@@ -19,22 +19,6 @@
 
 ## Pending - MVP
 
-### CORE-001: ModelIR Types ([spec](docs/specs/CORE-001-model-ir.md))
-
-- [ ] :red_circle: [HIGH] TableIR interface
-  - name, columns, primaryKey, foreignKeys
-- [ ] :red_circle: [HIGH] ColumnIR interface
-  - name, type, nullable, default
-- [ ] :red_circle: [HIGH] ForeignKeyIR interface
-  - columns, references, onDelete
-- [ ] :red_circle: [HIGH] RelationIR interface
-  - name, type, source, target, through
-  - Planning hints: cardinality, optionality
-  - Strategy hints: includeStrategy, filterStrategy, joinDefault
-- [ ] ModelIR interface
-  - tables Map, relations Map
-  - Helper methods: getTable, getRelation, getRelationsFrom, getRelationsTo
-
 ### CORE-002: IntentAST Types
 
 - [ ] :red_circle: [HIGH] QueryIntent interface
@@ -77,14 +61,6 @@
   - Return options array for DX layer
   - Enables Q3 golden test (throws in dx)
 
-### Schema Builder API
-
-- [ ] defineSchema() function
-  - Thenable pattern
-- [ ] .relations() chain
-  - hasOne, hasMany, belongsTo, belongsToMany helpers
-- [ ] .build() to produce ModelIR
-
 ### Query Builder API
 
 - [ ] query() function accepting model reference
@@ -99,7 +75,28 @@
 
 ## Completed
 
-(none)
+### CORE-001: ModelIR Types ([spec](docs/specs/CORE-001-model-ir.md))
+
+- [x] ✅ TableIR interface
+  - name, columns, primaryKey, foreignKeys
+- [x] ✅ ColumnIR interface
+  - name, type, nullable, default
+- [x] ✅ ForeignKeyIR interface
+  - columns, references, onDelete
+- [x] ✅ RelationIR interface
+  - name, type, source, target, through
+  - Planning hints: cardinality, optionality
+  - Strategy hints: includeStrategy, filterStrategy, joinDefault
+- [x] ✅ ModelIR interface
+  - tables Map, relations Map
+  - Helper methods: getTable, getRelation, getRelationsFrom, getRelationsTo, isAmbiguous
+
+### Schema Builder API
+
+- [x] ✅ defineSchema() function (thenable pattern)
+- [x] ✅ .relations() chain
+- [x] ✅ hasOne, hasMany, belongsTo, belongsToMany helpers
+- [x] ✅ .build() to produce ModelIR (immutable after build)
 
 ## Blocked / Deferred
 
@@ -118,5 +115,5 @@
 ## Open Questions
 
 - [x] Should schema be immutable after construction? → **Yes, immutable after .build()**
-- [ ] How to handle circular relation definitions? → Defer to validation step
+- [x] How to handle circular relation definitions? → **Detected at build time, logs warning (not an error)**
 - [x] Custom planning hints/overrides API? → **RelationIR strategy hints + per-query via**

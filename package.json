@@ -1,0 +1,20 @@
+{
+	"name": "db-semantic-planner",
+	"private": true,
+	"type": "module",
+	"packageManager": "pnpm@9.15.4",
+	"engines": {
+		"node": ">=20"
+	},
+	"scripts": {
+		"build": "pnpm -r build",
+		"test": "pnpm -r test",
+		"lint": "pnpm biome check .",
+		"lint:fix": "pnpm biome check --write .",
+		"typecheck": "pnpm -r typecheck"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "catalog:",
+		"typescript": "catalog:"
+	}
+}
