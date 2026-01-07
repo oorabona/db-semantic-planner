@@ -45,6 +45,30 @@ if (this.whereIntent !== undefined) {
 
 ---
 
+### Relation Hints Must Clone Object for Immutability (2026-01-07)
+
+**Issue:** When implementing per-query relation hints with an immutable builder pattern, the hints object must be cloned on each `clone()` call.
+
+**Cause:** If the same object reference is shared, calling `withRelationHint()` on one builder modifies all clones.
+
+**Solution:** Clone the hints object in the builder's `clone()` method:
+```typescript
+private clone(): QueryBuilderImpl {
+  const builder = new QueryBuilderImpl(
+    this.model,
+    this.strictMode,
+    this.from,
+    { ...this.relationHints }  // <-- Clone here
+  );
+  // ... copy other fields
+  return builder;
+}
+```
+
+**Location:** `packages/dx/src/orm.ts` line 313
+
+---
+
 ## Architecture
 
 ### Ports and Adapters Strict Dependency Order (2026-01-07)

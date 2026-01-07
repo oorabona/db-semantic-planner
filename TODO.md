@@ -12,7 +12,7 @@
 | Multi-tenant (forTenant) | adapter | MVP | ✅ Complete |
 | Observability (dump) | adapter | MVP | ✅ Complete |
 | Golden Tests (Q1, Q2, Q3) | testing | MVP | ✅ Complete |
-| Strict Mode | dx | P1 | :red_circle: Not started |
+| Strict Mode | dx | P1 | ✅ Complete |
 | Compat Layer | dx | P1 | :red_circle: Not started |
 | Multi-dialect Capabilities | adapter | P2 | :red_circle: Not started |
 
@@ -47,13 +47,16 @@
 
 ### DX Package (`packages/dx`)
 
-- [ ] **DX-001**: Strict mode implementation
+- [x] ✅ **DX-001**: Strict mode implementation (2026-01-07)
   - strictMode: true option
   - AmbiguousRelationError with options array
-  - Q3 golden test validation
-- [ ] **DX-002**: Override API
-  - include('x', { via: 'relationName' })
-  - withRelationHint('Target', 'relationName')
+  - include({ via }) for disambiguation
+  - 33 tests passing
+- [x] ✅ **DX-002**: Override API (2026-01-07)
+  - Per-query strictMode override: `query.withStrictMode(true)`
+  - withRelationHint('target', 'relationName')
+  - Global relation hints in OrmOptions
+  - 21 tests passing
 - [ ] **DX-003**: Compat layer helpers
   - eq(), and(), or(), gt(), lt(), like(), isNull(), inArray()
   - findMany(), findFirst(), findFirstOrThrow()

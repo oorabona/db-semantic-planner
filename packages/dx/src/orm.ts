@@ -16,6 +16,7 @@ import type {
 	OrmInstance,
 	OrmOptions,
 	QueryBuilder,
+	RelationHints,
 } from './types.js';
 
 /**
@@ -37,12 +38,12 @@ import type {
  * ```
  */
 export function createOrm(options: OrmOptions): OrmInstance {
-	const { model, strictMode = false } = options;
+	const { model, strictMode = false, relationHints = {} } = options;
 
 	return {
 		strictMode,
 		query(from: string): QueryBuilder {
-			return new QueryBuilderImpl(model, strictMode, from);
+			return new QueryBuilderImpl(model, strictMode, from, relationHints);
 		},
 	};
 }
@@ -109,13 +110,21 @@ class QueryBuilderImpl implements QueryBuilder {
 	private readonly strictMode: boolean;
 	private readonly from: string;
 	private readonly includes: IncludeIntent[] = [];
+	private readonly relationHints: RelationHints;
 	private selectIntent?: SelectIntent;
 	private whereIntent?: WhereIntent;
+	private strictModeOverride?: boolean;
 
-	constructor(model: ModelIR, strictMode: boolean, from: string) {
+	constructor(
+		model: ModelIR,
+		strictMode: boolean,
+		from: string,
+		relationHints: RelationHints = {}
+	) {
 		this.model = model;
 		this.strictMode = strictMode;
 		this.from = from;
+		this.relationHints = relationHints;
 	}
 
 	include(relation: string, options?: IncludeOptions): QueryBuilder {
@@ -136,17 +145,90 @@ class QueryBuilderImpl implements QueryBuilder {
 		return builder;
 	}
 
+	withStrictMode(strict: boolean): QueryBuilder {
+		const builder = this.clone();
+		builder.strictModeOverride = strict;
+		return builder;
+	}
+
+	withRelationHint(target: string, relation: string): QueryBuilder {
+		const builder = this.clone();
+		(builder.relationHints as Record<string, string>)[target] = relation;
+		return builder;
+	}
+
+	/**
+	 * Get effective strict mode (override takes precedence over ORM-level).
+	 */
+	private getEffectiveStrictMode(): boolean {
+		return this.strictModeOverride !== undefined
+			? this.strictModeOverride
+			: this.strictMode;
+	}
+
 	plan(): PlanReport {
 		const intent = this.buildIntent();
 
+		// Apply relation hints to includes before planning
+		const intentWithHints = this.applyRelationHints(intent);
+
 		try {
-			return plan(intent, this.model);
+			return plan(intentWithHints, this.model);
 		} catch (error) {
 			if (error instanceof AmbiguousPlanError) {
-				return this.handleAmbiguity(error, intent);
+				return this.handleAmbiguity(error, intentWithHints);
 			}
 			throw error;
 		}
+	}
+
+	/**
+	 * Apply relation hints to includes that don't have explicit `via`.
+	 */
+	private applyRelationHints(intent: QueryIntent): QueryIntent {
+		if (!intent.include || Object.keys(this.relationHints).length === 0) {
+			return intent;
+		}
+
+		const updatedIncludes = intent.include.map((inc) =>
+			this.applyHintToInclude(inc)
+		);
+
+		return {
+			...intent,
+			include: updatedIncludes,
+		};
+	}
+
+	/**
+	 * Apply relation hint to a single include (recursively).
+	 */
+	private applyHintToInclude(inc: IncludeIntent): IncludeIntent {
+		// If already has explicit via, don't override
+		if (inc.via !== undefined) {
+			// But still process nested includes
+			if (inc.include && inc.include.length > 0) {
+				return {
+					...inc,
+					include: inc.include.map((nested) => this.applyHintToInclude(nested)),
+				};
+			}
+			return inc;
+		}
+
+		// Check if we have a hint for this target
+		const hint = this.relationHints[inc.relation];
+		const result: IncludeIntent = hint ? { ...inc, via: hint } : inc;
+
+		// Process nested includes
+		if (result.include && result.include.length > 0) {
+			return {
+				...result,
+				include: result.include.map((nested) => this.applyHintToInclude(nested)),
+			};
+		}
+
+		return result;
 	}
 
 	/**
@@ -179,7 +261,7 @@ class QueryBuilderImpl implements QueryBuilder {
 		error: AmbiguousPlanError,
 		intent: QueryIntent
 	): PlanReport {
-		if (this.strictMode) {
+		if (this.getEffectiveStrictMode()) {
 			// Strict mode: convert to AmbiguousRelationError and throw
 			throw new AmbiguousRelationError(
 				error.sourceTable,
@@ -227,7 +309,8 @@ class QueryBuilderImpl implements QueryBuilder {
 		const builder = new QueryBuilderImpl(
 			this.model,
 			this.strictMode,
-			this.from
+			this.from,
+			{ ...this.relationHints } // Clone hints to allow per-query additions
 		);
 		builder.includes.push(...this.includes);
 		if (this.selectIntent !== undefined) {
@@ -235,6 +318,9 @@ class QueryBuilderImpl implements QueryBuilder {
 		}
 		if (this.whereIntent !== undefined) {
 			builder.whereIntent = this.whereIntent;
+		}
+		if (this.strictModeOverride !== undefined) {
+			builder.strictModeOverride = this.strictModeOverride;
 		}
 		return builder;
 	}

@@ -21,19 +21,6 @@ This is a LEAF package (nothing depends on it)
 
 ## Pending - P1
 
-### DX-002: Override API
-
-**Note:** Per-query `strictMode` override explicitly deferred here from DX-001.
-
-- [ ] Per-query `strictMode` override: `query.withStrictMode(true)`
-- [ ] include(relation, { via: 'relationName' })
-  - Disambiguates which path to use
-- [ ] withRelationHint(targetTable, relationName)
-  - Per-query default for a target
-- [ ] Global relation hints in `OrmOptions`
-- [ ] Integration with planner
-  - Pass hints to planner, skip ambiguity error
-
 ### DX-003: Compat Layer (Drizzle-like)
 
 #### Filter Helpers
@@ -67,6 +54,19 @@ This is a LEAF package (nothing depends on it)
 ---
 
 ## Completed
+
+### DX-002: Override API ✅ (2026-01-07)
+
+- [x] ✅ Per-query `strictMode` override: `query.withStrictMode(true)`
+- [x] ✅ include(relation, { via: 'relationName' }) - Already existed from DX-001
+- [x] ✅ withRelationHint(targetTable, relationName)
+  - Per-query default for a target
+- [x] ✅ Global `relationHints` in `OrmOptions`
+- [x] ✅ Integration with planner
+  - Hints applied to includes before planning
+  - Explicit via takes precedence over hints
+  - Nested includes supported
+- [x] ✅ 21 tests passing (override-api.test.ts)
 
 ### DX-001: Strict Mode ✅ (2026-01-07)
 
