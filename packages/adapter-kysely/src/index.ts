@@ -26,6 +26,15 @@ export {
 export { explain } from './explain.js';
 // Redaction API (ADAPTER-004)
 export { redactParams } from './redact.js';
+export type { StreamQueryOptions } from './stream.js';
+// Stream API (STREAMING-001)
+export {
+	MissingDependencyError,
+	streamQuery,
+	streamRawQuery,
+	supportsStreaming,
+	UnsupportedOperationError,
+} from './stream.js';
 // Types
 // ADAPTER-004 Types
 export type {
@@ -40,6 +49,5 @@ export type {
 	JsonDump,
 	RedactionOptions,
 } from './types.js';
-
 // ADAPTER-004 Constants
 export { DEFAULT_REDACTION_PATTERNS, REDACTED_PLACEHOLDER } from './types.js';

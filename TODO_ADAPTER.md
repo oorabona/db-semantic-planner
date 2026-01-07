@@ -48,6 +48,21 @@ MUST NOT import from: packages/dx
 
 ## Completed - MVP ✅
 
+### STREAMING-001: Cursor/Streaming Support - 20 adapter tests ✅ (2026-01-07)
+
+**Spec:** [docs/specs/STREAMING-001-cursor-support.md](docs/specs/STREAMING-001-cursor-support.md)
+
+- [x] ✅ `streamQuery()` function for row-by-row iteration
+  - AsyncIterableIterator return type
+  - onStart callback for observability
+  - chunkSize option (for future cursor support)
+- [x] ✅ `streamRawQuery()` helper function
+- [x] ✅ `supportsStreaming()` capability check
+- [x] ✅ Error classes:
+  - MissingDependencyError (for pg-cursor)
+  - UnsupportedOperationError (for unsupported dialects)
+- [x] ✅ Export from index.ts
+
 ### ADAPTER-005: Aggregates and GROUP BY - 14 new tests ✅ (2026-01-07)
 
 - [x] ✅ Aggregate SELECT expressions (COUNT, SUM, AVG, MIN, MAX)
@@ -127,8 +142,8 @@ MUST NOT import from: packages/dx
 
 ## Blocked / Deferred
 
-- [ ] QueryBuilder.execute() → Deferred to DX package (P1)
-- [ ] Streaming/cursor support → P2 or later
+- [x] ✅ QueryBuilder.execute() → Moved to DX package (DX-003)
+- [x] ✅ Streaming/cursor support → STREAMING-001 (2026-01-07)
 
 ---
 
@@ -156,4 +171,4 @@ const stateMap = new WeakMap<object, State>();
 
 - [x] Transaction boundary handling? → **Defer to Kysely (user manages)**
 - [x] Connection pooling? → **Defer to Kysely**
-- [ ] Streaming/cursor support? → **P2 or later**
+- [x] Streaming/cursor support? → **STREAMING-001 ✅ (2026-01-07)**

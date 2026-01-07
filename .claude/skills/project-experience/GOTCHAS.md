@@ -172,6 +172,36 @@ await sql.raw(`EXPLAIN (FORMAT JSON) ${sql}`, [true]).execute(db); // ERROR
 
 ---
 
+### Streaming stream() Must Throw Synchronously for Missing DB (2026-01-07)
+
+**Issue:** When implementing `stream()` on QueryBuilder, the method returns `AsyncIterableIterator` but should throw `ExecutionError` synchronously if db is not configured.
+
+**Cause:** Unlike `findMany()` which returns a Promise and can reject asynchronously, `stream()` returns an iterator. If we check db inside the generator, the error would only surface when `.next()` is called.
+
+**Solution:** Check db configuration synchronously before returning the iterator:
+```typescript
+stream(options?: StreamOptions): AsyncIterableIterator<unknown> {
+  const db = this.getConfiguredDb();  // Throws synchronously
+  const dumpResult = this.dump();
+  return streamQuery(db, dumpResult, options);
+}
+```
+
+**Test Implication:** Tests must expect synchronous throw, not async rejection:
+```typescript
+// WRONG - expects async error
+await expect(async () => {
+  for await (const _row of orm.query('users').stream()) {}
+}).rejects.toThrow(ExecutionError);
+
+// CORRECT - expects sync throw
+expect(() => orm.query('users').stream()).toThrow(ExecutionError);
+```
+
+**Location:** `packages/dx/src/orm.ts` lines 341-348, `packages/dx/src/orm-execution.test.ts`
+
+---
+
 ### Build Order Critical When Adding New Exports (2026-01-07)
 
 **Issue:** When adding new types to `packages/core` and using them in `packages/adapter-kysely`, TypeScript compilation fails with "Module has no exported member" errors.

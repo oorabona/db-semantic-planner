@@ -27,6 +27,20 @@ This is a LEAF package (nothing depends on it)
 
 ## Completed
 
+### STREAMING-001: QueryBuilder.stream() - 10 dx tests ✅ (2026-01-07)
+
+**Spec:** [docs/specs/STREAMING-001-cursor-support.md](docs/specs/STREAMING-001-cursor-support.md)
+
+- [x] ✅ `stream(options?)` method on QueryBuilder
+  - Returns AsyncIterableIterator<unknown>
+  - Throws ExecutionError if db not configured
+- [x] ✅ `StreamOptions` interface
+  - chunkSize?: number
+  - onStart?: (dump: Dump) => void
+- [x] ✅ Multi-tenant streaming support
+- [x] ✅ Works with where(), select() builder chain
+- [x] ✅ Re-exports MissingDependencyError, UnsupportedOperationError
+
 ### DX-004: Aggregate API ✅ (2026-01-07)
 
 - [x] ✅ `count(options?)` - COUNT(*) or COUNT(field)

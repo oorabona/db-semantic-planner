@@ -13,7 +13,7 @@ doc-meta:
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
 
-**Status:** MVP ✅ Complete + P1 ✅ Complete (359 unit + 64 E2E = 423 tests)
+**Status:** MVP ✅ Complete + P1 ✅ Complete + P2 Streaming ✅ (354 unit + 87 E2E = 441 tests)
 
 ## Architecture: Ports & Adapters
 
@@ -56,6 +56,7 @@ packages/dx            → Depends on core + adapter-kysely
 | DX-003 | [Compat Layer](specs/DX-003-compat-layer.md) | dx | ✅ canonical |
 | DX-004 | dump()/execute() API | dx | ✅ in E2E-001 |
 | E2E-001 | [PostgreSQL Validation](specs/E2E-001-postgresql-validation.md) | testing | ✅ canonical |
+| STREAMING-001 | [Cursor/Streaming Support](specs/STREAMING-001-cursor-support.md) | adapter, dx | ✅ canonical |
 
 ## Golden Query Tests (MVP Contract) - ✅ Complete
 
@@ -75,6 +76,7 @@ packages/dx            → Depends on core + adapter-kysely
 | Q5 | Blog scenario | Basic E2E validation | ✅ | 12 (3 todo) |
 | EXPLAIN | EXPLAIN/ANALYZE integration | Real PostgreSQL EXPLAIN | ✅ | 12 |
 | Benchmarks | Query performance | Compilation/execution metrics | ✅ | 8 |
+| Streaming | Cursor/streaming support | AsyncIterableIterator | ✅ | 14 |
 | Infrastructure | Container lifecycle | Testcontainers | ✅ | 5 |
 
 **Note:** 9 tests marked as `.todo()` due to known EXISTS schema prefix bug (F-001).

@@ -1,4 +1,8 @@
-import { compile, type Dump } from '@db-semantic-planner/adapter-kysely';
+import {
+	compile,
+	type Dump,
+	streamQuery,
+} from '@db-semantic-planner/adapter-kysely';
 import type {
 	AggregateIntent,
 	IncludeIntent,
@@ -26,6 +30,7 @@ import type {
 	OrmOptions,
 	QueryBuilder,
 	RelationHints,
+	StreamOptions,
 } from './types.js';
 
 /**
@@ -335,6 +340,15 @@ class QueryBuilderImpl implements QueryBuilder {
 
 	execute(): Promise<unknown[]> {
 		return this.findMany();
+	}
+
+	stream(options?: StreamOptions): AsyncIterableIterator<unknown> {
+		const db = this.getConfiguredDb();
+		const dumpResult = this.dump();
+
+		// Pass options directly - they're already compatible types
+		// streamQuery handles undefined options gracefully
+		return streamQuery(db, dumpResult, options);
 	}
 
 	/**
