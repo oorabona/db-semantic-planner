@@ -150,22 +150,21 @@
   - Testcontainers infrastructure with global setup/teardown
   - PIM/DAM schema + seed (acme, globex tenants)
   - Blog schema + seed
-  - Q1-E2E: EXISTS filter validation - 7 tests (4 pass, 3 todo)
+  - Q1-E2E: EXISTS filter validation - 7 tests (all pass)
   - Q2-E2E: CTE extraction validation - 8 tests (5 pass, 3 todo)
   - Q4: Multi-tenant isolation - 9 tests
   - Q5: Blog scenario - 12 tests (9 pass, 3 todo)
   - EXPLAIN integration - 12 tests
   - Performance benchmarks - 8 tests
-  - Total: 64 passing, 9 todo (EXISTS schema prefix bug)
+  - Total: 67 passing, 6 todo
 
-## Blocked / Deferred
+## Fixed Issues
 
-### Known Limitation: EXISTS Schema Prefix
+### ✅ EXISTS Schema Prefix (2026-01-07)
 
-- **Issue:** EXISTS subqueries don't include schema prefix in multi-tenant context
-- **Impact:** 9 E2E tests marked as `.todo()`
-- **Workaround:** dump() validation still works, only execute() affected
-- **Future Fix:** Modify compiler to pass schema to EXISTS subquery generation
+- **Issue:** EXISTS subqueries didn't include schema prefix in multi-tenant context
+- **Impact:** Q1 tests now all pass (7/7)
+- **Fix:** Modified compiler to pass `schemaName` through `compileWhere` → `compileExists` → `compileRelationFilter`
 
 ---
 

@@ -155,7 +155,7 @@ await sql.raw(`EXPLAIN (FORMAT JSON) ${sql}`, [true]).execute(db); // ERROR
 
 ---
 
-### EXISTS Subqueries Need Schema Prefix in Multi-tenant (2026-01-07)
+### EXISTS Subqueries Need Schema Prefix in Multi-tenant (2026-01-07) — RESOLVED
 
 **Issue:** When using `forTenant('schema')`, EXISTS subqueries reference tables without schema prefix, causing "relation does not exist" errors.
 
@@ -163,8 +163,9 @@ await sql.raw(`EXPLAIN (FORMAT JSON) ${sql}`, [true]).execute(db); // ERROR
 
 **Impact:** Multi-tenant EXISTS queries fail at runtime. Unit tests pass because they don't execute against real PostgreSQL.
 
-**Workaround:** Mark affected tests as `.todo()` until compiler is fixed.
+**Solution (2026-01-07):** Thread `schemaName` parameter through the compiler call chain:
+- `compile()` → `addWhere()` → `compileWhere()` → `compileExists()` / `compileRelationFilter()`
+- Apply schema prefix in `compileExists()` using same pattern as root table: `const targetTable = schemaName ? \`${schemaName}.${relation.target}\` : relation.target`
+- Forward `schemaName` to nested `compileWhere()` calls for deeply nested EXISTS
 
-**Required Fix:** Pass schema name through to EXISTS subquery compilation in `packages/adapter-kysely/src/compiler.ts`.
-
-**Location:** E2E tests marked as `.todo()` in `pimdam.q1.exists.test.ts`, `pimdam.q2.cte-multilocale.test.ts`, `blog.basic.test.ts`
+**Location:** `packages/adapter-kysely/src/compiler.ts` lines 64, 128, 144, 166, 173, 179, 183, 186, 189, 245, 307-310, 328, 351, 364, 376, 394

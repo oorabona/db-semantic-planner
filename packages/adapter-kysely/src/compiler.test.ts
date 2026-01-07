@@ -574,6 +574,57 @@ describe('SQL Compiler', () => {
 			expect(compiled.sql).toContain('not');
 			expect(compiled.sql).toContain('exists');
 		});
+
+		it('should apply schema prefix to EXISTS subquery for multi-tenant', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'exists',
+					relation: 'images',
+					where: {
+						kind: 'comparison',
+						field: 'locale',
+						operator: 'eq',
+						value: 'fr',
+					},
+				},
+			};
+
+			const planReport = plan(intent, q1Schema);
+			const compiled = compile(planReport, q1Schema, kysely, 'acme');
+
+			// Root table should have schema prefix (quoted identifier format)
+			expect(compiled.sql).toContain('"acme"."products"');
+			// EXISTS subquery should ALSO have schema prefix
+			expect(compiled.sql).toContain('"acme"."productImages"');
+		});
+
+		it('should apply schema prefix to relationFilter subquery for multi-tenant', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'relationFilter',
+					relation: 'images',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'approved',
+						operator: 'eq',
+						value: true,
+					},
+				},
+			};
+
+			const planReport = plan(intent, q1Schema);
+			const compiled = compile(planReport, q1Schema, kysely, 'tenant_xyz');
+
+			// Root table should have schema prefix (quoted identifier format)
+			expect(compiled.sql).toContain('"tenant_xyz"."products"');
+			// EXISTS subquery should ALSO have schema prefix
+			expect(compiled.sql).toContain('"tenant_xyz"."productImages"');
+		});
 	});
 
 	// ============================================================================

@@ -61,7 +61,15 @@ export function compile(
 
 	// Add WHERE clause
 	if (intent.where) {
-		query = addWhere(query, intent.where, rootAlias, model, plan, state);
+		query = addWhere(
+			query,
+			intent.where,
+			rootAlias,
+			model,
+			plan,
+			state,
+			schemaName,
+		);
 	}
 
 	// Add ORDER BY
@@ -125,10 +133,11 @@ function addWhere(
 	model: ModelIR,
 	plan: PlanReport,
 	state: CompilerState,
+	schemaName?: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {
 	return query.where((eb) =>
-		compileWhere(eb, where, alias, model, plan, state),
+		compileWhere(eb, where, alias, model, plan, state, schemaName),
 	);
 }
 
@@ -140,6 +149,7 @@ function compileWhere(
 	model: ModelIR,
 	plan: PlanReport,
 	state: CompilerState,
+	schemaName?: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
 ): any {
 	switch (where.kind) {
@@ -161,30 +171,64 @@ function compileWhere(
 		case 'and':
 			return eb.and(
 				where.conditions.map((c: WhereIntent) =>
-					compileWhere(eb, c, alias, model, plan, state),
+					compileWhere(eb, c, alias, model, plan, state, schemaName),
 				),
 			);
 
 		case 'or':
 			return eb.or(
 				where.conditions.map((c: WhereIntent) =>
-					compileWhere(eb, c, alias, model, plan, state),
+					compileWhere(eb, c, alias, model, plan, state, schemaName),
 				),
 			);
 
 		case 'not':
 			return eb.not(
-				compileWhere(eb, where.condition, alias, model, plan, state),
+				compileWhere(
+					eb,
+					where.condition,
+					alias,
+					model,
+					plan,
+					state,
+					schemaName,
+				),
 			);
 
 		case 'exists':
-			return compileExists(eb, where, alias, model, plan, state, false);
+			return compileExists(
+				eb,
+				where,
+				alias,
+				model,
+				plan,
+				state,
+				false,
+				schemaName,
+			);
 
 		case 'notExists':
-			return compileExists(eb, where, alias, model, plan, state, true);
+			return compileExists(
+				eb,
+				where,
+				alias,
+				model,
+				plan,
+				state,
+				true,
+				schemaName,
+			);
 
 		case 'relationFilter':
-			return compileRelationFilter(eb, where, alias, model, plan, state);
+			return compileRelationFilter(
+				eb,
+				where,
+				alias,
+				model,
+				plan,
+				state,
+				schemaName,
+			);
 
 		default:
 			throw new CompilationError(
@@ -240,6 +284,7 @@ function compileExists(
 	plan: PlanReport,
 	state: CompilerState,
 	negate: boolean,
+	schemaName?: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
 ): any {
 	// Find the relation
@@ -301,8 +346,13 @@ function compileExists(
 		? (sourcePk[0] ?? 'id')
 		: (sourcePk ?? 'id');
 
+	// Apply schema prefix for multi-tenant support
+	const targetTable = schemaName
+		? `${schemaName}.${relation.target}`
+		: relation.target;
+
 	const subquery = eb
-		.selectFrom(`${relation.target} as ${relatedAlias}`)
+		.selectFrom(`${targetTable} as ${relatedAlias}`)
 		.select(sql`1`)
 		.whereRef(`${relatedAlias}.${fk}`, '=', `${sourceAlias}.${sourceKey}`);
 
@@ -317,6 +367,7 @@ function compileExists(
 				model,
 				plan,
 				state,
+				schemaName,
 			),
 		);
 	}
@@ -339,6 +390,7 @@ function compileRelationFilter(
 	model: ModelIR,
 	plan: PlanReport,
 	state: CompilerState,
+	schemaName?: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
 ): any {
 	switch (where.mode) {
@@ -351,6 +403,7 @@ function compileRelationFilter(
 				plan,
 				state,
 				false,
+				schemaName,
 			);
 
 		case 'none':
@@ -362,6 +415,7 @@ function compileRelationFilter(
 				plan,
 				state,
 				true,
+				schemaName,
 			);
 
 		case 'every': {
@@ -379,6 +433,7 @@ function compileRelationFilter(
 				plan,
 				state,
 				true,
+				schemaName,
 			);
 		}
 	}
