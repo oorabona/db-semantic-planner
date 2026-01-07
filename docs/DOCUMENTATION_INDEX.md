@@ -13,7 +13,7 @@ doc-meta:
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
 
-**Status:** MVP ✅ Complete + P1 ✅ Complete + P2 ✅ Complete (444 unit + 87 E2E = 531 tests)
+**Status:** MVP ✅ Complete + P1 ✅ Complete + P2 ✅ Complete (481 unit + 87 E2E = 568 tests)
 
 ## Architecture: Ports & Adapters
 
@@ -58,6 +58,7 @@ packages/dx            → Depends on core + adapter-kysely
 | E2E-001 | [PostgreSQL Validation](specs/E2E-001-postgresql-validation.md) | testing | ✅ canonical |
 | STREAMING-001 | [Cursor/Streaming Support](specs/STREAMING-001-cursor-support.md) | adapter, dx | ✅ canonical |
 | DIALECT-001 | [Multi-dialect Capabilities](specs/DIALECT-001-multi-dialect-capabilities.md) | adapter | ✅ canonical |
+| TEST-001 | [SQL Snapshot Testing](specs/TEST-001-sql-snapshot-utilities.md) | testing | ✅ canonical |
 
 ## Golden Query Tests (MVP Contract) - ✅ Complete
 

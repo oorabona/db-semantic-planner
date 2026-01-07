@@ -16,20 +16,24 @@
 | Strict Mode | dx | P1 | ✅ Complete |
 | Compat Layer | dx | P1 | ✅ Complete |
 | E2E PostgreSQL Validation | testing | P1 | ✅ Complete |
-| Multi-dialect Capabilities | adapter | P2 | 🟡 In Progress |
+| Multi-dialect Capabilities | adapter | P2 | ✅ Complete |
 
 ## In Progress
 
-### DIALECT-001: Multi-dialect Capabilities 🟡
+(none)
+
+## Recently Completed
+
+### DIALECT-001: Multi-dialect Capabilities ✅ (2026-01-07)
 
 **Spec:** [docs/specs/DIALECT-001-multi-dialect-capabilities.md](docs/specs/DIALECT-001-multi-dialect-capabilities.md)
 **Backlog:** [TODO_ADAPTER.md](TODO_ADAPTER.md)
 
-- [ ] 🟡 Block 1: DialectCapabilities interface and detection
-- [ ] Block 2: Multi-tenant capability guard
-- [ ] Block 3: EXPLAIN dialect adaptation
-- [ ] Block 4: Streaming capability guard
-- [ ] Block 5: Test helpers
+- [x] ✅ Block 1: DialectCapabilities interface and detection (42 tests)
+- [x] ✅ Block 2: Multi-tenant capability guard (14 tests)
+- [x] ✅ Block 3: EXPLAIN dialect adaptation (10 tests)
+- [x] ✅ Block 4: Streaming capability guard (12 tests)
+- [x] ✅ Block 5: Test helpers (12 tests)
 
 ### Golden Tests (MVP Contract) - ✅ COMPLETE
 
@@ -52,7 +56,12 @@
 
 - [x] ✅ Vitest configuration (already configured)
 - [x] ✅ Test fixtures (Product, Category, User, Post models)
-- [ ] SQL snapshot testing utilities (optional enhancement)
+- [x] ✅ SQL snapshot testing utilities (2026-01-07) — TEST-001
+  - `normalizeSql()` for whitespace-insensitive comparison
+  - `toMatchSqlSnapshot()` custom Vitest matcher
+  - `toMatchSql()` for inline SQL comparison
+  - Snapshot storage in `__snapshots__/*.sql` files
+  - 37 new tests
 
 ## Pending - P1
 
