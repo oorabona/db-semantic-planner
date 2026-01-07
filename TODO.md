@@ -4,13 +4,13 @@
 
 | Epic | Scope | Phase | Status |
 |------|-------|-------|--------|
-| ModelIR (Schema) | core | MVP | :red_circle: Not started |
-| IntentAST (Query) | core | MVP | :red_circle: Not started |
-| Semantic Planner | core | MVP | :red_circle: Not started |
-| SQL Compiler | adapter | MVP | :red_circle: Not started |
-| Kysely Engine | adapter | MVP | :red_circle: Not started |
-| Multi-tenant (forTenant) | adapter | MVP | :red_circle: Not started |
-| Observability (dump) | adapter | MVP | :red_circle: Not started |
+| ModelIR (Schema) | core | MVP | ✅ Complete |
+| IntentAST (Query) | core | MVP | ✅ Complete |
+| Semantic Planner | core | MVP | ✅ Complete |
+| SQL Compiler | adapter | MVP | ✅ Complete |
+| Kysely Engine | adapter | MVP | ✅ Complete |
+| Multi-tenant (forTenant) | adapter | MVP | ✅ Complete |
+| Observability (dump) | adapter | MVP | ✅ Complete |
 | Golden Tests (Q1, Q2, Q3) | testing | MVP | :red_circle: Not started |
 | Strict Mode | dx | P1 | :red_circle: Not started |
 | Compat Layer | dx | P1 | :red_circle: Not started |
@@ -21,35 +21,6 @@
 (none)
 
 ## Pending - MVP (P0)
-
-### Core Package (`packages/core`)
-
-- [ ] :red_circle: [HIGH] **CORE-001**: Implement ModelIR types ([spec](docs/specs/CORE-001-model-ir.md))
-  - TableIR, ColumnIR, ForeignKeyIR, RelationIR
-  - Planning hints: cardinality, optionality, includeStrategy, filterStrategy, joinDefault
-- [ ] :red_circle: [HIGH] **CORE-002**: Implement IntentAST types
-  - QueryIntent, SelectIntent, IncludeIntent, WhereIntent
-  - exists() filter for Q1 golden test
-- [ ] :red_circle: [HIGH] **CORE-003**: Implement Semantic Planner
-  - EXISTS vs JOIN decision engine (default: EXISTS for to-many)
-  - LEFT vs INNER join inference
-  - CTE extraction for Q2 golden test
-  - PlanReport with decisions + warnings
-
-### Adapter Package (`packages/adapter-kysely`)
-
-- [ ] :red_circle: [HIGH] **ADAPTER-001**: Implement compile/dump/execute ([spec](docs/specs/ADAPTER-001-kysely-dump-compile-execute.md))
-  - Dump type: { plan, sql, params, meta }
-  - Uses Kysely .compile() for SQL + params
-  - Deterministic aliasing (t0, t1, t2...)
-- [ ] :red_circle: [HIGH] **ADAPTER-002**: Implement multi-tenant
-  - orm.forTenant(schemaName) API
-  - Schema name validation (identifier allow-list)
-  - Uses Kysely db.withSchema()
-- [ ] **ADAPTER-003**: Implement SQL compilation
-  - PlanReport → Kysely query builder
-  - Parameter binding
-  - PostgreSQL dialect (MVP)
 
 ### Golden Tests (MVP Contract)
 
@@ -110,7 +81,25 @@
 
 ## Completed
 
-(none)
+### Core Package (`packages/core`)
+
+- [x] ✅ **CORE-001**: ModelIR types ([spec](docs/specs/CORE-001-model-ir.md)) - 29 tests
+- [x] ✅ **CORE-002**: IntentAST types - 35 tests
+- [x] ✅ **CORE-003**: Semantic Planner ([spec](docs/specs/CORE-003-semantic-planner.md)) - 29 tests
+  - EXISTS vs JOIN decision engine
+  - CTE extraction logic
+  - Ambiguity detection
+
+### Adapter Package (`packages/adapter-kysely`)
+
+- [x] ✅ **ADAPTER-001**: SQL Compiler + Dump API - 39 tests
+  - `compile()`: PlanReport → Kysely CompiledQuery
+  - `createDump()`: Intent → Dump (plan + sql + params + meta)
+  - Deterministic aliasing (t0, t1, t2...)
+  - EXISTS subquery for relation filters
+  - Multi-tenant schema prefix support
+  - Full WHERE clause compilation (comparison, like, in, null, and, or, not)
+  - ORDER BY, LIMIT, OFFSET support
 
 ## Blocked / Deferred
 
