@@ -13,6 +13,7 @@ export type {
 	OrmInstance,
 	OrmOptions,
 	QueryBuilder,
+	RelationHints,
 } from './types.js';
 
 // Factory

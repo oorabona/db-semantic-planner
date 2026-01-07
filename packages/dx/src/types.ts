@@ -6,6 +6,19 @@ import type {
 } from '@db-semantic-planner/core';
 
 /**
+ * Mapping of target table to preferred relation name.
+ * Used to resolve ambiguous relations automatically.
+ *
+ * @example
+ * ```typescript
+ * const hints: RelationHints = {
+ *   posts: 'authoredPosts',  // When including 'posts', use 'authoredPosts' relation
+ * };
+ * ```
+ */
+export type RelationHints = Readonly<Record<string, string>>;
+
+/**
  * Configuration options for creating an ORM instance.
  */
 export interface OrmOptions {
@@ -23,6 +36,22 @@ export interface OrmOptions {
 	 * @default false
 	 */
 	readonly strictMode?: boolean;
+
+	/**
+	 * Global relation hints for disambiguating relations.
+	 * Maps target table names to preferred relation names.
+	 *
+	 * @example
+	 * ```typescript
+	 * const orm = createOrm({
+	 *   model: schema,
+	 *   relationHints: {
+	 *     posts: 'authoredPosts',  // Always use 'authoredPosts' for 'posts' target
+	 *   },
+	 * });
+	 * ```
+	 */
+	readonly relationHints?: RelationHints;
 }
 
 /**
@@ -94,6 +123,41 @@ export interface QueryBuilder {
 	 * @returns A new QueryBuilder with the filter applied
 	 */
 	where(condition: WhereIntent): QueryBuilder;
+
+	/**
+	 * Override the ORM-level strict mode for this query.
+	 *
+	 * @param strict - true for strict mode, false for lenient mode
+	 * @returns A new QueryBuilder with the strict mode override
+	 *
+	 * @example
+	 * ```typescript
+	 * // ORM is lenient by default, but this query is strict
+	 * orm.query('users')
+	 *   .withStrictMode(true)
+	 *   .include('posts')
+	 *   .plan();  // Throws if 'posts' is ambiguous
+	 * ```
+	 */
+	withStrictMode(strict: boolean): QueryBuilder;
+
+	/**
+	 * Set a relation hint for this query.
+	 * When including the target table, use the specified relation.
+	 *
+	 * @param target - The target table name
+	 * @param relation - The relation name to use
+	 * @returns A new QueryBuilder with the hint added
+	 *
+	 * @example
+	 * ```typescript
+	 * orm.query('users')
+	 *   .withRelationHint('posts', 'authoredPosts')
+	 *   .include('posts')  // Uses 'authoredPosts' relation
+	 *   .plan();
+	 * ```
+	 */
+	withRelationHint(target: string, relation: string): QueryBuilder;
 
 	/**
 	 * Generate the execution plan for this query.
