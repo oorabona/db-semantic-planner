@@ -159,7 +159,7 @@ export interface SchemaBuilder<T extends Record<string, TableDef>> {
 	 */
 	relations<R extends RelationsDef<T>>(
 		relations: R,
-	): SchemaBuilderWithRelations<T, R>;
+	): SchemaBuilderWithRelations;
 
 	/**
 	 * Build the final ModelIR without relations
@@ -167,10 +167,7 @@ export interface SchemaBuilder<T extends Record<string, TableDef>> {
 	build(): ModelIR;
 }
 
-export interface SchemaBuilderWithRelations<
-	T extends Record<string, TableDef>,
-	_R extends RelationsDef<T>,
-> {
+export interface SchemaBuilderWithRelations {
 	/**
 	 * Build the final ModelIR (immutable after this)
 	 */
@@ -197,7 +194,7 @@ class SchemaBuilderImpl<T extends Record<string, TableDef>>
 
 	relations<R extends RelationsDef<T>>(
 		relationsDefs: R,
-	): SchemaBuilderWithRelations<T, R> {
+	): SchemaBuilderWithRelations {
 		return new SchemaBuilderWithRelationsImpl(this.tableDefs, relationsDefs);
 	}
 
@@ -322,7 +319,7 @@ class SchemaBuilderImpl<T extends Record<string, TableDef>>
 class SchemaBuilderWithRelationsImpl<
 	T extends Record<string, TableDef>,
 	R extends RelationsDef<T>,
-> implements SchemaBuilderWithRelations<T, R>
+> implements SchemaBuilderWithRelations
 {
 	private readonly builder: SchemaBuilderImpl<T>;
 

@@ -19,24 +19,6 @@
 
 ## Pending - MVP
 
-### CORE-002: IntentAST Types
-
-- [ ] :red_circle: [HIGH] QueryIntent interface
-  - type: 'select', from, select, where, include, orderBy, limit, offset
-- [ ] SelectIntent interface
-  - type: 'all' | 'fields', fields array
-- [ ] IncludeIntent interface
-  - relation, select, where, include (nested), via (disambiguation)
-- [ ] :red_circle: [HIGH] WhereIntent union type
-  - Comparison: eq, neq, gt, gte, lt, lte
-  - String: like
-  - Array: in
-  - Null: isNull, isNotNull
-  - Logical: and, or, not
-  - **Relation: exists, relationFilter** (critical for Q1)
-- [ ] OrderByIntent interface
-  - field, direction, nulls
-
 ### CORE-003: Semantic Planner
 
 - [ ] :red_circle: [HIGH] PlanReport interface
@@ -97,6 +79,26 @@
 - [x] ✅ .relations() chain
 - [x] ✅ hasOne, hasMany, belongsTo, belongsToMany helpers
 - [x] ✅ .build() to produce ModelIR (immutable after build)
+
+### CORE-002: IntentAST Types
+
+- [x] ✅ QueryIntent interface
+  - type: 'select', from, select, where, include, orderBy, limit, offset
+- [x] ✅ SelectIntent interface
+  - type: 'all' | 'fields', fields array
+- [x] ✅ IncludeIntent interface
+  - relation, select, where, include (nested), via (disambiguation)
+- [x] ✅ WhereIntent union type
+  - Comparison: eq, neq, gt, gte, lt, lte
+  - String: like
+  - Array: in
+  - Null: isNull, isNotNull
+  - Logical: and, or, not
+  - **Relation: exists, notExists, relationFilter** (critical for Q1)
+- [x] ✅ OrderByIntent interface
+  - field, direction, nulls
+- [x] ✅ Type guards for all WhereIntent kinds
+- [x] ✅ 35 unit tests
 
 ## Blocked / Deferred
 
