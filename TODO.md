@@ -19,7 +19,17 @@
 
 ## In Progress
 
-(none)
+### E2E-001: Real-world PostgreSQL Validation 🟡
+
+**Spec:** [docs/specs/E2E-001-postgresql-validation.md](docs/specs/E2E-001-postgresql-validation.md)
+
+- [ ] DX-004: Add dump()/execute() to QueryBuilder
+- [ ] Test infrastructure (Testcontainers + vitest global setup)
+- [ ] PIM/DAM schema + seed (acme, globex tenants)
+- [ ] Blog schema + seed (simpler validation)
+- [ ] E2E tests: Q1 (EXISTS), Q2 (CTE), Q4 (multi-tenant), Q5 (blog)
+- [ ] EXPLAIN integration test
+- [ ] Performance benchmarks
 
 ### Golden Tests (MVP Contract) - ✅ COMPLETE
 
@@ -86,6 +96,13 @@
 
 - [ ] Direct pg adapter (no Kysely) - TBD
 - [ ] Drizzle adapter - TBD
+
+### Query Features (P2)
+
+- [ ] NOT EXISTS filter strategy (unused assets query)
+- [ ] Aggregations support (COUNT, SUM, AVG, etc.)
+- [ ] GROUP BY support
+- [ ] Streaming/cursor support
 
 ## Completed
 

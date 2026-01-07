@@ -13,7 +13,7 @@ doc-meta:
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
 
-**Status:** MVP ✅ Complete + P1 (DX-001, DX-002, DX-003) (258 tests)
+**Status:** MVP ✅ Complete + P1 ✅ Complete (284 tests)
 
 ## Architecture: Ports & Adapters
 
@@ -51,9 +51,11 @@ packages/dx            → Depends on core + adapter-kysely
 | CORE-003 | [Semantic Planner](specs/CORE-003-semantic-planner.md) | core | ✅ canonical |
 | ADAPTER-001 | [Kysely Dump/Compile/Execute](specs/ADAPTER-001-kysely-dump-compile-execute.md) | adapter | ✅ canonical |
 | ADAPTER-002 | Multi-tenant | adapter | ✅ implemented (in ADAPTER-001) |
-| ADAPTER-004 | [Enhanced Observability](specs/ADAPTER-004-enhanced-observability.md) | adapter | 🟡 draft |
+| ADAPTER-004 | [Enhanced Observability](specs/ADAPTER-004-enhanced-observability.md) | adapter | ✅ canonical |
 | DX-001 | [Strict Mode](specs/DX-001-strict-mode.md) | dx | ✅ canonical |
 | DX-003 | [Compat Layer](specs/DX-003-compat-layer.md) | dx | ✅ canonical |
+| DX-004 | dump()/execute() API | dx | 🟡 in E2E-001 |
+| E2E-001 | [PostgreSQL Validation](specs/E2E-001-postgresql-validation.md) | testing | 🟡 draft |
 
 ## Golden Query Tests (MVP Contract) - ✅ Complete
 
@@ -62,6 +64,15 @@ packages/dx            → Depends on core + adapter-kysely
 | Q1 | Filter to-many → EXISTS | filter-strategy: exists | ✅ | 6 |
 | Q2 | Coverage by category → CTE | cte-extraction | ✅ | 5 |
 | Q3 | Strict mode ambiguity | AmbiguousPlanError | ✅ | 7 |
+
+## E2E Golden Tests (Real PostgreSQL) - 🟡 In Progress
+
+| Test | Description | Key Validation | Status |
+|------|-------------|----------------|--------|
+| Q1-E2E | Products with approved FR image | Real PostgreSQL EXISTS | 🟡 |
+| Q2-E2E | Multi-locale images (CTE extraction) | Real PostgreSQL CTE | 🟡 |
+| Q4 | Multi-tenant isolation | Schema qualification | 🟡 |
+| Q5 | Blog scenario | Basic E2E validation | 🟡 |
 
 ## Tech Stack
 
