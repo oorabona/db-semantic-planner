@@ -7,7 +7,7 @@
 
 // Compiler (low-level)
 export { compile } from './compiler.js';
-
+export type { DialectCapabilities, DialectName } from './dialect.js';
 // Dialect detection and capabilities (DIALECT-001)
 export {
 	assertCapability,
@@ -18,12 +18,11 @@ export {
 	MSSQL_CAPABILITIES,
 	MYSQL_CAPABILITIES,
 	POSTGRESQL_CAPABILITIES,
-	skipIfMissingCapability,
 	SQLITE_CAPABILITIES,
+	skipIfMissingCapability,
 	UNKNOWN_CAPABILITIES,
 	withMockedCapabilities,
 } from './dialect.js';
-export type { DialectCapabilities, DialectName } from './dialect.js';
 
 // Dump API (high-level observability)
 export {
@@ -38,6 +37,7 @@ export {
 	CompilationError,
 	InvalidIdentifierError,
 	NotFoundError,
+	validateIdentifier,
 } from './errors.js';
 // EXPLAIN API (ADAPTER-004)
 export { explain } from './explain.js';

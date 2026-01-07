@@ -92,7 +92,10 @@ export function sanitizeTestName(testName: string): string {
 /**
  * Gets the full path to a snapshot file.
  */
-export function getSnapshotPath(testFilePath: string, testName: string): string {
+export function getSnapshotPath(
+	testFilePath: string,
+	testName: string,
+): string {
 	const snapshotDir = getSnapshotDir(testFilePath);
 	const fileName = `${sanitizeTestName(testName)}.sql`;
 	return join(snapshotDir, fileName);
@@ -102,7 +105,10 @@ export function getSnapshotPath(testFilePath: string, testName: string): string 
  * Reads a SQL snapshot from disk.
  * Returns null if the snapshot doesn't exist.
  */
-export function readSqlSnapshot(testFilePath: string, testName: string): string | null {
+export function readSqlSnapshot(
+	testFilePath: string,
+	testName: string,
+): string | null {
 	const snapshotPath = getSnapshotPath(testFilePath, testName);
 
 	if (!existsSync(snapshotPath)) {
@@ -116,7 +122,11 @@ export function readSqlSnapshot(testFilePath: string, testName: string): string 
  * Writes a SQL snapshot to disk.
  * Creates the snapshot directory if it doesn't exist.
  */
-export function writeSqlSnapshot(testFilePath: string, testName: string, sql: string): void {
+export function writeSqlSnapshot(
+	testFilePath: string,
+	testName: string,
+	sql: string,
+): void {
 	const snapshotPath = getSnapshotPath(testFilePath, testName);
 	const snapshotDir = dirname(snapshotPath);
 
@@ -127,7 +137,7 @@ export function writeSqlSnapshot(testFilePath: string, testName: string, sql: st
 	const formatted = formatSqlForSnapshot(sql);
 	const header = `-- Snapshot: ${testName}\n-- Generated: ${new Date().toISOString().split('T')[0]}\n\n`;
 
-	writeFileSync(snapshotPath, header + formatted + '\n', 'utf-8');
+	writeFileSync(snapshotPath, `${header + formatted}\n`, 'utf-8');
 }
 
 /**
@@ -229,7 +239,10 @@ export interface SqlSnapshotOptions {
  *
  * @throws Error if SQL doesn't match snapshot (and not in update mode)
  */
-export function assertSqlSnapshot(sql: string, options: SqlSnapshotOptions): void {
+export function assertSqlSnapshot(
+	sql: string,
+	options: SqlSnapshotOptions,
+): void {
 	const { testFilePath, testName } = options;
 	const update = options.update ?? process.env.UPDATE_SNAPSHOTS === 'true';
 
@@ -256,6 +269,6 @@ export function assertSqlSnapshot(sql: string, options: SqlSnapshotOptions): voi
 
 	const snapshotPath = getSnapshotPath(testFilePath, testName);
 	throw new Error(
-		`${result.diff}\n\nSnapshot file: ${snapshotPath}\nRun with UPDATE_SNAPSHOTS=true to update.`
+		`${result.diff}\n\nSnapshot file: ${snapshotPath}\nRun with UPDATE_SNAPSHOTS=true to update.`,
 	);
 }

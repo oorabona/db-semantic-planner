@@ -15,7 +15,7 @@
  */
 
 import { expect } from 'vitest';
-import { assertSqlSnapshot, compareSql, getSnapshotPath, readSqlSnapshot } from './sql-snapshot.js';
+import { assertSqlSnapshot, compareSql } from './sql-snapshot.js';
 
 /** Current test file path, set by setupSqlSnapshotMatcher */
 let currentTestFilePath: string | null = null;
@@ -42,7 +42,7 @@ export function setupSqlSnapshotMatcher(testFilePath: string): void {
 function getTestFilePath(): string {
 	if (!currentTestFilePath) {
 		throw new Error(
-			'SQL snapshot matcher not initialized. Call setupSqlSnapshotMatcher(import.meta.url) at the top of your test file.'
+			'SQL snapshot matcher not initialized. Call setupSqlSnapshotMatcher(import.meta.url) at the top of your test file.',
 		);
 	}
 	return currentTestFilePath;
@@ -59,7 +59,10 @@ interface MatcherResult {
 /**
  * Vitest custom matcher for SQL snapshots.
  */
-function toMatchSqlSnapshot(received: string, snapshotName: string): MatcherResult {
+function toMatchSqlSnapshot(
+	received: string,
+	snapshotName: string,
+): MatcherResult {
 	const testFilePath = getTestFilePath();
 
 	try {
@@ -109,6 +112,7 @@ expect.extend({
 // TypeScript declaration merging for custom matchers
 declare module 'vitest' {
 	// biome-ignore lint/suspicious/noExplicitAny: Vitest requires this signature
+	// biome-ignore lint/correctness/noUnusedVariables: Required to match Vitest's Assertion interface
 	interface Assertion<T = any> {
 		/**
 		 * Asserts that SQL matches the stored snapshot file.

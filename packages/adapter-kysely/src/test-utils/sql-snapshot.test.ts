@@ -2,7 +2,13 @@
  * Tests for SQL Snapshot Testing Utilities
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -67,7 +73,9 @@ describe('SQL Snapshot Utilities', () => {
 
 		it('should preserve parameter placeholders', () => {
 			const input = 'SELECT * FROM users WHERE name = $1 AND age > $2';
-			expect(normalizeSql(input)).toBe('SELECT * FROM users WHERE name = $1 AND age > $2');
+			expect(normalizeSql(input)).toBe(
+				'SELECT * FROM users WHERE name = $1 AND age > $2',
+			);
 		});
 	});
 
@@ -113,14 +121,18 @@ describe('SQL Snapshot Utilities', () => {
 		});
 
 		it('should handle special characters', () => {
-			expect(sanitizeTestName('test: with (special) chars!')).toBe('test-with-special-chars');
+			expect(sanitizeTestName('test: with (special) chars!')).toBe(
+				'test-with-special-chars',
+			);
 		});
 	});
 
 	describe('getSnapshotDir', () => {
 		it('should return __snapshots__ directory with test file name', () => {
 			const testPath = '/path/to/my-feature.test.ts';
-			expect(getSnapshotDir(testPath)).toBe('/path/to/__snapshots__/my-feature');
+			expect(getSnapshotDir(testPath)).toBe(
+				'/path/to/__snapshots__/my-feature',
+			);
 		});
 
 		it('should strip .test suffix from directory name', () => {
@@ -134,7 +146,9 @@ describe('SQL Snapshot Utilities', () => {
 			const testPath = '/path/to/compiler.test.ts';
 			const testName = 'select with exists';
 			const snapshotPath = getSnapshotPath(testPath, testName);
-			expect(snapshotPath).toBe('/path/to/__snapshots__/compiler/select-with-exists.sql');
+			expect(snapshotPath).toBe(
+				'/path/to/__snapshots__/compiler/select-with-exists.sql',
+			);
 		});
 	});
 
@@ -224,7 +238,11 @@ describe('SQL Snapshot Utilities', () => {
 			});
 
 			it('should write formatted SQL with header', () => {
-				writeSqlSnapshot(fakeTestFile, 'my-query', 'SELECT * FROM users WHERE id = $1');
+				writeSqlSnapshot(
+					fakeTestFile,
+					'my-query',
+					'SELECT * FROM users WHERE id = $1',
+				);
 
 				const snapshotPath = getSnapshotPath(fakeTestFile, 'my-query');
 				const content = readFileSync(snapshotPath, 'utf-8');

@@ -67,7 +67,9 @@ export class UnsupportedOperationError extends Error {
 		reason: string,
 		options?: { capability?: string; dialect?: string },
 	) {
-		const dialectInfo = options?.dialect ? `\nDetected dialect: ${options.dialect}` : '';
+		const dialectInfo = options?.dialect
+			? `\nDetected dialect: ${options.dialect}`
+			: '';
 		const capabilityInfo = options?.capability
 			? `\nRequired capability: '${options.capability}'`
 			: '';

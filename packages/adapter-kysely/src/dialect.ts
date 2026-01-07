@@ -10,41 +10,46 @@ import { UnsupportedOperationError } from './stream.js';
 /**
  * Supported database dialect names.
  */
-export type DialectName = 'postgresql' | 'mysql' | 'sqlite' | 'mssql' | 'unknown';
+export type DialectName =
+	| 'postgresql'
+	| 'mysql'
+	| 'sqlite'
+	| 'mssql'
+	| 'unknown';
 
 /**
  * Capability flags for database features.
  */
 export interface DialectCapabilities {
-  /** Common Table Expressions (WITH clause) */
-  readonly supportsCTE: boolean;
+	/** Common Table Expressions (WITH clause) */
+	readonly supportsCTE: boolean;
 
-  /** EXPLAIN command for query plans */
-  readonly supportsExplain: boolean;
+	/** EXPLAIN command for query plans */
+	readonly supportsExplain: boolean;
 
-  /** Runtime schema switching (PostgreSQL schemas) */
-  readonly supportsWithSchema: boolean;
+	/** Runtime schema switching (PostgreSQL schemas) */
+	readonly supportsWithSchema: boolean;
 
-  /** RETURNING clause for INSERT/UPDATE/DELETE */
-  readonly supportsReturning: boolean;
+	/** RETURNING clause for INSERT/UPDATE/DELETE */
+	readonly supportsReturning: boolean;
 
-  /** NULLS FIRST/LAST in ORDER BY */
-  readonly supportsNullsFirstLast: boolean;
+	/** NULLS FIRST/LAST in ORDER BY */
+	readonly supportsNullsFirstLast: boolean;
 
-  /** Cursor-based streaming (requires pg-cursor) */
-  readonly supportsStreaming: boolean;
+	/** Cursor-based streaming (requires pg-cursor) */
+	readonly supportsStreaming: boolean;
 }
 
 /**
  * PostgreSQL capability profile - full feature support.
  */
 export const POSTGRESQL_CAPABILITIES: DialectCapabilities = {
-  supportsCTE: true,
-  supportsExplain: true,
-  supportsWithSchema: true,
-  supportsReturning: true,
-  supportsNullsFirstLast: true,
-  supportsStreaming: true,
+	supportsCTE: true,
+	supportsExplain: true,
+	supportsWithSchema: true,
+	supportsReturning: true,
+	supportsNullsFirstLast: true,
+	supportsStreaming: true,
 };
 
 /**
@@ -52,36 +57,36 @@ export const POSTGRESQL_CAPABILITIES: DialectCapabilities = {
  * Note: MySQL uses database switching instead of schemas.
  */
 export const MYSQL_CAPABILITIES: DialectCapabilities = {
-  supportsCTE: true,
-  supportsExplain: true,
-  supportsWithSchema: false,
-  supportsReturning: false,
-  supportsNullsFirstLast: true, // MySQL 8.0+
-  supportsStreaming: false,
+	supportsCTE: true,
+	supportsExplain: true,
+	supportsWithSchema: false,
+	supportsReturning: false,
+	supportsNullsFirstLast: true, // MySQL 8.0+
+	supportsStreaming: false,
 };
 
 /**
  * SQLite capability profile - limited feature support.
  */
 export const SQLITE_CAPABILITIES: DialectCapabilities = {
-  supportsCTE: true,
-  supportsExplain: true,
-  supportsWithSchema: false,
-  supportsReturning: true, // SQLite 3.35+
-  supportsNullsFirstLast: true, // SQLite 3.30+
-  supportsStreaming: false,
+	supportsCTE: true,
+	supportsExplain: true,
+	supportsWithSchema: false,
+	supportsReturning: true, // SQLite 3.35+
+	supportsNullsFirstLast: true, // SQLite 3.30+
+	supportsStreaming: false,
 };
 
 /**
  * MSSQL capability profile.
  */
 export const MSSQL_CAPABILITIES: DialectCapabilities = {
-  supportsCTE: true,
-  supportsExplain: true, // MSSQL uses SET SHOWPLAN_XML ON
-  supportsWithSchema: true,
-  supportsReturning: false, // MSSQL uses OUTPUT clause
-  supportsNullsFirstLast: false,
-  supportsStreaming: false,
+	supportsCTE: true,
+	supportsExplain: true, // MSSQL uses SET SHOWPLAN_XML ON
+	supportsWithSchema: true,
+	supportsReturning: false, // MSSQL uses OUTPUT clause
+	supportsNullsFirstLast: false,
+	supportsStreaming: false,
 };
 
 /**
@@ -89,23 +94,23 @@ export const MSSQL_CAPABILITIES: DialectCapabilities = {
  * Most modern databases support CTEs.
  */
 export const UNKNOWN_CAPABILITIES: DialectCapabilities = {
-  supportsCTE: true, // Most modern DBs support CTEs
-  supportsExplain: false,
-  supportsWithSchema: false,
-  supportsReturning: false,
-  supportsNullsFirstLast: false,
-  supportsStreaming: false,
+	supportsCTE: true, // Most modern DBs support CTEs
+	supportsExplain: false,
+	supportsWithSchema: false,
+	supportsReturning: false,
+	supportsNullsFirstLast: false,
+	supportsStreaming: false,
 };
 
 /**
  * Map of dialect names to their capabilities.
  */
 const DIALECT_CAPABILITIES_MAP: Record<DialectName, DialectCapabilities> = {
-  postgresql: POSTGRESQL_CAPABILITIES,
-  mysql: MYSQL_CAPABILITIES,
-  sqlite: SQLITE_CAPABILITIES,
-  mssql: MSSQL_CAPABILITIES,
-  unknown: UNKNOWN_CAPABILITIES,
+	postgresql: POSTGRESQL_CAPABILITIES,
+	mysql: MYSQL_CAPABILITIES,
+	sqlite: SQLITE_CAPABILITIES,
+	mssql: MSSQL_CAPABILITIES,
+	unknown: UNKNOWN_CAPABILITIES,
 };
 
 /**
@@ -123,44 +128,48 @@ const DIALECT_CAPABILITIES_MAP: Record<DialectName, DialectCapabilities> = {
  * ```
  */
 export function detectDialect(db: Kysely<unknown>): DialectName {
-  // Access Kysely internals to get dialect information
-  // Kysely stores the dialect adapter on the internal executor
-  const adapter = getDialectAdapter(db);
+	// Access Kysely internals to get dialect information
+	// Kysely stores the dialect adapter on the internal executor
+	const adapter = getDialectAdapter(db);
 
-  if (!adapter) {
-    return 'unknown';
-  }
+	if (!adapter) {
+		return 'unknown';
+	}
 
-  const adapterName = adapter.constructor.name.toLowerCase();
+	const adapterName = adapter.constructor.name.toLowerCase();
 
-  if (adapterName.includes('postgres')) {
-    return 'postgresql';
-  }
+	if (adapterName.includes('postgres')) {
+		return 'postgresql';
+	}
 
-  if (adapterName.includes('mysql')) {
-    return 'mysql';
-  }
+	if (adapterName.includes('mysql')) {
+		return 'mysql';
+	}
 
-  if (adapterName.includes('sqlite')) {
-    return 'sqlite';
-  }
+	if (adapterName.includes('sqlite')) {
+		return 'sqlite';
+	}
 
-  if (adapterName.includes('mssql')) {
-    return 'mssql';
-  }
+	if (adapterName.includes('mssql')) {
+		return 'mssql';
+	}
 
-  return 'unknown';
+	return 'unknown';
 }
 
 /**
  * Get the dialect adapter from a Kysely instance.
  * This accesses Kysely internals which may change between versions.
  */
-function getDialectAdapter(db: Kysely<unknown>): { constructor: { name: string } } | undefined {
-  // Kysely exposes the executor which contains the adapter
-  // The structure is: db -> getExecutor() -> adapter
-  const executor = (db as unknown as { getExecutor?: () => { adapter?: unknown } }).getExecutor?.();
-  return executor?.adapter as { constructor: { name: string } } | undefined;
+function getDialectAdapter(
+	db: Kysely<unknown>,
+): { constructor: { name: string } } | undefined {
+	// Kysely exposes the executor which contains the adapter
+	// The structure is: db -> getExecutor() -> adapter
+	const executor = (
+		db as unknown as { getExecutor?: () => { adapter?: unknown } }
+	).getExecutor?.();
+	return executor?.adapter as { constructor: { name: string } } | undefined;
 }
 
 /**
@@ -180,8 +189,8 @@ function getDialectAdapter(db: Kysely<unknown>): { constructor: { name: string }
  * ```
  */
 export function getCapabilities(db: Kysely<unknown>): DialectCapabilities {
-  const dialect = detectDialect(db);
-  return getCapabilitiesForDialect(dialect);
+	const dialect = detectDialect(db);
+	return getCapabilitiesForDialect(dialect);
 }
 
 /**
@@ -196,8 +205,10 @@ export function getCapabilities(db: Kysely<unknown>): DialectCapabilities {
  * // Returns MYSQL_CAPABILITIES
  * ```
  */
-export function getCapabilitiesForDialect(dialect: DialectName): DialectCapabilities {
-  return DIALECT_CAPABILITIES_MAP[dialect];
+export function getCapabilitiesForDialect(
+	dialect: DialectName,
+): DialectCapabilities {
+	return DIALECT_CAPABILITIES_MAP[dialect];
 }
 
 /**
@@ -222,77 +233,91 @@ export function getCapabilitiesForDialect(dialect: DialectName): DialectCapabili
  * ```
  */
 export function assertCapability(
-  db: Kysely<unknown>,
-  capability: keyof DialectCapabilities,
-  operation: string,
-  guidance?: string,
+	db: Kysely<unknown>,
+	capability: keyof DialectCapabilities,
+	operation: string,
+	guidance?: string,
 ): void {
-  const dialect = detectDialect(db);
-  const caps = getCapabilitiesForDialect(dialect);
+	const dialect = detectDialect(db);
+	const caps = getCapabilitiesForDialect(dialect);
 
-  if (!caps[capability]) {
-    const defaultGuidance = getDefaultGuidance(capability, dialect);
-    throw new UnsupportedOperationError(operation, guidance ?? defaultGuidance, {
-      capability,
-      dialect,
-    });
-  }
+	if (!caps[capability]) {
+		const defaultGuidance = getDefaultGuidance(capability, dialect);
+		throw new UnsupportedOperationError(
+			operation,
+			guidance ?? defaultGuidance,
+			{
+				capability,
+				dialect,
+			},
+		);
+	}
 }
 
 /**
  * Get default guidance message for a missing capability.
  */
 function getDefaultGuidance(
-  capability: keyof DialectCapabilities,
-  dialect: DialectName,
+	capability: keyof DialectCapabilities,
+	dialect: DialectName,
 ): string {
-  const guidanceMap: Record<keyof DialectCapabilities, Record<DialectName, string>> = {
-    supportsWithSchema: {
-      postgresql: 'This should work - check PostgreSQL configuration.',
-      mysql:
-        'MySQL uses database switching instead of schemas. Consider using separate database connections per tenant.',
-      sqlite: 'SQLite does not support schemas. Consider using separate database files per tenant.',
-      mssql: 'This should work - check MSSQL configuration.',
-      unknown: 'The detected dialect does not support schema switching.',
-    },
-    supportsStreaming: {
-      postgresql: 'Ensure pg-cursor is installed and configured in PostgresDialect.',
-      mysql: 'MySQL does not support cursor-based streaming. Use pagination with LIMIT/OFFSET instead.',
-      sqlite: 'SQLite does not support cursor-based streaming. Use pagination with LIMIT/OFFSET instead.',
-      mssql: 'MSSQL does not support cursor-based streaming. Use pagination with OFFSET/FETCH instead.',
-      unknown: 'The detected dialect does not support cursor-based streaming.',
-    },
-    supportsExplain: {
-      postgresql: 'This should work - check PostgreSQL configuration.',
-      mysql: 'This should work - check MySQL configuration.',
-      sqlite: 'This should work - check SQLite configuration.',
-      mssql: 'MSSQL uses SET SHOWPLAN_XML ON instead of EXPLAIN.',
-      unknown: 'The detected dialect may not support EXPLAIN.',
-    },
-    supportsCTE: {
-      postgresql: 'This should work - PostgreSQL supports CTEs.',
-      mysql: 'This should work - MySQL 8.0+ supports CTEs.',
-      sqlite: 'This should work - SQLite 3.8.3+ supports CTEs.',
-      mssql: 'This should work - MSSQL supports CTEs.',
-      unknown: 'The detected dialect may not support CTEs.',
-    },
-    supportsReturning: {
-      postgresql: 'This should work - PostgreSQL supports RETURNING.',
-      mysql: 'MySQL does not support RETURNING. Use SELECT after INSERT/UPDATE instead.',
-      sqlite: 'This should work - SQLite 3.35+ supports RETURNING.',
-      mssql: 'MSSQL uses OUTPUT clause instead of RETURNING.',
-      unknown: 'The detected dialect may not support RETURNING.',
-    },
-    supportsNullsFirstLast: {
-      postgresql: 'This should work - PostgreSQL supports NULLS FIRST/LAST.',
-      mysql: 'This should work - MySQL 8.0+ supports NULLS FIRST/LAST.',
-      sqlite: 'This should work - SQLite 3.30+ supports NULLS FIRST/LAST.',
-      mssql: 'MSSQL does not support NULLS FIRST/LAST. Use CASE expression in ORDER BY instead.',
-      unknown: 'The detected dialect may not support NULLS FIRST/LAST.',
-    },
-  };
+	const guidanceMap: Record<
+		keyof DialectCapabilities,
+		Record<DialectName, string>
+	> = {
+		supportsWithSchema: {
+			postgresql: 'This should work - check PostgreSQL configuration.',
+			mysql:
+				'MySQL uses database switching instead of schemas. Consider using separate database connections per tenant.',
+			sqlite:
+				'SQLite does not support schemas. Consider using separate database files per tenant.',
+			mssql: 'This should work - check MSSQL configuration.',
+			unknown: 'The detected dialect does not support schema switching.',
+		},
+		supportsStreaming: {
+			postgresql:
+				'Ensure pg-cursor is installed and configured in PostgresDialect.',
+			mysql:
+				'MySQL does not support cursor-based streaming. Use pagination with LIMIT/OFFSET instead.',
+			sqlite:
+				'SQLite does not support cursor-based streaming. Use pagination with LIMIT/OFFSET instead.',
+			mssql:
+				'MSSQL does not support cursor-based streaming. Use pagination with OFFSET/FETCH instead.',
+			unknown: 'The detected dialect does not support cursor-based streaming.',
+		},
+		supportsExplain: {
+			postgresql: 'This should work - check PostgreSQL configuration.',
+			mysql: 'This should work - check MySQL configuration.',
+			sqlite: 'This should work - check SQLite configuration.',
+			mssql: 'MSSQL uses SET SHOWPLAN_XML ON instead of EXPLAIN.',
+			unknown: 'The detected dialect may not support EXPLAIN.',
+		},
+		supportsCTE: {
+			postgresql: 'This should work - PostgreSQL supports CTEs.',
+			mysql: 'This should work - MySQL 8.0+ supports CTEs.',
+			sqlite: 'This should work - SQLite 3.8.3+ supports CTEs.',
+			mssql: 'This should work - MSSQL supports CTEs.',
+			unknown: 'The detected dialect may not support CTEs.',
+		},
+		supportsReturning: {
+			postgresql: 'This should work - PostgreSQL supports RETURNING.',
+			mysql:
+				'MySQL does not support RETURNING. Use SELECT after INSERT/UPDATE instead.',
+			sqlite: 'This should work - SQLite 3.35+ supports RETURNING.',
+			mssql: 'MSSQL uses OUTPUT clause instead of RETURNING.',
+			unknown: 'The detected dialect may not support RETURNING.',
+		},
+		supportsNullsFirstLast: {
+			postgresql: 'This should work - PostgreSQL supports NULLS FIRST/LAST.',
+			mysql: 'This should work - MySQL 8.0+ supports NULLS FIRST/LAST.',
+			sqlite: 'This should work - SQLite 3.30+ supports NULLS FIRST/LAST.',
+			mssql:
+				'MSSQL does not support NULLS FIRST/LAST. Use CASE expression in ORDER BY instead.',
+			unknown: 'The detected dialect may not support NULLS FIRST/LAST.',
+		},
+	};
 
-  return guidanceMap[capability][dialect];
+	return guidanceMap[capability][dialect];
 }
 
 // ============================================================================
@@ -315,7 +340,7 @@ function getDefaultGuidance(
  * ```
  */
 export function getDialectName(db: Kysely<unknown>): string {
-  return detectDialect(db);
+	return detectDialect(db);
 }
 
 /**
@@ -335,11 +360,11 @@ export function getDialectName(db: Kysely<unknown>): string {
  * ```
  */
 export function skipIfMissingCapability(
-  db: Kysely<unknown>,
-  capability: keyof DialectCapabilities,
+	db: Kysely<unknown>,
+	capability: keyof DialectCapabilities,
 ): boolean {
-  const caps = getCapabilities(db);
-  return !caps[capability];
+	const caps = getCapabilities(db);
+	return !caps[capability];
 }
 
 /**
@@ -358,19 +383,19 @@ export function skipIfMissingCapability(
  * ```
  */
 export function withMockedCapabilities(dialect: DialectName): Kysely<unknown> {
-  const adapterNameMap: Record<DialectName, string> = {
-    postgresql: 'PostgresDialectAdapter',
-    mysql: 'MysqlDialectAdapter',
-    sqlite: 'SqliteDialectAdapter',
-    mssql: 'MssqlDialectAdapter',
-    unknown: 'UnknownDialectAdapter',
-  };
+	const adapterNameMap: Record<DialectName, string> = {
+		postgresql: 'PostgresDialectAdapter',
+		mysql: 'MysqlDialectAdapter',
+		sqlite: 'SqliteDialectAdapter',
+		mssql: 'MssqlDialectAdapter',
+		unknown: 'UnknownDialectAdapter',
+	};
 
-  return {
-    getExecutor: () => ({
-      adapter: {
-        constructor: { name: adapterNameMap[dialect] },
-      },
-    }),
-  } as unknown as Kysely<unknown>;
+	return {
+		getExecutor: () => ({
+			adapter: {
+				constructor: { name: adapterNameMap[dialect] },
+			},
+		}),
+	} as unknown as Kysely<unknown>;
 }

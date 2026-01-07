@@ -1,3 +1,4 @@
+import { InvalidIdentifierError } from '@db-semantic-planner/adapter-kysely';
 import { belongsTo, defineSchema, hasMany } from '@db-semantic-planner/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
@@ -249,6 +250,59 @@ describe('Execution Layer', () => {
 			const planReport = builder.plan();
 			expect(planReport).toBeDefined();
 			expect(planReport.intent.from).toBe('users');
+		});
+
+		describe('schema name validation (F-001 security fix)', () => {
+			it('accepts valid schema names', () => {
+				const orm = createOrm({ model: testModel, db });
+
+				expect(() => orm.forTenant('tenant_123')).not.toThrow();
+				expect(() => orm.forTenant('acme')).not.toThrow();
+				expect(() => orm.forTenant('_private')).not.toThrow();
+				expect(() => orm.forTenant('MySchema')).not.toThrow();
+			});
+
+			it('rejects schema names with hyphens', () => {
+				const orm = createOrm({ model: testModel, db });
+
+				expect(() => orm.forTenant('my-schema')).toThrow(
+					InvalidIdentifierError,
+				);
+			});
+
+			it('rejects schema names starting with numbers', () => {
+				const orm = createOrm({ model: testModel, db });
+
+				expect(() => orm.forTenant('123tenant')).toThrow(
+					InvalidIdentifierError,
+				);
+			});
+
+			it('rejects schema names with special characters', () => {
+				const orm = createOrm({ model: testModel, db });
+
+				expect(() => orm.forTenant('schema!')).toThrow(InvalidIdentifierError);
+				expect(() => orm.forTenant('schema@tenant')).toThrow(
+					InvalidIdentifierError,
+				);
+			});
+
+			it('rejects SQL injection attempts', () => {
+				const orm = createOrm({ model: testModel, db });
+
+				expect(() => orm.forTenant("'; DROP TABLE users;--")).toThrow(
+					InvalidIdentifierError,
+				);
+				expect(() => orm.forTenant('public.users')).toThrow(
+					InvalidIdentifierError,
+				);
+			});
+
+			it('rejects empty schema names', () => {
+				const orm = createOrm({ model: testModel, db });
+
+				expect(() => orm.forTenant('')).toThrow(InvalidIdentifierError);
+			});
 		});
 	});
 

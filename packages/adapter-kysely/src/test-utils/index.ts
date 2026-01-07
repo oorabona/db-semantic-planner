@@ -22,27 +22,25 @@
  * ```
  */
 
-// SQL Snapshot utilities
-export {
-	normalizeSql,
-	formatSqlForSnapshot,
-	getSnapshotDir,
-	getSnapshotPath,
-	sanitizeTestName,
-	readSqlSnapshot,
-	writeSqlSnapshot,
-	compareSql,
-	assertSqlSnapshot,
-	type SqlCompareResult,
-	type SqlSnapshotOptions,
-} from './sql-snapshot.js';
-
-// Vitest custom matchers
-export { setupSqlSnapshotMatcher } from './vitest-matchers.js';
-
 // Re-export dialect test helpers (from main package)
 export {
 	getDialectName,
 	skipIfMissingCapability,
 	withMockedCapabilities,
 } from '../dialect.js';
+// SQL Snapshot utilities
+export {
+	assertSqlSnapshot,
+	compareSql,
+	formatSqlForSnapshot,
+	getSnapshotDir,
+	getSnapshotPath,
+	normalizeSql,
+	readSqlSnapshot,
+	type SqlCompareResult,
+	type SqlSnapshotOptions,
+	sanitizeTestName,
+	writeSqlSnapshot,
+} from './sql-snapshot.js';
+// Vitest custom matchers
+export { setupSqlSnapshotMatcher } from './vitest-matchers.js';

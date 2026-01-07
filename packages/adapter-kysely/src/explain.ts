@@ -92,7 +92,7 @@ function buildMysqlExplainPrefix(options: ExplainOptions): string {
  * Note: SQLite doesn't support ANALYZE as part of EXPLAIN.
  *       SQLite returns a simpler tree structure, not JSON.
  */
-function buildSqliteExplainPrefix(options: ExplainOptions): string {
+function buildSqliteExplainPrefix(_options: ExplainOptions): string {
 	// SQLite only has EXPLAIN and EXPLAIN QUERY PLAN
 	// EXPLAIN shows VM opcodes, EXPLAIN QUERY PLAN shows query plan
 	// For our purposes, EXPLAIN QUERY PLAN is more useful
