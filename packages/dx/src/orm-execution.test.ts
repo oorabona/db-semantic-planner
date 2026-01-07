@@ -251,6 +251,131 @@ describe('Execution Layer', () => {
 		});
 	});
 
+	describe('dump()', () => {
+		it('throws ExecutionError when db is not configured', () => {
+			const orm = createOrm({ model: testModel });
+
+			expect(() => orm.query('users').dump()).toThrow(ExecutionError);
+			expect(() => orm.query('users').dump()).toThrow(
+				'Database not configured',
+			);
+		});
+
+		it('returns complete Dump object when db is configured', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm.query('users').dump();
+
+			// Verify structure
+			expect(dump).toHaveProperty('plan');
+			expect(dump).toHaveProperty('sql');
+			expect(dump).toHaveProperty('params');
+			expect(dump).toHaveProperty('meta');
+
+			// Verify plan
+			expect(dump.plan.intent.from).toBe('users');
+
+			// Verify SQL (SQLite uses lowercase)
+			expect(dump.sql.toLowerCase()).toContain('select');
+			expect(dump.sql.toLowerCase()).toContain('users');
+
+			// Verify params is array
+			expect(Array.isArray(dump.params)).toBe(true);
+
+			// Verify meta
+			expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
+		});
+
+		it('includes params for where clause', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm
+				.query('users')
+				.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 42 })
+				.dump();
+
+			expect(dump.params).toContain(42);
+		});
+
+		it('includes tenant in meta for forTenant()', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm.forTenant('acme').query('users').dump();
+
+			expect(dump.meta?.tenant).toBe('acme');
+			// SQL should include schema qualification
+			expect(dump.sql).toContain('"acme"');
+		});
+
+		it('does not include tenant in meta when no tenant', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm.query('users').dump();
+
+			expect(dump.meta?.tenant).toBeUndefined();
+		});
+
+		it('works with complex query chain', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm
+				.query('users')
+				.select(['id', 'name'])
+				.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 1 })
+				.dump();
+
+			expect(dump.plan).toBeDefined();
+			expect(dump.sql.toLowerCase()).toContain('select');
+			expect(dump.params).toContain(1);
+		});
+	});
+
+	describe('execute()', () => {
+		it('throws ExecutionError when db is not configured', async () => {
+			const orm = createOrm({ model: testModel });
+
+			await expect(orm.query('users').execute()).rejects.toThrow(
+				ExecutionError,
+			);
+			await expect(orm.query('users').execute()).rejects.toThrow(
+				'Database not configured',
+			);
+		});
+
+		it('is an alias for findMany()', async () => {
+			const orm = createOrm({ model: testModel, db });
+
+			const executeResult = await orm.query('users').execute();
+			const findManyResult = await orm.query('users').findMany();
+
+			expect(executeResult).toEqual(findManyResult);
+		});
+
+		it('returns all rows', async () => {
+			const orm = createOrm({ model: testModel, db });
+			const result = await orm.query('users').execute();
+
+			expect(result).toHaveLength(2);
+		});
+
+		it('returns empty array when no rows match', async () => {
+			// Create fresh DB without data
+			const emptyDb = createTestDb();
+			await setupDatabase(emptyDb);
+
+			const orm = createOrm({ model: testModel, db: emptyDb });
+			const result = await orm.query('users').execute();
+
+			expect(result).toEqual([]);
+			await emptyDb.destroy();
+		});
+
+		it('works with where clause', async () => {
+			const orm = createOrm({ model: testModel, db });
+			const result = await orm
+				.query('users')
+				.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 1 })
+				.execute();
+
+			expect(result).toHaveLength(1);
+		});
+	});
+
 	describe('execution with builder chain', () => {
 		it('executes query with where clause', async () => {
 			const orm = createOrm({ model: testModel, db });

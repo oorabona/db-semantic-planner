@@ -3,6 +3,9 @@
  * Developer Experience enhancements - strict mode, disambiguation, compat helpers.
  */
 
+// Re-export types from adapter for dump()
+export type { Dump, DumpMeta } from '@db-semantic-planner/adapter-kysely';
+
 // Errors
 export {
 	AmbiguousRelationError,

@@ -1,3 +1,4 @@
+import type { Dump } from '@db-semantic-planner/adapter-kysely';
 import type {
 	ModelIR,
 	PlanReport,
@@ -187,6 +188,47 @@ export interface QueryBuilder {
 	 * @throws {AmbiguousRelationError} In strict mode when relation is ambiguous
 	 */
 	plan(): PlanReport;
+
+	/**
+	 * Get the complete dump for this query including plan, SQL, and parameters.
+	 *
+	 * Provides full observability without executing the query.
+	 * Requires `db` to be configured in createOrm() options.
+	 *
+	 * @returns The complete dump with plan, sql, params, and meta
+	 * @throws {ExecutionError} If db is not configured
+	 *
+	 * @example
+	 * ```typescript
+	 * const dump = orm.query('products')
+	 *   .where(eq('active', true))
+	 *   .dump();
+	 *
+	 * console.log(dump.sql);       // SELECT * FROM products WHERE active = $1
+	 * console.log(dump.params);    // [true]
+	 * console.log(dump.plan);      // { rootTable: 'products', decisions: [...] }
+	 * console.log(dump.meta);      // { tenant: 'acme', compiledAt: Date }
+	 * ```
+	 */
+	dump(): Dump;
+
+	/**
+	 * Execute the query and return all matching rows.
+	 *
+	 * Semantic alias for findMany() - use for clearer intent in code.
+	 * Requires `db` to be configured in createOrm() options.
+	 *
+	 * @returns Promise resolving to array of rows (may be empty)
+	 * @throws {ExecutionError} If db is not configured
+	 *
+	 * @example
+	 * ```typescript
+	 * const products = await orm.query('products')
+	 *   .where(eq('active', true))
+	 *   .execute();
+	 * ```
+	 */
+	execute(): Promise<unknown[]>;
 
 	/**
 	 * Execute the query and return all matching rows.

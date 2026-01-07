@@ -549,16 +549,17 @@ describe('IntentAST', () => {
 				},
 			];
 
-			expect(isWhereComparison(intents[0]!)).toBe(true);
-			expect(isWhereLike(intents[1]!)).toBe(true);
-			expect(isWhereIn(intents[2]!)).toBe(true);
-			expect(isWhereNull(intents[3]!)).toBe(true);
-			expect(isWhereAnd(intents[4]!)).toBe(true);
-			expect(isWhereOr(intents[5]!)).toBe(true);
-			expect(isWhereNot(intents[6]!)).toBe(true);
-			expect(isWhereExists(intents[7]!)).toBe(true);
-			expect(isWhereNotExists(intents[8]!)).toBe(true);
-			expect(isWhereRelationFilter(intents[9]!)).toBe(true);
+			const [i0, i1, i2, i3, i4, i5, i6, i7, i8, i9] = intents;
+			expect(isWhereComparison(i0)).toBe(true);
+			expect(isWhereLike(i1)).toBe(true);
+			expect(isWhereIn(i2)).toBe(true);
+			expect(isWhereNull(i3)).toBe(true);
+			expect(isWhereAnd(i4)).toBe(true);
+			expect(isWhereOr(i5)).toBe(true);
+			expect(isWhereNot(i6)).toBe(true);
+			expect(isWhereExists(i7)).toBe(true);
+			expect(isWhereNotExists(i8)).toBe(true);
+			expect(isWhereRelationFilter(i9)).toBe(true);
 		});
 
 		it('should correctly identify logical vs non-logical intents', () => {
