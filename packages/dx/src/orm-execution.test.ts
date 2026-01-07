@@ -1,8 +1,9 @@
 import { belongsTo, defineSchema, hasMany } from '@db-semantic-planner/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { ExecutionError, NotFoundError } from './errors.js';
+import { eq } from './filters.js';
 import { createOrm } from './orm.js';
 
 // Create proper ModelIR using schema builder
@@ -408,6 +409,137 @@ describe('Execution Layer', () => {
 				.findFirst();
 
 			expect(result).toBeDefined();
+		});
+	});
+
+	describe('stream()', () => {
+		it('throws ExecutionError when db is not configured', () => {
+			const orm = createOrm({ model: testModel });
+
+			// stream() throws immediately because it needs db for dump()
+			expect(() => orm.query('users').stream()).toThrow(ExecutionError);
+			expect(() => orm.query('users').stream()).toThrow(
+				'Database not configured',
+			);
+		});
+
+		it('returns an AsyncIterableIterator', () => {
+			const orm = createOrm({ model: testModel, db });
+			const iterator = orm.query('users').stream();
+
+			expect(typeof iterator[Symbol.asyncIterator]).toBe('function');
+			expect(typeof iterator.next).toBe('function');
+		});
+
+		it('yields rows one at a time', async () => {
+			const orm = createOrm({ model: testModel, db });
+			const results: unknown[] = [];
+
+			for await (const row of orm.query('users').stream()) {
+				results.push(row);
+			}
+
+			expect(results).toHaveLength(2);
+			expect(results[0]).toHaveProperty('name');
+		});
+
+		it('supports early break from iteration', async () => {
+			const orm = createOrm({ model: testModel, db });
+			const results: unknown[] = [];
+
+			for await (const row of orm.query('users').stream()) {
+				results.push(row);
+				break; // Stop after first row
+			}
+
+			expect(results).toHaveLength(1);
+		});
+
+		it('invokes onStart callback before streaming', async () => {
+			const orm = createOrm({ model: testModel, db });
+			const onStart = vi.fn();
+
+			const iterator = orm.query('users').stream({ onStart });
+			await iterator.next();
+
+			expect(onStart).toHaveBeenCalledOnce();
+			expect(onStart).toHaveBeenCalledWith(
+				expect.objectContaining({
+					plan: expect.any(Object),
+					sql: expect.any(String),
+					params: expect.any(Array),
+				}),
+			);
+		});
+
+		it('accepts chunkSize option', async () => {
+			const orm = createOrm({ model: testModel, db });
+			const results: unknown[] = [];
+
+			for await (const row of orm.query('users').stream({ chunkSize: 1 })) {
+				results.push(row);
+			}
+
+			expect(results).toHaveLength(2);
+		});
+
+		it('works with where clause', async () => {
+			const orm = createOrm({ model: testModel, db });
+			const results: unknown[] = [];
+
+			for await (const row of orm.query('users').where(eq('id', 1)).stream()) {
+				results.push(row);
+			}
+
+			expect(results).toHaveLength(1);
+		});
+
+		it('handles empty result set', async () => {
+			// Create fresh DB without data
+			const emptyDb = createTestDb();
+			await setupDatabase(emptyDb);
+
+			const orm = createOrm({ model: testModel, db: emptyDb });
+			const results: unknown[] = [];
+
+			for await (const row of orm.query('users').stream()) {
+				results.push(row);
+			}
+
+			expect(results).toHaveLength(0);
+			await emptyDb.destroy();
+		});
+
+		it('works with multi-tenant forTenant()', async () => {
+			// Note: SQLite doesn't support schemas, so this tests the API works
+			// Real schema isolation is tested in E2E with PostgreSQL
+			const orm = createOrm({ model: testModel, db });
+			const tenantOrm = orm.forTenant('tenant_123');
+			const onStart = vi.fn();
+
+			// The stream() call should work (will fail on execution due to missing schema)
+			const iterator = tenantOrm.query('users').stream({ onStart });
+
+			// Verify the iterator is created correctly
+			expect(typeof iterator[Symbol.asyncIterator]).toBe('function');
+		});
+
+		it('preserves query builder state through stream()', async () => {
+			const orm = createOrm({ model: testModel, db });
+			const onStart = vi.fn();
+
+			// Chain operations then stream
+			const results: unknown[] = [];
+			for await (const row of orm
+				.query('users')
+				.select(['id', 'name'])
+				.where(eq('id', 1))
+				.stream({ onStart })) {
+				results.push(row);
+			}
+
+			expect(results).toHaveLength(1);
+			expect(onStart).toHaveBeenCalledOnce();
 		});
 	});
 });

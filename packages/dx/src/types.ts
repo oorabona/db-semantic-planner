@@ -8,6 +8,25 @@ import type {
 import type { Kysely } from 'kysely';
 
 /**
+ * Options for streaming query execution.
+ * Re-exports from adapter-kysely for convenience.
+ */
+export interface StreamOptions {
+	/**
+	 * Number of rows to fetch per batch from the database.
+	 * Only affects PostgreSQL with pg-cursor configured.
+	 * @default 100
+	 */
+	readonly chunkSize?: number;
+
+	/**
+	 * Callback invoked before streaming starts.
+	 * Receives the query dump for observability/logging.
+	 */
+	readonly onStart?: (dump: Dump) => void;
+}
+
+/**
  * Options for aggregate functions.
  */
 export interface AggregateOptions {
@@ -371,6 +390,30 @@ export interface QueryBuilder {
 	 * ```
 	 */
 	findFirstOrThrow(): Promise<unknown>;
+
+	/**
+	 * Execute the query and stream results row by row.
+	 *
+	 * Requires PostgreSQL with pg-cursor installed.
+	 * Breaking out of the loop early releases the connection.
+	 *
+	 * Requires `db` to be configured in createOrm() options.
+	 *
+	 * @param options - Stream options (chunkSize, onStart callback)
+	 * @returns AsyncIterableIterator for row-by-row iteration
+	 * @throws {ExecutionError} If db is not configured
+	 * @throws {MissingDependencyError} If pg-cursor not installed
+	 * @throws {UnsupportedOperationError} If streaming not supported by dialect
+	 *
+	 * @example
+	 * ```typescript
+	 * for await (const user of orm.query('users').stream()) {
+	 *   console.log(user.name);
+	 *   if (shouldStop) break; // Connection released automatically
+	 * }
+	 * ```
+	 */
+	stream(options?: StreamOptions): AsyncIterableIterator<unknown>;
 }
 
 /**

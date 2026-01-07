@@ -3,8 +3,12 @@
  * Developer Experience enhancements - strict mode, disambiguation, compat helpers.
  */
 
-// Re-export types from adapter for dump()
+// Re-export types from adapter for dump() and stream()
 export type { Dump, DumpMeta } from '@db-semantic-planner/adapter-kysely';
+export {
+	MissingDependencyError,
+	UnsupportedOperationError,
+} from '@db-semantic-planner/adapter-kysely';
 
 // Errors
 export {
@@ -48,4 +52,5 @@ export type {
 	OrmOptions,
 	QueryBuilder,
 	RelationHints,
+	StreamOptions,
 } from './types.js';
