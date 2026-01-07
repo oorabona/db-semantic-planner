@@ -2,6 +2,7 @@ import {
 	compile,
 	type Dump,
 	streamQuery,
+	validateIdentifier,
 } from '@db-semantic-planner/adapter-kysely';
 import type {
 	AggregateIntent,
@@ -82,6 +83,8 @@ function createOrmInstance(
 			);
 		},
 		forTenant(tenantSchema: string): OrmInstance {
+			// Validate schema name to prevent SQL injection
+			validateIdentifier(tenantSchema, 'schema');
 			return createOrmInstance(
 				model,
 				strictMode,
