@@ -1,0 +1,681 @@
+import { describe, expect, it } from 'vitest';
+import { belongsTo, defineSchema, hasMany, type QueryIntent } from './index.js';
+import { AmbiguousPlanError, plan } from './planner.js';
+
+// ============================================================================
+// Test Schemas
+// ============================================================================
+
+/**
+ * Q1 Schema: Products with images (for EXISTS filter test)
+ */
+const q1Schema = defineSchema({
+	products: {
+		id: 'number',
+		name: 'string',
+	},
+	productImages: {
+		id: 'number',
+		productId: 'number',
+		locale: 'string',
+		type: 'string',
+		approved: 'boolean',
+	},
+})
+	.relations({
+		products: {
+			images: hasMany('productImages', { foreignKey: 'productId' }),
+		},
+		productImages: {
+			product: belongsTo('products', { foreignKey: 'productId' }),
+		},
+	})
+	.build();
+
+/**
+ * Q2 Schema: Categories with products (for CTE extraction test)
+ */
+const q2Schema = defineSchema({
+	categories: {
+		id: 'number',
+		name: 'string',
+	},
+	products: {
+		id: 'number',
+		categoryId: 'number',
+		active: 'boolean',
+	},
+})
+	.relations({
+		categories: {
+			products: hasMany('products', { foreignKey: 'categoryId' }),
+		},
+		products: {
+			category: belongsTo('categories', { foreignKey: 'categoryId' }),
+		},
+	})
+	.build();
+
+/**
+ * Q3 Schema: Users with multiple relations to posts (for ambiguity test)
+ */
+const q3Schema = defineSchema({
+	users: {
+		id: 'number',
+		name: 'string',
+	},
+	posts: {
+		id: 'number',
+		title: 'string',
+		createdById: 'number',
+		editedById: 'number',
+	},
+})
+	.relations({
+		users: {
+			createdPosts: hasMany('posts', { foreignKey: 'createdById' }),
+			editedPosts: hasMany('posts', { foreignKey: 'editedById' }),
+		},
+		posts: {
+			creator: belongsTo('users', { foreignKey: 'createdById' }),
+			editor: belongsTo('users', { foreignKey: 'editedById' }),
+		},
+	})
+	.build();
+
+// ============================================================================
+// Basic Planning Tests
+// ============================================================================
+
+describe('Semantic Planner', () => {
+	describe('basic planning', () => {
+		it('should plan a simple select query', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+			};
+
+			const report = plan(intent, q1Schema);
+
+			expect(report.rootTable).toBe('products');
+			expect(report.decisions).toHaveLength(0); // No relations to analyze
+			expect(report.warnings).toHaveLength(0);
+			expect(report.ctes).toHaveLength(0);
+			expect(report.metadata.isAmbiguous).toBe(false);
+		});
+
+		it('should throw for unknown table', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'nonexistent',
+			};
+
+			expect(() => plan(intent, q1Schema)).toThrow(
+				'Unknown table: nonexistent',
+			);
+		});
+
+		it('should include planning metadata', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+			};
+
+			const report = plan(intent, q1Schema);
+
+			expect(report.metadata.planningTimeMs).toBeGreaterThanOrEqual(0);
+			expect(report.metadata.relationsAnalyzed).toBe(0);
+			expect(report.intent).toBe(intent);
+		});
+	});
+
+	// ============================================================================
+	// Q1: EXISTS Filter Strategy Tests
+	// ============================================================================
+
+	describe('Q1: EXISTS filter for to-many relations', () => {
+		it('should choose EXISTS strategy for hasMany filter', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'exists',
+					relation: 'images',
+					where: {
+						kind: 'and',
+						conditions: [
+							{
+								kind: 'comparison',
+								field: 'locale',
+								operator: 'eq',
+								value: 'en',
+							},
+							{
+								kind: 'comparison',
+								field: 'type',
+								operator: 'eq',
+								value: 'thumbnail',
+							},
+							{
+								kind: 'comparison',
+								field: 'approved',
+								operator: 'eq',
+								value: true,
+							},
+						],
+					},
+				},
+			};
+
+			const report = plan(intent, q1Schema);
+
+			const filterDecision = report.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+			expect(filterDecision).toBeDefined();
+			expect(filterDecision?.choice).toBe('exists');
+			expect(filterDecision?.context.relation).toBe('images');
+			expect(filterDecision?.reasoning).toContain('cardinality "many"');
+			expect(filterDecision?.alternatives).toContain('join');
+		});
+
+		it('should choose JOIN strategy for belongsTo filter', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'productImages',
+				where: {
+					kind: 'exists',
+					relation: 'product',
+				},
+			};
+
+			const report = plan(intent, q1Schema);
+
+			const filterDecision = report.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+			expect(filterDecision).toBeDefined();
+			expect(filterDecision?.choice).toBe('join');
+			expect(filterDecision?.reasoning).toContain('cardinality "one"');
+		});
+
+		it('should not warn about row explosion when using EXISTS', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'exists',
+					relation: 'images',
+				},
+			};
+
+			const report = plan(intent, q1Schema);
+
+			const rowExplosionWarning = report.warnings.find(
+				(w) => w.code === 'POTENTIAL_ROW_EXPLOSION',
+			);
+			expect(rowExplosionWarning).toBeUndefined();
+		});
+
+		it('should warn about row explosion when forcing JOIN on to-many', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'exists',
+					relation: 'images',
+				},
+			};
+
+			const report = plan(intent, q1Schema, { forceFilterStrategy: 'join' });
+
+			const filterDecision = report.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+			expect(filterDecision?.choice).toBe('join');
+
+			const rowExplosionWarning = report.warnings.find(
+				(w) => w.code === 'POTENTIAL_ROW_EXPLOSION',
+			);
+			expect(rowExplosionWarning).toBeDefined();
+			expect(rowExplosionWarning?.message).toContain('images');
+		});
+
+		it('should handle relationFilter with mode some', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'relationFilter',
+					relation: 'images',
+					where: {
+						kind: 'comparison',
+						field: 'approved',
+						operator: 'eq',
+						value: true,
+					},
+					mode: 'some',
+				},
+			};
+
+			const report = plan(intent, q1Schema);
+
+			const filterDecision = report.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+			expect(filterDecision?.choice).toBe('exists');
+		});
+
+		it('should handle notExists filter', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'notExists',
+					relation: 'images',
+				},
+			};
+
+			const report = plan(intent, q1Schema);
+
+			const filterDecision = report.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+			expect(filterDecision?.choice).toBe('exists');
+		});
+	});
+
+	// ============================================================================
+	// Q2: CTE Extraction Tests
+	// ============================================================================
+
+	describe('Q2: CTE extraction for ratio calculations', () => {
+		it('should extract CTE when same relation accessed multiple times', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				select: { type: 'fields', fields: ['name'] },
+				include: [
+					{
+						relation: 'products',
+						where: {
+							kind: 'comparison',
+							field: 'active',
+							operator: 'eq',
+							value: true,
+						},
+					},
+					{ relation: 'products' },
+				],
+			};
+
+			const report = plan(intent, q2Schema, { enableCTEs: true });
+
+			expect(report.ctes.length).toBeGreaterThanOrEqual(1);
+			expect(report.ctes[0]?.name).toContain('products');
+			expect(report.ctes[0]?.referencedBy.length).toBe(2);
+		});
+
+		it('should not extract CTE when below threshold', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [{ relation: 'products' }],
+			};
+
+			const report = plan(intent, q2Schema, {
+				enableCTEs: true,
+				cteThreshold: 2,
+			});
+
+			expect(report.ctes).toHaveLength(0);
+		});
+
+		it('should not extract CTE when disabled', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [{ relation: 'products' }, { relation: 'products' }],
+			};
+
+			const report = plan(intent, q2Schema, { enableCTEs: false });
+
+			expect(report.ctes).toHaveLength(0);
+		});
+
+		it('should create CTE extraction decision', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [{ relation: 'products' }, { relation: 'products' }],
+			};
+
+			const report = plan(intent, q2Schema, { enableCTEs: true });
+
+			const cteDecision = report.decisions.find(
+				(d) => d.type === 'cte-extraction',
+			);
+			expect(cteDecision).toBeDefined();
+			expect(cteDecision?.reasoning).toContain('accessed 2 times');
+		});
+	});
+
+	// ============================================================================
+	// Q3: Ambiguity Detection Tests
+	// ============================================================================
+
+	describe('Q3: Ambiguity detection', () => {
+		it('should throw AmbiguousPlanError when multiple relations exist to same target', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts' }], // Ambiguous: createdPosts or editedPosts?
+			};
+
+			expect(() => plan(intent, q3Schema)).toThrow(AmbiguousPlanError);
+		});
+
+		it('should return options in error', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts' }],
+			};
+
+			try {
+				plan(intent, q3Schema);
+				expect.fail('Should have thrown AmbiguousPlanError');
+			} catch (e) {
+				expect(e).toBeInstanceOf(AmbiguousPlanError);
+				const error = e as AmbiguousPlanError;
+				expect(error.sourceTable).toBe('users');
+				expect(error.targetTable).toBe('posts');
+				expect(error.options).toContain('createdPosts');
+				expect(error.options).toContain('editedPosts');
+			}
+		});
+
+		it('should resolve with via hint', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts', via: 'createdPosts' }],
+			};
+
+			const report = plan(intent, q3Schema);
+			expect(report.metadata.isAmbiguous).toBe(false);
+		});
+
+		it('should resolve with disambiguate option', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts' }],
+			};
+
+			const report = plan(intent, q3Schema, {
+				disambiguate: { 'users.posts': 'editedPosts' },
+			});
+
+			expect(report.metadata.isAmbiguous).toBe(false);
+		});
+
+		it('should not be ambiguous when using direct relation name', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'createdPosts' }],
+			};
+
+			const report = plan(intent, q3Schema);
+			expect(report.metadata.isAmbiguous).toBe(false);
+		});
+	});
+
+	// ============================================================================
+	// Include Strategy Tests
+	// ============================================================================
+
+	describe('include strategy', () => {
+		it('should choose JOIN for to-one includes', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				include: [{ relation: 'category' }],
+			};
+
+			const report = plan(intent, q2Schema);
+
+			const includeDecision = report.decisions.find(
+				(d) => d.type === 'include-strategy',
+			);
+			expect(includeDecision).toBeDefined();
+			expect(includeDecision?.choice).toBe('join');
+		});
+
+		it('should choose separate for to-many includes', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [{ relation: 'products' }],
+			};
+
+			const report = plan(intent, q2Schema);
+
+			const includeDecision = report.decisions.find(
+				(d) => d.type === 'include-strategy',
+			);
+			expect(includeDecision).toBeDefined();
+			expect(includeDecision?.choice).toBe('separate');
+		});
+	});
+
+	// ============================================================================
+	// Join Type Tests
+	// ============================================================================
+
+	describe('join type', () => {
+		it('should choose LEFT JOIN for optional without filter', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				include: [{ relation: 'category' }],
+			};
+
+			const report = plan(intent, q2Schema);
+
+			const joinDecision = report.decisions.find((d) => d.type === 'join-type');
+			expect(joinDecision).toBeDefined();
+			expect(joinDecision?.choice).toBe('left');
+		});
+
+		it('should choose INNER JOIN for optional with filter', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				include: [
+					{
+						relation: 'category',
+						where: {
+							kind: 'comparison',
+							field: 'name',
+							operator: 'eq',
+							value: 'Electronics',
+						},
+					},
+				],
+			};
+
+			const report = plan(intent, q2Schema);
+
+			const joinDecision = report.decisions.find((d) => d.type === 'join-type');
+			expect(joinDecision).toBeDefined();
+			expect(joinDecision?.choice).toBe('inner');
+		});
+
+		it('should respect forceJoinType option', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				include: [{ relation: 'category' }],
+			};
+
+			const report = plan(intent, q2Schema, { forceJoinType: 'inner' });
+
+			const joinDecision = report.decisions.find((d) => d.type === 'join-type');
+			expect(joinDecision?.choice).toBe('inner');
+		});
+	});
+
+	// ============================================================================
+	// Nested Processing Tests
+	// ============================================================================
+
+	describe('nested processing', () => {
+		it('should process nested includes', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [
+					{
+						relation: 'products',
+						include: [{ relation: 'category' }],
+					},
+				],
+			};
+
+			const report = plan(intent, q2Schema);
+
+			// Should have decisions for both levels
+			expect(report.decisions.length).toBeGreaterThanOrEqual(2);
+			expect(report.metadata.relationsAnalyzed).toBeGreaterThanOrEqual(2);
+		});
+
+		it('should process nested where conditions', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'and',
+					conditions: [
+						{
+							kind: 'exists',
+							relation: 'images',
+						},
+						{
+							kind: 'or',
+							conditions: [
+								{
+									kind: 'comparison',
+									field: 'name',
+									operator: 'eq',
+									value: 'A',
+								},
+								{
+									kind: 'comparison',
+									field: 'name',
+									operator: 'eq',
+									value: 'B',
+								},
+							],
+						},
+					],
+				},
+			};
+
+			const report = plan(intent, q1Schema);
+
+			const filterDecision = report.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+			expect(filterDecision).toBeDefined();
+		});
+
+		it('should warn about deep nesting', () => {
+			// Create a deeply nested intent that exceeds maxIncludeDepth
+			// With maxIncludeDepth: 0, any include at depth 1 should trigger warning
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [
+					{
+						relation: 'products', // depth 0 - this is fine
+						include: [
+							{
+								relation: 'category', // depth 1 - exceeds maxIncludeDepth: 0
+							},
+						],
+					},
+				],
+			};
+
+			const report = plan(intent, q2Schema, { maxIncludeDepth: 0 });
+
+			const deepNestingWarning = report.warnings.find(
+				(w) => w.code === 'DEEP_NESTING',
+			);
+			expect(deepNestingWarning).toBeDefined();
+			expect(deepNestingWarning?.message).toContain('depth');
+		});
+
+		it('should detect circular includes', () => {
+			// This would be: categories -> products -> category -> products...
+			// But in our test, we manually create a potential circular path
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [
+					{
+						relation: 'products',
+						include: [
+							{
+								relation: 'category',
+								include: [{ relation: 'products' }],
+							},
+						],
+					},
+				],
+			};
+
+			const report = plan(intent, q2Schema);
+
+			// Should have completed without infinite loop
+			expect(report.decisions.length).toBeGreaterThan(0);
+		});
+	});
+
+	// ============================================================================
+	// Decision ID Generation Tests
+	// ============================================================================
+
+	describe('decision ID generation', () => {
+		it('should generate unique IDs for each decision', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [{ relation: 'products' }, { relation: 'products' }],
+			};
+
+			const report = plan(intent, q2Schema);
+
+			const ids = report.decisions.map((d) => d.id);
+			const uniqueIds = new Set(ids);
+			expect(uniqueIds.size).toBe(ids.length);
+		});
+
+		it('should use correct ID format', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [{ relation: 'products' }],
+			};
+
+			const report = plan(intent, q2Schema);
+
+			for (const decision of report.decisions) {
+				// Should match pattern like 'includestrategy-001' or 'filterstrategy-001'
+				expect(decision.id).toMatch(/^[a-z]+-\d{3}$/);
+			}
+		});
+	});
+});
