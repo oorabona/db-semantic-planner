@@ -130,9 +130,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 	});
 
 	describe('execute() results', () => {
-		// TODO: EXISTS subqueries currently don't include schema prefix (known limitation)
-		// See: https://github.com/[repo]/issues/XXX
-		it.todo('should return only products with approved FR main image (Acme)', async () => {
+		it('should return only products with approved FR main image (Acme)', async () => {
 			const db = await getTestDb();
 			const orm = createOrm({ model: pimdamModel, db });
 
@@ -158,7 +156,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 			expect(skus).toContain('PROD-002');
 		});
 
-		it.todo('should return different results per tenant (Globex)', async () => {
+		it('should return different results per tenant (Globex)', async () => {
 			const db = await getTestDb();
 			const orm = createOrm({ model: pimdamModel, db });
 
@@ -185,7 +183,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 			expect(skus).toContain('GLX-003');
 		});
 
-		it.todo('should return deterministic results with orderBy', async () => {
+		it('should return deterministic results with orderBy', async () => {
 			const db = await getTestDb();
 			const orm = createOrm({ model: pimdamModel, db });
 
