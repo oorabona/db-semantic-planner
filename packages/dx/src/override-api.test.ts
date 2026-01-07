@@ -103,7 +103,7 @@ describe('Feature 1: withStrictMode() per-query override', () => {
 				.plan();
 
 			const warning = report.warnings.find(
-				(w) => w.code === 'AMBIGUOUS_RELATION'
+				(w) => w.code === 'AMBIGUOUS_RELATION',
 			);
 			expect(warning).toBeDefined();
 		});
@@ -171,7 +171,7 @@ describe('Feature 2: withRelationHint() per-query hints', () => {
 				.plan();
 
 			const warning = report.warnings.find(
-				(w) => w.code === 'AMBIGUOUS_RELATION'
+				(w) => w.code === 'AMBIGUOUS_RELATION',
 			);
 			expect(warning).toBeUndefined();
 		});
@@ -189,7 +189,7 @@ describe('Feature 2: withRelationHint() per-query hints', () => {
 
 			// Should have no ambiguity warning since hint resolved it
 			const warning = report.warnings.find(
-				(w) => w.code === 'AMBIGUOUS_RELATION'
+				(w) => w.code === 'AMBIGUOUS_RELATION',
 			);
 			expect(warning).toBeUndefined();
 		});

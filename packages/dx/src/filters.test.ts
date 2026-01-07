@@ -1,0 +1,385 @@
+/**
+ * DX-003: Filter Helpers Tests
+ *
+ * Tests for Drizzle-like filter helper functions.
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import {
+	and,
+	eq,
+	exists,
+	gt,
+	gte,
+	inArray,
+	isNotNull,
+	isNull,
+	like,
+	lt,
+	lte,
+	neq,
+	not,
+	notExists,
+	or,
+} from './filters.js';
+
+// ============================================================================
+// Feature 1: Comparison Operators
+// ============================================================================
+
+describe('Feature 1: Comparison Operators', () => {
+	describe('Scenario 1.1: eq() creates comparison intent', () => {
+		it('should return WhereComparisonIntent with eq operator', () => {
+			const result = eq('status', 'active');
+
+			expect(result).toEqual({
+				kind: 'comparison',
+				field: 'status',
+				operator: 'eq',
+				value: 'active',
+			});
+		});
+
+		it('should handle numeric values', () => {
+			const result = eq('id', 42);
+
+			expect(result.value).toBe(42);
+		});
+
+		it('should handle null values', () => {
+			const result = eq('deletedAt', null);
+
+			expect(result.value).toBeNull();
+		});
+	});
+
+	describe('Scenario 1.2: Other comparison operators', () => {
+		it('neq() should return neq operator', () => {
+			const result = neq('status', 'deleted');
+
+			expect(result).toEqual({
+				kind: 'comparison',
+				field: 'status',
+				operator: 'neq',
+				value: 'deleted',
+			});
+		});
+
+		it('gt() should return gt operator', () => {
+			const result = gt('age', 18);
+
+			expect(result).toEqual({
+				kind: 'comparison',
+				field: 'age',
+				operator: 'gt',
+				value: 18,
+			});
+		});
+
+		it('gte() should return gte operator', () => {
+			const result = gte('age', 18);
+
+			expect(result).toEqual({
+				kind: 'comparison',
+				field: 'age',
+				operator: 'gte',
+				value: 18,
+			});
+		});
+
+		it('lt() should return lt operator', () => {
+			const result = lt('price', 100);
+
+			expect(result).toEqual({
+				kind: 'comparison',
+				field: 'price',
+				operator: 'lt',
+				value: 100,
+			});
+		});
+
+		it('lte() should return lte operator', () => {
+			const result = lte('price', 100);
+
+			expect(result).toEqual({
+				kind: 'comparison',
+				field: 'price',
+				operator: 'lte',
+				value: 100,
+			});
+		});
+	});
+});
+
+// ============================================================================
+// Feature 2: String Operators
+// ============================================================================
+
+describe('Feature 2: String Operators', () => {
+	describe('Scenario 1.3: like() creates like intent', () => {
+		it('should return WhereLikeIntent', () => {
+			const result = like('name', '%john%');
+
+			expect(result).toEqual({
+				kind: 'like',
+				field: 'name',
+				pattern: '%john%',
+			});
+		});
+
+		it('should support caseInsensitive option', () => {
+			const result = like('email', '%@EXAMPLE.COM', true);
+
+			expect(result).toEqual({
+				kind: 'like',
+				field: 'email',
+				pattern: '%@EXAMPLE.COM',
+				caseInsensitive: true,
+			});
+		});
+
+		it('should not include caseInsensitive when not specified', () => {
+			const result = like('name', '%test%');
+
+			expect(result).not.toHaveProperty('caseInsensitive');
+		});
+	});
+});
+
+// ============================================================================
+// Feature 3: Array Operators
+// ============================================================================
+
+describe('Feature 3: Array Operators', () => {
+	describe('Scenario 1.5: inArray() creates in intent', () => {
+		it('should return WhereInIntent', () => {
+			const result = inArray('status', ['active', 'pending']);
+
+			expect(result).toEqual({
+				kind: 'in',
+				field: 'status',
+				values: ['active', 'pending'],
+			});
+		});
+
+		it('should handle numeric arrays', () => {
+			const result = inArray('id', [1, 2, 3]);
+
+			expect(result.values).toEqual([1, 2, 3]);
+		});
+
+		it('should handle empty arrays', () => {
+			const result = inArray('id', []);
+
+			expect(result.values).toEqual([]);
+		});
+	});
+});
+
+// ============================================================================
+// Feature 4: Null Operators
+// ============================================================================
+
+describe('Feature 4: Null Operators', () => {
+	describe('Scenario 1.4: isNull and isNotNull', () => {
+		it('isNull() should return WhereNullIntent with isNull operator', () => {
+			const result = isNull('deletedAt');
+
+			expect(result).toEqual({
+				kind: 'null',
+				field: 'deletedAt',
+				operator: 'isNull',
+			});
+		});
+
+		it('isNotNull() should return WhereNullIntent with isNotNull operator', () => {
+			const result = isNotNull('email');
+
+			expect(result).toEqual({
+				kind: 'null',
+				field: 'email',
+				operator: 'isNotNull',
+			});
+		});
+	});
+});
+
+// ============================================================================
+// Feature 5: Logical Operators
+// ============================================================================
+
+describe('Feature 5: Logical Operators', () => {
+	describe('Scenario 1.6: and() combines conditions', () => {
+		it('should return WhereAndIntent with variadic args', () => {
+			const result = and(eq('a', 1), gt('b', 2));
+
+			expect(result).toEqual({
+				kind: 'and',
+				conditions: [
+					{ kind: 'comparison', field: 'a', operator: 'eq', value: 1 },
+					{ kind: 'comparison', field: 'b', operator: 'gt', value: 2 },
+				],
+			});
+		});
+
+		it('should accept array form', () => {
+			const conditions = [eq('a', 1), gt('b', 2)];
+			const result = and(conditions);
+
+			expect(result.kind).toBe('and');
+			expect(result.conditions).toHaveLength(2);
+		});
+
+		it('should handle single condition', () => {
+			const result = and(eq('a', 1));
+
+			expect(result.conditions).toHaveLength(1);
+		});
+	});
+
+	describe('Scenario 1.7: or() combines conditions', () => {
+		it('should return WhereOrIntent with variadic args', () => {
+			const result = or(eq('status', 'active'), eq('status', 'pending'));
+
+			expect(result).toEqual({
+				kind: 'or',
+				conditions: [
+					{
+						kind: 'comparison',
+						field: 'status',
+						operator: 'eq',
+						value: 'active',
+					},
+					{
+						kind: 'comparison',
+						field: 'status',
+						operator: 'eq',
+						value: 'pending',
+					},
+				],
+			});
+		});
+
+		it('should accept array form', () => {
+			const conditions = [eq('a', 1), eq('a', 2)];
+			const result = or(conditions);
+
+			expect(result.kind).toBe('or');
+			expect(result.conditions).toHaveLength(2);
+		});
+	});
+
+	describe('Scenario 1.8: not() negates condition', () => {
+		it('should return WhereNotIntent', () => {
+			const result = not(eq('deleted', true));
+
+			expect(result).toEqual({
+				kind: 'not',
+				condition: {
+					kind: 'comparison',
+					field: 'deleted',
+					operator: 'eq',
+					value: true,
+				},
+			});
+		});
+
+		it('should handle nested logical conditions', () => {
+			const result = not(and(eq('a', 1), eq('b', 2)));
+
+			expect(result.kind).toBe('not');
+			expect(result.condition.kind).toBe('and');
+		});
+	});
+});
+
+// ============================================================================
+// Feature 6: Relation Operators
+// ============================================================================
+
+describe('Feature 6: Relation Operators', () => {
+	describe('Scenario 1.9: exists() creates exists intent', () => {
+		it('should return WhereExistsIntent without where', () => {
+			const result = exists('posts');
+
+			expect(result).toEqual({
+				kind: 'exists',
+				relation: 'posts',
+			});
+		});
+
+		it('should return WhereExistsIntent with where', () => {
+			const result = exists('posts', { where: eq('published', true) });
+
+			expect(result).toEqual({
+				kind: 'exists',
+				relation: 'posts',
+				where: {
+					kind: 'comparison',
+					field: 'published',
+					operator: 'eq',
+					value: true,
+				},
+			});
+		});
+
+		it('should not include where when undefined', () => {
+			const result = exists('posts');
+
+			expect(result).not.toHaveProperty('where');
+		});
+	});
+
+	describe('Scenario 1.10: notExists() creates notExists intent', () => {
+		it('should return WhereNotExistsIntent without where', () => {
+			const result = notExists('comments');
+
+			expect(result).toEqual({
+				kind: 'notExists',
+				relation: 'comments',
+			});
+		});
+
+		it('should return WhereNotExistsIntent with where', () => {
+			const result = notExists('comments', { where: eq('spam', true) });
+
+			expect(result).toEqual({
+				kind: 'notExists',
+				relation: 'comments',
+				where: {
+					kind: 'comparison',
+					field: 'spam',
+					operator: 'eq',
+					value: true,
+				},
+			});
+		});
+	});
+});
+
+// ============================================================================
+// Feature 7: Composition
+// ============================================================================
+
+describe('Feature 7: Composition', () => {
+	it('should support deeply nested conditions', () => {
+		const result = and(
+			eq('status', 'active'),
+			or(gt('age', 18), and(eq('role', 'admin'), isNotNull('verifiedAt'))),
+		);
+
+		expect(result.kind).toBe('and');
+		expect(result.conditions).toHaveLength(2);
+		expect(result.conditions[1].kind).toBe('or');
+	});
+
+	it('should support exists with complex where', () => {
+		const result = exists('posts', {
+			where: and(eq('published', true), gt('views', 100)),
+		});
+
+		expect(result.kind).toBe('exists');
+		expect(result.where?.kind).toBe('and');
+	});
+});

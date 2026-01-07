@@ -20,10 +20,17 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@db-semantic-planner/core": "workspace:*"
+		"@db-semantic-planner/core": "workspace:*",
+		"@db-semantic-planner/adapter-kysely": "workspace:*"
+	},
+	"peerDependencies": {
+		"kysely": "catalog:"
 	},
 	"devDependencies": {
+		"@types/better-sqlite3": "^7.6.13",
 		"@types/node": "catalog:",
+		"better-sqlite3": "^12.5.0",
+		"kysely": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"
 	}

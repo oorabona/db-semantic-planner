@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { AmbiguousRelationError } from './errors.js';
+import { describe, expect, it } from 'vitest';
+import {
+	AmbiguousRelationError,
+	ExecutionError,
+	NotFoundError,
+} from './errors.js';
 
 describe('AmbiguousRelationError', () => {
 	it('creates error with correct properties', () => {
@@ -24,9 +28,13 @@ describe('AmbiguousRelationError', () => {
 			'reviewedPosts',
 		]);
 
-		expect(error.message).toContain("Ambiguous relation to 'posts' from 'users'");
+		expect(error.message).toContain(
+			"Ambiguous relation to 'posts' from 'users'",
+		);
 		expect(error.message).toContain('authoredPosts, reviewedPosts');
-		expect(error.message).toContain("Use { via: 'relationName' } to disambiguate");
+		expect(error.message).toContain(
+			"Use { via: 'relationName' } to disambiguate",
+		);
 	});
 
 	it('works with instanceof check', () => {
@@ -47,8 +55,53 @@ describe('AmbiguousRelationError', () => {
 	});
 
 	it('handles single option gracefully', () => {
-		const error = new AmbiguousRelationError('users', 'posts', ['singleRelation']);
+		const error = new AmbiguousRelationError('users', 'posts', [
+			'singleRelation',
+		]);
 
 		expect(error.message).toContain('Available relations: singleRelation');
+	});
+});
+
+describe('ExecutionError', () => {
+	it('creates error with message', () => {
+		const error = new ExecutionError('No database configured');
+
+		expect(error.message).toBe('No database configured');
+	});
+
+	it('has name set to ExecutionError', () => {
+		const error = new ExecutionError('test');
+
+		expect(error.name).toBe('ExecutionError');
+	});
+
+	it('works with instanceof check', () => {
+		const error = new ExecutionError('test');
+
+		expect(error instanceof ExecutionError).toBe(true);
+		expect(error instanceof Error).toBe(true);
+	});
+});
+
+describe('NotFoundError', () => {
+	it('creates error with table name', () => {
+		const error = new NotFoundError('users');
+
+		expect(error.table).toBe('users');
+		expect(error.message).toBe("No record found for 'users'");
+	});
+
+	it('has name set to NotFoundError', () => {
+		const error = new NotFoundError('posts');
+
+		expect(error.name).toBe('NotFoundError');
+	});
+
+	it('works with instanceof check', () => {
+		const error = new NotFoundError('users');
+
+		expect(error instanceof NotFoundError).toBe(true);
+		expect(error instanceof Error).toBe(true);
 	});
 });
