@@ -41,8 +41,19 @@ export function createDump(
 	kysely: Kysely<any>,
 	options?: CompileOptions,
 ): Dump {
-	// Step 1: Plan the query
-	const planReport = plan(intent, model);
+	// Step 1: Plan the query with CTE options if specified
+	const planOptions =
+		options?.enableCTEs !== undefined || options?.cteThreshold !== undefined
+			? {
+					...(options.enableCTEs !== undefined && {
+						enableCTEs: options.enableCTEs,
+					}),
+					...(options.cteThreshold !== undefined && {
+						cteThreshold: options.cteThreshold,
+					}),
+				}
+			: undefined;
+	const planReport = plan(intent, model, planOptions);
 
 	// Step 2: Compile to SQL
 	const compiled = compile(planReport, model, kysely, options?.tenant);

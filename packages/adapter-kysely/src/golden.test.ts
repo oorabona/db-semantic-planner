@@ -70,6 +70,37 @@ const q1Schema = defineSchema({
 	.build();
 
 // ============================================================================
+// Q2 Schema: Categories with Products
+// ============================================================================
+
+/**
+ * Q2: Coverage by category → CTE + ratio
+ * - Categories have many products
+ * - When same relation accessed multiple times, extract to CTE
+ * - Expected: WITH clause in generated SQL
+ */
+const q2Schema = defineSchema({
+	categories: {
+		id: 'number',
+		name: 'string',
+	},
+	products: {
+		id: 'number',
+		categoryId: 'number',
+		active: 'boolean',
+	},
+})
+	.relations({
+		categories: {
+			products: hasMany('products', { foreignKey: 'categoryId' }),
+		},
+		products: {
+			category: belongsTo('categories', { foreignKey: 'categoryId' }),
+		},
+	})
+	.build();
+
+// ============================================================================
 // Q3 Schema: Users with Multiple Post Relations
 // ============================================================================
 
@@ -261,6 +292,116 @@ describe('Q1: Filter to-many → EXISTS', () => {
 		const formatted = formatDump(dump);
 		expect(formatted).toContain('Q1-ProductsWithFRImage');
 		expect(formatted).toContain('filter-strategy=exists');
+	});
+});
+
+// ============================================================================
+// Q2: CTE Extraction → WITH Clause
+// ============================================================================
+
+describe('Q2: CTE extraction → WITH clause', () => {
+	const kysely = createTestKysely();
+
+	it('should generate WITH clause when CTE is extracted', () => {
+		// Access same relation multiple times to trigger CTE extraction
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'categories',
+			select: { type: 'fields', fields: ['name'] },
+			include: [
+				{
+					relation: 'products',
+					where: {
+						kind: 'comparison',
+						field: 'active',
+						operator: 'eq',
+						value: true,
+					},
+				},
+				{ relation: 'products' },
+			],
+		};
+
+		const planReport = plan(intent, q2Schema, { enableCTEs: true });
+
+		// Should have CTE in plan
+		expect(planReport.ctes.length).toBeGreaterThanOrEqual(1);
+		expect(planReport.ctes[0]?.name).toContain('products');
+
+		// Compile should produce WITH clause
+		const compiled = compile(planReport, q2Schema, kysely);
+
+		// Validate SQL contains WITH
+		expect(compiled.sql.toLowerCase()).toContain('with');
+		expect(compiled.sql.toLowerCase()).toContain('cte_products');
+	});
+
+	it('should not generate WITH clause when no CTEs', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'categories',
+		};
+
+		const planReport = plan(intent, q2Schema);
+
+		// No CTEs
+		expect(planReport.ctes).toHaveLength(0);
+
+		// Compile should not have WITH
+		const compiled = compile(planReport, q2Schema, kysely);
+		expect(compiled.sql.toLowerCase()).not.toContain('with');
+	});
+
+	it('should include CTE in dump output', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'categories',
+			include: [{ relation: 'products' }, { relation: 'products' }],
+		};
+
+		const dump = createDump(intent, q2Schema, kysely, {
+			queryName: 'Q2-CategoryCoverage',
+			enableCTEs: true,
+		});
+
+		// Should have CTE decision
+		const cteDecision = dump.plan.decisions.find(
+			(d) => d.type === 'cte-extraction',
+		);
+		expect(cteDecision).toBeDefined();
+
+		// SQL should have WITH
+		expect(dump.sql.toLowerCase()).toContain('with');
+	});
+
+	it('should apply schema prefix to CTE target table', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'categories',
+			include: [{ relation: 'products' }, { relation: 'products' }],
+		};
+
+		const planReport = plan(intent, q2Schema, { enableCTEs: true });
+		const compiled = compile(planReport, q2Schema, kysely, 'tenant_acme');
+
+		// CTE definition should have schema prefix
+		expect(compiled.sql).toContain('tenant_acme');
+	});
+
+	it('should create cte-extraction decision', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'categories',
+			include: [{ relation: 'products' }, { relation: 'products' }],
+		};
+
+		const planReport = plan(intent, q2Schema, { enableCTEs: true });
+
+		const cteDecision = planReport.decisions.find(
+			(d) => d.type === 'cte-extraction',
+		);
+		expect(cteDecision).toBeDefined();
+		expect(cteDecision?.reasoning).toContain('accessed 2 times');
 	});
 });
 

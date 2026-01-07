@@ -72,4 +72,10 @@ export interface CompileOptions {
 
 	/** Correlation ID for tracing */
 	readonly correlationId?: string;
+
+	/** Enable CTE extraction for repeated relation access */
+	readonly enableCTEs?: boolean;
+
+	/** Minimum access count to trigger CTE extraction (default: 2) */
+	readonly cteThreshold?: number;
 }

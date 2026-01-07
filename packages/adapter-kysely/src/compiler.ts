@@ -53,8 +53,11 @@ export function compile(
 	const rootAlias = getNextAlias(state);
 	state.tableAliases.set(rootTable, rootAlias);
 
-	// Build the base query
-	let query = buildBaseQuery(intent, rootAlias, kysely, schemaName);
+	// Build CTEs first (must come before selectFrom in Kysely)
+	const builder = buildCTEs(plan, model, kysely, schemaName);
+
+	// Build the base query using the CTE-enhanced builder
+	let query = buildBaseQuery(intent, rootAlias, builder, schemaName);
 
 	// Add WHERE clause
 	if (intent.where) {
@@ -77,11 +80,6 @@ export function compile(
 	// Add OFFSET
 	if (intent.offset !== undefined) {
 		query = query.offset(intent.offset);
-	}
-
-	// Wrap with CTEs if needed
-	if (plan.ctes.length > 0) {
-		query = addCTEs(query, plan, model, kysely, state);
 	}
 
 	return query.compile();
@@ -390,29 +388,56 @@ function compileRelationFilter(
 // CTE Compilation
 // ============================================================================
 
-function addCTEs(
+/**
+ * Build CTEs before the main query using Kysely's .with() method.
+ *
+ * Returns a builder that can be used to construct the main SELECT.
+ * CTEs are generated for relations that are accessed multiple times.
+ */
+function buildCTEs(
+	plan: PlanReport,
+	model: ModelIR,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-	query: SelectQueryBuilder<any, any, any>,
-	_plan: PlanReport,
-	_model: ModelIR,
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-	_kysely: Kysely<any>,
-	_state: CompilerState,
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-): SelectQueryBuilder<any, any, any> {
-	// For now, CTEs are informational in the plan
-	// The actual CTE generation would require more complex query restructuring
-	// This is a placeholder that adds a comment about CTEs
+	kysely: Kysely<any>,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Returns Kysely or WithSchemaBuilder
+): any {
+	if (plan.ctes.length === 0) {
+		return kysely;
+	}
 
-	// In a full implementation, we would:
-	// 1. Extract the common subquery from plan.ctes
-	// 2. Use Kysely's .with() to add CTEs
-	// 3. Reference CTEs in the main query
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic CTE building
+	let builder: any = kysely;
 
-	// For MVP, we'll handle simple cases where CTEs are detected but not extracted
-	// The plan.ctes array tells us what SHOULD be extracted
+	for (const cte of plan.ctes) {
+		// Parse sourceIntent to get source table and relation
+		// Format: "sourceTable.relationName"
+		const parts = cte.sourceIntent.split('.');
+		const sourceTable = parts[0];
+		const relationName = parts[1];
 
-	return query;
+		if (!sourceTable || !relationName) {
+			continue;
+		}
+
+		// Get the relation to find target table
+		const relation = model.getRelation(`${sourceTable}.${relationName}`);
+		if (!relation) {
+			continue;
+		}
+
+		// Build CTE: SELECT * FROM targetTable
+		const targetTable = schemaName
+			? `${schemaName}.${relation.target}`
+			: relation.target;
+
+		// biome-ignore lint/suspicious/noExplicitAny: Dynamic table name requires any
+		builder = builder.with(cte.name, (db: Kysely<any>) =>
+			db.selectFrom(targetTable).selectAll(),
+		);
+	}
+
+	return builder;
 }
 
 // ============================================================================
