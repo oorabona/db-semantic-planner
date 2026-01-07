@@ -1,9 +1,11 @@
 /**
  * @module stream
  * Streaming/cursor support for large result set iteration.
+ * DIALECT-001: Capability-gated streaming
  */
 
 import { CompiledQuery, type Kysely } from 'kysely';
+import { detectDialect, getCapabilities } from './dialect.js';
 import type { Dump } from './types.js';
 
 // ============================================================================
@@ -57,12 +59,31 @@ export class MissingDependencyError extends Error {
 export class UnsupportedOperationError extends Error {
 	readonly operation: string;
 	readonly reason: string;
+	readonly capability?: string;
+	readonly dialect?: string;
 
-	constructor(operation: string, reason: string) {
-		super(`Operation '${operation}' not supported: ${reason}`);
+	constructor(
+		operation: string,
+		reason: string,
+		options?: { capability?: string; dialect?: string },
+	) {
+		const dialectInfo = options?.dialect ? `\nDetected dialect: ${options.dialect}` : '';
+		const capabilityInfo = options?.capability
+			? `\nRequired capability: '${options.capability}'`
+			: '';
+		super(
+			`Operation '${operation}' not supported: ${reason}${capabilityInfo}${dialectInfo}`,
+		);
 		this.name = 'UnsupportedOperationError';
 		this.operation = operation;
 		this.reason = reason;
+		// Conditional assignment for exactOptionalPropertyTypes
+		if (options?.capability !== undefined) {
+			this.capability = options.capability;
+		}
+		if (options?.dialect !== undefined) {
+			this.dialect = options.dialect;
+		}
 		Object.setPrototypeOf(this, UnsupportedOperationError.prototype);
 	}
 }
@@ -190,13 +211,47 @@ export async function* streamRawQuery<T = unknown>(
  */
 export function supportsStreaming(
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
-	_db: Kysely<any>,
+	db: Kysely<any>,
 ): boolean {
-	// This is a best-effort check - actual support depends on:
-	// 1. PostgreSQL dialect
-	// 2. pg-cursor installed and configured
-	//
-	// For now, we assume streaming is supported and let errors
-	// propagate with helpful messages at runtime
-	return true;
+	// Check dialect capability
+	const caps = getCapabilities(db);
+	return caps.supportsStreaming;
+}
+
+/**
+ * Assert that streaming is supported by the current dialect.
+ * Throws UnsupportedOperationError if not supported.
+ *
+ * @param db - Kysely instance to check
+ * @throws {UnsupportedOperationError} If streaming is not supported
+ */
+export function assertStreamingSupported(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	db: Kysely<any>,
+): void {
+	const caps = getCapabilities(db);
+	if (!caps.supportsStreaming) {
+		const dialect = detectDialect(db);
+		const guidance = getStreamingGuidance(dialect);
+		throw new UnsupportedOperationError('stream', guidance, {
+			capability: 'supportsStreaming',
+			dialect,
+		});
+	}
+}
+
+/**
+ * Get dialect-specific guidance for streaming not being supported.
+ */
+function getStreamingGuidance(dialect: string): string {
+	switch (dialect) {
+		case 'mysql':
+			return 'MySQL does not support cursor-based streaming. Use pagination with LIMIT/OFFSET instead.';
+		case 'sqlite':
+			return 'SQLite does not support cursor-based streaming. Use pagination with LIMIT/OFFSET instead.';
+		case 'mssql':
+			return 'MSSQL does not support cursor-based streaming. Use pagination with OFFSET/FETCH instead.';
+		default:
+			return 'The detected dialect does not support cursor-based streaming. Use pagination instead.';
+	}
 }

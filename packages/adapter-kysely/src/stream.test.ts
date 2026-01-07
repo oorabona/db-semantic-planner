@@ -6,6 +6,7 @@
 import type { Kysely } from 'kysely';
 import { describe, expect, it, vi } from 'vitest';
 import {
+	assertStreamingSupported,
 	MissingDependencyError,
 	streamQuery,
 	streamRawQuery,
@@ -13,6 +14,33 @@ import {
 	UnsupportedOperationError,
 } from './stream.js';
 import type { Dump } from './types.js';
+
+// ============================================================================
+// Dialect-Aware Mock Helpers
+// ============================================================================
+
+/**
+ * Create a mock Kysely instance with a specific adapter name for dialect detection.
+ */
+function createMockDbWithDialect(
+	adapterName: string,
+	rows: unknown[] = [],
+): Kysely<unknown> {
+	const mockResult = { rows };
+	return {
+		selectFrom: vi.fn().mockReturnThis(),
+		dynamic: {
+			ref: vi.fn().mockReturnValue('users'),
+		},
+		getExecutor: vi.fn().mockReturnValue({
+			adapter: {
+				constructor: { name: adapterName },
+			},
+			provideConnection: vi.fn().mockResolvedValue({}),
+		}),
+		executeQuery: vi.fn().mockResolvedValue(mockResult),
+	} as unknown as Kysely<unknown>;
+}
 
 // ============================================================================
 // Test Fixtures
@@ -318,15 +346,172 @@ describe('streamRawQuery', () => {
 });
 
 // ============================================================================
-// supportsStreaming Tests
+// supportsStreaming Tests (DIALECT-001)
 // ============================================================================
 
 describe('supportsStreaming', () => {
-	it('should return true (best-effort check)', () => {
-		const db = createMockDb([]);
+	describe('Feature: Capability-gated streaming', () => {
+		describe('Scenario: PostgreSQL supports streaming', () => {
+			it('Given PostgresDialect, When supportsStreaming is called, Then returns true', () => {
+				const db = createMockDbWithDialect('PostgresDialectAdapter');
 
-		const result = supportsStreaming(db);
+				const result = supportsStreaming(db);
 
-		expect(result).toBe(true);
+				expect(result).toBe(true);
+			});
+		});
+
+		describe('Scenario: MySQL does not support streaming', () => {
+			it('Given MysqlDialect, When supportsStreaming is called, Then returns false', () => {
+				const db = createMockDbWithDialect('MysqlDialectAdapter');
+
+				const result = supportsStreaming(db);
+
+				expect(result).toBe(false);
+			});
+		});
+
+		describe('Scenario: SQLite does not support streaming', () => {
+			it('Given SqliteDialect, When supportsStreaming is called, Then returns false', () => {
+				const db = createMockDbWithDialect('SqliteDialectAdapter');
+
+				const result = supportsStreaming(db);
+
+				expect(result).toBe(false);
+			});
+		});
+
+		describe('Scenario: MSSQL does not support streaming', () => {
+			it('Given MssqlDialect, When supportsStreaming is called, Then returns false', () => {
+				const db = createMockDbWithDialect('MssqlDialectAdapter');
+
+				const result = supportsStreaming(db);
+
+				expect(result).toBe(false);
+			});
+		});
+
+		describe('Scenario: Unknown dialect defaults to no streaming', () => {
+			it('Given unknown dialect, When supportsStreaming is called, Then returns false', () => {
+				const db = createMockDbWithDialect('CustomDialectAdapter');
+
+				const result = supportsStreaming(db);
+
+				expect(result).toBe(false);
+			});
+		});
+	});
+});
+
+// ============================================================================
+// assertStreamingSupported Tests (DIALECT-001)
+// ============================================================================
+
+describe('assertStreamingSupported', () => {
+	describe('Feature: Streaming capability guard', () => {
+		describe('Scenario: PostgreSQL passes assertion', () => {
+			it('Given PostgresDialect, When assertStreamingSupported is called, Then does not throw', () => {
+				const db = createMockDbWithDialect('PostgresDialectAdapter');
+
+				expect(() => assertStreamingSupported(db)).not.toThrow();
+			});
+		});
+
+		describe('Scenario: MySQL fails assertion with guidance', () => {
+			it('Given MysqlDialect, When assertStreamingSupported is called, Then throws UnsupportedOperationError', () => {
+				const db = createMockDbWithDialect('MysqlDialectAdapter');
+
+				expect(() => assertStreamingSupported(db)).toThrow(
+					UnsupportedOperationError,
+				);
+			});
+
+			it('should include MySQL-specific guidance', () => {
+				const db = createMockDbWithDialect('MysqlDialectAdapter');
+
+				try {
+					assertStreamingSupported(db);
+					expect.fail('Should have thrown');
+				} catch (error) {
+					expect(error).toBeInstanceOf(UnsupportedOperationError);
+					const e = error as UnsupportedOperationError;
+					expect(e.operation).toBe('stream');
+					expect(e.capability).toBe('supportsStreaming');
+					expect(e.dialect).toBe('mysql');
+					expect(e.message).toContain('MySQL');
+					expect(e.message).toContain('LIMIT/OFFSET');
+				}
+			});
+		});
+
+		describe('Scenario: SQLite fails assertion with guidance', () => {
+			it('Given SqliteDialect, When assertStreamingSupported is called, Then throws UnsupportedOperationError', () => {
+				const db = createMockDbWithDialect('SqliteDialectAdapter');
+
+				expect(() => assertStreamingSupported(db)).toThrow(
+					UnsupportedOperationError,
+				);
+			});
+
+			it('should include SQLite-specific guidance', () => {
+				const db = createMockDbWithDialect('SqliteDialectAdapter');
+
+				try {
+					assertStreamingSupported(db);
+					expect.fail('Should have thrown');
+				} catch (error) {
+					expect(error).toBeInstanceOf(UnsupportedOperationError);
+					const e = error as UnsupportedOperationError;
+					expect(e.operation).toBe('stream');
+					expect(e.capability).toBe('supportsStreaming');
+					expect(e.dialect).toBe('sqlite');
+					expect(e.message).toContain('SQLite');
+				}
+			});
+		});
+
+		describe('Scenario: MSSQL fails assertion with guidance', () => {
+			it('Given MssqlDialect, When assertStreamingSupported is called, Then throws UnsupportedOperationError', () => {
+				const db = createMockDbWithDialect('MssqlDialectAdapter');
+
+				expect(() => assertStreamingSupported(db)).toThrow(
+					UnsupportedOperationError,
+				);
+			});
+
+			it('should include MSSQL-specific guidance', () => {
+				const db = createMockDbWithDialect('MssqlDialectAdapter');
+
+				try {
+					assertStreamingSupported(db);
+					expect.fail('Should have thrown');
+				} catch (error) {
+					expect(error).toBeInstanceOf(UnsupportedOperationError);
+					const e = error as UnsupportedOperationError;
+					expect(e.operation).toBe('stream');
+					expect(e.dialect).toBe('mssql');
+					expect(e.message).toContain('MSSQL');
+					expect(e.message).toContain('OFFSET/FETCH');
+				}
+			});
+		});
+
+		describe('Scenario: Unknown dialect fails with generic guidance', () => {
+			it('Given unknown dialect, When assertStreamingSupported is called, Then throws with generic guidance', () => {
+				const db = createMockDbWithDialect('CustomDialectAdapter');
+
+				try {
+					assertStreamingSupported(db);
+					expect.fail('Should have thrown');
+				} catch (error) {
+					expect(error).toBeInstanceOf(UnsupportedOperationError);
+					const e = error as UnsupportedOperationError;
+					expect(e.operation).toBe('stream');
+					expect(e.capability).toBe('supportsStreaming');
+					expect(e.dialect).toBe('unknown');
+					expect(e.message).toContain('pagination');
+				}
+			});
+		});
 	});
 });

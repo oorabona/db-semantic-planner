@@ -2,11 +2,13 @@
  * @module explain.test
  * Tests for EXPLAIN/ANALYZE support.
  * ADAPTER-004: Enhanced Observability
+ * DIALECT-001: Multi-dialect EXPLAIN syntax
  *
  * Note: These tests use mocked Kysely to test the explain() function
  * without requiring a real PostgreSQL database.
  */
 
+import type { Kysely } from 'kysely';
 import { CompiledQuery } from 'kysely';
 import { describe, expect, it } from 'vitest';
 import { explain } from './explain.js';
@@ -23,6 +25,29 @@ function createTestCompiledQuery(
 	params: unknown[] = [],
 ): CompiledQuery {
 	return CompiledQuery.raw(sqlStr, params);
+}
+
+/**
+ * Create a mock Kysely instance with a specific adapter name.
+ */
+function createMockDb(
+	adapterName: string,
+	mockExecuteQuery?: (query: CompiledQuery) => Promise<{ rows: unknown[] }>,
+): Kysely<unknown> {
+	const defaultExecuteQuery = async () => ({
+		rows: [{ 'QUERY PLAN': 'Mock plan' }],
+	});
+
+	return {
+		getExecutor: () => ({
+			adapter: {
+				constructor: {
+					name: adapterName,
+				},
+			},
+		}),
+		executeQuery: mockExecuteQuery ?? defaultExecuteQuery,
+	} as unknown as Kysely<unknown>;
 }
 
 // ============================================================================
@@ -106,6 +131,164 @@ describe('explain', () => {
 			};
 
 			expect(analyzeResult.executionTime).toBe(1.234);
+		});
+	});
+});
+
+// ============================================================================
+// Dialect-specific EXPLAIN syntax tests (DIALECT-001)
+// ============================================================================
+
+describe('dialect-specific EXPLAIN syntax', () => {
+	describe('Feature: EXPLAIN Dialect Adaptation', () => {
+		describe('Scenario: EXPLAIN on PostgreSQL uses PostgreSQL syntax', () => {
+			it('Given a compiled query and PostgresDialect, When explain with format: json is called, Then SQL starts with EXPLAIN (FORMAT JSON)', async () => {
+				// Given
+				const compiled = createTestCompiledQuery();
+				let capturedSql = '';
+				const db = createMockDb('PostgresDialectAdapter', async (query) => {
+					capturedSql = query.sql;
+					return { rows: [{ 'QUERY PLAN': '[]' }] };
+				});
+
+				// When
+				await explain(compiled, db, { format: 'json' });
+
+				// Then
+				expect(capturedSql).toMatch(/^EXPLAIN \(FORMAT JSON\)/);
+			});
+
+			it('should use ANALYZE inside parentheses for PostgreSQL', async () => {
+				const compiled = createTestCompiledQuery();
+				let capturedSql = '';
+				const db = createMockDb('PostgresDialectAdapter', async (query) => {
+					capturedSql = query.sql;
+					return { rows: [{ 'QUERY PLAN': '[]' }] };
+				});
+
+				await explain(compiled, db, { analyze: true, format: 'json' });
+
+				expect(capturedSql).toMatch(/^EXPLAIN \(ANALYZE, FORMAT JSON\)/);
+			});
+
+			it('should support COSTS OFF option', async () => {
+				const compiled = createTestCompiledQuery();
+				let capturedSql = '';
+				const db = createMockDb('PostgresDialectAdapter', async (query) => {
+					capturedSql = query.sql;
+					return { rows: [{ 'QUERY PLAN': 'Mock plan' }] };
+				});
+
+				await explain(compiled, db, { costs: false });
+
+				expect(capturedSql).toContain('COSTS OFF');
+			});
+
+			it('should support BUFFERS option', async () => {
+				const compiled = createTestCompiledQuery();
+				let capturedSql = '';
+				const db = createMockDb('PostgresDialectAdapter', async (query) => {
+					capturedSql = query.sql;
+					return { rows: [{ 'QUERY PLAN': 'Mock plan' }] };
+				});
+
+				await explain(compiled, db, { analyze: true, buffers: true });
+
+				expect(capturedSql).toContain('BUFFERS');
+			});
+		});
+
+		describe('Scenario: EXPLAIN on MySQL uses MySQL syntax', () => {
+			it('Given a compiled query and MysqlDialect, When explain with format: json is called, Then SQL uses EXPLAIN FORMAT=JSON', async () => {
+				// Given
+				const compiled = createTestCompiledQuery();
+				let capturedSql = '';
+				const db = createMockDb('MysqlDialectAdapter', async (query) => {
+					capturedSql = query.sql;
+					return { rows: [{ plan: '{}' }] };
+				});
+
+				// When
+				await explain(compiled, db, { format: 'json' });
+
+				// Then
+				expect(capturedSql).toMatch(/^EXPLAIN FORMAT=JSON/);
+			});
+
+			it('should use EXPLAIN ANALYZE for MySQL 8.0.18+', async () => {
+				const compiled = createTestCompiledQuery();
+				let capturedSql = '';
+				const db = createMockDb('MysqlDialectAdapter', async (query) => {
+					capturedSql = query.sql;
+					return { rows: [{ plan: '{}' }] };
+				});
+
+				await explain(compiled, db, { analyze: true });
+
+				expect(capturedSql).toMatch(/^EXPLAIN ANALYZE/);
+			});
+
+			it('should combine ANALYZE and FORMAT for MySQL', async () => {
+				const compiled = createTestCompiledQuery();
+				let capturedSql = '';
+				const db = createMockDb('MysqlDialectAdapter', async (query) => {
+					capturedSql = query.sql;
+					return { rows: [{ plan: '{}' }] };
+				});
+
+				await explain(compiled, db, { analyze: true, format: 'json' });
+
+				expect(capturedSql).toMatch(/^EXPLAIN ANALYZE FORMAT=JSON/);
+			});
+		});
+
+		describe('Scenario: EXPLAIN on SQLite uses EXPLAIN QUERY PLAN', () => {
+			it('Given a compiled query and SqliteDialect, When explain is called, Then SQL uses EXPLAIN QUERY PLAN', async () => {
+				// Given
+				const compiled = createTestCompiledQuery();
+				let capturedSql = '';
+				const db = createMockDb('SqliteDialectAdapter', async (query) => {
+					capturedSql = query.sql;
+					return { rows: [{ id: 0, parent: 0, detail: 'SCAN users' }] };
+				});
+
+				// When
+				await explain(compiled, db);
+
+				// Then
+				expect(capturedSql).toMatch(/^EXPLAIN QUERY PLAN/);
+			});
+
+			it('should always use EXPLAIN QUERY PLAN regardless of options', async () => {
+				const compiled = createTestCompiledQuery();
+				let capturedSql = '';
+				const db = createMockDb('SqliteDialectAdapter', async (query) => {
+					capturedSql = query.sql;
+					return { rows: [{ id: 0, parent: 0, detail: 'SCAN users' }] };
+				});
+
+				// Even with analyze: true, SQLite uses EXPLAIN QUERY PLAN
+				await explain(compiled, db, { analyze: true, format: 'json' });
+
+				expect(capturedSql).toMatch(/^EXPLAIN QUERY PLAN/);
+			});
+		});
+
+		describe('Scenario: Unknown dialect defaults to PostgreSQL syntax', () => {
+			it('should use PostgreSQL syntax for unknown dialects', async () => {
+				const compiled = createTestCompiledQuery();
+				let capturedSql = '';
+				const db = createMockDb('CustomDialectAdapter', async (query) => {
+					capturedSql = query.sql;
+					// Return valid JSON for json format
+					return { rows: [{ 'QUERY PLAN': '[]' }] };
+				});
+
+				await explain(compiled, db, { format: 'json' });
+
+				// Unknown defaults to PostgreSQL syntax
+				expect(capturedSql).toMatch(/^EXPLAIN \(FORMAT JSON\)/);
+			});
 		});
 	});
 });

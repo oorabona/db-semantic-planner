@@ -16,11 +16,20 @@
 | Strict Mode | dx | P1 | ✅ Complete |
 | Compat Layer | dx | P1 | ✅ Complete |
 | E2E PostgreSQL Validation | testing | P1 | ✅ Complete |
-| Multi-dialect Capabilities | adapter | P2 | :red_circle: Not started |
+| Multi-dialect Capabilities | adapter | P2 | 🟡 In Progress |
 
 ## In Progress
 
-(none)
+### DIALECT-001: Multi-dialect Capabilities 🟡
+
+**Spec:** [docs/specs/DIALECT-001-multi-dialect-capabilities.md](docs/specs/DIALECT-001-multi-dialect-capabilities.md)
+**Backlog:** [TODO_ADAPTER.md](TODO_ADAPTER.md)
+
+- [ ] 🟡 Block 1: DialectCapabilities interface and detection
+- [ ] Block 2: Multi-tenant capability guard
+- [ ] Block 3: EXPLAIN dialect adaptation
+- [ ] Block 4: Streaming capability guard
+- [ ] Block 5: Test helpers
 
 ### Golden Tests (MVP Contract) - ✅ COMPLETE
 
@@ -76,12 +85,7 @@
 
 ### Multi-dialect Support (`packages/adapter-kysely`)
 
-- [ ] DialectCapabilities interface
-- [ ] PostgreSQL capability profile (baseline)
-- [ ] MySQL capability profile
-- [ ] SQLite capability profile
-- [ ] Capability-gated strategy selection
-- [ ] Cross-dialect acceptance test suite
+See **DIALECT-001** in "In Progress" section above.
 
 ### Additional Adapters
 
@@ -101,7 +105,11 @@
   - Adapter: GROUP BY clause generation in compiler
   - DX: groupBy() method on QueryBuilder
   - 5 new tests
-- [ ] Streaming/cursor support
+- [x] ✅ Streaming/cursor support (2026-01-07) — STREAMING-001
+  - Adapter: streamQuery(), streamRawQuery(), supportsStreaming()
+  - DX: stream() method on QueryBuilder with onStart callback
+  - E2E: 14 streaming tests
+  - Error classes: MissingDependencyError, UnsupportedOperationError
 
 ## Completed
 

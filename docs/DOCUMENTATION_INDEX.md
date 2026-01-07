@@ -13,7 +13,7 @@ doc-meta:
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
 
-**Status:** MVP ✅ Complete + P1 ✅ Complete + P2 Streaming ✅ (354 unit + 87 E2E = 441 tests)
+**Status:** MVP ✅ Complete + P1 ✅ Complete + P2 ✅ Complete (444 unit + 87 E2E = 531 tests)
 
 ## Architecture: Ports & Adapters
 
@@ -57,6 +57,7 @@ packages/dx            → Depends on core + adapter-kysely
 | DX-004 | dump()/execute() API | dx | ✅ in E2E-001 |
 | E2E-001 | [PostgreSQL Validation](specs/E2E-001-postgresql-validation.md) | testing | ✅ canonical |
 | STREAMING-001 | [Cursor/Streaming Support](specs/STREAMING-001-cursor-support.md) | adapter, dx | ✅ canonical |
+| DIALECT-001 | [Multi-dialect Capabilities](specs/DIALECT-001-multi-dialect-capabilities.md) | adapter | ✅ canonical |
 
 ## Golden Query Tests (MVP Contract) - ✅ Complete
 
@@ -112,12 +113,14 @@ packages/dx            → Depends on core + adapter-kysely
 - Parameter redaction for logs
 - Drizzle-like compat helpers (eq/and/or, findMany/findFirst)
 
-### P2 - Multi-Dialect
+### P2 - Multi-Dialect ✅ Complete
 
-- DialectCapabilities interface
-- Capability-gated strategy selection
-- MySQL, SQLite, MSSQL profiles
-- Cross-dialect acceptance suite
+- ✅ **DIALECT-001**: Multi-dialect Capabilities ([spec](specs/DIALECT-001-multi-dialect-capabilities.md))
+  - DialectCapabilities interface and detection (42 tests)
+  - Multi-tenant capability guard (14 tests)
+  - EXPLAIN dialect adaptation (10 tests)
+  - Streaming capability guard (12 tests)
+  - Cross-dialect test helpers (12 tests)
 
 ## MVP Non-Goals
 

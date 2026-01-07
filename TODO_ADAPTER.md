@@ -1,7 +1,7 @@
 # Adapter Scope Backlog (`packages/adapter-kysely`)
 
 **Package:** `packages/adapter-kysely`
-**Phase:** MVP ✅ Complete, P1 (enhancements), P2 (multi-dialect)
+**Phase:** MVP ✅ Complete, P1 ✅ Complete, P2 ✅ Complete
 **Dependencies:** `packages/core`, `kysely` (peer)
 
 ## Architecture Constraint
@@ -25,28 +25,42 @@ MUST NOT import from: packages/dx
 
 ## Pending - P2
 
-### Multi-dialect Capabilities
-
-- [ ] DialectCapabilities interface
-  - supportsCTE, supportsExplain, supportsWithSchema
-  - supportsLateralJson, supportsTransactionalDdl
-  - supportsReturning, supportsNullsFirstLast
-- [ ] PostgreSQL capability profile (baseline)
-  - All capabilities: true
-- [ ] MySQL capability profile
-  - supportsWithSchema: false (uses database switching)
-  - supportsLateralJson: false
-- [ ] SQLite capability profile
-  - supportsWithSchema: false
-  - supportsReturning: false (until 3.35)
-- [ ] Capability-gated strategy selection
-  - if (caps.supportsLateralJson) use lateral-json-agg
-  - else use separate-queries
-- [ ] Cross-dialect acceptance test suite
+(none)
 
 ---
 
 ## Completed - MVP ✅
+
+### DIALECT-001: Multi-dialect Capabilities - 90 new tests ✅ (2026-01-07)
+
+**Spec:** [docs/specs/DIALECT-001-multi-dialect-capabilities.md](docs/specs/DIALECT-001-multi-dialect-capabilities.md)
+
+- [x] ✅ Block 1: DialectCapabilities interface and detection
+  - DialectCapabilities interface
+  - DialectName type
+  - detectDialect(), getCapabilities() functions
+  - Predefined profiles (PostgreSQL, MySQL, SQLite, MSSQL, Unknown)
+  - 42 tests
+- [x] ✅ Block 2: Multi-tenant capability guard
+  - assertCapability() helper function
+  - UnsupportedOperationError with capability/dialect context
+  - Default guidance messages per capability/dialect
+  - 14 new tests
+- [x] ✅ Block 3: EXPLAIN dialect adaptation
+  - PostgreSQL: EXPLAIN (FORMAT JSON)
+  - MySQL: EXPLAIN FORMAT=JSON syntax
+  - SQLite: EXPLAIN QUERY PLAN
+  - 10 new tests
+- [x] ✅ Block 4: Streaming capability guard
+  - supportsStreaming() uses dialect capabilities
+  - assertStreamingSupported() function
+  - Dialect-specific guidance (MySQL, SQLite, MSSQL, unknown)
+  - 12 new tests
+- [x] ✅ Block 5: Test helpers
+  - getDialectName() for display in tests
+  - skipIfMissingCapability() for conditional test skipping
+  - withMockedCapabilities() for mock db creation
+  - 12 new tests
 
 ### STREAMING-001: Cursor/Streaming Support - 20 adapter tests ✅ (2026-01-07)
 

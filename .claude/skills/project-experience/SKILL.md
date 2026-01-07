@@ -9,7 +9,8 @@ description: Project-specific patterns, gotchas, and learnings for db-semantic-p
 
 **Vision:** Semantic query planning for databases - intent-first approach
 **Generated:** 2026-01-06
-**Phase:** MVP in progress
+**Updated:** 2026-01-07
+**Phase:** P2 Complete (Multi-dialect capabilities)
 
 ## Architecture: Ports & Adapters
 
@@ -116,7 +117,52 @@ transformResult(args) {
 }
 ```
 
-### 5. Multi-tenant Schema Validation
+### 5. Kysely Dialect Detection via Internals
+
+**Problem:** Need to detect database dialect at runtime to adapt SQL generation without requiring explicit configuration.
+
+**Solution:** Access Kysely's internal adapter name:
+
+```typescript
+function detectDialect(db: Kysely<unknown>): DialectName {
+  const adapter = db.getExecutor?.()?.adapter;
+  const adapterName = adapter?.constructor?.name?.toLowerCase() ?? '';
+
+  if (adapterName.includes('postgres')) return 'postgresql';
+  if (adapterName.includes('mysql')) return 'mysql';
+  if (adapterName.includes('sqlite')) return 'sqlite';
+  if (adapterName.includes('mssql')) return 'mssql';
+  return 'unknown';
+}
+```
+
+**Why this works:** Kysely stores dialect-specific adapters internally. The adapter class name reliably indicates the dialect.
+
+**Gotcha:** This relies on Kysely internals - changes between Kysely versions could break detection. Test helpers can mock this structure for unit tests.
+
+### 6. exactOptionalPropertyTypes Compatibility
+
+**Problem:** TypeScript's `exactOptionalPropertyTypes` flag causes errors when conditionally assigning optional properties with undefined values.
+
+**Solution:** Use conditional assignment instead of always assigning:
+
+```typescript
+// BAD: Fails with exactOptionalPropertyTypes
+constructor(options?: { capability?: string }) {
+  this.capability = options?.capability; // Error if undefined
+}
+
+// GOOD: Conditional assignment
+constructor(options?: { capability?: string }) {
+  if (options?.capability !== undefined) {
+    this.capability = options.capability;
+  }
+}
+```
+
+**When to apply:** Any class or interface with optional properties where the compiler complains about undefined assignment.
+
+### 7. Multi-tenant Schema Validation
 
 **Problem:** Raw schema names in SQL = injection risk.
 

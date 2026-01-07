@@ -2,18 +2,39 @@
  * @module explain
  * EXPLAIN/ANALYZE support for query plan analysis.
  * ADAPTER-004: Enhanced Observability
+ * DIALECT-001: Multi-dialect EXPLAIN syntax
  */
 
 import { CompiledQuery, type Kysely } from 'kysely';
+import { type DialectName, detectDialect } from './dialect.js';
 import type { ExplainOptions, ExplainResult } from './types.js';
 
 /**
- * Build EXPLAIN SQL prefix based on options.
+ * Build EXPLAIN SQL prefix based on options and dialect.
  */
-function buildExplainPrefix(options: ExplainOptions): string {
-	const parts: string[] = ['EXPLAIN'];
+function buildExplainPrefix(
+	options: ExplainOptions,
+	dialect: DialectName,
+): string {
+	switch (dialect) {
+		case 'postgresql':
+			return buildPostgresExplainPrefix(options);
+		case 'mysql':
+			return buildMysqlExplainPrefix(options);
+		case 'sqlite':
+			return buildSqliteExplainPrefix(options);
+		default:
+			// Default to PostgreSQL syntax for unknown dialects
+			return buildPostgresExplainPrefix(options);
+	}
+}
 
-	// Collect option clauses
+/**
+ * Build PostgreSQL EXPLAIN prefix.
+ * Syntax: EXPLAIN [(option, ...)] statement
+ */
+function buildPostgresExplainPrefix(options: ExplainOptions): string {
+	const parts: string[] = ['EXPLAIN'];
 	const optionClauses: string[] = [];
 
 	if (options.analyze) {
@@ -41,6 +62,41 @@ function buildExplainPrefix(options: ExplainOptions): string {
 	}
 
 	return parts.join(' ');
+}
+
+/**
+ * Build MySQL EXPLAIN prefix.
+ * Syntax: EXPLAIN [FORMAT=format_type] statement
+ * Note: MySQL's EXPLAIN doesn't support ANALYZE as an option like PostgreSQL.
+ *       MySQL 8.0.18+ has EXPLAIN ANALYZE but with different syntax.
+ */
+function buildMysqlExplainPrefix(options: ExplainOptions): string {
+	const parts: string[] = ['EXPLAIN'];
+
+	// MySQL 8.0.18+ supports EXPLAIN ANALYZE but it works differently
+	if (options.analyze) {
+		parts.push('ANALYZE');
+	}
+
+	if (options.format && options.format !== 'text') {
+		// MySQL uses FORMAT=JSON syntax (no space after FORMAT)
+		parts.push(`FORMAT=${options.format.toUpperCase()}`);
+	}
+
+	return parts.join(' ');
+}
+
+/**
+ * Build SQLite EXPLAIN prefix.
+ * Syntax: EXPLAIN QUERY PLAN statement
+ * Note: SQLite doesn't support ANALYZE as part of EXPLAIN.
+ *       SQLite returns a simpler tree structure, not JSON.
+ */
+function buildSqliteExplainPrefix(options: ExplainOptions): string {
+	// SQLite only has EXPLAIN and EXPLAIN QUERY PLAN
+	// EXPLAIN shows VM opcodes, EXPLAIN QUERY PLAN shows query plan
+	// For our purposes, EXPLAIN QUERY PLAN is more useful
+	return 'EXPLAIN QUERY PLAN';
 }
 
 /**
@@ -99,7 +155,9 @@ export async function explain(
 	db: Kysely<any>,
 	options: ExplainOptions = {},
 ): Promise<ExplainResult> {
-	const prefix = buildExplainPrefix(options);
+	// Detect dialect for appropriate EXPLAIN syntax
+	const dialect = detectDialect(db);
+	const prefix = buildExplainPrefix(options, dialect);
 
 	// Build EXPLAIN query by prepending prefix to the compiled query
 	const explainSql = `${prefix} ${compiled.sql}`;
