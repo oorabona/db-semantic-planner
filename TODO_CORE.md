@@ -19,30 +19,6 @@
 
 ## Pending - MVP
 
-### CORE-003: Semantic Planner
-
-- [ ] :red_circle: [HIGH] PlanReport interface
-  - rootTable, decisions, warnings, ctes
-- [ ] PlanDecision interface
-  - id, type, context, choice, reasoning, alternatives
-- [ ] PlanWarning interface
-  - code, message, suggestion
-- [ ] CTEDefinition interface
-  - name, purpose, referencedBy
-- [ ] :red_circle: [HIGH] EXISTS vs JOIN decision engine
-  - Default to EXISTS for to-many (avoids row explosion)
-  - Enables Q1 golden test
-- [ ] LEFT vs INNER join inference
-  - Based on cardinality + optionality + filters
-- [ ] :red_circle: [HIGH] CTE extraction logic
-  - Detect alias reuse (same subquery multiple times)
-  - Extract to CTE, reference by name
-  - Enables Q2 golden test
-- [ ] Ambiguity detection
-  - Multiple relations to same target
-  - Return options array for DX layer
-  - Enables Q3 golden test (throws in dx)
-
 ### Query Builder API
 
 - [ ] query() function accepting model reference
@@ -99,6 +75,36 @@
   - field, direction, nulls
 - [x] ✅ Type guards for all WhereIntent kinds
 - [x] ✅ 35 unit tests
+
+### CORE-003: Semantic Planner ([spec](docs/specs/CORE-003-semantic-planner.md))
+
+- [x] ✅ PlanReport interface
+  - rootTable, decisions, warnings, ctes, intent, metadata
+- [x] ✅ PlanDecision interface
+  - id, type, context, choice, reasoning, alternatives
+- [x] ✅ PlanWarning interface
+  - code (AMBIGUOUS_RELATION, POTENTIAL_ROW_EXPLOSION, CIRCULAR_INCLUDE, DEEP_NESTING), message, suggestion
+- [x] ✅ CTEDefinition interface
+  - name, purpose, referencedBy, sourceIntent
+- [x] ✅ PlanOptions interface
+  - forceFilterStrategy, forceJoinType, enableCTEs, cteThreshold, maxIncludeDepth, disambiguate
+- [x] ✅ EXISTS vs JOIN decision engine
+  - Default to EXISTS for to-many (avoids row explosion)
+  - Enables Q1 golden test
+- [x] ✅ LEFT vs INNER join inference
+  - Based on cardinality + optionality + filters
+- [x] ✅ Include strategy (JOIN vs separate query)
+  - JOIN for to-one, separate for to-many
+- [x] ✅ CTE extraction logic
+  - Detect relation reuse (same relation accessed multiple times)
+  - Extract to CTE with threshold control
+  - Enables Q2 golden test
+- [x] ✅ Ambiguity detection
+  - Multiple relations to same target
+  - AmbiguousPlanError with options array
+  - Via hint and disambiguate option support
+  - Enables Q3 golden test
+- [x] ✅ 29 unit tests covering Q1, Q2, Q3 scenarios
 
 ## Blocked / Deferred
 

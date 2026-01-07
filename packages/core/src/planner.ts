@@ -1,0 +1,875 @@
+/**
+ * @module planner
+ * Semantic Planner - Decision engine for query planning.
+ * Transforms QueryIntent + ModelIR into PlanReport with strategic decisions.
+ */
+
+import type { IncludeIntent, QueryIntent, WhereIntent } from './intent-ast.js';
+import type { ModelIR, RelationIR } from './model-ir.js';
+
+// ============================================================================
+// Decision Types
+// ============================================================================
+
+/**
+ * Decision types made by the planner
+ */
+export type DecisionType =
+	| 'filter-strategy'
+	| 'join-type'
+	| 'include-strategy'
+	| 'cte-extraction'
+	| 'ambiguity';
+
+/**
+ * A single planning decision with full reasoning
+ */
+export interface PlanDecision {
+	/** Unique identifier for the decision */
+	readonly id: string;
+
+	/** Type of decision */
+	readonly type: DecisionType;
+
+	/** Context: what triggered this decision */
+	readonly context: {
+		/** Source table in the decision */
+		readonly sourceTable: string;
+		/** Target table or relation name */
+		readonly target?: string;
+		/** Relation name if applicable */
+		readonly relation?: string;
+		/** Intent path (e.g., "where.exists.posts") */
+		readonly intentPath?: string;
+	};
+
+	/** The choice made */
+	readonly choice: string;
+
+	/** Human-readable reasoning */
+	readonly reasoning: string;
+
+	/** Other options that were available */
+	readonly alternatives: readonly string[];
+}
+
+// ============================================================================
+// Warning Types
+// ============================================================================
+
+/**
+ * Warning codes for planning issues
+ */
+export type PlanWarningCode =
+	| 'AMBIGUOUS_RELATION'
+	| 'POTENTIAL_ROW_EXPLOSION'
+	| 'CIRCULAR_INCLUDE'
+	| 'MISSING_INDEX_HINT'
+	| 'DEEP_NESTING';
+
+/**
+ * A warning about the query plan
+ */
+export interface PlanWarning {
+	/** Warning code for programmatic handling */
+	readonly code: PlanWarningCode;
+
+	/** Human-readable message */
+	readonly message: string;
+
+	/** Suggested action to resolve */
+	readonly suggestion?: string;
+
+	/** Related decision ID if applicable */
+	readonly relatedDecision?: string;
+}
+
+// ============================================================================
+// CTE Types
+// ============================================================================
+
+/**
+ * CTE definition for extracted subqueries
+ */
+export interface CTEDefinition {
+	/** CTE name (used in WITH clause) */
+	readonly name: string;
+
+	/** Purpose of this CTE */
+	readonly purpose: string;
+
+	/** Which query parts reference this CTE */
+	readonly referencedBy: readonly string[];
+
+	/** The intent fragment this CTE represents */
+	readonly sourceIntent: string;
+}
+
+// ============================================================================
+// Plan Report
+// ============================================================================
+
+/**
+ * Complete plan report
+ */
+export interface PlanReport {
+	/** Root table for the query */
+	readonly rootTable: string;
+
+	/** All decisions made during planning */
+	readonly decisions: readonly PlanDecision[];
+
+	/** Warnings about the plan */
+	readonly warnings: readonly PlanWarning[];
+
+	/** CTEs to be extracted */
+	readonly ctes: readonly CTEDefinition[];
+
+	/** Original intent (for reference) */
+	readonly intent: QueryIntent;
+
+	/** Planning metadata */
+	readonly metadata: {
+		/** Planning duration in ms */
+		readonly planningTimeMs: number;
+		/** Number of relations traversed */
+		readonly relationsAnalyzed: number;
+		/** Whether the plan is ambiguous */
+		readonly isAmbiguous: boolean;
+		/** Ambiguous relation options (if isAmbiguous) */
+		readonly ambiguousOptions?: readonly string[];
+	};
+}
+
+// ============================================================================
+// Plan Options
+// ============================================================================
+
+/**
+ * Planning options for customization
+ */
+export interface PlanOptions {
+	/**
+	 * Force a specific filter strategy (overrides auto-detection)
+	 */
+	forceFilterStrategy?: 'exists' | 'join';
+
+	/**
+	 * Force a specific join type (overrides auto-detection)
+	 */
+	forceJoinType?: 'left' | 'inner';
+
+	/**
+	 * Enable CTE extraction for repeated subqueries
+	 * @default true
+	 */
+	enableCTEs?: boolean;
+
+	/**
+	 * Threshold for CTE extraction (min references)
+	 * @default 2
+	 */
+	cteThreshold?: number;
+
+	/**
+	 * Maximum include depth before warning
+	 * @default 5
+	 */
+	maxIncludeDepth?: number;
+
+	/**
+	 * Disambiguation hints for ambiguous relations
+	 * Map of "sourceTable.targetTable" -> relation name
+	 */
+	disambiguate?: Record<string, string>;
+}
+
+// ============================================================================
+// Errors
+// ============================================================================
+
+/**
+ * Error thrown when plan cannot be created due to ambiguity
+ */
+export class AmbiguousPlanError extends Error {
+	readonly sourceTable: string;
+	readonly targetTable: string;
+	readonly options: readonly string[];
+
+	constructor(
+		sourceTable: string,
+		targetTable: string,
+		options: readonly string[],
+	) {
+		super(
+			`Ambiguous relation from "${sourceTable}" to "${targetTable}". ` +
+				`Use "via" to specify one of: ${options.join(', ')}`,
+		);
+		this.name = 'AmbiguousPlanError';
+		this.sourceTable = sourceTable;
+		this.targetTable = targetTable;
+		this.options = options;
+	}
+}
+
+// ============================================================================
+// Planner State (Internal)
+// ============================================================================
+
+interface PlannerState {
+	decisions: PlanDecision[];
+	warnings: PlanWarning[];
+	ctes: CTEDefinition[];
+	relationsAnalyzed: number;
+	decisionCounters: Record<DecisionType, number>;
+	relationAccessCounts: Map<string, string[]>; // relation path -> intent paths
+	visitedIncludes: Set<string>; // For circular detection
+}
+
+// ============================================================================
+// Planner Implementation
+// ============================================================================
+
+/**
+ * Create a query plan from an intent and model
+ */
+export function plan(
+	intent: QueryIntent,
+	model: ModelIR,
+	options: PlanOptions = {},
+): PlanReport {
+	const startTime = performance.now();
+
+	const state: PlannerState = {
+		decisions: [],
+		warnings: [],
+		ctes: [],
+		relationsAnalyzed: 0,
+		decisionCounters: {
+			'filter-strategy': 0,
+			'join-type': 0,
+			'include-strategy': 0,
+			'cte-extraction': 0,
+			ambiguity: 0,
+		},
+		relationAccessCounts: new Map(),
+		visitedIncludes: new Set(),
+	};
+
+	const opts: Required<PlanOptions> = {
+		forceFilterStrategy: options.forceFilterStrategy as 'exists' | 'join',
+		forceJoinType: options.forceJoinType as 'left' | 'inner',
+		enableCTEs: options.enableCTEs ?? true,
+		cteThreshold: options.cteThreshold ?? 2,
+		maxIncludeDepth: options.maxIncludeDepth ?? 5,
+		disambiguate: options.disambiguate ?? {},
+	};
+
+	// Validate root table
+	const rootTable = model.getTable(intent.from);
+	if (!rootTable) {
+		throw new Error(`Unknown table: ${intent.from}`);
+	}
+
+	// Process where clause
+	if (intent.where) {
+		processWhere(intent.where, intent.from, model, state, opts, 'where');
+	}
+
+	// Process includes
+	if (intent.include) {
+		for (let i = 0; i < intent.include.length; i++) {
+			const inc = intent.include[i];
+			if (inc) {
+				processInclude(
+					inc,
+					intent.from,
+					model,
+					state,
+					opts,
+					`include[${i}]`,
+					0,
+				);
+			}
+		}
+	}
+
+	// Extract CTEs if enabled
+	if (opts.enableCTEs) {
+		extractCTEs(state, opts.cteThreshold);
+	}
+
+	const planningTimeMs = performance.now() - startTime;
+
+	// Check for overall ambiguity
+	const ambiguousDecision = state.decisions.find(
+		(d) => d.type === 'ambiguity' && d.choice === 'unresolved',
+	);
+
+	const metadata: PlanReport['metadata'] = ambiguousDecision
+		? Object.freeze({
+				planningTimeMs,
+				relationsAnalyzed: state.relationsAnalyzed,
+				isAmbiguous: true,
+				ambiguousOptions: ambiguousDecision.alternatives as readonly string[],
+			})
+		: Object.freeze({
+				planningTimeMs,
+				relationsAnalyzed: state.relationsAnalyzed,
+				isAmbiguous: false,
+			});
+
+	const report: PlanReport = {
+		rootTable: intent.from,
+		decisions: Object.freeze([...state.decisions]),
+		warnings: Object.freeze([...state.warnings]),
+		ctes: Object.freeze([...state.ctes]),
+		intent,
+		metadata,
+	};
+
+	return Object.freeze(report);
+}
+
+// ============================================================================
+// Where Processing
+// ============================================================================
+
+function processWhere(
+	where: WhereIntent,
+	sourceTable: string,
+	model: ModelIR,
+	state: PlannerState,
+	opts: Required<PlanOptions>,
+	intentPath: string,
+): void {
+	switch (where.kind) {
+		case 'exists':
+		case 'notExists':
+			processRelationFilter(
+				where.relation,
+				sourceTable,
+				model,
+				state,
+				opts,
+				`${intentPath}.${where.kind}`,
+				where.where,
+			);
+			break;
+
+		case 'relationFilter':
+			processRelationFilter(
+				where.relation,
+				sourceTable,
+				model,
+				state,
+				opts,
+				`${intentPath}.relationFilter`,
+				where.where,
+				where.mode,
+			);
+			break;
+
+		case 'and':
+			for (let i = 0; i < where.conditions.length; i++) {
+				const cond = where.conditions[i];
+				if (cond) {
+					processWhere(
+						cond,
+						sourceTable,
+						model,
+						state,
+						opts,
+						`${intentPath}.and[${i}]`,
+					);
+				}
+			}
+			break;
+
+		case 'or':
+			for (let i = 0; i < where.conditions.length; i++) {
+				const cond = where.conditions[i];
+				if (cond) {
+					processWhere(
+						cond,
+						sourceTable,
+						model,
+						state,
+						opts,
+						`${intentPath}.or[${i}]`,
+					);
+				}
+			}
+			break;
+
+		case 'not':
+			processWhere(
+				where.condition,
+				sourceTable,
+				model,
+				state,
+				opts,
+				`${intentPath}.not`,
+			);
+			break;
+
+		// Scalar conditions don't need relation analysis
+		case 'comparison':
+		case 'like':
+		case 'in':
+		case 'null':
+			// No relation analysis needed
+			break;
+	}
+}
+
+function processRelationFilter(
+	relationName: string,
+	sourceTable: string,
+	model: ModelIR,
+	state: PlannerState,
+	opts: Required<PlanOptions>,
+	intentPath: string,
+	nestedWhere?: WhereIntent,
+	mode?: 'some' | 'every' | 'none',
+): void {
+	state.relationsAnalyzed++;
+
+	// Find the relation
+	const relation = resolveRelation(
+		relationName,
+		sourceTable,
+		model,
+		state,
+		opts,
+		intentPath,
+	);
+
+	if (!relation) {
+		return; // Error already added to warnings or exception thrown
+	}
+
+	// Track relation access for CTE extraction
+	const relationPath = `${sourceTable}.${relation.name}`;
+	const paths = state.relationAccessCounts.get(relationPath) ?? [];
+	paths.push(intentPath);
+	state.relationAccessCounts.set(relationPath, paths);
+
+	// Determine filter strategy
+	const filterStrategy = determineFilterStrategy(
+		relation,
+		opts,
+		mode ?? 'some',
+	);
+
+	const decisionId = generateDecisionId(state, 'filter-strategy');
+	state.decisions.push({
+		id: decisionId,
+		type: 'filter-strategy',
+		context: {
+			sourceTable,
+			target: relation.target,
+			relation: relation.name,
+			intentPath,
+		},
+		choice: filterStrategy,
+		reasoning: generateFilterReasoning(relation, filterStrategy, mode),
+		alternatives: filterStrategy === 'exists' ? ['join'] : ['exists'],
+	});
+
+	// Check for potential row explosion warning
+	if (filterStrategy === 'join' && relation.cardinality === 'many') {
+		state.warnings.push({
+			code: 'POTENTIAL_ROW_EXPLOSION',
+			message: `Using JOIN on to-many relation "${relation.name}" may cause row multiplication`,
+			suggestion: `Consider using EXISTS strategy for relation "${relation.name}"`,
+			relatedDecision: decisionId,
+		});
+	}
+
+	// Process nested where if present
+	if (nestedWhere) {
+		processWhere(
+			nestedWhere,
+			relation.target,
+			model,
+			state,
+			opts,
+			`${intentPath}.where`,
+		);
+	}
+}
+
+// ============================================================================
+// Include Processing
+// ============================================================================
+
+function processInclude(
+	include: IncludeIntent,
+	sourceTable: string,
+	model: ModelIR,
+	state: PlannerState,
+	opts: Required<PlanOptions>,
+	intentPath: string,
+	depth: number,
+): void {
+	state.relationsAnalyzed++;
+
+	// Check depth
+	if (depth > opts.maxIncludeDepth) {
+		state.warnings.push({
+			code: 'DEEP_NESTING',
+			message: `Include depth ${depth} exceeds maximum ${opts.maxIncludeDepth}`,
+			suggestion: 'Consider flattening the query or increasing maxIncludeDepth',
+		});
+	}
+
+	// Use via hint if provided, otherwise use relation name
+	const relationName = include.via ?? include.relation;
+
+	// Resolve the relation
+	const relation = resolveRelation(
+		relationName,
+		sourceTable,
+		model,
+		state,
+		opts,
+		intentPath,
+		include.via,
+	);
+
+	if (!relation) {
+		return;
+	}
+
+	// Check for circular includes
+	const includePath = `${sourceTable}.${relation.name}`;
+	if (state.visitedIncludes.has(includePath)) {
+		state.warnings.push({
+			code: 'CIRCULAR_INCLUDE',
+			message: `Circular include detected: ${includePath}`,
+			suggestion: 'Remove circular include to prevent infinite recursion',
+		});
+		return;
+	}
+	state.visitedIncludes.add(includePath);
+
+	// Track relation access for CTE extraction
+	const relationPath = `${sourceTable}.${relation.name}`;
+	const paths = state.relationAccessCounts.get(relationPath) ?? [];
+	paths.push(intentPath);
+	state.relationAccessCounts.set(relationPath, paths);
+
+	// Determine include strategy
+	const includeStrategy = determineIncludeStrategy(relation, opts);
+	const includeDecisionId = generateDecisionId(state, 'include-strategy');
+
+	state.decisions.push({
+		id: includeDecisionId,
+		type: 'include-strategy',
+		context: {
+			sourceTable,
+			target: relation.target,
+			relation: relation.name,
+			intentPath,
+		},
+		choice: includeStrategy,
+		reasoning: generateIncludeReasoning(relation, includeStrategy),
+		alternatives: includeStrategy === 'join' ? ['separate'] : ['join'],
+	});
+
+	// Determine join type (only if using join strategy)
+	if (includeStrategy === 'join') {
+		const hasFilter = !!include.where;
+		const joinType = determineJoinType(relation, opts, hasFilter);
+		const joinDecisionId = generateDecisionId(state, 'join-type');
+
+		state.decisions.push({
+			id: joinDecisionId,
+			type: 'join-type',
+			context: {
+				sourceTable,
+				target: relation.target,
+				relation: relation.name,
+				intentPath,
+			},
+			choice: joinType,
+			reasoning: generateJoinReasoning(relation, joinType, hasFilter),
+			alternatives: joinType === 'left' ? ['inner'] : ['left'],
+		});
+	}
+
+	// Process nested where
+	if (include.where) {
+		processWhere(
+			include.where,
+			relation.target,
+			model,
+			state,
+			opts,
+			`${intentPath}.where`,
+		);
+	}
+
+	// Process nested includes
+	if (include.include) {
+		for (let i = 0; i < include.include.length; i++) {
+			const nestedInc = include.include[i];
+			if (nestedInc) {
+				processInclude(
+					nestedInc,
+					relation.target,
+					model,
+					state,
+					opts,
+					`${intentPath}.include[${i}]`,
+					depth + 1,
+				);
+			}
+		}
+	}
+
+	// Remove from visited after processing (allow same relation at different depths)
+	state.visitedIncludes.delete(includePath);
+}
+
+// ============================================================================
+// Relation Resolution
+// ============================================================================
+
+function resolveRelation(
+	relationName: string,
+	sourceTable: string,
+	model: ModelIR,
+	state: PlannerState,
+	opts: Required<PlanOptions>,
+	_intentPath: string,
+	viaHint?: string,
+): RelationIR | undefined {
+	// Try direct lookup first
+	const directRelation = model.getRelation(`${sourceTable}.${relationName}`);
+	if (directRelation) {
+		return directRelation;
+	}
+
+	// Check if this might be a target table name (ambiguous case)
+	const relationsToTarget = model
+		.getRelationsFrom(sourceTable)
+		.filter((r) => r.target === relationName);
+
+	if (relationsToTarget.length === 0) {
+		// No relation found
+		state.warnings.push({
+			code: 'AMBIGUOUS_RELATION',
+			message: `Unknown relation "${relationName}" from table "${sourceTable}"`,
+			suggestion: `Check that the relation exists in the schema`,
+		});
+		return undefined;
+	}
+
+	if (relationsToTarget.length === 1) {
+		// Unambiguous - only one relation to target
+		return relationsToTarget[0];
+	}
+
+	// Multiple relations - need disambiguation
+	const options = relationsToTarget.map((r) => r.name);
+
+	// Check for via hint
+	if (viaHint) {
+		const resolved = relationsToTarget.find((r) => r.name === viaHint);
+		if (resolved) {
+			return resolved;
+		}
+	}
+
+	// Check disambiguate option
+	const disambiguateKey = `${sourceTable}.${relationName}`;
+	const disambiguated = opts.disambiguate[disambiguateKey];
+	if (disambiguated) {
+		const resolved = relationsToTarget.find((r) => r.name === disambiguated);
+		if (resolved) {
+			return resolved;
+		}
+	}
+
+	// Ambiguous - throw error
+	throw new AmbiguousPlanError(sourceTable, relationName, options);
+}
+
+// ============================================================================
+// Strategy Determination
+// ============================================================================
+
+function determineFilterStrategy(
+	relation: RelationIR,
+	opts: Required<PlanOptions>,
+	_mode: 'some' | 'every' | 'none',
+): 'exists' | 'join' {
+	// Forced strategy takes precedence
+	if (opts.forceFilterStrategy) {
+		return opts.forceFilterStrategy;
+	}
+
+	// Use relation hint if not auto
+	if (relation.filterStrategy !== 'auto') {
+		return relation.filterStrategy;
+	}
+
+	// Auto-determine based on cardinality and mode
+	if (relation.cardinality === 'one') {
+		return 'join';
+	}
+
+	// For cardinality 'many', EXISTS is generally better
+	// (avoids row explosion)
+	return 'exists';
+}
+
+function determineIncludeStrategy(
+	relation: RelationIR,
+	_opts: Required<PlanOptions>,
+): 'join' | 'separate' {
+	// Use relation hint if not auto
+	if (relation.includeStrategy !== 'auto') {
+		return relation.includeStrategy;
+	}
+
+	// Auto-determine based on cardinality
+	return relation.cardinality === 'one' ? 'join' : 'separate';
+}
+
+function determineJoinType(
+	relation: RelationIR,
+	opts: Required<PlanOptions>,
+	hasFilter: boolean,
+): 'left' | 'inner' {
+	// Forced join type takes precedence
+	if (opts.forceJoinType) {
+		return opts.forceJoinType;
+	}
+
+	// Use relation hint if not auto
+	if (relation.joinDefault !== 'auto') {
+		return relation.joinDefault;
+	}
+
+	// Auto-determine based on optionality and filter presence
+	if (relation.optionality === 'required') {
+		return 'inner';
+	}
+
+	// Optional relation with filter implies existence
+	if (hasFilter) {
+		return 'inner';
+	}
+
+	// Optional without filter -> LEFT to preserve parent rows
+	return 'left';
+}
+
+// ============================================================================
+// CTE Extraction
+// ============================================================================
+
+function extractCTEs(state: PlannerState, threshold: number): void {
+	for (const [relationPath, intentPaths] of state.relationAccessCounts) {
+		if (intentPaths.length >= threshold) {
+			const parts = relationPath.split('.');
+			const table = parts[0] ?? 'unknown';
+			const relation = parts[1] ?? 'unknown';
+			const cteName = `cte_${relation}`;
+
+			state.ctes.push({
+				name: cteName,
+				purpose: `${relation} relation accessed ${intentPaths.length} times`,
+				referencedBy: Object.freeze([...intentPaths]),
+				sourceIntent: relationPath,
+			});
+
+			const decisionId = generateDecisionId(state, 'cte-extraction');
+			state.decisions.push({
+				id: decisionId,
+				type: 'cte-extraction',
+				context: {
+					sourceTable: table,
+					relation,
+				},
+				choice: cteName,
+				reasoning: `Extracting ${relationPath} to CTE "${cteName}" because it is accessed ${intentPaths.length} times (threshold: ${threshold})`,
+				alternatives: ['inline'],
+			});
+		}
+	}
+}
+
+// ============================================================================
+// Utilities
+// ============================================================================
+
+function generateDecisionId(state: PlannerState, type: DecisionType): string {
+	state.decisionCounters[type]++;
+	const counter = state.decisionCounters[type].toString().padStart(3, '0');
+	return `${type.replace('-', '')}-${counter}`;
+}
+
+function generateFilterReasoning(
+	relation: RelationIR,
+	strategy: 'exists' | 'join',
+	mode?: 'some' | 'every' | 'none',
+): string {
+	const modeText = mode ? ` (mode: ${mode})` : '';
+
+	if (strategy === 'exists') {
+		return (
+			`Relation ${relation.source}.${relation.name} has cardinality "${relation.cardinality}"${modeText} - ` +
+			`using EXISTS to avoid row explosion`
+		);
+	}
+
+	return (
+		`Relation ${relation.source}.${relation.name} has cardinality "${relation.cardinality}"${modeText} - ` +
+		`using JOIN for efficient single-row access`
+	);
+}
+
+function generateIncludeReasoning(
+	relation: RelationIR,
+	strategy: 'join' | 'separate',
+): string {
+	if (strategy === 'join') {
+		return (
+			`Relation ${relation.source}.${relation.name} has cardinality "${relation.cardinality}" - ` +
+			`using JOIN for efficient single-row fetch`
+		);
+	}
+
+	return (
+		`Relation ${relation.source}.${relation.name} has cardinality "${relation.cardinality}" - ` +
+		`using separate query to avoid row multiplication`
+	);
+}
+
+function generateJoinReasoning(
+	relation: RelationIR,
+	joinType: 'left' | 'inner',
+	_hasFilter: boolean,
+): string {
+	if (joinType === 'inner') {
+		if (relation.optionality === 'required') {
+			return (
+				`Relation ${relation.source}.${relation.name} is required - ` +
+				`using INNER JOIN`
+			);
+		}
+		return (
+			`Relation ${relation.source}.${relation.name} has filter - ` +
+			`using INNER JOIN (filter implies existence)`
+		);
+	}
+
+	return (
+		`Relation ${relation.source}.${relation.name} is optional without filter - ` +
+		`using LEFT JOIN to preserve parent rows without matches`
+	);
+}

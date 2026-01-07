@@ -109,6 +109,27 @@ export {
 } from './schema-builder.js';
 
 // ============================================================================
+// Semantic Planner
+// ============================================================================
+
+export type {
+	// Plan types
+	CTEDefinition,
+	DecisionType,
+	PlanDecision,
+	PlanOptions,
+	PlanReport,
+	PlanWarning,
+	PlanWarningCode,
+} from './planner.js';
+export {
+	// Error
+	AmbiguousPlanError,
+	// Entry point
+	plan,
+} from './planner.js';
+
+// ============================================================================
 // Implementation (for advanced use cases)
 // ============================================================================
 
