@@ -13,7 +13,7 @@ doc-meta:
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
 
-**Status:** MVP ✅ Complete (152 tests)
+**Status:** MVP ✅ Complete + P1 (DX-001) (185 tests)
 
 ## Architecture: Ports & Adapters
 
@@ -51,7 +51,7 @@ packages/dx            → Depends on core + adapter-kysely
 | CORE-003 | [Semantic Planner](specs/CORE-003-semantic-planner.md) | core | ✅ canonical |
 | ADAPTER-001 | [Kysely Dump/Compile/Execute](specs/ADAPTER-001-kysely-dump-compile-execute.md) | adapter | ✅ canonical |
 | ADAPTER-002 | Multi-tenant | adapter | ✅ implemented (in ADAPTER-001) |
-| DX-001 | Strict Mode | dx | planned (P1) |
+| DX-001 | [Strict Mode](specs/DX-001-strict-mode.md) | dx | ✅ canonical |
 
 ## Golden Query Tests (MVP Contract) - ✅ Complete
 

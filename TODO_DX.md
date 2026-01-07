@@ -17,32 +17,20 @@ This is a LEAF package (nothing depends on it)
 
 (none)
 
+---
+
 ## Pending - P1
-
-### DX-001: Strict Mode
-
-- [ ] :red_circle: [HIGH] strictMode option in createOrm()
-- [ ] :red_circle: [HIGH] AmbiguousRelationError class
-  - message: "Ambiguous relation 'X' on Y. Available: [...]"
-  - options: string[] (available relation names)
-  - source: string (source table)
-  - target: string (target table hint)
-- [ ] :red_circle: [HIGH] Q3 golden test validation
-  - Throws when include('posts') with multiple relations to Post
-  - Error includes ['createdPosts', 'editedPosts']
-- [ ] Behavior matrix:
-  | Scenario | strictMode: true | strictMode: false |
-  |----------|------------------|-------------------|
-  | Ambiguous | Throws | Warn + use first |
-  | With via | Works | Works |
-  | Unambiguous | Works | Works |
 
 ### DX-002: Override API
 
+**Note:** Per-query `strictMode` override explicitly deferred here from DX-001.
+
+- [ ] Per-query `strictMode` override: `query.withStrictMode(true)`
 - [ ] include(relation, { via: 'relationName' })
   - Disambiguates which path to use
 - [ ] withRelationHint(targetTable, relationName)
   - Per-query default for a target
+- [ ] Global relation hints in `OrmOptions`
 - [ ] Integration with planner
   - Pass hints to planner, skip ambiguity error
 
@@ -80,7 +68,26 @@ This is a LEAF package (nothing depends on it)
 
 ## Completed
 
-(none)
+### DX-001: Strict Mode ✅ (2026-01-07)
+
+**Spec:** [docs/specs/DX-001-strict-mode.md](docs/specs/DX-001-strict-mode.md)
+
+#### Delivered
+
+- [x] ✅ `strictMode` option in `createOrm()` (default: false)
+- [x] ✅ `AmbiguousRelationError` class with:
+  - `sourceTable`, `targetTable`, `options` properties
+  - Proper `instanceof` support
+  - Disambiguation hint in message
+- [x] ✅ Behavior matrix:
+  | Scenario | strictMode: true | strictMode: false |
+  |----------|------------------|-------------------|
+  | Ambiguous | Throws `AmbiguousRelationError` | Warn + use first |
+  | With via | Works | Works |
+  | Unambiguous | Works | Works |
+- [x] ✅ `include({ via })` syntax for disambiguation
+- [x] ✅ 33 passing tests (9 BDD scenarios + additional edge cases)
+- [x] ✅ Integration verified: `pnpm -r test` and `pnpm -r typecheck` pass
 
 ## Blocked / Deferred
 
@@ -103,5 +110,6 @@ This is a LEAF package (nothing depends on it)
 ## Open Questions
 
 - [x] Should compat layer be a separate package? → **No, part of packages/dx**
-- [x] Strict mode: warn vs error? → **error in strict mode, warn otherwise**
+- [x] Strict mode: warn vs error? → **error in strict mode, warning in plan.warnings otherwise**
+- [x] Console.warn for lenient mode? → **No, use existing PlanReport.warnings**
 - [ ] Which Drizzle helpers to prioritize? → Start with eq/and/or/exists
