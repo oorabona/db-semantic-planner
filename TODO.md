@@ -11,36 +11,36 @@
 | Kysely Engine | adapter | MVP | ✅ Complete |
 | Multi-tenant (forTenant) | adapter | MVP | ✅ Complete |
 | Observability (dump) | adapter | MVP | ✅ Complete |
-| Golden Tests (Q1, Q2, Q3) | testing | MVP | :red_circle: Not started |
+| Golden Tests (Q1, Q2, Q3) | testing | MVP | 🟡 In Progress (Q1, Q3 done) |
 | Strict Mode | dx | P1 | :red_circle: Not started |
 | Compat Layer | dx | P1 | :red_circle: Not started |
 | Multi-dialect Capabilities | adapter | P2 | :red_circle: Not started |
 
 ## In Progress
 
-(none)
-
-## Pending - MVP (P0)
-
 ### Golden Tests (MVP Contract)
 
-- [ ] :red_circle: [HIGH] **Q1**: Filter to-many → EXISTS
+- [x] ✅ **Q1**: Filter to-many → EXISTS - 6 tests
   - Products with main image FR approved
   - Validates: filter-strategy = exists
   - SQL snapshot: SELECT ... WHERE EXISTS (...)
-- [ ] :red_circle: [HIGH] **Q2**: Coverage by category → CTE + ratio
+- [ ] 🔴 [HIGH] **Q2**: Coverage by category → CTE + ratio
   - Category coverage percentage
   - Validates: cte-extraction for alias reuse
   - SQL snapshot: WITH ... SELECT ... COUNT(DISTINCT ...) / NULLIF(...)
-- [ ] :red_circle: [HIGH] **Q3**: Strict mode ambiguity
+  - **Note:** CTE compilation not yet implemented in MVP
+- [x] ✅ **Q3**: Strict mode ambiguity - 7 tests
   - Include "posts" when multiple relations exist
-  - Validates: AmbiguousRelationError thrown with options
+  - Validates: AmbiguousPlanError thrown with options
+  - Disambiguation via `via` hint and `disambiguate` option
+
+## Pending - MVP (P0)
 
 ### Testing Setup
 
-- [ ] Vitest configuration
-- [ ] Test fixtures (Product, Category, User, Post models)
-- [ ] SQL snapshot testing utilities
+- [x] ✅ Vitest configuration (already configured)
+- [x] ✅ Test fixtures (Product, Category, User, Post models)
+- [ ] SQL snapshot testing utilities (optional enhancement)
 
 ## Pending - P1
 
@@ -100,6 +100,24 @@
   - Multi-tenant schema prefix support
   - Full WHERE clause compilation (comparison, like, in, null, and, or, not)
   - ORDER BY, LIMIT, OFFSET support
+- [x] ✅ **ADAPTER-002**: Multi-tenant support (forTenant)
+  - Schema prefix for all tables
+  - Included in ADAPTER-001 implementation
+- [x] ✅ **ADAPTER-003**: Observability (dump API)
+  - `createDump()`, `createDumpFromPlan()`, `formatDump()`
+  - Meta: tenant, queryName, correlationId, compiledAt
+  - Included in ADAPTER-001 implementation
+
+### Golden Tests (`packages/adapter-kysely`)
+
+- [x] ✅ **GOLDEN-Q1**: Filter to-many → EXISTS - 6 tests
+  - Products with FR main image approved
+  - Validates EXISTS subquery generation
+  - Tests schema prefix, cardinality detection
+- [x] ✅ **GOLDEN-Q3**: Strict mode ambiguity - 7 tests
+  - AmbiguousPlanError with options array
+  - Disambiguation via `via` hint
+  - Disambiguation via PlanOptions.disambiguate
 
 ## Blocked / Deferred
 

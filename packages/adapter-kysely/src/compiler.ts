@@ -246,7 +246,38 @@ function compileExists(
 ): any {
 	// Find the relation
 	const sourceTable = getTableFromAlias(state, sourceAlias) ?? plan.rootTable;
-	const relation = model.getRelation(`${sourceTable}.${where.relation}`);
+
+	// Try direct lookup first
+	let relation = model.getRelation(`${sourceTable}.${where.relation}`);
+
+	// If not found, check if planner resolved it to a different relation name
+	// This happens when disambiguate option is used
+	if (!relation) {
+		// Look for planner decision that resolved this relation
+		const decision = plan.decisions.find(
+			(d) =>
+				d.type === 'filter-strategy' &&
+				d.context.sourceTable === sourceTable &&
+				d.context.target === where.relation,
+		);
+		if (decision?.context.relation) {
+			relation = model.getRelation(
+				`${sourceTable}.${decision.context.relation}`,
+			);
+		}
+	}
+
+	// Also try to find relation by target table (for ambiguous cases resolved by planner)
+	if (!relation) {
+		const relationsFromSource = model.getRelationsFrom(sourceTable);
+		const byTarget = relationsFromSource.filter(
+			(r) => r.target === where.relation,
+		);
+		if (byTarget.length === 1) {
+			// Unambiguous - only one relation to target
+			relation = byTarget[0];
+		}
+	}
 
 	if (!relation) {
 		throw new CompilationError(
