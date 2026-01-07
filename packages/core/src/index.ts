@@ -33,6 +33,9 @@ export type {
 // ============================================================================
 
 export type {
+	// Aggregates
+	AggregateFunction,
+	AggregateIntent,
 	// Operators
 	ArrayOperator,
 	ComparisonOperator,
@@ -46,6 +49,7 @@ export type {
 	// Query
 	QueryIntent,
 	RelationOperator,
+	SelectAggregateIntent,
 	// Select
 	SelectAllIntent,
 	SelectFieldsIntent,
@@ -67,6 +71,7 @@ export type {
 } from './intent-ast.js';
 export {
 	// Type guards
+	isSelectAggregate,
 	isSelectAll,
 	isSelectFields,
 	isWhereAnd,

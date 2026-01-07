@@ -123,8 +123,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 	});
 
 	describe('EXISTS queries on relations', () => {
-		// TODO: EXISTS subqueries currently don't include schema prefix (known limitation)
-		it.todo('should find authors with published posts', async () => {
+		it('should find authors with published posts', async () => {
 			const db = await getTestDb();
 			const orm = createOrm({ model: blogModel, db });
 
@@ -143,7 +142,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 			expect(authorsWithPublished).toHaveLength(2);
 		});
 
-		it.todo('should find posts with comments', async () => {
+		it('should find posts with comments', async () => {
 			const db = await getTestDb();
 			const orm = createOrm({ model: blogModel, db });
 
@@ -202,8 +201,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 	});
 
 	describe('Combined filters', () => {
-		// TODO: EXISTS subqueries currently don't include schema prefix (known limitation)
-		it.todo('should combine entity filter with relation filter', async () => {
+		it('should combine entity filter with relation filter', async () => {
 			const db = await getTestDb();
 			const orm = createOrm({ model: blogModel, db });
 

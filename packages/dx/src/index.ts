@@ -41,6 +41,7 @@ export {
 export { createOrm } from './orm.js';
 // Types
 export type {
+	AggregateOptions,
 	IncludeOptions,
 	NestedInclude,
 	OrmInstance,

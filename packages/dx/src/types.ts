@@ -8,6 +8,20 @@ import type {
 import type { Kysely } from 'kysely';
 
 /**
+ * Options for aggregate functions.
+ */
+export interface AggregateOptions {
+	/**
+	 * Field to aggregate (required for SUM, AVG, MIN, MAX; optional for COUNT).
+	 */
+	readonly field?: string;
+	/**
+	 * Alias for the result column.
+	 */
+	readonly as?: string;
+}
+
+/**
  * Mapping of target table to preferred relation name.
  * Used to resolve ambiguous relations automatically.
  *
@@ -134,6 +148,82 @@ export interface QueryBuilder {
 	 * @returns A new QueryBuilder with the selection applied
 	 */
 	select(fields: readonly string[]): QueryBuilder;
+
+	/**
+	 * Count rows, optionally counting a specific field.
+	 *
+	 * @param options - Optional field to count and alias
+	 * @returns A new QueryBuilder configured for COUNT
+	 *
+	 * @example
+	 * ```typescript
+	 * // COUNT(*)
+	 * orm.query('users').count().execute();
+	 *
+	 * // COUNT(email) AS email_count
+	 * orm.query('users').count({ field: 'email', as: 'email_count' }).execute();
+	 * ```
+	 */
+	count(options?: AggregateOptions): QueryBuilder;
+
+	/**
+	 * Calculate sum of a field.
+	 *
+	 * @param field - Field to sum
+	 * @param as - Optional alias for result column
+	 * @returns A new QueryBuilder configured for SUM
+	 *
+	 * @example
+	 * ```typescript
+	 * orm.query('orders').sum('total', 'order_total').execute();
+	 * ```
+	 */
+	sum(field: string, as?: string): QueryBuilder;
+
+	/**
+	 * Calculate average of a field.
+	 *
+	 * @param field - Field to average
+	 * @param as - Optional alias for result column
+	 * @returns A new QueryBuilder configured for AVG
+	 */
+	avg(field: string, as?: string): QueryBuilder;
+
+	/**
+	 * Find minimum value of a field.
+	 *
+	 * @param field - Field to find minimum
+	 * @param as - Optional alias for result column
+	 * @returns A new QueryBuilder configured for MIN
+	 */
+	min(field: string, as?: string): QueryBuilder;
+
+	/**
+	 * Find maximum value of a field.
+	 *
+	 * @param field - Field to find maximum
+	 * @param as - Optional alias for result column
+	 * @returns A new QueryBuilder configured for MAX
+	 */
+	max(field: string, as?: string): QueryBuilder;
+
+	/**
+	 * Group results by specified fields.
+	 * Used with aggregate functions like count(), sum(), etc.
+	 *
+	 * @param fields - Fields to group by
+	 * @returns A new QueryBuilder with GROUP BY applied
+	 *
+	 * @example
+	 * ```typescript
+	 * // Count posts per author
+	 * orm.query('posts')
+	 *   .count({ as: 'post_count' })
+	 *   .groupBy(['authorId'])
+	 *   .execute();
+	 * ```
+	 */
+	groupBy(fields: readonly string[]): QueryBuilder;
 
 	/**
 	 * Filter the root entity records.
