@@ -15,5 +15,9 @@
 		"noImplicitOverride": true,
 		"exactOptionalPropertyTypes": true
 	},
-	"references": [{ "path": "./packages/core" }]
+	"references": [
+		{ "path": "./packages/core" },
+		{ "path": "./packages/adapter-kysely" },
+		{ "path": "./packages/dx" }
+	]
 }
