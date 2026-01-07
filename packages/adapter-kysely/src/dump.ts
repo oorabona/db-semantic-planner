@@ -11,7 +11,14 @@ import type {
 import { plan } from '@db-semantic-planner/core';
 import type { Kysely } from 'kysely';
 import { compile } from './compiler.js';
-import type { CompileOptions, Dump, DumpMeta } from './types.js';
+import { redactParams } from './redact.js';
+import type {
+	CompileOptions,
+	Dump,
+	DumpMeta,
+	FormatDumpJsonOptions,
+	JsonDump,
+} from './types.js';
 
 // ============================================================================
 // Dump API
@@ -171,4 +178,93 @@ export function formatDump(dump: Dump): string {
 	}
 
 	return lines.join('\n');
+}
+
+// ============================================================================
+// JSON Dump API (ADAPTER-004)
+// ============================================================================
+
+/**
+ * Format a Dump as structured JSON for log aggregation.
+ *
+ * Suitable for logging systems like Datadog, ELK, Splunk, etc.
+ *
+ * @param dump - The dump to format
+ * @param options - Formatting options including redaction settings
+ * @returns JSON string ready for logging
+ *
+ * @example
+ * ```ts
+ * const dump = createDump(intent, model, kysely, { correlationId: 'abc-123' });
+ *
+ * // Basic JSON output
+ * console.log(formatDumpJson(dump));
+ *
+ * // With parameter redaction
+ * console.log(formatDumpJson(dump, {
+ *   redact: true,
+ *   fieldHints: ['email', 'password', 'userId']
+ * }));
+ * ```
+ */
+export function formatDumpJson(
+	dump: Dump,
+	options: FormatDumpJsonOptions = {},
+): string {
+	const jsonDump = toJsonDump(dump, options);
+	return JSON.stringify(jsonDump);
+}
+
+/**
+ * Convert a Dump to a JsonDump object.
+ *
+ * Use this when you need the structured object without stringifying.
+ *
+ * @param dump - The dump to convert
+ * @param options - Conversion options
+ * @returns JsonDump object
+ */
+export function toJsonDump(
+	dump: Dump,
+	options: FormatDumpJsonOptions = {},
+): JsonDump {
+	// Handle parameter redaction
+	let params: readonly unknown[] = dump.params;
+	if (options.redact && options.fieldHints) {
+		params = redactParams(
+			dump.params,
+			options.fieldHints,
+			options.redactionOptions,
+		);
+	}
+
+	// Build decisions summary
+	const decisions = dump.plan.decisions.map((d) => ({
+		type: d.type,
+		choice: d.choice,
+	}));
+
+	// Build warnings list
+	const warnings = dump.plan.warnings.map((w) => w.message);
+
+	// Build JSON structure
+	const result: JsonDump = {
+		sql: dump.sql,
+		params,
+		rootTable: dump.plan.rootTable,
+		decisions,
+		warnings,
+		...(dump.meta?.tenant && { tenant: dump.meta.tenant }),
+		...(dump.meta?.queryName && { queryName: dump.meta.queryName }),
+		...(dump.meta?.correlationId && {
+			correlationId: dump.meta.correlationId,
+		}),
+		...(dump.meta?.compiledAt && {
+			compiledAt: dump.meta.compiledAt.toISOString(),
+		}),
+		...(dump.plan.ctes &&
+			dump.plan.ctes.length > 0 && { cteCount: dump.plan.ctes.length }),
+	};
+
+	return result;
 }

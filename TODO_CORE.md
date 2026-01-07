@@ -17,13 +17,9 @@
 
 (none)
 
-## Pending - P1 (Deferred to DX)
+## Pending - P1
 
-### Query Builder API (moved to packages/dx)
-
-- [ ] Fluent query() builder → DX-003
-- [ ] .select() / .where() / .include() chains → DX-003
-- [ ] findMany() / findFirst() shortcuts → DX-003
+(none - Query Builder API completed in DX-003)
 
 ---
 

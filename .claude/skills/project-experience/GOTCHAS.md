@@ -69,6 +69,29 @@ private clone(): QueryBuilderImpl {
 
 ---
 
+## Kysely
+
+### CompiledQuery.raw() for EXPLAIN Prefix (2026-01-07)
+
+**Issue:** Need to execute EXPLAIN on an already-compiled Kysely query without re-building from scratch.
+
+**Solution:** Use `CompiledQuery.raw(sql, params)` factory method to create a new CompiledQuery with modified SQL while preserving the original parameters.
+
+```typescript
+import { CompiledQuery } from 'kysely';
+
+const compiled = query.compile(); // Original query
+const explainSql = `EXPLAIN (FORMAT JSON) ${compiled.sql}`;
+const explainQuery = CompiledQuery.raw(explainSql, compiled.parameters as unknown[]);
+const result = await db.executeQuery(explainQuery);
+```
+
+**Key insight:** `CompiledQuery.raw()` is the proper way to construct arbitrary SQL that Kysely can execute while maintaining type safety at the execution layer.
+
+**Location:** `packages/adapter-kysely/src/explain.ts` lines 35-45
+
+---
+
 ## Architecture
 
 ### Ports and Adapters Strict Dependency Order (2026-01-07)

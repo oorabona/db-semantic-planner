@@ -51,6 +51,7 @@ packages/dx            → Depends on core + adapter-kysely
 | CORE-003 | [Semantic Planner](specs/CORE-003-semantic-planner.md) | core | ✅ canonical |
 | ADAPTER-001 | [Kysely Dump/Compile/Execute](specs/ADAPTER-001-kysely-dump-compile-execute.md) | adapter | ✅ canonical |
 | ADAPTER-002 | Multi-tenant | adapter | ✅ implemented (in ADAPTER-001) |
+| ADAPTER-004 | [Enhanced Observability](specs/ADAPTER-004-enhanced-observability.md) | adapter | 🟡 draft |
 | DX-001 | [Strict Mode](specs/DX-001-strict-mode.md) | dx | ✅ canonical |
 | DX-003 | [Compat Layer](specs/DX-003-compat-layer.md) | dx | ✅ canonical |
 

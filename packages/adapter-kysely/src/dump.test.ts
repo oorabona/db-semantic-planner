@@ -8,7 +8,14 @@ import {
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { describe, expect, it } from 'vitest';
-import { createDump, createDumpFromPlan, formatDump } from './dump.js';
+import {
+	createDump,
+	createDumpFromPlan,
+	formatDump,
+	formatDumpJson,
+	toJsonDump,
+} from './dump.js';
+import { REDACTED_PLACEHOLDER } from './types.js';
 
 // ============================================================================
 // Test Setup
@@ -229,6 +236,193 @@ describe('Dump API', () => {
 			const formatted = formatDump(dump);
 
 			expect(formatted).toContain('CorrelationId: trace-456');
+		});
+	});
+
+	// ============================================================================
+	// formatDumpJson Tests (ADAPTER-004)
+	// ============================================================================
+
+	describe('formatDumpJson', () => {
+		describe('Scenario 2.1: formatDumpJson returns valid JSON', () => {
+			it('should return valid JSON string', () => {
+				// Given
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+				};
+				const dump = createDump(intent, basicSchema, kysely, {
+					correlationId: 'abc-123',
+					queryName: 'findUsers',
+				});
+
+				// When
+				const result = formatDumpJson(dump);
+
+				// Then
+				expect(() => JSON.parse(result)).not.toThrow();
+			});
+		});
+
+		describe('Scenario 2.2: JSON includes all fields', () => {
+			it('should include sql, params, correlationId, queryName, decisions', () => {
+				// Given
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+					where: {
+						kind: 'comparison',
+						field: 'id',
+						operator: 'eq',
+						value: 42,
+					},
+				};
+				const dump = createDump(intent, basicSchema, kysely, {
+					correlationId: 'trace-789',
+					queryName: 'getUser',
+					tenant: 'acme',
+				});
+
+				// When
+				const result = JSON.parse(formatDumpJson(dump));
+
+				// Then
+				expect(result.sql).toContain('select');
+				expect(result.params).toContain(42);
+				expect(result.correlationId).toBe('trace-789');
+				expect(result.queryName).toBe('getUser');
+				expect(result.tenant).toBe('acme');
+				expect(result.rootTable).toBe('users');
+				expect(Array.isArray(result.decisions)).toBe(true);
+				expect(Array.isArray(result.warnings)).toBe(true);
+			});
+
+			it('should include compiledAt as ISO string', () => {
+				// Given
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+				};
+				const dump = createDump(intent, basicSchema, kysely, {
+					queryName: 'test',
+				});
+
+				// When
+				const result = JSON.parse(formatDumpJson(dump));
+
+				// Then
+				expect(result.compiledAt).toBeDefined();
+				expect(new Date(result.compiledAt).toISOString()).toBe(
+					result.compiledAt,
+				);
+			});
+		});
+
+		describe('Scenario 2.3: JSON decisions are summarized', () => {
+			it('should include decision type and choice only (no reasoning)', () => {
+				// Given - EXISTS intent triggers filter-strategy decision
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+					where: {
+						kind: 'exists',
+						relation: 'posts',
+					},
+				};
+				const dump = createDump(intent, basicSchema, kysely);
+
+				// When
+				const result = toJsonDump(dump);
+
+				// Then - decisions is array of {type, choice}
+				expect(result.decisions.length).toBeGreaterThan(0);
+				const decision = result.decisions[0];
+				expect(decision).toHaveProperty('type');
+				expect(decision).toHaveProperty('choice');
+				// Should NOT have reasoning (verbose mode only)
+				expect(decision).not.toHaveProperty('reasoning');
+			});
+		});
+
+		describe('Scenario 2.4: formatDumpJson with redaction option', () => {
+			it('should redact sensitive params when redact: true', () => {
+				// Given
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+					where: {
+						kind: 'and',
+						conditions: [
+							{
+								kind: 'comparison',
+								field: 'email',
+								operator: 'eq',
+								value: 'john@example.com',
+							},
+							{
+								kind: 'comparison',
+								field: 'password',
+								operator: 'eq',
+								value: 'secret123',
+							},
+						],
+					},
+				};
+				const dump = createDump(intent, basicSchema, kysely);
+
+				// When
+				const result = JSON.parse(
+					formatDumpJson(dump, {
+						redact: true,
+						fieldHints: ['email', 'password'],
+					}),
+				);
+
+				// Then - password is redacted, email is not
+				expect(result.params).toContain('john@example.com');
+				expect(result.params).toContain(REDACTED_PLACEHOLDER);
+				expect(result.params).not.toContain('secret123');
+			});
+
+			it('should NOT redact when redact: false', () => {
+				// Given
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+					where: {
+						kind: 'comparison',
+						field: 'password',
+						operator: 'eq',
+						value: 'secret123',
+					},
+				};
+				const dump = createDump(intent, basicSchema, kysely);
+
+				// When - redact is false (default)
+				const result = JSON.parse(formatDumpJson(dump));
+
+				// Then - value is NOT redacted
+				expect(result.params).toContain('secret123');
+			});
+		});
+
+		describe('toJsonDump', () => {
+			it('should return JsonDump object without stringifying', () => {
+				// Given
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+				};
+				const dump = createDump(intent, basicSchema, kysely);
+
+				// When
+				const result = toJsonDump(dump);
+
+				// Then - it's an object, not a string
+				expect(typeof result).toBe('object');
+				expect(result.sql).toBeDefined();
+				expect(result.rootTable).toBe('users');
+			});
 		});
 	});
 });

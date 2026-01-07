@@ -7,13 +7,39 @@
 
 // Compiler (low-level)
 export { compile } from './compiler.js';
+
 // Dump API (high-level observability)
-export { createDump, createDumpFromPlan, formatDump } from './dump.js';
+export {
+	createDump,
+	createDumpFromPlan,
+	formatDump,
+	formatDumpJson,
+	toJsonDump,
+} from './dump.js';
 // Errors
 export {
 	CompilationError,
 	InvalidIdentifierError,
 	NotFoundError,
 } from './errors.js';
+// EXPLAIN API (ADAPTER-004)
+export { explain } from './explain.js';
+// Redaction API (ADAPTER-004)
+export { redactParams } from './redact.js';
 // Types
-export type { CompileOptions, Dump, DumpMeta } from './types.js';
+// ADAPTER-004 Types
+export type {
+	CompileOptions,
+	Dump,
+	DumpMeta,
+	ExplainFormat,
+	ExplainOptions,
+	ExplainResult,
+	FormatDumpJsonOptions,
+	JsonDecision,
+	JsonDump,
+	RedactionOptions,
+} from './types.js';
+
+// ADAPTER-004 Constants
+export { DEFAULT_REDACTION_PATTERNS, REDACTED_PLACEHOLDER } from './types.js';

@@ -126,4 +126,4 @@ This is a LEAF package (nothing depends on it)
 - [x] Should compat layer be a separate package? → **No, part of packages/dx**
 - [x] Strict mode: warn vs error? → **error in strict mode, warning in plan.warnings otherwise**
 - [x] Console.warn for lenient mode? → **No, use existing PlanReport.warnings**
-- [ ] Which Drizzle helpers to prioritize? → Start with eq/and/or/exists
+- [x] Which Drizzle helpers to prioritize? → ✅ Implemented all 14 in DX-003

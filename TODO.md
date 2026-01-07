@@ -11,9 +11,10 @@
 | Kysely Engine | adapter | MVP | ✅ Complete |
 | Multi-tenant (forTenant) | adapter | MVP | ✅ Complete |
 | Observability (dump) | adapter | MVP | ✅ Complete |
+| Enhanced Observability | adapter | P1 | ✅ Complete |
 | Golden Tests (Q1, Q2, Q3) | testing | MVP | ✅ Complete |
 | Strict Mode | dx | P1 | ✅ Complete |
-| Compat Layer | dx | P1 | :red_circle: Not started |
+| Compat Layer | dx | P1 | ✅ Complete |
 | Multi-dialect Capabilities | adapter | P2 | :red_circle: Not started |
 
 ## In Progress
@@ -57,15 +58,18 @@
   - withRelationHint('target', 'relationName')
   - Global relation hints in OrmOptions
   - 21 tests passing
-- [ ] **DX-003**: Compat layer helpers
-  - eq(), and(), or(), gt(), lt(), like(), isNull(), inArray()
-  - findMany(), findFirst(), findFirstOrThrow()
+- [x] ✅ **DX-003**: Compat layer helpers (2026-01-07)
+  - 14 filter helpers: eq, neq, gt, gte, lt, lte, like, isNull, isNotNull, inArray, and, or, not, exists, notExists
+  - Execution: findMany(), findFirst(), findFirstOrThrow()
+  - Multi-tenant: forTenant() for schema scoping
+  - 106 tests passing
 
 ### Adapter Enhancements (P1)
 
-- [ ] explain() hook for EXPLAIN/ANALYZE
-- [ ] Structured logging with correlation IDs
-- [ ] Parameter redaction for logs (dump.meta.redactedParams)
+- [x] ✅ **ADAPTER-004**: Enhanced Observability (2026-01-07)
+  - explain() hook for EXPLAIN/ANALYZE
+  - Structured logging with correlation IDs (formatDumpJson)
+  - Parameter redaction for logs (redactParams)
 
 ## Pending - P2
 
@@ -111,6 +115,10 @@
   - `createDump()`, `createDumpFromPlan()`, `formatDump()`
   - Meta: tenant, queryName, correlationId, compiledAt
   - Included in ADAPTER-001 implementation
+- [x] ✅ **ADAPTER-004**: Enhanced Observability (2026-01-07) - 40 tests
+  - `explain()`: EXPLAIN/ANALYZE support (PostgreSQL)
+  - `formatDumpJson()`, `toJsonDump()`: Structured JSON logging
+  - `redactParams()`: Safe logging with sensitive data redaction
 
 ### Golden Tests (`packages/adapter-kysely`)
 

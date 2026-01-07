@@ -19,16 +19,7 @@ MUST NOT import from: packages/dx
 
 ## Pending - P1
 
-### Enhanced Observability
-
-- [ ] explain() method
-  - explain(options?: { analyze?: boolean }): Promise<ExplainResult>
-  - ExplainResult: { plan, executionTime?, rowsReturned? }
-- [ ] Structured logging
-  - Correlation ID propagation
-  - Query timing
-- [ ] Parameter redaction
-  - dump.meta.redactedParams for safe logging
+(none)
 
 ---
 
@@ -56,6 +47,22 @@ MUST NOT import from: packages/dx
 ---
 
 ## Completed - MVP ✅
+
+### ADAPTER-004: Enhanced Observability - 40 tests ✅ (2026-01-07)
+
+**Spec:** [docs/specs/ADAPTER-004-enhanced-observability.md](docs/specs/ADAPTER-004-enhanced-observability.md)
+
+- [x] ✅ `explain()` method for EXPLAIN/ANALYZE (PostgreSQL)
+  - ExplainOptions: analyze, format, costs, buffers, timing
+  - ExplainResult: plan, jsonPlan?, executionTime?
+- [x] ✅ `formatDumpJson()` for structured JSON logging
+  - Correlation ID propagation
+  - Datadog/ELK-ready format
+- [x] ✅ `toJsonDump()` for programmatic JSON access
+- [x] ✅ `redactParams()` for safe logging
+  - DEFAULT_REDACTION_PATTERNS: password, secret, token, key, auth, credential, api_key, apikey, private
+  - additionalPatterns, whitelist options
+  - Case-insensitive matching
 
 ### ADAPTER-001: Compile/Dump API - 59 tests
 
