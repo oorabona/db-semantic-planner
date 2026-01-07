@@ -29,6 +29,61 @@ export type {
 } from './model-ir.js';
 
 // ============================================================================
+// IntentAST Types
+// ============================================================================
+
+export type {
+	// Operators
+	ArrayOperator,
+	ComparisonOperator,
+	// Include
+	IncludeIntent,
+	LogicalOperator,
+	NullOperator,
+	NullsPosition,
+	// OrderBy
+	OrderByIntent,
+	// Query
+	QueryIntent,
+	RelationOperator,
+	// Select
+	SelectAllIntent,
+	SelectFieldsIntent,
+	SelectIntent,
+	SortDirection,
+	StringOperator,
+	// Where (filters)
+	WhereAndIntent,
+	WhereComparisonIntent,
+	WhereExistsIntent,
+	WhereInIntent,
+	WhereIntent,
+	WhereLikeIntent,
+	WhereNotExistsIntent,
+	WhereNotIntent,
+	WhereNullIntent,
+	WhereOrIntent,
+	WhereRelationFilterIntent,
+} from './intent-ast.js';
+export {
+	// Type guards
+	isSelectAll,
+	isSelectFields,
+	isWhereAnd,
+	isWhereComparison,
+	isWhereExists,
+	isWhereIn,
+	isWhereLike,
+	isWhereLogical,
+	isWhereNot,
+	isWhereNotExists,
+	isWhereNull,
+	isWhereOr,
+	isWhereRelationBased,
+	isWhereRelationFilter,
+} from './intent-ast.js';
+
+// ============================================================================
 // Schema Builder
 // ============================================================================
 
