@@ -728,4 +728,275 @@ describe('SQL Compiler', () => {
 			expect(compiled.sql).toContain('limit');
 		});
 	});
+
+	// ============================================================================
+	// Aggregate Tests
+	// ============================================================================
+
+	describe('Aggregates', () => {
+		it('should compile COUNT(*)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count' }],
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('count(*)');
+		});
+
+		it('should compile COUNT with field', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', field: 'email' }],
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('count(');
+			expect(compiled.sql).toContain('email');
+		});
+
+		it('should compile SUM', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'sum', field: 'id' }],
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('sum(');
+		});
+
+		it('should compile AVG', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'avg', field: 'id' }],
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('avg(');
+		});
+
+		it('should compile MIN', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'min', field: 'id' }],
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('min(');
+		});
+
+		it('should compile MAX', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'max', field: 'id' }],
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('max(');
+		});
+
+		it('should compile multiple aggregates', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [
+						{ function: 'count' },
+						{ function: 'min', field: 'id' },
+						{ function: 'max', field: 'id' },
+					],
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('count(*)');
+			expect(compiled.sql.toLowerCase()).toContain('min(');
+			expect(compiled.sql.toLowerCase()).toContain('max(');
+		});
+
+		it('should compile aggregate with alias', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', as: 'total_users' }],
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('count(*)');
+			expect(compiled.sql).toContain('total_users');
+		});
+
+		it('should compile aggregate with fields (for GROUP BY)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', as: 'post_count' }],
+					fields: ['userId'],
+				},
+				groupBy: ['userId'],
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('count(*)');
+			expect(compiled.sql).toContain('userId');
+			expect(compiled.sql.toLowerCase()).toContain('group by');
+		});
+	});
+
+	// ============================================================================
+	// GROUP BY Tests
+	// ============================================================================
+
+	describe('GROUP BY', () => {
+		it('should compile GROUP BY single field', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count' }],
+					fields: ['userId'],
+				},
+				groupBy: ['userId'],
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('group by');
+			expect(compiled.sql).toContain('userId');
+		});
+
+		it('should compile GROUP BY multiple fields', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count' }],
+					fields: ['userId', 'published'],
+				},
+				groupBy: ['userId', 'published'],
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('group by');
+			expect(compiled.sql).toContain('userId');
+			expect(compiled.sql).toContain('published');
+		});
+
+		it('should compile GROUP BY with WHERE', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', as: 'published_count' }],
+					fields: ['userId'],
+				},
+				where: {
+					kind: 'comparison',
+					field: 'published',
+					operator: 'eq',
+					value: true,
+				},
+				groupBy: ['userId'],
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('where');
+			expect(compiled.sql.toLowerCase()).toContain('group by');
+		});
+
+		it('should compile GROUP BY with ORDER BY', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', as: 'cnt' }],
+					fields: ['userId'],
+				},
+				groupBy: ['userId'],
+				orderBy: [{ field: 'userId', direction: 'asc' }],
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('group by');
+			expect(compiled.sql.toLowerCase()).toContain('order by');
+		});
+
+		it('should apply schema prefix with GROUP BY', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count' }],
+					fields: ['userId'],
+				},
+				groupBy: ['userId'],
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely, 'tenant_abc');
+
+			expect(compiled.sql).toContain('"tenant_abc"."posts"');
+			expect(compiled.sql.toLowerCase()).toContain('group by');
+		});
+	});
 });

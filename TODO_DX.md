@@ -27,6 +27,17 @@ This is a LEAF package (nothing depends on it)
 
 ## Completed
 
+### DX-004: Aggregate API ✅ (2026-01-07)
+
+- [x] ✅ `count(options?)` - COUNT(*) or COUNT(field)
+- [x] ✅ `sum(field, as?)` - SUM aggregate
+- [x] ✅ `avg(field, as?)` - AVG aggregate
+- [x] ✅ `min(field, as?)` - MIN aggregate
+- [x] ✅ `max(field, as?)` - MAX aggregate
+- [x] ✅ `groupBy(fields)` - GROUP BY support
+- [x] ✅ `AggregateOptions` interface
+- [x] ✅ Integrated with QueryBuilder immutable pattern
+
 ### DX-003: Compat Layer ✅ (2026-01-07)
 
 **Spec:** [docs/specs/DX-003-compat-layer.md](docs/specs/DX-003-compat-layer.md)
@@ -67,7 +78,7 @@ This is a LEAF package (nothing depends on it)
 
 #### Tests
 
-- [x] ✅ 106 tests passing (30 filters + 12 errors + 27 strict-mode + 21 override + 16 execution)
+- [x] ✅ 117 tests passing (30 filters + 12 errors + 27 strict-mode + 21 override + 27 execution)
 
 ### DX-002: Override API ✅ (2026-01-07)
 

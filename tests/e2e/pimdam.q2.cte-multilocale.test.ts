@@ -132,8 +132,7 @@ describe.skipIf(shouldSkipE2E())(
 		});
 
 		describe('execute() results', () => {
-			// TODO: EXISTS subqueries currently don't include schema prefix (known limitation)
-			it.todo('should return only products with BOTH FR and EN approved main images (Acme)', async () => {
+			it('should return only products with BOTH FR and EN approved main images (Acme)', async () => {
 				const db = await getTestDb();
 				const orm = createOrm({ model: pimdamModel, db });
 
@@ -144,7 +143,7 @@ describe.skipIf(shouldSkipE2E())(
 				expect(products[0]).toMatchObject({ sku: 'PROD-001' });
 			});
 
-			it.todo('should return different results per tenant (Globex)', async () => {
+			it('should return different results per tenant (Globex)', async () => {
 				const db = await getTestDb();
 				const orm = createOrm({ model: pimdamModel, db });
 
@@ -155,7 +154,7 @@ describe.skipIf(shouldSkipE2E())(
 				expect(products[0]).toMatchObject({ sku: 'GLX-001' });
 			});
 
-			it.todo('should return deterministic results with multiple executions', async () => {
+			it('should return deterministic results with multiple executions', async () => {
 				const db = await getTestDb();
 				const orm = createOrm({ model: pimdamModel, db });
 

@@ -48,6 +48,17 @@ MUST NOT import from: packages/dx
 
 ## Completed - MVP ✅
 
+### ADAPTER-005: Aggregates and GROUP BY - 14 new tests ✅ (2026-01-07)
+
+- [x] ✅ Aggregate SELECT expressions (COUNT, SUM, AVG, MIN, MAX)
+  - COUNT(*) and COUNT(field) support
+  - Automatic alias generation (e.g., count_email)
+  - Custom alias via `as` parameter
+- [x] ✅ GROUP BY clause generation
+  - Single and multiple field grouping
+  - Proper alias prefix (t0.field)
+  - Schema prefix support for multi-tenant
+
 ### ADAPTER-004: Enhanced Observability - 40 tests ✅ (2026-01-07)
 
 **Spec:** [docs/specs/ADAPTER-004-enhanced-observability.md](docs/specs/ADAPTER-004-enhanced-observability.md)

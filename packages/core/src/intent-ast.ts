@@ -56,10 +56,45 @@ export interface SelectFieldsIntent {
 	readonly fields: readonly string[];
 }
 
+// ============================================================================
+// Aggregate Functions
+// ============================================================================
+
+/** Aggregate function types */
+export type AggregateFunction = 'count' | 'sum' | 'avg' | 'min' | 'max';
+
+/**
+ * Aggregate operation intent
+ * @example { function: 'count' } → COUNT(*)
+ * @example { function: 'sum', field: 'price' } → SUM(price)
+ */
+export interface AggregateIntent {
+	/** Aggregate function */
+	readonly function: AggregateFunction;
+	/** Field to aggregate (optional for count without field) */
+	readonly field?: string;
+	/** Alias for result column */
+	readonly as?: string;
+}
+
+/**
+ * Select with aggregate functions
+ */
+export interface SelectAggregateIntent {
+	readonly type: 'aggregate';
+	/** Aggregate operations */
+	readonly aggregates: readonly AggregateIntent[];
+	/** Non-aggregate fields (for GROUP BY) */
+	readonly fields?: readonly string[];
+}
+
 /**
  * Select intent - what columns to retrieve
  */
-export type SelectIntent = SelectAllIntent | SelectFieldsIntent;
+export type SelectIntent =
+	| SelectAllIntent
+	| SelectFieldsIntent
+	| SelectAggregateIntent;
 
 // ============================================================================
 // Where Intent - Filter Conditions
@@ -276,6 +311,12 @@ export interface QueryIntent {
 	/** Sort order */
 	readonly orderBy?: readonly OrderByIntent[];
 
+	/**
+	 * Fields to group by for aggregate queries.
+	 * When specified, SELECT must include only grouped fields and aggregates.
+	 */
+	readonly groupBy?: readonly string[];
+
 	/** Maximum number of rows */
 	readonly limit?: number;
 
@@ -402,4 +443,13 @@ export function isSelectFields(
 	select: SelectIntent,
 ): select is SelectFieldsIntent {
 	return select.type === 'fields';
+}
+
+/**
+ * Check if a select intent is an aggregate select
+ */
+export function isSelectAggregate(
+	select: SelectIntent,
+): select is SelectAggregateIntent {
+	return select.type === 'aggregate';
 }

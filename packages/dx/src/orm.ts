@@ -1,10 +1,12 @@
 import { compile, type Dump } from '@db-semantic-planner/adapter-kysely';
 import type {
+	AggregateIntent,
 	IncludeIntent,
 	ModelIR,
 	PlanOptions,
 	PlanReport,
 	QueryIntent,
+	SelectAggregateIntent,
 	SelectIntent,
 	WhereIntent,
 } from '@db-semantic-planner/core';
@@ -17,6 +19,7 @@ import {
 	NotFoundError,
 } from './errors.js';
 import type {
+	AggregateOptions,
 	IncludeOptions,
 	NestedInclude,
 	OrmInstance,
@@ -154,6 +157,8 @@ class QueryBuilderImpl implements QueryBuilder {
 	private selectIntent?: SelectIntent;
 	private whereIntent?: WhereIntent;
 	private strictModeOverride?: boolean;
+	private aggregates: AggregateIntent[] = [];
+	private groupByFields: string[] = [];
 
 	constructor(
 		model: ModelIR,
@@ -181,6 +186,65 @@ class QueryBuilderImpl implements QueryBuilder {
 	select(fields: readonly string[]): QueryBuilder {
 		const builder = this.clone();
 		builder.selectIntent = { type: 'fields', fields: [...fields] };
+		return builder;
+	}
+
+	count(options?: AggregateOptions): QueryBuilder {
+		const builder = this.clone();
+		const agg: AggregateIntent = { function: 'count' };
+		if (options?.field !== undefined) {
+			(agg as { field: string }).field = options.field;
+		}
+		if (options?.as !== undefined) {
+			(agg as { as: string }).as = options.as;
+		}
+		builder.aggregates.push(agg);
+		return builder;
+	}
+
+	sum(field: string, as?: string): QueryBuilder {
+		const builder = this.clone();
+		const agg: AggregateIntent = { function: 'sum', field };
+		if (as !== undefined) {
+			(agg as { as: string }).as = as;
+		}
+		builder.aggregates.push(agg);
+		return builder;
+	}
+
+	avg(field: string, as?: string): QueryBuilder {
+		const builder = this.clone();
+		const agg: AggregateIntent = { function: 'avg', field };
+		if (as !== undefined) {
+			(agg as { as: string }).as = as;
+		}
+		builder.aggregates.push(agg);
+		return builder;
+	}
+
+	min(field: string, as?: string): QueryBuilder {
+		const builder = this.clone();
+		const agg: AggregateIntent = { function: 'min', field };
+		if (as !== undefined) {
+			(agg as { as: string }).as = as;
+		}
+		builder.aggregates.push(agg);
+		return builder;
+	}
+
+	max(field: string, as?: string): QueryBuilder {
+		const builder = this.clone();
+		const agg: AggregateIntent = { function: 'max', field };
+		if (as !== undefined) {
+			(agg as { as: string }).as = as;
+		}
+		builder.aggregates.push(agg);
+		return builder;
+	}
+
+	groupBy(fields: readonly string[]): QueryBuilder {
+		const builder = this.clone();
+		builder.groupByFields.push(...fields);
 		return builder;
 	}
 
@@ -349,14 +413,33 @@ class QueryBuilderImpl implements QueryBuilder {
 			from: this.from,
 		};
 
-		if (this.selectIntent !== undefined) {
+		// Handle aggregates - convert to SelectAggregateIntent
+		if (this.aggregates.length > 0) {
+			const aggregateSelect: SelectAggregateIntent = {
+				type: 'aggregate',
+				aggregates: [...this.aggregates],
+			};
+			// Add group by fields to the select for projection
+			if (this.groupByFields.length > 0) {
+				(aggregateSelect as { fields: readonly string[] }).fields = [
+					...this.groupByFields,
+				];
+			}
+			(intent as { select: SelectIntent }).select = aggregateSelect;
+		} else if (this.selectIntent !== undefined) {
 			(intent as { select: SelectIntent }).select = this.selectIntent;
 		}
+
 		if (this.whereIntent !== undefined) {
 			(intent as { where: WhereIntent }).where = this.whereIntent;
 		}
 		if (this.includes.length > 0) {
 			(intent as { include: readonly IncludeIntent[] }).include = this.includes;
+		}
+		if (this.groupByFields.length > 0) {
+			(intent as { groupBy: readonly string[] }).groupBy = [
+				...this.groupByFields,
+			];
 		}
 
 		return intent;
@@ -432,6 +515,9 @@ class QueryBuilderImpl implements QueryBuilder {
 		if (this.strictModeOverride !== undefined) {
 			builder.strictModeOverride = this.strictModeOverride;
 		}
+		// Clone aggregates and groupBy
+		builder.aggregates.push(...this.aggregates);
+		builder.groupByFields.push(...this.groupByFields);
 		return builder;
 	}
 }

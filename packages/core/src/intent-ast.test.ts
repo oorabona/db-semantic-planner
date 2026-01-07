@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type {
+	AggregateIntent,
 	IncludeIntent,
 	OrderByIntent,
 	QueryIntent,
+	SelectAggregateIntent,
 	SelectAllIntent,
 	SelectFieldsIntent,
 	SelectIntent,
@@ -19,6 +21,7 @@ import type {
 	WhereRelationFilterIntent,
 } from './intent-ast.js';
 import {
+	isSelectAggregate,
 	isSelectAll,
 	isSelectFields,
 	isWhereAnd,
@@ -606,6 +609,142 @@ describe('IntentAST', () => {
 			for (const intent of nonRelation) {
 				expect(isWhereRelationBased(intent)).toBe(false);
 			}
+		});
+	});
+
+	describe('AggregateIntent', () => {
+		it('should represent count aggregate', () => {
+			const agg: AggregateIntent = { function: 'count' };
+
+			expect(agg.function).toBe('count');
+			expect(agg.field).toBeUndefined();
+		});
+
+		it('should represent count with field', () => {
+			const agg: AggregateIntent = { function: 'count', field: 'id' };
+
+			expect(agg.function).toBe('count');
+			expect(agg.field).toBe('id');
+		});
+
+		it('should represent sum aggregate', () => {
+			const agg: AggregateIntent = { function: 'sum', field: 'price' };
+
+			expect(agg.function).toBe('sum');
+			expect(agg.field).toBe('price');
+		});
+
+		it('should represent avg aggregate', () => {
+			const agg: AggregateIntent = { function: 'avg', field: 'rating' };
+
+			expect(agg.function).toBe('avg');
+			expect(agg.field).toBe('rating');
+		});
+
+		it('should represent min/max aggregates', () => {
+			const min: AggregateIntent = { function: 'min', field: 'price' };
+			const max: AggregateIntent = { function: 'max', field: 'price' };
+
+			expect(min.function).toBe('min');
+			expect(max.function).toBe('max');
+		});
+
+		it('should support alias', () => {
+			const agg: AggregateIntent = {
+				function: 'count',
+				as: 'total_count',
+			};
+
+			expect(agg.as).toBe('total_count');
+		});
+	});
+
+	describe('SelectAggregateIntent', () => {
+		it('should represent aggregate select', () => {
+			const select: SelectAggregateIntent = {
+				type: 'aggregate',
+				aggregates: [{ function: 'count' }],
+			};
+
+			expect(select.type).toBe('aggregate');
+			expect(select.aggregates).toHaveLength(1);
+			expect(isSelectAggregate(select)).toBe(true);
+			expect(isSelectAll(select)).toBe(false);
+			expect(isSelectFields(select)).toBe(false);
+		});
+
+		it('should support multiple aggregates', () => {
+			const select: SelectAggregateIntent = {
+				type: 'aggregate',
+				aggregates: [
+					{ function: 'count' },
+					{ function: 'sum', field: 'price' },
+					{ function: 'avg', field: 'rating' },
+				],
+			};
+
+			expect(select.aggregates).toHaveLength(3);
+		});
+
+		it('should support fields with aggregates (for GROUP BY)', () => {
+			const select: SelectAggregateIntent = {
+				type: 'aggregate',
+				aggregates: [{ function: 'count' }],
+				fields: ['category_id', 'status'],
+			};
+
+			expect(select.fields).toEqual(['category_id', 'status']);
+		});
+
+		it('should discriminate from other select types', () => {
+			const selectAgg: SelectIntent = {
+				type: 'aggregate',
+				aggregates: [{ function: 'count' }],
+			};
+			const selectAll: SelectIntent = { type: 'all' };
+			const selectFields: SelectIntent = { type: 'fields', fields: ['id'] };
+
+			expect(isSelectAggregate(selectAgg)).toBe(true);
+			expect(isSelectAggregate(selectAll)).toBe(false);
+			expect(isSelectAggregate(selectFields)).toBe(false);
+		});
+	});
+
+	describe('QueryIntent - GroupBy', () => {
+		it('should support groupBy field', () => {
+			const query: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				groupBy: ['category_id'],
+			};
+
+			expect(query.groupBy).toEqual(['category_id']);
+		});
+
+		it('should support multiple groupBy fields', () => {
+			const query: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				groupBy: ['category_id', 'status'],
+			};
+
+			expect(query.groupBy).toHaveLength(2);
+		});
+
+		it('should combine aggregate select with groupBy', () => {
+			const query: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count' }],
+					fields: ['category_id'],
+				},
+				groupBy: ['category_id'],
+			};
+
+			expect(query.groupBy).toEqual(['category_id']);
+			expect(query.select?.type).toBe('aggregate');
 		});
 	});
 });

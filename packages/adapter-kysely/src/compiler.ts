@@ -4,11 +4,14 @@
  */
 
 import type {
+	AggregateIntent,
 	ModelIR,
 	PlanReport,
 	QueryIntent,
+	SelectAggregateIntent,
 	WhereIntent,
 } from '@db-semantic-planner/core';
+import { isSelectAggregate } from '@db-semantic-planner/core';
 import type { CompiledQuery, Kysely, SelectQueryBuilder } from 'kysely';
 import { sql } from 'kysely';
 import { CompilationError } from './errors.js';
@@ -72,6 +75,13 @@ export function compile(
 		);
 	}
 
+	// Add GROUP BY
+	if (intent.groupBy && intent.groupBy.length > 0) {
+		for (const field of intent.groupBy) {
+			query = query.groupBy(`${rootAlias}.${field}`);
+		}
+	}
+
 	// Add ORDER BY
 	if (intent.orderBy) {
 		for (const order of intent.orderBy) {
@@ -113,12 +123,92 @@ function buildBaseQuery(
 	// Add SELECT
 	if (!intent.select || intent.select.type === 'all') {
 		query = query.selectAll(alias);
+	} else if (isSelectAggregate(intent.select)) {
+		// Handle aggregate select
+		query = buildAggregateSelect(query, intent.select, alias);
 	} else {
 		const fields = intent.select.fields.map((f: string) => `${alias}.${f}`);
 		query = query.select(fields);
 	}
 
 	return query;
+}
+
+/**
+ * Build aggregate SELECT expressions
+ */
+function buildAggregateSelect(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: SelectQueryBuilder<any, any, any>,
+	select: SelectAggregateIntent,
+	alias: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	let result = query;
+
+	// Add non-aggregate fields first (for GROUP BY)
+	if (select.fields && select.fields.length > 0) {
+		const fields = select.fields.map((f: string) => `${alias}.${f}`);
+		result = result.select(fields);
+	}
+
+	// Add aggregate expressions
+	for (const agg of select.aggregates) {
+		result = addAggregateExpression(result, agg, alias);
+	}
+
+	return result;
+}
+
+/**
+ * Add a single aggregate expression to the query
+ */
+function addAggregateExpression(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: SelectQueryBuilder<any, any, any>,
+	agg: AggregateIntent,
+	alias: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	const column = agg.field ? `${alias}.${agg.field}` : null;
+	const resultAlias =
+		agg.as ?? `${agg.function}${agg.field ? `_${agg.field}` : ''}`;
+
+	switch (agg.function) {
+		case 'count':
+			if (column) {
+				return query.select((eb) => eb.fn.count(column).as(resultAlias));
+			}
+			// COUNT(*) - count all rows
+			return query.select((eb) => eb.fn.countAll().as(resultAlias));
+
+		case 'sum':
+			if (!column) {
+				throw new CompilationError('SUM requires a field');
+			}
+			return query.select((eb) => eb.fn.sum(column).as(resultAlias));
+
+		case 'avg':
+			if (!column) {
+				throw new CompilationError('AVG requires a field');
+			}
+			return query.select((eb) => eb.fn.avg(column).as(resultAlias));
+
+		case 'min':
+			if (!column) {
+				throw new CompilationError('MIN requires a field');
+			}
+			return query.select((eb) => eb.fn.min(column).as(resultAlias));
+
+		case 'max':
+			if (!column) {
+				throw new CompilationError('MAX requires a field');
+			}
+			return query.select((eb) => eb.fn.max(column).as(resultAlias));
+
+		default:
+			throw new CompilationError(`Unknown aggregate function: ${agg.function}`);
+	}
 }
 
 // ============================================================================

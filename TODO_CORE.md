@@ -23,7 +23,7 @@
 
 ---
 
-## Completed - MVP ✅ (93 tests)
+## Completed - MVP ✅ (106 tests)
 
 ### CORE-001: ModelIR Types ([spec](docs/specs/CORE-001-model-ir.md))
 
@@ -51,9 +51,13 @@
 ### CORE-002: IntentAST Types
 
 - [x] ✅ QueryIntent interface
-  - type: 'select', from, select, where, include, orderBy, limit, offset
+  - type: 'select', from, select, where, include, orderBy, limit, offset, groupBy
 - [x] ✅ SelectIntent interface
-  - type: 'all' | 'fields', fields array
+  - type: 'all' | 'fields' | 'aggregate', fields array
+  - AggregateFunction: count, sum, avg, min, max
+  - AggregateIntent: function, field?, as?
+  - SelectAggregateIntent: aggregates array + optional fields
+  - isSelectAggregate type guard
 - [x] ✅ IncludeIntent interface
   - relation, select, where, include (nested), via (disambiguation)
 - [x] ✅ WhereIntent union type

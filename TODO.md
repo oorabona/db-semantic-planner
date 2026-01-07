@@ -90,9 +90,17 @@
 
 ### Query Features (P2)
 
-- [ ] NOT EXISTS filter strategy (unused assets query)
-- [ ] Aggregations support (COUNT, SUM, AVG, etc.)
-- [ ] GROUP BY support
+- [x] ✅ NOT EXISTS filter strategy (2026-01-07) — Already implemented in DX-003 as `notExists()` helper
+- [x] ✅ Aggregations support (COUNT, SUM, AVG, MIN, MAX) (2026-01-07)
+  - Core: AggregateFunction, AggregateIntent, SelectAggregateIntent types, isSelectAggregate guard
+  - Adapter: buildAggregateSelect, addAggregateExpression in compiler
+  - DX: count(), sum(), avg(), min(), max() methods on QueryBuilder
+  - 27 new tests across packages
+- [x] ✅ GROUP BY support (2026-01-07)
+  - Core: groupBy field on QueryIntent
+  - Adapter: GROUP BY clause generation in compiler
+  - DX: groupBy() method on QueryBuilder
+  - 5 new tests
 - [ ] Streaming/cursor support
 
 ## Completed
@@ -151,12 +159,12 @@
   - PIM/DAM schema + seed (acme, globex tenants)
   - Blog schema + seed
   - Q1-E2E: EXISTS filter validation - 7 tests (all pass)
-  - Q2-E2E: CTE extraction validation - 8 tests (5 pass, 3 todo)
+  - Q2-E2E: CTE extraction validation - 8 tests (all pass)
   - Q4: Multi-tenant isolation - 9 tests
-  - Q5: Blog scenario - 12 tests (9 pass, 3 todo)
+  - Q5: Blog scenario - 12 tests (all pass)
   - EXPLAIN integration - 12 tests
   - Performance benchmarks - 8 tests
-  - Total: 67 passing, 6 todo
+  - Total: 73 passing (all .todo() tests enabled 2026-01-07)
 
 ## Fixed Issues
 

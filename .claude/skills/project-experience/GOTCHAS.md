@@ -169,3 +169,27 @@ await sql.raw(`EXPLAIN (FORMAT JSON) ${sql}`, [true]).execute(db); // ERROR
 - Forward `schemaName` to nested `compileWhere()` calls for deeply nested EXISTS
 
 **Location:** `packages/adapter-kysely/src/compiler.ts` lines 64, 128, 144, 166, 173, 179, 183, 186, 189, 245, 307-310, 328, 351, 364, 376, 394
+
+---
+
+### Build Order Critical When Adding New Exports (2026-01-07)
+
+**Issue:** When adding new types to `packages/core` and using them in `packages/adapter-kysely`, TypeScript compilation fails with "Module has no exported member" errors.
+
+**Cause:** TypeScript in a pnpm monorepo reads compiled `.d.ts` files from dist/ directories. Adding a new export to a source file doesn't make it visible to dependent packages until the package is rebuilt.
+
+**Solution:** Always rebuild upstream packages before running typecheck on downstream:
+```bash
+# After adding exports to core
+pnpm -C packages/core build
+
+# Then typecheck adapter (which depends on core)
+pnpm -C packages/adapter-kysely typecheck
+```
+
+**Build order for this project:**
+```
+packages/core → packages/adapter-kysely → packages/dx
+```
+
+**Location:** Encountered when adding `AggregateFunction`, `AggregateIntent`, `SelectAggregateIntent` to `packages/core/src/intent-ast.ts`
