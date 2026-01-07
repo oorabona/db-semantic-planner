@@ -1,7 +1,7 @@
 # Core Scope Backlog (`packages/core`)
 
 **Package:** `packages/core`
-**Phase:** MVP
+**Phase:** MVP ✅ Complete
 **Dependencies:** None (DB-agnostic)
 
 ## Architecture Constraint
@@ -17,21 +17,17 @@
 
 (none)
 
-## Pending - MVP
+## Pending - P1 (Deferred to DX)
 
-### Query Builder API
+### Query Builder API (moved to packages/dx)
 
-- [ ] query() function accepting model reference
-- [ ] .select() chain
-- [ ] .where() chain
-- [ ] .include() chain (with nested support)
-- [ ] .orderBy() chain
-- [ ] .limit() / .offset() chains
-- [ ] Intent extraction (.toIntent())
+- [ ] Fluent query() builder → DX-003
+- [ ] .select() / .where() / .include() chains → DX-003
+- [ ] findMany() / findFirst() shortcuts → DX-003
 
 ---
 
-## Completed
+## Completed - MVP ✅ (93 tests)
 
 ### CORE-001: ModelIR Types ([spec](docs/specs/CORE-001-model-ir.md))
 

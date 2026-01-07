@@ -1,10 +1,10 @@
 ---
 doc-meta:
-  status: draft
+  status: canonical
   scope: core
   type: specification
   created: 2026-01-06
-  updated: 2026-01-06
+  updated: 2026-01-07
 ---
 
 # CORE-001: ModelIR Specification

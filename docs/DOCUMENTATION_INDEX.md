@@ -4,7 +4,7 @@ doc-meta:
   scope: project
   type: reference
   created: 2026-01-06
-  updated: 2026-01-06
+  updated: 2026-01-07
 ---
 
 # Documentation Index
@@ -12,6 +12,8 @@ doc-meta:
 ## Project: db-semantic-planner
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
+
+**Status:** MVP ✅ Complete (152 tests)
 
 ## Architecture: Ports & Adapters
 
@@ -44,21 +46,20 @@ packages/dx            → Depends on core + adapter-kysely
 
 | Spec ID | Title | Scope | Status |
 |---------|-------|-------|--------|
-| CORE-001 | [ModelIR](specs/CORE-001-model-ir.md) | core | draft |
-| ADAPTER-001 | [Kysely Dump/Compile/Execute](specs/ADAPTER-001-kysely-dump-compile-execute.md) | adapter | draft |
-| CORE-002 | IntentAST | core | planned |
-| CORE-003 | Semantic Planner | core | planned |
-| ADAPTER-002 | Multi-tenant | adapter | planned |
-| DX-001 | Strict Mode | dx | planned |
+| CORE-001 | [ModelIR](specs/CORE-001-model-ir.md) | core | ✅ canonical |
+| CORE-002 | IntentAST | core | ✅ implemented (no spec) |
+| CORE-003 | [Semantic Planner](specs/CORE-003-semantic-planner.md) | core | ✅ canonical |
+| ADAPTER-001 | [Kysely Dump/Compile/Execute](specs/ADAPTER-001-kysely-dump-compile-execute.md) | adapter | ✅ canonical |
+| ADAPTER-002 | Multi-tenant | adapter | ✅ implemented (in ADAPTER-001) |
+| DX-001 | Strict Mode | dx | planned (P1) |
 
-## Golden Query Tests (MVP Contract)
+## Golden Query Tests (MVP Contract) - ✅ Complete
 
-| Test | Description | Key Validation | Spec |
-|------|-------------|----------------|------|
-| Q1 | Filter to-many → EXISTS | filter-strategy: exists | [core](plans/core-OVERVIEW.md#q1-filter-to-many--exists) |
-| Q2 | Coverage by category → CTE | cte-extraction | [adapter](plans/adapter-OVERVIEW.md#q2-coverage-by-category--cte--ratio) |
-| Q3 | Strict mode ambiguity | AmbiguousRelationError | [dx](plans/dx-OVERVIEW.md#golden-query-test-q3-strict-mode-ambiguity) |
-| Q4 | Multi-tenant schema | forTenant → withSchema | [adapter](plans/adapter-OVERVIEW.md#q4-multi-tenant-schema-per-tenant) |
+| Test | Description | Key Validation | Status | Tests |
+|------|-------------|----------------|--------|-------|
+| Q1 | Filter to-many → EXISTS | filter-strategy: exists | ✅ | 6 |
+| Q2 | Coverage by category → CTE | cte-extraction | ✅ | 5 |
+| Q3 | Strict mode ambiguity | AmbiguousPlanError | ✅ | 7 |
 
 ## Tech Stack
 
@@ -73,15 +74,15 @@ packages/dx            → Depends on core + adapter-kysely
 
 ## Phases
 
-### P0 (MVP) - End-to-end vertical slice
+### P0 (MVP) - ✅ Complete
 
-- ModelIR schema definition with planning hints
-- IntentAST query builder with exists() filter
-- Semantic planner (EXISTS vs JOIN, CTE extraction)
-- SQL compilation via Kysely
-- Multi-tenant (`orm.forTenant()`)
-- Observability (`dump()` returning plan + sql + params)
-- 3 golden-query acceptance tests
+- ✅ ModelIR schema definition with planning hints (29 tests)
+- ✅ IntentAST query types with type guards (35 tests)
+- ✅ Semantic planner (EXISTS vs JOIN, CTE extraction) (29 tests)
+- ✅ SQL compilation via Kysely (59 tests)
+- ✅ Multi-tenant (schema prefix support)
+- ✅ Observability (`createDump()` returning plan + sql + params)
+- ✅ 3 golden-query acceptance tests (Q1, Q2, Q3 = 18 tests)
 
 ### P1 - Developer Experience
 

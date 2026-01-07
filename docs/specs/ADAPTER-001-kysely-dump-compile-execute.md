@@ -1,10 +1,10 @@
 ---
 doc-meta:
-  status: draft
+  status: canonical
   scope: adapter
   type: specification
   created: 2026-01-06
-  updated: 2026-01-06
+  updated: 2026-01-07
 ---
 
 # ADAPTER-001: Kysely Dump/Compile/Execute Specification
