@@ -1,4 +1,4 @@
-import { compile } from '@db-semantic-planner/adapter-kysely';
+import { compile, type Dump } from '@db-semantic-planner/adapter-kysely';
 import type {
 	IncludeIntent,
 	ModelIR,
@@ -246,6 +246,31 @@ class QueryBuilderImpl implements QueryBuilder {
 			throw new NotFoundError(this.from);
 		}
 		return result;
+	}
+
+	dump(): Dump {
+		const db = this.getConfiguredDb();
+		const planReport = this.plan();
+		const compiled = compile(planReport, this.model, db, this.schemaName);
+
+		// Build meta with exactOptionalPropertyTypes compliance
+		const meta: { compiledAt: Date; tenant?: string } = {
+			compiledAt: new Date(),
+		};
+		if (this.schemaName !== undefined) {
+			meta.tenant = this.schemaName;
+		}
+
+		return {
+			plan: planReport,
+			sql: compiled.sql,
+			params: compiled.parameters as readonly unknown[],
+			meta,
+		};
+	}
+
+	execute(): Promise<unknown[]> {
+		return this.findMany();
 	}
 
 	/**

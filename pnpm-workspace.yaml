@@ -3,7 +3,10 @@ packages:
 
 catalog:
   '@biomejs/biome': ^2.3.11
+  '@testcontainers/postgresql': ^11.0.1
   '@types/node': ^22.15.29
+  '@types/pg': ^8.15.4
   kysely: ^0.28.9
+  pg: ^8.16.1
   typescript: ^5.9.3
   vitest: ^4.0.16
