@@ -21,39 +21,53 @@ This is a LEAF package (nothing depends on it)
 
 ## Pending - P1
 
-### DX-003: Compat Layer (Drizzle-like)
-
-#### Filter Helpers
-
-- [ ] eq(field, value): WhereIntent
-- [ ] neq(field, value): WhereIntent
-- [ ] gt(field, value): WhereIntent
-- [ ] gte(field, value): WhereIntent
-- [ ] lt(field, value): WhereIntent
-- [ ] lte(field, value): WhereIntent
-- [ ] like(field, pattern): WhereIntent
-- [ ] isNull(field): WhereIntent
-- [ ] isNotNull(field): WhereIntent
-- [ ] inArray(field, values): WhereIntent
-- [ ] and(...conditions): WhereIntent
-- [ ] or(...conditions): WhereIntent
-- [ ] not(condition): WhereIntent
-
-#### Query Shortcuts
-
-- [ ] Model.findMany(options): Promise<T[]>
-- [ ] Model.findFirst(options): Promise<T | undefined>
-- [ ] Model.findFirstOrThrow(options): Promise<T>
-- [ ] Options: { where?, select?, include?, orderBy?, limit?, offset? }
-
-#### Exists Helper
-
-- [ ] exists(relation, options): WhereIntent
-  - Convenience wrapper for { type: 'exists', ... }
+(none)
 
 ---
 
 ## Completed
+
+### DX-003: Compat Layer ✅ (2026-01-07)
+
+**Spec:** [docs/specs/DX-003-compat-layer.md](docs/specs/DX-003-compat-layer.md)
+
+#### Filter Helpers (14 functions)
+
+- [x] ✅ eq(field, value): WhereComparisonIntent
+- [x] ✅ neq(field, value): WhereComparisonIntent
+- [x] ✅ gt(field, value): WhereComparisonIntent
+- [x] ✅ gte(field, value): WhereComparisonIntent
+- [x] ✅ lt(field, value): WhereComparisonIntent
+- [x] ✅ lte(field, value): WhereComparisonIntent
+- [x] ✅ like(field, pattern, caseInsensitive?): WhereLikeIntent
+- [x] ✅ isNull(field): WhereNullIntent
+- [x] ✅ isNotNull(field): WhereNullIntent
+- [x] ✅ inArray(field, values): WhereInIntent
+- [x] ✅ and(...conditions): WhereAndIntent
+- [x] ✅ or(...conditions): WhereOrIntent
+- [x] ✅ not(condition): WhereNotIntent
+- [x] ✅ exists(relation, { where? }): WhereExistsIntent
+- [x] ✅ notExists(relation, { where? }): WhereNotExistsIntent
+
+#### Query Execution Methods
+
+- [x] ✅ findMany(): Promise<unknown[]>
+- [x] ✅ findFirst(): Promise<unknown | undefined>
+- [x] ✅ findFirstOrThrow(): Promise<unknown>
+- [x] ✅ `db` option in `OrmOptions` for Kysely instance
+
+#### Multi-tenant Execution
+
+- [x] ✅ forTenant(schemaName): OrmInstance - scoped to tenant schema
+
+#### Error Classes
+
+- [x] ✅ ExecutionError - thrown when db not configured
+- [x] ✅ NotFoundError - thrown by findFirstOrThrow() when no results
+
+#### Tests
+
+- [x] ✅ 106 tests passing (30 filters + 12 errors + 27 strict-mode + 21 override + 16 execution)
 
 ### DX-002: Override API ✅ (2026-01-07)
 

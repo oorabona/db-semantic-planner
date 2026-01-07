@@ -12,6 +12,9 @@ catalogs:
     '@types/node':
       specifier: ^22.15.29
       version: 22.19.3
+    kysely:
+      specifier: ^0.28.9
+      version: 0.28.9
     typescript:
       specifier: ^5.9.3
       version: 5.9.3
@@ -46,7 +49,7 @@ importers:
         specifier: ^12.5.0
         version: 12.5.0
       kysely:
-        specifier: ^0.28.9
+        specifier: 'catalog:'
         version: 0.28.9
       typescript:
         specifier: 'catalog:'
@@ -69,13 +72,25 @@ importers:
 
   packages/dx:
     dependencies:
+      '@db-semantic-planner/adapter-kysely':
+        specifier: workspace:*
+        version: link:../adapter-kysely
       '@db-semantic-planner/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
       '@types/node':
         specifier: 'catalog:'
         version: 22.19.3
+      better-sqlite3:
+        specifier: ^12.5.0
+        version: 12.5.0
+      kysely:
+        specifier: 'catalog:'
+        version: 0.28.9
       typescript:
         specifier: 'catalog:'
         version: 5.9.3

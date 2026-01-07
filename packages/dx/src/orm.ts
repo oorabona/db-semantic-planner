@@ -1,3 +1,4 @@
+import { compile } from '@db-semantic-planner/adapter-kysely';
 import type {
 	IncludeIntent,
 	ModelIR,
@@ -8,8 +9,13 @@ import type {
 	WhereIntent,
 } from '@db-semantic-planner/core';
 import { AmbiguousPlanError, plan } from '@db-semantic-planner/core';
+import type { Kysely } from 'kysely';
 
-import { AmbiguousRelationError } from './errors.js';
+import {
+	AmbiguousRelationError,
+	ExecutionError,
+	NotFoundError,
+} from './errors.js';
 import type {
 	IncludeOptions,
 	NestedInclude,
@@ -38,12 +44,43 @@ import type {
  * ```
  */
 export function createOrm(options: OrmOptions): OrmInstance {
-	const { model, strictMode = false, relationHints = {} } = options;
+	const { model, strictMode = false, relationHints = {}, db } = options;
 
+	return createOrmInstance(model, strictMode, relationHints, db);
+}
+
+/**
+ * Internal factory for creating ORM instances.
+ * Supports optional schema name for multi-tenant scenarios.
+ */
+function createOrmInstance(
+	model: ModelIR,
+	strictMode: boolean,
+	relationHints: RelationHints,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	db?: Kysely<any>,
+	schemaName?: string,
+): OrmInstance {
 	return {
 		strictMode,
 		query(from: string): QueryBuilder {
-			return new QueryBuilderImpl(model, strictMode, from, relationHints);
+			return new QueryBuilderImpl(
+				model,
+				strictMode,
+				from,
+				relationHints,
+				db,
+				schemaName,
+			);
+		},
+		forTenant(tenantSchema: string): OrmInstance {
+			return createOrmInstance(
+				model,
+				strictMode,
+				relationHints,
+				db,
+				tenantSchema,
+			);
 		},
 	};
 }
@@ -54,7 +91,7 @@ export function createOrm(options: OrmOptions): OrmInstance {
  */
 function includeOptionsToIntent(
 	relation: string,
-	options?: IncludeOptions
+	options?: IncludeOptions,
 ): IncludeIntent {
 	if (!options) {
 		return { relation };
@@ -111,6 +148,9 @@ class QueryBuilderImpl implements QueryBuilder {
 	private readonly from: string;
 	private readonly includes: IncludeIntent[] = [];
 	private readonly relationHints: RelationHints;
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	private readonly db: Kysely<any> | undefined;
+	private readonly schemaName: string | undefined;
 	private selectIntent?: SelectIntent;
 	private whereIntent?: WhereIntent;
 	private strictModeOverride?: boolean;
@@ -119,12 +159,17 @@ class QueryBuilderImpl implements QueryBuilder {
 		model: ModelIR,
 		strictMode: boolean,
 		from: string,
-		relationHints: RelationHints = {}
+		relationHints: RelationHints = {},
+		// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+		db?: Kysely<any>,
+		schemaName?: string,
 	) {
 		this.model = model;
 		this.strictMode = strictMode;
 		this.from = from;
 		this.relationHints = relationHints;
+		this.db = db;
+		this.schemaName = schemaName;
 	}
 
 	include(relation: string, options?: IncludeOptions): QueryBuilder {
@@ -182,6 +227,42 @@ class QueryBuilderImpl implements QueryBuilder {
 		}
 	}
 
+	async findMany(): Promise<unknown[]> {
+		const db = this.getConfiguredDb();
+		const planReport = this.plan();
+		const compiled = compile(planReport, this.model, db, this.schemaName);
+		const result = await db.executeQuery(compiled);
+		return result.rows as unknown[];
+	}
+
+	async findFirst(): Promise<unknown | undefined> {
+		const rows = await this.findMany();
+		return rows[0];
+	}
+
+	async findFirstOrThrow(): Promise<unknown> {
+		const result = await this.findFirst();
+		if (result === undefined) {
+			throw new NotFoundError(this.from);
+		}
+		return result;
+	}
+
+	/**
+	 * Get configured db, throwing if not configured.
+	 * @throws {ExecutionError} If db is not configured
+	 * @returns The configured Kysely instance
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	private getConfiguredDb(): Kysely<any> {
+		if (!this.db) {
+			throw new ExecutionError(
+				'Database not configured. Pass db option to createOrm() to enable query execution.',
+			);
+		}
+		return this.db;
+	}
+
 	/**
 	 * Apply relation hints to includes that don't have explicit `via`.
 	 */
@@ -191,7 +272,7 @@ class QueryBuilderImpl implements QueryBuilder {
 		}
 
 		const updatedIncludes = intent.include.map((inc) =>
-			this.applyHintToInclude(inc)
+			this.applyHintToInclude(inc),
 		);
 
 		return {
@@ -224,7 +305,9 @@ class QueryBuilderImpl implements QueryBuilder {
 		if (result.include && result.include.length > 0) {
 			return {
 				...result,
-				include: result.include.map((nested) => this.applyHintToInclude(nested)),
+				include: result.include.map((nested) =>
+					this.applyHintToInclude(nested),
+				),
 			};
 		}
 
@@ -259,14 +342,14 @@ class QueryBuilderImpl implements QueryBuilder {
 	 */
 	private handleAmbiguity(
 		error: AmbiguousPlanError,
-		intent: QueryIntent
+		intent: QueryIntent,
 	): PlanReport {
 		if (this.getEffectiveStrictMode()) {
 			// Strict mode: convert to AmbiguousRelationError and throw
 			throw new AmbiguousRelationError(
 				error.sourceTable,
 				error.targetTable,
-				error.options
+				error.options,
 			);
 		}
 
@@ -310,7 +393,9 @@ class QueryBuilderImpl implements QueryBuilder {
 			this.model,
 			this.strictMode,
 			this.from,
-			{ ...this.relationHints } // Clone hints to allow per-query additions
+			{ ...this.relationHints }, // Clone hints to allow per-query additions
+			this.db,
+			this.schemaName,
 		);
 		builder.includes.push(...this.includes);
 		if (this.selectIntent !== undefined) {

@@ -4,6 +4,7 @@ import type {
 	SelectIntent,
 	WhereIntent,
 } from '@db-semantic-planner/core';
+import type { Kysely } from 'kysely';
 
 /**
  * Mapping of target table to preferred relation name.
@@ -52,6 +53,23 @@ export interface OrmOptions {
 	 * ```
 	 */
 	readonly relationHints?: RelationHints;
+
+	/**
+	 * Kysely database instance for query execution.
+	 * Required for findMany(), findFirst(), findFirstOrThrow() methods.
+	 *
+	 * @example
+	 * ```typescript
+	 * const db = new Kysely<Database>({ dialect: ... });
+	 * const orm = createOrm({
+	 *   model: schema,
+	 *   db,  // Enable query execution
+	 * });
+	 * await orm.query('users').findMany();
+	 * ```
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	readonly db?: Kysely<any>;
 }
 
 /**
@@ -169,6 +187,58 @@ export interface QueryBuilder {
 	 * @throws {AmbiguousRelationError} In strict mode when relation is ambiguous
 	 */
 	plan(): PlanReport;
+
+	/**
+	 * Execute the query and return all matching rows.
+	 *
+	 * Requires `db` to be configured in createOrm() options.
+	 *
+	 * @returns Promise resolving to array of rows (may be empty)
+	 * @throws {ExecutionError} If db is not configured
+	 *
+	 * @example
+	 * ```typescript
+	 * const users = await orm.query('users')
+	 *   .where(eq('status', 'active'))
+	 *   .findMany();
+	 * ```
+	 */
+	findMany(): Promise<unknown[]>;
+
+	/**
+	 * Execute the query and return the first matching row.
+	 *
+	 * Requires `db` to be configured in createOrm() options.
+	 *
+	 * @returns Promise resolving to first row or undefined if none
+	 * @throws {ExecutionError} If db is not configured
+	 *
+	 * @example
+	 * ```typescript
+	 * const user = await orm.query('users')
+	 *   .where(eq('id', 1))
+	 *   .findFirst();
+	 * ```
+	 */
+	findFirst(): Promise<unknown | undefined>;
+
+	/**
+	 * Execute the query and return the first matching row, or throw if none.
+	 *
+	 * Requires `db` to be configured in createOrm() options.
+	 *
+	 * @returns Promise resolving to first row
+	 * @throws {NotFoundError} If no rows match
+	 * @throws {ExecutionError} If db is not configured
+	 *
+	 * @example
+	 * ```typescript
+	 * const user = await orm.query('users')
+	 *   .where(eq('id', 1))
+	 *   .findFirstOrThrow();
+	 * ```
+	 */
+	findFirstOrThrow(): Promise<unknown>;
 }
 
 /**
@@ -195,6 +265,22 @@ export interface OrmInstance {
 	 * The strict mode setting for this ORM instance.
 	 */
 	readonly strictMode: boolean;
+
+	/**
+	 * Create a tenant-scoped ORM instance.
+	 * All queries from the returned instance will include the schema prefix.
+	 *
+	 * @param schemaName - The tenant schema name
+	 * @returns A new ORM instance scoped to the tenant
+	 *
+	 * @example
+	 * ```typescript
+	 * const tenantOrm = orm.forTenant('tenant_123');
+	 * const users = await tenantOrm.query('users').findMany();
+	 * // SQL: SELECT * FROM tenant_123.users
+	 * ```
+	 */
+	forTenant(schemaName: string): OrmInstance;
 }
 
 /**

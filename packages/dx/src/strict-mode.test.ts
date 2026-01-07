@@ -144,7 +144,7 @@ describe('Scenario 2: Lenient mode resolves ambiguity with warning', () => {
 		const planReport = orm.query('users').include('posts').plan();
 
 		const ambiguityWarning = planReport.warnings.find(
-			(w) => w.code === 'AMBIGUOUS_RELATION'
+			(w) => w.code === 'AMBIGUOUS_RELATION',
 		);
 		expect(ambiguityWarning).toBeDefined();
 	});
@@ -155,7 +155,7 @@ describe('Scenario 2: Lenient mode resolves ambiguity with warning', () => {
 		const planReport = orm.query('users').include('posts').plan();
 
 		const ambiguityWarning = planReport.warnings.find(
-			(w) => w.code === 'AMBIGUOUS_RELATION'
+			(w) => w.code === 'AMBIGUOUS_RELATION',
 		);
 		expect(ambiguityWarning?.message).toContain('authoredPosts');
 	});
@@ -185,7 +185,7 @@ describe('Scenario 3: Via hint resolves ambiguity in strict mode', () => {
 		// Plan should succeed and have no ambiguity warnings
 		expect(planReport.rootTable).toBe('users');
 		const ambiguityWarning = planReport.warnings.find(
-			(w) => w.code === 'AMBIGUOUS_RELATION'
+			(w) => w.code === 'AMBIGUOUS_RELATION',
 		);
 		expect(ambiguityWarning).toBeUndefined();
 	});
@@ -206,7 +206,7 @@ describe('Scenario 4: Via hint works in lenient mode', () => {
 
 		// No ambiguity warning since we explicitly resolved
 		const ambiguityWarning = planReport.warnings.find(
-			(w) => w.code === 'AMBIGUOUS_RELATION'
+			(w) => w.code === 'AMBIGUOUS_RELATION',
 		);
 		expect(ambiguityWarning).toBeUndefined();
 	});
@@ -242,7 +242,7 @@ describe('Scenario 5: Unambiguous relation works in strict mode', () => {
 		const planReport = orm.query('users').include('profile').plan();
 
 		const ambiguityWarning = planReport.warnings.find(
-			(w) => w.code === 'AMBIGUOUS_RELATION'
+			(w) => w.code === 'AMBIGUOUS_RELATION',
 		);
 		expect(ambiguityWarning).toBeUndefined();
 	});
@@ -273,7 +273,7 @@ describe('Scenario 6: Default strictMode is lenient', () => {
 		const planReport = orm.query('users').include('posts').plan();
 
 		const ambiguityWarning = planReport.warnings.find(
-			(w) => w.code === 'AMBIGUOUS_RELATION'
+			(w) => w.code === 'AMBIGUOUS_RELATION',
 		);
 		expect(ambiguityWarning).toBeDefined();
 	});
@@ -300,8 +300,8 @@ describe('Scenario 7: Invalid via hint behavior', () => {
 			.plan();
 
 		// Should have warning about unknown relation
-		const warning = planReport.warnings.find(
-			(w) => w.message.includes('nonExistentRelation')
+		const warning = planReport.warnings.find((w) =>
+			w.message.includes('nonExistentRelation'),
 		);
 		expect(warning).toBeDefined();
 	});
@@ -316,8 +316,8 @@ describe('Scenario 7: Invalid via hint behavior', () => {
 			.plan();
 
 		// Should have warning about unknown relation
-		const warning = planReport.warnings.find(
-			(w) => w.message.includes('nonExistentRelation')
+		const warning = planReport.warnings.find((w) =>
+			w.message.includes('nonExistentRelation'),
 		);
 		expect(warning).toBeDefined();
 	});

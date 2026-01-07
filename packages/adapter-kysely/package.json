@@ -23,13 +23,13 @@
 		"@db-semantic-planner/core": "workspace:*"
 	},
 	"peerDependencies": {
-		"kysely": "^0.28.0"
+		"kysely": "catalog:"
 	},
 	"devDependencies": {
 		"@types/better-sqlite3": "^7.6.13",
 		"@types/node": "catalog:",
 		"better-sqlite3": "^12.5.0",
-		"kysely": "^0.28.9",
+		"kysely": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"
 	}
