@@ -23,7 +23,6 @@ export {
 	UNKNOWN_CAPABILITIES,
 	withMockedCapabilities,
 } from './dialect.js';
-
 // Dump API (high-level observability)
 export {
 	createDump,
@@ -41,6 +40,14 @@ export {
 } from './errors.js';
 // EXPLAIN API (ADAPTER-004)
 export { explain } from './explain.js';
+export type {
+	DetectedHierarchy,
+	ForeignKeyInfo,
+	IntrospectedModelIR,
+	IntrospectionOptions,
+} from './introspection.js';
+// Introspection (ADAPTER-006)
+export { introspect } from './introspection.js';
 // Redaction API (ADAPTER-004)
 export { redactParams } from './redact.js';
 export type { StreamQueryOptions } from './stream.js';

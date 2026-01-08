@@ -44,6 +44,42 @@ MUST NOT import from: packages/dx
 
 ---
 
+## Completed - P2 Features
+
+### ADAPTER-006: Schema Introspection ✅ (2026-01-08)
+
+**Spec:** [docs/specs/ADAPTER-006-schema-introspection.md](docs/specs/ADAPTER-006-schema-introspection.md)
+
+Auto-infer ModelIR from database via Kysely introspection with automatic hierarchy detection.
+
+- [x] ✅ Block 1: Core Introspection (2026-01-08)
+  - `introspect(db, options?)` function
+  - TableMetadata → TableIR mapping
+  - Column type mapping (varchar→string, int→number, etc.)
+  - Primary key detection (auto-increment columns)
+  - Table filtering (exclude/include glob patterns)
+- [x] ✅ Block 2: Relation Inference (2026-01-08)
+  - FK → belongsTo relation (owner → target)
+  - FK → hasMany relation (target → owner)
+  - camelCase/snake_case naming options
+  - Composite FK support
+- [x] ✅ Block 3: Hierarchy Detection (2026-01-08)
+  - Adjacency pattern (self-referential FK)
+  - Edge-table pattern (2 FKs to same target)
+  - DetectedHierarchy metadata
+- [x] ✅ Block 4: Integration & Export (2026-01-08)
+  - IntrospectedModelIR interface (extends ModelIR)
+  - hierarchies, introspectedAt, warnings properties
+  - Export from index.ts
+
+**Results:**
+- 49 new tests in introspection.test.ts
+- 336 total tests passing in adapter-kysely
+- PostgreSQL information_schema FK query
+- `_foreignKeysForTesting` option for dependency injection
+
+---
+
 ## In Progress
 
 ### RFC-001: Recursive CTE Support - MVP ✅ (2026-01-08)

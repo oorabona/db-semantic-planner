@@ -318,3 +318,29 @@ function compileRecursive(
 ```
 
 **Location:** `packages/adapter-kysely/src/compiler.ts:126`
+
+---
+
+### Introspection: Don't Transform Data From Source (2026-01-08)
+
+**Issue:** Attempted to pluralize table names for hasMany relations. `pluralize('posts')` returned `'postses'`.
+
+**Root cause:** Over-engineering. Tried to be "smart" by transforming table names instead of using them as-is.
+
+**Lesson learned:**
+1. Introspection gives real names → use them directly
+2. Don't invent data that doesn't exist
+3. If manual schema definition, developer provides real names
+4. Transformations are fragile and will break on edge cases
+
+**Solution:** Use source data directly, no transformation:
+
+```typescript
+// ❌ WRONG - over-engineering
+const hasManyName = pluralize(fk.sourceTable);
+
+// ✅ CORRECT - use as-is
+const hasManyName = fk.sourceTable;
+```
+
+**Location:** `packages/adapter-kysely/src/introspection.ts` - `inferRelations()`

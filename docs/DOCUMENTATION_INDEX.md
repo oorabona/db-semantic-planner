@@ -52,6 +52,7 @@ packages/dx            → Depends on core + adapter-kysely
 | ADAPTER-001 | [Kysely Dump/Compile/Execute](specs/ADAPTER-001-kysely-dump-compile-execute.md) | adapter | ✅ canonical |
 | ADAPTER-002 | Multi-tenant | adapter | ✅ implemented (in ADAPTER-001) |
 | ADAPTER-004 | [Enhanced Observability](specs/ADAPTER-004-enhanced-observability.md) | adapter | ✅ canonical |
+| ADAPTER-006 | [Schema Introspection](specs/ADAPTER-006-schema-introspection.md) | adapter | ✅ canonical |
 | DX-001 | [Strict Mode](specs/DX-001-strict-mode.md) | dx | ✅ canonical |
 | DX-003 | [Compat Layer](specs/DX-003-compat-layer.md) | dx | ✅ canonical |
 | DX-004 | dump()/execute() API | dx | ✅ in E2E-001 |
@@ -130,7 +131,7 @@ packages/dx            → Depends on core + adapter-kysely
 
 - No cost-based optimization
 - No join reordering
-- No runtime schema introspection
+- ~~No runtime schema introspection~~ → Added in P2 (ADAPTER-006)
 - No NL-to-SQL
 - No multi-dialect correctness (PostgreSQL only)
 - No change tracking / dirty checking
