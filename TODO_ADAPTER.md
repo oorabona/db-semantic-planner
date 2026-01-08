@@ -41,6 +41,44 @@ MUST NOT import from: packages/dx
 
 ---
 
+## Completed - Tech Debt
+
+### REFACTOR-001: Replace raw SQL with Kysely Expression Builder ✅ (2026-01-08)
+
+**Priority:** HIGH (architectural debt)
+**Discovered:** 2026-01-08 (Security Audit)
+**Scope:** `packages/adapter-kysely/src/compiler.ts`
+
+**Problem:** Recursive CTE used `sql` template tag (raw SQL) instead of Kysely's type-safe expression builder API.
+
+**Remaining raw SQL (irreducible):**
+```typescript
+// compiler.ts:289 - ARRAY literal (no Kysely equivalent)
+sql`ARRAY[${sql.ref('col')}]`
+
+// compiler.ts:794 - Raw expression kind (intentional escape hatch)
+sql`${sql.raw(expr.sql)}`
+```
+
+**Refactored to Kysely API:**
+```typescript
+// Array concat - now uses eb() binary expression (compiler.ts:405, 507)
+eb(eb.ref('prev.path'), '||', eb.ref('node.${traversal.nodeId}')).as('path')
+```
+
+**Tasks:**
+- [x] ✅ Refactor array concatenation to use `eb(a, '||', b)` (2026-01-08)
+- [x] ⏭️ ANY check: Not needed (never implemented, deferred to future cycle detection)
+- [x] ✅ Document that ARRAY literal still requires sql template (2026-01-08)
+
+**Results:**
+- Raw SQL reduced from 3 operations to 2 (ARRAY literal + raw escape hatch)
+- Array concatenation now uses type-safe Kysely expression builder
+- All 553 tests pass - behavior unchanged
+- Typecheck and lint pass
+
+---
+
 ## Pending - P3 (Advanced PostgreSQL Features)
 
 **Study:** [STUDY-001-advanced-postgresql-features.md](docs/studies/STUDY-001-advanced-postgresql-features.md)

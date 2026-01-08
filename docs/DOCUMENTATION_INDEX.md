@@ -4,7 +4,7 @@ doc-meta:
   scope: project
   type: reference
   created: 2026-01-06
-  updated: 2026-01-07
+  updated: 2026-01-08
 ---
 
 # Documentation Index
@@ -144,6 +144,13 @@ packages/dx            → Depends on core + adapter-kysely
 | Study ID | Title | Scope | Status |
 |----------|-------|-------|--------|
 | STUDY-001 | [Advanced PostgreSQL Features](studies/STUDY-001-advanced-postgresql-features.md) | adapter | 📚 reference |
+
+## Security Reports
+
+| Report | Date | Verdict | Findings |
+|--------|------|---------|----------|
+| [Security Audit 2026-01-08](reports/SECURITY_AUDIT_2026-01-08.md) | 2026-01-08 | ✅ SECURE | 0 critical, 0 high, 0 medium |
+| [Security Audit 2026-01-07](reports/SECURITY_AUDIT_2026-01-07.md) | 2026-01-07 | ✅ SECURE | - |
 
 ## Archived
 

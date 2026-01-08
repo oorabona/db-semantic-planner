@@ -402,9 +402,9 @@ function buildAdjacencyRecursiveStep(
 			selections.push(eb('prev.depth', '+', eb.lit(1)).as('depth'));
 		}
 		if (intent.track?.path) {
-			// path = prev.path || node.id (PostgreSQL array concat)
+			// path = prev.path || node.id (PostgreSQL array concat, using native Kysely expression builder)
 			selections.push(
-				sql`${sql.ref('prev.path')} || ${sql.ref(`node.${traversal.nodeId}`)}`.as(
+				eb(eb.ref('prev.path'), '||', eb.ref(`node.${traversal.nodeId}`)).as(
 					'path',
 				),
 			);
@@ -505,8 +505,9 @@ function buildEdgeTableRecursiveStep(
 			selections.push(eb('prev.depth', '+', eb.lit(1)).as('depth'));
 		}
 		if (intent.track?.path) {
+			// path = prev.path || node.id (PostgreSQL array concat, using native Kysely expression builder)
 			selections.push(
-				sql`${sql.ref('prev.path')} || ${sql.ref(`node.${traversal.nodeId}`)}`.as(
+				eb(eb.ref('prev.path'), '||', eb.ref(`node.${traversal.nodeId}`)).as(
 					'path',
 				),
 			);
