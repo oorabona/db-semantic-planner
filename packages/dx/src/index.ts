@@ -68,6 +68,8 @@ export type {
 	NestedInclude,
 	OrmInstance,
 	OrmOptions,
+	OrmOptionsWithDb,
+	OrmOptionsWithModel,
 	QueryBuilder,
 	RelationHints,
 	StreamOptions,

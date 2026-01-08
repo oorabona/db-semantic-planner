@@ -1,6 +1,7 @@
 import {
 	compile,
 	type Dump,
+	introspect,
 	streamQuery,
 	validateIdentifier,
 } from '@db-semantic-planner/adapter-kysely';
@@ -33,6 +34,8 @@ import type {
 	NestedInclude,
 	OrmInstance,
 	OrmOptions,
+	OrmOptionsWithDb,
+	OrmOptionsWithModel,
 	QueryBuilder,
 	RelationHints,
 	StreamOptions,
@@ -44,22 +47,41 @@ import type {
  * @param options - Configuration options including model and strictMode
  * @returns An ORM instance for building and planning queries
  *
- * @example
+ * @example With explicit model (sync)
  * ```typescript
  * const orm = createOrm({
  *   model: mySchema,
- *   strictMode: true,  // Throws on ambiguous relations
+ *   strictMode: true,
  * });
+ * ```
  *
- * const plan = orm.query('users')
- *   .include('posts', { via: 'authoredPosts' })
- *   .plan();
+ * @example Zero-config with auto-introspection (async)
+ * ```typescript
+ * const orm = await createOrm({ db });
+ * const users = await orm.query('users').findMany();
  * ```
  */
-export function createOrm(options: OrmOptions): OrmInstance {
+export function createOrm(options: OrmOptionsWithModel): OrmInstance;
+export function createOrm(options: OrmOptionsWithDb): Promise<OrmInstance>;
+export function createOrm(
+	options: OrmOptionsWithModel | OrmOptionsWithDb,
+): OrmInstance | Promise<OrmInstance> {
 	const { model, strictMode = false, relationHints = {}, db } = options;
 
-	return createOrmInstance(model, strictMode, relationHints, db);
+	// If model is provided, create synchronously
+	if (model) {
+		return createOrmInstance(model, strictMode, relationHints, db);
+	}
+
+	// If no model but db is provided, introspect and create async
+	if (db) {
+		return introspect(db).then((introspectedModel) =>
+			createOrmInstance(introspectedModel, strictMode, relationHints, db),
+		);
+	}
+
+	// Neither model nor db - this shouldn't happen with proper types
+	throw new Error('Either model or db must be provided to createOrm');
 }
 
 /**
