@@ -137,7 +137,7 @@ packages/dx            → Depends on core + adapter-kysely
 
 | RFC ID | Title | Scope | Status |
 |--------|-------|-------|--------|
-| RFC-001 | [Recursive CTE Support](rfcs/RFC-001-recursive-cte.md) | core, adapter | 🟡 draft |
+| RFC-001 | [Recursive CTE Support](rfcs/RFC-001-recursive-cte.md) | core, adapter | ✅ canonical |
 
 ## Studies
 

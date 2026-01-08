@@ -374,6 +374,265 @@ export interface QueryIntent {
 }
 
 // ============================================================================
+// Recursive CTE Intent - Hierarchical Data Traversal (RFC-001)
+// ============================================================================
+
+/**
+ * Node ID expression for recursive CTE anchor.
+ * Used to define the join key for recursive traversal.
+ */
+export type RecursiveNodeIdExpr =
+	| { readonly kind: 'column'; readonly name: string; readonly as?: string }
+	| {
+			readonly kind: 'literal';
+			readonly value: unknown;
+			readonly as?: string;
+	  }
+	| {
+			readonly kind: 'binary';
+			readonly left: RecursiveNodeIdExpr;
+			readonly op: string;
+			readonly right: RecursiveNodeIdExpr;
+			readonly as?: string;
+	  };
+
+/**
+ * Adjacency-list traversal (self-referential table).
+ * Example: roles.parent_id → roles.id
+ */
+export interface AdjacencyTraversal {
+	readonly kind: 'adjacency';
+
+	/** Table containing hierarchical data */
+	readonly nodeTable: string;
+
+	/** Primary key column (e.g., "id") */
+	readonly nodeId: string;
+
+	/** Foreign key pointing to parent (e.g., "parent_id") */
+	readonly parentId: string;
+
+	/** Traversal direction */
+	readonly direction: 'descendants' | 'ancestors';
+
+	/** Filter applied to each step (e.g., active = true) */
+	readonly stepWhere?: WhereIntent;
+}
+
+/**
+ * Edge-table traversal (separate join table).
+ * Example: role_inheritance(from_role_id, to_role_id)
+ */
+export interface EdgeTableTraversal {
+	readonly kind: 'edge-table';
+
+	/** Node table containing hierarchical data */
+	readonly nodeTable: string;
+
+	/** Edge table containing relationships */
+	readonly edgeTable: string;
+
+	/** Primary key column in node table (e.g., "id") */
+	readonly nodeId: string;
+
+	/** Source column in edge table (e.g., "from_role_id") */
+	readonly edgeFrom: string;
+
+	/** Target column in edge table (e.g., "to_role_id") */
+	readonly edgeTo: string;
+
+	/** Traversal direction */
+	readonly direction: 'out' | 'in' | 'both';
+
+	/** Filter on edges (e.g., relationship_type = 'inheritance') */
+	readonly edgeWhere?: WhereIntent;
+
+	/** Filter on nodes (e.g., active = true) */
+	readonly nodeWhere?: WhereIntent;
+
+	/** Edge attributes to include in result */
+	readonly edgeSelect?: readonly string[];
+
+	/**
+	 * Hint for edge storage semantics (only affects `direction: 'both'`).
+	 *
+	 * - 'unknown' (default): Edges may exist in both directions (A→B and B→A).
+	 *   Uses UNION (distinct) to avoid duplicates. Safe but slower.
+	 * - 'directed-only': Caller guarantees edges are stored once only.
+	 *   Uses UNION ALL for performance. INCORRECT if duplicates exist.
+	 */
+	readonly edgeStorageHint?: 'unknown' | 'directed-only';
+}
+
+/**
+ * Custom traversal for complex cases (P2 escape hatch).
+ */
+export interface CustomTraversal {
+	readonly kind: 'custom';
+	/** Explicit step query builder - reserved for P2 */
+	readonly stepBuilder?: unknown;
+}
+
+/**
+ * Recursive traversal type union.
+ */
+export type RecursiveTraversal =
+	| AdjacencyTraversal
+	| EdgeTableTraversal
+	| CustomTraversal;
+
+/**
+ * Tracking options for recursive traversal.
+ */
+export interface RecursiveTrackOptions {
+	/** Depth counter (starts at 0) */
+	readonly depth?: {
+		readonly as?: string; // Default: "depth"
+	};
+
+	/** Path tracking for cycle detection + debugging */
+	readonly path?: {
+		/** Columns to trace in path (default: nodeId only) */
+		readonly by?: 'nodeId' | readonly string[];
+		/** Result column name (default: "path") */
+		readonly as?: string;
+		/** Storage strategy (default: 'array' for PostgreSQL) */
+		readonly strategy?: 'array' | 'string';
+	};
+
+	/** Cycle detection marker */
+	readonly isCycle?: {
+		readonly as?: string; // Default: "is_cycle"
+	};
+}
+
+/**
+ * Emit options for recursive CTE final projection.
+ */
+export interface RecursiveEmitOptions {
+	/** Fields to select from CTE */
+	readonly select?: readonly string[];
+	/** Filter on generated rows */
+	readonly where?: WhereIntent;
+	/** Ordering */
+	readonly orderBy?: readonly OrderByIntent[];
+}
+
+/**
+ * PostgreSQL-specific options for recursive CTE (capability-gated).
+ */
+export interface RecursivePgOptions {
+	/**
+	 * Native CYCLE clause (PG14+).
+	 * - 'error': Throw on cycle
+	 * - 'stop': Stop traversal at cycle
+	 * - 'mark': Add is_cycle column
+	 */
+	readonly cycle?: 'error' | 'stop' | 'mark';
+
+	/**
+	 * Native SEARCH clause (PG14+).
+	 * - 'depth': Depth-first search order
+	 * - 'breadth': Breadth-first search order
+	 */
+	readonly search?: 'depth' | 'breadth';
+}
+
+/**
+ * Deduplication strategy for recursive CTE.
+ *
+ * - 'none': No dedup. May return same node multiple times via different paths.
+ *   Fastest. Use when you need all paths or when graph is known to be a tree.
+ *
+ * - 'final' (default): One row per nodeId in final output.
+ *   Implemented via `DISTINCT ON (nodeId)` (PostgreSQL) or
+ *   `ROW_NUMBER() OVER (PARTITION BY nodeId)` fallback.
+ *   ⚠️ NOT the same as `query.distinct()` which dedupes on entire row!
+ *
+ * - 'global': UNION instead of UNION ALL in recursive member.
+ *   Expensive (set membership check every iteration) but guarantees
+ *   each node is visited exactly once during traversal.
+ */
+export type RecursiveDedupe = 'none' | 'final' | 'global';
+
+/**
+ * Recursive CTE intent for hierarchical data traversal.
+ *
+ * Key invariant: anchor and step MUST produce identical column shape.
+ * The planner validates this and auto-injects nodeIdExpr.
+ *
+ * @see RFC-001 for detailed specification
+ */
+export interface RecursiveIntent {
+	readonly type: 'recursive';
+
+	/** CTE name for the recursive query */
+	readonly cteName: string;
+
+	// ─────────────────────────────────────────────────────────────────────────
+	// START (anchor/seed)
+	// ─────────────────────────────────────────────────────────────────────────
+
+	readonly start: {
+		/** Source table for anchor query */
+		readonly from: string;
+
+		/** Filter for seed rows (e.g., where id = $userId) */
+		readonly where?: WhereIntent;
+
+		/**
+		 * REQUIRED: Expression for node ID. Auto-injected into select.
+		 * This ensures the recursive join always has the key column.
+		 */
+		readonly nodeIdExpr: RecursiveNodeIdExpr;
+
+		/** Additional fields to select (beyond nodeId) */
+		readonly select?: readonly string[];
+	};
+
+	// ─────────────────────────────────────────────────────────────────────────
+	// TRAVERSAL
+	// ─────────────────────────────────────────────────────────────────────────
+
+	/** Traversal configuration (adjacency-list or edge-table) */
+	readonly traversal: RecursiveTraversal;
+
+	// ─────────────────────────────────────────────────────────────────────────
+	// TRACKING (system columns)
+	// ─────────────────────────────────────────────────────────────────────────
+
+	/** Tracking options for depth, path, and cycle detection */
+	readonly track?: RecursiveTrackOptions;
+
+	// ─────────────────────────────────────────────────────────────────────────
+	// SAFETY
+	// ─────────────────────────────────────────────────────────────────────────
+
+	/** Maximum recursion depth (REQUIRED) */
+	readonly maxDepth: number;
+
+	/** Maximum rows (optional safety limit) */
+	readonly maxRows?: number;
+
+	/** Deduplication strategy */
+	readonly dedupe?: RecursiveDedupe;
+
+	// ─────────────────────────────────────────────────────────────────────────
+	// EMIT (final projection)
+	// ─────────────────────────────────────────────────────────────────────────
+
+	/** Final projection options */
+	readonly emit?: RecursiveEmitOptions;
+
+	// ─────────────────────────────────────────────────────────────────────────
+	// POSTGRESQL-SPECIFIC (capability-gated)
+	// ─────────────────────────────────────────────────────────────────────────
+
+	/** PostgreSQL-specific options (PG14+ SEARCH/CYCLE clauses) */
+	readonly pgOptions?: RecursivePgOptions;
+}
+
+// ============================================================================
 // Type Guards
 // ============================================================================
 
@@ -528,4 +787,44 @@ export function isRawExpression(
 	expr: ExpressionIntent,
 ): expr is RawExpressionIntent {
 	return expr.kind === 'raw';
+}
+
+// ============================================================================
+// Recursive CTE Type Guards
+// ============================================================================
+
+/**
+ * Check if a traversal is adjacency-list based
+ */
+export function isAdjacencyTraversal(
+	traversal: RecursiveTraversal,
+): traversal is AdjacencyTraversal {
+	return traversal.kind === 'adjacency';
+}
+
+/**
+ * Check if a traversal is edge-table based
+ */
+export function isEdgeTableTraversal(
+	traversal: RecursiveTraversal,
+): traversal is EdgeTableTraversal {
+	return traversal.kind === 'edge-table';
+}
+
+/**
+ * Check if a traversal is custom
+ */
+export function isCustomTraversal(
+	traversal: RecursiveTraversal,
+): traversal is CustomTraversal {
+	return traversal.kind === 'custom';
+}
+
+/**
+ * Check if an intent is a recursive CTE intent
+ */
+export function isRecursiveIntent(
+	intent: QueryIntent | RecursiveIntent,
+): intent is RecursiveIntent {
+	return intent.type === 'recursive';
 }

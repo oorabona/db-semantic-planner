@@ -15,25 +15,35 @@ MUST NOT import from: packages/dx
 
 ## In Progress
 
-(none)
+### RFC-001: Recursive CTE Support - MVP ✅ (2026-01-08)
+
+**RFC:** [RFC-001-recursive-cte.md](docs/rfcs/RFC-001-recursive-cte.md)
+**Use case:** IAM/RBAC role hierarchy, category trees, org charts
+
+- [x] ✅ Block 3: Compiler using Kysely native `withRecursive()` + CTE orchestration (2026-01-08)
+  - `compileRecursive()` function in compiler.ts
+  - Handles UNION vs UNION ALL based on bidirectional-edges decision
+  - `buildRecursiveBaseCase()` for anchor query with depth=0, path array
+  - `buildAdjacencyRecursiveStep()` for self-referential traversal
+  - `buildEdgeTableRecursiveStep()` for edge-table traversal
+  - Native Kysely expressions for arithmetic (`eb(left, '+', eb.lit(1))`)
+  - Dedupe:'final' with DISTINCT ON
+  - Emit filters (where, orderBy) support
+- [x] ✅ Block 4: Unit tests for recursive CTE compilation (2026-01-08) - 9 tests
+
+**Deferred to P2:**
+- [ ] Block 5: DX API (`orm.query().withRecursive()`)
+- [ ] Block 6: E2E tests with real PostgreSQL
+
+**Test Gaps (NON-BLOCKING, deferred):**
+- [ ] F-004: Add test for `dedupe: 'global'` strategy (M)
+- [ ] F-005: Add test for `ancestors` direction (M)
 
 ---
 
 ## Pending - P3 (Advanced PostgreSQL Features)
 
 **Study:** [STUDY-001-advanced-postgresql-features.md](docs/studies/STUDY-001-advanced-postgresql-features.md)
-
-### RFC-001: Recursive CTE Support 🟡 DRAFT
-
-**RFC:** [RFC-001-recursive-cte.md](docs/rfcs/RFC-001-recursive-cte.md)
-**Priority:** CRITICAL (changes planner fundamentally)
-**Use case:** IAM/RBAC role hierarchy, category trees, org charts
-
-- [ ] Block 1: Core types (`RecursiveIntent`, `selfReference` in ModelIR)
-- [ ] Block 2: Planner logic for recursive queries
-- [ ] Block 3: Compiler using Kysely native `withRecursive()` + `.unionAll()`
-- [ ] Block 4: DX API (`orm.query().withRecursive()`)
-- [ ] Block 5: E2E tests with real PostgreSQL
 
 ### Future P3 Features (pending RFCs)
 

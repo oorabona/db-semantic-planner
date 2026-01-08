@@ -21,17 +21,6 @@
 
 ## Pending - P3 (Advanced Features)
 
-### RFC-001: Recursive CTE Support 🟡 DRAFT
-
-**RFC:** [docs/rfcs/RFC-001-recursive-cte.md](docs/rfcs/RFC-001-recursive-cte.md)
-**Priority:** CRITICAL (changes QueryIntent from tree to DAG)
-
-- [ ] Add `RecursiveIntent` to intent-ast.ts
-- [ ] Add `selfReference` to RelationDefinition in model-ir.ts
-- [ ] Add `recursive-cte` decision type to planner
-- [ ] Add recursive planning logic
-- [ ] Unit tests for recursive intent creation and planning
-
 ### Future P3 Features (pending RFCs)
 
 - [ ] `WindowIntent` for window functions (OVER PARTITION BY)
@@ -39,7 +28,18 @@
 
 ---
 
-## Completed - MVP ✅ (106 tests)
+## Completed - MVP ✅ (119 tests)
+
+### RFC-001: Recursive CTE Support ✅ (2026-01-08)
+
+**RFC:** [docs/rfcs/RFC-001-recursive-cte.md](docs/rfcs/RFC-001-recursive-cte.md)
+
+- [x] ✅ Block 1: Add `RecursiveIntent` + traversal types to intent-ast.ts (2026-01-08)
+- [x] ✅ Block 2: Add shape validation + `recursive-cte` decision type to planner (2026-01-08)
+- [x] ✅ Unit tests for recursive intent creation and planning (2026-01-08) - 13 tests
+
+---
+
 
 ### CORE-001: ModelIR Types ([spec](docs/specs/CORE-001-model-ir.md))
 

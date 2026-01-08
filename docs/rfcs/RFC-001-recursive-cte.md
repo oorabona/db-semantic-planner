@@ -2,12 +2,13 @@
 
 ---
 doc-meta:
-  status: draft
+  status: canonical
   scope: core, adapter
   type: rfc
   created: 2026-01-08
   updated: 2026-01-08
   version: 3.1
+  implemented: 2026-01-08
 ---
 
 # RFC-001: Recursive CTE Support

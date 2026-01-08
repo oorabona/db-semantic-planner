@@ -707,7 +707,11 @@ describe('Execution Layer', () => {
 		it('returns empty array when offset exceeds count', async () => {
 			const orm = createOrm({ model: testModel, db });
 			// Note: SQLite requires LIMIT when using OFFSET
-			const results = await orm.query('users').limit(100).offset(100).findMany();
+			const results = await orm
+				.query('users')
+				.limit(100)
+				.offset(100)
+				.findMany();
 
 			expect(results).toHaveLength(0);
 		});

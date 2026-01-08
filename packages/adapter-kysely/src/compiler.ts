@@ -9,11 +9,16 @@ import type {
 	ModelIR,
 	PlanReport,
 	QueryIntent,
+	RecursiveIntent,
+	RecursiveNodeIdExpr,
+	RecursivePlanReport,
 	SelectAggregateIntent,
 	SelectWithExpressionsIntent,
 	WhereIntent,
 } from '@db-semantic-planner/core';
 import {
+	isAdjacencyTraversal,
+	isEdgeTableTraversal,
 	isSelectAggregate,
 	isSelectWithExpressions,
 } from '@db-semantic-planner/core';
@@ -106,6 +111,526 @@ export function compile(
 	}
 
 	return query.compile();
+}
+
+// ============================================================================
+// Recursive CTE Compiler (RFC-001)
+// ============================================================================
+
+/**
+ * Compile a RecursivePlanReport into a Kysely CompiledQuery.
+ * Per RFC-001: Uses native Kysely APIs, NEVER raw SQL.
+ */
+export function compileRecursive(
+	plan: RecursivePlanReport,
+	_model: ModelIR, // Reserved for future use (e.g., relation metadata lookups)
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	kysely: Kysely<any>,
+	schemaName?: string,
+): CompiledQuery {
+	const intent = plan.intent;
+	const cteName = intent.cteName;
+
+	// Determine if we need UNION (distinct) or UNION ALL
+	const bidirectionalDecision = plan.decisions.find(
+		(d: { type: string; choice: string }) => d.type === 'bidirectional-edges',
+	);
+	const useUnionAll = bidirectionalDecision?.choice !== 'union';
+
+	// Build column list for CTE definition
+	const cteColumns = buildCteColumnList(intent);
+	const cteNameWithColumns = `${cteName}(${cteColumns.join(', ')})`;
+
+	// Build the recursive CTE
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic CTE building requires any
+	let builder: any = kysely;
+
+	// Use withRecursive for the recursive CTE
+	builder = builder.withRecursive(
+		cteNameWithColumns,
+		// biome-ignore lint/suspicious/noExplicitAny: Dynamic CTE callback
+		(db: Kysely<any>) => {
+			// Build base case (anchor)
+			const baseQuery = buildRecursiveBaseCase(intent, db, schemaName);
+
+			// Build recursive case
+			const recursiveQuery = buildRecursiveStep(
+				intent,
+				db,
+				cteName,
+				schemaName,
+			);
+
+			// Combine with UNION or UNION ALL
+			if (useUnionAll) {
+				return baseQuery.unionAll(recursiveQuery);
+			}
+			return baseQuery.union(recursiveQuery);
+		},
+	);
+
+	// Build the final SELECT from the CTE
+	let finalQuery = builder.selectFrom(cteName).selectAll();
+
+	// Apply dedupe strategy
+	if (intent.dedupe === 'final') {
+		// DISTINCT ON (node_id) - PostgreSQL specific
+		// Per RFC-001: 1 row per nodeId, keep first (shallowest depth)
+		const nodeIdAlias = getNodeIdAlias(intent.start.nodeIdExpr);
+		finalQuery = finalQuery.distinctOn(nodeIdAlias);
+		// Order by node_id, depth to ensure we get shallowest first
+		if (intent.track?.depth) {
+			finalQuery = finalQuery.orderBy(nodeIdAlias).orderBy('depth');
+		} else {
+			finalQuery = finalQuery.orderBy(nodeIdAlias);
+		}
+	}
+
+	// Apply emit filters if specified
+	if (intent.emit?.where) {
+		// Apply custom WHERE filter on final results
+		finalQuery = addWhereSimple(finalQuery, intent.emit.where, cteName);
+	}
+
+	// Apply ordering from emit options
+	if (intent.emit?.orderBy) {
+		for (const order of intent.emit.orderBy) {
+			const direction = order.direction === 'desc' ? 'desc' : 'asc';
+			finalQuery = finalQuery.orderBy(order.field, direction);
+		}
+	}
+
+	return finalQuery.compile();
+}
+
+/**
+ * Build the list of columns for the CTE definition.
+ */
+function buildCteColumnList(intent: RecursiveIntent): string[] {
+	const columns: string[] = [];
+
+	// node_id is always first
+	columns.push(getNodeIdAlias(intent.start.nodeIdExpr));
+
+	// select fields (if specified)
+	if (intent.start.select) {
+		columns.push(...intent.start.select);
+	}
+
+	// tracked columns
+	if (intent.track?.depth) {
+		columns.push('depth');
+	}
+	if (intent.track?.path) {
+		columns.push('path');
+	}
+
+	return columns;
+}
+
+/**
+ * Get the alias for the node_id expression.
+ */
+function getNodeIdAlias(expr: RecursiveNodeIdExpr): string {
+	if (expr.as) return expr.as;
+	if (expr.kind === 'column') return expr.name;
+	return 'node_id';
+}
+
+/**
+ * Build the base case (anchor) of the recursive CTE.
+ */
+function buildRecursiveBaseCase(
+	intent: RecursiveIntent,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	db: Kysely<any>,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	const startTable = schemaName
+		? `${schemaName}.${intent.start.from}`
+		: intent.start.from;
+
+	let query = db.selectFrom(`${startTable} as t0`);
+
+	// Build SELECT clause
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic select expressions
+	query = query.select((eb: any) => {
+		// biome-ignore lint/suspicious/noExplicitAny: Dynamic selections array
+		const selections: any[] = [];
+
+		// node_id expression
+		const nodeIdAlias = getNodeIdAlias(intent.start.nodeIdExpr);
+		if (intent.start.nodeIdExpr.kind === 'column') {
+			selections.push(
+				eb.ref(`t0.${intent.start.nodeIdExpr.name}`).as(nodeIdAlias),
+			);
+		} else if (intent.start.nodeIdExpr.kind === 'literal') {
+			selections.push(eb.val(intent.start.nodeIdExpr.value).as(nodeIdAlias));
+		}
+		// Binary expressions would need more complex handling
+
+		// Additional select fields
+		if (intent.start.select) {
+			for (const field of intent.start.select) {
+				selections.push(eb.ref(`t0.${field}`).as(field));
+			}
+		}
+
+		// Tracked columns - base case initializations
+		if (intent.track?.depth) {
+			selections.push(eb.lit(0).as('depth'));
+		}
+		if (intent.track?.path) {
+			// Initialize path as array with just the starting node_id
+			// PostgreSQL: ARRAY[node_id]
+			if (intent.start.nodeIdExpr.kind === 'column') {
+				selections.push(
+					sql`ARRAY[${sql.ref(`t0.${intent.start.nodeIdExpr.name}`)}]`.as(
+						'path',
+					),
+				);
+			}
+		}
+
+		return selections;
+	});
+
+	// Apply start WHERE clause
+	if (intent.start.where) {
+		query = addWhereSimple(query, intent.start.where, 't0');
+	}
+
+	return query;
+}
+
+/**
+ * Build the recursive step of the CTE.
+ */
+function buildRecursiveStep(
+	intent: RecursiveIntent,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	db: Kysely<any>,
+	cteName: string,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	const traversal = intent.traversal;
+	const nodeIdAlias = getNodeIdAlias(intent.start.nodeIdExpr);
+
+	if (isAdjacencyTraversal(traversal)) {
+		return buildAdjacencyRecursiveStep(
+			intent,
+			db,
+			cteName,
+			traversal,
+			nodeIdAlias,
+			schemaName,
+		);
+	}
+
+	if (isEdgeTableTraversal(traversal)) {
+		return buildEdgeTableRecursiveStep(
+			intent,
+			db,
+			cteName,
+			traversal,
+			nodeIdAlias,
+			schemaName,
+		);
+	}
+
+	throw new CompilationError(
+		`Unsupported traversal kind: ${traversal.kind}`,
+		'recursive-step',
+	);
+}
+
+/**
+ * Build recursive step for adjacency-list traversal (self-referential parent_id).
+ */
+function buildAdjacencyRecursiveStep(
+	intent: RecursiveIntent,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	db: Kysely<any>,
+	cteName: string,
+	traversal: Extract<RecursiveIntent['traversal'], { kind: 'adjacency' }>,
+	nodeIdAlias: string,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	const nodeTable = schemaName
+		? `${schemaName}.${traversal.nodeTable}`
+		: traversal.nodeTable;
+
+	// Join CTE with node table
+	// For descendants: prev.node_id = node.parent_id
+	// For ancestors: prev.node_id = node.id AND node.parent_id = prev.node_id
+	let query = db.selectFrom(`${cteName} as prev`);
+
+	if (traversal.direction === 'descendants') {
+		// Find children: node.parent_id = prev.node_id
+		query = query.innerJoin(`${nodeTable} as node`, (join) =>
+			join.onRef(`node.${traversal.parentId}`, '=', `prev.${nodeIdAlias}`),
+		);
+	} else {
+		// Find parents: prev.parent_id = node.id (ancestors)
+		query = query.innerJoin(`${nodeTable} as node`, (join) =>
+			join.onRef(`prev.${traversal.parentId}`, '=', `node.${traversal.nodeId}`),
+		);
+	}
+
+	// Build SELECT clause
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic select expressions
+	query = query.select((eb: any) => {
+		// biome-ignore lint/suspicious/noExplicitAny: Dynamic selections array
+		const selections: any[] = [];
+
+		// node_id from the joined table
+		selections.push(eb.ref(`node.${traversal.nodeId}`).as(nodeIdAlias));
+
+		// Additional select fields
+		if (intent.start.select) {
+			for (const field of intent.start.select) {
+				selections.push(eb.ref(`node.${field}`).as(field));
+			}
+		}
+
+		// Tracked columns - recursive expressions
+		if (intent.track?.depth) {
+			// depth = prev.depth + 1, using native Kysely expression builder
+			selections.push(eb('prev.depth', '+', eb.lit(1)).as('depth'));
+		}
+		if (intent.track?.path) {
+			// path = prev.path || node.id (PostgreSQL array concat)
+			selections.push(
+				sql`${sql.ref('prev.path')} || ${sql.ref(`node.${traversal.nodeId}`)}`.as(
+					'path',
+				),
+			);
+		}
+
+		return selections;
+	});
+
+	// Apply maxDepth constraint
+	if (intent.track?.depth && intent.maxDepth > 0) {
+		query = query.where('prev.depth', '<', intent.maxDepth);
+	}
+
+	// Apply step WHERE clause
+	if (traversal.stepWhere) {
+		query = addWhereSimple(query, traversal.stepWhere, 'node');
+	}
+
+	return query;
+}
+
+/**
+ * Build recursive step for edge-table traversal (separate join table).
+ */
+function buildEdgeTableRecursiveStep(
+	intent: RecursiveIntent,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	db: Kysely<any>,
+	cteName: string,
+	traversal: Extract<RecursiveIntent['traversal'], { kind: 'edge-table' }>,
+	nodeIdAlias: string,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	const nodeTable = schemaName
+		? `${schemaName}.${traversal.nodeTable}`
+		: traversal.nodeTable;
+	const edgeTable = schemaName
+		? `${schemaName}.${traversal.edgeTable}`
+		: traversal.edgeTable;
+
+	// Start from CTE
+	let query = db.selectFrom(`${cteName} as prev`);
+
+	// Join with edge table and node table based on direction
+	if (traversal.direction === 'out') {
+		// Outgoing edges: prev -> edge.from -> edge.to -> node
+		query = query
+			.innerJoin(`${edgeTable} as edge`, (join) =>
+				join.onRef(`edge.${traversal.edgeFrom}`, '=', `prev.${nodeIdAlias}`),
+			)
+			.innerJoin(`${nodeTable} as node`, (join) =>
+				join.onRef(`node.${traversal.nodeId}`, '=', `edge.${traversal.edgeTo}`),
+			);
+	} else if (traversal.direction === 'in') {
+		// Incoming edges: prev <- edge.to <- edge.from <- node
+		query = query
+			.innerJoin(`${edgeTable} as edge`, (join) =>
+				join.onRef(`edge.${traversal.edgeTo}`, '=', `prev.${nodeIdAlias}`),
+			)
+			.innerJoin(`${nodeTable} as node`, (join) =>
+				join.onRef(
+					`node.${traversal.nodeId}`,
+					'=',
+					`edge.${traversal.edgeFrom}`,
+				),
+			);
+	} else {
+		// Both directions: handled by UNION in the calling code
+		// Here we just do outgoing, the UNION handles combining both
+		query = query
+			.innerJoin(`${edgeTable} as edge`, (join) =>
+				join.onRef(`edge.${traversal.edgeFrom}`, '=', `prev.${nodeIdAlias}`),
+			)
+			.innerJoin(`${nodeTable} as node`, (join) =>
+				join.onRef(`node.${traversal.nodeId}`, '=', `edge.${traversal.edgeTo}`),
+			);
+	}
+
+	// Build SELECT clause
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic select expressions
+	query = query.select((eb: any) => {
+		// biome-ignore lint/suspicious/noExplicitAny: Dynamic selections array
+		const selections: any[] = [];
+
+		// node_id from the joined node table
+		selections.push(eb.ref(`node.${traversal.nodeId}`).as(nodeIdAlias));
+
+		// Additional select fields from node table
+		if (intent.start.select) {
+			for (const field of intent.start.select) {
+				selections.push(eb.ref(`node.${field}`).as(field));
+			}
+		}
+
+		// Tracked columns - recursive expressions
+		if (intent.track?.depth) {
+			selections.push(eb('prev.depth', '+', eb.lit(1)).as('depth'));
+		}
+		if (intent.track?.path) {
+			selections.push(
+				sql`${sql.ref('prev.path')} || ${sql.ref(`node.${traversal.nodeId}`)}`.as(
+					'path',
+				),
+			);
+		}
+
+		return selections;
+	});
+
+	// Apply maxDepth constraint
+	if (intent.track?.depth && intent.maxDepth > 0) {
+		query = query.where('prev.depth', '<', intent.maxDepth);
+	}
+
+	// Apply edge WHERE clause
+	if (traversal.edgeWhere) {
+		query = addWhereSimple(query, traversal.edgeWhere, 'edge');
+	}
+
+	// Apply node WHERE clause
+	if (traversal.nodeWhere) {
+		query = addWhereSimple(query, traversal.nodeWhere, 'node');
+	}
+
+	return query;
+}
+
+/**
+ * Simplified WHERE clause builder for recursive CTEs.
+ * Handles basic comparisons without the full complexity of the main addWhere.
+ */
+function addWhereSimple(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: SelectQueryBuilder<any, any, any>,
+	where: WhereIntent,
+	alias: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	// Handle comparison operators (WhereComparisonIntent has kind='comparison', field, operator, value)
+	if ('kind' in where && where.kind === 'comparison') {
+		const w = where as {
+			kind: 'comparison';
+			field: string;
+			operator: string;
+			value: unknown;
+		};
+		const fieldRef = `${alias}.${w.field}`;
+		switch (w.operator) {
+			case 'eq':
+				return query.where(fieldRef, '=', w.value);
+			case 'neq':
+				return query.where(fieldRef, '!=', w.value);
+			case 'gt':
+				return query.where(fieldRef, '>', w.value);
+			case 'gte':
+				return query.where(fieldRef, '>=', w.value);
+			case 'lt':
+				return query.where(fieldRef, '<', w.value);
+			case 'lte':
+				return query.where(fieldRef, '<=', w.value);
+			default:
+				return query;
+		}
+	}
+
+	// Handle like (WhereLikeIntent has kind='like')
+	if ('kind' in where && where.kind === 'like') {
+		const w = where as { kind: 'like'; field: string; pattern: string };
+		return query.where(`${alias}.${w.field}`, 'like', w.pattern);
+	}
+
+	// Handle in (WhereInIntent has kind='in')
+	if ('kind' in where && where.kind === 'in') {
+		const w = where as { kind: 'in'; field: string; values: unknown[] };
+		return query.where(`${alias}.${w.field}`, 'in', w.values);
+	}
+
+	// Handle null (WhereNullIntent has kind='null')
+	if ('kind' in where && where.kind === 'null') {
+		const w = where as {
+			kind: 'null';
+			field: string;
+			operator: 'isNull' | 'isNotNull';
+		};
+		if (w.operator === 'isNull') {
+			return query.where(`${alias}.${w.field}`, 'is', null);
+		}
+		return query.where(`${alias}.${w.field}`, 'is not', null);
+	}
+
+	// Handle AND (WhereAndIntent has kind='and')
+	if ('kind' in where && where.kind === 'and') {
+		const w = where as { kind: 'and'; conditions: WhereIntent[] };
+		let result = query;
+		for (const condition of w.conditions) {
+			result = addWhereSimple(result, condition, alias);
+		}
+		return result;
+	}
+
+	// Handle OR (WhereOrIntent has kind='or')
+	if ('kind' in where && where.kind === 'or') {
+		const w = where as { kind: 'or'; conditions: WhereIntent[] };
+		return query.where((eb) => {
+			const ors = w.conditions.map((c) => {
+				// Build condition expression for comparison
+				if ('kind' in c && c.kind === 'comparison') {
+					const cmp = c as {
+						kind: 'comparison';
+						field: string;
+						operator: string;
+						value: unknown;
+					};
+					if (cmp.operator === 'eq')
+						return eb(`${alias}.${cmp.field}`, '=', cmp.value);
+					if (cmp.operator === 'neq')
+						return eb(`${alias}.${cmp.field}`, '!=', cmp.value);
+				}
+				return eb.lit(true); // Fallback
+			});
+			return eb.or(ors);
+		});
+	}
+
+	return query;
 }
 
 // ============================================================================

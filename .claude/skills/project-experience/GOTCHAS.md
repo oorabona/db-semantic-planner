@@ -260,6 +260,61 @@ query.select(sql`1`)
 query.select((eb) => eb.lit(1).as('_exists'))
 ```
 
-**Exception:** The ONLY valid use of `sql` is for `RawExpressionIntent` — the explicit user escape hatch for SQL that cannot be expressed via intents.
+**Exception:** The ONLY valid use of `sql` is for:
+1. `RawExpressionIntent` — the explicit user escape hatch for SQL that cannot be expressed via intents
+2. PostgreSQL array operations in recursive CTEs — `ARRAY[id]::text[]` path tracking via `sql.lit()` (Kysely lacks native PG array type support)
 
 **Location:** `packages/adapter-kysely/src/compiler.ts`, `CLAUDE.md` (Adapter Rules section)
+
+---
+
+### Recursive CTE: Bidirectional Edge Detection Requires edgeStorageHint (2026-01-08)
+
+**Issue:** When implementing recursive CTEs with edge-table traversal, need to distinguish between edges stored as symmetric pairs vs single rows requiring dual lookup.
+
+**Cause:** Two common edge storage patterns:
+- **Symmetric pairs:** Each edge stored twice (A→B, B→A) - use `UNION ALL`, no self-join
+- **Single row, dual lookup:** One row per edge (A↔B) - requires self-join of CTE in recursive step
+
+**Solution:** `edgeStorageHint: 'edges_symmetric' | 'edges_bidir'` in EdgeTableTraversal:
+
+```typescript
+// 'edges_symmetric' (default): UNION ALL, edges stored as pairs
+// Node 1→2 exists as: (parent_id=1, child_id=2) AND (parent_id=2, child_id=1)
+// SQL: ... UNION ALL SELECT ...
+
+// 'edges_bidir': UNION, single row with dual lookup
+// Node 1↔2 exists as single row: (from_id=1, to_id=2) OR lookup via (to_id=1, from_id=2)  
+// SQL: ... UNION SELECT ... (deduplicates via UNION)
+```
+
+**Key insight:** The `bidirectional-edges` decision in PlanReport triggers `UNION` instead of `UNION ALL` to prevent duplicates from dual lookup.
+
+**Location:** `packages/core/src/intent-ast.ts` EdgeTableTraversal, `packages/adapter-kysely/src/compiler.ts` compileRecursive()
+
+---
+
+### TypeScript: Underscore Prefix for Reserved/Unused Parameters (2026-01-08)
+
+**Issue:** Biome lint error `noUnusedFunctionParameters` for parameters reserved for future use.
+
+**Cause:** Function signature includes parameter that's not used in current implementation but will be needed later.
+
+**Solution:** Prefix with underscore and add comment explaining purpose:
+
+```typescript
+// ❌ WRONG - lint error
+function compileRecursive(plan: Plan, model: ModelIR): Result {
+  // model not used yet
+}
+
+// ✅ CORRECT - lint passes, intent documented
+function compileRecursive(
+  plan: Plan,
+  _model: ModelIR, // Reserved for future use (e.g., relation metadata lookups)
+): Result {
+  // _model available when needed
+}
+```
+
+**Location:** `packages/adapter-kysely/src/compiler.ts:126`

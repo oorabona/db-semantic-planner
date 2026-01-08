@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { belongsTo, defineSchema, hasMany, type QueryIntent } from './index.js';
-import { AmbiguousPlanError, plan } from './planner.js';
+import type { RecursiveIntent } from './intent-ast.js';
+import {
+	AmbiguousPlanError,
+	plan,
+	planRecursive,
+	RecursiveShapeMismatchError,
+	validateRecursiveShape,
+} from './planner.js';
 
 // ============================================================================
 // Test Schemas
@@ -676,6 +683,395 @@ describe('Semantic Planner', () => {
 				// Should match pattern like 'includestrategy-001' or 'filterstrategy-001'
 				expect(decision.id).toMatch(/^[a-z]+-\d{3}$/);
 			}
+		});
+	});
+
+	// ============================================================================
+	// RFC-001: Recursive CTE Planning Tests
+	// ============================================================================
+
+	describe('RFC-001: Recursive CTE Planning', () => {
+		/**
+		 * Recursive schema: Categories with parent (for hierarchical traversal)
+		 */
+		const recursiveSchema = defineSchema({
+			categories: {
+				id: 'number',
+				name: 'string',
+				parentId: 'number',
+			},
+		})
+			.relations({
+				categories: {
+					parent: belongsTo('categories', { foreignKey: 'parentId' }),
+					children: hasMany('categories', { foreignKey: 'parentId' }),
+				},
+			})
+			.build();
+
+		/**
+		 * Edge-table schema: Roles with edges (for role hierarchy)
+		 */
+		const edgeTableSchema = defineSchema({
+			roles: {
+				id: 'number',
+				name: 'string',
+			},
+			roleEdges: {
+				id: 'number',
+				parentRoleId: 'number',
+				childRoleId: 'number',
+			},
+		})
+			.relations({
+				roles: {
+					parentEdges: hasMany('roleEdges', { foreignKey: 'childRoleId' }),
+					childEdges: hasMany('roleEdges', { foreignKey: 'parentRoleId' }),
+				},
+				roleEdges: {
+					parentRole: belongsTo('roles', { foreignKey: 'parentRoleId' }),
+					childRole: belongsTo('roles', { foreignKey: 'childRoleId' }),
+				},
+			})
+			.build();
+
+		describe('validateRecursiveShape', () => {
+			it('should pass for valid adjacency-list intent', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'category_tree',
+					start: {
+						from: 'categories',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						where: {
+							kind: 'comparison',
+							field: 'id',
+							operator: 'eq',
+							value: 1,
+						},
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parentId',
+						direction: 'descendants',
+					},
+					maxDepth: 10,
+				};
+
+				expect(() => validateRecursiveShape(intent)).not.toThrow();
+			});
+
+			it('should pass for valid edge-table intent', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'role_hierarchy',
+					start: {
+						from: 'roles',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						where: {
+							kind: 'comparison',
+							field: 'name',
+							operator: 'eq',
+							value: 'admin',
+						},
+					},
+					traversal: {
+						kind: 'edge-table',
+						nodeTable: 'roles',
+						edgeTable: 'roleEdges',
+						nodeId: 'id',
+						edgeFrom: 'parentRoleId',
+						edgeTo: 'childRoleId',
+						direction: 'out',
+					},
+					maxDepth: 10,
+				};
+
+				expect(() => validateRecursiveShape(intent)).not.toThrow();
+			});
+
+			it('should pass for intent with additional select fields', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'category_tree',
+					start: {
+						from: 'categories',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						select: ['name'],
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parentId',
+						direction: 'descendants',
+					},
+					maxDepth: 10,
+				};
+
+				expect(() => validateRecursiveShape(intent)).not.toThrow();
+			});
+		});
+
+		describe('planRecursive', () => {
+			it('should create recursive-cte decision for adjacency traversal', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'category_tree',
+					start: {
+						from: 'categories',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						where: {
+							kind: 'comparison',
+							field: 'id',
+							operator: 'eq',
+							value: 1,
+						},
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parentId',
+						direction: 'descendants',
+					},
+					maxDepth: 10,
+				};
+
+				const report = planRecursive(intent, recursiveSchema);
+
+				expect(report.metadata.isRecursive).toBe(true);
+				expect(report.metadata.traversalKind).toBe('adjacency');
+
+				const recursiveDecision = report.decisions.find(
+					(d) => d.type === 'recursive-cte',
+				);
+				expect(recursiveDecision).toBeDefined();
+				expect(recursiveDecision?.choice).toBe('with-recursive');
+			});
+
+			it('should create recursive-cte decision for edge-table traversal', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'role_hierarchy',
+					start: {
+						from: 'roles',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						where: {
+							kind: 'comparison',
+							field: 'name',
+							operator: 'eq',
+							value: 'admin',
+						},
+					},
+					traversal: {
+						kind: 'edge-table',
+						nodeTable: 'roles',
+						edgeTable: 'roleEdges',
+						nodeId: 'id',
+						edgeFrom: 'parentRoleId',
+						edgeTo: 'childRoleId',
+						direction: 'out',
+					},
+					maxDepth: 10,
+				};
+
+				const report = planRecursive(intent, edgeTableSchema);
+
+				expect(report.metadata.isRecursive).toBe(true);
+				expect(report.metadata.traversalKind).toBe('edge-table');
+			});
+
+			it('should detect bidirectional traversal and create decision', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'role_hierarchy',
+					start: {
+						from: 'roles',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'edge-table',
+						nodeTable: 'roles',
+						edgeTable: 'roleEdges',
+						nodeId: 'id',
+						edgeFrom: 'parentRoleId',
+						edgeTo: 'childRoleId',
+						direction: 'both',
+					},
+					maxDepth: 10,
+				};
+
+				const report = planRecursive(intent, edgeTableSchema);
+
+				expect(report.metadata.usesBidirectional).toBe(true);
+
+				const bidirDecision = report.decisions.find(
+					(d) => d.type === 'bidirectional-edges',
+				);
+				expect(bidirDecision).toBeDefined();
+				// Default edgeStorageHint is 'unknown', so should use UNION
+				expect(bidirDecision?.choice).toBe('union');
+			});
+
+			it('should use UNION ALL when edgeStorageHint is directed-only', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'role_hierarchy',
+					start: {
+						from: 'roles',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'edge-table',
+						nodeTable: 'roles',
+						edgeTable: 'roleEdges',
+						nodeId: 'id',
+						edgeFrom: 'parentRoleId',
+						edgeTo: 'childRoleId',
+						direction: 'both',
+						edgeStorageHint: 'directed-only',
+					},
+					maxDepth: 10,
+				};
+
+				const report = planRecursive(intent, edgeTableSchema);
+
+				const bidirDecision = report.decisions.find(
+					(d) => d.type === 'bidirectional-edges',
+				);
+				expect(bidirDecision).toBeDefined();
+				expect(bidirDecision?.choice).toBe('union-all');
+			});
+
+			it('should include dedupe strategy in metadata', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'category_tree',
+					start: {
+						from: 'categories',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parentId',
+						direction: 'descendants',
+					},
+					maxDepth: 10,
+					dedupe: 'final',
+				};
+
+				const report = planRecursive(intent, recursiveSchema);
+
+				expect(report.metadata.dedupeStrategy).toBe('final');
+			});
+
+			it('should default dedupe to none', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'category_tree',
+					start: {
+						from: 'categories',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parentId',
+						direction: 'descendants',
+					},
+					maxDepth: 10,
+				};
+
+				const report = planRecursive(intent, recursiveSchema);
+
+				expect(report.metadata.dedupeStrategy).toBe('none');
+			});
+
+			it('should preserve original intent in report', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'my_cte',
+					start: {
+						from: 'categories',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parentId',
+						direction: 'ancestors',
+					},
+					maxDepth: 10,
+				};
+
+				const report = planRecursive(intent, recursiveSchema);
+
+				expect(report.intent).toBe(intent);
+				expect(report.intent.cteName).toBe('my_cte');
+			});
+
+			it('should generate unique decision IDs', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'role_hierarchy',
+					start: {
+						from: 'roles',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'edge-table',
+						nodeTable: 'roles',
+						edgeTable: 'roleEdges',
+						nodeId: 'id',
+						edgeFrom: 'parentRoleId',
+						edgeTo: 'childRoleId',
+						direction: 'both',
+					},
+					maxDepth: 10,
+				};
+
+				const report = planRecursive(intent, edgeTableSchema);
+
+				const ids = report.decisions.map((d) => d.id);
+				const uniqueIds = new Set(ids);
+				expect(uniqueIds.size).toBe(ids.length);
+			});
+		});
+
+		describe('RecursiveShapeMismatchError', () => {
+			it('should contain CTE name and column details', () => {
+				const error = new RecursiveShapeMismatchError(
+					'test_cte',
+					['id', 'name'],
+					['id', 'name', 'depth'],
+					'Recursive step has extra column: depth',
+				);
+
+				expect(error.cteName).toBe('test_cte');
+				expect(error.baseColumns).toEqual(['id', 'name']);
+				expect(error.recursiveColumns).toEqual(['id', 'name', 'depth']);
+				expect(error.mismatchDetails).toContain('depth');
+				expect(error.message).toContain('test_cte');
+			});
+
+			it('should be an instance of Error', () => {
+				const error = new RecursiveShapeMismatchError(
+					'cte',
+					['a'],
+					['a', 'b'],
+					'mismatch',
+				);
+
+				expect(error).toBeInstanceOf(Error);
+				expect(error.name).toBe('RecursiveShapeMismatchError');
+			});
 		});
 	});
 });

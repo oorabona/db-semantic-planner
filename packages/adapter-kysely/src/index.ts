@@ -6,7 +6,7 @@
  */
 
 // Compiler (low-level)
-export { compile } from './compiler.js';
+export { compile, compileRecursive } from './compiler.js';
 export type { DialectCapabilities, DialectName } from './dialect.js';
 // Dialect detection and capabilities (DIALECT-001)
 export {
