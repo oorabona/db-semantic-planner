@@ -8,7 +8,14 @@ import {
 	type RecursiveIntent,
 } from '@db-semantic-planner/core';
 import Database from 'better-sqlite3';
-import { DummyDriver, Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler, SqliteDialect } from 'kysely';
+import {
+	DummyDriver,
+	Kysely,
+	PostgresAdapter,
+	PostgresIntrospector,
+	PostgresQueryCompiler,
+	SqliteDialect,
+} from 'kysely';
 import { describe, expect, it } from 'vitest';
 import { compile, compileRecursive } from './compiler.js';
 import { CompilationError } from './errors.js';
@@ -1347,7 +1354,6 @@ describe('SQL Compiler', () => {
 			});
 		});
 
-
 		describe('ARCH-001: path tracking strategies', () => {
 			// Create a PostgreSQL Kysely instance for array strategy tests
 			const postgresKysely = createPostgresKysely();
@@ -1375,7 +1381,11 @@ describe('SQL Compiler', () => {
 
 				const report = planRecursive(intent, recursiveSchema);
 				// Use PostgreSQL Kysely for array strategy test
-				const compiled = compileRecursive(report, recursiveSchema, postgresKysely);
+				const compiled = compileRecursive(
+					report,
+					recursiveSchema,
+					postgresKysely,
+				);
 
 				// PostgreSQL uses ARRAY[] for path initialization
 				expect(compiled.sql).toContain('ARRAY[');

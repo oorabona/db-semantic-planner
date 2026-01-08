@@ -1,4 +1,38 @@
-# TODO: E2E-002 PIM/DAM Realistic Scenarios
+# TODO: E2E Tests
+
+**Phase:** P2
+**Updated:** 2026-01-08
+
+---
+
+## In Progress
+
+(empty)
+
+---
+
+## Completed
+
+### E2E-003: IAM/RBAC Recursive CTE Validation ✅
+
+**Spec:** docs/specs/E2E-003-iam-rbac-recursive.md
+**Status:** ✅ COMPLETE
+**Created:** 2026-01-08
+**Completed:** 2026-01-08
+
+- [x] ✅ Block 1: IAM Schema DDL + Seed + Model (2026-01-08)
+- [x] ✅ Block 2: Effective Permissions E2E Test (2026-01-08)
+- [x] ✅ Block 3: Role Hierarchy Traversal E2E Test (2026-01-08)
+- [x] ✅ Block 4: Separation of Duty E2E Test (2026-01-08)
+
+**Summary:** 9 E2E tests validating recursive CTE queries for IAM/RBAC scenarios:
+- Effective permissions via role hierarchy (3 tests)
+- Role hierarchy traversal with depth/path tracking (3 tests)
+- Separation of Duty detection (3 tests)
+
+---
+
+### E2E-002: PIM/DAM Realistic Scenarios ✅
 
 **Spec:** docs/specs/E2E-002-pimdam-realistic-scenarios.md
 **Status:** ✅ PHASE 1 COMPLETE (COALESCE API)
