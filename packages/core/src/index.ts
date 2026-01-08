@@ -45,6 +45,8 @@ export type {
 	ComparisonOperator,
 	CustomTraversal,
 	EdgeTableTraversal,
+	// Emit composition (DX-005)
+	EmitJoinClause,
 	ExpressionIntent,
 	// Include
 	IncludeIntent,

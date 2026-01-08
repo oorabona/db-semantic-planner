@@ -26,6 +26,7 @@ import {
 	ExecutionError,
 	NotFoundError,
 } from './errors.js';
+import { RecursiveQueryBuilder } from './recursive-query-builder.js';
 import type {
 	AggregateOptions,
 	IncludeOptions,
@@ -95,6 +96,17 @@ function createOrmInstance(
 				db,
 				tenantSchema,
 			);
+		},
+		recursive<TResult = unknown>(
+			cteName: string,
+		): RecursiveQueryBuilder<TResult> {
+			if (!db) {
+				throw new Error(
+					'RecursiveQueryBuilder requires a database connection. ' +
+						'Pass a Kysely instance when creating the ORM.',
+				);
+			}
+			return new RecursiveQueryBuilder<TResult>(model, db, cteName, schemaName);
 		},
 	};
 }
