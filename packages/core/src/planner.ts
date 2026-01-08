@@ -4,7 +4,13 @@
  * Transforms QueryIntent + ModelIR into PlanReport with strategic decisions.
  */
 
-import type { IncludeIntent, QueryIntent, WhereIntent } from './intent-ast.js';
+import type {
+	IncludeIntent,
+	QueryIntent,
+	RecursiveIntent,
+	RecursiveNodeIdExpr,
+	WhereIntent,
+} from './intent-ast.js';
 import type { ModelIR, RelationIR } from './model-ir.js';
 
 // ============================================================================
@@ -19,7 +25,9 @@ export type DecisionType =
 	| 'join-type'
 	| 'include-strategy'
 	| 'cte-extraction'
-	| 'ambiguity';
+	| 'ambiguity'
+	| 'recursive-cte'
+	| 'bidirectional-edges';
 
 /**
  * A single planning decision with full reasoning
@@ -212,6 +220,134 @@ export class AmbiguousPlanError extends Error {
 	}
 }
 
+/**
+ * Error thrown when recursive CTE base/recursive cases have incompatible shapes.
+ * Per RFC-001: columns must match in count, order, and be type-compatible.
+ */
+export class RecursiveShapeMismatchError extends Error {
+	readonly cteName: string;
+	readonly baseColumns: readonly string[];
+	readonly recursiveColumns: readonly string[];
+	readonly mismatchDetails: string;
+
+	constructor(
+		cteName: string,
+		baseColumns: readonly string[],
+		recursiveColumns: readonly string[],
+		mismatchDetails: string,
+	) {
+		super(
+			`Recursive CTE "${cteName}" shape mismatch: ${mismatchDetails}. ` +
+				`Base columns: [${baseColumns.join(', ')}], ` +
+				`Recursive columns: [${recursiveColumns.join(', ')}]`,
+		);
+		this.name = 'RecursiveShapeMismatchError';
+		this.cteName = cteName;
+		this.baseColumns = baseColumns;
+		this.recursiveColumns = recursiveColumns;
+		this.mismatchDetails = mismatchDetails;
+	}
+}
+
+// ============================================================================
+// Recursive CTE Shape Validation Helpers
+// ============================================================================
+
+/**
+ * Computes the column alias from a RecursiveNodeIdExpr.
+ * Per RFC-001: nodeIdExpr determines the node_id column name.
+ */
+function getNodeIdAlias(expr: RecursiveNodeIdExpr): string {
+	if (expr.as) return expr.as;
+	if (expr.kind === 'column') return expr.name;
+	if (expr.kind === 'literal') return 'node_id';
+	// Binary expression needs explicit alias
+	return 'node_id';
+}
+
+/**
+ * Computes expected base case columns from RecursiveIntent.
+ * Order: [node_id_alias, ...select_fields, depth (if track.depth), path (if track.path)]
+ */
+function computeBaseColumns(intent: RecursiveIntent): readonly string[] {
+	const columns: string[] = [];
+
+	// node_id is always first
+	columns.push(getNodeIdAlias(intent.start.nodeIdExpr));
+
+	// select fields (if specified)
+	if (intent.start.select) {
+		columns.push(...intent.start.select);
+	}
+
+	// tracked columns
+	if (intent.track?.depth) {
+		columns.push('depth');
+	}
+	if (intent.track?.path) {
+		columns.push('path');
+	}
+
+	return Object.freeze(columns);
+}
+
+/**
+ * Computes expected recursive step columns from RecursiveIntent.
+ * Must match base columns in count and order.
+ */
+function computeRecursiveColumns(intent: RecursiveIntent): readonly string[] {
+	const columns: string[] = [];
+
+	// node_id is always first (from traversal)
+	columns.push(getNodeIdAlias(intent.start.nodeIdExpr));
+
+	// select fields must match base
+	if (intent.start.select) {
+		columns.push(...intent.start.select);
+	}
+
+	// tracked columns with expressions
+	if (intent.track?.depth) {
+		columns.push('depth'); // Will be `prev.depth + 1`
+	}
+	if (intent.track?.path) {
+		columns.push('path'); // Will be `prev.path || id`
+	}
+
+	return Object.freeze(columns);
+}
+
+/**
+ * Validates that base and recursive columns are shape-compatible.
+ * Throws RecursiveShapeMismatchError if validation fails.
+ */
+export function validateRecursiveShape(intent: RecursiveIntent): void {
+	const baseColumns = computeBaseColumns(intent);
+	const recursiveColumns = computeRecursiveColumns(intent);
+
+	// Check column count
+	if (baseColumns.length !== recursiveColumns.length) {
+		throw new RecursiveShapeMismatchError(
+			intent.cteName,
+			baseColumns,
+			recursiveColumns,
+			`column count mismatch: base has ${baseColumns.length}, recursive has ${recursiveColumns.length}`,
+		);
+	}
+
+	// Check column order (names must match at each position)
+	for (let i = 0; i < baseColumns.length; i++) {
+		if (baseColumns[i] !== recursiveColumns[i]) {
+			throw new RecursiveShapeMismatchError(
+				intent.cteName,
+				baseColumns,
+				recursiveColumns,
+				`column ${i} name mismatch: base has "${baseColumns[i]}", recursive has "${recursiveColumns[i]}"`,
+			);
+		}
+	}
+}
+
 // ============================================================================
 // Planner State (Internal)
 // ============================================================================
@@ -251,6 +387,8 @@ export function plan(
 			'include-strategy': 0,
 			'cte-extraction': 0,
 			ambiguity: 0,
+			'recursive-cte': 0,
+			'bidirectional-edges': 0,
 		},
 		relationAccessCounts: new Map(),
 		visitedIncludes: new Set(),
@@ -329,6 +467,209 @@ export function plan(
 	};
 
 	return Object.freeze(report);
+}
+
+// ============================================================================
+// Recursive Intent Planning
+// ============================================================================
+
+/**
+ * RecursivePlanReport extends PlanReport with recursive-specific metadata.
+ */
+export interface RecursivePlanReport
+	extends Omit<PlanReport, 'intent' | 'metadata'> {
+	readonly intent: RecursiveIntent;
+	readonly metadata: PlanReport['metadata'] & {
+		readonly isRecursive: true;
+		readonly traversalKind: 'adjacency' | 'edge-table' | 'custom';
+		readonly usesBidirectional: boolean;
+		readonly dedupeStrategy: 'none' | 'final' | 'global';
+	};
+}
+
+/**
+ * Options specific to recursive CTE planning.
+ */
+export interface RecursivePlanOptions {
+	/** Force bidirectional edge handling strategy */
+	readonly forceBidirectionalStrategy?: 'union' | 'union-all';
+}
+
+/**
+ * Create a plan for a recursive CTE intent.
+ * Per RFC-001: validates shape, generates decisions for traversal strategy.
+ */
+export function planRecursive(
+	intent: RecursiveIntent,
+	model: ModelIR,
+	options: RecursivePlanOptions = {},
+): RecursivePlanReport {
+	const startTime = performance.now();
+
+	// Step 1: Validate shape compatibility
+	validateRecursiveShape(intent);
+
+	const state: PlannerState = {
+		decisions: [],
+		warnings: [],
+		ctes: [],
+		relationsAnalyzed: 0,
+		decisionCounters: {
+			'filter-strategy': 0,
+			'join-type': 0,
+			'include-strategy': 0,
+			'cte-extraction': 0,
+			ambiguity: 0,
+			'recursive-cte': 0,
+			'bidirectional-edges': 0,
+		},
+		relationAccessCounts: new Map(),
+		visitedIncludes: new Set(),
+	};
+
+	// Validate that start table exists
+	const startTable = model.getTable(intent.start.from);
+	if (!startTable) {
+		throw new Error(`Unknown table: ${intent.start.from}`);
+	}
+
+	// Step 2: Generate recursive-cte decision
+	const traversalKind = intent.traversal.kind;
+
+	const recursiveCteDecision: PlanDecision = {
+		id: generateDecisionId(state, 'recursive-cte'),
+		type: 'recursive-cte',
+		context: {
+			sourceTable: intent.start.from,
+			intentPath: `recursive:${intent.cteName}`,
+		},
+		choice: 'with-recursive',
+		reasoning: generateRecursiveReasoning(intent),
+		alternatives: ['with-recursive', 'iterative'],
+	};
+	state.decisions.push(recursiveCteDecision);
+
+	// Step 3: Handle bidirectional edges (for edge-table traversal)
+	let usesBidirectional = false;
+	if (
+		traversalKind === 'edge-table' &&
+		intent.traversal.kind === 'edge-table'
+	) {
+		const edgeTraversal = intent.traversal;
+		if (edgeTraversal.direction === 'both') {
+			usesBidirectional = true;
+
+			const storageHint = edgeTraversal.edgeStorageHint ?? 'unknown';
+			const strategy =
+				options.forceBidirectionalStrategy ??
+				(storageHint === 'directed-only' ? 'union-all' : 'union');
+
+			const bidirectionalDecision: PlanDecision = {
+				id: generateDecisionId(state, 'bidirectional-edges'),
+				type: 'bidirectional-edges',
+				context: {
+					sourceTable: intent.start.from,
+					target: edgeTraversal.edgeTable,
+					intentPath: `recursive:${intent.cteName}:edges`,
+				},
+				choice: strategy,
+				reasoning: generateBidirectionalReasoning(storageHint, strategy),
+				alternatives: ['union', 'union-all'],
+			};
+			state.decisions.push(bidirectionalDecision);
+
+			// Add warning if using union-all with unknown storage
+			if (strategy === 'union-all' && storageHint === 'unknown') {
+				state.warnings.push({
+					code: 'POTENTIAL_ROW_EXPLOSION',
+					message: `Bidirectional edge traversal with UNION ALL on unknown storage hint may produce duplicates`,
+					suggestion: `Set edgeStorageHint: 'directed-only' if edges are guaranteed uni-directional, or use dedupe: 'final'`,
+				});
+			}
+		}
+	}
+
+	// Step 4: Validate maxDepth
+	if (intent.maxDepth < 1) {
+		throw new Error(`maxDepth must be >= 1, got ${intent.maxDepth}`);
+	}
+
+	if (intent.maxDepth > 100) {
+		state.warnings.push({
+			code: 'DEEP_NESTING',
+			message: `maxDepth of ${intent.maxDepth} is unusually high`,
+			suggestion: `Consider if you really need traversal depth > 100. Large values may cause performance issues.`,
+		});
+	}
+
+	const planningTimeMs = performance.now() - startTime;
+
+	const dedupeStrategy = intent.dedupe ?? 'none';
+
+	const report: RecursivePlanReport = {
+		rootTable: intent.start.from,
+		decisions: Object.freeze([...state.decisions]),
+		warnings: Object.freeze([...state.warnings]),
+		ctes: Object.freeze([...state.ctes]),
+		intent,
+		metadata: Object.freeze({
+			planningTimeMs,
+			relationsAnalyzed: state.relationsAnalyzed,
+			isAmbiguous: false,
+			isRecursive: true as const,
+			traversalKind,
+			usesBidirectional,
+			dedupeStrategy,
+		}),
+	};
+
+	return Object.freeze(report) as RecursivePlanReport;
+}
+
+/**
+ * Generate reasoning for recursive CTE decision.
+ */
+function generateRecursiveReasoning(intent: RecursiveIntent): string {
+	const parts: string[] = [];
+
+	parts.push(
+		`Recursive CTE "${intent.cteName}" using ${intent.traversal.kind} traversal`,
+	);
+
+	if (intent.traversal.kind === 'adjacency') {
+		parts.push(
+			`direction=${intent.traversal.direction}, parentId=${intent.traversal.parentId}`,
+		);
+	} else if (intent.traversal.kind === 'edge-table') {
+		parts.push(
+			`edgeTable=${intent.traversal.edgeTable}, direction=${intent.traversal.direction}`,
+		);
+	}
+
+	parts.push(`maxDepth=${intent.maxDepth}`);
+
+	if (intent.dedupe && intent.dedupe !== 'none') {
+		parts.push(`dedupe=${intent.dedupe}`);
+	}
+
+	return parts.join(', ');
+}
+
+/**
+ * Generate reasoning for bidirectional edge decision.
+ */
+function generateBidirectionalReasoning(
+	storageHint: 'unknown' | 'directed-only',
+	strategy: 'union' | 'union-all',
+): string {
+	if (storageHint === 'directed-only') {
+		return strategy === 'union-all'
+			? 'edgeStorageHint=directed-only guarantees no reverse duplicates, UNION ALL is safe'
+			: 'UNION used despite directed-only hint (forced or conservative)';
+	}
+	return strategy === 'union'
+		? 'edgeStorageHint=unknown, using UNION to eliminate potential duplicates'
+		: 'UNION ALL used despite unknown storage hint (may produce duplicates)';
 }
 
 // ============================================================================

@@ -33,14 +33,18 @@ export type {
 // ============================================================================
 
 export type {
+	// Recursive CTE (RFC-001)
+	AdjacencyTraversal,
 	// Aggregates
 	AggregateFunction,
 	AggregateIntent,
 	// Operators
 	ArrayOperator,
-	ComparisonOperator,
 	// Expressions
 	CoalesceExpressionIntent,
+	ComparisonOperator,
+	CustomTraversal,
+	EdgeTableTraversal,
 	ExpressionIntent,
 	// Include
 	IncludeIntent,
@@ -52,6 +56,13 @@ export type {
 	// Query
 	QueryIntent,
 	RawExpressionIntent,
+	RecursiveDedupe,
+	RecursiveEmitOptions,
+	RecursiveIntent,
+	RecursiveNodeIdExpr,
+	RecursivePgOptions,
+	RecursiveTrackOptions,
+	RecursiveTraversal,
 	RelationOperator,
 	SelectAggregateIntent,
 	// Select
@@ -75,9 +86,14 @@ export type {
 	WhereRelationFilterIntent,
 } from './intent-ast.js';
 export {
+	// Recursive CTE type guards (RFC-001)
+	isAdjacencyTraversal,
 	// Type guards
 	isCoalesceExpression,
+	isCustomTraversal,
+	isEdgeTableTraversal,
 	isRawExpression,
+	isRecursiveIntent,
 	isSelectAggregate,
 	isSelectAll,
 	isSelectFields,
@@ -134,12 +150,19 @@ export type {
 	PlanReport,
 	PlanWarning,
 	PlanWarningCode,
+	// Recursive CTE planning (RFC-001)
+	RecursivePlanOptions,
+	RecursivePlanReport,
 } from './planner.js';
 export {
-	// Error
+	// Errors
 	AmbiguousPlanError,
-	// Entry point
+	// Entry points
 	plan,
+	planRecursive,
+	RecursiveShapeMismatchError,
+	// Recursive CTE helpers
+	validateRecursiveShape,
 } from './planner.js';
 
 // ============================================================================
