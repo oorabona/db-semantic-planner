@@ -56,27 +56,22 @@ Raccourcis pour les cas d'usage fréquents.
 
 ---
 
-### DX-009: RecursiveBuilder Integration + Renaming 🟡 MEDIUM
+### DX-009: RecursiveBuilder Integration + Renaming ✅ (2026-01-09)
 
 Intégrer RecursiveQueryBuilder directement dans l'ORM avec API plus intuitive.
 
-**Renaming proposé:**
-- `nodeId(x)` → `startingFrom(x)`
-- `traverseVia(rel)` → `following(rel)`
-- `maxDepth(n)` → `upToDepth(n)`
-
-**Intégration ORM:**
-```typescript
-// Au lieu de createRecursiveBuilder(model, 'categories')
-orm.recursive('categories').startingFrom(42).following('children');
-```
-
-**Raccourcis sémantiques:**
-- `orm.ancestors('categories', 42)` - parcours ascendant
-- `orm.descendants('categories', 42)` - parcours descendant
-- `orm.subtree('categories', 42)` - sous-arbre complet
-
-**Note:** Ces raccourcis doivent fonctionner avec les hiérarchies adjacency ET edge-table.
+- [x] ✅ Intuitive alias methods on RecursiveQueryBuilder:
+  - `startingFrom(column)` - alias for nodeId()
+  - `following(table, options)` - alias for traverseVia()
+  - `upToDepth(depth)` - alias for maxDepth()
+- [x] ✅ Hierarchy shortcuts on ORM instance:
+  - `orm.ancestors(table, nodeIdValue, options)` - ancestor traversal
+  - `orm.descendants(table, nodeIdValue, options)` - descendant traversal
+  - `orm.subtree(table, nodeIdValue, options)` - subtree traversal
+- [x] ✅ HierarchyOptions interface with parentId, nodeId, cteName
+- [x] ✅ Multi-tenant support for hierarchy shortcuts (forTenant)
+- [x] ✅ Updated dump() to return intent for debugging
+- [x] ✅ 12 hierarchy-shortcuts tests + 4 alias tests (26 total recursive-query-builder tests)
 
 **Effort:** M
 

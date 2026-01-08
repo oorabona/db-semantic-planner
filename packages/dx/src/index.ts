@@ -65,6 +65,7 @@ export {
 // Types
 export type {
 	AggregateOptions,
+	HierarchyOptions,
 	IncludeOptions,
 	NestedInclude,
 	OrmInstance,

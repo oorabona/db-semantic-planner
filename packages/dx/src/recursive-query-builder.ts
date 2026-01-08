@@ -263,6 +263,56 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 	}
 
 	// =========================================================================
+	// Intuitive Aliases (DX-009)
+	// =========================================================================
+
+	/**
+	 * Alias for nodeId() - more intuitive naming.
+	 * Set the starting node identifier.
+	 *
+	 * @example
+	 * ```typescript
+	 * orm.recursive('categories').startingFrom('id').following(...)
+	 * ```
+	 */
+	startingFrom(column: string): this {
+		return this.nodeId(column);
+	}
+
+	/**
+	 * Alias for traverseVia() - more intuitive naming.
+	 * Configure how to traverse the hierarchy.
+	 *
+	 * @example
+	 * ```typescript
+	 * // Adjacency list (self-referential)
+	 * .following('categories', { parentId: 'parentCategoryId' })
+	 *
+	 * // Edge table
+	 * .following('roleEdges', { from: 'parentRoleId', to: 'childRoleId' })
+	 * ```
+	 */
+	following(
+		tableOrNodeTable: string,
+		options: AdjacencyOptions | EdgeTableOptions,
+	): this {
+		return this.traverseVia(tableOrNodeTable, options);
+	}
+
+	/**
+	 * Alias for maxDepth() - more intuitive naming.
+	 * Set the maximum traversal depth.
+	 *
+	 * @example
+	 * ```typescript
+	 * .upToDepth(5) // Traverse up to 5 levels
+	 * ```
+	 */
+	upToDepth(depth: number): this {
+		return this.maxDepth(depth);
+	}
+
+	// =========================================================================
 	// Tracking Options (Block 3)
 	// =========================================================================
 
@@ -480,7 +530,7 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 	 * Plan and compile the recursive query.
 	 * Returns the compiled SQL and parameters.
 	 */
-	dump(): { sql: string; parameters: readonly unknown[] } {
+	dump(): { sql: string; parameters: readonly unknown[]; intent: RecursiveIntent } {
 		const intent = this.buildIntent();
 		const report = planRecursive(intent, this.schema);
 		const compiled = compileRecursive(
@@ -492,6 +542,7 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 		return {
 			sql: compiled.sql,
 			parameters: compiled.parameters,
+			intent,
 		};
 	}
 
