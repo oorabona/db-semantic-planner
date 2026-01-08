@@ -15,6 +15,7 @@ export {
 	AmbiguousRelationError,
 	ExecutionError,
 	NotFoundError,
+	RelationNotFoundError,
 } from './errors.js';
 // Filter Helpers (Drizzle-like)
 export {

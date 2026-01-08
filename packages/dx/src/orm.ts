@@ -27,6 +27,7 @@ import {
 	ExecutionError,
 	NotFoundError,
 } from './errors.js';
+import { and, eq, inArray } from './filters.js';
 import { RecursiveQueryBuilder } from './recursive-query-builder.js';
 import type {
 	AggregateOptions,
@@ -188,6 +189,34 @@ function nestedIncludeToIntent(nested: NestedInclude): IncludeIntent {
 }
 
 /**
+ * Parse dot notation include into nested IncludeIntent.
+ *
+ * @example
+ * 'posts.comments.author' becomes:
+ * { relation: 'posts', include: [{ relation: 'comments', include: [{ relation: 'author' }] }] }
+ */
+function parseDotNotationInclude(
+	path: string,
+	options?: IncludeOptions,
+): IncludeIntent {
+	const parts = path.split('.');
+	if (parts.length === 0) {
+		throw new Error('Invalid include path');
+	}
+
+	// Build from the end (deepest level) to the beginning
+	// Options apply to the deepest (last) relation
+	let current: IncludeIntent = includeOptionsToIntent(parts[parts.length - 1]!, options);
+
+	// Work backwards through the path, wrapping each level
+	for (let i = parts.length - 2; i >= 0; i--) {
+		current = { relation: parts[i]!, include: [current] };
+	}
+
+	return current;
+}
+
+/**
  * Internal query builder implementation.
  */
 class QueryBuilderImpl implements QueryBuilder {
@@ -227,7 +256,12 @@ class QueryBuilderImpl implements QueryBuilder {
 
 	include(relation: string, options?: IncludeOptions): QueryBuilder {
 		const builder = this.clone();
-		builder.includes.push(includeOptionsToIntent(relation, options));
+		// Support dot notation for nested includes: 'posts.comments.author'
+		if (relation.includes('.')) {
+			builder.includes.push(parseDotNotationInclude(relation, options));
+		} else {
+			builder.includes.push(includeOptionsToIntent(relation, options));
+		}
 		return builder;
 	}
 
@@ -395,6 +429,59 @@ class QueryBuilderImpl implements QueryBuilder {
 		return result;
 	}
 
+	async byId(
+		value: string | number | Record<string, unknown>,
+	): Promise<unknown | undefined> {
+		const condition = this.buildPkCondition(value);
+		return this.where(condition).findFirst();
+	}
+
+	async byIdOrThrow(
+		value: string | number | Record<string, unknown>,
+	): Promise<unknown> {
+		const result = await this.byId(value);
+		if (result === undefined) {
+			throw new NotFoundError(
+				this.from,
+				`No record found with the specified primary key`,
+			);
+		}
+		return result;
+	}
+
+	async byIds(values: readonly (string | number)[]): Promise<unknown[]> {
+		if (values.length === 0) {
+			return [];
+		}
+		return this.where(inArray('id', [...values])).findMany();
+	}
+
+	/**
+	 * Build a where condition for a primary key lookup.
+	 * Supports simple PKs (string | number) and composite PKs (object).
+	 */
+	private buildPkCondition(
+		value: string | number | Record<string, unknown>,
+	): WhereIntent {
+		if (typeof value === 'string' || typeof value === 'number') {
+			// Simple PK
+			return eq('id', value);
+		}
+		// Composite PK - build AND condition
+		const entries = Object.entries(value);
+		if (entries.length === 0) {
+			throw new Error('Composite primary key cannot be empty');
+		}
+		if (entries.length === 1) {
+			const [field, fieldValue] = entries[0]!;
+			return eq(field, fieldValue);
+		}
+		const conditions = entries.map(([field, fieldValue]) =>
+			eq(field, fieldValue),
+		);
+		return and(...conditions);
+	}
+
 	dump(): Dump {
 		const db = this.getConfiguredDb();
 		const planReport = this.plan();
@@ -437,9 +524,11 @@ class QueryBuilderImpl implements QueryBuilder {
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
 	private getConfiguredDb(): Kysely<any> {
 		if (!this.db) {
-			throw new ExecutionError(
-				'Database not configured. Pass db option to createOrm() to enable query execution.',
-			);
+			throw new ExecutionError({
+				operation: 'query execution',
+				reason: 'Database not configured',
+				fix: 'Pass a Kysely instance to createOrm({ db: yourKyselyInstance })',
+			});
 		}
 		return this.db;
 	}
