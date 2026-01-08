@@ -27,6 +27,17 @@ This is a LEAF package (nothing depends on it)
 
 ## Completed
 
+### DX-006: Zero-Config ORM ✅ (2026-01-08)
+
+Make `model` optional in `createOrm()` - auto-introspect from database when missing.
+
+- [x] ✅ Update `OrmOptions` to make `model` optional
+- [x] ✅ Add `OrmOptionsWithModel` and `OrmOptionsWithDb` types
+- [x] ✅ Function overloads: sync with model, async without (Promise)
+- [x] ✅ Import and call `introspect(db)` when model missing
+- [x] ✅ 11 unit tests for zero-config path
+- [x] ✅ Export new types from index.ts
+
 ### DX-005: Recursive Query Builder ✅ (2026-01-08)
 
 **Spec:** [docs/specs/DX-005-recursive-query-builder.md](docs/specs/DX-005-recursive-query-builder.md)

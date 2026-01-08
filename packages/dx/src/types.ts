@@ -57,12 +57,30 @@ export type RelationHints = Readonly<Record<string, string>>;
 
 /**
  * Configuration options for creating an ORM instance.
+ *
+ * Either `model` or `db` must be provided:
+ * - With `model`: Uses the provided schema (sync)
+ * - With `db` only: Auto-discovers schema via introspection (async)
+ *
+ * @example Zero-config (auto-introspection)
+ * ```typescript
+ * const orm = await createOrm({ db });
+ * const users = await orm.query('users').findMany();
+ * ```
+ *
+ * @example Explicit model
+ * ```typescript
+ * const orm = createOrm({ model, db });
+ * const users = await orm.query('users').findMany();
+ * ```
  */
 export interface OrmOptions {
 	/**
 	 * The schema model to use for query planning.
+	 * If not provided and `db` is set, the schema will be auto-discovered
+	 * via database introspection.
 	 */
-	readonly model: ModelIR;
+	readonly model?: ModelIR;
 
 	/**
 	 * Controls behavior when ambiguous relations are detected.
@@ -93,6 +111,7 @@ export interface OrmOptions {
 	/**
 	 * Kysely database instance for query execution.
 	 * Required for findMany(), findFirst(), findFirstOrThrow() methods.
+	 * Also required for auto-introspection when `model` is not provided.
 	 *
 	 * @example
 	 * ```typescript
@@ -106,6 +125,22 @@ export interface OrmOptions {
 	 */
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
 	readonly db?: Kysely<any>;
+}
+
+/**
+ * OrmOptions with explicit model (sync creation).
+ */
+export interface OrmOptionsWithModel extends OrmOptions {
+	readonly model: ModelIR;
+}
+
+/**
+ * OrmOptions without model, requires db for auto-introspection (async creation).
+ */
+export interface OrmOptionsWithDb extends Omit<OrmOptions, 'model'> {
+	readonly model?: undefined;
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	readonly db: Kysely<any>;
 }
 
 /**
