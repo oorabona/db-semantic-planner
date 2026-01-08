@@ -223,3 +223,43 @@ packages/core → packages/adapter-kysely → packages/dx
 ```
 
 **Location:** Encountered when adding `AggregateFunction`, `AggregateIntent`, `SelectAggregateIntent` to `packages/core/src/intent-ast.ts`
+
+---
+
+## Adapter Implementation
+
+### NEVER Use Raw SQL Templates in Adapter Code (2026-01-08)
+
+**Issue:** Using `sql` template literals (e.g., `` sql`COALESCE(...)` ``) instead of Kysely's native expression builder APIs.
+
+**Cause:** Habit from writing raw SQL, or not knowing Kysely has native functions.
+
+**Why it's wrong:**
+1. **Dialect portability:** Kysely's `eb.fn('coalesce')` adapts per dialect; raw SQL doesn't
+2. **Type safety:** Native APIs provide TypeScript inference; raw templates lose types
+3. **Security:** Native APIs handle escaping properly
+4. **Maintainability:** Expression builders are more readable and refactorable
+
+**Solution:** Always use Kysely expression builder methods:
+
+```typescript
+// ❌ WRONG - raw SQL template
+const refs = fields.map((f) => sql.ref(`${alias}.${f}`));
+const coalesceExpr = sql`COALESCE(${sql.join(refs, sql`, `)})`;
+return query.select(coalesceExpr.as(resultAlias));
+
+// ✅ CORRECT - native expression builder
+return query.select((eb) =>
+  eb.fn('coalesce', fields.map((f) => eb.ref(`${alias}.${f}`))).as(resultAlias)
+);
+
+// ❌ WRONG - literal via sql
+query.select(sql`1`)
+
+// ✅ CORRECT - native literal
+query.select((eb) => eb.lit(1).as('_exists'))
+```
+
+**Exception:** The ONLY valid use of `sql` is for `RawExpressionIntent` — the explicit user escape hatch for SQL that cannot be expressed via intents.
+
+**Location:** `packages/adapter-kysely/src/compiler.ts`, `CLAUDE.md` (Adapter Rules section)

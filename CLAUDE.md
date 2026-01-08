@@ -13,6 +13,7 @@ Semantic query planning for databases - an intent-first approach that transforms
 - **Observable:** Every decision is inspectable via dump()
 - **Deterministic:** Same inputs always produce same SQL/plan
 - **Secure:** Identifier validation, parameter binding, no raw SQL exposure
+- **Native Adapter APIs:** ALWAYS use adapter primitives (e.g., Kysely's `eb.fn()`, `eb.ref()`, `eb.lit()`), NEVER raw SQL templates except for explicit user escape hatches (see Adapter Rules below)
 
 ## Architecture: Ports & Adapters
 
@@ -154,6 +155,36 @@ module.exports = {
 | Adapter | Kysely (peer dependency) |
 | Testing | Vitest |
 | Build | tsup (ESM + CJS) |
+
+## Adapter Rules (CRITICAL)
+
+**NEVER use raw SQL templates in adapter implementations.** Always use the adapter's native expression builders.
+
+### Kysely Adapter (`packages/adapter-kysely`)
+
+| Need | ❌ DON'T | ✅ DO |
+|------|---------|-------|
+| SQL function | `` sql`COALESCE(${...})` `` | `eb.fn('coalesce', [...])` |
+| Column reference | `` sql.ref('table.col') `` | `eb.ref('table.col')` |
+| Literal value | `` sql`1` `` | `eb.lit(1)` or `eb.val(value)` |
+| Join references | `` sql.join([...]) `` | Use Kysely's native `.select()` callback |
+
+### Exception: User Escape Hatch
+
+The **only** allowed use of `sql` template is for `RawExpressionIntent` — the explicit user escape hatch for arbitrary SQL that cannot be expressed via the planner's intent system:
+
+```typescript
+// This is OK - it's the user's explicit escape hatch
+case 'raw':
+  return query.select(sql`${sql.raw(expr.sql)}`.as(expr.as));
+```
+
+### Why This Matters
+
+1. **Type safety:** Native APIs provide better TypeScript inference
+2. **Dialect portability:** Kysely adapts `eb.fn('coalesce')` per dialect; raw SQL doesn't
+3. **Security:** Native APIs handle escaping; raw SQL is injection-prone
+4. **Maintainability:** Easier to understand and refactor
 
 ## Multi-tenant API
 

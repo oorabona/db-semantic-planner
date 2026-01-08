@@ -168,6 +168,22 @@ constructor(options?: { capability?: string }) {
 
 **Solution:** Always validate + use Kysely `.withSchema()`:
 
+### 8. NEVER Raw SQL in Adapter Code (CRITICAL)
+
+**Problem:** Using `sql` template literals instead of Kysely's native expression builders.
+
+**Why forbidden:**
+- Breaks dialect portability (Kysely adapts `eb.fn()` per dialect)
+- Loses type safety
+- Injection risk without proper escaping
+
+**Solution:** Always use native Kysely APIs:
+- `eb.fn('coalesce', [...])` instead of `` sql`COALESCE(...)` ``
+- `eb.ref('table.col')` instead of `sql.ref('table.col')`
+- `eb.lit(1)` instead of `` sql`1` ``
+
+**Exception:** Only `RawExpressionIntent` may use `sql.raw()` — it's the user's escape hatch.
+
 ```typescript
 const IDENTIFIER_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
