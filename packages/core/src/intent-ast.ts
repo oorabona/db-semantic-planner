@@ -509,6 +509,35 @@ export interface RecursiveTrackOptions {
 }
 
 /**
+ * Join clause for CTE emit composition.
+ * Allows joining the CTE result with additional tables for final projection.
+ */
+export interface EmitJoinClause {
+	/** Table to join with */
+	readonly table: string;
+
+	/** Join type (default: 'inner') */
+	readonly type?: 'inner' | 'left';
+
+	/** Alias for this table (auto-generated if not provided) */
+	readonly as?: string;
+
+	/** Join condition */
+	readonly on: {
+		/** Column from CTE or previous joined table */
+		readonly left: string;
+		/** Column from this table */
+		readonly right: string;
+	};
+
+	/** Columns to select from this table */
+	readonly select?: readonly (
+		| string
+		| { readonly column: string; readonly as: string }
+	)[];
+}
+
+/**
  * Emit options for recursive CTE final projection.
  */
 export interface RecursiveEmitOptions {
@@ -518,6 +547,10 @@ export interface RecursiveEmitOptions {
 	readonly where?: WhereIntent;
 	/** Ordering */
 	readonly orderBy?: readonly OrderByIntent[];
+	/** Join CTE result with additional tables for composition */
+	readonly joinWith?: readonly EmitJoinClause[];
+	/** Apply DISTINCT to final result */
+	readonly distinct?: boolean;
 }
 
 /**

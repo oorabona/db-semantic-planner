@@ -47,6 +47,20 @@ export {
 
 // Factory
 export { createOrm } from './orm.js';
+export type {
+	AdjacencyOptions,
+	EdgeTableOptions,
+	JoinOptions,
+	PathOptions,
+	SelectField,
+	TraversalDirection,
+} from './recursive-query-builder.js';
+
+// Recursive Query Builder (DX-005)
+export {
+	createRecursiveBuilder,
+	RecursiveQueryBuilder,
+} from './recursive-query-builder.js';
 // Types
 export type {
 	AggregateOptions,

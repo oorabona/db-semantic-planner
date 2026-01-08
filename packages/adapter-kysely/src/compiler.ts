@@ -5,6 +5,7 @@
 
 import type {
 	AggregateIntent,
+	EmitJoinClause,
 	ExpressionIntent,
 	ModelIR,
 	PlanReport,
@@ -296,11 +297,30 @@ export function compileRecursive(
 	);
 
 	// Build the final SELECT from the CTE
-	let finalQuery = builder.selectFrom(cteName).selectAll();
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+	let finalQuery: any = builder.selectFrom(`${cteName} as ${cteName}`);
 
-	// Apply dedupe strategy
-	if (intent.dedupe === 'final') {
-		// DISTINCT ON (node_id) - PostgreSQL specific
+	// DX-005: Apply emit.joinWith for CTE composition
+	const joinAliases: string[] = [cteName];
+	if (intent.emit?.joinWith && intent.emit.joinWith.length > 0) {
+		finalQuery = compileEmitJoins(
+			finalQuery,
+			intent.emit.joinWith,
+			joinAliases,
+			schemaName,
+		);
+	}
+
+	// Build SELECT clause
+	finalQuery = buildEmitSelect(finalQuery, intent, joinAliases);
+
+	// DX-005: Apply emit.distinct
+	if (intent.emit?.distinct) {
+		finalQuery = finalQuery.distinct();
+	}
+
+	// Apply dedupe strategy (DISTINCT ON - PostgreSQL specific)
+	if (intent.dedupe === 'final' && !intent.emit?.distinct) {
 		// Per RFC-001: 1 row per nodeId, keep first (shallowest depth)
 		const nodeIdAlias = getNodeIdAlias(intent.start.nodeIdExpr);
 		finalQuery = finalQuery.distinctOn(nodeIdAlias);
@@ -1353,6 +1373,118 @@ function buildCTEs(
 	}
 
 	return builder;
+}
+
+// ============================================================================
+// DX-005: Emit Join Compilation
+// ============================================================================
+
+/**
+ * Compile emit.joinWith clauses into Kysely JOIN statements.
+ * Supports chained joins with schema prefix for multi-tenant.
+ */
+function compileEmitJoins(
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+	query: any,
+	joins: readonly EmitJoinClause[],
+	joinAliases: string[],
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+): any {
+	let result = query;
+	let aliasCounter = 0;
+
+	for (const join of joins) {
+		const tableAlias = join.as || `j${aliasCounter++}`;
+		const tableName = schemaName ? `${schemaName}.${join.table}` : join.table;
+		const tableRef = `${tableName} as ${tableAlias}`;
+
+		// Resolve left column: could be from CTE or previous joined table
+		const leftColumn = resolveJoinColumn(join.on.left, joinAliases);
+		const rightColumn = `${tableAlias}.${join.on.right}`;
+
+		if (join.type === 'left') {
+			result = result.leftJoin(tableRef, leftColumn, rightColumn);
+		} else {
+			result = result.innerJoin(tableRef, leftColumn, rightColumn);
+		}
+
+		// Track this alias for subsequent joins
+		joinAliases.push(tableAlias);
+	}
+
+	return result;
+}
+
+/**
+ * Resolve a column reference for join conditions.
+ * Supports: 'column' (from first alias), 'alias.column' (qualified), 'prev.column' (previous join)
+ */
+function resolveJoinColumn(column: string, joinAliases: string[]): string {
+	// Already qualified
+	if (column.includes('.')) {
+		// Check if it's a 'prev.' reference
+		if (column.startsWith('prev.')) {
+			const col = column.substring(5);
+			const prevAlias = joinAliases[joinAliases.length - 1];
+			return `${prevAlias}.${col}`;
+		}
+		return column;
+	}
+	// Unqualified: use first alias (CTE)
+	return `${joinAliases[0]}.${column}`;
+}
+
+/**
+ * Build SELECT clause for emit options.
+ * If joinWith has select fields, use those. Otherwise, selectAll from CTE.
+ */
+function buildEmitSelect(
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+	query: any,
+	intent: RecursiveIntent,
+	joinAliases: string[],
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+): any {
+	// Collect all select fields from joinWith clauses
+	const selectFields: string[] = [];
+
+	// Add CTE fields if emit.select specified
+	if (intent.emit?.select) {
+		for (const field of intent.emit.select) {
+			// If field has no qualifier, assume it's from CTE or a joined table
+			selectFields.push(field);
+		}
+	}
+
+	// Add fields from joinWith clauses
+	if (intent.emit?.joinWith) {
+		for (let i = 0; i < intent.emit.joinWith.length; i++) {
+			const join = intent.emit.joinWith[i];
+			if (!join) continue;
+			const tableAlias = join.as || `j${i}`;
+
+			if (join.select) {
+				for (const sel of join.select) {
+					if (typeof sel === 'string') {
+						selectFields.push(`${tableAlias}.${sel}`);
+					} else {
+						// { column, as } - aliased select
+						selectFields.push(`${tableAlias}.${sel.column} as ${sel.as}`);
+					}
+				}
+			}
+		}
+	}
+
+	// If we have specific fields, select only those
+	if (selectFields.length > 0) {
+		// biome-ignore lint/suspicious/noExplicitAny: Dynamic select building
+		return query.select(selectFields.map((f: string) => sql.raw(f) as any));
+	}
+
+	// Default: select all from CTE
+	return query.selectAll(joinAliases[0]);
 }
 
 // ============================================================================

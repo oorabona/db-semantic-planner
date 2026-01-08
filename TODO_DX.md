@@ -27,6 +27,19 @@ This is a LEAF package (nothing depends on it)
 
 ## Completed
 
+### DX-005: Recursive Query Builder ✅ (2026-01-08)
+
+**Spec:** [docs/specs/DX-005-recursive-query-builder.md](docs/specs/DX-005-recursive-query-builder.md)
+
+Fluent builder API for recursive CTE queries with composition support.
+
+- [x] ✅ Block 1: Core AST Extension (EmitJoinClause, RecursiveEmitOptions)
+- [x] ✅ Block 2: Compiler Join Support (compileEmitJoins)
+- [x] ✅ Block 3: RecursiveQueryBuilder Core (from, nodeId, traverseVia, maxDepth)
+- [x] ✅ Block 4: Builder Composition Methods (join, leftJoin, select, distinct, emitFilter)
+- [x] ✅ Block 5: Builder Execution (execute, dump, buildIntent)
+- [x] ✅ Block 6: Unit Tests - 22 tests covering all BDD scenarios
+
 ### STREAMING-001: QueryBuilder.stream() - 10 dx tests ✅ (2026-01-07)
 
 **Spec:** [docs/specs/STREAMING-001-cursor-support.md](docs/specs/STREAMING-001-cursor-support.md)

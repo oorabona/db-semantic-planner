@@ -1558,5 +1558,274 @@ describe('SQL Compiler', () => {
 				expect(compiled.parameters).toContain('/');
 			});
 		});
+
+		describe('emit.joinWith (CTE composition)', () => {
+			/**
+			 * Schema for emit.joinWith tests: roles with permissions
+			 */
+			const permissionsSchema = defineSchema({
+				roles: {
+					id: 'number',
+					name: 'string',
+				},
+				roleEdges: {
+					id: 'number',
+					parentRoleId: 'number',
+					childRoleId: 'number',
+				},
+				rolePermissions: {
+					id: 'number',
+					roleId: 'number',
+					permissionId: 'number',
+				},
+				permissions: {
+					id: 'number',
+					name: 'string',
+					resource: 'string',
+				},
+			})
+				.relations({
+					roles: {
+						parentEdges: hasMany('roleEdges', { foreignKey: 'childRoleId' }),
+						childEdges: hasMany('roleEdges', { foreignKey: 'parentRoleId' }),
+						rolePermissions: hasMany('rolePermissions', {
+							foreignKey: 'roleId',
+						}),
+					},
+					roleEdges: {
+						parentRole: belongsTo('roles', { foreignKey: 'parentRoleId' }),
+						childRole: belongsTo('roles', { foreignKey: 'childRoleId' }),
+					},
+					rolePermissions: {
+						role: belongsTo('roles', { foreignKey: 'roleId' }),
+						permission: belongsTo('permissions', {
+							foreignKey: 'permissionId',
+						}),
+					},
+					permissions: {
+						rolePermissions: hasMany('rolePermissions', {
+							foreignKey: 'permissionId',
+						}),
+					},
+				})
+				.build();
+
+			it('should generate JOIN clause when emit.joinWith is specified', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'role_tree',
+					start: {
+						from: 'roles',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						where: {
+							kind: 'comparison',
+							field: 'id',
+							operator: 'eq',
+							value: 1,
+						},
+					},
+					traversal: {
+						kind: 'edge-table',
+						edgeTable: 'roleEdges',
+						sourceNodeId: 'parentRoleId',
+						targetNodeId: 'childRoleId',
+						direction: 'descendants',
+					},
+					maxDepth: 10,
+					emit: {
+						joinWith: [
+							{
+								table: 'rolePermissions',
+								on: { left: 'id', right: 'roleId' },
+								select: ['permissionId'],
+							},
+						],
+					},
+				};
+
+				const report = planRecursive(intent, permissionsSchema);
+				const compiled = compileRecursive(report, permissionsSchema, kysely);
+
+				// Should contain JOIN clause
+				expect(compiled.sql.toLowerCase()).toContain('join');
+				expect(compiled.sql.toLowerCase()).toContain('"rolepermissions"');
+				// Should select from joined table
+				expect(compiled.sql.toLowerCase()).toContain('permissionid');
+			});
+
+			it('should support left join type', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'role_tree',
+					start: {
+						from: 'roles',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						where: {
+							kind: 'comparison',
+							field: 'id',
+							operator: 'eq',
+							value: 1,
+						},
+					},
+					traversal: {
+						kind: 'edge-table',
+						edgeTable: 'roleEdges',
+						sourceNodeId: 'parentRoleId',
+						targetNodeId: 'childRoleId',
+						direction: 'descendants',
+					},
+					maxDepth: 10,
+					emit: {
+						joinWith: [
+							{
+								table: 'rolePermissions',
+								type: 'left',
+								on: { left: 'id', right: 'roleId' },
+							},
+						],
+					},
+				};
+
+				const report = planRecursive(intent, permissionsSchema);
+				const compiled = compileRecursive(report, permissionsSchema, kysely);
+
+				// Should contain LEFT JOIN
+				expect(compiled.sql.toLowerCase()).toContain('left join');
+			});
+
+			it('should support emit.distinct', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'role_tree',
+					start: {
+						from: 'roles',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						where: {
+							kind: 'comparison',
+							field: 'id',
+							operator: 'eq',
+							value: 1,
+						},
+					},
+					traversal: {
+						kind: 'edge-table',
+						edgeTable: 'roleEdges',
+						sourceNodeId: 'parentRoleId',
+						targetNodeId: 'childRoleId',
+						direction: 'descendants',
+					},
+					maxDepth: 10,
+					emit: {
+						distinct: true,
+						select: ['name'],
+					},
+				};
+
+				const report = planRecursive(intent, permissionsSchema);
+				const compiled = compileRecursive(report, permissionsSchema, kysely);
+
+				// Should contain SELECT DISTINCT
+				expect(compiled.sql.toLowerCase()).toContain('select distinct');
+			});
+
+			it('should support multiple joins in emit.joinWith', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'role_tree',
+					start: {
+						from: 'roles',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						where: {
+							kind: 'comparison',
+							field: 'id',
+							operator: 'eq',
+							value: 1,
+						},
+					},
+					traversal: {
+						kind: 'edge-table',
+						edgeTable: 'roleEdges',
+						sourceNodeId: 'parentRoleId',
+						targetNodeId: 'childRoleId',
+						direction: 'descendants',
+					},
+					maxDepth: 10,
+					emit: {
+						joinWith: [
+							{
+								table: 'rolePermissions',
+								as: 'rp',
+								on: { left: 'id', right: 'roleId' },
+								select: ['permissionId'],
+							},
+							{
+								table: 'permissions',
+								as: 'p',
+								on: { left: 'rp.permissionId', right: 'id' },
+								select: ['name'],
+							},
+						],
+						distinct: true,
+					},
+				};
+
+				const report = planRecursive(intent, permissionsSchema);
+				const compiled = compileRecursive(report, permissionsSchema, kysely);
+
+				// Should contain two JOINs
+				expect(compiled.sql.toLowerCase()).toMatch(/join.*join/);
+				// Should select distinct
+				expect(compiled.sql.toLowerCase()).toContain('select distinct');
+			});
+
+			it('should support aliased select in joinWith', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'role_tree',
+					start: {
+						from: 'roles',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						where: {
+							kind: 'comparison',
+							field: 'id',
+							operator: 'eq',
+							value: 1,
+						},
+					},
+					traversal: {
+						kind: 'edge-table',
+						edgeTable: 'roleEdges',
+						sourceNodeId: 'parentRoleId',
+						targetNodeId: 'childRoleId',
+						direction: 'descendants',
+					},
+					maxDepth: 10,
+					emit: {
+						joinWith: [
+							{
+								table: 'permissions',
+								as: 'perm',
+								on: { left: 'id', right: 'id' },
+								select: [
+									{ column: 'name', as: 'permissionName' },
+									{ column: 'resource', as: 'resourceType' },
+								],
+							},
+						],
+					},
+				};
+
+				const report = planRecursive(intent, permissionsSchema);
+				const compiled = compileRecursive(report, permissionsSchema, kysely);
+
+				// Should have aliased columns (may or may not be quoted depending on dialect)
+				expect(compiled.sql.toLowerCase()).toMatch(
+					/as\s+["']?permissionname["']?/,
+				);
+				expect(compiled.sql.toLowerCase()).toMatch(
+					/as\s+["']?resourcetype["']?/,
+				);
+			});
+		});
 	});
 });

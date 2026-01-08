@@ -7,6 +7,7 @@ import type {
 	WhereIntent,
 } from '@db-semantic-planner/core';
 import type { Kysely } from 'kysely';
+import type { RecursiveQueryBuilder } from './recursive-query-builder.js';
 
 /**
  * Options for streaming query execution.
@@ -557,6 +558,28 @@ export interface OrmInstance {
 	 * ```
 	 */
 	forTenant(schemaName: string): OrmInstance;
+
+	/**
+	 * Start building a recursive CTE query.
+	 *
+	 * @param cteName - Name for the recursive CTE
+	 * @returns A RecursiveQueryBuilder for constructing the recursive query
+	 *
+	 * @example
+	 * ```typescript
+	 * const permissions = await orm
+	 *   .recursive('role_tree')
+	 *   .from('roles')
+	 *   .where(eq('id', 1))
+	 *   .nodeId('id')
+	 *   .traverseVia('roleEdges', { from: 'parentRoleId', to: 'childRoleId' })
+	 *   .maxDepth(10)
+	 *   .join('rolePermissions', 'id', 'roleId')
+	 *   .distinct()
+	 *   .execute();
+	 * ```
+	 */
+	recursive<TResult = unknown>(cteName: string): RecursiveQueryBuilder<TResult>;
 }
 
 /**
