@@ -183,7 +183,12 @@ export interface QueryBuilder {
 	/**
 	 * Include a related entity in the query results.
 	 *
-	 * @param relation - The relation name or target table to include
+	 * Supports dot notation for nested includes:
+	 * - `'posts'` - include posts
+	 * - `'posts.comments'` - include posts and their comments
+	 * - `'posts.comments.author'` - include posts, their comments, and comment authors
+	 *
+	 * @param relation - The relation name (dot notation for nested)
 	 * @param options - Optional configuration for the include
 	 * @returns A new QueryBuilder with the include added
 	 *
@@ -191,6 +196,7 @@ export interface QueryBuilder {
 	 * ```typescript
 	 * query('users')
 	 *   .include('posts')  // Simple include
+	 *   .include('posts.comments.author')  // Dot notation for nested
 	 *   .include('profile', { select: { fields: ['bio'] } })  // With options
 	 *   .include('posts', { via: 'authoredPosts' })  // Disambiguated
 	 * ```
@@ -551,6 +557,66 @@ export interface QueryBuilder {
 	 * ```
 	 */
 	stream(options?: StreamOptions): AsyncIterableIterator<unknown>;
+
+	/**
+	 * Find a single record by its primary key.
+	 *
+	 * Shortcut for `.where(eq('id', value)).findFirst()` for simple PKs,
+	 * or `.where(and(eq('a', 1), eq('b', 2))).findFirst()` for composite PKs.
+	 *
+	 * @param value - Simple PK value (string | number) or composite PK object
+	 * @returns Promise resolving to the record or undefined if not found
+	 * @throws {ExecutionError} If db is not configured
+	 *
+	 * @example
+	 * ```typescript
+	 * // Simple primary key
+	 * const user = await orm.query('users').byId(42);
+	 *
+	 * // Composite primary key
+	 * const orderLine = await orm.query('order_lines').byId({
+	 *   orderId: 1,
+	 *   productId: 42
+	 * });
+	 * ```
+	 */
+	byId(
+		value: string | number | Record<string, unknown>,
+	): Promise<unknown | undefined>;
+
+	/**
+	 * Find a single record by its primary key, or throw if not found.
+	 *
+	 * @param value - Simple PK value (string | number) or composite PK object
+	 * @returns Promise resolving to the record
+	 * @throws {NotFoundError} If no record found
+	 * @throws {ExecutionError} If db is not configured
+	 *
+	 * @example
+	 * ```typescript
+	 * const user = await orm.query('users').byIdOrThrow(42);
+	 * ```
+	 */
+	byIdOrThrow(
+		value: string | number | Record<string, unknown>,
+	): Promise<unknown>;
+
+	/**
+	 * Find multiple records by their primary keys.
+	 *
+	 * Shortcut for `.where(inArray('id', values)).findMany()`.
+	 * Only supports simple (non-composite) primary keys.
+	 *
+	 * @param values - Array of primary key values
+	 * @returns Promise resolving to array of records (may be empty)
+	 * @throws {ExecutionError} If db is not configured
+	 *
+	 * @example
+	 * ```typescript
+	 * const users = await orm.query('users').byIds([1, 2, 3]);
+	 * ```
+	 */
+	byIds(values: readonly (string | number)[]): Promise<unknown[]>;
 }
 
 /**

@@ -19,9 +19,112 @@ This is a LEAF package (nothing depends on it)
 
 ---
 
-## Pending - P1
+## Pending - P2
 
-(none)
+### DX-007: Actionable Error Messages ✅ (2026-01-09)
+
+Améliorer les messages d'erreur pour guider l'utilisateur vers la solution.
+
+- [x] ✅ `ExecutionError` avec operation, reason, fix
+- [x] ✅ `NotFoundError` avec hint optionnel
+- [x] ✅ `AmbiguousRelationError` avec exemples de code pour fix
+- [x] ✅ `RelationNotFoundError` (NEW) avec:
+  - Liste des relations disponibles
+  - Suggestion "Did you mean 'X'?" (fuzzy match Levenshtein)
+- [x] ✅ 21 tests (9 nouveaux pour RelationNotFoundError)
+
+**Effort:** S
+
+---
+
+### DX-008: API Shortcuts (byId, dot notation include) ✅ (2026-01-09)
+
+Raccourcis pour les cas d'usage fréquents.
+
+- [x] ✅ `byId(value)` - raccourci pour `where(eq('id', value)).findFirst()`
+  - Support PK simple: `byId(42)`
+  - Support PK composite: `byId({ orderId: 1, productId: 42 })`
+- [x] ✅ `byIdOrThrow(value)` - throws NotFoundError if not found
+- [x] ✅ `byIds(values)` - raccourci pour `where(inArray('id', values)).findMany()`
+  - Handles empty array gracefully (returns [])
+- [x] ✅ Dot notation pour include nested: `.include('posts.comments.author')`
+  - Options applied to deepest level
+- [x] ✅ Fluent chaining alternatif: `.include('posts').include('posts.comments')`
+- [x] ✅ 13 unit tests
+
+**Effort:** S
+
+---
+
+### DX-009: RecursiveBuilder Integration + Renaming 🟡 MEDIUM
+
+Intégrer RecursiveQueryBuilder directement dans l'ORM avec API plus intuitive.
+
+**Renaming proposé:**
+- `nodeId(x)` → `startingFrom(x)`
+- `traverseVia(rel)` → `following(rel)`
+- `maxDepth(n)` → `upToDepth(n)`
+
+**Intégration ORM:**
+```typescript
+// Au lieu de createRecursiveBuilder(model, 'categories')
+orm.recursive('categories').startingFrom(42).following('children');
+```
+
+**Raccourcis sémantiques:**
+- `orm.ancestors('categories', 42)` - parcours ascendant
+- `orm.descendants('categories', 42)` - parcours descendant
+- `orm.subtree('categories', 42)` - sous-arbre complet
+
+**Note:** Ces raccourcis doivent fonctionner avec les hiérarchies adjacency ET edge-table.
+
+**Effort:** M
+
+---
+
+### DX-010: Mutations (insert/update/delete) 🟢 NORMAL
+
+Ajouter le support des mutations tout en conservant la philosophie intent-first.
+
+**API proposée:**
+```typescript
+orm.insert('users').values({ name: 'Alice' });
+orm.insert('users').values([{ name: 'A' }, { name: 'B' }]);  // Bulk
+
+orm.update('users').where(eq('id', 1)).set({ name: 'Bob' });
+
+orm.delete('users').where(eq('id', 1));
+```
+
+**Observabilité (dump):**
+```typescript
+const dump = orm.insert('users').values({...}).dump();
+// → { sql, params, plan }
+```
+
+**Cascade explicite (option ou méthode):**
+```typescript
+// Option 1: méthode fluent
+orm.delete('users').where(eq('id', 1)).cascade();
+
+// Option 2: option explicite
+orm.delete('users').where(eq('id', 1)).execute({ cascade: true });
+
+// Option 3: relations explicites
+orm.delete('users').where(eq('id', 1)).cascade(['posts', 'comments']);
+```
+
+**Ce qu'on NE fait PAS:**
+- Migrations (Kysely/Prisma/Drizzle le font déjà)
+- Change tracking / Unit of Work
+- Cascade automatique (toujours explicite)
+
+**Multi-tenant:**
+```typescript
+orm.forTenant('acme').insert('users').values({...});
+```
+
+**Effort:** L
 
 ---
 
@@ -164,10 +267,11 @@ Fluent builder API for recursive CTE queries with composition support.
 |------|-----------|------------|
 | Q3 | Strict mode | Throws AmbiguousRelationError with options |
 
-## Non-Goals (P1)
+## Non-Goals
 
-- No Prisma-like nested writes
-- No automatic relation inference
+- No migrations (use Kysely/Prisma/Drizzle migrations)
+- No change tracking / Unit of Work pattern
+- No automatic cascade (always explicit via .cascade())
 - No runtime type validation
 
 ## Open Questions

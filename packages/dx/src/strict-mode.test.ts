@@ -120,7 +120,7 @@ describe('Scenario 1: Strict mode throws on ambiguous relation', () => {
 		} catch (error) {
 			expect(error).toBeInstanceOf(AmbiguousRelationError);
 			const message = (error as Error).message;
-			expect(message).toContain("Use { via: 'relationName' }");
+			expect(message).toContain("{ via: 'authoredPosts' }");
 		}
 	});
 });
