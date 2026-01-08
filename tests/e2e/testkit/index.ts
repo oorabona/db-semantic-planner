@@ -35,3 +35,8 @@ export {
 export { createBlogSchema, dropBlogSchema } from './blog.ddl.js';
 export { blogModel } from './blog.model.js';
 export { seedBlogData } from './blog.seed.js';
+
+// IAM/RBAC
+export { createIamSchema, dropIamSchema } from './iam.ddl.js';
+export { iamModel } from './iam.model.js';
+export { seedIamData, iamTestData } from './iam.seed.js';
