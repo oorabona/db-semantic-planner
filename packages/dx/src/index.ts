@@ -20,6 +20,8 @@ export {
 export {
 	// Logical
 	and,
+	// Expression
+	coalesce,
 	// Comparison
 	eq,
 	// Relation
@@ -39,6 +41,8 @@ export {
 	not,
 	notExists,
 	or,
+	// Raw SQL escape hatch
+	raw,
 } from './filters.js';
 
 // Factory

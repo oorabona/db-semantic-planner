@@ -15,10 +15,21 @@ export {
 	shouldSkipE2E,
 } from './db.js';
 
-// PIM/DAM
+// PIM/DAM (base)
 export { createPimdamSchema, dropPimdamSchema } from './pimdam.ddl.js';
 export { pimdamModel } from './pimdam.model.js';
 export { seedAcmeTenant, seedGlobexTenant } from './pimdam.seed.js';
+
+// PIM/DAM (extended for E2E-002)
+export {
+	createExtendedPimdamSchema,
+	dropExtendedPimdamSchema,
+} from './pimdam-extended.ddl.js';
+export { pimdamExtendedModel } from './pimdam-extended.model.js';
+export {
+	seedExtendedPimdam,
+	seedExtendedPimdamTenant2,
+} from './pimdam-extended.seed.js';
 
 // Blog
 export { createBlogSchema, dropBlogSchema } from './blog.ddl.js';

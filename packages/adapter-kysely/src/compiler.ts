@@ -5,13 +5,18 @@
 
 import type {
 	AggregateIntent,
+	ExpressionIntent,
 	ModelIR,
 	PlanReport,
 	QueryIntent,
 	SelectAggregateIntent,
+	SelectWithExpressionsIntent,
 	WhereIntent,
 } from '@db-semantic-planner/core';
-import { isSelectAggregate } from '@db-semantic-planner/core';
+import {
+	isSelectAggregate,
+	isSelectWithExpressions,
+} from '@db-semantic-planner/core';
 import type { CompiledQuery, Kysely, SelectQueryBuilder } from 'kysely';
 import { sql } from 'kysely';
 import { CompilationError } from './errors.js';
@@ -126,6 +131,9 @@ function buildBaseQuery(
 	} else if (isSelectAggregate(intent.select)) {
 		// Handle aggregate select
 		query = buildAggregateSelect(query, intent.select, alias);
+	} else if (isSelectWithExpressions(intent.select)) {
+		// Handle select with expressions (COALESCE, etc.)
+		query = buildSelectWithExpressions(query, intent.select, alias);
 	} else {
 		const fields = intent.select.fields.map((f: string) => `${alias}.${f}`);
 		query = query.select(fields);
@@ -209,6 +217,89 @@ function addAggregateExpression(
 		default:
 			throw new CompilationError(`Unknown aggregate function: ${agg.function}`);
 	}
+}
+
+// ============================================================================
+// Expression Compilation (COALESCE, etc.)
+// ============================================================================
+
+/**
+ * Build SELECT with expressions (COALESCE, raw, etc.)
+ */
+function buildSelectWithExpressions(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: SelectQueryBuilder<any, any, any>,
+	select: SelectWithExpressionsIntent,
+	alias: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	let result = query;
+
+	// Add regular fields first
+	if (select.fields && select.fields.length > 0) {
+		const fields = select.fields.map((f: string) => `${alias}.${f}`);
+		result = result.select(fields);
+	}
+
+	// Add expressions
+	for (const expr of select.expressions) {
+		result = addExpressionSelect(result, expr, alias);
+	}
+
+	return result;
+}
+
+/**
+ * Add a single expression to the SELECT clause
+ */
+function addExpressionSelect(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: SelectQueryBuilder<any, any, any>,
+	expr: ExpressionIntent,
+	alias: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	switch (expr.kind) {
+		case 'coalesce':
+			return compileCoalesceSelect(query, expr.fields, expr.as, alias);
+
+		case 'raw':
+			// Raw SQL expression - use with caution!
+			return query.select(sql`${sql.raw(expr.sql)}`.as(expr.as));
+
+		default:
+			throw new CompilationError(
+				`Unknown expression kind: ${(expr as ExpressionIntent).kind}`,
+			);
+	}
+}
+
+/**
+ * Compile COALESCE expression for SELECT
+ * COALESCE(field1, field2, ...) AS alias
+ */
+function compileCoalesceSelect(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: SelectQueryBuilder<any, any, any>,
+	fields: readonly string[],
+	resultAlias: string,
+	tableAlias: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	if (fields.length === 0) {
+		throw new CompilationError('COALESCE requires at least one field');
+	}
+
+	// Build COALESCE(t0.field1, t0.field2, ...) using Kysely's native expression builder
+	return query.select((eb) =>
+		eb
+			.fn(
+				'coalesce',
+				// biome-ignore lint/suspicious/noExplicitAny: Dynamic column references
+				fields.map((f) => eb.ref(`${tableAlias}.${f}` as any)),
+			)
+			.as(resultAlias),
+	);
 }
 
 // ============================================================================
@@ -443,7 +534,8 @@ function compileExists(
 
 	const subquery = eb
 		.selectFrom(`${targetTable} as ${relatedAlias}`)
-		.select(sql`1`)
+		// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+		.select((innerEb: any) => innerEb.lit(1).as('_exists'))
 		.whereRef(`${relatedAlias}.${fk}`, '=', `${sourceAlias}.${sourceKey}`);
 
 	// Add nested WHERE if present

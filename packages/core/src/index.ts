@@ -39,6 +39,9 @@ export type {
 	// Operators
 	ArrayOperator,
 	ComparisonOperator,
+	// Expressions
+	CoalesceExpressionIntent,
+	ExpressionIntent,
 	// Include
 	IncludeIntent,
 	LogicalOperator,
@@ -48,12 +51,14 @@ export type {
 	OrderByIntent,
 	// Query
 	QueryIntent,
+	RawExpressionIntent,
 	RelationOperator,
 	SelectAggregateIntent,
 	// Select
 	SelectAllIntent,
 	SelectFieldsIntent,
 	SelectIntent,
+	SelectWithExpressionsIntent,
 	SortDirection,
 	StringOperator,
 	// Where (filters)
@@ -71,9 +76,12 @@ export type {
 } from './intent-ast.js';
 export {
 	// Type guards
+	isCoalesceExpression,
+	isRawExpression,
 	isSelectAggregate,
 	isSelectAll,
 	isSelectFields,
+	isSelectWithExpressions,
 	isWhereAnd,
 	isWhereComparison,
 	isWhereExists,
