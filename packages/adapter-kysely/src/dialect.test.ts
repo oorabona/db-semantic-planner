@@ -112,6 +112,7 @@ describe('capability profiles', () => {
 				supportsReturning: true,
 				supportsNullsFirstLast: true,
 				supportsStreaming: true,
+				supportsArrayType: true,
 			});
 		});
 	});
@@ -125,6 +126,7 @@ describe('capability profiles', () => {
 				supportsReturning: false,
 				supportsNullsFirstLast: true,
 				supportsStreaming: false,
+				supportsArrayType: false,
 			});
 		});
 
@@ -146,6 +148,7 @@ describe('capability profiles', () => {
 				supportsReturning: true,
 				supportsNullsFirstLast: true,
 				supportsStreaming: false,
+				supportsArrayType: false,
 			});
 		});
 
@@ -167,6 +170,7 @@ describe('capability profiles', () => {
 				supportsReturning: false,
 				supportsNullsFirstLast: false,
 				supportsStreaming: false,
+				supportsArrayType: false,
 			});
 		});
 	});
@@ -180,6 +184,7 @@ describe('capability profiles', () => {
 				supportsReturning: false,
 				supportsNullsFirstLast: false,
 				supportsStreaming: false,
+				supportsArrayType: false,
 			});
 		});
 

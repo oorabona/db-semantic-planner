@@ -496,8 +496,10 @@ export interface RecursiveTrackOptions {
 		readonly by?: 'nodeId' | readonly string[];
 		/** Result column name (default: "path") */
 		readonly as?: string;
-		/** Storage strategy (default: 'array' for PostgreSQL) */
+		/** Storage strategy (default: 'array' for PostgreSQL, 'string' for others) */
 		readonly strategy?: 'array' | 'string';
+		/** Separator for string strategy (default: '/') */
+		readonly separator?: string;
 	};
 
 	/** Cycle detection marker */

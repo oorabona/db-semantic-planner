@@ -13,9 +13,16 @@
 
 ---
 
-## In Progress
+## Completed - Architecture
 
-(none)
+### ARCH-001: Dialect-Agnostic Recursive CTE - Core Changes ✅ (2026-01-08)
+
+**Spec:** [docs/specs/ARCH-001-dialect-agnostic-recursive.md](docs/specs/ARCH-001-dialect-agnostic-recursive.md)
+
+- [x] ✅ Block 1: Extend `RecursiveTrackOptions.path` with `separator?: string` (2026-01-08)
+  - Added `separator` option to intent-ast.ts
+  - TypeScript compilation verified
+  - Backward compatible (existing code unchanged)
 
 ---
 

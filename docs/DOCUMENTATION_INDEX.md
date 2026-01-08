@@ -60,6 +60,7 @@ packages/dx            → Depends on core + adapter-kysely
 | DIALECT-001 | [Multi-dialect Capabilities](specs/DIALECT-001-multi-dialect-capabilities.md) | adapter | ✅ canonical |
 | TEST-001 | [SQL Snapshot Testing](specs/TEST-001-sql-snapshot-utilities.md) | testing | ✅ canonical |
 | E2E-002 | [PIM/DAM Realistic Scenarios](specs/E2E-002-pimdam-realistic-scenarios.md) | e2e | 🟡 draft |
+| ARCH-001 | [Dialect-Agnostic Recursive CTE](specs/ARCH-001-dialect-agnostic-recursive.md) | core, adapter | 🟡 draft |
 
 ## Golden Query Tests (MVP Contract) - ✅ Complete
 

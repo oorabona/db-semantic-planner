@@ -13,6 +13,37 @@ MUST NOT import from: packages/dx
 
 ---
 
+## Completed - Architecture
+
+### ARCH-001: Dialect-Agnostic Recursive CTE - Adapter Changes ✅ (2026-01-08)
+
+**Spec:** [docs/specs/ARCH-001-dialect-agnostic-recursive.md](docs/specs/ARCH-001-dialect-agnostic-recursive.md)
+**Depends on:** ARCH-001 Core Block 1 ✅
+
+- [x] ✅ Block 2: Add `supportsArrayType` capability to DialectCapabilities (2026-01-08)
+  - Updated `dialect.ts` interface
+  - Updated dialect profiles (PostgreSQL: true, others: false)
+  - Added capability detection tests
+- [x] ✅ Block 3: Implement PathTrackingCompiler with strategy selection (2026-01-08)
+  - `resolvePathStrategy()` - infers strategy from capabilities
+  - `compilePathTrackingBaseCase()` - ARRAY[] for PostgreSQL, CAST(x AS text) for others
+  - `compilePathTrackingRecursive()` - array concat or string concat with separator
+  - UnsupportedOperationError guard for array on non-PostgreSQL
+- [x] ✅ Block 4: Integration tests for path tracking strategies (2026-01-08)
+  - Array strategy on PostgreSQL (with PostgresKysely test factory)
+  - String strategy on any dialect
+  - Custom separator tests
+  - Custom path alias tests
+  - Edge-table traversal with path tracking
+  - Backward compatibility (all existing tests pass)
+
+**Results:**
+- 6 new tests for path tracking strategies
+- 282 total tests passing in adapter-kysely
+- Path tracking now works on MySQL, SQLite, and MSSQL via string strategy
+
+---
+
 ## In Progress
 
 ### RFC-001: Recursive CTE Support - MVP ✅ (2026-01-08)

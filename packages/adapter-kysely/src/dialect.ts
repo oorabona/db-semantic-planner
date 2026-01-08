@@ -38,6 +38,9 @@ export interface DialectCapabilities {
 
 	/** Cursor-based streaming (requires pg-cursor) */
 	readonly supportsStreaming: boolean;
+
+	/** Native array type support (PostgreSQL ARRAY) */
+	readonly supportsArrayType: boolean;
 }
 
 /**
@@ -50,6 +53,7 @@ export const POSTGRESQL_CAPABILITIES: DialectCapabilities = {
 	supportsReturning: true,
 	supportsNullsFirstLast: true,
 	supportsStreaming: true,
+	supportsArrayType: true,
 };
 
 /**
@@ -63,6 +67,7 @@ export const MYSQL_CAPABILITIES: DialectCapabilities = {
 	supportsReturning: false,
 	supportsNullsFirstLast: true, // MySQL 8.0+
 	supportsStreaming: false,
+	supportsArrayType: false,
 };
 
 /**
@@ -75,6 +80,7 @@ export const SQLITE_CAPABILITIES: DialectCapabilities = {
 	supportsReturning: true, // SQLite 3.35+
 	supportsNullsFirstLast: true, // SQLite 3.30+
 	supportsStreaming: false,
+	supportsArrayType: false,
 };
 
 /**
@@ -87,6 +93,7 @@ export const MSSQL_CAPABILITIES: DialectCapabilities = {
 	supportsReturning: false, // MSSQL uses OUTPUT clause
 	supportsNullsFirstLast: false,
 	supportsStreaming: false,
+	supportsArrayType: false,
 };
 
 /**
@@ -100,6 +107,7 @@ export const UNKNOWN_CAPABILITIES: DialectCapabilities = {
 	supportsReturning: false,
 	supportsNullsFirstLast: false,
 	supportsStreaming: false,
+	supportsArrayType: false,
 };
 
 /**
@@ -314,6 +322,17 @@ function getDefaultGuidance(
 			mssql:
 				'MSSQL does not support NULLS FIRST/LAST. Use CASE expression in ORDER BY instead.',
 			unknown: 'The detected dialect may not support NULLS FIRST/LAST.',
+		},
+		supportsArrayType: {
+			postgresql: 'This should work - PostgreSQL supports ARRAY type.',
+			mysql:
+				"MySQL does not support native arrays. Use strategy: 'string' for path tracking instead.",
+			sqlite:
+				"SQLite does not support native arrays. Use strategy: 'string' for path tracking instead.",
+			mssql:
+				"MSSQL does not support native arrays. Use strategy: 'string' for path tracking instead.",
+			unknown:
+				"The detected dialect may not support native arrays. Use strategy: 'string' for path tracking.",
 		},
 	};
 

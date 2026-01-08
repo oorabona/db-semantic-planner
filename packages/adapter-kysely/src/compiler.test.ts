@@ -8,7 +8,7 @@ import {
 	type RecursiveIntent,
 } from '@db-semantic-planner/core';
 import Database from 'better-sqlite3';
-import { Kysely, SqliteDialect } from 'kysely';
+import { DummyDriver, Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler, SqliteDialect } from 'kysely';
 import { describe, expect, it } from 'vitest';
 import { compile, compileRecursive } from './compiler.js';
 import { CompilationError } from './errors.js';
@@ -26,6 +26,21 @@ function createTestKysely() {
 		dialect: new SqliteDialect({
 			database: new Database(':memory:'),
 		}),
+	});
+}
+
+/**
+ * Create a PostgreSQL Kysely instance for testing PostgreSQL-specific features
+ * Uses DummyDriver since we only need SQL generation, not execution
+ */
+function createPostgresKysely() {
+	return new Kysely<Record<string, unknown>>({
+		dialect: {
+			createAdapter: () => new PostgresAdapter(),
+			createDriver: () => new DummyDriver(),
+			createIntrospector: (db) => new PostgresIntrospector(db),
+			createQueryCompiler: () => new PostgresQueryCompiler(),
+		},
 	});
 }
 
@@ -1329,6 +1344,208 @@ describe('SQL Compiler', () => {
 
 				expect(compiled.sql).toContain('"tenant_abc"."roles"');
 				expect(compiled.sql).toContain('"tenant_abc"."roleEdges"');
+			});
+		});
+
+
+		describe('ARCH-001: path tracking strategies', () => {
+			// Create a PostgreSQL Kysely instance for array strategy tests
+			const postgresKysely = createPostgresKysely();
+
+			it('should use array strategy by default for PostgreSQL (path tracking)', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'category_tree',
+					start: {
+						from: 'categories',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parentId',
+						direction: 'descendants',
+					},
+					track: {
+						path: {}, // No explicit strategy - should default to array for PostgreSQL
+					},
+					maxDepth: 10,
+				};
+
+				const report = planRecursive(intent, recursiveSchema);
+				// Use PostgreSQL Kysely for array strategy test
+				const compiled = compileRecursive(report, recursiveSchema, postgresKysely);
+
+				// PostgreSQL uses ARRAY[] for path initialization
+				expect(compiled.sql).toContain('ARRAY[');
+				// And || for array concatenation in recursive step
+				expect(compiled.sql).toMatch(/"path"\s*\|\|/);
+			});
+
+			it('should use string strategy when explicitly requested', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'category_tree',
+					start: {
+						from: 'categories',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parentId',
+						direction: 'descendants',
+					},
+					track: {
+						path: {
+							strategy: 'string',
+						},
+					},
+					maxDepth: 10,
+				};
+
+				const report = planRecursive(intent, recursiveSchema);
+				const compiled = compileRecursive(report, recursiveSchema, kysely);
+
+				// String strategy uses CAST for base case
+				expect(compiled.sql.toLowerCase()).toContain('cast(');
+				// Separator is bound as parameter - check parameters array
+				expect(compiled.parameters).toContain('/');
+			});
+
+			it('should use custom separator in string strategy', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'category_tree',
+					start: {
+						from: 'categories',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parentId',
+						direction: 'descendants',
+					},
+					track: {
+						path: {
+							strategy: 'string',
+							separator: '->',
+						},
+					},
+					maxDepth: 10,
+				};
+
+				const report = planRecursive(intent, recursiveSchema);
+				const compiled = compileRecursive(report, recursiveSchema, kysely);
+
+				// Custom separator should appear in the parameters
+				expect(compiled.parameters).toContain('->');
+				// Should not contain default separator
+				expect(compiled.parameters).not.toContain('/');
+			});
+
+			it('should use custom path alias', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'category_tree',
+					start: {
+						from: 'categories',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parentId',
+						direction: 'descendants',
+					},
+					track: {
+						path: {
+							as: 'breadcrumb',
+						},
+					},
+					maxDepth: 10,
+				};
+
+				const report = planRecursive(intent, recursiveSchema);
+				const compiled = compileRecursive(report, recursiveSchema, kysely);
+
+				// Custom alias should appear
+				expect(compiled.sql).toContain('"breadcrumb"');
+				// CTE columns should include the custom alias
+				expect(compiled.sql).toContain('breadcrumb');
+			});
+
+			it('should include path in edge-table traversal', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'role_hierarchy',
+					start: {
+						from: 'roles',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'edge-table',
+						nodeTable: 'roles',
+						edgeTable: 'roleEdges',
+						nodeId: 'id',
+						edgeFrom: 'parentRoleId',
+						edgeTo: 'childRoleId',
+						direction: 'out',
+					},
+					track: {
+						path: {
+							strategy: 'string',
+							separator: ' > ',
+						},
+					},
+					maxDepth: 10,
+				};
+
+				const report = planRecursive(intent, edgeTableSchema);
+				const compiled = compileRecursive(report, edgeTableSchema, kysely);
+
+				// Custom separator should appear in the parameters
+				expect(compiled.parameters).toContain(' > ');
+				// Should have path column in CTE definition
+				expect(compiled.sql).toContain('path');
+			});
+
+			it('should default to string strategy for non-PostgreSQL dialects', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'category_tree',
+					start: {
+						from: 'categories',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parentId',
+						direction: 'descendants',
+					},
+					track: {
+						path: {}, // No explicit strategy - should default to string for SQLite
+					},
+					maxDepth: 10,
+				};
+
+				const report = planRecursive(intent, recursiveSchema);
+				// Use SQLite Kysely (default) - should use string strategy
+				const compiled = compileRecursive(report, recursiveSchema, kysely);
+
+				// String strategy uses CAST for base case
+				expect(compiled.sql.toLowerCase()).toContain('cast(');
+				// Should NOT use ARRAY (PostgreSQL-specific)
+				expect(compiled.sql.toLowerCase()).not.toContain('array[');
+				// Separator should be in parameters
+				expect(compiled.parameters).toContain('/');
 			});
 		});
 	});

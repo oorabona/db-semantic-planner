@@ -12,6 +12,7 @@ import type {
 	RecursiveIntent,
 	RecursiveNodeIdExpr,
 	RecursivePlanReport,
+	RecursiveTrackOptions,
 	SelectAggregateIntent,
 	SelectWithExpressionsIntent,
 	WhereIntent,
@@ -22,9 +23,21 @@ import {
 	isSelectAggregate,
 	isSelectWithExpressions,
 } from '@db-semantic-planner/core';
-import type { CompiledQuery, Kysely, SelectQueryBuilder } from 'kysely';
+import type {
+	AliasedExpression,
+	CompiledQuery,
+	ExpressionBuilder,
+	Kysely,
+	SelectQueryBuilder,
+} from 'kysely';
 import { sql } from 'kysely';
+import {
+	type DialectCapabilities,
+	detectDialect,
+	getCapabilitiesForDialect,
+} from './dialect.js';
 import { CompilationError } from './errors.js';
+import { UnsupportedOperationError } from './stream.js';
 
 // ============================================================================
 // Compiler State
@@ -37,6 +50,107 @@ interface CompilerState {
 	tableAliases: Map<string, string>;
 	/** Collected parameters */
 	parameters: unknown[];
+}
+
+// ============================================================================
+// Path Tracking Compiler (ARCH-001)
+// ============================================================================
+
+/**
+ * Determine the path tracking strategy based on intent and capabilities.
+ *
+ * @param pathOptions - Path tracking options from intent
+ * @param capabilities - Dialect capabilities
+ * @returns The resolved strategy ('array' or 'string')
+ */
+function resolvePathStrategy(
+	pathOptions: RecursiveTrackOptions['path'],
+	capabilities: DialectCapabilities,
+): 'array' | 'string' {
+	if (pathOptions?.strategy) {
+		return pathOptions.strategy;
+	}
+	// Infer from capabilities
+	return capabilities.supportsArrayType ? 'array' : 'string';
+}
+
+/**
+ * Compile path tracking expression for base case (anchor query).
+ *
+ * @param eb - Kysely expression builder
+ * @param columnRef - Reference to the node ID column (e.g., 't0.id')
+ * @param pathOptions - Path tracking options from intent
+ * @param capabilities - Dialect capabilities
+ * @param dialect - Dialect name for error messages
+ * @returns AliasedExpression for the path column
+ */
+function compilePathTrackingBaseCase(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder generic
+	eb: ExpressionBuilder<any, any>,
+	columnRef: string,
+	pathOptions: RecursiveTrackOptions['path'],
+	capabilities: DialectCapabilities,
+	dialect: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic return type
+): AliasedExpression<any, string> {
+	const strategy = resolvePathStrategy(pathOptions, capabilities);
+	const alias = pathOptions?.as ?? 'path';
+
+	if (strategy === 'array') {
+		if (!capabilities.supportsArrayType) {
+			throw new UnsupportedOperationError(
+				'array path tracking',
+				`Array path tracking requires PostgreSQL. Use strategy: 'string' or remove path tracking.`,
+				{ capability: 'supportsArrayType', dialect },
+			);
+		}
+		// PostgreSQL: ARRAY[node_id]
+		return sql`ARRAY[${sql.ref(columnRef)}]`.as(alias);
+	}
+
+	// String strategy: CAST(node_id AS TEXT)
+	return eb.cast(eb.ref(columnRef), 'text').as(alias);
+}
+
+/**
+ * Compile path tracking expression for recursive step.
+ *
+ * @param eb - Kysely expression builder
+ * @param nodeColumnRef - Reference to the new node ID column (e.g., 'node.id')
+ * @param pathOptions - Path tracking options from intent
+ * @param capabilities - Dialect capabilities
+ * @param dialect - Dialect name for error messages
+ * @returns AliasedExpression for the path column
+ */
+function compilePathTrackingRecursive(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder generic
+	eb: ExpressionBuilder<any, any>,
+	nodeColumnRef: string,
+	pathOptions: RecursiveTrackOptions['path'],
+	capabilities: DialectCapabilities,
+	dialect: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic return type
+): AliasedExpression<any, string> {
+	const strategy = resolvePathStrategy(pathOptions, capabilities);
+	const alias = pathOptions?.as ?? 'path';
+	const separator = pathOptions?.separator ?? '/';
+
+	if (strategy === 'array') {
+		if (!capabilities.supportsArrayType) {
+			throw new UnsupportedOperationError(
+				'array path tracking',
+				`Array path tracking requires PostgreSQL. Use strategy: 'string' or remove path tracking.`,
+				{ capability: 'supportsArrayType', dialect },
+			);
+		}
+		// PostgreSQL: prev.path || node.id (array concat)
+		return eb(eb.ref('prev.path'), '||', eb.ref(nodeColumnRef)).as(alias);
+	}
+
+	// String strategy: CONCAT(prev.path, separator, node.id)
+	return sql`${eb.ref('prev.path')} || ${eb.val(separator)} || ${eb.cast(eb.ref(nodeColumnRef), 'text')}`.as(
+		alias,
+	);
 }
 
 // ============================================================================
@@ -131,6 +245,10 @@ export function compileRecursive(
 	const intent = plan.intent;
 	const cteName = intent.cteName;
 
+	// ARCH-001: Detect dialect capabilities for path tracking strategy
+	const dialect = detectDialect(kysely);
+	const capabilities = getCapabilitiesForDialect(dialect);
+
 	// Determine if we need UNION (distinct) or UNION ALL
 	const bidirectionalDecision = plan.decisions.find(
 		(d: { type: string; choice: string }) => d.type === 'bidirectional-edges',
@@ -151,7 +269,13 @@ export function compileRecursive(
 		// biome-ignore lint/suspicious/noExplicitAny: Dynamic CTE callback
 		(db: Kysely<any>) => {
 			// Build base case (anchor)
-			const baseQuery = buildRecursiveBaseCase(intent, db, schemaName);
+			const baseQuery = buildRecursiveBaseCase(
+				intent,
+				db,
+				schemaName,
+				capabilities,
+				dialect,
+			);
 
 			// Build recursive case
 			const recursiveQuery = buildRecursiveStep(
@@ -159,6 +283,8 @@ export function compileRecursive(
 				db,
 				cteName,
 				schemaName,
+				capabilities,
+				dialect,
 			);
 
 			// Combine with UNION or UNION ALL
@@ -244,7 +370,9 @@ function buildRecursiveBaseCase(
 	intent: RecursiveIntent,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 	db: Kysely<any>,
-	schemaName?: string,
+	schemaName: string | undefined,
+	capabilities: DialectCapabilities,
+	dialect: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {
 	const startTable = schemaName
@@ -282,12 +410,16 @@ function buildRecursiveBaseCase(
 			selections.push(eb.lit(0).as('depth'));
 		}
 		if (intent.track?.path) {
-			// Initialize path as array with just the starting node_id
-			// PostgreSQL: ARRAY[node_id]
+			// ARCH-001: Use dialect-agnostic path tracking
 			if (intent.start.nodeIdExpr.kind === 'column') {
+				const columnRef = `t0.${intent.start.nodeIdExpr.name}`;
 				selections.push(
-					sql`ARRAY[${sql.ref(`t0.${intent.start.nodeIdExpr.name}`)}]`.as(
-						'path',
+					compilePathTrackingBaseCase(
+						eb,
+						columnRef,
+						intent.track.path,
+						capabilities,
+						dialect,
 					),
 				);
 			}
@@ -312,7 +444,9 @@ function buildRecursiveStep(
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 	db: Kysely<any>,
 	cteName: string,
-	schemaName?: string,
+	schemaName: string | undefined,
+	capabilities: DialectCapabilities,
+	dialect: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {
 	const traversal = intent.traversal;
@@ -326,6 +460,8 @@ function buildRecursiveStep(
 			traversal,
 			nodeIdAlias,
 			schemaName,
+			capabilities,
+			dialect,
 		);
 	}
 
@@ -337,6 +473,8 @@ function buildRecursiveStep(
 			traversal,
 			nodeIdAlias,
 			schemaName,
+			capabilities,
+			dialect,
 		);
 	}
 
@@ -356,7 +494,9 @@ function buildAdjacencyRecursiveStep(
 	cteName: string,
 	traversal: Extract<RecursiveIntent['traversal'], { kind: 'adjacency' }>,
 	nodeIdAlias: string,
-	schemaName?: string,
+	schemaName: string | undefined,
+	capabilities: DialectCapabilities,
+	dialect: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {
 	const nodeTable = schemaName
@@ -402,10 +542,15 @@ function buildAdjacencyRecursiveStep(
 			selections.push(eb('prev.depth', '+', eb.lit(1)).as('depth'));
 		}
 		if (intent.track?.path) {
-			// path = prev.path || node.id (PostgreSQL array concat, using native Kysely expression builder)
+			// ARCH-001: Use dialect-agnostic path tracking
+			const nodeColumnRef = `node.${traversal.nodeId}`;
 			selections.push(
-				eb(eb.ref('prev.path'), '||', eb.ref(`node.${traversal.nodeId}`)).as(
-					'path',
+				compilePathTrackingRecursive(
+					eb,
+					nodeColumnRef,
+					intent.track.path,
+					capabilities,
+					dialect,
 				),
 			);
 		}
@@ -436,7 +581,9 @@ function buildEdgeTableRecursiveStep(
 	cteName: string,
 	traversal: Extract<RecursiveIntent['traversal'], { kind: 'edge-table' }>,
 	nodeIdAlias: string,
-	schemaName?: string,
+	schemaName: string | undefined,
+	capabilities: DialectCapabilities,
+	dialect: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {
 	const nodeTable = schemaName
@@ -505,10 +652,15 @@ function buildEdgeTableRecursiveStep(
 			selections.push(eb('prev.depth', '+', eb.lit(1)).as('depth'));
 		}
 		if (intent.track?.path) {
-			// path = prev.path || node.id (PostgreSQL array concat, using native Kysely expression builder)
+			// ARCH-001: Use dialect-agnostic path tracking
+			const nodeColumnRef = `node.${traversal.nodeId}`;
 			selections.push(
-				eb(eb.ref('prev.path'), '||', eb.ref(`node.${traversal.nodeId}`)).as(
-					'path',
+				compilePathTrackingRecursive(
+					eb,
+					nodeColumnRef,
+					intent.track.path,
+					capabilities,
+					dialect,
 				),
 			);
 		}
