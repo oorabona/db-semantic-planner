@@ -17,9 +17,25 @@
 
 (none)
 
-## Pending - P1
+---
 
-(none - Query Builder API completed in DX-003)
+## Pending - P3 (Advanced Features)
+
+### RFC-001: Recursive CTE Support 🟡 DRAFT
+
+**RFC:** [docs/rfcs/RFC-001-recursive-cte.md](docs/rfcs/RFC-001-recursive-cte.md)
+**Priority:** CRITICAL (changes QueryIntent from tree to DAG)
+
+- [ ] Add `RecursiveIntent` to intent-ast.ts
+- [ ] Add `selfReference` to RelationDefinition in model-ir.ts
+- [ ] Add `recursive-cte` decision type to planner
+- [ ] Add recursive planning logic
+- [ ] Unit tests for recursive intent creation and planning
+
+### Future P3 Features (pending RFCs)
+
+- [ ] `WindowIntent` for window functions (OVER PARTITION BY)
+- [ ] `AggregateWindowIntent` for running totals/balances
 
 ---
 

@@ -17,15 +17,30 @@ MUST NOT import from: packages/dx
 
 (none)
 
-## Pending - P1
-
-(none)
-
 ---
 
-## Pending - P2
+## Pending - P3 (Advanced PostgreSQL Features)
 
-(none)
+**Study:** [STUDY-001-advanced-postgresql-features.md](docs/studies/STUDY-001-advanced-postgresql-features.md)
+
+### RFC-001: Recursive CTE Support 🟡 DRAFT
+
+**RFC:** [RFC-001-recursive-cte.md](docs/rfcs/RFC-001-recursive-cte.md)
+**Priority:** CRITICAL (changes planner fundamentally)
+**Use case:** IAM/RBAC role hierarchy, category trees, org charts
+
+- [ ] Block 1: Core types (`RecursiveIntent`, `selfReference` in ModelIR)
+- [ ] Block 2: Planner logic for recursive queries
+- [ ] Block 3: Compiler using Kysely native `withRecursive()` + `.unionAll()`
+- [ ] Block 4: DX API (`orm.query().withRecursive()`)
+- [ ] Block 5: E2E tests with real PostgreSQL
+
+### Future P3 Features (pending RFCs)
+
+- [ ] Window Functions (FinTech running balance) - `OverIntent`
+- [ ] Range Types (Booking/Scheduling) - PostgreSQL-specific
+- [ ] FOR UPDATE SKIP LOCKED (Job Queue) - `LockIntent`
+- [ ] Full-text Search (tsvector) - PostgreSQL-specific
 
 ---
 

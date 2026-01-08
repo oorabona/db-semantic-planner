@@ -133,6 +133,18 @@ packages/dx            → Depends on core + adapter-kysely
 - No multi-dialect correctness (PostgreSQL only)
 - No change tracking / dirty checking
 
+## RFCs (Request for Comments)
+
+| RFC ID | Title | Scope | Status |
+|--------|-------|-------|--------|
+| RFC-001 | [Recursive CTE Support](rfcs/RFC-001-recursive-cte.md) | core, adapter | 🟡 draft |
+
+## Studies
+
+| Study ID | Title | Scope | Status |
+|----------|-------|-------|--------|
+| STUDY-001 | [Advanced PostgreSQL Features](studies/STUDY-001-advanced-postgresql-features.md) | adapter | 📚 reference |
+
 ## Archived
 
 See [docs/historic/](historic/) for deprecated documentation.
