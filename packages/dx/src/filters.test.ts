@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	and,
+	coalesce,
 	eq,
 	exists,
 	gt,
@@ -22,6 +23,7 @@ import {
 	not,
 	notExists,
 	or,
+	raw,
 } from './filters.js';
 
 // ============================================================================
@@ -381,5 +383,97 @@ describe('Feature 7: Composition', () => {
 
 		expect(result.kind).toBe('exists');
 		expect(result.where?.kind).toBe('and');
+	});
+});
+
+// ============================================================================
+// Feature 8: Expression Helpers
+// ============================================================================
+
+describe('Feature 8: Expression Helpers', () => {
+	describe('Scenario 8.1: coalesce() creates coalesce expression intent', () => {
+		it('should return CoalesceExpressionIntent with multiple fields', () => {
+			const result = coalesce(['name_fr', 'name_en', 'name'], 'displayName');
+
+			expect(result).toEqual({
+				kind: 'coalesce',
+				fields: ['name_fr', 'name_en', 'name'],
+				as: 'displayName',
+			});
+		});
+
+		it('should handle single field', () => {
+			const result = coalesce(['name'], 'displayName');
+
+			expect(result).toEqual({
+				kind: 'coalesce',
+				fields: ['name'],
+				as: 'displayName',
+			});
+		});
+
+		it('should throw on empty fields array', () => {
+			expect(() => coalesce([], 'displayName')).toThrow(
+				'coalesce() requires at least one field',
+			);
+		});
+
+		it('should throw on empty alias', () => {
+			expect(() => coalesce(['name'], '')).toThrow(
+				'coalesce() requires a non-empty alias',
+			);
+		});
+
+		it('should throw on whitespace-only alias', () => {
+			expect(() => coalesce(['name'], '   ')).toThrow(
+				'coalesce() requires a non-empty alias',
+			);
+		});
+	});
+
+	describe('Scenario 8.2: raw() creates raw expression intent', () => {
+		it('should return RawExpressionIntent', () => {
+			const result = raw("CONCAT(first_name, ' ', last_name)", 'fullName');
+
+			expect(result).toEqual({
+				kind: 'raw',
+				sql: "CONCAT(first_name, ' ', last_name)",
+				as: 'fullName',
+			});
+		});
+
+		it('should handle complex SQL expressions', () => {
+			const result = raw(
+				'CASE WHEN status = 1 THEN active ELSE inactive END',
+				'statusLabel',
+			);
+
+			expect(result.kind).toBe('raw');
+			expect(result.sql).toContain('CASE WHEN');
+			expect(result.as).toBe('statusLabel');
+		});
+
+		it('should throw on empty alias', () => {
+			expect(() => raw('SELECT 1', '')).toThrow(
+				'raw() requires a non-empty alias',
+			);
+		});
+
+		it('should throw on whitespace-only alias', () => {
+			expect(() => raw('SELECT 1', '  ')).toThrow(
+				'raw() requires a non-empty alias',
+			);
+		});
+
+		it('should allow empty SQL (edge case for validation elsewhere)', () => {
+			// Empty SQL is technically allowed - validation happens during compilation
+			const result = raw('', 'emptyExpr');
+
+			expect(result).toEqual({
+				kind: 'raw',
+				sql: '',
+				as: 'emptyExpr',
+			});
+		});
 	});
 });

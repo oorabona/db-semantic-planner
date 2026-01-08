@@ -1,5 +1,6 @@
 import type { Dump } from '@db-semantic-planner/adapter-kysely';
 import type {
+	ExpressionIntent,
 	ModelIR,
 	PlanReport,
 	SelectIntent,
@@ -169,6 +170,40 @@ export interface QueryBuilder {
 	select(fields: readonly string[]): QueryBuilder;
 
 	/**
+	 * Select fields with computed expressions (COALESCE, raw SQL, etc.)
+	 *
+	 * @param fields - Array of regular field names to select
+	 * @param expressions - Array of expression intents (from coalesce(), raw(), etc.)
+	 * @returns A new QueryBuilder with the selection applied
+	 *
+	 * @example
+	 * ```typescript
+	 * import { coalesce, raw } from '@db-semantic-planner/dx';
+	 *
+	 * // Locale fallback pattern
+	 * orm.query('products')
+	 *   .selectWithExpressions(
+	 *     ['id', 'sku'],
+	 *     [coalesce(['title_fr', 'title_en'], 'title')]
+	 *   )
+	 *   .findMany();
+	 * // → SELECT id, sku, COALESCE(title_fr, title_en) AS title FROM products
+	 *
+	 * // Computed expression
+	 * orm.query('orders')
+	 *   .selectWithExpressions(
+	 *     ['id'],
+	 *     [raw('price_cents / 100.0', 'price_dollars')]
+	 *   )
+	 *   .findMany();
+	 * ```
+	 */
+	selectWithExpressions(
+		fields: readonly string[],
+		expressions: readonly ExpressionIntent[],
+	): QueryBuilder;
+
+	/**
 	 * Count rows, optionally counting a specific field.
 	 *
 	 * @param options - Optional field to count and alias
@@ -243,6 +278,72 @@ export interface QueryBuilder {
 	 * ```
 	 */
 	groupBy(fields: readonly string[]): QueryBuilder;
+
+	/**
+	 * Sort results by one or more fields.
+	 *
+	 * @param field - Field name to sort by
+	 * @param direction - Sort direction ('asc' or 'desc'), defaults to 'asc'
+	 * @returns A new QueryBuilder with the sort applied
+	 *
+	 * @example
+	 * ```typescript
+	 * // Simple ascending sort
+	 * orm.query('users').orderBy('name').findMany();
+	 *
+	 * // Descending sort
+	 * orm.query('users').orderBy('createdAt', 'desc').findMany();
+	 *
+	 * // Multiple sorts (chained)
+	 * orm.query('users')
+	 *   .orderBy('lastName', 'asc')
+	 *   .orderBy('firstName', 'asc')
+	 *   .findMany();
+	 * ```
+	 */
+	orderBy(field: string, direction?: 'asc' | 'desc'): QueryBuilder;
+
+	/**
+	 * Limit the number of results returned.
+	 *
+	 * @param count - Maximum number of rows to return
+	 * @returns A new QueryBuilder with the limit applied
+	 *
+	 * @example
+	 * ```typescript
+	 * // Get first 10 users
+	 * orm.query('users').limit(10).findMany();
+	 *
+	 * // Pagination with limit and offset
+	 * orm.query('users')
+	 *   .orderBy('id')
+	 *   .limit(20)
+	 *   .offset(40)
+	 *   .findMany();
+	 * ```
+	 */
+	limit(count: number): QueryBuilder;
+
+	/**
+	 * Skip a number of results (for pagination).
+	 *
+	 * @param count - Number of rows to skip
+	 * @returns A new QueryBuilder with the offset applied
+	 *
+	 * @example
+	 * ```typescript
+	 * // Skip first 20 results
+	 * orm.query('users').offset(20).findMany();
+	 *
+	 * // Pagination: page 3 with 10 items per page
+	 * orm.query('users')
+	 *   .orderBy('id')
+	 *   .limit(10)
+	 *   .offset(20)
+	 *   .findMany();
+	 * ```
+	 */
+	offset(count: number): QueryBuilder;
 
 	/**
 	 * Filter the root entity records.

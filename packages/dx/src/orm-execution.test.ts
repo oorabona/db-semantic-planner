@@ -596,4 +596,158 @@ describe('Execution Layer', () => {
 			expect(onStart).toHaveBeenCalledOnce();
 		});
 	});
+
+	describe('orderBy()', () => {
+		it('generates ORDER BY clause in SQL', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm.query('users').orderBy('name').dump();
+
+			expect(dump.sql.toLowerCase()).toContain('order by');
+			expect(dump.sql.toLowerCase()).toContain('name');
+		});
+
+		it('defaults to ascending order', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm.query('users').orderBy('name').dump();
+
+			expect(dump.sql.toLowerCase()).toContain('asc');
+		});
+
+		it('supports descending order', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm.query('users').orderBy('name', 'desc').dump();
+
+			expect(dump.sql.toLowerCase()).toContain('desc');
+		});
+
+		it('supports chaining multiple orderBy calls', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm
+				.query('users')
+				.orderBy('name', 'asc')
+				.orderBy('id', 'desc')
+				.dump();
+
+			// Both fields should be in ORDER BY
+			expect(dump.sql.toLowerCase()).toContain('order by');
+			expect(dump.sql.toLowerCase()).toContain('name');
+			expect(dump.sql.toLowerCase()).toContain('id');
+		});
+
+		it('returns results in correct order', async () => {
+			const orm = createOrm({ model: testModel, db });
+			const results = (await orm
+				.query('users')
+				.orderBy('name', 'asc')
+				.findMany()) as { name: string }[];
+
+			// Alice should come before Bob alphabetically
+			expect(results[0].name).toBe('Alice');
+			expect(results[1].name).toBe('Bob');
+		});
+
+		it('returns results in descending order', async () => {
+			const orm = createOrm({ model: testModel, db });
+			const results = (await orm
+				.query('users')
+				.orderBy('name', 'desc')
+				.findMany()) as { name: string }[];
+
+			// Bob should come before Alice in descending order
+			expect(results[0].name).toBe('Bob');
+			expect(results[1].name).toBe('Alice');
+		});
+	});
+
+	describe('limit()', () => {
+		it('generates LIMIT clause in SQL', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm.query('users').limit(10).dump();
+
+			expect(dump.sql.toLowerCase()).toContain('limit');
+		});
+
+		it('limits the number of results', async () => {
+			const orm = createOrm({ model: testModel, db });
+			const results = await orm.query('users').limit(1).findMany();
+
+			expect(results).toHaveLength(1);
+		});
+
+		it('returns all results when limit exceeds count', async () => {
+			const orm = createOrm({ model: testModel, db });
+			const results = await orm.query('users').limit(100).findMany();
+
+			expect(results).toHaveLength(2); // Only 2 users in test data
+		});
+	});
+
+	describe('offset()', () => {
+		it('generates OFFSET clause in SQL', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm.query('users').offset(5).dump();
+
+			expect(dump.sql.toLowerCase()).toContain('offset');
+		});
+
+		it('skips the specified number of results', async () => {
+			const orm = createOrm({ model: testModel, db });
+			// Note: SQLite requires LIMIT when using OFFSET
+			const results = await orm
+				.query('users')
+				.orderBy('id')
+				.limit(100)
+				.offset(1)
+				.findMany();
+
+			expect(results).toHaveLength(1);
+			expect((results[0] as { id: number }).id).toBe(2); // Second user
+		});
+
+		it('returns empty array when offset exceeds count', async () => {
+			const orm = createOrm({ model: testModel, db });
+			// Note: SQLite requires LIMIT when using OFFSET
+			const results = await orm.query('users').limit(100).offset(100).findMany();
+
+			expect(results).toHaveLength(0);
+		});
+	});
+
+	describe('pagination (limit + offset)', () => {
+		it('supports pagination with limit and offset', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm.query('users').orderBy('id').limit(10).offset(20).dump();
+
+			expect(dump.sql.toLowerCase()).toContain('limit');
+			expect(dump.sql.toLowerCase()).toContain('offset');
+			expect(dump.sql.toLowerCase()).toContain('order by');
+		});
+
+		it('returns correct page of results', async () => {
+			const orm = createOrm({ model: testModel, db });
+			// Page 2 with page size 1
+			const results = await orm
+				.query('users')
+				.orderBy('id')
+				.limit(1)
+				.offset(1)
+				.findMany();
+
+			expect(results).toHaveLength(1);
+			expect((results[0] as { id: number }).id).toBe(2);
+		});
+
+		it('combines with where clause', async () => {
+			const orm = createOrm({ model: testModel, db });
+			const results = await orm
+				.query('posts')
+				.where(eq('userId', 1))
+				.orderBy('id')
+				.limit(1)
+				.findMany();
+
+			expect(results).toHaveLength(1);
+			expect((results[0] as { title: string }).title).toBe('First Post');
+		});
+	});
 });

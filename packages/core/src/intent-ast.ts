@@ -94,7 +94,56 @@ export interface SelectAggregateIntent {
 export type SelectIntent =
 	| SelectAllIntent
 	| SelectFieldsIntent
-	| SelectAggregateIntent;
+	| SelectAggregateIntent
+	| SelectWithExpressionsIntent;
+
+// ============================================================================
+// Expression Intents - Computed/Derived Values
+// ============================================================================
+
+/**
+ * COALESCE expression: returns first non-null value from a list of fields
+ * @example { kind: 'coalesce', fields: ['name_fr', 'name_en'], as: 'display_name' }
+ *          → COALESCE(name_fr, name_en) AS display_name
+ */
+export interface CoalesceExpressionIntent {
+	readonly kind: 'coalesce';
+	/** Fields to check in order (first non-null wins) */
+	readonly fields: readonly string[];
+	/** Required alias for the result column */
+	readonly as: string;
+}
+
+/**
+ * Raw SQL expression (escape hatch for advanced use cases)
+ * @example { kind: 'raw', sql: 'NOW()', as: 'current_time' }
+ *          → NOW() AS current_time
+ * @warning Use sparingly - bypasses type safety and SQL injection protection
+ */
+export interface RawExpressionIntent {
+	readonly kind: 'raw';
+	/** Raw SQL fragment (must be safe, no user input!) */
+	readonly sql: string;
+	/** Required alias for the result column */
+	readonly as: string;
+}
+
+/**
+ * Expression intent union type - computed/derived values in SELECT
+ * Extensible for future expression types (CASE WHEN, etc.)
+ */
+export type ExpressionIntent = CoalesceExpressionIntent | RawExpressionIntent;
+
+/**
+ * Select with expressions (computed columns)
+ */
+export interface SelectWithExpressionsIntent {
+	readonly type: 'expressions';
+	/** Regular fields to select */
+	readonly fields?: readonly string[];
+	/** Computed expressions */
+	readonly expressions: readonly ExpressionIntent[];
+}
 
 // ============================================================================
 // Where Intent - Filter Conditions
@@ -452,4 +501,31 @@ export function isSelectAggregate(
 	select: SelectIntent,
 ): select is SelectAggregateIntent {
 	return select.type === 'aggregate';
+}
+
+/**
+ * Check if a select intent has expressions
+ */
+export function isSelectWithExpressions(
+	select: SelectIntent,
+): select is SelectWithExpressionsIntent {
+	return select.type === 'expressions';
+}
+
+/**
+ * Check if an expression is a COALESCE expression
+ */
+export function isCoalesceExpression(
+	expr: ExpressionIntent,
+): expr is CoalesceExpressionIntent {
+	return expr.kind === 'coalesce';
+}
+
+/**
+ * Check if an expression is a raw SQL expression
+ */
+export function isRawExpression(
+	expr: ExpressionIntent,
+): expr is RawExpressionIntent {
+	return expr.kind === 'raw';
 }

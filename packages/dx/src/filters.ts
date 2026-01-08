@@ -253,3 +253,73 @@ export function notExists(
 	}
 	return intent;
 }
+
+// ============================================================================
+// Expression Helpers
+// ============================================================================
+
+import type {
+	CoalesceExpressionIntent,
+	RawExpressionIntent,
+} from '@db-semantic-planner/core';
+
+/**
+ * COALESCE expression: returns first non-null value from a list of fields
+ *
+ * Use this for locale fallback patterns (e.g., FR → EN → default)
+ *
+ * @param fields - Array of field names to check in order
+ * @param as - Required alias for the result column
+ *
+ * @example
+ * ```typescript
+ * // Locale fallback: prefer French, fall back to English
+ * coalesce(['name_fr', 'name_en'], 'display_name')
+ * // → COALESCE(name_fr, name_en) AS display_name
+ *
+ * // Use in QueryBuilder select with expressions
+ * orm.query('products')
+ *   .selectWithExpressions(['id', 'sku'], [
+ *     coalesce(['title_fr', 'title_en', 'title_default'], 'title')
+ *   ])
+ * ```
+ */
+export function coalesce(
+	fields: readonly string[],
+	as: string,
+): CoalesceExpressionIntent {
+	if (fields.length === 0) {
+		throw new Error('coalesce() requires at least one field');
+	}
+	if (!as || as.trim() === '') {
+		throw new Error('coalesce() requires a non-empty alias');
+	}
+	return { kind: 'coalesce', fields, as };
+}
+
+/**
+ * Raw SQL expression (escape hatch for advanced use cases)
+ *
+ * @warning Use sparingly - bypasses type safety and SQL injection protection.
+ * NEVER pass user input directly to this function.
+ *
+ * @param sqlFragment - Raw SQL fragment (must be safe, no user input!)
+ * @param as - Required alias for the result column
+ *
+ * @example
+ * ```typescript
+ * // Current timestamp
+ * raw('NOW()', 'current_time')
+ * // → NOW() AS current_time
+ *
+ * // Complex expression
+ * raw('price_cents / 100.0', 'price_dollars')
+ * // → price_cents / 100.0 AS price_dollars
+ * ```
+ */
+export function raw(sqlFragment: string, as: string): RawExpressionIntent {
+	if (!as || as.trim() === '') {
+		throw new Error('raw() requires a non-empty alias');
+	}
+	return { kind: 'raw', sql: sqlFragment, as };
+}

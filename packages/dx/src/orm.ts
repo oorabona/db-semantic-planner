@@ -6,13 +6,16 @@ import {
 } from '@db-semantic-planner/adapter-kysely';
 import type {
 	AggregateIntent,
+	ExpressionIntent,
 	IncludeIntent,
 	ModelIR,
+	OrderByIntent,
 	PlanOptions,
 	PlanReport,
 	QueryIntent,
 	SelectAggregateIntent,
 	SelectIntent,
+	SelectWithExpressionsIntent,
 	WhereIntent,
 } from '@db-semantic-planner/core';
 import { AmbiguousPlanError, plan } from '@db-semantic-planner/core';
@@ -167,6 +170,9 @@ class QueryBuilderImpl implements QueryBuilder {
 	private strictModeOverride?: boolean;
 	private aggregates: AggregateIntent[] = [];
 	private groupByFields: string[] = [];
+	private orderByIntents: OrderByIntent[] = [];
+	private limitValue?: number;
+	private offsetValue?: number;
 
 	constructor(
 		model: ModelIR,
@@ -194,6 +200,23 @@ class QueryBuilderImpl implements QueryBuilder {
 	select(fields: readonly string[]): QueryBuilder {
 		const builder = this.clone();
 		builder.selectIntent = { type: 'fields', fields: [...fields] };
+		return builder;
+	}
+
+	selectWithExpressions(
+		fields: readonly string[],
+		expressions: readonly ExpressionIntent[],
+	): QueryBuilder {
+		const builder = this.clone();
+		const select: SelectWithExpressionsIntent = {
+			type: 'expressions',
+			expressions: [...expressions],
+		};
+		// Add fields if provided
+		if (fields.length > 0) {
+			(select as { fields: readonly string[] }).fields = [...fields];
+		}
+		builder.selectIntent = select;
 		return builder;
 	}
 
@@ -253,6 +276,24 @@ class QueryBuilderImpl implements QueryBuilder {
 	groupBy(fields: readonly string[]): QueryBuilder {
 		const builder = this.clone();
 		builder.groupByFields.push(...fields);
+		return builder;
+	}
+
+	orderBy(field: string, direction: 'asc' | 'desc' = 'asc'): QueryBuilder {
+		const builder = this.clone();
+		builder.orderByIntents.push({ field, direction });
+		return builder;
+	}
+
+	limit(count: number): QueryBuilder {
+		const builder = this.clone();
+		builder.limitValue = count;
+		return builder;
+	}
+
+	offset(count: number): QueryBuilder {
+		const builder = this.clone();
+		builder.offsetValue = count;
 		return builder;
 	}
 
@@ -458,6 +499,17 @@ class QueryBuilderImpl implements QueryBuilder {
 				...this.groupByFields,
 			];
 		}
+		if (this.orderByIntents.length > 0) {
+			(intent as { orderBy: readonly OrderByIntent[] }).orderBy = [
+				...this.orderByIntents,
+			];
+		}
+		if (this.limitValue !== undefined) {
+			(intent as { limit: number }).limit = this.limitValue;
+		}
+		if (this.offsetValue !== undefined) {
+			(intent as { offset: number }).offset = this.offsetValue;
+		}
 
 		return intent;
 	}
@@ -535,6 +587,14 @@ class QueryBuilderImpl implements QueryBuilder {
 		// Clone aggregates and groupBy
 		builder.aggregates.push(...this.aggregates);
 		builder.groupByFields.push(...this.groupByFields);
+		// Clone orderBy, limit, offset
+		builder.orderByIntents.push(...this.orderByIntents);
+		if (this.limitValue !== undefined) {
+			builder.limitValue = this.limitValue;
+		}
+		if (this.offsetValue !== undefined) {
+			builder.offsetValue = this.offsetValue;
+		}
 		return builder;
 	}
 }
