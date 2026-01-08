@@ -620,6 +620,27 @@ export interface QueryBuilder {
 }
 
 /**
+ * Options for hierarchy traversal shortcuts (ancestors, descendants, subtree).
+ */
+export interface HierarchyOptions {
+	/**
+	 * The column that references the parent node (for adjacency list pattern).
+	 * @example 'parentCategoryId', 'parentId', 'managerId'
+	 */
+	readonly parentId: string;
+
+	/**
+	 * The column that identifies a node (default: 'id').
+	 */
+	readonly nodeId?: string;
+
+	/**
+	 * Optional CTE name (default: auto-generated based on table name).
+	 */
+	readonly cteName?: string;
+}
+
+/**
  * ORM instance created by createOrm().
  */
 export interface OrmInstance {
@@ -681,6 +702,78 @@ export interface OrmInstance {
 	 * ```
 	 */
 	recursive<TResult = unknown>(cteName: string): RecursiveQueryBuilder<TResult>;
+
+	/**
+	 * Get ancestors of a node in a hierarchy (traverses UP the tree).
+	 * Shortcut for recursive query with adjacency traversal in 'ancestors' direction.
+	 *
+	 * @param table - The hierarchical table name
+	 * @param nodeIdValue - The ID of the starting node
+	 * @param options - Hierarchy traversal options
+	 * @returns A RecursiveQueryBuilder configured for ancestor traversal
+	 *
+	 * @example
+	 * ```typescript
+	 * // Get all ancestor categories of category 42
+	 * const ancestors = await orm
+	 *   .ancestors('categories', 42, { parentId: 'parentCategoryId' })
+	 *   .upToDepth(10)
+	 *   .execute();
+	 * ```
+	 */
+	ancestors<TResult = unknown>(
+		table: string,
+		nodeIdValue: unknown,
+		options: HierarchyOptions,
+	): RecursiveQueryBuilder<TResult>;
+
+	/**
+	 * Get descendants of a node in a hierarchy (traverses DOWN the tree).
+	 * Shortcut for recursive query with adjacency traversal in 'descendants' direction.
+	 *
+	 * @param table - The hierarchical table name
+	 * @param nodeIdValue - The ID of the starting node
+	 * @param options - Hierarchy traversal options
+	 * @returns A RecursiveQueryBuilder configured for descendant traversal
+	 *
+	 * @example
+	 * ```typescript
+	 * // Get all descendant categories of category 1 (root)
+	 * const descendants = await orm
+	 *   .descendants('categories', 1, { parentId: 'parentCategoryId' })
+	 *   .upToDepth(5)
+	 *   .execute();
+	 * ```
+	 */
+	descendants<TResult = unknown>(
+		table: string,
+		nodeIdValue: unknown,
+		options: HierarchyOptions,
+	): RecursiveQueryBuilder<TResult>;
+
+	/**
+	 * Get the entire subtree rooted at a node (the node + all descendants).
+	 * Shortcut for recursive query that includes the starting node and all descendants.
+	 *
+	 * @param table - The hierarchical table name
+	 * @param nodeIdValue - The ID of the root node
+	 * @param options - Hierarchy traversal options
+	 * @returns A RecursiveQueryBuilder configured for subtree traversal
+	 *
+	 * @example
+	 * ```typescript
+	 * // Get entire category subtree starting from category 5
+	 * const subtree = await orm
+	 *   .subtree('categories', 5, { parentId: 'parentCategoryId' })
+	 *   .upToDepth(10)
+	 *   .execute();
+	 * ```
+	 */
+	subtree<TResult = unknown>(
+		table: string,
+		nodeIdValue: unknown,
+		options: HierarchyOptions,
+	): RecursiveQueryBuilder<TResult>;
 }
 
 /**

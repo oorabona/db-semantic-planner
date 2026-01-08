@@ -621,4 +621,107 @@ describe('RecursiveQueryBuilder', () => {
 			expect(sql).toContain('tenant_123');
 		});
 	});
+
+	// ============================================================================
+	// DX-009: Intuitive Alias Tests
+	// ============================================================================
+
+	describe('Intuitive Aliases (DX-009)', () => {
+		it('startingFrom() should be alias for nodeId()', () => {
+			const db = createTestDb();
+
+			// Using old API
+			const builderOld = createRecursiveBuilder(categoryModel, db, 'tree1')
+				.from('categories')
+				.nodeId('id')
+				.where(eq('id', 1))
+				.traverseVia('categories', { parentId: 'parentId' })
+				.maxDepth(5);
+
+			// Using new alias API
+			const builderNew = createRecursiveBuilder(categoryModel, db, 'tree2')
+				.from('categories')
+				.startingFrom('id')
+				.where(eq('id', 1))
+				.traverseVia('categories', { parentId: 'parentId' })
+				.maxDepth(5);
+
+			const dumpOld = builderOld.dump();
+			const dumpNew = builderNew.dump();
+
+			// Should produce equivalent SQL (same structure)
+			expect(dumpOld.intent.nodeId).toEqual(dumpNew.intent.nodeId);
+		});
+
+		it('following() should be alias for traverseVia()', () => {
+			const db = createTestDb();
+
+			// Using old API
+			const builderOld = createRecursiveBuilder(categoryModel, db, 'tree1')
+				.from('categories')
+				.nodeId('id')
+				.where(eq('id', 1))
+				.traverseVia('categories', { parentId: 'parentId' })
+				.maxDepth(5);
+
+			// Using new alias API
+			const builderNew = createRecursiveBuilder(categoryModel, db, 'tree2')
+				.from('categories')
+				.nodeId('id')
+				.where(eq('id', 1))
+				.following('categories', { parentId: 'parentId' })
+				.maxDepth(5);
+
+			const dumpOld = builderOld.dump();
+			const dumpNew = builderNew.dump();
+
+			// Should have equivalent traversal config
+			expect(dumpOld.intent.traversal).toEqual(dumpNew.intent.traversal);
+		});
+
+		it('upToDepth() should be alias for maxDepth()', () => {
+			const db = createTestDb();
+
+			// Using old API
+			const builderOld = createRecursiveBuilder(categoryModel, db, 'tree1')
+				.from('categories')
+				.nodeId('id')
+				.where(eq('id', 1))
+				.traverseVia('categories', { parentId: 'parentId' })
+				.maxDepth(7);
+
+			// Using new alias API
+			const builderNew = createRecursiveBuilder(categoryModel, db, 'tree2')
+				.from('categories')
+				.nodeId('id')
+				.where(eq('id', 1))
+				.traverseVia('categories', { parentId: 'parentId' })
+				.upToDepth(7);
+
+			const dumpOld = builderOld.dump();
+			const dumpNew = builderNew.dump();
+
+			// Should have same maxDepth
+			expect(dumpOld.intent.maxDepth).toEqual(dumpNew.intent.maxDepth);
+			expect(dumpNew.intent.maxDepth).toBe(7);
+		});
+
+		it('should support full fluent chain with new aliases', () => {
+			const db = createTestDb();
+
+			const builder = createRecursiveBuilder(categoryModel, db, 'category_tree')
+				.from('categories')
+				.startingFrom('id')
+				.where(eq('id', 42))
+				.following('categories', { parentId: 'parentId', direction: 'descendants' })
+				.upToDepth(10);
+
+			const { sql, intent } = builder.dump();
+
+			expect(intent.start.nodeIdExpr).toEqual({ kind: 'column', name: 'id' });
+			expect(intent.maxDepth).toBe(10);
+			expect(intent.traversal?.kind).toBe('adjacency');
+			expect(sql.toLowerCase()).toContain('with recursive');
+		});
+	});
 });

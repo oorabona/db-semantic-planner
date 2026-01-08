@@ -31,6 +31,7 @@ import { and, eq, inArray } from './filters.js';
 import { RecursiveQueryBuilder } from './recursive-query-builder.js';
 import type {
 	AggregateOptions,
+	HierarchyOptions,
 	IncludeOptions,
 	NestedInclude,
 	OrmInstance,
@@ -130,6 +131,68 @@ function createOrmInstance(
 				);
 			}
 			return new RecursiveQueryBuilder<TResult>(model, db, cteName, schemaName);
+		},
+
+		ancestors<TResult = unknown>(
+			table: string,
+			nodeIdValue: unknown,
+			options: HierarchyOptions,
+		): RecursiveQueryBuilder<TResult> {
+			if (!db) {
+				throw new Error(
+					'ancestors() requires a database connection. ' +
+						'Pass a Kysely instance when creating the ORM.',
+				);
+			}
+			const cteName = options.cteName ?? `${table}_ancestors`;
+			const nodeId = options.nodeId ?? 'id';
+			return new RecursiveQueryBuilder<TResult>(model, db, cteName, schemaName)
+				.from(table)
+				.nodeId(nodeId)
+				.where(eq(nodeId, nodeIdValue))
+				.traverseVia(table, { parentId: options.parentId, direction: 'ancestors' });
+		},
+
+		descendants<TResult = unknown>(
+			table: string,
+			nodeIdValue: unknown,
+			options: HierarchyOptions,
+		): RecursiveQueryBuilder<TResult> {
+			if (!db) {
+				throw new Error(
+					'descendants() requires a database connection. ' +
+						'Pass a Kysely instance when creating the ORM.',
+				);
+			}
+			const cteName = options.cteName ?? `${table}_descendants`;
+			const nodeId = options.nodeId ?? 'id';
+			return new RecursiveQueryBuilder<TResult>(model, db, cteName, schemaName)
+				.from(table)
+				.nodeId(nodeId)
+				.where(eq(nodeId, nodeIdValue))
+				.traverseVia(table, { parentId: options.parentId, direction: 'descendants' });
+		},
+
+		subtree<TResult = unknown>(
+			table: string,
+			nodeIdValue: unknown,
+			options: HierarchyOptions,
+		): RecursiveQueryBuilder<TResult> {
+			// Subtree is the same as descendants but includes the starting node
+			// The starting node is always included by the anchor query in descendants
+			if (!db) {
+				throw new Error(
+					'subtree() requires a database connection. ' +
+						'Pass a Kysely instance when creating the ORM.',
+				);
+			}
+			const cteName = options.cteName ?? `${table}_subtree`;
+			const nodeId = options.nodeId ?? 'id';
+			return new RecursiveQueryBuilder<TResult>(model, db, cteName, schemaName)
+				.from(table)
+				.nodeId(nodeId)
+				.where(eq(nodeId, nodeIdValue))
+				.traverseVia(table, { parentId: options.parentId, direction: 'descendants' });
 		},
 	};
 }
