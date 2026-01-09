@@ -19,28 +19,6 @@ export {
 	RelationNotFoundError,
 	UnsafeOperationError,
 } from './errors.js';
-
-// Lightweight ModelIR (DX-023)
-export {
-	type CardinalityShorthand,
-	defineModel,
-	type DefineModelOptions,
-	inferForeignKey,
-	InvalidRelationDefinitionError,
-	isCardinalityShorthand,
-	isRelationObjectDef,
-	isRelationTupleDef,
-	type LightweightRelationsDef,
-	parseRelationDef,
-	parseRelationKey,
-	type ParsedRelationDef,
-	type ParsedRelationKey,
-	type RelationKey,
-	type RelationObjectDef,
-	type RelationShorthand,
-	type RelationTupleDef,
-	singularize,
-} from './lightweight-model.js';
 // Filter Helpers (Drizzle-like)
 export {
 	// Logical
@@ -81,6 +59,27 @@ export {
 	wMin,
 	wSum,
 } from './filters.js';
+// Lightweight ModelIR (DX-023)
+export {
+	type CardinalityShorthand,
+	type DefineModelOptions,
+	defineModel,
+	InvalidRelationDefinitionError,
+	inferForeignKey,
+	isCardinalityShorthand,
+	isRelationObjectDef,
+	isRelationTupleDef,
+	type LightweightRelationsDef,
+	type ParsedRelationDef,
+	type ParsedRelationKey,
+	parseRelationDef,
+	parseRelationKey,
+	type RelationKey,
+	type RelationObjectDef,
+	type RelationShorthand,
+	type RelationTupleDef,
+	singularize,
+} from './lightweight-model.js';
 // Mutation Builders (DX-010)
 export {
 	DeleteBuilder,
@@ -129,12 +128,17 @@ export type {
 	IncludeOptions,
 	ListHierarchyOptions,
 	NestedInclude,
+	NullsPosition,
+	OrderByInput,
+	OrderByRecord,
+	OrderBySpec,
 	OrmInstance,
 	OrmOptions,
 	OrmOptionsWithDb,
 	OrmOptionsWithModel,
 	QueryBuilder,
 	RelationHints,
+	SortDirection,
 	StreamOptions,
 } from './types.js';
 // Type guard

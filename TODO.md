@@ -149,7 +149,7 @@ Window function support across all packages for analytics queries.
 | DX-021 | Window functions builder pattern | MEDIUM | M | Yes |
 | DX-022 | Recursive via `include({ recursive: true })` | HIGH | L | Yes |
 | DX-023 | Lightweight ModelIR (relations-only) | MEDIUM | L | No |
-| DX-024 | `orderBy()` shorthand (polymorphic) | HIGH | S | No |
+| DX-024 | ✅ `orderBy()` shorthand (polymorphic) (2026-01-09) | HIGH | S | No |
 | DX-025 | `orm.transaction()` wrapper (passthrough) | HIGH | M | No |
 | DX-026 | `upsert()` + `returning()` support | HIGH | M | No |
 | DX-027 | Raw SQL escape hatch (`raw`, `orm.raw`) | HIGH | S | No |

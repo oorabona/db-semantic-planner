@@ -54,12 +54,15 @@ import {
 	isRecursiveIncludeOptions,
 	type ListHierarchyOptions,
 	type NestedInclude,
+	type OrderByRecord,
+	type OrderBySpec,
 	type OrmInstance,
 	type OrmOptionsWithDb,
 	type OrmOptionsWithModel,
 	type QueryBuilder,
 	type RecursiveIncludeOptions,
 	type RelationHints,
+	type SortDirection,
 	type StreamOptions,
 } from './types.js';
 
@@ -710,11 +713,39 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	}
 
 	orderBy(
-		field: string,
-		direction: 'asc' | 'desc' = 'asc',
+		fieldOrRecordOrSpecs: string | OrderByRecord | readonly OrderBySpec[],
+		direction?: SortDirection,
 	): QueryBuilder<TResult> {
 		const builder = this.clone();
-		builder.orderByIntents.push({ field, direction });
+
+		// String form: orderBy('field') or orderBy('field', 'desc')
+		if (typeof fieldOrRecordOrSpecs === 'string') {
+			builder.orderByIntents.push({
+				field: fieldOrRecordOrSpecs,
+				direction: direction ?? 'asc',
+			});
+			return builder;
+		}
+
+		// Array form: orderBy([{ column, direction, nulls }])
+		if (Array.isArray(fieldOrRecordOrSpecs)) {
+			for (const spec of fieldOrRecordOrSpecs) {
+				builder.orderByIntents.push({
+					field: spec.column,
+					direction: spec.direction ?? 'asc',
+					nulls: spec.nulls,
+				});
+			}
+			return builder;
+		}
+
+		// Object form: orderBy({ field1: 'desc', field2: 'asc' })
+		for (const [field, dir] of Object.entries(fieldOrRecordOrSpecs)) {
+			builder.orderByIntents.push({
+				field,
+				direction: dir,
+			});
+		}
 		return builder;
 	}
 

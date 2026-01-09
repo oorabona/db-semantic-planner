@@ -257,7 +257,7 @@ Window function support across core, adapter, and dx packages.
 
 ## Pending - P2
 
-### DX-024: orderBy() Shorthand
+### ✅ DX-024: orderBy() Shorthand (2026-01-09)
 
 **Priority:** HIGH | **Effort:** S
 
@@ -279,10 +279,10 @@ API polymorphe pour `orderBy()` avec raccourcis.
 ```
 
 **Tâches :**
-- [ ] Overloads TypeScript pour les 4 signatures
-- [ ] Normaliser vers format interne `OrderByIntent[]`
-- [ ] Tests pour chaque variante
-- [ ] Backward compatible (syntaxe tableau existante fonctionne)
+- [x] ✅ Overloads TypeScript pour les 4 signatures (2026-01-09)
+- [x] ✅ Normaliser vers format interne `OrderByIntent[]` (2026-01-09)
+- [x] ✅ Tests pour chaque variante (2026-01-09)
+- [x] ✅ Backward compatible (syntaxe tableau existante fonctionne) (2026-01-09)
 
 ---
 
