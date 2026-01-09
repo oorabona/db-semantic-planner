@@ -19,6 +19,28 @@ export {
 	RelationNotFoundError,
 	UnsafeOperationError,
 } from './errors.js';
+
+// Lightweight ModelIR (DX-023)
+export {
+	type CardinalityShorthand,
+	defineModel,
+	type DefineModelOptions,
+	inferForeignKey,
+	InvalidRelationDefinitionError,
+	isCardinalityShorthand,
+	isRelationObjectDef,
+	isRelationTupleDef,
+	type LightweightRelationsDef,
+	parseRelationDef,
+	parseRelationKey,
+	type ParsedRelationDef,
+	type ParsedRelationKey,
+	type RelationKey,
+	type RelationObjectDef,
+	type RelationShorthand,
+	type RelationTupleDef,
+	singularize,
+} from './lightweight-model.js';
 // Filter Helpers (Drizzle-like)
 export {
 	// Logical
