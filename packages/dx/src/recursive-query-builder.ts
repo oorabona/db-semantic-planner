@@ -530,7 +530,11 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 	 * Plan and compile the recursive query.
 	 * Returns the compiled SQL and parameters.
 	 */
-	dump(): { sql: string; parameters: readonly unknown[]; intent: RecursiveIntent } {
+	dump(): {
+		sql: string;
+		parameters: readonly unknown[];
+		intent: RecursiveIntent;
+	} {
 		const intent = this.buildIntent();
 		const report = planRecursive(intent, this.schema);
 		const compiled = compileRecursive(

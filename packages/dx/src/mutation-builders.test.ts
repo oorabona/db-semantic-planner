@@ -3,7 +3,7 @@
  * Unit tests for DX-010: Mutation Builders (InsertBuilder, UpdateBuilder, DeleteBuilder)
  */
 
-import { defineSchema, hasMany, belongsTo } from '@db-semantic-planner/core';
+import { belongsTo, defineSchema, hasMany } from '@db-semantic-planner/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -12,7 +12,7 @@ import {
 	InvalidOperationError,
 	UnsafeOperationError,
 } from './errors.js';
-import { eq, and, inArray } from './filters.js';
+import { and, eq, inArray } from './filters.js';
 import { createOrm } from './orm.js';
 
 // Test schema
@@ -228,7 +228,10 @@ describe('Mutation Builders (DX-010)', () => {
 			it('should throw ExecutionError if no db configured', async () => {
 				const orm = createOrm({ model: testModel });
 				await expect(
-					orm.insert('users').values({ name: 'Test', email: 't@e.com' }).execute(),
+					orm
+						.insert('users')
+						.values({ name: 'Test', email: 't@e.com' })
+						.execute(),
 				).rejects.toThrow(ExecutionError);
 			});
 		});
@@ -264,9 +267,7 @@ describe('Mutation Builders (DX-010)', () => {
 					.where(eq('id', 1))
 					.dump();
 
-				expect(
-					(dump.intent as { set: Record<string, unknown> }).set,
-				).toEqual({
+				expect((dump.intent as { set: Record<string, unknown> }).set).toEqual({
 					name: 'NewName',
 					email: 'new@example.com',
 				});
@@ -317,7 +318,11 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('execute()', () => {
 			it('should update matching rows', async () => {
 				const orm = createOrm({ model: testModel, db });
-				await orm.update('users').set({ active: 0 }).where(eq('id', 1)).execute();
+				await orm
+					.update('users')
+					.set({ active: 0 })
+					.where(eq('id', 1))
+					.execute();
 
 				const user = await db
 					.selectFrom('users')
@@ -360,7 +365,10 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should support IN clause', async () => {
 				const orm = createOrm({ model: testModel, db });
-				const dump = orm.delete('users').where(inArray('id', [1, 2])).dump();
+				const dump = orm
+					.delete('users')
+					.where(inArray('id', [1, 2]))
+					.dump();
 
 				expect(dump.intent.where).toBeDefined();
 			});
@@ -401,7 +409,10 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should delete multiple rows with IN clause', async () => {
 				const orm = createOrm({ model: testModel, db });
-				await orm.delete('users').where(inArray('id', [1, 2])).execute();
+				await orm
+					.delete('users')
+					.where(inArray('id', [1, 2]))
+					.execute();
 
 				const users = await db.selectFrom('users').selectAll().execute();
 				expect(users).toHaveLength(1);
@@ -445,7 +456,7 @@ describe('Mutation Builders (DX-010)', () => {
 				.dump();
 
 			// SQLite quotes schema.table as "schema"."table"
-			expect(dump.sql.toLowerCase()).toMatch(/tenant_123["\.].*users/);
+			expect(dump.sql.toLowerCase()).toMatch(/tenant_123[".].*users/);
 			expect(dump.meta?.tenant).toBe('tenant_123');
 		});
 
@@ -458,7 +469,7 @@ describe('Mutation Builders (DX-010)', () => {
 				.where(eq('id', 1))
 				.dump();
 
-			expect(dump.sql.toLowerCase()).toMatch(/tenant_abc["\.].*users/);
+			expect(dump.sql.toLowerCase()).toMatch(/tenant_abc[".].*users/);
 			expect(dump.meta?.tenant).toBe('tenant_abc');
 		});
 
@@ -467,7 +478,7 @@ describe('Mutation Builders (DX-010)', () => {
 			const tenantOrm = orm.forTenant('company_x');
 			const dump = tenantOrm.delete('posts').where(eq('id', 1)).dump();
 
-			expect(dump.sql.toLowerCase()).toMatch(/company_x["\.].*posts/);
+			expect(dump.sql.toLowerCase()).toMatch(/company_x[".].*posts/);
 			expect(dump.meta?.tenant).toBe('company_x');
 		});
 	});

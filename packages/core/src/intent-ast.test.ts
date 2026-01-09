@@ -771,18 +771,17 @@ describe('IntentAST', () => {
 			expect(insert.type).toBe('insert');
 			expect(insert.table).toBe('users');
 			expect(insert.values).toHaveLength(1);
-			expect(insert.values[0]).toEqual({ name: 'Alice', email: 'alice@test.com' });
+			expect(insert.values[0]).toEqual({
+				name: 'Alice',
+				email: 'alice@test.com',
+			});
 		});
 
 		it('should represent bulk insert', () => {
 			const insert: InsertIntent = {
 				type: 'insert',
 				table: 'users',
-				values: [
-					{ name: 'Alice' },
-					{ name: 'Bob' },
-					{ name: 'Charlie' },
-				],
+				values: [{ name: 'Alice' }, { name: 'Bob' }, { name: 'Charlie' }],
 			};
 
 			expect(insert.values).toHaveLength(3);
@@ -914,8 +913,16 @@ describe('IntentAST', () => {
 
 	describe('MutationIntent type guard', () => {
 		it('should identify all mutation types', () => {
-			const insert: MutationIntent = { type: 'insert', table: 'users', values: [{}] };
-			const update: MutationIntent = { type: 'update', table: 'users', set: {} };
+			const insert: MutationIntent = {
+				type: 'insert',
+				table: 'users',
+				values: [{}],
+			};
+			const update: MutationIntent = {
+				type: 'update',
+				table: 'users',
+				set: {},
+			};
 			const del: MutationIntent = { type: 'delete', table: 'users' };
 
 			expect(isMutationIntent(insert)).toBe(true);

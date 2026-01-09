@@ -4,6 +4,11 @@
  * Part of DX-010: Mutations.
  */
 
+import {
+	compileDelete,
+	compileInsert,
+	compileUpdate,
+} from '@db-semantic-planner/adapter-kysely';
 import type {
 	DeleteIntent,
 	InsertIntent,
@@ -11,13 +16,12 @@ import type {
 	UpdateIntent,
 	WhereIntent,
 } from '@db-semantic-planner/core';
-import {
-	compileDelete,
-	compileInsert,
-	compileUpdate,
-} from '@db-semantic-planner/adapter-kysely';
 import type { Kysely } from 'kysely';
-import { ExecutionError, InvalidOperationError, UnsafeOperationError } from './errors.js';
+import {
+	ExecutionError,
+	InvalidOperationError,
+	UnsafeOperationError,
+} from './errors.js';
 
 // ============================================================================
 // Types
@@ -92,7 +96,10 @@ export class InsertBuilder {
 	 */
 	private buildIntent(): InsertIntent {
 		if (this.valuesData.length === 0) {
-			throw new InvalidOperationError('insert', 'No values provided for insert');
+			throw new InvalidOperationError(
+				'insert',
+				'No values provided for insert',
+			);
 		}
 
 		return {

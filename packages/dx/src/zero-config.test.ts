@@ -6,9 +6,10 @@ import { createOrm } from './orm.js';
 
 // Mock the introspect function
 vi.mock('@db-semantic-planner/adapter-kysely', async (importOriginal) => {
-	const original = await importOriginal<
-		typeof import('@db-semantic-planner/adapter-kysely')
-	>();
+	const original =
+		await importOriginal<
+			typeof import('@db-semantic-planner/adapter-kysely')
+		>();
 	return {
 		...original,
 		introspect: vi.fn().mockResolvedValue(
