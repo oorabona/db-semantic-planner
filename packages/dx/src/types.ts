@@ -5,6 +5,7 @@ import type {
 	PlanReport,
 	SelectIntent,
 	WhereIntent,
+	WindowFunction,
 } from '@db-semantic-planner/core';
 import type { Kysely } from 'kysely';
 import type {
@@ -84,6 +85,7 @@ export interface AggregateOptions {
 	 */
 	readonly as?: string;
 }
+
 
 /**
  * Mapping of target table to preferred relation name.
@@ -219,6 +221,89 @@ export interface IncludeOptions {
 	readonly include?: readonly NestedInclude[];
 }
 
+
+/**
+ * Options for recursive include traversal on self-referential relations.
+ *
+ * @example
+ * ```typescript
+ * // Traverse ancestors (nested format)
+ * query('categories').where(eq('id', 5)).include('parent', {
+ *   recursive: true,
+ *   direction: 'ancestors'
+ * })
+ *
+ * // Traverse descendants (flat format with depth)
+ * query('categories').where(eq('id', 1)).include('children', {
+ *   recursive: true,
+ *   direction: 'descendants',
+ *   flat: true,
+ *   maxDepth: 10
+ * })
+ * ```
+ */
+export interface RecursiveIncludeOptions extends IncludeOptions {
+	/**
+	 * Enable recursive CTE traversal.
+	 * MUST be `true` when using recursive options.
+	 */
+	readonly recursive: true;
+
+	/**
+	 * Direction of traversal.
+	 * - 'ancestors': Traverse up the hierarchy (parent → grandparent → ...)
+	 * - 'descendants': Traverse down the hierarchy (children → grandchildren → ...)
+	 *
+	 * REQUIRED when `recursive: true`.
+	 */
+	readonly direction: 'ancestors' | 'descendants';
+
+	/**
+	 * Output format.
+	 * - false (default): Nested object structure (parent: { parent: { ... } })
+	 * - true: Flat array with depth field ([{ id: 2, depth: 1 }, { id: 1, depth: 2 }])
+	 *
+	 * When flat=true, property is renamed: parent → ancestors, children → descendants
+	 */
+	readonly flat?: boolean;
+
+	/**
+	 * Exclude the source node from results.
+	 * @default false
+	 */
+	readonly omitSelf?: boolean;
+
+	/**
+	 * Maximum traversal depth.
+	 * @default 100 (safety limit)
+	 */
+	readonly maxDepth?: number;
+
+	/**
+	 * Include depth column in results.
+	 * Automatically true when flat=true.
+	 */
+	readonly includeDepth?: boolean;
+}
+
+/**
+ * Union type for include options: regular or recursive.
+ */
+export type IncludeOptionsWithRecursive = IncludeOptions | RecursiveIncludeOptions;
+
+/**
+ * Type guard to check if include options are recursive.
+ */
+export function isRecursiveIncludeOptions(
+	options: IncludeOptionsWithRecursive | undefined,
+): options is RecursiveIncludeOptions {
+	return (
+		options !== undefined &&
+		'recursive' in options &&
+		options.recursive === true
+	);
+}
+
 /**
  * Utility type for picking fields from an object type.
  * Used for type inference in select().
@@ -270,7 +355,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 *   .include('posts', { via: 'authoredPosts' })  // Disambiguated
 	 * ```
 	 */
-	include(relation: string, options?: IncludeOptions): QueryBuilder<TResult>;
+	include(relation: string, options?: IncludeOptionsWithRecursive): QueryBuilder<TResult>;
 
 	/**
 	 * Select specific columns from the root entity.
@@ -384,6 +469,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 * ```
 	 */
 	groupBy(fields: readonly string[]): QueryBuilder<TResult>;
+
 
 	/**
 	 * Sort results by one or more fields.
@@ -730,6 +816,29 @@ export interface HierarchyOptions {
 }
 
 /**
+ * Options for listAncestors/listDescendants methods (DX-022).
+ * These methods execute immediately and return flat arrays.
+ */
+export interface ListHierarchyOptions {
+	/**
+	 * The column that references the parent node (for adjacency list pattern).
+	 * This is used to auto-detect the self-referential relation.
+	 * @example 'parentCategoryId', 'parentId', 'managerId'
+	 */
+	readonly parentId: string;
+
+	/**
+	 * The column that identifies a node (default: 'id').
+	 */
+	readonly nodeId?: string;
+
+	/**
+	 * Maximum depth to traverse (default: 100).
+	 */
+	readonly maxDepth?: number;
+}
+
+/**
  * ORM instance created by createOrm().
  *
  * @typeParam DB - Database schema type (Kysely-like).
@@ -804,99 +913,63 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 */
 	forTenant(schemaName: string): OrmInstance<DB>;
 
-	/**
-	 * Start building a recursive CTE query.
-	 *
-	 * @param cteName - Name for the recursive CTE
-	 * @returns A RecursiveQueryBuilder for constructing the recursive query
-	 *
-	 * @example
-	 * ```typescript
-	 * const permissions = await orm
-	 *   .recursive('role_tree')
-	 *   .from('roles')
-	 *   .where(eq('id', 1))
-	 *   .nodeId('id')
-	 *   .traverseVia('roleEdges', { from: 'parentRoleId', to: 'childRoleId' })
-	 *   .maxDepth(10)
-	 *   .join('rolePermissions', 'id', 'roleId')
-	 *   .distinct()
-	 *   .execute();
-	 * ```
-	 */
-	recursive<TResult = unknown>(cteName: string): RecursiveQueryBuilder<TResult>;
+	// =========================================================================
+	// Hierarchy List Methods (DX-022)
+	// =========================================================================
 
 	/**
-	 * Get ancestors of a node in a hierarchy (traverses UP the tree).
-	 * Shortcut for recursive query with adjacency traversal in 'ancestors' direction.
+	 * List all ancestors of a node as a flat array.
+	 * Uses the include({ recursive: true }) API internally.
+	 *
+	 * Unlike ancestors(), this method executes immediately and returns a flat array.
 	 *
 	 * @param table - The hierarchical table name
 	 * @param nodeIdValue - The ID of the starting node
-	 * @param options - Hierarchy traversal options
-	 * @returns A RecursiveQueryBuilder configured for ancestor traversal
+	 * @param options - Hierarchy list options
+	 * @returns Promise resolving to array of ancestor records (excluding the starting node)
 	 *
 	 * @example
 	 * ```typescript
 	 * // Get all ancestor categories of category 42
-	 * const ancestors = await orm
-	 *   .ancestors('categories', 42, { parentId: 'parentCategoryId' })
-	 *   .upToDepth(10)
-	 *   .execute();
+	 * const ancestors = await orm.listAncestors('categories', 42, {
+	 *   parentId: 'parentCategoryId',
+	 *   maxDepth: 10
+	 * });
+	 * // Returns: [{ id: 5, name: 'Parent' }, { id: 1, name: 'Root' }]
 	 * ```
 	 */
-	ancestors<TResult = unknown>(
+	listAncestors<TResult = unknown>(
 		table: string,
 		nodeIdValue: unknown,
-		options: HierarchyOptions,
-	): RecursiveQueryBuilder<TResult>;
+		options: ListHierarchyOptions,
+	): Promise<TResult[]>;
 
 	/**
-	 * Get descendants of a node in a hierarchy (traverses DOWN the tree).
-	 * Shortcut for recursive query with adjacency traversal in 'descendants' direction.
+	 * List all descendants of a node as a flat array.
+	 * Uses the include({ recursive: true }) API internally.
+	 *
+	 * Unlike descendants(), this method executes immediately and returns a flat array.
 	 *
 	 * @param table - The hierarchical table name
 	 * @param nodeIdValue - The ID of the starting node
-	 * @param options - Hierarchy traversal options
-	 * @returns A RecursiveQueryBuilder configured for descendant traversal
+	 * @param options - Hierarchy list options
+	 * @returns Promise resolving to array of descendant records (excluding the starting node)
 	 *
 	 * @example
 	 * ```typescript
-	 * // Get all descendant categories of category 1 (root)
-	 * const descendants = await orm
-	 *   .descendants('categories', 1, { parentId: 'parentCategoryId' })
-	 *   .upToDepth(5)
-	 *   .execute();
+	 * // Get all descendant categories of category 1
+	 * const descendants = await orm.listDescendants('categories', 1, {
+	 *   parentId: 'parentCategoryId',
+	 *   maxDepth: 5
+	 * });
+	 * // Returns: [{ id: 2, name: 'Child1' }, { id: 3, name: 'Grandchild' }]
 	 * ```
 	 */
-	descendants<TResult = unknown>(
+	listDescendants<TResult = unknown>(
 		table: string,
 		nodeIdValue: unknown,
-		options: HierarchyOptions,
-	): RecursiveQueryBuilder<TResult>;
-
-	/**
-	 * Get the entire subtree rooted at a node (the node + all descendants).
-	 * Shortcut for recursive query that includes the starting node and all descendants.
-	 *
-	 * @param table - The hierarchical table name
-	 * @param nodeIdValue - The ID of the root node
-	 * @param options - Hierarchy traversal options
-	 * @returns A RecursiveQueryBuilder configured for subtree traversal
-	 *
-	 * @example
-	 * ```typescript
-	 * // Get entire category subtree starting from category 5
-	 * const subtree = await orm
-	 *   .subtree('categories', 5, { parentId: 'parentCategoryId' })
-	 *   .upToDepth(10)
-	 *   .execute();
-	 * ```
-	 */
-	subtree<TResult = unknown>(
-		table: string,
-		nodeIdValue: unknown,
-		options: HierarchyOptions,
-	): RecursiveQueryBuilder<TResult>;
+		options: ListHierarchyOptions,
+	): Promise<TResult[]>;
 
 	// =========================================================================
 	// Mutation Methods (DX-010)

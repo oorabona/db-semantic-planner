@@ -25,8 +25,6 @@ export {
 	and,
 	// Expression
 	coalesce,
-	// Window function builders (DX-021)
-	denseRank,
 	// Comparison
 	eq,
 	// Relation
@@ -38,8 +36,6 @@ export {
 	// Null
 	isNotNull,
 	isNull,
-	lag,
-	lead,
 	// String
 	like,
 	lt,
@@ -48,16 +44,20 @@ export {
 	not,
 	notExists,
 	or,
-	rank,
 	// Raw SQL escape hatch
 	raw,
+	// Window function builders (DX-021)
+	denseRank,
+	lag,
+	lead,
+	rank,
 	rowNumber,
-	WindowBuilder,
 	wAvg,
 	wCount,
 	wMax,
 	wMin,
 	wSum,
+	WindowBuilder,
 } from './filters.js';
 // Mutation Builders (DX-010)
 export {
@@ -78,6 +78,9 @@ export {
 
 // Factory
 export { createOrm } from './orm.js';
+// NOTE: RecursiveQueryBuilder is now internal-only (DX-022)
+// Use include({ recursive: true }) API instead
+// Type exports kept for edge-table support (internal use)
 export type {
 	AdjacencyOptions,
 	EdgeTableOptions,
@@ -87,11 +90,6 @@ export type {
 	TraversalDirection,
 } from './recursive-query-builder.js';
 
-// Recursive Query Builder (DX-005)
-export {
-	createRecursiveBuilder,
-	RecursiveQueryBuilder,
-} from './recursive-query-builder.js';
 // Subquery Builder (DX-012 Block 3)
 export {
 	isSubqueryExpression,
@@ -106,6 +104,7 @@ export type {
 	ColumnSpec,
 	ExpressionSpec,
 	HierarchyOptions,
+	ListHierarchyOptions,
 	IncludeOptions,
 	NestedInclude,
 	OrmInstance,

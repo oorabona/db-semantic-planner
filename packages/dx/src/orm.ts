@@ -1,5 +1,6 @@
 import {
 	compile,
+	compileRecursive,
 	type Dump,
 	introspect,
 	streamQuery,
@@ -14,17 +15,20 @@ import type {
 	PlanOptions,
 	PlanReport,
 	QueryIntent,
+	RecursiveIntent,
 	SelectAggregateIntent,
 	SelectIntent,
 	SelectWithExpressionsIntent,
 	WhereIntent,
+	WindowIntent,
 } from '@db-semantic-planner/core';
-import { AmbiguousPlanError, plan } from '@db-semantic-planner/core';
-import type { Kysely } from 'kysely';
+import { AmbiguousPlanError, plan, planRecursive } from '@db-semantic-planner/core';
+import { CompiledQuery, type Kysely } from 'kysely';
 
 import {
 	AmbiguousRelationError,
 	ExecutionError,
+	InvalidOperationError,
 	NotFoundError,
 } from './errors.js';
 import { and, eq, inArray } from './filters.js';
@@ -44,7 +48,11 @@ import {
 	type ColumnSpec,
 	type HierarchyOptions,
 	type IncludeOptions,
+	type IncludeOptionsWithRecursive,
 	isExpressionSpec,
+	isRecursiveIncludeOptions,
+	type ListHierarchyOptions,
+	type RecursiveIncludeOptions,
 	type NestedInclude,
 	type OrmInstance,
 	type OrmOptionsWithDb,
@@ -153,87 +161,128 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				tenantSchema,
 			);
 		},
-		recursive<TResult = unknown>(
-			cteName: string,
-		): RecursiveQueryBuilder<TResult> {
-			if (!db) {
-				throw new Error(
-					'RecursiveQueryBuilder requires a database connection. ' +
-						'Pass a Kysely instance when creating the ORM.',
-				);
-			}
-			return new RecursiveQueryBuilder<TResult>(model, db, cteName, schemaName);
-		},
 
-		ancestors<TResult = unknown>(
+		// =====================================================================
+		// Hierarchy List Methods (DX-022)
+		// Returns flat arrays, uses include() with recursive: true internally
+		// =====================================================================
+
+		/**
+		 * List all ancestors of a node as a flat array.
+		 * Uses the new include({ recursive: true }) API internally.
+		 *
+		 * @param table - The table name
+		 * @param nodeIdValue - The starting node's ID value
+		 * @param options - Options including parentId column name
+		 * @returns Promise resolving to array of ancestor records
+		 */
+		async listAncestors<TResult = unknown>(
 			table: string,
 			nodeIdValue: unknown,
-			options: HierarchyOptions,
-		): RecursiveQueryBuilder<TResult> {
+			options: ListHierarchyOptions,
+		): Promise<TResult[]> {
 			if (!db) {
 				throw new Error(
-					'ancestors() requires a database connection. ' +
+					'listAncestors() requires a database connection. ' +
 						'Pass a Kysely instance when creating the ORM.',
 				);
 			}
-			const cteName = options.cteName ?? `${table}_ancestors`;
-			const nodeId = options.nodeId ?? 'id';
-			return new RecursiveQueryBuilder<TResult>(model, db, cteName, schemaName)
-				.from(table)
-				.nodeId(nodeId)
-				.where(eq(nodeId, nodeIdValue))
-				.traverseVia(table, {
-					parentId: options.parentId,
+
+			// Find the self-referential relation that matches the parent direction
+			const selfRefRelation = findSelfRefRelation(model, table, 'ancestors');
+			if (!selfRefRelation) {
+				throw new InvalidOperationError(
+					'listAncestors',
+					`Table '${table}' has no self-referential belongsTo/hasOne relation for ancestor traversal`,
+				);
+			}
+
+			const nodeIdCol = options.nodeId ?? 'id';
+			const maxDepth = options.maxDepth ?? 100;
+
+			const builder = new QueryBuilderImpl<TResult>(
+				model,
+				strictMode,
+				table,
+				relationHints,
+				db,
+				schemaName,
+			);
+
+			const result = await builder
+				.where(eq(nodeIdCol, nodeIdValue))
+				.include(selfRefRelation.name, {
+					recursive: true,
 					direction: 'ancestors',
-				});
+					flat: true,
+					omitSelf: true,
+					maxDepth,
+				})
+				.first();
+
+			// Result shape: { id, ..., ancestors: [...] }
+			// Return the ancestors array or empty if no result
+			// biome-ignore lint/suspicious/noExplicitAny: Result shape depends on relation name
+			return (result as any)?.ancestors ?? [];
 		},
 
-		descendants<TResult = unknown>(
+		/**
+		 * List all descendants of a node as a flat array.
+		 * Uses the new include({ recursive: true }) API internally.
+		 *
+		 * @param table - The table name
+		 * @param nodeIdValue - The starting node's ID value
+		 * @param options - Options including parentId column name
+		 * @returns Promise resolving to array of descendant records
+		 */
+		async listDescendants<TResult = unknown>(
 			table: string,
 			nodeIdValue: unknown,
-			options: HierarchyOptions,
-		): RecursiveQueryBuilder<TResult> {
+			options: ListHierarchyOptions,
+		): Promise<TResult[]> {
 			if (!db) {
 				throw new Error(
-					'descendants() requires a database connection. ' +
+					'listDescendants() requires a database connection. ' +
 						'Pass a Kysely instance when creating the ORM.',
 				);
 			}
-			const cteName = options.cteName ?? `${table}_descendants`;
-			const nodeId = options.nodeId ?? 'id';
-			return new RecursiveQueryBuilder<TResult>(model, db, cteName, schemaName)
-				.from(table)
-				.nodeId(nodeId)
-				.where(eq(nodeId, nodeIdValue))
-				.traverseVia(table, {
-					parentId: options.parentId,
-					direction: 'descendants',
-				});
-		},
 
-		subtree<TResult = unknown>(
-			table: string,
-			nodeIdValue: unknown,
-			options: HierarchyOptions,
-		): RecursiveQueryBuilder<TResult> {
-			// Subtree is the same as descendants but includes the starting node
-			// The starting node is always included by the anchor query in descendants
-			if (!db) {
-				throw new Error(
-					'subtree() requires a database connection. ' +
-						'Pass a Kysely instance when creating the ORM.',
+			// Find the self-referential relation that matches the children direction
+			const selfRefRelation = findSelfRefRelation(model, table, 'descendants');
+			if (!selfRefRelation) {
+				throw new InvalidOperationError(
+					'listDescendants',
+					`Table '${table}' has no self-referential hasMany relation for descendant traversal`,
 				);
 			}
-			const cteName = options.cteName ?? `${table}_subtree`;
-			const nodeId = options.nodeId ?? 'id';
-			return new RecursiveQueryBuilder<TResult>(model, db, cteName, schemaName)
-				.from(table)
-				.nodeId(nodeId)
-				.where(eq(nodeId, nodeIdValue))
-				.traverseVia(table, {
-					parentId: options.parentId,
+
+			const nodeIdCol = options.nodeId ?? 'id';
+			const maxDepth = options.maxDepth ?? 100;
+
+			const builder = new QueryBuilderImpl<TResult>(
+				model,
+				strictMode,
+				table,
+				relationHints,
+				db,
+				schemaName,
+			);
+
+			const result = await builder
+				.where(eq(nodeIdCol, nodeIdValue))
+				.include(selfRefRelation.name, {
+					recursive: true,
 					direction: 'descendants',
-				});
+					flat: true,
+					omitSelf: true,
+					maxDepth,
+				})
+				.first();
+
+			// Result shape: { id, ..., descendants: [...] }
+			// Return the descendants array or empty if no result
+			// biome-ignore lint/suspicious/noExplicitAny: Result shape depends on relation name
+			return (result as any)?.descendants ?? [];
 		},
 
 		// =====================================================================
@@ -344,6 +393,143 @@ function nestedIncludeToIntent(nested: NestedInclude): IncludeIntent {
 }
 
 /**
+ * Validate recursive include options.
+ * Throws InvalidOperationError if:
+ * - Relation is not self-referential (source !== target)
+ * - Direction is missing
+ * - Direction conflicts with relation cardinality
+ *
+ * @param model - The model IR
+ * @param sourceTable - The source table name
+ * @param relationName - The relation name
+ * @param options - The recursive include options
+ */
+function validateRecursiveInclude(
+	model: ModelIR,
+	sourceTable: string,
+	relationName: string,
+	options: RecursiveIncludeOptions,
+): void {
+	// Get the relation from the model
+	const qualifiedName = `${sourceTable}.${relationName}`;
+	const relation = model.getRelation(qualifiedName);
+
+	if (!relation) {
+		// Let the planner handle the "relation not found" error
+		return;
+	}
+
+	// Check if direction is provided (INV-2)
+	if (!options.direction) {
+		throw new InvalidOperationError(
+			'recursive include',
+			`'direction' is required when using recursive: true. ` +
+				`Use 'ancestors' for parent traversal or 'descendants' for children traversal.`,
+		);
+	}
+
+	// Check if relation is self-referential (INV-1, PRE-1)
+	if (relation.source !== relation.target) {
+		throw new InvalidOperationError(
+			'recursive include',
+			`Recursive include requires a self-referential relation. ` +
+				`Relation '${relationName}' connects '${relation.source}' to '${relation.target}', ` +
+				`but both must be the same table for recursive traversal.`,
+		);
+	}
+
+	// Check direction vs relation type (PRE-2, PRE-3, ERR-3)
+	// ancestors requires belongsTo/hasOne (to-one), descendants requires hasMany (to-many)
+	const { direction } = options;
+	const relType = relation.type;
+
+	if (direction === 'ancestors') {
+		// ancestors traversal: follow the "parent" direction (N:1 or 1:1)
+		// The relation should be belongsTo or hasOne (e.g., category -> parent category)
+		if (relType === 'hasMany' || relType === 'belongsToMany') {
+			throw new InvalidOperationError(
+				'recursive include',
+				`Direction 'ancestors' requires a to-one relation (belongsTo or hasOne). ` +
+					`Relation '${relationName}' has type '${relType}'. ` +
+					`Use 'descendants' for hasMany/belongsToMany relations.`,
+			);
+		}
+	} else if (direction === 'descendants') {
+		// descendants traversal: follow the "children" direction (1:N)
+		// The relation should be hasMany (e.g., category -> child categories)
+		if (relType === 'belongsTo' || relType === 'hasOne') {
+			throw new InvalidOperationError(
+				'recursive include',
+				`Direction 'descendants' requires a to-many relation (hasMany). ` +
+					`Relation '${relationName}' has type '${relType}'. ` +
+					`Use 'ancestors' for belongsTo/hasOne relations.`,
+			);
+		}
+	}
+}
+
+/**
+ * Find a self-referential relation on a table that matches the desired direction.
+ *
+ * @param model - The model IR
+ * @param table - The table name
+ * @param direction - 'ancestors' (needs belongsTo/hasOne) or 'descendants' (needs hasMany)
+ * @returns The matching relation or null if not found
+ */
+function findSelfRefRelation(
+	model: ModelIR,
+	table: string,
+	direction: 'ancestors' | 'descendants',
+): { name: string; type: string } | null {
+	// Get all relations from this table
+	const tableRelations = model.getRelationsFrom(table);
+	if (!tableRelations || tableRelations.length === 0) {
+		return null;
+	}
+
+	// Find self-referential relations that match the direction
+	for (const relation of tableRelations) {
+		// Must be self-referential
+		if (relation.source !== relation.target) {
+			continue;
+		}
+
+		// Check if direction matches relation type
+		if (direction === 'ancestors') {
+			// Need belongsTo or hasOne for ancestor traversal
+			if (relation.type === 'belongsTo' || relation.type === 'hasOne') {
+				return { name: relation.name, type: relation.type };
+			}
+		} else {
+			// Need hasMany for descendant traversal
+			if (relation.type === 'hasMany') {
+				return { name: relation.name, type: relation.type };
+			}
+		}
+	}
+
+	return null;
+}
+
+/**
+ * Check if a relation is self-referential (source === target table).
+ *
+ * @param model - The model IR
+ * @param sourceTable - The source table name
+ * @param relationName - The relation name
+ * @returns true if the relation exists and is self-referential
+ */
+function isSelfReferentialRelation(
+	model: ModelIR,
+	sourceTable: string,
+	relationName: string,
+): boolean {
+	const qualifiedName = `${sourceTable}.${relationName}`;
+	const relation = model.getRelation(qualifiedName);
+	return relation !== undefined && relation.source === relation.target;
+}
+
+/**
  * Parse dot notation include into nested IncludeIntent.
  *
  * @example
@@ -378,6 +564,15 @@ function parseDotNotationInclude(
 }
 
 /**
+ * Configuration for a recursive include.
+ * Stores the relation name and recursive options for later processing.
+ */
+interface RecursiveIncludeConfig {
+	readonly relation: string;
+	readonly options: RecursiveIncludeOptions;
+}
+
+/**
  * Internal query builder implementation.
  */
 class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
@@ -385,6 +580,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	private readonly strictMode: boolean;
 	private readonly from: string;
 	private readonly includes: IncludeIntent[] = [];
+	private readonly recursiveIncludes: RecursiveIncludeConfig[] = [];
 	private readonly relationHints: RelationHints;
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
 	private readonly db: Kysely<any> | undefined;
@@ -415,8 +611,17 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		this.schemaName = schemaName;
 	}
 
-	include(relation: string, options?: IncludeOptions): QueryBuilder<TResult> {
+	include(relation: string, options?: IncludeOptionsWithRecursive): QueryBuilder<TResult> {
 		const builder = this.clone();
+
+		// Handle recursive includes separately - they require CTE execution
+		if (isRecursiveIncludeOptions(options)) {
+			validateRecursiveInclude(this.model, this.from, relation, options);
+			// Store for separate CTE processing during execution
+			builder.recursiveIncludes.push({ relation, options });
+			return builder;
+		}
+
 		// Support dot notation for nested includes: 'posts.comments.author'
 		if (relation.includes('.')) {
 			builder.includes.push(parseDotNotationInclude(relation, options));
@@ -600,7 +805,305 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 
 		const compiled = compile(planReport, this.model, db, compileOptions);
 		const result = await db.executeQuery(compiled);
-		return result.rows as TResult[];
+		const mainResults = result.rows as TResult[];
+
+		// Process recursive includes if any
+		if (this.recursiveIncludes.length > 0) {
+			await this.processRecursiveIncludes(mainResults, db);
+		}
+
+		return mainResults;
+	}
+
+	/**
+	 * Process recursive includes by executing CTE queries and merging results.
+	 * For each recursive include, builds a RecursiveIntent, executes it, and
+	 * attaches the results to the appropriate parent records.
+	 */
+	private async processRecursiveIncludes(
+		// biome-ignore lint/suspicious/noExplicitAny: Result rows can have any shape
+		results: any[],
+		// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+		db: Kysely<any>,
+	): Promise<void> {
+		if (results.length === 0) return;
+
+		for (const config of this.recursiveIncludes) {
+			await this.processOneRecursiveInclude(results, config, db);
+		}
+	}
+
+	/**
+	 * Process a single recursive include.
+	 */
+	private async processOneRecursiveInclude(
+		// biome-ignore lint/suspicious/noExplicitAny: Result rows can have any shape
+		results: any[],
+		config: RecursiveIncludeConfig,
+		// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+		db: Kysely<any>,
+	): Promise<void> {
+		const { relation, options } = config;
+		const { direction, flat = false, omitSelf = false, maxDepth = 100, includeDepth = false } = options;
+
+		// Get relation metadata
+		const qualifiedName = `${this.from}.${relation}`;
+		const relationMeta = this.model.getRelation(qualifiedName);
+		if (!relationMeta) {
+			throw new InvalidOperationError(
+				'recursive include execution',
+				`Relation '${relation}' not found on '${this.from}'`,
+			);
+		}
+
+		// Determine the foreign key column from relation metadata
+		const fkColumn = this.getForeignKeyColumn(relationMeta.foreignKey);
+
+		// Collect IDs from the main results (primary key values)
+		// For ancestors: we start from the record's own ID and traverse up via parent
+		// For descendants: we start from the record's own ID and traverse down via children
+		const startIds = results
+			.map((r) => r.id as unknown)
+			.filter((id) => id !== undefined && id !== null);
+
+		if (startIds.length === 0) return;
+
+		// Build RecursiveIntent
+		const cteName = `_recursive_${relation}_${direction}`;
+		const recursiveIntent = this.buildRecursiveIntent(
+			cteName,
+			relationMeta,
+			startIds,
+			direction,
+			maxDepth,
+			includeDepth,
+		);
+
+		// Plan and compile the recursive query
+		const report = planRecursive(recursiveIntent, this.model);
+		const compiledRecursive = compileRecursive(
+			report,
+			this.model,
+			db,
+			this.schemaName,
+		);
+
+		// Execute
+		const compiledQuery = CompiledQuery.raw(
+			compiledRecursive.sql,
+			compiledRecursive.parameters as unknown[],
+		);
+		const recursiveResult = await db.executeQuery(compiledQuery);
+		// biome-ignore lint/suspicious/noExplicitAny: Recursive result rows can have any shape
+		const recursiveRows = recursiveResult.rows as any[];
+
+		// Merge results back into main results
+		this.mergeRecursiveResults(
+			results,
+			recursiveRows,
+			relation,
+			direction,
+			fkColumn,
+			flat,
+			omitSelf,
+		);
+	}
+
+	/**
+	 * Build a RecursiveIntent from the include options.
+	 */
+	private buildRecursiveIntent(
+		cteName: string,
+		relationMeta: ReturnType<ModelIR['getRelation']> & object,
+		startIds: unknown[],
+		direction: 'ancestors' | 'descendants',
+		maxDepth: number,
+		includeDepth: boolean,
+	): RecursiveIntent {
+		const { source, foreignKey } = relationMeta;
+
+		// Get the foreign key as a string (use first element if array)
+		const fkColumn = this.getForeignKeyColumn(foreignKey);
+
+		// For self-referential relations:
+		// - ancestors: traverse via parent (belongsTo) - follow foreignKey to parent
+		// - descendants: traverse via children (hasMany) - find rows where foreignKey = our id
+
+		// Build the start WHERE clause to filter by the starting IDs
+		const startWhere: WhereIntent = startIds.length === 1
+			? { kind: 'comparison', field: 'id', operator: 'eq', value: startIds[0] }
+			: { kind: 'in', field: 'id', values: startIds as (string | number | boolean)[] };
+
+		// Build traversal config based on direction
+		const traversal = this.buildTraversalConfig(source, fkColumn, direction);
+
+		// Build the intent
+		const intent: RecursiveIntent = {
+			type: 'recursive',
+			cteName,
+			start: {
+				from: source,
+				nodeIdExpr: { kind: 'column', name: 'id' },
+				where: startWhere,
+			},
+			traversal,
+			maxDepth,
+		};
+
+		// Add depth tracking if requested
+		if (includeDepth) {
+			(intent as { track?: RecursiveIntent['track'] }).track = { depth: {} };
+		}
+
+		return intent;
+	}
+
+	/**
+	 * Extract foreign key column name from RelationIR foreignKey.
+	 */
+	private getForeignKeyColumn(foreignKey: string | readonly string[] | undefined): string {
+		if (!foreignKey) {
+			return 'parent_id'; // Default convention for self-referential
+		}
+		if (typeof foreignKey === 'string') {
+			return foreignKey;
+		}
+		// It's a readonly array - use first column for composite FK
+		const first = foreignKey[0];
+		return first ?? 'parent_id'; // Fallback for empty array
+	}
+
+	/**
+	 * Build traversal config for recursive CTE.
+	 */
+	private buildTraversalConfig(
+		nodeTable: string,
+		parentIdColumn: string,
+		direction: 'ancestors' | 'descendants',
+	): RecursiveIntent['traversal'] {
+		// For self-referential adjacency list:
+		// - ancestors: currentRow.foreignKey = nextRow.id (follow parent pointer)
+		// - descendants: currentRow.id = nextRow.foreignKey (find children)
+		return {
+			kind: 'adjacency',
+			nodeTable,
+			nodeId: 'id',
+			parentId: parentIdColumn,
+			direction,
+		};
+	}
+
+	/**
+	 * Merge recursive query results back into the main results.
+	 */
+	private mergeRecursiveResults(
+		// biome-ignore lint/suspicious/noExplicitAny: Result rows can have any shape
+		results: any[],
+		// biome-ignore lint/suspicious/noExplicitAny: Recursive result rows can have any shape
+		recursiveRows: any[],
+		relation: string,
+		direction: 'ancestors' | 'descendants',
+		foreignKey: string,
+		flat: boolean,
+		omitSelf: boolean,
+	): void {
+		// Build a map from start ID to recursive results
+		// biome-ignore lint/suspicious/noExplicitAny: Recursive result rows can have any shape
+		const resultsByStartId = new Map<unknown, any[]>();
+
+		for (const row of recursiveRows) {
+			// The recursive CTE returns rows with a _start_id or similar marker
+			// For now, we group by the root ID that started the traversal
+			const startId = row._root_id ?? row.id;
+			const existing = resultsByStartId.get(startId) ?? [];
+
+			// Apply omitSelf filter
+			if (omitSelf && row.depth === 0) {
+				continue;
+			}
+
+			existing.push(row);
+			resultsByStartId.set(startId, existing);
+		}
+
+		// Determine output property name based on direction
+		const outputProperty = direction === 'ancestors'
+			? (relation === 'parent' ? 'ancestors' : `${relation}_ancestors`)
+			: (relation === 'children' ? 'descendants' : `${relation}_descendants`);
+
+		// Attach to main results
+		for (const result of results) {
+			const id = result.id as unknown;
+			const recursiveData = resultsByStartId.get(id) ?? [];
+
+			if (flat) {
+				// Flat: array of all results
+				result[outputProperty] = recursiveData;
+			} else {
+				// Nested: build tree structure
+				result[outputProperty] = this.buildNestedHierarchy(
+					recursiveData,
+					direction,
+					foreignKey,
+				);
+			}
+		}
+	}
+
+	/**
+	 * Build nested hierarchy from flat recursive results.
+	 */
+	private buildNestedHierarchy(
+		// biome-ignore lint/suspicious/noExplicitAny: Recursive result rows can have any shape
+		rows: any[],
+		direction: 'ancestors' | 'descendants',
+		foreignKey: string,
+		// biome-ignore lint/suspicious/noExplicitAny: Nested result can have any shape
+	): any {
+		if (rows.length === 0) return direction === 'ancestors' ? null : [];
+
+		// Sort by depth
+		const sorted = [...rows].sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0));
+
+		if (direction === 'ancestors') {
+			// For ancestors, build a chain: self -> parent -> grandparent
+			// Return the immediate parent with nested ancestors
+			let current = null;
+			for (let i = sorted.length - 1; i >= 0; i--) {
+				const row = sorted[i];
+				const node = { ...row };
+				if (current !== null) {
+					node[direction === 'ancestors' ? 'parent' : 'children'] = current;
+				}
+				current = node;
+			}
+			return current;
+		}
+
+		// For descendants, build a tree structure
+		// biome-ignore lint/suspicious/noExplicitAny: Building nested tree structure
+		const nodeMap = new Map<unknown, any>();
+		// biome-ignore lint/suspicious/noExplicitAny: Building nested tree structure
+		const roots: any[] = [];
+
+		for (const row of sorted) {
+			const node = { ...row, children: [] };
+			nodeMap.set(row.id, node);
+
+			const parentId = row[foreignKey] as unknown;
+			if (parentId !== null && parentId !== undefined) {
+				const parent = nodeMap.get(parentId);
+				if (parent) {
+					parent.children.push(node);
+				} else {
+					roots.push(node);
+				}
+			} else {
+				roots.push(node);
+			}
+		}
+
+		return roots;
 	}
 
 	async first(): Promise<TResult | undefined> {
@@ -684,6 +1187,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		if (this.schemaName !== undefined) {
 			compileOptions.schemaName = this.schemaName;
 		}
+
 
 		const compiled = compile(planReport, this.model, db, compileOptions);
 
@@ -904,6 +1408,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			this.schemaName,
 		);
 		builder.includes.push(...this.includes);
+		builder.recursiveIncludes.push(...this.recursiveIncludes);
 		if (this.selectIntent !== undefined) {
 			builder.selectIntent = this.selectIntent;
 		}
