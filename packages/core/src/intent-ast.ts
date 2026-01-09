@@ -579,16 +579,15 @@ export interface RecursivePgOptions {
  * - 'none': No dedup. May return same node multiple times via different paths.
  *   Fastest. Use when you need all paths or when graph is known to be a tree.
  *
- * - 'final' (default): One row per nodeId in final output.
+ * - 'final': One row per nodeId in final output.
  *   Implemented via `DISTINCT ON (nodeId)` (PostgreSQL) or
  *   `ROW_NUMBER() OVER (PARTITION BY nodeId)` fallback.
  *   ⚠️ NOT the same as `query.distinct()` which dedupes on entire row!
  *
- * - 'global': UNION instead of UNION ALL in recursive member.
- *   Expensive (set membership check every iteration) but guarantees
- *   each node is visited exactly once during traversal.
+ * Note: 'global' (UNION instead of UNION ALL) was considered but not implemented.
+ * 'final' provides the same end result with better performance characteristics.
  */
-export type RecursiveDedupe = 'none' | 'final' | 'global';
+export type RecursiveDedupe = 'none' | 'final';
 
 /**
  * Recursive CTE intent for hierarchical data traversal.
