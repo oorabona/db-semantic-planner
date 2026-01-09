@@ -19,7 +19,13 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql as kyselySql } from 'kysely';
-import { createOrm, eq, and, type RelationHints } from '@db-semantic-planner/dx';
+import {
+	createOrm,
+	eq,
+	and,
+	AmbiguousRelationError,
+	type RelationHints,
+} from '@db-semantic-planner/dx';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
@@ -471,6 +477,169 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			// Verify tenant schema is applied
 			expect(dump.sql).toContain(`"${SCHEMA}".`);
 			expect(dump.plan).toBeDefined();
+		});
+	});
+
+	describe('Q8-07: Strict mode ambiguity errors (E2E-002 Q8-03)', () => {
+		/**
+		 * Tests strict mode behavior with real PostgreSQL database.
+		 * In strict mode, ambiguous relations must be resolved explicitly.
+		 *
+		 * Schema ambiguity:
+		 * - products.author_id → users (author relation)
+		 * - products.reviewer_id → users (reviewer relation)
+		 *
+		 * When querying from products and including 'users', the ORM cannot
+		 * determine which relation to use. In strict mode, this throws.
+		 */
+
+		it('should throw AmbiguousRelationError in strict mode when including users without via hint', async () => {
+			const db = await getTestDb();
+			const orm = createOrm({
+				model: pimdamExtendedModel,
+				db,
+				strictMode: true,
+			});
+
+			// products has both author and reviewer relations to users
+			expect(() => {
+				orm.forTenant(SCHEMA).query('products').include('users').plan();
+			}).toThrow(AmbiguousRelationError);
+		});
+
+		it('should include sourceTable in AmbiguousRelationError', async () => {
+			const db = await getTestDb();
+			const orm = createOrm({
+				model: pimdamExtendedModel,
+				db,
+				strictMode: true,
+			});
+
+			try {
+				orm.forTenant(SCHEMA).query('products').include('users').plan();
+				expect.fail('Should have thrown AmbiguousRelationError');
+			} catch (error) {
+				expect(error).toBeInstanceOf(AmbiguousRelationError);
+				expect((error as AmbiguousRelationError).sourceTable).toBe('products');
+			}
+		});
+
+		it('should include targetTable in AmbiguousRelationError', async () => {
+			const db = await getTestDb();
+			const orm = createOrm({
+				model: pimdamExtendedModel,
+				db,
+				strictMode: true,
+			});
+
+			try {
+				orm.forTenant(SCHEMA).query('products').include('users').plan();
+				expect.fail('Should have thrown AmbiguousRelationError');
+			} catch (error) {
+				expect(error).toBeInstanceOf(AmbiguousRelationError);
+				expect((error as AmbiguousRelationError).targetTable).toBe('users');
+			}
+		});
+
+		it('should provide available relation options in error', async () => {
+			const db = await getTestDb();
+			const orm = createOrm({
+				model: pimdamExtendedModel,
+				db,
+				strictMode: true,
+			});
+
+			try {
+				orm.forTenant(SCHEMA).query('products').include('users').plan();
+				expect.fail('Should have thrown AmbiguousRelationError');
+			} catch (error) {
+				expect(error).toBeInstanceOf(AmbiguousRelationError);
+				const options = (error as AmbiguousRelationError).options;
+				// Should contain both author and reviewer relation names
+				expect(options).toContain('author');
+				expect(options).toContain('reviewer');
+			}
+		});
+
+		it('should provide helpful error message with disambiguation hint', async () => {
+			const db = await getTestDb();
+			const orm = createOrm({
+				model: pimdamExtendedModel,
+				db,
+				strictMode: true,
+			});
+
+			try {
+				orm.forTenant(SCHEMA).query('products').include('users').plan();
+				expect.fail('Should have thrown AmbiguousRelationError');
+			} catch (error) {
+				expect(error).toBeInstanceOf(AmbiguousRelationError);
+				const message = (error as Error).message;
+				// Message should include disambiguation hints
+				expect(message).toContain('Ambiguous relation');
+				expect(message).toContain('products');
+				expect(message).toContain('users');
+				expect(message).toContain('via');
+			}
+		});
+
+		it('should not throw when via hint resolves ambiguity', async () => {
+			const db = await getTestDb();
+			const orm = createOrm({
+				model: pimdamExtendedModel,
+				db,
+				strictMode: true,
+			});
+
+			// Using via: 'author' resolves the ambiguity
+			expect(() => {
+				orm.forTenant(SCHEMA).query('products').include('users', { via: 'author' }).plan();
+			}).not.toThrow();
+
+			// Using via: 'reviewer' also resolves it
+			expect(() => {
+				orm.forTenant(SCHEMA).query('products').include('users', { via: 'reviewer' }).plan();
+			}).not.toThrow();
+		});
+
+		it('should work in lenient mode (default) with warning instead of error', async () => {
+			const db = await getTestDb();
+			const orm = createOrm({
+				model: pimdamExtendedModel,
+				db,
+				strictMode: false, // Default/lenient mode
+			});
+
+			// Should not throw
+			const planReport = orm.forTenant(SCHEMA).query('products').include('users').plan();
+
+			// Should have ambiguity warning
+			const ambiguityWarning = planReport.warnings.find(
+				(w) => w.code === 'AMBIGUOUS_RELATION',
+			);
+			expect(ambiguityWarning).toBeDefined();
+		});
+
+		it('should execute query successfully when ambiguity is resolved with via hint', async () => {
+			const db = await getTestDb();
+			const orm = createOrm({
+				model: pimdamExtendedModel,
+				db,
+				strictMode: true,
+			});
+
+			// Execute real query with resolved ambiguity
+			const products = await orm
+				.forTenant(SCHEMA)
+				.query('products')
+				.where(eq('sku', 'WIDGET-001'))
+				.include('users', { via: 'author' })
+				.select(['id', 'sku'])
+				.execute();
+
+			const results = products as { sku: string }[];
+			expect(results.length).toBe(1);
+			expect(results[0].sku).toBe('WIDGET-001');
 		});
 	});
 });
