@@ -17,6 +17,43 @@ import type { WhereFilter } from './object-filter.js';
 import type { RecursiveQueryBuilder } from './recursive-query-builder.js';
 
 /**
+ * A wrapper around an ExpressionIntent that marks it for use in columns().
+ * The __expr marker allows runtime detection of expression vs string columns.
+ *
+ * Create these using helper functions like coalesce() or raw().
+ */
+export interface ExpressionSpec {
+	readonly __expr: true;
+	readonly intent: ExpressionIntent;
+}
+
+/**
+ * A column specification - either a field name or an expression.
+ *
+ * @example
+ * ```typescript
+ * // Simple field
+ * 'id'
+ *
+ * // Expression (via coalesce helper)
+ * coalesce(['name_fr', 'name_en'], 'name')
+ * ```
+ */
+export type ColumnSpec = string | ExpressionSpec;
+
+/**
+ * Type guard to check if a ColumnSpec is an ExpressionSpec.
+ */
+export function isExpressionSpec(spec: ColumnSpec): spec is ExpressionSpec {
+	return (
+		typeof spec === 'object' &&
+		spec !== null &&
+		'__expr' in spec &&
+		spec.__expr === true
+	);
+}
+
+/**
  * Options for streaming query execution.
  * Re-exports from adapter-kysely for convenience.
  */
@@ -270,6 +307,7 @@ export interface QueryBuilder<TResult = unknown> {
 
 	/**
 	 * Select specific columns from the root entity.
+	 * Accepts both simple field names and expression specs (from coalesce(), raw(), etc.)
 	 *
 	 * The result type is preserved from the QueryBuilder generic parameter.
 	 * Use explicit typing on select() for typed results:
@@ -281,44 +319,28 @@ export interface QueryBuilder<TResult = unknown> {
 	 * // users is User[]
 	 * ```
 	 *
-	 * @param fields - Array of field names to select
+	 * @param columns - Array of field names or expression specs
 	 * @returns A new QueryBuilder with the column selection applied
-	 */
-	columns(fields: readonly string[]): QueryBuilder<TResult>;
-
-	/**
-	 * Select columns with computed expressions (COALESCE, raw SQL, etc.)
-	 *
-	 * @param fields - Array of regular field names to select
-	 * @param expressions - Array of expression intents (from coalesce(), raw(), etc.)
-	 * @returns A new QueryBuilder with the selection applied
 	 *
 	 * @example
 	 * ```typescript
 	 * import { coalesce, raw } from '@db-semantic-planner/dx';
 	 *
-	 * // Locale fallback pattern
+	 * // Simple fields
+	 * orm.select('users').columns(['id', 'name']).all();
+	 *
+	 * // Mix of fields and expressions
 	 * orm.select('products')
-	 *   .columnsWithExpressions(
-	 *     ['id', 'sku'],
-	 *     [coalesce(['title_fr', 'title_en'], 'title')]
-	 *   )
+	 *   .columns([
+	 *     'id',
+	 *     'sku',
+	 *     coalesce(['title_fr', 'title_en'], 'title')
+	 *   ])
 	 *   .all();
 	 * // → SELECT id, sku, COALESCE(title_fr, title_en) AS title FROM products
-	 *
-	 * // Computed expression
-	 * orm.select('orders')
-	 *   .columnsWithExpressions(
-	 *     ['id'],
-	 *     [raw('price_cents / 100.0', 'price_dollars')]
-	 *   )
-	 *   .all();
 	 * ```
 	 */
-	columnsWithExpressions(
-		fields: readonly string[],
-		expressions: readonly ExpressionIntent[],
-	): QueryBuilder<TResult>;
+	columns(columns: readonly ColumnSpec[]): QueryBuilder<TResult>;
 
 	/**
 	 * Count rows, optionally counting a specific field.

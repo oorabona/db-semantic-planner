@@ -391,14 +391,17 @@ describe('Feature 7: Composition', () => {
 // ============================================================================
 
 describe('Feature 8: Expression Helpers', () => {
-	describe('Scenario 8.1: coalesce() creates coalesce expression intent', () => {
-		it('should return CoalesceExpressionIntent with multiple fields', () => {
+	describe('Scenario 8.1: coalesce() creates ExpressionSpec with coalesce intent', () => {
+		it('should return ExpressionSpec wrapping CoalesceExpressionIntent', () => {
 			const result = coalesce(['name_fr', 'name_en', 'name'], 'displayName');
 
 			expect(result).toEqual({
-				kind: 'coalesce',
-				fields: ['name_fr', 'name_en', 'name'],
-				as: 'displayName',
+				__expr: true,
+				intent: {
+					kind: 'coalesce',
+					fields: ['name_fr', 'name_en', 'name'],
+					as: 'displayName',
+				},
 			});
 		});
 
@@ -406,9 +409,12 @@ describe('Feature 8: Expression Helpers', () => {
 			const result = coalesce(['name'], 'displayName');
 
 			expect(result).toEqual({
-				kind: 'coalesce',
-				fields: ['name'],
-				as: 'displayName',
+				__expr: true,
+				intent: {
+					kind: 'coalesce',
+					fields: ['name'],
+					as: 'displayName',
+				},
 			});
 		});
 
@@ -431,14 +437,17 @@ describe('Feature 8: Expression Helpers', () => {
 		});
 	});
 
-	describe('Scenario 8.2: raw() creates raw expression intent', () => {
-		it('should return RawExpressionIntent', () => {
+	describe('Scenario 8.2: raw() creates ExpressionSpec with raw intent', () => {
+		it('should return ExpressionSpec wrapping RawExpressionIntent', () => {
 			const result = raw("CONCAT(first_name, ' ', last_name)", 'fullName');
 
 			expect(result).toEqual({
-				kind: 'raw',
-				sql: "CONCAT(first_name, ' ', last_name)",
-				as: 'fullName',
+				__expr: true,
+				intent: {
+					kind: 'raw',
+					sql: "CONCAT(first_name, ' ', last_name)",
+					as: 'fullName',
+				},
 			});
 		});
 
@@ -448,9 +457,10 @@ describe('Feature 8: Expression Helpers', () => {
 				'statusLabel',
 			);
 
-			expect(result.kind).toBe('raw');
-			expect(result.sql).toContain('CASE WHEN');
-			expect(result.as).toBe('statusLabel');
+			expect(result.__expr).toBe(true);
+			expect(result.intent.kind).toBe('raw');
+			expect(result.intent.sql).toContain('CASE WHEN');
+			expect(result.intent.as).toBe('statusLabel');
 		});
 
 		it('should throw on empty alias', () => {
@@ -470,9 +480,12 @@ describe('Feature 8: Expression Helpers', () => {
 			const result = raw('', 'emptyExpr');
 
 			expect(result).toEqual({
-				kind: 'raw',
-				sql: '',
-				as: 'emptyExpr',
+				__expr: true,
+				intent: {
+					kind: 'raw',
+					sql: '',
+					as: 'emptyExpr',
+				},
 			});
 		});
 	});

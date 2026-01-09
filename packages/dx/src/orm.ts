@@ -40,18 +40,20 @@ import {
 	type WhereFilter,
 } from './object-filter.js';
 import { RecursiveQueryBuilder } from './recursive-query-builder.js';
-import type {
-	AggregateOptions,
-	HierarchyOptions,
-	IncludeOptions,
-	NestedInclude,
-	OrmInstance,
-	OrmOptionsWithDb,
-	OrmOptionsWithModel,
-	QueryBuilder,
-	RelationHints,
-	StreamOptions,
-	WindowOptions,
+import {
+	type AggregateOptions,
+	type ColumnSpec,
+	type HierarchyOptions,
+	type IncludeOptions,
+	isExpressionSpec,
+	type NestedInclude,
+	type OrmInstance,
+	type OrmOptionsWithDb,
+	type OrmOptionsWithModel,
+	type QueryBuilder,
+	type RelationHints,
+	type StreamOptions,
+	type WindowOptions,
 } from './types.js';
 
 /**
@@ -427,26 +429,36 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		return builder;
 	}
 
-	columns(fields: readonly string[]): QueryBuilder<TResult> {
+	columns(columns: readonly ColumnSpec[]): QueryBuilder<TResult> {
 		const builder = this.clone();
-		builder.selectIntent = { type: 'fields', fields: [...fields] };
-		return builder;
-	}
 
-	columnsWithExpressions(
-		fields: readonly string[],
-		expressions: readonly ExpressionIntent[],
-	): QueryBuilder<TResult> {
-		const builder = this.clone();
-		const select: SelectWithExpressionsIntent = {
-			type: 'expressions',
-			expressions: [...expressions],
-		};
-		// Add fields if provided
-		if (fields.length > 0) {
-			(select as { fields: readonly string[] }).fields = [...fields];
+		// Separate strings and expressions
+		const fields: string[] = [];
+		const expressions: ExpressionIntent[] = [];
+
+		for (const col of columns) {
+			if (isExpressionSpec(col)) {
+				expressions.push(col.intent);
+			} else {
+				fields.push(col);
+			}
 		}
-		builder.selectIntent = select;
+
+		// If we have expressions, use SelectWithExpressionsIntent
+		if (expressions.length > 0) {
+			const select: SelectWithExpressionsIntent = {
+				type: 'expressions',
+				expressions,
+			};
+			if (fields.length > 0) {
+				(select as { fields: readonly string[] }).fields = fields;
+			}
+			builder.selectIntent = select;
+		} else {
+			// Simple fields only
+			builder.selectIntent = { type: 'fields', fields };
+		}
+
 		return builder;
 	}
 
