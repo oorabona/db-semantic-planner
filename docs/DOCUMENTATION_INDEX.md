@@ -13,7 +13,7 @@ doc-meta:
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
 
-**Status:** MVP ✅ Complete + P1 ✅ Complete + P2 ✅ Complete (481 unit + 87 E2E = 568 tests)
+**Status:** MVP ✅ Complete + P1 ✅ Complete + P2 ✅ Complete (736 unit + 87 E2E = 823 tests)
 
 ## Architecture: Ports & Adapters
 
@@ -63,6 +63,7 @@ packages/dx            → Depends on core + adapter-kysely
 | E2E-002 | [PIM/DAM Realistic Scenarios](specs/E2E-002-pimdam-realistic-scenarios.md) | e2e | 🟡 draft |
 | ARCH-001 | [Dialect-Agnostic Recursive CTE](specs/ARCH-001-dialect-agnostic-recursive.md) | core, adapter | 🟡 draft |
 | DX-005 | [Recursive Query Builder](specs/DX-005-recursive-query-builder.md) | dx | 🟡 draft |
+| DX-010 | [Mutations (insert/update/delete)](specs/DX-010-mutations.md) | dx | ✅ canonical |
 
 ## Golden Query Tests (MVP Contract) - ✅ Complete
 

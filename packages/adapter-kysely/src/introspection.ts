@@ -229,7 +229,6 @@ function fkToRelationName(
  * Simple English pluralization rules.
  */
 
-
 // ============================================================================
 // Main Introspection Function
 // ============================================================================

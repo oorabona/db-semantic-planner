@@ -276,3 +276,66 @@ export class RelationNotFoundError extends Error {
 		Object.setPrototypeOf(this, RelationNotFoundError.prototype);
 	}
 }
+
+
+/**
+ * Error thrown when an operation is invalid or malformed.
+ *
+ * @example
+ * ```typescript
+ * orm.insert('users').values([]).execute();
+ * // Throws InvalidOperationError: No values provided for insert
+ * ```
+ */
+export class InvalidOperationError extends Error {
+	override readonly name = 'InvalidOperationError' as const;
+
+	/**
+	 * The operation that was attempted.
+	 */
+	readonly operation: string;
+
+	/**
+	 * The reason the operation is invalid.
+	 */
+	readonly reason: string;
+
+	constructor(operation: string, reason: string) {
+		const message = `Invalid ${operation}: ${reason}`;
+		super(message);
+		this.operation = operation;
+		this.reason = reason;
+		Object.setPrototypeOf(this, InvalidOperationError.prototype);
+	}
+}
+
+/**
+ * Error thrown when an operation is potentially unsafe and requires explicit confirmation.
+ *
+ * @example
+ * ```typescript
+ * orm.update('users').set({ active: false }).execute();
+ * // Throws UnsafeOperationError: WHERE clause required
+ * ```
+ */
+export class UnsafeOperationError extends Error {
+	override readonly name = 'UnsafeOperationError' as const;
+
+	/**
+	 * The operation that was attempted.
+	 */
+	readonly operation: string;
+
+	/**
+	 * How to make the operation safe or explicit.
+	 */
+	readonly fix: string;
+
+	constructor(operation: string, fix: string) {
+		const message = `Unsafe ${operation}: ${fix}`;
+		super(message);
+		this.operation = operation;
+		this.fix = fix;
+		Object.setPrototypeOf(this, UnsafeOperationError.prototype);
+	}
+}

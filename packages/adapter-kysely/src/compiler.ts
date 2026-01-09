@@ -5,8 +5,10 @@
 
 import type {
 	AggregateIntent,
+	DeleteIntent,
 	EmitJoinClause,
 	ExpressionIntent,
+	InsertIntent,
 	ModelIR,
 	PlanReport,
 	QueryIntent,
@@ -16,6 +18,7 @@ import type {
 	RecursiveTrackOptions,
 	SelectAggregateIntent,
 	SelectWithExpressionsIntent,
+	UpdateIntent,
 	WhereIntent,
 } from '@db-semantic-planner/core';
 import {
@@ -226,6 +229,189 @@ export function compile(
 	}
 
 	return query.compile();
+}
+
+// ============================================================================
+// Mutation Compilers (DX-010)
+// ============================================================================
+
+/**
+ * Compile an InsertIntent into a Kysely CompiledQuery.
+ * Supports single and bulk inserts with multi-tenant schema prefix.
+ */
+export function compileInsert(
+	intent: InsertIntent,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	kysely: Kysely<any>,
+	schemaName?: string,
+): CompiledQuery {
+	const tableName = schemaName ? `${schemaName}.${intent.table}` : intent.table;
+
+	// Build the INSERT query
+	const query = kysely.insertInto(tableName).values(intent.values as Record<string, unknown>[]);
+
+	return query.compile();
+}
+
+/**
+ * Compile an UpdateIntent into a Kysely CompiledQuery.
+ * Requires WHERE clause unless allowAll is explicitly true.
+ */
+export function compileUpdate(
+	intent: UpdateIntent,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	kysely: Kysely<any>,
+	schemaName?: string,
+): CompiledQuery {
+	// Safety check: require WHERE unless allowAll is true
+	if (!intent.where && !intent.allowAll) {
+		throw new CompilationError(
+			'UPDATE without WHERE clause is unsafe. Use allowAll: true to explicitly allow.',
+		);
+	}
+
+	const tableName = schemaName ? `${schemaName}.${intent.table}` : intent.table;
+
+	// Build the UPDATE query
+	let query = kysely.updateTable(tableName).set(intent.set);
+
+	// Add WHERE clause if present
+	if (intent.where) {
+		query = addMutationWhere(query, intent.where);
+	}
+
+	return query.compile();
+}
+
+/**
+ * Compile a DeleteIntent into a Kysely CompiledQuery.
+ * Requires WHERE clause unless allowAll is explicitly true.
+ * Note: Cascade handling is application-level (not SQL CASCADE).
+ */
+export function compileDelete(
+	intent: DeleteIntent,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	kysely: Kysely<any>,
+	schemaName?: string,
+): CompiledQuery {
+	// Safety check: require WHERE unless allowAll is true
+	if (!intent.where && !intent.allowAll) {
+		throw new CompilationError(
+			'DELETE without WHERE clause is unsafe. Use allowAll: true to explicitly allow.',
+		);
+	}
+
+	const tableName = schemaName ? `${schemaName}.${intent.table}` : intent.table;
+
+	// Build the DELETE query
+	let query = kysely.deleteFrom(tableName);
+
+	// Add WHERE clause if present
+	if (intent.where) {
+		query = addMutationWhere(query, intent.where);
+	}
+
+	return query.compile();
+}
+
+/**
+ * Add WHERE clause to UPDATE/DELETE mutation queries.
+ * Simplified version that doesn't require table aliases.
+ */
+function addMutationWhere(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: any,
+	where: WhereIntent,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): any {
+	// Handle comparison operators
+	if ('kind' in where && where.kind === 'comparison') {
+		const w = where as {
+			kind: 'comparison';
+			field: string;
+			operator: string;
+			value: unknown;
+		};
+		switch (w.operator) {
+			case 'eq':
+				return query.where(w.field, '=', w.value);
+			case 'neq':
+				return query.where(w.field, '!=', w.value);
+			case 'gt':
+				return query.where(w.field, '>', w.value);
+			case 'gte':
+				return query.where(w.field, '>=', w.value);
+			case 'lt':
+				return query.where(w.field, '<', w.value);
+			case 'lte':
+				return query.where(w.field, '<=', w.value);
+			default:
+				return query;
+		}
+	}
+
+	// Handle like
+	if ('kind' in where && where.kind === 'like') {
+		const w = where as { kind: 'like'; field: string; pattern: string };
+		return query.where(w.field, 'like', w.pattern);
+	}
+
+	// Handle in
+	if ('kind' in where && where.kind === 'in') {
+		const w = where as { kind: 'in'; field: string; values: unknown[] };
+		return query.where(w.field, 'in', w.values);
+	}
+
+	// Handle null
+	if ('kind' in where && where.kind === 'null') {
+		const w = where as {
+			kind: 'null';
+			field: string;
+			operator: 'isNull' | 'isNotNull';
+		};
+		if (w.operator === 'isNull') {
+			return query.where(w.field, 'is', null);
+		}
+		return query.where(w.field, 'is not', null);
+	}
+
+	// Handle AND
+	if ('kind' in where && where.kind === 'and') {
+		const w = where as { kind: 'and'; conditions: WhereIntent[] };
+		let result = query;
+		for (const condition of w.conditions) {
+			result = addMutationWhere(result, condition);
+		}
+		return result;
+	}
+
+	// Handle OR - requires expression builder for proper grouping
+	if ('kind' in where && where.kind === 'or') {
+		const w = where as { kind: 'or'; conditions: WhereIntent[] };
+		// biome-ignore lint/suspicious/noExplicitAny: Dynamic WHERE building
+		return (query as any).where((eb: any) => {
+			const ors = w.conditions.map((c) => {
+				if ('kind' in c && c.kind === 'comparison') {
+					const cmp = c as {
+						kind: 'comparison';
+						field: string;
+						operator: string;
+						value: unknown;
+					};
+					if (cmp.operator === 'eq') return eb(cmp.field, '=', cmp.value);
+					if (cmp.operator === 'neq') return eb(cmp.field, '!=', cmp.value);
+					if (cmp.operator === 'gt') return eb(cmp.field, '>', cmp.value);
+					if (cmp.operator === 'gte') return eb(cmp.field, '>=', cmp.value);
+					if (cmp.operator === 'lt') return eb(cmp.field, '<', cmp.value);
+					if (cmp.operator === 'lte') return eb(cmp.field, '<=', cmp.value);
+				}
+				return eb.lit(true); // Fallback
+			});
+			return eb.or(ors);
+		});
+	}
+
+	return query;
 }
 
 // ============================================================================

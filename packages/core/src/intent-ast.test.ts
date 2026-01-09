@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type {
 	AggregateIntent,
+	DeleteIntent,
 	IncludeIntent,
+	InsertIntent,
+	MutationIntent,
 	OrderByIntent,
 	QueryIntent,
 	SelectAggregateIntent,
 	SelectAllIntent,
 	SelectFieldsIntent,
 	SelectIntent,
+	UpdateIntent,
 	WhereAndIntent,
 	WhereComparisonIntent,
 	WhereExistsIntent,
@@ -21,9 +25,13 @@ import type {
 	WhereRelationFilterIntent,
 } from './intent-ast.js';
 import {
+	isDeleteIntent,
+	isInsertIntent,
+	isMutationIntent,
 	isSelectAggregate,
 	isSelectAll,
 	isSelectFields,
+	isUpdateIntent,
 	isWhereAnd,
 	isWhereComparison,
 	isWhereExists,
@@ -745,6 +753,181 @@ describe('IntentAST', () => {
 
 			expect(query.groupBy).toEqual(['category_id']);
 			expect(query.select?.type).toBe('aggregate');
+		});
+	});
+
+	// =========================================================================
+	// Mutation Intents (DX-010)
+	// =========================================================================
+
+	describe('InsertIntent', () => {
+		it('should represent single row insert', () => {
+			const insert: InsertIntent = {
+				type: 'insert',
+				table: 'users',
+				values: [{ name: 'Alice', email: 'alice@test.com' }],
+			};
+
+			expect(insert.type).toBe('insert');
+			expect(insert.table).toBe('users');
+			expect(insert.values).toHaveLength(1);
+			expect(insert.values[0]).toEqual({ name: 'Alice', email: 'alice@test.com' });
+		});
+
+		it('should represent bulk insert', () => {
+			const insert: InsertIntent = {
+				type: 'insert',
+				table: 'users',
+				values: [
+					{ name: 'Alice' },
+					{ name: 'Bob' },
+					{ name: 'Charlie' },
+				],
+			};
+
+			expect(insert.values).toHaveLength(3);
+		});
+
+		it('should be identified by type guard', () => {
+			const insert: MutationIntent = {
+				type: 'insert',
+				table: 'users',
+				values: [{ name: 'Test' }],
+			};
+
+			expect(isInsertIntent(insert)).toBe(true);
+			expect(isUpdateIntent(insert)).toBe(false);
+			expect(isDeleteIntent(insert)).toBe(false);
+			expect(isMutationIntent(insert)).toBe(true);
+		});
+	});
+
+	describe('UpdateIntent', () => {
+		it('should represent update with where clause', () => {
+			const update: UpdateIntent = {
+				type: 'update',
+				table: 'users',
+				set: { name: 'Bob', active: true },
+				where: {
+					kind: 'comparison',
+					field: 'id',
+					operator: 'eq',
+					value: 1,
+				},
+			};
+
+			expect(update.type).toBe('update');
+			expect(update.table).toBe('users');
+			expect(update.set).toEqual({ name: 'Bob', active: true });
+			expect(update.where?.kind).toBe('comparison');
+		});
+
+		it('should support allowAll for full-table updates', () => {
+			const update: UpdateIntent = {
+				type: 'update',
+				table: 'users',
+				set: { active: false },
+				allowAll: true,
+			};
+
+			expect(update.allowAll).toBe(true);
+			expect(update.where).toBeUndefined();
+		});
+
+		it('should be identified by type guard', () => {
+			const update: MutationIntent = {
+				type: 'update',
+				table: 'users',
+				set: { name: 'Test' },
+			};
+
+			expect(isUpdateIntent(update)).toBe(true);
+			expect(isInsertIntent(update)).toBe(false);
+			expect(isDeleteIntent(update)).toBe(false);
+			expect(isMutationIntent(update)).toBe(true);
+		});
+	});
+
+	describe('DeleteIntent', () => {
+		it('should represent delete with where clause', () => {
+			const del: DeleteIntent = {
+				type: 'delete',
+				table: 'users',
+				where: {
+					kind: 'comparison',
+					field: 'id',
+					operator: 'eq',
+					value: 1,
+				},
+			};
+
+			expect(del.type).toBe('delete');
+			expect(del.table).toBe('users');
+			expect(del.where?.kind).toBe('comparison');
+		});
+
+		it('should support allowAll for full-table deletes', () => {
+			const del: DeleteIntent = {
+				type: 'delete',
+				table: 'users',
+				allowAll: true,
+			};
+
+			expect(del.allowAll).toBe(true);
+			expect(del.where).toBeUndefined();
+		});
+
+		it('should support cascade: true for all relations', () => {
+			const del: DeleteIntent = {
+				type: 'delete',
+				table: 'users',
+				where: { kind: 'comparison', field: 'id', operator: 'eq', value: 1 },
+				cascade: true,
+			};
+
+			expect(del.cascade).toBe(true);
+		});
+
+		it('should support cascade with specific relations', () => {
+			const del: DeleteIntent = {
+				type: 'delete',
+				table: 'users',
+				where: { kind: 'comparison', field: 'id', operator: 'eq', value: 1 },
+				cascade: ['posts', 'comments'],
+			};
+
+			expect(del.cascade).toEqual(['posts', 'comments']);
+		});
+
+		it('should be identified by type guard', () => {
+			const del: MutationIntent = {
+				type: 'delete',
+				table: 'users',
+			};
+
+			expect(isDeleteIntent(del)).toBe(true);
+			expect(isInsertIntent(del)).toBe(false);
+			expect(isUpdateIntent(del)).toBe(false);
+			expect(isMutationIntent(del)).toBe(true);
+		});
+	});
+
+	describe('MutationIntent type guard', () => {
+		it('should identify all mutation types', () => {
+			const insert: MutationIntent = { type: 'insert', table: 'users', values: [{}] };
+			const update: MutationIntent = { type: 'update', table: 'users', set: {} };
+			const del: MutationIntent = { type: 'delete', table: 'users' };
+
+			expect(isMutationIntent(insert)).toBe(true);
+			expect(isMutationIntent(update)).toBe(true);
+			expect(isMutationIntent(del)).toBe(true);
+		});
+
+		it('should not identify query intents as mutations', () => {
+			const query: QueryIntent = { type: 'select', from: 'users' };
+
+			// @ts-expect-error - Testing runtime behavior
+			expect(isMutationIntent(query)).toBe(false);
 		});
 	});
 });

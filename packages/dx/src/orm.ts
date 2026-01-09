@@ -28,6 +28,11 @@ import {
 	NotFoundError,
 } from './errors.js';
 import { and, eq, inArray } from './filters.js';
+import {
+	DeleteBuilder,
+	InsertBuilder,
+	UpdateBuilder,
+} from './mutation-builders.js';
 import { RecursiveQueryBuilder } from './recursive-query-builder.js';
 import type {
 	AggregateOptions,
@@ -193,6 +198,57 @@ function createOrmInstance(
 				.nodeId(nodeId)
 				.where(eq(nodeId, nodeIdValue))
 				.traverseVia(table, { parentId: options.parentId, direction: 'descendants' });
+		},
+
+		// =====================================================================
+		// Mutation Methods (DX-010)
+		// =====================================================================
+
+		insert(table: string): InsertBuilder {
+			return new InsertBuilder({
+				table,
+				model,
+				db,
+				schemaName,
+			});
+		},
+
+		update(table: string): UpdateBuilder {
+			return new UpdateBuilder({
+				table,
+				model,
+				db,
+				schemaName,
+			});
+		},
+
+		delete(table: string): DeleteBuilder {
+			return new DeleteBuilder({
+				table,
+				model,
+				db,
+				schemaName,
+			});
+		},
+
+		updateAll(table: string): UpdateBuilder {
+			return new UpdateBuilder({
+				table,
+				model,
+				db,
+				schemaName,
+				allowAll: true,
+			});
+		},
+
+		deleteAll(table: string): DeleteBuilder {
+			return new DeleteBuilder({
+				table,
+				model,
+				db,
+				schemaName,
+				allowAll: true,
+			});
 		},
 	};
 }

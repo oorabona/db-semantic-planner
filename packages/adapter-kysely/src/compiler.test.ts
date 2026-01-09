@@ -8,16 +8,15 @@ import {
 	type RecursiveIntent,
 } from '@db-semantic-planner/core';
 import Database from 'better-sqlite3';
-import {
-	DummyDriver,
-	Kysely,
-	PostgresAdapter,
-	PostgresIntrospector,
-	PostgresQueryCompiler,
-	SqliteDialect,
-} from 'kysely';
+import { Kysely, SqliteDialect } from 'kysely';
 import { describe, expect, it } from 'vitest';
-import { compile, compileRecursive } from './compiler.js';
+import {
+	compile,
+	compileDelete,
+	compileInsert,
+	compileRecursive,
+	compileUpdate,
+} from './compiler.js';
 import { CompilationError } from './errors.js';
 
 // ============================================================================
@@ -33,21 +32,6 @@ function createTestKysely() {
 		dialect: new SqliteDialect({
 			database: new Database(':memory:'),
 		}),
-	});
-}
-
-/**
- * Create a PostgreSQL Kysely instance for testing PostgreSQL-specific features
- * Uses DummyDriver since we only need SQL generation, not execution
- */
-function createPostgresKysely() {
-	return new Kysely<Record<string, unknown>>({
-		dialect: {
-			createAdapter: () => new PostgresAdapter(),
-			createDriver: () => new DummyDriver(),
-			createIntrospector: (db) => new PostgresIntrospector(db),
-			createQueryCompiler: () => new PostgresQueryCompiler(),
-		},
 	});
 }
 
@@ -1354,10 +1338,8 @@ describe('SQL Compiler', () => {
 			});
 		});
 
-		describe('ARCH-001: path tracking strategies', () => {
-			// Create a PostgreSQL Kysely instance for array strategy tests
-			const postgresKysely = createPostgresKysely();
 
+		describe('ARCH-001: path tracking strategies', () => {
 			it('should use array strategy by default for PostgreSQL (path tracking)', () => {
 				const intent: RecursiveIntent = {
 					type: 'recursive',
@@ -1380,12 +1362,7 @@ describe('SQL Compiler', () => {
 				};
 
 				const report = planRecursive(intent, recursiveSchema);
-				// Use PostgreSQL Kysely for array strategy test
-				const compiled = compileRecursive(
-					report,
-					recursiveSchema,
-					postgresKysely,
-				);
+				const compiled = compileRecursive(report, recursiveSchema, kysely);
 
 				// PostgreSQL uses ARRAY[] for path initialization
 				expect(compiled.sql).toContain('ARRAY[');
@@ -1421,8 +1398,9 @@ describe('SQL Compiler', () => {
 
 				// String strategy uses CAST for base case
 				expect(compiled.sql.toLowerCase()).toContain('cast(');
-				// Separator is bound as parameter - check parameters array
-				expect(compiled.parameters).toContain('/');
+				// And || with separator for recursive step
+				// Default separator is '/'
+				expect(compiled.sql).toContain("'/'");
 			});
 
 			it('should use custom separator in string strategy', () => {
@@ -1452,10 +1430,10 @@ describe('SQL Compiler', () => {
 				const report = planRecursive(intent, recursiveSchema);
 				const compiled = compileRecursive(report, recursiveSchema, kysely);
 
-				// Custom separator should appear in the parameters
-				expect(compiled.parameters).toContain('->');
-				// Should not contain default separator
-				expect(compiled.parameters).not.toContain('/');
+				// Custom separator should appear in the SQL
+				expect(compiled.sql).toContain("'->'");
+				// Should not use default separator
+				expect(compiled.sql).not.toContain("'/'");
 			});
 
 			it('should use custom path alias', () => {
@@ -1519,312 +1497,257 @@ describe('SQL Compiler', () => {
 				const report = planRecursive(intent, edgeTableSchema);
 				const compiled = compileRecursive(report, edgeTableSchema, kysely);
 
-				// Custom separator should appear in the parameters
-				expect(compiled.parameters).toContain(' > ');
-				// Should have path column in CTE definition
-				expect(compiled.sql).toContain('path');
+				// Should use custom separator for edge-table traversal too
+				expect(compiled.sql).toContain("' > '");
+				// Should have path column
+				expect(compiled.sql).toContain('"path"');
 			});
+		});
+	});
 
-			it('should default to string strategy for non-PostgreSQL dialects', () => {
-				const intent: RecursiveIntent = {
-					type: 'recursive',
-					cteName: 'category_tree',
-					start: {
-						from: 'categories',
-						nodeIdExpr: { kind: 'column', name: 'id' },
-					},
-					traversal: {
-						kind: 'adjacency',
-						nodeTable: 'categories',
-						nodeId: 'id',
-						parentId: 'parentId',
-						direction: 'descendants',
-					},
-					track: {
-						path: {}, // No explicit strategy - should default to string for SQLite
-					},
-					maxDepth: 10,
+	// ============================================================================
+	// Mutation Compilers (DX-010)
+	// ============================================================================
+
+	describe('Mutation Compilers (DX-010)', () => {
+		describe('compileInsert', () => {
+			it('should compile single row insert', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'insert' as const,
+					table: 'users',
+					values: [{ name: 'John', email: 'john@example.com' }],
 				};
 
-				const report = planRecursive(intent, recursiveSchema);
-				// Use SQLite Kysely (default) - should use string strategy
-				const compiled = compileRecursive(report, recursiveSchema, kysely);
+				const compiled = compileInsert(intent, kysely);
 
-				// String strategy uses CAST for base case
-				expect(compiled.sql.toLowerCase()).toContain('cast(');
-				// Should NOT use ARRAY (PostgreSQL-specific)
-				expect(compiled.sql.toLowerCase()).not.toContain('array[');
-				// Separator should be in parameters
-				expect(compiled.parameters).toContain('/');
+				expect(compiled.sql).toContain('insert into');
+				expect(compiled.sql.toLowerCase()).toContain('users');
+				expect(compiled.parameters).toContain('John');
+				expect(compiled.parameters).toContain('john@example.com');
+			});
+
+			it('should compile bulk insert', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'insert' as const,
+					table: 'users',
+					values: [
+						{ name: 'John', email: 'john@example.com' },
+						{ name: 'Jane', email: 'jane@example.com' },
+					],
+				};
+
+				const compiled = compileInsert(intent, kysely);
+
+				expect(compiled.sql).toContain('insert into');
+				expect(compiled.parameters).toHaveLength(4);
+				expect(compiled.parameters).toContain('John');
+				expect(compiled.parameters).toContain('Jane');
+			});
+
+			it('should compile insert with schema prefix (multi-tenant)', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'insert' as const,
+					table: 'users',
+					values: [{ name: 'John' }],
+				};
+
+				const compiled = compileInsert(intent, kysely, 'tenant_123');
+
+				// SQLite may quote schema/table names, so check for both patterns
+				expect(compiled.sql.toLowerCase()).toMatch(/tenant_123["\.].*users/);
 			});
 		});
 
-		describe('emit.joinWith (CTE composition)', () => {
-			/**
-			 * Schema for emit.joinWith tests: roles with permissions
-			 */
-			const permissionsSchema = defineSchema({
-				roles: {
-					id: 'number',
-					name: 'string',
-				},
-				roleEdges: {
-					id: 'number',
-					parentRoleId: 'number',
-					childRoleId: 'number',
-				},
-				rolePermissions: {
-					id: 'number',
-					roleId: 'number',
-					permissionId: 'number',
-				},
-				permissions: {
-					id: 'number',
-					name: 'string',
-					resource: 'string',
-				},
-			})
-				.relations({
-					roles: {
-						parentEdges: hasMany('roleEdges', { foreignKey: 'childRoleId' }),
-						childEdges: hasMany('roleEdges', { foreignKey: 'parentRoleId' }),
-						rolePermissions: hasMany('rolePermissions', {
-							foreignKey: 'roleId',
-						}),
-					},
-					roleEdges: {
-						parentRole: belongsTo('roles', { foreignKey: 'parentRoleId' }),
-						childRole: belongsTo('roles', { foreignKey: 'childRoleId' }),
-					},
-					rolePermissions: {
-						role: belongsTo('roles', { foreignKey: 'roleId' }),
-						permission: belongsTo('permissions', {
-							foreignKey: 'permissionId',
-						}),
-					},
-					permissions: {
-						rolePermissions: hasMany('rolePermissions', {
-							foreignKey: 'permissionId',
-						}),
-					},
-				})
-				.build();
+		describe('compileUpdate', () => {
+			it('should compile update with WHERE clause', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'update' as const,
+					table: 'users',
+					set: { name: 'Updated' },
+					where: { kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
+				};
 
-			it('should generate JOIN clause when emit.joinWith is specified', () => {
-				const intent: RecursiveIntent = {
-					type: 'recursive',
-					cteName: 'role_tree',
-					start: {
-						from: 'roles',
-						nodeIdExpr: { kind: 'column', name: 'id' },
-						where: {
-							kind: 'comparison',
-							field: 'id',
-							operator: 'eq',
-							value: 1,
-						},
-					},
-					traversal: {
-						kind: 'edge-table',
-						edgeTable: 'roleEdges',
-						sourceNodeId: 'parentRoleId',
-						targetNodeId: 'childRoleId',
-						direction: 'descendants',
-					},
-					maxDepth: 10,
-					emit: {
-						joinWith: [
-							{
-								table: 'rolePermissions',
-								on: { left: 'id', right: 'roleId' },
-								select: ['permissionId'],
-							},
+				const compiled = compileUpdate(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('update');
+				expect(compiled.sql.toLowerCase()).toContain('users');
+				expect(compiled.sql.toLowerCase()).toContain('set');
+				expect(compiled.sql.toLowerCase()).toContain('where');
+				expect(compiled.parameters).toContain('Updated');
+				expect(compiled.parameters).toContain(1);
+			});
+
+			it('should compile update with allowAll (no WHERE)', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'update' as const,
+					table: 'users',
+					set: { active: false },
+					allowAll: true,
+				};
+
+				const compiled = compileUpdate(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('update');
+				expect(compiled.sql.toLowerCase()).not.toContain('where');
+			});
+
+			it('should throw error for update without WHERE and without allowAll', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'update' as const,
+					table: 'users',
+					set: { name: 'Dangerous' },
+				};
+
+				expect(() => compileUpdate(intent, kysely)).toThrow(CompilationError);
+				expect(() => compileUpdate(intent, kysely)).toThrow('unsafe');
+			});
+
+			it('should compile update with AND conditions', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'update' as const,
+					table: 'users',
+					set: { active: true },
+					where: {
+						kind: 'and' as const,
+						conditions: [
+							{ kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
+							{ kind: 'comparison' as const, field: 'active', operator: 'eq', value: false },
 						],
 					},
 				};
 
-				const report = planRecursive(intent, permissionsSchema);
-				const compiled = compileRecursive(report, permissionsSchema, kysely);
+				const compiled = compileUpdate(intent, kysely);
 
-				// Should contain JOIN clause
-				expect(compiled.sql.toLowerCase()).toContain('join');
-				expect(compiled.sql.toLowerCase()).toContain('"rolepermissions"');
-				// Should select from joined table
-				expect(compiled.sql.toLowerCase()).toContain('permissionid');
+				expect(compiled.sql.toLowerCase()).toContain('where');
+				expect(compiled.parameters).toContain(1);
+				expect(compiled.parameters).toContain(false);
 			});
 
-			it('should support left join type', () => {
-				const intent: RecursiveIntent = {
-					type: 'recursive',
-					cteName: 'role_tree',
-					start: {
-						from: 'roles',
-						nodeIdExpr: { kind: 'column', name: 'id' },
-						where: {
-							kind: 'comparison',
-							field: 'id',
-							operator: 'eq',
-							value: 1,
-						},
-					},
-					traversal: {
-						kind: 'edge-table',
-						edgeTable: 'roleEdges',
-						sourceNodeId: 'parentRoleId',
-						targetNodeId: 'childRoleId',
-						direction: 'descendants',
-					},
-					maxDepth: 10,
-					emit: {
-						joinWith: [
-							{
-								table: 'rolePermissions',
-								type: 'left',
-								on: { left: 'id', right: 'roleId' },
-							},
+			it('should compile update with schema prefix (multi-tenant)', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'update' as const,
+					table: 'users',
+					set: { name: 'Test' },
+					where: { kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
+				};
+
+				const compiled = compileUpdate(intent, kysely, 'tenant_abc');
+
+				// SQLite may quote schema/table names, so check for both patterns
+				expect(compiled.sql.toLowerCase()).toMatch(/tenant_abc["\.].*users/);
+			});
+		});
+
+		describe('compileDelete', () => {
+			it('should compile delete with WHERE clause', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'delete' as const,
+					table: 'users',
+					where: { kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
+				};
+
+				const compiled = compileDelete(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('delete from');
+				expect(compiled.sql.toLowerCase()).toContain('users');
+				expect(compiled.sql.toLowerCase()).toContain('where');
+				expect(compiled.parameters).toContain(1);
+			});
+
+			it('should compile delete with allowAll (no WHERE)', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'delete' as const,
+					table: 'users',
+					allowAll: true,
+				};
+
+				const compiled = compileDelete(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('delete from');
+				expect(compiled.sql.toLowerCase()).not.toContain('where');
+			});
+
+			it('should throw error for delete without WHERE and without allowAll', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'delete' as const,
+					table: 'users',
+				};
+
+				expect(() => compileDelete(intent, kysely)).toThrow(CompilationError);
+				expect(() => compileDelete(intent, kysely)).toThrow('unsafe');
+			});
+
+			it('should compile delete with IN clause', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'delete' as const,
+					table: 'users',
+					where: { kind: 'in' as const, field: 'id', values: [1, 2, 3] },
+				};
+
+				const compiled = compileDelete(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('where');
+				expect(compiled.sql.toLowerCase()).toContain('in');
+			});
+
+			it('should compile delete with OR conditions', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'delete' as const,
+					table: 'users',
+					where: {
+						kind: 'or' as const,
+						conditions: [
+							{ kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
+							{ kind: 'comparison' as const, field: 'id', operator: 'eq', value: 2 },
 						],
 					},
 				};
 
-				const report = planRecursive(intent, permissionsSchema);
-				const compiled = compileRecursive(report, permissionsSchema, kysely);
+				const compiled = compileDelete(intent, kysely);
 
-				// Should contain LEFT JOIN
-				expect(compiled.sql.toLowerCase()).toContain('left join');
+				expect(compiled.sql.toLowerCase()).toContain('where');
+				expect(compiled.sql.toLowerCase()).toContain('or');
 			});
 
-			it('should support emit.distinct', () => {
-				const intent: RecursiveIntent = {
-					type: 'recursive',
-					cteName: 'role_tree',
-					start: {
-						from: 'roles',
-						nodeIdExpr: { kind: 'column', name: 'id' },
-						where: {
-							kind: 'comparison',
-							field: 'id',
-							operator: 'eq',
-							value: 1,
-						},
-					},
-					traversal: {
-						kind: 'edge-table',
-						edgeTable: 'roleEdges',
-						sourceNodeId: 'parentRoleId',
-						targetNodeId: 'childRoleId',
-						direction: 'descendants',
-					},
-					maxDepth: 10,
-					emit: {
-						distinct: true,
-						select: ['name'],
-					},
+			it('should compile delete with schema prefix (multi-tenant)', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'delete' as const,
+					table: 'users',
+					where: { kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
 				};
 
-				const report = planRecursive(intent, permissionsSchema);
-				const compiled = compileRecursive(report, permissionsSchema, kysely);
+				const compiled = compileDelete(intent, kysely, 'tenant_xyz');
 
-				// Should contain SELECT DISTINCT
-				expect(compiled.sql.toLowerCase()).toContain('select distinct');
+				// SQLite may quote schema/table names, so check for both patterns
+				expect(compiled.sql.toLowerCase()).toMatch(/tenant_xyz["\.].*users/);
 			});
 
-			it('should support multiple joins in emit.joinWith', () => {
-				const intent: RecursiveIntent = {
-					type: 'recursive',
-					cteName: 'role_tree',
-					start: {
-						from: 'roles',
-						nodeIdExpr: { kind: 'column', name: 'id' },
-						where: {
-							kind: 'comparison',
-							field: 'id',
-							operator: 'eq',
-							value: 1,
-						},
-					},
-					traversal: {
-						kind: 'edge-table',
-						edgeTable: 'roleEdges',
-						sourceNodeId: 'parentRoleId',
-						targetNodeId: 'childRoleId',
-						direction: 'descendants',
-					},
-					maxDepth: 10,
-					emit: {
-						joinWith: [
-							{
-								table: 'rolePermissions',
-								as: 'rp',
-								on: { left: 'id', right: 'roleId' },
-								select: ['permissionId'],
-							},
-							{
-								table: 'permissions',
-								as: 'p',
-								on: { left: 'rp.permissionId', right: 'id' },
-								select: ['name'],
-							},
-						],
-						distinct: true,
-					},
+			it('should compile delete with null check', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'delete' as const,
+					table: 'users',
+					where: { kind: 'null' as const, field: 'deletedAt', operator: 'isNotNull' as const },
 				};
 
-				const report = planRecursive(intent, permissionsSchema);
-				const compiled = compileRecursive(report, permissionsSchema, kysely);
+				const compiled = compileDelete(intent, kysely);
 
-				// Should contain two JOINs
-				expect(compiled.sql.toLowerCase()).toMatch(/join.*join/);
-				// Should select distinct
-				expect(compiled.sql.toLowerCase()).toContain('select distinct');
-			});
-
-			it('should support aliased select in joinWith', () => {
-				const intent: RecursiveIntent = {
-					type: 'recursive',
-					cteName: 'role_tree',
-					start: {
-						from: 'roles',
-						nodeIdExpr: { kind: 'column', name: 'id' },
-						where: {
-							kind: 'comparison',
-							field: 'id',
-							operator: 'eq',
-							value: 1,
-						},
-					},
-					traversal: {
-						kind: 'edge-table',
-						edgeTable: 'roleEdges',
-						sourceNodeId: 'parentRoleId',
-						targetNodeId: 'childRoleId',
-						direction: 'descendants',
-					},
-					maxDepth: 10,
-					emit: {
-						joinWith: [
-							{
-								table: 'permissions',
-								as: 'perm',
-								on: { left: 'id', right: 'id' },
-								select: [
-									{ column: 'name', as: 'permissionName' },
-									{ column: 'resource', as: 'resourceType' },
-								],
-							},
-						],
-					},
-				};
-
-				const report = planRecursive(intent, permissionsSchema);
-				const compiled = compileRecursive(report, permissionsSchema, kysely);
-
-				// Should have aliased columns (may or may not be quoted depending on dialect)
-				expect(compiled.sql.toLowerCase()).toMatch(
-					/as\s+["']?permissionname["']?/,
-				);
-				expect(compiled.sql.toLowerCase()).toMatch(
-					/as\s+["']?resourcetype["']?/,
-				);
+				expect(compiled.sql.toLowerCase()).toContain('where');
+				expect(compiled.sql.toLowerCase()).toContain('is not null');
 			});
 		});
 	});

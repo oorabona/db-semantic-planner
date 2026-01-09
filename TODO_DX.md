@@ -21,38 +21,43 @@ This is a LEAF package (nothing depends on it)
 
 ## Pending - P2
 
-### DX-007: Actionable Error Messages ✅ (2026-01-09)
-
-Améliorer les messages d'erreur pour guider l'utilisateur vers la solution.
-
-- [x] ✅ `ExecutionError` avec operation, reason, fix
-- [x] ✅ `NotFoundError` avec hint optionnel
-- [x] ✅ `AmbiguousRelationError` avec exemples de code pour fix
-- [x] ✅ `RelationNotFoundError` (NEW) avec:
-  - Liste des relations disponibles
-  - Suggestion "Did you mean 'X'?" (fuzzy match Levenshtein)
-- [x] ✅ 21 tests (9 nouveaux pour RelationNotFoundError)
-
-**Effort:** S
+(none)
 
 ---
 
-### DX-008: API Shortcuts (byId, dot notation include) ✅ (2026-01-09)
+## Completed
 
-Raccourcis pour les cas d'usage fréquents.
+### DX-010: Mutations (insert/update/delete) ✅ (2026-01-09)
 
-- [x] ✅ `byId(value)` - raccourci pour `where(eq('id', value)).findFirst()`
-  - Support PK simple: `byId(42)`
-  - Support PK composite: `byId({ orderId: 1, productId: 42 })`
-- [x] ✅ `byIdOrThrow(value)` - throws NotFoundError if not found
-- [x] ✅ `byIds(values)` - raccourci pour `where(inArray('id', values)).findMany()`
-  - Handles empty array gracefully (returns [])
-- [x] ✅ Dot notation pour include nested: `.include('posts.comments.author')`
-  - Options applied to deepest level
-- [x] ✅ Fluent chaining alternatif: `.include('posts').include('posts.comments')`
-- [x] ✅ 13 unit tests
+**Spec:** [docs/specs/DX-010-mutations.md](docs/specs/DX-010-mutations.md)
 
-**Effort:** S
+Full mutation support for insert/update/delete with safety guards and observability.
+
+- [x] ✅ Block 1: Core Intent Types (InsertIntent, UpdateIntent, DeleteIntent)
+  - 13 new tests in core
+- [x] ✅ Block 2: Adapter Mutation Compiler
+  - `compileInsert()`, `compileUpdate()`, `compileDelete()` in adapter-kysely
+  - Safety guards: WHERE required unless allowAll=true
+  - Multi-tenant schema prefix support
+  - 17 new tests in adapter-kysely
+- [x] ✅ Block 3: DX Insert Builder
+  - `InsertBuilder` with `values()`, `dump()`, `execute()`
+  - Immutable builder pattern
+  - `InvalidOperationError` for empty values
+- [x] ✅ Block 4: DX Update Builder
+  - `UpdateBuilder` with `set()`, `where()`, `dump()`, `execute()`
+  - Safety guard: `UnsafeOperationError` without WHERE
+  - `orm.updateAll()` factory for explicit full-table updates
+- [x] ✅ Block 5: DX Delete Builder
+  - `DeleteBuilder` with `where()`, `cascade()`, `dump()`, `execute()`
+  - Safety guard: `UnsafeOperationError` without WHERE
+  - `orm.deleteAll()` factory for explicit full-table deletes
+- [x] ✅ Block 6: Multi-tenant Mutations
+  - Schema prefix in INSERT/UPDATE/DELETE via `forTenant()`
+  - `MutationDump.meta.tenant` for observability
+- [x] ✅ 34 new tests in dx (mutation-builders.test.ts)
+
+**Effort:** L
 
 ---
 
@@ -77,53 +82,40 @@ Intégrer RecursiveQueryBuilder directement dans l'ORM avec API plus intuitive.
 
 ---
 
-### DX-010: Mutations (insert/update/delete) 🟢 NORMAL
+### DX-008: API Shortcuts (byId, dot notation include) ✅ (2026-01-09)
 
-Ajouter le support des mutations tout en conservant la philosophie intent-first.
+Raccourcis pour les cas d'usage fréquents.
 
-**API proposée:**
-```typescript
-orm.insert('users').values({ name: 'Alice' });
-orm.insert('users').values([{ name: 'A' }, { name: 'B' }]);  // Bulk
+- [x] ✅ `byId(value)` - raccourci pour `where(eq('id', value)).findFirst()`
+  - Support PK simple: `byId(42)`
+  - Support PK composite: `byId({ orderId: 1, productId: 42 })`
+- [x] ✅ `byIdOrThrow(value)` - throws NotFoundError if not found
+- [x] ✅ `byIds(values)` - raccourci pour `where(inArray('id', values)).findMany()`
+  - Handles empty array gracefully (returns [])
+- [x] ✅ Dot notation pour include nested: `.include('posts.comments.author')`
+  - Options applied to deepest level
+- [x] ✅ Fluent chaining alternatif: `.include('posts').include('posts.comments')`
+- [x] ✅ 13 unit tests
 
-orm.update('users').where(eq('id', 1)).set({ name: 'Bob' });
-
-orm.delete('users').where(eq('id', 1));
-```
-
-**Observabilité (dump):**
-```typescript
-const dump = orm.insert('users').values({...}).dump();
-// → { sql, params, plan }
-```
-
-**Cascade explicite (option ou méthode):**
-```typescript
-// Option 1: méthode fluent
-orm.delete('users').where(eq('id', 1)).cascade();
-
-// Option 2: option explicite
-orm.delete('users').where(eq('id', 1)).execute({ cascade: true });
-
-// Option 3: relations explicites
-orm.delete('users').where(eq('id', 1)).cascade(['posts', 'comments']);
-```
-
-**Ce qu'on NE fait PAS:**
-- Migrations (Kysely/Prisma/Drizzle le font déjà)
-- Change tracking / Unit of Work
-- Cascade automatique (toujours explicite)
-
-**Multi-tenant:**
-```typescript
-orm.forTenant('acme').insert('users').values({...});
-```
-
-**Effort:** L
+**Effort:** S
 
 ---
 
-## Completed
+### DX-007: Actionable Error Messages ✅ (2026-01-09)
+
+Améliorer les messages d'erreur pour guider l'utilisateur vers la solution.
+
+- [x] ✅ `ExecutionError` avec operation, reason, fix
+- [x] ✅ `NotFoundError` avec hint optionnel
+- [x] ✅ `AmbiguousRelationError` avec exemples de code pour fix
+- [x] ✅ `RelationNotFoundError` (NEW) avec:
+  - Liste des relations disponibles
+  - Suggestion "Did you mean 'X'?" (fuzzy match Levenshtein)
+- [x] ✅ 21 tests (9 nouveaux pour RelationNotFoundError)
+
+**Effort:** S
+
+---
 
 ### DX-006: Zero-Config ORM ✅ (2026-01-08)
 

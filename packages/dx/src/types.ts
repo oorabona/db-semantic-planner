@@ -7,6 +7,11 @@ import type {
 	WhereIntent,
 } from '@db-semantic-planner/core';
 import type { Kysely } from 'kysely';
+import type {
+	DeleteBuilder,
+	InsertBuilder,
+	UpdateBuilder,
+} from './mutation-builders.js';
 import type { RecursiveQueryBuilder } from './recursive-query-builder.js';
 
 /**
@@ -774,6 +779,88 @@ export interface OrmInstance {
 		nodeIdValue: unknown,
 		options: HierarchyOptions,
 	): RecursiveQueryBuilder<TResult>;
+
+	// =========================================================================
+	// Mutation Methods (DX-010)
+	// =========================================================================
+
+	/**
+	 * Start building an INSERT operation.
+	 *
+	 * @param table - The table to insert into
+	 * @returns An InsertBuilder for constructing the insert
+	 *
+	 * @example
+	 * ```typescript
+	 * await orm.insert('users')
+	 *   .values({ name: 'John', email: 'john@example.com' })
+	 *   .execute();
+	 * ```
+	 */
+	insert(table: string): InsertBuilder;
+
+	/**
+	 * Start building an UPDATE operation.
+	 * Requires a WHERE clause unless using updateAll().
+	 *
+	 * @param table - The table to update
+	 * @returns An UpdateBuilder for constructing the update
+	 *
+	 * @example
+	 * ```typescript
+	 * await orm.update('users')
+	 *   .set({ active: false })
+	 *   .where(eq('id', 123))
+	 *   .execute();
+	 * ```
+	 */
+	update(table: string): UpdateBuilder;
+
+	/**
+	 * Start building a DELETE operation.
+	 * Requires a WHERE clause unless using deleteAll().
+	 *
+	 * @param table - The table to delete from
+	 * @returns A DeleteBuilder for constructing the delete
+	 *
+	 * @example
+	 * ```typescript
+	 * await orm.delete('users')
+	 *   .where(eq('id', 123))
+	 *   .execute();
+	 * ```
+	 */
+	delete(table: string): DeleteBuilder;
+
+	/**
+	 * Start building an UPDATE operation that affects all rows.
+	 * Use with caution - this explicitly allows updates without WHERE.
+	 *
+	 * @param table - The table to update
+	 * @returns An UpdateBuilder pre-configured for full-table update
+	 *
+	 * @example
+	 * ```typescript
+	 * await orm.updateAll('users')
+	 *   .set({ lastLoginCheck: new Date() })
+	 *   .execute();
+	 * ```
+	 */
+	updateAll(table: string): UpdateBuilder;
+
+	/**
+	 * Start building a DELETE operation that affects all rows.
+	 * Use with caution - this explicitly allows deletes without WHERE.
+	 *
+	 * @param table - The table to delete from
+	 * @returns A DeleteBuilder pre-configured for full-table delete
+	 *
+	 * @example
+	 * ```typescript
+	 * await orm.deleteAll('tempData').execute();
+	 * ```
+	 */
+	deleteAll(table: string): DeleteBuilder;
 }
 
 /**
