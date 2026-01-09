@@ -259,8 +259,8 @@ function convertOperatorObject(
 	}
 
 	if (conditions.length === 1) {
-		// Non-null assertion safe: length check guarantees element exists
-		return conditions[0]!;
+		// Type assertion safe: length check guarantees element exists
+		return conditions[0] as WhereIntent;
 	}
 
 	return { kind: 'and', conditions } satisfies WhereAndIntent;
@@ -302,8 +302,8 @@ export function objectToWhereIntent(
 
 	// Single condition → return directly
 	if (conditions.length === 1) {
-		// Non-null assertion safe: length check guarantees element exists
-		return conditions[0]!;
+		// Type assertion safe: length check guarantees element exists
+		return conditions[0] as WhereIntent;
 	}
 
 	// Multiple conditions → AND

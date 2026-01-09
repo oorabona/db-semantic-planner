@@ -5,7 +5,6 @@ import type {
 	PlanReport,
 	SelectIntent,
 	WhereIntent,
-	WindowFunction,
 } from '@db-semantic-planner/core';
 import type { Kysely } from 'kysely';
 import type {
@@ -84,38 +83,6 @@ export interface AggregateOptions {
 	 * Alias for the result column.
 	 */
 	readonly as?: string;
-}
-
-/**
- * Options for window functions (P3-A).
- * Used with the window() method to add window function expressions to SELECT.
- */
-export interface WindowOptions {
-	/**
-	 * Window function to apply.
-	 * Ranking: row_number, rank, dense_rank
-	 * Aggregate: sum, avg, count, min, max
-	 * Lead/Lag: lag, lead
-	 */
-	readonly function: WindowFunction;
-
-	/**
-	 * Field to aggregate (required for aggregate functions: sum, avg, count, min, max).
-	 * Not used for ranking functions (row_number, rank, dense_rank).
-	 */
-	readonly field?: string;
-
-	/**
-	 * Columns to partition by (PARTITION BY clause).
-	 * Results are computed within each partition.
-	 */
-	readonly partitionBy?: readonly string[];
-
-	/**
-	 * Ordering within the window (ORDER BY clause).
-	 * Required for ranking functions to determine row order.
-	 */
-	readonly orderBy?: readonly { field: string; direction?: 'asc' | 'desc' }[];
 }
 
 /**
@@ -417,47 +384,6 @@ export interface QueryBuilder<TResult = unknown> {
 	 * ```
 	 */
 	groupBy(fields: readonly string[]): QueryBuilder<TResult>;
-
-	/**
-	 * Add a window function to the SELECT clause (P3-A).
-	 *
-	 * Window functions compute values across a set of rows related to the current row.
-	 * They are useful for rankings, running totals, and moving averages.
-	 *
-	 * @param alias - Alias for the window function result column
-	 * @param options - Window function configuration
-	 * @returns A new QueryBuilder with the window function added
-	 *
-	 * @example
-	 * ```typescript
-	 * // Row number for pagination
-	 * orm.select('products')
-	 *   .window('row_num', {
-	 *     function: 'row_number',
-	 *     orderBy: [{ field: 'price', direction: 'desc' }]
-	 *   })
-	 *   .all();
-	 * // → SELECT *, ROW_NUMBER() OVER (ORDER BY "price" DESC) AS "row_num" FROM products
-	 *
-	 * // Running total partitioned by category
-	 * orm.select('sales')
-	 *   .window('running_total', {
-	 *     function: 'sum',
-	 *     field: 'amount',
-	 *     partitionBy: ['category_id'],
-	 *     orderBy: [{ field: 'date', direction: 'asc' }]
-	 *   })
-	 *   .all();
-	 * // → SELECT *, SUM("amount") OVER (PARTITION BY "category_id" ORDER BY "date" ASC) AS "running_total"
-	 *
-	 * // Multiple window functions (chained)
-	 * orm.select('employees')
-	 *   .window('rank', { function: 'rank', partitionBy: ['dept'], orderBy: [{ field: 'salary', direction: 'desc' }] })
-	 *   .window('avg_salary', { function: 'avg', field: 'salary', partitionBy: ['dept'] })
-	 *   .all();
-	 * ```
-	 */
-	window(alias: string, options: WindowOptions): QueryBuilder<TResult>;
 
 	/**
 	 * Sort results by one or more fields.
