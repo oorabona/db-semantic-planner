@@ -38,7 +38,8 @@ const testModel = defineSchema({
 // biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
 const mockKysely = new Kysely<any>({
 	dialect: {
-		createAdapter: () => new PostgresDialect({ pool: {} as any }).createAdapter(),
+		createAdapter: () =>
+			new PostgresDialect({ pool: {} as any }).createAdapter(),
 		createDriver: () =>
 			({
 				init: async () => {},
@@ -66,7 +67,7 @@ describe('P3-A: Window Functions DX API', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
-				.query('products')
+				.select('products')
 				.window('row_num', {
 					function: 'row_number',
 					orderBy: [{ field: 'price', direction: 'desc' }],
@@ -83,7 +84,7 @@ describe('P3-A: Window Functions DX API', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
-				.query('products')
+				.select('products')
 				.window('category_rank', {
 					function: 'rank',
 					partitionBy: ['categoryId'],
@@ -101,7 +102,7 @@ describe('P3-A: Window Functions DX API', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
-				.query('products')
+				.select('products')
 				.window('dense_rank', {
 					function: 'dense_rank',
 					orderBy: [{ field: 'createdAt' }],
@@ -115,7 +116,7 @@ describe('P3-A: Window Functions DX API', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
-				.query('sales')
+				.select('sales')
 				.window('running_total', {
 					function: 'sum',
 					field: 'amount',
@@ -134,7 +135,7 @@ describe('P3-A: Window Functions DX API', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
-				.query('employees')
+				.select('employees')
 				.window('dept_avg_salary', {
 					function: 'avg',
 					field: 'salary',
@@ -151,7 +152,7 @@ describe('P3-A: Window Functions DX API', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
-				.query('products')
+				.select('products')
 				.window('products_in_category', {
 					function: 'count',
 					field: 'id',
@@ -167,7 +168,7 @@ describe('P3-A: Window Functions DX API', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
-				.query('products')
+				.select('products')
 				.window('min_price', {
 					function: 'min',
 					field: 'price',
@@ -182,7 +183,7 @@ describe('P3-A: Window Functions DX API', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
-				.query('products')
+				.select('products')
 				.window('max_price', {
 					function: 'max',
 					field: 'price',
@@ -197,7 +198,7 @@ describe('P3-A: Window Functions DX API', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
-				.query('sales')
+				.select('sales')
 				.window('prev_amount', {
 					function: 'lag',
 					field: 'amount',
@@ -212,7 +213,7 @@ describe('P3-A: Window Functions DX API', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
-				.query('sales')
+				.select('sales')
 				.window('next_amount', {
 					function: 'lead',
 					field: 'amount',
@@ -229,7 +230,7 @@ describe('P3-A: Window Functions DX API', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
-				.query('employees')
+				.select('employees')
 				.window('rank', {
 					function: 'rank',
 					partitionBy: ['department'],
@@ -258,7 +259,7 @@ describe('P3-A: Window Functions DX API', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
-				.query('products')
+				.select('products')
 				.window('rn', {
 					function: 'row_number',
 					orderBy: [{ field: 'price' }],
@@ -278,7 +279,7 @@ describe('P3-A: Window Functions DX API', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
-				.query('products')
+				.select('products')
 				.window('rn', {
 					function: 'row_number',
 					orderBy: [{ field: 'price' }],
@@ -294,8 +295,8 @@ describe('P3-A: Window Functions DX API', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
-				.query('products')
-				.select(['id', 'name', 'price'])
+				.select('products')
+				.columns(['id', 'name', 'price'])
 				.window('rn', {
 					function: 'row_number',
 					orderBy: [{ field: 'price' }],
@@ -310,7 +311,7 @@ describe('P3-A: Window Functions DX API', () => {
 		it('should be immutable - original builder unchanged', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
-			const builder1 = orm.query('products');
+			const builder1 = orm.select('products');
 			const builder2 = builder1.window('rn', {
 				function: 'row_number',
 				orderBy: [{ field: 'price' }],

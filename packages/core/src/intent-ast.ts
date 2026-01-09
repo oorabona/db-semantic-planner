@@ -145,7 +145,6 @@ export interface SelectWithExpressionsIntent {
 	readonly expressions: readonly ExpressionIntent[];
 }
 
-
 // ============================================================================
 // Window Functions (P3-A)
 // ============================================================================
@@ -354,7 +353,6 @@ export interface WhereRelationFilterIntent {
 	 */
 	readonly mode: 'some' | 'every' | 'none';
 }
-
 
 // ============================================================================
 // Subquery Intent - Scalar Subquery in WHERE
@@ -891,7 +889,6 @@ export type MutationIntent = InsertIntent | UpdateIntent | DeleteIntent;
 /**
  * Check if a where intent is a comparison
  */
-
 
 // ============================================================================
 // Window Intent Type Guards

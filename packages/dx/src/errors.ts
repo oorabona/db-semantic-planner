@@ -4,7 +4,7 @@
  * @example
  * ```typescript
  * const orm = createOrm({ model: schema }); // No db!
- * await orm.query('users').findMany(); // Throws ExecutionError
+ * await orm.select('users').findMany(); // Throws ExecutionError
  * ```
  */
 export class ExecutionError extends Error {
@@ -41,11 +41,11 @@ export class ExecutionError extends Error {
 }
 
 /**
- * Error thrown when findFirstOrThrow() finds no results.
+ * Error thrown when firstOrThrow() finds no results.
  *
  * @example
  * ```typescript
- * await orm.query('users').where(eq('id', 999)).findFirstOrThrow();
+ * await orm.select('users').where(eq('id', 999)).firstOrThrow();
  * // Throws NotFoundError: No record found for 'users'
  * ```
  */
@@ -85,7 +85,7 @@ export class NotFoundError extends Error {
  * @example
  * ```typescript
  * try {
- *   orm.query('users').include('posts').plan();
+ *   orm.select('users').include('posts').plan();
  * } catch (error) {
  *   if (error instanceof AmbiguousRelationError) {
  *     console.log(error.options); // ['authoredPosts', 'reviewedPosts']

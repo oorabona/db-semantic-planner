@@ -192,7 +192,7 @@ export function compile(
 	const options: InternalCompileOptions =
 		typeof schemaNameOrOptions === 'string'
 			? { schemaName: schemaNameOrOptions }
-			: schemaNameOrOptions ?? {};
+			: (schemaNameOrOptions ?? {});
 
 	const { schemaName, windows } = options;
 
@@ -1219,7 +1219,6 @@ function compileCoalesceSelect(
 			.as(resultAlias),
 	);
 }
-
 
 // ============================================================================
 // Window Function Compiler (P3-A)

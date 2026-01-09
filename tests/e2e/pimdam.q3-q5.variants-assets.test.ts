@@ -101,14 +101,14 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 			// Query variants with stock > 0 using ORM
 			const dump = orm
 				.forTenant(SCHEMA)
-				.query('variants')
+				.select('variants')
 				.where(
 					and(
 						eq('product_id', 4), // T-Shirt
 						// Stock > 0 - need gt operator or raw
 					),
 				)
-				.select(['id', 'sku', 'name', 'stock'])
+				.columns(['id', 'sku', 'name', 'stock'])
 				.dump();
 
 			expect(dump.sql).toContain(`"${SCHEMA}"`);
@@ -257,9 +257,9 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 			// Use ORM with notExists
 			const dump = orm
 				.forTenant(SCHEMA)
-				.query('assets')
+				.select('assets')
 				.where(notExists('productImages'))
-				.select(['id', 'storage_key', 'kind'])
+				.columns(['id', 'storage_key', 'kind'])
 				.dump();
 
 			expect(dump.sql.toUpperCase()).toContain('NOT EXISTS');
@@ -267,9 +267,9 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 			// Execute to verify
 			const assets = await orm
 				.forTenant(SCHEMA)
-				.query('assets')
+				.select('assets')
 				.where(notExists('productImages'))
-				.select(['id', 'storage_key', 'kind'])
+				.columns(['id', 'storage_key', 'kind'])
 				.execute();
 
 			// Asset 6 (orphan.jpg) has no product_images
@@ -339,9 +339,9 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 			// Find variants that have images
 			const dump = orm
 				.forTenant(SCHEMA)
-				.query('variants')
+				.select('variants')
 				.where(exists('images'))
-				.select(['id', 'sku', 'name'])
+				.columns(['id', 'sku', 'name'])
 				.dump();
 
 			expect(dump.sql.toUpperCase()).toContain('EXISTS');
@@ -354,7 +354,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 
 			const dump = orm
 				.forTenant(SCHEMA)
-				.query('assets')
+				.select('assets')
 				.where(notExists('productImages'))
 				.dump();
 

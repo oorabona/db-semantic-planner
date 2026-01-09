@@ -51,7 +51,7 @@ describe('DX-008: API Shortcuts', () => {
 
 	describe('byId() - Simple Primary Key', () => {
 		it('should create correct plan for simple PK lookup', () => {
-			const plan = orm.query('users').where(eq('id', 42)).plan();
+			const plan = orm.select('users').where(eq('id', 42)).plan();
 
 			expect(plan.rootTable).toBe('users');
 			expect(plan.intent.where).toEqual({
@@ -63,9 +63,9 @@ describe('DX-008: API Shortcuts', () => {
 		});
 
 		it('should use eq filter for simple numeric PK', () => {
-			// byId internally uses where(eq('id', value)).findFirst()
+			// byId internally uses where(eq('id', value)).first()
 			// We test the plan to verify the where clause is correctly constructed
-			const plan = orm.query('users').where(eq('id', 1)).plan();
+			const plan = orm.select('users').where(eq('id', 1)).plan();
 
 			expect(plan.intent.where).toEqual({
 				kind: 'comparison',
@@ -76,7 +76,7 @@ describe('DX-008: API Shortcuts', () => {
 		});
 
 		it('should use eq filter for simple string PK', () => {
-			const plan = orm.query('users').where(eq('id', 'abc-123')).plan();
+			const plan = orm.select('users').where(eq('id', 'abc-123')).plan();
 
 			expect(plan.intent.where).toEqual({
 				kind: 'comparison',
@@ -90,7 +90,7 @@ describe('DX-008: API Shortcuts', () => {
 	describe('byId() - Composite Primary Key', () => {
 		it('should create AND condition for composite PK with 2 fields', () => {
 			const plan = orm
-				.query('order_lines')
+				.select('order_lines')
 				.where(and(eq('order_id', 1), eq('product_id', 42)))
 				.plan();
 
@@ -99,7 +99,12 @@ describe('DX-008: API Shortcuts', () => {
 				kind: 'and',
 				conditions: [
 					{ kind: 'comparison', field: 'order_id', operator: 'eq', value: 1 },
-					{ kind: 'comparison', field: 'product_id', operator: 'eq', value: 42 },
+					{
+						kind: 'comparison',
+						field: 'product_id',
+						operator: 'eq',
+						value: 42,
+					},
 				],
 			});
 		});
@@ -107,7 +112,10 @@ describe('DX-008: API Shortcuts', () => {
 
 	describe('byIds() - Multiple PKs', () => {
 		it('should create IN condition for multiple simple PKs', () => {
-			const plan = orm.query('users').where(inArray('id', [1, 2, 3])).plan();
+			const plan = orm
+				.select('users')
+				.where(inArray('id', [1, 2, 3]))
+				.plan();
 
 			expect(plan.rootTable).toBe('users');
 			expect(plan.intent.where).toEqual({
@@ -120,7 +128,7 @@ describe('DX-008: API Shortcuts', () => {
 		it('should handle empty array gracefully', () => {
 			// byIds([]) should return [] without hitting db
 			// We verify this by checking the condition creation
-			const plan = orm.query('users').where(inArray('id', [])).plan();
+			const plan = orm.select('users').where(inArray('id', [])).plan();
 
 			expect(plan.intent.where).toEqual({
 				kind: 'in',
@@ -132,13 +140,13 @@ describe('DX-008: API Shortcuts', () => {
 
 	describe('include() - Dot Notation', () => {
 		it('should parse single-level include (no dot)', () => {
-			const plan = orm.query('users').include('posts').plan();
+			const plan = orm.select('users').include('posts').plan();
 
 			expect(plan.intent.include).toEqual([{ relation: 'posts' }]);
 		});
 
 		it('should parse two-level dot notation', () => {
-			const plan = orm.query('users').include('posts.comments').plan();
+			const plan = orm.select('users').include('posts.comments').plan();
 
 			expect(plan.intent.include).toEqual([
 				{
@@ -149,7 +157,7 @@ describe('DX-008: API Shortcuts', () => {
 		});
 
 		it('should parse three-level dot notation', () => {
-			const plan = orm.query('users').include('posts.comments.author').plan();
+			const plan = orm.select('users').include('posts.comments.author').plan();
 
 			expect(plan.intent.include).toEqual([
 				{
@@ -166,7 +174,7 @@ describe('DX-008: API Shortcuts', () => {
 
 		it('should apply options to deepest level', () => {
 			const plan = orm
-				.query('users')
+				.select('users')
 				.include('posts.comments', {
 					select: { type: 'fields', fields: ['text'] },
 				})
@@ -187,7 +195,7 @@ describe('DX-008: API Shortcuts', () => {
 
 		it('should apply via option to deepest level', () => {
 			const plan = orm
-				.query('users')
+				.select('users')
 				.include('posts.author', { via: 'commentAuthor' })
 				.plan();
 
@@ -208,7 +216,7 @@ describe('DX-008: API Shortcuts', () => {
 	describe('Fluent chaining - multiple includes', () => {
 		it('should allow chaining multiple dot notation includes', () => {
 			const plan = orm
-				.query('users')
+				.select('users')
 				.include('posts')
 				.include('posts.comments')
 				.plan();
@@ -223,7 +231,7 @@ describe('DX-008: API Shortcuts', () => {
 
 		it('should combine simple and dot notation includes', () => {
 			const plan = orm
-				.query('posts')
+				.select('posts')
 				.include('author')
 				.include('comments.author')
 				.plan();

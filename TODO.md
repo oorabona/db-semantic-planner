@@ -24,6 +24,22 @@
 
 ## Recently Completed
 
+### API-001: API Rename for SQL Verb Consistency ✅ (2026-01-09)
+
+**Scope:** dx, adapter-kysely, core, e2e
+**Breaking change:** Yes (required before v1.0)
+
+Renamed API methods for SQL verb consistency:
+- [x] ✅ `query()` → `select()` (ORM entry point)
+- [x] ✅ `.select()` → `.columns()` (column selection)
+- [x] ✅ `findMany()` → `all()`
+- [x] ✅ `findFirst()` → `first()`
+- [x] ✅ `findFirstOrThrow()` → `firstOrThrow()`
+- [x] ✅ `selectWithExpressions()` → `columnsWithExpressions()`
+
+**Files changed:** 36 (21 source + 15 E2E tests)
+**Tests:** 887 unit + 212 E2E all passing
+
 ### P3-A: Window Functions ✅ (2026-01-09)
 
 **Spec:** [docs/specs/P3-A-window-functions.md](docs/specs/P3-A-window-functions.md)
@@ -118,11 +134,12 @@ Window function support across all packages for analytics queries.
 
 ### API Refinement (Breaking changes - do before v1.0)
 
-- [ ] **API-001**: Rename query() → select() for SQL verb consistency
+- [x] ✅ **API-001**: Rename query() → select() for SQL verb consistency (2026-01-09)
   - Rename `.select()` → `.columns()` to avoid collision
   - Rename `findFirst()` → `first()`
   - Rename `findMany()` → `all()`
   - Rename `findFirstOrThrow()` → `firstOrThrow()`
+  - Rename `selectWithExpressions()` → `columnsWithExpressions()`
 
 ### Multi-dialect Support (`packages/adapter-kysely`)
 

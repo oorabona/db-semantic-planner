@@ -40,8 +40,8 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 			const authors = await orm
 				.forTenant(SCHEMA)
-				.query('authors')
-				.select(['id', 'name', 'email'])
+				.select('authors')
+				.columns(['id', 'name', 'email'])
 				.execute();
 
 			expect(authors).toHaveLength(2);
@@ -56,8 +56,8 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 			const posts = await orm
 				.forTenant(SCHEMA)
-				.query('posts')
-				.select(['id', 'title', 'published'])
+				.select('posts')
+				.columns(['id', 'title', 'published'])
 				.execute();
 
 			expect(posts).toHaveLength(5);
@@ -69,8 +69,8 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 			const comments = await orm
 				.forTenant(SCHEMA)
-				.query('comments')
-				.select(['id', 'content'])
+				.select('comments')
+				.columns(['id', 'content'])
 				.execute();
 
 			expect(comments).toHaveLength(10);
@@ -84,9 +84,9 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 			const publishedPosts = await orm
 				.forTenant(SCHEMA)
-				.query('posts')
+				.select('posts')
 				.where(eq('published', true))
-				.select(['id', 'title'])
+				.columns(['id', 'title'])
 				.execute();
 
 			expect(publishedPosts).toHaveLength(3);
@@ -98,9 +98,9 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 			const draftPosts = await orm
 				.forTenant(SCHEMA)
-				.query('posts')
+				.select('posts')
 				.where(eq('published', false))
-				.select(['id', 'title'])
+				.columns(['id', 'title'])
 				.execute();
 
 			expect(draftPosts).toHaveLength(2);
@@ -112,9 +112,9 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 			const alice = await orm
 				.forTenant(SCHEMA)
-				.query('authors')
+				.select('authors')
 				.where(eq('email', 'alice@example.com'))
-				.select(['id', 'name'])
+				.columns(['id', 'name'])
 				.execute();
 
 			expect(alice).toHaveLength(1);
@@ -129,13 +129,13 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 			const authorsWithPublished = await orm
 				.forTenant(SCHEMA)
-				.query('authors')
+				.select('authors')
 				.where(
 					exists('posts', {
 						where: eq('published', true),
 					}),
 				)
-				.select(['id', 'name'])
+				.columns(['id', 'name'])
 				.execute();
 
 			// Both Alice and Bob have published posts
@@ -148,9 +148,9 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 			const postsWithComments = await orm
 				.forTenant(SCHEMA)
-				.query('posts')
+				.select('posts')
 				.where(exists('comments'))
-				.select(['id', 'title'])
+				.columns(['id', 'title'])
 				.execute();
 
 			// Posts 1, 2, 3 have comments
@@ -165,9 +165,9 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 			const dump = orm
 				.forTenant(SCHEMA)
-				.query('posts')
+				.select('posts')
 				.where(eq('published', true))
-				.select(['id', 'title'])
+				.columns(['id', 'title'])
 				.dump();
 
 			// Verify SQL structure
@@ -180,7 +180,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 			const db = await getTestDb();
 			const orm = createOrm({ model: blogModel, db });
 
-			const dump = orm.forTenant(SCHEMA).query('authors').dump();
+			const dump = orm.forTenant(SCHEMA).select('authors').dump();
 
 			expect(dump.meta?.tenant).toBe(SCHEMA);
 			expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
@@ -192,7 +192,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 			const dump = orm
 				.forTenant(SCHEMA)
-				.query('posts')
+				.select('posts')
 				.where(exists('comments'))
 				.dump();
 
@@ -207,9 +207,9 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 			const publishedWithComments = await orm
 				.forTenant(SCHEMA)
-				.query('posts')
+				.select('posts')
 				.where(and(eq('published', true), exists('comments')))
-				.select(['id', 'title'])
+				.columns(['id', 'title'])
 				.execute();
 
 			// Published posts (3) that also have comments

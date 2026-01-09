@@ -111,12 +111,12 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 				'Simple SELECT',
 				ITERATIONS,
 				() =>
-					orm.forTenant('acme').query('products').select(['id', 'sku']).dump(),
+					orm.forTenant('acme').select('products').columns(['id', 'sku']).dump(),
 				async () =>
 					orm
 						.forTenant('acme')
-						.query('products')
-						.select(['id', 'sku'])
+						.select('products')
+						.columns(['id', 'sku'])
 						.execute(),
 			);
 
@@ -134,16 +134,16 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 				() =>
 					orm
 						.forTenant('acme')
-						.query('products')
+						.select('products')
 						.where(eq('active', true))
-						.select(['id', 'sku'])
+						.columns(['id', 'sku'])
 						.dump(),
 				async () =>
 					orm
 						.forTenant('acme')
-						.query('products')
+						.select('products')
 						.where(eq('active', true))
-						.select(['id', 'sku'])
+						.columns(['id', 'sku'])
 						.execute(),
 			);
 
@@ -161,14 +161,14 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 				() =>
 					orm
 						.forTenant('acme')
-						.query('products')
-						.select(['id', 'sku', 'title', 'active', 'category_id'])
+						.select('products')
+						.columns(['id', 'sku', 'title', 'active', 'category_id'])
 						.dump(),
 				async () =>
 					orm
 						.forTenant('acme')
-						.query('products')
-						.select(['id', 'sku', 'title', 'active', 'category_id'])
+						.select('products')
+						.columns(['id', 'sku', 'title', 'active', 'category_id'])
 						.execute(),
 			);
 
@@ -185,8 +185,8 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 			const result = await runBenchmark(
 				'Simple Query Execution',
 				ITERATIONS,
-				() => orm.forTenant('acme').query('products').dump(),
-				async () => orm.forTenant('acme').query('products').execute(),
+				() => orm.forTenant('acme').select('products').dump(),
+				async () => orm.forTenant('acme').select('products').execute(),
 			);
 
 			results.push(result);
@@ -202,11 +202,11 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 				'Filtered Query Execution',
 				ITERATIONS,
 				() =>
-					orm.forTenant('acme').query('products').where(eq('sku', 'PROD-001')).dump(),
+					orm.forTenant('acme').select('products').where(eq('sku', 'PROD-001')).dump(),
 				async () =>
 					orm
 						.forTenant('acme')
-						.query('products')
+						.select('products')
 						.where(eq('sku', 'PROD-001'))
 						.execute(),
 			);
@@ -223,8 +223,8 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 			const catResult = await runBenchmark(
 				'Categories Query',
 				ITERATIONS,
-				() => orm.forTenant('acme').query('categories').dump(),
-				async () => orm.forTenant('acme').query('categories').execute(),
+				() => orm.forTenant('acme').select('categories').dump(),
+				async () => orm.forTenant('acme').select('categories').execute(),
 			);
 			results.push(catResult);
 
@@ -232,8 +232,8 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 			const assetResult = await runBenchmark(
 				'Assets Query',
 				ITERATIONS,
-				() => orm.forTenant('acme').query('assets').dump(),
-				async () => orm.forTenant('acme').query('assets').execute(),
+				() => orm.forTenant('acme').select('assets').dump(),
+				async () => orm.forTenant('acme').select('assets').execute(),
 			);
 			results.push(assetResult);
 
@@ -241,8 +241,8 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 			const variantResult = await runBenchmark(
 				'Variants Query',
 				ITERATIONS,
-				() => orm.forTenant('acme').query('variants').dump(),
-				async () => orm.forTenant('acme').query('variants').execute(),
+				() => orm.forTenant('acme').select('variants').dump(),
+				async () => orm.forTenant('acme').select('variants').execute(),
 			);
 			results.push(variantResult);
 
@@ -261,8 +261,8 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 			const ormResult = await runBenchmark(
 				'ORM Query',
 				ITERATIONS,
-				() => orm.forTenant('acme').query('products').dump(),
-				async () => orm.forTenant('acme').query('products').execute(),
+				() => orm.forTenant('acme').select('products').dump(),
+				async () => orm.forTenant('acme').select('products').execute(),
 			);
 			results.push(ormResult);
 
@@ -310,7 +310,7 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 			for (let batch = 0; batch < 10; batch++) {
 				const start = performance.now();
 				for (let i = 0; i < 10; i++) {
-					await orm.forTenant('acme').query('products').execute();
+					await orm.forTenant('acme').select('products').execute();
 				}
 				const end = performance.now();
 				times.push((end - start) / 10);

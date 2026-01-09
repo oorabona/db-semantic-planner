@@ -219,9 +219,9 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 
 			const bundles = await orm
 				.forTenant(SCHEMA)
-				.query('products')
+				.select('products')
 				.where(eq('is_bundle', true))
-				.select(['id', 'sku', 'title'])
+				.columns(['id', 'sku', 'title'])
 				.execute();
 
 			expect((bundles as unknown[]).length).toBeGreaterThanOrEqual(1);
@@ -235,18 +235,18 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 			// Find products that have components (i.e., are bundles)
 			const dump = orm
 				.forTenant(SCHEMA)
-				.query('products')
+				.select('products')
 				.where(exists('components'))
-				.select(['id', 'sku'])
+				.columns(['id', 'sku'])
 				.dump();
 
 			expect(dump.sql.toUpperCase()).toContain('EXISTS');
 
 			const bundles = await orm
 				.forTenant(SCHEMA)
-				.query('products')
+				.select('products')
 				.where(exists('components'))
-				.select(['id', 'sku'])
+				.columns(['id', 'sku'])
 				.execute();
 
 			expect((bundles as { sku: string }[]).some((b) => b.sku === 'BUNDLE-001')).toBe(true);

@@ -15,7 +15,7 @@
  *   .traverseVia('roleEdges', { from: 'parentRoleId', to: 'childRoleId' })
  *   .maxDepth(10)
  *   .join('rolePermissions', 'id', 'roleId')
- *   .select({ permission: 'permissions.name' })
+ *   .columns({ permission: 'permissions.name' })
  *   .execute();
  * ```
  */
@@ -393,7 +393,7 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 	/**
 	 * Select specific columns in the output.
 	 */
-	select(columns: readonly string[] | Record<string, string>): this {
+	columns(columns: readonly string[] | Record<string, string>): this {
 		if (Array.isArray(columns)) {
 			this.emitSelect = columns;
 		} else {

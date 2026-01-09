@@ -37,7 +37,6 @@ function createTestKysely() {
 	});
 }
 
-
 // ============================================================================
 // Test Schemas
 // ============================================================================
@@ -1341,7 +1340,6 @@ describe('SQL Compiler', () => {
 			});
 		});
 
-
 		describe('ARCH-001: path tracking strategies', () => {
 			// Note: PostgreSQL array strategy test is in E2E (tests/e2e/iam.recursive.test.ts)
 			// because it requires real PostgreSQL to test ARRAY[] syntax
@@ -1533,7 +1531,7 @@ describe('SQL Compiler', () => {
 				const compiled = compileInsert(intent, kysely, 'tenant_123');
 
 				// SQLite may quote schema/table names, so check for both patterns
-				expect(compiled.sql.toLowerCase()).toMatch(/tenant_123["\.].*users/);
+				expect(compiled.sql.toLowerCase()).toMatch(/tenant_123[".].*users/);
 			});
 		});
 
@@ -1544,7 +1542,12 @@ describe('SQL Compiler', () => {
 					type: 'update' as const,
 					table: 'users',
 					set: { name: 'Updated' },
-					where: { kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
+					where: {
+						kind: 'comparison' as const,
+						field: 'id',
+						operator: 'eq',
+						value: 1,
+					},
 				};
 
 				const compiled = compileUpdate(intent, kysely);
@@ -1593,8 +1596,18 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'and' as const,
 						conditions: [
-							{ kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
-							{ kind: 'comparison' as const, field: 'active', operator: 'eq', value: false },
+							{
+								kind: 'comparison' as const,
+								field: 'id',
+								operator: 'eq',
+								value: 1,
+							},
+							{
+								kind: 'comparison' as const,
+								field: 'active',
+								operator: 'eq',
+								value: false,
+							},
 						],
 					},
 				};
@@ -1612,13 +1625,18 @@ describe('SQL Compiler', () => {
 					type: 'update' as const,
 					table: 'users',
 					set: { name: 'Test' },
-					where: { kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
+					where: {
+						kind: 'comparison' as const,
+						field: 'id',
+						operator: 'eq',
+						value: 1,
+					},
 				};
 
 				const compiled = compileUpdate(intent, kysely, 'tenant_abc');
 
 				// SQLite may quote schema/table names, so check for both patterns
-				expect(compiled.sql.toLowerCase()).toMatch(/tenant_abc["\.].*users/);
+				expect(compiled.sql.toLowerCase()).toMatch(/tenant_abc[".].*users/);
 			});
 		});
 
@@ -1628,7 +1646,12 @@ describe('SQL Compiler', () => {
 				const intent = {
 					type: 'delete' as const,
 					table: 'users',
-					where: { kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
+					where: {
+						kind: 'comparison' as const,
+						field: 'id',
+						operator: 'eq',
+						value: 1,
+					},
 				};
 
 				const compiled = compileDelete(intent, kysely);
@@ -1686,8 +1709,18 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'or' as const,
 						conditions: [
-							{ kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
-							{ kind: 'comparison' as const, field: 'id', operator: 'eq', value: 2 },
+							{
+								kind: 'comparison' as const,
+								field: 'id',
+								operator: 'eq',
+								value: 1,
+							},
+							{
+								kind: 'comparison' as const,
+								field: 'id',
+								operator: 'eq',
+								value: 2,
+							},
 						],
 					},
 				};
@@ -1703,34 +1736,39 @@ describe('SQL Compiler', () => {
 				const intent = {
 					type: 'delete' as const,
 					table: 'users',
-					where: { kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
+					where: {
+						kind: 'comparison' as const,
+						field: 'id',
+						operator: 'eq',
+						value: 1,
+					},
 				};
 
 				const compiled = compileDelete(intent, kysely, 'tenant_xyz');
 
 				// SQLite may quote schema/table names, so check for both patterns
-				expect(compiled.sql.toLowerCase()).toMatch(/tenant_xyz["\.].*users/);
+				expect(compiled.sql.toLowerCase()).toMatch(/tenant_xyz[".].*users/);
 			});
 
-		it('should compile delete with null check', () => {
-			const kysely = createTestKysely();
-			const intent = {
-				type: 'delete' as const,
-				table: 'users',
-				where: {
-					kind: 'null' as const,
-					field: 'deletedAt',
-					operator: 'isNotNull' as const,
-				},
-			};
+			it('should compile delete with null check', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'delete' as const,
+					table: 'users',
+					where: {
+						kind: 'null' as const,
+						field: 'deletedAt',
+						operator: 'isNotNull' as const,
+					},
+				};
 
-			const compiled = compileDelete(intent, kysely);
+				const compiled = compileDelete(intent, kysely);
 
-			expect(compiled.sql.toLowerCase()).toContain('where');
-			expect(compiled.sql.toLowerCase()).toContain('is not null');
+				expect(compiled.sql.toLowerCase()).toContain('where');
+				expect(compiled.sql.toLowerCase()).toContain('is not null');
+			});
 		});
 	});
-});
 
 	// ============================================================================
 	// Window Function Compilation (P3-A)

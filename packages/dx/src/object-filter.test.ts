@@ -8,7 +8,6 @@ import type {
 	WhereAndIntent,
 	WhereComparisonIntent,
 	WhereInIntent,
-	WhereIntent,
 	WhereLikeIntent,
 	WhereNullIntent,
 } from '@db-semantic-planner/core';
@@ -16,16 +15,23 @@ import { describe, expect, it } from 'vitest';
 import { eq } from './filters.js';
 import {
 	type FilterOperators,
-	type WhereFilter,
 	isWhereIntent,
 	objectToWhereIntent,
+	type WhereFilter,
 } from './object-filter.js';
 
 describe('DX-012 Block 1: Object Filter Syntax', () => {
 	describe('isWhereIntent()', () => {
 		it('should return true for WhereIntent objects', () => {
 			expect(isWhereIntent(eq('field', 'value'))).toBe(true);
-			expect(isWhereIntent({ kind: 'comparison', field: 'x', operator: 'eq', value: 1 })).toBe(true);
+			expect(
+				isWhereIntent({
+					kind: 'comparison',
+					field: 'x',
+					operator: 'eq',
+					value: 1,
+				}),
+			).toBe(true);
 			expect(isWhereIntent({ kind: 'and', conditions: [] })).toBe(true);
 		});
 
@@ -202,7 +208,9 @@ describe('DX-012 Block 1: Object Filter Syntax', () => {
 
 	describe('objectToWhereIntent() - $in Operator', () => {
 		it('should convert $in operator', () => {
-			const result = objectToWhereIntent({ status: { $in: ['active', 'pending'] } });
+			const result = objectToWhereIntent({
+				status: { $in: ['active', 'pending'] },
+			});
 
 			expect(result).toEqual<WhereInIntent>({
 				kind: 'in',
@@ -234,7 +242,9 @@ describe('DX-012 Block 1: Object Filter Syntax', () => {
 		});
 
 		it('should convert $ilike operator (case-insensitive)', () => {
-			const result = objectToWhereIntent({ email: { $ilike: '%@EXAMPLE.COM' } });
+			const result = objectToWhereIntent({
+				email: { $ilike: '%@EXAMPLE.COM' },
+			});
 
 			expect(result).toEqual<WhereLikeIntent>({
 				kind: 'like',
@@ -293,12 +303,17 @@ describe('DX-012 Block 1: Object Filter Syntax', () => {
 
 	describe('objectToWhereIntent() - Edge Cases', () => {
 		it('should throw on empty object', () => {
-			expect(() => objectToWhereIntent({})).toThrow('Invalid filter: empty object');
+			expect(() => objectToWhereIntent({})).toThrow(
+				'Invalid filter: empty object',
+			);
 		});
 
 		it('should handle undefined values by ignoring them', () => {
 			// TypeScript won't allow undefined in filter, but runtime might encounter it
-			const filter = { status: 'active', deleted: undefined } as unknown as WhereFilter;
+			const filter = {
+				status: 'active',
+				deleted: undefined,
+			} as unknown as WhereFilter;
 			const result = objectToWhereIntent(filter);
 
 			// Should only have the non-undefined field

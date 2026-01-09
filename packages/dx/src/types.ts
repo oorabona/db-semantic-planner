@@ -49,7 +49,6 @@ export interface AggregateOptions {
 	readonly as?: string;
 }
 
-
 /**
  * Options for window functions (P3-A).
  * Used with the window() method to add window function expressions to SELECT.
@@ -105,13 +104,13 @@ export type RelationHints = Readonly<Record<string, string>>;
  * @example Zero-config (auto-introspection)
  * ```typescript
  * const orm = await createOrm({ db });
- * const users = await orm.query('users').findMany();
+ * const users = await orm.select('users').all();
  * ```
  *
  * @example Explicit model
  * ```typescript
  * const orm = createOrm({ model, db });
- * const users = await orm.query('users').findMany();
+ * const users = await orm.select('users').all();
  * ```
  */
 export interface OrmOptions {
@@ -160,7 +159,7 @@ export interface OrmOptions {
 	 *   model: schema,
 	 *   db,  // Enable query execution
 	 * });
-	 * await orm.query('users').findMany();
+	 * await orm.select('users').all();
 	 * ```
 	 */
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
@@ -229,19 +228,19 @@ export type SelectFields<TTable, K extends keyof TTable> = Pick<TTable, K>;
  *   Defaults to `unknown` for backward compatibility.
  *   Can be narrowed by:
  *   - Providing explicit type: `orm.query<User>('users')`
- *   - Using typed select: `orm.query('users').select<User, 'id' | 'name'>(['id', 'name'])`
+ *   - Using typed select: `orm.select('users').select<User, 'id' | 'name'>(['id', 'name'])`
  *
  * @example
  * ```typescript
  * // Explicit table type
  * type User = { id: number; name: string; email: string };
- * const users = await orm.query<User>('users').findMany();
+ * const users = await orm.query<User>('users').all();
  * // users is User[]
  *
  * // With select narrowing
  * const partialUsers = await orm.query<User>('users')
  *   .select<User, 'id' | 'name'>(['id', 'name'])
- *   .findMany();
+ *   .all();
  * // partialUsers is Pick<User, 'id' | 'name'>[]
  * ```
  */
@@ -270,25 +269,25 @@ export interface QueryBuilder<TResult = unknown> {
 	include(relation: string, options?: IncludeOptions): QueryBuilder<TResult>;
 
 	/**
-	 * Select specific fields from the root entity.
+	 * Select specific columns from the root entity.
 	 *
 	 * The result type is preserved from the QueryBuilder generic parameter.
-	 * Use explicit typing on query() for typed results:
+	 * Use explicit typing on select() for typed results:
 	 * ```typescript
 	 * type User = { id: number; name: string; email: string };
-	 * const users = await orm.query<User>('users')
-	 *   .select(['id', 'name'])
-	 *   .findMany();
+	 * const users = await orm.select<User>('users')
+	 *   .columns(['id', 'name'])
+	 *   .all();
 	 * // users is User[]
 	 * ```
 	 *
 	 * @param fields - Array of field names to select
-	 * @returns A new QueryBuilder with the selection applied
+	 * @returns A new QueryBuilder with the column selection applied
 	 */
-	select(fields: readonly string[]): QueryBuilder<TResult>;
+	columns(fields: readonly string[]): QueryBuilder<TResult>;
 
 	/**
-	 * Select fields with computed expressions (COALESCE, raw SQL, etc.)
+	 * Select columns with computed expressions (COALESCE, raw SQL, etc.)
 	 *
 	 * @param fields - Array of regular field names to select
 	 * @param expressions - Array of expression intents (from coalesce(), raw(), etc.)
@@ -299,24 +298,24 @@ export interface QueryBuilder<TResult = unknown> {
 	 * import { coalesce, raw } from '@db-semantic-planner/dx';
 	 *
 	 * // Locale fallback pattern
-	 * orm.query('products')
-	 *   .selectWithExpressions(
+	 * orm.select('products')
+	 *   .columnsWithExpressions(
 	 *     ['id', 'sku'],
 	 *     [coalesce(['title_fr', 'title_en'], 'title')]
 	 *   )
-	 *   .findMany();
+	 *   .all();
 	 * // → SELECT id, sku, COALESCE(title_fr, title_en) AS title FROM products
 	 *
 	 * // Computed expression
-	 * orm.query('orders')
-	 *   .selectWithExpressions(
+	 * orm.select('orders')
+	 *   .columnsWithExpressions(
 	 *     ['id'],
 	 *     [raw('price_cents / 100.0', 'price_dollars')]
 	 *   )
-	 *   .findMany();
+	 *   .all();
 	 * ```
 	 */
-	selectWithExpressions(
+	columnsWithExpressions(
 		fields: readonly string[],
 		expressions: readonly ExpressionIntent[],
 	): QueryBuilder<TResult>;
@@ -330,10 +329,10 @@ export interface QueryBuilder<TResult = unknown> {
 	 * @example
 	 * ```typescript
 	 * // COUNT(*)
-	 * orm.query('users').count().execute();
+	 * orm.select('users').count().execute();
 	 *
 	 * // COUNT(email) AS email_count
-	 * orm.query('users').count({ field: 'email', as: 'email_count' }).execute();
+	 * orm.select('users').count({ field: 'email', as: 'email_count' }).execute();
 	 * ```
 	 */
 	count(options?: AggregateOptions): QueryBuilder<TResult>;
@@ -347,7 +346,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 *
 	 * @example
 	 * ```typescript
-	 * orm.query('orders').sum('total', 'order_total').execute();
+	 * orm.select('orders').sum('total', 'order_total').execute();
 	 * ```
 	 */
 	sum(field: string, as?: string): QueryBuilder<TResult>;
@@ -389,7 +388,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 * @example
 	 * ```typescript
 	 * // Count posts per author
-	 * orm.query('posts')
+	 * orm.select('posts')
 	 *   .count({ as: 'post_count' })
 	 *   .groupBy(['authorId'])
 	 *   .execute();
@@ -410,30 +409,30 @@ export interface QueryBuilder<TResult = unknown> {
 	 * @example
 	 * ```typescript
 	 * // Row number for pagination
-	 * orm.query('products')
+	 * orm.select('products')
 	 *   .window('row_num', {
 	 *     function: 'row_number',
 	 *     orderBy: [{ field: 'price', direction: 'desc' }]
 	 *   })
-	 *   .findMany();
+	 *   .all();
 	 * // → SELECT *, ROW_NUMBER() OVER (ORDER BY "price" DESC) AS "row_num" FROM products
 	 *
 	 * // Running total partitioned by category
-	 * orm.query('sales')
+	 * orm.select('sales')
 	 *   .window('running_total', {
 	 *     function: 'sum',
 	 *     field: 'amount',
 	 *     partitionBy: ['category_id'],
 	 *     orderBy: [{ field: 'date', direction: 'asc' }]
 	 *   })
-	 *   .findMany();
+	 *   .all();
 	 * // → SELECT *, SUM("amount") OVER (PARTITION BY "category_id" ORDER BY "date" ASC) AS "running_total"
 	 *
 	 * // Multiple window functions (chained)
-	 * orm.query('employees')
+	 * orm.select('employees')
 	 *   .window('rank', { function: 'rank', partitionBy: ['dept'], orderBy: [{ field: 'salary', direction: 'desc' }] })
 	 *   .window('avg_salary', { function: 'avg', field: 'salary', partitionBy: ['dept'] })
-	 *   .findMany();
+	 *   .all();
 	 * ```
 	 */
 	window(alias: string, options: WindowOptions): QueryBuilder<TResult>;
@@ -448,16 +447,16 @@ export interface QueryBuilder<TResult = unknown> {
 	 * @example
 	 * ```typescript
 	 * // Simple ascending sort
-	 * orm.query('users').orderBy('name').findMany();
+	 * orm.select('users').orderBy('name').all();
 	 *
 	 * // Descending sort
-	 * orm.query('users').orderBy('createdAt', 'desc').findMany();
+	 * orm.select('users').orderBy('createdAt', 'desc').all();
 	 *
 	 * // Multiple sorts (chained)
-	 * orm.query('users')
+	 * orm.select('users')
 	 *   .orderBy('lastName', 'asc')
 	 *   .orderBy('firstName', 'asc')
-	 *   .findMany();
+	 *   .all();
 	 * ```
 	 */
 	orderBy(field: string, direction?: 'asc' | 'desc'): QueryBuilder<TResult>;
@@ -471,14 +470,14 @@ export interface QueryBuilder<TResult = unknown> {
 	 * @example
 	 * ```typescript
 	 * // Get first 10 users
-	 * orm.query('users').limit(10).findMany();
+	 * orm.select('users').limit(10).all();
 	 *
 	 * // Pagination with limit and offset
-	 * orm.query('users')
+	 * orm.select('users')
 	 *   .orderBy('id')
 	 *   .limit(20)
 	 *   .offset(40)
-	 *   .findMany();
+	 *   .all();
 	 * ```
 	 */
 	limit(count: number): QueryBuilder<TResult>;
@@ -492,14 +491,14 @@ export interface QueryBuilder<TResult = unknown> {
 	 * @example
 	 * ```typescript
 	 * // Skip first 20 results
-	 * orm.query('users').offset(20).findMany();
+	 * orm.select('users').offset(20).all();
 	 *
 	 * // Pagination: page 3 with 10 items per page
-	 * orm.query('users')
+	 * orm.select('users')
 	 *   .orderBy('id')
 	 *   .limit(10)
 	 *   .offset(20)
-	 *   .findMany();
+	 *   .all();
 	 * ```
 	 */
 	offset(count: number): QueryBuilder<TResult>;
@@ -523,16 +522,16 @@ export interface QueryBuilder<TResult = unknown> {
 	 * @example
 	 * ```typescript
 	 * // Using filter helpers (legacy)
-	 * orm.query('users').where(eq('status', 'active'))
+	 * orm.select('users').where(eq('status', 'active'))
 	 *
 	 * // Using object syntax (new)
-	 * orm.query('users').where({ status: 'active' })
+	 * orm.select('users').where({ status: 'active' })
 	 *
 	 * // With operators
-	 * orm.query('users').where({ age: { $gte: 18, $lt: 65 } })
+	 * orm.select('users').where({ age: { $gte: 18, $lt: 65 } })
 	 *
 	 * // Multiple conditions (implicit AND)
-	 * orm.query('users').where({ active: true, role: 'admin' })
+	 * orm.select('users').where({ active: true, role: 'admin' })
 	 * ```
 	 */
 	where(condition: WhereIntent | WhereFilter<TResult>): QueryBuilder<TResult>;
@@ -546,7 +545,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 * @example
 	 * ```typescript
 	 * // ORM is lenient by default, but this query is strict
-	 * orm.query('users')
+	 * orm.select('users')
 	 *   .withStrictMode(true)
 	 *   .include('posts')
 	 *   .plan();  // Throws if 'posts' is ambiguous
@@ -564,7 +563,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 *
 	 * @example
 	 * ```typescript
-	 * orm.query('users')
+	 * orm.select('users')
 	 *   .withRelationHint('posts', 'authoredPosts')
 	 *   .include('posts')  // Uses 'authoredPosts' relation
 	 *   .plan();
@@ -594,7 +593,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 *
 	 * @example
 	 * ```typescript
-	 * const dump = orm.query('products')
+	 * const dump = orm.select('products')
 	 *   .where(eq('active', true))
 	 *   .dump();
 	 *
@@ -609,7 +608,7 @@ export interface QueryBuilder<TResult = unknown> {
 	/**
 	 * Execute the query and return all matching rows.
 	 *
-	 * Semantic alias for findMany() - use for clearer intent in code.
+	 * Semantic alias for all() - use for clearer intent in code.
 	 * Requires `db` to be configured in createOrm() options.
 	 *
 	 * @returns Promise resolving to array of rows (may be empty)
@@ -617,7 +616,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 *
 	 * @example
 	 * ```typescript
-	 * const products = await orm.query('products')
+	 * const products = await orm.select('products')
 	 *   .where(eq('active', true))
 	 *   .execute();
 	 * ```
@@ -634,12 +633,12 @@ export interface QueryBuilder<TResult = unknown> {
 	 *
 	 * @example
 	 * ```typescript
-	 * const users = await orm.query('users')
+	 * const users = await orm.select('users')
 	 *   .where(eq('status', 'active'))
-	 *   .findMany();
+	 *   .all();
 	 * ```
 	 */
-	findMany(): Promise<TResult[]>;
+	all(): Promise<TResult[]>;
 
 	/**
 	 * Execute the query and return the first matching row.
@@ -651,12 +650,12 @@ export interface QueryBuilder<TResult = unknown> {
 	 *
 	 * @example
 	 * ```typescript
-	 * const user = await orm.query('users')
+	 * const user = await orm.select('users')
 	 *   .where(eq('id', 1))
-	 *   .findFirst();
+	 *   .first();
 	 * ```
 	 */
-	findFirst(): Promise<TResult | undefined>;
+	first(): Promise<TResult | undefined>;
 
 	/**
 	 * Execute the query and return the first matching row, or throw if none.
@@ -669,12 +668,12 @@ export interface QueryBuilder<TResult = unknown> {
 	 *
 	 * @example
 	 * ```typescript
-	 * const user = await orm.query('users')
+	 * const user = await orm.select('users')
 	 *   .where(eq('id', 1))
-	 *   .findFirstOrThrow();
+	 *   .firstOrThrow();
 	 * ```
 	 */
-	findFirstOrThrow(): Promise<TResult>;
+	firstOrThrow(): Promise<TResult>;
 
 	/**
 	 * Execute the query and stream results row by row.
@@ -692,7 +691,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 *
 	 * @example
 	 * ```typescript
-	 * for await (const user of orm.query('users').stream()) {
+	 * for await (const user of orm.select('users').stream()) {
 	 *   console.log(user.name);
 	 *   if (shouldStop) break; // Connection released automatically
 	 * }
@@ -703,8 +702,8 @@ export interface QueryBuilder<TResult = unknown> {
 	/**
 	 * Find a single record by its primary key.
 	 *
-	 * Shortcut for `.where(eq('id', value)).findFirst()` for simple PKs,
-	 * or `.where(and(eq('a', 1), eq('b', 2))).findFirst()` for composite PKs.
+	 * Shortcut for `.where(eq('id', value)).first()` for simple PKs,
+	 * or `.where(and(eq('a', 1), eq('b', 2))).first()` for composite PKs.
 	 *
 	 * @param value - Simple PK value (string | number) or composite PK object
 	 * @returns Promise resolving to the record or undefined if not found
@@ -713,10 +712,10 @@ export interface QueryBuilder<TResult = unknown> {
 	 * @example
 	 * ```typescript
 	 * // Simple primary key
-	 * const user = await orm.query('users').byId(42);
+	 * const user = await orm.select('users').byId(42);
 	 *
 	 * // Composite primary key
-	 * const orderLine = await orm.query('order_lines').byId({
+	 * const orderLine = await orm.select('order_lines').byId({
 	 *   orderId: 1,
 	 *   productId: 42
 	 * });
@@ -736,7 +735,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 *
 	 * @example
 	 * ```typescript
-	 * const user = await orm.query('users').byIdOrThrow(42);
+	 * const user = await orm.select('users').byIdOrThrow(42);
 	 * ```
 	 */
 	byIdOrThrow(
@@ -746,7 +745,7 @@ export interface QueryBuilder<TResult = unknown> {
 	/**
 	 * Find multiple records by their primary keys.
 	 *
-	 * Shortcut for `.where(inArray('id', values)).findMany()`.
+	 * Shortcut for `.where(inArray('id', values)).all()`.
 	 * Only supports simple (non-composite) primary keys.
 	 *
 	 * @param values - Array of primary key values
@@ -755,7 +754,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 *
 	 * @example
 	 * ```typescript
-	 * const users = await orm.query('users').byIds([1, 2, 3]);
+	 * const users = await orm.select('users').byIds([1, 2, 3]);
 	 * ```
 	 */
 	byIds(values: readonly (string | number)[]): Promise<TResult[]>;
@@ -802,13 +801,13 @@ export interface HierarchyOptions {
  * const orm = createOrm<Database>({ model });
  *
  * // Table names are autocompleted, results are typed
- * const users = await orm.query('users').findMany();
+ * const users = await orm.select('users').all();
  * // users is { id: number; name: string; email: string }[]
  * ```
  */
 export interface OrmInstance<DB = Record<string, unknown>> {
 	/**
-	 * Start building a query from a table.
+	 * Start building a SELECT query from a table.
 	 *
 	 * When DB generic is provided:
 	 * - Table name is constrained to `keyof DB`
@@ -816,22 +815,22 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * @typeParam K - Table name (inferred from DB keys when typed)
 	 * @typeParam TResult - Override result type (defaults to DB[K])
-	 * @param from - The root table name to query
-	 * @returns A QueryBuilder for constructing the query
+	 * @param from - The root table name to select from
+	 * @returns A QueryBuilder for constructing the select
 	 *
 	 * @example
 	 * ```typescript
-	 * // Typed query (with DB generic)
+	 * // Typed select (with DB generic)
 	 * const orm = createOrm<Database>({ model });
-	 * const users = await orm.query('users').findMany();
+	 * const users = await orm.select('users').all();
 	 * // users is Database['users'][]
 	 *
 	 * // Override type if needed
 	 * type CustomUser = { id: number; extra: string };
-	 * const custom = await orm.query<CustomUser>('users').findMany();
+	 * const custom = await orm.select<CustomUser>('users').all();
 	 * ```
 	 */
-	query<K extends keyof DB & string, TResult = DB[K]>(
+	select<K extends keyof DB & string, TResult = DB[K]>(
 		from: K,
 	): QueryBuilder<TResult>;
 
@@ -851,7 +850,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * @example
 	 * ```typescript
 	 * const tenantOrm = orm.forTenant('tenant_123');
-	 * const users = await tenantOrm.query('users').findMany();
+	 * const users = await tenantOrm.select('users').all();
 	 * // SQL: SELECT * FROM tenant_123.users
 	 * ```
 	 */

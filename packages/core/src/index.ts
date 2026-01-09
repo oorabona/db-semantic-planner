@@ -74,6 +74,7 @@ export type {
 	RecursiveTrackOptions,
 	RecursiveTraversal,
 	RelationOperator,
+	ScalarSubqueryIntent,
 	SelectAggregateIntent,
 	// Select
 	SelectAllIntent,
@@ -82,6 +83,7 @@ export type {
 	SelectWithExpressionsIntent,
 	SortDirection,
 	StringOperator,
+	SubqueryRefIntent,
 	UpdateIntent,
 	// Where (filters)
 	WhereAndIntent,
@@ -97,8 +99,6 @@ export type {
 	WhereRelationFilterIntent,
 	// Subquery (DX-012)
 	WhereSubqueryIntent,
-	SubqueryRefIntent,
-	ScalarSubqueryIntent,
 	// Window Functions (P3-A)
 	WindowFunction,
 	WindowIntent,
@@ -124,6 +124,7 @@ export {
 	isSelectAll,
 	isSelectFields,
 	isSelectWithExpressions,
+	isSubqueryRef,
 	isUpdateIntent,
 	isWhereAnd,
 	isWhereComparison,
@@ -139,7 +140,6 @@ export {
 	isWhereRelationFilter,
 	// Subquery type guards (DX-012)
 	isWhereSubquery,
-	isSubqueryRef,
 	// Window function type guards (P3-A)
 	isWindowIntent,
 } from './intent-ast.js';

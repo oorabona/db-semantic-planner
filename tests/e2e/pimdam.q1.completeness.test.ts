@@ -261,9 +261,9 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 			// The ORM can execute with schema prefix
 			const products = await orm
 				.forTenant(SCHEMA)
-				.query('products')
+				.select('products')
 				.where(eq('sku', 'IPHONE-15'))
-				.select(['id', 'sku', 'title'])
+				.columns(['id', 'sku', 'title'])
 				.execute();
 
 			expect(products).toHaveLength(1);
@@ -276,9 +276,9 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 
 			const dump = orm
 				.forTenant(SCHEMA)
-				.query('products')
+				.select('products')
 				.where(eq('family_id', 1))
-				.select(['id', 'sku'])
+				.columns(['id', 'sku'])
 				.dump();
 
 			expect(dump.sql).toContain(`"${SCHEMA}"`);
