@@ -110,6 +110,32 @@ A critical constraint is **connection pool management**. Having separate adapter
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### Column Reference Type (Type Safety)
+
+**Problem:** Using `field: string` weakens type safety (typos, aliasing issues, "compiles but crashes").
+
+**Solution:** Use a typed `ColumnRef<T>` that carries table/column metadata:
+
+```typescript
+// packages/core/src/intent-ast.ts
+
+/**
+ * Typed column reference - produced by model builder / QueryBuilder.
+ * Carries metadata for proper alias resolution at compile time.
+ */
+export interface ColumnRef<T = unknown> {
+  __brand: 'ColumnRef';
+  table: string;
+  column: string;
+  type?: T;  // Phantom type for inference
+}
+
+// DX helper to create typed refs
+export function col<T>(table: string, column: string): ColumnRef<T> {
+  return { __brand: 'ColumnRef', table, column } as ColumnRef<T>;
+}
+```
+
 ### Intent Type Definitions
 
 ```typescript
@@ -117,55 +143,82 @@ A critical constraint is **connection pool management**. Having separate adapter
 
 /**
  * Full-Text Search Intent
- * Compiles to: to_tsvector(config, field) @@ to_tsquery(config, query)
+ *
+ * Maps to PostgreSQL tsquery functions:
+ * - 'tsquery': to_tsquery() - strict tsquery syntax
+ * - 'plain': plainto_tsquery() - simple text, ANDs words
+ * - 'phrase': phraseto_tsquery() - phrase search (word proximity)
+ * - 'websearch': websearch_to_tsquery() - Google-like syntax
+ *
+ * @see https://www.postgresql.org/docs/current/textsearch-controls.html
  */
 export interface FTSIntent {
   kind: 'fts';
-  field: string;
+  field: ColumnRef<string>;           // Typed column reference
   query: string;
-  config?: string;                    // 'english', 'french', 'simple'
-  operator?: 'match' | 'phrase' | 'prefix' | 'negation';
+  config?: string;                    // 'english', 'french', 'simple', etc.
+  queryMode?: 'tsquery' | 'plain' | 'phrase' | 'websearch';  // Maps to *_to_tsquery()
+  prefix?: boolean;                   // Append :* for prefix matching
   ranking?: {
     enabled: boolean;
     weights?: [number, number, number, number];  // A, B, C, D weights
-    normalization?: number;
+    normalization?: number;           // ts_rank normalization option
   };
 }
 
 /**
  * Range Type Intent
- * Compiles to: field <operator> range_value
- * Operators: && (overlaps), @> (contains), <@ (contained), -|- (adjacent)
+ *
+ * PostgreSQL range operators:
+ * - && (overlaps): ranges share any points
+ * - @> (contains): left contains right
+ * - <@ (contained_by): left is contained by right
+ * - -|- (adjacent): ranges are adjacent
+ * - << (left_of): strictly left of
+ * - >> (right_of): strictly right of
+ *
+ * SECURITY: Range type names are allowlisted union, safe for sql.id()
+ *
+ * @see https://www.postgresql.org/docs/current/rangetypes.html
  */
+export type RangeType = 'daterange' | 'tsrange' | 'tstzrange' | 'int4range' | 'int8range' | 'numrange';
+export type RangeOperator = 'overlaps' | 'contains' | 'contained_by' | 'adjacent' | 'left_of' | 'right_of';
+
 export interface RangeIntent {
   kind: 'range';
-  field: string;
-  type: 'daterange' | 'tsrange' | 'tstzrange' | 'int4range' | 'int8range' | 'numrange';
-  operator: 'overlaps' | 'contains' | 'contained_by' | 'adjacent' | 'left_of' | 'right_of';
+  field: ColumnRef;                   // Typed column reference
+  type: RangeType;                    // Allowlisted - safe for sql.id()
+  operator: RangeOperator;            // Allowlisted - safe for sql.raw()
   value: {
     lower: unknown;
     upper: unknown;
-    bounds?: '[]' | '[)' | '(]' | '()';  // inclusive/exclusive
+    bounds?: '[]' | '[)' | '(]' | '()';  // inclusive/exclusive, default '[)'
   };
 }
 
 /**
  * Window Function Intent
- * Compiles to: fn(field) OVER (PARTITION BY ... ORDER BY ...)
+ *
+ * SECURITY: Function names are allowlisted union, safe for sql.raw()
+ *
+ * Note: Frame specification deferred to P3+ (not in MVP).
+ *
+ * @see https://www.postgresql.org/docs/current/tutorial-window.html
  */
+export type WindowFunction =
+  | 'row_number' | 'rank' | 'dense_rank' | 'ntile'
+  | 'sum' | 'avg' | 'count' | 'min' | 'max'
+  | 'lag' | 'lead' | 'first_value' | 'last_value';
+
 export interface WindowIntent {
   kind: 'window';
-  function: 'row_number' | 'rank' | 'dense_rank' | 'sum' | 'avg' | 'count' | 'min' | 'max' | 'lag' | 'lead' | 'first_value' | 'last_value';
-  field?: string;                     // For aggregate window functions
+  function: WindowFunction;           // Allowlisted - safe for sql.raw()
+  field?: ColumnRef;                  // For aggregate window functions
   alias: string;
   over: {
-    partitionBy?: string[];
-    orderBy?: Array<{ field: string; direction?: 'asc' | 'desc' }>;
-    frame?: {
-      type: 'rows' | 'range' | 'groups';
-      start: 'unbounded_preceding' | 'current_row' | { offset: number; direction: 'preceding' | 'following' };
-      end?: 'unbounded_following' | 'current_row' | { offset: number; direction: 'preceding' | 'following' };
-    };
+    partitionBy?: ColumnRef[];
+    orderBy?: Array<{ field: ColumnRef; direction?: 'asc' | 'desc' }>;
+    // frame?: ... // DEFERRED: Frame specification (ROWS/RANGE/GROUPS) to P3+
   };
 }
 ```
@@ -222,10 +275,22 @@ function compileFTSWhere(
   tableAlias: string
 ): Expression<SqlBool> {
   const config = sql.lit(intent.config || 'english');
-  const field = sql.ref(`${tableAlias}.${intent.field}`);
+  // Use ColumnRef for proper alias resolution
+  const field = sql.ref(`${tableAlias}.${intent.field.column}`);
   const query = sql.val(intent.query);
 
-  return sql`to_tsvector(${config}, ${field}) @@ to_tsquery(${config}, ${query})`;
+  // Select tsquery function based on queryMode (default: plainto_tsquery for safety)
+  const queryFn = {
+    tsquery: 'to_tsquery',
+    plain: 'plainto_tsquery',
+    phrase: 'phraseto_tsquery',
+    websearch: 'websearch_to_tsquery'
+  }[intent.queryMode || 'plain'];
+
+  // Prefix matching: append :* to query for prefix search
+  const searchQuery = intent.prefix ? sql`${query} || ':*'` : query;
+
+  return sql`to_tsvector(${config}, ${field}) @@ ${sql.raw(queryFn)}(${config}, ${searchQuery})`;
 }
 
 function compileFTSRankSelect(
@@ -234,14 +299,21 @@ function compileFTSRankSelect(
   alias: string
 ): AliasedExpression<number, string> {
   const config = sql.lit(intent.config || 'english');
-  const field = sql.ref(`${tableAlias}.${intent.field}`);
+  const field = sql.ref(`${tableAlias}.${intent.field.column}`);
   const query = sql.val(intent.query);
 
-  let rankExpr = sql`ts_rank(to_tsvector(${config}, ${field}), to_tsquery(${config}, ${query}))`;
+  const queryFn = {
+    tsquery: 'to_tsquery',
+    plain: 'plainto_tsquery',
+    phrase: 'phraseto_tsquery',
+    websearch: 'websearch_to_tsquery'
+  }[intent.queryMode || 'plain'];
+
+  let rankExpr = sql`ts_rank(to_tsvector(${config}, ${field}), ${sql.raw(queryFn)}(${config}, ${query}))`;
 
   if (intent.ranking?.weights) {
     const weights = sql.lit(`{${intent.ranking.weights.join(',')}}`);
-    rankExpr = sql`ts_rank(${weights}, to_tsvector(${config}, ${field}), to_tsquery(${config}, ${query}))`;
+    rankExpr = sql`ts_rank(${weights}, to_tsvector(${config}, ${field}), ${sql.raw(queryFn)}(${config}, ${query}))`;
   }
 
   return rankExpr.as(alias);
@@ -252,11 +324,18 @@ function compileRangeWhere(
   intent: RangeIntent,
   tableAlias: string
 ): Expression<SqlBool> {
-  const field = sql.ref(`${tableAlias}.${intent.field}`);
+  // Use ColumnRef for proper alias resolution
+  const field = sql.ref(`${tableAlias}.${intent.field.column}`);
   const bounds = intent.value.bounds || '[)';
-  const rangeValue = sql`${sql.lit(intent.type)}(${sql.val(intent.value.lower)}, ${sql.val(intent.value.upper)}, ${sql.lit(bounds)})`;
 
-  const operators: Record<RangeIntent['operator'], string> = {
+  // IMPORTANT: sql.id() for the range constructor function name (identifier),
+  // NOT sql.lit() which would create a string literal 'tsrange' instead of tsrange()
+  // Safe because RangeType is an allowlisted union (no injection risk)
+  const ctor = sql.id(intent.type);
+  const rangeValue = sql`${ctor}(${sql.val(intent.value.lower)}, ${sql.val(intent.value.upper)}, ${sql.val(bounds)})`;
+
+  // Allowlisted operators - safe for sql.raw() (closed enum, no user input)
+  const operators: Record<RangeOperator, string> = {
     overlaps: '&&',
     contains: '@>',
     contained_by: '<@',
@@ -272,19 +351,23 @@ function compileWindowSelect(
   intent: WindowIntent,
   tableAlias: string
 ): AliasedExpression<unknown, string> {
+  // WindowFunction is allowlisted - safe for sql.raw()
   const fn = intent.function;
-  const field = intent.field ? sql.ref(`${tableAlias}.${intent.field}`) : sql`*`;
+  // Use ColumnRef for proper alias resolution
+  const field = intent.field ? sql.ref(`${tableAlias}.${intent.field.column}`) : sql`*`;
 
   let overClause = sql``;
 
   if (intent.over.partitionBy?.length) {
-    const partitionCols = intent.over.partitionBy.map(c => sql.ref(`${tableAlias}.${c}`));
+    // ColumnRef[] - extract column names
+    const partitionCols = intent.over.partitionBy.map(c => sql.ref(`${tableAlias}.${c.column}`));
     overClause = sql`PARTITION BY ${sql.join(partitionCols)}`;
   }
 
   if (intent.over.orderBy?.length) {
     const orderCols = intent.over.orderBy.map(o => {
-      const col = sql.ref(`${tableAlias}.${o.field}`);
+      // ColumnRef - extract column name
+      const col = sql.ref(`${tableAlias}.${o.field.column}`);
       return o.direction === 'desc' ? sql`${col} DESC` : col;
     });
     const orderClause = sql`ORDER BY ${sql.join(orderCols)}`;
@@ -321,6 +404,17 @@ function compileWindowSelect(
 ```typescript
 // packages/adapter-kysely/src/dialect.ts
 
+/**
+ * FTS Flavor - Different databases have different FTS implementations
+ * This allows the compiler to select the right SQL generation strategy
+ */
+type FTSFlavor = 'none' | 'postgres-tsvector' | 'mysql-fulltext' | 'sqlite-fts5';
+
+/**
+ * Window Function Support Level
+ */
+type WindowFunctionSupport = 'none' | 'basic' | 'full';
+
 interface DialectCapabilities {
   // Existing
   supportsReturning: boolean;
@@ -329,37 +423,96 @@ interface DialectCapabilities {
   supportsArrayType: boolean;
   supportsRecursiveCTE: boolean;
 
-  // NEW for P3 features
-  supportsFullTextSearch: boolean;      // PostgreSQL, MySQL (different syntax)
-  supportsTsvector: boolean;            // PostgreSQL only
-  supportsRangeTypes: boolean;          // PostgreSQL only
-  supportsWindowFunctions: boolean;     // PostgreSQL, MySQL 8+, SQLite 3.25+
+  // NEW for P3 features - Using flavors instead of booleans
+  // This allows proper SQL generation per dialect
+  ftsFlavor: FTSFlavor;                       // Which FTS implementation?
+  supportsRangeTypes: boolean;                // PostgreSQL only (no flavor needed)
+  windowFunctionSupport: WindowFunctionSupport; // Level of window function support
 }
 
 const POSTGRES_CAPABILITIES: DialectCapabilities = {
   // ... existing
-  supportsFullTextSearch: true,
-  supportsTsvector: true,
-  supportsRangeTypes: true,
-  supportsWindowFunctions: true,
+  ftsFlavor: 'postgres-tsvector',  // to_tsvector/to_tsquery
+  supportsRangeTypes: true,         // daterange, tsrange, etc.
+  windowFunctionSupport: 'full',    // All window functions + frames
 };
 
 const MYSQL_CAPABILITIES: DialectCapabilities = {
   // ... existing
-  supportsFullTextSearch: true,   // Different syntax (MATCH ... AGAINST)
-  supportsTsvector: false,
+  ftsFlavor: 'mysql-fulltext',     // MATCH ... AGAINST syntax
   supportsRangeTypes: false,
-  supportsWindowFunctions: true,  // MySQL 8.0+
+  windowFunctionSupport: 'full',   // MySQL 8.0+ has full support
 };
 
 const SQLITE_CAPABILITIES: DialectCapabilities = {
   // ... existing
-  supportsFullTextSearch: true,   // FTS5
-  supportsTsvector: false,
+  ftsFlavor: 'sqlite-fts5',        // FTS5 virtual tables
   supportsRangeTypes: false,
-  supportsWindowFunctions: true,  // SQLite 3.25+
+  windowFunctionSupport: 'basic',  // SQLite 3.25+ (no GROUPS frame)
+};
+
+const MSSQL_CAPABILITIES: DialectCapabilities = {
+  // ... existing
+  ftsFlavor: 'none',               // Would need separate implementation
+  supportsRangeTypes: false,
+  windowFunctionSupport: 'full',
 };
 ```
+
+### FTS Flavor Usage in Compiler
+
+```typescript
+function compileFTSWhere(
+  intent: FTSIntent,
+  tableAlias: string,
+  capabilities: DialectCapabilities
+): Expression<SqlBool> {
+  switch (capabilities.ftsFlavor) {
+    case 'postgres-tsvector':
+      return compilePostgresFTS(intent, tableAlias);
+    case 'mysql-fulltext':
+      return compileMySQLFTS(intent, tableAlias);
+    case 'sqlite-fts5':
+      return compileSQLiteFTS(intent, tableAlias);
+    case 'none':
+      throw new UnsupportedOperationError(
+        'Full-text search',
+        'current dialect',
+        'Use PostgreSQL, MySQL, or SQLite for FTS support'
+      );
+  }
+}
+```
+
+## Prisma Adapter Considerations
+
+**Important:** Prisma's raw SQL mechanism (`$queryRaw`, `$queryRawUnsafe`) differs fundamentally from Kysely/Drizzle:
+
+| Feature | Kysely/Drizzle | Prisma |
+|---------|----------------|--------|
+| **Scope** | Fragments (WHERE, SELECT expressions) | Entire queries only |
+| **Integration** | Composable with query builder | Standalone execution |
+| **Type safety** | Template tag with interpolation | `Prisma.sql` or unsafe string |
+
+**Implication for adapter-prisma:**
+
+```typescript
+// Kysely/Drizzle approach (fragment injection)
+.where(sql`to_tsvector('english', ${ref('title')}) @@ to_tsquery(...)`)
+
+// Prisma approach (must build complete query)
+const result = await prisma.$queryRaw`
+  SELECT * FROM articles
+  WHERE to_tsvector('english', title) @@ to_tsquery('english', ${query})
+`;
+```
+
+The Prisma adapter will need to:
+1. Build complete SQL strings from Intent AST (not fragments)
+2. Use `Prisma.sql` template tag for parameter binding
+3. Potentially fall back to native Prisma queries when possible
+
+This is a **significant implementation difference** but doesn't change the architecture—Typed Intents remain the contract, only compilation differs.
 
 ## Intent Hierarchy Summary
 
