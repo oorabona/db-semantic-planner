@@ -76,6 +76,33 @@ Ergonomic improvements to QueryBuilder API for better DX.
 
 ---
 
+## Pending - P3
+
+**ADR:** [ADR-001: Typed Intents for Advanced Features](docs/adrs/ADR-001-typed-intents-for-advanced-features.md)
+
+### P3-A: Window Functions DX API
+
+- [ ] `window()` method on QueryBuilder
+  - `window('running_balance', { function: 'sum', field: 'amount', over: { partitionBy: [...] } })`
+- [ ] Type-safe WindowOptions interface
+- [ ] Integration with select(), findMany()
+
+### P3-B: Full-Text Search DX API
+
+- [ ] `fts(field, query, options?)` helper function
+- [ ] `ftsRank(field, query)` for ordering by relevance
+- [ ] FTSOptions: config, operator, ranking
+- [ ] Integration with where() clause
+
+### P3-C: Range Types DX API
+
+- [ ] `rangeOverlaps(field, value)` helper
+- [ ] `rangeContains(field, value)` helper
+- [ ] `rangeContainedBy(field, value)` helper
+- [ ] RangeValue type: { lower, upper, bounds? }
+
+---
+
 ## Pending - P2
 
 (none)

@@ -161,14 +161,46 @@ eb(eb.ref('prev.path'), '||', eb.ref('node.${traversal.nodeId}')).as('path')
 
 ## Pending - P3 (Advanced PostgreSQL Features)
 
+**ADR:** [ADR-001: Typed Intents for Advanced Features](docs/adrs/ADR-001-typed-intents-for-advanced-features.md)
 **Study:** [STUDY-001-advanced-postgresql-features.md](docs/studies/STUDY-001-advanced-postgresql-features.md)
 
-### Future P3 Features (pending RFCs)
+### P3-A: Window Functions Compiler (HIGH priority)
 
-- [ ] Window Functions (FinTech running balance) - `OverIntent`
-- [ ] Range Types (Booking/Scheduling) - PostgreSQL-specific
-- [ ] FOR UPDATE SKIP LOCKED (Job Queue) - `LockIntent`
-- [ ] Full-text Search (tsvector) - PostgreSQL-specific
+- [ ] `compileWindowSelect()` function
+  - Uses Kysely's native `over()`, `partitionBy()` API
+  - Supports: row_number, rank, dense_rank, sum, avg, count, min, max, lag, lead
+  - Frame specification (ROWS/RANGE/GROUPS)
+- [ ] Extend DialectCapabilities with `supportsWindowFunctions`
+- [ ] Unit tests for window function compilation
+
+### P3-B: FTS Compiler (PostgreSQL)
+
+- [ ] `compileFTSWhere()` function
+  - Uses Kysely's `sql` template (same connection pool)
+  - Compiles to: `to_tsvector(config, field) @@ to_tsquery(config, query)`
+- [ ] `compileFTSRankSelect()` for ts_rank ordering
+- [ ] Extend DialectCapabilities with `supportsFullTextSearch`, `supportsTsvector`
+- [ ] Capability guard: `assertCapability('supportsTsvector')` for PostgreSQL-only
+- [ ] Unit tests for FTS compilation
+
+### P3-C: Range Types Compiler (PostgreSQL)
+
+- [ ] `compileRangeWhere()` function
+  - Uses Kysely's `sql` template (same connection pool)
+  - Operators: && (overlaps), @> (contains), <@ (contained_by), -|- (adjacent)
+- [ ] Extend DialectCapabilities with `supportsRangeTypes`
+- [ ] Capability guard for PostgreSQL-only
+- [ ] Unit tests for range compilation
+
+### P3-D: FOR UPDATE SKIP LOCKED (Job Queue pattern)
+
+- [ ] `LockIntent` type (future)
+- [ ] Kysely's native `forUpdate()` + SKIP LOCKED
+
+### P3-E: Multi-dialect FTS (future)
+
+- [ ] MySQL MATCH...AGAINST syntax
+- [ ] SQLite FTS5 syntax
 
 ---
 

@@ -13,7 +13,7 @@ doc-meta:
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
 
-**Status:** MVP ✅ Complete + P1 ✅ Complete + P2 ✅ Complete (736 unit + 87 E2E = 823 tests)
+**Status:** MVP ✅ Complete + P1 ✅ Complete + P2 ✅ Complete (745 unit + 87 E2E = 832 tests)
 
 ## Architecture: Ports & Adapters
 
@@ -137,6 +137,12 @@ packages/dx            → Depends on core + adapter-kysely
 - No NL-to-SQL
 - No multi-dialect correctness (PostgreSQL only)
 - No change tracking / dirty checking
+
+## ADRs (Architecture Decision Records)
+
+| ADR ID | Title | Scope | Status |
+|--------|-------|-------|--------|
+| ADR-001 | [Typed Intents for Advanced Features](adrs/ADR-001-typed-intents-for-advanced-features.md) | core, adapter, dx | ✅ accepted |
 
 ## RFCs (Request for Comments)
 

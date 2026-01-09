@@ -28,10 +28,33 @@
 
 ## Pending - P3 (Advanced Features)
 
-### Future P3 Features (pending RFCs)
+**ADR:** [ADR-001: Typed Intents for Advanced Features](docs/adrs/ADR-001-typed-intents-for-advanced-features.md)
 
-- [ ] `WindowIntent` for window functions (OVER PARTITION BY)
-- [ ] `AggregateWindowIntent` for running totals/balances
+### P3-A: WindowIntent (HIGH priority - Kysely native API)
+
+- [ ] `WindowIntent` type in intent-ast.ts
+  - function: row_number, rank, dense_rank, sum, avg, count, min, max, lag, lead
+  - over: partitionBy, orderBy, frame
+  - alias: string
+- [ ] `isWindowIntent` type guard
+- [ ] Planner support for window functions in SELECT
+
+### P3-B: FTSIntent (PostgreSQL Full-Text Search)
+
+- [ ] `FTSIntent` type in intent-ast.ts
+  - field, query, config (language)
+  - operator: match, phrase, prefix, negation
+  - ranking options (weights, normalization)
+- [ ] `isFTSIntent` type guard
+- [ ] Planner support for FTS in WHERE clause
+
+### P3-C: RangeIntent (PostgreSQL Range Types)
+
+- [ ] `RangeIntent` type in intent-ast.ts
+  - type: daterange, tsrange, tstzrange, int4range, int8range, numrange
+  - operator: overlaps, contains, contained_by, adjacent, left_of, right_of
+  - value: { lower, upper, bounds }
+- [ ] `isRangeIntent` type guard
 
 ---
 

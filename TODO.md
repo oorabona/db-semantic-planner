@@ -98,8 +98,9 @@ See **DIALECT-001** in "In Progress" section above.
 
 ### Additional Adapters
 
-- [ ] Direct pg adapter (no Kysely) - TBD
-- [ ] Drizzle adapter - TBD
+- [ ] Drizzle adapter - TBD (uses same Typed Intents, different compilation)
+- [ ] Prisma adapter - TBD (uses same Typed Intents, different compilation)
+- [x] ⏭️ Direct pg adapter - **SUPERSEDED** by ADR-001 (Typed Intents use each ORM's raw escape hatch)
 
 ### Query Features (P2)
 
