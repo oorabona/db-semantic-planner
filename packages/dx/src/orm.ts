@@ -40,7 +40,6 @@ import type {
 	IncludeOptions,
 	NestedInclude,
 	OrmInstance,
-	OrmOptions,
 	OrmOptionsWithDb,
 	OrmOptionsWithModel,
 	QueryBuilder,
@@ -155,7 +154,10 @@ function createOrmInstance(
 				.from(table)
 				.nodeId(nodeId)
 				.where(eq(nodeId, nodeIdValue))
-				.traverseVia(table, { parentId: options.parentId, direction: 'ancestors' });
+				.traverseVia(table, {
+					parentId: options.parentId,
+					direction: 'ancestors',
+				});
 		},
 
 		descendants<TResult = unknown>(
@@ -175,7 +177,10 @@ function createOrmInstance(
 				.from(table)
 				.nodeId(nodeId)
 				.where(eq(nodeId, nodeIdValue))
-				.traverseVia(table, { parentId: options.parentId, direction: 'descendants' });
+				.traverseVia(table, {
+					parentId: options.parentId,
+					direction: 'descendants',
+				});
 		},
 
 		subtree<TResult = unknown>(
@@ -197,7 +202,10 @@ function createOrmInstance(
 				.from(table)
 				.nodeId(nodeId)
 				.where(eq(nodeId, nodeIdValue))
-				.traverseVia(table, { parentId: options.parentId, direction: 'descendants' });
+				.traverseVia(table, {
+					parentId: options.parentId,
+					direction: 'descendants',
+				});
 		},
 
 		// =====================================================================
@@ -325,11 +333,17 @@ function parseDotNotationInclude(
 
 	// Build from the end (deepest level) to the beginning
 	// Options apply to the deepest (last) relation
-	let current: IncludeIntent = includeOptionsToIntent(parts[parts.length - 1]!, options);
+	const lastPart = parts[parts.length - 1];
+	if (!lastPart) {
+		throw new Error('Invalid include path: empty segment');
+	}
+	let current: IncludeIntent = includeOptionsToIntent(lastPart, options);
 
 	// Work backwards through the path, wrapping each level
 	for (let i = parts.length - 2; i >= 0; i--) {
-		current = { relation: parts[i]!, include: [current] };
+		const part = parts[i];
+		if (!part) continue;
+		current = { relation: part, include: [current] };
 	}
 
 	return current;
@@ -592,7 +606,11 @@ class QueryBuilderImpl implements QueryBuilder {
 			throw new Error('Composite primary key cannot be empty');
 		}
 		if (entries.length === 1) {
-			const [field, fieldValue] = entries[0]!;
+			const entry = entries[0];
+			if (!entry) {
+				throw new Error('Composite primary key entry missing');
+			}
+			const [field, fieldValue] = entry;
 			return eq(field, fieldValue);
 		}
 		const conditions = entries.map(([field, fieldValue]) =>

@@ -95,7 +95,10 @@ describe('DX-009: Hierarchy Shortcuts', () => {
 			});
 
 			const { intent } = builder.upToDepth(5).dump();
-			expect(intent.start.nodeIdExpr).toEqual({ kind: 'column', name: 'category_id' });
+			expect(intent.start.nodeIdExpr).toEqual({
+				kind: 'column',
+				name: 'category_id',
+			});
 		});
 
 		it('should use custom cteName when specified', () => {

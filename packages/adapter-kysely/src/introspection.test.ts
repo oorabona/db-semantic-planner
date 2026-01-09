@@ -637,11 +637,12 @@ describe('introspection', () => {
 			const result = await introspect(db, { _foreignKeysForTesting: fks });
 
 			expect(result.hierarchies).toHaveLength(1);
-			const hierarchy = result.hierarchies[0]!;
-			expect(hierarchy.type).toBe('adjacency');
-			expect(hierarchy.nodeTable).toBe('categories');
-			expect(hierarchy.parentColumn).toBe('parent_id');
-			expect(hierarchy.nodeIdColumn).toBe('id');
+			const hierarchy = result.hierarchies[0];
+			expect(hierarchy).toBeDefined();
+			expect(hierarchy?.type).toBe('adjacency');
+			expect(hierarchy?.nodeTable).toBe('categories');
+			expect(hierarchy?.parentColumn).toBe('parent_id');
+			expect(hierarchy?.nodeIdColumn).toBe('id');
 		});
 
 		it('should detect manager relationship as adjacency', async () => {
@@ -657,9 +658,10 @@ describe('introspection', () => {
 			const db = createMockDb(tables);
 			const result = await introspect(db, { _foreignKeysForTesting: fks });
 
-			const hierarchy = result.hierarchies[0]!;
-			expect(hierarchy.type).toBe('adjacency');
-			expect(hierarchy.parentColumn).toBe('manager_id');
+			const hierarchy = result.hierarchies[0];
+			expect(hierarchy).toBeDefined();
+			expect(hierarchy?.type).toBe('adjacency');
+			expect(hierarchy?.parentColumn).toBe('manager_id');
 		});
 
 		it('should not create adjacency for non-self-referential FK', async () => {

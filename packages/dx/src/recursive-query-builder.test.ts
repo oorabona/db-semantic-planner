@@ -713,7 +713,10 @@ describe('RecursiveQueryBuilder', () => {
 				.from('categories')
 				.startingFrom('id')
 				.where(eq('id', 42))
-				.following('categories', { parentId: 'parentId', direction: 'descendants' })
+				.following('categories', {
+					parentId: 'parentId',
+					direction: 'descendants',
+				})
 				.upToDepth(10);
 
 			const { sql, intent } = builder.dump();

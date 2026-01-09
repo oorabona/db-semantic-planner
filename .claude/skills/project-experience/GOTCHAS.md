@@ -344,3 +344,42 @@ const hasManyName = fk.sourceTable;
 ```
 
 **Location:** `packages/adapter-kysely/src/introspection.ts` - `inferRelations()`
+
+---
+
+### Biome: Use Helper Functions for Array Access (2026-01-09)
+
+**Issue:** Biome's `noNonNullAssertion` rule flags `array[0]!` patterns even when logic guarantees non-empty array.
+
+**Cause:** TypeScript's type system can't prove array access is safe. `arr[0]!` bypasses type checking, which Biome prohibits.
+
+**Wrong pattern:**
+```typescript
+const pkColumns = metadata.primaryKey!.columns;
+const firstCol = pkColumns[0]!;  // Biome error: noNonNullAssertion
+```
+
+**Solution:** Create helper functions with explicit checks:
+
+```typescript
+function first<T>(arr: readonly T[], fallback: T): T {
+  const element = arr[0];
+  return element !== undefined ? element : fallback;
+}
+
+function firstOrThrow<T>(arr: readonly T[], context: string): T {
+  const element = arr[0];
+  if (element === undefined) {
+    throw new Error(`Expected non-empty array in ${context}`);
+  }
+  return element;
+}
+
+// Usage
+const firstCol = first(pkColumns, 'id');  // With fallback
+const required = firstOrThrow(fk.sourceColumns, 'FK source columns');  // Throws if empty
+```
+
+**Key insight:** The `element !== undefined` check satisfies both TypeScript and Biome because it proves the element exists at runtime.
+
+**Location:** `packages/adapter-kysely/src/introspection.ts` lines 16-31

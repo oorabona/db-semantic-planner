@@ -29,9 +29,13 @@ describe('AmbiguousRelationError', () => {
 			'reviewedPosts',
 		]);
 
-		expect(error.message).toContain("Ambiguous relation from 'users' to 'posts'");
+		expect(error.message).toContain(
+			"Ambiguous relation from 'users' to 'posts'",
+		);
 		expect(error.message).toContain('authoredPosts, reviewedPosts');
-		expect(error.message).toContain(".include('posts', { via: 'authoredPosts' })");
+		expect(error.message).toContain(
+			".include('posts', { via: 'authoredPosts' })",
+		);
 		expect(error.message).toContain('createOrm({ db, relationHints:');
 	});
 
@@ -123,7 +127,9 @@ describe('NotFoundError', () => {
 
 		expect(error.table).toBe('users');
 		expect(error.hint).toBe('Check if the ID exists.');
-		expect(error.message).toBe("No record found for 'users'. Check if the ID exists.");
+		expect(error.message).toBe(
+			"No record found for 'users'. Check if the ID exists.",
+		);
 	});
 
 	it('has name set to NotFoundError', () => {
@@ -160,7 +166,9 @@ describe('RelationNotFoundError', () => {
 			available: ['posts', 'profile'],
 		});
 
-		expect(error.message).toContain("Relation 'unknown' not found on table 'users'");
+		expect(error.message).toContain(
+			"Relation 'unknown' not found on table 'users'",
+		);
 		expect(error.message).toContain('Available relations: posts, profile');
 	});
 

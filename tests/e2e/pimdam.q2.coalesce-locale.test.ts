@@ -2,12 +2,25 @@
  * Q2: Working Context with Locale Fallback (COALESCE)
  *
  * Tests the COALESCE expression API for locale-aware field selection.
- * 
+ *
+ * @see E2E-002 Block 6
+ *
+ * ## Test Structure (GWT - Given/When/Then)
+ *
+ * - **Given**: Extended PIM/DAM schema with products having locale-specific names (beforeAll)
+ * - **When**: Execute ORM query with coalesce() expression
+ * - **Then**: Verify correct fallback behavior based on NULL values
+ *
  * Scenarios:
  * - Q2-01: Product name with FR->EN fallback (EN used when FR is NULL)
  * - Q2-02: Product name with FR primary (FR used when available)
  * - Q2-03: Multi-level fallback chain (FR->EN->default)
  * - Q2-04: Filter by coalesced value
+ *
+ * Test data:
+ * - WIDGET-001: name_fr=NULL, name_en="Widget Pro" → expects "Widget Pro"
+ * - GADGET-001: name_fr="Super Bidule", name_en="Super Gadget" → expects "Super Bidule"
+ * - GIZMO-001: name_fr=NULL, name_en=NULL, name_default="Default Gizmo" → expects "Default Gizmo"
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';

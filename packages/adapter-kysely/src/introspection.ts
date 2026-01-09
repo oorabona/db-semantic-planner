@@ -18,6 +18,31 @@ import type { ColumnMetadata, Kysely, TableMetadata } from 'kysely';
 import { sql } from 'kysely';
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Safely get first element from a non-empty array.
+ * Returns the element or a fallback if array is empty.
+ */
+function first<T>(arr: readonly T[], fallback: T): T {
+	const element = arr[0];
+	return element !== undefined ? element : fallback;
+}
+
+/**
+ * Get first element, throwing if array is empty.
+ * Use only when array is guaranteed non-empty by previous checks.
+ */
+function firstOrThrow<T>(arr: readonly T[], context: string): T {
+	const element = arr[0];
+	if (element === undefined) {
+		throw new Error(`Expected non-empty array in ${context}`);
+	}
+	return element;
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -353,7 +378,7 @@ function buildTableIR(
 	const primaryKey: string | readonly string[] =
 		pkColumns.length > 0
 			? pkColumns.length === 1
-				? pkColumns[0]!
+				? first(pkColumns, 'id')
 				: pkColumns
 			: 'id';
 
@@ -475,15 +500,18 @@ function inferRelations(
 	const relations: RelationIR[] = [];
 
 	for (const fk of foreignKeys) {
+		// FK must have at least one source column
+		const firstSourceCol = firstOrThrow(fk.sourceColumns, 'FK source columns');
+
 		// belongsTo: FK owner → FK target
-		const belongsToName = fkToRelationName(fk.sourceColumns[0]!, naming);
+		const belongsToName = fkToRelationName(firstSourceCol, naming);
 		const belongsTo: RelationIR = {
 			name: belongsToName,
 			type: 'belongsTo',
 			source: fk.sourceTable,
 			target: fk.targetTable,
 			foreignKey:
-				fk.sourceColumns.length === 1 ? fk.sourceColumns[0]! : fk.sourceColumns,
+				fk.sourceColumns.length === 1 ? firstSourceCol : fk.sourceColumns,
 			cardinality: 'one',
 			optionality: 'optional', // FK columns are usually nullable
 			includeStrategy: 'join',
@@ -501,7 +529,7 @@ function inferRelations(
 			source: fk.targetTable,
 			target: fk.sourceTable,
 			foreignKey:
-				fk.sourceColumns.length === 1 ? fk.sourceColumns[0]! : fk.sourceColumns,
+				fk.sourceColumns.length === 1 ? firstSourceCol : fk.sourceColumns,
 			cardinality: 'many',
 			optionality: 'optional',
 			includeStrategy: 'separate', // Use 'separate' for hasMany to avoid row explosion
@@ -547,10 +575,11 @@ function detectHierarchies(
 		if (fk.sourceTable === fk.targetTable) {
 			// Self-referential FK = adjacency pattern
 			const nodeIdColumn = tablePkMap.get(fk.sourceTable) ?? 'id';
+			const parentCol = firstOrThrow(fk.sourceColumns, 'adjacency FK');
 			hierarchies.push({
 				type: 'adjacency',
 				nodeTable: fk.sourceTable,
-				parentColumn: fk.sourceColumns[0]!,
+				parentColumn: parentCol,
 				nodeIdColumn,
 			});
 		}
@@ -583,16 +612,20 @@ function detectHierarchies(
 		// Check for 2+ FKs to same target
 		for (const [targetTable, targetFks] of fksByTarget) {
 			if (targetFks.length >= 2) {
-				// Edge-table pattern detected
+				// Edge-table pattern detected - we checked length >= 2
 				const nodeIdColumn = tablePkMap.get(targetTable) ?? 'id';
-				hierarchies.push({
-					type: 'edge-table',
-					nodeTable: targetTable,
-					edgeTable: sourceTable,
-					parentColumn: targetFks[0]!.sourceColumns[0]!,
-					childColumn: targetFks[1]!.sourceColumns[0]!,
-					nodeIdColumn,
-				});
+				const parentFk = targetFks[0];
+				const childFk = targetFks[1];
+				if (parentFk && childFk) {
+					hierarchies.push({
+						type: 'edge-table',
+						nodeTable: targetTable,
+						edgeTable: sourceTable,
+						parentColumn: firstOrThrow(parentFk.sourceColumns, 'parent FK'),
+						childColumn: firstOrThrow(childFk.sourceColumns, 'child FK'),
+						nodeIdColumn,
+					});
+				}
 			}
 		}
 	}

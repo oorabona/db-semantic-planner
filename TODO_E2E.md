@@ -1,7 +1,22 @@
 # TODO: E2E Tests
 
 **Phase:** P2
-**Updated:** 2026-01-08
+**Updated:** 2026-01-09
+
+---
+
+## Pending (Backlogged from Review)
+
+### E2E-002 Edge Case: Q8-03 Strict Mode Ambiguity Error
+
+**Source:** Review finding F-001 (NON-BLOCKING, LOW, Size M)
+**Added:** 2026-01-09
+
+- [ ] Implement strict mode in ORM config
+- [ ] Add test: `should throw AmbiguousRelationError when querying 'users' without via hint`
+- [ ] Add test: `should provide helpful error message with available relations`
+
+**Blocked by:** DX-011 (strict mode implementation)
 
 ---
 
@@ -35,45 +50,39 @@
 ### E2E-002: PIM/DAM Realistic Scenarios ✅
 
 **Spec:** docs/specs/E2E-002-pimdam-realistic-scenarios.md
-**Status:** ✅ PHASE 1 COMPLETE (COALESCE API)
+**Status:** ✅ COMPLETE (Phase 1 + Phase 2)
 **Created:** 2026-01-08
-**Updated:** 2026-01-08
+**Completed:** 2026-01-09
 
 ## Summary
 
-Implement 10 realistic PIM/DAM use cases as E2E tests to validate API capabilities:
+Implemented 10 realistic PIM/DAM use cases as E2E tests validating API capabilities:
 - P0 (discriminating): Q1-Q5 (completeness, fallback, variants, assets)
 - P1 (enterprise): Q6-Q8 (category tree, BOM, ambiguity)
 - P2 (robustness): Q9-Q10 (multi-tenant, capabilities)
 
-**Blocker RESOLVED:** COALESCE expressions API implemented (Blocks 1-3)
+**Total E2E Tests:** 186
 
 ---
 
-## Pending (Phase 2 - Deferred)
+## Phase 2 Completed (2026-01-09)
 
 ### E2E Test Files
 
-- [ ] Block 5: Q1 Completeness tests (M)
-- [ ] Block 7: Q3-Q5 Variants and assets tests (M)
-- [ ] Block 8: Q6 Category tree tests (S)
-- [ ] Block 9: Q7 BOM/Bundle tests (M)
-- [ ] Block 10: Q8 Ambiguity via/role tests (S)
+- [x] ✅ Block 5: Q1 Completeness tests - 12 tests (2026-01-09)
+- [x] ✅ Block 7: Q3-Q5 Variants and assets tests - 12 tests (2026-01-09)
+- [x] ✅ Block 8: Q6 Category tree tests - 8 tests (2026-01-09)
+- [x] ✅ Block 9: Q7 BOM/Bundle tests - 7 tests (2026-01-09)
+- [x] ✅ Block 10: Q8 Ambiguity via/role tests - 14 tests (2026-01-09)
 
 ### Verification
 
-- [ ] Block 11: Verify Q9 multi-tenant coverage (S)
-- [ ] Block 12: Verify Q10 capabilities coverage (S)
+- [x] ✅ Block 11: Q9 multi-tenant coverage verified - 9 tests in pimdam.q4.multitenant.test.ts (2026-01-09)
+- [x] ✅ Block 12: Q10 capabilities coverage verified - 56+ tests in dialect.test.ts (2026-01-09)
 
 ---
 
-## In Progress
-
-(empty)
-
----
-
-## Completed
+## Phase 1 Completed (2026-01-08)
 
 - [x] ✅ Phase 0: Knowledge discovery (2026-01-08)
 - [x] ✅ Stage 1: /clarify - Requirements analysis (2026-01-08)

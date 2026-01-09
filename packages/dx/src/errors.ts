@@ -140,7 +140,6 @@ export class AmbiguousRelationError extends Error {
 	}
 }
 
-
 /**
  * Finds the closest match to a target string from a list of candidates.
  * Uses Levenshtein distance for fuzzy matching.
@@ -178,30 +177,52 @@ function findClosestMatch(
  * Simple Levenshtein distance implementation.
  */
 function levenshteinDistance(a: string, b: string): number {
+	// Pre-initialize matrix with zeros
+	const rows = b.length + 1;
+	const cols = a.length + 1;
 	const matrix: number[][] = [];
 
-	for (let i = 0; i <= b.length; i++) {
-		matrix[i] = [i];
-	}
-	for (let j = 0; j <= a.length; j++) {
-		matrix[0]![j] = j;
+	for (let i = 0; i < rows; i++) {
+		matrix[i] = new Array<number>(cols).fill(0);
 	}
 
-	for (let i = 1; i <= b.length; i++) {
-		for (let j = 1; j <= a.length; j++) {
+	// Initialize first column
+	for (let i = 0; i < rows; i++) {
+		const row = matrix[i];
+		if (row) row[0] = i;
+	}
+	// Initialize first row
+	const firstRow = matrix[0];
+	if (firstRow) {
+		for (let j = 0; j < cols; j++) {
+			firstRow[j] = j;
+		}
+	}
+
+	for (let i = 1; i < rows; i++) {
+		const currentRow = matrix[i];
+		const prevRow = matrix[i - 1];
+		if (!currentRow || !prevRow) continue;
+
+		for (let j = 1; j < cols; j++) {
+			const prevDiag = prevRow[j - 1] ?? 0;
+			const prevUp = prevRow[j] ?? 0;
+			const prevLeft = currentRow[j - 1] ?? 0;
+
 			if (b.charAt(i - 1) === a.charAt(j - 1)) {
-				matrix[i]![j] = matrix[i - 1]![j - 1]!;
+				currentRow[j] = prevDiag;
 			} else {
-				matrix[i]![j] = Math.min(
-					matrix[i - 1]![j - 1]! + 1, // substitution
-					matrix[i]![j - 1]! + 1, // insertion
-					matrix[i - 1]![j]! + 1, // deletion
+				currentRow[j] = Math.min(
+					prevDiag + 1, // substitution
+					prevLeft + 1, // insertion
+					prevUp + 1, // deletion
 				);
 			}
 		}
 	}
 
-	return matrix[b.length]![a.length]!;
+	const lastRow = matrix[b.length];
+	return lastRow ? (lastRow[a.length] ?? 0) : 0;
 }
 
 /**
@@ -252,9 +273,7 @@ export class RelationNotFoundError extends Error {
 	}) {
 		const suggestion = findClosestMatch(opts.requested, opts.available);
 		const availableList =
-			opts.available.length > 0
-				? opts.available.join(', ')
-				: '(none defined)';
+			opts.available.length > 0 ? opts.available.join(', ') : '(none defined)';
 
 		let message =
 			`Relation '${opts.requested}' not found on table '${opts.table}'.\n` +
@@ -276,7 +295,6 @@ export class RelationNotFoundError extends Error {
 		Object.setPrototypeOf(this, RelationNotFoundError.prototype);
 	}
 }
-
 
 /**
  * Error thrown when an operation is invalid or malformed.
