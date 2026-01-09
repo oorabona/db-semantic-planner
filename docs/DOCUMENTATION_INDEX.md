@@ -60,11 +60,11 @@ packages/dx            → Depends on core + adapter-kysely
 | STREAMING-001 | [Cursor/Streaming Support](specs/STREAMING-001-cursor-support.md) | adapter, dx | ✅ canonical |
 | DIALECT-001 | [Multi-dialect Capabilities](specs/DIALECT-001-multi-dialect-capabilities.md) | adapter | ✅ canonical |
 | TEST-001 | [SQL Snapshot Testing](specs/TEST-001-sql-snapshot-utilities.md) | testing | ✅ canonical |
-| E2E-002 | [PIM/DAM Realistic Scenarios](specs/E2E-002-pimdam-realistic-scenarios.md) | e2e | 🟡 draft |
-| ARCH-001 | [Dialect-Agnostic Recursive CTE](specs/ARCH-001-dialect-agnostic-recursive.md) | core, adapter | 🟡 draft |
-| DX-005 | [Recursive Query Builder](specs/DX-005-recursive-query-builder.md) | dx | 🟡 draft |
+| E2E-002 | [PIM/DAM Realistic Scenarios](specs/E2E-002-pimdam-realistic-scenarios.md) | e2e | ✅ canonical |
+| ARCH-001 | [Dialect-Agnostic Recursive CTE](specs/ARCH-001-dialect-agnostic-recursive.md) | core, adapter | ✅ canonical |
+| DX-005 | [Recursive Query Builder](specs/DX-005-recursive-query-builder.md) | dx | ✅ canonical |
 | DX-010 | [Mutations (insert/update/delete)](specs/DX-010-mutations.md) | dx | ✅ canonical |
-| DX-012 | [API Ergonomics](specs/DX-012-api-ergonomics.md) | dx | 🟡 draft |
+| DX-012 | [API Ergonomics](specs/DX-012-api-ergonomics.md) | dx | ✅ canonical |
 | DX-021 | [Window Functions Builder](plans/DX-021-window-builder.md) | dx | ✅ canonical |
 | DX-022 | [Recursive via include()](plans/DX-022-recursive-include.md) | dx | ✅ canonical |
 | P3-A | [Window Functions](specs/P3-A-window-functions.md) | core, adapter, dx | ✅ canonical |
