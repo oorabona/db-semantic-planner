@@ -65,6 +65,7 @@ packages/dx            → Depends on core + adapter-kysely
 | DX-005 | [Recursive Query Builder](specs/DX-005-recursive-query-builder.md) | dx | ✅ canonical |
 | DX-010 | [Mutations (insert/update/delete)](specs/DX-010-mutations.md) | dx | ✅ canonical |
 | DX-012 | [API Ergonomics](specs/DX-012-api-ergonomics.md) | dx | ✅ canonical |
+| DX-023 | [Lightweight ModelIR](plans/DX-023-lightweight-modelir.md) | dx | 🟡 draft |
 | DX-021 | [Window Functions Builder](plans/DX-021-window-builder.md) | dx | ✅ canonical |
 | DX-022 | [Recursive via include()](plans/DX-022-recursive-include.md) | dx | ✅ canonical |
 | P3-A | [Window Functions](specs/P3-A-window-functions.md) | core, adapter, dx | ✅ canonical |

@@ -21,6 +21,44 @@ This is a LEAF package (nothing depends on it)
 
 ## Completed (Recent)
 
+### DX-023: Lightweight ModelIR (Kysely Type Inference) ✅ (2026-01-09)
+
+**Priority:** MEDIUM | **Effort:** L
+**Spec:** [docs/plans/DX-023-lightweight-modelir.md](docs/plans/DX-023-lightweight-modelir.md)
+
+Simplify model definition with shorthand relations syntax and FK inference.
+
+**New API:**
+```typescript
+const model = defineModel<Database>({
+  relations: {
+    'users.posts': '1:N',                    // FK inferred: user_id
+    'users.profile': ['1:1', 'profiles'],    // FK inferred: user_id
+    'posts.author': ['N:1', 'users'],        // Explicit target
+    'orders.items': { cardinality: '1:N', fk: 'order_uuid' }  // Exotic case
+  }
+});
+```
+
+**Features:**
+- Cardinality shorthand: `'1:N'`, `'N:1'`, `'1:1'`, `'M:N'`
+- Three definition forms: simple, tuple, object
+- FK inference via `{singular_table}_id` convention
+- Singularization: users→user, categories→category, irregular plurals
+- M:N requires `through` option
+- Self-referential relations supported
+- Type-safe RelationKey<DB> for autocomplete
+
+**Blocks:**
+- [x] ✅ Block 1: Types and Parser (CardinalityShorthand, RelationObjectDef, etc.)
+- [x] ✅ Block 2: FK Inference (singularize, inferForeignKey)
+- [x] ✅ Block 3: defineModel Function (LightweightModelIR)
+- [x] ✅ Block 4: Type-Level Safety (RelationKey<DB>, expectTypeOf tests)
+- [x] ✅ Block 5: Integration Tests
+
+**Tests:** 66 new tests (lightweight-model.test.ts)
+**Exports:** defineModel, singularize, inferForeignKey, InvalidRelationDefinitionError, type guards
+
 ### DX-022: Recursive via include() Option ✅ (2026-01-09)
 
 **Priority:** HIGH | **Effort:** L | **BREAKING CHANGE**
@@ -218,59 +256,6 @@ Window function support across core, adapter, and dx packages.
 ---
 
 ## Pending - P2
-
-### DX-023: Lightweight ModelIR (Kysely Type Inference)
-
-**Priority:** MEDIUM | **Effort:** L
-
-Simplifier la définition du modèle en inférant entités/colonnes depuis les types Kysely.
-
-**Actuel (verbose) :**
-```typescript
-const model = defineModel({
-  entities: {
-    users: { tableName: 'users', columns: { id: { type: 'number' }, ... } },
-    posts: { tableName: 'posts', columns: { ... } }
-  },
-  relations: [...]
-});
-```
-
-**Nouveau (léger) :**
-```typescript
-// Option A: Codegen build-time (recommandé)
-// Script génère model.generated.ts depuis Database interface
-
-// Option B: Relations-only (runtime, conventions FK)
-const model = defineModel<Database>({
-  relations: {
-    'users.posts': '1:N',                    // FK inférée: posts.user_id
-    'users.profile': '1:1',                  // FK inférée: profile.user_id
-    'posts.author': ['N:1', 'users'],        // Explicite car nom ≠ target
-    'orders.items': { fk: 'order_uuid', cardinality: '1:N' }  // Cas exotique
-  }
-});
-```
-
-**Conventions FK :**
-- `{target}_id` → `{target}.id` (ex: `user_id` → `users.id`)
-- Override explicite toujours possible via `{ fk: 'custom_column' }`
-
-**Tâches :**
-- [ ] Implémenter Option B d'abord (runtime, plus simple)
-  - [ ] Parser `'1:N'` shorthand
-  - [ ] Parser `['N:1', 'target']` pour noms custom
-  - [ ] Parser objet complet pour cas exotiques
-  - [ ] Inférer FK via convention `{target}_id`
-- [ ] Garder API verbose existante pour cas exotiques (backward compatible)
-- [ ] Documenter les conventions et overrides
-- [ ] (Futur) Option A: Codegen plugin TypeScript pour build-time
-
-**Note:** Runtime vs Build-time
-- **Runtime (Option B):** On ne peut PAS inférer les colonnes depuis `Database` car types effacés. On définit seulement les relations, colonnes restent dynamiques.
-- **Build-time (Option A, futur):** Un script/plugin analyse les types TS et génère le ModelIR complet. Similar à Prisma generate.
-
----
 
 ### DX-024: orderBy() Shorthand
 
