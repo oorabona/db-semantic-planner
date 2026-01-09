@@ -14,8 +14,10 @@ export {
 export {
 	AmbiguousRelationError,
 	ExecutionError,
+	InvalidOperationError,
 	NotFoundError,
 	RelationNotFoundError,
+	UnsafeOperationError,
 } from './errors.js';
 // Filter Helpers (Drizzle-like)
 export {
@@ -45,6 +47,13 @@ export {
 	// Raw SQL escape hatch
 	raw,
 } from './filters.js';
+// Mutation Builders (DX-010)
+export {
+	DeleteBuilder,
+	InsertBuilder,
+	type MutationDump,
+	UpdateBuilder,
+} from './mutation-builders.js';
 
 // Factory
 export { createOrm } from './orm.js';

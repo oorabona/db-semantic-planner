@@ -668,6 +668,74 @@ export interface RecursiveIntent {
 }
 
 // ============================================================================
+// Mutation Intents - Insert, Update, Delete (DX-010)
+// ============================================================================
+
+/**
+ * Insert intent - insert one or more rows into a table.
+ * @example { type: 'insert', table: 'users', values: [{ name: 'Alice' }] }
+ */
+export interface InsertIntent {
+	readonly type: 'insert';
+
+	/** Target table name */
+	readonly table: string;
+
+	/** Values to insert (single object or array for bulk insert) */
+	readonly values: readonly Record<string, unknown>[];
+}
+
+/**
+ * Update intent - update rows matching a condition.
+ * @example { type: 'update', table: 'users', set: { name: 'Bob' }, where: ... }
+ */
+export interface UpdateIntent {
+	readonly type: 'update';
+
+	/** Target table name */
+	readonly table: string;
+
+	/** Fields to update with new values */
+	readonly set: Record<string, unknown>;
+
+	/** Filter condition (required for safety, unless allowAll is true) */
+	readonly where?: WhereIntent;
+
+	/** Explicitly allow update without WHERE (for updateAll) */
+	readonly allowAll?: boolean;
+}
+
+/**
+ * Delete intent - delete rows matching a condition.
+ * @example { type: 'delete', table: 'users', where: ... }
+ */
+export interface DeleteIntent {
+	readonly type: 'delete';
+
+	/** Target table name */
+	readonly table: string;
+
+	/** Filter condition (required for safety, unless allowAll is true) */
+	readonly where?: WhereIntent;
+
+	/** Explicitly allow delete without WHERE (for deleteAll) */
+	readonly allowAll?: boolean;
+
+	/**
+	 * Relations to cascade delete.
+	 * - undefined: no cascade
+	 * - true: cascade all relations
+	 * - string[]: cascade specific relations
+	 */
+	readonly cascade?: boolean | readonly string[];
+}
+
+/**
+ * Union of all mutation intents.
+ */
+export type MutationIntent = InsertIntent | UpdateIntent | DeleteIntent;
+
+// ============================================================================
 // Type Guards
 // ============================================================================
 
@@ -862,4 +930,48 @@ export function isRecursiveIntent(
 	intent: QueryIntent | RecursiveIntent,
 ): intent is RecursiveIntent {
 	return intent.type === 'recursive';
+}
+
+// ============================================================================
+// Mutation Intent Type Guards
+// ============================================================================
+
+/**
+ * Check if an intent is an insert intent
+ */
+export function isInsertIntent(
+	intent: QueryIntent | RecursiveIntent | MutationIntent,
+): intent is InsertIntent {
+	return intent.type === 'insert';
+}
+
+/**
+ * Check if an intent is an update intent
+ */
+export function isUpdateIntent(
+	intent: QueryIntent | RecursiveIntent | MutationIntent,
+): intent is UpdateIntent {
+	return intent.type === 'update';
+}
+
+/**
+ * Check if an intent is a delete intent
+ */
+export function isDeleteIntent(
+	intent: QueryIntent | RecursiveIntent | MutationIntent,
+): intent is DeleteIntent {
+	return intent.type === 'delete';
+}
+
+/**
+ * Check if an intent is any mutation intent
+ */
+export function isMutationIntent(
+	intent: QueryIntent | RecursiveIntent | MutationIntent,
+): intent is MutationIntent {
+	return (
+		intent.type === 'insert' ||
+		intent.type === 'update' ||
+		intent.type === 'delete'
+	);
 }

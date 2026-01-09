@@ -44,13 +44,17 @@ export type {
 	CoalesceExpressionIntent,
 	ComparisonOperator,
 	CustomTraversal,
+	// Mutations (DX-010)
+	DeleteIntent,
 	EdgeTableTraversal,
 	// Emit composition (DX-005)
 	EmitJoinClause,
 	ExpressionIntent,
 	// Include
 	IncludeIntent,
+	InsertIntent,
 	LogicalOperator,
+	MutationIntent,
 	NullOperator,
 	NullsPosition,
 	// OrderBy
@@ -74,6 +78,7 @@ export type {
 	SelectWithExpressionsIntent,
 	SortDirection,
 	StringOperator,
+	UpdateIntent,
 	// Where (filters)
 	WhereAndIntent,
 	WhereComparisonIntent,
@@ -93,13 +98,18 @@ export {
 	// Type guards
 	isCoalesceExpression,
 	isCustomTraversal,
+	// Mutation type guards (DX-010)
+	isDeleteIntent,
 	isEdgeTableTraversal,
+	isInsertIntent,
+	isMutationIntent,
 	isRawExpression,
 	isRecursiveIntent,
 	isSelectAggregate,
 	isSelectAll,
 	isSelectFields,
 	isSelectWithExpressions,
+	isUpdateIntent,
 	isWhereAnd,
 	isWhereComparison,
 	isWhereExists,
