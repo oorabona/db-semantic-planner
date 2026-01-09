@@ -182,9 +182,35 @@ export interface IncludeOptions {
 }
 
 /**
- * Chainable query builder for constructing queries.
+ * Utility type for picking fields from an object type.
+ * Used for type inference in select().
  */
-export interface QueryBuilder {
+export type SelectFields<TTable, K extends keyof TTable> = Pick<TTable, K>;
+
+/**
+ * Chainable query builder for constructing queries.
+ *
+ * @typeParam TResult - The inferred result type for execution methods.
+ *   Defaults to `unknown` for backward compatibility.
+ *   Can be narrowed by:
+ *   - Providing explicit type: `orm.query<User>('users')`
+ *   - Using typed select: `orm.query('users').select<User, 'id' | 'name'>(['id', 'name'])`
+ *
+ * @example
+ * ```typescript
+ * // Explicit table type
+ * type User = { id: number; name: string; email: string };
+ * const users = await orm.query<User>('users').findMany();
+ * // users is User[]
+ *
+ * // With select narrowing
+ * const partialUsers = await orm.query<User>('users')
+ *   .select<User, 'id' | 'name'>(['id', 'name'])
+ *   .findMany();
+ * // partialUsers is Pick<User, 'id' | 'name'>[]
+ * ```
+ */
+export interface QueryBuilder<TResult = unknown> {
 	/**
 	 * Include a related entity in the query results.
 	 *
@@ -206,15 +232,25 @@ export interface QueryBuilder {
 	 *   .include('posts', { via: 'authoredPosts' })  // Disambiguated
 	 * ```
 	 */
-	include(relation: string, options?: IncludeOptions): QueryBuilder;
+	include(relation: string, options?: IncludeOptions): QueryBuilder<TResult>;
 
 	/**
 	 * Select specific fields from the root entity.
 	 *
+	 * The result type is preserved from the QueryBuilder generic parameter.
+	 * Use explicit typing on query() for typed results:
+	 * ```typescript
+	 * type User = { id: number; name: string; email: string };
+	 * const users = await orm.query<User>('users')
+	 *   .select(['id', 'name'])
+	 *   .findMany();
+	 * // users is User[]
+	 * ```
+	 *
 	 * @param fields - Array of field names to select
 	 * @returns A new QueryBuilder with the selection applied
 	 */
-	select(fields: readonly string[]): QueryBuilder;
+	select(fields: readonly string[]): QueryBuilder<TResult>;
 
 	/**
 	 * Select fields with computed expressions (COALESCE, raw SQL, etc.)
@@ -248,7 +284,7 @@ export interface QueryBuilder {
 	selectWithExpressions(
 		fields: readonly string[],
 		expressions: readonly ExpressionIntent[],
-	): QueryBuilder;
+	): QueryBuilder<TResult>;
 
 	/**
 	 * Count rows, optionally counting a specific field.
@@ -265,7 +301,7 @@ export interface QueryBuilder {
 	 * orm.query('users').count({ field: 'email', as: 'email_count' }).execute();
 	 * ```
 	 */
-	count(options?: AggregateOptions): QueryBuilder;
+	count(options?: AggregateOptions): QueryBuilder<TResult>;
 
 	/**
 	 * Calculate sum of a field.
@@ -279,7 +315,7 @@ export interface QueryBuilder {
 	 * orm.query('orders').sum('total', 'order_total').execute();
 	 * ```
 	 */
-	sum(field: string, as?: string): QueryBuilder;
+	sum(field: string, as?: string): QueryBuilder<TResult>;
 
 	/**
 	 * Calculate average of a field.
@@ -288,7 +324,7 @@ export interface QueryBuilder {
 	 * @param as - Optional alias for result column
 	 * @returns A new QueryBuilder configured for AVG
 	 */
-	avg(field: string, as?: string): QueryBuilder;
+	avg(field: string, as?: string): QueryBuilder<TResult>;
 
 	/**
 	 * Find minimum value of a field.
@@ -297,7 +333,7 @@ export interface QueryBuilder {
 	 * @param as - Optional alias for result column
 	 * @returns A new QueryBuilder configured for MIN
 	 */
-	min(field: string, as?: string): QueryBuilder;
+	min(field: string, as?: string): QueryBuilder<TResult>;
 
 	/**
 	 * Find maximum value of a field.
@@ -306,7 +342,7 @@ export interface QueryBuilder {
 	 * @param as - Optional alias for result column
 	 * @returns A new QueryBuilder configured for MAX
 	 */
-	max(field: string, as?: string): QueryBuilder;
+	max(field: string, as?: string): QueryBuilder<TResult>;
 
 	/**
 	 * Group results by specified fields.
@@ -324,7 +360,7 @@ export interface QueryBuilder {
 	 *   .execute();
 	 * ```
 	 */
-	groupBy(fields: readonly string[]): QueryBuilder;
+	groupBy(fields: readonly string[]): QueryBuilder<TResult>;
 
 	/**
 	 * Sort results by one or more fields.
@@ -348,7 +384,7 @@ export interface QueryBuilder {
 	 *   .findMany();
 	 * ```
 	 */
-	orderBy(field: string, direction?: 'asc' | 'desc'): QueryBuilder;
+	orderBy(field: string, direction?: 'asc' | 'desc'): QueryBuilder<TResult>;
 
 	/**
 	 * Limit the number of results returned.
@@ -369,7 +405,7 @@ export interface QueryBuilder {
 	 *   .findMany();
 	 * ```
 	 */
-	limit(count: number): QueryBuilder;
+	limit(count: number): QueryBuilder<TResult>;
 
 	/**
 	 * Skip a number of results (for pagination).
@@ -390,7 +426,7 @@ export interface QueryBuilder {
 	 *   .findMany();
 	 * ```
 	 */
-	offset(count: number): QueryBuilder;
+	offset(count: number): QueryBuilder<TResult>;
 
 	/**
 	 * Filter the root entity records.
@@ -398,7 +434,7 @@ export interface QueryBuilder {
 	 * @param condition - Where condition to apply
 	 * @returns A new QueryBuilder with the filter applied
 	 */
-	where(condition: WhereIntent): QueryBuilder;
+	where(condition: WhereIntent): QueryBuilder<TResult>;
 
 	/**
 	 * Override the ORM-level strict mode for this query.
@@ -415,7 +451,7 @@ export interface QueryBuilder {
 	 *   .plan();  // Throws if 'posts' is ambiguous
 	 * ```
 	 */
-	withStrictMode(strict: boolean): QueryBuilder;
+	withStrictMode(strict: boolean): QueryBuilder<TResult>;
 
 	/**
 	 * Set a relation hint for this query.
@@ -433,7 +469,7 @@ export interface QueryBuilder {
 	 *   .plan();
 	 * ```
 	 */
-	withRelationHint(target: string, relation: string): QueryBuilder;
+	withRelationHint(target: string, relation: string): QueryBuilder<TResult>;
 
 	/**
 	 * Generate the execution plan for this query.
@@ -485,7 +521,7 @@ export interface QueryBuilder {
 	 *   .execute();
 	 * ```
 	 */
-	execute(): Promise<unknown[]>;
+	execute(): Promise<TResult[]>;
 
 	/**
 	 * Execute the query and return all matching rows.
@@ -502,7 +538,7 @@ export interface QueryBuilder {
 	 *   .findMany();
 	 * ```
 	 */
-	findMany(): Promise<unknown[]>;
+	findMany(): Promise<TResult[]>;
 
 	/**
 	 * Execute the query and return the first matching row.
@@ -519,7 +555,7 @@ export interface QueryBuilder {
 	 *   .findFirst();
 	 * ```
 	 */
-	findFirst(): Promise<unknown | undefined>;
+	findFirst(): Promise<TResult | undefined>;
 
 	/**
 	 * Execute the query and return the first matching row, or throw if none.
@@ -537,7 +573,7 @@ export interface QueryBuilder {
 	 *   .findFirstOrThrow();
 	 * ```
 	 */
-	findFirstOrThrow(): Promise<unknown>;
+	findFirstOrThrow(): Promise<TResult>;
 
 	/**
 	 * Execute the query and stream results row by row.
@@ -561,7 +597,7 @@ export interface QueryBuilder {
 	 * }
 	 * ```
 	 */
-	stream(options?: StreamOptions): AsyncIterableIterator<unknown>;
+	stream(options?: StreamOptions): AsyncIterableIterator<TResult>;
 
 	/**
 	 * Find a single record by its primary key.
@@ -587,7 +623,7 @@ export interface QueryBuilder {
 	 */
 	byId(
 		value: string | number | Record<string, unknown>,
-	): Promise<unknown | undefined>;
+	): Promise<TResult | undefined>;
 
 	/**
 	 * Find a single record by its primary key, or throw if not found.
@@ -604,7 +640,7 @@ export interface QueryBuilder {
 	 */
 	byIdOrThrow(
 		value: string | number | Record<string, unknown>,
-	): Promise<unknown>;
+	): Promise<TResult>;
 
 	/**
 	 * Find multiple records by their primary keys.
@@ -621,7 +657,7 @@ export interface QueryBuilder {
 	 * const users = await orm.query('users').byIds([1, 2, 3]);
 	 * ```
 	 */
-	byIds(values: readonly (string | number)[]): Promise<unknown[]>;
+	byIds(values: readonly (string | number)[]): Promise<TResult[]>;
 }
 
 /**
@@ -652,18 +688,26 @@ export interface OrmInstance {
 	/**
 	 * Start building a query from a table.
 	 *
+	 * @typeParam TResult - Optional type for the query result rows.
+	 *   When provided, execution methods (findMany, execute, etc.) return typed results.
 	 * @param from - The root table name to query
 	 * @returns A QueryBuilder for constructing the query
 	 *
 	 * @example
 	 * ```typescript
+	 * // Untyped query (backward compatible)
 	 * const users = orm.query('users')
 	 *   .include('posts')
 	 *   .where({ field: 'active', op: '=', value: true })
 	 *   .plan();
+	 *
+	 * // Typed query (new)
+	 * type User = { id: number; name: string; email: string };
+	 * const typedUsers = await orm.query<User>('users').findMany();
+	 * // typedUsers is User[]
 	 * ```
 	 */
-	query(from: string): QueryBuilder;
+	query<TResult = unknown>(from: string): QueryBuilder<TResult>;
 
 	/**
 	 * The strict mode setting for this ORM instance.

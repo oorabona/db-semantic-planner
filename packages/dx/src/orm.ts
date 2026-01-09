@@ -104,8 +104,8 @@ function createOrmInstance(
 ): OrmInstance {
 	return {
 		strictMode,
-		query(from: string): QueryBuilder {
-			return new QueryBuilderImpl(
+		query<TResult = unknown>(from: string): QueryBuilder<TResult> {
+			return new QueryBuilderImpl<TResult>(
 				model,
 				strictMode,
 				from,
@@ -352,7 +352,7 @@ function parseDotNotationInclude(
 /**
  * Internal query builder implementation.
  */
-class QueryBuilderImpl implements QueryBuilder {
+class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	private readonly model: ModelIR;
 	private readonly strictMode: boolean;
 	private readonly from: string;
@@ -362,7 +362,7 @@ class QueryBuilderImpl implements QueryBuilder {
 	private readonly db: Kysely<any> | undefined;
 	private readonly schemaName: string | undefined;
 	private selectIntent?: SelectIntent;
-	private whereIntent?: WhereIntent;
+	private whereIntents: WhereIntent[] = [];
 	private strictModeOverride?: boolean;
 	private aggregates: AggregateIntent[] = [];
 	private groupByFields: string[] = [];
@@ -387,7 +387,7 @@ class QueryBuilderImpl implements QueryBuilder {
 		this.schemaName = schemaName;
 	}
 
-	include(relation: string, options?: IncludeOptions): QueryBuilder {
+	include(relation: string, options?: IncludeOptions): QueryBuilder<TResult> {
 		const builder = this.clone();
 		// Support dot notation for nested includes: 'posts.comments.author'
 		if (relation.includes('.')) {
@@ -398,7 +398,7 @@ class QueryBuilderImpl implements QueryBuilder {
 		return builder;
 	}
 
-	select(fields: readonly string[]): QueryBuilder {
+	select(fields: readonly string[]): QueryBuilder<TResult> {
 		const builder = this.clone();
 		builder.selectIntent = { type: 'fields', fields: [...fields] };
 		return builder;
@@ -407,7 +407,7 @@ class QueryBuilderImpl implements QueryBuilder {
 	selectWithExpressions(
 		fields: readonly string[],
 		expressions: readonly ExpressionIntent[],
-	): QueryBuilder {
+	): QueryBuilder<TResult> {
 		const builder = this.clone();
 		const select: SelectWithExpressionsIntent = {
 			type: 'expressions',
@@ -421,7 +421,7 @@ class QueryBuilderImpl implements QueryBuilder {
 		return builder;
 	}
 
-	count(options?: AggregateOptions): QueryBuilder {
+	count(options?: AggregateOptions): QueryBuilder<TResult> {
 		const builder = this.clone();
 		const agg: AggregateIntent = { function: 'count' };
 		if (options?.field !== undefined) {
@@ -434,7 +434,7 @@ class QueryBuilderImpl implements QueryBuilder {
 		return builder;
 	}
 
-	sum(field: string, as?: string): QueryBuilder {
+	sum(field: string, as?: string): QueryBuilder<TResult> {
 		const builder = this.clone();
 		const agg: AggregateIntent = { function: 'sum', field };
 		if (as !== undefined) {
@@ -444,7 +444,7 @@ class QueryBuilderImpl implements QueryBuilder {
 		return builder;
 	}
 
-	avg(field: string, as?: string): QueryBuilder {
+	avg(field: string, as?: string): QueryBuilder<TResult> {
 		const builder = this.clone();
 		const agg: AggregateIntent = { function: 'avg', field };
 		if (as !== undefined) {
@@ -454,7 +454,7 @@ class QueryBuilderImpl implements QueryBuilder {
 		return builder;
 	}
 
-	min(field: string, as?: string): QueryBuilder {
+	min(field: string, as?: string): QueryBuilder<TResult> {
 		const builder = this.clone();
 		const agg: AggregateIntent = { function: 'min', field };
 		if (as !== undefined) {
@@ -464,7 +464,7 @@ class QueryBuilderImpl implements QueryBuilder {
 		return builder;
 	}
 
-	max(field: string, as?: string): QueryBuilder {
+	max(field: string, as?: string): QueryBuilder<TResult> {
 		const builder = this.clone();
 		const agg: AggregateIntent = { function: 'max', field };
 		if (as !== undefined) {
@@ -474,43 +474,46 @@ class QueryBuilderImpl implements QueryBuilder {
 		return builder;
 	}
 
-	groupBy(fields: readonly string[]): QueryBuilder {
+	groupBy(fields: readonly string[]): QueryBuilder<TResult> {
 		const builder = this.clone();
 		builder.groupByFields.push(...fields);
 		return builder;
 	}
 
-	orderBy(field: string, direction: 'asc' | 'desc' = 'asc'): QueryBuilder {
+	orderBy(
+		field: string,
+		direction: 'asc' | 'desc' = 'asc',
+	): QueryBuilder<TResult> {
 		const builder = this.clone();
 		builder.orderByIntents.push({ field, direction });
 		return builder;
 	}
 
-	limit(count: number): QueryBuilder {
+	limit(count: number): QueryBuilder<TResult> {
 		const builder = this.clone();
 		builder.limitValue = count;
 		return builder;
 	}
 
-	offset(count: number): QueryBuilder {
+	offset(count: number): QueryBuilder<TResult> {
 		const builder = this.clone();
 		builder.offsetValue = count;
 		return builder;
 	}
 
-	where(condition: WhereIntent): QueryBuilder {
+	where(condition: WhereIntent): QueryBuilder<TResult> {
 		const builder = this.clone();
-		builder.whereIntent = condition;
+		builder.whereIntents.push(condition);
 		return builder;
 	}
 
-	withStrictMode(strict: boolean): QueryBuilder {
+	withStrictMode(strict: boolean): QueryBuilder<TResult> {
 		const builder = this.clone();
 		builder.strictModeOverride = strict;
 		return builder;
 	}
 
-	withRelationHint(target: string, relation: string): QueryBuilder {
+	withRelationHint(target: string, relation: string): QueryBuilder<TResult> {
 		const builder = this.clone();
 		(builder.relationHints as Record<string, string>)[target] = relation;
 		return builder;
@@ -541,20 +544,20 @@ class QueryBuilderImpl implements QueryBuilder {
 		}
 	}
 
-	async findMany(): Promise<unknown[]> {
+	async findMany(): Promise<TResult[]> {
 		const db = this.getConfiguredDb();
 		const planReport = this.plan();
 		const compiled = compile(planReport, this.model, db, this.schemaName);
 		const result = await db.executeQuery(compiled);
-		return result.rows as unknown[];
+		return result.rows as TResult[];
 	}
 
-	async findFirst(): Promise<unknown | undefined> {
+	async findFirst(): Promise<TResult | undefined> {
 		const rows = await this.findMany();
 		return rows[0];
 	}
 
-	async findFirstOrThrow(): Promise<unknown> {
+	async findFirstOrThrow(): Promise<TResult> {
 		const result = await this.findFirst();
 		if (result === undefined) {
 			throw new NotFoundError(this.from);
@@ -564,14 +567,14 @@ class QueryBuilderImpl implements QueryBuilder {
 
 	async byId(
 		value: string | number | Record<string, unknown>,
-	): Promise<unknown | undefined> {
+	): Promise<TResult | undefined> {
 		const condition = this.buildPkCondition(value);
 		return this.where(condition).findFirst();
 	}
 
 	async byIdOrThrow(
 		value: string | number | Record<string, unknown>,
-	): Promise<unknown> {
+	): Promise<TResult> {
 		const result = await this.byId(value);
 		if (result === undefined) {
 			throw new NotFoundError(
@@ -582,7 +585,7 @@ class QueryBuilderImpl implements QueryBuilder {
 		return result;
 	}
 
-	async byIds(values: readonly (string | number)[]): Promise<unknown[]> {
+	async byIds(values: readonly (string | number)[]): Promise<TResult[]> {
 		if (values.length === 0) {
 			return [];
 		}
@@ -640,11 +643,11 @@ class QueryBuilderImpl implements QueryBuilder {
 		};
 	}
 
-	execute(): Promise<unknown[]> {
+	execute(): Promise<TResult[]> {
 		return this.findMany();
 	}
 
-	stream(options?: StreamOptions): AsyncIterableIterator<unknown> {
+	stream(options?: StreamOptions): AsyncIterableIterator<TResult> {
 		const db = this.getConfiguredDb();
 		const dumpResult = this.dump();
 
@@ -748,8 +751,14 @@ class QueryBuilderImpl implements QueryBuilder {
 			(intent as { select: SelectIntent }).select = this.selectIntent;
 		}
 
-		if (this.whereIntent !== undefined) {
-			(intent as { where: WhereIntent }).where = this.whereIntent;
+		// Combine multiple where conditions with AND
+		if (this.whereIntents.length === 1) {
+			const singleWhere = this.whereIntents[0];
+			if (singleWhere !== undefined) {
+				(intent as { where: WhereIntent }).where = singleWhere;
+			}
+		} else if (this.whereIntents.length > 1) {
+			(intent as { where: WhereIntent }).where = and(...this.whereIntents);
 		}
 		if (this.includes.length > 0) {
 			(intent as { include: readonly IncludeIntent[] }).include = this.includes;
@@ -825,8 +834,8 @@ class QueryBuilderImpl implements QueryBuilder {
 	/**
 	 * Create a shallow clone of this builder.
 	 */
-	private clone(): QueryBuilderImpl {
-		const builder = new QueryBuilderImpl(
+	private clone(): QueryBuilderImpl<TResult> {
+		const builder = new QueryBuilderImpl<TResult>(
 			this.model,
 			this.strictMode,
 			this.from,
@@ -838,9 +847,8 @@ class QueryBuilderImpl implements QueryBuilder {
 		if (this.selectIntent !== undefined) {
 			builder.selectIntent = this.selectIntent;
 		}
-		if (this.whereIntent !== undefined) {
-			builder.whereIntent = this.whereIntent;
-		}
+		// Clone whereIntents array
+		builder.whereIntents.push(...this.whereIntents);
 		if (this.strictModeOverride !== undefined) {
 			builder.strictModeOverride = this.strictModeOverride;
 		}
