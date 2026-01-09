@@ -151,8 +151,10 @@ function compilePathTrackingRecursive(
 		return eb(eb.ref('prev.path'), '||', eb.ref(nodeColumnRef)).as(alias);
 	}
 
-	// String strategy: CONCAT(prev.path, separator, node.id)
-	return sql`${eb.ref('prev.path')} || ${eb.val(separator)} || ${eb.cast(eb.ref(nodeColumnRef), 'text')}`.as(
+	// String strategy: prev.path || 'separator' || CAST(node.id AS TEXT)
+	// Use sql.lit for inline literal separator (safe since separator is from config, not user input)
+	const escapedSeparator = separator.replace(/'/g, "''");
+	return sql`${eb.ref('prev.path')} || ${sql.lit(`'${escapedSeparator}'`)} || ${eb.cast(eb.ref(nodeColumnRef), 'text')}`.as(
 		alias,
 	);
 }
@@ -248,7 +250,9 @@ export function compileInsert(
 	const tableName = schemaName ? `${schemaName}.${intent.table}` : intent.table;
 
 	// Build the INSERT query
-	const query = kysely.insertInto(tableName).values(intent.values as Record<string, unknown>[]);
+	const query = kysely
+		.insertInto(tableName)
+		.values(intent.values as Record<string, unknown>[]);
 
 	return query.compile();
 }

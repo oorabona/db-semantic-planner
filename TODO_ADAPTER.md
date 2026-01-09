@@ -42,6 +42,11 @@ MUST NOT import from: packages/dx
 - 282 total tests passing in adapter-kysely
 - Path tracking now works on MySQL, SQLite, and MSSQL via string strategy
 
+**Bug Fix (2026-01-09):**
+- Fixed string strategy to use `sql.lit()` for inline separator literals (was using parameterized `?`)
+- Moved PostgreSQL array test to E2E (`tests/e2e/iam.recursive.test.ts`) - SQLite doesn't support ARRAY[]
+- 343 total tests in adapter-kysely (1 todo for PostgreSQL array test documented in E2E)
+
 ---
 
 ## Completed - P2 Features
