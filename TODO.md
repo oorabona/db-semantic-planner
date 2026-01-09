@@ -80,7 +80,64 @@ Window function support across all packages for analytics queries.
   - Validates: AmbiguousPlanError thrown with options
   - Disambiguation via `via` hint and `disambiguate` option
 
-## Pending - MVP (P0)
+## Pending - MVP (P0) — BLOCKING before v1.0
+
+### CORE-001: Planner → Compiler Contract Enforcement 🔴
+
+**Priority:** P0 CRITICAL | **Effort:** L | **Scope:** core, adapter-kysely
+
+Le compiler DOIT respecter les décisions du planner. Actuellement non vérifié.
+
+**Problème :**
+- Le planner décide `filterStrategy: 'exists'` ou `'join'`
+- Le planner décide `includeStrategy: 'join'` ou `'separate'`
+- Le compiler génère du SQL... mais lit-il vraiment ces décisions ?
+- Les golden tests vérifient le SQL output, pas le chemin planner→compiler
+
+**Tâches :**
+- [ ] Audit : vérifier si le compiler lit `plan.filterStrategy`
+- [ ] Audit : vérifier si le compiler lit `plan.includeStrategy`
+- [ ] Implémenter filter-strategy (JOIN vs EXISTS) dans le compiler
+- [ ] Implémenter include-strategy (join vs separate) dans le compiler
+- [ ] Tests d'intégration : "quand planner décide X, compiler génère Y"
+- [ ] Golden tests mis à jour : assertion sur `plan.*Strategy` + SQL
+
+---
+
+### CORE-002: Relation Resolution Correctness 🔴
+
+**Priority:** P0 CRITICAL | **Effort:** M | **Scope:** core, adapter-kysely
+
+La résolution des relations pour filtres/includes doit être correcte.
+
+**Problèmes identifiés :**
+1. **FK directionnelle** : hasMany vs belongsTo génère-t-il le bon JOIN order ?
+   - hasMany: `parent.id = child.parent_id` (parent est la source)
+   - belongsTo: `child.parent_id = parent.id` (child est la source)
+2. **M:N via through** : pas de support pour les tables de jonction
+3. **Aliasing** : risque de collision d'alias entre tables
+
+**Tâches :**
+- [ ] Audit : vérifier la génération FK pour hasMany
+- [ ] Audit : vérifier la génération FK pour belongsTo
+- [ ] Implémenter support M:N avec `through` table
+- [ ] Tests pour les 3 types de relations (1:1, 1:N, M:N)
+- [ ] Corriger la logique d'aliasing si nécessaire
+
+---
+
+### CORE-003: Edge Cases & Plan Coherence 🟡
+
+**Priority:** P1 HIGH | **Effort:** S | **Scope:** core, adapter-kysely
+
+**Problèmes identifiés :**
+- [ ] CTE naming : garantir unicité des noms
+- [ ] IN/AND/OR vides : comportement défini (erreur ou no-op ?)
+- [ ] Path separator : cohérence dans les chemins de relation
+- [ ] Metadata d'ambiguïté : exposer dans le plan
+- [ ] Side-effects : supprimer console.warn (pollution tests)
+
+---
 
 ### Testing Setup
 
