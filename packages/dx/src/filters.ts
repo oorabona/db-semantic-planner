@@ -35,6 +35,7 @@ import type {
 	WhereNullIntent,
 	WhereOrIntent,
 } from '@db-semantic-planner/core';
+import type { ExpressionSpec } from './types.js';
 
 // ============================================================================
 // Comparison Operators
@@ -258,11 +259,6 @@ export function notExists(
 // Expression Helpers
 // ============================================================================
 
-import type {
-	CoalesceExpressionIntent,
-	RawExpressionIntent,
-} from '@db-semantic-planner/core';
-
 /**
  * COALESCE expression: returns first non-null value from a list of fields
  *
@@ -287,14 +283,17 @@ import type {
 export function coalesce(
 	fields: readonly string[],
 	as: string,
-): CoalesceExpressionIntent {
+): ExpressionSpec {
 	if (fields.length === 0) {
 		throw new Error('coalesce() requires at least one field');
 	}
 	if (!as || as.trim() === '') {
 		throw new Error('coalesce() requires a non-empty alias');
 	}
-	return { kind: 'coalesce', fields, as };
+	return {
+		__expr: true,
+		intent: { kind: 'coalesce', fields, as },
+	};
 }
 
 /**
@@ -317,9 +316,12 @@ export function coalesce(
  * // → price_cents / 100.0 AS price_dollars
  * ```
  */
-export function raw(sqlFragment: string, as: string): RawExpressionIntent {
+export function raw(sqlFragment: string, as: string): ExpressionSpec {
 	if (!as || as.trim() === '') {
 		throw new Error('raw() requires a non-empty alias');
 	}
-	return { kind: 'raw', sql: sqlFragment, as };
+	return {
+		__expr: true,
+		intent: { kind: 'raw', sql: sqlFragment, as },
+	};
 }

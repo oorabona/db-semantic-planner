@@ -80,10 +80,7 @@ describe.skipIf(shouldSkipE2E())(
 					.forTenant(TENANT)
 					.select('products')
 					.where(eq('sku', 'WIDGET-001'))
-					.columnsWithExpressions(
-						['sku'],
-						[coalesce(['name_fr', 'name_en'], 'display_name')],
-					)
+					.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])
 					.first();
 
 				// Then display_name should be "Widget Pro" (English fallback)
@@ -120,10 +117,7 @@ describe.skipIf(shouldSkipE2E())(
 					.forTenant(TENANT)
 					.select('products')
 					.where(eq('sku', 'GADGET-001'))
-					.columnsWithExpressions(
-						['sku'],
-						[coalesce(['name_fr', 'name_en'], 'display_name')],
-					)
+					.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])
 					.first();
 
 				// Then display_name should be "Super Bidule" (French primary)
@@ -161,10 +155,10 @@ describe.skipIf(shouldSkipE2E())(
 					.forTenant(TENANT)
 					.select('products')
 					.where(eq('sku', 'GIZMO-001'))
-					.columnsWithExpressions(
-						['sku'],
-						[coalesce(['name_fr', 'name_en', 'name_default'], 'display_name')],
-					)
+					.columns([
+						'sku',
+						coalesce(['name_fr', 'name_en', 'name_default'], 'display_name'),
+					])
 					.first();
 
 				// Then display_name should be "Default Gizmo"
@@ -186,10 +180,7 @@ describe.skipIf(shouldSkipE2E())(
 				const products = await orm
 					.forTenant(TENANT)
 					.select('products')
-					.columnsWithExpressions(
-						['sku'],
-						[coalesce(['name_fr', 'name_en'], 'display_name')],
-					)
+					.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])
 					.all();
 
 				// Filter in application code (SQL LIKE on COALESCE would require raw)
@@ -211,10 +202,10 @@ describe.skipIf(shouldSkipE2E())(
 					.forTenant(TENANT)
 					.select('products')
 					.where(eq('active', true))
-					.columnsWithExpressions(
-						['sku'],
-						[coalesce(['name_fr', 'name_en', 'name_default'], 'display_name')],
-					)
+					.columns([
+						'sku',
+						coalesce(['name_fr', 'name_en', 'name_default'], 'display_name'),
+					])
 					.all();
 
 				// Should have multiple products with display names
@@ -239,10 +230,7 @@ describe.skipIf(shouldSkipE2E())(
 				const dump = orm
 					.forTenant(TENANT)
 					.select('products')
-					.columnsWithExpressions(
-						['sku'],
-						[coalesce(['name_fr', 'name_en'], 'display_name')],
-					)
+					.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])
 					.dump();
 
 				expect(dump.sql.toUpperCase()).toContain('COALESCE');
@@ -257,10 +245,7 @@ describe.skipIf(shouldSkipE2E())(
 					.forTenant(TENANT)
 					.select('products')
 					.where(eq('sku', 'WIDGET-001'))
-					.columnsWithExpressions(
-						['sku'],
-						[coalesce(['name_fr', 'name_en'], 'display_name')],
-					)
+					.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])
 					.dump();
 
 				// Should have parameter for sku filter

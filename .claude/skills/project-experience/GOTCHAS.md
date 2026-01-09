@@ -410,3 +410,52 @@ const required = firstOrThrow(fk.sourceColumns, 'FK source columns');  // Throws
 **Key insight:** The `element !== undefined` check satisfies both TypeScript and Biome because it proves the element exists at runtime.
 
 **Location:** `packages/adapter-kysely/src/introspection.ts` lines 16-31
+
+---
+
+### Runtime Type Detection: Use Marker Property Pattern (2026-01-09)
+
+**Issue:** Need to distinguish between primitive values (strings) and objects in a union type at runtime, e.g., `ColumnSpec = string | ExpressionSpec`.
+
+**Cause:** TypeScript types are erased at runtime. Cannot use `instanceof` for interfaces. Duck typing with `typeof === 'object'` is not robust for extensibility.
+
+**Solution:** Use a marker property pattern with a boolean literal type:
+
+```typescript
+// Define marker interface
+export interface ExpressionSpec {
+  readonly __expr: true;  // Marker property with literal type
+  readonly intent: ExpressionIntent;
+}
+
+export type ColumnSpec = string | ExpressionSpec;
+
+// Type guard with all safety checks
+export function isExpressionSpec(spec: ColumnSpec): spec is ExpressionSpec {
+  return (
+    typeof spec === 'object' &&
+    spec !== null &&
+    '__expr' in spec &&
+    spec.__expr === true
+  );
+}
+```
+
+**Why this works:**
+1. `__expr: true` is impossible for strings
+2. `in` operator safely checks property existence
+3. Value check `=== true` prevents false positives from objects with `__expr: false` or `__expr: 'something'`
+4. Pattern is extensible - can add more marker types later
+
+**Usage in unified columns() API:**
+```typescript
+for (const col of columns) {
+  if (isExpressionSpec(col)) {
+    expressions.push(col.intent);  // TypeScript knows col.intent exists
+  } else {
+    fields.push(col);  // TypeScript knows col is string
+  }
+}
+```
+
+**Location:** `packages/dx/src/types.ts` lines 19-49, `packages/dx/src/orm.ts` columns() implementation

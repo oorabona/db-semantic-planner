@@ -141,6 +141,29 @@ Window function support across all packages for analytics queries.
   - Rename `findFirstOrThrow()` → `firstOrThrow()`
   - Rename `selectWithExpressions()` → `columnsWithExpressions()`
 
+### DX API Improvements (P2) — See TODO_DX.md for details
+
+| ID | Feature | Priority | Effort | Breaking |
+|----|---------|----------|--------|----------|
+| DX-020 | ✅ Unified `columns()` API (2026-01-09) | HIGH | M | Yes |
+| DX-021 | Window functions builder pattern | MEDIUM | M | Yes |
+| DX-022 | Recursive via `include({ recursive: true })` | HIGH | L | Yes |
+| DX-023 | Lightweight ModelIR (relations-only) | MEDIUM | L | No |
+| DX-024 | `orderBy()` shorthand (polymorphic) | HIGH | S | No |
+| DX-025 | `orm.transaction()` wrapper (passthrough) | HIGH | M | No |
+| DX-026 | `upsert()` + `returning()` support | HIGH | M | No |
+| DX-027 | Raw SQL escape hatch (`raw`, `orm.raw`) | HIGH | S | No |
+| DX-028 | Pagination helpers (offset + cursor) | MEDIUM | S | No |
+
+**Breaking changes summary:**
+- ✅ DX-020: Remove `columnsWithExpressions()`, use `columns()` unified (DONE 2026-01-09)
+- DX-021: Remove `.window([...])` object syntax, use builder pattern
+- DX-022: Remove `createRecursiveQuery()`, use `include({ recursive: true })`
+
+**Architecture principle:**
+- Passthrough, pas réimplémentation : on expose ce que l'adapter supporte
+- Si Kysely/Drizzle ne supporte pas → erreur de l'adapter, pas de hack
+
 ### Multi-dialect Support (`packages/adapter-kysely`)
 
 See **DIALECT-001** in "In Progress" section above.

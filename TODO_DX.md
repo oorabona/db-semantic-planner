@@ -21,6 +21,28 @@ This is a LEAF package (nothing depends on it)
 
 ## Completed (Recent)
 
+### DX-020: Unified columns() API ✅ (2026-01-09)
+
+**BREAKING CHANGE:** Removed `columnsWithExpressions()`, unified into `columns()`.
+
+- [x] ✅ Create `ExpressionSpec` type with `__expr: true` marker
+- [x] ✅ Create `ColumnSpec = string | ExpressionSpec` union type
+- [x] ✅ Create `isExpressionSpec()` type guard function
+- [x] ✅ Modify `columns()` to accept `ColumnSpec[]`
+- [x] ✅ Update `coalesce()` helper to return `ExpressionSpec`
+- [x] ✅ Update `raw()` helper to return `ExpressionSpec`
+- [x] ✅ Remove `columnsWithExpressions()` from types.ts
+- [x] ✅ Remove `columnsWithExpressions()` from orm.ts
+- [x] ✅ Update E2E tests to use new `columns()` API
+- [x] ✅ All 887 tests passing
+
+**New API:**
+```typescript
+.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])
+```
+
+**Effort:** M
+
 ### DX-012: API Ergonomics ✅ (2026-01-09)
 
 **Spec:** [docs/specs/DX-012-api-ergonomics.md](docs/specs/DX-012-api-ergonomics.md)
@@ -120,7 +142,444 @@ Window function support across core, adapter, and dx packages.
 
 ## Pending - P2
 
-(none)
+### DX-021: Window Functions Builder Pattern
+
+**Priority:** MEDIUM | **Effort:** M
+
+Remplacer l'API objet verbose par un builder pattern fluide.
+
+**Actuel (à supprimer) :**
+```typescript
+.window([{ fn: 'row_number', over: { orderBy: [...] }, alias: 'rn' }])
+```
+
+**Nouveau :**
+```typescript
+.columns([
+  'sku',
+  rowNumber().orderBy('created_at', 'desc').as('rn'),
+  rank().partitionBy('category_id').orderBy('price').as('price_rank'),
+  sum('amount').partitionBy('user_id').as('running_total')
+])
+```
+
+**Tâches :**
+- [ ] Créer builders: `rowNumber()`, `rank()`, `denseRank()`, `sum()`, `avg()`, `count()`, `min()`, `max()`, `lag()`, `lead()`
+- [ ] Chaque builder retourne `WindowBuilder` avec `.partitionBy()`, `.orderBy()`, `.as()`
+- [ ] `WindowBuilder.as()` retourne `ExpressionSpec` compatible avec `columns()`
+- [ ] **Supprimer** l'ancienne méthode `.window([...])`
+- [ ] Intégration avec DX-020 (columns unifié)
+
+---
+
+### DX-022: Recursive via include() Option (BREAKING)
+
+**Priority:** HIGH | **Effort:** L
+
+Intégrer les requêtes récursives dans `include()` au lieu d'une fonction séparée.
+
+**Actuel (à supprimer) :**
+```typescript
+createRecursiveQuery({ model, db }).from('categories').nodeId(5).traverseVia(...)
+```
+
+**Nouveau - include() avec recursive :**
+```typescript
+// Nested (défaut) - ancêtres attachés en structure imbriquée
+const category = await orm.select('categories')
+   .where(eq('id', 5))
+   .include('parent', { recursive: true, direction: 'ancestors' })
+   .first();
+// → { id: 5, name: 'Phones', parent: { id: 2, parent: { id: 1, parent: null } } }
+
+// Flat - ancêtres en tableau avec depth
+const category = await orm.select('categories')
+   .where(eq('id', 5))
+   .include('parent', { recursive: true, direction: 'ancestors', flat: true })
+   .first();
+// → { id: 5, name: 'Phones', ancestors: [{ id: 2, depth: 1 }, { id: 1, depth: 2 }] }
+
+// Descendants nested
+const category = await orm.select('categories')
+   .where(eq('id', 1))
+   .include('children', { recursive: true, direction: 'descendants', maxDepth: 3 })
+   .first();
+// → { id: 1, children: [{ id: 2, children: [{ id: 5, children: [] }] }] }
+```
+
+**Shortcuts = sucre syntaxique autour de include() :**
+```typescript
+// Liste flat des ancêtres (sans le nœud source)
+const ancestors = await orm.listAncestors('categories', 5);
+// → [{ id: 2, depth: 1 }, { id: 1, depth: 2 }]
+
+// Équivalent explicite :
+// orm.select('categories').where(eq('id', 5))
+//    .include('parent', { recursive: true, direction: 'ancestors', flat: true, omitSelf: true })
+//    .first().then(r => r.ancestors)
+
+// Liste flat des descendants
+const descendants = await orm.listDescendants('categories', 1, { maxDepth: 3 });
+// → [{ id: 2, depth: 1 }, { id: 5, depth: 2 }, { id: 6, depth: 2 }]
+
+// Subtree (inclut le nœud source)
+const subtree = await orm.subtree('categories', 1);
+// → [{ id: 1, depth: 0 }, { id: 2, depth: 1 }, { id: 5, depth: 2 }]
+```
+
+**RecursiveIncludeOptions (source unique de vérité) :**
+```typescript
+interface RecursiveIncludeOptions {
+  recursive: true;
+  direction: 'ancestors' | 'descendants';
+  flat?: boolean;           // false = nested (défaut), true = array avec depth
+  omitSelf?: boolean;       // true = exclure le nœud source (défaut: false)
+  maxDepth?: number;        // Limite profondeur (défaut: illimité)
+  includeDepth?: boolean;   // Ajouter colonne depth (auto true si flat)
+  includePath?: boolean;    // Ajouter array des IDs traversés
+}
+```
+
+**Shortcuts comme wrappers :**
+```typescript
+// listAncestors = include('parent', { recursive, direction: 'ancestors', flat: true, omitSelf: true })
+// listDescendants = include('children', { recursive, direction: 'descendants', flat: true, omitSelf: true })
+// subtree = include('children', { recursive, direction: 'descendants', flat: true, omitSelf: false })
+```
+
+**Implémentation :**
+```
+SQL (CTE) → toujours flat avec depth
+                ↓
+         Post-processing JS
+                ↓
+    ┌───────────┴───────────┐
+    │                       │
+flat: true              flat: false (défaut)
+    │                       │
+    ↓                       ↓
+Return as-is          buildNestedTree()
+avec depth            restructure en objets nested
+```
+
+**Tâches :**
+- [ ] Étendre `IncludeOptions` avec `RecursiveIncludeOptions`
+- [ ] Détecter relations self-référentielles dans ModelIR
+- [ ] Générer CTE automatiquement quand `recursive: true`
+- [ ] Implémenter `buildNestedTree()` pour format nested (post-processing JS)
+- [ ] Format flat : retourner avec depth, renommer propriété (`parent` → `ancestors`, `children` → `descendants`)
+- [ ] Implémenter `omitSelf` option
+- [ ] **Supprimer** `createRecursiveQuery()` et `RecursiveQueryBuilder` (internal)
+- [ ] **Renommer** shortcuts : `ancestors()` → `listAncestors()`, `descendants()` → `listDescendants()`
+- [ ] **Réimplémenter** shortcuts comme wrappers autour de `include({ recursive })`
+- [ ] Mettre à jour tests E2E Q6 (category tree)
+- [ ] Documentation : decision tree "quand utiliser quoi"
+
+**Architecture :**
+```
+include({ recursive: true })  ← Source unique de vérité (primitif)
+        ↓
+   ┌────┴────┐
+   │         │
+listAncestors()  listDescendants()  subtree()  ← Sucre syntaxique (wrappers)
+```
+
+**Dépendances :** Impacte aussi adapter-kysely (compilation CTE)
+
+---
+
+### DX-023: Lightweight ModelIR (Kysely Type Inference)
+
+**Priority:** MEDIUM | **Effort:** L
+
+Simplifier la définition du modèle en inférant entités/colonnes depuis les types Kysely.
+
+**Actuel (verbose) :**
+```typescript
+const model = defineModel({
+  entities: {
+    users: { tableName: 'users', columns: { id: { type: 'number' }, ... } },
+    posts: { tableName: 'posts', columns: { ... } }
+  },
+  relations: [...]
+});
+```
+
+**Nouveau (léger) :**
+```typescript
+// Option A: Codegen build-time (recommandé)
+// Script génère model.generated.ts depuis Database interface
+
+// Option B: Relations-only (runtime, conventions FK)
+const model = defineModel<Database>({
+  relations: {
+    'users.posts': '1:N',                    // FK inférée: posts.user_id
+    'users.profile': '1:1',                  // FK inférée: profile.user_id
+    'posts.author': ['N:1', 'users'],        // Explicite car nom ≠ target
+    'orders.items': { fk: 'order_uuid', cardinality: '1:N' }  // Cas exotique
+  }
+});
+```
+
+**Conventions FK :**
+- `{target}_id` → `{target}.id` (ex: `user_id` → `users.id`)
+- Override explicite toujours possible via `{ fk: 'custom_column' }`
+
+**Tâches :**
+- [ ] Implémenter Option B d'abord (runtime, plus simple)
+  - [ ] Parser `'1:N'` shorthand
+  - [ ] Parser `['N:1', 'target']` pour noms custom
+  - [ ] Parser objet complet pour cas exotiques
+  - [ ] Inférer FK via convention `{target}_id`
+- [ ] Garder API verbose existante pour cas exotiques (backward compatible)
+- [ ] Documenter les conventions et overrides
+- [ ] (Futur) Option A: Codegen plugin TypeScript pour build-time
+
+**Note:** Runtime vs Build-time
+- **Runtime (Option B):** On ne peut PAS inférer les colonnes depuis `Database` car types effacés. On définit seulement les relations, colonnes restent dynamiques.
+- **Build-time (Option A, futur):** Un script/plugin analyse les types TS et génère le ModelIR complet. Similar à Prisma generate.
+
+---
+
+### DX-024: orderBy() Shorthand
+
+**Priority:** HIGH | **Effort:** S
+
+API polymorphe pour `orderBy()` avec raccourcis.
+
+**Nouveau :**
+```typescript
+// Simple - défaut ASC
+.orderBy('created_at')
+
+// Avec direction
+.orderBy('created_at', 'desc')
+
+// Multiple colonnes (objet)
+.orderBy({ created_at: 'desc', name: 'asc' })
+
+// Cas avancés (garde syntaxe actuelle)
+.orderBy([{ column: 'created_at', direction: 'desc', nulls: 'last' }])
+```
+
+**Tâches :**
+- [ ] Overloads TypeScript pour les 4 signatures
+- [ ] Normaliser vers format interne `OrderByIntent[]`
+- [ ] Tests pour chaque variante
+- [ ] Backward compatible (syntaxe tableau existante fonctionne)
+
+---
+
+### DX-025: Transaction Wrapper
+
+**Priority:** HIGH | **Effort:** M
+
+API `orm.transaction()` pour transactions avec abstraction adapter.
+
+**Philosophie : Passthrough, pas réimplémentation**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  On expose ce que l'adapter supporte, on n'invente rien         │
+│  Nested transactions, savepoints, readOnly → si Kysely le fait  │
+│  Sinon → erreur de l'adapter (pas notre responsabilité)         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**API :**
+```typescript
+await orm.transaction(async (tx) => {
+  const user = await tx.select('users').where(eq('id', 1)).first();
+  await tx.insert('posts').values({ user_id: user.id, title: 'New' }).execute();
+  // Commit automatique si pas d'erreur
+  // Rollback automatique si erreur (géré par Kysely)
+});
+
+// Multi-tenant
+await orm.forTenant('acme').transaction(async (tx) => {
+  // tx est scopé au tenant
+});
+```
+
+**Architecture :**
+```typescript
+// Interface adapter (packages/adapter-kysely)
+interface DatabaseAdapter {
+  transaction<T>(fn: (tx: TransactionContext) => Promise<T>): Promise<T>;
+}
+
+// TransactionContext = ORM instance scopée à la transaction
+// Wraps Kysely's transaction, rien de plus
+```
+
+**Tâches :**
+- [ ] Définir `TransactionContext` interface
+- [ ] Implémenter dans adapter-kysely (wraps `db.transaction()`)
+- [ ] Ajouter `orm.transaction()` dans dx
+- [ ] Multi-tenant : `forTenant().transaction()`
+- [ ] Tests: commit, rollback
+- [ ] Documenter : "Ce qui est supporté dépend de l'adapter sous-jacent"
+
+---
+
+### DX-026: Upsert Support
+
+**Priority:** HIGH | **Effort:** M
+
+Support `INSERT ... ON CONFLICT` (PostgreSQL) / `INSERT OR REPLACE` (SQLite).
+
+**Philosophie : Passthrough vers l'adapter**
+- RETURNING → si Kysely/PostgreSQL le supporte, on l'expose
+- Syntaxe SQLite différente → géré par DialectCapabilities
+
+**API :**
+```typescript
+// Update colonnes spécifiques
+orm.upsert('users')
+   .values({ id: 1, name: 'John', email: 'john@example.com' })
+   .onConflict('id')
+   .doUpdate(['name', 'email'])
+   .execute()
+
+// Update avec valeurs custom
+orm.upsert('users')
+   .values({ id: 1, name: 'John' })
+   .onConflict('id')
+   .doUpdate({ name: 'John Updated', updated_at: new Date() })
+   .execute()
+
+// Composite key
+orm.upsert('order_items')
+   .values({ order_id: 1, product_id: 42, qty: 5 })
+   .onConflict(['order_id', 'product_id'])
+   .doUpdate(['qty'])
+   .execute()
+
+// Do nothing (INSERT ... ON CONFLICT DO NOTHING)
+orm.upsert('users')
+   .values({ id: 1, name: 'John' })
+   .onConflict('id')
+   .doNothing()
+   .execute()
+
+// Avec RETURNING (PostgreSQL) - passthrough vers Kysely
+const user = await orm.upsert('users')
+   .values({ id: 1, name: 'John' })
+   .onConflict('id')
+   .doUpdate(['name'])
+   .returning(['id', 'name', 'updated_at'])
+   .execute()
+// → { id: 1, name: 'John', updated_at: Date }
+```
+
+**Tâches :**
+- [ ] Core: `UpsertIntent` type
+- [ ] Adapter: `compileUpsert()` avec support PostgreSQL
+- [ ] DX: `UpsertBuilder` avec `.values()`, `.onConflict()`, `.doUpdate()`, `.doNothing()`, `.returning()`, `.execute()`, `.dump()`
+- [ ] Multi-tenant: schema prefix support
+- [ ] Tests: single key, composite key, doUpdate, doNothing, returning
+- [ ] DialectCapabilities: `supportsUpsert`, `supportsReturning`
+
+---
+
+### DX-027: Raw SQL Escape Hatch
+
+**Priority:** HIGH | **Effort:** S
+
+Permettre du SQL brut pour les cas non couverts par l'ORM.
+
+**API :**
+```typescript
+// Query complète raw
+const users = await orm.raw<User[]>`
+  SELECT * FROM users
+  WHERE jsonb_data @> '{"role": "admin"}'
+`;
+
+// Raw dans un where (expression)
+import { raw } from '@db-semantic-planner/dx';
+
+orm.select('users')
+   .where(raw`age > 18 AND jsonb_field @> '{"active": true}'`)
+   .all()
+
+// Raw avec paramètres (sécurisé)
+orm.select('products')
+   .where(raw`price BETWEEN ${minPrice} AND ${maxPrice}`)
+   .all()
+
+// Raw pour colonnes calculées
+orm.select('orders')
+   .columns(['id', raw`total * 1.2 AS total_with_tax`])
+   .all()
+```
+
+**Sécurité :**
+- Template literals avec paramètres → binding automatique (pas d'injection)
+- `orm.raw` pour queries complètes
+- `raw` helper pour expressions dans where/columns
+
+**Tâches :**
+- [ ] Helper `raw` pour expressions (tagged template literal)
+- [ ] `orm.raw<T>()` pour queries complètes
+- [ ] Binding automatique des paramètres (sécurité injection SQL)
+- [ ] Intégration avec `where()`, `columns()`
+- [ ] Multi-tenant : schema prefix dans raw queries ?
+- [ ] Tests: expressions, full queries, paramètres
+
+---
+
+### DX-028: Pagination Helpers
+
+**Priority:** MEDIUM | **Effort:** S
+
+Helpers pour pagination offset-based et cursor-based.
+
+**API Offset-based :**
+```typescript
+const page = await orm.select('users')
+   .where(eq('active', true))
+   .orderBy('created_at', 'desc')
+   .paginate({ page: 2, perPage: 20 })
+   .execute()
+
+// → {
+//   data: User[],
+//   pagination: {
+//     page: 2,
+//     perPage: 20,
+//     total: 156,
+//     totalPages: 8,
+//     hasNextPage: true,
+//     hasPrevPage: true
+//   }
+// }
+```
+
+**API Cursor-based (pour gros datasets) :**
+```typescript
+const page = await orm.select('users')
+   .orderBy('id')
+   .cursorPaginate({ cursor: 'eyJpZCI6MTAwfQ==', limit: 20 })
+   .execute()
+
+// → {
+//   data: User[],
+//   nextCursor: 'eyJpZCI6MTIwfQ==' | null,
+//   prevCursor: 'eyJpZCI6MTAxfQ==' | null
+// }
+```
+
+**Implémentation :**
+- Offset-based : `LIMIT` + `OFFSET` + COUNT query séparée
+- Cursor-based : Encode/decode cursor (base64 JSON), `WHERE id > cursor LIMIT n+1`
+
+**Tâches :**
+- [ ] `paginate({ page, perPage })` méthode
+- [ ] `PaginatedResult<T>` type avec metadata
+- [ ] COUNT query optimisée (ou option `withCount: false`)
+- [ ] `cursorPaginate({ cursor, limit })` méthode
+- [ ] Cursor encode/decode (base64 JSON du dernier ID)
+- [ ] Tests: première page, milieu, dernière, empty
 
 ---
 

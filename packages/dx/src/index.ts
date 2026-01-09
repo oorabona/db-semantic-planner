@@ -91,6 +91,8 @@ export {
 // Types
 export type {
 	AggregateOptions,
+	ColumnSpec,
+	ExpressionSpec,
 	HierarchyOptions,
 	IncludeOptions,
 	NestedInclude,
@@ -103,3 +105,5 @@ export type {
 	StreamOptions,
 	WindowOptions,
 } from './types.js';
+// Type guard
+export { isExpressionSpec } from './types.js';
