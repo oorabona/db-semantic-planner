@@ -18,14 +18,17 @@ import type {
 	RecursiveTrackOptions,
 	SelectAggregateIntent,
 	SelectWithExpressionsIntent,
+	SubqueryRefIntent,
 	UpdateIntent,
 	WhereIntent,
+	WhereSubqueryIntent,
 } from '@db-semantic-planner/core';
 import {
 	isAdjacencyTraversal,
 	isEdgeTableTraversal,
 	isSelectAggregate,
 	isSelectWithExpressions,
+	isSubqueryRef,
 } from '@db-semantic-planner/core';
 import type {
 	AliasedExpression,
@@ -34,7 +37,7 @@ import type {
 	Kysely,
 	SelectQueryBuilder,
 } from 'kysely';
-import { sql } from 'kysely';
+import { type RawBuilder, sql } from 'kysely';
 import {
 	type DialectCapabilities,
 	detectDialect,
@@ -1299,6 +1302,9 @@ function compileWhere(
 				schemaName,
 			);
 
+		case 'subquery':
+			return compileSubquery(eb, where, alias, model, plan, state, schemaName);
+
 		default:
 			throw new CompilationError(
 				`Unknown where kind: ${(where as WhereIntent).kind}`,
@@ -1507,6 +1513,138 @@ function compileRelationFilter(
 			);
 		}
 	}
+}
+
+/**
+ * Compile a scalar subquery WHERE condition.
+ * Produces: field op (SELECT scalar FROM table WHERE ...)
+ */
+function compileSubquery(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
+	eb: any,
+	where: WhereSubqueryIntent,
+	parentAlias: string,
+	model: ModelIR,
+	plan: PlanReport,
+	state: CompilerState,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
+): any {
+	const { field, operator, subquery } = where;
+
+	// Determine the full table name (with schema if multi-tenant)
+	const tableName = schemaName
+		? `${schemaName}.${subquery.from}`
+		: subquery.from;
+
+	// Build subquery
+	const subqueryBuilder = eb
+		.selectFrom(tableName)
+		.select(
+			subquery.aggregate
+				? buildSubqueryAggregate(subquery.aggregate, subquery.from)
+				: `${subquery.from}.${subquery.select}`,
+		);
+
+	// Add WHERE clause if present (handling ref() for correlated subqueries)
+	let finalSubquery = subqueryBuilder;
+	const subqueryWhere = subquery.where;
+	if (subqueryWhere) {
+		// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder type
+		finalSubquery = subqueryBuilder.where((sqEb: any) =>
+			compileSubqueryWhere(
+				sqEb,
+				subqueryWhere,
+				subquery.from,
+				parentAlias,
+				model,
+				plan,
+				state,
+				schemaName,
+			),
+		);
+	}
+
+	// Map operator to SQL operator
+	const sqlOp = mapOperatorToSql(operator);
+
+	// Return comparison: parentAlias.field op (subquery)
+	return eb(`${parentAlias}.${field}`, sqlOp, finalSubquery);
+}
+
+/**
+ * Build aggregate expression for subquery (e.g., MAX(price))
+ */
+function buildSubqueryAggregate(
+	aggregate: { fn: 'count' | 'sum' | 'avg' | 'min' | 'max'; field: string },
+	tableAlias: string,
+): RawBuilder<unknown> {
+	const { fn, field } = aggregate;
+	return sql`${sql.raw(fn.toUpperCase())}(${sql.ref(`${tableAlias}.${field}`)})`;
+}
+
+/**
+ * Compile WHERE for a subquery, handling ref() column references to parent.
+ */
+function compileSubqueryWhere(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
+	eb: any,
+	where: WhereIntent,
+	subqueryAlias: string,
+	parentAlias: string,
+	model: ModelIR,
+	plan: PlanReport,
+	state: CompilerState,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
+): any {
+	// Check if this is a comparison with a ref() value
+	if (where.kind === 'comparison') {
+		const value = where.value;
+		if (isSubqueryRef(value)) {
+			// This is a correlated reference to parent column
+			const refColumn = resolveRef(value, parentAlias);
+			return eb(
+				`${subqueryAlias}.${where.field}`,
+				mapOperatorToSql(where.operator),
+				sql.ref(refColumn),
+			);
+		}
+	}
+
+	// For other cases, delegate to normal compileWhere with subquery alias
+	return compileWhere(eb, where, subqueryAlias, model, plan, state, schemaName);
+}
+
+/**
+ * Resolve a SubqueryRefIntent to a column reference string.
+ * Handles both simple refs ('id') and qualified refs ('alias.column').
+ */
+function resolveRef(ref: SubqueryRefIntent, defaultAlias: string): string {
+	const { column } = ref;
+	// If already qualified (contains '.'), use as-is
+	if (column.includes('.')) {
+		return column;
+	}
+	// Otherwise, qualify with parent alias
+	return `${defaultAlias}.${column}`;
+}
+
+/**
+ * Map intent operator to SQL operator string.
+ */
+function mapOperatorToSql(
+	operator: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte',
+): string {
+	const map: Record<string, string> = {
+		eq: '=',
+		neq: '!=',
+		gt: '>',
+		gte: '>=',
+		lt: '<',
+		lte: '<=',
+	};
+	return map[operator] ?? '=';
 }
 
 // ============================================================================

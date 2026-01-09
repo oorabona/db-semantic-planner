@@ -21,6 +21,36 @@ This is a LEAF package (nothing depends on it)
 
 ## Completed (Recent)
 
+### DX-012: API Ergonomics ✅ (2026-01-09)
+
+**Spec:** [docs/specs/DX-012-api-ergonomics.md](docs/specs/DX-012-api-ergonomics.md)
+
+Improve API ergonomics with object filter syntax, typed generics, and subquery builder.
+
+- [x] ✅ Block 1: Object Filter Syntax
+  - `where({ status: 'active' })` shorthand for `where(eq('status', 'active'))`
+  - Operators via `$` prefix: `{ age: { $gt: 18 } }`
+  - Support: $eq, $neq, $gt, $gte, $lt, $lte, $in, $like, $ilike, null, $notNull
+  - Backward compatible with WhereIntent
+  - 28 tests in object-filter.test.ts
+- [x] ✅ Block 2: Typed Schema Generics (Kysely-like)
+  - `createOrm<DB>()` with DB interface for autocomplete
+  - `query('users')` autocomplete on table names
+  - `where({ name: 'x' })` autocomplete on field names
+  - Compatible with existing Kysely Database types
+  - 13 tests in typed-schema.test.ts
+- [x] ✅ Block 3: Subquery Builder
+  - `subquery('table').select('field').where(...)`
+  - Aggregate methods: `.count()`, `.sum()`, `.avg()`, `.min()`, `.max()`
+  - `ref('column')` helper for parent column references
+  - Integration with object filter syntax: `{ price: { $eq: subquery(...) } }`
+  - WhereSubqueryIntent, ScalarSubqueryIntent, SubqueryRefIntent in core
+  - Compiler support in adapter-kysely (compileSubquery)
+  - 38 tests in subquery-builder.test.ts
+
+**Tests:** 79 new tests across 3 test files
+**Effort:** L
+
 ### DX-011: API Improvements (Type Inference, where AND, include) ✅ (2026-01-09)
 
 Ergonomic improvements to QueryBuilder API for better DX.

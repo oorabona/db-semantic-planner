@@ -91,6 +91,10 @@ export type {
 	WhereNullIntent,
 	WhereOrIntent,
 	WhereRelationFilterIntent,
+	// Subquery (DX-012)
+	WhereSubqueryIntent,
+	SubqueryRefIntent,
+	ScalarSubqueryIntent,
 } from './intent-ast.js';
 export {
 	// Recursive CTE type guards (RFC-001)
@@ -122,6 +126,9 @@ export {
 	isWhereOr,
 	isWhereRelationBased,
 	isWhereRelationFilter,
+	// Subquery type guards (DX-012)
+	isWhereSubquery,
+	isSubqueryRef,
 } from './intent-ast.js';
 
 // ============================================================================

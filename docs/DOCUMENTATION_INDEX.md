@@ -64,6 +64,7 @@ packages/dx            → Depends on core + adapter-kysely
 | ARCH-001 | [Dialect-Agnostic Recursive CTE](specs/ARCH-001-dialect-agnostic-recursive.md) | core, adapter | 🟡 draft |
 | DX-005 | [Recursive Query Builder](specs/DX-005-recursive-query-builder.md) | dx | 🟡 draft |
 | DX-010 | [Mutations (insert/update/delete)](specs/DX-010-mutations.md) | dx | ✅ canonical |
+| DX-012 | [API Ergonomics](specs/DX-012-api-ergonomics.md) | dx | 🟡 draft |
 
 ## Golden Query Tests (MVP Contract) - ✅ Complete
 

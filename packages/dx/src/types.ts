@@ -12,6 +12,7 @@ import type {
 	InsertBuilder,
 	UpdateBuilder,
 } from './mutation-builders.js';
+import type { WhereFilter } from './object-filter.js';
 import type { RecursiveQueryBuilder } from './recursive-query-builder.js';
 
 /**
@@ -431,10 +432,35 @@ export interface QueryBuilder<TResult = unknown> {
 	/**
 	 * Filter the root entity records.
 	 *
-	 * @param condition - Where condition to apply
+	 * Supports two syntax forms:
+	 * 1. WhereIntent (from filter helpers): `where(eq('status', 'active'))`
+	 * 2. Object filter (Prisma-like): `where({ status: 'active' })`
+	 *
+	 * Object filter syntax:
+	 * - Simple equality: `{ status: 'active' }` → `eq('status', 'active')`
+	 * - Operators: `{ age: { $gt: 18 } }` → `gt('age', 18)`
+	 * - Multiple fields: `{ a: 1, b: 2 }` → `and(eq('a', 1), eq('b', 2))`
+	 * - Null check: `{ deletedAt: null }` → `isNull('deletedAt')`
+	 *
+	 * @param condition - Where condition (WhereIntent or object filter)
 	 * @returns A new QueryBuilder with the filter applied
+	 *
+	 * @example
+	 * ```typescript
+	 * // Using filter helpers (legacy)
+	 * orm.query('users').where(eq('status', 'active'))
+	 *
+	 * // Using object syntax (new)
+	 * orm.query('users').where({ status: 'active' })
+	 *
+	 * // With operators
+	 * orm.query('users').where({ age: { $gte: 18, $lt: 65 } })
+	 *
+	 * // Multiple conditions (implicit AND)
+	 * orm.query('users').where({ active: true, role: 'admin' })
+	 * ```
 	 */
-	where(condition: WhereIntent): QueryBuilder<TResult>;
+	where(condition: WhereIntent | WhereFilter<TResult>): QueryBuilder<TResult>;
 
 	/**
 	 * Override the ORM-level strict mode for this query.
@@ -683,31 +709,56 @@ export interface HierarchyOptions {
 
 /**
  * ORM instance created by createOrm().
+ *
+ * @typeParam DB - Database schema type (Kysely-like).
+ *   Keys are table names, values are row types.
+ *   When provided, query() method provides autocomplete for table names
+ *   and infers result types automatically.
+ *
+ * @example
+ * ```typescript
+ * // Define your database schema
+ * interface Database {
+ *   users: { id: number; name: string; email: string };
+ *   posts: { id: number; title: string; authorId: number };
+ * }
+ *
+ * // Create typed ORM
+ * const orm = createOrm<Database>({ model });
+ *
+ * // Table names are autocompleted, results are typed
+ * const users = await orm.query('users').findMany();
+ * // users is { id: number; name: string; email: string }[]
+ * ```
  */
-export interface OrmInstance {
+export interface OrmInstance<DB = Record<string, unknown>> {
 	/**
 	 * Start building a query from a table.
 	 *
-	 * @typeParam TResult - Optional type for the query result rows.
-	 *   When provided, execution methods (findMany, execute, etc.) return typed results.
+	 * When DB generic is provided:
+	 * - Table name is constrained to `keyof DB`
+	 * - Result type defaults to `DB[TableName]`
+	 *
+	 * @typeParam K - Table name (inferred from DB keys when typed)
+	 * @typeParam TResult - Override result type (defaults to DB[K])
 	 * @param from - The root table name to query
 	 * @returns A QueryBuilder for constructing the query
 	 *
 	 * @example
 	 * ```typescript
-	 * // Untyped query (backward compatible)
-	 * const users = orm.query('users')
-	 *   .include('posts')
-	 *   .where({ field: 'active', op: '=', value: true })
-	 *   .plan();
+	 * // Typed query (with DB generic)
+	 * const orm = createOrm<Database>({ model });
+	 * const users = await orm.query('users').findMany();
+	 * // users is Database['users'][]
 	 *
-	 * // Typed query (new)
-	 * type User = { id: number; name: string; email: string };
-	 * const typedUsers = await orm.query<User>('users').findMany();
-	 * // typedUsers is User[]
+	 * // Override type if needed
+	 * type CustomUser = { id: number; extra: string };
+	 * const custom = await orm.query<CustomUser>('users').findMany();
 	 * ```
 	 */
-	query<TResult = unknown>(from: string): QueryBuilder<TResult>;
+	query<K extends keyof DB & string, TResult = DB[K]>(
+		from: K,
+	): QueryBuilder<TResult>;
 
 	/**
 	 * The strict mode setting for this ORM instance.
@@ -717,6 +768,7 @@ export interface OrmInstance {
 	/**
 	 * Create a tenant-scoped ORM instance.
 	 * All queries from the returned instance will include the schema prefix.
+	 * Type information is preserved in the returned instance.
 	 *
 	 * @param schemaName - The tenant schema name
 	 * @returns A new ORM instance scoped to the tenant
@@ -728,7 +780,7 @@ export interface OrmInstance {
 	 * // SQL: SELECT * FROM tenant_123.users
 	 * ```
 	 */
-	forTenant(schemaName: string): OrmInstance;
+	forTenant(schemaName: string): OrmInstance<DB>;
 
 	/**
 	 * Start building a recursive CTE query.
