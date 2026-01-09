@@ -21,6 +21,51 @@ This is a LEAF package (nothing depends on it)
 
 ## Completed (Recent)
 
+### DX-022: Recursive via include() Option ✅ (2026-01-09)
+
+**Priority:** HIGH | **Effort:** L | **BREAKING CHANGE**
+**Spec:** [docs/plans/DX-022-recursive-include.md](docs/plans/DX-022-recursive-include.md)
+
+Integrate recursive queries into `include()` instead of a separate function.
+
+**New API:**
+```typescript
+// Nested (default) - ancestors attached in nested structure
+const category = await orm.select('categories')
+   .where(eq('id', 5))
+   .include('parent', { recursive: true, direction: 'ancestors' })
+   .first();
+
+// Flat - ancestors as array with depth
+const category = await orm.select('categories')
+   .where(eq('id', 5))
+   .include('parent', { recursive: true, direction: 'ancestors', flat: true })
+   .first();
+
+// Shortcuts
+const ancestors = await orm.listAncestors('categories', 5, { parentId: 'parentId' });
+const descendants = await orm.listDescendants('categories', 1, { parentId: 'parentId' });
+```
+
+**Old API (removed):**
+- `createRecursiveQuery()` - removed
+- `RecursiveQueryBuilder` - now internal-only
+- `orm.recursive()` - removed
+- `orm.ancestors()` - replaced by `orm.listAncestors()`
+- `orm.descendants()` - replaced by `orm.listDescendants()`
+- `orm.subtree()` - removed (use `listDescendants`)
+
+**Blocks:**
+- [x] ✅ Block 1: RecursiveIncludeOptions type
+- [x] ✅ Block 2: Self-referential detection
+- [x] ✅ Block 3: Recursive include processing (flat + nested)
+- [x] ✅ Block 4: listAncestors/listDescendants shortcuts
+- [x] ✅ Block 5: Remove old API (BREAKING)
+- [x] ✅ Block 6: Documentation & migration guide
+
+**Tests:** 12 new tests (hierarchy-shortcuts.test.ts)
+**Exports:** `ListHierarchyOptions`, `RecursiveIncludeOptions`
+
 ### DX-021: Window Functions Builder Pattern ✅ (2026-01-09)
 
 **Priority:** MEDIUM | **Effort:** M | **BREAKING CHANGE**
@@ -173,122 +218,6 @@ Window function support across core, adapter, and dx packages.
 ---
 
 ## Pending - P2
-
-### DX-022: Recursive via include() Option (BREAKING)
-
-**Priority:** HIGH | **Effort:** L
-
-Intégrer les requêtes récursives dans `include()` au lieu d'une fonction séparée.
-
-**Actuel (à supprimer) :**
-```typescript
-createRecursiveQuery({ model, db }).from('categories').nodeId(5).traverseVia(...)
-```
-
-**Nouveau - include() avec recursive :**
-```typescript
-// Nested (défaut) - ancêtres attachés en structure imbriquée
-const category = await orm.select('categories')
-   .where(eq('id', 5))
-   .include('parent', { recursive: true, direction: 'ancestors' })
-   .first();
-// → { id: 5, name: 'Phones', parent: { id: 2, parent: { id: 1, parent: null } } }
-
-// Flat - ancêtres en tableau avec depth
-const category = await orm.select('categories')
-   .where(eq('id', 5))
-   .include('parent', { recursive: true, direction: 'ancestors', flat: true })
-   .first();
-// → { id: 5, name: 'Phones', ancestors: [{ id: 2, depth: 1 }, { id: 1, depth: 2 }] }
-
-// Descendants nested
-const category = await orm.select('categories')
-   .where(eq('id', 1))
-   .include('children', { recursive: true, direction: 'descendants', maxDepth: 3 })
-   .first();
-// → { id: 1, children: [{ id: 2, children: [{ id: 5, children: [] }] }] }
-```
-
-**Shortcuts = sucre syntaxique autour de include() :**
-```typescript
-// Liste flat des ancêtres (sans le nœud source)
-const ancestors = await orm.listAncestors('categories', 5);
-// → [{ id: 2, depth: 1 }, { id: 1, depth: 2 }]
-
-// Équivalent explicite :
-// orm.select('categories').where(eq('id', 5))
-//    .include('parent', { recursive: true, direction: 'ancestors', flat: true, omitSelf: true })
-//    .first().then(r => r.ancestors)
-
-// Liste flat des descendants
-const descendants = await orm.listDescendants('categories', 1, { maxDepth: 3 });
-// → [{ id: 2, depth: 1 }, { id: 5, depth: 2 }, { id: 6, depth: 2 }]
-
-// Subtree (inclut le nœud source)
-const subtree = await orm.subtree('categories', 1);
-// → [{ id: 1, depth: 0 }, { id: 2, depth: 1 }, { id: 5, depth: 2 }]
-```
-
-**RecursiveIncludeOptions (source unique de vérité) :**
-```typescript
-interface RecursiveIncludeOptions {
-  recursive: true;
-  direction: 'ancestors' | 'descendants';
-  flat?: boolean;           // false = nested (défaut), true = array avec depth
-  omitSelf?: boolean;       // true = exclure le nœud source (défaut: false)
-  maxDepth?: number;        // Limite profondeur (défaut: illimité)
-  includeDepth?: boolean;   // Ajouter colonne depth (auto true si flat)
-  includePath?: boolean;    // Ajouter array des IDs traversés
-}
-```
-
-**Shortcuts comme wrappers :**
-```typescript
-// listAncestors = include('parent', { recursive, direction: 'ancestors', flat: true, omitSelf: true })
-// listDescendants = include('children', { recursive, direction: 'descendants', flat: true, omitSelf: true })
-// subtree = include('children', { recursive, direction: 'descendants', flat: true, omitSelf: false })
-```
-
-**Implémentation :**
-```
-SQL (CTE) → toujours flat avec depth
-                ↓
-         Post-processing JS
-                ↓
-    ┌───────────┴───────────┐
-    │                       │
-flat: true              flat: false (défaut)
-    │                       │
-    ↓                       ↓
-Return as-is          buildNestedTree()
-avec depth            restructure en objets nested
-```
-
-**Tâches :**
-- [ ] Étendre `IncludeOptions` avec `RecursiveIncludeOptions`
-- [ ] Détecter relations self-référentielles dans ModelIR
-- [ ] Générer CTE automatiquement quand `recursive: true`
-- [ ] Implémenter `buildNestedTree()` pour format nested (post-processing JS)
-- [ ] Format flat : retourner avec depth, renommer propriété (`parent` → `ancestors`, `children` → `descendants`)
-- [ ] Implémenter `omitSelf` option
-- [ ] **Supprimer** `createRecursiveQuery()` et `RecursiveQueryBuilder` (internal)
-- [ ] **Renommer** shortcuts : `ancestors()` → `listAncestors()`, `descendants()` → `listDescendants()`
-- [ ] **Réimplémenter** shortcuts comme wrappers autour de `include({ recursive })`
-- [ ] Mettre à jour tests E2E Q6 (category tree)
-- [ ] Documentation : decision tree "quand utiliser quoi"
-
-**Architecture :**
-```
-include({ recursive: true })  ← Source unique de vérité (primitif)
-        ↓
-   ┌────┴────┐
-   │         │
-listAncestors()  listDescendants()  subtree()  ← Sucre syntaxique (wrappers)
-```
-
-**Dépendances :** Impacte aussi adapter-kysely (compilation CTE)
-
----
 
 ### DX-023: Lightweight ModelIR (Kysely Type Inference)
 

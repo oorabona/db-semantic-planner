@@ -1,6 +1,7 @@
 /**
- * DX-009: Hierarchy Shortcuts Tests
- * Tests for ancestors(), descendants(), subtree() ORM shortcuts
+ * DX-022: Hierarchy List Methods Tests
+ * Tests for listAncestors() and listDescendants() ORM methods
+ * These replace the old ancestors(), descendants(), subtree() methods (BREAKING CHANGE)
  */
 
 import { belongsTo, defineSchema, hasMany } from '@db-semantic-planner/core';
@@ -53,167 +54,106 @@ const categoryModel = defineSchema({
 	})
 	.build();
 
-describe('DX-009: Hierarchy Shortcuts', () => {
-	describe('ancestors()', () => {
-		it('should create RecursiveQueryBuilder for ancestor traversal', () => {
-			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
-
-			const builder = orm.ancestors('categories', 42, {
-				parentId: 'parentId',
-			});
-
-			// Builder should be configured correctly
-			const { sql, intent } = builder.upToDepth(10).dump();
-
-			expect(sql.toLowerCase()).toContain('with recursive');
-			expect(intent.traversal?.kind).toBe('adjacency');
-			if (intent.traversal?.kind === 'adjacency') {
-				expect(intent.traversal.direction).toBe('ancestors');
-			}
-		});
-
-		it('should use default nodeId "id" when not specified', () => {
-			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
-
-			const builder = orm.ancestors('categories', 1, {
-				parentId: 'parentId',
-			});
-
-			const { intent } = builder.upToDepth(5).dump();
-			expect(intent.start.nodeIdExpr).toEqual({ kind: 'column', name: 'id' });
-		});
-
-		it('should use custom nodeId when specified', () => {
-			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
-
-			const builder = orm.ancestors('categories', 1, {
-				parentId: 'parentId',
-				nodeId: 'category_id',
-			});
-
-			const { intent } = builder.upToDepth(5).dump();
-			expect(intent.start.nodeIdExpr).toEqual({
-				kind: 'column',
-				name: 'category_id',
-			});
-		});
-
-		it('should use custom cteName when specified', () => {
-			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
-
-			const builder = orm.ancestors('categories', 1, {
-				parentId: 'parentId',
-				cteName: 'my_ancestors',
-			});
-
-			const { sql } = builder.upToDepth(5).dump();
-			expect(sql).toContain('my_ancestors');
-		});
-
-		it('should throw when db not configured', () => {
+describe('DX-022: Hierarchy List Methods', () => {
+	describe('listAncestors()', () => {
+		it('should throw when db not configured', async () => {
 			const orm = createOrm({ model: categoryModel });
 
-			expect(() =>
-				orm.ancestors('categories', 42, { parentId: 'parentId' }),
-			).toThrow('ancestors() requires a database connection');
+			await expect(
+				orm.listAncestors('categories', 42, { parentId: 'parentId' }),
+			).rejects.toThrow('listAncestors() requires a database connection');
+		});
+
+		it('should have method defined on ORM', () => {
+			const db = createTestDb();
+			const orm = createOrm({ model: categoryModel, db });
+
+			expect(typeof orm.listAncestors).toBe('function');
+		});
+
+		it('should have correct signature', () => {
+			const db = createTestDb();
+			const orm = createOrm({ model: categoryModel, db });
+
+			// Method should accept table, nodeIdValue, and options
+			expect(orm.listAncestors.length).toBe(3);
 		});
 	});
 
-	describe('descendants()', () => {
-		it('should create RecursiveQueryBuilder for descendant traversal', () => {
-			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
-
-			const builder = orm.descendants('categories', 1, {
-				parentId: 'parentId',
-			});
-
-			const { sql, intent } = builder.upToDepth(10).dump();
-
-			expect(sql.toLowerCase()).toContain('with recursive');
-			expect(intent.traversal?.kind).toBe('adjacency');
-			if (intent.traversal?.kind === 'adjacency') {
-				expect(intent.traversal.direction).toBe('descendants');
-			}
-		});
-
-		it('should generate auto cteName based on table', () => {
-			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
-
-			const builder = orm.descendants('categories', 1, {
-				parentId: 'parentId',
-			});
-
-			const { sql } = builder.upToDepth(5).dump();
-			expect(sql).toContain('categories_descendants');
-		});
-
-		it('should throw when db not configured', () => {
+	describe('listDescendants()', () => {
+		it('should throw when db not configured', async () => {
 			const orm = createOrm({ model: categoryModel });
 
-			expect(() =>
-				orm.descendants('categories', 1, { parentId: 'parentId' }),
-			).toThrow('descendants() requires a database connection');
+			await expect(
+				orm.listDescendants('categories', 1, { parentId: 'parentId' }),
+			).rejects.toThrow('listDescendants() requires a database connection');
+		});
+
+		it('should have method defined on ORM', () => {
+			const db = createTestDb();
+			const orm = createOrm({ model: categoryModel, db });
+
+			expect(typeof orm.listDescendants).toBe('function');
+		});
+
+		it('should have correct signature', () => {
+			const db = createTestDb();
+			const orm = createOrm({ model: categoryModel, db });
+
+			// Method should accept table, nodeIdValue, and options
+			expect(orm.listDescendants.length).toBe(3);
 		});
 	});
 
-	describe('subtree()', () => {
-		it('should create RecursiveQueryBuilder for subtree traversal', () => {
+	describe('Old API removed (DX-022 Breaking Change)', () => {
+		it('should NOT have ancestors() method', () => {
 			const db = createTestDb();
 			const orm = createOrm({ model: categoryModel, db });
 
-			const builder = orm.subtree('categories', 5, {
-				parentId: 'parentId',
-			});
-
-			const { sql, intent } = builder.upToDepth(10).dump();
-
-			expect(sql.toLowerCase()).toContain('with recursive');
-			// Subtree uses descendants direction (includes starting node)
-			expect(intent.traversal?.kind).toBe('adjacency');
-			if (intent.traversal?.kind === 'adjacency') {
-				expect(intent.traversal.direction).toBe('descendants');
-			}
+			// biome-ignore lint/suspicious/noExplicitAny: Testing removed API
+			expect((orm as any).ancestors).toBeUndefined();
 		});
 
-		it('should generate auto cteName with _subtree suffix', () => {
+		it('should NOT have descendants() method', () => {
 			const db = createTestDb();
 			const orm = createOrm({ model: categoryModel, db });
 
-			const builder = orm.subtree('categories', 5, {
-				parentId: 'parentId',
-			});
-
-			const { sql } = builder.upToDepth(5).dump();
-			expect(sql).toContain('categories_subtree');
+			// biome-ignore lint/suspicious/noExplicitAny: Testing removed API
+			expect((orm as any).descendants).toBeUndefined();
 		});
 
-		it('should throw when db not configured', () => {
-			const orm = createOrm({ model: categoryModel });
+		it('should NOT have subtree() method', () => {
+			const db = createTestDb();
+			const orm = createOrm({ model: categoryModel, db });
 
-			expect(() =>
-				orm.subtree('categories', 5, { parentId: 'parentId' }),
-			).toThrow('subtree() requires a database connection');
+			// biome-ignore lint/suspicious/noExplicitAny: Testing removed API
+			expect((orm as any).subtree).toBeUndefined();
+		});
+
+		it('should NOT have recursive() method', () => {
+			const db = createTestDb();
+			const orm = createOrm({ model: categoryModel, db });
+
+			// biome-ignore lint/suspicious/noExplicitAny: Testing removed API
+			expect((orm as any).recursive).toBeUndefined();
 		});
 	});
 
 	describe('Multi-tenant support', () => {
-		it('should work with forTenant()', () => {
+		it('should have listAncestors on tenant ORM', () => {
 			const db = createTestDb();
 			const orm = createOrm({ model: categoryModel, db });
 			const tenantOrm = orm.forTenant('tenant_123');
 
-			const builder = tenantOrm.descendants('categories', 1, {
-				parentId: 'parentId',
-			});
+			expect(typeof tenantOrm.listAncestors).toBe('function');
+		});
 
-			const { sql } = builder.upToDepth(5).dump();
-			expect(sql).toContain('tenant_123');
+		it('should have listDescendants on tenant ORM', () => {
+			const db = createTestDb();
+			const orm = createOrm({ model: categoryModel, db });
+			const tenantOrm = orm.forTenant('tenant_123');
+
+			expect(typeof tenantOrm.listDescendants).toBe('function');
 		});
 	});
 });
