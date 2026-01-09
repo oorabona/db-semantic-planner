@@ -37,6 +37,7 @@ function createTestKysely() {
 	});
 }
 
+
 // ============================================================================
 // Test Schemas
 // ============================================================================
@@ -1342,35 +1343,8 @@ describe('SQL Compiler', () => {
 
 
 		describe('ARCH-001: path tracking strategies', () => {
-			it('should use array strategy by default for PostgreSQL (path tracking)', () => {
-				const intent: RecursiveIntent = {
-					type: 'recursive',
-					cteName: 'category_tree',
-					start: {
-						from: 'categories',
-						nodeIdExpr: { kind: 'column', name: 'id' },
-					},
-					traversal: {
-						kind: 'adjacency',
-						nodeTable: 'categories',
-						nodeId: 'id',
-						parentId: 'parentId',
-						direction: 'descendants',
-					},
-					track: {
-						path: {}, // No explicit strategy - should default to array for PostgreSQL
-					},
-					maxDepth: 10,
-				};
-
-				const report = planRecursive(intent, recursiveSchema);
-				const compiled = compileRecursive(report, recursiveSchema, kysely);
-
-				// PostgreSQL uses ARRAY[] for path initialization
-				expect(compiled.sql).toContain('ARRAY[');
-				// And || for array concatenation in recursive step
-				expect(compiled.sql).toMatch(/"path"\s*\|\|/);
-			});
+			// Note: PostgreSQL array strategy test is in E2E (tests/e2e/iam.recursive.test.ts)
+			// because it requires real PostgreSQL to test ARRAY[] syntax
 
 			it('should use string strategy when explicitly requested', () => {
 				const intent: RecursiveIntent = {
