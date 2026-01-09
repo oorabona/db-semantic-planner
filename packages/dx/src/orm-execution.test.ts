@@ -653,6 +653,87 @@ describe('Execution Layer', () => {
 			expect(results[0].name).toBe('Bob');
 			expect(results[1].name).toBe('Alice');
 		});
+
+		// DX-024: Object form tests
+		it('supports object form with multiple fields', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm
+				.select('users')
+				.orderBy({ name: 'asc', id: 'desc' })
+				.dump();
+
+			// Both fields should be in ORDER BY
+			expect(dump.sql.toLowerCase()).toContain('order by');
+			expect(dump.sql.toLowerCase()).toContain('name');
+			expect(dump.sql.toLowerCase()).toContain('id');
+			expect(dump.sql.toLowerCase()).toContain('asc');
+			expect(dump.sql.toLowerCase()).toContain('desc');
+		});
+
+		it('object form produces correct ordering', async () => {
+			const orm = createOrm({ model: testModel, db });
+			const results = (await orm
+				.select('users')
+				.orderBy({ name: 'desc' })
+				.all()) as { name: string }[];
+
+			// Bob should come before Alice in descending order
+			expect(results[0].name).toBe('Bob');
+			expect(results[1].name).toBe('Alice');
+		});
+
+		// DX-024: Array form tests
+		it('supports array form with OrderBySpec', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm
+				.select('users')
+				.orderBy([{ column: 'name', direction: 'desc' }])
+				.dump();
+
+			expect(dump.sql.toLowerCase()).toContain('order by');
+			expect(dump.sql.toLowerCase()).toContain('name');
+			expect(dump.sql.toLowerCase()).toContain('desc');
+		});
+
+		it('array form supports nulls option in intent', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm
+				.select('users')
+				.orderBy([{ column: 'name', direction: 'asc', nulls: 'last' }])
+				.dump();
+
+			// Verify the intent includes nulls (compiler support is separate)
+			expect(dump.sql.toLowerCase()).toContain('order by');
+			expect(dump.plan.intent.orderBy).toBeDefined();
+			expect(dump.plan.intent.orderBy?.[0]?.nulls).toBe('last');
+		});
+
+		it('array form with multiple specs', () => {
+			const orm = createOrm({ model: testModel, db });
+			const dump = orm
+				.select('users')
+				.orderBy([
+					{ column: 'name', direction: 'asc' },
+					{ column: 'id', direction: 'desc', nulls: 'first' },
+				])
+				.dump();
+
+			expect(dump.sql.toLowerCase()).toContain('order by');
+			expect(dump.sql.toLowerCase()).toContain('name');
+			expect(dump.sql.toLowerCase()).toContain('id');
+		});
+
+		it('array form produces correct ordering', async () => {
+			const orm = createOrm({ model: testModel, db });
+			const results = (await orm
+				.select('users')
+				.orderBy([{ column: 'name', direction: 'desc' }])
+				.all()) as { name: string }[];
+
+			// Bob should come before Alice in descending order
+			expect(results[0].name).toBe('Bob');
+			expect(results[1].name).toBe('Alice');
+		});
 	});
 
 	describe('limit()', () => {

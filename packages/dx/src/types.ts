@@ -97,6 +97,52 @@ export interface AggregateOptions {
  */
 export type RelationHints = Readonly<Record<string, string>>;
 
+// ============================================================================
+// OrderBy Shorthand Types (DX-024)
+// ============================================================================
+
+/**
+ * Sort direction for orderBy.
+ */
+export type SortDirection = 'asc' | 'desc';
+
+/**
+ * Where to place NULL values in sort order.
+ */
+export type NullsPosition = 'first' | 'last';
+
+/**
+ * Object form for orderBy - map of field to direction.
+ *
+ * @example
+ * ```typescript
+ * { created_at: 'desc', name: 'asc' }
+ * ```
+ */
+export type OrderByRecord = Readonly<Record<string, SortDirection>>;
+
+/**
+ * Advanced orderBy specification with nulls handling.
+ *
+ * @example
+ * ```typescript
+ * { column: 'created_at', direction: 'desc', nulls: 'last' }
+ * ```
+ */
+export interface OrderBySpec {
+	readonly column: string;
+	readonly direction?: SortDirection;
+	readonly nulls?: NullsPosition;
+}
+
+/**
+ * All valid orderBy input types.
+ */
+export type OrderByInput =
+	| string // Simple: 'field'
+	| OrderByRecord // Object: { field: 'desc' }
+	| readonly OrderBySpec[]; // Array: [{ column, direction, nulls }]
+
 /**
  * Configuration options for creating an ORM instance.
  *
@@ -474,26 +520,39 @@ export interface QueryBuilder<TResult = unknown> {
 	/**
 	 * Sort results by one or more fields.
 	 *
-	 * @param field - Field name to sort by
-	 * @param direction - Sort direction ('asc' or 'desc'), defaults to 'asc'
-	 * @returns A new QueryBuilder with the sort applied
+	 * Supports multiple signatures for convenience:
+	 * - Single field with optional direction: `.orderBy('name')` or `.orderBy('name', 'desc')`
+	 * - Object form for multiple fields: `.orderBy({ created_at: 'desc', name: 'asc' })`
+	 * - Array form for advanced options: `.orderBy([{ column: 'name', direction: 'desc', nulls: 'last' }])`
 	 *
 	 * @example
 	 * ```typescript
-	 * // Simple ascending sort
+	 * // Simple ascending sort (default)
 	 * orm.select('users').orderBy('name').all();
 	 *
 	 * // Descending sort
 	 * orm.select('users').orderBy('createdAt', 'desc').all();
 	 *
-	 * // Multiple sorts (chained)
+	 * // Multiple fields (chained)
 	 * orm.select('users')
 	 *   .orderBy('lastName', 'asc')
 	 *   .orderBy('firstName', 'asc')
 	 *   .all();
+	 *
+	 * // Object form - multiple fields at once
+	 * orm.select('users')
+	 *   .orderBy({ created_at: 'desc', name: 'asc' })
+	 *   .all();
+	 *
+	 * // Array form - advanced with nulls handling
+	 * orm.select('users')
+	 *   .orderBy([{ column: 'created_at', direction: 'desc', nulls: 'last' }])
+	 *   .all();
 	 * ```
 	 */
-	orderBy(field: string, direction?: 'asc' | 'desc'): QueryBuilder<TResult>;
+	orderBy(field: string, direction?: SortDirection): QueryBuilder<TResult>;
+	orderBy(fields: OrderByRecord): QueryBuilder<TResult>;
+	orderBy(specs: readonly OrderBySpec[]): QueryBuilder<TResult>;
 
 	/**
 	 * Limit the number of results returned.
