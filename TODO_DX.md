@@ -19,6 +19,33 @@ This is a LEAF package (nothing depends on it)
 
 ---
 
+## Completed (Recent)
+
+### DX-011: API Improvements (Type Inference, where AND, include) ✅ (2026-01-09)
+
+Ergonomic improvements to QueryBuilder API for better DX.
+
+- [x] ✅ Block 1: where() AND chaining
+  - Multiple `.where()` calls produce implicit AND
+  - Single where → direct WhereIntent
+  - Multiple where → wrapped in WhereAndIntent
+  - 4 tests covering nominal/edge cases
+- [x] ✅ Block 2: include('relationName') direct syntax
+  - `.include('posts')` as shorthand for `.include({ relation: 'posts' })`
+  - `.include('posts', { select: [...] })` for options
+  - Existing object syntax still works
+  - 4 tests for string/options/object forms
+- [x] ✅ Block 3: Type inference on select/execute
+  - `orm.query<User>('users')` returns `QueryBuilder<User>`
+  - All builder methods preserve `TResult` generic
+  - Execution methods return typed: `Promise<User[]>`, `Promise<User | undefined>`
+  - 6 type-level tests using `expectTypeOf`
+
+**Tests:** 14 new tests in `dx-011-api-improvements.test.ts`
+**Effort:** M
+
+---
+
 ## Pending - P2
 
 (none)
