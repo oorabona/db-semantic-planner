@@ -29,6 +29,11 @@ import {
 } from './errors.js';
 import { and, eq, inArray } from './filters.js';
 import {
+	type WhereFilter,
+	isWhereIntent,
+	objectToWhereIntent,
+} from './object-filter.js';
+import {
 	DeleteBuilder,
 	InsertBuilder,
 	UpdateBuilder,
@@ -50,15 +55,28 @@ import type {
 /**
  * Create an ORM instance with the specified configuration.
  *
+ * @typeParam DB - Database schema type (Kysely-like).
+ *   Keys are table names, values are row types.
+ *   When provided, query() provides autocomplete and type inference.
+ *
  * @param options - Configuration options including model and strictMode
  * @returns An ORM instance for building and planning queries
  *
- * @example With explicit model (sync)
+ * @example With explicit model and typed schema (sync)
  * ```typescript
- * const orm = createOrm({
+ * interface Database {
+ *   users: { id: number; name: string };
+ *   posts: { id: number; title: string; authorId: number };
+ * }
+ *
+ * const orm = createOrm<Database>({
  *   model: mySchema,
  *   strictMode: true,
  * });
+ *
+ * // Table names autocomplete, results are typed
+ * const users = await orm.query('users').findMany();
+ * // users: { id: number; name: string }[]
  * ```
  *
  * @example Zero-config with auto-introspection (async)
@@ -67,11 +85,15 @@ import type {
  * const users = await orm.query('users').findMany();
  * ```
  */
-export function createOrm(options: OrmOptionsWithModel): OrmInstance;
-export function createOrm(options: OrmOptionsWithDb): Promise<OrmInstance>;
-export function createOrm(
+export function createOrm<DB = Record<string, unknown>>(
+	options: OrmOptionsWithModel,
+): OrmInstance<DB>;
+export function createOrm<DB = Record<string, unknown>>(
+	options: OrmOptionsWithDb,
+): Promise<OrmInstance<DB>>;
+export function createOrm<DB = Record<string, unknown>>(
 	options: OrmOptionsWithModel | OrmOptionsWithDb,
-): OrmInstance | Promise<OrmInstance> {
+): OrmInstance<DB> | Promise<OrmInstance<DB>> {
 	const { model, strictMode = false, relationHints = {}, db } = options;
 
 	// If model is provided, create synchronously
@@ -93,28 +115,32 @@ export function createOrm(
 /**
  * Internal factory for creating ORM instances.
  * Supports optional schema name for multi-tenant scenarios.
+ *
+ * @typeParam DB - Database schema type (passed through from createOrm)
  */
-function createOrmInstance(
+function createOrmInstance<DB = Record<string, unknown>>(
 	model: ModelIR,
 	strictMode: boolean,
 	relationHints: RelationHints,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
 	db?: Kysely<any>,
 	schemaName?: string,
-): OrmInstance {
+): OrmInstance<DB> {
 	return {
 		strictMode,
-		query<TResult = unknown>(from: string): QueryBuilder<TResult> {
+		query<K extends keyof DB & string, TResult = DB[K]>(
+			from: K,
+		): QueryBuilder<TResult> {
 			return new QueryBuilderImpl<TResult>(
 				model,
 				strictMode,
-				from,
+				from as string,
 				relationHints,
 				db,
 				schemaName,
 			);
 		},
-		forTenant(tenantSchema: string): OrmInstance {
+		forTenant(tenantSchema: string): OrmInstance<DB> {
 			// Validate schema name to prevent SQL injection
 			validateIdentifier(tenantSchema, 'schema');
 			return createOrmInstance(
@@ -501,9 +527,13 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		return builder;
 	}
 
-	where(condition: WhereIntent): QueryBuilder<TResult> {
+	where(condition: WhereIntent | WhereFilter<TResult>): QueryBuilder<TResult> {
 		const builder = this.clone();
-		builder.whereIntents.push(condition);
+		// Convert object filter to WhereIntent if needed
+		const intent = isWhereIntent(condition)
+			? condition
+			: objectToWhereIntent(condition as WhereFilter<Record<string, unknown>>);
+		builder.whereIntents.push(intent);
 		return builder;
 	}
 

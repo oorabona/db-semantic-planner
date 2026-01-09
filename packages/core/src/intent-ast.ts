@@ -267,6 +267,66 @@ export interface WhereRelationFilterIntent {
 	readonly mode: 'some' | 'every' | 'none';
 }
 
+// ============================================================================
+// Subquery Intent - Scalar Subquery in WHERE
+// ============================================================================
+
+/**
+ * Reference to a parent query column in a subquery.
+ * Used to create correlated subqueries.
+ *
+ * @example
+ * // Reference parent 'id' column in subquery WHERE
+ * { kind: 'ref', column: 'id' }
+ * { kind: 'ref', column: 't0.id' }  // with alias
+ */
+export interface SubqueryRefIntent {
+	readonly kind: 'ref';
+	/** Column name or aliased column (e.g., 'id' or 't0.id') */
+	readonly column: string;
+}
+
+/**
+ * Subquery intent for scalar subquery comparisons.
+ * Produces correlated subqueries in SQL.
+ *
+ * @example
+ * // Find products where price equals max price of category
+ * {
+ *   kind: 'subquery',
+ *   field: 'price',
+ *   operator: 'eq',
+ *   subquery: { from: 'products', select: { kind: 'aggregate', fn: 'max', field: 'price' } }
+ * }
+ */
+export interface WhereSubqueryIntent {
+	readonly kind: 'subquery';
+	/** Field to compare on the parent query */
+	readonly field: string;
+	/** Comparison operator */
+	readonly operator: ComparisonOperator;
+	/** Subquery producing scalar value */
+	readonly subquery: ScalarSubqueryIntent;
+}
+
+/**
+ * Scalar subquery intent - produces a single value.
+ * Simplified QueryIntent for subquery context.
+ */
+export interface ScalarSubqueryIntent {
+	/** Target table for subquery */
+	readonly from: string;
+	/** Field to select (single scalar) */
+	readonly select: string;
+	/** Optional filter (can include SubqueryRefIntent values) */
+	readonly where?: WhereIntent;
+	/** Optional aggregate function */
+	readonly aggregate?: {
+		readonly fn: 'count' | 'sum' | 'avg' | 'min' | 'max';
+		readonly field: string;
+	};
+}
+
 /**
  * Where intent - filter conditions union type
  * Discriminated union using 'kind' field
@@ -281,7 +341,8 @@ export type WhereIntent =
 	| WhereNotIntent
 	| WhereExistsIntent
 	| WhereNotExistsIntent
-	| WhereRelationFilterIntent;
+	| WhereRelationFilterIntent
+	| WhereSubqueryIntent;
 
 // ============================================================================
 // Include Intent - Relation Loading
@@ -752,6 +813,27 @@ export function isWhereComparison(
  */
 export function isWhereLike(where: WhereIntent): where is WhereLikeIntent {
 	return where.kind === 'like';
+}
+
+/**
+ * Check if a where intent is a subquery filter
+ */
+export function isWhereSubquery(
+	where: WhereIntent,
+): where is WhereSubqueryIntent {
+	return where.kind === 'subquery';
+}
+
+/**
+ * Check if a value is a subquery ref (column reference in subquery)
+ */
+export function isSubqueryRef(value: unknown): value is SubqueryRefIntent {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		'kind' in value &&
+		(value as { kind: unknown }).kind === 'ref'
+	);
 }
 
 /**

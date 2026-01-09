@@ -1,5 +1,6 @@
 import { belongsTo, defineSchema, hasMany } from '@db-semantic-planner/core';
 import { describe, expect, it } from 'vitest';
+import { and, eq, inArray } from './filters.js';
 import { createOrm } from './orm.js';
 
 /**
@@ -50,35 +51,37 @@ describe('DX-008: API Shortcuts', () => {
 
 	describe('byId() - Simple Primary Key', () => {
 		it('should create correct plan for simple PK lookup', () => {
-			const plan = orm
-				.query('users')
-				.where({ type: 'eq', field: 'id', value: 42 })
-				.plan();
+			const plan = orm.query('users').where(eq('id', 42)).plan();
 
 			expect(plan.rootTable).toBe('users');
-			expect(plan.intent.where).toEqual({ type: 'eq', field: 'id', value: 42 });
+			expect(plan.intent.where).toEqual({
+				kind: 'comparison',
+				field: 'id',
+				operator: 'eq',
+				value: 42,
+			});
 		});
 
 		it('should use eq filter for simple numeric PK', () => {
 			// byId internally uses where(eq('id', value)).findFirst()
 			// We test the plan to verify the where clause is correctly constructed
-			const plan = orm
-				.query('users')
-				.where({ type: 'eq', field: 'id', value: 1 })
-				.plan();
+			const plan = orm.query('users').where(eq('id', 1)).plan();
 
-			expect(plan.intent.where).toEqual({ type: 'eq', field: 'id', value: 1 });
+			expect(plan.intent.where).toEqual({
+				kind: 'comparison',
+				field: 'id',
+				operator: 'eq',
+				value: 1,
+			});
 		});
 
 		it('should use eq filter for simple string PK', () => {
-			const plan = orm
-				.query('users')
-				.where({ type: 'eq', field: 'id', value: 'abc-123' })
-				.plan();
+			const plan = orm.query('users').where(eq('id', 'abc-123')).plan();
 
 			expect(plan.intent.where).toEqual({
-				type: 'eq',
+				kind: 'comparison',
 				field: 'id',
+				operator: 'eq',
 				value: 'abc-123',
 			});
 		});
@@ -88,21 +91,15 @@ describe('DX-008: API Shortcuts', () => {
 		it('should create AND condition for composite PK with 2 fields', () => {
 			const plan = orm
 				.query('order_lines')
-				.where({
-					type: 'and',
-					conditions: [
-						{ type: 'eq', field: 'order_id', value: 1 },
-						{ type: 'eq', field: 'product_id', value: 42 },
-					],
-				})
+				.where(and(eq('order_id', 1), eq('product_id', 42)))
 				.plan();
 
 			expect(plan.rootTable).toBe('order_lines');
 			expect(plan.intent.where).toEqual({
-				type: 'and',
+				kind: 'and',
 				conditions: [
-					{ type: 'eq', field: 'order_id', value: 1 },
-					{ type: 'eq', field: 'product_id', value: 42 },
+					{ kind: 'comparison', field: 'order_id', operator: 'eq', value: 1 },
+					{ kind: 'comparison', field: 'product_id', operator: 'eq', value: 42 },
 				],
 			});
 		});
@@ -110,14 +107,11 @@ describe('DX-008: API Shortcuts', () => {
 
 	describe('byIds() - Multiple PKs', () => {
 		it('should create IN condition for multiple simple PKs', () => {
-			const plan = orm
-				.query('users')
-				.where({ type: 'in', field: 'id', values: [1, 2, 3] })
-				.plan();
+			const plan = orm.query('users').where(inArray('id', [1, 2, 3])).plan();
 
 			expect(plan.rootTable).toBe('users');
 			expect(plan.intent.where).toEqual({
-				type: 'in',
+				kind: 'in',
 				field: 'id',
 				values: [1, 2, 3],
 			});
@@ -126,13 +120,10 @@ describe('DX-008: API Shortcuts', () => {
 		it('should handle empty array gracefully', () => {
 			// byIds([]) should return [] without hitting db
 			// We verify this by checking the condition creation
-			const plan = orm
-				.query('users')
-				.where({ type: 'in', field: 'id', values: [] })
-				.plan();
+			const plan = orm.query('users').where(inArray('id', [])).plan();
 
 			expect(plan.intent.where).toEqual({
-				type: 'in',
+				kind: 'in',
 				field: 'id',
 				values: [],
 			});

@@ -55,6 +55,15 @@ export {
 	UpdateBuilder,
 } from './mutation-builders.js';
 
+// Object Filter Syntax (DX-012)
+export {
+	type FilterOperators,
+	type FilterValue,
+	type WhereFilter,
+	isWhereIntent,
+	objectToWhereIntent,
+} from './object-filter.js';
+
 // Factory
 export { createOrm } from './orm.js';
 export type {
@@ -85,3 +94,12 @@ export type {
 	RelationHints,
 	StreamOptions,
 } from './types.js';
+
+// Subquery Builder (DX-012 Block 3)
+export {
+	SubqueryBuilder,
+	SubqueryExpression,
+	subquery,
+	ref,
+	isSubqueryExpression,
+} from './subquery-builder.js';
