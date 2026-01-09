@@ -106,6 +106,24 @@ Window function support across all packages for analytics queries.
 
 ## Pending - P2
 
+### Documentation (DX critical)
+
+- [ ] **DOCS-001**: User documentation (Getting Started, API Guide)
+  - Getting Started guide (installation, first query)
+  - API reference (select, insert, update, delete, recursive, window)
+  - Migration guide from Prisma/Drizzle
+  - Multi-tenant setup guide
+  - Best practices and patterns
+- [ ] **DOCS-002**: Interactive examples (playground or REPL)
+
+### API Refinement (Breaking changes - do before v1.0)
+
+- [ ] **API-001**: Rename query() → select() for SQL verb consistency
+  - Rename `.select()` → `.columns()` to avoid collision
+  - Rename `findFirst()` → `first()`
+  - Rename `findMany()` → `all()`
+  - Rename `findFirstOrThrow()` → `firstOrThrow()`
+
 ### Multi-dialect Support (`packages/adapter-kysely`)
 
 See **DIALECT-001** in "In Progress" section above.
