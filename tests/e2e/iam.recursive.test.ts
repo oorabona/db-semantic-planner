@@ -521,4 +521,71 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 			expect(sodResult.rows).toHaveLength(0);
 		});
 	});
+
+	// ═══════════════════════════════════════════════════════════════════════════
+	// ARCH-001: PATH TRACKING STRATEGIES
+	// ═══════════════════════════════════════════════════════════════════════════
+
+	describe('ARCH-001: Path Tracking Strategies', () => {
+		it('should use array strategy by default for PostgreSQL (path tracking)', async () => {
+			const db = await getTestDb();
+
+			// Verify PostgreSQL capabilities
+			const caps = getCapabilities(db);
+			expect(caps.supportsArrayType).toBe(true);
+
+			// Build intent with default path tracking (no explicit strategy)
+			const intent: RecursiveIntent = {
+				type: 'recursive',
+				cteName: 'role_tree',
+				start: {
+					from: 'roles',
+					nodeIdExpr: { kind: 'column', name: 'id' },
+					where: {
+						kind: 'comparison',
+						field: 'name',
+						operator: 'eq',
+						value: 'admin',
+					},
+					select: ['name'],
+				},
+				traversal: {
+					kind: 'edge-table',
+					nodeTable: 'roles',
+					edgeTable: 'role_edges',
+					nodeId: 'id',
+					edgeFrom: 'parent_role_id',
+					edgeTo: 'child_role_id',
+					direction: 'out',
+				},
+				track: {
+					path: {}, // No explicit strategy - should default to array for PostgreSQL
+				},
+				maxDepth: 10,
+			};
+
+			const report = planRecursive(intent, iamModel);
+			const compiled = compileRecursive(report, iamModel, db, IAM_SCHEMA);
+
+			// PostgreSQL uses ARRAY[] for path initialization
+			expect(compiled.sql).toContain('ARRAY[');
+			// And || for array concatenation in recursive step
+			expect(compiled.sql).toMatch(/"path"\s*\|\|/);
+
+			// Verify it actually executes and returns array paths
+			const result = await db.executeQuery<{
+				id: number;
+				name: string;
+				path: number[];
+			}>(compiled);
+
+			// Should have at least the root + descendants
+			expect(result.rows.length).toBeGreaterThan(0);
+
+			// Path should be an array of role IDs
+			const adminRow = result.rows.find((r) => r.name === 'admin');
+			expect(adminRow).toBeDefined();
+			expect(Array.isArray(adminRow?.path)).toBe(true);
+		});
+	});
 });
