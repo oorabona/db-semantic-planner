@@ -19,7 +19,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql as kyselySql } from 'kysely';
-import { createOrm, eq, type RelationHints } from '@db-semantic-planner/dx';
+import { createOrm, eq, and, type RelationHints } from '@db-semantic-planner/dx';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
@@ -267,6 +267,165 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 
 			// None of our test products have same author/reviewer
 			expect(result.rows.length).toBe(0);
+		});
+	});
+
+	describe('Q8-06: Junction table with role column (product_images)', () => {
+		/**
+		 * This tests a different disambiguation pattern:
+		 * Instead of multiple FK columns to the same target (author_id, reviewer_id),
+		 * this uses a junction table with a 'role' column to distinguish different
+		 * types of relationships (main image, gallery, thumbnail).
+		 *
+		 * Test data (product 10 - iPhone):
+		 * - Image 1: role='main' (primary product image)
+		 * - Image 3: role='gallery' (additional gallery image)
+		 * - Image 4: role='thumbnail' (small preview)
+		 */
+
+		it('should query all images for a product with roles', async () => {
+			const db = await getTestDb();
+
+			const result = await kyselySql`
+				SELECT
+					pi.product_id,
+					pi.asset_id,
+					pi.role,
+					pi.position,
+					a.storage_key
+				FROM ${kyselySql.ref(SCHEMA)}.product_images pi
+				JOIN ${kyselySql.ref(SCHEMA)}.assets a ON a.id = pi.asset_id
+				WHERE pi.product_id = 10
+				ORDER BY pi.position
+			`.execute(db);
+
+			const images = result.rows as { role: string; storage_key: string; position: number }[];
+			expect(images.length).toBe(3);
+
+			// Verify roles exist
+			const roles = images.map((i) => i.role);
+			expect(roles).toContain('main');
+			expect(roles).toContain('gallery');
+			expect(roles).toContain('thumbnail');
+		});
+
+		it('should filter product images by role=main', async () => {
+			const db = await getTestDb();
+
+			const result = await kyselySql`
+				SELECT
+					pi.product_id,
+					a.storage_key,
+					pi.role
+				FROM ${kyselySql.ref(SCHEMA)}.product_images pi
+				JOIN ${kyselySql.ref(SCHEMA)}.assets a ON a.id = pi.asset_id
+				WHERE pi.product_id = 10
+				  AND pi.role = 'main'
+			`.execute(db);
+
+			const images = result.rows as { role: string; storage_key: string }[];
+			expect(images.length).toBe(1);
+			expect(images[0].role).toBe('main');
+		});
+
+		it('should filter product images by role=gallery', async () => {
+			const db = await getTestDb();
+
+			const result = await kyselySql`
+				SELECT
+					pi.product_id,
+					a.storage_key,
+					pi.role
+				FROM ${kyselySql.ref(SCHEMA)}.product_images pi
+				JOIN ${kyselySql.ref(SCHEMA)}.assets a ON a.id = pi.asset_id
+				WHERE pi.product_id = 10
+				  AND pi.role = 'gallery'
+			`.execute(db);
+
+			const images = result.rows as { role: string; storage_key: string }[];
+			expect(images.length).toBe(1);
+			expect(images[0].role).toBe('gallery');
+		});
+
+		it('should filter product images by role=thumbnail', async () => {
+			const db = await getTestDb();
+
+			const result = await kyselySql`
+				SELECT
+					pi.product_id,
+					a.storage_key,
+					pi.role
+				FROM ${kyselySql.ref(SCHEMA)}.product_images pi
+				JOIN ${kyselySql.ref(SCHEMA)}.assets a ON a.id = pi.asset_id
+				WHERE pi.product_id = 10
+				  AND pi.role = 'thumbnail'
+			`.execute(db);
+
+			const images = result.rows as { role: string; storage_key: string }[];
+			expect(images.length).toBe(1);
+			expect(images[0].role).toBe('thumbnail');
+		});
+
+		it('should query via ORM with role filter using eq and and()', async () => {
+			const db = await getTestDb();
+			const orm = createOrm({ model: pimdamExtendedModel, db });
+
+			// Query product_images junction table with role filter
+			// Use and() to combine conditions since where() replaces previous condition
+			const mainImages = await orm
+				.forTenant(SCHEMA)
+				.query('product_images')
+				.where(and(eq('product_id', 10), eq('role', 'main')))
+				.select(['product_id', 'asset_id', 'role', 'position'])
+				.execute();
+
+			const results = mainImages as { product_id: number; role: string }[];
+			expect(results.length).toBe(1);
+			expect(results[0].role).toBe('main');
+			expect(results[0].product_id).toBe(10);
+		});
+
+		it('should demonstrate junction vs FK disambiguation patterns', async () => {
+			const db = await getTestDb();
+
+			/**
+			 * This test documents the two disambiguation patterns:
+			 *
+			 * Pattern 1: Multiple FK columns (Q8-01 through Q8-05)
+			 * - products.author_id → users (author role)
+			 * - products.reviewer_id → users (reviewer role)
+			 * - Disambiguation: column name determines relationship type
+			 *
+			 * Pattern 2: Junction table with role column (this section)
+			 * - products ← product_images.role → assets
+			 * - Disambiguation: role column value determines relationship type
+			 */
+
+			// Verify both patterns work in the same schema
+			const fkPattern = await kyselySql`
+				SELECT p.sku, author.name AS author_name
+				FROM ${kyselySql.ref(SCHEMA)}.products p
+				JOIN ${kyselySql.ref(SCHEMA)}.users author ON author.id = p.author_id
+				WHERE p.id = 1
+			`.execute(db);
+
+			const junctionPattern = await kyselySql`
+				SELECT p.sku, a.storage_key, pi.role
+				FROM ${kyselySql.ref(SCHEMA)}.products p
+				JOIN ${kyselySql.ref(SCHEMA)}.product_images pi ON pi.product_id = p.id
+				JOIN ${kyselySql.ref(SCHEMA)}.assets a ON a.id = pi.asset_id
+				WHERE p.id = 10 AND pi.role = 'main'
+			`.execute(db);
+
+			// Both patterns should work
+			expect(fkPattern.rows.length).toBe(1);
+			expect(junctionPattern.rows.length).toBe(1);
+
+			const fkResult = fkPattern.rows[0] as { author_name: string };
+			const junctionResult = junctionPattern.rows[0] as { role: string };
+
+			expect(fkResult.author_name).toBe('Alice Author');
+			expect(junctionResult.role).toBe('main');
 		});
 	});
 
