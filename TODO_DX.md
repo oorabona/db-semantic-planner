@@ -15,11 +15,43 @@ This is a LEAF package (nothing depends on it)
 
 ## In Progress
 
-(none)
+(No tasks in progress)
 
 ---
 
 ## Completed (Recent)
+
+### DX-021: Window Functions Builder Pattern ✅ (2026-01-09)
+
+**Priority:** MEDIUM | **Effort:** M | **BREAKING CHANGE**
+**Spec:** [docs/plans/DX-021-window-builder.md](docs/plans/DX-021-window-builder.md)
+
+Replace verbose object API with fluent builder pattern.
+
+**Old API (removed):**
+```typescript
+.window('running_balance', { function: 'sum', field: 'amount', partitionBy: [...], orderBy: [...] })
+```
+
+**New API:**
+```typescript
+.columns([
+  'sku',
+  rowNumber().orderBy('created_at', 'desc').as('rn'),
+  rank().partitionBy('category_id').orderBy('price').as('price_rank'),
+  wSum('amount').partitionBy('user_id').as('running_total')
+])
+```
+
+**Blocks:**
+- [x] ✅ Block 1: Core Type Updates - Add WindowIntent to ExpressionIntent union
+- [x] ✅ Block 2: WindowBuilder class with partitionBy(), orderBy(), as()
+- [x] ✅ Block 3: Factory functions - rowNumber(), rank(), denseRank(), wSum(), wAvg(), wCount(), wMin(), wMax(), lag(), lead()
+- [x] ✅ Block 4: Remove old .window() method (BREAKING)
+- [x] ✅ Block 5: Integration with columns() API verification
+
+**Tests:** 35 new tests (21 unit + 14 integration)
+**Functions:** rowNumber, rank, denseRank, wSum, wAvg, wCount, wMin, wMax, lag, lead
 
 ### DX-020: Unified columns() API ✅ (2026-01-09)
 
@@ -141,36 +173,6 @@ Window function support across core, adapter, and dx packages.
 ---
 
 ## Pending - P2
-
-### DX-021: Window Functions Builder Pattern
-
-**Priority:** MEDIUM | **Effort:** M
-
-Remplacer l'API objet verbose par un builder pattern fluide.
-
-**Actuel (à supprimer) :**
-```typescript
-.window([{ fn: 'row_number', over: { orderBy: [...] }, alias: 'rn' }])
-```
-
-**Nouveau :**
-```typescript
-.columns([
-  'sku',
-  rowNumber().orderBy('created_at', 'desc').as('rn'),
-  rank().partitionBy('category_id').orderBy('price').as('price_rank'),
-  sum('amount').partitionBy('user_id').as('running_total')
-])
-```
-
-**Tâches :**
-- [ ] Créer builders: `rowNumber()`, `rank()`, `denseRank()`, `sum()`, `avg()`, `count()`, `min()`, `max()`, `lag()`, `lead()`
-- [ ] Chaque builder retourne `WindowBuilder` avec `.partitionBy()`, `.orderBy()`, `.as()`
-- [ ] `WindowBuilder.as()` retourne `ExpressionSpec` compatible avec `columns()`
-- [ ] **Supprimer** l'ancienne méthode `.window([...])`
-- [ ] Intégration avec DX-020 (columns unifié)
-
----
 
 ### DX-022: Recursive via include() Option (BREAKING)
 

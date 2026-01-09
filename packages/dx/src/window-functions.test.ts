@@ -1,11 +1,23 @@
 /**
- * @file Window Functions Tests (P3-A)
- * Tests for the window() method on QueryBuilder
+ * @file Window Functions Integration Tests (DX-021)
+ * Tests for window function integration with QueryBuilder via columns() API
  */
 
 import { defineSchema } from '@db-semantic-planner/core';
 import { Kysely, PostgresDialect } from 'kysely';
 import { describe, expect, it } from 'vitest';
+import {
+	denseRank,
+	lag,
+	lead,
+	rank,
+	rowNumber,
+	wAvg,
+	wCount,
+	wMax,
+	wMin,
+	wSum,
+} from './filters.js';
 import { createOrm } from './orm.js';
 
 // ============================================================================
@@ -34,11 +46,12 @@ const testModel = defineSchema({
 	},
 }).build();
 
-// Create a mock Kysely instance
-// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+// Create a mock Kysely instance for testing SQL generation only (no actual execution)
+// biome-ignore lint/suspicious/noExplicitAny: Mock Kysely requires any for database schema and internal types
 const mockKysely = new Kysely<any>({
 	dialect: {
 		createAdapter: () =>
+			// biome-ignore lint/suspicious/noExplicitAny: Mock pool requires any
 			new PostgresDialect({ pool: {} as any }).createAdapter(),
 		createDriver: () =>
 			({
@@ -49,10 +62,13 @@ const mockKysely = new Kysely<any>({
 				beginTransaction: async () => {},
 				commitTransaction: async () => {},
 				rollbackTransaction: async () => {},
+				// biome-ignore lint/suspicious/noExplicitAny: Mock driver type assertion
 			}) as any,
 		createIntrospector: (db) =>
+			// biome-ignore lint/suspicious/noExplicitAny: Mock pool requires any
 			new PostgresDialect({ pool: {} as any }).createIntrospector(db),
 		createQueryCompiler: () =>
+			// biome-ignore lint/suspicious/noExplicitAny: Mock pool requires any
 			new PostgresDialect({ pool: {} as any }).createQueryCompiler(),
 	},
 });
@@ -61,17 +77,18 @@ const mockKysely = new Kysely<any>({
 // Tests
 // ============================================================================
 
-describe('P3-A: Window Functions DX API', () => {
-	describe('window() method', () => {
-		it('should add ROW_NUMBER window function', () => {
+describe('DX-021: Window Functions Integration with columns() API', () => {
+	describe('ranking functions', () => {
+		it('should add ROW_NUMBER window function via columns()', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
 				.select('products')
-				.window('row_num', {
-					function: 'row_number',
-					orderBy: [{ field: 'price', direction: 'desc' }],
-				})
+				.columns([
+					'id',
+					'name',
+					rowNumber().orderBy('price', 'desc').as('row_num'),
+				])
 				.dump();
 
 			expect(dump.sql).toContain('ROW_NUMBER()');
@@ -80,16 +97,19 @@ describe('P3-A: Window Functions DX API', () => {
 			expect(dump.sql).toContain('"row_num"');
 		});
 
-		it('should add RANK window function with PARTITION BY', () => {
+		it('should add RANK with PARTITION BY via columns()', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
 				.select('products')
-				.window('category_rank', {
-					function: 'rank',
-					partitionBy: ['categoryId'],
-					orderBy: [{ field: 'price', direction: 'desc' }],
-				})
+				.columns([
+					'id',
+					'categoryId',
+					rank()
+						.partitionBy('categoryId')
+						.orderBy('price', 'desc')
+						.as('category_rank'),
+				])
 				.dump();
 
 			expect(dump.sql).toContain('RANK()');
@@ -103,26 +123,27 @@ describe('P3-A: Window Functions DX API', () => {
 
 			const dump = orm
 				.select('products')
-				.window('dense_rank', {
-					function: 'dense_rank',
-					orderBy: [{ field: 'createdAt' }],
-				})
+				.columns(['name', denseRank().orderBy('createdAt').as('dense_rank')])
 				.dump();
 
 			expect(dump.sql).toContain('DENSE_RANK()');
 		});
+	});
 
+	describe('aggregate window functions', () => {
 		it('should add SUM aggregate window function with field', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
 				.select('sales')
-				.window('running_total', {
-					function: 'sum',
-					field: 'amount',
-					partitionBy: ['productId'],
-					orderBy: [{ field: 'date', direction: 'asc' }],
-				})
+				.columns([
+					'productId',
+					'date',
+					wSum('amount')
+						.partitionBy('productId')
+						.orderBy('date')
+						.as('running_total'),
+				])
 				.dump();
 
 			expect(dump.sql).toContain('SUM(');
@@ -136,11 +157,11 @@ describe('P3-A: Window Functions DX API', () => {
 
 			const dump = orm
 				.select('employees')
-				.window('dept_avg_salary', {
-					function: 'avg',
-					field: 'salary',
-					partitionBy: ['department'],
-				})
+				.columns([
+					'name',
+					'department',
+					wAvg('salary').partitionBy('department').as('dept_avg_salary'),
+				])
 				.dump();
 
 			expect(dump.sql).toContain('AVG(');
@@ -153,11 +174,10 @@ describe('P3-A: Window Functions DX API', () => {
 
 			const dump = orm
 				.select('products')
-				.window('products_in_category', {
-					function: 'count',
-					field: 'id',
-					partitionBy: ['categoryId'],
-				})
+				.columns([
+					'name',
+					wCount('id').partitionBy('categoryId').as('products_in_category'),
+				])
 				.dump();
 
 			expect(dump.sql).toContain('COUNT(');
@@ -169,11 +189,10 @@ describe('P3-A: Window Functions DX API', () => {
 
 			const dump = orm
 				.select('products')
-				.window('min_price', {
-					function: 'min',
-					field: 'price',
-					partitionBy: ['categoryId'],
-				})
+				.columns([
+					'name',
+					wMin('price').partitionBy('categoryId').as('min_price'),
+				])
 				.dump();
 
 			expect(dump.sql).toContain('MIN(');
@@ -184,26 +203,27 @@ describe('P3-A: Window Functions DX API', () => {
 
 			const dump = orm
 				.select('products')
-				.window('max_price', {
-					function: 'max',
-					field: 'price',
-					partitionBy: ['categoryId'],
-				})
+				.columns([
+					'name',
+					wMax('price').partitionBy('categoryId').as('max_price'),
+				])
 				.dump();
 
 			expect(dump.sql).toContain('MAX(');
 		});
+	});
 
+	describe('offset window functions', () => {
 		it('should add LAG offset function', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
 				.select('sales')
-				.window('prev_amount', {
-					function: 'lag',
-					field: 'amount',
-					orderBy: [{ field: 'date' }],
-				})
+				.columns([
+					'date',
+					'amount',
+					lag('amount').orderBy('date').as('prev_amount'),
+				])
 				.dump();
 
 			expect(dump.sql).toContain('LAG(');
@@ -214,37 +234,31 @@ describe('P3-A: Window Functions DX API', () => {
 
 			const dump = orm
 				.select('sales')
-				.window('next_amount', {
-					function: 'lead',
-					field: 'amount',
-					orderBy: [{ field: 'date' }],
-				})
+				.columns([
+					'date',
+					'amount',
+					lead('amount').orderBy('date').as('next_amount'),
+				])
 				.dump();
 
 			expect(dump.sql).toContain('LEAD(');
 		});
 	});
 
-	describe('window() chaining', () => {
-		it('should support multiple window functions via chaining', () => {
+	describe('multiple window functions in columns()', () => {
+		it('should support multiple window functions in single columns() call', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
 				.select('employees')
-				.window('rank', {
-					function: 'rank',
-					partitionBy: ['department'],
-					orderBy: [{ field: 'salary', direction: 'desc' }],
-				})
-				.window('dept_avg', {
-					function: 'avg',
-					field: 'salary',
-					partitionBy: ['department'],
-				})
-				.window('row_num', {
-					function: 'row_number',
-					orderBy: [{ field: 'name' }],
-				})
+				.columns([
+					'name',
+					'salary',
+					'department',
+					rank().partitionBy('department').orderBy('salary', 'desc').as('rank'),
+					wAvg('salary').partitionBy('department').as('dept_avg'),
+					rowNumber().orderBy('name').as('row_num'),
+				])
 				.dump();
 
 			expect(dump.sql).toContain('RANK()');
@@ -254,36 +268,15 @@ describe('P3-A: Window Functions DX API', () => {
 			expect(dump.sql).toContain('"dept_avg"');
 			expect(dump.sql).toContain('"row_num"');
 		});
-
-		it('should preserve window functions when cloning via other methods', () => {
-			const orm = createOrm({ model: testModel, db: mockKysely });
-
-			const dump = orm
-				.select('products')
-				.window('rn', {
-					function: 'row_number',
-					orderBy: [{ field: 'price' }],
-				})
-				.orderBy('name')
-				.limit(10)
-				.dump();
-
-			expect(dump.sql).toContain('ROW_NUMBER()');
-			expect(dump.sql).toContain('ORDER BY');
-			expect(dump.sql.toLowerCase()).toContain('limit');
-		});
 	});
 
-	describe('window() with other query features', () => {
+	describe('window functions with other query features', () => {
 		it('should work with where()', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
 				.select('products')
-				.window('rn', {
-					function: 'row_number',
-					orderBy: [{ field: 'price' }],
-				})
+				.columns(['id', 'name', rowNumber().orderBy('price').as('rn')])
 				.where({ categoryId: 1 })
 				.dump();
 
@@ -291,31 +284,29 @@ describe('P3-A: Window Functions DX API', () => {
 			expect(dump.sql.toLowerCase()).toContain('where');
 		});
 
-		it('should work with select()', () => {
+		it('should work with orderBy() and limit()', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
 			const dump = orm
 				.select('products')
-				.columns(['id', 'name', 'price'])
-				.window('rn', {
-					function: 'row_number',
-					orderBy: [{ field: 'price' }],
-				})
+				.columns(['id', 'name', rowNumber().orderBy('price').as('rn')])
+				.orderBy('name')
+				.limit(10)
 				.dump();
 
 			expect(dump.sql).toContain('ROW_NUMBER()');
+			expect(dump.sql.toLowerCase()).toContain('limit');
 		});
 	});
 
-	describe('window() immutability', () => {
+	describe('builder immutability', () => {
 		it('should be immutable - original builder unchanged', () => {
 			const orm = createOrm({ model: testModel, db: mockKysely });
 
-			const builder1 = orm.select('products');
-			const builder2 = builder1.window('rn', {
-				function: 'row_number',
-				orderBy: [{ field: 'price' }],
-			});
+			const builder1 = orm.select('products').columns(['id', 'name']);
+			const builder2 = builder1.columns([
+				rowNumber().orderBy('price').as('rn'),
+			]);
 
 			const dump1 = builder1.dump();
 			const dump2 = builder2.dump();

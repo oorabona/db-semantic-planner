@@ -1185,6 +1185,10 @@ function addExpressionSelect(
 			// Raw SQL expression - use with caution!
 			return query.select(sql`${sql.raw(expr.sql)}`.as(expr.as));
 
+		case 'window':
+			// Window function expression (DX-021)
+			return compileWindowSelect(query, expr, alias);
+
 		default:
 			throw new CompilationError(
 				`Unknown expression kind: ${(expr as ExpressionIntent).kind}`,

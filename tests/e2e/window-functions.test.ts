@@ -1,16 +1,13 @@
 /**
- * P3-A: Window Functions E2E Tests
+ * DX-021: Window Functions E2E Tests
  *
- * Tests window function execution against real PostgreSQL:
- * - row_number() with ordering
- * - rank() with partition by
- * - sum() running total
- * - Multi-tenant window function tests
+ * Tests window function execution against real PostgreSQL using the
+ * new fluent builder pattern (rowNumber(), rank(), wSum(), etc.)
  *
  * ## Test Structure (GWT - Given/When/Then)
  *
  * - **Given**: Extended PIM/DAM schema with variants (price_cents, stock)
- * - **When**: Execute ORM query with window() method
+ * - **When**: Execute ORM query with window functions via columns()
  * - **Then**: Verify window function results in returned data
  *
  * Test data (from pimdam-extended.seed.ts):
@@ -22,7 +19,14 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createOrm } from '@db-semantic-planner/dx';
+import {
+	createOrm,
+	denseRank,
+	rank,
+	rowNumber,
+	wAvg,
+	wSum,
+} from '@db-semantic-planner/dx';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
@@ -33,10 +37,10 @@ import {
 	shouldSkipE2E,
 } from './testkit/index.js';
 
-const SCHEMA = 'p3a_window_functions';
-const SCHEMA_TENANT2 = 'p3a_window_tenant2';
+const SCHEMA = 'dx021_window_functions';
+const SCHEMA_TENANT2 = 'dx021_window_tenant2';
 
-describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
+describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 	beforeAll(async () => {
 		// Set up test schema
 		await dropExtendedPimdamSchema(SCHEMA);
@@ -61,11 +65,12 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			const results = (await orm
 				.forTenant(SCHEMA)
 				.select('variants')
-				.columns(['id', 'name', 'price_cents'])
-				.window('row_num', {
-					function: 'row_number',
-					orderBy: [{ field: 'price_cents', direction: 'asc' }],
-				})
+				.columns([
+					'id',
+					'name',
+					'price_cents',
+					rowNumber().orderBy('price_cents').as('row_num'),
+				])
 				.all()) as Array<{
 				id: number;
 				name: string;
@@ -92,11 +97,12 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			const results = (await orm
 				.forTenant(SCHEMA)
 				.select('variants')
-				.columns(['id', 'name', 'price_cents'])
-				.window('row_num', {
-					function: 'row_number',
-					orderBy: [{ field: 'price_cents', direction: 'desc' }],
-				})
+				.columns([
+					'id',
+					'name',
+					'price_cents',
+					rowNumber().orderBy('price_cents', 'desc').as('row_num'),
+				])
 				.all()) as Array<{
 				name: string;
 				price_cents: number;
@@ -122,11 +128,12 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			const results = (await orm
 				.forTenant(SCHEMA)
 				.select('variants')
-				.columns(['id', 'name', 'price_cents'])
-				.window('price_rank', {
-					function: 'rank',
-					orderBy: [{ field: 'price_cents', direction: 'desc' }],
-				})
+				.columns([
+					'id',
+					'name',
+					'price_cents',
+					rank().orderBy('price_cents', 'desc').as('price_rank'),
+				])
 				.all()) as Array<{
 				name: string;
 				price_cents: number;
@@ -150,12 +157,13 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			const results = (await orm
 				.forTenant(SCHEMA)
 				.select('variants')
-				.columns(['id', 'product_id', 'name', 'price_cents'])
-				.window('rank_in_product', {
-					function: 'rank',
-					partitionBy: ['product_id'],
-					orderBy: [{ field: 'price_cents', direction: 'asc' }],
-				})
+				.columns([
+					'id',
+					'product_id',
+					'name',
+					'price_cents',
+					rank().partitionBy('product_id').orderBy('price_cents').as('rank_in_product'),
+				])
 				.all()) as Array<{
 				product_id: number;
 				name: string;
@@ -190,11 +198,11 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			const results = (await orm
 				.forTenant(SCHEMA)
 				.select('variants')
-				.columns(['name', 'price_cents'])
-				.window('dense_rank_price', {
-					function: 'dense_rank',
-					orderBy: [{ field: 'price_cents', direction: 'desc' }],
-				})
+				.columns([
+					'name',
+					'price_cents',
+					denseRank().orderBy('price_cents', 'desc').as('dense_rank_price'),
+				])
 				.all()) as Array<{
 				name: string;
 				price_cents: number;
@@ -222,12 +230,11 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			const results = (await orm
 				.forTenant(SCHEMA)
 				.select('variants')
-				.columns(['name', 'price_cents'])
-				.window('running_total', {
-					function: 'sum',
-					field: 'price_cents',
-					orderBy: [{ field: 'price_cents', direction: 'asc' }],
-				})
+				.columns([
+					'name',
+					'price_cents',
+					wSum('price_cents').orderBy('price_cents').as('running_total'),
+				])
 				.all()) as Array<{
 				name: string;
 				price_cents: number;
@@ -262,13 +269,12 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			const results = (await orm
 				.forTenant(SCHEMA)
 				.select('variants')
-				.columns(['product_id', 'name', 'price_cents'])
-				.window('product_running_total', {
-					function: 'sum',
-					field: 'price_cents',
-					partitionBy: ['product_id'],
-					orderBy: [{ field: 'price_cents', direction: 'asc' }],
-				})
+				.columns([
+					'product_id',
+					'name',
+					'price_cents',
+					wSum('price_cents').partitionBy('product_id').orderBy('price_cents').as('product_running_total'),
+				])
 				.all()) as Array<{
 				product_id: number;
 				name: string;
@@ -301,12 +307,11 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			const results = (await orm
 				.forTenant(SCHEMA)
 				.select('variants')
-				.columns(['name', 'stock'])
-				.window('avg_stock', {
-					function: 'avg',
-					field: 'stock',
-					orderBy: [{ field: 'stock', direction: 'asc' }],
-				})
+				.columns([
+					'name',
+					'stock',
+					wAvg('stock').orderBy('stock').as('avg_stock'),
+				])
 				.all()) as Array<{
 				name: string;
 				stock: number;
@@ -371,11 +376,11 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			const tenant1Results = (await orm
 				.forTenant(SCHEMA)
 				.select('variants')
-				.columns(['name', 'price_cents'])
-				.window('rank', {
-					function: 'rank',
-					orderBy: [{ field: 'price_cents', direction: 'desc' }],
-				})
+				.columns([
+					'name',
+					'price_cents',
+					rank().orderBy('price_cents', 'desc').as('rank'),
+				])
 				.all()) as Array<{
 				name: string;
 				price_cents: number;
@@ -386,11 +391,11 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			const tenant2Results = (await orm
 				.forTenant(SCHEMA_TENANT2)
 				.select('variants')
-				.columns(['name', 'price_cents'])
-				.window('rank', {
-					function: 'rank',
-					orderBy: [{ field: 'price_cents', direction: 'desc' }],
-				})
+				.columns([
+					'name',
+					'price_cents',
+					rank().orderBy('price_cents', 'desc').as('rank'),
+				])
 				.all()) as Array<{
 				name: string;
 				price_cents: number;
@@ -419,11 +424,11 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			const dump = orm
 				.forTenant(SCHEMA)
 				.select('variants')
-				.columns(['name', 'price_cents'])
-				.window('row_num', {
-					function: 'row_number',
-					orderBy: [{ field: 'price_cents' }],
-				})
+				.columns([
+					'name',
+					'price_cents',
+					rowNumber().orderBy('price_cents').as('row_num'),
+				])
 				.dump();
 
 			// Verify schema prefix in SQL
@@ -437,18 +442,17 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 	// Dump API Integration
 	// =========================================================================
 	describe('Dump API', () => {
-		it('should include WindowIntent in dump plan', async () => {
+		it('should include WindowIntent in dump SQL', async () => {
 			const db = await getTestDb();
 			const orm = createOrm({ model: pimdamExtendedModel, db });
 
 			const dump = orm
 				.forTenant(SCHEMA)
 				.select('variants')
-				.columns(['name'])
-				.window('row_num', {
-					function: 'row_number',
-					orderBy: [{ field: 'price_cents' }],
-				})
+				.columns([
+					'name',
+					rowNumber().orderBy('price_cents').as('row_num'),
+				])
 				.dump();
 
 			// Verify SQL contains window function syntax
@@ -465,12 +469,11 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			const dump = orm
 				.forTenant(SCHEMA)
 				.select('variants')
-				.columns(['product_id', 'name'])
-				.window('product_rank', {
-					function: 'rank',
-					partitionBy: ['product_id'],
-					orderBy: [{ field: 'price_cents', direction: 'desc' }],
-				})
+				.columns([
+					'product_id',
+					'name',
+					rank().partitionBy('product_id').orderBy('price_cents', 'desc').as('product_rank'),
+				])
 				.dump();
 
 			expect(dump.sql.toUpperCase()).toContain('PARTITION BY');

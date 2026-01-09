@@ -25,6 +25,8 @@ export {
 	and,
 	// Expression
 	coalesce,
+	// Window function builders (DX-021)
+	denseRank,
 	// Comparison
 	eq,
 	// Relation
@@ -36,6 +38,8 @@ export {
 	// Null
 	isNotNull,
 	isNull,
+	lag,
+	lead,
 	// String
 	like,
 	lt,
@@ -44,8 +48,16 @@ export {
 	not,
 	notExists,
 	or,
+	rank,
 	// Raw SQL escape hatch
 	raw,
+	rowNumber,
+	WindowBuilder,
+	wAvg,
+	wCount,
+	wMax,
+	wMin,
+	wSum,
 } from './filters.js';
 // Mutation Builders (DX-010)
 export {
@@ -103,7 +115,6 @@ export type {
 	QueryBuilder,
 	RelationHints,
 	StreamOptions,
-	WindowOptions,
 } from './types.js';
 // Type guard
 export { isExpressionSpec } from './types.js';

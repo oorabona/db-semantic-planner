@@ -132,7 +132,10 @@ export interface RawExpressionIntent {
  * Expression intent union type - computed/derived values in SELECT
  * Extensible for future expression types (CASE WHEN, etc.)
  */
-export type ExpressionIntent = CoalesceExpressionIntent | RawExpressionIntent;
+export type ExpressionIntent =
+	| CoalesceExpressionIntent
+	| RawExpressionIntent
+	| WindowIntent;
 
 /**
  * Select with expressions (computed columns)
