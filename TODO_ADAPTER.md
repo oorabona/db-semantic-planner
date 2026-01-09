@@ -114,7 +114,9 @@ Auto-infer ModelIR from database via Kysely introspection with automatic hierarc
   - ARCH-001 path tracking strategies (1 test)
 
 **Test Gaps (NON-BLOCKING, deferred):**
-- [ ] F-004: Add test for `dedupe: 'global'` strategy (M)
+- [x] ⏭️ F-004: `dedupe: 'global'` - **REMOVED** from type (2026-01-09)
+  - `dedupe: 'final'` provides same end result with better performance (DISTINCT ON vs UNION)
+  - Type simplified from `'none' | 'final' | 'global'` to `'none' | 'final'`
 - [x] ✅ F-005: Add test for `ancestors` direction - covered by "should traverse ancestors" test (2026-01-09)
 
 ---

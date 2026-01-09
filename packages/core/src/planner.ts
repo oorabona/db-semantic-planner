@@ -483,7 +483,7 @@ export interface RecursivePlanReport
 		readonly isRecursive: true;
 		readonly traversalKind: 'adjacency' | 'edge-table' | 'custom';
 		readonly usesBidirectional: boolean;
-		readonly dedupeStrategy: 'none' | 'final' | 'global';
+		readonly dedupeStrategy: 'none' | 'final';
 	};
 }
 
