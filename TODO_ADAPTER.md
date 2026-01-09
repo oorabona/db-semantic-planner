@@ -85,9 +85,9 @@ Auto-infer ModelIR from database via Kysely introspection with automatic hierarc
 
 ---
 
-## In Progress
+## Completed - RFC-001 Recursive CTE
 
-### RFC-001: Recursive CTE Support - MVP ✅ (2026-01-08)
+### RFC-001: Recursive CTE Support ✅ COMPLETE (2026-01-09)
 
 **RFC:** [RFC-001-recursive-cte.md](docs/rfcs/RFC-001-recursive-cte.md)
 **Use case:** IAM/RBAC role hierarchy, category trees, org charts
@@ -102,14 +102,20 @@ Auto-infer ModelIR from database via Kysely introspection with automatic hierarc
   - Dedupe:'final' with DISTINCT ON
   - Emit filters (where, orderBy) support
 - [x] ✅ Block 4: Unit tests for recursive CTE compilation (2026-01-08) - 9 tests
-
-**Deferred to P2:**
-- [ ] Block 5: DX API (`orm.query().withRecursive()`)
-- [ ] Block 6: E2E tests with real PostgreSQL
+- [x] ⏭️ Block 5: DX API (`orm.query().withRecursive()`) - **SUPERSEDED** by better API (2026-01-09)
+  - `orm.descendants()`, `orm.ancestors()`, `orm.subtree()` shortcuts already implemented
+  - `orm.recursive()` provides full builder for advanced cases
+  - `withRecursive()` on QueryBuilder would be redundant/less ergonomic
+- [x] ✅ Block 6: E2E tests with real PostgreSQL (2026-01-09)
+  - `tests/e2e/iam.recursive.test.ts` - 10 tests passing
+  - Effective permissions via role hierarchy (3 tests)
+  - Role hierarchy traversal with depth/path tracking (3 tests)
+  - Separation of Duty (SoD) detection (3 tests)
+  - ARCH-001 path tracking strategies (1 test)
 
 **Test Gaps (NON-BLOCKING, deferred):**
 - [ ] F-004: Add test for `dedupe: 'global'` strategy (M)
-- [ ] F-005: Add test for `ancestors` direction (M)
+- [x] ✅ F-005: Add test for `ancestors` direction - covered by "should traverse ancestors" test (2026-01-09)
 
 ---
 
