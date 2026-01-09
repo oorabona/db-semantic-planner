@@ -41,6 +41,9 @@ export interface DialectCapabilities {
 
 	/** Native array type support (PostgreSQL ARRAY) */
 	readonly supportsArrayType: boolean;
+
+	/** Window functions (ROW_NUMBER, RANK, etc. with OVER clause) */
+	readonly supportsWindowFunctions: boolean;
 }
 
 /**
@@ -54,6 +57,7 @@ export const POSTGRESQL_CAPABILITIES: DialectCapabilities = {
 	supportsNullsFirstLast: true,
 	supportsStreaming: true,
 	supportsArrayType: true,
+	supportsWindowFunctions: true,
 };
 
 /**
@@ -68,6 +72,7 @@ export const MYSQL_CAPABILITIES: DialectCapabilities = {
 	supportsNullsFirstLast: true, // MySQL 8.0+
 	supportsStreaming: false,
 	supportsArrayType: false,
+	supportsWindowFunctions: true, // MySQL 8.0+
 };
 
 /**
@@ -81,6 +86,7 @@ export const SQLITE_CAPABILITIES: DialectCapabilities = {
 	supportsNullsFirstLast: true, // SQLite 3.30+
 	supportsStreaming: false,
 	supportsArrayType: false,
+	supportsWindowFunctions: true, // SQLite 3.25+
 };
 
 /**
@@ -94,6 +100,7 @@ export const MSSQL_CAPABILITIES: DialectCapabilities = {
 	supportsNullsFirstLast: false,
 	supportsStreaming: false,
 	supportsArrayType: false,
+	supportsWindowFunctions: true, // MSSQL 2005+
 };
 
 /**
@@ -108,6 +115,7 @@ export const UNKNOWN_CAPABILITIES: DialectCapabilities = {
 	supportsNullsFirstLast: false,
 	supportsStreaming: false,
 	supportsArrayType: false,
+	supportsWindowFunctions: true, // Most modern DBs support window functions
 };
 
 /**
@@ -334,6 +342,13 @@ function getDefaultGuidance(
 			unknown:
 				"The detected dialect may not support native arrays. Use strategy: 'string' for path tracking.",
 		},
+		supportsWindowFunctions: {
+			postgresql: 'This should work - PostgreSQL supports window functions.',
+			mysql: 'This should work - MySQL 8.0+ supports window functions.',
+			sqlite: 'This should work - SQLite 3.25+ supports window functions.',
+			mssql: 'This should work - MSSQL 2005+ supports window functions.',
+			unknown: 'The detected dialect may not support window functions.',
+		},
 	};
 
 	return guidanceMap[capability][dialect];
@@ -417,4 +432,58 @@ export function withMockedCapabilities(dialect: DialectName): Kysely<unknown> {
 			},
 		}),
 	} as unknown as Kysely<unknown>;
+}
+
+// ============================================================================
+// Window Functions Capability Guards (P3-A)
+// ============================================================================
+
+/**
+ * Check if window functions are supported by the dialect.
+ *
+ * @param db - Kysely instance to check
+ * @returns true if window functions are supported
+ *
+ * @example
+ * ```typescript
+ * if (supportsWindowFunctions(db)) {
+ *   // Use window functions
+ * }
+ * ```
+ */
+export function supportsWindowFunctions(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	db: Kysely<any>,
+): boolean {
+	const caps = getCapabilities(db);
+	return caps.supportsWindowFunctions;
+}
+
+/**
+ * Assert that window functions are supported by the dialect.
+ *
+ * Throws UnsupportedOperationError if not supported.
+ *
+ * @param db - Kysely instance to check
+ * @throws {UnsupportedOperationError} If window functions are not supported
+ *
+ * @example
+ * ```typescript
+ * assertWindowFunctionsSupported(db);
+ * // Safe to use window functions here
+ * ```
+ */
+export function assertWindowFunctionsSupported(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	db: Kysely<any>,
+): void {
+	const caps = getCapabilities(db);
+	if (!caps.supportsWindowFunctions) {
+		const dialect = detectDialect(db);
+		const guidance = getDefaultGuidance('supportsWindowFunctions', dialect);
+		throw new UnsupportedOperationError('window functions', guidance, {
+			capability: 'supportsWindowFunctions',
+			dialect,
+		});
+	}
 }

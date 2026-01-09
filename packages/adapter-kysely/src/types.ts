@@ -3,7 +3,7 @@
  * Core types for the Kysely adapter.
  */
 
-import type { PlanReport } from '@db-semantic-planner/core';
+import type { PlanReport, WindowIntent } from '@db-semantic-planner/core';
 
 // ============================================================================
 // Dump Types
@@ -78,6 +78,9 @@ export interface CompileOptions {
 
 	/** Minimum access count to trigger CTE extraction (default: 2) */
 	readonly cteThreshold?: number;
+
+	/** Window functions to add to SELECT clause (P3-A) */
+	readonly windows?: readonly WindowIntent[];
 }
 
 // ============================================================================

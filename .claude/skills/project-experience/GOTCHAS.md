@@ -347,6 +347,33 @@ const hasManyName = fk.sourceTable;
 
 ---
 
+### defineSchema().build() Required for Full ModelIR (2026-01-09)
+
+**Issue:** Test using `defineSchema({...})` directly as model fails with "model.getTable is not a function".
+
+**Cause:** `defineSchema()` returns a schema builder object, not a full ModelIR. The `.build()` method must be called to produce a ModelIR with methods like `getTable()`, `getRelationsTo()`, etc.
+
+**Wrong pattern:**
+```typescript
+const testSchema = defineSchema({
+  products: { id: 'integer', name: 'string' }
+});
+// testSchema is SchemaBuilder, NOT ModelIR
+orm.query('products')  // Fails: "model.getTable is not a function"
+```
+
+**Solution:** Always call `.build()` on defineSchema:
+```typescript
+const testModel = defineSchema({
+  products: { id: 'integer', name: 'string' }
+}).build();
+// testModel is now a proper ModelIR with all methods
+```
+
+**Location:** `packages/dx/src/window-functions.test.ts` line 15-35
+
+---
+
 ### Biome: Use Helper Functions for Array Access (2026-01-09)
 
 **Issue:** Biome's `noNonNullAssertion` rule flags `array[0]!` patterns even when logic guarantees non-empty array.

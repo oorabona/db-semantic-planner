@@ -12,11 +12,14 @@ export {
 	compileInsert,
 	compileRecursive,
 	compileUpdate,
+	compileWindowSelect,
+	type InternalCompileOptions,
 } from './compiler.js';
 export type { DialectCapabilities, DialectName } from './dialect.js';
 // Dialect detection and capabilities (DIALECT-001)
 export {
 	assertCapability,
+	assertWindowFunctionsSupported,
 	detectDialect,
 	getCapabilities,
 	getCapabilitiesForDialect,
@@ -26,6 +29,7 @@ export {
 	POSTGRESQL_CAPABILITIES,
 	SQLITE_CAPABILITIES,
 	skipIfMissingCapability,
+	supportsWindowFunctions,
 	UNKNOWN_CAPABILITIES,
 	withMockedCapabilities,
 } from './dialect.js';

@@ -24,6 +24,20 @@
 
 ## Recently Completed
 
+### P3-A: Window Functions ✅ (2026-01-09)
+
+**Spec:** [docs/specs/P3-A-window-functions.md](docs/specs/P3-A-window-functions.md)
+**Backlog:** [TODO_DX.md](TODO_DX.md)
+
+Window function support across all packages for analytics queries.
+
+- [x] ✅ Core: WindowIntent type, WindowFunction union, isWindowIntent guard
+- [x] ✅ Adapter: DialectCapabilities.supportsWindowFunctions, compileWindowSelect()
+- [x] ✅ DX: window() method on QueryBuilder with immutable chaining
+- [x] ✅ 40 tests (8 core + 17 adapter + 15 dx)
+
+**Functions supported:** row_number, rank, dense_rank, sum, avg, count, min, max, lag, lead
+
 ### DIALECT-001: Multi-dialect Capabilities ✅ (2026-01-07)
 
 **Spec:** [docs/specs/DIALECT-001-multi-dialect-capabilities.md](docs/specs/DIALECT-001-multi-dialect-capabilities.md)

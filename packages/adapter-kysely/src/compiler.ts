@@ -22,9 +22,11 @@ import type {
 	UpdateIntent,
 	WhereIntent,
 	WhereSubqueryIntent,
+	WindowIntent,
 } from '@db-semantic-planner/core';
 import {
 	isAdjacencyTraversal,
+	isAggregateWindowFunction,
 	isEdgeTableTraversal,
 	isSelectAggregate,
 	isSelectWithExpressions,
@@ -167,6 +169,16 @@ function compilePathTrackingRecursive(
 // ============================================================================
 
 /**
+ * Options for compile function
+ */
+export interface InternalCompileOptions {
+	/** Schema name for multi-tenant queries */
+	schemaName?: string;
+	/** Window functions to add to SELECT clause (P3-A) */
+	windows?: readonly WindowIntent[];
+}
+
+/**
  * Compile a PlanReport into a Kysely CompiledQuery
  */
 export function compile(
@@ -174,8 +186,16 @@ export function compile(
 	model: ModelIR,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
 	kysely: Kysely<any>,
-	schemaName?: string,
+	schemaNameOrOptions?: string | InternalCompileOptions,
 ): CompiledQuery {
+	// Handle both legacy (string schemaName) and new (options object) signatures
+	const options: InternalCompileOptions =
+		typeof schemaNameOrOptions === 'string'
+			? { schemaName: schemaNameOrOptions }
+			: schemaNameOrOptions ?? {};
+
+	const { schemaName, windows } = options;
+
 	const state: CompilerState = {
 		aliasCounter: 0,
 		tableAliases: new Map(),
@@ -194,6 +214,13 @@ export function compile(
 
 	// Build the base query using the CTE-enhanced builder
 	let query = buildBaseQuery(intent, rootAlias, builder, schemaName);
+
+	// Add Window functions (P3-A)
+	if (windows && windows.length > 0) {
+		for (const window of windows) {
+			query = compileWindowSelect(query, window, rootAlias);
+		}
+	}
 
 	// Add WHERE clause
 	if (intent.where) {
@@ -1191,6 +1218,80 @@ function compileCoalesceSelect(
 			)
 			.as(resultAlias),
 	);
+}
+
+
+// ============================================================================
+// Window Function Compiler (P3-A)
+// ============================================================================
+
+/**
+ * Compile a WindowIntent into a SQL window function expression.
+ *
+ * Produces SQL like:
+ * - ROW_NUMBER() OVER (PARTITION BY "category_id" ORDER BY "price" DESC) AS "rn"
+ * - SUM("amount") OVER (PARTITION BY "account_id" ORDER BY "date") AS "running_total"
+ *
+ * @param query - The current query builder
+ * @param window - The window intent to compile
+ * @param tableAlias - The table alias for column references
+ * @returns The query with window function added to SELECT
+ */
+export function compileWindowSelect(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: SelectQueryBuilder<any, any, any>,
+	window: WindowIntent,
+	tableAlias: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	const { function: fn, field, alias, over } = window;
+
+	// Build the OVER clause parts
+	const partitionByParts = over.partitionBy?.length
+		? over.partitionBy.map((col) => `"${col}"`).join(', ')
+		: '';
+
+	const orderByParts = over.orderBy?.length
+		? over.orderBy
+				.map((o) => {
+					const dir = o.direction?.toUpperCase() ?? 'ASC';
+					return `"${o.field}" ${dir}`;
+				})
+				.join(', ')
+		: '';
+
+	// Build OVER clause
+	const overParts: string[] = [];
+	if (partitionByParts) {
+		overParts.push(`PARTITION BY ${partitionByParts}`);
+	}
+	if (orderByParts) {
+		overParts.push(`ORDER BY ${orderByParts}`);
+	}
+	const overClause = overParts.length ? overParts.join(' ') : '';
+
+	// Build the function call
+	let functionCall: string;
+	if (isAggregateWindowFunction(fn)) {
+		// Aggregate window functions: SUM("field"), AVG("field"), etc.
+		if (!field) {
+			throw new CompilationError(
+				`Window function '${fn}' requires a field parameter`,
+			);
+		}
+		functionCall = `${fn.toUpperCase()}("${tableAlias}"."${field}")`;
+	} else {
+		// Ranking functions: ROW_NUMBER(), RANK(), DENSE_RANK()
+		functionCall = `${fn.toUpperCase()}()`;
+	}
+
+	// Build the full expression: FUNCTION() OVER (...) AS "alias"
+	const fullExpr = overClause
+		? `${functionCall} OVER (${overClause})`
+		: `${functionCall} OVER ()`;
+
+	// Use sql template tag to add the window function as a select expression
+	return query.select(sql<unknown>`${sql.raw(fullExpr)}`.as(alias));
 }
 
 // ============================================================================

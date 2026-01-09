@@ -6,6 +6,7 @@ import {
 	planRecursive,
 	type QueryIntent,
 	type RecursiveIntent,
+	type WindowIntent,
 } from '@db-semantic-planner/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
@@ -16,6 +17,7 @@ import {
 	compileInsert,
 	compileRecursive,
 	compileUpdate,
+	compileWindowSelect,
 } from './compiler.js';
 import { CompilationError } from './errors.js';
 
@@ -1338,12 +1340,37 @@ describe('SQL Compiler', () => {
 			});
 		});
 
+
 		describe('ARCH-001: path tracking strategies', () => {
-			// ARCH-001: PostgreSQL array path tracking tested in E2E (tests/e2e/iam.recursive.test.ts)
-			// SQLite doesn't support ARRAY[], so this unit test verifies string fallback behavior
-			it.todo(
-				'should use array strategy by default for PostgreSQL (path tracking) - see E2E tests',
-			);
+			it('should use array strategy by default for PostgreSQL (path tracking)', () => {
+				const intent: RecursiveIntent = {
+					type: 'recursive',
+					cteName: 'category_tree',
+					start: {
+						from: 'categories',
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parentId',
+						direction: 'descendants',
+					},
+					track: {
+						path: {}, // No explicit strategy - should default to array for PostgreSQL
+					},
+					maxDepth: 10,
+				};
+
+				const report = planRecursive(intent, recursiveSchema);
+				const compiled = compileRecursive(report, recursiveSchema, kysely);
+
+				// PostgreSQL uses ARRAY[] for path initialization
+				expect(compiled.sql).toContain('ARRAY[');
+				// And || for array concatenation in recursive step
+				expect(compiled.sql).toMatch(/"path"\s*\|\|/);
+			});
 
 			it('should use string strategy when explicitly requested', () => {
 				const intent: RecursiveIntent = {
@@ -1532,7 +1559,7 @@ describe('SQL Compiler', () => {
 				const compiled = compileInsert(intent, kysely, 'tenant_123');
 
 				// SQLite may quote schema/table names, so check for both patterns
-				expect(compiled.sql.toLowerCase()).toMatch(/tenant_123[".].*users/);
+				expect(compiled.sql.toLowerCase()).toMatch(/tenant_123["\.].*users/);
 			});
 		});
 
@@ -1543,12 +1570,7 @@ describe('SQL Compiler', () => {
 					type: 'update' as const,
 					table: 'users',
 					set: { name: 'Updated' },
-					where: {
-						kind: 'comparison' as const,
-						field: 'id',
-						operator: 'eq',
-						value: 1,
-					},
+					where: { kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
 				};
 
 				const compiled = compileUpdate(intent, kysely);
@@ -1597,18 +1619,8 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'and' as const,
 						conditions: [
-							{
-								kind: 'comparison' as const,
-								field: 'id',
-								operator: 'eq',
-								value: 1,
-							},
-							{
-								kind: 'comparison' as const,
-								field: 'active',
-								operator: 'eq',
-								value: false,
-							},
+							{ kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
+							{ kind: 'comparison' as const, field: 'active', operator: 'eq', value: false },
 						],
 					},
 				};
@@ -1626,18 +1638,13 @@ describe('SQL Compiler', () => {
 					type: 'update' as const,
 					table: 'users',
 					set: { name: 'Test' },
-					where: {
-						kind: 'comparison' as const,
-						field: 'id',
-						operator: 'eq',
-						value: 1,
-					},
+					where: { kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
 				};
 
 				const compiled = compileUpdate(intent, kysely, 'tenant_abc');
 
 				// SQLite may quote schema/table names, so check for both patterns
-				expect(compiled.sql.toLowerCase()).toMatch(/tenant_abc[".].*users/);
+				expect(compiled.sql.toLowerCase()).toMatch(/tenant_abc["\.].*users/);
 			});
 		});
 
@@ -1647,12 +1654,7 @@ describe('SQL Compiler', () => {
 				const intent = {
 					type: 'delete' as const,
 					table: 'users',
-					where: {
-						kind: 'comparison' as const,
-						field: 'id',
-						operator: 'eq',
-						value: 1,
-					},
+					where: { kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
 				};
 
 				const compiled = compileDelete(intent, kysely);
@@ -1710,18 +1712,8 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'or' as const,
 						conditions: [
-							{
-								kind: 'comparison' as const,
-								field: 'id',
-								operator: 'eq',
-								value: 1,
-							},
-							{
-								kind: 'comparison' as const,
-								field: 'id',
-								operator: 'eq',
-								value: 2,
-							},
+							{ kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
+							{ kind: 'comparison' as const, field: 'id', operator: 'eq', value: 2 },
 						],
 					},
 				};
@@ -1737,36 +1729,420 @@ describe('SQL Compiler', () => {
 				const intent = {
 					type: 'delete' as const,
 					table: 'users',
-					where: {
-						kind: 'comparison' as const,
-						field: 'id',
-						operator: 'eq',
-						value: 1,
-					},
+					where: { kind: 'comparison' as const, field: 'id', operator: 'eq', value: 1 },
 				};
 
 				const compiled = compileDelete(intent, kysely, 'tenant_xyz');
 
 				// SQLite may quote schema/table names, so check for both patterns
-				expect(compiled.sql.toLowerCase()).toMatch(/tenant_xyz[".].*users/);
+				expect(compiled.sql.toLowerCase()).toMatch(/tenant_xyz["\.].*users/);
 			});
 
-			it('should compile delete with null check', () => {
+		it('should compile delete with null check', () => {
+			const kysely = createTestKysely();
+			const intent = {
+				type: 'delete' as const,
+				table: 'users',
+				where: {
+					kind: 'null' as const,
+					field: 'deletedAt',
+					operator: 'isNotNull' as const,
+				},
+			};
+
+			const compiled = compileDelete(intent, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('where');
+			expect(compiled.sql.toLowerCase()).toContain('is not null');
+		});
+	});
+});
+
+	// ============================================================================
+	// Window Function Compilation (P3-A)
+	// ============================================================================
+
+	describe('Window Function Compilation (P3-A)', () => {
+		describe('compileWindowSelect', () => {
+			it('should compile ROW_NUMBER with ORDER BY', () => {
 				const kysely = createTestKysely();
-				const intent = {
-					type: 'delete' as const,
-					table: 'users',
-					where: {
-						kind: 'null' as const,
-						field: 'deletedAt',
-						operator: 'isNotNull' as const,
+				let query = kysely.selectFrom('users as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'row_number',
+					alias: 'rn',
+					over: {
+						orderBy: [{ field: 'createdAt', direction: 'desc' }],
 					},
 				};
 
-				const compiled = compileDelete(intent, kysely);
+				query = compileWindowSelect(query, window, 't0');
+				const compiled = query.compile();
 
-				expect(compiled.sql.toLowerCase()).toContain('where');
-				expect(compiled.sql.toLowerCase()).toContain('is not null');
+				expect(compiled.sql).toContain('ROW_NUMBER()');
+				expect(compiled.sql).toContain('OVER');
+				expect(compiled.sql).toContain('ORDER BY');
+				expect(compiled.sql).toContain('"createdAt"');
+				expect(compiled.sql).toContain('DESC');
+				expect(compiled.sql).toContain('"rn"');
+			});
+
+			it('should compile RANK with PARTITION BY and ORDER BY', () => {
+				const kysely = createTestKysely();
+				let query = kysely.selectFrom('products as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'rank',
+					alias: 'category_rank',
+					over: {
+						partitionBy: ['categoryId'],
+						orderBy: [{ field: 'sales', direction: 'desc' }],
+					},
+				};
+
+				query = compileWindowSelect(query, window, 't0');
+				const compiled = query.compile();
+
+				expect(compiled.sql).toContain('RANK()');
+				expect(compiled.sql).toContain('PARTITION BY');
+				expect(compiled.sql).toContain('"categoryId"');
+				expect(compiled.sql).toContain('ORDER BY');
+				expect(compiled.sql).toContain('"sales"');
+				expect(compiled.sql).toContain('"category_rank"');
+			});
+
+			it('should compile DENSE_RANK', () => {
+				const kysely = createTestKysely();
+				let query = kysely.selectFrom('users as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'dense_rank',
+					alias: 'dense_rn',
+					over: {
+						orderBy: [{ field: 'score' }],
+					},
+				};
+
+				query = compileWindowSelect(query, window, 't0');
+				const compiled = query.compile();
+
+				expect(compiled.sql).toContain('DENSE_RANK()');
+				expect(compiled.sql).toContain('"dense_rn"');
+			});
+
+			it('should compile SUM aggregate window function', () => {
+				const kysely = createTestKysely();
+				let query = kysely.selectFrom('transactions as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'sum',
+					field: 'amount',
+					alias: 'running_sum',
+					over: {
+						partitionBy: ['accountId'],
+						orderBy: [{ field: 'date', direction: 'asc' }],
+					},
+				};
+
+				query = compileWindowSelect(query, window, 't0');
+				const compiled = query.compile();
+
+				expect(compiled.sql).toContain('SUM(');
+				expect(compiled.sql).toContain('"t0"."amount"');
+				expect(compiled.sql).toContain('PARTITION BY');
+				expect(compiled.sql).toContain('"accountId"');
+				expect(compiled.sql).toContain('ORDER BY');
+				expect(compiled.sql).toContain('"date"');
+				expect(compiled.sql).toContain('"running_sum"');
+			});
+
+			it('should compile AVG aggregate window function', () => {
+				const kysely = createTestKysely();
+				let query = kysely.selectFrom('sales as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'avg',
+					field: 'price',
+					alias: 'avg_price',
+					over: {
+						partitionBy: ['productId'],
+					},
+				};
+
+				query = compileWindowSelect(query, window, 't0');
+				const compiled = query.compile();
+
+				expect(compiled.sql).toContain('AVG(');
+				expect(compiled.sql).toContain('"t0"."price"');
+				expect(compiled.sql).toContain('"avg_price"');
+			});
+
+			it('should compile COUNT aggregate window function', () => {
+				const kysely = createTestKysely();
+				let query = kysely.selectFrom('orders as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'count',
+					field: 'id',
+					alias: 'order_count',
+					over: {
+						partitionBy: ['customerId'],
+					},
+				};
+
+				query = compileWindowSelect(query, window, 't0');
+				const compiled = query.compile();
+
+				expect(compiled.sql).toContain('COUNT(');
+				expect(compiled.sql).toContain('"t0"."id"');
+				expect(compiled.sql).toContain('"order_count"');
+			});
+
+			it('should compile MIN aggregate window function', () => {
+				const kysely = createTestKysely();
+				let query = kysely.selectFrom('prices as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'min',
+					field: 'value',
+					alias: 'min_value',
+					over: {
+						partitionBy: ['categoryId'],
+					},
+				};
+
+				query = compileWindowSelect(query, window, 't0');
+				const compiled = query.compile();
+
+				expect(compiled.sql).toContain('MIN(');
+				expect(compiled.sql).toContain('"min_value"');
+			});
+
+			it('should compile MAX aggregate window function', () => {
+				const kysely = createTestKysely();
+				let query = kysely.selectFrom('prices as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'max',
+					field: 'value',
+					alias: 'max_value',
+					over: {
+						partitionBy: ['categoryId'],
+					},
+				};
+
+				query = compileWindowSelect(query, window, 't0');
+				const compiled = query.compile();
+
+				expect(compiled.sql).toContain('MAX(');
+				expect(compiled.sql).toContain('"max_value"');
+			});
+
+			it('should compile LAG offset function', () => {
+				const kysely = createTestKysely();
+				let query = kysely.selectFrom('prices as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'lag',
+					field: 'price',
+					alias: 'prev_price',
+					over: {
+						orderBy: [{ field: 'date', direction: 'asc' }],
+					},
+				};
+
+				query = compileWindowSelect(query, window, 't0');
+				const compiled = query.compile();
+
+				expect(compiled.sql).toContain('LAG(');
+				expect(compiled.sql).toContain('"t0"."price"');
+				expect(compiled.sql).toContain('"prev_price"');
+			});
+
+			it('should compile LEAD offset function', () => {
+				const kysely = createTestKysely();
+				let query = kysely.selectFrom('prices as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'lead',
+					field: 'price',
+					alias: 'next_price',
+					over: {
+						orderBy: [{ field: 'date', direction: 'asc' }],
+					},
+				};
+
+				query = compileWindowSelect(query, window, 't0');
+				const compiled = query.compile();
+
+				expect(compiled.sql).toContain('LEAD(');
+				expect(compiled.sql).toContain('"t0"."price"');
+				expect(compiled.sql).toContain('"next_price"');
+			});
+
+			it('should handle empty partitionBy (no PARTITION BY clause)', () => {
+				const kysely = createTestKysely();
+				let query = kysely.selectFrom('users as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'row_number',
+					alias: 'global_rn',
+					over: {
+						partitionBy: [],
+						orderBy: [{ field: 'id' }],
+					},
+				};
+
+				query = compileWindowSelect(query, window, 't0');
+				const compiled = query.compile();
+
+				expect(compiled.sql).toContain('ROW_NUMBER()');
+				expect(compiled.sql).toContain('ORDER BY');
+				expect(compiled.sql).not.toContain('PARTITION BY');
+			});
+
+			it('should handle multiple ORDER BY fields', () => {
+				const kysely = createTestKysely();
+				let query = kysely.selectFrom('products as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'row_number',
+					alias: 'rn',
+					over: {
+						orderBy: [
+							{ field: 'categoryId', direction: 'asc' },
+							{ field: 'price', direction: 'desc' },
+						],
+					},
+				};
+
+				query = compileWindowSelect(query, window, 't0');
+				const compiled = query.compile();
+
+				expect(compiled.sql).toContain('"categoryId" ASC');
+				expect(compiled.sql).toContain('"price" DESC');
+			});
+
+			it('should default direction to ASC when not specified', () => {
+				const kysely = createTestKysely();
+				let query = kysely.selectFrom('users as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'row_number',
+					alias: 'rn',
+					over: {
+						orderBy: [{ field: 'createdAt' }],
+					},
+				};
+
+				query = compileWindowSelect(query, window, 't0');
+				const compiled = query.compile();
+
+				expect(compiled.sql).toContain('"createdAt" ASC');
+			});
+
+			it('should throw error for aggregate function without field', () => {
+				const kysely = createTestKysely();
+				const query = kysely.selectFrom('users as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'sum',
+					alias: 'total',
+					over: {},
+				};
+
+				expect(() => compileWindowSelect(query, window, 't0')).toThrow(
+					CompilationError,
+				);
+				expect(() => compileWindowSelect(query, window, 't0')).toThrow(
+					'requires a field',
+				);
+			});
+
+			it('should compile window with empty OVER clause', () => {
+				const kysely = createTestKysely();
+				let query = kysely.selectFrom('users as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'row_number',
+					alias: 'rn',
+					over: {},
+				};
+
+				query = compileWindowSelect(query, window, 't0');
+				const compiled = query.compile();
+
+				expect(compiled.sql).toContain('ROW_NUMBER() OVER ()');
+			});
+
+			it('should handle multiple partitionBy fields', () => {
+				const kysely = createTestKysely();
+				let query = kysely.selectFrom('sales as t0').selectAll();
+
+				const window: WindowIntent = {
+					kind: 'window',
+					function: 'sum',
+					field: 'amount',
+					alias: 'total',
+					over: {
+						partitionBy: ['regionId', 'productId'],
+					},
+				};
+
+				query = compileWindowSelect(query, window, 't0');
+				const compiled = query.compile();
+
+				expect(compiled.sql).toContain('PARTITION BY');
+				expect(compiled.sql).toContain('"regionId"');
+				expect(compiled.sql).toContain('"productId"');
+			});
+
+			it('should allow chaining multiple window functions', () => {
+				const kysely = createTestKysely();
+				let query = kysely.selectFrom('products as t0').selectAll();
+
+				const window1: WindowIntent = {
+					kind: 'window',
+					function: 'row_number',
+					alias: 'rn',
+					over: {
+						orderBy: [{ field: 'price', direction: 'desc' }],
+					},
+				};
+
+				const window2: WindowIntent = {
+					kind: 'window',
+					function: 'sum',
+					field: 'price',
+					alias: 'running_total',
+					over: {
+						orderBy: [{ field: 'id', direction: 'asc' }],
+					},
+				};
+
+				query = compileWindowSelect(query, window1, 't0');
+				query = compileWindowSelect(query, window2, 't0');
+				const compiled = query.compile();
+
+				expect(compiled.sql).toContain('ROW_NUMBER()');
+				expect(compiled.sql).toContain('SUM(');
+				expect(compiled.sql).toContain('"rn"');
+				expect(compiled.sql).toContain('"running_total"');
 			});
 		});
 	});

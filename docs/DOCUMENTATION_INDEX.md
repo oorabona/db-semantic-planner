@@ -65,6 +65,7 @@ packages/dx            → Depends on core + adapter-kysely
 | DX-005 | [Recursive Query Builder](specs/DX-005-recursive-query-builder.md) | dx | 🟡 draft |
 | DX-010 | [Mutations (insert/update/delete)](specs/DX-010-mutations.md) | dx | ✅ canonical |
 | DX-012 | [API Ergonomics](specs/DX-012-api-ergonomics.md) | dx | 🟡 draft |
+| P3-A | [Window Functions](specs/P3-A-window-functions.md) | core, adapter, dx | ✅ canonical |
 
 ## Golden Query Tests (MVP Contract) - ✅ Complete
 

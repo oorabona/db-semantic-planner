@@ -76,16 +76,31 @@ Ergonomic improvements to QueryBuilder API for better DX.
 
 ---
 
+## Completed (Recent)
+
+### P3-A: Window Functions DX API ✅ (2026-01-09)
+
+**Spec:** [docs/specs/P3-A-window-functions.md](docs/specs/P3-A-window-functions.md)
+
+Window function support across core, adapter, and dx packages.
+
+- [x] ✅ Block 1: Core WindowIntent types (WindowFunction, WindowIntent, isWindowIntent)
+- [x] ✅ Block 2: Adapter DialectCapabilities.supportsWindowFunctions
+- [x] ✅ Block 3: Adapter compileWindowSelect() function
+- [x] ✅ Block 4: DX window() method on QueryBuilder
+  - `window('running_balance', { function: 'sum', field: 'amount', partitionBy: [...], orderBy: [...] })`
+  - Immutable builder pattern with chaining support
+  - Integration with dump(), select(), where()
+
+**Tests:** 40 window-specific tests (8 core + 17 adapter + 15 dx)
+**Functions:** row_number, rank, dense_rank, sum, avg, count, min, max, lag, lead
+**Effort:** M
+
+---
+
 ## Pending - P3
 
 **ADR:** [ADR-001: Typed Intents for Advanced Features](docs/adrs/ADR-001-typed-intents-for-advanced-features.md)
-
-### P3-A: Window Functions DX API
-
-- [ ] `window()` method on QueryBuilder
-  - `window('running_balance', { function: 'sum', field: 'amount', over: { partitionBy: [...] } })`
-- [ ] Type-safe WindowOptions interface
-- [ ] Integration with select(), findMany()
 
 ### P3-B: Full-Text Search DX API
 

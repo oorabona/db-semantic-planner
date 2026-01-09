@@ -18,6 +18,7 @@ import type {
 	SelectIntent,
 	SelectWithExpressionsIntent,
 	WhereIntent,
+	WindowIntent,
 } from '@db-semantic-planner/core';
 import { AmbiguousPlanError, plan } from '@db-semantic-planner/core';
 import type { Kysely } from 'kysely';
@@ -50,6 +51,7 @@ import type {
 	QueryBuilder,
 	RelationHints,
 	StreamOptions,
+	WindowOptions,
 } from './types.js';
 
 /**
@@ -395,6 +397,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	private orderByIntents: OrderByIntent[] = [];
 	private limitValue?: number;
 	private offsetValue?: number;
+	private windowIntents: WindowIntent[] = [];
 
 	constructor(
 		model: ModelIR,
@@ -506,6 +509,51 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		return builder;
 	}
 
+
+	window(alias: string, options: WindowOptions): QueryBuilder<TResult> {
+		const builder = this.clone();
+
+		// Build orderBy with proper typing for exactOptionalPropertyTypes
+		const orderBy = options.orderBy
+			? options.orderBy.map((o) => {
+					const result: { field: string; direction?: 'asc' | 'desc' } = {
+						field: o.field,
+					};
+					if (o.direction !== undefined) {
+						result.direction = o.direction;
+					}
+					return result;
+				})
+			: undefined;
+
+		// Build over clause with proper typing
+		const over: {
+			partitionBy?: readonly string[];
+			orderBy?: readonly { field: string; direction?: 'asc' | 'desc' }[];
+		} = {};
+		if (options.partitionBy && options.partitionBy.length > 0) {
+			over.partitionBy = [...options.partitionBy];
+		}
+		if (orderBy && orderBy.length > 0) {
+			over.orderBy = orderBy;
+		}
+
+		// Build window intent with proper typing
+		const windowIntent: WindowIntent = {
+			kind: 'window',
+			function: options.function,
+			alias,
+			over,
+		};
+
+		// Add field for aggregate functions
+		if (options.field !== undefined) {
+			(windowIntent as { field: string }).field = options.field;
+		}
+		builder.windowIntents.push(windowIntent);
+		return builder;
+	}
+
 	orderBy(
 		field: string,
 		direction: 'asc' | 'desc' = 'asc',
@@ -577,7 +625,20 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	async findMany(): Promise<TResult[]> {
 		const db = this.getConfiguredDb();
 		const planReport = this.plan();
-		const compiled = compile(planReport, this.model, db, this.schemaName);
+
+		// Build compile options with exactOptionalPropertyTypes compliance
+		const compileOptions: {
+			schemaName?: string;
+			windows?: readonly WindowIntent[];
+		} = {};
+		if (this.schemaName !== undefined) {
+			compileOptions.schemaName = this.schemaName;
+		}
+		if (this.windowIntents.length > 0) {
+			compileOptions.windows = this.windowIntents;
+		}
+
+		const compiled = compile(planReport, this.model, db, compileOptions);
 		const result = await db.executeQuery(compiled);
 		return result.rows as TResult[];
 	}
@@ -655,7 +716,20 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	dump(): Dump {
 		const db = this.getConfiguredDb();
 		const planReport = this.plan();
-		const compiled = compile(planReport, this.model, db, this.schemaName);
+
+		// Build compile options with exactOptionalPropertyTypes compliance
+		const compileOptions: {
+			schemaName?: string;
+			windows?: readonly WindowIntent[];
+		} = {};
+		if (this.schemaName !== undefined) {
+			compileOptions.schemaName = this.schemaName;
+		}
+		if (this.windowIntents.length > 0) {
+			compileOptions.windows = this.windowIntents;
+		}
+
+		const compiled = compile(planReport, this.model, db, compileOptions);
 
 		// Build meta with exactOptionalPropertyTypes compliance
 		const meta: { compiledAt: Date; tenant?: string } = {
@@ -893,6 +967,8 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		if (this.offsetValue !== undefined) {
 			builder.offsetValue = this.offsetValue;
 		}
+		// Clone window intents (P3-A)
+		builder.windowIntents.push(...this.windowIntents);
 		return builder;
 	}
 }

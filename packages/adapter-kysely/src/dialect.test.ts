@@ -8,6 +8,7 @@ import type { Kysely } from 'kysely';
 import { describe, expect, it } from 'vitest';
 import {
 	assertCapability,
+	assertWindowFunctionsSupported,
 	type DialectCapabilities,
 	type DialectName,
 	detectDialect,
@@ -19,6 +20,7 @@ import {
 	POSTGRESQL_CAPABILITIES,
 	SQLITE_CAPABILITIES,
 	skipIfMissingCapability,
+	supportsWindowFunctions,
 	UNKNOWN_CAPABILITIES,
 	withMockedCapabilities,
 } from './dialect.js';
@@ -113,6 +115,7 @@ describe('capability profiles', () => {
 				supportsNullsFirstLast: true,
 				supportsStreaming: true,
 				supportsArrayType: true,
+				supportsWindowFunctions: true,
 			});
 		});
 	});
@@ -127,6 +130,7 @@ describe('capability profiles', () => {
 				supportsNullsFirstLast: true,
 				supportsStreaming: false,
 				supportsArrayType: false,
+				supportsWindowFunctions: true,
 			});
 		});
 
@@ -149,6 +153,7 @@ describe('capability profiles', () => {
 				supportsNullsFirstLast: true,
 				supportsStreaming: false,
 				supportsArrayType: false,
+				supportsWindowFunctions: true,
 			});
 		});
 
@@ -171,6 +176,7 @@ describe('capability profiles', () => {
 				supportsNullsFirstLast: false,
 				supportsStreaming: false,
 				supportsArrayType: false,
+				supportsWindowFunctions: true,
 			});
 		});
 	});
@@ -185,6 +191,7 @@ describe('capability profiles', () => {
 				supportsNullsFirstLast: false,
 				supportsStreaming: false,
 				supportsArrayType: false,
+				supportsWindowFunctions: true,
 			});
 		});
 
@@ -659,6 +666,106 @@ describe('test helpers', () => {
 			expect(() =>
 				assertCapability(mysqlDb, 'supportsWithSchema', 'forTenant'),
 			).toThrow(UnsupportedOperationError);
+		});
+	});
+});
+
+// ============================================================================
+// Window Functions Capability Guards (P3-A)
+// ============================================================================
+
+describe('supportsWindowFunctions (P3-A)', () => {
+	describe('Feature: Check window function support', () => {
+		describe('Scenario: PostgreSQL supports window functions', () => {
+			it('Given PostgresDialect, When supportsWindowFunctions is called, Then returns true', () => {
+				const db = createMockDb('PostgresDialectAdapter');
+				expect(supportsWindowFunctions(db)).toBe(true);
+			});
+		});
+
+		describe('Scenario: MySQL supports window functions', () => {
+			it('Given MysqlDialect, When supportsWindowFunctions is called, Then returns true', () => {
+				const db = createMockDb('MysqlDialectAdapter');
+				expect(supportsWindowFunctions(db)).toBe(true);
+			});
+		});
+
+		describe('Scenario: SQLite supports window functions', () => {
+			it('Given SqliteDialect, When supportsWindowFunctions is called, Then returns true', () => {
+				const db = createMockDb('SqliteDialectAdapter');
+				expect(supportsWindowFunctions(db)).toBe(true);
+			});
+		});
+
+		describe('Scenario: MSSQL supports window functions', () => {
+			it('Given MssqlDialect, When supportsWindowFunctions is called, Then returns true', () => {
+				const db = createMockDb('MssqlDialectAdapter');
+				expect(supportsWindowFunctions(db)).toBe(true);
+			});
+		});
+
+		describe('Scenario: Unknown dialect supports window functions', () => {
+			it('Given unknown dialect, When supportsWindowFunctions is called, Then returns true', () => {
+				const db = createMockDb('CustomDialectAdapter');
+				expect(supportsWindowFunctions(db)).toBe(true);
+			});
+		});
+	});
+});
+
+describe('assertWindowFunctionsSupported (P3-A)', () => {
+	describe('Feature: Window functions capability guard', () => {
+		describe('Scenario: PostgreSQL passes assertion', () => {
+			it('Given PostgresDialect, When assertWindowFunctionsSupported is called, Then does not throw', () => {
+				const db = createMockDb('PostgresDialectAdapter');
+				expect(() => assertWindowFunctionsSupported(db)).not.toThrow();
+			});
+		});
+
+		describe('Scenario: MySQL passes assertion', () => {
+			it('Given MysqlDialect, When assertWindowFunctionsSupported is called, Then does not throw', () => {
+				const db = createMockDb('MysqlDialectAdapter');
+				expect(() => assertWindowFunctionsSupported(db)).not.toThrow();
+			});
+		});
+
+		describe('Scenario: SQLite passes assertion', () => {
+			it('Given SqliteDialect, When assertWindowFunctionsSupported is called, Then does not throw', () => {
+				const db = createMockDb('SqliteDialectAdapter');
+				expect(() => assertWindowFunctionsSupported(db)).not.toThrow();
+			});
+		});
+
+		describe('Scenario: MSSQL passes assertion', () => {
+			it('Given MssqlDialect, When assertWindowFunctionsSupported is called, Then does not throw', () => {
+				const db = createMockDb('MssqlDialectAdapter');
+				expect(() => assertWindowFunctionsSupported(db)).not.toThrow();
+			});
+		});
+
+		describe('Scenario: All dialects support window functions', () => {
+			it('All known dialects have supportsWindowFunctions: true', () => {
+				// Note: All current dialects (PostgreSQL, MySQL 8+, SQLite 3.25+, MSSQL 2005+)
+				// support window functions. The assertWindowFunctionsSupported throw path
+				// follows the same pattern as assertCapability (tested above).
+				// This test verifies the capability is properly configured for all dialects.
+				expect(POSTGRESQL_CAPABILITIES.supportsWindowFunctions).toBe(true);
+				expect(MYSQL_CAPABILITIES.supportsWindowFunctions).toBe(true);
+				expect(SQLITE_CAPABILITIES.supportsWindowFunctions).toBe(true);
+				expect(MSSQL_CAPABILITIES.supportsWindowFunctions).toBe(true);
+				expect(UNKNOWN_CAPABILITIES.supportsWindowFunctions).toBe(true);
+			});
+
+			it('assertCapability throws for unsupported capabilities (proves same pattern)', () => {
+				// This test demonstrates the throw pattern that assertWindowFunctionsSupported
+				// would follow if any dialect didn't support window functions.
+				// Using supportsWithSchema on MySQL as the example (known to be false).
+				const db = createMockDb('MysqlDialectAdapter');
+
+				expect(() =>
+					assertCapability(db, 'supportsWithSchema', 'window functions'),
+				).toThrow(UnsupportedOperationError);
+			});
 		});
 	});
 });
