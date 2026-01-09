@@ -145,6 +145,94 @@ export interface SelectWithExpressionsIntent {
 	readonly expressions: readonly ExpressionIntent[];
 }
 
+
+// ============================================================================
+// Window Functions (P3-A)
+// ============================================================================
+
+/**
+ * Window function types for OVER clause analytics.
+ * - Ranking: row_number, rank, dense_rank (no field required)
+ * - Aggregate: sum, avg, count, min, max (field required)
+ * - Offset: lag, lead (field required, offset/default deferred to P3+)
+ */
+export type WindowFunction =
+	| 'row_number'
+	| 'rank'
+	| 'dense_rank'
+	| 'sum'
+	| 'avg'
+	| 'count'
+	| 'min'
+	| 'max'
+	| 'lag'
+	| 'lead';
+
+/**
+ * Order specification for window OVER clause.
+ */
+export interface WindowOrderBy {
+	readonly field: string;
+	readonly direction?: 'asc' | 'desc';
+}
+
+/**
+ * Window function intent for analytics over partitions.
+ * Produces SQL like: ROW_NUMBER() OVER (PARTITION BY x ORDER BY y) AS alias
+ *
+ * @example Row numbering
+ * {
+ *   kind: 'window',
+ *   function: 'row_number',
+ *   alias: 'rn',
+ *   over: { orderBy: [{ field: 'created_at', direction: 'desc' }] }
+ * }
+ *
+ * @example Running total
+ * {
+ *   kind: 'window',
+ *   function: 'sum',
+ *   field: 'amount',
+ *   alias: 'running_total',
+ *   over: { partitionBy: ['account_id'], orderBy: [{ field: 'date' }] }
+ * }
+ */
+export interface WindowIntent {
+	readonly kind: 'window';
+
+	/** Window function to apply */
+	readonly function: WindowFunction;
+
+	/** Field for aggregate/offset functions (required for sum/avg/count/min/max/lag/lead) */
+	readonly field?: string;
+
+	/** Result column alias (required) */
+	readonly alias: string;
+
+	/** OVER clause specification */
+	readonly over: {
+		/** PARTITION BY columns (optional) */
+		readonly partitionBy?: readonly string[];
+		/** ORDER BY specification (optional but recommended for ranking) */
+		readonly orderBy?: readonly WindowOrderBy[];
+	};
+}
+
+/**
+ * Ranking window functions (no field required)
+ */
+export type RankingWindowFunction = 'row_number' | 'rank' | 'dense_rank';
+
+/**
+ * Aggregate window functions (field required)
+ */
+export type AggregateWindowFunction = 'sum' | 'avg' | 'count' | 'min' | 'max';
+
+/**
+ * Offset window functions (field required, offset/default deferred)
+ */
+export type OffsetWindowFunction = 'lag' | 'lead';
+
 // ============================================================================
 // Where Intent - Filter Conditions
 // ============================================================================
@@ -266,6 +354,7 @@ export interface WhereRelationFilterIntent {
 	 */
 	readonly mode: 'some' | 'every' | 'none';
 }
+
 
 // ============================================================================
 // Subquery Intent - Scalar Subquery in WHERE
@@ -802,6 +891,41 @@ export type MutationIntent = InsertIntent | UpdateIntent | DeleteIntent;
 /**
  * Check if a where intent is a comparison
  */
+
+
+// ============================================================================
+// Window Intent Type Guards
+// ============================================================================
+
+/**
+ * Check if an intent is a window function intent
+ */
+export function isWindowIntent(intent: unknown): intent is WindowIntent {
+	return (
+		typeof intent === 'object' &&
+		intent !== null &&
+		'kind' in intent &&
+		(intent as { kind: unknown }).kind === 'window'
+	);
+}
+
+/**
+ * Check if a window function requires a field (aggregate or offset functions)
+ */
+export function isAggregateWindowFunction(
+	fn: WindowFunction,
+): fn is AggregateWindowFunction | OffsetWindowFunction {
+	return ['sum', 'avg', 'count', 'min', 'max', 'lag', 'lead'].includes(fn);
+}
+
+/**
+ * Check if a window function is a ranking function (no field required)
+ */
+export function isRankingWindowFunction(
+	fn: WindowFunction,
+): fn is RankingWindowFunction {
+	return ['row_number', 'rank', 'dense_rank'].includes(fn);
+}
 export function isWhereComparison(
 	where: WhereIntent,
 ): where is WhereComparisonIntent {

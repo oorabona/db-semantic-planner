@@ -38,6 +38,8 @@ export type {
 	// Aggregates
 	AggregateFunction,
 	AggregateIntent,
+	// Window Functions (P3-A)
+	AggregateWindowFunction,
 	// Operators
 	ArrayOperator,
 	// Expressions
@@ -57,10 +59,12 @@ export type {
 	MutationIntent,
 	NullOperator,
 	NullsPosition,
+	OffsetWindowFunction,
 	// OrderBy
 	OrderByIntent,
 	// Query
 	QueryIntent,
+	RankingWindowFunction,
 	RawExpressionIntent,
 	RecursiveDedupe,
 	RecursiveEmitOptions,
@@ -95,10 +99,16 @@ export type {
 	WhereSubqueryIntent,
 	SubqueryRefIntent,
 	ScalarSubqueryIntent,
+	// Window Functions (P3-A)
+	WindowFunction,
+	WindowIntent,
+	WindowOrderBy,
 } from './intent-ast.js';
 export {
 	// Recursive CTE type guards (RFC-001)
 	isAdjacencyTraversal,
+	// Window function type guards (P3-A)
+	isAggregateWindowFunction,
 	// Type guards
 	isCoalesceExpression,
 	isCustomTraversal,
@@ -107,6 +117,7 @@ export {
 	isEdgeTableTraversal,
 	isInsertIntent,
 	isMutationIntent,
+	isRankingWindowFunction,
 	isRawExpression,
 	isRecursiveIntent,
 	isSelectAggregate,
@@ -129,6 +140,8 @@ export {
 	// Subquery type guards (DX-012)
 	isWhereSubquery,
 	isSubqueryRef,
+	// Window function type guards (P3-A)
+	isWindowIntent,
 } from './intent-ast.js';
 
 // ============================================================================

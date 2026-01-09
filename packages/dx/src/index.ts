@@ -93,6 +93,7 @@ export type {
 	QueryBuilder,
 	RelationHints,
 	StreamOptions,
+	WindowOptions,
 } from './types.js';
 
 // Subquery Builder (DX-012 Block 3)

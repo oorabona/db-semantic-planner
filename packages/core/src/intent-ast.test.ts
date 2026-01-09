@@ -23,11 +23,15 @@ import type {
 	WhereNullIntent,
 	WhereOrIntent,
 	WhereRelationFilterIntent,
+	// Window Functions (P3-A)
+	WindowIntent,
 } from './intent-ast.js';
 import {
+	isAggregateWindowFunction,
 	isDeleteIntent,
 	isInsertIntent,
 	isMutationIntent,
+	isRankingWindowFunction,
 	isSelectAggregate,
 	isSelectAll,
 	isSelectFields,
@@ -44,6 +48,8 @@ import {
 	isWhereOr,
 	isWhereRelationBased,
 	isWhereRelationFilter,
+	// Window Functions (P3-A)
+	isWindowIntent,
 } from './intent-ast.js';
 
 describe('IntentAST', () => {
@@ -935,6 +941,158 @@ describe('IntentAST', () => {
 
 			// @ts-expect-error - Testing runtime behavior
 			expect(isMutationIntent(query)).toBe(false);
+		});
+	});
+
+	// =========================================================================
+	// Window Intent Tests (P3-A)
+	// =========================================================================
+
+	describe('WindowIntent', () => {
+		it('should represent row_number window function', () => {
+			const window: WindowIntent = {
+				kind: 'window',
+				function: 'row_number',
+				alias: 'rn',
+				over: {
+					orderBy: [{ field: 'created_at', direction: 'desc' }],
+				},
+			};
+
+			expect(window.kind).toBe('window');
+			expect(window.function).toBe('row_number');
+			expect(window.alias).toBe('rn');
+			expect(window.over.orderBy).toHaveLength(1);
+			expect(isWindowIntent(window)).toBe(true);
+		});
+
+		it('should represent rank window function with partition', () => {
+			const window: WindowIntent = {
+				kind: 'window',
+				function: 'rank',
+				alias: 'category_rank',
+				over: {
+					partitionBy: ['category_id'],
+					orderBy: [{ field: 'sales', direction: 'desc' }],
+				},
+			};
+
+			expect(window.function).toBe('rank');
+			expect(window.over.partitionBy).toEqual(['category_id']);
+			expect(isWindowIntent(window)).toBe(true);
+		});
+
+		it('should represent aggregate window function with field', () => {
+			const window: WindowIntent = {
+				kind: 'window',
+				function: 'sum',
+				field: 'amount',
+				alias: 'running_total',
+				over: {
+					partitionBy: ['account_id'],
+					orderBy: [{ field: 'date', direction: 'asc' }],
+				},
+			};
+
+			expect(window.function).toBe('sum');
+			expect(window.field).toBe('amount');
+			expect(window.alias).toBe('running_total');
+			expect(isWindowIntent(window)).toBe(true);
+		});
+
+		it('should support empty partitionBy (window over entire result)', () => {
+			const window: WindowIntent = {
+				kind: 'window',
+				function: 'row_number',
+				alias: 'global_rn',
+				over: {
+					partitionBy: [],
+					orderBy: [{ field: 'id' }],
+				},
+			};
+
+			expect(window.over.partitionBy).toEqual([]);
+			expect(isWindowIntent(window)).toBe(true);
+		});
+
+		it('should support orderBy without direction (defaults to asc)', () => {
+			const window: WindowIntent = {
+				kind: 'window',
+				function: 'dense_rank',
+				alias: 'rank',
+				over: {
+					orderBy: [{ field: 'score' }],
+				},
+			};
+
+			expect(window.over.orderBy?.[0].direction).toBeUndefined();
+			expect(isWindowIntent(window)).toBe(true);
+		});
+
+		it('should support multiple orderBy fields', () => {
+			const window: WindowIntent = {
+				kind: 'window',
+				function: 'row_number',
+				alias: 'rn',
+				over: {
+					orderBy: [
+						{ field: 'category_id', direction: 'asc' },
+						{ field: 'price', direction: 'desc' },
+					],
+				},
+			};
+
+			expect(window.over.orderBy).toHaveLength(2);
+			expect(isWindowIntent(window)).toBe(true);
+		});
+	});
+
+	describe('Window function type guards', () => {
+		it('isWindowIntent should return true for window intents', () => {
+			const window: WindowIntent = {
+				kind: 'window',
+				function: 'row_number',
+				alias: 'rn',
+				over: {},
+			};
+
+			expect(isWindowIntent(window)).toBe(true);
+		});
+
+		it('isWindowIntent should return false for non-window objects', () => {
+			expect(isWindowIntent(null)).toBe(false);
+			expect(isWindowIntent(undefined)).toBe(false);
+			expect(isWindowIntent({})).toBe(false);
+			expect(isWindowIntent({ kind: 'comparison' })).toBe(false);
+			expect(isWindowIntent({ type: 'select' })).toBe(false);
+		});
+
+		it('isAggregateWindowFunction should identify aggregate functions', () => {
+			expect(isAggregateWindowFunction('sum')).toBe(true);
+			expect(isAggregateWindowFunction('avg')).toBe(true);
+			expect(isAggregateWindowFunction('count')).toBe(true);
+			expect(isAggregateWindowFunction('min')).toBe(true);
+			expect(isAggregateWindowFunction('max')).toBe(true);
+			expect(isAggregateWindowFunction('lag')).toBe(true);
+			expect(isAggregateWindowFunction('lead')).toBe(true);
+		});
+
+		it('isAggregateWindowFunction should return false for ranking functions', () => {
+			expect(isAggregateWindowFunction('row_number')).toBe(false);
+			expect(isAggregateWindowFunction('rank')).toBe(false);
+			expect(isAggregateWindowFunction('dense_rank')).toBe(false);
+		});
+
+		it('isRankingWindowFunction should identify ranking functions', () => {
+			expect(isRankingWindowFunction('row_number')).toBe(true);
+			expect(isRankingWindowFunction('rank')).toBe(true);
+			expect(isRankingWindowFunction('dense_rank')).toBe(true);
+		});
+
+		it('isRankingWindowFunction should return false for aggregate functions', () => {
+			expect(isRankingWindowFunction('sum')).toBe(false);
+			expect(isRankingWindowFunction('avg')).toBe(false);
+			expect(isRankingWindowFunction('lag')).toBe(false);
 		});
 	});
 });
