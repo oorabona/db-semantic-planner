@@ -208,4 +208,80 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 			expect(result1).toEqual(result2);
 		});
 	});
+
+	// ============================================================================
+	// Filter Strategy Contract Tests (CORE-001)
+	// ============================================================================
+
+	describe('Filter strategy contract (CORE-001)', () => {
+		describe('belongsTo → JOIN strategy (default)', () => {
+			it('should use JOIN strategy for belongsTo filter (products.category)', async () => {
+				const db = await getTestDb();
+				const orm = createOrm({ model: pimdamModel, db });
+
+				const dump = orm
+					.forTenant('acme')
+					.select('products')
+					.where(
+						exists('category', {
+							where: eq('name', 'Electronics'),
+						}),
+					)
+					.dump();
+
+				// Verify JOIN strategy is chosen for belongsTo
+				const filterDecision = dump.plan.decisions.find(
+					(d) => d.type === 'filter-strategy',
+				);
+				expect(filterDecision).toBeDefined();
+				expect(filterDecision?.choice).toBe('join');
+
+				// Verify SQL uses JOIN not EXISTS
+				expect(dump.sql.toLowerCase()).toContain('join');
+				expect(dump.sql.toLowerCase()).not.toContain('exists');
+			});
+
+			it('should return correct results with JOIN filter on category', async () => {
+				const db = await getTestDb();
+				const orm = createOrm({ model: pimdamModel, db });
+
+				const products = await orm
+					.forTenant('acme')
+					.select('products')
+					.where(
+						exists('category', {
+							where: eq('name', 'Electronics'),
+						}),
+					)
+					.columns(['id', 'sku'])
+					.execute();
+
+				// Should return products in Electronics category
+				expect(products.length).toBeGreaterThanOrEqual(1);
+			});
+		});
+
+		describe('hasMany → EXISTS strategy (default)', () => {
+			it('should use EXISTS strategy for hasMany filter (products.images)', async () => {
+				const db = await getTestDb();
+				const orm = createOrm({ model: pimdamModel, db });
+
+				const dump = orm
+					.forTenant('acme')
+					.select('products')
+					.where(exists('images'))
+					.dump();
+
+				// Verify EXISTS strategy is chosen for hasMany
+				const filterDecision = dump.plan.decisions.find(
+					(d) => d.type === 'filter-strategy',
+				);
+				expect(filterDecision).toBeDefined();
+				expect(filterDecision?.choice).toBe('exists');
+
+				// Verify SQL uses EXISTS
+				expect(dump.sql.toLowerCase()).toContain('exists');
+			});
+		});
+	});
 });
