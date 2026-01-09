@@ -7,16 +7,7 @@
 
 ## Pending (Backlogged from Review)
 
-### E2E-002 Edge Case: Q8-03 Strict Mode Ambiguity Error
-
-**Source:** Review finding F-001 (NON-BLOCKING, LOW, Size M)
-**Added:** 2026-01-09
-
-- [ ] Implement strict mode in ORM config
-- [ ] Add test: `should throw AmbiguousRelationError when querying 'users' without via hint`
-- [ ] Add test: `should provide helpful error message with available relations`
-
-**Blocked by:** DX-011 (strict mode implementation)
+(empty)
 
 ---
 
@@ -61,7 +52,7 @@ Implemented 10 realistic PIM/DAM use cases as E2E tests validating API capabilit
 - P1 (enterprise): Q6-Q8 (category tree, BOM, ambiguity)
 - P2 (robustness): Q9-Q10 (multi-tenant, capabilities)
 
-**Total E2E Tests:** 192 (186 + 6 Q8-06 junction tests)
+**Total E2E Tests:** 200 (192 + 8 Q8-07 strict mode tests)
 
 ---
 
@@ -73,9 +64,10 @@ Implemented 10 realistic PIM/DAM use cases as E2E tests validating API capabilit
 - [x] ✅ Block 7: Q3-Q5 Variants and assets tests - 12 tests (2026-01-09)
 - [x] ✅ Block 8: Q6 Category tree tests - 8 tests (2026-01-09)
 - [x] ✅ Block 9: Q7 BOM/Bundle tests - 7 tests (2026-01-09)
-- [x] ✅ Block 10: Q8 Ambiguity via/role tests - 20 tests (2026-01-09)
+- [x] ✅ Block 10: Q8 Ambiguity via/role tests - 28 tests (2026-01-09)
   - Q8-01 to Q8-05: FK-based disambiguation (author_id/reviewer_id → users)
   - Q8-06: Junction table with role column (product_images.role → main/gallery/thumbnail)
+  - Q8-07: Strict mode ambiguity errors - 8 tests (2026-01-09)
 
 ### Verification
 
