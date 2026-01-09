@@ -52,7 +52,7 @@ describe('DX-011: API Improvements', () => {
 
 		describe('Scenario: Single where condition', () => {
 			it('should use condition directly without wrapping', () => {
-				const query = orm.query('users').where(eq('active', true));
+				const query = orm.select('users').where(eq('active', true));
 
 				// Access buildIntent via plan which calls it internally
 				const plan = query.plan();
@@ -67,7 +67,7 @@ describe('DX-011: API Improvements', () => {
 		describe('Scenario: Multiple where conditions produce AND', () => {
 			it('should combine two where() calls with AND', () => {
 				const query = orm
-					.query('users')
+					.select('users')
 					.where(eq('active', true))
 					.where(eq('role', 'admin'));
 
@@ -88,7 +88,7 @@ describe('DX-011: API Improvements', () => {
 
 			it('should combine three where() calls with AND', () => {
 				const query = orm
-					.query('users')
+					.select('users')
 					.where(eq('active', true))
 					.where(eq('role', 'admin'))
 					.where(eq('name', 'John'));
@@ -110,7 +110,7 @@ describe('DX-011: API Improvements', () => {
 		describe('Scenario: Chaining with OR condition', () => {
 			it('should AND an OR condition with subsequent where()', () => {
 				const query = orm
-					.query('users')
+					.select('users')
 					.where(or(eq('role', 'admin'), eq('role', 'super')))
 					.where(eq('active', true));
 
@@ -133,7 +133,7 @@ describe('DX-011: API Improvements', () => {
 		describe('Scenario: Chaining with explicit AND condition', () => {
 			it('should nest explicit and() within implicit AND', () => {
 				const query = orm
-					.query('users')
+					.select('users')
 					.where(and(eq('active', true), eq('role', 'admin')))
 					.where(eq('name', 'John'));
 
@@ -155,7 +155,7 @@ describe('DX-011: API Improvements', () => {
 
 		describe('Scenario: Builder immutability', () => {
 			it('should not mutate original builder when chaining where()', () => {
-				const base = orm.query('users').where(eq('active', true));
+				const base = orm.select('users').where(eq('active', true));
 				const withRole = base.where(eq('role', 'admin'));
 				const withName = base.where(eq('name', 'John'));
 
@@ -179,7 +179,7 @@ describe('DX-011: API Improvements', () => {
 		describe('Scenario: Include by exact relation name', () => {
 			it('should use relation when name matches exactly', () => {
 				// 'authoredPosts' is a relation name from users → posts
-				const query = orm.query('users').include('authoredPosts');
+				const query = orm.select('users').include('authoredPosts');
 				const plan = query.plan();
 
 				// Should include 'authoredPosts' relation
@@ -190,7 +190,7 @@ describe('DX-011: API Improvements', () => {
 
 			it('should use author relation when name matches exactly', () => {
 				// 'author' is a relation name from posts → users
-				const query = orm.query('posts').include('author');
+				const query = orm.select('posts').include('author');
 				const plan = query.plan();
 
 				expect(plan.intent.include).toBeDefined();
@@ -202,7 +202,7 @@ describe('DX-011: API Improvements', () => {
 			it('should still work with via option for disambiguation', () => {
 				// Two relations from users to posts: 'authoredPosts' and 'reviewedPosts'
 				const query = orm
-					.query('users')
+					.select('users')
 					.include('posts', { via: 'authoredPosts' });
 				const plan = query.plan();
 
@@ -216,7 +216,7 @@ describe('DX-011: API Improvements', () => {
 			it('should use relation directly without ambiguity check', () => {
 				// Even though users→posts has 2 relations, 'authoredPosts' is unambiguous as relation name
 				const ormStrict = createOrm({ model: testSchema, strictMode: true });
-				const query = ormStrict.query('users').include('authoredPosts');
+				const query = ormStrict.select('users').include('authoredPosts');
 
 				// Should NOT throw AmbiguousRelationError because 'authoredPosts' is exact relation name
 				expect(() => query.plan()).not.toThrow();
@@ -238,31 +238,27 @@ describe('DX-011: API Improvements', () => {
 
 		describe('Scenario: Typed query returns typed results', () => {
 			it('should infer return type from generic parameter', () => {
-				const query = orm.query<User>('users');
+				const query = orm.select<User>('users');
 
-				// Type-level assertions using expectTypeOf on method signatures (not calls)
+				// Type-level assertions using expectTypeOf
 				expectTypeOf(query.execute).returns.toEqualTypeOf<Promise<User[]>>();
-				expectTypeOf(query.findMany).returns.toEqualTypeOf<Promise<User[]>>();
-				expectTypeOf(query.findFirst).returns.toEqualTypeOf<
+				expectTypeOf(query.all).returns.toEqualTypeOf<Promise<User[]>>();
+				expectTypeOf(query.first).returns.toEqualTypeOf<
 					Promise<User | undefined>
 				>();
-				expectTypeOf(query.findFirstOrThrow).returns.toEqualTypeOf<
-					Promise<User>
-				>();
+				expectTypeOf(query.firstOrThrow).returns.toEqualTypeOf<Promise<User>>();
 			});
 		});
 
 		describe('Scenario: Untyped query returns unknown', () => {
 			it('should default to unknown when no type parameter provided', () => {
-				const query = orm.query('users');
+				const query = orm.select('users');
 
 				// Type-level assertions - untyped query returns unknown
 				expectTypeOf(query.execute).returns.toEqualTypeOf<Promise<unknown[]>>();
-				expectTypeOf(query.findMany).returns.toEqualTypeOf<
-					Promise<unknown[]>
-				>();
-				expectTypeOf(query.findFirst).returns.toEqualTypeOf<Promise<unknown>>();
-				expectTypeOf(query.findFirstOrThrow).returns.toEqualTypeOf<
+				expectTypeOf(query.all).returns.toEqualTypeOf<Promise<unknown[]>>();
+				expectTypeOf(query.first).returns.toEqualTypeOf<Promise<unknown>>();
+				expectTypeOf(query.firstOrThrow).returns.toEqualTypeOf<
 					Promise<unknown>
 				>();
 			});
@@ -271,15 +267,15 @@ describe('DX-011: API Improvements', () => {
 		describe('Scenario: Type preserved through chaining', () => {
 			it('should preserve type through where/select/include chains', () => {
 				const query = orm
-					.query<User>('users')
+					.select<User>('users')
 					.where(eq('active', true))
-					.select(['id', 'name'])
+					.columns(['id', 'name'])
 					.orderBy('name')
 					.limit(10);
 
 				// Type should be preserved through the chain
 				expectTypeOf(query.execute).returns.toEqualTypeOf<Promise<User[]>>();
-				expectTypeOf(query.findFirst).returns.toEqualTypeOf<
+				expectTypeOf(query.first).returns.toEqualTypeOf<
 					Promise<User | undefined>
 				>();
 			});
@@ -287,9 +283,9 @@ describe('DX-011: API Improvements', () => {
 
 		describe('Scenario: Stream returns typed iterator', () => {
 			it('should infer stream element type from generic parameter', () => {
-				const query = orm.query<User>('users');
+				const query = orm.select<User>('users');
 
-				// Stream should return typed iterator (test method signature)
+				// Stream should return typed iterator
 				expectTypeOf(query.stream).returns.toEqualTypeOf<
 					AsyncIterableIterator<User>
 				>();

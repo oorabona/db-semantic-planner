@@ -98,27 +98,29 @@ describe('DX-012 Block 2: Typed Schema Generics', () => {
 		});
 	});
 
-	describe('Typed query() method', () => {
+	describe('Typed select() method', () => {
 		it('should infer table type from DB generic', () => {
 			const orm = createOrm<TestDatabase>({ model: testModel });
-			const builder = orm.query('users');
+			const builder = orm.select('users');
 
 			// Result should be typed as User
 			type ExpectedResult = TestDatabase['users'];
 			// Use .returns.resolves to check type without calling the method
-			expectTypeOf(builder.findMany).returns.resolves.toMatchTypeOf<ExpectedResult[]>();
+			expectTypeOf(builder.all).returns.resolves.toMatchTypeOf<
+				ExpectedResult[]
+			>();
 		});
 
 		it('should provide autocomplete for table names', () => {
 			const orm = createOrm<TestDatabase>({ model: testModel });
 
 			// These should compile
-			orm.query('users');
-			orm.query('posts');
-			orm.query('comments');
+			orm.select('users');
+			orm.select('posts');
+			orm.select('comments');
 
 			// @ts-expect-error - 'invalid' is not a valid table name
-			// orm.query('invalid');
+			// orm.select('invalid');
 		});
 
 		it('should allow manual type override', () => {
@@ -126,10 +128,10 @@ describe('DX-012 Block 2: Typed Schema Generics', () => {
 
 			// Manual override should take precedence
 			type CustomUser = { id: number; customField: string };
-			const builder = orm.query<CustomUser>('users');
+			const builder = orm.select<CustomUser>('users');
 
 			// Use .returns.resolves to check type without calling the method
-			expectTypeOf(builder.findMany).returns.resolves.toMatchTypeOf<CustomUser[]>();
+			expectTypeOf(builder.all).returns.resolves.toMatchTypeOf<CustomUser[]>();
 		});
 	});
 
@@ -138,7 +140,7 @@ describe('DX-012 Block 2: Typed Schema Generics', () => {
 			const orm = createOrm<TestDatabase>({ model: testModel });
 
 			// Should compile - 'name' is a valid field
-			const plan = orm.query('users').where({ name: 'John' }).plan();
+			const plan = orm.select('users').where({ name: 'John' }).plan();
 
 			expect(plan.rootTable).toBe('users');
 			expect(plan.intent.where).toEqual({
@@ -153,7 +155,10 @@ describe('DX-012 Block 2: Typed Schema Generics', () => {
 			const orm = createOrm<TestDatabase>({ model: testModel });
 
 			// Should compile - 'id' is number, $gt accepts number
-			const plan = orm.query('posts').where({ id: { $gt: 10 } }).plan();
+			const plan = orm
+				.select('posts')
+				.where({ id: { $gt: 10 } })
+				.plan();
 
 			expect(plan.intent.where).toEqual({
 				kind: 'comparison',
@@ -167,7 +172,7 @@ describe('DX-012 Block 2: Typed Schema Generics', () => {
 			const orm = createOrm<TestDatabase>({ model: testModel });
 
 			const plan = orm
-				.query('users')
+				.select('users')
 				.where({ active: true, name: { $like: '%john%' } })
 				.plan();
 
@@ -180,7 +185,7 @@ describe('DX-012 Block 2: Typed Schema Generics', () => {
 			const orm = createOrm<TestDatabase>({ model: testModel });
 
 			// Legacy syntax should still work
-			const plan = orm.query('users').where(eq('name', 'John')).plan();
+			const plan = orm.select('users').where(eq('name', 'John')).plan();
 
 			expect(plan.intent.where).toEqual({
 				kind: 'comparison',
@@ -196,7 +201,7 @@ describe('DX-012 Block 2: Typed Schema Generics', () => {
 			const orm = createOrm({ model: testModel });
 
 			// Should compile - untyped allows any table
-			const plan = orm.query('users').where({ anyField: 'value' }).plan();
+			const plan = orm.select('users').where({ anyField: 'value' }).plan();
 
 			expect(plan.rootTable).toBe('users');
 		});
@@ -206,8 +211,8 @@ describe('DX-012 Block 2: Typed Schema Generics', () => {
 
 			// Result type should be unknown[]
 			// Use .returns.resolves to check type without calling the method
-			const builder = orm.query('users');
-			expectTypeOf(builder.findMany).returns.resolves.toMatchTypeOf<unknown[]>();
+			const builder = orm.select('users');
+			expectTypeOf(builder.all).returns.resolves.toMatchTypeOf<unknown[]>();
 		});
 	});
 
@@ -216,7 +221,7 @@ describe('DX-012 Block 2: Typed Schema Generics', () => {
 			const orm = createOrm<TestDatabase>({ model: testModel });
 
 			const plan = orm
-				.query('users')
+				.select('users')
 				.where({ active: true, name: 'John' })
 				.include('posts')
 				.plan();
@@ -231,7 +236,7 @@ describe('DX-012 Block 2: Typed Schema Generics', () => {
 
 			// Complex chained query
 			const plan = orm
-				.query('posts')
+				.select('posts')
 				.where({ published: true })
 				.where({ authorId: { $gt: 0 } })
 				.orderBy('title', 'asc')

@@ -109,17 +109,15 @@ describe('Execution Layer', () => {
 		it('throws ExecutionError when db is not configured', async () => {
 			const orm = createOrm({ model: testModel });
 
-			await expect(orm.query('users').findMany()).rejects.toThrow(
-				ExecutionError,
-			);
-			await expect(orm.query('users').findMany()).rejects.toThrow(
+			await expect(orm.select('users').all()).rejects.toThrow(ExecutionError);
+			await expect(orm.select('users').all()).rejects.toThrow(
 				'Database not configured',
 			);
 		});
 
 		it('executes query and returns rows when db is configured', async () => {
 			const orm = createOrm({ model: testModel, db });
-			const result = await orm.query('users').findMany();
+			const result = await orm.select('users').all();
 
 			expect(result).toHaveLength(2);
 			expect(result[0]).toHaveProperty('name');
@@ -132,7 +130,7 @@ describe('Execution Layer', () => {
 			await setupDatabase(emptyDb);
 
 			const orm = createOrm({ model: testModel, db: emptyDb });
-			const result = await orm.query('users').findMany();
+			const result = await orm.select('users').all();
 
 			expect(result).toEqual([]);
 			await emptyDb.destroy();
@@ -143,14 +141,12 @@ describe('Execution Layer', () => {
 		it('throws ExecutionError when db is not configured', async () => {
 			const orm = createOrm({ model: testModel });
 
-			await expect(orm.query('users').findFirst()).rejects.toThrow(
-				ExecutionError,
-			);
+			await expect(orm.select('users').first()).rejects.toThrow(ExecutionError);
 		});
 
 		it('returns first row when results exist', async () => {
 			const orm = createOrm({ model: testModel, db });
-			const result = await orm.query('users').findFirst();
+			const result = await orm.select('users').first();
 
 			expect(result).toBeDefined();
 			expect(result).toHaveProperty('name');
@@ -162,7 +158,7 @@ describe('Execution Layer', () => {
 			await setupDatabase(emptyDb);
 
 			const orm = createOrm({ model: testModel, db: emptyDb });
-			const result = await orm.query('users').findFirst();
+			const result = await orm.select('users').first();
 
 			expect(result).toBeUndefined();
 			await emptyDb.destroy();
@@ -173,14 +169,14 @@ describe('Execution Layer', () => {
 		it('throws ExecutionError when db is not configured', async () => {
 			const orm = createOrm({ model: testModel });
 
-			await expect(orm.query('users').findFirstOrThrow()).rejects.toThrow(
+			await expect(orm.select('users').firstOrThrow()).rejects.toThrow(
 				ExecutionError,
 			);
 		});
 
 		it('returns first row when results exist', async () => {
 			const orm = createOrm({ model: testModel, db });
-			const result = await orm.query('users').findFirstOrThrow();
+			const result = await orm.select('users').firstOrThrow();
 
 			expect(result).toBeDefined();
 			expect(result).toHaveProperty('name');
@@ -193,10 +189,10 @@ describe('Execution Layer', () => {
 
 			const orm = createOrm({ model: testModel, db: emptyDb });
 
-			await expect(orm.query('users').findFirstOrThrow()).rejects.toThrow(
+			await expect(orm.select('users').firstOrThrow()).rejects.toThrow(
 				NotFoundError,
 			);
-			await expect(orm.query('users').findFirstOrThrow()).rejects.toThrow(
+			await expect(orm.select('users').firstOrThrow()).rejects.toThrow(
 				"No record found for 'users'",
 			);
 			await emptyDb.destroy();
@@ -210,7 +206,7 @@ describe('Execution Layer', () => {
 			const orm = createOrm({ model: testModel, db: emptyDb });
 
 			try {
-				await orm.query('posts').findFirstOrThrow();
+				await orm.select('posts').firstOrThrow();
 				expect.fail('Should have thrown');
 			} catch (error) {
 				expect(error).toBeInstanceOf(NotFoundError);
@@ -244,7 +240,7 @@ describe('Execution Layer', () => {
 			const orm = createOrm({ model: testModel, db });
 
 			const tenantOrm = orm.forTenant('tenant_abc');
-			const builder = tenantOrm.query('users');
+			const builder = tenantOrm.select('users');
 
 			// Should be able to build a plan
 			const planReport = builder.plan();
@@ -310,15 +306,15 @@ describe('Execution Layer', () => {
 		it('throws ExecutionError when db is not configured', () => {
 			const orm = createOrm({ model: testModel });
 
-			expect(() => orm.query('users').dump()).toThrow(ExecutionError);
-			expect(() => orm.query('users').dump()).toThrow(
+			expect(() => orm.select('users').dump()).toThrow(ExecutionError);
+			expect(() => orm.select('users').dump()).toThrow(
 				'Database not configured',
 			);
 		});
 
 		it('returns complete Dump object when db is configured', () => {
 			const orm = createOrm({ model: testModel, db });
-			const dump = orm.query('users').dump();
+			const dump = orm.select('users').dump();
 
 			// Verify structure
 			expect(dump).toHaveProperty('plan');
@@ -343,7 +339,7 @@ describe('Execution Layer', () => {
 		it('includes params for where clause', () => {
 			const orm = createOrm({ model: testModel, db });
 			const dump = orm
-				.query('users')
+				.select('users')
 				.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 42 })
 				.dump();
 
@@ -352,7 +348,7 @@ describe('Execution Layer', () => {
 
 		it('includes tenant in meta for forTenant()', () => {
 			const orm = createOrm({ model: testModel, db });
-			const dump = orm.forTenant('acme').query('users').dump();
+			const dump = orm.forTenant('acme').select('users').dump();
 
 			expect(dump.meta?.tenant).toBe('acme');
 			// SQL should include schema qualification
@@ -361,7 +357,7 @@ describe('Execution Layer', () => {
 
 		it('does not include tenant in meta when no tenant', () => {
 			const orm = createOrm({ model: testModel, db });
-			const dump = orm.query('users').dump();
+			const dump = orm.select('users').dump();
 
 			expect(dump.meta?.tenant).toBeUndefined();
 		});
@@ -369,8 +365,8 @@ describe('Execution Layer', () => {
 		it('works with complex query chain', () => {
 			const orm = createOrm({ model: testModel, db });
 			const dump = orm
-				.query('users')
-				.select(['id', 'name'])
+				.select('users')
+				.columns(['id', 'name'])
 				.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 1 })
 				.dump();
 
@@ -384,10 +380,10 @@ describe('Execution Layer', () => {
 		it('throws ExecutionError when db is not configured', async () => {
 			const orm = createOrm({ model: testModel });
 
-			await expect(orm.query('users').execute()).rejects.toThrow(
+			await expect(orm.select('users').execute()).rejects.toThrow(
 				ExecutionError,
 			);
-			await expect(orm.query('users').execute()).rejects.toThrow(
+			await expect(orm.select('users').execute()).rejects.toThrow(
 				'Database not configured',
 			);
 		});
@@ -395,15 +391,15 @@ describe('Execution Layer', () => {
 		it('is an alias for findMany()', async () => {
 			const orm = createOrm({ model: testModel, db });
 
-			const executeResult = await orm.query('users').execute();
-			const findManyResult = await orm.query('users').findMany();
+			const executeResult = await orm.select('users').execute();
+			const findManyResult = await orm.select('users').all();
 
 			expect(executeResult).toEqual(findManyResult);
 		});
 
 		it('returns all rows', async () => {
 			const orm = createOrm({ model: testModel, db });
-			const result = await orm.query('users').execute();
+			const result = await orm.select('users').execute();
 
 			expect(result).toHaveLength(2);
 		});
@@ -414,7 +410,7 @@ describe('Execution Layer', () => {
 			await setupDatabase(emptyDb);
 
 			const orm = createOrm({ model: testModel, db: emptyDb });
-			const result = await orm.query('users').execute();
+			const result = await orm.select('users').execute();
 
 			expect(result).toEqual([]);
 			await emptyDb.destroy();
@@ -423,7 +419,7 @@ describe('Execution Layer', () => {
 		it('works with where clause', async () => {
 			const orm = createOrm({ model: testModel, db });
 			const result = await orm
-				.query('users')
+				.select('users')
 				.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 1 })
 				.execute();
 
@@ -435,16 +431,16 @@ describe('Execution Layer', () => {
 		it('executes query with where clause', async () => {
 			const orm = createOrm({ model: testModel, db });
 			const result = await orm
-				.query('users')
+				.select('users')
 				.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 1 })
-				.findMany();
+				.all();
 
 			expect(result).toHaveLength(1);
 		});
 
 		it('executes query with select', async () => {
 			const orm = createOrm({ model: testModel, db });
-			const result = await orm.query('users').select(['name']).findMany();
+			const result = await orm.select('users').columns(['name']).all();
 
 			expect(result).toHaveLength(2);
 			// Result contains at least the selected field
@@ -456,11 +452,11 @@ describe('Execution Layer', () => {
 
 			// Chain multiple operations
 			const result = await orm
-				.query('users')
-				.select(['id', 'name'])
+				.select('users')
+				.columns(['id', 'name'])
 				.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 1 })
 				.withStrictMode(true)
-				.findFirst();
+				.first();
 
 			expect(result).toBeDefined();
 		});
@@ -471,15 +467,15 @@ describe('Execution Layer', () => {
 			const orm = createOrm({ model: testModel });
 
 			// stream() throws immediately because it needs db for dump()
-			expect(() => orm.query('users').stream()).toThrow(ExecutionError);
-			expect(() => orm.query('users').stream()).toThrow(
+			expect(() => orm.select('users').stream()).toThrow(ExecutionError);
+			expect(() => orm.select('users').stream()).toThrow(
 				'Database not configured',
 			);
 		});
 
 		it('returns an AsyncIterableIterator', () => {
 			const orm = createOrm({ model: testModel, db });
-			const iterator = orm.query('users').stream();
+			const iterator = orm.select('users').stream();
 
 			expect(typeof iterator[Symbol.asyncIterator]).toBe('function');
 			expect(typeof iterator.next).toBe('function');
@@ -489,7 +485,7 @@ describe('Execution Layer', () => {
 			const orm = createOrm({ model: testModel, db });
 			const results: unknown[] = [];
 
-			for await (const row of orm.query('users').stream()) {
+			for await (const row of orm.select('users').stream()) {
 				results.push(row);
 			}
 
@@ -501,7 +497,7 @@ describe('Execution Layer', () => {
 			const orm = createOrm({ model: testModel, db });
 			const results: unknown[] = [];
 
-			for await (const row of orm.query('users').stream()) {
+			for await (const row of orm.select('users').stream()) {
 				results.push(row);
 				break; // Stop after first row
 			}
@@ -513,7 +509,7 @@ describe('Execution Layer', () => {
 			const orm = createOrm({ model: testModel, db });
 			const onStart = vi.fn();
 
-			const iterator = orm.query('users').stream({ onStart });
+			const iterator = orm.select('users').stream({ onStart });
 			await iterator.next();
 
 			expect(onStart).toHaveBeenCalledOnce();
@@ -530,7 +526,7 @@ describe('Execution Layer', () => {
 			const orm = createOrm({ model: testModel, db });
 			const results: unknown[] = [];
 
-			for await (const row of orm.query('users').stream({ chunkSize: 1 })) {
+			for await (const row of orm.select('users').stream({ chunkSize: 1 })) {
 				results.push(row);
 			}
 
@@ -541,7 +537,7 @@ describe('Execution Layer', () => {
 			const orm = createOrm({ model: testModel, db });
 			const results: unknown[] = [];
 
-			for await (const row of orm.query('users').where(eq('id', 1)).stream()) {
+			for await (const row of orm.select('users').where(eq('id', 1)).stream()) {
 				results.push(row);
 			}
 
@@ -556,7 +552,7 @@ describe('Execution Layer', () => {
 			const orm = createOrm({ model: testModel, db: emptyDb });
 			const results: unknown[] = [];
 
-			for await (const row of orm.query('users').stream()) {
+			for await (const row of orm.select('users').stream()) {
 				results.push(row);
 			}
 
@@ -572,7 +568,7 @@ describe('Execution Layer', () => {
 			const onStart = vi.fn();
 
 			// The stream() call should work (will fail on execution due to missing schema)
-			const iterator = tenantOrm.query('users').stream({ onStart });
+			const iterator = tenantOrm.select('users').stream({ onStart });
 
 			// Verify the iterator is created correctly
 			expect(typeof iterator[Symbol.asyncIterator]).toBe('function');
@@ -585,8 +581,8 @@ describe('Execution Layer', () => {
 			// Chain operations then stream
 			const results: unknown[] = [];
 			for await (const row of orm
-				.query('users')
-				.select(['id', 'name'])
+				.select('users')
+				.columns(['id', 'name'])
 				.where(eq('id', 1))
 				.stream({ onStart })) {
 				results.push(row);
@@ -600,7 +596,7 @@ describe('Execution Layer', () => {
 	describe('orderBy()', () => {
 		it('generates ORDER BY clause in SQL', () => {
 			const orm = createOrm({ model: testModel, db });
-			const dump = orm.query('users').orderBy('name').dump();
+			const dump = orm.select('users').orderBy('name').dump();
 
 			expect(dump.sql.toLowerCase()).toContain('order by');
 			expect(dump.sql.toLowerCase()).toContain('name');
@@ -608,14 +604,14 @@ describe('Execution Layer', () => {
 
 		it('defaults to ascending order', () => {
 			const orm = createOrm({ model: testModel, db });
-			const dump = orm.query('users').orderBy('name').dump();
+			const dump = orm.select('users').orderBy('name').dump();
 
 			expect(dump.sql.toLowerCase()).toContain('asc');
 		});
 
 		it('supports descending order', () => {
 			const orm = createOrm({ model: testModel, db });
-			const dump = orm.query('users').orderBy('name', 'desc').dump();
+			const dump = orm.select('users').orderBy('name', 'desc').dump();
 
 			expect(dump.sql.toLowerCase()).toContain('desc');
 		});
@@ -623,7 +619,7 @@ describe('Execution Layer', () => {
 		it('supports chaining multiple orderBy calls', () => {
 			const orm = createOrm({ model: testModel, db });
 			const dump = orm
-				.query('users')
+				.select('users')
 				.orderBy('name', 'asc')
 				.orderBy('id', 'desc')
 				.dump();
@@ -637,9 +633,9 @@ describe('Execution Layer', () => {
 		it('returns results in correct order', async () => {
 			const orm = createOrm({ model: testModel, db });
 			const results = (await orm
-				.query('users')
+				.select('users')
 				.orderBy('name', 'asc')
-				.findMany()) as { name: string }[];
+				.all()) as { name: string }[];
 
 			// Alice should come before Bob alphabetically
 			expect(results[0].name).toBe('Alice');
@@ -649,9 +645,9 @@ describe('Execution Layer', () => {
 		it('returns results in descending order', async () => {
 			const orm = createOrm({ model: testModel, db });
 			const results = (await orm
-				.query('users')
+				.select('users')
 				.orderBy('name', 'desc')
-				.findMany()) as { name: string }[];
+				.all()) as { name: string }[];
 
 			// Bob should come before Alice in descending order
 			expect(results[0].name).toBe('Bob');
@@ -662,21 +658,21 @@ describe('Execution Layer', () => {
 	describe('limit()', () => {
 		it('generates LIMIT clause in SQL', () => {
 			const orm = createOrm({ model: testModel, db });
-			const dump = orm.query('users').limit(10).dump();
+			const dump = orm.select('users').limit(10).dump();
 
 			expect(dump.sql.toLowerCase()).toContain('limit');
 		});
 
 		it('limits the number of results', async () => {
 			const orm = createOrm({ model: testModel, db });
-			const results = await orm.query('users').limit(1).findMany();
+			const results = await orm.select('users').limit(1).all();
 
 			expect(results).toHaveLength(1);
 		});
 
 		it('returns all results when limit exceeds count', async () => {
 			const orm = createOrm({ model: testModel, db });
-			const results = await orm.query('users').limit(100).findMany();
+			const results = await orm.select('users').limit(100).all();
 
 			expect(results).toHaveLength(2); // Only 2 users in test data
 		});
@@ -685,7 +681,7 @@ describe('Execution Layer', () => {
 	describe('offset()', () => {
 		it('generates OFFSET clause in SQL', () => {
 			const orm = createOrm({ model: testModel, db });
-			const dump = orm.query('users').offset(5).dump();
+			const dump = orm.select('users').offset(5).dump();
 
 			expect(dump.sql.toLowerCase()).toContain('offset');
 		});
@@ -694,11 +690,11 @@ describe('Execution Layer', () => {
 			const orm = createOrm({ model: testModel, db });
 			// Note: SQLite requires LIMIT when using OFFSET
 			const results = await orm
-				.query('users')
+				.select('users')
 				.orderBy('id')
 				.limit(100)
 				.offset(1)
-				.findMany();
+				.all();
 
 			expect(results).toHaveLength(1);
 			expect((results[0] as { id: number }).id).toBe(2); // Second user
@@ -707,11 +703,7 @@ describe('Execution Layer', () => {
 		it('returns empty array when offset exceeds count', async () => {
 			const orm = createOrm({ model: testModel, db });
 			// Note: SQLite requires LIMIT when using OFFSET
-			const results = await orm
-				.query('users')
-				.limit(100)
-				.offset(100)
-				.findMany();
+			const results = await orm.select('users').limit(100).offset(100).all();
 
 			expect(results).toHaveLength(0);
 		});
@@ -720,7 +712,12 @@ describe('Execution Layer', () => {
 	describe('pagination (limit + offset)', () => {
 		it('supports pagination with limit and offset', () => {
 			const orm = createOrm({ model: testModel, db });
-			const dump = orm.query('users').orderBy('id').limit(10).offset(20).dump();
+			const dump = orm
+				.select('users')
+				.orderBy('id')
+				.limit(10)
+				.offset(20)
+				.dump();
 
 			expect(dump.sql.toLowerCase()).toContain('limit');
 			expect(dump.sql.toLowerCase()).toContain('offset');
@@ -731,11 +728,11 @@ describe('Execution Layer', () => {
 			const orm = createOrm({ model: testModel, db });
 			// Page 2 with page size 1
 			const results = await orm
-				.query('users')
+				.select('users')
 				.orderBy('id')
 				.limit(1)
 				.offset(1)
-				.findMany();
+				.all();
 
 			expect(results).toHaveLength(1);
 			expect((results[0] as { id: number }).id).toBe(2);
@@ -744,11 +741,11 @@ describe('Execution Layer', () => {
 		it('combines with where clause', async () => {
 			const orm = createOrm({ model: testModel, db });
 			const results = await orm
-				.query('posts')
+				.select('posts')
 				.where(eq('userId', 1))
 				.orderBy('id')
 				.limit(1)
-				.findMany();
+				.all();
 
 			expect(results).toHaveLength(1);
 			expect((results[0] as { title: string }).title).toBe('First Post');

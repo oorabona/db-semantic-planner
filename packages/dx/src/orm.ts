@@ -30,15 +30,15 @@ import {
 } from './errors.js';
 import { and, eq, inArray } from './filters.js';
 import {
-	type WhereFilter,
-	isWhereIntent,
-	objectToWhereIntent,
-} from './object-filter.js';
-import {
 	DeleteBuilder,
 	InsertBuilder,
 	UpdateBuilder,
 } from './mutation-builders.js';
+import {
+	isWhereIntent,
+	objectToWhereIntent,
+	type WhereFilter,
+} from './object-filter.js';
 import { RecursiveQueryBuilder } from './recursive-query-builder.js';
 import type {
 	AggregateOptions,
@@ -77,14 +77,14 @@ import type {
  * });
  *
  * // Table names autocomplete, results are typed
- * const users = await orm.query('users').findMany();
+ * const users = await orm.select('users').all();
  * // users: { id: number; name: string }[]
  * ```
  *
  * @example Zero-config with auto-introspection (async)
  * ```typescript
  * const orm = await createOrm({ db });
- * const users = await orm.query('users').findMany();
+ * const users = await orm.select('users').all();
  * ```
  */
 export function createOrm<DB = Record<string, unknown>>(
@@ -130,7 +130,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 ): OrmInstance<DB> {
 	return {
 		strictMode,
-		query<K extends keyof DB & string, TResult = DB[K]>(
+		select<K extends keyof DB & string, TResult = DB[K]>(
 			from: K,
 		): QueryBuilder<TResult> {
 			return new QueryBuilderImpl<TResult>(
@@ -427,13 +427,13 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		return builder;
 	}
 
-	select(fields: readonly string[]): QueryBuilder<TResult> {
+	columns(fields: readonly string[]): QueryBuilder<TResult> {
 		const builder = this.clone();
 		builder.selectIntent = { type: 'fields', fields: [...fields] };
 		return builder;
 	}
 
-	selectWithExpressions(
+	columnsWithExpressions(
 		fields: readonly string[],
 		expressions: readonly ExpressionIntent[],
 	): QueryBuilder<TResult> {
@@ -508,7 +508,6 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		builder.groupByFields.push(...fields);
 		return builder;
 	}
-
 
 	window(alias: string, options: WindowOptions): QueryBuilder<TResult> {
 		const builder = this.clone();
@@ -622,7 +621,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		}
 	}
 
-	async findMany(): Promise<TResult[]> {
+	async all(): Promise<TResult[]> {
 		const db = this.getConfiguredDb();
 		const planReport = this.plan();
 
@@ -643,13 +642,13 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		return result.rows as TResult[];
 	}
 
-	async findFirst(): Promise<TResult | undefined> {
-		const rows = await this.findMany();
+	async first(): Promise<TResult | undefined> {
+		const rows = await this.all();
 		return rows[0];
 	}
 
-	async findFirstOrThrow(): Promise<TResult> {
-		const result = await this.findFirst();
+	async firstOrThrow(): Promise<TResult> {
+		const result = await this.first();
 		if (result === undefined) {
 			throw new NotFoundError(this.from);
 		}
@@ -660,7 +659,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		value: string | number | Record<string, unknown>,
 	): Promise<TResult | undefined> {
 		const condition = this.buildPkCondition(value);
-		return this.where(condition).findFirst();
+		return this.where(condition).first();
 	}
 
 	async byIdOrThrow(
@@ -680,7 +679,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		if (values.length === 0) {
 			return [];
 		}
-		return this.where(inArray('id', [...values])).findMany();
+		return this.where(inArray('id', [...values])).all();
 	}
 
 	/**
@@ -748,7 +747,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	}
 
 	execute(): Promise<TResult[]> {
-		return this.findMany();
+		return this.all();
 	}
 
 	stream(options?: StreamOptions): AsyncIterableIterator<TResult> {

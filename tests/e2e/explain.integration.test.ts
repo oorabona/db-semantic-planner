@@ -54,8 +54,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 			const dump = orm
 				.forTenant('acme')
-				.query('products')
-				.select(['id', 'sku'])
+				.select('products')
+				.columns(['id', 'sku'])
 				.dump();
 
 			// This query has no parameters
@@ -78,8 +78,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 			const dump = orm
 				.forTenant('acme')
-				.query('categories')
-				.select(['id', 'name'])
+				.select('categories')
+				.columns(['id', 'name'])
 				.dump();
 
 			expect(dump.params).toHaveLength(0);
@@ -95,8 +95,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 			const dump = orm
 				.forTenant('acme')
-				.query('assets')
-				.select(['id', 'kind', 'mime'])
+				.select('assets')
+				.columns(['id', 'kind', 'mime'])
 				.dump();
 
 			expect(dump.params).toHaveLength(0);
@@ -114,8 +114,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 			const dump = orm
 				.forTenant('acme')
-				.query('products')
-				.select(['id', 'sku', 'title'])
+				.select('products')
+				.columns(['id', 'sku', 'title'])
 				.dump();
 
 			// Verify schema prefix in SQL
@@ -137,7 +137,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 			] as const;
 
 			for (const entity of entities) {
-				const dump = orm.forTenant('acme').query(entity).select(['id']).dump();
+				const dump = orm.forTenant('acme').select(entity).columns(['id']).dump();
 
 				expect(dump.sql).toContain('"acme"');
 				expect(dump.sql.toLowerCase()).toContain('select');
@@ -150,8 +150,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 			const dump = orm
 				.forTenant('acme')
-				.query('products')
-				.select(['id'])
+				.select('products')
+				.columns(['id'])
 				.dump();
 
 			expect(dump.params).toBeInstanceOf(Array);
@@ -165,8 +165,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 			const dump = orm
 				.forTenant('acme')
-				.query('products')
-				.select(['id', 'sku'])
+				.select('products')
+				.columns(['id', 'sku'])
 				.dump();
 
 			const explainOutput = await runExplain(dump.sql);
@@ -181,8 +181,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 			const dump = orm
 				.forTenant('acme')
-				.query('products')
-				.select(['id', 'sku'])
+				.select('products')
+				.columns(['id', 'sku'])
 				.dump();
 
 			const explainOutput = await runExplain(dump.sql);
@@ -199,8 +199,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 			const dump = orm
 				.forTenant('acme')
-				.query('products')
-				.select(['id'])
+				.select('products')
+				.columns(['id'])
 				.dump();
 
 			const explainOutput = await runExplain(dump.sql);
@@ -217,7 +217,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 			const dump = orm
 				.forTenant('acme')
-				.query('products')
+				.select('products')
 				.dump();
 
 			expect(dump.meta?.tenant).toBe('acme');
@@ -229,7 +229,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 			const dump = orm
 				.forTenant('acme')
-				.query('products')
+				.select('products')
 				.dump();
 
 			expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
@@ -241,7 +241,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 			const dump = orm
 				.forTenant('acme')
-				.query('products')
+				.select('products')
 				.dump();
 
 			expect(dump.plan).toBeDefined();

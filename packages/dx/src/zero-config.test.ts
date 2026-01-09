@@ -100,14 +100,14 @@ describe('Zero-Config ORM (auto-introspection)', () => {
 			const orm = await createOrm({ db });
 
 			expect(orm).toBeDefined();
-			expect(orm.query).toBeDefined();
+			expect(orm.select).toBeDefined();
 			expect(orm.forTenant).toBeDefined();
 			expect(typeof orm.strictMode).toBe('boolean');
 		});
 
 		it('can query tables discovered via introspection', async () => {
 			const orm = await createOrm({ db });
-			const users = await orm.query('users').findMany();
+			const users = await orm.select('users').all();
 
 			expect(users).toHaveLength(2);
 			expect(users[0]).toHaveProperty('name');
@@ -116,9 +116,9 @@ describe('Zero-Config ORM (auto-introspection)', () => {
 		it('can use where clause on introspected schema', async () => {
 			const orm = await createOrm({ db });
 			const users = await orm
-				.query('users')
+				.select('users')
 				.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 1 })
-				.findMany();
+				.all();
 
 			expect(users).toHaveLength(1);
 			expect((users[0] as { name: string }).name).toBe('Alice');
@@ -126,7 +126,7 @@ describe('Zero-Config ORM (auto-introspection)', () => {
 
 		it('can use select on introspected schema', async () => {
 			const orm = await createOrm({ db });
-			const users = await orm.query('users').select(['name']).findMany();
+			const users = await orm.select('users').columns(['name']).all();
 
 			expect(users).toHaveLength(2);
 			// Should only have name field selected
@@ -152,7 +152,7 @@ describe('Zero-Config ORM (auto-introspection)', () => {
 			const tenantOrm = orm.forTenant('acme');
 
 			expect(tenantOrm).toBeDefined();
-			const dump = tenantOrm.query('users').dump();
+			const dump = tenantOrm.select('users').dump();
 			expect(dump.meta?.tenant).toBe('acme');
 		});
 	});
@@ -170,12 +170,12 @@ describe('Zero-Config ORM (auto-introspection)', () => {
 
 			// Should NOT be a Promise
 			expect(orm).not.toBeInstanceOf(Promise);
-			expect(orm.query).toBeDefined();
+			expect(orm.select).toBeDefined();
 		});
 
 		it('uses provided model instead of introspecting', () => {
 			const orm = createOrm({ model: explicitModel, db });
-			const dump = orm.query('users').dump();
+			const dump = orm.select('users').dump();
 
 			// Should work with the explicit model
 			expect(dump.sql).toContain('users');

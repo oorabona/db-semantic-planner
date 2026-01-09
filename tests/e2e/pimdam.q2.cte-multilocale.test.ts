@@ -44,7 +44,7 @@ describe.skipIf(shouldSkipE2E())(
 		) =>
 			orm
 				.forTenant(tenant)
-				.query('products')
+				.select('products')
 				.where(
 					and(
 						exists('images', {
@@ -63,7 +63,7 @@ describe.skipIf(shouldSkipE2E())(
 						}),
 					),
 				)
-				.select(['id', 'sku']);
+				.columns(['id', 'sku']);
 
 		describe('dump() analysis - CTE extraction', () => {
 			it('should trigger CTE extraction (images relation accessed twice)', async () => {

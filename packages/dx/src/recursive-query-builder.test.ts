@@ -395,7 +395,7 @@ describe('RecursiveQueryBuilder', () => {
 			expect(intent.emit?.joinWith?.length).toBe(2);
 		});
 
-		it('should support select()', () => {
+		it('should support columns()', () => {
 			const db = createTestDb();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
@@ -408,7 +408,7 @@ describe('RecursiveQueryBuilder', () => {
 				.nodeId('id')
 				.traverseVia('roleEdges', { from: 'from_role_id', to: 'to_role_id' })
 				.maxDepth(10)
-				.select(['id', 'name'])
+				.columns(['id', 'name'])
 				.buildIntent();
 
 			expect(intent.emit?.select).toEqual(['id', 'name']);
@@ -587,7 +587,7 @@ describe('RecursiveQueryBuilder', () => {
 				.dedupeWith('skip-visited')
 				.join('rolePermissions', 'id', 'role_id')
 				.join('permissions', 'permission_id', 'id')
-				.select(['id', 'name'])
+				.columns(['id', 'name'])
 				.distinct()
 				.dump();
 

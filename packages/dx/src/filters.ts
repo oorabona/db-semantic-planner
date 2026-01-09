@@ -10,10 +10,10 @@
  * import { eq, and, gt, like } from '@db-semantic-planner/dx';
  *
  * // Simple equality
- * orm.query('users').where(eq('status', 'active'))
+ * orm.select('users').where(eq('status', 'active'))
  *
  * // Combined conditions
- * orm.query('users').where(
+ * orm.select('users').where(
  *   and(
  *     eq('status', 'active'),
  *     gt('age', 18),
@@ -278,7 +278,7 @@ import type {
  * // → COALESCE(name_fr, name_en) AS display_name
  *
  * // Use in QueryBuilder select with expressions
- * orm.query('products')
+ * orm.select('products')
  *   .selectWithExpressions(['id', 'sku'], [
  *     coalesce(['title_fr', 'title_en', 'title_default'], 'title')
  *   ])

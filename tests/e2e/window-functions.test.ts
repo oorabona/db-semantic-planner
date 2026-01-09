@@ -60,13 +60,13 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			// Query variants with row_number ordered by price
 			const results = (await orm
 				.forTenant(SCHEMA)
-				.query('variants')
-				.select(['id', 'name', 'price_cents'])
+				.select('variants')
+				.columns(['id', 'name', 'price_cents'])
 				.window('row_num', {
 					function: 'row_number',
 					orderBy: [{ field: 'price_cents', direction: 'asc' }],
 				})
-				.findMany()) as Array<{
+				.all()) as Array<{
 				id: number;
 				name: string;
 				price_cents: number;
@@ -91,13 +91,13 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 
 			const results = (await orm
 				.forTenant(SCHEMA)
-				.query('variants')
-				.select(['id', 'name', 'price_cents'])
+				.select('variants')
+				.columns(['id', 'name', 'price_cents'])
 				.window('row_num', {
 					function: 'row_number',
 					orderBy: [{ field: 'price_cents', direction: 'desc' }],
 				})
-				.findMany()) as Array<{
+				.all()) as Array<{
 				name: string;
 				price_cents: number;
 				row_num: string;
@@ -121,13 +121,13 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			// Query variants with rank by price (Medium and Large have same price)
 			const results = (await orm
 				.forTenant(SCHEMA)
-				.query('variants')
-				.select(['id', 'name', 'price_cents'])
+				.select('variants')
+				.columns(['id', 'name', 'price_cents'])
 				.window('price_rank', {
 					function: 'rank',
 					orderBy: [{ field: 'price_cents', direction: 'desc' }],
 				})
-				.findMany()) as Array<{
+				.all()) as Array<{
 				name: string;
 				price_cents: number;
 				price_rank: string;
@@ -149,14 +149,14 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			// Rank variants within each product
 			const results = (await orm
 				.forTenant(SCHEMA)
-				.query('variants')
-				.select(['id', 'product_id', 'name', 'price_cents'])
+				.select('variants')
+				.columns(['id', 'product_id', 'name', 'price_cents'])
 				.window('rank_in_product', {
 					function: 'rank',
 					partitionBy: ['product_id'],
 					orderBy: [{ field: 'price_cents', direction: 'asc' }],
 				})
-				.findMany()) as Array<{
+				.all()) as Array<{
 				product_id: number;
 				name: string;
 				price_cents: number;
@@ -189,13 +189,13 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 
 			const results = (await orm
 				.forTenant(SCHEMA)
-				.query('variants')
-				.select(['name', 'price_cents'])
+				.select('variants')
+				.columns(['name', 'price_cents'])
 				.window('dense_rank_price', {
 					function: 'dense_rank',
 					orderBy: [{ field: 'price_cents', direction: 'desc' }],
 				})
-				.findMany()) as Array<{
+				.all()) as Array<{
 				name: string;
 				price_cents: number;
 				dense_rank_price: string;
@@ -221,14 +221,14 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 
 			const results = (await orm
 				.forTenant(SCHEMA)
-				.query('variants')
-				.select(['name', 'price_cents'])
+				.select('variants')
+				.columns(['name', 'price_cents'])
 				.window('running_total', {
 					function: 'sum',
 					field: 'price_cents',
 					orderBy: [{ field: 'price_cents', direction: 'asc' }],
 				})
-				.findMany()) as Array<{
+				.all()) as Array<{
 				name: string;
 				price_cents: number;
 				running_total: string;
@@ -261,15 +261,15 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 
 			const results = (await orm
 				.forTenant(SCHEMA)
-				.query('variants')
-				.select(['product_id', 'name', 'price_cents'])
+				.select('variants')
+				.columns(['product_id', 'name', 'price_cents'])
 				.window('product_running_total', {
 					function: 'sum',
 					field: 'price_cents',
 					partitionBy: ['product_id'],
 					orderBy: [{ field: 'price_cents', direction: 'asc' }],
 				})
-				.findMany()) as Array<{
+				.all()) as Array<{
 				product_id: number;
 				name: string;
 				price_cents: number;
@@ -300,14 +300,14 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 
 			const results = (await orm
 				.forTenant(SCHEMA)
-				.query('variants')
-				.select(['name', 'stock'])
+				.select('variants')
+				.columns(['name', 'stock'])
 				.window('avg_stock', {
 					function: 'avg',
 					field: 'stock',
 					orderBy: [{ field: 'stock', direction: 'asc' }],
 				})
-				.findMany()) as Array<{
+				.all()) as Array<{
 				name: string;
 				stock: number;
 				avg_stock: string;
@@ -370,13 +370,13 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			// Query tenant 1
 			const tenant1Results = (await orm
 				.forTenant(SCHEMA)
-				.query('variants')
-				.select(['name', 'price_cents'])
+				.select('variants')
+				.columns(['name', 'price_cents'])
 				.window('rank', {
 					function: 'rank',
 					orderBy: [{ field: 'price_cents', direction: 'desc' }],
 				})
-				.findMany()) as Array<{
+				.all()) as Array<{
 				name: string;
 				price_cents: number;
 				rank: string;
@@ -385,13 +385,13 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 			// Query tenant 2
 			const tenant2Results = (await orm
 				.forTenant(SCHEMA_TENANT2)
-				.query('variants')
-				.select(['name', 'price_cents'])
+				.select('variants')
+				.columns(['name', 'price_cents'])
 				.window('rank', {
 					function: 'rank',
 					orderBy: [{ field: 'price_cents', direction: 'desc' }],
 				})
-				.findMany()) as Array<{
+				.all()) as Array<{
 				name: string;
 				price_cents: number;
 				rank: string;
@@ -418,8 +418,8 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 
 			const dump = orm
 				.forTenant(SCHEMA)
-				.query('variants')
-				.select(['name', 'price_cents'])
+				.select('variants')
+				.columns(['name', 'price_cents'])
 				.window('row_num', {
 					function: 'row_number',
 					orderBy: [{ field: 'price_cents' }],
@@ -443,8 +443,8 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 
 			const dump = orm
 				.forTenant(SCHEMA)
-				.query('variants')
-				.select(['name'])
+				.select('variants')
+				.columns(['name'])
 				.window('row_num', {
 					function: 'row_number',
 					orderBy: [{ field: 'price_cents' }],
@@ -464,8 +464,8 @@ describe.skipIf(shouldSkipE2E())('P3-A: Window Functions E2E', () => {
 
 			const dump = orm
 				.forTenant(SCHEMA)
-				.query('variants')
-				.select(['product_id', 'name'])
+				.select('variants')
+				.columns(['product_id', 'name'])
 				.window('product_rank', {
 					function: 'rank',
 					partitionBy: ['product_id'],

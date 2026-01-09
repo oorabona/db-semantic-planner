@@ -39,7 +39,7 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 			const results: unknown[] = [];
 			for await (const row of orm
 				.forTenant(SCHEMA)
-				.query('authors')
+				.select('authors')
 				.stream()) {
 				results.push(row);
 			}
@@ -56,8 +56,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 			const names: string[] = [];
 			for await (const row of orm
 				.forTenant(SCHEMA)
-				.query('authors')
-				.select(['name'])
+				.select('authors')
+				.columns(['name'])
 				.stream()) {
 				names.push((row as { name: string }).name);
 			}
@@ -75,7 +75,7 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 			const results: unknown[] = [];
 			for await (const row of orm
 				.forTenant(SCHEMA)
-				.query('posts')
+				.select('posts')
 				.stream({ chunkSize: 2 })) {
 				results.push(row);
 			}
@@ -93,7 +93,7 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 			const results: unknown[] = [];
 			for await (const row of orm
 				.forTenant(SCHEMA)
-				.query('comments')
+				.select('comments')
 				.stream()) {
 				results.push(row);
 				if (results.length >= 3) {
@@ -111,13 +111,13 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 			// First query with early break
 			for await (const row of orm
 				.forTenant(SCHEMA)
-				.query('posts')
+				.select('posts')
 				.stream()) {
 				break; // Break immediately
 			}
 
 			// Second query should work fine
-			const posts = await orm.forTenant(SCHEMA).query('posts').execute();
+			const posts = await orm.forTenant(SCHEMA).select('posts').execute();
 			expect(posts).toHaveLength(5);
 		});
 	});
@@ -130,7 +130,7 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 
 			const iterator = orm
 				.forTenant(SCHEMA)
-				.query('authors')
+				.select('authors')
 				.stream({ onStart });
 
 			// onStart should not be called yet
@@ -151,7 +151,7 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 
 			for await (const _row of orm
 				.forTenant(SCHEMA)
-				.query('authors')
+				.select('authors')
 				.stream({
 					onStart: (dump) => {
 						receivedDump = dump;
@@ -194,7 +194,7 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 			const tenantAResults: unknown[] = [];
 			for await (const row of orm
 				.forTenant(TENANT_A)
-				.query('authors')
+				.select('authors')
 				.stream()) {
 				tenantAResults.push(row);
 			}
@@ -203,7 +203,7 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 			const tenantBResults: unknown[] = [];
 			for await (const row of orm
 				.forTenant(TENANT_B)
-				.query('authors')
+				.select('authors')
 				.stream()) {
 				tenantBResults.push(row);
 			}
@@ -220,7 +220,7 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 
 			for await (const _row of orm
 				.forTenant(TENANT_A)
-				.query('authors')
+				.select('authors')
 				.stream({
 					onStart: (dump) => {
 						sql = dump.sql;
@@ -241,7 +241,7 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 			const publishedPosts: unknown[] = [];
 			for await (const row of orm
 				.forTenant(SCHEMA)
-				.query('posts')
+				.select('posts')
 				.where(eq('published', true))
 				.stream()) {
 				publishedPosts.push(row);
@@ -258,7 +258,7 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 
 			for await (const _row of orm
 				.forTenant(SCHEMA)
-				.query('posts')
+				.select('posts')
 				.where(eq('published', true))
 				.stream({
 					onStart: (dump) => {
@@ -281,7 +281,7 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 			// Filter that matches nothing
 			for await (const row of orm
 				.forTenant(SCHEMA)
-				.query('authors')
+				.select('authors')
 				.where(eq('name', 'nonexistent_name_xyz'))
 				.stream()) {
 				results.push(row);
@@ -297,7 +297,7 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 
 			for await (const _row of orm
 				.forTenant(SCHEMA)
-				.query('authors')
+				.select('authors')
 				.where(eq('name', 'nonexistent'))
 				.stream({ onStart })) {
 				// Should never enter this block
@@ -315,8 +315,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 			const results: unknown[] = [];
 			for await (const row of orm
 				.forTenant(SCHEMA)
-				.query('authors')
-				.select(['id', 'name'])
+				.select('authors')
+				.columns(['id', 'name'])
 				.stream()) {
 				results.push(row);
 			}

@@ -59,9 +59,9 @@ export {
 export {
 	type FilterOperators,
 	type FilterValue,
-	type WhereFilter,
 	isWhereIntent,
 	objectToWhereIntent,
+	type WhereFilter,
 } from './object-filter.js';
 
 // Factory
@@ -80,6 +80,14 @@ export {
 	createRecursiveBuilder,
 	RecursiveQueryBuilder,
 } from './recursive-query-builder.js';
+// Subquery Builder (DX-012 Block 3)
+export {
+	isSubqueryExpression,
+	ref,
+	SubqueryBuilder,
+	SubqueryExpression,
+	subquery,
+} from './subquery-builder.js';
 // Types
 export type {
 	AggregateOptions,
@@ -95,12 +103,3 @@ export type {
 	StreamOptions,
 	WindowOptions,
 } from './types.js';
-
-// Subquery Builder (DX-012 Block 3)
-export {
-	SubqueryBuilder,
-	SubqueryExpression,
-	subquery,
-	ref,
-	isSubqueryExpression,
-} from './subquery-builder.js';

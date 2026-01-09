@@ -64,7 +64,7 @@ describe('Feature 1: withStrictMode() per-query override', () => {
 			const orm = createOrm({ model: testSchema, strictMode: false });
 
 			expect(() => {
-				orm.query('users').withStrictMode(true).include('posts').plan();
+				orm.select('users').withStrictMode(true).include('posts').plan();
 			}).toThrow(AmbiguousRelationError);
 		});
 
@@ -72,7 +72,7 @@ describe('Feature 1: withStrictMode() per-query override', () => {
 			const orm = createOrm({ model: testSchema, strictMode: false });
 
 			try {
-				orm.query('users').withStrictMode(true).include('posts').plan();
+				orm.select('users').withStrictMode(true).include('posts').plan();
 				expect.fail('Should have thrown');
 			} catch (error) {
 				expect(error).toBeInstanceOf(AmbiguousRelationError);
@@ -89,7 +89,7 @@ describe('Feature 1: withStrictMode() per-query override', () => {
 			const orm = createOrm({ model: testSchema, strictMode: true });
 
 			expect(() => {
-				orm.query('users').withStrictMode(false).include('posts').plan();
+				orm.select('users').withStrictMode(false).include('posts').plan();
 			}).not.toThrow();
 		});
 
@@ -97,7 +97,7 @@ describe('Feature 1: withStrictMode() per-query override', () => {
 			const orm = createOrm({ model: testSchema, strictMode: true });
 
 			const report = orm
-				.query('users')
+				.select('users')
 				.withStrictMode(false)
 				.include('posts')
 				.plan();
@@ -116,12 +116,12 @@ describe('Feature 1: withStrictMode() per-query override', () => {
 
 			// Strict ORM throws
 			expect(() => {
-				strictOrm.query('users').include('posts').plan();
+				strictOrm.select('users').include('posts').plan();
 			}).toThrow(AmbiguousRelationError);
 
 			// Lenient ORM doesn't throw
 			expect(() => {
-				lenientOrm.query('users').include('posts').plan();
+				lenientOrm.select('users').include('posts').plan();
 			}).not.toThrow();
 		});
 	});
@@ -132,9 +132,9 @@ describe('Feature 1: withStrictMode() per-query override', () => {
 
 			expect(() => {
 				orm
-					.query('users')
+					.select('users')
 					.withStrictMode(true)
-					.select(['id', 'name'])
+					.columns(['id', 'name'])
 					.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 1 })
 					.include('posts')
 					.plan();
@@ -154,7 +154,7 @@ describe('Feature 2: withRelationHint() per-query hints', () => {
 
 			expect(() => {
 				orm
-					.query('users')
+					.select('users')
 					.withRelationHint('posts', 'authoredPosts')
 					.include('posts')
 					.plan();
@@ -165,7 +165,7 @@ describe('Feature 2: withRelationHint() per-query hints', () => {
 			const orm = createOrm({ model: testSchema, strictMode: true });
 
 			const report = orm
-				.query('users')
+				.select('users')
 				.withRelationHint('posts', 'authoredPosts')
 				.include('posts')
 				.plan();
@@ -182,7 +182,7 @@ describe('Feature 2: withRelationHint() per-query hints', () => {
 			const orm = createOrm({ model: testSchema, strictMode: false });
 
 			const report = orm
-				.query('users')
+				.select('users')
 				.withRelationHint('posts', 'reviewedPosts')
 				.include('posts')
 				.plan();
@@ -202,7 +202,7 @@ describe('Feature 2: withRelationHint() per-query hints', () => {
 			// Hint says authoredPosts, but explicit via says reviewedPosts
 			expect(() => {
 				orm
-					.query('users')
+					.select('users')
 					.withRelationHint('posts', 'authoredPosts')
 					.include('posts', { via: 'reviewedPosts' })
 					.plan();
@@ -218,7 +218,7 @@ describe('Feature 2: withRelationHint() per-query hints', () => {
 			// but we can verify multiple hints are accepted
 			expect(() => {
 				orm
-					.query('users')
+					.select('users')
 					.withRelationHint('posts', 'authoredPosts')
 					.withRelationHint('profile', 'profile') // Not ambiguous, but valid
 					.include('posts')
@@ -234,9 +234,9 @@ describe('Feature 2: withRelationHint() per-query hints', () => {
 
 			expect(() => {
 				orm
-					.query('users')
+					.select('users')
 					.withRelationHint('posts', 'authoredPosts')
-					.select(['id', 'name'])
+					.columns(['id', 'name'])
 					.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 1 })
 					.include('posts')
 					.plan();
@@ -261,7 +261,7 @@ describe('Feature 3: Global relationHints in OrmOptions', () => {
 			});
 
 			expect(() => {
-				orm.query('users').include('posts').plan();
+				orm.select('users').include('posts').plan();
 			}).not.toThrow();
 		});
 	});
@@ -279,7 +279,7 @@ describe('Feature 3: Global relationHints in OrmOptions', () => {
 			// Global says authoredPosts, query says reviewedPosts
 			expect(() => {
 				orm
-					.query('users')
+					.select('users')
 					.withRelationHint('posts', 'reviewedPosts')
 					.include('posts')
 					.plan();
@@ -299,7 +299,7 @@ describe('Feature 3: Global relationHints in OrmOptions', () => {
 
 			// Global says authoredPosts, include says reviewedPosts
 			expect(() => {
-				orm.query('users').include('posts', { via: 'reviewedPosts' }).plan();
+				orm.select('users').include('posts', { via: 'reviewedPosts' }).plan();
 			}).not.toThrow();
 		});
 	});
@@ -316,12 +316,12 @@ describe('Feature 3: Global relationHints in OrmOptions', () => {
 
 			// Multiple queries should all use the global hint
 			expect(() => {
-				orm.query('users').include('posts').plan();
+				orm.select('users').include('posts').plan();
 			}).not.toThrow();
 
 			expect(() => {
 				orm
-					.query('users')
+					.select('users')
 					.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 1 })
 					.include('posts')
 					.plan();
@@ -348,7 +348,7 @@ describe('Feature 4: Nested includes with hints', () => {
 			// Profile -> User -> Posts (ambiguous)
 			expect(() => {
 				orm
-					.query('profiles')
+					.select('profiles')
 					.include('user', {
 						include: [{ relation: 'posts' }],
 					})
@@ -370,7 +370,7 @@ describe('Feature 4: Nested includes with hints', () => {
 			// Global says authoredPosts, nested via says reviewedPosts
 			expect(() => {
 				orm
-					.query('profiles')
+					.select('profiles')
 					.include('user', {
 						include: [{ relation: 'posts', via: 'reviewedPosts' }],
 					})
@@ -394,7 +394,7 @@ describe('Edge Cases', () => {
 
 		// Should still work (lenient mode)
 		expect(() => {
-			orm.query('users').include('posts').plan();
+			orm.select('users').include('posts').plan();
 		}).not.toThrow();
 	});
 
@@ -409,7 +409,7 @@ describe('Edge Cases', () => {
 
 		// Profile is unambiguous, should work regardless of hints
 		expect(() => {
-			orm.query('users').include('profile').plan();
+			orm.select('users').include('profile').plan();
 		}).not.toThrow();
 	});
 
@@ -419,7 +419,7 @@ describe('Edge Cases', () => {
 		// Override to strict but provide hint to resolve ambiguity
 		expect(() => {
 			orm
-				.query('users')
+				.select('users')
 				.withStrictMode(true)
 				.withRelationHint('posts', 'authoredPosts')
 				.include('posts')

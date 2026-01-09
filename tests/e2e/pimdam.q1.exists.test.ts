@@ -40,7 +40,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 
 			const dump = orm
 				.forTenant('acme')
-				.query('products')
+				.select('products')
 				.where(
 					exists('images', {
 						where: and(
@@ -67,7 +67,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 
 			const dump = orm
 				.forTenant('acme')
-				.query('products')
+				.select('products')
 				.where(
 					exists('images', {
 						where: and(
@@ -89,7 +89,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 
 			const dump = orm
 				.forTenant('acme')
-				.query('products')
+				.select('products')
 				.where(
 					exists('images', {
 						where: and(
@@ -112,7 +112,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 
 			const dump = orm
 				.forTenant('acme')
-				.query('products')
+				.select('products')
 				.where(
 					exists('images', {
 						where: and(
@@ -136,7 +136,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 
 			const products = await orm
 				.forTenant('acme')
-				.query('products')
+				.select('products')
 				.where(
 					exists('images', {
 						where: and(
@@ -146,7 +146,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 						),
 					}),
 				)
-				.select(['id', 'sku'])
+				.columns(['id', 'sku'])
 				.execute();
 
 			// Acme: PROD-001 and PROD-002 have approved FR main images
@@ -162,7 +162,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 
 			const products = await orm
 				.forTenant('globex')
-				.query('products')
+				.select('products')
 				.where(
 					exists('images', {
 						where: and(
@@ -172,7 +172,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 						),
 					}),
 				)
-				.select(['id', 'sku'])
+				.columns(['id', 'sku'])
 				.execute();
 
 			// Globex: GLX-001, GLX-002, GLX-003 have approved FR main images
@@ -189,7 +189,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 
 			const query = orm
 				.forTenant('acme')
-				.query('products')
+				.select('products')
 				.where(
 					exists('images', {
 						where: and(
@@ -199,7 +199,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 						),
 					}),
 				)
-				.select(['id', 'sku']);
+				.columns(['id', 'sku']);
 
 			// Execute twice and compare
 			const result1 = await query.execute();

@@ -124,9 +124,9 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			// Filter by author_id directly (no ambiguity - it's a column)
 			const products = await orm
 				.forTenant(SCHEMA)
-				.query('products')
+				.select('products')
 				.where(eq('author_id', 1))
-				.select(['id', 'sku', 'title', 'author_id'])
+				.columns(['id', 'sku', 'title', 'author_id'])
 				.execute();
 
 			const results = products as { sku: string; author_id: number }[];
@@ -142,9 +142,9 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			// Filter by reviewer_id=3 (Charlie)
 			const products = await orm
 				.forTenant(SCHEMA)
-				.query('products')
+				.select('products')
 				.where(eq('reviewer_id', 3))
-				.select(['id', 'sku', 'title', 'reviewer_id'])
+				.columns(['id', 'sku', 'title', 'reviewer_id'])
 				.execute();
 
 			const results = products as { sku: string; reviewer_id: number }[];
@@ -160,7 +160,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			const orm = createOrm({ model: pimdamExtendedModel, db });
 
 			// Verify the model supports both relations from products to users
-			const dump = orm.forTenant(SCHEMA).query('products').select(['id', 'sku']).dump();
+			const dump = orm.forTenant(SCHEMA).select('products').columns(['id', 'sku']).dump();
 
 			// Plan should include relation metadata showing both relations exist
 			expect(dump.sql).toContain(`"${SCHEMA}"`);
@@ -174,9 +174,9 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			// Verify columns are accessible
 			const products = await orm
 				.forTenant(SCHEMA)
-				.query('products')
+				.select('products')
 				.where(eq('sku', 'WIDGET-001'))
-				.select(['id', 'sku', 'author_id', 'reviewer_id'])
+				.columns(['id', 'sku', 'author_id', 'reviewer_id'])
 				.execute();
 
 			const result = products as { sku: string; author_id: number; reviewer_id: number }[];
@@ -380,9 +380,9 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			// Use and() to combine conditions since where() replaces previous condition
 			const mainImages = await orm
 				.forTenant(SCHEMA)
-				.query('product_images')
+				.select('product_images')
 				.where(and(eq('product_id', 10), eq('role', 'main')))
-				.select(['product_id', 'asset_id', 'role', 'position'])
+				.columns(['product_id', 'asset_id', 'role', 'position'])
 				.execute();
 
 			const results = mainImages as { product_id: number; role: string }[];
@@ -451,7 +451,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			});
 
 			// Query with hints should prefer author relation
-			const dump = orm.forTenant(SCHEMA).query('products').select(['id', 'sku']).dump();
+			const dump = orm.forTenant(SCHEMA).select('products').columns(['id', 'sku']).dump();
 
 			// Just verify the ORM was created with hints
 			expect(dump.sql).toContain(`"${SCHEMA}"`);
@@ -461,7 +461,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			const db = await getTestDb();
 			const orm = createOrm({ model: pimdamExtendedModel, db });
 
-			const dump = orm.forTenant(SCHEMA).query('products').select(['id', 'sku']).dump();
+			const dump = orm.forTenant(SCHEMA).select('products').columns(['id', 'sku']).dump();
 
 			// Verify tenant schema is applied
 			expect(dump.sql).toContain(`"${SCHEMA}".`);
@@ -472,7 +472,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			const db = await getTestDb();
 			const orm = createOrm({ model: pimdamExtendedModel, db });
 
-			const dump = orm.forTenant(SCHEMA).query('users').select(['id', 'name', 'email']).dump();
+			const dump = orm.forTenant(SCHEMA).select('users').columns(['id', 'name', 'email']).dump();
 
 			// Verify tenant schema is applied
 			expect(dump.sql).toContain(`"${SCHEMA}".`);
@@ -503,7 +503,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 
 			// products has both author and reviewer relations to users
 			expect(() => {
-				orm.forTenant(SCHEMA).query('products').include('users').plan();
+				orm.forTenant(SCHEMA).select('products').include('users').plan();
 			}).toThrow(AmbiguousRelationError);
 		});
 
@@ -516,7 +516,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			});
 
 			try {
-				orm.forTenant(SCHEMA).query('products').include('users').plan();
+				orm.forTenant(SCHEMA).select('products').include('users').plan();
 				expect.fail('Should have thrown AmbiguousRelationError');
 			} catch (error) {
 				expect(error).toBeInstanceOf(AmbiguousRelationError);
@@ -533,7 +533,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			});
 
 			try {
-				orm.forTenant(SCHEMA).query('products').include('users').plan();
+				orm.forTenant(SCHEMA).select('products').include('users').plan();
 				expect.fail('Should have thrown AmbiguousRelationError');
 			} catch (error) {
 				expect(error).toBeInstanceOf(AmbiguousRelationError);
@@ -550,7 +550,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			});
 
 			try {
-				orm.forTenant(SCHEMA).query('products').include('users').plan();
+				orm.forTenant(SCHEMA).select('products').include('users').plan();
 				expect.fail('Should have thrown AmbiguousRelationError');
 			} catch (error) {
 				expect(error).toBeInstanceOf(AmbiguousRelationError);
@@ -570,7 +570,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			});
 
 			try {
-				orm.forTenant(SCHEMA).query('products').include('users').plan();
+				orm.forTenant(SCHEMA).select('products').include('users').plan();
 				expect.fail('Should have thrown AmbiguousRelationError');
 			} catch (error) {
 				expect(error).toBeInstanceOf(AmbiguousRelationError);
@@ -593,12 +593,12 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 
 			// Using via: 'author' resolves the ambiguity
 			expect(() => {
-				orm.forTenant(SCHEMA).query('products').include('users', { via: 'author' }).plan();
+				orm.forTenant(SCHEMA).select('products').include('users', { via: 'author' }).plan();
 			}).not.toThrow();
 
 			// Using via: 'reviewer' also resolves it
 			expect(() => {
-				orm.forTenant(SCHEMA).query('products').include('users', { via: 'reviewer' }).plan();
+				orm.forTenant(SCHEMA).select('products').include('users', { via: 'reviewer' }).plan();
 			}).not.toThrow();
 		});
 
@@ -611,7 +611,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			});
 
 			// Should not throw
-			const planReport = orm.forTenant(SCHEMA).query('products').include('users').plan();
+			const planReport = orm.forTenant(SCHEMA).select('products').include('users').plan();
 
 			// Should have ambiguity warning
 			const ambiguityWarning = planReport.warnings.find(
@@ -631,10 +631,10 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			// Execute real query with resolved ambiguity
 			const products = await orm
 				.forTenant(SCHEMA)
-				.query('products')
+				.select('products')
 				.where(eq('sku', 'WIDGET-001'))
 				.include('users', { via: 'author' })
-				.select(['id', 'sku'])
+				.columns(['id', 'sku'])
 				.execute();
 
 			const results = products as { sku: string }[];

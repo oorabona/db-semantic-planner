@@ -196,9 +196,9 @@ describe.skipIf(shouldSkipE2E())('Q6: Category Tree (Materialized Path)', () => 
 			// Find categories in Electronics subtree
 			const dump = orm
 				.forTenant(SCHEMA)
-				.query('categories')
+				.select('categories')
 				.where(like('path', '/1/%'))
-				.select(['id', 'name', 'path'])
+				.columns(['id', 'name', 'path'])
 				.dump();
 
 			expect(dump.sql.toLowerCase()).toContain('like');
@@ -211,9 +211,9 @@ describe.skipIf(shouldSkipE2E())('Q6: Category Tree (Materialized Path)', () => 
 
 			const categories = await orm
 				.forTenant(SCHEMA)
-				.query('categories')
+				.select('categories')
 				.where(like('path', '/1/%'))
-				.select(['id', 'name', 'path'])
+				.columns(['id', 'name', 'path'])
 				.execute();
 
 			// /1/, /1/2/, /1/2/3/, /1/4/ = 4 categories

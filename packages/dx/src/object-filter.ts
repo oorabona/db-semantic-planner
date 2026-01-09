@@ -12,10 +12,10 @@
  * import { createOrm } from '@db-semantic-planner/dx';
  *
  * // Object syntax (new)
- * orm.query('users').where({ status: 'active', age: { $gte: 18 } })
+ * orm.select('users').where({ status: 'active', age: { $gte: 18 } })
  *
  * // Equivalent to (legacy)
- * orm.query('users').where(and(eq('status', 'active'), gte('age', 18)))
+ * orm.select('users').where(and(eq('status', 'active'), gte('age', 18)))
  * ```
  */
 
@@ -30,8 +30,8 @@ import type {
 	WhereSubqueryIntent,
 } from '@db-semantic-planner/core';
 import {
-	type SubqueryExpression,
 	isSubqueryExpression,
+	type SubqueryExpression,
 } from './subquery-builder.js';
 
 // ============================================================================
@@ -135,7 +135,11 @@ function isOperatorObject(value: unknown): value is FilterOperators {
 function convertFieldValue(field: string, value: FilterValue): WhereIntent {
 	// Handle null → isNull
 	if (value === null) {
-		return { kind: 'null', field, operator: 'isNull' } satisfies WhereNullIntent;
+		return {
+			kind: 'null',
+			field,
+			operator: 'isNull',
+		} satisfies WhereNullIntent;
 	}
 
 	// Handle operator object
