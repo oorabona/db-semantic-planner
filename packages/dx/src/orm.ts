@@ -20,9 +20,12 @@ import type {
 	SelectIntent,
 	SelectWithExpressionsIntent,
 	WhereIntent,
-	WindowIntent,
 } from '@db-semantic-planner/core';
-import { AmbiguousPlanError, plan, planRecursive } from '@db-semantic-planner/core';
+import {
+	AmbiguousPlanError,
+	plan,
+	planRecursive,
+} from '@db-semantic-planner/core';
 import { CompiledQuery, type Kysely } from 'kysely';
 
 import {
@@ -42,22 +45,20 @@ import {
 	objectToWhereIntent,
 	type WhereFilter,
 } from './object-filter.js';
-import { RecursiveQueryBuilder } from './recursive-query-builder.js';
 import {
 	type AggregateOptions,
 	type ColumnSpec,
-	type HierarchyOptions,
 	type IncludeOptions,
 	type IncludeOptionsWithRecursive,
 	isExpressionSpec,
 	isRecursiveIncludeOptions,
 	type ListHierarchyOptions,
-	type RecursiveIncludeOptions,
 	type NestedInclude,
 	type OrmInstance,
 	type OrmOptionsWithDb,
 	type OrmOptionsWithModel,
 	type QueryBuilder,
+	type RecursiveIncludeOptions,
 	type RelationHints,
 	type StreamOptions,
 } from './types.js';
@@ -512,24 +513,6 @@ function findSelfRefRelation(
 }
 
 /**
- * Check if a relation is self-referential (source === target table).
- *
- * @param model - The model IR
- * @param sourceTable - The source table name
- * @param relationName - The relation name
- * @returns true if the relation exists and is self-referential
- */
-function isSelfReferentialRelation(
-	model: ModelIR,
-	sourceTable: string,
-	relationName: string,
-): boolean {
-	const qualifiedName = `${sourceTable}.${relationName}`;
-	const relation = model.getRelation(qualifiedName);
-	return relation !== undefined && relation.source === relation.target;
-}
-
-/**
  * Parse dot notation include into nested IncludeIntent.
  *
  * @example
@@ -611,7 +594,10 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		this.schemaName = schemaName;
 	}
 
-	include(relation: string, options?: IncludeOptionsWithRecursive): QueryBuilder<TResult> {
+	include(
+		relation: string,
+		options?: IncludeOptionsWithRecursive,
+	): QueryBuilder<TResult> {
 		const builder = this.clone();
 
 		// Handle recursive includes separately - they require CTE execution
@@ -844,7 +830,13 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		db: Kysely<any>,
 	): Promise<void> {
 		const { relation, options } = config;
-		const { direction, flat = false, omitSelf = false, maxDepth = 100, includeDepth = false } = options;
+		const {
+			direction,
+			flat = false,
+			omitSelf = false,
+			maxDepth = 100,
+			includeDepth = false,
+		} = options;
 
 		// Get relation metadata
 		const qualifiedName = `${this.from}.${relation}`;
@@ -930,9 +922,19 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		// - descendants: traverse via children (hasMany) - find rows where foreignKey = our id
 
 		// Build the start WHERE clause to filter by the starting IDs
-		const startWhere: WhereIntent = startIds.length === 1
-			? { kind: 'comparison', field: 'id', operator: 'eq', value: startIds[0] }
-			: { kind: 'in', field: 'id', values: startIds as (string | number | boolean)[] };
+		const startWhere: WhereIntent =
+			startIds.length === 1
+				? {
+						kind: 'comparison',
+						field: 'id',
+						operator: 'eq',
+						value: startIds[0],
+					}
+				: {
+						kind: 'in',
+						field: 'id',
+						values: startIds as (string | number | boolean)[],
+					};
 
 		// Build traversal config based on direction
 		const traversal = this.buildTraversalConfig(source, fkColumn, direction);
@@ -961,7 +963,9 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	/**
 	 * Extract foreign key column name from RelationIR foreignKey.
 	 */
-	private getForeignKeyColumn(foreignKey: string | readonly string[] | undefined): string {
+	private getForeignKeyColumn(
+		foreignKey: string | readonly string[] | undefined,
+	): string {
 		if (!foreignKey) {
 			return 'parent_id'; // Default convention for self-referential
 		}
@@ -1027,9 +1031,14 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		}
 
 		// Determine output property name based on direction
-		const outputProperty = direction === 'ancestors'
-			? (relation === 'parent' ? 'ancestors' : `${relation}_ancestors`)
-			: (relation === 'children' ? 'descendants' : `${relation}_descendants`);
+		const outputProperty =
+			direction === 'ancestors'
+				? relation === 'parent'
+					? 'ancestors'
+					: `${relation}_ancestors`
+				: relation === 'children'
+					? 'descendants'
+					: `${relation}_descendants`;
 
 		// Attach to main results
 		for (const result of results) {
@@ -1187,7 +1196,6 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		if (this.schemaName !== undefined) {
 			compileOptions.schemaName = this.schemaName;
 		}
-
 
 		const compiled = compile(planReport, this.model, db, compileOptions);
 

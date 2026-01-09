@@ -13,7 +13,7 @@ doc-meta:
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
 
-**Status:** MVP ✅ Complete + P1 ✅ Complete + P2 ✅ Complete (745 unit + 87 E2E = 832 tests)
+**Status:** MVP ✅ Complete + P1 ✅ Complete + P2 ✅ Complete (919 unit + 212 E2E = 1131 tests)
 
 ## Architecture: Ports & Adapters
 
@@ -65,6 +65,8 @@ packages/dx            → Depends on core + adapter-kysely
 | DX-005 | [Recursive Query Builder](specs/DX-005-recursive-query-builder.md) | dx | 🟡 draft |
 | DX-010 | [Mutations (insert/update/delete)](specs/DX-010-mutations.md) | dx | ✅ canonical |
 | DX-012 | [API Ergonomics](specs/DX-012-api-ergonomics.md) | dx | 🟡 draft |
+| DX-021 | [Window Functions Builder](plans/DX-021-window-builder.md) | dx | ✅ canonical |
+| DX-022 | [Recursive via include()](plans/DX-022-recursive-include.md) | dx | ✅ canonical |
 | P3-A | [Window Functions](specs/P3-A-window-functions.md) | core, adapter, dx | ✅ canonical |
 
 ## Golden Query Tests (MVP Contract) - ✅ Complete
