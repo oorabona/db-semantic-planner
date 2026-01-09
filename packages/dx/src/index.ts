@@ -25,6 +25,8 @@ export {
 	and,
 	// Expression
 	coalesce,
+	// Window function builders (DX-021)
+	denseRank,
 	// Comparison
 	eq,
 	// Relation
@@ -36,6 +38,8 @@ export {
 	// Null
 	isNotNull,
 	isNull,
+	lag,
+	lead,
 	// String
 	like,
 	lt,
@@ -44,20 +48,16 @@ export {
 	not,
 	notExists,
 	or,
+	rank,
 	// Raw SQL escape hatch
 	raw,
-	// Window function builders (DX-021)
-	denseRank,
-	lag,
-	lead,
-	rank,
 	rowNumber,
+	WindowBuilder,
 	wAvg,
 	wCount,
 	wMax,
 	wMin,
 	wSum,
-	WindowBuilder,
 } from './filters.js';
 // Mutation Builders (DX-010)
 export {
@@ -104,8 +104,8 @@ export type {
 	ColumnSpec,
 	ExpressionSpec,
 	HierarchyOptions,
-	ListHierarchyOptions,
 	IncludeOptions,
+	ListHierarchyOptions,
 	NestedInclude,
 	OrmInstance,
 	OrmOptions,

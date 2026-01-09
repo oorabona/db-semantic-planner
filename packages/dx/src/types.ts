@@ -5,7 +5,6 @@ import type {
 	PlanReport,
 	SelectIntent,
 	WhereIntent,
-	WindowFunction,
 } from '@db-semantic-planner/core';
 import type { Kysely } from 'kysely';
 import type {
@@ -14,7 +13,6 @@ import type {
 	UpdateBuilder,
 } from './mutation-builders.js';
 import type { WhereFilter } from './object-filter.js';
-import type { RecursiveQueryBuilder } from './recursive-query-builder.js';
 
 /**
  * A wrapper around an ExpressionIntent that marks it for use in columns().
@@ -85,7 +83,6 @@ export interface AggregateOptions {
 	 */
 	readonly as?: string;
 }
-
 
 /**
  * Mapping of target table to preferred relation name.
@@ -221,7 +218,6 @@ export interface IncludeOptions {
 	readonly include?: readonly NestedInclude[];
 }
 
-
 /**
  * Options for recursive include traversal on self-referential relations.
  *
@@ -289,7 +285,9 @@ export interface RecursiveIncludeOptions extends IncludeOptions {
 /**
  * Union type for include options: regular or recursive.
  */
-export type IncludeOptionsWithRecursive = IncludeOptions | RecursiveIncludeOptions;
+export type IncludeOptionsWithRecursive =
+	| IncludeOptions
+	| RecursiveIncludeOptions;
 
 /**
  * Type guard to check if include options are recursive.
@@ -355,7 +353,10 @@ export interface QueryBuilder<TResult = unknown> {
 	 *   .include('posts', { via: 'authoredPosts' })  // Disambiguated
 	 * ```
 	 */
-	include(relation: string, options?: IncludeOptionsWithRecursive): QueryBuilder<TResult>;
+	include(
+		relation: string,
+		options?: IncludeOptionsWithRecursive,
+	): QueryBuilder<TResult>;
 
 	/**
 	 * Select specific columns from the root entity.
@@ -469,7 +470,6 @@ export interface QueryBuilder<TResult = unknown> {
 	 * ```
 	 */
 	groupBy(fields: readonly string[]): QueryBuilder<TResult>;
-
 
 	/**
 	 * Sort results by one or more fields.
