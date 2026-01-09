@@ -665,3 +665,429 @@ describe('Q3 Complete Scenario: Strict mode ambiguity detection', () => {
 		}
 	});
 });
+
+// ============================================================================
+// Q4: Filter Strategy Contract Enforcement (CORE-001)
+// ============================================================================
+
+/**
+ * Q4: Verify planner filter-strategy decisions are respected by compiler
+ * - belongsTo (cardinality: one) → default: 'join'
+ * - hasMany (cardinality: many) → default: 'exists'
+ */
+describe('Q4: Filter strategy contract enforcement', () => {
+	const kysely = createTestKysely();
+
+	// Schema with both belongsTo and hasMany relations
+	const filterContractSchema = defineSchema({
+		posts: {
+			id: 'number',
+			title: 'string',
+			authorId: 'number',
+		},
+		users: {
+			id: 'number',
+			name: 'string',
+			role: 'string',
+		},
+		comments: {
+			id: 'number',
+			postId: 'number',
+			content: 'string',
+		},
+	})
+		.relations({
+			posts: {
+				author: belongsTo('users', { foreignKey: 'authorId' }),
+				comments: hasMany('comments', { foreignKey: 'postId' }),
+			},
+			users: {
+				posts: hasMany('posts', { foreignKey: 'authorId' }),
+			},
+			comments: {
+				post: belongsTo('posts', { foreignKey: 'postId' }),
+			},
+		})
+		.build();
+
+	describe('belongsTo → JOIN strategy (default)', () => {
+		it('should use JOIN for belongsTo filter (posts.author)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				where: {
+					kind: 'relationFilter',
+					relation: 'author',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'role',
+						operator: 'eq',
+						value: 'admin',
+					},
+				},
+			};
+
+			const planReport = plan(intent, filterContractSchema);
+			const compiled = compile(planReport, filterContractSchema, kysely);
+
+			// Verify decision is 'join'
+			const filterDecision = planReport.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+			expect(filterDecision).toBeDefined();
+			expect(filterDecision?.choice).toBe('join');
+			expect(filterDecision?.reasoning).toContain('one');
+
+			// Verify SQL contains JOIN, not EXISTS
+			expect(compiled.sql.toLowerCase()).toContain('join');
+			expect(compiled.sql.toLowerCase()).not.toContain('exists');
+		});
+
+		it('should correlate JOIN correctly for belongsTo', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				where: {
+					kind: 'relationFilter',
+					relation: 'author',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'name',
+						operator: 'eq',
+						value: 'Alice',
+					},
+				},
+			};
+
+			const planReport = plan(intent, filterContractSchema);
+			const compiled = compile(planReport, filterContractSchema, kysely);
+
+			// Should have JOIN with correct correlation
+			expect(compiled.sql).toContain('users');
+			expect(compiled.sql.toLowerCase()).toContain('join');
+			// authorId correlation
+			expect(compiled.sql).toContain('authorId');
+		});
+	});
+
+	describe('hasMany → EXISTS strategy (default)', () => {
+		it('should use EXISTS for hasMany filter (posts.comments)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				where: {
+					kind: 'relationFilter',
+					relation: 'comments',
+					mode: 'some',
+					where: {
+						kind: 'like',
+						field: 'content',
+						pattern: '%great%',
+					},
+				},
+			};
+
+			const planReport = plan(intent, filterContractSchema);
+			const compiled = compile(planReport, filterContractSchema, kysely);
+
+			// Verify decision is 'exists'
+			const filterDecision = planReport.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+			expect(filterDecision).toBeDefined();
+			expect(filterDecision?.choice).toBe('exists');
+
+			// Verify SQL contains EXISTS, not JOIN
+			expect(compiled.sql.toLowerCase()).toContain('exists');
+		});
+
+		it('should generate correct EXISTS subquery for hasMany', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'exists',
+					relation: 'posts',
+				},
+			};
+
+			const planReport = plan(intent, filterContractSchema);
+			const compiled = compile(planReport, filterContractSchema, kysely);
+
+			// EXISTS with correlation
+			expect(compiled.sql.toLowerCase()).toContain('exists');
+			expect(compiled.sql).toContain('posts');
+			expect(compiled.sql).toContain('authorId');
+		});
+	});
+
+	describe('explicit strategy override', () => {
+		// Schema with explicit strategy hints
+		const overrideSchema = defineSchema({
+			users: {
+				id: 'number',
+				name: 'string',
+			},
+			posts: {
+				id: 'number',
+				userId: 'number',
+				title: 'string',
+			},
+		})
+			.relations({
+				users: {
+					// hasMany with explicit JOIN strategy (override default EXISTS)
+					posts: hasMany(
+						'posts',
+						{ foreignKey: 'userId' },
+						{ filterStrategy: 'join' },
+					),
+				},
+				posts: {
+					// belongsTo with explicit EXISTS strategy (override default JOIN)
+					user: belongsTo(
+						'users',
+						{ foreignKey: 'userId' },
+						{ filterStrategy: 'exists' },
+					),
+				},
+			})
+			.build();
+
+		it('should respect explicit JOIN override for hasMany', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'relationFilter',
+					relation: 'posts',
+					mode: 'some',
+					where: {
+						kind: 'like',
+						field: 'title',
+						pattern: '%test%',
+					},
+				},
+			};
+
+			const planReport = plan(intent, overrideSchema);
+			const compiled = compile(planReport, overrideSchema, kysely);
+
+			// Should use JOIN despite being hasMany (explicit override)
+			const filterDecision = planReport.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+			expect(filterDecision?.choice).toBe('join');
+			expect(compiled.sql.toLowerCase()).toContain('join');
+			expect(compiled.sql.toLowerCase()).not.toContain('exists');
+		});
+
+		it('should respect explicit EXISTS override for belongsTo', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				where: {
+					kind: 'relationFilter',
+					relation: 'user',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'name',
+						operator: 'eq',
+						value: 'Alice',
+					},
+				},
+			};
+
+			const planReport = plan(intent, overrideSchema);
+			const compiled = compile(planReport, overrideSchema, kysely);
+
+			// Should use EXISTS despite being belongsTo (explicit override from schema)
+			const filterDecision = planReport.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+			expect(filterDecision?.choice).toBe('exists');
+			expect(compiled.sql.toLowerCase()).toContain('exists');
+		});
+	});
+});
+
+// ============================================================================
+// Q5: Include Strategy Contract Enforcement (CORE-001)
+// ============================================================================
+
+/**
+ * Q5: Verify planner include-strategy decisions are respected by compiler
+ * - belongsTo (cardinality: one) → default: 'join' (LEFT JOIN)
+ * - hasMany (cardinality: many) → default: 'separate' (follow-up queries)
+ */
+describe('Q5: Include strategy contract enforcement', () => {
+	const kysely = createTestKysely();
+
+	// Schema with belongsTo and hasMany relations
+	const includeContractSchema = defineSchema({
+		posts: {
+			id: 'number',
+			title: 'string',
+			authorId: 'number',
+		},
+		users: {
+			id: 'number',
+			name: 'string',
+			email: 'string',
+		},
+		comments: {
+			id: 'number',
+			postId: 'number',
+			content: 'string',
+		},
+	})
+		.relations({
+			posts: {
+				author: belongsTo('users', { foreignKey: 'authorId' }),
+				comments: hasMany('comments', { foreignKey: 'postId' }),
+			},
+			users: {
+				posts: hasMany('posts', { foreignKey: 'authorId' }),
+			},
+			comments: {
+				post: belongsTo('posts', { foreignKey: 'postId' }),
+			},
+		})
+		.build();
+
+	describe('belongsTo → JOIN strategy (default)', () => {
+		it('should use LEFT JOIN for belongsTo include', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				include: [{ relation: 'author' }],
+			};
+
+			const planReport = plan(intent, includeContractSchema);
+			const compiled = compile(planReport, includeContractSchema, kysely);
+
+			// Verify decision is 'join'
+			const includeDecision = planReport.decisions.find(
+				(d) =>
+					d.type === 'include-strategy' && d.context?.relation === 'author',
+			);
+			expect(includeDecision).toBeDefined();
+			expect(includeDecision?.choice).toBe('join');
+
+			// Verify SQL contains LEFT JOIN
+			expect(compiled.sql.toLowerCase()).toContain('left join');
+			expect(compiled.sql).toContain('users');
+		});
+
+		it('should include aliased columns for included relation', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: { type: 'fields', fields: ['id', 'title'] },
+				include: [{ relation: 'author', select: ['id', 'name'] }],
+			};
+
+			const planReport = plan(intent, includeContractSchema);
+			const compiled = compile(planReport, includeContractSchema, kysely);
+
+			// Should select aliased columns for author (format: "author.id")
+			expect(compiled.sql).toContain('author.');
+		});
+	});
+
+	describe('hasMany → separate strategy (default)', () => {
+		it('should NOT add JOIN for hasMany include in main query', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts' }],
+			};
+
+			const planReport = plan(intent, includeContractSchema);
+			const compiled = compile(planReport, includeContractSchema, kysely);
+
+			// Verify decision is 'separate'
+			const includeDecision = planReport.decisions.find(
+				(d) => d.type === 'include-strategy' && d.context?.relation === 'posts',
+			);
+			expect(includeDecision).toBeDefined();
+			expect(includeDecision?.choice).toBe('separate');
+
+			// Main query should NOT have JOIN on posts
+			expect(compiled.sql.toLowerCase()).not.toContain('join');
+		});
+
+		it('should provide metadata for follow-up queries via compileWithIncludes', async () => {
+			const { compileWithIncludes } = await import('./compiler.js');
+
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts' }],
+			};
+
+			const planReport = plan(intent, includeContractSchema);
+			const result = compileWithIncludes(
+				planReport,
+				includeContractSchema,
+				kysely,
+			);
+
+			// Should have separate include info
+			expect(result.separateIncludes).toHaveLength(1);
+			expect(result.separateIncludes[0]?.relationName).toBe('posts');
+			expect(result.separateIncludes[0]?.targetTable).toBe('posts');
+			expect(result.separateIncludes[0]?.foreignKey).toBe('authorId');
+		});
+	});
+
+	describe('explicit strategy override', () => {
+		// Schema with explicit include strategy hints
+		const overrideSchema = defineSchema({
+			users: {
+				id: 'number',
+				name: 'string',
+			},
+			posts: {
+				id: 'number',
+				userId: 'number',
+				title: 'string',
+			},
+		})
+			.relations({
+				users: {
+					// hasMany with explicit JOIN strategy (override default separate)
+					posts: hasMany(
+						'posts',
+						{ foreignKey: 'userId' },
+						{ includeStrategy: 'join' },
+					),
+				},
+				posts: {
+					user: belongsTo('users', { foreignKey: 'userId' }),
+				},
+			})
+			.build();
+
+		it('should respect explicit JOIN override for hasMany include', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts' }],
+			};
+
+			const planReport = plan(intent, overrideSchema);
+			const compiled = compile(planReport, overrideSchema, kysely);
+
+			// Should use JOIN despite being hasMany (explicit override)
+			const includeDecision = planReport.decisions.find(
+				(d) => d.type === 'include-strategy',
+			);
+			expect(includeDecision?.choice).toBe('join');
+			expect(compiled.sql.toLowerCase()).toContain('left join');
+		});
+	});
+});

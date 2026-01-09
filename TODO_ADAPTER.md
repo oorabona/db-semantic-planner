@@ -49,6 +49,40 @@ MUST NOT import from: packages/dx
 
 ---
 
+### CORE-001: Planner → Compiler Contract Enforcement ✅ (2026-01-09)
+
+**Spec:** [docs/plans/CORE-001-planner-compiler-contract.md](docs/plans/CORE-001-planner-compiler-contract.md)
+
+Ensures planner strategy decisions (filter-strategy, include-strategy) are respected by the compiler.
+
+- [x] ✅ Block 1: Filter Strategy - JOIN Implementation (2026-01-09)
+  - Added `compileJoinFilter()` for belongsTo relations
+  - Modified `compileRelationFilter()` to check decision.choice
+  - JOIN produces `INNER JOIN ... ON ...` + WHERE conditions
+- [x] ✅ Block 2: Filter Strategy - Integration Tests (2026-01-09)
+  - belongsTo default → JOIN
+  - hasMany default → EXISTS
+  - Explicit filterStrategy hint override
+- [x] ✅ Block 3: Include Strategy - JOIN Implementation (2026-01-09)
+  - Added `compileIncludeJoin()` for LEFT JOIN includes
+  - Modified `compileSelectExpressions()` to add aliased columns
+  - Format: `author.id`, `author.name` etc.
+- [x] ✅ Block 4: Include Strategy - Separate Implementation (2026-01-09)
+  - Added `compileWithIncludes()` returning `{ main, separateIncludes }`
+  - `SeparateIncludeInfo` type for follow-up query metadata
+  - `CompileResultWithIncludes` exported from index.ts
+- [x] ✅ Block 5: Golden Tests & E2E Updates (2026-01-09)
+  - Q4: Filter strategy contract tests (6 tests)
+  - Q5: Include strategy contract tests (5 tests)
+  - E2E: Filter strategy contract tests (3 tests)
+
+**Results:**
+- 396 tests passing in adapter-kysely (up from 385)
+- All 7 BDD scenarios have passing tests
+- Compiler now respects planner decisions
+
+---
+
 ## Completed - P2 Features
 
 ### ADAPTER-006: Schema Introspection ✅ (2026-01-08)

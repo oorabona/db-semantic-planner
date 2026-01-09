@@ -7,13 +7,17 @@
 
 // Compiler (low-level)
 export {
+	type CompileResultWithIncludes,
 	compile,
 	compileDelete,
 	compileInsert,
 	compileRecursive,
+	compileSeparateInclude,
 	compileUpdate,
 	compileWindowSelect,
+	compileWithIncludes,
 	type InternalCompileOptions,
+	type SeparateIncludeInfo,
 } from './compiler.js';
 export type { DialectCapabilities, DialectName } from './dialect.js';
 // Dialect detection and capabilities (DIALECT-001)

@@ -8,14 +8,17 @@ import type {
 	DeleteIntent,
 	EmitJoinClause,
 	ExpressionIntent,
+	IncludeIntent,
 	InsertIntent,
 	ModelIR,
+	PlanDecision,
 	PlanReport,
 	QueryIntent,
 	RecursiveIntent,
 	RecursiveNodeIdExpr,
 	RecursivePlanReport,
 	RecursiveTrackOptions,
+	RelationIR,
 	SelectAggregateIntent,
 	SelectWithExpressionsIntent,
 	SubqueryRefIntent,
@@ -59,6 +62,13 @@ interface CompilerState {
 	tableAliases: Map<string, string>;
 	/** Collected parameters */
 	parameters: unknown[];
+	/** Track relations that have been JOINed for filter-strategy: 'join' */
+	joinedFilterRelations: Map<string, { alias: string; targetTable: string }>;
+	/** Track relations that have been JOINed for include-strategy: 'join' */
+	joinedIncludeRelations: Map<
+		string,
+		{ alias: string; targetTable: string; relationName: string }
+	>;
 }
 
 // ============================================================================
@@ -178,6 +188,268 @@ export interface InternalCompileOptions {
 	windows?: readonly WindowIntent[];
 }
 
+// ============================================================================
+// Separate Include Types (CORE-001 Block 4)
+// ============================================================================
+
+/**
+ * Metadata for a separate include query.
+ * Used when planner decides include-strategy: 'separate' for hasMany relations.
+ */
+export interface SeparateIncludeInfo {
+	/** Name of the relation being included */
+	relationName: string;
+	/** Target table to fetch from */
+	targetTable: string;
+	/** Foreign key column in target table (e.g., 'userId' for posts) */
+	foreignKey: string;
+	/** Source key column in parent table (usually 'id') */
+	sourceKey: string;
+	/** Optional select clause from include intent */
+	select?: IncludeIntent['select'];
+	/** Optional where clause from include intent */
+	where?: IncludeIntent['where'];
+}
+
+/**
+ * Result of compiling a query with separate includes.
+ * Returned by compileWithIncludes() when there are includes with strategy 'separate'.
+ */
+export interface CompileResultWithIncludes {
+	/** The main query (includes any JOIN includes) */
+	main: CompiledQuery;
+	/** Metadata for separate include queries (empty if all includes use JOIN) */
+	separateIncludes: SeparateIncludeInfo[];
+}
+
+/**
+ * Compile a separate include query with the given parent IDs.
+ * This is called by the executor after running the main query.
+ *
+ * @param info - Separate include metadata from compileWithIncludes()
+ * @param parentIds - IDs from the main query result
+ * @param kysely - Kysely instance
+ * @param schemaName - Optional schema name for multi-tenant
+ * @returns Compiled query for fetching the related records
+ */
+export function compileSeparateInclude(
+	info: SeparateIncludeInfo,
+	parentIds: readonly unknown[],
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	kysely: Kysely<any>,
+	schemaName?: string,
+): CompiledQuery {
+	if (parentIds.length === 0) {
+		// Return an empty result query - no parent IDs means no includes to fetch
+		const tableName = schemaName
+			? `${schemaName}.${info.targetTable}`
+			: info.targetTable;
+		return kysely
+			.selectFrom(tableName)
+			.selectAll()
+			.where((eb) => eb.lit(false)) // Always false - returns empty result
+			.compile();
+	}
+
+	const tableName = schemaName
+		? `${schemaName}.${info.targetTable}`
+		: info.targetTable;
+
+	let query = kysely.selectFrom(tableName).selectAll();
+
+	// Add WHERE foreignKey IN (parentIds)
+	query = query.where(info.foreignKey, 'in', parentIds as unknown[]);
+
+	// Add additional WHERE conditions from include intent
+	if (info.where) {
+		query = addSimpleWhere(query, info.where, info.targetTable);
+	}
+
+	return query.compile();
+}
+
+/**
+ * Add simple WHERE conditions (non-relational) to a query.
+ * Used for separate include queries.
+ */
+function addSimpleWhere(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: SelectQueryBuilder<any, any, any>,
+	where: WhereIntent,
+	tableName: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	switch (where.kind) {
+		case 'comparison': {
+			const column = `${tableName}.${where.field}`;
+			switch (where.operator) {
+				case 'eq':
+					return query.where(column, '=', where.value);
+				case 'neq':
+					return query.where(column, '!=', where.value);
+				case 'gt':
+					return query.where(column, '>', where.value);
+				case 'gte':
+					return query.where(column, '>=', where.value);
+				case 'lt':
+					return query.where(column, '<', where.value);
+				case 'lte':
+					return query.where(column, '<=', where.value);
+				default:
+					return query;
+			}
+		}
+		case 'like':
+			return where.caseInsensitive
+				? query.where(`${tableName}.${where.field}`, 'ilike', where.pattern)
+				: query.where(`${tableName}.${where.field}`, 'like', where.pattern);
+		case 'in':
+			return query.where(
+				`${tableName}.${where.field}`,
+				'in',
+				where.values as unknown[],
+			);
+		case 'null':
+			return where.operator === 'isNull'
+				? query.where(`${tableName}.${where.field}`, 'is', null)
+				: query.where(`${tableName}.${where.field}`, 'is not', null);
+		case 'and':
+			for (const condition of where.conditions) {
+				query = addSimpleWhere(query, condition, tableName);
+			}
+			return query;
+		case 'or':
+			return query.where((eb) => {
+				const conditions = where.conditions.map((c: WhereIntent) => {
+					if (c.kind === 'comparison') {
+						const col = `${tableName}.${c.field}`;
+						switch (c.operator) {
+							case 'eq':
+								return eb(col, '=', c.value);
+							case 'neq':
+								return eb(col, '!=', c.value);
+							case 'gt':
+								return eb(col, '>', c.value);
+							case 'gte':
+								return eb(col, '>=', c.value);
+							case 'lt':
+								return eb(col, '<', c.value);
+							case 'lte':
+								return eb(col, '<=', c.value);
+							default:
+								return eb.lit(true);
+						}
+					}
+					return eb.lit(true);
+				});
+				return eb.or(conditions);
+			});
+		default:
+			return query;
+	}
+}
+
+/**
+ * Collect separate includes from intent based on planner decisions.
+ */
+function collectSeparateIncludes(
+	includes: readonly IncludeIntent[] | undefined,
+	plan: PlanReport,
+	model: ModelIR,
+	sourceTable: string,
+): SeparateIncludeInfo[] {
+	if (!includes || includes.length === 0) {
+		return [];
+	}
+
+	const result: SeparateIncludeInfo[] = [];
+
+	for (const include of includes) {
+		const relationName = include.relation;
+
+		// Find the include-strategy decision for this relation
+		const decision = plan.decisions.find(
+			(d) =>
+				d.type === 'include-strategy' &&
+				d.context?.sourceTable === sourceTable &&
+				d.context?.relation === relationName,
+		);
+
+		// If planner decided 'separate', collect the info
+		if (decision?.choice === 'separate') {
+			// Get relation definition from model
+			const relation = model.getRelation(`${sourceTable}.${relationName}`);
+			if (!relation) {
+				continue; // Skip if relation not found
+			}
+
+			// Determine FK and source key based on relation type
+			let foreignKey: string;
+			let sourceKey: string;
+
+			if (relation.type === 'hasMany' || relation.type === 'hasOne') {
+				// hasMany/hasOne: FK is in target table (e.g., posts.userId), points to source's PK
+				foreignKey = Array.isArray(relation.foreignKey)
+					? relation.foreignKey[0]
+					: (relation.foreignKey ?? `${sourceTable.replace(/s$/, '')}Id`);
+				sourceKey = 'id'; // Source table's PK
+			} else {
+				// belongsTo: FK is in source table (rare for 'separate', but handle it)
+				// For separate include, we need target's PK
+				foreignKey = 'id'; // Target table's PK
+				sourceKey = Array.isArray(relation.foreignKey)
+					? relation.foreignKey[0]
+					: (relation.foreignKey ?? `${relation.target.replace(/s$/, '')}Id`);
+			}
+
+			result.push({
+				relationName,
+				targetTable: relation.target,
+				foreignKey,
+				sourceKey,
+				select: include.select,
+				where: include.where,
+			});
+		}
+	}
+
+	return result;
+}
+
+/**
+ * Compile a PlanReport with full support for separate includes.
+ * Returns both the main query and metadata for separate include queries.
+ *
+ * @param plan - The plan report from the planner
+ * @param model - The model IR
+ * @param kysely - Kysely instance
+ * @param schemaNameOrOptions - Schema name or options
+ * @returns Compile result with main query and separate includes info
+ */
+export function compileWithIncludes(
+	plan: PlanReport,
+	model: ModelIR,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	kysely: Kysely<any>,
+	schemaNameOrOptions?: string | InternalCompileOptions,
+): CompileResultWithIncludes {
+	// Compile the main query (uses existing compile function)
+	const main = compile(plan, model, kysely, schemaNameOrOptions);
+
+	// Collect separate includes
+	const separateIncludes = collectSeparateIncludes(
+		plan.intent.include,
+		plan,
+		model,
+		plan.intent.from,
+	);
+
+	return {
+		main,
+		separateIncludes,
+	};
+}
+
 /**
  * Compile a PlanReport into a Kysely CompiledQuery
  */
@@ -200,6 +472,8 @@ export function compile(
 		aliasCounter: 0,
 		tableAliases: new Map(),
 		parameters: [],
+		joinedFilterRelations: new Map(),
+		joinedIncludeRelations: new Map(),
 	};
 
 	const intent = plan.intent;
@@ -220,6 +494,39 @@ export function compile(
 		for (const window of windows) {
 			query = compileWindowSelect(query, window, rootAlias);
 		}
+	}
+
+	// Apply JOIN filters for filter-strategy: 'join' (before WHERE clause)
+	// This adds INNER JOINs for relation filters that the planner decided to use JOIN
+	if (intent.where) {
+		query = applyJoinFilters(
+			query,
+			intent.where,
+			plan,
+			model,
+			state,
+			rootTable,
+			rootAlias,
+			schemaName,
+		);
+	}
+
+	// Apply LEFT JOINs for include-strategy: 'join' (CORE-001)
+	// This adds LEFT JOINs for includes that the planner decided to use JOIN
+	if (intent.include) {
+		query = applyIncludeJoins(
+			query,
+			intent.include,
+			plan,
+			model,
+			state,
+			rootTable,
+			rootAlias,
+			schemaName,
+		);
+
+		// Add SELECT columns for included relations
+		query = addIncludeSelectColumns(query, state, model);
 	}
 
 	// Add WHERE clause
@@ -1558,6 +1865,428 @@ function compileExists(
 	return eb.exists(finalSubquery);
 }
 
+/**
+ * Find the planner decision for a relation filter.
+ */
+function findFilterStrategyDecision(
+	plan: PlanReport,
+	sourceTable: string,
+	relationTarget: string,
+): PlanDecision | undefined {
+	return plan.decisions.find(
+		(d) =>
+			d.type === 'filter-strategy' &&
+			d.context.sourceTable === sourceTable &&
+			(d.context.target === relationTarget ||
+				d.context.relation === relationTarget),
+	);
+}
+
+/**
+ * Find the planner decision for an include relation.
+ */
+function findIncludeStrategyDecision(
+	plan: PlanReport,
+	sourceTable: string,
+	relationName: string,
+): PlanDecision | undefined {
+	return plan.decisions.find(
+		(d) =>
+			d.type === 'include-strategy' &&
+			d.context.sourceTable === sourceTable &&
+			d.context.relation === relationName,
+	);
+}
+
+/**
+ * Collect all includes that should use JOIN strategy (decision.choice === 'join').
+ */
+function collectJoinIncludes(
+	includes: readonly IncludeIntent[] | undefined,
+	plan: PlanReport,
+	sourceTable: string,
+): Array<{ include: IncludeIntent; relationName: string }> {
+	if (!includes) return [];
+
+	const results: Array<{ include: IncludeIntent; relationName: string }> = [];
+
+	for (const include of includes) {
+		const decision = findIncludeStrategyDecision(
+			plan,
+			sourceTable,
+			include.relation,
+		);
+		if (decision?.choice === 'join') {
+			results.push({
+				include,
+				relationName: include.relation,
+			});
+		}
+	}
+
+	return results;
+}
+
+/**
+ * Apply LEFT JOINs for all includes that use 'join' strategy.
+ * Returns the modified query with JOINs applied.
+ */
+function applyIncludeJoins(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: SelectQueryBuilder<any, any, any>,
+	includes: readonly IncludeIntent[] | undefined,
+	plan: PlanReport,
+	model: ModelIR,
+	state: CompilerState,
+	rootTable: string,
+	rootAlias: string,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	if (!includes) return query;
+
+	const joinIncludes = collectJoinIncludes(includes, plan, rootTable);
+
+	let result = query;
+
+	for (const { include: _include, relationName } of joinIncludes) {
+		// Skip if already joined
+		if (state.joinedIncludeRelations.has(relationName)) {
+			continue;
+		}
+
+		const relation = resolveRelation(relationName, rootTable, model, plan);
+
+		if (!relation) {
+			throw new CompilationError(
+				`Unknown relation for include JOIN: ${rootTable}.${relationName}`,
+			);
+		}
+
+		// Create alias for the joined table
+		const joinAlias = getNextAlias(state);
+		state.tableAliases.set(`${relation.target}_include`, joinAlias);
+		state.joinedIncludeRelations.set(relationName, {
+			alias: joinAlias,
+			targetTable: relation.target,
+			relationName,
+		});
+
+		// Build JOIN condition based on relation type
+		const fk = Array.isArray(relation.foreignKey)
+			? relation.foreignKey[0]
+			: (relation.foreignKey ?? 'id');
+
+		const targetTableDef = model.getTable(relation.target);
+		const targetPk = targetTableDef?.primaryKey;
+		const targetKey = Array.isArray(targetPk)
+			? (targetPk[0] ?? 'id')
+			: (targetPk ?? 'id');
+
+		const sourceTableDef = model.getTable(relation.source);
+		const sourcePk = sourceTableDef?.primaryKey;
+		const sourceKey = Array.isArray(sourcePk)
+			? (sourcePk[0] ?? 'id')
+			: (sourcePk ?? 'id');
+
+		// Apply schema prefix
+		const targetTable = schemaName
+			? `${schemaName}.${relation.target}`
+			: relation.target;
+
+		// Determine join condition based on relation type
+		// belongsTo: source.foreignKey = target.primaryKey
+		// hasMany/hasOne: source.primaryKey = target.foreignKey
+		if (relation.type === 'belongsTo') {
+			result = result.leftJoin(
+				`${targetTable} as ${joinAlias}`,
+				`${rootAlias}.${fk}`,
+				`${joinAlias}.${targetKey}`,
+			);
+		} else {
+			// hasMany or hasOne
+			result = result.leftJoin(
+				`${targetTable} as ${joinAlias}`,
+				`${joinAlias}.${fk}`,
+				`${rootAlias}.${sourceKey}`,
+			);
+		}
+	}
+
+	return result;
+}
+
+/**
+ * Add SELECT columns for included relations that were JOINed.
+ * Columns are aliased as "relationName.columnName" to avoid conflicts.
+ */
+function addIncludeSelectColumns(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: SelectQueryBuilder<any, any, any>,
+	state: CompilerState,
+	model: ModelIR,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	if (state.joinedIncludeRelations.size === 0) {
+		return query;
+	}
+
+	let result = query;
+
+	for (const [relationName, joinInfo] of state.joinedIncludeRelations) {
+		const { alias, targetTable } = joinInfo;
+		const tableDef = model.getTable(targetTable);
+
+		if (!tableDef) {
+			throw new CompilationError(`Unknown table for include: ${targetTable}`);
+		}
+
+		// Add all columns from the included table with aliased names
+		for (const column of tableDef.columns) {
+			const aliasedName = `${relationName}.${column.name}`;
+			result = result.select(
+				sql`${sql.ref(`${alias}.${column.name}`)}`.as(aliasedName),
+			);
+		}
+	}
+
+	return result;
+}
+
+/**
+ * Recursively collect all relationFilter nodes from a WHERE intent
+ * that should use JOIN strategy (decision.choice === 'join').
+ */
+function collectJoinFilterRelations(
+	where: WhereIntent,
+	plan: PlanReport,
+	model: ModelIR,
+	sourceTable: string,
+): Array<{
+	relation: string;
+	where?: WhereIntent;
+	mode: 'some' | 'every' | 'none';
+}> {
+	const results: Array<{
+		relation: string;
+		where?: WhereIntent;
+		mode: 'some' | 'every' | 'none';
+	}> = [];
+
+	if (where.kind === 'relationFilter') {
+		const decision = findFilterStrategyDecision(
+			plan,
+			sourceTable,
+			where.relation,
+		);
+		if (decision?.choice === 'join') {
+			results.push({
+				relation: where.relation,
+				where: where.where,
+				mode: where.mode,
+			});
+		}
+	} else if (where.kind === 'and' || where.kind === 'or') {
+		for (const condition of where.conditions) {
+			results.push(
+				...collectJoinFilterRelations(condition, plan, model, sourceTable),
+			);
+		}
+	} else if (where.kind === 'not') {
+		results.push(
+			...collectJoinFilterRelations(where.condition, plan, model, sourceTable),
+		);
+	}
+
+	return results;
+}
+
+/**
+ * Resolve relation info from a relation name, handling disambiguation.
+ */
+function resolveRelation(
+	relationName: string,
+	sourceTable: string,
+	model: ModelIR,
+	plan: PlanReport,
+): RelationIR | undefined {
+	// Try direct lookup first
+	let relation = model.getRelation(`${sourceTable}.${relationName}`);
+
+	// If not found, check if planner resolved it to a different relation name
+	if (!relation) {
+		const decision = findFilterStrategyDecision(
+			plan,
+			sourceTable,
+			relationName,
+		);
+		if (decision?.context.relation) {
+			relation = model.getRelation(
+				`${sourceTable}.${decision.context.relation}`,
+			);
+		}
+	}
+
+	// Also try to find relation by target table
+	if (!relation) {
+		const relationsFromSource = model.getRelationsFrom(sourceTable);
+		const byTarget = relationsFromSource.filter(
+			(r) => r.target === relationName,
+		);
+		if (byTarget.length === 1) {
+			relation = byTarget[0];
+		}
+	}
+
+	return relation;
+}
+
+/**
+ * Apply INNER JOINs for all relationFilters that use 'join' strategy.
+ * Returns the modified query with JOINs applied.
+ */
+function applyJoinFilters(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: SelectQueryBuilder<any, any, any>,
+	where: WhereIntent | undefined,
+	plan: PlanReport,
+	model: ModelIR,
+	state: CompilerState,
+	rootTable: string,
+	rootAlias: string,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	if (!where) return query;
+
+	const joinRelations = collectJoinFilterRelations(
+		where,
+		plan,
+		model,
+		rootTable,
+	);
+
+	let result = query;
+
+	for (const joinRel of joinRelations) {
+		// Skip if already joined
+		if (state.joinedFilterRelations.has(joinRel.relation)) {
+			continue;
+		}
+
+		const relation = resolveRelation(joinRel.relation, rootTable, model, plan);
+
+		if (!relation) {
+			throw new CompilationError(
+				`Unknown relation for JOIN filter: ${rootTable}.${joinRel.relation}`,
+			);
+		}
+
+		// Create alias for the joined table
+		const joinAlias = getNextAlias(state);
+		state.tableAliases.set(`${relation.target}_join`, joinAlias);
+		state.joinedFilterRelations.set(joinRel.relation, {
+			alias: joinAlias,
+			targetTable: relation.target,
+		});
+
+		// Build JOIN condition
+		const fk = Array.isArray(relation.foreignKey)
+			? relation.foreignKey[0]
+			: (relation.foreignKey ?? 'id');
+
+		const sourceTableDef = model.getTable(relation.source);
+		const sourcePk = sourceTableDef?.primaryKey;
+		const sourceKey = Array.isArray(sourcePk)
+			? (sourcePk[0] ?? 'id')
+			: (sourcePk ?? 'id');
+
+		// Apply schema prefix
+		const targetTable = schemaName
+			? `${schemaName}.${relation.target}`
+			: relation.target;
+
+		// Add INNER JOIN
+		result = result.innerJoin(
+			`${targetTable} as ${joinAlias}`,
+			`${joinAlias}.${fk}`,
+			`${rootAlias}.${sourceKey}`,
+		);
+	}
+
+	return result;
+}
+
+/**
+ * Compile WHERE conditions for a relation that was already JOINed.
+ * Instead of EXISTS, we just compile the nested conditions against the joined table.
+ */
+function compileJoinedRelationConditions(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
+	eb: any,
+	where: {
+		relation: string;
+		where?: WhereIntent;
+		mode: 'some' | 'every' | 'none';
+	},
+	_sourceAlias: string,
+	model: ModelIR,
+	plan: PlanReport,
+	state: CompilerState,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
+): any {
+	const joinInfo = state.joinedFilterRelations.get(where.relation);
+	if (!joinInfo) {
+		throw new CompilationError(
+			`Relation ${where.relation} was not joined but JOIN strategy was requested`,
+		);
+	}
+
+	const joinAlias = joinInfo.alias;
+
+	// Handle different modes
+	switch (where.mode) {
+		case 'some': {
+			// For 'some', just compile the nested WHERE conditions if present
+			// The INNER JOIN already filters to rows that have at least one match
+			if (where.where) {
+				return compileWhere(
+					eb,
+					where.where,
+					joinAlias,
+					model,
+					plan,
+					state,
+					schemaName,
+				);
+			}
+			// If no nested where, the JOIN itself is sufficient (return true)
+			return eb.lit(true);
+		}
+
+		case 'none': {
+			// For 'none' with JOIN, we need a different approach:
+			// This is NOT ideal with JOIN (row explosion), but user explicitly chose it
+			// We would need LEFT JOIN + IS NULL pattern
+			// For now, throw error suggesting EXISTS for 'none' mode
+			throw new CompilationError(
+				`filter-strategy: 'join' is not supported for mode 'none'. ` +
+					`Use EXISTS strategy or remove the filterStrategy hint.`,
+			);
+		}
+
+		case 'every': {
+			// For 'every' with JOIN, this is also problematic
+			// We would need complex NOT EXISTS of negated condition
+			throw new CompilationError(
+				`filter-strategy: 'join' is not supported for mode 'every'. ` +
+					`Use EXISTS strategy or remove the filterStrategy hint.`,
+			);
+		}
+	}
+}
+
 function compileRelationFilter(
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
 	eb: any,
@@ -1573,6 +2302,29 @@ function compileRelationFilter(
 	schemaName?: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
 ): any {
+	// Check planner decision for filter strategy
+	const sourceTable = getTableFromAlias(state, sourceAlias) ?? plan.rootTable;
+	const decision = findFilterStrategyDecision(
+		plan,
+		sourceTable,
+		where.relation,
+	);
+	const useJoin = decision?.choice === 'join';
+
+	// If JOIN strategy and table was already joined, use the joined conditions
+	if (useJoin && state.joinedFilterRelations.has(where.relation)) {
+		return compileJoinedRelationConditions(
+			eb,
+			where,
+			sourceAlias,
+			model,
+			plan,
+			state,
+			schemaName,
+		);
+	}
+
+	// Default: EXISTS strategy
 	switch (where.mode) {
 		case 'some':
 			return compileExists(

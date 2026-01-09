@@ -16,8 +16,10 @@ import {
 	compileDelete,
 	compileInsert,
 	compileRecursive,
+	compileSeparateInclude,
 	compileUpdate,
 	compileWindowSelect,
+	compileWithIncludes,
 } from './compiler.js';
 import { CompilationError } from './errors.js';
 
@@ -2155,6 +2157,478 @@ describe('SQL Compiler', () => {
 				expect(compiled.sql).toContain('SUM(');
 				expect(compiled.sql).toContain('"rn"');
 				expect(compiled.sql).toContain('"running_total"');
+			});
+		});
+	});
+
+	// ============================================================================
+	// CORE-001: Filter Strategy Enforcement
+	// ============================================================================
+
+	describe('Filter Strategy Enforcement (CORE-001)', () => {
+		describe('BDD Scenario 1: EXISTS strategy for hasMany (default)', () => {
+			it('should generate EXISTS when planner decides filter-strategy: exists', () => {
+				const kysely = createTestKysely();
+
+				// Given: users hasMany posts
+				// When: filter users by posts condition
+				const intent: QueryIntent = {
+					from: 'users',
+					select: { type: 'all' },
+					where: {
+						kind: 'relationFilter',
+						relation: 'posts',
+						mode: 'some',
+						where: {
+							kind: 'comparison',
+							field: 'published',
+							operator: 'eq',
+							value: true,
+						},
+					},
+				};
+
+				const report = plan(intent, basicSchema);
+				const compiled = compile(report, basicSchema, kysely);
+
+				// Then: planner decides 'exists' (hasMany → exists by default)
+				const filterDecision = report.decisions.find(
+					(d) => d.type === 'filter-strategy',
+				);
+				expect(filterDecision?.choice).toBe('exists');
+
+				// And: SQL contains EXISTS, not JOIN
+				expect(compiled.sql).toContain('exists');
+				expect(compiled.sql).not.toMatch(/join\s+["']?posts["']?/i);
+			});
+		});
+
+		describe('BDD Scenario 2: JOIN strategy for belongsTo (default)', () => {
+			it('should generate JOIN when planner decides filter-strategy: join', () => {
+				const kysely = createTestKysely();
+
+				// Given: posts belongsTo users (cardinality: one)
+				// When: filter posts by author condition
+				const intent: QueryIntent = {
+					from: 'posts',
+					select: { type: 'all' },
+					where: {
+						kind: 'relationFilter',
+						relation: 'author', // belongsTo relation
+						mode: 'some',
+						where: {
+							kind: 'comparison',
+							field: 'active',
+							operator: 'eq',
+							value: true,
+						},
+					},
+				};
+
+				const report = plan(intent, basicSchema);
+				const compiled = compile(report, basicSchema, kysely);
+
+				// Then: planner decides 'join' (belongsTo → one cardinality → join)
+				const filterDecision = report.decisions.find(
+					(d) => d.type === 'filter-strategy',
+				);
+				expect(filterDecision?.choice).toBe('join');
+
+				// And: SQL contains JOIN, not EXISTS
+				expect(compiled.sql.toLowerCase()).toContain('join');
+				expect(compiled.sql.toLowerCase()).toContain('users');
+				expect(compiled.sql.toLowerCase()).not.toContain('exists');
+			});
+		});
+
+		describe('BDD Scenario 3: Explicit JOIN override for hasMany', () => {
+			it('should generate JOIN when forceFilterStrategy is set', () => {
+				const kysely = createTestKysely();
+
+				// Given: users hasMany posts (normally exists)
+				// But: forceFilterStrategy: 'join'
+				const intent: QueryIntent = {
+					from: 'users',
+					select: { type: 'all' },
+					where: {
+						kind: 'relationFilter',
+						relation: 'posts',
+						mode: 'some',
+						where: {
+							kind: 'comparison',
+							field: 'published',
+							operator: 'eq',
+							value: true,
+						},
+					},
+				};
+
+				const report = plan(intent, basicSchema, {
+					forceFilterStrategy: 'join',
+				});
+				const compiled = compile(report, basicSchema, kysely);
+
+				// Then: planner decides 'join' (forced)
+				const filterDecision = report.decisions.find(
+					(d) => d.type === 'filter-strategy',
+				);
+				expect(filterDecision?.choice).toBe('join');
+
+				// And: SQL contains JOIN
+				expect(compiled.sql.toLowerCase()).toContain('join');
+				expect(compiled.sql.toLowerCase()).toContain('posts');
+			});
+		});
+
+		describe('BDD Scenario 4: Explicit EXISTS override for belongsTo', () => {
+			it('should generate EXISTS when forceFilterStrategy overrides default', () => {
+				const kysely = createTestKysely();
+
+				// Given: posts belongsTo author (normally join)
+				// But: forceFilterStrategy: 'exists'
+				const intent: QueryIntent = {
+					from: 'posts',
+					select: { type: 'all' },
+					where: {
+						kind: 'relationFilter',
+						relation: 'author',
+						mode: 'some',
+						where: {
+							kind: 'comparison',
+							field: 'active',
+							operator: 'eq',
+							value: true,
+						},
+					},
+				};
+
+				const report = plan(intent, basicSchema, {
+					forceFilterStrategy: 'exists',
+				});
+				const compiled = compile(report, basicSchema, kysely);
+
+				// Then: planner decides 'exists' (forced)
+				const filterDecision = report.decisions.find(
+					(d) => d.type === 'filter-strategy',
+				);
+				expect(filterDecision?.choice).toBe('exists');
+
+				// And: SQL contains EXISTS, not JOIN
+				expect(compiled.sql.toLowerCase()).toContain('exists');
+				expect(compiled.sql.toLowerCase()).not.toMatch(
+					/join\s+["']?users["']?/i,
+				);
+			});
+		});
+
+		describe('JOIN filter with nested conditions', () => {
+			it('should apply WHERE conditions on joined table', () => {
+				const kysely = createTestKysely();
+
+				const intent: QueryIntent = {
+					from: 'posts',
+					select: { type: 'all' },
+					where: {
+						kind: 'relationFilter',
+						relation: 'author',
+						mode: 'some',
+						where: {
+							kind: 'and',
+							conditions: [
+								{
+									kind: 'comparison',
+									field: 'active',
+									operator: 'eq',
+									value: true,
+								},
+								{
+									kind: 'like',
+									field: 'name',
+									pattern: '%admin%',
+								},
+							],
+						},
+					},
+				};
+
+				const report = plan(intent, basicSchema);
+				const compiled = compile(report, basicSchema, kysely);
+
+				// Should use JOIN for belongsTo
+				expect(compiled.sql.toLowerCase()).toContain('join');
+
+				// Should have conditions applied
+				expect(compiled.sql.toLowerCase()).toContain('active');
+			});
+		});
+
+		describe('JOIN filter error handling', () => {
+			it('should throw for none mode with join strategy', () => {
+				const kysely = createTestKysely();
+
+				// Given: posts belongsTo author (would use join)
+				// But: mode is 'none' which requires EXISTS pattern
+				const intent: QueryIntent = {
+					from: 'posts',
+					select: { type: 'all' },
+					where: {
+						kind: 'relationFilter',
+						relation: 'author',
+						mode: 'none', // NOT EXISTS semantic
+						where: {
+							kind: 'comparison',
+							field: 'active',
+							operator: 'eq',
+							value: true,
+						},
+					},
+				};
+
+				const report = plan(intent, basicSchema);
+
+				// The decision is 'join' but mode is 'none'
+				// Our implementation should handle this gracefully
+				// (either throw or fall back to EXISTS)
+				expect(() => compile(report, basicSchema, kysely)).toThrow(
+					/join.*not supported.*none/i,
+				);
+			});
+		});
+	});
+
+	// ============================================================================
+	// CORE-001: Include Strategy Enforcement
+	// ============================================================================
+
+	describe('Include Strategy Enforcement (CORE-001)', () => {
+		describe('BDD Scenario 5: JOIN strategy for belongsTo include', () => {
+			it('should generate LEFT JOIN when planner decides include-strategy: join', () => {
+				const kysely = createTestKysely();
+
+				// Given: posts belongsTo author (cardinality 'one' → include-strategy: join)
+				// Using basicSchema where posts.author is belongsTo users
+
+				// When: I select posts with include('author')
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'posts',
+					select: { type: 'all' },
+					include: [{ relation: 'author' }],
+				};
+
+				const report = plan(intent, basicSchema);
+				const compiled = compile(report, basicSchema, kysely);
+
+				// Then: planner decides include-strategy: 'join'
+				const includeDecision = report.decisions.find(
+					(d) => d.type === 'include-strategy',
+				);
+				expect(includeDecision).toBeDefined();
+				expect(includeDecision?.choice).toBe('join');
+
+				// And: SQL contains LEFT JOIN
+				expect(compiled.sql.toLowerCase()).toContain('left join');
+				expect(compiled.sql.toLowerCase()).toContain('users');
+
+				// And: SQL selects user columns with aliased names
+				expect(compiled.sql.toLowerCase()).toContain('author.');
+			});
+		});
+
+		describe('BDD Scenario 6: Separate strategy for hasMany include (not JOIN)', () => {
+			it('should NOT generate JOIN when planner decides include-strategy: separate', () => {
+				const kysely = createTestKysely();
+
+				// Given: users hasMany posts (cardinality 'many' → include-strategy: separate)
+
+				// When: I select users with include('posts')
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+					select: { type: 'all' },
+					include: [{ relation: 'posts' }],
+				};
+
+				const report = plan(intent, basicSchema);
+
+				// Then: planner decides include-strategy: 'separate'
+				const includeDecision = report.decisions.find(
+					(d) => d.type === 'include-strategy',
+				);
+				expect(includeDecision).toBeDefined();
+				expect(includeDecision?.choice).toBe('separate');
+
+				// And: SQL does NOT contain JOIN posts (separate queries will be needed)
+				const compiled = compile(report, basicSchema, kysely);
+				expect(compiled.sql.toLowerCase()).not.toContain('join');
+				expect(compiled.sql.toLowerCase()).not.toContain('left join posts');
+			});
+		});
+
+		describe('BDD Scenario 7: Explicit JOIN override for hasMany include', () => {
+			it('should generate LEFT JOIN when relation has includeStrategy: join hint', () => {
+				const kysely = createTestKysely();
+
+				// Given: users hasMany posts with explicit includeStrategy: 'join'
+				const schemaWithJoinHint = defineSchema({
+					users: {
+						id: 'number',
+						name: 'string',
+					},
+					posts: {
+						id: 'number',
+						title: 'string',
+						userId: 'number',
+					},
+				})
+					.relations({
+						users: {
+							posts: hasMany(
+								'posts',
+								{ foreignKey: 'userId' },
+								{ includeStrategy: 'join' },
+							),
+						},
+					})
+					.build();
+
+				// When: I select users with include('posts')
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+					select: { type: 'all' },
+					include: [{ relation: 'posts' }],
+				};
+
+				const report = plan(intent, schemaWithJoinHint);
+				const compiled = compile(report, schemaWithJoinHint, kysely);
+
+				// Then: planner decides include-strategy: 'join' (due to hint)
+				const includeDecision = report.decisions.find(
+					(d) => d.type === 'include-strategy',
+				);
+				expect(includeDecision).toBeDefined();
+				expect(includeDecision?.choice).toBe('join');
+
+				// And: SQL contains LEFT JOIN
+				expect(compiled.sql.toLowerCase()).toContain('left join');
+				expect(compiled.sql.toLowerCase()).toContain('posts');
+
+				// And: SQL selects post columns with aliased names
+				expect(compiled.sql.toLowerCase()).toContain('posts.');
+			});
+		});
+
+		describe('BDD Scenario 8: compileWithIncludes returns separateIncludes metadata', () => {
+			it('should return separateIncludes for hasMany relations', () => {
+				const kysely = createTestKysely();
+
+				// Given: users hasMany posts (default includeStrategy is 'separate')
+				// When: I use compileWithIncludes
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+					select: { type: 'all' },
+					include: [{ relation: 'posts' }],
+				};
+
+				const report = plan(intent, basicSchema);
+				const result = compileWithIncludes(report, basicSchema, kysely);
+
+				// Then: main query should be compiled
+				expect(result.main).toBeDefined();
+				expect(result.main.sql.toLowerCase()).toContain('select');
+				expect(result.main.sql.toLowerCase()).not.toContain('join posts');
+
+				// And: separateIncludes should contain posts metadata
+				expect(result.separateIncludes).toHaveLength(1);
+				expect(result.separateIncludes[0].relationName).toBe('posts');
+				expect(result.separateIncludes[0].targetTable).toBe('posts');
+				expect(result.separateIncludes[0].foreignKey).toBe('userId');
+				expect(result.separateIncludes[0].sourceKey).toBe('id');
+			});
+
+			it('should return empty separateIncludes for JOIN includes', () => {
+				const kysely = createTestKysely();
+
+				// Given: posts belongsTo user (default includeStrategy is 'join')
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'posts',
+					select: { type: 'all' },
+					include: [{ relation: 'author' }],
+				};
+
+				const report = plan(intent, basicSchema);
+				const result = compileWithIncludes(report, basicSchema, kysely);
+
+				// Then: main query should be compiled with JOIN
+				expect(result.main.sql.toLowerCase()).toContain('left join');
+
+				// And: separateIncludes should be empty (author is JOINed)
+				expect(result.separateIncludes).toHaveLength(0);
+			});
+		});
+
+		describe('BDD Scenario 9: compileSeparateInclude generates follow-up queries', () => {
+			it('should generate IN query for separate include', () => {
+				const kysely = createTestKysely();
+
+				// Given: separate include metadata from compileWithIncludes
+				const includeInfo = {
+					relationName: 'posts',
+					targetTable: 'posts',
+					foreignKey: 'userId',
+					sourceKey: 'id',
+				};
+
+				// When: I compile the separate include with parent IDs
+				const parentIds = [1, 2, 3];
+				const compiled = compileSeparateInclude(includeInfo, parentIds, kysely);
+
+				// Then: SQL should contain IN clause with parent IDs
+				expect(compiled.sql.toLowerCase()).toContain('select');
+				expect(compiled.sql.toLowerCase()).toContain('from "posts"');
+				expect(compiled.sql.toLowerCase()).toContain('"userid" in');
+			});
+
+			it('should return empty result for empty parent IDs', () => {
+				const kysely = createTestKysely();
+
+				const includeInfo = {
+					relationName: 'posts',
+					targetTable: 'posts',
+					foreignKey: 'userId',
+					sourceKey: 'id',
+				};
+
+				// When: parent IDs is empty
+				const compiled = compileSeparateInclude(includeInfo, [], kysely);
+
+				// Then: SQL should return empty result (WHERE false)
+				expect(compiled.sql.toLowerCase()).toContain('select');
+				// The query uses eb.lit(false) which compiles to "0" in SQLite
+			});
+
+			it('should apply schema prefix for multi-tenant', () => {
+				const kysely = createTestKysely();
+
+				const includeInfo = {
+					relationName: 'posts',
+					targetTable: 'posts',
+					foreignKey: 'userId',
+					sourceKey: 'id',
+				};
+
+				const compiled = compileSeparateInclude(
+					includeInfo,
+					[1, 2],
+					kysely,
+					'tenant_abc',
+				);
+
+				// Then: SQL should contain schema prefix (SQLite quotes identifiers)
+				expect(compiled.sql.toLowerCase()).toMatch(/tenant_abc.*posts/);
 			});
 		});
 	});

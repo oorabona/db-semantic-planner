@@ -49,6 +49,7 @@ packages/dx            → Depends on core + adapter-kysely
 | CORE-001 | [ModelIR](specs/CORE-001-model-ir.md) | core | ✅ canonical |
 | CORE-002 | IntentAST | core | ✅ implemented (no spec) |
 | CORE-003 | [Semantic Planner](specs/CORE-003-semantic-planner.md) | core | ✅ canonical |
+| CORE-001-PC | [Planner → Compiler Contract](plans/CORE-001-planner-compiler-contract.md) | core, adapter | ✅ canonical |
 | ADAPTER-001 | [Kysely Dump/Compile/Execute](specs/ADAPTER-001-kysely-dump-compile-execute.md) | adapter | ✅ canonical |
 | ADAPTER-002 | Multi-tenant | adapter | ✅ implemented (in ADAPTER-001) |
 | ADAPTER-004 | [Enhanced Observability](specs/ADAPTER-004-enhanced-observability.md) | adapter | ✅ canonical |
