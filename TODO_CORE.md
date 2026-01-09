@@ -26,18 +26,23 @@
 
 ---
 
-## Pending - P3 (Advanced Features)
+## Completed - P3 (Advanced Features)
 
 **ADR:** [ADR-001: Typed Intents for Advanced Features](docs/adrs/ADR-001-typed-intents-for-advanced-features.md)
 
-### P3-A: WindowIntent (HIGH priority - Kysely native API)
+### P3-A: WindowIntent ✅ (2026-01-09)
 
-- [ ] `WindowIntent` type in intent-ast.ts
+- [x] ✅ `WindowIntent` type in intent-ast.ts
   - function: row_number, rank, dense_rank, sum, avg, count, min, max, lag, lead
   - over: partitionBy, orderBy, frame
   - alias: string
-- [ ] `isWindowIntent` type guard
-- [ ] Planner support for window functions in SELECT
+- [x] ✅ `WindowFunction` union type
+- [x] ✅ `isWindowIntent` type guard
+- [x] ✅ 8 unit tests for WindowIntent
+
+---
+
+## Pending - P3 (Advanced Features)
 
 ### P3-B: FTSIntent (PostgreSQL Full-Text Search)
 

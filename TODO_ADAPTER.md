@@ -164,14 +164,16 @@ eb(eb.ref('prev.path'), '||', eb.ref('node.${traversal.nodeId}')).as('path')
 **ADR:** [ADR-001: Typed Intents for Advanced Features](docs/adrs/ADR-001-typed-intents-for-advanced-features.md)
 **Study:** [STUDY-001-advanced-postgresql-features.md](docs/studies/STUDY-001-advanced-postgresql-features.md)
 
-### P3-A: Window Functions Compiler (HIGH priority)
+### P3-A: Window Functions Compiler ✅ (2026-01-09)
 
-- [ ] `compileWindowSelect()` function
+- [x] ✅ `compileWindowSelect()` function
   - Uses Kysely's native `over()`, `partitionBy()` API
   - Supports: row_number, rank, dense_rank, sum, avg, count, min, max, lag, lead
   - Frame specification (ROWS/RANGE/GROUPS)
-- [ ] Extend DialectCapabilities with `supportsWindowFunctions`
-- [ ] Unit tests for window function compilation
+- [x] ✅ DialectCapabilities.supportsWindowFunctions (all dialects: true)
+- [x] ✅ assertWindowFunctionsSupported() capability guard
+- [x] ✅ 17 unit tests for window function compilation
+- [x] ✅ 12 E2E tests with real PostgreSQL
 
 ### P3-B: FTS Compiler (PostgreSQL)
 
