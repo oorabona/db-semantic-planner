@@ -1,10 +1,10 @@
 ---
 doc-meta:
-  status: canonical
+  status: complete
   scope: dx
   type: specification
   created: 2026-01-09
-  updated: 2026-01-09
+  updated: 2026-01-10
 ---
 
 # Specification: DX-021 Window Functions Builder Pattern
@@ -404,12 +404,14 @@ export function lead(field: string): WindowBuilder {
 
 ## Definition of Done
 
-- [ ] Block 1: WindowIntent added to ExpressionIntent
-- [ ] Block 2: WindowBuilder class implemented with tests
-- [ ] Block 3: 10 factory functions exported
-- [ ] Block 4: Old .window() method removed
-- [ ] Block 5: Integration with columns() verified
-- [ ] All BDD scenarios have passing tests
-- [ ] All existing tests pass (or migrated)
-- [ ] Lint/typecheck pass
-- [ ] Documentation updated (if applicable)
+- [x] Block 1: WindowIntent added to ExpressionIntent
+- [x] Block 2: WindowBuilder class implemented with tests
+- [x] Block 3: 10 factory functions exported
+- [x] Block 4: Old .window() method removed
+- [x] Block 5: Integration with columns() verified
+- [x] All BDD scenarios have passing tests (21 tests)
+- [x] All existing tests pass (or migrated)
+- [x] Lint/typecheck pass
+- [x] Documentation updated (if applicable)
+
+**Completed:** 2026-01-10

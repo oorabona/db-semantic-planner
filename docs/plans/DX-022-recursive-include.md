@@ -1,10 +1,10 @@
 ---
 doc-meta:
-  status: canonical
+  status: complete
   scope: dx
   type: specification
   created: 2026-01-09
-  updated: 2026-01-09
+  updated: 2026-01-10
 ---
 
 # Specification: DX-022 Recursive via include() Option
