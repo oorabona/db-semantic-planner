@@ -13,6 +13,7 @@ import type {
 	UpsertBuilder,
 } from './mutation-builders.js';
 import type { WhereFilter } from './object-filter.js';
+import type { GeneratedSchema } from './schema-bridge.js';
 
 /**
  * A wrapper around an ExpressionIntent that marks it for use in columns().
@@ -69,7 +70,6 @@ export interface StreamOptions {
 	 */
 	readonly onStart?: (dump: Dump) => void;
 }
-
 
 /**
  * Options for offset-based pagination.
@@ -261,73 +261,49 @@ export type OrderByInput =
  * const users = await orm.select('users').all();
  * ```
  */
-export interface OrmOptions<DB = unknown> {
-	/**
-	 * The schema model to use for query planning.
-	 * If not provided and `adapter` is set, the schema will be auto-discovered
-	 * via database introspection.
-	 */
-	readonly model?: ModelIR;
+/**
+ * Union type for all ORM options (backwards compatibility).
+ * @deprecated Use specific option types (OrmOptionsWithModel, OrmOptionsWithSchema, OrmOptionsWithAdapter)
+ */
+export type OrmOptions<DB = unknown> =
+	| OrmOptionsWithModel<DB>
+	| OrmOptionsWithSchema<DB>
+	| OrmOptionsWithAdapter<DB>;
 
-	/**
-	 * Controls behavior when ambiguous relations are detected.
-	 *
-	 * - `true` (strict mode): Throws `AmbiguousRelationError` on ambiguous relations
-	 * - `false` (lenient mode): Uses first relation and records warning in plan
-	 *
-	 * @default false
-	 */
+/**
+ * Base options shared by all ORM option variants.
+ */
+interface OrmOptionsBase<DB = unknown> {
 	readonly strictMode?: boolean;
-
-	/**
-	 * Global relation hints for disambiguating relations.
-	 * Maps target table names to preferred relation names.
-	 *
-	 * @example
-	 * ```typescript
-	 * const orm = createOrm({
-	 *   model: schema,
-	 *   relationHints: {
-	 *     posts: 'authoredPosts',  // Always use 'authoredPosts' for 'posts' target
-	 *   },
-	 * });
-	 * ```
-	 */
 	readonly relationHints?: RelationHints;
-
-	/**
-	 * Database adapter for query compilation and execution.
-	 * Required for all query execution methods (all(), first(), stream(), etc.)
-	 * Also required for auto-introspection when `model` is not provided.
-	 *
-	 * @example
-	 * ```typescript
-	 * import { createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
-	 *
-	 * const adapter = createKyselyAdapter(db);
-	 * const orm = createOrm({
-	 *   model: schema,
-	 *   adapter,  // Enable query execution
-	 * });
-	 * await orm.select('users').all();
-	 * ```
-	 */
 	readonly adapter?: Adapter<DB>;
 }
 
 /**
  * OrmOptions with explicit model (sync creation).
+ * @deprecated Use OrmOptionsWithSchema for codegen-first approach.
  */
-export interface OrmOptionsWithModel<DB = unknown> extends OrmOptions<DB> {
+export interface OrmOptionsWithModel<DB = unknown> extends OrmOptionsBase<DB> {
 	readonly model: ModelIR;
+	readonly schema?: never;
+}
+
+/**
+ * OrmOptions with generated schema (sync creation, codegen-first).
+ * Preferred approach for ARCH-002 codegen-first architecture.
+ */
+export interface OrmOptionsWithSchema<DB = unknown> extends OrmOptionsBase<DB> {
+	readonly schema: GeneratedSchema;
+	readonly model?: never;
 }
 
 /**
  * OrmOptions without model, requires adapter for auto-introspection (async creation).
  */
 export interface OrmOptionsWithAdapter<DB = unknown>
-	extends Omit<OrmOptions<DB>, 'model'> {
-	readonly model?: undefined;
+	extends OrmOptionsBase<DB> {
+	readonly model?: never;
+	readonly schema?: never;
 	readonly adapter: Adapter<DB>;
 }
 
@@ -941,7 +917,9 @@ export interface QueryBuilder<TResult = unknown> {
 	 *   .cursorPaginate({ cursor: page1.nextCursor, limit: 20 });
 	 * ```
 	 */
-	cursorPaginate(options?: CursorPaginateOptions): Promise<CursorPaginatedResult<TResult>>;
+	cursorPaginate(
+		options?: CursorPaginateOptions,
+	): Promise<CursorPaginatedResult<TResult>>;
 
 	/**
 	 * Find a single record by its primary key.

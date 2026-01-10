@@ -13,12 +13,14 @@ doc-meta:
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
 
-**Status:** ✅ v1.0 Ready (1005 unit + 212 E2E = 1217+ tests)
+**Status:** ✅ v1.0 Ready (1186 unit tests across 4 packages)
 
-## Architecture: Ports & Adapters (ARCH-001)
+## Architecture: Codegen-First (ARCH-002)
 
 ```
-packages/core          → DB-agnostic, includes DX layer (MUST NOT import adapter)
+packages/schema         → Schema DSL, defineSchema(), conventions
+packages/cli            → dbsp CLI (generate, verify commands)
+packages/core           → DB-agnostic, includes DX layer (MUST NOT import adapter)
 packages/adapter-kysely → Depends on core
 ```
 
@@ -37,10 +39,13 @@ packages/adapter-kysely → Depends on core
 
 | Scope | Package | Overview | Backlog | Status |
 |-------|---------|----------|---------|--------|
+| schema | `packages/schema` | N/A | [TODO](../TODO.md) | ✅ Complete |
+| cli | `packages/cli` | N/A | [TODO](../TODO.md) | ✅ Complete |
 | core | `packages/core` | [Overview](plans/core-OVERVIEW.md) | [TODO](../TODO_CORE.md) | ✅ Complete |
 | adapter | `packages/adapter-kysely` | [Overview](plans/adapter-OVERVIEW.md) | [TODO](../TODO_ADAPTER.md) | ✅ Complete |
 
 **Note:** DX layer is now part of `packages/core/src/dx/` (see ARCH-001).
+**Note:** Schema package provides the DSL for schema definition (see ARCH-002).
 
 ## Implementation Specifications
 
@@ -70,6 +75,7 @@ packages/adapter-kysely → Depends on core
 | DX-021 | [Window Functions Builder](plans/DX-021-window-builder.md) | dx | ✅ canonical |
 | DX-022 | [Recursive via include()](plans/DX-022-recursive-include.md) | dx | ✅ canonical |
 | P3-A | [Window Functions](specs/P3-A-window-functions.md) | core, adapter, dx | ✅ canonical |
+| ARCH-002 | [One Ring Architecture](specs/ARCH-002-one-ring.md) | schema, cli, core | ✅ canonical |
 
 ## Golden Query Tests - ✅ Complete
 
@@ -146,6 +152,12 @@ These features are intentionally deferred and may become backlog items:
 - Full ORM behavior (change tracking, dirty checking)
 
 **Note:** Runtime schema introspection was added in ADAPTER-006.
+
+## Briefs (Ideation)
+
+| Brief ID | Title | Scope | Status |
+|----------|-------|-------|--------|
+| ARCH-002 | [One Ring Architecture](briefs/ARCH-002-one-ring.md) | schema, cli, core | ✅ implemented |
 
 ## ADRs (Architecture Decision Records)
 

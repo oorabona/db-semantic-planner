@@ -18,10 +18,87 @@
 | E2E PostgreSQL Validation | testing | ✅ Complete |
 | Multi-dialect Capabilities | adapter | ✅ Complete |
 | DX Layer in Core (ARCH-001) | core | ✅ Complete |
+| One Ring Codegen-First (ARCH-002) | schema, cli, core | ✅ Complete |
 
 ## In Progress
 
 (No tasks in progress)
+
+---
+
+## ✅ Completed: ARCH-002 v2 "One Ring" Codegen-First Architecture (2026-01-11)
+
+**Brief:** [docs/briefs/ARCH-002-one-ring.md](docs/briefs/ARCH-002-one-ring.md)  
+**Spec:** [docs/specs/ARCH-002-one-ring.md](docs/specs/ARCH-002-one-ring.md)  
+**Priority:** HIGH | **Effort:** L | **Breaking:** Yes (new package structure)
+
+Transform db-semantic-planner into a **codegen-first schema platform**:
+- `dbsp.schema.ts` = Source of Truth (SoT)
+- CLI generates typed adapters (Kysely, Drizzle, etc.)
+- Zero runtime introspection in production
+- Core becomes internal (private: true)
+
+### MVP Blocks
+
+| # | Block | Effort | Status |
+|---|-------|--------|--------|
+| 1 | Schema DSL (`defineSchema`) | M | ✅ Done (2026-01-10) |
+| 2 | Convention Inference (FK + M:N detection) | S | ✅ Done (2026-01-10) |
+| 3 | CLI Scaffold (`dbsp` binary) | S | ✅ Done (2026-01-10) |
+| 4 | `dbsp generate manifest` | M | ✅ Done (2026-01-10) |
+| 5 | `dbsp generate kysely` | M | ✅ Done (2026-01-10) |
+| 6 | Schema Bridge (GeneratedSchema → ModelIR) | M | ✅ Done (2026-01-11) |
+| 7 | `dbsp verify` (drift detection) | M | ✅ Done (2026-01-11) |
+| 8 | Run all tests (1186 passing) | L | ✅ Done (2026-01-11) |
+
+### Completed Implementation Details
+
+**Block 1+2: packages/schema (54 tests)**
+- `defineSchema()` with tables, relations, hints, conventions
+- Discriminated union for relations: `kind: 'belongsTo' | 'hasMany' | 'manyToMany'`
+- FK detection with explicit `references` priority over conventions
+- M:N auto-detection for pure junction tables
+- Type guards: `isBelongsTo()`, `isHasMany()`, `isManyToMany()`
+
+**Block 3+4+5: packages/cli (35 tests)**
+- `dbsp generate manifest` — generates JSON-serializable schema
+- `dbsp generate kysely` — generates DB interface + table types
+- Kysely idioms: `Generated<T>`, `ColumnType<S,I,U>`
+- Schema loader with tsx support for .ts files
+
+**Block 6: Schema Bridge (packages/core - 18 tests)**
+- `buildModelFromSchema()` — converts GeneratedSchema to ModelIR
+- Primary key inference: `id` column or explicit `.primaryKey()` hint
+- Foreign key extraction from relations with `belongsTo` kind
+- Type mapping: `serial`, `bigserial`, `uuid` → appropriate types
+
+**Block 7: `dbsp verify` (drift detection)**
+- Schema vs database drift detection
+- Compares tables, columns, types
+- JSON output option for CI/CD integration
+
+**Block 8: Full test suite validation**
+- All 1186 tests passing across 4 packages:
+  - schema: 54 tests
+  - core: 494 tests
+  - adapter-kysely: 603 tests (5 skipped)
+  - cli: 35 tests
+
+### Future Blocks (Post-MVP)
+
+| # | Block | Description |
+|---|-------|-------------|
+| 9 | `dbsp import drizzle` | Import Drizzle schema to SoT |
+| 10 | `dbsp import prisma` | Import Prisma schema to SoT |
+| 11 | `dbsp import db` | Introspect DB to bootstrap SoT |
+| 12 | `dbsp generate drizzle` | Generate Drizzle schema from SoT |
+| 13 | Prisma adapter | Compile to `$queryRaw(Prisma.sql)` |
+
+### Future Native Adapters (Long-term)
+
+- [ ] `db-semantic-planner/pgsql` — Native PostgreSQL (information_schema)
+- [ ] `db-semantic-planner/mysql` — Native MySQL
+- [ ] `db-semantic-planner/sqlite` — Native SQLite
 
 ## Recently Completed
 

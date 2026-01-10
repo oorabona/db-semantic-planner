@@ -718,7 +718,9 @@ describe('Mutation Builders (DX-010)', () => {
 					.doNothing()
 					.dump();
 
-				expect(dump.intent.onConflict).toEqual({ columns: ['title', 'userId'] });
+				expect(dump.intent.onConflict).toEqual({
+					columns: ['title', 'userId'],
+				});
 			});
 		});
 
@@ -735,7 +737,9 @@ describe('Mutation Builders (DX-010)', () => {
 					.doNothing()
 					.dump();
 
-				expect(dump.intent.onConflict).toEqual({ constraint: 'users_email_unique' });
+				expect(dump.intent.onConflict).toEqual({
+					constraint: 'users_email_unique',
+				});
 			});
 		});
 
@@ -858,7 +862,11 @@ describe('Mutation Builders (DX-010)', () => {
 					adapter: createKyselyAdapter(db),
 				});
 				expect(() =>
-					orm.upsert('users').values({ name: 'Test' }).onConflict(['email']).dump(),
+					orm
+						.upsert('users')
+						.values({ name: 'Test' })
+						.onConflict(['email'])
+						.dump(),
 				).toThrow(InvalidOperationError);
 			});
 

@@ -33,6 +33,7 @@ import {
 	objectToWhereIntent,
 	type WhereFilter,
 } from './object-filter.js';
+import { buildModelFromSchema } from './schema-bridge.js';
 import {
 	type AggregateOptions,
 	type ColumnSpec,
@@ -49,6 +50,7 @@ import {
 	type OrmInstance,
 	type OrmOptionsWithAdapter,
 	type OrmOptionsWithModel,
+	type OrmOptionsWithSchema,
 	type PaginatedResult,
 	type PaginateOptions,
 	type QueryBuilder,
@@ -96,19 +98,39 @@ export function createOrm<DB = Record<string, unknown>>(
 	options: OrmOptionsWithModel<DB>,
 ): OrmInstance<DB>;
 export function createOrm<DB = Record<string, unknown>>(
+	options: OrmOptionsWithSchema<DB>,
+): OrmInstance<DB>;
+export function createOrm<DB = Record<string, unknown>>(
 	options: OrmOptionsWithAdapter<DB>,
 ): Promise<OrmInstance<DB>>;
 export function createOrm<DB = Record<string, unknown>>(
-	options: OrmOptionsWithModel<DB> | OrmOptionsWithAdapter<DB>,
+	options:
+		| OrmOptionsWithModel<DB>
+		| OrmOptionsWithSchema<DB>
+		| OrmOptionsWithAdapter<DB>,
 ): OrmInstance<DB> | Promise<OrmInstance<DB>> {
 	const { model, strictMode = false, relationHints = {}, adapter } = options;
+
+	// Extract schema from options (need to cast due to union type)
+	const schema = (options as OrmOptionsWithSchema<DB>).schema;
+
+	// If schema is provided (codegen-first approach), convert to model and create synchronously
+	if (schema) {
+		const convertedModel = buildModelFromSchema(schema);
+		return createOrmInstance(
+			convertedModel,
+			strictMode,
+			relationHints,
+			adapter,
+		);
+	}
 
 	// If model is provided, create synchronously
 	if (model) {
 		return createOrmInstance(model, strictMode, relationHints, adapter);
 	}
 
-	// If no model but adapter is provided, introspect and create async
+	// If no model/schema but adapter is provided, introspect and create async
 	if (adapter) {
 		return adapter
 			.introspect()
@@ -122,8 +144,10 @@ export function createOrm<DB = Record<string, unknown>>(
 			);
 	}
 
-	// Neither model nor adapter - this shouldn't happen with proper types
-	throw new Error('Either model or adapter must be provided to createOrm');
+	// Neither model nor schema nor adapter - this shouldn't happen with proper types
+	throw new Error(
+		'Either model, schema, or adapter must be provided to createOrm',
+	);
 }
 
 /**
@@ -1376,10 +1400,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			);
 		}
 		if (perPage < 1) {
-			throw new InvalidOperationError(
-				'paginate',
-				'perPage must be >= 1',
-			);
+			throw new InvalidOperationError('paginate', 'perPage must be >= 1');
 		}
 
 		// Calculate offset
@@ -1447,10 +1468,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 
 		// Validate inputs
 		if (limit < 1) {
-			throw new InvalidOperationError(
-				'cursorPaginate',
-				'limit must be >= 1',
-			);
+			throw new InvalidOperationError('cursorPaginate', 'limit must be >= 1');
 		}
 
 		// Require orderBy for stable cursor pagination
@@ -1511,7 +1529,8 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		return {
 			data,
 			nextCursor: direction === 'forward' ? nextCursor : prevCursor,
-			prevCursor: direction === 'forward' ? (cursor ? prevCursor : null) : nextCursor,
+			prevCursor:
+				direction === 'forward' ? (cursor ? prevCursor : null) : nextCursor,
 			hasNextPage: direction === 'forward' ? hasMore : cursor !== null,
 			hasPrevPage: direction === 'forward' ? cursor !== null : hasMore,
 		};
@@ -1528,7 +1547,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		if (this.orderByIntents.length === 1) {
 			const orderBy = this.orderByIntents[0];
 			if (!orderBy) return null;
-			
+
 			const field =
 				typeof orderBy === 'string' ? orderBy : (orderBy.field as string);
 			const sortDir =
@@ -1543,9 +1562,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 
 			// Determine comparison based on sort direction and pagination direction
 			const isAsc =
-				sortDir === 'asc'
-					? direction === 'forward'
-					: direction === 'backward';
+				sortDir === 'asc' ? direction === 'forward' : direction === 'backward';
 			return {
 				kind: 'comparison',
 				field,
@@ -1564,7 +1581,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			for (let j = 0; j <= i; j++) {
 				const orderBy = this.orderByIntents[j];
 				if (!orderBy) continue;
-				
+
 				const field =
 					typeof orderBy === 'string' ? orderBy : (orderBy.field as string);
 				const sortDir =
@@ -1612,9 +1629,10 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			return null;
 		}
 
-		// biome-ignore lint/style/noNonNullAssertion: length check guarantees first element
-		return conditions.length === 1
-			? conditions[0]!
+		// Safe: length check guarantees first element exists
+		const firstCondition = conditions[0];
+		return conditions.length === 1 && firstCondition !== undefined
+			? firstCondition
 			: { kind: 'or', conditions };
 	}
 

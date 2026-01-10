@@ -97,7 +97,6 @@ export {
 
 // Factory
 export { createOrm } from './orm.js';
-
 // NOTE: RecursiveQueryBuilder is now internal-only (DX-022)
 // Use include({ recursive: true }) API instead
 // Type exports kept for edge-table support (internal use)
@@ -109,6 +108,22 @@ export type {
 	SelectField,
 	TraversalDirection,
 } from './recursive-query-builder.js';
+// Schema Bridge (ARCH-002 codegen-first)
+export {
+	buildModelFromSchema,
+	type GeneratedBelongsTo,
+	type GeneratedColumn,
+	type GeneratedColumnType,
+	type GeneratedConventions,
+	type GeneratedHasMany,
+	type GeneratedHint,
+	type GeneratedManyToMany,
+	type GeneratedRelation,
+	type GeneratedRelationKind,
+	type GeneratedSchema,
+	type GeneratedTable,
+	isGeneratedSchema,
+} from './schema-bridge.js';
 
 // Subquery Builder (DX-012 Block 3)
 export {
@@ -139,6 +154,8 @@ export type {
 	OrmOptions,
 	OrmOptionsWithAdapter,
 	OrmOptionsWithModel,
+	// ARCH-002: Codegen-first schema option
+	OrmOptionsWithSchema,
 	PaginatedResult,
 	PaginateOptions,
 	QueryBuilder,

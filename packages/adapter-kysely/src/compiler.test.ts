@@ -2798,7 +2798,12 @@ describe('SQL Compiler', () => {
 					action: {
 						type: 'doUpdate',
 						set: { name: 'Updated John' },
-						where: { kind: 'comparison', field: 'active', operator: 'eq', value: true },
+						where: {
+							kind: 'comparison',
+							field: 'active',
+							operator: 'eq',
+							value: true,
+						},
 					},
 				};
 
@@ -2847,7 +2852,12 @@ describe('SQL Compiler', () => {
 					type: 'update' as const,
 					table: 'users',
 					set: { name: 'Updated' },
-					where: { kind: 'comparison' as const, field: 'id', operator: 'eq' as const, value: 1 },
+					where: {
+						kind: 'comparison' as const,
+						field: 'id',
+						operator: 'eq' as const,
+						value: 1,
+					},
 					returning: ['id', 'name', 'email'],
 				};
 
@@ -2863,7 +2873,12 @@ describe('SQL Compiler', () => {
 					type: 'update' as const,
 					table: 'users',
 					set: { name: 'Updated' },
-					where: { kind: 'comparison' as const, field: 'id', operator: 'eq' as const, value: 1 },
+					where: {
+						kind: 'comparison' as const,
+						field: 'id',
+						operator: 'eq' as const,
+						value: 1,
+					},
 				};
 
 				const compiled = compileUpdate(intent, kysely);
@@ -2878,7 +2893,12 @@ describe('SQL Compiler', () => {
 				const intent = {
 					type: 'delete' as const,
 					table: 'users',
-					where: { kind: 'comparison' as const, field: 'id', operator: 'eq' as const, value: 1 },
+					where: {
+						kind: 'comparison' as const,
+						field: 'id',
+						operator: 'eq' as const,
+						value: 1,
+					},
 					returning: ['id', 'name'],
 				};
 
@@ -2893,7 +2913,12 @@ describe('SQL Compiler', () => {
 				const intent = {
 					type: 'delete' as const,
 					table: 'users',
-					where: { kind: 'comparison' as const, field: 'id', operator: 'eq' as const, value: 1 },
+					where: {
+						kind: 'comparison' as const,
+						field: 'id',
+						operator: 'eq' as const,
+						value: 1,
+					},
 				};
 
 				const compiled = compileDelete(intent, kysely);

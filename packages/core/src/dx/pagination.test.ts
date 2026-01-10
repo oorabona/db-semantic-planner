@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { PaginateOptions, CursorPaginateOptions } from './types.js';
+import type { CursorPaginateOptions, PaginateOptions } from './types.js';
 
 // Test cursor encode/decode utilities
 describe('Pagination: Cursor utilities', () => {
@@ -11,23 +11,31 @@ describe('Pagination: Cursor utilities', () => {
 	describe('cursor encoding', () => {
 		it('should encode cursor as base64 JSON', () => {
 			const cursorData = { id: 100 };
-			const encoded = Buffer.from(JSON.stringify(cursorData), 'utf-8').toString('base64');
-			
+			const encoded = Buffer.from(JSON.stringify(cursorData), 'utf-8').toString(
+				'base64',
+			);
+
 			expect(encoded).toBe('eyJpZCI6MTAwfQ==');
 		});
 
 		it('should decode cursor from base64 JSON', () => {
 			const cursor = 'eyJpZCI6MTAwfQ==';
-			const decoded = JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8'));
-			
+			const decoded = JSON.parse(
+				Buffer.from(cursor, 'base64').toString('utf-8'),
+			);
+
 			expect(decoded).toEqual({ id: 100 });
 		});
 
 		it('should handle multi-field cursors', () => {
 			const cursorData = { id: 100, created_at: '2025-01-01' };
-			const encoded = Buffer.from(JSON.stringify(cursorData), 'utf-8').toString('base64');
-			const decoded = JSON.parse(Buffer.from(encoded, 'base64').toString('utf-8'));
-			
+			const encoded = Buffer.from(JSON.stringify(cursorData), 'utf-8').toString(
+				'base64',
+			);
+			const decoded = JSON.parse(
+				Buffer.from(encoded, 'base64').toString('utf-8'),
+			);
+
 			expect(decoded).toEqual(cursorData);
 		});
 	});
@@ -40,7 +48,7 @@ describe('Pagination: Type contracts', () => {
 				page: 2,
 				perPage: 25,
 			};
-			
+
 			expect(options.page).toBe(2);
 			expect(options.perPage).toBe(25);
 		});
@@ -51,13 +59,13 @@ describe('Pagination: Type contracts', () => {
 				perPage: 10,
 				withCount: false,
 			};
-			
+
 			expect(options.withCount).toBe(false);
 		});
 
 		it('should allow all options to be optional', () => {
 			const options: PaginateOptions = {};
-			
+
 			expect(options.page).toBeUndefined();
 			expect(options.perPage).toBeUndefined();
 			expect(options.withCount).toBeUndefined();
@@ -70,7 +78,7 @@ describe('Pagination: Type contracts', () => {
 				cursor: 'eyJpZCI6MTAwfQ==',
 				limit: 20,
 			};
-			
+
 			expect(options.cursor).toBe('eyJpZCI6MTAwfQ==');
 			expect(options.limit).toBe(20);
 		});
@@ -82,7 +90,7 @@ describe('Pagination: Type contracts', () => {
 			const backwardOptions: CursorPaginateOptions = {
 				direction: 'backward',
 			};
-			
+
 			expect(forwardOptions.direction).toBe('forward');
 			expect(backwardOptions.direction).toBe('backward');
 		});
@@ -92,7 +100,7 @@ describe('Pagination: Type contracts', () => {
 				cursor: null,
 				limit: 10,
 			};
-			
+
 			expect(options.cursor).toBeNull();
 		});
 	});
@@ -135,7 +143,7 @@ describe('Pagination: Offset calculations', () => {
 		const page = 1;
 		const perPage = 20;
 		const offset = (page - 1) * perPage;
-		
+
 		expect(offset).toBe(0);
 	});
 
@@ -143,7 +151,7 @@ describe('Pagination: Offset calculations', () => {
 		const page = 2;
 		const perPage = 20;
 		const offset = (page - 1) * perPage;
-		
+
 		expect(offset).toBe(20);
 	});
 
@@ -151,7 +159,7 @@ describe('Pagination: Offset calculations', () => {
 		const page = 5;
 		const perPage = 50;
 		const offset = (page - 1) * perPage;
-		
+
 		expect(offset).toBe(200);
 	});
 
@@ -159,7 +167,7 @@ describe('Pagination: Offset calculations', () => {
 		const total = 95;
 		const perPage = 20;
 		const totalPages = Math.ceil(total / perPage);
-		
+
 		expect(totalPages).toBe(5);
 	});
 
@@ -167,7 +175,7 @@ describe('Pagination: Offset calculations', () => {
 		const total = 100;
 		const perPage = 20;
 		const totalPages = Math.ceil(total / perPage);
-		
+
 		expect(totalPages).toBe(5);
 	});
 });
@@ -176,14 +184,14 @@ describe('Pagination: hasNextPage/hasPrevPage logic', () => {
 	it('should have hasPrevPage=false on page 1', () => {
 		const page = 1;
 		const hasPrevPage = page > 1;
-		
+
 		expect(hasPrevPage).toBe(false);
 	});
 
 	it('should have hasPrevPage=true on page 2', () => {
 		const page = 2;
 		const hasPrevPage = page > 1;
-		
+
 		expect(hasPrevPage).toBe(true);
 	});
 
@@ -191,7 +199,7 @@ describe('Pagination: hasNextPage/hasPrevPage logic', () => {
 		const page = 2;
 		const totalPages = 5;
 		const hasNextPage = page < totalPages;
-		
+
 		expect(hasNextPage).toBe(true);
 	});
 
@@ -199,7 +207,7 @@ describe('Pagination: hasNextPage/hasPrevPage logic', () => {
 		const page = 5;
 		const totalPages = 5;
 		const hasNextPage = page < totalPages;
-		
+
 		expect(hasNextPage).toBe(false);
 	});
 });
@@ -209,36 +217,40 @@ describe('Pagination: Cursor condition building', () => {
 		it('should use gt for forward + asc', () => {
 			const sortDir = 'asc';
 			const direction = 'forward';
-			const isAsc = sortDir === 'asc' ? direction === 'forward' : direction === 'backward';
+			const isAsc =
+				sortDir === 'asc' ? direction === 'forward' : direction === 'backward';
 			const operator = isAsc ? 'gt' : 'lt';
-			
+
 			expect(operator).toBe('gt');
 		});
 
 		it('should use lt for forward + desc', () => {
 			const sortDir = 'desc';
 			const direction = 'forward';
-			const isAsc = sortDir === 'asc' ? direction === 'forward' : direction === 'backward';
+			const isAsc =
+				sortDir === 'asc' ? direction === 'forward' : direction === 'backward';
 			const operator = isAsc ? 'gt' : 'lt';
-			
+
 			expect(operator).toBe('lt');
 		});
 
 		it('should use lt for backward + asc', () => {
 			const sortDir = 'asc';
 			const direction = 'backward';
-			const isAsc = sortDir === 'asc' ? direction === 'forward' : direction === 'backward';
+			const isAsc =
+				sortDir === 'asc' ? direction === 'forward' : direction === 'backward';
 			const operator = isAsc ? 'gt' : 'lt';
-			
+
 			expect(operator).toBe('lt');
 		});
 
 		it('should use gt for backward + desc', () => {
 			const sortDir = 'desc';
 			const direction = 'backward';
-			const isAsc = sortDir === 'asc' ? direction === 'forward' : direction === 'backward';
+			const isAsc =
+				sortDir === 'asc' ? direction === 'forward' : direction === 'backward';
 			const operator = isAsc ? 'gt' : 'lt';
-			
+
 			expect(operator).toBe('gt');
 		});
 	});
