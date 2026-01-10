@@ -20,6 +20,7 @@ import {
 	ExecutionError,
 	InvalidOperationError,
 	NotFoundError,
+	RelationNotFoundError,
 } from './errors.js';
 import { and, eq, inArray } from './filters.js';
 import {
@@ -951,10 +952,14 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		const qualifiedName = `${this.from}.${relation}`;
 		const relationMeta = this.model.getRelation(qualifiedName);
 		if (!relationMeta) {
-			throw new InvalidOperationError(
-				'recursive include execution',
-				`Relation '${relation}' not found on '${this.from}'`,
-			);
+			// Get available relations for helpful error message
+			const tableRelations = this.model.getRelationsFrom(this.from);
+			const available = tableRelations?.map((r) => r.name) ?? [];
+			throw new RelationNotFoundError({
+				table: this.from,
+				requested: relation,
+				available,
+			});
 		}
 
 		// Determine the foreign key column from relation metadata

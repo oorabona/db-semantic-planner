@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
 	AmbiguousRelationError,
+	ColumnNotFoundError,
 	ExecutionError,
+	findClosestMatch,
 	NotFoundError,
 	RelationNotFoundError,
+	TableNotFoundError,
 } from './errors.js';
 
 describe('AmbiguousRelationError', () => {
@@ -225,5 +228,223 @@ describe('RelationNotFoundError', () => {
 
 		expect(error instanceof RelationNotFoundError).toBe(true);
 		expect(error instanceof Error).toBe(true);
+	});
+});
+
+describe('TableNotFoundError', () => {
+	it('creates error with requested and available tables', () => {
+		const error = new TableNotFoundError({
+			requested: 'usrs',
+			available: ['users', 'posts', 'comments'],
+		});
+
+		expect(error.requested).toBe('usrs');
+		expect(error.available).toEqual(['users', 'posts', 'comments']);
+	});
+
+	it('generates message with available tables', () => {
+		const error = new TableNotFoundError({
+			requested: 'unknown',
+			available: ['users', 'posts'],
+		});
+
+		expect(error.message).toContain("Table 'unknown' not found in schema");
+		expect(error.message).toContain('Available tables: users, posts');
+	});
+
+	it('provides fuzzy match suggestion for typos', () => {
+		const error = new TableNotFoundError({
+			requested: 'usrs',
+			available: ['users', 'posts', 'comments'],
+		});
+
+		expect(error.suggestion).toBe('users');
+		expect(error.message).toContain("Did you mean 'users'?");
+	});
+
+	it('provides suggestion for prefix match', () => {
+		const error = new TableNotFoundError({
+			requested: 'user',
+			available: ['users', 'posts'],
+		});
+
+		expect(error.suggestion).toBe('users');
+		expect(error.message).toContain("Did you mean 'users'?");
+	});
+
+	it('handles no available tables gracefully', () => {
+		const error = new TableNotFoundError({
+			requested: 'anything',
+			available: [],
+		});
+
+		expect(error.suggestion).toBeUndefined();
+		expect(error.message).toContain('Available tables: (none defined)');
+		expect(error.message).not.toContain('Did you mean');
+	});
+
+	it('truncates long table lists', () => {
+		const tables = Array.from({ length: 15 }, (_, i) => `table${i}`);
+		const error = new TableNotFoundError({
+			requested: 'unknown',
+			available: tables,
+		});
+
+		expect(error.message).toContain('(and 5 more)');
+	});
+
+	it('has name set to TableNotFoundError', () => {
+		const error = new TableNotFoundError({
+			requested: 'x',
+			available: [],
+		});
+
+		expect(error.name).toBe('TableNotFoundError');
+	});
+
+	it('works with instanceof check', () => {
+		const error = new TableNotFoundError({
+			requested: 'x',
+			available: [],
+		});
+
+		expect(error instanceof TableNotFoundError).toBe(true);
+		expect(error instanceof Error).toBe(true);
+	});
+});
+
+describe('ColumnNotFoundError', () => {
+	it('creates error with table, requested, and available columns', () => {
+		const error = new ColumnNotFoundError({
+			table: 'users',
+			requested: 'emial',
+			available: ['id', 'email', 'name'],
+		});
+
+		expect(error.table).toBe('users');
+		expect(error.requested).toBe('emial');
+		expect(error.available).toEqual(['id', 'email', 'name']);
+	});
+
+	it('generates message with available columns', () => {
+		const error = new ColumnNotFoundError({
+			table: 'users',
+			requested: 'unknown',
+			available: ['id', 'email'],
+		});
+
+		expect(error.message).toContain(
+			"Column 'unknown' not found on table 'users'",
+		);
+		expect(error.message).toContain('Available columns: id, email');
+	});
+
+	it('provides fuzzy match suggestion for typos', () => {
+		const error = new ColumnNotFoundError({
+			table: 'users',
+			requested: 'emial',
+			available: ['id', 'email', 'name'],
+		});
+
+		expect(error.suggestion).toBe('email');
+		expect(error.message).toContain("Did you mean 'email'?");
+	});
+
+	it('provides suggestion for prefix match', () => {
+		const error = new ColumnNotFoundError({
+			table: 'users',
+			requested: 'create',
+			available: ['id', 'createdAt', 'updatedAt'],
+		});
+
+		expect(error.suggestion).toBe('createdAt');
+		expect(error.message).toContain("Did you mean 'createdAt'?");
+	});
+
+	it('handles no available columns gracefully', () => {
+		const error = new ColumnNotFoundError({
+			table: 'users',
+			requested: 'anything',
+			available: [],
+		});
+
+		expect(error.suggestion).toBeUndefined();
+		expect(error.message).toContain('Available columns: (none defined)');
+		expect(error.message).not.toContain('Did you mean');
+	});
+
+	it('truncates long column lists', () => {
+		const columns = Array.from({ length: 20 }, (_, i) => `column${i}`);
+		const error = new ColumnNotFoundError({
+			table: 'users',
+			requested: 'unknown',
+			available: columns,
+		});
+
+		expect(error.message).toContain('(and 5 more)');
+	});
+
+	it('has name set to ColumnNotFoundError', () => {
+		const error = new ColumnNotFoundError({
+			table: 'users',
+			requested: 'x',
+			available: [],
+		});
+
+		expect(error.name).toBe('ColumnNotFoundError');
+	});
+
+	it('works with instanceof check', () => {
+		const error = new ColumnNotFoundError({
+			table: 'users',
+			requested: 'x',
+			available: [],
+		});
+
+		expect(error instanceof ColumnNotFoundError).toBe(true);
+		expect(error instanceof Error).toBe(true);
+	});
+});
+
+describe('findClosestMatch', () => {
+	it('returns exact prefix match', () => {
+		const result = findClosestMatch('user', ['users', 'posts', 'comments']);
+		expect(result).toBe('users');
+	});
+
+	it('returns case-insensitive prefix match', () => {
+		const result = findClosestMatch('User', ['users', 'posts']);
+		expect(result).toBe('users');
+	});
+
+	it('returns fuzzy match for typos', () => {
+		const result = findClosestMatch('commnets', ['users', 'posts', 'comments']);
+		expect(result).toBe('comments');
+	});
+
+	it('prefers prefix match over levenshtein', () => {
+		// Prefix match takes priority
+		const result = findClosestMatch('post', ['posts', 'pots', 'posit']);
+		expect(result).toBe('posts'); // prefix match wins
+	});
+
+	it('returns undefined for empty candidates', () => {
+		const result = findClosestMatch('users', []);
+		expect(result).toBeUndefined();
+	});
+
+	it('handles single character typos', () => {
+		const result = findClosestMatch('usres', ['users', 'posts']);
+		expect(result).toBe('users');
+	});
+
+	it('handles missing character', () => {
+		const result = findClosestMatch('sers', ['users', 'posts']);
+		expect(result).toBe('users');
+	});
+
+	it('handles extra character', () => {
+		const result = findClosestMatch('userss', ['users', 'posts']);
+		expect(result).toBe('users');
 	});
 });

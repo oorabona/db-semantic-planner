@@ -143,8 +143,14 @@ export class AmbiguousRelationError extends Error {
 /**
  * Finds the closest match to a target string from a list of candidates.
  * Uses Levenshtein distance for fuzzy matching.
+ *
+ * @example
+ * ```typescript
+ * findClosestMatch('usrs', ['users', 'posts', 'comments']); // 'users'
+ * findClosestMatch('xyz', ['users', 'posts']); // undefined (no close match)
+ * ```
  */
-function findClosestMatch(
+export function findClosestMatch(
 	target: string,
 	candidates: readonly string[],
 ): string | undefined {
@@ -355,5 +361,146 @@ export class UnsafeOperationError extends Error {
 		this.operation = operation;
 		this.fix = fix;
 		Object.setPrototypeOf(this, UnsafeOperationError.prototype);
+	}
+}
+
+/**
+ * Error thrown when a requested table does not exist in the schema.
+ *
+ * Provides helpful suggestions including available tables and fuzzy-matched
+ * "Did you mean?" hints.
+ *
+ * @example
+ * ```typescript
+ * throw new TableNotFoundError({
+ *   requested: 'usrs',
+ *   available: ['users', 'posts', 'comments'],
+ * });
+ * // Error: Table 'usrs' not found in schema.
+ * // Available tables: users, posts, comments
+ * // Did you mean 'users'?
+ * ```
+ */
+export class TableNotFoundError extends Error {
+	override readonly name = 'TableNotFoundError' as const;
+
+	/**
+	 * The table name that was requested but not found.
+	 */
+	readonly requested: string;
+
+	/**
+	 * Available tables in the schema.
+	 */
+	readonly available: readonly string[];
+
+	/**
+	 * Suggested table name (fuzzy match), if any.
+	 */
+	readonly suggestion?: string;
+
+	constructor(opts: { requested: string; available: readonly string[] }) {
+		const suggestion = findClosestMatch(opts.requested, opts.available);
+		const availableList =
+			opts.available.length > 0
+				? opts.available.slice(0, 10).join(', ') +
+					(opts.available.length > 10
+						? ` (and ${opts.available.length - 10} more)`
+						: '')
+				: '(none defined)';
+
+		let message =
+			`Table '${opts.requested}' not found in schema.\n` +
+			`Available tables: ${availableList}`;
+
+		if (suggestion) {
+			message += `\n\nDid you mean '${suggestion}'?`;
+		}
+
+		super(message);
+
+		this.requested = opts.requested;
+		this.available = opts.available;
+		if (suggestion !== undefined) {
+			this.suggestion = suggestion;
+		}
+
+		Object.setPrototypeOf(this, TableNotFoundError.prototype);
+	}
+}
+
+/**
+ * Error thrown when a requested column does not exist on a table.
+ *
+ * Provides helpful suggestions including available columns and fuzzy-matched
+ * "Did you mean?" hints.
+ *
+ * @example
+ * ```typescript
+ * throw new ColumnNotFoundError({
+ *   table: 'users',
+ *   requested: 'emial',
+ *   available: ['id', 'email', 'name', 'createdAt'],
+ * });
+ * // Error: Column 'emial' not found on table 'users'.
+ * // Available columns: id, email, name, createdAt
+ * // Did you mean 'email'?
+ * ```
+ */
+export class ColumnNotFoundError extends Error {
+	override readonly name = 'ColumnNotFoundError' as const;
+
+	/**
+	 * The table where the column was requested.
+	 */
+	readonly table: string;
+
+	/**
+	 * The column name that was requested but not found.
+	 */
+	readonly requested: string;
+
+	/**
+	 * Available columns on this table.
+	 */
+	readonly available: readonly string[];
+
+	/**
+	 * Suggested column name (fuzzy match), if any.
+	 */
+	readonly suggestion?: string;
+
+	constructor(opts: {
+		table: string;
+		requested: string;
+		available: readonly string[];
+	}) {
+		const suggestion = findClosestMatch(opts.requested, opts.available);
+		const availableList =
+			opts.available.length > 0
+				? opts.available.slice(0, 15).join(', ') +
+					(opts.available.length > 15
+						? ` (and ${opts.available.length - 15} more)`
+						: '')
+				: '(none defined)';
+
+		let message =
+			`Column '${opts.requested}' not found on table '${opts.table}'.\n` +
+			`Available columns: ${availableList}`;
+
+		if (suggestion) {
+			message += `\n\nDid you mean '${suggestion}'?`;
+		}
+
+		super(message);
+
+		this.table = opts.table;
+		this.requested = opts.requested;
+		this.available = opts.available;
+		if (suggestion !== undefined) {
+			this.suggestion = suggestion;
+		}
+
+		Object.setPrototypeOf(this, ColumnNotFoundError.prototype);
 	}
 }
