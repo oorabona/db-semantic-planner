@@ -1154,6 +1154,53 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * ```
 	 */
 	transaction<T>(fn: (tx: OrmInstance<DB>) => Promise<T>): Promise<T>;
+
+	// =========================================================================
+	// Raw SQL Execution (DX-027)
+	// =========================================================================
+
+	/**
+	 * Execute raw SQL directly.
+	 * This is the ultimate escape hatch for queries that cannot be
+	 * expressed via the intent system.
+	 *
+	 * ⚠️  WARNING: This bypasses the planner and all type safety.
+	 * The SQL string is NOT validated - ensure it's safe!
+	 * Use parameter placeholders for any dynamic values.
+	 * Note: Placeholder syntax varies by dialect ($1, $2 for PostgreSQL; ? for SQLite/MySQL).
+	 *
+	 * @typeParam T - Expected result type (defaults to unknown)
+	 * @param sql - Raw SQL string with parameter placeholders
+	 * @param parameters - Parameter values for placeholders
+	 * @returns Promise resolving to array of results
+	 *
+	 * @example
+	 * ```typescript
+	 * // Simple query with parameters
+	 * const users = await orm.raw<User>(
+	 *   'SELECT * FROM users WHERE age > $1 AND status = $2',
+	 *   [18, 'active']
+	 * );
+	 *
+	 * // Complex analytics query not expressible via intents
+	 * const stats = await orm.raw<{ month: Date; count: number }>(
+	 *   `SELECT date_trunc('month', created_at) as month,
+	 *           COUNT(*) as count
+	 *    FROM orders
+	 *    GROUP BY 1
+	 *    ORDER BY 1 DESC`,
+	 *   []
+	 * );
+	 *
+	 * // Multi-tenant: raw() does NOT auto-prefix tables with schema.
+	 * // You must include the schema name in your SQL manually:
+	 * const products = await orm.forTenant('acme').raw<Product>(
+	 *   'SELECT * FROM "acme"."products" WHERE inventory > $1',
+	 *   [0]
+	 * );
+	 * ```
+	 */
+	raw<T = unknown>(sql: string, parameters?: readonly unknown[]): Promise<T[]>;
 }
 
 /**

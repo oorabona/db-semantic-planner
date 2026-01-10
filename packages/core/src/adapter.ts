@@ -263,6 +263,47 @@ export interface Adapter<DB = unknown> {
 	 * @throws Error if identifier is invalid
 	 */
 	validateIdentifier(value: string, type: string): void;
+
+	// =========================================================================
+	// Raw SQL Execution (DX-027)
+	// =========================================================================
+
+	/**
+	 * Execute raw SQL directly.
+	 * This is the ultimate escape hatch for queries that cannot be
+	 * expressed via the intent system.
+	 *
+	 * ⚠️  WARNING: This bypasses the planner and all type safety.
+	 * The SQL string is NOT validated - ensure it's safe!
+	 * Parameters should use placeholders ($1, $2, etc.) to prevent injection.
+	 *
+	 * @param sql - Raw SQL string with parameter placeholders
+	 * @param parameters - Parameter values for placeholders
+	 * @returns Promise resolving to array of results
+	 *
+	 * @example
+	 * ```typescript
+	 * // Simple query
+	 * const results = await adapter.executeRaw<User>(
+	 *   'SELECT * FROM users WHERE age > $1',
+	 *   [18]
+	 * );
+	 *
+	 * // Complex query not expressible via intents
+	 * const stats = await adapter.executeRaw<Stats>(
+	 *   `SELECT date_trunc('month', created_at) as month,
+	 *           COUNT(*) as count
+	 *    FROM orders
+	 *    GROUP BY 1
+	 *    ORDER BY 1 DESC`,
+	 *   []
+	 * );
+	 * ```
+	 */
+	executeRaw<T = unknown>(
+		sql: string,
+		parameters?: readonly unknown[],
+	): Promise<T[]>;
 }
 
 // ============================================================================
