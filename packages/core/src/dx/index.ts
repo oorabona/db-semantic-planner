@@ -76,12 +76,14 @@ export {
 	singularize,
 } from './lightweight-model.js';
 
-// Mutation Builders (DX-010)
+// Mutation Builders (DX-010, DX-026)
 export {
 	DeleteBuilder,
 	InsertBuilder,
 	type MutationDump,
 	UpdateBuilder,
+	// DX-026: Upsert support
+	UpsertBuilder,
 } from './mutation-builders.js';
 
 // Object Filter Syntax (DX-012)

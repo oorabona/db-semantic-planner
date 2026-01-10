@@ -10,6 +10,7 @@ import type {
 	DeleteBuilder,
 	InsertBuilder,
 	UpdateBuilder,
+	UpsertBuilder,
 } from './mutation-builders.js';
 import type { WhereFilter } from './object-filter.js';
 
@@ -1111,6 +1112,40 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * ```
 	 */
 	deleteAll(table: string): DeleteBuilder;
+
+	/**
+	 * Start building an UPSERT operation (INSERT ... ON CONFLICT).
+	 * Combines insert with conflict handling for idempotent operations.
+	 *
+	 * @param table - The table to upsert into
+	 * @returns An UpsertBuilder for constructing the upsert
+	 *
+	 * @example
+	 * ```typescript
+	 * // Upsert with doUpdate
+	 * await orm.upsert('users')
+	 *   .values({ id: 1, name: 'Alice', email: 'alice@example.com' })
+	 *   .onConflict(['id'])
+	 *   .doUpdate({ name: 'Alice Updated' })
+	 *   .execute();
+	 *
+	 * // Upsert with doNothing
+	 * await orm.upsert('users')
+	 *   .values({ id: 1, name: 'Alice' })
+	 *   .onConflict(['id'])
+	 *   .doNothing()
+	 *   .execute();
+	 *
+	 * // With returning (requires PostgreSQL)
+	 * const upserted = await orm.upsert('users')
+	 *   .values({ id: 1, name: 'Alice' })
+	 *   .onConflict(['id'])
+	 *   .doUpdate()
+	 *   .returning(['id', 'updated_at'])
+	 *   .execute();
+	 * ```
+	 */
+	upsert(table: string): UpsertBuilder;
 
 	// =========================================================================
 	// Transaction Methods (DX-025)

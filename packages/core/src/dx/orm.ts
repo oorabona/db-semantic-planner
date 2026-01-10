@@ -26,6 +26,7 @@ import {
 	DeleteBuilder,
 	InsertBuilder,
 	UpdateBuilder,
+	UpsertBuilder,
 } from './mutation-builders.js';
 import {
 	isWhereIntent,
@@ -335,6 +336,16 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				adapter,
 				schemaName,
 				allowAll: true,
+			});
+		},
+
+		// DX-026: Upsert support
+		upsert(table: string): UpsertBuilder {
+			return new UpsertBuilder({
+				table,
+				model,
+				adapter,
+				schemaName,
 			});
 		},
 

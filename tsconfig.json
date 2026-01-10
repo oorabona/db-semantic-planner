@@ -17,7 +17,6 @@
 	},
 	"references": [
 		{ "path": "./packages/core" },
-		{ "path": "./packages/adapter-kysely" },
-		{ "path": "./packages/dx" }
+		{ "path": "./packages/adapter-kysely" }
 	]
 }
