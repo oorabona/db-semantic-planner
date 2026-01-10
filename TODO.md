@@ -355,17 +355,106 @@ Window function support across all packages for analytics queries.
   - Structured logging with correlation IDs (formatDumpJson)
   - Parameter redaction for logs (redactParams)
 
+## ✅ Completed: DX-029 Better Error Messages with Suggestions (2026-01-11)
+
+**Priority:** HIGH | **Effort:** S (~8h) | **Breaking:** No
+
+Improved error messages to guide users with available options and fuzzy matching suggestions:
+
+- [x] ✅ `RelationNotFoundError` now shows available relations (already implemented, now used in orm.ts)
+- [x] ✅ `TableNotFoundError` added with fuzzy matching and available tables list
+- [x] ✅ `ColumnNotFoundError` added with fuzzy matching and available columns list
+- [x] ✅ `findClosestMatch()` exported for reuse (Levenshtein distance + prefix priority)
+- [x] ✅ 24 new tests added for error classes and fuzzy matching
+
+**Example output:**
+```
+TableNotFoundError: Table 'usrs' not found in schema.
+Available tables: users, posts, comments
+
+Did you mean 'users'?
+```
+
+**Files changed:**
+- `packages/core/src/dx/errors.ts` - Added TableNotFoundError, ColumnNotFoundError, exported findClosestMatch
+- `packages/core/src/dx/index.ts` - Added new exports
+- `packages/core/src/dx/orm.ts` - Now uses RelationNotFoundError with available relations
+- `packages/core/src/dx/errors.test.ts` - 24 new tests (45 total)
+
+**Tests:** All 1210 passing (schema: 54, core: 518, cli: 35, adapter-kysely: 603)
+
+---
+
+## Pending - P1 (High Value DX)
+
+### DX-030-SPIKE: Évaluer Ink vs vue-termui pour REPL
+
+**Priority:** HIGH | **Effort:** XS (~2h) | **Breaking:** No
+
+POC minimal pour comparer les deux frameworks avant implémentation complète :
+
+- [ ] Ink POC: input + box + table output + basic styling
+- [ ] vue-termui POC: même fonctionnalités
+- [ ] Comparer: lignes de code, ergonomie, bugs rencontrés, écosystème
+- [ ] Documenter décision dans ADR
+
+**Critères d'évaluation:**
+| Critère | Poids |
+|---------|-------|
+| Facilité d'implémentation | 30% |
+| Qualité des composants (tables, inputs) | 25% |
+| Stabilité / bugs rencontrés | 25% |
+| Taille bundle / dépendances | 10% |
+| Familiarité équipe | 10% |
+
+**Output:** `docs/adrs/ADR-003-cli-repl-framework.md`
+
+---
+
+### DX-030: CLI REPL Interactive Playground
+
+**Priority:** HIGH | **Effort:** M (~17h) | **Breaking:** No
+**Dépend de:** DX-030-SPIKE, DX-031
+
+REPL interactif pour tester des requêtes sans setup complet :
+
+- [ ] `dbsp repl --schema ./dbsp.schema.ts`
+- [ ] Évaluation de requêtes avec affichage SQL + Plan
+- [ ] Dot commands (`.schema`, `.tables`, `.relations`, `.help`)
+- [ ] Pretty printing (tables, syntax highlighting)
+- [ ] Autocomplétion des noms de tables/relations
+- [ ] Split view optionnel (schema | query | result)
+
+**Tech:** Décision après DX-030-SPIKE
+
+### DX-031: MockAdapter (compile-only)
+
+**Priority:** MEDIUM | **Effort:** S (~2h) | **Breaking:** No
+
+Adapter qui compile sans exécuter (pour REPL et tests) :
+
+- [ ] `createMockAdapter()` qui retourne SQL sans connexion DB
+- [ ] Utile pour tests unitaires sans DB
+- [ ] Prérequis pour DX-030 (REPL)
+
+---
+
 ## Pending - P2
 
 ### Documentation (DX critical)
 
 - [ ] **DOCS-001**: User documentation (Getting Started, API Guide)
-  - Getting Started guide (installation, first query)
-  - API reference (select, insert, update, delete, recursive, window)
-  - Migration guide from Prisma/Drizzle
-  - Multi-tenant setup guide
-  - Best practices and patterns
-- [ ] **DOCS-002**: Interactive examples (playground or REPL)
+  - [ ] Getting Started guide (installation, first query) - **~4h**
+  - [ ] API reference (select, insert, update, delete, recursive, window)
+  - [ ] Best practices and patterns
+- [ ] **DOCS-002**: Migration guides
+  - [ ] `from-prisma.md` - side-by-side comparisons - **~4h**
+  - [ ] `from-drizzle.md` - **~4h**
+  - [ ] `from-kysely.md` - **~2h**
+- [ ] **DOCS-003**: Pattern guides
+  - [ ] Multi-tenant setup guide
+  - [ ] Recursive queries (category trees, BOM)
+  - [ ] Window functions for analytics
 
 ### API Refinement (Breaking changes - do before v1.0)
 

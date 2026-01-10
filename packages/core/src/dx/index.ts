@@ -6,10 +6,14 @@
 // Errors
 export {
 	AmbiguousRelationError,
+	ColumnNotFoundError,
 	ExecutionError,
+	// Utility for fuzzy matching suggestions
+	findClosestMatch,
 	InvalidOperationError,
 	NotFoundError,
 	RelationNotFoundError,
+	TableNotFoundError,
 	UnsafeOperationError,
 } from './errors.js';
 
