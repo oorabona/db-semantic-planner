@@ -4,10 +4,15 @@
  * Provides Kysely instance factory and schema management for E2E tests.
  */
 
+import { type Adapter, createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 
 const { Pool } = pg;
+
+// Singleton adapter instance
+// biome-ignore lint/suspicious/noExplicitAny: Database schema is dynamic in tests
+let adapter: Adapter<any> | undefined;
 
 // Singleton Kysely instance
 // biome-ignore lint/suspicious/noExplicitAny: Database schema is dynamic in tests
@@ -43,6 +48,21 @@ export async function getTestDb(): Promise<Kysely<any>> {
 }
 
 /**
+ * Get or create the shared Kysely adapter instance.
+ * Uses the same connection as getTestDb().
+ */
+// biome-ignore lint/suspicious/noExplicitAny: Database schema is dynamic in tests
+export async function getTestAdapter(): Promise<Adapter<any>> {
+	if (adapter) {
+		return adapter;
+	}
+
+	const database = await getTestDb();
+	adapter = createKyselyAdapter(database);
+	return adapter;
+}
+
+/**
  * Close the database connection.
  * Called in test teardown.
  */
@@ -50,6 +70,7 @@ export async function closeTestDb(): Promise<void> {
 	if (db) {
 		await db.destroy();
 		db = undefined;
+		adapter = undefined;
 	}
 }
 

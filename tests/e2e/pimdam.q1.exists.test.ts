@@ -10,7 +10,7 @@ import {
 	closeTestDb,
 	createPimdamSchema,
 	dropPimdamSchema,
-	getTestDb,
+	getTestAdapter,
 	pimdamModel,
 	seedAcmeTenant,
 	seedGlobexTenant,
@@ -35,8 +35,8 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 
 	describe('dump() analysis', () => {
 		it('should use EXISTS strategy in plan', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
 				.forTenant('acme')
@@ -62,8 +62,8 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 		});
 
 		it('should generate SQL with WHERE EXISTS', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
 				.forTenant('acme')
@@ -84,8 +84,8 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 		});
 
 		it('should have correct parameters', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
 				.forTenant('acme')
@@ -107,8 +107,8 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 		});
 
 		it('should include tenant in meta', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
 				.forTenant('acme')
@@ -131,8 +131,8 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 
 	describe('execute() results', () => {
 		it('should return only products with approved FR main image (Acme)', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const products = await orm
 				.forTenant('acme')
@@ -157,8 +157,8 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 		});
 
 		it('should return different results per tenant (Globex)', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const products = await orm
 				.forTenant('globex')
@@ -184,8 +184,8 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 		});
 
 		it('should return deterministic results with orderBy', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const query = orm
 				.forTenant('acme')
@@ -216,8 +216,8 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 	describe('Filter strategy contract (CORE-001)', () => {
 		describe('belongsTo → JOIN strategy (default)', () => {
 			it('should use JOIN strategy for belongsTo filter (products.category)', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamModel, adapter });
 
 				const dump = orm
 					.forTenant('acme')
@@ -242,8 +242,8 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 			});
 
 			it('should return correct results with JOIN filter on category', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamModel, adapter });
 
 				const products = await orm
 					.forTenant('acme')
@@ -263,8 +263,8 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 
 		describe('hasMany → EXISTS strategy (default)', () => {
 			it('should use EXISTS strategy for hasMany filter (products.images)', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamModel, adapter });
 
 				const dump = orm
 					.forTenant('acme')

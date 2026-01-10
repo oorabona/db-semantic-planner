@@ -23,6 +23,7 @@ import {
 	closeTestDb,
 	createExtendedPimdamSchema,
 	dropExtendedPimdamSchema,
+	getTestAdapter,
 	getTestDb,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
@@ -214,8 +215,8 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 
 	describe('ORM API: Bundle queries', () => {
 		it('should find products that are bundles', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const bundles = await orm
 				.forTenant(SCHEMA)
@@ -229,8 +230,8 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 		});
 
 		it('should find bundles with components using EXISTS', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// Find products that have components (i.e., are bundles)
 			const dump = orm

@@ -26,6 +26,7 @@ import {
 	closeTestDb,
 	createExtendedPimdamSchema,
 	dropExtendedPimdamSchema,
+	getTestAdapter,
 	getTestDb,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
@@ -96,7 +97,8 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 
 		it('Q3-02: should filter variants by stock availability', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// Query variants with stock > 0 using ORM
 			const dump = orm
@@ -252,7 +254,8 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 	describe('Q5: Unused assets (NOT EXISTS)', () => {
 		it('Q5-01: should find assets not linked to any product', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// Use ORM with notExists
 			const dump = orm
@@ -334,7 +337,8 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 	describe('ORM API: exists/notExists patterns', () => {
 		it('should generate EXISTS SQL for variant images filter', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// Find variants that have images
 			const dump = orm
@@ -350,7 +354,8 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 
 		it('should generate NOT EXISTS SQL for orphan assets', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const dump = orm
 				.forTenant(SCHEMA)

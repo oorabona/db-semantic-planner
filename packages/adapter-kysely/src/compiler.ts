@@ -1838,6 +1838,22 @@ function compileWhere(
 			);
 
 		case 'exists':
+			// Check if relation was already JOINed via filter-strategy: 'join'
+			if (state.joinedFilterRelations.has(where.relation)) {
+				return compileJoinedRelationConditions(
+					eb,
+					{
+						relation: where.relation,
+						...(where.where !== undefined && { where: where.where }),
+						mode: 'some',
+					},
+					alias,
+					model,
+					plan,
+					state,
+					schemaName,
+				);
+			}
 			return compileExists(
 				eb,
 				where,
@@ -1850,6 +1866,22 @@ function compileWhere(
 			);
 
 		case 'notExists':
+			// Check if relation was already JOINed via filter-strategy: 'join'
+			if (state.joinedFilterRelations.has(where.relation)) {
+				return compileJoinedRelationConditions(
+					eb,
+					{
+						relation: where.relation,
+						...(where.where !== undefined && { where: where.where }),
+						mode: 'none',
+					},
+					alias,
+					model,
+					plan,
+					state,
+					schemaName,
+				);
+			}
 			return compileExists(
 				eb,
 				where,
@@ -2355,6 +2387,34 @@ function collectJoinFilterRelations(
 				relation: where.relation,
 				where: where.where,
 				mode: where.mode,
+			});
+		}
+	} else if (where.kind === 'exists') {
+		// Handle exists() helper - maps to mode: 'some'
+		const decision = findFilterStrategyDecision(
+			plan,
+			sourceTable,
+			where.relation,
+		);
+		if (decision?.choice === 'join') {
+			results.push({
+				relation: where.relation,
+				...(where.where !== undefined && { where: where.where }),
+				mode: 'some',
+			});
+		}
+	} else if (where.kind === 'notExists') {
+		// Handle notExists() helper - maps to mode: 'none'
+		const decision = findFilterStrategyDecision(
+			plan,
+			sourceTable,
+			where.relation,
+		);
+		if (decision?.choice === 'join') {
+			results.push({
+				relation: where.relation,
+				...(where.where !== undefined && { where: where.where }),
+				mode: 'none',
 			});
 		}
 	} else if (where.kind === 'and' || where.kind === 'or') {

@@ -1306,22 +1306,54 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		const adapter = this.getConfiguredAdapter();
 		const dumpResult = this.dump();
 
-		// Call onStart at ORM level with full dump (including plan)
-		if (options?.onStart) {
-			options.onStart(dumpResult);
-		}
-
-		// Use adapter's stream method (without onStart, we already called it)
+		// Prepare compiled query for adapter
 		const compiled = {
 			sql: dumpResult.sql,
 			parameters: dumpResult.params as readonly unknown[],
 		};
-		// Only pass chunkSize to adapter, onStart is handled above
+		// Only pass chunkSize to adapter, onStart is handled in wrapper
 		const adapterOptions =
 			options?.chunkSize !== undefined
 				? { chunkSize: options.chunkSize }
 				: undefined;
-		return adapter.stream<TResult>(compiled, adapterOptions);
+
+		// Create a lazy wrapper that defers onStart until first next() call
+		const onStartCallback = options?.onStart;
+		const capturedDump = dumpResult;
+		let adapterIterator: AsyncIterableIterator<TResult> | null = null;
+		let onStartCalled = false;
+
+		const lazyIterator: AsyncIterableIterator<TResult> = {
+			[Symbol.asyncIterator]() {
+				return this;
+			},
+			async next() {
+				// Initialize adapter iterator lazily on first next() call
+				if (!adapterIterator) {
+					adapterIterator = adapter.stream<TResult>(compiled, adapterOptions);
+				}
+				// Call onStart only once, on first next() call
+				if (!onStartCalled && onStartCallback) {
+					onStartCalled = true;
+					onStartCallback(capturedDump);
+				}
+				return adapterIterator.next();
+			},
+			async return(value?: TResult) {
+				if (adapterIterator?.return) {
+					return adapterIterator.return(value);
+				}
+				return { done: true, value: undefined as unknown as TResult };
+			},
+			async throw(error?: unknown) {
+				if (adapterIterator?.throw) {
+					return adapterIterator.throw(error);
+				}
+				throw error;
+			},
+		};
+
+		return lazyIterator;
 	}
 
 	/**

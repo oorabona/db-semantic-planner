@@ -10,7 +10,7 @@ import {
 	closeTestDb,
 	createPimdamSchema,
 	dropPimdamSchema,
-	getTestDb,
+	getTestAdapter,
 	pimdamModel,
 	seedAcmeTenant,
 	seedGlobexTenant,
@@ -67,8 +67,8 @@ describe.skipIf(shouldSkipE2E())(
 
 		describe('dump() analysis - CTE extraction', () => {
 			it('should trigger CTE extraction (images relation accessed twice)', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamModel, adapter });
 
 				const dump = buildQ2Query(orm, 'acme').dump();
 
@@ -78,8 +78,8 @@ describe.skipIf(shouldSkipE2E())(
 			});
 
 			it('should name CTE based on relation', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamModel, adapter });
 
 				const dump = buildQ2Query(orm, 'acme').dump();
 
@@ -94,8 +94,8 @@ describe.skipIf(shouldSkipE2E())(
 			});
 
 			it('should generate SQL with WITH clause', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamModel, adapter });
 
 				const dump = buildQ2Query(orm, 'acme').dump();
 
@@ -104,8 +104,8 @@ describe.skipIf(shouldSkipE2E())(
 			});
 
 			it('should have two EXISTS clauses in SQL', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamModel, adapter });
 
 				const dump = buildQ2Query(orm, 'acme').dump();
 
@@ -117,8 +117,8 @@ describe.skipIf(shouldSkipE2E())(
 			});
 
 			it('should have cte-extraction decision in plan', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamModel, adapter });
 
 				const dump = buildQ2Query(orm, 'acme').dump();
 
@@ -133,8 +133,8 @@ describe.skipIf(shouldSkipE2E())(
 
 		describe('execute() results', () => {
 			it('should return only products with BOTH FR and EN approved main images (Acme)', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamModel, adapter });
 
 				const products = await buildQ2Query(orm, 'acme').execute();
 
@@ -144,8 +144,8 @@ describe.skipIf(shouldSkipE2E())(
 			});
 
 			it('should return different results per tenant (Globex)', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamModel, adapter });
 
 				const products = await buildQ2Query(orm, 'globex').execute();
 
@@ -155,8 +155,8 @@ describe.skipIf(shouldSkipE2E())(
 			});
 
 			it('should return deterministic results with multiple executions', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamModel, adapter });
 
 				const query = buildQ2Query(orm, 'acme');
 

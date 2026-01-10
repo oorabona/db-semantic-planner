@@ -31,6 +31,7 @@ import {
 	closeTestDb,
 	createExtendedPimdamSchema,
 	dropExtendedPimdamSchema,
+	getTestAdapter,
 	getTestDb,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
@@ -58,8 +59,8 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 	// =========================================================================
 	describe('ROW_NUMBER()', () => {
 		it('should generate row numbers ordered by price ascending', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// Query variants with row_number ordered by price
 			const results = (await orm
@@ -91,8 +92,8 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 		});
 
 		it('should generate row numbers ordered by price descending', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const results = (await orm
 				.forTenant(SCHEMA)
@@ -121,8 +122,8 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 	// =========================================================================
 	describe('RANK()', () => {
 		it('should assign same rank to items with equal values', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// Query variants with rank by price (Medium and Large have same price)
 			const results = (await orm
@@ -150,8 +151,8 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 		});
 
 		it('should rank with PARTITION BY product_id', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// Rank variants within each product
 			const results = (await orm
@@ -192,8 +193,8 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 	// =========================================================================
 	describe('DENSE_RANK()', () => {
 		it('should not skip ranks after ties', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const results = (await orm
 				.forTenant(SCHEMA)
@@ -224,8 +225,8 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 	// =========================================================================
 	describe('SUM() Running Total', () => {
 		it('should compute running total of price_cents', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const results = (await orm
 				.forTenant(SCHEMA)
@@ -263,8 +264,8 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 		});
 
 		it('should compute running total partitioned by product_id', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const results = (await orm
 				.forTenant(SCHEMA)
@@ -301,8 +302,8 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 	// =========================================================================
 	describe('AVG() Window', () => {
 		it('should compute moving average of stock', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const results = (await orm
 				.forTenant(SCHEMA)
@@ -369,8 +370,8 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 		});
 
 		it('should isolate window function results between tenants', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// Query tenant 1
 			const tenant1Results = (await orm
@@ -418,8 +419,8 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 		});
 
 		it('should include schema prefix in window function SQL', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const dump = orm
 				.forTenant(SCHEMA)
@@ -443,8 +444,8 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 	// =========================================================================
 	describe('Dump API', () => {
 		it('should include WindowIntent in dump SQL', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const dump = orm
 				.forTenant(SCHEMA)
@@ -463,8 +464,8 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 		});
 
 		it('should generate correct SQL for PARTITION BY + ORDER BY', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const dump = orm
 				.forTenant(SCHEMA)
