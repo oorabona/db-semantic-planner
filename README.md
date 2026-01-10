@@ -175,11 +175,12 @@ The semantic planner automatically makes optimization decisions:
 
 ## Status
 
-**MVP Complete** - 152 tests passing
+**✅ v1.0 Ready** - 1000+ tests passing
 
-- Core: ModelIR, IntentAST, Semantic Planner
-- Adapter: SQL Compiler, Multi-tenant, Observability
+- Core: ModelIR, IntentAST, Semantic Planner, DX Layer
+- Adapter: SQL Compiler, Multi-tenant, Observability, Multi-dialect
 - Golden Tests: Q1 (EXISTS), Q2 (CTE), Q3 (Ambiguity)
+- E2E: PostgreSQL integration (Testcontainers)
 
 ## License
 

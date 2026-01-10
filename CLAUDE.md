@@ -40,7 +40,7 @@ Semantic query planning for databases - an intent-first approach that transforms
 │  │  (SQL gen)  │  │  (Engine)   │  │  (capabilities)         │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
 │                                                                 │
-│  PostgreSQL-first (MVP) • Multi-dialect via capabilities (P2)  │
+│  PostgreSQL-first • Multi-dialect via capabilities              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -110,10 +110,10 @@ module.exports = {
 
 ## Scopes
 
-| Scope | Package | Description | Phase |
-|-------|---------|-------------|-------|
-| `core` | `packages/core` | Schema, Query AST, Planner, DX layer, Adapter interface | MVP |
-| `adapter` | `packages/adapter-kysely` | SQL compiler, KyselyAdapter, multi-dialect | MVP |
+| Scope | Package | Description | Status |
+|-------|---------|-------------|--------|
+| `core` | `packages/core` | Schema, Query AST, Planner, DX layer, Adapter interface | ✅ Complete |
+| `adapter` | `packages/adapter-kysely` | SQL compiler, KyselyAdapter, multi-dialect | ✅ Complete |
 
 ## Tech Stack
 
@@ -121,7 +121,7 @@ module.exports = {
 |-------|------------|
 | Language | TypeScript (strict mode) |
 | Runtime | Node.js (ESM preferred) |
-| Primary DB | PostgreSQL (MVP) |
+| Primary DB | PostgreSQL |
 | Adapter | Kysely (peer dependency) |
 | Testing | Vitest |
 | Build | tsup (ESM + CJS) |
@@ -215,10 +215,11 @@ packages/core → packages/adapter-kysely
 - **Security:** Identifier validation, param redaction in logs
 - **Performance:** Anti "row explosion" defaults, minimal JS overhead
 
-## MVP Non-Goals
+## Out of Scope
 
-- No cost-based optimization or join reordering
-- No runtime schema introspection
-- No NL-to-SQL / AI query generation
-- No full ORM behavior (change tracking, dirty checking, migrations)
-- No multi-dialect correctness guarantees (PostgreSQL-only for MVP)
+These features are intentionally deferred:
+
+- Cost-based optimization or join reordering
+- NL-to-SQL / AI query generation
+- Full ORM behavior (change tracking, dirty checking, migrations)
+- Multi-dialect correctness guarantees (PostgreSQL-focused)
