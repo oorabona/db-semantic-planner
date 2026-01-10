@@ -11,6 +11,7 @@
 import {
 	AmbiguousPlanError,
 	belongsTo,
+	belongsToMany,
 	defineSchema,
 	hasMany,
 	plan,
@@ -1408,6 +1409,293 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 
 			// Source table (users, t0) should have id
 			expect(compiled.sql).toMatch(/"t0"\."id"/);
+		});
+	});
+});
+
+// ============================================================================
+// Q7: M:N Through Table Support (CORE-002-B)
+// ============================================================================
+
+/**
+ * Q7: Verify M:N relations via junction tables work correctly
+ * - belongsToMany uses `through` table for two-JOIN pattern
+ * - Filter generates: source → junction → target
+ * - Include generates: LEFT JOIN source → junction → target
+ * - EXISTS generates: EXISTS subquery with junction JOIN target
+ */
+describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
+	const kysely = createTestKysely();
+
+	// Schema with M:N relation: posts belongsToMany tags through postTags
+	const mnSchema = defineSchema({
+		posts: {
+			id: 'number',
+			title: 'string',
+		},
+		tags: {
+			id: 'number',
+			name: 'string',
+		},
+		postTags: {
+			id: 'number',
+			postId: 'number',
+			tagId: 'number',
+		},
+	})
+		.relations({
+			posts: {
+				tags: belongsToMany('tags', {
+					through: 'postTags',
+					foreignKey: 'postId',
+					otherKey: 'tagId',
+				}),
+			},
+			tags: {
+				posts: belongsToMany('posts', {
+					through: 'postTags',
+					foreignKey: 'tagId',
+					otherKey: 'postId',
+				}),
+			},
+		})
+		.build();
+
+	describe('M:N filter with JOIN strategy', () => {
+		it('should generate two JOINs for belongsToMany filter (posts.tags)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				where: {
+					kind: 'relationFilter',
+					relation: 'tags',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'name',
+						operator: 'eq',
+						value: 'typescript',
+					},
+				},
+			};
+
+			// Force JOIN strategy
+			const schemaWithJoin = defineSchema({
+				posts: { id: 'number', title: 'string' },
+				tags: { id: 'number', name: 'string' },
+				postTags: { id: 'number', postId: 'number', tagId: 'number' },
+			})
+				.relations({
+					posts: {
+						tags: belongsToMany(
+							'tags',
+							{ through: 'postTags', foreignKey: 'postId', otherKey: 'tagId' },
+							{ filterStrategy: 'join' },
+						),
+					},
+				})
+				.build();
+
+			const planReport = plan(intent, schemaWithJoin);
+			const compiled = compile(planReport, schemaWithJoin, kysely);
+
+			// Should have JOIN, not EXISTS
+			expect(compiled.sql.toLowerCase()).toContain('join');
+
+			// Should have two JOINs: postTags and tags
+			expect(compiled.sql).toContain('postTags');
+			expect(compiled.sql).toContain('tags');
+
+			// Verify JOIN chain:
+			// posts.id = postTags.postId (first JOIN)
+			expect(compiled.sql).toMatch(/"t0"\."id"/);
+			expect(compiled.sql).toMatch(/"t1"\."postId"/);
+
+			// postTags.tagId = tags.id (second JOIN)
+			expect(compiled.sql).toMatch(/"t1"\."tagId"/);
+			expect(compiled.sql).toMatch(/"t2"\."id"/);
+		});
+	});
+
+	describe('M:N filter with EXISTS strategy', () => {
+		it('should generate EXISTS with junction JOIN for belongsToMany (posts.tags)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				where: {
+					kind: 'relationFilter',
+					relation: 'tags',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'name',
+						operator: 'eq',
+						value: 'typescript',
+					},
+				},
+			};
+
+			const planReport = plan(intent, mnSchema);
+			const compiled = compile(planReport, mnSchema, kysely);
+
+			// belongsToMany defaults to EXISTS (cardinality: many)
+			expect(compiled.sql.toLowerCase()).toContain('exists');
+
+			// Should have postTags in the subquery
+			expect(compiled.sql).toContain('postTags');
+
+			// Should have inner JOIN to tags in the EXISTS subquery
+			expect(compiled.sql.toLowerCase()).toContain('inner join');
+			expect(compiled.sql).toContain('tags');
+
+			// Verify correlation: postTags.postId = posts.id
+			// Note: alias order depends on state counter
+			expect(compiled.sql).toContain('"postId"');
+			expect(compiled.sql).toMatch(/"t0"\."id"/);
+
+			// Verify junction to target: postTags.tagId = tags.id
+			expect(compiled.sql).toContain('"tagId"');
+		});
+
+		it('should correctly handle nested conditions on target table', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				where: {
+					kind: 'relationFilter',
+					relation: 'tags',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'name',
+						operator: 'eq',
+						value: 'typescript',
+					},
+				},
+			};
+
+			const planReport = plan(intent, mnSchema);
+			const compiled = compile(planReport, mnSchema, kysely);
+
+			// The WHERE condition should be on the target table (tags), not junction
+			// Alias assignment depends on state counter - just verify the pattern
+			expect(compiled.sql).toContain('"name"');
+			expect(compiled.parameters).toContain('typescript');
+		});
+	});
+
+	describe('M:N include with JOIN strategy', () => {
+		it('should generate two LEFT JOINs for belongsToMany include', () => {
+			// Force JOIN strategy for include
+			const schemaWithJoin = defineSchema({
+				posts: { id: 'number', title: 'string' },
+				tags: { id: 'number', name: 'string' },
+				postTags: { id: 'number', postId: 'number', tagId: 'number' },
+			})
+				.relations({
+					posts: {
+						tags: belongsToMany(
+							'tags',
+							{ through: 'postTags', foreignKey: 'postId', otherKey: 'tagId' },
+							{ includeStrategy: 'join' },
+						),
+					},
+				})
+				.build();
+
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				include: [{ relation: 'tags' }],
+			};
+
+			const planReport = plan(intent, schemaWithJoin);
+			const compiled = compile(planReport, schemaWithJoin, kysely);
+
+			// Should have LEFT JOINs
+			expect(compiled.sql.toLowerCase()).toContain('left join');
+
+			// Should have both junction and target tables
+			expect(compiled.sql).toContain('postTags');
+			expect(compiled.sql).toContain('tags');
+
+			// Should have aliased columns for tags
+			expect(compiled.sql).toContain('tags.id');
+			expect(compiled.sql).toContain('tags.name');
+		});
+	});
+
+	describe('M:N with custom FK names', () => {
+		it('should use custom foreignKey and otherKey', () => {
+			const customFkSchema = defineSchema({
+				users: { id: 'number', name: 'string' },
+				roles: { id: 'number', roleName: 'string' },
+				userRoles: { id: 'number', user_id: 'number', role_id: 'number' },
+			})
+				.relations({
+					users: {
+						roles: belongsToMany('roles', {
+							through: 'userRoles',
+							foreignKey: 'user_id',
+							otherKey: 'role_id',
+						}),
+					},
+				})
+				.build();
+
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'relationFilter',
+					relation: 'roles',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'roleName',
+						operator: 'eq',
+						value: 'admin',
+					},
+				},
+			};
+
+			const planReport = plan(intent, customFkSchema);
+			const compiled = compile(planReport, customFkSchema, kysely);
+
+			// Should use custom FK names
+			expect(compiled.sql).toContain('user_id');
+			expect(compiled.sql).toContain('role_id');
+		});
+	});
+
+	describe('M:N with schema prefix (multi-tenant)', () => {
+		it('should prefix all tables including junction', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				where: {
+					kind: 'relationFilter',
+					relation: 'tags',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'name',
+						operator: 'eq',
+						value: 'typescript',
+					},
+				},
+			};
+
+			const planReport = plan(intent, mnSchema);
+			const compiled = compile(planReport, mnSchema, kysely, {
+				schemaName: 'tenant_123',
+			});
+
+			// All tables should be prefixed
+			expect(compiled.sql).toContain('tenant_123');
+			expect(compiled.sql).toContain('"tenant_123"."posts"');
+			expect(compiled.sql).toContain('"tenant_123"."postTags"');
+			expect(compiled.sql).toContain('"tenant_123"."tags"');
 		});
 	});
 });

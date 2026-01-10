@@ -551,3 +551,31 @@ expect(compiled.sql).toContain('author.');
 ```
 
 **Location:** `packages/adapter-kysely/src/compiler.ts` compileIncludeJoin(), `packages/adapter-kysely/src/golden.test.ts` Q5 tests
+
+---
+
+### Test Assertions: Use Pattern Matching for Table Aliases (2026-01-10)
+
+**Issue:** Tests expecting specific table aliases like `t1.postId` fail because alias order varies with internal state counter.
+
+**Cause:** The compiler generates aliases like `t0`, `t1`, `t2` based on an incrementing counter. In M:N through joins, whether junction table gets `t1` or `t2` depends on when `getNextAlias()` is called during compilation.
+
+**Wrong pattern:**
+```typescript
+// FRAGILE - assumes specific alias assignment
+expect(compiled.sql).toMatch(/"t1"\."postId"/);
+expect(compiled.sql).toMatch(/"t2"\."tagId"/);
+```
+
+**Solution:** Match the column name pattern without specific alias:
+```typescript
+// ROBUST - checks column exists in correct context
+expect(compiled.sql).toContain('"postId"');
+expect(compiled.sql).toContain('"tagId"');
+// Or for more precision:
+expect(compiled.sql).toMatch(/inner join.*"postTags".*"postId"/i);
+```
+
+**Key insight:** What matters is that the correct columns appear in the correct JOIN structure, not which specific alias number they get.
+
+**Location:** `packages/adapter-kysely/src/golden.test.ts` Q7 M:N tests

@@ -137,6 +137,8 @@ describe('ModelIR', () => {
 			expect(relation?.type).toBe('belongsToMany');
 			expect(relation?.cardinality).toBe('many');
 			expect(relation?.through).toBe('postTags');
+			expect(relation?.foreignKey).toBe('postId');
+			expect(relation?.otherKey).toBe('tagId');
 		});
 	});
 

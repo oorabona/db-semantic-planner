@@ -24,6 +24,29 @@
 
 ## Recently Completed
 
+### CORE-002-B: M:N Through Table Support ✅ (2026-01-10)
+
+**Scope:** core, adapter-kysely
+**Spec:** [docs/plans/CORE-002-B-mn-through-table.md](docs/plans/CORE-002-B-mn-through-table.md)
+
+Implemented M:N (many-to-many) relation support via junction tables:
+
+- [x] ✅ Block 1: Add otherKey to RelationIR (2026-01-10)
+- [x] ✅ Block 2: M:N filter with JOIN - two INNER JOINs pattern (2026-01-10)
+- [x] ✅ Block 3: M:N filter with EXISTS - EXISTS with junction JOIN (2026-01-10)
+- [x] ✅ Block 4: M:N include with JOIN - two LEFT JOINs pattern (2026-01-10)
+- [x] ✅ Block 5: Q7 golden tests (6 tests) (2026-01-10)
+
+**Key features:**
+- `belongsToMany('target', { through, foreignKey, otherKey })`
+- Two-JOIN pattern: `source → junction → target`
+- FK inference: `{source}Id` and `{target}Id` defaults
+- Multi-tenant schema prefix on all 3 tables
+- Custom FK names support
+
+**Files changed:** 6 (core: 3, adapter: 2, spec: 1)
+**Tests:** 1010 passing (7 new tests: 6 Q7 + 1 core)
+
 ### CORE-002: Relation Resolution Correctness ✅ (2026-01-09)
 
 **Scope:** adapter-kysely
@@ -125,8 +148,8 @@ Window function support across all packages for analytics queries.
 
 **See:** Recently Completed section above.
 
-**Deferred to CORE-002-B:**
-- [ ] M:N via through table support (relation.through property exists but not implemented)
+**Completed in CORE-002-B:**
+- [x] ✅ M:N via through table support (2026-01-10)
 
 ---
 

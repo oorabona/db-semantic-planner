@@ -1818,14 +1818,6 @@ function compileExists(
 	const relatedAlias = getNextAlias(state);
 	state.tableAliases.set(`${relation.target}_${relatedAlias}`, relatedAlias);
 
-	// Build EXISTS subquery
-	// FK direction depends on relation type:
-	// - belongsTo: source.foreignKey = target.primaryKey
-	// - hasMany/hasOne: target.foreignKey = source.primaryKey
-	const fk = Array.isArray(relation.foreignKey)
-		? relation.foreignKey[0]
-		: (relation.foreignKey ?? 'id');
-
 	// Get source table's primary key
 	const sourceTableDef = model.getTable(relation.source);
 	const sourcePk = sourceTableDef?.primaryKey;
@@ -1833,39 +1825,88 @@ function compileExists(
 		? (sourcePk[0] ?? 'id')
 		: (sourcePk ?? 'id');
 
-	// Get target table's primary key (needed for belongsTo)
+	// Get target table's primary key
 	const targetTableDef = model.getTable(relation.target);
 	const targetPk = targetTableDef?.primaryKey;
 	const targetKey = Array.isArray(targetPk)
 		? (targetPk[0] ?? 'id')
 		: (targetPk ?? 'id');
 
-	// Apply schema prefix for multi-tenant support
-	const targetTable = schemaName
-		? `${schemaName}.${relation.target}`
-		: relation.target;
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	let subquery: any;
 
-	// Build base subquery
-	let subquery = eb
-		.selectFrom(`${targetTable} as ${relatedAlias}`)
-		// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-		.select((innerEb: any) => innerEb.lit(1).as('_exists'));
+	// Handle M:N (belongsToMany) with through table
+	if (relation.through) {
+		// M:N EXISTS: SELECT 1 FROM junction JOIN target WHERE junction.fk = source.pk AND target.<conditions>
+		const junctionAlias = getNextAlias(state);
+		const targetAlias = relatedAlias;
 
-	// Add FK correlation based on relation type
-	if (relation.type === 'belongsTo') {
-		// belongsTo: source.fk = target.pk (e.g., posts.authorId = users.id)
-		subquery = subquery.whereRef(
-			`${sourceAlias}.${fk}`,
-			'=',
-			`${relatedAlias}.${targetKey}`,
-		);
+		// FK from junction to source (default: {source}Id)
+		const fk = Array.isArray(relation.foreignKey)
+			? relation.foreignKey[0]
+			: (relation.foreignKey ?? `${relation.source}Id`);
+
+		// FK from junction to target (default: {target}Id)
+		const otherKey = relation.otherKey ?? `${relation.target}Id`;
+
+		// Apply schema prefix
+		const junctionTable = schemaName
+			? `${schemaName}.${relation.through}`
+			: relation.through;
+		const targetTable = schemaName
+			? `${schemaName}.${relation.target}`
+			: relation.target;
+
+		// Build subquery starting from junction table
+		subquery = eb
+			.selectFrom(`${junctionTable} as ${junctionAlias}`)
+			// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+			.select((innerEb: any) => innerEb.lit(1).as('_exists'))
+			// JOIN target table
+			.innerJoin(
+				`${targetTable} as ${targetAlias}`,
+				`${junctionAlias}.${otherKey}`,
+				`${targetAlias}.${targetKey}`,
+			)
+			// Correlate junction to source
+			.whereRef(`${junctionAlias}.${fk}`, '=', `${sourceAlias}.${sourceKey}`);
 	} else {
-		// hasMany/hasOne: target.fk = source.pk (e.g., posts.userId = users.id)
-		subquery = subquery.whereRef(
-			`${relatedAlias}.${fk}`,
-			'=',
-			`${sourceAlias}.${sourceKey}`,
-		);
+		// Non-M:N relations
+		// Build EXISTS subquery
+		// FK direction depends on relation type:
+		// - belongsTo: source.foreignKey = target.primaryKey
+		// - hasMany/hasOne: target.foreignKey = source.primaryKey
+		const fk = Array.isArray(relation.foreignKey)
+			? relation.foreignKey[0]
+			: (relation.foreignKey ?? 'id');
+
+		// Apply schema prefix for multi-tenant support
+		const targetTable = schemaName
+			? `${schemaName}.${relation.target}`
+			: relation.target;
+
+		// Build base subquery
+		subquery = eb
+			.selectFrom(`${targetTable} as ${relatedAlias}`)
+			// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+			.select((innerEb: any) => innerEb.lit(1).as('_exists'));
+
+		// Add FK correlation based on relation type
+		if (relation.type === 'belongsTo') {
+			// belongsTo: source.fk = target.pk (e.g., posts.authorId = users.id)
+			subquery = subquery.whereRef(
+				`${sourceAlias}.${fk}`,
+				'=',
+				`${relatedAlias}.${targetKey}`,
+			);
+		} else {
+			// hasMany/hasOne: target.fk = source.pk (e.g., posts.userId = users.id)
+			subquery = subquery.whereRef(
+				`${relatedAlias}.${fk}`,
+				'=',
+				`${sourceAlias}.${sourceKey}`,
+			);
+		}
 	}
 
 	// Add nested WHERE if present
@@ -1988,20 +2029,7 @@ function applyIncludeJoins(
 			);
 		}
 
-		// Create alias for the joined table
-		const joinAlias = getNextAlias(state);
-		state.tableAliases.set(`${relation.target}_include`, joinAlias);
-		state.joinedIncludeRelations.set(relationName, {
-			alias: joinAlias,
-			targetTable: relation.target,
-			relationName,
-		});
-
-		// Build JOIN condition based on relation type
-		const fk = Array.isArray(relation.foreignKey)
-			? relation.foreignKey[0]
-			: (relation.foreignKey ?? 'id');
-
+		// Get table definitions
 		const targetTableDef = model.getTable(relation.target);
 		const targetPk = targetTableDef?.primaryKey;
 		const targetKey = Array.isArray(targetPk)
@@ -2014,27 +2042,86 @@ function applyIncludeJoins(
 			? (sourcePk[0] ?? 'id')
 			: (sourcePk ?? 'id');
 
-		// Apply schema prefix
-		const targetTable = schemaName
-			? `${schemaName}.${relation.target}`
-			: relation.target;
+		// Handle M:N (belongsToMany) with through table
+		if (relation.through) {
+			// M:N requires two LEFT JOINs: source → junction → target
+			const junctionAlias = getNextAlias(state);
+			const targetAlias = getNextAlias(state);
 
-		// Determine join condition based on relation type
-		// belongsTo: source.foreignKey = target.primaryKey
-		// hasMany/hasOne: source.primaryKey = target.foreignKey
-		if (relation.type === 'belongsTo') {
+			// FK from junction to source (default: {source}Id)
+			const fk = Array.isArray(relation.foreignKey)
+				? relation.foreignKey[0]
+				: (relation.foreignKey ?? `${relation.source}Id`);
+
+			// FK from junction to target (default: {target}Id)
+			const otherKey = relation.otherKey ?? `${relation.target}Id`;
+
+			// Apply schema prefix
+			const junctionTable = schemaName
+				? `${schemaName}.${relation.through}`
+				: relation.through;
+			const targetTable = schemaName
+				? `${schemaName}.${relation.target}`
+				: relation.target;
+
+			// LEFT JOIN 1: source → junction (source.pk = junction.fk)
 			result = result.leftJoin(
-				`${targetTable} as ${joinAlias}`,
-				`${rootAlias}.${fk}`,
-				`${joinAlias}.${targetKey}`,
-			);
-		} else {
-			// hasMany or hasOne
-			result = result.leftJoin(
-				`${targetTable} as ${joinAlias}`,
-				`${joinAlias}.${fk}`,
+				`${junctionTable} as ${junctionAlias}`,
 				`${rootAlias}.${sourceKey}`,
+				`${junctionAlias}.${fk}`,
 			);
+
+			// LEFT JOIN 2: junction → target (junction.otherKey = target.pk)
+			result = result.leftJoin(
+				`${targetTable} as ${targetAlias}`,
+				`${junctionAlias}.${otherKey}`,
+				`${targetAlias}.${targetKey}`,
+			);
+
+			// Track the target alias (not junction) for column selection
+			state.tableAliases.set(`${relation.target}_include`, targetAlias);
+			state.joinedIncludeRelations.set(relationName, {
+				alias: targetAlias,
+				targetTable: relation.target,
+				relationName,
+			});
+		} else {
+			// Non-M:N relations (hasOne, hasMany, belongsTo)
+			const joinAlias = getNextAlias(state);
+			state.tableAliases.set(`${relation.target}_include`, joinAlias);
+			state.joinedIncludeRelations.set(relationName, {
+				alias: joinAlias,
+				targetTable: relation.target,
+				relationName,
+			});
+
+			// Build JOIN condition based on relation type
+			const fk = Array.isArray(relation.foreignKey)
+				? relation.foreignKey[0]
+				: (relation.foreignKey ?? 'id');
+
+			// Apply schema prefix
+			const targetTable = schemaName
+				? `${schemaName}.${relation.target}`
+				: relation.target;
+
+			// Determine join condition based on relation type
+			// belongsTo: source.foreignKey = target.primaryKey
+			// hasMany/hasOne: source.primaryKey = target.foreignKey
+			if (relation.type === 'belongsTo') {
+				result = result.leftJoin(
+					`${targetTable} as ${joinAlias}`,
+					`${rootAlias}.${fk}`,
+					`${joinAlias}.${targetKey}`,
+				);
+			} else {
+				// hasMany or hasOne
+				result = result.leftJoin(
+					`${targetTable} as ${joinAlias}`,
+					`${joinAlias}.${fk}`,
+					`${rootAlias}.${sourceKey}`,
+				);
+			}
 		}
 	}
 
@@ -2207,21 +2294,7 @@ function applyJoinFilters(
 			);
 		}
 
-		// Create alias for the joined table
-		const joinAlias = getNextAlias(state);
-		state.tableAliases.set(`${relation.target}_join`, joinAlias);
-		state.joinedFilterRelations.set(joinRel.relation, {
-			alias: joinAlias,
-			targetTable: relation.target,
-		});
-
-		// Build JOIN condition based on relation type
-		// belongsTo: source.foreignKey = target.primaryKey
-		// hasMany/hasOne: target.foreignKey = source.primaryKey
-		const fk = Array.isArray(relation.foreignKey)
-			? relation.foreignKey[0]
-			: (relation.foreignKey ?? 'id');
-
+		// Get table definitions
 		const sourceTableDef = model.getTable(relation.source);
 		const sourcePk = sourceTableDef?.primaryKey;
 		const sourceKey = Array.isArray(sourcePk)
@@ -2234,26 +2307,85 @@ function applyJoinFilters(
 			? (targetPk[0] ?? 'id')
 			: (targetPk ?? 'id');
 
-		// Apply schema prefix
-		const targetTable = schemaName
-			? `${schemaName}.${relation.target}`
-			: relation.target;
+		// Handle M:N (belongsToMany) with through table
+		if (relation.through) {
+			// M:N requires two JOINs: source → junction → target
+			const junctionAlias = getNextAlias(state);
+			const targetAlias = getNextAlias(state);
 
-		// Add INNER JOIN with correct FK direction
-		if (relation.type === 'belongsTo') {
-			// belongsTo: source.fk = target.pk (e.g., posts.authorId = users.id)
+			// FK from junction to source (default: {source}Id)
+			const fk = Array.isArray(relation.foreignKey)
+				? relation.foreignKey[0]
+				: (relation.foreignKey ?? `${relation.source}Id`);
+
+			// FK from junction to target (default: {target}Id)
+			const otherKey = relation.otherKey ?? `${relation.target}Id`;
+
+			// Apply schema prefix
+			const junctionTable = schemaName
+				? `${schemaName}.${relation.through}`
+				: relation.through;
+			const targetTable = schemaName
+				? `${schemaName}.${relation.target}`
+				: relation.target;
+
+			// JOIN 1: source → junction (source.pk = junction.fk)
 			result = result.innerJoin(
-				`${targetTable} as ${joinAlias}`,
-				`${rootAlias}.${fk}`,
-				`${joinAlias}.${targetKey}`,
-			);
-		} else {
-			// hasMany/hasOne: target.fk = source.pk (e.g., posts.userId = users.id)
-			result = result.innerJoin(
-				`${targetTable} as ${joinAlias}`,
-				`${joinAlias}.${fk}`,
+				`${junctionTable} as ${junctionAlias}`,
 				`${rootAlias}.${sourceKey}`,
+				`${junctionAlias}.${fk}`,
 			);
+
+			// JOIN 2: junction → target (junction.otherKey = target.pk)
+			result = result.innerJoin(
+				`${targetTable} as ${targetAlias}`,
+				`${junctionAlias}.${otherKey}`,
+				`${targetAlias}.${targetKey}`,
+			);
+
+			// Track the target alias (not junction) for WHERE compilation
+			state.tableAliases.set(`${relation.target}_join`, targetAlias);
+			state.joinedFilterRelations.set(joinRel.relation, {
+				alias: targetAlias,
+				targetTable: relation.target,
+			});
+		} else {
+			// Non-M:N relations (hasOne, hasMany, belongsTo)
+			const joinAlias = getNextAlias(state);
+			state.tableAliases.set(`${relation.target}_join`, joinAlias);
+			state.joinedFilterRelations.set(joinRel.relation, {
+				alias: joinAlias,
+				targetTable: relation.target,
+			});
+
+			// Build JOIN condition based on relation type
+			// belongsTo: source.foreignKey = target.primaryKey
+			// hasMany/hasOne: target.foreignKey = source.primaryKey
+			const fk = Array.isArray(relation.foreignKey)
+				? relation.foreignKey[0]
+				: (relation.foreignKey ?? 'id');
+
+			// Apply schema prefix
+			const targetTable = schemaName
+				? `${schemaName}.${relation.target}`
+				: relation.target;
+
+			// Add INNER JOIN with correct FK direction
+			if (relation.type === 'belongsTo') {
+				// belongsTo: source.fk = target.pk (e.g., posts.authorId = users.id)
+				result = result.innerJoin(
+					`${targetTable} as ${joinAlias}`,
+					`${rootAlias}.${fk}`,
+					`${joinAlias}.${targetKey}`,
+				);
+			} else {
+				// hasMany/hasOne: target.fk = source.pk (e.g., posts.userId = users.id)
+				result = result.innerJoin(
+					`${targetTable} as ${joinAlias}`,
+					`${joinAlias}.${fk}`,
+					`${rootAlias}.${sourceKey}`,
+				);
+			}
 		}
 	}
 
