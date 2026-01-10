@@ -719,7 +719,10 @@ export class UpsertBuilder<T = void> {
 	 * @param set - Optional fields to update on conflict
 	 * @param where - Optional condition for the update
 	 */
-	doUpdate(set?: Record<string, unknown>, where?: WhereIntent): UpsertBuilder<T> {
+	doUpdate(
+		set?: Record<string, unknown>,
+		where?: WhereIntent,
+	): UpsertBuilder<T> {
 		const action: UpsertConflictAction = {
 			type: 'doUpdate',
 			...(set && { set }),

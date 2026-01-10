@@ -6,7 +6,9 @@ catalog:
   '@testcontainers/postgresql': ^11.0.1
   '@types/node': ^22.15.29
   '@types/pg': ^8.15.4
+  commander: ^14.0.0
   kysely: ^0.28.9
   pg: ^8.16.1
+  tsx: ^4.21.0
   typescript: ^5.9.3
   vitest: ^4.0.16
