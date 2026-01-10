@@ -1091,3 +1091,323 @@ describe('Q5: Include strategy contract enforcement', () => {
 		});
 	});
 });
+
+// ============================================================================
+// Q6: FK Direction Correctness (CORE-002)
+// ============================================================================
+
+/**
+ * Q6: Verify FK direction is correct for different relation types
+ * - belongsTo: source.foreignKey = target.primaryKey (e.g., posts.authorId = users.id)
+ * - hasMany: target.foreignKey = source.primaryKey (e.g., posts.authorId = users.id)
+ *
+ * This test suite verifies the fix for CORE-002 where applyJoinFilters and
+ * compileExists were always using the hasMany FK pattern regardless of relation type.
+ */
+describe('Q6: FK Direction Correctness (CORE-002)', () => {
+	const kysely = createTestKysely();
+
+	// Schema with clear FK directions for testing
+	const fkDirectionSchema = defineSchema({
+		posts: {
+			id: 'number',
+			title: 'string',
+			authorId: 'number', // FK to users.id
+		},
+		users: {
+			id: 'number',
+			name: 'string',
+			role: 'string',
+		},
+		comments: {
+			id: 'number',
+			postId: 'number', // FK to posts.id
+			content: 'string',
+		},
+	})
+		.relations({
+			posts: {
+				// belongsTo: FK is in posts table (authorId)
+				author: belongsTo('users', { foreignKey: 'authorId' }),
+				// hasMany: FK is in comments table (postId)
+				comments: hasMany('comments', { foreignKey: 'postId' }),
+			},
+			users: {
+				// hasMany: FK is in posts table (authorId)
+				posts: hasMany('posts', { foreignKey: 'authorId' }),
+			},
+			comments: {
+				// belongsTo: FK is in comments table (postId)
+				post: belongsTo('posts', { foreignKey: 'postId' }),
+			},
+		})
+		.build();
+
+	describe('belongsTo FK direction', () => {
+		it('should use source.fk = target.pk for belongsTo JOIN (posts.author)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				where: {
+					kind: 'relationFilter',
+					relation: 'author',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'role',
+						operator: 'eq',
+						value: 'admin',
+					},
+				},
+			};
+
+			const planReport = plan(intent, fkDirectionSchema);
+			const compiled = compile(planReport, fkDirectionSchema, kysely);
+
+			// CRITICAL: Verify FK direction is source.fk = target.pk
+			// posts.authorId = users.id (NOT users.authorId = posts.id)
+			const sqlLower = compiled.sql.toLowerCase();
+
+			// Should contain: "t0"."authorId" = "t1"."id"
+			// t0 = posts (source), t1 = users (target)
+			expect(sqlLower).toContain('join');
+
+			// Verify the JOIN uses posts.authorId (source.fk), not users.authorId
+			// The pattern should be: posts alias followed by authorId
+			expect(compiled.sql).toMatch(/"t0"\."authorId"/);
+
+			// And target should use id (primary key)
+			expect(compiled.sql).toMatch(/"t1"\."id"/);
+
+			// NEGATIVE TEST: Should NOT have users.authorId pattern
+			// (which would indicate wrong FK direction)
+			expect(compiled.sql).not.toMatch(/"t1"\."authorId"/);
+		});
+
+		it('should use source.fk = target.pk for belongsTo EXISTS (posts.author)', () => {
+			// Use explicit EXISTS strategy for belongsTo
+			const existsSchema = defineSchema({
+				posts: {
+					id: 'number',
+					title: 'string',
+					authorId: 'number',
+				},
+				users: {
+					id: 'number',
+					name: 'string',
+					role: 'string',
+				},
+			})
+				.relations({
+					posts: {
+						author: belongsTo(
+							'users',
+							{ foreignKey: 'authorId' },
+							{ filterStrategy: 'exists' },
+						),
+					},
+				})
+				.build();
+
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				where: {
+					kind: 'relationFilter',
+					relation: 'author',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'role',
+						operator: 'eq',
+						value: 'admin',
+					},
+				},
+			};
+
+			const planReport = plan(intent, existsSchema);
+			const compiled = compile(planReport, existsSchema, kysely);
+
+			// Should use EXISTS
+			expect(compiled.sql.toLowerCase()).toContain('exists');
+
+			// CRITICAL: EXISTS correlation should be source.fk = target.pk
+			// posts.authorId = users.id (NOT users.authorId = posts.id)
+
+			// The outer table (posts) should correlate via authorId
+			expect(compiled.sql).toMatch(/"t0"\."authorId"/);
+
+			// The subquery table (users) should use id
+			expect(compiled.sql).toMatch(/"t1"\."id"/);
+
+			// NEGATIVE TEST: Should NOT have users.authorId
+			expect(compiled.sql).not.toMatch(/"t1"\."authorId"/);
+		});
+	});
+
+	describe('hasMany FK direction (regression)', () => {
+		it('should use target.fk = source.pk for hasMany EXISTS (users.posts)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'relationFilter',
+					relation: 'posts',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'title',
+						operator: 'eq',
+						value: 'test',
+					},
+				},
+			};
+
+			const planReport = plan(intent, fkDirectionSchema);
+			const compiled = compile(planReport, fkDirectionSchema, kysely);
+
+			// hasMany defaults to EXISTS
+			expect(compiled.sql.toLowerCase()).toContain('exists');
+
+			// CRITICAL: EXISTS correlation should be target.fk = source.pk
+			// posts.authorId = users.id
+
+			// The subquery table (posts) should have authorId
+			expect(compiled.sql).toMatch(/"t1"\."authorId"/);
+
+			// The outer table (users) should correlate via id
+			expect(compiled.sql).toMatch(/"t0"\."id"/);
+		});
+
+		it('should use target.fk = source.pk for hasMany JOIN (explicit override)', () => {
+			// Use explicit JOIN strategy for hasMany
+			const joinSchema = defineSchema({
+				users: {
+					id: 'number',
+					name: 'string',
+				},
+				posts: {
+					id: 'number',
+					authorId: 'number',
+					title: 'string',
+				},
+			})
+				.relations({
+					users: {
+						posts: hasMany(
+							'posts',
+							{ foreignKey: 'authorId' },
+							{ filterStrategy: 'join' },
+						),
+					},
+				})
+				.build();
+
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'relationFilter',
+					relation: 'posts',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'title',
+						operator: 'eq',
+						value: 'test',
+					},
+				},
+			};
+
+			const planReport = plan(intent, joinSchema);
+			const compiled = compile(planReport, joinSchema, kysely);
+
+			// Should use JOIN
+			expect(compiled.sql.toLowerCase()).toContain('join');
+			expect(compiled.sql.toLowerCase()).not.toContain('exists');
+
+			// CRITICAL: JOIN should be target.fk = source.pk
+			// posts.authorId = users.id
+
+			// Target table (posts, t1) should have authorId in JOIN condition
+			expect(compiled.sql).toMatch(/"t1"\."authorId"/);
+
+			// Source table (users, t0) should have id in JOIN condition
+			expect(compiled.sql).toMatch(/"t0"\."id"/);
+		});
+	});
+
+	describe('include FK direction', () => {
+		it('should use source.fk = target.pk for belongsTo include (posts.author)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				include: [{ relation: 'author' }],
+			};
+
+			const planReport = plan(intent, fkDirectionSchema);
+			const compiled = compile(planReport, fkDirectionSchema, kysely);
+
+			// belongsTo include uses LEFT JOIN by default
+			expect(compiled.sql.toLowerCase()).toContain('left join');
+
+			// CRITICAL: JOIN should be source.fk = target.pk
+			// posts.authorId = users.id
+
+			// Source table (posts, t0) should have authorId
+			expect(compiled.sql).toMatch(/"t0"\."authorId"/);
+
+			// Target table (users, t1) should have id
+			expect(compiled.sql).toMatch(/"t1"\."id"/);
+
+			// NEGATIVE TEST: Should NOT have users.authorId
+			expect(compiled.sql).not.toMatch(/"t1"\."authorId"/);
+		});
+
+		it('should use target.fk = source.pk for hasMany include with JOIN override', () => {
+			// Use explicit JOIN strategy for hasMany include
+			const joinIncludeSchema = defineSchema({
+				users: {
+					id: 'number',
+					name: 'string',
+				},
+				posts: {
+					id: 'number',
+					authorId: 'number',
+					title: 'string',
+				},
+			})
+				.relations({
+					users: {
+						posts: hasMany(
+							'posts',
+							{ foreignKey: 'authorId' },
+							{ includeStrategy: 'join' },
+						),
+					},
+				})
+				.build();
+
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts' }],
+			};
+
+			const planReport = plan(intent, joinIncludeSchema);
+			const compiled = compile(planReport, joinIncludeSchema, kysely);
+
+			// Should use LEFT JOIN
+			expect(compiled.sql.toLowerCase()).toContain('left join');
+
+			// CRITICAL: JOIN should be target.fk = source.pk
+			// posts.authorId = users.id
+
+			// Target table (posts, t1) should have authorId
+			expect(compiled.sql).toMatch(/"t1"\."authorId"/);
+
+			// Source table (users, t0) should have id
+			expect(compiled.sql).toMatch(/"t0"\."id"/);
+		});
+	});
+});

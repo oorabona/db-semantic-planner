@@ -1819,29 +1819,54 @@ function compileExists(
 	state.tableAliases.set(`${relation.target}_${relatedAlias}`, relatedAlias);
 
 	// Build EXISTS subquery
-	// For hasMany: target.foreignKey = source.primaryKey
-	// foreignKey can be string or array, take first if array
+	// FK direction depends on relation type:
+	// - belongsTo: source.foreignKey = target.primaryKey
+	// - hasMany/hasOne: target.foreignKey = source.primaryKey
 	const fk = Array.isArray(relation.foreignKey)
 		? relation.foreignKey[0]
 		: (relation.foreignKey ?? 'id');
 
-	// Get source table's primary key (use relation.source which is same as sourceTable)
+	// Get source table's primary key
 	const sourceTableDef = model.getTable(relation.source);
 	const sourcePk = sourceTableDef?.primaryKey;
 	const sourceKey = Array.isArray(sourcePk)
 		? (sourcePk[0] ?? 'id')
 		: (sourcePk ?? 'id');
 
+	// Get target table's primary key (needed for belongsTo)
+	const targetTableDef = model.getTable(relation.target);
+	const targetPk = targetTableDef?.primaryKey;
+	const targetKey = Array.isArray(targetPk)
+		? (targetPk[0] ?? 'id')
+		: (targetPk ?? 'id');
+
 	// Apply schema prefix for multi-tenant support
 	const targetTable = schemaName
 		? `${schemaName}.${relation.target}`
 		: relation.target;
 
-	const subquery = eb
+	// Build base subquery
+	let subquery = eb
 		.selectFrom(`${targetTable} as ${relatedAlias}`)
 		// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-		.select((innerEb: any) => innerEb.lit(1).as('_exists'))
-		.whereRef(`${relatedAlias}.${fk}`, '=', `${sourceAlias}.${sourceKey}`);
+		.select((innerEb: any) => innerEb.lit(1).as('_exists'));
+
+	// Add FK correlation based on relation type
+	if (relation.type === 'belongsTo') {
+		// belongsTo: source.fk = target.pk (e.g., posts.authorId = users.id)
+		subquery = subquery.whereRef(
+			`${sourceAlias}.${fk}`,
+			'=',
+			`${relatedAlias}.${targetKey}`,
+		);
+	} else {
+		// hasMany/hasOne: target.fk = source.pk (e.g., posts.userId = users.id)
+		subquery = subquery.whereRef(
+			`${relatedAlias}.${fk}`,
+			'=',
+			`${sourceAlias}.${sourceKey}`,
+		);
+	}
 
 	// Add nested WHERE if present
 	let finalSubquery = subquery;
@@ -2190,7 +2215,9 @@ function applyJoinFilters(
 			targetTable: relation.target,
 		});
 
-		// Build JOIN condition
+		// Build JOIN condition based on relation type
+		// belongsTo: source.foreignKey = target.primaryKey
+		// hasMany/hasOne: target.foreignKey = source.primaryKey
 		const fk = Array.isArray(relation.foreignKey)
 			? relation.foreignKey[0]
 			: (relation.foreignKey ?? 'id');
@@ -2201,17 +2228,33 @@ function applyJoinFilters(
 			? (sourcePk[0] ?? 'id')
 			: (sourcePk ?? 'id');
 
+		const targetTableDef = model.getTable(relation.target);
+		const targetPk = targetTableDef?.primaryKey;
+		const targetKey = Array.isArray(targetPk)
+			? (targetPk[0] ?? 'id')
+			: (targetPk ?? 'id');
+
 		// Apply schema prefix
 		const targetTable = schemaName
 			? `${schemaName}.${relation.target}`
 			: relation.target;
 
-		// Add INNER JOIN
-		result = result.innerJoin(
-			`${targetTable} as ${joinAlias}`,
-			`${joinAlias}.${fk}`,
-			`${rootAlias}.${sourceKey}`,
-		);
+		// Add INNER JOIN with correct FK direction
+		if (relation.type === 'belongsTo') {
+			// belongsTo: source.fk = target.pk (e.g., posts.authorId = users.id)
+			result = result.innerJoin(
+				`${targetTable} as ${joinAlias}`,
+				`${rootAlias}.${fk}`,
+				`${joinAlias}.${targetKey}`,
+			);
+		} else {
+			// hasMany/hasOne: target.fk = source.pk (e.g., posts.userId = users.id)
+			result = result.innerJoin(
+				`${targetTable} as ${joinAlias}`,
+				`${joinAlias}.${fk}`,
+				`${rootAlias}.${sourceKey}`,
+			);
+		}
 	}
 
 	return result;
