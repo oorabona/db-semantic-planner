@@ -36,6 +36,8 @@ import {
 import {
 	type AggregateOptions,
 	type ColumnSpec,
+	type CursorPaginatedResult,
+	type CursorPaginateOptions,
 	type IncludeOptions,
 	type IncludeOptionsWithRecursive,
 	isExpressionSpec,
@@ -47,6 +49,8 @@ import {
 	type OrmInstance,
 	type OrmOptionsWithAdapter,
 	type OrmOptionsWithModel,
+	type PaginatedResult,
+	type PaginateOptions,
 	type QueryBuilder,
 	type RecursiveIncludeOptions,
 	type RelationHints,
@@ -1354,6 +1358,280 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		};
 
 		return lazyIterator;
+	}
+
+	/**
+	 * Execute the query with offset-based pagination.
+	 */
+	async paginate(options?: PaginateOptions): Promise<PaginatedResult<TResult>> {
+		const page = options?.page ?? 1;
+		const perPage = options?.perPage ?? 20;
+		const withCount = options?.withCount ?? true;
+
+		// Validate inputs
+		if (page < 1) {
+			throw new InvalidOperationError(
+				'paginate',
+				'Page must be >= 1. Use page: 1 for the first page',
+			);
+		}
+		if (perPage < 1) {
+			throw new InvalidOperationError(
+				'paginate',
+				'perPage must be >= 1',
+			);
+		}
+
+		// Calculate offset
+		const offset = (page - 1) * perPage;
+
+		// Build paginated query
+		const paginatedBuilder = this.clone();
+		paginatedBuilder.limitValue = perPage;
+		paginatedBuilder.offsetValue = offset;
+
+		// Execute main query
+		const data = await paginatedBuilder.all();
+
+		// Calculate pagination metadata
+		let total: number | undefined;
+		let totalPages: number | undefined;
+
+		if (withCount) {
+			// Execute count query (without limit/offset) - create fresh builder
+			const countBuilder = new QueryBuilderImpl<{ _count: number }>(
+				this.model,
+				this.strictMode,
+				this.from,
+				{ ...this.relationHints },
+				this.adapter,
+				this.schemaName,
+			);
+			// Copy where conditions but not limit/offset
+			countBuilder.whereIntents.push(...this.whereIntents);
+			countBuilder.aggregates = [{ function: 'count', as: '_count' }];
+
+			const countResult = await countBuilder.all();
+			total = Number(countResult[0]?._count ?? 0);
+			totalPages = Math.ceil(total / perPage);
+		}
+
+		// Determine hasNextPage/hasPrevPage
+		const hasNextPage = withCount
+			? page < (totalPages ?? 1)
+			: data.length === perPage; // Optimistic: assume more if full page
+		const hasPrevPage = page > 1;
+
+		return {
+			data,
+			pagination: {
+				page,
+				perPage,
+				...(total !== undefined && { total }),
+				...(totalPages !== undefined && { totalPages }),
+				hasNextPage,
+				hasPrevPage,
+			},
+		};
+	}
+
+	/**
+	 * Execute the query with cursor-based pagination.
+	 */
+	async cursorPaginate(
+		options?: CursorPaginateOptions,
+	): Promise<CursorPaginatedResult<TResult>> {
+		const limit = options?.limit ?? 20;
+		const cursor = options?.cursor ?? null;
+		const direction = options?.direction ?? 'forward';
+
+		// Validate inputs
+		if (limit < 1) {
+			throw new InvalidOperationError(
+				'cursorPaginate',
+				'limit must be >= 1',
+			);
+		}
+
+		// Require orderBy for stable cursor pagination
+		if (this.orderByIntents.length === 0) {
+			throw new InvalidOperationError(
+				'cursorPaginate',
+				'Cursor pagination requires an orderBy clause. Add .orderBy("id") or similar before .cursorPaginate()',
+			);
+		}
+
+		// Decode cursor if provided
+		let cursorValues: Record<string, unknown> | null = null;
+		if (cursor) {
+			try {
+				cursorValues = JSON.parse(
+					Buffer.from(cursor, 'base64').toString('utf-8'),
+				);
+			} catch {
+				throw new InvalidOperationError(
+					'cursorPaginate',
+					'Invalid cursor format. Use a cursor returned from a previous cursorPaginate() call',
+				);
+			}
+		}
+
+		// Build cursor conditions based on orderBy fields
+		const paginatedBuilder = this.clone();
+		if (cursorValues) {
+			const cursorConditions = this.buildCursorConditions(
+				cursorValues,
+				direction,
+			);
+			if (cursorConditions) {
+				paginatedBuilder.whereIntents.push(cursorConditions);
+			}
+		}
+
+		// Fetch one extra to determine if there's a next page
+		paginatedBuilder.limitValue = limit + 1;
+
+		// Execute query
+		const results = await paginatedBuilder.all();
+
+		// Determine if there are more items
+		const hasMore = results.length > limit;
+		const data = hasMore ? results.slice(0, limit) : results;
+
+		// Build cursors
+		const nextCursor =
+			hasMore && data.length > 0
+				? this.buildCursor(data[data.length - 1] as Record<string, unknown>)
+				: null;
+		const prevCursor =
+			data.length > 0
+				? this.buildCursor(data[0] as Record<string, unknown>)
+				: null;
+
+		return {
+			data,
+			nextCursor: direction === 'forward' ? nextCursor : prevCursor,
+			prevCursor: direction === 'forward' ? (cursor ? prevCursor : null) : nextCursor,
+			hasNextPage: direction === 'forward' ? hasMore : cursor !== null,
+			hasPrevPage: direction === 'forward' ? cursor !== null : hasMore,
+		};
+	}
+
+	/**
+	 * Build cursor conditions for pagination.
+	 */
+	private buildCursorConditions(
+		cursorValues: Record<string, unknown>,
+		direction: 'forward' | 'backward',
+	): WhereIntent | null {
+		// For single orderBy field, simple comparison
+		if (this.orderByIntents.length === 1) {
+			const orderBy = this.orderByIntents[0];
+			if (!orderBy) return null;
+			
+			const field =
+				typeof orderBy === 'string' ? orderBy : (orderBy.field as string);
+			const sortDir =
+				typeof orderBy === 'string'
+					? 'asc'
+					: ((orderBy.direction as string) ?? 'asc');
+			const cursorValue = cursorValues[field];
+
+			if (cursorValue === undefined) {
+				return null;
+			}
+
+			// Determine comparison based on sort direction and pagination direction
+			const isAsc =
+				sortDir === 'asc'
+					? direction === 'forward'
+					: direction === 'backward';
+			return {
+				kind: 'comparison',
+				field,
+				operator: isAsc ? 'gt' : 'lt',
+				value: cursorValue,
+			};
+		}
+
+		// For multiple orderBy fields, build compound condition
+		// (a > v1) OR (a = v1 AND b > v2) OR (a = v1 AND b = v2 AND c > v3)
+		const conditions: WhereIntent[] = [];
+
+		for (let i = 0; i < this.orderByIntents.length; i++) {
+			const parts: WhereIntent[] = [];
+
+			for (let j = 0; j <= i; j++) {
+				const orderBy = this.orderByIntents[j];
+				if (!orderBy) continue;
+				
+				const field =
+					typeof orderBy === 'string' ? orderBy : (orderBy.field as string);
+				const sortDir =
+					typeof orderBy === 'string'
+						? 'asc'
+						: ((orderBy.direction as string) ?? 'asc');
+				const cursorValue = cursorValues[field];
+
+				if (cursorValue === undefined) {
+					return null;
+				}
+
+				if (j < i) {
+					// Equality for all but the last field in this condition
+					parts.push({
+						kind: 'comparison',
+						field,
+						operator: 'eq',
+						value: cursorValue,
+					});
+				} else {
+					// Comparison for the last field
+					const isAsc =
+						sortDir === 'asc'
+							? direction === 'forward'
+							: direction === 'backward';
+					parts.push({
+						kind: 'comparison',
+						field,
+						operator: isAsc ? 'gt' : 'lt',
+						value: cursorValue,
+					});
+				}
+			}
+
+			if (parts.length > 0) {
+				conditions.push(
+					// biome-ignore lint/style/noNonNullAssertion: length check guarantees first element
+					parts.length === 1 ? parts[0]! : { kind: 'and', conditions: parts },
+				);
+			}
+		}
+
+		if (conditions.length === 0) {
+			return null;
+		}
+
+		// biome-ignore lint/style/noNonNullAssertion: length check guarantees first element
+		return conditions.length === 1
+			? conditions[0]!
+			: { kind: 'or', conditions };
+	}
+
+	/**
+	 * Build cursor from a row using orderBy fields.
+	 */
+	private buildCursor(row: Record<string, unknown>): string {
+		const cursorData: Record<string, unknown> = {};
+
+		for (const orderBy of this.orderByIntents) {
+			if (!orderBy) continue;
+			const field =
+				typeof orderBy === 'string' ? orderBy : (orderBy.field as string);
+			cursorData[field] = row[field];
+		}
+
+		return Buffer.from(JSON.stringify(cursorData), 'utf-8').toString('base64');
 	}
 
 	/**

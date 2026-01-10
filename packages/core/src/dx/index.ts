@@ -123,6 +123,9 @@ export {
 export type {
 	AggregateOptions,
 	ColumnSpec,
+	// Pagination (DX-028)
+	CursorPaginatedResult,
+	CursorPaginateOptions,
 	ExpressionSpec,
 	HierarchyOptions,
 	IncludeOptions,
@@ -136,6 +139,8 @@ export type {
 	OrmOptions,
 	OrmOptionsWithAdapter,
 	OrmOptionsWithModel,
+	PaginatedResult,
+	PaginateOptions,
 	QueryBuilder,
 	RelationHints,
 	SortDirection,
