@@ -8,7 +8,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { and, createOrm, eq, exists } from '@db-semantic-planner/dx';
+import { and, createOrm, eq, exists } from '@db-semantic-planner/core';
 import {
 	blogModel,
 	closeTestDb,

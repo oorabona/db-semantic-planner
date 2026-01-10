@@ -1,5 +1,5 @@
-import { belongsTo, defineSchema, hasMany } from '@db-semantic-planner/core';
 import { describe, expect, it } from 'vitest';
+import { belongsTo, defineSchema, hasMany } from '../schema-builder.js';
 import { and, eq, inArray } from './filters.js';
 import { createOrm } from './orm.js';
 

@@ -20,22 +20,21 @@
  * ```
  */
 
-import { compileRecursive } from '@db-semantic-planner/adapter-kysely';
-import {
-	type AdjacencyTraversal,
-	type EdgeTableTraversal,
-	type EmitJoinClause,
-	type ModelIR,
-	planRecursive,
-	type RecursiveDedupe,
-	type RecursiveEmitOptions,
-	type RecursiveIntent,
-	type RecursiveNodeIdExpr,
-	type RecursiveTrackOptions,
-	type RecursiveTraversal,
-	type WhereIntent,
-} from '@db-semantic-planner/core';
-import { CompiledQuery, type Kysely } from 'kysely';
+import type { Adapter, CompiledQuery } from '../adapter.js';
+import type {
+	AdjacencyTraversal,
+	EdgeTableTraversal,
+	EmitJoinClause,
+	RecursiveDedupe,
+	RecursiveEmitOptions,
+	RecursiveIntent,
+	RecursiveNodeIdExpr,
+	RecursiveTrackOptions,
+	RecursiveTraversal,
+	WhereIntent,
+} from '../intent-ast.js';
+import type { ModelIR } from '../model-ir.js';
+import { planRecursive } from '../planner.js';
 
 // ============================================================================
 // Types
@@ -122,8 +121,7 @@ export type TraversalDirection = AdjacencyDirection | EdgeTableDirection;
  */
 export class RecursiveQueryBuilder<TResult = unknown> {
 	private readonly schema: ModelIR;
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generics
-	private readonly db: Kysely<any>;
+	private readonly adapter: Adapter;
 	private readonly schemaName: string | undefined;
 	private readonly cteName: string;
 
@@ -150,13 +148,12 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 
 	constructor(
 		schema: ModelIR,
-		// biome-ignore lint/suspicious/noExplicitAny: Kysely generics
-		db: Kysely<any>,
+		adapter: Adapter,
 		cteName: string,
 		schemaName: string | undefined,
 	) {
 		this.schema = schema;
-		this.db = db;
+		this.adapter = adapter;
 		this.cteName = cteName;
 		this.schemaName = schemaName;
 	}
@@ -537,11 +534,13 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 	} {
 		const intent = this.buildIntent();
 		const report = planRecursive(intent, this.schema);
-		const compiled = compileRecursive(
+		const compileOptions = this.schemaName
+			? { schemaName: this.schemaName }
+			: undefined;
+		const compiled = this.adapter.compileRecursive(
 			report,
 			this.schema,
-			this.db,
-			this.schemaName,
+			compileOptions,
 		);
 		return {
 			sql: compiled.sql,
@@ -555,9 +554,11 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 	 */
 	async execute(): Promise<TResult[]> {
 		const { sql, parameters } = this.dump();
-		const compiledQuery = CompiledQuery.raw(sql, parameters as unknown[]);
-		const result = await this.db.executeQuery(compiledQuery);
-		return result.rows as TResult[];
+		const compiledQuery: CompiledQuery<TResult> = {
+			sql,
+			parameters,
+		};
+		return this.adapter.execute(compiledQuery);
 	}
 }
 
@@ -569,16 +570,20 @@ export class RecursiveQueryBuilder<TResult = unknown> {
  * Create a recursive query builder.
  *
  * @param schema - ModelIR schema
- * @param db - Kysely database instance
+ * @param adapter - Database adapter instance
  * @param cteName - Name for the CTE
  * @param schemaName - Optional schema name for multi-tenant
  */
 export function createRecursiveBuilder<TResult = unknown>(
 	schema: ModelIR,
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generics
-	db: Kysely<any>,
+	adapter: Adapter,
 	cteName: string,
 	schemaName?: string,
 ): RecursiveQueryBuilder<TResult> {
-	return new RecursiveQueryBuilder<TResult>(schema, db, cteName, schemaName);
+	return new RecursiveQueryBuilder<TResult>(
+		schema,
+		adapter,
+		cteName,
+		schemaName,
+	);
 }

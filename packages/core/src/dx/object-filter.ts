@@ -9,7 +9,7 @@
  *
  * @example
  * ```typescript
- * import { createOrm } from '@db-semantic-planner/dx';
+ * import { createOrm } from '@db-semantic-planner/core';
  *
  * // Object syntax (new)
  * orm.select('users').where({ status: 'active', age: { $gte: 18 } })
@@ -28,7 +28,7 @@ import type {
 	WhereLikeIntent,
 	WhereNullIntent,
 	WhereSubqueryIntent,
-} from '@db-semantic-planner/core';
+} from '../intent-ast.js';
 import {
 	isSubqueryExpression,
 	type SubqueryExpression,

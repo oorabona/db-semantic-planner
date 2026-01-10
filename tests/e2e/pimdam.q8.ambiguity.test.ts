@@ -25,7 +25,7 @@ import {
 	and,
 	AmbiguousRelationError,
 	type RelationHints,
-} from '@db-semantic-planner/dx';
+} from '@db-semantic-planner/core';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,

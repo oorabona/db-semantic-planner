@@ -4,19 +4,14 @@
  * Part of DX-010: Mutations.
  */
 
-import {
-	compileDelete,
-	compileInsert,
-	compileUpdate,
-} from '@db-semantic-planner/adapter-kysely';
+import type { Adapter } from '../adapter.js';
 import type {
 	DeleteIntent,
 	InsertIntent,
-	ModelIR,
 	UpdateIntent,
 	WhereIntent,
-} from '@db-semantic-planner/core';
-import type { Kysely } from 'kysely';
+} from '../intent-ast.js';
+import type { ModelIR } from '../model-ir.js';
 import {
 	ExecutionError,
 	InvalidOperationError,
@@ -56,20 +51,20 @@ export interface MutationDump {
 export class InsertBuilder {
 	private readonly table: string;
 	private readonly model: ModelIR;
-	private readonly db: Kysely<Record<string, unknown>> | undefined;
+	private readonly adapter: Adapter | undefined;
 	private readonly schemaName: string | undefined;
 	private readonly valuesData: readonly Record<string, unknown>[];
 
 	constructor(opts: {
 		table: string;
 		model: ModelIR;
-		db?: Kysely<Record<string, unknown>> | undefined;
+		adapter?: Adapter | undefined;
 		schemaName?: string | undefined;
 		values?: readonly Record<string, unknown>[] | undefined;
 	}) {
 		this.table = opts.table;
 		this.model = opts.model;
-		this.db = opts.db;
+		this.adapter = opts.adapter;
 		this.schemaName = opts.schemaName;
 		this.valuesData = opts.values ?? [];
 	}
@@ -85,7 +80,7 @@ export class InsertBuilder {
 		return new InsertBuilder({
 			table: this.table,
 			model: this.model,
-			db: this.db,
+			adapter: this.adapter,
 			schemaName: this.schemaName,
 			values: valueArray,
 		});
@@ -114,16 +109,19 @@ export class InsertBuilder {
 	 * Useful for observability and debugging.
 	 */
 	dump(): MutationDump {
-		if (!this.db) {
+		if (!this.adapter) {
 			throw new ExecutionError({
 				operation: 'dump',
-				reason: 'Database not configured',
-				fix: 'Pass db option when creating ORM: createOrm({ model, db })',
+				reason: 'Adapter not configured',
+				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
 			});
 		}
 
 		const intent = this.buildIntent();
-		const compiled = compileInsert(intent, this.db, this.schemaName);
+		const compileOptions = this.schemaName
+			? { schemaName: this.schemaName }
+			: undefined;
+		const compiled = this.adapter.compileInsert(intent, compileOptions);
 
 		const meta: { compiledAt: Date; tenant?: string } = {
 			compiledAt: new Date(),
@@ -134,7 +132,7 @@ export class InsertBuilder {
 
 		return {
 			sql: compiled.sql,
-			parameters: compiled.parameters as readonly unknown[],
+			parameters: compiled.parameters,
 			intent,
 			meta,
 		};
@@ -145,19 +143,22 @@ export class InsertBuilder {
 	 * Returns void for MVP (no RETURNING support yet).
 	 */
 	async execute(): Promise<void> {
-		if (!this.db) {
+		if (!this.adapter) {
 			throw new ExecutionError({
 				operation: 'insert',
-				reason: 'Database not configured',
-				fix: 'Pass db option when creating ORM: createOrm({ model, db })',
+				reason: 'Adapter not configured',
+				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
 			});
 		}
 
 		const intent = this.buildIntent();
-		const compiled = compileInsert(intent, this.db, this.schemaName);
+		const compileOptions = this.schemaName
+			? { schemaName: this.schemaName }
+			: undefined;
+		const compiled = this.adapter.compileInsert(intent, compileOptions);
 
 		// Execute the compiled query
-		await this.db.executeQuery(compiled);
+		await this.adapter.execute(compiled);
 	}
 }
 
@@ -172,7 +173,7 @@ export class InsertBuilder {
 export class UpdateBuilder {
 	private readonly table: string;
 	private readonly model: ModelIR;
-	private readonly db: Kysely<Record<string, unknown>> | undefined;
+	private readonly adapter: Adapter | undefined;
 	private readonly schemaName: string | undefined;
 	private readonly setData: Record<string, unknown>;
 	private readonly whereIntent: WhereIntent | undefined;
@@ -181,7 +182,7 @@ export class UpdateBuilder {
 	constructor(opts: {
 		table: string;
 		model: ModelIR;
-		db?: Kysely<Record<string, unknown>> | undefined;
+		adapter?: Adapter | undefined;
 		schemaName?: string | undefined;
 		set?: Record<string, unknown> | undefined;
 		where?: WhereIntent | undefined;
@@ -189,7 +190,7 @@ export class UpdateBuilder {
 	}) {
 		this.table = opts.table;
 		this.model = opts.model;
-		this.db = opts.db;
+		this.adapter = opts.adapter;
 		this.schemaName = opts.schemaName;
 		this.setData = opts.set ?? {};
 		this.whereIntent = opts.where;
@@ -204,7 +205,7 @@ export class UpdateBuilder {
 		return new UpdateBuilder({
 			table: this.table,
 			model: this.model,
-			db: this.db,
+			adapter: this.adapter,
 			schemaName: this.schemaName,
 			set: { ...this.setData, ...data },
 			where: this.whereIntent,
@@ -219,7 +220,7 @@ export class UpdateBuilder {
 		return new UpdateBuilder({
 			table: this.table,
 			model: this.model,
-			db: this.db,
+			adapter: this.adapter,
 			schemaName: this.schemaName,
 			set: this.setData,
 			where: condition,
@@ -262,16 +263,19 @@ export class UpdateBuilder {
 	 * Compile and return the dump without executing.
 	 */
 	dump(): MutationDump {
-		if (!this.db) {
+		if (!this.adapter) {
 			throw new ExecutionError({
 				operation: 'dump',
-				reason: 'Database not configured',
-				fix: 'Pass db option when creating ORM: createOrm({ model, db })',
+				reason: 'Adapter not configured',
+				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
 			});
 		}
 
 		const intent = this.buildIntent();
-		const compiled = compileUpdate(intent, this.db, this.schemaName);
+		const compileOptions = this.schemaName
+			? { schemaName: this.schemaName }
+			: undefined;
+		const compiled = this.adapter.compileUpdate(intent, compileOptions);
 
 		const meta: { compiledAt: Date; tenant?: string } = {
 			compiledAt: new Date(),
@@ -282,7 +286,7 @@ export class UpdateBuilder {
 
 		return {
 			sql: compiled.sql,
-			parameters: compiled.parameters as readonly unknown[],
+			parameters: compiled.parameters,
 			intent,
 			meta,
 		};
@@ -292,18 +296,21 @@ export class UpdateBuilder {
 	 * Execute the update operation.
 	 */
 	async execute(): Promise<void> {
-		if (!this.db) {
+		if (!this.adapter) {
 			throw new ExecutionError({
 				operation: 'update',
-				reason: 'Database not configured',
-				fix: 'Pass db option when creating ORM: createOrm({ model, db })',
+				reason: 'Adapter not configured',
+				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
 			});
 		}
 
 		const intent = this.buildIntent();
-		const compiled = compileUpdate(intent, this.db, this.schemaName);
+		const compileOptions = this.schemaName
+			? { schemaName: this.schemaName }
+			: undefined;
+		const compiled = this.adapter.compileUpdate(intent, compileOptions);
 
-		await this.db.executeQuery(compiled);
+		await this.adapter.execute(compiled);
 	}
 }
 
@@ -318,7 +325,7 @@ export class UpdateBuilder {
 export class DeleteBuilder {
 	private readonly table: string;
 	private readonly model: ModelIR;
-	private readonly db: Kysely<Record<string, unknown>> | undefined;
+	private readonly adapter: Adapter | undefined;
 	private readonly schemaName: string | undefined;
 	private readonly whereIntent: WhereIntent | undefined;
 	private readonly allowAllFlag: boolean;
@@ -327,7 +334,7 @@ export class DeleteBuilder {
 	constructor(opts: {
 		table: string;
 		model: ModelIR;
-		db?: Kysely<Record<string, unknown>> | undefined;
+		adapter?: Adapter | undefined;
 		schemaName?: string | undefined;
 		where?: WhereIntent | undefined;
 		allowAll?: boolean | undefined;
@@ -335,7 +342,7 @@ export class DeleteBuilder {
 	}) {
 		this.table = opts.table;
 		this.model = opts.model;
-		this.db = opts.db;
+		this.adapter = opts.adapter;
 		this.schemaName = opts.schemaName;
 		this.whereIntent = opts.where;
 		this.allowAllFlag = opts.allowAll ?? false;
@@ -349,7 +356,7 @@ export class DeleteBuilder {
 		return new DeleteBuilder({
 			table: this.table,
 			model: this.model,
-			db: this.db,
+			adapter: this.adapter,
 			schemaName: this.schemaName,
 			where: condition,
 			allowAll: this.allowAllFlag,
@@ -366,7 +373,7 @@ export class DeleteBuilder {
 		return new DeleteBuilder({
 			table: this.table,
 			model: this.model,
-			db: this.db,
+			adapter: this.adapter,
 			schemaName: this.schemaName,
 			where: this.whereIntent,
 			allowAll: this.allowAllFlag,
@@ -407,16 +414,19 @@ export class DeleteBuilder {
 	 * Compile and return the dump without executing.
 	 */
 	dump(): MutationDump {
-		if (!this.db) {
+		if (!this.adapter) {
 			throw new ExecutionError({
 				operation: 'dump',
-				reason: 'Database not configured',
-				fix: 'Pass db option when creating ORM: createOrm({ model, db })',
+				reason: 'Adapter not configured',
+				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
 			});
 		}
 
 		const intent = this.buildIntent();
-		const compiled = compileDelete(intent, this.db, this.schemaName);
+		const compileOptions = this.schemaName
+			? { schemaName: this.schemaName }
+			: undefined;
+		const compiled = this.adapter.compileDelete(intent, compileOptions);
 
 		const meta: { compiledAt: Date; tenant?: string } = {
 			compiledAt: new Date(),
@@ -427,7 +437,7 @@ export class DeleteBuilder {
 
 		return {
 			sql: compiled.sql,
-			parameters: compiled.parameters as readonly unknown[],
+			parameters: compiled.parameters,
 			intent,
 			meta,
 		};
@@ -438,19 +448,22 @@ export class DeleteBuilder {
 	 * Note: Cascade deletes are executed as multiple statements.
 	 */
 	async execute(): Promise<void> {
-		if (!this.db) {
+		if (!this.adapter) {
 			throw new ExecutionError({
 				operation: 'delete',
-				reason: 'Database not configured',
-				fix: 'Pass db option when creating ORM: createOrm({ model, db })',
+				reason: 'Adapter not configured',
+				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
 			});
 		}
 
 		// TODO: Implement cascade delete logic (multiple statements)
 		// For now, just execute the single delete
 		const intent = this.buildIntent();
-		const compiled = compileDelete(intent, this.db, this.schemaName);
+		const compileOptions = this.schemaName
+			? { schemaName: this.schemaName }
+			: undefined;
+		const compiled = this.adapter.compileDelete(intent, compileOptions);
 
-		await this.db.executeQuery(compiled);
+		await this.adapter.execute(compiled);
 	}
 }

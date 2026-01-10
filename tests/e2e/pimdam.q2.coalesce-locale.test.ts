@@ -24,7 +24,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { coalesce, createOrm, eq, like } from '@db-semantic-planner/dx';
+import { coalesce, createOrm, eq, like } from '@db-semantic-planner/core';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,

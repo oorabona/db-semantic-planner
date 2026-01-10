@@ -4,14 +4,14 @@
  * Tests for object-to-WhereIntent conversion.
  */
 
+import { describe, expect, it } from 'vitest';
 import type {
 	WhereAndIntent,
 	WhereComparisonIntent,
 	WhereInIntent,
 	WhereLikeIntent,
 	WhereNullIntent,
-} from '@db-semantic-planner/core';
-import { describe, expect, it } from 'vitest';
+} from '../schema-builder.js';
 import { eq } from './filters.js';
 import {
 	type FilterOperators,

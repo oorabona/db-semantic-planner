@@ -1,18 +1,19 @@
 /**
  * @module recursive-query-builder.test
  * Unit tests for RecursiveQueryBuilder (DX-005)
+ *
+ * NOTE: These tests only verify intent-building logic (core package).
+ * SQL generation tests are in adapter-kysely/src/recursive-query-builder.test.ts
  */
 
-import { belongsTo, defineSchema, hasMany } from '@db-semantic-planner/core';
 import {
-	DummyDriver,
-	Kysely,
-	PostgresAdapter,
-	PostgresIntrospector,
-	PostgresQueryCompiler,
-} from 'kysely';
+	belongsTo,
+	defineSchema,
+	eq,
+	hasMany,
+} from '@db-semantic-planner/core';
 import { describe, expect, it } from 'vitest';
-import { eq } from './filters.js';
+import type { Adapter, AdapterCapabilities } from '../adapter.js';
 import { createRecursiveBuilder } from './recursive-query-builder.js';
 
 // ============================================================================
@@ -81,18 +82,46 @@ const categoryModel = defineSchema({
 	.build();
 
 // ============================================================================
-// Helper - Create PostgreSQL Kysely instance
+// Helper - Create Mock Adapter for Intent-Building Tests
 // ============================================================================
 
-function createTestDb() {
-	return new Kysely({
-		dialect: {
-			createAdapter: () => new PostgresAdapter(),
-			createDriver: () => new DummyDriver(),
-			createIntrospector: (db) => new PostgresIntrospector(db),
-			createQueryCompiler: () => new PostgresQueryCompiler(),
-		},
-	});
+/**
+ * Mock adapter that only supports intent building.
+ * SQL generation tests are in adapter-kysely.
+ */
+function createMockAdapter(): Adapter {
+	const notImplemented = () => {
+		throw new Error(
+			'Not implemented in mock adapter - use adapter-kysely for SQL tests',
+		);
+	};
+
+	return {
+		capabilities: {
+			supportsReturning: true,
+			supportsJsonAgg: true,
+			supportsLateralJoin: true,
+			supportsRecursiveCte: true,
+			supportsCte: true,
+			supportsWindowFunctions: true,
+			supportsArrayAgg: true,
+			dialectName: 'mock',
+		} as AdapterCapabilities,
+		compile: notImplemented,
+		execute: notImplemented,
+		executeOne: notImplemented,
+		executeOneOrThrow: notImplemented,
+		stream: notImplemented as () => AsyncIterableIterator<never>,
+		transaction: notImplemented,
+		withSchema: () => createMockAdapter(),
+		createDump: notImplemented,
+		compileInsert: notImplemented,
+		compileUpdate: notImplemented,
+		compileDelete: notImplemented,
+		compileRecursive: notImplemented,
+		introspect: notImplemented,
+		validateIdentifier: () => {},
+	};
 }
 
 // ============================================================================
@@ -102,10 +131,10 @@ function createTestDb() {
 describe('RecursiveQueryBuilder', () => {
 	describe('validation', () => {
 		it('should throw if from() not called', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 
@@ -118,10 +147,10 @@ describe('RecursiveQueryBuilder', () => {
 		});
 
 		it('should throw if nodeId() not called', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 
@@ -134,10 +163,10 @@ describe('RecursiveQueryBuilder', () => {
 		});
 
 		it('should throw if traverseVia() not called', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 
@@ -149,10 +178,10 @@ describe('RecursiveQueryBuilder', () => {
 		});
 
 		it('should throw if maxDepth() not called', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 
@@ -171,10 +200,10 @@ describe('RecursiveQueryBuilder', () => {
 
 	describe('edge-table traversal', () => {
 		it('should build intent with edge-table traversal', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 
@@ -201,12 +230,12 @@ describe('RecursiveQueryBuilder', () => {
 		});
 
 		it('should support edge-table direction options', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 
 			// Test 'in' direction
 			const builderIn = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 			const intentIn = builderIn
@@ -228,7 +257,7 @@ describe('RecursiveQueryBuilder', () => {
 			// Test 'both' direction
 			const builderBoth = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 			const intentBoth = builderBoth
@@ -249,10 +278,10 @@ describe('RecursiveQueryBuilder', () => {
 		});
 
 		it('should support storageHint for edge-table', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 
@@ -281,10 +310,10 @@ describe('RecursiveQueryBuilder', () => {
 
 	describe('adjacency traversal', () => {
 		it('should build intent with adjacency traversal (descendants)', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				categoryModel,
-				db,
+				adapter,
 				'category_tree',
 			);
 
@@ -305,10 +334,10 @@ describe('RecursiveQueryBuilder', () => {
 		});
 
 		it('should support ancestors direction', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				categoryModel,
-				db,
+				adapter,
 				'category_tree',
 			);
 
@@ -335,10 +364,10 @@ describe('RecursiveQueryBuilder', () => {
 
 	describe('emit configuration', () => {
 		it('should support join()', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 
@@ -357,10 +386,10 @@ describe('RecursiveQueryBuilder', () => {
 		});
 
 		it('should support leftJoin()', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 
@@ -376,10 +405,10 @@ describe('RecursiveQueryBuilder', () => {
 		});
 
 		it('should support multiple joins', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 
@@ -396,10 +425,10 @@ describe('RecursiveQueryBuilder', () => {
 		});
 
 		it('should support columns()', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 
@@ -415,10 +444,10 @@ describe('RecursiveQueryBuilder', () => {
 		});
 
 		it('should support distinct()', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 
@@ -434,10 +463,10 @@ describe('RecursiveQueryBuilder', () => {
 		});
 
 		it('should support emitFilter()', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 
@@ -459,10 +488,10 @@ describe('RecursiveQueryBuilder', () => {
 
 	describe('tracking options', () => {
 		it('should support trackPath()', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 
@@ -478,10 +507,10 @@ describe('RecursiveQueryBuilder', () => {
 		});
 
 		it('should support trackPath() with options', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 
@@ -498,10 +527,10 @@ describe('RecursiveQueryBuilder', () => {
 		});
 
 		it('should support dedupeWith()', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 			const builder = createRecursiveBuilder(
 				roleHierarchyModel,
-				db,
+				adapter,
 				'role_tree',
 			);
 
@@ -518,109 +547,9 @@ describe('RecursiveQueryBuilder', () => {
 	});
 
 	// ============================================================================
-	// dump() Tests
+	// NOTE: dump() and SQL generation tests are in adapter-kysely
+	// See: packages/adapter-kysely/src/recursive-query-builder.test.ts
 	// ============================================================================
-
-	describe('dump()', () => {
-		it('should produce valid SQL', () => {
-			const db = createTestDb();
-			const builder = createRecursiveBuilder(
-				roleHierarchyModel,
-				db,
-				'role_tree',
-			);
-
-			const { sql, parameters } = builder
-				.from('roles')
-				.nodeId('id')
-				.where(eq('id', 'user-role-123'))
-				.traverseVia('roleEdges', { from: 'from_role_id', to: 'to_role_id' })
-				.maxDepth(10)
-				.dump();
-
-			expect(sql.toLowerCase()).toContain('with recursive');
-			expect(sql).toContain('role_tree');
-			expect(parameters.length).toBeGreaterThan(0);
-		});
-
-		it('should include JOIN in emit SQL', () => {
-			const db = createTestDb();
-			const builder = createRecursiveBuilder(
-				roleHierarchyModel,
-				db,
-				'role_tree',
-			);
-
-			const { sql } = builder
-				.from('roles')
-				.nodeId('id')
-				.traverseVia('roleEdges', { from: 'from_role_id', to: 'to_role_id' })
-				.maxDepth(10)
-				.join('rolePermissions', 'id', 'role_id')
-				.dump();
-
-			expect(sql.toLowerCase()).toContain('join');
-			// The table name in SQL is 'rolepermissions' (camelCase preserved by Kysely)
-			expect(sql.toLowerCase()).toContain('rolepermissions');
-		});
-	});
-
-	// ============================================================================
-	// Method Chaining Tests
-	// ============================================================================
-
-	describe('method chaining', () => {
-		it('should support full fluent chain', () => {
-			const db = createTestDb();
-
-			const { sql } = createRecursiveBuilder(
-				roleHierarchyModel,
-				db,
-				'effective_permissions',
-			)
-				.from('roles')
-				.where(eq('id', 'user-role'))
-				.nodeId('id')
-				.traverseVia('roleEdges', { from: 'from_role_id', to: 'to_role_id' })
-				.maxDepth(10)
-				.trackPath({ alias: 'role_path' })
-				.dedupeWith('skip-visited')
-				.join('rolePermissions', 'id', 'role_id')
-				.join('permissions', 'permission_id', 'id')
-				.columns(['id', 'name'])
-				.distinct()
-				.dump();
-
-			expect(sql.toLowerCase()).toContain('with recursive');
-			expect(sql.toLowerCase()).toContain('effective_permissions');
-			expect(sql.toLowerCase()).toContain('distinct');
-		});
-	});
-
-	// ============================================================================
-	// Factory Function Tests
-	// ============================================================================
-
-	describe('createRecursiveBuilder', () => {
-		it('should create builder with schema name', () => {
-			const db = createTestDb();
-
-			const builder = createRecursiveBuilder(
-				roleHierarchyModel,
-				db,
-				'role_tree',
-				'tenant_123',
-			);
-			const { sql } = builder
-				.from('roles')
-				.nodeId('id')
-				.traverseVia('roleEdges', { from: 'from_role_id', to: 'to_role_id' })
-				.maxDepth(10)
-				.dump();
-
-			expect(sql).toContain('tenant_123');
-		});
-	});
 
 	// ============================================================================
 	// DX-009: Intuitive Alias Tests
@@ -628,88 +557,89 @@ describe('RecursiveQueryBuilder', () => {
 
 	describe('Intuitive Aliases (DX-009)', () => {
 		it('startingFrom() should be alias for nodeId()', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 
 			// Using old API
-			const builderOld = createRecursiveBuilder(categoryModel, db, 'tree1')
+			const intentOld = createRecursiveBuilder(categoryModel, adapter, 'tree1')
 				.from('categories')
 				.nodeId('id')
 				.where(eq('id', 1))
 				.traverseVia('categories', { parentId: 'parentId' })
-				.maxDepth(5);
+				.maxDepth(5)
+				.buildIntent();
 
 			// Using new alias API
-			const builderNew = createRecursiveBuilder(categoryModel, db, 'tree2')
+			const intentNew = createRecursiveBuilder(categoryModel, adapter, 'tree2')
 				.from('categories')
 				.startingFrom('id')
 				.where(eq('id', 1))
 				.traverseVia('categories', { parentId: 'parentId' })
-				.maxDepth(5);
+				.maxDepth(5)
+				.buildIntent();
 
-			const dumpOld = builderOld.dump();
-			const dumpNew = builderNew.dump();
-
-			// Should produce equivalent SQL (same structure)
-			expect(dumpOld.intent.nodeId).toEqual(dumpNew.intent.nodeId);
+			// Should produce equivalent intents
+			expect(intentOld.start.nodeIdExpr).toEqual(intentNew.start.nodeIdExpr);
 		});
 
 		it('following() should be alias for traverseVia()', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 
 			// Using old API
-			const builderOld = createRecursiveBuilder(categoryModel, db, 'tree1')
+			const intentOld = createRecursiveBuilder(categoryModel, adapter, 'tree1')
 				.from('categories')
 				.nodeId('id')
 				.where(eq('id', 1))
 				.traverseVia('categories', { parentId: 'parentId' })
-				.maxDepth(5);
+				.maxDepth(5)
+				.buildIntent();
 
 			// Using new alias API
-			const builderNew = createRecursiveBuilder(categoryModel, db, 'tree2')
+			const intentNew = createRecursiveBuilder(categoryModel, adapter, 'tree2')
 				.from('categories')
 				.nodeId('id')
 				.where(eq('id', 1))
 				.following('categories', { parentId: 'parentId' })
-				.maxDepth(5);
-
-			const dumpOld = builderOld.dump();
-			const dumpNew = builderNew.dump();
+				.maxDepth(5)
+				.buildIntent();
 
 			// Should have equivalent traversal config
-			expect(dumpOld.intent.traversal).toEqual(dumpNew.intent.traversal);
+			expect(intentOld.traversal).toEqual(intentNew.traversal);
 		});
 
 		it('upToDepth() should be alias for maxDepth()', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 
 			// Using old API
-			const builderOld = createRecursiveBuilder(categoryModel, db, 'tree1')
+			const intentOld = createRecursiveBuilder(categoryModel, adapter, 'tree1')
 				.from('categories')
 				.nodeId('id')
 				.where(eq('id', 1))
 				.traverseVia('categories', { parentId: 'parentId' })
-				.maxDepth(7);
+				.maxDepth(7)
+				.buildIntent();
 
 			// Using new alias API
-			const builderNew = createRecursiveBuilder(categoryModel, db, 'tree2')
+			const intentNew = createRecursiveBuilder(categoryModel, adapter, 'tree2')
 				.from('categories')
 				.nodeId('id')
 				.where(eq('id', 1))
 				.traverseVia('categories', { parentId: 'parentId' })
-				.upToDepth(7);
-
-			const dumpOld = builderOld.dump();
-			const dumpNew = builderNew.dump();
+				.upToDepth(7)
+				.buildIntent();
 
 			// Should have same maxDepth
-			expect(dumpOld.intent.maxDepth).toEqual(dumpNew.intent.maxDepth);
-			expect(dumpNew.intent.maxDepth).toBe(7);
+			expect(intentOld.maxDepth).toEqual(intentNew.maxDepth);
+			expect(intentNew.maxDepth).toBe(7);
 		});
 
 		it('should support full fluent chain with new aliases', () => {
-			const db = createTestDb();
+			const adapter = createMockAdapter();
 
-			const builder = createRecursiveBuilder(categoryModel, db, 'category_tree')
+			const intent = createRecursiveBuilder(
+				categoryModel,
+				adapter,
+				'category_tree',
+			)
 				.from('categories')
 				.startingFrom('id')
 				.where(eq('id', 42))
@@ -717,14 +647,12 @@ describe('RecursiveQueryBuilder', () => {
 					parentId: 'parentId',
 					direction: 'descendants',
 				})
-				.upToDepth(10);
-
-			const { sql, intent } = builder.dump();
+				.upToDepth(10)
+				.buildIntent();
 
 			expect(intent.start.nodeIdExpr).toEqual({ kind: 'column', name: 'id' });
 			expect(intent.maxDepth).toBe(10);
 			expect(intent.traversal?.kind).toBe('adjacency');
-			expect(sql.toLowerCase()).toContain('with recursive');
 		});
 	});
 });

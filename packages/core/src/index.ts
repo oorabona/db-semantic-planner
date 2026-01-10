@@ -202,3 +202,28 @@ export {
 // ============================================================================
 
 export { ModelIRImpl } from './model-impl.js';
+
+// ============================================================================
+// Adapter Interface (for multi-adapter support)
+// ============================================================================
+
+export type {
+	Adapter,
+	AdapterCapabilities,
+	AdapterStreamOptions,
+	CompiledQuery,
+	CompileOptions,
+	Dump,
+	DumpMeta,
+} from './adapter.js';
+export {
+	AdapterRequiredError,
+	assertCapability,
+	UnsupportedCapabilityError,
+} from './adapter.js';
+
+// ============================================================================
+// DX Layer (Developer Experience)
+// ============================================================================
+
+export * from './dx/index.js';

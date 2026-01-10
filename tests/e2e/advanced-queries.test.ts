@@ -22,7 +22,7 @@ import {
 	lt,
 	not,
 	or,
-} from '@db-semantic-planner/dx';
+} from '@db-semantic-planner/core';
 import { belongsTo, defineSchema, hasMany } from '@db-semantic-planner/core';
 import {
 	closeTestDb,

@@ -7,13 +7,13 @@
  * - Block 3: Type inference on select/execute (compile-time only)
  */
 
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
 	belongsTo,
 	defineSchema,
 	hasMany,
 	type WhereIntent,
-} from '@db-semantic-planner/core';
-import { describe, expect, expectTypeOf, it } from 'vitest';
+} from '../schema-builder.js';
 import { and, createOrm, eq, or } from './index.js';
 
 // Schema with relations for testing

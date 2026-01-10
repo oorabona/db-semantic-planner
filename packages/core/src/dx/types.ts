@@ -1,12 +1,11 @@
-import type { Dump } from '@db-semantic-planner/adapter-kysely';
+import type { Adapter, Dump } from '../adapter.js';
 import type {
 	ExpressionIntent,
-	ModelIR,
-	PlanReport,
 	SelectIntent,
 	WhereIntent,
-} from '@db-semantic-planner/core';
-import type { Kysely } from 'kysely';
+} from '../intent-ast.js';
+import type { ModelIR } from '../model-ir.js';
+import type { PlanReport } from '../planner.js';
 import type {
 	DeleteBuilder,
 	InsertBuilder,
@@ -146,26 +145,26 @@ export type OrderByInput =
 /**
  * Configuration options for creating an ORM instance.
  *
- * Either `model` or `db` must be provided:
+ * Either `model` or `adapter` must be provided:
  * - With `model`: Uses the provided schema (sync)
- * - With `db` only: Auto-discovers schema via introspection (async)
+ * - With `adapter` only: Auto-discovers schema via introspection (async)
  *
  * @example Zero-config (auto-introspection)
  * ```typescript
- * const orm = await createOrm({ db });
+ * const orm = await createOrm({ adapter });
  * const users = await orm.select('users').all();
  * ```
  *
  * @example Explicit model
  * ```typescript
- * const orm = createOrm({ model, db });
+ * const orm = createOrm({ model, adapter });
  * const users = await orm.select('users').all();
  * ```
  */
-export interface OrmOptions {
+export interface OrmOptions<DB = unknown> {
 	/**
 	 * The schema model to use for query planning.
-	 * If not provided and `db` is set, the schema will be auto-discovered
+	 * If not provided and `adapter` is set, the schema will be auto-discovered
 	 * via database introspection.
 	 */
 	readonly model?: ModelIR;
@@ -197,38 +196,39 @@ export interface OrmOptions {
 	readonly relationHints?: RelationHints;
 
 	/**
-	 * Kysely database instance for query execution.
-	 * Required for findMany(), findFirst(), findFirstOrThrow() methods.
+	 * Database adapter for query compilation and execution.
+	 * Required for all query execution methods (all(), first(), stream(), etc.)
 	 * Also required for auto-introspection when `model` is not provided.
 	 *
 	 * @example
 	 * ```typescript
-	 * const db = new Kysely<Database>({ dialect: ... });
+	 * import { createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
+	 *
+	 * const adapter = createKyselyAdapter(db);
 	 * const orm = createOrm({
 	 *   model: schema,
-	 *   db,  // Enable query execution
+	 *   adapter,  // Enable query execution
 	 * });
 	 * await orm.select('users').all();
 	 * ```
 	 */
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
-	readonly db?: Kysely<any>;
+	readonly adapter?: Adapter<DB>;
 }
 
 /**
  * OrmOptions with explicit model (sync creation).
  */
-export interface OrmOptionsWithModel extends OrmOptions {
+export interface OrmOptionsWithModel<DB = unknown> extends OrmOptions<DB> {
 	readonly model: ModelIR;
 }
 
 /**
- * OrmOptions without model, requires db for auto-introspection (async creation).
+ * OrmOptions without model, requires adapter for auto-introspection (async creation).
  */
-export interface OrmOptionsWithDb extends Omit<OrmOptions, 'model'> {
+export interface OrmOptionsWithAdapter<DB = unknown>
+	extends Omit<OrmOptions<DB>, 'model'> {
 	readonly model?: undefined;
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
-	readonly db: Kysely<any>;
+	readonly adapter: Adapter<DB>;
 }
 
 /**
@@ -423,7 +423,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 *
 	 * @example
 	 * ```typescript
-	 * import { coalesce, raw } from '@db-semantic-planner/dx';
+	 * import { coalesce, raw } from '@db-semantic-planner/core';
 	 *
 	 * // Simple fields
 	 * orm.select('users').columns(['id', 'name']).all();
@@ -1111,6 +1111,49 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * ```
 	 */
 	deleteAll(table: string): DeleteBuilder;
+
+	// =========================================================================
+	// Transaction Methods (DX-025)
+	// =========================================================================
+
+	/**
+	 * Execute a callback within a database transaction.
+	 * Auto-commits on success, auto-rolls back on exception.
+	 *
+	 * This is a passthrough to Kysely's transaction API.
+	 * The callback receives a transaction-scoped ORM instance.
+	 *
+	 * @typeParam T - The return type of the callback
+	 * @param fn - Async callback that receives a transaction-scoped ORM instance
+	 * @returns Promise resolving to the callback's return value
+	 *
+	 * @example
+	 * ```typescript
+	 * // Basic transaction
+	 * const result = await orm.transaction(async (tx) => {
+	 *   await tx.insert('orders').values({ userId: 1, total: 100 }).execute();
+	 *   await tx.update('users').set({ balance: 0 }).where(eq('id', 1)).execute();
+	 *   return { success: true };
+	 * });
+	 *
+	 * // Multi-tenant transaction
+	 * await orm.forTenant('tenant_123').transaction(async (tx) => {
+	 *   await tx.insert('events').values({ type: 'order_created' }).execute();
+	 * });
+	 *
+	 * // Auto-rollback on exception
+	 * try {
+	 *   await orm.transaction(async (tx) => {
+	 *     await tx.insert('orders').values({ userId: 1 }).execute();
+	 *     throw new Error('Validation failed');
+	 *     // Transaction is automatically rolled back
+	 *   });
+	 * } catch (err) {
+	 *   // Handle error
+	 * }
+	 * ```
+	 */
+	transaction<T>(fn: (tx: OrmInstance<DB>) => Promise<T>): Promise<T>;
 }
 
 /**

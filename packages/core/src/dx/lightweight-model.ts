@@ -7,7 +7,7 @@
  *
  * @example
  * ```typescript
- * import { defineModel } from '@db-semantic-planner/dx';
+ * import { defineModel } from '@db-semantic-planner/core';
  *
  * interface Database {
  *   users: { id: number; name: string; };
@@ -30,7 +30,7 @@ import type {
 	RelationIR,
 	RelationType,
 	TableIR,
-} from '@db-semantic-planner/core';
+} from '../index.js';
 
 // ============================================================================
 // Types
