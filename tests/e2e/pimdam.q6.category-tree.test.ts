@@ -24,6 +24,7 @@ import {
 	closeTestDb,
 	createExtendedPimdamSchema,
 	dropExtendedPimdamSchema,
+	getTestAdapter,
 	getTestDb,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
@@ -190,8 +191,8 @@ describe.skipIf(shouldSkipE2E())('Q6: Category Tree (Materialized Path)', () => 
 
 	describe('ORM API: Category queries with LIKE', () => {
 		it('should use LIKE for path matching', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// Find categories in Electronics subtree
 			const dump = orm
@@ -206,8 +207,8 @@ describe.skipIf(shouldSkipE2E())('Q6: Category Tree (Materialized Path)', () => 
 		});
 
 		it('should execute category subtree query', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const categories = await orm
 				.forTenant(SCHEMA)

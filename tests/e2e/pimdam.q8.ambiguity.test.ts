@@ -30,6 +30,7 @@ import {
 	closeTestDb,
 	createExtendedPimdamSchema,
 	dropExtendedPimdamSchema,
+	getTestAdapter,
 	getTestDb,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
@@ -118,8 +119,8 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 
 	describe('Q8-02: ORM with named relations', () => {
 		it('should filter products by author_id using eq', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// Filter by author_id directly (no ambiguity - it's a column)
 			const products = await orm
@@ -136,8 +137,8 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should filter products by reviewer_id using eq', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// Filter by reviewer_id=3 (Charlie)
 			const products = await orm
@@ -156,8 +157,8 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 
 	describe('Q8-03: Named relations support multiple FKs to same target', () => {
 		it('should have distinct author and reviewer relations defined', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// Verify the model supports both relations from products to users
 			const dump = orm.forTenant(SCHEMA).select('products').columns(['id', 'sku']).dump();
@@ -168,8 +169,8 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should query with author_id and reviewer_id columns', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// Verify columns are accessible
 			const products = await orm
@@ -373,8 +374,8 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should query via ORM with role filter using eq and and()', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// Query product_images junction table with role filter
 			// Use and() to combine conditions since where() replaces previous condition
@@ -437,7 +438,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 
 	describe('ORM API: Relation hints', () => {
 		it('should use relationHints for default disambiguation', async () => {
-			const db = await getTestDb();
+			const adapter = await getTestAdapter();
 
 			// Create ORM with relation hints
 			const hints: RelationHints = {
@@ -446,7 +447,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 
 			const orm = createOrm({
 				model: pimdamExtendedModel,
-				db,
+				adapter,
 				relationHints: hints,
 			});
 
@@ -458,8 +459,8 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should generate proper SQL for products query', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const dump = orm.forTenant(SCHEMA).select('products').columns(['id', 'sku']).dump();
 
@@ -469,8 +470,8 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should generate proper SQL for users query', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const dump = orm.forTenant(SCHEMA).select('users').columns(['id', 'name', 'email']).dump();
 
@@ -494,10 +495,10 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		 */
 
 		it('should throw AmbiguousRelationError in strict mode when including users without via hint', async () => {
-			const db = await getTestDb();
+			const adapter = await getTestAdapter();
 			const orm = createOrm({
 				model: pimdamExtendedModel,
-				db,
+				adapter,
 				strictMode: true,
 			});
 
@@ -508,10 +509,10 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should include sourceTable in AmbiguousRelationError', async () => {
-			const db = await getTestDb();
+			const adapter = await getTestAdapter();
 			const orm = createOrm({
 				model: pimdamExtendedModel,
-				db,
+				adapter,
 				strictMode: true,
 			});
 
@@ -525,10 +526,10 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should include targetTable in AmbiguousRelationError', async () => {
-			const db = await getTestDb();
+			const adapter = await getTestAdapter();
 			const orm = createOrm({
 				model: pimdamExtendedModel,
-				db,
+				adapter,
 				strictMode: true,
 			});
 
@@ -542,10 +543,10 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should provide available relation options in error', async () => {
-			const db = await getTestDb();
+			const adapter = await getTestAdapter();
 			const orm = createOrm({
 				model: pimdamExtendedModel,
-				db,
+				adapter,
 				strictMode: true,
 			});
 
@@ -562,10 +563,10 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should provide helpful error message with disambiguation hint', async () => {
-			const db = await getTestDb();
+			const adapter = await getTestAdapter();
 			const orm = createOrm({
 				model: pimdamExtendedModel,
-				db,
+				adapter,
 				strictMode: true,
 			});
 
@@ -584,10 +585,10 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should not throw when via hint resolves ambiguity', async () => {
-			const db = await getTestDb();
+			const adapter = await getTestAdapter();
 			const orm = createOrm({
 				model: pimdamExtendedModel,
-				db,
+				adapter,
 				strictMode: true,
 			});
 
@@ -603,10 +604,10 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should work in lenient mode (default) with warning instead of error', async () => {
-			const db = await getTestDb();
+			const adapter = await getTestAdapter();
 			const orm = createOrm({
 				model: pimdamExtendedModel,
-				db,
+				adapter,
 				strictMode: false, // Default/lenient mode
 			});
 
@@ -621,10 +622,10 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should execute query successfully when ambiguity is resolved with via hint', async () => {
-			const db = await getTestDb();
+			const adapter = await getTestAdapter();
 			const orm = createOrm({
 				model: pimdamExtendedModel,
-				db,
+				adapter,
 				strictMode: true,
 			});
 

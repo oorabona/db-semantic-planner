@@ -29,7 +29,7 @@ import {
 	closeTestDb,
 	createExtendedPimdamSchema,
 	dropExtendedPimdamSchema,
-	getTestDb,
+	getTestAdapter,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
 	shouldSkipE2E,
@@ -56,8 +56,8 @@ describe.skipIf(shouldSkipE2E())(
 		// =====================================================================
 		describe('Scenario Q2-01: FR->EN fallback', () => {
 			it('Given product "widget" with name_en "Widget Pro" and name_fr NULL', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamExtendedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				// Query widget directly to verify seed data
 				const widget = await orm
@@ -73,8 +73,8 @@ describe.skipIf(shouldSkipE2E())(
 			});
 
 			it('When I query with coalesce(name_fr, name_en) as display_name', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamExtendedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const result = await orm
 					.forTenant(TENANT)
@@ -94,8 +94,8 @@ describe.skipIf(shouldSkipE2E())(
 		// =====================================================================
 		describe('Scenario Q2-02: FR primary', () => {
 			it('Given product "gadget" with name_en "Super Gadget" and name_fr "Super Bidule"', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamExtendedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const gadget = await orm
 					.forTenant(TENANT)
@@ -110,8 +110,8 @@ describe.skipIf(shouldSkipE2E())(
 			});
 
 			it('When I query with coalesce(name_fr, name_en) as display_name', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamExtendedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const result = await orm
 					.forTenant(TENANT)
@@ -131,8 +131,8 @@ describe.skipIf(shouldSkipE2E())(
 		// =====================================================================
 		describe('Scenario Q2-03: Multi-level fallback chain', () => {
 			it('Given product with name_fr NULL, name_en NULL, name_default "Default Gizmo"', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamExtendedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const gizmo = await orm
 					.forTenant(TENANT)
@@ -148,8 +148,8 @@ describe.skipIf(shouldSkipE2E())(
 			});
 
 			it('When I query with coalesce(name_fr, name_en, name_default) as display_name', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamExtendedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const result = await orm
 					.forTenant(TENANT)
@@ -172,8 +172,8 @@ describe.skipIf(shouldSkipE2E())(
 		// =====================================================================
 		describe('Scenario Q2-04: Filter by coalesced value', () => {
 			it('should find products matching in either FR or EN name via LIKE', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamExtendedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				// Find products where coalesced name contains "Bidule"
 				// This should match GADGET-001 (name_fr = "Super Bidule")
@@ -195,8 +195,8 @@ describe.skipIf(shouldSkipE2E())(
 			});
 
 			it('should return all products with coalesced display names', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamExtendedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const products = await orm
 					.forTenant(TENANT)
@@ -224,8 +224,8 @@ describe.skipIf(shouldSkipE2E())(
 		// =====================================================================
 		describe('SQL generation for COALESCE', () => {
 			it('should generate COALESCE in SQL', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamExtendedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const dump = orm
 					.forTenant(TENANT)
@@ -238,8 +238,8 @@ describe.skipIf(shouldSkipE2E())(
 			});
 
 			it('should generate correct parameter binding', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: pimdamExtendedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const dump = orm
 					.forTenant(TENANT)

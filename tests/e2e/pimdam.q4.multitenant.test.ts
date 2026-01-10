@@ -11,7 +11,7 @@ import {
 	closeTestDb,
 	createPimdamSchema,
 	dropPimdamSchema,
-	getTestDb,
+	getTestAdapter,
 	pimdamModel,
 	seedAcmeTenant,
 	seedGlobexTenant,
@@ -36,8 +36,8 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 
 	describe('Schema isolation', () => {
 		it('should only return Acme products when querying Acme tenant', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const products = await orm
 				.forTenant('acme')
@@ -53,8 +53,8 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 		});
 
 		it('should only return Globex products when querying Globex tenant', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const products = await orm
 				.forTenant('globex')
@@ -70,8 +70,8 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 		});
 
 		it('should generate SQL with correct schema prefix', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const acmeDump = orm
 				.forTenant('acme')
@@ -94,8 +94,8 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 		});
 
 		it('should include tenant in dump meta', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const acmeDump = orm.forTenant('acme').select('products').dump();
 			const globexDump = orm.forTenant('globex').select('products').dump();
@@ -107,8 +107,8 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 
 	describe('Filtered queries per tenant', () => {
 		it('should filter by SKU within correct tenant', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const acmeProduct = await orm
 				.forTenant('acme')
@@ -122,8 +122,8 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 		});
 
 		it('should return empty when querying non-existent SKU in tenant', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			// GLX-001 exists in Globex but not in Acme
 			const result = await orm
@@ -137,8 +137,8 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 		});
 
 		it('should return different category counts per tenant', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const acmeCategories = await orm
 				.forTenant('acme')
@@ -160,8 +160,8 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 
 	describe('Same query, different results', () => {
 		it('should execute identical query structure with tenant-specific results', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			// Build identical query for both tenants
 			const buildQuery = (tenant: string) =>
@@ -184,8 +184,8 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 		});
 
 		it('should generate SQL with same structure but different schema', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const buildQuery = (tenant: string) =>
 				orm

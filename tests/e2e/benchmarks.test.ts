@@ -11,6 +11,7 @@ import {
 	closeTestDb,
 	createPimdamSchema,
 	dropPimdamSchema,
+	getTestAdapter,
 	getTestDb,
 	pimdamModel,
 	seedAcmeTenant,
@@ -104,8 +105,8 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 
 	describe('Compilation benchmarks', () => {
 		it('should benchmark simple select compilation', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const result = await runBenchmark(
 				'Simple SELECT',
@@ -125,8 +126,8 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 		});
 
 		it('should benchmark filtered select compilation', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const result = await runBenchmark(
 				'Filtered SELECT',
@@ -152,8 +153,8 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 		});
 
 		it('should benchmark multi-column select compilation', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const result = await runBenchmark(
 				'Multi-column SELECT',
@@ -179,8 +180,8 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 
 	describe('Execution benchmarks', () => {
 		it('should benchmark simple query execution', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const result = await runBenchmark(
 				'Simple Query Execution',
@@ -195,8 +196,8 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 		});
 
 		it('should benchmark filtered query execution', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const result = await runBenchmark(
 				'Filtered Query Execution',
@@ -216,8 +217,8 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 		});
 
 		it('should benchmark different entity types', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			// Categories
 			const catResult = await runBenchmark(
@@ -254,8 +255,9 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 
 	describe('Overhead analysis', () => {
 		it('should measure ORM overhead vs raw SQL', async () => {
+			const adapter = await getTestAdapter();
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			// ORM query
 			const ormResult = await runBenchmark(
@@ -301,8 +303,8 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 
 	describe('Scalability hints', () => {
 		it('should maintain consistent performance across multiple queries', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const times: number[] = [];
 

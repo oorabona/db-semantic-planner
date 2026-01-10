@@ -12,7 +12,7 @@ import {
 	closeTestDb,
 	createBlogSchema,
 	dropBlogSchema,
-	getTestDb,
+	getTestAdapter,
 	seedBlogData,
 	shouldSkipE2E,
 } from './testkit/index.js';
@@ -33,8 +33,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 
 	describe('Scenario 1: Basic streaming iteration', () => {
 		it('should stream all rows one at a time', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const results: unknown[] = [];
 			for await (const row of orm
@@ -50,8 +50,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 		});
 
 		it('should yield correct data for each row', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const names: string[] = [];
 			for await (const row of orm
@@ -69,8 +69,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 
 	describe('Scenario 2: Streaming with chunkSize', () => {
 		it('should accept chunkSize option', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const results: unknown[] = [];
 			for await (const row of orm
@@ -87,8 +87,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 
 	describe('Scenario 3: Early break releases connection', () => {
 		it('should handle early break from iteration', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const results: unknown[] = [];
 			for await (const row of orm
@@ -105,8 +105,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 		});
 
 		it('should allow queries after early break', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			// First query with early break
 			for await (const row of orm
@@ -124,8 +124,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 
 	describe('Scenario 4: Streaming with onStart callback', () => {
 		it('should invoke onStart before first row', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 			const onStart = vi.fn();
 
 			const iterator = orm
@@ -145,8 +145,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 		});
 
 		it('should pass dump to onStart with correct schema prefix', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 			let receivedDump: Dump | undefined;
 
 			for await (const _row of orm
@@ -187,8 +187,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 		});
 
 		it('should isolate streaming to tenant schema', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			// Stream from tenant A
 			const tenantAResults: unknown[] = [];
@@ -214,8 +214,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 		});
 
 		it('should include schema prefix in SQL', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 			let sql = '';
 
 			for await (const _row of orm
@@ -235,8 +235,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 
 	describe('Scenario 6: Streaming with filters', () => {
 		it('should stream only filtered rows', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const publishedPosts: unknown[] = [];
 			for await (const row of orm
@@ -252,8 +252,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 		});
 
 		it('should pass filter params correctly', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 			let params: readonly unknown[] = [];
 
 			for await (const _row of orm
@@ -274,8 +274,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 
 	describe('Scenario 9: Empty result set', () => {
 		it('should handle empty results gracefully', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const results: unknown[] = [];
 			// Filter that matches nothing
@@ -291,8 +291,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 		});
 
 		it('should still invoke onStart for empty results', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 			const onStart = vi.fn();
 
 			for await (const _row of orm
@@ -309,8 +309,8 @@ describe.skipIf(shouldSkipE2E())('STREAMING-001: Cursor/Streaming Support', () =
 
 	describe('Scenario: Streaming preserves query builder chain', () => {
 		it('should work with select fields', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const results: unknown[] = [];
 			for await (const row of orm

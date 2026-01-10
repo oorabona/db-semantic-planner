@@ -15,6 +15,7 @@ import {
 	closeTestDb,
 	createPimdamSchema,
 	dropPimdamSchema,
+	getTestAdapter,
 	getTestDb,
 	pimdamModel,
 	seedAcmeTenant,
@@ -50,7 +51,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 	describe('Basic queries (no parameters)', () => {
 		it('should produce valid EXPLAIN output for simple select', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
 				.forTenant('acme')
@@ -74,7 +76,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 		it('should produce valid EXPLAIN for categories query', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
 				.forTenant('acme')
@@ -91,7 +94,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 		it('should produce valid EXPLAIN for assets query', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
 				.forTenant('acme')
@@ -110,7 +114,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 	describe('SQL structure validation', () => {
 		it('should generate SELECT with correct schema prefix', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
 				.forTenant('acme')
@@ -126,7 +131,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 		it('should generate valid SQL for all entity types', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const entities = [
 				'products',
@@ -146,7 +152,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 		it('should include parameters array even when empty', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
 				.forTenant('acme')
@@ -161,7 +168,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 	describe('Plan characteristics', () => {
 		it('should use Seq Scan on small tables', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
 				.forTenant('acme')
@@ -177,7 +185,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 		it('should estimate reasonable row counts', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
 				.forTenant('acme')
@@ -195,7 +204,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 		it('should show correct relation name in plan', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
 				.forTenant('acme')
@@ -213,7 +223,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 	describe('Dump metadata', () => {
 		it('should include tenant in meta', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
 				.forTenant('acme')
@@ -225,7 +236,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 		it('should include compiledAt timestamp', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
 				.forTenant('acme')
@@ -237,7 +249,8 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 		it('should have plan with decisions', async () => {
 			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
 				.forTenant('acme')

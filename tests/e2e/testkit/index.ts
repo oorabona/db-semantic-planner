@@ -11,6 +11,7 @@ export {
 	describeE2E,
 	dropSchema,
 	execInSchema,
+	getTestAdapter,
 	getTestDb,
 	shouldSkipE2E,
 } from './db.js';

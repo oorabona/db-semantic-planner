@@ -14,7 +14,7 @@ import {
 	closeTestDb,
 	createBlogSchema,
 	dropBlogSchema,
-	getTestDb,
+	getTestAdapter,
 	seedBlogData,
 	shouldSkipE2E,
 } from './testkit/index.js';
@@ -35,8 +35,8 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 	describe('Simple entity queries', () => {
 		it('should query all authors', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const authors = await orm
 				.forTenant(SCHEMA)
@@ -51,8 +51,8 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 		});
 
 		it('should query all posts', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const posts = await orm
 				.forTenant(SCHEMA)
@@ -64,8 +64,8 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 		});
 
 		it('should query all comments', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const comments = await orm
 				.forTenant(SCHEMA)
@@ -79,8 +79,8 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 	describe('Filtered queries', () => {
 		it('should filter published posts', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const publishedPosts = await orm
 				.forTenant(SCHEMA)
@@ -93,8 +93,8 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 		});
 
 		it('should filter draft posts', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const draftPosts = await orm
 				.forTenant(SCHEMA)
@@ -107,8 +107,8 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 		});
 
 		it('should filter author by email', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const alice = await orm
 				.forTenant(SCHEMA)
@@ -124,8 +124,8 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 	describe('EXISTS queries on relations', () => {
 		it('should find authors with published posts', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const authorsWithPublished = await orm
 				.forTenant(SCHEMA)
@@ -143,8 +143,8 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 		});
 
 		it('should find posts with comments', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const postsWithComments = await orm
 				.forTenant(SCHEMA)
@@ -160,8 +160,8 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 	describe('dump() analysis', () => {
 		it('should generate correct SQL for filtered query', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const dump = orm
 				.forTenant(SCHEMA)
@@ -177,8 +177,8 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 		});
 
 		it('should include schema in meta', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const dump = orm.forTenant(SCHEMA).select('authors').dump();
 
@@ -187,8 +187,8 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 		});
 
 		it('should generate EXISTS subquery for relation filter', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const dump = orm
 				.forTenant(SCHEMA)
@@ -202,8 +202,8 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 	describe('Combined filters', () => {
 		it('should combine entity filter with relation filter', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: blogModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
 
 			const publishedWithComments = await orm
 				.forTenant(SCHEMA)

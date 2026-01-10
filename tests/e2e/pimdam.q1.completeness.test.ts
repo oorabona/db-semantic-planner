@@ -24,6 +24,7 @@ import {
 	closeTestDb,
 	createExtendedPimdamSchema,
 	dropExtendedPimdamSchema,
+	getTestAdapter,
 	getTestDb,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
@@ -255,8 +256,8 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 
 	describe('ORM API: Completeness via raw SQL expression', () => {
 		it('should support raw SQL in select for computed fields', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// The ORM can execute with schema prefix
 			const products = await orm
@@ -271,8 +272,8 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 		});
 
 		it('should generate correct tenant-scoped SQL', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: pimdamExtendedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const dump = orm
 				.forTenant(SCHEMA)

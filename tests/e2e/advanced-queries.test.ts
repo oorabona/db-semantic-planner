@@ -26,6 +26,7 @@ import {
 import { belongsTo, defineSchema, hasMany } from '@db-semantic-planner/core';
 import {
 	closeTestDb,
+	getTestAdapter,
 	getTestDb,
 	shouldSkipE2E,
 } from './testkit/index.js';
@@ -212,8 +213,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 	describe('Aggregations', () => {
 		describe('COUNT', () => {
 			it('should count all products (excluding soft-deleted)', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
 					.forTenant(SCHEMA)
@@ -227,8 +228,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 			});
 
 			it('should count products by category', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
 					.forTenant(SCHEMA)
@@ -249,8 +250,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 		describe('SUM', () => {
 			it('should sum total order value', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
 					.forTenant(SCHEMA)
@@ -267,8 +268,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 			});
 
 			it('should sum quantities by product', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
 					.forTenant(SCHEMA)
@@ -283,8 +284,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 		describe('AVG', () => {
 			it('should calculate average rating per product', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
 					.forTenant(SCHEMA)
@@ -306,8 +307,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 		describe('MIN/MAX', () => {
 			it('should find min and max prices', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const minResult = await orm
 					.forTenant(SCHEMA)
@@ -342,8 +343,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 	describe('Sorting & Pagination', () => {
 		describe('ORDER BY', () => {
 			it('should sort products by price ascending', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
 					.forTenant(SCHEMA)
@@ -360,8 +361,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 			});
 
 			it('should sort products by price descending', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
 					.forTenant(SCHEMA)
@@ -378,8 +379,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 			});
 
 			it('should sort by multiple fields', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
 					.forTenant(SCHEMA)
@@ -397,8 +398,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 		describe('LIMIT', () => {
 			it('should limit results to specified count', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
 					.forTenant(SCHEMA)
@@ -411,8 +412,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 			});
 
 			it('should return all when limit exceeds count', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
 					.forTenant(SCHEMA)
@@ -427,8 +428,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 		describe('OFFSET', () => {
 			it('should skip specified number of results', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const allProducts = await orm
 					.forTenant(SCHEMA)
@@ -455,8 +456,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 		describe('Pagination', () => {
 			it('should implement cursor-style pagination', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 				const pageSize = 3;
 
 				// Page 1
@@ -502,8 +503,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 			});
 
 			it('should combine sorting with pagination', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				// Get top 5 most expensive products
 				const top5 = await orm
@@ -528,8 +529,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 	describe('Nested Conditions', () => {
 		describe('Simple combinations', () => {
 			it('should filter with AND conditions', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				// Electronics category AND price > 100
 				const result = await orm
@@ -550,8 +551,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 			});
 
 			it('should filter with OR conditions', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				// Either electronics OR furniture category
 				const result = await orm
@@ -570,8 +571,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 			});
 
 			it('should filter with NOT condition', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				// NOT electronics category
 				const result = await orm
@@ -587,8 +588,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 		describe('Complex nested conditions', () => {
 			it('should handle deeply nested AND/OR', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				// (category = 'electronics' AND price > 20) OR (category = 'furniture' AND stock > 100)
 				const result = await orm
@@ -612,8 +613,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 			});
 
 			it('should handle NOT with nested OR', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				// NOT (category = 'electronics' OR category = 'furniture')
 				// Same as: category NOT IN ('electronics', 'furniture')
@@ -633,8 +634,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 			});
 
 			it('should combine field conditions with relation filters', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				// Products with orders AND (high-rated OR expensive)
 				const result = await orm
@@ -655,8 +656,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 		describe('Range queries', () => {
 			it('should filter products in price range', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				// Price between 10 and 100
 				const result = await orm
@@ -679,8 +680,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 	describe('Soft Deletes', () => {
 		describe('Active records only', () => {
 			it('should exclude soft-deleted records by default pattern', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const activeProducts = await orm
 					.forTenant(SCHEMA)
@@ -693,8 +694,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 			});
 
 			it('should count only active records', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const countResult = await orm
 					.forTenant(SCHEMA)
@@ -709,8 +710,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 		describe('Include deleted records', () => {
 			it('should include soft-deleted records when explicitly requested', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				// No deleted_at filter = all records including deleted
 				const allProducts = await orm
@@ -722,8 +723,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 			});
 
 			it('should query only deleted records', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const deletedProducts = await orm
 					.forTenant(SCHEMA)
@@ -741,8 +742,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 		describe('Soft delete with other conditions', () => {
 			it('should combine soft delete filter with category filter', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				// Active electronics only
 				const activeElectronics = await orm
@@ -757,8 +758,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 			});
 
 			it('should combine soft delete with relation filter', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				// Active products with orders
 				const activeWithOrders = await orm
@@ -777,8 +778,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 		describe('Observability', () => {
 			it('should generate correct SQL for soft delete filter', async () => {
-				const db = await getTestDb();
-				const orm = createOrm({ model: advancedModel, db });
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: advancedModel, adapter });
 
 				const dump = orm
 					.forTenant(SCHEMA)
@@ -797,8 +798,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 	// ============================================================
 	describe('Combined Advanced Queries', () => {
 		it('should combine aggregation with soft delete filter', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: advancedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: advancedModel, adapter });
 
 			// Count active products by category
 			const result = await orm
@@ -818,8 +819,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 		});
 
 		it('should combine sorting, pagination, and filtering', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: advancedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: advancedModel, adapter });
 
 			// Top 3 most expensive active electronics
 			const result = await orm
@@ -837,8 +838,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 		});
 
 		it('should combine nested conditions with aggregation', async () => {
-			const db = await getTestDb();
-			const orm = createOrm({ model: advancedModel, db });
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: advancedModel, adapter });
 
 			// Sum order totals for completed or shipped orders
 			const result = await orm
