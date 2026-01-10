@@ -6,6 +6,7 @@ import {
 	planRecursive,
 	type QueryIntent,
 	type RecursiveIntent,
+	type UpsertIntent,
 	type WindowIntent,
 } from '@db-semantic-planner/core';
 import Database from 'better-sqlite3';
@@ -18,6 +19,7 @@ import {
 	compileRecursive,
 	compileSeparateInclude,
 	compileUpdate,
+	compileUpsert,
 	compileWindowSelect,
 	compileWithIncludes,
 } from './compiler.js';
@@ -2629,6 +2631,274 @@ describe('SQL Compiler', () => {
 
 				// Then: SQL should contain schema prefix (SQLite quotes identifiers)
 				expect(compiled.sql.toLowerCase()).toMatch(/tenant_abc.*posts/);
+			});
+		});
+	});
+
+	// ============================================================================
+	// Upsert Compiler (DX-026)
+	// ============================================================================
+
+	describe('Upsert Compiler (DX-026)', () => {
+		describe('compileUpsert', () => {
+			it('should compile INSERT ... ON CONFLICT DO NOTHING', () => {
+				const kysely = createTestKysely();
+				const intent: UpsertIntent = {
+					type: 'upsert',
+					table: 'users',
+					values: [{ name: 'John', email: 'john@example.com' }],
+					onConflict: { columns: ['email'] },
+					action: { type: 'doNothing' },
+				};
+
+				const compiled = compileUpsert(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('insert into');
+				expect(compiled.sql.toLowerCase()).toContain('users');
+				expect(compiled.sql.toLowerCase()).toContain('on conflict');
+				expect(compiled.sql.toLowerCase()).toContain('do nothing');
+				expect(compiled.parameters).toContain('John');
+				expect(compiled.parameters).toContain('john@example.com');
+			});
+
+			it('should compile INSERT ... ON CONFLICT DO UPDATE with explicit SET', () => {
+				const kysely = createTestKysely();
+				const intent: UpsertIntent = {
+					type: 'upsert',
+					table: 'users',
+					values: [{ name: 'John', email: 'john@example.com' }],
+					onConflict: { columns: ['email'] },
+					action: {
+						type: 'doUpdate',
+						set: { name: 'Updated John' },
+					},
+				};
+
+				const compiled = compileUpsert(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('insert into');
+				expect(compiled.sql.toLowerCase()).toContain('on conflict');
+				expect(compiled.sql.toLowerCase()).toContain('do update');
+				expect(compiled.sql.toLowerCase()).toContain('set');
+				expect(compiled.parameters).toContain('Updated John');
+			});
+
+			it('should compile upsert with auto-UPDATE from excluded row', () => {
+				const kysely = createTestKysely();
+				const intent: UpsertIntent = {
+					type: 'upsert',
+					table: 'users',
+					values: [{ name: 'John', email: 'john@example.com' }],
+					onConflict: { columns: ['email'] },
+					action: { type: 'doUpdate' },
+				};
+
+				const compiled = compileUpsert(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('insert into');
+				expect(compiled.sql.toLowerCase()).toContain('on conflict');
+				expect(compiled.sql.toLowerCase()).toContain('do update');
+				// Should reference excluded.name since email is the conflict column
+				expect(compiled.sql.toLowerCase()).toContain('excluded');
+			});
+
+			it('should compile upsert with constraint name', () => {
+				const kysely = createTestKysely();
+				const intent: UpsertIntent = {
+					type: 'upsert',
+					table: 'users',
+					values: [{ name: 'John', email: 'john@example.com' }],
+					onConflict: { constraint: 'users_email_unique' },
+					action: { type: 'doNothing' },
+				};
+
+				const compiled = compileUpsert(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('insert into');
+				expect(compiled.sql.toLowerCase()).toContain('on conflict');
+				// SQLite doesn't support constraint syntax well, but the SQL should still be generated
+				expect(compiled.sql).toContain('users_email_unique');
+			});
+
+			it('should compile upsert with multiple conflict columns', () => {
+				const kysely = createTestKysely();
+				const intent: UpsertIntent = {
+					type: 'upsert',
+					table: 'posts',
+					values: [{ title: 'Post', content: 'Content', userId: 1 }],
+					onConflict: { columns: ['title', 'userId'] },
+					action: { type: 'doUpdate', set: { content: 'Updated content' } },
+				};
+
+				const compiled = compileUpsert(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('on conflict');
+				expect(compiled.sql.toLowerCase()).toContain('do update');
+			});
+
+			it('should compile bulk upsert with multiple values', () => {
+				const kysely = createTestKysely();
+				const intent: UpsertIntent = {
+					type: 'upsert',
+					table: 'users',
+					values: [
+						{ name: 'John', email: 'john@example.com' },
+						{ name: 'Jane', email: 'jane@example.com' },
+					],
+					onConflict: { columns: ['email'] },
+					action: { type: 'doNothing' },
+				};
+
+				const compiled = compileUpsert(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('insert into');
+				expect(compiled.parameters).toContain('John');
+				expect(compiled.parameters).toContain('Jane');
+			});
+
+			it('should compile upsert with multi-tenant schema prefix', () => {
+				const kysely = createTestKysely();
+				const intent: UpsertIntent = {
+					type: 'upsert',
+					table: 'users',
+					values: [{ name: 'John', email: 'john@example.com' }],
+					onConflict: { columns: ['email'] },
+					action: { type: 'doNothing' },
+				};
+
+				const compiled = compileUpsert(intent, kysely, 'tenant_123');
+
+				expect(compiled.sql.toLowerCase()).toMatch(/tenant_123[".].*users/);
+			});
+
+			it('should compile upsert with RETURNING clause', () => {
+				const kysely = createTestKysely();
+				const intent: UpsertIntent = {
+					type: 'upsert',
+					table: 'users',
+					values: [{ name: 'John', email: 'john@example.com' }],
+					onConflict: { columns: ['email'] },
+					action: { type: 'doNothing' },
+					returning: ['id', 'name'],
+				};
+
+				const compiled = compileUpsert(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('returning');
+				expect(compiled.sql.toLowerCase()).toMatch(/returning.*"id".*"name"/);
+			});
+
+			it('should compile upsert with WHERE clause in doUpdate', () => {
+				const kysely = createTestKysely();
+				const intent: UpsertIntent = {
+					type: 'upsert',
+					table: 'users',
+					values: [{ name: 'John', email: 'john@example.com', active: true }],
+					onConflict: { columns: ['email'] },
+					action: {
+						type: 'doUpdate',
+						set: { name: 'Updated John' },
+						where: { kind: 'comparison', field: 'active', operator: 'eq', value: true },
+					},
+				};
+
+				const compiled = compileUpsert(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('do update');
+				expect(compiled.sql.toLowerCase()).toContain('where');
+			});
+		});
+
+		describe('compileInsert with RETURNING (DX-026)', () => {
+			it('should compile insert with RETURNING clause', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'insert' as const,
+					table: 'users',
+					values: [{ name: 'John', email: 'john@example.com' }],
+					returning: ['id', 'name'],
+				};
+
+				const compiled = compileInsert(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('insert into');
+				expect(compiled.sql.toLowerCase()).toContain('returning');
+				expect(compiled.sql.toLowerCase()).toMatch(/returning.*"id".*"name"/);
+			});
+
+			it('should compile insert without RETURNING when not specified', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'insert' as const,
+					table: 'users',
+					values: [{ name: 'John', email: 'john@example.com' }],
+				};
+
+				const compiled = compileInsert(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).not.toContain('returning');
+			});
+		});
+
+		describe('compileUpdate with RETURNING (DX-026)', () => {
+			it('should compile update with RETURNING clause', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'update' as const,
+					table: 'users',
+					set: { name: 'Updated' },
+					where: { kind: 'comparison' as const, field: 'id', operator: 'eq' as const, value: 1 },
+					returning: ['id', 'name', 'email'],
+				};
+
+				const compiled = compileUpdate(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('update');
+				expect(compiled.sql.toLowerCase()).toContain('returning');
+			});
+
+			it('should compile update without RETURNING when not specified', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'update' as const,
+					table: 'users',
+					set: { name: 'Updated' },
+					where: { kind: 'comparison' as const, field: 'id', operator: 'eq' as const, value: 1 },
+				};
+
+				const compiled = compileUpdate(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).not.toContain('returning');
+			});
+		});
+
+		describe('compileDelete with RETURNING (DX-026)', () => {
+			it('should compile delete with RETURNING clause', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'delete' as const,
+					table: 'users',
+					where: { kind: 'comparison' as const, field: 'id', operator: 'eq' as const, value: 1 },
+					returning: ['id', 'name'],
+				};
+
+				const compiled = compileDelete(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).toContain('delete');
+				expect(compiled.sql.toLowerCase()).toContain('returning');
+			});
+
+			it('should compile delete without RETURNING when not specified', () => {
+				const kysely = createTestKysely();
+				const intent = {
+					type: 'delete' as const,
+					table: 'users',
+					where: { kind: 'comparison' as const, field: 'id', operator: 'eq' as const, value: 1 },
+				};
+
+				const compiled = compileDelete(intent, kysely);
+
+				expect(compiled.sql.toLowerCase()).not.toContain('returning');
 			});
 		});
 	});

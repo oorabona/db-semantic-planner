@@ -11,6 +11,7 @@ import {
 	eq,
 	hasMany,
 	inArray,
+	UpsertBuilder,
 } from '@db-semantic-planner/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
@@ -622,6 +623,409 @@ describe('Mutation Builders (DX-010)', () => {
 			});
 			expect(orm.deleteAll).toBeDefined();
 			expect(typeof orm.deleteAll).toBe('function');
+		});
+
+		it('should expose upsert() method', () => {
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
+			expect(orm.upsert).toBeDefined();
+			expect(typeof orm.upsert).toBe('function');
+		});
+	});
+
+	// =========================================================================
+	// UpsertBuilder Tests (DX-026)
+	// =========================================================================
+
+	describe('UpsertBuilder (DX-026)', () => {
+		describe('values()', () => {
+			it('should accept a single object', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const dump = orm
+					.upsert('users')
+					.values({ name: 'David', email: 'david@example.com' })
+					.onConflict(['email'])
+					.doNothing()
+					.dump();
+
+				expect(dump.sql.toLowerCase()).toContain('insert into');
+				expect(dump.intent.type).toBe('upsert');
+				expect(dump.intent.values).toHaveLength(1);
+			});
+
+			it('should accept an array for bulk upsert', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const dump = orm
+					.upsert('users')
+					.values([
+						{ name: 'David', email: 'david@example.com' },
+						{ name: 'Eve', email: 'eve@example.com' },
+					])
+					.onConflict(['email'])
+					.doNothing()
+					.dump();
+
+				expect(dump.intent.type).toBe('upsert');
+				expect(dump.intent.values).toHaveLength(2);
+			});
+
+			it('should be immutable - return new builder', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const builder1 = orm.upsert('users');
+				const builder2 = builder1.values({ name: 'David', email: 'd@e.com' });
+
+				expect(builder1).not.toBe(builder2);
+			});
+		});
+
+		describe('onConflict()', () => {
+			it('should set conflict columns', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const dump = orm
+					.upsert('users')
+					.values({ name: 'David', email: 'david@example.com' })
+					.onConflict(['email'])
+					.doNothing()
+					.dump();
+
+				expect(dump.sql.toLowerCase()).toContain('on conflict');
+				expect(dump.intent.onConflict).toHaveProperty('columns');
+			});
+
+			it('should support multiple conflict columns', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const dump = orm
+					.upsert('posts')
+					.values({ title: 'Post', content: 'Content', userId: 1 })
+					.onConflict(['title', 'userId'])
+					.doNothing()
+					.dump();
+
+				expect(dump.intent.onConflict).toEqual({ columns: ['title', 'userId'] });
+			});
+		});
+
+		describe('onConflictConstraint()', () => {
+			it('should set constraint name', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const dump = orm
+					.upsert('users')
+					.values({ name: 'David', email: 'david@example.com' })
+					.onConflictConstraint('users_email_unique')
+					.doNothing()
+					.dump();
+
+				expect(dump.intent.onConflict).toEqual({ constraint: 'users_email_unique' });
+			});
+		});
+
+		describe('doNothing()', () => {
+			it('should set DO NOTHING action', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const dump = orm
+					.upsert('users')
+					.values({ name: 'David', email: 'david@example.com' })
+					.onConflict(['email'])
+					.doNothing()
+					.dump();
+
+				expect(dump.sql.toLowerCase()).toContain('do nothing');
+				expect(dump.intent.action).toEqual({ type: 'doNothing' });
+			});
+		});
+
+		describe('doUpdate()', () => {
+			it('should set DO UPDATE action with explicit SET', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const dump = orm
+					.upsert('users')
+					.values({ name: 'David', email: 'david@example.com' })
+					.onConflict(['email'])
+					.doUpdate({ name: 'Updated David' })
+					.dump();
+
+				expect(dump.sql.toLowerCase()).toContain('do update');
+				expect(dump.intent.action).toMatchObject({
+					type: 'doUpdate',
+					set: { name: 'Updated David' },
+				});
+			});
+
+			it('should set DO UPDATE action with auto-update from excluded', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const dump = orm
+					.upsert('users')
+					.values({ name: 'David', email: 'david@example.com' })
+					.onConflict(['email'])
+					.doUpdate()
+					.dump();
+
+				expect(dump.sql.toLowerCase()).toContain('do update');
+				expect(dump.sql.toLowerCase()).toContain('excluded');
+			});
+
+			it('should support WHERE clause in doUpdate', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const dump = orm
+					.upsert('users')
+					.values({ name: 'David', email: 'david@example.com', active: 1 })
+					.onConflict(['email'])
+					.doUpdate({ name: 'Updated' }, eq('active', 1))
+					.dump();
+
+				expect(dump.sql.toLowerCase()).toContain('where');
+				expect(dump.intent.action).toMatchObject({
+					type: 'doUpdate',
+					where: expect.anything(),
+				});
+			});
+		});
+
+		describe('dump()', () => {
+			it('should return MutationDump with sql and parameters', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const dump = orm
+					.upsert('users')
+					.values({ name: 'David', email: 'david@example.com' })
+					.onConflict(['email'])
+					.doNothing()
+					.dump();
+
+				expect(dump.sql).toBeDefined();
+				expect(dump.parameters).toBeDefined();
+				expect(dump.intent).toBeDefined();
+				expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
+			});
+
+			it('should throw InvalidOperationError if no values provided', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				expect(() =>
+					orm.upsert('users').onConflict(['email']).doNothing().dump(),
+				).toThrow(InvalidOperationError);
+			});
+
+			it('should throw InvalidOperationError if no conflict target', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				expect(() =>
+					orm.upsert('users').values({ name: 'Test' }).doNothing().dump(),
+				).toThrow(InvalidOperationError);
+			});
+
+			it('should throw InvalidOperationError if no action specified', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				expect(() =>
+					orm.upsert('users').values({ name: 'Test' }).onConflict(['email']).dump(),
+				).toThrow(InvalidOperationError);
+			});
+
+			it('should throw ExecutionError if no db configured', () => {
+				const orm = createOrm({ model: testModel });
+				expect(() =>
+					orm
+						.upsert('users')
+						.values({ name: 'Test', email: 't@e.com' })
+						.onConflict(['email'])
+						.doNothing()
+						.dump(),
+				).toThrow(ExecutionError);
+			});
+		});
+
+		describe('returning()', () => {
+			it('should add RETURNING clause to upsert', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const dump = orm
+					.upsert('users')
+					.values({ name: 'David', email: 'david@example.com' })
+					.onConflict(['email'])
+					.doNothing()
+					.returning(['id', 'name'])
+					.dump();
+
+				expect(dump.sql.toLowerCase()).toContain('returning');
+				expect(dump.intent.returning).toEqual(['id', 'name']);
+			});
+
+			it('should be chainable', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const builder = orm
+					.upsert('users')
+					.values({ name: 'David', email: 'david@example.com' })
+					.onConflict(['email'])
+					.doNothing()
+					.returning(['id']);
+
+				expect(builder).toBeInstanceOf(UpsertBuilder);
+			});
+		});
+	});
+
+	// =========================================================================
+	// Returning Support Tests (DX-026)
+	// =========================================================================
+
+	describe('Returning Support (DX-026)', () => {
+		describe('InsertBuilder.returning()', () => {
+			it('should add RETURNING clause to insert', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const dump = orm
+					.insert('users')
+					.values({ name: 'David', email: 'david@example.com' })
+					.returning(['id', 'name'])
+					.dump();
+
+				expect(dump.sql.toLowerCase()).toContain('returning');
+				expect(dump.intent.returning).toEqual(['id', 'name']);
+			});
+
+			it('should be immutable - return new builder', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const builder1 = orm
+					.insert('users')
+					.values({ name: 'David', email: 'david@example.com' });
+				const builder2 = builder1.returning(['id']);
+
+				expect(builder1).not.toBe(builder2);
+			});
+		});
+
+		describe('UpdateBuilder.returning()', () => {
+			it('should add RETURNING clause to update', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const dump = orm
+					.update('users')
+					.set({ name: 'Updated' })
+					.where(eq('id', 1))
+					.returning(['id', 'name', 'email'])
+					.dump();
+
+				expect(dump.sql.toLowerCase()).toContain('returning');
+				expect(dump.intent.returning).toEqual(['id', 'name', 'email']);
+			});
+
+			it('should be immutable - return new builder', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const builder1 = orm
+					.update('users')
+					.set({ name: 'Updated' })
+					.where(eq('id', 1));
+				const builder2 = builder1.returning(['id']);
+
+				expect(builder1).not.toBe(builder2);
+			});
+		});
+
+		describe('DeleteBuilder.returning()', () => {
+			it('should add RETURNING clause to delete', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const dump = orm
+					.delete('users')
+					.where(eq('id', 1))
+					.returning(['id', 'name'])
+					.dump();
+
+				expect(dump.sql.toLowerCase()).toContain('returning');
+				expect(dump.intent.returning).toEqual(['id', 'name']);
+			});
+
+			it('should be immutable - return new builder', () => {
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
+				const builder1 = orm.delete('users').where(eq('id', 1));
+				const builder2 = builder1.returning(['id']);
+
+				expect(builder1).not.toBe(builder2);
+			});
+		});
+	});
+
+	// =========================================================================
+	// Multi-tenant UpsertBuilder Tests (DX-026)
+	// =========================================================================
+
+	describe('Multi-tenant Upsert (DX-026)', () => {
+		it('should include schema prefix in upsert dump', () => {
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
+			const tenantOrm = orm.forTenant('tenant_xyz');
+			const dump = tenantOrm
+				.upsert('users')
+				.values({ name: 'Test', email: 't@e.com' })
+				.onConflict(['email'])
+				.doNothing()
+				.dump();
+
+			expect(dump.sql.toLowerCase()).toMatch(/tenant_xyz[".].*users/);
+			expect(dump.meta?.tenant).toBe('tenant_xyz');
 		});
 	});
 });

@@ -833,6 +833,13 @@ export interface InsertIntent {
 
 	/** Values to insert (single object or array for bulk insert) */
 	readonly values: readonly Record<string, unknown>[];
+
+	/**
+	 * Columns to return from inserted rows (DX-026).
+	 * Requires adapter capability: supportsReturning
+	 * @example ['id', 'created_at']
+	 */
+	readonly returning?: readonly string[];
 }
 
 /**
@@ -853,6 +860,13 @@ export interface UpdateIntent {
 
 	/** Explicitly allow update without WHERE (for updateAll) */
 	readonly allowAll?: boolean;
+
+	/**
+	 * Columns to return from updated rows (DX-026).
+	 * Requires adapter capability: supportsReturning
+	 * @example ['id', 'updated_at']
+	 */
+	readonly returning?: readonly string[];
 }
 
 /**
@@ -878,12 +892,88 @@ export interface DeleteIntent {
 	 * - string[]: cascade specific relations
 	 */
 	readonly cascade?: boolean | readonly string[];
+
+	/**
+	 * Columns to return from deleted rows (DX-026).
+	 * Requires adapter capability: supportsReturning
+	 * @example ['id', 'email']
+	 */
+	readonly returning?: readonly string[];
+}
+
+/**
+ * Upsert conflict target - specifies which columns determine uniqueness.
+ */
+export type UpsertConflictTarget =
+	| { readonly columns: readonly string[] }
+	| { readonly constraint: string };
+
+/**
+ * Upsert conflict action - what to do when conflict occurs.
+ */
+export type UpsertConflictAction =
+	| { readonly type: 'doNothing' }
+	| {
+			readonly type: 'doUpdate';
+			/** Fields to update on conflict. If undefined, updates all non-conflict columns. */
+			readonly set?: Record<string, unknown>;
+			/** Optional WHERE clause for conditional update */
+			readonly where?: WhereIntent;
+	  };
+
+/**
+ * Upsert intent - insert or update on conflict (DX-026).
+ * Implements INSERT ... ON CONFLICT ... DO UPDATE/NOTHING pattern.
+ *
+ * @example doNothing
+ * {
+ *   type: 'upsert',
+ *   table: 'users',
+ *   values: [{ email: 'a@b.com', name: 'Alice' }],
+ *   onConflict: { columns: ['email'] },
+ *   action: { type: 'doNothing' }
+ * }
+ *
+ * @example doUpdate
+ * {
+ *   type: 'upsert',
+ *   table: 'users',
+ *   values: [{ email: 'a@b.com', name: 'Alice' }],
+ *   onConflict: { columns: ['email'] },
+ *   action: { type: 'doUpdate', set: { name: 'Alice Updated' } }
+ * }
+ */
+export interface UpsertIntent {
+	readonly type: 'upsert';
+
+	/** Target table name */
+	readonly table: string;
+
+	/** Values to insert (single object or array for bulk upsert) */
+	readonly values: readonly Record<string, unknown>[];
+
+	/** Conflict target - columns or constraint name */
+	readonly onConflict: UpsertConflictTarget;
+
+	/** Action to take on conflict */
+	readonly action: UpsertConflictAction;
+
+	/**
+	 * Columns to return from affected rows (DX-026).
+	 * Requires adapter capability: supportsReturning
+	 * @example ['id', 'created_at', 'updated_at']
+	 */
+	readonly returning?: readonly string[];
 }
 
 /**
  * Union of all mutation intents.
  */
-export type MutationIntent = InsertIntent | UpdateIntent | DeleteIntent;
+export type MutationIntent =
+	| InsertIntent
+	| UpdateIntent
+	| DeleteIntent
+	| UpsertIntent;
 
 // ============================================================================
 // Type Guards
@@ -1169,6 +1259,15 @@ export function isDeleteIntent(
 }
 
 /**
+ * Check if an intent is an upsert intent (DX-026)
+ */
+export function isUpsertIntent(
+	intent: QueryIntent | RecursiveIntent | MutationIntent,
+): intent is UpsertIntent {
+	return intent.type === 'upsert';
+}
+
+/**
  * Check if an intent is any mutation intent
  */
 export function isMutationIntent(
@@ -1177,6 +1276,7 @@ export function isMutationIntent(
 	return (
 		intent.type === 'insert' ||
 		intent.type === 'update' ||
-		intent.type === 'delete'
+		intent.type === 'delete' ||
+		intent.type === 'upsert'
 	);
 }

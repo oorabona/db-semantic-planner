@@ -23,6 +23,7 @@ import type {
 	SelectWithExpressionsIntent,
 	SubqueryRefIntent,
 	UpdateIntent,
+	UpsertIntent,
 	WhereIntent,
 	WhereSubqueryIntent,
 	WindowIntent,
@@ -577,6 +578,7 @@ export function compile(
 /**
  * Compile an InsertIntent into a Kysely CompiledQuery.
  * Supports single and bulk inserts with multi-tenant schema prefix.
+ * DX-026: Supports RETURNING clause.
  */
 export function compileInsert(
 	intent: InsertIntent,
@@ -587,9 +589,15 @@ export function compileInsert(
 	const tableName = schemaName ? `${schemaName}.${intent.table}` : intent.table;
 
 	// Build the INSERT query
-	const query = kysely
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+	let query: any = kysely
 		.insertInto(tableName)
 		.values(intent.values as Record<string, unknown>[]);
+
+	// DX-026: Add RETURNING clause if specified
+	if (intent.returning && intent.returning.length > 0) {
+		query = query.returning(intent.returning as string[]);
+	}
 
 	return query.compile();
 }
@@ -597,6 +605,7 @@ export function compileInsert(
 /**
  * Compile an UpdateIntent into a Kysely CompiledQuery.
  * Requires WHERE clause unless allowAll is explicitly true.
+ * DX-026: Supports RETURNING clause.
  */
 export function compileUpdate(
 	intent: UpdateIntent,
@@ -614,11 +623,17 @@ export function compileUpdate(
 	const tableName = schemaName ? `${schemaName}.${intent.table}` : intent.table;
 
 	// Build the UPDATE query
-	let query = kysely.updateTable(tableName).set(intent.set);
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+	let query: any = kysely.updateTable(tableName).set(intent.set);
 
 	// Add WHERE clause if present
 	if (intent.where) {
 		query = addMutationWhere(query, intent.where);
+	}
+
+	// DX-026: Add RETURNING clause if specified
+	if (intent.returning && intent.returning.length > 0) {
+		query = query.returning(intent.returning as string[]);
 	}
 
 	return query.compile();
@@ -628,6 +643,7 @@ export function compileUpdate(
  * Compile a DeleteIntent into a Kysely CompiledQuery.
  * Requires WHERE clause unless allowAll is explicitly true.
  * Note: Cascade handling is application-level (not SQL CASCADE).
+ * DX-026: Supports RETURNING clause.
  */
 export function compileDelete(
 	intent: DeleteIntent,
@@ -645,14 +661,145 @@ export function compileDelete(
 	const tableName = schemaName ? `${schemaName}.${intent.table}` : intent.table;
 
 	// Build the DELETE query
-	let query = kysely.deleteFrom(tableName);
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+	let query: any = kysely.deleteFrom(tableName);
 
 	// Add WHERE clause if present
 	if (intent.where) {
 		query = addMutationWhere(query, intent.where);
 	}
 
+	// DX-026: Add RETURNING clause if specified
+	if (intent.returning && intent.returning.length > 0) {
+		query = query.returning(intent.returning as string[]);
+	}
+
 	return query.compile();
+}
+
+/**
+ * Compile an UpsertIntent into a Kysely CompiledQuery (DX-026).
+ * Implements INSERT ... ON CONFLICT ... DO UPDATE/NOTHING pattern.
+ * Supports RETURNING clause.
+ */
+export function compileUpsert(
+	intent: UpsertIntent,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	kysely: Kysely<any>,
+	schemaName?: string,
+): CompiledQuery {
+	const tableName = schemaName ? `${schemaName}.${intent.table}` : intent.table;
+
+	// Build the INSERT part
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+	let query: any = kysely
+		.insertInto(tableName)
+		.values(intent.values as Record<string, unknown>[]);
+
+	// Add ON CONFLICT clause
+	query = query.onConflict((oc: any) => {
+		// Set conflict target (columns or constraint)
+		if ('columns' in intent.onConflict) {
+			oc = oc.columns(intent.onConflict.columns as string[]);
+		} else {
+			oc = oc.constraint(intent.onConflict.constraint);
+		}
+
+		// Set action (doNothing or doUpdate)
+		if (intent.action.type === 'doNothing') {
+			return oc.doNothing();
+		}
+
+		// doUpdate action
+		if (intent.action.set) {
+			// Use provided set values
+			oc = oc.doUpdateSet(intent.action.set);
+		} else {
+			// Update all non-conflict columns from the excluded row
+			// Get all keys from the first value object
+			const allKeys = Object.keys(intent.values[0] || {});
+			const conflictColumns =
+				'columns' in intent.onConflict ? intent.onConflict.columns : [];
+			const updateKeys = allKeys.filter(
+				(k) => !(conflictColumns as readonly string[]).includes(k),
+			);
+
+			if (updateKeys.length > 0) {
+				const updateSet: Record<string, any> = {};
+				for (const key of updateKeys) {
+					// Reference the excluded row
+					updateSet[key] = sql.ref(`excluded.${key}`);
+				}
+				oc = oc.doUpdateSet(updateSet);
+			} else {
+				// All columns are conflict columns, nothing to update
+				return oc.doNothing();
+			}
+		}
+
+		// Add WHERE clause if present on doUpdate
+		if (intent.action.type === 'doUpdate' && intent.action.where) {
+			oc = addOnConflictWhere(oc, intent.action.where);
+		}
+
+		return oc;
+	});
+
+	// Add RETURNING clause if specified
+	if (intent.returning && intent.returning.length > 0) {
+		query = query.returning(intent.returning as string[]);
+	}
+
+	return query.compile();
+}
+
+/**
+ * Add WHERE clause to ON CONFLICT DO UPDATE.
+ * Similar to addMutationWhere but for conflict context.
+ */
+function addOnConflictWhere(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	oc: any,
+	where: WhereIntent,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): any {
+	// Handle comparison operators
+	if ('kind' in where && where.kind === 'comparison') {
+		const w = where as {
+			kind: 'comparison';
+			field: string;
+			operator: string;
+			value: unknown;
+		};
+		switch (w.operator) {
+			case 'eq':
+				return oc.where(w.field, '=', w.value);
+			case 'neq':
+				return oc.where(w.field, '!=', w.value);
+			case 'gt':
+				return oc.where(w.field, '>', w.value);
+			case 'gte':
+				return oc.where(w.field, '>=', w.value);
+			case 'lt':
+				return oc.where(w.field, '<', w.value);
+			case 'lte':
+				return oc.where(w.field, '<=', w.value);
+			default:
+				return oc;
+		}
+	}
+
+	// Handle AND
+	if ('kind' in where && where.kind === 'and') {
+		const w = where as { kind: 'and'; conditions: WhereIntent[] };
+		let result = oc;
+		for (const condition of w.conditions) {
+			result = addOnConflictWhere(result, condition);
+		}
+		return result;
+	}
+
+	return oc;
 }
 
 /**

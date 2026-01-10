@@ -14,6 +14,8 @@ export {
 	compileRecursive,
 	compileSeparateInclude,
 	compileUpdate,
+	// DX-026: Upsert support
+	compileUpsert,
 	compileWindowSelect,
 	compileWithIncludes,
 	type InternalCompileOptions,

@@ -21,6 +21,7 @@ import type {
 	PlanReport,
 	RecursivePlanReport,
 	UpdateIntent,
+	UpsertIntent,
 } from '@db-semantic-planner/core';
 import type { Kysely, Transaction } from 'kysely';
 
@@ -30,6 +31,7 @@ import {
 	compileInsert,
 	compileRecursive,
 	compileUpdate,
+	compileUpsert,
 } from './compiler.js';
 import { getCapabilities } from './dialect.js';
 import { validateIdentifier } from './errors.js';
@@ -250,6 +252,19 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 		const schemaName = this.schemaName ?? options?.schemaName;
 
 		const compiled = compileDelete(intent, this.db, schemaName);
+		return {
+			sql: compiled.sql,
+			parameters: compiled.parameters as readonly unknown[],
+		};
+	}
+
+	/**
+	 * Compile an upsert intent to executable SQL (DX-026).
+	 */
+	compileUpsert(intent: UpsertIntent, options?: CompileOptions): CompiledQuery {
+		const schemaName = this.schemaName ?? options?.schemaName;
+
+		const compiled = compileUpsert(intent, this.db, schemaName);
 		return {
 			sql: compiled.sql,
 			parameters: compiled.parameters as readonly unknown[],

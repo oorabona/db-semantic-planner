@@ -85,6 +85,10 @@ export type {
 	StringOperator,
 	SubqueryRefIntent,
 	UpdateIntent,
+	// Upsert (DX-026)
+	UpsertConflictAction,
+	UpsertConflictTarget,
+	UpsertIntent,
 	// Where (filters)
 	WhereAndIntent,
 	WhereComparisonIntent,
@@ -126,6 +130,8 @@ export {
 	isSelectWithExpressions,
 	isSubqueryRef,
 	isUpdateIntent,
+	// Upsert type guard (DX-026)
+	isUpsertIntent,
 	isWhereAnd,
 	isWhereComparison,
 	isWhereExists,

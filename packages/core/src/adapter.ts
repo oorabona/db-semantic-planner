@@ -7,7 +7,12 @@
  * @module adapter
  */
 
-import type { DeleteIntent, InsertIntent, UpdateIntent } from './intent-ast.js';
+import type {
+	DeleteIntent,
+	InsertIntent,
+	UpdateIntent,
+	UpsertIntent,
+} from './intent-ast.js';
 import type { ModelIR } from './model-ir.js';
 import type { PlanReport, RecursivePlanReport } from './planner.js';
 
@@ -219,6 +224,16 @@ export interface Adapter<DB = unknown> {
 	 * @returns Compiled query with SQL and parameters
 	 */
 	compileDelete(intent: DeleteIntent, options?: CompileOptions): CompiledQuery;
+
+	/**
+	 * Compile an upsert intent to executable SQL (DX-026).
+	 * Implements INSERT ... ON CONFLICT ... DO UPDATE/NOTHING pattern.
+	 *
+	 * @param intent - The upsert intent
+	 * @param options - Compilation options
+	 * @returns Compiled query with SQL and parameters
+	 */
+	compileUpsert(intent: UpsertIntent, options?: CompileOptions): CompiledQuery;
 
 	// =========================================================================
 	// Recursive CTE Compilation
