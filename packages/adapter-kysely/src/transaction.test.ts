@@ -286,4 +286,144 @@ describe('Transaction Support (DX-025)', () => {
 			).resolves.toBe('completed');
 		});
 	});
+
+	// =========================================================================
+	// Raw SQL Execution (DX-027)
+	// =========================================================================
+
+	describe('raw() - Raw SQL Escape Hatch (DX-027)', () => {
+		it('should execute raw SQL with parameters', async () => {
+			const orm = createOrm<TestDatabase>({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
+
+			// Query using raw SQL with parameter
+			const results = await orm.raw<{ id: number; name: string }>(
+				'SELECT id, name FROM users WHERE balance > ?',
+				[600],
+			);
+
+			expect(results).toHaveLength(1);
+			expect(results[0]?.name).toBe('Alice');
+			expect(results[0]?.id).toBe(1);
+		});
+
+		it('should execute raw SQL without parameters', async () => {
+			const orm = createOrm<TestDatabase>({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
+
+			const results = await orm.raw<{ total: number }>(
+				'SELECT COUNT(*) as total FROM users',
+			);
+
+			expect(results).toHaveLength(1);
+			expect(results[0]?.total).toBe(2);
+		});
+
+		it('should handle complex raw SQL queries', async () => {
+			const orm = createOrm<TestDatabase>({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
+
+			// Insert some orders for testing
+			await orm
+				.insert('orders')
+				.values([
+					{ id: 1, userId: 1, total: 100 },
+					{ id: 2, userId: 1, total: 200 },
+					{ id: 3, userId: 2, total: 50 },
+				])
+				.execute();
+
+			// Complex query with GROUP BY and aggregation
+			const results = await orm.raw<{
+				userId: number;
+				orderCount: number;
+				totalAmount: number;
+			}>(
+				`SELECT userId,
+				        COUNT(*) as orderCount,
+				        SUM(total) as totalAmount
+				 FROM orders
+				 GROUP BY userId
+				 ORDER BY totalAmount DESC`,
+			);
+
+			expect(results).toHaveLength(2);
+			expect(results[0]?.userId).toBe(1);
+			expect(results[0]?.orderCount).toBe(2);
+			expect(results[0]?.totalAmount).toBe(300);
+		});
+
+		it('should throw error without adapter', async () => {
+			const orm = createOrm<TestDatabase>({ model: testModel });
+
+			await expect(orm.raw('SELECT * FROM users')).rejects.toThrow(
+				'raw() requires an adapter',
+			);
+		});
+
+		it('should work within transactions', async () => {
+			const orm = createOrm<TestDatabase>({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
+
+			const result = await orm.transaction(async (tx) => {
+				// Insert using raw SQL within transaction
+				await tx.raw(
+					'INSERT INTO orders (id, userId, total) VALUES (?, ?, ?)',
+					[10, 1, 999],
+				);
+
+				// Query using raw SQL within same transaction
+				const orders = await tx.raw<{ total: number }>(
+					'SELECT total FROM orders WHERE id = ?',
+					[10],
+				);
+
+				return orders[0]?.total;
+			});
+
+			expect(result).toBe(999);
+
+			// Verify committed
+			const order = await orm.select('orders').where(eq('id', 10)).first();
+			expect(order?.total).toBe(999);
+		});
+
+		it('should handle empty result sets', async () => {
+			const orm = createOrm<TestDatabase>({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
+
+			const results = await orm.raw<{ id: number }>(
+				'SELECT id FROM users WHERE balance > ?',
+				[999999],
+			);
+
+			expect(results).toHaveLength(0);
+			expect(results).toEqual([]);
+		});
+
+		it('should support multiple parameters', async () => {
+			const orm = createOrm<TestDatabase>({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
+
+			const results = await orm.raw<{ id: number; name: string }>(
+				'SELECT id, name FROM users WHERE balance >= ? AND balance <= ?',
+				[500, 1000],
+			);
+
+			// Both Alice (1000) and Bob (500) should match
+			expect(results).toHaveLength(2);
+		});
+	});
 });

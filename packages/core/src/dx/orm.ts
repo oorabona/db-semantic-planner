@@ -363,6 +363,25 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				return fn(txOrm);
 			});
 		},
+
+		// =====================================================================
+		// Raw SQL Execution (DX-027)
+		// =====================================================================
+
+		async raw<T = unknown>(
+			sqlString: string,
+			parameters: readonly unknown[] = [],
+		): Promise<T[]> {
+			if (!adapter) {
+				throw new Error(
+					'raw() requires an adapter. ' +
+						'Pass an adapter when creating the ORM.',
+				);
+			}
+
+			// Passthrough to adapter's executeRaw API
+			return adapter.executeRaw<T>(sqlString, parameters);
+		},
 	};
 }
 

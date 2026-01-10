@@ -310,7 +310,7 @@ Window function support across all packages for analytics queries.
 | DX-024 | ✅ `orderBy()` shorthand (polymorphic) (2026-01-09) | HIGH | S | No |
 | DX-025 | ✅ `orm.transaction()` wrapper (passthrough) (2026-01-10) | HIGH | M | No |
 | DX-026 | `upsert()` + `returning()` support | HIGH | M | No |
-| DX-027 | Raw SQL escape hatch (`raw`, `orm.raw`) | HIGH | S | No |
+| DX-027 | ✅ Raw SQL escape hatch (`raw`, `orm.raw`) (2026-01-10) | HIGH | S | No |
 | DX-028 | Pagination helpers (offset + cursor) | MEDIUM | S | No |
 
 **Breaking changes summary:**

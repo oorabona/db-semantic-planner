@@ -302,6 +302,33 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 	validateIdentifier(value: string, type: string): void {
 		validateIdentifier(value, type);
 	}
+
+	// =========================================================================
+	// Raw SQL Execution (DX-027)
+	// =========================================================================
+
+	/**
+	 * Execute raw SQL directly.
+	 * This is the ultimate escape hatch for queries that cannot be
+	 * expressed via the intent system.
+	 *
+	 * ⚠️  WARNING: The SQL is executed as-is. Use parameter placeholders
+	 * ($1, $2, etc.) for any dynamic values to prevent SQL injection.
+	 */
+	async executeRaw<T = unknown>(
+		sqlString: string,
+		parameters: readonly unknown[] = [],
+	): Promise<T[]> {
+		// Create a raw query compatible with Kysely's executeQuery
+		// biome-ignore lint/suspicious/noExplicitAny: Kysely executeQuery requires specific internal types
+		const kyselyQuery: any = {
+			sql: sqlString,
+			parameters: [...parameters],
+			query: { kind: 'RawNode', sqlFragments: [], parameters: [] },
+		};
+		const result = await this.db.executeQuery(kyselyQuery);
+		return result.rows as T[];
+	}
 }
 
 // ============================================================================
