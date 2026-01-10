@@ -11,21 +11,23 @@ doc-meta:
 
 ## Purpose
 
-The **dx** scope (`packages/dx`) enhances developer experience with safety features and familiar APIs:
+The **dx** layer (`packages/core/src/dx/`) enhances developer experience with safety features and familiar APIs:
 
 1. **Ambiguity Handling** - Strict mode + override API for relation disambiguation
 2. **Compatibility Layer** - Drizzle-like helpers for easier adoption
+3. **Query Builder** - Fluent API for building queries
+4. **Adapter Interface** - Multi-adapter support via dependency injection
 
-**Phase:** P1 (after MVP)
+**Status:** ✅ Complete (merged into core via ARCH-001)
 
 ## Architecture Constraint
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        packages/dx                          │
+│                  packages/core/src/dx/                       │
 │                                                             │
-│  Imports from: packages/core, packages/adapter-kysely       │
-│  This is a LEAF package (nothing depends on it)             │
+│  Part of: packages/core (adapter-agnostic)                  │
+│  Adapter injection via: createOrm({ model, adapter })       │
 │                                                             │
 │  Provides: Strict mode, Override API, Compat helpers        │
 └─────────────────────────────────────────────────────────────┘

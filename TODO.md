@@ -2,21 +2,22 @@
 
 ## Epics
 
-| Epic | Scope | Phase | Status |
-|------|-------|-------|--------|
-| ModelIR (Schema) | core | MVP | ✅ Complete |
-| IntentAST (Query) | core | MVP | ✅ Complete |
-| Semantic Planner | core | MVP | ✅ Complete |
-| SQL Compiler | adapter | MVP | ✅ Complete |
-| Kysely Engine | adapter | MVP | ✅ Complete |
-| Multi-tenant (forTenant) | adapter | MVP | ✅ Complete |
-| Observability (dump) | adapter | MVP | ✅ Complete |
-| Enhanced Observability | adapter | P1 | ✅ Complete |
-| Golden Tests (Q1, Q2, Q3) | testing | MVP | ✅ Complete |
-| Strict Mode | dx | P1 | ✅ Complete |
-| Compat Layer | dx | P1 | ✅ Complete |
-| E2E PostgreSQL Validation | testing | P1 | ✅ Complete |
-| Multi-dialect Capabilities | adapter | P2 | ✅ Complete |
+| Epic | Scope | Status |
+|------|-------|--------|
+| ModelIR (Schema) | core | ✅ Complete |
+| IntentAST (Query) | core | ✅ Complete |
+| Semantic Planner | core | ✅ Complete |
+| SQL Compiler | adapter | ✅ Complete |
+| Kysely Engine | adapter | ✅ Complete |
+| Multi-tenant (forTenant) | adapter | ✅ Complete |
+| Observability (dump) | adapter | ✅ Complete |
+| Enhanced Observability | adapter | ✅ Complete |
+| Golden Tests (Q1, Q2, Q3) | testing | ✅ Complete |
+| Strict Mode | core/dx | ✅ Complete |
+| Compat Layer | core/dx | ✅ Complete |
+| E2E PostgreSQL Validation | testing | ✅ Complete |
+| Multi-dialect Capabilities | adapter | ✅ Complete |
+| DX Layer in Core (ARCH-001) | core | ✅ Complete |
 
 ## In Progress
 
@@ -207,7 +208,7 @@ Window function support across all packages for analytics queries.
 - [x] ✅ Block 4: Streaming capability guard (12 tests)
 - [x] ✅ Block 5: Test helpers (12 tests)
 
-### Golden Tests (MVP Contract) - ✅ COMPLETE
+### Golden Tests - ✅ COMPLETE
 
 - [x] ✅ **Q1**: Filter to-many → EXISTS - 6 tests
   - Products with main image FR approved
@@ -222,7 +223,7 @@ Window function support across all packages for analytics queries.
   - Validates: AmbiguousPlanError thrown with options
   - Disambiguation via `via` hint and `disambiguate` option
 
-## Pending - MVP (P0) — BLOCKING before v1.0
+## Completed - Foundation
 
 ### CORE-002: Relation Resolution Correctness ✅ (2026-01-09)
 
@@ -434,11 +435,23 @@ packages/adapter-kysely → packages/core
 
 Note: `packages/dx` was merged into `packages/core` in ARCH-001 (2026-01-10).
 
-### MVP Non-Goals
+### Potential Future Features (P4+)
 
-- No cost-based optimization
-- No join reordering
-- No runtime schema introspection
-- No NL-to-SQL
-- No multi-dialect correctness (PostgreSQL only)
-- No change tracking / dirty checking
+These features may be considered for future versions:
+
+| Feature | Priority | Notes |
+|---------|----------|-------|
+| **Multi-dialect full correctness** | LOW | Extend beyond PostgreSQL focus, full test coverage for MySQL/SQLite/MSSQL |
+| **Cost-based optimization** | LOW | Query cost estimation based on table statistics |
+| **Join reordering** | LOW | Automatic join order optimization (requires cost estimation) |
+
+### Out of Scope (Design Decisions)
+
+These features are intentionally excluded from the library's scope:
+
+| Feature | Reason |
+|---------|--------|
+| **NL-to-SQL / AI generation** | Separate concern, would be a different library/layer |
+| **Change tracking / dirty checking** | Not an ORM - this is a query planner |
+| **Migrations** | Use dedicated tools (Kysely migrations, Prisma, etc.) |
+| **Connection pooling** | Delegated to underlying adapter (Kysely) |

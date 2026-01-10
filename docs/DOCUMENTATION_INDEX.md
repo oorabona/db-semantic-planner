@@ -13,14 +13,13 @@ doc-meta:
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
 
-**Status:** MVP ✅ Complete + P1 ✅ Complete + P2 ✅ Complete (919 unit + 212 E2E = 1131 tests)
+**Status:** ✅ v1.0 Ready (1005 unit + 212 E2E = 1217+ tests)
 
-## Architecture: Ports & Adapters
+## Architecture: Ports & Adapters (ARCH-001)
 
 ```
-packages/core          → DB-agnostic (MUST NOT import adapter)
+packages/core          → DB-agnostic, includes DX layer (MUST NOT import adapter)
 packages/adapter-kysely → Depends on core
-packages/dx            → Depends on core + adapter-kysely
 ```
 
 ## Quick Links
@@ -36,11 +35,12 @@ packages/dx            → Depends on core + adapter-kysely
 
 ## By Scope
 
-| Scope | Package | Overview | Backlog | Phase |
-|-------|---------|----------|---------|-------|
-| core | `packages/core` | [Overview](plans/core-OVERVIEW.md) | [TODO](../TODO_CORE.md) | MVP |
-| adapter | `packages/adapter-kysely` | [Overview](plans/adapter-OVERVIEW.md) | [TODO](../TODO_ADAPTER.md) | MVP |
-| dx | `packages/dx` | [Overview](plans/dx-OVERVIEW.md) | [TODO](../TODO_DX.md) | P1 |
+| Scope | Package | Overview | Backlog | Status |
+|-------|---------|----------|---------|--------|
+| core | `packages/core` | [Overview](plans/core-OVERVIEW.md) | [TODO](../TODO_CORE.md) | ✅ Complete |
+| adapter | `packages/adapter-kysely` | [Overview](plans/adapter-OVERVIEW.md) | [TODO](../TODO_ADAPTER.md) | ✅ Complete |
+
+**Note:** DX layer is now part of `packages/core/src/dx/` (see ARCH-001).
 
 ## Implementation Specifications
 
@@ -71,7 +71,7 @@ packages/dx            → Depends on core + adapter-kysely
 | DX-022 | [Recursive via include()](plans/DX-022-recursive-include.md) | dx | ✅ canonical |
 | P3-A | [Window Functions](specs/P3-A-window-functions.md) | core, adapter, dx | ✅ canonical |
 
-## Golden Query Tests (MVP Contract) - ✅ Complete
+## Golden Query Tests - ✅ Complete
 
 | Test | Description | Key Validation | Status | Tests |
 |------|-------------|----------------|--------|-------|
@@ -100,14 +100,14 @@ packages/dx            → Depends on core + adapter-kysely
 |-------|------------|-------|
 | Language | TypeScript | Strict mode |
 | Runtime | Node.js | ESM preferred |
-| Primary DB | PostgreSQL | MVP only |
+| Primary DB | PostgreSQL | Primary focus |
 | Adapter | Kysely | Peer dependency |
 | Testing | Vitest | Golden tests |
 | Build | tsup | ESM + CJS |
 
-## Phases
+## Completed Phases
 
-### P0 (MVP) - ✅ Complete
+### Foundation - ✅ Complete
 
 - ✅ ModelIR schema definition with planning hints (29 tests)
 - ✅ IntentAST query types with type guards (35 tests)
@@ -117,15 +117,16 @@ packages/dx            → Depends on core + adapter-kysely
 - ✅ Observability (`createDump()` returning plan + sql + params)
 - ✅ 3 golden-query acceptance tests (Q1, Q2, Q3 = 18 tests)
 
-### P1 - Developer Experience
+### Developer Experience - ✅ Complete
 
-- Strict ambiguity mode + override API
-- EXPLAIN/ANALYZE support
-- Structured logging with correlation
-- Parameter redaction for logs
-- Drizzle-like compat helpers (eq/and/or, findMany/findFirst)
+- ✅ Strict ambiguity mode + override API
+- ✅ EXPLAIN/ANALYZE support
+- ✅ Structured logging with correlation
+- ✅ Parameter redaction for logs
+- ✅ Drizzle-like compat helpers (eq/and/or, all/first)
+- ✅ DX layer merged into core (ARCH-001)
 
-### P2 - Multi-Dialect ✅ Complete
+### Multi-Dialect - ✅ Complete
 
 - ✅ **DIALECT-001**: Multi-dialect Capabilities ([spec](specs/DIALECT-001-multi-dialect-capabilities.md))
   - DialectCapabilities interface and detection (42 tests)
@@ -134,14 +135,17 @@ packages/dx            → Depends on core + adapter-kysely
   - Streaming capability guard (12 tests)
   - Cross-dialect test helpers (12 tests)
 
-## MVP Non-Goals
+## Out of Scope
 
-- No cost-based optimization
-- No join reordering
-- ~~No runtime schema introspection~~ → Added in P2 (ADAPTER-006)
-- No NL-to-SQL
-- No multi-dialect correctness (PostgreSQL only)
-- No change tracking / dirty checking
+These features are intentionally deferred and may become backlog items:
+
+- Cost-based optimization
+- Join reordering
+- NL-to-SQL / AI query generation
+- Multi-dialect correctness guarantees (PostgreSQL-focused)
+- Full ORM behavior (change tracking, dirty checking)
+
+**Note:** Runtime schema introspection was added in ADAPTER-006.
 
 ## ADRs (Architecture Decision Records)
 

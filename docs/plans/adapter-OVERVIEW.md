@@ -33,7 +33,7 @@ The **adapter** scope (`packages/adapter-kysely`) bridges abstract query plans t
 
 ---
 
-## Public API Contracts (MVP)
+## Public API Contracts
 
 ### Dump (Observability Output)
 
@@ -377,7 +377,7 @@ WHERE "t0"."active" = $1
 
 ---
 
-## Non-Goals (MVP)
+## Out of Scope
 
 - **No multi-dialect correctness**: Only PostgreSQL tested
 - **No cost-based optimization**: Heuristics only

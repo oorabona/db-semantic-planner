@@ -34,7 +34,7 @@ The core package produces abstract plans that adapters compile to SQL.
 
 ---
 
-## Public API Contracts (MVP)
+## Public API Contracts
 
 ### ModelIR (Schema Intermediate Representation)
 
@@ -212,7 +212,7 @@ Core planning decisions:
 
 ---
 
-## Non-Goals (MVP)
+## Out of Scope
 
 - **No cost-based optimization**: We use heuristics, not statistics
 - **No join reordering**: Relations are processed in declaration order
@@ -222,7 +222,7 @@ Core planning decisions:
 
 ---
 
-## Golden Query Tests (MVP Contract)
+## Golden Query Tests
 
 Core must support planning for these 3 acceptance tests:
 

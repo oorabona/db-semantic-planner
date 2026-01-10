@@ -1,14 +1,15 @@
 # Core Scope Backlog (`packages/core`)
 
 **Package:** `packages/core`
-**Phase:** MVP ✅ Complete
+**Status:** ✅ Complete (Schema, Intent, Planner, DX layer)
 **Dependencies:** None (DB-agnostic)
 
 ## Architecture Constraint
 
 ```
-⚠️  MUST NOT import from adapter-kysely or dx packages
+⚠️  MUST NOT import from adapter packages
 ⚠️  Zero database-specific code
+⚠️  DX layer (core/src/dx/) is now part of this package (ARCH-001)
 ```
 
 ---
@@ -63,7 +64,166 @@
 
 ---
 
-## Completed - MVP ✅ (119 tests)
+## Pending - DX Layer (core/src/dx/)
+
+*Migrated from TODO_DX.md after ARCH-001 merge (2026-01-10)*
+
+### DX-026: Upsert Support
+
+**Priority:** HIGH | **Effort:** M
+
+Support `INSERT ... ON CONFLICT` (PostgreSQL) / `INSERT OR REPLACE` (SQLite).
+
+**API:**
+```typescript
+orm.upsert('users')
+   .values({ id: 1, name: 'John', email: 'john@example.com' })
+   .onConflict('id')
+   .doUpdate(['name', 'email'])
+   .execute()
+
+// Avec RETURNING (PostgreSQL)
+const user = await orm.upsert('users')
+   .values({ id: 1, name: 'John' })
+   .onConflict('id')
+   .doUpdate(['name'])
+   .returning(['id', 'name', 'updated_at'])
+   .execute()
+```
+
+**Tasks:**
+- [ ] Core: `UpsertIntent` type
+- [ ] Adapter: `compileUpsert()` avec support PostgreSQL
+- [ ] DX: `UpsertBuilder` avec `.values()`, `.onConflict()`, `.doUpdate()`, `.doNothing()`, `.returning()`, `.execute()`, `.dump()`
+- [ ] Multi-tenant: schema prefix support
+- [ ] Tests: single key, composite key, doUpdate, doNothing, returning
+- [ ] DialectCapabilities: `supportsUpsert`, `supportsReturning`
+
+---
+
+### DX-027: Raw SQL Escape Hatch
+
+**Priority:** HIGH | **Effort:** S
+
+Permettre du SQL brut pour les cas non couverts par l'ORM.
+
+**API:**
+```typescript
+// Query complète raw
+const users = await orm.raw<User[]>`
+  SELECT * FROM users
+  WHERE jsonb_data @> '{"role": "admin"}'
+`;
+
+// Raw dans un where (expression)
+orm.select('users')
+   .where(raw`age > 18 AND jsonb_field @> '{"active": true}'`)
+   .all()
+
+// Raw avec paramètres (sécurisé)
+orm.select('products')
+   .where(raw`price BETWEEN ${minPrice} AND ${maxPrice}`)
+   .all()
+```
+
+**Tasks:**
+- [ ] Helper `raw` pour expressions (tagged template literal)
+- [ ] `orm.raw<T>()` pour queries complètes
+- [ ] Binding automatique des paramètres (sécurité injection SQL)
+- [ ] Intégration avec `where()`, `columns()`
+- [ ] Multi-tenant : schema prefix dans raw queries ?
+- [ ] Tests: expressions, full queries, paramètres
+
+---
+
+### DX-028: Pagination Helpers
+
+**Priority:** MEDIUM | **Effort:** S
+
+Helpers pour pagination offset-based et cursor-based.
+
+**API Offset-based:**
+```typescript
+const page = await orm.select('users')
+   .where(eq('active', true))
+   .orderBy('created_at', 'desc')
+   .paginate({ page: 2, perPage: 20 })
+   .execute()
+// → { data: User[], pagination: { page, perPage, total, totalPages, hasNextPage, hasPrevPage } }
+```
+
+**API Cursor-based:**
+```typescript
+const page = await orm.select('users')
+   .orderBy('id')
+   .cursorPaginate({ cursor: 'eyJpZCI6MTAwfQ==', limit: 20 })
+   .execute()
+// → { data: User[], nextCursor, prevCursor }
+```
+
+**Tasks:**
+- [ ] `paginate({ page, perPage })` méthode
+- [ ] `PaginatedResult<T>` type avec metadata
+- [ ] COUNT query optimisée (ou option `withCount: false`)
+- [ ] `cursorPaginate({ cursor, limit })` méthode
+- [ ] Cursor encode/decode (base64 JSON du dernier ID)
+- [ ] Tests: première page, milieu, dernière, empty
+
+---
+
+### P3-B: Full-Text Search DX API
+
+**Priority:** LOW | **Effort:** M
+
+- [ ] `fts(field, query, options?)` helper function
+- [ ] `ftsRank(field, query)` for ordering by relevance
+- [ ] FTSOptions: config, operator, ranking
+- [ ] Integration with where() clause
+
+---
+
+### P3-C: Range Types DX API
+
+**Priority:** LOW | **Effort:** S
+
+- [ ] `rangeOverlaps(field, value)` helper
+- [ ] `rangeContains(field, value)` helper
+- [ ] `rangeContainedBy(field, value)` helper
+- [ ] RangeValue type: { lower, upper, bounds? }
+
+---
+
+## Completed - DX Layer (Migrated from TODO_DX.md)
+
+All DX features completed before ARCH-001 merge are documented below for reference.
+See original TODO_DX.md commit history for full details.
+
+| ID | Feature | Date |
+|----|---------|------|
+| DX-025 | Transaction Wrapper | 2026-01-10 |
+| DX-024 | orderBy() Shorthand | 2026-01-09 |
+| DX-023 | Lightweight ModelIR | 2026-01-09 |
+| DX-022 | Recursive via include() | 2026-01-09 |
+| DX-021 | Window Functions Builder | 2026-01-09 |
+| DX-020 | Unified columns() API | 2026-01-09 |
+| DX-012 | API Ergonomics | 2026-01-09 |
+| DX-011 | API Improvements | 2026-01-09 |
+| DX-010 | Mutations | 2026-01-09 |
+| DX-009 | RecursiveBuilder Integration | 2026-01-09 |
+| DX-008 | API Shortcuts | 2026-01-09 |
+| DX-007 | Actionable Error Messages | 2026-01-09 |
+| DX-006 | Zero-Config ORM | 2026-01-08 |
+| DX-005 | Recursive Query Builder | 2026-01-08 |
+| DX-004 | Aggregate API | 2026-01-07 |
+| DX-003 | Compat Layer | 2026-01-07 |
+| DX-002 | Override API | 2026-01-07 |
+| DX-001 | Strict Mode | 2026-01-07 |
+| P3-A | Window Functions DX API | 2026-01-09 |
+| STREAMING-001 | QueryBuilder.stream() | 2026-01-07 |
+
+---
+
+## Completed - Schema, Intent, Planner
 
 ### RFC-001: Recursive CTE Support ✅ (2026-01-08)
 

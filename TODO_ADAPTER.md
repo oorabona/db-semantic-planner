@@ -1,7 +1,7 @@
 # Adapter Scope Backlog (`packages/adapter-kysely`)
 
 **Package:** `packages/adapter-kysely`
-**Phase:** MVP ✅ Complete, P1 ✅ Complete, P2 ✅ Complete
+**Status:** ✅ Complete (Foundation + P1 + P2)
 **Dependencies:** `packages/core`, `kysely` (peer)
 
 ## Architecture Constraint
@@ -240,7 +240,7 @@ eb(eb.ref('prev.path'), '||', eb.ref('node.${traversal.nodeId}')).as('path')
 
 ---
 
-## Completed - MVP ✅
+## Completed - Foundation ✅
 
 ### DIALECT-001: Multi-dialect Capabilities - 90 new tests ✅ (2026-01-07)
 
