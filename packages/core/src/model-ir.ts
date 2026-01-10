@@ -125,6 +125,12 @@ export interface RelationIR {
 	/** Foreign key column(s) on the "many" side */
 	readonly foreignKey?: string | readonly string[] | undefined;
 
+	/**
+	 * For M:N relations: foreign key column on junction table pointing to target.
+	 * Example: In posts-tags via postTags, otherKey = 'tagId'
+	 */
+	readonly otherKey?: string | undefined;
+
 	// --- Planning Hints ---
 
 	/** Cardinality affects strategy selection */

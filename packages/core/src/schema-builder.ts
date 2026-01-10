@@ -290,6 +290,7 @@ class SchemaBuilderImpl<T extends Record<string, TableDef>>
 					target: relationDef.target,
 					through: relationDef.through,
 					foreignKey: relationDef.foreignKey,
+					otherKey: relationDef.otherKey,
 					cardinality,
 					optionality,
 					includeStrategy,
