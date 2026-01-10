@@ -8,8 +8,8 @@
  * - E3: Direction mismatch
  */
 
-import { belongsTo, defineSchema, hasMany } from '@db-semantic-planner/core';
 import { describe, expect, it } from 'vitest';
+import { belongsTo, defineSchema, hasMany } from '../schema-builder.js';
 import { InvalidOperationError } from './errors.js';
 import { createOrm } from './orm.js';
 import type { RecursiveIncludeOptions } from './types.js';

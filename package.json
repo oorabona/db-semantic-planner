@@ -18,7 +18,6 @@
 		"@biomejs/biome": "catalog:",
 		"@db-semantic-planner/core": "workspace:*",
 		"@db-semantic-planner/adapter-kysely": "workspace:*",
-		"@db-semantic-planner/dx": "workspace:*",
 		"@testcontainers/postgresql": "catalog:",
 		"@types/node": "catalog:",
 		"@types/pg": "catalog:",

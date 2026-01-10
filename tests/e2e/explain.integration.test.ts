@@ -10,7 +10,7 @@
 
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createOrm } from '@db-semantic-planner/dx';
+import { createOrm } from '@db-semantic-planner/core';
 import {
 	closeTestDb,
 	createPimdamSchema,

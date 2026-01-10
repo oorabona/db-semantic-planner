@@ -10,7 +10,7 @@ import type {
 	SubqueryRefIntent,
 	WhereIntent,
 	WhereSubqueryIntent,
-} from '@db-semantic-planner/core';
+} from '../intent-ast.js';
 
 // ============================================================================
 // Subquery Builder

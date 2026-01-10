@@ -3,7 +3,15 @@
  * Unit tests for DX-010: Mutation Builders (InsertBuilder, UpdateBuilder, DeleteBuilder)
  */
 
-import { belongsTo, defineSchema, hasMany } from '@db-semantic-planner/core';
+import {
+	and,
+	belongsTo,
+	createOrm,
+	defineSchema,
+	eq,
+	hasMany,
+	inArray,
+} from '@db-semantic-planner/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -12,8 +20,7 @@ import {
 	InvalidOperationError,
 	UnsafeOperationError,
 } from './errors.js';
-import { and, eq, inArray } from './filters.js';
-import { createOrm } from './orm.js';
+import { createKyselyAdapter } from './kysely-adapter.js';
 
 // Test schema
 const testModel = defineSchema({
@@ -135,7 +142,10 @@ describe('Mutation Builders (DX-010)', () => {
 	describe('InsertBuilder', () => {
 		describe('values()', () => {
 			it('should accept a single object', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				const dump = orm
 					.insert('users')
 					.values({ name: 'David', email: 'david@example.com' })
@@ -148,7 +158,10 @@ describe('Mutation Builders (DX-010)', () => {
 			});
 
 			it('should accept an array for bulk insert', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				const dump = orm
 					.insert('users')
 					.values([
@@ -162,7 +175,10 @@ describe('Mutation Builders (DX-010)', () => {
 			});
 
 			it('should be immutable - return new builder', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				const builder1 = orm.insert('users');
 				const builder2 = builder1.values({ name: 'David', email: 'd@e.com' });
 
@@ -172,7 +188,10 @@ describe('Mutation Builders (DX-010)', () => {
 
 		describe('dump()', () => {
 			it('should return MutationDump with sql and parameters', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				const dump = orm
 					.insert('users')
 					.values({ name: 'David', email: 'david@example.com' })
@@ -185,7 +204,10 @@ describe('Mutation Builders (DX-010)', () => {
 			});
 
 			it('should throw InvalidOperationError if no values provided', () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				expect(() => orm.insert('users').dump()).toThrow(InvalidOperationError);
 			});
 
@@ -199,7 +221,10 @@ describe('Mutation Builders (DX-010)', () => {
 
 		describe('execute()', () => {
 			it('should insert a single row', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				await orm
 					.insert('users')
 					.values({ name: 'David', email: 'david@example.com' })
@@ -212,7 +237,10 @@ describe('Mutation Builders (DX-010)', () => {
 			});
 
 			it('should insert multiple rows (bulk insert)', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				await orm
 					.insert('users')
 					.values([
@@ -244,7 +272,10 @@ describe('Mutation Builders (DX-010)', () => {
 	describe('UpdateBuilder', () => {
 		describe('set()', () => {
 			it('should set fields to update', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				const dump = orm
 					.update('users')
 					.set({ active: 0 })
@@ -259,7 +290,10 @@ describe('Mutation Builders (DX-010)', () => {
 			});
 
 			it('should merge multiple set() calls', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				const dump = orm
 					.update('users')
 					.set({ name: 'NewName' })
@@ -276,7 +310,10 @@ describe('Mutation Builders (DX-010)', () => {
 
 		describe('where()', () => {
 			it('should add WHERE condition', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				const dump = orm
 					.update('users')
 					.set({ active: 0 })
@@ -287,7 +324,10 @@ describe('Mutation Builders (DX-010)', () => {
 			});
 
 			it('should support compound conditions', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				const dump = orm
 					.update('users')
 					.set({ active: 0 })
@@ -300,14 +340,20 @@ describe('Mutation Builders (DX-010)', () => {
 
 		describe('safety guards', () => {
 			it('should throw UnsafeOperationError without WHERE clause', () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				expect(() => orm.update('users').set({ active: 0 }).dump()).toThrow(
 					UnsafeOperationError,
 				);
 			});
 
 			it('should allow updateAll() without WHERE', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				const dump = orm.updateAll('users').set({ active: 0 }).dump();
 
 				expect(dump.sql).toBeDefined();
@@ -317,7 +363,10 @@ describe('Mutation Builders (DX-010)', () => {
 
 		describe('execute()', () => {
 			it('should update matching rows', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				await orm
 					.update('users')
 					.set({ active: 0 })
@@ -333,7 +382,10 @@ describe('Mutation Builders (DX-010)', () => {
 			});
 
 			it('should update all rows with updateAll()', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				await orm.updateAll('users').set({ active: 0 }).execute();
 
 				const users = await db.selectFrom('users').selectAll().execute();
@@ -341,7 +393,10 @@ describe('Mutation Builders (DX-010)', () => {
 			});
 
 			it('should throw InvalidOperationError if no fields to update', () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				expect(() => orm.update('users').where(eq('id', 1)).dump()).toThrow(
 					InvalidOperationError,
 				);
@@ -356,7 +411,10 @@ describe('Mutation Builders (DX-010)', () => {
 	describe('DeleteBuilder', () => {
 		describe('where()', () => {
 			it('should add WHERE condition', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				const dump = orm.delete('users').where(eq('id', 1)).dump();
 
 				expect(dump.sql.toLowerCase()).toContain('delete');
@@ -364,7 +422,10 @@ describe('Mutation Builders (DX-010)', () => {
 			});
 
 			it('should support IN clause', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				const dump = orm
 					.delete('users')
 					.where(inArray('id', [1, 2]))
@@ -376,12 +437,18 @@ describe('Mutation Builders (DX-010)', () => {
 
 		describe('safety guards', () => {
 			it('should throw UnsafeOperationError without WHERE clause', () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				expect(() => orm.delete('users').dump()).toThrow(UnsafeOperationError);
 			});
 
 			it('should allow deleteAll() without WHERE', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				const dump = orm.deleteAll('posts').dump();
 
 				expect(dump.sql).toBeDefined();
@@ -391,7 +458,10 @@ describe('Mutation Builders (DX-010)', () => {
 
 		describe('execute()', () => {
 			it('should delete matching rows', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				await orm.delete('users').where(eq('id', 1)).execute();
 
 				const users = await db.selectFrom('users').selectAll().execute();
@@ -400,7 +470,10 @@ describe('Mutation Builders (DX-010)', () => {
 			});
 
 			it('should delete all rows with deleteAll()', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				await orm.deleteAll('posts').execute();
 
 				const posts = await db.selectFrom('posts').selectAll().execute();
@@ -408,7 +481,10 @@ describe('Mutation Builders (DX-010)', () => {
 			});
 
 			it('should delete multiple rows with IN clause', async () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				await orm
 					.delete('users')
 					.where(inArray('id', [1, 2]))
@@ -422,7 +498,10 @@ describe('Mutation Builders (DX-010)', () => {
 
 		describe('cascade() (placeholder)', () => {
 			it('should set cascade flag', () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				const builder = orm.delete('users').where(eq('id', 1)).cascade();
 				const dump = builder.dump();
 
@@ -430,7 +509,10 @@ describe('Mutation Builders (DX-010)', () => {
 			});
 
 			it('should accept specific relations', () => {
-				const orm = createOrm({ model: testModel, db });
+				const orm = createOrm({
+					model: testModel,
+					adapter: createKyselyAdapter(db),
+				});
 				const builder = orm
 					.delete('users')
 					.where(eq('id', 1))
@@ -448,7 +530,10 @@ describe('Mutation Builders (DX-010)', () => {
 
 	describe('Multi-tenant Mutations', () => {
 		it('should include schema prefix in insert dump', () => {
-			const orm = createOrm({ model: testModel, db });
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
 			const tenantOrm = orm.forTenant('tenant_123');
 			const dump = tenantOrm
 				.insert('users')
@@ -461,7 +546,10 @@ describe('Mutation Builders (DX-010)', () => {
 		});
 
 		it('should include schema prefix in update dump', () => {
-			const orm = createOrm({ model: testModel, db });
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
 			const tenantOrm = orm.forTenant('tenant_abc');
 			const dump = tenantOrm
 				.update('users')
@@ -474,7 +562,10 @@ describe('Mutation Builders (DX-010)', () => {
 		});
 
 		it('should include schema prefix in delete dump', () => {
-			const orm = createOrm({ model: testModel, db });
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
 			const tenantOrm = orm.forTenant('company_x');
 			const dump = tenantOrm.delete('posts').where(eq('id', 1)).dump();
 
@@ -489,31 +580,46 @@ describe('Mutation Builders (DX-010)', () => {
 
 	describe('OrmInstance factory methods', () => {
 		it('should expose insert() method', () => {
-			const orm = createOrm({ model: testModel, db });
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
 			expect(orm.insert).toBeDefined();
 			expect(typeof orm.insert).toBe('function');
 		});
 
 		it('should expose update() method', () => {
-			const orm = createOrm({ model: testModel, db });
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
 			expect(orm.update).toBeDefined();
 			expect(typeof orm.update).toBe('function');
 		});
 
 		it('should expose delete() method', () => {
-			const orm = createOrm({ model: testModel, db });
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
 			expect(orm.delete).toBeDefined();
 			expect(typeof orm.delete).toBe('function');
 		});
 
 		it('should expose updateAll() method', () => {
-			const orm = createOrm({ model: testModel, db });
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
 			expect(orm.updateAll).toBeDefined();
 			expect(typeof orm.updateAll).toBe('function');
 		});
 
 		it('should expose deleteAll() method', () => {
-			const orm = createOrm({ model: testModel, db });
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
 			expect(orm.deleteAll).toBeDefined();
 			expect(typeof orm.deleteAll).toBe('function');
 		});

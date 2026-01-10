@@ -3,8 +3,8 @@
  * Tests for the fluent window function builder pattern
  */
 
-import type { WindowIntent } from '@db-semantic-planner/core';
 import { describe, expect, it } from 'vitest';
+import type { WindowIntent } from '../intent-ast.js';
 import {
 	denseRank,
 	lag,

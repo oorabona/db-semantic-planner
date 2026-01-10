@@ -15,7 +15,7 @@ Semantic query planning for databases - an intent-first approach that transforms
 - **Secure:** Identifier validation, parameter binding, no raw SQL exposure
 - **Native Adapter APIs:** ALWAYS use adapter primitives (e.g., Kysely's `eb.fn()`, `eb.ref()`, `eb.lit()`), NEVER raw SQL templates except for explicit user escape hatches (see Adapter Rules below)
 
-## Architecture: Ports & Adapters
+## Architecture: Ports & Adapters (ARCH-001)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -24,40 +24,48 @@ Semantic query planning for databases - an intent-first approach that transforms
 │  │  ModelIR    │  │  IntentAST  │  │  Semantic Planner       │  │
 │  │  (Schema)   │→→│  (Query)    │→→│  (Plan + PlanReport)    │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  DX Layer (core/src/dx/)                                │    │
+│  │  • Adapter interface  • createOrm()  • Query builders   │    │
+│  │  • Filter helpers     • Strict mode  • Multi-tenant     │    │
+│  └─────────────────────────────────────────────────────────┘    │
 │  ⚠️  DB-AGNOSTIC: MUST NOT import adapter code                  │
 └──────────────────────────────┬──────────────────────────────────┘
-                               │ depends on
+                               │ implements Adapter
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    packages/adapter-kysely                      │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │  Compiler   │  │  Engine     │  │  Multi-tenant           │  │
-│  │  (SQL gen)  │  │  (Kysely)   │  │  (orm.forTenant)        │  │
+│  │  Compiler   │  │KyselyAdapter│  │  Multi-dialect          │  │
+│  │  (SQL gen)  │  │  (Engine)   │  │  (capabilities)         │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
 │                                                                 │
 │  PostgreSQL-first (MVP) • Multi-dialect via capabilities (P2)  │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │ depends on
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        packages/dx                              │
-│  ┌─────────────────────────┐  ┌───────────────────────────────┐ │
-│  │  Ambiguity Handling     │  │  Compat Layer (Drizzle-like)  │ │
-│  │  (Strict mode + Override)│  │  (eq/and/or, findMany/First) │ │
-│  └─────────────────────────┘  └───────────────────────────────┘ │
-│                                                                 │
-│  Phase: P1 (after MVP)                                          │
 └─────────────────────────────────────────────────────────────────┘
+```
+
+### API Pattern
+
+```typescript
+import { createOrm, eq } from '@db-semantic-planner/core';
+import { createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
+
+// Create ORM with adapter injection
+const orm = createOrm({
+  model: schema,
+  adapter: createKyselyAdapter(kyselyDb)
+});
+
+// Query with type-safe API
+const users = await orm.select('users').where(eq('active', true)).all();
 ```
 
 ### Dependency Rules (STRICT)
 
 | Package | May Import | Must NOT Import |
 |---------|------------|-----------------|
-| `packages/core` | Nothing | `adapter-kysely`, `dx` |
-| `packages/adapter-kysely` | `core` | `dx` |
-| `packages/dx` | `core`, `adapter-kysely` | - |
+| `packages/core` | Nothing | `adapter-kysely` |
+| `packages/adapter-kysely` | `core` | - |
 
 ### Enforcing Architecture (Recommended)
 
@@ -68,7 +76,7 @@ Semantic query planning for databases - an intent-first approach that transforms
 {
   "compilerOptions": {
     "composite": true,
-    "paths": {}  // No paths to adapter/dx
+    "paths": {}  // No paths to adapter
   }
 }
 
@@ -79,38 +87,11 @@ Semantic query planning for databases - an intent-first approach that transforms
     "paths": {
       "@db-semantic-planner/core": ["../core/src"]
     }
-    // No path to dx
   }
-}
-
-// packages/dx/tsconfig.json
-{
-  "references": [
-    { "path": "../core" },
-    { "path": "../adapter-kysely" }
-  ]
 }
 ```
 
-**Option 2: ESLint no-restricted-imports**
-
-```javascript
-// packages/core/.eslintrc.js
-module.exports = {
-  rules: {
-    'no-restricted-imports': ['error', {
-      patterns: [
-        '@db-semantic-planner/adapter-*',
-        '@db-semantic-planner/dx',
-        '../adapter-*',
-        '../dx'
-      ]
-    }]
-  }
-};
-```
-
-**Option 3: Dependency Cruiser**
+**Option 2: Dependency Cruiser**
 
 ```javascript
 // .dependency-cruiser.cjs
@@ -120,16 +101,6 @@ module.exports = {
       name: 'core-no-adapter',
       from: { path: 'packages/core' },
       to: { path: 'packages/adapter-' }
-    },
-    {
-      name: 'core-no-dx',
-      from: { path: 'packages/core' },
-      to: { path: 'packages/dx' }
-    },
-    {
-      name: 'adapter-no-dx',
-      from: { path: 'packages/adapter-' },
-      to: { path: 'packages/dx' }
     }
   ]
 };
@@ -141,9 +112,8 @@ module.exports = {
 
 | Scope | Package | Description | Phase |
 |-------|---------|-------------|-------|
-| `core` | `packages/core` | Schema (ModelIR), Query AST, Semantic planner | MVP |
-| `adapter` | `packages/adapter-kysely` | SQL compiler, Kysely engine, multi-tenant, observability | MVP |
-| `dx` | `packages/dx` | Ambiguity handling, Drizzle-like compat layer | P1 |
+| `core` | `packages/core` | Schema, Query AST, Planner, DX layer, Adapter interface | MVP |
+| `adapter` | `packages/adapter-kysely` | SQL compiler, KyselyAdapter, multi-dialect | MVP |
 
 ## Tech Stack
 
@@ -193,8 +163,8 @@ case 'raw':
 ```typescript
 // Returns a tenant-scoped context
 const tenantOrm = orm.forTenant('tenant_123');
-const users = await tenantOrm.query(User).findMany();
-// Under the hood: Kysely db.withSchema('tenant_123')
+const users = await tenantOrm.select('users').all();
+// Under the hood: adapter.withSchema('tenant_123')
 ```
 
 **Security:** Schema name MUST be validated against allow-list pattern (identifier validation).
@@ -220,13 +190,13 @@ type Dump = {
 
 - **Index:** `docs/DOCUMENTATION_INDEX.md`
 - **Specs:** `docs/specs/` (implementation-ready specifications)
-- **Backlogs:** `TODO.md`, `TODO_CORE.md`, `TODO_ADAPTER.md`, `TODO_DX.md`
+- **Backlogs:** `TODO.md`, `TODO_CORE.md`, `TODO_ADAPTER.md`
 - **Scope indexes:** `docs/scopes/DOCS_<SCOPE>_INDEX.md`
 
 ## Build Order
 
 ```
-packages/core → packages/adapter-kysely → packages/dx
+packages/core → packages/adapter-kysely
 ```
 
 ## Workflow

@@ -4,11 +4,15 @@
  * Type-level tests for Kysely-like schema inference.
  */
 
-import { belongsTo, defineSchema, hasMany } from '@db-semantic-planner/core';
+import type { OrmInstance } from '@db-semantic-planner/core';
+import {
+	belongsTo,
+	createOrm,
+	defineSchema,
+	eq,
+	hasMany,
+} from '@db-semantic-planner/core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import { eq } from './filters.js';
-import { createOrm } from './orm.js';
-import type { OrmInstance } from './types.js';
 
 // ============================================================================
 // Test Schema Definition

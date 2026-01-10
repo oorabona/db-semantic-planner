@@ -4,13 +4,8 @@
  * Tests the configurable strict mode for ambiguous relation handling.
  */
 
-import {
-	belongsTo,
-	defineSchema,
-	hasMany,
-	hasOne,
-} from '@db-semantic-planner/core';
 import { describe, expect, it } from 'vitest';
+import { belongsTo, defineSchema, hasMany, hasOne } from '../schema-builder.js';
 
 import { AmbiguousRelationError } from './errors.js';
 import { createOrm } from './orm.js';

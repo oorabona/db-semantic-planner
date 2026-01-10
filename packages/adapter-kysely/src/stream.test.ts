@@ -3,6 +3,7 @@
  * Unit tests for streaming/cursor support.
  */
 
+import type { Dump } from '@db-semantic-planner/core';
 import type { Kysely } from 'kysely';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -13,7 +14,6 @@ import {
 	supportsStreaming,
 	UnsupportedOperationError,
 } from './stream.js';
-import type { Dump } from './types.js';
 
 // ============================================================================
 // Dialect-Aware Mock Helpers

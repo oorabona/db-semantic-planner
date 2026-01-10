@@ -18,7 +18,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql as kyselySql } from 'kysely';
-import { createOrm, eq, exists } from '@db-semantic-planner/dx';
+import { createOrm, eq, exists } from '@db-semantic-planner/core';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,

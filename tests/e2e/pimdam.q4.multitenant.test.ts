@@ -6,7 +6,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createOrm, eq } from '@db-semantic-planner/dx';
+import { createOrm, eq } from '@db-semantic-planner/core';
 import {
 	closeTestDb,
 	createPimdamSchema,

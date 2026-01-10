@@ -20,9 +20,69 @@
 
 ## In Progress
 
-(none)
+(No tasks in progress)
 
 ## Recently Completed
+
+### ARCH-001: Merge dx + core for Adapter-Agnostic Architecture ✅ (2026-01-10)
+
+**Scope:** core, dx, adapter-kysely
+**ADR:** [docs/adrs/ADR-002-merge-dx-into-core.md](docs/adrs/ADR-002-merge-dx-into-core.md)
+**Spec:** [docs/plans/ARCH-001-merge-dx-core.md](docs/plans/ARCH-001-merge-dx-core.md)
+
+Merged `packages/dx` into `packages/core` to enable true multi-adapter support:
+
+- [x] ✅ Block 1: Create AdapterInterface in core (2026-01-10)
+- [x] ✅ Block 2: Move dx source files to core/src/dx/ (2026-01-10)
+- [x] ✅ Block 3: Move dx test files to core/src/dx/ (2026-01-10)
+- [x] ✅ Block 4: Refactor createOrm for adapter injection (2026-01-10)
+- [x] ✅ Block 5: Implement KyselyAdapter in adapter-kysely (2026-01-10)
+- [x] ✅ Block 6: Update core exports (index.ts) (2026-01-10)
+- [x] ✅ Block 7: Delete dx package entirely (2026-01-10)
+- [x] ✅ Block 8: Run all tests and verify (2026-01-10)
+
+**Key deliverables:**
+- `packages/core/src/adapter.ts`: Adapter interface with capabilities
+- `packages/core/src/dx/`: All DX layer code moved from dx package
+- `packages/adapter-kysely/src/kysely-adapter.ts`: KyselyAdapter implementation
+- API change: `createOrm({ model, db })` → `createOrm({ model, adapter: createKyselyAdapter(db) })`
+
+**Files changed:** 60+ (core: 30+, adapter-kysely: 15+, e2e: 15+)
+**Tests:** 1005 passing (449 core + 556 adapter-kysely)
+
+### DX-025: Transaction Wrapper ✅ (2026-01-10)
+
+**Scope:** dx
+
+Implemented `orm.transaction()` as a passthrough to Kysely's transaction API:
+
+- [x] ✅ Add `transaction()` method signature to OrmInstance interface (2026-01-10)
+- [x] ✅ Implement `transaction()` in createOrmInstance (2026-01-10)
+- [x] ✅ Multi-tenant support: `forTenant().transaction()` (2026-01-10)
+- [x] ✅ Write tests for commit/rollback (7 tests) (2026-01-10)
+
+**Key features:**
+- Auto-commit on success, auto-rollback on exception
+- Transaction callback receives scoped OrmInstance
+- Multi-tenant context preserved in transaction
+- All ORM operations available within transaction (select, insert, update, delete, includes)
+
+**API:**
+```typescript
+// Basic transaction
+await orm.transaction(async (tx) => {
+  await tx.insert('orders').values({ userId: 1, total: 100 }).execute();
+  await tx.update('users').set({ balance: 0 }).where(eq('id', 1)).execute();
+});
+
+// Multi-tenant transaction
+await orm.forTenant('tenant_123').transaction(async (tx) => {
+  await tx.insert('events').values({ type: 'order_created' }).execute();
+});
+```
+
+**Files changed:** 3 (types.ts, orm.ts, transaction.test.ts)
+**Tests:** 1017 passing (7 new transaction tests)
 
 ### CORE-003: Edge Cases & Plan Coherence ✅ (2026-01-10)
 
@@ -247,7 +307,7 @@ Window function support across all packages for analytics queries.
 | DX-022 | Recursive via `include({ recursive: true })` | HIGH | L | Yes |
 | DX-023 | Lightweight ModelIR (relations-only) | MEDIUM | L | No |
 | DX-024 | ✅ `orderBy()` shorthand (polymorphic) (2026-01-09) | HIGH | S | No |
-| DX-025 | `orm.transaction()` wrapper (passthrough) | HIGH | M | No |
+| DX-025 | ✅ `orm.transaction()` wrapper (passthrough) (2026-01-10) | HIGH | M | No |
 | DX-026 | `upsert()` + `returning()` support | HIGH | M | No |
 | DX-027 | Raw SQL escape hatch (`raw`, `orm.raw`) | HIGH | S | No |
 | DX-028 | Pagination helpers (offset + cursor) | MEDIUM | S | No |
@@ -368,10 +428,11 @@ See **DIALECT-001** in "In Progress" section above.
 ### Package Dependencies (STRICT)
 
 ```
-packages/core          → (nothing)
+packages/core           → (nothing)
 packages/adapter-kysely → packages/core
-packages/dx            → packages/core + packages/adapter-kysely
 ```
+
+Note: `packages/dx` was merged into `packages/core` in ARCH-001 (2026-01-10).
 
 ### MVP Non-Goals
 

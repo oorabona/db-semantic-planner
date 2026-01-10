@@ -26,7 +26,7 @@ import {
 	rowNumber,
 	wAvg,
 	wSum,
-} from '@db-semantic-planner/dx';
+} from '@db-semantic-planner/core';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,

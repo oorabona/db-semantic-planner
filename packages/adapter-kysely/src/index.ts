@@ -62,6 +62,8 @@ export type {
 } from './introspection.js';
 // Introspection (ADAPTER-006)
 export { introspect } from './introspection.js';
+// KyselyAdapter (high-level adapter interface implementation)
+export { createKyselyAdapter, KyselyAdapter } from './kysely-adapter.js';
 // Redaction API (ADAPTER-004)
 export { redactParams } from './redact.js';
 export type { StreamQueryOptions } from './stream.js';

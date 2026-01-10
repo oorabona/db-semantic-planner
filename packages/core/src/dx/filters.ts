@@ -7,7 +7,7 @@
  *
  * @example
  * ```typescript
- * import { eq, and, gt, like } from '@db-semantic-planner/dx';
+ * import { eq, and, gt, like } from '@db-semantic-planner/core';
  *
  * // Simple equality
  * orm.select('users').where(eq('status', 'active'))
@@ -36,7 +36,7 @@ import type {
 	WhereOrIntent,
 	WindowFunction,
 	WindowIntent,
-} from '@db-semantic-planner/core';
+} from '../intent-ast.js';
 import type { ExpressionSpec } from './types.js';
 
 // ============================================================================

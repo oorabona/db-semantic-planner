@@ -1,14 +1,7 @@
 /**
- * @db-semantic-planner/dx
+ * @db-semantic-planner/core/dx
  * Developer Experience enhancements - strict mode, disambiguation, compat helpers.
  */
-
-// Re-export types from adapter for dump() and stream()
-export type { Dump, DumpMeta } from '@db-semantic-planner/adapter-kysely';
-export {
-	MissingDependencyError,
-	UnsupportedOperationError,
-} from '@db-semantic-planner/adapter-kysely';
 
 // Errors
 export {
@@ -19,6 +12,7 @@ export {
 	RelationNotFoundError,
 	UnsafeOperationError,
 } from './errors.js';
+
 // Filter Helpers (Drizzle-like)
 export {
 	// Logical
@@ -59,6 +53,7 @@ export {
 	wMin,
 	wSum,
 } from './filters.js';
+
 // Lightweight ModelIR (DX-023)
 export {
 	type CardinalityShorthand,
@@ -80,6 +75,7 @@ export {
 	type RelationTupleDef,
 	singularize,
 } from './lightweight-model.js';
+
 // Mutation Builders (DX-010)
 export {
 	DeleteBuilder,
@@ -99,6 +95,7 @@ export {
 
 // Factory
 export { createOrm } from './orm.js';
+
 // NOTE: RecursiveQueryBuilder is now internal-only (DX-022)
 // Use include({ recursive: true }) API instead
 // Type exports kept for edge-table support (internal use)
@@ -119,6 +116,7 @@ export {
 	SubqueryExpression,
 	subquery,
 } from './subquery-builder.js';
+
 // Types
 export type {
 	AggregateOptions,
@@ -134,7 +132,7 @@ export type {
 	OrderBySpec,
 	OrmInstance,
 	OrmOptions,
-	OrmOptionsWithDb,
+	OrmOptionsWithAdapter,
 	OrmOptionsWithModel,
 	QueryBuilder,
 	RelationHints,

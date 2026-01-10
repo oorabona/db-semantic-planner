@@ -6,7 +6,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createOrm, eq, type Dump } from '@db-semantic-planner/dx';
+import { createOrm, eq, type Dump } from '@db-semantic-planner/core';
 import {
 	blogModel,
 	closeTestDb,

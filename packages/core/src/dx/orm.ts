@@ -1,32 +1,19 @@
-import {
-	compile,
-	compileRecursive,
-	type Dump,
-	introspect,
-	streamQuery,
-	validateIdentifier,
-} from '@db-semantic-planner/adapter-kysely';
+import type { Adapter, Dump } from '../adapter.js';
 import type {
 	AggregateIntent,
 	ExpressionIntent,
 	IncludeIntent,
-	ModelIR,
 	OrderByIntent,
-	PlanOptions,
-	PlanReport,
 	QueryIntent,
 	RecursiveIntent,
 	SelectAggregateIntent,
 	SelectIntent,
 	SelectWithExpressionsIntent,
 	WhereIntent,
-} from '@db-semantic-planner/core';
-import {
-	AmbiguousPlanError,
-	plan,
-	planRecursive,
-} from '@db-semantic-planner/core';
-import { CompiledQuery, type Kysely } from 'kysely';
+} from '../intent-ast.js';
+import type { ModelIR } from '../model-ir.js';
+import type { PlanOptions, PlanReport } from '../planner.js';
+import { AmbiguousPlanError, plan, planRecursive } from '../planner.js';
 
 import {
 	AmbiguousRelationError,
@@ -57,7 +44,7 @@ import {
 	type OrderByRecord,
 	type OrderBySpec,
 	type OrmInstance,
-	type OrmOptionsWithDb,
+	type OrmOptionsWithAdapter,
 	type OrmOptionsWithModel,
 	type QueryBuilder,
 	type RecursiveIncludeOptions,
@@ -85,6 +72,7 @@ import {
  *
  * const orm = createOrm<Database>({
  *   model: mySchema,
+ *   adapter,
  *   strictMode: true,
  * });
  *
@@ -95,35 +83,42 @@ import {
  *
  * @example Zero-config with auto-introspection (async)
  * ```typescript
- * const orm = await createOrm({ db });
+ * const orm = await createOrm({ adapter });
  * const users = await orm.select('users').all();
  * ```
  */
 export function createOrm<DB = Record<string, unknown>>(
-	options: OrmOptionsWithModel,
+	options: OrmOptionsWithModel<DB>,
 ): OrmInstance<DB>;
 export function createOrm<DB = Record<string, unknown>>(
-	options: OrmOptionsWithDb,
+	options: OrmOptionsWithAdapter<DB>,
 ): Promise<OrmInstance<DB>>;
 export function createOrm<DB = Record<string, unknown>>(
-	options: OrmOptionsWithModel | OrmOptionsWithDb,
+	options: OrmOptionsWithModel<DB> | OrmOptionsWithAdapter<DB>,
 ): OrmInstance<DB> | Promise<OrmInstance<DB>> {
-	const { model, strictMode = false, relationHints = {}, db } = options;
+	const { model, strictMode = false, relationHints = {}, adapter } = options;
 
 	// If model is provided, create synchronously
 	if (model) {
-		return createOrmInstance(model, strictMode, relationHints, db);
+		return createOrmInstance(model, strictMode, relationHints, adapter);
 	}
 
-	// If no model but db is provided, introspect and create async
-	if (db) {
-		return introspect(db).then((introspectedModel) =>
-			createOrmInstance(introspectedModel, strictMode, relationHints, db),
-		);
+	// If no model but adapter is provided, introspect and create async
+	if (adapter) {
+		return adapter
+			.introspect()
+			.then((introspectedModel) =>
+				createOrmInstance(
+					introspectedModel,
+					strictMode,
+					relationHints,
+					adapter,
+				),
+			);
 	}
 
-	// Neither model nor db - this shouldn't happen with proper types
-	throw new Error('Either model or db must be provided to createOrm');
+	// Neither model nor adapter - this shouldn't happen with proper types
+	throw new Error('Either model or adapter must be provided to createOrm');
 }
 
 /**
@@ -136,8 +131,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 	model: ModelIR,
 	strictMode: boolean,
 	relationHints: RelationHints,
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
-	db?: Kysely<any>,
+	adapter?: Adapter<DB>,
 	schemaName?: string,
 ): OrmInstance<DB> {
 	return {
@@ -150,18 +144,22 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				strictMode,
 				from as string,
 				relationHints,
-				db,
+				adapter,
 				schemaName,
 			);
 		},
 		forTenant(tenantSchema: string): OrmInstance<DB> {
 			// Validate schema name to prevent SQL injection
-			validateIdentifier(tenantSchema, 'schema');
+			if (adapter) {
+				adapter.validateIdentifier(tenantSchema, 'schema');
+			}
+			// Create a schema-scoped adapter if we have one
+			const scopedAdapter = adapter?.withSchema(tenantSchema);
 			return createOrmInstance(
 				model,
 				strictMode,
 				relationHints,
-				db,
+				scopedAdapter as Adapter<DB> | undefined,
 				tenantSchema,
 			);
 		},
@@ -185,10 +183,10 @@ function createOrmInstance<DB = Record<string, unknown>>(
 			nodeIdValue: unknown,
 			options: ListHierarchyOptions,
 		): Promise<TResult[]> {
-			if (!db) {
+			if (!adapter) {
 				throw new Error(
-					'listAncestors() requires a database connection. ' +
-						'Pass a Kysely instance when creating the ORM.',
+					'listAncestors() requires an adapter. ' +
+						'Pass an adapter when creating the ORM.',
 				);
 			}
 
@@ -209,7 +207,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				strictMode,
 				table,
 				relationHints,
-				db,
+				adapter,
 				schemaName,
 			);
 
@@ -244,10 +242,10 @@ function createOrmInstance<DB = Record<string, unknown>>(
 			nodeIdValue: unknown,
 			options: ListHierarchyOptions,
 		): Promise<TResult[]> {
-			if (!db) {
+			if (!adapter) {
 				throw new Error(
-					'listDescendants() requires a database connection. ' +
-						'Pass a Kysely instance when creating the ORM.',
+					'listDescendants() requires an adapter. ' +
+						'Pass an adapter when creating the ORM.',
 				);
 			}
 
@@ -268,7 +266,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				strictMode,
 				table,
 				relationHints,
-				db,
+				adapter,
 				schemaName,
 			);
 
@@ -297,7 +295,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 			return new InsertBuilder({
 				table,
 				model,
-				db,
+				adapter,
 				schemaName,
 			});
 		},
@@ -306,7 +304,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 			return new UpdateBuilder({
 				table,
 				model,
-				db,
+				adapter,
 				schemaName,
 			});
 		},
@@ -315,7 +313,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 			return new DeleteBuilder({
 				table,
 				model,
-				db,
+				adapter,
 				schemaName,
 			});
 		},
@@ -324,7 +322,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 			return new UpdateBuilder({
 				table,
 				model,
-				db,
+				adapter,
 				schemaName,
 				allowAll: true,
 			});
@@ -334,9 +332,35 @@ function createOrmInstance<DB = Record<string, unknown>>(
 			return new DeleteBuilder({
 				table,
 				model,
-				db,
+				adapter,
 				schemaName,
 				allowAll: true,
+			});
+		},
+
+		// =====================================================================
+		// Transaction Methods (DX-025)
+		// =====================================================================
+
+		async transaction<T>(fn: (tx: OrmInstance<DB>) => Promise<T>): Promise<T> {
+			if (!adapter) {
+				throw new Error(
+					'transaction() requires an adapter. ' +
+						'Pass an adapter when creating the ORM.',
+				);
+			}
+
+			// Passthrough to adapter's transaction API
+			return adapter.transaction(async (txAdapter) => {
+				// Create a transaction-scoped ORM instance
+				const txOrm = createOrmInstance<DB>(
+					model,
+					strictMode,
+					relationHints,
+					txAdapter as Adapter<DB>,
+					schemaName,
+				);
+				return fn(txOrm);
 			});
 		},
 	};
@@ -568,8 +592,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	private readonly includes: IncludeIntent[] = [];
 	private readonly recursiveIncludes: RecursiveIncludeConfig[] = [];
 	private readonly relationHints: RelationHints;
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
-	private readonly db: Kysely<any> | undefined;
+	private readonly adapter: Adapter | undefined;
 	private readonly schemaName: string | undefined;
 	private selectIntent?: SelectIntent;
 	private whereIntents: WhereIntent[] = [];
@@ -585,15 +608,14 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		strictMode: boolean,
 		from: string,
 		relationHints: RelationHints = {},
-		// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
-		db?: Kysely<any>,
+		adapter?: Adapter,
 		schemaName?: string,
 	) {
 		this.model = model;
 		this.strictMode = strictMode;
 		this.from = from;
 		this.relationHints = relationHints;
-		this.db = db;
+		this.adapter = adapter;
 		this.schemaName = schemaName;
 	}
 
@@ -809,24 +831,24 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	}
 
 	async all(): Promise<TResult[]> {
-		const db = this.getConfiguredDb();
+		const adapter = this.getConfiguredAdapter();
 		const planReport = this.plan();
 
 		// Build compile options with exactOptionalPropertyTypes compliance
 		const compileOptions: {
 			schemaName?: string;
-		} = {};
+			model: ModelIR;
+		} = { model: this.model };
 		if (this.schemaName !== undefined) {
 			compileOptions.schemaName = this.schemaName;
 		}
 
-		const compiled = compile(planReport, this.model, db, compileOptions);
-		const result = await db.executeQuery(compiled);
-		const mainResults = result.rows as TResult[];
+		const compiled = adapter.compile(planReport, compileOptions);
+		const mainResults = (await adapter.execute(compiled)) as TResult[];
 
 		// Process recursive includes if any
 		if (this.recursiveIncludes.length > 0) {
-			await this.processRecursiveIncludes(mainResults, db);
+			await this.processRecursiveIncludes(mainResults, adapter);
 		}
 
 		return mainResults;
@@ -840,13 +862,12 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	private async processRecursiveIncludes(
 		// biome-ignore lint/suspicious/noExplicitAny: Result rows can have any shape
 		results: any[],
-		// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
-		db: Kysely<any>,
+		adapter: Adapter,
 	): Promise<void> {
 		if (results.length === 0) return;
 
 		for (const config of this.recursiveIncludes) {
-			await this.processOneRecursiveInclude(results, config, db);
+			await this.processOneRecursiveInclude(results, config, adapter);
 		}
 	}
 
@@ -857,8 +878,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		// biome-ignore lint/suspicious/noExplicitAny: Result rows can have any shape
 		results: any[],
 		config: RecursiveIncludeConfig,
-		// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
-		db: Kysely<any>,
+		adapter: Adapter,
 	): Promise<void> {
 		const { relation, options } = config;
 		const {
@@ -904,21 +924,22 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 
 		// Plan and compile the recursive query
 		const report = planRecursive(recursiveIntent, this.model);
-		const compiledRecursive = compileRecursive(
+
+		// Build compile options with exactOptionalPropertyTypes compliance
+		const compileOptions: { schemaName?: string } = {};
+		if (this.schemaName !== undefined) {
+			compileOptions.schemaName = this.schemaName;
+		}
+
+		const compiledRecursive = adapter.compileRecursive(
 			report,
 			this.model,
-			db,
-			this.schemaName,
+			compileOptions,
 		);
 
 		// Execute
-		const compiledQuery = CompiledQuery.raw(
-			compiledRecursive.sql,
-			compiledRecursive.parameters as unknown[],
-		);
-		const recursiveResult = await db.executeQuery(compiledQuery);
 		// biome-ignore lint/suspicious/noExplicitAny: Recursive result rows can have any shape
-		const recursiveRows = recursiveResult.rows as any[];
+		const recursiveRows = (await adapter.execute(compiledRecursive)) as any[];
 
 		// Merge results back into main results
 		this.mergeRecursiveResults(
@@ -1217,18 +1238,19 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	}
 
 	dump(): Dump {
-		const db = this.getConfiguredDb();
+		const adapter = this.getConfiguredAdapter();
 		const planReport = this.plan();
 
 		// Build compile options with exactOptionalPropertyTypes compliance
 		const compileOptions: {
 			schemaName?: string;
-		} = {};
+			model: ModelIR;
+		} = { model: this.model };
 		if (this.schemaName !== undefined) {
 			compileOptions.schemaName = this.schemaName;
 		}
 
-		const compiled = compile(planReport, this.model, db, compileOptions);
+		const compiled = adapter.compile(planReport, compileOptions);
 
 		// Build meta with exactOptionalPropertyTypes compliance
 		const meta: { compiledAt: Date; tenant?: string } = {
@@ -1251,29 +1273,41 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	}
 
 	stream(options?: StreamOptions): AsyncIterableIterator<TResult> {
-		const db = this.getConfiguredDb();
+		const adapter = this.getConfiguredAdapter();
 		const dumpResult = this.dump();
 
-		// Pass options directly - they're already compatible types
-		// streamQuery handles undefined options gracefully
-		return streamQuery(db, dumpResult, options);
+		// Call onStart at ORM level with full dump (including plan)
+		if (options?.onStart) {
+			options.onStart(dumpResult);
+		}
+
+		// Use adapter's stream method (without onStart, we already called it)
+		const compiled = {
+			sql: dumpResult.sql,
+			parameters: dumpResult.params as readonly unknown[],
+		};
+		// Only pass chunkSize to adapter, onStart is handled above
+		const adapterOptions =
+			options?.chunkSize !== undefined
+				? { chunkSize: options.chunkSize }
+				: undefined;
+		return adapter.stream<TResult>(compiled, adapterOptions);
 	}
 
 	/**
-	 * Get configured db, throwing if not configured.
-	 * @throws {ExecutionError} If db is not configured
-	 * @returns The configured Kysely instance
+	 * Get configured adapter, throwing if not configured.
+	 * @throws {ExecutionError} If adapter is not configured
+	 * @returns The configured adapter instance
 	 */
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
-	private getConfiguredDb(): Kysely<any> {
-		if (!this.db) {
+	private getConfiguredAdapter(): Adapter {
+		if (!this.adapter) {
 			throw new ExecutionError({
 				operation: 'query execution',
-				reason: 'Database not configured',
-				fix: 'Pass a Kysely instance to createOrm({ db: yourKyselyInstance })',
+				reason: 'Adapter not configured',
+				fix: 'Pass an adapter to createOrm({ adapter: yourAdapter })',
 			});
 		}
-		return this.db;
+		return this.adapter;
 	}
 
 	/**
@@ -1443,7 +1477,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			this.strictMode,
 			this.from,
 			{ ...this.relationHints }, // Clone hints to allow per-query additions
-			this.db,
+			this.adapter,
 			this.schemaName,
 		);
 		builder.includes.push(...this.includes);

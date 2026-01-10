@@ -19,7 +19,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql as kyselySql } from 'kysely';
-import { createOrm, like } from '@db-semantic-planner/dx';
+import { createOrm, like } from '@db-semantic-planner/core';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,

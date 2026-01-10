@@ -4,7 +4,12 @@
  * These replace the old ancestors(), descendants(), subtree() methods (BREAKING CHANGE)
  */
 
-import { belongsTo, defineSchema, hasMany } from '@db-semantic-planner/core';
+import {
+	belongsTo,
+	createOrm,
+	defineSchema,
+	hasMany,
+} from '@db-semantic-planner/core';
 import {
 	Kysely,
 	PostgresAdapter,
@@ -12,7 +17,7 @@ import {
 	PostgresQueryCompiler,
 } from 'kysely';
 import { describe, expect, it } from 'vitest';
-import { createOrm } from './orm.js';
+import { createKyselyAdapter } from './kysely-adapter.js';
 
 // Dummy driver for testing (no actual DB connection)
 class DummyDriver {
@@ -61,19 +66,25 @@ describe('DX-022: Hierarchy List Methods', () => {
 
 			await expect(
 				orm.listAncestors('categories', 42, { parentId: 'parentId' }),
-			).rejects.toThrow('listAncestors() requires a database connection');
+			).rejects.toThrow('listAncestors() requires an adapter');
 		});
 
 		it('should have method defined on ORM', () => {
 			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
+			const orm = createOrm({
+				model: categoryModel,
+				adapter: createKyselyAdapter(db),
+			});
 
 			expect(typeof orm.listAncestors).toBe('function');
 		});
 
 		it('should have correct signature', () => {
 			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
+			const orm = createOrm({
+				model: categoryModel,
+				adapter: createKyselyAdapter(db),
+			});
 
 			// Method should accept table, nodeIdValue, and options
 			expect(orm.listAncestors.length).toBe(3);
@@ -86,19 +97,25 @@ describe('DX-022: Hierarchy List Methods', () => {
 
 			await expect(
 				orm.listDescendants('categories', 1, { parentId: 'parentId' }),
-			).rejects.toThrow('listDescendants() requires a database connection');
+			).rejects.toThrow('listDescendants() requires an adapter');
 		});
 
 		it('should have method defined on ORM', () => {
 			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
+			const orm = createOrm({
+				model: categoryModel,
+				adapter: createKyselyAdapter(db),
+			});
 
 			expect(typeof orm.listDescendants).toBe('function');
 		});
 
 		it('should have correct signature', () => {
 			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
+			const orm = createOrm({
+				model: categoryModel,
+				adapter: createKyselyAdapter(db),
+			});
 
 			// Method should accept table, nodeIdValue, and options
 			expect(orm.listDescendants.length).toBe(3);
@@ -108,7 +125,10 @@ describe('DX-022: Hierarchy List Methods', () => {
 	describe('Old API removed (DX-022 Breaking Change)', () => {
 		it('should NOT have ancestors() method', () => {
 			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
+			const orm = createOrm({
+				model: categoryModel,
+				adapter: createKyselyAdapter(db),
+			});
 
 			// biome-ignore lint/suspicious/noExplicitAny: Testing removed API
 			expect((orm as any).ancestors).toBeUndefined();
@@ -116,7 +136,10 @@ describe('DX-022: Hierarchy List Methods', () => {
 
 		it('should NOT have descendants() method', () => {
 			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
+			const orm = createOrm({
+				model: categoryModel,
+				adapter: createKyselyAdapter(db),
+			});
 
 			// biome-ignore lint/suspicious/noExplicitAny: Testing removed API
 			expect((orm as any).descendants).toBeUndefined();
@@ -124,7 +147,10 @@ describe('DX-022: Hierarchy List Methods', () => {
 
 		it('should NOT have subtree() method', () => {
 			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
+			const orm = createOrm({
+				model: categoryModel,
+				adapter: createKyselyAdapter(db),
+			});
 
 			// biome-ignore lint/suspicious/noExplicitAny: Testing removed API
 			expect((orm as any).subtree).toBeUndefined();
@@ -132,7 +158,10 @@ describe('DX-022: Hierarchy List Methods', () => {
 
 		it('should NOT have recursive() method', () => {
 			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
+			const orm = createOrm({
+				model: categoryModel,
+				adapter: createKyselyAdapter(db),
+			});
 
 			// biome-ignore lint/suspicious/noExplicitAny: Testing removed API
 			expect((orm as any).recursive).toBeUndefined();
@@ -142,7 +171,10 @@ describe('DX-022: Hierarchy List Methods', () => {
 	describe('Multi-tenant support', () => {
 		it('should have listAncestors on tenant ORM', () => {
 			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
+			const orm = createOrm({
+				model: categoryModel,
+				adapter: createKyselyAdapter(db),
+			});
 			const tenantOrm = orm.forTenant('tenant_123');
 
 			expect(typeof tenantOrm.listAncestors).toBe('function');
@@ -150,7 +182,10 @@ describe('DX-022: Hierarchy List Methods', () => {
 
 		it('should have listDescendants on tenant ORM', () => {
 			const db = createTestDb();
-			const orm = createOrm({ model: categoryModel, db });
+			const orm = createOrm({
+				model: categoryModel,
+				adapter: createKyselyAdapter(db),
+			});
 			const tenantOrm = orm.forTenant('tenant_123');
 
 			expect(typeof tenantOrm.listDescendants).toBe('function');
