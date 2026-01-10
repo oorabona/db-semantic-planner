@@ -334,7 +334,8 @@ describe('Q2: CTE extraction → WITH clause', () => {
 
 		// Validate SQL contains WITH
 		expect(compiled.sql.toLowerCase()).toContain('with');
-		expect(compiled.sql.toLowerCase()).toContain('cte_products');
+		// CTE name now includes table for uniqueness: cte_<table>_<relation>
+		expect(compiled.sql.toLowerCase()).toContain('cte_categories_products');
 	});
 
 	it('should not generate WITH clause when no CTEs', () => {

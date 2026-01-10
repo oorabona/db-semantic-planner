@@ -190,14 +190,9 @@ export class ModelIRImpl implements ModelIR {
 			}
 		}
 
-		// Detect and warn about circular relations (not an error, just informational)
-		const circularPaths = this.detectCircularRelations();
-		if (circularPaths.length > 0) {
-			console.warn(
-				'[ModelIR] Circular relations detected (not an error):',
-				circularPaths,
-			);
-		}
+		// Detect circular relations (informational only, not an error)
+		// Detection logic is retained but logging removed to avoid test pollution
+		this.detectCircularRelations();
 
 		if (errors.length > 0) {
 			throw new Error(

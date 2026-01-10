@@ -1643,6 +1643,10 @@ function compileWhere(
 			return eb(`${alias}.${where.field}`, 'like', where.pattern);
 
 		case 'in':
+			// Empty IN is always false (no values can match)
+			if (where.values.length === 0) {
+				return eb.lit(false);
+			}
 			return eb(`${alias}.${where.field}`, 'in', where.values);
 
 		case 'null':
@@ -1652,6 +1656,10 @@ function compileWhere(
 			return eb(`${alias}.${where.field}`, 'is not', null);
 
 		case 'and':
+			// Empty AND is always true (no conditions to fail)
+			if (where.conditions.length === 0) {
+				return eb.lit(true);
+			}
 			return eb.and(
 				where.conditions.map((c: WhereIntent) =>
 					compileWhere(eb, c, alias, model, plan, state, schemaName),
@@ -1659,6 +1667,10 @@ function compileWhere(
 			);
 
 		case 'or':
+			// Empty OR is always false (no conditions can pass)
+			if (where.conditions.length === 0) {
+				return eb.lit(false);
+			}
 			return eb.or(
 				where.conditions.map((c: WhereIntent) =>
 					compileWhere(eb, c, alias, model, plan, state, schemaName),

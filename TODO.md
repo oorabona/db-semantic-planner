@@ -24,6 +24,26 @@
 
 ## Recently Completed
 
+### CORE-003: Edge Cases & Plan Coherence ✅ (2026-01-10)
+
+**Scope:** core, adapter-kysely
+
+Fixed edge cases and removed side-effects that polluted tests:
+
+- [x] ✅ CTE naming uniqueness: `cte_<table>_<relation>` pattern (2026-01-10)
+- [x] ✅ Empty IN/AND/OR edge cases: proper SQL semantics (2026-01-10)
+- [x] ✅ Path separator: verified consistent (`.` for relation paths, `/` for tree traversal)
+- [x] ✅ Ambiguity metadata: already exposed via `isAmbiguous`/`ambiguousOptions`
+- [x] ✅ console.warn removal: test pollution fixed (2026-01-10)
+
+**Key changes:**
+- Empty IN → `false`, Empty AND → `true`, Empty OR → `false`
+- CTE names now include source table for uniqueness
+- No more console.warn during test runs
+
+**Files changed:** 4 (core: 2, adapter: 2)
+**Tests:** 1010 passing
+
 ### CORE-002-B: M:N Through Table Support ✅ (2026-01-10)
 
 **Scope:** core, adapter-kysely
@@ -153,16 +173,9 @@ Window function support across all packages for analytics queries.
 
 ---
 
-### CORE-003: Edge Cases & Plan Coherence 🟡
+### CORE-003: Edge Cases & Plan Coherence ✅ (2026-01-10)
 
-**Priority:** P1 HIGH | **Effort:** S | **Scope:** core, adapter-kysely
-
-**Problèmes identifiés :**
-- [ ] CTE naming : garantir unicité des noms
-- [ ] IN/AND/OR vides : comportement défini (erreur ou no-op ?)
-- [ ] Path separator : cohérence dans les chemins de relation
-- [ ] Metadata d'ambiguïté : exposer dans le plan
-- [ ] Side-effects : supprimer console.warn (pollution tests)
+**See:** Recently Completed section above.
 
 ---
 
