@@ -68,9 +68,9 @@
 
 *Migrated from TODO_DX.md after ARCH-001 merge (2026-01-10)*
 
-### DX-026: Upsert Support
+### DX-026: Upsert Support ✅ (2026-01-10)
 
-**Priority:** HIGH | **Effort:** M
+**Priority:** HIGH | **Effort:** M | **Commit:** dde5d71
 
 Support `INSERT ... ON CONFLICT` (PostgreSQL) / `INSERT OR REPLACE` (SQLite).
 
@@ -92,18 +92,18 @@ const user = await orm.upsert('users')
 ```
 
 **Tasks:**
-- [ ] Core: `UpsertIntent` type
-- [ ] Adapter: `compileUpsert()` avec support PostgreSQL
-- [ ] DX: `UpsertBuilder` avec `.values()`, `.onConflict()`, `.doUpdate()`, `.doNothing()`, `.returning()`, `.execute()`, `.dump()`
-- [ ] Multi-tenant: schema prefix support
-- [ ] Tests: single key, composite key, doUpdate, doNothing, returning
-- [ ] DialectCapabilities: `supportsUpsert`, `supportsReturning`
+- [x] ✅ Core: `UpsertIntent` type (2026-01-10)
+- [x] ✅ Adapter: `compileUpsert()` avec support PostgreSQL (2026-01-10)
+- [x] ✅ DX: `UpsertBuilder` avec `.values()`, `.onConflict()`, `.doUpdate()`, `.doNothing()`, `.returning()`, `.execute()`, `.dump()` (2026-01-10)
+- [x] ✅ Multi-tenant: schema prefix support (2026-01-10)
+- [x] ✅ Tests: single key, composite key, doUpdate, doNothing, returning (2026-01-10)
+- [x] ✅ DialectCapabilities: `supportsUpsert`, `supportsReturning` (2026-01-10)
 
 ---
 
-### DX-027: Raw SQL Escape Hatch
+### DX-027: Raw SQL Escape Hatch ✅ (2026-01-10)
 
-**Priority:** HIGH | **Effort:** S
+**Priority:** HIGH | **Effort:** S | **Commit:** 1dae226
 
 Permettre du SQL brut pour les cas non couverts par l'ORM.
 
@@ -127,16 +127,16 @@ orm.select('products')
 ```
 
 **Tasks:**
-- [ ] Helper `raw` pour expressions (tagged template literal)
-- [ ] `orm.raw<T>()` pour queries complètes
-- [ ] Binding automatique des paramètres (sécurité injection SQL)
-- [ ] Intégration avec `where()`, `columns()`
-- [ ] Multi-tenant : schema prefix dans raw queries ?
-- [ ] Tests: expressions, full queries, paramètres
+- [x] ✅ Helper `raw` pour expressions (tagged template literal) (2026-01-10)
+- [x] ✅ `orm.raw<T>()` pour queries complètes (2026-01-10)
+- [x] ✅ Binding automatique des paramètres (sécurité injection SQL) (2026-01-10)
+- [x] ✅ Intégration avec `where()`, `columns()` (2026-01-10)
+- [x] ✅ Multi-tenant : schema prefix dans raw queries (2026-01-10)
+- [x] ✅ Tests: expressions, full queries, paramètres (2026-01-10)
 
 ---
 
-### DX-028: Pagination Helpers
+### DX-028: Pagination Helpers ✅ (2026-01-10)
 
 **Priority:** MEDIUM | **Effort:** S
 
@@ -148,7 +148,6 @@ const page = await orm.select('users')
    .where(eq('active', true))
    .orderBy('created_at', 'desc')
    .paginate({ page: 2, perPage: 20 })
-   .execute()
 // → { data: User[], pagination: { page, perPage, total, totalPages, hasNextPage, hasPrevPage } }
 ```
 
@@ -157,17 +156,16 @@ const page = await orm.select('users')
 const page = await orm.select('users')
    .orderBy('id')
    .cursorPaginate({ cursor: 'eyJpZCI6MTAwfQ==', limit: 20 })
-   .execute()
-// → { data: User[], nextCursor, prevCursor }
+// → { data: User[], nextCursor, prevCursor, hasNextPage, hasPrevPage }
 ```
 
 **Tasks:**
-- [ ] `paginate({ page, perPage })` méthode
-- [ ] `PaginatedResult<T>` type avec metadata
-- [ ] COUNT query optimisée (ou option `withCount: false`)
-- [ ] `cursorPaginate({ cursor, limit })` méthode
-- [ ] Cursor encode/decode (base64 JSON du dernier ID)
-- [ ] Tests: première page, milieu, dernière, empty
+- [x] ✅ `paginate({ page, perPage })` method (2026-01-10)
+- [x] ✅ `PaginatedResult<T>` type with metadata (2026-01-10)
+- [x] ✅ COUNT query optimized (option `withCount: false`) (2026-01-10)
+- [x] ✅ `cursorPaginate({ cursor, limit })` method (2026-01-10)
+- [x] ✅ Cursor encode/decode (base64 JSON of orderBy values) (2026-01-10)
+- [x] ✅ Tests: first page, middle, last, empty (27 tests) (2026-01-10)
 
 ---
 

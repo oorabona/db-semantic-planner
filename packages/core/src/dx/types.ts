@@ -70,6 +70,105 @@ export interface StreamOptions {
 	readonly onStart?: (dump: Dump) => void;
 }
 
+
+/**
+ * Options for offset-based pagination.
+ */
+export interface PaginateOptions {
+	/**
+	 * Page number (1-indexed).
+	 * @default 1
+	 */
+	readonly page?: number;
+
+	/**
+	 * Number of items per page.
+	 * @default 20
+	 */
+	readonly perPage?: number;
+
+	/**
+	 * Whether to include total count (requires additional COUNT query).
+	 * Set to false for better performance when total is not needed.
+	 * @default true
+	 */
+	readonly withCount?: boolean;
+}
+
+/**
+ * Result of offset-based pagination.
+ */
+export interface PaginatedResult<T> {
+	/** The data for the current page */
+	readonly data: T[];
+
+	/** Pagination metadata */
+	readonly pagination: {
+		/** Current page number (1-indexed) */
+		readonly page: number;
+
+		/** Items per page */
+		readonly perPage: number;
+
+		/** Total number of items (only if withCount: true) */
+		readonly total?: number;
+
+		/** Total number of pages (only if withCount: true) */
+		readonly totalPages?: number;
+
+		/** Whether there is a next page */
+		readonly hasNextPage: boolean;
+
+		/** Whether there is a previous page */
+		readonly hasPrevPage: boolean;
+	};
+}
+
+/**
+ * Options for cursor-based pagination.
+ */
+export interface CursorPaginateOptions {
+	/**
+	 * Cursor pointing to the last item of the previous page.
+	 * Pass undefined/null for the first page.
+	 */
+	readonly cursor?: string | null;
+
+	/**
+	 * Number of items to fetch.
+	 * @default 20
+	 */
+	readonly limit?: number;
+
+	/**
+	 * Direction of pagination.
+	 * - 'forward': fetch items after cursor (default)
+	 * - 'backward': fetch items before cursor
+	 * @default 'forward'
+	 */
+	readonly direction?: 'forward' | 'backward';
+}
+
+/**
+ * Result of cursor-based pagination.
+ */
+export interface CursorPaginatedResult<T> {
+	/** The data for the current page */
+	readonly data: T[];
+
+	/** Cursor for the next page (null if no more items) */
+	readonly nextCursor: string | null;
+
+	/** Cursor for the previous page (null if at the beginning) */
+	readonly prevCursor: string | null;
+
+	/** Whether there are more items after this page */
+	readonly hasNextPage: boolean;
+
+	/** Whether there are items before this page */
+	readonly hasPrevPage: boolean;
+}
+
 /**
  * Options for aggregate functions.
  */
@@ -792,6 +891,57 @@ export interface QueryBuilder<TResult = unknown> {
 	 * ```
 	 */
 	stream(options?: StreamOptions): AsyncIterableIterator<TResult>;
+
+	/**
+	 * Execute the query with offset-based pagination.
+	 *
+	 * Returns the data for the requested page along with pagination metadata.
+	 * By default, includes a COUNT query to determine total pages.
+	 *
+	 * @param options - Pagination options (page, perPage, withCount)
+	 * @returns Promise resolving to paginated result with data and metadata
+	 * @throws {ExecutionError} If db is not configured
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await orm.select('users')
+	 *   .where(eq('active', true))
+	 *   .orderBy('created_at', 'desc')
+	 *   .paginate({ page: 2, perPage: 20 });
+	 *
+	 * // result = {
+	 * //   data: User[],
+	 * //   pagination: { page: 2, perPage: 20, total: 100, totalPages: 5, hasNextPage: true, hasPrevPage: true }
+	 * // }
+	 * ```
+	 */
+	paginate(options?: PaginateOptions): Promise<PaginatedResult<TResult>>;
+
+	/**
+	 * Execute the query with cursor-based pagination.
+	 *
+	 * Returns the data along with cursors for navigating to next/previous pages.
+	 * Requires an orderBy clause to ensure stable ordering.
+	 *
+	 * @param options - Cursor pagination options (cursor, limit, direction)
+	 * @returns Promise resolving to cursor-paginated result
+	 * @throws {ExecutionError} If db is not configured
+	 * @throws {PlannerError} If no orderBy clause is specified
+	 *
+	 * @example
+	 * ```typescript
+	 * // First page
+	 * const page1 = await orm.select('users')
+	 *   .orderBy('id')
+	 *   .cursorPaginate({ limit: 20 });
+	 *
+	 * // Next page
+	 * const page2 = await orm.select('users')
+	 *   .orderBy('id')
+	 *   .cursorPaginate({ cursor: page1.nextCursor, limit: 20 });
+	 * ```
+	 */
+	cursorPaginate(options?: CursorPaginateOptions): Promise<CursorPaginatedResult<TResult>>;
 
 	/**
 	 * Find a single record by its primary key.
