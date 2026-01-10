@@ -1119,7 +1119,8 @@ function extractCTEs(state: PlannerState, threshold: number): void {
 			const parts = relationPath.split('.');
 			const table = parts[0] ?? 'unknown';
 			const relation = parts[1] ?? 'unknown';
-			const cteName = `cte_${relation}`;
+			// Include table name for uniqueness (e.g., users.posts and comments.posts both have "posts")
+			const cteName = `cte_${table}_${relation}`;
 
 			state.ctes.push({
 				name: cteName,
