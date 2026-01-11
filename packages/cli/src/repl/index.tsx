@@ -91,8 +91,9 @@ function ReplApp({ config }: ReplAppProps) {
 						return;
 
 					case '.exit':
-						exit();
-						return;
+				case '.quit':
+					exit();
+					return;
 
 					case '.clear':
 						setShowHelp(false);
