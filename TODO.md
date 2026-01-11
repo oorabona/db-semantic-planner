@@ -607,27 +607,35 @@ packages/adapter-pgsql/
 
 ---
 
-### DX-030-SPIKE: Évaluer Ink vs vue-termui pour REPL
+### ✅ DX-030-SPIKE: Évaluer Ink vs vue-termui pour REPL (2026-01-11)
 
 **Priority:** HIGH | **Effort:** XS (~2h) | **Breaking:** No
 
 POC minimal pour comparer les deux frameworks avant implémentation complète :
 
-- [ ] Ink POC: input + box + table output + basic styling
-- [ ] vue-termui POC: même fonctionnalités
-- [ ] Comparer: lignes de code, ergonomie, bugs rencontrés, écosystème
-- [ ] Documenter décision dans ADR
+- [x] ✅ Ink POC: input + box + table output + basic styling (2026-01-11)
+- [x] ✅ vue-termui POC: même fonctionnalités (2026-01-11)
+- [x] ✅ Comparer: lignes de code, ergonomie, bugs rencontrés, écosystème (2026-01-11)
+- [x] ✅ Documenter décision dans ADR (2026-01-11)
 
 **Critères d'évaluation:**
-| Critère | Poids |
-|---------|-------|
-| Facilité d'implémentation | 30% |
-| Qualité des composants (tables, inputs) | 25% |
-| Stabilité / bugs rencontrés | 25% |
-| Taille bundle / dépendances | 10% |
-| Familiarité équipe | 10% |
+| Critère | Poids | Ink | vue-termui |
+|---------|-------|-----|------------|
+| Facilité d'implémentation | 30% | 9/10 | 6/10 |
+| Qualité des composants (tables, inputs) | 25% | 9/10 | 7/10 |
+| Stabilité / bugs rencontrés | 25% | 9/10 | 5/10 |
+| Taille bundle / dépendances | 10% | 7/10 | 8/10 |
+| Familiarité équipe | 10% | 8/10 | 6/10 |
 
-**Output:** `docs/adrs/ADR-003-cli-repl-framework.md`
+**Weighted Scores:** Ink = 8.7, vue-termui = 6.2
+
+**Decision:** **Ink** selected for DX-030 REPL implementation.
+
+**Reason:** Mature ecosystem (v5.0+), @inkjs/ui + ink-table components, React patterns familiar, production-proven (Gatsby, Parcel, Yarn).
+
+**Output:** [docs/adrs/ADR-003-cli-repl-framework.md](docs/adrs/ADR-003-cli-repl-framework.md)
+
+**POCs:** `packages/cli/spike/ink-poc/`, `packages/cli/spike/vue-termui-poc/`
 
 ---
 

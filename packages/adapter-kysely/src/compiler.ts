@@ -745,6 +745,7 @@ export function compileUpsert(
 		.values(intent.values as Record<string, unknown>[]);
 
 	// Add ON CONFLICT clause
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely's onConflict callback requires any for builder chaining
 	query = query.onConflict((oc: any) => {
 		// Set conflict target (columns or constraint)
 		if ('columns' in intent.onConflict) {
@@ -773,6 +774,7 @@ export function compileUpsert(
 			);
 
 			if (updateKeys.length > 0) {
+				// biome-ignore lint/suspicious/noExplicitAny: Kysely's doUpdateSet accepts Record<string, any>
 				const updateSet: Record<string, any> = {};
 				for (const key of updateKeys) {
 					// Reference the excluded row
@@ -1192,7 +1194,6 @@ function buildRecursiveStep(
 	db: Kysely<any>,
 	cteName: string,
 	schemaName: string | undefined,
-	// biome-ignore lint/correctness/noUnusedFunctionParameters: passed for API consistency
 	capabilities: AdapterDialectCapabilities,
 	dialect: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
