@@ -233,3 +233,25 @@ export {
 // ============================================================================
 
 export * from './dx/index.js';
+
+// ============================================================================
+// Dialect Capabilities (CORE-004)
+// ============================================================================
+
+export type { DialectCapabilities } from './dialects/index.js';
+export {
+	// Constants
+	DUCKDB_CAPABILITIES,
+	// Functions
+	extendDialect,
+	getAvailableDialects,
+	getDialectCapabilities,
+	isKnownDialect,
+	MSSQL_CAPABILITIES,
+	MYSQL_CAPABILITIES,
+	POSTGRESQL_CAPABILITIES,
+	registerDialect,
+	SQLITE_CAPABILITIES,
+	// Errors
+	UnknownDialectError,
+} from './dialects/index.js';
