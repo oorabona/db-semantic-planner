@@ -13,7 +13,11 @@ import type {
 	UpsertBuilder,
 } from './mutation-builders.js';
 import type { WhereFilter } from './object-filter.js';
-import type { GeneratedSchema } from './schema-bridge.js';
+import type {
+	GeneratedSchema,
+	GeneratedTable,
+	InferDBFromSchema,
+} from './schema-bridge.js';
 
 /**
  * A wrapper around an ExpressionIntent that marks it for use in columns().
@@ -267,7 +271,7 @@ export type OrderByInput =
  */
 export type OrmOptions<DB = unknown> =
 	| OrmOptionsWithModel<DB>
-	| OrmOptionsWithSchema<DB>
+	| OrmOptionsWithSchema<GeneratedSchema, DB>
 	| OrmOptionsWithAdapter<DB>;
 
 /**
@@ -291,9 +295,22 @@ export interface OrmOptionsWithModel<DB = unknown> extends OrmOptionsBase<DB> {
 /**
  * OrmOptions with generated schema (sync creation, codegen-first).
  * Preferred approach for ARCH-002 codegen-first architecture.
+ *
+ * @typeParam TSchema - The schema type (inferred from schema value)
+ * @typeParam DB - The database type (inferred from TSchema when possible)
+ *
+ * @example
+ * ```typescript
+ * const schema = { tables: { users: { id: { type: 'uuid' } } } } as const satisfies GeneratedSchema;
+ * const orm = createOrm({ schema, adapter });
+ * // DB is inferred as { users: { id: string } }
+ * ```
  */
-export interface OrmOptionsWithSchema<DB = unknown> extends OrmOptionsBase<DB> {
-	readonly schema: GeneratedSchema;
+export interface OrmOptionsWithSchema<
+	TSchema extends GeneratedSchema = GeneratedSchema,
+	DB = InferDBFromSchema<TSchema>,
+> extends OrmOptionsBase<DB> {
+	readonly schema: TSchema;
 	readonly model?: never;
 }
 

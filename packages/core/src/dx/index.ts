@@ -117,6 +117,8 @@ export {
 	// CORE-005: ResolvedSchema → GeneratedSchema converter with Valibot
 	assertResolvedSchemaToGeneratedSchema,
 	buildModelFromSchema,
+	// DX-102: Type inference utilities for createOrm
+	type ColumnTypeToTS,
 	type GeneratedBelongsTo,
 	type GeneratedColumn,
 	type GeneratedColumnType,
@@ -128,6 +130,9 @@ export {
 	type GeneratedRelationKind,
 	type GeneratedSchema,
 	type GeneratedTable,
+	// DX-102: Infer DB type from schema
+	type InferDBFromSchema,
+	type InferRowType,
 	isGeneratedSchema,
 	ResolvedSchemaValidation,
 	resolvedSchemaToGeneratedSchema,

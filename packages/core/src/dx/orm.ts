@@ -34,7 +34,12 @@ import {
 	objectToWhereIntent,
 	type WhereFilter,
 } from './object-filter.js';
-import { buildModelFromSchema } from './schema-bridge.js';
+import {
+	buildModelFromSchema,
+	type GeneratedSchema,
+	type GeneratedTable,
+	type InferDBFromSchema,
+} from './schema-bridge.js';
 import {
 	type AggregateOptions,
 	type ColumnSpec,
@@ -71,6 +76,26 @@ import {
  * @param options - Configuration options including model and strictMode
  * @returns An ORM instance for building and planning queries
  *
+ * @example With generated schema (codegen-first, recommended)
+ * ```typescript
+ * const schema = {
+ *   tables: {
+ *     users: { id: { type: 'uuid', primaryKey: true }, name: { type: 'string' } },
+ *     posts: { id: { type: 'uuid', primaryKey: true }, title: { type: 'string' } },
+ *   },
+ *   relations: {},
+ *   hints: {},
+ *   conventions: { fkPattern: '{singular}Id', pluralize: true, timestamps: [] },
+ * } as const satisfies GeneratedSchema;
+ *
+ * const orm = createOrm({ schema, adapter });
+ *
+ * // Table names autocomplete, results are typed!
+ * const users = await orm.select('users').all();
+ * // users: { id: string; name: string }[]
+ * orm.select('invalid'); // ← TypeScript error: 'invalid' not in 'users' | 'posts'
+ * ```
+ *
  * @example With explicit model and typed schema (sync)
  * ```typescript
  * interface Database {
@@ -95,25 +120,32 @@ import {
  * const users = await orm.select('users').all();
  * ```
  */
+// Overload 1: With explicit model (sync), DB must be explicitly provided
 export function createOrm<DB = Record<string, unknown>>(
 	options: OrmOptionsWithModel<DB>,
 ): OrmInstance<DB>;
-export function createOrm<DB = Record<string, unknown>>(
-	options: OrmOptionsWithSchema<DB>,
-): OrmInstance<DB>;
+// Overload 2: With generated schema (sync), DB is inferred from schema
+export function createOrm<
+	TTables extends Record<string, GeneratedTable>,
+	TSchema extends GeneratedSchema<TTables>,
+>(
+	options: OrmOptionsWithSchema<TSchema, InferDBFromSchema<TSchema>>,
+): OrmInstance<InferDBFromSchema<TSchema>>;
+// Overload 3: With adapter only (async introspection)
 export function createOrm<DB = Record<string, unknown>>(
 	options: OrmOptionsWithAdapter<DB>,
 ): Promise<OrmInstance<DB>>;
+// Implementation signature
 export function createOrm<DB = Record<string, unknown>>(
 	options:
 		| OrmOptionsWithModel<DB>
-		| OrmOptionsWithSchema<DB>
+		| OrmOptionsWithSchema<GeneratedSchema, DB>
 		| OrmOptionsWithAdapter<DB>,
 ): OrmInstance<DB> | Promise<OrmInstance<DB>> {
 	const { model, strictMode = false, relationHints = {}, adapter } = options;
 
 	// Extract schema from options (need to cast due to union type)
-	const schema = (options as OrmOptionsWithSchema<DB>).schema;
+	const schema = (options as OrmOptionsWithSchema<GeneratedSchema, DB>).schema;
 
 	// If schema is provided (codegen-first approach), convert to model and create synchronously
 	if (schema) {
@@ -408,6 +440,31 @@ function createOrmInstance<DB = Record<string, unknown>>(
 		// Raw SQL Execution (DX-027)
 		// =====================================================================
 
+		/**
+		 * Execute raw SQL directly - escape hatch for queries that cannot
+		 * be expressed via the intent system.
+		 *
+		 * @warning **SECURITY RISK: POTENTIAL SQL INJECTION**
+		 *
+		 * This method bypasses the semantic planner and all type safety.
+		 * Always use parameter placeholders ($1, $2, etc.) for values.
+		 *
+		 * **SAFE:**
+		 * ```typescript
+		 * orm.raw('SELECT * FROM users WHERE id = $1', [userId]);
+		 * ```
+		 *
+		 * **DANGEROUS - NEVER DO THIS:**
+		 * ```typescript
+		 * orm.raw(`SELECT * FROM users WHERE id = ${userId}`);
+		 * ```
+		 *
+		 * @param sqlString - SQL with parameter placeholders ($1, $2, etc.)
+		 * @param parameters - Values to bind (safely escaped by driver)
+		 * @returns Promise resolving to typed results
+		 *
+		 * @see {@link https://owasp.org/www-community/attacks/SQL_Injection | OWASP SQL Injection}
+		 */
 		async raw<T = unknown>(
 			sqlString: string,
 			parameters: readonly unknown[] = [],

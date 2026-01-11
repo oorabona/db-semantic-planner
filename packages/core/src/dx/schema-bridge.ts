@@ -126,13 +126,81 @@ export interface GeneratedConventions {
 
 /**
  * Complete generated schema (output of dbsp generate manifest).
+ *
+ * @typeParam TTables - The tables type, preserving literal table names for autocomplete.
+ *   When using `as const` on your schema definition, table names will be preserved.
+ *
+ * @example
+ * ```typescript
+ * const schema = {
+ *   tables: {
+ *     users: { id: { type: 'uuid', primaryKey: true }, name: { type: 'string' } },
+ *     posts: { id: { type: 'uuid', primaryKey: true }, title: { type: 'string' } },
+ *   },
+ *   relations: {},
+ *   hints: {},
+ *   conventions: { fkPattern: '{singular}Id', pluralize: true, timestamps: [] },
+ * } as const satisfies GeneratedSchema;
+ *
+ * // TypeScript knows: keyof typeof schema.tables = 'users' | 'posts'
+ * ```
  */
-export interface GeneratedSchema {
-	readonly tables: Record<string, GeneratedTable>;
+export interface GeneratedSchema<
+	TTables extends Record<string, GeneratedTable> = Record<string, GeneratedTable>,
+> {
+	readonly tables: TTables;
 	readonly relations: Record<string, GeneratedRelation>;
 	readonly hints: Record<string, GeneratedHint>;
 	readonly conventions: GeneratedConventions;
 }
+
+// ============================================================================
+// Type Utilities for Schema Inference
+// ============================================================================
+
+/**
+ * Map a GeneratedColumnType to its TypeScript runtime type.
+ */
+export type ColumnTypeToTS<T extends GeneratedColumnType> = T extends
+	| 'string'
+	| 'text'
+	| 'uuid'
+	? string
+	: T extends 'number' | 'integer' | 'decimal'
+		? number
+		: T extends 'bigint'
+			? bigint
+			: T extends 'boolean'
+				? boolean
+				: T extends 'date' | 'timestamp' | 'datetime'
+					? Date
+					: T extends 'json'
+						? unknown
+						: never;
+
+/**
+ * Infer the TypeScript row type from a GeneratedTable definition.
+ */
+export type InferRowType<T extends GeneratedTable> = {
+	[K in keyof T]: T[K]['nullable'] extends true
+		? ColumnTypeToTS<T[K]['type']> | null
+		: ColumnTypeToTS<T[K]['type']>;
+};
+
+/**
+ * Infer the database type from a GeneratedSchema.
+ * Maps each table name to its row type.
+ *
+ * @example
+ * ```typescript
+ * const schema = { tables: { users: { id: { type: 'uuid' } } } } as const satisfies GeneratedSchema;
+ * type DB = InferDBFromSchema<typeof schema>;
+ * // DB = { users: { id: string } }
+ * ```
+ */
+export type InferDBFromSchema<S extends GeneratedSchema> = {
+	[TableName in keyof S['tables'] & string]: InferRowType<S['tables'][TableName]>;
+};
 
 // ============================================================================
 // Conversion Functions
