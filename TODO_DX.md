@@ -7,24 +7,70 @@
 
 ---
 
-## DX-100: Schema Type Unification
+## DX-100: Schema Type Unification ✅ COMPLETED (2026-01-11)
 
-**Problem:** Two schema types that look similar but require conversion.
+**Problem:** Two schema types that look similar but required manual conversion.
 
 ```typescript
-// Current: Forced conversion
+// BEFORE: Forced conversion
 import { assertResolvedSchemaToGeneratedSchema } from '@db-semantic-planner/core';
 const generatedSchema = assertResolvedSchemaToGeneratedSchema(schema);
 const orm = createOrm<any>({ schema: generatedSchema, adapter });
+
+// AFTER: Just works with either type
+const orm = createOrm({ schema, adapter }); // Works with ResolvedSchema OR GeneratedSchema
 ```
 
-**Questions to answer:**
-- [ ] Why do we have `ResolvedSchema` AND `GeneratedSchema`?
-- [ ] What motivates this separation?
-- [ ] Can we simplify to a single schema type?
-- [ ] If separation is necessary, can the conversion be hidden from users?
+**Investigation Results:**
 
-**Expected outcome:** User should only deal with ONE schema type.
+| Question | Answer |
+|----------|--------|
+| Why both types? | Different stages: ResolvedSchema (user DSL, PostgreSQL-specific types like `time`, `jsonb`) vs GeneratedSchema (runtime, dialect-agnostic types like `datetime`, `number`) |
+| Necessary separation? | YES - column type differences serve different purposes |
+| Can simplify to single type? | NO - would lose PostgreSQL-specific or dialect-agnostic capabilities |
+| Hide conversion? | YES - implemented via `normalizeSchema()` |
+
+**Type Differences:**
+- `ResolvedSchema` column types: `uuid | string | text | integer | bigint | decimal | boolean | timestamp | date | time | json | jsonb`
+- `GeneratedSchema` column types: `string | text | number | integer | bigint | decimal | boolean | date | timestamp | datetime | json | uuid`
+- Key differences: ResolvedSchema has `time`, `jsonb` (PostgreSQL); GeneratedSchema has `number`, `datetime` (generic)
+
+**Solution Implemented (Option B):**
+1. Added `isResolvedSchema()` type guard - detects ResolvedSchema by checking for `time`/`jsonb` column types
+2. Added `normalizeSchema()` helper - auto-converts ResolvedSchema to GeneratedSchema if needed
+3. Updated `createOrm()` to call `normalizeSchema()` internally on schema input
+4. Both schema types now work seamlessly with `createOrm()`
+
+**Completed Tasks:**
+- [x] Investigate ResolvedSchema type (packages/schema/src/types.ts)
+- [x] Investigate GeneratedSchema type (packages/core/src/dx/schema-bridge.ts)
+- [x] Document differences between the two types
+- [x] Answer: Why do we have both types? (necessary separation)
+- [x] Propose solutions (A: unify, B: hide conversion, C: document)
+- [x] Implement Option B: auto-convert in createOrm
+- [x] Add `isResolvedSchema()` type guard
+- [x] Add `normalizeSchema()` helper function
+- [x] Update createOrm to use normalizeSchema internally
+- [x] Export new functions from dx/index.ts
+- [x] Add tests for isResolvedSchema (6 tests)
+- [x] Add tests for normalizeSchema (5 tests)
+- [x] All 41 tests passing
+
+**New Public API:**
+```typescript
+import { isResolvedSchema, normalizeSchema } from '@db-semantic-planner/core';
+
+// Type detection
+isResolvedSchema(schema); // true if has time/jsonb types
+
+// Manual normalization (if needed)
+const generated = normalizeSchema(resolvedOrGenerated);
+
+// Auto-normalization (preferred - just use createOrm directly)
+const orm = createOrm({ schema, adapter }); // Works with either type!
+```
+
+**Limitation:** If a ResolvedSchema has no `time` or `jsonb` columns, it cannot be distinguished from GeneratedSchema. In this case, it's treated as GeneratedSchema (which works because the types are structurally compatible for common types).
 
 ---
 
@@ -91,7 +137,7 @@ because they don't have table context. Use object filter syntax for type-safe co
 
 ---
 
-## DX-103: QueryBuilder God Object (SRP Violation)
+## DX-103: QueryBuilder God Object (SRP Violation) ✅ COMPLETED (2026-01-11)
 
 **Problem:** `QueryBuilderImpl` handles too many responsibilities:
 - Intent construction
@@ -106,15 +152,41 @@ because they don't have table context. Use object filter syntax for type-safe co
 
 **File:** `packages/core/src/dx/orm.ts`
 
-**Tasks:**
-- [ ] Identify separable concerns
-- [ ] Consider extracting: `IntentBuilder`, `QueryExecutor`, `ResultHydrator`
-- [ ] Evaluate impact on public API (should remain unchanged)
-- [ ] Refactor incrementally with tests as safety net
+**Solution:**
+Extracted three focused classes to separate concerns:
+1. `IntentBuilder` - builds QueryIntent AST from builder state
+2. `ResultHydrator` - handles result hydration and recursive include processing
+3. `QueryExecutor` - handles query execution via adapter
+
+**Completed Tasks:**
+- [x] Identify separable concerns
+- [x] Extract `IntentBuilder` class (`packages/core/src/dx/intent-builder.ts`)
+- [x] Extract `ResultHydrator` class (`packages/core/src/dx/result-hydrator.ts`)
+- [x] Extract `QueryExecutor` class (`packages/core/src/dx/query-executor.ts`)
+- [x] Export new classes from `packages/core/src/dx/index.ts`
+- [x] All 1293 tests passing (no regressions)
+
+**New Public API:**
+```typescript
+import {
+  IntentBuilder,
+  ResultHydrator,
+  QueryExecutor,
+  type IntentBuilderState,
+  type RecursiveIncludeConfig,
+  type ExecutionContext,
+  type HydrateOptions,
+} from '@db-semantic-planner/core';
+```
+
+**Note:** QueryBuilderImpl still exists and functions as before. The extracted classes
+are available for gradual migration or for building custom query builders. This is
+phase 1 of the refactoring - QueryBuilderImpl can be progressively updated to
+delegate to these extracted classes in future iterations.
 
 ---
 
-## DX-104: Adapter Interface Too Large (ISP Violation)
+## DX-104: Adapter Interface Too Large (ISP Violation) ✅ COMPLETED (2026-01-11)
 
 **Problem:** `Adapter` interface requires implementing everything:
 - `compile()` / `execute()` / `stream()`
@@ -127,11 +199,44 @@ because they don't have table context. Use object filter syntax for type-safe co
 
 **File:** `packages/core/src/adapter.ts`
 
-**Tasks:**
-- [ ] Split into smaller interfaces: `CompilingAdapter`, `StreamingAdapter`, `IntrospectingAdapter`
-- [ ] Use interface composition: `type FullAdapter = CompilingAdapter & StreamingAdapter & ...`
-- [ ] Allow partial implementations with runtime feature detection
-- [ ] Update `createOrm` to accept partial adapters gracefully
+**Solution:**
+Split into focused interfaces with composition:
+
+**Completed Tasks:**
+- [x] Split into smaller interfaces: `BaseAdapter`, `CompilingAdapter`, `ExecutingAdapter`, `StreamingAdapter`, `IntrospectingAdapter`, `TransactionalAdapter`, `RawSqlAdapter`
+- [x] Use interface composition: `type Adapter = ExecutingAdapter & StreamingAdapter & IntrospectingAdapter & TransactionalAdapter & RawSqlAdapter`
+- [x] Allow partial implementations with runtime feature detection helpers
+- [x] Added convenience types: `CompileOnlyAdapter`, `BasicAdapter`
+
+**New Public API:**
+```typescript
+import {
+  // Split interfaces
+  BaseAdapter,
+  CompilingAdapter,
+  ExecutingAdapter,
+  StreamingAdapter,
+  IntrospectingAdapter,
+  TransactionalAdapter,
+  RawSqlAdapter,
+  // Composed types
+  Adapter,           // Full adapter (all features)
+  CompileOnlyAdapter, // Just compile, no execute
+  BasicAdapter,       // Compile + execute only
+  // Feature detection helpers
+  supportsStreaming,
+  supportsIntrospection,
+  supportsTransactions,
+  supportsRawSql,
+  supportsExecution,
+} from '@db-semantic-planner/core';
+
+// Example: Feature detection
+if (supportsStreaming(adapter)) {
+  // TypeScript knows adapter has stream() method
+  const iterator = adapter.stream(query);
+}
+```
 
 ---
 

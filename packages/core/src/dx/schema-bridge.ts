@@ -146,7 +146,10 @@ export interface GeneratedConventions {
  * ```
  */
 export interface GeneratedSchema<
-	TTables extends Record<string, GeneratedTable> = Record<string, GeneratedTable>,
+	TTables extends Record<string, GeneratedTable> = Record<
+		string,
+		GeneratedTable
+	>,
 > {
 	readonly tables: TTables;
 	readonly relations: Record<string, GeneratedRelation>;
@@ -199,7 +202,9 @@ export type InferRowType<T extends GeneratedTable> = {
  * ```
  */
 export type InferDBFromSchema<S extends GeneratedSchema> = {
-	[TableName in keyof S['tables'] & string]: InferRowType<S['tables'][TableName]>;
+	[TableName in keyof S['tables'] & string]: InferRowType<
+		S['tables'][TableName]
+	>;
 };
 
 // ============================================================================
@@ -404,6 +409,10 @@ export function buildModelFromSchema(schema: GeneratedSchema): ModelIR {
 
 /**
  * Type guard for GeneratedSchema.
+ *
+ * Note: Both GeneratedSchema and ResolvedSchema have the same structure,
+ * so this check will return true for both. Use `isResolvedSchema()` to
+ * specifically detect ResolvedSchema (from @db-semantic-planner/schema).
  */
 export function isGeneratedSchema(value: unknown): value is GeneratedSchema {
 	if (typeof value !== 'object' || value === null) {
@@ -420,6 +429,132 @@ export function isGeneratedSchema(value: unknown): value is GeneratedSchema {
 		typeof obj.conventions === 'object' &&
 		obj.conventions !== null
 	);
+}
+
+/**
+ * Column types that exist only in ResolvedSchema (from @db-semantic-planner/schema).
+ * These types are PostgreSQL-specific and not present in GeneratedSchema.
+ */
+const RESOLVED_SCHEMA_ONLY_TYPES = new Set(['time', 'jsonb']);
+
+/**
+ * Column types that exist only in GeneratedSchema.
+ * These are dialect-agnostic types not present in ResolvedSchema.
+ */
+const GENERATED_SCHEMA_ONLY_TYPES = new Set(['number', 'datetime']);
+
+/**
+ * Check if any column in the schema has a type only found in ResolvedSchema.
+ */
+function hasResolvedSchemaOnlyTypes(
+	tables: Record<string, Record<string, { type?: string }>>,
+): boolean {
+	for (const table of Object.values(tables)) {
+		for (const column of Object.values(table)) {
+			if (column?.type && RESOLVED_SCHEMA_ONLY_TYPES.has(column.type)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/**
+ * Check if any column in the schema has a type only found in GeneratedSchema.
+ */
+function hasGeneratedSchemaOnlyTypes(
+	tables: Record<string, Record<string, { type?: string }>>,
+): boolean {
+	for (const table of Object.values(tables)) {
+		for (const column of Object.values(table)) {
+			if (column?.type && GENERATED_SCHEMA_ONLY_TYPES.has(column.type)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/**
+ * Type guard for ResolvedSchema (from @db-semantic-planner/schema).
+ *
+ * Detects ResolvedSchema by checking for PostgreSQL-specific column types
+ * like 'time' and 'jsonb' that only exist in ResolvedSchema.
+ *
+ * Note: If the schema has no such types, this may return false even for
+ * a valid ResolvedSchema. In that case, the schema can be used directly
+ * as a GeneratedSchema since both have the same structure.
+ */
+export function isResolvedSchema(value: unknown): boolean {
+	if (!isGeneratedSchema(value)) {
+		return false;
+	}
+	// If it has ResolvedSchema-only types, it's definitely a ResolvedSchema
+	if (
+		hasResolvedSchemaOnlyTypes(
+			value.tables as Record<string, Record<string, { type?: string }>>,
+		)
+	) {
+		return true;
+	}
+	// If it has GeneratedSchema-only types, it's definitely NOT a ResolvedSchema
+	if (
+		hasGeneratedSchemaOnlyTypes(
+			value.tables as Record<string, Record<string, { type?: string }>>,
+		)
+	) {
+		return false;
+	}
+	// Ambiguous case: no distinguishing types. Assume GeneratedSchema (more common at runtime).
+	return false;
+}
+
+/**
+ * Normalize a schema input to GeneratedSchema.
+ *
+ * This function accepts either a GeneratedSchema or a ResolvedSchema
+ * and returns a GeneratedSchema. If the input is already a GeneratedSchema,
+ * it is returned as-is. If it's a ResolvedSchema, it is converted.
+ *
+ * This is the recommended way to accept schemas in APIs that need to
+ * support both schema formats transparently.
+ *
+ * @param input - Either a GeneratedSchema or ResolvedSchema
+ * @returns GeneratedSchema (possibly converted from ResolvedSchema)
+ * @throws Error if the input is not a valid schema
+ *
+ * @example
+ * ```typescript
+ * import { normalizeSchema } from '@db-semantic-planner/core';
+ *
+ * // Works with GeneratedSchema (from codegen)
+ * const schema1 = normalizeSchema(generatedSchema);
+ *
+ * // Works with ResolvedSchema (from defineSchema())
+ * const schema2 = normalizeSchema(resolvedSchema);
+ * ```
+ */
+export function normalizeSchema(input: unknown): GeneratedSchema {
+	// First check if it has the basic structure
+	if (!isGeneratedSchema(input)) {
+		throw new Error(
+			'Invalid schema: must have tables, relations, hints, and conventions properties',
+		);
+	}
+
+	// Check if it looks like a ResolvedSchema (has PostgreSQL-specific types)
+	if (isResolvedSchema(input)) {
+		// Convert using the existing converter
+		const result = resolvedSchemaToGeneratedSchema(input);
+		if (!result.success) {
+			const messages = result.errors.map((e) => e.message).join(', ');
+			throw new Error(`Schema conversion failed: ${messages}`);
+		}
+		return result.schema;
+	}
+
+	// Already a GeneratedSchema (or ambiguous but structurally valid)
+	return input;
 }
 
 // ============================================================================

@@ -214,20 +214,37 @@ export { ModelIRImpl } from './model-impl.js';
 // ============================================================================
 
 export type {
+	// Full adapter type (all capabilities)
 	Adapter,
 	AdapterCapabilities,
 	AdapterStreamOptions,
+	// DX-104: Split interfaces (ISP compliance)
+	BaseAdapter,
+	BasicAdapter,
 	CompiledQuery,
+	CompileOnlyAdapter,
 	CompileOptions,
 	// DX-033: Include hydration
 	CompileResultWithIncludes,
+	CompilingAdapter,
 	Dump,
 	DumpMeta,
+	ExecutingAdapter,
+	IntrospectingAdapter,
+	RawSqlAdapter,
 	SeparateIncludeInfo,
+	StreamingAdapter,
+	TransactionalAdapter,
 } from './adapter.js';
 export {
 	AdapterRequiredError,
 	assertCapability,
+	// DX-104: Feature detection helpers
+	supportsExecution,
+	supportsIntrospection,
+	supportsRawSql,
+	supportsStreaming,
+	supportsTransactions,
 	UnsupportedCapabilityError,
 } from './adapter.js';
 
