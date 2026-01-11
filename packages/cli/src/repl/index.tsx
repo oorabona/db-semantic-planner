@@ -5,8 +5,7 @@
  */
 
 import { Box, render, Text, useApp, useInput } from 'ink';
-import type React from 'react';
-import { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { CompletionProvider, type CompletionSuggestion } from './completion.js';
 import {
 	CompletionDisplay,

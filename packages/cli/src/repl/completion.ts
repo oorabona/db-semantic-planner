@@ -209,7 +209,7 @@ export class CompletionProvider {
 				if (!this.tableRelations.has(tableName)) {
 					this.tableRelations.set(tableName, []);
 				}
-				this.tableRelations.get(tableName)!.push({
+				this.tableRelations.get(tableName)?.push({
 					text: simpleRelName,
 					label: simpleRelName,
 					type: 'relation',

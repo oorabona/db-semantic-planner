@@ -1,3 +1,4 @@
+import React from 'react';
 /**
  * DX-030: REPL Help Display Component
  */

@@ -4,7 +4,7 @@
 		"rootDir": "./src",
 		"outDir": "./dist",
 
-		"jsx": "react-jsx",
+		"jsx": "react",
 		"paths": {
 			"@db-semantic-planner/schema": ["../schema/src"],
 			"@db-semantic-planner/core": ["../core/src"]
