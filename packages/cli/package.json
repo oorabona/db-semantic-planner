@@ -17,7 +17,7 @@
 		"dist"
 	],
 	"scripts": {
-		"build": "tsc",
+		"build": "tsup",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"typecheck": "tsc --noEmit"
@@ -53,6 +53,7 @@
 		"@types/react": "catalog:",
 		"tsx": "catalog:",
 		"typescript": "catalog:",
+		"tsup": "catalog:",
 		"vitest": "catalog:"
 	}
 }

@@ -197,6 +197,8 @@ export class CompletionProvider {
 			// Relations are keyed as "table.relationName" (qualified format)
 			if (relName.includes('.')) {
 				const [tableName, ...relParts] = relName.split('.');
+				// tableName is guaranteed to exist because relName.includes('.')
+				if (!tableName) continue;
 				const simpleRelName = relParts.join('.');
 				if (!this.tableRelations.has(tableName)) {
 					this.tableRelations.set(tableName, []);
@@ -248,7 +250,7 @@ export class CompletionProvider {
 			case 'relation': {
 				// Use table-specific relations if table is known
 				const tableRels = context.table
-					? this.tableRelations.get(context.table) ?? []
+					? (this.tableRelations.get(context.table) ?? [])
 					: [];
 				// Fall back to all relations if no table-specific ones found
 				const relSuggestions =

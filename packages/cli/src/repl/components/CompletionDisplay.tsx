@@ -4,8 +4,8 @@
  * Shows inline completion suggestions as the user types.
  */
 
-import React from 'react';
 import { Box, Text } from 'ink';
+import React from 'react';
 import type { CompletionSuggestion } from '../completion.js';
 
 interface CompletionDisplayProps {

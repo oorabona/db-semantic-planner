@@ -492,7 +492,9 @@ describe('isGeneratedSchema', () => {
 describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 	describe('valid conversions', () => {
 		it('should convert a simple ResolvedSchema to GeneratedSchema', async () => {
-			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+			const { resolvedSchemaToGeneratedSchema } = await import(
+				'./schema-bridge.js'
+			);
 
 			const resolved = {
 				tables: {
@@ -523,7 +525,9 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 		});
 
 		it('should map schema-specific column types correctly', async () => {
-			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+			const { resolvedSchemaToGeneratedSchema } = await import(
+				'./schema-bridge.js'
+			);
 
 			const resolved = {
 				tables: {
@@ -552,14 +556,22 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 		});
 
 		it('should convert all relation types', async () => {
-			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+			const { resolvedSchemaToGeneratedSchema } = await import(
+				'./schema-bridge.js'
+			);
 
 			const resolved = {
 				tables: {
 					users: { id: { type: 'uuid' as const } },
-					posts: { id: { type: 'uuid' as const }, authorId: { type: 'uuid' as const } },
+					posts: {
+						id: { type: 'uuid' as const },
+						authorId: { type: 'uuid' as const },
+					},
 					tags: { id: { type: 'uuid' as const } },
-					postTags: { postId: { type: 'uuid' as const }, tagId: { type: 'uuid' as const } },
+					postTags: {
+						postId: { type: 'uuid' as const },
+						tagId: { type: 'uuid' as const },
+					},
 				},
 				relations: {
 					'posts.author': {
@@ -599,12 +611,17 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 		});
 
 		it('should convert hints correctly', async () => {
-			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+			const { resolvedSchemaToGeneratedSchema } = await import(
+				'./schema-bridge.js'
+			);
 
 			const resolved = {
 				tables: {
 					users: { id: { type: 'uuid' as const } },
-					posts: { id: { type: 'uuid' as const }, authorId: { type: 'uuid' as const } },
+					posts: {
+						id: { type: 'uuid' as const },
+						authorId: { type: 'uuid' as const },
+					},
 				},
 				relations: {
 					'users.posts': {
@@ -630,13 +647,17 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 
 			expect(result.success).toBe(true);
 			if (result.success) {
-				expect(result.schema.hints['users.posts'].defaultStrategy).toBe('exists');
+				expect(result.schema.hints['users.posts'].defaultStrategy).toBe(
+					'exists',
+				);
 				expect(result.schema.hints['users.posts'].cardinality).toBe('many');
 			}
 		});
 
 		it('should preserve foreign key references', async () => {
-			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+			const { resolvedSchemaToGeneratedSchema } = await import(
+				'./schema-bridge.js'
+			);
 
 			const resolved = {
 				tables: {
@@ -672,7 +693,9 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 
 	describe('validation errors', () => {
 		it('should fail for invalid column type', async () => {
-			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+			const { resolvedSchemaToGeneratedSchema } = await import(
+				'./schema-bridge.js'
+			);
 
 			const resolved = {
 				tables: {
@@ -698,7 +721,9 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 		});
 
 		it('should fail for missing required conventions', async () => {
-			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+			const { resolvedSchemaToGeneratedSchema } = await import(
+				'./schema-bridge.js'
+			);
 
 			const resolved = {
 				tables: {},
@@ -715,7 +740,9 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 		});
 
 		it('should fail for invalid relation kind', async () => {
-			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+			const { resolvedSchemaToGeneratedSchema } = await import(
+				'./schema-bridge.js'
+			);
 
 			const resolved = {
 				tables: {},
@@ -739,13 +766,17 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 		});
 
 		it('should fail for null input', async () => {
-			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+			const { resolvedSchemaToGeneratedSchema } = await import(
+				'./schema-bridge.js'
+			);
 			const result = resolvedSchemaToGeneratedSchema(null);
 			expect(result.success).toBe(false);
 		});
 
 		it('should fail for undefined input', async () => {
-			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+			const { resolvedSchemaToGeneratedSchema } = await import(
+				'./schema-bridge.js'
+			);
 			const result = resolvedSchemaToGeneratedSchema(undefined);
 			expect(result.success).toBe(false);
 		});
@@ -753,7 +784,9 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 
 	describe('assertResolvedSchemaToGeneratedSchema', () => {
 		it('should return schema for valid input', async () => {
-			const { assertResolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+			const { assertResolvedSchemaToGeneratedSchema } = await import(
+				'./schema-bridge.js'
+			);
 
 			const resolved = {
 				tables: {
@@ -774,7 +807,9 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 		});
 
 		it('should throw for invalid input', async () => {
-			const { assertResolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+			const { assertResolvedSchemaToGeneratedSchema } = await import(
+				'./schema-bridge.js'
+			);
 
 			const invalid = {
 				tables: { users: { id: { type: 'invalid' } } },

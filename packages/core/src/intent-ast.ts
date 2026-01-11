@@ -713,7 +713,7 @@ export interface RecursiveAdvancedOptions {
 	 * - 'error': Throw on cycle detection
 	 * - 'stop': Stop traversal at cycle (prune branch)
 	 * - 'mark': Add is_cycle column to results
-	 * 
+	 *
 	 * PostgreSQL 14+ uses native CYCLE clause.
 	 * Other adapters may use application-level detection.
 	 */
@@ -723,7 +723,7 @@ export interface RecursiveAdvancedOptions {
 	 * Traversal search order (adapter-specific implementation).
 	 * - 'depth': Depth-first search order
 	 * - 'breadth': Breadth-first search order
-	 * 
+	 *
 	 * PostgreSQL 14+ uses native SEARCH clause.
 	 * Other adapters may use ORDER BY on depth column.
 	 */

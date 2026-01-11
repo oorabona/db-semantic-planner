@@ -11,8 +11,8 @@
 
 import { defineSchema } from '@db-semantic-planner/schema';
 
-export default defineSchema({
-	tables: {
+export default defineSchema(
+	{
 		authors: {
 			id: { type: 'integer', primaryKey: true },
 			name: { type: 'string', nullable: false },
@@ -49,23 +49,25 @@ export default defineSchema({
 			tagId: { type: 'integer', references: { table: 'tags' } },
 		},
 	},
-	relations: {
-		// Explicit M:N relation via junction table
-		'posts.tags': {
-			kind: 'manyToMany',
-			target: 'tags',
-			through: 'postTags',
-			sourceFk: 'postId',
-			targetFk: 'tagId',
-		},
-		'tags.posts': {
-			kind: 'manyToMany',
-			target: 'posts',
-			through: 'postTags',
-			sourceFk: 'tagId',
-			targetFk: 'postId',
+	{
+		relations: {
+			// Explicit M:N relation via junction table
+			'posts.tags': {
+				kind: 'manyToMany',
+				target: 'tags',
+				through: 'postTags',
+				sourceFk: 'postId',
+				targetFk: 'tagId',
+			},
+			'tags.posts': {
+				kind: 'manyToMany',
+				target: 'posts',
+				through: 'postTags',
+				sourceFk: 'tagId',
+				targetFk: 'postId',
+			},
 		},
 	},
-	// Other relations (authors.posts, posts.author, posts.comments, comments.post)
-	// are auto-inferred from `references` definitions
-});
+);
+// Other relations (authors.posts, posts.author, posts.comments, comments.post)
+// are auto-inferred from `references` definitions

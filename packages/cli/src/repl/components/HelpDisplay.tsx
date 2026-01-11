@@ -2,8 +2,8 @@
  * DX-030: REPL Help Display Component
  */
 
-import React from 'react';
 import { Box, Text } from 'ink';
+import React from 'react';
 
 const DOT_COMMANDS = [
 	{ command: '.help', description: 'Show this help' },

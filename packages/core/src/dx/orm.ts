@@ -966,7 +966,10 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			// Extract parent IDs from results using sourceKey
 			const parentIds = results
 				.map((r) =>
-					this.extractKeyValue(r as Record<string, unknown>, includeInfo.sourceKey),
+					this.extractKeyValue(
+						r as Record<string, unknown>,
+						includeInfo.sourceKey,
+					),
 				)
 				.filter((id) => id !== undefined && id !== null);
 
@@ -1004,7 +1007,8 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 					includeInfo.sourceKey,
 				);
 				const children = childrenByParentId.get(parentId) ?? [];
-				(result as Record<string, unknown>)[includeInfo.relationName] = children;
+				(result as Record<string, unknown>)[includeInfo.relationName] =
+					children;
 			}
 
 			// Process nested includes recursively if present

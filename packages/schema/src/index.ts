@@ -40,6 +40,7 @@ export type {
 	RelationsDefinition,
 	ResolvedSchema,
 	// Schema
+	SchemaConfigInput,
 	SchemaDefinitionInput,
 	TableDefinition,
 	TablesDefinition,

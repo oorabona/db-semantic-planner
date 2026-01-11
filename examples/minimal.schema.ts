@@ -12,20 +12,18 @@
 import { defineSchema } from '@db-semantic-planner/schema';
 
 export default defineSchema({
-	tables: {
-		users: {
-			id: { type: 'integer', primaryKey: true },
-			name: { type: 'string' },
-			email: { type: 'string' },
-		},
-		posts: {
-			id: { type: 'integer', primaryKey: true },
-			title: { type: 'string' },
-			content: { type: 'text', nullable: true },
-			userId: { type: 'integer', references: { table: 'users' } },
-		},
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'string' },
+		email: { type: 'string' },
 	},
-	// Relations auto-inferred from `references`:
-	// - users.posts (hasMany)
-	// - posts.user (belongsTo)
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: { type: 'string' },
+		content: { type: 'text', nullable: true },
+		userId: { type: 'integer', references: { table: 'users' } },
+	},
 });
+// Relations auto-inferred from `references`:
+// - users.posts (hasMany)
+// - posts.user (belongsTo)

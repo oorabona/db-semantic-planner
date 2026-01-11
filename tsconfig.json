@@ -10,13 +10,10 @@
 		"declaration": true,
 		"declarationMap": true,
 		"sourceMap": true,
-		"composite": true,
+		
 		"noUncheckedIndexedAccess": true,
 		"noImplicitOverride": true,
 		"exactOptionalPropertyTypes": true
 	},
-	"references": [
-		{ "path": "./packages/core" },
-		{ "path": "./packages/adapter-kysely" }
-	]
+	
 }

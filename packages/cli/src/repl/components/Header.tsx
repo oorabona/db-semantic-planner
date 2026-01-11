@@ -2,8 +2,8 @@
  * DX-030: REPL Header Component
  */
 
-import React from 'react';
 import { Box, Text } from 'ink';
+import React from 'react';
 import type { QueryMode } from '../types.js';
 
 interface HeaderProps {

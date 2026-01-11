@@ -6,7 +6,8 @@
 
 import type { ResolvedSchema } from '@db-semantic-planner/schema';
 import { Box, Text } from 'ink';
-import React, { useState } from 'react';
+import type React from 'react';
+import { useState } from 'react';
 
 interface SplitViewProps {
 	schema: ResolvedSchema;
@@ -158,7 +159,8 @@ export function SchemaSidebar({ schema }: { schema: ResolvedSchema }) {
 			<Box flexDirection="column" marginTop={1}>
 				{tables.map((tableName) => (
 					<Text key={tableName} color="white">
-						{'• '}{tableName}
+						{'• '}
+						{tableName}
 					</Text>
 				))}
 			</Box>
