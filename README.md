@@ -10,159 +10,371 @@ Semantic query planning for databases. An intent-first approach that transforms 
 - **Multi-tenant** - Schema-per-tenant with `forTenant()` API
 - **Full observability** - Inspect plans, SQL, and parameters before execution
 - **Type-safe** - Full TypeScript support with strict types
+- **CLI tools** - Generate types, verify schemas, interactive REPL
 
 ## Installation
 
 ```bash
+# Core packages
 pnpm add @db-semantic-planner/core @db-semantic-planner/adapter-kysely
+
+# Schema definition (optional, for codegen workflow)
+pnpm add @db-semantic-planner/schema
+
+# CLI (optional, for code generation and REPL)
+pnpm add -D @db-semantic-planner/cli
 ```
 
 ## Quick Start
 
-### 1. Define your schema
+### Option A: Codegen Workflow (Recommended)
+
+#### 1. Define your schema (`dbsp.schema.ts`)
 
 ```typescript
-import { defineSchema, hasMany, belongsTo } from '@db-semantic-planner/core';
+import { defineSchema } from '@db-semantic-planner/schema';
 
-const model = defineSchema({
+export default defineSchema({
   users: {
-    id: 'number',
-    name: 'string',
-    email: 'string',
+    id: { type: 'serial', primaryKey: true },
+    name: { type: 'varchar', length: 255 },
+    email: { type: 'varchar', length: 255, nullable: false },
+    createdAt: { type: 'timestamp', default: 'now()' },
   },
   posts: {
-    id: 'number',
-    title: 'string',
-    authorId: 'number',
+    id: { type: 'serial', primaryKey: true },
+    title: { type: 'varchar', length: 255 },
+    content: { type: 'text', nullable: true },
+    authorId: { type: 'integer', references: 'users.id' },
+    published: { type: 'boolean', default: false },
   },
-})
-  .relations({
+});
+```
+
+#### 2. Generate Kysely types
+
+```bash
+# Generate typed database interface
+npx dbsp generate kysely --schema ./dbsp.schema.ts --output ./src/db.generated.ts
+```
+
+This generates:
+
+```typescript
+// src/db.generated.ts
+import type { Generated, ColumnType } from 'kysely';
+
+export interface UsersTable {
+  id: Generated<number>;
+  name: string;
+  email: string;
+  createdAt: Generated<Date>;
+}
+
+export interface PostsTable {
+  id: Generated<number>;
+  title: string;
+  content: string | null;
+  authorId: number;
+  published: Generated<boolean>;
+}
+
+export interface DB {
+  users: UsersTable;
+  posts: PostsTable;
+}
+```
+
+#### 3. Use with the ORM
+
+```typescript
+import { createOrm, eq } from '@db-semantic-planner/core';
+import { createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
+import { Kysely, PostgresDialect } from 'kysely';
+import type { DB } from './db.generated';
+
+const kysely = new Kysely<DB>({ dialect: new PostgresDialect({ pool }) });
+
+const orm = createOrm({
+  model: schema,
+  adapter: createKyselyAdapter(kysely),
+});
+
+// Type-safe queries
+const activeUsers = await orm
+  .select('users')
+  .where(eq('email', 'user@example.com'))
+  .all();
+
+// With relations
+const postsWithAuthors = await orm
+  .select('posts')
+  .where(eq('published', true))
+  .include('author')
+  .all();
+```
+
+### Option B: Manual Schema Definition
+
+```typescript
+import { createOrm, eq, hasMany, belongsTo } from '@db-semantic-planner/core';
+import { createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
+
+const model = {
+  tables: {
     users: {
-      posts: hasMany('posts', { foreignKey: 'authorId' }),
+      name: 'users',
+      columns: [
+        { name: 'id', type: 'number', primaryKey: true },
+        { name: 'name', type: 'string' },
+        { name: 'email', type: 'string' },
+      ],
     },
     posts: {
-      author: belongsTo('users', { foreignKey: 'authorId' }),
-    },
-  })
-  .build();
-```
-
-### 2. Create a query intent
-
-```typescript
-import type { QueryIntent } from '@db-semantic-planner/core';
-
-const intent: QueryIntent = {
-  type: 'select',
-  from: 'users',
-  where: {
-    kind: 'exists',
-    relation: 'posts',
-    where: {
-      kind: 'comparison',
-      field: 'title',
-      operator: 'like',
-      value: '%typescript%',
+      name: 'posts',
+      columns: [
+        { name: 'id', type: 'number', primaryKey: true },
+        { name: 'title', type: 'string' },
+        { name: 'authorId', type: 'number' },
+      ],
+      foreignKeys: [{ column: 'authorId', references: { table: 'users', column: 'id' } }],
     },
   },
+  relations: {
+    users: { posts: { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' } },
+    posts: { author: { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' } },
+  },
 };
+
+const orm = createOrm({
+  model,
+  adapter: createKyselyAdapter(kysely),
+});
 ```
 
-### 3. Plan and compile
+---
+
+## CLI Usage
+
+The CLI provides tools for code generation, schema verification, and interactive exploration.
+
+### Installation
+
+```bash
+# As dev dependency (recommended)
+pnpm add -D @db-semantic-planner/cli
+
+# Or globally
+npm install -g @db-semantic-planner/cli
+```
+
+### Running the CLI
+
+```bash
+# Via npx (if installed as dependency)
+npx dbsp <command>
+
+# Via pnpm (in monorepo development)
+pnpm dbsp <command>
+
+# Via global install
+dbsp <command>
+```
+
+### Commands
+
+#### `dbsp generate kysely`
+
+Generate Kysely type definitions from your schema.
+
+```bash
+dbsp generate kysely --schema ./dbsp.schema.ts --output ./src/db.generated.ts
+```
+
+Options:
+- `-s, --schema <path>` - Path to schema file (default: `dbsp.schema.ts`)
+- `-o, --output <path>` - Output file path (default: stdout)
+
+#### `dbsp generate manifest`
+
+Generate a JSON manifest of your schema (useful for tooling).
+
+```bash
+dbsp generate manifest --schema ./dbsp.schema.ts --output ./schema.json
+```
+
+#### `dbsp verify`
+
+Compare your schema against a real database for drift detection.
+
+```bash
+dbsp verify --schema ./dbsp.schema.ts --db postgres://user:pass@localhost/mydb
+```
+
+Options:
+- `-s, --schema <path>` - Path to schema file
+- `-d, --db <url>` - Database connection URL (required)
+- `--schema-name <name>` - Database schema name (default: `public`)
+- `--json` - Output as JSON (for CI integration)
+
+Example output:
+```
+🔍 Verifying schema: dbsp.schema.ts
+   Database: postgres://user:***@localhost/mydb
+
+✅ Schema is valid - no drift detected
+
+Tables: 5 matched
+Columns: 23 matched
+```
+
+#### `dbsp repl`
+
+Interactive REPL for testing queries without a database connection.
+
+```bash
+# Basic REPL
+dbsp repl --schema ./dbsp.schema.ts
+
+# With split view (schema sidebar)
+dbsp repl --schema ./dbsp.schema.ts --split
+```
+
+Options:
+- `-s, --schema <path>` - Path to schema file (required)
+- `--split` - Enable split view with schema sidebar
+
+##### REPL Features
+
+**Natural query syntax:**
+```
+> users
+> users where active = true
+> posts where authorId = 1 include author
+> users limit 10 offset 20
+```
+
+**Dot commands:**
+```
+> .help              # Show all commands
+> .tables            # List all tables
+> .schema users      # Show table schema
+> .relations posts   # Show table relations
+> .clear             # Clear screen
+> .quit              # Exit REPL
+```
+
+**Output:**
+- SQL query generated
+- Query plan with decisions
+- Parameter bindings
+
+**Features:**
+- Tab completion for tables, relations, columns, and operators
+- Command history (persisted to `~/.dbsp_history`)
+- Up/Down arrows to navigate history
+- Split view mode for schema reference
+
+---
+
+## Multi-tenant Queries
 
 ```typescript
-import { plan } from '@db-semantic-planner/core';
-import { createDump } from '@db-semantic-planner/adapter-kysely';
-import { Kysely, PostgresDialect } from 'kysely';
+// Schema-per-tenant isolation
+const tenantOrm = orm.forTenant('acme_corp');
 
-// Create Kysely instance
-const kysely = new Kysely({ dialect: new PostgresDialect({ pool }) });
-
-// Get full observability dump
-const dump = createDump(intent, model, kysely);
-
-console.log(dump.sql);
-// SELECT * FROM "users" AS "t0"
-// WHERE EXISTS (
-//   SELECT 1 FROM "posts" AS "t1"
-//   WHERE "t1"."authorId" = "t0"."id"
-//     AND "t1"."title" LIKE $1
-// )
-
-console.log(dump.params);
-// ['%typescript%']
-
-console.log(dump.plan.decisions);
-// [{ type: 'filter-strategy', choice: 'exists', reasoning: '...' }]
+const users = await tenantOrm.select('users').all();
+// SQL: SELECT * FROM "acme_corp"."users"
 ```
 
-### 4. Multi-tenant queries
+---
+
+## Observability
+
+Every query provides full observability via `dump()`:
 
 ```typescript
-const dump = createDump(intent, model, kysely, { tenant: 'acme_corp' });
+const query = orm.select('users').where(eq('active', true));
 
-console.log(dump.sql);
-// SELECT * FROM "acme_corp"."users" AS "t0" ...
+const dump = query.dump();
+console.log(dump.sql);      // SELECT * FROM "users" WHERE "active" = $1
+console.log(dump.params);   // [true]
+console.log(dump.plan);     // { decisions: [...], warnings: [...] }
 ```
+
+---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Your Application                         │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  @db-semantic-planner/core                                   │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │  ModelIR    │  │  IntentAST  │  │  Semantic Planner   │  │
-│  │  (Schema)   │  │  (Query)    │  │  (Decisions)        │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│  @db-semantic-planner/adapter-kysely                         │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │  SQL Compiler (PlanReport → Kysely CompiledQuery)   │    │
-│  └─────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        Kysely                                │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        @db-semantic-planner/cli                  │
+│  dbsp generate | dbsp verify | dbsp repl                        │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+┌──────────────────────────────┼──────────────────────────────────┐
+│                              ▼                                   │
+│  @db-semantic-planner/schema                                     │
+│  defineSchema() → GeneratedSchema                                │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+┌──────────────────────────────┼──────────────────────────────────┐
+│                              ▼                                   │
+│  @db-semantic-planner/core                                       │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
+│  │  ModelIR    │  │  IntentAST  │  │  Semantic Planner       │  │
+│  │  (Schema)   │→→│  (Query)    │→→│  (Plan + Decisions)     │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  DX Layer: createOrm(), eq(), include(), etc.           │    │
+│  └─────────────────────────────────────────────────────────┘    │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │ implements Adapter
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  @db-semantic-planner/adapter-kysely                             │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  SQL Compiler (PlanReport → Kysely CompiledQuery)       │    │
+│  │  KyselyAdapter, MockAdapter (for REPL/testing)          │    │
+│  └─────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Packages
 
 | Package | Description |
 |---------|-------------|
-| `@db-semantic-planner/core` | Schema definition, query intents, semantic planning |
+| `@db-semantic-planner/schema` | Schema DSL (`defineSchema()`) |
+| `@db-semantic-planner/core` | Query intents, semantic planning, ORM API |
 | `@db-semantic-planner/adapter-kysely` | SQL compilation via Kysely |
+| `@db-semantic-planner/cli` | CLI tools (generate, verify, repl) |
 
 ## API Reference
 
-### Core
+### Schema Package
 
 | Export | Description |
 |--------|-------------|
-| `defineSchema()` | Create a schema with tables and relations |
-| `hasMany()` | Define a one-to-many relation |
-| `hasOne()` | Define a one-to-one relation |
-| `belongsTo()` | Define a many-to-one relation |
-| `plan()` | Generate a PlanReport from QueryIntent |
-| `AmbiguousPlanError` | Thrown when relation is ambiguous |
+| `defineSchema()` | Create a schema with tables, columns, and auto-inferred relations |
 
-### Adapter
+### Core Package
 
 | Export | Description |
 |--------|-------------|
-| `compile()` | Low-level: PlanReport → CompiledQuery |
-| `createDump()` | High-level: QueryIntent → Dump (plan + sql + params) |
-| `createDumpFromPlan()` | Create Dump from existing PlanReport |
-| `formatDump()` | Format Dump for logging |
+| `createOrm()` | Create an ORM instance with adapter |
+| `eq()`, `neq()`, `gt()`, `gte()`, `lt()`, `lte()` | Comparison filters |
+| `like()`, `ilike()` | Pattern matching filters |
+| `isNull()`, `isNotNull()` | Null checks |
+| `inArray()` | Array membership |
+| `and()`, `or()`, `not()` | Logical operators |
+| `exists()`, `notExists()` | Subquery existence checks |
+
+### Adapter Package
+
+| Export | Description |
+|--------|-------------|
+| `createKyselyAdapter()` | Create adapter for Kysely instance |
+| `createMockAdapter()` | Create compile-only adapter (no DB required) |
 
 ## Planner Decisions
 
@@ -171,15 +383,65 @@ The semantic planner automatically makes optimization decisions:
 | Decision | Options | Criteria |
 |----------|---------|----------|
 | `filter-strategy` | `exists`, `join` | Cardinality (to-many → EXISTS) |
+| `include-strategy` | `join`, `separate` | Cardinality and query complexity |
 | `cte-extraction` | extract, inline | Access count (≥2 → CTE) |
+
+## Examples
+
+Ready-to-use example schemas in the `examples/` directory:
+
+| File | Description | Complexity |
+|------|-------------|------------|
+| `minimal.schema.ts` | Users + Posts | Beginner |
+| `blog.schema.ts` | Authors, Posts, Comments, Tags | Intermediate |
+| `ecommerce.schema.ts` | Products, Categories, Orders | Advanced |
+
+**Quick test:**
+
+```bash
+# Generate Kysely types from minimal schema
+pnpm dbsp generate kysely --schema ./examples/minimal.schema.ts
+
+# Start REPL with blog schema
+pnpm dbsp repl --schema ./examples/blog.schema.ts
+```
+
+See [examples/QUICKSTART.md](examples/QUICKSTART.md) for detailed usage guide.
+
+---
+
+## Development
+
+```bash
+# Clone and install
+git clone https://github.com/your-org/db-semantic-planner
+cd db-semantic-planner
+pnpm install
+
+# Build all packages
+pnpm build
+
+# Run tests
+pnpm test
+
+# Run CLI in development
+pnpm dbsp repl --schema ./path/to/schema.ts
+
+# Type check
+pnpm typecheck
+
+# Lint
+pnpm lint
+```
 
 ## Status
 
-**✅ v1.0 Ready** - 1000+ tests passing
+**✅ v1.0 Ready** - 1300+ tests passing
 
-- Core: ModelIR, IntentAST, Semantic Planner, DX Layer
-- Adapter: SQL Compiler, Multi-tenant, Observability, Multi-dialect
-- Golden Tests: Q1 (EXISTS), Q2 (CTE), Q3 (Ambiguity)
+- Schema: DSL with convention inference (54 tests)
+- Core: ModelIR, IntentAST, Semantic Planner, DX Layer (543 tests)
+- Adapter: SQL Compiler, Multi-tenant, Observability, Multi-dialect (628 tests)
+- CLI: Generate, Verify, REPL (106 tests)
 - E2E: PostgreSQL integration (Testcontainers)
 
 ## License

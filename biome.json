@@ -18,6 +18,7 @@
 	},
 	"linter": {
 		"enabled": true,
+		"includes": ["packages/**"],
 		"rules": {
 			"recommended": true,
 			"correctness": {
@@ -39,5 +40,26 @@
 			"quoteStyle": "single",
 			"semicolons": "always"
 		}
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["**/spike/**"],
+			"linter": {
+				"enabled": false
+			}
+		},
+		{
+			"includes": ["**/*.test.ts", "**/*.test.tsx"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noExplicitAny": "off"
+					},
+					"style": {
+						"noNonNullAssertion": "off"
+					}
+				}
+			}
+		}
+	]
 }

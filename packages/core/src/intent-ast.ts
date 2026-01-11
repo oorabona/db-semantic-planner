@@ -707,19 +707,25 @@ export interface RecursiveEmitOptions {
 /**
  * PostgreSQL-specific options for recursive CTE (capability-gated).
  */
-export interface RecursivePgOptions {
+export interface RecursiveAdvancedOptions {
 	/**
-	 * Native CYCLE clause (PG14+).
-	 * - 'error': Throw on cycle
-	 * - 'stop': Stop traversal at cycle
-	 * - 'mark': Add is_cycle column
+	 * Cycle detection strategy (adapter-specific implementation).
+	 * - 'error': Throw on cycle detection
+	 * - 'stop': Stop traversal at cycle (prune branch)
+	 * - 'mark': Add is_cycle column to results
+	 * 
+	 * PostgreSQL 14+ uses native CYCLE clause.
+	 * Other adapters may use application-level detection.
 	 */
 	readonly cycle?: 'error' | 'stop' | 'mark';
 
 	/**
-	 * Native SEARCH clause (PG14+).
+	 * Traversal search order (adapter-specific implementation).
 	 * - 'depth': Depth-first search order
 	 * - 'breadth': Breadth-first search order
+	 * 
+	 * PostgreSQL 14+ uses native SEARCH clause.
+	 * Other adapters may use ORDER BY on depth column.
 	 */
 	readonly search?: 'depth' | 'breadth';
 }
@@ -810,11 +816,11 @@ export interface RecursiveIntent {
 	readonly emit?: RecursiveEmitOptions;
 
 	// ─────────────────────────────────────────────────────────────────────────
-	// POSTGRESQL-SPECIFIC (capability-gated)
+	// ADVANCED OPTIONS (capability-gated, adapter-specific implementation)
 	// ─────────────────────────────────────────────────────────────────────────
 
-	/** PostgreSQL-specific options (PG14+ SEARCH/CYCLE clauses) */
-	readonly pgOptions?: RecursivePgOptions;
+	/** Advanced recursive options (cycle detection, search order) */
+	readonly advancedOptions?: RecursiveAdvancedOptions;
 }
 
 // ============================================================================

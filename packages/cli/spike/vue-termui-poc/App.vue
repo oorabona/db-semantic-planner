@@ -1,24 +1,24 @@
 <script setup lang="ts">
 /**
  * Vue TermUI POC - REPL interface
- * 
+ *
  * DX-030-SPIKE: Evaluating vue-termui for CLI REPL framework
  * Features: input handling, box layouts, table rendering, styling
  */
-import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { TuiBox, TuiText, useStdin, useApp } from 'vue-termui';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { TuiBox, TuiText, useApp, useStdin } from 'vue-termui';
 
 // Types
 interface HistoryEntry {
-  command: string;
-  timestamp: Date;
+	command: string;
+	timestamp: Date;
 }
 
 interface TableRow {
-  id: number;
-  name: string;
-  email: string;
-  active: boolean;
+	id: number;
+	name: string;
+	email: string;
+	active: boolean;
 }
 
 // State
@@ -26,15 +26,15 @@ const input = ref('');
 const history = ref<HistoryEntry[]>([]);
 const showHelp = ref(false);
 const output = ref<{
-  type: 'sql' | 'plan' | 'table' | 'message' | null;
-  content: any;
+	type: 'sql' | 'plan' | 'table' | 'message' | null;
+	content: any;
 }>({ type: null, content: null });
 
 // Mock data for table demonstration
 const mockTableData: TableRow[] = [
-  { id: 1, name: 'Alice', email: 'alice@example.com', active: true },
-  { id: 2, name: 'Bob', email: 'bob@example.com', active: false },
-  { id: 3, name: 'Charlie', email: 'charlie@example.com', active: true },
+	{ id: 1, name: 'Alice', email: 'alice@example.com', active: true },
+	{ id: 2, name: 'Bob', email: 'bob@example.com', active: false },
+	{ id: 3, name: 'Charlie', email: 'charlie@example.com', active: true },
 ];
 
 // App instance for exit
@@ -45,96 +45,96 @@ const { stdin, setRawMode } = useStdin();
 
 // Handle keyboard input
 const handleKeypress = (data: Buffer) => {
-  const char = data.toString();
-  const code = data[0];
-  
-  // Ctrl+C - exit
-  if (code === 3) {
-    exit();
-    return;
-  }
-  
-  // Enter - submit
-  if (code === 13) {
-    handleSubmit();
-    return;
-  }
-  
-  // Backspace
-  if (code === 127) {
-    input.value = input.value.slice(0, -1);
-    return;
-  }
-  
-  // Printable characters
-  if (code >= 32 && code <= 126) {
-    input.value += char;
-  }
+	const char = data.toString();
+	const code = data[0];
+
+	// Ctrl+C - exit
+	if (code === 3) {
+		exit();
+		return;
+	}
+
+	// Enter - submit
+	if (code === 13) {
+		handleSubmit();
+		return;
+	}
+
+	// Backspace
+	if (code === 127) {
+		input.value = input.value.slice(0, -1);
+		return;
+	}
+
+	// Printable characters
+	if (code >= 32 && code <= 126) {
+		input.value += char;
+	}
 };
 
 // Command submission
 const handleSubmit = () => {
-  const cmd = input.value.trim();
-  if (!cmd) return;
-  
-  // Add to history
-  history.value.push({ command: cmd, timestamp: new Date() });
-  
-  // Process commands
-  if (cmd === '.help') {
-    showHelp.value = true;
-    output.value = { type: null, content: null };
-  } else if (cmd === '.clear') {
-    showHelp.value = false;
-    output.value = { type: null, content: null };
-    history.value = [];
-  } else if (cmd === '.tables') {
-    output.value = {
-      type: 'message',
-      content: 'Tables: users, posts, comments, categories',
-    };
-    showHelp.value = false;
-  } else if (cmd.toLowerCase().startsWith('select')) {
-    // Simulate query execution
-    output.value = {
-      type: 'table',
-      content: {
-        sql: `SELECT id, name, email, active FROM users WHERE active = $1`,
-        params: [true],
-        plan: {
-          root: 'users',
-          strategy: 'index_scan',
-          cost: 12.5,
-        },
-        data: mockTableData,
-      },
-    };
-    showHelp.value = false;
-  } else {
-    output.value = {
-      type: 'message',
-      content: `Unknown command: ${cmd}. Type .help for available commands.`,
-    };
-    showHelp.value = false;
-  }
-  
-  input.value = '';
+	const cmd = input.value.trim();
+	if (!cmd) return;
+
+	// Add to history
+	history.value.push({ command: cmd, timestamp: new Date() });
+
+	// Process commands
+	if (cmd === '.help') {
+		showHelp.value = true;
+		output.value = { type: null, content: null };
+	} else if (cmd === '.clear') {
+		showHelp.value = false;
+		output.value = { type: null, content: null };
+		history.value = [];
+	} else if (cmd === '.tables') {
+		output.value = {
+			type: 'message',
+			content: 'Tables: users, posts, comments, categories',
+		};
+		showHelp.value = false;
+	} else if (cmd.toLowerCase().startsWith('select')) {
+		// Simulate query execution
+		output.value = {
+			type: 'table',
+			content: {
+				sql: `SELECT id, name, email, active FROM users WHERE active = $1`,
+				params: [true],
+				plan: {
+					root: 'users',
+					strategy: 'index_scan',
+					cost: 12.5,
+				},
+				data: mockTableData,
+			},
+		};
+		showHelp.value = false;
+	} else {
+		output.value = {
+			type: 'message',
+			content: `Unknown command: ${cmd}. Type .help for available commands.`,
+		};
+		showHelp.value = false;
+	}
+
+	input.value = '';
 };
 
 // Lifecycle
 onMounted(() => {
-  if (setRawMode) {
-    setRawMode(true);
-  }
-  if (stdin) {
-    stdin.on('data', handleKeypress);
-  }
+	if (setRawMode) {
+		setRawMode(true);
+	}
+	if (stdin) {
+		stdin.on('data', handleKeypress);
+	}
 });
 
 onUnmounted(() => {
-  if (stdin) {
-    stdin.off('data', handleKeypress);
-  }
+	if (stdin) {
+		stdin.off('data', handleKeypress);
+	}
 });
 
 // Computed for table rendering

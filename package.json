@@ -12,12 +12,15 @@
 		"test:e2e": "vitest run --config tests/e2e/vitest.config.e2e.ts",
 		"lint": "pnpm biome check .",
 		"lint:fix": "pnpm biome check --write .",
-		"typecheck": "pnpm -r typecheck"
+		"typecheck": "pnpm -r typecheck",
+		"dbsp": "pnpm tsx packages/cli/src/index.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",
+		"tsx": "catalog:",
 		"@db-semantic-planner/core": "workspace:*",
 		"@db-semantic-planner/adapter-kysely": "workspace:*",
+		"@db-semantic-planner/schema": "workspace:*",
 		"@testcontainers/postgresql": "catalog:",
 		"@types/node": "catalog:",
 		"@types/pg": "catalog:",
