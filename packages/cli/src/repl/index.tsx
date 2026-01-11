@@ -5,7 +5,8 @@
  */
 
 import { Box, render, Text, useApp, useInput } from 'ink';
-import React, { useCallback, useMemo, useState } from 'react';
+import type React from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { CompletionProvider, type CompletionSuggestion } from './completion.js';
 import {
 	CompletionDisplay,
@@ -18,7 +19,12 @@ import {
 import { getHistory } from './history.js';
 import { ParseError, parseNaturalQuery } from './parser.js';
 import { executeQuery } from './query-executor.js';
-import type { QueryMode, QueryResult, ReplConfig } from './types.js';
+import type {
+	AliasingMode,
+	QueryMode,
+	QueryResult,
+	ReplConfig,
+} from './types.js';
 
 interface ReplAppProps {
 	config: ReplConfig;
@@ -34,6 +40,7 @@ function getRelationDescription(rel: { kind: string; target: string }): string {
 function ReplApp({ config }: ReplAppProps) {
 	const { exit } = useApp();
 	const [mode, setMode] = useState<QueryMode>('natural');
+	const [aliasingMode, setAliasingMode] = useState<AliasingMode>('always');
 	const [showHelp, setShowHelp] = useState(false);
 	const [output, setOutput] = useState<React.ReactNode | null>(null);
 	const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
@@ -91,9 +98,9 @@ function ReplApp({ config }: ReplAppProps) {
 						return;
 
 					case '.exit':
-				case '.quit':
-					exit();
-					return;
+					case '.quit':
+						exit();
+						return;
 
 					case '.clear':
 						setShowHelp(false);
@@ -229,6 +236,24 @@ function ReplApp({ config }: ReplAppProps) {
 						setShowHelp(false);
 						return;
 
+					case '.aliasing': {
+						// Toggle between 'always' and 'onCollision' modes (CLI-010)
+						const newMode: AliasingMode =
+							aliasingMode === 'always' ? 'onCollision' : 'always';
+						setAliasingMode(newMode);
+						setOutput(
+							<Text color="cyan">
+								🏷️ Column aliasing mode: {newMode}
+								{newMode === 'always'
+									? ' (all included columns prefixed)'
+									: ' (only colliding columns prefixed)'}
+							</Text>,
+						);
+						setQueryResult(null);
+						setShowHelp(false);
+						return;
+					}
+
 					case '.history': {
 						const recent = history.getRecent(20);
 						setShowHelp(false);
@@ -272,7 +297,7 @@ function ReplApp({ config }: ReplAppProps) {
 			if (mode === 'natural') {
 				try {
 					const parsed = parseNaturalQuery(trimmed, config.schema);
-					const result = executeQuery(parsed, config.schema);
+					const result = executeQuery(parsed, config.schema, { aliasingMode });
 
 					if (result.error) {
 						setQueryResult({

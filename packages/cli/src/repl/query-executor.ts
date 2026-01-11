@@ -8,6 +8,7 @@
 import { createMockAdapter } from '@db-semantic-planner/adapter-kysely';
 import {
 	assertResolvedSchemaToGeneratedSchema,
+	buildModelFromSchema,
 	createOrm,
 	type Dump,
 	eq,
@@ -22,6 +23,15 @@ import {
 } from '@db-semantic-planner/core';
 import type { ResolvedSchema } from '@db-semantic-planner/schema';
 import type { ParsedQuery, WhereClause } from './parser.js';
+import type { AliasingMode } from './types.js';
+
+/**
+ * Options for query execution
+ */
+export interface QueryExecutionOptions {
+	/** Column aliasing mode for included relations (CLI-010) */
+	aliasingMode?: AliasingMode;
+}
 
 /**
  * Result of query execution (compile-only mode)
@@ -80,15 +90,21 @@ function whereClauseToFilter(clause: WhereClause) {
 export function executeQuery(
 	query: ParsedQuery,
 	schema: ResolvedSchema,
+	options?: QueryExecutionOptions,
 ): QueryExecutionResult {
 	try {
 		// Create ORM with MockAdapter (compile-only)
 		// CORE-005: Use safe converter with Valibot validation
 		const generatedSchema = assertResolvedSchemaToGeneratedSchema(schema);
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const orm = createOrm<any>({
-			schema: generatedSchema,
-			adapter: createMockAdapter(),
+		// Build model from schema and use model-based createOrm overload
+		const model = buildModelFromSchema(generatedSchema);
+		// Use Record<string, unknown> as DB type since tables are dynamic from user input
+		// CLI-010: Pass aliasing mode to MockAdapter
+		const orm = createOrm<Record<string, unknown>>({
+			model,
+			adapter: createMockAdapter({
+				aliasIncludedColumns: options?.aliasingMode ?? 'always',
+			}),
 		});
 
 		// Start building the query (table name comes from user input)
