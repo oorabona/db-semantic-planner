@@ -10,8 +10,8 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import type { ResolvedSchema } from '@db-semantic-planner/schema';
 import { Command } from 'commander';
+import type { ResolvedSchema } from '@db-semantic-planner/schema';
 import { generateKysely } from '../generators/kysely.js';
 import { generateManifest } from '../generators/manifest.js';
 import { loadSchema, loadSchemaFromCwd } from '../utils/schema-loader.js';
@@ -21,8 +21,9 @@ export const generateCommand = new Command('generate')
 	.argument('<target>', 'Target to generate: manifest | kysely')
 	.option('-s, --schema <path>', 'Path to schema file (default: auto-detect)')
 	.option('-o, --out <dir>', 'Output directory (default: ./generated/<target>)')
+	.option('--output <dir>', 'Output directory (alias for --out)')
 	.action(
-		async (target: string, options: { schema?: string; out?: string }) => {
+		async (target: string, options: { schema?: string; out?: string; output?: string }) => {
 			try {
 				// Load schema
 				let schema: ResolvedSchema;
@@ -40,7 +41,7 @@ export const generateCommand = new Command('generate')
 				console.log(`📄 Loaded schema from: ${schemaPath}`);
 
 				// Determine output directory
-				const outDir = options.out ?? `./generated/${target}`;
+				const outDir = options.out ?? options.output ?? `./generated/${target}`;
 				const resolvedOutDir = resolve(process.cwd(), outDir);
 
 				// Generate based on target
