@@ -299,24 +299,45 @@ export function coalesce(
 }
 
 /**
- * Raw SQL expression (escape hatch for advanced use cases)
+ * Raw SQL expression (escape hatch for advanced use cases).
  *
- * @warning Use sparingly - bypasses type safety and SQL injection protection.
- * NEVER pass user input directly to this function.
+ * @warning **SECURITY RISK: SQL INJECTION VULNERABILITY**
  *
- * @param sqlFragment - Raw SQL fragment (must be safe, no user input!)
+ * This function bypasses ALL SQL injection protections. The SQL fragment
+ * is inserted directly into queries without sanitization.
+ *
+ * **NEVER:**
+ * - Interpolate user input: `raw(\`WHERE name = '\${userInput}'\`, 'x')` ❌
+ * - Use request parameters: `raw(req.query.field, 'x')` ❌
+ * - Trust client-side data: `raw(formData.expression, 'x')` ❌
+ *
+ * **SAFE USAGE:**
+ * - Hardcoded expressions: `raw('NOW()', 'current_time')` ✅
+ * - Constants: `raw('price_cents / 100.0', 'price_dollars')` ✅
+ * - Server-controlled values only
+ *
+ * For user-provided values, use parameterized queries via the standard
+ * filter functions (eq, gt, like, etc.) which properly escape values.
+ *
+ * @param sqlFragment - Raw SQL fragment. **Must be safe - no user input!**
  * @param as - Required alias for the result column
+ * @returns ExpressionSpec for use in select()
  *
  * @example
  * ```typescript
- * // Current timestamp
+ * // SAFE: Hardcoded expressions
  * raw('NOW()', 'current_time')
  * // → NOW() AS current_time
  *
- * // Complex expression
  * raw('price_cents / 100.0', 'price_dollars')
  * // → price_cents / 100.0 AS price_dollars
+ *
+ * // DANGEROUS - SQL INJECTION RISK!
+ * // raw(`WHERE name = '${userInput}'`, 'x')  // NEVER DO THIS!
  * ```
+ *
+ * @see {@link https://owasp.org/www-community/attacks/SQL_Injection | OWASP SQL Injection}
+ * @see {@link https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html | OWASP Parameterization}
  */
 export function raw(sqlFragment: string, as: string): ExpressionSpec {
 	if (!as || as.trim() === '') {

@@ -323,6 +323,111 @@ Options:
 
 ---
 
+## Common Patterns
+
+### Include (Eager Loading)
+
+Load related data with the `.include()` method.
+
+#### Simple Include
+
+```typescript
+// Load posts for users
+const usersWithPosts = await orm
+  .select('users')
+  .include('posts')
+  .all();
+// Result: [{ id: 1, name: 'Alice', posts: [{ id: 1, title: '...' }, ...] }]
+```
+
+#### Nested Include (Dot Notation) - Recommended
+
+Use dot notation for deep includes. Options apply to the deepest level:
+
+```typescript
+// Load posts with their comments
+const users = await orm
+  .select('users')
+  .include('posts.comments')
+  .all();
+
+// Three levels deep
+const users = await orm
+  .select('users')
+  .include('posts.comments.author')
+  .all();
+
+// With options on the deepest relation
+const users = await orm
+  .select('users')
+  .include('posts.comments', { 
+    select: { type: 'fields', fields: ['text'] }
+  })
+  .all();
+
+// Disambiguate with 'via' (applies to deepest level)
+const users = await orm
+  .select('users')
+  .include('posts.author', { via: 'commentAuthor' })
+  .all();
+```
+
+#### Multiple Includes (Chaining)
+
+Chain multiple `.include()` calls:
+
+```typescript
+const users = await orm
+  .select('users')
+  .include('posts')
+  .include('profile')
+  .include('posts.comments')
+  .all();
+```
+
+#### Recursive Includes (Hierarchies)
+
+For self-referential relations (trees/hierarchies):
+
+```typescript
+// Traverse ancestors (up the tree)
+const categories = await orm
+  .select('categories')
+  .where(eq('id', 5))
+  .include('parent', {
+    recursive: true,
+    direction: 'ancestors'
+  })
+  .all();
+
+// Traverse descendants (down the tree) with flat output
+const categories = await orm
+  .select('categories')
+  .where(eq('id', 1))
+  .include('children', {
+    recursive: true,
+    direction: 'descendants',
+    flat: true,
+    maxDepth: 10
+  })
+  .all();
+```
+
+#### Include Options Reference
+
+| Option | Description |
+|--------|-------------|
+| `via` | Disambiguate when multiple relations exist between tables |
+| `where` | Filter conditions on related records |
+| `select` | Select specific columns from related records |
+| `include` | Nested includes (alternative to dot notation) |
+| `recursive` | Enable recursive CTE traversal (hierarchies) |
+| `direction` | `'ancestors'` or `'descendants'` (required when recursive) |
+| `flat` | Output as flat array with depth field (default: nested objects) |
+| `maxDepth` | Maximum traversal depth (default: 100) |
+
+---
+
 ## Multi-tenant Queries
 
 ```typescript
