@@ -1,0 +1,48 @@
+{
+	"name": "@db-semantic-planner/mcp-server",
+	"version": "0.0.1",
+	"type": "module",
+	"description": "MCP Server for db-semantic-planner - expose schema and query planning to AI tools",
+	"bin": {
+		"dbsp-mcp": "./dist/index.js"
+	},
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsup",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"typecheck": "tsc --noEmit",
+		"dev": "tsx src/index.ts"
+	},
+	"dependencies": {
+		"@db-semantic-planner/adapter-kysely": "workspace:*",
+		"@db-semantic-planner/core": "workspace:*",
+		"@db-semantic-planner/schema": "workspace:*",
+		"@modelcontextprotocol/sdk": "catalog:"
+	},
+	"peerDependencies": {
+		"tsx": "^4.0.0"
+	},
+	"peerDependenciesMeta": {
+		"tsx": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@types/node": "catalog:",
+		"tsx": "catalog:",
+		"typescript": "catalog:",
+		"tsup": "catalog:",
+		"vitest": "catalog:"
+	}
+}

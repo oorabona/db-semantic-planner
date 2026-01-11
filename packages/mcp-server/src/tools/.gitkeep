@@ -1,0 +1,5 @@
+# Tools directory
+# MCP-003: schema_list_tables
+# MCP-004: schema_get_relations
+# MCP-005: query_plan
+# MCP-006: intent_validate
