@@ -22,6 +22,14 @@
 | CLI REPL Interactive (DX-030) | cli | ✅ Complete |
 | Codebase Stabilization (STAB-001) | all | ✅ Complete |
 | MCP Server (@dbsp/mcp-server) | mcp-server | 🟡 Ready |
+| Developer Experience (DX) | core, adapter | 🟡 Backlog |
+
+## Scope-Specific Backlogs
+
+| File | Scope | Description |
+|------|-------|-------------|
+| `TODO_MCP.md` | mcp-server | MCP server implementation tasks |
+| `TODO_DX.md` | core, adapter | DX improvements, SOLID fixes, type inference |
 
 ## ✅ COMPLETED: ALIGN-001 Documentation & API Alignment Sprint (2026-01-11)
 
