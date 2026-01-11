@@ -899,12 +899,14 @@ describe('introspection', () => {
 
 		it('should accept custom schema option', async () => {
 			const db = createMockDb([
-				createTable('users', [
-					createColumn('id', 'int4', { autoIncrementing: true }),
-				]),
+				createTable(
+					'users',
+					[createColumn('id', 'int4', { autoIncrementing: true })],
+					'tenant_123', // Match the schema option
+				),
 			]);
 
-			// Just verify no error
+			// Introspect with custom schema - should only find tables in that schema
 			const result = await introspect(db, {
 				schema: 'tenant_123',
 				_foreignKeysForTesting: [],

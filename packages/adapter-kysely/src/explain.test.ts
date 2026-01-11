@@ -293,27 +293,4 @@ describe('dialect-specific EXPLAIN syntax', () => {
 	});
 });
 
-// ============================================================================
-// Integration Tests (require real PostgreSQL - skipped in CI)
-// ============================================================================
-
-describe.skip('explain (integration - requires PostgreSQL)', () => {
-	// These tests would run against a real PostgreSQL database
-	// They are skipped by default since we use SQLite for unit tests
-
-	it('should execute EXPLAIN on real PostgreSQL', async () => {
-		// This test would:
-		// 1. Connect to real PostgreSQL
-		// 2. Create a compiled query
-		// 3. Call explain()
-		// 4. Verify the result contains a query plan
-	});
-
-	it('should execute EXPLAIN ANALYZE and return timing', async () => {
-		// This test would verify actual execution timing is returned
-	});
-
-	it('should return JSON format when requested', async () => {
-		// This test would verify JSON parsing works correctly
-	});
-});
+// Integration tests are in tests/e2e/explain.integration.test.ts (12 tests)

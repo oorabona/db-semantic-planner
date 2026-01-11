@@ -286,8 +286,9 @@ export async function introspect(
 		withInternalKyselyTables: false,
 	});
 
-	// Filter tables based on options
-	const filteredTables = tableMetadata.filter((t) =>
+	// Filter tables by schema first, then by include/exclude patterns
+	const tablesInSchema = tableMetadata.filter((t) => t.schema === schema);
+	const filteredTables = tablesInSchema.filter((t) =>
 		shouldIncludeTable(t.name, options),
 	);
 

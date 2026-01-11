@@ -70,25 +70,8 @@ describe('Zero-Config ORM (with adapter)', () => {
 		await db.destroy();
 	});
 
-	// NOTE: Async introspection tests are PostgreSQL-only (uses information_schema)
-	// See tests/e2e/introspection.e2e.test.ts for PostgreSQL introspection tests
-
-	describe.skip('createOrm({ adapter }) - async path (auto-introspection)', () => {
-		// These tests require PostgreSQL - skipped for SQLite unit tests
-		it('returns a Promise when model is not provided', () => {
-			const result = createOrm({ adapter });
-			expect(result).toBeInstanceOf(Promise);
-		});
-
-		it('resolves to an OrmInstance after introspection', async () => {
-			const orm = await createOrm({ adapter });
-
-			expect(orm).toBeDefined();
-			expect(orm.select).toBeDefined();
-			expect(orm.forTenant).toBeDefined();
-			expect(typeof orm.strictMode).toBe('boolean');
-		});
-	});
+	// NOTE: Async introspection tests (createOrm without model) require PostgreSQL
+	// See tests/e2e/introspection.test.ts
 
 	describe('createOrm({ model, adapter }) - sync path', () => {
 		const explicitModel = defineSchema({
