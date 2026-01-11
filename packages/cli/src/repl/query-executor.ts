@@ -7,9 +7,9 @@
 
 import { createMockAdapter } from '@db-semantic-planner/adapter-kysely';
 import {
-	type Dump,
 	assertResolvedSchemaToGeneratedSchema,
 	createOrm,
+	type Dump,
 	eq,
 	gt,
 	gte,
@@ -174,7 +174,9 @@ export function formatExecutionResult(result: QueryExecutionResult): string {
 
 	// Parameters
 	if (result.params.length > 0) {
-		lines.push(`Parameters: [${result.params.map((p) => JSON.stringify(p)).join(', ')}]`);
+		lines.push(
+			`Parameters: [${result.params.map((p) => JSON.stringify(p)).join(', ')}]`,
+		);
 		lines.push('');
 	}
 

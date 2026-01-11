@@ -322,19 +322,17 @@ export function parseNaturalQuery(
 					if (!foundRelation) {
 						const relations = Object.keys(schema.relations);
 						// Find relations that belong to the current table (qualified format)
-						const tableRelations = relations.filter(
-							(r) => r.startsWith(`${result.table}.`),
+						const tableRelations = relations.filter((r) =>
+							r.startsWith(`${result.table}.`),
 						);
 						const suggestion =
-							tableRelations.find(
-								(r) => {
-									const name = r.split('.').slice(1).join('.');
-									return (
-										name.toLowerCase() === rel.toLowerCase() ||
-										name.toLowerCase().startsWith(rel.toLowerCase())
-									);
-								},
-							) ||
+							tableRelations.find((r) => {
+								const name = r.split('.').slice(1).join('.');
+								return (
+									name.toLowerCase() === rel.toLowerCase() ||
+									name.toLowerCase().startsWith(rel.toLowerCase())
+								);
+							}) ||
 							relations.find(
 								(r) =>
 									r.toLowerCase() === rel.toLowerCase() ||

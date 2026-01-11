@@ -199,12 +199,25 @@ export interface ConventionsDefinition {
 
 /**
  * Complete schema definition input for defineSchema().
+ * @deprecated Use the new hybrid API: defineSchema(tables, config?)
  */
 export interface SchemaDefinitionInput<
 	T extends TablesDefinition = TablesDefinition,
 > {
 	/** Table definitions */
 	tables: T;
+	/** Explicit relation definitions (override auto-detected) */
+	relations?: RelationsDefinition;
+	/** Planner hints */
+	hints?: HintsDefinition;
+	/** Convention configuration */
+	conventions?: ConventionsDefinition;
+}
+
+/**
+ * Configuration options for defineSchema (new API).
+ */
+export interface SchemaConfigInput {
 	/** Explicit relation definitions (override auto-detected) */
 	relations?: RelationsDefinition;
 	/** Planner hints */

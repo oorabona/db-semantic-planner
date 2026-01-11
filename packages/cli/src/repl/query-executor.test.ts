@@ -4,10 +4,10 @@
  * Verifies that the query executor generates proper SQL using the semantic planner.
  */
 
-import { describe, expect, it } from 'vitest';
 import type { ResolvedSchema } from '@db-semantic-planner/schema';
-import { executeQuery } from './query-executor.js';
+import { describe, expect, it } from 'vitest';
 import type { ParsedQuery } from './parser.js';
+import { executeQuery } from './query-executor.js';
 
 // Simple test schema
 const testSchema: ResolvedSchema = {
@@ -56,7 +56,7 @@ describe('executeQuery', () => {
 		expect(result.sql.toLowerCase()).toContain('select');
 		expect(result.sql).toContain('posts');
 		// Should use table aliasing (e.g., "t0")
-		expect(result.sql).toMatch(/"t\d+"/);  // Matches "t0", "t1", etc.
+		expect(result.sql).toMatch(/"t\d+"/); // Matches "t0", "t1", etc.
 	});
 
 	it('should generate SQL with where clause', () => {

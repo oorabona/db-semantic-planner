@@ -11,8 +11,8 @@
 
 import { defineSchema } from '@db-semantic-planner/schema';
 
-export default defineSchema({
-	tables: {
+export default defineSchema(
+	{
 		// Hierarchical categories (self-referencing)
 		categories: {
 			id: { type: 'integer', primaryKey: true },
@@ -91,38 +91,39 @@ export default defineSchema({
 			totalPrice: { type: 'decimal', nullable: false },
 		},
 	},
+	{
+		relations: {
+			// Self-referencing for category hierarchy
+			'categories.parent': {
+				kind: 'belongsTo',
+				target: 'categories',
+				foreignKey: 'parentId',
+			},
+			'categories.children': {
+				kind: 'hasMany',
+				target: 'categories',
+				foreignKey: 'parentId',
+			},
 
-	relations: {
-		// Self-referencing for category hierarchy
-		'categories.parent': {
-			kind: 'belongsTo',
-			target: 'categories',
-			foreignKey: 'parentId',
-		},
-		'categories.children': {
-			kind: 'hasMany',
-			target: 'categories',
-			foreignKey: 'parentId',
-		},
-
-		// Orders have two addresses (shipping + billing)
-		// Need explicit relations because of multiple FKs to same table
-		'orders.shippingAddress': {
-			kind: 'belongsTo',
-			target: 'addresses',
-			foreignKey: 'shippingAddressId',
-		},
-		'orders.billingAddress': {
-			kind: 'belongsTo',
-			target: 'addresses',
-			foreignKey: 'billingAddressId',
+			// Orders have two addresses (shipping + billing)
+			// Need explicit relations because of multiple FKs to same table
+			'orders.shippingAddress': {
+				kind: 'belongsTo',
+				target: 'addresses',
+				foreignKey: 'shippingAddressId',
+			},
+			'orders.billingAddress': {
+				kind: 'belongsTo',
+				target: 'addresses',
+				foreignKey: 'billingAddressId',
+			},
 		},
 	},
-	// Other relations auto-inferred:
-	// - products.category, categories.products
-	// - products.variants, variants.product
-	// - customers.addresses, addresses.customer
-	// - customers.orders, orders.customer
-	// - orders.orderItems, orderItems.order
-	// - orderItems.product, orderItems.variant
-});
+);
+// Other relations auto-inferred:
+// - products.category, categories.products
+// - products.variants, variants.product
+// - customers.addresses, addresses.customer
+// - customers.orders, orders.customer
+// - orders.orderItems, orderItems.order
+// - orderItems.product, orderItems.variant

@@ -1092,11 +1092,13 @@ describe('Execution Layer', () => {
 				.select('users')
 				.where(eq('id', 1))
 				.include('posts')
-				.first()) as {
-				id: number;
-				name: string;
-				posts?: Array<{ id: number; title: string }>;
-			} | undefined;
+				.first()) as
+				| {
+						id: number;
+						name: string;
+						posts?: Array<{ id: number; title: string }>;
+				  }
+				| undefined;
 
 			expect(result).toBeDefined();
 			expect(result?.name).toBe('Alice');

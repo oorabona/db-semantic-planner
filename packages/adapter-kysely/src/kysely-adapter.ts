@@ -136,7 +136,12 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 		}
 
 		const schemaName = this.schemaName ?? options.schemaName;
-		const result = compileWithIncludes(plan, options.model, this.db, schemaName);
+		const result = compileWithIncludes(
+			plan,
+			options.model,
+			this.db,
+			schemaName,
+		);
 
 		// Convert to adapter-agnostic format (pass through - types are now aligned)
 		const separateIncludes: SeparateIncludeInfo[] = result.separateIncludes.map(

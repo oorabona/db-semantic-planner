@@ -232,6 +232,9 @@ import { Kysely, PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
 import type { DB } from './db.generated';
 
+// Import your schema
+import schema from './examples/blog.schema';
+
 // Create Kysely instance
 const db = new Kysely<DB>({
   dialect: new PostgresDialect({
@@ -239,12 +242,9 @@ const db = new Kysely<DB>({
   }),
 });
 
-// Create ORM (need to also import your schema)
-import schema from './examples/blog.schema';
-import { buildModelFromSchema } from '@db-semantic-planner/core';
-
+// Create ORM with schema (codegen-first approach)
 const orm = createOrm({
-  model: buildModelFromSchema(schema),
+  schema,  // Schema from @db-semantic-planner/schema
   adapter: createKyselyAdapter(db),
 });
 

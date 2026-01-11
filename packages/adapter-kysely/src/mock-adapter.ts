@@ -194,7 +194,12 @@ export class MockAdapter implements Adapter<unknown> {
 		}
 
 		const schemaName = this._schemaName ?? options.schemaName;
-		const result = compileWithIncludes(plan, options.model, this.kysely, schemaName);
+		const result = compileWithIncludes(
+			plan,
+			options.model,
+			this.kysely,
+			schemaName,
+		);
 
 		// Convert to adapter-agnostic format
 		const separateIncludes: SeparateIncludeInfo[] = result.separateIncludes.map(

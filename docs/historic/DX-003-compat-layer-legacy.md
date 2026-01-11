@@ -1,6 +1,8 @@
 ---
 doc-meta:
-  status: canonical
+  status: deprecated
+  deprecated_by: API-001 (findMany→all, findFirst→first, findFirstOrThrow→firstOrThrow)
+  moved_to_historic: 2026-01-11
   scope: dx
   type: specification
   created: 2026-01-07

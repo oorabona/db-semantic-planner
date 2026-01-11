@@ -308,7 +308,9 @@ export function compileSeparateInclude(
 	let query = kysely.selectFrom(tableName).selectAll();
 
 	// Add WHERE foreignKey IN (parentIds) - handle composite keys
-	const fkCols = Array.isArray(info.foreignKey) ? info.foreignKey : [info.foreignKey];
+	const fkCols = Array.isArray(info.foreignKey)
+		? info.foreignKey
+		: [info.foreignKey];
 	if (fkCols.length === 1) {
 		// Simple case: single column FK
 		query = query.where(fkCols[0], 'in', parentIds as unknown[]);
@@ -317,9 +319,7 @@ export function compileSeparateInclude(
 		// Each parentId is expected to be a tuple [val1, val2, ...]
 		query = query.where((eb) => {
 			const conditions = (parentIds as unknown[][]).map((tuple) => {
-				const colConditions = fkCols.map((col, i) =>
-					eb(col, '=', tuple[i])
-				);
+				const colConditions = fkCols.map((col, i) => eb(col, '=', tuple[i]));
 				return eb.and(colConditions);
 			});
 			return eb.or(conditions);
@@ -485,14 +485,20 @@ function collectSeparateIncludes(
 
 			if (relation.type === 'hasMany' || relation.type === 'hasOne') {
 				// hasMany/hasOne: FK is in target table (e.g., posts.userId), points to source's PK
-				const fkCols = normalizeForeignKey(relation.foreignKey, `${sourceTable.replace(/s$/, '')}Id`);
+				const fkCols = normalizeForeignKey(
+					relation.foreignKey,
+					`${sourceTable.replace(/s$/, '')}Id`,
+				);
 				foreignKey = unwrapSingletonArray(fkCols);
 				sourceKey = unwrapSingletonArray(sourcePkCols); // Source table's PK (supports composite)
 			} else {
 				// belongsTo: FK is in source table (rare for 'separate', but handle it)
 				// For separate include, we need target's PK
 				foreignKey = unwrapSingletonArray(targetPkCols); // Target table's PK (supports composite)
-				const skCols = normalizeForeignKey(relation.foreignKey, `${relation.target.replace(/s$/, '')}Id`);
+				const skCols = normalizeForeignKey(
+					relation.foreignKey,
+					`${relation.target.replace(/s$/, '')}Id`,
+				);
 				sourceKey = unwrapSingletonArray(skCols);
 			}
 
@@ -1134,7 +1140,7 @@ export function compileRecursive(
 
 /**
  * CORE-007: Inject PostgreSQL 14+ CYCLE and SEARCH clauses into compiled SQL.
- * 
+ *
  * These clauses are added after the CTE definition but before the final SELECT:
  * ```sql
  * WITH RECURSIVE cte(cols) AS (...)
@@ -1165,7 +1171,8 @@ export function injectAdvancedRecursiveClauses(
 
 	// Build SEARCH clause if search order is requested
 	if (options.search && capabilities.supportsSearchClause) {
-		const searchType = options.search === 'depth' ? 'DEPTH FIRST' : 'BREADTH FIRST';
+		const searchType =
+			options.search === 'depth' ? 'DEPTH FIRST' : 'BREADTH FIRST';
 		clauses.push(`SEARCH ${searchType} BY ${nodeIdColumn} SET ordercol`);
 	}
 
@@ -1178,7 +1185,7 @@ export function injectAdvancedRecursiveClauses(
 	// We need to find the last ) before SELECT that closes the CTE
 	const cteClosePattern = /\)\s*SELECT/i;
 	const match = sql.match(cteClosePattern);
-	
+
 	if (match?.index !== undefined) {
 		const clauseText = ` ${clauses.join(' ')} `;
 		const insertPos = match.index + 1; // After the )
@@ -1603,7 +1610,12 @@ function addWhereSimple(
 
 	// Handle like (WhereLikeIntent has kind='like')
 	if ('kind' in where && where.kind === 'like') {
-		const w = where as { kind: 'like'; field: string; pattern: string; caseInsensitive?: boolean };
+		const w = where as {
+			kind: 'like';
+			field: string;
+			pattern: string;
+			caseInsensitive?: boolean;
+		};
 		return w.caseInsensitive
 			? query.where(`${alias}.${w.field}`, 'ilike', w.pattern)
 			: query.where(`${alias}.${w.field}`, 'like', w.pattern);
@@ -2244,7 +2256,10 @@ function compileExists(
 		const targetAlias = relatedAlias;
 
 		// FK from junction to source (default: {source}Id) - supports composite keys
-		const fkCols = normalizeForeignKey(relation.foreignKey, `${relation.source}Id`);
+		const fkCols = normalizeForeignKey(
+			relation.foreignKey,
+			`${relation.source}Id`,
+		);
 
 		// FK from junction to target (default: {target}Id)
 		const otherKey = relation.otherKey ?? `${relation.target}Id`;
@@ -2268,14 +2283,24 @@ function compileExists(
 				`${junctionAlias}.${otherKey}`,
 				`${targetAlias}.${targetKeys[0]}`,
 			);
-		
+
 		// Correlate junction to source with composite key support
 		if (fkCols.length === 1) {
-			subquery = subquery.whereRef(`${junctionAlias}.${fkCols[0]}`, '=', `${sourceAlias}.${sourceKeys[0]}`);
+			subquery = subquery.whereRef(
+				`${junctionAlias}.${fkCols[0]}`,
+				'=',
+				`${sourceAlias}.${sourceKeys[0]}`,
+			);
 		} else {
 			// Composite key correlation
 			subquery = subquery.where((innerEb: any) =>
-				buildCompositeKeyCorrelation(innerEb, junctionAlias, sourceAlias, fkCols, sourceKeys)
+				buildCompositeKeyCorrelation(
+					innerEb,
+					junctionAlias,
+					sourceAlias,
+					fkCols,
+					sourceKeys,
+				),
 			);
 		}
 	} else {
@@ -2309,7 +2334,13 @@ function compileExists(
 			} else {
 				// Composite key: source.fk[] = target.pk[]
 				subquery = subquery.where((innerEb: any) =>
-					buildCompositeKeyCorrelation(innerEb, sourceAlias, relatedAlias, fkCols, targetKeys)
+					buildCompositeKeyCorrelation(
+						innerEb,
+						sourceAlias,
+						relatedAlias,
+						fkCols,
+						targetKeys,
+					),
 				);
 			}
 		} else {
@@ -2323,7 +2354,13 @@ function compileExists(
 			} else {
 				// Composite key: target.fk[] = source.pk[]
 				subquery = subquery.where((innerEb: any) =>
-					buildCompositeKeyCorrelation(innerEb, relatedAlias, sourceAlias, fkCols, sourceKeys)
+					buildCompositeKeyCorrelation(
+						innerEb,
+						relatedAlias,
+						sourceAlias,
+						fkCols,
+						sourceKeys,
+					),
 				);
 			}
 		}
@@ -2463,7 +2500,10 @@ function applyIncludeJoins(
 			const targetAlias = getNextAlias(state);
 
 			// FK from junction to source (default: {source}Id) - supports composite keys
-			const fkCols = normalizeForeignKey(relation.foreignKey, `${relation.source}Id`);
+			const fkCols = normalizeForeignKey(
+				relation.foreignKey,
+				`${relation.source}Id`,
+			);
 
 			// FK from junction to target (default: {target}Id)
 			const otherKey = relation.otherKey ?? `${relation.target}Id`;
@@ -2485,13 +2525,24 @@ function applyIncludeJoins(
 				);
 			} else {
 				// Composite key: multiple ON conditions
-				result = result.leftJoin(`${junctionTable} as ${junctionAlias}`, (join) => {
-					let j = join.onRef(`${rootAlias}.${sourceKeys[0]}`, '=', `${junctionAlias}.${fkCols[0]}`);
-					for (let i = 1; i < fkCols.length; i++) {
-						j = j.onRef(`${rootAlias}.${sourceKeys[i]}`, '=', `${junctionAlias}.${fkCols[i]}`);
-					}
-					return j;
-				});
+				result = result.leftJoin(
+					`${junctionTable} as ${junctionAlias}`,
+					(join) => {
+						let j = join.onRef(
+							`${rootAlias}.${sourceKeys[0]}`,
+							'=',
+							`${junctionAlias}.${fkCols[0]}`,
+						);
+						for (let i = 1; i < fkCols.length; i++) {
+							j = j.onRef(
+								`${rootAlias}.${sourceKeys[i]}`,
+								'=',
+								`${junctionAlias}.${fkCols[i]}`,
+							);
+						}
+						return j;
+					},
+				);
 			}
 
 			// LEFT JOIN 2: junction → target (junction.otherKey = target.pk) - single key for now
@@ -2539,9 +2590,17 @@ function applyIncludeJoins(
 				} else {
 					// Composite key: multiple ON conditions
 					result = result.leftJoin(`${targetTable} as ${joinAlias}`, (join) => {
-						let j = join.onRef(`${rootAlias}.${fkCols[0]}`, '=', `${joinAlias}.${targetKeys[0]}`);
+						let j = join.onRef(
+							`${rootAlias}.${fkCols[0]}`,
+							'=',
+							`${joinAlias}.${targetKeys[0]}`,
+						);
 						for (let i = 1; i < fkCols.length; i++) {
-							j = j.onRef(`${rootAlias}.${fkCols[i]}`, '=', `${joinAlias}.${targetKeys[i]}`);
+							j = j.onRef(
+								`${rootAlias}.${fkCols[i]}`,
+								'=',
+								`${joinAlias}.${targetKeys[i]}`,
+							);
 						}
 						return j;
 					});
@@ -2557,9 +2616,17 @@ function applyIncludeJoins(
 				} else {
 					// Composite key: multiple ON conditions
 					result = result.leftJoin(`${targetTable} as ${joinAlias}`, (join) => {
-						let j = join.onRef(`${joinAlias}.${fkCols[0]}`, '=', `${rootAlias}.${sourceKeys[0]}`);
+						let j = join.onRef(
+							`${joinAlias}.${fkCols[0]}`,
+							'=',
+							`${rootAlias}.${sourceKeys[0]}`,
+						);
 						for (let i = 1; i < fkCols.length; i++) {
-							j = j.onRef(`${joinAlias}.${fkCols[i]}`, '=', `${rootAlias}.${sourceKeys[i]}`);
+							j = j.onRef(
+								`${joinAlias}.${fkCols[i]}`,
+								'=',
+								`${rootAlias}.${sourceKeys[i]}`,
+							);
 						}
 						return j;
 					});
@@ -2779,7 +2846,10 @@ function applyJoinFilters(
 			const targetAlias = getNextAlias(state);
 
 			// FK from junction to source (default: {source}Id) - supports composite keys
-			const fkCols = normalizeForeignKey(relation.foreignKey, `${relation.source}Id`);
+			const fkCols = normalizeForeignKey(
+				relation.foreignKey,
+				`${relation.source}Id`,
+			);
 
 			// FK from junction to target (default: {target}Id)
 			const otherKey = relation.otherKey ?? `${relation.target}Id`;
@@ -2801,13 +2871,24 @@ function applyJoinFilters(
 				);
 			} else {
 				// Composite key: multiple ON conditions
-				result = result.innerJoin(`${junctionTable} as ${junctionAlias}`, (join) => {
-					let j = join.onRef(`${rootAlias}.${sourceKeys[0]}`, '=', `${junctionAlias}.${fkCols[0]}`);
-					for (let i = 1; i < fkCols.length; i++) {
-						j = j.onRef(`${rootAlias}.${sourceKeys[i]}`, '=', `${junctionAlias}.${fkCols[i]}`);
-					}
-					return j;
-				});
+				result = result.innerJoin(
+					`${junctionTable} as ${junctionAlias}`,
+					(join) => {
+						let j = join.onRef(
+							`${rootAlias}.${sourceKeys[0]}`,
+							'=',
+							`${junctionAlias}.${fkCols[0]}`,
+						);
+						for (let i = 1; i < fkCols.length; i++) {
+							j = j.onRef(
+								`${rootAlias}.${sourceKeys[i]}`,
+								'=',
+								`${junctionAlias}.${fkCols[i]}`,
+							);
+						}
+						return j;
+					},
+				);
 			}
 
 			// JOIN 2: junction → target (junction.otherKey = target.pk) - single key for now
@@ -2853,13 +2934,24 @@ function applyJoinFilters(
 					);
 				} else {
 					// Composite key: multiple ON conditions
-					result = result.innerJoin(`${targetTable} as ${joinAlias}`, (join) => {
-						let j = join.onRef(`${rootAlias}.${fkCols[0]}`, '=', `${joinAlias}.${targetKeys[0]}`);
-						for (let i = 1; i < fkCols.length; i++) {
-							j = j.onRef(`${rootAlias}.${fkCols[i]}`, '=', `${joinAlias}.${targetKeys[i]}`);
-						}
-						return j;
-					});
+					result = result.innerJoin(
+						`${targetTable} as ${joinAlias}`,
+						(join) => {
+							let j = join.onRef(
+								`${rootAlias}.${fkCols[0]}`,
+								'=',
+								`${joinAlias}.${targetKeys[0]}`,
+							);
+							for (let i = 1; i < fkCols.length; i++) {
+								j = j.onRef(
+									`${rootAlias}.${fkCols[i]}`,
+									'=',
+									`${joinAlias}.${targetKeys[i]}`,
+								);
+							}
+							return j;
+						},
+					);
 				}
 			} else {
 				// hasMany/hasOne: target.fk = source.pk (e.g., posts.userId = users.id)
@@ -2871,13 +2963,24 @@ function applyJoinFilters(
 					);
 				} else {
 					// Composite key: multiple ON conditions
-					result = result.innerJoin(`${targetTable} as ${joinAlias}`, (join) => {
-						let j = join.onRef(`${joinAlias}.${fkCols[0]}`, '=', `${rootAlias}.${sourceKeys[0]}`);
-						for (let i = 1; i < fkCols.length; i++) {
-							j = j.onRef(`${joinAlias}.${fkCols[i]}`, '=', `${rootAlias}.${sourceKeys[i]}`);
-						}
-						return j;
-					});
+					result = result.innerJoin(
+						`${targetTable} as ${joinAlias}`,
+						(join) => {
+							let j = join.onRef(
+								`${joinAlias}.${fkCols[0]}`,
+								'=',
+								`${rootAlias}.${sourceKeys[0]}`,
+							);
+							for (let i = 1; i < fkCols.length; i++) {
+								j = j.onRef(
+									`${joinAlias}.${fkCols[i]}`,
+									'=',
+									`${rootAlias}.${sourceKeys[i]}`,
+								);
+							}
+							return j;
+						},
+					);
 				}
 			}
 		}
@@ -3377,7 +3480,8 @@ function normalizeForeignKey(
 	if (Array.isArray(foreignKey)) {
 		return foreignKey;
 	}
-	return foreignKey ? [foreignKey] : [defaultValue];
+	// After Array.isArray check, foreignKey is string | undefined
+	return foreignKey !== undefined ? [foreignKey as string] : [defaultValue];
 }
 
 /**
@@ -3389,7 +3493,8 @@ function normalizePrimaryKey(
 	if (Array.isArray(primaryKey)) {
 		return primaryKey;
 	}
-	return primaryKey ? [primaryKey] : ['id'];
+	// After Array.isArray check, primaryKey is string | undefined
+	return primaryKey !== undefined ? [primaryKey as string] : ['id'];
 }
 
 /**
@@ -3414,13 +3519,21 @@ function buildCompositeKeyCorrelation(
 	if (sourceCols.length === 1) {
 		// Single key - simple whereRef
 		return eb.and([
-			eb(`${sourceAlias}.${sourceCols[0]}`, '=', eb.ref(`${targetAlias}.${targetCols[0]}`)),
+			eb(
+				`${sourceAlias}.${sourceCols[0]}`,
+				'=',
+				eb.ref(`${targetAlias}.${targetCols[0]}`),
+			),
 		]);
 	}
 
 	// Composite key - AND all column pairs
 	const conditions = sourceCols.map((srcCol, i) =>
-		eb(`${sourceAlias}.${srcCol}`, '=', eb.ref(`${targetAlias}.${targetCols[i]}`)),
+		eb(
+			`${sourceAlias}.${srcCol}`,
+			'=',
+			eb.ref(`${targetAlias}.${targetCols[i]}`),
+		),
 	);
 	return eb.and(conditions);
 }
@@ -3432,5 +3545,7 @@ function buildCompositeKeyCorrelation(
 function unwrapSingletonArray(
 	value: readonly string[],
 ): string | readonly string[] {
-	return value.length === 1 ? value[0] : value;
+	// With noUncheckedIndexedAccess, value[0] is string | undefined
+	// We know length === 1 means value[0] exists, so use non-null assertion
+	return value.length === 1 ? value[0]! : value;
 }

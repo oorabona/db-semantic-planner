@@ -10,8 +10,8 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { Command } from 'commander';
 import type { ResolvedSchema } from '@db-semantic-planner/schema';
+import { Command } from 'commander';
 import { generateKysely } from '../generators/kysely.js';
 import { generateManifest } from '../generators/manifest.js';
 import { loadSchema, loadSchemaFromCwd } from '../utils/schema-loader.js';
@@ -23,7 +23,10 @@ export const generateCommand = new Command('generate')
 	.option('-o, --out <dir>', 'Output directory (default: ./generated/<target>)')
 	.option('--output <dir>', 'Output directory (alias for --out)')
 	.action(
-		async (target: string, options: { schema?: string; out?: string; output?: string }) => {
+		async (
+			target: string,
+			options: { schema?: string; out?: string; output?: string },
+		) => {
 			try {
 				// Load schema
 				let schema: ResolvedSchema;
@@ -48,10 +51,10 @@ export const generateCommand = new Command('generate')
 				switch (target) {
 					case 'manifest': {
 						const manifest = generateManifest(schema);
-						const outPath = resolve(resolvedOutDir, 'schema.ts');
+						const outPath = resolve(resolvedOutDir, 'schema.json');
 
 						mkdirSync(dirname(outPath), { recursive: true });
-						writeFileSync(outPath, manifest.code, 'utf-8');
+						writeFileSync(outPath, manifest.json, 'utf-8');
 
 						console.log(`✅ Generated manifest: ${outPath}`);
 						console.log(`   Tables: ${Object.keys(schema.tables).length}`);

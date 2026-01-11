@@ -4,14 +4,21 @@
  * Interactive REPL for exploring schema and executing queries.
  */
 
-import React, { useState, useCallback, useMemo } from 'react';
-import { render, Box, Text, useInput, useApp } from 'ink';
-import type { ReplConfig, QueryMode, QueryResult } from './types.js';
-import { Header, InputPrompt, HelpDisplay, OutputDisplay, CompletionDisplay, SchemaSidebar } from './components/index.js';
-import { parseNaturalQuery, ParseError } from './parser.js';
-import { executeQuery } from './query-executor.js';
-import { getHistory } from './history.js';
+import { Box, render, Text, useApp, useInput } from 'ink';
+import React, { useCallback, useMemo, useState } from 'react';
 import { CompletionProvider, type CompletionSuggestion } from './completion.js';
+import {
+	CompletionDisplay,
+	Header,
+	HelpDisplay,
+	InputPrompt,
+	OutputDisplay,
+	SchemaSidebar,
+} from './components/index.js';
+import { getHistory } from './history.js';
+import { ParseError, parseNaturalQuery } from './parser.js';
+import { executeQuery } from './query-executor.js';
+import type { QueryMode, QueryResult, ReplConfig } from './types.js';
 
 interface ReplAppProps {
 	config: ReplConfig;
@@ -32,12 +39,15 @@ function ReplApp({ config }: ReplAppProps) {
 	const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
 	const [inputKey, setInputKey] = useState(0);
 	const [splitView, setSplitView] = useState(false);
-	
+
 	// Get command history singleton
 	const history = useMemo(() => getHistory(), []);
-	
+
 	// Create completion provider
-	const completionProvider = useMemo(() => new CompletionProvider(config.schema), [config.schema]);
+	const completionProvider = useMemo(
+		() => new CompletionProvider(config.schema),
+		[config.schema],
+	);
 	const [completions, setCompletions] = useState<CompletionSuggestion[]>([]);
 
 	// Handle special keys
@@ -48,14 +58,17 @@ function ReplApp({ config }: ReplAppProps) {
 	});
 
 	// Handle input changes for completions
-	const handleInputChange = useCallback((value: string) => {
-		if (mode === 'natural') {
-			const suggestions = completionProvider.complete(value);
-			setCompletions(suggestions);
-		} else {
-			setCompletions([]);
-		}
-	}, [completionProvider, mode]);
+	const handleInputChange = useCallback(
+		(value: string) => {
+			if (mode === 'natural') {
+				const suggestions = completionProvider.complete(value);
+				setCompletions(suggestions);
+			} else {
+				setCompletions([]);
+			}
+		},
+		[completionProvider, mode],
+	);
 
 	const handleSubmit = useCallback(
 		(value: string) => {
@@ -159,7 +172,7 @@ function ReplApp({ config }: ReplAppProps) {
 								return;
 							}
 							// TableDefinition IS the columns map (Record<string, ColumnDefinition>)
-						const columns = Object.entries(table);
+							const columns = Object.entries(table);
 							setOutput(
 								<Box flexDirection="column" marginY={1}>
 									<Text bold color="cyan">
@@ -169,15 +182,15 @@ function ReplApp({ config }: ReplAppProps) {
 										Columns:
 									</Text>
 									{columns.map(([col, def]) => {
-									if (!def) return null;
-									return (
-										<Text key={col}>
-											{' '}
-											• {col}: {def.type}
-											{def.nullable ? '' : ' (NOT NULL)'}
-										</Text>
-									);
-								})}
+										if (!def) return null;
+										return (
+											<Text key={col}>
+												{' '}
+												• {col}: {def.type}
+												{def.nullable ? '' : ' (NOT NULL)'}
+											</Text>
+										);
+									})}
 								</Box>,
 							);
 						} else {
@@ -206,7 +219,9 @@ function ReplApp({ config }: ReplAppProps) {
 						setSplitView((prev) => !prev);
 						setOutput(
 							<Text color="cyan">
-								{splitView ? '📋 Single view mode' : '📊 Split view mode (schema | query)'}
+								{splitView
+									? '📋 Single view mode'
+									: '📊 Split view mode (schema | query)'}
 							</Text>,
 						);
 						setQueryResult(null);
@@ -218,9 +233,7 @@ function ReplApp({ config }: ReplAppProps) {
 						setShowHelp(false);
 						setQueryResult(null);
 						if (recent.length === 0) {
-							setOutput(
-								<Text color="gray">No command history yet.</Text>,
-							);
+							setOutput(<Text color="gray">No command history yet.</Text>);
 						} else {
 							setOutput(
 								<Box flexDirection="column" marginY={1}>
@@ -229,7 +242,8 @@ function ReplApp({ config }: ReplAppProps) {
 									</Text>
 									{recent.map((cmd, idx) => (
 										<Text key={idx} color="gray">
-											{' '}{idx + 1}. {cmd}
+											{' '}
+											{idx + 1}. {cmd}
 										</Text>
 									))}
 								</Box>,
@@ -258,7 +272,7 @@ function ReplApp({ config }: ReplAppProps) {
 				try {
 					const parsed = parseNaturalQuery(trimmed, config.schema);
 					const result = executeQuery(parsed, config.schema);
-					
+
 					if (result.error) {
 						setQueryResult({
 							sql: '',
@@ -320,10 +334,10 @@ function ReplApp({ config }: ReplAppProps) {
 			)}
 
 			{/* Input area */}
-			<InputPrompt 
-				onSubmit={handleSubmit} 
-				mode={mode} 
-				resetKey={inputKey} 
+			<InputPrompt
+				onSubmit={handleSubmit}
+				mode={mode}
+				resetKey={inputKey}
 				history={history}
 				onInputChange={handleInputChange}
 			/>

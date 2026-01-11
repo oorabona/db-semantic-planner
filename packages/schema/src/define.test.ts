@@ -58,6 +58,149 @@ describe('defineSchema', () => {
 		});
 	});
 
+	describe('new API format', () => {
+		it('creates schema with tables as first argument', () => {
+			const schema = defineSchema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					name: { type: 'string' },
+				},
+			});
+
+			expect(schema.tables.users).toBeDefined();
+			expect(schema.tables.users.id.type).toBe('uuid');
+			expect(schema.conventions).toEqual(DEFAULT_CONVENTIONS);
+			expect(schema.hints).toEqual({});
+		});
+
+		it('creates schema with tables and config', () => {
+			const schema = defineSchema(
+				{
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+					},
+					posts: {
+						id: { type: 'uuid', primaryKey: true },
+						authorId: { type: 'uuid', references: { table: 'users' } },
+					},
+				},
+				{
+					hints: {
+						'users.posts': { defaultStrategy: 'exists' },
+					},
+				},
+			);
+
+			expect(schema.tables.users).toBeDefined();
+			expect(schema.tables.posts).toBeDefined();
+			expect(schema.hints['users.posts']).toEqual({
+				defaultStrategy: 'exists',
+			});
+		});
+
+		it('supports relations in config', () => {
+			const schema = defineSchema(
+				{
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+					},
+					posts: {
+						id: { type: 'uuid', primaryKey: true },
+						authorId: { type: 'uuid' },
+					},
+				},
+				{
+					relations: {
+						'posts.author': {
+							kind: 'belongsTo',
+							target: 'users',
+							foreignKey: 'authorId',
+						},
+					},
+				},
+			);
+
+			expect(schema.relations['posts.author']).toMatchObject({
+				kind: 'belongsTo',
+				target: 'users',
+				foreignKey: 'authorId',
+			});
+		});
+
+		it('supports conventions in config', () => {
+			const schema = defineSchema(
+				{
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+					},
+				},
+				{
+					conventions: {
+						fkPattern: '{singular}_id',
+					},
+				},
+			);
+
+			expect(schema.conventions.fkPattern).toBe('{singular}_id');
+			expect(schema.conventions.pluralize).toBe(true); // Default preserved
+		});
+
+		it('auto-infers relations in new format', () => {
+			const schema = defineSchema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					authorId: { type: 'uuid', references: { table: 'users' } },
+				},
+			});
+
+			expect(schema.relations['posts.author']).toMatchObject({
+				kind: 'belongsTo',
+				target: 'users',
+			});
+			expect(schema.relations['users.posts']).toMatchObject({
+				kind: 'hasMany',
+				target: 'posts',
+			});
+		});
+	});
+
+	describe('legacy API format (backward compatibility)', () => {
+		it('still supports { tables: {...} } format', () => {
+			const schema = defineSchema({
+				tables: {
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+						name: { type: 'string' },
+					},
+				},
+			});
+
+			expect(schema.tables.users).toBeDefined();
+			expect(schema.tables.users.id.type).toBe('uuid');
+		});
+
+		it('correctly handles table literally named "tables" in new format', () => {
+			// Edge case: user has a table named "tables" - should NOT be detected as legacy
+			const schema = defineSchema({
+				tables: {
+					id: { type: 'uuid', primaryKey: true },
+					name: { type: 'string' },
+				},
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+			});
+
+			// "tables" should be recognized as a table name, not legacy wrapper
+			expect(schema.tables.tables).toBeDefined();
+			expect(schema.tables.tables.id.type).toBe('uuid');
+			expect(schema.tables.users).toBeDefined();
+		});
+	});
+
 	describe('relation inference', () => {
 		it('auto-infers belongsTo and hasMany from FK', () => {
 			const schema = defineSchema({

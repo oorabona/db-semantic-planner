@@ -354,7 +354,6 @@ export function isGeneratedSchema(value: unknown): value is GeneratedSchema {
 	);
 }
 
-
 // ============================================================================
 // Valibot Validation Schemas (CORE-005)
 // ============================================================================
@@ -450,7 +449,10 @@ const RelationDefinitionSchema = v.variant('kind', [
 /**
  * Relations definition schema
  */
-const RelationsDefinitionSchema = v.record(v.string(), RelationDefinitionSchema);
+const RelationsDefinitionSchema = v.record(
+	v.string(),
+	RelationDefinitionSchema,
+);
 
 /**
  * Hint definition schema

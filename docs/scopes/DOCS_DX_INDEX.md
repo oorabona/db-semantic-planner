@@ -41,7 +41,7 @@ This scope focuses on making the library approachable and safe to use.
 ### Compatibility Layer (P1)
 
 - Drizzle-like helpers: eq(), and(), or()
-- Query shortcuts: findMany(), findFirst(), findOneOrThrow()
+- Query shortcuts: all(), first(), firstOrThrow()
 - Familiar API for developers migrating from other ORMs
 
 ## Backlog

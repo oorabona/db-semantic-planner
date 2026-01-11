@@ -34,21 +34,48 @@ pnpm add -D @db-semantic-planner/cli
 ```typescript
 import { defineSchema } from '@db-semantic-planner/schema';
 
-export default defineSchema({
+// Simple: Tables only (relations auto-inferred from FK references)
+const schema = defineSchema({
   users: {
-    id: { type: 'serial', primaryKey: true },
-    name: { type: 'varchar', length: 255 },
-    email: { type: 'varchar', length: 255, nullable: false },
-    createdAt: { type: 'timestamp', default: 'now()' },
+    id: { type: 'integer', primaryKey: true },
+    name: { type: 'string' },
+    email: { type: 'string' },
+    createdAt: { type: 'datetime' },
   },
   posts: {
-    id: { type: 'serial', primaryKey: true },
-    title: { type: 'varchar', length: 255 },
-    content: { type: 'text', nullable: true },
-    authorId: { type: 'integer', references: 'users.id' },
-    published: { type: 'boolean', default: false },
+    id: { type: 'integer', primaryKey: true },
+    title: { type: 'string' },
+    content: { type: 'string', nullable: true },
+    authorId: { type: 'integer', references: { table: 'users' } },
+    published: { type: 'boolean' },
   },
 });
+
+// With explicit relations (for complex cases like many-to-many)
+const schemaWithRelations = defineSchema(
+  {
+    users: {
+      id: { type: 'integer', primaryKey: true },
+      name: { type: 'string' },
+    },
+    roles: {
+      id: { type: 'integer', primaryKey: true },
+      name: { type: 'string' },
+    },
+    user_roles: {
+      userId: { type: 'integer', references: { table: 'users' } },
+      roleId: { type: 'integer', references: { table: 'roles' } },
+    },
+  },
+  {
+    relations: {
+      'users.roles': { kind: 'manyToMany', target: 'roles', through: 'user_roles' },
+      'roles.users': { kind: 'manyToMany', target: 'users', through: 'user_roles' },
+    },
+  }
+);
+
+export default schema;
 ```
 
 #### 2. Generate Kysely types
@@ -96,7 +123,7 @@ import type { DB } from './db.generated';
 const kysely = new Kysely<DB>({ dialect: new PostgresDialect({ pool }) });
 
 const orm = createOrm({
-  model: schema,
+  schema,  // Schema from @db-semantic-planner/schema
   adapter: createKyselyAdapter(kysely),
 });
 
@@ -117,9 +144,10 @@ const postsWithAuthors = await orm
 ### Option B: Manual Schema Definition
 
 ```typescript
-import { createOrm, eq, hasMany, belongsTo } from '@db-semantic-planner/core';
+import { createOrm, eq } from '@db-semantic-planner/core';
 import { createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
 
+// Low-level ModelIR format (advanced users only)
 const model = {
   tables: {
     users: {
@@ -197,10 +225,21 @@ Options:
 
 #### `dbsp generate manifest`
 
-Generate a JSON manifest of your schema (useful for tooling).
+Generate a JSON manifest of your schema (useful for tooling). Outputs JSON format.
 
 ```bash
 dbsp generate manifest --schema ./dbsp.schema.ts --output ./schema.json
+```
+
+The manifest is a JSON file containing the resolved schema structure:
+
+```json
+{
+  "tables": { "users": { ... }, "posts": { ... } },
+  "relations": { "users.posts": { ... }, "posts.author": { ... } },
+  "hints": {},
+  "conventions": { "fkPattern": "{table}Id", "pluralize": true, "timestamps": [] }
+}
 ```
 
 #### `dbsp verify`
@@ -235,14 +274,10 @@ Interactive REPL for testing queries without a database connection.
 ```bash
 # Basic REPL
 dbsp repl --schema ./dbsp.schema.ts
-
-# With split view (schema sidebar)
-dbsp repl --schema ./dbsp.schema.ts --split
 ```
 
 Options:
-- `-s, --schema <path>` - Path to schema file (required)
-- `--split` - Enable split view with schema sidebar
+- `-s, --schema <path>` - Path to schema file (auto-detected if not specified)
 
 ##### REPL Features
 
@@ -273,7 +308,7 @@ Options:
 - Tab completion for tables, relations, columns, and operators
 - Command history (persisted to `~/.dbsp_history`)
 - Up/Down arrows to navigate history
-- Split view mode for schema reference
+- Split view mode (toggle with `.split` command) for schema reference
 
 ---
 

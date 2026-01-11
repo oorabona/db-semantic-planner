@@ -23,8 +23,8 @@ import {
 	compileUpsert,
 	compileWindowSelect,
 	compileWithIncludes,
+	injectAdvancedRecursiveClauses,
 } from './compiler.js';
-import { injectAdvancedRecursiveClauses } from './compiler.js';
 import {
 	POSTGRESQL_CAPABILITIES,
 	SQLITE_CAPABILITIES,
@@ -376,7 +376,12 @@ describe('SQL Compiler', () => {
 					kind: 'or',
 					conditions: [
 						{ kind: 'comparison', field: 'id', operator: 'eq', value: 1 },
-						{ kind: 'like', field: 'name', pattern: '%admin%', caseInsensitive: true },
+						{
+							kind: 'like',
+							field: 'name',
+							pattern: '%admin%',
+							caseInsensitive: true,
+						},
 						{ kind: 'in', field: 'role', values: ['admin', 'moderator'] },
 						{ kind: 'null', field: 'deletedAt', operator: 'isNull' },
 					],
@@ -1567,7 +1572,9 @@ describe('SQL Compiler', () => {
 						POSTGRESQL_CAPABILITIES,
 					);
 
-					expect(result.sql).toContain('SEARCH DEPTH FIRST BY node_id SET ordercol');
+					expect(result.sql).toContain(
+						'SEARCH DEPTH FIRST BY node_id SET ordercol',
+					);
 				});
 
 				it('should inject SEARCH BREADTH FIRST clause when search=breadth (PostgreSQL)', () => {
@@ -1579,7 +1586,9 @@ describe('SQL Compiler', () => {
 						POSTGRESQL_CAPABILITIES,
 					);
 
-					expect(result.sql).toContain('SEARCH BREADTH FIRST BY node_id SET ordercol');
+					expect(result.sql).toContain(
+						'SEARCH BREADTH FIRST BY node_id SET ordercol',
+					);
 				});
 
 				it('should inject both CYCLE and SEARCH clauses when both are specified', () => {
@@ -1637,7 +1646,9 @@ describe('SQL Compiler', () => {
 							POSTGRESQL_CAPABILITIES,
 						);
 						// All modes use CYCLE clause - application handles is_cycle differently
-						expect(result.sql).toContain('CYCLE node_id SET is_cycle USING path');
+						expect(result.sql).toContain(
+							'CYCLE node_id SET is_cycle USING path',
+						);
 					}
 				});
 			});
@@ -3166,7 +3177,6 @@ describe('CORE-006: Composite Key Support', () => {
 	 * since defineSchema() defaults primaryKey to 'id'.
 	 */
 	const compositeKeySchema = (() => {
-
 		const tables = new Map();
 
 		// tenants table (simple PK)
@@ -3342,11 +3352,7 @@ describe('CORE-006: Composite Key Support', () => {
 				sourceKey: ['tenantId', 'id'] as readonly string[],
 			};
 
-			const compiled = compileSeparateInclude(
-				includeInfo,
-				parentIds,
-				kysely,
-			);
+			const compiled = compileSeparateInclude(includeInfo, parentIds, kysely);
 
 			// Should produce OR conditions for composite key tuples
 			expect(compiled.sql).toContain('tenant_orders');

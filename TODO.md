@@ -22,6 +22,125 @@
 | CLI REPL Interactive (DX-030) | cli | ✅ Complete |
 | Codebase Stabilization (STAB-001) | all | ✅ Complete |
 
+## ✅ COMPLETED: ALIGN-001 Documentation & API Alignment Sprint (2026-01-11)
+
+**Priority:** HIGH | **Effort:** L (~16h total) | **Breaking:** Yes (schema API change)
+**Scope:** schema, core, cli, docs
+**Started:** 2026-01-11 | **Completed:** 2026-01-11
+
+Alignment sprint to fix doc↔code gaps and improve DX before v1.0.
+
+### Decisions (validated 2026-01-11)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Schema API | `defineSchema(tables, config?)` hybrid | Flat tables, optional config object |
+| Manifest output | JSON for tooling/MCP | TS for Kysely types, JSON for schema description |
+| Build system | Migrate to tsup | 10x faster builds |
+| MCP roadmap | `@dbsp/mcp-server` planned | Intent JSON → SQL deterministic |
+
+### Tasks
+
+| # | Task ID | Title | Priority | Effort | Status |
+|---|---------|-------|----------|--------|--------|
+| 1 | LOT-1 | Fix README.md (schema format, types, FK, --split) | HIGH | S (~1h) | ✅ Done (2026-01-11) |
+| 2 | LOT-2 | Fix QUICKSTART.md + examples alignment | HIGH | XS (~30min) | ✅ Done (2026-01-11) — Already aligned by LOT-3 |
+| 3 | LOT-3 | Implement hybrid `defineSchema(tables, config?)` API | HIGH | M (~4h) | ✅ Done (2026-01-11) |
+| 4 | LOT-4 | Implement `dbsp generate manifest` JSON output | MEDIUM | S (~2h) | ✅ Done (2026-01-11) |
+| 5 | LOT-5 | Migrate build to tsup (all packages) | MEDIUM | M (~3h) | ✅ Done (2026-01-11) |
+| 6 | LOT-6 | Move legacy dx/findMany docs → historical/ | LOW | XS (~15min) | ✅ Done (2026-01-11) |
+| 7 | LOT-7 | REPL schema bridge type safety | MEDIUM | S (~2h) | ✅ Done (2026-01-11) — Covered by CORE-005 Valibot |
+| 8 | FUTURE | @dbsp/mcp-server package | LOW | XL | ⏳ Backlog |
+
+---
+
+### LOT-1: Fix README.md Critical Gaps
+
+**Priority:** HIGH | **Effort:** S (~1h) | **Breaking:** No
+**Scope:** docs
+
+Fix documentation to match actual/planned API.
+
+**Changes:**
+- [x] Update schema format: `defineSchema(tables)` or `defineSchema(tables, config?)` hybrid API (2026-01-11)
+- [x] Fix types: use `{ type: 'integer', primaryKey: true }` format (2026-01-11)
+- [x] Fix FK syntax: `{ type: 'integer', references: { table: 'users' } }` (2026-01-11)
+- [x] Document `.split` REPL command (2026-01-11)
+- [x] Update manifest docs to show JSON output (2026-01-11)
+
+---
+
+### LOT-3: Implement Hybrid defineSchema API ✅ (2026-01-11)
+
+**Priority:** HIGH | **Effort:** M (~4h) | **Breaking:** Yes
+**Scope:** schema
+
+New signature: `defineSchema(tables, config?)`
+
+**Implementation:**
+- [x] Update `defineSchema()` signature in `packages/schema/src/define.ts` (2026-01-11)
+- [x] Support overloads: `defineSchema(tables)` and `defineSchema(tables, config)` (2026-01-11)
+- [x] Move `relations` from first arg to config object (2026-01-11)
+- [x] Keep backward compat with deprecation warning for old format (2026-01-11)
+- [x] Update all examples in `examples/` (2026-01-11)
+- [x] Update all tests (2026-01-11)
+- [ ] Update type exports
+
+**New API:**
+```typescript
+// Simple (relations inferred from FK)
+defineSchema({
+  users: { id: { type: 'integer', primaryKey: true } },
+  posts: { userId: { type: 'integer', references: { table: 'users' } } },
+});
+
+// With explicit relations
+defineSchema(
+  {
+    users: { id: { type: 'integer', primaryKey: true } },
+    roles: { id: { type: 'integer', primaryKey: true } },
+  },
+  {
+    relations: [
+      { kind: 'manyToMany', from: 'users', to: 'roles', through: 'user_roles' }
+    ],
+  }
+);
+```
+
+---
+
+### LOT-5: Migrate Build to tsup ✅ (2026-01-11)
+
+**Priority:** MEDIUM | **Effort:** M (~3h) | **Breaking:** No
+**Scope:** schema, core, adapter-kysely, cli
+
+Replaced tsc with tsup (esbuild-based) for faster builds.
+
+**Implementation:**
+- [x] Add tsup to pnpm catalog (2026-01-11)
+- [x] Create tsup.config.ts for all 4 packages (2026-01-11)
+- [x] Update build scripts from "tsc" to "tsup" (2026-01-11)
+- [x] Remove composite:true from tsconfigs (incompatible with tsup dts) (2026-01-11)
+- [x] Fix 3 type errors in compiler.ts exposed by stricter typecheck (2026-01-11)
+
+**Type fixes in compiler.ts:**
+- `normalizeForeignKey`: TypeScript narrowing after Array.isArray
+- `normalizePrimaryKey`: Same pattern
+- `unwrapSingletonArray`: noUncheckedIndexedAccess array access
+
+**Build time improvements:**
+| Package | Before (tsc) | After (tsup) |
+|---------|--------------|--------------|
+| schema | ~700ms | ~13ms |
+| core | ~1.2s | ~34ms |
+| adapter-kysely | ~1.7s | ~66ms |
+| cli | ~1.2s | ~20ms |
+
+**Tests:** All 1384 passing (schema: 60, core: 555, adapter-kysely: 649, cli: 120)
+
+---
+
 ## ✅ Completed: STAB-001 Codebase Stabilization Sprint (2026-01-11)
 
 **Priority:** HIGH | **Effort:** L (~20h total) | **Breaking:** No

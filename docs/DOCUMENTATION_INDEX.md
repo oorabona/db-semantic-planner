@@ -60,7 +60,7 @@ packages/adapter-kysely → Depends on core
 | ADAPTER-004 | [Enhanced Observability](specs/ADAPTER-004-enhanced-observability.md) | adapter | ✅ canonical |
 | ADAPTER-006 | [Schema Introspection](specs/ADAPTER-006-schema-introspection.md) | adapter | ✅ canonical |
 | DX-001 | [Strict Mode](specs/DX-001-strict-mode.md) | dx | ✅ canonical |
-| DX-003 | [Compat Layer](specs/DX-003-compat-layer.md) | dx | ✅ canonical |
+| DX-003 | [Compat Layer (legacy)](historic/DX-003-compat-layer-legacy.md) | dx | ⚠️ deprecated (API-001) |
 | DX-004 | dump()/execute() API | dx | ✅ in E2E-001 |
 | E2E-001 | [PostgreSQL Validation](specs/E2E-001-postgresql-validation.md) | testing | ✅ canonical |
 | STREAMING-001 | [Cursor/Streaming Support](specs/STREAMING-001-cursor-support.md) | adapter, dx | ✅ canonical |

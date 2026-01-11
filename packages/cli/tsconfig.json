@@ -3,14 +3,14 @@
 	"compilerOptions": {
 		"rootDir": "./src",
 		"outDir": "./dist",
-		"composite": true,
+
 		"jsx": "react-jsx",
 		"paths": {
 			"@db-semantic-planner/schema": ["../schema/src"],
 			"@db-semantic-planner/core": ["../core/src"]
 		}
 	},
-	"references": [{ "path": "../schema" }, { "path": "../core" }],
+
 	"include": ["src/**/*", "src/**/*.tsx"],
 	"exclude": ["node_modules", "dist", "**/*.test.ts", "spike/**/*"]
 }

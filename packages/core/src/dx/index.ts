@@ -129,8 +129,8 @@ export {
 	type GeneratedSchema,
 	type GeneratedTable,
 	isGeneratedSchema,
-	resolvedSchemaToGeneratedSchema,
 	ResolvedSchemaValidation,
+	resolvedSchemaToGeneratedSchema,
 	type SchemaConversionResult,
 	type ValidatedResolvedSchema,
 } from './schema-bridge.js';

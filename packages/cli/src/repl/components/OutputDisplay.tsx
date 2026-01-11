@@ -2,8 +2,8 @@
  * DX-030: REPL Output Display Component
  */
 
-import React from 'react';
 import { Box, Text } from 'ink';
+import React from 'react';
 import type { QueryResult } from '../types.js';
 
 interface OutputDisplayProps {

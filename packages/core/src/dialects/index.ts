@@ -286,7 +286,7 @@ export function getAvailableDialects(): string[] {
 	const seen = new Set<string>();
 	const result: string[] = [];
 
-	for (const [key, caps] of dialectRegistry) {
+	for (const [_key, caps] of dialectRegistry) {
 		if (!seen.has(caps.name)) {
 			seen.add(caps.name);
 			result.push(caps.name);

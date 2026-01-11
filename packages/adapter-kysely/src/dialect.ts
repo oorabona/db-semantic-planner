@@ -66,7 +66,7 @@ export const POSTGRESQL_CAPABILITIES: DialectCapabilities = {
 	supportsWindowFunctions: true,
 	supportsCycleDetection: true, // PostgreSQL 14+
 	supportsSearchClause: true, // PostgreSQL 14+
-};;
+};
 
 /**
  * MySQL capability profile - limited feature support.
@@ -83,7 +83,7 @@ export const MYSQL_CAPABILITIES: DialectCapabilities = {
 	supportsWindowFunctions: true, // MySQL 8.0+
 	supportsCycleDetection: false,
 	supportsSearchClause: false,
-};;
+};
 
 /**
  * SQLite capability profile - limited feature support.
@@ -99,7 +99,7 @@ export const SQLITE_CAPABILITIES: DialectCapabilities = {
 	supportsWindowFunctions: true, // SQLite 3.25+
 	supportsCycleDetection: false,
 	supportsSearchClause: false,
-};;
+};
 
 /**
  * MSSQL capability profile.
@@ -115,7 +115,7 @@ export const MSSQL_CAPABILITIES: DialectCapabilities = {
 	supportsWindowFunctions: true, // MSSQL 2005+
 	supportsCycleDetection: false,
 	supportsSearchClause: false,
-};;
+};
 
 /**
  * Unknown dialect capability profile - safe defaults.
@@ -132,7 +132,7 @@ export const UNKNOWN_CAPABILITIES: DialectCapabilities = {
 	supportsWindowFunctions: true, // Most modern DBs support window functions
 	supportsCycleDetection: false,
 	supportsSearchClause: false,
-};;
+};
 
 /**
  * Map of dialect names to their capabilities.
@@ -374,8 +374,7 @@ function getDefaultGuidance(
 				'SQLite does not support native CYCLE clause. Use application-level cycle detection.',
 			mssql:
 				'MSSQL does not support native CYCLE clause. Use application-level cycle detection.',
-			unknown:
-				'The detected dialect may not support native cycle detection.',
+			unknown: 'The detected dialect may not support native cycle detection.',
 		},
 		supportsSearchClause: {
 			postgresql:
@@ -386,8 +385,7 @@ function getDefaultGuidance(
 				'SQLite does not support native SEARCH clause. Use ORDER BY on depth column instead.',
 			mssql:
 				'MSSQL does not support native SEARCH clause. Use ORDER BY on depth column instead.',
-			unknown:
-				'The detected dialect may not support native search clause.',
+			unknown: 'The detected dialect may not support native search clause.',
 		},
 	};
 
