@@ -1,9 +1,9 @@
+import React from 'react';
 /**
  * DX-030: REPL Header Component
  */
 
 import { Box, Text } from 'ink';
-import React from 'react';
 import type { QueryMode } from '../types.js';
 
 interface HeaderProps {

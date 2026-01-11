@@ -1,10 +1,11 @@
+import React from 'react';
 /**
  * DX-030: REPL Input Prompt Component with History Support
  */
 
 import { TextInput } from '@inkjs/ui';
 import { Box, Text, useInput } from 'ink';
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { CommandHistory } from '../history.js';
 import type { QueryMode } from '../types.js';
 

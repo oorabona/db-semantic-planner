@@ -1,3 +1,4 @@
+import React from 'react';
 /**
  * DX-030 Block 6: Completion Display Component
  *
@@ -5,7 +6,6 @@
  */
 
 import { Box, Text } from 'ink';
-import React from 'react';
 import type { CompletionSuggestion } from '../completion.js';
 
 interface CompletionDisplayProps {
