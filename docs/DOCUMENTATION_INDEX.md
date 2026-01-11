@@ -4,7 +4,7 @@ doc-meta:
   scope: project
   type: reference
   created: 2026-01-06
-  updated: 2026-01-08
+  updated: 2026-01-11
 ---
 
 # Documentation Index
@@ -13,7 +13,7 @@ doc-meta:
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
 
-**Status:** ✅ v1.0 Ready (1186 unit tests across 4 packages)
+**Status:** ✅ v1.0 Ready (1344 unit tests across 4 packages)
 
 ## Architecture: Codegen-First (ARCH-002)
 
@@ -33,7 +33,6 @@ packages/adapter-kysely → Depends on core
 | Project | [**Feature Comparison**](COMPARISON.md) | canonical |
 | Core | [Core Overview](plans/core-OVERVIEW.md) | draft |
 | Adapter | [Adapter Overview](plans/adapter-OVERVIEW.md) | draft |
-| DX | [DX Overview](plans/dx-OVERVIEW.md) | draft |
 | Experience | [Project Experience](../.claude/skills/project-experience/SKILL.md) | canonical |
 
 ## By Scope
@@ -45,8 +44,8 @@ packages/adapter-kysely → Depends on core
 | core | `packages/core` | [Overview](plans/core-OVERVIEW.md) | [TODO](../TODO_CORE.md) | ✅ Complete |
 | adapter | `packages/adapter-kysely` | [Overview](plans/adapter-OVERVIEW.md) | [TODO](../TODO_ADAPTER.md) | ✅ Complete |
 
-**Note:** DX layer is now part of `packages/core/src/dx/` (see ARCH-001).
-**Note:** Schema package provides the DSL for schema definition (see ARCH-002).
+**Note:** DX layer (ORM API, filters, query builders) is part of `packages/core/src/dx/` since ARCH-001.
+**Note:** Schema package (`packages/schema`) provides the DSL for schema definition (ARCH-002).
 
 ## Implementation Specifications
 

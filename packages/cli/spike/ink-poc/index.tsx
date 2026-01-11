@@ -8,10 +8,11 @@
  * - Basic styling (colors, bold, etc.)
  */
 
-import React, { useState, useCallback } from 'react';
-import { render, Box, Text, useInput, useApp } from 'ink';
-import Table from 'ink-table';
 import { TextInput } from '@inkjs/ui';
+import { Box, render, Text, useApp, useInput } from 'ink';
+import Table from 'ink-table';
+import type React from 'react';
+import { useCallback, useState } from 'react';
 
 // Mock SQL results data
 const MOCK_SQL_RESULTS = [
@@ -29,12 +30,7 @@ const MOCK_PLAN = {
 // Header component with styling
 function Header() {
 	return (
-		<Box
-			borderStyle="round"
-			borderColor="cyan"
-			paddingX={2}
-			marginBottom={1}
-		>
+		<Box borderStyle="round" borderColor="cyan" paddingX={2} marginBottom={1}>
 			<Text bold color="cyan">
 				🔍 db-semantic-planner REPL
 			</Text>
@@ -50,12 +46,7 @@ function SqlOutput({ sql, params }: { sql: string; params: unknown[] }) {
 			<Text bold color="yellow">
 				📝 Generated SQL:
 			</Text>
-			<Box
-				borderStyle="single"
-				borderColor="gray"
-				paddingX={1}
-				marginTop={1}
-			>
+			<Box borderStyle="single" borderColor="gray" paddingX={1} marginTop={1}>
 				<Text color="green">{sql}</Text>
 			</Box>
 			{params.length > 0 && (
@@ -155,58 +146,55 @@ function ReplApp() {
 		}
 	});
 
-	const handleSubmit = useCallback(
-		(value: string) => {
-			const trimmed = value.trim();
-			if (!trimmed) return;
+	const handleSubmit = useCallback((value: string) => {
+		const trimmed = value.trim();
+		if (!trimmed) return;
 
-			setHistory((prev) => [...prev, trimmed]);
-			setInput('');
+		setHistory((prev) => [...prev, trimmed]);
+		setInput('');
 
-			// Handle dot commands
-			if (trimmed === '.help') {
-				setShowHelp(true);
-				setOutput(null);
-				return;
-			}
+		// Handle dot commands
+		if (trimmed === '.help') {
+			setShowHelp(true);
+			setOutput(null);
+			return;
+		}
 
-			if (trimmed === '.tables') {
-				setShowHelp(false);
-				setOutput(
-					<Box flexDirection="column">
-						<Text bold color="cyan">
-							📋 Tables:
-						</Text>
-						<Text> - users</Text>
-						<Text> - posts</Text>
-						<Text> - comments</Text>
-					</Box>,
-				);
-				return;
-			}
-
-			if (trimmed === '.clear') {
-				setShowHelp(false);
-				setOutput(null);
-				setHistory([]);
-				return;
-			}
-
-			// Simulate query execution
+		if (trimmed === '.tables') {
 			setShowHelp(false);
 			setOutput(
 				<Box flexDirection="column">
-					<SqlOutput
-						sql="SELECT id, name, email, active FROM users WHERE active = $1"
-						params={[true]}
-					/>
-					<PlanOutput plan={MOCK_PLAN} />
-					<ResultsTable data={MOCK_SQL_RESULTS} />
+					<Text bold color="cyan">
+						📋 Tables:
+					</Text>
+					<Text> - users</Text>
+					<Text> - posts</Text>
+					<Text> - comments</Text>
 				</Box>,
 			);
-		},
-		[],
-	);
+			return;
+		}
+
+		if (trimmed === '.clear') {
+			setShowHelp(false);
+			setOutput(null);
+			setHistory([]);
+			return;
+		}
+
+		// Simulate query execution
+		setShowHelp(false);
+		setOutput(
+			<Box flexDirection="column">
+				<SqlOutput
+					sql="SELECT id, name, email, active FROM users WHERE active = $1"
+					params={[true]}
+				/>
+				<PlanOutput plan={MOCK_PLAN} />
+				<ResultsTable data={MOCK_SQL_RESULTS} />
+			</Box>,
+		);
+	}, []);
 
 	return (
 		<Box flexDirection="column" padding={1}>

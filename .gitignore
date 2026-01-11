@@ -5,6 +5,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Generated files (dbsp generate)
+generated/
+
 # Test coverage
 coverage/
 

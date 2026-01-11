@@ -579,3 +579,117 @@ expect(compiled.sql).toMatch(/inner join.*"postTags".*"postId"/i);
 **Key insight:** What matters is that the correct columns appear in the correct JOIN structure, not which specific alias number they get.
 
 **Location:** `packages/adapter-kysely/src/golden.test.ts` Q7 M:N tests
+
+---
+
+## Serena MCP Tools
+
+### Use replace_content Regex Mode with Wildcards (2026-01-11)
+
+**Issue:** Literal mode requires exact match of full content, which is verbose and error-prone for multi-line replacements.
+
+**Cause:** `mode: "literal"` matches character-for-character, including whitespace. For long code blocks, this wastes tokens and risks mismatches.
+
+**Solution:** Use `mode: "regex"` with wildcards to match patterns without quoting full content:
+
+```typescript
+// ❌ WRONG - literal mode requires exact text
+mcp__plugin_serena_serena__replace_content(
+  relative_path="file.ts",
+  needle="function foo() {\n  const a = 1;\n  const b = 2;\n  return a + b;\n}",  // All exact!
+  repl="function foo() { return 3; }",
+  mode="literal"
+)
+
+// ✅ CORRECT - regex with wildcards
+mcp__plugin_serena_serena__replace_content(
+  relative_path="file.ts",
+  needle="function foo\\(\\).*?\\nreturn.*?\\n\\}",  // Non-greedy match
+  repl="function foo() { return 3; }",
+  mode="regex"
+)
+```
+
+**Key insight:** Use `.*?` (non-greedy) to match content between known anchors. Escape special regex chars (`()`, `{}`, `[]`).
+
+---
+
+### Limit search_for_pattern Scope to Avoid Token Overflow (2026-01-11)
+
+**Issue:** `search_for_pattern` on root directory returns too many matches, exceeding `max_answer_chars` limit.
+
+**Cause:** Without `relative_path` constraint, the tool searches entire codebase. Large monorepos easily hit the 15K default char limit.
+
+**Solution:** Always constrain search scope:
+
+```typescript
+// ❌ WRONG - searches everything
+search_for_pattern(substring_pattern="TODO")
+
+// ✅ CORRECT - constrained to relevant directory
+search_for_pattern(
+  substring_pattern="TODO",
+  relative_path="packages/core/src",
+  context_lines_before=2,
+  context_lines_after=2
+)
+```
+
+**Alternative:** For simple searches, use Bash + grep which has unlimited output:
+```bash
+grep -rn "TODO" packages/core/src
+```
+
+---
+
+### find_symbol Doesn't Find Plain Functions (2026-01-11)
+
+**Issue:** `find_symbol(name_path_pattern="myFunction")` returns empty results for standalone functions.
+
+**Cause:** Serena's symbol analysis works best with classes and their methods. Plain exported functions may not be indexed as symbols depending on the language server.
+
+**Solution:** For finding plain functions, use pattern search instead:
+
+```typescript
+// ❌ MAY NOT WORK for plain functions
+find_symbol(name_path_pattern="injectAdvancedRecursiveClauses")
+
+// ✅ WORKS - pattern search
+search_for_pattern(
+  substring_pattern="export function injectAdvancedRecursiveClauses",
+  relative_path="packages/adapter-kysely/src"
+)
+```
+
+**When find_symbol works well:**
+- Class definitions: `find_symbol(name_path_pattern="MyClass")`
+- Class methods: `find_symbol(name_path_pattern="MyClass/myMethod")`
+- TypeScript interfaces and types
+
+---
+
+### Prefer Bash for Quick Searches, Serena for Edits (2026-01-11)
+
+**Rule of thumb:** Use the right tool for the job:
+
+| Task | Best Tool | Why |
+|------|-----------|-----|
+| Simple text search | `Bash + grep` | No token limits, faster |
+| Find files by pattern | `Bash + find` or `ls` | Simple, fast |
+| Read specific file | `read_file` (Serena) | Line range support |
+| Replace in file | `replace_content` (Serena) | Regex mode powerful |
+| Symbol-level edit | `replace_symbol_body` | Preserves structure |
+
+**Example workflow:**
+```bash
+# 1. Find files with Bash
+find packages -name "*.test.ts" -exec grep -l "CYCLE" {} \;
+
+# 2. Read specific file with Serena (line range)
+read_file(relative_path="packages/adapter-kysely/src/dialect.test.ts", start_line=100, end_line=150)
+
+# 3. Edit with Serena regex
+replace_content(needle="supportsCycleDetection: false", repl="supportsCycleDetection: true", mode="literal")
+```
+
+**Token savings:** ~10-15% when using Bash for discovery + Serena for targeted edits vs using Serena for everything.

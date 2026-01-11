@@ -231,9 +231,7 @@ export class UnknownDialectError extends Error {
 		public readonly availableDialects: string[],
 	) {
 		const available = availableDialects.join(', ');
-		super(
-			`Unknown dialect '${dialectName}'. Available dialects: ${available}`,
-		);
+		super(`Unknown dialect '${dialectName}'. Available dialects: ${available}`);
 		this.name = 'UnknownDialectError';
 	}
 }

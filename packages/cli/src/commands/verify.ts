@@ -42,8 +42,10 @@ async function createDbConnection(connectionUrl: string) {
 
 /**
  * Introspect database tables using Kysely's introspection API.
+ * Note: Using 'any' types for dynamically-imported Kysely introspection results.
  */
 async function introspectDatabase(
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic import - accepting any Kysely instance
 	db: any,
 	schemaName?: string,
 ): Promise<DbTableInfo[]> {
@@ -53,18 +55,22 @@ async function introspectDatabase(
 
 	// Filter by schema if specified
 	const filteredTables = schemaName
-		? tables.filter((t: any) => t.schema === schemaName)
-		: tables.filter((t: any) => t.schema === 'public');
+		? // biome-ignore lint/suspicious/noExplicitAny: Kysely TableMetadata from introspection
+			tables.filter((t: any) => t.schema === schemaName)
+		: // biome-ignore lint/suspicious/noExplicitAny: Kysely TableMetadata from introspection
+			tables.filter((t: any) => t.schema === 'public');
 
 	// Get column info for each table
 	const result: DbTableInfo[] = [];
 	for (const table of filteredTables) {
+		// biome-ignore lint/suspicious/noExplicitAny: Kysely ColumnMetadata type from introspection
 		const columns: DbColumnInfo[] = table.columns.map((col: any) => ({
 			name: col.name,
 			dataType: col.dataType,
 			isNullable: col.isNullable,
 			isPrimaryKey:
 				col.name ===
+				// biome-ignore lint/suspicious/noExplicitAny: Kysely ColumnMetadata type
 				table.columns.find((c: any) => c.hasDefaultValue && c.name === 'id')
 					?.name,
 			hasDefault: col.hasDefaultValue,

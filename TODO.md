@@ -19,10 +19,244 @@
 | Multi-dialect Capabilities | adapter | ✅ Complete |
 | DX Layer in Core (ARCH-001) | core | ✅ Complete |
 | One Ring Codegen-First (ARCH-002) | schema, cli, core | ✅ Complete |
+| CLI REPL Interactive (DX-030) | cli | ✅ Complete |
+| Codebase Stabilization (STAB-001) | all | ✅ Complete |
 
-## In Progress
+## ✅ Completed: STAB-001 Codebase Stabilization Sprint (2026-01-11)
 
-(No tasks in progress)
+**Priority:** HIGH | **Effort:** L (~20h total) | **Breaking:** No
+**Scope:** core, cli, adapter-kysely, docs
+
+Stabilization sprint completed - all gaps and inconsistencies fixed before v1.0.
+
+| # | Task ID | Title | Priority | Effort | Status |
+|---|---------|-------|----------|--------|--------|
+| 1 | CLI-001 | Add `--output` alias to CLI | LOW | XS (~5min) | ✅ Done |
+| 2 | CORE-005 | ResolvedSchema → GeneratedSchema converter (Valibot) | HIGH | S (~2h) | ✅ Done |
+| 3 | DX-033 | Include execution with hydration | HIGH | M (~8h) | ✅ Done |
+| 4 | ADAPTER-005 | Audit WHERE compilation consistency | MEDIUM | S (~2h) | ✅ Done |
+| 5 | CORE-006 | Composite key JOIN/EXISTS support | MEDIUM | M (~6h) | ✅ Done |
+| 6 | CORE-007 | Implement advanced recursive features (cycle, search) | MEDIUM | M (~8h) | ✅ Done |
+| 7 | DOCS-005 | Update DOCUMENTATION_INDEX.md | LOW | XS (~30min) | ✅ Done |
+
+**Sprint completed:** 2026-01-11
+**Tests:** 1377 passing (schema: 54, core: 555, adapter-kysely: 649, cli: 119)
+
+---
+
+### CLI-001: Add `--output` alias to CLI ✅ (2026-01-11)
+
+**Priority:** LOW | **Effort:** XS (~5min) | **Breaking:** No
+**Scope:** cli
+
+Add `--output` as alias for existing `--out` option for better discoverability.
+
+- [x] ✅ Add `--output` alias to generate command options (2026-01-11)
+- [x] ✅ Update action to use `out ?? output` fallback (2026-01-11)
+
+**Files modified:**
+- `packages/cli/src/commands/generate.ts`
+
+---
+
+### CORE-005: ResolvedSchema → GeneratedSchema Converter
+
+**Priority:** HIGH | **Effort:** S (~2h) | **Breaking:** No
+**Scope:** core
+**Validation:** Valibot
+
+Secure the REPL by replacing unsafe cast with proper type-safe conversion.
+
+**Problem:**
+```typescript
+// packages/cli/src/repl/query-executor.ts:87-88 — UNSAFE!
+const orm = createOrm<any>({
+  schema: schema as unknown as GeneratedSchema,
+  adapter: createMockAdapter(),
+});
+```
+
+**Solution:**
+- [ ] Create `resolvedSchemaToGeneratedSchema()` function in schema-bridge.ts
+- [ ] Add Valibot schema for validation
+- [ ] Handle type mapping (ResolvedColumn → GeneratedColumn)
+- [ ] Handle relation mapping (ResolvedRelation → GeneratedRelation)
+- [ ] Update query-executor.ts to use the converter
+- [ ] Add tests for conversion edge cases
+
+**Files to modify:**
+- `packages/core/src/dx/schema-bridge.ts` - Add converter function
+- `packages/cli/src/repl/query-executor.ts` - Use converter
+- `packages/core/src/dx/schema-bridge.test.ts` - Add tests
+
+---
+
+### DX-033: Include Execution with Hydration
+
+**Priority:** HIGH | **Effort:** M (~8h) | **Breaking:** No
+**Scope:** core, adapter-kysely
+**Depends on:** CORE-005
+
+Make `include()` actually fetch related data for hasMany relations with separate strategy.
+
+**Current state:**
+- ✅ `compileWithIncludes()` exists in adapter
+- ✅ `compileSeparateInclude()` exists in adapter
+- ✅ `SeparateIncludeInfo` type exported
+- ❌ No hydration logic in ORM layer
+
+**Implementation:**
+- [ ] Add `executeWithIncludes()` function in orm.ts
+- [ ] Execute main query via adapter
+- [ ] Extract parent IDs from main result
+- [ ] Execute separate include queries via `compileSeparateInclude()`
+- [ ] Group child results by foreign key
+- [ ] Hydrate parent objects with nested children
+- [ ] Handle nested includes (recursive hydration)
+- [ ] Add integration tests
+
+**API (unchanged):**
+```typescript
+// This should actually return posts nested in users
+const users = await orm.select('users').include('posts').all();
+// users[0].posts = [{ id: 1, ... }, { id: 2, ... }]
+```
+
+**Files to modify:**
+- `packages/core/src/dx/orm.ts` - Add executeWithIncludes()
+- `packages/core/src/dx/types.ts` - Add HydratedResult type if needed
+- `packages/adapter-kysely/src/kysely-adapter.ts` - Ensure execute returns proper format
+
+---
+
+### ADAPTER-005: Audit WHERE Compilation Consistency
+
+**Priority:** MEDIUM | **Effort:** S (~2h) | **Breaking:** No
+**Scope:** adapter-kysely
+
+Verify that all WHERE compilation paths handle `caseInsensitive` and complex filters uniformly.
+
+**Paths to audit:**
+- [ ] `compileWhere()` - main path
+- [ ] `compileJoinFilter()` - JOIN filter path
+- [ ] `compileExists()` - EXISTS subquery path
+- [ ] `compileSeparateInclude()` - separate include WHERE
+
+**Check for each path:**
+- [ ] `caseInsensitive` option supported
+- [ ] `or()` / `and()` nesting works
+- [ ] `inArray()` works
+- [ ] `like()` / `ilike()` works
+- [ ] Schema prefix applied correctly
+
+**Files to audit:**
+- `packages/adapter-kysely/src/compiler.ts`
+
+**Output:** Document any inconsistencies found and fix them.
+
+---
+
+### CORE-006: Composite Key JOIN/EXISTS Support ✅ (2026-01-11)
+
+**Priority:** MEDIUM | **Effort:** M (~6h) | **Breaking:** No
+**Scope:** core, adapter-kysely
+
+Support multi-column foreign keys in JOIN and EXISTS compilation.
+
+**Implementation:**
+- [x] ✅ Added helper functions: `normalizeForeignKey`, `normalizePrimaryKey`, `buildCompositeKeyCorrelation` (2026-01-11)
+- [x] ✅ Updated `SeparateIncludeInfo` to support `string | readonly string[]` for foreignKey/sourceKey (2026-01-11)
+- [x] ✅ Updated `compileSeparateInclude()` with OR conditions for composite key tuples (2026-01-11)
+- [x] ✅ Updated `compileExists()` with composite key correlation (2026-01-11)
+- [x] ✅ Updated `applyJoinFilters()` with multi-column ON clauses (2026-01-11)
+- [x] ✅ Updated `applyIncludeJoins()` for composite FK LEFT JOINs (2026-01-11)
+- [x] ✅ Updated `collectSeparateIncludes()` with proper key normalization (2026-01-11)
+- [x] ✅ Added backward compatibility with `unwrapSingletonArray()` helper (2026-01-11)
+- [x] ✅ Added tests for composite key scenarios (4 new tests) (2026-01-11)
+
+**Files modified:**
+- `packages/adapter-kysely/src/compiler.ts` - All composite key support
+- `packages/adapter-kysely/src/compiler.test.ts` - CORE-006 test block
+
+**Example:**
+```typescript
+// Composite FK: (tenantId, orderId) → (tenantId, id)
+defineSchema({
+  orderItems: {
+    columns: { tenantId: 'uuid', orderId: 'integer', productId: 'integer' },
+    relations: {
+      order: belongsTo('orders', { 
+        foreignKey: ['tenantId', 'orderId'],
+        references: ['tenantId', 'id']
+      })
+    }
+  }
+});
+```
+
+**Files to modify:**
+- `packages/adapter-kysely/src/compiler.ts` - Multi-column ON clause
+- `packages/schema/src/define.ts` - Composite FK syntax
+- `packages/core/src/model-ir.ts` - Composite FK in RelationIR
+
+---
+
+### CORE-007: Implement Advanced Recursive Features ✅ (2026-01-11)
+
+**Priority:** MEDIUM | **Effort:** M (~8h) | **Breaking:** No
+**Scope:** core, adapter-kysely
+
+Implement the advanced recursive CTE features that are typed but not yet functional.
+
+**Features implemented:**
+
+1. **Cycle Detection (`advancedOptions.cycle`)**
+   - [x] ✅ Add `CYCLE` clause to recursive CTE when cycle mode is set (2026-01-11)
+   - [x] ✅ PostgreSQL 14+ syntax: `CYCLE node_id SET is_cycle USING path` (2026-01-11)
+   - [x] ✅ Capability check (`supportsCycleDetection`) in dialect.ts (2026-01-11)
+   - [x] ✅ Support all modes: 'error', 'stop', 'mark' (2026-01-11)
+   - [x] ✅ Tests for cycle detection (3 tests) (2026-01-11)
+
+2. **Search Clause (`advancedOptions.search`)**
+   - [x] ✅ Add `SEARCH` clause for ordering traversal (2026-01-11)
+   - [x] ✅ `SEARCH DEPTH FIRST BY node_id SET ordercol` (2026-01-11)
+   - [x] ✅ `SEARCH BREADTH FIRST BY node_id SET ordercol` (2026-01-11)
+   - [x] ✅ Capability check (`supportsSearchClause`) in dialect.ts (2026-01-11)
+   - [x] ✅ Tests for both search modes (2 tests) (2026-01-11)
+
+3. **Fallback for non-PostgreSQL dialects**
+   - [x] ✅ SQLite/MySQL: No CYCLE/SEARCH injection (graceful degradation) (2026-01-11)
+   - [x] ✅ Tests for SQLite fallback behavior (2 tests) (2026-01-11)
+
+**Implementation details:**
+- `RecursiveAdvancedOptions` type in intent-ast.ts (lines 712-730)
+- `injectAdvancedRecursiveClauses()` function in compiler.ts (lines 1136-1195)
+- `supportsCycleDetection` and `supportsSearchClause` capabilities in dialect.ts
+
+**Files modified:**
+- `packages/core/src/intent-ast.ts` - RecursiveAdvancedOptions type
+- `packages/adapter-kysely/src/compiler.ts` - injectAdvancedRecursiveClauses()
+- `packages/adapter-kysely/src/dialect.ts` - Capability definitions
+- `packages/adapter-kysely/src/compiler.test.ts` - 9 CORE-007 tests
+
+**Tests:** 9 tests passing (unit + integration)
+
+---
+
+### DOCS-005: Update DOCUMENTATION_INDEX.md ✅ (2026-01-11)
+
+**Priority:** LOW | **Effort:** XS (~30min) | **Breaking:** No
+**Scope:** docs
+
+Fix outdated information in documentation index.
+
+- [x] ✅ Update test count from "1186" to "1344" (2026-01-11)
+- [x] ✅ Clarify DX scope note (2026-01-11)
+- [x] ✅ Remove stale DX Overview link (2026-01-11)
+- [x] ✅ Update doc-meta date to 2026-01-11 (2026-01-11)
+
+**Files modified:**
+- `docs/DOCUMENTATION_INDEX.md`
 
 ---
 
@@ -639,21 +873,64 @@ POC minimal pour comparer les deux frameworks avant implémentation complète :
 
 ---
 
-### DX-030: CLI REPL Interactive Playground
+### ✅ DX-030: CLI REPL Interactive Playground (2026-01-11)
 
 **Priority:** HIGH | **Effort:** M (~17h) | **Breaking:** No
-**Dépend de:** DX-030-SPIKE, DX-031
+**Depends on:** DX-030-SPIKE ✅, DX-031 ✅
 
-REPL interactif pour tester des requêtes sans setup complet :
+Interactive REPL for testing queries without full setup:
 
-- [ ] `dbsp repl --schema ./dbsp.schema.ts`
-- [ ] Évaluation de requêtes avec affichage SQL + Plan
-- [ ] Dot commands (`.schema`, `.tables`, `.relations`, `.help`)
-- [ ] Pretty printing (tables, syntax highlighting)
-- [ ] Autocomplétion des noms de tables/relations
-- [ ] Split view optionnel (schema | query | result)
+- [x] ✅ `dbsp repl --schema ./dbsp.schema.ts` (2026-01-11)
+- [x] ✅ Query evaluation with SQL + Plan display (2026-01-11)
+- [x] ✅ Dot commands (`.schema`, `.tables`, `.relations`, `.help`, `.clear`, `.quit`) (2026-01-11)
+- [x] ✅ Pretty printing (tables, syntax highlighting) (2026-01-11)
+- [x] ✅ Autocompletion (table names, relation names, columns, operators) (2026-01-11)
+- [x] ✅ Command history with persistence (~/.dbsp_history) (2026-01-11)
+- [x] ✅ Split view (schema sidebar | query/output area) (2026-01-11)
 
-**Tech:** Décision après DX-030-SPIKE
+**Tech:** Ink (React for CLI) - selected after DX-030-SPIKE evaluation
+
+**Implementation Blocks:**
+
+| # | Block | Status |
+|---|-------|--------|
+| 1 | CLI command + schema loading + basic UI | ✅ Done |
+| 2 | Natural query parser ("users where active = true") | ✅ Done |
+| 3 | Dot commands | ✅ Done |
+| 4 | Plan + table display | ✅ Done |
+| 5 | Command history | ✅ Done |
+| 6 | Autocompletion | ✅ Done |
+| 7 | Split view | ✅ Done |
+
+**Files created/modified:**
+- `packages/cli/src/commands/repl.tsx` - Main REPL command with Ink
+- `packages/cli/src/repl/parser.ts` - Natural query parser
+- `packages/cli/src/repl/dot-commands.ts` - Dot command handlers
+- `packages/cli/src/repl/completion.ts` - CompletionProvider
+- `packages/cli/src/repl/history.ts` - HistoryManager
+- `packages/cli/src/repl/components/` - Ink components (InputPrompt, SplitView, etc.)
+
+**Tests:** 106 CLI tests passing (schema: 54, core: 543, adapter-kysely: 628, cli: 106)
+
+**Usage:**
+```bash
+# Basic REPL
+dbsp repl --schema ./dbsp.schema.ts
+
+# With split view
+dbsp repl --schema ./dbsp.schema.ts --split
+
+# Natural queries
+> users
+> users where active = true
+> posts include author
+
+# Dot commands
+> .tables
+> .relations posts
+> .schema users
+> .help
+```
 
 ### DX-031: MockAdapter (compile-only) ✅ (2026-01-11)
 
@@ -699,6 +976,38 @@ await orm.select('users').all(); // Throws ExecutionError with fix suggestion
 ---
 
 ## Pending - P2
+
+### ADAPTER-003: Smart Column Aliasing (onCollision mode)
+
+**Priority:** LOW | **Effort:** S (~4h) | **Breaking:** No
+**Scope:** adapter-kysely
+
+Currently, JOIN includes alias ALL columns from included tables (`"author.id"`, `"author.name"`, etc.). This is verbose but safe—prevents data loss from duplicate column names in JavaScript objects.
+
+**Feature:** Add `aliasIncludedColumns: 'always' | 'onCollision'` option:
+
+- `'always'` (default, current behavior): Alias all columns from included tables
+- `'onCollision'`: Only alias columns that exist in multiple tables (e.g., `id`, `createdAt`)
+
+**Implementation:**
+- [ ] Scan both source and target table columns before SELECT generation
+- [ ] Build collision set: columns that exist in both tables
+- [ ] Only add alias for columns in collision set when mode is `'onCollision'`
+- [ ] Add option to `createKyselyAdapter()` and `compile()` options
+- [ ] Tests for both modes
+
+**Example:**
+```typescript
+// Current (always alias)
+SELECT "t0"."id", "t0"."title", "author"."id" AS "author.id", "author"."name" AS "author.name"
+
+// With onCollision (only id collides)
+SELECT "t0"."id", "t0"."title", "author"."id" AS "author.id", "author"."name"
+```
+
+**Note:** `'never'` mode intentionally excluded—it would cause data loss when columns collide and results are converted to JavaScript objects.
+
+---
 
 ### Documentation (DX critical)
 

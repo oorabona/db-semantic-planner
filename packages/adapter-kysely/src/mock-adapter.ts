@@ -16,6 +16,7 @@ import type {
 	AdapterStreamOptions,
 	CompiledQuery,
 	CompileOptions,
+	CompileResultWithIncludes,
 	DeleteIntent,
 	Dump,
 	DumpMeta,
@@ -23,6 +24,7 @@ import type {
 	ModelIR,
 	PlanReport,
 	RecursivePlanReport,
+	SeparateIncludeInfo,
 	UpdateIntent,
 	UpsertIntent,
 } from '@db-semantic-planner/core';
@@ -38,8 +40,10 @@ import {
 	compileDelete,
 	compileInsert,
 	compileRecursive,
+	compileSeparateInclude,
 	compileUpdate,
 	compileUpsert,
+	compileWithIncludes,
 } from './compiler.js';
 import { validateIdentifier } from './errors.js';
 
@@ -169,6 +173,73 @@ export class MockAdapter implements Adapter<unknown> {
 
 		const schemaName = this._schemaName ?? options.schemaName;
 		const compiled = compile(plan, options.model, this.kysely, schemaName);
+
+		return {
+			sql: compiled.sql,
+			parameters: compiled.parameters as readonly unknown[],
+		};
+	}
+
+	/**
+	 * Compile a plan with includes (DX-033).
+	 */
+	compileWithIncludes<T = unknown>(
+		plan: PlanReport,
+		options?: CompileOptions,
+	): CompileResultWithIncludes<T> {
+		if (!options?.model) {
+			throw new Error(
+				'MockAdapter.compileWithIncludes requires options.model to be provided',
+			);
+		}
+
+		const schemaName = this._schemaName ?? options.schemaName;
+		const result = compileWithIncludes(plan, options.model, this.kysely, schemaName);
+
+		// Convert to adapter-agnostic format
+		const separateIncludes: SeparateIncludeInfo[] = result.separateIncludes.map(
+			(info) => {
+				const mapped: SeparateIncludeInfo = {
+					relationName: info.relationName,
+					targetTable: info.targetTable,
+					foreignKey: info.foreignKey,
+					sourceKey: info.sourceKey,
+				};
+				if (info.select !== undefined) {
+					(mapped as { select?: typeof info.select }).select = info.select;
+				}
+				if (info.where !== undefined) {
+					(mapped as { where?: typeof info.where }).where = info.where;
+				}
+				return mapped;
+			},
+		);
+
+		return {
+			main: {
+				sql: result.main.sql,
+				parameters: result.main.parameters as readonly unknown[],
+			},
+			separateIncludes,
+		};
+	}
+
+	/**
+	 * Compile a separate include query for given parent IDs (DX-033).
+	 */
+	compileSeparateInclude(
+		info: SeparateIncludeInfo,
+		parentIds: readonly unknown[],
+		options?: CompileOptions,
+	): CompiledQuery {
+		const schemaName = this._schemaName ?? options?.schemaName;
+
+		const compiled = compileSeparateInclude(
+			info,
+			parentIds,
+			this.kysely,
+			schemaName,
+		);
 
 		return {
 			sql: compiled.sql,
