@@ -159,7 +159,34 @@ const DIALECT_CAPABILITIES_MAP: Record<DialectName, DialectCapabilities> = {
  * // Returns 'postgresql', 'mysql', 'sqlite', 'mssql', or 'unknown'
  * ```
  */
-export function detectDialect(db: Kysely<unknown>): DialectName {
+/**
+ * Detect the dialect from a Kysely instance.
+ *
+ * Uses Kysely's internal dialect configuration to determine the database type.
+ * Falls back to 'unknown' if detection fails (e.g., minified code, custom dialects).
+ *
+ * @param db - Kysely instance to detect dialect from
+ * @param explicitDialect - Optional explicit dialect override (recommended for production builds)
+ * @returns The detected dialect name
+ *
+ * @example
+ * ```typescript
+ * // Auto-detection (works in development, may fail with minification)
+ * const dialect = detectDialect(db);
+ *
+ * // Explicit dialect (recommended for production)
+ * const dialect = detectDialect(db, 'postgresql');
+ * ```
+ */
+export function detectDialect(
+	db: Kysely<unknown>,
+	explicitDialect?: DialectName,
+): DialectName {
+	// Explicit dialect always wins (recommended for production/minified builds)
+	if (explicitDialect && explicitDialect !== 'unknown') {
+		return explicitDialect;
+	}
+
 	// Access Kysely internals to get dialect information
 	// Kysely stores the dialect adapter on the internal executor
 	const adapter = getDialectAdapter(db);
@@ -168,6 +195,7 @@ export function detectDialect(db: Kysely<unknown>): DialectName {
 		return 'unknown';
 	}
 
+	// Try constructor.name first (works in development, may fail with minification)
 	const adapterName = adapter.constructor.name.toLowerCase();
 
 	if (adapterName.includes('postgres')) {
@@ -186,7 +214,9 @@ export function detectDialect(db: Kysely<unknown>): DialectName {
 		return 'mssql';
 	}
 
-	return 'unknown';
+	// Fallback: try to detect via adapter behavior if constructor.name is mangled
+	// This provides resilience against minification
+	return tryDetectByBehavior(adapter) ?? 'unknown';
 }
 
 /**
@@ -202,6 +232,49 @@ function getDialectAdapter(
 		db as unknown as { getExecutor?: () => { adapter?: unknown } }
 	).getExecutor?.();
 	return executor?.adapter as { constructor: { name: string } } | undefined;
+}
+
+
+/**
+ * Try to detect dialect by adapter behavior when constructor.name is mangled.
+ *
+ * This provides resilience against minification by checking adapter-specific
+ * methods or properties that are unlikely to be renamed.
+ */
+function tryDetectByBehavior(
+	adapter: { constructor: { name: string } },
+): DialectName | undefined {
+	// Check for dialect-specific methods that minifiers won't rename
+	// (because they're part of the public Kysely API)
+	const adapterAny = adapter as Record<string, unknown>;
+
+	// PostgreSQL adapter has specific methods
+	if (
+		typeof adapterAny.supportsTransactionalDdl === 'function' ||
+		typeof adapterAny.supportsReturning === 'function'
+	) {
+		// Both PostgreSQL and SQLite support RETURNING, need to differentiate
+		if (typeof adapterAny.acquireMigrationLock === 'function') {
+			return 'postgresql'; // Only PostgreSQL has advisory locks
+		}
+	}
+
+	// MySQL adapter has specific error handling
+	if (typeof adapterAny.parseError === 'function') {
+		const parseError = adapterAny.parseError as (error: unknown) => unknown;
+		try {
+			// MySQL adapter's parseError has specific behavior
+			const testError = parseError({ code: 'ER_DUP_ENTRY' });
+			if (testError && typeof testError === 'object') {
+				return 'mysql';
+			}
+		} catch {
+			// Not MySQL
+		}
+	}
+
+	// If we can't determine, return undefined to fall through to 'unknown'
+	return undefined;
 }
 
 /**
@@ -220,8 +293,31 @@ function getDialectAdapter(
  * }
  * ```
  */
-export function getCapabilities(db: Kysely<unknown>): DialectCapabilities {
-	const dialect = detectDialect(db);
+/**
+ * Get capabilities for a Kysely instance.
+ *
+ * Detects the dialect and returns the corresponding capability profile.
+ *
+ * @param db - Kysely instance to get capabilities for
+ * @param explicitDialect - Optional explicit dialect override (recommended for production builds)
+ * @returns The capabilities for the detected dialect
+ *
+ * @example
+ * ```typescript
+ * const caps = getCapabilities(db);
+ * if (caps.supportsWithSchema) {
+ *   // Safe to use schema prefix
+ * }
+ *
+ * // With explicit dialect (recommended for production)
+ * const caps = getCapabilities(db, 'postgresql');
+ * ```
+ */
+export function getCapabilities(
+	db: Kysely<unknown>,
+	explicitDialect?: DialectName,
+): DialectCapabilities {
+	const dialect = detectDialect(db, explicitDialect);
 	return getCapabilitiesForDialect(dialect);
 }
 

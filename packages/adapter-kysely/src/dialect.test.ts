@@ -101,6 +101,40 @@ describe('dialect detection', () => {
 			} as unknown as Kysely<unknown>;
 			expect(detectDialect(db)).toBe('unknown');
 		});
+
+		// DX-106: Explicit dialect override tests
+		it('should use explicit dialect when provided', () => {
+			const db = createMockDb('CustomDialectAdapter');
+			expect(detectDialect(db, 'postgresql')).toBe('postgresql');
+		});
+
+		it('should use explicit dialect even when auto-detection would work', () => {
+			const db = createMockDb('PostgresDialectAdapter');
+			expect(detectDialect(db, 'mysql')).toBe('mysql');
+		});
+
+		it('should fall back to auto-detection when explicit dialect is unknown', () => {
+			const db = createMockDb('PostgresDialectAdapter');
+			expect(detectDialect(db, 'unknown')).toBe('postgresql');
+		});
+
+		it('should fall back to auto-detection when explicit dialect is undefined', () => {
+			const db = createMockDb('MysqlDialectAdapter');
+			expect(detectDialect(db, undefined)).toBe('mysql');
+		});
+
+		// DX-106: Minification resilience test
+		it('should handle minified constructor name gracefully', () => {
+			// Simulate minified class name (e.g., "e" or "t")
+			const db = createMockDb('e');
+			// Should fall back to 'unknown' but not crash
+			expect(detectDialect(db)).toBe('unknown');
+		});
+
+		it('should handle empty constructor name', () => {
+			const db = createMockDb('');
+			expect(detectDialect(db)).toBe('unknown');
+		});
 	});
 });
 

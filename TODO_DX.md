@@ -151,23 +151,28 @@ because they don't have table context. Use object filter syntax for type-safe co
 
 ---
 
-## DX-106: Brittle Dialect Detection
+## DX-106: Brittle Dialect Detection ✅ COMPLETED (2026-01-11)
 
 **Problem:** Detection based on Kysely internals (constructor name).
 
 ```typescript
-// Current approach - fragile
+// Before: Fragile - breaks on minification
 const dialectName = dialect.constructor.name; // "PostgresDialect"
+
+// After: Explicit dialect option + graceful fallback
+const adapter = createKyselyAdapter(db, undefined, 'postgresql');
 ```
 
-**Risk:** Breaks on Kysely updates, minification, or custom dialects.
+**Solution:**
+1. Added optional `dialect` parameter to `createKyselyAdapter()` and `KyselyAdapter` constructor
+2. Explicit dialect always takes precedence (recommended for production builds)
+3. Added `tryDetectByBehavior()` fallback when constructor.name is mangled
+4. Graceful fallback to 'unknown' with safe default capabilities
 
-**File:** `packages/adapter-kysely/src/dialect.ts`
-
-**Tasks:**
-- [ ] Find stable detection method (Kysely config? explicit option?)
-- [ ] Add fallback for unknown dialects
-- [ ] Add test with mocked/custom dialect to catch regressions
+**Completed Tasks:**
+- [x] Find stable detection method → explicit `dialect` option
+- [x] Add fallback for unknown dialects → `UNKNOWN_CAPABILITIES` with safe defaults
+- [x] Add test with mocked/custom dialect to catch regressions → 6 new tests
 
 ---
 
@@ -236,7 +241,7 @@ const dialectName = dialect.constructor.name; // "PostgresDialect"
 | DX-102 | Fix `createOrm` type inference | Medium | ✅ DONE (2026-01-11) |
 | DX-101 | Document nested include syntax | Low | ✅ DONE |
 | DX-107 | Add JSDoc warnings on raw() | Low | ✅ DONE |
-| DX-106 | Add dialect detection fallback | Low | TODO |
+| DX-106 | Add dialect detection fallback | Low | ✅ DONE (2026-01-11) |
 
 ---
 
