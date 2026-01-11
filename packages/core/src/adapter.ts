@@ -354,36 +354,61 @@ export interface Adapter<DB = unknown> {
 	// =========================================================================
 
 	/**
-	 * Execute raw SQL directly.
-	 * This is the ultimate escape hatch for queries that cannot be
-	 * expressed via the intent system.
+	 * Execute raw SQL directly - the ultimate escape hatch for queries
+	 * that cannot be expressed via the intent system.
 	 *
-	 * ⚠️  WARNING: This bypasses the planner and all type safety.
-	 * The SQL string is NOT validated - ensure it's safe!
-	 * Parameters should use placeholders ($1, $2, etc.) to prevent injection.
+	 * @warning **SECURITY RISK: POTENTIAL SQL INJECTION**
 	 *
-	 * @param sql - Raw SQL string with parameter placeholders
-	 * @param parameters - Parameter values for placeholders
-	 * @returns Promise resolving to array of results
+	 * This method bypasses the semantic planner and all type safety.
+	 * While parameter binding protects values, the SQL string itself
+	 * is NOT validated or sanitized.
+	 *
+	 * **SAFE: Use parameter placeholders ($1, $2, etc.) for ALL values:**
+	 * ```typescript
+	 * // Parameters are safely escaped by the database driver
+	 * adapter.executeRaw('SELECT * FROM users WHERE id = $1', [userId]);
+	 * ```
+	 *
+	 * **DANGEROUS: Never interpolate user input into SQL strings:**
+	 * ```typescript
+	 * // SQL INJECTION RISK - NEVER DO THIS!
+	 * adapter.executeRaw(`SELECT * FROM ${tableName} WHERE id = ${id}`);
+	 * ```
+	 *
+	 * **AUDIT TRAIL:** Raw SQL usage is logged in dump().plan for security audits.
+	 *
+	 * @param sql - Raw SQL string with parameter placeholders ($1, $2, etc.)
+	 * @param parameters - Parameter values (safely bound by driver)
+	 * @returns Promise resolving to array of typed results
 	 *
 	 * @example
 	 * ```typescript
-	 * // Simple query
+	 * // SAFE: Parameterized query
 	 * const results = await adapter.executeRaw<User>(
-	 *   'SELECT * FROM users WHERE age > $1',
-	 *   [18]
+	 *   'SELECT * FROM users WHERE age > $1 AND status = $2',
+	 *   [18, 'active']
 	 * );
 	 *
-	 * // Complex query not expressible via intents
+	 * // SAFE: Complex query with parameters
 	 * const stats = await adapter.executeRaw<Stats>(
 	 *   `SELECT date_trunc('month', created_at) as month,
 	 *           COUNT(*) as count
 	 *    FROM orders
+	 *    WHERE created_at > $1
 	 *    GROUP BY 1
 	 *    ORDER BY 1 DESC`,
-	 *   []
+	 *   [startDate]
 	 * );
+	 *
+	 * // DANGEROUS - SQL INJECTION RISK!
+	 * // const results = await adapter.executeRaw(
+	 * //   `SELECT * FROM ${userInput}`,  // NEVER interpolate user input!
+	 * //   []
+	 * // );
 	 * ```
+	 *
+	 * @see {@link https://owasp.org/www-community/attacks/SQL_Injection | OWASP SQL Injection}
+	 * @see {@link https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html | OWASP Parameterization}
 	 */
 	executeRaw<T = unknown>(
 		sql: string,
