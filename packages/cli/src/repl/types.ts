@@ -19,6 +19,13 @@ export interface ReplConfig {
 export type QueryMode = 'natural' | 'sql';
 
 /**
+ * Column aliasing mode for included relations (CLI-010)
+ * - 'always': Alias all columns from included tables
+ * - 'onCollision': Only alias columns that exist in multiple tables
+ */
+export type AliasingMode = 'always' | 'onCollision';
+
+/**
  * REPL state
  */
 export interface ReplState {
@@ -26,6 +33,7 @@ export interface ReplState {
 	history: string[];
 	historyIndex: number;
 	splitView: boolean;
+	aliasingMode: AliasingMode;
 }
 
 /**

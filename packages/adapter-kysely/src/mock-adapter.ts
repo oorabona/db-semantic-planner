@@ -67,6 +67,14 @@ export interface MockAdapterOptions {
 	 * Optional schema name for multi-tenant queries.
 	 */
 	schemaName?: string;
+
+	/**
+	 * Column aliasing mode for included relations (ADAPTER-003).
+	 * - 'always' (default): Alias all columns from included tables
+	 * - 'onCollision': Only alias columns that exist in multiple tables
+	 * @default 'always'
+	 */
+	aliasIncludedColumns?: 'always' | 'onCollision';
 }
 
 /**
@@ -134,6 +142,7 @@ export class MockAdapter implements Adapter<unknown> {
 	private readonly kysely: Kysely<unknown>;
 	private readonly _schemaName?: string;
 	private readonly _capabilities: AdapterCapabilities;
+	private readonly _aliasIncludedColumns: 'always' | 'onCollision';
 
 	constructor(options: MockAdapterOptions = {}) {
 		const dialect = options.dialect ?? 'postgresql';
@@ -141,6 +150,7 @@ export class MockAdapter implements Adapter<unknown> {
 		if (options.schemaName !== undefined) {
 			this._schemaName = options.schemaName;
 		}
+		this._aliasIncludedColumns = options.aliasIncludedColumns ?? 'always';
 
 		// PostgreSQL capabilities (most permissive)
 		this._capabilities = {
@@ -172,7 +182,10 @@ export class MockAdapter implements Adapter<unknown> {
 		}
 
 		const schemaName = this._schemaName ?? options.schemaName;
-		const compiled = compile(plan, options.model, this.kysely, schemaName);
+		const compiled = compile(plan, options.model, this.kysely, {
+			...(schemaName !== undefined && { schemaName }),
+			aliasIncludedColumns: this._aliasIncludedColumns,
+		});
 
 		return {
 			sql: compiled.sql,
@@ -194,12 +207,10 @@ export class MockAdapter implements Adapter<unknown> {
 		}
 
 		const schemaName = this._schemaName ?? options.schemaName;
-		const result = compileWithIncludes(
-			plan,
-			options.model,
-			this.kysely,
-			schemaName,
-		);
+		const result = compileWithIncludes(plan, options.model, this.kysely, {
+			...(schemaName !== undefined && { schemaName }),
+			aliasIncludedColumns: this._aliasIncludedColumns,
+		});
 
 		// Convert to adapter-agnostic format
 		const separateIncludes: SeparateIncludeInfo[] = result.separateIncludes.map(

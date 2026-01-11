@@ -3,7 +3,6 @@
  */
 
 import { Box, Text } from 'ink';
-import React from 'react';
 
 const DOT_COMMANDS = [
 	{ command: '.help', description: 'Show this help' },
@@ -20,6 +19,10 @@ const DOT_COMMANDS = [
 	{ command: '.sql', description: 'Switch to SQL mode' },
 	{ command: '.natural', description: 'Switch to natural query mode' },
 	{ command: '.split', description: 'Toggle split view (schema | query)' },
+	{
+		command: '.aliasing',
+		description: 'Toggle column aliasing mode (always/onCollision)',
+	},
 	{ command: '.clear', description: 'Clear screen and output' },
 	{ command: '.exit / .quit', description: 'Exit REPL' },
 ];
