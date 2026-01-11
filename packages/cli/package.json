@@ -23,8 +23,14 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@db-semantic-planner/adapter-kysely": "workspace:*",
+		"@db-semantic-planner/core": "workspace:*",
 		"@db-semantic-planner/schema": "workspace:*",
-		"commander": "catalog:"
+		"@inkjs/ui": "catalog:",
+		"commander": "catalog:",
+		"ink": "catalog:",
+		"ink-table": "catalog:",
+		"react": "catalog:"
 	},
 	"peerDependencies": {
 		"tsx": "^4.0.0",
@@ -44,6 +50,7 @@
 	},
 	"devDependencies": {
 		"@types/node": "catalog:",
+		"@types/react": "catalog:",
 		"tsx": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"
