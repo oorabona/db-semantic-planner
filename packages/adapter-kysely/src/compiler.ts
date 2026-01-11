@@ -45,10 +45,17 @@ import type {
 } from 'kysely';
 import { type RawBuilder, sql } from 'kysely';
 import {
-	type DialectCapabilities,
+	type DialectCapabilities as AdapterDialectCapabilities,
+	type DialectName,
 	detectDialect,
 	getCapabilitiesForDialect,
 } from './dialect.js';
+import {
+	type DialectCapabilities as CoreDialectCapabilities,
+	getDialectCapabilities,
+	isKnownDialect,
+	POSTGRESQL_CAPABILITIES as CORE_POSTGRESQL_CAPABILITIES,
+} from '@db-semantic-planner/core';
 import { CompilationError } from './errors.js';
 import { UnsupportedOperationError } from './stream.js';
 
@@ -77,21 +84,51 @@ interface CompilerState {
 // ============================================================================
 
 /**
- * Determine the path tracking strategy based on intent and capabilities.
+ * Map adapter dialect name to core dialect capabilities.
+ * This bridges the adapter's dialect detection with core's capabilities registry.
+ *
+ * @param dialectName - Adapter dialect name (from detectDialect)
+ * @returns Core dialect capabilities for SQL generation
+ */
+function getCoreCapabilitiesForDialect(
+	dialectName: DialectName,
+): CoreDialectCapabilities {
+	// Map adapter dialect names to core dialect identifiers
+	const coreDialectMap: Record<DialectName, string> = {
+		postgresql: 'postgresql',
+		mysql: 'mysql',
+		sqlite: 'sqlite',
+		mssql: 'mssql',
+		unknown: 'postgresql', // Default to PostgreSQL as most feature-rich
+	};
+
+	const coreDialect = coreDialectMap[dialectName];
+
+	if (isKnownDialect(coreDialect)) {
+		return getDialectCapabilities(coreDialect);
+	}
+
+	// Fallback to PostgreSQL capabilities
+	return CORE_POSTGRESQL_CAPABILITIES;
+}
+
+/**
+ * Determine the path tracking strategy based on intent and core capabilities.
  *
  * @param pathOptions - Path tracking options from intent
- * @param capabilities - Dialect capabilities
+ * @param coreCapabilities - Core dialect capabilities
  * @returns The resolved strategy ('array' or 'string')
  */
 function resolvePathStrategy(
 	pathOptions: RecursiveTrackOptions['path'],
-	capabilities: DialectCapabilities,
+	coreCapabilities: CoreDialectCapabilities,
 ): 'array' | 'string' {
 	if (pathOptions?.strategy) {
 		return pathOptions.strategy;
 	}
-	// Infer from capabilities
-	return capabilities.supportsArrayType ? 'array' : 'string';
+	// Infer from core capabilities' recursivePathStyle
+	// JSON style maps to 'string' for now (could be extended later)
+	return coreCapabilities.recursivePathStyle === 'array' ? 'array' : 'string';
 }
 
 /**
@@ -100,7 +137,7 @@ function resolvePathStrategy(
  * @param eb - Kysely expression builder
  * @param columnRef - Reference to the node ID column (e.g., 't0.id')
  * @param pathOptions - Path tracking options from intent
- * @param capabilities - Dialect capabilities
+ * @param coreCapabilities - Core dialect capabilities for SQL generation
  * @param dialect - Dialect name for error messages
  * @returns AliasedExpression for the path column
  */
@@ -109,15 +146,15 @@ function compilePathTrackingBaseCase(
 	eb: ExpressionBuilder<any, any>,
 	columnRef: string,
 	pathOptions: RecursiveTrackOptions['path'],
-	capabilities: DialectCapabilities,
+	coreCapabilities: CoreDialectCapabilities,
 	dialect: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic return type
 ): AliasedExpression<any, string> {
-	const strategy = resolvePathStrategy(pathOptions, capabilities);
+	const strategy = resolvePathStrategy(pathOptions, coreCapabilities);
 	const alias = pathOptions?.as ?? 'path';
 
 	if (strategy === 'array') {
-		if (!capabilities.supportsArrayType) {
+		if (!coreCapabilities.supportsArrayType) {
 			throw new UnsupportedOperationError(
 				'array path tracking',
 				`Array path tracking requires PostgreSQL. Use strategy: 'string' or remove path tracking.`,
@@ -138,7 +175,7 @@ function compilePathTrackingBaseCase(
  * @param eb - Kysely expression builder
  * @param nodeColumnRef - Reference to the new node ID column (e.g., 'node.id')
  * @param pathOptions - Path tracking options from intent
- * @param capabilities - Dialect capabilities
+ * @param coreCapabilities - Core dialect capabilities for SQL generation
  * @param dialect - Dialect name for error messages
  * @returns AliasedExpression for the path column
  */
@@ -147,16 +184,16 @@ function compilePathTrackingRecursive(
 	eb: ExpressionBuilder<any, any>,
 	nodeColumnRef: string,
 	pathOptions: RecursiveTrackOptions['path'],
-	capabilities: DialectCapabilities,
+	coreCapabilities: CoreDialectCapabilities,
 	dialect: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic return type
 ): AliasedExpression<any, string> {
-	const strategy = resolvePathStrategy(pathOptions, capabilities);
+	const strategy = resolvePathStrategy(pathOptions, coreCapabilities);
 	const alias = pathOptions?.as ?? 'path';
 	const separator = pathOptions?.separator ?? '/';
 
 	if (strategy === 'array') {
-		if (!capabilities.supportsArrayType) {
+		if (!coreCapabilities.supportsArrayType) {
 			throw new UnsupportedOperationError(
 				'array path tracking',
 				`Array path tracking requires PostgreSQL. Use strategy: 'string' or remove path tracking.`,
@@ -167,8 +204,21 @@ function compilePathTrackingRecursive(
 		return eb(eb.ref('prev.path'), '||', eb.ref(nodeColumnRef)).as(alias);
 	}
 
-	// String strategy: prev.path || 'separator' || CAST(node.id AS TEXT)
-	// Use sql.lit for inline literal separator (safe since separator is from config, not user input)
+	// String strategy: Use dialect-appropriate concatenation
+	// - 'operator' (PostgreSQL, SQLite): prev.path || '/' || CAST(node.id AS TEXT)
+	// - 'function' (MySQL): CONCAT(prev.path, '/', CAST(node.id AS TEXT))
+	if (coreCapabilities.stringConcatStyle === 'function') {
+		// MySQL: CONCAT function
+		return eb
+			.fn('concat', [
+				eb.ref('prev.path'),
+				eb.val(separator),
+				eb.cast(eb.ref(nodeColumnRef), 'text'),
+			])
+			.as(alias);
+	}
+
+	// PostgreSQL/SQLite: || operator
 	const escapedSeparator = separator.replace(/'/g, "''");
 	return sql`${eb.ref('prev.path')} || ${sql.lit(`'${escapedSeparator}'`)} || ${eb.cast(eb.ref(nodeColumnRef), 'text')}`.as(
 		alias,
@@ -1107,12 +1157,16 @@ function buildRecursiveBaseCase(
 			// ARCH-001: Use dialect-agnostic path tracking
 			if (intent.start.nodeIdExpr.kind === 'column') {
 				const columnRef = `t0.${intent.start.nodeIdExpr.name}`;
+				// Get core capabilities for path tracking SQL generation
+				const coreCapabilities = getCoreCapabilitiesForDialect(
+					dialect as DialectName,
+				);
 				selections.push(
 					compilePathTrackingBaseCase(
 						eb,
 						columnRef,
 						intent.track.path,
-						capabilities,
+						coreCapabilities,
 						dialect,
 					),
 				);
@@ -1238,12 +1292,16 @@ function buildAdjacencyRecursiveStep(
 		if (intent.track?.path) {
 			// ARCH-001: Use dialect-agnostic path tracking
 			const nodeColumnRef = `node.${traversal.nodeId}`;
+			// Get core capabilities for path tracking SQL generation
+			const coreCapabilities = getCoreCapabilitiesForDialect(
+				dialect as DialectName,
+			);
 			selections.push(
 				compilePathTrackingRecursive(
 					eb,
 					nodeColumnRef,
 					intent.track.path,
-					capabilities,
+					coreCapabilities,
 					dialect,
 				),
 			);
@@ -1348,12 +1406,16 @@ function buildEdgeTableRecursiveStep(
 		if (intent.track?.path) {
 			// ARCH-001: Use dialect-agnostic path tracking
 			const nodeColumnRef = `node.${traversal.nodeId}`;
+			// Get core capabilities for path tracking SQL generation
+			const coreCapabilities = getCoreCapabilitiesForDialect(
+				dialect as DialectName,
+			);
 			selections.push(
 				compilePathTrackingRecursive(
 					eb,
 					nodeColumnRef,
 					intent.track.path,
-					capabilities,
+					coreCapabilities,
 					dialect,
 				),
 			);

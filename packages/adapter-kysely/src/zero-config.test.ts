@@ -102,7 +102,7 @@ describe('Zero-Config ORM (with adapter)', () => {
 		it('throws when neither model nor adapter is provided', () => {
 			// @ts-expect-error - Testing invalid usage
 			expect(() => createOrm({})).toThrow(
-				'Either model or adapter must be provided',
+				'Either model, schema, or adapter must be provided to createOrm',
 			);
 		});
 	});
