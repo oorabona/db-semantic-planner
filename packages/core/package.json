@@ -19,6 +19,9 @@
 		"test:watch": "vitest",
 		"typecheck": "tsc --noEmit"
 	},
+	"dependencies": {
+		"valibot": "catalog:"
+	},
 	"devDependencies": {
 		"@types/node": "catalog:",
 		"typescript": "catalog:",
