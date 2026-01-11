@@ -63,6 +63,16 @@ export async function getTestAdapter(): Promise<Adapter<any>> {
 }
 
 /**
+ * Create an adapter for a specific schema (for introspection tests).
+ * Unlike getTestAdapter(), this creates a new adapter each time with the schema set.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: Database schema is dynamic in tests
+export async function createAdapterForSchema(schemaName: string): Promise<Adapter<any>> {
+	const database = await getTestDb();
+	return createKyselyAdapter(database, schemaName);
+}
+
+/**
  * Close the database connection.
  * Called in test teardown.
  */

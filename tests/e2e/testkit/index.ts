@@ -7,6 +7,7 @@
 // Database utilities
 export {
 	closeTestDb,
+	createAdapterForSchema,
 	createSchema,
 	describeE2E,
 	dropSchema,
