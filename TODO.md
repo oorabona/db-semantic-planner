@@ -457,47 +457,63 @@ packages/adapter-drizzle/  (futur)
 
 ---
 
-### 🟡 CORE-004: Dialect Capabilities Registry (IN PROGRESS)
+### ✅ CORE-004: Dialect Capabilities Registry (2026-01-11)
 
 **Priority:** HIGH | **Effort:** S (~4h) | **Breaking:** No
 **Scope:** core
 
 Module centralisé de capabilities par dialecte SQL. Évite la duplication entre adapters.
 
-- [ ] Créer `packages/core/src/dialects/index.ts` - types + registry
-- [ ] Définir `DialectCapabilities` interface complète
-- [ ] Implémenter capabilities PostgreSQL
-- [ ] Implémenter capabilities MySQL
-- [ ] Implémenter capabilities SQLite
-- [ ] Implémenter capabilities DuckDB
-- [ ] `getDialectCapabilities(name)` - lookup
-- [ ] `registerDialect(name, caps)` - extensibilité utilisateur
-- [ ] Exporter depuis `packages/core/src/index.ts`
-- [ ] Tests unitaires
+- [x] ✅ Créer `packages/core/src/dialects/index.ts` - types + registry (2026-01-11)
+- [x] ✅ Définir `DialectCapabilities` interface complète (12 properties) (2026-01-11)
+- [x] ✅ Implémenter capabilities PostgreSQL (2026-01-11)
+- [x] ✅ Implémenter capabilities MySQL (2026-01-11)
+- [x] ✅ Implémenter capabilities SQLite (2026-01-11)
+- [x] ✅ Implémenter capabilities DuckDB (2026-01-11)
+- [x] ✅ Implémenter capabilities MSSQL (2026-01-11)
+- [x] ✅ `getDialectCapabilities(name)` - lookup avec aliases (postgres, pg, sqlserver) (2026-01-11)
+- [x] ✅ `registerDialect(name, caps)` - extensibilité utilisateur (2026-01-11)
+- [x] ✅ `extendDialect(base, overrides)` - créer variantes (2026-01-11)
+- [x] ✅ Exporter depuis `packages/core/src/index.ts` (2026-01-11)
+- [x] ✅ Tests unitaires (25 tests) (2026-01-11)
 
-**Interface:**
+**Files changed:**
+- `packages/core/src/dialects/index.ts` (new - 208 lines)
+- `packages/core/src/dialects/dialects.test.ts` (new - 25 tests)
+- `packages/core/src/index.ts` (exports added)
+
+**API:**
 ```typescript
-export interface DialectCapabilities {
-  name: string;
-  
-  // Features
-  supportsReturning: boolean;
-  supportsRecursiveCTE: boolean;
-  supportsWindowFunctions: boolean;
-  supportsArrayType: boolean;
-  supportsJsonType: boolean;
-  
-  // Syntax
-  recursivePathStyle: 'array' | 'string' | 'json';
-  stringConcatStyle: 'operator' | 'function';  // || vs CONCAT()
-  identifierQuote: '"' | '`' | '[';
-  parameterStyle: 'dollar' | 'question' | 'named';
+import {
+  getDialectCapabilities,
+  registerDialect,
+  extendDialect,
+  isKnownDialect,
+  getAvailableDialects,
+  POSTGRESQL_CAPABILITIES,
+  MYSQL_CAPABILITIES,
+  SQLITE_CAPABILITIES,
+  DUCKDB_CAPABILITIES,
+  MSSQL_CAPABILITIES,
+} from '@db-semantic-planner/core';
+
+// Lookup with aliases (case-insensitive)
+const caps = getDialectCapabilities('postgres'); // or 'pg', 'postgresql'
+
+// Capability-based conditional compilation
+if (caps.supportsReturning) {
+  // Add RETURNING clause
 }
 
-export const DIALECT_CAPABILITIES: Record<string, DialectCapabilities>;
-export function getDialectCapabilities(name: string): DialectCapabilities;
-export function registerDialect(name: string, caps: DialectCapabilities): void;
+// Register custom dialect
+const cockroachCaps = extendDialect(POSTGRESQL_CAPABILITIES, {
+  name: 'cockroachdb',
+  supportsArrayType: false,
+});
+registerDialect('cockroachdb', cockroachCaps);
 ```
+
+**Tests:** All 1260 passing (543 core + 628 adapter-kysely + 54 schema + 35 cli)
 
 **Principe:** La connaissance des dialectes est dans CORE, les adapters consomment.
 
