@@ -385,7 +385,213 @@ Did you mean 'users'?
 
 ---
 
+### DX-031: MockAdapter (compile-only) ✅ (2026-01-11)
+
+**Scope:** adapter-kysely
+
+Implemented compile-only adapter for testing and REPL scenarios:
+
+- [x] ✅ MockAdapter class implementing Adapter interface (2026-01-11)
+- [x] ✅ PostgreSQL DummyDriver (no real DB connection) (2026-01-11)
+- [x] ✅ All compile methods: compile, compileInsert, compileUpdate, compileDelete, compileUpsert, compileRecursive (2026-01-11)
+- [x] ✅ Execute methods throw ExecutionError with helpful fix suggestions (2026-01-11)
+- [x] ✅ Multi-tenant support via withSchema() (2026-01-11)
+- [x] ✅ 25 comprehensive tests (2026-01-11)
+
+**Files changed:** 3
+- `packages/adapter-kysely/src/mock-adapter.ts` (new)
+- `packages/adapter-kysely/src/mock-adapter.test.ts` (new)
+- `packages/adapter-kysely/src/index.ts` (exports)
+
+**Tests:** All 1235 passing (schema: 54, core: 518, cli: 35, adapter-kysely: 628)
+
+---
+
 ## Pending - P1 (High Value DX)
+
+### DX-032: Conformance Test Framework
+
+**Priority:** HIGH | **Effort:** M (~12h) | **Breaking:** No
+**Depends on:** DX-031 (MockAdapter)
+
+Framework de tests de conformité DRY pour multi-adapter support:
+
+- [ ] Définir `ConformanceTestRunner` interface dans core
+- [ ] Créer `packages/core/fixtures/conformance/scenarios.ts` avec scénarios partagés
+- [ ] Créer `runConformanceTests()` fonction générique
+- [ ] Migrer golden tests Kysely vers ce framework
+- [ ] Documenter comment ajouter un nouvel adapter
+
+**Architecture:**
+```
+packages/core/
+  fixtures/conformance/
+    ├── scenarios.ts              # IntentAST + PlanReport attendus
+    └── runner.ts                 # ConformanceTestRunner interface
+
+packages/adapter-kysely/
+  fixtures/conformance/
+    └── expected-sql/             # SQL attendu pour Kysely
+  src/conformance.test.ts         # Implémente le runner
+
+packages/adapter-drizzle/  (futur)
+  fixtures/conformance/
+    └── expected-sql/             # SQL attendu pour Drizzle
+  src/conformance.test.ts         # Même runner, SQL différent
+```
+
+**Principe clé:** Chaque adapter génère du SQL textuellement différent mais sémantiquement équivalent. Les scénarios (Intent → Plan) sont partagés dans core, seul le SQL attendu varie par adapter.
+
+**Bénéfices:**
+- DRY: Ajouter un scénario = 1 fichier core + N fichiers SQL
+- Ajouter un adapter = implémenter runner + créer SQL attendus
+- Garantie de conformité: même Intent → même Plan (testé dans core)
+
+**Workflow Golden Test (création des références SQL):**
+1. **Génération:** `dump().sql` via MockAdapter ou adapter réel
+2. **Review humain:** Vérifier que le SQL fait sens sémantiquement (JOINs, filtres, colonnes)
+3. **Enregistrement:** Sauvegarder dans `fixtures/conformance/expected-sql/<scenario>.sql`
+4. **Régression:** CI compare automatiquement, échec = review (bug ou amélioration ?)
+
+**Note:** Le SQL diffère entre adapters (aliases, formatting) mais doit être sémantiquement équivalent. La validation humaine à l'enregistrement est critique.
+
+---
+
+### 🟡 CORE-004: Dialect Capabilities Registry (IN PROGRESS)
+
+**Priority:** HIGH | **Effort:** S (~4h) | **Breaking:** No
+**Scope:** core
+
+Module centralisé de capabilities par dialecte SQL. Évite la duplication entre adapters.
+
+- [ ] Créer `packages/core/src/dialects/index.ts` - types + registry
+- [ ] Définir `DialectCapabilities` interface complète
+- [ ] Implémenter capabilities PostgreSQL
+- [ ] Implémenter capabilities MySQL
+- [ ] Implémenter capabilities SQLite
+- [ ] Implémenter capabilities DuckDB
+- [ ] `getDialectCapabilities(name)` - lookup
+- [ ] `registerDialect(name, caps)` - extensibilité utilisateur
+- [ ] Exporter depuis `packages/core/src/index.ts`
+- [ ] Tests unitaires
+
+**Interface:**
+```typescript
+export interface DialectCapabilities {
+  name: string;
+  
+  // Features
+  supportsReturning: boolean;
+  supportsRecursiveCTE: boolean;
+  supportsWindowFunctions: boolean;
+  supportsArrayType: boolean;
+  supportsJsonType: boolean;
+  
+  // Syntax
+  recursivePathStyle: 'array' | 'string' | 'json';
+  stringConcatStyle: 'operator' | 'function';  // || vs CONCAT()
+  identifierQuote: '"' | '`' | '[';
+  parameterStyle: 'dollar' | 'question' | 'named';
+}
+
+export const DIALECT_CAPABILITIES: Record<string, DialectCapabilities>;
+export function getDialectCapabilities(name: string): DialectCapabilities;
+export function registerDialect(name: string, caps: DialectCapabilities): void;
+```
+
+**Principe:** La connaissance des dialectes est dans CORE, les adapters consomment.
+
+---
+
+### ADAPTER-002: Rendre adapter-kysely 100% dialect-agnostic
+
+**Priority:** HIGH | **Effort:** M (~6h) | **Breaking:** No
+**Scope:** adapter-kysely
+**Depends on:** CORE-004 (Dialect Capabilities Registry)
+
+Le compiler utilise actuellement du SQL PostgreSQL-spécifique (ARRAY[], ||, ::text). 
+Doit utiliser les capabilities de CORE-004 pour supporter tous les dialectes Kysely.
+
+- [ ] Importer `getDialectCapabilities` depuis core
+- [ ] Créer `detectKyselyDialect(db)` - détection du dialecte Kysely
+- [ ] Modifier `createKyselyAdapter()` pour accepter `dialectName` et `capabilities` overrides
+- [ ] Refactorer `buildInitialPath()` - utiliser `capabilities.recursivePathStyle`
+- [ ] Refactorer `buildRecursivePath()` - utiliser `capabilities.stringConcatStyle`
+- [ ] Ajouter tests multi-dialect (PostgreSQL, MySQL, SQLite, DuckDB)
+- [ ] Documenter dans README
+
+**API:**
+```typescript
+// Auto-détection
+const adapter = createKyselyAdapter(db);
+
+// Override dialecte
+const adapter = createKyselyAdapter(db, { dialectName: 'duckdb' });
+
+// Override capabilities spécifiques
+const adapter = createKyselyAdapter(db, {
+  capabilities: { recursivePathStyle: 'string' }
+});
+```
+
+**Code refactoré:**
+```typescript
+// AVANT (PostgreSQL-only) ❌
+sql`ARRAY[${sql.ref(columnRef)}]`
+
+// APRÈS (capability-driven) ✅
+if (capabilities.recursivePathStyle === 'array') {
+  // Use array syntax
+} else if (capabilities.recursivePathStyle === 'string') {
+  // Use string concat
+} else {
+  // Use JSON
+}
+```
+
+**Impact:** Utilisateurs Kysely+MySQL, SQLite, DuckDB peuvent utiliser CTEs récursives.
+
+---
+
+### ADAPTER-PGSQL-001: Native PostgreSQL Adapter
+
+**Priority:** MEDIUM | **Effort:** L (~20h) | **Breaking:** No
+**Depends on:** CORE-004 (Dialect Capabilities), DX-032 (Conformance Test Framework)
+
+Adapter natif PostgreSQL sans dépendance ORM - utilise `pg` directement.
+
+- [ ] Créer `packages/adapter-pgsql/`
+- [ ] Importer `getDialectCapabilities('postgresql')` depuis core
+- [ ] Implémenter `SqlBuilder` (sérialiseur SQL)
+  - [ ] Utiliser `capabilities.identifierQuote` pour quoting
+  - [ ] Utiliser `capabilities.parameterStyle` pour placeholders
+  - [ ] Clause serialization (SELECT, JOIN, WHERE, etc.)
+- [ ] Implémenter `PgsqlAdapter` avec interface Adapter
+  - [ ] compile methods (utiliser capabilities pour SQL generation)
+  - [ ] execute methods (via `pg` driver)
+  - [ ] transaction support
+  - [ ] streaming support (`pg-cursor`)
+- [ ] Intégrer avec Conformance Test Framework (DX-032)
+- [ ] Tests E2E contre PostgreSQL réel
+- [ ] Documentation
+
+**Architecture:**
+```
+packages/adapter-pgsql/
+  src/
+    sql-builder.ts      # Sérialiseur SQL (utilise DialectCapabilities)
+    pgsql-adapter.ts    # Adapter avec pg driver
+    index.ts
+  package.json          # deps: pg, @types/pg, @db-semantic-planner/core
+```
+
+**Valeur:**
+- Prouve que l'architecture est vraiment ORM-agnostic
+- Valide que CORE-004 (DialectCapabilities) fonctionne hors Kysely
+- Option minimale pour users qui ne veulent pas d'ORM
+- Reference implementation pour futurs adapters natifs (MySQL, SQLite)
+
+---
 
 ### DX-030-SPIKE: Évaluer Ink vs vue-termui pour REPL
 
@@ -427,15 +633,46 @@ REPL interactif pour tester des requêtes sans setup complet :
 
 **Tech:** Décision après DX-030-SPIKE
 
-### DX-031: MockAdapter (compile-only)
+### DX-031: MockAdapter (compile-only) ✅ (2026-01-11)
 
 **Priority:** MEDIUM | **Effort:** S (~2h) | **Breaking:** No
 
 Adapter qui compile sans exécuter (pour REPL et tests) :
 
-- [ ] `createMockAdapter()` qui retourne SQL sans connexion DB
-- [ ] Utile pour tests unitaires sans DB
-- [ ] Prérequis pour DX-030 (REPL)
+- [x] ✅ `createMockAdapter()` qui retourne SQL sans connexion DB (2026-01-11)
+- [x] ✅ Utile pour tests unitaires sans DB (2026-01-11)
+- [x] ✅ Prérequis pour DX-030 (REPL) (2026-01-11)
+
+**Key features:**
+- MockAdapter with PostgreSQL DummyDriver (no real DB connection)
+- Compile methods: `compile()`, `compileInsert()`, `compileUpdate()`, `compileDelete()`, `compileUpsert()`, `compileRecursive()`
+- Execute methods throw `ExecutionError` with helpful fix suggestions
+- Multi-tenant support via `withSchema()` / `forTenant()`
+- Dialect options: PostgreSQL (default), SQLite/MySQL planned
+- 25 tests covering all functionality
+
+**API:**
+```typescript
+import { createMockAdapter } from '@db-semantic-planner/adapter-kysely';
+
+const orm = createOrm({
+  model: schema,
+  adapter: createMockAdapter(), // No DB connection required
+});
+
+// Compile-only workflow
+const dump = orm.select('users').where(eq('active', true)).dump();
+console.log(dump.sql);    // SELECT ... WHERE ...
+console.log(dump.params); // [true]
+
+// Execution throws helpful error
+await orm.select('users').all(); // Throws ExecutionError with fix suggestion
+```
+
+**Files changed:** 3
+- `packages/adapter-kysely/src/mock-adapter.ts` (new)
+- `packages/adapter-kysely/src/mock-adapter.test.ts` (new, 25 tests)
+- `packages/adapter-kysely/src/index.ts` (exports)
 
 ---
 

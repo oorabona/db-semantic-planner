@@ -66,6 +66,13 @@ export type {
 export { introspect } from './introspection.js';
 // KyselyAdapter (high-level adapter interface implementation)
 export { createKyselyAdapter, KyselyAdapter } from './kysely-adapter.js';
+// MockAdapter (DX-031: compile-only adapter for testing and REPL)
+export {
+	createMockAdapter,
+	MockAdapter,
+	type MockAdapterOptions,
+	type MockDialect,
+} from './mock-adapter.js';
 // Redaction API (ADAPTER-004)
 export { redactParams } from './redact.js';
 export type { StreamQueryOptions } from './stream.js';
