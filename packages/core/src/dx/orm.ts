@@ -902,8 +902,24 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			compileOptions.schemaName = this.schemaName;
 		}
 
-		const compiled = adapter.compile(planReport, compileOptions);
-		const mainResults = (await adapter.execute(compiled)) as TResult[];
+		// Use compileWithIncludes to get separate include info for hasMany relations
+		const compiledWithIncludes = adapter.compileWithIncludes(
+			planReport,
+			compileOptions,
+		);
+		const mainResults = (await adapter.execute(
+			compiledWithIncludes.main,
+		)) as TResult[];
+
+		// Process separate includes (hasMany hydration - DX-033)
+		if (compiledWithIncludes.separateIncludes.length > 0) {
+			await this.hydrateIncludes(
+				mainResults,
+				compiledWithIncludes.separateIncludes,
+				adapter,
+				compileOptions,
+			);
+		}
 
 		// Process recursive includes if any
 		if (this.recursiveIncludes.length > 0) {
@@ -911,6 +927,100 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		}
 
 		return mainResults;
+	}
+
+	/**
+	 * Extract key value(s) from an object using key column(s).
+	 * Supports both simple and composite keys.
+	 * For composite keys, returns a stringified tuple for use as Map key.
+	 */
+	private extractKeyValue(
+		obj: Record<string, unknown>,
+		key: string | readonly string[],
+	): unknown {
+		if (typeof key === 'string') {
+			return obj[key];
+		}
+		// Composite key: return stringified tuple for Map key
+		const values = key.map((k) => obj[k]);
+		// Return undefined if any value is missing
+		if (values.some((v) => v === undefined || v === null)) {
+			return undefined;
+		}
+		return JSON.stringify(values);
+	}
+
+	/**
+	 * Hydrate results with separate include data (DX-033).
+	 * For hasMany relations, executes separate queries and attaches children to parents.
+	 */
+	private async hydrateIncludes(
+		results: TResult[],
+		separateIncludes: readonly import('../adapter.js').SeparateIncludeInfo[],
+		adapter: import('../adapter.js').Adapter,
+		compileOptions: { schemaName?: string; model: ModelIR },
+	): Promise<void> {
+		if (results.length === 0) return;
+
+		for (const includeInfo of separateIncludes) {
+			// Extract parent IDs from results using sourceKey
+			const parentIds = results
+				.map((r) =>
+					this.extractKeyValue(r as Record<string, unknown>, includeInfo.sourceKey),
+				)
+				.filter((id) => id !== undefined && id !== null);
+
+			if (parentIds.length === 0) continue;
+
+			// Compile and execute the include query
+			const includeQuery = adapter.compileSeparateInclude(
+				includeInfo,
+				parentIds,
+				compileOptions,
+			);
+			const childResults = await adapter.execute(includeQuery);
+
+			// Group children by foreign key
+			const childrenByParentId = new Map<unknown, unknown[]>();
+			for (const child of childResults) {
+				const parentId = this.extractKeyValue(
+					child as Record<string, unknown>,
+					includeInfo.foreignKey,
+				);
+				if (parentId !== undefined) {
+					const existing = childrenByParentId.get(parentId);
+					if (existing) {
+						existing.push(child);
+					} else {
+						childrenByParentId.set(parentId, [child]);
+					}
+				}
+			}
+
+			// Attach children to parent objects
+			for (const result of results) {
+				const parentId = this.extractKeyValue(
+					result as Record<string, unknown>,
+					includeInfo.sourceKey,
+				);
+				const children = childrenByParentId.get(parentId) ?? [];
+				(result as Record<string, unknown>)[includeInfo.relationName] = children;
+			}
+
+			// Process nested includes recursively if present
+			if (includeInfo.nestedIncludes && includeInfo.nestedIncludes.length > 0) {
+				// Flatten all children for nested hydration
+				const allChildren = Array.from(childrenByParentId.values()).flat();
+				if (allChildren.length > 0) {
+					await this.hydrateIncludes(
+						allChildren as TResult[],
+						includeInfo.nestedIncludes,
+						adapter,
+						compileOptions,
+					);
+				}
+			}
+		}
 	}
 
 	/**

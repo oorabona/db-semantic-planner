@@ -1013,4 +1013,171 @@ describe('Execution Layer', () => {
 			expect((results[0] as { title: string }).title).toBe('First Post');
 		});
 	});
+
+	describe('include() with hydration (DX-033)', () => {
+		it('hydrates hasMany relation with separate query', async () => {
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
+			const results = (await orm
+				.select('users')
+				.include('posts')
+				.orderBy('id')
+				.all()) as Array<{
+				id: number;
+				name: string;
+				posts?: Array<{ id: number; title: string }>;
+			}>;
+
+			expect(results).toHaveLength(2);
+
+			// Alice (id=1) has 2 posts
+			expect(results[0].name).toBe('Alice');
+			expect(results[0].posts).toBeDefined();
+			expect(results[0].posts).toHaveLength(2);
+			expect(results[0].posts?.[0].title).toBe('First Post');
+			expect(results[0].posts?.[1].title).toBe('Second Post');
+
+			// Bob (id=2) has 0 posts
+			expect(results[1].name).toBe('Bob');
+			expect(results[1].posts).toBeDefined();
+			expect(results[1].posts).toHaveLength(0);
+		});
+
+		it('returns empty array for parent with no children', async () => {
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
+			const results = (await orm
+				.select('users')
+				.where(eq('id', 2)) // Bob has no posts
+				.include('posts')
+				.all()) as Array<{
+				id: number;
+				name: string;
+				posts?: Array<{ id: number; title: string }>;
+			}>;
+
+			expect(results).toHaveLength(1);
+			expect(results[0].name).toBe('Bob');
+			expect(results[0].posts).toBeDefined();
+			expect(results[0].posts).toHaveLength(0);
+		});
+
+		it('handles empty parent results gracefully', async () => {
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
+			const results = (await orm
+				.select('users')
+				.where(eq('id', 999)) // Non-existent user
+				.include('posts')
+				.all()) as Array<{
+				id: number;
+				posts?: Array<{ id: number }>;
+			}>;
+
+			expect(results).toHaveLength(0);
+		});
+
+		it('works with first() returning single hydrated result', async () => {
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
+			const result = (await orm
+				.select('users')
+				.where(eq('id', 1))
+				.include('posts')
+				.first()) as {
+				id: number;
+				name: string;
+				posts?: Array<{ id: number; title: string }>;
+			} | undefined;
+
+			expect(result).toBeDefined();
+			expect(result?.name).toBe('Alice');
+			expect(result?.posts).toBeDefined();
+			expect(result?.posts).toHaveLength(2);
+		});
+
+		it('groups children correctly by foreign key', async () => {
+			// Add a third user with posts to test grouping
+			const testDb = createTestDb();
+			await setupDatabase(testDb);
+
+			// Seed with more data for grouping test
+			await testDb
+				.insertInto('users')
+				.values([
+					{ id: 1, name: 'Alice', email: 'alice@example.com' },
+					{ id: 2, name: 'Bob', email: 'bob@example.com' },
+					{ id: 3, name: 'Charlie', email: 'charlie@example.com' },
+				])
+				.execute();
+
+			await testDb
+				.insertInto('posts')
+				.values([
+					{ id: 1, title: 'Alice Post 1', userId: 1 },
+					{ id: 2, title: 'Alice Post 2', userId: 1 },
+					{ id: 3, title: 'Charlie Post 1', userId: 3 },
+					{ id: 4, title: 'Charlie Post 2', userId: 3 },
+					{ id: 5, title: 'Charlie Post 3', userId: 3 },
+				])
+				.execute();
+
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(testDb),
+			});
+
+			const results = (await orm
+				.select('users')
+				.include('posts')
+				.orderBy('id')
+				.all()) as Array<{
+				id: number;
+				name: string;
+				posts?: Array<{ id: number; title: string }>;
+			}>;
+
+			expect(results).toHaveLength(3);
+
+			// Alice has 2 posts
+			expect(results[0].posts).toHaveLength(2);
+			expect(results[0].posts?.every((p) => p.title.startsWith('Alice'))).toBe(
+				true,
+			);
+
+			// Bob has 0 posts
+			expect(results[1].posts).toHaveLength(0);
+
+			// Charlie has 3 posts
+			expect(results[2].posts).toHaveLength(3);
+			expect(
+				results[2].posts?.every((p) => p.title.startsWith('Charlie')),
+			).toBe(true);
+
+			await testDb.destroy();
+		});
+
+		it('include does not affect query without execution', () => {
+			const orm = createOrm({
+				model: testModel,
+				adapter: createKyselyAdapter(db),
+			});
+
+			// Just building the query should not throw
+			const builder = orm.select('users').include('posts');
+
+			// Plan should be valid
+			const plan = builder.plan();
+			expect(plan).toBeDefined();
+			expect(plan.intent.from).toBe('users');
+		});
+	});
 });

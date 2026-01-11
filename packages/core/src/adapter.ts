@@ -10,8 +10,10 @@
 import type {
 	DeleteIntent,
 	InsertIntent,
+	SelectIntent,
 	UpdateIntent,
 	UpsertIntent,
+	WhereIntent,
 } from './intent-ast.js';
 import type { ModelIR } from './model-ir.js';
 import type { PlanReport, RecursivePlanReport } from './planner.js';
@@ -72,6 +74,45 @@ export interface CompileOptions {
 }
 
 // ============================================================================
+// Include Hydration (DX-033)
+// ============================================================================
+
+/**
+ * Metadata for a separate include query.
+ * Used when planner decides include-strategy: 'separate' for hasMany relations.
+ *
+ * After executing the main query, separate include queries are compiled
+ * using this info plus the parent IDs from the main result.
+ */
+export interface SeparateIncludeInfo {
+	/** Name of the relation being included */
+	readonly relationName: string;
+	/** Target table to fetch from */
+	readonly targetTable: string;
+	/** Foreign key column(s) in target table (e.g., 'userId' for posts, or ['tenantId', 'userId'] for composite) */
+	readonly foreignKey: string | readonly string[];
+	/** Source key column(s) in parent table (usually 'id', or ['tenantId', 'id'] for composite) */
+	readonly sourceKey: string | readonly string[];
+	/** Optional select clause from include intent */
+	readonly select?: SelectIntent;
+	/** Optional where clause from include intent */
+	readonly where?: WhereIntent;
+	/** Optional nested includes (for recursive hydration) */
+	readonly nestedIncludes?: readonly SeparateIncludeInfo[];
+}
+
+/**
+ * Result of compiling a query with separate includes.
+ * Returned by compileWithIncludes() when there are includes with strategy 'separate'.
+ */
+export interface CompileResultWithIncludes<T = unknown> {
+	/** The main query (includes any JOIN includes) */
+	readonly main: CompiledQuery<T>;
+	/** Metadata for separate include queries (empty if all includes use JOIN) */
+	readonly separateIncludes: readonly SeparateIncludeInfo[];
+}
+
+// ============================================================================
 // Dump (Observability)
 // ============================================================================
 
@@ -129,6 +170,35 @@ export interface Adapter<DB = unknown> {
 		plan: PlanReport,
 		options?: CompileOptions,
 	): CompiledQuery<T>;
+
+	/**
+	 * Compile a plan with includes, returning separate include metadata (DX-033).
+	 * For hasMany relations with strategy 'separate', this returns metadata
+	 * to compile follow-up queries after the main query executes.
+	 *
+	 * @param plan - The plan report from the semantic planner
+	 * @param options - Compilation options
+	 * @returns Main compiled query + separate include metadata
+	 */
+	compileWithIncludes<T = unknown>(
+		plan: PlanReport,
+		options?: CompileOptions,
+	): CompileResultWithIncludes<T>;
+
+	/**
+	 * Compile a separate include query for given parent IDs (DX-033).
+	 * Called after main query to fetch related data for hydration.
+	 *
+	 * @param info - Separate include metadata from compileWithIncludes()
+	 * @param parentIds - IDs extracted from main query results
+	 * @param options - Compilation options
+	 * @returns Compiled query to fetch child records
+	 */
+	compileSeparateInclude(
+		info: SeparateIncludeInfo,
+		parentIds: readonly unknown[],
+		options?: CompileOptions,
+	): CompiledQuery;
 
 	/**
 	 * Execute a query and return all results.

@@ -70,7 +70,7 @@ export type {
 	RecursiveEmitOptions,
 	RecursiveIntent,
 	RecursiveNodeIdExpr,
-	RecursivePgOptions,
+	RecursiveAdvancedOptions,
 	RecursiveTrackOptions,
 	RecursiveTraversal,
 	RelationOperator,
@@ -219,8 +219,11 @@ export type {
 	AdapterStreamOptions,
 	CompiledQuery,
 	CompileOptions,
+	// DX-033: Include hydration
+	CompileResultWithIncludes,
 	Dump,
 	DumpMeta,
+	SeparateIncludeInfo,
 } from './adapter.js';
 export {
 	AdapterRequiredError,
