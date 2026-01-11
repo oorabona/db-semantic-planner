@@ -44,6 +44,12 @@ export interface DialectCapabilities {
 
 	/** Window functions (ROW_NUMBER, RANK, etc. with OVER clause) */
 	readonly supportsWindowFunctions: boolean;
+
+	/** CYCLE clause for recursive CTEs (PostgreSQL 14+) */
+	readonly supportsCycleDetection: boolean;
+
+	/** SEARCH clause for recursive CTEs (PostgreSQL 14+) */
+	readonly supportsSearchClause: boolean;
 }
 
 /**
@@ -58,7 +64,9 @@ export const POSTGRESQL_CAPABILITIES: DialectCapabilities = {
 	supportsStreaming: true,
 	supportsArrayType: true,
 	supportsWindowFunctions: true,
-};
+	supportsCycleDetection: true, // PostgreSQL 14+
+	supportsSearchClause: true, // PostgreSQL 14+
+};;
 
 /**
  * MySQL capability profile - limited feature support.
@@ -73,7 +81,9 @@ export const MYSQL_CAPABILITIES: DialectCapabilities = {
 	supportsStreaming: false,
 	supportsArrayType: false,
 	supportsWindowFunctions: true, // MySQL 8.0+
-};
+	supportsCycleDetection: false,
+	supportsSearchClause: false,
+};;
 
 /**
  * SQLite capability profile - limited feature support.
@@ -87,7 +97,9 @@ export const SQLITE_CAPABILITIES: DialectCapabilities = {
 	supportsStreaming: false,
 	supportsArrayType: false,
 	supportsWindowFunctions: true, // SQLite 3.25+
-};
+	supportsCycleDetection: false,
+	supportsSearchClause: false,
+};;
 
 /**
  * MSSQL capability profile.
@@ -101,7 +113,9 @@ export const MSSQL_CAPABILITIES: DialectCapabilities = {
 	supportsStreaming: false,
 	supportsArrayType: false,
 	supportsWindowFunctions: true, // MSSQL 2005+
-};
+	supportsCycleDetection: false,
+	supportsSearchClause: false,
+};;
 
 /**
  * Unknown dialect capability profile - safe defaults.
@@ -116,7 +130,9 @@ export const UNKNOWN_CAPABILITIES: DialectCapabilities = {
 	supportsStreaming: false,
 	supportsArrayType: false,
 	supportsWindowFunctions: true, // Most modern DBs support window functions
-};
+	supportsCycleDetection: false,
+	supportsSearchClause: false,
+};;
 
 /**
  * Map of dialect names to their capabilities.
@@ -348,6 +364,30 @@ function getDefaultGuidance(
 			sqlite: 'This should work - SQLite 3.25+ supports window functions.',
 			mssql: 'This should work - MSSQL 2005+ supports window functions.',
 			unknown: 'The detected dialect may not support window functions.',
+		},
+		supportsCycleDetection: {
+			postgresql:
+				'This should work - PostgreSQL 14+ supports native CYCLE clause.',
+			mysql:
+				'MySQL does not support native CYCLE clause. Use application-level cycle detection.',
+			sqlite:
+				'SQLite does not support native CYCLE clause. Use application-level cycle detection.',
+			mssql:
+				'MSSQL does not support native CYCLE clause. Use application-level cycle detection.',
+			unknown:
+				'The detected dialect may not support native cycle detection.',
+		},
+		supportsSearchClause: {
+			postgresql:
+				'This should work - PostgreSQL 14+ supports native SEARCH clause.',
+			mysql:
+				'MySQL does not support native SEARCH clause. Use ORDER BY on depth column instead.',
+			sqlite:
+				'SQLite does not support native SEARCH clause. Use ORDER BY on depth column instead.',
+			mssql:
+				'MSSQL does not support native SEARCH clause. Use ORDER BY on depth column instead.',
+			unknown:
+				'The detected dialect may not support native search clause.',
 		},
 	};
 

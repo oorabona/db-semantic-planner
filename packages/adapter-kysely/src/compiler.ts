@@ -14,6 +14,7 @@ import type {
 	PlanDecision,
 	PlanReport,
 	QueryIntent,
+	RecursiveAdvancedOptions,
 	RecursiveIntent,
 	RecursiveNodeIdExpr,
 	RecursivePlanReport,
@@ -250,10 +251,10 @@ export interface SeparateIncludeInfo {
 	relationName: string;
 	/** Target table to fetch from */
 	targetTable: string;
-	/** Foreign key column in target table (e.g., 'userId' for posts) */
-	foreignKey: string;
-	/** Source key column in parent table (usually 'id') */
-	sourceKey: string;
+	/** Foreign key column(s) in target table (e.g., 'userId' for posts, or ['tenantId', 'userId'] for composite) */
+	foreignKey: string | readonly string[];
+	/** Source key column(s) in parent table (usually 'id', or ['tenantId', 'id'] for composite) */
+	sourceKey: string | readonly string[];
 	/** Optional select clause from include intent */
 	select?: IncludeIntent['select'];
 	/** Optional where clause from include intent */
@@ -306,8 +307,24 @@ export function compileSeparateInclude(
 
 	let query = kysely.selectFrom(tableName).selectAll();
 
-	// Add WHERE foreignKey IN (parentIds)
-	query = query.where(info.foreignKey, 'in', parentIds as unknown[]);
+	// Add WHERE foreignKey IN (parentIds) - handle composite keys
+	const fkCols = Array.isArray(info.foreignKey) ? info.foreignKey : [info.foreignKey];
+	if (fkCols.length === 1) {
+		// Simple case: single column FK
+		query = query.where(fkCols[0], 'in', parentIds as unknown[]);
+	} else {
+		// Composite key: parentIds should be tuples, use OR conditions
+		// Each parentId is expected to be a tuple [val1, val2, ...]
+		query = query.where((eb) => {
+			const conditions = (parentIds as unknown[][]).map((tuple) => {
+				const colConditions = fkCols.map((col, i) =>
+					eb(col, '=', tuple[i])
+				);
+				return eb.and(colConditions);
+			});
+			return eb.or(conditions);
+		});
+	}
 
 	// Add additional WHERE conditions from include intent
 	if (info.where) {
@@ -370,26 +387,48 @@ function addSimpleWhere(
 		case 'or':
 			return query.where((eb) => {
 				const conditions = where.conditions.map((c: WhereIntent) => {
-					if (c.kind === 'comparison') {
-						const col = `${tableName}.${c.field}`;
-						switch (c.operator) {
-							case 'eq':
-								return eb(col, '=', c.value);
-							case 'neq':
-								return eb(col, '!=', c.value);
-							case 'gt':
-								return eb(col, '>', c.value);
-							case 'gte':
-								return eb(col, '>=', c.value);
-							case 'lt':
-								return eb(col, '<', c.value);
-							case 'lte':
-								return eb(col, '<=', c.value);
-							default:
-								return eb.lit(true);
+					switch (c.kind) {
+						case 'comparison': {
+							const col = `${tableName}.${c.field}`;
+							switch (c.operator) {
+								case 'eq':
+									return eb(col, '=', c.value);
+								case 'neq':
+									return eb(col, '!=', c.value);
+								case 'gt':
+									return eb(col, '>', c.value);
+								case 'gte':
+									return eb(col, '>=', c.value);
+								case 'lt':
+									return eb(col, '<', c.value);
+								case 'lte':
+									return eb(col, '<=', c.value);
+								default:
+									return eb.lit(true);
+							}
 						}
+						case 'like': {
+							const col = `${tableName}.${c.field}`;
+							return c.caseInsensitive
+								? eb(col, 'ilike', c.pattern)
+								: eb(col, 'like', c.pattern);
+						}
+						case 'in': {
+							const col = `${tableName}.${c.field}`;
+							if (c.values.length === 0) {
+								return eb.lit(false);
+							}
+							return eb(col, 'in', [...c.values]);
+						}
+						case 'null': {
+							const col = `${tableName}.${c.field}`;
+							return c.operator === 'isNull'
+								? eb(col, 'is', null)
+								: eb(col, 'is not', null);
+						}
+						default:
+							return eb.lit(true);
 					}
-					return eb.lit(true);
 				});
 				return eb.or(conditions);
 			});
@@ -432,23 +471,29 @@ function collectSeparateIncludes(
 				continue; // Skip if relation not found
 			}
 
-			// Determine FK and source key based on relation type
-			let foreignKey: string;
-			let sourceKey: string;
+			// Determine FK and source key based on relation type - supports composite keys
+			let foreignKey: string | readonly string[];
+			let sourceKey: string | readonly string[];
+
+			// Get source table's primary key
+			const sourceTableDef = model.getTable(sourceTable);
+			const sourcePkCols = normalizePrimaryKey(sourceTableDef?.primaryKey);
+
+			// Get target table's primary key
+			const targetTableDef = model.getTable(relation.target);
+			const targetPkCols = normalizePrimaryKey(targetTableDef?.primaryKey);
 
 			if (relation.type === 'hasMany' || relation.type === 'hasOne') {
 				// hasMany/hasOne: FK is in target table (e.g., posts.userId), points to source's PK
-				foreignKey = Array.isArray(relation.foreignKey)
-					? relation.foreignKey[0]
-					: (relation.foreignKey ?? `${sourceTable.replace(/s$/, '')}Id`);
-				sourceKey = 'id'; // Source table's PK
+				const fkCols = normalizeForeignKey(relation.foreignKey, `${sourceTable.replace(/s$/, '')}Id`);
+				foreignKey = unwrapSingletonArray(fkCols);
+				sourceKey = unwrapSingletonArray(sourcePkCols); // Source table's PK (supports composite)
 			} else {
 				// belongsTo: FK is in source table (rare for 'separate', but handle it)
 				// For separate include, we need target's PK
-				foreignKey = 'id'; // Target table's PK
-				sourceKey = Array.isArray(relation.foreignKey)
-					? relation.foreignKey[0]
-					: (relation.foreignKey ?? `${relation.target.replace(/s$/, '')}Id`);
+				foreignKey = unwrapSingletonArray(targetPkCols); // Target table's PK (supports composite)
+				const skCols = normalizeForeignKey(relation.foreignKey, `${relation.target.replace(/s$/, '')}Id`);
+				sourceKey = unwrapSingletonArray(skCols);
 			}
 
 			result.push({
@@ -1070,7 +1115,80 @@ export function compileRecursive(
 		}
 	}
 
-	return finalQuery.compile();
+	// Compile the query
+	const compiled = finalQuery.compile();
+
+	// CORE-007: Apply CYCLE/SEARCH clauses if advancedOptions specified and supported
+	if (intent.advancedOptions && capabilities.supportsCycleDetection) {
+		return injectAdvancedRecursiveClauses(
+			compiled,
+			intent.advancedOptions,
+			cteName,
+			getNodeIdAlias(intent.start.nodeIdExpr),
+			capabilities,
+		);
+	}
+
+	return compiled;
+}
+
+/**
+ * CORE-007: Inject PostgreSQL 14+ CYCLE and SEARCH clauses into compiled SQL.
+ * 
+ * These clauses are added after the CTE definition but before the final SELECT:
+ * ```sql
+ * WITH RECURSIVE cte(cols) AS (...)
+ * CYCLE node_id SET is_cycle USING path
+ * SEARCH DEPTH FIRST BY node_id SET ordercol
+ * SELECT ... FROM cte
+ * ```
+ */
+/** @internal exported for testing */
+export function injectAdvancedRecursiveClauses(
+	compiled: CompiledQuery,
+	options: RecursiveAdvancedOptions,
+	_cteName: string, // Reserved for future use
+	nodeIdColumn: string,
+	capabilities: AdapterDialectCapabilities,
+): CompiledQuery {
+	let sql = compiled.sql;
+	const clauses: string[] = [];
+
+	// Build CYCLE clause if cycle detection is requested
+	if (options.cycle && capabilities.supportsCycleDetection) {
+		// CYCLE column_list SET is_cycle USING path
+		// - 'mark' mode adds is_cycle column (standard CYCLE behavior)
+		// - 'stop' mode is implicit (CYCLE stops traversal by default)
+		// - 'error' mode would need application-level handling (throw on is_cycle=true)
+		clauses.push(`CYCLE ${nodeIdColumn} SET is_cycle USING path`);
+	}
+
+	// Build SEARCH clause if search order is requested
+	if (options.search && capabilities.supportsSearchClause) {
+		const searchType = options.search === 'depth' ? 'DEPTH FIRST' : 'BREADTH FIRST';
+		clauses.push(`SEARCH ${searchType} BY ${nodeIdColumn} SET ordercol`);
+	}
+
+	if (clauses.length === 0) {
+		return compiled;
+	}
+
+	// Find the position to inject clauses: after the CTE definition's closing )
+	// Pattern: ") SELECT" or ") select" (case-insensitive)
+	// We need to find the last ) before SELECT that closes the CTE
+	const cteClosePattern = /\)\s*SELECT/i;
+	const match = sql.match(cteClosePattern);
+	
+	if (match?.index !== undefined) {
+		const clauseText = ` ${clauses.join(' ')} `;
+		const insertPos = match.index + 1; // After the )
+		sql = sql.slice(0, insertPos) + clauseText + sql.slice(insertPos);
+	}
+
+	return {
+		...compiled,
+		sql,
+	};
 }
 
 /**
@@ -1485,8 +1603,10 @@ function addWhereSimple(
 
 	// Handle like (WhereLikeIntent has kind='like')
 	if ('kind' in where && where.kind === 'like') {
-		const w = where as { kind: 'like'; field: string; pattern: string };
-		return query.where(`${alias}.${w.field}`, 'like', w.pattern);
+		const w = where as { kind: 'like'; field: string; pattern: string; caseInsensitive?: boolean };
+		return w.caseInsensitive
+			? query.where(`${alias}.${w.field}`, 'ilike', w.pattern)
+			: query.where(`${alias}.${w.field}`, 'like', w.pattern);
 	}
 
 	// Handle in (WhereInIntent has kind='in')
@@ -1523,18 +1643,48 @@ function addWhereSimple(
 		const w = where as { kind: 'or'; conditions: WhereIntent[] };
 		return query.where((eb) => {
 			const ors = w.conditions.map((c) => {
-				// Build condition expression for comparison
-				if ('kind' in c && c.kind === 'comparison') {
-					const cmp = c as {
-						kind: 'comparison';
-						field: string;
-						operator: string;
-						value: unknown;
-					};
-					if (cmp.operator === 'eq')
-						return eb(`${alias}.${cmp.field}`, '=', cmp.value);
-					if (cmp.operator === 'neq')
-						return eb(`${alias}.${cmp.field}`, '!=', cmp.value);
+				if ('kind' in c && 'field' in c) {
+					const col = `${alias}.${c.field as string}`;
+					switch (c.kind) {
+						case 'comparison': {
+							const cmp = c as { operator: string; value: unknown };
+							switch (cmp.operator) {
+								case 'eq':
+									return eb(col, '=', cmp.value);
+								case 'neq':
+									return eb(col, '!=', cmp.value);
+								case 'gt':
+									return eb(col, '>', cmp.value);
+								case 'gte':
+									return eb(col, '>=', cmp.value);
+								case 'lt':
+									return eb(col, '<', cmp.value);
+								case 'lte':
+									return eb(col, '<=', cmp.value);
+								default:
+									return eb.lit(true);
+							}
+						}
+						case 'like': {
+							const like = c as { pattern: string; caseInsensitive?: boolean };
+							return like.caseInsensitive
+								? eb(col, 'ilike', like.pattern)
+								: eb(col, 'like', like.pattern);
+						}
+						case 'in': {
+							const inC = c as { values: readonly unknown[] };
+							if (inC.values.length === 0) {
+								return eb.lit(false);
+							}
+							return eb(col, 'in', [...inC.values]);
+						}
+						case 'null': {
+							const nullC = c as { operator: 'isNull' | 'isNotNull' };
+							return nullC.operator === 'isNull'
+								? eb(col, 'is', null)
+								: eb(col, 'is not', null);
+						}
+					}
 				}
 				return eb.lit(true); // Fallback
 			});
@@ -1852,7 +2002,9 @@ function compileWhere(
 			return compileComparison(eb, where, alias);
 
 		case 'like':
-			return eb(`${alias}.${where.field}`, 'like', where.pattern);
+			return where.caseInsensitive
+				? eb(`${alias}.${where.field}`, 'ilike', where.pattern)
+				: eb(`${alias}.${where.field}`, 'like', where.pattern);
 
 		case 'in':
 			// Empty IN is always false (no values can match)
@@ -2074,19 +2226,13 @@ function compileExists(
 	const relatedAlias = getNextAlias(state);
 	state.tableAliases.set(`${relation.target}_${relatedAlias}`, relatedAlias);
 
-	// Get source table's primary key
+	// Get source table's primary key (supports composite)
 	const sourceTableDef = model.getTable(relation.source);
-	const sourcePk = sourceTableDef?.primaryKey;
-	const sourceKey = Array.isArray(sourcePk)
-		? (sourcePk[0] ?? 'id')
-		: (sourcePk ?? 'id');
+	const sourceKeys = normalizePrimaryKey(sourceTableDef?.primaryKey);
 
-	// Get target table's primary key
+	// Get target table's primary key (supports composite)
 	const targetTableDef = model.getTable(relation.target);
-	const targetPk = targetTableDef?.primaryKey;
-	const targetKey = Array.isArray(targetPk)
-		? (targetPk[0] ?? 'id')
-		: (targetPk ?? 'id');
+	const targetKeys = normalizePrimaryKey(targetTableDef?.primaryKey);
 
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 	let subquery: any;
@@ -2097,10 +2243,8 @@ function compileExists(
 		const junctionAlias = getNextAlias(state);
 		const targetAlias = relatedAlias;
 
-		// FK from junction to source (default: {source}Id)
-		const fk = Array.isArray(relation.foreignKey)
-			? relation.foreignKey[0]
-			: (relation.foreignKey ?? `${relation.source}Id`);
+		// FK from junction to source (default: {source}Id) - supports composite keys
+		const fkCols = normalizeForeignKey(relation.foreignKey, `${relation.source}Id`);
 
 		// FK from junction to target (default: {target}Id)
 		const otherKey = relation.otherKey ?? `${relation.target}Id`;
@@ -2118,23 +2262,29 @@ function compileExists(
 			.selectFrom(`${junctionTable} as ${junctionAlias}`)
 			// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 			.select((innerEb: any) => innerEb.lit(1).as('_exists'))
-			// JOIN target table
+			// JOIN target table (single column otherKey for now - M:N composite key is rare)
 			.innerJoin(
 				`${targetTable} as ${targetAlias}`,
 				`${junctionAlias}.${otherKey}`,
-				`${targetAlias}.${targetKey}`,
-			)
-			// Correlate junction to source
-			.whereRef(`${junctionAlias}.${fk}`, '=', `${sourceAlias}.${sourceKey}`);
+				`${targetAlias}.${targetKeys[0]}`,
+			);
+		
+		// Correlate junction to source with composite key support
+		if (fkCols.length === 1) {
+			subquery = subquery.whereRef(`${junctionAlias}.${fkCols[0]}`, '=', `${sourceAlias}.${sourceKeys[0]}`);
+		} else {
+			// Composite key correlation
+			subquery = subquery.where((innerEb: any) =>
+				buildCompositeKeyCorrelation(innerEb, junctionAlias, sourceAlias, fkCols, sourceKeys)
+			);
+		}
 	} else {
 		// Non-M:N relations
 		// Build EXISTS subquery
 		// FK direction depends on relation type:
 		// - belongsTo: source.foreignKey = target.primaryKey
 		// - hasMany/hasOne: target.foreignKey = source.primaryKey
-		const fk = Array.isArray(relation.foreignKey)
-			? relation.foreignKey[0]
-			: (relation.foreignKey ?? 'id');
+		const fkCols = normalizeForeignKey(relation.foreignKey, 'id');
 
 		// Apply schema prefix for multi-tenant support
 		const targetTable = schemaName
@@ -2147,21 +2297,35 @@ function compileExists(
 			// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 			.select((innerEb: any) => innerEb.lit(1).as('_exists'));
 
-		// Add FK correlation based on relation type
+		// Add FK correlation based on relation type with composite key support
 		if (relation.type === 'belongsTo') {
 			// belongsTo: source.fk = target.pk (e.g., posts.authorId = users.id)
-			subquery = subquery.whereRef(
-				`${sourceAlias}.${fk}`,
-				'=',
-				`${relatedAlias}.${targetKey}`,
-			);
+			if (fkCols.length === 1) {
+				subquery = subquery.whereRef(
+					`${sourceAlias}.${fkCols[0]}`,
+					'=',
+					`${relatedAlias}.${targetKeys[0]}`,
+				);
+			} else {
+				// Composite key: source.fk[] = target.pk[]
+				subquery = subquery.where((innerEb: any) =>
+					buildCompositeKeyCorrelation(innerEb, sourceAlias, relatedAlias, fkCols, targetKeys)
+				);
+			}
 		} else {
 			// hasMany/hasOne: target.fk = source.pk (e.g., posts.userId = users.id)
-			subquery = subquery.whereRef(
-				`${relatedAlias}.${fk}`,
-				'=',
-				`${sourceAlias}.${sourceKey}`,
-			);
+			if (fkCols.length === 1) {
+				subquery = subquery.whereRef(
+					`${relatedAlias}.${fkCols[0]}`,
+					'=',
+					`${sourceAlias}.${sourceKeys[0]}`,
+				);
+			} else {
+				// Composite key: target.fk[] = source.pk[]
+				subquery = subquery.where((innerEb: any) =>
+					buildCompositeKeyCorrelation(innerEb, relatedAlias, sourceAlias, fkCols, sourceKeys)
+				);
+			}
 		}
 	}
 
@@ -2285,18 +2449,12 @@ function applyIncludeJoins(
 			);
 		}
 
-		// Get table definitions
+		// Get table definitions - supports composite keys
 		const targetTableDef = model.getTable(relation.target);
-		const targetPk = targetTableDef?.primaryKey;
-		const targetKey = Array.isArray(targetPk)
-			? (targetPk[0] ?? 'id')
-			: (targetPk ?? 'id');
+		const targetKeys = normalizePrimaryKey(targetTableDef?.primaryKey);
 
 		const sourceTableDef = model.getTable(relation.source);
-		const sourcePk = sourceTableDef?.primaryKey;
-		const sourceKey = Array.isArray(sourcePk)
-			? (sourcePk[0] ?? 'id')
-			: (sourcePk ?? 'id');
+		const sourceKeys = normalizePrimaryKey(sourceTableDef?.primaryKey);
 
 		// Handle M:N (belongsToMany) with through table
 		if (relation.through) {
@@ -2304,10 +2462,8 @@ function applyIncludeJoins(
 			const junctionAlias = getNextAlias(state);
 			const targetAlias = getNextAlias(state);
 
-			// FK from junction to source (default: {source}Id)
-			const fk = Array.isArray(relation.foreignKey)
-				? relation.foreignKey[0]
-				: (relation.foreignKey ?? `${relation.source}Id`);
+			// FK from junction to source (default: {source}Id) - supports composite keys
+			const fkCols = normalizeForeignKey(relation.foreignKey, `${relation.source}Id`);
 
 			// FK from junction to target (default: {target}Id)
 			const otherKey = relation.otherKey ?? `${relation.target}Id`;
@@ -2320,18 +2476,29 @@ function applyIncludeJoins(
 				? `${schemaName}.${relation.target}`
 				: relation.target;
 
-			// LEFT JOIN 1: source → junction (source.pk = junction.fk)
-			result = result.leftJoin(
-				`${junctionTable} as ${junctionAlias}`,
-				`${rootAlias}.${sourceKey}`,
-				`${junctionAlias}.${fk}`,
-			);
+			// LEFT JOIN 1: source → junction (source.pk = junction.fk) - supports composite keys
+			if (fkCols.length === 1) {
+				result = result.leftJoin(
+					`${junctionTable} as ${junctionAlias}`,
+					`${rootAlias}.${sourceKeys[0]}`,
+					`${junctionAlias}.${fkCols[0]}`,
+				);
+			} else {
+				// Composite key: multiple ON conditions
+				result = result.leftJoin(`${junctionTable} as ${junctionAlias}`, (join) => {
+					let j = join.onRef(`${rootAlias}.${sourceKeys[0]}`, '=', `${junctionAlias}.${fkCols[0]}`);
+					for (let i = 1; i < fkCols.length; i++) {
+						j = j.onRef(`${rootAlias}.${sourceKeys[i]}`, '=', `${junctionAlias}.${fkCols[i]}`);
+					}
+					return j;
+				});
+			}
 
-			// LEFT JOIN 2: junction → target (junction.otherKey = target.pk)
+			// LEFT JOIN 2: junction → target (junction.otherKey = target.pk) - single key for now
 			result = result.leftJoin(
 				`${targetTable} as ${targetAlias}`,
 				`${junctionAlias}.${otherKey}`,
-				`${targetAlias}.${targetKey}`,
+				`${targetAlias}.${targetKeys[0]}`,
 			);
 
 			// Track the target alias (not junction) for column selection
@@ -2351,10 +2518,8 @@ function applyIncludeJoins(
 				relationName,
 			});
 
-			// Build JOIN condition based on relation type
-			const fk = Array.isArray(relation.foreignKey)
-				? relation.foreignKey[0]
-				: (relation.foreignKey ?? 'id');
+			// Build JOIN condition based on relation type - supports composite keys
+			const fkCols = normalizeForeignKey(relation.foreignKey, 'id');
 
 			// Apply schema prefix
 			const targetTable = schemaName
@@ -2365,18 +2530,40 @@ function applyIncludeJoins(
 			// belongsTo: source.foreignKey = target.primaryKey
 			// hasMany/hasOne: source.primaryKey = target.foreignKey
 			if (relation.type === 'belongsTo') {
-				result = result.leftJoin(
-					`${targetTable} as ${joinAlias}`,
-					`${rootAlias}.${fk}`,
-					`${joinAlias}.${targetKey}`,
-				);
+				if (fkCols.length === 1) {
+					result = result.leftJoin(
+						`${targetTable} as ${joinAlias}`,
+						`${rootAlias}.${fkCols[0]}`,
+						`${joinAlias}.${targetKeys[0]}`,
+					);
+				} else {
+					// Composite key: multiple ON conditions
+					result = result.leftJoin(`${targetTable} as ${joinAlias}`, (join) => {
+						let j = join.onRef(`${rootAlias}.${fkCols[0]}`, '=', `${joinAlias}.${targetKeys[0]}`);
+						for (let i = 1; i < fkCols.length; i++) {
+							j = j.onRef(`${rootAlias}.${fkCols[i]}`, '=', `${joinAlias}.${targetKeys[i]}`);
+						}
+						return j;
+					});
+				}
 			} else {
 				// hasMany or hasOne
-				result = result.leftJoin(
-					`${targetTable} as ${joinAlias}`,
-					`${joinAlias}.${fk}`,
-					`${rootAlias}.${sourceKey}`,
-				);
+				if (fkCols.length === 1) {
+					result = result.leftJoin(
+						`${targetTable} as ${joinAlias}`,
+						`${joinAlias}.${fkCols[0]}`,
+						`${rootAlias}.${sourceKeys[0]}`,
+					);
+				} else {
+					// Composite key: multiple ON conditions
+					result = result.leftJoin(`${targetTable} as ${joinAlias}`, (join) => {
+						let j = join.onRef(`${joinAlias}.${fkCols[0]}`, '=', `${rootAlias}.${sourceKeys[0]}`);
+						for (let i = 1; i < fkCols.length; i++) {
+							j = j.onRef(`${joinAlias}.${fkCols[i]}`, '=', `${rootAlias}.${sourceKeys[i]}`);
+						}
+						return j;
+					});
+				}
 			}
 		}
 	}
@@ -2578,18 +2765,12 @@ function applyJoinFilters(
 			);
 		}
 
-		// Get table definitions
+		// Get table definitions - supports composite keys
 		const sourceTableDef = model.getTable(relation.source);
-		const sourcePk = sourceTableDef?.primaryKey;
-		const sourceKey = Array.isArray(sourcePk)
-			? (sourcePk[0] ?? 'id')
-			: (sourcePk ?? 'id');
+		const sourceKeys = normalizePrimaryKey(sourceTableDef?.primaryKey);
 
 		const targetTableDef = model.getTable(relation.target);
-		const targetPk = targetTableDef?.primaryKey;
-		const targetKey = Array.isArray(targetPk)
-			? (targetPk[0] ?? 'id')
-			: (targetPk ?? 'id');
+		const targetKeys = normalizePrimaryKey(targetTableDef?.primaryKey);
 
 		// Handle M:N (belongsToMany) with through table
 		if (relation.through) {
@@ -2597,10 +2778,8 @@ function applyJoinFilters(
 			const junctionAlias = getNextAlias(state);
 			const targetAlias = getNextAlias(state);
 
-			// FK from junction to source (default: {source}Id)
-			const fk = Array.isArray(relation.foreignKey)
-				? relation.foreignKey[0]
-				: (relation.foreignKey ?? `${relation.source}Id`);
+			// FK from junction to source (default: {source}Id) - supports composite keys
+			const fkCols = normalizeForeignKey(relation.foreignKey, `${relation.source}Id`);
 
 			// FK from junction to target (default: {target}Id)
 			const otherKey = relation.otherKey ?? `${relation.target}Id`;
@@ -2613,18 +2792,29 @@ function applyJoinFilters(
 				? `${schemaName}.${relation.target}`
 				: relation.target;
 
-			// JOIN 1: source → junction (source.pk = junction.fk)
-			result = result.innerJoin(
-				`${junctionTable} as ${junctionAlias}`,
-				`${rootAlias}.${sourceKey}`,
-				`${junctionAlias}.${fk}`,
-			);
+			// JOIN 1: source → junction (source.pk = junction.fk) - supports composite keys
+			if (fkCols.length === 1) {
+				result = result.innerJoin(
+					`${junctionTable} as ${junctionAlias}`,
+					`${rootAlias}.${sourceKeys[0]}`,
+					`${junctionAlias}.${fkCols[0]}`,
+				);
+			} else {
+				// Composite key: multiple ON conditions
+				result = result.innerJoin(`${junctionTable} as ${junctionAlias}`, (join) => {
+					let j = join.onRef(`${rootAlias}.${sourceKeys[0]}`, '=', `${junctionAlias}.${fkCols[0]}`);
+					for (let i = 1; i < fkCols.length; i++) {
+						j = j.onRef(`${rootAlias}.${sourceKeys[i]}`, '=', `${junctionAlias}.${fkCols[i]}`);
+					}
+					return j;
+				});
+			}
 
-			// JOIN 2: junction → target (junction.otherKey = target.pk)
+			// JOIN 2: junction → target (junction.otherKey = target.pk) - single key for now
 			result = result.innerJoin(
 				`${targetTable} as ${targetAlias}`,
 				`${junctionAlias}.${otherKey}`,
-				`${targetAlias}.${targetKey}`,
+				`${targetAlias}.${targetKeys[0]}`,
 			);
 
 			// Track the target alias (not junction) for WHERE compilation
@@ -2642,33 +2832,53 @@ function applyJoinFilters(
 				targetTable: relation.target,
 			});
 
-			// Build JOIN condition based on relation type
+			// Build JOIN condition based on relation type - supports composite keys
 			// belongsTo: source.foreignKey = target.primaryKey
 			// hasMany/hasOne: target.foreignKey = source.primaryKey
-			const fk = Array.isArray(relation.foreignKey)
-				? relation.foreignKey[0]
-				: (relation.foreignKey ?? 'id');
+			const fkCols = normalizeForeignKey(relation.foreignKey, 'id');
 
 			// Apply schema prefix
 			const targetTable = schemaName
 				? `${schemaName}.${relation.target}`
 				: relation.target;
 
-			// Add INNER JOIN with correct FK direction
+			// Add INNER JOIN with correct FK direction - supports composite keys
 			if (relation.type === 'belongsTo') {
 				// belongsTo: source.fk = target.pk (e.g., posts.authorId = users.id)
-				result = result.innerJoin(
-					`${targetTable} as ${joinAlias}`,
-					`${rootAlias}.${fk}`,
-					`${joinAlias}.${targetKey}`,
-				);
+				if (fkCols.length === 1) {
+					result = result.innerJoin(
+						`${targetTable} as ${joinAlias}`,
+						`${rootAlias}.${fkCols[0]}`,
+						`${joinAlias}.${targetKeys[0]}`,
+					);
+				} else {
+					// Composite key: multiple ON conditions
+					result = result.innerJoin(`${targetTable} as ${joinAlias}`, (join) => {
+						let j = join.onRef(`${rootAlias}.${fkCols[0]}`, '=', `${joinAlias}.${targetKeys[0]}`);
+						for (let i = 1; i < fkCols.length; i++) {
+							j = j.onRef(`${rootAlias}.${fkCols[i]}`, '=', `${joinAlias}.${targetKeys[i]}`);
+						}
+						return j;
+					});
+				}
 			} else {
 				// hasMany/hasOne: target.fk = source.pk (e.g., posts.userId = users.id)
-				result = result.innerJoin(
-					`${targetTable} as ${joinAlias}`,
-					`${joinAlias}.${fk}`,
-					`${rootAlias}.${sourceKey}`,
-				);
+				if (fkCols.length === 1) {
+					result = result.innerJoin(
+						`${targetTable} as ${joinAlias}`,
+						`${joinAlias}.${fkCols[0]}`,
+						`${rootAlias}.${sourceKeys[0]}`,
+					);
+				} else {
+					// Composite key: multiple ON conditions
+					result = result.innerJoin(`${targetTable} as ${joinAlias}`, (join) => {
+						let j = join.onRef(`${joinAlias}.${fkCols[0]}`, '=', `${rootAlias}.${sourceKeys[0]}`);
+						for (let i = 1; i < fkCols.length; i++) {
+							j = j.onRef(`${joinAlias}.${fkCols[i]}`, '=', `${rootAlias}.${sourceKeys[i]}`);
+						}
+						return j;
+					});
+				}
 			}
 		}
 	}
@@ -3155,4 +3365,72 @@ function getTableFromAlias(
 		}
 	}
 	return undefined;
+}
+
+/**
+ * Normalize foreignKey to array for consistent handling of composite keys.
+ */
+function normalizeForeignKey(
+	foreignKey: string | readonly string[] | undefined,
+	defaultValue: string,
+): readonly string[] {
+	if (Array.isArray(foreignKey)) {
+		return foreignKey;
+	}
+	return foreignKey ? [foreignKey] : [defaultValue];
+}
+
+/**
+ * Normalize primaryKey to array for consistent handling of composite keys.
+ */
+function normalizePrimaryKey(
+	primaryKey: string | readonly string[] | undefined,
+): readonly string[] {
+	if (Array.isArray(primaryKey)) {
+		return primaryKey;
+	}
+	return primaryKey ? [primaryKey] : ['id'];
+}
+
+/**
+ * Build composite key correlation for EXISTS subqueries.
+ * Returns an AND expression for all FK/PK column pairs.
+ */
+function buildCompositeKeyCorrelation(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
+	eb: any,
+	sourceAlias: string,
+	targetAlias: string,
+	sourceCols: readonly string[],
+	targetCols: readonly string[],
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
+): any {
+	if (sourceCols.length !== targetCols.length) {
+		throw new CompilationError(
+			`Composite key mismatch: source has ${sourceCols.length} columns, target has ${targetCols.length}`,
+		);
+	}
+
+	if (sourceCols.length === 1) {
+		// Single key - simple whereRef
+		return eb.and([
+			eb(`${sourceAlias}.${sourceCols[0]}`, '=', eb.ref(`${targetAlias}.${targetCols[0]}`)),
+		]);
+	}
+
+	// Composite key - AND all column pairs
+	const conditions = sourceCols.map((srcCol, i) =>
+		eb(`${sourceAlias}.${srcCol}`, '=', eb.ref(`${targetAlias}.${targetCols[i]}`)),
+	);
+	return eb.and(conditions);
+}
+
+/**
+ * Unwrap single-element arrays to strings for backward compatibility.
+ * Used by SeparateIncludeInfo to maintain the original API contract.
+ */
+function unwrapSingletonArray(
+	value: readonly string[],
+): string | readonly string[] {
+	return value.length === 1 ? value[0] : value;
 }

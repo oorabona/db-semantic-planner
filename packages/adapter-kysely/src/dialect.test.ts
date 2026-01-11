@@ -116,6 +116,8 @@ describe('capability profiles', () => {
 				supportsStreaming: true,
 				supportsArrayType: true,
 				supportsWindowFunctions: true,
+				supportsCycleDetection: true,
+				supportsSearchClause: true,
 			});
 		});
 	});
@@ -131,6 +133,8 @@ describe('capability profiles', () => {
 				supportsStreaming: false,
 				supportsArrayType: false,
 				supportsWindowFunctions: true,
+				supportsCycleDetection: false,
+				supportsSearchClause: false,
 			});
 		});
 
@@ -154,6 +158,8 @@ describe('capability profiles', () => {
 				supportsStreaming: false,
 				supportsArrayType: false,
 				supportsWindowFunctions: true,
+				supportsCycleDetection: false,
+				supportsSearchClause: false,
 			});
 		});
 
@@ -177,6 +183,8 @@ describe('capability profiles', () => {
 				supportsStreaming: false,
 				supportsArrayType: false,
 				supportsWindowFunctions: true,
+				supportsCycleDetection: false,
+				supportsSearchClause: false,
 			});
 		});
 	});
@@ -192,6 +200,8 @@ describe('capability profiles', () => {
 				supportsStreaming: false,
 				supportsArrayType: false,
 				supportsWindowFunctions: true,
+				supportsCycleDetection: false,
+				supportsSearchClause: false,
 			});
 		});
 

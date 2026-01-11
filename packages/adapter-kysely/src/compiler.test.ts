@@ -2,6 +2,7 @@ import {
 	belongsTo,
 	defineSchema,
 	hasMany,
+	ModelIRImpl,
 	plan,
 	planRecursive,
 	type QueryIntent,
@@ -23,6 +24,12 @@ import {
 	compileWindowSelect,
 	compileWithIncludes,
 } from './compiler.js';
+import { injectAdvancedRecursiveClauses } from './compiler.js';
+import {
+	POSTGRESQL_CAPABILITIES,
+	SQLITE_CAPABILITIES,
+	withMockedCapabilities,
+} from './dialect.js';
 import { CompilationError } from './errors.js';
 
 // ============================================================================
@@ -243,6 +250,25 @@ describe('SQL Compiler', () => {
 			expect(compiled.parameters).toContain('%john%');
 		});
 
+		it('should compile case-insensitive LIKE pattern (ILIKE)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'like',
+					field: 'name',
+					pattern: '%john%',
+					caseInsensitive: true,
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql).toContain('ilike');
+			expect(compiled.parameters).toContain('%john%');
+		});
+
 		it('should compile IN list', () => {
 			const intent: QueryIntent = {
 				type: 'select',
@@ -340,6 +366,31 @@ describe('SQL Compiler', () => {
 			const compiled = compile(planReport, basicSchema, kysely);
 
 			expect(compiled.sql).toContain('or');
+		});
+
+		it('should compile OR with mixed intent types (ADAPTER-005 fix)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'or',
+					conditions: [
+						{ kind: 'comparison', field: 'id', operator: 'eq', value: 1 },
+						{ kind: 'like', field: 'name', pattern: '%admin%', caseInsensitive: true },
+						{ kind: 'in', field: 'role', values: ['admin', 'moderator'] },
+						{ kind: 'null', field: 'deletedAt', operator: 'isNull' },
+					],
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			// Verify OR is present and all conditions are compiled
+			expect(compiled.sql).toContain('or');
+			expect(compiled.sql).toContain('ilike'); // caseInsensitive like
+			expect(compiled.sql).toContain('in');
+			expect(compiled.sql).toContain('is null');
 		});
 
 		it('should compile NOT condition', () => {
@@ -1479,6 +1530,179 @@ describe('SQL Compiler', () => {
 				expect(compiled.sql).toContain("' > '");
 				// Should have path column
 				expect(compiled.sql).toContain('"path"');
+			});
+		});
+
+		// ====================================================================
+		// CORE-007: Advanced Recursive Options (CYCLE/SEARCH)
+		// ====================================================================
+
+		describe('CORE-007: Advanced recursive options', () => {
+			// Sample compiled SQL for testing injection
+			const sampleCteSQL = {
+				sql: 'WITH RECURSIVE category_tree(node_id, depth) AS (...) SELECT * FROM category_tree',
+				parameters: [],
+				query: { kind: 'SelectQueryNode' },
+			};
+
+			describe('injectAdvancedRecursiveClauses (unit tests)', () => {
+				it('should inject CYCLE clause when cycle detection is enabled (PostgreSQL)', () => {
+					const result = injectAdvancedRecursiveClauses(
+						sampleCteSQL,
+						{ cycle: 'mark' },
+						'category_tree',
+						'node_id',
+						POSTGRESQL_CAPABILITIES,
+					);
+
+					expect(result.sql).toContain('CYCLE node_id SET is_cycle USING path');
+				});
+
+				it('should inject SEARCH DEPTH FIRST clause when search=depth (PostgreSQL)', () => {
+					const result = injectAdvancedRecursiveClauses(
+						sampleCteSQL,
+						{ search: 'depth' },
+						'category_tree',
+						'node_id',
+						POSTGRESQL_CAPABILITIES,
+					);
+
+					expect(result.sql).toContain('SEARCH DEPTH FIRST BY node_id SET ordercol');
+				});
+
+				it('should inject SEARCH BREADTH FIRST clause when search=breadth (PostgreSQL)', () => {
+					const result = injectAdvancedRecursiveClauses(
+						sampleCteSQL,
+						{ search: 'breadth' },
+						'category_tree',
+						'node_id',
+						POSTGRESQL_CAPABILITIES,
+					);
+
+					expect(result.sql).toContain('SEARCH BREADTH FIRST BY node_id SET ordercol');
+				});
+
+				it('should inject both CYCLE and SEARCH clauses when both are specified', () => {
+					const result = injectAdvancedRecursiveClauses(
+						sampleCteSQL,
+						{ cycle: 'stop', search: 'depth' },
+						'category_tree',
+						'node_id',
+						POSTGRESQL_CAPABILITIES,
+					);
+
+					expect(result.sql).toContain('CYCLE');
+					expect(result.sql).toContain('SEARCH DEPTH FIRST');
+				});
+
+				it('should NOT inject CYCLE/SEARCH clauses for SQLite (no capabilities)', () => {
+					const result = injectAdvancedRecursiveClauses(
+						sampleCteSQL,
+						{ cycle: 'mark', search: 'depth' },
+						'category_tree',
+						'node_id',
+						SQLITE_CAPABILITIES,
+					);
+
+					// SQLite doesn't support CYCLE/SEARCH - should NOT be present
+					expect(result.sql).not.toContain('CYCLE');
+					expect(result.sql).not.toContain('SEARCH');
+					// Original SQL should be unchanged
+					expect(result.sql).toBe(sampleCteSQL.sql);
+				});
+
+				it('should preserve parameters in the compiled result', () => {
+					const compiledWithParams = {
+						...sampleCteSQL,
+						parameters: [1, 'test'],
+					};
+					const result = injectAdvancedRecursiveClauses(
+						compiledWithParams,
+						{ cycle: 'mark' },
+						'category_tree',
+						'node_id',
+						POSTGRESQL_CAPABILITIES,
+					);
+
+					expect(result.parameters).toEqual([1, 'test']);
+				});
+
+				it('should handle all cycle modes (mark, stop, error)', () => {
+					for (const mode of ['mark', 'stop', 'error'] as const) {
+						const result = injectAdvancedRecursiveClauses(
+							sampleCteSQL,
+							{ cycle: mode },
+							'category_tree',
+							'node_id',
+							POSTGRESQL_CAPABILITIES,
+						);
+						// All modes use CYCLE clause - application handles is_cycle differently
+						expect(result.sql).toContain('CYCLE node_id SET is_cycle USING path');
+					}
+				});
+			});
+
+			describe('integration with compileRecursive', () => {
+				it('should NOT inject CYCLE/SEARCH clauses for SQLite (no capabilities)', () => {
+					const intent: RecursiveIntent = {
+						type: 'recursive',
+						cteName: 'category_tree',
+						start: {
+							from: 'categories',
+							nodeIdExpr: { kind: 'column', name: 'id' },
+						},
+						traversal: {
+							kind: 'adjacency',
+							nodeTable: 'categories',
+							nodeId: 'id',
+							parentId: 'parentId',
+							direction: 'descendants',
+						},
+						maxDepth: 10,
+						advancedOptions: {
+							cycle: 'mark',
+							search: 'depth',
+						},
+					};
+
+					const report = planRecursive(intent, recursiveSchema);
+					const compiled = compileRecursive(report, recursiveSchema, kysely);
+
+					// SQLite doesn't support CYCLE/SEARCH - should NOT be present
+					expect(compiled.sql).not.toContain('CYCLE');
+					expect(compiled.sql).not.toContain('SEARCH');
+				});
+
+				it('should accept advancedOptions without errors', () => {
+					const intent: RecursiveIntent = {
+						type: 'recursive',
+						cteName: 'category_tree',
+						start: {
+							from: 'categories',
+							nodeIdExpr: { kind: 'column', name: 'id' },
+						},
+						traversal: {
+							kind: 'adjacency',
+							nodeTable: 'categories',
+							nodeId: 'id',
+							parentId: 'parentId',
+							direction: 'descendants',
+						},
+						maxDepth: 10,
+						advancedOptions: {
+							cycle: 'mark',
+							search: 'breadth',
+						},
+					};
+
+					// Should not throw
+					const report = planRecursive(intent, recursiveSchema);
+					const compiled = compileRecursive(report, recursiveSchema, kysely);
+
+					// Just verify it compiles without error (case-insensitive check)
+					expect(compiled.sql.toLowerCase()).toContain('with recursive');
+					expect(compiled.sql).toContain('category_tree');
+				});
 			});
 		});
 	});
@@ -2925,6 +3149,212 @@ describe('SQL Compiler', () => {
 
 				expect(compiled.sql.toLowerCase()).not.toContain('returning');
 			});
+		});
+	});
+});
+
+// ============================================================================
+// CORE-006: Composite Key Support Tests
+// ============================================================================
+
+describe('CORE-006: Composite Key Support', () => {
+	/**
+	 * Schema with composite foreign keys for testing multi-column joins
+	 * tenant_orders has composite FK [tenantId, customerId] -> customers[tenantId, id]
+	 *
+	 * We construct ModelIR manually to set composite primary keys,
+	 * since defineSchema() defaults primaryKey to 'id'.
+	 */
+	const compositeKeySchema = (() => {
+
+		const tables = new Map();
+
+		// tenants table (simple PK)
+		tables.set('tenants', {
+			name: 'tenants',
+			columns: [
+				{ name: 'id', type: 'number', nullable: false },
+				{ name: 'name', type: 'string', nullable: false },
+			],
+			primaryKey: 'id',
+			foreignKeys: [],
+		});
+
+		// customers table (composite PK: [tenantId, id])
+		tables.set('customers', {
+			name: 'customers',
+			columns: [
+				{ name: 'tenantId', type: 'number', nullable: false },
+				{ name: 'id', type: 'number', nullable: false },
+				{ name: 'name', type: 'string', nullable: false },
+				{ name: 'email', type: 'string', nullable: false },
+			],
+			primaryKey: ['tenantId', 'id'], // Composite PK
+			foreignKeys: [],
+		});
+
+		// tenant_orders table (composite FK to customers)
+		tables.set('tenant_orders', {
+			name: 'tenant_orders',
+			columns: [
+				{ name: 'id', type: 'number', nullable: false },
+				{ name: 'tenantId', type: 'number', nullable: false },
+				{ name: 'customerId', type: 'number', nullable: false },
+				{ name: 'total', type: 'number', nullable: false },
+				{ name: 'status', type: 'string', nullable: false },
+			],
+			primaryKey: 'id',
+			foreignKeys: [
+				{
+					columns: ['tenantId', 'customerId'],
+					references: { table: 'customers', columns: ['tenantId', 'id'] },
+				},
+			],
+		});
+
+		const relations = new Map();
+
+		// hasMany: customers -> tenant_orders
+		relations.set('customers.tenant_orders', {
+			name: 'tenant_orders',
+			type: 'hasMany',
+			source: 'customers',
+			target: 'tenant_orders',
+			foreignKey: ['tenantId', 'customerId'], // Composite FK
+			cardinality: 'one-to-many',
+			optionality: 'optional',
+			includeStrategy: 'separate', // hasMany defaults to separate
+			filterStrategy: 'exists',
+			joinDefault: 'left',
+		});
+
+		// belongsTo: tenant_orders -> customers
+		relations.set('tenant_orders.customer', {
+			name: 'customer',
+			type: 'belongsTo',
+			source: 'tenant_orders',
+			target: 'customers',
+			foreignKey: ['tenantId', 'customerId'], // Composite FK
+			cardinality: 'many-to-one',
+			optionality: 'optional',
+			includeStrategy: 'join', // belongsTo defaults to join
+			filterStrategy: 'exists',
+			joinDefault: 'left',
+		});
+
+		return new ModelIRImpl(tables, relations);
+	})();
+
+	describe('EXISTS with composite foreign keys', () => {
+		it('should compile EXISTS with composite FK correlation (hasMany)', () => {
+			const kysely = createTestKysely();
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'customers',
+				where: {
+					kind: 'exists',
+					relation: 'tenant_orders',
+				},
+			};
+
+			const planReport = plan(intent, compositeKeySchema);
+			const compiled = compile(planReport, compositeKeySchema, kysely);
+
+			// Should have composite key correlation in EXISTS
+			expect(compiled.sql).toContain('exists');
+			// Check that both FK columns are referenced in the correlation
+			expect(compiled.sql).toMatch(/tenantId.*=.*tenantId/i);
+			expect(compiled.sql).toMatch(/customerId.*=.*id/i);
+		});
+
+		it('should compile nested EXISTS where with composite FK', () => {
+			const kysely = createTestKysely();
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'customers',
+				where: {
+					kind: 'exists',
+					relation: 'tenant_orders',
+					where: {
+						kind: 'comparison',
+						field: 'status',
+						operator: 'eq',
+						value: 'completed',
+					},
+				},
+			};
+
+			const planReport = plan(intent, compositeKeySchema);
+			const compiled = compile(planReport, compositeKeySchema, kysely);
+
+			expect(compiled.sql).toContain('exists');
+			expect(compiled.sql.toLowerCase()).toContain('status');
+			expect(compiled.parameters).toContain('completed');
+		});
+	});
+
+	describe('SeparateIncludeInfo with composite keys', () => {
+		it('should return array for composite FK in SeparateIncludeInfo', () => {
+			const kysely = createTestKysely();
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'customers',
+				include: [{ relation: 'tenant_orders' }],
+			};
+
+			const planReport = plan(intent, compositeKeySchema);
+			const result = compileWithIncludes(
+				planReport,
+				compositeKeySchema,
+				kysely,
+			);
+
+			// For composite keys, foreignKey should be an array
+			const includeInfo = result.separateIncludes[0];
+			expect(includeInfo).toBeDefined();
+			expect(includeInfo?.relationName).toBe('tenant_orders');
+
+			// Composite FK should be returned as array
+			expect(Array.isArray(includeInfo?.foreignKey)).toBe(true);
+			expect(includeInfo?.foreignKey).toEqual(['tenantId', 'customerId']);
+
+			// Composite source key should also be array
+			expect(Array.isArray(includeInfo?.sourceKey)).toBe(true);
+			expect(includeInfo?.sourceKey).toEqual(['tenantId', 'id']);
+		});
+	});
+
+	describe('compileSeparateInclude with composite keys', () => {
+		it('should compile separate include with composite FK using OR conditions', () => {
+			const kysely = createTestKysely();
+
+			// Simulate parent tuples: [tenantId, customerId]
+			const parentIds = [
+				[1, 100],
+				[1, 101],
+				[2, 100],
+			];
+
+			const includeInfo = {
+				relationName: 'tenant_orders',
+				targetTable: 'tenant_orders',
+				foreignKey: ['tenantId', 'customerId'] as readonly string[],
+				sourceKey: ['tenantId', 'id'] as readonly string[],
+			};
+
+			const compiled = compileSeparateInclude(
+				includeInfo,
+				parentIds,
+				kysely,
+			);
+
+			// Should produce OR conditions for composite key tuples
+			expect(compiled.sql).toContain('tenant_orders');
+			// Should have conditions for each tuple
+			expect(compiled.sql.toLowerCase()).toContain('or');
+			// Should reference both FK columns
+			expect(compiled.sql).toContain('tenantId');
+			expect(compiled.sql).toContain('customerId');
 		});
 	});
 });
