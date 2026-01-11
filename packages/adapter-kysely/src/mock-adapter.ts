@@ -134,7 +134,9 @@ export class MockAdapter implements Adapter<unknown> {
 	constructor(options: MockAdapterOptions = {}) {
 		const dialect = options.dialect ?? 'postgresql';
 		this.kysely = createMockKysely(dialect);
-		this._schemaName = options.schemaName;
+		if (options.schemaName !== undefined) {
+			this._schemaName = options.schemaName;
+		}
 
 		// PostgreSQL capabilities (most permissive)
 		this._capabilities = {
@@ -291,7 +293,7 @@ export class MockAdapter implements Adapter<unknown> {
 			sql: query.sql,
 			params: query.parameters as readonly unknown[],
 			meta: {
-				tenant: this._schemaName,
+				...(this._schemaName !== undefined && { tenant: this._schemaName }),
 				...meta,
 			},
 		};

@@ -29,9 +29,13 @@ import type {
 	WindowIntent,
 } from '@db-semantic-planner/core';
 import {
+	POSTGRESQL_CAPABILITIES as CORE_POSTGRESQL_CAPABILITIES,
+	type DialectCapabilities as CoreDialectCapabilities,
+	getDialectCapabilities,
 	isAdjacencyTraversal,
 	isAggregateWindowFunction,
 	isEdgeTableTraversal,
+	isKnownDialect,
 	isSelectAggregate,
 	isSelectWithExpressions,
 	isSubqueryRef,
@@ -50,12 +54,6 @@ import {
 	detectDialect,
 	getCapabilitiesForDialect,
 } from './dialect.js';
-import {
-	type DialectCapabilities as CoreDialectCapabilities,
-	getDialectCapabilities,
-	isKnownDialect,
-	POSTGRESQL_CAPABILITIES as CORE_POSTGRESQL_CAPABILITIES,
-} from '@db-semantic-planner/core';
 import { CompilationError } from './errors.js';
 import { UnsupportedOperationError } from './stream.js';
 
@@ -1115,7 +1113,8 @@ function buildRecursiveBaseCase(
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 	db: Kysely<any>,
 	schemaName: string | undefined,
-	capabilities: DialectCapabilities,
+	// biome-ignore lint/correctness/noUnusedFunctionParameters: passed for API consistency
+	capabilities: AdapterDialectCapabilities,
 	dialect: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {
@@ -1193,7 +1192,8 @@ function buildRecursiveStep(
 	db: Kysely<any>,
 	cteName: string,
 	schemaName: string | undefined,
-	capabilities: DialectCapabilities,
+	// biome-ignore lint/correctness/noUnusedFunctionParameters: passed for API consistency
+	capabilities: AdapterDialectCapabilities,
 	dialect: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {
@@ -1243,7 +1243,8 @@ function buildAdjacencyRecursiveStep(
 	traversal: Extract<RecursiveIntent['traversal'], { kind: 'adjacency' }>,
 	nodeIdAlias: string,
 	schemaName: string | undefined,
-	capabilities: DialectCapabilities,
+	// biome-ignore lint/correctness/noUnusedFunctionParameters: passed for API consistency
+	capabilities: AdapterDialectCapabilities,
 	dialect: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {
@@ -1334,7 +1335,8 @@ function buildEdgeTableRecursiveStep(
 	traversal: Extract<RecursiveIntent['traversal'], { kind: 'edge-table' }>,
 	nodeIdAlias: string,
 	schemaName: string | undefined,
-	capabilities: DialectCapabilities,
+	// biome-ignore lint/correctness/noUnusedFunctionParameters: passed for API consistency
+	capabilities: AdapterDialectCapabilities,
 	dialect: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {

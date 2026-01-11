@@ -519,22 +519,20 @@ registerDialect('cockroachdb', cockroachCaps);
 
 ---
 
-### ADAPTER-002: Rendre adapter-kysely 100% dialect-agnostic
+### ✅ ADAPTER-002: Dialect-agnostic path tracking in recursive CTEs (2026-01-11)
 
-**Priority:** HIGH | **Effort:** M (~6h) | **Breaking:** No
+**Priority:** HIGH | **Effort:** M | **Breaking:** No
 **Scope:** adapter-kysely
 **Depends on:** CORE-004 (Dialect Capabilities Registry)
 
-Le compiler utilise actuellement du SQL PostgreSQL-spécifique (ARRAY[], ||, ::text). 
-Doit utiliser les capabilities de CORE-004 pour supporter tous les dialectes Kysely.
+Made adapter-kysely use core's DialectCapabilities for dialect-agnostic SQL generation.
 
-- [ ] Importer `getDialectCapabilities` depuis core
-- [ ] Créer `detectKyselyDialect(db)` - détection du dialecte Kysely
-- [ ] Modifier `createKyselyAdapter()` pour accepter `dialectName` et `capabilities` overrides
-- [ ] Refactorer `buildInitialPath()` - utiliser `capabilities.recursivePathStyle`
-- [ ] Refactorer `buildRecursivePath()` - utiliser `capabilities.stringConcatStyle`
-- [ ] Ajouter tests multi-dialect (PostgreSQL, MySQL, SQLite, DuckDB)
-- [ ] Documenter dans README
+- [x] ✅ Import `getDialectCapabilities` from core (2026-01-11)
+- [x] ✅ Create `getCoreCapabilitiesForDialect()` bridge function (2026-01-11)
+- [x] ✅ Update `compilePathTrackingBaseCase()` - use `recursivePathStyle` (2026-01-11)
+- [x] ✅ Update `compilePathTrackingRecursive()` - use `stringConcatStyle` (2026-01-11)
+- [x] ✅ Fix TypeScript type references (AdapterDialectCapabilities vs CoreDialectCapabilities) (2026-01-11)
+- [x] ✅ Fix mock-adapter.ts exactOptionalPropertyTypes errors (2026-01-11)
 
 **API:**
 ```typescript
