@@ -3,34 +3,35 @@
 > MCP Server for db-semantic-planner
 > Brief: docs/briefs/mcp-server.md
 
-## Status: 🟡 READY FOR IMPLEMENTATION
+## Status: 🟢 IN PROGRESS
 
 ---
 
-## MCP-001: Package Setup
+## MCP-001: Package Setup ✅ (2026-01-11)
 
-- [ ] Create `packages/mcp-server` directory structure
-- [ ] Initialize package.json with dependencies:
+- [x] Create `packages/mcp-server` directory structure
+- [x] Initialize package.json with dependencies:
   - `@modelcontextprotocol/sdk` (pin v1.x - stable API)
   - `@db-semantic-planner/core`
   - `@db-semantic-planner/schema`
   - `@db-semantic-planner/adapter-kysely`
-- [ ] Configure tsconfig.json (ESM, strict)
-- [ ] Configure tsup.config.ts (ESM output)
-- [ ] Add to pnpm-workspace.yaml
+- [x] Configure tsconfig.json (ESM, strict)
+- [x] Configure tsup.config.ts (ESM output)
+- [x] Add to pnpm-workspace.yaml (via catalog)
 
 ---
 
-## MCP-002: Schema Loader
+## MCP-002: Schema Loader ✅ (2026-01-11)
 
-- [ ] Implement schema file loader (TypeScript/JavaScript imports)
-- [ ] Support for `--schema` CLI argument
-- [ ] Validate loaded schema structure
-- [ ] Error handling for invalid paths/formats
-- [ ] Path traversal mitigation:
-  - Allowlist of valid root directories
+- [x] Implement schema file loader (TypeScript/JavaScript imports)
+- [x] Support for `--schema` CLI argument
+- [x] Validate loaded schema structure
+- [x] Error handling for invalid paths/formats
+- [x] Path traversal mitigation:
+  - Allowlist of valid root directories (`--allowed-root` option)
   - Resolve path and verify stays within allowed roots
   - Reject paths containing `..` or symlinks outside roots
+  - Uses `realpathSync` to resolve symlinks
 
 ---
 
@@ -102,13 +103,13 @@
 
 ---
 
-## MCP-008: Server Entry Point
+## MCP-008: Server Entry Point (Partial - Foundation Ready)
 
-- [ ] MCP server initialization
-- [ ] Tool registration
-- [ ] Resource registration
-- [ ] CLI entry with `--schema` argument
-- [ ] Add bin entry to package.json
+- [x] MCP server initialization (McpServer from SDK)
+- [ ] Tool registration (placeholder TODOs added)
+- [ ] Resource registration (placeholder TODOs added)
+- [x] CLI entry with `--schema` argument
+- [x] Add bin entry to package.json (`dbsp-mcp`)
 
 ---
 
