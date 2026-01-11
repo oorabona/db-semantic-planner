@@ -114,6 +114,8 @@ export type {
 } from './recursive-query-builder.js';
 // Schema Bridge (ARCH-002 codegen-first)
 export {
+	// CORE-005: ResolvedSchema → GeneratedSchema converter with Valibot
+	assertResolvedSchemaToGeneratedSchema,
 	buildModelFromSchema,
 	type GeneratedBelongsTo,
 	type GeneratedColumn,
@@ -127,6 +129,10 @@ export {
 	type GeneratedSchema,
 	type GeneratedTable,
 	isGeneratedSchema,
+	resolvedSchemaToGeneratedSchema,
+	ResolvedSchemaValidation,
+	type SchemaConversionResult,
+	type ValidatedResolvedSchema,
 } from './schema-bridge.js';
 
 // Subquery Builder (DX-012 Block 3)

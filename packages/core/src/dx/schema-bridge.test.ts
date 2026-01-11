@@ -488,3 +488,308 @@ describe('isGeneratedSchema', () => {
 		);
 	});
 });
+
+describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
+	describe('valid conversions', () => {
+		it('should convert a simple ResolvedSchema to GeneratedSchema', async () => {
+			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+
+			const resolved = {
+				tables: {
+					users: {
+						id: { type: 'uuid' as const, primaryKey: true },
+						name: { type: 'string' as const, nullable: false },
+						email: { type: 'string' as const, unique: true },
+					},
+				},
+				relations: {},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: ['createdAt', 'updatedAt'],
+				},
+			};
+
+			const result = resolvedSchemaToGeneratedSchema(resolved);
+
+			expect(result.success).toBe(true);
+			if (result.success) {
+				expect(result.schema.tables.users).toBeDefined();
+				expect(result.schema.tables.users.id.type).toBe('uuid');
+				expect(result.schema.tables.users.name.type).toBe('string');
+				expect(result.schema.conventions.fkPattern).toBe('{singular}Id');
+			}
+		});
+
+		it('should map schema-specific column types correctly', async () => {
+			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+
+			const resolved = {
+				tables: {
+					test: {
+						timeCol: { type: 'time' as const },
+						jsonbCol: { type: 'jsonb' as const },
+					},
+				},
+				relations: {},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+				},
+			};
+
+			const result = resolvedSchemaToGeneratedSchema(resolved);
+
+			expect(result.success).toBe(true);
+			if (result.success) {
+				// 'time' maps to 'timestamp', 'jsonb' maps to 'json'
+				expect(result.schema.tables.test.timeCol.type).toBe('timestamp');
+				expect(result.schema.tables.test.jsonbCol.type).toBe('json');
+			}
+		});
+
+		it('should convert all relation types', async () => {
+			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+
+			const resolved = {
+				tables: {
+					users: { id: { type: 'uuid' as const } },
+					posts: { id: { type: 'uuid' as const }, authorId: { type: 'uuid' as const } },
+					tags: { id: { type: 'uuid' as const } },
+					postTags: { postId: { type: 'uuid' as const }, tagId: { type: 'uuid' as const } },
+				},
+				relations: {
+					'posts.author': {
+						kind: 'belongsTo' as const,
+						target: 'users',
+						foreignKey: 'authorId',
+					},
+					'users.posts': {
+						kind: 'hasMany' as const,
+						target: 'posts',
+						foreignKey: 'authorId',
+					},
+					'posts.tags': {
+						kind: 'manyToMany' as const,
+						target: 'tags',
+						through: 'postTags',
+						sourceFk: 'postId',
+						targetFk: 'tagId',
+					},
+				},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+				},
+			};
+
+			const result = resolvedSchemaToGeneratedSchema(resolved);
+
+			expect(result.success).toBe(true);
+			if (result.success) {
+				expect(result.schema.relations['posts.author'].kind).toBe('belongsTo');
+				expect(result.schema.relations['users.posts'].kind).toBe('hasMany');
+				expect(result.schema.relations['posts.tags'].kind).toBe('manyToMany');
+			}
+		});
+
+		it('should convert hints correctly', async () => {
+			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+
+			const resolved = {
+				tables: {
+					users: { id: { type: 'uuid' as const } },
+					posts: { id: { type: 'uuid' as const }, authorId: { type: 'uuid' as const } },
+				},
+				relations: {
+					'users.posts': {
+						kind: 'hasMany' as const,
+						target: 'posts',
+						foreignKey: 'authorId',
+					},
+				},
+				hints: {
+					'users.posts': {
+						defaultStrategy: 'exists' as const,
+						cardinality: 'many' as const,
+					},
+				},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+				},
+			};
+
+			const result = resolvedSchemaToGeneratedSchema(resolved);
+
+			expect(result.success).toBe(true);
+			if (result.success) {
+				expect(result.schema.hints['users.posts'].defaultStrategy).toBe('exists');
+				expect(result.schema.hints['users.posts'].cardinality).toBe('many');
+			}
+		});
+
+		it('should preserve foreign key references', async () => {
+			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+
+			const resolved = {
+				tables: {
+					users: { id: { type: 'uuid' as const } },
+					posts: {
+						id: { type: 'uuid' as const },
+						authorId: {
+							type: 'uuid' as const,
+							references: { table: 'users', column: 'id' },
+						},
+					},
+				},
+				relations: {},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+				},
+			};
+
+			const result = resolvedSchemaToGeneratedSchema(resolved);
+
+			expect(result.success).toBe(true);
+			if (result.success) {
+				expect(result.schema.tables.posts.authorId.references).toEqual({
+					table: 'users',
+					column: 'id',
+				});
+			}
+		});
+	});
+
+	describe('validation errors', () => {
+		it('should fail for invalid column type', async () => {
+			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+
+			const resolved = {
+				tables: {
+					users: {
+						id: { type: 'invalid_type' },
+					},
+				},
+				relations: {},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+				},
+			};
+
+			const result = resolvedSchemaToGeneratedSchema(resolved);
+
+			expect(result.success).toBe(false);
+			if (!result.success) {
+				expect(result.errors.length).toBeGreaterThan(0);
+			}
+		});
+
+		it('should fail for missing required conventions', async () => {
+			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+
+			const resolved = {
+				tables: {},
+				relations: {},
+				hints: {},
+				conventions: {
+					// Missing fkPattern, pluralize, timestamps
+				},
+			};
+
+			const result = resolvedSchemaToGeneratedSchema(resolved);
+
+			expect(result.success).toBe(false);
+		});
+
+		it('should fail for invalid relation kind', async () => {
+			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+
+			const resolved = {
+				tables: {},
+				relations: {
+					'users.posts': {
+						kind: 'invalidKind',
+						target: 'posts',
+					},
+				},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+				},
+			};
+
+			const result = resolvedSchemaToGeneratedSchema(resolved);
+
+			expect(result.success).toBe(false);
+		});
+
+		it('should fail for null input', async () => {
+			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+			const result = resolvedSchemaToGeneratedSchema(null);
+			expect(result.success).toBe(false);
+		});
+
+		it('should fail for undefined input', async () => {
+			const { resolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+			const result = resolvedSchemaToGeneratedSchema(undefined);
+			expect(result.success).toBe(false);
+		});
+	});
+
+	describe('assertResolvedSchemaToGeneratedSchema', () => {
+		it('should return schema for valid input', async () => {
+			const { assertResolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+
+			const resolved = {
+				tables: {
+					users: { id: { type: 'uuid' as const } },
+				},
+				relations: {},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+				},
+			};
+
+			const schema = assertResolvedSchemaToGeneratedSchema(resolved);
+
+			expect(schema.tables.users).toBeDefined();
+		});
+
+		it('should throw for invalid input', async () => {
+			const { assertResolvedSchemaToGeneratedSchema } = await import('./schema-bridge.js');
+
+			const invalid = {
+				tables: { users: { id: { type: 'invalid' } } },
+				relations: {},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+				},
+			};
+
+			expect(() => assertResolvedSchemaToGeneratedSchema(invalid)).toThrow(
+				/Schema validation failed/,
+			);
+		});
+	});
+});
