@@ -134,6 +134,9 @@ export {
 	type InferDBFromSchema,
 	type InferRowType,
 	isGeneratedSchema,
+	// DX-100: Schema type unification - auto-detect and convert ResolvedSchema
+	isResolvedSchema,
+	normalizeSchema,
 	ResolvedSchemaValidation,
 	resolvedSchemaToGeneratedSchema,
 	type SchemaConversionResult,
@@ -180,3 +183,26 @@ export type {
 } from './types.js';
 // Type guard
 export { isExpressionSpec } from './types.js';
+
+// DX-103: Extracted components for SRP compliance
+// IntentBuilder - builds QueryIntent AST from builder state
+export {
+	IntentBuilder,
+	isRecursiveIncludeOptions,
+	type IntentBuilderState,
+	type RecursiveIncludeConfig,
+	validateRecursiveInclude,
+} from './intent-builder.js';
+
+// ResultHydrator - handles result hydration and recursive include processing
+export {
+	ResultHydrator,
+	type HydrateOptions,
+} from './result-hydrator.js';
+
+// QueryExecutor - handles query execution via adapter
+export {
+	QueryExecutor,
+	type ExecutionContext,
+	type CompileOptions as ExecutorCompileOptions,
+} from './query-executor.js';

@@ -39,6 +39,7 @@ import {
 	type GeneratedSchema,
 	type GeneratedTable,
 	type InferDBFromSchema,
+	normalizeSchema,
 } from './schema-bridge.js';
 import {
 	type AggregateOptions,
@@ -147,9 +148,12 @@ export function createOrm<DB = Record<string, unknown>>(
 	// Extract schema from options (need to cast due to union type)
 	const schema = (options as OrmOptionsWithSchema<GeneratedSchema, DB>).schema;
 
-	// If schema is provided (codegen-first approach), convert to model and create synchronously
+	// If schema is provided, normalize it (handles both GeneratedSchema and ResolvedSchema)
+	// and convert to model. This enables seamless use of either schema type.
 	if (schema) {
-		const convertedModel = buildModelFromSchema(schema);
+		// normalizeSchema auto-detects and converts ResolvedSchema to GeneratedSchema if needed
+		const normalizedSchema = normalizeSchema(schema);
+		const convertedModel = buildModelFromSchema(normalizedSchema);
 		return createOrmInstance(
 			convertedModel,
 			strictMode,

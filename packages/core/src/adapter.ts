@@ -4,6 +4,12 @@
  * This module defines the contract that all database adapters must implement.
  * Adapters handle compilation, execution, transactions, and streaming.
  *
+ * DX-104: Interfaces are split following ISP (Interface Segregation Principle).
+ * Implement only the interfaces you need:
+ * - CompilingAdapter: compile-only (e.g., MockAdapter)
+ * - ExecutingAdapter: compile + execute
+ * - Add StreamingAdapter, IntrospectingAdapter, etc. as needed
+ *
  * @module adapter
  */
 
@@ -136,29 +142,55 @@ export interface Dump {
 }
 
 // ============================================================================
-// Adapter Interface
+// Split Interfaces (DX-104 - ISP Compliance)
 // ============================================================================
 
 /**
- * Database adapter interface.
- *
- * Implementations handle the database-specific compilation and execution.
- * Each ORM (Kysely, Drizzle, Prisma) has its own adapter implementation.
+ * Base adapter interface with capabilities and core utilities.
+ * All adapters must implement this interface.
  *
  * @typeParam DB - Database schema type for type inference
- *
- * @example
- * ```typescript
- * import { createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
- *
- * const adapter = createKyselyAdapter(kyselyDb);
- * const orm = createOrm({ model, adapter });
- * ```
  */
-export interface Adapter<DB = unknown> {
+export interface BaseAdapter<DB = unknown> {
 	/** Adapter capabilities for feature detection */
 	readonly capabilities: AdapterCapabilities;
 
+	/**
+	 * Create a schema-scoped adapter for multi-tenant queries.
+	 *
+	 * @param schemaName - The schema name to scope queries to
+	 * @returns A new adapter scoped to the schema
+	 */
+	withSchema(schemaName: string): Adapter<DB>;
+
+	/**
+	 * Create a dump for observability.
+	 *
+	 * @param plan - The plan report
+	 * @param query - The compiled query
+	 * @param meta - Optional metadata
+	 * @returns Dump object with plan, SQL, and parameters
+	 */
+	createDump(plan: PlanReport, query: CompiledQuery, meta?: DumpMeta): Dump;
+
+	/**
+	 * Validate an identifier (table name, column name, schema name).
+	 * Throws if the identifier contains unsafe characters.
+	 *
+	 * @param value - The identifier value to validate
+	 * @param type - The type of identifier (for error messages)
+	 * @throws Error if identifier is invalid
+	 */
+	validateIdentifier(value: string, type: string): void;
+}
+
+/**
+ * Adapter interface for query compilation.
+ * Compiles plans and intents to executable SQL.
+ *
+ * @typeParam DB - Database schema type for type inference
+ */
+export interface CompilingAdapter<DB = unknown> extends BaseAdapter<DB> {
 	/**
 	 * Compile a plan to executable SQL.
 	 *
@@ -201,74 +233,6 @@ export interface Adapter<DB = unknown> {
 	): CompiledQuery;
 
 	/**
-	 * Execute a query and return all results.
-	 *
-	 * @param query - The compiled query to execute
-	 * @returns Promise resolving to array of results
-	 */
-	execute<T>(query: CompiledQuery<T>): Promise<T[]>;
-
-	/**
-	 * Execute a query and return the first result or null.
-	 *
-	 * @param query - The compiled query to execute
-	 * @returns Promise resolving to first result or null
-	 */
-	executeOne<T>(query: CompiledQuery<T>): Promise<T | null>;
-
-	/**
-	 * Execute a query and return the first result or throw.
-	 *
-	 * @param query - The compiled query to execute
-	 * @returns Promise resolving to first result
-	 * @throws NotFoundError if no results
-	 */
-	executeOneOrThrow<T>(query: CompiledQuery<T>): Promise<T>;
-
-	/**
-	 * Stream query results as an async iterable iterator.
-	 *
-	 * @param query - The compiled query to execute
-	 * @param options - Stream options (chunk size, etc.)
-	 * @returns Async iterable iterator of results
-	 */
-	stream<T>(
-		query: CompiledQuery<T>,
-		options?: AdapterStreamOptions,
-	): AsyncIterableIterator<T>;
-
-	/**
-	 * Execute a callback within a database transaction.
-	 * Auto-commits on success, auto-rolls back on exception.
-	 *
-	 * @param fn - Callback receiving a transaction-scoped adapter
-	 * @returns Promise resolving to callback's return value
-	 */
-	transaction<T>(fn: (adapter: Adapter<DB>) => Promise<T>): Promise<T>;
-
-	/**
-	 * Create a schema-scoped adapter for multi-tenant queries.
-	 *
-	 * @param schemaName - The schema name to scope queries to
-	 * @returns A new adapter scoped to the schema
-	 */
-	withSchema(schemaName: string): Adapter<DB>;
-
-	/**
-	 * Create a dump for observability.
-	 *
-	 * @param plan - The plan report
-	 * @param query - The compiled query
-	 * @param meta - Optional metadata
-	 * @returns Dump object with plan, SQL, and parameters
-	 */
-	createDump(plan: PlanReport, query: CompiledQuery, meta?: DumpMeta): Dump;
-
-	// =========================================================================
-	// Mutation Compilation
-	// =========================================================================
-
-	/**
 	 * Compile an insert intent to executable SQL.
 	 *
 	 * @param intent - The insert intent
@@ -305,10 +269,6 @@ export interface Adapter<DB = unknown> {
 	 */
 	compileUpsert(intent: UpsertIntent, options?: CompileOptions): CompiledQuery;
 
-	// =========================================================================
-	// Recursive CTE Compilation
-	// =========================================================================
-
 	/**
 	 * Compile a recursive CTE plan to executable SQL.
 	 *
@@ -322,11 +282,68 @@ export interface Adapter<DB = unknown> {
 		model: ModelIR,
 		options?: CompileOptions,
 	): CompiledQuery;
+}
 
-	// =========================================================================
-	// Introspection
-	// =========================================================================
+/**
+ * Adapter interface for query execution.
+ * Executes compiled queries against the database.
+ *
+ * @typeParam DB - Database schema type for type inference
+ */
+export interface ExecutingAdapter<DB = unknown> extends CompilingAdapter<DB> {
+	/**
+	 * Execute a query and return all results.
+	 *
+	 * @param query - The compiled query to execute
+	 * @returns Promise resolving to array of results
+	 */
+	execute<T>(query: CompiledQuery<T>): Promise<T[]>;
 
+	/**
+	 * Execute a query and return the first result or null.
+	 *
+	 * @param query - The compiled query to execute
+	 * @returns Promise resolving to first result or null
+	 */
+	executeOne<T>(query: CompiledQuery<T>): Promise<T | null>;
+
+	/**
+	 * Execute a query and return the first result or throw.
+	 *
+	 * @param query - The compiled query to execute
+	 * @returns Promise resolving to first result
+	 * @throws NotFoundError if no results
+	 */
+	executeOneOrThrow<T>(query: CompiledQuery<T>): Promise<T>;
+}
+
+/**
+ * Adapter interface for streaming query results.
+ * Optional capability - check `capabilities.supportsStreaming` before use.
+ *
+ * @typeParam DB - Database schema type for type inference
+ */
+export interface StreamingAdapter<DB = unknown> {
+	/**
+	 * Stream query results as an async iterable iterator.
+	 *
+	 * @param query - The compiled query to execute
+	 * @param options - Stream options (chunk size, etc.)
+	 * @returns Async iterable iterator of results
+	 */
+	stream<T>(
+		query: CompiledQuery<T>,
+		options?: AdapterStreamOptions,
+	): AsyncIterableIterator<T>;
+}
+
+/**
+ * Adapter interface for database introspection.
+ * Optional capability - used for auto-discovery when no explicit model is provided.
+ *
+ * @typeParam _DB - Database schema type (unused but kept for consistency)
+ */
+export interface IntrospectingAdapter<_DB = unknown> {
 	/**
 	 * Introspect the database schema and return a ModelIR.
 	 * Used for auto-discovery when no explicit model is provided.
@@ -334,25 +351,32 @@ export interface Adapter<DB = unknown> {
 	 * @returns Promise resolving to the introspected model
 	 */
 	introspect(): Promise<ModelIR>;
+}
 
-	// =========================================================================
-	// Validation Utilities
-	// =========================================================================
-
+/**
+ * Adapter interface for database transactions.
+ * Optional capability - wraps operations in database transactions.
+ *
+ * @typeParam DB - Database schema type for type inference
+ */
+export interface TransactionalAdapter<DB = unknown> {
 	/**
-	 * Validate an identifier (table name, column name, schema name).
-	 * Throws if the identifier contains unsafe characters.
+	 * Execute a callback within a database transaction.
+	 * Auto-commits on success, auto-rolls back on exception.
 	 *
-	 * @param value - The identifier value to validate
-	 * @param type - The type of identifier (for error messages)
-	 * @throws Error if identifier is invalid
+	 * @param fn - Callback receiving a transaction-scoped adapter
+	 * @returns Promise resolving to callback's return value
 	 */
-	validateIdentifier(value: string, type: string): void;
+	transaction<T>(fn: (adapter: Adapter<DB>) => Promise<T>): Promise<T>;
+}
 
-	// =========================================================================
-	// Raw SQL Execution (DX-027)
-	// =========================================================================
-
+/**
+ * Adapter interface for raw SQL execution.
+ * Optional capability - provides an escape hatch for complex queries.
+ *
+ * @typeParam _DB - Database schema type (unused but kept for consistency)
+ */
+export interface RawSqlAdapter<_DB = unknown> {
 	/**
 	 * Execute raw SQL directly - the ultimate escape hatch for queries
 	 * that cannot be expressed via the intent system.
@@ -417,6 +441,188 @@ export interface Adapter<DB = unknown> {
 }
 
 // ============================================================================
+// Composed Adapter Types (DX-104)
+// ============================================================================
+
+/**
+ * Full adapter interface - implements all optional capabilities.
+ * This is the complete adapter type that KyselyAdapter implements.
+ *
+ * For partial implementations, use individual interfaces:
+ * - `CompilingAdapter` - compile-only (e.g., MockAdapter)
+ * - `ExecutingAdapter` - compile + execute
+ * - Add `StreamingAdapter`, `IntrospectingAdapter`, etc. as needed
+ *
+ * @typeParam DB - Database schema type for type inference
+ *
+ * @example
+ * ```typescript
+ * import { createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
+ *
+ * const adapter = createKyselyAdapter(kyselyDb);
+ * const orm = createOrm({ model, adapter });
+ * ```
+ */
+export type Adapter<DB = unknown> = ExecutingAdapter<DB> &
+	StreamingAdapter<DB> &
+	IntrospectingAdapter<DB> &
+	TransactionalAdapter<DB> &
+	RawSqlAdapter<DB>;
+
+/**
+ * Minimal adapter for compile-only use cases (e.g., testing, REPL).
+ * Does not require database connection or execution capabilities.
+ *
+ * @typeParam DB - Database schema type for type inference
+ */
+export type CompileOnlyAdapter<DB = unknown> = CompilingAdapter<DB>;
+
+/**
+ * Adapter with execution but no streaming/introspection.
+ * Suitable for simple use cases without advanced features.
+ *
+ * @typeParam DB - Database schema type for type inference
+ */
+export type BasicAdapter<DB = unknown> = ExecutingAdapter<DB>;
+
+// ============================================================================
+// Runtime Feature Detection Helpers (DX-104)
+// ============================================================================
+
+/**
+ * Check if an adapter supports streaming.
+ * Use this before calling `stream()` to avoid runtime errors.
+ *
+ * @param adapter - The adapter to check
+ * @returns True if the adapter supports streaming
+ *
+ * @example
+ * ```typescript
+ * if (supportsStreaming(adapter)) {
+ *   for await (const row of adapter.stream(query)) {
+ *     // Process row
+ *   }
+ * } else {
+ *   const results = await adapter.execute(query);
+ *   // Process results
+ * }
+ * ```
+ */
+export function supportsStreaming<DB>(
+	adapter: CompilingAdapter<DB>,
+): adapter is CompilingAdapter<DB> & StreamingAdapter<DB> {
+	return (
+		adapter.capabilities.supportsStreaming &&
+		'stream' in adapter &&
+		typeof (adapter as StreamingAdapter<DB>).stream === 'function'
+	);
+}
+
+/**
+ * Check if an adapter supports introspection.
+ * Use this before calling `introspect()` to avoid runtime errors.
+ *
+ * @param adapter - The adapter to check
+ * @returns True if the adapter supports introspection
+ *
+ * @example
+ * ```typescript
+ * if (supportsIntrospection(adapter)) {
+ *   const model = await adapter.introspect();
+ * } else {
+ *   // Provide model manually
+ * }
+ * ```
+ */
+export function supportsIntrospection<DB>(
+	adapter: CompilingAdapter<DB>,
+): adapter is CompilingAdapter<DB> & IntrospectingAdapter<DB> {
+	return (
+		'introspect' in adapter &&
+		typeof (adapter as IntrospectingAdapter<DB>).introspect === 'function'
+	);
+}
+
+/**
+ * Check if an adapter supports transactions.
+ * Use this before calling `transaction()` to avoid runtime errors.
+ *
+ * @param adapter - The adapter to check
+ * @returns True if the adapter supports transactions
+ *
+ * @example
+ * ```typescript
+ * if (supportsTransactions(adapter)) {
+ *   await adapter.transaction(async (tx) => {
+ *     // Transactional operations
+ *   });
+ * } else {
+ *   // Execute without transaction
+ * }
+ * ```
+ */
+export function supportsTransactions<DB>(
+	adapter: CompilingAdapter<DB>,
+): adapter is CompilingAdapter<DB> & TransactionalAdapter<DB> {
+	return (
+		'transaction' in adapter &&
+		typeof (adapter as TransactionalAdapter<DB>).transaction === 'function'
+	);
+}
+
+/**
+ * Check if an adapter supports raw SQL execution.
+ * Use this before calling `executeRaw()` to avoid runtime errors.
+ *
+ * @param adapter - The adapter to check
+ * @returns True if the adapter supports raw SQL execution
+ *
+ * @example
+ * ```typescript
+ * if (supportsRawSql(adapter)) {
+ *   const results = await adapter.executeRaw('SELECT 1');
+ * } else {
+ *   // Use compiled queries instead
+ * }
+ * ```
+ */
+export function supportsRawSql<DB>(
+	adapter: CompilingAdapter<DB>,
+): adapter is CompilingAdapter<DB> & RawSqlAdapter<DB> {
+	return (
+		'executeRaw' in adapter &&
+		typeof (adapter as RawSqlAdapter<DB>).executeRaw === 'function'
+	);
+}
+
+/**
+ * Check if an adapter supports query execution (not compile-only).
+ * Use this to distinguish between compile-only and full adapters.
+ *
+ * @param adapter - The adapter to check
+ * @returns True if the adapter supports execution
+ *
+ * @example
+ * ```typescript
+ * if (supportsExecution(adapter)) {
+ *   const results = await adapter.execute(query);
+ * } else {
+ *   // Compile-only adapter, just get the SQL
+ *   const query = adapter.compile(plan);
+ *   console.log(query.sql);
+ * }
+ * ```
+ */
+export function supportsExecution<DB>(
+	adapter: CompilingAdapter<DB>,
+): adapter is ExecutingAdapter<DB> {
+	return (
+		'execute' in adapter &&
+		typeof (adapter as ExecutingAdapter<DB>).execute === 'function'
+	);
+}
+
+// ============================================================================
 // Errors
 // ============================================================================
 
@@ -455,7 +661,7 @@ export class UnsupportedCapabilityError extends Error {
  * @throws UnsupportedCapabilityError if capability is not supported
  */
 export function assertCapability(
-	adapter: Adapter,
+	adapter: CompilingAdapter,
 	capability: keyof AdapterCapabilities,
 	operation: string,
 ): void {

@@ -828,3 +828,224 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 		});
 	});
 });
+
+describe('isResolvedSchema (DX-100)', () => {
+	it('should return true when schema has ResolvedSchema-only types (time)', async () => {
+		const { isResolvedSchema } = await import('./schema-bridge.js');
+		const resolvedWithTime = {
+			tables: {
+				events: {
+					id: { type: 'uuid', primaryKey: true },
+					eventTime: { type: 'time' }, // Only in ResolvedSchema
+				},
+			},
+			relations: {},
+			hints: {},
+			conventions: {
+				fkPattern: '{singular}Id',
+				pluralize: true,
+				timestamps: [],
+			},
+		};
+		expect(isResolvedSchema(resolvedWithTime)).toBe(true);
+	});
+
+	it('should return true when schema has ResolvedSchema-only types (jsonb)', async () => {
+		const { isResolvedSchema } = await import('./schema-bridge.js');
+		const resolvedWithJsonb = {
+			tables: {
+				configs: {
+					id: { type: 'uuid', primaryKey: true },
+					data: { type: 'jsonb' }, // Only in ResolvedSchema
+				},
+			},
+			relations: {},
+			hints: {},
+			conventions: {
+				fkPattern: '{singular}Id',
+				pluralize: true,
+				timestamps: [],
+			},
+		};
+		expect(isResolvedSchema(resolvedWithJsonb)).toBe(true);
+	});
+
+	it('should return false when schema has GeneratedSchema-only types (datetime)', async () => {
+		const { isResolvedSchema } = await import('./schema-bridge.js');
+		const generatedWithDatetime: GeneratedSchema = {
+			tables: {
+				events: {
+					id: { type: 'uuid', primaryKey: true },
+					createdAt: { type: 'datetime' }, // Only in GeneratedSchema
+				},
+			},
+			relations: {},
+			hints: {},
+			conventions: {
+				fkPattern: '{singular}Id',
+				pluralize: true,
+				timestamps: [],
+			},
+		};
+		expect(isResolvedSchema(generatedWithDatetime)).toBe(false);
+	});
+
+	it('should return false when schema has GeneratedSchema-only types (number)', async () => {
+		const { isResolvedSchema } = await import('./schema-bridge.js');
+		const generatedWithNumber: GeneratedSchema = {
+			tables: {
+				metrics: {
+					id: { type: 'uuid', primaryKey: true },
+					value: { type: 'number' }, // Only in GeneratedSchema
+				},
+			},
+			relations: {},
+			hints: {},
+			conventions: {
+				fkPattern: '{singular}Id',
+				pluralize: true,
+				timestamps: [],
+			},
+		};
+		expect(isResolvedSchema(generatedWithNumber)).toBe(false);
+	});
+
+	it('should return false for ambiguous schema (no distinguishing types)', async () => {
+		const { isResolvedSchema } = await import('./schema-bridge.js');
+		// Uses only types common to both: uuid, string, boolean
+		const ambiguousSchema: GeneratedSchema = {
+			tables: {
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					name: { type: 'string' },
+					active: { type: 'boolean' },
+				},
+			},
+			relations: {},
+			hints: {},
+			conventions: {
+				fkPattern: '{singular}Id',
+				pluralize: true,
+				timestamps: [],
+			},
+		};
+		// Ambiguous defaults to GeneratedSchema (false)
+		expect(isResolvedSchema(ambiguousSchema)).toBe(false);
+	});
+
+	it('should return false for invalid input', async () => {
+		const { isResolvedSchema } = await import('./schema-bridge.js');
+		expect(isResolvedSchema(null)).toBe(false);
+		expect(isResolvedSchema(undefined)).toBe(false);
+		expect(isResolvedSchema('string')).toBe(false);
+		expect(isResolvedSchema({})).toBe(false);
+	});
+});
+
+describe('normalizeSchema (DX-100)', () => {
+	it('should return GeneratedSchema as-is', async () => {
+		const { normalizeSchema } = await import('./schema-bridge.js');
+		const generated: GeneratedSchema = {
+			tables: {
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					count: { type: 'number' }, // GeneratedSchema-only type
+				},
+			},
+			relations: {},
+			hints: {},
+			conventions: {
+				fkPattern: '{singular}Id',
+				pluralize: true,
+				timestamps: [],
+			},
+		};
+		const result = normalizeSchema(generated);
+		expect(result).toBe(generated); // Same reference
+	});
+
+	it('should convert ResolvedSchema to GeneratedSchema', async () => {
+		const { normalizeSchema } = await import('./schema-bridge.js');
+		const resolved = {
+			tables: {
+				events: {
+					id: { type: 'uuid', primaryKey: true },
+					eventTime: { type: 'time' }, // ResolvedSchema-only type
+					data: { type: 'jsonb' }, // ResolvedSchema-only type
+				},
+			},
+			relations: {},
+			hints: {},
+			conventions: {
+				fkPattern: '{singular}Id',
+				pluralize: true,
+				timestamps: [],
+			},
+		};
+		const result = normalizeSchema(resolved);
+		// Should have been converted
+		expect(result.tables.events.eventTime.type).toBe('timestamp'); // time -> timestamp
+		expect(result.tables.events.data.type).toBe('json'); // jsonb -> json
+	});
+
+	it('should throw for invalid schema structure', async () => {
+		const { normalizeSchema } = await import('./schema-bridge.js');
+		expect(() => normalizeSchema(null)).toThrow(/Invalid schema/);
+		expect(() => normalizeSchema({})).toThrow(/Invalid schema/);
+		expect(() => normalizeSchema({ tables: {} })).toThrow(/Invalid schema/);
+	});
+
+	it('should handle ambiguous schema (no distinguishing types)', async () => {
+		const { normalizeSchema } = await import('./schema-bridge.js');
+		const ambiguous: GeneratedSchema = {
+			tables: {
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					name: { type: 'string' },
+				},
+			},
+			relations: {},
+			hints: {},
+			conventions: {
+				fkPattern: '{singular}Id',
+				pluralize: true,
+				timestamps: [],
+			},
+		};
+		// Should return as-is (treated as GeneratedSchema)
+		const result = normalizeSchema(ambiguous);
+		expect(result).toBe(ambiguous);
+	});
+
+	it('should preserve relations during conversion', async () => {
+		const { normalizeSchema } = await import('./schema-bridge.js');
+		const resolved = {
+			tables: {
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					authorId: { type: 'uuid', references: { table: 'users' } },
+					publishedAt: { type: 'time' }, // ResolvedSchema-only type
+				},
+			},
+			relations: {
+				'posts.author': {
+					kind: 'belongsTo',
+					target: 'users',
+					foreignKey: 'authorId',
+				},
+			},
+			hints: {},
+			conventions: {
+				fkPattern: '{singular}Id',
+				pluralize: true,
+				timestamps: [],
+			},
+		};
+		const result = normalizeSchema(resolved);
+		expect(result.relations['posts.author']).toBeDefined();
+		expect(result.relations['posts.author'].kind).toBe('belongsTo');
+	});
+});
