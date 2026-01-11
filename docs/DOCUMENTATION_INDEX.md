@@ -30,6 +30,7 @@ packages/adapter-kysely → Depends on core
 |----------|----------|--------|
 | Project | [CLAUDE.md](../CLAUDE.md) | canonical |
 | Project | [Main Backlog](../TODO.md) | active |
+| Project | [**Feature Comparison**](COMPARISON.md) | canonical |
 | Core | [Core Overview](plans/core-OVERVIEW.md) | draft |
 | Adapter | [Adapter Overview](plans/adapter-OVERVIEW.md) | draft |
 | DX | [DX Overview](plans/dx-OVERVIEW.md) | draft |
