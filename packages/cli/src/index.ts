@@ -7,6 +7,7 @@
 
 import { Command } from 'commander';
 import { generateCommand } from './commands/generate.js';
+import { replCommand } from './commands/repl.js';
 import { verifyCommand } from './commands/verify.js';
 
 const program = new Command();
@@ -18,6 +19,7 @@ program
 
 // Register commands
 program.addCommand(generateCommand);
+program.addCommand(replCommand);
 program.addCommand(verifyCommand);
 
 program.parse();

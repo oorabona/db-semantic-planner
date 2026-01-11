@@ -1,0 +1,170 @@
+/**
+ * DX-030 Block 5: Command History
+ *
+ * Manages command history with persistence to ~/.dbsp_history
+ */
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+
+const HISTORY_FILE = join(homedir(), '.dbsp_history');
+const MAX_HISTORY_SIZE = 1000;
+
+/**
+ * Command history manager
+ */
+export class CommandHistory {
+	private history: string[] = [];
+	private index = -1;
+	private currentInput = '';
+
+	constructor() {
+		this.load();
+	}
+
+	/**
+	 * Load history from file
+	 */
+	private load(): void {
+		try {
+			if (existsSync(HISTORY_FILE)) {
+				const content = readFileSync(HISTORY_FILE, 'utf-8');
+				this.history = content
+					.split('\n')
+					.filter((line) => line.trim().length > 0);
+			}
+		} catch {
+			// Ignore load errors, start with empty history
+		}
+	}
+
+	/**
+	 * Save history to file
+	 */
+	private save(): void {
+		try {
+			const dir = dirname(HISTORY_FILE);
+			if (!existsSync(dir)) {
+				mkdirSync(dir, { recursive: true });
+			}
+			writeFileSync(HISTORY_FILE, this.history.join('\n'), 'utf-8');
+		} catch {
+			// Ignore save errors
+		}
+	}
+
+	/**
+	 * Add a command to history
+	 */
+	add(command: string): void {
+		const trimmed = command.trim();
+		if (!trimmed) return;
+
+		// Don't add duplicates of the last command
+		if (this.history[this.history.length - 1] === trimmed) return;
+
+		this.history.push(trimmed);
+
+		// Trim history if too large
+		if (this.history.length > MAX_HISTORY_SIZE) {
+			this.history = this.history.slice(-MAX_HISTORY_SIZE);
+		}
+
+		this.resetIndex();
+		this.save();
+	}
+
+	/**
+	 * Reset the navigation index
+	 */
+	resetIndex(): void {
+		this.index = -1;
+		this.currentInput = '';
+	}
+
+	/**
+	 * Navigate to previous command (up arrow)
+	 * Returns the command to display, or undefined if at start of history
+	 */
+	previous(currentInput: string): string | undefined {
+		// Save current input when starting navigation
+		if (this.index === -1) {
+			this.currentInput = currentInput;
+		}
+
+		if (this.history.length === 0) return undefined;
+
+		// Move up in history
+		if (this.index < this.history.length - 1) {
+			this.index++;
+		}
+
+		return this.history[this.history.length - 1 - this.index];
+	}
+
+	/**
+	 * Navigate to next command (down arrow)
+	 * Returns the command to display, or the saved current input if past history
+	 */
+	next(): string | undefined {
+		if (this.index <= 0) {
+			this.index = -1;
+			return this.currentInput;
+		}
+
+		this.index--;
+		return this.history[this.history.length - 1 - this.index];
+	}
+
+	/**
+	 * Search history for commands containing the query
+	 */
+	search(query: string): string[] {
+		if (!query) return this.history.slice(-10);
+		const lower = query.toLowerCase();
+		return this.history.filter((cmd) => cmd.toLowerCase().includes(lower));
+	}
+
+	/**
+	 * Get all history entries
+	 */
+	getAll(): readonly string[] {
+		return this.history;
+	}
+
+	/**
+	 * Get recent history (last N entries)
+	 */
+	getRecent(count = 10): string[] {
+		return this.history.slice(-count);
+	}
+
+	/**
+	 * Clear all history
+	 */
+	clear(): void {
+		this.history = [];
+		this.resetIndex();
+		this.save();
+	}
+
+	/**
+	 * Get total count
+	 */
+	get length(): number {
+		return this.history.length;
+	}
+}
+
+/**
+ * Create a singleton history instance
+ */
+let historyInstance: CommandHistory | null = null;
+
+export function getHistory(): CommandHistory {
+	if (!historyInstance) {
+		historyInstance = new CommandHistory();
+	}
+	return historyInstance;
+}
