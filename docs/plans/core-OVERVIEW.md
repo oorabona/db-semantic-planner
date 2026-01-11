@@ -4,7 +4,7 @@ doc-meta:
   scope: core
   type: design
   created: 2026-01-06
-  updated: 2026-01-06
+  updated: 2026-01-11
 ---
 
 # Core Scope Overview
@@ -216,9 +216,10 @@ Core planning decisions:
 
 - **No cost-based optimization**: We use heuristics, not statistics
 - **No join reordering**: Relations are processed in declaration order
-- **No runtime schema introspection**: Schema must be statically defined
 - **No NL-to-SQL**: No natural language parsing
-- **No dialect awareness**: Core is database-agnostic (adapters handle dialects)
+- **No dialect-specific SQL generation**: Core is database-agnostic (adapters handle SQL compilation)
+
+**Note:** Schema introspection is supported via adapter capabilities (e.g., `adapter.introspect()`) but core itself doesn't contain database drivers.
 
 ---
 
@@ -301,13 +302,16 @@ query(User)
 
 ## Dependencies
 
-- **None** (core has zero external dependencies)
-- Core MUST NOT import from `adapter-kysely` or `dx`
+- **valibot** - Runtime schema validation (CORE-005)
+- Core MUST NOT import from `adapter-kysely`
+
+**Note:** The dx layer was merged into core in ARCH-001.
 
 ## Dependents
 
 - `packages/adapter-kysely` imports core for ModelIR, IntentAST, PlanReport
-- `packages/dx` imports core for schema and query builders
+- `packages/cli` imports core for ORM and schema utilities
+- `packages/schema` is a peer (core imports resolved schema types)
 
 ## Implementation Specs
 

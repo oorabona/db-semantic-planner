@@ -4,7 +4,7 @@ doc-meta:
   scope: adapter
   type: design
   created: 2026-01-06
-  updated: 2026-01-06
+  updated: 2026-01-11
 ---
 
 # Adapter Scope Overview
@@ -208,17 +208,17 @@ function validateSchemaName(name: string): void {
 3. **Ordered params**: Parameters in SQL order ($1, $2, $3...)
 4. **Reproducible plan**: Decisions ordered by processing sequence
 
-### P1: explain() Hook (Planned)
+### explain() API (Implemented)
 
 ```typescript
 interface QueryBuilder<T> {
   // ... existing methods ...
 
   /**
-   * [P1] Run EXPLAIN ANALYZE and return execution plan.
-   * Only available when connected to a database.
+   * Run EXPLAIN ANALYZE and return execution plan.
+   * Requires database connection.
    */
-  explain(options?: { analyze?: boolean }): Promise<ExplainResult>;
+  explain(options?: { analyze?: boolean; format?: 'text' | 'json' }): Promise<ExplainResult>;
 }
 
 interface ExplainResult {
@@ -228,23 +228,23 @@ interface ExplainResult {
 }
 ```
 
+**Status:** ✅ Implemented in ADAPTER-004 (Enhanced Observability)
+
 ---
 
-## Dialect Capabilities (P2)
+## Dialect Capabilities (Implemented)
 
-### Phase Clarification
+### Status
 
-| Phase | Dialect Support |
-|-------|-----------------|
-| **MVP** | PostgreSQL only - no multi-dialect |
-| **P2** | Multi-dialect via capability checks |
+Multi-dialect support is implemented via capability checks (DIALECT-001, CORE-004).
+PostgreSQL remains the primary tested dialect.
 
 ### Capabilities Matrix (Draft)
 
 | Capability | PostgreSQL | MySQL 8+ | SQLite 3.35+ | MSSQL | MVP Required |
 |------------|------------|----------|--------------|-------|--------------|
 | `supportsCTE` | Yes | Yes | Yes | Yes | Yes |
-| `supportsExplain` | Yes | Yes | Yes | Yes | No (P1) |
+| `supportsExplain` | Yes | Yes | Yes | Yes | Yes (implemented) |
 | `supportsWithSchema` | Yes | No* | No | Yes | Yes |
 | `supportsLateralJson` | Yes | No | No | No | No |
 | `supportsTransactionalDdl` | Yes | No | No | Yes | No |
@@ -253,7 +253,7 @@ interface ExplainResult {
 
 \* MySQL uses database switching, not schema
 
-### Capability Interface (P2)
+### Capability Interface
 
 ```typescript
 interface DialectCapabilities {
@@ -379,12 +379,16 @@ WHERE "t0"."active" = $1
 
 ## Out of Scope
 
-- **No multi-dialect correctness**: Only PostgreSQL tested
+- **No multi-dialect correctness guarantee**: PostgreSQL is primary target
 - **No cost-based optimization**: Heuristics only
-- **No streaming/cursor support**: Full result sets only
 - **No connection pool management**: Deferred to Kysely
 - **No migrations**: Schema assumed to exist
 - **No change tracking**: Read-focused API
+
+**Implemented features (previously planned):**
+- ✅ **Streaming/cursor support**: `stream()` method with AsyncIterator (STREAMING-001)
+- ✅ **EXPLAIN/ANALYZE**: `explain()` method (ADAPTER-004)
+- ✅ **Multi-dialect capabilities**: Dialect detection with capability checks (DIALECT-001)
 
 ---
 

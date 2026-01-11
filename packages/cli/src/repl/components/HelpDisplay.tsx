@@ -21,7 +21,7 @@ const DOT_COMMANDS = [
 	{ command: '.natural', description: 'Switch to natural query mode' },
 	{ command: '.split', description: 'Toggle split view (schema | query)' },
 	{ command: '.clear', description: 'Clear screen and output' },
-	{ command: '.exit', description: 'Exit REPL' },
+	{ command: '.exit / .quit', description: 'Exit REPL' },
 ];
 
 const NATURAL_SYNTAX = [

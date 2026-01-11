@@ -31,6 +31,8 @@ packages/adapter-kysely → Depends on core
 | Project | [CLAUDE.md](../CLAUDE.md) | canonical |
 | Project | [Main Backlog](../TODO.md) | active |
 | Project | [**Feature Comparison**](COMPARISON.md) | canonical |
+| Project | [MCP Server Brief](briefs/mcp-server.md) | ready |
+| Project | [MCP Server Backlog](../TODO_MCP.md) | ready |
 | Core | [Core Overview](plans/core-OVERVIEW.md) | draft |
 | Adapter | [Adapter Overview](plans/adapter-OVERVIEW.md) | draft |
 | Experience | [Project Experience](../.claude/skills/project-experience/SKILL.md) | canonical |

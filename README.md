@@ -82,20 +82,20 @@ export default schema;
 
 ```bash
 # Generate typed database interface
-npx dbsp generate kysely --schema ./dbsp.schema.ts --output ./src/db.generated.ts
+npx dbsp generate kysely --schema ./dbsp.schema.ts --output ./src/generated
 ```
 
-This generates:
+This generates two files:
 
 ```typescript
-// src/db.generated.ts
+// src/generated/types.ts
 import type { Generated, ColumnType } from 'kysely';
 
 export interface UsersTable {
   id: Generated<number>;
   name: string;
   email: string;
-  createdAt: Generated<Date>;
+  createdAt: ColumnType<Date, Date | string | undefined, Date | string>;
 }
 
 export interface PostsTable {
@@ -105,6 +105,11 @@ export interface PostsTable {
   authorId: number;
   published: Generated<boolean>;
 }
+```
+
+```typescript
+// src/generated/DB.ts
+import type { UsersTable, PostsTable } from './types.js';
 
 export interface DB {
   users: UsersTable;
@@ -118,7 +123,7 @@ export interface DB {
 import { createOrm, eq } from '@db-semantic-planner/core';
 import { createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
 import { Kysely, PostgresDialect } from 'kysely';
-import type { DB } from './db.generated';
+import type { DB } from './generated/DB.js';
 
 const kysely = new Kysely<DB>({ dialect: new PostgresDialect({ pool }) });
 
@@ -216,20 +221,26 @@ dbsp <command>
 Generate Kysely type definitions from your schema.
 
 ```bash
-dbsp generate kysely --schema ./dbsp.schema.ts --output ./src/db.generated.ts
+dbsp generate kysely --schema ./dbsp.schema.ts --output ./src/generated
 ```
 
+Generates:
+- `DB.ts` - Main database interface
+- `types.ts` - Table type definitions
+
 Options:
-- `-s, --schema <path>` - Path to schema file (default: `dbsp.schema.ts`)
-- `-o, --output <path>` - Output file path (default: stdout)
+- `-s, --schema <path>` - Path to schema file (default: auto-detect `dbsp.schema.ts`)
+- `-o, --output <dir>` - Output directory (default: `./generated/kysely`)
 
 #### `dbsp generate manifest`
 
-Generate a JSON manifest of your schema (useful for tooling). Outputs JSON format.
+Generate a JSON manifest of your schema (useful for tooling/MCP). Outputs JSON format.
 
 ```bash
-dbsp generate manifest --schema ./dbsp.schema.ts --output ./schema.json
+dbsp generate manifest --schema ./dbsp.schema.ts --output ./generated
 ```
+
+Generates `schema.json` in the output directory.
 
 The manifest is a JSON file containing the resolved schema structure:
 
@@ -296,7 +307,7 @@ Options:
 > .schema users      # Show table schema
 > .relations posts   # Show table relations
 > .clear             # Clear screen
-> .quit              # Exit REPL
+> .exit              # Exit REPL (or .quit)
 ```
 
 **Output:**

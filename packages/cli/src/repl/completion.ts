@@ -79,6 +79,12 @@ const DOT_COMMANDS: CompletionSuggestion[] = [
 		type: 'command',
 		description: 'Exit REPL',
 	},
+	{
+		text: '.quit',
+		label: '.quit',
+		type: 'command',
+		description: 'Exit REPL (alias)',
+	},
 ];
 
 /**

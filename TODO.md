@@ -21,6 +21,7 @@
 | One Ring Codegen-First (ARCH-002) | schema, cli, core | ✅ Complete |
 | CLI REPL Interactive (DX-030) | cli | ✅ Complete |
 | Codebase Stabilization (STAB-001) | all | ✅ Complete |
+| MCP Server (@dbsp/mcp-server) | mcp-server | 🟡 Ready |
 
 ## ✅ COMPLETED: ALIGN-001 Documentation & API Alignment Sprint (2026-01-11)
 
@@ -50,7 +51,7 @@ Alignment sprint to fix doc↔code gaps and improve DX before v1.0.
 | 5 | LOT-5 | Migrate build to tsup (all packages) | MEDIUM | M (~3h) | ✅ Done (2026-01-11) |
 | 6 | LOT-6 | Move legacy dx/findMany docs → historical/ | LOW | XS (~15min) | ✅ Done (2026-01-11) |
 | 7 | LOT-7 | REPL schema bridge type safety | MEDIUM | S (~2h) | ✅ Done (2026-01-11) — Covered by CORE-005 Valibot |
-| 8 | FUTURE | @dbsp/mcp-server package | LOW | XL | ⏳ Backlog |
+| 8 | MCP-001→010 | @dbsp/mcp-server package | HIGH | XL | 🟡 Ready (see TODO_MCP.md) |
 
 ---
 
