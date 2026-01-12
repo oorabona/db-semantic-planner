@@ -1305,15 +1305,21 @@ tags include posts where published = true
 users where active = true include posts where published = true
       ^^^^^^^^^^^^^^^^^^^        ^^^^^ ^^^^^^^^^^^^^^^^^^^^^^^^
       main table filter          relation + its filter
+
+tags include posts where published = true and tags.name = "yes"
+                         ^^^^^^^^^^^^^^^^^    ^^^^^^^^^^^^^^^^^
+                         include filter       main table filter (qualified)
 ```
 
+**Qualified column parsing:** When a column is qualified with the main table name (e.g., `tags.name`), it's recognized as a main table filter, not an include filter. The table prefix is stripped from the result.
+
 **Files modified:**
-- `packages/cli/src/repl/parser.ts` - ParsedInclude type, include filter parsing
+- `packages/cli/src/repl/parser.ts` - ParsedInclude type, include filter parsing, qualified column detection
 - `packages/cli/src/repl/query-executor.ts` - buildIncludeOptions(), pass filters to ORM
-- `packages/cli/src/repl/parser.test.ts` - Tests for filtered includes
+- `packages/cli/src/repl/parser.test.ts` - Tests for filtered includes + qualified columns
 - `packages/cli/src/repl/query-executor.test.ts` - Integration test for filtered includes
 
-**Tests:** All 127 CLI tests passing (5 new tests for CLI-014)
+**Tests:** All 129 CLI tests passing (7 new tests for CLI-014 including qualified column parsing)
 
 ---
 
