@@ -1,13 +1,14 @@
 import React from 'react';
 /**
  * DX-030: REPL Input Prompt Component with History Support
+ * CLI-015: Enhanced keyboard shortcuts
  */
 
-import { TextInput } from '@inkjs/ui';
 import { Box, Text, useInput } from 'ink';
 import { useCallback, useEffect, useState } from 'react';
 import type { CommandHistory } from '../history.js';
 import type { QueryMode } from '../types.js';
+import { EnhancedTextInput } from './EnhancedTextInput.js';
 
 interface InputPromptProps {
 	onSubmit: (value: string) => void;
@@ -114,7 +115,7 @@ export function InputPrompt({
 			<Text color={promptColor} bold>
 				{promptSymbol}{' '}
 			</Text>
-			<TextInput
+			<EnhancedTextInput
 				key={combinedKey}
 				defaultValue={historyValue ?? ''}
 				onSubmit={handleSubmit}

@@ -1328,6 +1328,33 @@ This allows flexible filter placement regardless of syntactic position.
 
 ---
 
+### CLI-015: REPL Input Box Keyboard Shortcuts ✅ (2025-01-12)
+
+**Priority:** MEDIUM | **Effort:** S (~2h) | **Breaking:** No
+
+**Status:** ✅ COMPLETE
+
+**Implementation:** Created custom `EnhancedTextInput` component with full cursor management and keyboard shortcuts using ink's `useInput` hook.
+
+**Implemented shortcuts:**
+- [x] `Home` / `Ctrl+A` - Move cursor to beginning of line (Home via escape sequences)
+- [x] `End` / `Ctrl+E` - Move cursor to end of line (End via escape sequences)
+- [x] `Ctrl+W` - Delete word before cursor (backward-kill-word)
+- [x] `Ctrl+U` - Delete from cursor to beginning of line
+- [x] `Ctrl+K` - Delete from cursor to end of line
+- [x] `Ctrl+←` / `Alt+B` - Move cursor one word backward
+- [x] `Ctrl+→` / `Alt+F` - Move cursor one word forward
+- [x] `Ctrl+H` - Backspace (terminal convention)
+- [x] Backspace / Delete key support with cursor position tracking
+
+**Files created/modified:**
+- `packages/cli/src/repl/components/EnhancedTextInput.tsx` (NEW)
+- `packages/cli/src/repl/components/InputPrompt.tsx` (updated to use EnhancedTextInput)
+
+**Tests:** All 131 CLI tests passing
+
+---
+
 ### Documentation (DX critical)
 
 - [ ] **DOCS-001**: User documentation (Getting Started, API Guide)
