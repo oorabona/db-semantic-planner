@@ -99,7 +99,7 @@ export function validatePath(
 			const isWithinAllowedRoot = normalizedRoots.some((root) => {
 				// Resolve symlinks for root as well
 				const realRoot = existsSync(root) ? realpathSync(root) : root;
-				return realPath.startsWith(realRoot + '/') || realPath === realRoot;
+				return realPath.startsWith(`${realRoot}/`) || realPath === realRoot;
 			});
 
 			if (!isWithinAllowedRoot) {
@@ -190,7 +190,10 @@ export async function loadSchema(
 			);
 		}
 
-		throw new SchemaLoadError(`Failed to load schema: ${message}`, 'LOAD_FAILED');
+		throw new SchemaLoadError(
+			`Failed to load schema: ${message}`,
+			'LOAD_FAILED',
+		);
 	}
 }
 

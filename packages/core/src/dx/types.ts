@@ -4,7 +4,7 @@ import type {
 	SelectIntent,
 	WhereIntent,
 } from '../intent-ast.js';
-import type { ModelIR } from '../model-ir.js';
+import type { IncludeStrategy, ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
 import type {
 	DeleteBuilder,
@@ -281,8 +281,12 @@ interface OrmOptionsBase<DB = unknown> {
 	 * Default include strategy for relations when set to 'auto'.
 	 * - 'join': Use JOIN (single query, database optimizes) - DEFAULT
 	 * - 'separate': Use separate queries (N+1 style with batching)
+	 * - 'cte': Use CTE (Common Table Expression)
+	 * - 'lateral': Use LATERAL JOIN (PostgreSQL)
+	 * - 'json_agg': Use JSON aggregation (PostgreSQL)
+	 * - 'auto': Let planner decide based on relation type
 	 */
-	readonly defaultIncludeStrategy?: 'join' | 'separate';
+	readonly defaultIncludeStrategy?: IncludeStrategy;
 }
 
 /**

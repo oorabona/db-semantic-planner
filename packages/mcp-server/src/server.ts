@@ -4,9 +4,9 @@
  * Exposes schema and query planning capabilities to AI tools via MCP protocol.
  */
 
+import type { ResolvedSchema } from '@db-semantic-planner/schema';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import type { ResolvedSchema } from '@db-semantic-planner/schema';
 
 /**
  * Options for creating the MCP server.
@@ -63,7 +63,9 @@ export function createMcpServer(options: McpServerOptions): McpServer {
 
 	// Log server info for debugging (to stderr to not interfere with stdio transport)
 	console.error(`[dbsp-mcp] Server created with schema containing:`);
-	console.error(`  - Tables: ${Object.keys(serverContext.schema.tables).length}`);
+	console.error(
+		`  - Tables: ${Object.keys(serverContext.schema.tables).length}`,
+	);
 	console.error(
 		`  - Relations: ${Object.keys(serverContext.schema.relations).length}`,
 	);

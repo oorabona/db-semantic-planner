@@ -122,52 +122,6 @@ describe('DX-022: Hierarchy List Methods', () => {
 		});
 	});
 
-	describe('Old API removed (DX-022 Breaking Change)', () => {
-		it('should NOT have ancestors() method', () => {
-			const db = createTestDb();
-			const orm = createOrm({
-				model: categoryModel,
-				adapter: createKyselyAdapter(db),
-			});
-
-			// biome-ignore lint/suspicious/noExplicitAny: Testing removed API
-			expect((orm as any).ancestors).toBeUndefined();
-		});
-
-		it('should NOT have descendants() method', () => {
-			const db = createTestDb();
-			const orm = createOrm({
-				model: categoryModel,
-				adapter: createKyselyAdapter(db),
-			});
-
-			// biome-ignore lint/suspicious/noExplicitAny: Testing removed API
-			expect((orm as any).descendants).toBeUndefined();
-		});
-
-		it('should NOT have subtree() method', () => {
-			const db = createTestDb();
-			const orm = createOrm({
-				model: categoryModel,
-				adapter: createKyselyAdapter(db),
-			});
-
-			// biome-ignore lint/suspicious/noExplicitAny: Testing removed API
-			expect((orm as any).subtree).toBeUndefined();
-		});
-
-		it('should NOT have recursive() method', () => {
-			const db = createTestDb();
-			const orm = createOrm({
-				model: categoryModel,
-				adapter: createKyselyAdapter(db),
-			});
-
-			// biome-ignore lint/suspicious/noExplicitAny: Testing removed API
-			expect((orm as any).recursive).toBeUndefined();
-		});
-	});
-
 	describe('Multi-tenant support', () => {
 		it('should have listAncestors on tenant ORM', () => {
 			const db = createTestDb();

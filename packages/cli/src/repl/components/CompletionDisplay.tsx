@@ -83,7 +83,7 @@ export function CompletionDisplay({
 						<Text>{TYPE_ICONS[suggestion.type]} </Text>
 						<Text
 							color={isSelected ? 'white' : TYPE_COLORS[suggestion.type]}
-							backgroundColor={isSelected ? 'blue' : undefined}
+							{...(isSelected && { backgroundColor: 'blue' as const })}
 							bold={isSelected}
 						>
 							{suggestion.label}

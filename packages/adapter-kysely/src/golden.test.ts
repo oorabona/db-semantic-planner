@@ -1009,7 +1009,9 @@ describe('Q5: Include strategy contract enforcement', () => {
 				include: [{ relation: 'posts' }],
 			};
 
-			const planReport = plan(intent, includeContractSchema, { defaultIncludeStrategy: 'separate' });
+			const planReport = plan(intent, includeContractSchema, {
+				defaultIncludeStrategy: 'separate',
+			});
 			const compiled = compile(planReport, includeContractSchema, kysely);
 
 			// Verify decision is 'separate'
@@ -1032,7 +1034,9 @@ describe('Q5: Include strategy contract enforcement', () => {
 				include: [{ relation: 'posts' }],
 			};
 
-			const planReport = plan(intent, includeContractSchema, { defaultIncludeStrategy: 'separate' });
+			const planReport = plan(intent, includeContractSchema, {
+				defaultIncludeStrategy: 'separate',
+			});
 			const result = compileWithIncludes(
 				planReport,
 				includeContractSchema,

@@ -48,11 +48,9 @@ const testModel = defineSchema({
 }).build();
 
 // Create a mock Kysely instance for testing SQL generation only (no actual execution)
-// biome-ignore lint/suspicious/noExplicitAny: Mock Kysely requires any for database schema and internal types
 const mockKysely = new Kysely<any>({
 	dialect: {
 		createAdapter: () =>
-			// biome-ignore lint/suspicious/noExplicitAny: Mock pool requires any
 			new PostgresDialect({ pool: {} as any }).createAdapter(),
 		createDriver: () =>
 			({
@@ -63,13 +61,10 @@ const mockKysely = new Kysely<any>({
 				beginTransaction: async () => {},
 				commitTransaction: async () => {},
 				rollbackTransaction: async () => {},
-				// biome-ignore lint/suspicious/noExplicitAny: Mock driver type assertion
 			}) as any,
 		createIntrospector: (db) =>
-			// biome-ignore lint/suspicious/noExplicitAny: Mock pool requires any
 			new PostgresDialect({ pool: {} as any }).createIntrospector(db),
 		createQueryCompiler: () =>
-			// biome-ignore lint/suspicious/noExplicitAny: Mock pool requires any
 			new PostgresDialect({ pool: {} as any }).createQueryCompiler(),
 	},
 });

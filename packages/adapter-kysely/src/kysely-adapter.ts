@@ -75,8 +75,8 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 	 * @param schemaName - Optional schema name for multi-tenant queries
 	 * @param dialect - Optional explicit dialect (recommended for production/minified builds)
 	 */
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely requires any for generic database schema
 	constructor(
+		// biome-ignore lint/suspicious/noExplicitAny: Kysely requires any for generic database schema
 		db: Kysely<any> | Transaction<any>,
 		schemaName?: string,
 		dialect?: DialectName,

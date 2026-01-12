@@ -23,7 +23,11 @@ import {
 } from '@db-semantic-planner/core';
 import type { ResolvedSchema } from '@db-semantic-planner/schema';
 import type { ParsedQuery, WhereClause } from './parser.js';
-import type { AliasingMode, DialectMode, IncludeStrategyMode } from './types.js';
+import type {
+	AliasingMode,
+	DialectMode,
+	IncludeStrategyMode,
+} from './types.js';
 
 /**
  * Options for query execution
@@ -130,7 +134,10 @@ export function executeQuery(
 			aliasIncludedColumns: options?.aliasingMode ?? 'always',
 		});
 		// CLI-011: 'auto' means let the planner decide (don't force a strategy)
-		const strategyToUse = options?.includeStrategy === 'auto' ? undefined : options?.includeStrategy;
+		const strategyToUse =
+			options?.includeStrategy === 'auto'
+				? undefined
+				: options?.includeStrategy;
 		const orm = createOrm<Record<string, unknown>>({
 			model,
 			adapter,
@@ -209,7 +216,7 @@ export function executeQuery(
 		return {
 			sql: dump.sql,
 			params: dump.params,
-			separateQueries: separateQueries.length > 0 ? separateQueries : undefined,
+			...(separateQueries.length > 0 && { separateQueries }),
 			plan: {
 				strategy: dump.plan.decisions
 					.map((d) => `${d.type}: ${d.choice}`)

@@ -18,50 +18,87 @@ import {
 import { getHistory } from './history.js';
 import { ParseError, parseNaturalQuery } from './parser.js';
 import { executeQuery } from './query-executor.js';
-import type { AliasingMode, DialectMode, IncludeStrategyMode, QueryMode, QueryResult, ReplConfig } from './types.js';
+import type {
+	AliasingMode,
+	DialectMode,
+	IncludeStrategyMode,
+	QueryMode,
+	QueryResult,
+	ReplConfig,
+} from './types.js';
 
 /**
  * Strategy information for user feedback (CLI-011)
  */
-const STRATEGY_INFO: Record<IncludeStrategyMode, {
-	name: string;
-	description: string;
-	pros: string[];
-	cons: string[];
-	dialects: DialectMode[];
-}> = {
+const STRATEGY_INFO: Record<
+	IncludeStrategyMode,
+	{
+		name: string;
+		description: string;
+		pros: string[];
+		cons: string[];
+		dialects: DialectMode[];
+	}
+> = {
 	auto: {
 		name: 'AUTO',
-		description: 'Let the planner choose based on relation type and cardinality',
-		pros: ['Optimal for mixed relations', 'JOIN for belongsTo, SEPARATE for hasMany', 'No manual tuning needed'],
-		cons: ['Less predictable SQL output', 'May not match specific performance needs'],
+		description:
+			'Let the planner choose based on relation type and cardinality',
+		pros: [
+			'Optimal for mixed relations',
+			'JOIN for belongsTo, SEPARATE for hasMany',
+			'No manual tuning needed',
+		],
+		cons: [
+			'Less predictable SQL output',
+			'May not match specific performance needs',
+		],
 		dialects: ['postgresql', 'mysql', 'sqlite', 'mssql', 'duckdb'],
 	},
 	join: {
 		name: 'JOIN',
 		description: 'LEFT JOIN to fetch relations in a single query',
-		pros: ['Single round-trip', 'Database optimizer handles it', 'Best for small/medium relations'],
-		cons: ['May cause row duplication with hasMany', 'Memory usage scales with result size'],
+		pros: [
+			'Single round-trip',
+			'Database optimizer handles it',
+			'Best for small/medium relations',
+		],
+		cons: [
+			'May cause row duplication with hasMany',
+			'Memory usage scales with result size',
+		],
 		dialects: ['postgresql', 'mysql', 'sqlite', 'mssql', 'duckdb'],
 	},
 	separate: {
 		name: 'SEPARATE',
 		description: 'Fetch relations in separate batched queries (IN clause)',
-		pros: ['No row duplication', 'Better for large hasMany relations', 'Cleaner hydration'],
+		pros: [
+			'No row duplication',
+			'Better for large hasMany relations',
+			'Cleaner hydration',
+		],
 		cons: ['Multiple round-trips (N+1 batched)', 'More network overhead'],
 		dialects: ['postgresql', 'mysql', 'sqlite', 'mssql', 'duckdb'],
 	},
 	cte: {
 		name: 'CTE',
 		description: 'WITH clause to materialize base query before joining',
-		pros: ['Materializes complex filters once', 'Good for repeated subqueries', 'Can improve performance'],
+		pros: [
+			'Materializes complex filters once',
+			'Good for repeated subqueries',
+			'Can improve performance',
+		],
 		cons: ['Extra query planning overhead', 'Not always faster'],
 		dialects: ['postgresql', 'mysql', 'sqlite', 'mssql', 'duckdb'],
 	},
 	lateral: {
 		name: 'LATERAL',
 		description: 'LATERAL JOIN for correlated subquery per parent',
-		pros: ['Limit N children per parent', 'Efficient for top-N queries', 'No row explosion'],
+		pros: [
+			'Limit N children per parent',
+			'Efficient for top-N queries',
+			'No row explosion',
+		],
 		cons: ['PostgreSQL only', 'More complex query plan'],
 		dialects: ['postgresql'],
 	},
@@ -77,11 +114,14 @@ const STRATEGY_INFO: Record<IncludeStrategyMode, {
 /**
  * Dialect information for user feedback (CLI-011)
  */
-const DIALECT_INFO: Record<DialectMode, {
-	name: string;
-	description: string;
-	strategies: IncludeStrategyMode[];
-}> = {
+const DIALECT_INFO: Record<
+	DialectMode,
+	{
+		name: string;
+		description: string;
+		strategies: IncludeStrategyMode[];
+	}
+> = {
 	postgresql: {
 		name: 'PostgreSQL',
 		description: 'Full-featured dialect with all strategies available',
@@ -124,7 +164,8 @@ function ReplApp({ config }: ReplAppProps) {
 	const { exit } = useApp();
 	const [mode, setMode] = useState<QueryMode>('natural');
 	const [aliasingMode, setAliasingMode] = useState<AliasingMode>('always');
-	const [includeStrategy, setIncludeStrategy] = useState<IncludeStrategyMode>('auto');
+	const [includeStrategy, setIncludeStrategy] =
+		useState<IncludeStrategyMode>('auto');
 	const [dialect, setDialect] = useState<DialectMode>('postgresql');
 	const [showHelp, setShowHelp] = useState(false);
 	const [output, setOutput] = useState<React.ReactNode | null>(null);
@@ -180,7 +221,9 @@ function ReplApp({ config }: ReplAppProps) {
 
 	// Get the currently selected completion text
 	const selectedCompletion =
-		selectedCompletionIndex >= 0 ? completions[selectedCompletionIndex]?.text : undefined;
+		selectedCompletionIndex >= 0
+			? completions[selectedCompletionIndex]?.text
+			: undefined;
 
 	const handleSubmit = useCallback(
 		(value: string) => {
@@ -203,9 +246,9 @@ function ReplApp({ config }: ReplAppProps) {
 						return;
 
 					case '.exit':
-				case '.quit':
-					exit();
-					return;
+					case '.quit':
+						exit();
+						return;
 
 					case '.clear':
 						setShowHelp(false);
@@ -329,164 +372,223 @@ function ReplApp({ config }: ReplAppProps) {
 					}
 
 					case '.split':
-					setSplitView((prev) => !prev);
-					setOutput(
-						<Text color="cyan">
-							{splitView
-								? '📋 Single view mode'
-								: '📊 Split view mode (schema | query)'}
-						</Text>,
-					);
-					setQueryResult(null);
-					setShowHelp(false);
-					return;
-
-				case '.aliasing': {
-					// Toggle between 'always' and 'onCollision' modes (CLI-010)
-					const newMode: AliasingMode = aliasingMode === 'always' ? 'onCollision' : 'always';
-					setAliasingMode(newMode);
-					setOutput(
-						<Text color="cyan">
-							🏷️ Column aliasing mode: {newMode}
-							{newMode === 'always'
-								? ' (all included columns prefixed)'
-								: ' (only colliding columns prefixed)'}
-						</Text>,
-					);
-					setQueryResult(null);
-					setShowHelp(false);
-					return;
-				}
-
-				case '.strategy': {
-					// CLI-011: Include strategy selection with informative feedback
-					const strategyArg = args[0]?.toLowerCase() as IncludeStrategyMode | undefined;
-					const dialectInfo = DIALECT_INFO[dialect];
-					const availableStrategies = dialectInfo.strategies;
-					
-					if (!strategyArg) {
-						// Show current strategy and all options with dialect info
+						setSplitView((prev) => !prev);
 						setOutput(
-							<Box flexDirection="column" marginY={1}>
-								<Text bold color="cyan">🔗 Include Strategy: {includeStrategy.toUpperCase()}</Text>
-								<Text color="gray">Dialect: {dialectInfo.name} ({dialect})</Text>
-								<Text> </Text>
-								<Text color="gray">Available strategies for {dialectInfo.name}:</Text>
-								{availableStrategies.map((strat) => {
-									const info = STRATEGY_INFO[strat];
-									const isCurrent = includeStrategy === strat;
-									return (
-										<Box key={strat} flexDirection="column" marginTop={1}>
-											<Text color={isCurrent ? 'green' : 'white'}>
-												  • {strat} {isCurrent ? '(current)' : ''}
-											</Text>
-											<Text color="gray" dimColor>    {info.description}</Text>
-											{info.pros.slice(0, 2).map((pro, i) => (
-												<Text key={i} color="gray" dimColor>    ✓ {pro}</Text>
-											))}
-											{info.cons.slice(0, 1).map((con, i) => (
-												<Text key={i} color="gray" dimColor>    ⚠ {con}</Text>
-											))}
-										</Box>
-									);
-								})}
-								<Text marginTop={1} color="gray">Usage: .strategy {availableStrategies.join(' | ')}</Text>
-							</Box>,
-						);
-					} else if (availableStrategies.includes(strategyArg)) {
-						const info = STRATEGY_INFO[strategyArg];
-						setIncludeStrategy(strategyArg);
-						setOutput(
-							<Box flexDirection="column" marginY={1}>
-								<Text color="green">✓ Include strategy: {info.name}</Text>
-								<Text color="gray">{info.description}</Text>
-								<Text color="gray" dimColor>Pros: {info.pros.join(', ')}</Text>
-							</Box>,
-						);
-					} else if (Object.keys(STRATEGY_INFO).includes(strategyArg)) {
-						// Valid strategy but not available for current dialect
-						const info = STRATEGY_INFO[strategyArg];
-						setOutput(
-							<Box flexDirection="column" marginY={1}>
-								<Text color="red">❌ Strategy '{strategyArg}' not available for {dialectInfo.name}</Text>
-								<Text color="gray">This strategy requires: {info.dialects.join(', ')}</Text>
-								<Text color="gray">Available strategies: {availableStrategies.join(', ')}</Text>
-							</Box>,
-						);
-					} else {
-						setOutput(
-							<Text color="red">
-								❌ Unknown strategy: {strategyArg}. Available: {availableStrategies.join(', ')}
+							<Text color="cyan">
+								{splitView
+									? '📋 Single view mode'
+									: '📊 Split view mode (schema | query)'}
 							</Text>,
 						);
-					}
-					setQueryResult(null);
-					setShowHelp(false);
-					return;
-				}
+						setQueryResult(null);
+						setShowHelp(false);
+						return;
 
-				case '.dialect': {
-					// CLI-011: SQL dialect selection
-					const dialectArg = args[0]?.toLowerCase() as DialectMode | undefined;
-					
-					if (!dialectArg) {
-						// Show current dialect and available options
+					case '.aliasing': {
+						// Toggle between 'always' and 'onCollision' modes (CLI-010)
+						const newMode: AliasingMode =
+							aliasingMode === 'always' ? 'onCollision' : 'always';
+						setAliasingMode(newMode);
 						setOutput(
-							<Box flexDirection="column" marginY={1}>
-								<Text bold color="cyan">🗄️ SQL Dialect: {DIALECT_INFO[dialect].name}</Text>
-								<Text> </Text>
-								<Text color="gray">Available dialects:</Text>
-								{(Object.entries(DIALECT_INFO) as [DialectMode, typeof DIALECT_INFO[DialectMode]][]).map(([key, info]) => {
-									const isCurrent = dialect === key;
-									return (
-										<Box key={key} flexDirection="column" marginTop={1}>
-											<Text color={isCurrent ? 'green' : 'white'}>
-												  • {key} {isCurrent ? '(current)' : ''}
-											</Text>
-											<Text color="gray" dimColor>    {info.description}</Text>
-											<Text color="gray" dimColor>    Strategies: {info.strategies.join(', ')}</Text>
-										</Box>
-									);
-								})}
-								<Text marginTop={1} color="gray">Usage: .dialect postgresql | mysql | sqlite | mssql | duckdb</Text>
-							</Box>,
+							<Text color="cyan">
+								🏷️ Column aliasing mode: {newMode}
+								{newMode === 'always'
+									? ' (all included columns prefixed)'
+									: ' (only colliding columns prefixed)'}
+							</Text>,
 						);
-					} else if (Object.keys(DIALECT_INFO).includes(dialectArg)) {
-						const info = DIALECT_INFO[dialectArg];
-						const oldDialect = dialect;
-						setDialect(dialectArg);
-						
-						// Check if current strategy is compatible with new dialect
-						if (!info.strategies.includes(includeStrategy)) {
-							setIncludeStrategy('join'); // Reset to default
+						setQueryResult(null);
+						setShowHelp(false);
+						return;
+					}
+
+					case '.strategy': {
+						// CLI-011: Include strategy selection with informative feedback
+						const strategyArg = args[0]?.toLowerCase() as
+							| IncludeStrategyMode
+							| undefined;
+						const dialectInfo = DIALECT_INFO[dialect];
+						const availableStrategies = dialectInfo.strategies;
+
+						if (!strategyArg) {
+							// Show current strategy and all options with dialect info
 							setOutput(
 								<Box flexDirection="column" marginY={1}>
-									<Text color="green">✓ Dialect: {info.name}</Text>
+									<Text bold color="cyan">
+										🔗 Include Strategy: {includeStrategy.toUpperCase()}
+									</Text>
+									<Text color="gray">
+										Dialect: {dialectInfo.name} ({dialect})
+									</Text>
+									<Text> </Text>
+									<Text color="gray">
+										Available strategies for {dialectInfo.name}:
+									</Text>
+									{availableStrategies.map((strat) => {
+										const info = STRATEGY_INFO[strat];
+										const isCurrent = includeStrategy === strat;
+										return (
+											<Box key={strat} flexDirection="column" marginTop={1}>
+												<Text color={isCurrent ? 'green' : 'white'}>
+													• {strat} {isCurrent ? '(current)' : ''}
+												</Text>
+												<Text color="gray" dimColor>
+													{' '}
+													{info.description}
+												</Text>
+												{info.pros.slice(0, 2).map((pro, i) => (
+													<Text key={i} color="gray" dimColor>
+														{' '}
+														✓ {pro}
+													</Text>
+												))}
+												{info.cons.slice(0, 1).map((con, i) => (
+													<Text key={i} color="gray" dimColor>
+														{' '}
+														⚠ {con}
+													</Text>
+												))}
+											</Box>
+										);
+									})}
+									<Box marginTop={1}>
+										<Text color="gray">
+											Usage: .strategy {availableStrategies.join(' | ')}
+										</Text>
+									</Box>
+								</Box>,
+							);
+						} else if (availableStrategies.includes(strategyArg)) {
+							const info = STRATEGY_INFO[strategyArg];
+							setIncludeStrategy(strategyArg);
+							setOutput(
+								<Box flexDirection="column" marginY={1}>
+									<Text color="green">✓ Include strategy: {info.name}</Text>
 									<Text color="gray">{info.description}</Text>
-									<Text color="yellow">⚠ Strategy reset to 'join' ('{includeStrategy}' not available for {info.name})</Text>
-									<Text color="gray">Available strategies: {info.strategies.join(', ')}</Text>
+									<Text color="gray" dimColor>
+										Pros: {info.pros.join(', ')}
+									</Text>
+								</Box>,
+							);
+						} else if (Object.keys(STRATEGY_INFO).includes(strategyArg)) {
+							// Valid strategy but not available for current dialect
+							const info = STRATEGY_INFO[strategyArg];
+							setOutput(
+								<Box flexDirection="column" marginY={1}>
+									<Text color="red">
+										❌ Strategy '{strategyArg}' not available for{' '}
+										{dialectInfo.name}
+									</Text>
+									<Text color="gray">
+										This strategy requires: {info.dialects.join(', ')}
+									</Text>
+									<Text color="gray">
+										Available strategies: {availableStrategies.join(', ')}
+									</Text>
 								</Box>,
 							);
 						} else {
 							setOutput(
-								<Box flexDirection="column" marginY={1}>
-									<Text color="green">✓ Dialect: {info.name}</Text>
-									<Text color="gray">{info.description}</Text>
-									<Text color="gray">Available strategies: {info.strategies.join(', ')}</Text>
-								</Box>,
+								<Text color="red">
+									❌ Unknown strategy: {strategyArg}. Available:{' '}
+									{availableStrategies.join(', ')}
+								</Text>,
 							);
 						}
-					} else {
-						setOutput(
-							<Text color="red">
-								❌ Unknown dialect: {dialectArg}. Available: {Object.keys(DIALECT_INFO).join(', ')}
-							</Text>,
-						);
+						setQueryResult(null);
+						setShowHelp(false);
+						return;
 					}
-					setQueryResult(null);
-					setShowHelp(false);
-					return;
-				}
+
+					case '.dialect': {
+						// CLI-011: SQL dialect selection
+						const dialectArg = args[0]?.toLowerCase() as
+							| DialectMode
+							| undefined;
+
+						if (!dialectArg) {
+							// Show current dialect and available options
+							setOutput(
+								<Box flexDirection="column" marginY={1}>
+									<Text bold color="cyan">
+										🗄️ SQL Dialect: {DIALECT_INFO[dialect].name}
+									</Text>
+									<Text> </Text>
+									<Text color="gray">Available dialects:</Text>
+									{(
+										Object.entries(DIALECT_INFO) as [
+											DialectMode,
+											(typeof DIALECT_INFO)[DialectMode],
+										][]
+									).map(([key, info]) => {
+										const isCurrent = dialect === key;
+										return (
+											<Box key={key} flexDirection="column" marginTop={1}>
+												<Text color={isCurrent ? 'green' : 'white'}>
+													• {key} {isCurrent ? '(current)' : ''}
+												</Text>
+												<Text color="gray" dimColor>
+													{' '}
+													{info.description}
+												</Text>
+												<Text color="gray" dimColor>
+													{' '}
+													Strategies: {info.strategies.join(', ')}
+												</Text>
+											</Box>
+										);
+									})}
+									<Box marginTop={1}>
+										<Text color="gray">
+											Usage: .dialect postgresql | mysql | sqlite | mssql |
+											duckdb
+										</Text>
+									</Box>
+								</Box>,
+							);
+						} else if (Object.keys(DIALECT_INFO).includes(dialectArg)) {
+							const info = DIALECT_INFO[dialectArg];
+							setDialect(dialectArg);
+
+							// Check if current strategy is compatible with new dialect
+							if (!info.strategies.includes(includeStrategy)) {
+								setIncludeStrategy('join'); // Reset to default
+								setOutput(
+									<Box flexDirection="column" marginY={1}>
+										<Text color="green">✓ Dialect: {info.name}</Text>
+										<Text color="gray">{info.description}</Text>
+										<Text color="yellow">
+											⚠ Strategy reset to 'join' ('{includeStrategy}' not
+											available for {info.name})
+										</Text>
+										<Text color="gray">
+											Available strategies: {info.strategies.join(', ')}
+										</Text>
+									</Box>,
+								);
+							} else {
+								setOutput(
+									<Box flexDirection="column" marginY={1}>
+										<Text color="green">✓ Dialect: {info.name}</Text>
+										<Text color="gray">{info.description}</Text>
+										<Text color="gray">
+											Available strategies: {info.strategies.join(', ')}
+										</Text>
+									</Box>,
+								);
+							}
+						} else {
+							setOutput(
+								<Text color="red">
+									❌ Unknown dialect: {dialectArg}. Available:{' '}
+									{Object.keys(DIALECT_INFO).join(', ')}
+								</Text>,
+							);
+						}
+						setQueryResult(null);
+						setShowHelp(false);
+						return;
+					}
 
 					case '.history': {
 						const recent = history.getRecent(20);
@@ -531,7 +633,11 @@ function ReplApp({ config }: ReplAppProps) {
 			if (mode === 'natural') {
 				try {
 					const parsed = parseNaturalQuery(trimmed, config.schema);
-					const result = executeQuery(parsed, config.schema, { aliasingMode, includeStrategy, dialect });
+					const result = executeQuery(parsed, config.schema, {
+						aliasingMode,
+						includeStrategy,
+						dialect,
+					});
 
 					if (result.error) {
 						setQueryResult({
@@ -543,7 +649,9 @@ function ReplApp({ config }: ReplAppProps) {
 						setQueryResult({
 							sql: result.sql,
 							params: result.params,
-							separateQueries: result.separateQueries,
+							...(result.separateQueries && {
+								separateQueries: result.separateQueries,
+							}),
 							plan: result.plan,
 						});
 					}
@@ -575,7 +683,16 @@ function ReplApp({ config }: ReplAppProps) {
 				});
 			}
 		},
-		[config.schema, exit, mode, aliasingMode, includeStrategy, dialect, splitView, history],
+		[
+			config.schema,
+			exit,
+			mode,
+			aliasingMode,
+			includeStrategy,
+			dialect,
+			splitView,
+			history,
+		],
 	);
 
 	const tableCount = Object.keys(config.schema.tables).length;
@@ -591,7 +708,10 @@ function ReplApp({ config }: ReplAppProps) {
 
 			{/* Completions (only in natural mode) */}
 			{mode === 'natural' && completions.length > 0 && !showHelp && (
-				<CompletionDisplay suggestions={completions} selectedIndex={selectedCompletionIndex} />
+				<CompletionDisplay
+					suggestions={completions}
+					selectedIndex={selectedCompletionIndex}
+				/>
 			)}
 
 			{/* Input area */}
@@ -601,7 +721,7 @@ function ReplApp({ config }: ReplAppProps) {
 				resetKey={inputKey}
 				history={history}
 				onInputChange={handleInputChange}
-				selectedCompletion={selectedCompletion}
+				{...(selectedCompletion !== undefined && { selectedCompletion })}
 				onCompletionAccepted={handleCompletionAccepted}
 			/>
 		</Box>
@@ -632,7 +752,10 @@ function ReplApp({ config }: ReplAppProps) {
 
 						{/* Completions (only in natural mode) */}
 						{mode === 'natural' && completions.length > 0 && !showHelp && (
-							<CompletionDisplay suggestions={completions} selectedIndex={selectedCompletionIndex} />
+							<CompletionDisplay
+								suggestions={completions}
+								selectedIndex={selectedCompletionIndex}
+							/>
 						)}
 
 						{/* Input area */}
@@ -642,7 +765,7 @@ function ReplApp({ config }: ReplAppProps) {
 							resetKey={inputKey}
 							history={history}
 							onInputChange={handleInputChange}
-							selectedCompletion={selectedCompletion}
+							{...(selectedCompletion !== undefined && { selectedCompletion })}
 							onCompletionAccepted={handleCompletionAccepted}
 						/>
 					</Box>

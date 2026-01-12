@@ -11,7 +11,7 @@ import type {
 	SelectWithExpressionsIntent,
 	WhereIntent,
 } from '../intent-ast.js';
-import type { ModelIR } from '../model-ir.js';
+import type { IncludeStrategy, ModelIR } from '../model-ir.js';
 import type { PlanOptions, PlanReport } from '../planner.js';
 import { AmbiguousPlanError, plan, planRecursive } from '../planner.js';
 
@@ -184,18 +184,16 @@ export function createOrm<DB = Record<string, unknown>>(
 
 	// If no model/schema but adapter is provided, introspect and create async
 	if (adapter) {
-		return adapter
-			.introspect()
-			.then((introspectedModel) =>
-				createOrmInstance(
-					introspectedModel,
-					strictMode,
-					relationHints,
-					adapter,
-					undefined, // schemaName
-					defaultIncludeStrategy,
-				),
-			);
+		return adapter.introspect().then((introspectedModel) =>
+			createOrmInstance(
+				introspectedModel,
+				strictMode,
+				relationHints,
+				adapter,
+				undefined, // schemaName
+				defaultIncludeStrategy,
+			),
+		);
 	}
 
 	// Neither model nor schema nor adapter - this shouldn't happen with proper types
@@ -216,7 +214,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 	relationHints: RelationHints,
 	adapter?: Adapter<DB>,
 	schemaName?: string,
-	defaultIncludeStrategy?: 'join' | 'separate',
+	defaultIncludeStrategy?: IncludeStrategy,
 ): OrmInstance<DB> {
 	return {
 		strictMode,
@@ -737,7 +735,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	private readonly relationHints: RelationHints;
 	private readonly adapter: Adapter | undefined;
 	private readonly schemaName: string | undefined;
-	private readonly defaultIncludeStrategy: 'join' | 'separate' | undefined;
+	private readonly defaultIncludeStrategy: IncludeStrategy | undefined;
 	private selectIntent?: SelectIntent;
 	private whereIntents: WhereIntent[] = [];
 	private strictModeOverride?: boolean;
@@ -754,7 +752,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		relationHints: RelationHints = {},
 		adapter?: Adapter,
 		schemaName?: string,
-		defaultIncludeStrategy?: 'join' | 'separate',
+		defaultIncludeStrategy?: IncludeStrategy,
 	) {
 		this.model = model;
 		this.strictMode = strictMode;

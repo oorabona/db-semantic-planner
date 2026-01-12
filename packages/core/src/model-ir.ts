@@ -49,7 +49,13 @@ export type Optionality = 'required' | 'optional';
  * - 'json_agg': Use JSON aggregation (PostgreSQL/MySQL/DuckDB, single row per parent)
  * - 'auto': Planner decides based on relation type + dialect capabilities
  */
-export type IncludeStrategy = 'join' | 'separate' | 'cte' | 'lateral' | 'json_agg' | 'auto';
+export type IncludeStrategy =
+	| 'join'
+	| 'separate'
+	| 'cte'
+	| 'lateral'
+	| 'json_agg'
+	| 'auto';
 
 /** Strategy for filtering by relation */
 export type FilterStrategy = 'exists' | 'join' | 'auto';

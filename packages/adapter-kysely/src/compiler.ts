@@ -333,7 +333,11 @@ export function compileSeparateInclude(
 				`${info.through}.${info.throughTargetKey}`,
 				`${info.targetTable}.${info.foreignKey as string}`,
 			)
-			.where(`${info.through}.${info.throughSourceKey}`, 'in', parentIds as unknown[]);
+			.where(
+				`${info.through}.${info.throughSourceKey}`,
+				'in',
+				parentIds as unknown[],
+			);
 
 		// Add additional WHERE conditions from include intent
 		if (info.where) {
@@ -2378,6 +2382,7 @@ function compileExists(
 			);
 		} else {
 			// Composite key correlation
+			// biome-ignore lint/suspicious/noExplicitAny: Kysely ExpressionBuilder requires any
 			subquery = subquery.where((innerEb: any) =>
 				buildCompositeKeyCorrelation(
 					innerEb,
@@ -2418,6 +2423,7 @@ function compileExists(
 				);
 			} else {
 				// Composite key: source.fk[] = target.pk[]
+				// biome-ignore lint/suspicious/noExplicitAny: Kysely ExpressionBuilder requires any
 				subquery = subquery.where((innerEb: any) =>
 					buildCompositeKeyCorrelation(
 						innerEb,
@@ -2438,6 +2444,7 @@ function compileExists(
 				);
 			} else {
 				// Composite key: target.fk[] = source.pk[]
+				// biome-ignore lint/suspicious/noExplicitAny: Kysely ExpressionBuilder requires any
 				subquery = subquery.where((innerEb: any) =>
 					buildCompositeKeyCorrelation(
 						innerEb,
@@ -2553,8 +2560,6 @@ function collectCteIncludes(
 		cteName: string;
 	}> = [];
 
-	let cteCounter = 0;
-
 	for (const include of includes) {
 		const decision = findIncludeStrategyDecision(
 			plan,
@@ -2564,11 +2569,12 @@ function collectCteIncludes(
 		if (decision?.choice === 'cte') {
 			const relation = model.getRelation(`${sourceTable}.${include.relation}`);
 			if (relation) {
-				cteCounter++;
+				// Use same naming convention as planner (CLI-012)
+				const cteName = `cte_${sourceTable}_${relation.name}`;
 				results.push({
 					include,
 					relation,
-					cteName: `cte_${include.relation}_${cteCounter}`,
+					cteName,
 				});
 			}
 		}
@@ -2583,7 +2589,7 @@ function collectCteIncludes(
  */
 function applyCteIncludes(
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-	kysely: Kysely<any>,
+	_kysely: Kysely<any>,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 	query: SelectQueryBuilder<any, any, any>,
 	includes: readonly IncludeIntent[] | undefined,
@@ -2613,17 +2619,16 @@ function applyCteIncludes(
 		const targetTableDef = model.getTable(relation.target);
 		const targetKeys = normalizePrimaryKey(targetTableDef?.primaryKey);
 
-		// Apply schema prefix
-		const targetTable = schemaName
-			? `${schemaName}.${relation.target}`
-			: relation.target;
+		// Check if CTE exists in plan (CLI-012: real CTE implementation)
+		const cteExists = plan.ctes.some((cte) => cte.name === cteName);
 
-		// Check if this is a recursive (self-referential) relation
-		const isRecursive = relation.source === relation.target;
-
-		// For now, CTE strategy is handled via recursive query builder
-		// when the planner detects a recursive include (e.g., categories.parent)
-		// The main compile function will use withRecursive for these cases
+		// If CTE exists, JOIN to CTE name; otherwise fallback to table
+		// Note: Schema prefix is NOT applied to CTEs (they're in local scope)
+		const joinTarget = cteExists
+			? cteName
+			: schemaName
+				? `${schemaName}.${relation.target}`
+				: relation.target;
 
 		// Create alias for the CTE join
 		const cteAlias = getNextAlias(state);
@@ -2641,12 +2646,12 @@ function applyCteIncludes(
 			// belongsTo: source.foreignKey = target.primaryKey
 			if (fkCols.length === 1) {
 				result = result.leftJoin(
-					`${targetTable} as ${cteAlias}`,
+					`${joinTarget} as ${cteAlias}`,
 					`${rootAlias}.${fkCols[0]}`,
 					`${cteAlias}.${targetKeys[0]}`,
 				);
 			} else {
-				result = result.leftJoin(`${targetTable} as ${cteAlias}`, (join) => {
+				result = result.leftJoin(`${joinTarget} as ${cteAlias}`, (join) => {
 					let j = join.onRef(
 						`${rootAlias}.${fkCols[0]}`,
 						'=',
@@ -2666,12 +2671,12 @@ function applyCteIncludes(
 			// hasMany or hasOne: source.primaryKey = target.foreignKey
 			if (fkCols.length === 1) {
 				result = result.leftJoin(
-					`${targetTable} as ${cteAlias}`,
+					`${joinTarget} as ${cteAlias}`,
 					`${cteAlias}.${fkCols[0]}`,
 					`${rootAlias}.${sourceKeys[0]}`,
 				);
 			} else {
-				result = result.leftJoin(`${targetTable} as ${cteAlias}`, (join) => {
+				result = result.leftJoin(`${joinTarget} as ${cteAlias}`, (join) => {
 					let j = join.onRef(
 						`${cteAlias}.${fkCols[0]}`,
 						'=',
@@ -2692,8 +2697,6 @@ function applyCteIncludes(
 
 	return result;
 }
-
-
 
 /**
  * Collect all includes that should use LATERAL JOIN strategy (decision.choice === 'lateral').
@@ -2745,7 +2748,12 @@ function applyLateralIncludes(
 ): SelectQueryBuilder<any, any, any> {
 	if (!includes) return query;
 
-	const lateralIncludes = collectLateralIncludes(includes, plan, rootTable, model);
+	const lateralIncludes = collectLateralIncludes(
+		includes,
+		plan,
+		rootTable,
+		model,
+	);
 
 	if (lateralIncludes.length === 0) {
 		return query;
@@ -2759,7 +2767,7 @@ function applyLateralIncludes(
 
 	for (const { include, relation } of lateralIncludes) {
 		const targetTableDef = model.getTable(relation.target);
-		const targetKeys = normalizePrimaryKey(targetTableDef?.primaryKey);
+		const _targetKeys = normalizePrimaryKey(targetTableDef?.primaryKey);
 
 		// Apply schema prefix
 		const targetTable = schemaName
@@ -2782,11 +2790,12 @@ function applyLateralIncludes(
 		// For LATERAL, we use sql.raw to create the LATERAL subquery
 		// because Kysely doesn't have native LATERAL support
 		// This creates: LEFT JOIN LATERAL (subquery) AS alias ON true
-		const orderBySql = include.orderBy 
-			? `ORDER BY ${include.orderBy.map(o => `"${o.field}" ${o.direction.toUpperCase()}`).join(', ')}`
+		const orderBySql = include.orderBy
+			? `ORDER BY ${include.orderBy.map((o) => `"${o.field}" ${o.direction.toUpperCase()}`).join(', ')}`
 			: '';
-		const limitSql = include.limit !== undefined ? `LIMIT ${include.limit}` : '';
-		
+		const limitSql =
+			include.limit !== undefined ? `LIMIT ${include.limit}` : '';
+
 		const lateralSubquery = `LATERAL (
 			SELECT * FROM "${targetTable}"
 			WHERE "${targetTable}"."${fkCols[0]}" = "${rootAlias}"."${sourceKeys[0]}"
@@ -2796,7 +2805,9 @@ function applyLateralIncludes(
 
 		// Use sql.raw with type assertion for LATERAL - Kysely doesn't have native support
 		// biome-ignore lint/suspicious/noExplicitAny: LATERAL requires raw SQL workaround
-		result = result.leftJoin(sql.raw(lateralSubquery) as any, (join: any) => join.onTrue());
+		result = result.leftJoin(sql.raw(lateralSubquery) as any, (join: any) =>
+			join.onTrue(),
+		);
 	}
 
 	return result;
@@ -2853,7 +2864,12 @@ function applyJsonAggIncludes(
 ): SelectQueryBuilder<any, any, any> {
 	if (!includes) return query;
 
-	const jsonAggIncludes = collectJsonAggIncludes(includes, plan, rootTable, model);
+	const jsonAggIncludes = collectJsonAggIncludes(
+		includes,
+		plan,
+		rootTable,
+		model,
+	);
 
 	if (jsonAggIncludes.length === 0) {
 		return query;
@@ -2867,7 +2883,7 @@ function applyJsonAggIncludes(
 
 	for (const { include, relation } of jsonAggIncludes) {
 		const targetTableDef = model.getTable(relation.target);
-		const targetKeys = normalizePrimaryKey(targetTableDef?.primaryKey);
+		const _targetKeys = normalizePrimaryKey(targetTableDef?.primaryKey);
 
 		// Apply schema prefix
 		const targetTable = schemaName
@@ -2891,7 +2907,7 @@ function applyJsonAggIncludes(
 		// Build subquery with ordering if specified
 		let orderBySql = '';
 		if (include.orderBy && include.orderBy.length > 0) {
-			orderBySql = `ORDER BY ${include.orderBy.map(o => `"${o.field}" ${o.direction.toUpperCase()}`).join(', ')}`;
+			orderBySql = `ORDER BY ${include.orderBy.map((o) => `"${o.field}" ${o.direction.toUpperCase()}`).join(', ')}`;
 		}
 
 		// Build the JSON aggregation expression
@@ -2904,13 +2920,13 @@ function applyJsonAggIncludes(
 				WHERE ${sql.ref(`__t__.${fkCols[0]}`)} = ${sql.ref(`${rootAlias}.${sourceKeys[0]}`)}
 			), '[]'::json)`
 			: isSqlite
-			? sql`COALESCE((
+				? sql`COALESCE((
 				SELECT json_group_array(json_object('id', __t__.id))
 				FROM ${sql.table(targetTable)} AS __t__
 				WHERE ${sql.ref(`__t__.${fkCols[0]}`)} = ${sql.ref(`${rootAlias}.${sourceKeys[0]}`)}
 				${orderBySql ? sql.raw(orderBySql) : sql``}
 			), '[]')`
-			: sql`'[]'`; // Fallback for unsupported dialects
+				: sql`'[]'`; // Fallback for unsupported dialects
 
 		// Add the JSON aggregation as a selected column
 		result = result.select(jsonAggSql.as(jsonColumnAlias));

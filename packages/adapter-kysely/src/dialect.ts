@@ -234,16 +234,15 @@ function getDialectAdapter(
 	return executor?.adapter as { constructor: { name: string } } | undefined;
 }
 
-
 /**
  * Try to detect dialect by adapter behavior when constructor.name is mangled.
  *
  * This provides resilience against minification by checking adapter-specific
  * methods or properties that are unlikely to be renamed.
  */
-function tryDetectByBehavior(
-	adapter: { constructor: { name: string } },
-): DialectName | undefined {
+function tryDetectByBehavior(adapter: {
+	constructor: { name: string };
+}): DialectName | undefined {
 	// Check for dialect-specific methods that minifiers won't rename
 	// (because they're part of the public Kysely API)
 	const adapterAny = adapter as Record<string, unknown>;

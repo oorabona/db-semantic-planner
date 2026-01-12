@@ -102,6 +102,7 @@ function History({ commands }: { commands: string[] }) {
 			<Text bold color="gray">
 				📜 History:
 			</Text>
+			{/* biome-ignore lint/suspicious/noArrayIndexKey: Spike code - simple history display */}
 			{commands.slice(-5).map((cmd, i) => (
 				<Text key={i} color="gray" dimColor>
 					{i + 1}. {cmd}

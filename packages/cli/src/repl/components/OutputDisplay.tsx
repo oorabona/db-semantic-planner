@@ -3,7 +3,7 @@ import React from 'react';
  * DX-030: REPL Output Display Component
  */
 
-import { Box, Text } from 'ink'
+import { Box, Text } from 'ink';
 import type { QueryResult, SeparateQueryResult } from '../types.js';
 
 interface OutputDisplayProps {
@@ -48,7 +48,12 @@ export function SeparateQueriesOutput({
 					<Text bold color="cyan">
 						📎 Separate Query ({q.relation}):
 					</Text>
-					<Box borderStyle="single" borderColor="cyan" paddingX={1} marginTop={1}>
+					<Box
+						borderStyle="single"
+						borderColor="cyan"
+						paddingX={1}
+						marginTop={1}
+					>
 						<Text color="green">{q.sql}</Text>
 					</Box>
 					{q.params.length > 0 && (

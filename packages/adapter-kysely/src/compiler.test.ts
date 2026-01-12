@@ -2683,7 +2683,9 @@ describe('SQL Compiler', () => {
 					include: [{ relation: 'posts' }],
 				};
 
-				const report = plan(intent, basicSchema, { defaultIncludeStrategy: 'separate' });
+				const report = plan(intent, basicSchema, {
+					defaultIncludeStrategy: 'separate',
+				});
 
 				// Then: planner decides include-strategy: 'separate'
 				const includeDecision = report.decisions.find(
@@ -2767,7 +2769,9 @@ describe('SQL Compiler', () => {
 					include: [{ relation: 'posts' }],
 				};
 
-				const report = plan(intent, basicSchema, { defaultIncludeStrategy: 'separate' });
+				const report = plan(intent, basicSchema, {
+					defaultIncludeStrategy: 'separate',
+				});
 				const result = compileWithIncludes(report, basicSchema, kysely);
 
 				// Then: main query should be compiled
@@ -2989,11 +2993,13 @@ describe('SQL Compiler', () => {
 					type: 'select',
 					from: 'users',
 					select: { type: 'all' },
-					include: [{ 
-						relation: 'posts', 
-						limit: 5,
-						orderBy: [{ field: 'createdAt', direction: 'desc' }]
-					}],
+					include: [
+						{
+							relation: 'posts',
+							limit: 5,
+							orderBy: [{ field: 'createdAt', direction: 'desc' }],
+						},
+					],
 				};
 
 				const report = plan(intent, schemaWithLateral);
@@ -3097,10 +3103,12 @@ describe('SQL Compiler', () => {
 					type: 'select',
 					from: 'users',
 					select: { type: 'all' },
-					include: [{ 
-						relation: 'posts', 
-						orderBy: [{ field: 'createdAt', direction: 'desc' }]
-					}],
+					include: [
+						{
+							relation: 'posts',
+							orderBy: [{ field: 'createdAt', direction: 'desc' }],
+						},
+					],
 				};
 
 				const report = plan(intent, schemaWithJsonAgg);
@@ -3857,6 +3865,123 @@ describe('CORE-006: Composite Key Support', () => {
 			// Should reference both FK columns
 			expect(compiled.sql).toContain('tenantId');
 			expect(compiled.sql).toContain('customerId');
+		});
+	});
+
+	describe('CTE Include Strategy (CLI-012)', () => {
+		const createCteTestSchema = () =>
+			defineSchema({
+				categories: {
+					id: 'integer',
+					name: 'string',
+					parentId: 'integer',
+				},
+				users: {
+					id: 'integer',
+					name: 'string',
+				},
+				posts: {
+					id: 'integer',
+					title: 'string',
+					authorId: 'integer',
+				},
+			})
+				.relations({
+					categories: {
+						parent: belongsTo(
+							'categories',
+							{ foreignKey: 'parentId' },
+							{ includeStrategy: 'cte' },
+						),
+					},
+					users: {
+						posts: hasMany(
+							'posts',
+							{ foreignKey: 'authorId' },
+							{ includeStrategy: 'cte' },
+						),
+					},
+				})
+				.build();
+
+		it('should generate CTE when includeStrategy is cte for self-referential relation', () => {
+			const kysely = createTestKysely();
+			const model = createCteTestSchema();
+
+			// Query categories with include parent (cte strategy)
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [{ relation: 'parent' }],
+			};
+
+			const planReport = plan(intent, model);
+			const compiled = compile(planReport, model, kysely);
+
+			// Should have WITH clause for the CTE
+			expect(compiled.sql.toUpperCase()).toContain('WITH');
+			expect(compiled.sql).toContain('cte_categories_parent');
+			// CTE should select from categories
+			expect(compiled.sql.toLowerCase()).toContain('select');
+			expect(compiled.sql.toLowerCase()).toContain('categories');
+		});
+
+		it('should generate CTE when includeStrategy is cte for hasMany relation', () => {
+			const kysely = createTestKysely();
+			const model = createCteTestSchema();
+
+			// Query users with include posts (cte strategy)
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts' }],
+			};
+
+			const planReport = plan(intent, model);
+			const compiled = compile(planReport, model, kysely);
+
+			// Should have WITH clause for the CTE
+			expect(compiled.sql.toUpperCase()).toContain('WITH');
+			expect(compiled.sql).toContain('cte_users_posts');
+		});
+
+		it('should record CTE in plan.ctes when cte strategy is used', () => {
+			const model = createCteTestSchema();
+
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [{ relation: 'parent' }],
+			};
+
+			const planReport = plan(intent, model);
+
+			// Plan should contain CTE definition
+			expect(planReport.ctes.length).toBeGreaterThan(0);
+			const cteDef = planReport.ctes.find(
+				(c) => c.name === 'cte_categories_parent',
+			);
+			expect(cteDef).toBeDefined();
+			expect(cteDef?.sourceIntent).toBe('categories.parent');
+		});
+
+		it('should JOIN to CTE name instead of table name', () => {
+			const kysely = createTestKysely();
+			const model = createCteTestSchema();
+
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [{ relation: 'parent' }],
+			};
+
+			const planReport = plan(intent, model);
+			const compiled = compile(planReport, model, kysely);
+
+			// Should have LEFT JOIN to the CTE
+			expect(compiled.sql.toUpperCase()).toContain('LEFT JOIN');
+			// The join should reference the CTE name
+			expect(compiled.sql).toContain('cte_categories_parent');
 		});
 	});
 });
