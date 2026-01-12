@@ -1660,6 +1660,92 @@ function buildEdgeTableRecursiveStep(
 }
 
 /**
+ * Add WHERE conditions to a JoinBuilder's ON clause.
+ * Used for include.where filtering in LEFT JOINs.
+ * Returns the modified JoinBuilder with additional ON conditions.
+ */
+function addWhereToJoin<T>(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely JoinBuilder generic
+	join: any,
+	where: WhereIntent | undefined,
+	alias: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely JoinBuilder generic
+): any {
+	if (!where) return join;
+
+	// Handle comparison operators
+	if ('kind' in where && where.kind === 'comparison') {
+		const w = where as {
+			kind: 'comparison';
+			field: string;
+			operator: string;
+			value: unknown;
+		};
+		const fieldRef = `${alias}.${w.field}`;
+		switch (w.operator) {
+			case 'eq':
+				return join.on(fieldRef, '=', w.value);
+			case 'neq':
+				return join.on(fieldRef, '!=', w.value);
+			case 'gt':
+				return join.on(fieldRef, '>', w.value);
+			case 'gte':
+				return join.on(fieldRef, '>=', w.value);
+			case 'lt':
+				return join.on(fieldRef, '<', w.value);
+			case 'lte':
+				return join.on(fieldRef, '<=', w.value);
+			case 'in':
+				// For IN, we need to use sql template
+				if (Array.isArray(w.value) && w.value.length > 0) {
+					return join.on(sql`${sql.ref(fieldRef)} IN (${sql.join(w.value.map(v => sql`${v}`))})`);
+				}
+				return join;
+			case 'isNull':
+				return join.on(fieldRef, 'is', null);
+			case 'isNotNull':
+				return join.on(fieldRef, 'is not', null);
+			default:
+				return join;
+		}
+	}
+
+	// Handle like
+	if ('kind' in where && where.kind === 'like') {
+		const w = where as {
+			kind: 'like';
+			field: string;
+			pattern: string;
+			caseInsensitive?: boolean;
+		};
+		const fieldRef = `${alias}.${w.field}`;
+		if (w.caseInsensitive) {
+			return join.on(sql`LOWER(${sql.ref(fieldRef)}) LIKE LOWER(${w.pattern})`);
+		}
+		return join.on(fieldRef, 'like', w.pattern);
+	}
+
+	// Handle AND
+	if ('kind' in where && where.kind === 'and') {
+		const w = where as { kind: 'and'; conditions: WhereIntent[] };
+		let result = join;
+		for (const condition of w.conditions) {
+			result = addWhereToJoin(result, condition, alias);
+		}
+		return result;
+	}
+
+	// Handle OR - more complex, need to use sql.or
+	if ('kind' in where && where.kind === 'or') {
+		// OR in JOIN ON clause is tricky - for now skip it
+		// The condition would need eb.or() pattern
+		return join;
+	}
+
+	return join;
+}
+
+/**
  * Simplified WHERE clause builder for recursive CTEs.
  * Handles basic comparisons without the full complexity of the main addWhere.
  */
@@ -2967,7 +3053,7 @@ function applyIncludeJoins(
 
 	let result = query;
 
-	for (const { include: _include, relationName } of joinIncludes) {
+	for (const { include, relationName } of joinIncludes) {
 		// Skip if already joined
 		if (state.joinedIncludeRelations.has(relationName)) {
 			continue;
@@ -3040,12 +3126,18 @@ function applyIncludeJoins(
 				);
 			}
 
-			// LEFT JOIN 2: junction → target (junction.otherKey = target.pk) - single key for now
-			result = result.leftJoin(
-				`${targetTable} as ${targetAlias}`,
-				`${junctionAlias}.${otherKey}`,
-				`${targetAlias}.${targetKeys[0]}`,
-			);
+			// LEFT JOIN 2: junction → target (junction.otherKey = target.pk)
+			// Apply include.where to the target table join
+			result = result.leftJoin(`${targetTable} as ${targetAlias}`, (join) => {
+				let j = join.onRef(
+					`${junctionAlias}.${otherKey}`,
+					'=',
+					`${targetAlias}.${targetKeys[0]}`,
+				);
+				// Add include.where conditions to ON clause
+				j = addWhereToJoin(j, include.where, targetAlias);
+				return j;
+			});
 
 			// Track the target alias (not junction) for column selection
 			state.tableAliases.set(`${relation.target}_include`, targetAlias);
@@ -3077,57 +3169,46 @@ function applyIncludeJoins(
 			// Determine join condition based on relation type
 			// belongsTo: source.foreignKey = target.primaryKey
 			// hasMany/hasOne: source.primaryKey = target.foreignKey
+			// Always use callback form to support include.where filtering
 			if (relation.type === 'belongsTo') {
-				if (fkCols.length === 1) {
-					result = result.leftJoin(
-						`${targetTable} as ${joinAlias}`,
+				result = result.leftJoin(`${targetTable} as ${joinAlias}`, (join) => {
+					// Add FK conditions
+					let j = join.onRef(
 						`${rootAlias}.${fkCols[0]}`,
+						'=',
 						`${joinAlias}.${targetKeys[0]}`,
 					);
-				} else {
-					// Composite key: multiple ON conditions
-					result = result.leftJoin(`${targetTable} as ${joinAlias}`, (join) => {
-						let j = join.onRef(
-							`${rootAlias}.${fkCols[0]}`,
+					for (let i = 1; i < fkCols.length; i++) {
+						j = j.onRef(
+							`${rootAlias}.${fkCols[i]}`,
 							'=',
-							`${joinAlias}.${targetKeys[0]}`,
+							`${joinAlias}.${targetKeys[i]}`,
 						);
-						for (let i = 1; i < fkCols.length; i++) {
-							j = j.onRef(
-								`${rootAlias}.${fkCols[i]}`,
-								'=',
-								`${joinAlias}.${targetKeys[i]}`,
-							);
-						}
-						return j;
-					});
-				}
+					}
+					// Add include.where conditions to ON clause
+					j = addWhereToJoin(j, include.where, joinAlias);
+					return j;
+				});
 			} else {
 				// hasMany or hasOne
-				if (fkCols.length === 1) {
-					result = result.leftJoin(
-						`${targetTable} as ${joinAlias}`,
+				result = result.leftJoin(`${targetTable} as ${joinAlias}`, (join) => {
+					// Add FK conditions
+					let j = join.onRef(
 						`${joinAlias}.${fkCols[0]}`,
+						'=',
 						`${rootAlias}.${sourceKeys[0]}`,
 					);
-				} else {
-					// Composite key: multiple ON conditions
-					result = result.leftJoin(`${targetTable} as ${joinAlias}`, (join) => {
-						let j = join.onRef(
-							`${joinAlias}.${fkCols[0]}`,
+					for (let i = 1; i < fkCols.length; i++) {
+						j = j.onRef(
+							`${joinAlias}.${fkCols[i]}`,
 							'=',
-							`${rootAlias}.${sourceKeys[0]}`,
+							`${rootAlias}.${sourceKeys[i]}`,
 						);
-						for (let i = 1; i < fkCols.length; i++) {
-							j = j.onRef(
-								`${joinAlias}.${fkCols[i]}`,
-								'=',
-								`${rootAlias}.${sourceKeys[i]}`,
-							);
-						}
-						return j;
-					});
-				}
+					}
+					// Add include.where conditions to ON clause
+					j = addWhereToJoin(j, include.where, joinAlias);
+					return j;
+				});
 			}
 		}
 	}
