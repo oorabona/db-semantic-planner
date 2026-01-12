@@ -1,4 +1,5 @@
 import type { Adapter, Dump } from '../adapter.js';
+import type { DialectCapabilities } from '../dialects/index.js';
 import type {
 	ExpressionIntent,
 	SelectIntent,
@@ -287,6 +288,14 @@ interface OrmOptionsBase<DB = unknown> {
 	 * - 'auto': Let planner decide based on relation type
 	 */
 	readonly defaultIncludeStrategy?: IncludeStrategy;
+	/**
+	 * Dialect capabilities for strategy selection.
+	 * When provided, the planner uses these to select optimal strategies:
+	 * - supportsJsonAgg: Enables json_agg for to-many relations
+	 * - supportsLateralJoin: Enables LATERAL for per-row limits
+	 * - supportsRecursiveCTE: Enables WITH RECURSIVE for tree traversal
+	 */
+	readonly dialectCapabilities?: DialectCapabilities;
 }
 
 /**
