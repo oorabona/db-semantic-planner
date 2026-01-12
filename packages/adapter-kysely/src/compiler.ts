@@ -71,10 +71,10 @@ interface CompilerState {
 	parameters: unknown[];
 	/** Track relations that have been JOINed for filter-strategy: 'join' */
 	joinedFilterRelations: Map<string, { alias: string; targetTable: string }>;
-	/** Track relations that have been JOINed for include-strategy: 'join' */
+	/** Track relations that have been JOINed for include-strategy: 'join' or 'json_agg' */
 	joinedIncludeRelations: Map<
 		string,
-		{ alias: string; targetTable: string; relationName: string }
+		{ alias: string; targetTable: string; relationName: string; strategy: 'join' | 'json_agg' }
 	>;
 }
 
@@ -2637,6 +2637,7 @@ function applyCteIncludes(
 			alias: cteAlias,
 			targetTable: relation.target,
 			relationName: include.relation,
+			strategy: 'join',
 		});
 
 		// Build JOIN condition based on relation type
@@ -2781,6 +2782,7 @@ function applyLateralIncludes(
 			alias: lateralAlias,
 			targetTable: relation.target,
 			relationName: include.relation,
+			strategy: 'join',
 		});
 
 		// Build the LATERAL subquery
@@ -2936,6 +2938,7 @@ function applyJsonAggIncludes(
 			alias: jsonColumnAlias,
 			targetTable: relation.target,
 			relationName: include.relation,
+			strategy: 'json_agg',
 		});
 	}
 
@@ -3050,6 +3053,7 @@ function applyIncludeJoins(
 				alias: targetAlias,
 				targetTable: relation.target,
 				relationName,
+				strategy: 'join',
 			});
 		} else {
 			// Non-M:N relations (hasOne, hasMany, belongsTo)
@@ -3059,6 +3063,7 @@ function applyIncludeJoins(
 				alias: joinAlias,
 				targetTable: relation.target,
 				relationName,
+				strategy: 'join',
 			});
 
 			// Build JOIN condition based on relation type - supports composite keys
@@ -3148,7 +3153,13 @@ function addIncludeSelectColumns(
 	let result = query;
 
 	for (const [relationName, joinInfo] of state.joinedIncludeRelations) {
-		const { alias, targetTable } = joinInfo;
+		const { alias, targetTable, strategy } = joinInfo;
+
+		// Skip JSON_AGG relations - the data is already in the _json column
+		if (strategy === 'json_agg') {
+			continue;
+		}
+
 		const tableDef = model.getTable(targetTable);
 
 		if (!tableDef) {

@@ -138,6 +138,9 @@ export class QueryExecutor<TResult = unknown> {
 			compiledWithIncludes.main,
 		)) as TResult[];
 
+		// Hydrate json_agg includes (E2E-004: parse JSON columns from json_agg strategy)
+		this.hydrateJsonAggIncludes(mainResults, planReport);
+
 		// Process separate includes (hasMany hydration - DX-033)
 		if (compiledWithIncludes.separateIncludes.length > 0) {
 			await this.hydrator.hydrateIncludes(
@@ -158,6 +161,74 @@ export class QueryExecutor<TResult = unknown> {
 		}
 
 		return mainResults;
+	}
+
+	/**
+	 * Hydrate json_agg includes by parsing JSON columns and renaming them.
+	 * E2E-004: json_agg strategy returns data as JSON string in *_json columns.
+	 */
+	private hydrateJsonAggIncludes(
+		results: TResult[],
+		planReport: PlanReport,
+	): void {
+		// Find all json_agg include decisions
+		const jsonAggDecisions = planReport.decisions.filter(
+			(d) => d.type === 'include-strategy' && d.choice === 'json_agg',
+		);
+
+		if (jsonAggDecisions.length === 0) {
+			return;
+		}
+
+		// Get relation names from decisions
+		const jsonAggRelations = jsonAggDecisions
+			.map((d) => d.context?.relation)
+			.filter((r): r is string => typeof r === 'string');
+
+		if (jsonAggRelations.length === 0) {
+			return;
+		}
+
+		// Process each result row
+		for (const row of results) {
+			if (typeof row !== 'object' || row === null) {
+				continue;
+			}
+
+			const record = row as Record<string, unknown>;
+
+			for (const relationName of jsonAggRelations) {
+				const jsonColumnName = `${relationName}_json`;
+
+				// Check if the JSON column exists
+				if (jsonColumnName in record) {
+					const jsonValue = record[jsonColumnName];
+
+					// Parse JSON if it's a string
+					let parsed: unknown;
+					if (typeof jsonValue === 'string') {
+						try {
+							parsed = JSON.parse(jsonValue);
+						} catch {
+							// If parsing fails, use empty array
+							parsed = [];
+						}
+					} else if (Array.isArray(jsonValue)) {
+						// Already an array (some drivers auto-parse)
+						parsed = jsonValue;
+					} else if (jsonValue === null || jsonValue === undefined) {
+						parsed = [];
+					} else {
+						// Unknown format, use as-is
+						parsed = jsonValue;
+					}
+
+					// Set the relation property and remove the JSON column
+					record[relationName] = parsed;
+					delete record[jsonColumnName];
+				}
+			}
+		}
 	}
 
 	/**
