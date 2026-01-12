@@ -218,11 +218,13 @@ describe('executeQuery', () => {
 		// Should not crash
 		expect(result.error).toBeUndefined();
 		expect(result.sql).toBeDefined();
-		// Plan should include all tables in the chain
+		// Nested includes should appear in SQL (comments table)
+		expect(result.sql).toContain('comments');
+		// CLI-015: Plan.tables should include ALL nested relations
 		expect(result.plan.tables).toContain('authors');
 		expect(result.plan.tables).toContain('posts');
-		// Note: nested includes may use separate queries, so comments
-		// might not appear in main SQL but should be tracked
+		expect(result.plan.tables).toContain('comments');
+		expect(result.plan.tables).toHaveLength(3);
 	});
 
 	it('should handle nested includes with where filters at each level', () => {
