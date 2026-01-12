@@ -3777,6 +3777,49 @@ function mapOperatorToSql(
  * Returns a builder that can be used to construct the main SELECT.
  * CTEs are generated for relations that are accessed multiple times.
  */
+
+/**
+ * Find IncludeIntent by sourceIntent path (e.g., "users.posts" or "users.posts.comments")
+ * CLI-012b: Helper for finding include filters to apply in CTEs
+ */
+function findIncludeByPath(
+	intent: QueryIntent,
+	sourceIntent: string,
+): IncludeIntent | undefined {
+	const parts = sourceIntent.split('.');
+	// parts[0] = source table (e.g., "users" or "posts"), parts[1] = relation name
+	// For nested includes, sourceIntent might be "posts.comments" but we need to find
+	// it within intent.include[*].include[*] where the parent target table is "posts"
+
+	if (parts.length < 2 || !intent.include) return undefined;
+
+	const sourceTable = parts[0];
+	const relationName = parts[1];
+
+	// Helper function to recursively search for the include
+	function findInIncludes(
+		includes: readonly IncludeIntent[],
+		parentTargetTable: string,
+	): IncludeIntent | undefined {
+		for (const inc of includes) {
+			// Check if this include's parent matches the source table
+			if (parentTargetTable === sourceTable && inc.relation === relationName) {
+				return inc;
+			}
+			// Recursively search in nested includes
+			if (inc.include) {
+				// The nested includes have the current relation's target as their parent
+				const result = findInIncludes(inc.include, inc.relation);
+				if (result) return result;
+			}
+		}
+		return undefined;
+	}
+
+	// Start search from root table (intent.from)
+	return findInIncludes(intent.include, intent.from);
+}
+
 function buildCTEs(
 	plan: PlanReport,
 	model: ModelIR,
@@ -3794,7 +3837,7 @@ function buildCTEs(
 
 	for (const cte of plan.ctes) {
 		// Parse sourceIntent to get source table and relation
-		// Format: "sourceTable.relationName"
+		// Format: "sourceTable.relationName" or "sourceTable.rel1.rel2" for nested
 		const parts = cte.sourceIntent.split('.');
 		const sourceTable = parts[0];
 		const relationName = parts[1];
@@ -3809,15 +3852,30 @@ function buildCTEs(
 			continue;
 		}
 
-		// Build CTE: SELECT * FROM targetTable
+		// CLI-012b: Find the include intent to get filters
+		const includeIntent = findIncludeByPath(plan.intent, cte.sourceIntent);
+
+		// Build CTE: SELECT * FROM targetTable [WHERE ...]
 		const targetTable = schemaName
 			? `${schemaName}.${relation.target}`
 			: relation.target;
 
 		// biome-ignore lint/suspicious/noExplicitAny: Dynamic table name requires any
-		builder = builder.with(cte.name, (db: Kysely<any>) =>
-			db.selectFrom(targetTable).selectAll(),
-		);
+		builder = builder.with(cte.name, (db: Kysely<any>) => {
+			// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+			let cteQuery: any = db.selectFrom(targetTable).selectAll();
+
+			// CLI-012b: Apply include.where filter inside the CTE
+			if (includeIntent?.where) {
+				cteQuery = addWhereSimple(
+					cteQuery,
+					includeIntent.where,
+					relation.target,
+				);
+			}
+
+			return cteQuery;
+		});
 	}
 
 	return builder;

@@ -3983,5 +3983,149 @@ describe('CORE-006: Composite Key Support', () => {
 			// The join should reference the CTE name
 			expect(compiled.sql).toContain('cte_categories_parent');
 		});
+
+		// CLI-012b: Filtered CTEs
+		it('should apply include.where filter inside CTE (CLI-012b)', () => {
+			const kysely = createTestKysely();
+			const model = createCteTestSchema();
+
+			// Query users with include posts filtered by title
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [
+					{
+						relation: 'posts',
+						where: {
+							kind: 'comparison',
+							field: 'title',
+							operator: 'eq',
+							value: 'Hello',
+						},
+					},
+				],
+			};
+
+			const planReport = plan(intent, model);
+			const compiled = compile(planReport, model, kysely);
+
+			// Should have WITH clause for the CTE
+			expect(compiled.sql.toUpperCase()).toContain('WITH');
+			expect(compiled.sql).toContain('cte_users_posts');
+
+			// The filter should be INSIDE the CTE definition, not in the main query
+			// Pattern: WITH cte_users_posts AS (SELECT ... FROM posts WHERE posts.title = ?)
+			const ctePart = compiled.sql.match(/WITH.*AS\s*\([^)]+\)/is)?.[0] || '';
+			expect(ctePart.toUpperCase()).toContain('WHERE');
+			expect(ctePart).toContain('"posts"."title"');
+
+			// The value should be in the parameters
+			expect(compiled.parameters).toContain('Hello');
+		});
+
+		it('should handle include without filter (no regression - CLI-012b)', () => {
+			const kysely = createTestKysely();
+			const model = createCteTestSchema();
+
+			// Query users with include posts (no where clause)
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts' }],
+			};
+
+			const planReport = plan(intent, model);
+			const compiled = compile(planReport, model, kysely);
+
+			// Should have WITH clause for the CTE
+			expect(compiled.sql.toUpperCase()).toContain('WITH');
+			expect(compiled.sql).toContain('cte_users_posts');
+
+			// CTE should NOT have WHERE clause (just SELECT * FROM posts)
+			const ctePart = compiled.sql.match(/WITH.*AS\s*\([^)]+\)/is)?.[0] || '';
+			expect(ctePart.toUpperCase()).not.toContain('WHERE');
+		});
+
+		// CLI-012b: Nested CTEs with filters
+		it('should apply filters to nested CTEs (CLI-012b)', () => {
+			const kysely = createTestKysely();
+			// Extended schema with nested relations
+			const model = defineSchema({
+				users: {
+					id: 'integer',
+					name: 'string',
+				},
+				posts: {
+					id: 'integer',
+					title: 'string',
+					authorId: 'integer',
+					published: 'boolean',
+				},
+				comments: {
+					id: 'integer',
+					content: 'string',
+					postId: 'integer',
+					approved: 'boolean',
+				},
+			})
+				.relations({
+					users: {
+						posts: hasMany(
+							'posts',
+							{ foreignKey: 'authorId' },
+							{ includeStrategy: 'cte' },
+						),
+					},
+					posts: {
+						comments: hasMany(
+							'comments',
+							{ foreignKey: 'postId' },
+							{ includeStrategy: 'cte' },
+						),
+					},
+				})
+				.build();
+
+			// Query users -> posts (published) -> comments (approved)
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [
+					{
+						relation: 'posts',
+						where: {
+							kind: 'comparison',
+							field: 'published',
+							operator: 'eq',
+							value: true,
+						},
+						include: [
+							{
+								relation: 'comments',
+								where: {
+									kind: 'comparison',
+									field: 'approved',
+									operator: 'eq',
+									value: true,
+								},
+							},
+						],
+					},
+				],
+			};
+
+			const planReport = plan(intent, model);
+			const compiled = compile(planReport, model, kysely);
+
+			// Should have CTEs for both posts and comments
+			expect(compiled.sql).toContain('cte_users_posts');
+			expect(compiled.sql).toContain('cte_posts_comments');
+
+			// Both CTEs should have their respective WHERE clauses
+			// Check posts CTE has published filter
+			expect(compiled.sql).toContain('"posts"."published"');
+			// Check comments CTE has approved filter
+			expect(compiled.sql).toContain('"comments"."approved"');
+		});
 	});
 });
