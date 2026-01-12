@@ -70,6 +70,23 @@ export interface QueryExecutionResult {
 }
 
 /**
+ * CLI-015: Recursively collect all relation names from nested includes
+ */
+function collectAllRelations(includes: ParsedInclude[] | undefined): string[] {
+	if (!includes || includes.length === 0) return [];
+
+	const relations: string[] = [];
+	for (const inc of includes) {
+		relations.push(inc.relation);
+		// Recursively collect nested relations
+		if (inc.include && inc.include.length > 0) {
+			relations.push(...collectAllRelations(inc.include));
+		}
+	}
+	return relations;
+}
+
+/**
  * CLI-014: Build include options with optional where filter and nested includes
  */
 function buildIncludeOptions(inc: ParsedInclude): IncludeOptions | undefined {
@@ -266,11 +283,8 @@ export function executeQuery(
 				strategy: dump.plan.decisions
 					.map((d) => `${d.type}: ${d.choice}`)
 					.join(', '),
-				// CLI-014: Extract relation names from ParsedInclude[]
-				tables: [
-					query.table,
-					...(query.include?.map((inc) => inc.relation) ?? []),
-				],
+				// CLI-015: Recursively extract all relation names including nested
+				tables: [query.table, ...collectAllRelations(query.include)],
 				warnings,
 			},
 		};

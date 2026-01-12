@@ -1289,6 +1289,8 @@ Implement CTE-based include strategy for relations with filters and recursive su
 
 **Problem:** "tags include posts where published = true" was applying the WHERE to `tags` instead of `posts`.
 
+**Note:** Nested includes (e.g., `authors include posts include comments`) now fully supported after compiler fix (2026-01-12). The `applyIncludeJoins` function in `compiler.ts` recursively processes nested `include.include` arrays to generate proper multi-level LEFT JOINs.
+
 **Solution:** Enhanced parser to support filtered includes syntax.
 
 **Features implemented:**

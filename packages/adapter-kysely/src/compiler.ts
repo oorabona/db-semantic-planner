@@ -3211,6 +3211,24 @@ function applyIncludeJoins(
 				});
 			}
 		}
+
+		// CLI-015: Recursively process nested includes
+		if (include.include && include.include.length > 0) {
+			// Get the target relation's alias and table for the recursive call
+			const relInfo = state.joinedIncludeRelations.get(relationName);
+			if (relInfo) {
+				result = applyIncludeJoins(
+					result,
+					include.include,
+					plan,
+					model,
+					state,
+					relation.target, // New source table is the relation's target
+					relInfo.alias, // Use the joined alias as root
+					schemaName,
+				);
+			}
+		}
 	}
 
 	return result;
