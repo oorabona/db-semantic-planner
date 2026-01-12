@@ -70,34 +70,45 @@ export interface QueryExecutionResult {
 }
 
 /**
- * CLI-014: Build include options with optional where filter
+ * CLI-014: Build include options with optional where filter and nested includes
  */
 function buildIncludeOptions(inc: ParsedInclude): IncludeOptions | undefined {
-	if (!inc.where || inc.where.length === 0) {
+	let whereFilter: WhereIntent | undefined;
+	let nestedIncludes: Array<{ relation: string } & IncludeOptions> | undefined;
+
+	// Convert where clauses to filter
+	if (inc.where && inc.where.length > 0) {
+		const filters = inc.where.map((clause) => whereClauseToFilter(clause));
+
+		if (filters.length > 0) {
+			if (filters.length === 1) {
+				whereFilter = filters[0];
+			} else {
+				whereFilter = and(...filters) ?? undefined;
+			}
+		}
+	}
+
+	// Convert nested includes recursively
+	if (inc.include && inc.include.length > 0) {
+		nestedIncludes = inc.include.map((nested) => {
+			const nestedOptions = buildIncludeOptions(nested);
+			return {
+				relation: nested.relation,
+				...nestedOptions,
+			};
+		});
+	}
+
+	// Return options only if we have any
+	if (!whereFilter && !nestedIncludes) {
 		return undefined;
 	}
 
-	const filters = inc.where.map((clause) => whereClauseToFilter(clause));
-
-	// Ensure we have at least one filter
-	if (filters.length === 0) {
-		return undefined;
-	}
-
-	// Single filter: pass directly, multiple: combine with and()
-	if (filters.length === 1) {
-		const first = filters[0];
-		// TypeScript guard - should always be defined since length === 1
-		if (!first) return undefined;
-		return { where: first };
-	}
-
-	const combined = and(...filters);
-	if (!combined) {
-		return undefined;
-	}
-
-	return { where: combined };
+	return {
+		...(whereFilter && { where: whereFilter }),
+		...(nestedIncludes && { include: nestedIncludes }),
+	};
 }
 
 /**

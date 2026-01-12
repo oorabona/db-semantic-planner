@@ -318,6 +318,133 @@ describe('parseNaturalQuery', () => {
 			});
 		});
 
+		describe('nested includes', () => {
+			// Schema for nested include testing
+			const nestedSchema: ResolvedSchema = {
+				tables: {
+					authors: {
+						id: { type: 'integer', nullable: false },
+						name: { type: 'text', nullable: false },
+						active: { type: 'boolean', nullable: false },
+					},
+					posts: {
+						id: { type: 'integer', nullable: false },
+						author_id: { type: 'integer', nullable: false },
+						title: { type: 'text', nullable: false },
+						published: { type: 'boolean', nullable: false },
+					},
+					comments: {
+						id: { type: 'integer', nullable: false },
+						post_id: { type: 'integer', nullable: false },
+						content: { type: 'text', nullable: false },
+						approved: { type: 'boolean', nullable: false },
+					},
+					tags: {
+						id: { type: 'integer', nullable: false },
+						name: { type: 'text', nullable: false },
+					},
+				},
+				relations: {
+					'authors.posts': {
+						kind: 'hasMany',
+						target: 'posts',
+						foreignKey: 'author_id',
+					},
+					'posts.author': {
+						kind: 'belongsTo',
+						target: 'authors',
+						foreignKey: 'author_id',
+					},
+					'posts.comments': {
+						kind: 'hasMany',
+						target: 'comments',
+						foreignKey: 'post_id',
+					},
+					'posts.tags': {
+						kind: 'hasMany',
+						target: 'tags',
+						foreignKey: 'post_id',
+					},
+					'comments.post': {
+						kind: 'belongsTo',
+						target: 'posts',
+						foreignKey: 'post_id',
+					},
+				},
+				hints: {},
+				conventions: {
+					primaryKey: 'id',
+					createdAt: 'created_at',
+					updatedAt: 'updated_at',
+					deletedAt: 'deleted_at',
+					foreignKeySuffix: '_id',
+					timestamps: false,
+					softDeletes: false,
+				},
+			};
+
+			it('parses simple nested include: authors include posts include comments', () => {
+				const result = parseNaturalQuery(
+					'authors include posts include comments',
+					nestedSchema,
+				);
+				expect(result).toEqual({
+					table: 'authors',
+					include: [
+						{
+							relation: 'posts',
+							include: [{ relation: 'comments' }],
+						},
+					],
+				});
+			});
+
+			it('parses nested include with where on each level', () => {
+				const result = parseNaturalQuery(
+					'authors where active = true include posts where published = true include comments where approved = true',
+					nestedSchema,
+				);
+				expect(result).toEqual({
+					table: 'authors',
+					where: [{ column: 'active', operator: '=', value: true }],
+					include: [
+						{
+							relation: 'posts',
+							where: [{ column: 'published', operator: '=', value: true }],
+							include: [
+								{
+									relation: 'comments',
+									where: [{ column: 'approved', operator: '=', value: true }],
+								},
+							],
+						},
+					],
+				});
+			});
+
+			it('parses multiple sibling includes with nested include', () => {
+				const result = parseNaturalQuery(
+					'posts include author include comments include tags',
+					nestedSchema,
+				);
+				expect(result).toEqual({
+					table: 'posts',
+					include: [
+						{ relation: 'author' },
+						{ relation: 'comments' },
+						{ relation: 'tags' },
+					],
+				});
+			});
+
+			it('throws error for invalid nested relation', () => {
+				// posts.ratings doesn't exist - should throw
+				expect(() =>
+					parseNaturalQuery('authors include posts include ratings', nestedSchema),
+				).toThrow(/Unknown relation.*ratings/);
+			});
+		});
+
 		describe('qualified relations', () => {
 			it('parses simple relation name when schema has qualified keys', () => {
 				// User types "author" but schema has "posts.author"
