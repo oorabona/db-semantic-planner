@@ -442,6 +442,51 @@ export type WhereIntent =
  * Include intent - load related records
  * Supports nested includes for deep relation loading
  */
+
+/**
+ * CLI-012c: Options for recursive include (self-referential relations only).
+ *
+ * Enables WITH RECURSIVE CTE generation for hierarchical data traversal
+ * (org charts, category trees, bill of materials).
+ *
+ * For complex recursive queries (bidirectional, custom traversal expressions),
+ * use `RecursiveIntent` directly.
+ *
+ * Note: Named `IncludeRecursiveOptions` to avoid conflict with DX-layer
+ * `RecursiveIncludeOptions` in dx/types.ts.
+ */
+export interface IncludeRecursiveOptions {
+	/**
+	 * Maximum recursion depth (default: 100).
+	 * Safety limit to prevent infinite recursion.
+	 * @example maxDepth: 10 - fetch up to 10 levels deep
+	 */
+	readonly maxDepth?: number;
+
+	/**
+	 * Track additional metadata during recursion.
+	 */
+	readonly track?: {
+		/**
+		 * Include depth counter (starts at 0 for root nodes).
+		 * Set to true for default column name 'depth', or object for custom alias.
+		 */
+		readonly depth?: boolean | { readonly as?: string };
+		/**
+		 * Include path array for cycle detection/debugging.
+		 * Set to true for default column name 'path', or object for custom alias.
+		 */
+		readonly path?: boolean | { readonly as?: string };
+	};
+
+	/**
+	 * Foreign key column for recursion.
+	 * If not specified, will be inferred from relation definition.
+	 * @example 'parentId' for self-referential category tree
+	 */
+	readonly foreignKey?: string;
+}
+
 export interface IncludeIntent {
 	/** Relation name to include */
 	readonly relation: string;
@@ -474,6 +519,18 @@ export interface IncludeIntent {
 	 * @example orderBy: [{ field: 'createdAt', direction: 'desc' }]
 	 */
 	readonly orderBy?: readonly OrderByIntent[];
+
+	/**
+	 * CLI-012c: Enable recursive CTE for self-referential relations.
+	 * Only valid when relation.source === relation.target (e.g., categories → parent).
+	 *
+	 * @example
+	 * include: [{
+	 *   relation: 'children',
+	 *   recursive: { maxDepth: 10, track: { depth: true } }
+	 * }]
+	 */
+	readonly recursive?: IncludeRecursiveOptions;
 }
 
 // ============================================================================
