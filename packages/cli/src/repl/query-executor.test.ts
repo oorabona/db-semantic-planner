@@ -112,7 +112,8 @@ describe('executeQuery', () => {
 	it('should handle include relations', () => {
 		const query: ParsedQuery = {
 			table: 'posts',
-			include: ['author'], // Simple relation name (posts.author in schema)
+			// CLI-014: include is now ParsedInclude[]
+			include: [{ relation: 'author' }],
 		};
 
 		const result = executeQuery(query, testSchema);
@@ -124,5 +125,25 @@ describe('executeQuery', () => {
 			expect(result.plan.tables).toContain('posts');
 			expect(result.plan.tables).toContain('author');
 		}
+	});
+
+	it('should handle filtered include relations (CLI-014)', () => {
+		const query: ParsedQuery = {
+			table: 'authors',
+			include: [
+				{
+					relation: 'posts',
+					where: [{ column: 'published', operator: '=', value: true }],
+				},
+			],
+		};
+
+		const result = executeQuery(query, testSchema);
+
+		// Should not crash and should generate SQL with the filter
+		expect(result.error).toBeUndefined();
+		expect(result.sql).toBeDefined();
+		// The SQL should contain a reference to published (either in CTE or WHERE)
+		expect(result.sql.toLowerCase()).toContain('published');
 	});
 });

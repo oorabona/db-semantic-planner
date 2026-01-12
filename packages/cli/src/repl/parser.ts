@@ -17,7 +17,8 @@ import type { ResolvedSchema } from '@db-semantic-planner/schema';
 export interface ParsedQuery {
 	table: string;
 	where?: WhereClause[];
-	include?: string[];
+	/** CLI-014: Now supports per-relation filters */
+	include?: ParsedInclude[];
 	limit?: number;
 	offset?: number;
 	orderBy?: OrderByClause[];
@@ -32,6 +33,14 @@ export interface WhereClause {
 export interface OrderByClause {
 	column: string;
 	direction: 'asc' | 'desc';
+}
+
+/**
+ * CLI-014: Parsed include with optional filters
+ */
+export interface ParsedInclude {
+	relation: string;
+	where?: WhereClause[];
 }
 
 /**
@@ -262,7 +271,7 @@ export function parseNaturalQuery(
 			}
 
 			case 'include': {
-				// Parse include relations
+				// Parse include relations (CLI-014: with optional where filters)
 				result.include = result.include ?? [];
 				i++;
 
@@ -270,12 +279,17 @@ export function parseNaturalQuery(
 					const rel = tokens[i];
 					if (!rel) break;
 
-					// Stop if we hit another keyword
+					// Stop if we hit another keyword (except 'where' which is handled below)
 					if (
-						['where', 'limit', 'offset', 'order', 'include'].includes(
-							rel.toLowerCase(),
-						)
+						['limit', 'offset', 'order', 'include'].includes(rel.toLowerCase())
 					) {
+						break;
+					}
+
+					// CLI-014: If 'where' appears without a preceding relation, it's a main table filter
+					// This can happen with "tags include posts, include comments where x = y"
+					// The 'where' applies to the main table, not the include
+					if (rel.toLowerCase() === 'where') {
 						break;
 					}
 
@@ -343,8 +357,57 @@ export function parseNaturalQuery(
 						);
 					}
 
-					result.include.push(relName);
 					i++;
+
+					// CLI-014: Check if next token is 'where' - filter on this relation
+					const nextToken = tokens[i];
+					let includeFilters: WhereClause[] | undefined;
+
+					if (nextToken?.toLowerCase() === 'where') {
+						includeFilters = [];
+						i++; // Skip 'where'
+
+						// Parse where clauses until we hit another keyword or relation
+						while (i < tokens.length) {
+							const possibleClause = tokens[i];
+							if (!possibleClause) break;
+
+							// Stop on keywords that end the include filter
+							if (
+								['limit', 'offset', 'order', 'include', 'and', 'or'].includes(
+									possibleClause.toLowerCase(),
+								) === false
+							) {
+								// Try to parse a where condition
+								try {
+									const { clause, nextIndex } = parseWhereCondition(tokens, i);
+									includeFilters.push(clause);
+									i = nextIndex;
+
+									// Check for 'and' to continue parsing
+									if (tokens[i]?.toLowerCase() === 'and') {
+										i++;
+										continue;
+									}
+									// Any other keyword or relation name stops the filter
+									break;
+								} catch {
+									// Not a valid where condition, stop parsing filters
+									break;
+								}
+							} else if (possibleClause.toLowerCase() === 'and') {
+								i++;
+							} else {
+								break;
+							}
+						}
+					}
+
+					result.include.push({
+						relation: relName,
+						...(includeFilters &&
+							includeFilters.length > 0 && { where: includeFilters }),
+					});
 				}
 				break;
 			}
@@ -457,8 +520,22 @@ export function parsedQueryToSql(query: ParsedQuery): string {
 	}
 
 	// Note: includes would be handled by JOIN or subquery in real SQL
+	// CLI-014: Include can now have filters
 	if (query.include && query.include.length > 0) {
-		sql += `\n-- Includes: ${query.include.join(', ')}`;
+		const includeDescriptions = query.include.map((inc) => {
+			if (inc.where && inc.where.length > 0) {
+				const filters = inc.where
+					.map((w) => {
+						const value =
+							typeof w.value === 'string' ? `'${w.value}'` : String(w.value);
+						return `${w.column} ${w.operator} ${value}`;
+					})
+					.join(' AND ');
+				return `${inc.relation} WHERE ${filters}`;
+			}
+			return inc.relation;
+		});
+		sql += `\n-- Includes: ${includeDescriptions.join(', ')}`;
 	}
 
 	return sql;

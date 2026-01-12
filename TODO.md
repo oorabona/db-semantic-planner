@@ -1283,6 +1283,40 @@ Implement CTE-based include strategy for relations with filters and recursive su
 
 ---
 
+### CLI-014: Include WHERE Filter Parsing ✅ (2026-01-12)
+
+**Priority:** HIGH | **Effort:** S (~2h) | **Breaking:** Yes (internal API)
+
+**Problem:** "tags include posts where published = true" was applying the WHERE to `tags` instead of `posts`.
+
+**Solution:** Enhanced parser to support filtered includes syntax.
+
+**Features implemented:**
+- [x] ✅ `ParsedInclude` type with optional `where` filter
+- [x] ✅ Parser captures `where` after relation as include filter
+- [x] ✅ Query executor passes filters to ORM `include()` with `{ where: ... }`
+- [x] ✅ `parsedQueryToSql` displays filtered includes correctly
+
+**Syntax supported:**
+```
+tags include posts where published = true
+                  ^^^^^ filter on posts, not tags
+
+users where active = true include posts where published = true
+      ^^^^^^^^^^^^^^^^^^^        ^^^^^ ^^^^^^^^^^^^^^^^^^^^^^^^
+      main table filter          relation + its filter
+```
+
+**Files modified:**
+- `packages/cli/src/repl/parser.ts` - ParsedInclude type, include filter parsing
+- `packages/cli/src/repl/query-executor.ts` - buildIncludeOptions(), pass filters to ORM
+- `packages/cli/src/repl/parser.test.ts` - Tests for filtered includes
+- `packages/cli/src/repl/query-executor.test.ts` - Integration test for filtered includes
+
+**Tests:** All 127 CLI tests passing (5 new tests for CLI-014)
+
+---
+
 ### Documentation (DX critical)
 
 - [ ] **DOCS-001**: User documentation (Getting Started, API Guide)

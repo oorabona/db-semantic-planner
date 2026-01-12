@@ -7,6 +7,7 @@
 
 import { createMockAdapter } from '@db-semantic-planner/adapter-kysely';
 import {
+	and,
 	assertResolvedSchemaToGeneratedSchema,
 	buildModelFromSchema,
 	createOrm,
@@ -14,15 +15,17 @@ import {
 	eq,
 	gt,
 	gte,
+	type IncludeOptions,
 	isNotNull,
 	isNull,
 	like,
 	lt,
 	lte,
 	neq,
+	type WhereIntent,
 } from '@db-semantic-planner/core';
 import type { ResolvedSchema } from '@db-semantic-planner/schema';
-import type { ParsedQuery, WhereClause } from './parser.js';
+import type { ParsedInclude, ParsedQuery, WhereClause } from './parser.js';
 import type {
 	AliasingMode,
 	DialectMode,
@@ -67,9 +70,40 @@ export interface QueryExecutionResult {
 }
 
 /**
+ * CLI-014: Build include options with optional where filter
+ */
+function buildIncludeOptions(inc: ParsedInclude): IncludeOptions | undefined {
+	if (!inc.where || inc.where.length === 0) {
+		return undefined;
+	}
+
+	const filters = inc.where.map((clause) => whereClauseToFilter(clause));
+
+	// Ensure we have at least one filter
+	if (filters.length === 0) {
+		return undefined;
+	}
+
+	// Single filter: pass directly, multiple: combine with and()
+	if (filters.length === 1) {
+		const first = filters[0];
+		// TypeScript guard - should always be defined since length === 1
+		if (!first) return undefined;
+		return { where: first };
+	}
+
+	const combined = and(...filters);
+	if (!combined) {
+		return undefined;
+	}
+
+	return { where: combined };
+}
+
+/**
  * Convert a WhereClause to a filter expression for the ORM
  */
-function whereClauseToFilter(clause: WhereClause) {
+function whereClauseToFilter(clause: WhereClause): WhereIntent {
 	const { column, operator, value } = clause;
 
 	switch (operator) {
@@ -155,12 +189,12 @@ export function executeQuery(
 			}
 		}
 
-		// Add includes
+		// Add includes (CLI-014: with optional where filters)
 		if (query.include && query.include.length > 0) {
-			for (const rel of query.include) {
-				// Parse relation path (e.g., "posts.author" -> table "posts", relation "author")
-				// For now, we assume simple relation names from the source table
-				builder = builder.include(rel);
+			for (const inc of query.include) {
+				// CLI-014: Build include options with where filter if present
+				const includeOptions = buildIncludeOptions(inc);
+				builder = builder.include(inc.relation, includeOptions);
 			}
 		}
 
@@ -221,7 +255,11 @@ export function executeQuery(
 				strategy: dump.plan.decisions
 					.map((d) => `${d.type}: ${d.choice}`)
 					.join(', '),
-				tables: [query.table, ...(query.include ?? [])],
+				// CLI-014: Extract relation names from ParsedInclude[]
+				tables: [
+					query.table,
+					...(query.include?.map((inc) => inc.relation) ?? []),
+				],
 				warnings,
 			},
 		};
