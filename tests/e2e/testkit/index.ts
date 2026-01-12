@@ -42,3 +42,11 @@ export { seedBlogData } from './blog.seed.js';
 export { createIamSchema, dropIamSchema } from './iam.ddl.js';
 export { iamModel } from './iam.model.js';
 export { seedIamData, iamTestData } from './iam.seed.js';
+
+// Blog Extended (complex testing - M:N, hierarchies)
+export {
+	createBlogExtendedSchema,
+	dropBlogExtendedSchema,
+} from './blog-extended.ddl.js';
+export { blogExtendedModel } from './blog-extended.model.js';
+export { seedBlogExtendedData, blogExtendedTestData } from './blog-extended.seed.js';

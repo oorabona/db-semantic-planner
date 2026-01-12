@@ -36,11 +36,13 @@ export interface OrderByClause {
 }
 
 /**
- * CLI-014: Parsed include with optional filters
+ * CLI-014: Parsed include with optional filters and nested includes
  */
 export interface ParsedInclude {
 	relation: string;
 	where?: WhereClause[];
+	/** Nested includes for deep relation loading (e.g., posts include comments include author) */
+	include?: ParsedInclude[];
 }
 
 /**
@@ -223,6 +225,219 @@ function parseWhereCondition(
 }
 
 /**
+ * Get the target table of a relation
+ */
+function getRelationTargetTable(
+	relationKey: string,
+	schema: ResolvedSchema,
+): string | undefined {
+	const relation = schema.relations[relationKey];
+	if (!relation) return undefined;
+	return relation.target;
+}
+
+/**
+ * Validate and resolve a relation name against the current table context
+ * Returns the simple relation name if valid, throws if not found
+ */
+function validateRelation(
+	rel: string,
+	currentTable: string,
+	schema: ResolvedSchema,
+): { relName: string; qualifiedKey: string } {
+	if (rel.includes('.')) {
+		// Already qualified (e.g., "posts.author")
+		const [sourceTable, ...relParts] = rel.split('.');
+		const simpleRel = relParts.join('.');
+
+		if (schema.relations[rel]) {
+			if (sourceTable !== currentTable) {
+				throw new ParseError(
+					`Relation "${rel}" belongs to table "${sourceTable}", not "${currentTable}". ` +
+						`Use just "${simpleRel}" or query from "${sourceTable}" table.`,
+				);
+			}
+			return { relName: simpleRel, qualifiedKey: rel };
+		}
+	} else {
+		// Simple name (e.g., "author")
+		const qualifiedRelation = `${currentTable}.${rel}`;
+		if (schema.relations[qualifiedRelation]) {
+			return { relName: rel, qualifiedKey: qualifiedRelation };
+		}
+		// Also check simple format for backward compatibility
+		if (schema.relations[rel]) {
+			return { relName: rel, qualifiedKey: rel };
+		}
+	}
+
+	// Not found - generate suggestion
+	const relations = Object.keys(schema.relations);
+	const tableRelations = relations.filter((r) =>
+		r.startsWith(`${currentTable}.`),
+	);
+	const suggestion =
+		tableRelations.find((r) => {
+			const name = r.split('.').slice(1).join('.');
+			return (
+				name.toLowerCase() === rel.toLowerCase() ||
+				name.toLowerCase().startsWith(rel.toLowerCase())
+			);
+		}) ||
+		relations.find(
+			(r) =>
+				r.toLowerCase() === rel.toLowerCase() ||
+				r.toLowerCase().includes(rel.toLowerCase()),
+		);
+
+	throw new ParseError(
+		`Unknown relation: "${rel}"${suggestion ? `. Did you mean "${suggestion}"?` : ''}`,
+	);
+}
+
+/**
+ * Parse include chain recursively - handles nested includes like "posts include comments include author"
+ */
+function parseIncludeChain(
+	tokens: string[],
+	startIndex: number,
+	currentTable: string,
+	schema: ResolvedSchema,
+	pendingQualifiedFilters: { targetTable: string; clause: WhereClause }[],
+): { includes: ParsedInclude[]; nextIndex: number } {
+	const includes: ParsedInclude[] = [];
+	let i = startIndex;
+
+	while (i < tokens.length) {
+		const rel = tokens[i];
+		if (!rel) break;
+
+		// Stop on keywords that aren't part of the include chain
+		const lowerRel = rel.toLowerCase();
+		if (['limit', 'offset', 'order', 'and', 'or'].includes(lowerRel)) {
+			break;
+		}
+
+		// 'where' without a relation means main table filter
+		if (lowerRel === 'where') {
+			break;
+		}
+
+		// 'include' at this position means a new sibling include
+		if (lowerRel === 'include') {
+			i++; // skip 'include'
+			continue;
+		}
+
+		// Validate the relation against the current table context
+		const { relName, qualifiedKey } = validateRelation(
+			rel,
+			currentTable,
+			schema,
+		);
+		i++;
+
+		// Get the target table of this relation for nested includes
+		const targetTable = getRelationTargetTable(qualifiedKey, schema);
+
+		// Check for where clause on this include
+		let includeFilters: WhereClause[] | undefined;
+		if (tokens[i]?.toLowerCase() === 'where') {
+			includeFilters = [];
+			i++; // skip 'where'
+
+			while (i < tokens.length) {
+				const tok = tokens[i];
+				if (!tok) break;
+
+				const lowerTok = tok.toLowerCase();
+				// Stop on keywords that end the include filter
+				if (['limit', 'offset', 'order', 'include'].includes(lowerTok)) {
+					break;
+				}
+
+				// Handle 'and' - continue parsing filters
+				if (lowerTok === 'and') {
+					i++;
+					continue;
+				}
+
+				// Try to parse a where condition
+				try {
+					const { clause, nextIndex } = parseWhereCondition(tokens, i);
+
+					if (clause.column.includes('.')) {
+						const [tablePrefix, ...columnParts] = clause.column.split('.');
+						if (tablePrefix) {
+							pendingQualifiedFilters.push({
+								targetTable: tablePrefix,
+								clause: { ...clause, column: columnParts.join('.') },
+							});
+						}
+					} else {
+						includeFilters.push(clause);
+					}
+
+					i = nextIndex;
+
+					const nextTok = tokens[i]?.toLowerCase();
+					if (nextTok !== 'and') {
+						break;
+					}
+				} catch {
+					break;
+				}
+			}
+		}
+
+		// Check for nested includes (e.g., "posts include comments")
+		// But distinguish from siblings: if next relation belongs to currentTable, it's a sibling
+		let nestedIncludes: ParsedInclude[] | undefined;
+		if (tokens[i]?.toLowerCase() === 'include' && targetTable) {
+			const nextRel = tokens[i + 1];
+			if (nextRel) {
+				// Check if nextRel is a relation of currentTable (sibling) or targetTable (nested)
+				const isSiblingOfCurrent =
+					schema.relations[`${currentTable}.${nextRel}`] ||
+					schema.relations[nextRel];
+				const isNestedOfTarget = schema.relations[`${targetTable}.${nextRel}`];
+
+				if (isNestedOfTarget && !isSiblingOfCurrent) {
+					// It's a nested include - recurse with targetTable context
+					i++; // skip 'include'
+					const nested = parseIncludeChain(
+						tokens,
+						i,
+						targetTable,
+						schema,
+						pendingQualifiedFilters,
+					);
+					nestedIncludes =
+						nested.includes.length > 0 ? nested.includes : undefined;
+					i = nested.nextIndex;
+				}
+				// else: it's a sibling, don't consume 'include', let main loop handle it
+			}
+		}
+
+		includes.push({
+			relation: relName,
+			...(includeFilters && includeFilters.length > 0 && { where: includeFilters }),
+			...(nestedIncludes && { include: nestedIncludes }),
+		});
+
+		// After parsing one include, check if there's a comma for more siblings
+		// or another 'include' keyword
+		if (tokens[i] === ',') {
+			i++;
+			continue;
+		}
+	}
+
+	return { includes, nextIndex: i };
+}
+
+/**
  * Parse a natural query string
  */
 export function parseNaturalQuery(
@@ -299,165 +514,18 @@ export function parseNaturalQuery(
 			}
 
 			case 'include': {
-				// Parse include relations (CLI-014: with optional where filters)
+				// Parse include relations recursively (supports nested includes)
+				i++; // Skip 'include'
+				const { includes, nextIndex } = parseIncludeChain(
+					tokens,
+					i,
+					result.table,
+					schema,
+					pendingQualifiedFilters,
+				);
 				result.include = result.include ?? [];
-				i++;
-
-				while (i < tokens.length) {
-					const rel = tokens[i];
-					if (!rel) break;
-
-					// Stop if we hit another keyword (except 'where' which is handled below)
-					// CLI-014: Also stop on 'and'/'or' which signals main table filters
-					if (
-						['limit', 'offset', 'order', 'include', 'and', 'or'].includes(
-							rel.toLowerCase(),
-						)
-					) {
-						break;
-					}
-
-					// CLI-014: If 'where' appears without a preceding relation, it's a main table filter
-					// This can happen with "tags include posts, include comments where x = y"
-					// The 'where' applies to the main table, not the include
-					if (rel.toLowerCase() === 'where') {
-						break;
-					}
-
-					// Validate relation exists
-					// Relations can be keyed in two ways:
-					// 1. Qualified: "posts.author" (from defineSchema with FK inference)
-					// 2. Simple: "author" (from manual schema or tests)
-					// User can type either format
-					let relName = rel;
-					let foundRelation = false;
-
-					if (rel.includes('.')) {
-						// Already qualified (e.g., "posts.author")
-						const [sourceTable, ...relParts] = rel.split('.');
-						const simpleRel = relParts.join('.');
-
-						if (schema.relations[rel]) {
-							// Check if the qualified relation matches the current table
-							if (sourceTable !== result.table) {
-								throw new ParseError(
-									`Relation "${rel}" belongs to table "${sourceTable}", not "${result.table}". ` +
-										`Use just "${simpleRel}" or query from "${sourceTable}" table.`,
-								);
-							}
-							foundRelation = true;
-							// Extract just the relation name for the ORM
-							relName = simpleRel;
-						}
-					} else {
-						// Simple name (e.g., "author")
-						// Try qualified format first: table.relation
-						const qualifiedRelation = `${result.table}.${rel}`;
-						if (schema.relations[qualifiedRelation]) {
-							foundRelation = true;
-							relName = rel;
-						}
-						// Also check simple format for backward compatibility
-						else if (schema.relations[rel]) {
-							foundRelation = true;
-							relName = rel;
-						}
-					}
-
-					if (!foundRelation) {
-						const relations = Object.keys(schema.relations);
-						// Find relations that belong to the current table (qualified format)
-						const tableRelations = relations.filter((r) =>
-							r.startsWith(`${result.table}.`),
-						);
-						const suggestion =
-							tableRelations.find((r) => {
-								const name = r.split('.').slice(1).join('.');
-								return (
-									name.toLowerCase() === rel.toLowerCase() ||
-									name.toLowerCase().startsWith(rel.toLowerCase())
-								);
-							}) ||
-							relations.find(
-								(r) =>
-									r.toLowerCase() === rel.toLowerCase() ||
-									r.toLowerCase().includes(rel.toLowerCase()),
-							);
-						throw new ParseError(
-							`Unknown relation: "${rel}"${suggestion ? `. Did you mean "${suggestion}"?` : ''}`,
-						);
-					}
-
-					i++;
-
-					// CLI-014: Check if next token is 'where' - filter on this relation
-					const nextToken = tokens[i];
-					let includeFilters: WhereClause[] | undefined;
-
-					if (nextToken?.toLowerCase() === 'where') {
-						includeFilters = [];
-						i++; // Skip 'where'
-
-						// Parse where clauses until we hit another keyword or relation
-						while (i < tokens.length) {
-							const possibleClause = tokens[i];
-							if (!possibleClause) break;
-
-							// Stop on keywords that end the include filter (except 'and' which continues)
-							if (
-								['limit', 'offset', 'order', 'include'].includes(
-									possibleClause.toLowerCase(),
-								)
-							) {
-								break;
-							}
-
-							// Handle 'and' - continue parsing
-							if (possibleClause.toLowerCase() === 'and') {
-								i++;
-								continue;
-							}
-
-							// Try to parse a where condition
-							try {
-								const { clause, nextIndex } = parseWhereCondition(tokens, i);
-
-								// CLI-014: Check if column is qualified (table.column)
-								if (clause.column.includes('.')) {
-									const [tablePrefix, ...columnParts] = clause.column.split('.');
-									if (tablePrefix) {
-										// Qualified column → store for distribution later
-										pendingQualifiedFilters.push({
-											targetTable: tablePrefix,
-											clause: { ...clause, column: columnParts.join('.') },
-										});
-									}
-								} else {
-									// Unqualified column → implicit scoping to current include
-									includeFilters.push(clause);
-								}
-
-								i = nextIndex;
-
-								// Check for 'and' to continue, or stop
-								const nextTok = tokens[i]?.toLowerCase();
-								if (nextTok !== 'and') {
-									break;
-								}
-								// 'and' found - loop will handle it
-							} catch {
-								// Not a valid where condition, stop parsing filters
-								break;
-							}
-						}
-					}
-
-					result.include.push({
-						relation: relName,
-						...(includeFilters &&
-							includeFilters.length > 0 && { where: includeFilters }),
-					});
-				}
+				result.include.push(...includes);
+				i = nextIndex;
 				break;
 			}
 

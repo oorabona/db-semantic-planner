@@ -43,6 +43,55 @@ const testSchema: ResolvedSchema = {
 	},
 };
 
+// Schema with nested relations for testing nested includes
+const nestedSchema: ResolvedSchema = {
+	tables: {
+		authors: {
+			id: { type: 'integer', primaryKey: true },
+			name: { type: 'string', nullable: false },
+		},
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: { type: 'string', nullable: false },
+			published: { type: 'boolean', default: 'false' },
+			authorId: { type: 'integer', references: { table: 'authors' } },
+		},
+		comments: {
+			id: { type: 'integer', primaryKey: true },
+			content: { type: 'string', nullable: false },
+			postId: { type: 'integer', references: { table: 'posts' } },
+		},
+	},
+	relations: {
+		'authors.posts': {
+			kind: 'hasMany',
+			target: 'posts',
+			foreignKey: 'authorId',
+		},
+		'posts.author': {
+			kind: 'belongsTo',
+			target: 'authors',
+			foreignKey: 'authorId',
+		},
+		'posts.comments': {
+			kind: 'hasMany',
+			target: 'comments',
+			foreignKey: 'postId',
+		},
+		'comments.post': {
+			kind: 'belongsTo',
+			target: 'posts',
+			foreignKey: 'postId',
+		},
+	},
+	hints: {},
+	conventions: {
+		fkPattern: '{singular}Id',
+		pluralize: true,
+		timestamps: ['createdAt', 'updatedAt'],
+	},
+};
+
 describe('executeQuery', () => {
 	it('should generate SQL for a simple select', () => {
 		const query: ParsedQuery = {
@@ -149,6 +198,52 @@ describe('executeQuery', () => {
 			/with\s+"cte_[^"]+"\s+as\s+\([^)]*where[^)]*published/,
 		);
 		// Should use parameter binding
+		expect(result.params).toContain(true);
+	});
+
+	it('should handle nested include relations', () => {
+		// Test: authors include posts include comments
+		const query: ParsedQuery = {
+			table: 'authors',
+			include: [
+				{
+					relation: 'posts',
+					include: [{ relation: 'comments' }],
+				},
+			],
+		};
+
+		const result = executeQuery(query, nestedSchema);
+
+		// Should not crash
+		expect(result.error).toBeUndefined();
+		expect(result.sql).toBeDefined();
+		// Plan should include all tables in the chain
+		expect(result.plan.tables).toContain('authors');
+		expect(result.plan.tables).toContain('posts');
+		// Note: nested includes may use separate queries, so comments
+		// might not appear in main SQL but should be tracked
+	});
+
+	it('should handle nested includes with where filters at each level', () => {
+		// Test: authors include posts where published = true include comments
+		const query: ParsedQuery = {
+			table: 'authors',
+			include: [
+				{
+					relation: 'posts',
+					where: [{ column: 'published', operator: '=', value: true }],
+					include: [{ relation: 'comments' }],
+				},
+			],
+		};
+
+		const result = executeQuery(query, nestedSchema);
+
+		// Should not crash
+		expect(result.error).toBeUndefined();
+		expect(result.sql).toBeDefined();
+		// Should have parameter for published filter
 		expect(result.params).toContain(true);
 	});
 });
