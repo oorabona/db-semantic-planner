@@ -3820,6 +3820,126 @@ function findIncludeByPath(
 	return findInIncludes(intent.include, intent.from);
 }
 
+/**
+ * CLI-012c: Build a recursive CTE for self-referential includes.
+ *
+ * Generates SQL like:
+ * WITH RECURSIVE cte_name AS (
+ *   -- Base case: root nodes (where foreignKey IS NULL)
+ *   SELECT *, 0 AS depth FROM table WHERE parentId IS NULL
+ *   UNION ALL
+ *   -- Recursive case: join children to CTE
+ *   SELECT t.*, c.depth + 1 FROM table t
+ *   INNER JOIN cte_name c ON t.parentId = c.id
+ *   WHERE c.depth < maxDepth
+ * )
+ *
+ * Per ARCH-001: Uses native Kysely APIs, NEVER raw SQL.
+ */
+function buildRecursiveCTE(
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic Kysely builder
+	builder: any,
+	cteName: string,
+	relation: RelationIR,
+	includeIntent: IncludeIntent | undefined,
+	targetTable: string,
+	_schemaName: string | undefined,
+): // biome-ignore lint/suspicious/noExplicitAny: Returns Kysely builder
+any {
+	const recursive = includeIntent?.recursive;
+	const maxDepth = recursive?.maxDepth ?? 100;
+	const trackDepth = recursive?.track?.depth;
+	const trackPath = recursive?.track?.path;
+
+	// Determine foreign key (use explicit or infer from relation)
+	const foreignKey = recursive?.foreignKey ?? relation.foreignKey ?? 'parentId';
+	const primaryKey = 'id'; // Convention: primary key is 'id'
+
+	// Column aliases
+	const depthAlias =
+		typeof trackDepth === 'object' && trackDepth.as ? trackDepth.as : 'depth';
+	const pathAlias =
+		typeof trackPath === 'object' && trackPath.as ? trackPath.as : 'path';
+
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic CTE building
+	return builder.withRecursive(cteName, (db: Kysely<any>) => {
+		// ============================================================
+		// Base case: root nodes (where foreignKey IS NULL)
+		// ============================================================
+		// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+		let baseQuery: any = db.selectFrom(targetTable).selectAll();
+
+		// Track depth if requested: SELECT *, 0 AS depth
+		if (trackDepth) {
+			// biome-ignore lint/suspicious/noExplicitAny: Expression builder
+			baseQuery = baseQuery.select((eb: any) => eb.lit(0).as(depthAlias));
+		}
+
+		// Track path if requested: SELECT *, ARRAY[id] AS path
+		if (trackPath) {
+			// biome-ignore lint/suspicious/noExplicitAny: Expression builder
+			baseQuery = baseQuery.select((eb: any) =>
+				eb.fn('array', [eb.ref(primaryKey)]).as(pathAlias),
+			);
+		}
+
+		// Base case filter: root nodes (foreignKey IS NULL)
+		baseQuery = baseQuery.where(foreignKey, 'is', null);
+
+		// Apply include.where filter to base case
+		if (includeIntent?.where) {
+			baseQuery = addWhereSimple(
+				baseQuery,
+				includeIntent.where,
+				relation.target,
+			);
+		}
+
+		// ============================================================
+		// Recursive case: JOIN children to CTE
+		// ============================================================
+		// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+		let recursiveQuery: any = db
+			.selectFrom(`${targetTable} as t`)
+			.innerJoin(`${cteName} as c`, `t.${foreignKey}`, `c.${primaryKey}`)
+			.selectAll('t');
+
+		// Track depth: c.depth + 1
+		if (trackDepth) {
+			// biome-ignore lint/suspicious/noExplicitAny: Expression builder
+			recursiveQuery = recursiveQuery.select((eb: any) =>
+				eb(eb.ref(`c.${depthAlias}`), '+', eb.lit(1)).as(depthAlias),
+			);
+		}
+
+		// Track path: c.path || ARRAY[t.id]
+		if (trackPath) {
+			// biome-ignore lint/suspicious/noExplicitAny: Expression builder
+			recursiveQuery = recursiveQuery.select((eb: any) =>
+				eb
+					.fn('array_cat', [
+						eb.ref(`c.${pathAlias}`),
+						eb.fn('array', [eb.ref(`t.${primaryKey}`)]),
+					])
+					.as(pathAlias),
+			);
+		}
+
+		// maxDepth termination: WHERE c.depth < maxDepth
+		if (trackDepth) {
+			recursiveQuery = recursiveQuery.where(`c.${depthAlias}`, '<', maxDepth);
+		}
+
+		// Apply include.where filter to recursive case
+		if (includeIntent?.where) {
+			recursiveQuery = addWhereSimple(recursiveQuery, includeIntent.where, 't');
+		}
+
+		// Combine with UNION ALL (standard for recursive CTEs)
+		return baseQuery.unionAll(recursiveQuery);
+	});
+}
+
 function buildCTEs(
 	plan: PlanReport,
 	model: ModelIR,
@@ -3860,22 +3980,35 @@ function buildCTEs(
 			? `${schemaName}.${relation.target}`
 			: relation.target;
 
-		// biome-ignore lint/suspicious/noExplicitAny: Dynamic table name requires any
-		builder = builder.with(cte.name, (db: Kysely<any>) => {
-			// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
-			let cteQuery: any = db.selectFrom(targetTable).selectAll();
+		// CLI-012c: Check if this is a recursive CTE
+		if (cte.recursive) {
+			builder = buildRecursiveCTE(
+				builder,
+				cte.name,
+				relation,
+				includeIntent,
+				targetTable,
+				schemaName,
+			);
+		} else {
+			// Non-recursive CTE (existing CLI-012b logic)
+			// biome-ignore lint/suspicious/noExplicitAny: Dynamic table name requires any
+			builder = builder.with(cte.name, (db: Kysely<any>) => {
+				// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+				let cteQuery: any = db.selectFrom(targetTable).selectAll();
 
-			// CLI-012b: Apply include.where filter inside the CTE
-			if (includeIntent?.where) {
-				cteQuery = addWhereSimple(
-					cteQuery,
-					includeIntent.where,
-					relation.target,
-				);
-			}
+				// CLI-012b: Apply include.where filter inside the CTE
+				if (includeIntent?.where) {
+					cteQuery = addWhereSimple(
+						cteQuery,
+						includeIntent.where,
+						relation.target,
+					);
+				}
 
-			return cteQuery;
-		});
+				return cteQuery;
+			});
+		}
 	}
 
 	return builder;

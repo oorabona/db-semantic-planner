@@ -4127,5 +4127,179 @@ describe('CORE-006: Composite Key Support', () => {
 			// Check comments CTE has approved filter
 			expect(compiled.sql).toContain('"comments"."approved"');
 		});
+
+		// CLI-012c: Recursive CTEs for self-referential relations
+		describe('recursive CTEs (CLI-012c)', () => {
+			// Helper to create self-referential schema
+			function createRecursiveSchema() {
+				return defineSchema({
+					categories: {
+						id: 'integer',
+						name: 'string',
+						parentId: 'integer',
+					},
+				})
+					.relations({
+						categories: {
+							children: hasMany('categories', { foreignKey: 'parentId' }),
+							parent: belongsTo('categories', { foreignKey: 'parentId' }),
+						},
+					})
+					.build();
+			}
+
+			it('should generate WITH RECURSIVE for self-referential include with recursive option', () => {
+				const kysely = createTestKysely();
+				const model = createRecursiveSchema();
+
+				// Verify relation is self-referential
+				const relation = model.getRelation('categories.children');
+				expect(relation?.source).toBe('categories');
+				expect(relation?.target).toBe('categories');
+
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'categories',
+					include: [
+						{
+							relation: 'children',
+							recursive: { maxDepth: 10 },
+						},
+					],
+				};
+
+				const planReport = plan(intent, model);
+
+				// Should have a recursive CTE
+				expect(planReport.ctes.length).toBeGreaterThan(0);
+				const recursiveCte = planReport.ctes.find((c) => c.recursive);
+				expect(recursiveCte).toBeDefined();
+				expect(recursiveCte?.name).toBe('cte_categories_children');
+
+				const compiled = compile(planReport, model, kysely);
+
+				// Should use WITH RECURSIVE
+				expect(compiled.sql.toUpperCase()).toContain('WITH RECURSIVE');
+				expect(compiled.sql).toContain('cte_categories_children');
+			});
+
+			it('should track depth when requested', () => {
+				const kysely = createTestKysely();
+				const model = createRecursiveSchema();
+
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'categories',
+					include: [
+						{
+							relation: 'children',
+							recursive: {
+								maxDepth: 5,
+								track: { depth: true },
+							},
+						},
+					],
+				};
+
+				const planReport = plan(intent, model);
+				const compiled = compile(planReport, model, kysely);
+
+				// Should have depth tracking (0 AS depth in base case)
+				expect(compiled.sql).toContain('0');
+				expect(compiled.sql.toLowerCase()).toContain('depth');
+			});
+
+			it('should warn when recursive is set on non-self-referential relation', () => {
+				const kysely = createTestKysely();
+				const model = createCteTestSchema(); // users -> posts (not self-referential)
+
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+					include: [
+						{
+							relation: 'posts',
+							recursive: {}, // Invalid: posts is not self-referential
+						},
+					],
+				};
+
+				const planReport = plan(intent, model);
+
+				// Should emit warning
+				const warning = planReport.warnings.find(
+					(w) => w.code === 'INVALID_RECURSIVE_INCLUDE',
+				);
+				expect(warning).toBeDefined();
+				expect(warning?.message).toContain('posts');
+				expect(warning?.message).toContain('not self-referential');
+
+				// Should NOT use WITH RECURSIVE (fallback to normal CTE)
+				const compiled = compile(planReport, model, kysely);
+				expect(compiled.sql.toUpperCase()).not.toContain('WITH RECURSIVE');
+			});
+
+			it('should apply include.where filter to recursive CTE', () => {
+				const kysely = createTestKysely();
+				const model = defineSchema({
+					categories: {
+						id: 'integer',
+						name: 'string',
+						parentId: 'integer',
+						active: 'boolean',
+					},
+				})
+					.relations({
+						categories: {
+							children: hasMany('categories', { foreignKey: 'parentId' }),
+						},
+					})
+					.build();
+
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'categories',
+					include: [
+						{
+							relation: 'children',
+							where: { kind: 'comparison', field: 'active', operator: 'eq', value: true },
+							recursive: { maxDepth: 10 },
+						},
+					],
+				};
+
+				const planReport = plan(intent, model);
+				const compiled = compile(planReport, model, kysely);
+
+				// Should have filter applied
+				expect(compiled.sql).toContain('"active"');
+				expect(compiled.parameters).toContain(true);
+			});
+
+			it('should use custom depth alias when specified', () => {
+				const kysely = createTestKysely();
+				const model = createRecursiveSchema();
+
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'categories',
+					include: [
+						{
+							relation: 'children',
+							recursive: {
+								maxDepth: 10,
+								track: { depth: { as: 'level' } },
+							},
+						},
+					],
+				};
+
+				const planReport = plan(intent, model);
+				const compiled = compile(planReport, model, kysely);
+
+				// Should use custom alias 'level' instead of 'depth'
+				expect(compiled.sql.toLowerCase()).toContain('level');
+			});
+		});
 	});
 });

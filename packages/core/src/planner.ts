@@ -74,7 +74,8 @@ export type PlanWarningCode =
 	| 'POTENTIAL_ROW_EXPLOSION'
 	| 'CIRCULAR_INCLUDE'
 	| 'MISSING_INDEX_HINT'
-	| 'DEEP_NESTING';
+	| 'DEEP_NESTING'
+	| 'INVALID_RECURSIVE_INCLUDE';
 
 /**
  * A warning about the query plan
@@ -112,6 +113,12 @@ export interface CTEDefinition {
 
 	/** The intent fragment this CTE represents */
 	readonly sourceIntent: string;
+
+	/**
+	 * CLI-012c: Whether this CTE should use WITH RECURSIVE.
+	 * Set when include.recursive is specified and relation is self-referential.
+	 */
+	readonly recursive?: boolean;
 }
 
 // ============================================================================
@@ -923,8 +930,15 @@ function processInclude(
 	paths.push(intentPath);
 	state.relationAccessCounts.set(relationPath, paths);
 
+	// CLI-012c: Check for recursive include on self-referential relations
+	const isRecursiveInclude =
+		!!include.recursive && relation.source === relation.target;
+
 	// Determine include strategy
-	const includeStrategy = determineIncludeStrategy(relation, opts);
+	// Force 'cte' strategy for recursive includes
+	const includeStrategy = isRecursiveInclude
+		? 'cte'
+		: determineIncludeStrategy(relation, opts);
 	const includeDecisionId = generateDecisionId(state, 'include-strategy');
 
 	state.decisions.push({
@@ -937,22 +951,43 @@ function processInclude(
 			intentPath,
 		},
 		choice: includeStrategy,
-		reasoning: generateIncludeReasoning(relation, includeStrategy),
+		reasoning: isRecursiveInclude
+			? `Recursive include on self-referential relation "${relation.name}" → forced CTE strategy`
+			: generateIncludeReasoning(relation, includeStrategy),
 		alternatives: getAlternativeStrategies(
 			includeStrategy,
 			opts.dialectCapabilities,
 		),
 	});
 
-	// Add CTE definition when using CTE strategy (CLI-012)
+	// CLI-012c: Warn if recursive is set but relation is not self-referential
+	if (include.recursive && !isRecursiveInclude) {
+		state.warnings.push({
+			code: 'INVALID_RECURSIVE_INCLUDE',
+			message: `recursive option on "${relation.name}" ignored: relation is not self-referential (source=${relation.source}, target=${relation.target})`,
+			suggestion: `Remove recursive option or use RecursiveIntent for cross-table recursion`,
+		});
+	}
+
+	// CLI-012/CLI-012c: Create CTE when strategy is 'cte' (recursive or not)
 	if (includeStrategy === 'cte') {
 		const cteName = `cte_${sourceTable}_${relation.name}`;
-		state.ctes.push({
-			name: cteName,
-			purpose: `Include ${relation.name} via CTE strategy`,
-			referencedBy: [intentPath],
-			sourceIntent: `${sourceTable}.${relation.name}`,
-		});
+		// Check if CTE already exists (avoid duplicates from nested includes)
+		const existingCte = state.ctes.find((c) => c.name === cteName);
+		if (!existingCte) {
+			state.ctes.push({
+				name: cteName,
+				purpose: isRecursiveInclude
+					? `Recursive include for self-referential "${relation.name}"`
+					: `CTE for "${relation.name}" include`,
+				referencedBy: [intentPath],
+				sourceIntent: `${sourceTable}.${relation.name}`,
+				recursive: isRecursiveInclude,
+			});
+		} else {
+			// Add intentPath to existing CTE's referencedBy
+			(existingCte.referencedBy as string[]).push(intentPath);
+		}
 	}
 
 	// Determine join type (only if using join strategy)
