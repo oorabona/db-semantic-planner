@@ -138,12 +138,17 @@ describe('executeQuery', () => {
 			],
 		};
 
-		const result = executeQuery(query, testSchema);
+		const result = executeQuery(query, testSchema, { includeStrategy: 'cte' });
 
 		// Should not crash and should generate SQL with the filter
 		expect(result.error).toBeUndefined();
 		expect(result.sql).toBeDefined();
-		// The SQL should contain a reference to published (either in CTE or WHERE)
-		expect(result.sql.toLowerCase()).toContain('published');
+		// CLI-014: The filter should be applied EARLY inside the CTE, not on the main query
+		// Expected: WITH "cte_..." AS (SELECT * FROM "posts" WHERE "posts"."published" = $1)
+		expect(result.sql.toLowerCase()).toMatch(
+			/with\s+"cte_[^"]+"\s+as\s+\([^)]*where[^)]*published/,
+		);
+		// Should use parameter binding
+		expect(result.params).toContain(true);
 	});
 });

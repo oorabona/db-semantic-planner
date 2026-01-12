@@ -280,8 +280,11 @@ export function parseNaturalQuery(
 					if (!rel) break;
 
 					// Stop if we hit another keyword (except 'where' which is handled below)
+					// CLI-014: Also stop on 'and'/'or' which signals main table filters
 					if (
-						['limit', 'offset', 'order', 'include'].includes(rel.toLowerCase())
+						['limit', 'offset', 'order', 'include', 'and', 'or'].includes(
+							rel.toLowerCase(),
+						)
 					) {
 						break;
 					}
@@ -378,6 +381,17 @@ export function parseNaturalQuery(
 									possibleClause.toLowerCase(),
 								) === false
 							) {
+								// CLI-014: Check if column is qualified with main table name
+								// e.g., "tags.name" in "tags include posts where published = true and tags.name = x"
+								// The "tags.name" should be a main table filter, not an include filter
+								if (possibleClause.includes('.')) {
+									const [tablePrefix] = possibleClause.split('.');
+									if (tablePrefix?.toLowerCase() === result.table.toLowerCase()) {
+										// This is a main table filter, stop include filter parsing
+										break;
+									}
+								}
+
 								// Try to parse a where condition
 								try {
 									const { clause, nextIndex } = parseWhereCondition(tokens, i);
@@ -386,6 +400,15 @@ export function parseNaturalQuery(
 
 									// Check for 'and' to continue parsing
 									if (tokens[i]?.toLowerCase() === 'and') {
+										// Peek ahead: if next column is qualified with main table, stop
+										const peekColumn = tokens[i + 1];
+										if (peekColumn?.includes('.')) {
+											const [peekTablePrefix] = peekColumn.split('.');
+											if (peekTablePrefix?.toLowerCase() === result.table.toLowerCase()) {
+												// Next condition is a main table filter, stop here
+												break;
+											}
+										}
 										i++;
 										continue;
 									}
@@ -396,6 +419,15 @@ export function parseNaturalQuery(
 									break;
 								}
 							} else if (possibleClause.toLowerCase() === 'and') {
+								// Peek ahead: if next column is qualified with main table, stop
+								const peekColumn = tokens[i + 1];
+								if (peekColumn?.includes('.')) {
+									const [peekTablePrefix] = peekColumn.split('.');
+									if (peekTablePrefix?.toLowerCase() === result.table.toLowerCase()) {
+										// Next condition is a main table filter, stop here
+										break;
+									}
+								}
 								i++;
 							} else {
 								break;
@@ -477,6 +509,38 @@ export function parseNaturalQuery(
 
 					result.orderBy.push({ column: col, direction });
 					i++;
+				}
+				break;
+			}
+
+			case 'and': {
+				// CLI-014: Handle 'and' after include filter parsing
+				// This happens when: "tags include posts where published = true and tags.name = x"
+				// The include filter parsing stops at "and tags.name", leaving "and" for outer parser
+				result.where = result.where ?? [];
+				i++;
+
+				while (i < tokens.length) {
+					const { clause, nextIndex } = parseWhereCondition(tokens, i);
+
+					// CLI-014: Strip table prefix from qualified columns (e.g., "users.active" → "active")
+					if (clause.column.includes('.')) {
+						const [tablePrefix, ...columnParts] = clause.column.split('.');
+						if (tablePrefix?.toLowerCase() === result.table.toLowerCase()) {
+							clause.column = columnParts.join('.');
+						}
+					}
+
+					result.where.push(clause);
+					i = nextIndex;
+
+					// Check for more 'and' conditions
+					const nextToken = tokens[i]?.toLowerCase();
+					if (nextToken === 'and') {
+						i++;
+					} else {
+						break;
+					}
 				}
 				break;
 			}

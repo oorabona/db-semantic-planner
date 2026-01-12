@@ -248,6 +248,45 @@ describe('parseNaturalQuery', () => {
 					},
 				]);
 			});
+
+			it('parses qualified main table column after include filter (CLI-014)', () => {
+				// "users include posts where published = true and users.active = true"
+				// - published = true → include filter (posts)
+				// - users.active = true → main table filter (qualified with table name)
+				const result = parseNaturalQuery(
+					'users include posts where published = true and users.active = true',
+					mockSchema,
+				);
+				expect(result.table).toBe('users');
+				expect(result.where).toEqual([
+					{ column: 'active', operator: '=', value: true },
+				]);
+				expect(result.include).toEqual([
+					{
+						relation: 'posts',
+						where: [{ column: 'published', operator: '=', value: true }],
+					},
+				]);
+			});
+
+			it('parses multiple main table conditions after include filter (CLI-014)', () => {
+				// "users include posts where published = true and users.active = true and users.name = "test""
+				const result = parseNaturalQuery(
+					'users include posts where published = true and users.active = true and users.name = "test"',
+					mockSchema,
+				);
+				expect(result.table).toBe('users');
+				expect(result.where).toEqual([
+					{ column: 'active', operator: '=', value: true },
+					{ column: 'name', operator: '=', value: 'test' },
+				]);
+				expect(result.include).toEqual([
+					{
+						relation: 'posts',
+						where: [{ column: 'published', operator: '=', value: true }],
+					},
+				]);
+			});
 		});
 
 		describe('qualified relations', () => {
