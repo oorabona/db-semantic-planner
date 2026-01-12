@@ -1306,20 +1306,25 @@ users where active = true include posts where published = true
       ^^^^^^^^^^^^^^^^^^^        ^^^^^ ^^^^^^^^^^^^^^^^^^^^^^^^
       main table filter          relation + its filter
 
-tags include posts where published = true and tags.name = "yes"
-                         ^^^^^^^^^^^^^^^^^    ^^^^^^^^^^^^^^^^^
-                         include filter       main table filter (qualified)
+users include posts where title = "foo" and posts.published = true and users.active = true
+                         ^^^^^^^^^^^^       ^^^^^^^^^^^^^^^^^^^^^^     ^^^^^^^^^^^^^^^^^^^^
+                         → posts (implicit) → posts (explicit)         → main (explicit)
 ```
 
-**Qualified column parsing:** When a column is qualified with the main table name (e.g., `tags.name`), it's recognized as a main table filter, not an include filter. The table prefix is stripped from the result.
+**Qualified column routing:** Any qualified column (`table.column`) is collected during parsing and distributed at the end:
+- If table matches main → add to `result.where`
+- If table matches an include's target → add to that include's `where`
+- If table not in query → error with available tables list
+
+This allows flexible filter placement regardless of syntactic position.
 
 **Files modified:**
-- `packages/cli/src/repl/parser.ts` - ParsedInclude type, include filter parsing, qualified column detection
+- `packages/cli/src/repl/parser.ts` - `QualifiedFilter` type, `pendingQualifiedFilters` collection, distribution logic
 - `packages/cli/src/repl/query-executor.ts` - buildIncludeOptions(), pass filters to ORM
-- `packages/cli/src/repl/parser.test.ts` - Tests for filtered includes + qualified columns
+- `packages/cli/src/repl/parser.test.ts` - Tests for qualified column routing
 - `packages/cli/src/repl/query-executor.test.ts` - Integration test for filtered includes
 
-**Tests:** All 129 CLI tests passing (7 new tests for CLI-014 including qualified column parsing)
+**Tests:** All 131 CLI tests passing (9 new tests for CLI-014 including qualified column routing)
 
 ---
 

@@ -287,6 +287,35 @@ describe('parseNaturalQuery', () => {
 					},
 				]);
 			});
+
+			it('routes qualified column to its target include (CLI-014)', () => {
+				// "users include posts where title = "foo" and posts.published = true"
+				// posts.published → explicitly targets posts include
+				const result = parseNaturalQuery(
+					'users include posts where title = "foo" and posts.published = true',
+					mockSchema,
+				);
+				expect(result.table).toBe('users');
+				expect(result.where).toBeUndefined();
+				expect(result.include).toEqual([
+					{
+						relation: 'posts',
+						where: [
+							{ column: 'title', operator: '=', value: 'foo' },
+							{ column: 'published', operator: '=', value: true },
+						],
+					},
+				]);
+			});
+
+			it('throws error for qualified column referencing unknown table (CLI-014)', () => {
+				expect(() =>
+					parseNaturalQuery(
+						'users include posts where published = true and orders.status = "pending"',
+						mockSchema,
+					),
+				).toThrow(/orders.*not in the query/);
+			});
 		});
 
 		describe('qualified relations', () => {
