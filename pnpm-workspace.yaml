@@ -2,21 +2,34 @@ packages:
   - "packages/*"
 
 catalog:
+  # UI / CLI
   '@inkjs/ui': ^2.0.0
-  '@modelcontextprotocol/sdk': ^1.25.2
-  valibot: ^1.1.0
-  '@biomejs/biome': ^2.3.11
-  '@testcontainers/postgresql': ^11.0.1
-  '@types/node': ^22.15.29
-  '@types/pg': ^8.15.4
-  '@types/react': ^18.3.0
-  commander: ^14.0.0
-  ink: ^5.0.1
+  ink: ^5.2.1
   ink-table: ^3.1.0
-  kysely: ^0.28.9
-  pg: ^8.16.1
+  commander: ^14.0.2
   react: ^18.3.1
-  tsx: ^4.21.0
+  '@types/react': ^18.3.20
+
+  # Database
+  kysely: ^0.28.9
+  pg: ^8.16.3
+  '@types/pg': ^8.16.0
+  better-sqlite3: ^12.6.0
+  '@types/better-sqlite3': ^7.6.13
+
+  # Schema / Validation
+  valibot: ^1.2.0
+
+  # Build / Dev tools
+  '@biomejs/biome': ^2.3.11
   typescript: ^5.9.3
-  tsup: ^8.5.0
+  tsup: ^8.5.1
+  tsx: ^4.21.0
   vitest: ^4.0.16
+  '@types/node': ^22.15.29
+
+  # Testing
+  '@testcontainers/postgresql': ^11.11.0
+
+  # Other
+  '@modelcontextprotocol/sdk': ^1.25.2
