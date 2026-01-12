@@ -143,7 +143,13 @@ export function createOrm<DB = Record<string, unknown>>(
 		| OrmOptionsWithSchema<GeneratedSchema, DB>
 		| OrmOptionsWithAdapter<DB>,
 ): OrmInstance<DB> | Promise<OrmInstance<DB>> {
-	const { model, strictMode = false, relationHints = {}, adapter } = options;
+	const {
+		model,
+		strictMode = false,
+		relationHints = {},
+		adapter,
+		defaultIncludeStrategy,
+	} = options;
 
 	// Extract schema from options (need to cast due to union type)
 	const schema = (options as OrmOptionsWithSchema<GeneratedSchema, DB>).schema;
@@ -159,12 +165,21 @@ export function createOrm<DB = Record<string, unknown>>(
 			strictMode,
 			relationHints,
 			adapter,
+			undefined, // schemaName
+			defaultIncludeStrategy,
 		);
 	}
 
 	// If model is provided, create synchronously
 	if (model) {
-		return createOrmInstance(model, strictMode, relationHints, adapter);
+		return createOrmInstance(
+			model,
+			strictMode,
+			relationHints,
+			adapter,
+			undefined, // schemaName
+			defaultIncludeStrategy,
+		);
 	}
 
 	// If no model/schema but adapter is provided, introspect and create async
@@ -177,6 +192,8 @@ export function createOrm<DB = Record<string, unknown>>(
 					strictMode,
 					relationHints,
 					adapter,
+					undefined, // schemaName
+					defaultIncludeStrategy,
 				),
 			);
 	}
@@ -199,6 +216,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 	relationHints: RelationHints,
 	adapter?: Adapter<DB>,
 	schemaName?: string,
+	defaultIncludeStrategy?: 'join' | 'separate',
 ): OrmInstance<DB> {
 	return {
 		strictMode,
@@ -212,6 +230,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				relationHints,
 				adapter,
 				schemaName,
+				defaultIncludeStrategy,
 			);
 		},
 		forTenant(tenantSchema: string): OrmInstance<DB> {
@@ -227,6 +246,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				relationHints,
 				scopedAdapter as Adapter<DB> | undefined,
 				tenantSchema,
+				defaultIncludeStrategy,
 			);
 		},
 
@@ -275,6 +295,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				relationHints,
 				adapter,
 				schemaName,
+				defaultIncludeStrategy,
 			);
 
 			const result = await builder
@@ -334,6 +355,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				relationHints,
 				adapter,
 				schemaName,
+				defaultIncludeStrategy,
 			);
 
 			const result = await builder
@@ -435,6 +457,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 					relationHints,
 					txAdapter as Adapter<DB>,
 					schemaName,
+					defaultIncludeStrategy,
 				);
 				return fn(txOrm);
 			});
@@ -714,6 +737,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	private readonly relationHints: RelationHints;
 	private readonly adapter: Adapter | undefined;
 	private readonly schemaName: string | undefined;
+	private readonly defaultIncludeStrategy: 'join' | 'separate' | undefined;
 	private selectIntent?: SelectIntent;
 	private whereIntents: WhereIntent[] = [];
 	private strictModeOverride?: boolean;
@@ -730,6 +754,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		relationHints: RelationHints = {},
 		adapter?: Adapter,
 		schemaName?: string,
+		defaultIncludeStrategy?: 'join' | 'separate',
 	) {
 		this.model = model;
 		this.strictMode = strictMode;
@@ -737,6 +762,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		this.relationHints = relationHints;
 		this.adapter = adapter;
 		this.schemaName = schemaName;
+		this.defaultIncludeStrategy = defaultIncludeStrategy;
 	}
 
 	include(
@@ -940,11 +966,17 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		// Apply relation hints to includes before planning
 		const intentWithHints = this.applyRelationHints(intent);
 
+		// Build plan options with defaultIncludeStrategy if set
+		const planOptions: PlanOptions = {};
+		if (this.defaultIncludeStrategy) {
+			planOptions.defaultIncludeStrategy = this.defaultIncludeStrategy;
+		}
+
 		try {
-			return plan(intentWithHints, this.model);
+			return plan(intentWithHints, this.model, planOptions);
 		} catch (error) {
 			if (error instanceof AmbiguousPlanError) {
-				return this.handleAmbiguity(error, intentWithHints);
+				return this.handleAmbiguity(error, intentWithHints, planOptions);
 			}
 			throw error;
 		}
@@ -1964,6 +1996,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	private handleAmbiguity(
 		error: AmbiguousPlanError,
 		intent: QueryIntent,
+		basePlanOptions: PlanOptions = {},
 	): PlanReport {
 		if (this.getEffectiveStrictMode()) {
 			// Strict mode: convert to AmbiguousRelationError and throw
@@ -1982,7 +2015,9 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 
 		const disambiguateKey = `${error.sourceTable}.${error.targetTable}`;
 		const planOptions: PlanOptions = {
+			...basePlanOptions,
 			disambiguate: {
+				...basePlanOptions.disambiguate,
 				[disambiguateKey]: firstRelation,
 			},
 		};
@@ -2017,6 +2052,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			{ ...this.relationHints }, // Clone hints to allow per-query additions
 			this.adapter,
 			this.schemaName,
+			this.defaultIncludeStrategy,
 		);
 		builder.includes.push(...this.includes);
 		builder.recursiveIncludes.push(...this.recursiveIncludes);

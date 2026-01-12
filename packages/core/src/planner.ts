@@ -11,7 +11,8 @@ import type {
 	RecursiveNodeIdExpr,
 	WhereIntent,
 } from './intent-ast.js';
-import type { ModelIR, RelationIR } from './model-ir.js';
+import type { IncludeStrategy, ModelIR, RelationIR } from './model-ir.js';
+import type { DialectCapabilities } from './dialects/index.js';
 
 // ============================================================================
 // Decision Types
@@ -190,6 +191,25 @@ export interface PlanOptions {
 	 * Map of "sourceTable.targetTable" -> relation name
 	 */
 	disambiguate?: Record<string, string>;
+
+	/**
+	 * Default include strategy for relations when set to 'auto'.
+	 * - 'join': Use JOIN (single query, database optimizes) - RECOMMENDED for to-one
+	 * - 'separate': Use separate queries (N+1 style with batching) - safe for to-many
+	 * - 'cte': Use CTE-based include (good for recursive/hierarchical)
+	 * - 'lateral': Use LATERAL JOIN (PostgreSQL) / CROSS APPLY (MSSQL)
+	 * - 'json_agg': Use JSON aggregation (PostgreSQL/MySQL/DuckDB)
+	 * - 'auto': Smart selection based on relation type + dialect capabilities
+	 * @default 'auto'
+	 */
+	defaultIncludeStrategy?: IncludeStrategy;
+
+	/**
+	 * Dialect capabilities for smart strategy selection.
+	 * When provided, 'auto' strategy uses dialect-aware selection.
+	 * When absent, 'auto' falls back to 'join'.
+	 */
+	dialectCapabilities?: DialectCapabilities;
 }
 
 // ============================================================================
@@ -401,6 +421,8 @@ export function plan(
 		cteThreshold: options.cteThreshold ?? 2,
 		maxIncludeDepth: options.maxIncludeDepth ?? 5,
 		disambiguate: options.disambiguate ?? {},
+		defaultIncludeStrategy: options.defaultIncludeStrategy ?? 'auto',
+		dialectCapabilities: options.dialectCapabilities as DialectCapabilities,
 	};
 
 	// Validate root table
@@ -916,7 +938,7 @@ function processInclude(
 		},
 		choice: includeStrategy,
 		reasoning: generateIncludeReasoning(relation, includeStrategy),
-		alternatives: includeStrategy === 'join' ? ['separate'] : ['join'],
+		alternatives: getAlternativeStrategies(includeStrategy, opts.dialectCapabilities),
 	});
 
 	// Determine join type (only if using join strategy)
@@ -1067,17 +1089,156 @@ function determineFilterStrategy(
 	return 'exists';
 }
 
+/**
+ * Resolved include strategy - the actual strategy to use (never 'auto').
+ * This is what the compiler receives after planner decision.
+ */
+export type ResolvedIncludeStrategy = Exclude<IncludeStrategy, 'auto'>;
+
+/**
+ * Determine the include strategy for a relation.
+ *
+ * Strategy selection logic (CORE-006):
+ * 1. If relation has explicit strategy (not 'auto'), use it (after validation)
+ * 2. If planner option has explicit strategy (not 'auto'), use it
+ * 3. Smart auto selection based on:
+ *    - Relation type (hasOne/belongsTo → join, hasMany/belongsToMany → depends)
+ *    - Dialect capabilities (lateral, json_agg support)
+ *    - Recursive relations → cte
+ *
+ * @throws {UnsupportedStrategyError} if requested strategy not supported by dialect
+ */
 function determineIncludeStrategy(
 	relation: RelationIR,
-	_opts: Required<PlanOptions>,
-): 'join' | 'separate' {
-	// Use relation hint if not auto
+	opts: Required<PlanOptions>,
+	isRecursive = false,
+): ResolvedIncludeStrategy {
+	const capabilities = opts.dialectCapabilities;
+
+	// Helper to validate strategy against dialect capabilities
+	const validateStrategy = (strategy: IncludeStrategy): ResolvedIncludeStrategy => {
+		if (strategy === 'auto') {
+			// Should not happen, but fallback to join
+			return 'join';
+		}
+
+		// Validate against dialect capabilities if available
+		if (capabilities) {
+			if (strategy === 'lateral' && !capabilities.supportsLateralJoin) {
+				throw new UnsupportedStrategyError(
+					`Strategy 'lateral' is not supported by ${capabilities.name}. ` +
+					`Use 'join', 'separate', or 'json_agg' instead.`
+				);
+			}
+			if (strategy === 'json_agg' && !capabilities.supportsJsonAgg) {
+				throw new UnsupportedStrategyError(
+					`Strategy 'json_agg' is not supported by ${capabilities.name}. ` +
+					`Use 'join', 'separate', or 'lateral' instead.`
+				);
+			}
+			if (strategy === 'cte' && !capabilities.supportsRecursiveCTE) {
+				throw new UnsupportedStrategyError(
+					`Strategy 'cte' is not supported by ${capabilities.name}. ` +
+					`Use 'join' or 'separate' instead.`
+				);
+			}
+		}
+
+		return strategy;
+	};
+
+	// 1. Use relation hint if not auto (explicit override)
 	if (relation.includeStrategy !== 'auto') {
-		return relation.includeStrategy;
+		return validateStrategy(relation.includeStrategy);
 	}
 
-	// Auto-determine based on cardinality
-	return relation.cardinality === 'one' ? 'join' : 'separate';
+	// 2. Use planner option if specified (CLI-010: runtime override)
+	if (opts.defaultIncludeStrategy && opts.defaultIncludeStrategy !== 'auto') {
+		return validateStrategy(opts.defaultIncludeStrategy);
+	}
+
+	// 3. Smart auto selection based on relation type + dialect
+	return selectSmartStrategy(relation, capabilities, isRecursive);
+}
+
+/**
+ * Smart strategy selection based on relation characteristics and dialect.
+ *
+ * Selection algorithm:
+ * - Recursive relations → 'cte' (if supported) or 'separate'
+ * - hasOne/belongsTo (to-one) → 'join' (always safe, single row)
+ * - hasMany/belongsToMany (to-many):
+ *   - If dialect supports json_agg → 'json_agg' (single row per parent, no explosion)
+ *   - Else if dialect supports lateral → 'lateral' (good with LIMIT)
+ *   - Else → 'join' (let DB optimize, user can override to 'separate' if needed)
+ */
+function selectSmartStrategy(
+	relation: RelationIR,
+	capabilities: DialectCapabilities | undefined,
+	isRecursive: boolean,
+): ResolvedIncludeStrategy {
+	// Recursive relations should use CTE
+	if (isRecursive) {
+		if (capabilities?.supportsRecursiveCTE !== false) {
+			return 'cte';
+		}
+		// Fallback for dialects without CTE support (rare)
+		return 'separate';
+	}
+
+	// To-one relations: JOIN is always optimal (single row, no explosion)
+	if (relation.type === 'hasOne' || relation.type === 'belongsTo') {
+		return 'join';
+	}
+
+	// To-many relations (hasMany, belongsToMany): need smarter selection
+	// Priority: json_agg > lateral > join
+	// Rationale:
+	// - json_agg: aggregates children into single JSON array, no row explosion
+	// - lateral: allows per-row subquery with LIMIT, good for "top N children"
+	// - join: fallback, simple but may cause row explosion
+
+	if (capabilities?.supportsJsonAgg) {
+		return 'json_agg';
+	}
+
+	if (capabilities?.supportsLateralJoin) {
+		return 'lateral';
+	}
+
+	// Fallback: use join (database optimizer handles it)
+	// User can explicitly request 'separate' if row explosion is a concern
+	return 'join';
+}
+
+/**
+ * Error thrown when requested include strategy is not supported by dialect.
+ */
+export class UnsupportedStrategyError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'UnsupportedStrategyError';
+	}
+}
+
+/**
+ * Get alternative strategies for a given strategy based on dialect capabilities.
+ */
+function getAlternativeStrategies(
+	strategy: ResolvedIncludeStrategy,
+	capabilities: DialectCapabilities | undefined,
+): string[] {
+	const allStrategies: ResolvedIncludeStrategy[] = ['join', 'separate', 'cte', 'lateral', 'json_agg'];
+
+	// Filter out current strategy and unsupported ones
+	return allStrategies.filter((s) => {
+		if (s === strategy) return false;
+		if (!capabilities) return s === 'join' || s === 'separate'; // No capabilities = only basic strategies
+		if (s === 'lateral' && !capabilities.supportsLateralJoin) return false;
+		if (s === 'json_agg' && !capabilities.supportsJsonAgg) return false;
+		if (s === 'cte' && !capabilities.supportsRecursiveCTE) return false;
+		return true;
+	});
 }
 
 function determineJoinType(
@@ -1177,19 +1338,22 @@ function generateFilterReasoning(
 
 function generateIncludeReasoning(
 	relation: RelationIR,
-	strategy: 'join' | 'separate',
+	strategy: ResolvedIncludeStrategy,
 ): string {
-	if (strategy === 'join') {
-		return (
-			`Relation ${relation.source}.${relation.name} has cardinality "${relation.cardinality}" - ` +
-			`using JOIN for efficient single-row fetch`
-		);
-	}
+	const prefix = `Relation ${relation.source}.${relation.name} (${relation.type}, cardinality: ${relation.cardinality})`;
 
-	return (
-		`Relation ${relation.source}.${relation.name} has cardinality "${relation.cardinality}" - ` +
-		`using separate query to avoid row multiplication`
-	);
+	switch (strategy) {
+		case 'join':
+			return `${prefix} - using JOIN for efficient single-query fetch`;
+		case 'separate':
+			return `${prefix} - using separate query to avoid row multiplication`;
+		case 'cte':
+			return `${prefix} - using CTE for recursive/hierarchical traversal`;
+		case 'lateral':
+			return `${prefix} - using LATERAL JOIN for per-row subquery with LIMIT support`;
+		case 'json_agg':
+			return `${prefix} - using JSON aggregation to avoid row explosion`;
+	}
 }
 
 function generateJoinReasoning(

@@ -460,7 +460,9 @@ describe('Semantic Planner', () => {
 			expect(includeDecision?.choice).toBe('join');
 		});
 
-		it('should choose separate for to-many includes', () => {
+		it('should choose JOIN for to-many includes (default)', () => {
+			// Default behavior: use JOIN and let the database optimizer handle it
+			// This avoids N+1 queries and leverages database's query planning
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'categories',
@@ -468,6 +470,22 @@ describe('Semantic Planner', () => {
 			};
 
 			const report = plan(intent, q2Schema);
+
+			const includeDecision = report.decisions.find(
+				(d) => d.type === 'include-strategy',
+			);
+			expect(includeDecision).toBeDefined();
+			expect(includeDecision?.choice).toBe('join');
+		});
+
+		it('should use SEPARATE when explicitly requested via defaultIncludeStrategy', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [{ relation: 'products' }],
+			};
+
+			const report = plan(intent, q2Schema, { defaultIncludeStrategy: 'separate' });
 
 			const includeDecision = report.decisions.find(
 				(d) => d.type === 'include-strategy',

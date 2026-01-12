@@ -2,13 +2,7 @@
  * Adapter interface for database adapters.
  *
  * This module defines the contract that all database adapters must implement.
- * Adapters handle compilation, execution, transactions, and streaming.
- *
- * DX-104: Interfaces are split following ISP (Interface Segregation Principle).
- * Implement only the interfaces you need:
- * - CompilingAdapter: compile-only (e.g., MockAdapter)
- * - ExecutingAdapter: compile + execute
- * - Add StreamingAdapter, IntrospectingAdapter, etc. as needed
+ * DX-104: Split into focused interfaces for ISP compliance.
  *
  * @module adapter
  */
@@ -70,6 +64,16 @@ export interface AdapterStreamOptions {
 }
 
 /**
+ * Alias mode for included relation columns.
+ *
+ * - `'always'` (default): Alias all columns from included tables (e.g., `"author.id"`, `"author.name"`)
+ * - `'onCollision'`: Only alias columns that exist in multiple tables (e.g., `id`, `createdAt`)
+ *
+ * Note: `'never'` is intentionally excluded as it would cause data loss from duplicate column names.
+ */
+export type AliasIncludedColumnsMode = 'always' | 'onCollision';
+
+/**
  * Options for query compilation.
  */
 export interface CompileOptions {
@@ -77,6 +81,11 @@ export interface CompileOptions {
 	readonly schemaName?: string;
 	/** Model IR for relation lookups during compilation */
 	readonly model?: ModelIR;
+	/**
+	 * Alias mode for included relation columns.
+	 * @default 'always'
+	 */
+	readonly aliasIncludedColumns?: AliasIncludedColumnsMode;
 }
 
 // ============================================================================
@@ -85,19 +94,16 @@ export interface CompileOptions {
 
 /**
  * Metadata for a separate include query.
- * Used when planner decides include-strategy: 'separate' for hasMany relations.
- *
- * After executing the main query, separate include queries are compiled
- * using this info plus the parent IDs from the main result.
+ \* Used when planner decides include-strategy: 'separate' for hasMany/manyToMany relations.
  */
 export interface SeparateIncludeInfo {
 	/** Name of the relation being included */
 	readonly relationName: string;
 	/** Target table to fetch from */
 	readonly targetTable: string;
-	/** Foreign key column(s) in target table (e.g., 'userId' for posts, or ['tenantId', 'userId'] for composite) */
+	/** Foreign key column(s) in target table */
 	readonly foreignKey: string | readonly string[];
-	/** Source key column(s) in parent table (usually 'id', or ['tenantId', 'id'] for composite) */
+	/** Source key column(s) in parent table */
 	readonly sourceKey: string | readonly string[];
 	/** Optional select clause from include intent */
 	readonly select?: SelectIntent;
@@ -105,11 +111,18 @@ export interface SeparateIncludeInfo {
 	readonly where?: WhereIntent;
 	/** Optional nested includes (for recursive hydration) */
 	readonly nestedIncludes?: readonly SeparateIncludeInfo[];
+
+	// --- M:N (manyToMany) support ---
+	/** Junction table for M:N relations (e.g., 'postTags') */
+	readonly through?: string;
+	/** FK in junction table pointing to source (e.g., 'postId') */
+	readonly throughSourceKey?: string;
+	/** FK in junction table pointing to target (e.g., 'tagId') */
+	readonly throughTargetKey?: string;
 }
 
 /**
  * Result of compiling a query with separate includes.
- * Returned by compileWithIncludes() when there are includes with strategy 'separate'.
  */
 export interface CompileResultWithIncludes<T = unknown> {
 	/** The main query (includes any JOIN includes) */
@@ -142,195 +155,88 @@ export interface Dump {
 }
 
 // ============================================================================
-// Split Interfaces (DX-104 - ISP Compliance)
+// Split Adapter Interfaces (DX-104: ISP Compliance)
 // ============================================================================
 
 /**
- * Base adapter interface with capabilities and core utilities.
- * All adapters must implement this interface.
- *
- * @typeParam DB - Database schema type for type inference
+ * Base adapter interface - core capabilities all adapters must have.
  */
-export interface BaseAdapter<DB = unknown> {
+export interface BaseAdapter {
 	/** Adapter capabilities for feature detection */
 	readonly capabilities: AdapterCapabilities;
 
 	/**
-	 * Create a schema-scoped adapter for multi-tenant queries.
-	 *
-	 * @param schemaName - The schema name to scope queries to
-	 * @returns A new adapter scoped to the schema
-	 */
-	withSchema(schemaName: string): Adapter<DB>;
-
-	/**
-	 * Create a dump for observability.
-	 *
-	 * @param plan - The plan report
-	 * @param query - The compiled query
-	 * @param meta - Optional metadata
-	 * @returns Dump object with plan, SQL, and parameters
-	 */
-	createDump(plan: PlanReport, query: CompiledQuery, meta?: DumpMeta): Dump;
-
-	/**
 	 * Validate an identifier (table name, column name, schema name).
 	 * Throws if the identifier contains unsafe characters.
-	 *
-	 * @param value - The identifier value to validate
-	 * @param type - The type of identifier (for error messages)
-	 * @throws Error if identifier is invalid
 	 */
 	validateIdentifier(value: string, type: string): void;
 }
 
 /**
- * Adapter interface for query compilation.
- * Compiles plans and intents to executable SQL.
- *
- * @typeParam DB - Database schema type for type inference
+ * Compiling adapter - can compile plans to SQL queries.
  */
-export interface CompilingAdapter<DB = unknown> extends BaseAdapter<DB> {
-	/**
-	 * Compile a plan to executable SQL.
-	 *
-	 * @param plan - The plan report from the semantic planner
-	 * @param options - Compilation options
-	 * @returns Compiled query with SQL and parameters
-	 */
+export interface CompilingAdapter extends BaseAdapter {
+	/** Compile a plan to executable SQL. */
 	compile<T = unknown>(
 		plan: PlanReport,
 		options?: CompileOptions,
 	): CompiledQuery<T>;
 
-	/**
-	 * Compile a plan with includes, returning separate include metadata (DX-033).
-	 * For hasMany relations with strategy 'separate', this returns metadata
-	 * to compile follow-up queries after the main query executes.
-	 *
-	 * @param plan - The plan report from the semantic planner
-	 * @param options - Compilation options
-	 * @returns Main compiled query + separate include metadata
-	 */
+	/** Compile a plan with includes, returning separate include metadata (DX-033). */
 	compileWithIncludes<T = unknown>(
 		plan: PlanReport,
 		options?: CompileOptions,
 	): CompileResultWithIncludes<T>;
 
-	/**
-	 * Compile a separate include query for given parent IDs (DX-033).
-	 * Called after main query to fetch related data for hydration.
-	 *
-	 * @param info - Separate include metadata from compileWithIncludes()
-	 * @param parentIds - IDs extracted from main query results
-	 * @param options - Compilation options
-	 * @returns Compiled query to fetch child records
-	 */
+	/** Compile a separate include query for given parent IDs (DX-033). */
 	compileSeparateInclude(
 		info: SeparateIncludeInfo,
 		parentIds: readonly unknown[],
 		options?: CompileOptions,
 	): CompiledQuery;
 
-	/**
-	 * Compile an insert intent to executable SQL.
-	 *
-	 * @param intent - The insert intent
-	 * @param options - Compilation options
-	 * @returns Compiled query with SQL and parameters
-	 */
+	/** Compile an insert intent to executable SQL. */
 	compileInsert(intent: InsertIntent, options?: CompileOptions): CompiledQuery;
 
-	/**
-	 * Compile an update intent to executable SQL.
-	 *
-	 * @param intent - The update intent
-	 * @param options - Compilation options
-	 * @returns Compiled query with SQL and parameters
-	 */
+	/** Compile an update intent to executable SQL. */
 	compileUpdate(intent: UpdateIntent, options?: CompileOptions): CompiledQuery;
 
-	/**
-	 * Compile a delete intent to executable SQL.
-	 *
-	 * @param intent - The delete intent
-	 * @param options - Compilation options
-	 * @returns Compiled query with SQL and parameters
-	 */
+	/** Compile a delete intent to executable SQL. */
 	compileDelete(intent: DeleteIntent, options?: CompileOptions): CompiledQuery;
 
-	/**
-	 * Compile an upsert intent to executable SQL (DX-026).
-	 * Implements INSERT ... ON CONFLICT ... DO UPDATE/NOTHING pattern.
-	 *
-	 * @param intent - The upsert intent
-	 * @param options - Compilation options
-	 * @returns Compiled query with SQL and parameters
-	 */
+	/** Compile an upsert intent to executable SQL (DX-026). */
 	compileUpsert(intent: UpsertIntent, options?: CompileOptions): CompiledQuery;
 
-	/**
-	 * Compile a recursive CTE plan to executable SQL.
-	 *
-	 * @param report - The recursive plan report
-	 * @param model - The model IR for relation resolution
-	 * @param options - Compilation options
-	 * @returns Compiled query with SQL and parameters
-	 */
+	/** Compile a recursive CTE plan to executable SQL. */
 	compileRecursive(
 		report: RecursivePlanReport,
 		model: ModelIR,
 		options?: CompileOptions,
 	): CompiledQuery;
+
+	/** Create a dump for observability. */
+	createDump(plan: PlanReport, query: CompiledQuery, meta?: DumpMeta): Dump;
 }
 
 /**
- * Adapter interface for query execution.
- * Executes compiled queries against the database.
- *
- * @typeParam DB - Database schema type for type inference
+ * Executing adapter - can execute compiled queries.
  */
-export interface ExecutingAdapter<DB = unknown> extends CompilingAdapter<DB> {
-	/**
-	 * Execute a query and return all results.
-	 *
-	 * @param query - The compiled query to execute
-	 * @returns Promise resolving to array of results
-	 */
+export interface ExecutingAdapter extends BaseAdapter {
+	/** Execute a query and return all results. */
 	execute<T>(query: CompiledQuery<T>): Promise<T[]>;
 
-	/**
-	 * Execute a query and return the first result or null.
-	 *
-	 * @param query - The compiled query to execute
-	 * @returns Promise resolving to first result or null
-	 */
+	/** Execute a query and return the first result or null. */
 	executeOne<T>(query: CompiledQuery<T>): Promise<T | null>;
 
-	/**
-	 * Execute a query and return the first result or throw.
-	 *
-	 * @param query - The compiled query to execute
-	 * @returns Promise resolving to first result
-	 * @throws NotFoundError if no results
-	 */
+	/** Execute a query and return the first result or throw. */
 	executeOneOrThrow<T>(query: CompiledQuery<T>): Promise<T>;
 }
 
 /**
- * Adapter interface for streaming query results.
- * Optional capability - check `capabilities.supportsStreaming` before use.
- *
- * @typeParam DB - Database schema type for type inference
+ * Streaming adapter - can stream query results.
  */
-export interface StreamingAdapter<DB = unknown> {
-	/**
-	 * Stream query results as an async iterable iterator.
-	 *
-	 * @param query - The compiled query to execute
-	 * @param options - Stream options (chunk size, etc.)
-	 * @returns Async iterable iterator of results
-	 */
+export interface StreamingAdapter extends BaseAdapter {
+	/** Stream query results as an async iterable iterator. */
 	stream<T>(
 		query: CompiledQuery<T>,
 		options?: AdapterStreamOptions,
@@ -338,101 +244,36 @@ export interface StreamingAdapter<DB = unknown> {
 }
 
 /**
- * Adapter interface for database introspection.
- * Optional capability - used for auto-discovery when no explicit model is provided.
- *
- * @typeParam _DB - Database schema type (unused but kept for consistency)
+ * Introspecting adapter - can introspect database schema.
  */
-export interface IntrospectingAdapter<_DB = unknown> {
-	/**
-	 * Introspect the database schema and return a ModelIR.
-	 * Used for auto-discovery when no explicit model is provided.
-	 *
-	 * @returns Promise resolving to the introspected model
-	 */
+export interface IntrospectingAdapter extends BaseAdapter {
+	/** Introspect the database schema and return a ModelIR. */
 	introspect(): Promise<ModelIR>;
 }
 
 /**
- * Adapter interface for database transactions.
- * Optional capability - wraps operations in database transactions.
- *
- * @typeParam DB - Database schema type for type inference
+ * Transactional adapter - supports database transactions.
  */
-export interface TransactionalAdapter<DB = unknown> {
-	/**
-	 * Execute a callback within a database transaction.
-	 * Auto-commits on success, auto-rolls back on exception.
-	 *
-	 * @param fn - Callback receiving a transaction-scoped adapter
-	 * @returns Promise resolving to callback's return value
-	 */
+export interface TransactionalAdapter<DB = unknown> extends BaseAdapter {
+	/** Execute a callback within a database transaction. */
 	transaction<T>(fn: (adapter: Adapter<DB>) => Promise<T>): Promise<T>;
+
+	/** Create a schema-scoped adapter for multi-tenant queries. */
+	withSchema(schemaName: string): Adapter<DB>;
 }
 
 /**
- * Adapter interface for raw SQL execution.
- * Optional capability - provides an escape hatch for complex queries.
+ * Raw SQL adapter - can execute raw SQL directly.
  *
- * @typeParam _DB - Database schema type (unused but kept for consistency)
+ * @warning **SECURITY RISK: POTENTIAL SQL INJECTION**
+ * Use parameter placeholders ($1, $2, etc.) for ALL values.
  */
-export interface RawSqlAdapter<_DB = unknown> {
+export interface RawSqlAdapter extends BaseAdapter {
 	/**
-	 * Execute raw SQL directly - the ultimate escape hatch for queries
-	 * that cannot be expressed via the intent system.
+	 * Execute raw SQL directly - the ultimate escape hatch.
 	 *
-	 * @warning **SECURITY RISK: POTENTIAL SQL INJECTION**
-	 *
-	 * This method bypasses the semantic planner and all type safety.
-	 * While parameter binding protects values, the SQL string itself
-	 * is NOT validated or sanitized.
-	 *
-	 * **SAFE: Use parameter placeholders ($1, $2, etc.) for ALL values:**
-	 * ```typescript
-	 * // Parameters are safely escaped by the database driver
-	 * adapter.executeRaw('SELECT * FROM users WHERE id = $1', [userId]);
-	 * ```
-	 *
-	 * **DANGEROUS: Never interpolate user input into SQL strings:**
-	 * ```typescript
-	 * // SQL INJECTION RISK - NEVER DO THIS!
-	 * adapter.executeRaw(`SELECT * FROM ${tableName} WHERE id = ${id}`);
-	 * ```
-	 *
-	 * **AUDIT TRAIL:** Raw SQL usage is logged in dump().plan for security audits.
-	 *
-	 * @param sql - Raw SQL string with parameter placeholders ($1, $2, etc.)
+	 * @param sql - Raw SQL string with parameter placeholders
 	 * @param parameters - Parameter values (safely bound by driver)
-	 * @returns Promise resolving to array of typed results
-	 *
-	 * @example
-	 * ```typescript
-	 * // SAFE: Parameterized query
-	 * const results = await adapter.executeRaw<User>(
-	 *   'SELECT * FROM users WHERE age > $1 AND status = $2',
-	 *   [18, 'active']
-	 * );
-	 *
-	 * // SAFE: Complex query with parameters
-	 * const stats = await adapter.executeRaw<Stats>(
-	 *   `SELECT date_trunc('month', created_at) as month,
-	 *           COUNT(*) as count
-	 *    FROM orders
-	 *    WHERE created_at > $1
-	 *    GROUP BY 1
-	 *    ORDER BY 1 DESC`,
-	 *   [startDate]
-	 * );
-	 *
-	 * // DANGEROUS - SQL INJECTION RISK!
-	 * // const results = await adapter.executeRaw(
-	 * //   `SELECT * FROM ${userInput}`,  // NEVER interpolate user input!
-	 * //   []
-	 * // );
-	 * ```
-	 *
-	 * @see {@link https://owasp.org/www-community/attacks/SQL_Injection | OWASP SQL Injection}
-	 * @see {@link https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html | OWASP Parameterization}
 	 */
 	executeRaw<T = unknown>(
 		sql: string,
@@ -441,184 +282,102 @@ export interface RawSqlAdapter<_DB = unknown> {
 }
 
 // ============================================================================
-// Composed Adapter Types (DX-104)
+// Convenience Composed Types (DX-104)
 // ============================================================================
 
 /**
- * Full adapter interface - implements all optional capabilities.
- * This is the complete adapter type that KyselyAdapter implements.
- *
- * For partial implementations, use individual interfaces:
- * - `CompilingAdapter` - compile-only (e.g., MockAdapter)
- * - `ExecutingAdapter` - compile + execute
- * - Add `StreamingAdapter`, `IntrospectingAdapter`, etc. as needed
- *
- * @typeParam DB - Database schema type for type inference
- *
- * @example
- * ```typescript
- * import { createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
- *
- * const adapter = createKyselyAdapter(kyselyDb);
- * const orm = createOrm({ model, adapter });
- * ```
+ * Compile-only adapter - can only compile, not execute.
+ * Useful for generating SQL without a database connection.
  */
-export type Adapter<DB = unknown> = ExecutingAdapter<DB> &
-	StreamingAdapter<DB> &
-	IntrospectingAdapter<DB> &
-	TransactionalAdapter<DB> &
-	RawSqlAdapter<DB>;
+export type CompileOnlyAdapter = CompilingAdapter;
 
 /**
- * Minimal adapter for compile-only use cases (e.g., testing, REPL).
- * Does not require database connection or execution capabilities.
- *
- * @typeParam DB - Database schema type for type inference
+ * Basic adapter - compile + execute, no streaming/transactions/introspection.
+ * Minimum viable adapter for most use cases.
  */
-export type CompileOnlyAdapter<DB = unknown> = CompilingAdapter<DB>;
-
-/**
- * Adapter with execution but no streaming/introspection.
- * Suitable for simple use cases without advanced features.
- *
- * @typeParam DB - Database schema type for type inference
- */
-export type BasicAdapter<DB = unknown> = ExecutingAdapter<DB>;
+export type BasicAdapter = CompilingAdapter & ExecutingAdapter;
 
 // ============================================================================
-// Runtime Feature Detection Helpers (DX-104)
+// Full Adapter Interface
 // ============================================================================
 
 /**
- * Check if an adapter supports streaming.
- * Use this before calling `stream()` to avoid runtime errors.
+ * Database adapter interface - full adapter with all capabilities.
  *
- * @param adapter - The adapter to check
- * @returns True if the adapter supports streaming
+ * This is the intersection of all split interfaces. Implementations
+ * can choose to implement only the interfaces they need.
  *
- * @example
- * ```typescript
- * if (supportsStreaming(adapter)) {
- *   for await (const row of adapter.stream(query)) {
- *     // Process row
- *   }
- * } else {
- *   const results = await adapter.execute(query);
- *   // Process results
- * }
- * ```
+ * @typeParam DB - Database schema type for type inference
  */
-export function supportsStreaming<DB>(
-	adapter: CompilingAdapter<DB>,
-): adapter is CompilingAdapter<DB> & StreamingAdapter<DB> {
+export interface Adapter<DB = unknown>
+	extends CompilingAdapter,
+		ExecutingAdapter,
+		StreamingAdapter,
+		IntrospectingAdapter,
+		TransactionalAdapter<DB>,
+		RawSqlAdapter {}
+
+// ============================================================================
+// Feature Detection Helpers (DX-104)
+// ============================================================================
+
+/**
+ * Check if adapter supports execution.
+ */
+export function supportsExecution(
+	adapter: BaseAdapter,
+): adapter is ExecutingAdapter {
 	return (
-		adapter.capabilities.supportsStreaming &&
-		'stream' in adapter &&
-		typeof (adapter as StreamingAdapter<DB>).stream === 'function'
+		'execute' in adapter &&
+		'executeOne' in adapter &&
+		typeof (adapter as ExecutingAdapter).execute === 'function'
 	);
 }
 
 /**
- * Check if an adapter supports introspection.
- * Use this before calling `introspect()` to avoid runtime errors.
- *
- * @param adapter - The adapter to check
- * @returns True if the adapter supports introspection
- *
- * @example
- * ```typescript
- * if (supportsIntrospection(adapter)) {
- *   const model = await adapter.introspect();
- * } else {
- *   // Provide model manually
- * }
- * ```
+ * Check if adapter supports streaming.
  */
-export function supportsIntrospection<DB>(
-	adapter: CompilingAdapter<DB>,
-): adapter is CompilingAdapter<DB> & IntrospectingAdapter<DB> {
+export function supportsStreaming(
+	adapter: BaseAdapter,
+): adapter is StreamingAdapter {
+	return (
+		'stream' in adapter &&
+		typeof (adapter as StreamingAdapter).stream === 'function'
+	);
+}
+
+/**
+ * Check if adapter supports introspection.
+ */
+export function supportsIntrospection(
+	adapter: BaseAdapter,
+): adapter is IntrospectingAdapter {
 	return (
 		'introspect' in adapter &&
-		typeof (adapter as IntrospectingAdapter<DB>).introspect === 'function'
+		typeof (adapter as IntrospectingAdapter).introspect === 'function'
 	);
 }
 
 /**
- * Check if an adapter supports transactions.
- * Use this before calling `transaction()` to avoid runtime errors.
- *
- * @param adapter - The adapter to check
- * @returns True if the adapter supports transactions
- *
- * @example
- * ```typescript
- * if (supportsTransactions(adapter)) {
- *   await adapter.transaction(async (tx) => {
- *     // Transactional operations
- *   });
- * } else {
- *   // Execute without transaction
- * }
- * ```
+ * Check if adapter supports transactions.
  */
 export function supportsTransactions<DB>(
-	adapter: CompilingAdapter<DB>,
-): adapter is CompilingAdapter<DB> & TransactionalAdapter<DB> {
+	adapter: BaseAdapter,
+): adapter is TransactionalAdapter<DB> {
 	return (
 		'transaction' in adapter &&
+		'withSchema' in adapter &&
 		typeof (adapter as TransactionalAdapter<DB>).transaction === 'function'
 	);
 }
 
 /**
- * Check if an adapter supports raw SQL execution.
- * Use this before calling `executeRaw()` to avoid runtime errors.
- *
- * @param adapter - The adapter to check
- * @returns True if the adapter supports raw SQL execution
- *
- * @example
- * ```typescript
- * if (supportsRawSql(adapter)) {
- *   const results = await adapter.executeRaw('SELECT 1');
- * } else {
- *   // Use compiled queries instead
- * }
- * ```
+ * Check if adapter supports raw SQL execution.
  */
-export function supportsRawSql<DB>(
-	adapter: CompilingAdapter<DB>,
-): adapter is CompilingAdapter<DB> & RawSqlAdapter<DB> {
+export function supportsRawSql(adapter: BaseAdapter): adapter is RawSqlAdapter {
 	return (
 		'executeRaw' in adapter &&
-		typeof (adapter as RawSqlAdapter<DB>).executeRaw === 'function'
-	);
-}
-
-/**
- * Check if an adapter supports query execution (not compile-only).
- * Use this to distinguish between compile-only and full adapters.
- *
- * @param adapter - The adapter to check
- * @returns True if the adapter supports execution
- *
- * @example
- * ```typescript
- * if (supportsExecution(adapter)) {
- *   const results = await adapter.execute(query);
- * } else {
- *   // Compile-only adapter, just get the SQL
- *   const query = adapter.compile(plan);
- *   console.log(query.sql);
- * }
- * ```
- */
-export function supportsExecution<DB>(
-	adapter: CompilingAdapter<DB>,
-): adapter is ExecutingAdapter<DB> {
-	return (
-		'execute' in adapter &&
-		typeof (adapter as ExecutingAdapter<DB>).execute === 'function'
+		typeof (adapter as RawSqlAdapter).executeRaw === 'function'
 	);
 }
 
@@ -654,14 +413,9 @@ export class UnsupportedCapabilityError extends Error {
 
 /**
  * Assert that an adapter supports a required capability.
- *
- * @param adapter - The adapter to check
- * @param capability - The required capability
- * @param operation - The operation name (for error message)
- * @throws UnsupportedCapabilityError if capability is not supported
  */
 export function assertCapability(
-	adapter: CompilingAdapter,
+	adapter: Adapter,
 	capability: keyof AdapterCapabilities,
 	operation: string,
 ): void {

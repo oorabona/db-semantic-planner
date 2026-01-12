@@ -3,8 +3,8 @@ import React from 'react';
  * DX-030: REPL Output Display Component
  */
 
-import { Box, Text } from 'ink';
-import type { QueryResult } from '../types.js';
+import { Box, Text } from 'ink'
+import type { QueryResult, SeparateQueryResult } from '../types.js';
 
 interface OutputDisplayProps {
 	result: QueryResult | null;
@@ -13,14 +13,16 @@ interface OutputDisplayProps {
 export function SqlOutput({
 	sql,
 	params,
+	label = '📝 Generated SQL:',
 }: {
 	sql: string;
 	params: readonly unknown[];
+	label?: string;
 }) {
 	return (
 		<Box flexDirection="column" marginY={1}>
 			<Text bold color="yellow">
-				📝 Generated SQL:
+				{label}
 			</Text>
 			<Box borderStyle="single" borderColor="gray" paddingX={1} marginTop={1}>
 				<Text color="green">{sql}</Text>
@@ -30,6 +32,32 @@ export function SqlOutput({
 					Parameters: {JSON.stringify(params)}
 				</Text>
 			)}
+		</Box>
+	);
+}
+
+export function SeparateQueriesOutput({
+	queries,
+}: {
+	queries: SeparateQueryResult[];
+}) {
+	return (
+		<Box flexDirection="column" marginY={1}>
+			{queries.map((q, i) => (
+				<Box key={i} flexDirection="column" marginBottom={1}>
+					<Text bold color="cyan">
+						📎 Separate Query ({q.relation}):
+					</Text>
+					<Box borderStyle="single" borderColor="cyan" paddingX={1} marginTop={1}>
+						<Text color="green">{q.sql}</Text>
+					</Box>
+					{q.params.length > 0 && (
+						<Text color="gray" dimColor>
+							Parameters: {JSON.stringify(q.params)}
+						</Text>
+					)}
+				</Box>
+			))}
 		</Box>
 	);
 }
@@ -83,7 +111,10 @@ export function OutputDisplay({ result }: OutputDisplayProps) {
 
 	return (
 		<Box flexDirection="column">
-			<SqlOutput sql={result.sql} params={result.params} />
+			<SqlOutput sql={result.sql} params={result.params} label="📝 Main SQL:" />
+			{result.separateQueries && result.separateQueries.length > 0 && (
+				<SeparateQueriesOutput queries={result.separateQueries} />
+			)}
 			{result.plan && <PlanOutput plan={result.plan} />}
 		</Box>
 	);

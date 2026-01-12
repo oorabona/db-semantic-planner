@@ -461,6 +461,19 @@ export interface IncludeIntent {
 	 * @example 'author' or 'editor' when User has both relations to Post
 	 */
 	readonly via?: string;
+
+	/**
+	 * Maximum number of related records to include per parent.
+	 * Only effective with LATERAL JOIN strategy (PostgreSQL/DuckDB/MSSQL).
+	 * @example limit: 5 - fetch at most 5 related records per parent
+	 */
+	readonly limit?: number;
+
+	/**
+	 * Order by for related records (used with limit).
+	 * @example orderBy: [{ field: 'createdAt', direction: 'desc' }]
+	 */
+	readonly orderBy?: readonly OrderByIntent[];
 }
 
 // ============================================================================

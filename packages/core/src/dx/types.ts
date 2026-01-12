@@ -13,11 +13,7 @@ import type {
 	UpsertBuilder,
 } from './mutation-builders.js';
 import type { WhereFilter } from './object-filter.js';
-import type {
-	GeneratedSchema,
-	GeneratedTable,
-	InferDBFromSchema,
-} from './schema-bridge.js';
+import type { GeneratedSchema, InferDBFromSchema } from './schema-bridge.js';
 
 /**
  * A wrapper around an ExpressionIntent that marks it for use in columns().
@@ -281,6 +277,12 @@ interface OrmOptionsBase<DB = unknown> {
 	readonly strictMode?: boolean;
 	readonly relationHints?: RelationHints;
 	readonly adapter?: Adapter<DB>;
+	/**
+	 * Default include strategy for relations when set to 'auto'.
+	 * - 'join': Use JOIN (single query, database optimizes) - DEFAULT
+	 * - 'separate': Use separate queries (N+1 style with batching)
+	 */
+	readonly defaultIncludeStrategy?: 'join' | 'separate';
 }
 
 /**

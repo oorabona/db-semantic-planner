@@ -85,6 +85,24 @@ const DOT_COMMANDS: CompletionSuggestion[] = [
 		type: 'command',
 		description: 'Exit REPL (alias)',
 	},
+	{
+		text: '.aliasing',
+		label: '.aliasing',
+		type: 'command',
+		description: 'Toggle column aliasing mode',
+	},
+	{
+		text: '.strategy',
+		label: '.strategy',
+		type: 'command',
+		description: 'Show/set include strategy',
+	},
+	{
+		text: '.dialect',
+		label: '.dialect',
+		type: 'command',
+		description: 'Show/set SQL dialect',
+	},
 ];
 
 /**
