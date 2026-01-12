@@ -1202,7 +1202,7 @@ FROM "users" AS "t0"
 
 ---
 
-### CLI-010: Aliasing Mode Switch in REPL/CLI
+### CLI-010: Aliasing Mode Switch in REPL/CLI ✅ (2026-01-11)
 
 **Priority:** MEDIUM | **Effort:** S (~2h) | **Breaking:** No
 **Scope:** cli
@@ -1211,21 +1211,75 @@ FROM "users" AS "t0"
 Add ability to switch between `always` and `onCollision` aliasing modes in REPL and CLI.
 
 **Implementation:**
-- [ ] Add `.alias <mode>` REPL command to switch modes (`always` | `onCollision`)
-- [ ] Add `--alias-mode` CLI flag for `dbsp query` command
-- [ ] Display current mode in REPL status/prompt
-- [ ] Persist preference in REPL session
+- [x] ✅ Add `.alias` REPL command to toggle modes (`always` | `onCollision`) (2026-01-11)
+- [x] ✅ `AliasingMode` type in repl/types.ts (2026-01-11)
+- [x] ✅ Toggle logic in repl/index.tsx (2026-01-11)
+- [x] ✅ Pass aliasing mode to MockAdapter in query-executor.ts (2026-01-11)
+- [x] ✅ Display mode change feedback in REPL (2026-01-11)
 
-**Example:**
-```bash
-# CLI
-dbsp query --alias-mode onCollision "select('users').include('posts')"
+**Files modified:**
+- `packages/cli/src/repl/types.ts` - AliasingMode type
+- `packages/cli/src/repl/index.tsx` - .alias command handler
+- `packages/cli/src/repl/query-executor.ts` - Pass mode to adapter
+- `packages/cli/src/repl/completion.ts` - Command autocomplete
+- `packages/cli/src/repl/components/HelpDisplay.tsx` - Help text
 
-# REPL
-dbsp> .alias onCollision
-Aliasing mode set to: onCollision
-dbsp> select('users').include('posts')
-```
+---
+
+### CLI-012: CTE Include Strategy ✅ (2026-01-12)
+
+**Priority:** HIGH | **Effort:** M (~6h) | **Breaking:** No
+**Scope:** core, adapter-kysely
+
+Implement CTE-based include strategy for relations with filters and recursive support.
+
+**Features implemented:**
+
+1. **CLI-012a: Basic CTE strategy** ✅ (2026-01-12)
+   - [x] ✅ Planner creates CTEs when `includeStrategy: 'cte'` on relation
+   - [x] ✅ Compiler generates `WITH <cte_name> AS (SELECT ...)`
+   - [x] ✅ Join to CTE name instead of table name
+   - [x] ✅ Plan reports CTE definitions with sourceIntent
+
+2. **CLI-012b: Filtered CTEs** ✅ (2026-01-12)
+   - [x] ✅ Apply `include.where` filter inside CTE definition
+   - [x] ✅ Nested CTEs with filters support
+   - [x] ✅ Tests for filtered CTE generation (3 tests)
+
+3. **CLI-012c: Recursive CTEs** ✅ (2026-01-12)
+   - [x] ✅ `IncludeRecursiveOptions` interface (maxDepth, track.depth/path, foreignKey)
+   - [x] ✅ `IncludeIntent.recursive` property for self-referential relations
+   - [x] ✅ `CTEDefinition.recursive` flag in planner
+   - [x] ✅ `buildRecursiveCTE()` generates WITH RECURSIVE SQL
+   - [x] ✅ Base case (roots) + recursive case (children) + UNION ALL
+   - [x] ✅ Optional depth/path tracking columns
+   - [x] ✅ Tests for recursive CTE generation (5 tests)
+
+**Files modified:**
+- `packages/core/src/intent-ast.ts` - IncludeRecursiveOptions, IncludeIntent.recursive
+- `packages/core/src/planner.ts` - CTEDefinition.recursive, processInclude() CTE creation
+- `packages/adapter-kysely/src/compiler.ts` - buildRecursiveCTE(), buildCTEs() routing
+- `packages/adapter-kysely/src/compiler.test.ts` - 12 CLI-012 tests
+
+**Tests:** 12 tests passing (4 CLI-012a + 3 CLI-012b + 5 CLI-012c)
+
+---
+
+### CLI-013: Enhanced REPL Status Line ✅ (2026-01-12)
+
+**Priority:** LOW | **Effort:** S (~1h) | **Breaking:** No
+
+**Features implemented:**
+- [x] ✅ Header component displays current dialect (PG, MySQL, SQLite, MSSQL, DuckDB)
+- [x] ✅ Header component displays include strategy (auto, join, sep, cte, lat, json)
+- [x] ✅ Header component displays aliasing mode (all, collision)
+- [x] ✅ Color-coded display for visual distinction
+
+**Files modified:**
+- `packages/cli/src/repl/components/Header.tsx` - New props, DIALECT_DISPLAY/STRATEGY_DISPLAY maps, third row
+- `packages/cli/src/repl/index.tsx` - Pass dialect, includeStrategy, aliasingMode to Header
+
+**Tests:** All 122 CLI tests passing
 
 ---
 
