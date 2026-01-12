@@ -44,6 +44,16 @@ export interface ParsedInclude {
 }
 
 /**
+ * CLI-014: Qualified filter pending distribution
+ * Stores filters with explicit table reference (e.g., "posts.title")
+ * to be routed to the correct destination after parsing completes
+ */
+interface QualifiedFilter {
+	targetTable: string;
+	clause: WhereClause;
+}
+
+/**
  * Parse error with position info
  */
 export class ParseError extends Error {
@@ -244,6 +254,9 @@ export function parseNaturalQuery(
 
 	const result: ParsedQuery = { table: tableName };
 
+	// CLI-014: Collect qualified filters for distribution after parsing
+	const pendingQualifiedFilters: QualifiedFilter[] = [];
+
 	let i = 1;
 	while (i < tokens.length) {
 		const token = tokens[i]?.toLowerCase() ?? '';
@@ -251,12 +264,27 @@ export function parseNaturalQuery(
 		switch (token) {
 			case 'where': {
 				// Parse where clauses (can have multiple with "and")
-				result.where = result.where ?? [];
 				i++;
 
 				while (i < tokens.length) {
 					const { clause, nextIndex } = parseWhereCondition(tokens, i);
-					result.where.push(clause);
+
+					// CLI-014: Check if column is qualified (table.column)
+					if (clause.column.includes('.')) {
+						const [tablePrefix, ...columnParts] = clause.column.split('.');
+						if (tablePrefix) {
+							// Qualified column → store for distribution later
+							pendingQualifiedFilters.push({
+								targetTable: tablePrefix,
+								clause: { ...clause, column: columnParts.join('.') },
+							});
+						}
+					} else {
+						// Unqualified column → implicit scoping to main table
+						result.where = result.where ?? [];
+						result.where.push(clause);
+					}
+
 					i = nextIndex;
 
 					// Check for "and" to continue
@@ -375,61 +403,50 @@ export function parseNaturalQuery(
 							const possibleClause = tokens[i];
 							if (!possibleClause) break;
 
-							// Stop on keywords that end the include filter
+							// Stop on keywords that end the include filter (except 'and' which continues)
 							if (
-								['limit', 'offset', 'order', 'include', 'and', 'or'].includes(
+								['limit', 'offset', 'order', 'include'].includes(
 									possibleClause.toLowerCase(),
-								) === false
+								)
 							) {
-								// CLI-014: Check if column is qualified with main table name
-								// e.g., "tags.name" in "tags include posts where published = true and tags.name = x"
-								// The "tags.name" should be a main table filter, not an include filter
-								if (possibleClause.includes('.')) {
-									const [tablePrefix] = possibleClause.split('.');
-									if (tablePrefix?.toLowerCase() === result.table.toLowerCase()) {
-										// This is a main table filter, stop include filter parsing
-										break;
-									}
-								}
+								break;
+							}
 
-								// Try to parse a where condition
-								try {
-									const { clause, nextIndex } = parseWhereCondition(tokens, i);
-									includeFilters.push(clause);
-									i = nextIndex;
-
-									// Check for 'and' to continue parsing
-									if (tokens[i]?.toLowerCase() === 'and') {
-										// Peek ahead: if next column is qualified with main table, stop
-										const peekColumn = tokens[i + 1];
-										if (peekColumn?.includes('.')) {
-											const [peekTablePrefix] = peekColumn.split('.');
-											if (peekTablePrefix?.toLowerCase() === result.table.toLowerCase()) {
-												// Next condition is a main table filter, stop here
-												break;
-											}
-										}
-										i++;
-										continue;
-									}
-									// Any other keyword or relation name stops the filter
-									break;
-								} catch {
-									// Not a valid where condition, stop parsing filters
-									break;
-								}
-							} else if (possibleClause.toLowerCase() === 'and') {
-								// Peek ahead: if next column is qualified with main table, stop
-								const peekColumn = tokens[i + 1];
-								if (peekColumn?.includes('.')) {
-									const [peekTablePrefix] = peekColumn.split('.');
-									if (peekTablePrefix?.toLowerCase() === result.table.toLowerCase()) {
-										// Next condition is a main table filter, stop here
-										break;
-									}
-								}
+							// Handle 'and' - continue parsing
+							if (possibleClause.toLowerCase() === 'and') {
 								i++;
-							} else {
+								continue;
+							}
+
+							// Try to parse a where condition
+							try {
+								const { clause, nextIndex } = parseWhereCondition(tokens, i);
+
+								// CLI-014: Check if column is qualified (table.column)
+								if (clause.column.includes('.')) {
+									const [tablePrefix, ...columnParts] = clause.column.split('.');
+									if (tablePrefix) {
+										// Qualified column → store for distribution later
+										pendingQualifiedFilters.push({
+											targetTable: tablePrefix,
+											clause: { ...clause, column: columnParts.join('.') },
+										});
+									}
+								} else {
+									// Unqualified column → implicit scoping to current include
+									includeFilters.push(clause);
+								}
+
+								i = nextIndex;
+
+								// Check for 'and' to continue, or stop
+								const nextTok = tokens[i]?.toLowerCase();
+								if (nextTok !== 'and') {
+									break;
+								}
+								// 'and' found - loop will handle it
+							} catch {
+								// Not a valid where condition, stop parsing filters
 								break;
 							}
 						}
@@ -517,21 +534,27 @@ export function parseNaturalQuery(
 				// CLI-014: Handle 'and' after include filter parsing
 				// This happens when: "tags include posts where published = true and tags.name = x"
 				// The include filter parsing stops at "and tags.name", leaving "and" for outer parser
-				result.where = result.where ?? [];
 				i++;
 
 				while (i < tokens.length) {
 					const { clause, nextIndex } = parseWhereCondition(tokens, i);
 
-					// CLI-014: Strip table prefix from qualified columns (e.g., "users.active" → "active")
+					// CLI-014: Check if column is qualified (table.column)
 					if (clause.column.includes('.')) {
 						const [tablePrefix, ...columnParts] = clause.column.split('.');
-						if (tablePrefix?.toLowerCase() === result.table.toLowerCase()) {
-							clause.column = columnParts.join('.');
+						if (tablePrefix) {
+							// Store as pending qualified filter for distribution later
+							pendingQualifiedFilters.push({
+								targetTable: tablePrefix,
+								clause: { ...clause, column: columnParts.join('.') },
+							});
 						}
+					} else {
+						// Unqualified column → add to main where (implicit scoping)
+						result.where = result.where ?? [];
+						result.where.push(clause);
 					}
 
-					result.where.push(clause);
 					i = nextIndex;
 
 					// Check for more 'and' conditions
@@ -547,6 +570,46 @@ export function parseNaturalQuery(
 
 			default:
 				throw new ParseError(`Unexpected token: "${token}"`);
+		}
+	}
+
+	// CLI-014: Distribute qualified filters to their target destinations
+	for (const qf of pendingQualifiedFilters) {
+		const targetTableLower = qf.targetTable.toLowerCase();
+
+		if (targetTableLower === result.table.toLowerCase()) {
+			// Target is main table → add to result.where
+			result.where = result.where ?? [];
+			result.where.push(qf.clause);
+		} else {
+			// Target is an include table → find and add to that include's where
+			const targetInclude = result.include?.find((inc) => {
+				// Check if include's target table matches
+				// The relation name might be different from the table name,
+				// so we need to look up the relation's target
+				const qualifiedRel = `${result.table}.${inc.relation}`;
+				const relation = schema.relations[qualifiedRel] ?? schema.relations[inc.relation];
+				return relation?.target.toLowerCase() === targetTableLower;
+			});
+
+			if (targetInclude) {
+				targetInclude.where = targetInclude.where ?? [];
+				targetInclude.where.push(qf.clause);
+			} else {
+				// Table not found in query - error
+				const availableTables = [
+					result.table,
+					...(result.include?.map((inc) => {
+						const qualifiedRel = `${result.table}.${inc.relation}`;
+						const relation = schema.relations[qualifiedRel] ?? schema.relations[inc.relation];
+						return relation?.target ?? inc.relation;
+					}) ?? []),
+				];
+				throw new ParseError(
+					`Qualified column "${qf.targetTable}.${qf.clause.column}" references table "${qf.targetTable}" ` +
+						`which is not in the query. Available tables: ${availableTables.join(', ')}`,
+				);
+			}
 		}
 	}
 
