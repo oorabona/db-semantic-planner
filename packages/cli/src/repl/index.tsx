@@ -734,6 +734,9 @@ function ReplApp({ config }: ReplAppProps) {
 				mode={mode}
 				tableCount={tableCount}
 				relationCount={relationCount}
+				dialect={dialect}
+				includeStrategy={includeStrategy}
+				aliasingMode={aliasingMode}
 			/>
 
 			{/* Main content - either split or single view */}
