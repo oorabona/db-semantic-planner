@@ -24,6 +24,14 @@ const DOT_COMMANDS = [
 		command: '.aliasing',
 		description: 'Toggle column aliasing mode (always/onCollision)',
 	},
+	{
+		command: '.strategy [mode]',
+		description: 'Show/set include strategy (auto|join|separate|cte|lateral|json_agg)',
+	},
+	{
+		command: '.dialect [name]',
+		description: 'Show/set SQL dialect (postgresql|mysql|sqlite|mssql|duckdb)',
+	},
 	{ command: '.clear', description: 'Clear screen and output' },
 	{ command: '.exit / .quit', description: 'Exit REPL' },
 ];

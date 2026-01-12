@@ -23,7 +23,7 @@ import {
 } from '@db-semantic-planner/core';
 import type { ResolvedSchema } from '@db-semantic-planner/schema';
 import type { ParsedQuery, WhereClause } from './parser.js';
-import type { AliasingMode } from './types.js';
+import type { AliasingMode, DialectMode, IncludeStrategyMode } from './types.js';
 
 /**
  * Options for query execution
@@ -31,6 +31,19 @@ import type { AliasingMode } from './types.js';
 export interface QueryExecutionOptions {
 	/** Column aliasing mode for included relations (CLI-010) */
 	aliasingMode?: AliasingMode;
+	/** Include strategy for relations (CLI-011) */
+	includeStrategy?: IncludeStrategyMode;
+	/** SQL dialect for query compilation (CLI-011) */
+	dialect?: DialectMode;
+}
+
+/**
+ * Separate include query for SEPARATE strategy relations
+ */
+export interface SeparateQuery {
+	relation: string;
+	sql: string;
+	params: readonly unknown[];
 }
 
 /**
@@ -39,6 +52,8 @@ export interface QueryExecutionOptions {
 export interface QueryExecutionResult {
 	sql: string;
 	params: readonly unknown[];
+	/** Additional queries for SEPARATE strategy relations (manyToMany, hasMany) */
+	separateQueries?: SeparateQuery[];
 	plan: {
 		strategy: string;
 		tables: string[];
@@ -100,11 +115,26 @@ export function executeQuery(
 		const model = buildModelFromSchema(generatedSchema);
 		// Use Record<string, unknown> as DB type since tables are dynamic from user input
 		// CLI-010: Pass aliasing mode to MockAdapter
+		// CLI-011: Pass include strategy to ORM and dialect to MockAdapter
+		// Keep adapter reference to compile separate include queries
+		// Note: DuckDB uses PostgreSQL syntax in Kysely, map accordingly
+		const dialectToMock = (d: DialectMode | undefined) => {
+			if (!d || d === 'postgresql' || d === 'duckdb') return 'postgresql';
+			if (d === 'mysql') return 'mysql';
+			if (d === 'sqlite') return 'sqlite';
+			if (d === 'mssql') return 'mssql';
+			return 'postgresql';
+		};
+		const adapter = createMockAdapter({
+			dialect: dialectToMock(options?.dialect),
+			aliasIncludedColumns: options?.aliasingMode ?? 'always',
+		});
+		// CLI-011: 'auto' means let the planner decide (don't force a strategy)
+		const strategyToUse = options?.includeStrategy === 'auto' ? undefined : options?.includeStrategy;
 		const orm = createOrm<Record<string, unknown>>({
 			model,
-			adapter: createMockAdapter({
-				aliasIncludedColumns: options?.aliasingMode ?? 'always',
-			}),
+			adapter,
+			...(strategyToUse && { defaultIncludeStrategy: strategyToUse }),
 		});
 
 		// Start building the query (table name comes from user input)
@@ -147,15 +177,45 @@ export function executeQuery(
 		// Get the dump (compiled SQL + plan)
 		const dump: Dump = builder.dump();
 
+		// Collect warnings from planner
+		const warnings = dump.plan.warnings.map((w) => w.message);
+
+		// Compile separate include queries if any
+		const separateQueries: SeparateQuery[] = [];
+
+		// Use compileWithIncludes to get separate include metadata
+		const compileResult = adapter.compileWithIncludes(dump.plan, { model });
+
+		if (compileResult.separateIncludes.length > 0) {
+			const relations = compileResult.separateIncludes
+				.map((info) => info.relationName)
+				.join(', ');
+			warnings.push(
+				`Relation(s) [${relations}] use SEPARATE query strategy (to-many).`,
+			);
+
+			// Compile each separate include with sample parent IDs
+			const sampleParentIds = [1, 2, 3]; // Example IDs for SQL preview
+			for (const info of compileResult.separateIncludes) {
+				const compiled = adapter.compileSeparateInclude(info, sampleParentIds);
+				separateQueries.push({
+					relation: info.relationName,
+					sql: compiled.sql,
+					params: compiled.parameters,
+				});
+			}
+		}
+
 		return {
 			sql: dump.sql,
 			params: dump.params,
+			separateQueries: separateQueries.length > 0 ? separateQueries : undefined,
 			plan: {
 				strategy: dump.plan.decisions
 					.map((d) => `${d.type}: ${d.choice}`)
 					.join(', '),
 				tables: [query.table, ...(query.include ?? [])],
-				warnings: dump.plan.warnings.map((w) => w.message),
+				warnings,
 			},
 		};
 	} catch (error) {
@@ -183,17 +243,31 @@ export function formatExecutionResult(result: QueryExecutionResult): string {
 
 	const lines: string[] = [];
 
-	// SQL
-	lines.push('SQL:');
+	// Main SQL
+	lines.push('Main SQL:');
 	lines.push(result.sql);
 	lines.push('');
 
-	// Parameters
+	// Main Parameters
 	if (result.params.length > 0) {
 		lines.push(
 			`Parameters: [${result.params.map((p) => JSON.stringify(p)).join(', ')}]`,
 		);
 		lines.push('');
+	}
+
+	// Separate Include Queries (SEPARATE strategy)
+	if (result.separateQueries && result.separateQueries.length > 0) {
+		for (const sq of result.separateQueries) {
+			lines.push(`Separate Query (${sq.relation}):`);
+			lines.push(sq.sql);
+			if (sq.params.length > 0) {
+				lines.push(
+					`  Parameters: [${sq.params.map((p) => JSON.stringify(p)).join(', ')}]`,
+				);
+			}
+			lines.push('');
+		}
 	}
 
 	// Plan

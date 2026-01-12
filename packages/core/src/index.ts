@@ -191,6 +191,8 @@ export type {
 	// Recursive CTE planning (RFC-001)
 	RecursivePlanOptions,
 	RecursivePlanReport,
+	// Include strategy (CORE-006)
+	ResolvedIncludeStrategy,
 } from './planner.js';
 export {
 	// Errors
@@ -199,6 +201,8 @@ export {
 	plan,
 	planRecursive,
 	RecursiveShapeMismatchError,
+	// Include strategy errors (CORE-006)
+	UnsupportedStrategyError,
 	// Recursive CTE helpers
 	validateRecursiveShape,
 } from './planner.js';
@@ -219,6 +223,7 @@ export type {
 	AdapterCapabilities,
 	AdapterStreamOptions,
 	// DX-104: Split interfaces (ISP compliance)
+	AliasIncludedColumnsMode,
 	BaseAdapter,
 	BasicAdapter,
 	CompiledQuery,

@@ -110,7 +110,7 @@ describe('introspection', () => {
 			expect(col?.type).toBe('string');
 		});
 
-		it('should map uuid to string', async () => {
+		it('should map uuid to uuid type', async () => {
 			const db = createMockDb([
 				createTable('items', [createColumn('id', 'uuid')]),
 			]);
@@ -118,10 +118,13 @@ describe('introspection', () => {
 			const result = await introspect(db, { _foreignKeysForTesting: [] });
 			const table = result.getTable('items');
 			const col = table?.columns.find((c) => c.name === 'id');
-			expect(col?.type).toBe('string');
+			// UUID gets its own type (better than mapping to string)
+			expect(col?.type).toBe('uuid');
+			// Original DB type is preserved
+			expect(col?.originalDbType).toBe('uuid');
 		});
 
-		it('should map integer types to number', async () => {
+		it('should map integer types correctly', async () => {
 			const db = createMockDb([
 				createTable('counters', [
 					createColumn('id', 'serial', { autoIncrementing: true }),
@@ -133,12 +136,18 @@ describe('introspection', () => {
 			const result = await introspect(db, { _foreignKeysForTesting: [] });
 			const table = result.getTable('counters');
 
+			// Regular integers map to number
 			expect(table?.columns.find((c) => c.name === 'count')?.type).toBe(
 				'number',
 			);
+			// BigInt maps to bigint type (for safe handling of large integers)
 			expect(table?.columns.find((c) => c.name === 'big_count')?.type).toBe(
-				'number',
+				'bigint',
 			);
+			// Original DB types are preserved
+			expect(
+				table?.columns.find((c) => c.name === 'big_count')?.originalDbType,
+			).toBe('bigint');
 		});
 
 		it('should map float/decimal to number', async () => {
@@ -175,11 +184,12 @@ describe('introspection', () => {
 			expect(col?.type).toBe('boolean');
 		});
 
-		it('should map timestamp to date', async () => {
+		it('should map timestamp and date types correctly', async () => {
 			const db = createMockDb([
 				createTable('events', [
 					createColumn('id', 'int4', { autoIncrementing: true }),
 					createColumn('created_at', 'timestamptz'),
+					createColumn('updated_at', 'timestamp'),
 					createColumn('event_date', 'date'),
 				]),
 			]);
@@ -187,12 +197,21 @@ describe('introspection', () => {
 			const result = await introspect(db, { _foreignKeysForTesting: [] });
 			const table = result.getTable('events');
 
+			// Timestamp types map to datetime
 			expect(table?.columns.find((c) => c.name === 'created_at')?.type).toBe(
-				'date',
+				'datetime',
 			);
+			expect(table?.columns.find((c) => c.name === 'updated_at')?.type).toBe(
+				'datetime',
+			);
+			// Date-only maps to date
 			expect(table?.columns.find((c) => c.name === 'event_date')?.type).toBe(
 				'date',
 			);
+			// Original DB types are preserved (useful for detecting timezone info loss)
+			expect(
+				table?.columns.find((c) => c.name === 'created_at')?.originalDbType,
+			).toBe('timestamptz');
 		});
 
 		it('should map json/jsonb to json', async () => {
@@ -225,6 +244,69 @@ describe('introspection', () => {
 			const table = result.getTable('custom');
 			const col = table?.columns.find((c) => c.name === 'geo');
 			expect(col?.type).toBe('string');
+			// Original DB type is preserved
+			expect(col?.originalDbType).toBe('geometry');
+		});
+
+		it('should add warnings for lossy type conversions', async () => {
+			const db = createMockDb([
+				createTable('prices', [
+					createColumn('id', 'int4', { autoIncrementing: true }),
+					createColumn('amount', 'numeric(10,2)'),
+					createColumn('name', 'varchar(255)'),
+					createColumn('data', 'jsonb'),
+					createColumn('geo', 'geometry'),
+				]),
+			]);
+
+			const result = await introspect(db, { _foreignKeysForTesting: [] });
+
+			// Should have warnings for lossy conversions
+			expect(result.warnings.some((w) => w.includes('prices.amount'))).toBe(
+				true,
+			);
+			expect(result.warnings.some((w) => w.includes('precision'))).toBe(true);
+			expect(result.warnings.some((w) => w.includes('prices.name'))).toBe(true);
+			expect(result.warnings.some((w) => w.includes('varchar'))).toBe(true);
+			expect(result.warnings.some((w) => w.includes('prices.data'))).toBe(true);
+			expect(result.warnings.some((w) => w.includes('jsonb'))).toBe(true);
+			expect(result.warnings.some((w) => w.includes('prices.geo'))).toBe(true);
+			expect(result.warnings.some((w) => w.includes('geometry'))).toBe(true);
+		});
+
+		it('should preserve originalDbType for all columns', async () => {
+			const db = createMockDb([
+				createTable('mixed', [
+					createColumn('id', 'int4', { autoIncrementing: true }),
+					createColumn('price', 'numeric(10,2)'),
+					createColumn('name', 'varchar(100)'),
+					createColumn('is_active', 'bool'),
+					createColumn('uuid', 'uuid'),
+					createColumn('count', 'bigint'),
+				]),
+			]);
+
+			const result = await introspect(db, { _foreignKeysForTesting: [] });
+			const table = result.getTable('mixed');
+
+			expect(table?.columns.find((c) => c.name === 'id')?.originalDbType).toBe(
+				'int4',
+			);
+			expect(
+				table?.columns.find((c) => c.name === 'price')?.originalDbType,
+			).toBe('numeric(10,2)');
+			expect(
+				table?.columns.find((c) => c.name === 'name')?.originalDbType,
+			).toBe('varchar(100)');
+			expect(
+				table?.columns.find((c) => c.name === 'is_active')?.originalDbType,
+			).toBe('bool');
+			expect(
+				table?.columns.find((c) => c.name === 'uuid')?.originalDbType,
+			).toBe('uuid');
+			expect(
+				table?.columns.find((c) => c.name === 'count')?.originalDbType,
+			).toBe('bigint');
 		});
 	});
 

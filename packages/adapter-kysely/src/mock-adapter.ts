@@ -31,9 +31,18 @@ import type {
 import { ExecutionError } from '@db-semantic-planner/core';
 import {
 	Kysely,
+	MssqlAdapter,
+	MssqlIntrospector,
+	MssqlQueryCompiler,
+	MysqlAdapter,
+	MysqlIntrospector,
+	MysqlQueryCompiler,
 	PostgresAdapter,
 	PostgresIntrospector,
 	PostgresQueryCompiler,
+	SqliteAdapter,
+	SqliteIntrospector,
+	SqliteQueryCompiler,
 } from 'kysely';
 import {
 	compile,
@@ -50,7 +59,7 @@ import { validateIdentifier } from './errors.js';
 /**
  * Supported dialects for MockAdapter SQL generation.
  */
-export type MockDialect = 'postgresql' | 'mysql' | 'sqlite';
+export type MockDialect = 'postgresql' | 'mysql' | 'sqlite' | 'mssql';
 
 /**
  * Options for creating a MockAdapter.
@@ -95,24 +104,51 @@ class DummyDriver {
 
 /**
  * Creates a Kysely instance with the specified dialect but no real database connection.
+ * CLI-011: Support all major SQL dialects for accurate syntax generation.
  */
 function createMockKysely(dialect: MockDialect): Kysely<unknown> {
-	// For now, we only support PostgreSQL syntax
-	// MySQL and SQLite can be added later with their respective adapters
-	if (dialect !== 'postgresql') {
-		throw new Error(
-			`MockAdapter currently only supports 'postgresql' dialect. Got: '${dialect}'`,
-		);
+	switch (dialect) {
+		case 'postgresql':
+			return new Kysely({
+				dialect: {
+					createAdapter: () => new PostgresAdapter(),
+					createDriver: () => new DummyDriver() as never,
+					createIntrospector: (db) => new PostgresIntrospector(db),
+					createQueryCompiler: () => new PostgresQueryCompiler(),
+				},
+			});
+		case 'mysql':
+			return new Kysely({
+				dialect: {
+					createAdapter: () => new MysqlAdapter(),
+					createDriver: () => new DummyDriver() as never,
+					createIntrospector: (db) => new MysqlIntrospector(db),
+					createQueryCompiler: () => new MysqlQueryCompiler(),
+				},
+			});
+		case 'sqlite':
+			return new Kysely({
+				dialect: {
+					createAdapter: () => new SqliteAdapter(),
+					createDriver: () => new DummyDriver() as never,
+					createIntrospector: (db) => new SqliteIntrospector(db),
+					createQueryCompiler: () => new SqliteQueryCompiler(),
+				},
+			});
+		case 'mssql':
+			return new Kysely({
+				dialect: {
+					createAdapter: () => new MssqlAdapter(),
+					createDriver: () => new DummyDriver() as never,
+					createIntrospector: (db) => new MssqlIntrospector(db),
+					createQueryCompiler: () => new MssqlQueryCompiler(),
+				},
+			});
+		default: {
+			const _exhaustive: never = dialect;
+			throw new Error(`Unknown dialect: ${_exhaustive}`);
+		}
 	}
-
-	return new Kysely({
-		dialect: {
-			createAdapter: () => new PostgresAdapter(),
-			createDriver: () => new DummyDriver() as never,
-			createIntrospector: (db) => new PostgresIntrospector(db),
-			createQueryCompiler: () => new PostgresQueryCompiler(),
-		},
-	});
 }
 
 /**
@@ -212,7 +248,7 @@ export class MockAdapter implements Adapter<unknown> {
 			aliasIncludedColumns: this._aliasIncludedColumns,
 		});
 
-		// Convert to adapter-agnostic format
+		// Convert to adapter-agnostic format (preserving all properties including M:N)
 		const separateIncludes: SeparateIncludeInfo[] = result.separateIncludes.map(
 			(info) => {
 				const mapped: SeparateIncludeInfo = {
@@ -226,6 +262,18 @@ export class MockAdapter implements Adapter<unknown> {
 				}
 				if (info.where !== undefined) {
 					(mapped as { where?: typeof info.where }).where = info.where;
+				}
+				// M:N (manyToMany) properties
+				if (info.through !== undefined) {
+					(mapped as { through?: string }).through = info.through;
+				}
+				if (info.throughSourceKey !== undefined) {
+					(mapped as { throughSourceKey?: string }).throughSourceKey =
+						info.throughSourceKey;
+				}
+				if (info.throughTargetKey !== undefined) {
+					(mapped as { throughTargetKey?: string }).throughTargetKey =
+						info.throughTargetKey;
 				}
 				return mapped;
 			},

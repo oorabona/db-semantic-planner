@@ -240,19 +240,49 @@ if (supportsStreaming(adapter)) {
 
 ---
 
-## DX-105: Dialect Capabilities Duplication (OCP Risk)
+## DX-105: Dialect Capabilities Duplication (OCP Risk) ✅ COMPLETED (2026-01-12)
 
-**Problem:** Dialect capabilities are maintained in TWO places:
-- `packages/core/src/dialects/index.ts`
-- `packages/adapter-kysely/src/dialect.ts`
+**Problem:** Dialect capabilities were maintained in TWO places:
+- `packages/core/src/dialects/index.ts` - SQL syntax variations
+- `packages/adapter-kysely/src/dialect.ts` - Runtime feature detection
 
 **Risk:** Divergence between core's assumptions and adapter's actual behavior.
 
-**Tasks:**
-- [ ] Analyze what each system provides
-- [ ] Determine single source of truth (likely adapter, core queries it)
-- [ ] Core should ask adapter "what can you do?" not assume
-- [ ] Remove duplication
+**Analysis:**
+After investigation, the two systems serve **different purposes** that justify their separation:
+
+| System | Purpose | Examples |
+|--------|---------|----------|
+| Core `DialectCapabilities` | SQL syntax generation | `recursivePathStyle`, `stringConcatStyle`, `identifierQuote`, `parameterStyle` |
+| Adapter `DialectCapabilities` | Runtime feature detection | `supportsStreaming`, `supportsWithSchema`, `supportsCycleDetection` |
+| Core `AdapterCapabilities` | Interface contract | Subset that adapters must expose |
+
+**Overlap:** Both had `supportsArrayType`, `supportsReturning`, `supportsWindowFunctions`.
+
+**Solution Implemented:**
+1. Created `MergedCapabilities` interface in compiler that combines both
+2. Adapter capabilities are **authoritative** for feature flags (e.g., `supportsArrayType`)
+3. Core capabilities provide **SQL syntax info** only (e.g., `recursivePathStyle`, `stringConcatStyle`)
+4. Added `getMergedCapabilities()` function that merges appropriately
+5. Updated path tracking functions to use merged capabilities
+
+**Key Changes:**
+- `packages/adapter-kysely/src/compiler.ts`:
+  - Added `MergedCapabilities` interface
+  - Added `getMergedCapabilities()` function
+  - Updated `compilePathTrackingBaseCase()` to use `MergedCapabilities`
+  - Updated `compilePathTrackingRecursive()` to use `MergedCapabilities`
+  - Updated all call sites to use `getMergedCapabilities()` instead of `getCoreCapabilitiesForDialect()`
+
+**Result:** Adapter is now authoritative for feature detection. Core provides SQL syntax info.
+All 657 adapter-kysely tests passing.
+
+**Completed Tasks:**
+- [x] Analyze what each system provides
+- [x] Determine single source of truth (adapter for features, core for syntax)
+- [x] Implemented merged capabilities with adapter as authoritative for features
+- [x] No duplication removal needed - systems serve different purposes
+- [x] All tests passing
 
 ---
 
@@ -304,7 +334,7 @@ const adapter = createKyselyAdapter(db, undefined, 'postgresql');
 
 ---
 
-## DX-108: Introspection Type Mapping Lossy
+## DX-108: Introspection Type Mapping Lossy ✅ COMPLETED (2026-01-12)
 
 **Problem:** DB types → ModelIR mapping loses precision.
 
@@ -315,27 +345,95 @@ const adapter = createKyselyAdapter(db, undefined, 'postgresql');
 
 **File:** `packages/adapter-kysely/src/introspection.ts`
 
-**Tasks:**
-- [ ] Audit current type mappings
-- [ ] Consider richer type representation (e.g., `{ type: 'decimal', precision: 10, scale: 2 }`)
-- [ ] Document known limitations
-- [ ] Add warnings for lossy conversions in introspection output
+**Solution Implemented:**
+
+1. **Fixed type mappings that already had support in ColumnType:**
+   - `uuid` → `uuid` (was incorrectly mapping to `string`)
+   - `bigint` → `bigint` (was incorrectly mapping to `number`)
+   - `timestamp/timestamptz` → `datetime` (more accurate than `date`)
+
+2. **Added `originalDbType` field to ColumnIR:**
+   - Preserves full database type string (e.g., `varchar(255)`, `numeric(10,2)`)
+   - Available via introspection for consumers who need precision info
+   - Optional field - manually defined schemas don't require it
+
+3. **Added lossy conversion warnings:**
+   - Introspection now adds warnings for lossy type conversions
+   - Examples: `"Column 'prices.amount': decimal precision (10,2) is not preserved"`
+   - Warnings in `IntrospectedModelIR.warnings` array
+
+**Type Mapping Summary:**
+
+| DB Type | ModelIR Type | Lossy? | Reason |
+|---------|--------------|--------|--------|
+| `uuid` | `uuid` | No | Exact mapping |
+| `varchar(N)`, `char(N)` | `string` | Yes | Length lost |
+| `text` | `string` | No | No precision |
+| `bigint`, `bigserial` | `bigint` | No | Exact mapping for JS BigInt |
+| `int`, `smallint`, `serial` | `number` | No | Exact mapping |
+| `numeric(P,S)`, `decimal(P,S)` | `number` | Yes | Precision/scale lost |
+| `float`, `double`, `real` | `number` | No | Exact mapping |
+| `boolean` | `boolean` | No | Exact mapping |
+| `timestamp` | `datetime` | No | Exact mapping |
+| `timestamptz` | `datetime` | Yes | Timezone info lost |
+| `date` | `date` | No | Exact mapping |
+| `time`, `timetz` | `date` | Yes | Time-only not supported |
+| `json` | `json` | No | Exact mapping |
+| `jsonb` | `json` | Yes | jsonb vs json distinction lost |
+| Unknown types | `string` | Yes | Type info lost |
+
+**Usage:**
+```typescript
+const model = await introspect(db);
+
+// Access original DB type for precision info
+const col = model.getTable('prices')?.columns.find(c => c.name === 'amount');
+console.log(col.type);          // 'number'
+console.log(col.originalDbType); // 'numeric(10,2)'
+
+// Check for lossy conversion warnings
+for (const warning of model.warnings) {
+  console.log(warning); // "Column 'prices.amount': decimal precision (10,2) is not preserved"
+}
+```
+
+**Completed Tasks:**
+- [x] Audit current type mappings
+- [x] Fix uuid → uuid mapping (was incorrectly mapping to string)
+- [x] Fix bigint → bigint mapping (was incorrectly mapping to number)
+- [x] Fix timestamp → datetime mapping (more accurate than date)
+- [x] Add `originalDbType` field to ColumnIR interface
+- [x] Implement `mapColumnTypeDetailed()` with lossy conversion detection
+- [x] Add warnings for lossy conversions in introspection output
+- [x] Add tests for originalDbType preservation
+- [x] Add tests for lossy conversion warnings
+- [x] All 50 introspection tests passing
 
 ---
 
-## DX-109: Core Package Mixed Concerns
+## DX-109: Core Package Mixed Concerns ✅ COMPLETED (2026-01-12)
 
 **Problem:** `packages/core` mixes domain (ModelIR, IntentAST, Planner) with infrastructure (DX execution, hydration).
 
-**Assessment:** Pragmatic trade-off, but reduces strict clean architecture.
+**Assessment:** After thorough analysis, the current structure is actually a **proper Hexagonal Architecture** implementation, not a violation.
 
-**File:** `packages/core/src/dx/orm.ts`
+**Resolution:** Documented in [ADR-004: Core Package Layered Structure](docs/adrs/ADR-004-core-package-layered-structure.md)
 
-**Tasks:**
-- [ ] Evaluate if `dx/` should be a separate package (`@db-semantic-planner/dx`)
-- [ ] Consider: core = pure domain, dx = execution layer
-- [ ] Weigh against "too many packages" fatigue
-- [ ] Document architectural decision if keeping as-is
+**Key Findings:**
+1. **Domain layer** (model-ir, intent-ast, planner): Pure, no adapter/dx imports
+2. **Port** (adapter.ts): Interface contract, imports domain types only
+3. **Application layer** (dx/): Orchestrates domain + port, depends on both
+4. Dependencies flow correctly: Domain ← Port ← Application ← Adapters
+
+**Decision:** Keep current structure. The dx/ subdirectory is the "application layer" in hexagonal terms - orchestrating domain logic through the port interface. This is intentional, not a violation.
+
+**Completed Tasks:**
+- [x] Analyzed current structure and dependency flow (2026-01-12)
+- [x] Verified domain layer has no dx/ imports (2026-01-12)
+- [x] Evaluated separation options (A: separate package, B: keep with docs, C: rename)
+- [x] Selected Option B: Keep in core with documented layering
+- [x] Created ADR-004 documenting the architectural decision
+- [x] Added dependency-cruiser rule recommendation for enforcement
 
 ---
 

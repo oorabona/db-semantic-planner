@@ -1000,15 +1000,16 @@ describe('Q5: Include strategy contract enforcement', () => {
 		});
 	});
 
-	describe('hasMany → separate strategy (default)', () => {
-		it('should NOT add JOIN for hasMany include in main query', () => {
+	describe('hasMany → separate strategy (explicit)', () => {
+		// Note: JOIN is now the default strategy. To test SEPARATE, we explicitly request it.
+		it('should NOT add JOIN for hasMany include when using separate strategy', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'users',
 				include: [{ relation: 'posts' }],
 			};
 
-			const planReport = plan(intent, includeContractSchema);
+			const planReport = plan(intent, includeContractSchema, { defaultIncludeStrategy: 'separate' });
 			const compiled = compile(planReport, includeContractSchema, kysely);
 
 			// Verify decision is 'separate'
@@ -1022,7 +1023,7 @@ describe('Q5: Include strategy contract enforcement', () => {
 			expect(compiled.sql.toLowerCase()).not.toContain('join');
 		});
 
-		it('should provide metadata for follow-up queries via compileWithIncludes', async () => {
+		it('should provide metadata for follow-up queries via compileWithIncludes (separate strategy)', async () => {
 			const { compileWithIncludes } = await import('./compiler.js');
 
 			const intent: QueryIntent = {
@@ -1031,7 +1032,7 @@ describe('Q5: Include strategy contract enforcement', () => {
 				include: [{ relation: 'posts' }],
 			};
 
-			const planReport = plan(intent, includeContractSchema);
+			const planReport = plan(intent, includeContractSchema, { defaultIncludeStrategy: 'separate' });
 			const result = compileWithIncludes(
 				planReport,
 				includeContractSchema,

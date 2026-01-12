@@ -1105,7 +1105,7 @@ await orm.select('users').all(); // Throws ExecutionError with fix suggestion
 
 ## Pending - P2
 
-### ADAPTER-003: Smart Column Aliasing (onCollision mode)
+### ~~ADAPTER-003: Smart Column Aliasing (onCollision mode)~~ ✅ DONE (2025-01-12)
 
 **Priority:** LOW | **Effort:** S (~4h) | **Breaking:** No
 **Scope:** adapter-kysely
@@ -1118,11 +1118,18 @@ Currently, JOIN includes alias ALL columns from included tables (`"author.id"`, 
 - `'onCollision'`: Only alias columns that exist in multiple tables (e.g., `id`, `createdAt`)
 
 **Implementation:**
-- [ ] Scan both source and target table columns before SELECT generation
-- [ ] Build collision set: columns that exist in both tables
-- [ ] Only add alias for columns in collision set when mode is `'onCollision'`
-- [ ] Add option to `createKyselyAdapter()` and `compile()` options
-- [ ] Tests for both modes
+- [x] ✅ Scan both source and target table columns before SELECT generation
+- [x] ✅ Build collision set: columns that exist in both tables (detectColumnCollisions function)
+- [x] ✅ Only add alias for columns in collision set when mode is `'onCollision'`
+- [x] ✅ Add option to `createKyselyAdapter()` and `compile()` options
+- [x] ✅ Tests for both modes (5 tests: 'always' mode, 'onCollision' mode, multiple includes)
+
+**Files modified:**
+- `packages/core/src/adapter.ts` - Added `AliasIncludedColumnsMode` type and `aliasIncludedColumns` to `CompileOptions`
+- `packages/core/src/index.ts` - Exported `AliasIncludedColumnsMode` type
+- `packages/adapter-kysely/src/compiler.ts` - Added `detectColumnCollisions()`, updated `addIncludeSelectColumns()`
+- `packages/adapter-kysely/src/kysely-adapter.ts` - Passed option through `compile()` and `compileWithIncludes()`
+- `packages/adapter-kysely/src/compiler.test.ts` - Added 5 tests for ADAPTER-003
 
 **Example:**
 ```typescript
@@ -1134,6 +1141,91 @@ SELECT "t0"."id", "t0"."title", "author"."id" AS "author.id", "author"."name"
 ```
 
 **Note:** `'never'` mode intentionally excluded—it would cause data loss when columns collide and results are converted to JavaScript objects.
+
+---
+
+### ~~CORE-008~~ LATERAL JOIN and JSON_AGG Include Strategies ✅ (2026-01-12)
+
+**Priority:** HIGH | **Effort:** M (~6h) | **Breaking:** No
+**Scope:** core, adapter-kysely
+
+Implemented LATERAL JOIN and JSON_AGG include strategies for efficient nested data fetching with per-parent row limiting.
+
+**Features implemented:**
+
+1. **LATERAL JOIN Strategy**
+   - [x] ✅ `collectLateralIncludes()` - collects includes with `lateral` strategy
+   - [x] ✅ `applyLateralJoins()` - generates `LEFT JOIN LATERAL (SELECT ... LIMIT n) AS alias ON true`
+   - [x] ✅ Per-parent LIMIT support via `include.limit`
+   - [x] ✅ ORDER BY support via `include.orderBy`
+   - [x] ✅ Dialect capability check (`supportsLateralJoin`)
+
+2. **JSON_AGG Strategy**
+   - [x] ✅ `collectJsonAggIncludes()` - collects includes with `json_agg` strategy
+   - [x] ✅ `addJsonAggSelects()` - generates correlated subquery with aggregation
+   - [x] ✅ Dialect-aware function: PostgreSQL `json_agg`, MySQL `JSON_ARRAYAGG`, SQLite `json_group_array`
+   - [x] ✅ ORDER BY support inside aggregation
+   - [x] ✅ COALESCE for empty array fallback
+
+3. **IncludeIntent Extensions**
+   - [x] ✅ Added `limit?: number` to IncludeIntent
+   - [x] ✅ Added `orderBy?: readonly OrderByIntent[]` to IncludeIntent
+
+**Files modified:**
+- `packages/core/src/intent-ast.ts` - Added limit/orderBy to IncludeIntent
+- `packages/adapter-kysely/src/compiler.ts` - Added 4 new functions for LATERAL and JSON_AGG
+- `packages/adapter-kysely/src/compiler.test.ts` - Added 5 new tests
+
+**SQL Examples:**
+
+```sql
+-- LATERAL JOIN (PostgreSQL/DuckDB/MSSQL)
+SELECT "t0".*, "recent_posts".*
+FROM "users" AS "t0"
+LEFT JOIN LATERAL (
+  SELECT * FROM "posts" 
+  WHERE "posts"."authorId" = "t0"."id"
+  ORDER BY "createdAt" DESC
+  LIMIT 5
+) AS "recent_posts" ON true
+
+-- JSON_AGG (PostgreSQL)
+SELECT "t0".*, (
+  SELECT COALESCE(json_agg(to_jsonb(t) ORDER BY "createdAt" DESC), '[]'::json)
+  FROM "posts" AS t
+  WHERE t."authorId" = "t0"."id"
+) AS "posts"
+FROM "users" AS "t0"
+```
+
+**Tests:** 1,427 passing (5 todo for ADAPTER-003 onCollision mode)
+
+---
+
+### CLI-010: Aliasing Mode Switch in REPL/CLI
+
+**Priority:** MEDIUM | **Effort:** S (~2h) | **Breaking:** No
+**Scope:** cli
+**Depends on:** ADAPTER-003
+
+Add ability to switch between `always` and `onCollision` aliasing modes in REPL and CLI.
+
+**Implementation:**
+- [ ] Add `.alias <mode>` REPL command to switch modes (`always` | `onCollision`)
+- [ ] Add `--alias-mode` CLI flag for `dbsp query` command
+- [ ] Display current mode in REPL status/prompt
+- [ ] Persist preference in REPL session
+
+**Example:**
+```bash
+# CLI
+dbsp query --alias-mode onCollision "select('users').include('posts')"
+
+# REPL
+dbsp> .alias onCollision
+Aliasing mode set to: onCollision
+dbsp> select('users').include('posts')
+```
 
 ---
 

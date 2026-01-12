@@ -7,7 +7,6 @@
 
 // Compiler (low-level)
 export {
-	type CompileResultWithIncludes,
 	compile,
 	compileDelete,
 	compileInsert,
@@ -19,8 +18,12 @@ export {
 	compileWindowSelect,
 	compileWithIncludes,
 	type InternalCompileOptions,
-	type SeparateIncludeInfo,
 } from './compiler.js';
+// Re-export types from core (SeparateIncludeInfo, CompileResultWithIncludes)
+export type {
+	CompileResultWithIncludes,
+	SeparateIncludeInfo,
+} from '@db-semantic-planner/core';
 export type { DialectCapabilities, DialectName } from './dialect.js';
 // Dialect detection and capabilities (DIALECT-001)
 export {

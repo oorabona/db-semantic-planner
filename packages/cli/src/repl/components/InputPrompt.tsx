@@ -18,6 +18,10 @@ interface InputPromptProps {
 	history?: CommandHistory;
 	/** Callback when input value changes */
 	onInputChange?: (value: string) => void;
+	/** Currently selected completion text (from Tab navigation) */
+	selectedCompletion?: string;
+	/** Callback when a completion is accepted (Enter with selection) */
+	onCompletionAccepted?: () => void;
 }
 
 export function InputPrompt({
@@ -26,6 +30,8 @@ export function InputPrompt({
 	resetKey = 0,
 	history,
 	onInputChange,
+	selectedCompletion,
+	onCompletionAccepted,
 }: InputPromptProps) {
 	const promptSymbol = mode === 'natural' ? '>' : 'sql>';
 	const promptColor = mode === 'natural' ? 'green' : 'yellow';
@@ -66,6 +72,16 @@ export function InputPrompt({
 
 	const handleSubmit = useCallback(
 		(value: string) => {
+			// If a completion is selected, accept it instead of executing
+			if (selectedCompletion) {
+				setHistoryValue(selectedCompletion);
+				setHistoryKey((k) => k + 1);
+				setCurrentInput(selectedCompletion);
+				onInputChange?.(selectedCompletion);
+				onCompletionAccepted?.();
+				return;
+			}
+
 			if (history && value.trim()) {
 				history.add(value);
 			}
@@ -73,7 +89,13 @@ export function InputPrompt({
 			setHistoryValue(undefined);
 			onSubmit(value);
 		},
-		[history, onSubmit],
+		[
+			history,
+			onSubmit,
+			selectedCompletion,
+			onCompletionAccepted,
+			onInputChange,
+		],
 	);
 
 	const handleChange = useCallback(

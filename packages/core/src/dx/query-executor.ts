@@ -7,17 +7,16 @@
  * @module query-executor
  */
 
-import type {
-	Adapter,
-	CompileResultWithIncludes,
-	CompiledQuery,
-	Dump,
-} from '../adapter.js';
+import type { Adapter, Dump } from '../adapter.js';
 import type { OrderByIntent, WhereIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
 
-import { ExecutionError, InvalidOperationError, NotFoundError } from './errors.js';
+import {
+	ExecutionError,
+	InvalidOperationError,
+	NotFoundError,
+} from './errors.js';
 import { and, eq, inArray } from './filters.js';
 import type { RecursiveIncludeConfig } from './intent-builder.js';
 import { ResultHydrator } from './result-hydrator.js';
@@ -87,10 +86,7 @@ export class QueryExecutor<TResult = unknown> {
 	private readonly hydrator: ResultHydrator<TResult>;
 	private readonly ctx: ExecutionContext<TResult>;
 
-	constructor(
-		adapter: Adapter,
-		ctx: ExecutionContext<TResult>,
-	) {
+	constructor(adapter: Adapter, ctx: ExecutionContext<TResult>) {
 		this.adapter = adapter;
 		this.ctx = ctx;
 		this.hydrator = new ResultHydrator<TResult>(
@@ -188,7 +184,9 @@ export class QueryExecutor<TResult = unknown> {
 	 */
 	async byId(
 		value: string | number | Record<string, unknown>,
-		addConditionAndExecute: (condition: WhereIntent) => Promise<TResult | undefined>,
+		addConditionAndExecute: (
+			condition: WhereIntent,
+		) => Promise<TResult | undefined>,
 	): Promise<TResult | undefined> {
 		const condition = this.buildPkCondition(value);
 		return addConditionAndExecute(condition);
@@ -199,7 +197,9 @@ export class QueryExecutor<TResult = unknown> {
 	 */
 	async byIdOrThrow(
 		value: string | number | Record<string, unknown>,
-		addConditionAndExecute: (condition: WhereIntent) => Promise<TResult | undefined>,
+		addConditionAndExecute: (
+			condition: WhereIntent,
+		) => Promise<TResult | undefined>,
 	): Promise<TResult> {
 		const result = await this.byId(value, addConditionAndExecute);
 		if (result === undefined) {

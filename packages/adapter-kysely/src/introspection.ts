@@ -179,47 +179,174 @@ function shouldIncludeTable(
 }
 
 /**
- * Convert Kysely column type to our ColumnIR type.
+ * Result of mapping a database type to ColumnIR type.
+ * Includes the mapped type and whether the conversion was lossy.
  */
-function mapColumnType(kyselyType: string): ColumnType {
+interface TypeMappingResult {
+	type: ColumnType;
+	isLossy: boolean;
+	lossyReason?: string;
+}
+
+/**
+ * Convert Kysely column type to our ColumnIR type.
+ * Returns detailed mapping result including lossy conversion info.
+ *
+ * Type mappings:
+ * - uuid → uuid (exact)
+ * - varchar, text, char → string (lossy: length info lost)
+ * - bigint, bigserial → bigint (exact for JS BigInt)
+ * - int, smallint, serial → number (exact)
+ * - numeric, decimal → number (lossy: precision/scale lost)
+ * - float, double, real → number (exact)
+ * - bool, boolean → boolean (exact)
+ * - timestamp, timestamptz → datetime (lossy: timezone info lost for timestamptz)
+ * - date → date (exact)
+ * - time, timetz → date (lossy: should be time, mapped to date)
+ * - json, jsonb → json (lossy: jsonb distinction lost)
+ * - unknown → string (lossy: type info lost)
+ */
+function mapColumnTypeDetailed(kyselyType: string): TypeMappingResult {
 	const type = kyselyType.toLowerCase();
 
-	if (
-		type.includes('varchar') ||
-		type.includes('text') ||
-		type.includes('char') ||
-		type.includes('uuid')
-	) {
-		return 'string';
+	// UUID - exact mapping (ColumnType supports 'uuid')
+	if (type === 'uuid') {
+		return { type: 'uuid', isLossy: false };
 	}
+
+	// String types - lossy (length info lost)
+	if (type.includes('varchar') || type.includes('char')) {
+		const match = type.match(/\((\d+)\)/);
+		if (match) {
+			return {
+				type: 'string',
+				isLossy: true,
+				lossyReason: `varchar/char length (${match[1]}) is not preserved`,
+			};
+		}
+		return { type: 'string', isLossy: false };
+	}
+	if (type.includes('text')) {
+		return { type: 'string', isLossy: false };
+	}
+
+	// BigInt - exact mapping (ColumnType supports 'bigint')
+	// Must check before general 'int' to avoid false match
+	if (type.includes('bigint') || type === 'bigserial') {
+		return { type: 'bigint', isLossy: false };
+	}
+
+	// Regular integers - exact
 	if (
 		type.includes('int') ||
 		type.includes('serial') ||
-		type.includes('bigint') ||
-		type.includes('numeric') ||
-		type.includes('decimal') ||
+		type.includes('smallint')
+	) {
+		return { type: 'number', isLossy: false };
+	}
+
+	// Decimal/Numeric - lossy (precision/scale lost)
+	if (type.includes('numeric') || type.includes('decimal')) {
+		const match = type.match(/\((\d+)(?:,\s*(\d+))?\)/);
+		if (match) {
+			const precision = match[1];
+			const scale = match[2] ?? '0';
+			return {
+				type: 'number',
+				isLossy: true,
+				lossyReason: `decimal precision (${precision},${scale}) is not preserved - may lose precision for large values`,
+			};
+		}
+		return {
+			type: 'number',
+			isLossy: true,
+			lossyReason: 'decimal type without explicit precision/scale',
+		};
+	}
+
+	// Float types - exact (JavaScript number is double precision)
+	if (
 		type.includes('float') ||
 		type.includes('double') ||
 		type.includes('real')
 	) {
-		return 'number';
-	}
-	if (type.includes('bool')) {
-		return 'boolean';
-	}
-	if (
-		type.includes('timestamp') ||
-		type.includes('date') ||
-		type.includes('time')
-	) {
-		return 'date';
-	}
-	if (type.includes('json')) {
-		return 'json';
+		return { type: 'number', isLossy: false };
 	}
 
-	// Default to string for unknown types
-	return 'string';
+	// Boolean - exact
+	if (type.includes('bool')) {
+		return { type: 'boolean', isLossy: false };
+	}
+
+	// Timestamp types - use datetime for timestamp, lossy for timestamptz
+	if (type.includes('timestamptz') || type.includes('timestamp with time')) {
+		return {
+			type: 'datetime',
+			isLossy: true,
+			lossyReason: 'timestamptz timezone information is not preserved',
+		};
+	}
+	if (type.includes('timestamp')) {
+		return { type: 'datetime', isLossy: false };
+	}
+
+	// Date - exact
+	if (type === 'date' || type.includes('date')) {
+		return { type: 'date', isLossy: false };
+	}
+
+	// Time types - lossy (mapped to date, should ideally be 'time')
+	if (type.includes('timetz') || type.includes('time with time')) {
+		return {
+			type: 'date',
+			isLossy: true,
+			lossyReason:
+				'time type mapped to date - time-only values lose precision, timezone lost',
+		};
+	}
+	if (type.includes('time')) {
+		return {
+			type: 'date',
+			isLossy: true,
+			lossyReason: 'time type mapped to date - time-only values lose precision',
+		};
+	}
+
+	// JSON types - jsonb is lossy (jsonb vs json distinction lost)
+	if (type === 'jsonb') {
+		return {
+			type: 'json',
+			isLossy: true,
+			lossyReason: 'jsonb vs json distinction not preserved',
+		};
+	}
+	if (type.includes('json')) {
+		return { type: 'json', isLossy: false };
+	}
+
+	// Array types - lossy
+	if (type.includes('[]') || type.includes('array')) {
+		return {
+			type: 'json',
+			isLossy: true,
+			lossyReason: `array type (${kyselyType}) mapped to json`,
+		};
+	}
+
+	// Default to string for unknown types - lossy
+	return {
+		type: 'string',
+		isLossy: true,
+		lossyReason: `unknown database type '${kyselyType}' mapped to string`,
+	};
+}
+
+/**
+ * Convert Kysely column type to our ColumnIR type.
+ * @deprecated Use mapColumnTypeDetailed for full lossy info
+ */
+function _mapColumnType(kyselyType: string): ColumnType {
+	return mapColumnTypeDetailed(kyselyType).type;
 }
 
 /**
@@ -363,12 +490,24 @@ function buildTableIR(
 	tableFks: ForeignKeyInfo[],
 	warnings: string[],
 ): TableIR {
-	// Map columns
-	const columns: ColumnIR[] = table.columns.map((col: ColumnMetadata) => ({
-		name: col.name,
-		type: mapColumnType(col.dataType),
-		nullable: col.isNullable,
-	}));
+	// Map columns with detailed type info
+	const columns: ColumnIR[] = table.columns.map((col: ColumnMetadata) => {
+		const typeResult = mapColumnTypeDetailed(col.dataType);
+
+		// Add warning for lossy conversions
+		if (typeResult.isLossy && typeResult.lossyReason) {
+			warnings.push(
+				`Column '${table.name}.${col.name}': ${typeResult.lossyReason}`,
+			);
+		}
+
+		return {
+			name: col.name,
+			type: typeResult.type,
+			nullable: col.isNullable,
+			originalDbType: col.dataType,
+		};
+	});
 
 	// Extract primary key
 	const pkColumns = table.columns

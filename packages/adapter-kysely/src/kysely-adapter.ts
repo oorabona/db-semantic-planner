@@ -122,7 +122,20 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 		// Merge schema name from adapter with options
 		const schemaName = this.schemaName ?? options.schemaName;
 
-		const compiled = compile(plan, options.model, this.db, schemaName);
+		// Build internal compile options (ADAPTER-003)
+		// Only include defined properties to satisfy exactOptionalPropertyTypes
+		const internalOptions: {
+			schemaName?: string;
+			aliasIncludedColumns?: 'always' | 'onCollision';
+		} = {};
+		if (schemaName !== undefined) {
+			internalOptions.schemaName = schemaName;
+		}
+		if (options.aliasIncludedColumns !== undefined) {
+			internalOptions.aliasIncludedColumns = options.aliasIncludedColumns;
+		}
+
+		const compiled = compile(plan, options.model, this.db, internalOptions);
 		return {
 			sql: compiled.sql,
 			parameters: compiled.parameters as readonly unknown[],
@@ -143,11 +156,25 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 		}
 
 		const schemaName = this.schemaName ?? options.schemaName;
+
+		// Build internal compile options (ADAPTER-003)
+		// Only include defined properties to satisfy exactOptionalPropertyTypes
+		const internalOptions: {
+			schemaName?: string;
+			aliasIncludedColumns?: 'always' | 'onCollision';
+		} = {};
+		if (schemaName !== undefined) {
+			internalOptions.schemaName = schemaName;
+		}
+		if (options.aliasIncludedColumns !== undefined) {
+			internalOptions.aliasIncludedColumns = options.aliasIncludedColumns;
+		}
+
 		const result = compileWithIncludes(
 			plan,
 			options.model,
 			this.db,
-			schemaName,
+			internalOptions,
 		);
 
 		// Convert to adapter-agnostic format (pass through - types are now aligned)

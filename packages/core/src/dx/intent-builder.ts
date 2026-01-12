@@ -20,7 +20,7 @@ import type {
 } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 
-import { InvalidOperationError, RelationNotFoundError } from './errors.js';
+import { InvalidOperationError } from './errors.js';
 import { and } from './filters.js';
 import {
 	isWhereIntent,
@@ -28,12 +28,12 @@ import {
 	type WhereFilter,
 } from './object-filter.js';
 import {
-	isExpressionSpec,
 	type AggregateOptions,
 	type ColumnSpec,
 	type ExpressionSpec,
 	type IncludeOptions,
 	type IncludeOptionsWithRecursive,
+	isExpressionSpec,
 	type NestedInclude,
 	type OrderByRecord,
 	type OrderBySpec,
@@ -52,7 +52,11 @@ import {
 export function isRecursiveIncludeOptions(
 	options?: IncludeOptionsWithRecursive,
 ): options is RecursiveIncludeOptions {
-	return options !== undefined && 'recursive' in options && options.recursive === true;
+	return (
+		options !== undefined &&
+		'recursive' in options &&
+		options.recursive === true
+	);
 }
 
 /**
@@ -278,12 +282,20 @@ export class IntentBuilder<TResult = unknown> {
 		this.relationHints = relationHints;
 		this.state = {
 			from,
-			whereIntents: initialState?.whereIntents ? [...initialState.whereIntents] : [],
+			whereIntents: initialState?.whereIntents
+				? [...initialState.whereIntents]
+				: [],
 			includes: initialState?.includes ? [...initialState.includes] : [],
-			recursiveIncludes: initialState?.recursiveIncludes ? [...initialState.recursiveIncludes] : [],
+			recursiveIncludes: initialState?.recursiveIncludes
+				? [...initialState.recursiveIncludes]
+				: [],
 			aggregates: initialState?.aggregates ? [...initialState.aggregates] : [],
-			groupByFields: initialState?.groupByFields ? [...initialState.groupByFields] : [],
-			orderByIntents: initialState?.orderByIntents ? [...initialState.orderByIntents] : [],
+			groupByFields: initialState?.groupByFields
+				? [...initialState.groupByFields]
+				: [],
+			orderByIntents: initialState?.orderByIntents
+				? [...initialState.orderByIntents]
+				: [],
 			selectIntent: initialState?.selectIntent,
 			limitValue: initialState?.limitValue,
 			offsetValue: initialState?.offsetValue,
@@ -293,10 +305,7 @@ export class IntentBuilder<TResult = unknown> {
 	/**
 	 * Add an include to the builder.
 	 */
-	addInclude(
-		relation: string,
-		options?: IncludeOptionsWithRecursive,
-	): void {
+	addInclude(relation: string, options?: IncludeOptionsWithRecursive): void {
 		// Handle recursive includes separately - they require CTE execution
 		if (isRecursiveIncludeOptions(options)) {
 			validateRecursiveInclude(this.model, this.state.from, relation, options);
@@ -468,11 +477,14 @@ export class IntentBuilder<TResult = unknown> {
 				(intent as { where: WhereIntent }).where = singleWhere;
 			}
 		} else if (this.state.whereIntents.length > 1) {
-			(intent as { where: WhereIntent }).where = and(...this.state.whereIntents);
+			(intent as { where: WhereIntent }).where = and(
+				...this.state.whereIntents,
+			);
 		}
 
 		if (this.state.includes.length > 0) {
-			(intent as { include: readonly IncludeIntent[] }).include = this.state.includes;
+			(intent as { include: readonly IncludeIntent[] }).include =
+				this.state.includes;
 		}
 
 		if (this.state.groupByFields.length > 0) {

@@ -1015,10 +1015,13 @@ describe('Execution Layer', () => {
 	});
 
 	describe('include() with hydration (DX-033)', () => {
+		// These tests use SEPARATE strategy to test multi-query hydration
+		// JOIN is now the default, but SEPARATE is still supported via defaultIncludeStrategy
 		it('hydrates hasMany relation with separate query', async () => {
 			const orm = createOrm({
 				model: testModel,
 				adapter: createKyselyAdapter(db),
+				defaultIncludeStrategy: 'separate', // Use SEPARATE for multi-query hydration test
 			});
 			const results = (await orm
 				.select('users')
@@ -1049,6 +1052,7 @@ describe('Execution Layer', () => {
 			const orm = createOrm({
 				model: testModel,
 				adapter: createKyselyAdapter(db),
+				defaultIncludeStrategy: 'separate', // Use SEPARATE for multi-query hydration test
 			});
 			const results = (await orm
 				.select('users')
@@ -1087,6 +1091,7 @@ describe('Execution Layer', () => {
 			const orm = createOrm({
 				model: testModel,
 				adapter: createKyselyAdapter(db),
+				defaultIncludeStrategy: 'separate', // Use SEPARATE for multi-query hydration test
 			});
 			const result = (await orm
 				.select('users')
@@ -1135,6 +1140,7 @@ describe('Execution Layer', () => {
 			const orm = createOrm({
 				model: testModel,
 				adapter: createKyselyAdapter(testDb),
+				defaultIncludeStrategy: 'separate', // Use SEPARATE for multi-query hydration test
 			});
 
 			const results = (await orm

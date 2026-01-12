@@ -166,6 +166,9 @@ These features are intentionally deferred and may become backlog items:
 | ADR ID | Title | Scope | Status |
 |--------|-------|-------|--------|
 | ADR-001 | [Typed Intents for Advanced Features](adrs/ADR-001-typed-intents-for-advanced-features.md) | core, adapter, dx | ✅ accepted |
+| ADR-002 | [Merge dx Package into core](adrs/ADR-002-merge-dx-into-core.md) | core, dx, adapter | ✅ accepted |
+| ADR-003 | [CLI REPL Framework Selection](adrs/ADR-003-cli-repl-framework.md) | cli | ✅ accepted |
+| ADR-004 | [Core Package Layered Structure](adrs/ADR-004-core-package-layered-structure.md) | core | ✅ accepted |
 
 ## RFCs (Request for Comments)
 

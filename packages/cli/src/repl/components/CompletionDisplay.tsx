@@ -11,6 +11,8 @@ import type { CompletionSuggestion } from '../completion.js';
 interface CompletionDisplayProps {
 	suggestions: CompletionSuggestion[];
 	maxItems?: number;
+	/** Index of the currently selected suggestion (-1 = none) */
+	selectedIndex?: number;
 }
 
 /**
@@ -38,28 +40,60 @@ const TYPE_COLORS: Record<CompletionSuggestion['type'], string> = {
 export function CompletionDisplay({
 	suggestions,
 	maxItems = 8,
+	selectedIndex = -1,
 }: CompletionDisplayProps) {
 	if (suggestions.length === 0) {
 		return null;
 	}
 
-	const items = suggestions.slice(0, maxItems);
-	const hasMore = suggestions.length > maxItems;
+	// Calculate sliding window to keep selected item visible
+	let startIndex = 0;
+	if (selectedIndex >= 0) {
+		// Center the selected item in the window when possible
+		const halfWindow = Math.floor(maxItems / 2);
+		startIndex = Math.max(
+			0,
+			Math.min(selectedIndex - halfWindow, suggestions.length - maxItems),
+		);
+	}
+	// Ensure startIndex doesn't go negative for small lists
+	startIndex = Math.max(0, startIndex);
+
+	const endIndex = Math.min(startIndex + maxItems, suggestions.length);
+	const items = suggestions.slice(startIndex, endIndex);
+	const hasBefore = startIndex > 0;
+	const hasAfter = endIndex < suggestions.length;
 
 	return (
 		<Box flexDirection="row" flexWrap="wrap" marginTop={0}>
 			<Text color="gray" dimColor>
 				[Tab]{' '}
 			</Text>
-			{items.map((suggestion, idx) => (
-				<Box key={idx} marginRight={1}>
-					<Text>{TYPE_ICONS[suggestion.type]} </Text>
-					<Text color={TYPE_COLORS[suggestion.type]}>{suggestion.label}</Text>
-				</Box>
-			))}
-			{hasMore && (
+			{hasBefore && (
 				<Text color="gray" dimColor>
-					+{suggestions.length - maxItems} more
+					◀{' '}
+				</Text>
+			)}
+			{items.map((suggestion, idx) => {
+				// Convert local index to global index for selection check
+				const globalIndex = startIndex + idx;
+				const isSelected = globalIndex === selectedIndex;
+				return (
+					<Box key={globalIndex} marginRight={1}>
+						<Text>{TYPE_ICONS[suggestion.type]} </Text>
+						<Text
+							color={isSelected ? 'white' : TYPE_COLORS[suggestion.type]}
+							backgroundColor={isSelected ? 'blue' : undefined}
+							bold={isSelected}
+						>
+							{suggestion.label}
+						</Text>
+					</Box>
+				);
+			})}
+			{hasAfter && (
+				<Text color="gray" dimColor>
+					▶ +{suggestions.length - endIndex}
 				</Text>
 			)}
 		</Box>

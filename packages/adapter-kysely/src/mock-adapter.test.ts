@@ -58,14 +58,19 @@ describe('MockAdapter', () => {
 			expect(adapter).toBeInstanceOf(MockAdapter);
 		});
 
-		it('throws for unsupported dialect', () => {
-			expect(() => createMockAdapter({ dialect: 'mysql' })).toThrow(
-				"MockAdapter currently only supports 'postgresql' dialect",
-			);
+		it('supports mysql dialect', () => {
+			const adapter = createMockAdapter({ dialect: 'mysql' });
+			expect(adapter).toBeInstanceOf(MockAdapter);
+		});
 
-			expect(() => createMockAdapter({ dialect: 'sqlite' })).toThrow(
-				"MockAdapter currently only supports 'postgresql' dialect",
-			);
+		it('supports sqlite dialect', () => {
+			const adapter = createMockAdapter({ dialect: 'sqlite' });
+			expect(adapter).toBeInstanceOf(MockAdapter);
+		});
+
+		it('supports mssql dialect', () => {
+			const adapter = createMockAdapter({ dialect: 'mssql' });
+			expect(adapter).toBeInstanceOf(MockAdapter);
 		});
 	});
 

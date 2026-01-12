@@ -88,6 +88,24 @@ export interface DialectCapabilities {
 	 * - 'numeric': 1/0 values
 	 */
 	readonly booleanStyle: 'native' | 'numeric';
+
+	// =========================================================================
+	// Include Strategy Capabilities (CORE-006)
+	// =========================================================================
+
+	/**
+	 * Supports LATERAL JOIN (PostgreSQL) or CROSS APPLY (MSSQL).
+	 * Enables per-row subqueries with LIMIT for hasMany relations.
+	 */
+	readonly supportsLateralJoin: boolean;
+
+	/**
+	 * Supports JSON aggregation functions.
+	 * - PostgreSQL: json_agg(), jsonb_agg()
+	 * - MySQL: JSON_ARRAYAGG()
+	 * - DuckDB: json_group_array()
+	 */
+	readonly supportsJsonAgg: boolean;
 }
 
 /**
@@ -104,6 +122,10 @@ export const POSTGRESQL_CAPABILITIES: DialectCapabilities = {
 	supportsArrayType: true,
 	supportsJsonType: true,
 	supportsSchemas: true,
+
+	// Include Strategy Capabilities (CORE-006)
+	supportsLateralJoin: true,
+	supportsJsonAgg: true,
 
 	// Syntax
 	recursivePathStyle: 'array',
@@ -128,6 +150,10 @@ export const MYSQL_CAPABILITIES: DialectCapabilities = {
 	supportsJsonType: true,
 	supportsSchemas: true, // MySQL uses database as schema
 
+	// Include Strategy Capabilities (CORE-006)
+	supportsLateralJoin: false, // MySQL 8.0.14+ has LATERAL but limited
+	supportsJsonAgg: true, // JSON_ARRAYAGG() in MySQL 8.0+
+
 	// Syntax
 	recursivePathStyle: 'string',
 	stringConcatStyle: 'function',
@@ -150,6 +176,10 @@ export const SQLITE_CAPABILITIES: DialectCapabilities = {
 	supportsArrayType: false,
 	supportsJsonType: true, // SQLite 3.38+ (JSON1 extension)
 	supportsSchemas: false, // SQLite uses ATTACH for multiple databases
+
+	// Include Strategy Capabilities (CORE-006)
+	supportsLateralJoin: false, // Not supported
+	supportsJsonAgg: false, // json_group_array exists but is limited
 
 	// Syntax
 	recursivePathStyle: 'string',
@@ -175,6 +205,10 @@ export const DUCKDB_CAPABILITIES: DialectCapabilities = {
 	supportsJsonType: true,
 	supportsSchemas: true,
 
+	// Include Strategy Capabilities (CORE-006)
+	supportsLateralJoin: true, // DuckDB supports LATERAL
+	supportsJsonAgg: true, // list_agg / json_group_array
+
 	// Syntax
 	recursivePathStyle: 'array', // DuckDB uses LIST which is similar
 	stringConcatStyle: 'operator',
@@ -197,6 +231,10 @@ export const MSSQL_CAPABILITIES: DialectCapabilities = {
 	supportsArrayType: false,
 	supportsJsonType: true, // SQL Server 2016+
 	supportsSchemas: true,
+
+	// Include Strategy Capabilities (CORE-006)
+	supportsLateralJoin: true, // CROSS APPLY / OUTER APPLY
+	supportsJsonAgg: false, // FOR JSON exists but different semantics
 
 	// Syntax
 	recursivePathStyle: 'string',

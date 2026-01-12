@@ -57,7 +57,15 @@ export {
 	wMin,
 	wSum,
 } from './filters.js';
-
+// DX-103: Extracted components for SRP compliance
+// IntentBuilder - builds QueryIntent AST from builder state
+export {
+	IntentBuilder,
+	type IntentBuilderState,
+	isRecursiveIncludeOptions,
+	type RecursiveIncludeConfig,
+	validateRecursiveInclude,
+} from './intent-builder.js';
 // Lightweight ModelIR (DX-023)
 export {
 	type CardinalityShorthand,
@@ -79,7 +87,6 @@ export {
 	type RelationTupleDef,
 	singularize,
 } from './lightweight-model.js';
-
 // Mutation Builders (DX-010, DX-026)
 export {
 	DeleteBuilder,
@@ -89,7 +96,6 @@ export {
 	// DX-026: Upsert support
 	UpsertBuilder,
 } from './mutation-builders.js';
-
 // Object Filter Syntax (DX-012)
 export {
 	type FilterOperators,
@@ -98,9 +104,14 @@ export {
 	objectToWhereIntent,
 	type WhereFilter,
 } from './object-filter.js';
-
 // Factory
 export { createOrm } from './orm.js';
+// QueryExecutor - handles query execution via adapter
+export {
+	type CompileOptions as ExecutorCompileOptions,
+	type ExecutionContext,
+	QueryExecutor,
+} from './query-executor.js';
 // NOTE: RecursiveQueryBuilder is now internal-only (DX-022)
 // Use include({ recursive: true }) API instead
 // Type exports kept for edge-table support (internal use)
@@ -112,6 +123,11 @@ export type {
 	SelectField,
 	TraversalDirection,
 } from './recursive-query-builder.js';
+// ResultHydrator - handles result hydration and recursive include processing
+export {
+	type HydrateOptions,
+	ResultHydrator,
+} from './result-hydrator.js';
 // Schema Bridge (ARCH-002 codegen-first)
 export {
 	// CORE-005: ResolvedSchema → GeneratedSchema converter with Valibot
@@ -142,7 +158,6 @@ export {
 	type SchemaConversionResult,
 	type ValidatedResolvedSchema,
 } from './schema-bridge.js';
-
 // Subquery Builder (DX-012 Block 3)
 export {
 	isSubqueryExpression,
@@ -151,7 +166,6 @@ export {
 	SubqueryExpression,
 	subquery,
 } from './subquery-builder.js';
-
 // Types
 export type {
 	AggregateOptions,
@@ -183,26 +197,3 @@ export type {
 } from './types.js';
 // Type guard
 export { isExpressionSpec } from './types.js';
-
-// DX-103: Extracted components for SRP compliance
-// IntentBuilder - builds QueryIntent AST from builder state
-export {
-	IntentBuilder,
-	isRecursiveIncludeOptions,
-	type IntentBuilderState,
-	type RecursiveIncludeConfig,
-	validateRecursiveInclude,
-} from './intent-builder.js';
-
-// ResultHydrator - handles result hydration and recursive include processing
-export {
-	ResultHydrator,
-	type HydrateOptions,
-} from './result-hydrator.js';
-
-// QueryExecutor - handles query execution via adapter
-export {
-	QueryExecutor,
-	type ExecutionContext,
-	type CompileOptions as ExecutorCompileOptions,
-} from './query-executor.js';

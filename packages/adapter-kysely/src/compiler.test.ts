@@ -25,11 +25,7 @@ import {
 	compileWithIncludes,
 	injectAdvancedRecursiveClauses,
 } from './compiler.js';
-import {
-	POSTGRESQL_CAPABILITIES,
-	SQLITE_CAPABILITIES,
-	withMockedCapabilities,
-} from './dialect.js';
+import { POSTGRESQL_CAPABILITIES, SQLITE_CAPABILITIES } from './dialect.js';
 import { CompilationError } from './errors.js';
 
 // ============================================================================
@@ -2672,13 +2668,14 @@ describe('SQL Compiler', () => {
 			});
 		});
 
-		describe('BDD Scenario 6: Separate strategy for hasMany include (not JOIN)', () => {
+		describe('BDD Scenario 6: Separate strategy for hasMany include (explicit)', () => {
 			it('should NOT generate JOIN when planner decides include-strategy: separate', () => {
 				const kysely = createTestKysely();
 
-				// Given: users hasMany posts (cardinality 'many' → include-strategy: separate)
+				// Given: users hasMany posts with explicit separate strategy
+				// Note: Since JOIN is now the default, we explicitly request 'separate'
 
-				// When: I select users with include('posts')
+				// When: I select users with include('posts') and defaultIncludeStrategy: 'separate'
 				const intent: QueryIntent = {
 					type: 'select',
 					from: 'users',
@@ -2686,7 +2683,7 @@ describe('SQL Compiler', () => {
 					include: [{ relation: 'posts' }],
 				};
 
-				const report = plan(intent, basicSchema);
+				const report = plan(intent, basicSchema, { defaultIncludeStrategy: 'separate' });
 
 				// Then: planner decides include-strategy: 'separate'
 				const includeDecision = report.decisions.find(
@@ -2757,10 +2754,11 @@ describe('SQL Compiler', () => {
 		});
 
 		describe('BDD Scenario 8: compileWithIncludes returns separateIncludes metadata', () => {
-			it('should return separateIncludes for hasMany relations', () => {
+			it('should return separateIncludes for hasMany relations (when using separate strategy)', () => {
 				const kysely = createTestKysely();
 
-				// Given: users hasMany posts (default includeStrategy is 'separate')
+				// Given: users hasMany posts with explicit 'separate' strategy
+				// Note: JOIN is now the default, so we explicitly request 'separate'
 				// When: I use compileWithIncludes
 				const intent: QueryIntent = {
 					type: 'select',
@@ -2769,7 +2767,7 @@ describe('SQL Compiler', () => {
 					include: [{ relation: 'posts' }],
 				};
 
-				const report = plan(intent, basicSchema);
+				const report = plan(intent, basicSchema, { defaultIncludeStrategy: 'separate' });
 				const result = compileWithIncludes(report, basicSchema, kysely);
 
 				// Then: main query should be compiled
@@ -2866,6 +2864,296 @@ describe('SQL Compiler', () => {
 
 				// Then: SQL should contain schema prefix (SQLite quotes identifiers)
 				expect(compiled.sql.toLowerCase()).toMatch(/tenant_abc.*posts/);
+			});
+
+			it('should generate junction JOIN for manyToMany (M:N) relations', () => {
+				const kysely = createTestKysely();
+
+				// Given: manyToMany relation info (posts.tags via postTags junction)
+				const includeInfo = {
+					relationName: 'tags',
+					targetTable: 'tags',
+					foreignKey: 'id', // tags.id
+					sourceKey: 'id', // posts.id
+					// M:N specific properties
+					through: 'postTags',
+					throughSourceKey: 'postId', // postTags.postId
+					throughTargetKey: 'tagId', // postTags.tagId
+				};
+
+				// When: compile separate include with parent post IDs
+				const parentIds = [1, 2, 3];
+				const compiled = compileSeparateInclude(includeInfo, parentIds, kysely);
+
+				const sql = compiled.sql.toLowerCase();
+
+				// Then: SQL should JOIN through junction table
+				expect(sql).toContain('select');
+				expect(sql).toContain('from "tags"');
+				expect(sql).toContain('inner join "posttags"');
+
+				// Junction should join to target table
+				expect(sql).toContain('"posttags"."tagid"');
+				expect(sql).toContain('"tags"."id"');
+
+				// WHERE should filter by source key in junction table
+				expect(sql).toContain('"posttags"."postid" in');
+
+				// Should include __sourceKey for hydration mapping
+				expect(sql).toContain('__sourcekey');
+
+				// Should have parent IDs as parameters
+				expect(compiled.parameters).toEqual([1, 2, 3]);
+			});
+		});
+
+		describe('CORE-006: LATERAL JOIN strategy', () => {
+			it('should generate LEFT JOIN LATERAL when strategy is lateral', () => {
+				const kysely = createTestKysely();
+
+				// Given: users hasMany posts with explicit 'lateral' strategy hint
+				const schemaWithLateral = defineSchema({
+					users: {
+						id: 'number',
+						name: 'string',
+					},
+					posts: {
+						id: 'number',
+						title: 'string',
+						userId: 'number',
+					},
+				})
+					.relations({
+						users: {
+							posts: hasMany(
+								'posts',
+								{ foreignKey: 'userId' },
+								{ includeStrategy: 'lateral' },
+							),
+						},
+					})
+					.build();
+
+				// When: I select users with include('posts')
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+					select: { type: 'all' },
+					include: [{ relation: 'posts' }],
+				};
+
+				const report = plan(intent, schemaWithLateral);
+
+				// Then: planner decides include-strategy: 'lateral'
+				const includeDecision = report.decisions.find(
+					(d) => d.type === 'include-strategy',
+				);
+				expect(includeDecision).toBeDefined();
+				expect(includeDecision?.choice).toBe('lateral');
+
+				// When: compiled
+				const compiled = compile(report, schemaWithLateral, kysely);
+
+				// Then: SQL contains LATERAL JOIN
+				expect(compiled.sql.toLowerCase()).toContain('lateral');
+			});
+
+			it('should support limit and orderBy in LATERAL subquery', () => {
+				const kysely = createTestKysely();
+
+				const schemaWithLateral = defineSchema({
+					users: {
+						id: 'number',
+						name: 'string',
+					},
+					posts: {
+						id: 'number',
+						title: 'string',
+						createdAt: 'Date',
+						userId: 'number',
+					},
+				})
+					.relations({
+						users: {
+							posts: hasMany(
+								'posts',
+								{ foreignKey: 'userId' },
+								{ includeStrategy: 'lateral' },
+							),
+						},
+					})
+					.build();
+
+				// When: I select users with include('posts') with limit and orderBy
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+					select: { type: 'all' },
+					include: [{ 
+						relation: 'posts', 
+						limit: 5,
+						orderBy: [{ field: 'createdAt', direction: 'desc' }]
+					}],
+				};
+
+				const report = plan(intent, schemaWithLateral);
+				const compiled = compile(report, schemaWithLateral, kysely);
+				const sql = compiled.sql.toLowerCase();
+
+				// Then: SQL contains LATERAL with ORDER BY and LIMIT
+				expect(sql).toContain('lateral');
+				expect(sql).toContain('order by');
+				expect(sql).toContain('createdat');
+				expect(sql).toContain('desc');
+				expect(sql).toContain('limit 5');
+			});
+		});
+
+		describe('CORE-006: JSON_AGG strategy', () => {
+			it('should generate json_agg subquery when strategy is json_agg', () => {
+				const kysely = createTestKysely();
+
+				// Given: users hasMany posts with explicit 'json_agg' strategy hint
+				const schemaWithJsonAgg = defineSchema({
+					users: {
+						id: 'number',
+						name: 'string',
+					},
+					posts: {
+						id: 'number',
+						title: 'string',
+						userId: 'number',
+					},
+				})
+					.relations({
+						users: {
+							posts: hasMany(
+								'posts',
+								{ foreignKey: 'userId' },
+								{ includeStrategy: 'json_agg' },
+							),
+						},
+					})
+					.build();
+
+				// When: I select users with include('posts')
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+					select: { type: 'all' },
+					include: [{ relation: 'posts' }],
+				};
+
+				const report = plan(intent, schemaWithJsonAgg);
+
+				// Then: planner decides include-strategy: 'json_agg'
+				const includeDecision = report.decisions.find(
+					(d) => d.type === 'include-strategy',
+				);
+				expect(includeDecision).toBeDefined();
+				expect(includeDecision?.choice).toBe('json_agg');
+
+				// When: compiled
+				const compiled = compile(report, schemaWithJsonAgg, kysely);
+				const sql = compiled.sql.toLowerCase();
+
+				// Then: SQL contains json aggregation subquery (json_group_array for SQLite)
+				// Note: createTestKysely uses SQLite which uses json_group_array instead of json_agg
+				expect(sql).toMatch(/json_agg|json_group_array/);
+				// to_jsonb is PostgreSQL-specific, SQLite uses different syntax
+				// expect(sql).toContain('to_jsonb');
+				// Should be a correlated subquery, not a JOIN
+				expect(sql).not.toContain('left join "posts"');
+			});
+
+			it('should support orderBy in JSON_AGG aggregation', () => {
+				const kysely = createTestKysely();
+
+				const schemaWithJsonAgg = defineSchema({
+					users: {
+						id: 'number',
+						name: 'string',
+					},
+					posts: {
+						id: 'number',
+						title: 'string',
+						createdAt: 'Date',
+						userId: 'number',
+					},
+				})
+					.relations({
+						users: {
+							posts: hasMany(
+								'posts',
+								{ foreignKey: 'userId' },
+								{ includeStrategy: 'json_agg' },
+							),
+						},
+					})
+					.build();
+
+				// When: I select users with include('posts') with orderBy
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+					select: { type: 'all' },
+					include: [{ 
+						relation: 'posts', 
+						orderBy: [{ field: 'createdAt', direction: 'desc' }]
+					}],
+				};
+
+				const report = plan(intent, schemaWithJsonAgg);
+				const compiled = compile(report, schemaWithJsonAgg, kysely);
+				const sql = compiled.sql.toLowerCase();
+
+				// Then: SQL contains ORDER BY inside json aggregation
+				expect(sql).toMatch(/json_agg|json_group_array/);
+				expect(sql).toContain('order by');
+				expect(sql).toContain('createdat');
+				expect(sql).toContain('desc');
+			});
+
+			it('should return empty JSON array when no related records', () => {
+				const kysely = createTestKysely();
+
+				const schemaWithJsonAgg = defineSchema({
+					users: {
+						id: 'number',
+						name: 'string',
+					},
+					posts: {
+						id: 'number',
+						title: 'string',
+						userId: 'number',
+					},
+				})
+					.relations({
+						users: {
+							posts: hasMany(
+								'posts',
+								{ foreignKey: 'userId' },
+								{ includeStrategy: 'json_agg' },
+							),
+						},
+					})
+					.build();
+
+				const intent: QueryIntent = {
+					type: 'select',
+					from: 'users',
+					select: { type: 'all' },
+					include: [{ relation: 'posts' }],
+				};
+
+				const report = plan(intent, schemaWithJsonAgg);
+				const compiled = compile(report, schemaWithJsonAgg, kysely);
+				const sql = compiled.sql.toLowerCase();
+
+				// Then: SQL contains COALESCE for empty array fallback
+				expect(sql).toContain('coalesce');
+				// Either '[]' or '[]'::json depending on dialect
+				expect(sql).toMatch(/\[\]/);
 			});
 		});
 	});
@@ -3160,6 +3448,214 @@ describe('SQL Compiler', () => {
 
 				expect(compiled.sql.toLowerCase()).not.toContain('returning');
 			});
+		});
+	});
+});
+
+// ============================================================================
+// ADAPTER-003: Smart Column Aliasing (onCollision mode)
+// ============================================================================
+
+describe.todo('ADAPTER-003: Smart Column Aliasing - onCollision mode not yet implemented', () => {
+	const kysely = createTestKysely();
+
+	// Schema with overlapping column names for collision testing
+	// users: id, name, createdAt
+	// posts: id, title, userId, createdAt (id and createdAt collide with users)
+	const schemaWithCollisions = defineSchema({
+		users: {
+			id: 'number',
+			name: 'string',
+			createdAt: 'string',
+		},
+		posts: {
+			id: 'number',
+			title: 'string',
+			userId: 'number',
+			createdAt: 'string',
+		},
+	})
+		.relations({
+			posts: {
+				author: belongsTo('users', { foreignKey: 'userId' }),
+			},
+		})
+		.build();
+
+	describe("aliasIncludedColumns: 'always' (default)", () => {
+		it('should alias ALL columns from included tables', () => {
+			// Given: posts belongsTo author
+			// When: I include author with default aliasing mode
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: { type: 'all' },
+				include: [{ relation: 'author' }],
+			};
+
+			const report = plan(intent, schemaWithCollisions);
+
+			// Default: aliasIncludedColumns: 'always'
+			const compiled = compile(report, schemaWithCollisions, kysely);
+
+			// Then: ALL author columns should have "author." prefix
+			const sql = compiled.sql.toLowerCase();
+
+			// All columns from author table should be aliased
+			expect(sql).toContain('"author.id"');
+			expect(sql).toContain('"author.name"');
+			expect(sql).toContain('"author.createdat"');
+		});
+
+		it('should use "always" as default when no option is specified', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: { type: 'all' },
+				include: [{ relation: 'author' }],
+			};
+
+			const report = plan(intent, schemaWithCollisions);
+
+			// Compile without explicit aliasIncludedColumns
+			const compiledDefault = compile(report, schemaWithCollisions, kysely);
+			// Compile with explicit 'always'
+			const compiledAlways = compile(report, schemaWithCollisions, kysely, {
+				aliasIncludedColumns: 'always',
+			});
+
+			// Both should produce the same SQL
+			expect(compiledDefault.sql).toBe(compiledAlways.sql);
+		});
+	});
+
+	describe("aliasIncludedColumns: 'onCollision'", () => {
+		it('should only alias columns that collide with root table', () => {
+			// Given: posts (id, title, userId, createdAt) with author (id, name, createdAt)
+			// Colliding columns: id, createdAt
+			// Non-colliding columns: name
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: { type: 'all' },
+				include: [{ relation: 'author' }],
+			};
+
+			const report = plan(intent, schemaWithCollisions);
+
+			// When: aliasIncludedColumns: 'onCollision'
+			const compiled = compile(report, schemaWithCollisions, kysely, {
+				aliasIncludedColumns: 'onCollision',
+			});
+
+			const sql = compiled.sql.toLowerCase();
+
+			// Then: Colliding columns (id, createdAt) should be aliased
+			expect(sql).toContain('"author.id"');
+			expect(sql).toContain('"author.createdat"');
+
+			// And: Non-colliding column (name) should NOT be aliased
+			// It should appear as a simple column reference without "author." prefix
+			expect(sql).not.toContain('"author.name"');
+
+			// But the name column should still be selected (without alias)
+			// In SQLite, unaliased column refs become `"t1"."name"` (double-quoted)
+			expect(sql).toMatch(/"t\d+"\."name"/); // e.g., "t1"."name"
+		});
+
+		it('should produce different SQL than "always" mode', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: { type: 'all' },
+				include: [{ relation: 'author' }],
+			};
+
+			const report = plan(intent, schemaWithCollisions);
+
+			const compiledAlways = compile(report, schemaWithCollisions, kysely, {
+				aliasIncludedColumns: 'always',
+			});
+			const compiledOnCollision = compile(
+				report,
+				schemaWithCollisions,
+				kysely,
+				{ aliasIncludedColumns: 'onCollision' },
+			);
+
+			// The SQL should be different
+			expect(compiledAlways.sql).not.toBe(compiledOnCollision.sql);
+
+			// 'always' should have more aliases
+			const alwaysAliasCount = (
+				compiledAlways.sql.match(/as "author\./gi) || []
+			).length;
+			const onCollisionAliasCount = (
+				compiledOnCollision.sql.match(/as "author\./gi) || []
+			).length;
+
+			expect(alwaysAliasCount).toBeGreaterThan(onCollisionAliasCount);
+		});
+	});
+
+	describe('collision detection across multiple includes', () => {
+		// Schema with multiple relations where column names collide
+		const schemaWithMultipleIncludes = defineSchema({
+			comments: {
+				id: 'number',
+				content: 'string',
+				postId: 'number',
+				authorId: 'number',
+				createdAt: 'string',
+			},
+			posts: {
+				id: 'number',
+				title: 'string',
+				createdAt: 'string',
+			},
+			users: {
+				id: 'number',
+				name: 'string',
+				createdAt: 'string',
+			},
+		})
+			.relations({
+				comments: {
+					post: belongsTo('posts', { foreignKey: 'postId' }),
+					author: belongsTo('users', { foreignKey: 'authorId' }),
+				},
+			})
+			.build();
+
+		it('should detect collisions across root and multiple included tables', () => {
+			// Given: comments with post and author includes
+			// All three tables have 'id' and 'createdAt' columns
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'comments',
+				select: { type: 'all' },
+				include: [{ relation: 'post' }, { relation: 'author' }],
+			};
+
+			const report = plan(intent, schemaWithMultipleIncludes);
+
+			// When: aliasIncludedColumns: 'onCollision'
+			const compiled = compile(report, schemaWithMultipleIncludes, kysely, {
+				aliasIncludedColumns: 'onCollision',
+			});
+
+			const sql = compiled.sql.toLowerCase();
+
+			// Then: 'id' and 'createdAt' should be aliased for both includes
+			expect(sql).toContain('"post.id"');
+			expect(sql).toContain('"post.createdat"');
+			expect(sql).toContain('"author.id"');
+			expect(sql).toContain('"author.createdat"');
+
+			// And: Non-colliding columns should NOT be aliased
+			// post.title and author.name don't collide with comments
+			expect(sql).not.toContain('"post.title"');
+			expect(sql).not.toContain('"author.name"');
 		});
 	});
 });

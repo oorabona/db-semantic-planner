@@ -40,7 +40,16 @@ export type Cardinality = 'one' | 'many';
 export type Optionality = 'required' | 'optional';
 
 /** Strategy for including related data */
-export type IncludeStrategy = 'join' | 'separate' | 'auto';
+/**
+ * Include strategy for fetching related data.
+ * - 'join': Use JOIN (efficient for to-one, risk of row explosion for to-many)
+ * - 'separate': Use separate query (safe for to-many, N+1 if not batched)
+ * - 'cte': Use CTE-based include (good for recursive/hierarchical)
+ * - 'lateral': Use LATERAL JOIN (PostgreSQL/MSSQL CROSS APPLY, handles LIMIT)
+ * - 'json_agg': Use JSON aggregation (PostgreSQL/MySQL/DuckDB, single row per parent)
+ * - 'auto': Planner decides based on relation type + dialect capabilities
+ */
+export type IncludeStrategy = 'join' | 'separate' | 'cte' | 'lateral' | 'json_agg' | 'auto';
 
 /** Strategy for filtering by relation */
 export type FilterStrategy = 'exists' | 'join' | 'auto';
@@ -67,6 +76,20 @@ export interface ColumnIR {
 
 	/** Default value (optional) */
 	readonly default?: unknown;
+
+	/**
+	 * Original database type string from introspection.
+	 * Preserves precision/scale/length info that may be lost in `type`.
+	 *
+	 * @example
+	 * - 'varchar(255)' when type is 'string'
+	 * - 'numeric(10,2)' when type is 'number'
+	 * - 'timestamptz' when type is 'datetime'
+	 *
+	 * This is optional and only populated by introspection.
+	 * Manually defined schemas may not have this field.
+	 */
+	readonly originalDbType?: string;
 }
 
 /**
