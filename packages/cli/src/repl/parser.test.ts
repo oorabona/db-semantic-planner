@@ -176,7 +176,8 @@ describe('parseNaturalQuery', () => {
 			const result = parseNaturalQuery('users include posts', mockSchema);
 			expect(result).toEqual({
 				table: 'users',
-				include: ['posts'],
+				// CLI-014: include is now ParsedInclude[]
+				include: [{ relation: 'posts' }],
 			});
 		});
 
@@ -185,13 +186,68 @@ describe('parseNaturalQuery', () => {
 				'posts include author comments',
 				mockSchema,
 			);
-			expect(result.include).toEqual(['author', 'comments']);
+			// CLI-014: include is now ParsedInclude[]
+			expect(result.include).toEqual([
+				{ relation: 'author' },
+				{ relation: 'comments' },
+			]);
 		});
 
 		it('throws on unknown relation', () => {
 			expect(() =>
 				parseNaturalQuery('users include unknown', mockSchema),
 			).toThrow(/Unknown relation/);
+		});
+
+		describe('filtered includes (CLI-014)', () => {
+			it('parses include with where filter', () => {
+				const result = parseNaturalQuery(
+					'users include posts where published = true',
+					mockSchema,
+				);
+				expect(result).toEqual({
+					table: 'users',
+					include: [
+						{
+							relation: 'posts',
+							where: [{ column: 'published', operator: '=', value: true }],
+						},
+					],
+				});
+			});
+
+			it('parses include with multiple where conditions', () => {
+				const result = parseNaturalQuery(
+					'users include posts where published = true and views > 100',
+					mockSchema,
+				);
+				expect(result.include).toEqual([
+					{
+						relation: 'posts',
+						where: [
+							{ column: 'published', operator: '=', value: true },
+							{ column: 'views', operator: '>', value: 100 },
+						],
+					},
+				]);
+			});
+
+			it('parses main table where separately from include where', () => {
+				const result = parseNaturalQuery(
+					'users where active = true include posts where published = true',
+					mockSchema,
+				);
+				expect(result.table).toBe('users');
+				expect(result.where).toEqual([
+					{ column: 'active', operator: '=', value: true },
+				]);
+				expect(result.include).toEqual([
+					{
+						relation: 'posts',
+						where: [{ column: 'published', operator: '=', value: true }],
+					},
+				]);
+			});
 		});
 
 		describe('qualified relations', () => {
@@ -203,7 +259,8 @@ describe('parseNaturalQuery', () => {
 				);
 				expect(result).toEqual({
 					table: 'posts',
-					include: ['author'],
+					// CLI-014: include is now ParsedInclude[]
+					include: [{ relation: 'author' }],
 				});
 			});
 
@@ -215,7 +272,8 @@ describe('parseNaturalQuery', () => {
 				);
 				expect(result).toEqual({
 					table: 'posts',
-					include: ['author'],
+					// CLI-014: include is now ParsedInclude[]
+					include: [{ relation: 'author' }],
 				});
 			});
 
@@ -289,7 +347,8 @@ describe('parseNaturalQuery', () => {
 			expect(result).toEqual({
 				table: 'users',
 				where: [{ column: 'active', operator: '=', value: true }],
-				include: ['posts'],
+				// CLI-014: include is now ParsedInclude[]
+				include: [{ relation: 'posts' }],
 				limit: 10,
 			});
 		});
@@ -301,7 +360,8 @@ describe('parseNaturalQuery', () => {
 			);
 			expect(result.table).toBe('users');
 			expect(result.where).toHaveLength(2);
-			expect(result.include).toEqual(['posts']);
+			// CLI-014: include is now ParsedInclude[]
+			expect(result.include).toEqual([{ relation: 'posts' }]);
 			expect(result.orderBy).toEqual([
 				{ column: 'created_at', direction: 'desc' },
 			]);
@@ -350,10 +410,24 @@ describe('parsedQueryToSql', () => {
 	});
 
 	it('includes comment for relations', () => {
+		// CLI-014: include is now ParsedInclude[]
 		const sql = parsedQueryToSql({
 			table: 'users',
-			include: ['posts', 'comments'],
+			include: [{ relation: 'posts' }, { relation: 'comments' }],
 		});
 		expect(sql).toContain('-- Includes: posts, comments');
+	});
+
+	it('includes comment for filtered relations (CLI-014)', () => {
+		const sql = parsedQueryToSql({
+			table: 'tags',
+			include: [
+				{
+					relation: 'posts',
+					where: [{ column: 'published', operator: '=', value: true }],
+				},
+			],
+		});
+		expect(sql).toContain('-- Includes: posts WHERE published = true');
 	});
 });
