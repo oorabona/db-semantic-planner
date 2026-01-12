@@ -34,13 +34,24 @@ export type AliasingMode = 'always' | 'onCollision';
  * - 'lateral': Use LATERAL JOIN (PostgreSQL only) - limit N children per parent
  * - 'json_agg': Use JSON aggregation (PostgreSQL, MySQL 8+) - no row duplication
  */
-export type IncludeStrategyMode = 'auto' | 'join' | 'separate' | 'cte' | 'lateral' | 'json_agg';
+export type IncludeStrategyMode =
+	| 'auto'
+	| 'join'
+	| 'separate'
+	| 'cte'
+	| 'lateral'
+	| 'json_agg';
 
 /**
  * SQL dialect for the REPL (CLI-011)
  * Determines SQL syntax and available features.
  */
-export type DialectMode = 'postgresql' | 'mysql' | 'sqlite' | 'mssql' | 'duckdb';
+export type DialectMode =
+	| 'postgresql'
+	| 'mysql'
+	| 'sqlite'
+	| 'mssql'
+	| 'duckdb';
 
 /**
  * REPL state

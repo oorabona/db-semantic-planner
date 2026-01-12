@@ -43,12 +43,6 @@
 	},
 	"overrides": [
 		{
-			"includes": ["**/spike/**"],
-			"linter": {
-				"enabled": false
-			}
-		},
-		{
 			"includes": ["**/*.test.ts", "**/*.test.tsx"],
 			"linter": {
 				"rules": {
@@ -72,6 +66,12 @@
 						"useImportType": "off"
 					}
 				}
+			}
+		},
+		{
+			"includes": ["**/spike/**"],
+			"linter": {
+				"enabled": false
 			}
 		}
 	]

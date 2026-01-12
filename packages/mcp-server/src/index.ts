@@ -171,7 +171,9 @@ async function main(): Promise<void> {
 		await startMcpServer({ schema });
 	} catch (error) {
 		if (error instanceof SchemaLoadError) {
-			console.error(`[dbsp-mcp] Schema error (${error.code}): ${error.message}`);
+			console.error(
+				`[dbsp-mcp] Schema error (${error.code}): ${error.message}`,
+			);
 		} else {
 			const message = error instanceof Error ? error.message : String(error);
 			console.error(`[dbsp-mcp] Error: ${message}`);

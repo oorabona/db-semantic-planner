@@ -485,7 +485,9 @@ describe('Semantic Planner', () => {
 				include: [{ relation: 'products' }],
 			};
 
-			const report = plan(intent, q2Schema, { defaultIncludeStrategy: 'separate' });
+			const report = plan(intent, q2Schema, {
+				defaultIncludeStrategy: 'separate',
+			});
 
 			const includeDecision = report.decisions.find(
 				(d) => d.type === 'include-strategy',

@@ -4,6 +4,7 @@
  * Transforms QueryIntent + ModelIR into PlanReport with strategic decisions.
  */
 
+import type { DialectCapabilities } from './dialects/index.js';
 import type {
 	IncludeIntent,
 	QueryIntent,
@@ -12,7 +13,6 @@ import type {
 	WhereIntent,
 } from './intent-ast.js';
 import type { IncludeStrategy, ModelIR, RelationIR } from './model-ir.js';
-import type { DialectCapabilities } from './dialects/index.js';
 
 // ============================================================================
 // Decision Types
@@ -938,8 +938,22 @@ function processInclude(
 		},
 		choice: includeStrategy,
 		reasoning: generateIncludeReasoning(relation, includeStrategy),
-		alternatives: getAlternativeStrategies(includeStrategy, opts.dialectCapabilities),
+		alternatives: getAlternativeStrategies(
+			includeStrategy,
+			opts.dialectCapabilities,
+		),
 	});
+
+	// Add CTE definition when using CTE strategy (CLI-012)
+	if (includeStrategy === 'cte') {
+		const cteName = `cte_${sourceTable}_${relation.name}`;
+		state.ctes.push({
+			name: cteName,
+			purpose: `Include ${relation.name} via CTE strategy`,
+			referencedBy: [intentPath],
+			sourceIntent: `${sourceTable}.${relation.name}`,
+		});
+	}
 
 	// Determine join type (only if using join strategy)
 	if (includeStrategy === 'join') {
@@ -1116,7 +1130,9 @@ function determineIncludeStrategy(
 	const capabilities = opts.dialectCapabilities;
 
 	// Helper to validate strategy against dialect capabilities
-	const validateStrategy = (strategy: IncludeStrategy): ResolvedIncludeStrategy => {
+	const validateStrategy = (
+		strategy: IncludeStrategy,
+	): ResolvedIncludeStrategy => {
 		if (strategy === 'auto') {
 			// Should not happen, but fallback to join
 			return 'join';
@@ -1127,19 +1143,19 @@ function determineIncludeStrategy(
 			if (strategy === 'lateral' && !capabilities.supportsLateralJoin) {
 				throw new UnsupportedStrategyError(
 					`Strategy 'lateral' is not supported by ${capabilities.name}. ` +
-					`Use 'join', 'separate', or 'json_agg' instead.`
+						`Use 'join', 'separate', or 'json_agg' instead.`,
 				);
 			}
 			if (strategy === 'json_agg' && !capabilities.supportsJsonAgg) {
 				throw new UnsupportedStrategyError(
 					`Strategy 'json_agg' is not supported by ${capabilities.name}. ` +
-					`Use 'join', 'separate', or 'lateral' instead.`
+						`Use 'join', 'separate', or 'lateral' instead.`,
 				);
 			}
 			if (strategy === 'cte' && !capabilities.supportsRecursiveCTE) {
 				throw new UnsupportedStrategyError(
 					`Strategy 'cte' is not supported by ${capabilities.name}. ` +
-					`Use 'join' or 'separate' instead.`
+						`Use 'join' or 'separate' instead.`,
 				);
 			}
 		}
@@ -1228,7 +1244,13 @@ function getAlternativeStrategies(
 	strategy: ResolvedIncludeStrategy,
 	capabilities: DialectCapabilities | undefined,
 ): string[] {
-	const allStrategies: ResolvedIncludeStrategy[] = ['join', 'separate', 'cte', 'lateral', 'json_agg'];
+	const allStrategies: ResolvedIncludeStrategy[] = [
+		'join',
+		'separate',
+		'cte',
+		'lateral',
+		'json_agg',
+	];
 
 	// Filter out current strategy and unsupported ones
 	return allStrategies.filter((s) => {

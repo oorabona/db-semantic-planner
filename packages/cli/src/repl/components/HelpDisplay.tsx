@@ -26,7 +26,8 @@ const DOT_COMMANDS = [
 	},
 	{
 		command: '.strategy [mode]',
-		description: 'Show/set include strategy (auto|join|separate|cte|lateral|json_agg)',
+		description:
+			'Show/set include strategy (auto|join|separate|cte|lateral|json_agg)',
 	},
 	{
 		command: '.dialect [name]',
