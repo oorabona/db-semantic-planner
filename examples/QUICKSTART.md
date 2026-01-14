@@ -79,7 +79,87 @@ pnpm dbsp repl --schema ./examples/ecommerce.schema.ts
 > .quit
 ```
 
-### Expected Output
+### Aggregate Queries (CLI-016)
+
+The REPL supports SQL-like aggregate functions:
+
+```
+# Count all rows
+> posts select count(*)
+
+# Count with alias
+> posts select count(*) as total_posts
+
+# Multiple aggregates
+> posts select sum(views) as total_views avg(views) as average
+
+# Group by with aggregate
+> posts select count(*) as post_count group by authorId
+
+# Having clause
+> posts select count(*) group by authorId having count > 5
+
+# Min/Max
+> orders select min(amount) as min_order max(amount) as max_order
+
+# Select distinct
+> posts select distinct
+
+# Count distinct
+> posts select count(distinct authorId) as unique_authors
+```
+
+### Expected Output (Aggregates)
+
+```
+dbsp> posts select count(*) as total_posts
+
+SQL:
+select count(*) as "total_posts" from "posts" as "t0"
+
+Plan:
+  Strategy: aggregate
+  Tables: posts
+```
+
+```
+dbsp> posts select count(*) as post_count group by authorId
+
+SQL:
+select "t0"."authorId", count(*) as "post_count"
+from "posts" as "t0"
+group by "t0"."authorId"
+
+Plan:
+  Strategy: aggregate, group-by
+  Tables: posts
+```
+
+```
+dbsp> posts select sum(views) as total_views avg(views) as avg_views
+
+SQL:
+select sum("t0"."views") as "total_views", avg("t0"."views") as "avg_views"
+from "posts" as "t0"
+
+Plan:
+  Strategy: aggregate
+  Tables: posts
+```
+
+```
+dbsp> posts select count(distinct authorId) as unique_authors
+
+SQL:
+select count(distinct "t0"."authorId") as "unique_authors"
+from "posts" as "t0"
+
+Plan:
+  Strategy: aggregate
+  Tables: posts
+```
+
+### Expected Output (Relations)
 
 ```
 dbsp> posts where published = true include author
@@ -293,4 +373,6 @@ pnpm dbsp repl --schema ./examples/minimal.schema.ts
 1. **Create your own schema** - Copy `minimal.schema.ts` and modify
 2. **Read the API docs** - See `README.md` for full API reference
 3. **Run E2E tests** - `pnpm test:e2e` to see real PostgreSQL examples
-4. **Explore advanced features** - Window functions, recursive queries, multi-tenant
+4. **Explore aggregate functions** - COUNT, SUM, AVG, MIN, MAX with GROUP BY and HAVING
+5. **Try nested includes** - `posts include author include posts`
+6. **Explore advanced features** - Window functions, recursive queries, multi-tenant

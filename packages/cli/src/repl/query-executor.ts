@@ -12,6 +12,7 @@ import {
 	buildModelFromSchema,
 	createOrm,
 	type Dump,
+	distinct as distinctField,
 	eq,
 	gt,
 	gte,
@@ -25,7 +26,12 @@ import {
 	type WhereIntent,
 } from '@db-semantic-planner/core';
 import type { ResolvedSchema } from '@db-semantic-planner/schema';
-import type { ParsedInclude, ParsedQuery, WhereClause } from './parser.js';
+import type {
+	ParsedAggregate,
+	ParsedInclude,
+	ParsedQuery,
+	WhereClause,
+} from './parser.js';
 import type {
 	AliasingMode,
 	DialectMode,
@@ -165,6 +171,41 @@ function whereClauseToFilter(clause: WhereClause): WhereIntent {
 }
 
 /**
+ * CLI-016: Apply aggregate to query builder
+ * Uses generic type to match QueryBuilder interface
+ */
+// biome-ignore lint/suspicious/noExplicitAny: QueryBuilder type is complex and context-dependent
+function applyAggregate(builder: any, agg: ParsedAggregate): any {
+	const { function: func, field, as: alias, distinct } = agg;
+
+	// For distinct aggregates, use the distinctField helper
+	const fieldArg = distinct && field ? distinctField(field) : field;
+
+	switch (func) {
+		case 'count':
+			// count() or count(field) or count(distinct field)
+			if (fieldArg) {
+				return builder.count(fieldArg, alias);
+			}
+			return builder.count(alias ? { as: alias } : undefined);
+		case 'sum':
+			if (!field) throw new Error('SUM requires a field');
+			return builder.sum(fieldArg as string, alias);
+		case 'avg':
+			if (!field) throw new Error('AVG requires a field');
+			return builder.avg(fieldArg as string, alias);
+		case 'min':
+			if (!field) throw new Error('MIN requires a field');
+			return builder.min(field, alias);
+		case 'max':
+			if (!field) throw new Error('MAX requires a field');
+			return builder.max(field, alias);
+		default:
+			throw new Error(`Unknown aggregate function: ${func}`);
+	}
+}
+
+/**
  * Execute a parsed query using the real semantic planner.
  * Returns SQL and plan without actually executing against a database.
  */
@@ -224,6 +265,31 @@ export function executeQuery(
 				const includeOptions = buildIncludeOptions(inc);
 				builder = builder.include(inc.relation, includeOptions);
 			}
+		}
+
+		// CLI-016: Add aggregates
+		if (query.aggregates && query.aggregates.length > 0) {
+			for (const agg of query.aggregates) {
+				builder = applyAggregate(builder, agg);
+			}
+		}
+
+		// CLI-016: Add group by
+		if (query.groupBy && query.groupBy.length > 0) {
+			builder = builder.groupBy(query.groupBy);
+		}
+
+		// CLI-016: Add having
+		if (query.having && query.having.length > 0) {
+			for (const clause of query.having) {
+				const filter = whereClauseToFilter(clause);
+				builder = builder.having(filter);
+			}
+		}
+
+		// CLI-016: Add distinct
+		if (query.distinct) {
+			builder = builder.distinct();
 		}
 
 		// Add order by

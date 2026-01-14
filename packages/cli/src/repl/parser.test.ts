@@ -440,7 +440,10 @@ describe('parseNaturalQuery', () => {
 			it('throws error for invalid nested relation', () => {
 				// posts.ratings doesn't exist - should throw
 				expect(() =>
-					parseNaturalQuery('authors include posts include ratings', nestedSchema),
+					parseNaturalQuery(
+						'authors include posts include ratings',
+						nestedSchema,
+					),
 				).toThrow(/Unknown relation.*ratings/);
 			});
 		});
@@ -624,5 +627,157 @@ describe('parsedQueryToSql', () => {
 			],
 		});
 		expect(sql).toContain('-- Includes: posts WHERE published = true');
+	});
+});
+
+// CLI-016: Aggregate parsing tests
+describe('parseNaturalQuery - aggregates (CLI-016)', () => {
+	it('parses count(*)', () => {
+		const result = parseNaturalQuery('users select count(*)', mockSchema);
+		expect(result.aggregates).toEqual([{ function: 'count' }]);
+	});
+
+	it('parses count(field)', () => {
+		const result = parseNaturalQuery('users select count(id)', mockSchema);
+		expect(result.aggregates).toEqual([{ function: 'count', field: 'id' }]);
+	});
+
+	it('parses count(field) as alias', () => {
+		const result = parseNaturalQuery(
+			'users select count(id) as total',
+			mockSchema,
+		);
+		expect(result.aggregates).toEqual([
+			{ function: 'count', field: 'id', as: 'total' },
+		]);
+	});
+
+	it('parses count(distinct field)', () => {
+		const result = parseNaturalQuery(
+			'users select count(distinct email)',
+			mockSchema,
+		);
+		expect(result.aggregates).toEqual([
+			{ function: 'count', field: 'email', distinct: true },
+		]);
+	});
+
+	it('parses multiple aggregates', () => {
+		const result = parseNaturalQuery(
+			'posts select count(*), sum(user_id) as total',
+			mockSchema,
+		);
+		expect(result.aggregates).toEqual([
+			{ function: 'count' },
+			{ function: 'sum', field: 'user_id', as: 'total' },
+		]);
+	});
+
+	it('parses avg, min, max', () => {
+		const result = parseNaturalQuery(
+			'users select avg(id), min(id), max(id)',
+			mockSchema,
+		);
+		expect(result.aggregates).toEqual([
+			{ function: 'avg', field: 'id' },
+			{ function: 'min', field: 'id' },
+			{ function: 'max', field: 'id' },
+		]);
+	});
+});
+
+describe('parseNaturalQuery - group by (CLI-016)', () => {
+	it('parses simple group by', () => {
+		const result = parseNaturalQuery(
+			'posts select count(*) group by user_id',
+			mockSchema,
+		);
+		expect(result.groupBy).toEqual(['user_id']);
+	});
+
+	it('parses multiple group by fields', () => {
+		const result = parseNaturalQuery(
+			'posts group by user_id, published',
+			mockSchema,
+		);
+		expect(result.groupBy).toEqual(['user_id', 'published']);
+	});
+
+	it('allows group by before select', () => {
+		const result = parseNaturalQuery(
+			'posts group by user_id select count(*) as total',
+			mockSchema,
+		);
+		expect(result.groupBy).toEqual(['user_id']);
+		expect(result.aggregates).toEqual([{ function: 'count', as: 'total' }]);
+	});
+});
+
+describe('parseNaturalQuery - having (CLI-016)', () => {
+	it('parses having clause', () => {
+		const result = parseNaturalQuery(
+			'posts select count(*) group by user_id having count > 5',
+			mockSchema,
+		);
+		expect(result.having).toEqual([
+			{ column: 'count', operator: '>', value: 5 },
+		]);
+	});
+
+	it('parses having with multiple conditions', () => {
+		const result = parseNaturalQuery(
+			'posts group by user_id having count > 5 and count < 100',
+			mockSchema,
+		);
+		expect(result.having).toEqual([
+			{ column: 'count', operator: '>', value: 5 },
+			{ column: 'count', operator: '<', value: 100 },
+		]);
+	});
+});
+
+describe('parseNaturalQuery - distinct (CLI-016)', () => {
+	it('parses select distinct', () => {
+		const result = parseNaturalQuery('users select distinct', mockSchema);
+		expect(result.distinct).toBe(true);
+	});
+
+	it('parses distinct keyword alone', () => {
+		const result = parseNaturalQuery('users distinct', mockSchema);
+		expect(result.distinct).toBe(true);
+	});
+
+	it('parses distinct with where', () => {
+		const result = parseNaturalQuery(
+			'users distinct where active = true',
+			mockSchema,
+		);
+		expect(result.distinct).toBe(true);
+		expect(result.where).toEqual([
+			{ column: 'active', operator: '=', value: true },
+		]);
+	});
+});
+
+describe('parseNaturalQuery - combined (CLI-016)', () => {
+	it('parses complex aggregate query', () => {
+		const result = parseNaturalQuery(
+			'posts where published = true select count(*) as total, sum(user_id) as user_sum group by user_id having count > 2 order by total desc limit 10',
+			mockSchema,
+		);
+		expect(result.table).toBe('posts');
+		expect(result.where).toEqual([
+			{ column: 'published', operator: '=', value: true },
+		]);
+		expect(result.aggregates).toEqual([
+			{ function: 'count', as: 'total' },
+			{ function: 'sum', field: 'user_id', as: 'user_sum' },
+		]);
+		expect(result.groupBy).toEqual(['user_id']);
+		expect(result.having).toEqual([
+			{ column: 'count', operator: '>', value: 2 },
+		]);
+		expect(result.orderBy).toEqual([{ column: 'total', direction: 'desc' }]);
+		expect(result.limit).toBe(10);
 	});
 });
