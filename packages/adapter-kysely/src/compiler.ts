@@ -738,6 +738,19 @@ export function compile(
 		}
 	}
 
+	// Add HAVING clause (DX-034)
+	if (intent.having) {
+		query = addHaving(
+			query,
+			intent.having,
+			rootAlias,
+			model,
+			plan,
+			state,
+			schemaName,
+		);
+	}
+
 	// Add ORDER BY
 	if (intent.orderBy) {
 		for (const order of intent.orderBy) {
@@ -1899,6 +1912,11 @@ function buildBaseQuery(
 	// Start with FROM
 	let query = kysely.selectFrom(`${tableName} as ${alias}`);
 
+	// Add SELECT DISTINCT if requested
+	if (intent.distinct) {
+		query = query.distinct();
+	}
+
 	// Add SELECT
 	if (!intent.select || intent.select.type === 'all') {
 		query = query.selectAll(alias);
@@ -1955,38 +1973,54 @@ function addAggregateExpression(
 	const column = agg.field ? `${alias}.${agg.field}` : null;
 	const resultAlias =
 		agg.as ?? `${agg.function}${agg.field ? `_${agg.field}` : ''}`;
+	const useDistinct = agg.distinct === true;
 
 	switch (agg.function) {
 		case 'count':
 			if (column) {
-				return query.select((eb) => eb.fn.count(column).as(resultAlias));
+				return query.select((eb) => {
+					const fn = eb.fn.count(column);
+					return (useDistinct ? fn.distinct() : fn).as(resultAlias);
+				});
 			}
-			// COUNT(*) - count all rows
+			// COUNT(*) - count all rows (distinct doesn't apply to countAll)
 			return query.select((eb) => eb.fn.countAll().as(resultAlias));
 
 		case 'sum':
 			if (!column) {
 				throw new CompilationError('SUM requires a field');
 			}
-			return query.select((eb) => eb.fn.sum(column).as(resultAlias));
+			return query.select((eb) => {
+				const fn = eb.fn.sum(column);
+				return (useDistinct ? fn.distinct() : fn).as(resultAlias);
+			});
 
 		case 'avg':
 			if (!column) {
 				throw new CompilationError('AVG requires a field');
 			}
-			return query.select((eb) => eb.fn.avg(column).as(resultAlias));
+			return query.select((eb) => {
+				const fn = eb.fn.avg(column);
+				return (useDistinct ? fn.distinct() : fn).as(resultAlias);
+			});
 
 		case 'min':
 			if (!column) {
 				throw new CompilationError('MIN requires a field');
 			}
-			return query.select((eb) => eb.fn.min(column).as(resultAlias));
+			return query.select((eb) => {
+				const fn = eb.fn.min(column);
+				return (useDistinct ? fn.distinct() : fn).as(resultAlias);
+			});
 
 		case 'max':
 			if (!column) {
 				throw new CompilationError('MAX requires a field');
 			}
-			return query.select((eb) => eb.fn.max(column).as(resultAlias));
+			return query.select((eb) => {
+				const fn = eb.fn.max(column);
+				return (useDistinct ? fn.distinct() : fn).as(resultAlias);
+			});
 
 		default:
 			throw new CompilationError(`Unknown aggregate function: ${agg.function}`);
@@ -2170,6 +2204,26 @@ function addWhere(
 ): SelectQueryBuilder<any, any, any> {
 	return query.where((eb) =>
 		compileWhere(eb, where, alias, model, plan, state, schemaName),
+	);
+}
+
+
+/**
+ * Add HAVING clause to query
+ */
+function addHaving(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: SelectQueryBuilder<any, any, any>,
+	having: WhereIntent,
+	alias: string,
+	model: ModelIR,
+	plan: PlanReport,
+	state: CompilerState,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	return query.having((eb) =>
+		compileWhere(eb, having, alias, model, plan, state, schemaName),
 	);
 }
 

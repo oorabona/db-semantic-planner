@@ -244,6 +244,7 @@ export interface IntentBuilderState {
 	readonly from: string;
 	selectIntent?: SelectIntent | undefined;
 	whereIntents: WhereIntent[];
+	havingIntents: WhereIntent[];
 	includes: IncludeIntent[];
 	recursiveIncludes: RecursiveIncludeConfig[];
 	aggregates: AggregateIntent[];
@@ -251,6 +252,7 @@ export interface IntentBuilderState {
 	orderByIntents: OrderByIntent[];
 	limitValue?: number | undefined;
 	offsetValue?: number | undefined;
+	isDistinct?: boolean | undefined;
 }
 
 // ============================================================================
@@ -285,6 +287,9 @@ export class IntentBuilder<TResult = unknown> {
 			whereIntents: initialState?.whereIntents
 				? [...initialState.whereIntents]
 				: [],
+			havingIntents: initialState?.havingIntents
+				? [...initialState.havingIntents]
+				: [],
 			includes: initialState?.includes ? [...initialState.includes] : [],
 			recursiveIncludes: initialState?.recursiveIncludes
 				? [...initialState.recursiveIncludes]
@@ -299,6 +304,7 @@ export class IntentBuilder<TResult = unknown> {
 			selectIntent: initialState?.selectIntent,
 			limitValue: initialState?.limitValue,
 			offsetValue: initialState?.offsetValue,
+			isDistinct: initialState?.isDistinct,
 		};
 	}
 
@@ -367,11 +373,12 @@ export class IntentBuilder<TResult = unknown> {
 
 	/**
 	 * Add an aggregate function.
+	 * DX-034: Now supports distinct flag for COUNT(DISTINCT field), etc.
 	 */
 	addAggregate(
 		func: 'count' | 'sum' | 'avg' | 'min' | 'max',
 		field?: string,
-		options?: AggregateOptions,
+		options?: AggregateOptions & { distinct?: boolean },
 	): void {
 		const agg: AggregateIntent = { function: func };
 		if (field !== undefined) {
@@ -382,6 +389,10 @@ export class IntentBuilder<TResult = unknown> {
 		if (options?.as !== undefined) {
 			(agg as { as: string }).as = options.as;
 		}
+		// DX-034: Support distinct aggregates
+		if (options?.distinct) {
+			(agg as { distinct: boolean }).distinct = true;
+		}
 		this.state.aggregates.push(agg);
 	}
 
@@ -390,6 +401,22 @@ export class IntentBuilder<TResult = unknown> {
 	 */
 	addGroupBy(fields: readonly string[]): void {
 		this.state.groupByFields.push(...fields);
+	}
+
+	/**
+	 * Add a HAVING condition for filtering on aggregates.
+	 * DX-034: HAVING is applied after GROUP BY.
+	 */
+	addHaving(condition: WhereIntent): void {
+		this.state.havingIntents.push(condition);
+	}
+
+	/**
+	 * Set SELECT DISTINCT mode.
+	 * DX-034: Deduplicates result rows.
+	 */
+	setDistinct(value: boolean = true): void {
+		this.state.isDistinct = value;
 	}
 
 	/**
@@ -491,6 +518,23 @@ export class IntentBuilder<TResult = unknown> {
 			(intent as { groupBy: readonly string[] }).groupBy = [
 				...this.state.groupByFields,
 			];
+		}
+
+		// DX-034: HAVING clause for filtering on aggregates
+		if (this.state.havingIntents.length === 1) {
+			const singleHaving = this.state.havingIntents[0];
+			if (singleHaving !== undefined) {
+				(intent as { having: WhereIntent }).having = singleHaving;
+			}
+		} else if (this.state.havingIntents.length > 1) {
+			(intent as { having: WhereIntent }).having = and(
+				...this.state.havingIntents,
+			);
+		}
+
+		// DX-034: SELECT DISTINCT
+		if (this.state.isDistinct) {
+			(intent as { distinct: boolean }).distinct = true;
 		}
 
 		if (this.state.orderByIntents.length > 0) {

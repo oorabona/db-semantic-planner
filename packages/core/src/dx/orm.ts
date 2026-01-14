@@ -23,7 +23,7 @@ import {
 	NotFoundError,
 	RelationNotFoundError,
 } from './errors.js';
-import { and, eq, inArray } from './filters.js';
+import { and, eq, inArray, isDistinctField, type DistinctField } from './filters.js';
 import {
 	DeleteBuilder,
 	InsertBuilder,
@@ -756,6 +756,8 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	private orderByIntents: OrderByIntent[] = [];
 	private limitValue?: number;
 	private offsetValue?: number;
+	private havingIntents: WhereIntent[] = [];
+	private isDistinctQuery = false;
 
 	constructor(
 		model: ModelIR,
@@ -833,22 +835,50 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		return builder;
 	}
 
-	count(options?: AggregateOptions): QueryBuilder<TResult> {
+	count(
+		fieldOrOptions?: AggregateOptions | string | DistinctField,
+		as?: string,
+	): QueryBuilder<TResult> {
 		const builder = this.clone();
 		const agg: AggregateIntent = { function: 'count' };
-		if (options?.field !== undefined) {
-			(agg as { field: string }).field = options.field;
+
+		if (fieldOrOptions === undefined) {
+			// count() - COUNT(*)
+		} else if (typeof fieldOrOptions === 'string') {
+			// count('field', 'alias') - COUNT(field)
+			(agg as { field: string }).field = fieldOrOptions;
+			if (as !== undefined) {
+				(agg as { as: string }).as = as;
+			}
+		} else if (isDistinctField(fieldOrOptions)) {
+			// count(distinct('field'), 'alias') - COUNT(DISTINCT field)
+			(agg as { field: string }).field = fieldOrOptions.field;
+			(agg as { distinct: boolean }).distinct = true;
+			if (as !== undefined) {
+				(agg as { as: string }).as = as;
+			}
+		} else {
+			// count({ field, as }) - AggregateOptions
+			if (fieldOrOptions.field !== undefined) {
+				(agg as { field: string }).field = fieldOrOptions.field;
+			}
+			if (fieldOrOptions.as !== undefined) {
+				(agg as { as: string }).as = fieldOrOptions.as;
+			}
 		}
-		if (options?.as !== undefined) {
-			(agg as { as: string }).as = options.as;
-		}
+
 		builder.aggregates.push(agg);
 		return builder;
 	}
 
-	sum(field: string, as?: string): QueryBuilder<TResult> {
+	sum(field: string | DistinctField, as?: string): QueryBuilder<TResult> {
 		const builder = this.clone();
-		const agg: AggregateIntent = { function: 'sum', field };
+		const isDistinct = isDistinctField(field);
+		const fieldName = isDistinct ? field.field : field;
+		const agg: AggregateIntent = { function: 'sum', field: fieldName };
+		if (isDistinct) {
+			(agg as { distinct: boolean }).distinct = true;
+		}
 		if (as !== undefined) {
 			(agg as { as: string }).as = as;
 		}
@@ -856,9 +886,14 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		return builder;
 	}
 
-	avg(field: string, as?: string): QueryBuilder<TResult> {
+	avg(field: string | DistinctField, as?: string): QueryBuilder<TResult> {
 		const builder = this.clone();
-		const agg: AggregateIntent = { function: 'avg', field };
+		const isDistinct = isDistinctField(field);
+		const fieldName = isDistinct ? field.field : field;
+		const agg: AggregateIntent = { function: 'avg', field: fieldName };
+		if (isDistinct) {
+			(agg as { distinct: boolean }).distinct = true;
+		}
 		if (as !== undefined) {
 			(agg as { as: string }).as = as;
 		}
@@ -889,6 +924,19 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	groupBy(fields: readonly string[]): QueryBuilder<TResult> {
 		const builder = this.clone();
 		builder.groupByFields.push(...fields);
+		return builder;
+	}
+
+
+	having(condition: WhereIntent): QueryBuilder<TResult> {
+		const builder = this.clone();
+		builder.havingIntents.push(condition);
+		return builder;
+	}
+
+	distinct(): QueryBuilder<TResult> {
+		const builder = this.clone();
+		builder.isDistinctQuery = true;
 		return builder;
 	}
 
@@ -2126,6 +2174,22 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		} else if (this.whereIntents.length > 1) {
 			(intent as { where: WhereIntent }).where = and(...this.whereIntents);
 		}
+
+		// Combine multiple having conditions with AND (DX-034)
+		if (this.havingIntents.length === 1) {
+			const singleHaving = this.havingIntents[0];
+			if (singleHaving !== undefined) {
+				(intent as { having: WhereIntent }).having = singleHaving;
+			}
+		} else if (this.havingIntents.length > 1) {
+			(intent as { having: WhereIntent }).having = and(...this.havingIntents);
+		}
+
+		// Add SELECT DISTINCT flag (DX-034)
+		if (this.isDistinctQuery) {
+			(intent as { distinct: boolean }).distinct = true;
+		}
+
 		if (this.includes.length > 0) {
 			(intent as { include: readonly IncludeIntent[] }).include = this.includes;
 		}
@@ -2221,6 +2285,10 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		}
 		// Clone whereIntents array
 		builder.whereIntents.push(...this.whereIntents);
+		// Clone havingIntents array (DX-034)
+		builder.havingIntents.push(...this.havingIntents);
+		// Clone isDistinctQuery (DX-034)
+		builder.isDistinctQuery = this.isDistinctQuery;
 		if (this.strictModeOverride !== undefined) {
 			builder.strictModeOverride = this.strictModeOverride;
 		}

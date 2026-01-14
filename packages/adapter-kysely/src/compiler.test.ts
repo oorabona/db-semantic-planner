@@ -1067,6 +1067,178 @@ describe('SQL Compiler', () => {
 	});
 
 	// ============================================================================
+	// DX-034: DISTINCT Aggregates and HAVING
+	// ============================================================================
+
+	describe('DX-034: DISTINCT Aggregates', () => {
+		it('should compile COUNT(DISTINCT field)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', field: 'userId', distinct: true }],
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('count(distinct');
+		});
+
+		it('should compile COUNT(DISTINCT field) with alias', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [
+						{
+							function: 'count',
+							field: 'userId',
+							distinct: true,
+							as: 'unique_authors',
+						},
+					],
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('count(distinct');
+			expect(compiled.sql).toContain('unique_authors');
+		});
+
+		it('should compile SUM(DISTINCT field)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [
+						{ function: 'sum', field: 'userId', distinct: true, as: 'unique_sum' },
+					],
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('sum(distinct');
+			expect(compiled.sql).toContain('unique_sum');
+		});
+
+		it('should compile AVG(DISTINCT field)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [
+						{ function: 'avg', field: 'userId', distinct: true, as: 'unique_avg' },
+					],
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('avg(distinct');
+			expect(compiled.sql).toContain('unique_avg');
+		});
+	});
+
+	describe('DX-034: HAVING clause', () => {
+		it('should compile HAVING with simple condition', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', as: 'cnt' }],
+					fields: ['userId'],
+				},
+				groupBy: ['userId'],
+				having: {
+					kind: 'comparison',
+					field: 'userId',
+					operator: 'gt',
+					value: 5,
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('having');
+			expect(compiled.sql.toLowerCase()).toContain('group by');
+		});
+
+		it('should place HAVING after GROUP BY', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', as: 'cnt' }],
+					fields: ['userId'],
+				},
+				groupBy: ['userId'],
+				having: {
+					kind: 'comparison',
+					field: 'userId',
+					operator: 'gt',
+					value: 0,
+				},
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			const lowerSql = compiled.sql.toLowerCase();
+			const groupByIndex = lowerSql.indexOf('group by');
+			const havingIndex = lowerSql.indexOf('having');
+			expect(groupByIndex).toBeLessThan(havingIndex);
+		});
+	});
+
+	describe('DX-034: SELECT DISTINCT', () => {
+		it('should compile SELECT DISTINCT', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				distinct: true,
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('select distinct');
+		});
+
+		it('should compile SELECT DISTINCT with columns', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				select: {
+					type: 'columns',
+					fields: ['name', 'email'],
+				},
+				distinct: true,
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			expect(compiled.sql.toLowerCase()).toContain('select distinct');
+			expect(compiled.sql).toContain('name');
+			expect(compiled.sql).toContain('email');
+		});
+	});
+
+	// ============================================================================
 	// RFC-001: Recursive CTE Compilation Tests
 	// ============================================================================
 
