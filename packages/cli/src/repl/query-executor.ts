@@ -17,6 +17,7 @@ import {
 	gt,
 	gte,
 	type IncludeOptions,
+	type IncludeOptionsWithRecursive,
 	isNotNull,
 	isNull,
 	like,
@@ -95,7 +96,11 @@ function collectAllRelations(includes: ParsedInclude[] | undefined): string[] {
 /**
  * CLI-014: Build include options with optional where filter and nested includes
  */
-function buildIncludeOptions(inc: ParsedInclude): IncludeOptions | undefined {
+function buildIncludeOptions(
+	inc: ParsedInclude,
+	schema: ResolvedSchema,
+	currentTable: string,
+): IncludeOptionsWithRecursive | undefined {
 	let whereFilter: WhereIntent | undefined;
 	let nestedIncludes: Array<{ relation: string } & IncludeOptions> | undefined;
 
@@ -112,15 +117,37 @@ function buildIncludeOptions(inc: ParsedInclude): IncludeOptions | undefined {
 		}
 	}
 
+	// Get target table for nested includes
+	const qualifiedKey = `${currentTable}.${inc.relation}`;
+	const relationDef =
+		schema.relations[qualifiedKey] || schema.relations[inc.relation];
+	const targetTable = relationDef?.target ?? inc.relation;
+
 	// Convert nested includes recursively
 	if (inc.include && inc.include.length > 0) {
 		nestedIncludes = inc.include.map((nested) => {
-			const nestedOptions = buildIncludeOptions(nested);
+			const nestedOptions = buildIncludeOptions(nested, schema, targetTable);
 			return {
 				relation: nested.relation,
 				...nestedOptions,
 			};
 		});
+	}
+
+	// CLI-017: Handle recursive includes
+	if (inc.recursive) {
+		// Determine direction from relation type
+		// hasMany/hasOne → descendants, belongsTo → ancestors
+		const direction: 'ancestors' | 'descendants' =
+			relationDef?.kind === 'belongsTo' ? 'ancestors' : 'descendants';
+
+		return {
+			recursive: true,
+			direction,
+			...(inc.maxDepth !== undefined && { maxDepth: inc.maxDepth }),
+			...(whereFilter && { where: whereFilter }),
+			...(nestedIncludes && { include: nestedIncludes }),
+		};
 	}
 
 	// Return options only if we have any
@@ -262,7 +289,7 @@ export function executeQuery(
 		if (query.include && query.include.length > 0) {
 			for (const inc of query.include) {
 				// CLI-014: Build include options with where filter if present
-				const includeOptions = buildIncludeOptions(inc);
+				const includeOptions = buildIncludeOptions(inc, schema, query.table);
 				builder = builder.include(inc.relation, includeOptions);
 			}
 		}

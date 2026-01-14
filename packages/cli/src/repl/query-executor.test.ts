@@ -347,4 +347,78 @@ describe('executeQuery - aggregates (CLI-016)', () => {
 		expect(result.error).toBeUndefined();
 		expect(result.sql.toLowerCase()).toContain('select distinct');
 	});
+
+	describe('recursive includes (CLI-017)', () => {
+		// Schema with self-referential relations
+		const hierarchySchema: ResolvedSchema = {
+			tables: {
+				categories: {
+					id: { type: 'integer', primaryKey: true },
+					name: { type: 'string', nullable: false },
+					parentId: { type: 'integer', nullable: true },
+				},
+			},
+			relations: {
+				'categories.parent': {
+					kind: 'belongsTo',
+					target: 'categories',
+					foreignKey: 'parentId',
+				},
+				'categories.children': {
+					kind: 'hasMany',
+					target: 'categories',
+					foreignKey: 'parentId',
+				},
+			},
+			hints: {},
+			conventions: {
+				fkPattern: '{singular}Id',
+				pluralize: true,
+				timestamps: ['createdAt', 'updatedAt'],
+			},
+		};
+
+		it('should accept recursive: true for hasMany relation without error', () => {
+			const query: ParsedQuery = {
+				table: 'categories',
+				include: [{ relation: 'children', recursive: true }],
+			};
+
+			const result = executeQuery(query, hierarchySchema);
+
+			// Recursive includes are processed during execution, not compilation
+			// In compile-only mode (REPL), the main query is generated without CTE
+			// The recursive include is stored separately for execution-time processing
+			expect(result.error).toBeUndefined();
+			// Main query should still compile successfully
+			expect(result.sql).toBeTruthy();
+		});
+
+		it('should accept recursive: true for belongsTo relation without error', () => {
+			const query: ParsedQuery = {
+				table: 'categories',
+				include: [{ relation: 'parent', recursive: true }],
+			};
+
+			const result = executeQuery(query, hierarchySchema);
+
+			// Recursive includes are handled at execution time
+			expect(result.error).toBeUndefined();
+			expect(result.sql).toBeTruthy();
+		});
+
+		it('should generate non-recursive SQL for regular includes', () => {
+			const query: ParsedQuery = {
+				table: 'categories',
+				include: [{ relation: 'children' }], // No recursive flag
+			};
+
+			const result = executeQuery(query, hierarchySchema);
+
+			expect(result.error).toBeUndefined();
+			// Non-recursive includes use JOIN strategy
+			expect(result.sql.toLowerCase()).toContain('left join');
+			expect(result.sql.toLowerCase()).not.toContain('with recursive');
+		});
+	});
 });

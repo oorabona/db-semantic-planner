@@ -74,7 +74,12 @@ interface CompilerState {
 	/** Track relations that have been JOINed for include-strategy: 'join' or 'json_agg' */
 	joinedIncludeRelations: Map<
 		string,
-		{ alias: string; targetTable: string; relationName: string; strategy: 'join' | 'json_agg' }
+		{
+			alias: string;
+			targetTable: string;
+			relationName: string;
+			strategy: 'join' | 'json_agg';
+		}
 	>;
 }
 
@@ -1711,7 +1716,9 @@ function addWhereToJoin<T>(
 			case 'in':
 				// For IN, we need to use sql template
 				if (Array.isArray(w.value) && w.value.length > 0) {
-					return join.on(sql`${sql.ref(fieldRef)} IN (${sql.join(w.value.map(v => sql`${v}`))})`);
+					return join.on(
+						sql`${sql.ref(fieldRef)} IN (${sql.join(w.value.map((v) => sql`${v}`))})`,
+					);
 				}
 				return join;
 			case 'isNull':
@@ -2206,7 +2213,6 @@ function addWhere(
 		compileWhere(eb, where, alias, model, plan, state, schemaName),
 	);
 }
-
 
 /**
  * Add HAVING clause to query

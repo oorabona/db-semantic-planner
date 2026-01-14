@@ -159,6 +159,26 @@ Plan:
   Tables: posts
 ```
 
+### Recursive Includes (CLI-017)
+
+For self-referential tables (like hierarchical categories), use `include all` for recursive traversal:
+
+```
+# Get category with all descendants (children, grandchildren, etc.)
+> categories where id = 1 include all children
+
+# Get category with all ancestors (parent, grandparent, etc.)
+> categories where id = 5 include all parent
+
+# Regular (non-recursive) includes - one level only
+> categories include children
+> categories include parent
+```
+
+> **Note:** Recursive includes generate CTEs (`WITH RECURSIVE`) at execution time.
+> In REPL compile-only mode, the main query is shown without the CTE.
+> Use actual database execution to see the full recursive behavior.
+
 ### Expected Output (Relations)
 
 ```
@@ -375,4 +395,5 @@ pnpm dbsp repl --schema ./examples/minimal.schema.ts
 3. **Run E2E tests** - `pnpm test:e2e` to see real PostgreSQL examples
 4. **Explore aggregate functions** - COUNT, SUM, AVG, MIN, MAX with GROUP BY and HAVING
 5. **Try nested includes** - `posts include author include posts`
-6. **Explore advanced features** - Window functions, recursive queries, multi-tenant
+6. **Try recursive includes** - `include all children` for hierarchical data
+7. **Explore advanced features** - Window functions, multi-tenant

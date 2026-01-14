@@ -5,9 +5,9 @@ import type {
 	SelectIntent,
 	WhereIntent,
 } from '../intent-ast.js';
-import type { DistinctField } from './filters.js';
 import type { IncludeStrategy, ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
+import type { DistinctField } from './filters.js';
 import type {
 	DeleteBuilder,
 	InsertBuilder,

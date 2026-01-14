@@ -1118,7 +1118,12 @@ describe('SQL Compiler', () => {
 				select: {
 					type: 'aggregate',
 					aggregates: [
-						{ function: 'sum', field: 'userId', distinct: true, as: 'unique_sum' },
+						{
+							function: 'sum',
+							field: 'userId',
+							distinct: true,
+							as: 'unique_sum',
+						},
 					],
 				},
 			};
@@ -1137,7 +1142,12 @@ describe('SQL Compiler', () => {
 				select: {
 					type: 'aggregate',
 					aggregates: [
-						{ function: 'avg', field: 'userId', distinct: true, as: 'unique_avg' },
+						{
+							function: 'avg',
+							field: 'userId',
+							distinct: true,
+							as: 'unique_avg',
+						},
 					],
 				},
 			};
@@ -4434,7 +4444,12 @@ describe('CORE-006: Composite Key Support', () => {
 					include: [
 						{
 							relation: 'children',
-							where: { kind: 'comparison', field: 'active', operator: 'eq', value: true },
+							where: {
+								kind: 'comparison',
+								field: 'active',
+								operator: 'eq',
+								value: true,
+							},
 							recursive: { maxDepth: 10 },
 						},
 					],

@@ -1396,6 +1396,47 @@ orders select distinct user_id
 
 ---
 
+### CLI-017: Recursive Include Syntax in REPL ✅ (2026-01-14)
+
+**Priority:** MEDIUM | **Effort:** S (~2h) | **Breaking:** No
+
+Add `include all <relation>` syntax for recursive includes in REPL.
+
+**Syntax:**
+```
+# One-level include (existing)
+categories include children
+
+# Recursive include (NEW)
+categories include all children    # All descendants via CTE
+categories include all parent      # All ancestors via CTE
+```
+
+**Auto-direction detection:**
+- `hasMany` relation → `descendants` (traverse down tree)
+- `belongsTo` relation → `ancestors` (traverse up tree)
+
+**Implementation:**
+1. [x] ✅ CLI-017.1: Extend `ParsedInclude` interface with `recursive?: boolean`, `maxDepth?: number`
+2. [x] ✅ CLI-017.2: Parse `include all <relation>` syntax in `parseIncludeChain()`
+3. [x] ✅ CLI-017.3: Pass recursive options to query-executor with direction auto-detection
+4. [x] ✅ CLI-017.4: Add tests for recursive includes (parser + query-executor)
+5. [x] ✅ CLI-017.5: Update QUICKSTART.md with recursive include examples
+
+**Files changed:**
+- `packages/cli/src/repl/parser.ts` - ParsedInclude extension, 'all' keyword detection
+- `packages/cli/src/repl/query-executor.ts` - buildIncludeOptions with direction detection
+- `packages/cli/src/repl/parser.test.ts` - 5 new tests
+- `packages/cli/src/repl/query-executor.test.ts` - 3 new tests
+- `packages/core/src/dx/index.ts` - Export `IncludeOptionsWithRecursive`
+- `examples/QUICKSTART.md` - Recursive includes section
+
+**Tests:** All 167 CLI tests passing (8 new tests for CLI-017)
+
+**Note:** Recursive CTEs are generated at execution time (`processRecursiveIncludes()`), not at compilation time. In REPL compile-only mode, `dump()` shows the main query without CTEs.
+
+---
+
 ### Documentation (DX critical)
 
 - [ ] **DOCS-001**: User documentation (Getting Started, API Guide)

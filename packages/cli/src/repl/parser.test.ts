@@ -488,6 +488,145 @@ describe('parseNaturalQuery', () => {
 				).toThrow(/Use just "posts" or query from "authors" table/);
 			});
 		});
+
+		describe('recursive includes (CLI-017)', () => {
+			// Schema with self-referential relation
+			const hierarchySchema: ResolvedSchema = {
+				tables: {
+					categories: {
+						id: { type: 'integer', nullable: false },
+						name: { type: 'text', nullable: false },
+						parent_id: { type: 'integer', nullable: true },
+					},
+				},
+				relations: {
+					'categories.parent': {
+						kind: 'belongsTo',
+						target: 'categories',
+						foreignKey: 'parent_id',
+					},
+					'categories.children': {
+						kind: 'hasMany',
+						target: 'categories',
+						foreignKey: 'parent_id',
+					},
+				},
+				hints: {},
+				conventions: {
+					primaryKey: 'id',
+					createdAt: 'created_at',
+					updatedAt: 'updated_at',
+					deletedAt: 'deleted_at',
+					foreignKeySuffix: '_id',
+					timestamps: false,
+					softDeletes: false,
+				},
+			};
+
+			it('parses "include all children" as recursive include', () => {
+				const result = parseNaturalQuery(
+					'categories include all children',
+					hierarchySchema,
+				);
+				expect(result).toEqual({
+					table: 'categories',
+					include: [
+						{
+							relation: 'children',
+							recursive: true,
+						},
+					],
+				});
+			});
+
+			it('parses "include all parent" as recursive include', () => {
+				const result = parseNaturalQuery(
+					'categories include all parent',
+					hierarchySchema,
+				);
+				expect(result).toEqual({
+					table: 'categories',
+					include: [
+						{
+							relation: 'parent',
+							recursive: true,
+						},
+					],
+				});
+			});
+
+			it('parses recursive include with where clause', () => {
+				const result = parseNaturalQuery(
+					'categories where id = 1 include all children',
+					hierarchySchema,
+				);
+				expect(result).toEqual({
+					table: 'categories',
+					where: [{ column: 'id', operator: '=', value: 1 }],
+					include: [
+						{
+							relation: 'children',
+							recursive: true,
+						},
+					],
+				});
+			});
+
+			it('parses mixed recursive and non-recursive includes', () => {
+				const mixedSchema: ResolvedSchema = {
+					...hierarchySchema,
+					tables: {
+						...hierarchySchema.tables,
+						posts: {
+							id: { type: 'integer', nullable: false },
+							category_id: { type: 'integer', nullable: false },
+							title: { type: 'text', nullable: false },
+						},
+					},
+					relations: {
+						...hierarchySchema.relations,
+						'categories.posts': {
+							kind: 'hasMany',
+							target: 'posts',
+							foreignKey: 'category_id',
+						},
+					},
+				};
+
+				const result = parseNaturalQuery(
+					'categories include all children include posts',
+					mixedSchema,
+				);
+				expect(result).toEqual({
+					table: 'categories',
+					include: [
+						{
+							relation: 'children',
+							recursive: true,
+						},
+						{
+							relation: 'posts',
+						},
+					],
+				});
+			});
+
+			it('parses regular include (without all) as non-recursive', () => {
+				const result = parseNaturalQuery(
+					'categories include children',
+					hierarchySchema,
+				);
+				expect(result).toEqual({
+					table: 'categories',
+					include: [
+						{
+							relation: 'children',
+							// No recursive flag
+						},
+					],
+				});
+			});
+		});
 	});
 
 	describe('limit and offset', () => {
