@@ -9,11 +9,13 @@ import { describe, expect, it } from 'vitest';
 import {
 	and,
 	coalesce,
+	distinct,
 	eq,
 	exists,
 	gt,
 	gte,
 	inArray,
+	isDistinctField,
 	isNotNull,
 	isNull,
 	like,
@@ -487,6 +489,40 @@ describe('Feature 8: Expression Helpers', () => {
 					as: 'emptyExpr',
 				},
 			});
+		});
+	});
+});
+
+// ============================================================================
+// DX-034: distinct() Helper
+// ============================================================================
+
+describe('DX-034: distinct() helper', () => {
+	describe('distinct()', () => {
+		it('should create a DistinctField object', () => {
+			const result = distinct('customerId');
+
+			expect(result).toEqual({
+				field: 'customerId',
+				distinct: true,
+			});
+		});
+
+		it('should be recognized by isDistinctField type guard', () => {
+			const result = distinct('customerId');
+
+			expect(isDistinctField(result)).toBe(true);
+		});
+
+		it('should reject non-DistinctField objects', () => {
+			expect(isDistinctField('customerId')).toBe(false);
+			expect(isDistinctField({ field: 'customerId' })).toBe(false);
+			expect(isDistinctField({ distinct: true })).toBe(false);
+			expect(isDistinctField(null)).toBe(false);
+			expect(isDistinctField(undefined)).toBe(false);
+			expect(isDistinctField({ field: 'customerId', distinct: false })).toBe(
+				false,
+			);
 		});
 	});
 });

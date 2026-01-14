@@ -25,6 +25,9 @@ export {
 	coalesce,
 	// Window function builders (DX-021)
 	denseRank,
+	// Distinct helper for aggregates (DX-034)
+	distinct,
+	type DistinctField,
 	// Comparison
 	eq,
 	// Relation
@@ -33,6 +36,8 @@ export {
 	gte,
 	// Array
 	inArray,
+	// Type guards
+	isDistinctField,
 	// Null
 	isNotNull,
 	isNull,

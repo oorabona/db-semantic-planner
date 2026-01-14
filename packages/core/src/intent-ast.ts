@@ -75,6 +75,8 @@ export interface AggregateIntent {
 	readonly field?: string;
 	/** Alias for result column */
 	readonly as?: string;
+	/** Whether to apply DISTINCT to the aggregate (e.g., COUNT(DISTINCT field)) */
+	readonly distinct?: boolean;
 }
 
 /**
@@ -586,6 +588,17 @@ export interface QueryIntent {
 	 * When specified, SELECT must include only grouped fields and aggregates.
 	 */
 	readonly groupBy?: readonly string[];
+
+	/**
+	 * Filter on aggregate results (applied after GROUP BY).
+	 * Similar to WHERE but operates on aggregated values.
+	 */
+	readonly having?: WhereIntent;
+
+	/**
+	 * Whether to apply SELECT DISTINCT to deduplicate rows.
+	 */
+	readonly distinct?: boolean;
 
 	/** Maximum number of rows */
 	readonly limit?: number;

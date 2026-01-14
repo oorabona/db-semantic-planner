@@ -40,6 +40,61 @@ import type {
 import type { ExpressionSpec } from './types.js';
 
 // ============================================================================
+// Distinct Field Helper (for aggregates)
+// ============================================================================
+
+/**
+ * Represents a field with DISTINCT modifier for aggregate functions.
+ *
+ * @example
+ * ```typescript
+ * count(distinct('customerId'))        // COUNT(DISTINCT customerId)
+ * sum(distinct('amount'), 'uniqueSum') // SUM(DISTINCT amount) AS uniqueSum
+ * ```
+ */
+export interface DistinctField {
+	readonly field: string;
+	readonly distinct: true;
+}
+
+/**
+ * Helper to mark a field as DISTINCT for aggregate functions.
+ *
+ * @param field - The field name to apply DISTINCT to
+ * @returns A DistinctField object that can be passed to aggregate functions
+ *
+ * @example
+ * ```typescript
+ * import { distinct } from '@db-semantic-planner/core';
+ *
+ * // COUNT(DISTINCT customerId)
+ * orm.select('orders').count(distinct('customerId')).execute();
+ *
+ * // COUNT(DISTINCT customerId) AS unique_customers
+ * orm.select('orders').count(distinct('customerId'), 'unique_customers').execute();
+ *
+ * // SUM(DISTINCT amount) - rare but valid SQL
+ * orm.select('orders').sum(distinct('amount'), 'unique_total').execute();
+ * ```
+ */
+export function distinct(field: string): DistinctField {
+	return { field, distinct: true };
+}
+
+/**
+ * Type guard to check if a value is a DistinctField.
+ */
+export function isDistinctField(value: unknown): value is DistinctField {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		'field' in value &&
+		'distinct' in value &&
+		(value as DistinctField).distinct === true
+	);
+}
+
+// ============================================================================
 // Comparison Operators
 // ============================================================================
 

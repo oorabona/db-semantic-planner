@@ -5,6 +5,7 @@ import type {
 	SelectIntent,
 	WhereIntent,
 } from '../intent-ast.js';
+import type { DistinctField } from './filters.js';
 import type { IncludeStrategy, ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
 import type {
@@ -551,43 +552,61 @@ export interface QueryBuilder<TResult = unknown> {
 
 	/**
 	 * Count rows, optionally counting a specific field.
+	 * Supports DISTINCT counting via the distinct() helper.
 	 *
-	 * @param options - Optional field to count and alias
+	 * @param fieldOrOptions - Optional field, DistinctField, or options object
+	 * @param as - Optional alias (when using field or DistinctField as first arg)
 	 * @returns A new QueryBuilder configured for COUNT
 	 *
 	 * @example
 	 * ```typescript
+	 * import { distinct } from '@db-semantic-planner/core';
+	 *
 	 * // COUNT(*)
 	 * orm.select('users').count().execute();
 	 *
+	 * // COUNT(email)
+	 * orm.select('users').count('email').execute();
+	 *
 	 * // COUNT(email) AS email_count
-	 * orm.select('users').count({ field: 'email', as: 'email_count' }).execute();
+	 * orm.select('users').count('email', 'email_count').execute();
+	 *
+	 * // COUNT(DISTINCT customerId)
+	 * orm.select('orders').count(distinct('customerId')).execute();
+	 *
+	 * // COUNT(DISTINCT customerId) AS unique_customers
+	 * orm.select('orders').count(distinct('customerId'), 'unique_customers').execute();
 	 * ```
 	 */
 	count(options?: AggregateOptions): QueryBuilder<TResult>;
+	count(field: string, as?: string): QueryBuilder<TResult>;
+	count(field: DistinctField, as?: string): QueryBuilder<TResult>;
 
 	/**
 	 * Calculate sum of a field.
+	 * Supports DISTINCT summing via the distinct() helper (rare but valid SQL).
 	 *
-	 * @param field - Field to sum
+	 * @param field - Field or DistinctField to sum
 	 * @param as - Optional alias for result column
 	 * @returns A new QueryBuilder configured for SUM
 	 *
 	 * @example
 	 * ```typescript
 	 * orm.select('orders').sum('total', 'order_total').execute();
+	 * orm.select('orders').sum(distinct('amount'), 'unique_total').execute();
 	 * ```
 	 */
-	sum(field: string, as?: string): QueryBuilder<TResult>;
+	sum(field: string | DistinctField, as?: string): QueryBuilder<TResult>;
 
 	/**
 	 * Calculate average of a field.
+	 * Supports DISTINCT averaging via the distinct() helper.
 	 *
-	 * @param field - Field to average
+	 * @param field - Field or DistinctField to average
 	 * @param as - Optional alias for result column
 	 * @returns A new QueryBuilder configured for AVG
 	 */
-	avg(field: string, as?: string): QueryBuilder<TResult>;
+	avg(field: string | DistinctField, as?: string): QueryBuilder<TResult>;
 
 	/**
 	 * Find minimum value of a field.
@@ -624,6 +643,56 @@ export interface QueryBuilder<TResult = unknown> {
 	 * ```
 	 */
 	groupBy(fields: readonly string[]): QueryBuilder<TResult>;
+
+	/**
+	 * Filter grouped results based on aggregate values.
+	 * Applied after GROUP BY, similar to WHERE but for aggregates.
+	 *
+	 * @param condition - Filter condition (typically using aggregate comparisons)
+	 * @returns A new QueryBuilder with HAVING applied
+	 *
+	 * @example
+	 * ```typescript
+	 * // Authors with more than 5 posts
+	 * orm.select('posts')
+	 *   .columns(['authorId'])
+	 *   .count({ as: 'postCount' })
+	 *   .groupBy(['authorId'])
+	 *   .having(gt('postCount', 5))
+	 *   .execute();
+	 *
+	 * // Categories with average price > 100
+	 * orm.select('products')
+	 *   .columns(['categoryId'])
+	 *   .avg('price', 'avgPrice')
+	 *   .groupBy(['categoryId'])
+	 *   .having(gt('avgPrice', 100))
+	 *   .execute();
+	 * ```
+	 */
+	having(condition: WhereIntent): QueryBuilder<TResult>;
+
+	/**
+	 * Apply SELECT DISTINCT to deduplicate result rows.
+	 *
+	 * @returns A new QueryBuilder with DISTINCT applied
+	 *
+	 * @example
+	 * ```typescript
+	 * // Get unique author IDs
+	 * orm.select('posts')
+	 *   .distinct()
+	 *   .columns(['authorId'])
+	 *   .execute();
+	 *
+	 * // Unique combinations
+	 * orm.select('orders')
+	 *   .distinct()
+	 *   .columns(['customerId', 'status'])
+	 *   .execute();
+	 * ```
+	 */
+	distinct(): QueryBuilder<TResult>;
 
 	/**
 	 * Sort results by one or more fields.
