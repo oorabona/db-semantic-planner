@@ -61,6 +61,10 @@ export interface ParsedInclude {
 	where?: WhereClause[];
 	/** Nested includes for deep relation loading (e.g., posts include comments include author) */
 	include?: ParsedInclude[];
+	/** If true, recursively fetch all ancestors or descendants via CTE */
+	recursive?: boolean;
+	/** Optional maximum depth for recursive includes (default: unlimited) */
+	maxDepth?: number;
 }
 
 /**
@@ -399,25 +403,35 @@ function parseIncludeChain(
 	let i = startIndex;
 
 	while (i < tokens.length) {
-		const rel = tokens[i];
-		if (!rel) break;
+		const tok = tokens[i];
+		if (!tok) break;
 
 		// Stop on keywords that aren't part of the include chain
-		const lowerRel = rel.toLowerCase();
-		if (['limit', 'offset', 'order', 'and', 'or'].includes(lowerRel)) {
+		const lowerTok = tok.toLowerCase();
+		if (['limit', 'offset', 'order', 'and', 'or'].includes(lowerTok)) {
 			break;
 		}
 
 		// 'where' without a relation means main table filter
-		if (lowerRel === 'where') {
+		if (lowerTok === 'where') {
 			break;
 		}
 
 		// 'include' at this position means a new sibling include
-		if (lowerRel === 'include') {
+		if (lowerTok === 'include') {
 			i++; // skip 'include'
 			continue;
 		}
+
+		// Check for 'all' keyword for recursive includes
+		let isRecursive = false;
+		if (lowerTok === 'all') {
+			isRecursive = true;
+			i++; // skip 'all'
+		}
+
+		const rel = tokens[i];
+		if (!rel) break;
 
 		// Validate the relation against the current table context
 		const { relName, qualifiedKey } = validateRelation(
@@ -437,17 +451,17 @@ function parseIncludeChain(
 			i++; // skip 'where'
 
 			while (i < tokens.length) {
-				const tok = tokens[i];
-				if (!tok) break;
+				const whereTok = tokens[i];
+				if (!whereTok) break;
 
-				const lowerTok = tok.toLowerCase();
+				const lowerWhereTok = whereTok.toLowerCase();
 				// Stop on keywords that end the include filter
-				if (['limit', 'offset', 'order', 'include'].includes(lowerTok)) {
+				if (['limit', 'offset', 'order', 'include'].includes(lowerWhereTok)) {
 					break;
 				}
 
 				// Handle 'and' - continue parsing filters
-				if (lowerTok === 'and') {
+				if (lowerWhereTok === 'and') {
 					i++;
 					continue;
 				}
@@ -485,12 +499,16 @@ function parseIncludeChain(
 		let nestedIncludes: ParsedInclude[] | undefined;
 		if (tokens[i]?.toLowerCase() === 'include' && targetTable) {
 			const nextRel = tokens[i + 1];
-			if (nextRel) {
+			// Handle 'include all' case - look ahead past 'all' keyword
+			const lookAheadRel =
+				nextRel?.toLowerCase() === 'all' ? tokens[i + 2] : nextRel;
+			if (lookAheadRel) {
 				// Check if nextRel is a relation of currentTable (sibling) or targetTable (nested)
 				const isSiblingOfCurrent =
-					schema.relations[`${currentTable}.${nextRel}`] ||
-					schema.relations[nextRel];
-				const isNestedOfTarget = schema.relations[`${targetTable}.${nextRel}`];
+					schema.relations[`${currentTable}.${lookAheadRel}`] ||
+					schema.relations[lookAheadRel];
+				const isNestedOfTarget =
+					schema.relations[`${targetTable}.${lookAheadRel}`];
 
 				if (isNestedOfTarget && !isSiblingOfCurrent) {
 					// It's a nested include - recurse with targetTable context
@@ -515,6 +533,7 @@ function parseIncludeChain(
 			...(includeFilters &&
 				includeFilters.length > 0 && { where: includeFilters }),
 			...(nestedIncludes && { include: nestedIncludes }),
+			...(isRecursive && { recursive: true }),
 		});
 
 		// After parsing one include, check if there's a comma for more siblings

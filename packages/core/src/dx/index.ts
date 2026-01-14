@@ -23,11 +23,11 @@ export {
 	and,
 	// Expression
 	coalesce,
+	type DistinctField,
 	// Window function builders (DX-021)
 	denseRank,
 	// Distinct helper for aggregates (DX-034)
 	distinct,
-	type DistinctField,
 	// Comparison
 	eq,
 	// Relation
@@ -181,6 +181,7 @@ export type {
 	ExpressionSpec,
 	HierarchyOptions,
 	IncludeOptions,
+	IncludeOptionsWithRecursive,
 	ListHierarchyOptions,
 	NestedInclude,
 	NullsPosition,

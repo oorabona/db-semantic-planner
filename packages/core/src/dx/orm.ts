@@ -1,4 +1,5 @@
 import type { Adapter, Dump } from '../adapter.js';
+import type { DialectCapabilities } from '../dialects/index.js';
 import type {
 	AggregateIntent,
 	ExpressionIntent,
@@ -11,7 +12,6 @@ import type {
 	SelectWithExpressionsIntent,
 	WhereIntent,
 } from '../intent-ast.js';
-import type { DialectCapabilities } from '../dialects/index.js';
 import type { IncludeStrategy, ModelIR } from '../model-ir.js';
 import type { PlanOptions, PlanReport } from '../planner.js';
 import { AmbiguousPlanError, plan, planRecursive } from '../planner.js';
@@ -23,7 +23,13 @@ import {
 	NotFoundError,
 	RelationNotFoundError,
 } from './errors.js';
-import { and, eq, inArray, isDistinctField, type DistinctField } from './filters.js';
+import {
+	and,
+	type DistinctField,
+	eq,
+	inArray,
+	isDistinctField,
+} from './filters.js';
 import {
 	DeleteBuilder,
 	InsertBuilder,
@@ -926,7 +932,6 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		builder.groupByFields.push(...fields);
 		return builder;
 	}
-
 
 	having(condition: WhereIntent): QueryBuilder<TResult> {
 		const builder = this.clone();
