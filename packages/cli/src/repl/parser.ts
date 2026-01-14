@@ -12,6 +12,16 @@
 import type { ResolvedSchema } from '@db-semantic-planner/schema';
 
 /**
+ * CLI-016: Parsed aggregate expression
+ */
+export interface ParsedAggregate {
+	function: 'count' | 'sum' | 'avg' | 'min' | 'max';
+	field?: string; // undefined for count(*)
+	as?: string;
+	distinct?: boolean;
+}
+
+/**
  * Parsed query result
  */
 export interface ParsedQuery {
@@ -22,6 +32,14 @@ export interface ParsedQuery {
 	limit?: number;
 	offset?: number;
 	orderBy?: OrderByClause[];
+	/** CLI-016: Aggregate expressions */
+	aggregates?: ParsedAggregate[];
+	/** CLI-016: GROUP BY fields */
+	groupBy?: string[];
+	/** CLI-016: HAVING clause */
+	having?: WhereClause[];
+	/** CLI-016: SELECT DISTINCT */
+	distinct?: boolean;
 }
 
 export interface WhereClause {
@@ -155,6 +173,78 @@ function parseValue(token: string): unknown {
 
 	// String (already unquoted by tokenizer)
 	return token;
+}
+
+/**
+ * CLI-016: Parse aggregate expression like count(*), sum(field) as alias
+ * Syntax: func([distinct] field) [as alias]
+ * Examples:
+ *   count(*) → { function: 'count' }
+ *   count(id) → { function: 'count', field: 'id' }
+ *   sum(amount) as total → { function: 'sum', field: 'amount', as: 'total' }
+ *   count(distinct user_id) → { function: 'count', field: 'user_id', distinct: true }
+ */
+function parseAggregateExpression(
+	tokens: string[],
+	index: number,
+): { aggregate: ParsedAggregate; nextIndex: number } | null {
+	const token = tokens[index];
+	if (!token) return null;
+
+	// Check if token is an aggregate function call: func(...)
+	const match = token.match(/^(count|sum|avg|min|max)\((.*)$/i);
+	if (!match) return null;
+
+	const func = match[1]?.toLowerCase() as ParsedAggregate['function'];
+	let argPart = match[2] ?? '';
+
+	// Collect tokens until we find the closing parenthesis
+	let currentIndex = index;
+	while (!argPart.endsWith(')') && currentIndex < tokens.length - 1) {
+		currentIndex++;
+		const nextToken = tokens[currentIndex];
+		if (nextToken) {
+			argPart += ` ${nextToken}`;
+		}
+	}
+
+	// Remove closing parenthesis
+	if (!argPart.endsWith(')')) {
+		return null; // Malformed
+	}
+	argPart = argPart.slice(0, -1).trim();
+
+	// Parse arguments: could be *, field, or distinct field
+	let field: string | undefined;
+	let distinct = false;
+
+	if (argPart === '*' || argPart === '') {
+		// count(*) or count()
+		field = undefined;
+	} else if (argPart.toLowerCase().startsWith('distinct ')) {
+		// count(distinct field)
+		distinct = true;
+		field = argPart.slice(9).trim();
+	} else {
+		field = argPart;
+	}
+
+	currentIndex++;
+
+	// Check for 'as alias'
+	let as: string | undefined;
+	if (tokens[currentIndex]?.toLowerCase() === 'as') {
+		currentIndex++;
+		as = tokens[currentIndex];
+		if (as) currentIndex++;
+	}
+
+	const aggregate: ParsedAggregate = { function: func };
+	if (field) aggregate.field = field;
+	if (as) aggregate.as = as;
+	if (distinct) aggregate.distinct = true;
+
+	return { aggregate, nextIndex: currentIndex };
 }
 
 /**
@@ -422,7 +512,8 @@ function parseIncludeChain(
 
 		includes.push({
 			relation: relName,
-			...(includeFilters && includeFilters.length > 0 && { where: includeFilters }),
+			...(includeFilters &&
+				includeFilters.length > 0 && { where: includeFilters }),
 			...(nestedIncludes && { include: nestedIncludes }),
 		});
 
@@ -430,7 +521,6 @@ function parseIncludeChain(
 		// or another 'include' keyword
 		if (tokens[i] === ',') {
 			i++;
-			continue;
 		}
 	}
 
@@ -580,7 +670,16 @@ export function parseNaturalQuery(
 
 					// Stop if we hit another keyword
 					if (
-						['where', 'limit', 'offset', 'include'].includes(col.toLowerCase())
+						[
+							'where',
+							'limit',
+							'offset',
+							'include',
+							'select',
+							'group',
+							'having',
+							'distinct',
+						].includes(col.toLowerCase())
 					) {
 						break;
 					}
@@ -636,6 +735,113 @@ export function parseNaturalQuery(
 				break;
 			}
 
+			case 'select': {
+				// CLI-016: Parse aggregate expressions after 'select'
+				// Syntax: select count(*), sum(field) as alias, ...
+				// Also handles: select distinct
+				// Note: commas are stripped by tokenizer, so we just keep parsing
+				i++;
+
+				// Check for 'distinct' immediately after select
+				if (tokens[i]?.toLowerCase() === 'distinct') {
+					// Check if next token is an aggregate or a field
+					const nextAfterDistinct = tokens[i + 1];
+					if (
+						nextAfterDistinct &&
+						/^(count|sum|avg|min|max)\(/i.test(nextAfterDistinct)
+					) {
+						// select distinct count(...) - distinct applies to aggregate
+						i++; // Skip 'distinct', handled below
+					} else {
+						// select distinct - SELECT DISTINCT query
+						result.distinct = true;
+						i++;
+						break;
+					}
+				}
+
+				// Parse aggregate expressions (keep going while we find aggregates)
+				while (i < tokens.length) {
+					const parsed = parseAggregateExpression(tokens, i);
+					if (!parsed) break;
+
+					result.aggregates = result.aggregates ?? [];
+					result.aggregates.push(parsed.aggregate);
+					i = parsed.nextIndex;
+					// No comma check needed - tokenizer strips commas
+				}
+				break;
+			}
+
+			case 'group': {
+				// CLI-016: Parse GROUP BY clause
+				// Syntax: group by field1, field2
+				// Note: commas are stripped by tokenizer
+				i++;
+				const byToken = tokens[i]?.toLowerCase();
+				if (byToken !== 'by') {
+					throw new ParseError('Expected "by" after "group"');
+				}
+				i++;
+
+				result.groupBy = result.groupBy ?? [];
+
+				while (i < tokens.length) {
+					const field = tokens[i];
+					if (!field) break;
+
+					// Stop if we hit a keyword
+					if (
+						[
+							'where',
+							'limit',
+							'offset',
+							'include',
+							'order',
+							'orderby',
+							'having',
+							'select',
+							'distinct',
+						].includes(field.toLowerCase())
+					) {
+						break;
+					}
+
+					result.groupBy.push(field);
+					i++;
+					// No comma check needed - tokenizer strips commas
+				}
+				break;
+			}
+
+			case 'having': {
+				// CLI-016: Parse HAVING clause (same syntax as where)
+				i++;
+
+				while (i < tokens.length) {
+					const { clause, nextIndex } = parseWhereCondition(tokens, i);
+					result.having = result.having ?? [];
+					result.having.push(clause);
+					i = nextIndex;
+
+					// Check for "and" to continue
+					const nextToken = tokens[i]?.toLowerCase();
+					if (nextToken === 'and') {
+						i++;
+					} else {
+						break;
+					}
+				}
+				break;
+			}
+
+			case 'distinct': {
+				// CLI-016: SELECT DISTINCT (when used without 'select' keyword)
+				result.distinct = true;
+				i++;
+				break;
+			}
+
 			default:
 				throw new ParseError(`Unexpected token: "${token}"`);
 		}
@@ -656,7 +862,8 @@ export function parseNaturalQuery(
 				// The relation name might be different from the table name,
 				// so we need to look up the relation's target
 				const qualifiedRel = `${result.table}.${inc.relation}`;
-				const relation = schema.relations[qualifiedRel] ?? schema.relations[inc.relation];
+				const relation =
+					schema.relations[qualifiedRel] ?? schema.relations[inc.relation];
 				return relation?.target.toLowerCase() === targetTableLower;
 			});
 
@@ -669,7 +876,8 @@ export function parseNaturalQuery(
 					result.table,
 					...(result.include?.map((inc) => {
 						const qualifiedRel = `${result.table}.${inc.relation}`;
-						const relation = schema.relations[qualifiedRel] ?? schema.relations[inc.relation];
+						const relation =
+							schema.relations[qualifiedRel] ?? schema.relations[inc.relation];
 						return relation?.target ?? inc.relation;
 					}) ?? []),
 				];

@@ -249,3 +249,102 @@ describe('executeQuery', () => {
 		expect(result.params).toContain(true);
 	});
 });
+
+// CLI-016: Aggregate query execution tests
+describe('executeQuery - aggregates (CLI-016)', () => {
+	it('should execute count(*)', () => {
+		const query: ParsedQuery = {
+			table: 'posts',
+			aggregates: [{ function: 'count' }],
+		};
+
+		const result = executeQuery(query, testSchema);
+
+		expect(result.error).toBeUndefined();
+		expect(result.sql).toContain('count(*)');
+	});
+
+	it('should execute count(field) as alias', () => {
+		const query: ParsedQuery = {
+			table: 'posts',
+			aggregates: [{ function: 'count', field: 'id', as: 'total' }],
+		};
+
+		const result = executeQuery(query, testSchema);
+
+		expect(result.error).toBeUndefined();
+		// Should have count and alias
+		expect(result.sql.toLowerCase()).toContain('count');
+		expect(result.sql.toLowerCase()).toContain('total');
+	});
+
+	it('should execute count(distinct field)', () => {
+		const query: ParsedQuery = {
+			table: 'posts',
+			aggregates: [{ function: 'count', field: 'authorId', distinct: true }],
+		};
+
+		const result = executeQuery(query, testSchema);
+
+		expect(result.error).toBeUndefined();
+		// Should have COUNT DISTINCT
+		expect(result.sql.toLowerCase()).toContain('count');
+		expect(result.sql.toLowerCase()).toContain('distinct');
+	});
+
+	it('should execute sum, avg aggregates', () => {
+		const query: ParsedQuery = {
+			table: 'posts',
+			aggregates: [
+				{ function: 'sum', field: 'id', as: 'sum_id' },
+				{ function: 'avg', field: 'id', as: 'avg_id' },
+			],
+		};
+
+		const result = executeQuery(query, testSchema);
+
+		expect(result.error).toBeUndefined();
+		expect(result.sql.toLowerCase()).toContain('sum');
+		expect(result.sql.toLowerCase()).toContain('avg');
+	});
+
+	it('should execute group by', () => {
+		const query: ParsedQuery = {
+			table: 'posts',
+			aggregates: [{ function: 'count', as: 'total' }],
+			groupBy: ['authorId'],
+		};
+
+		const result = executeQuery(query, testSchema);
+
+		expect(result.error).toBeUndefined();
+		expect(result.sql.toLowerCase()).toContain('group by');
+		expect(result.sql.toLowerCase()).toContain('authorid');
+	});
+
+	it('should execute having clause', () => {
+		const query: ParsedQuery = {
+			table: 'posts',
+			aggregates: [{ function: 'count', as: 'total' }],
+			groupBy: ['authorId'],
+			having: [{ column: 'count', operator: '>', value: 5 }],
+		};
+
+		const result = executeQuery(query, testSchema);
+
+		expect(result.error).toBeUndefined();
+		expect(result.sql.toLowerCase()).toContain('having');
+	});
+
+	it('should execute distinct', () => {
+		const query: ParsedQuery = {
+			table: 'posts',
+			distinct: true,
+		};
+
+		const result = executeQuery(query, testSchema);
+
+		expect(result.error).toBeUndefined();
+		expect(result.sql.toLowerCase()).toContain('select distinct');
+	});
+});

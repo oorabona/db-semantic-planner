@@ -1357,6 +1357,45 @@ This allows flexible filter placement regardless of syntactic position.
 
 ---
 
+### CLI-016: REPL Aggregate Support ✅ (2026-01-14)
+
+**Priority:** MEDIUM | **Effort:** S (~2h) | **Breaking:** No
+
+**Status:** ✅ COMPLETE
+
+**Goal:** Add aggregate query support to REPL natural query parser.
+
+**Syntax (SQL-like):**
+```
+orders select count(*), sum(amount) as total group by user_id having count > 5
+users group by status select count() as user_count
+products select avg(price) as avg_price, min(price), max(price)
+orders select distinct user_id
+```
+
+**Implementation:**
+- [x] ✅ Extended `ParsedQuery` type with aggregates, groupBy, having, distinct (2026-01-14)
+- [x] ✅ Added `parseAggregateExpression()` function for func(field) as alias syntax (2026-01-14)
+- [x] ✅ Parse `select` keyword for aggregate expressions (2026-01-14)
+- [x] ✅ Parse `group by` clause (2026-01-14)
+- [x] ✅ Parse `having` clause (2026-01-14)
+- [x] ✅ Parse `distinct` keyword (2026-01-14)
+- [x] ✅ Update `query-executor.ts` with `applyAggregate()` helper (2026-01-14)
+- [x] ✅ Add 16 parser tests (2026-01-14)
+- [x] ✅ Add 7 executor tests (2026-01-14)
+
+**Files modified:**
+- `packages/cli/src/repl/parser.ts` - Added ParsedAggregate type, parseAggregateExpression(), select/group/having/distinct cases
+- `packages/cli/src/repl/query-executor.ts` - Added applyAggregate(), aggregate/groupBy/having/distinct execution
+- `packages/cli/src/repl/parser.test.ts` - 16 new tests
+- `packages/cli/src/repl/query-executor.test.ts` - 7 new tests
+
+**Tests:** All 159 CLI tests passing (23 new tests for CLI-016)
+
+**Dependencies:** DX-034 (aggregate support in core) ✅ Complete
+
+---
+
 ### Documentation (DX critical)
 
 - [ ] **DOCS-001**: User documentation (Getting Started, API Guide)
