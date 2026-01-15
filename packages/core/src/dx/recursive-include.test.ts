@@ -193,3 +193,95 @@ describe('Valid recursive include combinations', () => {
 		}).not.toThrow();
 	});
 });
+
+// ============================================================================
+// Intent conversion (DX-017 fix)
+// ============================================================================
+
+import { IntentBuilder } from './intent-builder.js';
+
+describe('Intent conversion (DX-017)', () => {
+	it('should convert recursive options to IncludeIntent.recursive', () => {
+		// Use IntentBuilder directly to verify intent structure
+		const builder = new IntentBuilder(model, 'categories');
+		builder.addInclude('children', {
+			recursive: true,
+			direction: 'descendants',
+			maxDepth: 10,
+		} satisfies RecursiveIncludeOptions);
+
+		const intent = builder.buildIntent();
+
+		expect(intent.include).toBeDefined();
+		expect(intent.include?.length).toBe(1);
+		expect(intent.include?.[0].relation).toBe('children');
+		expect(intent.include?.[0].recursive).toBeDefined();
+		expect(intent.include?.[0].recursive).toEqual({ maxDepth: 10 });
+	});
+
+	it('should convert includeDepth to track.depth', () => {
+		const builder = new IntentBuilder(model, 'categories');
+		builder.addInclude('children', {
+			recursive: true,
+			direction: 'descendants',
+			includeDepth: true,
+		} satisfies RecursiveIncludeOptions);
+
+		const intent = builder.buildIntent();
+
+		expect(intent.include?.[0].recursive?.track?.depth).toBe(true);
+	});
+
+	it('should NOT store recursive includes in separate array anymore', () => {
+		const builder = new IntentBuilder(model, 'categories');
+		builder.addInclude('children', {
+			recursive: true,
+			direction: 'descendants',
+		} satisfies RecursiveIncludeOptions);
+
+		const intent = builder.buildIntent();
+
+		// Recursive includes should be in the main includes array
+		expect(intent.include?.length).toBe(1);
+		expect(intent.include?.[0].recursive).toBeDefined();
+
+		// recursiveIncludes should be empty (or not exist)
+		expect((intent as { recursiveIncludes?: unknown[] }).recursiveIncludes).toBeUndefined();
+	});
+});
+
+// ============================================================================
+// ORM path tests (DX-017 - same path as CLI)
+// ============================================================================
+
+describe('ORM path for recursive includes (DX-017)', () => {
+	it('should build intent with recursive property via ORM.include()', () => {
+		// This tests the same path the CLI uses
+		const builder = orm.select('categories').include('children', {
+			recursive: true,
+			direction: 'descendants',
+		} satisfies RecursiveIncludeOptions);
+
+		// Get internal includes array (expose via any for testing)
+		const internalBuilder = builder as unknown as {
+			includes: Array<{ relation: string; recursive?: unknown }>;
+		};
+
+		// Verify the include has recursive set
+		expect(internalBuilder.includes.length).toBe(1);
+		expect(internalBuilder.includes[0].relation).toBe('children');
+		expect(internalBuilder.includes[0].recursive).toBeDefined();
+
+		// Access the internal intent through plan()
+		const planReport = builder.plan();
+
+		// Verify that the plan detected recursive include
+		const ctes = planReport.ctes;
+		expect(ctes.length).toBeGreaterThan(0);
+
+		// At least one CTE should be marked as recursive
+		const recursiveCte = ctes.find((cte) => cte.recursive === true);
+		expect(recursiveCte).toBeDefined();
+		expect(recursiveCte?.name).toContain('categories');
+	});
+});

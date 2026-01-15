@@ -378,7 +378,7 @@ describe('executeQuery - aggregates (CLI-016)', () => {
 			},
 		};
 
-		it('should accept recursive: true for hasMany relation without error', () => {
+		it('should generate WITH RECURSIVE for hasMany recursive include (DX-017)', () => {
 			const query: ParsedQuery = {
 				table: 'categories',
 				include: [{ relation: 'children', recursive: true }],
@@ -386,15 +386,14 @@ describe('executeQuery - aggregates (CLI-016)', () => {
 
 			const result = executeQuery(query, hierarchySchema);
 
-			// Recursive includes are processed during execution, not compilation
-			// In compile-only mode (REPL), the main query is generated without CTE
-			// The recursive include is stored separately for execution-time processing
+			// DX-017: Recursive includes now generate WITH RECURSIVE CTE
 			expect(result.error).toBeUndefined();
-			// Main query should still compile successfully
 			expect(result.sql).toBeTruthy();
+			expect(result.sql.toUpperCase()).toContain('WITH RECURSIVE');
+			expect(result.sql).toContain('cte_categories_children');
 		});
 
-		it('should accept recursive: true for belongsTo relation without error', () => {
+		it('should generate WITH RECURSIVE for belongsTo recursive include (DX-017)', () => {
 			const query: ParsedQuery = {
 				table: 'categories',
 				include: [{ relation: 'parent', recursive: true }],
@@ -402,9 +401,11 @@ describe('executeQuery - aggregates (CLI-016)', () => {
 
 			const result = executeQuery(query, hierarchySchema);
 
-			// Recursive includes are handled at execution time
+			// DX-017: Recursive includes now generate WITH RECURSIVE CTE
 			expect(result.error).toBeUndefined();
 			expect(result.sql).toBeTruthy();
+			expect(result.sql.toUpperCase()).toContain('WITH RECURSIVE');
+			expect(result.sql).toContain('cte_categories_parent');
 		});
 
 		it('should generate non-recursive SQL for regular includes', () => {

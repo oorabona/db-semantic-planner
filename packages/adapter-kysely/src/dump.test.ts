@@ -425,4 +425,74 @@ describe('Dump API', () => {
 			});
 		});
 	});
+
+	// ============================================================================
+	// Recursive Include Integration (DX-017)
+	// ============================================================================
+
+	describe('Recursive Include Integration (DX-017)', () => {
+		// Schema with self-referential relation for recursive queries
+		const recursiveSchema = defineSchema({
+			categories: {
+				id: 'number',
+				name: 'string',
+				parentId: { type: 'number', nullable: true },
+			},
+		})
+			.relations({
+				categories: {
+					children: hasMany('categories', { foreignKey: 'parentId' }),
+					parent: belongsTo('categories', { foreignKey: 'parentId' }),
+				},
+			})
+			.build();
+
+		it('should generate WITH RECURSIVE SQL for recursive include', () => {
+			// Given - intent with recursive include (as IntentAST)
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [
+					{
+						relation: 'children',
+						recursive: { maxDepth: 10 },
+					},
+				],
+			};
+
+			// When - create dump
+			const dump = createDump(intent, recursiveSchema, kysely);
+
+			// Then - SQL should contain WITH RECURSIVE
+			expect(dump.sql.toUpperCase()).toContain('WITH RECURSIVE');
+			expect(dump.sql).toContain('cte_categories_children');
+			expect(dump.plan.ctes.length).toBeGreaterThan(0);
+			expect(dump.plan.ctes.some((c) => c.recursive)).toBe(true);
+		});
+
+		it('should include depth tracking when requested', () => {
+			// Given - intent with depth tracking
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [
+					{
+						relation: 'children',
+						recursive: {
+							maxDepth: 5,
+							track: { depth: true },
+						},
+					},
+				],
+			};
+
+			// When
+			const dump = createDump(intent, recursiveSchema, kysely);
+
+			// Then - should have depth column in CTE
+			expect(dump.sql.toUpperCase()).toContain('WITH RECURSIVE');
+			// The depth is tracked in the CTE
+			expect(dump.sql.toLowerCase()).toContain('depth');
+		});
+	});
 });
