@@ -28,8 +28,8 @@ catalogs:
       specifier: ^8.16.0
       version: 8.16.0
     '@types/react':
-      specifier: ^18.3.20
-      version: 18.3.27
+      specifier: ^19.2.8
+      version: 19.2.8
     better-sqlite3:
       specifier: ^12.6.0
       version: 12.6.0
@@ -37,8 +37,8 @@ catalogs:
       specifier: ^14.0.2
       version: 14.0.2
     ink:
-      specifier: ^5.2.1
-      version: 5.2.1
+      specifier: ^6.6.0
+      version: 6.6.0
     ink-table:
       specifier: ^3.1.0
       version: 3.1.0
@@ -49,8 +49,8 @@ catalogs:
       specifier: ^8.16.3
       version: 8.16.3
     react:
-      specifier: ^18.3.1
-      version: 18.3.1
+      specifier: ^19.2.3
+      version: 19.2.3
     tsup:
       specifier: ^8.5.1
       version: 8.5.1
@@ -149,16 +149,16 @@ importers:
         version: link:../schema
       '@inkjs/ui':
         specifier: 'catalog:'
-        version: 2.0.0(ink@5.2.1(@types/react@18.3.27)(react@18.3.1))
+        version: 2.0.0(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))
       commander:
         specifier: 'catalog:'
         version: 14.0.2
       ink:
         specifier: 'catalog:'
-        version: 5.2.1(@types/react@18.3.27)(react@18.3.1)
+        version: 6.6.0(@types/react@19.2.8)(react@19.2.3)
       ink-table:
         specifier: 'catalog:'
-        version: 3.1.0(ink@5.2.1(@types/react@18.3.27)(react@18.3.1))(react@18.3.1)
+        version: 3.1.0(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))(react@19.2.3)
       kysely:
         specifier: ^0.28.0
         version: 0.28.9
@@ -167,14 +167,14 @@ importers:
         version: 8.16.3
       react:
         specifier: 'catalog:'
-        version: 18.3.1
+        version: 19.2.3
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
         version: 22.19.3
       '@types/react':
         specifier: 'catalog:'
-        version: 18.3.27
+        version: 19.2.8
       tsup:
         specifier: 'catalog:'
         version: 8.5.1(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
@@ -255,9 +255,9 @@ importers:
 
 packages:
 
-  '@alcalzone/ansi-tokenize@0.1.3':
-    resolution: {integrity: sha512-3yWxPTq3UQ/FY9p1ErPxIyfT64elWaMvM9lIHnaqpyft63tkxodF5aUElYHrdisWve5cETkh1+KBw1yJuW0aRw==}
-    engines: {node: '>=14.13.1'}
+  '@alcalzone/ansi-tokenize@0.2.3':
+    resolution: {integrity: sha512-jsElTJ0sQ4wHRz+C45tfect76BwbTbgkgKByOzpCN9xG61N5V6u/glvg1CsNJhq2xJIFpKHSwG3D2wPPuEYOrQ==}
+    engines: {node: '>=18'}
 
   '@balena/dockerignore@1.0.2':
     resolution: {integrity: sha512-wMue2Sy4GAVTk6Ic4tJVcnfdau+gx2EnG7S+uAEe+TWJFqE4YoWN4/H8MSLj4eYJKxGg26lZwboEniNiNwZQ6Q==}
@@ -719,11 +719,8 @@ packages:
   '@types/pg@8.16.0':
     resolution: {integrity: sha512-RmhMd/wD+CF8Dfo+cVIy3RR5cl8CyfXQ0tGgW6XBL8L4LM/UTEbNXYRbLwU6w+CgrKBNbrQWt4FUtTfaU5jSYQ==}
 
-  '@types/prop-types@15.7.15':
-    resolution: {integrity: sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw==}
-
-  '@types/react@18.3.27':
-    resolution: {integrity: sha512-cisd7gxkzjBKU2GgdYrTdtQx1SORymWyaAFhaxQPK9bYO9ot3Y5OikQRvY0VYQtvwjeQnizCINJAenh/V7MK2w==}
+  '@types/react@19.2.8':
+    resolution: {integrity: sha512-3MbSL37jEchWZz2p2mjntRZtPt837ij10ApxKfgmXCTuHWagYg7iA5bqPw6C8BMPfwidlvfPI/fxOc42HLhcyg==}
 
   '@types/ssh2-streams@0.1.13':
     resolution: {integrity: sha512-faHyY3brO9oLEA0QlcO8N2wT7R0+1sHWZvQ+y3rMLwdY1ZyS1z0W3t65j9PqT4HmQ6ALzNe7RZlNuCNE0wBSWA==}
@@ -974,9 +971,9 @@ packages:
     resolution: {integrity: sha512-/+40ljC3ONVnYIttjMWrlL51nItDAbBrq2upN8BPyvGU/2n5Oxw3tbNwORCaNuNqLJnxGqOfjUuhsv7l5Q4IsQ==}
     engines: {node: '>=18.20'}
 
-  cli-truncate@4.0.0:
-    resolution: {integrity: sha512-nPdaFdQ0h/GEigbPClz11D0v/ZJEwxmeVZGeMo3Z5StPtUTkA9o1lD6QwoirYiSDzbcwn2XcjwmCp68W1IS4TA==}
-    engines: {node: '>=18'}
+  cli-truncate@5.1.1:
+    resolution: {integrity: sha512-SroPvNHxUnk+vIW/dOSfNqdy1sPEFkrTk6TUtqLCnBlo3N7TNYYkzzN7uSD6+jVjrdO4+p8nH7JzH6cIvUem6A==}
+    engines: {node: '>=20'}
 
   cliui@8.0.1:
     resolution: {integrity: sha512-BSeNnyus75C4//NQ9gQt1/csTXyo/8Sb+afLAkzAptFuMsod9HFokGNudZpi/oQV73hnVK+sR+5PVRMd+Dr7YQ==}
@@ -1339,13 +1336,13 @@ packages:
       ink: '>=3.0.0'
       react: '>=16.8.0'
 
-  ink@5.2.1:
-    resolution: {integrity: sha512-BqcUyWrG9zq5HIwW6JcfFHsIYebJkWWb4fczNah1goUO0vv5vneIlfwuS85twyJ5hYR/y18FlAYUxrO9ChIWVg==}
-    engines: {node: '>=18'}
+  ink@6.6.0:
+    resolution: {integrity: sha512-QDt6FgJxgmSxAelcOvOHUvFxbIUjVpCH5bx+Slvc5m7IEcpGt3dYwbz/L+oRnqEGeRvwy1tineKK4ect3nW1vQ==}
+    engines: {node: '>=20'}
     peerDependencies:
-      '@types/react': '>=18.0.0'
-      react: '>=18.0.0'
-      react-devtools-core: ^4.19.1
+      '@types/react': '>=19.0.0'
+      react: '>=19.0.0'
+      react-devtools-core: ^6.1.2
     peerDependenciesMeta:
       '@types/react':
         optional: true
@@ -1360,17 +1357,13 @@ packages:
     resolution: {integrity: sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==}
     engines: {node: '>=8'}
 
-  is-fullwidth-code-point@4.0.0:
-    resolution: {integrity: sha512-O4L094N2/dZ7xqVdrXhh9r1KODPJpFms8B5sGdJLPy664AgvXsreZUyCQQNItZRDlYug4xStLjNp/sz3HvBowQ==}
-    engines: {node: '>=12'}
-
   is-fullwidth-code-point@5.1.0:
     resolution: {integrity: sha512-5XHYaSyiqADb4RnZ1Bdad6cPp8Toise4TzEjcOYDHZkTCbKgiUl7WTUCpNWHuxmDt91wnsZBc9xinNzopv3JMQ==}
     engines: {node: '>=18'}
 
-  is-in-ci@1.0.0:
-    resolution: {integrity: sha512-eUuAjybVTHMYWm/U+vBO1sY/JOCgoPCXRxzdju0K+K0BiGW0SChEL1MLC0PoCIR1OlPo5YAp8HuQoUlsWEICwg==}
-    engines: {node: '>=18'}
+  is-in-ci@2.0.0:
+    resolution: {integrity: sha512-cFeerHriAnhrQSbpAxL37W1wcJKUUX07HyLWZCW1URJT/ra3GyUTzBgUnh24TMVfNTV2Hij2HLxkPHFZfOZy5w==}
+    engines: {node: '>=20'}
     hasBin: true
 
   is-promise@4.0.0:
@@ -1399,9 +1392,6 @@ packages:
   joycon@3.1.1:
     resolution: {integrity: sha512-34wB/Y7MW7bzjKRjUKTa46I2Z7eV62Rkhva+KkopW7Qvv/OSWBqvkSY7vusOPrNuZcUG3tApvdVgNB8POj3SPw==}
     engines: {node: '>=10'}
-
-  js-tokens@4.0.0:
-    resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
 
   json-schema-traverse@1.0.0:
     resolution: {integrity: sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==}
@@ -1436,10 +1426,6 @@ packages:
 
   long@5.3.2:
     resolution: {integrity: sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA==}
-
-  loose-envify@1.4.0:
-    resolution: {integrity: sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==}
-    hasBin: true
 
   lru-cache@10.4.3:
     resolution: {integrity: sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==}
@@ -1717,14 +1703,14 @@ packages:
     resolution: {integrity: sha512-y3bGgqKj3QBdxLbLkomlohkvsA8gdAiUQlSBJnBhfn+BPxg4bc62d8TcBW15wavDfgexCgccckhcZvywyQYPOw==}
     hasBin: true
 
-  react-reconciler@0.29.2:
-    resolution: {integrity: sha512-zZQqIiYgDCTP/f1N/mAR10nJGrPD2ZR+jDSEsKWJHYC7Cm2wodlwbR3upZRdC3cjIjSlTLNVyO7Iu0Yy7t2AYg==}
+  react-reconciler@0.33.0:
+    resolution: {integrity: sha512-KetWRytFv1epdpJc3J4G75I4WrplZE5jOL7Yq0p34+OVOKF4Se7WrdIdVC45XsSSmUTlht2FM/fM1FZb1mfQeA==}
     engines: {node: '>=0.10.0'}
     peerDependencies:
-      react: ^18.3.1
+      react: ^19.2.0
 
-  react@18.3.1:
-    resolution: {integrity: sha512-wS+hAgJShR0KhEvPJArfuPVN1+Hz1t0Y6n5jLrGQbkb4urgPE/0Rve+1kMB1v/oWgHgm4WIcV+i7F2pTVj+2iQ==}
+  react@19.2.3:
+    resolution: {integrity: sha512-Ku/hhYbVjOQnXDZFv2+RibmLFGwFdeeKHFcOTlrt7xplBnya5OGn/hIRDsqDiSUcfORsDC7MPxwork8jBwsIWA==}
     engines: {node: '>=0.10.0'}
 
   readable-stream@2.3.8:
@@ -1786,8 +1772,8 @@ packages:
   safer-buffer@2.1.2:
     resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==}
 
-  scheduler@0.23.2:
-    resolution: {integrity: sha512-UOShsPwz7NrMUqhR6t0hWjFduvOzbtv7toDH1/hIrfRNIDBnnBWd0CwJTGvTpngVlmwGCdP9/Zl/tVrDqcuYzQ==}
+  scheduler@0.27.0:
+    resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
 
   semver@7.7.3:
     resolution: {integrity: sha512-SdsKMrI9TdgjdweUSR9MweHA4EJ8YxHn8DFaDisvhVlUOe4BF1tLD7GAj0lIqWVl+dPb/rExr0Btby5loQm20Q==}
@@ -1845,10 +1831,6 @@ packages:
   simple-get@4.0.1:
     resolution: {integrity: sha512-brv7p5WgH0jmQJr1ZDDfKDOSeWWg+OVypG99A/5vYGPqJ6pxiaHLy8nxtFjBA7oMa01ebA9gfh1uMCFqOuXxvA==}
 
-  slice-ansi@5.0.0:
-    resolution: {integrity: sha512-FC+lgizVPfie0kkhqUScwRu1O/lF6NOgJmlCgK+/LYxDCTk8sGelYaHDhFcDN+Sn3Cv+3VSa4Byeo+IMCzpMgQ==}
-    engines: {node: '>=12'}
-
   slice-ansi@7.1.2:
     resolution: {integrity: sha512-iOBWFgUX7caIZiuutICxVgX1SdxwAVFFKwt1EvMYYec/NWO5meOJ6K5uQxhrYBdQJne4KxiqZc+KptFOWFSI9w==}
     engines: {node: '>=18'}
@@ -1903,6 +1885,10 @@ packages:
   string-width@7.2.0:
     resolution: {integrity: sha512-tsaTIkKW9b4N+AEj+SVA+WhJzV7/zMhcSu78mLKWSk7cXMOSHsBKFWUs0fWwq8QyK3MgJBQRX6Gbi4kYbdvGkQ==}
     engines: {node: '>=18'}
+
+  string-width@8.1.0:
+    resolution: {integrity: sha512-Kxl3KJGb/gxkaUMOjRsQ8IrXiGW75O4E3RPjFIINOVH8AMl2SQ/yWdTzWwF3FevIX9LcMAjJW+GRwAlAbTSXdg==}
+    engines: {node: '>=20'}
 
   string_decoder@1.1.1:
     resolution: {integrity: sha512-n/ShnvDi6FHbbVfviro+WojiFzv+s8MPMHBczVePfUpDJLwoLT0ht1l4YwBCbi8pJAveEEdnkHyPyTP/mzRfwg==}
@@ -2218,10 +2204,10 @@ packages:
 
 snapshots:
 
-  '@alcalzone/ansi-tokenize@0.1.3':
+  '@alcalzone/ansi-tokenize@0.2.3':
     dependencies:
       ansi-styles: 6.2.3
-      is-fullwidth-code-point: 4.0.0
+      is-fullwidth-code-point: 5.1.0
 
   '@balena/dockerignore@1.0.2': {}
 
@@ -2361,13 +2347,13 @@ snapshots:
     dependencies:
       hono: 4.11.3
 
-  '@inkjs/ui@2.0.0(ink@5.2.1(@types/react@18.3.27)(react@18.3.1))':
+  '@inkjs/ui@2.0.0(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))':
     dependencies:
       chalk: 5.6.2
       cli-spinners: 3.3.0
       deepmerge: 4.3.1
       figures: 6.1.0
-      ink: 5.2.1(@types/react@18.3.27)(react@18.3.1)
+      ink: 6.6.0(@types/react@19.2.8)(react@19.2.3)
 
   '@isaacs/cliui@8.0.2':
     dependencies:
@@ -2566,11 +2552,8 @@ snapshots:
       pg-protocol: 1.10.3
       pg-types: 2.2.0
 
-  '@types/prop-types@15.7.15': {}
-
-  '@types/react@18.3.27':
+  '@types/react@19.2.8':
     dependencies:
-      '@types/prop-types': 15.7.15
       csstype: 3.2.3
 
   '@types/ssh2-streams@0.1.13':
@@ -2832,10 +2815,10 @@ snapshots:
 
   cli-spinners@3.3.0: {}
 
-  cli-truncate@4.0.0:
+  cli-truncate@5.1.1:
     dependencies:
-      slice-ansi: 5.0.0
-      string-width: 7.2.0
+      slice-ansi: 7.1.2
+      string-width: 8.1.0
 
   cliui@8.0.1:
     dependencies:
@@ -3202,41 +3185,40 @@ snapshots:
 
   ini@1.3.8: {}
 
-  ink-table@3.1.0(ink@5.2.1(@types/react@18.3.27)(react@18.3.1))(react@18.3.1):
+  ink-table@3.1.0(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))(react@19.2.3):
     dependencies:
-      ink: 5.2.1(@types/react@18.3.27)(react@18.3.1)
+      ink: 6.6.0(@types/react@19.2.8)(react@19.2.3)
       object-hash: 2.2.0
-      react: 18.3.1
+      react: 19.2.3
 
-  ink@5.2.1(@types/react@18.3.27)(react@18.3.1):
+  ink@6.6.0(@types/react@19.2.8)(react@19.2.3):
     dependencies:
-      '@alcalzone/ansi-tokenize': 0.1.3
+      '@alcalzone/ansi-tokenize': 0.2.3
       ansi-escapes: 7.2.0
       ansi-styles: 6.2.3
       auto-bind: 5.0.1
       chalk: 5.6.2
       cli-boxes: 3.0.0
       cli-cursor: 4.0.0
-      cli-truncate: 4.0.0
+      cli-truncate: 5.1.1
       code-excerpt: 4.0.0
       es-toolkit: 1.43.0
       indent-string: 5.0.0
-      is-in-ci: 1.0.0
+      is-in-ci: 2.0.0
       patch-console: 2.0.0
-      react: 18.3.1
-      react-reconciler: 0.29.2(react@18.3.1)
-      scheduler: 0.23.2
+      react: 19.2.3
+      react-reconciler: 0.33.0(react@19.2.3)
       signal-exit: 3.0.7
       slice-ansi: 7.1.2
       stack-utils: 2.0.6
-      string-width: 7.2.0
+      string-width: 8.1.0
       type-fest: 4.41.0
       widest-line: 5.0.0
       wrap-ansi: 9.0.2
       ws: 8.19.0
       yoga-layout: 3.2.1
     optionalDependencies:
-      '@types/react': 18.3.27
+      '@types/react': 19.2.8
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -3245,13 +3227,11 @@ snapshots:
 
   is-fullwidth-code-point@3.0.0: {}
 
-  is-fullwidth-code-point@4.0.0: {}
-
   is-fullwidth-code-point@5.1.0:
     dependencies:
       get-east-asian-width: 1.4.0
 
-  is-in-ci@1.0.0: {}
+  is-in-ci@2.0.0: {}
 
   is-promise@4.0.0: {}
 
@@ -3272,8 +3252,6 @@ snapshots:
   jose@6.1.3: {}
 
   joycon@3.1.1: {}
-
-  js-tokens@4.0.0: {}
 
   json-schema-traverse@1.0.0: {}
 
@@ -3296,10 +3274,6 @@ snapshots:
   lodash@4.17.21: {}
 
   long@5.3.2: {}
-
-  loose-envify@1.4.0:
-    dependencies:
-      js-tokens: 4.0.0
 
   lru-cache@10.4.3: {}
 
@@ -3553,15 +3527,12 @@ snapshots:
       minimist: 1.2.8
       strip-json-comments: 2.0.1
 
-  react-reconciler@0.29.2(react@18.3.1):
+  react-reconciler@0.33.0(react@19.2.3):
     dependencies:
-      loose-envify: 1.4.0
-      react: 18.3.1
-      scheduler: 0.23.2
+      react: 19.2.3
+      scheduler: 0.27.0
 
-  react@18.3.1:
-    dependencies:
-      loose-envify: 1.4.0
+  react@19.2.3: {}
 
   readable-stream@2.3.8:
     dependencies:
@@ -3655,9 +3626,7 @@ snapshots:
 
   safer-buffer@2.1.2: {}
 
-  scheduler@0.23.2:
-    dependencies:
-      loose-envify: 1.4.0
+  scheduler@0.27.0: {}
 
   semver@7.7.3: {}
 
@@ -3736,11 +3705,6 @@ snapshots:
       once: 1.4.0
       simple-concat: 1.0.1
 
-  slice-ansi@5.0.0:
-    dependencies:
-      ansi-styles: 6.2.3
-      is-fullwidth-code-point: 4.0.0
-
   slice-ansi@7.1.2:
     dependencies:
       ansi-styles: 6.2.3
@@ -3801,6 +3765,11 @@ snapshots:
   string-width@7.2.0:
     dependencies:
       emoji-regex: 10.6.0
+      get-east-asian-width: 1.4.0
+      strip-ansi: 7.1.2
+
+  string-width@8.1.0:
+    dependencies:
       get-east-asian-width: 1.4.0
       strip-ansi: 7.1.2
 
