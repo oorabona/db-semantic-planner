@@ -65,6 +65,8 @@ export interface ParsedInclude {
 	recursive?: boolean;
 	/** Optional maximum depth for recursive includes (default: unlimited) */
 	maxDepth?: number;
+	/** If true, include a 'depth' column in recursive results (CLI-018) */
+	includeDepth?: boolean;
 }
 
 /**
@@ -444,6 +446,32 @@ function parseIncludeChain(
 		// Get the target table of this relation for nested includes
 		const targetTable = getRelationTargetTable(qualifiedKey, schema);
 
+		// CLI-018: Parse recursive options (depth N, max N, with depth)
+		let maxDepth: number | undefined;
+		let includeDepth = false;
+
+		if (isRecursive) {
+			// Check for 'depth N' or 'max N' (maxDepth)
+			const depthKeyword = tokens[i]?.toLowerCase();
+			if (depthKeyword === 'depth' || depthKeyword === 'max') {
+				i++; // skip 'depth' or 'max'
+				const depthValue = tokens[i];
+				if (depthValue && /^\d+$/.test(depthValue)) {
+					maxDepth = parseInt(depthValue, 10);
+					i++; // skip the number
+				}
+			}
+
+			// Check for 'with depth' (includeDepth)
+			if (
+				tokens[i]?.toLowerCase() === 'with' &&
+				tokens[i + 1]?.toLowerCase() === 'depth'
+			) {
+				includeDepth = true;
+				i += 2; // skip 'with depth'
+			}
+		}
+
 		// Check for where clause on this include
 		let includeFilters: WhereClause[] | undefined;
 		if (tokens[i]?.toLowerCase() === 'where') {
@@ -534,6 +562,8 @@ function parseIncludeChain(
 				includeFilters.length > 0 && { where: includeFilters }),
 			...(nestedIncludes && { include: nestedIncludes }),
 			...(isRecursive && { recursive: true }),
+			...(maxDepth !== undefined && { maxDepth }),
+			...(includeDepth && { includeDepth: true }),
 		});
 
 		// After parsing one include, check if there's a comma for more siblings

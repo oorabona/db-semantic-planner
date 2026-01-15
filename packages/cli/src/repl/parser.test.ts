@@ -626,6 +626,95 @@ describe('parseNaturalQuery', () => {
 					],
 				});
 			});
+
+			// CLI-018: maxDepth and includeDepth options
+			it('parses "include all children depth 10" with maxDepth', () => {
+				const result = parseNaturalQuery(
+					'categories include all children depth 10',
+					hierarchySchema,
+				);
+				expect(result).toEqual({
+					table: 'categories',
+					include: [
+						{
+							relation: 'children',
+							recursive: true,
+							maxDepth: 10,
+						},
+					],
+				});
+			});
+
+			it('parses "include all children max 5" with maxDepth', () => {
+				const result = parseNaturalQuery(
+					'categories include all children max 5',
+					hierarchySchema,
+				);
+				expect(result).toEqual({
+					table: 'categories',
+					include: [
+						{
+							relation: 'children',
+							recursive: true,
+							maxDepth: 5,
+						},
+					],
+				});
+			});
+
+			it('parses "include all children with depth" with includeDepth', () => {
+				const result = parseNaturalQuery(
+					'categories include all children with depth',
+					hierarchySchema,
+				);
+				expect(result).toEqual({
+					table: 'categories',
+					include: [
+						{
+							relation: 'children',
+							recursive: true,
+							includeDepth: true,
+						},
+					],
+				});
+			});
+
+			it('parses "include all children depth 10 with depth" with both options', () => {
+				const result = parseNaturalQuery(
+					'categories include all children depth 10 with depth',
+					hierarchySchema,
+				);
+				expect(result).toEqual({
+					table: 'categories',
+					include: [
+						{
+							relation: 'children',
+							recursive: true,
+							maxDepth: 10,
+							includeDepth: true,
+						},
+					],
+				});
+			});
+
+			it('parses recursive include with where and depth options', () => {
+				const result = parseNaturalQuery(
+					'categories where id = 1 include all children depth 3 with depth',
+					hierarchySchema,
+				);
+				expect(result).toEqual({
+					table: 'categories',
+					where: [{ column: 'id', operator: '=', value: 1 }],
+					include: [
+						{
+							relation: 'children',
+							recursive: true,
+							maxDepth: 3,
+							includeDepth: true,
+						},
+					],
+				});
+			});
 		});
 	});
 

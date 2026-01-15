@@ -421,5 +421,47 @@ describe('executeQuery - aggregates (CLI-016)', () => {
 			expect(result.sql.toLowerCase()).toContain('left join');
 			expect(result.sql.toLowerCase()).not.toContain('with recursive');
 		});
+
+		// CLI-018: includeDepth option
+		it('should include depth column when includeDepth is true', () => {
+			const query: ParsedQuery = {
+				table: 'categories',
+				include: [{ relation: 'children', recursive: true, includeDepth: true }],
+			};
+
+			const result = executeQuery(query, hierarchySchema);
+
+			expect(result.error).toBeUndefined();
+			expect(result.sql).toBeTruthy();
+			expect(result.sql.toUpperCase()).toContain('WITH RECURSIVE');
+			// Should have depth tracking: 0 AS "depth" in base, depth + 1 in recursive
+			expect(result.sql).toContain('0 as "depth"');
+			expect(result.sql).toContain('"depth" + 1 as "depth"');
+		});
+
+		it('should support both maxDepth and includeDepth together', () => {
+			const query: ParsedQuery = {
+				table: 'categories',
+				include: [
+					{
+						relation: 'children',
+						recursive: true,
+						maxDepth: 5,
+						includeDepth: true,
+					},
+				],
+			};
+
+			const result = executeQuery(query, hierarchySchema);
+
+			expect(result.error).toBeUndefined();
+			expect(result.sql).toBeTruthy();
+			expect(result.sql.toUpperCase()).toContain('WITH RECURSIVE');
+			// Should have depth tracking
+			expect(result.sql).toContain('0 as "depth"');
+			expect(result.sql).toContain('"depth" + 1 as "depth"');
+			// Should have depth limit in WHERE clause
+			expect(result.sql).toContain('"depth" < $1');
+		});
 	});
 });

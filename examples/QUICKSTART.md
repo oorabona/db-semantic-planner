@@ -175,6 +175,24 @@ For self-referential tables (like hierarchical categories), use `include all` fo
 > categories include parent
 ```
 
+#### Depth Options (CLI-018)
+
+Control recursion depth and track hierarchy level:
+
+```
+# Limit recursion to 10 levels deep
+> categories include all children depth 10
+
+# Alternative syntax for max depth
+> categories include all children max 5
+
+# Include a depth column showing hierarchy level (0 for root, 1 for children, etc.)
+> categories include all children with depth
+
+# Combine both options
+> categories include all children depth 10 with depth
+```
+
 > **Note:** Recursive includes generate CTEs (`WITH RECURSIVE`) at execution time.
 > In REPL compile-only mode, the main query is shown without the CTE.
 > Use actual database execution to see the full recursive behavior.
