@@ -49,7 +49,7 @@ pnpm audit: No known vulnerabilities found
 ```
 
 **Production Dependencies:**
-- `@db-semantic-planner/core` (internal)
+- `@dbsp/core` (internal)
 - `kysely` (peer dependency, v0.27+)
 
 **Dev Dependencies:**

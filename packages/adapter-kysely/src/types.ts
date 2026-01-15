@@ -3,7 +3,7 @@
  * Core types for the Kysely adapter.
  */
 
-import type { PlanReport, WindowIntent } from '@db-semantic-planner/core';
+import type { PlanReport, WindowIntent } from '@dbsp/core';
 
 // ============================================================================
 // Dump Types
@@ -33,7 +33,7 @@ export interface DumpMeta {
 export interface Dump {
 	/**
 	 * Planner decisions with reasoning.
-	 * From @db-semantic-planner/core Semantic Planner.
+	 * From @dbsp/core Semantic Planner.
 	 */
 	readonly plan: PlanReport;
 

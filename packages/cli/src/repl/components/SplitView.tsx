@@ -4,7 +4,7 @@
  * Shows schema browser on the left and query/output on the right.
  */
 
-import type { ResolvedSchema } from '@db-semantic-planner/schema';
+import type { ResolvedSchema } from '@dbsp/schema';
 import { Box, Text } from 'ink';
 import React, { useState } from 'react';
 

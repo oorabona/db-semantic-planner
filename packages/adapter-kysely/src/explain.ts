@@ -127,7 +127,7 @@ function parseExecutionTime(jsonPlan: unknown): number | undefined {
  *
  * @example
  * ```typescript
- * import { compile, explain } from '@db-semantic-planner/adapter-kysely';
+ * import { compile, explain } from '@dbsp/adapter-kysely';
  *
  * const compiled = compile(planReport, model, db);
  *

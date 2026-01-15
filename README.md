@@ -16,13 +16,13 @@ Semantic query planning for databases. An intent-first approach that transforms 
 
 ```bash
 # Core packages
-pnpm add @db-semantic-planner/core @db-semantic-planner/adapter-kysely
+pnpm add @dbsp/core @dbsp/adapter-kysely
 
 # Schema definition (optional, for codegen workflow)
-pnpm add @db-semantic-planner/schema
+pnpm add @dbsp/schema
 
 # CLI (optional, for code generation and REPL)
-pnpm add -D @db-semantic-planner/cli
+pnpm add -D @dbsp/cli
 ```
 
 ## Quick Start
@@ -32,7 +32,7 @@ pnpm add -D @db-semantic-planner/cli
 #### 1. Define your schema (`dbsp.schema.ts`)
 
 ```typescript
-import { defineSchema } from '@db-semantic-planner/schema';
+import { defineSchema } from '@dbsp/schema';
 
 // Simple: Tables only (relations auto-inferred from FK references)
 const schema = defineSchema({
@@ -120,15 +120,15 @@ export interface DB {
 #### 3. Use with the ORM
 
 ```typescript
-import { createOrm, eq } from '@db-semantic-planner/core';
-import { createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
+import { createOrm, eq } from '@dbsp/core';
+import { createKyselyAdapter } from '@dbsp/adapter-kysely';
 import { Kysely, PostgresDialect } from 'kysely';
 import type { DB } from './generated/DB.js';
 
 const kysely = new Kysely<DB>({ dialect: new PostgresDialect({ pool }) });
 
 const orm = createOrm({
-  schema,  // Schema from @db-semantic-planner/schema
+  schema,  // Schema from @dbsp/schema
   adapter: createKyselyAdapter(kysely),
 });
 
@@ -149,8 +149,8 @@ const postsWithAuthors = await orm
 ### Option B: Manual Schema Definition
 
 ```typescript
-import { createOrm, eq } from '@db-semantic-planner/core';
-import { createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
+import { createOrm, eq } from '@dbsp/core';
+import { createKyselyAdapter } from '@dbsp/adapter-kysely';
 
 // Low-level ModelIR format (advanced users only)
 const model = {
@@ -195,10 +195,10 @@ The CLI provides tools for code generation, schema verification, and interactive
 
 ```bash
 # As dev dependency (recommended)
-pnpm add -D @db-semantic-planner/cli
+pnpm add -D @dbsp/cli
 
 # Or globally
-npm install -g @db-semantic-planner/cli
+npm install -g @dbsp/cli
 ```
 
 ### Running the CLI
@@ -459,19 +459,19 @@ console.log(dump.plan);     // { decisions: [...], warnings: [...] }
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        @db-semantic-planner/cli                  │
+│                        @dbsp/cli                  │
 │  dbsp generate | dbsp verify | dbsp repl                        │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
 ┌──────────────────────────────┼──────────────────────────────────┐
 │                              ▼                                   │
-│  @db-semantic-planner/schema                                     │
+│  @dbsp/schema                                     │
 │  defineSchema() → GeneratedSchema                                │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
 ┌──────────────────────────────┼──────────────────────────────────┐
 │                              ▼                                   │
-│  @db-semantic-planner/core                                       │
+│  @dbsp/core                                       │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
 │  │  ModelIR    │  │  IntentAST  │  │  Semantic Planner       │  │
 │  │  (Schema)   │→→│  (Query)    │→→│  (Plan + Decisions)     │  │
@@ -483,7 +483,7 @@ console.log(dump.plan);     // { decisions: [...], warnings: [...] }
                                │ implements Adapter
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  @db-semantic-planner/adapter-kysely                             │
+│  @dbsp/adapter-kysely                             │
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │  SQL Compiler (PlanReport → Kysely CompiledQuery)       │    │
 │  │  KyselyAdapter, MockAdapter (for REPL/testing)          │    │
@@ -495,10 +495,10 @@ console.log(dump.plan);     // { decisions: [...], warnings: [...] }
 
 | Package | Description |
 |---------|-------------|
-| `@db-semantic-planner/schema` | Schema DSL (`defineSchema()`) |
-| `@db-semantic-planner/core` | Query intents, semantic planning, ORM API |
-| `@db-semantic-planner/adapter-kysely` | SQL compilation via Kysely |
-| `@db-semantic-planner/cli` | CLI tools (generate, verify, repl) |
+| `@dbsp/schema` | Schema DSL (`defineSchema()`) |
+| `@dbsp/core` | Query intents, semantic planning, ORM API |
+| `@dbsp/adapter-kysely` | SQL compilation via Kysely |
+| `@dbsp/cli` | CLI tools (generate, verify, repl) |
 
 ## API Reference
 

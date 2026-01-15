@@ -12,9 +12,9 @@
 
 **Current state:**
 - Type inference stops at column level - relations not included in query results
-- 3 packages to import for basic usage (`@db-semantic-planner/schema`, `core`, `adapter-kysely`)
+- 3 packages to import for basic usage (`@dbsp/schema`, `core`, `adapter-kysely`)
 - No autocomplete on `include('xxx')` - string literals not validated
-- Verbose package names (`@db-semantic-planner/*`)
+- Verbose package names (`@dbsp/*`)
 
 **Target state:**
 - Prisma-like conditional type inference based on `include()` calls
@@ -46,11 +46,11 @@
 #### Before
 ```
 packages/
-├── schema/           → @db-semantic-planner/schema
-├── core/             → @db-semantic-planner/core
-├── adapter-kysely/   → @db-semantic-planner/adapter-kysely
-├── cli/              → @db-semantic-planner/cli
-└── mcp-server/       → @db-semantic-planner/mcp-server
+├── schema/           → @dbsp/schema
+├── core/             → @dbsp/core
+├── adapter-kysely/   → @dbsp/adapter-kysely
+├── cli/              → @dbsp/cli
+└── mcp-server/       → @dbsp/mcp-server
 ```
 
 #### After

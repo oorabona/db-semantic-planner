@@ -16,7 +16,7 @@ import {
 	wMax,
 	wMin,
 	wSum,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 import { Kysely, PostgresDialect } from 'kysely';
 import { describe, expect, it } from 'vitest';
 import { createKyselyAdapter } from './kysely-adapter.js';

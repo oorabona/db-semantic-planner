@@ -4,7 +4,7 @@ import {
 	defineSchema,
 	eq,
 	hasMany,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';

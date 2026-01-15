@@ -381,7 +381,7 @@ function buildRelationIR(
  * @example
  * ```typescript
  * import { schema } from './generated/dbsp/schema';
- * import { buildModelFromSchema, createOrm } from '@db-semantic-planner/core';
+ * import { buildModelFromSchema, createOrm } from '@dbsp/core';
  *
  * const model = buildModelFromSchema(schema);
  * const orm = createOrm({ model, adapter });
@@ -412,7 +412,7 @@ export function buildModelFromSchema(schema: GeneratedSchema): ModelIR {
  *
  * Note: Both GeneratedSchema and ResolvedSchema have the same structure,
  * so this check will return true for both. Use `isResolvedSchema()` to
- * specifically detect ResolvedSchema (from @db-semantic-planner/schema).
+ * specifically detect ResolvedSchema (from @dbsp/schema).
  */
 export function isGeneratedSchema(value: unknown): value is GeneratedSchema {
 	if (typeof value !== 'object' || value === null) {
@@ -432,7 +432,7 @@ export function isGeneratedSchema(value: unknown): value is GeneratedSchema {
 }
 
 /**
- * Column types that exist only in ResolvedSchema (from @db-semantic-planner/schema).
+ * Column types that exist only in ResolvedSchema (from @dbsp/schema).
  * These types are PostgreSQL-specific and not present in GeneratedSchema.
  */
 const RESOLVED_SCHEMA_ONLY_TYPES = new Set(['time', 'jsonb']);
@@ -476,7 +476,7 @@ function hasGeneratedSchemaOnlyTypes(
 }
 
 /**
- * Type guard for ResolvedSchema (from @db-semantic-planner/schema).
+ * Type guard for ResolvedSchema (from @dbsp/schema).
  *
  * Detects ResolvedSchema by checking for PostgreSQL-specific column types
  * like 'time' and 'jsonb' that only exist in ResolvedSchema.
@@ -525,7 +525,7 @@ export function isResolvedSchema(value: unknown): boolean {
  *
  * @example
  * ```typescript
- * import { normalizeSchema } from '@db-semantic-planner/core';
+ * import { normalizeSchema } from '@dbsp/core';
  *
  * // Works with GeneratedSchema (from codegen)
  * const schema1 = normalizeSchema(generatedSchema);
@@ -562,7 +562,7 @@ export function normalizeSchema(input: unknown): GeneratedSchema {
 // ============================================================================
 
 /**
- * Schema column type from @db-semantic-planner/schema
+ * Schema column type from @dbsp/schema
  */
 const SchemaColumnTypeSchema = v.picklist([
 	'uuid',
@@ -588,7 +588,7 @@ const ForeignKeyReferenceSchema = v.object({
 });
 
 /**
- * Column definition schema (from @db-semantic-planner/schema)
+ * Column definition schema (from @dbsp/schema)
  */
 const ColumnDefinitionSchema = v.object({
 	type: SchemaColumnTypeSchema,
@@ -836,7 +836,7 @@ export type SchemaConversionResult =
 	| { success: false; errors: v.BaseIssue<unknown>[] };
 
 /**
- * Convert a ResolvedSchema (from @db-semantic-planner/schema) to GeneratedSchema.
+ * Convert a ResolvedSchema (from @dbsp/schema) to GeneratedSchema.
  *
  * This function validates the input using Valibot and then converts the
  * schema structure to the format expected by createOrm().
@@ -846,8 +846,8 @@ export type SchemaConversionResult =
  *
  * @example
  * ```typescript
- * import { defineSchema } from '@db-semantic-planner/schema';
- * import { resolvedSchemaToGeneratedSchema, createOrm } from '@db-semantic-planner/core';
+ * import { defineSchema } from '@dbsp/schema';
+ * import { resolvedSchemaToGeneratedSchema, createOrm } from '@dbsp/core';
  *
  * const resolved = defineSchema({ tables: { users: { id: { type: 'uuid' } } } });
  * const result = resolvedSchemaToGeneratedSchema(resolved);

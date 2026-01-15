@@ -349,7 +349,7 @@ When joinDefault is `'auto'`:
 ### Basic Schema Definition
 
 ```typescript
-import { defineSchema, hasOne, hasMany, belongsTo } from '@db-semantic-planner/core';
+import { defineSchema, hasOne, hasMany, belongsTo } from '@dbsp/core';
 
 const schema = defineSchema({
   products: {

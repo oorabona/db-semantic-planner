@@ -1,5 +1,5 @@
 /**
- * @db-semantic-planner/core/dx
+ * @dbsp/core/dx
  * Developer Experience enhancements - strict mode, disambiguation, compat helpers.
  */
 

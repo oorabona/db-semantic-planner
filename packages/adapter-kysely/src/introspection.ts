@@ -12,8 +12,8 @@ import type {
 	ModelIR,
 	RelationIR,
 	TableIR,
-} from '@db-semantic-planner/core';
-import { ModelIRImpl } from '@db-semantic-planner/core';
+} from '@dbsp/core';
+import { ModelIRImpl } from '@dbsp/core';
 import type { ColumnMetadata, Kysely, TableMetadata } from 'kysely';
 import { sql } from 'kysely';
 
@@ -394,7 +394,7 @@ function fkToRelationName(
  *
  * @example
  * ```typescript
- * import { introspect } from '@db-semantic-planner/adapter-kysely';
+ * import { introspect } from '@dbsp/adapter-kysely';
  *
  * const model = await introspect(db);
  * const planner = createPlanner(model);

@@ -164,8 +164,8 @@ export type {
 
 ```typescript
 import { Kysely, PostgresDialect } from 'kysely';
-import { introspect } from '@db-semantic-planner/adapter-kysely';
-import { createPlanner } from '@db-semantic-planner/core';
+import { introspect } from '@dbsp/adapter-kysely';
+import { createPlanner } from '@dbsp/core';
 
 // Connect to database
 const db = new Kysely<Database>({
@@ -386,7 +386,7 @@ Scenario: Programmatic schema definition unchanged
 - [ ] 28+ unit tests passing
 - [ ] TypeScript strict mode passes
 - [ ] Biome lint passes
-- [ ] Exported from `@db-semantic-planner/adapter-kysely`
+- [ ] Exported from `@dbsp/adapter-kysely`
 - [ ] defineSchema() regression tests pass
 
 ---

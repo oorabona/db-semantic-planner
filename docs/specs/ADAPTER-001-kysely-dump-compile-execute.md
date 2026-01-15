@@ -26,7 +26,7 @@ This spec defines the compile, dump, and execute APIs for the Kysely adapter. Th
 ```typescript
 // packages/adapter-kysely/src/dump.ts
 
-import type { PlanReport } from '@db-semantic-planner/core';
+import type { PlanReport } from '@dbsp/core';
 
 /**
  * Metadata for correlation and debugging
@@ -52,7 +52,7 @@ export interface DumpMeta {
 export interface Dump {
   /**
    * Planner decisions with reasoning.
-   * From @db-semantic-planner/core Semantic Planner.
+   * From @dbsp/core Semantic Planner.
    */
   plan: PlanReport;
 
@@ -82,7 +82,7 @@ export interface Dump {
 // packages/adapter-kysely/src/orm-context.ts
 
 import type { Kysely } from 'kysely';
-import type { ModelIR } from '@db-semantic-planner/core';
+import type { ModelIR } from '@dbsp/core';
 
 /**
  * Options for creating an ORM context
@@ -146,7 +146,7 @@ export function createOrm(options: CreateOrmOptions): OrmContext;
 // packages/adapter-kysely/src/query-builder.ts
 
 import type { Dump, DumpMeta } from './dump';
-import type { WhereIntent, IncludeOptions, OrderByIntent } from '@db-semantic-planner/core';
+import type { WhereIntent, IncludeOptions, OrderByIntent } from '@dbsp/core';
 
 /**
  * Fluent query builder with compile/dump/execute methods

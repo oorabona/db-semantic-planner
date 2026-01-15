@@ -6,7 +6,7 @@ import {
 	eq,
 	hasMany,
 	NotFoundError,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';

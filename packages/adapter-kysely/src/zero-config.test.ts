@@ -1,5 +1,5 @@
-import type { Adapter } from '@db-semantic-planner/core';
-import { createOrm, defineSchema } from '@db-semantic-planner/core';
+import type { Adapter } from '@dbsp/core';
+import { createOrm, defineSchema } from '@dbsp/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';

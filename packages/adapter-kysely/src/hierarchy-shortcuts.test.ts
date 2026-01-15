@@ -9,7 +9,7 @@ import {
 	createOrm,
 	defineSchema,
 	hasMany,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 import {
 	Kysely,
 	PostgresAdapter,

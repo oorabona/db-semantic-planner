@@ -425,7 +425,7 @@ CREATE TABLE comments (
 ```typescript
 // pimdam.q1.exists.test.ts
 import { describe, it, expect, beforeAll } from 'vitest';
-import { createOrm, eq, and, exists } from '@db-semantic-planner/dx';
+import { createOrm, eq, and, exists } from '@dbsp/dx';
 import { getTestDb } from './testkit/db';
 import { pimdamModel } from './testkit/pimdam.model';
 
@@ -483,7 +483,7 @@ describe('Q1: Products with approved FR main image', () => {
 ```typescript
 // pimdam.q2.cte-multilocale.test.ts
 import { describe, it, expect, beforeAll } from 'vitest';
-import { createOrm, eq, and, exists } from '@db-semantic-planner/dx';
+import { createOrm, eq, and, exists } from '@dbsp/dx';
 import { getTestDb } from './testkit/db';
 import { pimdamModel } from './testkit/pimdam.model';
 
@@ -548,7 +548,7 @@ describe('Q2: Products with approved images in BOTH FR and EN', () => {
 **Implementation:**
 ```typescript
 import { bench, describe } from 'vitest';
-import { createOrm, eq } from '@db-semantic-planner/dx';
+import { createOrm, eq } from '@dbsp/dx';
 import { pimdamModel } from '../testkit/pimdam.model';
 
 describe('Query Performance', () => {

@@ -7,7 +7,7 @@
  *
  * @example
  * ```typescript
- * import { defineModel } from '@db-semantic-planner/core';
+ * import { defineModel } from '@dbsp/core';
  *
  * interface Database {
  *   users: { id: number; name: string; };

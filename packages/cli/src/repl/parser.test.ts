@@ -2,7 +2,7 @@
  * DX-030: Natural Query Parser Tests
  */
 
-import type { ResolvedSchema } from '@db-semantic-planner/schema';
+import type { ResolvedSchema } from '@dbsp/schema';
 import { describe, expect, it } from 'vitest';
 import { ParseError, parsedQueryToSql, parseNaturalQuery } from './parser.js';
 

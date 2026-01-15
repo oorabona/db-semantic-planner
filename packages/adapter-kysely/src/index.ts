@@ -1,5 +1,5 @@
 /**
- * @module @db-semantic-planner/adapter-kysely
+ * @module @dbsp/adapter-kysely
  * Kysely adapter for db-semantic-planner.
  *
  * Provides SQL compilation and query execution using Kysely.
@@ -9,7 +9,7 @@
 export type {
 	CompileResultWithIncludes,
 	SeparateIncludeInfo,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 // Compiler (low-level)
 export {
 	compile,

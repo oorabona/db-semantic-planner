@@ -3,7 +3,7 @@
  *
  * Usage in tests:
  * ```typescript
- * import { setupSqlSnapshotMatcher } from '@db-semantic-planner/adapter-kysely/test-utils';
+ * import { setupSqlSnapshotMatcher } from '@dbsp/adapter-kysely/test-utils';
  *
  * setupSqlSnapshotMatcher(import.meta.url);
  *

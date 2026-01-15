@@ -10,7 +10,7 @@ import {
 	ExecutionError,
 	eq,
 	hasMany,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createMockAdapter, MockAdapter } from './mock-adapter.js';
 

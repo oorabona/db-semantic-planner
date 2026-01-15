@@ -23,7 +23,7 @@ Implement SQL compilation from `PlanReport` to Kysely queries with full observab
 **Files:** `packages/adapter-kysely/package.json`, `tsconfig.json`, `src/index.ts`, `src/types.ts`
 
 - [ ] Create `packages/adapter-kysely` directory
-- [ ] Create `package.json` with dependencies (kysely, @db-semantic-planner/core)
+- [ ] Create `package.json` with dependencies (kysely, @dbsp/core)
 - [ ] Create `tsconfig.json` extending root
 - [ ] Define `Dump`, `DumpMeta` interfaces
 - [ ] Define `InvalidIdentifierError`, `NotFoundError` classes
@@ -127,7 +127,7 @@ Implement SQL compilation from `PlanReport` to Kysely queries with full observab
 
 ```
 packages/adapter-kysely
-├── @db-semantic-planner/core (workspace:*)
+├── @dbsp/core (workspace:*)
 ├── kysely (^0.28.9) - peer dependency
 └── pg (peer, for PostgreSQL dialect)
 ```

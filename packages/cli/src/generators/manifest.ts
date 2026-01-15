@@ -9,7 +9,7 @@ import type {
 	ColumnDefinition,
 	RelationDefinition,
 	ResolvedSchema,
-} from '@db-semantic-planner/schema';
+} from '@dbsp/schema';
 
 /**
  * JSON-serializable column definition for manifest output.

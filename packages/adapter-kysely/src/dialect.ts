@@ -349,7 +349,7 @@ export function getCapabilitiesForDialect(
  *
  * @example
  * ```typescript
- * import { assertCapability } from '@db-semantic-planner/adapter-kysely';
+ * import { assertCapability } from '@dbsp/adapter-kysely';
  *
  * assertCapability(
  *   db,

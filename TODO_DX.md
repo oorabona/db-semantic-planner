@@ -13,7 +13,7 @@
 
 ```typescript
 // BEFORE: Forced conversion
-import { assertResolvedSchemaToGeneratedSchema } from '@db-semantic-planner/core';
+import { assertResolvedSchemaToGeneratedSchema } from '@dbsp/core';
 const generatedSchema = assertResolvedSchemaToGeneratedSchema(schema);
 const orm = createOrm<any>({ schema: generatedSchema, adapter });
 
@@ -58,7 +58,7 @@ const orm = createOrm({ schema, adapter }); // Works with ResolvedSchema OR Gene
 
 **New Public API:**
 ```typescript
-import { isResolvedSchema, normalizeSchema } from '@db-semantic-planner/core';
+import { isResolvedSchema, normalizeSchema } from '@dbsp/core';
 
 // Type detection
 isResolvedSchema(schema); // true if has time/jsonb types
@@ -176,7 +176,7 @@ import {
   type RecursiveIncludeConfig,
   type ExecutionContext,
   type HydrateOptions,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 ```
 
 **Note:** QueryBuilderImpl still exists and functions as before. The extracted classes
@@ -229,7 +229,7 @@ import {
   supportsTransactions,
   supportsRawSql,
   supportsExecution,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 
 // Example: Feature detection
 if (supportsStreaming(adapter)) {

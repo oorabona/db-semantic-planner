@@ -28,7 +28,7 @@ import type {
 	WhereIntent,
 	WhereSubqueryIntent,
 	WindowIntent,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 import {
 	POSTGRESQL_CAPABILITIES as CORE_POSTGRESQL_CAPABILITIES,
 	type DialectCapabilities as CoreDialectCapabilities,
@@ -40,7 +40,7 @@ import {
 	isSelectAggregate,
 	isSelectWithExpressions,
 	isSubqueryRef,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 import type {
 	AliasedExpression,
 	CompiledQuery,

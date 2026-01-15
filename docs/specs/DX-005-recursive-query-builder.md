@@ -453,7 +453,7 @@ Scenario: Inspect query plan without execution
 - [ ] 8 E2E tests passing
 - [ ] TypeScript strict mode passes
 - [ ] Biome lint passes
-- [ ] API exported from `@db-semantic-planner/dx`
+- [ ] API exported from `@dbsp/dx`
 - [ ] Documentation updated
 
 ---

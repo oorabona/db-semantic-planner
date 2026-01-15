@@ -4,7 +4,7 @@
  * Compares schema definition against real database for drift detection.
  */
 
-import type { ResolvedSchema } from '@db-semantic-planner/schema';
+import type { ResolvedSchema } from '@dbsp/schema';
 
 // ============================================================================
 // Types

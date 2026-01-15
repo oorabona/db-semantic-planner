@@ -77,7 +77,7 @@ packages/core/src/
 
 ### Options Considered
 
-#### Option A: Separate `@db-semantic-planner/dx` Package
+#### Option A: Separate `@dbsp/dx` Package
 
 Move dx/ to a separate package.
 
@@ -145,7 +145,7 @@ The dx/ layer is the **application layer** in hexagonal terms - it orchestrates 
 
 ### Positive
 
-1. **No breaking changes**: Users continue importing from `@db-semantic-planner/core`
+1. **No breaking changes**: Users continue importing from `@dbsp/core`
 2. **Clear mental model**: One package with well-organized layers
 3. **Reduced complexity**: Two packages (core + adapter) instead of three
 4. **Aligned with ADR-002**: Reinforces the original decision
@@ -177,7 +177,7 @@ module.exports = {
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    @db-semantic-planner/core                    │
+│                    @dbsp/core                    │
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │  DOMAIN LAYER (Pure, No External Dependencies)          │   │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │   │
@@ -211,7 +211,7 @@ module.exports = {
                     implements Adapter
                               ↑
 ┌─────────────────────────────────────────────────────────────────┐
-│                 @db-semantic-planner/adapter-kysely             │
+│                 @dbsp/adapter-kysely             │
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │  ADAPTER LAYER (External Implementation)                │   │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐  │   │

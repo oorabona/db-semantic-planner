@@ -1,5 +1,5 @@
 {
-	"name": "@db-semantic-planner/adapter-kysely",
+	"name": "@dbsp/adapter-kysely",
 	"version": "0.0.1",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -24,7 +24,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@db-semantic-planner/core": "workspace:*"
+		"@dbsp/core": "workspace:*"
 	},
 	"peerDependencies": {
 		"kysely": "catalog:"

@@ -1,5 +1,5 @@
 /**
- * @db-semantic-planner/schema
+ * @dbsp/schema
  *
  * Schema definition DSL for db-semantic-planner.
  * Source of Truth for tables, relations, and planner hints.

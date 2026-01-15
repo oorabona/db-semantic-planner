@@ -12,9 +12,9 @@
 - [x] Create `packages/mcp-server` directory structure
 - [x] Initialize package.json with dependencies:
   - `@modelcontextprotocol/sdk` (pin v1.x - stable API)
-  - `@db-semantic-planner/core`
-  - `@db-semantic-planner/schema`
-  - `@db-semantic-planner/adapter-kysely`
+  - `@dbsp/core`
+  - `@dbsp/schema`
+  - `@dbsp/adapter-kysely`
 - [x] Configure tsconfig.json (ESM, strict)
 - [x] Configure tsup.config.ts (ESM output)
 - [x] Add to pnpm-workspace.yaml (via catalog)

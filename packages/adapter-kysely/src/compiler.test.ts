@@ -9,7 +9,7 @@ import {
 	type RecursiveIntent,
 	type UpsertIntent,
 	type WindowIntent,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { describe, expect, it } from 'vitest';

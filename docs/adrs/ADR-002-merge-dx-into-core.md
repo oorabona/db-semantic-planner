@@ -41,7 +41,7 @@ The current architecture has three packages with problematic coupling:
 **Evidence of coupling in `packages/dx/src/orm.ts`:**
 
 ```typescript
-import { compile, ... } from '@db-semantic-planner/adapter-kysely';
+import { compile, ... } from '@dbsp/adapter-kysely';
 import { Kysely } from 'kysely';
 
 // Transaction uses Kysely API directly
@@ -117,7 +117,7 @@ Create `dx-kysely`, `dx-drizzle`, etc.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  @db-semantic-planner/core                                      │
+│  @dbsp/core                                      │
 ├─────────────────────────────────────────────────────────────────┤
 │  Schema Layer:                                                  │
 │    - ModelIR, ModelIRImpl                                       │
@@ -146,7 +146,7 @@ Create `dx-kysely`, `dx-drizzle`, etc.
 └─────────────────────────────────────────────────────────────────┘
                               ↑
 ┌─────────────────────────────────────────────────────────────────┐
-│  @db-semantic-planner/adapter-kysely                            │
+│  @dbsp/adapter-kysely                            │
 │  implements AdapterInterface                                    │
 ├─────────────────────────────────────────────────────────────────┤
 │  - createKyselyAdapter(db: Kysely<DB>): Adapter                 │
@@ -212,14 +212,14 @@ export interface Adapter<DB = unknown> {
 const orm = createOrm({ model, db: kyselyInstance });
 
 // After (core package, adapter-agnostic)
-import { createOrm } from '@db-semantic-planner/core';
-import { createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
+import { createOrm } from '@dbsp/core';
+import { createKyselyAdapter } from '@dbsp/adapter-kysely';
 
 const adapter = createKyselyAdapter(kyselyInstance);
 const orm = createOrm({ model, adapter });
 
 // Or with Drizzle (future)
-import { createDrizzleAdapter } from '@db-semantic-planner/adapter-drizzle';
+import { createDrizzleAdapter } from '@dbsp/adapter-drizzle';
 const adapter = createDrizzleAdapter(drizzleInstance);
 const orm = createOrm({ model, adapter });
 ```
@@ -230,13 +230,13 @@ const orm = createOrm({ model, adapter });
 
 1. **True multi-adapter support**: Add Drizzle/Prisma adapters without code duplication
 2. **Clear architecture**: core = abstractions, adapter-* = implementations
-3. **Single import source**: Users import everything from `@db-semantic-planner/core`
+3. **Single import source**: Users import everything from `@dbsp/core`
 4. **Testability**: Core can be unit tested without any adapter
 5. **Type safety preserved**: Generic Adapter<DB> carries database schema
 
 ### Negative
 
-1. **Breaking change**: Import paths change from `@db-semantic-planner/dx` to `@db-semantic-planner/core`
+1. **Breaking change**: Import paths change from `@dbsp/dx` to `@dbsp/core`
 2. **Migration effort**: Move ~15 files, update all imports
 3. **Larger core package**: Tree-shaking mitigates this
 
@@ -251,7 +251,7 @@ const orm = createOrm({ model, adapter });
 
 ### Backward Compatibility
 
-**None** - This is a breaking change. Users must update imports from `@db-semantic-planner/dx` to `@db-semantic-planner/core`.
+**None** - This is a breaking change. Users must update imports from `@dbsp/dx` to `@dbsp/core`.
 
 Since the project is pre-1.0, breaking changes are acceptable.
 

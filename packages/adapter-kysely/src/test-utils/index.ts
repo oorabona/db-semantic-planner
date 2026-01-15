@@ -9,7 +9,7 @@
  *   setupSqlSnapshotMatcher,
  *   normalizeSql,
  *   compareSql,
- * } from '@db-semantic-planner/adapter-kysely/test-utils';
+ * } from '@dbsp/adapter-kysely/test-utils';
  *
  * setupSqlSnapshotMatcher(import.meta.url);
  *

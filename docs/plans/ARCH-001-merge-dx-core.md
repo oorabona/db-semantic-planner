@@ -55,7 +55,7 @@ Scenario: Missing capability error
 
 Scenario: Deprecated dx import
   Given the deprecated dx package
-  When I import { createOrm } from '@db-semantic-planner/dx'
+  When I import { createOrm } from '@dbsp/dx'
   Then it logs a deprecation warning
   And the import works (re-exported from core)
 ```
@@ -221,8 +221,8 @@ export class UnsupportedCapabilityError extends Error {
 | `packages/dx/src/lightweight-model.ts` | `packages/core/src/dx/lightweight-model.ts` |
 
 **Update imports:**
-- Change `@db-semantic-planner/core` → relative imports
-- Remove `@db-semantic-planner/adapter-kysely` imports (will be injected)
+- Change `@dbsp/core` → relative imports
+- Remove `@dbsp/adapter-kysely` imports (will be injected)
 
 ---
 
@@ -294,8 +294,8 @@ import type {
   CompiledQuery, 
   Dump,
   StreamOptions 
-} from '@db-semantic-planner/core';
-import type { PlanReport } from '@db-semantic-planner/core';
+} from '@dbsp/core';
+import type { PlanReport } from '@dbsp/core';
 import { compile } from './compiler.js';
 import { getCapabilities } from './dialect.js';
 import { streamQuery } from './stream.js';
@@ -362,7 +362,7 @@ export function createKyselyAdapter<DB>(db: Kysely<DB>): Adapter<DB> {
 **Export from index.ts:**
 ```typescript
 export { createKyselyAdapter } from './adapter.js';
-export type { Adapter, AdapterCapabilities } from '@db-semantic-planner/core';
+export type { Adapter, AdapterCapabilities } from '@dbsp/core';
 ```
 
 ---

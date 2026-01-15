@@ -9,7 +9,7 @@
  * - "users where active = true include posts limit 10"
  */
 
-import type { ResolvedSchema } from '@db-semantic-planner/schema';
+import type { ResolvedSchema } from '@dbsp/schema';
 
 /**
  * CLI-016: Parsed aggregate expression

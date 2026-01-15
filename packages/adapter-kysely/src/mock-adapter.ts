@@ -27,8 +27,8 @@ import type {
 	SeparateIncludeInfo,
 	UpdateIntent,
 	UpsertIntent,
-} from '@db-semantic-planner/core';
-import { ExecutionError } from '@db-semantic-planner/core';
+} from '@dbsp/core';
+import { ExecutionError } from '@dbsp/core';
 import {
 	Kysely,
 	MssqlAdapter,
@@ -161,8 +161,8 @@ function createMockKysely(dialect: MockDialect): Kysely<unknown> {
  *
  * @example
  * ```typescript
- * import { createOrm } from '@db-semantic-planner/core';
- * import { createMockAdapter } from '@db-semantic-planner/adapter-kysely';
+ * import { createOrm } from '@dbsp/core';
+ * import { createMockAdapter } from '@dbsp/adapter-kysely';
  *
  * const orm = createOrm({
  *   model: mySchema,

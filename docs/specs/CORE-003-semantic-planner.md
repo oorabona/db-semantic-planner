@@ -352,7 +352,7 @@ const intent: QueryIntent = {
 ### Basic Planning
 
 ```typescript
-import { plan } from '@db-semantic-planner/core';
+import { plan } from '@dbsp/core';
 
 const intent: QueryIntent = {
   type: 'select',

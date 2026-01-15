@@ -123,13 +123,13 @@ packages/dx/
 | Errors | `AmbiguousRelationError` class | `instanceof` works correctly |
 | Factory | `createOrm()` with `strictMode` | Returns configured ORM |
 | Query Builder | `include()` with `{ via }` option | Passes hint to planner |
-| Integration | Uses `@db-semantic-planner/core` planner | Catches `AmbiguousPlanError`, converts/re-throws |
+| Integration | Uses `@dbsp/core` planner | Catches `AmbiguousPlanError`, converts/re-throws |
 
 ### Dependency Flow
 
 ```
 packages/dx
-  ├── imports: @db-semantic-planner/core (plan, AmbiguousPlanError, types)
+  ├── imports: @dbsp/core (plan, AmbiguousPlanError, types)
   └── peer: kysely (for type inference only)
 ```
 
@@ -258,7 +258,7 @@ Scenario: Multiple includes with one ambiguous in strict mode
 
 **Packages:** `packages/dx`
 
-- **package.json:** Create with dependencies on `@db-semantic-planner/core`, peer dep on `kysely`
+- **package.json:** Create with dependencies on `@dbsp/core`, peer dep on `kysely`
 - **tsconfig.json:** Extend root, reference `packages/core`
 - **vitest.config.ts:** Configure for package
 - **src/index.ts:** Empty exports placeholder

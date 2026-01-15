@@ -7,8 +7,8 @@ import type {
 	ModelIR,
 	PlanReport,
 	QueryIntent,
-} from '@db-semantic-planner/core';
-import { plan } from '@db-semantic-planner/core';
+} from '@dbsp/core';
+import { plan } from '@dbsp/core';
 import type { Kysely } from 'kysely';
 import { compile } from './compiler.js';
 import { redactParams } from './redact.js';

@@ -857,7 +857,7 @@ import {
   SQLITE_CAPABILITIES,
   DUCKDB_CAPABILITIES,
   MSSQL_CAPABILITIES,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 
 // Lookup with aliases (case-insensitive)
 const caps = getDialectCapabilities('postgres'); // or 'pg', 'postgresql'
@@ -958,7 +958,7 @@ packages/adapter-pgsql/
     sql-builder.ts      # Sérialiseur SQL (utilise DialectCapabilities)
     pgsql-adapter.ts    # Adapter avec pg driver
     index.ts
-  package.json          # deps: pg, @types/pg, @db-semantic-planner/core
+  package.json          # deps: pg, @types/pg, @dbsp/core
 ```
 
 **Valeur:**
@@ -1080,7 +1080,7 @@ Adapter qui compile sans exécuter (pour REPL et tests) :
 
 **API:**
 ```typescript
-import { createMockAdapter } from '@db-semantic-planner/adapter-kysely';
+import { createMockAdapter } from '@dbsp/adapter-kysely';
 
 const orm = createOrm({
   model: schema,

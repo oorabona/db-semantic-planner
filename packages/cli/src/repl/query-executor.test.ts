@@ -4,7 +4,7 @@
  * Verifies that the query executor generates proper SQL using the semantic planner.
  */
 
-import type { ResolvedSchema } from '@db-semantic-planner/schema';
+import type { ResolvedSchema } from '@dbsp/schema';
 import { describe, expect, it } from 'vitest';
 import type { ParsedQuery } from './parser.js';
 import { executeQuery } from './query-executor.js';

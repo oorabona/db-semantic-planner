@@ -24,7 +24,7 @@ import type {
 	SeparateIncludeInfo,
 	UpdateIntent,
 	UpsertIntent,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 import type { Kysely, Transaction } from 'kysely';
 
 import {
@@ -54,7 +54,7 @@ import { type StreamQueryOptions, streamQuery } from './stream.js';
  * @example
  * ```typescript
  * import { Kysely, PostgresDialect } from 'kysely';
- * import { createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
+ * import { createKyselyAdapter } from '@dbsp/adapter-kysely';
  *
  * const db = new Kysely<Database>({ dialect: new PostgresDialect(...) });
  * const adapter = createKyselyAdapter(db);

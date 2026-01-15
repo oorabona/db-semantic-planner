@@ -47,8 +47,8 @@ Semantic query planning for databases - an intent-first approach that transforms
 ### API Pattern
 
 ```typescript
-import { createOrm, eq } from '@db-semantic-planner/core';
-import { createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
+import { createOrm, eq } from '@dbsp/core';
+import { createKyselyAdapter } from '@dbsp/adapter-kysely';
 
 // Create ORM with adapter injection
 const orm = createOrm({
@@ -85,7 +85,7 @@ const users = await orm.select('users').where(eq('active', true)).all();
   "references": [{ "path": "../core" }],
   "compilerOptions": {
     "paths": {
-      "@db-semantic-planner/core": ["../core/src"]
+      "@dbsp/core": ["../core/src"]
     }
   }
 }

@@ -11,7 +11,7 @@ import {
 	defineSchema,
 	eq,
 	hasMany,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import type { Adapter, AdapterCapabilities } from '../adapter.js';
 import { createRecursiveBuilder } from './recursive-query-builder.js';
