@@ -328,9 +328,9 @@ const adapter = createKyselyAdapter(db, undefined, 'postgresql');
 - [x] Added prominent JSDoc warnings with **SECURITY RISK** headers
 - [x] Added safe vs dangerous usage examples in each JSDoc
 - [x] Added OWASP reference links (SQL Injection + Parameterization Cheat Sheet)
-- [ ] Consider `dangerouslyExecuteRaw()` naming - DEFERRED (too breaking)
-- [ ] Log usage in dump() plan - DEFERRED (separate task)
-- [ ] Document in security section of README - DEFERRED (separate task)
+- [x] ⏭️ `dangerouslyExecuteRaw()` naming - SKIPPED (breaking change, JSDoc warnings suffisent)
+- [x] ✅ Log raw() usage in dump() plan warnings (observabilité sécurité) (2026-01-15)
+- [x] ⏭️ Document in README security section - SKIPPED (JSDoc auto-generated dans API docs)
 
 ---
 
@@ -451,6 +451,7 @@ for (const warning of model.warnings) {
 ## Future Considerations
 
 - [ ] CLI `dbsp init` wizard (like Prisma)
-- [ ] Single unified export: `import { createOrm, eq, createMockAdapter } from '@db-semantic-planner'`
+- [x] ✅ Unified export from @dbsp/core: createOrm, eq, gt, like, and, or, raw, etc. (2026-01-15)
+  - Note: createMockAdapter reste dans @dbsp/adapter-kysely (architecture Ports & Adapters)
 - [x] "Common Patterns" documentation section (DONE - added to README.md)
 - [x] ✅ Type-safe schema definition with full inference chain (DX-110) (2026-01-15)
