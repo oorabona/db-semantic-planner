@@ -1437,6 +1437,35 @@ categories include all parent      # All ancestors via CTE
 
 ---
 
+### CLI-018: Depth Options for Recursive Includes ✅ (2026-01-15)
+
+**Goal:** Add `depth N` and `with depth` syntax to REPL for recursive includes
+
+**Syntax:**
+- `include all children depth 10` - Limit recursion to 10 levels
+- `include all children max 5` - Alternative syntax for maxDepth
+- `include all children with depth` - Include a `depth` column (0 for root, 1 for children, etc.)
+- `include all children depth 10 with depth` - Combine both options
+
+**Implementation:**
+1. [x] ✅ CLI-018.1: Extend `ParsedInclude` interface with `includeDepth?: boolean`
+2. [x] ✅ CLI-018.2: Parse `depth N`, `max N`, and `with depth` keywords in `parseIncludeChain()`
+3. [x] ✅ CLI-018.3: Pass `includeDepth` option through `buildIncludeOptions()`
+4. [x] ✅ CLI-018.4: Add parser tests (6 new tests for CLI-018 syntax)
+5. [x] ✅ CLI-018.5: Add query-executor tests (2 new tests for depth column)
+6. [x] ✅ CLI-018.6: Update QUICKSTART.md with depth options examples
+
+**Files changed:**
+- `packages/cli/src/repl/parser.ts` - ParsedInclude extension, depth/max/with depth parsing
+- `packages/cli/src/repl/query-executor.ts` - buildIncludeOptions with includeDepth mapping
+- `packages/cli/src/repl/parser.test.ts` - 6 new tests
+- `packages/cli/src/repl/query-executor.test.ts` - 2 new tests
+- `examples/QUICKSTART.md` - Depth options section
+
+**Tests:** All 174 CLI tests passing (8 new tests for CLI-018)
+
+---
+
 ### Documentation (DX critical)
 
 - [ ] **DOCS-001**: User documentation (Getting Started, API Guide)

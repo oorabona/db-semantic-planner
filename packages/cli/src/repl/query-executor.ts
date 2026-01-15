@@ -145,6 +145,7 @@ function buildIncludeOptions(
 			recursive: true,
 			direction,
 			...(inc.maxDepth !== undefined && { maxDepth: inc.maxDepth }),
+			...(inc.includeDepth && { includeDepth: true }),
 			...(whereFilter && { where: whereFilter }),
 			...(nestedIncludes && { include: nestedIncludes }),
 		};
