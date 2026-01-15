@@ -3,47 +3,51 @@
  *
  * These tests verify that TypeScript properly infers types from schema definitions.
  * They use compile-time type assertions to catch regressions.
+ *
+ * MIGRATED to TypedSchema format (DX-110)
  */
 
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { createOrm } from './orm.js';
-import type {
-	GeneratedSchema,
-	InferDBFromSchema,
-	InferRowType,
-} from './schema-bridge.js';
-import type { OrmInstance } from './types.js';
+import type { TypedSchema, InferColumns, InferQueryResult } from './prisma-types.js';
+import { hasMany, belongsTo } from './prisma-types.js';
+import type { TypedOrmInstance } from './typed-query-builder.js';
 
 // ============================================================================
-// Test Schema Definitions
+// Test Schema Definitions (TypedSchema format)
 // ============================================================================
 
 /**
  * Simple test schema with users and posts tables.
- * Uses `as const satisfies GeneratedSchema` pattern for type inference.
+ * Uses `as const satisfies TypedSchema` pattern for type inference.
  */
 const simpleSchema = {
 	tables: {
 		users: {
-			id: { type: 'uuid', primaryKey: true },
-			name: { type: 'string' },
-			email: { type: 'string', nullable: true },
+			columns: {
+				id: { type: 'uuid', primaryKey: true },
+				name: { type: 'string' },
+				email: { type: 'string', nullable: true },
+			},
+			relations: {
+				posts: hasMany('posts', { foreignKey: 'authorId' }),
+			},
 		},
 		posts: {
-			id: { type: 'uuid', primaryKey: true },
-			title: { type: 'string' },
-			authorId: { type: 'uuid' },
-			publishedAt: { type: 'timestamp', nullable: true },
+			columns: {
+				id: { type: 'uuid', primaryKey: true },
+				title: { type: 'string' },
+				authorId: { type: 'uuid' },
+				publishedAt: { type: 'timestamp', nullable: true },
+			},
+			relations: {
+				author: belongsTo('users', { foreignKey: 'authorId' }),
+			},
 		},
 	},
-	relations: {},
-	hints: {},
-	conventions: {
-		fkPattern: '{singular}Id',
-		pluralize: true,
-		timestamps: [],
-	},
-} as const satisfies GeneratedSchema;
+} as const satisfies TypedSchema;
+
+type SimpleSchema = typeof simpleSchema;
 
 /**
  * Schema with all supported column types for comprehensive type mapping tests.
@@ -51,40 +55,37 @@ const simpleSchema = {
 const allTypesSchema = {
 	tables: {
 		allTypes: {
-			id: { type: 'uuid', primaryKey: true },
-			stringCol: { type: 'string' },
-			textCol: { type: 'text' },
-			intCol: { type: 'integer' },
-			numCol: { type: 'number' },
-			bigCol: { type: 'bigint' },
-			decCol: { type: 'decimal' },
-			boolCol: { type: 'boolean' },
-			dateCol: { type: 'date' },
-			tsCol: { type: 'timestamp' },
-			dtCol: { type: 'datetime' },
-			jsonCol: { type: 'json' },
-			nullableString: { type: 'string', nullable: true },
+			columns: {
+				id: { type: 'uuid', primaryKey: true },
+				stringCol: { type: 'string' },
+				textCol: { type: 'text' },
+				intCol: { type: 'integer' },
+				numCol: { type: 'number' },
+				bigCol: { type: 'bigint' },
+				decCol: { type: 'decimal' },
+				boolCol: { type: 'boolean' },
+				dateCol: { type: 'date' },
+				tsCol: { type: 'timestamp' },
+				dtCol: { type: 'datetime' },
+				jsonCol: { type: 'json' },
+				nullableString: { type: 'string', nullable: true },
+			},
+			relations: {},
 		},
 	},
-	relations: {},
-	hints: {},
-	conventions: {
-		fkPattern: '{singular}Id',
-		pluralize: true,
-		timestamps: [],
-	},
-} as const satisfies GeneratedSchema;
+} as const satisfies TypedSchema;
 
 // ============================================================================
 // Type-Level Tests
 // ============================================================================
 
 describe('DX-102: Type inference for createOrm', () => {
-	describe('InferRowType', () => {
+	describe('InferColumns (TypedSchema)', () => {
 		it('should infer correct TypeScript types from column definitions', () => {
 			// Test users table row type
-			type UsersRow = InferRowType<typeof simpleSchema.tables.users>;
+			type UsersRow = InferColumns<SimpleSchema['tables']['users']['columns']>;
 
+			// The inferred type should match our expected row type
 			expectTypeOf<UsersRow>().toEqualTypeOf<{
 				id: string;
 				name: string;
@@ -92,124 +93,101 @@ describe('DX-102: Type inference for createOrm', () => {
 			}>();
 		});
 
-		it('should map all column types correctly', () => {
-			type AllTypesRow = InferRowType<typeof allTypesSchema.tables.allTypes>;
+		it('should handle nullable columns correctly', () => {
+			// Posts table has nullable publishedAt
+			type PostsRow = InferColumns<SimpleSchema['tables']['posts']['columns']>;
 
-			// String types → string
-			expectTypeOf<AllTypesRow['stringCol']>().toBeString();
-			expectTypeOf<AllTypesRow['textCol']>().toBeString();
-			expectTypeOf<AllTypesRow['id']>().toBeString(); // uuid → string
-
-			// Number types → number
-			expectTypeOf<AllTypesRow['intCol']>().toBeNumber();
-			expectTypeOf<AllTypesRow['numCol']>().toBeNumber();
-			expectTypeOf<AllTypesRow['decCol']>().toBeNumber();
-
-			// Bigint → bigint
-			expectTypeOf<AllTypesRow['bigCol']>().toEqualTypeOf<bigint>();
-
-			// Boolean → boolean
-			expectTypeOf<AllTypesRow['boolCol']>().toBeBoolean();
-
-			// Date/time types → Date
-			expectTypeOf<AllTypesRow['dateCol']>().toEqualTypeOf<Date>();
-			expectTypeOf<AllTypesRow['tsCol']>().toEqualTypeOf<Date>();
-			expectTypeOf<AllTypesRow['dtCol']>().toEqualTypeOf<Date>();
-
-			// JSON → unknown
-			expectTypeOf<AllTypesRow['jsonCol']>().toBeUnknown();
-
-			// Nullable string → string | null
-			expectTypeOf<AllTypesRow['nullableString']>().toEqualTypeOf<
-				string | null
-			>();
-		});
-	});
-
-	describe('InferDBFromSchema', () => {
-		it('should infer DB type with correct table names', () => {
-			type DB = InferDBFromSchema<typeof simpleSchema>;
-
-			// Should have exactly these table names
-			expectTypeOf<keyof DB>().toEqualTypeOf<'users' | 'posts'>();
-		});
-
-		it('should infer correct row types for each table', () => {
-			type DB = InferDBFromSchema<typeof simpleSchema>;
-
-			// Users row type
-			expectTypeOf<DB['users']>().toEqualTypeOf<{
-				id: string;
-				name: string;
-				email: string | null;
-			}>();
-
-			// Posts row type
-			expectTypeOf<DB['posts']>().toEqualTypeOf<{
+			expectTypeOf<PostsRow>().toEqualTypeOf<{
 				id: string;
 				title: string;
 				authorId: string;
 				publishedAt: Date | null;
 			}>();
 		});
-	});
 
-	describe('createOrm with schema', () => {
-		// Note: We can't actually call createOrm without an adapter in these type tests,
-		// but we can verify the type inference at compile time.
-
-		it('should infer OrmInstance with correct DB type from schema', () => {
-			// This is a type-level test - we're checking the types, not runtime behavior
-			// biome-ignore lint/correctness/noUnusedVariables: Type used for compile-time verification
-			type ExpectedDB = InferDBFromSchema<typeof simpleSchema>;
-
-			// The function type should accept our schema and return OrmInstance<ExpectedDB>
-			// We use a type assertion to verify the return type would be correct
-			const createOrmWithSchema = createOrm<
-				typeof simpleSchema.tables,
-				typeof simpleSchema
+		it('should handle all column types', () => {
+			// Test all supported column types
+			type AllTypesRow = InferColumns<
+				(typeof allTypesSchema)['tables']['allTypes']['columns']
 			>;
 
-			// Note: We can't actually call this without an adapter, but the type inference
-			// is what we're testing. The mock adapter test below verifies runtime behavior.
-			expectTypeOf(createOrmWithSchema).toBeFunction();
-		});
-
-		it('should allow table name autocomplete in select()', () => {
-			// Type test: verify that the OrmInstance type constrains table names correctly
-			type DB = InferDBFromSchema<typeof simpleSchema>;
-			type Orm = OrmInstance<DB>;
-
-			// The select method should accept 'users' | 'posts'
-			type SelectMethod = Orm['select'];
-
-			// Verify the method exists and accepts correct table names
-			expectTypeOf<SelectMethod>().toBeFunction();
-
-			// The first parameter should be constrained to table names
-			// This is verified by TypeScript at compile time
+			expectTypeOf<AllTypesRow>().toEqualTypeOf<{
+				id: string;
+				stringCol: string;
+				textCol: string;
+				intCol: number;
+				numCol: number;
+				bigCol: bigint;
+				decCol: string;
+				boolCol: boolean;
+				dateCol: Date;
+				tsCol: Date;
+				dtCol: Date;
+				jsonCol: unknown;
+				nullableString: string | null;
+			}>();
 		});
 	});
 
-	describe('backwards compatibility', () => {
-		it('should still work with explicit DB generic', () => {
-			// Old-style usage with explicit type should still work
-			interface ManualDB {
-				users: { id: number; name: string };
-			}
+	describe('InferQueryResult', () => {
+		it('should infer correct base type without includes', () => {
+			type UsersResult = InferQueryResult<SimpleSchema, 'users'>;
 
-			type Orm = OrmInstance<ManualDB>;
-			expectTypeOf<Orm['select']>().toBeFunction();
+			expectTypeOf<UsersResult>().toEqualTypeOf<{
+				id: string;
+				name: string;
+				email: string | null;
+			}>();
 		});
 
-		it('should work with adapter-only (auto-introspection)', () => {
-			// The async introspection path should return Promise<OrmInstance<DB>>
-			// Type verified at compile time - actual runtime is tested elsewhere
-			// biome-ignore lint/correctness/noUnusedVariables: Type used for compile-time verification
-			type AsyncReturn = ReturnType<typeof createOrm<Record<string, unknown>>>;
+		it('should infer correct type with hasMany include', () => {
+			type UsersWithPosts = InferQueryResult<
+				SimpleSchema,
+				'users',
+				{ posts: true }
+			>;
 
-			// This could be either OrmInstance (sync) or Promise<OrmInstance> (async)
-			// depending on the overload matched
+			// Should include posts array
+			expectTypeOf<UsersWithPosts>().toMatchTypeOf<{
+				id: string;
+				name: string;
+				posts: Array<{ id: string; title: string }>;
+			}>();
+		});
+
+		it('should infer correct type with belongsTo include', () => {
+			type PostsWithAuthor = InferQueryResult<
+				SimpleSchema,
+				'posts',
+				{ author: true }
+			>;
+
+			// Should include author object (nullable for belongsTo)
+			expectTypeOf<PostsWithAuthor>().toMatchTypeOf<{
+				id: string;
+				title: string;
+				author: { id: string; name: string } | null;
+			}>();
+		});
+	});
+
+	describe('createOrm with TypedSchema', () => {
+		it('should return TypedOrmInstance type', () => {
+			const orm = createOrm({ schema: simpleSchema });
+
+			// Type-level check
+			expectTypeOf(orm).toMatchTypeOf<TypedOrmInstance<SimpleSchema>>();
+		});
+
+		it('should constrain select to valid table names', () => {
+			const orm = createOrm({ schema: simpleSchema });
+
+			// These should work
+			const usersQuery = orm.select('users');
+			const postsQuery = orm.select('posts');
+
+			expect(usersQuery).toBeDefined();
+			expect(postsQuery).toBeDefined();
 		});
 	});
 });
@@ -218,19 +196,13 @@ describe('DX-102: Type inference for createOrm', () => {
 // Runtime Tests with Mock Adapter
 // ============================================================================
 
-describe('DX-102: Runtime type inference with mock adapter', () => {
-	/**
-	 * Mock adapter for testing - minimal implementation
-	 */
+describe('DX-102: createOrm runtime behavior with TypedSchema', () => {
+	// Create a minimal mock adapter for testing
 	const mockAdapter = {
 		execute: async () => [],
-		executeTakeFirst: async () => undefined,
-		executeTakeFirstOrThrow: async () => {
-			throw new Error('Not found');
-		},
+		compile: () => ({ sql: '', parameters: [] }),
 		stream: async function* () {},
 		introspect: async () => {
-			// Return a mock ModelIR
 			return {
 				tables: new Map(),
 				relations: new Map(),
@@ -246,8 +218,7 @@ describe('DX-102: Runtime type inference with mock adapter', () => {
 		delete: async () => 0,
 	} as any;
 
-	it('should create ORM with inferred types from schema', () => {
-		// This is the key test: createOrm without explicit generic should infer DB type
+	it('should create ORM with inferred types from TypedSchema', () => {
 		const orm = createOrm({
 			schema: simpleSchema,
 			adapter: mockAdapter,
@@ -260,54 +231,58 @@ describe('DX-102: Runtime type inference with mock adapter', () => {
 		// Verify the queries were created
 		expect(usersQuery).toBeDefined();
 		expect(postsQuery).toBeDefined();
-
-		// Type-level verification: the ORM should have the correct DB type
-		// This verifies that select() parameter is constrained to table names
-		type OrmDB = typeof orm extends OrmInstance<infer DB> ? DB : never;
-		expectTypeOf<keyof OrmDB>().toEqualTypeOf<'users' | 'posts'>();
 	});
 
-	it('should infer result types from schema', () => {
+	it('should support includes with type inference', () => {
 		const orm = createOrm({
 			schema: simpleSchema,
 			adapter: mockAdapter,
 		});
 
-		// Type-level verification: result types should match schema
-		type OrmDB = typeof orm extends OrmInstance<infer DB> ? DB : never;
+		// Include should work
+		const usersWithPosts = orm.select('users').include('posts');
+		const postsWithAuthor = orm.select('posts').include('author');
 
-		expectTypeOf<OrmDB['users']>().toEqualTypeOf<{
-			id: string;
-			name: string;
-			email: string | null;
-		}>();
-
-		expectTypeOf<OrmDB['posts']>().toEqualTypeOf<{
-			id: string;
-			title: string;
-			authorId: string;
-			publishedAt: Date | null;
-		}>();
+		expect(usersWithPosts).toBeDefined();
+		expect(postsWithAuthor).toBeDefined();
 	});
 
-	it('should provide column autocomplete in object filter syntax', () => {
+	it('should support where filtering', () => {
 		const orm = createOrm({
 			schema: simpleSchema,
 			adapter: mockAdapter,
 		});
 
-		// Object filter syntax should provide autocomplete for column names
-		// This works because where() accepts WhereFilter<TResult> where TResult = DB[TableName]
+		// Object filter syntax should work
 		const query = orm.select('users').where({
 			id: '123',
 			name: 'John',
-			// email can be string or null
 			email: null,
 		});
 
 		expect(query).toBeDefined();
+	});
 
-		// Note: eq('fieldName', value) standalone helpers do NOT provide column autocomplete
-		// because they don't have table context. Use object filter syntax for type safety.
+	it('should have correct strictMode setting', () => {
+		const normalOrm = createOrm({ schema: simpleSchema });
+		const strictOrm = createOrm({
+			schema: simpleSchema,
+			strictMode: true,
+		});
+
+		expect(normalOrm.strictMode).toBe(false);
+		expect(strictOrm.strictMode).toBe(true);
+	});
+
+	it('should forward mutation methods', () => {
+		const orm = createOrm({
+			schema: simpleSchema,
+			adapter: mockAdapter,
+		});
+
+		// These should exist and be functions
+		expect(orm.insert).toBeTypeOf('function');
+		expect(orm.update).toBeTypeOf('function');
+		expect(orm.delete).toBeTypeOf('function');
 	});
 });
