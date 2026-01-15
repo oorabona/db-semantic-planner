@@ -5,12 +5,13 @@
  */
 
 import type { DialectCapabilities } from './dialects/index.js';
-import type {
-	IncludeIntent,
-	QueryIntent,
-	RecursiveIntent,
-	RecursiveNodeIdExpr,
-	WhereIntent,
+import {
+	type IncludeIntent,
+	isRawExpression,
+	type QueryIntent,
+	type RecursiveIntent,
+	type RecursiveNodeIdExpr,
+	type WhereIntent,
 } from './intent-ast.js';
 import type { IncludeStrategy, ModelIR, RelationIR } from './model-ir.js';
 
@@ -75,7 +76,8 @@ export type PlanWarningCode =
 	| 'CIRCULAR_INCLUDE'
 	| 'MISSING_INDEX_HINT'
 	| 'DEEP_NESTING'
-	| 'INVALID_RECURSIVE_INCLUDE';
+	| 'INVALID_RECURSIVE_INCLUDE'
+	| 'RAW_SQL_USAGE';
 
 /**
  * A warning about the query plan
@@ -465,6 +467,9 @@ export function plan(
 	if (opts.enableCTEs) {
 		extractCTEs(state, opts.cteThreshold);
 	}
+
+	// Detect raw SQL usage and add security warnings
+	detectRawSqlUsage(intent, state);
 
 	const planningTimeMs = performance.now() - startTime;
 
@@ -1325,6 +1330,38 @@ function determineJoinType(
 
 	// Optional without filter -> LEFT to preserve parent rows
 	return 'left';
+}
+
+// ============================================================================
+// Raw SQL Detection (Security Observability)
+// ============================================================================
+
+/**
+ * Detects raw SQL expressions in the query intent and adds security warnings.
+ * This provides observability for potentially unsafe SQL usage.
+ */
+function detectRawSqlUsage(intent: QueryIntent, state: PlannerState): void {
+	// Check SELECT expressions for raw SQL
+	if (
+		intent.select &&
+		'type' in intent.select &&
+		intent.select.type === 'expressions'
+	) {
+		const expressions = intent.select.expressions;
+		if (expressions) {
+			for (const expr of expressions) {
+				if (isRawExpression(expr)) {
+					state.warnings.push({
+						code: 'RAW_SQL_USAGE',
+						message: `Raw SQL expression detected: "${expr.sql}" (alias: ${expr.as})`,
+						suggestion:
+							'Raw SQL bypasses type safety and SQL injection protection. ' +
+							'Ensure the SQL is safe and consider using built-in expression helpers instead.',
+					});
+				}
+			}
+		}
+	}
 }
 
 // ============================================================================

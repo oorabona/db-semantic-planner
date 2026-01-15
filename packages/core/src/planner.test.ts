@@ -1094,4 +1094,103 @@ describe('Semantic Planner', () => {
 			});
 		});
 	});
+
+	describe('RAW_SQL_USAGE warning', () => {
+		const simpleSchema = defineSchema({
+			users: {
+				id: 'number',
+				name: 'string',
+				email: 'string',
+			},
+		}).build();
+
+		it('should warn when raw SQL expression is used in select', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				select: {
+					type: 'expressions',
+					fields: ['id', 'name'],
+					expressions: [
+						{
+							kind: 'raw',
+							sql: 'NOW()',
+							as: 'current_time',
+						},
+					],
+				},
+			};
+
+			const report = plan(intent, simpleSchema);
+
+			const rawWarning = report.warnings.find(
+				(w) => w.code === 'RAW_SQL_USAGE',
+			);
+			expect(rawWarning).toBeDefined();
+			expect(rawWarning?.message).toContain('NOW()');
+			expect(rawWarning?.message).toContain('current_time');
+			expect(rawWarning?.suggestion).toContain('bypasses type safety');
+		});
+
+		it('should warn for multiple raw SQL expressions', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				select: {
+					type: 'expressions',
+					fields: ['id'],
+					expressions: [
+						{ kind: 'raw', sql: 'NOW()', as: 'time1' },
+						{ kind: 'raw', sql: 'CURRENT_USER', as: 'user' },
+					],
+				},
+			};
+
+			const report = plan(intent, simpleSchema);
+
+			const rawWarnings = report.warnings.filter(
+				(w) => w.code === 'RAW_SQL_USAGE',
+			);
+			expect(rawWarnings).toHaveLength(2);
+		});
+
+		it('should not warn when no raw SQL is used', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				select: {
+					type: 'expressions',
+					fields: ['id', 'name'],
+					expressions: [
+						{
+							kind: 'coalesce',
+							fields: ['name', 'email'],
+							as: 'display',
+						},
+					],
+				},
+			};
+
+			const report = plan(intent, simpleSchema);
+
+			const rawWarning = report.warnings.find(
+				(w) => w.code === 'RAW_SQL_USAGE',
+			);
+			expect(rawWarning).toBeUndefined();
+		});
+
+		it('should not warn for simple select without expressions', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+			};
+
+			const report = plan(intent, simpleSchema);
+
+			const rawWarning = report.warnings.find(
+				(w) => w.code === 'RAW_SQL_USAGE',
+			);
+			expect(rawWarning).toBeUndefined();
+		});
+	});
 });
