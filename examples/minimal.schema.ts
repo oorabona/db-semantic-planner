@@ -9,7 +9,7 @@
  *   pnpm dbsp generate kysely --schema ./examples/minimal.schema.ts
  */
 
-import { defineSchema } from '@db-semantic-planner/schema';
+import { defineSchema } from '@dbsp/schema';
 
 export default defineSchema({
 	users: {

@@ -74,13 +74,13 @@ importers:
       '@biomejs/biome':
         specifier: 'catalog:'
         version: 2.3.11
-      '@db-semantic-planner/adapter-kysely':
+      '@dbsp/adapter-kysely':
         specifier: workspace:*
         version: link:packages/adapter-kysely
-      '@db-semantic-planner/core':
+      '@dbsp/core':
         specifier: workspace:*
         version: link:packages/core
-      '@db-semantic-planner/schema':
+      '@dbsp/schema':
         specifier: workspace:*
         version: link:packages/schema
       '@testcontainers/postgresql':
@@ -110,7 +110,7 @@ importers:
 
   packages/adapter-kysely:
     dependencies:
-      '@db-semantic-planner/core':
+      '@dbsp/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -138,13 +138,13 @@ importers:
 
   packages/cli:
     dependencies:
-      '@db-semantic-planner/adapter-kysely':
+      '@dbsp/adapter-kysely':
         specifier: workspace:*
         version: link:../adapter-kysely
-      '@db-semantic-planner/core':
+      '@dbsp/core':
         specifier: workspace:*
         version: link:../core
-      '@db-semantic-planner/schema':
+      '@dbsp/schema':
         specifier: workspace:*
         version: link:../schema
       '@inkjs/ui':
@@ -209,13 +209,13 @@ importers:
 
   packages/mcp-server:
     dependencies:
-      '@db-semantic-planner/adapter-kysely':
+      '@dbsp/adapter-kysely':
         specifier: workspace:*
         version: link:../adapter-kysely
-      '@db-semantic-planner/core':
+      '@dbsp/core':
         specifier: workspace:*
         version: link:../core
-      '@db-semantic-planner/schema':
+      '@dbsp/schema':
         specifier: workspace:*
         version: link:../schema
       '@modelcontextprotocol/sdk':

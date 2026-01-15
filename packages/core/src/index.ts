@@ -1,5 +1,5 @@
 /**
- * @db-semantic-planner/core
+ * @dbsp/core
  * Schema definition and query planning for db-semantic-planner.
  */
 

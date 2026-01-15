@@ -20,7 +20,7 @@
  *   tags include posts where published = true and view_count > 100
  */
 
-import { defineSchema } from '@db-semantic-planner/schema';
+import { defineSchema } from '@dbsp/schema';
 
 export default defineSchema(
 	{

@@ -10,7 +10,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import type { ResolvedSchema } from '@db-semantic-planner/schema';
+import type { ResolvedSchema } from '@dbsp/schema';
 import { Command } from 'commander';
 import { generateKysely } from '../generators/kysely.js';
 import { generateManifest } from '../generators/manifest.js';

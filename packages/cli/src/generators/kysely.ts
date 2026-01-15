@@ -13,7 +13,7 @@ import type {
 	ColumnDefinition,
 	ResolvedSchema,
 	ColumnType as SchemaColumnType,
-} from '@db-semantic-planner/schema';
+} from '@dbsp/schema';
 
 export interface KyselyOutput {
 	/** Generated DB interface file content */

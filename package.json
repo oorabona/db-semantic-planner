@@ -18,9 +18,9 @@
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",
 		"tsx": "catalog:",
-		"@db-semantic-planner/core": "workspace:*",
-		"@db-semantic-planner/adapter-kysely": "workspace:*",
-		"@db-semantic-planner/schema": "workspace:*",
+		"@dbsp/core": "workspace:*",
+		"@dbsp/adapter-kysely": "workspace:*",
+		"@dbsp/schema": "workspace:*",
 		"@testcontainers/postgresql": "catalog:",
 		"@types/node": "catalog:",
 		"@types/pg": "catalog:",

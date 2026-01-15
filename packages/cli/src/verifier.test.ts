@@ -2,7 +2,7 @@
  * Tests for ARCH-002 Block 7: Schema Verifier
  */
 
-import { defineSchema } from '@db-semantic-planner/schema';
+import { defineSchema } from '@dbsp/schema';
 import { describe, expect, it } from 'vitest';
 import { type DbTableInfo, formatVerifyResult, verify } from './verifier.js';
 

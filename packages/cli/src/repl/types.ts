@@ -3,7 +3,7 @@ import type React from 'react';
  * DX-030: REPL Types
  */
 
-import type { ResolvedSchema } from '@db-semantic-planner/schema';
+import type { ResolvedSchema } from '@dbsp/schema';
 
 /**
  * REPL Configuration passed from CLI command

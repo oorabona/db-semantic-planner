@@ -9,7 +9,7 @@
  *
  * @example
  * ```typescript
- * import { createOrm } from '@db-semantic-planner/core';
+ * import { createOrm } from '@dbsp/core';
  *
  * // Object syntax (new)
  * orm.select('users').where({ status: 'active', age: { $gte: 18 } })

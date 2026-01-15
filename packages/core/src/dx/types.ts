@@ -532,7 +532,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 *
 	 * @example
 	 * ```typescript
-	 * import { coalesce, raw } from '@db-semantic-planner/core';
+	 * import { coalesce, raw } from '@dbsp/core';
 	 *
 	 * // Simple fields
 	 * orm.select('users').columns(['id', 'name']).all();
@@ -560,7 +560,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 *
 	 * @example
 	 * ```typescript
-	 * import { distinct } from '@db-semantic-planner/core';
+	 * import { distinct } from '@dbsp/core';
 	 *
 	 * // COUNT(*)
 	 * orm.select('users').count().execute();

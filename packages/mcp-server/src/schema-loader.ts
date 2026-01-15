@@ -8,7 +8,7 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { isAbsolute, normalize, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { ResolvedSchema } from '@db-semantic-planner/schema';
+import type { ResolvedSchema } from '@dbsp/schema';
 
 /**
  * Options for schema loading with security constraints.

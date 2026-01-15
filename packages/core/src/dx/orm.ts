@@ -225,7 +225,7 @@ export interface OrmOptionsWithTypedSchema<S extends TypedSchema> {
  *
  * @example With TypedSchema (recommended)
  * ```typescript
- * import { hasMany, belongsTo, TypedSchema } from '@db-semantic-planner/core';
+ * import { hasMany, belongsTo, TypedSchema } from '@dbsp/core';
  *
  * const schema = {
  *   tables: {

@@ -7,7 +7,7 @@
  *
  * @example
  * ```typescript
- * import { eq, and, gt, like } from '@db-semantic-planner/core';
+ * import { eq, and, gt, like } from '@dbsp/core';
  *
  * // Simple equality
  * orm.select('users').where(eq('status', 'active'))
@@ -65,7 +65,7 @@ export interface DistinctField {
  *
  * @example
  * ```typescript
- * import { distinct } from '@db-semantic-planner/core';
+ * import { distinct } from '@dbsp/core';
  *
  * // COUNT(DISTINCT customerId)
  * orm.select('orders').count(distinct('customerId')).execute();

@@ -5,7 +5,7 @@
  * Uses MockAdapter for compile-only mode (no database required).
  */
 
-import { createMockAdapter } from '@db-semantic-planner/adapter-kysely';
+import { createMockAdapter } from '@dbsp/adapter-kysely';
 import {
 	and,
 	assertResolvedSchemaToGeneratedSchema,
@@ -25,8 +25,8 @@ import {
 	lte,
 	neq,
 	type WhereIntent,
-} from '@db-semantic-planner/core';
-import type { ResolvedSchema } from '@db-semantic-planner/schema';
+} from '@dbsp/core';
+import type { ResolvedSchema } from '@dbsp/schema';
 import type {
 	ParsedAggregate,
 	ParsedInclude,

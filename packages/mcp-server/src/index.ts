@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * @db-semantic-planner/mcp-server
+ * @dbsp/mcp-server
  *
  * MCP Server entry point for db-semantic-planner.
  *
@@ -76,7 +76,7 @@ function parseArgs(args: string[]): CliArgs {
  */
 function printHelp(): void {
 	console.log(`
-@db-semantic-planner/mcp-server
+@dbsp/mcp-server
 
 MCP Server exposing db-semantic-planner schema and query planning capabilities.
 
@@ -106,7 +106,7 @@ SCHEMA FILE FORMAT:
   The schema file must export a ResolvedSchema object:
 
     // dbsp.schema.ts
-    import { defineSchema, table, column, relation } from '@db-semantic-planner/schema';
+    import { defineSchema, table, column, relation } from '@dbsp/schema';
 
     export const schema = defineSchema({
       tables: {
@@ -128,7 +128,7 @@ MCP CONFIGURATION:
       "mcpServers": {
         "dbsp": {
           "command": "npx",
-          "args": ["@db-semantic-planner/mcp-server", "--schema", "./dbsp.schema.ts"]
+          "args": ["@dbsp/mcp-server", "--schema", "./dbsp.schema.ts"]
         }
       }
     }
