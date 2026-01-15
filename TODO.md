@@ -1466,6 +1466,28 @@ categories include all parent      # All ancestors via CTE
 
 ---
 
+### DEPS-001: React 19 + Ink 6.6.0 Migration ✅ (2026-01-15)
+
+**Scope:** cli (dependencies)
+**Breaking:** Requires Node.js 20+
+
+**Changes:**
+- react: 18.3.1 → 19.2.3
+- ink: 5.2.1 → 6.6.0
+- @types/react: 18.3.20 → 19.2.8
+
+**Simplifications:**
+- Removed `useStdin` workaround for Home/End keys (now native in Ink 6.6.0 via `key.home`/`key.end`)
+- EnhancedTextInput.tsx: 342 → 280 lines (-18%)
+
+**Files:**
+- `pnpm-workspace.yaml` - Updated catalog versions
+- `packages/cli/src/repl/components/EnhancedTextInput.tsx` - Simplified keyboard handling
+
+**Tests:** All 1,504 tests passing
+
+---
+
 ### Documentation (DX critical)
 
 - [ ] **DOCS-001**: User documentation (Getting Started, API Guide)

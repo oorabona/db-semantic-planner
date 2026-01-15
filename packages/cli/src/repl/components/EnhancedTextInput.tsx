@@ -11,8 +11,8 @@
  * - Ctrl+Right / Alt+F: Move word forward
  */
 
-import { Box, Text, useInput, useStdin } from 'ink';
-import React, { useEffect, useRef, useState } from 'react';
+import { Box, Text, useInput } from 'ink';
+import React, { useEffect, useState } from 'react';
 
 interface EnhancedTextInputProps {
 	/** Current value (controlled) */
@@ -111,53 +111,6 @@ export function EnhancedTextInput({
 		onChange?.(newValue);
 	};
 
-	// Use raw stdin to capture Home/End sequences that Ink's useInput misses
-	const { stdin } = useStdin();
-	const stdinBufferRef = useRef('');
-
-	useEffect(() => {
-		if (!stdin || isDisabled || !isFocused) return;
-
-		const handleData = (data: Buffer) => {
-			const str = data.toString();
-			stdinBufferRef.current += str;
-
-			// Check for Home sequences
-			if (
-				stdinBufferRef.current.includes('\x1b[H') ||
-				stdinBufferRef.current.includes('\x1b[1~') ||
-				stdinBufferRef.current.includes('\x1bOH') ||
-				stdinBufferRef.current.includes('\x1b[7~')
-			) {
-				setCursor(0);
-				stdinBufferRef.current = '';
-				return;
-			}
-
-			// Check for End sequences
-			if (
-				stdinBufferRef.current.includes('\x1b[F') ||
-				stdinBufferRef.current.includes('\x1b[4~') ||
-				stdinBufferRef.current.includes('\x1bOF') ||
-				stdinBufferRef.current.includes('\x1b[8~')
-			) {
-				setCursor(value.length);
-				stdinBufferRef.current = '';
-				return;
-			}
-
-			// Clear buffer after a short delay if no match (avoid memory buildup)
-			setTimeout(() => {
-				stdinBufferRef.current = '';
-			}, 50);
-		};
-
-		stdin.on('data', handleData);
-		return () => {
-			stdin.off('data', handleData);
-		};
-	}, [stdin, isDisabled, isFocused, value.length]);
-
 	useInput(
 		(input, key) => {
 			if (isDisabled || !isFocused) return;
@@ -175,29 +128,14 @@ export function EnhancedTextInput({
 
 			// === CURSOR MOVEMENT ===
 
-			// Home key - move to beginning
-			// Detect via escape sequences: \x1b[H, \x1b[1~, \x1bOH, \x1b[7~
-			// or via extended key object (ink may expose it at runtime)
-			if (
-				input === '\x1b[H' ||
-				input === '\x1b[1~' ||
-				input === '\x1bOH' ||
-				input === '\x1b[7~' ||
-				(key as Record<string, boolean>).home
-			) {
+			// Home key - move to beginning (native in Ink 6.6.0+)
+			if (key.home) {
 				setCursor(0);
 				return;
 			}
 
-			// End key - move to end
-			// Detect via escape sequences: \x1b[F, \x1b[4~, \x1bOF, \x1b[8~
-			if (
-				input === '\x1b[F' ||
-				input === '\x1b[4~' ||
-				input === '\x1bOF' ||
-				input === '\x1b[8~' ||
-				(key as Record<string, boolean>).end
-			) {
+			// End key - move to end (native in Ink 6.6.0+)
+			if (key.end) {
 				setCursor(value.length);
 				return;
 			}
