@@ -110,7 +110,7 @@ export {
 	type WhereFilter,
 } from './object-filter.js';
 // Factory
-export { createOrm } from './orm.js';
+export { createOrm, type OrmOptionsWithTypedSchema } from './orm.js';
 // QueryExecutor - handles query execution via adapter
 export {
 	type CompileOptions as ExecutorCompileOptions,
@@ -203,3 +203,47 @@ export type {
 } from './types.js';
 // Type guard
 export { isExpressionSpec } from './types.js';
+// DX-110: Prisma-like Type Inference
+export {
+	// Relation helper functions for TypedSchema API
+	belongsTo,
+	belongsToMany,
+	hasMany,
+	hasOne,
+} from './prisma-types.js';
+export type {
+	// Relation definitions
+	AnyRelationDef,
+	BelongsToDef,
+	BelongsToManyDef,
+	HasManyDef,
+	HasOneDef,
+	RelationDef,
+	RelationKind,
+	// Schema types
+	TypedSchema,
+	TypedTableDef,
+	// Inference utilities
+	ColumnNames,
+	ColumnTypeToTS as PrismaColumnTypeToTS,
+	InferColumnType,
+	InferColumns,
+	InferQueryResult,
+	InferRelationNames,
+	InferRelationType,
+	InferTargetRowType,
+	IsToManyRelation,
+	RelationTarget,
+	TableNames,
+	// Include types
+	IncludeSpec,
+	NestedIncludeSpec,
+	ResolveIncludedRelations,
+} from './prisma-types.js';
+// DX-110: Type-Safe Query Builder
+export type {
+	IncludeState,
+	MergeInclude,
+	TypedOrmInstance,
+	TypedQueryBuilder,
+} from './typed-query-builder.js';

@@ -44,10 +44,15 @@ import {
 import {
 	buildModelFromSchema,
 	type GeneratedSchema,
-	type GeneratedTable,
-	type InferDBFromSchema,
-	normalizeSchema,
+	type GeneratedColumnType,
 } from './schema-bridge.js';
+import type {
+	AnyRelationDef,
+	TableNames,
+	TypedSchema,
+	TypedTableDef,
+} from './prisma-types.js';
+import type { TypedOrmInstance, TypedQueryBuilder } from './typed-query-builder.js';
 import {
 	type AggregateOptions,
 	type ColumnSpec,
@@ -79,6 +84,135 @@ import {
 	validateRecursiveInclude,
 } from './intent-builder.js';
 
+// ============================================================================
+// TypedSchema Conversion (DX-110)
+// ============================================================================
+
+/**
+ * Convert TypedSchema to GeneratedSchema format, then to ModelIR.
+ * This reuses the existing, well-tested buildModelFromSchema function.
+ */
+function typedSchemaToModelIR(schema: TypedSchema): ModelIR {
+	// Convert TypedSchema to GeneratedSchema format
+	const generatedTables: GeneratedSchema['tables'] = {};
+	const generatedRelations: GeneratedSchema['relations'] = {};
+
+	for (const [tableName, tableDef] of Object.entries(schema.tables)) {
+		const typedTable = tableDef as TypedTableDef;
+
+		// Convert columns - use 'as const' to preserve literal types
+		const tableColumns: Record<
+			string,
+			{ type: GeneratedColumnType; primaryKey?: true; nullable?: true }
+		> = {};
+		for (const [colName, colDef] of Object.entries(typedTable.columns)) {
+			const col = colDef as {
+				type: string;
+				primaryKey?: boolean;
+				nullable?: boolean;
+			};
+			tableColumns[colName] = {
+				type: col.type as GeneratedColumnType,
+				...(col.primaryKey === true && { primaryKey: true as const }),
+				...(col.nullable === true && { nullable: true as const }),
+			};
+		}
+		generatedTables[tableName] = tableColumns;
+
+		// Convert relations
+		if (typedTable.relations) {
+			for (const [relationName, relationDef] of Object.entries(
+				typedTable.relations,
+			)) {
+				const rel = relationDef as AnyRelationDef;
+				const qualifiedName = `${tableName}.${relationName}`;
+
+				// Map TypedSchema relation kind to GeneratedRelation
+				switch (rel.kind) {
+					case 'hasOne':
+					case 'hasMany':
+						// Both hasOne and hasMany use GeneratedHasMany (FK is on target table)
+						// Default foreignKey: {sourceTable}Id
+						generatedRelations[qualifiedName] = {
+							kind: 'hasMany' as const,
+							target: rel.target,
+							foreignKey:
+								rel.foreignKey ??
+								`${tableName.replace(/s$/, '')}Id`,
+						};
+						break;
+					case 'belongsTo':
+						// FK is on this table pointing to target
+						// Default foreignKey: {targetTable}Id
+						generatedRelations[qualifiedName] = {
+							kind: 'belongsTo' as const,
+							target: rel.target,
+							foreignKey:
+								rel.foreignKey ?? `${rel.target.replace(/s$/, '')}Id`,
+						};
+						break;
+					case 'belongsToMany':
+						generatedRelations[qualifiedName] = {
+							kind: 'manyToMany' as const,
+							target: rel.target,
+							through: rel.through ?? `${tableName}_${rel.target}`,
+							sourceFk:
+								rel.foreignKey ??
+								`${tableName.replace(/s$/, '')}Id`,
+							targetFk:
+								rel.otherKey ?? `${rel.target.replace(/s$/, '')}Id`,
+						};
+						break;
+				}
+			}
+		}
+	}
+
+	// Create GeneratedSchema and convert to ModelIR
+	const generatedSchema: GeneratedSchema = {
+		tables: generatedTables,
+		relations: generatedRelations,
+		hints: {},
+		conventions: {
+			fkPattern: '{singular}Id',
+			pluralize: true,
+			timestamps: [],
+		},
+	};
+
+	return buildModelFromSchema(generatedSchema);
+}
+
+/**
+ * Options for createOrm with a TypedSchema (DX-110).
+ */
+export interface OrmOptionsWithTypedSchema<S extends TypedSchema> {
+	/**
+	 * TypedSchema with per-table relations for Prisma-like type inference.
+	 */
+	schema: S;
+	/**
+	 * Optional database adapter.
+	 */
+	adapter?: Adapter<unknown>;
+	/**
+	 * Enable strict mode by default.
+	 */
+	strictMode?: boolean;
+	/**
+	 * Default relation hints.
+	 */
+	relationHints?: RelationHints;
+	/**
+	 * Default include strategy.
+	 */
+	defaultIncludeStrategy?: IncludeStrategy;
+	/**
+	 * Optional dialect capabilities.
+	 */
+	dialectCapabilities?: DialectCapabilities;
+}
+
 /**
  * Create an ORM instance with the specified configuration.
  *
@@ -89,27 +223,35 @@ import {
  * @param options - Configuration options including model and strictMode
  * @returns An ORM instance for building and planning queries
  *
- * @example With generated schema (codegen-first, recommended)
+ * @example With TypedSchema (recommended)
  * ```typescript
+ * import { hasMany, belongsTo, TypedSchema } from '@db-semantic-planner/core';
+ *
  * const schema = {
  *   tables: {
- *     users: { id: { type: 'uuid', primaryKey: true }, name: { type: 'string' } },
- *     posts: { id: { type: 'uuid', primaryKey: true }, title: { type: 'string' } },
+ *     users: {
+ *       columns: { id: { type: 'uuid', primaryKey: true }, name: { type: 'string' } },
+ *       relations: { posts: hasMany('posts', { foreignKey: 'authorId' }) },
+ *     },
+ *     posts: {
+ *       columns: { id: { type: 'uuid', primaryKey: true }, title: { type: 'string' }, authorId: { type: 'uuid' } },
+ *       relations: { author: belongsTo('users', { foreignKey: 'authorId' }) },
+ *     },
  *   },
- *   relations: {},
- *   hints: {},
- *   conventions: { fkPattern: '{singular}Id', pluralize: true, timestamps: [] },
- * } as const satisfies GeneratedSchema;
+ * } as const satisfies TypedSchema;
  *
  * const orm = createOrm({ schema, adapter });
  *
  * // Table names autocomplete, results are typed!
  * const users = await orm.select('users').all();
  * // users: { id: string; name: string }[]
- * orm.select('invalid'); // ← TypeScript error: 'invalid' not in 'users' | 'posts'
+ *
+ * // Include relations with type inference
+ * const usersWithPosts = await orm.select('users').include('posts').all();
+ * // usersWithPosts: { id: string; name: string; posts: { id: string; title: string }[] }[]
  * ```
  *
- * @example With explicit model and typed schema (sync)
+ * @example With explicit model (sync)
  * ```typescript
  * interface Database {
  *   users: { id: number; name: string };
@@ -137,51 +279,73 @@ import {
 export function createOrm<DB = Record<string, unknown>>(
 	options: OrmOptionsWithModel<DB>,
 ): OrmInstance<DB>;
-// Overload 2: With generated schema (sync), DB is inferred from schema
-export function createOrm<
-	TTables extends Record<string, GeneratedTable>,
-	TSchema extends GeneratedSchema<TTables>,
->(
-	options: OrmOptionsWithSchema<TSchema, InferDBFromSchema<TSchema>>,
-): OrmInstance<InferDBFromSchema<TSchema>>;
+// Overload 2: With TypedSchema (DX-110, Prisma-like inference)
+export function createOrm<S extends TypedSchema>(
+	options: OrmOptionsWithTypedSchema<S>,
+): TypedOrmInstance<S>;
 // Overload 3: With adapter only (async introspection)
 export function createOrm<DB = Record<string, unknown>>(
 	options: OrmOptionsWithAdapter<DB>,
 ): Promise<OrmInstance<DB>>;
 // Implementation signature
-export function createOrm<DB = Record<string, unknown>>(
+export function createOrm<DB = Record<string, unknown>, S extends TypedSchema = TypedSchema>(
 	options:
 		| OrmOptionsWithModel<DB>
-		| OrmOptionsWithSchema<GeneratedSchema, DB>
+		| OrmOptionsWithTypedSchema<S>
 		| OrmOptionsWithAdapter<DB>,
-): OrmInstance<DB> | Promise<OrmInstance<DB>> {
-	const {
-		model,
-		strictMode = false,
-		relationHints = {},
-		adapter,
-		defaultIncludeStrategy,
-		dialectCapabilities,
-	} = options;
+): OrmInstance<DB> | Promise<OrmInstance<DB>> | TypedOrmInstance<S> {
+	// Extract common options
+	const strictMode = options.strictMode ?? false;
+	const relationHints = options.relationHints ?? {};
+	const adapter = options.adapter;
+	const defaultIncludeStrategy = options.defaultIncludeStrategy;
+	const dialectCapabilities = options.dialectCapabilities;
 
-	// Extract schema from options (need to cast due to union type)
-	const schema = (options as OrmOptionsWithSchema<GeneratedSchema, DB>).schema;
+	// Extract schema if provided (DX-110: TypedSchema)
+	const typedSchema = (options as OrmOptionsWithTypedSchema<TypedSchema>).schema;
+	// Extract model if provided
+	const model = (options as OrmOptionsWithModel<DB>).model;
 
-	// If schema is provided, normalize it (handles both GeneratedSchema and ResolvedSchema)
-	// and convert to model. This enables seamless use of either schema type.
-	if (schema) {
-		// normalizeSchema auto-detects and converts ResolvedSchema to GeneratedSchema if needed
-		const normalizedSchema = normalizeSchema(schema);
-		const convertedModel = buildModelFromSchema(normalizedSchema);
-		return createOrmInstance(
+	// If TypedSchema is provided (DX-110), convert and return TypedOrmInstance
+	if (typedSchema) {
+		const convertedModel = typedSchemaToModelIR(typedSchema);
+		const baseOrm = createOrmInstance(
 			convertedModel,
 			strictMode,
 			relationHints,
 			adapter,
-			undefined, // schemaName
+			undefined,
 			defaultIncludeStrategy,
 			dialectCapabilities,
 		);
+
+		// Return type-safe wrapper
+		return {
+			select<T extends TableNames<typeof typedSchema>>(
+				tableName: T,
+			): TypedQueryBuilder<typeof typedSchema, T, undefined> {
+				// tableName is a string at runtime, cast through unknown to bridge untyped baseOrm
+				return baseOrm.select(
+					tableName as unknown as never,
+				) as unknown as TypedQueryBuilder<typeof typedSchema, T, undefined>;
+			},
+			get strictMode(): boolean {
+				return baseOrm.strictMode;
+			},
+			// Forward mutation methods
+			forTenant: (schemaName: string) => baseOrm.forTenant(schemaName),
+			insert: (table: string) => baseOrm.insert(table),
+			update: (table: string) => baseOrm.update(table),
+			delete: (table: string) => baseOrm.delete(table),
+			updateAll: (table: string) => baseOrm.updateAll(table),
+			deleteAll: (table: string) => baseOrm.deleteAll(table),
+			upsert: (table: string) => baseOrm.upsert(table),
+			transaction: baseOrm.transaction.bind(baseOrm),
+			raw: baseOrm.raw.bind(baseOrm),
+			listAncestors: baseOrm.listAncestors.bind(baseOrm),
+			listDescendants: baseOrm.listDescendants.bind(baseOrm),
+		// biome-ignore lint/suspicious/noExplicitAny: TypedOrmInstance is compatible
+		} as any;
 	}
 
 	// If model is provided, create synchronously

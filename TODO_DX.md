@@ -453,4 +453,4 @@ for (const warning of model.warnings) {
 - [ ] CLI `dbsp init` wizard (like Prisma)
 - [ ] Single unified export: `import { createOrm, eq, createMockAdapter } from '@db-semantic-planner'`
 - [x] "Common Patterns" documentation section (DONE - added to README.md)
-- [ ] Type-safe schema definition with full inference chain
+- [x] ✅ Type-safe schema definition with full inference chain (DX-110) (2026-01-15)
