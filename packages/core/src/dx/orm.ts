@@ -73,6 +73,11 @@ import {
 	type SortDirection,
 	type StreamOptions,
 } from './types.js';
+import {
+	includeOptionsToIntent,
+	nestedIncludeToIntent,
+	validateRecursiveInclude,
+} from './intent-builder.js';
 
 /**
  * Create an ORM instance with the specified configuration.
@@ -525,136 +530,6 @@ function createOrmInstance<DB = Record<string, unknown>>(
 }
 
 /**
- * Convert IncludeOptions to IncludeIntent.
- * Handles exactOptionalPropertyTypes by only including defined properties.
- */
-function includeOptionsToIntent(
-	relation: string,
-	options?: IncludeOptions,
-): IncludeIntent {
-	if (!options) {
-		return { relation };
-	}
-
-	const intent: IncludeIntent = { relation };
-
-	if (options.via !== undefined) {
-		(intent as { via: string }).via = options.via;
-	}
-	if (options.where !== undefined) {
-		(intent as { where: WhereIntent }).where = options.where;
-	}
-	if (options.select !== undefined) {
-		(intent as { select: SelectIntent }).select = options.select;
-	}
-	if (options.include !== undefined && options.include.length > 0) {
-		(intent as { include: readonly IncludeIntent[] }).include =
-			options.include.map((nested) => nestedIncludeToIntent(nested));
-	}
-
-	return intent;
-}
-
-/**
- * Convert NestedInclude to IncludeIntent.
- */
-function nestedIncludeToIntent(nested: NestedInclude): IncludeIntent {
-	const intent: IncludeIntent = { relation: nested.relation };
-
-	if (nested.via !== undefined) {
-		(intent as { via: string }).via = nested.via;
-	}
-	if (nested.where !== undefined) {
-		(intent as { where: WhereIntent }).where = nested.where;
-	}
-	if (nested.select !== undefined) {
-		(intent as { select: SelectIntent }).select = nested.select;
-	}
-	if (nested.include !== undefined && nested.include.length > 0) {
-		(intent as { include: readonly IncludeIntent[] }).include =
-			nested.include.map((n) => nestedIncludeToIntent(n));
-	}
-
-	return intent;
-}
-
-/**
- * Validate recursive include options.
- * Throws InvalidOperationError if:
- * - Relation is not self-referential (source !== target)
- * - Direction is missing
- * - Direction conflicts with relation cardinality
- *
- * @param model - The model IR
- * @param sourceTable - The source table name
- * @param relationName - The relation name
- * @param options - The recursive include options
- */
-function validateRecursiveInclude(
-	model: ModelIR,
-	sourceTable: string,
-	relationName: string,
-	options: RecursiveIncludeOptions,
-): void {
-	// Get the relation from the model
-	const qualifiedName = `${sourceTable}.${relationName}`;
-	const relation = model.getRelation(qualifiedName);
-
-	if (!relation) {
-		// Let the planner handle the "relation not found" error
-		return;
-	}
-
-	// Check if direction is provided (INV-2)
-	if (!options.direction) {
-		throw new InvalidOperationError(
-			'recursive include',
-			`'direction' is required when using recursive: true. ` +
-				`Use 'ancestors' for parent traversal or 'descendants' for children traversal.`,
-		);
-	}
-
-	// Check if relation is self-referential (INV-1, PRE-1)
-	if (relation.source !== relation.target) {
-		throw new InvalidOperationError(
-			'recursive include',
-			`Recursive include requires a self-referential relation. ` +
-				`Relation '${relationName}' connects '${relation.source}' to '${relation.target}', ` +
-				`but both must be the same table for recursive traversal.`,
-		);
-	}
-
-	// Check direction vs relation type (PRE-2, PRE-3, ERR-3)
-	// ancestors requires belongsTo/hasOne (to-one), descendants requires hasMany (to-many)
-	const { direction } = options;
-	const relType = relation.type;
-
-	if (direction === 'ancestors') {
-		// ancestors traversal: follow the "parent" direction (N:1 or 1:1)
-		// The relation should be belongsTo or hasOne (e.g., category -> parent category)
-		if (relType === 'hasMany' || relType === 'belongsToMany') {
-			throw new InvalidOperationError(
-				'recursive include',
-				`Direction 'ancestors' requires a to-one relation (belongsTo or hasOne). ` +
-					`Relation '${relationName}' has type '${relType}'. ` +
-					`Use 'descendants' for hasMany/belongsToMany relations.`,
-			);
-		}
-	} else if (direction === 'descendants') {
-		// descendants traversal: follow the "children" direction (1:N)
-		// The relation should be hasMany (e.g., category -> child categories)
-		if (relType === 'belongsTo' || relType === 'hasOne') {
-			throw new InvalidOperationError(
-				'recursive include',
-				`Direction 'descendants' requires a to-many relation (hasMany). ` +
-					`Relation '${relationName}' has type '${relType}'. ` +
-					`Use 'ancestors' for belongsTo/hasOne relations.`,
-			);
-		}
-	}
-}
-
-/**
  * Find a self-referential relation on a table that matches the desired direction.
  *
  * @param model - The model IR
@@ -791,12 +666,10 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	): QueryBuilder<TResult> {
 		const builder = this.clone();
 
-		// Handle recursive includes separately - they require CTE execution
+		// Validate recursive includes (DX-017)
 		if (isRecursiveIncludeOptions(options)) {
 			validateRecursiveInclude(this.model, this.from, relation, options);
-			// Store for separate CTE processing during execution
-			builder.recursiveIncludes.push({ relation, options });
-			return builder;
+			// DX-017: No longer store separately - let includeOptionsToIntent handle conversion
 		}
 
 		// Support dot notation for nested includes: 'posts.comments.author'

@@ -11,6 +11,7 @@ import type {
 	AggregateIntent,
 	ExpressionIntent,
 	IncludeIntent,
+	IncludeRecursiveOptions,
 	OrderByIntent,
 	QueryIntent,
 	SelectAggregateIntent,
@@ -63,9 +64,9 @@ export function isRecursiveIncludeOptions(
  * Convert IncludeOptions to IncludeIntent.
  * Handles exactOptionalPropertyTypes by only including defined properties.
  */
-function includeOptionsToIntent(
+export function includeOptionsToIntent(
 	relation: string,
-	options?: IncludeOptions,
+	options?: IncludeOptionsWithRecursive,
 ): IncludeIntent {
 	if (!options) {
 		return { relation };
@@ -87,13 +88,27 @@ function includeOptionsToIntent(
 			options.include.map((nested) => nestedIncludeToIntent(nested));
 	}
 
+	// Handle recursive options (DX-017)
+	if (isRecursiveIncludeOptions(options)) {
+		const recursiveOpts: IncludeRecursiveOptions = {};
+		// Only set maxDepth if defined
+		if (options.maxDepth !== undefined) {
+			(recursiveOpts as { maxDepth: number }).maxDepth = options.maxDepth;
+		}
+		// Convert includeDepth to track.depth
+		if (options.includeDepth) {
+			(recursiveOpts as { track: { depth: boolean } }).track = { depth: true };
+		}
+		(intent as { recursive: IncludeRecursiveOptions }).recursive = recursiveOpts;
+	}
+
 	return intent;
 }
 
 /**
  * Convert NestedInclude to IncludeIntent.
  */
-function nestedIncludeToIntent(nested: NestedInclude): IncludeIntent {
+export function nestedIncludeToIntent(nested: NestedInclude): IncludeIntent {
 	const intent: IncludeIntent = { relation: nested.relation };
 
 	if (nested.via !== undefined) {
@@ -122,7 +137,7 @@ function nestedIncludeToIntent(nested: NestedInclude): IncludeIntent {
  */
 function parseDotNotationInclude(
 	path: string,
-	options?: IncludeOptions,
+	options?: IncludeOptionsWithRecursive,
 ): IncludeIntent {
 	const parts = path.split('.');
 	if (parts.length === 0) {
@@ -312,12 +327,11 @@ export class IntentBuilder<TResult = unknown> {
 	 * Add an include to the builder.
 	 */
 	addInclude(relation: string, options?: IncludeOptionsWithRecursive): void {
-		// Handle recursive includes separately - they require CTE execution
+		// Validate recursive includes (self-referential relations)
 		if (isRecursiveIncludeOptions(options)) {
 			validateRecursiveInclude(this.model, this.state.from, relation, options);
-			// Store for separate CTE processing during execution
-			this.state.recursiveIncludes.push({ relation, options });
-			return;
+			// Note: recursive options are now converted to IncludeIntent.recursive
+			// by includeOptionsToIntent, no longer stored separately
 		}
 
 		// Support dot notation for nested includes: 'posts.comments.author'
