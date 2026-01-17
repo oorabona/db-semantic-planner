@@ -10,8 +10,15 @@ import {
 	type StartedPostgreSqlContainer,
 } from '@testcontainers/postgresql';
 
-// Configure Testcontainers for Podman/WSL2 environments
-process.env.TESTCONTAINERS_RYUK_DISABLED = 'true';
+// Testcontainers requires DOCKER_HOST to be set for Podman environments
+// Add to your ~/.bashrc: export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"
+if (!process.env.DOCKER_HOST) {
+	throw new Error(
+		'DOCKER_HOST is not set. For Podman, add to ~/.bashrc:\n' +
+		'  export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"'
+	);
+}
+
 // Use host networking for better Podman compatibility
 process.env.TESTCONTAINERS_HOST_OVERRIDE = 'localhost';
 
