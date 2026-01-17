@@ -139,7 +139,7 @@ export interface CompileResultWithIncludes<T = unknown> {
  * Metadata for a query dump.
  */
 export interface DumpMeta {
-	readonly tenant?: string;
+	readonly schema?: string;
 	readonly queryName?: string;
 	readonly correlationId?: string;
 }

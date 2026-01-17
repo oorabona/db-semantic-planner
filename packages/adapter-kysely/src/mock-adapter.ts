@@ -428,7 +428,7 @@ export class MockAdapter implements Adapter<unknown> {
 			sql: query.sql,
 			params: query.parameters as readonly unknown[],
 			meta: {
-				...(this._schemaName !== undefined && { tenant: this._schemaName }),
+				...(this._schemaName !== undefined && { schema: this._schemaName }),
 				...meta,
 			},
 		};

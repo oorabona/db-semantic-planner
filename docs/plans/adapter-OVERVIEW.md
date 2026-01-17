@@ -15,7 +15,7 @@ The **adapter** scope (`packages/adapter-kysely`) bridges abstract query plans t
 
 1. **Compiler** - Transform PlanReport into SQL + parameters
 2. **Engine** - Execute queries via Kysely
-3. **Multi-tenant** - Runtime schema switching (`orm.forTenant()`)
+3. **Multi-tenant** - Runtime schema switching (`orm.withSchema()`)
 4. **Observability** - `dump()` API for debugging
 
 ## Architecture Constraint
@@ -79,7 +79,7 @@ interface OrmContext {
    * Create a tenant-scoped context.
    * Under the hood: Kysely db.withSchema(schemaName)
    */
-  forTenant(schemaName: string): TenantOrmContext;
+  withSchema(schemaName: string): TenantOrmContext;
 
   /**
    * Start a query on a model.
@@ -146,14 +146,14 @@ interface QueryBuilder<T> {
 
 ## Multi-tenant API
 
-**Chosen pattern:** `orm.forTenant(schemaName)`
+**Chosen pattern:** `orm.withSchema(schemaName)`
 
 ```typescript
 // Create ORM instance
 const orm = createOrm({ kysely: db, model: schema });
 
 // Get tenant-scoped context
-const tenantOrm = orm.forTenant('tenant_acme');
+const tenantOrm = orm.withSchema('tenant_acme');
 
 // All queries use that schema
 const users = await tenantOrm.query(User).findMany();
@@ -163,7 +163,7 @@ const users = await tenantOrm.query(User).findMany();
 const dump = tenantOrm.query(User).where(eq('active', true)).dump();
 console.log(dump.sql);    // SELECT * FROM "tenant_acme"."users" WHERE "active" = $1
 console.log(dump.params); // [true]
-console.log(dump.meta?.tenant); // 'tenant_acme'
+console.log(dump.meta?.schema); // 'tenant_acme'
 ```
 
 ### Security Requirements
@@ -197,7 +197,7 @@ function validateSchemaName(name: string): void {
 | `plan` | Semantic Planner | Decisions + reasoning + warnings |
 | `sql` | Kysely `CompiledQuery.sql` | Exact SQL that would execute |
 | `params` | Kysely `CompiledQuery.parameters` | Bound parameter values |
-| `meta.tenant` | forTenant() context | Schema name if multi-tenant |
+| `meta.schema` | withSchema() context | Schema name if multi-tenant |
 | `meta.queryName` | User-provided | Labeling for logs |
 | `meta.correlationId` | User-provided | Distributed tracing |
 
@@ -359,7 +359,7 @@ GROUP BY "t0"."id", "t0"."name"
 
 ```typescript
 // Intent
-const dump = orm.forTenant('acme').query(User)
+const dump = orm.withSchema('acme').query(User)
   .where(eq('active', true))
   .dump();
 ```
@@ -373,7 +373,7 @@ WHERE "t0"."active" = $1
 ```
 
 **Expected params:** `[true]`
-**Expected meta.tenant:** `'acme'`
+**Expected meta.schema:** `'acme'`
 
 ---
 

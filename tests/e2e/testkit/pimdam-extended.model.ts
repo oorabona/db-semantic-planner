@@ -10,7 +10,7 @@
  * - Q8: Ambiguous relations (author/reviewer pattern)
  */
 
-import { belongsTo, defineSchema, hasMany } from '@db-semantic-planner/core';
+import { belongsTo, defineSchema, hasMany } from '@dbsp/core';
 
 /**
  * Extended PIM/DAM schema model for E2E-002 tests.

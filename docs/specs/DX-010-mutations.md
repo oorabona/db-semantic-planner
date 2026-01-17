@@ -63,7 +63,7 @@ doc-meta:
 - **BR18:** `updateAll()` and `deleteAll()` bypass WHERE requirement (explicit intent)
 
 ### Multi-tenant
-- **BR19:** `orm.forTenant('schema').insert('table')` targets `schema.table`
+- **BR19:** `orm.withSchema('schema').insert('table')` targets `schema.table`
 - **BR20:** Multi-tenant mutations require `db` in OrmOptions
 
 ### Observability
@@ -224,21 +224,21 @@ And comments are NOT deleted
 #### Scenario 4.1: Insert in tenant schema
 ```gherkin
 Given an ORM instance with db configured
-When orm.forTenant('acme').insert('users').values({ name: 'Alice' }).execute() is called
+When orm.withSchema('acme').insert('users').values({ name: 'Alice' }).execute() is called
 Then the SQL is: INSERT INTO "acme"."users" ("name") VALUES ($1)
 ```
 
 #### Scenario 4.2: Update in tenant schema
 ```gherkin
 Given an ORM instance with db configured
-When orm.forTenant('acme').update('users').where(eq('id', 1)).set({ name: 'Bob' }).execute() is called
+When orm.withSchema('acme').update('users').where(eq('id', 1)).set({ name: 'Bob' }).execute() is called
 Then the SQL is: UPDATE "acme"."users" SET "name" = $1 WHERE "id" = $2
 ```
 
 #### Scenario 4.3: Delete in tenant schema
 ```gherkin
 Given an ORM instance with db configured
-When orm.forTenant('acme').delete('users').where(eq('id', 1)).execute() is called
+When orm.withSchema('acme').delete('users').where(eq('id', 1)).execute() is called
 Then the SQL is: DELETE FROM "acme"."users" WHERE "id" = $1
 ```
 
@@ -332,7 +332,7 @@ Then ExecutionError is thrown with message "Database not configured"
 ### Block 6: Multi-tenant Mutations
 **Packages:** packages/dx
 
-- **forTenant() integration:** Pass schema to mutation builders
+- **withSchema() integration:** Pass schema to mutation builders
 - **Tests:** Multi-tenant insert/update/delete tests
 
 **Complexity:** S

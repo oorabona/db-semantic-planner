@@ -19,7 +19,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql as kyselySql } from 'kysely';
-import { createOrm, like } from '@db-semantic-planner/core';
+import { createOrm, like } from '@dbsp/core';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
@@ -196,7 +196,7 @@ describe.skipIf(shouldSkipE2E())('Q6: Category Tree (Materialized Path)', () => 
 
 			// Find categories in Electronics subtree
 			const dump = orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('categories')
 				.where(like('path', '/1/%'))
 				.columns(['id', 'name', 'path'])
@@ -211,7 +211,7 @@ describe.skipIf(shouldSkipE2E())('Q6: Category Tree (Materialized Path)', () => 
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const categories = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('categories')
 				.where(like('path', '/1/%'))
 				.columns(['id', 'name', 'path'])

@@ -37,7 +37,7 @@ Scenario: Create ORM without adapter (plan-only mode)
 
 Scenario: Multi-tenant with adapter
   Given an ORM with Kysely adapter
-  When I call orm.forTenant('tenant_123')
+  When I call orm.withSchema('tenant_123')
   Then queries use adapter.withSchema('tenant_123')
   And SQL includes schema prefix "tenant_123.users"
 
@@ -269,7 +269,7 @@ export function createOrm<DB = unknown>(options: OrmOptions<DB>): OrmInstance<DB
     strictMode,
     relationHints,
     adapter,
-    undefined, // schemaName - set via forTenant
+    undefined, // schemaName - set via withSchema
   );
 }
 ```

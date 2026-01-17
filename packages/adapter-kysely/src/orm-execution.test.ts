@@ -243,19 +243,19 @@ describe('Execution Layer', () => {
 		});
 	});
 
-	describe('forTenant()', () => {
+	describe('withSchema()', () => {
 		it('returns a new ORM instance scoped to tenant schema', () => {
 			const orm = createOrm({
 				model: testModel,
 				adapter: createKyselyAdapter(db),
 			});
 
-			const tenantOrm = orm.forTenant('tenant_123');
+			const scopedOrm = orm.withSchema('tenant_123');
 
 			// Verify it returns a new ORM instance
-			expect(tenantOrm).toBeDefined();
-			expect(tenantOrm).not.toBe(orm);
-			expect(tenantOrm.strictMode).toBe(orm.strictMode);
+			expect(scopedOrm).toBeDefined();
+			expect(scopedOrm).not.toBe(orm);
+			expect(scopedOrm.strictMode).toBe(orm.strictMode);
 		});
 
 		it('preserves strictMode setting', () => {
@@ -265,19 +265,19 @@ describe('Execution Layer', () => {
 				strictMode: true,
 			});
 
-			const tenantOrm = orm.forTenant('tenant_123');
+			const scopedOrm = orm.withSchema('tenant_123');
 
-			expect(tenantOrm.strictMode).toBe(true);
+			expect(scopedOrm.strictMode).toBe(true);
 		});
 
-		it('can chain forTenant with query operations', () => {
+		it('can chain withSchema with query operations', () => {
 			const orm = createOrm({
 				model: testModel,
 				adapter: createKyselyAdapter(db),
 			});
 
-			const tenantOrm = orm.forTenant('tenant_abc');
-			const builder = tenantOrm.select('users');
+			const scopedOrm = orm.withSchema('tenant_abc');
+			const builder = scopedOrm.select('users');
 
 			// Should be able to build a plan
 			const planReport = builder.plan();
@@ -292,10 +292,10 @@ describe('Execution Layer', () => {
 					adapter: createKyselyAdapter(db),
 				});
 
-				expect(() => orm.forTenant('tenant_123')).not.toThrow();
-				expect(() => orm.forTenant('acme')).not.toThrow();
-				expect(() => orm.forTenant('_private')).not.toThrow();
-				expect(() => orm.forTenant('MySchema')).not.toThrow();
+				expect(() => orm.withSchema('tenant_123')).not.toThrow();
+				expect(() => orm.withSchema('acme')).not.toThrow();
+				expect(() => orm.withSchema('_private')).not.toThrow();
+				expect(() => orm.withSchema('MySchema')).not.toThrow();
 			});
 
 			it('rejects schema names with hyphens', () => {
@@ -304,7 +304,7 @@ describe('Execution Layer', () => {
 					adapter: createKyselyAdapter(db),
 				});
 
-				expect(() => orm.forTenant('my-schema')).toThrow(
+				expect(() => orm.withSchema('my-schema')).toThrow(
 					InvalidIdentifierError,
 				);
 			});
@@ -315,7 +315,7 @@ describe('Execution Layer', () => {
 					adapter: createKyselyAdapter(db),
 				});
 
-				expect(() => orm.forTenant('123tenant')).toThrow(
+				expect(() => orm.withSchema('123tenant')).toThrow(
 					InvalidIdentifierError,
 				);
 			});
@@ -326,8 +326,8 @@ describe('Execution Layer', () => {
 					adapter: createKyselyAdapter(db),
 				});
 
-				expect(() => orm.forTenant('schema!')).toThrow(InvalidIdentifierError);
-				expect(() => orm.forTenant('schema@tenant')).toThrow(
+				expect(() => orm.withSchema('schema!')).toThrow(InvalidIdentifierError);
+				expect(() => orm.withSchema('schema@tenant')).toThrow(
 					InvalidIdentifierError,
 				);
 			});
@@ -338,10 +338,10 @@ describe('Execution Layer', () => {
 					adapter: createKyselyAdapter(db),
 				});
 
-				expect(() => orm.forTenant("'; DROP TABLE users;--")).toThrow(
+				expect(() => orm.withSchema("'; DROP TABLE users;--")).toThrow(
 					InvalidIdentifierError,
 				);
-				expect(() => orm.forTenant('public.users')).toThrow(
+				expect(() => orm.withSchema('public.users')).toThrow(
 					InvalidIdentifierError,
 				);
 			});
@@ -352,7 +352,7 @@ describe('Execution Layer', () => {
 					adapter: createKyselyAdapter(db),
 				});
 
-				expect(() => orm.forTenant('')).toThrow(InvalidIdentifierError);
+				expect(() => orm.withSchema('')).toThrow(InvalidIdentifierError);
 			});
 		});
 	});
@@ -407,14 +407,14 @@ describe('Execution Layer', () => {
 			expect(dump.params).toContain(42);
 		});
 
-		it('includes tenant in meta for forTenant()', () => {
+		it('includes tenant in meta for withSchema()', () => {
 			const orm = createOrm({
 				model: testModel,
 				adapter: createKyselyAdapter(db),
 			});
-			const dump = orm.forTenant('acme').select('users').dump();
+			const dump = orm.withSchema('acme').select('users').dump();
 
-			expect(dump.meta?.tenant).toBe('acme');
+			expect(dump.meta?.schema).toBe('acme');
 			// SQL should include schema qualification
 			expect(dump.sql).toContain('"acme"');
 		});
@@ -426,7 +426,7 @@ describe('Execution Layer', () => {
 			});
 			const dump = orm.select('users').dump();
 
-			expect(dump.meta?.tenant).toBeUndefined();
+			expect(dump.meta?.schema).toBeUndefined();
 		});
 
 		it('works with complex query chain', () => {
@@ -672,18 +672,18 @@ describe('Execution Layer', () => {
 			await emptyDb.destroy();
 		});
 
-		it('works with multi-tenant forTenant()', async () => {
+		it('works with multi-tenant withSchema()', async () => {
 			// Note: SQLite doesn't support schemas, so this tests the API works
 			// Real schema isolation is tested in E2E with PostgreSQL
 			const orm = createOrm({
 				model: testModel,
 				adapter: createKyselyAdapter(db),
 			});
-			const tenantOrm = orm.forTenant('tenant_123');
+			const scopedOrm = orm.withSchema('tenant_123');
 			const onStart = vi.fn();
 
 			// The stream() call should work (will fail on execution due to missing schema)
-			const iterator = tenantOrm.select('users').stream({ onStart });
+			const iterator = scopedOrm.select('users').stream({ onStart });
 
 			// Verify the iterator is created correctly
 			expect(typeof iterator[Symbol.asyncIterator]).toBe('function');

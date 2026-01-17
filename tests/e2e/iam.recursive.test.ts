@@ -14,11 +14,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	type RecursiveIntent,
 	planRecursive,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 import {
 	compileRecursive,
 	getCapabilities,
-} from '@db-semantic-planner/adapter-kysely';
+} from '@dbsp/adapter-kysely';
 import {
 	createIamSchema,
 	createSchema,

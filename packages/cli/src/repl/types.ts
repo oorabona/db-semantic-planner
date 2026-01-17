@@ -11,6 +11,8 @@ import type { ResolvedSchema } from '@dbsp/schema';
 export interface ReplConfig {
 	schema: ResolvedSchema;
 	schemaPath: string;
+	/** CLI-020: Optional database connection URL for execution mode */
+	databaseUrl?: string;
 }
 
 /**
@@ -64,15 +66,21 @@ export interface ReplState {
 	aliasingMode: AliasingMode;
 	includeStrategy: IncludeStrategyMode;
 	dialect: DialectMode;
+	/** CLI-020: Execution mode enabled */
+	execMode: boolean;
+	/** CLI-020: Database connection active */
+	connected: boolean;
 }
 
 /**
  * Dot command handler result
  */
 export interface DotCommandResult {
-	type: 'output' | 'clear' | 'exit' | 'mode-change' | 'toggle-split';
+	type: 'output' | 'clear' | 'exit' | 'mode-change' | 'toggle-split' | 'exec-toggle';
 	content?: React.ReactNode;
 	newMode?: QueryMode;
+	/** CLI-020: New execution mode state */
+	newExecMode?: boolean;
 }
 
 /**
@@ -98,4 +106,23 @@ export interface QueryResult {
 		warnings: string[];
 	};
 	error?: string;
+}
+
+
+/**
+ * CLI-020: Database execution result
+ */
+export interface ExecutionResult {
+	/** Result rows from database */
+	rows: Record<string, unknown>[];
+	/** Column names in order */
+	columns: string[];
+	/** Row count */
+	rowCount: number;
+	/** Execution time in milliseconds */
+	executionTimeMs: number;
+	/** Error message if execution failed */
+	error?: string;
+	/** Was result truncated? */
+	truncated?: boolean;
 }

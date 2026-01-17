@@ -264,7 +264,7 @@ describe('Transaction Support (DX-025)', () => {
 		});
 	});
 
-	describe('forTenant().transaction()', () => {
+	describe('withSchema().transaction()', () => {
 		// Note: SQLite doesn't support schemas, so we test that the API works
 		// without actually verifying schema isolation (would need PostgreSQL)
 
@@ -273,12 +273,12 @@ describe('Transaction Support (DX-025)', () => {
 				model: testModel,
 				adapter: createKyselyAdapter(db),
 			});
-			const tenantOrm = orm.forTenant('tenant_acme');
+			const scopedOrm = orm.withSchema('tenant_acme');
 
 			// The transaction callback receives a tenant-scoped ORM
 			// This tests that the API chain works correctly
 			await expect(
-				tenantOrm.transaction(async (_tx) => {
+				scopedOrm.transaction(async (_tx) => {
 					// tx should be tenant-scoped
 					// In SQLite this won't actually use a schema, but the API should work
 					return 'completed';

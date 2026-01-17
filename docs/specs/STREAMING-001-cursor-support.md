@@ -148,7 +148,7 @@ And dump should contain sql, params, and plan
 ```gherkin
 Given tenant 'acme' with 100 users
 And tenant 'globex' with 50 users
-When I call orm.forTenant('acme').query('users').stream()
+When I call orm.withSchema('acme').query('users').stream()
 Then I should only receive acme's 100 users
 And SQL should include schema prefix 'acme.users'
 ```

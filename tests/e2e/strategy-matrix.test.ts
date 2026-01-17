@@ -22,8 +22,8 @@ import {
 	hasMany,
 	hasOne,
 	POSTGRESQL_CAPABILITIES,
-} from '@db-semantic-planner/core';
-import type { PlanReport } from '@db-semantic-planner/core';
+} from '@dbsp/core';
+import type { PlanReport } from '@dbsp/core';
 
 /**
  * PostgreSQL dialect capabilities for auto strategy selection.
@@ -75,7 +75,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 				// When: posts include author (belongsTo)
 				const query = orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('posts')
 					.include('author')
 					.columns(['id', 'title']);
@@ -101,7 +101,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 				// biome-ignore lint/suspicious/noExplicitAny: E2E test allows loose typing
 				const posts = (await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('posts')
 					.include('author')
 					.columns(['id', 'title'])
@@ -173,7 +173,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 				// When: authors include posts (hasMany) with PostgreSQL
 				const query = orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('authors')
 					.include('posts')
 					.columns(['id', 'name']);
@@ -195,7 +195,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 				// biome-ignore lint/suspicious/noExplicitAny: E2E test allows loose typing
 				const authors = (await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('authors')
 					.include('posts')
 					.columns(['id', 'name'])
@@ -226,7 +226,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 				// When: posts include comments (hasMany)
 				const query = orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('posts')
 					.include('comments')
 					.columns(['id', 'title']);
@@ -300,7 +300,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 				});
 
 				const query = orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('authors')
 					.include('posts');
 				const dump = query.dump();
@@ -324,7 +324,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 				// When: filter authors by having published posts
 				const query = orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('authors')
 					.where(exists('posts', { where: eq('published', true) }))
 					.columns(['id', 'name']);
@@ -342,7 +342,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 				// biome-ignore lint/suspicious/noExplicitAny: E2E test allows loose typing
 				const authorsWithPublished = (await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('authors')
 					.where(exists('posts', { where: eq('published', true) }))
 					.columns(['id', 'name'])
@@ -374,7 +374,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 				const orm = createOrm({ model: blogModel, adapter, dialectCapabilities });
 
 				const query = orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('posts')
 					.where(exists('comments'))
 					.columns(['id', 'title']);
@@ -391,7 +391,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 				// biome-ignore lint/suspicious/noExplicitAny: E2E test allows loose typing
 				const postsWithComments = (await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('posts')
 					.where(exists('comments'))
 					.columns(['id', 'title'])
@@ -415,7 +415,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 				// When: limit 1 author with posts
 				// biome-ignore lint/suspicious/noExplicitAny: E2E test allows loose typing
 				const authors = (await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('authors')
 					.include('posts')
 					.limit(1)
@@ -436,7 +436,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 				// Get first author
 				// biome-ignore lint/suspicious/noExplicitAny: E2E test allows loose typing
 				const firstPage = (await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('authors')
 					.include('posts')
 					.orderBy('id', 'asc')
@@ -446,7 +446,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 				// Get second author
 				// biome-ignore lint/suspicious/noExplicitAny: E2E test allows loose typing
 				const secondPage = (await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('authors')
 					.include('posts')
 					.orderBy('id', 'asc')

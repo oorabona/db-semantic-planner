@@ -19,7 +19,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql as kyselySql } from 'kysely';
-import { createOrm, eq } from '@db-semantic-planner/core';
+import { createOrm, eq } from '@dbsp/core';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
@@ -261,7 +261,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 
 			// The ORM can execute with schema prefix
 			const products = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('products')
 				.where(eq('sku', 'IPHONE-15'))
 				.columns(['id', 'sku', 'title'])
@@ -276,14 +276,14 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const dump = orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('products')
 				.where(eq('family_id', 1))
 				.columns(['id', 'sku'])
 				.dump();
 
 			expect(dump.sql).toContain(`"${SCHEMA}"`);
-			expect(dump.meta?.tenant).toBe(SCHEMA);
+			expect(dump.meta?.schema).toBe(SCHEMA);
 		});
 	});
 });

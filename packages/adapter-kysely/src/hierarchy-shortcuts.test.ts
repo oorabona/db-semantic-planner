@@ -129,9 +129,9 @@ describe('DX-022: Hierarchy List Methods', () => {
 				model: categoryModel,
 				adapter: createKyselyAdapter(db),
 			});
-			const tenantOrm = orm.forTenant('tenant_123');
+			const scopedOrm = orm.withSchema('tenant_123');
 
-			expect(typeof tenantOrm.listAncestors).toBe('function');
+			expect(typeof scopedOrm.listAncestors).toBe('function');
 		});
 
 		it('should have listDescendants on tenant ORM', () => {
@@ -140,9 +140,9 @@ describe('DX-022: Hierarchy List Methods', () => {
 				model: categoryModel,
 				adapter: createKyselyAdapter(db),
 			});
-			const tenantOrm = orm.forTenant('tenant_123');
+			const scopedOrm = orm.withSchema('tenant_123');
 
-			expect(typeof tenantOrm.listDescendants).toBe('function');
+			expect(typeof scopedOrm.listDescendants).toBe('function');
 		});
 	});
 });

@@ -64,6 +64,7 @@ export type {
 	OrderByIntent,
 	// Query
 	QueryIntent,
+	RangeOperator,
 	RankingWindowFunction,
 	RawExpressionIntent,
 	RecursiveAdvancedOptions,
@@ -100,6 +101,8 @@ export type {
 	WhereNotIntent,
 	WhereNullIntent,
 	WhereOrIntent,
+	// Range (PostgreSQL P3-C)
+	WhereRangeIntent,
 	WhereRelationFilterIntent,
 	// Subquery (DX-012)
 	WhereSubqueryIntent,
@@ -142,6 +145,8 @@ export {
 	isWhereNotExists,
 	isWhereNull,
 	isWhereOr,
+	// Range type guard (P3-C)
+	isWhereRange,
 	isWhereRelationBased,
 	isWhereRelationFilter,
 	// Subquery type guards (DX-012)

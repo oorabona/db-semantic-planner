@@ -1,12 +1,12 @@
 /**
  * Q4: Multi-tenant Isolation Test
  *
- * Verifies that forTenant() properly scopes queries to the correct schema
+ * Verifies that withSchema() properly scopes queries to the correct schema
  * and that there is no data leakage between tenants.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createOrm, eq } from '@db-semantic-planner/core';
+import { createOrm, eq } from '@dbsp/core';
 import {
 	closeTestDb,
 	createPimdamSchema,
@@ -40,7 +40,7 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const products = await orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.columns(['id', 'sku'])
 				.execute();
@@ -57,7 +57,7 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const products = await orm
-				.forTenant('globex')
+				.withSchema('globex')
 				.select('products')
 				.columns(['id', 'sku'])
 				.execute();
@@ -74,13 +74,13 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const acmeDump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.columns(['id', 'sku'])
 				.dump();
 
 			const globexDump = orm
-				.forTenant('globex')
+				.withSchema('globex')
 				.select('products')
 				.columns(['id', 'sku'])
 				.dump();
@@ -97,11 +97,11 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
-			const acmeDump = orm.forTenant('acme').select('products').dump();
-			const globexDump = orm.forTenant('globex').select('products').dump();
+			const acmeDump = orm.withSchema('acme').select('products').dump();
+			const globexDump = orm.withSchema('globex').select('products').dump();
 
-			expect(acmeDump.meta?.tenant).toBe('acme');
-			expect(globexDump.meta?.tenant).toBe('globex');
+			expect(acmeDump.meta?.schema).toBe('acme');
+			expect(globexDump.meta?.schema).toBe('globex');
 		});
 	});
 
@@ -111,7 +111,7 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const acmeProduct = await orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.where(eq('sku', 'PROD-001'))
 				.columns(['id', 'sku', 'title'])
@@ -127,7 +127,7 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 
 			// GLX-001 exists in Globex but not in Acme
 			const result = await orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.where(eq('sku', 'GLX-001'))
 				.columns(['id', 'sku'])
@@ -141,13 +141,13 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const acmeCategories = await orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('categories')
 				.columns(['id', 'name'])
 				.execute();
 
 			const globexCategories = await orm
-				.forTenant('globex')
+				.withSchema('globex')
 				.select('categories')
 				.columns(['id', 'name'])
 				.execute();
@@ -166,7 +166,7 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 			// Build identical query for both tenants
 			const buildQuery = (tenant: string) =>
 				orm
-					.forTenant(tenant)
+					.withSchema(tenant)
 					.select('products')
 					.where(eq('active', true))
 					.columns(['id', 'sku']);
@@ -189,7 +189,7 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 
 			const buildQuery = (tenant: string) =>
 				orm
-					.forTenant(tenant)
+					.withSchema(tenant)
 					.select('products')
 					.where(eq('active', true))
 					.columns(['id', 'sku']);

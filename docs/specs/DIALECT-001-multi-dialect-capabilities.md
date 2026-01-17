@@ -79,7 +79,7 @@ When a query uses a feature requiring a capability that is `false`:
 
 | Feature | Missing Capability | Behavior |
 |---------|-------------------|----------|
-| `forTenant(schema)` | `supportsWithSchema` | Throw `UnsupportedOperationError` |
+| `withSchema(schema)` | `supportsWithSchema` | Throw `UnsupportedOperationError` |
 | `explain({ analyze: true })` | `supportsExplain` | Throw `UnsupportedOperationError` |
 | `stream()` | `supportsStreaming` | Throw `UnsupportedOperationError` with guidance |
 | NULLS FIRST/LAST in orderBy | `supportsNullsFirstLast` | Omit NULLS clause (degrade gracefully) |
@@ -95,7 +95,7 @@ All capability-related errors MUST include:
 
 Example:
 ```
-UnsupportedOperationError: Operation 'forTenant' requires 'supportsWithSchema' capability.
+UnsupportedOperationError: Operation 'withSchema' requires 'supportsWithSchema' capability.
 Detected dialect: MySQL
 MySQL uses database switching instead of schemas. Consider using separate database connections per tenant.
 ```
@@ -119,7 +119,7 @@ Test utilities MUST provide:
 | **Compiler** | Pass capabilities to compile(), guard feature usage | No regression in PostgreSQL output |
 | **EXPLAIN** | Dialect-specific EXPLAIN syntax | PostgreSQL unchanged, MySQL/SQLite adapted |
 | **Stream** | Guard with `supportsStreaming` capability | Clear error messages |
-| **Multi-tenant** | Guard `forTenant()` with `supportsWithSchema` | Clear error on MySQL/SQLite |
+| **Multi-tenant** | Guard `withSchema()` with `supportsWithSchema` | Clear error on MySQL/SQLite |
 | **Tests** | Test helpers, per-dialect snapshots | All existing tests pass |
 
 ### Files to Create
@@ -178,24 +178,24 @@ Scenario: Unknown dialect returns safe defaults
 ### Feature: Multi-tenant Capability Guard
 
 ```gherkin
-Scenario: forTenant works on PostgreSQL
+Scenario: withSchema works on PostgreSQL
   Given a Kysely instance with PostgresDialect
   And supportsWithSchema is true
-  When forTenant("tenant_acme") is called
+  When withSchema("tenant_acme") is called
   Then the ORM context is scoped to schema "tenant_acme"
 
-Scenario: forTenant throws on MySQL
+Scenario: withSchema throws on MySQL
   Given a Kysely instance with MysqlDialect
   And supportsWithSchema is false
-  When forTenant("tenant_acme") is called
+  When withSchema("tenant_acme") is called
   Then UnsupportedOperationError is thrown
-  And error.operation equals "forTenant"
+  And error.operation equals "withSchema"
   And error.message contains "supportsWithSchema"
   And error.message contains "MySQL"
 
-Scenario: forTenant throws on SQLite
+Scenario: withSchema throws on SQLite
   Given a Kysely instance with SqliteDialect
-  When forTenant("tenant_acme") is called
+  When withSchema("tenant_acme") is called
   Then UnsupportedOperationError is thrown
   And error.message contains "SQLite"
 ```
@@ -288,14 +288,14 @@ Scenario: Run test if capability present
 
 **Tasks:**
 - Add `capabilities` parameter to compiler functions
-- Guard `forTenant()` with `supportsWithSchema` check
+- Guard `withSchema()` with `supportsWithSchema` check
 - Update `UnsupportedOperationError` to include dialect context
 - Pass capabilities through dump/compile pipeline
 
 **Tests:**
-- Test forTenant() succeeds on PostgreSQL
-- Test forTenant() throws UnsupportedOperationError on MySQL
-- Test forTenant() throws UnsupportedOperationError on SQLite
+- Test withSchema() succeeds on PostgreSQL
+- Test withSchema() throws UnsupportedOperationError on MySQL
+- Test withSchema() throws UnsupportedOperationError on SQLite
 - Test error message includes operation, capability, and dialect
 
 **Acceptance criteria covered:** US-2 (partial), Scenarios 5-7
@@ -384,9 +384,9 @@ Scenario: Run test if capability present
 | MySQL detection | Yes | - | - |
 | SQLite detection | Yes | - | - |
 | Unknown dialect fallback | Yes | - | - |
-| forTenant on PostgreSQL | Yes | Yes | Yes (existing) |
-| forTenant on MySQL | Yes | - | - |
-| forTenant on SQLite | Yes | - | - |
+| withSchema on PostgreSQL | Yes | Yes | Yes (existing) |
+| withSchema on MySQL | Yes | - | - |
+| withSchema on SQLite | Yes | - | - |
 | EXPLAIN PostgreSQL | Yes | Yes | Yes (existing) |
 | EXPLAIN MySQL | Yes | - | - |
 | EXPLAIN SQLite | Yes | - | - |

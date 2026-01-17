@@ -1466,6 +1466,56 @@ categories include all parent      # All ancestors via CTE
 
 ---
 
+### CLI-020: REPL Connected Mode ✅ (2026-01-15)
+
+**Priority:** HIGH | **Effort:** M (~4h) | **Breaking:** No
+
+**Goal:** Allow REPL to connect to PostgreSQL and execute queries via Kysely ORM.
+
+**Implementation:**
+- [x] ✅ Parse `.connect` command with connection string
+- [x] ✅ Parse `!` prefix for raw SQL mode escape
+- [x] ✅ Execute queries against real database
+- [x] ✅ Display results in table format
+- [x] ✅ Handle connection errors gracefully
+
+**Files:**
+- `packages/cli/src/repl/parser.ts` - Mode escape parsing
+- `packages/cli/src/repl/query-executor.ts` - Database execution
+- `packages/cli/src/repl/index.tsx` - Connected mode state
+
+**Tests:** All CLI tests passing (17 new tests for mode escape)
+
+---
+
+### CLI-021: Rename forTenant → withSchema ✅ (2026-01-15)
+
+**Priority:** MEDIUM | **Effort:** M (~4h) | **Breaking:** Yes (API rename)
+
+**Goal:** Rename `forTenant()` API to `withSchema()` for consistency with Kysely/Drizzle.
+
+**Changes:**
+1. [x] ✅ Rename `orm.forTenant(name)` → `orm.withSchema(name)` in core/dx
+2. [x] ✅ Rename `meta.tenant` → `meta.schema` in DumpMeta interface
+3. [x] ✅ Add `.use <schema>` REPL command for schema-scoped queries
+4. [x] ✅ Update all adapter tests
+5. [x] ✅ Update all e2e tests
+6. [x] ✅ Update all documentation (50+ files)
+
+**Files:**
+- `packages/core/src/adapter.ts` - DumpMeta interface
+- `packages/core/src/dx/orm.ts` - withSchema method
+- `packages/core/src/dx/types.ts` - OrmInstance interface
+- `packages/adapter-kysely/src/types.ts` - CompileOptions and DumpMeta
+- `packages/adapter-kysely/src/dump.ts` - schema option handling
+- `packages/cli/src/repl/index.tsx` - .use command
+- `packages/cli/src/repl/query-executor.ts` - schemaName option
+- `docs/**/*.md` - All documentation updates
+
+**Tests:** All 1599 tests passing (2 new tests for schema scoping)
+
+---
+
 ### DEPS-001: React 19 + Ink 6.6.0 Migration ✅ (2026-01-15)
 
 **Scope:** cli (dependencies)

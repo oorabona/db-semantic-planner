@@ -22,8 +22,8 @@ import {
 	lt,
 	not,
 	or,
-} from '@db-semantic-planner/core';
-import { belongsTo, defineSchema, hasMany } from '@db-semantic-planner/core';
+} from '@dbsp/core';
+import { belongsTo, defineSchema, hasMany } from '@dbsp/core';
 import {
 	closeTestDb,
 	getTestAdapter,
@@ -217,7 +217,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.count()
@@ -232,7 +232,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.count({ as: 'product_count' })
@@ -254,7 +254,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('orders')
 					.where(eq('status', 'completed'))
 					.sum('total_price', 'total_revenue')
@@ -272,7 +272,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('orders')
 					.sum('quantity', 'total_quantity')
 					.groupBy(['product_id'])
@@ -288,7 +288,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('reviews')
 					.avg('rating', 'avg_rating')
 					.groupBy(['product_id'])
@@ -311,14 +311,14 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const minResult = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.min('price', 'min_price')
 					.execute();
 
 				const maxResult = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.max('price', 'max_price')
@@ -347,7 +347,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.columns(['id', 'name', 'price'])
@@ -365,7 +365,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.columns(['id', 'name', 'price'])
@@ -383,7 +383,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.columns(['id', 'category', 'name'])
@@ -402,7 +402,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.limit(3)
@@ -416,7 +416,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.limit(100)
@@ -432,14 +432,14 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const allProducts = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.orderBy('id', 'asc')
 					.execute();
 
 				const offsetProducts = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.orderBy('id', 'asc')
@@ -462,7 +462,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 				// Page 1
 				const page1 = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.orderBy('id', 'asc')
@@ -472,7 +472,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 				// Page 2
 				const page2 = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.orderBy('id', 'asc')
@@ -482,7 +482,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 				// Page 3
 				const page3 = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.orderBy('id', 'asc')
@@ -508,7 +508,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 				// Get top 5 most expensive products
 				const top5 = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.columns(['name', 'price'])
@@ -534,7 +534,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 				// Electronics category AND price > 100
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(
 						and(
@@ -556,7 +556,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 				// Either electronics OR furniture category
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(
 						and(
@@ -576,7 +576,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 				// NOT electronics category
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(and(isNull('deleted_at'), not(eq('category', 'electronics'))))
 					.execute();
@@ -593,7 +593,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 				// (category = 'electronics' AND price > 20) OR (category = 'furniture' AND stock > 100)
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(
 						and(
@@ -619,7 +619,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				// NOT (category = 'electronics' OR category = 'furniture')
 				// Same as: category NOT IN ('electronics', 'furniture')
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(
 						and(
@@ -639,7 +639,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 				// Products with orders AND (high-rated OR expensive)
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(
 						and(
@@ -661,7 +661,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 				// Price between 10 and 100
 				const result = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(
 						and(isNull('deleted_at'), gte('price', 10), lt('price', 100)),
@@ -684,7 +684,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const activeProducts = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.execute();
@@ -698,7 +698,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const countResult = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.count()
@@ -715,7 +715,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 				// No deleted_at filter = all records including deleted
 				const allProducts = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.execute();
 
@@ -727,7 +727,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const deletedProducts = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNotNull('deleted_at'))
 					.columns(['id', 'name', 'deleted_at'])
@@ -747,7 +747,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 				// Active electronics only
 				const activeElectronics = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(and(isNull('deleted_at'), eq('category', 'electronics')))
 					.execute();
@@ -763,7 +763,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 				// Active products with orders
 				const activeWithOrders = await orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(and(isNull('deleted_at'), exists('orders')))
 					.execute();
@@ -782,7 +782,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const orm = createOrm({ model: advancedModel, adapter });
 
 				const dump = orm
-					.forTenant(SCHEMA)
+					.withSchema(SCHEMA)
 					.select('products')
 					.where(isNull('deleted_at'))
 					.dump();
@@ -803,7 +803,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 			// Count active products by category
 			const result = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('products')
 				.where(isNull('deleted_at'))
 				.count({ as: 'count' })
@@ -824,7 +824,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 			// Top 3 most expensive active electronics
 			const result = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('products')
 				.where(and(isNull('deleted_at'), eq('category', 'electronics')))
 				.columns(['name', 'price'])
@@ -843,7 +843,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 
 			// Sum order totals for completed or shipped orders
 			const result = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('orders')
 				.where(or(eq('status', 'completed'), eq('status', 'shipped')))
 				.sum('total_price', 'total')

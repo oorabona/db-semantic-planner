@@ -333,7 +333,7 @@ export function createOrm<DB = Record<string, unknown>, S extends TypedSchema = 
 				return baseOrm.strictMode;
 			},
 			// Forward mutation methods
-			forTenant: (schemaName: string) => baseOrm.forTenant(schemaName),
+			withSchema: (schemaName: string) => baseOrm.withSchema(schemaName),
 			insert: (table: string) => baseOrm.insert(table),
 			update: (table: string) => baseOrm.update(table),
 			delete: (table: string) => baseOrm.delete(table),
@@ -413,19 +413,19 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				dialectCapabilities,
 			);
 		},
-		forTenant(tenantSchema: string): OrmInstance<DB> {
+		withSchema(schemaName: string): OrmInstance<DB> {
 			// Validate schema name to prevent SQL injection
 			if (adapter) {
-				adapter.validateIdentifier(tenantSchema, 'schema');
+				adapter.validateIdentifier(schemaName, 'schema');
 			}
 			// Create a schema-scoped adapter if we have one
-			const scopedAdapter = adapter?.withSchema(tenantSchema);
+			const scopedAdapter = adapter?.withSchema(schemaName);
 			return createOrmInstance(
 				model,
 				strictMode,
 				relationHints,
 				scopedAdapter as Adapter<DB> | undefined,
-				tenantSchema,
+				schemaName,
 				defaultIncludeStrategy,
 				dialectCapabilities,
 			);
@@ -1770,11 +1770,11 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		const compiled = adapter.compile(planReport, compileOptions);
 
 		// Build meta with exactOptionalPropertyTypes compliance
-		const meta: { compiledAt: Date; tenant?: string } = {
+		const meta: { compiledAt: Date; schema?: string } = {
 			compiledAt: new Date(),
 		};
 		if (this.schemaName !== undefined) {
-			meta.tenant = this.schemaName;
+			meta.schema = this.schemaName;
 		}
 
 		return {

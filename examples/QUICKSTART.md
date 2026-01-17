@@ -20,6 +20,7 @@ pnpm install
 | `minimal.schema.ts` | Users + Posts | Beginner |
 | `blog.schema.ts` | Authors, Posts, Comments, Tags | Intermediate |
 | `ecommerce.schema.ts` | Products, Categories, Orders | Advanced |
+| `scheduling.schema.ts` | Rooms, Bookings, Events (range types) | Advanced |
 
 ---
 
@@ -38,6 +39,9 @@ pnpm dbsp repl --schema ./examples/blog.schema.ts
 
 # E-commerce schema
 pnpm dbsp repl --schema ./examples/ecommerce.schema.ts
+
+# Scheduling schema (range types)
+pnpm dbsp repl --schema ./examples/scheduling.schema.ts
 ```
 
 ### Try These Queries
@@ -197,6 +201,50 @@ Control recursion depth and track hierarchy level:
 > In REPL compile-only mode, the main query is shown without the CTE.
 > Use actual database execution to see the full recursive behavior.
 
+### Range Operators (PostgreSQL)
+
+Query PostgreSQL range types (daterange, tstzrange, int4range) with specialized operators:
+
+```
+# Range overlaps - find bookings that overlap a date range
+> room_bookings where booking_period overlaps [2024-01-15,2024-01-20)
+
+# Shorthand range syntax (inclusive both sides)
+> events where time_slot overlaps 2024-01-01..2024-01-31
+
+# Range contains element - find price tier for quantity 25
+> price_tiers where quantity_range contains 25
+
+# Range contains date - find bookings containing Jan 18
+> room_bookings where booking_period contains 2024-01-18
+
+# Range contained by - find bookings fully within January
+> room_bookings where booking_period containedBy [2024-01-01,2024-02-01)
+
+# Combine with relations
+> rooms include bookings where booking_period overlaps [2024-01-15,2024-01-20)
+```
+
+#### Range Syntax
+
+| Format | Meaning | Example |
+|--------|---------|---------|
+| `[a,b)` | Inclusive lower, exclusive upper | `[2024-01-01,2024-02-01)` |
+| `[a,b]` | Both inclusive | `[1,100]` |
+| `(a,b)` | Both exclusive | `(0,100)` |
+| `a..b` | Shorthand for `[a,b]` (inclusive) | `10..50` |
+
+#### Operators
+
+| Operator | SQL | Description |
+|----------|-----|-------------|
+| `overlaps` | `&&` | Ranges share common points |
+| `contains` | `@>` | Range contains element or range |
+| `containedBy` | `<@` | Range is contained by another |
+
+> **Note:** Range types require PostgreSQL 9.2+ and appropriate column types
+> (daterange, tstzrange, int4range, etc.) in your database schema.
+
 ### Expected Output (Relations)
 
 ```
@@ -225,7 +273,387 @@ Plan:
 
 ---
 
-## 2. Generate Kysely Types
+## 2. Live Database Examples (PostgreSQL)
+
+Connect the REPL to a real PostgreSQL database to execute queries and see actual results.
+
+### Prerequisites
+
+- PostgreSQL 9.2+ (15+ recommended for range types)
+- A database to use (e.g., `dbsp_examples`)
+
+```bash
+# Create a database for examples
+createdb dbsp_examples
+```
+
+---
+
+### 2.1 Minimal Schema (Beginner)
+
+**Tables:** `users`, `posts`
+
+#### Setup
+
+```bash
+# Load DDL schema
+psql -d dbsp_examples -f examples/minimal.ddl.sql
+
+# Seed sample data
+psql -d dbsp_examples -f examples/minimal.seed.sql
+```
+
+#### Launch REPL with Database Connection
+
+```bash
+pnpm dbsp repl \
+  --schema ./examples/minimal.schema.ts \
+  --db postgres://localhost/dbsp_examples
+```
+
+#### Try These Queries
+
+```
+# Compile mode (default) - shows SQL without executing
+> users
+> posts
+
+# Enable execution mode
+> .exec on
+
+# Now queries return actual data
+> users
+│ id  │ name       │ email              │
+├───────────────────────────────────────────┤
+│ 1   │ Alice      │ alice@example.com  │
+│ 2   │ Bob        │ bob@example.com    │
+2 rows (5ms)
+
+# Filter queries
+> posts where user_id = 1
+> users where name = 'Alice' include posts
+
+# Raw SQL (prefix with !)
+> !SELECT COUNT(*) FROM users
+
+# Toggle back to compile mode
+> .exec off
+```
+
+---
+
+### 2.2 Blog Schema (Intermediate)
+
+**Tables:** `authors`, `posts`, `comments`, `tags`, `post_tags`
+
+#### Setup
+
+```bash
+# Load DDL schema
+psql -d dbsp_examples -f examples/blog.ddl.sql
+
+# Seed sample data
+psql -d dbsp_examples -f examples/blog.seed.sql
+```
+
+#### Launch REPL
+
+```bash
+pnpm dbsp repl \
+  --schema ./examples/blog.schema.ts \
+  --db postgres://localhost/dbsp_examples
+```
+
+#### Try These Queries
+
+```
+> .exec on
+
+# List published posts
+> posts where published = true
+
+# Posts with author details
+> posts include author
+
+# Aggregate: count posts per author
+> posts select count(*) as post_count group by author_id
+
+# Find posts with comments
+> posts where id = 1 include comments
+
+# Filter comments
+> comments where approved = true include post
+
+# Raw SQL for complex queries
+> !SELECT a.name, COUNT(p.id) as posts
+>  FROM authors a LEFT JOIN posts p ON a.id = p.author_id
+>  GROUP BY a.name ORDER BY posts DESC
+
+# Check schema
+> .schema posts
+> .relations posts
+```
+
+---
+
+### 2.3 E-Commerce Schema (Advanced)
+
+**Tables:** `categories`, `products`, `variants`, `customers`, `addresses`, `orders`, `order_items`
+
+#### Setup
+
+```bash
+# Load DDL schema
+psql -d dbsp_examples -f examples/ecommerce.ddl.sql
+
+# Seed sample data
+psql -d dbsp_examples -f examples/ecommerce.seed.sql
+```
+
+#### Launch REPL
+
+```bash
+pnpm dbsp repl \
+  --schema ./examples/ecommerce.schema.ts \
+  --db postgres://localhost/dbsp_examples
+```
+
+#### Try These Queries
+
+```
+> .exec on
+
+# Active products with stock
+> products where active = true and stock > 0
+
+# Products with variants
+> products include variants
+
+# Recursive category tree (all descendants)
+> categories where id = 1 include all children
+
+# Categories with depth tracking
+> categories include all children with depth
+
+# Customer orders
+> customers where id = 1 include orders
+
+# Order details with items
+> orders include items include product
+
+# Aggregates: total revenue per customer
+> orders select sum(total) as revenue group by customer_id
+
+# Raw SQL: top selling products
+> !SELECT p.name, SUM(oi.quantity) as sold
+>  FROM products p
+>  JOIN order_items oi ON p.id = oi.product_id
+>  GROUP BY p.name ORDER BY sold DESC LIMIT 10
+```
+
+---
+
+### 2.4 Scheduling Schema (Range Types)
+
+**Tables:** `rooms`, `room_bookings`, `events`, `price_tiers`
+
+> **Note:** This schema uses PostgreSQL range types (`daterange`, `tstzrange`, `int4range`).
+> Requires PostgreSQL 9.2+.
+
+#### Setup
+
+```bash
+# Load DDL schema (includes EXCLUDE constraints for overlaps)
+psql -d dbsp_examples -f examples/scheduling.ddl.sql
+
+# Seed sample data
+psql -d dbsp_examples -f examples/scheduling.seed.sql
+```
+
+#### Launch REPL
+
+```bash
+pnpm dbsp repl \
+  --schema ./examples/scheduling.schema.ts \
+  --db postgres://localhost/dbsp_examples
+```
+
+#### Try These Queries
+
+```
+> .exec on
+
+# All rooms
+> rooms
+
+# Room bookings
+> room_bookings include room
+
+# Range: find bookings overlapping a date range
+> room_bookings where booking_period overlaps [2024-01-15,2024-01-20)
+
+# Range: find bookings containing a specific date
+> room_bookings where booking_period contains 2024-01-18
+
+# Find available rooms (not booked in date range)
+> !SELECT r.* FROM rooms r
+>  WHERE NOT EXISTS (
+>    SELECT 1 FROM room_bookings rb
+>    WHERE rb.room_id = r.id
+>    AND rb.booking_period && '[2024-01-15,2024-01-20)'::daterange
+>  )
+
+# Events in a time window (timestamp ranges)
+> events where time_slot overlaps 2024-01-15T09:00:00Z..2024-01-15T17:00:00Z
+
+# Price tiers: find tier for quantity 25
+> price_tiers where quantity_range contains 25
+
+# Shorthand range syntax (inclusive both sides)
+> room_bookings where booking_period overlaps 2024-01-01..2024-01-31
+```
+
+---
+
+### 2.5 Mode Reference
+
+#### Input Modes
+
+| Mode | Command | Default Input | `!` Escape |
+|------|---------|---------------|------------|
+| Natural | `.natural` (default) | Natural query syntax | Raw SQL |
+| SQL | `.sql` | Raw SQL | Natural query |
+
+The `!` prefix acts as a **mode escape**: it does the opposite of the current mode.
+
+```
+# In natural mode (default)
+> users where active = true     # Parsed as natural query
+> !SELECT * FROM users          # Executed as raw SQL
+
+# In SQL mode (.sql)
+> SELECT * FROM users           # Executed as raw SQL
+> !users where active = true    # Parsed as natural query
+```
+
+#### Execution Mode
+
+| Setting | Command | Behavior |
+|---------|---------|----------|
+| Compile only | `.exec off` (default) | Shows SQL without executing |
+| Execute | `.exec on` | Compiles AND executes queries |
+
+> **Note:** Execution requires a database connection (`--db` option).
+
+#### Schema Scoping (Multi-Tenant)
+
+PostgreSQL schemas allow isolating data per tenant. The REPL supports schema-scoped queries via `.use`.
+
+##### Setup: Create Schemas and Load DDL
+
+```bash
+# 1. Create schemas for each tenant
+psql $DATABASE_URL -c "CREATE SCHEMA IF NOT EXISTS tenant_acme;"
+psql $DATABASE_URL -c "CREATE SCHEMA IF NOT EXISTS tenant_globex;"
+
+# 2. Load DDL into each schema (use search_path)
+psql $DATABASE_URL -c "SET search_path TO tenant_acme;" -f examples/blog.ddl.sql
+psql $DATABASE_URL -c "SET search_path TO tenant_globex;" -f examples/blog.ddl.sql
+
+# 3. Seed data per tenant
+psql $DATABASE_URL -c "SET search_path TO tenant_acme;" -f examples/blog.seed.sql
+psql $DATABASE_URL -c "SET search_path TO tenant_globex;" -f examples/blog.seed.sql
+```
+
+Or in a single script:
+
+```bash
+#!/bin/bash
+# setup-tenants.sh
+DATABASE_URL=${DATABASE_URL:-"postgresql://localhost/dbsp_examples"}
+DDL_FILE=${1:-"examples/blog.ddl.sql"}
+SEED_FILE=${2:-"examples/blog.seed.sql"}
+
+for TENANT in tenant_acme tenant_globex tenant_initech; do
+  echo "Setting up schema: $TENANT"
+  psql "$DATABASE_URL" <<EOF
+    CREATE SCHEMA IF NOT EXISTS $TENANT;
+    SET search_path TO $TENANT;
+    \i $DDL_FILE
+    \i $SEED_FILE
+EOF
+done
+echo "Done! Created 3 tenant schemas."
+```
+
+##### REPL: Switch Between Schemas
+
+Use `.use <schema>` to scope all queries to a specific PostgreSQL schema:
+
+```
+> .use tenant_acme
+Using schema: tenant_acme
+All queries will be scoped to this schema. .use to clear.
+
+> users                              # Queries tenant_acme.users
+SELECT "id", "name", "email" FROM "tenant_acme"."users"
+
+> .use tenant_globex                 # Switch to another tenant
+Using schema: tenant_globex
+
+> users                              # Now queries tenant_globex.users
+SELECT "id", "name", "email" FROM "tenant_globex"."users"
+
+> .use                               # Clear schema
+Cleared schema. Queries now use default schema.
+```
+
+##### Programmatic Usage
+
+```typescript
+import { createOrm } from '@dbsp/core';
+import { createKyselyAdapter } from '@dbsp/adapter-kysely';
+
+const orm = createOrm({ model: schema, adapter: createKyselyAdapter(db) });
+
+// Scope queries to a tenant schema
+const acmeOrm = orm.withSchema('tenant_acme');
+const acmeUsers = await acmeOrm.select('users').all();
+
+// Each tenant is isolated
+const globexOrm = orm.withSchema('tenant_globex');
+const globexUsers = await globexOrm.select('users').all();
+
+// dump() shows schema in meta
+const dump = acmeOrm.select('users').dump();
+console.log(dump.meta?.schema); // 'tenant_acme'
+console.log(dump.sql);          // SELECT ... FROM "tenant_acme"."users"
+```
+
+This pattern is useful for multi-tenant SaaS applications where each tenant has isolated data.
+
+### 2.6 Status Indicator
+
+The REPL header shows current settings:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 🔍 db-semantic-planner REPL | .help for commands | Ctrl+C to exit      │
+│ Schema: ./examples/blog.schema.ts (5 tables, 6 relations)              │
+│ Mode: natural | Schema: tenant_123 | Dialect: PG | Strategy: auto      │
+│ DB: dbsp_examples | ▶ EXEC                                             │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+| Indicator | Values | Meaning |
+|-----------|--------|---------|
+| Mode | `natural` (green) / `sql` (yellow) | Input parsing mode |
+| DB | Database name | Connected database |
+| ▶ EXEC / ◼ COMPILE | Green / Yellow | Execution enabled or compile-only |
+
+---
+
+## 3. Generate Kysely Types
 
 Generate TypeScript types for use with Kysely.
 
@@ -274,7 +702,7 @@ export interface DB {
 
 ---
 
-## 3. Generate Manifest (JSON)
+## 4. Generate Manifest (JSON)
 
 Generate a JSON manifest of your schema (useful for tooling).
 
@@ -285,7 +713,7 @@ pnpm dbsp generate manifest --schema ./examples/blog.schema.ts --output ./schema
 
 ---
 
-## 4. Verify Against Database (Optional)
+## 5. Verify Against Database (Optional)
 
 Compare your schema against a real PostgreSQL database.
 
@@ -339,7 +767,7 @@ Column mismatches in 'posts':
 
 ---
 
-## 5. Use in Your Application
+## 6. Use in Your Application
 
 Once you've generated types, use them with the ORM:
 
@@ -408,10 +836,12 @@ pnpm dbsp repl --schema ./examples/minimal.schema.ts
 
 ## Next Steps
 
-1. **Create your own schema** - Copy `minimal.schema.ts` and modify
-2. **Read the API docs** - See `README.md` for full API reference
-3. **Run E2E tests** - `pnpm test:e2e` to see real PostgreSQL examples
-4. **Explore aggregate functions** - COUNT, SUM, AVG, MIN, MAX with GROUP BY and HAVING
-5. **Try nested includes** - `posts include author include posts`
-6. **Try recursive includes** - `include all children` for hierarchical data
-7. **Explore advanced features** - Window functions, multi-tenant
+1. **Try live database examples** - Follow Section 2 to connect REPL to PostgreSQL
+2. **Create your own schema** - Copy `minimal.schema.ts` and modify
+3. **Read the API docs** - See `README.md` for full API reference
+4. **Run E2E tests** - `pnpm test:e2e` to see real PostgreSQL examples
+5. **Explore aggregate functions** - COUNT, SUM, AVG, MIN, MAX with GROUP BY and HAVING
+6. **Try nested includes** - `posts include author include posts`
+7. **Try recursive includes** - `include all children` for hierarchical data
+8. **Explore range types** - See Section 2.4 for PostgreSQL range queries
+9. **Explore advanced features** - Window functions, multi-tenant

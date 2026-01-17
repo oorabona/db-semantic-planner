@@ -354,7 +354,7 @@ export function getCapabilitiesForDialect(
  * assertCapability(
  *   db,
  *   'supportsWithSchema',
- *   'forTenant',
+ *   'withSchema',
  *   'MySQL uses database switching instead of schemas. Consider using separate database connections per tenant.'
  * );
  * ```

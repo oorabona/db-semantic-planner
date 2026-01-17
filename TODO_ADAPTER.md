@@ -219,14 +219,15 @@ eb(eb.ref('prev.path'), '||', eb.ref('node.${traversal.nodeId}')).as('path')
 - [ ] Capability guard: `assertCapability('supportsTsvector')` for PostgreSQL-only
 - [ ] Unit tests for FTS compilation
 
-### P3-C: Range Types Compiler (PostgreSQL)
+### P3-C: Range Types Compiler (PostgreSQL) ✅ (2026-01-15)
 
-- [ ] `compileRangeWhere()` function
-  - Uses Kysely's `sql` template (same connection pool)
-  - Operators: && (overlaps), @> (contains), <@ (contained_by), -|- (adjacent)
-- [ ] Extend DialectCapabilities with `supportsRangeTypes`
-- [ ] Capability guard for PostgreSQL-only
-- [ ] Unit tests for range compilation
+- [x] `compileRangeExpression()` function in compiler.ts
+  - Uses Kysely's `sql` template for PostgreSQL range syntax
+  - Operators: && (overlaps), @> (contains), <@ (containedBy)
+- [x] Integration in `addSimpleWhere()` (4 switch cases)
+- [x] Helper functions: `isRangeValue()`, `buildRangeLiteral()`
+- [ ] Extend DialectCapabilities with `supportsRangeTypes` (TODO: future, not blocking)
+- [x] Unit tests in core (5 tests for DX helpers)
 
 ### P3-D: FOR UPDATE SKIP LOCKED (Job Queue pattern)
 
@@ -252,7 +253,7 @@ eb(eb.ref('prev.path'), '||', eb.ref('node.${traversal.nodeId}')).as('path')
   - detectDialect(), getCapabilities() functions
   - Predefined profiles (PostgreSQL, MySQL, SQLite, MSSQL, Unknown)
   - 42 tests
-- [x] ✅ Block 2: Multi-tenant capability guard
+- [x] ✅ Block 2: Schema scoping capability guard
   - assertCapability() helper function
   - UnsupportedOperationError with capability/dialect context
   - Default guidance messages per capability/dialect
@@ -297,7 +298,7 @@ eb(eb.ref('prev.path'), '||', eb.ref('node.${traversal.nodeId}')).as('path')
 - [x] ✅ GROUP BY clause generation
   - Single and multiple field grouping
   - Proper alias prefix (t0.field)
-  - Schema prefix support for multi-tenant
+  - Schema prefix support for schema-scoped
 
 ### ADAPTER-004: Enhanced Observability - 40 tests ✅ (2026-01-07)
 
@@ -323,7 +324,7 @@ eb(eb.ref('prev.path'), '||', eb.ref('node.${traversal.nodeId}')).as('path')
   - params: readonly unknown[] (from Kysely CompiledQuery.parameters)
   - meta?: DumpMeta
 - [x] ✅ DumpMeta interface
-  - tenant?, queryName?, correlationId?, compiledAt?
+  - schema?, queryName?, correlationId?, compiledAt?
 - [x] ✅ compile() function
   - PlanReport → Kysely CompiledQuery
 - [x] ✅ createDump() function
@@ -334,7 +335,7 @@ eb(eb.ref('prev.path'), '||', eb.ref('node.${traversal.nodeId}')).as('path')
   - Stable SQL (same intent → same SQL)
   - Consistent aliasing: t0, t1, t2...
 
-### ADAPTER-002: Multi-tenant
+### ADAPTER-002: Schema scoping
 
 - [x] ✅ Schema prefix support via `tenant` option
 - [x] ✅ All tables prefixed with schema name

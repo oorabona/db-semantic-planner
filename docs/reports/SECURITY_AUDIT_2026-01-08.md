@@ -62,7 +62,7 @@ sequenceDiagram
     participant Validator as validateIdentifier()
     participant Kysely as Kysely DB
     
-    Client->>ORM: forTenant("tenant_123")
+    Client->>ORM: withSchema("tenant_123")
     ORM->>Validator: validateIdentifier(schema, "schema")
     alt Invalid identifier
         Validator-->>Client: InvalidIdentifierError
@@ -95,7 +95,7 @@ sequenceDiagram
 │                    packages/adapter-kysely                      │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
 │  │  Compiler   │  │  Engine     │  │  Multi-tenant           │  │
-│  │  (SQL gen)  │  │  (Kysely)   │  │  (orm.forTenant)        │  │
+│  │  (SQL gen)  │  │  (Kysely)   │  │  (orm.withSchema)        │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
 │                                                                 │
 │  PostgreSQL-first (MVP) • Multi-dialect via capabilities (P2)  │
@@ -335,7 +335,7 @@ Consumer responsibility to sanitize inputs before using `raw()` intents.
 **Location:** `packages/dx/src/orm.ts:85-91`
 
 ```typescript
-forTenant(tenantSchema: string): OrmInstance {
+withSchema(tenantSchema: string): OrmInstance {
   validateIdentifier(tenantSchema, 'schema');
   return createOrmInstance(model, strictMode, relationHints, db, tenantSchema);
 }
@@ -435,14 +435,14 @@ export const DEFAULT_REDACTION_PATTERNS = [
 | Scenario | What It Tests | Security Assertion |
 |----------|---------------|-------------------|
 | Schema isolation | Different schemas for different tenants | Queries are prefixed with schema name |
-| Same query, different results | `forTenant('acme')` vs `forTenant('globex')` | No data leakage between tenants |
+| Same query, different results | `withSchema('acme')` vs `withSchema('globex')` | No data leakage between tenants |
 | Filtered queries per tenant | Tenant-specific filters work correctly | WHERE clauses scoped to schema |
 | Schema validation | Invalid schema names rejected | `validateIdentifier()` called |
 
 ```typescript
 // Example from test
-const acmeOrm = orm.forTenant('acme');
-const globexOrm = orm.forTenant('globex');
+const acmeOrm = orm.withSchema('acme');
+const globexOrm = orm.withSchema('globex');
 
 // Same query, must return different data
 const acmeProducts = await acmeOrm.query('products').findMany();
@@ -608,7 +608,7 @@ flowchart TB
 │                                                                             │
 │  UNTRUSTED (validated at boundary)                                          │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │ • Schema names in forTenant() → validateIdentifier()                │    │
+│  │ • Schema names in withSchema() → validateIdentifier()                │    │
 │  │ • Column/table names in queries → validateIdentifier()              │    │
 │  │ • User-provided values → Kysely parameter binding                   │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │

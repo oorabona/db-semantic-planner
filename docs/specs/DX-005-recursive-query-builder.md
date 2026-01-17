@@ -135,7 +135,7 @@ export interface RecursiveEmitOptions {
 const builder = orm.recursive('role_tree');
 
 // Or with tenant scope
-const builder = orm.forTenant('tenant_123').recursive('role_tree');
+const builder = orm.withSchema('tenant_123').recursive('role_tree');
 ```
 
 ### 4.2 Builder Methods
@@ -324,7 +324,7 @@ Scenario: Result type matches selected columns
 
 ```gherkin
 Scenario: Joined tables get schema prefix in multi-tenant mode
-  Given orm.forTenant('tenant_abc')
+  Given orm.withSchema('tenant_abc')
   When I build a recursive query with joins
   Then joined tables are prefixed: tenant_abc.role_permissions
   And CTE name is NOT prefixed

@@ -87,12 +87,12 @@ Scenario: execute() is alias for findMany()
   When execute() is called
   Then result is same as calling findMany()
 
-Scenario: dump() includes tenant in meta for forTenant()
+Scenario: dump() includes tenant in meta for withSchema()
   Given an ORM instance with db configured
-  And forTenant('acme') is called
+  And withSchema('acme') is called
   And a query for "products"
   When dump() is called
-  Then result.meta.tenant equals "acme"
+  Then result.meta.schema equals "acme"
   And result.sql contains '"acme"."products"'
 ```
 
@@ -178,18 +178,18 @@ Scenario: Queries are scoped to tenant schema
   Given schemas "acme" and "globex" exist
   And "acme".users has 3 records
   And "globex".users has 5 records
-  When orm.forTenant('acme').query('users').execute()
+  When orm.withSchema('acme').query('users').execute()
   Then result has 3 users
-  When orm.forTenant('globex').query('users').execute()
+  When orm.withSchema('globex').query('users').execute()
   Then result has 5 users
 
 Scenario: Invalid schema name throws error
   Given ORM instance configured
-  When forTenant('bad;drop schema') is called
+  When withSchema('bad;drop schema') is called
   Then InvalidIdentifierError is thrown
 
 Scenario: SQL includes schema qualification
-  Given ORM instance with forTenant('acme')
+  Given ORM instance with withSchema('acme')
   When dump() is called on any query
   Then dump.sql contains '"acme".'
 ```
@@ -440,7 +440,7 @@ describe('Q1: Products with approved FR main image', () => {
 
   describe('Given acme tenant', () => {
     it('should use EXISTS strategy in plan', () => {
-      const dump = orm.forTenant('acme')
+      const dump = orm.withSchema('acme')
         .query('products')
         .where(exists('images', {
           where: and(
@@ -461,7 +461,7 @@ describe('Q1: Products with approved FR main image', () => {
     });
 
     it('should return only products with approved FR main image', async () => {
-      const products = await orm.forTenant('acme')
+      const products = await orm.withSchema('acme')
         .query('products')
         .where(exists('images', {
           where: and(
@@ -498,7 +498,7 @@ describe('Q2: Products with approved images in BOTH FR and EN', () => {
 
   describe('Given acme tenant', () => {
     const buildQ2Query = (tenant: string) =>
-      orm.forTenant(tenant)
+      orm.withSchema(tenant)
         .query('products')
         .where(and(
           exists('images', {

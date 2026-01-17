@@ -10,7 +10,7 @@
 
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createOrm } from '@db-semantic-planner/core';
+import { createOrm } from '@dbsp/core';
 import {
 	closeTestDb,
 	createPimdamSchema,
@@ -55,7 +55,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.columns(['id', 'sku'])
 				.dump();
@@ -80,7 +80,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('categories')
 				.columns(['id', 'name'])
 				.dump();
@@ -98,7 +98,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('assets')
 				.columns(['id', 'kind', 'mime'])
 				.dump();
@@ -118,7 +118,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.columns(['id', 'sku', 'title'])
 				.dump();
@@ -143,7 +143,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 			] as const;
 
 			for (const entity of entities) {
-				const dump = orm.forTenant('acme').select(entity).columns(['id']).dump();
+				const dump = orm.withSchema('acme').select(entity).columns(['id']).dump();
 
 				expect(dump.sql).toContain('"acme"');
 				expect(dump.sql.toLowerCase()).toContain('select');
@@ -156,7 +156,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.columns(['id'])
 				.dump();
@@ -172,7 +172,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.columns(['id', 'sku'])
 				.dump();
@@ -189,7 +189,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.columns(['id', 'sku'])
 				.dump();
@@ -208,7 +208,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.columns(['id'])
 				.dump();
@@ -227,11 +227,11 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.dump();
 
-			expect(dump.meta?.tenant).toBe('acme');
+			expect(dump.meta?.schema).toBe('acme');
 		});
 
 		it('should include compiledAt timestamp', async () => {
@@ -240,7 +240,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.dump();
 
@@ -253,7 +253,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.dump();
 

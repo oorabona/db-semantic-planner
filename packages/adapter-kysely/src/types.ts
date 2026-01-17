@@ -13,8 +13,8 @@ import type { PlanReport, WindowIntent } from '@dbsp/core';
  * Metadata for correlation and debugging
  */
 export interface DumpMeta {
-	/** Tenant schema name (if multi-tenant) */
-	readonly tenant?: string;
+	/** Schema name (if schema-scoped) */
+	readonly schema?: string;
 
 	/** User-provided query label */
 	readonly queryName?: string;
@@ -64,8 +64,8 @@ export interface Dump {
  * Options for SQL compilation
  */
 export interface CompileOptions {
-	/** Tenant schema name for multi-tenant queries */
-	readonly tenant?: string;
+	/** Schema name for schema-scoped queries */
+	readonly schema?: string;
 
 	/** Query name for logging */
 	readonly queryName?: string;
@@ -231,8 +231,8 @@ export interface JsonDump {
 	/** Warning messages (if any) */
 	readonly warnings: readonly string[];
 
-	/** Tenant schema name (if multi-tenant) */
-	readonly tenant?: string;
+	/** Schema name (if schema-scoped) */
+	readonly schema?: string;
 
 	/** User-provided query label */
 	readonly queryName?: string;

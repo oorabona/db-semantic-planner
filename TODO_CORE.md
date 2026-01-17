@@ -54,13 +54,14 @@
 - [ ] `isFTSIntent` type guard
 - [ ] Planner support for FTS in WHERE clause
 
-### P3-C: RangeIntent (PostgreSQL Range Types)
+### P3-C: RangeIntent (PostgreSQL Range Types) ✅ (2026-01-15)
 
-- [ ] `RangeIntent` type in intent-ast.ts
-  - type: daterange, tsrange, tstzrange, int4range, int8range, numrange
-  - operator: overlaps, contains, contained_by, adjacent, left_of, right_of
-  - value: { lower, upper, bounds }
-- [ ] `isRangeIntent` type guard
+- [x] `WhereRangeIntent` type in intent-ast.ts
+  - operator: overlaps, contains, containedBy
+  - value: RangeValue { lower, upper, bounds? }
+- [x] `isWhereRange` type guard
+- [x] DX helpers: rangeOverlaps, rangeContains, rangeContainedBy
+- [x] Compiler support in adapter-kysely
 
 ---
 
@@ -180,14 +181,14 @@ const page = await orm.select('users')
 
 ---
 
-### P3-C: Range Types DX API
+### P3-C: Range Types DX API ✅ (2026-01-15)
 
 **Priority:** LOW | **Effort:** S
 
-- [ ] `rangeOverlaps(field, value)` helper
-- [ ] `rangeContains(field, value)` helper
-- [ ] `rangeContainedBy(field, value)` helper
-- [ ] RangeValue type: { lower, upper, bounds? }
+- [x] `rangeOverlaps(field, value)` helper
+- [x] `rangeContains(field, value)` helper
+- [x] `rangeContainedBy(field, value)` helper
+- [x] RangeValue type: { lower, upper, bounds? }
 
 ---
 

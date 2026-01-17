@@ -535,15 +535,15 @@ describe('Mutation Builders (DX-010)', () => {
 				model: testModel,
 				adapter: createKyselyAdapter(db),
 			});
-			const tenantOrm = orm.forTenant('tenant_123');
-			const dump = tenantOrm
+			const scopedOrm = orm.withSchema('tenant_123');
+			const dump = scopedOrm
 				.insert('users')
 				.values({ name: 'Test', email: 't@e.com' })
 				.dump();
 
 			// SQLite quotes schema.table as "schema"."table"
 			expect(dump.sql.toLowerCase()).toMatch(/tenant_123[".].*users/);
-			expect(dump.meta?.tenant).toBe('tenant_123');
+			expect(dump.meta?.schema).toBe('tenant_123');
 		});
 
 		it('should include schema prefix in update dump', () => {
@@ -551,15 +551,15 @@ describe('Mutation Builders (DX-010)', () => {
 				model: testModel,
 				adapter: createKyselyAdapter(db),
 			});
-			const tenantOrm = orm.forTenant('tenant_abc');
-			const dump = tenantOrm
+			const scopedOrm = orm.withSchema('tenant_abc');
+			const dump = scopedOrm
 				.update('users')
 				.set({ active: 0 })
 				.where(eq('id', 1))
 				.dump();
 
 			expect(dump.sql.toLowerCase()).toMatch(/tenant_abc[".].*users/);
-			expect(dump.meta?.tenant).toBe('tenant_abc');
+			expect(dump.meta?.schema).toBe('tenant_abc');
 		});
 
 		it('should include schema prefix in delete dump', () => {
@@ -567,11 +567,11 @@ describe('Mutation Builders (DX-010)', () => {
 				model: testModel,
 				adapter: createKyselyAdapter(db),
 			});
-			const tenantOrm = orm.forTenant('company_x');
-			const dump = tenantOrm.delete('posts').where(eq('id', 1)).dump();
+			const scopedOrm = orm.withSchema('company_x');
+			const dump = scopedOrm.delete('posts').where(eq('id', 1)).dump();
 
 			expect(dump.sql.toLowerCase()).toMatch(/company_x[".].*posts/);
-			expect(dump.meta?.tenant).toBe('company_x');
+			expect(dump.meta?.schema).toBe('company_x');
 		});
 	});
 
@@ -1024,8 +1024,8 @@ describe('Mutation Builders (DX-010)', () => {
 				model: testModel,
 				adapter: createKyselyAdapter(db),
 			});
-			const tenantOrm = orm.forTenant('tenant_xyz');
-			const dump = tenantOrm
+			const scopedOrm = orm.withSchema('tenant_xyz');
+			const dump = scopedOrm
 				.upsert('users')
 				.values({ name: 'Test', email: 't@e.com' })
 				.onConflict(['email'])
@@ -1033,7 +1033,7 @@ describe('Mutation Builders (DX-010)', () => {
 				.dump();
 
 			expect(dump.sql.toLowerCase()).toMatch(/tenant_xyz[".].*users/);
-			expect(dump.meta?.tenant).toBe('tenant_xyz');
+			expect(dump.meta?.schema).toBe('tenant_xyz');
 		});
 	});
 });

@@ -1186,21 +1186,21 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	readonly strictMode: boolean;
 
 	/**
-	 * Create a tenant-scoped ORM instance.
+	 * Create a schema-scoped ORM instance.
 	 * All queries from the returned instance will include the schema prefix.
 	 * Type information is preserved in the returned instance.
 	 *
-	 * @param schemaName - The tenant schema name
-	 * @returns A new ORM instance scoped to the tenant
+	 * @param schemaName - The database schema name (e.g., 'public', 'blog', 'tenant_123')
+	 * @returns A new ORM instance scoped to the schema
 	 *
 	 * @example
 	 * ```typescript
-	 * const tenantOrm = orm.forTenant('tenant_123');
-	 * const users = await tenantOrm.select('users').all();
-	 * // SQL: SELECT * FROM tenant_123.users
+	 * const scopedOrm = orm.withSchema('blog');
+	 * const users = await scopedOrm.select('users').all();
+	 * // SQL: SELECT * FROM blog.users
 	 * ```
 	 */
-	forTenant(schemaName: string): OrmInstance<DB>;
+	withSchema(schemaName: string): OrmInstance<DB>;
 
 	// =========================================================================
 	// Hierarchy List Methods (DX-022)
@@ -1401,7 +1401,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * });
 	 *
 	 * // Multi-tenant transaction
-	 * await orm.forTenant('tenant_123').transaction(async (tx) => {
+	 * await orm.withSchema('schema_name').transaction(async (tx) => {
 	 *   await tx.insert('events').values({ type: 'order_created' }).execute();
 	 * });
 	 *
@@ -1458,7 +1458,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * // Multi-tenant: raw() does NOT auto-prefix tables with schema.
 	 * // You must include the schema name in your SQL manually:
-	 * const products = await orm.forTenant('acme').raw<Product>(
+	 * const products = await orm.withSchema('acme').raw<Product>(
 	 *   'SELECT * FROM "acme"."products" WHERE inventory > $1',
 	 *   [0]
 	 * );

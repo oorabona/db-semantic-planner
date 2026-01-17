@@ -4,7 +4,7 @@
  * Provides Kysely instance factory and schema management for E2E tests.
  */
 
-import { type Adapter, createKyselyAdapter } from '@db-semantic-planner/adapter-kysely';
+import { type Adapter, createKyselyAdapter } from '@dbsp/adapter-kysely';
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 

@@ -155,7 +155,7 @@ Scenario: Use listDescendants shortcut
 
 ```gherkin
 Scenario: Recursive include respects tenant schema
-  Given multi-tenant ORM with forTenant('acme')
+  Given multi-tenant ORM with withSchema('acme')
   When I call .include('parent', { recursive: true, direction: 'ancestors' })
   Then the CTE should use tenant schema prefix
 ```

@@ -152,12 +152,12 @@ describe('MockAdapter', () => {
 				adapter: createMockAdapter(),
 			});
 
-			// Use forTenant to scope queries to a schema
-			const tenantOrm = orm.forTenant('tenant_123');
-			const dump = tenantOrm.select('users').dump();
+			// Use withSchema to scope queries to a schema
+			const scopedOrm = orm.withSchema('tenant_123');
+			const dump = scopedOrm.select('users').dump();
 
 			expect(dump.sql).toContain('"tenant_123"."users"');
-			expect(dump.meta?.tenant).toBe('tenant_123');
+			expect(dump.meta?.schema).toBe('tenant_123');
 		});
 
 		it('compiles query with relation include', async () => {
@@ -240,8 +240,8 @@ describe('MockAdapter', () => {
 				adapter: createMockAdapter(),
 			});
 
-			const tenantOrm = orm.forTenant('tenant_xyz');
-			const dump = await tenantOrm.select('users').dump();
+			const scopedOrm = orm.withSchema('tenant_xyz');
+			const dump = await scopedOrm.select('users').dump();
 
 			expect(dump.sql).toContain('"tenant_xyz"."users"');
 		});
@@ -270,7 +270,7 @@ describe('MockAdapter', () => {
 				parameters: [],
 			});
 
-			expect(dump.meta?.tenant).toBe('my_tenant');
+			expect(dump.meta?.schema).toBe('my_tenant');
 		});
 	});
 

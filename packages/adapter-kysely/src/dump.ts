@@ -35,7 +35,7 @@ import type {
  *
  * @example
  * ```ts
- * const dump = createDump(intent, model, kysely, { tenant: 'acme' });
+ * const dump = createDump(intent, model, kysely, { schema: 'acme' });
  * console.log(dump.sql);     // SELECT * FROM "acme"."users" AS "t0"
  * console.log(dump.params);  // []
  * console.log(dump.plan);    // { rootTable: 'users', ... }
@@ -63,12 +63,12 @@ export function createDump(
 	const planReport = plan(intent, model, planOptions);
 
 	// Step 2: Compile to SQL
-	const compiled = compile(planReport, model, kysely, options?.tenant);
+	const compiled = compile(planReport, model, kysely, options?.schema);
 
 	// Step 3: Build result
 	if (options) {
 		const meta: DumpMeta = {
-			...(options.tenant && { tenant: options.tenant }),
+			...(options.schema && { schema: options.schema }),
 			...(options.queryName && { queryName: options.queryName }),
 			...(options.correlationId && { correlationId: options.correlationId }),
 			compiledAt: new Date(),
@@ -108,12 +108,12 @@ export function createDumpFromPlan(
 	options?: CompileOptions,
 ): Dump {
 	// Compile to SQL
-	const compiled = compile(planReport, model, kysely, options?.tenant);
+	const compiled = compile(planReport, model, kysely, options?.schema);
 
 	// Build result
 	if (options) {
 		const meta: DumpMeta = {
-			...(options.tenant && { tenant: options.tenant }),
+			...(options.schema && { schema: options.schema }),
 			...(options.queryName && { queryName: options.queryName }),
 			...(options.correlationId && { correlationId: options.correlationId }),
 			compiledAt: new Date(),
@@ -254,7 +254,7 @@ export function toJsonDump(
 		rootTable: dump.plan.rootTable,
 		decisions,
 		warnings,
-		...(dump.meta?.tenant && { tenant: dump.meta.tenant }),
+		...(dump.meta?.schema && { schema: dump.meta.schema }),
 		...(dump.meta?.queryName && { queryName: dump.meta.queryName }),
 		...(dump.meta?.correlationId && {
 			correlationId: dump.meta.correlationId,

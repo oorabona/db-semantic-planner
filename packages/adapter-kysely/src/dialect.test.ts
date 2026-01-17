@@ -300,7 +300,7 @@ describe('assertCapability', () => {
 		it('should not throw for PostgreSQL with supportsWithSchema', () => {
 			const db = createMockDb('PostgresDialectAdapter');
 			expect(() =>
-				assertCapability(db, 'supportsWithSchema', 'forTenant'),
+				assertCapability(db, 'supportsWithSchema', 'withSchema'),
 			).not.toThrow();
 		});
 
@@ -321,14 +321,14 @@ describe('assertCapability', () => {
 		it('should throw UnsupportedOperationError for MySQL with supportsWithSchema', () => {
 			const db = createMockDb('MysqlDialectAdapter');
 			expect(() =>
-				assertCapability(db, 'supportsWithSchema', 'forTenant'),
+				assertCapability(db, 'supportsWithSchema', 'withSchema'),
 			).toThrow(UnsupportedOperationError);
 		});
 
 		it('should throw UnsupportedOperationError for SQLite with supportsWithSchema', () => {
 			const db = createMockDb('SqliteDialectAdapter');
 			expect(() =>
-				assertCapability(db, 'supportsWithSchema', 'forTenant'),
+				assertCapability(db, 'supportsWithSchema', 'withSchema'),
 			).toThrow(UnsupportedOperationError);
 		});
 
@@ -342,11 +342,11 @@ describe('assertCapability', () => {
 		it('should include operation name in error', () => {
 			const db = createMockDb('MysqlDialectAdapter');
 			try {
-				assertCapability(db, 'supportsWithSchema', 'forTenant');
+				assertCapability(db, 'supportsWithSchema', 'withSchema');
 			} catch (error) {
 				expect(error).toBeInstanceOf(UnsupportedOperationError);
 				expect((error as UnsupportedOperationError).operation).toBe(
-					'forTenant',
+					'withSchema',
 				);
 			}
 		});
@@ -354,7 +354,7 @@ describe('assertCapability', () => {
 		it('should include capability name in error', () => {
 			const db = createMockDb('MysqlDialectAdapter');
 			try {
-				assertCapability(db, 'supportsWithSchema', 'forTenant');
+				assertCapability(db, 'supportsWithSchema', 'withSchema');
 			} catch (error) {
 				expect(error).toBeInstanceOf(UnsupportedOperationError);
 				expect((error as UnsupportedOperationError).capability).toBe(
@@ -366,7 +366,7 @@ describe('assertCapability', () => {
 		it('should include dialect name in error', () => {
 			const db = createMockDb('MysqlDialectAdapter');
 			try {
-				assertCapability(db, 'supportsWithSchema', 'forTenant');
+				assertCapability(db, 'supportsWithSchema', 'withSchema');
 			} catch (error) {
 				expect(error).toBeInstanceOf(UnsupportedOperationError);
 				expect((error as UnsupportedOperationError).dialect).toBe('mysql');
@@ -376,7 +376,7 @@ describe('assertCapability', () => {
 		it('should include helpful guidance in error message', () => {
 			const db = createMockDb('MysqlDialectAdapter');
 			try {
-				assertCapability(db, 'supportsWithSchema', 'forTenant');
+				assertCapability(db, 'supportsWithSchema', 'withSchema');
 			} catch (error) {
 				expect(error).toBeInstanceOf(UnsupportedOperationError);
 				expect((error as Error).message).toContain('database switching');
@@ -390,7 +390,7 @@ describe('assertCapability', () => {
 			const db = createMockDb('MysqlDialectAdapter');
 			const customGuidance = 'Custom guidance message';
 			try {
-				assertCapability(db, 'supportsWithSchema', 'forTenant', customGuidance);
+				assertCapability(db, 'supportsWithSchema', 'withSchema', customGuidance);
 			} catch (error) {
 				expect(error).toBeInstanceOf(UnsupportedOperationError);
 				expect((error as Error).message).toContain(customGuidance);
@@ -401,7 +401,7 @@ describe('assertCapability', () => {
 
 describe('BDD Scenarios', () => {
 	describe('Feature: Multi-tenant Capability Guard', () => {
-		describe('Scenario: forTenant works on PostgreSQL', () => {
+		describe('Scenario: withSchema works on PostgreSQL', () => {
 			it('Given a Kysely instance with PostgresDialect And supportsWithSchema is true, When assertCapability for supportsWithSchema is called, Then no error is thrown', () => {
 				// Given
 				const db = createMockDb('PostgresDialectAdapter');
@@ -410,12 +410,12 @@ describe('BDD Scenarios', () => {
 
 				// When/Then
 				expect(() =>
-					assertCapability(db, 'supportsWithSchema', 'forTenant'),
+					assertCapability(db, 'supportsWithSchema', 'withSchema'),
 				).not.toThrow();
 			});
 		});
 
-		describe('Scenario: forTenant throws on MySQL', () => {
+		describe('Scenario: withSchema throws on MySQL', () => {
 			it('Given a Kysely instance with MysqlDialect And supportsWithSchema is false, When assertCapability for supportsWithSchema is called, Then UnsupportedOperationError is thrown', () => {
 				// Given
 				const db = createMockDb('MysqlDialectAdapter');
@@ -424,13 +424,13 @@ describe('BDD Scenarios', () => {
 
 				// When/Then
 				try {
-					assertCapability(db, 'supportsWithSchema', 'forTenant');
+					assertCapability(db, 'supportsWithSchema', 'withSchema');
 					expect.fail('Expected UnsupportedOperationError to be thrown');
 				} catch (error) {
 					// Then
 					expect(error).toBeInstanceOf(UnsupportedOperationError);
 					expect((error as UnsupportedOperationError).operation).toBe(
-						'forTenant',
+						'withSchema',
 					);
 					expect((error as Error).message).toContain('supportsWithSchema');
 					expect((error as Error).message).toContain('mysql');
@@ -438,14 +438,14 @@ describe('BDD Scenarios', () => {
 			});
 		});
 
-		describe('Scenario: forTenant throws on SQLite', () => {
+		describe('Scenario: withSchema throws on SQLite', () => {
 			it('Given a Kysely instance with SqliteDialect, When assertCapability for supportsWithSchema is called, Then UnsupportedOperationError is thrown And error.message contains "SQLite"', () => {
 				// Given
 				const db = createMockDb('SqliteDialectAdapter');
 
 				// When/Then
 				try {
-					assertCapability(db, 'supportsWithSchema', 'forTenant');
+					assertCapability(db, 'supportsWithSchema', 'withSchema');
 					expect.fail('Expected UnsupportedOperationError to be thrown');
 				} catch (error) {
 					// Then
@@ -703,12 +703,12 @@ describe('test helpers', () => {
 		it('should be usable with assertCapability', () => {
 			const pgDb = withMockedCapabilities('postgresql');
 			expect(() =>
-				assertCapability(pgDb, 'supportsWithSchema', 'forTenant'),
+				assertCapability(pgDb, 'supportsWithSchema', 'withSchema'),
 			).not.toThrow();
 
 			const mysqlDb = withMockedCapabilities('mysql');
 			expect(() =>
-				assertCapability(mysqlDb, 'supportsWithSchema', 'forTenant'),
+				assertCapability(mysqlDb, 'supportsWithSchema', 'withSchema'),
 			).toThrow(UnsupportedOperationError);
 		});
 	});

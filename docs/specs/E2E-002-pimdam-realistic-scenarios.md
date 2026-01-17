@@ -265,7 +265,7 @@ Scenario: Q8-03 Strict mode throws on ambiguity without via
 Scenario: Q9-01 Tenant isolation via PostgreSQL schemas
   Given tenants "acme" and "globex" with separate schemas
   And both have products table with different data
-  When I query orm.forTenant('acme').query('products').findMany()
+  When I query orm.withSchema('acme').query('products').findMany()
   Then only ACME products are returned (schema: acme.products)
 
 Scenario: Q9-02 Concurrent tenant queries
@@ -275,7 +275,7 @@ Scenario: Q9-02 Concurrent tenant queries
 
 Scenario: Q9-03 Tenant schema name validation
   Given attempt to use invalid schema name "'; DROP TABLE--"
-  When I call orm.forTenant(maliciousName)
+  When I call orm.withSchema(maliciousName)
   Then InvalidIdentifierError is thrown (SQL injection prevented)
 ```
 

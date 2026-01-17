@@ -108,7 +108,7 @@ export interface OrmContext {
    *
    * @throws InvalidIdentifierError if schemaName is invalid
    */
-  forTenant(schemaName: string): TenantOrmContext;
+  withSchema(schemaName: string): TenantOrmContext;
 
   /**
    * Start a query on a model.
@@ -342,11 +342,11 @@ We use `sql` and `parameters` directly in `Dump`.
 
 ## Multi-tenant Integration
 
-### forTenant() Implementation
+### withSchema() Implementation
 
 ```typescript
-// Pseudocode for forTenant()
-function forTenant(schemaName: string): TenantOrmContext {
+// Pseudocode for withSchema()
+function withSchema(schemaName: string): TenantOrmContext {
   // 1. Validate schema name
   validateSchemaName(schemaName);
 
@@ -377,9 +377,9 @@ function validateSchemaName(name: string): void {
 ### Tenant in Dump.meta
 
 ```typescript
-const dump = orm.forTenant('acme').query(User).dump();
+const dump = orm.withSchema('acme').query(User).dump();
 
-expect(dump.meta?.tenant).toBe('acme');
+expect(dump.meta?.schema).toBe('acme');
 expect(dump.sql).toContain('"acme"."users"');
 ```
 
@@ -451,12 +451,12 @@ expect(dump.params).toEqual([true]);
 const orm = createOrm({ kysely: db, model: schema });
 
 // Query with tenant
-const dump = orm.forTenant('acme').query(User)
+const dump = orm.withSchema('acme').query(User)
   .where(eq('active', true))
   .dump();
 
 // Assertions
-expect(dump.meta?.tenant).toBe('acme');
+expect(dump.meta?.schema).toBe('acme');
 expect(dump.sql).toBe(`SELECT "t0".* FROM "acme"."users" AS "t0" WHERE "t0"."active" = $1`);
 expect(dump.params).toEqual([true]);
 ```
@@ -593,4 +593,4 @@ packages/adapter-kysely/src/
 - CORE-001-model-ir.md (provides ModelIR for query context)
 - CORE-002-intent-ast.md (provides IntentAST for planning)
 - CORE-003-planner.md (provides PlanReport for compilation)
-- ADAPTER-002-multi-tenant.md (details forTenant implementation)
+- ADAPTER-002-multi-tenant.md (details withSchema implementation)

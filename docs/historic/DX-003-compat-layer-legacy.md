@@ -49,7 +49,7 @@ doc-meta:
 - **BR6:** `findFirst()` MUST return `Promise<unknown | undefined>`
 - **BR7:** `findFirstOrThrow()` MUST throw `NotFoundError` if no results
 - **BR8:** Execution REQUIRES `db` option in `createOrm()` or throws `ExecutionError`
-- **BR9:** Multi-tenant queries (via `forTenant()`) MUST include schema prefix
+- **BR9:** Multi-tenant queries (via `withSchema()`) MUST include schema prefix
 
 ### Error Handling
 - **BR10:** `ExecutionError` thrown when `db` not configured
@@ -202,7 +202,7 @@ And error message includes hint about db option
 #### Scenario 2.7: Multi-tenant execution
 ```gherkin
 Given ORM configured with model and db
-When orm.forTenant('tenant_123').query('users').findMany() is called
+When orm.withSchema('tenant_123').query('users').findMany() is called
 Then SQL includes schema prefix 'tenant_123'
 And results come from tenant schema
 ```
@@ -277,7 +277,7 @@ Then execution respects select and where
 **Package:** packages/dx
 
 **Files:**
-- UPDATE `src/orm.ts` - Ensure forTenant() passes schema to compile
+- UPDATE `src/orm.ts` - Ensure withSchema() passes schema to compile
 
 **Tests:**
 - UPDATE `src/execution.test.ts` - Multi-tenant tests
@@ -319,7 +319,7 @@ Then execution respects select and where
 - [x] ExecutionError and NotFoundError implemented (12 tests)
 - [x] findMany, findFirst, findFirstOrThrow implemented
 - [x] db option added to OrmOptions
-- [x] Multi-tenant execution works with forTenant()
+- [x] Multi-tenant execution works with withSchema()
 - [x] All BDD scenarios have passing tests (22 scenarios)
 - [x] All tests pass (258 total: 93 core + 59 adapter + 106 dx)
 - [x] Lint/typecheck pass

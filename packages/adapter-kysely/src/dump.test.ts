@@ -101,13 +101,13 @@ describe('Dump API', () => {
 			};
 
 			const dump = createDump(intent, basicSchema, kysely, {
-				tenant: 'acme',
+				schema: 'acme',
 				queryName: 'findUsers',
 				correlationId: 'req-123',
 			});
 
 			expect(dump.meta).toBeDefined();
-			expect(dump.meta?.tenant).toBe('acme');
+			expect(dump.meta?.schema).toBe('acme');
 			expect(dump.meta?.queryName).toBe('findUsers');
 			expect(dump.meta?.correlationId).toBe('req-123');
 			expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
@@ -131,7 +131,7 @@ describe('Dump API', () => {
 			};
 
 			const dump = createDump(intent, basicSchema, kysely, {
-				tenant: 'tenant_123',
+				schema: 'tenant_123',
 			});
 
 			expect(dump.sql).toContain('tenant_123');
@@ -280,7 +280,7 @@ describe('Dump API', () => {
 				const dump = createDump(intent, basicSchema, kysely, {
 					correlationId: 'trace-789',
 					queryName: 'getUser',
-					tenant: 'acme',
+					schema: 'acme',
 				});
 
 				// When
@@ -291,7 +291,7 @@ describe('Dump API', () => {
 				expect(result.params).toContain(42);
 				expect(result.correlationId).toBe('trace-789');
 				expect(result.queryName).toBe('getUser');
-				expect(result.tenant).toBe('acme');
+				expect(result.schema).toBe('acme');
 				expect(result.rootTable).toBe('users');
 				expect(Array.isArray(result.decisions)).toBe(true);
 				expect(Array.isArray(result.warnings)).toBe(true);

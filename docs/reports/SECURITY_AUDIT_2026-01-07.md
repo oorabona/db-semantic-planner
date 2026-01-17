@@ -26,7 +26,7 @@ The db-semantic-planner codebase demonstrates **strong security practices** for 
 | Input Validation | ✅ SECURE | Identifier validation via InvalidIdentifierError |
 | Secrets Management | ✅ SECURE | Parameter redaction with configurable patterns |
 | Dependency Security | ✅ SECURE | No known vulnerabilities (pnpm audit) |
-| Multi-tenant Isolation | ✅ SECURE | Schema-based isolation via forTenant() |
+| Multi-tenant Isolation | ✅ SECURE | Schema-based isolation via withSchema() |
 | Cryptography | ✅ N/A | No crypto operations in codebase |
 
 ---
@@ -123,7 +123,7 @@ export class InvalidIdentifierError extends Error {
 
 ```typescript
 // packages/dx/src/orm.ts:83-91
-forTenant(tenantSchema: string): OrmInstance {
+withSchema(tenantSchema: string): OrmInstance {
   return createOrmInstance(
     model,
     strictMode,
@@ -249,7 +249,7 @@ sequenceDiagram
     participant Compiler
     participant Kysely
 
-    User->>ORM: forTenant("tenant_123")
+    User->>ORM: withSchema("tenant_123")
     ORM->>TenantORM: Create scoped instance
     Note over TenantORM: schemaName = "tenant_123"
 
@@ -288,14 +288,14 @@ sequenceDiagram
 
 | ID | Severity | Type | Description | Status |
 |----|----------|------|-------------|--------|
-| F-001 | LOW | Enhancement | Add explicit schema name validation in forTenant() | ✅ FIXED |
+| F-001 | LOW | Enhancement | Add explicit schema name validation in withSchema() | ✅ FIXED |
 | F-002 | INFO | Style | Biome formatting issues (11 errors, non-security) | ✅ FIXED |
 
 ### 9.2 Detailed Recommendations
 
 #### F-001: Schema Name Validation ✅ FIXED
 
-**Before:** `forTenant(schemaName)` passed directly to Kysely without validation.
+**Before:** `withSchema(schemaName)` passed directly to Kysely without validation.
 
 **After:** Implemented `validateIdentifier()` function in `packages/adapter-kysely/src/errors.ts`:
 
@@ -314,9 +314,9 @@ export function validateIdentifier(identifier: string, type: string = 'identifie
 }
 ```
 
-**Usage in `forTenant()`:**
+**Usage in `withSchema()`:**
 ```typescript
-forTenant(tenantSchema: string): OrmInstance {
+withSchema(tenantSchema: string): OrmInstance {
   validateIdentifier(tenantSchema, 'schema'); // Throws on invalid input
   return createOrmInstance(...);
 }

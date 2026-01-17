@@ -5,7 +5,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { and, createOrm, eq, exists } from '@db-semantic-planner/core';
+import { and, createOrm, eq, exists } from '@dbsp/core';
 import {
 	closeTestDb,
 	createPimdamSchema,
@@ -43,7 +43,7 @@ describe.skipIf(shouldSkipE2E())(
 			tenant: string,
 		) =>
 			orm
-				.forTenant(tenant)
+				.withSchema(tenant)
 				.select('products')
 				.where(
 					and(

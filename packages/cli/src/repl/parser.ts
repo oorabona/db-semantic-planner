@@ -44,7 +44,19 @@ export interface ParsedQuery {
 
 export interface WhereClause {
 	column: string;
-	operator: '=' | '!=' | '>' | '<' | '>=' | '<=' | 'like' | 'in' | 'is';
+	operator:
+		| '='
+		| '!='
+		| '>'
+		| '<'
+		| '>='
+		| '<='
+		| 'like'
+		| 'in'
+		| 'is'
+		| 'overlaps'
+		| 'contains'
+		| 'containedBy';
 	value: unknown;
 }
 
@@ -100,9 +112,23 @@ function tokenize(input: string): string[] {
 	let current = '';
 	let inQuote = false;
 	let quoteChar = '';
+	let inRange = false;
 
 	for (let i = 0; i < input.length; i++) {
 		const char = input[i];
+
+		// Handle PostgreSQL range literals [lower, upper) or (lower, upper]
+		// Only [ starts a range (not ( which is used for function calls)
+		// Closing bracket can be ] or ) regardless of opening bracket
+		if (inRange) {
+			current += char;
+			if (char === ')' || char === ']') {
+				inRange = false;
+				tokens.push(current);
+				current = '';
+			}
+			continue;
+		}
 
 		if (inQuote) {
 			if (char === quoteChar) {
@@ -112,6 +138,14 @@ function tokenize(input: string): string[] {
 			} else {
 				current += char;
 			}
+		} else if (char === '[') {
+			// Start of PostgreSQL range literal (only [ starts range, not ()
+			if (current) {
+				tokens.push(current);
+				current = '';
+			}
+			inRange = true;
+			current = char;
 		} else if (char === '"' || char === "'") {
 			if (current) {
 				tokens.push(current);
@@ -163,8 +197,51 @@ function tokenize(input: string): string[] {
 }
 
 /**
- * Parse a value from token
+ * Parse a PostgreSQL range literal like "[2024-01-01, 2024-01-15)" into a RangeValue object.
+ * Supports formats:
+ * - "[lower, upper)" or "(lower, upper]" - standard PostgreSQL range notation
+ * - "lower..upper" - shorthand for inclusive range [lower, upper]
+ *
+ * @returns RangeValue object or null if not a valid range literal
  */
+function parseRangeLiteral(
+	token: string,
+): { lower: string | number; upper: string | number; bounds?: string } | null {
+	// Standard PostgreSQL range format: [lower, upper) or (lower, upper]
+	const pgRangeMatch = token.match(/^([\[\(])([^,]*),\s*([^\]\)]*)([\]\)])$/);
+	if (pgRangeMatch) {
+		const [, lowerBound, lower = '', upper = '', upperBound] = pgRangeMatch;
+		const bounds = `${lowerBound}${upperBound}`; // e.g., "[)" or "(]"
+		return {
+			lower: parseSimpleValue(lower.trim()),
+			upper: parseSimpleValue(upper.trim()),
+			bounds,
+		};
+	}
+
+	// Shorthand format: lower..upper (inclusive)
+	const shorthandMatch = token.match(/^(.+)\.\.(.+)$/);
+	if (shorthandMatch) {
+		const [, lower = '', upper = ''] = shorthandMatch;
+		return {
+			lower: parseSimpleValue(lower.trim()),
+			upper: parseSimpleValue(upper.trim()),
+			bounds: '[]', // inclusive both sides
+		};
+	}
+
+	return null;
+}
+
+/**
+ * Parse a simple value (number or string) without range detection
+ */
+function parseSimpleValue(token: string): string | number {
+	const num = Number(token);
+	if (!Number.isNaN(num)) return num;
+	return token;
+}
+
 function parseValue(token: string): unknown {
 	// Boolean
 	if (token.toLowerCase() === 'true') return true;
@@ -172,6 +249,10 @@ function parseValue(token: string): unknown {
 
 	// Null
 	if (token.toLowerCase() === 'null') return null;
+
+	// Range literal (PostgreSQL)
+	const rangeValue = parseRangeLiteral(token);
+	if (rangeValue) return rangeValue;
 
 	// Number
 	const num = Number(token);
@@ -302,6 +383,16 @@ function parseWhereCondition(
 			break;
 		case 'is':
 			operator = 'is';
+			break;
+		// Range operators (PostgreSQL)
+		case 'overlaps':
+			operator = 'overlaps';
+			break;
+		case 'contains':
+			operator = 'contains';
+			break;
+		case 'containedby':
+			operator = 'containedBy';
 			break;
 		default:
 			throw new ParseError(`Unknown operator: ${op}`);

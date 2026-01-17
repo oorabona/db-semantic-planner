@@ -47,6 +47,7 @@ import type {
 	ExpressionBuilder,
 	Kysely,
 	SelectQueryBuilder,
+	SqlBool,
 } from 'kysely';
 import { type RawBuilder, sql } from 'kysely';
 import {
@@ -81,6 +82,10 @@ interface CompilerState {
 			strategy: 'join' | 'json_agg';
 		}
 	>;
+	/** Dialect capabilities for feature validation (CORE-004) */
+	coreCapabilities?: CoreDialectCapabilities;
+	/** Dialect name for error messages */
+	dialect?: string;
 }
 
 // ============================================================================
@@ -243,6 +248,10 @@ export interface InternalCompileOptions {
 	windows?: readonly WindowIntent[];
 	/** Column aliasing mode for included relations (CLI-010) */
 	aliasIncludedColumns?: 'always' | 'onCollision';
+	/** Dialect capabilities for feature validation (CORE-004) */
+	coreCapabilities?: CoreDialectCapabilities;
+	/** Dialect name for error messages */
+	dialect?: string;
 }
 
 // ============================================================================
@@ -382,15 +391,204 @@ export function compileSeparateInclude(
 	return query.compile();
 }
 
+// ============================================================================
+// Range Type Helpers (PostgreSQL)
+// ============================================================================
+
+/**
+ * Range value with lower/upper bounds and optional bounds specification.
+ */
+interface RangeValue {
+	readonly lower: unknown;
+	readonly upper: unknown;
+	readonly bounds?: '[)' | '[]' | '()' | '(]';
+}
+
+/**
+ * Check if a value is a range value (has lower/upper properties).
+ */
+function isRangeValue(value: unknown): value is RangeValue {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		'lower' in value &&
+		'upper' in value
+	);
+}
+
+/**
+ * Detect PostgreSQL range type from values.
+ * - ISO date strings (YYYY-MM-DD) → daterange
+ * - ISO timestamps (with T or space and time) → tstzrange
+ * - Integers → int4range
+ * - Decimals → numrange
+ */
+function inferRangeType(lower: unknown, upper: unknown): string {
+	// Use whichever bound is defined to infer type
+	const sample = lower ?? upper;
+	if (sample === null || sample === undefined) {
+		// Unbounded range - default to text (PostgreSQL will infer from column)
+		return '';
+	}
+
+	if (typeof sample === 'number') {
+		return Number.isInteger(sample) ? '::int4range' : '::numrange';
+	}
+
+	if (typeof sample === 'bigint') {
+		return '::int8range';
+	}
+
+	if (sample instanceof Date) {
+		return '::tstzrange';
+	}
+
+	if (typeof sample === 'string') {
+		// Check if it looks like a date/timestamp
+		// ISO date: YYYY-MM-DD (exactly 10 chars)
+		// ISO timestamp: YYYY-MM-DDTHH:MM:SS or YYYY-MM-DD HH:MM:SS
+		if (/^\d{4}-\d{2}-\d{2}$/.test(sample)) {
+			return '::daterange';
+		}
+		if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(sample)) {
+			return '::tstzrange';
+		}
+		// Check if it's a numeric string
+		if (/^-?\d+$/.test(sample)) {
+			return '::int4range';
+		}
+		if (/^-?\d+\.?\d*$/.test(sample)) {
+			return '::numrange';
+		}
+	}
+
+	// Default: no cast, let PostgreSQL infer from column
+	return '';
+}
+
+/**
+ * Infer PostgreSQL scalar type cast for range element operations.
+ * This is used when comparing a range with a scalar (e.g., range @> element).
+ */
+function inferScalarCast(value: unknown): string {
+	if (value === null || value === undefined) {
+		return '';
+	}
+
+	if (typeof value === 'number') {
+		return Number.isInteger(value) ? '::integer' : '::numeric';
+	}
+
+	if (typeof value === 'bigint') {
+		return '::bigint';
+	}
+
+	if (value instanceof Date) {
+		return '::timestamptz';
+	}
+
+	if (typeof value === 'string') {
+		// Check if it looks like a date/timestamp
+		if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+			return '::date';
+		}
+		if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(value)) {
+			return '::timestamptz';
+		}
+		// Check if it's a numeric string
+		if (/^-?\d+$/.test(value)) {
+			return '::integer';
+		}
+		if (/^-?\d+\.?\d*$/.test(value)) {
+			return '::numeric';
+		}
+	}
+
+	// Default: no cast
+	return '';
+}
+
+/**
+ * Build a PostgreSQL range literal from a RangeValue.
+ * @example { lower: '2025-01-15', upper: '2025-01-20', bounds: '[)' } → '[2025-01-15,2025-01-20)'
+ */
+function buildRangeLiteral(value: RangeValue): { literal: string; cast: string } {
+	const bounds = value.bounds ?? '[)';
+	const leftBound = bounds[0];
+	const rightBound = bounds[1];
+	// Format values - convert Date objects to ISO strings for PostgreSQL
+	const formatValue = (v: unknown): string => {
+		if (v === null || v === undefined) return '';
+		if (v instanceof Date) return v.toISOString();
+		return String(v);
+	};
+	const lower = formatValue(value.lower);
+	const upper = formatValue(value.upper);
+	// Escape single quotes in values to prevent SQL injection
+	const escapedLower = lower.replace(/'/g, "''");
+	const escapedUpper = upper.replace(/'/g, "''");
+	// Infer range type from values for explicit casting
+	const cast = inferRangeType(value.lower, value.upper);
+	// Return literal and cast separately
+	return {
+		literal: `'${leftBound}${escapedLower},${escapedUpper}${rightBound}'`,
+		cast,
+	};
+}
+
+/**
+ * Compile a range WHERE condition to SQL.
+ * PostgreSQL operators: && (overlaps), @> (contains), <@ (contained by)
+ */
+function compileRangeExpression(
+	column: string,
+	operator: 'overlaps' | 'contains' | 'containedBy',
+	value: unknown,
+	coreCapabilities?: CoreDialectCapabilities,
+	dialect?: string,
+): RawBuilder<SqlBool> {
+	// Validate range capability if capabilities are provided
+	if (coreCapabilities && !coreCapabilities.supportsRangeTypes) {
+		throw new UnsupportedOperationError(
+			'range types',
+			`Range operators (overlaps, contains, containedBy) require PostgreSQL. ` +
+				`Other databases do not have native range type support.`,
+			{ capability: 'supportsRangeTypes', dialect: dialect ?? 'unknown' },
+		);
+	}
+
+	const sqlOp =
+		operator === 'overlaps' ? '&&' : operator === 'contains' ? '@>' : '<@';
+
+	if (isRangeValue(value)) {
+		// Range-to-range comparison
+		// Build literal with explicit cast: '[2024-01-15,2024-01-20)'::daterange
+		const { literal, cast } = buildRangeLiteral(value);
+		return sql`${sql.ref(column)} ${sql.raw(sqlOp)} ${sql.raw(literal)}${sql.raw(cast)}`;
+	}
+	// Scalar value (e.g., range @> element)
+	// PostgreSQL needs explicit cast for parameterized values
+	const scalarCast = inferScalarCast(value);
+	if (scalarCast) {
+		return sql`${sql.ref(column)} ${sql.raw(sqlOp)} ${sql.val(value)}${sql.raw(scalarCast)}`;
+	}
+	return sql`${sql.ref(column)} ${sql.raw(sqlOp)} ${sql.val(value)}`;
+}
+
 /**
  * Add simple WHERE conditions (non-relational) to a query.
  * Used for separate include queries.
+ *
+ * @param coreCapabilities - Optional dialect capabilities for feature validation
+ * @param dialect - Optional dialect name for error messages
  */
 function addSimpleWhere(
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 	query: SelectQueryBuilder<any, any, any>,
 	where: WhereIntent,
 	tableName: string,
+	coreCapabilities?: CoreDialectCapabilities,
+	dialect?: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {
 	switch (where.kind) {
@@ -427,9 +625,25 @@ function addSimpleWhere(
 			return where.operator === 'isNull'
 				? query.where(`${tableName}.${where.field}`, 'is', null)
 				: query.where(`${tableName}.${where.field}`, 'is not', null);
+		case 'range':
+			return query.where(
+				compileRangeExpression(
+					`${tableName}.${where.field}`,
+					where.operator,
+					where.value,
+					coreCapabilities,
+					dialect,
+				),
+			);
 		case 'and':
 			for (const condition of where.conditions) {
-				query = addSimpleWhere(query, condition, tableName);
+				query = addSimpleWhere(
+					query,
+					condition,
+					tableName,
+					coreCapabilities,
+					dialect,
+				);
 			}
 			return query;
 		case 'or':
@@ -473,6 +687,16 @@ function addSimpleWhere(
 							return c.operator === 'isNull'
 								? eb(col, 'is', null)
 								: eb(col, 'is not', null);
+						}
+						case 'range': {
+							const col = `${tableName}.${c.field}`;
+							return compileRangeExpression(
+								col,
+								c.operator,
+								c.value,
+								coreCapabilities,
+								dialect,
+							);
 						}
 						default:
 							return eb.lit(true);
@@ -614,7 +838,7 @@ export function compile(
 			? { schemaName: schemaNameOrOptions }
 			: (schemaNameOrOptions ?? {});
 
-	const { schemaName, windows } = options;
+	const { schemaName, windows, coreCapabilities, dialect } = options;
 
 	const state: CompilerState = {
 		aliasCounter: 0,
@@ -622,6 +846,8 @@ export function compile(
 		parameters: [],
 		joinedFilterRelations: new Map(),
 		joinedIncludeRelations: new Map(),
+		...(coreCapabilities !== undefined && { coreCapabilities }),
+		...(dialect !== undefined && { dialect }),
 	};
 
 	const intent = plan.intent;
@@ -632,7 +858,14 @@ export function compile(
 	state.tableAliases.set(rootTable, rootAlias);
 
 	// Build CTEs first (must come before selectFrom in Kysely)
-	const builder = buildCTEs(plan, model, kysely, schemaName);
+	const builder = buildCTEs(
+		plan,
+		model,
+		kysely,
+		schemaName,
+		coreCapabilities,
+		dialect,
+	);
 
 	// Build the base query using the CTE-enhanced builder
 	let query = buildBaseQuery(intent, rootAlias, builder, schemaName);
@@ -1217,7 +1450,16 @@ export function compileRecursive(
 	// Apply emit filters if specified
 	if (intent.emit?.where) {
 		// Apply custom WHERE filter on final results
-		finalQuery = addWhereSimple(finalQuery, intent.emit.where, cteName);
+		const coreCapabilities = getCoreCapabilitiesForDialect(
+			dialect as DialectName,
+		);
+		finalQuery = addWhereSimple(
+			finalQuery,
+			intent.emit.where,
+			cteName,
+			coreCapabilities,
+			dialect,
+		);
 	}
 
 	// Apply ordering from emit options
@@ -1358,6 +1600,11 @@ function buildRecursiveBaseCase(
 
 	let query = db.selectFrom(`${startTable} as t0`);
 
+	// Get core capabilities for range type validation
+	const coreCapabilities = getCoreCapabilitiesForDialect(
+		dialect as DialectName,
+	);
+
 	// Build SELECT clause
 	// biome-ignore lint/suspicious/noExplicitAny: Dynamic select expressions
 	query = query.select((eb: any) => {
@@ -1411,7 +1658,13 @@ function buildRecursiveBaseCase(
 
 	// Apply start WHERE clause
 	if (intent.start.where) {
-		query = addWhereSimple(query, intent.start.where, 't0');
+		query = addWhereSimple(
+			query,
+			intent.start.where,
+			't0',
+			coreCapabilities,
+			dialect,
+		);
 	}
 
 	return query;
@@ -1485,6 +1738,11 @@ function buildAdjacencyRecursiveStep(
 		? `${schemaName}.${traversal.nodeTable}`
 		: traversal.nodeTable;
 
+	// Get core capabilities for range type validation
+	const coreCapabilities = getCoreCapabilitiesForDialect(
+		dialect as DialectName,
+	);
+
 	// Join CTE with node table
 	// For descendants: prev.node_id = node.parent_id
 	// For ancestors: prev.node_id = node.id AND node.parent_id = prev.node_id
@@ -1551,7 +1809,13 @@ function buildAdjacencyRecursiveStep(
 
 	// Apply step WHERE clause
 	if (traversal.stepWhere) {
-		query = addWhereSimple(query, traversal.stepWhere, 'node');
+		query = addWhereSimple(
+			query,
+			traversal.stepWhere,
+			'node',
+			coreCapabilities,
+			dialect,
+		);
 	}
 
 	return query;
@@ -1579,6 +1843,11 @@ function buildEdgeTableRecursiveStep(
 	const edgeTable = schemaName
 		? `${schemaName}.${traversal.edgeTable}`
 		: traversal.edgeTable;
+
+	// Get core capabilities for range type validation
+	const coreCapabilities = getCoreCapabilitiesForDialect(
+		dialect as DialectName,
+	);
 
 	// Start from CTE
 	let query = db.selectFrom(`${cteName} as prev`);
@@ -1666,12 +1935,24 @@ function buildEdgeTableRecursiveStep(
 
 	// Apply edge WHERE clause
 	if (traversal.edgeWhere) {
-		query = addWhereSimple(query, traversal.edgeWhere, 'edge');
+		query = addWhereSimple(
+			query,
+			traversal.edgeWhere,
+			'edge',
+			coreCapabilities,
+			dialect,
+		);
 	}
 
 	// Apply node WHERE clause
 	if (traversal.nodeWhere) {
-		query = addWhereSimple(query, traversal.nodeWhere, 'node');
+		query = addWhereSimple(
+			query,
+			traversal.nodeWhere,
+			'node',
+			coreCapabilities,
+			dialect,
+		);
 	}
 
 	return query;
@@ -1774,6 +2055,8 @@ function addWhereSimple(
 	query: SelectQueryBuilder<any, any, any>,
 	where: WhereIntent,
 	alias: string,
+	coreCapabilities?: CoreDialectCapabilities,
+	dialect?: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {
 	// Handle comparison operators (WhereComparisonIntent has kind='comparison', field, operator, value)
@@ -1840,7 +2123,13 @@ function addWhereSimple(
 		const w = where as { kind: 'and'; conditions: WhereIntent[] };
 		let result = query;
 		for (const condition of w.conditions) {
-			result = addWhereSimple(result, condition, alias);
+			result = addWhereSimple(
+				result,
+				condition,
+				alias,
+				coreCapabilities,
+				dialect,
+			);
 		}
 		return result;
 	}
@@ -1890,6 +2179,19 @@ function addWhereSimple(
 							return nullC.operator === 'isNull'
 								? eb(col, 'is', null)
 								: eb(col, 'is not', null);
+						}
+						case 'range': {
+							const rangeC = c as {
+								operator: 'overlaps' | 'contains' | 'containedBy';
+								value: unknown;
+							};
+							return compileRangeExpression(
+								col,
+								rangeC.operator,
+								rangeC.value,
+								coreCapabilities,
+								dialect,
+							);
 						}
 					}
 				}
@@ -2265,6 +2567,15 @@ function compileWhere(
 				return eb(`${alias}.${where.field}`, 'is', null);
 			}
 			return eb(`${alias}.${where.field}`, 'is not', null);
+
+		case 'range':
+			return compileRangeExpression(
+				`${alias}.${where.field}`,
+				where.operator,
+				where.value,
+				state.coreCapabilities,
+				state.dialect,
+			);
 
 		case 'and':
 			// Empty AND is always true (no conditions to fail)
@@ -4014,6 +4325,8 @@ function buildRecursiveCTE(
 	includeIntent: IncludeIntent | undefined,
 	targetTable: string,
 	_schemaName: string | undefined,
+	coreCapabilities?: CoreDialectCapabilities,
+	dialect?: string,
 ): // biome-ignore lint/suspicious/noExplicitAny: Returns Kysely builder
 any {
 	const recursive = includeIntent?.recursive;
@@ -4062,6 +4375,8 @@ any {
 				baseQuery,
 				includeIntent.where,
 				relation.target,
+				coreCapabilities,
+				dialect,
 			);
 		}
 
@@ -4102,7 +4417,13 @@ any {
 
 		// Apply include.where filter to recursive case
 		if (includeIntent?.where) {
-			recursiveQuery = addWhereSimple(recursiveQuery, includeIntent.where, 't');
+			recursiveQuery = addWhereSimple(
+				recursiveQuery,
+				includeIntent.where,
+				't',
+				coreCapabilities,
+				dialect,
+			);
 		}
 
 		// Combine with UNION ALL (standard for recursive CTEs)
@@ -4116,6 +4437,8 @@ function buildCTEs(
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 	kysely: Kysely<any>,
 	schemaName?: string,
+	coreCapabilities?: CoreDialectCapabilities,
+	dialect?: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Returns Kysely or WithSchemaBuilder
 ): any {
 	if (plan.ctes.length === 0) {
@@ -4159,6 +4482,8 @@ function buildCTEs(
 				includeIntent,
 				targetTable,
 				schemaName,
+				coreCapabilities,
+				dialect,
 			);
 		} else {
 			// Non-recursive CTE (existing CLI-012b logic)
@@ -4173,6 +4498,8 @@ function buildCTEs(
 						cteQuery,
 						includeIntent.where,
 						relation.target,
+						coreCapabilities,
+						dialect,
 					);
 				}
 
