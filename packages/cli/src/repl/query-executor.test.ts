@@ -464,4 +464,32 @@ describe('executeQuery - aggregates (CLI-016)', () => {
 			expect(result.sql).toContain('"depth" < $1');
 		});
 	});
+
+	// CLI-021: Schema scoping
+	describe('schema scoping', () => {
+		it('should add schema prefix when schemaName is provided', () => {
+			const query: ParsedQuery = {
+				table: 'posts',
+			};
+
+			const result = executeQuery(query, testSchema, {
+				schemaName: 'tenant_123',
+			});
+
+			expect(result.error).toBeUndefined();
+			expect(result.sql).toContain('"tenant_123"');
+			expect(result.sql.toLowerCase()).toMatch(/tenant_123[".].*posts/);
+		});
+
+		it('should not add schema prefix when schemaName is not provided', () => {
+			const query: ParsedQuery = {
+				table: 'posts',
+			};
+
+			const result = executeQuery(query, testSchema);
+
+			expect(result.error).toBeUndefined();
+			expect(result.sql).not.toContain('tenant_');
+		});
+	});
 });

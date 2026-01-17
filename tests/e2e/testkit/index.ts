@@ -50,3 +50,11 @@ export {
 } from './blog-extended.ddl.js';
 export { blogExtendedModel } from './blog-extended.model.js';
 export { seedBlogExtendedData, blogExtendedTestData } from './blog-extended.seed.js';
+
+// Scheduling (PostgreSQL range types)
+export {
+	createSchedulingSchema,
+	dropSchedulingSchema,
+} from './scheduling.ddl.js';
+export { schedulingModel } from './scheduling.model.js';
+export { seedSchedulingData, schedulingTestData } from './scheduling.seed.js';

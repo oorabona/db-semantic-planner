@@ -24,7 +24,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { coalesce, createOrm, eq, like } from '@db-semantic-planner/core';
+import { coalesce, createOrm, eq, like } from '@dbsp/core';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
@@ -61,7 +61,7 @@ describe.skipIf(shouldSkipE2E())(
 
 				// Query widget directly to verify seed data
 				const widget = await orm
-					.forTenant(TENANT)
+					.withSchema(TENANT)
 					.select('products')
 					.where(eq('sku', 'WIDGET-001'))
 					.columns(['sku', 'name_fr', 'name_en'])
@@ -77,7 +77,7 @@ describe.skipIf(shouldSkipE2E())(
 				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const result = await orm
-					.forTenant(TENANT)
+					.withSchema(TENANT)
 					.select('products')
 					.where(eq('sku', 'WIDGET-001'))
 					.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])
@@ -98,7 +98,7 @@ describe.skipIf(shouldSkipE2E())(
 				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const gadget = await orm
-					.forTenant(TENANT)
+					.withSchema(TENANT)
 					.select('products')
 					.where(eq('sku', 'GADGET-001'))
 					.columns(['sku', 'name_fr', 'name_en'])
@@ -114,7 +114,7 @@ describe.skipIf(shouldSkipE2E())(
 				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const result = await orm
-					.forTenant(TENANT)
+					.withSchema(TENANT)
 					.select('products')
 					.where(eq('sku', 'GADGET-001'))
 					.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])
@@ -135,7 +135,7 @@ describe.skipIf(shouldSkipE2E())(
 				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const gizmo = await orm
-					.forTenant(TENANT)
+					.withSchema(TENANT)
 					.select('products')
 					.where(eq('sku', 'GIZMO-001'))
 					.columns(['sku', 'name_fr', 'name_en', 'name_default'])
@@ -152,7 +152,7 @@ describe.skipIf(shouldSkipE2E())(
 				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const result = await orm
-					.forTenant(TENANT)
+					.withSchema(TENANT)
 					.select('products')
 					.where(eq('sku', 'GIZMO-001'))
 					.columns([
@@ -178,7 +178,7 @@ describe.skipIf(shouldSkipE2E())(
 				// Find products where coalesced name contains "Bidule"
 				// This should match GADGET-001 (name_fr = "Super Bidule")
 				const products = await orm
-					.forTenant(TENANT)
+					.withSchema(TENANT)
 					.select('products')
 					.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])
 					.all();
@@ -199,7 +199,7 @@ describe.skipIf(shouldSkipE2E())(
 				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const products = await orm
-					.forTenant(TENANT)
+					.withSchema(TENANT)
 					.select('products')
 					.where(eq('active', true))
 					.columns([
@@ -228,7 +228,7 @@ describe.skipIf(shouldSkipE2E())(
 				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const dump = orm
-					.forTenant(TENANT)
+					.withSchema(TENANT)
 					.select('products')
 					.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])
 					.dump();
@@ -242,7 +242,7 @@ describe.skipIf(shouldSkipE2E())(
 				const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 				const dump = orm
-					.forTenant(TENANT)
+					.withSchema(TENANT)
 					.select('products')
 					.where(eq('sku', 'WIDGET-001'))
 					.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])

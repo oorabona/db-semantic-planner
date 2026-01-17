@@ -9,7 +9,7 @@ import {
 	defineSchema,
 	hasMany,
 	type ModelIR,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 
 /**
  * IAM schema ModelIR.

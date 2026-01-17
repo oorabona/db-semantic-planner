@@ -33,6 +33,9 @@ export interface DialectCapabilities {
 	/** Supports native array types (e.g., PostgreSQL ARRAY) */
 	readonly supportsArrayType: boolean;
 
+	/** Supports native range types (PostgreSQL only: daterange, int4range, etc.) */
+	readonly supportsRangeTypes: boolean;
+
 	/** Supports native JSON/JSONB types */
 	readonly supportsJsonType: boolean;
 
@@ -120,6 +123,7 @@ export const POSTGRESQL_CAPABILITIES: DialectCapabilities = {
 	supportsRecursiveCTE: true,
 	supportsWindowFunctions: true,
 	supportsArrayType: true,
+	supportsRangeTypes: true, // PostgreSQL has native range types (daterange, int4range, etc.)
 	supportsJsonType: true,
 	supportsSchemas: true,
 
@@ -147,6 +151,7 @@ export const MYSQL_CAPABILITIES: DialectCapabilities = {
 	supportsRecursiveCTE: true, // MySQL 8.0+
 	supportsWindowFunctions: true, // MySQL 8.0+
 	supportsArrayType: false,
+	supportsRangeTypes: false, // MySQL has no native range types
 	supportsJsonType: true,
 	supportsSchemas: true, // MySQL uses database as schema
 
@@ -174,6 +179,7 @@ export const SQLITE_CAPABILITIES: DialectCapabilities = {
 	supportsRecursiveCTE: true,
 	supportsWindowFunctions: true, // SQLite 3.25+
 	supportsArrayType: false,
+	supportsRangeTypes: false, // SQLite has no native range types
 	supportsJsonType: true, // SQLite 3.38+ (JSON1 extension)
 	supportsSchemas: false, // SQLite uses ATTACH for multiple databases
 
@@ -202,6 +208,7 @@ export const DUCKDB_CAPABILITIES: DialectCapabilities = {
 	supportsRecursiveCTE: true,
 	supportsWindowFunctions: true,
 	supportsArrayType: true, // DuckDB has LIST type
+	supportsRangeTypes: false, // DuckDB has no native range types like PostgreSQL
 	supportsJsonType: true,
 	supportsSchemas: true,
 
@@ -229,6 +236,7 @@ export const MSSQL_CAPABILITIES: DialectCapabilities = {
 	supportsRecursiveCTE: true,
 	supportsWindowFunctions: true,
 	supportsArrayType: false,
+	supportsRangeTypes: false, // MSSQL has no native range types
 	supportsJsonType: true, // SQL Server 2016+
 	supportsSchemas: true,
 

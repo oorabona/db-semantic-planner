@@ -40,7 +40,7 @@ export interface ExecutionContext<TResult = unknown> {
 	model: ModelIR;
 	/** Source table name */
 	from: string;
-	/** Optional schema name for multi-tenant */
+	/** Optional schema name for schema-scoped queries */
 	schemaName?: string;
 	/** OrderBy intents for cursor pagination */
 	orderByIntents: readonly OrderByIntent[];
@@ -522,11 +522,11 @@ export class QueryExecutor<TResult = unknown> {
 		const compiled = adapter.compile(planReport, compileOptions);
 
 		// Build meta with exactOptionalPropertyTypes compliance
-		const meta: { compiledAt: Date; tenant?: string } = {
+		const meta: { compiledAt: Date; schema?: string } = {
 			compiledAt: new Date(),
 		};
 		if (this.ctx.schemaName !== undefined) {
-			meta.tenant = this.ctx.schemaName;
+			meta.schema = this.ctx.schemaName;
 		}
 
 		return {

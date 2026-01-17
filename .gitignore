@@ -36,3 +36,21 @@ pnpm-debug.log*
 # Temporary files
 tmp/
 temp/
+
+# Personal config files (symlinked from home)
+.bashrc
+.bash_profile
+.zshrc
+.zprofile
+.profile
+.gitconfig
+.ripgreprc
+.gitmodules
+
+# IDE
+.idea/
+.vscode/
+
+# Claude Code local settings
+.claude/settings.json
+.claude/commands

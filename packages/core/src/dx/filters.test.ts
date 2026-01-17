@@ -25,6 +25,9 @@ import {
 	not,
 	notExists,
 	or,
+	rangeContainedBy,
+	rangeContains,
+	rangeOverlaps,
 	raw,
 } from './filters.js';
 
@@ -204,6 +207,86 @@ describe('Feature 4: Null Operators', () => {
 				kind: 'null',
 				field: 'email',
 				operator: 'isNotNull',
+			});
+		});
+	});
+});
+
+// ============================================================================
+// Feature 4.5: Range Operators (PostgreSQL)
+// ============================================================================
+
+describe('Feature 4.5: Range Operators (PostgreSQL)', () => {
+	describe('rangeOverlaps() creates range intent with overlaps operator', () => {
+		it('should return WhereRangeIntent with overlaps operator', () => {
+			const result = rangeOverlaps('dates', {
+				lower: '2025-01-15',
+				upper: '2025-01-20',
+			});
+
+			expect(result).toEqual({
+				kind: 'range',
+				field: 'dates',
+				operator: 'overlaps',
+				value: { lower: '2025-01-15', upper: '2025-01-20' },
+			});
+		});
+
+		it('should support custom bounds', () => {
+			const result = rangeOverlaps('period', {
+				lower: 10,
+				upper: 20,
+				bounds: '[]',
+			});
+
+			expect(result).toEqual({
+				kind: 'range',
+				field: 'period',
+				operator: 'overlaps',
+				value: { lower: 10, upper: 20, bounds: '[]' },
+			});
+		});
+	});
+
+	describe('rangeContains() creates range intent with contains operator', () => {
+		it('should return WhereRangeIntent with contains for scalar value', () => {
+			const result = rangeContains('salary_range', 50000);
+
+			expect(result).toEqual({
+				kind: 'range',
+				field: 'salary_range',
+				operator: 'contains',
+				value: 50000,
+			});
+		});
+
+		it('should return WhereRangeIntent with contains for range value', () => {
+			const result = rangeContains('date_range', {
+				lower: '2025-01-01',
+				upper: '2025-01-05',
+			});
+
+			expect(result).toEqual({
+				kind: 'range',
+				field: 'date_range',
+				operator: 'contains',
+				value: { lower: '2025-01-01', upper: '2025-01-05' },
+			});
+		});
+	});
+
+	describe('rangeContainedBy() creates range intent with containedBy operator', () => {
+		it('should return WhereRangeIntent with containedBy operator', () => {
+			const result = rangeContainedBy('event_dates', {
+				lower: '2025-01-01',
+				upper: '2025-12-31',
+			});
+
+			expect(result).toEqual({
+				kind: 'range',
+				field: 'event_dates',
+				operator: 'containedBy',
+				value: { lower: '2025-01-01', upper: '2025-12-31' },
 			});
 		});
 	});

@@ -20,6 +20,14 @@ interface HeaderProps {
 	dialect: DialectMode;
 	includeStrategy: IncludeStrategyMode;
 	aliasingMode: AliasingMode;
+	/** CLI-020: Database connection status */
+	connected?: boolean;
+	/** CLI-020: Execution mode enabled */
+	execMode?: boolean;
+	/** CLI-020: Database name for display */
+	databaseName?: string;
+	/** CLI-021: Active schema name for schema-scoped queries */
+	schemaName?: string;
 }
 
 /** Short display names for dialects */
@@ -49,6 +57,10 @@ export function Header({
 	dialect,
 	includeStrategy,
 	aliasingMode,
+	connected,
+	execMode,
+	databaseName,
+	schemaName,
 }: HeaderProps) {
 	return (
 		<Box
@@ -79,6 +91,12 @@ export function Header({
 				</Text>
 				<Text color="gray"> | Mode: </Text>
 				<Text color={mode === 'natural' ? 'green' : 'yellow'}>{mode}</Text>
+				{schemaName && (
+					<>
+						<Text color="gray"> | Schema: </Text>
+						<Text color="cyan">{schemaName}</Text>
+					</>
+				)}
 			</Box>
 
 			{/* Row 3: Dialect, Strategy, Aliasing (CLI-013) */}
@@ -93,6 +111,18 @@ export function Header({
 				<Text color={aliasingMode === 'always' ? 'cyan' : 'yellow'}>
 					{aliasingMode === 'always' ? 'all' : 'collision'}
 				</Text>
+
+				{/* CLI-020: Database connection status */}
+				{connected && (
+					<>
+						<Text color="gray"> | </Text>
+						<Text color="green">DB: {databaseName}</Text>
+						<Text color="gray"> | </Text>
+						<Text color={execMode ? 'green' : 'yellow'}>
+							{execMode ? '▶ EXEC' : '◼ COMPILE'}
+						</Text>
+					</>
+				)}
 			</Box>
 		</Box>
 	);

@@ -27,7 +27,7 @@ Semantic query planning for databases - an intent-first approach that transforms
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │  DX Layer (core/src/dx/)                                │    │
 │  │  • Adapter interface  • createOrm()  • Query builders   │    │
-│  │  • Filter helpers     • Strict mode  • Multi-tenant     │    │
+│  │  • Filter helpers     • Strict mode  • Schema scoping   │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │  ⚠️  DB-AGNOSTIC: MUST NOT import adapter code                  │
 └──────────────────────────────┬──────────────────────────────────┘
@@ -156,15 +156,15 @@ case 'raw':
 3. **Security:** Native APIs handle escaping; raw SQL is injection-prone
 4. **Maintainability:** Easier to understand and refactor
 
-## Multi-tenant API
+## Schema Scoping API
 
-**Public API:** `orm.forTenant(schemaName)`
+**Public API:** `orm.withSchema(schemaName)`
 
 ```typescript
-// Returns a tenant-scoped context
-const tenantOrm = orm.forTenant('tenant_123');
-const users = await tenantOrm.select('users').all();
-// Under the hood: adapter.withSchema('tenant_123')
+// Returns a schema-scoped ORM context
+const scopedOrm = orm.withSchema('tenant_123');
+const users = await scopedOrm.select('users').all();
+// SQL: SELECT * FROM "tenant_123"."users"
 ```
 
 **Security:** Schema name MUST be validated against allow-list pattern (identifier validation).
@@ -179,7 +179,7 @@ type Dump = {
   sql: string;           // Compiled SQL (from Kysely .compile())
   params: readonly unknown[]; // Bound parameters
   meta?: {
-    tenant?: string;      // Schema name if multi-tenant
+    schema?: string;      // Schema name if schema-scoped
     queryName?: string;   // Optional label
     correlationId?: string;
   };

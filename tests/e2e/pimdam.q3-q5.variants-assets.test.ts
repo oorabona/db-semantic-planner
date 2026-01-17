@@ -21,7 +21,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql as kyselySql } from 'kysely';
-import { createOrm, eq, exists, and, notExists } from '@db-semantic-planner/core';
+import { createOrm, eq, exists, and, notExists } from '@dbsp/core';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
@@ -102,7 +102,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 
 			// Query variants with stock > 0 using ORM
 			const dump = orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('variants')
 				.where(
 					and(
@@ -259,7 +259,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 
 			// Use ORM with notExists
 			const dump = orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('assets')
 				.where(notExists('productImages'))
 				.columns(['id', 'storage_key', 'kind'])
@@ -269,7 +269,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 
 			// Execute to verify
 			const assets = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('assets')
 				.where(notExists('productImages'))
 				.columns(['id', 'storage_key', 'kind'])
@@ -342,7 +342,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 
 			// Find variants that have images
 			const dump = orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('variants')
 				.where(exists('images'))
 				.columns(['id', 'sku', 'name'])
@@ -358,7 +358,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const dump = orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('assets')
 				.where(notExists('productImages'))
 				.dump();

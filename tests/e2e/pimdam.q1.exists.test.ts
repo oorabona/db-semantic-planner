@@ -5,7 +5,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { and, createOrm, eq, exists } from '@db-semantic-planner/core';
+import { and, createOrm, eq, exists } from '@dbsp/core';
 import {
 	closeTestDb,
 	createPimdamSchema,
@@ -39,7 +39,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.where(
 					exists('images', {
@@ -66,7 +66,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.where(
 					exists('images', {
@@ -88,7 +88,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.where(
 					exists('images', {
@@ -111,7 +111,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const dump = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.where(
 					exists('images', {
@@ -124,7 +124,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 				)
 				.dump();
 
-			expect(dump.meta?.tenant).toBe('acme');
+			expect(dump.meta?.schema).toBe('acme');
 			expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
 		});
 	});
@@ -135,7 +135,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const products = await orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.where(
 					exists('images', {
@@ -161,7 +161,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const products = await orm
-				.forTenant('globex')
+				.withSchema('globex')
 				.select('products')
 				.where(
 					exists('images', {
@@ -188,7 +188,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			const query = orm
-				.forTenant('acme')
+				.withSchema('acme')
 				.select('products')
 				.where(
 					exists('images', {
@@ -220,7 +220,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 				const orm = createOrm({ model: pimdamModel, adapter });
 
 				const dump = orm
-					.forTenant('acme')
+					.withSchema('acme')
 					.select('products')
 					.where(
 						exists('category', {
@@ -246,7 +246,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 				const orm = createOrm({ model: pimdamModel, adapter });
 
 				const products = await orm
-					.forTenant('acme')
+					.withSchema('acme')
 					.select('products')
 					.where(
 						exists('category', {
@@ -267,7 +267,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Products with approved FR main image', () 
 				const orm = createOrm({ model: pimdamModel, adapter });
 
 				const dump = orm
-					.forTenant('acme')
+					.withSchema('acme')
 					.select('products')
 					.where(exists('images'))
 					.dump();

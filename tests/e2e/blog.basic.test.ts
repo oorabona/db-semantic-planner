@@ -8,7 +8,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { and, createOrm, eq, exists } from '@db-semantic-planner/core';
+import { and, createOrm, eq, exists } from '@dbsp/core';
 import {
 	blogModel,
 	closeTestDb,
@@ -39,7 +39,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 			const orm = createOrm({ model: blogModel, adapter });
 
 			const authors = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('authors')
 				.columns(['id', 'name', 'email'])
 				.execute();
@@ -55,7 +55,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 			const orm = createOrm({ model: blogModel, adapter });
 
 			const posts = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('posts')
 				.columns(['id', 'title', 'published'])
 				.execute();
@@ -68,7 +68,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 			const orm = createOrm({ model: blogModel, adapter });
 
 			const comments = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('comments')
 				.columns(['id', 'content'])
 				.execute();
@@ -83,7 +83,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 			const orm = createOrm({ model: blogModel, adapter });
 
 			const publishedPosts = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('posts')
 				.where(eq('published', true))
 				.columns(['id', 'title'])
@@ -97,7 +97,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 			const orm = createOrm({ model: blogModel, adapter });
 
 			const draftPosts = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('posts')
 				.where(eq('published', false))
 				.columns(['id', 'title'])
@@ -111,7 +111,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 			const orm = createOrm({ model: blogModel, adapter });
 
 			const alice = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('authors')
 				.where(eq('email', 'alice@example.com'))
 				.columns(['id', 'name'])
@@ -128,7 +128,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 			const orm = createOrm({ model: blogModel, adapter });
 
 			const authorsWithPublished = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('authors')
 				.where(
 					exists('posts', {
@@ -147,7 +147,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 			const orm = createOrm({ model: blogModel, adapter });
 
 			const postsWithComments = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('posts')
 				.where(exists('comments'))
 				.columns(['id', 'title'])
@@ -164,7 +164,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 			const orm = createOrm({ model: blogModel, adapter });
 
 			const dump = orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('posts')
 				.where(eq('published', true))
 				.columns(['id', 'title'])
@@ -180,9 +180,9 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: blogModel, adapter });
 
-			const dump = orm.forTenant(SCHEMA).select('authors').dump();
+			const dump = orm.withSchema(SCHEMA).select('authors').dump();
 
-			expect(dump.meta?.tenant).toBe(SCHEMA);
+			expect(dump.meta?.schema).toBe(SCHEMA);
 			expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
 		});
 
@@ -191,7 +191,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 			const orm = createOrm({ model: blogModel, adapter });
 
 			const dump = orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('posts')
 				.where(exists('comments'))
 				.dump();
@@ -206,7 +206,7 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 			const orm = createOrm({ model: blogModel, adapter });
 
 			const publishedWithComments = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('posts')
 				.where(and(eq('published', true), exists('comments')))
 				.columns(['id', 'title'])

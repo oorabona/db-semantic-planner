@@ -5,7 +5,13 @@
  */
 
 import { Box, render, Text, useApp, useInput } from 'ink';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+	createDbConnection,
+	getDatabaseName,
+	type DbConnection,
+	type ExecutionResult,
+} from './db-connection.js';
 import { CompletionProvider, type CompletionSuggestion } from './completion.js';
 import {
 	CompletionDisplay,
@@ -16,8 +22,10 @@ import {
 	SchemaSidebar,
 } from './components/index.js';
 import { getHistory } from './history.js';
+import { getModeWarning, parseInputMode } from './mode-escape.js';
 import { ParseError, parseNaturalQuery } from './parser.js';
 import { executeQuery } from './query-executor.js';
+import { ExecutionResultDisplay } from './result-formatter.js';
 import type {
 	AliasingMode,
 	DialectMode,
@@ -173,6 +181,53 @@ function ReplApp({ config }: ReplAppProps) {
 	const [inputKey, setInputKey] = useState(0);
 	const [splitView, setSplitView] = useState(false);
 
+	// CLI-020: Execution mode state
+	const [execMode, setExecMode] = useState(false);
+	const [connected, setConnected] = useState(false);
+	const [schemaName, setSchemaName] = useState<string | undefined>(undefined);
+	const dbConnectionRef = useRef<DbConnection | null>(null);
+	const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(
+		null,
+	);
+
+	// CLI-020: Initialize database connection if URL provided
+	useEffect(() => {
+		if (!config.databaseUrl) return;
+
+		let isMounted = true;
+
+		const initConnection = async () => {
+			try {
+				const connection = await createDbConnection(config.databaseUrl!);
+				if (isMounted) {
+					dbConnectionRef.current = connection;
+					setConnected(true);
+					const dbName = getDatabaseName(config.databaseUrl!);
+					setOutput(
+						<Text color="green">✓ Connected to database: {dbName}</Text>,
+					);
+				}
+			} catch (error) {
+				if (isMounted) {
+					const message =
+						error instanceof Error ? error.message : String(error);
+					setOutput(<Text color="red">❌ Connection failed: {message}</Text>);
+				}
+			}
+		};
+
+		initConnection();
+
+		// Cleanup on unmount
+		return () => {
+			isMounted = false;
+			if (dbConnectionRef.current) {
+				dbConnectionRef.current.close();
+				dbConnectionRef.current = null;
+			}
+		};
+	}, [config.databaseUrl]);
+
 	// Get command history singleton
 	const history = useMemo(() => getHistory(), []);
 
@@ -259,9 +314,14 @@ function ReplApp({ config }: ReplAppProps) {
 					case '.sql':
 						setMode('sql');
 						setOutput(
-							<Text color="yellow">
-								Switched to SQL mode. Use .natural to return.
-							</Text>,
+							<Box flexDirection="column">
+								<Text color="yellow">
+									Switched to SQL mode. Input is raw SQL by default.
+								</Text>
+								<Text color="gray">
+									Use ! prefix for natural queries. .natural to switch back.
+								</Text>
+							</Box>,
 						);
 						setQueryResult(null);
 						setShowHelp(false);
@@ -270,13 +330,57 @@ function ReplApp({ config }: ReplAppProps) {
 					case '.natural':
 						setMode('natural');
 						setOutput(
-							<Text color="green">
-								Switched to natural query mode. Use .sql for raw SQL.
-							</Text>,
+							<Box flexDirection="column">
+								<Text color="green">
+									Switched to natural query mode. Input is parsed as natural
+									query.
+								</Text>
+								<Text color="gray">
+									Use ! prefix for raw SQL. .sql to switch modes.
+								</Text>
+							</Box>,
 						);
 						setQueryResult(null);
 						setShowHelp(false);
 						return;
+
+					case '.use': {
+						const schema = args[0];
+						if (!schema) {
+							// Show current schema or clear it
+							if (schemaName) {
+								setSchemaName(undefined);
+								setOutput(
+									<Box flexDirection="column">
+										<Text color="yellow">
+											Cleared schema. Queries now use default schema.
+										</Text>
+									</Box>,
+								);
+							} else {
+								setOutput(
+									<Text color="gray">
+										No schema set. Usage: .use &lt;schema_name&gt;
+									</Text>,
+								);
+							}
+						} else {
+							setSchemaName(schema);
+							setOutput(
+								<Box flexDirection="column">
+									<Text color="cyan">
+										Using schema: <Text bold>{schema}</Text>
+									</Text>
+									<Text color="gray">
+										All queries will be scoped to this schema. .use to clear.
+									</Text>
+								</Box>,
+							);
+						}
+						setQueryResult(null);
+						setShowHelp(false);
+						return;
+					}
 
 					case '.tables': {
 						const tables = Object.keys(config.schema.tables);
@@ -614,6 +718,66 @@ function ReplApp({ config }: ReplAppProps) {
 						return;
 					}
 
+					case '.exec': {
+						// CLI-020: Toggle execution mode
+						const arg = args[0]?.toLowerCase();
+
+						if (!connected) {
+							setOutput(
+								<Box flexDirection="column" marginY={1}>
+									<Text color="red">
+										❌ No database connected
+									</Text>
+									<Text color="gray">
+										Start REPL with --db option to enable execution mode:
+									</Text>
+									<Text color="gray">
+										dbsp repl --schema schema.ts --db postgres://localhost/mydb
+									</Text>
+								</Box>,
+							);
+							setQueryResult(null);
+							setShowHelp(false);
+							return;
+						}
+
+						if (arg === 'on') {
+							setExecMode(true);
+							setOutput(
+								<Text color="green">
+									✓ Execution mode: ON - queries will be executed against the database
+								</Text>,
+							);
+						} else if (arg === 'off') {
+							setExecMode(false);
+							setOutput(
+								<Text color="yellow">
+									✓ Execution mode: OFF - compile-only mode
+								</Text>,
+							);
+						} else {
+							// Show current status
+							setOutput(
+								<Box flexDirection="column" marginY={1}>
+									<Text bold color="cyan">
+										🔌 Execution Mode: {execMode ? 'ON' : 'OFF'}
+									</Text>
+									<Text color="gray">
+										Database: {getDatabaseName(config.databaseUrl!)}
+									</Text>
+									<Text> </Text>
+									<Text color="gray">Usage:</Text>
+									<Text color="gray"> .exec on  - Execute queries against database</Text>
+									<Text color="gray"> .exec off - Compile-only mode (show SQL)</Text>
+								</Box>,
+							);
+						}
+						setQueryResult(null);
+						setExecutionResult(null);
+						setShowHelp(false);
+						return;
+					}
+
 					default:
 						setOutput(
 							<Text color="red">
@@ -629,14 +793,61 @@ function ReplApp({ config }: ReplAppProps) {
 			// Handle query execution
 			setShowHelp(false);
 			setOutput(null);
+			setExecutionResult(null);
 
-			if (mode === 'natural') {
+			// CLI-020: Helper to execute SQL and update result
+			const executeOnDb = async (sql: string, params: readonly unknown[]) => {
+				if (!dbConnectionRef.current) return;
+				const result = await dbConnectionRef.current.executeRaw(sql, params);
+				setExecutionResult(result);
+			};
+
+			// CLI-020: Mode escape with ! prefix (see mode-escape.ts)
+			const { content, isRawSql, escaped } = parseInputMode(trimmed, mode);
+
+			if (!content) {
+				setOutput(
+					<Text color="red">
+						❌ Empty query.{' '}
+						{mode === 'sql'
+							? 'Enter SQL or use ! for natural query'
+							: 'Enter query or use ! for raw SQL'}
+					</Text>,
+				);
+				setQueryResult(null);
+				return;
+			}
+
+			if (isRawSql) {
+				// Raw SQL handling
+				setQueryResult({
+					sql: content,
+					params: [],
+					plan: {
+						strategy: 'RAW_SQL',
+						tables: [],
+						warnings: [
+							getModeWarning(mode, escaped),
+							...(execMode && connected
+								? []
+								: ['(compile-only, use .exec on to execute)']),
+						],
+					},
+				});
+
+				// Execute if in exec mode and connected
+				if (execMode && connected && dbConnectionRef.current) {
+					executeOnDb(content, []);
+				}
+			} else {
+				// Natural query handling
 				try {
-					const parsed = parseNaturalQuery(trimmed, config.schema);
+					const parsed = parseNaturalQuery(content, config.schema);
 					const result = executeQuery(parsed, config.schema, {
 						aliasingMode,
 						includeStrategy,
 						dialect,
+						schemaName,
 					});
 
 					if (result.error) {
@@ -654,6 +865,11 @@ function ReplApp({ config }: ReplAppProps) {
 							}),
 							plan: result.plan,
 						});
+
+						// Execute if in exec mode and connected
+						if (execMode && connected && dbConnectionRef.current) {
+							executeOnDb(result.sql, result.params);
+						}
 					}
 				} catch (err) {
 					if (err instanceof ParseError) {
@@ -670,21 +886,11 @@ function ReplApp({ config }: ReplAppProps) {
 						});
 					}
 				}
-			} else {
-				// SQL mode - pass through (compile-only, no execution)
-				setQueryResult({
-					sql: trimmed,
-					params: [],
-					plan: {
-						strategy: 'RAW_SQL',
-						tables: [],
-						warnings: ['SQL mode: query displayed as-is (no execution)'],
-					},
-				});
 			}
 		},
 		[
 			config.schema,
+			config.databaseUrl,
 			exit,
 			mode,
 			aliasingMode,
@@ -692,6 +898,8 @@ function ReplApp({ config }: ReplAppProps) {
 			dialect,
 			splitView,
 			history,
+			execMode,
+			connected,
 		],
 	);
 
@@ -705,6 +913,9 @@ function ReplApp({ config }: ReplAppProps) {
 			{showHelp && <HelpDisplay />}
 			{output}
 			<OutputDisplay result={queryResult} />
+
+			{/* CLI-020: Execution result display */}
+			{executionResult && <ExecutionResultDisplay result={executionResult} />}
 
 			{/* Completions (only in natural mode) */}
 			{mode === 'natural' && completions.length > 0 && !showHelp && (
@@ -737,6 +948,10 @@ function ReplApp({ config }: ReplAppProps) {
 				dialect={dialect}
 				includeStrategy={includeStrategy}
 				aliasingMode={aliasingMode}
+				connected={connected}
+				execMode={execMode}
+				schemaName={schemaName}
+				{...(config.databaseUrl && { databaseName: getDatabaseName(config.databaseUrl) })}
 			/>
 
 			{/* Main content - either split or single view */}

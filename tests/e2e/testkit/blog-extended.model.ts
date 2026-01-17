@@ -12,7 +12,7 @@ import {
 	belongsToMany,
 	defineSchema,
 	hasMany,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 
 export const blogExtendedModel = defineSchema({
 	authors: {

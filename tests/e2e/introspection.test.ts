@@ -6,7 +6,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createOrm } from '@db-semantic-planner/core';
+import { createOrm } from '@dbsp/core';
 import {
 	closeTestDb,
 	createAdapterForSchema,
@@ -45,7 +45,7 @@ describe.skipIf(shouldSkipE2E())('Auto-Introspection', () => {
 			expect(orm.insert).toBeDefined();
 			expect(orm.update).toBeDefined();
 			expect(orm.delete).toBeDefined();
-			expect(orm.forTenant).toBeDefined();
+			expect(orm.withSchema).toBeDefined();
 			expect(typeof orm.strictMode).toBe('boolean');
 		});
 

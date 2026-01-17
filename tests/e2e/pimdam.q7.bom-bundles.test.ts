@@ -18,7 +18,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql as kyselySql } from 'kysely';
-import { createOrm, eq, exists } from '@db-semantic-planner/core';
+import { createOrm, eq, exists } from '@dbsp/core';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
@@ -219,7 +219,7 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const bundles = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('products')
 				.where(eq('is_bundle', true))
 				.columns(['id', 'sku', 'title'])
@@ -235,7 +235,7 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 
 			// Find products that have components (i.e., are bundles)
 			const dump = orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('products')
 				.where(exists('components'))
 				.columns(['id', 'sku'])
@@ -244,7 +244,7 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 			expect(dump.sql.toUpperCase()).toContain('EXISTS');
 
 			const bundles = await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('products')
 				.where(exists('components'))
 				.columns(['id', 'sku'])

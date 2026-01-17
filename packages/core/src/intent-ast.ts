@@ -273,6 +273,44 @@ export interface WhereInIntent {
 }
 
 /**
+ * Range operator for PostgreSQL range types.
+ * - overlaps: && (ranges have common points)
+ * - contains: @> (range contains value or range)
+ * - containedBy: <@ (range is contained by another range)
+ */
+export type RangeOperator = 'overlaps' | 'contains' | 'containedBy';
+
+/**
+ * Range value representation for PostgreSQL range types.
+ * Supports: daterange, tsrange, tstzrange, int4range, int8range, numrange
+ */
+export interface RangeValue {
+	readonly lower: unknown;
+	readonly upper: unknown;
+	/** Bounds specification: '[)' (default), '[]', '()', '(]' */
+	readonly bounds?: '[)' | '[]' | '()' | '(]';
+}
+
+/**
+ * Range filter: field overlaps/contains/containedBy range value
+ * PostgreSQL range types: daterange, tsrange, tstzrange, int4range, int8range, numrange
+ *
+ * @example
+ * // Check if booking dates overlap a period
+ * { kind: 'range', field: 'dates', operator: 'overlaps', value: { lower: '2025-01-15', upper: '2025-01-20' } }
+ *
+ * // Check if salary range contains a value
+ * { kind: 'range', field: 'salary_range', operator: 'contains', value: 50000 }
+ */
+export interface WhereRangeIntent {
+	readonly kind: 'range';
+	readonly field: string;
+	readonly operator: RangeOperator;
+	/** Can be a RangeValue (for range-to-range ops) or scalar (for contains/containedBy with point) */
+	readonly value: RangeValue | unknown;
+}
+
+/**
  * Null filter: field is null / is not null
  */
 export interface WhereNullIntent {
@@ -428,6 +466,7 @@ export type WhereIntent =
 	| WhereLikeIntent
 	| WhereInIntent
 	| WhereNullIntent
+	| WhereRangeIntent
 	| WhereAndIntent
 	| WhereOrIntent
 	| WhereNotIntent
@@ -1151,6 +1190,13 @@ export function isWhereIn(where: WhereIntent): where is WhereInIntent {
  */
 export function isWhereNull(where: WhereIntent): where is WhereNullIntent {
 	return where.kind === 'null';
+}
+
+/**
+ * Check if a where intent is a range filter (PostgreSQL range types)
+ */
+export function isWhereRange(where: WhereIntent): where is WhereRangeIntent {
+	return where.kind === 'range';
 }
 
 /**

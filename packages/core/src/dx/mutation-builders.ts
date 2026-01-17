@@ -38,7 +38,7 @@ export interface MutationDump {
 	readonly intent: InsertIntent | UpdateIntent | DeleteIntent | UpsertIntent;
 	/** Optional metadata */
 	readonly meta?: {
-		readonly tenant?: string;
+		readonly schema?: string;
 		readonly compiledAt?: Date;
 	};
 }
@@ -162,11 +162,11 @@ export class InsertBuilder<T = void> {
 			: undefined;
 		const compiled = this.adapter.compileInsert(intent, compileOptions);
 
-		const meta: { compiledAt: Date; tenant?: string } = {
+		const meta: { compiledAt: Date; schema?: string } = {
 			compiledAt: new Date(),
 		};
 		if (this.schemaName !== undefined) {
-			meta.tenant = this.schemaName;
+			meta.schema = this.schemaName;
 		}
 
 		return {
@@ -357,11 +357,11 @@ export class UpdateBuilder<T = void> {
 			: undefined;
 		const compiled = this.adapter.compileUpdate(intent, compileOptions);
 
-		const meta: { compiledAt: Date; tenant?: string } = {
+		const meta: { compiledAt: Date; schema?: string } = {
 			compiledAt: new Date(),
 		};
 		if (this.schemaName !== undefined) {
-			meta.tenant = this.schemaName;
+			meta.schema = this.schemaName;
 		}
 
 		return {
@@ -549,11 +549,11 @@ export class DeleteBuilder<T = void> {
 			: undefined;
 		const compiled = this.adapter.compileDelete(intent, compileOptions);
 
-		const meta: { compiledAt: Date; tenant?: string } = {
+		const meta: { compiledAt: Date; schema?: string } = {
 			compiledAt: new Date(),
 		};
 		if (this.schemaName !== undefined) {
-			meta.tenant = this.schemaName;
+			meta.schema = this.schemaName;
 		}
 
 		return {
@@ -833,11 +833,11 @@ export class UpsertBuilder<T = void> {
 			: undefined;
 		const compiled = this.adapter.compileUpsert(intent, compileOptions);
 
-		const meta: { compiledAt: Date; tenant?: string } = {
+		const meta: { compiledAt: Date; schema?: string } = {
 			compiledAt: new Date(),
 		};
 		if (this.schemaName !== undefined) {
-			meta.tenant = this.schemaName;
+			meta.schema = this.schemaName;
 		}
 
 		return {

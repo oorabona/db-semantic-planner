@@ -17,8 +17,18 @@ const DOT_COMMANDS = [
 		command: '.history',
 		description: 'Show command history (↑/↓ to navigate)',
 	},
-	{ command: '.sql', description: 'Switch to SQL mode' },
-	{ command: '.natural', description: 'Switch to natural query mode' },
+	{
+		command: '.sql',
+		description: 'SQL mode: input is raw SQL, ! escapes to natural',
+	},
+	{
+		command: '.natural',
+		description: 'Natural mode: input is parsed, ! escapes to SQL',
+	},
+	{
+		command: '.use [schema]',
+		description: 'Set schema for queries (empty to clear)',
+	},
 	{ command: '.split', description: 'Toggle split view (schema | query)' },
 	{
 		command: '.aliasing',
@@ -32,6 +42,10 @@ const DOT_COMMANDS = [
 	{
 		command: '.dialect [name]',
 		description: 'Show/set SQL dialect (postgresql|mysql|sqlite|mssql|duckdb)',
+	},
+	{
+		command: '.exec [on|off]',
+		description: 'Toggle execution mode (requires --db connection)',
 	},
 	{ command: '.clear', description: 'Clear screen and output' },
 	{ command: '.exit / .quit', description: 'Exit REPL' },
@@ -57,6 +71,11 @@ const NATURAL_SYNTAX = [
 		pattern: '<table> limit <n>',
 		example: 'users limit 10',
 		description: 'Limit results',
+	},
+	{
+		pattern: '!<query>',
+		example: '!SELECT... or !users',
+		description: 'Mode escape: SQL in natural mode, natural in SQL mode',
 	},
 ];
 

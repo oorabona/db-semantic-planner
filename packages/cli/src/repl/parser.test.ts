@@ -171,6 +171,85 @@ describe('parseNaturalQuery', () => {
 		});
 	});
 
+	describe('range operators (CLI-018)', () => {
+		it('parses overlaps with PostgreSQL range syntax', () => {
+			const result = parseNaturalQuery(
+				'posts where body overlaps [2024-01-15,2024-01-20)',
+				mockSchema,
+			);
+			expect(result.where?.[0]).toEqual({
+				column: 'body',
+				operator: 'overlaps',
+				value: { lower: '2024-01-15', upper: '2024-01-20', bounds: '[)' },
+			});
+		});
+
+		it('parses overlaps with shorthand range syntax', () => {
+			const result = parseNaturalQuery(
+				'posts where id overlaps 10..50',
+				mockSchema,
+			);
+			expect(result.where?.[0]).toEqual({
+				column: 'id',
+				operator: 'overlaps',
+				value: { lower: 10, upper: 50, bounds: '[]' },
+			});
+		});
+
+		it('parses contains with single value', () => {
+			const result = parseNaturalQuery(
+				'posts where id contains 25',
+				mockSchema,
+			);
+			expect(result.where?.[0]).toEqual({
+				column: 'id',
+				operator: 'contains',
+				value: 25,
+			});
+		});
+
+		it('parses contains with date string', () => {
+			const result = parseNaturalQuery(
+				'posts where body contains 2024-01-18',
+				mockSchema,
+			);
+			expect(result.where?.[0]).toEqual({
+				column: 'body',
+				operator: 'contains',
+				value: '2024-01-18',
+			});
+		});
+
+		it('parses containedBy with range', () => {
+			const result = parseNaturalQuery(
+				'posts where body containedBy [2024-01-01,2024-02-01)',
+				mockSchema,
+			);
+			expect(result.where?.[0]).toEqual({
+				column: 'body',
+				operator: 'containedBy',
+				value: { lower: '2024-01-01', upper: '2024-02-01', bounds: '[)' },
+			});
+		});
+
+		it('parses range in include where clause', () => {
+			const result = parseNaturalQuery(
+				'users include posts where body overlaps 2024-01-01..2024-01-31',
+				mockSchema,
+			);
+			expect(result.include?.[0]).toEqual({
+				relation: 'posts',
+				where: [
+					{
+						column: 'body',
+						operator: 'overlaps',
+						value: { lower: '2024-01-01', upper: '2024-01-31', bounds: '[]' },
+					},
+				],
+			});
+		});
+	});
+
 	describe('include clauses', () => {
 		it('parses single include', () => {
 			const result = parseNaturalQuery('users include posts', mockSchema);

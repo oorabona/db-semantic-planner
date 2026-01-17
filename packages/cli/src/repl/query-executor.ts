@@ -24,6 +24,9 @@ import {
 	lt,
 	lte,
 	neq,
+	rangeContainedBy,
+	rangeContains,
+	rangeOverlaps,
 	type WhereIntent,
 } from '@dbsp/core';
 import type { ResolvedSchema } from '@dbsp/schema';
@@ -49,6 +52,8 @@ export interface QueryExecutionOptions {
 	includeStrategy?: IncludeStrategyMode;
 	/** SQL dialect for query compilation (CLI-011) */
 	dialect?: DialectMode;
+	/** Schema name for schema-scoped queries (CLI-021) */
+	schemaName?: string;
 }
 
 /**
@@ -193,6 +198,15 @@ function whereClauseToFilter(clause: WhereClause): WhereIntent {
 			// For 'in' operator, we need inArray - but for simplicity,
 			// we'll use eq for single values for now
 			return eq(column, value);
+		case 'overlaps':
+			// Range overlaps operator (&&)
+			return rangeOverlaps(column, value as { lower: unknown; upper: unknown });
+		case 'contains':
+			// Range contains operator (@>) - range contains element or range
+			return rangeContains(column, value);
+		case 'containedBy':
+			// Range contained by operator (<@) - range is contained by another
+			return rangeContainedBy(column, value as { lower: unknown; upper: unknown });
 		default:
 			throw new Error(`Unsupported operator: ${operator}`);
 	}
@@ -269,11 +283,16 @@ export function executeQuery(
 			options?.includeStrategy === 'auto'
 				? undefined
 				: options?.includeStrategy;
-		const orm = createOrm<Record<string, unknown>>({
+		const baseOrm = createOrm<Record<string, unknown>>({
 			model,
 			adapter,
 			...(strategyToUse && { defaultIncludeStrategy: strategyToUse }),
 		});
+
+		// CLI-021: Apply schema scoping if configured
+		const orm = options?.schemaName
+			? baseOrm.withSchema(options.schemaName)
+			: baseOrm;
 
 		// Start building the query (table name comes from user input)
 		let builder = orm.select(query.table);

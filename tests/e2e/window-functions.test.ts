@@ -26,7 +26,7 @@ import {
 	rowNumber,
 	wAvg,
 	wSum,
-} from '@db-semantic-planner/core';
+} from '@dbsp/core';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
@@ -64,7 +64,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 
 			// Query variants with row_number ordered by price
 			const results = (await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('variants')
 				.columns([
 					'id',
@@ -96,7 +96,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const results = (await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('variants')
 				.columns([
 					'id',
@@ -127,7 +127,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 
 			// Query variants with rank by price (Medium and Large have same price)
 			const results = (await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('variants')
 				.columns([
 					'id',
@@ -156,7 +156,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 
 			// Rank variants within each product
 			const results = (await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('variants')
 				.columns([
 					'id',
@@ -197,7 +197,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const results = (await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('variants')
 				.columns([
 					'name',
@@ -229,7 +229,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const results = (await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('variants')
 				.columns([
 					'name',
@@ -268,7 +268,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const results = (await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('variants')
 				.columns([
 					'product_id',
@@ -306,7 +306,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const results = (await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('variants')
 				.columns([
 					'name',
@@ -375,7 +375,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 
 			// Query tenant 1
 			const tenant1Results = (await orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('variants')
 				.columns([
 					'name',
@@ -390,7 +390,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 
 			// Query tenant 2
 			const tenant2Results = (await orm
-				.forTenant(SCHEMA_TENANT2)
+				.withSchema(SCHEMA_TENANT2)
 				.select('variants')
 				.columns([
 					'name',
@@ -423,7 +423,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const dump = orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('variants')
 				.columns([
 					'name',
@@ -448,7 +448,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const dump = orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('variants')
 				.columns([
 					'name',
@@ -468,7 +468,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			const dump = orm
-				.forTenant(SCHEMA)
+				.withSchema(SCHEMA)
 				.select('variants')
 				.columns([
 					'product_id',

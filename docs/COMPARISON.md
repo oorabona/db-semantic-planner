@@ -196,7 +196,7 @@ This document compares db-semantic-planner with all major Node.js database tools
 | **Observability** | `.dump()` shows plan + SQL + params — debug before execution |
 | **Decision Transparency** | See WHY the planner chose a strategy, not just WHAT |
 | **Relations as First-Class** | `.include('author')` just works, no manual JOINs |
-| **Multi-tenant Native** | `.forTenant('tenant_123')` is built-in, not bolted-on |
+| **Multi-tenant Native** | `.withSchema('tenant_123')` is built-in, not bolted-on |
 | **Recursive Queries** | `.include({ recursive: true })` for trees/graphs — no raw SQL |
 | **Adapter-Agnostic** | Same API works with Kysely, Drizzle, native pg (planned) |
 | **N+1 Prevention** | Planner automatically chooses optimal strategy |
