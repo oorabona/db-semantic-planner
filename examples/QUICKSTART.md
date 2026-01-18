@@ -536,10 +536,11 @@ createdb -h localhost -U postgres demo
 ### Setup with Minimal Schema
 
 ```bash
-# Generate DDL from schema
-pnpm dbsp generate ddl --schema ./examples/minimal.schema.ts > /tmp/minimal.sql
+# Generate DDL and apply directly to database (DDL goes to stdout)
+pnpm dbsp generate ddl --schema ./examples/minimal.schema.ts 2>/dev/null | psql -h localhost -U postgres -d demo
 
-# Apply to database
+# Or save to file first
+pnpm dbsp generate ddl --schema ./examples/minimal.schema.ts -o /tmp/minimal.sql
 psql -h localhost -U postgres -d demo -f /tmp/minimal.sql
 
 # (Optional) Seed sample data

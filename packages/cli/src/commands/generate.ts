@@ -51,10 +51,15 @@ export const generateCommand = new Command('generate')
 					schemaPath = result.path;
 				}
 
-				console.log(`📄 Loaded schema from: ${schemaPath}`);
+				// For DDL without --output, we output to stdout so use stderr for info
+				const outputPath = options.out ?? options.output;
+				const useStdout = target === 'ddl' && !outputPath;
+				const log = useStdout ? console.error : console.log;
 
-				// Determine output directory
-				const outDir = options.out ?? options.output ?? `./generated/${target}`;
+				log(`📄 Loaded schema from: ${schemaPath}`);
+
+				// Determine output directory (only used when writing to file)
+				const outDir = outputPath ?? `./generated/${target}`;
 				const resolvedOutDir = resolve(process.cwd(), outDir);
 
 				// Generate based on target
@@ -124,22 +129,31 @@ export const generateCommand = new Command('generate')
 								schemaName: options.schemaName,
 							});
 
-							// Output path for DDL is a single file, not a directory
-							const outPath = resolvedOutDir.endsWith('.sql')
-								? resolvedOutDir
-								: resolve(resolvedOutDir, 'schema.sql');
+							const ddlContent = ddlStatements.join('\n\n');
+							const outputPath = options.out ?? options.output;
 
-							mkdirSync(dirname(outPath), { recursive: true });
-							writeFileSync(outPath, ddlStatements.join('\n\n'), 'utf-8');
+							if (outputPath) {
+								// Write to file if --output is specified
+								const outPath = outputPath.endsWith('.sql')
+									? resolve(process.cwd(), outputPath)
+									: resolve(process.cwd(), outputPath, 'schema.sql');
 
-							console.log(`✅ Generated DDL: ${outPath}`);
-							console.log(`   Tables: ${Object.keys(schema.tables).length}`);
-							console.log(`   Statements: ${ddlStatements.length}`);
-							if (options.drop) {
-								console.log(`   Includes DROP statements`);
-							}
-							if (options.schemaName) {
-								console.log(`   Schema: ${options.schemaName}`);
+								mkdirSync(dirname(outPath), { recursive: true });
+								writeFileSync(outPath, ddlContent, 'utf-8');
+
+								console.log(`✅ Generated DDL: ${outPath}`);
+								console.log(`   Tables: ${Object.keys(schema.tables).length}`);
+								console.log(`   Statements: ${ddlStatements.length}`);
+								if (options.drop) {
+									console.log(`   Includes DROP statements`);
+								}
+								if (options.schemaName) {
+									console.log(`   Schema: ${options.schemaName}`);
+								}
+							} else {
+								// Output DDL to stdout (for piping)
+								// Info messages (schema loaded) went to stderr
+								console.log(ddlContent);
 							}
 						} finally {
 							await db.destroy();
