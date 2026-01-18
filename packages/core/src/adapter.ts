@@ -281,6 +281,23 @@ export interface RawSqlAdapter extends BaseAdapter {
 	): Promise<T[]>;
 }
 
+/**
+ * DDL-generating adapter - can generate DDL (CREATE TABLE statements) from a schema.
+ *
+ * This enables programmatic DDL generation through the underlying adapter's
+ * schema builder, ensuring column naming transformations (e.g., camelCase to snake_case)
+ * are applied consistently between DDL and queries.
+ */
+export interface DDLGeneratingAdapter extends BaseAdapter {
+	/**
+	 * Generate DDL statements from a schema.
+	 *
+	 * @param schema - The ModelIR schema to generate DDL from
+	 * @returns Array of DDL statements (CREATE TABLE, CREATE INDEX, etc.)
+	 */
+	generateDDL(schema: ModelIR): string[];
+}
+
 // ============================================================================
 // Convenience Composed Types (DX-104)
 // ============================================================================
@@ -315,7 +332,8 @@ export interface Adapter<DB = unknown>
 		StreamingAdapter,
 		IntrospectingAdapter,
 		TransactionalAdapter<DB>,
-		RawSqlAdapter {}
+		RawSqlAdapter,
+		DDLGeneratingAdapter {}
 
 // ============================================================================
 // Feature Detection Helpers (DX-104)
@@ -378,6 +396,18 @@ export function supportsRawSql(adapter: BaseAdapter): adapter is RawSqlAdapter {
 	return (
 		'executeRaw' in adapter &&
 		typeof (adapter as RawSqlAdapter).executeRaw === 'function'
+	);
+}
+
+/**
+ * Check if adapter supports DDL generation.
+ */
+export function supportsDDLGeneration(
+	adapter: BaseAdapter,
+): adapter is DDLGeneratingAdapter {
+	return (
+		'generateDDL' in adapter &&
+		typeof (adapter as DDLGeneratingAdapter).generateDDL === 'function'
 	);
 }
 

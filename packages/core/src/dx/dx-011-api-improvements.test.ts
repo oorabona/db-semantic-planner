@@ -19,17 +19,17 @@ import { and, createOrm, eq, or } from './index.js';
 // Schema with relations for testing
 const testSchema = defineSchema({
 	users: {
-		id: 'number',
-		name: 'string',
-		email: 'string',
-		active: 'boolean',
-		role: 'string',
+		id: { type: 'number' },
+		name: { type: 'string' },
+		email: { type: 'string' },
+		active: { type: 'boolean' },
+		role: { type: 'string' },
 	},
 	posts: {
-		id: 'number',
-		title: 'string',
-		authorId: 'number',
-		reviewerId: 'number',
+		id: { type: 'number' },
+		title: { type: 'string' },
+		authorId: { type: 'number' },
+		reviewerId: { type: 'number' },
 	},
 })
 	.relations({

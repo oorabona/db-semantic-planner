@@ -9,11 +9,11 @@ import { describe, expectTypeOf, it } from 'vitest';
 import type {
 	AnyRelationDef,
 	ColumnNames,
+	IncludeSpec,
 	InferColumns,
 	InferQueryResult,
 	InferRelationNames,
 	InferRelationType,
-	IncludeSpec,
 	TableNames,
 	TypedSchema,
 	TypedTableDef,
@@ -214,7 +214,9 @@ describe('DX-110: InferRelationNames type', () => {
 	it('should extract relation names for posts table', () => {
 		type PostRelations = InferRelationNames<TestSchema['tables']['posts']>;
 
-		expectTypeOf<PostRelations>().toEqualTypeOf<'author' | 'comments' | 'tags'>();
+		expectTypeOf<PostRelations>().toEqualTypeOf<
+			'author' | 'comments' | 'tags'
+		>();
 	});
 
 	it('should return never for table without relations', () => {

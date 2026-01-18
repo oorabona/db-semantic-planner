@@ -17,22 +17,22 @@ import { belongsTo, defineSchema, hasMany } from '@dbsp/core';
 export const blogModel = defineSchema({
 	authors: {
 		id: 'integer',
-		name: 'string',
-		email: 'string',
+		name: { type: 'string' },
+		email: { type: 'string' },
 	},
 	posts: {
 		id: 'integer',
-		title: 'string',
-		content: 'string',
+		title: { type: 'string' },
+		content: { type: 'string' },
 		author_id: 'integer',
-		published: 'boolean',
+		published: { type: 'boolean' },
 		created_at: 'timestamp',
 	},
 	comments: {
 		id: 'integer',
 		post_id: 'integer',
-		author_name: 'string',
-		content: 'string',
+		author_name: { type: 'string' },
+		content: { type: 'string' },
 		created_at: 'timestamp',
 	},
 })

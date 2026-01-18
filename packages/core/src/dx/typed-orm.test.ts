@@ -5,11 +5,14 @@
  * and returns TypedOrmInstance with proper type inference.
  */
 
-import { describe, expectTypeOf, it, expect } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { createOrm } from './orm.js';
-import type { TypedOrmInstance, TypedQueryBuilder } from './typed-query-builder.js';
-import type { TypedSchema, InferQueryResult } from './prisma-types.js';
-import { belongsTo, hasMany, hasOne, belongsToMany } from './prisma-types.js';
+import type { InferQueryResult, TypedSchema } from './prisma-types.js';
+import { belongsTo, belongsToMany, hasMany, hasOne } from './prisma-types.js';
+import type {
+	TypedOrmInstance,
+	TypedQueryBuilder,
+} from './typed-query-builder.js';
 
 // ============================================================================
 // Test Schema

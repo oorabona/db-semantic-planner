@@ -6,12 +6,7 @@
  * SQL generation tests are in adapter-kysely/src/recursive-query-builder.test.ts
  */
 
-import {
-	belongsTo,
-	defineSchema,
-	eq,
-	hasMany,
-} from '@dbsp/core';
+import { belongsTo, defineSchema, eq, hasMany } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import type { Adapter, AdapterCapabilities } from '../adapter.js';
 import { createRecursiveBuilder } from './recursive-query-builder.js';
@@ -22,22 +17,22 @@ import { createRecursiveBuilder } from './recursive-query-builder.js';
 
 const roleHierarchyModel = defineSchema({
 	roles: {
-		id: 'uuid',
-		name: 'string',
+		id: { type: 'uuid' },
+		name: { type: 'string' },
 	},
 	roleEdges: {
-		id: 'uuid',
-		fromRoleId: 'uuid',
-		toRoleId: 'uuid',
+		id: { type: 'uuid' },
+		fromRoleId: { type: 'uuid' },
+		toRoleId: { type: 'uuid' },
 	},
 	permissions: {
-		id: 'uuid',
-		name: 'string',
+		id: { type: 'uuid' },
+		name: { type: 'string' },
 	},
 	rolePermissions: {
-		id: 'uuid',
-		roleId: 'uuid',
-		permissionId: 'uuid',
+		id: { type: 'uuid' },
+		roleId: { type: 'uuid' },
+		permissionId: { type: 'uuid' },
 	},
 })
 	.relations({
@@ -68,9 +63,9 @@ const roleHierarchyModel = defineSchema({
 
 const categoryModel = defineSchema({
 	categories: {
-		id: 'uuid',
-		name: 'string',
-		parentId: { type: 'uuid', nullable: true },
+		id: { type: 'uuid' },
+		name: { type: 'string' },
+		parentId: { type: { type: 'uuid' }, nullable: true },
 	},
 })
 	.relations({

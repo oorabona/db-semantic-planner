@@ -18,6 +18,8 @@ export type {
 	FilterStrategy,
 	ForeignKeyIR,
 	IncludeStrategy,
+	// Index definition
+	IndexIR,
 	JoinDefault,
 	ModelIR,
 	OnDeleteAction,
@@ -237,6 +239,7 @@ export type {
 	// DX-033: Include hydration
 	CompileResultWithIncludes,
 	CompilingAdapter,
+	DDLGeneratingAdapter,
 	Dump,
 	DumpMeta,
 	ExecutingAdapter,
@@ -250,6 +253,7 @@ export {
 	AdapterRequiredError,
 	assertCapability,
 	// DX-104: Feature detection helpers
+	supportsDDLGeneration,
 	supportsExecution,
 	supportsIntrospection,
 	supportsRawSql,

@@ -847,7 +847,7 @@ function ReplApp({ config }: ReplAppProps) {
 						aliasingMode,
 						includeStrategy,
 						dialect,
-						schemaName,
+						...(schemaName && { schemaName }),
 					});
 
 					if (result.error) {
@@ -950,7 +950,7 @@ function ReplApp({ config }: ReplAppProps) {
 				aliasingMode={aliasingMode}
 				connected={connected}
 				execMode={execMode}
-				schemaName={schemaName}
+				{...(schemaName && { schemaName })}
 				{...(config.databaseUrl && { databaseName: getDatabaseName(config.databaseUrl) })}
 			/>
 

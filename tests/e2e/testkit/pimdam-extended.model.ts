@@ -28,24 +28,24 @@ export const pimdamExtendedModel = defineSchema({
 	// Core tables (extended from base model)
 	categories: {
 		id: 'integer',
-		name: 'string',
+		name: { type: 'string' },
 		parent_id: 'integer',
-		path: 'string', // Materialized path: /1/2/3/
+		path: { type: 'string' }, // Materialized path: /1/2/3/
 	},
 	products: {
 		id: 'integer',
-		sku: 'string',
-		title: 'string',
+		sku: { type: 'string' },
+		title: { type: 'string' },
 		// Locale-specific names for COALESCE fallback
-		name_fr: 'string',
-		name_en: 'string',
-		name_default: 'string',
-		description_fr: 'string',
-		description_en: 'string',
+		name_fr: { type: 'string' },
+		name_en: { type: 'string' },
+		name_default: { type: 'string' },
+		description_fr: { type: 'string' },
+		description_en: { type: 'string' },
 		category_id: 'integer',
 		family_id: 'integer',
-		active: 'boolean',
-		is_bundle: 'boolean',
+		active: { type: 'boolean' },
+		is_bundle: { type: 'boolean' },
 		deleted_at: 'timestamp',
 		// Ambiguity test: multiple user references
 		author_id: 'integer',
@@ -53,13 +53,13 @@ export const pimdamExtendedModel = defineSchema({
 	},
 	assets: {
 		id: 'integer',
-		kind: 'string',
-		sha256: 'string',
-		mime: 'string',
+		kind: { type: 'string' },
+		sha256: { type: 'string' },
+		mime: { type: 'string' },
 		width: 'integer',
 		height: 'integer',
 		size_bytes: 'integer',
-		storage_key: 'string',
+		storage_key: { type: 'string' },
 		expires_at: 'timestamp',
 		created_at: 'timestamp',
 	},
@@ -67,18 +67,18 @@ export const pimdamExtendedModel = defineSchema({
 		id: 'integer',
 		product_id: 'integer',
 		asset_id: 'integer',
-		locale: 'string',
-		status: 'string',
-		is_main: 'boolean',
-		role: 'string', // For ambiguous relations: 'main', 'gallery', 'thumbnail'
+		locale: { type: 'string' },
+		status: { type: 'string' },
+		is_main: { type: 'boolean' },
+		role: { type: 'string' }, // For ambiguous relations: 'main', 'gallery', 'thumbnail'
 		position: 'integer',
 		deleted_at: 'timestamp',
 	},
 	variants: {
 		id: 'integer',
 		product_id: 'integer',
-		sku: 'string',
-		name: 'string',
+		sku: { type: 'string' },
+		name: { type: 'string' },
 		price_cents: 'integer',
 		stock: 'integer',
 	},
@@ -88,15 +88,15 @@ export const pimdamExtendedModel = defineSchema({
 	// Q1: Completeness - Families define required attributes
 	families: {
 		id: 'integer',
-		name: 'string',
-		code: 'string',
+		name: { type: 'string' },
+		code: { type: 'string' },
 	},
 
 	// Q1: Completeness - Channels for multi-channel requirements
 	channels: {
 		id: 'integer',
-		name: 'string',
-		code: 'string',
+		name: { type: 'string' },
+		code: { type: 'string' },
 	},
 
 	// Q1: Completeness - Which attributes are required per family/channel
@@ -104,17 +104,17 @@ export const pimdamExtendedModel = defineSchema({
 		id: 'integer',
 		family_id: 'integer',
 		channel_id: 'integer',
-		attribute_name: 'string',
-		is_required: 'boolean',
+		attribute_name: { type: 'string' },
+		is_required: { type: 'boolean' },
 	},
 
 	// Q1: Completeness - Actual attribute values per product
 	product_attributes: {
 		id: 'integer',
 		product_id: 'integer',
-		attribute_name: 'string',
-		value: 'string',
-		locale: 'string',
+		attribute_name: { type: 'string' },
+		value: { type: 'string' },
+		locale: { type: 'string' },
 	},
 
 	// Q7: BOM/Bundles - Components junction
@@ -131,17 +131,17 @@ export const pimdamExtendedModel = defineSchema({
 		id: 'integer',
 		variant_id: 'integer',
 		asset_id: 'integer',
-		locale: 'string',
-		is_main: 'boolean',
+		locale: { type: 'string' },
+		is_main: { type: 'boolean' },
 		position: 'integer',
 	},
 
 	// Q8: Users for author/reviewer ambiguity
 	users: {
 		id: 'integer',
-		name: 'string',
-		email: 'string',
-		role: 'string',
+		name: { type: 'string' },
+		email: { type: 'string' },
+		role: { type: 'string' },
 	},
 })
 	.relations({

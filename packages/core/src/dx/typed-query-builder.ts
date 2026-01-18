@@ -10,6 +10,8 @@
  * - Result type automatically includes relations based on include() calls
  */
 
+import type { WhereIntent } from '../intent-ast.js';
+import type { DistinctField } from './filters.js';
 import type {
 	IncludeSpec,
 	InferColumns,
@@ -34,8 +36,6 @@ import type {
 	SortDirection,
 	StreamOptions,
 } from './types.js';
-import type { DistinctField } from './filters.js';
-import type { WhereIntent } from '../intent-ast.js';
 
 // ============================================================================
 // Type-Safe Include State Tracking
@@ -269,7 +269,9 @@ export interface TypedQueryBuilder<
 	/**
 	 * Paginate with page/perPage.
 	 */
-	paginate(options: PaginateOptions): Promise<PaginatedResult<InferQueryResult<S, T, I>>>;
+	paginate(
+		options: PaginateOptions,
+	): Promise<PaginatedResult<InferQueryResult<S, T, I>>>;
 
 	/**
 	 * Cursor-based pagination.
@@ -326,7 +328,9 @@ export interface TypedQueryBuilder<
 	 * @param ids - Array of primary key values
 	 * @returns Array of results
 	 */
-	byIds(ids: readonly (string | number)[]): Promise<InferQueryResult<S, T, I>[]>;
+	byIds(
+		ids: readonly (string | number)[],
+	): Promise<InferQueryResult<S, T, I>[]>;
 
 	/**
 	 * Stream results.
@@ -397,7 +401,9 @@ export interface TypedOrmInstance<S extends TypedSchema> {
 	 * // users: { id: string; name: string; ... }[]
 	 * ```
 	 */
-	select<T extends TableNames<S>>(tableName: T): TypedQueryBuilder<S, T, undefined>;
+	select<T extends TableNames<S>>(
+		tableName: T,
+	): TypedQueryBuilder<S, T, undefined>;
 
 	/**
 	 * Whether strict mode is enabled by default.

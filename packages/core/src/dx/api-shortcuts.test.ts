@@ -8,27 +8,27 @@ import { createOrm } from './orm.js';
  */
 const testSchema = defineSchema({
 	users: {
-		id: 'number',
-		name: 'string',
-		email: 'string',
+		id: { type: 'number' },
+		name: { type: 'string' },
+		email: { type: 'string' },
 	},
 	order_lines: {
-		order_id: 'number',
-		product_id: 'number',
-		quantity: 'number',
-		price: 'number',
+		order_id: { type: 'number' },
+		product_id: { type: 'number' },
+		quantity: { type: 'number' },
+		price: { type: 'number' },
 	},
 	posts: {
-		id: 'number',
-		title: 'string',
-		content: 'string',
-		author_id: 'number',
+		id: { type: 'number' },
+		title: { type: 'string' },
+		content: { type: 'string' },
+		author_id: { type: 'number' },
 	},
 	comments: {
-		id: 'number',
-		text: 'string',
-		post_id: 'number',
-		author_id: 'number',
+		id: { type: 'number' },
+		text: { type: 'string' },
+		post_id: { type: 'number' },
+		author_id: { type: 'number' },
 	},
 })
 	.relations({
