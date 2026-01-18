@@ -11,8 +11,10 @@ import type {
 	FilterStrategy,
 	ForeignKeyIR,
 	IncludeStrategy,
+	IndexIR,
 	JoinDefault,
 	ModelIR,
+	OnDeleteAction,
 	Optionality,
 	RelationIR,
 	RelationType,
@@ -24,14 +26,80 @@ import type {
 // ============================================================================
 
 /**
- * Column definition shorthand: type name string
+ * SQL expression wrapper for defaults - triggers RAW_SQL_USAGE warning
  */
-export type ColumnDef = ColumnType;
+export interface SqlDefault {
+	readonly sql: string;
+}
 
 /**
- * Table definition: column name → column type
+ * Safe default value: literal or SQL expression
  */
-export type TableDef = Record<string, ColumnDef>;
+export type DefaultValue = string | number | boolean | null | SqlDefault;
+
+/**
+ * Foreign key reference definition
+ */
+export interface FKReference {
+	readonly table: string;
+	readonly column?: string; // default: 'id'
+	readonly onDelete?: OnDeleteAction;
+}
+
+/**
+ * Rich column definition with constraints
+ */
+export interface ColumnDef {
+	readonly type: ColumnType;
+	readonly nullable?: boolean;
+	readonly unique?: boolean;
+	readonly primaryKey?: boolean;
+	readonly default?: DefaultValue;
+	readonly index?: boolean | string;
+	readonly references?: FKReference;
+}
+
+/**
+ * Index definition for table-level composite indexes
+ */
+export interface IndexDef {
+	readonly columns: readonly string[];
+	readonly unique?: boolean;
+	readonly name?: string;
+}
+
+/**
+ * Table definition with optional config
+ */
+export interface TableDefWithConfig {
+	readonly columns: Record<string, ColumnDef>;
+	readonly primaryKey?: string | readonly string[];
+	readonly indexes?: readonly IndexDef[];
+}
+
+/**
+ * Table definition: simple (columns only) or with config
+ */
+export type TableDef = Record<string, ColumnDef> | TableDefWithConfig;
+
+/**
+ * Type guard to check if TableDef has config
+ */
+export function isTableDefWithConfig(def: TableDef): def is TableDefWithConfig {
+	return 'columns' in def && typeof def.columns === 'object';
+}
+
+/**
+ * Valid SQL identifier pattern
+ */
+export const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+/**
+ * Validate that a string is a valid SQL identifier
+ */
+export function isValidIdentifier(name: string): boolean {
+	return IDENTIFIER_REGEX.test(name);
+}
 
 /**
  * Optional hints to override default planner strategies
@@ -211,35 +279,139 @@ class SchemaBuilderImpl<T extends Record<string, TableDef>>
 	private buildTables(): Map<string, TableIR> {
 		const tables = new Map<string, TableIR>();
 
-		for (const [tableName, columnDefs] of Object.entries(this.tableDefs)) {
+		for (const [tableName, tableDef] of Object.entries(this.tableDefs)) {
+			// Extract columns and config from TableDef
+			const columnDefs = isTableDefWithConfig(tableDef)
+				? tableDef.columns
+				: tableDef;
+			const tableConfig = isTableDefWithConfig(tableDef) ? tableDef : null;
+
 			const columns: ColumnIR[] = [];
 			const foreignKeys: ForeignKeyIR[] = [];
-			let primaryKey: string | readonly string[] = 'id'; // default
+			const indexes: IndexIR[] = [];
+			const pkColumns: string[] = [];
+			let hasIdColumn = false;
 
-			for (const [colName, colType] of Object.entries(columnDefs as TableDef)) {
-				columns.push({
-					name: colName,
-					type: colType,
-					nullable: false, // default
-				});
-
-				// Auto-detect primary key
-				if (colName === 'id') {
-					primaryKey = 'id';
+			for (const [colName, colDef] of Object.entries(columnDefs)) {
+				// Validate identifier
+				if (!isValidIdentifier(colName)) {
+					throw new Error(
+						`Invalid column name '${colName}' in table '${tableName}': must match /^[a-zA-Z_][a-zA-Z0-9_]*$/`,
+					);
 				}
 
-				// Auto-detect foreign keys (columns ending with Id)
-				if (colName.endsWith('Id') && colName !== 'id') {
-					const referencedTable = this.inferTableFromForeignKey(colName);
-					if (referencedTable && this.tableDefs[referencedTable]) {
-						foreignKeys.push({
-							columns: [colName],
-							references: {
-								table: referencedTable,
-								columns: ['id'],
-							},
-						});
+				// V2: Nullable primary key
+				if (colDef.primaryKey && colDef.nullable) {
+					throw new Error(
+						`Primary key column '${colName}' in table '${tableName}' cannot be nullable`,
+					);
+				}
+
+				// V3: Default null on non-nullable
+				if (colDef.default === null && !colDef.nullable) {
+					throw new Error(
+						`Cannot set default to null on non-nullable column '${colName}' in table '${tableName}'`,
+					);
+				}
+
+				// V5: Validate FK reference table identifier
+				if (colDef.references) {
+					if (!isValidIdentifier(colDef.references.table)) {
+						throw new Error(
+							`Invalid table name '${colDef.references.table}' in FK reference for column '${colName}'`,
+						);
 					}
+					if (
+						colDef.references.column &&
+						!isValidIdentifier(colDef.references.column)
+					) {
+						throw new Error(
+							`Invalid column name '${colDef.references.column}' in FK reference for column '${colName}'`,
+						);
+					}
+				}
+
+				// Build ColumnIR
+				columns.push({
+					name: colName,
+					type: colDef.type,
+					nullable: colDef.nullable ?? false,
+					default: colDef.default,
+				});
+
+				// Track primary key columns
+				if (colDef.primaryKey) {
+					pkColumns.push(colName);
+				}
+				if (colName === 'id') {
+					hasIdColumn = true;
+				}
+
+				// Extract explicit FK references
+				if (colDef.references) {
+					const fkDef: ForeignKeyIR = {
+						columns: [colName],
+						references: {
+							table: colDef.references.table,
+							columns: [colDef.references.column ?? 'id'],
+						},
+					};
+					if (colDef.references.onDelete) {
+						(fkDef as { onDelete?: OnDeleteAction }).onDelete =
+							colDef.references.onDelete;
+					}
+					foreignKeys.push(fkDef);
+				}
+
+				// Extract column-level index
+				if (colDef.index) {
+					const indexName =
+						typeof colDef.index === 'string'
+							? colDef.index
+							: `idx_${tableName}_${colName}`;
+					indexes.push({
+						name: indexName,
+						columns: [colName],
+						unique: false,
+					});
+				}
+
+				// Unique constraint creates implicit index (optional: track separately)
+				// For now, unique is handled in DDL generation directly
+			}
+
+			// V1: Multiple primaryKey: true
+			if (pkColumns.length > 1) {
+				throw new Error(
+					`Multiple columns have primaryKey: true in table '${tableName}'. Use table-level primaryKey for composite keys.`,
+				);
+			}
+
+			// Determine final primary key
+			let primaryKey: string | readonly string[];
+			const singlePkCol = pkColumns.length === 1 ? pkColumns[0] : undefined;
+			if (tableConfig?.primaryKey) {
+				// Table-level primaryKey takes precedence
+				primaryKey = tableConfig.primaryKey;
+			} else if (singlePkCol !== undefined) {
+				primaryKey = singlePkCol;
+			} else if (hasIdColumn) {
+				primaryKey = 'id';
+			} else {
+				// Default to first column if no id
+				primaryKey = columns[0]?.name ?? 'id';
+			}
+
+			// Extract table-level indexes
+			if (tableConfig?.indexes) {
+				for (const idxDef of tableConfig.indexes) {
+					const indexName =
+						idxDef.name ?? `idx_${tableName}_${idxDef.columns.join('_')}`;
+					indexes.push({
+						name: indexName,
+						columns: idxDef.columns,
+						unique: idxDef.unique ?? false,
+					});
 				}
 			}
 
@@ -248,20 +420,24 @@ class SchemaBuilderImpl<T extends Record<string, TableDef>>
 				columns: Object.freeze(columns),
 				primaryKey,
 				foreignKeys: Object.freeze(foreignKeys),
+				indexes: Object.freeze(indexes),
 			});
 
 			tables.set(tableName, table);
 		}
 
-		return tables;
-	}
+		// V4: Validate FK references point to existing tables
+		for (const [tableName, table] of tables) {
+			for (const fk of table.foreignKeys) {
+				if (!tables.has(fk.references.table)) {
+					throw new Error(
+						`Foreign key in table '${tableName}' references unknown table '${fk.references.table}'`,
+					);
+				}
+			}
+		}
 
-	private inferTableFromForeignKey(columnName: string): string | undefined {
-		// categoryId → categories, userId → users, productId → products
-		const baseName = columnName.replace(/Id$/, '');
-		// Simple pluralization
-		const pluralized = `${baseName}s`;
-		return pluralized;
+		return tables;
 	}
 
 	private buildRelations(
