@@ -15,7 +15,7 @@ import {
 if (!process.env.DOCKER_HOST) {
 	throw new Error(
 		'DOCKER_HOST is not set. For Podman, add to ~/.bashrc:\n' +
-		'  export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"'
+			'  export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"',
 	);
 }
 
@@ -44,9 +44,7 @@ export async function setup(): Promise<void> {
 	// Check Docker availability
 	const dockerAvailable = await isDockerAvailable();
 	if (!dockerAvailable) {
-		console.warn(
-			'\n⚠️  Docker is not available. E2E tests will be skipped.\n',
-		);
+		console.warn('\n⚠️  Docker is not available. E2E tests will be skipped.\n');
 		process.env.SKIP_E2E_TESTS = 'true';
 		return;
 	}

@@ -14,7 +14,7 @@ const MAX_COL_WIDTH = 30;
 /** Truncate string to max length with ellipsis */
 function truncate(value: string, maxLen: number): string {
 	if (value.length <= maxLen) return value;
-	return value.slice(0, maxLen - 1) + '…';
+	return `${value.slice(0, maxLen - 1)}…`;
 }
 
 /** Format a cell value for display */
@@ -41,7 +41,10 @@ function calculateColumnWidths(
 		columns.forEach((col, idx) => {
 			const value = formatValue(row[col]);
 			const currentWidth = widths[idx] ?? 0;
-			widths[idx] = Math.min(MAX_COL_WIDTH, Math.max(currentWidth, value.length));
+			widths[idx] = Math.min(
+				MAX_COL_WIDTH,
+				Math.max(currentWidth, value.length),
+			);
 		});
 	}
 
@@ -89,15 +92,17 @@ export function ExecutionResultDisplay({
 	const widths = calculateColumnWidths(columns, rows);
 
 	// Build separator line
-	const separator = '─'.repeat(
-		widths.reduce((sum, w) => sum + w + 3, 0) - 1,
-	);
+	const separator = '─'.repeat(widths.reduce((sum, w) => sum + w + 3, 0) - 1);
 
 	return (
 		<Box flexDirection="column" marginY={1}>
 			{/* Header */}
 			<Text color="cyan">
-				│ {columns.map((col, idx) => padCell(col, widths[idx] ?? col.length)).join(' │ ')} │
+				│{' '}
+				{columns
+					.map((col, idx) => padCell(col, widths[idx] ?? col.length))
+					.join(' │ ')}{' '}
+				│
 			</Text>
 			<Text color="gray">├{separator}┤</Text>
 
@@ -106,7 +111,9 @@ export function ExecutionResultDisplay({
 				<Text key={rowIdx}>
 					│{' '}
 					{columns
-						.map((col, idx) => padCell(formatValue(row[col]), widths[idx] ?? 10))
+						.map((col, idx) =>
+							padCell(formatValue(row[col]), widths[idx] ?? 10),
+						)
 						.join(' │ ')}{' '}
 					│
 				</Text>

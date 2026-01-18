@@ -3,11 +3,7 @@
  * Dump API - High-level compilation interface for observability.
  */
 
-import type {
-	ModelIR,
-	PlanReport,
-	QueryIntent,
-} from '@dbsp/core';
+import type { ModelIR, PlanReport, QueryIntent } from '@dbsp/core';
 import { plan } from '@dbsp/core';
 import type { Kysely } from 'kysely';
 import { compile } from './compiler.js';

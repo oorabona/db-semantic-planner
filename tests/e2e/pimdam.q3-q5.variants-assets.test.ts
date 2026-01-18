@@ -19,9 +19,9 @@
  * - Unused assets: Some assets not linked to any variant
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { and, createOrm, eq, exists, notExists } from '@dbsp/core';
 import { sql as kyselySql } from 'kysely';
-import { createOrm, eq, exists, and, notExists } from '@dbsp/core';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
@@ -123,7 +123,11 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				ORDER BY name
 			`.execute(db);
 
-			const inStock = result.rows as { sku: string; name: string; stock: number }[];
+			const inStock = result.rows as {
+				sku: string;
+				name: string;
+				stock: number;
+			}[];
 			// Small (10) and Medium (5) are in stock, Large (0) is out
 			expect(inStock).toHaveLength(2);
 			expect(inStock.map((v) => v.name)).toEqual(['Medium', 'Small']);
@@ -150,7 +154,10 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				ORDER BY v.name
 			`.execute(db);
 
-			const variants = result.rows as { sku: string; image_path: string | null }[];
+			const variants = result.rows as {
+				sku: string;
+				image_path: string | null;
+			}[];
 			// Large has no images
 			const large = variants.find((v) => v.sku === 'TSHIRT-001-L');
 			expect(large?.image_path).toBeNull();
@@ -186,7 +193,9 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 
 			const expiring = result.rows as { id: number; storage_key: string }[];
 			expect(expiring.length).toBeGreaterThanOrEqual(1);
-			expect(expiring.some((a) => a.storage_key.includes('expiring-soon'))).toBe(true);
+			expect(
+				expiring.some((a) => a.storage_key.includes('expiring-soon')),
+			).toBe(true);
 		});
 
 		it('Q4-02: should exclude assets used only by inactive products', async () => {
@@ -211,9 +220,9 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 
 			const inactiveOnly = result.rows as { id: number; storage_key: string }[];
 			// Asset 12 (deleted-product.jpg) is only used by deleted product
-			expect(inactiveOnly.some((a) => a.storage_key.includes('deleted-product'))).toBe(
-				true,
-			);
+			expect(
+				inactiveOnly.some((a) => a.storage_key.includes('deleted-product')),
+			).toBe(true);
 		});
 
 		it('Q4-03: should join assets with product details', async () => {
@@ -243,7 +252,9 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 			expect(expiring.length).toBeGreaterThanOrEqual(1);
 
 			// Verify we have product context
-			const expiringAsset = expiring.find((a) => a.storage_key.includes('expiring'));
+			const expiringAsset = expiring.find((a) =>
+				a.storage_key.includes('expiring'),
+			);
 			expect(expiringAsset?.product_sku).toBe('EXPIRING-001');
 		});
 	});
@@ -253,7 +264,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 	// =========================================================================
 	describe('Q5: Unused assets (NOT EXISTS)', () => {
 		it('Q5-01: should find assets not linked to any product', async () => {
-			const db = await getTestDb();
+			const _db = await getTestDb();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
@@ -300,7 +311,9 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 			const unused = result.rows as { storage_key: string; kind: string }[];
 			// orphan.jpg, deleted-product.jpg, video, document should be "unused"
 			expect(unused.some((a) => a.storage_key.includes('orphan'))).toBe(true);
-			expect(unused.some((a) => a.storage_key.includes('deleted-product'))).toBe(true);
+			expect(
+				unused.some((a) => a.storage_key.includes('deleted-product')),
+			).toBe(true);
 		});
 
 		it('Q5-03: should count unused assets by kind', async () => {
@@ -336,7 +349,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 	// =========================================================================
 	describe('ORM API: exists/notExists patterns', () => {
 		it('should generate EXISTS SQL for variant images filter', async () => {
-			const db = await getTestDb();
+			const _db = await getTestDb();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
@@ -353,7 +366,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 		});
 
 		it('should generate NOT EXISTS SQL for orphan assets', async () => {
-			const db = await getTestDb();
+			const _db = await getTestDb();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 

@@ -8,9 +8,9 @@
  * so we only test non-parameterized queries or verify SQL structure.
  */
 
+import { createOrm } from '@dbsp/core';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createOrm } from '@dbsp/core';
 import {
 	closeTestDb,
 	createPimdamSchema,
@@ -50,7 +50,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 	describe('Basic queries (no parameters)', () => {
 		it('should produce valid EXPLAIN output for simple select', async () => {
-			const db = await getTestDb();
+			const _db = await getTestDb();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -75,7 +75,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 		});
 
 		it('should produce valid EXPLAIN for categories query', async () => {
-			const db = await getTestDb();
+			const _db = await getTestDb();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -93,7 +93,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 		});
 
 		it('should produce valid EXPLAIN for assets query', async () => {
-			const db = await getTestDb();
+			const _db = await getTestDb();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -113,7 +113,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 	describe('SQL structure validation', () => {
 		it('should generate SELECT with correct schema prefix', async () => {
-			const db = await getTestDb();
+			const _db = await getTestDb();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -130,7 +130,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 		});
 
 		it('should generate valid SQL for all entity types', async () => {
-			const db = await getTestDb();
+			const _db = await getTestDb();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -143,7 +143,11 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 			] as const;
 
 			for (const entity of entities) {
-				const dump = orm.withSchema('acme').select(entity).columns(['id']).dump();
+				const dump = orm
+					.withSchema('acme')
+					.select(entity)
+					.columns(['id'])
+					.dump();
 
 				expect(dump.sql).toContain('"acme"');
 				expect(dump.sql.toLowerCase()).toContain('select');
@@ -151,7 +155,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 		});
 
 		it('should include parameters array even when empty', async () => {
-			const db = await getTestDb();
+			const _db = await getTestDb();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -167,7 +171,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 	describe('Plan characteristics', () => {
 		it('should use Seq Scan on small tables', async () => {
-			const db = await getTestDb();
+			const _db = await getTestDb();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -184,7 +188,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 		});
 
 		it('should estimate reasonable row counts', async () => {
-			const db = await getTestDb();
+			const _db = await getTestDb();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -203,7 +207,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 		});
 
 		it('should show correct relation name in plan', async () => {
-			const db = await getTestDb();
+			const _db = await getTestDb();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -222,40 +226,31 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 	describe('Dump metadata', () => {
 		it('should include tenant in meta', async () => {
-			const db = await getTestDb();
+			const _db = await getTestDb();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
-			const dump = orm
-				.withSchema('acme')
-				.select('products')
-				.dump();
+			const dump = orm.withSchema('acme').select('products').dump();
 
 			expect(dump.meta?.schema).toBe('acme');
 		});
 
 		it('should include compiledAt timestamp', async () => {
-			const db = await getTestDb();
+			const _db = await getTestDb();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
-			const dump = orm
-				.withSchema('acme')
-				.select('products')
-				.dump();
+			const dump = orm.withSchema('acme').select('products').dump();
 
 			expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
 		});
 
 		it('should have plan with decisions', async () => {
-			const db = await getTestDb();
+			const _db = await getTestDb();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
-			const dump = orm
-				.withSchema('acme')
-				.select('products')
-				.dump();
+			const dump = orm.withSchema('acme').select('products').dump();
 
 			expect(dump.plan).toBeDefined();
 			expect(dump.plan.decisions).toBeInstanceOf(Array);

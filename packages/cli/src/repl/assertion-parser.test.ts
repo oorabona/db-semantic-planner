@@ -195,7 +195,13 @@ ${type}: ${input}
 
 	describe('validateAssertionBlocks', () => {
 		it('validates query index bounds', () => {
-			const blocks = [{ queryIndex: 10, startLine: 1, assertions: [{ type: 'success' as const, value: true, line: 2 }] }];
+			const blocks = [
+				{
+					queryIndex: 10,
+					startLine: 1,
+					assertions: [{ type: 'success' as const, value: true, line: 2 }],
+				},
+			];
 			const errors = validateAssertionBlocks(blocks, 3, ['a', 'b', 'c']);
 
 			expect(errors).toHaveLength(1);
@@ -204,16 +210,36 @@ ${type}: ${input}
 		});
 
 		it('validates query match exists', () => {
-			const blocks = [{ queryMatch: 'nonexistent', startLine: 1, assertions: [{ type: 'success' as const, value: true, line: 2 }] }];
-			const errors = validateAssertionBlocks(blocks, 3, ['posts', 'users', 'comments']);
+			const blocks = [
+				{
+					queryMatch: 'nonexistent',
+					startLine: 1,
+					assertions: [{ type: 'success' as const, value: true, line: 2 }],
+				},
+			];
+			const errors = validateAssertionBlocks(blocks, 3, [
+				'posts',
+				'users',
+				'comments',
+			]);
 
 			expect(errors).toHaveLength(1);
 			expect(errors[0].message).toContain('No query matches');
 		});
 
 		it('detects ambiguous match (ERR-06)', () => {
-			const blocks = [{ queryMatch: 'posts', startLine: 1, assertions: [{ type: 'success' as const, value: true, line: 2 }] }];
-			const errors = validateAssertionBlocks(blocks, 3, ['posts', 'users', 'posts']);
+			const blocks = [
+				{
+					queryMatch: 'posts',
+					startLine: 1,
+					assertions: [{ type: 'success' as const, value: true, line: 2 }],
+				},
+			];
+			const errors = validateAssertionBlocks(blocks, 3, [
+				'posts',
+				'users',
+				'posts',
+			]);
 
 			expect(errors).toHaveLength(1);
 			expect(errors[0].message).toContain('Ambiguous match');
@@ -231,8 +257,16 @@ ${type}: ${input}
 
 		it('passes valid blocks', () => {
 			const blocks = [
-				{ queryIndex: 0, startLine: 1, assertions: [{ type: 'success' as const, value: true, line: 2 }] },
-				{ queryIndex: 2, startLine: 3, assertions: [{ type: 'success' as const, value: true, line: 4 }] },
+				{
+					queryIndex: 0,
+					startLine: 1,
+					assertions: [{ type: 'success' as const, value: true, line: 2 }],
+				},
+				{
+					queryIndex: 2,
+					startLine: 3,
+					assertions: [{ type: 'success' as const, value: true, line: 4 }],
+				},
 			];
 			const errors = validateAssertionBlocks(blocks, 3, ['a', 'b', 'c']);
 
@@ -249,7 +283,11 @@ ${type}: ${input}
 		});
 
 		it('finds index by match', () => {
-			const block = { queryMatch: 'users where id = 1', startLine: 1, assertions: [] };
+			const block = {
+				queryMatch: 'users where id = 1',
+				startLine: 1,
+				assertions: [],
+			};
 			expect(resolveQueryIndex(block, queries)).toBe(1);
 		});
 
@@ -259,7 +297,11 @@ ${type}: ${input}
 		});
 
 		it('handles whitespace in match', () => {
-			const block = { queryMatch: '  users where id = 1  ', startLine: 1, assertions: [] };
+			const block = {
+				queryMatch: '  users where id = 1  ',
+				startLine: 1,
+				assertions: [],
+			};
 			expect(resolveQueryIndex(block, queries)).toBe(1);
 		});
 	});

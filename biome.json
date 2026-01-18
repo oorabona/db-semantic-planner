@@ -1,7 +1,7 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.3.11/schema.json",
 	"files": {
-		"includes": ["packages/**", "*.json", "*.md"]
+		"includes": ["packages/**", "tests/**", "*.json", "*.md"]
 	},
 	"vcs": {
 		"enabled": true,
@@ -18,7 +18,7 @@
 	},
 	"linter": {
 		"enabled": true,
-		"includes": ["packages/**"],
+		"includes": ["packages/**", "tests/**"],
 		"rules": {
 			"recommended": true,
 			"correctness": {
@@ -43,7 +43,7 @@
 	},
 	"overrides": [
 		{
-			"includes": ["**/*.test.ts", "**/*.test.tsx"],
+			"includes": ["**/*.test.ts", "**/*.test.tsx", "**/testkit/**"],
 			"linter": {
 				"rules": {
 					"suspicious": {

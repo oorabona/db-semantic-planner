@@ -17,7 +17,7 @@ import {
 describe.skipIf(shouldSkipE2E())('E2E Infrastructure', () => {
 	beforeAll(async () => {
 		// Ensure clean state
-		const db = await getTestDb();
+		const _db = await getTestDb();
 		await dropSchema('test_infra');
 	});
 

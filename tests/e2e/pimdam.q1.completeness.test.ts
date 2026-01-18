@@ -17,9 +17,9 @@
  * - Product 10 (iPhone-15): has name + description, missing price = 66.67% complete
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { sql as kyselySql } from 'kysely';
 import { createOrm, eq } from '@dbsp/core';
+import { sql as kyselySql } from 'kysely';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
@@ -199,7 +199,10 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 			`.execute(db);
 
 			// Products without any product_attributes have 0% completeness
-			const lowCompleteness = result.rows as { sku: string; completeness: number }[];
+			const lowCompleteness = result.rows as {
+				sku: string;
+				completeness: number;
+			}[];
 			// Widget, Gadget, Gizmo etc don't have product_attributes → 0%
 			expect(lowCompleteness.some((p) => p.sku === 'WIDGET-001')).toBe(true);
 		});
@@ -241,7 +244,10 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 				ORDER BY c.code
 			`.execute(db);
 
-			const byChannel = result.rows as { channel: string; completeness: number }[];
+			const byChannel = result.rows as {
+				channel: string;
+				completeness: number;
+			}[];
 			const print = byChannel.find((c) => c.channel === 'print');
 			const web = byChannel.find((c) => c.channel === 'web');
 

@@ -18,7 +18,9 @@ import { getTestDb } from './db.js';
 /**
  * Create the Scheduling schema tables in a tenant schema.
  */
-export async function createSchedulingSchema(schemaName: string): Promise<void> {
+export async function createSchedulingSchema(
+	schemaName: string,
+): Promise<void> {
 	const db = await getTestDb();
 
 	// Create schema and required extension

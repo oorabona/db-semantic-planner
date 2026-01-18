@@ -4,8 +4,8 @@
  * Tests CTE extraction when the same relation is accessed multiple times.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { and, createOrm, eq, exists } from '@dbsp/core';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createPimdamSchema,
@@ -38,10 +38,7 @@ describe.skipIf(shouldSkipE2E())(
 		/**
 		 * Build the Q2 query: products with approved FR main image AND approved EN main image
 		 */
-		const buildQ2Query = (
-			orm: ReturnType<typeof createOrm>,
-			tenant: string,
-		) =>
+		const buildQ2Query = (orm: ReturnType<typeof createOrm>, tenant: string) =>
 			orm
 				.withSchema(tenant)
 				.select('products')
@@ -110,9 +107,8 @@ describe.skipIf(shouldSkipE2E())(
 				const dump = buildQ2Query(orm, 'acme').dump();
 
 				// Count EXISTS occurrences
-				const existsCount = (
-					dump.sql.toUpperCase().match(/EXISTS/g) || []
-				).length;
+				const existsCount = (dump.sql.toUpperCase().match(/EXISTS/g) || [])
+					.length;
 				expect(existsCount).toBeGreaterThanOrEqual(2);
 			});
 

@@ -9,16 +9,10 @@
  * Uses edge-table traversal pattern (role_edges junction table).
  */
 
+import { compileRecursive, getCapabilities } from '@dbsp/adapter-kysely';
+import { planRecursive, type RecursiveIntent } from '@dbsp/core';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import {
-	type RecursiveIntent,
-	planRecursive,
-} from '@dbsp/core';
-import {
-	compileRecursive,
-	getCapabilities,
-} from '@dbsp/adapter-kysely';
 import {
 	createIamSchema,
 	createSchema,
@@ -88,17 +82,14 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 
 			// Plan and compile the recursive CTE
 			const report = planRecursive(roleHierarchyIntent, iamModel);
-			const compiled = compileRecursive(
-				report,
-				iamModel,
-				db,
-				IAM_SCHEMA,
-			);
+			const compiled = compileRecursive(report, iamModel, db, IAM_SCHEMA);
 
 			// Execute to get all roles in hierarchy
-			const roleResult = await db.executeQuery<{ id: number; name: string; depth: number }>(
-				compiled,
-			);
+			const roleResult = await db.executeQuery<{
+				id: number;
+				name: string;
+				depth: number;
+			}>(compiled);
 
 			// Extract role IDs from hierarchy
 			const roleIds = roleResult.rows.map((r) => r.id);

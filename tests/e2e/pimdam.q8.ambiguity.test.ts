@@ -17,15 +17,15 @@
  * - Products have author_id → author, reviewer_id → reviewer relations to users
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { sql as kyselySql } from 'kysely';
 import {
+	AmbiguousRelationError,
+	and,
 	createOrm,
 	eq,
-	and,
-	AmbiguousRelationError,
 	type RelationHints,
 } from '@dbsp/core';
+import { sql as kyselySql } from 'kysely';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
@@ -75,7 +75,9 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				WHERE p.sku = 'WIDGET-001'
 			`.execute(db);
 
-			const product = (result.rows as { author_name: string; reviewer_name: string }[])[0];
+			const product = (
+				result.rows as { author_name: string; reviewer_name: string }[]
+			)[0];
 			expect(product.author_name).toBe('Alice Author');
 			expect(product.reviewer_name).toBe('Bob Reviewer');
 		});
@@ -161,7 +163,11 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
 			// Verify the model supports both relations from products to users
-			const dump = orm.withSchema(SCHEMA).select('products').columns(['id', 'sku']).dump();
+			const dump = orm
+				.withSchema(SCHEMA)
+				.select('products')
+				.columns(['id', 'sku'])
+				.dump();
 
 			// Plan should include relation metadata showing both relations exist
 			expect(dump.sql).toContain(`"${SCHEMA}"`);
@@ -180,7 +186,11 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				.columns(['id', 'sku', 'author_id', 'reviewer_id'])
 				.execute();
 
-			const result = products as { sku: string; author_id: number; reviewer_id: number }[];
+			const result = products as {
+				sku: string;
+				author_id: number;
+				reviewer_id: number;
+			}[];
 			expect(result.length).toBe(1);
 			expect(result[0].author_id).toBe(1); // Alice
 			expect(result[0].reviewer_id).toBe(2); // Bob
@@ -255,7 +265,11 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				ORDER BY p.sku
 			`.execute(db);
 
-			const products = result.rows as { sku: string; author: string; reviewer: string }[];
+			const products = result.rows as {
+				sku: string;
+				author: string;
+				reviewer: string;
+			}[];
 			// All our test products have different author/reviewer
 			expect(products.length).toBeGreaterThanOrEqual(5);
 			// Verify they're actually different
@@ -306,7 +320,11 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				ORDER BY pi.position
 			`.execute(db);
 
-			const images = result.rows as { role: string; storage_key: string; position: number }[];
+			const images = result.rows as {
+				role: string;
+				storage_key: string;
+				position: number;
+			}[];
 			expect(images.length).toBe(3);
 
 			// Verify roles exist
@@ -452,7 +470,11 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			});
 
 			// Query with hints should prefer author relation
-			const dump = orm.withSchema(SCHEMA).select('products').columns(['id', 'sku']).dump();
+			const dump = orm
+				.withSchema(SCHEMA)
+				.select('products')
+				.columns(['id', 'sku'])
+				.dump();
 
 			// Just verify the ORM was created with hints
 			expect(dump.sql).toContain(`"${SCHEMA}"`);
@@ -462,7 +484,11 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
-			const dump = orm.withSchema(SCHEMA).select('products').columns(['id', 'sku']).dump();
+			const dump = orm
+				.withSchema(SCHEMA)
+				.select('products')
+				.columns(['id', 'sku'])
+				.dump();
 
 			// Verify tenant schema is applied
 			expect(dump.sql).toContain(`"${SCHEMA}".`);
@@ -473,7 +499,11 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
-			const dump = orm.withSchema(SCHEMA).select('users').columns(['id', 'name', 'email']).dump();
+			const dump = orm
+				.withSchema(SCHEMA)
+				.select('users')
+				.columns(['id', 'name', 'email'])
+				.dump();
 
 			// Verify tenant schema is applied
 			expect(dump.sql).toContain(`"${SCHEMA}".`);
@@ -594,12 +624,20 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 
 			// Using via: 'author' resolves the ambiguity
 			expect(() => {
-				orm.withSchema(SCHEMA).select('products').include('users', { via: 'author' }).plan();
+				orm
+					.withSchema(SCHEMA)
+					.select('products')
+					.include('users', { via: 'author' })
+					.plan();
 			}).not.toThrow();
 
 			// Using via: 'reviewer' also resolves it
 			expect(() => {
-				orm.withSchema(SCHEMA).select('products').include('users', { via: 'reviewer' }).plan();
+				orm
+					.withSchema(SCHEMA)
+					.select('products')
+					.include('users', { via: 'reviewer' })
+					.plan();
 			}).not.toThrow();
 		});
 
@@ -612,7 +650,11 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			});
 
 			// Should not throw
-			const planReport = orm.withSchema(SCHEMA).select('products').include('users').plan();
+			const planReport = orm
+				.withSchema(SCHEMA)
+				.select('products')
+				.include('users')
+				.plan();
 
 			// Should have ambiguity warning
 			const ambiguityWarning = planReport.warnings.find(

@@ -5,8 +5,8 @@
  * Results are logged but not asserted (informational only).
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createOrm, eq } from '@dbsp/core';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createPimdamSchema,
@@ -112,7 +112,11 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 				'Simple SELECT',
 				ITERATIONS,
 				() =>
-					orm.withSchema('acme').select('products').columns(['id', 'sku']).dump(),
+					orm
+						.withSchema('acme')
+						.select('products')
+						.columns(['id', 'sku'])
+						.dump(),
 				async () =>
 					orm
 						.withSchema('acme')
@@ -203,7 +207,11 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 				'Filtered Query Execution',
 				ITERATIONS,
 				() =>
-					orm.withSchema('acme').select('products').where(eq('sku', 'PROD-001')).dump(),
+					orm
+						.withSchema('acme')
+						.select('products')
+						.where(eq('sku', 'PROD-001'))
+						.dump(),
 				async () =>
 					orm
 						.withSchema('acme')
@@ -293,7 +301,9 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 			const overheadMs = ormResult.totalMs - rawExecutionMs;
 			const overheadPercent = (overheadMs / rawExecutionMs) * 100;
 
-			console.log(`\n📈 ORM Overhead: ${overheadMs.toFixed(3)}ms (${overheadPercent.toFixed(1)}%)`);
+			console.log(
+				`\n📈 ORM Overhead: ${overheadMs.toFixed(3)}ms (${overheadPercent.toFixed(1)}%)`,
+			);
 
 			// ORM overhead should be acceptable (< 100% of raw query time)
 			// This is a soft assertion - we just want to track it
@@ -324,7 +334,9 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 				times.reduce((sum, t) => sum + (t - avg) ** 2, 0) / times.length;
 			const stdDev = Math.sqrt(variance);
 
-			console.log(`\n📉 Query consistency: avg=${avg.toFixed(3)}ms, stdDev=${stdDev.toFixed(3)}ms`);
+			console.log(
+				`\n📉 Query consistency: avg=${avg.toFixed(3)}ms, stdDev=${stdDev.toFixed(3)}ms`,
+			);
 
 			// Standard deviation should be reasonable (< 50% of average)
 			expect(stdDev / avg).toBeLessThan(0.5);

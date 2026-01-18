@@ -24,7 +24,10 @@ export interface ModeEscapeResult {
  * @param mode - Current query mode ('natural' or 'sql')
  * @returns Parsed result with content and query type
  */
-export function parseInputMode(input: string, mode: QueryMode): ModeEscapeResult {
+export function parseInputMode(
+	input: string,
+	mode: QueryMode,
+): ModeEscapeResult {
 	const trimmed = input.trim();
 	const escaped = trimmed.startsWith('!');
 	const content = escaped ? trimmed.slice(1).trim() : trimmed;

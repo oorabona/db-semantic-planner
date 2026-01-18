@@ -306,7 +306,11 @@ class SchemaBuilderImpl<T extends Record<string, TableDef>>
 						: rawColDef;
 
 				// V1: Validate ColumnDef has required type property
-				if (typeof colDef !== 'object' || colDef === null || !('type' in colDef)) {
+				if (
+					typeof colDef !== 'object' ||
+					colDef === null ||
+					!('type' in colDef)
+				) {
 					throw new Error(
 						`Invalid column definition for '${colName}' in table '${tableName}': ` +
 							`expected { type: ColumnType, ... } or ColumnType string, got ${JSON.stringify(rawColDef)}`,

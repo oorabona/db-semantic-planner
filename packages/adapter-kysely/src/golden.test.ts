@@ -1489,7 +1489,11 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 			const schemaWithJoin = defineSchema({
 				posts: { id: { type: 'number' }, title: { type: 'string' } },
 				tags: { id: { type: 'number' }, name: { type: 'string' } },
-				postTags: { id: { type: 'number' }, postId: { type: 'number' }, tagId: { type: 'number' } },
+				postTags: {
+					id: { type: 'number' },
+					postId: { type: 'number' },
+					tagId: { type: 'number' },
+				},
 			})
 				.relations({
 					posts: {
@@ -1596,7 +1600,11 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 			const schemaWithJoin = defineSchema({
 				posts: { id: { type: 'number' }, title: { type: 'string' } },
 				tags: { id: { type: 'number' }, name: { type: 'string' } },
-				postTags: { id: { type: 'number' }, postId: { type: 'number' }, tagId: { type: 'number' } },
+				postTags: {
+					id: { type: 'number' },
+					postId: { type: 'number' },
+					tagId: { type: 'number' },
+				},
 			})
 				.relations({
 					posts: {
@@ -1636,7 +1644,11 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 			const customFkSchema = defineSchema({
 				users: { id: { type: 'number' }, name: { type: 'string' } },
 				roles: { id: { type: 'number' }, roleName: { type: 'string' } },
-				userRoles: { id: { type: 'number' }, user_id: { type: 'number' }, role_id: { type: 'number' } },
+				userRoles: {
+					id: { type: 'number' },
+					user_id: { type: 'number' },
+					role_id: { type: 'number' },
+				},
 			})
 				.relations({
 					users: {

@@ -426,7 +426,9 @@ describe('executeQuery - aggregates (CLI-016)', () => {
 		it('should include depth column when includeDepth is true', () => {
 			const query: ParsedQuery = {
 				table: 'categories',
-				include: [{ relation: 'children', recursive: true, includeDepth: true }],
+				include: [
+					{ relation: 'children', recursive: true, includeDepth: true },
+				],
 			};
 
 			const result = executeQuery(query, hierarchySchema);

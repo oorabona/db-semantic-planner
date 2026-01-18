@@ -24,9 +24,9 @@ export {
 	compileWithIncludes,
 	type InternalCompileOptions,
 } from './compiler.js';
-export type { DialectCapabilities, DialectName } from './dialect.js';
 // DDL generation (generates CREATE TABLE from ModelIR)
-export { generateDDL, type GenerateDDLOptions } from './ddl.js';
+export { type GenerateDDLOptions, generateDDL } from './ddl.js';
+export type { DialectCapabilities, DialectName } from './dialect.js';
 // Dialect detection and capabilities (DIALECT-001)
 export {
 	assertCapability,

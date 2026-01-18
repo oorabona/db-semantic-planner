@@ -5,13 +5,7 @@
  */
 
 import type { OrmInstance } from '@dbsp/core';
-import {
-	belongsTo,
-	createOrm,
-	defineSchema,
-	eq,
-	hasMany,
-} from '@dbsp/core';
+import { belongsTo, createOrm, defineSchema, eq, hasMany } from '@dbsp/core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 // ============================================================================

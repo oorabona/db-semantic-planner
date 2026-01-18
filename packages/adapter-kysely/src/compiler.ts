@@ -512,7 +512,10 @@ function inferScalarCast(value: unknown): string {
  * Build a PostgreSQL range literal from a RangeValue.
  * @example { lower: '2025-01-15', upper: '2025-01-20', bounds: '[)' } → '[2025-01-15,2025-01-20)'
  */
-function buildRangeLiteral(value: RangeValue): { literal: string; cast: string } {
+function buildRangeLiteral(value: RangeValue): {
+	literal: string;
+	cast: string;
+} {
 	const bounds = value.bounds ?? '[)';
 	const leftBound = bounds[0];
 	const rightBound = bounds[1];
@@ -1963,7 +1966,7 @@ function buildEdgeTableRecursiveStep(
  * Used for include.where filtering in LEFT JOINs.
  * Returns the modified JoinBuilder with additional ON conditions.
  */
-function addWhereToJoin<T>(
+function addWhereToJoin<_T>(
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely JoinBuilder generic
 	join: any,
 	where: WhereIntent | undefined,
@@ -4727,5 +4730,6 @@ function unwrapSingletonArray(
 ): string | readonly string[] {
 	// With noUncheckedIndexedAccess, value[0] is string | undefined
 	// We know length === 1 means value[0] exists, so use non-null assertion
+	// biome-ignore lint/style/noNonNullAssertion: Length check guarantees value[0] exists
 	return value.length === 1 ? value[0]! : value;
 }

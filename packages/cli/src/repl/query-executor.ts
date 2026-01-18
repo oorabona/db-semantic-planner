@@ -206,7 +206,10 @@ function whereClauseToFilter(clause: WhereClause): WhereIntent {
 			return rangeContains(column, value);
 		case 'containedBy':
 			// Range contained by operator (<@) - range is contained by another
-			return rangeContainedBy(column, value as { lower: unknown; upper: unknown });
+			return rangeContainedBy(
+				column,
+				value as { lower: unknown; upper: unknown },
+			);
 		default:
 			throw new Error(`Unsupported operator: ${operator}`);
 	}

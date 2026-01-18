@@ -5,8 +5,8 @@
  * without a model, triggering database introspection via information_schema.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createOrm } from '@dbsp/core';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createAdapterForSchema,

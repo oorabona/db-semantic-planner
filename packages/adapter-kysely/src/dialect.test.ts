@@ -390,7 +390,12 @@ describe('assertCapability', () => {
 			const db = createMockDb('MysqlDialectAdapter');
 			const customGuidance = 'Custom guidance message';
 			try {
-				assertCapability(db, 'supportsWithSchema', 'withSchema', customGuidance);
+				assertCapability(
+					db,
+					'supportsWithSchema',
+					'withSchema',
+					customGuidance,
+				);
 			} catch (error) {
 				expect(error).toBeInstanceOf(UnsupportedOperationError);
 				expect((error as Error).message).toContain(customGuidance);

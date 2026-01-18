@@ -7,12 +7,7 @@
  * - approved field on comments
  */
 
-import {
-	belongsTo,
-	belongsToMany,
-	defineSchema,
-	hasMany,
-} from '@dbsp/core';
+import { belongsTo, belongsToMany, defineSchema, hasMany } from '@dbsp/core';
 
 export const blogExtendedModel = defineSchema({
 	authors: {

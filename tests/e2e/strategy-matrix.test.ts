@@ -12,7 +12,7 @@
  * - supportsJsonAgg: true
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { PlanReport } from '@dbsp/core';
 import {
 	belongsTo,
 	createOrm,
@@ -23,12 +23,13 @@ import {
 	hasOne,
 	POSTGRESQL_CAPABILITIES,
 } from '@dbsp/core';
-import type { PlanReport } from '@dbsp/core';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 /**
  * PostgreSQL dialect capabilities for auto strategy selection.
  */
 const dialectCapabilities = POSTGRESQL_CAPABILITIES;
+
 import {
 	blogModel,
 	closeTestDb,
@@ -45,8 +46,7 @@ import {
 function getIncludeStrategyDecision(report: PlanReport, relationName: string) {
 	return report.decisions.find(
 		(d) =>
-			d.type === 'include-strategy' &&
-			d.context?.relation === relationName,
+			d.type === 'include-strategy' && d.context?.relation === relationName,
 	);
 }
 
@@ -71,7 +71,11 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 		describe('E2E-004-A1: belongsTo uses JOIN strategy', () => {
 			it('should auto-select JOIN for belongsTo relation', async () => {
 				const adapter = await getTestAdapter();
-				const orm = createOrm({ model: blogModel, adapter, dialectCapabilities });
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					dialectCapabilities,
+				});
 
 				// When: posts include author (belongsTo)
 				const query = orm
@@ -83,10 +87,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 				const dump = query.dump();
 
 				// Then: planner decides strategy: 'join'
-				const decision = getIncludeStrategyDecision(
-					dump.plan,
-					'author',
-				);
+				const decision = getIncludeStrategyDecision(dump.plan, 'author');
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('join');
 
@@ -97,9 +98,12 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 			it('should return correct author object for each post', async () => {
 				const adapter = await getTestAdapter();
-				const orm = createOrm({ model: blogModel, adapter, dialectCapabilities });
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					dialectCapabilities,
+				});
 
-				// biome-ignore lint/suspicious/noExplicitAny: E2E test allows loose typing
 				const posts = (await orm
 					.withSchema(SCHEMA)
 					.select('posts')
@@ -141,7 +145,11 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 					.build();
 
 				const adapter = await getTestAdapter();
-				const orm = createOrm({ model: schemaWithProfile, adapter, dialectCapabilities });
+				const orm = createOrm({
+					model: schemaWithProfile,
+					adapter,
+					dialectCapabilities,
+				});
 
 				// When: users include profile (hasOne)
 				const query = orm.select('users').include('profile');
@@ -149,10 +157,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 				const dump = query.dump();
 
 				// Then: planner decides strategy: 'join' for hasOne
-				const decision = getIncludeStrategyDecision(
-					dump.plan,
-					'profile',
-				);
+				const decision = getIncludeStrategyDecision(dump.plan, 'profile');
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('join');
 
@@ -169,7 +174,11 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 		describe('E2E-004-B1: hasMany auto-selects json_agg on PostgreSQL', () => {
 			it('should auto-select json_agg for hasMany relation', async () => {
 				const adapter = await getTestAdapter();
-				const orm = createOrm({ model: blogModel, adapter, dialectCapabilities });
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					dialectCapabilities,
+				});
 
 				// When: authors include posts (hasMany) with PostgreSQL
 				const query = orm
@@ -191,9 +200,12 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 			it('should return authors with posts array (no row explosion)', async () => {
 				const adapter = await getTestAdapter();
-				const orm = createOrm({ model: blogModel, adapter, dialectCapabilities });
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					dialectCapabilities,
+				});
 
-				// biome-ignore lint/suspicious/noExplicitAny: E2E test allows loose typing
 				const authors = (await orm
 					.withSchema(SCHEMA)
 					.select('authors')
@@ -211,8 +223,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 				// Total posts across authors should match seed data (5 posts)
 				const totalPosts = authors.reduce(
-					(sum: number, a: { posts: unknown[] }) =>
-						sum + a.posts.length,
+					(sum: number, a: { posts: unknown[] }) => sum + a.posts.length,
 					0,
 				);
 				expect(totalPosts).toBe(5);
@@ -222,7 +233,11 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 		describe('E2E-004-B2: Nested hasMany relations', () => {
 			it('should use json_agg for nested to-many includes', async () => {
 				const adapter = await getTestAdapter();
-				const orm = createOrm({ model: blogModel, adapter, dialectCapabilities });
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					dialectCapabilities,
+				});
 
 				// When: posts include comments (hasMany)
 				const query = orm
@@ -234,10 +249,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 				const dump = query.dump();
 
 				// Then: strategy is json_agg
-				const decision = getIncludeStrategyDecision(
-					dump.plan,
-					'comments',
-				);
+				const decision = getIncludeStrategyDecision(dump.plan, 'comments');
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('json_agg');
 			});
@@ -274,7 +286,11 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 					.build();
 
 				const adapter = await getTestAdapter();
-				const orm = createOrm({ model: schemaWithJoinHint, adapter, dialectCapabilities });
+				const orm = createOrm({
+					model: schemaWithJoinHint,
+					adapter,
+					dialectCapabilities,
+				});
 
 				const query = orm.select('users').include('posts');
 				const dump = query.dump();
@@ -299,10 +315,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 					defaultIncludeStrategy: 'separate',
 				});
 
-				const query = orm
-					.withSchema(SCHEMA)
-					.select('authors')
-					.include('posts');
+				const query = orm.withSchema(SCHEMA).select('authors').include('posts');
 				const dump = query.dump();
 
 				// Then: uses separate (not json_agg) due to planner option
@@ -320,7 +333,11 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 		describe('E2E-004-G1: to-many filter uses EXISTS', () => {
 			it('should use EXISTS for hasMany filter', async () => {
 				const adapter = await getTestAdapter();
-				const orm = createOrm({ model: blogModel, adapter, dialectCapabilities });
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					dialectCapabilities,
+				});
 
 				// When: filter authors by having published posts
 				const query = orm
@@ -338,9 +355,12 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 			it('should return correct filtered results without duplicates', async () => {
 				const adapter = await getTestAdapter();
-				const orm = createOrm({ model: blogModel, adapter, dialectCapabilities });
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					dialectCapabilities,
+				});
 
-				// biome-ignore lint/suspicious/noExplicitAny: E2E test allows loose typing
 				const authorsWithPublished = (await orm
 					.withSchema(SCHEMA)
 					.select('authors')
@@ -371,7 +391,11 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 		describe('E2E-004-G3: multi-level relation filter', () => {
 			it('should find posts with comments using EXISTS', async () => {
 				const adapter = await getTestAdapter();
-				const orm = createOrm({ model: blogModel, adapter, dialectCapabilities });
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					dialectCapabilities,
+				});
 
 				const query = orm
 					.withSchema(SCHEMA)
@@ -387,9 +411,12 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 			it('should correctly filter posts with comments', async () => {
 				const adapter = await getTestAdapter();
-				const orm = createOrm({ model: blogModel, adapter, dialectCapabilities });
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					dialectCapabilities,
+				});
 
-				// biome-ignore lint/suspicious/noExplicitAny: E2E test allows loose typing
 				const postsWithComments = (await orm
 					.withSchema(SCHEMA)
 					.select('posts')
@@ -410,10 +437,13 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 		describe('E2E-004-H1: json_agg preserves pagination', () => {
 			it('should return correct number of parents with limit', async () => {
 				const adapter = await getTestAdapter();
-				const orm = createOrm({ model: blogModel, adapter, dialectCapabilities });
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					dialectCapabilities,
+				});
 
 				// When: limit 1 author with posts
-				// biome-ignore lint/suspicious/noExplicitAny: E2E test allows loose typing
 				const authors = (await orm
 					.withSchema(SCHEMA)
 					.select('authors')
@@ -431,10 +461,13 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 			it('should work with offset for pagination', async () => {
 				const adapter = await getTestAdapter();
-				const orm = createOrm({ model: blogModel, adapter, dialectCapabilities });
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					dialectCapabilities,
+				});
 
 				// Get first author
-				// biome-ignore lint/suspicious/noExplicitAny: E2E test allows loose typing
 				const firstPage = (await orm
 					.withSchema(SCHEMA)
 					.select('authors')
@@ -444,7 +477,6 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 					.execute()) as any[];
 
 				// Get second author
-				// biome-ignore lint/suspicious/noExplicitAny: E2E test allows loose typing
 				const secondPage = (await orm
 					.withSchema(SCHEMA)
 					.select('authors')

@@ -4,12 +4,7 @@
  * These replace the old ancestors(), descendants(), subtree() methods (BREAKING CHANGE)
  */
 
-import {
-	belongsTo,
-	createOrm,
-	defineSchema,
-	hasMany,
-} from '@dbsp/core';
+import { belongsTo, createOrm, defineSchema, hasMany } from '@dbsp/core';
 import {
 	Kysely,
 	PostgresAdapter,

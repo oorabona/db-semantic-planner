@@ -14,20 +14,19 @@
  */
 
 import type {
-	ColumnIR,
 	ColumnType,
 	ForeignKeyIR,
 	IndexIR,
 	ModelIR,
 	TableIR,
 } from '@dbsp/core';
-import { sql } from 'kysely';
 import type {
 	ColumnDataType,
 	CreateTableBuilder,
 	Kysely,
 	OnModifyForeignAction,
 } from 'kysely';
+import { sql } from 'kysely';
 
 // ============================================================================
 // Type Mapping
@@ -66,10 +65,11 @@ function mapColumnType(
 			return 'uuid';
 		case 'bigint':
 			return 'bigint';
-		default:
+		default: {
 			// TypeScript exhaustive check
 			const _exhaustive: never = type;
 			throw new Error(`Unknown column type: ${_exhaustive}`);
+		}
 	}
 }
 
@@ -86,7 +86,6 @@ function mapOnDelete(action?: string): OnModifyForeignAction {
 			return 'set default';
 		case 'RESTRICT':
 			return 'restrict';
-		case 'NO ACTION':
 		default:
 			return 'no action';
 	}
@@ -121,7 +120,9 @@ export function generateDDL(
 	// Generate DROP statements (if requested)
 	if (includeDropStatements) {
 		// Drop in reverse alphabetical order (or any order with CASCADE)
-		const sortedTables = [...tables].sort((a, b) => b.name.localeCompare(a.name));
+		const sortedTables = [...tables].sort((a, b) =>
+			b.name.localeCompare(a.name),
+		);
 		for (const table of sortedTables) {
 			const tableName = schemaName ? `${schemaName}.${table.name}` : table.name;
 			statements.push(`DROP TABLE IF EXISTS "${tableName}" CASCADE;`);
@@ -326,4 +327,3 @@ function generateIndexDDL(
 	const compiled = builder.compile();
 	return `${compiled.sql};`;
 }
-

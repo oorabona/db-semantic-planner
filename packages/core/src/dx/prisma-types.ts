@@ -11,11 +11,7 @@
  * - InferIncludeResult: Compute result type based on includes
  */
 
-import type {
-	GeneratedColumn,
-	GeneratedColumnType,
-	GeneratedTable,
-} from './schema-bridge.js';
+import type { GeneratedColumn, GeneratedColumnType } from './schema-bridge.js';
 
 // ============================================================================
 // Schema with Per-Table Relations

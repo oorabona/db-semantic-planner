@@ -32,7 +32,6 @@ import {
 } from './filters.js';
 import {
 	includeOptionsToIntent,
-	nestedIncludeToIntent,
 	validateRecursiveInclude,
 } from './intent-builder.js';
 import {
@@ -71,13 +70,11 @@ import {
 	isExpressionSpec,
 	isRecursiveIncludeOptions,
 	type ListHierarchyOptions,
-	type NestedInclude,
 	type OrderByRecord,
 	type OrderBySpec,
 	type OrmInstance,
 	type OrmOptionsWithAdapter,
 	type OrmOptionsWithModel,
-	type OrmOptionsWithSchema,
 	type PaginatedResult,
 	type PaginateOptions,
 	type QueryBuilder,
