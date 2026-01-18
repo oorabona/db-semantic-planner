@@ -9,6 +9,7 @@ import {
 	PostgreSqlContainer,
 	type StartedPostgreSqlContainer,
 } from '@testcontainers/postgresql';
+import { Wait } from 'testcontainers';
 
 // Testcontainers requires DOCKER_HOST to be set for Podman environments
 // Add to your ~/.bashrc: export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"
@@ -59,7 +60,10 @@ export async function setup(): Promise<void> {
 			.withDatabase('e2e_test')
 			.withUsername('test')
 			.withPassword('test')
-			.withStartupTimeout(60000) // 1 minute
+			.withStartupTimeout(120000) // 2 minutes
+			.withWaitStrategy(
+				Wait.forLogMessage(/database system is ready to accept connections/, 2),
+			)
 			.start();
 
 		// Set environment variables for tests
