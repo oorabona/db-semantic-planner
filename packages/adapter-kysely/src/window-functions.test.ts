@@ -28,22 +28,22 @@ import { createKyselyAdapter } from './kysely-adapter.js';
 const testModel = defineSchema({
 	products: {
 		id: 'integer',
-		name: 'string',
-		price: 'number',
+		name: { type: 'string' },
+		price: { type: 'number' },
 		categoryId: 'integer',
-		createdAt: 'date',
+		createdAt: { type: 'date' },
 	},
 	sales: {
 		id: 'integer',
 		productId: 'integer',
-		amount: 'number',
-		date: 'date',
+		amount: { type: 'number' },
+		date: { type: 'date' },
 	},
 	employees: {
 		id: 'integer',
-		name: 'string',
-		department: 'string',
-		salary: 'number',
+		name: { type: 'string' },
+		department: { type: 'string' },
+		salary: { type: 'number' },
 	},
 }).build();
 

@@ -47,17 +47,17 @@ function createTestKysely() {
  */
 const q1Schema = defineSchema({
 	products: {
-		id: 'number',
-		name: 'string',
-		sku: 'string',
+		id: { type: 'number' },
+		name: { type: 'string' },
+		sku: { type: 'string' },
 	},
 	productImages: {
-		id: 'number',
-		productId: 'number',
-		locale: 'string',
-		type: 'string',
-		approved: 'boolean',
-		url: 'string',
+		id: { type: 'number' },
+		productId: { type: 'number' },
+		locale: { type: 'string' },
+		type: { type: 'string' },
+		approved: { type: 'boolean' },
+		url: { type: 'string' },
 	},
 })
 	.relations({
@@ -82,13 +82,13 @@ const q1Schema = defineSchema({
  */
 const q2Schema = defineSchema({
 	categories: {
-		id: 'number',
-		name: 'string',
+		id: { type: 'number' },
+		name: { type: 'string' },
 	},
 	products: {
-		id: 'number',
-		categoryId: 'number',
-		active: 'boolean',
+		id: { type: 'number' },
+		categoryId: { type: 'number' },
+		active: { type: 'boolean' },
 	},
 })
 	.relations({
@@ -113,16 +113,16 @@ const q2Schema = defineSchema({
  */
 const q3Schema = defineSchema({
 	users: {
-		id: 'number',
-		name: 'string',
-		email: 'string',
+		id: { type: 'number' },
+		name: { type: 'string' },
+		email: { type: 'string' },
 	},
 	posts: {
-		id: 'number',
-		title: 'string',
-		content: 'string',
-		authorId: 'number',
-		reviewerId: 'number',
+		id: { type: 'number' },
+		title: { type: 'string' },
+		content: { type: 'string' },
+		authorId: { type: 'number' },
+		reviewerId: { type: 'number' },
 	},
 })
 	.relations({
@@ -683,19 +683,19 @@ describe('Q4: Filter strategy contract enforcement', () => {
 	// Schema with both belongsTo and hasMany relations
 	const filterContractSchema = defineSchema({
 		posts: {
-			id: 'number',
-			title: 'string',
-			authorId: 'number',
+			id: { type: 'number' },
+			title: { type: 'string' },
+			authorId: { type: 'number' },
 		},
 		users: {
-			id: 'number',
-			name: 'string',
-			role: 'string',
+			id: { type: 'number' },
+			name: { type: 'string' },
+			role: { type: 'string' },
 		},
 		comments: {
-			id: 'number',
-			postId: 'number',
-			content: 'string',
+			id: { type: 'number' },
+			postId: { type: 'number' },
+			content: { type: 'string' },
 		},
 	})
 		.relations({
@@ -829,13 +829,13 @@ describe('Q4: Filter strategy contract enforcement', () => {
 		// Schema with explicit strategy hints
 		const overrideSchema = defineSchema({
 			users: {
-				id: 'number',
-				name: 'string',
+				id: { type: 'number' },
+				name: { type: 'string' },
 			},
 			posts: {
-				id: 'number',
-				userId: 'number',
-				title: 'string',
+				id: { type: 'number' },
+				userId: { type: 'number' },
+				title: { type: 'string' },
 			},
 		})
 			.relations({
@@ -931,19 +931,19 @@ describe('Q5: Include strategy contract enforcement', () => {
 	// Schema with belongsTo and hasMany relations
 	const includeContractSchema = defineSchema({
 		posts: {
-			id: 'number',
-			title: 'string',
-			authorId: 'number',
+			id: { type: 'number' },
+			title: { type: 'string' },
+			authorId: { type: 'number' },
 		},
 		users: {
-			id: 'number',
-			name: 'string',
-			email: 'string',
+			id: { type: 'number' },
+			name: { type: 'string' },
+			email: { type: 'string' },
 		},
 		comments: {
-			id: 'number',
-			postId: 'number',
-			content: 'string',
+			id: { type: 'number' },
+			postId: { type: 'number' },
+			content: { type: 'string' },
 		},
 	})
 		.relations({
@@ -1055,13 +1055,13 @@ describe('Q5: Include strategy contract enforcement', () => {
 		// Schema with explicit include strategy hints
 		const overrideSchema = defineSchema({
 			users: {
-				id: 'number',
-				name: 'string',
+				id: { type: 'number' },
+				name: { type: 'string' },
 			},
 			posts: {
-				id: 'number',
-				userId: 'number',
-				title: 'string',
+				id: { type: 'number' },
+				userId: { type: 'number' },
+				title: { type: 'string' },
 			},
 		})
 			.relations({
@@ -1117,19 +1117,19 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 	// Schema with clear FK directions for testing
 	const fkDirectionSchema = defineSchema({
 		posts: {
-			id: 'number',
-			title: 'string',
-			authorId: 'number', // FK to users.id
+			id: { type: 'number' },
+			title: { type: 'string' },
+			authorId: { type: 'number' }, // FK to users.id
 		},
 		users: {
-			id: 'number',
-			name: 'string',
-			role: 'string',
+			id: { type: 'number' },
+			name: { type: 'string' },
+			role: { type: 'string' },
 		},
 		comments: {
-			id: 'number',
-			postId: 'number', // FK to posts.id
-			content: 'string',
+			id: { type: 'number' },
+			postId: { type: 'number' }, // FK to posts.id
+			content: { type: 'string' },
 		},
 	})
 		.relations({
@@ -1195,14 +1195,14 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			// Use explicit EXISTS strategy for belongsTo
 			const existsSchema = defineSchema({
 				posts: {
-					id: 'number',
-					title: 'string',
-					authorId: 'number',
+					id: { type: 'number' },
+					title: { type: 'string' },
+					authorId: { type: 'number' },
 				},
 				users: {
-					id: 'number',
-					name: 'string',
-					role: 'string',
+					id: { type: 'number' },
+					name: { type: 'string' },
+					role: { type: 'string' },
 				},
 			})
 				.relations({
@@ -1290,13 +1290,13 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			// Use explicit JOIN strategy for hasMany
 			const joinSchema = defineSchema({
 				users: {
-					id: 'number',
-					name: 'string',
+					id: { type: 'number' },
+					name: { type: 'string' },
 				},
 				posts: {
-					id: 'number',
-					authorId: 'number',
-					title: 'string',
+					id: { type: 'number' },
+					authorId: { type: 'number' },
+					title: { type: 'string' },
 				},
 			})
 				.relations({
@@ -1375,13 +1375,13 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			// Use explicit JOIN strategy for hasMany include
 			const joinIncludeSchema = defineSchema({
 				users: {
-					id: 'number',
-					name: 'string',
+					id: { type: 'number' },
+					name: { type: 'string' },
 				},
 				posts: {
-					id: 'number',
-					authorId: 'number',
-					title: 'string',
+					id: { type: 'number' },
+					authorId: { type: 'number' },
+					title: { type: 'string' },
 				},
 			})
 				.relations({
@@ -1436,17 +1436,17 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 	// Schema with M:N relation: posts belongsToMany tags through postTags
 	const mnSchema = defineSchema({
 		posts: {
-			id: 'number',
-			title: 'string',
+			id: { type: 'number' },
+			title: { type: 'string' },
 		},
 		tags: {
-			id: 'number',
-			name: 'string',
+			id: { type: 'number' },
+			name: { type: 'string' },
 		},
 		postTags: {
-			id: 'number',
-			postId: 'number',
-			tagId: 'number',
+			id: { type: 'number' },
+			postId: { type: 'number' },
+			tagId: { type: 'number' },
 		},
 	})
 		.relations({
@@ -1487,9 +1487,9 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 
 			// Force JOIN strategy
 			const schemaWithJoin = defineSchema({
-				posts: { id: 'number', title: 'string' },
-				tags: { id: 'number', name: 'string' },
-				postTags: { id: 'number', postId: 'number', tagId: 'number' },
+				posts: { id: { type: 'number' }, title: { type: 'string' } },
+				tags: { id: { type: 'number' }, name: { type: 'string' } },
+				postTags: { id: { type: 'number' }, postId: { type: 'number' }, tagId: { type: 'number' } },
 			})
 				.relations({
 					posts: {
@@ -1594,9 +1594,9 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 		it('should generate two LEFT JOINs for belongsToMany include', () => {
 			// Force JOIN strategy for include
 			const schemaWithJoin = defineSchema({
-				posts: { id: 'number', title: 'string' },
-				tags: { id: 'number', name: 'string' },
-				postTags: { id: 'number', postId: 'number', tagId: 'number' },
+				posts: { id: { type: 'number' }, title: { type: 'string' } },
+				tags: { id: { type: 'number' }, name: { type: 'string' } },
+				postTags: { id: { type: 'number' }, postId: { type: 'number' }, tagId: { type: 'number' } },
 			})
 				.relations({
 					posts: {
@@ -1634,9 +1634,9 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 	describe('M:N with custom FK names', () => {
 		it('should use custom foreignKey and otherKey', () => {
 			const customFkSchema = defineSchema({
-				users: { id: 'number', name: 'string' },
-				roles: { id: 'number', roleName: 'string' },
-				userRoles: { id: 'number', user_id: 'number', role_id: 'number' },
+				users: { id: { type: 'number' }, name: { type: 'string' } },
+				roles: { id: { type: 'number' }, roleName: { type: 'string' } },
+				userRoles: { id: { type: 'number' }, user_id: { type: 'number' }, role_id: { type: 'number' } },
 			})
 				.relations({
 					users: {

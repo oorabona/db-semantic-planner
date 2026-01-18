@@ -9,8 +9,12 @@
 
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { createOrm } from './orm.js';
-import type { TypedSchema, InferColumns, InferQueryResult } from './prisma-types.js';
-import { hasMany, belongsTo } from './prisma-types.js';
+import type {
+	InferColumns,
+	InferQueryResult,
+	TypedSchema,
+} from './prisma-types.js';
+import { belongsTo, hasMany } from './prisma-types.js';
 import type { TypedOrmInstance } from './typed-query-builder.js';
 
 // ============================================================================

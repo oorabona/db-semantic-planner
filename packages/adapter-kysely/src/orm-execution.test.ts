@@ -17,12 +17,12 @@ import { createKyselyAdapter } from './kysely-adapter.js';
 const testModel = defineSchema({
 	users: {
 		id: 'integer',
-		name: 'string',
-		email: 'string',
+		name: { type: 'string' },
+		email: { type: 'string' },
 	},
 	posts: {
 		id: 'integer',
-		title: 'string',
+		title: { type: 'string' },
 		userId: 'integer',
 	},
 })

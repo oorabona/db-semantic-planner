@@ -467,6 +467,7 @@ export function defineModel<DB = Record<string, unknown>>(
 			columns: [],
 			primaryKey: 'id',
 			foreignKeys: [],
+			indexes: [],
 		});
 	}
 

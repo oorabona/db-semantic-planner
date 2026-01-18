@@ -38,8 +38,8 @@ const SCHEMA = 'advanced_e2e';
 const advancedModel = defineSchema({
 	products: {
 		id: 'integer',
-		name: 'string',
-		category: 'string',
+		name: { type: 'string' },
+		category: { type: 'string' },
 		price: 'decimal',
 		stock: 'integer',
 		created_at: 'timestamp',
@@ -50,16 +50,16 @@ const advancedModel = defineSchema({
 		product_id: 'integer',
 		quantity: 'integer',
 		total_price: 'decimal',
-		customer_name: 'string',
-		status: 'string',
+		customer_name: { type: 'string' },
+		status: { type: 'string' },
 		created_at: 'timestamp',
 	},
 	reviews: {
 		id: 'integer',
 		product_id: 'integer',
 		rating: 'integer',
-		comment: 'string',
-		reviewer_name: 'string',
+		comment: { type: 'string' },
+		reviewer_name: { type: 'string' },
 		created_at: 'timestamp',
 	},
 })

@@ -418,6 +418,14 @@ export class MockAdapter implements Adapter<unknown> {
 		});
 	}
 
+	generateDDL(_schema: ModelIR): string[] {
+		throw new ExecutionError({
+			operation: 'generateDDL',
+			reason: 'MockAdapter does not support DDL generation',
+			fix: 'Use createKyselyAdapter() with a real database connection',
+		});
+	}
+
 	// =========================================================================
 	// Dump and Validation
 	// =========================================================================

@@ -76,14 +76,24 @@ export interface BelongsToManyDef<Target extends string = string>
 /**
  * Union of all relation definitions.
  */
-export type AnyRelationDef = HasOneDef | HasManyDef | BelongsToDef | BelongsToManyDef;
+export type AnyRelationDef =
+	| HasOneDef
+	| HasManyDef
+	| BelongsToDef
+	| BelongsToManyDef;
 
 /**
  * Table definition with columns and relations.
  */
 export interface TypedTableDef<
-	TColumns extends Record<string, GeneratedColumn> = Record<string, GeneratedColumn>,
-	TRelations extends Record<string, AnyRelationDef> = Record<string, AnyRelationDef>,
+	TColumns extends Record<string, GeneratedColumn> = Record<
+		string,
+		GeneratedColumn
+	>,
+	TRelations extends Record<string, AnyRelationDef> = Record<
+		string,
+		AnyRelationDef
+	>,
 > {
 	readonly columns: TColumns;
 	readonly relations?: TRelations;
@@ -203,9 +213,10 @@ export type ColumnTypeToTS<T extends GeneratedColumnType> = T extends
 /**
  * Infer TypeScript type for a single column.
  */
-export type InferColumnType<C extends GeneratedColumn> = C['nullable'] extends true
-	? ColumnTypeToTS<C['type']> | null
-	: ColumnTypeToTS<C['type']>;
+export type InferColumnType<C extends GeneratedColumn> =
+	C['nullable'] extends true
+		? ColumnTypeToTS<C['type']> | null
+		: ColumnTypeToTS<C['type']>;
 
 /**
  * Infer TypeScript row type from a table's columns.
@@ -229,12 +240,10 @@ export type InferColumns<TColumns extends Record<string, GeneratedColumn>> = {
  * // 'posts' | 'profile'
  * ```
  */
-export type InferRelationNames<T extends TypedTableDef> = T['relations'] extends Record<
-	string,
-	AnyRelationDef
->
-	? keyof T['relations'] & string
-	: never;
+export type InferRelationNames<T extends TypedTableDef> =
+	T['relations'] extends Record<string, AnyRelationDef>
+		? keyof T['relations'] & string
+		: never;
 
 /**
  * Extract the target table name from a relation.
@@ -290,12 +299,16 @@ export type InferRelationType<
 /**
  * Include specification: can be a boolean, or nested include object.
  */
-export type IncludeSpec<S extends TypedSchema, T extends keyof S['tables'] & string> = {
+export type IncludeSpec<
+	S extends TypedSchema,
+	T extends keyof S['tables'] & string,
+> = {
 	[R in InferRelationNames<S['tables'][T]>]?:
 		| boolean
 		| (S['tables'][T]['relations'] extends Record<string, AnyRelationDef>
 				? S['tables'][T]['relations'][R] extends AnyRelationDef
-					? S['tables'][T]['relations'][R]['target'] extends keyof S['tables'] & string
+					? S['tables'][T]['relations'][R]['target'] extends keyof S['tables'] &
+							string
 						? NestedIncludeSpec<S, S['tables'][T]['relations'][R]['target']>
 						: never
 					: never
@@ -339,9 +352,10 @@ export type ResolveIncludedRelations<
 									: InferTargetRowType<S, Target>[]
 								: I[R] extends { include: infer NestedI }
 									? NestedI extends IncludeSpec<S, Target>
-										? | (InferTargetRowType<S, Target> &
-													ResolveIncludedRelations<S, Target, NestedI>)
-											| null
+										?
+												| (InferTargetRowType<S, Target> &
+														ResolveIncludedRelations<S, Target, NestedI>)
+												| null
 										: InferTargetRowType<S, Target> | null
 									: InferTargetRowType<S, Target> | null
 							: never
@@ -390,4 +404,6 @@ export type TableNames<S extends TypedSchema> = keyof S['tables'] & string;
 export type ColumnNames<
 	S extends TypedSchema,
 	T extends TableNames<S>,
-> = S['tables'][T] extends TypedTableDef<infer TColumns> ? keyof TColumns & string : never;
+> = S['tables'][T] extends TypedTableDef<infer TColumns>
+	? keyof TColumns & string
+	: never;

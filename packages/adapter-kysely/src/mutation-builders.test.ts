@@ -27,14 +27,14 @@ import { createKyselyAdapter } from './kysely-adapter.js';
 const testModel = defineSchema({
 	users: {
 		id: 'integer',
-		name: 'string',
-		email: 'string',
-		active: 'boolean',
+		name: { type: 'string' },
+		email: { type: 'string' },
+		active: { type: 'boolean' },
 	},
 	posts: {
 		id: 'integer',
-		title: 'string',
-		content: 'string',
+		title: { type: 'string' },
+		content: { type: 'string' },
 		userId: 'integer',
 	},
 })

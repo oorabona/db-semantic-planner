@@ -31,6 +31,11 @@ import {
 	isDistinctField,
 } from './filters.js';
 import {
+	includeOptionsToIntent,
+	nestedIncludeToIntent,
+	validateRecursiveInclude,
+} from './intent-builder.js';
+import {
 	DeleteBuilder,
 	InsertBuilder,
 	UpdateBuilder,
@@ -41,18 +46,21 @@ import {
 	objectToWhereIntent,
 	type WhereFilter,
 } from './object-filter.js';
-import {
-	buildModelFromSchema,
-	type GeneratedSchema,
-	type GeneratedColumnType,
-} from './schema-bridge.js';
 import type {
 	AnyRelationDef,
 	TableNames,
 	TypedSchema,
 	TypedTableDef,
 } from './prisma-types.js';
-import type { TypedOrmInstance, TypedQueryBuilder } from './typed-query-builder.js';
+import {
+	buildModelFromSchema,
+	type GeneratedColumnType,
+	type GeneratedSchema,
+} from './schema-bridge.js';
+import type {
+	TypedOrmInstance,
+	TypedQueryBuilder,
+} from './typed-query-builder.js';
 import {
 	type AggregateOptions,
 	type ColumnSpec,
@@ -78,11 +86,6 @@ import {
 	type SortDirection,
 	type StreamOptions,
 } from './types.js';
-import {
-	includeOptionsToIntent,
-	nestedIncludeToIntent,
-	validateRecursiveInclude,
-} from './intent-builder.js';
 
 // ============================================================================
 // TypedSchema Conversion (DX-110)
@@ -136,9 +139,7 @@ function typedSchemaToModelIR(schema: TypedSchema): ModelIR {
 						generatedRelations[qualifiedName] = {
 							kind: 'hasMany' as const,
 							target: rel.target,
-							foreignKey:
-								rel.foreignKey ??
-								`${tableName.replace(/s$/, '')}Id`,
+							foreignKey: rel.foreignKey ?? `${tableName.replace(/s$/, '')}Id`,
 						};
 						break;
 					case 'belongsTo':
@@ -147,8 +148,7 @@ function typedSchemaToModelIR(schema: TypedSchema): ModelIR {
 						generatedRelations[qualifiedName] = {
 							kind: 'belongsTo' as const,
 							target: rel.target,
-							foreignKey:
-								rel.foreignKey ?? `${rel.target.replace(/s$/, '')}Id`,
+							foreignKey: rel.foreignKey ?? `${rel.target.replace(/s$/, '')}Id`,
 						};
 						break;
 					case 'belongsToMany':
@@ -156,11 +156,8 @@ function typedSchemaToModelIR(schema: TypedSchema): ModelIR {
 							kind: 'manyToMany' as const,
 							target: rel.target,
 							through: rel.through ?? `${tableName}_${rel.target}`,
-							sourceFk:
-								rel.foreignKey ??
-								`${tableName.replace(/s$/, '')}Id`,
-							targetFk:
-								rel.otherKey ?? `${rel.target.replace(/s$/, '')}Id`,
+							sourceFk: rel.foreignKey ?? `${tableName.replace(/s$/, '')}Id`,
+							targetFk: rel.otherKey ?? `${rel.target.replace(/s$/, '')}Id`,
 						};
 						break;
 				}
@@ -288,7 +285,10 @@ export function createOrm<DB = Record<string, unknown>>(
 	options: OrmOptionsWithAdapter<DB>,
 ): Promise<OrmInstance<DB>>;
 // Implementation signature
-export function createOrm<DB = Record<string, unknown>, S extends TypedSchema = TypedSchema>(
+export function createOrm<
+	DB = Record<string, unknown>,
+	S extends TypedSchema = TypedSchema,
+>(
 	options:
 		| OrmOptionsWithModel<DB>
 		| OrmOptionsWithTypedSchema<S>
@@ -302,7 +302,8 @@ export function createOrm<DB = Record<string, unknown>, S extends TypedSchema = 
 	const dialectCapabilities = options.dialectCapabilities;
 
 	// Extract schema if provided (DX-110: TypedSchema)
-	const typedSchema = (options as OrmOptionsWithTypedSchema<TypedSchema>).schema;
+	const typedSchema = (options as OrmOptionsWithTypedSchema<TypedSchema>)
+		.schema;
 	// Extract model if provided
 	const model = (options as OrmOptionsWithModel<DB>).model;
 
@@ -344,7 +345,7 @@ export function createOrm<DB = Record<string, unknown>, S extends TypedSchema = 
 			raw: baseOrm.raw.bind(baseOrm),
 			listAncestors: baseOrm.listAncestors.bind(baseOrm),
 			listDescendants: baseOrm.listDescendants.bind(baseOrm),
-		// biome-ignore lint/suspicious/noExplicitAny: TypedOrmInstance is compatible
+			// biome-ignore lint/suspicious/noExplicitAny: TypedOrmInstance is compatible
 		} as any;
 	}
 

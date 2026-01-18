@@ -18,13 +18,13 @@ import { createMockAdapter, MockAdapter } from './mock-adapter.js';
 const testSchema = defineSchema({
 	users: {
 		id: 'serial',
-		name: 'string',
-		email: 'string',
-		active: 'boolean',
+		name: { type: 'string' },
+		email: { type: 'string' },
+		active: { type: 'boolean' },
 	},
 	posts: {
 		id: 'serial',
-		title: 'string',
+		title: { type: 'string' },
 		content: 'text',
 		authorId: 'integer',
 	},

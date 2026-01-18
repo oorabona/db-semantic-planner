@@ -51,10 +51,13 @@ export async function setup(): Promise<void> {
 		return;
 	}
 
-	console.log('\n🐘 Starting PostgreSQL container...');
+	// Allow custom PostgreSQL image via environment variable
+	// Supports: docker.io/oorabona/postgres:16-full-alpine, docker.io/oorabona/postgres:17-full-alpine
+	const pgImage = process.env.POSTGRES_IMAGE ?? 'postgres:16-alpine';
+	console.log(`\n🐘 Starting PostgreSQL container (${pgImage})...`);
 
 	try {
-		container = await new PostgreSqlContainer('postgres:16-alpine')
+		container = await new PostgreSqlContainer(pgImage)
 			.withDatabase('e2e_test')
 			.withUsername('test')
 			.withPassword('test')
@@ -73,8 +76,9 @@ export async function setup(): Promise<void> {
 		console.log(`✅ PostgreSQL container started at ${connectionUri}\n`);
 	} catch (error) {
 		console.error('\n❌ Failed to start PostgreSQL container:', error);
+		console.warn('\n⚠️  E2E database tests will be skipped.\n');
 		process.env.SKIP_E2E_TESTS = 'true';
-		throw error;
+		// Don't throw - allow compile-only tests to run
 	}
 }
 

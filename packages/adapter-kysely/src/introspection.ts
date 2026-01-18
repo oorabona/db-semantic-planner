@@ -547,6 +547,7 @@ function buildTableIR(
 		columns,
 		primaryKey,
 		foreignKeys,
+		indexes: [], // TODO: introspect indexes from database
 	};
 }
 

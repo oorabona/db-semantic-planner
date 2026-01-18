@@ -23,40 +23,40 @@ import {
  */
 export const iamModel: ModelIR = defineSchema({
 	users: {
-		id: 'number',
-		username: 'string',
-		email: 'string',
-		created_at: 'date',
+		id: { type: 'number' },
+		username: { type: 'string' },
+		email: { type: 'string' },
+		created_at: { type: 'date' },
 	},
 	roles: {
-		id: 'number',
-		name: 'string',
-		description: 'string',
+		id: { type: 'number' },
+		name: { type: 'string' },
+		description: { type: 'string' },
 	},
 	permissions: {
-		id: 'number',
-		name: 'string',
-		description: 'string',
+		id: { type: 'number' },
+		name: { type: 'string' },
+		description: { type: 'string' },
 	},
 	user_roles: {
-		user_id: 'number',
-		role_id: 'number',
-		granted_at: 'date',
+		user_id: { type: 'number' },
+		role_id: { type: 'number' },
+		granted_at: { type: 'date' },
 	},
 	role_permissions: {
-		role_id: 'number',
-		permission_id: 'number',
+		role_id: { type: 'number' },
+		permission_id: { type: 'number' },
 	},
 	role_edges: {
-		id: 'number',
-		parent_role_id: 'number',
-		child_role_id: 'number',
+		id: { type: 'number' },
+		parent_role_id: { type: 'number' },
+		child_role_id: { type: 'number' },
 	},
 	sod_rules: {
-		id: 'number',
-		role_a_id: 'number',
-		role_b_id: 'number',
-		reason: 'string',
+		id: { type: 'number' },
+		role_a_id: { type: 'number' },
+		role_b_id: { type: 'number' },
+		reason: { type: 'string' },
 	},
 })
 	.relations({

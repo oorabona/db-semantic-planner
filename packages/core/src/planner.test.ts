@@ -18,15 +18,15 @@ import {
  */
 const q1Schema = defineSchema({
 	products: {
-		id: 'number',
-		name: 'string',
+		id: { type: 'number' },
+		name: { type: 'string' },
 	},
 	productImages: {
-		id: 'number',
-		productId: 'number',
-		locale: 'string',
-		type: 'string',
-		approved: 'boolean',
+		id: { type: 'number' },
+		productId: { type: 'number' },
+		locale: { type: 'string' },
+		type: { type: 'string' },
+		approved: { type: 'boolean' },
 	},
 })
 	.relations({
@@ -44,13 +44,13 @@ const q1Schema = defineSchema({
  */
 const q2Schema = defineSchema({
 	categories: {
-		id: 'number',
-		name: 'string',
+		id: { type: 'number' },
+		name: { type: 'string' },
 	},
 	products: {
-		id: 'number',
-		categoryId: 'number',
-		active: 'boolean',
+		id: { type: 'number' },
+		categoryId: { type: 'number' },
+		active: { type: 'boolean' },
 	},
 })
 	.relations({
@@ -68,14 +68,14 @@ const q2Schema = defineSchema({
  */
 const q3Schema = defineSchema({
 	users: {
-		id: 'number',
-		name: 'string',
+		id: { type: 'number' },
+		name: { type: 'string' },
 	},
 	posts: {
-		id: 'number',
-		title: 'string',
-		createdById: 'number',
-		editedById: 'number',
+		id: { type: 'number' },
+		title: { type: 'string' },
+		createdById: { type: 'number' },
+		editedById: { type: 'number' },
 	},
 })
 	.relations({
@@ -716,9 +716,9 @@ describe('Semantic Planner', () => {
 		 */
 		const recursiveSchema = defineSchema({
 			categories: {
-				id: 'number',
-				name: 'string',
-				parentId: 'number',
+				id: { type: 'number' },
+				name: { type: 'string' },
+				parentId: { type: 'number' },
 			},
 		})
 			.relations({
@@ -734,13 +734,13 @@ describe('Semantic Planner', () => {
 		 */
 		const edgeTableSchema = defineSchema({
 			roles: {
-				id: 'number',
-				name: 'string',
+				id: { type: 'number' },
+				name: { type: 'string' },
 			},
 			roleEdges: {
-				id: 'number',
-				parentRoleId: 'number',
-				childRoleId: 'number',
+				id: { type: 'number' },
+				parentRoleId: { type: 'number' },
+				childRoleId: { type: 'number' },
 			},
 		})
 			.relations({
@@ -1098,9 +1098,9 @@ describe('Semantic Planner', () => {
 	describe('RAW_SQL_USAGE warning', () => {
 		const simpleSchema = defineSchema({
 			users: {
-				id: 'number',
-				name: 'string',
-				email: 'string',
+				id: { type: 'number' },
+				name: { type: 'string' },
+				email: { type: 'string' },
 			},
 		}).build();
 

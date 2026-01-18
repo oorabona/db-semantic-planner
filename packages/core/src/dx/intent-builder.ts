@@ -99,7 +99,8 @@ export function includeOptionsToIntent(
 		if (options.includeDepth) {
 			(recursiveOpts as { track: { depth: boolean } }).track = { depth: true };
 		}
-		(intent as { recursive: IncludeRecursiveOptions }).recursive = recursiveOpts;
+		(intent as { recursive: IncludeRecursiveOptions }).recursive =
+			recursiveOpts;
 	}
 
 	return intent;

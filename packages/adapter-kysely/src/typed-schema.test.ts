@@ -46,23 +46,23 @@ interface TestDatabase {
 
 const testModel = defineSchema({
 	users: {
-		id: 'number',
-		name: 'string',
-		email: 'string',
-		active: 'boolean',
+		id: { type: 'number' },
+		name: { type: 'string' },
+		email: { type: 'string' },
+		active: { type: 'boolean' },
 	},
 	posts: {
-		id: 'number',
-		title: 'string',
-		content: 'string',
-		authorId: 'number',
-		published: 'boolean',
+		id: { type: 'number' },
+		title: { type: 'string' },
+		content: { type: 'string' },
+		authorId: { type: 'number' },
+		published: { type: 'boolean' },
 	},
 	comments: {
-		id: 'number',
-		text: 'string',
-		postId: 'number',
-		authorId: 'number',
+		id: { type: 'number' },
+		text: { type: 'string' },
+		postId: { type: 'number' },
+		authorId: { type: 'number' },
 	},
 })
 	.relations({

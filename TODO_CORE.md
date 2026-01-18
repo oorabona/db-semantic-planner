@@ -43,6 +43,38 @@
 
 ---
 
+## ✅ COMPLETE - CORE-003: Rich ColumnDef for DDL (2026-01-18)
+
+**Spec:** [docs/plans/CORE-003-rich-columndef-ddl.md](docs/plans/CORE-003-rich-columndef-ddl.md)
+**Status:** ✅ COMPLETE
+**Complexity:** COMPLEX
+
+### Block 1: Model IR Extensions ✅
+- [x] ✅ `IndexIR` interface defined (2026-01-18)
+- [x] ✅ `TableIR.indexes` property added (2026-01-18)
+- [x] ✅ TypeScript compiles without errors (2026-01-18)
+
+### Block 2: Schema Builder Types ✅
+- [x] ✅ `ColumnDef` interface with all constraint properties (2026-01-18)
+- [x] ✅ `TableDef` union type (simple vs config form) (2026-01-18)
+- [x] ✅ `OnDeleteAction`, `DefaultValue`, `SqlDefault` types exported (2026-01-18)
+- [x] ✅ Identifier validation regex constant (2026-01-18)
+
+### Block 3: Schema Builder Logic ✅
+- [x] ✅ `buildTable()` handles new `ColumnDef` format (2026-01-18)
+- [x] ✅ Column-level `index: true` → `IndexIR` (2026-01-18)
+- [x] ✅ Table-level `indexes` → `IndexIR[]` (2026-01-18)
+- [x] ✅ All ERR-* validations implemented (2026-01-18)
+- [x] ✅ Unit tests for validations pass (2026-01-18)
+
+### Block 4: DDL Generation Update ✅
+- [x] ✅ Two-pass DDL: CREATE TABLEs first, ALTER TABLEs for FKs (2026-01-18)
+- [x] ✅ CREATE INDEX statements generated (2026-01-18)
+- [x] ✅ Unique constraint names (fk_{table}_{col}, idx_{table}_{cols}) (2026-01-18)
+- [x] ✅ All BDD scenarios have passing tests (2026-01-18)
+
+---
+
 ## Pending - P3 (Advanced Features)
 
 ### P3-B: FTSIntent (PostgreSQL Full-Text Search)

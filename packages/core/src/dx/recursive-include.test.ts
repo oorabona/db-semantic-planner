@@ -21,16 +21,16 @@ import type { RecursiveIncludeOptions } from './types.js';
 const model = defineSchema({
 	categories: {
 		id: 'integer',
-		name: 'string',
+		name: { type: 'string' },
 		parentId: { type: 'integer', nullable: true },
 	},
 	users: {
 		id: 'integer',
-		name: 'string',
+		name: { type: 'string' },
 	},
 	posts: {
 		id: 'integer',
-		title: 'string',
+		title: { type: 'string' },
 		authorId: 'integer',
 	},
 })
@@ -246,7 +246,9 @@ describe('Intent conversion (DX-017)', () => {
 		expect(intent.include?.[0].recursive).toBeDefined();
 
 		// recursiveIncludes should be empty (or not exist)
-		expect((intent as { recursiveIncludes?: unknown[] }).recursiveIncludes).toBeUndefined();
+		expect(
+			(intent as { recursiveIncludes?: unknown[] }).recursiveIncludes,
+		).toBeUndefined();
 	});
 });
 

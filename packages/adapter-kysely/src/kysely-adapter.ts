@@ -37,6 +37,7 @@ import {
 	compileUpsert,
 	compileWithIncludes,
 } from './compiler.js';
+import { type GenerateDDLOptions, generateDDL } from './ddl.js';
 import { type DialectName, getCapabilities } from './dialect.js';
 import { validateIdentifier } from './errors.js';
 import { introspect } from './introspection.js';
@@ -420,6 +421,30 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 		// biome-ignore lint/suspicious/noExplicitAny: Cast needed for Kysely type compatibility
 		const result = await introspect(this.db as Kysely<any>, options);
 		return result;
+	}
+
+	// =========================================================================
+	// DDL Generation
+	// =========================================================================
+
+	/**
+	 * Generate DDL statements from a ModelIR schema.
+	 *
+	 * Uses Kysely's schema builder to ensure column naming transformations
+	 * (e.g., CamelCasePlugin) are applied consistently between DDL and queries.
+	 *
+	 * @param schema - The ModelIR schema to generate DDL from
+	 * @param options - Optional configuration (includeDropStatements, etc.)
+	 * @returns Array of DDL statements (CREATE TABLE, etc.)
+	 */
+	generateDDL(schema: ModelIR, options?: GenerateDDLOptions): string[] {
+		const ddlOptions: GenerateDDLOptions = {
+			...options,
+			// If adapter is schema-scoped, use that schema by default
+			schemaName: options?.schemaName ?? this.schemaName,
+		};
+		// biome-ignore lint/suspicious/noExplicitAny: Cast needed for Kysely type compatibility
+		return generateDDL(this.db as Kysely<any>, schema, ddlOptions);
 	}
 
 	// =========================================================================

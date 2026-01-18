@@ -20,29 +20,29 @@ import { belongsTo, defineSchema, hasMany } from '@dbsp/core';
 export const schedulingModel = defineSchema({
 	rooms: {
 		id: 'integer',
-		name: 'string',
+		name: { type: 'string' },
 		capacity: 'integer',
 		floor: 'integer',
 	},
 	room_bookings: {
 		id: 'integer',
 		room_id: 'integer',
-		booked_by: 'string',
-		booking_period: 'string', // PostgreSQL daterange stored as string in model
-		purpose: 'string',
+		booked_by: { type: 'string' },
+		booking_period: { type: 'string' }, // PostgreSQL daterange stored as string in model
+		purpose: { type: 'string' },
 	},
 	events: {
 		id: 'integer',
-		title: 'string',
+		title: { type: 'string' },
 		room_id: 'integer',
-		time_slot: 'string', // PostgreSQL tstzrange stored as string in model
-		organizer: 'string',
+		time_slot: { type: 'string' }, // PostgreSQL tstzrange stored as string in model
+		organizer: { type: 'string' },
 		max_attendees: 'integer',
 	},
 	price_tiers: {
 		id: 'integer',
-		product_name: 'string',
-		quantity_range: 'string', // PostgreSQL int4range stored as string in model
+		product_name: { type: 'string' },
+		quantity_range: { type: 'string' }, // PostgreSQL int4range stored as string in model
 		unit_price: 'decimal',
 	},
 })

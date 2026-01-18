@@ -6,14 +6,14 @@
  */
 
 import { describe, expectTypeOf, it } from 'vitest';
+import type { InferQueryResult, TypedSchema } from './prisma-types.js';
+import { belongsTo, belongsToMany, hasMany, hasOne } from './prisma-types.js';
 import type {
 	IncludeState,
 	MergeInclude,
 	TypedOrmInstance,
 	TypedQueryBuilder,
 } from './typed-query-builder.js';
-import type { TypedSchema, InferQueryResult } from './prisma-types.js';
-import { belongsTo, hasMany, hasOne, belongsToMany } from './prisma-types.js';
 
 // ============================================================================
 // Test Schema
@@ -134,7 +134,11 @@ describe('DX-110: TypedQueryBuilder interface', () => {
 
 		// Should be a TypedQueryBuilder
 		expectTypeOf<SelectResult>().toMatchTypeOf<
-			TypedQueryBuilder<TestSchema, 'users' | 'posts' | 'comments' | 'profiles' | 'tags', undefined>
+			TypedQueryBuilder<
+				TestSchema,
+				'users' | 'posts' | 'comments' | 'profiles' | 'tags',
+				undefined
+			>
 		>();
 	});
 
@@ -152,7 +156,11 @@ describe('DX-110: TypedQueryBuilder interface', () => {
 	it('should track includes through chaining', () => {
 		type QB0 = TypedQueryBuilder<TestSchema, 'users', undefined>;
 		type QB1 = TypedQueryBuilder<TestSchema, 'users', { posts: true }>;
-		type QB2 = TypedQueryBuilder<TestSchema, 'users', { posts: true; profile: true }>;
+		type QB2 = TypedQueryBuilder<
+			TestSchema,
+			'users',
+			{ posts: true; profile: true }
+		>;
 
 		// Verify that includes are tracked in the type parameter
 		expectTypeOf<QB0>().not.toMatchTypeOf<QB1>();
@@ -213,7 +221,11 @@ describe('DX-110: TypedQueryBuilder interface', () => {
 	});
 
 	it('should return correct result type with multiple includes', () => {
-		type QB = TypedQueryBuilder<TestSchema, 'users', { posts: true; profile: true }>;
+		type QB = TypedQueryBuilder<
+			TestSchema,
+			'users',
+			{ posts: true; profile: true }
+		>;
 		type AllResult = Awaited<ReturnType<QB['all']>>;
 
 		// With both includes
@@ -284,7 +296,9 @@ describe('DX-110: QueryBuilder chaining pattern', () => {
 		// where() should return same type
 		type WhereResult = ReturnType<QB['where']>;
 
-		expectTypeOf<WhereResult>().toMatchTypeOf<TypedQueryBuilder<TestSchema, 'users', { posts: true }>>();
+		expectTypeOf<WhereResult>().toMatchTypeOf<
+			TypedQueryBuilder<TestSchema, 'users', { posts: true }>
+		>();
 	});
 
 	it('should maintain type through orderBy() chaining', () => {
@@ -293,7 +307,9 @@ describe('DX-110: QueryBuilder chaining pattern', () => {
 		// orderBy() should return same type (first overload)
 		type OrderByResult = ReturnType<QB['orderBy']>;
 
-		expectTypeOf<OrderByResult>().toMatchTypeOf<TypedQueryBuilder<TestSchema, 'users', { profile: true }>>();
+		expectTypeOf<OrderByResult>().toMatchTypeOf<
+			TypedQueryBuilder<TestSchema, 'users', { profile: true }>
+		>();
 	});
 
 	it('should maintain type through limit/offset chaining', () => {
@@ -302,8 +318,12 @@ describe('DX-110: QueryBuilder chaining pattern', () => {
 		type LimitResult = ReturnType<QB['limit']>;
 		type OffsetResult = ReturnType<QB['offset']>;
 
-		expectTypeOf<LimitResult>().toMatchTypeOf<TypedQueryBuilder<TestSchema, 'posts', { author: true }>>();
-		expectTypeOf<OffsetResult>().toMatchTypeOf<TypedQueryBuilder<TestSchema, 'posts', { author: true }>>();
+		expectTypeOf<LimitResult>().toMatchTypeOf<
+			TypedQueryBuilder<TestSchema, 'posts', { author: true }>
+		>();
+		expectTypeOf<OffsetResult>().toMatchTypeOf<
+			TypedQueryBuilder<TestSchema, 'posts', { author: true }>
+		>();
 	});
 });
 

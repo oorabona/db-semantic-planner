@@ -305,6 +305,7 @@ function buildTableIR(tableName: string, genTable: GeneratedTable): TableIR {
 		columns,
 		primaryKey,
 		foreignKeys,
+		indexes: [],
 	};
 }
 
