@@ -69,10 +69,16 @@ export interface IndexDef {
 }
 
 /**
+ * Column definition input: either rich object or shorthand string.
+ * Shorthand 'string' is normalized to { type: 'string' } at runtime.
+ */
+export type ColumnDefInput = ColumnDef | ColumnType;
+
+/**
  * Table definition with optional config
  */
 export interface TableDefWithConfig {
-	readonly columns: Record<string, ColumnDef>;
+	readonly columns: Record<string, ColumnDefInput>;
 	readonly primaryKey?: string | readonly string[];
 	readonly indexes?: readonly IndexDef[];
 }
@@ -80,7 +86,7 @@ export interface TableDefWithConfig {
 /**
  * Table definition: simple (columns only) or with config
  */
-export type TableDef = Record<string, ColumnDef> | TableDefWithConfig;
+export type TableDef = Record<string, ColumnDefInput> | TableDefWithConfig;
 
 /**
  * Type guard to check if TableDef has config
@@ -292,7 +298,21 @@ class SchemaBuilderImpl<T extends Record<string, TableDef>>
 			const pkColumns: string[] = [];
 			let hasIdColumn = false;
 
-			for (const [colName, colDef] of Object.entries(columnDefs)) {
+			for (const [colName, rawColDef] of Object.entries(columnDefs)) {
+				// Normalize shorthand format: 'string' → { type: 'string' }
+				const colDef: ColumnDef =
+					typeof rawColDef === 'string'
+						? { type: rawColDef as ColumnType }
+						: rawColDef;
+
+				// V1: Validate ColumnDef has required type property
+				if (typeof colDef !== 'object' || colDef === null || !('type' in colDef)) {
+					throw new Error(
+						`Invalid column definition for '${colName}' in table '${tableName}': ` +
+							`expected { type: ColumnType, ... } or ColumnType string, got ${JSON.stringify(rawColDef)}`,
+					);
+				}
+
 				// Validate identifier
 				if (!isValidIdentifier(colName)) {
 					throw new Error(

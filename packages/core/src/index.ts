@@ -164,6 +164,7 @@ export {
 export type {
 	// Builder types
 	ColumnDef,
+	ColumnDefInput,
 	ModelRef,
 	RelationDef,
 	RelationHints,

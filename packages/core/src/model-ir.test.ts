@@ -348,6 +348,46 @@ describe('ModelIR', () => {
 					.build();
 			}).toThrow(/non-existent source table/);
 		});
+
+		it('should support shorthand column format (string instead of object)', () => {
+			const schema = defineSchema({
+				users: { id: 'number', name: 'string' },
+			}).build();
+
+			const usersTable = schema.tables.get('users')!;
+			const idCol = usersTable.columns.find((c) => c.name === 'id');
+			const nameCol = usersTable.columns.find((c) => c.name === 'name');
+
+			expect(idCol?.type).toBe('number');
+			expect(nameCol?.type).toBe('string');
+		});
+
+		it('should support mixed shorthand and rich format', () => {
+			const schema = defineSchema({
+				users: {
+					id: 'number', // shorthand
+					name: { type: 'string', nullable: true }, // rich
+				},
+			}).build();
+
+			const usersTable = schema.tables.get('users')!;
+			const idCol = usersTable.columns.find((c) => c.name === 'id');
+			const nameCol = usersTable.columns.find((c) => c.name === 'name');
+
+			expect(idCol?.type).toBe('number');
+			expect(idCol?.nullable).toBe(false); // default
+			expect(nameCol?.type).toBe('string');
+			expect(nameCol?.nullable).toBe(true);
+		});
+
+		it('ERR-V1: should throw on missing type property in column definition', () => {
+			expect(() => {
+				defineSchema({
+					// @ts-expect-error - testing runtime validation
+					users: { id: { nullable: true } },
+				}).build();
+			}).toThrow(/expected { type: ColumnType, ... }/);
+		});
 	});
 
 	describe('golden test fixtures', () => {
