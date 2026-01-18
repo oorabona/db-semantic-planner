@@ -451,6 +451,8 @@ for (const warning of model.warnings) {
 ## Future Considerations
 
 - [ ] CLI `dbsp init` wizard (like Prisma)
+- [ ] CLI: Add unit tests for `generateSchemaFile()` in schema-codegen.ts (M)
+- [ ] CLI: Add unit tests for `dbsp generate ddl` target (M)
 - [x] ✅ Unified export from @dbsp/core: createOrm, eq, gt, like, and, or, raw, etc. (2026-01-15)
   - Note: createMockAdapter reste dans @dbsp/adapter-kysely (architecture Ports & Adapters)
 - [x] "Common Patterns" documentation section (DONE - added to README.md)

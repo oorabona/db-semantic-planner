@@ -7,6 +7,7 @@
 
 import { Command } from 'commander';
 import { generateCommand } from './commands/generate.js';
+import { introspectCommand } from './commands/introspect.js';
 import { replCommand } from './commands/repl.js';
 import { verifyCommand } from './commands/verify.js';
 
@@ -19,6 +20,7 @@ program
 
 // Register commands
 program.addCommand(generateCommand);
+program.addCommand(introspectCommand);
 program.addCommand(replCommand);
 program.addCommand(verifyCommand);
 
