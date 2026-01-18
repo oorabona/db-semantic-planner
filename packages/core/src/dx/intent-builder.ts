@@ -32,7 +32,6 @@ import {
 	type AggregateOptions,
 	type ColumnSpec,
 	type ExpressionSpec,
-	type IncludeOptions,
 	type IncludeOptionsWithRecursive,
 	isExpressionSpec,
 	type NestedInclude,

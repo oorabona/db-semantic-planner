@@ -208,7 +208,7 @@ function parseRangeLiteral(
 	token: string,
 ): { lower: string | number; upper: string | number; bounds?: string } | null {
 	// Standard PostgreSQL range format: [lower, upper) or (lower, upper]
-	const pgRangeMatch = token.match(/^([\[\(])([^,]*),\s*([^\]\)]*)([\]\)])$/);
+	const pgRangeMatch = token.match(/^([[(])([^,]*),\s*([^\])]*)([\])])$/);
 	if (pgRangeMatch) {
 		const [, lowerBound, lower = '', upper = '', upperBound] = pgRangeMatch;
 		const bounds = `${lowerBound}${upperBound}`; // e.g., "[)" or "(]"

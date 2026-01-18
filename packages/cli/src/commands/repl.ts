@@ -26,11 +26,24 @@ export interface ReplOptions {
 export const replCommand = new Command('repl')
 	.description('Launch interactive REPL for exploring schema and queries')
 	.option('-s, --schema <path>', 'Path to schema file (default: auto-detect)')
-	.option('-d, --db <url>', 'PostgreSQL connection URL for execution mode (e.g., postgres://localhost/mydb)')
+	.option(
+		'-d, --db <url>',
+		'PostgreSQL connection URL for execution mode (e.g., postgres://localhost/mydb)',
+	)
 	.option('-e, --eval <query>', 'Execute a single query and exit (batch mode)')
-	.option('-i, --input <file>', 'Execute queries from file, one per line (batch mode)')
-	.option('-f, --format <format>', 'Output format for batch mode: text (default) or json', 'text')
-	.option('-a, --assert <file>', 'Assertion file to validate query output (requires --input)')
+	.option(
+		'-i, --input <file>',
+		'Execute queries from file, one per line (batch mode)',
+	)
+	.option(
+		'-f, --format <format>',
+		'Output format for batch mode: text (default) or json',
+		'text',
+	)
+	.option(
+		'-a, --assert <file>',
+		'Assertion file to validate query output (requires --input)',
+	)
 	.action(async (options: ReplOptions) => {
 		try {
 			// Load schema
@@ -48,7 +61,9 @@ export const replCommand = new Command('repl')
 
 			// DEMO-E2E: Validate --assert requires --input
 			if (options.assert && !options.input) {
-				throw new Error('--assert requires --input (assertion files validate query output from input files)');
+				throw new Error(
+					'--assert requires --input (assertion files validate query output from input files)',
+				);
 			}
 
 			// CLI-022: Batch mode - execute queries without interactive UI

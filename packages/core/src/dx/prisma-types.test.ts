@@ -7,7 +7,6 @@
 
 import { describe, expectTypeOf, it } from 'vitest';
 import type {
-	AnyRelationDef,
 	ColumnNames,
 	IncludeSpec,
 	InferColumns,
@@ -16,7 +15,6 @@ import type {
 	InferRelationType,
 	TableNames,
 	TypedSchema,
-	TypedTableDef,
 } from './prisma-types.js';
 import { belongsTo, belongsToMany, hasMany, hasOne } from './prisma-types.js';
 

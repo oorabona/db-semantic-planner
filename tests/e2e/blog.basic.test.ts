@@ -7,8 +7,8 @@
  * - Multi-entity queries
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { and, createOrm, eq, exists } from '@dbsp/core';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	blogModel,
 	closeTestDb,

@@ -9,13 +9,13 @@
  * Requires PostgreSQL 9.2+ (when range types were introduced).
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	createOrm,
-	rangeOverlaps,
-	rangeContains,
 	rangeContainedBy,
+	rangeContains,
+	rangeOverlaps,
 } from '@dbsp/core';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createSchedulingSchema,
@@ -142,7 +142,9 @@ describe.skipIf(shouldSkipE2E())('PostgreSQL Range Types', () => {
 				.execute();
 
 			expect(tiers).toHaveLength(1);
-			expect(tiers[0].unit_price).toBe(schedulingTestData.priceTiers.tierForQty25.unit_price);
+			expect(tiers[0].unit_price).toBe(
+				schedulingTestData.priceTiers.tierForQty25.unit_price,
+			);
 		});
 
 		it('should find tier for bulk quantity (100+)', async () => {

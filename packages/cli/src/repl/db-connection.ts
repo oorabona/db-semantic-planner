@@ -14,7 +14,10 @@ const MAX_ROWS = 100;
 
 export interface DbConnection {
 	/** Execute a raw SQL query */
-	executeRaw(query: string, params?: readonly unknown[]): Promise<ExecutionResult>;
+	executeRaw(
+		query: string,
+		params?: readonly unknown[],
+	): Promise<ExecutionResult>;
 	/** Test the connection */
 	ping(): Promise<boolean>;
 	/** Close the connection */
@@ -43,7 +46,10 @@ export async function createDbConnection(
 	connectionString: string,
 ): Promise<DbConnection> {
 	// Validate connection string format
-	if (!connectionString.startsWith('postgres://') && !connectionString.startsWith('postgresql://')) {
+	if (
+		!connectionString.startsWith('postgres://') &&
+		!connectionString.startsWith('postgresql://')
+	) {
 		throw new Error(
 			`Invalid connection URL: must start with postgres:// or postgresql://`,
 		);
@@ -79,13 +85,8 @@ export async function createDbConnection(
 			const startTime = performance.now();
 
 			try {
-				// Build parameterized query with sql.raw
-				// Note: sql.raw doesn't support params directly, use sql template
-				let result;
-				if (params.length === 0) {
-					result = await sql.raw<Record<string, unknown>>(query).execute(db);
-				} else {
-					// For parameterized queries, we need to use the pool directly
+				// For parameterized queries, use the pool directly
+				if (params.length > 0) {
 					const poolResult = await pool.query(query, [...params]);
 					const endTime = performance.now();
 					const executionTimeMs = Math.round(endTime - startTime);
@@ -103,6 +104,11 @@ export async function createDbConnection(
 						truncated,
 					};
 				}
+
+				// No params - use sql.raw
+				const result = await sql
+					.raw<Record<string, unknown>>(query)
+					.execute(db);
 
 				const endTime = performance.now();
 				const executionTimeMs = Math.round(endTime - startTime);

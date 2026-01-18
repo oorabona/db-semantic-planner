@@ -6,7 +6,7 @@
  */
 
 import { describe, expectTypeOf, it } from 'vitest';
-import type { InferQueryResult, TypedSchema } from './prisma-types.js';
+import type { TypedSchema } from './prisma-types.js';
 import { belongsTo, belongsToMany, hasMany, hasOne } from './prisma-types.js';
 import type {
 	IncludeState,

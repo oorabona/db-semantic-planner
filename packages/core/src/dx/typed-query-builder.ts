@@ -14,14 +14,10 @@ import type { WhereIntent } from '../intent-ast.js';
 import type { DistinctField } from './filters.js';
 import type {
 	IncludeSpec,
-	InferColumns,
 	InferQueryResult,
 	InferRelationNames,
-	InferRelationType,
-	NestedIncludeSpec,
 	TableNames,
 	TypedSchema,
-	TypedTableDef,
 } from './prisma-types.js';
 import type {
 	AggregateOptions,
@@ -150,6 +146,7 @@ export interface TypedQueryBuilder<
 	 */
 	includeNested<
 		R extends InferRelationNames<S['tables'][T]>,
+		// biome-ignore lint/suspicious/noExplicitAny: Required for conditional type check on relations Record
 		Target extends S['tables'][T]['relations'] extends Record<string, any>
 			? S['tables'][T]['relations'][R] extends { target: infer Tgt }
 				? Tgt extends TableNames<S>

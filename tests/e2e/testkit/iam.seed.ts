@@ -14,7 +14,7 @@
  *   - dave: no roles (edge case)
  */
 
-import { sql, type Kysely } from 'kysely';
+import { type Kysely, sql } from 'kysely';
 
 /**
  * Seed IAM data in the specified schema.

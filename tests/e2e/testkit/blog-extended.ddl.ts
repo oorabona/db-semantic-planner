@@ -5,7 +5,9 @@
 import { sql } from 'kysely';
 import { getTestDb } from './db.js';
 
-export async function createBlogExtendedSchema(schemaName: string): Promise<void> {
+export async function createBlogExtendedSchema(
+	schemaName: string,
+): Promise<void> {
 	const db = await getTestDb();
 
 	await sql`CREATE SCHEMA IF NOT EXISTS ${sql.ref(schemaName)}`.execute(db);
@@ -75,7 +77,9 @@ export async function createBlogExtendedSchema(schemaName: string): Promise<void
   `.execute(db);
 }
 
-export async function dropBlogExtendedSchema(schemaName: string): Promise<void> {
+export async function dropBlogExtendedSchema(
+	schemaName: string,
+): Promise<void> {
 	const db = await getTestDb();
 	await sql`DROP SCHEMA IF EXISTS ${sql.ref(schemaName)} CASCADE`.execute(db);
 }

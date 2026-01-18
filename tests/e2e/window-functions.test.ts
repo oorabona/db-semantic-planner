@@ -18,15 +18,8 @@
  * - Variant 5: Standard Case, price_cents=499, stock=50
  */
 
+import { createOrm, denseRank, rank, rowNumber, wAvg, wSum } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import {
-	createOrm,
-	denseRank,
-	rank,
-	rowNumber,
-	wAvg,
-	wSum,
-} from '@dbsp/core';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
@@ -163,7 +156,10 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 					'product_id',
 					'name',
 					'price_cents',
-					rank().partitionBy('product_id').orderBy('price_cents').as('rank_in_product'),
+					rank()
+						.partitionBy('product_id')
+						.orderBy('price_cents')
+						.as('rank_in_product'),
 				])
 				.all()) as Array<{
 				product_id: number;
@@ -212,9 +208,9 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 
 			// With dense_rank: 2199 (rank 1), 1999 (rank 2), 999 (rank 3), 499 (rank 4)
 			// (rank doesn't skip to 3 after tie at 2199)
-			const ranks = [...new Set(results.map((r) => Number(r.dense_rank_price)))].sort(
-				(a, b) => a - b,
-			);
+			const ranks = [
+				...new Set(results.map((r) => Number(r.dense_rank_price))),
+			].sort((a, b) => a - b);
 			// Should have consecutive ranks: 1, 2, 3, 4
 			expect(ranks).toEqual([1, 2, 3, 4]);
 		});
@@ -274,7 +270,10 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 					'product_id',
 					'name',
 					'price_cents',
-					wSum('price_cents').partitionBy('product_id').orderBy('price_cents').as('product_running_total'),
+					wSum('price_cents')
+						.partitionBy('product_id')
+						.orderBy('price_cents')
+						.as('product_running_total'),
 				])
 				.all()) as Array<{
 				product_id: number;
@@ -321,7 +320,6 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 
 			// Verify avg is computed
 			expect(results.length).toBe(5);
-			// biome-ignore lint/complexity/noForEach: test iteration
 			results.forEach((r) => {
 				expect(r.avg_stock).toBeDefined();
 				expect(Number(r.avg_stock)).toBeGreaterThanOrEqual(0);
@@ -410,7 +408,9 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 			expect(tenant2Results.length).toBe(2);
 
 			// Tenant 2 prices are different (5000, 3000 vs tenant 1's 2199, 1999, etc.)
-			const t2Prices = tenant2Results.map((r) => r.price_cents).sort((a, b) => b - a);
+			const t2Prices = tenant2Results
+				.map((r) => r.price_cents)
+				.sort((a, b) => b - a);
 			expect(t2Prices).toEqual([5000, 3000]);
 
 			// Verify ranks are computed correctly for each tenant
@@ -450,10 +450,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 			const dump = orm
 				.withSchema(SCHEMA)
 				.select('variants')
-				.columns([
-					'name',
-					rowNumber().orderBy('price_cents').as('row_num'),
-				])
+				.columns(['name', rowNumber().orderBy('price_cents').as('row_num')])
 				.dump();
 
 			// Verify SQL contains window function syntax
@@ -473,7 +470,10 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 				.columns([
 					'product_id',
 					'name',
-					rank().partitionBy('product_id').orderBy('price_cents', 'desc').as('product_rank'),
+					rank()
+						.partitionBy('product_id')
+						.orderBy('price_cents', 'desc')
+						.as('product_rank'),
 				])
 				.dump();
 

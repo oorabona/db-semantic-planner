@@ -8,22 +8,24 @@
  * - Soft Deletes (deleted_at filtering)
  */
 
-import { sql } from 'kysely';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	and,
+	belongsTo,
 	createOrm,
+	defineSchema,
 	eq,
 	exists,
 	gt,
 	gte,
+	hasMany,
 	isNotNull,
 	isNull,
 	lt,
 	not,
 	or,
 } from '@dbsp/core';
-import { belongsTo, defineSchema, hasMany } from '@dbsp/core';
+import { sql } from 'kysely';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	getTestAdapter,
@@ -624,7 +626,9 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 					.where(
 						and(
 							isNull('deleted_at'),
-							not(or(eq('category', 'electronics'), eq('category', 'furniture'))),
+							not(
+								or(eq('category', 'electronics'), eq('category', 'furniture')),
+							),
 						),
 					)
 					.execute();
@@ -645,7 +649,10 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 						and(
 							isNull('deleted_at'),
 							exists('orders'),
-							or(gt('price', 500), exists('reviews', { where: gte('rating', 5) })),
+							or(
+								gt('price', 500),
+								exists('reviews', { where: gte('rating', 5) }),
+							),
 						),
 					)
 					.execute();
@@ -663,9 +670,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const result = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(
-						and(isNull('deleted_at'), gte('price', 10), lt('price', 100)),
-					)
+					.where(and(isNull('deleted_at'), gte('price', 10), lt('price', 100)))
 					.execute();
 
 				// Mouse (29.99), Mug (14.99), Lamp (49.99), Notebook (19.99) = 4

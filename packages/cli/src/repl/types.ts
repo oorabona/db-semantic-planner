@@ -76,7 +76,13 @@ export interface ReplState {
  * Dot command handler result
  */
 export interface DotCommandResult {
-	type: 'output' | 'clear' | 'exit' | 'mode-change' | 'toggle-split' | 'exec-toggle';
+	type:
+		| 'output'
+		| 'clear'
+		| 'exit'
+		| 'mode-change'
+		| 'toggle-split'
+		| 'exec-toggle';
 	content?: React.ReactNode;
 	newMode?: QueryMode;
 	/** CLI-020: New execution mode state */
@@ -107,7 +113,6 @@ export interface QueryResult {
 	};
 	error?: string;
 }
-
 
 /**
  * CLI-020: Database execution result

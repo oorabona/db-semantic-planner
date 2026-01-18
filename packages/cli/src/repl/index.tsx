@@ -5,13 +5,13 @@
  */
 
 import { Box, render, Text, useApp, useInput } from 'ink';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-	createDbConnection,
-	getDatabaseName,
-	type DbConnection,
-	type ExecutionResult,
-} from './db-connection.js';
+import React, {
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from 'react';
 import { CompletionProvider, type CompletionSuggestion } from './completion.js';
 import {
 	CompletionDisplay,
@@ -21,6 +21,12 @@ import {
 	OutputDisplay,
 	SchemaSidebar,
 } from './components/index.js';
+import {
+	createDbConnection,
+	type DbConnection,
+	type ExecutionResult,
+	getDatabaseName,
+} from './db-connection.js';
 import { getHistory } from './history.js';
 import { getModeWarning, parseInputMode } from './mode-escape.js';
 import { ParseError, parseNaturalQuery } from './parser.js';
@@ -186,23 +192,23 @@ function ReplApp({ config }: ReplAppProps) {
 	const [connected, setConnected] = useState(false);
 	const [schemaName, setSchemaName] = useState<string | undefined>(undefined);
 	const dbConnectionRef = useRef<DbConnection | null>(null);
-	const [executionResult, setExecutionResult] = useState<ExecutionResult | null>(
-		null,
-	);
+	const [executionResult, setExecutionResult] =
+		useState<ExecutionResult | null>(null);
 
 	// CLI-020: Initialize database connection if URL provided
 	useEffect(() => {
 		if (!config.databaseUrl) return;
+		const databaseUrl = config.databaseUrl; // Narrowed after guard
 
 		let isMounted = true;
 
 		const initConnection = async () => {
 			try {
-				const connection = await createDbConnection(config.databaseUrl!);
+				const connection = await createDbConnection(databaseUrl);
 				if (isMounted) {
 					dbConnectionRef.current = connection;
 					setConnected(true);
-					const dbName = getDatabaseName(config.databaseUrl!);
+					const dbName = getDatabaseName(databaseUrl);
 					setOutput(
 						<Text color="green">✓ Connected to database: {dbName}</Text>,
 					);
@@ -725,9 +731,7 @@ function ReplApp({ config }: ReplAppProps) {
 						if (!connected) {
 							setOutput(
 								<Box flexDirection="column" marginY={1}>
-									<Text color="red">
-										❌ No database connected
-									</Text>
+									<Text color="red">❌ No database connected</Text>
 									<Text color="gray">
 										Start REPL with --db option to enable execution mode:
 									</Text>
@@ -745,7 +749,8 @@ function ReplApp({ config }: ReplAppProps) {
 							setExecMode(true);
 							setOutput(
 								<Text color="green">
-									✓ Execution mode: ON - queries will be executed against the database
+									✓ Execution mode: ON - queries will be executed against the
+									database
 								</Text>,
 							);
 						} else if (arg === 'off') {
@@ -763,12 +768,21 @@ function ReplApp({ config }: ReplAppProps) {
 										🔌 Execution Mode: {execMode ? 'ON' : 'OFF'}
 									</Text>
 									<Text color="gray">
-										Database: {getDatabaseName(config.databaseUrl!)}
+										Database:{' '}
+										{config.databaseUrl
+											? getDatabaseName(config.databaseUrl)
+											: 'N/A'}
 									</Text>
 									<Text> </Text>
 									<Text color="gray">Usage:</Text>
-									<Text color="gray"> .exec on  - Execute queries against database</Text>
-									<Text color="gray"> .exec off - Compile-only mode (show SQL)</Text>
+									<Text color="gray">
+										{' '}
+										.exec on - Execute queries against database
+									</Text>
+									<Text color="gray">
+										{' '}
+										.exec off - Compile-only mode (show SQL)
+									</Text>
 								</Box>,
 							);
 						}
@@ -951,7 +965,9 @@ function ReplApp({ config }: ReplAppProps) {
 				connected={connected}
 				execMode={execMode}
 				{...(schemaName && { schemaName })}
-				{...(config.databaseUrl && { databaseName: getDatabaseName(config.databaseUrl) })}
+				{...(config.databaseUrl && {
+					databaseName: getDatabaseName(config.databaseUrl),
+				})}
 			/>
 
 			{/* Main content - either split or single view */}

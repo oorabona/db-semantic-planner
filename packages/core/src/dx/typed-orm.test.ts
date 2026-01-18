@@ -8,7 +8,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { createOrm } from './orm.js';
 import type { InferQueryResult, TypedSchema } from './prisma-types.js';
-import { belongsTo, belongsToMany, hasMany, hasOne } from './prisma-types.js';
+import { belongsTo, hasMany, hasOne } from './prisma-types.js';
 import type {
 	TypedOrmInstance,
 	TypedQueryBuilder,
@@ -185,7 +185,7 @@ describe('DX-110: TypedSchema to ModelIR conversion', () => {
 describe('DX-110: End-to-end type inference', () => {
 	it('should infer correct type for query without includes', () => {
 		const orm = createOrm({ schema: testSchema });
-		const query = orm.select('users');
+		const _query = orm.select('users');
 
 		type Result = InferQueryResult<TestSchema, 'users'>;
 
@@ -198,7 +198,7 @@ describe('DX-110: End-to-end type inference', () => {
 
 	it('should infer correct type for query with hasMany include', () => {
 		const orm = createOrm({ schema: testSchema });
-		const query = orm.select('users').include('posts');
+		const _query = orm.select('users').include('posts');
 
 		// When include is called, the result should include posts
 		type Result = InferQueryResult<TestSchema, 'users', { posts: true }>;
@@ -212,7 +212,7 @@ describe('DX-110: End-to-end type inference', () => {
 
 	it('should infer correct type for query with hasOne include', () => {
 		const orm = createOrm({ schema: testSchema });
-		const query = orm.select('users').include('profile');
+		const _query = orm.select('users').include('profile');
 
 		type Result = InferQueryResult<TestSchema, 'users', { profile: true }>;
 
@@ -225,7 +225,7 @@ describe('DX-110: End-to-end type inference', () => {
 
 	it('should infer correct type for query with belongsTo include', () => {
 		const orm = createOrm({ schema: testSchema });
-		const query = orm.select('posts').include('author');
+		const _query = orm.select('posts').include('author');
 
 		type Result = InferQueryResult<TestSchema, 'posts', { author: true }>;
 

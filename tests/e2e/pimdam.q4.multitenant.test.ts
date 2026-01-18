@@ -5,8 +5,8 @@
  * and that there is no data leakage between tenants.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createOrm, eq } from '@dbsp/core';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createPimdamSchema,

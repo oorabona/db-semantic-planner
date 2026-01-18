@@ -5,7 +5,7 @@
  * Used for testing recursive CTE queries (role hierarchy traversal).
  */
 
-import { sql, type Kysely } from 'kysely';
+import { type Kysely, sql } from 'kysely';
 
 /**
  * Create IAM schema tables in the specified schema.

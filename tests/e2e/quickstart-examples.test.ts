@@ -5,9 +5,9 @@
  * Uses the batch mode to execute queries programmatically.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createBlogSchema,
@@ -27,14 +27,7 @@ function runBatchQuery(
 	query: string,
 	options: { db?: string; format?: 'text' | 'json' } = {},
 ): { stdout: string; stderr: string; success: boolean } {
-	const args = [
-		'dbsp',
-		'repl',
-		'--schema',
-		schemaPath,
-		'--eval',
-		query,
-	];
+	const args = ['dbsp', 'repl', '--schema', schemaPath, '--eval', query];
 	if (options.format) {
 		args.push('--format', options.format);
 	}
@@ -191,8 +184,7 @@ describe('QUICKSTART Examples - Compile Only', () => {
 			expect(result.success).toBe(true);
 			// Either join or separate strategy
 			expect(
-				result.stdout.includes('join') ||
-					result.stdout.includes('SEPARATE'),
+				result.stdout.includes('join') || result.stdout.includes('SEPARATE'),
 			).toBe(true);
 		});
 	});
@@ -252,7 +244,11 @@ describe('QUICKSTART Examples - Assertion System', () => {
 			});
 			return { stdout, stderr: '', success: true, exitCode: 0 };
 		} catch (error) {
-			const execError = error as { stdout?: string; stderr?: string; status?: number };
+			const execError = error as {
+				stdout?: string;
+				stderr?: string;
+				status?: number;
+			};
 			return {
 				stdout: execError.stdout ?? '',
 				stderr: execError.stderr ?? '',
@@ -275,13 +271,17 @@ describe('QUICKSTART Examples - Assertion System', () => {
 		});
 
 		it('should output assertion summary in text format', () => {
-			const result = runBatchWithAssertions(schema, input, assertions, { format: 'text' });
+			const result = runBatchWithAssertions(schema, input, assertions, {
+				format: 'text',
+			});
 			expect(result.stdout).toContain('ASSERTION RESULTS');
 			expect(result.stdout).toContain('Summary:');
 		});
 
 		it('should include assertion results in JSON output', () => {
-			const result = runBatchWithAssertions(schema, input, assertions, { format: 'json' });
+			const result = runBatchWithAssertions(schema, input, assertions, {
+				format: 'json',
+			});
 			// pnpm prepends output with "> db-semantic-planner@..." - extract JSON from the output
 			const jsonMatch = result.stdout.match(/\{[\s\S]*\}/);
 			expect(jsonMatch).not.toBeNull();
@@ -305,7 +305,9 @@ describe('QUICKSTART Examples - Assertion System', () => {
 		});
 
 		it('should include assertion count in summary', () => {
-			const result = runBatchWithAssertions(schema, input, assertions, { format: 'text' });
+			const result = runBatchWithAssertions(schema, input, assertions, {
+				format: 'text',
+			});
 			// Verify the summary shows assertions count
 			expect(result.stdout).toMatch(/Summary:\s+\d+\/\d+\s+passed/);
 		});

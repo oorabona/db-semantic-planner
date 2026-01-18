@@ -11,18 +11,15 @@ import pg from 'pg';
 const { Pool } = pg;
 
 // Singleton adapter instance
-// biome-ignore lint/suspicious/noExplicitAny: Database schema is dynamic in tests
 let adapter: Adapter<any> | undefined;
 
 // Singleton Kysely instance
-// biome-ignore lint/suspicious/noExplicitAny: Database schema is dynamic in tests
 let db: Kysely<any> | undefined;
 
 /**
  * Get or create the shared Kysely database instance.
  * Uses PostgreSQL connection from environment variables set by globalSetup.
  */
-// biome-ignore lint/suspicious/noExplicitAny: Database schema is dynamic in tests
 export async function getTestDb(): Promise<Kysely<any>> {
 	if (db) {
 		return db;
@@ -30,9 +27,7 @@ export async function getTestDb(): Promise<Kysely<any>> {
 
 	const connectionString = process.env.DATABASE_URL;
 	if (!connectionString) {
-		throw new Error(
-			'DATABASE_URL not set. Did globalSetup run successfully?',
-		);
+		throw new Error('DATABASE_URL not set. Did globalSetup run successfully?');
 	}
 
 	db = new Kysely({
@@ -51,7 +46,6 @@ export async function getTestDb(): Promise<Kysely<any>> {
  * Get or create the shared Kysely adapter instance.
  * Uses the same connection as getTestDb().
  */
-// biome-ignore lint/suspicious/noExplicitAny: Database schema is dynamic in tests
 export async function getTestAdapter(): Promise<Adapter<any>> {
 	if (adapter) {
 		return adapter;
@@ -66,8 +60,9 @@ export async function getTestAdapter(): Promise<Adapter<any>> {
  * Create an adapter for a specific schema (for introspection tests).
  * Unlike getTestAdapter(), this creates a new adapter each time with the schema set.
  */
-// biome-ignore lint/suspicious/noExplicitAny: Database schema is dynamic in tests
-export async function createAdapterForSchema(schemaName: string): Promise<Adapter<any>> {
+export async function createAdapterForSchema(
+	schemaName: string,
+): Promise<Adapter<any>> {
 	const database = await getTestDb();
 	return createKyselyAdapter(database, schemaName);
 }
@@ -131,7 +126,7 @@ export function shouldSkipE2E(): boolean {
 export function describeE2E(
 	name: string,
 	fn: () => void,
-): ReturnType<typeof describe> | void {
+): ReturnType<typeof describe> | undefined {
 	if (shouldSkipE2E()) {
 		return describe.skip(name, fn);
 	}

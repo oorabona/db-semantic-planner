@@ -63,10 +63,14 @@ describe('assertion-runner', () => {
 	describe('runAssertions', () => {
 		describe('output.contains', () => {
 			it('passes when output contains expected text', () => {
-				const results = [createResult({ output: 'Tables (5): users, posts, comments' })];
+				const results = [
+					createResult({ output: 'Tables (5): users, posts, comments' }),
+				];
 				const blocks = [
 					createBlock({
-						assertions: [{ type: 'output.contains', value: 'Tables (5)', line: 2 }],
+						assertions: [
+							{ type: 'output.contains', value: 'Tables (5)', line: 2 },
+						],
 					}),
 				];
 
@@ -80,7 +84,9 @@ describe('assertion-runner', () => {
 				const results = [createResult({ output: 'Tables (3): users, posts' })];
 				const blocks = [
 					createBlock({
-						assertions: [{ type: 'output.contains', value: 'NotFound', line: 2 }],
+						assertions: [
+							{ type: 'output.contains', value: 'NotFound', line: 2 },
+						],
 					}),
 				];
 
@@ -97,7 +103,9 @@ describe('assertion-runner', () => {
 				const results = [createResult({ output: '  exact value  ' })];
 				const blocks = [
 					createBlock({
-						assertions: [{ type: 'output.equals', value: 'exact value', line: 2 }],
+						assertions: [
+							{ type: 'output.equals', value: 'exact value', line: 2 },
+						],
 					}),
 				];
 
@@ -109,7 +117,9 @@ describe('assertion-runner', () => {
 				const results = [createResult({ output: 'actual value' })];
 				const blocks = [
 					createBlock({
-						assertions: [{ type: 'output.equals', value: 'expected value', line: 2 }],
+						assertions: [
+							{ type: 'output.equals', value: 'expected value', line: 2 },
+						],
 					}),
 				];
 
@@ -123,7 +133,9 @@ describe('assertion-runner', () => {
 				const results = [createResult({ output: 'Tables (5)' })];
 				const blocks = [
 					createBlock({
-						assertions: [{ type: 'output.matches', value: 'Tables \\(\\d+\\)', line: 2 }],
+						assertions: [
+							{ type: 'output.matches', value: 'Tables \\(\\d+\\)', line: 2 },
+						],
 					}),
 				];
 
@@ -135,7 +147,9 @@ describe('assertion-runner', () => {
 				const results = [createResult({ output: 'No tables' })];
 				const blocks = [
 					createBlock({
-						assertions: [{ type: 'output.matches', value: 'Tables \\(\\d+\\)', line: 2 }],
+						assertions: [
+							{ type: 'output.matches', value: 'Tables \\(\\d+\\)', line: 2 },
+						],
 					}),
 				];
 
@@ -146,10 +160,14 @@ describe('assertion-runner', () => {
 
 		describe('sql.contains', () => {
 			it('passes when SQL contains expected text', () => {
-				const results = [createResult({ sql: 'SELECT * FROM "posts" WHERE "published" = $1' })];
+				const results = [
+					createResult({ sql: 'SELECT * FROM "posts" WHERE "published" = $1' }),
+				];
 				const blocks = [
 					createBlock({
-						assertions: [{ type: 'sql.contains', value: 'WHERE "published"', line: 2 }],
+						assertions: [
+							{ type: 'sql.contains', value: 'WHERE "published"', line: 2 },
+						],
 					}),
 				];
 
@@ -163,7 +181,9 @@ describe('assertion-runner', () => {
 				const results = [createResult({ sql: 'SELECT  *  FROM  "users"' })];
 				const blocks = [
 					createBlock({
-						assertions: [{ type: 'sql.equals', value: 'select * from "users"', line: 2 }],
+						assertions: [
+							{ type: 'sql.equals', value: 'select * from "users"', line: 2 },
+						],
 					}),
 				];
 
@@ -175,7 +195,9 @@ describe('assertion-runner', () => {
 				const results = [createResult({ sql: 'SELECT * FROM "Users"' })];
 				const blocks = [
 					createBlock({
-						assertions: [{ type: 'sql.equals', value: 'select * from "users"', line: 2 }],
+						assertions: [
+							{ type: 'sql.equals', value: 'select * from "users"', line: 2 },
+						],
 					}),
 				];
 
@@ -186,10 +208,14 @@ describe('assertion-runner', () => {
 
 		describe('sql.matches', () => {
 			it('passes when regex matches SQL', () => {
-				const results = [createResult({ sql: 'SELECT "t0".* FROM "posts" AS "t0"' })];
+				const results = [
+					createResult({ sql: 'SELECT "t0".* FROM "posts" AS "t0"' }),
+				];
 				const blocks = [
 					createBlock({
-						assertions: [{ type: 'sql.matches', value: 'FROM.*posts', line: 2 }],
+						assertions: [
+							{ type: 'sql.matches', value: 'FROM.*posts', line: 2 },
+						],
 					}),
 				];
 
@@ -203,7 +229,9 @@ describe('assertion-runner', () => {
 				const results = [createResult({ params: [true, 1, 'test'] })];
 				const blocks = [
 					createBlock({
-						assertions: [{ type: 'params.equals', value: [true, 1, 'test'], line: 2 }],
+						assertions: [
+							{ type: 'params.equals', value: [true, 1, 'test'], line: 2 },
+						],
 					}),
 				];
 
@@ -248,7 +276,9 @@ describe('assertion-runner', () => {
 
 				const summary = runAssertions(blocks, results, ['query']);
 				expect(summary.failed).toBe(1);
-				expect(summary.results[0].assertions[0].message).toContain('Expected 3 params, got 2');
+				expect(summary.results[0].assertions[0].message).toContain(
+					'Expected 3 params, got 2',
+				);
 			});
 		});
 
@@ -261,7 +291,13 @@ describe('assertion-runner', () => {
 				];
 				const blocks = [
 					createBlock({
-						assertions: [{ type: 'plan.contains', value: 'include-strategy: join', line: 2 }],
+						assertions: [
+							{
+								type: 'plan.contains',
+								value: 'include-strategy: join',
+								line: 2,
+							},
+						],
 					}),
 				];
 
@@ -319,7 +355,9 @@ describe('assertion-runner', () => {
 				];
 				const blocks = [
 					createBlock({
-						assertions: [{ type: 'error.contains', value: 'not found', line: 2 }],
+						assertions: [
+							{ type: 'error.contains', value: 'not found', line: 2 },
+						],
 					}),
 				];
 
@@ -380,8 +418,16 @@ describe('assertion-runner', () => {
 		describe('multiple blocks', () => {
 			it('runs assertions for multiple queries', () => {
 				const results = [
-					createResult({ query: 'posts', output: 'posts output', success: true }),
-					createResult({ query: 'users', output: 'users output', success: true }),
+					createResult({
+						query: 'posts',
+						output: 'posts output',
+						success: true,
+					}),
+					createResult({
+						query: 'users',
+						output: 'users output',
+						success: true,
+					}),
 				];
 				const blocks = [
 					createBlock({
@@ -404,7 +450,10 @@ describe('assertion-runner', () => {
 		describe('query matching', () => {
 			it('matches by queryMatch string', () => {
 				const results = [
-					createResult({ query: 'posts where id = 1', sql: 'SELECT * FROM posts WHERE id = $1' }),
+					createResult({
+						query: 'posts where id = 1',
+						sql: 'SELECT * FROM posts WHERE id = $1',
+					}),
 				];
 				const blocks = [
 					createBlock({

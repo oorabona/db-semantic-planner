@@ -4,12 +4,7 @@
  * Defines the schema for IAM entities and their relationships.
  */
 
-import {
-	belongsTo,
-	defineSchema,
-	hasMany,
-	type ModelIR,
-} from '@dbsp/core';
+import { belongsTo, defineSchema, hasMany, type ModelIR } from '@dbsp/core';
 
 /**
  * IAM schema ModelIR.
@@ -79,7 +74,9 @@ export const iamModel: ModelIR = defineSchema({
 
 		// Permission relations
 		permissions: {
-			role_permissions: hasMany('role_permissions', { foreignKey: 'permission_id' }),
+			role_permissions: hasMany('role_permissions', {
+				foreignKey: 'permission_id',
+			}),
 		},
 
 		// Junction table relations

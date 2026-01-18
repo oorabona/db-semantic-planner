@@ -16,9 +16,9 @@
  * - Starter Kit (bundle, id=7): 2x Charger (999) + 1x Case (499) = 2497 total
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { sql as kyselySql } from 'kysely';
 import { createOrm, eq, exists } from '@dbsp/core';
+import { sql as kyselySql } from 'kysely';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
@@ -68,7 +68,9 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 				GROUP BY b.id, b.sku, b.title
 			`.execute(db);
 
-			const bundle = (result.rows as { bundle_sku: string; total_price_cents: string }[])[0];
+			const bundle = (
+				result.rows as { bundle_sku: string; total_price_cents: string }[]
+			)[0];
 			expect(bundle).toBeDefined();
 			expect(bundle.bundle_sku).toBe('BUNDLE-001');
 			// 2*999 + 1*499 = 2497
@@ -204,12 +206,12 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 			}[];
 			// Our bundle has 2 leaf components at level 1
 			expect(flatBom).toHaveLength(2);
-			expect(flatBom.find((c) => c.component_sku === 'COMPONENT-A')?.total_quantity).toBe(
-				'2',
-			);
-			expect(flatBom.find((c) => c.component_sku === 'COMPONENT-B')?.total_quantity).toBe(
-				'1',
-			);
+			expect(
+				flatBom.find((c) => c.component_sku === 'COMPONENT-A')?.total_quantity,
+			).toBe('2');
+			expect(
+				flatBom.find((c) => c.component_sku === 'COMPONENT-B')?.total_quantity,
+			).toBe('1');
 		});
 	});
 
@@ -226,7 +228,9 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 				.execute();
 
 			expect((bundles as unknown[]).length).toBeGreaterThanOrEqual(1);
-			expect((bundles as { sku: string }[]).some((b) => b.sku === 'BUNDLE-001')).toBe(true);
+			expect(
+				(bundles as { sku: string }[]).some((b) => b.sku === 'BUNDLE-001'),
+			).toBe(true);
 		});
 
 		it('should find bundles with components using EXISTS', async () => {
@@ -250,7 +254,9 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 				.columns(['id', 'sku'])
 				.execute();
 
-			expect((bundles as { sku: string }[]).some((b) => b.sku === 'BUNDLE-001')).toBe(true);
+			expect(
+				(bundles as { sku: string }[]).some((b) => b.sku === 'BUNDLE-001'),
+			).toBe(true);
 		});
 	});
 });
