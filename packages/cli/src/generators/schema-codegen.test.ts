@@ -6,7 +6,10 @@
 
 import { defineSchema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { generateSchemaFile, type SchemaCodegenOptions } from './schema-codegen.js';
+import {
+	generateSchemaFile,
+	type SchemaCodegenOptions,
+} from './schema-codegen.js';
 
 describe('generateSchemaFile', () => {
 	describe('basic structure', () => {
@@ -87,7 +90,9 @@ describe('generateSchemaFile', () => {
 			const result = generateSchemaFile(model);
 
 			expect(result).toContain("id: { type: 'uuid', primaryKey: true }");
-			expect(result).not.toContain("name: { type: 'string', primaryKey: true }");
+			expect(result).not.toContain(
+				"name: { type: 'string', primaryKey: true }",
+			);
 		});
 
 		it('does not mark non-primary key columns', () => {
@@ -204,13 +209,18 @@ describe('generateSchemaFile', () => {
 				},
 				posts: {
 					id: { type: 'uuid', primaryKey: true },
-					author_email: { type: 'string', references: { table: 'users', column: 'email' } },
+					author_email: {
+						type: 'string',
+						references: { table: 'users', column: 'email' },
+					},
 				},
 			}).build();
 
 			const result = generateSchemaFile(model);
 
-			expect(result).toContain("references: { table: 'users', column: 'email' }");
+			expect(result).toContain(
+				"references: { table: 'users', column: 'email' }",
+			);
 		});
 	});
 
@@ -256,7 +266,10 @@ describe('generateSchemaFile', () => {
 			}).build();
 
 			const options: SchemaCodegenOptions = {
-				warnings: ['Type mapping lossy: jsonb → json', 'Unknown type: custom_enum'],
+				warnings: [
+					'Type mapping lossy: jsonb → json',
+					'Unknown type: custom_enum',
+				],
 			};
 
 			const result = generateSchemaFile(model, options);
@@ -280,10 +293,12 @@ describe('generateSchemaFile', () => {
 			const usersTable = model.tables.get('users');
 			if (usersTable) {
 				// Cast to mutable for test setup
-				const idCol = usersTable.columns.find(c => c.name === 'id');
-				const dataCol = usersTable.columns.find(c => c.name === 'data');
-				if (idCol) (idCol as { originalDbType?: string }).originalDbType = 'uuid';
-				if (dataCol) (dataCol as { originalDbType?: string }).originalDbType = 'jsonb';
+				const idCol = usersTable.columns.find((c) => c.name === 'id');
+				const dataCol = usersTable.columns.find((c) => c.name === 'data');
+				if (idCol)
+					(idCol as { originalDbType?: string }).originalDbType = 'uuid';
+				if (dataCol)
+					(dataCol as { originalDbType?: string }).originalDbType = 'jsonb';
 			}
 
 			const options: SchemaCodegenOptions = {

@@ -117,9 +117,14 @@ export function Header({
 					<>
 						<Text color="gray"> | </Text>
 						<Text color="green">DB: {databaseName}</Text>
+					</>
+				)}
+				{/* Always show exec mode indicator when connected */}
+				{connected && (
+					<>
 						<Text color="gray"> | </Text>
-						<Text color={execMode ? 'green' : 'yellow'}>
-							{execMode ? '▶ EXEC' : '◼ COMPILE'}
+						<Text color={execMode ? 'green' : 'gray'}>
+							[exec: {execMode ? 'ON' : 'OFF'}]
 						</Text>
 					</>
 				)}

@@ -282,6 +282,14 @@ function ReplApp({ config }: ReplAppProps) {
 		setCompletions([]);
 	}, []);
 
+	// Apply completion: replace partial word with completion text
+	const handleApplyCompletion = useCallback(
+		(currentInput: string, completionText: string) => {
+			return completionProvider.applyCompletion(currentInput, completionText);
+		},
+		[completionProvider],
+	);
+
 	// Get the currently selected completion text
 	const selectedCompletion =
 		selectedCompletionIndex >= 0
@@ -763,29 +771,13 @@ function ReplApp({ config }: ReplAppProps) {
 								</Text>,
 							);
 						} else {
-							// Show current status
+							// Toggle mode when no argument provided
+							const newMode = !execMode;
+							setExecMode(newMode);
 							setOutput(
-								<Box flexDirection="column" marginY={1}>
-									<Text bold color="cyan">
-										🔌 Execution Mode: {execMode ? 'ON' : 'OFF'}
-									</Text>
-									<Text color="gray">
-										Database:{' '}
-										{config.databaseUrl
-											? getDatabaseName(config.databaseUrl)
-											: 'N/A'}
-									</Text>
-									<Text> </Text>
-									<Text color="gray">Usage:</Text>
-									<Text color="gray">
-										{' '}
-										.exec on - Execute queries against database
-									</Text>
-									<Text color="gray">
-										{' '}
-										.exec off - Compile-only mode (show SQL)
-									</Text>
-								</Box>,
+								<Text color={newMode ? 'green' : 'yellow'}>
+									✓ Execution mode: {newMode ? 'ON' : 'OFF'}
+								</Text>,
 							);
 						}
 						setQueryResult(null);
@@ -1067,6 +1059,7 @@ function ReplApp({ config }: ReplAppProps) {
 				onInputChange={handleInputChange}
 				{...(selectedCompletion !== undefined && { selectedCompletion })}
 				onCompletionAccepted={handleCompletionAccepted}
+				applyCompletion={handleApplyCompletion}
 			/>
 		</Box>
 	);
@@ -1120,6 +1113,7 @@ function ReplApp({ config }: ReplAppProps) {
 							onInputChange={handleInputChange}
 							{...(selectedCompletion !== undefined && { selectedCompletion })}
 							onCompletionAccepted={handleCompletionAccepted}
+							applyCompletion={handleApplyCompletion}
 						/>
 					</Box>
 				</Box>

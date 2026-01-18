@@ -21,6 +21,10 @@ export interface ReplOptions {
 	format?: 'text' | 'json';
 	/** DEMO-E2E: Assertion file for validating query output */
 	assert?: string;
+	/** CLI-IMPORT: SQL files to import before queries (injected as .import commands) */
+	import?: string[];
+	/** CLI-USE: PostgreSQL schema to use (injected as .use command) */
+	use?: string;
 }
 
 export const replCommand = new Command('repl')
@@ -44,6 +48,14 @@ export const replCommand = new Command('repl')
 		'-a, --assert <file>',
 		'Assertion file to validate query output (requires --input)',
 	)
+	.option(
+		'--import <files...>',
+		'SQL files to import before queries (equivalent to .import commands)',
+	)
+	.option(
+		'--use <schema>',
+		'PostgreSQL schema to use (equivalent to .use command)',
+	)
 	.action(async (options: ReplOptions) => {
 		try {
 			// Load schema
@@ -66,10 +78,29 @@ export const replCommand = new Command('repl')
 				);
 			}
 
+			// CLI-IMPORT/USE: Validate that --import and --use require batch mode
+			if ((options.import || options.use) && !options.eval && !options.input) {
+				throw new Error(
+					'--import and --use require batch mode (--eval or --input)',
+				);
+			}
+
 			// CLI-022: Batch mode - execute queries without interactive UI
 			if (options.eval || options.input) {
 				const { runBatchMode } = await import('../repl/batch.js');
 				const queries: string[] = [];
+
+				// CLI-USE: Inject .use command first (schema scoping)
+				if (options.use) {
+					queries.push(`.use ${options.use}`);
+				}
+
+				// CLI-IMPORT: Inject .import commands for SQL files
+				if (options.import) {
+					for (const file of options.import) {
+						queries.push(`.import ${file}`);
+					}
+				}
 
 				if (options.eval) {
 					queries.push(options.eval);

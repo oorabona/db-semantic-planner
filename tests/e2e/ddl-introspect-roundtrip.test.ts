@@ -10,11 +10,11 @@
  * 6. Verify the generated schema matches the original
  */
 
-import { defineSchema } from '@dbsp/core';
 import { generateDDL, introspect } from '@dbsp/adapter-kysely';
-import { generateSchemaFile } from '../../packages/cli/src/generators/schema-codegen.js';
+import { defineSchema } from '@dbsp/core';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { generateSchemaFile } from '../../packages/cli/src/generators/schema-codegen.js';
 import {
 	closeTestDb,
 	createSchema,
@@ -93,7 +93,9 @@ describe.skipIf(shouldSkipE2E())('DDL → Introspect Round-Trip', () => {
 		expect(introspectedModel.tables.has('comments')).toBe(true);
 
 		// Check generated code structure
-		expect(generatedCode).toContain("import { defineSchema } from '@dbsp/schema'");
+		expect(generatedCode).toContain(
+			"import { defineSchema } from '@dbsp/schema'",
+		);
 		expect(generatedCode).toContain('export const schema = defineSchema({');
 
 		// Check tables appear in generated code
@@ -104,12 +106,20 @@ describe.skipIf(shouldSkipE2E())('DDL → Introspect Round-Trip', () => {
 		// Check column types are preserved (note: types may be mapped)
 		const usersTable = introspectedModel.tables.get('users')!;
 		expect(usersTable.columns.find((c) => c.name === 'id')?.type).toBe('uuid');
-		expect(usersTable.columns.find((c) => c.name === 'email')?.type).toBe('string');
-		expect(usersTable.columns.find((c) => c.name === 'active')?.type).toBe('boolean');
+		expect(usersTable.columns.find((c) => c.name === 'email')?.type).toBe(
+			'string',
+		);
+		expect(usersTable.columns.find((c) => c.name === 'active')?.type).toBe(
+			'boolean',
+		);
 
 		// Check nullable is preserved
-		expect(usersTable.columns.find((c) => c.name === 'name')?.nullable).toBe(true);
-		expect(usersTable.columns.find((c) => c.name === 'email')?.nullable).toBe(false);
+		expect(usersTable.columns.find((c) => c.name === 'name')?.nullable).toBe(
+			true,
+		);
+		expect(usersTable.columns.find((c) => c.name === 'email')?.nullable).toBe(
+			false,
+		);
 
 		// Check primary keys
 		expect(usersTable.primaryKey).toBe('id');
@@ -172,10 +182,18 @@ describe.skipIf(shouldSkipE2E())('DDL → Introspect Round-Trip', () => {
 
 		// Verify nullable is correctly detected
 		const idCol = table.columns.find((c) => c.name === 'id')!;
-		const withDefaultCol = table.columns.find((c) => c.name === 'with_default')!;
-		const withoutDefaultCol = table.columns.find((c) => c.name === 'without_default')!;
-		const nullableWithDefaultCol = table.columns.find((c) => c.name === 'nullable_with_default')!;
-		const nullableWithoutDefaultCol = table.columns.find((c) => c.name === 'nullable_without_default')!;
+		const withDefaultCol = table.columns.find(
+			(c) => c.name === 'with_default',
+		)!;
+		const withoutDefaultCol = table.columns.find(
+			(c) => c.name === 'without_default',
+		)!;
+		const nullableWithDefaultCol = table.columns.find(
+			(c) => c.name === 'nullable_with_default',
+		)!;
+		const nullableWithoutDefaultCol = table.columns.find(
+			(c) => c.name === 'nullable_without_default',
+		)!;
 
 		// UUID PK is not nullable
 		expect(idCol.nullable).toBe(false);

@@ -161,6 +161,39 @@ const KEYWORDS: CompletionSuggestion[] = [
 		description: 'Boolean false',
 	},
 	{ text: 'null', label: 'null', type: 'keyword', description: 'Null value' },
+	// Range operators (PostgreSQL)
+	{
+		text: 'overlaps',
+		label: 'overlaps',
+		type: 'keyword',
+		description: 'Range overlap operator (&&)',
+	},
+	{
+		text: 'contains',
+		label: 'contains',
+		type: 'keyword',
+		description: 'Range contains element (@>)',
+	},
+	{
+		text: 'containedBy',
+		label: 'containedBy',
+		type: 'keyword',
+		description: 'Range within another (<@)',
+	},
+	// String operators
+	{
+		text: 'like',
+		label: 'like',
+		type: 'keyword',
+		description: 'Pattern matching (LIKE)',
+	},
+	// Set operators
+	{
+		text: 'in',
+		label: 'in',
+		type: 'keyword',
+		description: 'Value in set (IN)',
+	},
 ];
 
 /**
@@ -410,6 +443,33 @@ export class CompletionProvider {
 	 */
 	getRelationNames(): string[] {
 		return this.relations.map((r) => r.text);
+	}
+
+	/**
+	 * Apply a completion to the current input.
+	 * Returns the new input text with the partial word replaced by the completion.
+	 *
+	 * @param input - Current input text
+	 * @param completionText - The completion text to insert
+	 * @returns New input text with completion applied
+	 */
+	applyCompletion(input: string, completionText: string): string {
+		const endsWithSpace = input.endsWith(' ');
+
+		// If input ends with space, just append the completion
+		if (endsWithSpace) {
+			return input + completionText;
+		}
+
+		// Otherwise, find and replace the partial word
+		const words = input.split(/\s+/);
+		if (words.length === 0) {
+			return completionText;
+		}
+
+		// Replace the last word (partial) with the completion
+		words[words.length - 1] = completionText;
+		return words.join(' ');
 	}
 }
 
