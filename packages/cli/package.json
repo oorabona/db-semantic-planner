@@ -11,6 +11,10 @@
 		".": {
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
+		},
+		"./generators/schema-codegen": {
+			"types": "./dist/generators/schema-codegen.d.ts",
+			"import": "./dist/generators/schema-codegen.js"
 		}
 	},
 	"files": [
