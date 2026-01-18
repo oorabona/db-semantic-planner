@@ -53,17 +53,17 @@ function createTestKysely() {
  */
 const basicSchema = defineSchema({
 	users: {
-		id: 'number',
-		name: 'string',
-		email: 'string',
-		active: 'boolean',
+		id: { type: 'number' },
+		name: { type: 'string' },
+		email: { type: 'string' },
+		active: { type: 'boolean' },
 	},
 	posts: {
-		id: 'number',
-		title: 'string',
-		content: 'string',
-		userId: 'number',
-		published: 'boolean',
+		id: { type: 'number' },
+		title: { type: 'string' },
+		content: { type: 'string' },
+		userId: { type: 'number' },
+		published: { type: 'boolean' },
 	},
 })
 	.relations({
@@ -81,15 +81,15 @@ const basicSchema = defineSchema({
  */
 const q1Schema = defineSchema({
 	products: {
-		id: 'number',
-		name: 'string',
+		id: { type: 'number' },
+		name: { type: 'string' },
 	},
 	productImages: {
-		id: 'number',
-		productId: 'number',
-		locale: 'string',
-		type: 'string',
-		approved: 'boolean',
+		id: { type: 'number' },
+		productId: { type: 'number' },
+		locale: { type: 'string' },
+		type: { type: 'string' },
+		approved: { type: 'boolean' },
 	},
 })
 	.relations({
@@ -1258,9 +1258,9 @@ describe('SQL Compiler', () => {
 		 */
 		const recursiveSchema = defineSchema({
 			categories: {
-				id: 'number',
-				name: 'string',
-				parentId: 'number',
+				id: { type: 'number' },
+				name: { type: 'string' },
+				parentId: { type: 'number' },
 			},
 		})
 			.relations({
@@ -1276,13 +1276,13 @@ describe('SQL Compiler', () => {
 		 */
 		const edgeTableSchema = defineSchema({
 			roles: {
-				id: 'number',
-				name: 'string',
+				id: { type: 'number' },
+				name: { type: 'string' },
 			},
 			roleEdges: {
-				id: 'number',
-				parentRoleId: 'number',
-				childRoleId: 'number',
+				id: { type: 'number' },
+				parentRoleId: { type: 'number' },
+				childRoleId: { type: 'number' },
 			},
 		})
 			.relations({
@@ -2890,13 +2890,13 @@ describe('SQL Compiler', () => {
 				// Given: users hasMany posts with explicit includeStrategy: 'join'
 				const schemaWithJoinHint = defineSchema({
 					users: {
-						id: 'number',
-						name: 'string',
+						id: { type: 'number' },
+						name: { type: 'string' },
 					},
 					posts: {
-						id: 'number',
-						title: 'string',
-						userId: 'number',
+						id: { type: 'number' },
+						title: { type: 'string' },
+						userId: { type: 'number' },
 					},
 				})
 					.relations({
@@ -3100,13 +3100,13 @@ describe('SQL Compiler', () => {
 				// Given: users hasMany posts with explicit 'lateral' strategy hint
 				const schemaWithLateral = defineSchema({
 					users: {
-						id: 'number',
-						name: 'string',
+						id: { type: 'number' },
+						name: { type: 'string' },
 					},
 					posts: {
-						id: 'number',
-						title: 'string',
-						userId: 'number',
+						id: { type: 'number' },
+						title: { type: 'string' },
+						userId: { type: 'number' },
 					},
 				})
 					.relations({
@@ -3149,14 +3149,14 @@ describe('SQL Compiler', () => {
 
 				const schemaWithLateral = defineSchema({
 					users: {
-						id: 'number',
-						name: 'string',
+						id: { type: 'number' },
+						name: { type: 'string' },
 					},
 					posts: {
-						id: 'number',
-						title: 'string',
+						id: { type: 'number' },
+						title: { type: 'string' },
 						createdAt: 'Date',
-						userId: 'number',
+						userId: { type: 'number' },
 					},
 				})
 					.relations({
@@ -3204,13 +3204,13 @@ describe('SQL Compiler', () => {
 				// Given: users hasMany posts with explicit 'json_agg' strategy hint
 				const schemaWithJsonAgg = defineSchema({
 					users: {
-						id: 'number',
-						name: 'string',
+						id: { type: 'number' },
+						name: { type: 'string' },
 					},
 					posts: {
-						id: 'number',
-						title: 'string',
-						userId: 'number',
+						id: { type: 'number' },
+						title: { type: 'string' },
+						userId: { type: 'number' },
 					},
 				})
 					.relations({
@@ -3259,14 +3259,14 @@ describe('SQL Compiler', () => {
 
 				const schemaWithJsonAgg = defineSchema({
 					users: {
-						id: 'number',
-						name: 'string',
+						id: { type: 'number' },
+						name: { type: 'string' },
 					},
 					posts: {
-						id: 'number',
-						title: 'string',
+						id: { type: 'number' },
+						title: { type: 'string' },
 						createdAt: 'Date',
-						userId: 'number',
+						userId: { type: 'number' },
 					},
 				})
 					.relations({
@@ -3309,13 +3309,13 @@ describe('SQL Compiler', () => {
 
 				const schemaWithJsonAgg = defineSchema({
 					users: {
-						id: 'number',
-						name: 'string',
+						id: { type: 'number' },
+						name: { type: 'string' },
 					},
 					posts: {
-						id: 'number',
-						title: 'string',
-						userId: 'number',
+						id: { type: 'number' },
+						title: { type: 'string' },
+						userId: { type: 'number' },
 					},
 				})
 					.relations({
@@ -3654,15 +3654,15 @@ describe.todo('ADAPTER-003: Smart Column Aliasing - onCollision mode not yet imp
 	// posts: id, title, userId, createdAt (id and createdAt collide with users)
 	const schemaWithCollisions = defineSchema({
 		users: {
-			id: 'number',
-			name: 'string',
-			createdAt: 'string',
+			id: { type: 'number' },
+			name: { type: 'string' },
+			createdAt: { type: 'string' },
 		},
 		posts: {
-			id: 'number',
-			title: 'string',
-			userId: 'number',
-			createdAt: 'string',
+			id: { type: 'number' },
+			title: { type: 'string' },
+			userId: { type: 'number' },
+			createdAt: { type: 'string' },
 		},
 	})
 		.relations({
@@ -3792,21 +3792,21 @@ describe.todo('ADAPTER-003: Smart Column Aliasing - onCollision mode not yet imp
 		// Schema with multiple relations where column names collide
 		const schemaWithMultipleIncludes = defineSchema({
 			comments: {
-				id: 'number',
-				content: 'string',
-				postId: 'number',
-				authorId: 'number',
-				createdAt: 'string',
+				id: { type: 'number' },
+				content: { type: 'string' },
+				postId: { type: 'number' },
+				authorId: { type: 'number' },
+				createdAt: { type: 'string' },
 			},
 			posts: {
-				id: 'number',
-				title: 'string',
-				createdAt: 'string',
+				id: { type: 'number' },
+				title: { type: 'string' },
+				createdAt: { type: 'string' },
 			},
 			users: {
-				id: 'number',
-				name: 'string',
-				createdAt: 'string',
+				id: { type: 'number' },
+				name: { type: 'string' },
+				createdAt: { type: 'string' },
 			},
 		})
 			.relations({
@@ -3869,8 +3869,8 @@ describe('CORE-006: Composite Key Support', () => {
 		tables.set('tenants', {
 			name: 'tenants',
 			columns: [
-				{ name: 'id', type: 'number', nullable: false },
-				{ name: 'name', type: 'string', nullable: false },
+				{ name: 'id', type: { type: 'number' }, nullable: false },
+				{ name: 'name', type: { type: 'string' }, nullable: false },
 			],
 			primaryKey: 'id',
 			foreignKeys: [],
@@ -3880,10 +3880,10 @@ describe('CORE-006: Composite Key Support', () => {
 		tables.set('customers', {
 			name: 'customers',
 			columns: [
-				{ name: 'tenantId', type: 'number', nullable: false },
-				{ name: 'id', type: 'number', nullable: false },
-				{ name: 'name', type: 'string', nullable: false },
-				{ name: 'email', type: 'string', nullable: false },
+				{ name: 'tenantId', type: { type: 'number' }, nullable: false },
+				{ name: 'id', type: { type: 'number' }, nullable: false },
+				{ name: 'name', type: { type: 'string' }, nullable: false },
+				{ name: 'email', type: { type: 'string' }, nullable: false },
 			],
 			primaryKey: ['tenantId', 'id'], // Composite PK
 			foreignKeys: [],
@@ -3893,11 +3893,11 @@ describe('CORE-006: Composite Key Support', () => {
 		tables.set('tenant_orders', {
 			name: 'tenant_orders',
 			columns: [
-				{ name: 'id', type: 'number', nullable: false },
-				{ name: 'tenantId', type: 'number', nullable: false },
-				{ name: 'customerId', type: 'number', nullable: false },
-				{ name: 'total', type: 'number', nullable: false },
-				{ name: 'status', type: 'string', nullable: false },
+				{ name: 'id', type: { type: 'number' }, nullable: false },
+				{ name: 'tenantId', type: { type: 'number' }, nullable: false },
+				{ name: 'customerId', type: { type: 'number' }, nullable: false },
+				{ name: 'total', type: { type: 'number' }, nullable: false },
+				{ name: 'status', type: { type: 'string' }, nullable: false },
 			],
 			primaryKey: 'id',
 			foreignKeys: [
@@ -4055,16 +4055,16 @@ describe('CORE-006: Composite Key Support', () => {
 			defineSchema({
 				categories: {
 					id: 'integer',
-					name: 'string',
+					name: { type: 'string' },
 					parentId: 'integer',
 				},
 				users: {
 					id: 'integer',
-					name: 'string',
+					name: { type: 'string' },
 				},
 				posts: {
 					id: 'integer',
-					title: 'string',
+					title: { type: 'string' },
 					authorId: 'integer',
 				},
 			})
@@ -4235,19 +4235,19 @@ describe('CORE-006: Composite Key Support', () => {
 			const model = defineSchema({
 				users: {
 					id: 'integer',
-					name: 'string',
+					name: { type: 'string' },
 				},
 				posts: {
 					id: 'integer',
-					title: 'string',
+					title: { type: 'string' },
 					authorId: 'integer',
-					published: 'boolean',
+					published: { type: 'boolean' },
 				},
 				comments: {
 					id: 'integer',
-					content: 'string',
+					content: { type: 'string' },
 					postId: 'integer',
-					approved: 'boolean',
+					approved: { type: 'boolean' },
 				},
 			})
 				.relations({
@@ -4317,7 +4317,7 @@ describe('CORE-006: Composite Key Support', () => {
 				return defineSchema({
 					categories: {
 						id: 'integer',
-						name: 'string',
+						name: { type: 'string' },
 						parentId: 'integer',
 					},
 				})
@@ -4426,9 +4426,9 @@ describe('CORE-006: Composite Key Support', () => {
 				const model = defineSchema({
 					categories: {
 						id: 'integer',
-						name: 'string',
+						name: { type: 'string' },
 						parentId: 'integer',
-						active: 'boolean',
+						active: { type: 'boolean' },
 					},
 				})
 					.relations({

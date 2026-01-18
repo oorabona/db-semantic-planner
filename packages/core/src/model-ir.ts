@@ -116,6 +116,20 @@ export interface ForeignKeyIR {
 }
 
 /**
+ * Index definition (single or composite)
+ */
+export interface IndexIR {
+	/** Index name (auto-generated if not provided: idx_{table}_{columns}) */
+	readonly name?: string;
+
+	/** Columns included in the index (1+ columns) */
+	readonly columns: readonly string[];
+
+	/** Whether this is a unique index */
+	readonly unique?: boolean;
+}
+
+/**
  * Table definition
  */
 export interface TableIR {
@@ -130,6 +144,9 @@ export interface TableIR {
 
 	/** Foreign key constraints */
 	readonly foreignKeys: readonly ForeignKeyIR[];
+
+	/** Index definitions */
+	readonly indexes: readonly IndexIR[];
 }
 
 /**

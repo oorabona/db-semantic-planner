@@ -11,7 +11,7 @@ describe('ModelIR', () => {
 	describe('defineSchema', () => {
 		it('should create a schema with tables', () => {
 			const schema = defineSchema({
-				users: { id: 'number', name: 'string' },
+				users: { id: { type: 'number' }, name: { type: 'string' } },
 			}).build();
 
 			expect(schema.tables.size).toBe(1);
@@ -21,7 +21,11 @@ describe('ModelIR', () => {
 
 		it('should create columns from table definition', () => {
 			const schema = defineSchema({
-				users: { id: 'number', name: 'string', active: 'boolean' },
+				users: {
+					id: { type: 'number' },
+					name: { type: 'string' },
+					active: { type: 'boolean' },
+				},
 			}).build();
 
 			const usersTable = schema.getTable('users');
@@ -39,16 +43,20 @@ describe('ModelIR', () => {
 
 		it('should default primary key to id', () => {
 			const schema = defineSchema({
-				users: { id: 'number', name: 'string' },
+				users: { id: { type: 'number' }, name: { type: 'string' } },
 			}).build();
 
 			expect(schema.getTable('users')?.primaryKey).toBe('id');
 		});
 
-		it('should auto-detect foreign keys from column names', () => {
+		it('should use explicit FK references (not auto-detect)', () => {
 			const schema = defineSchema({
-				users: { id: 'number', name: 'string' },
-				posts: { id: 'number', title: 'string', userId: 'number' },
+				users: { id: { type: 'number' }, name: { type: 'string' } },
+				posts: {
+					id: { type: 'number' },
+					title: { type: 'string' },
+					userId: { type: 'number', references: { table: 'users' } },
+				},
 			}).build();
 
 			const postsTable = schema.getTable('posts');
@@ -61,8 +69,12 @@ describe('ModelIR', () => {
 	describe('relations', () => {
 		it('should define hasOne relation', () => {
 			const schema = defineSchema({
-				users: { id: 'number', name: 'string' },
-				profiles: { id: 'number', bio: 'string', userId: 'number' },
+				users: { id: { type: 'number' }, name: { type: 'string' } },
+				profiles: {
+					id: { type: 'number' },
+					bio: { type: 'string' },
+					userId: { type: 'number' },
+				},
 			})
 				.relations({
 					users: {
@@ -81,8 +93,12 @@ describe('ModelIR', () => {
 
 		it('should define hasMany relation', () => {
 			const schema = defineSchema({
-				users: { id: 'number', name: 'string' },
-				posts: { id: 'number', title: 'string', userId: 'number' },
+				users: { id: { type: 'number' }, name: { type: 'string' } },
+				posts: {
+					id: { type: 'number' },
+					title: { type: 'string' },
+					userId: { type: 'number' },
+				},
 			})
 				.relations({
 					users: {
@@ -99,8 +115,12 @@ describe('ModelIR', () => {
 
 		it('should define belongsTo relation', () => {
 			const schema = defineSchema({
-				users: { id: 'number', name: 'string' },
-				posts: { id: 'number', title: 'string', userId: 'number' },
+				users: { id: { type: 'number' }, name: { type: 'string' } },
+				posts: {
+					id: { type: 'number' },
+					title: { type: 'string' },
+					userId: { type: 'number' },
+				},
 			})
 				.relations({
 					posts: {
@@ -117,9 +137,13 @@ describe('ModelIR', () => {
 
 		it('should define belongsToMany relation', () => {
 			const schema = defineSchema({
-				posts: { id: 'number', title: 'string' },
-				tags: { id: 'number', name: 'string' },
-				postTags: { id: 'number', postId: 'number', tagId: 'number' },
+				posts: { id: { type: 'number' }, title: { type: 'string' } },
+				tags: { id: { type: 'number' }, name: { type: 'string' } },
+				postTags: {
+					id: { type: 'number' },
+					postId: { type: 'number' },
+					tagId: { type: 'number' },
+				},
 			})
 				.relations({
 					posts: {
@@ -145,8 +169,12 @@ describe('ModelIR', () => {
 	describe('relation hints', () => {
 		it('should apply custom strategy hints', () => {
 			const schema = defineSchema({
-				users: { id: 'number', name: 'string' },
-				posts: { id: 'number', title: 'string', userId: 'number' },
+				users: { id: { type: 'number' }, name: { type: 'string' } },
+				posts: {
+					id: { type: 'number' },
+					title: { type: 'string' },
+					userId: { type: 'number' },
+				},
 			})
 				.relations({
 					users: {
@@ -173,8 +201,12 @@ describe('ModelIR', () => {
 
 		it('should default strategies to auto', () => {
 			const schema = defineSchema({
-				users: { id: 'number', name: 'string' },
-				posts: { id: 'number', title: 'string', userId: 'number' },
+				users: { id: { type: 'number' }, name: { type: 'string' } },
+				posts: {
+					id: { type: 'number' },
+					title: { type: 'string' },
+					userId: { type: 'number' },
+				},
 			})
 				.relations({
 					users: {
@@ -192,12 +224,12 @@ describe('ModelIR', () => {
 
 	describe('helper methods', () => {
 		const schema = defineSchema({
-			users: { id: 'number', name: 'string' },
+			users: { id: { type: 'number' }, name: { type: 'string' } },
 			posts: {
-				id: 'number',
-				title: 'string',
-				createdById: 'number',
-				editedById: 'number',
+				id: { type: 'number' },
+				title: { type: 'string' },
+				createdById: { type: 'number' },
+				editedById: { type: 'number' },
 			},
 		})
 			.relations({
@@ -224,7 +256,7 @@ describe('ModelIR', () => {
 
 			it('should return empty array for table with no relations', () => {
 				const simpleSchema = defineSchema({
-					users: { id: 'number', name: 'string' },
+					users: { id: { type: 'number' }, name: { type: 'string' } },
 				}).build();
 
 				const relations = simpleSchema.getRelationsFrom('users');
@@ -261,8 +293,12 @@ describe('ModelIR', () => {
 
 			it('should return false for unambiguous relations', () => {
 				const simpleSchema = defineSchema({
-					users: { id: 'number', name: 'string' },
-					posts: { id: 'number', title: 'string', userId: 'number' },
+					users: { id: { type: 'number' }, name: { type: 'string' } },
+					posts: {
+						id: { type: 'number' },
+						title: { type: 'string' },
+						userId: { type: 'number' },
+					},
 				})
 					.relations({
 						users: {
@@ -288,7 +324,7 @@ describe('ModelIR', () => {
 		it('should throw on relation to non-existent target table', () => {
 			expect(() => {
 				defineSchema({
-					users: { id: 'number', name: 'string' },
+					users: { id: { type: 'number' }, name: { type: 'string' } },
 				})
 					.relations({
 						users: {
@@ -302,7 +338,7 @@ describe('ModelIR', () => {
 		it('should throw on relation from non-existent source table', () => {
 			expect(() => {
 				defineSchema({
-					posts: { id: 'number', title: 'string' },
+					posts: { id: { type: 'number' }, title: { type: 'string' } },
 				})
 					.relations({
 						users: {
@@ -317,13 +353,13 @@ describe('ModelIR', () => {
 	describe('golden test fixtures', () => {
 		describe('Q1: Products with images filtered by locale', () => {
 			const q1Schema = defineSchema({
-				products: { id: 'number', name: 'string' },
+				products: { id: { type: 'number' }, name: { type: 'string' } },
 				productImages: {
-					id: 'number',
-					productId: 'number',
-					locale: 'string',
-					type: 'string',
-					approved: 'boolean',
+					id: { type: 'number' },
+					productId: { type: 'number' },
+					locale: { type: 'string' },
+					type: { type: 'string' },
+					approved: { type: 'boolean' },
 				},
 			})
 				.relations({
@@ -350,11 +386,11 @@ describe('ModelIR', () => {
 
 		describe('Q2: Categories with product coverage', () => {
 			const q2Schema = defineSchema({
-				categories: { id: 'number', name: 'string' },
+				categories: { id: { type: 'number' }, name: { type: 'string' } },
 				products: {
-					id: 'number',
-					categoryId: 'number',
-					active: 'boolean',
+					id: { type: 'number' },
+					categoryId: { type: 'number' },
+					active: { type: 'boolean' },
 				},
 			})
 				.relations({
@@ -383,12 +419,12 @@ describe('ModelIR', () => {
 
 		describe('Q3: Ambiguous relations', () => {
 			const q3Schema = defineSchema({
-				users: { id: 'number', name: 'string' },
+				users: { id: { type: 'number' }, name: { type: 'string' } },
 				posts: {
-					id: 'number',
-					title: 'string',
-					createdById: 'number',
-					editedById: 'number',
+					id: { type: 'number' },
+					title: { type: 'string' },
+					createdById: { type: 'number' },
+					editedById: { type: 'number' },
 				},
 			})
 				.relations({
@@ -415,7 +451,7 @@ describe('ModelIR', () => {
 	describe('immutability', () => {
 		it('should expose tables as ReadonlyMap (compile-time immutability)', () => {
 			const schema = defineSchema({
-				users: { id: 'number', name: 'string' },
+				users: { id: { type: 'number' }, name: { type: 'string' } },
 			}).build();
 
 			// TypeScript enforces ReadonlyMap at compile-time.
@@ -432,7 +468,7 @@ describe('ModelIR', () => {
 
 		it('should have frozen table objects', () => {
 			const schema = defineSchema({
-				users: { id: 'number', name: 'string' },
+				users: { id: { type: 'number' }, name: { type: 'string' } },
 			}).build();
 
 			const usersTable = schema.tables.get('users');
