@@ -1,0 +1,112 @@
+# Assertions for test-minimal.dbsp
+# Validates output from minimal schema queries
+
+# ─────────────────────────────────────────
+# Query 0: .tables
+# ─────────────────────────────────────────
+--- query: 0
+success: true
+output.contains: Tables (2)
+output.contains: users
+output.contains: posts
+
+# ─────────────────────────────────────────
+# Query 1: .schema users
+# ─────────────────────────────────────────
+--- query: 1
+success: true
+output.contains: Table: users
+output.contains: id
+output.contains: name
+output.contains: email
+
+# ─────────────────────────────────────────
+# Query 2: .schema posts
+# ─────────────────────────────────────────
+--- query: 2
+success: true
+output.contains: Table: posts
+output.contains: userId
+
+# ─────────────────────────────────────────
+# Query 3: .relations posts
+# ─────────────────────────────────────────
+--- query: 3
+success: true
+output.matches: (R|r)elation
+
+# ─────────────────────────────────────────
+# Query 4: users (simple select)
+# ─────────────────────────────────────────
+--- query: 4
+success: true
+sql.contains: from "users"
+params.length: 0
+
+# ─────────────────────────────────────────
+# Query 5: posts (simple select)
+# ─────────────────────────────────────────
+--- query: 5
+success: true
+sql.contains: from "posts"
+params.length: 0
+
+# ─────────────────────────────────────────
+# Query 6: users where id = 1
+# ─────────────────────────────────────────
+--- query: 6
+success: true
+sql.contains: where
+sql.matches: "id".*=
+params.equals: [1]
+
+# ─────────────────────────────────────────
+# Query 7: posts where published = true
+# NOTE: published column exists in posts schema, but the value is parameterized
+# ─────────────────────────────────────────
+--- query: 7
+success: true
+sql.contains: where
+sql.contains: "published"
+params.equals: [true]
+
+# ─────────────────────────────────────────
+# Query 8: posts include author
+# NOTE: "author" relation doesn't exist in minimal schema (it's "user")
+# ─────────────────────────────────────────
+--- query: 8
+success: false
+error.contains: author
+
+# ─────────────────────────────────────────
+# Query 9: users include posts
+# ─────────────────────────────────────────
+--- query: 9
+success: true
+sql.contains: from "users"
+plan.contains: include
+
+# ─────────────────────────────────────────
+# Query 10: posts where published = true and authorId = 1
+# ─────────────────────────────────────────
+--- query: 10
+success: true
+sql.contains: where
+params.length: 2
+
+# ─────────────────────────────────────────
+# Query 11: posts limit 10
+# NOTE: LIMIT value is parameterized ($1)
+# ─────────────────────────────────────────
+--- query: 11
+success: true
+sql.contains: limit
+
+# ─────────────────────────────────────────
+# Query 12: posts limit 10 offset 20
+# NOTE: LIMIT and OFFSET values are parameterized ($1, $2)
+# ─────────────────────────────────────────
+--- query: 12
+success: true
+sql.contains: limit
+sql.contains: offset
