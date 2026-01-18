@@ -23,6 +23,8 @@ interface InputPromptProps {
 	selectedCompletion?: string;
 	/** Callback when a completion is accepted (Enter with selection) */
 	onCompletionAccepted?: () => void;
+	/** Function to apply completion to current input (replaces partial word) */
+	applyCompletion?: (currentInput: string, completionText: string) => string;
 }
 
 export function InputPrompt({
@@ -33,6 +35,7 @@ export function InputPrompt({
 	onInputChange,
 	selectedCompletion,
 	onCompletionAccepted,
+	applyCompletion,
 }: InputPromptProps) {
 	const promptSymbol = mode === 'natural' ? '>' : 'sql>';
 	const promptColor = mode === 'natural' ? 'green' : 'yellow';
@@ -75,10 +78,14 @@ export function InputPrompt({
 		(value: string) => {
 			// If a completion is selected, accept it instead of executing
 			if (selectedCompletion) {
-				setHistoryValue(selectedCompletion);
+				// Apply completion: replace partial word with completion text
+				const newValue = applyCompletion
+					? applyCompletion(value, selectedCompletion)
+					: selectedCompletion; // Fallback to old behavior
+				setHistoryValue(newValue);
 				setHistoryKey((k) => k + 1);
-				setCurrentInput(selectedCompletion);
-				onInputChange?.(selectedCompletion);
+				setCurrentInput(newValue);
+				onInputChange?.(newValue);
 				onCompletionAccepted?.();
 				return;
 			}
@@ -96,6 +103,7 @@ export function InputPrompt({
 			selectedCompletion,
 			onCompletionAccepted,
 			onInputChange,
+			applyCompletion,
 		],
 	);
 

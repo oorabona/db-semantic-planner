@@ -48,27 +48,37 @@ function mapColumnType(
 	}
 
 	// Default mappings for manually-defined schemas
+	// Supports both core ColumnType and schema ColumnType
 	switch (type) {
 		case 'string':
 			return 'varchar(255)';
+		case 'text':
+			return 'text';
 		case 'number':
+		case 'integer':
 			return 'integer';
+		case 'bigint':
+			return 'bigint';
+		case 'decimal':
+			return 'decimal';
 		case 'boolean':
 			return 'boolean';
 		case 'date':
 			return 'date';
+		case 'time':
+			return 'time';
 		case 'datetime':
+		case 'timestamp':
 			return 'timestamptz';
 		case 'json':
+		case 'jsonb':
 			return 'jsonb';
 		case 'uuid':
 			return 'uuid';
-		case 'bigint':
-			return 'bigint';
 		default: {
-			// TypeScript exhaustive check
-			const _exhaustive: never = type;
-			throw new Error(`Unknown column type: ${_exhaustive}`);
+			// TypeScript exhaustive check - but allow unknown types through
+			// for range types and other PostgreSQL-specific types
+			return type as ColumnDataType;
 		}
 	}
 }

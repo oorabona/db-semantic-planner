@@ -5,7 +5,8 @@
  * Supports dot commands and natural queries.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { ResolvedSchema } from '@dbsp/schema';
 import {
 	parseAssertionFile,
@@ -42,7 +43,8 @@ export interface BatchResult {
 	type: 'command' | 'query';
 }
 
-interface BatchState {
+/** @internal - Exported for testing */
+export interface BatchState {
 	mode: QueryMode;
 	execEnabled: boolean;
 	schemaName: string | undefined;
@@ -127,13 +129,14 @@ function formatRelations(schema: ResolvedSchema, tableName?: string): string {
 }
 
 /**
- * Process a dot command
+ * Process a dot command (async to support .import)
+ * @internal - Exported for testing
  */
-function processDotCommand(
+export async function processDotCommand(
 	input: string,
 	schema: ResolvedSchema,
 	state: BatchState,
-): { output: string; stateChange?: Partial<BatchState> } {
+): Promise<{ output: string; stateChange?: Partial<BatchState> }> {
 	const parts = input.split(/\s+/);
 	const command = (parts[0] ?? '').toLowerCase();
 	const arg = parts.slice(1).join(' ').trim();
@@ -146,7 +149,8 @@ function processDotCommand(
   .schema <table>   - Show table schema
   .relations [table]- Show relations (optionally for a specific table)
   .use [schema]     - Set/clear PostgreSQL schema for multi-tenant
-  .exec on|off      - Enable/disable query execution (requires --db)
+  .exec [on|off]    - Toggle or set execution mode (requires --db)
+  .import <file>    - Execute SQL file (DDL, seed data)
   .natural          - Switch to natural query mode
   .sql              - Switch to SQL mode
   .help             - Show this help`,
@@ -180,23 +184,32 @@ function processDotCommand(
 				stateChange: { schemaName: arg },
 			};
 
-		case '.exec':
+		case '.exec': {
 			if (arg === 'on') {
 				if (!state.dbConnection) {
 					return { output: '❌ No database connection. Use --db option.' };
 				}
 				return {
-					output: '▶ Execution mode enabled',
+					output: '✓ Execution mode: ON',
 					stateChange: { execEnabled: true },
 				};
 			}
 			if (arg === 'off') {
 				return {
-					output: '◼ Compile-only mode enabled',
+					output: '✓ Execution mode: OFF',
 					stateChange: { execEnabled: false },
 				};
 			}
-			return { output: '❌ Usage: .exec on|off' };
+			// Toggle when no argument provided
+			if (!state.dbConnection) {
+				return { output: '❌ No database connection. Use --db option.' };
+			}
+			const newMode = !state.execEnabled;
+			return {
+				output: `✓ Execution mode: ${newMode ? 'ON' : 'OFF'}`,
+				stateChange: { execEnabled: newMode },
+			};
+		}
 
 		case '.natural':
 			return {
@@ -209,6 +222,35 @@ function processDotCommand(
 				output: 'Switched to SQL mode',
 				stateChange: { mode: 'sql' },
 			};
+
+		case '.import': {
+			// Import and execute a SQL file
+			if (!arg) {
+				return { output: '❌ Usage: .import <file.sql>' };
+			}
+
+			if (!state.dbConnection) {
+				return { output: '❌ .import requires database connection (--db)' };
+			}
+
+			const resolvedPath = resolve(process.cwd(), arg);
+			if (!existsSync(resolvedPath)) {
+				return { output: `❌ File not found: ${arg}` };
+			}
+
+			try {
+				const sqlContent = readFileSync(resolvedPath, 'utf-8');
+				const result = await state.dbConnection.executeRaw(sqlContent, []);
+				const rowInfo =
+					result.rowCount !== undefined
+						? ` (${result.rowCount} rows affected)`
+						: '';
+				return { output: `✅ Imported: ${arg}${rowInfo}` };
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				return { output: `❌ Import failed: ${message}` };
+			}
+		}
 
 		case '.exit':
 		case '.quit':
@@ -448,15 +490,15 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 
 		let result: BatchResult;
 
-		// Process dot commands
+		// Process dot commands (async for .import support)
 		if (effectiveQuery.startsWith('.')) {
-			const cmdResult = processDotCommand(effectiveQuery, schema, state);
+			const cmdResult = await processDotCommand(effectiveQuery, schema, state);
 			if (cmdResult.stateChange) {
 				Object.assign(state, cmdResult.stateChange);
 			}
 			result = {
 				query: effectiveQuery,
-				success: true,
+				success: !cmdResult.output.startsWith('❌'),
 				output: cmdResult.output,
 				type: 'command',
 			};

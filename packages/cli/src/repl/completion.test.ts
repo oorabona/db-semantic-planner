@@ -280,6 +280,41 @@ describe('CompletionProvider', () => {
 			expect(relations).toContain('postAuthor');
 		});
 	});
+
+	describe('applyCompletion', () => {
+		it('should append completion when input ends with space', () => {
+			const result = provider.applyCompletion('users where ', 'active');
+			expect(result).toBe('users where active');
+		});
+
+		it('should replace partial word when not ending with space', () => {
+			const result = provider.applyCompletion('users where act', 'active');
+			expect(result).toBe('users where active');
+		});
+
+		it('should replace single partial word', () => {
+			const result = provider.applyCompletion('us', 'users');
+			expect(result).toBe('users');
+		});
+
+		it('should handle empty input', () => {
+			const result = provider.applyCompletion('', 'users');
+			expect(result).toBe('users');
+		});
+
+		it('should preserve previous words when replacing partial', () => {
+			const result = provider.applyCompletion(
+				'users where active = tr',
+				'true',
+			);
+			expect(result).toBe('users where active = true');
+		});
+
+		it('should handle dot commands', () => {
+			const result = provider.applyCompletion('.tab', '.tables');
+			expect(result).toBe('.tables');
+		});
+	});
 });
 
 describe('formatCompletions', () => {

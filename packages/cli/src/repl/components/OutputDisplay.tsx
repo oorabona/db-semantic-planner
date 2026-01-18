@@ -28,8 +28,9 @@ export function SqlOutput({
 				<Text color="green">{sql}</Text>
 			</Box>
 			{params.length > 0 && (
-				<Text color="gray" dimColor>
-					Parameters: {JSON.stringify(params)}
+				<Text>
+					<Text color="gray">Parameters: </Text>
+					<Text color="cyan">{JSON.stringify(params)}</Text>
 				</Text>
 			)}
 		</Box>
@@ -57,8 +58,9 @@ export function SeparateQueriesOutput({
 						<Text color="green">{q.sql}</Text>
 					</Box>
 					{q.params.length > 0 && (
-						<Text color="gray" dimColor>
-							Parameters: {JSON.stringify(q.params)}
+						<Text>
+							<Text color="gray">Parameters: </Text>
+							<Text color="cyan">{JSON.stringify(q.params)}</Text>
 						</Text>
 					)}
 				</Box>

@@ -11,13 +11,19 @@
 /** Column data types supported by the planner */
 export type ColumnType =
 	| 'string'
+	| 'text'
 	| 'number'
+	| 'integer'
+	| 'bigint'
+	| 'decimal'
 	| 'boolean'
 	| 'date'
+	| 'time'
 	| 'datetime'
+	| 'timestamp'
 	| 'json'
-	| 'uuid'
-	| 'bigint';
+	| 'jsonb'
+	| 'uuid';
 
 // ============================================================================
 // Foreign Key Types

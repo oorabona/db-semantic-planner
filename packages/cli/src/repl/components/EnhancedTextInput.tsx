@@ -267,7 +267,10 @@ export function EnhancedTextInput({
 	return (
 		<Box>
 			{showPlaceholder ? (
-				<Text dimColor>{placeholder}</Text>
+				<>
+					<Text inverse> </Text>
+					<Text dimColor>{placeholder}</Text>
+				</>
 			) : (
 				<>
 					<Text>{beforeCursor}</Text>

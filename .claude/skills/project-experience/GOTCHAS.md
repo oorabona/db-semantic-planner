@@ -693,3 +693,21 @@ replace_content(needle="supportsCycleDetection: false", repl="supportsCycleDetec
 ```
 
 **Token savings:** ~10-15% when using Bash for discovery + Serena for targeted edits vs using Serena for everything.
+
+---
+
+### Multi-task feedback = COMPLEX, not SIMPLE (2026-01-19)
+
+**Symptoms:** User provides multiple feedback items (e.g., 9 tasks) and you classify as SIMPLE or skip workflow entirely.
+
+**Cause:** Assuming "small fixes" = SIMPLE. Even if each fix is small, multiple files + multiple concerns = COMPLEX.
+
+**Solution:**
+- Count the distinct tasks/files affected
+- 3+ files OR 5+ distinct tasks = COMPLEX
+- COMPLEX = mandatory /workflow → /review → /finalize
+- Never skip /review even if "just UI changes"
+
+**Impact if ignored:** Missing tests, lint errors discovered late, no proper quality gate.
+
+**Prevention:** When user gives numbered list of feedback → immediately classify as COMPLEX.
