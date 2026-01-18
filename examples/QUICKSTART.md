@@ -20,6 +20,7 @@ pnpm install
 | `minimal.schema.ts` | Users + Posts | Beginner |
 | `blog.schema.ts` | Authors, Posts, Comments, Tags | Intermediate |
 | `ecommerce.schema.ts` | Products, Categories, Orders | Advanced |
+| `pimdam.schema.ts` | PIM/DAM: Products, Assets, Variants, Localization | Advanced |
 | `scheduling.schema.ts` | Rooms, Bookings, Events (range types) | Advanced |
 
 ---
@@ -39,6 +40,9 @@ pnpm dbsp repl --schema ./examples/blog.schema.ts
 
 # E-commerce schema
 pnpm dbsp repl --schema ./examples/ecommerce.schema.ts
+
+# PIM/DAM schema (Product Information Management / Digital Asset Management)
+pnpm dbsp repl --schema ./examples/pimdam.schema.ts
 
 # Scheduling schema (range types)
 pnpm dbsp repl --schema ./examples/scheduling.schema.ts
@@ -515,7 +519,142 @@ pnpm dbsp repl \
 
 ---
 
-### 2.5 Mode Reference
+### 2.5 PIM/DAM Schema (Product Information Management)
+
+**Tables:** `categories`, `products`, `assets`, `productImages`, `variants`
+
+A real-world Product Information Management / Digital Asset Management schema demonstrating:
+- **Hierarchical categories** (self-referential)
+- **Digital assets** with metadata (images, videos, documents)
+- **Localized content** (product images per locale)
+- **Approval workflow** (pending, approved, rejected status)
+- **Soft deletes** (deletedAt timestamps)
+
+#### Setup
+
+```bash
+# Load DDL schema
+psql -d dbsp_examples -f examples/pimdam.ddl.sql
+
+# Seed sample data (12 categories, 15 products, 20 assets, 25 images, 22 variants)
+psql -d dbsp_examples -f examples/pimdam.seed.sql
+
+# Or use the REPL .import command:
+pnpm dbsp repl --schema ./examples/pimdam.schema.ts --db postgres://localhost/dbsp_examples
+> .import examples/pimdam.ddl.sql
+> .import examples/pimdam.seed.sql
+```
+
+#### Launch REPL
+
+```bash
+pnpm dbsp repl \
+  --schema ./examples/pimdam.schema.ts \
+  --db postgres://localhost/dbsp_examples
+```
+
+#### Try These Queries
+
+```
+> .exec on
+
+# List all product categories (hierarchical)
+> categories
+
+# Find root categories (no parent)
+> categories where parentId = null
+
+# Products with their category
+> products include category
+
+# Active products only
+> products where active = true
+
+# Products with approved images for a locale
+> products include images where status = 'approved' and locale = 'en'
+
+# Products with variants (pricing and inventory)
+> products include variants where stock > 0
+
+# Digital assets by type
+> assets where kind = 'image'
+
+# Find products with main image in French locale
+> productImages where locale = 'fr' and isMain = true include product
+
+# Aggregates: count products per category
+> products count by categoryId
+
+# Aggregates: average price per product
+> variants avg(priceCents) by productId
+
+# Category hierarchy: get children of "Electronics"
+> categories include children where parentId = 1
+```
+
+#### PIM/DAM Use Cases
+
+| Use Case | Query |
+|----------|-------|
+| Products without images | `products where id not in (select productId from productImages)` |
+| Pending image approvals | `productImages where status = 'pending'` |
+| Low stock variants | `variants where stock < 10` |
+| Products by brand | `products where brand = 'Apple'` |
+| Category tree | `categories include children include products` |
+
+---
+
+### 2.6 Importing SQL Files (.import)
+
+The `.import` command executes SQL files directly against the connected database. This is useful for:
+- Loading DDL schemas
+- Seeding data
+- Running migrations
+- Executing arbitrary SQL scripts
+
+#### Usage
+
+```
+> .import <file.sql>
+```
+
+#### Examples
+
+```bash
+# Start REPL with database connection
+pnpm dbsp repl --schema ./examples/pimdam.schema.ts --db postgresql://localhost/mydb
+
+# In REPL:
+> .import examples/pimdam.ddl.sql
+✅ SQL file executed successfully: examples/pimdam.ddl.sql
+   Rows affected: 5
+
+> .import examples/pimdam.seed.sql
+✅ SQL file executed successfully: examples/pimdam.seed.sql
+   Rows affected: 94
+```
+
+#### Workflow: Schema → DDL → Seed → Query
+
+```bash
+# 1. Start REPL with schema and database
+pnpm dbsp repl --schema ./examples/pimdam.schema.ts --db $DATABASE_URL --exec
+
+# 2. Create tables
+> .import examples/pimdam.ddl.sql
+
+# 3. Load sample data
+> .import examples/pimdam.seed.sql
+
+# 4. Query your data
+> products include variants include images
+```
+
+> **Note:** `.import` requires a database connection (`--db`). The file path is relative to your current working directory.
+
+---
+
+### 2.7 Mode Reference
 
 #### Input Modes
 
@@ -632,7 +771,7 @@ console.log(dump.sql);          // SELECT ... FROM "tenant_acme"."users"
 
 This pattern is useful for multi-tenant SaaS applications where each tenant has isolated data.
 
-### 2.6 Status Indicator
+### 2.8 Status Indicator
 
 The REPL header shows current settings:
 
@@ -653,7 +792,164 @@ The REPL header shows current settings:
 
 ---
 
-## 3. Generate Kysely Types
+## 3. Generate DDL from Schema
+
+Generate SQL DDL (CREATE TABLE statements) from your TypeScript schema definition. This is useful for:
+- Creating database tables from your schema
+- Generating migration scripts
+- Documentation and schema sharing
+
+### Basic Usage
+
+```bash
+# Generate DDL to stdout
+pnpm dbsp generate ddl --schema ./examples/blog.schema.ts
+
+# Generate DDL to file
+pnpm dbsp generate ddl --schema ./examples/blog.schema.ts --output ./schema.ddl.sql
+
+# Specify dialect (default: postgresql)
+pnpm dbsp generate ddl --schema ./examples/pimdam.schema.ts --dialect postgresql
+```
+
+### Supported Dialects
+
+| Dialect | Flag | Notes |
+|---------|------|-------|
+| PostgreSQL | `--dialect postgresql` (default) | Full feature support |
+| MySQL | `--dialect mysql` | Basic support |
+| SQLite | `--dialect sqlite` | Basic support |
+| DuckDB | `--dialect duckdb` | Analytical queries |
+| MS SQL | `--dialect mssql` | Basic support |
+
+### Example Output (PostgreSQL)
+
+```sql
+-- Generated from: ./examples/blog.schema.ts
+-- Dialect: postgresql
+
+CREATE TABLE "authors" (
+  "id" SERIAL PRIMARY KEY,
+  "name" VARCHAR(255) NOT NULL,
+  "email" VARCHAR(255) NOT NULL UNIQUE,
+  "bio" TEXT,
+  "created_at" TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE "posts" (
+  "id" SERIAL PRIMARY KEY,
+  "title" VARCHAR(500) NOT NULL,
+  "slug" VARCHAR(255) NOT NULL UNIQUE,
+  "content" TEXT,
+  "published" BOOLEAN DEFAULT FALSE,
+  "author_id" INTEGER NOT NULL REFERENCES "authors"("id"),
+  "created_at" TIMESTAMP DEFAULT NOW(),
+  "updated_at" TIMESTAMP
+);
+
+-- ... more tables
+```
+
+### Workflow: Schema → DDL → Database
+
+```bash
+# 1. Generate DDL from schema
+pnpm dbsp generate ddl --schema ./examples/pimdam.schema.ts --output ./pimdam.ddl.sql
+
+# 2. Apply to database
+psql $DATABASE_URL -f ./pimdam.ddl.sql
+
+# 3. (Optional) Load seed data
+psql $DATABASE_URL -f ./examples/pimdam.seed.sql
+```
+
+Or use the REPL for interactive setup:
+
+```bash
+# Start REPL and use .import
+pnpm dbsp repl --schema ./examples/pimdam.schema.ts --db $DATABASE_URL --exec
+> .import ./pimdam.ddl.sql
+> .import ./examples/pimdam.seed.sql
+```
+
+---
+
+## 4. Introspect Database Schema
+
+Reverse-engineer a TypeScript schema definition from an existing database. This is useful for:
+- Onboarding existing databases to db-semantic-planner
+- Generating initial schema from legacy databases
+- Keeping schema in sync with database changes
+
+### Basic Usage
+
+```bash
+# Introspect and output to stdout
+pnpm dbsp introspect --db postgresql://localhost/mydb
+
+# Introspect and save to file
+pnpm dbsp introspect --db postgresql://localhost/mydb --output ./schema.ts
+
+# Introspect specific PostgreSQL schema
+pnpm dbsp introspect --db postgresql://localhost/mydb --schema-name public
+```
+
+### Example Output
+
+```typescript
+// Generated by dbsp introspect
+// Source: postgresql://localhost/mydb
+// Schema: public
+// Generated at: 2025-01-18T10:30:00Z
+
+import { defineSchema } from '@dbsp/schema';
+
+export default defineSchema({
+  authors: {
+    id: { type: 'integer', primaryKey: true },
+    name: { type: 'string', nullable: false },
+    email: { type: 'string', nullable: false },
+    bio: { type: 'string', nullable: true },
+    createdAt: { type: 'timestamp', defaultNow: true },
+  },
+  posts: {
+    id: { type: 'integer', primaryKey: true },
+    title: { type: 'string', nullable: false },
+    slug: { type: 'string', nullable: false },
+    content: { type: 'string', nullable: true },
+    published: { type: 'boolean', default: false },
+    authorId: { type: 'integer', nullable: false, references: { table: 'authors' } },
+    createdAt: { type: 'timestamp', defaultNow: true },
+    updatedAt: { type: 'timestamp', nullable: true },
+  },
+  // ... more tables
+});
+```
+
+### Workflow: Database → Schema → Types
+
+```bash
+# 1. Introspect existing database
+pnpm dbsp introspect --db $DATABASE_URL --output ./src/schema.ts
+
+# 2. Generate Kysely types from schema
+pnpm dbsp generate kysely --schema ./src/schema.ts --output ./src/db.types.ts
+
+# 3. Use in your application
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--db <url>` | Database connection URL (required) |
+| `--output <file>` | Output file path (default: stdout) |
+| `--schema-name <name>` | PostgreSQL schema to introspect (default: public) |
+| `--include-views` | Include database views (default: false) |
+
+---
+
+## 5. Generate Kysely Types
 
 Generate TypeScript types for use with Kysely.
 
@@ -702,7 +998,7 @@ export interface DB {
 
 ---
 
-## 4. Generate Manifest (JSON)
+## 6. Generate Manifest (JSON)
 
 Generate a JSON manifest of your schema (useful for tooling).
 
@@ -713,7 +1009,7 @@ pnpm dbsp generate manifest --schema ./examples/blog.schema.ts --output ./schema
 
 ---
 
-## 5. Verify Against Database (Optional)
+## 7. Verify Against Database (Optional)
 
 Compare your schema against a real PostgreSQL database.
 
@@ -767,7 +1063,7 @@ Column mismatches in 'posts':
 
 ---
 
-## 6. Use in Your Application
+## 8. Use in Your Application
 
 Once you've generated types, use them with the ORM:
 

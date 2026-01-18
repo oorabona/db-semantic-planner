@@ -4,6 +4,8 @@
  * Interactive REPL for exploring schema and executing queries.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Box, render, Text, useApp, useInput } from 'ink';
 import React, {
 	useCallback,
@@ -788,6 +790,123 @@ function ReplApp({ config }: ReplAppProps) {
 						}
 						setQueryResult(null);
 						setExecutionResult(null);
+						setShowHelp(false);
+						return;
+					}
+
+					case '.import': {
+						// Import and execute a SQL file
+						const filePath = args[0];
+
+						if (!filePath) {
+							setOutput(
+								<Box flexDirection="column" marginY={1}>
+									<Text color="red">❌ Missing file path</Text>
+									<Text color="gray">Usage: .import &lt;file.sql&gt;</Text>
+									<Text color="gray">
+										Example: .import examples/blog.seed.sql
+									</Text>
+								</Box>,
+							);
+							setQueryResult(null);
+							setShowHelp(false);
+							return;
+						}
+
+						if (!connected || !dbConnectionRef.current) {
+							setOutput(
+								<Box flexDirection="column" marginY={1}>
+									<Text color="red">❌ No database connected</Text>
+									<Text color="gray">
+										.import requires a database connection.
+									</Text>
+									<Text color="gray">Start REPL with --db option:</Text>
+									<Text color="gray">
+										dbsp repl --schema schema.ts --db postgres://localhost/mydb
+									</Text>
+								</Box>,
+							);
+							setQueryResult(null);
+							setShowHelp(false);
+							return;
+						}
+
+						// Resolve file path
+						const resolvedPath = resolve(process.cwd(), filePath);
+
+						if (!existsSync(resolvedPath)) {
+							setOutput(
+								<Box flexDirection="column" marginY={1}>
+									<Text color="red">❌ File not found: {filePath}</Text>
+									<Text color="gray">
+										Make sure the path is correct (relative to current
+										directory).
+									</Text>
+								</Box>,
+							);
+							setQueryResult(null);
+							setShowHelp(false);
+							return;
+						}
+
+						// Read file content
+						let sqlContent: string;
+						try {
+							sqlContent = readFileSync(resolvedPath, 'utf-8');
+						} catch (err) {
+							const message = err instanceof Error ? err.message : String(err);
+							setOutput(
+								<Box flexDirection="column" marginY={1}>
+									<Text color="red">❌ Cannot read file: {filePath}</Text>
+									<Text color="red">{message}</Text>
+								</Box>,
+							);
+							setQueryResult(null);
+							setShowHelp(false);
+							return;
+						}
+
+						// Show loading state
+						setOutput(
+							<Box flexDirection="column" marginY={1}>
+								<Text color="cyan">
+									📂 Importing: <Text bold>{filePath}</Text>
+								</Text>
+								<Text color="gray">Executing SQL...</Text>
+							</Box>,
+						);
+
+						// Execute async (fire-and-forget pattern like executeOnDb)
+						const db = dbConnectionRef.current;
+						db.executeRaw(sqlContent, [])
+							.then((result) => {
+								setOutput(
+									<Box flexDirection="column" marginY={1}>
+										<Text color="green">
+											✅ Import complete: <Text bold>{filePath}</Text>
+										</Text>
+										{result.rowCount !== undefined && (
+											<Text color="gray">Rows affected: {result.rowCount}</Text>
+										)}
+										{schemaName && (
+											<Text color="gray">Schema: {schemaName}</Text>
+										)}
+									</Box>,
+								);
+								setExecutionResult(result);
+							})
+							.catch((err: unknown) => {
+								const message =
+									err instanceof Error ? err.message : String(err);
+								setOutput(
+									<Box flexDirection="column" marginY={1}>
+										<Text color="red">❌ Import failed: {filePath}</Text>
+										<Text color="red">{message}</Text>
+									</Box>,
+								);
+							});
+
+						setQueryResult(null);
 						setShowHelp(false);
 						return;
 					}
