@@ -1,0 +1,33 @@
+# Test file for minimal schema
+# These are the queries from QUICKSTART.md
+
+# List all tables
+.tables
+
+# Show schema for users
+.schema users
+
+# Show schema for posts
+.schema posts
+
+# Show relations
+.relations posts
+
+# Simple queries
+users
+posts
+
+# With filter
+users where id = 1
+posts where published = true
+
+# With relation include
+posts include author
+users include posts
+
+# Multiple conditions
+posts where published = true and authorId = 1
+
+# With limit/offset
+posts limit 10
+posts limit 10 offset 20

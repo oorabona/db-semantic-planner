@@ -1,0 +1,25 @@
+# Test file for blog schema
+# Aggregate queries from QUICKSTART.md
+
+# Basic commands
+.tables
+.schema posts
+.relations
+
+# Simple queries
+posts
+authors
+comments
+
+# Filtered queries
+posts where published = true
+posts include author
+
+# Aggregate queries (CLI-016)
+posts select count(*)
+posts select count(*) as total_posts
+posts select sum(views) as total_views avg(views) as average
+posts select count(*) as post_count group by authorId
+posts select min(amount) as min_order max(amount) as max_order
+posts select distinct
+posts select count(distinct authorId) as unique_authors
