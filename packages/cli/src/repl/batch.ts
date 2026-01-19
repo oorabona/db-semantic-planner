@@ -431,6 +431,7 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 	if (databaseUrl) {
 		try {
 			state.dbConnection = await createDbConnection(databaseUrl);
+			state.execEnabled = true; // Enable execution mode when DB is connected
 			console.error(`✅ Connected to database`);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
