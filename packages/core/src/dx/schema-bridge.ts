@@ -53,6 +53,7 @@ export interface GeneratedColumn {
 	readonly primaryKey?: boolean;
 	readonly nullable?: boolean;
 	readonly unique?: boolean;
+	readonly autoIncrement?: boolean;
 	readonly default?: string;
 	readonly references?: {
 		readonly table: string;
@@ -284,6 +285,9 @@ function buildTableIR(
 		};
 		if (colDef.unique !== undefined) {
 			(col as { unique?: boolean }).unique = colDef.unique;
+		}
+		if (colDef.autoIncrement !== undefined) {
+			(col as { autoIncrement?: boolean }).autoIncrement = colDef.autoIncrement;
 		}
 		columns.push(col);
 
@@ -643,14 +647,41 @@ const ColumnDefinitionSchema = v.object({
 	primaryKey: v.optional(v.boolean()),
 	nullable: v.optional(v.boolean()),
 	unique: v.optional(v.boolean()),
+	autoIncrement: v.optional(v.boolean()),
 	default: v.optional(v.string()),
 	references: v.optional(ForeignKeyReferenceSchema),
 });
 
 /**
- * Table definition schema
+ * Table definition schema - flat format (column name -> column def).
  */
-const TableDefinitionSchema = v.record(v.string(), ColumnDefinitionSchema);
+const FlatTableDefinitionSchema = v.record(v.string(), ColumnDefinitionSchema);
+
+/**
+ * Table definition with config - supports composite primary keys.
+ * Format: { columns: { col1: ColumnDef }, primaryKey: ['col1', 'col2'] }
+ */
+const TableDefWithConfigSchema = v.object({
+	columns: FlatTableDefinitionSchema,
+	primaryKey: v.array(v.string()),
+	indexes: v.optional(
+		v.array(
+			v.object({
+				columns: v.array(v.string()),
+				unique: v.optional(v.boolean()),
+				name: v.optional(v.string()),
+			}),
+		),
+	),
+});
+
+/**
+ * Table definition schema - accepts both flat and with-config formats.
+ */
+const TableDefinitionSchema = v.union([
+	TableDefWithConfigSchema,
+	FlatTableDefinitionSchema,
+]);
 
 /**
  * Tables definition schema
@@ -804,6 +835,9 @@ function convertColumn(
 	if (col.unique !== undefined) {
 		(result as { unique?: boolean }).unique = col.unique;
 	}
+	if (col.autoIncrement !== undefined) {
+		(result as { autoIncrement?: boolean }).autoIncrement = col.autoIncrement;
+	}
 	if (col.default !== undefined) {
 		(result as { default?: string }).default = col.default;
 	}
@@ -923,12 +957,26 @@ export function resolvedSchemaToGeneratedSchema(
 
 	const validated = parseResult.output;
 
-	// Convert tables
+	// Convert tables (handles both flat and with-config formats)
 	const tables: Record<string, GeneratedTable> = {};
 	for (const [tableName, tableDef] of Object.entries(validated.tables)) {
 		const convertedTable: Record<string, GeneratedColumn> = {};
-		for (const [colName, colDef] of Object.entries(tableDef)) {
-			convertedTable[colName] = convertColumn(colDef);
+
+		// Check if this is the with-config format (has 'columns' property)
+		const isWithConfig =
+			tableDef !== null &&
+			typeof tableDef === 'object' &&
+			'columns' in tableDef &&
+			typeof tableDef.columns === 'object';
+
+		const columns = isWithConfig
+			? (tableDef as { columns: Record<string, unknown> }).columns
+			: (tableDef as Record<string, unknown>);
+
+		for (const [colName, colDef] of Object.entries(columns)) {
+			convertedTable[colName] = convertColumn(
+				colDef as v.InferOutput<typeof ColumnDefinitionSchema>,
+			);
 		}
 		tables[tableName] = convertedTable;
 	}
