@@ -36,10 +36,12 @@ const testSchema: ResolvedSchema = {
 		},
 	},
 	hints: {},
+	indexes: {},
 	conventions: {
 		fkPattern: '{singular}Id',
 		pluralize: true,
 		timestamps: ['createdAt', 'updatedAt'],
+		fkAutoIndex: true,
 	},
 };
 
@@ -85,10 +87,12 @@ const nestedSchema: ResolvedSchema = {
 		},
 	},
 	hints: {},
+	indexes: {},
 	conventions: {
 		fkPattern: '{singular}Id',
 		pluralize: true,
 		timestamps: ['createdAt', 'updatedAt'],
+		fkAutoIndex: true,
 	},
 };
 
@@ -371,10 +375,12 @@ describe('executeQuery - aggregates (CLI-016)', () => {
 				},
 			},
 			hints: {},
+			indexes: {},
 			conventions: {
 				fkPattern: '{singular}Id',
 				pluralize: true,
 				timestamps: ['createdAt', 'updatedAt'],
+				fkAutoIndex: true,
 			},
 		};
 

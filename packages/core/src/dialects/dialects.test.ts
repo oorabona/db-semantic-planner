@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+	assertTypeSupported,
 	DUCKDB_CAPABILITIES,
 	extendDialect,
 	getAvailableDialects,
@@ -16,6 +17,7 @@ import {
 	POSTGRESQL_CAPABILITIES,
 	registerDialect,
 	SQLITE_CAPABILITIES,
+	UnhandledTypeInDialect,
 	UnknownDialectError,
 } from './index.js';
 
@@ -298,6 +300,150 @@ describe('Dialect Capabilities', () => {
 			const sqliteFeatures = checkFeatures('sqlite');
 			expect(sqliteFeatures.canUseReturning).toBe(true);
 			expect(sqliteFeatures.canUseMultiTenant).toBe(false);
+		});
+	});
+
+	// ========================================================================
+	// Dialect Type Safety (DIALECT-TYPE-SAFETY story)
+	// ========================================================================
+
+	describe('UnhandledTypeInDialect', () => {
+		it('creates error with type and dialect info', () => {
+			const error = new UnhandledTypeInDialect('daterange', 'mysql');
+
+			expect(error).toBeInstanceOf(Error);
+			expect(error.name).toBe('UnhandledTypeInDialect');
+			expect(error.columnType).toBe('daterange');
+			expect(error.dialectName).toBe('mysql');
+			expect(error.message).toContain("Type 'daterange' is not supported");
+			expect(error.message).toContain("dialect 'mysql'");
+		});
+
+		it('includes hint in message when provided', () => {
+			const error = new UnhandledTypeInDialect(
+				'daterange',
+				'mysql',
+				'Use separate start/end columns instead.',
+			);
+
+			expect(error.hint).toBe('Use separate start/end columns instead.');
+			expect(error.message).toContain('Hint:');
+			expect(error.message).toContain('Use separate start/end columns');
+		});
+	});
+
+	describe('assertTypeSupported', () => {
+		describe('PostgreSQL (supports all types)', () => {
+			const caps = POSTGRESQL_CAPABILITIES;
+
+			it('allows range types on PostgreSQL', () => {
+				expect(() =>
+					assertTypeSupported('daterange', 'postgresql', caps),
+				).not.toThrow();
+				expect(() =>
+					assertTypeSupported('tsrange', 'postgresql', caps),
+				).not.toThrow();
+				expect(() =>
+					assertTypeSupported('int4range', 'postgresql', caps),
+				).not.toThrow();
+			});
+
+			it('allows jsonb on PostgreSQL', () => {
+				expect(() =>
+					assertTypeSupported('jsonb', 'postgresql', caps),
+				).not.toThrow();
+			});
+
+			it('allows common types on PostgreSQL', () => {
+				expect(() =>
+					assertTypeSupported('string', 'postgresql', caps),
+				).not.toThrow();
+				expect(() =>
+					assertTypeSupported('integer', 'postgresql', caps),
+				).not.toThrow();
+				expect(() =>
+					assertTypeSupported('uuid', 'postgresql', caps),
+				).not.toThrow();
+			});
+		});
+
+		describe('MySQL (no range types, has json)', () => {
+			const caps = MYSQL_CAPABILITIES;
+
+			it('throws for range types on MySQL', () => {
+				expect(() => assertTypeSupported('daterange', 'mysql', caps)).toThrow(
+					UnhandledTypeInDialect,
+				);
+				expect(() => assertTypeSupported('tsrange', 'mysql', caps)).toThrow(
+					UnhandledTypeInDialect,
+				);
+				expect(() => assertTypeSupported('int4range', 'mysql', caps)).toThrow(
+					UnhandledTypeInDialect,
+				);
+			});
+
+			it('throws for jsonb on MySQL', () => {
+				expect(() => assertTypeSupported('jsonb', 'mysql', caps)).toThrow(
+					UnhandledTypeInDialect,
+				);
+			});
+
+			it('allows json on MySQL', () => {
+				expect(() => assertTypeSupported('json', 'mysql', caps)).not.toThrow();
+			});
+
+			it('allows common types on MySQL', () => {
+				expect(() =>
+					assertTypeSupported('string', 'mysql', caps),
+				).not.toThrow();
+				expect(() =>
+					assertTypeSupported('integer', 'mysql', caps),
+				).not.toThrow();
+			});
+		});
+
+		describe('SQLite (no range types)', () => {
+			const caps = SQLITE_CAPABILITIES;
+
+			it('throws for range types on SQLite', () => {
+				expect(() => assertTypeSupported('daterange', 'sqlite', caps)).toThrow(
+					UnhandledTypeInDialect,
+				);
+				expect(() => assertTypeSupported('numrange', 'sqlite', caps)).toThrow(
+					UnhandledTypeInDialect,
+				);
+			});
+
+			it('throws for jsonb on SQLite', () => {
+				expect(() => assertTypeSupported('jsonb', 'sqlite', caps)).toThrow(
+					UnhandledTypeInDialect,
+				);
+			});
+		});
+
+		describe('error message quality', () => {
+			it('provides helpful hint for range types', () => {
+				try {
+					assertTypeSupported('daterange', 'mysql', MYSQL_CAPABILITIES);
+					expect.fail('Should have thrown');
+				} catch (e) {
+					expect(e).toBeInstanceOf(UnhandledTypeInDialect);
+					const error = e as UnhandledTypeInDialect;
+					expect(error.hint).toContain('PostgreSQL-specific');
+					expect(error.hint).toContain('separate start/end columns');
+				}
+			});
+
+			it('provides helpful hint for jsonb', () => {
+				try {
+					assertTypeSupported('jsonb', 'mysql', MYSQL_CAPABILITIES);
+					expect.fail('Should have thrown');
+				} catch (e) {
+					expect(e).toBeInstanceOf(UnhandledTypeInDialect);
+					const error = e as UnhandledTypeInDialect;
+					expect(error.hint).toContain("'json' type");
+				}
+			});
 		});
 	});
 });

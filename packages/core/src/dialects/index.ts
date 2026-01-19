@@ -10,6 +10,91 @@
  * - Compiler uses capabilities to generate dialect-appropriate SQL
  */
 
+import type { ColumnType } from '../model-ir.js';
+
+// ============================================================================
+// Dialect Names
+// ============================================================================
+
+/** Known dialect identifiers */
+export type DialectName =
+	| 'postgresql'
+	| 'mysql'
+	| 'sqlite'
+	| 'duckdb'
+	| 'mssql';
+
+// ============================================================================
+// Dialect-Specific Column Types (Compile-Time Validation)
+// ============================================================================
+
+/** PostgreSQL-only column types (range types, jsonb) */
+export type PostgresOnlyColumnType =
+	| 'daterange'
+	| 'tsrange'
+	| 'tstzrange'
+	| 'int4range'
+	| 'int8range'
+	| 'numrange'
+	| 'jsonb';
+
+/** Column types common to all dialects */
+export type CommonColumnType = Exclude<ColumnType, PostgresOnlyColumnType>;
+
+/** Column types supported by PostgreSQL (all types) */
+export type PostgresColumnType = ColumnType;
+
+/** Column types supported by MySQL */
+export type MySQLColumnType = CommonColumnType | 'json';
+
+/** Column types supported by SQLite */
+export type SQLiteColumnType = CommonColumnType | 'json';
+
+/** Column types supported by DuckDB */
+export type DuckDBColumnType = CommonColumnType | 'json';
+
+/** Column types supported by MSSQL */
+export type MSSQLColumnType = CommonColumnType | 'json';
+
+/**
+ * Maps a dialect name to its supported column types.
+ *
+ * Use this for compile-time validation of column types:
+ * ```typescript
+ * function createColumn<D extends DialectName>(
+ *   dialect: D,
+ *   type: SupportedColumnTypes<D>
+ * ) { ... }
+ *
+ * createColumn('postgresql', 'daterange'); // OK
+ * createColumn('mysql', 'daterange'); // Type error!
+ * ```
+ */
+export type SupportedColumnTypes<D extends DialectName> = D extends 'postgresql'
+	? PostgresColumnType
+	: D extends 'mysql'
+		? MySQLColumnType
+		: D extends 'sqlite'
+			? SQLiteColumnType
+			: D extends 'duckdb'
+				? DuckDBColumnType
+				: D extends 'mssql'
+					? MSSQLColumnType
+					: CommonColumnType;
+
+/**
+ * Checks if a column type is supported by a dialect.
+ * Returns `true` if supported, `false` otherwise.
+ */
+export type IsTypeSupported<
+	T extends ColumnType,
+	D extends DialectName,
+> = T extends SupportedColumnTypes<D> ? true : false;
+
+// ============================================================================
+// Dialect Capabilities
+// ============================================================================
+
 /**
  * SQL dialect capabilities that affect query compilation.
  */
@@ -389,4 +474,82 @@ export function extendDialect(
 	overrides: Partial<DialectCapabilities> & { name: string },
 ): DialectCapabilities {
 	return { ...base, ...overrides };
+}
+
+// ============================================================================
+// Dialect Type Errors
+// ============================================================================
+
+/**
+ * Error thrown when a column type is not supported by the target dialect.
+ *
+ * @example
+ * ```typescript
+ * // PostgreSQL range types are not supported in MySQL
+ * throw new UnhandledTypeInDialect('daterange', 'mysql', 'Range types are PostgreSQL-specific');
+ * ```
+ */
+export class UnhandledTypeInDialect extends Error {
+	constructor(
+		/** The column type that is not supported */
+		public readonly columnType: ColumnType | string,
+		/** The dialect that doesn't support the type */
+		public readonly dialectName: string,
+		/** Optional hint for the user */
+		public readonly hint?: string,
+	) {
+		const hintSuffix = hint ? ` Hint: ${hint}` : '';
+		super(
+			`Type '${columnType}' is not supported by dialect '${dialectName}'.${hintSuffix}`,
+		);
+		this.name = 'UnhandledTypeInDialect';
+	}
+}
+
+/**
+ * Check if a column type is supported by a dialect at runtime.
+ * Returns true if supported, throws UnhandledTypeInDialect if not.
+ *
+ * @param type - The column type to check
+ * @param dialectName - The target dialect
+ * @param capabilities - The dialect capabilities
+ * @throws UnhandledTypeInDialect if the type is not supported
+ *
+ * @example
+ * ```typescript
+ * assertTypeSupported('daterange', 'postgresql', pgCaps); // OK
+ * assertTypeSupported('daterange', 'mysql', mysqlCaps); // throws!
+ * ```
+ */
+export function assertTypeSupported(
+	type: ColumnType,
+	dialectName: string,
+	capabilities: DialectCapabilities,
+): void {
+	// Range types require supportsRangeTypes
+	const rangeTypes: ColumnType[] = [
+		'daterange',
+		'tsrange',
+		'tstzrange',
+		'int4range',
+		'int8range',
+		'numrange',
+	];
+
+	if (rangeTypes.includes(type) && !capabilities.supportsRangeTypes) {
+		throw new UnhandledTypeInDialect(
+			type,
+			dialectName,
+			'Range types are PostgreSQL-specific. Consider using separate start/end columns instead.',
+		);
+	}
+
+	// JSONB specifically requires PostgreSQL
+	if (type === 'jsonb' && dialectName !== 'postgresql') {
+		throw new UnhandledTypeInDialect(
+			type,
+			dialectName,
+			"Use 'json' type instead, which is supported by most dialects.",
+		);
+	}
 }
