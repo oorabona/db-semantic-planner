@@ -171,6 +171,7 @@ function typedSchemaToModelIR(schema: TypedSchema): ModelIR {
 			fkPattern: '{singular}Id',
 			pluralize: true,
 			timestamps: [],
+			fkAutoIndex: true,
 		},
 	};
 

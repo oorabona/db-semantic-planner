@@ -75,9 +75,23 @@ function mapColumnType(
 			return 'jsonb';
 		case 'uuid':
 			return 'uuid';
+		// PostgreSQL-specific range types
+		// These will fail on non-PostgreSQL dialects at runtime
+		case 'daterange':
+			return 'daterange' as ColumnDataType;
+		case 'tsrange':
+			return 'tsrange' as ColumnDataType;
+		case 'tstzrange':
+			return 'tstzrange' as ColumnDataType;
+		case 'int4range':
+			return 'int4range' as ColumnDataType;
+		case 'int8range':
+			return 'int8range' as ColumnDataType;
+		case 'numrange':
+			return 'numrange' as ColumnDataType;
 		default: {
 			// TypeScript exhaustive check - but allow unknown types through
-			// for range types and other PostgreSQL-specific types
+			// for future types
 			return type as ColumnDataType;
 		}
 	}
@@ -122,7 +136,11 @@ export function generateDDL(
 	options: GenerateDDLOptions = {},
 ): string[] {
 	const statements: string[] = [];
-	const { includeDropStatements = false, schemaName } = options;
+	const {
+		includeDropStatements = false,
+		schemaName,
+		fkAutoIndex = true,
+	} = options;
 
 	// Get all tables (order doesn't matter for two-pass approach)
 	const tables = Array.from(schema.tables.values());
@@ -162,9 +180,43 @@ export function generateDDL(
 	// PASS 3: CREATE INDEX statements
 	// ========================================================================
 	for (const table of tables) {
+		// Collect explicit index column names to avoid duplicates
+		const explicitIndexColumns = new Set(
+			table.indexes.flatMap((idx) =>
+				idx.columns.length === 1 ? idx.columns : [],
+			),
+		);
+
+		// Generate explicit indexes
 		for (const idx of table.indexes) {
 			const indexDDL = generateIndexDDL(db, table.name, idx, schemaName);
 			statements.push(indexDDL);
+		}
+
+		// Auto-generate indexes for FK columns if fkAutoIndex is enabled
+		if (fkAutoIndex) {
+			for (const fk of table.foreignKeys) {
+				// Only auto-index single-column FKs that don't have explicit indexes
+				const fkCol = fk.columns[0];
+				if (
+					fk.columns.length === 1 &&
+					fkCol &&
+					!explicitIndexColumns.has(fkCol)
+				) {
+					const autoIdx: IndexIR = {
+						name: `idx_${table.name}_${fkCol}`,
+						columns: [fkCol],
+						unique: false,
+					};
+					const indexDDL = generateIndexDDL(
+						db,
+						table.name,
+						autoIdx,
+						schemaName,
+					);
+					statements.push(indexDDL);
+				}
+			}
 		}
 	}
 
@@ -179,6 +231,12 @@ export interface GenerateDDLOptions {
 	readonly includeDropStatements?: boolean | undefined;
 	/** Database schema name (e.g., 'public', 'tenant_123') */
 	readonly schemaName?: string | undefined;
+	/**
+	 * Automatically create indexes on foreign key columns.
+	 * FK columns are frequently used in JOINs, so indexing is a best practice.
+	 * @default true
+	 */
+	readonly fkAutoIndex?: boolean | undefined;
 }
 
 /**

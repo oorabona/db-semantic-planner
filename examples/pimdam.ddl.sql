@@ -1,115 +1,41 @@
--- PIM/DAM Schema DDL
---
--- Product Information Management / Digital Asset Management schema.
--- Run with: psql -d your_db -f examples/pimdam.ddl.sql
---
--- Or use the CLI:
---   pnpm dbsp generate ddl --schema ./examples/pimdam.schema.ts
+create table "categories" ("id" integer not null primary key, "name" varchar(255) not null, "slug" varchar(255) not null, "description" text, "parent_id" integer, "position" integer default '0' not null, "active" boolean default 'true' not null, "created_at" timestamptz default now() not null);
 
--- Drop tables in reverse dependency order
-DROP TABLE IF EXISTS variants CASCADE;
-DROP TABLE IF EXISTS product_images CASCADE;
-DROP TABLE IF EXISTS assets CASCADE;
-DROP TABLE IF EXISTS products CASCADE;
-DROP TABLE IF EXISTS categories CASCADE;
+create table "products" ("id" integer not null primary key, "sku" varchar(255) not null unique, "title" varchar(255) not null, "description" text, "category_id" integer not null, "brand" varchar(255), "active" boolean default 'true' not null, "created_at" timestamptz default now() not null, "updated_at" timestamptz, "deleted_at" timestamptz);
 
--- Categories: hierarchical product taxonomy
-CREATE TABLE categories (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    slug VARCHAR(255) NOT NULL,
-    description TEXT,
-    parent_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
-    position INTEGER DEFAULT 0,
-    active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT NOW()
-);
+create table "assets" ("id" integer not null primary key, "kind" varchar(255) not null, "filename" varchar(255) not null, "sha256" varchar(255) not null, "mime" varchar(255) not null, "width" integer, "height" integer, "size_bytes" integer not null, "storage_key" varchar(255) not null, "alt_text" varchar(255), "expires_at" timestamptz, "created_at" timestamptz default now() not null);
 
-CREATE INDEX idx_categories_parent ON categories(parent_id);
-CREATE INDEX idx_categories_slug ON categories(slug);
+create table "product_images" ("id" integer not null primary key, "product_id" integer not null, "asset_id" integer not null, "locale" varchar(255) not null, "status" varchar(255) default '''pending''' not null, "is_main" boolean default 'false' not null, "position" integer default '0' not null, "rejected_reason" varchar(255), "approved_by" varchar(255), "approved_at" timestamptz, "created_at" timestamptz default now() not null, "deleted_at" timestamptz);
 
--- Products: main product catalog
-CREATE TABLE products (
-    id SERIAL PRIMARY KEY,
-    sku VARCHAR(100) NOT NULL UNIQUE,
-    title VARCHAR(500) NOT NULL,
-    description TEXT,
-    category_id INTEGER NOT NULL REFERENCES categories(id),
-    brand VARCHAR(255),
-    active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP,
-    deleted_at TIMESTAMP
-);
+create table "variants" ("id" integer not null primary key, "product_id" integer not null, "sku" varchar(255) not null unique, "name" varchar(255) not null, "price_cents" integer not null, "compare_at_price_cents" integer, "cost_cents" integer, "stock" integer default '0' not null, "weight_grams" integer, "barcode" varchar(255), "active" boolean default 'true' not null, "created_at" timestamptz default now() not null);
 
-CREATE INDEX idx_products_category ON products(category_id);
-CREATE INDEX idx_products_sku ON products(sku);
-CREATE INDEX idx_products_active ON products(active) WHERE active = TRUE;
+alter table "categories" add constraint "fk_categories_parent_id" foreign key ("parent_id") references "categories" ("id") on delete set null;
 
--- Assets: Digital Asset Management
-CREATE TABLE assets (
-    id SERIAL PRIMARY KEY,
-    kind VARCHAR(50) NOT NULL, -- 'image', 'video', 'document'
-    filename VARCHAR(500) NOT NULL,
-    sha256 VARCHAR(64) NOT NULL,
-    mime VARCHAR(100) NOT NULL,
-    width INTEGER,
-    height INTEGER,
-    size_bytes INTEGER NOT NULL,
-    storage_key VARCHAR(500) NOT NULL,
-    alt_text VARCHAR(500),
-    expires_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT NOW()
-);
+alter table "products" add constraint "fk_products_category_id" foreign key ("category_id") references "categories" ("id");
 
-CREATE INDEX idx_assets_kind ON assets(kind);
-CREATE INDEX idx_assets_sha256 ON assets(sha256);
+alter table "product_images" add constraint "fk_product_images_product_id" foreign key ("product_id") references "products" ("id") on delete cascade;
 
--- Product Images: junction table with localization and workflow
-CREATE TABLE product_images (
-    id SERIAL PRIMARY KEY,
-    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-    asset_id INTEGER NOT NULL REFERENCES assets(id),
-    locale VARCHAR(10) NOT NULL, -- 'en', 'fr', 'de', etc.
-    status VARCHAR(20) DEFAULT 'pending', -- 'pending', 'approved', 'rejected'
-    is_main BOOLEAN DEFAULT FALSE,
-    position INTEGER DEFAULT 0,
-    rejected_reason TEXT,
-    approved_by VARCHAR(255),
-    approved_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT NOW(),
-    deleted_at TIMESTAMP
-);
+alter table "product_images" add constraint "fk_product_images_asset_id" foreign key ("asset_id") references "assets" ("id");
 
-CREATE INDEX idx_product_images_product ON product_images(product_id);
-CREATE INDEX idx_product_images_locale ON product_images(locale);
-CREATE INDEX idx_product_images_status ON product_images(status);
-CREATE UNIQUE INDEX idx_product_images_main ON product_images(product_id, locale)
-    WHERE is_main = TRUE AND deleted_at IS NULL;
+alter table "variants" add constraint "fk_variants_product_id" foreign key ("product_id") references "products" ("id") on delete cascade;
 
--- Variants: product SKU variations
-CREATE TABLE variants (
-    id SERIAL PRIMARY KEY,
-    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-    sku VARCHAR(100) NOT NULL UNIQUE,
-    name VARCHAR(255) NOT NULL,
-    price_cents INTEGER NOT NULL,
-    compare_at_price_cents INTEGER,
-    cost_cents INTEGER,
-    stock INTEGER DEFAULT 0,
-    weight_grams INTEGER,
-    barcode VARCHAR(50),
-    active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT NOW()
-);
+create index "idx_categories_slug" on "categories" ("slug");
 
-CREATE INDEX idx_variants_product ON variants(product_id);
-CREATE INDEX idx_variants_sku ON variants(sku);
-CREATE INDEX idx_variants_stock ON variants(stock) WHERE stock > 0;
+create index "idx_categories_parent_id" on "categories" ("parent_id");
 
--- Verify
-SELECT 'Tables created:' AS info;
-SELECT table_name FROM information_schema.tables
-WHERE table_schema = 'public'
-AND table_name IN ('categories', 'products', 'assets', 'product_images', 'variants')
-ORDER BY table_name;
+create index "idx_categories_active" on "categories" ("active");
+
+create index "idx_products_category_id" on "products" ("category_id");
+
+create index "idx_products_active" on "products" ("active");
+
+create index "idx_assets_kind" on "assets" ("kind");
+
+create index "idx_assets_sha256" on "assets" ("sha256");
+
+create index "idx_product_images_product_id" on "product_images" ("product_id");
+
+create index "idx_product_images_locale" on "product_images" ("locale");
+
+create index "idx_product_images_status" on "product_images" ("status");
+
+create index "idx_variants_product_id" on "variants" ("product_id");

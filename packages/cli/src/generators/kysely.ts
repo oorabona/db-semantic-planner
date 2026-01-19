@@ -40,6 +40,13 @@ const TYPE_MAP: Record<SchemaColumnType, string> = {
 	time: 'string',
 	json: 'unknown',
 	jsonb: 'unknown',
+	// PostgreSQL range types - represented as strings in TypeScript
+	daterange: 'string',
+	tsrange: 'string',
+	tstzrange: 'string',
+	int4range: 'string',
+	int8range: 'string',
+	numrange: 'string',
 };
 
 /**

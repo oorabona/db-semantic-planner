@@ -1,115 +1,51 @@
--- E-Commerce Schema DDL
--- Products, Categories (hierarchical), Orders, Customers
---
--- Usage:
---   psql -d your_db -f examples/ecommerce.ddl.sql
+create table "categories" ("id" integer not null primary key, "name" varchar(255) not null, "slug" varchar(255) not null unique, "parent_id" integer, "sort_order" integer default '0' not null);
 
--- Drop in reverse dependency order
-DROP TABLE IF EXISTS order_items CASCADE;
-DROP TABLE IF EXISTS orders CASCADE;
-DROP TABLE IF EXISTS addresses CASCADE;
-DROP TABLE IF EXISTS customers CASCADE;
-DROP TABLE IF EXISTS variants CASCADE;
-DROP TABLE IF EXISTS products CASCADE;
-DROP TABLE IF EXISTS categories CASCADE;
+create table "products" ("id" integer not null primary key, "sku" varchar(255) not null unique, "name" varchar(255) not null, "description" text, "price" decimal not null, "stock" integer default '0' not null, "category_id" integer not null, "active" boolean default 'true' not null, "created_at" timestamptz default now() not null);
 
--- Categories (self-referencing hierarchy)
-CREATE TABLE categories (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    slug VARCHAR(100) NOT NULL UNIQUE,
-    parent_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
-    sort_order INTEGER DEFAULT 0
-);
+create table "variants" ("id" integer not null primary key, "product_id" integer not null, "sku" varchar(255) not null unique, "name" varchar(255) not null, "price_modifier" decimal default '0' not null, "stock" integer default '0' not null);
 
--- Products
-CREATE TABLE products (
-    id SERIAL PRIMARY KEY,
-    sku VARCHAR(50) NOT NULL UNIQUE,
-    name VARCHAR(200) NOT NULL,
-    description TEXT,
-    price DECIMAL(10,2) NOT NULL CHECK (price >= 0),
-    stock INTEGER DEFAULT 0 CHECK (stock >= 0),
-    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
-    active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+create table "customers" ("id" integer not null primary key, "email" varchar(255) not null unique, "first_name" varchar(255) not null, "last_name" varchar(255) not null, "phone" varchar(255), "created_at" timestamptz default now() not null);
 
--- Product variants (size, color, etc.)
-CREATE TABLE variants (
-    id SERIAL PRIMARY KEY,
-    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-    sku VARCHAR(50) NOT NULL UNIQUE,
-    name VARCHAR(100) NOT NULL,
-    price_modifier DECIMAL(10,2) DEFAULT 0,
-    stock INTEGER DEFAULT 0 CHECK (stock >= 0)
-);
+create table "addresses" ("id" integer not null primary key, "customer_id" integer not null, "type" varchar(255) not null, "street" varchar(255) not null, "city" varchar(255) not null, "postal_code" varchar(255) not null, "country" varchar(255) not null, "is_default" boolean default 'false' not null);
 
--- Customers
-CREATE TABLE customers (
-    id SERIAL PRIMARY KEY,
-    email VARCHAR(255) NOT NULL UNIQUE,
-    first_name VARCHAR(100) NOT NULL,
-    last_name VARCHAR(100) NOT NULL,
-    phone VARCHAR(20),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+create table "orders" ("id" integer not null primary key, "order_number" varchar(255) not null unique, "customer_id" integer not null, "status" varchar(255) default '''pending''' not null, "total" decimal not null, "shipping_address_id" integer not null, "billing_address_id" integer not null, "created_at" timestamptz default now() not null, "updated_at" timestamptz);
 
--- Customer addresses
-CREATE TABLE addresses (
-    id SERIAL PRIMARY KEY,
-    customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
-    type VARCHAR(20) NOT NULL CHECK (type IN ('billing', 'shipping')),
-    street VARCHAR(255) NOT NULL,
-    city VARCHAR(100) NOT NULL,
-    postal_code VARCHAR(20) NOT NULL,
-    country VARCHAR(100) NOT NULL,
-    is_default BOOLEAN DEFAULT FALSE
-);
+create table "order_items" ("id" integer not null primary key, "order_id" integer not null, "product_id" integer not null, "variant_id" integer, "quantity" integer not null, "unit_price" decimal not null, "total_price" decimal not null);
 
--- Orders
-CREATE TABLE orders (
-    id SERIAL PRIMARY KEY,
-    order_number VARCHAR(50) NOT NULL UNIQUE,
-    customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
-    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'shipped', 'delivered', 'cancelled')),
-    total DECIMAL(10,2) NOT NULL CHECK (total >= 0),
-    shipping_address_id INTEGER REFERENCES addresses(id),
-    billing_address_id INTEGER REFERENCES addresses(id),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE
-);
+alter table "categories" add constraint "fk_categories_parent_id" foreign key ("parent_id") references "categories" ("id") on delete set null;
 
--- Order line items
-CREATE TABLE order_items (
-    id SERIAL PRIMARY KEY,
-    order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
-    variant_id INTEGER REFERENCES variants(id) ON DELETE SET NULL,
-    quantity INTEGER NOT NULL CHECK (quantity > 0),
-    unit_price DECIMAL(10,2) NOT NULL CHECK (unit_price >= 0),
-    total_price DECIMAL(10,2) NOT NULL CHECK (total_price >= 0)
-);
+alter table "products" add constraint "fk_products_category_id" foreign key ("category_id") references "categories" ("id") on delete restrict;
 
--- Indexes
-CREATE INDEX idx_categories_parent ON categories(parent_id);
-CREATE INDEX idx_categories_slug ON categories(slug);
-CREATE INDEX idx_products_category ON products(category_id);
-CREATE INDEX idx_products_sku ON products(sku);
-CREATE INDEX idx_products_active ON products(active);
-CREATE INDEX idx_variants_product ON variants(product_id);
-CREATE INDEX idx_addresses_customer ON addresses(customer_id);
-CREATE INDEX idx_orders_customer ON orders(customer_id);
-CREATE INDEX idx_orders_status ON orders(status);
-CREATE INDEX idx_orders_number ON orders(order_number);
-CREATE INDEX idx_order_items_order ON order_items(order_id);
-CREATE INDEX idx_order_items_product ON order_items(product_id);
+alter table "variants" add constraint "fk_variants_product_id" foreign key ("product_id") references "products" ("id") on delete cascade;
 
--- Comments
-COMMENT ON TABLE categories IS 'Product categories with hierarchical structure';
-COMMENT ON TABLE products IS 'Product catalog';
-COMMENT ON TABLE variants IS 'Product variants (size, color, etc.)';
-COMMENT ON TABLE customers IS 'Registered customers';
-COMMENT ON TABLE addresses IS 'Customer billing and shipping addresses';
-COMMENT ON TABLE orders IS 'Customer orders';
-COMMENT ON TABLE order_items IS 'Order line items';
+alter table "addresses" add constraint "fk_addresses_customer_id" foreign key ("customer_id") references "customers" ("id") on delete cascade;
+
+alter table "orders" add constraint "fk_orders_customer_id" foreign key ("customer_id") references "customers" ("id") on delete restrict;
+
+alter table "orders" add constraint "fk_orders_shipping_address_id" foreign key ("shipping_address_id") references "addresses" ("id");
+
+alter table "orders" add constraint "fk_orders_billing_address_id" foreign key ("billing_address_id") references "addresses" ("id");
+
+alter table "order_items" add constraint "fk_order_items_order_id" foreign key ("order_id") references "orders" ("id") on delete cascade;
+
+alter table "order_items" add constraint "fk_order_items_product_id" foreign key ("product_id") references "products" ("id") on delete restrict;
+
+alter table "order_items" add constraint "fk_order_items_variant_id" foreign key ("variant_id") references "variants" ("id") on delete set null;
+
+create index "idx_categories_parent_id" on "categories" ("parent_id");
+
+create index "idx_products_category_id" on "products" ("category_id");
+
+create index "idx_products_active" on "products" ("active");
+
+create index "idx_variants_product_id" on "variants" ("product_id");
+
+create index "idx_addresses_customer_id" on "addresses" ("customer_id");
+
+create index "idx_orders_customer_id" on "orders" ("customer_id");
+
+create index "idx_orders_status" on "orders" ("status");
+
+create index "idx_order_items_order_id" on "order_items" ("order_id");
+
+create index "idx_order_items_product_id" on "order_items" ("product_id");

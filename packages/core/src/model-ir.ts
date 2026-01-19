@@ -23,7 +23,14 @@ export type ColumnType =
 	| 'timestamp'
 	| 'json'
 	| 'jsonb'
-	| 'uuid';
+	| 'uuid'
+	// PostgreSQL-specific range types
+	| 'daterange'
+	| 'tsrange'
+	| 'tstzrange'
+	| 'int4range'
+	| 'int8range'
+	| 'numrange';
 
 // ============================================================================
 // Foreign Key Types

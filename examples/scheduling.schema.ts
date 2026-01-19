@@ -27,23 +27,23 @@ export default defineSchema({
 	},
 	room_bookings: {
 		id: { type: 'integer', primaryKey: true },
-		room_id: { type: 'integer', references: { table: 'rooms' } },
+		room_id: { type: 'integer', references: { table: 'rooms', onDelete: 'CASCADE' }, index: true },
 		booked_by: { type: 'string' },
-		booking_period: { type: 'string' }, // PostgreSQL daterange
+		booking_period: { type: 'daterange' }, // PostgreSQL daterange
 		purpose: { type: 'string', nullable: true },
 	},
 	events: {
 		id: { type: 'integer', primaryKey: true },
 		title: { type: 'string' },
-		room_id: { type: 'integer', references: { table: 'rooms' } },
-		time_slot: { type: 'string' }, // PostgreSQL tstzrange
+		room_id: { type: 'integer', references: { table: 'rooms', onDelete: 'CASCADE' }, index: true },
+		time_slot: { type: 'tstzrange' }, // PostgreSQL tstzrange
 		organizer: { type: 'string' },
 		max_attendees: { type: 'integer', nullable: true },
 	},
 	price_tiers: {
 		id: { type: 'integer', primaryKey: true },
-		product_name: { type: 'string' },
-		quantity_range: { type: 'string' }, // PostgreSQL int4range
+		product_name: { type: 'string', index: true },
+		quantity_range: { type: 'int4range' }, // PostgreSQL int4range
 		unit_price: { type: 'decimal' },
 	},
 });

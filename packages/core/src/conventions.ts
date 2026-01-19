@@ -29,6 +29,7 @@ export const DEFAULT_CONVENTIONS: Required<SchemaConventionsDefinition> = {
 	fkPattern: '{singular}Id',
 	pluralize: true,
 	timestamps: ['createdAt', 'updatedAt'],
+	fkAutoIndex: true,
 };
 
 // =============================================================================
