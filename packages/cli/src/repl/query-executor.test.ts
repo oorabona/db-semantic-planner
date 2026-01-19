@@ -323,7 +323,8 @@ describe('executeQuery - aggregates (CLI-016)', () => {
 
 		expect(result.error).toBeUndefined();
 		expect(result.sql.toLowerCase()).toContain('group by');
-		expect(result.sql.toLowerCase()).toContain('authorid');
+		// With CamelCasePlugin, authorId becomes author_id in SQL
+		expect(result.sql.toLowerCase()).toContain('author_id');
 	});
 
 	it('should execute having clause', () => {
