@@ -18,6 +18,14 @@ import { generateKysely } from '../generators/kysely.js';
 import { generateManifest } from '../generators/manifest.js';
 import { loadSchema, loadSchemaFromCwd } from '../utils/schema-loader.js';
 
+/** Default casing by dialect (follows database conventions) */
+const DEFAULT_CASING: Record<string, 'snake' | 'camel'> = {
+	postgresql: 'snake',
+	mysql: 'snake',
+	sqlite: 'snake',
+	mssql: 'camel', // MSSQL convention is PascalCase, camel is close enough
+};
+
 export const generateCommand = new Command('generate')
 	.description('Generate code from schema')
 	.argument('<target>', 'Target to generate: manifest | kysely | ddl')
@@ -26,6 +34,14 @@ export const generateCommand = new Command('generate')
 	.option('--output <dir>', 'Output directory (alias for --out)')
 	.option('--drop', 'Include DROP TABLE IF EXISTS statements (ddl only)')
 	.option('--schema-name <name>', 'Database schema name (ddl only)')
+	.option(
+		'--dialect <name>',
+		'Database dialect: postgresql | mysql | sqlite | mssql (default: postgresql)',
+	)
+	.option(
+		'--casing <type>',
+		'Column naming: snake | camel | none (default: based on dialect)',
+	)
 	.action(
 		async (
 			target: string,
@@ -35,6 +51,8 @@ export const generateCommand = new Command('generate')
 				output?: string;
 				drop?: boolean;
 				schemaName?: string;
+				dialect?: string;
+				casing?: 'snake' | 'camel' | 'none';
 			},
 		) => {
 			try {
@@ -98,8 +116,14 @@ export const generateCommand = new Command('generate')
 
 					case 'ddl': {
 						// Dynamic import of Kysely and pg (optional peer deps)
-						const { Kysely, PostgresDialect } = await import('kysely');
+						const { CamelCasePlugin, Kysely, PostgresDialect } = await import(
+							'kysely'
+						);
 						const { default: pg } = await import('pg');
+
+						// Determine casing: explicit option > dialect default > 'snake'
+						const dialect = options.dialect ?? 'postgresql';
+						const casing = options.casing ?? DEFAULT_CASING[dialect] ?? 'snake';
 
 						// Create a Kysely instance with a mock pool (no actual connection)
 						// This is sufficient for DDL generation which only builds SQL strings
@@ -107,8 +131,12 @@ export const generateCommand = new Command('generate')
 							connectionString: 'postgresql://localhost/mock',
 						});
 
+						// Apply CamelCasePlugin for snake_case transformation
+						const plugins = casing === 'snake' ? [new CamelCasePlugin()] : [];
+
 						const db = new Kysely<unknown>({
 							dialect: new PostgresDialect({ pool: mockPool }),
+							plugins,
 						});
 
 						try {
@@ -144,6 +172,7 @@ export const generateCommand = new Command('generate')
 								console.log(`✅ Generated DDL: ${outPath}`);
 								console.log(`   Tables: ${Object.keys(schema.tables).length}`);
 								console.log(`   Statements: ${ddlStatements.length}`);
+								console.log(`   Casing: ${casing}`);
 								if (options.drop) {
 									console.log(`   Includes DROP statements`);
 								}

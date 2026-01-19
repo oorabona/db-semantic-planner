@@ -1,23 +1,11 @@
 -- Minimal Schema DDL
--- Simplest schema: users and posts
+-- Generated from: pnpm dbsp generate ddl --schema ./examples/minimal.schema.ts
 --
 -- Usage:
 --   psql -d your_db -f examples/minimal.ddl.sql
 
-DROP TABLE IF EXISTS posts CASCADE;
-DROP TABLE IF EXISTS users CASCADE;
+create table "users" ("id" integer not null primary key, "name" varchar(255) not null, "email" varchar(255) not null);
 
-CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    email VARCHAR(255) NOT NULL UNIQUE
-);
+create table "posts" ("id" integer not null primary key, "title" varchar(255) not null, "content" text, "user_id" integer not null);
 
-CREATE TABLE posts (
-    id SERIAL PRIMARY KEY,
-    title VARCHAR(200) NOT NULL,
-    content TEXT,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_posts_user ON posts(user_id);
+alter table "posts" add constraint "fk_posts_user_id" foreign key ("user_id") references "users" ("id");
