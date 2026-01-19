@@ -197,6 +197,18 @@ function validateSchemaName(name: string): void {
 orm.forTenant('tenant_acme'); // Validated, uses db.withSchema()
 ```
 
+### 10. Type Chain Propagation Gap (2026-01-19)
+
+**Problem:** Feature exists in adapter layer (DDL generator supports `unique`, `onDelete`, indexes) but schema layer (`@dbsp/schema`) doesn't expose them, so they never reach the adapter.
+
+**Why it happens:** The type chain flows `@dbsp/schema` → `@dbsp/core` (ModelIR) → `@dbsp/adapter-kysely`. If a property isn't in an intermediate type (like `ColumnIR`), it's lost.
+
+**Example:** `ColumnDefinition` has `unique: true` but `ColumnIR` doesn't, so DDL can't generate `UNIQUE` constraints.
+
+**How to diagnose:** When a feature seems missing, trace the full type chain from user-facing API to adapter. The gap is usually in the intermediate IR types.
+
+**Solution:** Add missing properties to IR types, not just the adapter or schema layers.
+
 ---
 
 ## Debugging Tips
@@ -370,3 +382,26 @@ How to avoid or mitigate.
 | Schema-per-tenant | Clean isolation, no row-level mixing | adapter-OVERVIEW.md |
 | Deterministic output | Testability via golden tests | core-OVERVIEW.md |
 | EXISTS default for to-many | Prevent row explosion | core-OVERVIEW.md |
+
+### Dual Schema Definition Paths (2026-01-19)
+
+**Pattern:** This project has two independent schema definition systems that must be kept in sync:
+
+| Package | API | Purpose |
+|---------|-----|---------|
+| `@dbsp/schema` | `defineSchema(tables, config?)` | Code generation, CLI workflows |
+| `@dbsp/core/schema-builder` | `defineSchema({ table: { columns, indexes } })` | Direct programmatic usage |
+
+**When:** Adding new schema features (unique, indexes, onDelete, etc.)
+
+**Why:** The two paths serve different use cases but converge on the same `ModelIR` format.
+
+**How:**
+1. Add types to both `@dbsp/schema/types.ts` AND `@dbsp/core/schema-builder.ts`
+2. Propagate through `schema-bridge.ts` (for @dbsp/schema path)
+3. Propagate through `schema-builder.ts` (for direct path)
+4. Both paths output to `ModelIR` which feeds DDL generation
+
+**Table-level indexes syntax differs:**
+- @dbsp/schema: pass indexes in config second argument
+- @dbsp/core/schema-builder: use `TableDefWithConfig` format with `columns` and `indexes` keys

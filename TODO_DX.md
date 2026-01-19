@@ -457,3 +457,8 @@ for (const warning of model.warnings) {
   - Note: createMockAdapter reste dans @dbsp/adapter-kysely (architecture Ports & Adapters)
 - [x] "Common Patterns" documentation section (DONE - added to README.md)
 - [x] ✅ Type-safe schema definition with full inference chain (DX-110) (2026-01-15)
+- [x] ✅ CLI: DDL output to stdout by default, --output for file (2026-01-19)
+- [x] ✅ CLI: Add --casing and --dialect options for DDL generation (2026-01-19)
+- [x] ✅ DDL: Add unique constraint support (column-level unique → ColumnIR → DDL) (2026-01-19)
+- [x] ✅ DDL: Add onDelete support to ForeignKeyReference (CASCADE, SET NULL, RESTRICT) (2026-01-19)
+- [x] ✅ DDL: Add index configuration at schema level (@dbsp/schema) (2026-01-19)

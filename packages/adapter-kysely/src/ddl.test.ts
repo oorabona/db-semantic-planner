@@ -157,4 +157,94 @@ describe('generateDDL', () => {
 			expect(ddl.some((s) => s.includes('DROP TABLE IF EXISTS'))).toBe(true);
 		});
 	});
+
+	describe('DDL features', () => {
+		let db: Kysely<unknown>;
+
+		beforeAll(() => {
+			db = new Kysely<unknown>({
+				dialect: new PostgresDialect({ pool: mockPool }),
+			});
+		});
+
+		afterAll(async () => {
+			await db.destroy();
+		});
+
+		it('generates UNIQUE constraint on column', () => {
+			const schema = defineSchema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					email: { type: 'string', unique: true },
+				},
+			}).build();
+
+			const ddl = generateDDL(db, schema);
+			const createUser = ddl.find((s) => s.includes('create table "users"'));
+
+			expect(createUser).toContain('unique');
+		});
+
+		it('generates onDelete CASCADE on foreign key', () => {
+			const schema = defineSchema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+				},
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					userId: {
+						type: 'integer',
+						references: { table: 'users', onDelete: 'CASCADE' },
+					},
+				},
+			}).build();
+
+			const ddl = generateDDL(db, schema);
+			const fkStatement = ddl.find((s) => s.includes('foreign key'));
+
+			expect(fkStatement).toContain('on delete cascade');
+		});
+
+		it('generates CREATE INDEX statement', () => {
+			const schema = defineSchema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					email: { type: 'string', index: true },
+				},
+			}).build();
+
+			const ddl = generateDDL(db, schema);
+			const indexStatement = ddl.find((s) => s.includes('create index'));
+
+			expect(indexStatement).toContain('idx_users_email');
+			expect(indexStatement).toContain('"email"');
+		});
+
+		it('generates unique index', () => {
+			// Use TableDefWithConfig syntax for schema-builder.ts
+			const schema = defineSchema({
+				users: {
+					columns: {
+						id: { type: 'integer', primaryKey: true },
+						email: { type: 'string' },
+						tenantId: { type: 'string' },
+					},
+					indexes: [
+						{
+							columns: ['email', 'tenantId'],
+							unique: true,
+							name: 'uk_users_email_tenant',
+						},
+					],
+				},
+			}).build();
+
+			const ddl = generateDDL(db, schema);
+			const indexStatement = ddl.find((s) =>
+				s.includes('uk_users_email_tenant'),
+			);
+
+			expect(indexStatement).toContain('create unique index');
+		});
+	});
 });

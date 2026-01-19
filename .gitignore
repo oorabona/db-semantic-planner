@@ -54,3 +54,4 @@ temp/
 # Claude Code local settings
 .claude/settings.json
 .claude/commands
+.serena/

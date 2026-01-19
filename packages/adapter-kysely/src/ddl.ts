@@ -223,6 +223,11 @@ function generateTableDDL(
 				colBuilder = applyDefaultValue(colBuilder, col.default, db);
 			}
 
+			// Unique constraint
+			if (col.unique) {
+				colBuilder = colBuilder.unique();
+			}
+
 			return colBuilder;
 		});
 	}

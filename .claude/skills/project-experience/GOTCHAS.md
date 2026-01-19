@@ -711,3 +711,25 @@ replace_content(needle="supportsCycleDetection: false", repl="supportsCycleDetec
 **Impact if ignored:** Missing tests, lint errors discovered late, no proper quality gate.
 
 **Prevention:** When user gives numbered list of feedback → immediately classify as COMPLEX.
+
+---
+
+### Marking TodoWrite items "completed" without invoking skills (2026-01-19)
+
+**Symptoms:** Todo list shows /review and /finalize as "completed" but skills were never invoked.
+
+**Cause:** Rationalization: "it's a simple task, I don't really need to run /finalize". This is the classic productivity illusion - feeling like you're being efficient by skipping steps.
+
+**Solution:**
+- NEVER mark a skill-invocation todo as "completed" without actually calling the Skill tool
+- If /review is in the todo list → invoke /review
+- If /finalize is in the todo list → invoke /finalize
+- The workflow exists for a reason - even SIMPLE tasks benefit from formal completion
+
+**Impact if ignored:**
+- No metrics captured for the workflow
+- No learning loop closure (/skills update not run)
+- User loses trust in the process
+- Quality gates bypassed
+
+**Prevention:** Before marking any skill todo as completed, ask: "Did I actually invoke this skill?" If not → invoke it now.

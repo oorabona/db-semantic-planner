@@ -356,12 +356,16 @@ class SchemaBuilderImpl<T extends Record<string, TableDef>>
 				}
 
 				// Build ColumnIR
-				columns.push({
+				const col: ColumnIR = {
 					name: colName,
 					type: colDef.type,
 					nullable: colDef.nullable ?? false,
 					default: colDef.default,
-				});
+				};
+				if (colDef.unique !== undefined) {
+					(col as { unique?: boolean }).unique = colDef.unique;
+				}
+				columns.push(col);
 
 				// Track primary key columns
 				if (colDef.primaryKey) {
