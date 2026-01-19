@@ -6,10 +6,10 @@
  */
 
 import type {
-	ColumnDefinition,
-	RelationDefinition,
 	ResolvedSchema,
-} from '@dbsp/schema';
+	SchemaColumnDefinition,
+	SchemaRelationDefinition,
+} from '@dbsp/core';
 
 /**
  * JSON-serializable column definition for manifest output.
@@ -120,7 +120,7 @@ export function generateManifest(schema: ResolvedSchema): ManifestOutput {
 /**
  * Serialize a column definition to JSON-serializable object.
  */
-function serializeColumn(col: ColumnDefinition): ManifestColumn {
+function serializeColumn(col: SchemaColumnDefinition): ManifestColumn {
 	const result: ManifestColumn = {
 		type: col.type,
 	};
@@ -143,7 +143,7 @@ function serializeColumn(col: ColumnDefinition): ManifestColumn {
 /**
  * Serialize a relation definition to JSON-serializable object.
  */
-function serializeRelation(rel: RelationDefinition): ManifestRelation {
+function serializeRelation(rel: SchemaRelationDefinition): ManifestRelation {
 	const result: ManifestRelation = {
 		kind: rel.kind,
 		target: rel.target,

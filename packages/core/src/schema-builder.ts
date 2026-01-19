@@ -251,7 +251,25 @@ export interface SchemaBuilderWithRelations {
 /**
  * Entry point for schema definition
  */
-export function defineSchema<T extends Record<string, TableDef>>(
+/**
+ * Create a schema builder for constructing ModelIR with fluent API.
+ *
+ * @example
+ * ```typescript
+ * const model = defineSchemaBuilder({
+ *   users: { id: { type: 'number', primaryKey: true }, name: { type: 'string' } },
+ *   posts: { id: { type: 'number', primaryKey: true }, authorId: { type: 'number' } },
+ * })
+ *   .relations({
+ *     'posts.author': belongsTo('users', 'authorId'),
+ *   })
+ *   .build();
+ * ```
+ *
+ * For user-facing schema definitions, prefer `defineSchema` from schema-dsl
+ * which returns ResolvedSchema. This builder is for internal ModelIR construction.
+ */
+export function defineSchemaBuilder<T extends Record<string, TableDef>>(
 	tables: T,
 ): SchemaBuilder<T> {
 	return new SchemaBuilderImpl(tables);

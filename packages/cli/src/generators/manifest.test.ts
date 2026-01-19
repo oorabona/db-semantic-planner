@@ -1,4 +1,4 @@
-import type { ResolvedSchema } from '@dbsp/schema';
+import type { ResolvedSchema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { generateManifest, type SchemaManifest } from './manifest.js';
 

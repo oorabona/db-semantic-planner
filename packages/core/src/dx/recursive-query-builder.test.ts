@@ -6,7 +6,7 @@
  * SQL generation tests are in adapter-kysely/src/recursive-query-builder.test.ts
  */
 
-import { belongsTo, defineSchema, eq, hasMany } from '@dbsp/core';
+import { belongsTo, defineSchemaBuilder, eq, hasMany } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import type { Adapter, AdapterCapabilities } from '../adapter.js';
 import { createRecursiveBuilder } from './recursive-query-builder.js';
@@ -15,7 +15,7 @@ import { createRecursiveBuilder } from './recursive-query-builder.js';
 // Test Schema - Role Hierarchy with Edge Table
 // ============================================================================
 
-const roleHierarchyModel = defineSchema({
+const roleHierarchyModel = defineSchemaBuilder({
 	roles: {
 		id: { type: 'uuid' },
 		name: { type: 'string' },
@@ -61,7 +61,7 @@ const roleHierarchyModel = defineSchema({
 // Test Schema - Category Hierarchy (Adjacency List)
 // ============================================================================
 
-const categoryModel = defineSchema({
+const categoryModel = defineSchemaBuilder({
 	categories: {
 		id: { type: 'uuid' },
 		name: { type: 'string' },

@@ -2,7 +2,7 @@
  * DX-030 Block 6: Autocompletion Tests
  */
 
-import type { ResolvedSchema } from '@dbsp/schema';
+import type { ResolvedSchema } from '@dbsp/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CompletionProvider, formatCompletions } from './completion.js';
 

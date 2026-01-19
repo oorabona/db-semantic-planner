@@ -4,7 +4,7 @@
  * Provides context-aware autocompletion suggestions for the REPL.
  */
 
-import type { ResolvedSchema } from '@dbsp/schema';
+import type { ResolvedSchema } from '@dbsp/core';
 
 /**
  * Completion suggestion

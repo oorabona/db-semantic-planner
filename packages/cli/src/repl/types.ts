@@ -3,7 +3,7 @@ import type React from 'react';
  * DX-030: REPL Types
  */
 
-import type { ResolvedSchema } from '@dbsp/schema';
+import type { ResolvedSchema } from '@dbsp/core';
 
 /**
  * REPL Configuration passed from CLI command

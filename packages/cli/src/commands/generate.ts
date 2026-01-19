@@ -12,7 +12,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import type { ResolvedSchema } from '@dbsp/schema';
+import type { ResolvedSchema } from '@dbsp/core';
 import { Command } from 'commander';
 import { generateKysely } from '../generators/kysely.js';
 import { generateManifest } from '../generators/manifest.js';
@@ -140,16 +140,13 @@ export const generateCommand = new Command('generate')
 						});
 
 						try {
-							// Import generateDDL from adapter-kysely and defineSchema from core
+							// Import generateDDL from adapter-kysely and defineSchemaBuilder from core
 							const { generateDDL } = await import('@dbsp/adapter-kysely');
-							const { defineSchema: defineSchemaCore } = await import(
-								'@dbsp/core'
-							);
+							const { defineSchemaBuilder } = await import('@dbsp/core');
 
-							// Convert ResolvedSchema tables to ModelIR using core's defineSchema
-							// The table format is compatible between @dbsp/schema and @dbsp/core
-							const model = defineSchemaCore(
-								schema.tables as Parameters<typeof defineSchemaCore>[0],
+							// Convert ResolvedSchema tables to ModelIR using defineSchemaBuilder
+							const model = defineSchemaBuilder(
+								schema.tables as Parameters<typeof defineSchemaBuilder>[0],
 							).build();
 
 							const ddlStatements = generateDDL(db, model, {

@@ -29,7 +29,6 @@
 	"dependencies": {
 		"@dbsp/adapter-kysely": "workspace:*",
 		"@dbsp/core": "workspace:*",
-		"@dbsp/schema": "workspace:*",
 		"@inkjs/ui": "catalog:",
 		"commander": "catalog:",
 		"ink": "catalog:",

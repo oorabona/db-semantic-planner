@@ -1,19 +1,22 @@
 /**
- * ARCH-002 Block 1: Schema Definition Types
+ * Schema DSL Types
  *
- * This module defines the core types for the dbsp.schema.ts Source of Truth.
- * Key design: Discriminated unions with `kind` field for type safety.
+ * Input types for defineSchema() - the user-facing schema definition DSL.
+ * These types are simpler than the IR types and serve as the "source of truth"
+ * for schema definitions before they're processed into ModelIR.
+ *
+ * Migrated from @dbsp/schema/types.ts as part of ARCH-003.
  */
 
 // =============================================================================
-// Column Types
+// Column Types (DSL - simpler than ColumnType in model-ir.ts)
 // =============================================================================
 
 /**
  * Supported column types in the schema DSL.
- * Maps to PostgreSQL types during verification.
+ * Maps to database types during DDL generation.
  */
-export type ColumnType =
+export type SchemaColumnType =
 	| 'uuid'
 	| 'string'
 	| 'text'
@@ -28,27 +31,31 @@ export type ColumnType =
 	| 'jsonb';
 
 /** Foreign key delete behavior */
-export type OnDeleteAction = 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
+export type SchemaOnDeleteAction =
+	| 'CASCADE'
+	| 'SET NULL'
+	| 'RESTRICT'
+	| 'NO ACTION';
 
 /**
  * Foreign key reference definition.
  * When present, takes priority over convention-based FK detection.
  */
-export interface ForeignKeyReference {
+export interface SchemaForeignKeyReference {
 	/** Target table name */
 	table: string;
 	/** Target column name (defaults to 'id') */
 	column?: string;
 	/** Delete behavior (CASCADE, SET NULL, RESTRICT, NO ACTION) */
-	onDelete?: OnDeleteAction;
+	onDelete?: SchemaOnDeleteAction;
 }
 
 /**
- * Column definition in the schema.
+ * Column definition in the schema DSL.
  */
-export interface ColumnDefinition {
+export interface SchemaColumnDefinition {
 	/** Column data type */
-	type: ColumnType;
+	type: SchemaColumnType;
 	/** Whether the column is the primary key */
 	primaryKey?: boolean;
 	/** Whether the column allows NULL values */
@@ -58,7 +65,7 @@ export interface ColumnDefinition {
 	/** Default value expression (e.g., 'now()', 'gen_random_uuid()') */
 	default?: string;
 	/** Explicit foreign key reference (takes priority over conventions) */
-	references?: ForeignKeyReference;
+	references?: SchemaForeignKeyReference;
 	/** Create an index on this column (true for auto-name, string for custom name) */
 	index?: boolean | string;
 }
@@ -66,17 +73,17 @@ export interface ColumnDefinition {
 /**
  * Table definition: mapping of column names to their definitions.
  */
-export type TableDefinition = Record<string, ColumnDefinition>;
+export type SchemaTableDefinition = Record<string, SchemaColumnDefinition>;
 
 /**
  * All tables in the schema.
  */
-export type TablesDefinition = Record<string, TableDefinition>;
+export type SchemaTablesDefinition = Record<string, SchemaTableDefinition>;
 
 /**
  * Index definition for composite indexes.
  */
-export interface IndexDefinition {
+export interface SchemaIndexDefinition {
 	/** Columns included in the index */
 	columns: string[];
 	/** Whether this is a unique index */
@@ -88,7 +95,7 @@ export interface IndexDefinition {
 /**
  * Index configuration by table.
  */
-export type IndexesDefinition = Record<string, IndexDefinition[]>;
+export type SchemaIndexesDefinition = Record<string, SchemaIndexDefinition[]>;
 
 // =============================================================================
 // Relation Types (Discriminated Union)
@@ -97,12 +104,12 @@ export type IndexesDefinition = Record<string, IndexDefinition[]>;
 /**
  * Relation kinds for discriminated union.
  */
-export type RelationKind = 'belongsTo' | 'hasMany' | 'manyToMany';
+export type SchemaRelationKind = 'belongsTo' | 'hasMany' | 'manyToMany';
 
 /**
  * Base properties shared by all relation types.
  */
-interface RelationBase {
+interface SchemaRelationBase {
 	/** Target table name */
 	target: string;
 }
@@ -111,7 +118,7 @@ interface RelationBase {
  * BelongsTo relation: source table has FK to target table.
  * Example: posts.author → users (posts.authorId references users.id)
  */
-export interface BelongsToRelation extends RelationBase {
+export interface SchemaBelongsToRelation extends SchemaRelationBase {
 	kind: 'belongsTo';
 	/** Foreign key column in the source table */
 	foreignKey: string;
@@ -123,7 +130,7 @@ export interface BelongsToRelation extends RelationBase {
  * HasMany relation: target table has FK to source table.
  * Example: users.posts → posts (posts.authorId references users.id)
  */
-export interface HasManyRelation extends RelationBase {
+export interface SchemaHasManyRelation extends SchemaRelationBase {
 	kind: 'hasMany';
 	/** Foreign key column in the target table */
 	foreignKey: string;
@@ -135,7 +142,7 @@ export interface HasManyRelation extends RelationBase {
  * ManyToMany relation: junction table connects source and target.
  * Example: posts ↔ categories via post_categories
  */
-export interface ManyToManyRelation extends RelationBase {
+export interface SchemaManyToManyRelation extends SchemaRelationBase {
 	kind: 'manyToMany';
 	/** Junction table name */
 	through: string;
@@ -149,16 +156,19 @@ export interface ManyToManyRelation extends RelationBase {
  * Union of all relation types.
  * Use `kind` field for type narrowing.
  */
-export type RelationDefinition =
-	| BelongsToRelation
-	| HasManyRelation
-	| ManyToManyRelation;
+export type SchemaRelationDefinition =
+	| SchemaBelongsToRelation
+	| SchemaHasManyRelation
+	| SchemaManyToManyRelation;
 
 /**
  * Explicit relations mapping.
  * Keys are 'sourceTable.relationName' format.
  */
-export type RelationsDefinition = Record<string, RelationDefinition>;
+export type SchemaRelationsDefinition = Record<
+	string,
+	SchemaRelationDefinition
+>;
 
 // =============================================================================
 // Planner Hints
@@ -167,27 +177,27 @@ export type RelationsDefinition = Record<string, RelationDefinition>;
 /**
  * Strategy hint for filtering on to-many relations.
  */
-export type FilterStrategy = 'exists' | 'join';
+export type SchemaFilterStrategy = 'exists' | 'join';
 
 /**
  * Cardinality hint for relation traversal.
  */
-export type Cardinality = 'one' | 'many';
+export type SchemaCardinality = 'one' | 'many';
 
 /**
  * Hint definition for a specific relation path.
  */
-export interface HintDefinition {
+export interface SchemaHintDefinition {
 	/** Preferred filter strategy */
-	defaultStrategy?: FilterStrategy;
+	defaultStrategy?: SchemaFilterStrategy;
 	/** Expected cardinality */
-	cardinality?: Cardinality;
+	cardinality?: SchemaCardinality;
 }
 
 /**
  * All hints, keyed by 'table.relation' path.
  */
-export type HintsDefinition = Record<string, HintDefinition>;
+export type SchemaHintsDefinition = Record<string, SchemaHintDefinition>;
 
 // =============================================================================
 // Convention Configuration
@@ -196,7 +206,7 @@ export type HintsDefinition = Record<string, HintDefinition>;
 /**
  * Convention settings for automatic FK detection and naming.
  */
-export interface ConventionsDefinition {
+export interface SchemaConventionsDefinition {
 	/**
 	 * Pattern for foreign key column names.
 	 * {singular} is replaced with singular table name.
@@ -222,20 +232,20 @@ export interface ConventionsDefinition {
 // =============================================================================
 
 /**
- * Complete schema definition input for defineSchema().
- * @deprecated Use the new hybrid API: defineSchema(tables, config?)
+ * Complete schema definition input for defineSchema() wrapped form.
+ * Prefer the new hybrid API: defineSchema(tables, config?)
  */
 export interface SchemaDefinitionInput<
-	T extends TablesDefinition = TablesDefinition,
+	T extends SchemaTablesDefinition = SchemaTablesDefinition,
 > {
 	/** Table definitions */
 	tables: T;
 	/** Explicit relation definitions (override auto-detected) */
-	relations?: RelationsDefinition;
+	relations?: SchemaRelationsDefinition;
 	/** Planner hints */
-	hints?: HintsDefinition;
+	hints?: SchemaHintsDefinition;
 	/** Convention configuration */
-	conventions?: ConventionsDefinition;
+	conventions?: SchemaConventionsDefinition;
 }
 
 /**
@@ -243,30 +253,32 @@ export interface SchemaDefinitionInput<
  */
 export interface SchemaConfigInput {
 	/** Explicit relation definitions (override auto-detected) */
-	relations?: RelationsDefinition;
+	relations?: SchemaRelationsDefinition;
 	/** Planner hints */
-	hints?: HintsDefinition;
+	hints?: SchemaHintsDefinition;
 	/** Convention configuration */
-	conventions?: ConventionsDefinition;
+	conventions?: SchemaConventionsDefinition;
 	/** Table-level index definitions (composite indexes) */
-	indexes?: IndexesDefinition;
+	indexes?: SchemaIndexesDefinition;
 }
 
 /**
  * Resolved schema with all relations (explicit + inferred).
  * This is the output of defineSchema().
  */
-export interface ResolvedSchema<T extends TablesDefinition = TablesDefinition> {
+export interface ResolvedSchema<
+	T extends SchemaTablesDefinition = SchemaTablesDefinition,
+> {
 	/** Original table definitions */
 	tables: T;
 	/** All relations (explicit + auto-detected) */
-	relations: RelationsDefinition;
+	relations: SchemaRelationsDefinition;
 	/** Planner hints */
-	hints: HintsDefinition;
+	hints: SchemaHintsDefinition;
 	/** Resolved conventions with defaults applied */
-	conventions: Required<ConventionsDefinition>;
+	conventions: Required<SchemaConventionsDefinition>;
 	/** Table-level index definitions */
-	indexes: IndexesDefinition;
+	indexes: SchemaIndexesDefinition;
 }
 
 // =============================================================================
@@ -276,14 +288,18 @@ export interface ResolvedSchema<T extends TablesDefinition = TablesDefinition> {
 /**
  * Type guard for BelongsTo relation.
  */
-export function isBelongsTo(rel: RelationDefinition): rel is BelongsToRelation {
+export function isBelongsTo(
+	rel: SchemaRelationDefinition,
+): rel is SchemaBelongsToRelation {
 	return rel.kind === 'belongsTo';
 }
 
 /**
  * Type guard for HasMany relation.
  */
-export function isHasMany(rel: RelationDefinition): rel is HasManyRelation {
+export function isHasMany(
+	rel: SchemaRelationDefinition,
+): rel is SchemaHasManyRelation {
 	return rel.kind === 'hasMany';
 }
 
@@ -291,7 +307,7 @@ export function isHasMany(rel: RelationDefinition): rel is HasManyRelation {
  * Type guard for ManyToMany relation.
  */
 export function isManyToMany(
-	rel: RelationDefinition,
-): rel is ManyToManyRelation {
+	rel: SchemaRelationDefinition,
+): rel is SchemaManyToManyRelation {
 	return rel.kind === 'manyToMany';
 }

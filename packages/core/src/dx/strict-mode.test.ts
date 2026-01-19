@@ -5,7 +5,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { belongsTo, defineSchema, hasMany, hasOne } from '../schema-builder.js';
+import {
+	belongsTo,
+	defineSchemaBuilder,
+	hasMany,
+	hasOne,
+} from '../schema-builder.js';
 
 import { AmbiguousRelationError } from './errors.js';
 import { createOrm } from './orm.js';
@@ -20,7 +25,7 @@ import { createOrm } from './orm.js';
  * - Posts have author and reviewer to Users (ambiguous "user")
  * - Users have single profile relation (unambiguous)
  */
-const testSchema = defineSchema({
+const testSchema = defineSchemaBuilder({
 	users: {
 		id: 'number',
 		name: 'string',

@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { belongsTo, defineSchema, hasMany } from '../schema-builder.js';
+import { belongsTo, defineSchemaBuilder, hasMany } from '../schema-builder.js';
 import { InvalidOperationError } from './errors.js';
 import { createOrm } from './orm.js';
 import type { RecursiveIncludeOptions } from './types.js';
@@ -18,7 +18,7 @@ import type { RecursiveIncludeOptions } from './types.js';
 // Test Schema with Self-Referential Relations
 // ============================================================================
 
-const model = defineSchema({
+const model = defineSchemaBuilder({
 	categories: {
 		id: 'integer',
 		name: { type: 'string' },
