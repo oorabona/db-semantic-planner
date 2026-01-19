@@ -14,14 +14,14 @@ import { defineSchema } from '@dbsp/schema';
 export default defineSchema({
 	users: {
 		id: { type: 'integer', primaryKey: true },
-		name: { type: 'string' },
-		email: { type: 'string' },
+		name: { type: 'string', index: true },
+		email: { type: 'string', unique: true },
 	},
 	posts: {
 		id: { type: 'integer', primaryKey: true },
 		title: { type: 'string' },
 		content: { type: 'text', nullable: true },
-		userId: { type: 'integer', references: { table: 'users' } },
+		userId: { type: 'integer', references: { table: 'users', onDelete: 'CASCADE' } },
 	},
 });
 // Relations auto-inferred from `references`:
