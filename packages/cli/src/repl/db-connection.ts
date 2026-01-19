@@ -4,7 +4,7 @@
  * Manages PostgreSQL connection for REPL execution mode.
  */
 
-import { Kysely, PostgresDialect, sql } from 'kysely';
+import { CamelCasePlugin, Kysely, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -63,9 +63,11 @@ export async function createDbConnection(
 		idleTimeoutMillis: 30000,
 	});
 
-	// Create Kysely instance
+	// Create Kysely instance with CamelCasePlugin
+	// This ensures column names match DDL generation (camelCase → snake_case)
 	const db = new Kysely<Record<string, unknown>>({
 		dialect: new PostgresDialect({ pool }),
+		plugins: [new CamelCasePlugin()],
 	});
 
 	// Test connection

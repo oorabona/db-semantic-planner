@@ -30,6 +30,7 @@ import type {
 } from '@dbsp/core';
 import { ExecutionError } from '@dbsp/core';
 import {
+	CamelCasePlugin,
 	Kysely,
 	MssqlAdapter,
 	MssqlIntrospector,
@@ -107,6 +108,10 @@ class DummyDriver {
  * CLI-011: Support all major SQL dialects for accurate syntax generation.
  */
 function createMockKysely(dialect: MockDialect): Kysely<unknown> {
+	// CamelCasePlugin ensures generated SQL uses snake_case column names,
+	// matching DDL generation (camelCase schema → snake_case database columns)
+	const plugins = [new CamelCasePlugin()];
+
 	switch (dialect) {
 		case 'postgresql':
 			return new Kysely({
@@ -116,6 +121,7 @@ function createMockKysely(dialect: MockDialect): Kysely<unknown> {
 					createIntrospector: (db) => new PostgresIntrospector(db),
 					createQueryCompiler: () => new PostgresQueryCompiler(),
 				},
+				plugins,
 			});
 		case 'mysql':
 			return new Kysely({
@@ -125,6 +131,7 @@ function createMockKysely(dialect: MockDialect): Kysely<unknown> {
 					createIntrospector: (db) => new MysqlIntrospector(db),
 					createQueryCompiler: () => new MysqlQueryCompiler(),
 				},
+				plugins,
 			});
 		case 'sqlite':
 			return new Kysely({
@@ -134,6 +141,7 @@ function createMockKysely(dialect: MockDialect): Kysely<unknown> {
 					createIntrospector: (db) => new SqliteIntrospector(db),
 					createQueryCompiler: () => new SqliteQueryCompiler(),
 				},
+				plugins,
 			});
 		case 'mssql':
 			return new Kysely({
@@ -143,6 +151,7 @@ function createMockKysely(dialect: MockDialect): Kysely<unknown> {
 					createIntrospector: (db) => new MssqlIntrospector(db),
 					createQueryCompiler: () => new MssqlQueryCompiler(),
 				},
+				plugins,
 			});
 		default: {
 			const _exhaustive: never = dialect;
