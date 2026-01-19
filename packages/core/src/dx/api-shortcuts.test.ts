@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { belongsTo, defineSchema, hasMany } from '../schema-builder.js';
+import { belongsTo, defineSchemaBuilder, hasMany } from '../schema-builder.js';
 import { and, eq, inArray } from './filters.js';
 import { createOrm } from './orm.js';
 
 /**
  * Schema for testing API shortcuts.
  */
-const testSchema = defineSchema({
+const testSchema = defineSchemaBuilder({
 	users: {
 		id: { type: 'number' },
 		name: { type: 'string' },

@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ResolvedSchema } from '@dbsp/schema';
+import type { ResolvedSchema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type BatchState, processDotCommand } from './batch.js';
 import type { DbConnection, ExecutionResult } from './db-connection.js';

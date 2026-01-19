@@ -5,7 +5,13 @@
  */
 
 import type { OrmInstance } from '@dbsp/core';
-import { belongsTo, createOrm, defineSchema, eq, hasMany } from '@dbsp/core';
+import {
+	belongsTo,
+	createOrm,
+	defineSchemaBuilder,
+	eq,
+	hasMany,
+} from '@dbsp/core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 // ============================================================================
@@ -38,7 +44,7 @@ interface TestDatabase {
 	};
 }
 
-const testModel = defineSchema({
+const testModel = defineSchemaBuilder({
 	users: {
 		id: { type: 'number' },
 		name: { type: 'string' },

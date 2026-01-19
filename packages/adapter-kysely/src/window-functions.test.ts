@@ -5,7 +5,7 @@
 
 import {
 	createOrm,
-	defineSchema,
+	defineSchemaBuilder,
 	denseRank,
 	lag,
 	lead,
@@ -25,7 +25,7 @@ import { createKyselyAdapter } from './kysely-adapter.js';
 // Test Schema
 // ============================================================================
 
-const testModel = defineSchema({
+const testModel = defineSchemaBuilder({
 	products: {
 		id: 'integer',
 		name: { type: 'string' },

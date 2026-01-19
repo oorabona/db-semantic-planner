@@ -4,7 +4,7 @@
  * Tests for generateSchemaFile() which generates TypeScript schema from ModelIR.
  */
 
-import { defineSchema } from '@dbsp/core';
+import { defineSchemaBuilder } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import {
 	generateSchemaFile,
@@ -14,7 +14,7 @@ import {
 describe('generateSchemaFile', () => {
 	describe('basic structure', () => {
 		it('generates valid schema file with imports', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					name: { type: 'string' },
@@ -23,13 +23,13 @@ describe('generateSchemaFile', () => {
 
 			const result = generateSchemaFile(model);
 
-			expect(result).toContain("import { defineSchema } from '@dbsp/schema';");
+			expect(result).toContain("import { defineSchema } from '@dbsp/core';");
 			expect(result).toContain('export const schema = defineSchema({');
 			expect(result).toContain('});');
 		});
 
 		it('generates table definitions', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
@@ -42,7 +42,7 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('generates multiple tables', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
@@ -60,7 +60,7 @@ describe('generateSchemaFile', () => {
 
 	describe('column types', () => {
 		it('generates correct type property', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				test: {
 					id: { type: 'uuid', primaryKey: true },
 					name: { type: 'string' },
@@ -80,7 +80,7 @@ describe('generateSchemaFile', () => {
 
 	describe('primary key', () => {
 		it('marks single primary key column', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					name: { type: 'string' },
@@ -96,7 +96,7 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('does not mark non-primary key columns', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					email: { type: 'string' },
@@ -115,7 +115,7 @@ describe('generateSchemaFile', () => {
 
 	describe('nullable columns', () => {
 		it('adds nullable: true for nullable columns', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					bio: { type: 'string', nullable: true },
@@ -128,7 +128,7 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('omits nullable for non-nullable columns', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					name: { type: 'string' },
@@ -145,7 +145,7 @@ describe('generateSchemaFile', () => {
 
 	describe('default values', () => {
 		it('includes string default values with quotes', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
 				},
@@ -157,7 +157,7 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('includes numeric default values without quotes', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				posts: {
 					id: { type: 'uuid', primaryKey: true },
 					views: { type: 'number', default: 0 },
@@ -170,7 +170,7 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('includes boolean default values', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					active: { type: 'boolean', default: true },
@@ -185,7 +185,7 @@ describe('generateSchemaFile', () => {
 
 	describe('foreign key references', () => {
 		it('includes references for FK columns', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
@@ -202,7 +202,7 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('includes column in references when not id', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					email: { type: 'string' },
@@ -226,7 +226,7 @@ describe('generateSchemaFile', () => {
 
 	describe('options', () => {
 		it('includes source URL in header (redacted)', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
@@ -243,7 +243,7 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('includes timestamp in header', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
@@ -259,7 +259,7 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('includes warnings in header', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
@@ -282,7 +282,7 @@ describe('generateSchemaFile', () => {
 		it('includes DB type comments when enabled', () => {
 			// For this test, we need to manually create a model with originalDbType
 			// since defineSchema doesn't include that field
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					data: { type: 'json', nullable: true },
@@ -312,7 +312,7 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('omits DB type comments when disabled', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
@@ -330,7 +330,7 @@ describe('generateSchemaFile', () => {
 
 	describe('header comment', () => {
 		it('includes auto-generated notice', () => {
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},

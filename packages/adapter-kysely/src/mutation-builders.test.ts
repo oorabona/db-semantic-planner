@@ -7,7 +7,7 @@ import {
 	and,
 	belongsTo,
 	createOrm,
-	defineSchema,
+	defineSchemaBuilder,
 	eq,
 	hasMany,
 	inArray,
@@ -24,7 +24,7 @@ import {
 import { createKyselyAdapter } from './kysely-adapter.js';
 
 // Test schema
-const testModel = defineSchema({
+const testModel = defineSchemaBuilder({
 	users: {
 		id: 'integer',
 		name: { type: 'string' },

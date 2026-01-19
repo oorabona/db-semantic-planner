@@ -106,17 +106,12 @@ SCHEMA FILE FORMAT:
   The schema file must export a ResolvedSchema object:
 
     // dbsp.schema.ts
-    import { defineSchema, table, column, relation } from '@dbsp/schema';
+    import { defineSchema } from '@dbsp/core';
 
     export const schema = defineSchema({
-      tables: {
-        users: table({
-          id: column.uuid().primaryKey(),
-          email: column.text().unique(),
-          // ...
-        }),
-      },
-      relations: {
+      users: {
+        id: { type: 'uuid', primaryKey: true },
+        email: { type: 'string', unique: true },
         // ...
       },
     });

@@ -154,7 +154,7 @@ export function generateSchemaFile(
 	lines.push('');
 
 	// Imports
-	lines.push("import { defineSchema } from '@dbsp/schema';");
+	lines.push("import { defineSchema } from '@dbsp/core';");
 	lines.push('');
 
 	// Schema definition

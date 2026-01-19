@@ -7,7 +7,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { ResolvedSchema } from '@dbsp/schema';
+import type { ResolvedSchema } from '@dbsp/core';
 import {
 	parseAssertionFile,
 	validateAssertionBlocks,

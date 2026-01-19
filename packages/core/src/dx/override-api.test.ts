@@ -5,7 +5,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { belongsTo, defineSchema, hasMany, hasOne } from '../schema-builder.js';
+import {
+	belongsTo,
+	defineSchemaBuilder,
+	hasMany,
+	hasOne,
+} from '../schema-builder.js';
 
 import { AmbiguousRelationError } from './errors.js';
 import { createOrm } from './orm.js';
@@ -14,7 +19,7 @@ import { createOrm } from './orm.js';
 // Test Schema: Same as DX-001 (Users with multiple Post relations)
 // ============================================================================
 
-const testSchema = defineSchema({
+const testSchema = defineSchemaBuilder({
 	users: {
 		id: 'number',
 		name: 'string',

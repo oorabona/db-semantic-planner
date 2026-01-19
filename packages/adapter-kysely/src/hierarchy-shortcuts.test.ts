@@ -4,7 +4,7 @@
  * These replace the old ancestors(), descendants(), subtree() methods (BREAKING CHANGE)
  */
 
-import { belongsTo, createOrm, defineSchema, hasMany } from '@dbsp/core';
+import { belongsTo, createOrm, defineSchemaBuilder, hasMany } from '@dbsp/core';
 import {
 	Kysely,
 	PostgresAdapter,
@@ -39,7 +39,7 @@ function createTestDb() {
 }
 
 // Adjacency model: categories with parent reference
-const categoryModel = defineSchema({
+const categoryModel = defineSchemaBuilder({
 	categories: {
 		id: 'uuid',
 		name: 'string',

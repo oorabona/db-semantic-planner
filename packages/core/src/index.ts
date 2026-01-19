@@ -176,12 +176,74 @@ export type {
 export {
 	belongsTo,
 	belongsToMany,
-	// Entry point
-	defineSchema,
+	// Builder entry point (returns SchemaBuilder)
+	defineSchemaBuilder,
 	hasMany,
 	// Relation helpers
 	hasOne,
 } from './schema-builder.js';
+
+// ============================================================================
+// Schema DSL (User-facing API)
+// ============================================================================
+
+export {
+	// Main entry point for schema definition
+	defineSchema,
+	SchemaValidationError,
+} from './schema-dsl.js';
+export type {
+	// Output
+	ResolvedSchema,
+	SchemaBelongsToRelation,
+	SchemaCardinality,
+	SchemaColumnDefinition,
+	// Column types
+	SchemaColumnType,
+	// Config
+	SchemaConfigInput,
+	// Conventions
+	SchemaConventionsDefinition,
+	SchemaDefinitionInput,
+	// Hints
+	SchemaFilterStrategy,
+	SchemaForeignKeyReference,
+	SchemaHasManyRelation,
+	SchemaHintDefinition,
+	SchemaHintsDefinition,
+	// Index types
+	SchemaIndexDefinition,
+	SchemaIndexesDefinition,
+	SchemaManyToManyRelation,
+	SchemaOnDeleteAction,
+	SchemaRelationDefinition,
+	// Relation types
+	SchemaRelationKind,
+	SchemaRelationsDefinition,
+	SchemaTableDefinition,
+	SchemaTablesDefinition,
+} from './schema-dsl-types.js';
+export {
+	// Type guards
+	isBelongsTo,
+	isHasMany,
+	isManyToMany,
+} from './schema-dsl-types.js';
+
+// ============================================================================
+// Conventions (FK detection, pluralization)
+// ============================================================================
+
+export {
+	capitalize,
+	DEFAULT_CONVENTIONS,
+	decapitalize,
+	detectForeignKeys,
+	detectManyToMany,
+	inferRelations,
+	pluralize,
+	singularize,
+} from './conventions.js';
 
 // ============================================================================
 // Semantic Planner

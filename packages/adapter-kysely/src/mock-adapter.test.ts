@@ -6,7 +6,7 @@
 import {
 	belongsTo,
 	createOrm,
-	defineSchema,
+	defineSchemaBuilder,
 	ExecutionError,
 	eq,
 	hasMany,
@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { createMockAdapter, MockAdapter } from './mock-adapter.js';
 
 // Test schema
-const testSchema = defineSchema({
+const testSchema = defineSchemaBuilder({
 	users: {
 		id: 'serial',
 		name: { type: 'string' },

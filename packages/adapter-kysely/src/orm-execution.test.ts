@@ -1,7 +1,7 @@
 import {
 	belongsTo,
 	createOrm,
-	defineSchema,
+	defineSchemaBuilder,
 	ExecutionError,
 	eq,
 	hasMany,
@@ -14,7 +14,7 @@ import { InvalidIdentifierError } from './errors.js';
 import { createKyselyAdapter } from './kysely-adapter.js';
 
 // Create proper ModelIR using schema builder
-const testModel = defineSchema({
+const testModel = defineSchemaBuilder({
 	users: {
 		id: 'integer',
 		name: { type: 'string' },

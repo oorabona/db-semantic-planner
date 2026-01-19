@@ -5,7 +5,7 @@
  * for column naming transformations.
  */
 
-import { defineSchema, type ModelIR } from '@dbsp/core';
+import { defineSchemaBuilder, type ModelIR } from '@dbsp/core';
 import { CamelCasePlugin, Kysely, PostgresDialect } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -20,7 +20,7 @@ const mockPool = new pg.Pool({
 
 // Create a simple test schema using ModelIR
 function createTestSchema(): ModelIR {
-	return defineSchema({
+	return defineSchemaBuilder({
 		users: {
 			id: { type: 'number' },
 			firstName: { type: 'string' },
@@ -113,7 +113,7 @@ describe('generateDDL', () => {
 
 		it('transforms table names to snake_case', () => {
 			// Create schema with multi-word table names
-			const schema = defineSchema({
+			const schema = defineSchemaBuilder({
 				userProfiles: {
 					id: { type: 'number' },
 					profileName: { type: 'string' },
@@ -172,7 +172,7 @@ describe('generateDDL', () => {
 		});
 
 		it('generates UNIQUE constraint on column', () => {
-			const schema = defineSchema({
+			const schema = defineSchemaBuilder({
 				users: {
 					id: { type: 'integer', primaryKey: true },
 					email: { type: 'string', unique: true },
@@ -186,7 +186,7 @@ describe('generateDDL', () => {
 		});
 
 		it('generates onDelete CASCADE on foreign key', () => {
-			const schema = defineSchema({
+			const schema = defineSchemaBuilder({
 				users: {
 					id: { type: 'integer', primaryKey: true },
 				},
@@ -206,7 +206,7 @@ describe('generateDDL', () => {
 		});
 
 		it('generates CREATE INDEX statement', () => {
-			const schema = defineSchema({
+			const schema = defineSchemaBuilder({
 				users: {
 					id: { type: 'integer', primaryKey: true },
 					email: { type: 'string', index: true },
@@ -222,7 +222,7 @@ describe('generateDDL', () => {
 
 		it('generates unique index', () => {
 			// Use TableDefWithConfig syntax for schema-builder.ts
-			const schema = defineSchema({
+			const schema = defineSchemaBuilder({
 				users: {
 					columns: {
 						id: { type: 'integer', primaryKey: true },

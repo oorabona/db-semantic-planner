@@ -733,3 +733,20 @@ replace_content(needle="supportsCycleDetection: false", repl="supportsCycleDetec
 - Quality gates bypassed
 
 **Prevention:** Before marking any skill todo as completed, ask: "Did I actually invoke this skill?" If not → invoke it now.
+
+### Schema Type Hierarchy: ColumnDefInput vs SchemaColumnDefinition (2026-01-19)
+
+**Symptoms:** TypeScript errors like "Property 'type' does not exist on type 'string'" when working with schema types in generators.
+
+**Cause:** Using the wrong type for the context. The DSL has a type hierarchy:
+- `ColumnDefInput` is a union that accepts both shorthand strings (like 'uuid') and full objects
+- `SchemaColumnDefinition` is always an object with properties like type, nullable, primaryKey
+
+When writing generators that process resolved schemas, the data is always in object form, but using `ColumnDefInput` as the type includes the string case which TypeScript correctly flags.
+
+**Solution:**
+- For DSL input types (what users write): use `ColumnDefInput`
+- For resolved/compiled schema types (what generators process): use `SchemaColumnDefinition`
+- Similarly for relations: use `SchemaRelationDefinition` not any input union type
+
+**Prevention:** When writing code that processes resolved schemas (after defineSchema runs), always use the `Schema*` prefixed types from core which represent the normalized object form.

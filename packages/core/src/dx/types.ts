@@ -264,8 +264,8 @@ export type OrderByInput =
  * ```
  */
 /**
- * Union type for all ORM options (backwards compatibility).
- * @deprecated Use specific option types (OrmOptionsWithModel, OrmOptionsWithSchema, OrmOptionsWithAdapter)
+ * Union type for all ORM options.
+ * Prefer specific option types (OrmOptionsWithModel, OrmOptionsWithSchema, OrmOptionsWithAdapter).
  */
 export type OrmOptions<DB = unknown> =
 	| OrmOptionsWithModel<DB>
@@ -301,7 +301,7 @@ interface OrmOptionsBase<DB = unknown> {
 
 /**
  * OrmOptions with explicit model (sync creation).
- * @deprecated Use OrmOptionsWithSchema for codegen-first approach.
+ * Prefer OrmOptionsWithSchema for codegen-first approach.
  */
 export interface OrmOptionsWithModel<DB = unknown> extends OrmOptionsBase<DB> {
 	readonly model: ModelIR;

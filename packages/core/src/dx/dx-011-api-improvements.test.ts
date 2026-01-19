@@ -10,14 +10,14 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
 	belongsTo,
-	defineSchema,
+	defineSchemaBuilder,
 	hasMany,
 	type WhereIntent,
 } from '../schema-builder.js';
 import { and, createOrm, eq, or } from './index.js';
 
 // Schema with relations for testing
-const testSchema = defineSchema({
+const testSchema = defineSchemaBuilder({
 	users: {
 		id: { type: 'number' },
 		name: { type: 'string' },

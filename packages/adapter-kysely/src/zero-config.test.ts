@@ -1,5 +1,5 @@
 import type { Adapter } from '@dbsp/core';
-import { createOrm, defineSchema } from '@dbsp/core';
+import { createOrm, defineSchemaBuilder } from '@dbsp/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -74,7 +74,7 @@ describe('Zero-Config ORM (with adapter)', () => {
 	// See tests/e2e/introspection.test.ts
 
 	describe('createOrm({ model, adapter }) - sync path', () => {
-		const explicitModel = defineSchema({
+		const explicitModel = defineSchemaBuilder({
 			users: {
 				id: 'number',
 				name: 'string',

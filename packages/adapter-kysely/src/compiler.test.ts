@@ -1,6 +1,6 @@
 import {
 	belongsTo,
-	defineSchema,
+	defineSchemaBuilder,
 	hasMany,
 	ModelIRImpl,
 	plan,
@@ -51,7 +51,7 @@ function createTestKysely() {
 /**
  * Basic schema: Users with posts
  */
-const basicSchema = defineSchema({
+const basicSchema = defineSchemaBuilder({
 	users: {
 		id: { type: 'number' },
 		name: { type: 'string' },
@@ -79,7 +79,7 @@ const basicSchema = defineSchema({
 /**
  * Q1 Schema: Products with images (EXISTS filter test)
  */
-const q1Schema = defineSchema({
+const q1Schema = defineSchemaBuilder({
 	products: {
 		id: { type: 'number' },
 		name: { type: 'string' },
@@ -1256,7 +1256,7 @@ describe('SQL Compiler', () => {
 		/**
 		 * Recursive schema: Categories with parent (for hierarchical traversal)
 		 */
-		const recursiveSchema = defineSchema({
+		const recursiveSchema = defineSchemaBuilder({
 			categories: {
 				id: { type: 'number' },
 				name: { type: 'string' },
@@ -1274,7 +1274,7 @@ describe('SQL Compiler', () => {
 		/**
 		 * Edge-table schema: Roles with edges (for role hierarchy)
 		 */
-		const edgeTableSchema = defineSchema({
+		const edgeTableSchema = defineSchemaBuilder({
 			roles: {
 				id: { type: 'number' },
 				name: { type: 'string' },
@@ -2888,7 +2888,7 @@ describe('SQL Compiler', () => {
 				const kysely = createTestKysely();
 
 				// Given: users hasMany posts with explicit includeStrategy: 'join'
-				const schemaWithJoinHint = defineSchema({
+				const schemaWithJoinHint = defineSchemaBuilder({
 					users: {
 						id: { type: 'number' },
 						name: { type: 'string' },
@@ -3098,7 +3098,7 @@ describe('SQL Compiler', () => {
 				const kysely = createTestKysely();
 
 				// Given: users hasMany posts with explicit 'lateral' strategy hint
-				const schemaWithLateral = defineSchema({
+				const schemaWithLateral = defineSchemaBuilder({
 					users: {
 						id: { type: 'number' },
 						name: { type: 'string' },
@@ -3147,7 +3147,7 @@ describe('SQL Compiler', () => {
 			it('should support limit and orderBy in LATERAL subquery', () => {
 				const kysely = createTestKysely();
 
-				const schemaWithLateral = defineSchema({
+				const schemaWithLateral = defineSchemaBuilder({
 					users: {
 						id: { type: 'number' },
 						name: { type: 'string' },
@@ -3202,7 +3202,7 @@ describe('SQL Compiler', () => {
 				const kysely = createTestKysely();
 
 				// Given: users hasMany posts with explicit 'json_agg' strategy hint
-				const schemaWithJsonAgg = defineSchema({
+				const schemaWithJsonAgg = defineSchemaBuilder({
 					users: {
 						id: { type: 'number' },
 						name: { type: 'string' },
@@ -3257,7 +3257,7 @@ describe('SQL Compiler', () => {
 			it('should support orderBy in JSON_AGG aggregation', () => {
 				const kysely = createTestKysely();
 
-				const schemaWithJsonAgg = defineSchema({
+				const schemaWithJsonAgg = defineSchemaBuilder({
 					users: {
 						id: { type: 'number' },
 						name: { type: 'string' },
@@ -3307,7 +3307,7 @@ describe('SQL Compiler', () => {
 			it('should return empty JSON array when no related records', () => {
 				const kysely = createTestKysely();
 
-				const schemaWithJsonAgg = defineSchema({
+				const schemaWithJsonAgg = defineSchemaBuilder({
 					users: {
 						id: { type: 'number' },
 						name: { type: 'string' },
@@ -3652,7 +3652,7 @@ describe.todo('ADAPTER-003: Smart Column Aliasing - onCollision mode not yet imp
 	// Schema with overlapping column names for collision testing
 	// users: id, name, createdAt
 	// posts: id, title, userId, createdAt (id and createdAt collide with users)
-	const schemaWithCollisions = defineSchema({
+	const schemaWithCollisions = defineSchemaBuilder({
 		users: {
 			id: { type: 'number' },
 			name: { type: 'string' },
@@ -3790,7 +3790,7 @@ describe.todo('ADAPTER-003: Smart Column Aliasing - onCollision mode not yet imp
 
 	describe('collision detection across multiple includes', () => {
 		// Schema with multiple relations where column names collide
-		const schemaWithMultipleIncludes = defineSchema({
+		const schemaWithMultipleIncludes = defineSchemaBuilder({
 			comments: {
 				id: { type: 'number' },
 				content: { type: 'string' },
@@ -4052,7 +4052,7 @@ describe('CORE-006: Composite Key Support', () => {
 
 	describe('CTE Include Strategy (CLI-012)', () => {
 		const createCteTestSchema = () =>
-			defineSchema({
+			defineSchemaBuilder({
 				categories: {
 					id: 'integer',
 					name: { type: 'string' },
@@ -4232,7 +4232,7 @@ describe('CORE-006: Composite Key Support', () => {
 		it('should apply filters to nested CTEs (CLI-012b)', () => {
 			const kysely = createTestKysely();
 			// Extended schema with nested relations
-			const model = defineSchema({
+			const model = defineSchemaBuilder({
 				users: {
 					id: 'integer',
 					name: { type: 'string' },
@@ -4314,7 +4314,7 @@ describe('CORE-006: Composite Key Support', () => {
 		describe('recursive CTEs (CLI-012c)', () => {
 			// Helper to create self-referential schema
 			function createRecursiveSchema() {
-				return defineSchema({
+				return defineSchemaBuilder({
 					categories: {
 						id: 'integer',
 						name: { type: 'string' },
@@ -4423,7 +4423,7 @@ describe('CORE-006: Composite Key Support', () => {
 
 			it('should apply include.where filter to recursive CTE', () => {
 				const kysely = createTestKysely();
-				const model = defineSchema({
+				const model = defineSchemaBuilder({
 					categories: {
 						id: 'integer',
 						name: { type: 'string' },

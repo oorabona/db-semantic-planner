@@ -1,6 +1,6 @@
 import {
 	belongsTo,
-	defineSchema,
+	defineSchemaBuilder,
 	hasMany,
 	plan,
 	type QueryIntent,
@@ -29,7 +29,7 @@ function createTestKysely() {
 	});
 }
 
-const basicSchema = defineSchema({
+const basicSchema = defineSchemaBuilder({
 	users: {
 		id: 'number',
 		name: 'string',
@@ -432,7 +432,7 @@ describe('Dump API', () => {
 
 	describe('Recursive Include Integration (DX-017)', () => {
 		// Schema with self-referential relation for recursive queries
-		const recursiveSchema = defineSchema({
+		const recursiveSchema = defineSchemaBuilder({
 			categories: {
 				id: 'number',
 				name: 'string',

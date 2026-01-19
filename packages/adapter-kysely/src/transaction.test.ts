@@ -1,11 +1,17 @@
-import { belongsTo, createOrm, defineSchema, eq, hasMany } from '@dbsp/core';
+import {
+	belongsTo,
+	createOrm,
+	defineSchemaBuilder,
+	eq,
+	hasMany,
+} from '@dbsp/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createKyselyAdapter } from './kysely-adapter.js';
 
 // Create proper ModelIR using schema builder
-const testModel = defineSchema({
+const testModel = defineSchemaBuilder({
 	users: {
 		id: 'integer',
 		name: 'string',

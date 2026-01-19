@@ -1,29 +1,31 @@
 /**
- * ARCH-002 Block 2: Convention Inference
+ * Schema Convention Inference
  *
  * Detects foreign keys and M:N relations using:
  * 1. Explicit `references` (highest priority)
  * 2. Convention patterns (fallback)
  *
  * M:N auto-detection: tables with exactly 2 FKs and no business columns.
+ *
+ * Migrated from @dbsp/schema/conventions.ts as part of ARCH-003.
  */
 
 import type {
-	BelongsToRelation,
-	ColumnDefinition,
-	ConventionsDefinition,
-	HasManyRelation,
-	ManyToManyRelation,
-	RelationsDefinition,
-	TableDefinition,
-	TablesDefinition,
-} from './types.js';
+	SchemaBelongsToRelation,
+	SchemaColumnDefinition,
+	SchemaConventionsDefinition,
+	SchemaHasManyRelation,
+	SchemaManyToManyRelation,
+	SchemaRelationsDefinition,
+	SchemaTableDefinition,
+	SchemaTablesDefinition,
+} from './schema-dsl-types.js';
 
 // =============================================================================
 // Default Conventions
 // =============================================================================
 
-export const DEFAULT_CONVENTIONS: Required<ConventionsDefinition> = {
+export const DEFAULT_CONVENTIONS: Required<SchemaConventionsDefinition> = {
 	fkPattern: '{singular}Id',
 	pluralize: true,
 	timestamps: ['createdAt', 'updatedAt'],
@@ -109,8 +111,8 @@ interface DetectedFK {
  */
 export function detectForeignKeys(
 	tableName: string,
-	table: TableDefinition,
-	conventions: Required<ConventionsDefinition>,
+	table: SchemaTableDefinition,
+	conventions: Required<SchemaConventionsDefinition>,
 	tableNames: Set<string>,
 ): DetectedFK[] {
 	const fks: DetectedFK[] = [];
@@ -203,7 +205,7 @@ interface DetectedManyToMany {
  */
 function isBusinessColumn(
 	colName: string,
-	colDef: ColumnDefinition,
+	colDef: SchemaColumnDefinition,
 	timestamps: string[],
 ): boolean {
 	// Primary key is not business data
@@ -227,8 +229,8 @@ function isBusinessColumn(
  * Criteria: exactly 2 FK columns, no business columns.
  */
 export function detectManyToMany(
-	tables: TablesDefinition,
-	conventions: Required<ConventionsDefinition>,
+	tables: SchemaTablesDefinition,
+	conventions: Required<SchemaConventionsDefinition>,
 	tableNames: Set<string>,
 ): DetectedManyToMany[] {
 	const results: DetectedManyToMany[] = [];
@@ -272,11 +274,11 @@ export function detectManyToMany(
  * Returns a map of 'sourceTable.relationName' → RelationDefinition.
  */
 export function inferRelations(
-	tables: TablesDefinition,
-	conventions: Required<ConventionsDefinition>,
-	explicitRelations: RelationsDefinition = {},
-): RelationsDefinition {
-	const result: RelationsDefinition = { ...explicitRelations };
+	tables: SchemaTablesDefinition,
+	conventions: Required<SchemaConventionsDefinition>,
+	explicitRelations: SchemaRelationsDefinition = {},
+): SchemaRelationsDefinition {
+	const result: SchemaRelationsDefinition = { ...explicitRelations };
 	const tableNames = new Set(Object.keys(tables));
 
 	// First pass: detect M:N relations (junction tables)
@@ -300,7 +302,7 @@ export function inferRelations(
 
 		// Only add if not explicitly defined
 		if (!(keyAtoB in result)) {
-			const rel: ManyToManyRelation = {
+			const rel: SchemaManyToManyRelation = {
 				kind: 'manyToMany',
 				target: tableB,
 				through: junction,
@@ -311,7 +313,7 @@ export function inferRelations(
 		}
 
 		if (!(keyBtoA in result)) {
-			const rel: ManyToManyRelation = {
+			const rel: SchemaManyToManyRelation = {
 				kind: 'manyToMany',
 				target: tableA,
 				through: junction,
@@ -335,7 +337,7 @@ export function inferRelations(
 			// BelongsTo: source has FK to target
 			const belongsToKey = `${tableName}.${fk.inferredName}`;
 			if (!(belongsToKey in result)) {
-				const rel: BelongsToRelation = {
+				const rel: SchemaBelongsToRelation = {
 					kind: 'belongsTo',
 					target: fk.targetTable,
 					foreignKey: fk.column,
@@ -350,7 +352,7 @@ export function inferRelations(
 				: tableName;
 			const hasManyKey = `${fk.targetTable}.${hasManyName}`;
 			if (!(hasManyKey in result)) {
-				const rel: HasManyRelation = {
+				const rel: SchemaHasManyRelation = {
 					kind: 'hasMany',
 					target: tableName,
 					foreignKey: fk.column,

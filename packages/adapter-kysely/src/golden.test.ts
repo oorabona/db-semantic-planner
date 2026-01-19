@@ -12,7 +12,7 @@ import {
 	AmbiguousPlanError,
 	belongsTo,
 	belongsToMany,
-	defineSchema,
+	defineSchemaBuilder,
 	hasMany,
 	plan,
 	type QueryIntent,
@@ -45,7 +45,7 @@ function createTestKysely() {
  * - Filter: images where locale='fr' AND type='main' AND approved=true
  * - Expected: EXISTS subquery
  */
-const q1Schema = defineSchema({
+const q1Schema = defineSchemaBuilder({
 	products: {
 		id: { type: 'number' },
 		name: { type: 'string' },
@@ -80,7 +80,7 @@ const q1Schema = defineSchema({
  * - When same relation accessed multiple times, extract to CTE
  * - Expected: WITH clause in generated SQL
  */
-const q2Schema = defineSchema({
+const q2Schema = defineSchemaBuilder({
 	categories: {
 		id: { type: 'number' },
 		name: { type: 'string' },
@@ -111,7 +111,7 @@ const q2Schema = defineSchema({
  * - Users have reviewed posts (reviewedPosts)
  * - Include "posts" should throw AmbiguousPlanError
  */
-const q3Schema = defineSchema({
+const q3Schema = defineSchemaBuilder({
 	users: {
 		id: { type: 'number' },
 		name: { type: 'string' },
@@ -681,7 +681,7 @@ describe('Q4: Filter strategy contract enforcement', () => {
 	const kysely = createTestKysely();
 
 	// Schema with both belongsTo and hasMany relations
-	const filterContractSchema = defineSchema({
+	const filterContractSchema = defineSchemaBuilder({
 		posts: {
 			id: { type: 'number' },
 			title: { type: 'string' },
@@ -827,7 +827,7 @@ describe('Q4: Filter strategy contract enforcement', () => {
 
 	describe('explicit strategy override', () => {
 		// Schema with explicit strategy hints
-		const overrideSchema = defineSchema({
+		const overrideSchema = defineSchemaBuilder({
 			users: {
 				id: { type: 'number' },
 				name: { type: 'string' },
@@ -929,7 +929,7 @@ describe('Q5: Include strategy contract enforcement', () => {
 	const kysely = createTestKysely();
 
 	// Schema with belongsTo and hasMany relations
-	const includeContractSchema = defineSchema({
+	const includeContractSchema = defineSchemaBuilder({
 		posts: {
 			id: { type: 'number' },
 			title: { type: 'string' },
@@ -1053,7 +1053,7 @@ describe('Q5: Include strategy contract enforcement', () => {
 
 	describe('explicit strategy override', () => {
 		// Schema with explicit include strategy hints
-		const overrideSchema = defineSchema({
+		const overrideSchema = defineSchemaBuilder({
 			users: {
 				id: { type: 'number' },
 				name: { type: 'string' },
@@ -1115,7 +1115,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 	const kysely = createTestKysely();
 
 	// Schema with clear FK directions for testing
-	const fkDirectionSchema = defineSchema({
+	const fkDirectionSchema = defineSchemaBuilder({
 		posts: {
 			id: { type: 'number' },
 			title: { type: 'string' },
@@ -1193,7 +1193,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 
 		it('should use source.fk = target.pk for belongsTo EXISTS (posts.author)', () => {
 			// Use explicit EXISTS strategy for belongsTo
-			const existsSchema = defineSchema({
+			const existsSchema = defineSchemaBuilder({
 				posts: {
 					id: { type: 'number' },
 					title: { type: 'string' },
@@ -1288,7 +1288,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 
 		it('should use target.fk = source.pk for hasMany JOIN (explicit override)', () => {
 			// Use explicit JOIN strategy for hasMany
-			const joinSchema = defineSchema({
+			const joinSchema = defineSchemaBuilder({
 				users: {
 					id: { type: 'number' },
 					name: { type: 'string' },
@@ -1373,7 +1373,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 
 		it('should use target.fk = source.pk for hasMany include with JOIN override', () => {
 			// Use explicit JOIN strategy for hasMany include
-			const joinIncludeSchema = defineSchema({
+			const joinIncludeSchema = defineSchemaBuilder({
 				users: {
 					id: { type: 'number' },
 					name: { type: 'string' },
@@ -1434,7 +1434,7 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 	const kysely = createTestKysely();
 
 	// Schema with M:N relation: posts belongsToMany tags through postTags
-	const mnSchema = defineSchema({
+	const mnSchema = defineSchemaBuilder({
 		posts: {
 			id: { type: 'number' },
 			title: { type: 'string' },
@@ -1486,7 +1486,7 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 			};
 
 			// Force JOIN strategy
-			const schemaWithJoin = defineSchema({
+			const schemaWithJoin = defineSchemaBuilder({
 				posts: { id: { type: 'number' }, title: { type: 'string' } },
 				tags: { id: { type: 'number' }, name: { type: 'string' } },
 				postTags: {
@@ -1597,7 +1597,7 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 	describe('M:N include with JOIN strategy', () => {
 		it('should generate two LEFT JOINs for belongsToMany include', () => {
 			// Force JOIN strategy for include
-			const schemaWithJoin = defineSchema({
+			const schemaWithJoin = defineSchemaBuilder({
 				posts: { id: { type: 'number' }, title: { type: 'string' } },
 				tags: { id: { type: 'number' }, name: { type: 'string' } },
 				postTags: {
@@ -1641,7 +1641,7 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 
 	describe('M:N with custom FK names', () => {
 		it('should use custom foreignKey and otherKey', () => {
-			const customFkSchema = defineSchema({
+			const customFkSchema = defineSchemaBuilder({
 				users: { id: { type: 'number' }, name: { type: 'string' } },
 				roles: { id: { type: 'number' }, roleName: { type: 'string' } },
 				userRoles: {

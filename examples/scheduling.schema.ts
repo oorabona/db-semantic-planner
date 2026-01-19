@@ -16,7 +16,7 @@
  *   > rooms include bookings where booking_period containedBy [2024-01-01,2024-02-01)
  */
 
-import { defineSchema } from '@dbsp/schema';
+import { defineSchema } from '@dbsp/core';
 
 export default defineSchema({
 	rooms: {

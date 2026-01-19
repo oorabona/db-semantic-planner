@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { belongsTo, defineSchema, hasMany, type QueryIntent } from './index.js';
+import {
+	belongsTo,
+	defineSchemaBuilder,
+	hasMany,
+	type QueryIntent,
+} from './index.js';
 import type { RecursiveIntent } from './intent-ast.js';
 import {
 	AmbiguousPlanError,
@@ -16,7 +21,7 @@ import {
 /**
  * Q1 Schema: Products with images (for EXISTS filter test)
  */
-const q1Schema = defineSchema({
+const q1Schema = defineSchemaBuilder({
 	products: {
 		id: { type: 'number' },
 		name: { type: 'string' },
@@ -42,7 +47,7 @@ const q1Schema = defineSchema({
 /**
  * Q2 Schema: Categories with products (for CTE extraction test)
  */
-const q2Schema = defineSchema({
+const q2Schema = defineSchemaBuilder({
 	categories: {
 		id: { type: 'number' },
 		name: { type: 'string' },
@@ -66,7 +71,7 @@ const q2Schema = defineSchema({
 /**
  * Q3 Schema: Users with multiple relations to posts (for ambiguity test)
  */
-const q3Schema = defineSchema({
+const q3Schema = defineSchemaBuilder({
 	users: {
 		id: { type: 'number' },
 		name: { type: 'string' },
@@ -714,7 +719,7 @@ describe('Semantic Planner', () => {
 		/**
 		 * Recursive schema: Categories with parent (for hierarchical traversal)
 		 */
-		const recursiveSchema = defineSchema({
+		const recursiveSchema = defineSchemaBuilder({
 			categories: {
 				id: { type: 'number' },
 				name: { type: 'string' },
@@ -732,7 +737,7 @@ describe('Semantic Planner', () => {
 		/**
 		 * Edge-table schema: Roles with edges (for role hierarchy)
 		 */
-		const edgeTableSchema = defineSchema({
+		const edgeTableSchema = defineSchemaBuilder({
 			roles: {
 				id: { type: 'number' },
 				name: { type: 'string' },
@@ -1096,7 +1101,7 @@ describe('Semantic Planner', () => {
 	});
 
 	describe('RAW_SQL_USAGE warning', () => {
-		const simpleSchema = defineSchema({
+		const simpleSchema = defineSchemaBuilder({
 			users: {
 				id: { type: 'number' },
 				name: { type: 'string' },

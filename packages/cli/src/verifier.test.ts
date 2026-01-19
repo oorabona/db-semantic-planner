@@ -2,7 +2,7 @@
  * Tests for ARCH-002 Block 7: Schema Verifier
  */
 
-import { defineSchema } from '@dbsp/schema';
+import { defineSchema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { type DbTableInfo, formatVerifyResult, verify } from './verifier.js';
 
@@ -10,15 +10,13 @@ describe('verify', () => {
 	describe('table-level drift', () => {
 		it('should detect missing table in database', () => {
 			const schema = defineSchema({
-				tables: {
-					users: {
-						id: { type: 'uuid', primaryKey: true },
-						name: { type: 'string' },
-					},
-					posts: {
-						id: { type: 'uuid', primaryKey: true },
-						title: { type: 'string' },
-					},
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					name: { type: 'string' },
+				},
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					title: { type: 'string' },
 				},
 			});
 
@@ -46,10 +44,8 @@ describe('verify', () => {
 
 		it('should detect extra table in database', () => {
 			const schema = defineSchema({
-				tables: {
-					users: {
-						id: { type: 'uuid', primaryKey: true },
-					},
+				users: {
+					id: { type: 'uuid', primaryKey: true },
 				},
 			});
 
@@ -79,11 +75,9 @@ describe('verify', () => {
 
 		it('should return valid when tables match', () => {
 			const schema = defineSchema({
-				tables: {
-					users: {
-						id: { type: 'uuid', primaryKey: true },
-						name: { type: 'string' },
-					},
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					name: { type: 'string' },
 				},
 			});
 
@@ -109,12 +103,10 @@ describe('verify', () => {
 	describe('column-level drift', () => {
 		it('should detect missing column in database', () => {
 			const schema = defineSchema({
-				tables: {
-					users: {
-						id: { type: 'uuid', primaryKey: true },
-						name: { type: 'string' },
-						email: { type: 'string' },
-					},
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					name: { type: 'string' },
+					email: { type: 'string' },
 				},
 			});
 
@@ -144,11 +136,9 @@ describe('verify', () => {
 
 		it('should detect extra column in database', () => {
 			const schema = defineSchema({
-				tables: {
-					users: {
-						id: { type: 'uuid', primaryKey: true },
-						name: { type: 'string' },
-					},
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					name: { type: 'string' },
 				},
 			});
 
@@ -179,11 +169,9 @@ describe('verify', () => {
 
 		it('should detect type mismatch', () => {
 			const schema = defineSchema({
-				tables: {
-					users: {
-						id: { type: 'uuid', primaryKey: true },
-						age: { type: 'integer' },
-					},
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					age: { type: 'integer' },
 				},
 			});
 
@@ -212,11 +200,9 @@ describe('verify', () => {
 
 		it('should detect nullable mismatch', () => {
 			const schema = defineSchema({
-				tables: {
-					users: {
-						id: { type: 'uuid', primaryKey: true },
-						email: { type: 'string', nullable: false },
-					},
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					email: { type: 'string', nullable: false },
 				},
 			});
 
@@ -246,11 +232,9 @@ describe('verify', () => {
 	describe('type compatibility', () => {
 		it('should accept varchar as string', () => {
 			const schema = defineSchema({
-				tables: {
-					users: {
-						id: { type: 'uuid', primaryKey: true },
-						name: { type: 'string' },
-					},
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					name: { type: 'string' },
 				},
 			});
 
@@ -274,11 +258,9 @@ describe('verify', () => {
 
 		it('should accept int4 as integer', () => {
 			const schema = defineSchema({
-				tables: {
-					users: {
-						id: { type: 'uuid', primaryKey: true },
-						age: { type: 'integer' },
-					},
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					age: { type: 'integer' },
 				},
 			});
 
@@ -299,11 +281,9 @@ describe('verify', () => {
 
 		it('should accept timestamptz as timestamp', () => {
 			const schema = defineSchema({
-				tables: {
-					users: {
-						id: { type: 'uuid', primaryKey: true },
-						createdAt: { type: 'timestamp' },
-					},
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					createdAt: { type: 'timestamp' },
 				},
 			});
 
@@ -328,11 +308,9 @@ describe('verify', () => {
 
 		it('should accept jsonb as json', () => {
 			const schema = defineSchema({
-				tables: {
-					users: {
-						id: { type: 'uuid', primaryKey: true },
-						metadata: { type: 'json' },
-					},
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					metadata: { type: 'json' },
 				},
 			});
 

@@ -11,7 +11,7 @@
  */
 
 import { generateDDL, introspect } from '@dbsp/adapter-kysely';
-import { defineSchema } from '@dbsp/core';
+import { defineSchemaBuilder } from '@dbsp/core';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { generateSchemaFile } from '../../packages/cli/src/generators/schema-codegen.js';
@@ -38,20 +38,20 @@ describe.skipIf(shouldSkipE2E())('DDL → Introspect Round-Trip', () => {
 
 	it('round-trips a simple schema through DDL and introspection', async () => {
 		// 1. Define a TypeScript schema
-		const originalModel = defineSchema({
+		const originalModel = defineSchemaBuilder({
 			users: {
 				id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
 				email: { type: 'string' },
 				name: { type: 'string', nullable: true },
-				active: { type: 'boolean', default: true },
-				created_at: { type: 'datetime', default: 'now()' },
+				active: { type: 'boolean', default: 'true' },
+				created_at: { type: 'date', default: 'now()' },
 			},
 			posts: {
 				id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
 				title: { type: 'string' },
 				content: { type: 'string', nullable: true },
 				author_id: { type: 'uuid', references: { table: 'users' } },
-				published: { type: 'boolean', default: false },
+				published: { type: 'boolean', default: 'false' },
 			},
 			comments: {
 				id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
@@ -94,7 +94,7 @@ describe.skipIf(shouldSkipE2E())('DDL → Introspect Round-Trip', () => {
 
 		// Check generated code structure
 		expect(generatedCode).toContain(
-			"import { defineSchema } from '@dbsp/schema'",
+			"import { defineSchema } from '@dbsp/core'",
 		);
 		expect(generatedCode).toContain('export const schema = defineSchema({');
 

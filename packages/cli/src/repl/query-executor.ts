@@ -6,6 +6,7 @@
  */
 
 import { createMockAdapter } from '@dbsp/adapter-kysely';
+import type { ResolvedSchema } from '@dbsp/core';
 import {
 	and,
 	assertResolvedSchemaToGeneratedSchema,
@@ -29,7 +30,6 @@ import {
 	rangeOverlaps,
 	type WhereIntent,
 } from '@dbsp/core';
-import type { ResolvedSchema } from '@dbsp/schema';
 import type {
 	ParsedAggregate,
 	ParsedInclude,

@@ -10,10 +10,10 @@
  */
 
 import type {
-	ColumnDefinition,
 	ResolvedSchema,
+	SchemaColumnDefinition,
 	ColumnType as SchemaColumnType,
-} from '@dbsp/schema';
+} from '@dbsp/core';
 
 export interface KyselyOutput {
 	/** Generated DB interface file content */
@@ -29,11 +29,13 @@ const TYPE_MAP: Record<SchemaColumnType, string> = {
 	uuid: 'string',
 	string: 'string',
 	text: 'string',
+	number: 'number',
 	integer: 'number',
 	bigint: 'bigint',
 	decimal: 'string', // Decimal as string to preserve precision
 	boolean: 'boolean',
 	timestamp: 'Date',
+	datetime: 'Date',
 	date: 'Date',
 	time: 'string',
 	json: 'unknown',
@@ -128,7 +130,7 @@ function generateTableTypes(schema: ResolvedSchema): string {
  */
 function generateColumnType(
 	colName: string,
-	col: ColumnDefinition,
+	col: SchemaColumnDefinition,
 	timestamps: Set<string>,
 ): string {
 	const baseType = TYPE_MAP[col.type] ?? 'unknown';
