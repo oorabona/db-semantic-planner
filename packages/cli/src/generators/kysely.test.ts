@@ -138,6 +138,7 @@ describe('generateKysely', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -162,6 +163,7 @@ describe('generateKysely', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -194,6 +196,7 @@ describe('generateKysely', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 

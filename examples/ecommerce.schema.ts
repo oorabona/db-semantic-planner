@@ -18,7 +18,7 @@ export default defineSchema(
 			id: { type: 'integer', primaryKey: true },
 			name: { type: 'string', nullable: false },
 			slug: { type: 'string', nullable: false, unique: true },
-			parentId: { type: 'integer', nullable: true, references: { table: 'categories' } },
+			parentId: { type: 'integer', nullable: true, references: { table: 'categories', onDelete: 'SET NULL' }, index: true },
 			sortOrder: { type: 'integer', default: '0' },
 		},
 
@@ -30,15 +30,15 @@ export default defineSchema(
 			description: { type: 'text', nullable: true },
 			price: { type: 'decimal', nullable: false },
 			stock: { type: 'integer', default: '0' },
-			categoryId: { type: 'integer', references: { table: 'categories' } },
-			active: { type: 'boolean', default: 'true' },
+			categoryId: { type: 'integer', references: { table: 'categories', onDelete: 'RESTRICT' }, index: true },
+			active: { type: 'boolean', default: 'true', index: true },
 			createdAt: { type: 'timestamp', default: 'now()' },
 		},
 
 		// Product variants (size, color, etc.)
 		variants: {
 			id: { type: 'integer', primaryKey: true },
-			productId: { type: 'integer', references: { table: 'products' } },
+			productId: { type: 'integer', references: { table: 'products', onDelete: 'CASCADE' }, index: true },
 			sku: { type: 'string', nullable: false, unique: true },
 			name: { type: 'string', nullable: false },
 			priceModifier: { type: 'decimal', default: '0' },
@@ -58,7 +58,7 @@ export default defineSchema(
 		// Customer addresses
 		addresses: {
 			id: { type: 'integer', primaryKey: true },
-			customerId: { type: 'integer', references: { table: 'customers' } },
+			customerId: { type: 'integer', references: { table: 'customers', onDelete: 'CASCADE' }, index: true },
 			type: { type: 'string', nullable: false }, // 'billing' | 'shipping'
 			street: { type: 'string', nullable: false },
 			city: { type: 'string', nullable: false },
@@ -71,8 +71,8 @@ export default defineSchema(
 		orders: {
 			id: { type: 'integer', primaryKey: true },
 			orderNumber: { type: 'string', nullable: false, unique: true },
-			customerId: { type: 'integer', references: { table: 'customers' } },
-			status: { type: 'string', default: "'pending'" }, // pending, paid, shipped, delivered
+			customerId: { type: 'integer', references: { table: 'customers', onDelete: 'RESTRICT' }, index: true },
+			status: { type: 'string', default: "'pending'", index: true }, // pending, paid, shipped, delivered
 			total: { type: 'decimal', nullable: false },
 			shippingAddressId: { type: 'integer', references: { table: 'addresses' } },
 			billingAddressId: { type: 'integer', references: { table: 'addresses' } },
@@ -83,9 +83,9 @@ export default defineSchema(
 		// Order line items
 		orderItems: {
 			id: { type: 'integer', primaryKey: true },
-			orderId: { type: 'integer', references: { table: 'orders' } },
-			productId: { type: 'integer', references: { table: 'products' } },
-			variantId: { type: 'integer', nullable: true, references: { table: 'variants' } },
+			orderId: { type: 'integer', references: { table: 'orders', onDelete: 'CASCADE' }, index: true },
+			productId: { type: 'integer', references: { table: 'products', onDelete: 'RESTRICT' }, index: true },
+			variantId: { type: 'integer', nullable: true, references: { table: 'variants', onDelete: 'SET NULL' } },
 			quantity: { type: 'integer', nullable: false },
 			unitPrice: { type: 'decimal', nullable: false },
 			totalPrice: { type: 'decimal', nullable: false },

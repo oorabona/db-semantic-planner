@@ -28,6 +28,7 @@ describe('buildModelFromSchema', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: ['createdAt', 'updatedAt'],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -61,6 +62,7 @@ describe('buildModelFromSchema', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -97,6 +99,7 @@ describe('buildModelFromSchema', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -138,6 +141,7 @@ describe('buildModelFromSchema', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -171,6 +175,7 @@ describe('buildModelFromSchema', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -205,6 +210,7 @@ describe('buildModelFromSchema', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -243,6 +249,7 @@ describe('buildModelFromSchema', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -286,6 +293,7 @@ describe('buildModelFromSchema', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -331,6 +339,7 @@ describe('buildModelFromSchema', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -367,6 +376,7 @@ describe('buildModelFromSchema', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -392,6 +402,7 @@ describe('buildModelFromSchema', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -415,6 +426,7 @@ describe('buildModelFromSchema', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -439,6 +451,7 @@ describe('buildModelFromSchema', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -460,6 +473,7 @@ describe('isGeneratedSchema', () => {
 				fkPattern: '{singular}Id',
 				pluralize: true,
 				timestamps: [],
+				fkAutoIndex: true,
 			},
 		};
 
@@ -510,6 +524,7 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: ['createdAt', 'updatedAt'],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -542,6 +557,7 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -597,6 +613,7 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -640,6 +657,7 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -676,6 +694,7 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -709,6 +728,7 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -757,6 +777,7 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -798,6 +819,7 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -819,6 +841,7 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 					fkPattern: '{singular}Id',
 					pluralize: true,
 					timestamps: [],
+					fkAutoIndex: true,
 				},
 			};
 
@@ -845,6 +868,7 @@ describe('isResolvedSchema (DX-100)', () => {
 				fkPattern: '{singular}Id',
 				pluralize: true,
 				timestamps: [],
+				fkAutoIndex: true,
 			},
 		};
 		expect(isResolvedSchema(resolvedWithTime)).toBe(true);
@@ -865,6 +889,7 @@ describe('isResolvedSchema (DX-100)', () => {
 				fkPattern: '{singular}Id',
 				pluralize: true,
 				timestamps: [],
+				fkAutoIndex: true,
 			},
 		};
 		expect(isResolvedSchema(resolvedWithJsonb)).toBe(true);
@@ -885,6 +910,7 @@ describe('isResolvedSchema (DX-100)', () => {
 				fkPattern: '{singular}Id',
 				pluralize: true,
 				timestamps: [],
+				fkAutoIndex: true,
 			},
 		};
 		expect(isResolvedSchema(generatedWithDatetime)).toBe(false);
@@ -905,6 +931,7 @@ describe('isResolvedSchema (DX-100)', () => {
 				fkPattern: '{singular}Id',
 				pluralize: true,
 				timestamps: [],
+				fkAutoIndex: true,
 			},
 		};
 		expect(isResolvedSchema(generatedWithNumber)).toBe(false);
@@ -927,6 +954,7 @@ describe('isResolvedSchema (DX-100)', () => {
 				fkPattern: '{singular}Id',
 				pluralize: true,
 				timestamps: [],
+				fkAutoIndex: true,
 			},
 		};
 		// Ambiguous defaults to GeneratedSchema (false)
@@ -958,6 +986,7 @@ describe('normalizeSchema (DX-100)', () => {
 				fkPattern: '{singular}Id',
 				pluralize: true,
 				timestamps: [],
+				fkAutoIndex: true,
 			},
 		};
 		const result = normalizeSchema(generated);
@@ -980,6 +1009,7 @@ describe('normalizeSchema (DX-100)', () => {
 				fkPattern: '{singular}Id',
 				pluralize: true,
 				timestamps: [],
+				fkAutoIndex: true,
 			},
 		};
 		const result = normalizeSchema(resolved);
@@ -1010,6 +1040,7 @@ describe('normalizeSchema (DX-100)', () => {
 				fkPattern: '{singular}Id',
 				pluralize: true,
 				timestamps: [],
+				fkAutoIndex: true,
 			},
 		};
 		// Should return as-is (treated as GeneratedSchema)
@@ -1042,10 +1073,76 @@ describe('normalizeSchema (DX-100)', () => {
 				fkPattern: '{singular}Id',
 				pluralize: true,
 				timestamps: [],
+				fkAutoIndex: true,
 			},
 		};
 		const result = normalizeSchema(resolved);
 		expect(result.relations['posts.author']).toBeDefined();
 		expect(result.relations['posts.author'].kind).toBe('belongsTo');
+	});
+
+	describe('fkAutoIndex behavior', () => {
+		it('should NOT create auto-indexes for FK columns when fkAutoIndex is false', () => {
+			const schema: GeneratedSchema = {
+				tables: {
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+						name: { type: 'string' },
+					},
+					posts: {
+						id: { type: 'uuid', primaryKey: true },
+						title: { type: 'string' },
+						authorId: { type: 'uuid', references: { table: 'users' } },
+					},
+				},
+				relations: {},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+					fkAutoIndex: false,
+				},
+			};
+
+			const model = buildModelFromSchema(schema);
+			const postsTable = model.getTable('posts')!;
+
+			// With fkAutoIndex: false, no auto-index should be created for authorId
+			expect(postsTable.indexes).toHaveLength(0);
+		});
+
+		it('should create auto-indexes for FK columns when fkAutoIndex is true', () => {
+			const schema: GeneratedSchema = {
+				tables: {
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+						name: { type: 'string' },
+					},
+					posts: {
+						id: { type: 'uuid', primaryKey: true },
+						title: { type: 'string' },
+						authorId: { type: 'uuid', references: { table: 'users' } },
+					},
+				},
+				relations: {},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+					fkAutoIndex: true,
+				},
+			};
+
+			const model = buildModelFromSchema(schema);
+			const postsTable = model.getTable('posts')!;
+
+			// With fkAutoIndex: true, auto-index should be created for authorId
+			expect(postsTable.indexes).toHaveLength(1);
+			expect(postsTable.indexes[0].name).toBe('idx_posts_authorId');
+			expect(postsTable.indexes[0].columns).toEqual(['authorId']);
+			expect(postsTable.indexes[0].unique).toBe(false);
+		});
 	});
 });

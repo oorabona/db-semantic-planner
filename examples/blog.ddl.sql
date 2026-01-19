@@ -1,60 +1,27 @@
--- Blog Schema DDL
--- Authors, Posts, Comments, Tags with M:N relation
---
--- Usage:
---   psql -d your_db -f examples/blog.ddl.sql
+create table "authors" ("id" integer not null primary key, "name" varchar(255) not null, "email" varchar(255) not null unique, "bio" text, "created_at" timestamptz default now() not null);
 
-DROP TABLE IF EXISTS post_tags CASCADE;
-DROP TABLE IF EXISTS comments CASCADE;
-DROP TABLE IF EXISTS posts CASCADE;
-DROP TABLE IF EXISTS tags CASCADE;
-DROP TABLE IF EXISTS authors CASCADE;
+create table "posts" ("id" integer not null primary key, "title" varchar(255) not null, "slug" varchar(255) not null unique, "content" text, "published" boolean default 'false' not null, "author_id" integer not null, "created_at" timestamptz default now() not null, "updated_at" timestamptz);
 
-CREATE TABLE authors (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    email VARCHAR(255) NOT NULL UNIQUE,
-    bio TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+create table "comments" ("id" integer not null primary key, "post_id" integer not null, "author_name" varchar(255) not null, "author_email" varchar(255), "content" text not null, "approved" boolean default 'false' not null, "created_at" timestamptz default now() not null);
 
-CREATE TABLE posts (
-    id SERIAL PRIMARY KEY,
-    title VARCHAR(200) NOT NULL,
-    slug VARCHAR(200) NOT NULL UNIQUE,
-    content TEXT,
-    published BOOLEAN DEFAULT FALSE,
-    author_id INTEGER NOT NULL REFERENCES authors(id) ON DELETE CASCADE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE
-);
+create table "tags" ("id" integer not null primary key, "name" varchar(255) not null unique, "slug" varchar(255) not null unique);
 
-CREATE TABLE comments (
-    id SERIAL PRIMARY KEY,
-    post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-    author_name VARCHAR(100) NOT NULL,
-    author_email VARCHAR(255),
-    content TEXT NOT NULL,
-    approved BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+create table "post_tags" ("post_id" integer not null, "tag_id" integer not null, constraint "pk_post_tags" primary key ("post_id", "tag_id"));
 
-CREATE TABLE tags (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(50) NOT NULL UNIQUE,
-    slug VARCHAR(50) NOT NULL UNIQUE
-);
+alter table "posts" add constraint "fk_posts_author_id" foreign key ("author_id") references "authors" ("id") on delete cascade;
 
-CREATE TABLE post_tags (
-    post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-    PRIMARY KEY (post_id, tag_id)
-);
+alter table "comments" add constraint "fk_comments_post_id" foreign key ("post_id") references "posts" ("id") on delete cascade;
 
--- Indexes
-CREATE INDEX idx_posts_author ON posts(author_id);
-CREATE INDEX idx_posts_published ON posts(published);
-CREATE INDEX idx_posts_slug ON posts(slug);
-CREATE INDEX idx_comments_post ON comments(post_id);
-CREATE INDEX idx_comments_approved ON comments(approved);
-CREATE INDEX idx_post_tags_tag ON post_tags(tag_id);
+alter table "post_tags" add constraint "fk_post_tags_post_id" foreign key ("post_id") references "posts" ("id") on delete cascade;
+
+alter table "post_tags" add constraint "fk_post_tags_tag_id" foreign key ("tag_id") references "tags" ("id") on delete cascade;
+
+create index "idx_posts_published" on "posts" ("published");
+
+create index "idx_posts_author_id" on "posts" ("author_id");
+
+create index "idx_comments_post_id" on "comments" ("post_id");
+
+create index "idx_comments_approved" on "comments" ("approved");
+
+create index "idx_post_tags_tag_id" on "post_tags" ("tag_id");

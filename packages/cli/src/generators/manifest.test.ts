@@ -166,6 +166,7 @@ describe('generateManifest', () => {
 				fkPattern: '{singular}Id',
 				pluralize: true,
 				timestamps: [],
+				fkAutoIndex: true,
 			},
 		};
 
@@ -216,6 +217,7 @@ describe('generateManifest', () => {
 				fkPattern: '{singular}Id',
 				pluralize: true,
 				timestamps: [],
+				fkAutoIndex: true,
 			},
 		};
 

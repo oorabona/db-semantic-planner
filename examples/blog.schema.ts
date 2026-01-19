@@ -25,18 +25,26 @@ export default defineSchema(
 			title: { type: 'string', nullable: false },
 			slug: { type: 'string', nullable: false, unique: true },
 			content: { type: 'text', nullable: true },
-			published: { type: 'boolean', default: 'false' },
-			authorId: { type: 'integer', references: { table: 'authors' } },
+			published: { type: 'boolean', default: 'false', index: true },
+			authorId: {
+				type: 'integer',
+				references: { table: 'authors', onDelete: 'CASCADE' },
+				index: true,
+			},
 			createdAt: { type: 'timestamp', default: 'now()' },
 			updatedAt: { type: 'timestamp', nullable: true },
 		},
 		comments: {
 			id: { type: 'integer', primaryKey: true },
-			postId: { type: 'integer', references: { table: 'posts' } },
+			postId: {
+				type: 'integer',
+				references: { table: 'posts', onDelete: 'CASCADE' },
+				index: true,
+			},
 			authorName: { type: 'string', nullable: false },
 			authorEmail: { type: 'string', nullable: true },
 			content: { type: 'text', nullable: false },
-			approved: { type: 'boolean', default: 'false' },
+			approved: { type: 'boolean', default: 'false', index: true },
 			createdAt: { type: 'timestamp', default: 'now()' },
 		},
 		tags: {
@@ -45,9 +53,20 @@ export default defineSchema(
 			slug: { type: 'string', nullable: false, unique: true },
 		},
 		postTags: {
-			postId: { type: 'integer', references: { table: 'posts' } },
-			tagId: { type: 'integer', references: { table: 'tags' } },
-		},
+			columns: {
+				postId: {
+					type: 'integer',
+					references: { table: 'posts', onDelete: 'CASCADE' },
+					index: true,
+				},
+				tagId: {
+					type: 'integer',
+					references: { table: 'tags', onDelete: 'CASCADE' },
+					index: true,
+				},
+			},
+			primaryKey: ['postId', 'tagId'],
+		} as any, // Composite PK uses TableDefWithConfig format
 	},
 	{
 		relations: {

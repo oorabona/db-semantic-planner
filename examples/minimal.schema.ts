@@ -21,7 +21,7 @@ export default defineSchema({
 		id: { type: 'integer', primaryKey: true },
 		title: { type: 'string' },
 		content: { type: 'text', nullable: true },
-		userId: { type: 'integer', references: { table: 'users', onDelete: 'CASCADE' } },
+		userId: { type: 'integer', references: { table: 'users', onDelete: 'CASCADE' }, index: true },
 	},
 });
 // Relations auto-inferred from `references`:

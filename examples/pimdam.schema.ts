@@ -27,11 +27,11 @@ export default defineSchema(
 		categories: {
 			id: { type: 'integer', primaryKey: true },
 			name: { type: 'string', nullable: false },
-			slug: { type: 'string', nullable: false },
+			slug: { type: 'string', nullable: false, index: true },
 			description: { type: 'text', nullable: true },
-			parentId: { type: 'integer', nullable: true, references: { table: 'categories' } },
+			parentId: { type: 'integer', nullable: true, references: { table: 'categories', onDelete: 'SET NULL' }, index: true },
 			position: { type: 'integer', default: '0' },
-			active: { type: 'boolean', default: 'true' },
+			active: { type: 'boolean', default: 'true', index: true },
 			createdAt: { type: 'timestamp', default: 'now()' },
 		},
 
@@ -44,9 +44,9 @@ export default defineSchema(
 			sku: { type: 'string', nullable: false, unique: true },
 			title: { type: 'string', nullable: false },
 			description: { type: 'text', nullable: true },
-			categoryId: { type: 'integer', references: { table: 'categories' } },
+			categoryId: { type: 'integer', references: { table: 'categories' }, index: true },
 			brand: { type: 'string', nullable: true },
-			active: { type: 'boolean', default: 'true' },
+			active: { type: 'boolean', default: 'true', index: true },
 			createdAt: { type: 'timestamp', default: 'now()' },
 			updatedAt: { type: 'timestamp', nullable: true },
 			deletedAt: { type: 'timestamp', nullable: true },
@@ -58,9 +58,9 @@ export default defineSchema(
 		 */
 		assets: {
 			id: { type: 'integer', primaryKey: true },
-			kind: { type: 'string', nullable: false }, // 'image', 'video', 'document'
+			kind: { type: 'string', nullable: false, index: true }, // 'image', 'video', 'document'
 			filename: { type: 'string', nullable: false },
-			sha256: { type: 'string', nullable: false },
+			sha256: { type: 'string', nullable: false, index: true },
 			mime: { type: 'string', nullable: false },
 			width: { type: 'integer', nullable: true },
 			height: { type: 'integer', nullable: true },
@@ -77,10 +77,10 @@ export default defineSchema(
 		 */
 		productImages: {
 			id: { type: 'integer', primaryKey: true },
-			productId: { type: 'integer', references: { table: 'products' } },
+			productId: { type: 'integer', references: { table: 'products', onDelete: 'CASCADE' }, index: true },
 			assetId: { type: 'integer', references: { table: 'assets' } },
-			locale: { type: 'string', nullable: false }, // 'en', 'fr', 'de', etc.
-			status: { type: 'string', default: "'pending'" }, // 'pending', 'approved', 'rejected'
+			locale: { type: 'string', nullable: false, index: true }, // 'en', 'fr', 'de', etc.
+			status: { type: 'string', default: "'pending'", index: true }, // 'pending', 'approved', 'rejected'
 			isMain: { type: 'boolean', default: 'false' },
 			position: { type: 'integer', default: '0' },
 			rejectedReason: { type: 'string', nullable: true },
@@ -96,7 +96,7 @@ export default defineSchema(
 		 */
 		variants: {
 			id: { type: 'integer', primaryKey: true },
-			productId: { type: 'integer', references: { table: 'products' } },
+			productId: { type: 'integer', references: { table: 'products', onDelete: 'CASCADE' }, index: true },
 			sku: { type: 'string', nullable: false, unique: true },
 			name: { type: 'string', nullable: false },
 			priceCents: { type: 'integer', nullable: false },

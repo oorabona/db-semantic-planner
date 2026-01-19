@@ -1,73 +1,37 @@
--- Blog Extended DDL
--- Run this before using: pnpm dbsp repl --schema ./examples/blog-extended.schema.ts
---
--- Usage: psql -d your_db -f examples/blog-extended.ddl.sql
+create table "authors" ("id" integer not null primary key, "name" varchar(255) not null, "email" varchar(255) not null unique, "active" boolean default 'true' not null);
 
--- Drop tables if exist (reverse order of dependencies)
-DROP TABLE IF EXISTS post_tags CASCADE;
-DROP TABLE IF EXISTS comments CASCADE;
-DROP TABLE IF EXISTS posts CASCADE;
-DROP TABLE IF EXISTS tags CASCADE;
-DROP TABLE IF EXISTS categories CASCADE;
-DROP TABLE IF EXISTS authors CASCADE;
+create table "categories" ("id" integer not null primary key, "name" varchar(255) not null, "parent_id" integer);
 
--- Authors
-CREATE TABLE authors (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(100) NOT NULL,
-  email VARCHAR(200) NOT NULL UNIQUE,
-  active BOOLEAN NOT NULL DEFAULT true
-);
+create table "posts" ("id" integer not null primary key, "title" varchar(255) not null, "content" text not null, "author_id" integer not null, "category_id" integer, "published" boolean default 'false' not null, "featured" boolean default 'false' not null, "view_count" integer default '0' not null, "created_at" timestamptz default now() not null);
 
--- Categories (self-referential hierarchy)
-CREATE TABLE categories (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(100) NOT NULL,
-  parent_id INTEGER REFERENCES categories(id)
-);
+create table "comments" ("id" integer not null primary key, "post_id" integer not null, "author_name" varchar(255) not null, "content" text not null, "approved" boolean default 'false' not null, "created_at" timestamptz default now() not null);
 
--- Tags
-CREATE TABLE tags (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(50) NOT NULL,
-  slug VARCHAR(50) NOT NULL UNIQUE
-);
+create table "tags" ("id" integer not null primary key, "name" varchar(255) not null, "slug" varchar(255) not null unique);
 
--- Posts
-CREATE TABLE posts (
-  id SERIAL PRIMARY KEY,
-  title VARCHAR(200) NOT NULL,
-  content TEXT NOT NULL,
-  author_id INTEGER NOT NULL REFERENCES authors(id),
-  category_id INTEGER REFERENCES categories(id),
-  published BOOLEAN NOT NULL DEFAULT false,
-  featured BOOLEAN NOT NULL DEFAULT false,
-  view_count INTEGER NOT NULL DEFAULT 0,
-  created_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
+create table "post_tags" ("post_id" integer not null, "tag_id" integer not null, constraint "pk_post_tags" primary key ("post_id", "tag_id"));
 
--- Comments
-CREATE TABLE comments (
-  id SERIAL PRIMARY KEY,
-  post_id INTEGER NOT NULL REFERENCES posts(id),
-  author_name VARCHAR(100) NOT NULL,
-  content TEXT NOT NULL,
-  approved BOOLEAN NOT NULL DEFAULT false,
-  created_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
+alter table "categories" add constraint "fk_categories_parent_id" foreign key ("parent_id") references "categories" ("id");
 
--- Junction: post_tags (M:N)
-CREATE TABLE post_tags (
-  post_id INTEGER NOT NULL REFERENCES posts(id),
-  tag_id INTEGER NOT NULL REFERENCES tags(id),
-  PRIMARY KEY (post_id, tag_id)
-);
+alter table "posts" add constraint "fk_posts_author_id" foreign key ("author_id") references "authors" ("id");
 
--- Create indexes for common queries
-CREATE INDEX idx_posts_author ON posts(author_id);
-CREATE INDEX idx_posts_category ON posts(category_id);
-CREATE INDEX idx_posts_published ON posts(published);
-CREATE INDEX idx_posts_featured ON posts(featured);
-CREATE INDEX idx_comments_post ON comments(post_id);
-CREATE INDEX idx_comments_approved ON comments(approved);
-CREATE INDEX idx_categories_parent ON categories(parent_id);
+alter table "posts" add constraint "fk_posts_category_id" foreign key ("category_id") references "categories" ("id");
+
+alter table "comments" add constraint "fk_comments_post_id" foreign key ("post_id") references "posts" ("id");
+
+alter table "post_tags" add constraint "fk_post_tags_post_id" foreign key ("post_id") references "posts" ("id");
+
+alter table "post_tags" add constraint "fk_post_tags_tag_id" foreign key ("tag_id") references "tags" ("id");
+
+create index "idx_categories_parent_id" on "categories" ("parent_id");
+
+create index "idx_posts_author_id" on "posts" ("author_id");
+
+create index "idx_posts_category_id" on "posts" ("category_id");
+
+create index "idx_posts_published" on "posts" ("published");
+
+create index "idx_posts_featured" on "posts" ("featured");
+
+create index "idx_comments_post_id" on "comments" ("post_id");
+
+create index "idx_comments_approved" on "comments" ("approved");

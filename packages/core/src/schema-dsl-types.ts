@@ -28,7 +28,14 @@ export type SchemaColumnType =
 	| 'date'
 	| 'time'
 	| 'json'
-	| 'jsonb';
+	| 'jsonb'
+	// PostgreSQL-specific range types (will error on non-PG dialects)
+	| 'daterange'
+	| 'tsrange'
+	| 'tstzrange'
+	| 'int4range'
+	| 'int8range'
+	| 'numrange';
 
 /** Foreign key delete behavior */
 export type SchemaOnDeleteAction =
@@ -225,6 +232,13 @@ export interface SchemaConventionsDefinition {
 	 * @default ['createdAt', 'updatedAt']
 	 */
 	timestamps?: string[];
+
+	/**
+	 * Automatically create indexes on foreign key columns.
+	 * FK columns are frequently used in JOINs, so indexing is a best practice.
+	 * @default true
+	 */
+	fkAutoIndex?: boolean;
 }
 
 // =============================================================================

@@ -61,6 +61,7 @@ export interface SchemaManifest {
 		fkPattern: string;
 		pluralize: boolean;
 		timestamps: string[];
+		fkAutoIndex: boolean;
 	};
 }
 
@@ -86,6 +87,7 @@ export function generateManifest(schema: ResolvedSchema): ManifestOutput {
 			fkPattern: schema.conventions.fkPattern,
 			pluralize: schema.conventions.pluralize,
 			timestamps: schema.conventions.timestamps,
+			fkAutoIndex: schema.conventions.fkAutoIndex,
 		},
 	};
 

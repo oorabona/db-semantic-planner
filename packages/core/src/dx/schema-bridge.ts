@@ -127,6 +127,7 @@ export interface GeneratedConventions {
 	readonly fkPattern: string;
 	readonly pluralize: boolean;
 	readonly timestamps: readonly string[];
+	readonly fkAutoIndex: boolean;
 }
 
 /**
@@ -144,7 +145,7 @@ export interface GeneratedConventions {
  *   },
  *   relations: {},
  *   hints: {},
- *   conventions: { fkPattern: '{singular}Id', pluralize: true, timestamps: [] },
+ *   conventions: { fkPattern: '{singular}Id', pluralize: true, timestamps: [], fkAutoIndex: true },
  * } as const satisfies GeneratedSchema;
  *
  * // TypeScript knows: keyof typeof schema.tables = 'users' | 'posts'
@@ -261,11 +262,17 @@ function mapRelationType(kind: GeneratedRelationKind): RelationType {
 /**
  * Build a TableIR from generated table definition.
  */
-function buildTableIR(tableName: string, genTable: GeneratedTable): TableIR {
+function buildTableIR(
+	tableName: string,
+	genTable: GeneratedTable,
+	fkAutoIndex: boolean,
+): TableIR {
 	const columns: ColumnIR[] = [];
 	const foreignKeys: ForeignKeyIR[] = [];
 	const indexes: IndexIR[] = [];
 	const primaryKeys: string[] = [];
+	// Track columns that already have explicit indexes
+	const indexedColumns = new Set<string>();
 
 	for (const [colName, colDef] of Object.entries(genTable)) {
 		// Column (with unique support)
@@ -301,7 +308,7 @@ function buildTableIR(tableName: string, genTable: GeneratedTable): TableIR {
 			foreignKeys.push(fk);
 		}
 
-		// Column-level index
+		// Column-level index (explicit)
 		if (colDef.index) {
 			const indexName =
 				typeof colDef.index === 'string'
@@ -312,6 +319,17 @@ function buildTableIR(tableName: string, genTable: GeneratedTable): TableIR {
 				columns: [colName],
 				unique: false,
 			});
+			indexedColumns.add(colName);
+		}
+
+		// Auto-index for FK columns if fkAutoIndex is enabled and no explicit index
+		if (fkAutoIndex && colDef.references && !colDef.index) {
+			indexes.push({
+				name: `idx_${tableName}_${colName}`,
+				columns: [colName],
+				unique: false,
+			});
+			indexedColumns.add(colName);
 		}
 	}
 
@@ -419,10 +437,11 @@ function buildRelationIR(
 export function buildModelFromSchema(schema: GeneratedSchema): ModelIR {
 	const tables = new Map<string, TableIR>();
 	const relations = new Map<string, RelationIR>();
+	const fkAutoIndex = schema.conventions.fkAutoIndex;
 
 	// Build tables
 	for (const [tableName, genTable] of Object.entries(schema.tables)) {
-		tables.set(tableName, buildTableIR(tableName, genTable));
+		tables.set(tableName, buildTableIR(tableName, genTable, fkAutoIndex));
 	}
 
 	// Build relations
@@ -706,6 +725,7 @@ const ConventionsDefinitionSchema = v.object({
 	fkPattern: v.string(),
 	pluralize: v.boolean(),
 	timestamps: v.array(v.string()),
+	fkAutoIndex: v.boolean(),
 });
 
 /**
@@ -930,6 +950,7 @@ export function resolvedSchemaToGeneratedSchema(
 		fkPattern: validated.conventions.fkPattern,
 		pluralize: validated.conventions.pluralize,
 		timestamps: validated.conventions.timestamps,
+		fkAutoIndex: validated.conventions.fkAutoIndex,
 	};
 
 	return {

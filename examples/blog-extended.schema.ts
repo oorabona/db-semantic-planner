@@ -37,29 +37,39 @@ export default defineSchema(
 				type: 'integer',
 				nullable: true,
 				references: { table: 'categories' },
+				index: true,
 			},
 		},
 		posts: {
 			id: { type: 'integer', primaryKey: true },
 			title: { type: 'string', nullable: false },
 			content: { type: 'text', nullable: false },
-			author_id: { type: 'integer', references: { table: 'authors' } },
+			author_id: {
+				type: 'integer',
+				references: { table: 'authors' },
+				index: true,
+			},
 			category_id: {
 				type: 'integer',
 				nullable: true,
 				references: { table: 'categories' },
+				index: true,
 			},
-			published: { type: 'boolean', default: 'false' },
-			featured: { type: 'boolean', default: 'false' },
+			published: { type: 'boolean', default: 'false', index: true },
+			featured: { type: 'boolean', default: 'false', index: true },
 			view_count: { type: 'integer', default: '0' },
 			created_at: { type: 'timestamp', default: 'now()' },
 		},
 		comments: {
 			id: { type: 'integer', primaryKey: true },
-			post_id: { type: 'integer', references: { table: 'posts' } },
+			post_id: {
+				type: 'integer',
+				references: { table: 'posts' },
+				index: true,
+			},
 			author_name: { type: 'string', nullable: false },
 			content: { type: 'text', nullable: false },
-			approved: { type: 'boolean', default: 'false' },
+			approved: { type: 'boolean', default: 'false', index: true },
 			created_at: { type: 'timestamp', default: 'now()' },
 		},
 		tags: {
@@ -68,9 +78,12 @@ export default defineSchema(
 			slug: { type: 'string', nullable: false, unique: true },
 		},
 		post_tags: {
-			post_id: { type: 'integer', references: { table: 'posts' } },
-			tag_id: { type: 'integer', references: { table: 'tags' } },
-		},
+			columns: {
+				post_id: { type: 'integer', references: { table: 'posts' }, index: true },
+				tag_id: { type: 'integer', references: { table: 'tags' }, index: true },
+			},
+			primaryKey: ['post_id', 'tag_id'],
+		} as any, // Composite PK uses TableDefWithConfig format
 	},
 	{
 		relations: {
