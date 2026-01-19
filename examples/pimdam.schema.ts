@@ -25,7 +25,7 @@ export default defineSchema(
 		 * Self-referential for unlimited nesting (Electronics > Phones > Smartphones)
 		 */
 		categories: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			name: { type: 'string', nullable: false },
 			slug: { type: 'string', nullable: false, index: true },
 			description: { type: 'text', nullable: true },
@@ -40,7 +40,7 @@ export default defineSchema(
 		 * Supports soft deletes via deletedAt
 		 */
 		products: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			sku: { type: 'string', nullable: false, unique: true },
 			title: { type: 'string', nullable: false },
 			description: { type: 'text', nullable: true },
@@ -57,7 +57,7 @@ export default defineSchema(
 		 * Images, videos, PDFs stored with metadata
 		 */
 		assets: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			kind: { type: 'string', nullable: false, index: true }, // 'image', 'video', 'document'
 			filename: { type: 'string', nullable: false },
 			sha256: { type: 'string', nullable: false, index: true },
@@ -76,7 +76,7 @@ export default defineSchema(
 		 * Links products to assets with locale-specific approval status
 		 */
 		productImages: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			productId: { type: 'integer', references: { table: 'products', onDelete: 'CASCADE' }, index: true },
 			assetId: { type: 'integer', references: { table: 'assets' } },
 			locale: { type: 'string', nullable: false, index: true }, // 'en', 'fr', 'de', etc.
@@ -95,7 +95,7 @@ export default defineSchema(
 		 * Size, color, material combinations with pricing and inventory
 		 */
 		variants: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			productId: { type: 'integer', references: { table: 'products', onDelete: 'CASCADE' }, index: true },
 			sku: { type: 'string', nullable: false, unique: true },
 			name: { type: 'string', nullable: false },

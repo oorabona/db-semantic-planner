@@ -15,7 +15,7 @@ export default defineSchema(
 	{
 		// Hierarchical categories (self-referencing)
 		categories: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			name: { type: 'string', nullable: false },
 			slug: { type: 'string', nullable: false, unique: true },
 			parentId: { type: 'integer', nullable: true, references: { table: 'categories', onDelete: 'SET NULL' }, index: true },
@@ -24,7 +24,7 @@ export default defineSchema(
 
 		// Products belong to categories
 		products: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			sku: { type: 'string', nullable: false, unique: true },
 			name: { type: 'string', nullable: false },
 			description: { type: 'text', nullable: true },
@@ -37,7 +37,7 @@ export default defineSchema(
 
 		// Product variants (size, color, etc.)
 		variants: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			productId: { type: 'integer', references: { table: 'products', onDelete: 'CASCADE' }, index: true },
 			sku: { type: 'string', nullable: false, unique: true },
 			name: { type: 'string', nullable: false },
@@ -47,7 +47,7 @@ export default defineSchema(
 
 		// Customers
 		customers: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			email: { type: 'string', nullable: false, unique: true },
 			firstName: { type: 'string', nullable: false },
 			lastName: { type: 'string', nullable: false },
@@ -57,7 +57,7 @@ export default defineSchema(
 
 		// Customer addresses
 		addresses: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			customerId: { type: 'integer', references: { table: 'customers', onDelete: 'CASCADE' }, index: true },
 			type: { type: 'string', nullable: false }, // 'billing' | 'shipping'
 			street: { type: 'string', nullable: false },
@@ -69,7 +69,7 @@ export default defineSchema(
 
 		// Orders
 		orders: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			orderNumber: { type: 'string', nullable: false, unique: true },
 			customerId: { type: 'integer', references: { table: 'customers', onDelete: 'RESTRICT' }, index: true },
 			status: { type: 'string', default: "'pending'", index: true }, // pending, paid, shipped, delivered
@@ -82,7 +82,7 @@ export default defineSchema(
 
 		// Order line items
 		orderItems: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			orderId: { type: 'integer', references: { table: 'orders', onDelete: 'CASCADE' }, index: true },
 			productId: { type: 'integer', references: { table: 'products', onDelete: 'RESTRICT' }, index: true },
 			variantId: { type: 'integer', nullable: true, references: { table: 'variants', onDelete: 'SET NULL' } },

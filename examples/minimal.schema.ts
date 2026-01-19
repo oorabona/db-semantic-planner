@@ -13,12 +13,12 @@ import { defineSchema } from '@dbsp/core';
 
 export default defineSchema({
 	users: {
-		id: { type: 'integer', primaryKey: true },
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
 		name: { type: 'string', index: true },
 		email: { type: 'string', unique: true },
 	},
 	posts: {
-		id: { type: 'integer', primaryKey: true },
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
 		title: { type: 'string' },
 		content: { type: 'text', nullable: true },
 		userId: { type: 'integer', references: { table: 'users', onDelete: 'CASCADE' }, index: true },

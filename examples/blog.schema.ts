@@ -14,14 +14,14 @@ import { defineSchema } from '@dbsp/core';
 export default defineSchema(
 	{
 		authors: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			name: { type: 'string', nullable: false },
 			email: { type: 'string', nullable: false, unique: true },
 			bio: { type: 'text', nullable: true },
 			createdAt: { type: 'timestamp', default: 'now()' },
 		},
 		posts: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			title: { type: 'string', nullable: false },
 			slug: { type: 'string', nullable: false, unique: true },
 			content: { type: 'text', nullable: true },
@@ -35,7 +35,7 @@ export default defineSchema(
 			updatedAt: { type: 'timestamp', nullable: true },
 		},
 		comments: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			postId: {
 				type: 'integer',
 				references: { table: 'posts', onDelete: 'CASCADE' },
@@ -48,7 +48,7 @@ export default defineSchema(
 			createdAt: { type: 'timestamp', default: 'now()' },
 		},
 		tags: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			name: { type: 'string', nullable: false, unique: true },
 			slug: { type: 'string', nullable: false, unique: true },
 		},
