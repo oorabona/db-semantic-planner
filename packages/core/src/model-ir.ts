@@ -102,6 +102,9 @@ export interface ColumnIR {
 	 * Manually defined schemas may not have this field.
 	 */
 	readonly originalDbType?: string;
+
+	/** Whether column has a UNIQUE constraint */
+	readonly unique?: boolean;
 }
 
 /**

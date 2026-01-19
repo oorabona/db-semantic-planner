@@ -14,8 +14,10 @@ import type {
 	FilterStrategy,
 	ForeignKeyIR,
 	IncludeStrategy,
+	IndexIR,
 	JoinDefault,
 	ModelIR,
+	OnDeleteAction,
 	Optionality,
 	RelationIR,
 	RelationType,
@@ -55,7 +57,10 @@ export interface GeneratedColumn {
 	readonly references?: {
 		readonly table: string;
 		readonly column?: string;
+		readonly onDelete?: 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
 	};
+	/** Create an index on this column (true for auto-name, string for custom name) */
+	readonly index?: boolean | string;
 }
 
 /**
@@ -259,30 +264,53 @@ function mapRelationType(kind: GeneratedRelationKind): RelationType {
 function buildTableIR(tableName: string, genTable: GeneratedTable): TableIR {
 	const columns: ColumnIR[] = [];
 	const foreignKeys: ForeignKeyIR[] = [];
+	const indexes: IndexIR[] = [];
 	const primaryKeys: string[] = [];
 
 	for (const [colName, colDef] of Object.entries(genTable)) {
-		// Column
-		columns.push({
+		// Column (with unique support)
+		const col: ColumnIR = {
 			name: colName,
 			type: mapColumnType(colDef.type),
 			nullable: colDef.nullable ?? false,
 			default: colDef.default,
-		});
+		};
+		if (colDef.unique !== undefined) {
+			(col as { unique?: boolean }).unique = colDef.unique;
+		}
+		columns.push(col);
 
 		// Primary key
 		if (colDef.primaryKey) {
 			primaryKeys.push(colName);
 		}
 
-		// Foreign key
+		// Foreign key (with onDelete support)
 		if (colDef.references) {
-			foreignKeys.push({
+			const fk: ForeignKeyIR = {
 				columns: [colName],
 				references: {
 					table: colDef.references.table,
 					columns: [colDef.references.column ?? 'id'],
 				},
+			};
+			if (colDef.references.onDelete) {
+				(fk as { onDelete?: OnDeleteAction }).onDelete =
+					colDef.references.onDelete;
+			}
+			foreignKeys.push(fk);
+		}
+
+		// Column-level index
+		if (colDef.index) {
+			const indexName =
+				typeof colDef.index === 'string'
+					? colDef.index
+					: `idx_${tableName}_${colName}`;
+			indexes.push({
+				name: indexName,
+				columns: [colName],
+				unique: false,
 			});
 		}
 	}
@@ -305,7 +333,7 @@ function buildTableIR(tableName: string, genTable: GeneratedTable): TableIR {
 		columns,
 		primaryKey,
 		foreignKeys,
-		indexes: [],
+		indexes,
 	};
 }
 

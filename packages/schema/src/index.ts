@@ -33,7 +33,12 @@ export type {
 	HasManyRelation,
 	HintDefinition,
 	HintsDefinition,
+	// Indexes
+	IndexDefinition,
+	IndexesDefinition,
 	ManyToManyRelation,
+	// Foreign key behavior
+	OnDeleteAction,
 	RelationDefinition,
 	// Relation types (discriminated union)
 	RelationKind,

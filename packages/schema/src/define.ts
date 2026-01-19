@@ -9,6 +9,7 @@ import { DEFAULT_CONVENTIONS, inferRelations } from './conventions.js';
 import type {
 	ConventionsDefinition,
 	HintsDefinition,
+	IndexesDefinition,
 	RelationsDefinition,
 	ResolvedSchema,
 	SchemaConfigInput,
@@ -97,6 +98,7 @@ export function defineSchema<T extends TablesDefinition>(
 	let relations: RelationsDefinition;
 	let hints: HintsDefinition;
 	let conventions: ConventionsDefinition;
+	let indexes: IndexesDefinition;
 
 	// Detect legacy format: { tables: {...} }
 	if (isLegacyFormat(tablesOrInput)) {
@@ -112,12 +114,14 @@ export function defineSchema<T extends TablesDefinition>(
 		relations = input.relations ?? {};
 		hints = input.hints ?? {};
 		conventions = input.conventions ?? {};
+		indexes = {};
 	} else {
 		// New format: tables as first arg, config as second
 		tables = tablesOrInput as T;
 		relations = config?.relations ?? {};
 		hints = config?.hints ?? {};
 		conventions = config?.conventions ?? {};
+		indexes = config?.indexes ?? {};
 	}
 
 	// Merge user conventions with defaults
@@ -140,6 +144,7 @@ export function defineSchema<T extends TablesDefinition>(
 		relations: allRelations,
 		hints,
 		conventions: resolvedConventions,
+		indexes,
 	};
 }
 

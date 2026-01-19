@@ -27,6 +27,9 @@ export type ColumnType =
 	| 'json'
 	| 'jsonb';
 
+/** Foreign key delete behavior */
+export type OnDeleteAction = 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
+
 /**
  * Foreign key reference definition.
  * When present, takes priority over convention-based FK detection.
@@ -36,6 +39,8 @@ export interface ForeignKeyReference {
 	table: string;
 	/** Target column name (defaults to 'id') */
 	column?: string;
+	/** Delete behavior (CASCADE, SET NULL, RESTRICT, NO ACTION) */
+	onDelete?: OnDeleteAction;
 }
 
 /**
@@ -54,6 +59,8 @@ export interface ColumnDefinition {
 	default?: string;
 	/** Explicit foreign key reference (takes priority over conventions) */
 	references?: ForeignKeyReference;
+	/** Create an index on this column (true for auto-name, string for custom name) */
+	index?: boolean | string;
 }
 
 /**
@@ -65,6 +72,23 @@ export type TableDefinition = Record<string, ColumnDefinition>;
  * All tables in the schema.
  */
 export type TablesDefinition = Record<string, TableDefinition>;
+
+/**
+ * Index definition for composite indexes.
+ */
+export interface IndexDefinition {
+	/** Columns included in the index */
+	columns: string[];
+	/** Whether this is a unique index */
+	unique?: boolean;
+	/** Custom index name (auto-generated if not provided) */
+	name?: string;
+}
+
+/**
+ * Index configuration by table.
+ */
+export type IndexesDefinition = Record<string, IndexDefinition[]>;
 
 // =============================================================================
 // Relation Types (Discriminated Union)
@@ -224,6 +248,8 @@ export interface SchemaConfigInput {
 	hints?: HintsDefinition;
 	/** Convention configuration */
 	conventions?: ConventionsDefinition;
+	/** Table-level index definitions (composite indexes) */
+	indexes?: IndexesDefinition;
 }
 
 /**
@@ -239,6 +265,8 @@ export interface ResolvedSchema<T extends TablesDefinition = TablesDefinition> {
 	hints: HintsDefinition;
 	/** Resolved conventions with defaults applied */
 	conventions: Required<ConventionsDefinition>;
+	/** Table-level index definitions */
+	indexes: IndexesDefinition;
 }
 
 // =============================================================================
