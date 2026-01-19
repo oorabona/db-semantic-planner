@@ -112,6 +112,9 @@ export interface ColumnIR {
 
 	/** Whether column has a UNIQUE constraint */
 	readonly unique?: boolean;
+
+	/** Whether column auto-increments (SERIAL, IDENTITY, AUTOINCREMENT) */
+	readonly autoIncrement?: boolean;
 }
 
 /**

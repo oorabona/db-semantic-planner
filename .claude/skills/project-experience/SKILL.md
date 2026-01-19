@@ -425,3 +425,25 @@ How to avoid or mitigate.
 - `PostgresOnlyColumnType`: Types exclusive to PostgreSQL (ranges, jsonb)
 - `SupportedColumnTypes<D>`: Conditional type mapping dialect to allowed types
 - `UnhandledTypeInDialect`: Error class with type, dialect, and hint
+
+---
+
+### Multi-Dialect Sequence Management Pattern
+
+**When:** Implementing sequence reset or setval functionality for multi-tenant data isolation.
+
+**Why:** Each dialect handles auto-increment sequences differently. A unified API abstracts these differences.
+
+**How:**
+1. Create a dialect mapping for sequence operations:
+   - PostgreSQL: `SELECT setval('schema.table_col_seq', COALESCE((SELECT MAX(col) FROM schema.table), 0))`
+   - MySQL: `SET @max_id = ...; ALTER TABLE t AUTO_INCREMENT = @max_id`
+   - SQLite: `UPDATE sqlite_sequence SET seq = (SELECT MAX(col) FROM t) WHERE name = 't'`
+   - MSSQL: `DBCC CHECKIDENT ('schema.t', RESEED, @max_id)`
+2. Use consistent naming convention: `{table}_{column}_seq` for PostgreSQL sequences
+3. Support schema qualification for multi-tenant scenarios
+4. Return null for dialects that don't support explicit sequence management
+
+**Key functions:**
+- `generateSequenceResetStatements()`: Batch reset all auto-increment sequences
+- `generateSetvalStatement()`: Set explicit next value for a sequence

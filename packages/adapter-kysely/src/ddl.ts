@@ -29,7 +29,7 @@ import type {
 	OnModifyForeignAction,
 } from 'kysely';
 import { sql } from 'kysely';
-import { detectDialect } from './dialect.js';
+import { type DialectName, detectDialect } from './dialect.js';
 
 // ============================================================================
 // Type Mapping
@@ -116,6 +116,66 @@ function mapOnDelete(action?: string): OnModifyForeignAction {
 		default:
 			return 'no action';
 	}
+}
+
+/**
+ * Auto-increment strategy per dialect.
+ *
+ * PostgreSQL: Uses SERIAL/BIGSERIAL as data types (creates implicit sequence)
+ * MySQL/MariaDB: Uses AUTO_INCREMENT modifier on integer types
+ * SQLite: Uses AUTOINCREMENT keyword after PRIMARY KEY
+ * MSSQL: Uses IDENTITY(1,1) modifier
+ */
+interface AutoIncrementStrategy {
+	/** Data type to use (e.g., 'serial', 'integer') */
+	dataType: ColumnDataType;
+	/** Whether to call .autoIncrement() on column builder */
+	useAutoIncrementMethod: boolean;
+	/** Whether the type implies NOT NULL */
+	impliesNotNull: boolean;
+}
+
+/**
+ * Get auto-increment strategy based on dialect and column type.
+ */
+function getAutoIncrementStrategy(
+	dialectName: DialectName,
+	columnType: ColumnType,
+	originalDbType?: string,
+): AutoIncrementStrategy {
+	// If there's an original DB type, preserve it (introspection case)
+	if (originalDbType) {
+		return {
+			dataType: originalDbType as ColumnDataType,
+			useAutoIncrementMethod: false,
+			impliesNotNull: false,
+		};
+	}
+
+	// PostgreSQL: use serial/bigserial
+	if (dialectName === 'postgresql') {
+		if (columnType === 'bigint') {
+			return {
+				dataType: 'bigserial',
+				useAutoIncrementMethod: false,
+				impliesNotNull: true,
+			};
+		}
+		// integer, number -> serial
+		return {
+			dataType: 'serial',
+			useAutoIncrementMethod: false,
+			impliesNotNull: true,
+		};
+	}
+
+	// MySQL, SQLite, MSSQL, unknown: use autoIncrement() method
+	const baseType = mapColumnType(columnType, originalDbType);
+	return {
+		dataType: baseType,
+		useAutoIncrementMethod: true,
+		impliesNotNull: false,
+	};
 }
 
 // ============================================================================
@@ -262,6 +322,9 @@ function generateTableDDL(
 	table: TableIR,
 	schemaName?: string,
 ): string {
+	// Detect dialect for auto-increment strategy
+	const dialectName = detectDialect(db);
+
 	// Start building the table
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely type requires unknown schema
 	let builder: CreateTableBuilder<any, any> = schemaName
@@ -275,7 +338,15 @@ function generateTableDDL(
 
 	// Add columns
 	for (const col of table.columns) {
-		const dataType = mapColumnType(col.type, col.originalDbType);
+		// Get auto-increment strategy based on dialect
+		const autoIncrementStrategy = col.autoIncrement
+			? getAutoIncrementStrategy(dialectName, col.type, col.originalDbType)
+			: null;
+
+		const dataType = autoIncrementStrategy
+			? autoIncrementStrategy.dataType
+			: mapColumnType(col.type, col.originalDbType);
+
 		const isPrimaryKey = pkColumns.length === 1 && pkColumns[0] === col.name;
 
 		builder = builder.addColumn(col.name, dataType, (cb) => {
@@ -286,8 +357,13 @@ function generateTableDDL(
 				colBuilder = colBuilder.primaryKey();
 			}
 
-			// Nullable
-			if (!col.nullable) {
+			// Auto-increment method (MySQL, SQLite, MSSQL)
+			if (autoIncrementStrategy?.useAutoIncrementMethod) {
+				colBuilder = colBuilder.autoIncrement();
+			}
+
+			// Nullable - some types like serial imply NOT NULL
+			if (!col.nullable && !autoIncrementStrategy?.impliesNotNull) {
 				colBuilder = colBuilder.notNull();
 			}
 
@@ -414,4 +490,165 @@ function generateIndexDDL(
 
 	const compiled = builder.compile();
 	return `${compiled.sql};`;
+}
+
+// ============================================================================
+// Sequence Management
+// ============================================================================
+
+/**
+ * Options for sequence reset generation.
+ */
+export interface GenerateSequenceResetOptions {
+	/** Database schema name (e.g., 'public', 'tenant_123') */
+	readonly schemaName?: string | undefined;
+}
+
+/**
+ * Generate statements to reset auto-increment sequences based on current max values.
+ *
+ * Useful after seeding data with explicit IDs to avoid ID conflicts on subsequent inserts.
+ *
+ * PostgreSQL: SELECT setval('table_column_seq', (SELECT COALESCE(MAX(col), 0) FROM table));
+ * MySQL: Uses information_schema to find current max
+ * SQLite: Updates sqlite_sequence table
+ *
+ * @param db - Kysely instance
+ * @param schema - The ModelIR schema
+ * @param options - Optional configuration
+ * @returns Array of SQL statements to reset sequences
+ */
+export function generateSequenceResetStatements(
+	db: Kysely<unknown>,
+	schema: ModelIR,
+	options: GenerateSequenceResetOptions = {},
+): string[] {
+	const statements: string[] = [];
+	const dialectName = detectDialect(db);
+	const { schemaName } = options;
+
+	for (const table of schema.tables.values()) {
+		// Find auto-increment columns
+		for (const col of table.columns) {
+			if (!col.autoIncrement) continue;
+
+			const qualifiedTable = schemaName
+				? `"${schemaName}"."${table.name}"`
+				: `"${table.name}"`;
+
+			const stmt = generateSequenceResetStatement(
+				dialectName,
+				table.name,
+				col.name,
+				qualifiedTable,
+				schemaName,
+			);
+
+			if (stmt) {
+				statements.push(stmt);
+			}
+		}
+	}
+
+	return statements;
+}
+
+/**
+ * Generate a single sequence reset statement for a specific column.
+ */
+function generateSequenceResetStatement(
+	dialectName: DialectName,
+	tableName: string,
+	columnName: string,
+	qualifiedTable: string,
+	schemaName?: string,
+): string | null {
+	switch (dialectName) {
+		case 'postgresql': {
+			// PostgreSQL SERIAL creates a sequence named {table}_{column}_seq
+			const sequenceName = schemaName
+				? `"${schemaName}"."${tableName}_${columnName}_seq"`
+				: `"${tableName}_${columnName}_seq"`;
+
+			// setval with subquery to find max value, defaulting to 0 if table is empty
+			return `SELECT setval('${sequenceName}', COALESCE((SELECT MAX("${columnName}") FROM ${qualifiedTable}), 0));`;
+		}
+
+		case 'mysql': {
+			// MySQL AUTO_INCREMENT reset via ALTER TABLE
+			// Uses subquery to find current max + 1
+			return (
+				`SET @max_id = (SELECT COALESCE(MAX(\`${columnName}\`), 0) + 1 FROM ${qualifiedTable}); ` +
+				`SET @sql = CONCAT('ALTER TABLE ${qualifiedTable} AUTO_INCREMENT = ', @max_id); ` +
+				`PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;`
+			);
+		}
+
+		case 'sqlite': {
+			// SQLite stores sequence values in sqlite_sequence table
+			return `UPDATE sqlite_sequence SET seq = (SELECT COALESCE(MAX("${columnName}"), 0) FROM "${tableName}") WHERE name = '${tableName}';`;
+		}
+
+		case 'mssql': {
+			// MSSQL uses DBCC CHECKIDENT
+			// Note: This requires special permissions
+			return (
+				`DECLARE @max_id INT = (SELECT COALESCE(MAX([${columnName}]), 0) FROM ${qualifiedTable}); ` +
+				`DBCC CHECKIDENT ('${qualifiedTable}', RESEED, @max_id);`
+			);
+		}
+
+		default:
+			return null;
+	}
+}
+
+/**
+ * Generate a setval statement for a specific table/column with an explicit value.
+ *
+ * Use this when you know the exact next value you want the sequence to produce.
+ *
+ * @param db - Kysely instance
+ * @param tableName - The table name
+ * @param columnName - The auto-increment column name (default: 'id')
+ * @param nextValue - The next value the sequence should produce
+ * @param schemaName - Optional schema name
+ * @returns SQL statement to set the sequence value
+ */
+export function generateSetvalStatement(
+	db: Kysely<unknown>,
+	tableName: string,
+	columnName: string,
+	nextValue: number,
+	schemaName?: string,
+): string {
+	const dialectName = detectDialect(db);
+	const qualifiedTable = schemaName
+		? `"${schemaName}"."${tableName}"`
+		: `"${tableName}"`;
+
+	switch (dialectName) {
+		case 'postgresql': {
+			const sequenceName = schemaName
+				? `"${schemaName}"."${tableName}_${columnName}_seq"`
+				: `"${tableName}_${columnName}_seq"`;
+			// setval's third parameter (is_called) = true means nextval will return nextValue + 1
+			// We want nextValue to be the next produced value, so we use false
+			return `SELECT setval('${sequenceName}', ${nextValue}, false);`;
+		}
+
+		case 'mysql':
+			return `ALTER TABLE ${qualifiedTable} AUTO_INCREMENT = ${nextValue};`;
+
+		case 'sqlite':
+			// SQLite seq value is the last used value, not the next
+			return `UPDATE sqlite_sequence SET seq = ${nextValue - 1} WHERE name = '${tableName}';`;
+
+		case 'mssql':
+			// DBCC CHECKIDENT reseeds to the value, next identity will be value + 1
+			return `DBCC CHECKIDENT ('${qualifiedTable}', RESEED, ${nextValue - 1});`;
+
+		default:
+			return `-- Sequence reset not supported for dialect: ${dialectName}`;
+	}
 }

@@ -185,6 +185,21 @@ describe('generateDDL', () => {
 			expect(createUser).toContain('unique');
 		});
 
+		it('generates autoIncrement column (SERIAL in PostgreSQL)', () => {
+			const schema = defineSchemaBuilder({
+				users: {
+					id: { type: 'integer', primaryKey: true, autoIncrement: true },
+					name: { type: 'string' },
+				},
+			}).build();
+
+			const ddl = generateDDL(db, schema);
+			const createUser = ddl.find((s) => s.includes('create table "users"'));
+
+			// Kysely generates SERIAL for PostgreSQL when autoIncrement is set
+			expect(createUser).toContain('serial');
+		});
+
 		it('generates onDelete CASCADE on foreign key', () => {
 			const schema = defineSchemaBuilder({
 				users: {
@@ -245,6 +260,88 @@ describe('generateDDL', () => {
 			);
 
 			expect(indexStatement).toContain('create unique index');
+		});
+	});
+
+	describe('Sequence management', () => {
+		let db: Kysely<unknown>;
+
+		beforeAll(() => {
+			db = new Kysely<unknown>({
+				dialect: new PostgresDialect({ pool: mockPool }),
+			});
+		});
+
+		afterAll(async () => {
+			await db.destroy();
+		});
+
+		it('generates sequence reset statements for tables with autoIncrement', async () => {
+			// Import dynamically to test the new functions
+			const { generateSequenceResetStatements } = await import('./ddl.js');
+
+			const schema = defineSchemaBuilder({
+				users: {
+					id: { type: 'integer', primaryKey: true, autoIncrement: true },
+					name: { type: 'string' },
+				},
+				posts: {
+					id: { type: 'integer', primaryKey: true, autoIncrement: true },
+					title: { type: 'string' },
+				},
+			}).build();
+
+			const statements = generateSequenceResetStatements(db, schema);
+
+			expect(statements).toHaveLength(2);
+			expect(statements[0]).toContain('setval');
+			expect(statements[0]).toContain('users_id_seq');
+			expect(statements[1]).toContain('posts_id_seq');
+		});
+
+		it('generates setval statement with explicit value', async () => {
+			const { generateSetvalStatement } = await import('./ddl.js');
+
+			const stmt = generateSetvalStatement(db, 'users', 'id', 100);
+
+			expect(stmt).toContain('setval');
+			expect(stmt).toContain('users_id_seq');
+			expect(stmt).toContain('100');
+			expect(stmt).toContain('false'); // is_called = false so next value is 100
+		});
+
+		it('skips tables without autoIncrement columns', async () => {
+			const { generateSequenceResetStatements } = await import('./ddl.js');
+
+			const schema = defineSchemaBuilder({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					name: { type: 'string' },
+				},
+			}).build();
+
+			const statements = generateSequenceResetStatements(db, schema);
+
+			expect(statements).toHaveLength(0);
+		});
+
+		it('supports schema-qualified sequence names', async () => {
+			const { generateSequenceResetStatements } = await import('./ddl.js');
+
+			const schema = defineSchemaBuilder({
+				users: {
+					id: { type: 'integer', primaryKey: true, autoIncrement: true },
+					name: { type: 'string' },
+				},
+			}).build();
+
+			const statements = generateSequenceResetStatements(db, schema, {
+				schemaName: 'tenant_123',
+			});
+
+			expect(statements).toHaveLength(1);
+			expect(statements[0]).toContain('"tenant_123"."users_id_seq"');
+			expect(statements[0]).toContain('"tenant_123"."users"');
 		});
 	});
 });

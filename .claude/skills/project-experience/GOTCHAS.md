@@ -750,3 +750,25 @@ When writing generators that process resolved schemas, the data is always in obj
 - Similarly for relations: use `SchemaRelationDefinition` not any input union type
 
 **Prevention:** When writing code that processes resolved schemas (after defineSchema runs), always use the `Schema*` prefixed types from core which represent the normalized object form.
+
+---
+
+## PostgreSQL SERIAL vs autoIncrement API (2026-01-19)
+
+**Symptoms:** Kysely's `.autoIncrement()` method doesn't produce `serial` type for PostgreSQL - it produces `integer identity(1,1) always`.
+
+**Cause:** PostgreSQL has two ways to handle auto-increment:
+1. `serial`/`bigserial` - pseudo-types that expand to `integer + sequence + default`
+2. `GENERATED ALWAYS AS IDENTITY` - SQL standard approach
+
+Kysely's `addColumn().autoIncrement()` uses the IDENTITY approach which is more portable, but some projects prefer SERIAL for PostgreSQL compatibility.
+
+**Solution:** For SERIAL support, use dialect detection and set the column type directly:
+- PostgreSQL: Use `serial` or `bigserial` as the column type instead of `integer` + autoIncrement()
+- MySQL: Use `.autoIncrement()` method
+- SQLite: Use `.autoIncrement()` method
+- MSSQL: Use `IDENTITY(1,1)` approach
+
+**Pattern:** Detect dialect with `detectDialect(db)` helper, then branch column type selection based on dialect and autoIncrement flag.
+
+**Prevention:** When implementing auto-increment features for multi-dialect support, always test the generated DDL across all target dialects. PostgreSQL's SERIAL pseudo-type is a common expectation.

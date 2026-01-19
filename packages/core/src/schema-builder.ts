@@ -54,6 +54,7 @@ export interface ColumnDef {
 	readonly nullable?: boolean;
 	readonly unique?: boolean;
 	readonly primaryKey?: boolean;
+	readonly autoIncrement?: boolean;
 	readonly default?: DefaultValue;
 	readonly index?: boolean | string;
 	readonly references?: FKReference;
@@ -382,6 +383,10 @@ class SchemaBuilderImpl<T extends Record<string, TableDef>>
 				};
 				if (colDef.unique !== undefined) {
 					(col as { unique?: boolean }).unique = colDef.unique;
+				}
+				if (colDef.autoIncrement !== undefined) {
+					(col as { autoIncrement?: boolean }).autoIncrement =
+						colDef.autoIncrement;
 				}
 				columns.push(col);
 
