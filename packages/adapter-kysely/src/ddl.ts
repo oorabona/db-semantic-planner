@@ -13,12 +13,14 @@
  * @module ddl
  */
 
-import type {
-	ColumnType,
-	ForeignKeyIR,
-	IndexIR,
-	ModelIR,
-	TableIR,
+import {
+	assertTypeSupported,
+	type ColumnType,
+	type ForeignKeyIR,
+	getDialectCapabilities,
+	type IndexIR,
+	type ModelIR,
+	type TableIR,
 } from '@dbsp/core';
 import type {
 	ColumnDataType,
@@ -27,6 +29,7 @@ import type {
 	OnModifyForeignAction,
 } from 'kysely';
 import { sql } from 'kysely';
+import { detectDialect } from './dialect.js';
 
 // ============================================================================
 // Type Mapping
@@ -144,6 +147,18 @@ export function generateDDL(
 
 	// Get all tables (order doesn't matter for two-pass approach)
 	const tables = Array.from(schema.tables.values());
+
+	// ========================================================================
+	// Validate column types against dialect capabilities
+	// ========================================================================
+	const dialectName = detectDialect(db);
+	const capabilities = getDialectCapabilities(dialectName);
+
+	for (const table of tables) {
+		for (const column of table.columns.values()) {
+			assertTypeSupported(column.type, dialectName, capabilities);
+		}
+	}
 
 	// Generate DROP statements (if requested)
 	if (includeDropStatements) {

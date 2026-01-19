@@ -405,3 +405,23 @@ How to avoid or mitigate.
 **Table-level indexes syntax differs:**
 - @dbsp/schema: pass indexes in config second argument
 - @dbsp/core/schema-builder: use `TableDefWithConfig` format with `columns` and `indexes` keys
+
+### Dialect Type Safety Pattern (2026-01-19)
+
+**Pattern:** Compile-time and runtime type safety for dialect-specific features.
+
+**When:** Adding features that only work on certain databases (e.g., PostgreSQL range types).
+
+**Why:** Prevents runtime errors by catching incompatible type usage early.
+
+**How:**
+1. Define dialect-specific types using TypeScript conditional types in `core/dialects/index.ts`
+2. Use `SupportedColumnTypes<D>` for compile-time validation
+3. Use `assertTypeSupported()` at DDL generation time for runtime validation
+4. Provide helpful hints in error messages (e.g., "jsonb is PostgreSQL-only, use json instead")
+
+**Key types:**
+- `DialectName`: Union of supported dialect names
+- `PostgresOnlyColumnType`: Types exclusive to PostgreSQL (ranges, jsonb)
+- `SupportedColumnTypes<D>`: Conditional type mapping dialect to allowed types
+- `UnhandledTypeInDialect`: Error class with type, dialect, and hint

@@ -335,11 +335,25 @@ export * from './dx/index.js';
 // Dialect Capabilities (CORE-004)
 // ============================================================================
 
-export type { DialectCapabilities } from './dialects/index.js';
+export type {
+	// Types
+	CommonColumnType,
+	DialectCapabilities,
+	DialectName,
+	DuckDBColumnType,
+	IsTypeSupported,
+	MSSQLColumnType,
+	MySQLColumnType,
+	PostgresColumnType,
+	PostgresOnlyColumnType,
+	SQLiteColumnType,
+	SupportedColumnTypes,
+} from './dialects/index.js';
 export {
+	// Functions
+	assertTypeSupported,
 	// Constants
 	DUCKDB_CAPABILITIES,
-	// Functions
 	extendDialect,
 	getAvailableDialects,
 	getDialectCapabilities,
@@ -350,5 +364,6 @@ export {
 	registerDialect,
 	SQLITE_CAPABILITIES,
 	// Errors
+	UnhandledTypeInDialect,
 	UnknownDialectError,
 } from './dialects/index.js';
