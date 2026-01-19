@@ -49,13 +49,13 @@ You're ready! Each chapter will:
 
 ## Chapter 1: Minimal Schema (users + posts)
 
-**New concepts:** `select`, `where`, `include`, `limit`, `offset`
+**New concepts:** `select`, `where`, `limit`, `offset`
 
 ### 1.1 Setup Database
 
 ```bash
-# Generate DDL
-pnpm dbsp generate ddl --schema ./examples/minimal.schema.ts -o /tmp/minimal.sql
+# Generate DDL (with --drop to reset existing tables)
+pnpm dbsp generate ddl --schema ./examples/minimal.schema.ts --drop -o /tmp/minimal.sql
 
 # Apply to database
 docker exec -i pg-demo psql -U postgres -d demo < /tmp/minimal.sql
@@ -64,207 +64,196 @@ docker exec -i pg-demo psql -U postgres -d demo < /tmp/minimal.sql
 docker exec -i pg-demo psql -U postgres -d demo < ./examples/minimal.seed.sql
 ```
 
-### 1.2 Connect REPL (Execution Mode)
+### 1.2 Query with REPL
+
+You can run queries in batch mode with `--eval`:
 
 ```bash
 pnpm dbsp repl \
   --schema ./examples/minimal.schema.ts \
   --db postgresql://postgres:demo@localhost:5432/demo \
-  --exec
+  --eval 'users'
 ```
 
-The `--exec` flag enables execution mode: queries run against the database and show real results.
+When `--db` is provided, queries execute against the database and show real results.
 
 ### 1.3 Explore Schema
 
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval '.tables'
 ```
-dbsp> .tables
 ```
-```
+> .tables
 Tables (2):
   - users
   - posts
 ```
 
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval '.schema users'
 ```
-dbsp> .schema users
 ```
-```
+> .schema users
 Table: users
 Columns:
   - id: integer (NOT NULL)
   - name: string (NOT NULL)
-  - email: string (NOT NULL, UNIQUE)
+  - email: string (NOT NULL)
 ```
 
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval '.relations posts'
 ```
-dbsp> .relations posts
 ```
-```
+> .relations posts
 Relations for posts:
-  - posts.user: belongsTo → users
-  - users.posts: hasMany → posts (inverse)
+  - users.posts: hasMany → posts
 ```
 
 ### 1.4 Basic SELECT
 
 **Select all users:**
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'users'
 ```
-dbsp> users
 ```
-```
-┌────┬─────────┬─────────────────────────┐
-│ id │ name    │ email                   │
-├────┼─────────┼─────────────────────────┤
-│  1 │ Alice   │ alice@example.com       │
-│  2 │ Bob     │ bob@example.com         │
-│  3 │ Charlie │ charlie@example.com     │
-└────┴─────────┴─────────────────────────┘
-3 rows (8ms)
+> users
+Main SQL:
+select "t0".* from "users" as "t0"
+
+Rows: 3
+id | name    | email
+---+---------+--------------------
+1  | Alice   | alice@example.com
+2  | Bob     | bob@example.com
+3  | Charlie | charlie@example.com
 ```
 
 **Select all posts:**
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts'
 ```
-dbsp> posts
 ```
-```
-┌────┬───────────────────┬────────────────────────────────────────┬─────────┐
-│ id │ title             │ content                                │ user_id │
-├────┼───────────────────┼────────────────────────────────────────┼─────────┤
-│  1 │ Hello World       │ My first post!                         │       1 │
-│  2 │ Getting Started   │ Here is how to begin...                │       1 │
-│  3 │ Tips and Tricks   │ Some useful tips for beginners.        │       2 │
-│  4 │ Advanced Topics   │ NULL                                   │       2 │
-│  5 │ Final Thoughts    │ Wrapping up the series.                │       3 │
-└────┴───────────────────┴────────────────────────────────────────┴─────────┘
-5 rows (5ms)
+> posts
+Main SQL:
+select "t0".* from "posts" as "t0"
+
+Rows: 5
+id | title           | content                         | user_id
+---+-----------------+---------------------------------+--------
+1  | Hello World     | My first post!                  | 1
+2  | Getting Started | Here is how to begin...         | 1
+3  | Tips and Tricks | Some useful tips for beginners. | 2
+4  | Advanced Topics | null                            | 2
+5  | Final Thoughts  | Wrapping up the series.         | 3
 ```
 
 ### 1.5 WHERE Clause
 
 **Filter by equality:**
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval "users where name = 'Alice'"
 ```
-dbsp> users where name = 'Alice'
 ```
-```
-┌────┬───────┬───────────────────┐
-│ id │ name  │ email             │
-├────┼───────┼───────────────────┤
-│  1 │ Alice │ alice@example.com │
-└────┴───────┴───────────────────┘
-1 row (4ms)
+> users where name = 'Alice'
+Main SQL:
+select "t0".* from "users" as "t0" where "t0"."name" = $1
+
+Parameters: ["Alice"]
+
+Rows: 1
+id | name  | email
+---+-------+------------------
+1  | Alice | alice@example.com
 ```
 
 **Filter by user_id:**
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts where user_id = 1'
 ```
-dbsp> posts where user_id = 1
 ```
-```
-┌────┬─────────────────┬──────────────────────────┬─────────┐
-│ id │ title           │ content                  │ user_id │
-├────┼─────────────────┼──────────────────────────┼─────────┤
-│  1 │ Hello World     │ My first post!           │       1 │
-│  2 │ Getting Started │ Here is how to begin...  │       1 │
-└────┴─────────────────┴──────────────────────────┴─────────┘
-2 rows (4ms)
+> posts where user_id = 1
+Main SQL:
+select "t0".* from "posts" as "t0" where "t0"."user_id" = $1
+
+Parameters: [1]
+
+Rows: 2
+id | title           | content                 | user_id
+---+-----------------+-------------------------+--------
+1  | Hello World     | My first post!          | 1
+2  | Getting Started | Here is how to begin... | 1
 ```
 
 **Filter with NULL:**
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts where content is null'
 ```
-dbsp> posts where content is null
 ```
-```
-┌────┬─────────────────┬─────────┬─────────┐
-│ id │ title           │ content │ user_id │
-├────┼─────────────────┼─────────┼─────────┤
-│  4 │ Advanced Topics │ NULL    │       2 │
-└────┴─────────────────┴─────────┴─────────┘
-1 row (3ms)
+> posts where content is null
+Main SQL:
+select "t0".* from "posts" as "t0" where "t0"."content" is null
+
+Rows: 1
+id | title           | content | user_id
+---+-----------------+---------+--------
+4  | Advanced Topics | null    | 2
 ```
 
-**Multiple conditions:**
+**Filter by user_id:**
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts where user_id = 2'
 ```
-dbsp> posts where user_id = 2 and content is not null
 ```
-```
-┌────┬─────────────────┬──────────────────────────────────┬─────────┐
-│ id │ title           │ content                          │ user_id │
-├────┼─────────────────┼──────────────────────────────────┼─────────┤
-│  3 │ Tips and Tricks │ Some useful tips for beginners.  │       2 │
-└────┴─────────────────┴──────────────────────────────────┴─────────┘
-1 row (3ms)
+> posts where user_id = 2
+Main SQL:
+select "t0".* from "posts" as "t0" where "t0"."user_id" = $1
+
+Parameters: [2]
+
+Rows: 2
+id | title           | content                         | user_id
+---+-----------------+---------------------------------+--------
+3  | Tips and Tricks | Some useful tips for beginners. | 2
+4  | Advanced Topics | null                            | 2
 ```
 
-### 1.6 INCLUDE (Joins)
-
-**Users with their posts:**
-```
-dbsp> users include posts
-```
-```
-┌────┬─────────┬─────────────────────────┬───────────────────────────────────────────┐
-│ id │ name    │ email                   │ posts                                     │
-├────┼─────────┼─────────────────────────┼───────────────────────────────────────────┤
-│  1 │ Alice   │ alice@example.com       │ [{id:1,title:"Hello World",...},          │
-│    │         │                         │  {id:2,title:"Getting Started",...}]      │
-│  2 │ Bob     │ bob@example.com         │ [{id:3,title:"Tips and Tricks",...},      │
-│    │         │                         │  {id:4,title:"Advanced Topics",...}]      │
-│  3 │ Charlie │ charlie@example.com     │ [{id:5,title:"Final Thoughts",...}]       │
-└────┴─────────┴─────────────────────────┴───────────────────────────────────────────┘
-3 rows (12ms)
-```
-
-**Posts with their author:**
-```
-dbsp> posts include user
-```
-```
-┌────┬───────────────────┬─────────┬───────────────────────────────────────┐
-│ id │ title             │ user_id │ user                                  │
-├────┼───────────────────┼─────────┼───────────────────────────────────────┤
-│  1 │ Hello World       │       1 │ {id:1,name:"Alice",email:"alice@..."}│
-│  2 │ Getting Started   │       1 │ {id:1,name:"Alice",email:"alice@..."}│
-│  3 │ Tips and Tricks   │       2 │ {id:2,name:"Bob",email:"bob@..."}    │
-│  4 │ Advanced Topics   │       2 │ {id:2,name:"Bob",email:"bob@..."}    │
-│  5 │ Final Thoughts    │       3 │ {id:3,name:"Charlie",email:"..."}    │
-└────┴───────────────────┴─────────┴───────────────────────────────────────┘
-5 rows (8ms)
-```
-
-### 1.7 LIMIT and OFFSET
+### 1.6 LIMIT and OFFSET
 
 **First 2 posts:**
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts limit 2'
 ```
-dbsp> posts limit 2
 ```
-```
-┌────┬─────────────────┬────────────────────────┬─────────┐
-│ id │ title           │ content                │ user_id │
-├────┼─────────────────┼────────────────────────┼─────────┤
-│  1 │ Hello World     │ My first post!         │       1 │
-│  2 │ Getting Started │ Here is how to begin...│       1 │
-└────┴─────────────────┴────────────────────────┴─────────┘
-2 rows (4ms)
+> posts limit 2
+Main SQL:
+select "t0".* from "posts" as "t0" limit $1
+
+Parameters: [2]
+
+Rows: 2
+id | title           | content                 | user_id
+---+-----------------+-------------------------+--------
+1  | Hello World     | My first post!          | 1
+2  | Getting Started | Here is how to begin... | 1
 ```
 
 **Skip first 2, get next 2:**
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts limit 2 offset 2'
 ```
-dbsp> posts limit 2 offset 2
 ```
-```
-┌────┬─────────────────┬──────────────────────────────────┬─────────┐
-│ id │ title           │ content                          │ user_id │
-├────┼─────────────────┼──────────────────────────────────┼─────────┤
-│  3 │ Tips and Tricks │ Some useful tips for beginners.  │       2 │
-│  4 │ Advanced Topics │ NULL                             │       2 │
-└────┴─────────────────┴──────────────────────────────────┴─────────┘
-2 rows (4ms)
-```
+> posts limit 2 offset 2
+Main SQL:
+select "t0".* from "posts" as "t0" limit $1 offset $2
 
-### 1.8 Cleanup
+Parameters: [2, 2]
 
-```
-dbsp> .exit
+Rows: 2
+id | title           | content                         | user_id
+---+-----------------+---------------------------------+--------
+3  | Tips and Tricks | Some useful tips for beginners. | 2
+4  | Advanced Topics | null                            | 2
 ```
 
 ---
