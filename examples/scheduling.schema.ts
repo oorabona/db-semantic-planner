@@ -20,20 +20,20 @@ import { defineSchema } from '@dbsp/core';
 
 export default defineSchema({
 	rooms: {
-		id: { type: 'integer', primaryKey: true },
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
 		name: { type: 'string' },
 		capacity: { type: 'integer' },
 		floor: { type: 'integer' },
 	},
 	room_bookings: {
-		id: { type: 'integer', primaryKey: true },
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
 		room_id: { type: 'integer', references: { table: 'rooms', onDelete: 'CASCADE' }, index: true },
 		booked_by: { type: 'string' },
 		booking_period: { type: 'daterange' }, // PostgreSQL daterange
 		purpose: { type: 'string', nullable: true },
 	},
 	events: {
-		id: { type: 'integer', primaryKey: true },
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
 		title: { type: 'string' },
 		room_id: { type: 'integer', references: { table: 'rooms', onDelete: 'CASCADE' }, index: true },
 		time_slot: { type: 'tstzrange' }, // PostgreSQL tstzrange
@@ -41,7 +41,7 @@ export default defineSchema({
 		max_attendees: { type: 'integer', nullable: true },
 	},
 	price_tiers: {
-		id: { type: 'integer', primaryKey: true },
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
 		product_name: { type: 'string', index: true },
 		quantity_range: { type: 'int4range' }, // PostgreSQL int4range
 		unit_price: { type: 'decimal' },

@@ -25,13 +25,13 @@ import { defineSchema } from '@dbsp/core';
 export default defineSchema(
 	{
 		authors: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			name: { type: 'string', nullable: false },
 			email: { type: 'string', nullable: false, unique: true },
 			active: { type: 'boolean', default: 'true' },
 		},
 		categories: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			name: { type: 'string', nullable: false },
 			parent_id: {
 				type: 'integer',
@@ -41,7 +41,7 @@ export default defineSchema(
 			},
 		},
 		posts: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			title: { type: 'string', nullable: false },
 			content: { type: 'text', nullable: false },
 			author_id: {
@@ -61,7 +61,7 @@ export default defineSchema(
 			created_at: { type: 'timestamp', default: 'now()' },
 		},
 		comments: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			post_id: {
 				type: 'integer',
 				references: { table: 'posts' },
@@ -73,7 +73,7 @@ export default defineSchema(
 			created_at: { type: 'timestamp', default: 'now()' },
 		},
 		tags: {
-			id: { type: 'integer', primaryKey: true },
+			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			name: { type: 'string', nullable: false },
 			slug: { type: 'string', nullable: false, unique: true },
 		},
