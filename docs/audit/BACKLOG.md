@@ -153,7 +153,7 @@
 | AUD-010 | Add CLI usage guide | `docs/` or `packages/cli/README.md` | M | TBD |
 | AUD-011 | Create error message factory | `core/src/dx/errors.ts` | S | TBD |
 | AUD-012 | Document production deployment | `docs/` | M | TBD |
-| AUD-013 | Add SECURITY.md policy | Root | S | TBD |
+| ~~AUD-013~~ | ~~Add SECURITY.md policy~~ | ✅ RESOLVED (2026-01-20) | S | - |
 
 ### Details
 
@@ -189,7 +189,7 @@
 |----|-------|--------|--------|
 | ~~AUD-QW-001~~ | ~~Update DOCUMENTATION_INDEX.md package refs~~ | ✅ (AUD-003) | - |
 | ~~AUD-QW-002~~ | ~~Update SKILL.md package refs~~ | ✅ (AUD-006) | - |
-| AUD-QW-003 | Add SECURITY.md policy | S | Medium |
+| ~~AUD-QW-003~~ | ~~Add SECURITY.md policy~~ | ✅ (AUD-013) | - |
 
 ---
 
@@ -200,11 +200,12 @@
 | P0 | 0 | 0h |
 | P1 | 2 (+1 resolved) | ~16h |
 | P2 | 2 (+10 resolved) | ~20h |
-| P3 | 5 | ~24h |
+| P3 | 4 (+1 resolved) | ~22h |
 | Quick Wins | 0 (+3 resolved) | ~0h |
-| **Total** | **9 open** | **~60h** |
+| **Total** | **8 open** | **~58h** |
 
 ### Recently Resolved
+- ✅ AUD-013 (2026-01-20) — SECURITY.md policy added
 - ✅ AUD-003, AUD-006, AUD-007, AUD-008 (2026-01-20) — Documentation updates
 - ✅ NAME-001, NAME-002, NAME-003, NAME-004 (2026-01-20) — Ambiguous naming fixed
 - ✅ DUP-001, DUP-002, DUP-003 (2026-01-20) — DRY violations fixed
