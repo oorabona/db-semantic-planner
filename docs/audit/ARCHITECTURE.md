@@ -147,7 +147,8 @@ packages/core/src/
 packages/adapter-kysely/src/
 ├── index.ts              # Public exports
 ├── kysely-adapter.ts     # KyselyAdapter implementation
-├── compiler.ts           # SQL compilation (4735 lines)
+├── compiler.ts           # SQL compilation (2633 lines, split into modules)
+├── compiler/             # Handler modules extracted from compiler.ts
 ├── dialect.ts            # Dialect detection & capabilities
 ├── ddl.ts                # DDL generation
 ├── dump.ts               # Query dump utilities

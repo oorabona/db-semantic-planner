@@ -31,7 +31,7 @@ packages/core/src/
 │   └── index.ts          # 555 lines - Dialect type utilities
 └── dx/
     ├── index.ts          # 186 lines - DX layer exports
-    ├── orm.ts            # 2351 lines - createOrm, QueryBuilder ⚠️
+    ├── orm.ts            # 1776 lines - createOrm, QueryBuilder (was 2351, -23%)
     ├── types.ts          # 1479 lines - Type definitions
     ├── filters.ts        # 761 lines - eq, and, or, exists
     ├── intent-builder.ts # 643 lines - Intent construction
@@ -55,8 +55,8 @@ packages/core/src/
 
 | Aspect | Score | Notes |
 |--------|-------|-------|
-| Single Responsibility | 7/10 | orm.ts handles too many concerns |
-| Testability | 9/10 | 345 tests pass, good coverage |
+| Single Responsibility | 8/10 | orm.ts refactored, ResultHydrator extracted |
+| Testability | 9/10 | 687 tests pass, good coverage |
 | Documentation | 9/10 | Well-documented interfaces |
 | Error Handling | 9/10 | Comprehensive error types |
 
@@ -64,7 +64,7 @@ packages/core/src/
 
 | ID | Issue | Severity | Recommendation |
 |----|-------|----------|----------------|
-| CORE-001 | `orm.ts` is 2351 lines | M | Extract QueryBuilder from execution concerns |
+| ~~CORE-001~~ | ~~`orm.ts` was 2351 lines~~ | ✅ | Resolved: ResultHydrator extracted (now 1776 lines, -23%) |
 | CORE-002 | `intent-ast.ts` is 1417 lines | L | Acceptable for comprehensive AST |
 | CORE-003 | `planner.ts` is 1475 lines | L | Consider splitting by concern |
 
@@ -72,7 +72,7 @@ packages/core/src/
 
 | Type | Count | Coverage |
 |------|-------|----------|
-| Unit | 345 | High |
+| Unit | 687 | High |
 | Integration | - | Via adapter |
 
 ---
@@ -97,7 +97,11 @@ packages/core/src/
 packages/adapter-kysely/src/
 ├── index.ts              # 108 lines - Public exports
 ├── kysely-adapter.ts     # 529 lines - KyselyAdapter implementation
-├── compiler.ts           # 4735 lines - SQL compilation ⚠️
+├── compiler.ts           # 2633 lines - SQL compilation (was 4735, -44%)
+├── compiler/             # Handler modules (extracted from compiler.ts)
+│   ├── handlers/where/   # 12 WHERE handlers
+│   ├── handlers/expression/ # Expression handlers
+│   └── handlers/include/ # Include strategy handlers
 ├── dialect.ts            # 622 lines - Dialect detection & capabilities
 ├── ddl.ts                # 668 lines - DDL generation
 ├── dump.ts               # 225 lines - Query dump utilities
@@ -124,7 +128,7 @@ packages/adapter-kysely/src/
 
 | Aspect | Score | Notes |
 |--------|-------|-------|
-| Single Responsibility | 6/10 | compiler.ts handles all SQL generation |
+| Single Responsibility | 8/10 | compiler.ts split into modules (-44%), handlers extracted |
 | Testability | 9/10 | 701 tests, comprehensive |
 | Documentation | 8/10 | Complex logic well-commented |
 | Error Handling | 9/10 | Good error propagation |
@@ -133,9 +137,9 @@ packages/adapter-kysely/src/
 
 | ID | Issue | Severity | Recommendation |
 |----|-------|----------|----------------|
-| ADAPT-001 | `compiler.ts` is 4735 lines | H | Split into focused modules (select, mutations, recursive) |
-| ADAPT-002 | 21 compile* functions in one file | M | Extract into separate files by concern |
-| ADAPT-003 | Some functions have 100+ lines | L | Consider further decomposition |
+| ~~ADAPT-001~~ | ~~`compiler.ts` was 4735 lines~~ | ✅ | Resolved: Split into compiler/ module (now 2633 lines, -44%) |
+| ~~ADAPT-002~~ | ~~21 compile* functions in one file~~ | ✅ | Resolved: Mutations, recursive, handlers extracted |
+| ADAPT-003 | Some functions have 100+ lines | L | Acceptable for complex compilation logic |
 
 ### Tests
 
@@ -287,7 +291,7 @@ packages/mcp-server/src/
 
 | Metric | Value | Assessment |
 |--------|-------|------------|
-| Largest file | compiler.ts (4735 lines) | ⚠️ Consider splitting |
-| Second largest | orm.ts (2351 lines) | ⚠️ Consider extraction |
-| Test coverage | 1344/1349 | ✅ Excellent |
+| Largest file | compiler.ts (2633 lines) | ✅ Split done (-44%) |
+| Second largest | orm.ts (1776 lines) | ✅ Extracted (-23%) |
+| Test coverage | 1686/1691 | ✅ Excellent |
 | Package isolation | Clean dependencies | ✅ Good architecture |

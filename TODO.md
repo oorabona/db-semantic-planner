@@ -93,7 +93,7 @@ New signature: `defineSchema(tables, config?)`
 - [x] Keep backward compat with deprecation warning for old format (2026-01-11)
 - [x] Update all examples in `examples/` (2026-01-11)
 - [x] Update all tests (2026-01-11)
-- [ ] Update type exports
+- [x] Update type exports (2026-01-20) — All schema types exported from core/index.ts
 
 **New API:**
 ```typescript

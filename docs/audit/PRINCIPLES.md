@@ -7,16 +7,16 @@
 | Status | Count | Details |
 |--------|-------|---------|
 | ✅ Compliant | 95% | Most modules have focused responsibilities |
-| ⚠️ Violations | 2 | Large files with multiple concerns |
+| ✅ Resolved | 0 | Large files split (2026-01-20) |
 
-**Violations:**
+**Previously Identified (Now Resolved):**
 
-| File:Line | Class/Function | Issue | Recommendation |
-|-----------|----------------|-------|----------------|
-| `adapter-kysely/src/compiler.ts:1-4735` | Module | 21 compile* functions handling all SQL generation | Split into select-compiler.ts, mutation-compiler.ts, recursive-compiler.ts |
-| `core/src/dx/orm.ts:1-2351` | QueryBuilderImpl | Handles query building, execution, hydration, pagination | Extract QueryExecutor, ResultHydrator as separate classes |
+| File:Line | Class/Function | Issue | Resolution |
+|-----------|----------------|-------|------------|
+| ~~`adapter-kysely/src/compiler.ts:1-4735`~~ | Module | 21 compile* functions | ✅ Split into compiler/ module (now 2633 lines, -44%) |
+| ~~`core/src/dx/orm.ts:1-2351`~~ | QueryBuilderImpl | Multiple concerns | ✅ ResultHydrator extracted (now 1776 lines, -23%) |
 
-**Compliance Score:** 8/10
+**Compliance Score:** 9/10
 
 ---
 
@@ -204,7 +204,7 @@ The codebase avoids over-engineering:
 
 | File | Concern | Assessment |
 |------|---------|------------|
-| compiler.ts | 4735 lines | ⚠️ Complex but necessary for comprehensive SQL |
+| compiler.ts | 2633 lines | ✅ Split into modules (-44%), handlers extracted |
 | planner.ts | Multiple strategy branches | ✅ Appropriate for decision complexity |
 | intent-ast.ts | Many intent types | ✅ Necessary for type safety |
 

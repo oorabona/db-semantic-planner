@@ -66,8 +66,8 @@
 
 | ID | Issue | Location | Effort | Owner |
 |----|-------|----------|--------|-------|
-| AUD-004 | compiler.ts is 4735 lines | `adapter-kysely/src/compiler.ts` | L | ✅ Phase 4 done |
-| AUD-005 | orm.ts is 2351 lines | `core/src/dx/orm.ts` | M | ✅ DONE |
+| ~~AUD-004~~ | ~~compiler.ts was 4735 lines~~ | ✅ Now 2633 lines (-44%) | L | ✅ DONE (2026-01-20) |
+| ~~AUD-005~~ | ~~orm.ts was 2351 lines~~ | ✅ Now 1776 lines (-23%) | M | ✅ DONE (2026-01-20) |
 | ~~AUD-006~~ | ~~Update SKILL.md package references~~ | ✅ RESOLVED (2026-01-20) | S | - |
 | ~~AUD-007~~ | ~~Add CHANGELOG.md~~ | ✅ RESOLVED (2026-01-20) | M | - |
 | ~~AUD-008~~ | ~~Add CONTRIBUTING.md~~ | ✅ RESOLVED (2026-01-20) | M | - |
@@ -182,8 +182,9 @@
 - Added `pnpm docs:api` script to generate docs to `docs/api/`
 - CI integration deferred to future work
 
-**AUD-010: CLI Usage Guide**
-- Document REPL commands, batch mode, code generation
+**~~AUD-010: CLI Usage Guide~~** ✅ RESOLVED (2026-01-20)
+- Created `docs/CLI_USAGE.md` with comprehensive CLI documentation
+- Covers: REPL commands, batch mode, code generation, examples
 - Effort: M (~3h)
 
 **~~AUD-011: Error Message Factory~~** ✅ RESOLVED (2026-01-20)
@@ -199,8 +200,8 @@
 - Also covers: streaming, EXPLAIN, rate limiting, security, health checks
 - Effort: M (~2h)
 
-**AUD-013: Security Policy**
-- SECURITY.md for vulnerability reporting
+**~~AUD-013: Security Policy~~** ✅ RESOLVED (2026-01-20)
+- Created `SECURITY.md` with vulnerability reporting process
 - Standard for OSS projects
 - Effort: S (~30min)
 
@@ -241,9 +242,11 @@
 
 ## Tracking
 
-- [ ] P0 items addressed (none needed)
-- [ ] P1 items in sprint planning
-- [ ] Quick wins executed
+- [x] P0 items addressed (none needed) ✅
+- [x] P1 items: MCP only (AUD-001, AUD-002 pending)
+- [x] P2 items: All 12 resolved (2026-01-20)
+- [x] P3 items: All 5 resolved (2026-01-20)
+- [x] Quick wins executed ✅
 - [ ] Next audit scheduled: [TBD]
 
 ---

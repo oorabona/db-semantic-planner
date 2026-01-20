@@ -18,17 +18,17 @@
 
 **Overall Health:** 🟢 Good
 
-The db-semantic-planner codebase is well-architected with a clean Ports & Adapters pattern separating the DB-agnostic core from the Kysely adapter. All 1344 unit tests pass, documentation is comprehensive, and security has been independently audited with no critical issues.
+The db-semantic-planner codebase is well-architected with a clean Ports & Adapters pattern separating the DB-agnostic core from the Kysely adapter. All 1686 unit tests pass (5 todo), documentation is comprehensive, and security has been independently audited with no critical issues.
 
 ---
 
 ## Key Findings (Top 5)
 
-1. **compiler.ts is 4735 lines** — Priority: P2 — Effort: L
-   - Single Responsibility violation; could be split into specialized compilers (select, mutations, recursive, etc.)
+1. ~~**compiler.ts was 4735 lines**~~ — ✅ RESOLVED (2026-01-20)
+   - Split into compiler/ module: 2633 lines remaining (-44%), with mutation-compiler.ts, recursive-compiler.ts, handlers/
 
-2. **orm.ts is 2351 lines** — Priority: P2 — Effort: M
-   - QueryBuilderImpl class handles too many responsibilities; consider extracting query building from execution
+2. ~~**orm.ts was 2351 lines**~~ — ✅ RESOLVED (2026-01-20)
+   - Extracted ResultHydrator: 1776 lines remaining (-23%), hydration logic moved to result-hydrator.ts
 
 3. **Dual schema definition paths require synchronization** — Priority: P3 — Effort: S
    - Both `@dbsp/schema` and `@dbsp/core/schema-builder` exist; documented but increases maintenance burden
@@ -51,7 +51,7 @@ The db-semantic-planner codebase is well-architected with a clean Ports & Adapte
 | Source files | 180 |
 | Lines of code | ~75,000 |
 | Test files | 45 |
-| Tests (unit) | 1,344 (5 skipped) |
+| Tests (unit) | 1,691 (5 todo) |
 | Dependencies | 5 direct, 18 dev |
 | TODO/FIXME count | 11 |
 | @ts-expect-error count | 8 (all in tests) |
@@ -74,11 +74,11 @@ The db-semantic-planner codebase is well-architected with a clean Ports & Adapte
 
 | Package | Tests | Passed | Skipped/Todo | Duration |
 |---------|-------|--------|--------------|----------|
-| @dbsp/core | 345 | 345 | 0 | 2.2s |
-| @dbsp/adapter-kysely | 706 | 701 | 5 todo | 603ms |
-| @dbsp/cli | 297 | 297 | 0 | 444ms |
-| @dbsp/mcp-server | 1 | 1 | 0 | 139ms |
-| **Total** | **1,349** | **1,344** | **5** | **~3.4s** |
+| @dbsp/core | 687 | 687 | 0 | ~2s |
+| @dbsp/adapter-kysely | 706 | 701 | 5 todo | ~600ms |
+| @dbsp/cli | 297 | 297 | 0 | ~450ms |
+| @dbsp/mcp-server | 1 | 1 | 0 | ~140ms |
+| **Total** | **1,691** | **1,686** | **5** | **~3.2s** |
 
 ---
 
@@ -91,10 +91,10 @@ The db-semantic-planner codebase is well-architected with a clean Ports & Adapte
 - Complete MCP server implementation or update status from "Ready" to "Alpha"
 - Add integration tests for mcp-server package
 
-### Medium-term (P2-P3)
-- Consider splitting `compiler.ts` into focused modules (select, mutations, recursive)
-- Extract query execution concerns from `QueryBuilderImpl` in `orm.ts`
-- Document the rationale for large files if splitting is not desirable
+### Medium-term (P2-P3) — ✅ ADDRESSED
+- ~~Consider splitting `compiler.ts` into focused modules~~ — **DONE** (compiler/ module with handlers)
+- ~~Extract query execution concerns from `QueryBuilderImpl` in `orm.ts`~~ — **DONE** (ResultHydrator extracted)
+- Large file issues resolved: compiler.ts -44%, orm.ts -23%
 
 ---
 
@@ -108,7 +108,7 @@ The db-semantic-planner codebase is well-architected with a clean Ports & Adapte
 - Strong TypeScript usage with minimal type suppressions
 
 ### Areas for Improvement
-- Large files could benefit from decomposition for maintainability
+- ~~Large files could benefit from decomposition~~ — **DONE** (compiler.ts, orm.ts split)
 - MCP server package is skeletal compared to other packages
 - E2E tests require external PostgreSQL container (documented, acceptable tradeoff)
 
