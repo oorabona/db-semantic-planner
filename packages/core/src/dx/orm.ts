@@ -32,6 +32,7 @@ import {
 } from './filters.js';
 import {
 	includeOptionsToIntent,
+	parseDotNotationInclude,
 	validateRecursiveInclude,
 } from './intent-builder.js';
 import {
@@ -65,7 +66,6 @@ import {
 	type ColumnSpec,
 	type CursorPaginatedResult,
 	type CursorPaginateOptions,
-	type IncludeOptions,
 	type IncludeOptionsWithRecursive,
 	isExpressionSpec,
 	isRecursiveIncludeOptions,
@@ -733,40 +733,6 @@ function findSelfRefRelation(
 	}
 
 	return null;
-}
-
-/**
- * Parse dot notation include into nested IncludeIntent.
- *
- * @example
- * 'posts.comments.author' becomes:
- * { relation: 'posts', include: [{ relation: 'comments', include: [{ relation: 'author' }] }] }
- */
-function parseDotNotationInclude(
-	path: string,
-	options?: IncludeOptions,
-): IncludeIntent {
-	const parts = path.split('.');
-	if (parts.length === 0) {
-		throw new Error('Invalid include path');
-	}
-
-	// Build from the end (deepest level) to the beginning
-	// Options apply to the deepest (last) relation
-	const lastPart = parts[parts.length - 1];
-	if (!lastPart) {
-		throw new Error('Invalid include path: empty segment');
-	}
-	let current: IncludeIntent = includeOptionsToIntent(lastPart, options);
-
-	// Work backwards through the path, wrapping each level
-	for (let i = parts.length - 2; i >= 0; i--) {
-		const part = parts[i];
-		if (!part) continue;
-		current = { relation: part, include: [current] };
-	}
-
-	return current;
 }
 
 /**

@@ -670,6 +670,21 @@ export type RecursiveNodeIdExpr =
 	  };
 
 /**
+ * Get the alias for a node ID expression.
+ * Used by both planner and compiler for consistent CTE column naming.
+ *
+ * @param expr - The node ID expression
+ * @returns The alias to use (explicit alias, column name, or 'node_id' fallback)
+ */
+export function getNodeIdAlias(expr: RecursiveNodeIdExpr): string {
+	if (expr.as) return expr.as;
+	if (expr.kind === 'column') return expr.name;
+	if (expr.kind === 'literal') return 'node_id';
+	// Binary expression needs explicit alias
+	return 'node_id';
+}
+
+/**
  * Adjacency-list traversal (self-referential table).
  * Example: roles.parent_id → roles.id
  */
