@@ -54,7 +54,7 @@ You're ready! Each chapter will:
 
 ## Chapter 1: Minimal Schema (users + posts)
 
-**New concepts:** `select`, `where`, `limit`, `offset`
+**New concepts:** `select`, `where`, `limit`, `offset`, `insert`, `update`, `delete`, `upsert`
 
 ### 1.1 Setup Database
 
@@ -259,6 +259,69 @@ id | title           | content                         | user_id
 ---+-----------------+---------------------------------+--------
 3  | Tips and Tricks | Some useful tips for beginners. | 2
 4  | Advanced Topics | null                            | 2
+```
+
+### 1.7 Mutations (INSERT, UPDATE, DELETE)
+
+**New concepts:** `insert`, `update`, `delete`, `upsert`, dry-run mode, `!` execute suffix
+
+The REPL supports data mutations with a safe dry-run mode by default.
+
+**Insert a new user (dry-run):**
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'users insert name = "Diana", email = "diana@example.com"'
+```
+```
+> users insert name = "Diana", email = "diana@example.com"
+[DRY-RUN] INSERT INTO "users" ("name", "email") VALUES ($1, $2)
+Parameters: ["Diana", "diana@example.com"]
+(add ! to execute)
+```
+
+**Execute the insert immediately with `!` suffix:**
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --exec --eval 'users insert name = "Diana", email = "diana@example.com"!'
+```
+```
+> users insert name = "Diana", email = "diana@example.com"!
+INSERT INTO "users" ("name", "email") VALUES ($1, $2)
+Parameters: ["Diana", "diana@example.com"]
+Rows affected: 1
+```
+
+**Update a user:**
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'users update set name = "Alice Smith" where id = 1'
+```
+```
+> users update set name = "Alice Smith" where id = 1
+[DRY-RUN] UPDATE "users" SET "name" = $1 WHERE "id" = $2
+Parameters: ["Alice Smith", 1]
+(add ! to execute)
+```
+
+**Delete a post:**
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts delete where id = 5'
+```
+```
+> posts delete where id = 5
+[DRY-RUN] DELETE FROM "posts" WHERE "id" = $1
+Parameters: [5]
+(add ! to execute)
+```
+
+> **Safety:** DELETE without WHERE clause is rejected to prevent accidental data loss.
+
+**Upsert (INSERT or UPDATE on conflict):**
+```bash
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'users upsert name = "Alice", email = "alice@example.com" on email do update set name = "Alice Updated"'
+```
+```
+> users upsert name = "Alice", email = "alice@example.com" on email do update set name = "Alice Updated"
+[DRY-RUN] INSERT INTO "users" ("name", "email") VALUES ($1, $2) ON CONFLICT ("email") DO UPDATE SET "name" = $3
+Parameters: ["Alice", "alice@example.com", "Alice Updated"]
+(add ! to execute)
 ```
 
 ---
@@ -1624,6 +1687,7 @@ pnpm dbsp repl --schema ./examples/minimal.schema.ts --dialect mysql
 | `.compile` | Disable execution mode (show SQL only) |
 | `.dump` | Show last query plan |
 | `.sql` | Show last SQL only |
+| `.explain` | Toggle EXPLAIN output (or `.explain on` / `.explain off`) |
 | `.help` | Show help |
 | `.exit` | Exit REPL |
 
@@ -1635,6 +1699,47 @@ pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://... --exe
 
 # Run with assertions
 pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://... --exec < test.assert.dbsp
+```
+
+### Mutation Syntax
+
+The REPL supports INSERT, UPDATE, DELETE, and UPSERT operations with a **dry-run by default** safety model.
+
+| Operation | Syntax | Example |
+|-----------|--------|---------|
+| INSERT | `<table> insert <col> = <val>, ...` | `users insert name = "Alice", email = "a@e.com"` |
+| UPDATE | `<table> update set <col> = <val> where <cond>` | `users update set name = "Bob" where id = 1` |
+| DELETE | `<table> delete where <cond>` | `posts delete where id = 5` |
+| UPSERT | `<table> upsert <col> = <val> on <col> do nothing\|update` | `users upsert name = "A" on email do nothing` |
+
+**Key features:**
+
+- **Dry-run default:** Mutations show the SQL without executing. Add `!` suffix to execute.
+- **Column validation:** Unknown columns are rejected immediately.
+- **Safety guards:** DELETE without WHERE is blocked.
+- **Parameterized queries:** All values are bound parameters (SQL injection safe).
+
+**Value types:**
+
+| Type | Syntax | Example |
+|------|--------|---------|
+| String | `"value"` or `'value'` | `name = "Alice"` |
+| Number | `123` or `3.14` | `age = 25` |
+| Boolean | `true` / `false` | `active = false` |
+| Null | `null` | `deleted_at = null` |
+| JSON | `{...}` or `[...]` | `metadata = {"key": "value"}` |
+
+**UPSERT conflict handling:**
+
+```
+# Do nothing on conflict
+users upsert name = "A", email = "a@e.com" on email do nothing
+
+# Update specific columns on conflict
+users upsert name = "A", email = "a@e.com" on email do update set name = "A Updated"
+
+# Composite conflict columns
+orders upsert ... on (user_id, product_id) do nothing
 ```
 
 ---
