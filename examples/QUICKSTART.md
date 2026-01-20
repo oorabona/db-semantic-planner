@@ -273,9 +273,12 @@ pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:
 ```
 ```
 > users insert name = "Diana", email = "diana@example.com"
-[DRY-RUN] INSERT INTO "users" ("name", "email") VALUES ($1, $2)
+[DRY-RUN] INSERT (add ! to execute)
+
+SQL:
+insert into "users" ("name", "email") values ($1, $2)
+
 Parameters: ["Diana", "diana@example.com"]
-(add ! to execute)
 ```
 
 **Execute the insert immediately with `!` suffix:**
@@ -284,9 +287,12 @@ pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:
 ```
 ```
 > users insert name = "Diana", email = "diana@example.com"!
-INSERT INTO "users" ("name", "email") VALUES ($1, $2)
+INSERT (executed)
+
+SQL:
+insert into "users" ("name", "email") values ($1, $2)
+
 Parameters: ["Diana", "diana@example.com"]
-Rows affected: 1
 ```
 
 **Update a user:**
@@ -295,9 +301,12 @@ pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:
 ```
 ```
 > users update set name = "Alice Smith" where id = 1
-[DRY-RUN] UPDATE "users" SET "name" = $1 WHERE "id" = $2
+[DRY-RUN] UPDATE (add ! to execute)
+
+SQL:
+update "users" set "name" = $1 where "id" = $2
+
 Parameters: ["Alice Smith", 1]
-(add ! to execute)
 ```
 
 **Delete a post:**
@@ -306,9 +315,12 @@ pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:
 ```
 ```
 > posts delete where id = 5
-[DRY-RUN] DELETE FROM "posts" WHERE "id" = $1
+[DRY-RUN] DELETE (add ! to execute)
+
+SQL:
+delete from "posts" where "id" = $1
+
 Parameters: [5]
-(add ! to execute)
 ```
 
 > **Safety:** DELETE without WHERE clause is rejected to prevent accidental data loss.
@@ -319,9 +331,12 @@ pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:
 ```
 ```
 > users upsert name = "Alice", email = "alice@example.com" on email do update set name = "Alice Updated"
-[DRY-RUN] INSERT INTO "users" ("name", "email") VALUES ($1, $2) ON CONFLICT ("email") DO UPDATE SET "name" = $3
+[DRY-RUN] UPSERT (add ! to execute)
+
+SQL:
+insert into "users" ("name", "email") values ($1, $2) on conflict ("email") do update set "name" = $3
+
 Parameters: ["Alice", "alice@example.com", "Alice Updated"]
-(add ! to execute)
 ```
 
 ---

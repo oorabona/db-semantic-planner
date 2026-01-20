@@ -15,10 +15,12 @@ import {
 import { type AssertionSummary, runAssertions } from './assertion-runner.js';
 import { createDbConnection, type DbConnection } from './db-connection.js';
 import { parseInputMode } from './mode-escape.js';
-import { parseNaturalQuery } from './parser.js';
+import { isMutationKeyword, parseNaturalQuery, parseMutation } from './parser.js';
 import {
 	executeQuery,
+	executeMutation,
 	formatExecutionResult,
+	formatMutationResult,
 	type QueryExecutionOptions,
 } from './query-executor.js';
 import type { QueryMode } from './types.js';
@@ -40,7 +42,7 @@ export interface BatchResult {
 	sql?: string;
 	params?: readonly unknown[];
 	error?: string;
-	type: 'command' | 'query';
+	type: 'command' | 'query' | 'mutation';
 }
 
 /** @internal - Exported for testing */
@@ -410,6 +412,62 @@ async function executeNaturalQuery(
 }
 
 /**
+ * CLI-MUT: Execute a mutation query (INSERT/UPDATE/DELETE/UPSERT)
+ */
+function executeMutationQuery(
+	input: string,
+	schema: ResolvedSchema,
+	state: BatchState,
+): BatchResult {
+	try {
+		const parsed = parseMutation(input, schema);
+		if (!parsed) {
+			return {
+				query: input,
+				success: false,
+				error: 'Failed to parse mutation',
+				type: 'mutation',
+			};
+		}
+
+		const options: QueryExecutionOptions = {};
+		if (state.schemaName) {
+			options.schemaName = state.schemaName;
+		}
+		const result = executeMutation(parsed, schema, options);
+
+		if (result.error) {
+			return {
+				query: input,
+				success: false,
+				error: result.error,
+				type: 'mutation',
+			};
+		}
+
+		// Format the output using formatMutationResult
+		const output = formatMutationResult(result);
+
+		return {
+			query: input,
+			success: true,
+			output,
+			sql: result.sql,
+			params: result.params,
+			type: 'mutation',
+		};
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return {
+			query: input,
+			success: false,
+			error: message,
+			type: 'mutation',
+		};
+	}
+}
+
+/**
  * Execute a raw SQL query (in SQL mode)
  */
 async function executeRawSql(
@@ -597,8 +655,18 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 			// Raw SQL mode
 			result = await executeRawSql(effectiveQuery, state);
 		} else {
-			// Natural query mode
-			result = await executeNaturalQuery(effectiveQuery, schema, state);
+			// CLI-MUT: Check if this is a mutation (table keyword ...)
+			const words = effectiveQuery.trim().split(/\s+/);
+			const secondWord = words[1]?.toLowerCase() ?? '';
+			const isMutation = words.length >= 2 && isMutationKeyword(secondWord);
+
+			if (isMutation) {
+				// CLI-MUT: Mutation handling (INSERT/UPDATE/DELETE/UPSERT)
+				result = executeMutationQuery(effectiveQuery, schema, state);
+			} else {
+				// Natural query mode (SELECT)
+				result = await executeNaturalQuery(effectiveQuery, schema, state);
+			}
 		}
 
 		results.push(result);
