@@ -74,6 +74,10 @@
 | ~~DUP-001~~ | ~~Duplicate `singularize` function~~ | ✅ RESOLVED (2026-01-20) | S | - |
 | ~~DUP-002~~ | ~~Duplicate `parseDotNotationInclude`~~ | ✅ RESOLVED (2026-01-20) | S | - |
 | ~~DUP-003~~ | ~~Similar `getNodeIdAlias` logic~~ | ✅ RESOLVED (2026-01-20) | S | - |
+| ~~NAME-001~~ | ~~`resolveRelation` ambiguous naming~~ | ✅ RESOLVED (2026-01-20) | S | - |
+| ~~NAME-002~~ | ~~`mapColumnType` ambiguous naming~~ | ✅ RESOLVED (2026-01-20) | S | - |
+| ~~NAME-003~~ | ~~`inferRelations` ambiguous naming~~ | ✅ RESOLVED (2026-01-20) | S | - |
+| ~~NAME-004~~ | ~~`buildTableIR` ambiguous naming~~ | ✅ RESOLVED (2026-01-20) | S | - |
 
 ### Details
 
@@ -122,6 +126,22 @@
 - Exported from `core/index.ts`
 - Both `planner.ts` and `compiler.ts` import from core
 - Resolution: Canonical location near RecursiveNodeIdExpr type
+
+**~~NAME-001: `resolveRelation` Ambiguous Naming~~** ✅ RESOLVED (2026-01-20)
+- `planner.ts`: Renamed to `disambiguateRelation` — handles warnings + disambiguation
+- `compiler.ts`: Renamed to `lookupResolvedRelation` — uses plan decisions
+
+**~~NAME-002: `mapColumnType` Ambiguous Naming~~** ✅ RESOLVED (2026-01-20)
+- `ddl.ts`: Renamed to `columnTypeToSql` — ColumnType → SQL string
+- `schema-bridge.ts`: Renamed to `generatedTypeToColumnType` — Generated → Column
+
+**~~NAME-003: `inferRelations` Ambiguous Naming~~** ✅ RESOLVED (2026-01-20)
+- `conventions.ts`: Renamed to `inferRelationsFromSchema` — from schema definition
+- `introspection.ts`: Renamed to `inferRelationsFromForeignKeys` — from DB metadata
+
+**~~NAME-004: `buildTableIR` Ambiguous Naming~~** ✅ RESOLVED (2026-01-20)
+- `schema-bridge.ts`: Renamed to `buildTableIRFromDefinition` — from code-first def
+- `introspection.ts`: Renamed to `buildTableIRFromMetadata` — from DB introspection
 
 ---
 
@@ -179,12 +199,13 @@
 |----------|-------|--------------|
 | P0 | 0 | 0h |
 | P1 | 3 | ~20h |
-| P2 | 5 (+3 resolved) | ~32h |
+| P2 | 5 (+7 resolved) | ~30h |
 | P3 | 5 | ~24h |
 | Quick Wins | 3 | ~2h |
-| **Total** | **16 open** | **~78h** |
+| **Total** | **16 open** | **~76h** |
 
 ### Recently Resolved
+- ✅ NAME-001, NAME-002, NAME-003, NAME-004 (2026-01-20) — Ambiguous naming fixed
 - ✅ DUP-001, DUP-002, DUP-003 (2026-01-20) — DRY violations fixed
 
 ---

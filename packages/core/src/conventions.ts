@@ -322,7 +322,7 @@ export function detectManyToMany(
  * Infer all relations from table definitions.
  * Returns a map of 'sourceTable.relationName' → RelationDefinition.
  */
-export function inferRelations(
+export function inferRelationsFromSchema(
 	tables: SchemaTablesDefinition,
 	conventions: Required<SchemaConventionsDefinition>,
 	explicitRelations: SchemaRelationsDefinition = {},

@@ -242,7 +242,7 @@ export {
 	decapitalize,
 	detectForeignKeys,
 	detectManyToMany,
-	inferRelations,
+	inferRelationsFromSchema,
 	pluralize,
 	singularize,
 } from './conventions.js';

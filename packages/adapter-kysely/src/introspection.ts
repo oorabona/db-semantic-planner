@@ -437,7 +437,7 @@ export async function introspect(
 
 	// Build table IR with FKs
 	const tableList = filteredTables.map((table) =>
-		buildTableIR(table, fkMap.get(table.name) ?? [], warnings),
+		buildTableIRFromMetadata(table, fkMap.get(table.name) ?? [], warnings),
 	);
 
 	// Convert to Map for ModelIR
@@ -447,7 +447,7 @@ export async function introspect(
 	}
 
 	// Infer relations from foreign keys
-	const relationList = inferRelations(foreignKeys, naming);
+	const relationList = inferRelationsFromForeignKeys(foreignKeys, naming);
 
 	// Convert to Map for ModelIR (keyed by "source.name")
 	const relationsMap = new Map<string, RelationIR>();
@@ -485,7 +485,7 @@ export async function introspect(
 /**
  * Build TableIR from Kysely TableMetadata.
  */
-function buildTableIR(
+function buildTableIRFromMetadata(
 	table: TableMetadata,
 	tableFks: ForeignKeyInfo[],
 	warnings: string[],
@@ -634,7 +634,7 @@ function buildForeignKeyMap(
  * Infer relations from foreign key constraints.
  * Each FK generates two relations: belongsTo (owner → target) and hasMany (target → owner).
  */
-function inferRelations(
+function inferRelationsFromForeignKeys(
 	foreignKeys: ForeignKeyInfo[],
 	naming: 'camelCase' | 'snake_case',
 ): RelationIR[] {

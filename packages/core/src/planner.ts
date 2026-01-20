@@ -799,7 +799,7 @@ function processRelationFilter(
 	state.relationsAnalyzed++;
 
 	// Find the relation
-	const relation = resolveRelation(
+	const relation = disambiguateRelation(
 		relationName,
 		sourceTable,
 		model,
@@ -891,7 +891,7 @@ function processInclude(
 	const relationName = include.via ?? include.relation;
 
 	// Resolve the relation
-	const relation = resolveRelation(
+	const relation = disambiguateRelation(
 		relationName,
 		sourceTable,
 		model,
@@ -1042,7 +1042,7 @@ function processInclude(
 // Relation Resolution
 // ============================================================================
 
-function resolveRelation(
+function disambiguateRelation(
 	relationName: string,
 	sourceTable: string,
 	model: ModelIR,

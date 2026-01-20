@@ -3424,7 +3424,12 @@ function applyIncludeJoins(
 			continue;
 		}
 
-		const relation = resolveRelation(relationName, rootTable, model, plan);
+		const relation = lookupResolvedRelation(
+			relationName,
+			rootTable,
+			model,
+			plan,
+		);
 
 		if (!relation) {
 			throw new CompilationError(
@@ -3721,7 +3726,7 @@ function collectJoinFilterRelations(
 /**
  * Resolve relation info from a relation name, handling disambiguation.
  */
-function resolveRelation(
+function lookupResolvedRelation(
 	relationName: string,
 	sourceTable: string,
 	model: ModelIR,
@@ -3791,7 +3796,12 @@ function applyJoinFilters(
 			continue;
 		}
 
-		const relation = resolveRelation(joinRel.relation, rootTable, model, plan);
+		const relation = lookupResolvedRelation(
+			joinRel.relation,
+			rootTable,
+			model,
+			plan,
+		);
 
 		if (!relation) {
 			throw new CompilationError(

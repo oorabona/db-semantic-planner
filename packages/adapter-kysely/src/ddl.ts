@@ -41,7 +41,7 @@ import { type DialectName, detectDialect } from './dialect.js';
  * Uses originalDbType if available (from introspection), otherwise
  * falls back to reasonable PostgreSQL defaults.
  */
-function mapColumnType(
+function columnTypeToSql(
 	type: ColumnType,
 	originalDbType?: string,
 ): ColumnDataType {
@@ -170,7 +170,7 @@ function getAutoIncrementStrategy(
 	}
 
 	// MySQL, SQLite, MSSQL, unknown: use autoIncrement() method
-	const baseType = mapColumnType(columnType, originalDbType);
+	const baseType = columnTypeToSql(columnType, originalDbType);
 	return {
 		dataType: baseType,
 		useAutoIncrementMethod: true,
@@ -359,7 +359,7 @@ function generateTableDDL(
 
 		const dataType = autoIncrementStrategy
 			? autoIncrementStrategy.dataType
-			: mapColumnType(col.type, col.originalDbType);
+			: columnTypeToSql(col.type, col.originalDbType);
 
 		const isPrimaryKey = pkColumns.length === 1 && pkColumns[0] === col.name;
 

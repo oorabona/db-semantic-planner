@@ -7,7 +7,10 @@
  * Migrated from @dbsp/schema/define.ts as part of ARCH-003.
  */
 
-import { DEFAULT_CONVENTIONS, inferRelations } from './conventions.js';
+import {
+	DEFAULT_CONVENTIONS,
+	inferRelationsFromSchema,
+} from './conventions.js';
 import type {
 	ResolvedSchema,
 	SchemaConfigInput,
@@ -64,7 +67,11 @@ export function defineSchema<T extends SchemaTablesDefinition>(
 	};
 
 	// Infer relations from table definitions + merge with explicit
-	const allRelations = inferRelations(tables, resolvedConventions, relations);
+	const allRelations = inferRelationsFromSchema(
+		tables,
+		resolvedConventions,
+		relations,
+	);
 
 	// Validate explicit relations reference existing tables
 	validateRelations(tables, relations);
