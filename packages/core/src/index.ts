@@ -114,6 +114,8 @@ export type {
 	WindowOrderBy,
 } from './intent-ast.js';
 export {
+	// Recursive CTE helpers (RFC-001)
+	getNodeIdAlias,
 	// Recursive CTE type guards (RFC-001)
 	isAdjacencyTraversal,
 	// Window function type guards (P3-A)

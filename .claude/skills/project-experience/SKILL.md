@@ -447,3 +447,34 @@ How to avoid or mitigate.
 **Key functions:**
 - `generateSequenceResetStatements()`: Batch reset all auto-increment sequences
 - `generateSetvalStatement()`: Set explicit next value for a sequence
+
+---
+
+### Canonical Locations for Shared Functions (DRY)
+
+**When:** Adding or consolidating shared utility functions across core and adapter packages.
+
+**Why:** Avoid duplicate implementations that can drift apart. Single source of truth.
+
+**Where to put shared functions:**
+
+| Function Type | Canonical Location | Example |
+|---------------|-------------------|---------|
+| String manipulation (pluralize, singularize, capitalize) | `core/src/conventions.ts` | `singularize()` with IRREGULAR_PLURALS |
+| Intent building helpers | `core/src/dx/intent-builder.ts` | `parseDotNotationInclude()` |
+| AST-related utilities | `core/src/intent-ast.ts` | `getNodeIdAlias()` near related types |
+| Type guards for AST nodes | `core/src/intent-ast.ts` | `isAdjacencyTraversal()` |
+| Schema utilities | `core/src/model-ir.ts` or `core/src/conventions.ts` | FK detection |
+
+**Cross-package sharing:** When adapter needs a function from core:
+1. Export from core's index.ts
+2. Import in adapter via `@dbsp/core`
+3. Never duplicate - if you find yourself copying, refactor instead
+
+**Backwards compatibility:** When moving a function, use re-export pattern:
+```typescript
+// In old location (e.g., lightweight-model.ts)
+export { singularize } from '../conventions.js';  // Re-export for consumers
+```
+
+**Added:** 2026-01-20 (DUP-001, DUP-002, DUP-003 fixes)

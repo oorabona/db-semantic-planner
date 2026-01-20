@@ -16,7 +16,6 @@ import type {
 	QueryIntent,
 	RecursiveAdvancedOptions,
 	RecursiveIntent,
-	RecursiveNodeIdExpr,
 	RecursivePlanReport,
 	RecursiveTrackOptions,
 	RelationIR,
@@ -33,6 +32,7 @@ import {
 	POSTGRESQL_CAPABILITIES as CORE_POSTGRESQL_CAPABILITIES,
 	type DialectCapabilities as CoreDialectCapabilities,
 	getDialectCapabilities,
+	getNodeIdAlias,
 	isAdjacencyTraversal,
 	isAggregateWindowFunction,
 	isEdgeTableTraversal,
@@ -1573,15 +1573,6 @@ function buildCteColumnList(intent: RecursiveIntent): string[] {
 	}
 
 	return columns;
-}
-
-/**
- * Get the alias for the node_id expression.
- */
-function getNodeIdAlias(expr: RecursiveNodeIdExpr): string {
-	if (expr.as) return expr.as;
-	if (expr.kind === 'column') return expr.name;
-	return 'node_id';
 }
 
 /**

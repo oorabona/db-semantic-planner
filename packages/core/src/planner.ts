@@ -6,11 +6,11 @@
 
 import type { DialectCapabilities } from './dialects/index.js';
 import {
+	getNodeIdAlias,
 	type IncludeIntent,
 	isRawExpression,
 	type QueryIntent,
 	type RecursiveIntent,
-	type RecursiveNodeIdExpr,
 	type WhereIntent,
 } from './intent-ast.js';
 import type { IncludeStrategy, ModelIR, RelationIR } from './model-ir.js';
@@ -281,18 +281,6 @@ export class RecursiveShapeMismatchError extends Error {
 // ============================================================================
 // Recursive CTE Shape Validation Helpers
 // ============================================================================
-
-/**
- * Computes the column alias from a RecursiveNodeIdExpr.
- * Per RFC-001: nodeIdExpr determines the node_id column name.
- */
-function getNodeIdAlias(expr: RecursiveNodeIdExpr): string {
-	if (expr.as) return expr.as;
-	if (expr.kind === 'column') return expr.name;
-	if (expr.kind === 'literal') return 'node_id';
-	// Binary expression needs explicit alias
-	return 'node_id';
-}
 
 /**
  * Computes expected base case columns from RecursiveIntent.

@@ -23,6 +23,7 @@
  * ```
  */
 
+import { singularize } from '../conventions.js';
 import type {
 	Cardinality as ModelCardinality,
 	ModelIR,
@@ -31,6 +32,9 @@ import type {
 	RelationType,
 	TableIR,
 } from '../index.js';
+
+// Re-export for backwards compatibility
+export { singularize };
 
 // ============================================================================
 // Types
@@ -319,63 +323,6 @@ export function parseRelationDef(
 // ============================================================================
 // FK Inference
 // ============================================================================
-
-/**
- * Irregular plural → singular mappings.
- * For MVP, we only handle common cases.
- */
-const IRREGULAR_PLURALS: Record<string, string> = {
-	people: 'person',
-	children: 'child',
-	men: 'man',
-	women: 'woman',
-	teeth: 'tooth',
-	feet: 'foot',
-	geese: 'goose',
-	mice: 'mouse',
-	data: 'datum',
-	media: 'medium',
-	criteria: 'criterion',
-	phenomena: 'phenomenon',
-};
-
-/**
- * Singularizes a table name using simple rules.
- *
- * Rules:
- * 1. Check irregular plurals first
- * 2. 'ies' → 'y' (categories → category)
- * 3. 's' → '' (users → user)
- *
- * @param tableName - The table name to singularize
- * @returns Singularized form
- */
-export function singularize(tableName: string): string {
-	const lower = tableName.toLowerCase();
-
-	// Check irregular plurals
-	const irregular = IRREGULAR_PLURALS[lower];
-	if (irregular !== undefined) {
-		// Preserve original case pattern
-		if (tableName[0]?.toUpperCase() === tableName[0]) {
-			return irregular.charAt(0).toUpperCase() + irregular.slice(1);
-		}
-		return irregular;
-	}
-
-	// Handle 'ies' → 'y'
-	if (lower.endsWith('ies') && tableName.length > 3) {
-		return `${tableName.slice(0, -3)}y`;
-	}
-
-	// Handle regular plurals ending in 's'
-	if (lower.endsWith('s') && !lower.endsWith('ss') && tableName.length > 1) {
-		return tableName.slice(0, -1);
-	}
-
-	// Already singular or unknown pattern
-	return tableName;
-}
 
 /**
  * Infers the foreign key column name based on convention.

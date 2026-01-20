@@ -40,16 +40,64 @@ export const DEFAULT_CONVENTIONS: Required<SchemaConventionsDefinition> = {
  * Convert table name to singular form.
  * Simple heuristic: remove trailing 's' if present.
  */
+/**
+ * Mapping of irregular plural forms to their singular equivalents.
+ */
+const IRREGULAR_PLURALS: Record<string, string> = {
+	people: 'person',
+	children: 'child',
+	men: 'man',
+	women: 'woman',
+	teeth: 'tooth',
+	feet: 'foot',
+	geese: 'goose',
+	mice: 'mouse',
+	data: 'datum',
+	media: 'medium',
+	criteria: 'criterion',
+	phenomena: 'phenomenon',
+};
+
 export function singularize(name: string): string {
-	if (name.endsWith('ies')) {
+	const lower = name.toLowerCase();
+
+	// Check irregular plurals
+	const irregular = IRREGULAR_PLURALS[lower];
+	if (irregular !== undefined) {
+		// Preserve original case pattern
+		if (name[0]?.toUpperCase() === name[0]) {
+			return irregular.charAt(0).toUpperCase() + irregular.slice(1);
+		}
+		return irregular;
+	}
+
+	// Handle 'ies' → 'y' (categories → category)
+	if (lower.endsWith('ies') && name.length > 3) {
 		return `${name.slice(0, -3)}y`;
 	}
-	if (name.endsWith('es') && !name.endsWith('ases') && !name.endsWith('uses')) {
+
+	// Handle 'es' for words ending in -shes, -ches, -xes, -zes, -ses (boxes → box)
+	// But NOT for -les, -res, -tes, etc. (profiles → profile, not profil)
+	if (
+		lower.endsWith('es') &&
+		name.length > 2 &&
+		(lower.endsWith('shes') ||
+			lower.endsWith('ches') ||
+			lower.endsWith('xes') ||
+			lower.endsWith('zes') ||
+			(lower.endsWith('ses') &&
+				!lower.endsWith('ases') &&
+				!lower.endsWith('uses')))
+	) {
 		return name.slice(0, -2);
 	}
-	if (name.endsWith('s') && !name.endsWith('ss')) {
+
+	// Handle regular plurals ending in 's' (but not 'ss')
+	if (lower.endsWith('s') && !lower.endsWith('ss') && name.length > 1) {
 		return name.slice(0, -1);
 	}
+
+	// Already singular or unknown pattern
 	return name;
 }
 

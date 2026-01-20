@@ -135,7 +135,7 @@ export function nestedIncludeToIntent(nested: NestedInclude): IncludeIntent {
  * 'posts.comments.author' becomes:
  * { relation: 'posts', include: [{ relation: 'comments', include: [{ relation: 'author' }] }] }
  */
-function parseDotNotationInclude(
+export function parseDotNotationInclude(
 	path: string,
 	options?: IncludeOptionsWithRecursive,
 ): IncludeIntent {
