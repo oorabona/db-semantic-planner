@@ -566,16 +566,32 @@ describe('Errors factory', () => {
 		});
 
 		it('isDbspError identifies any DBSP error', () => {
-			expect(Errors.isDbspError(new ExecutionError({ operation: 'x', reason: 'y', fix: 'z' }))).toBe(true);
+			expect(
+				Errors.isDbspError(
+					new ExecutionError({ operation: 'x', reason: 'y', fix: 'z' }),
+				),
+			).toBe(true);
 			expect(Errors.isDbspError(new NotFoundError('t'))).toBe(true);
-			expect(Errors.isDbspError(new TableNotFoundError({ requested: 'x', available: [] }))).toBe(true);
+			expect(
+				Errors.isDbspError(
+					new TableNotFoundError({ requested: 'x', available: [] }),
+				),
+			).toBe(true);
 			expect(Errors.isDbspError(new Error('generic'))).toBe(false);
 			expect(Errors.isDbspError('string')).toBe(false);
 		});
 
 		it('hasCode identifies errors with DBSP codes', () => {
-			const withCode = Errors.execution({ operation: 'x', reason: 'y', fix: 'z' });
-			const withoutCode = new ExecutionError({ operation: 'x', reason: 'y', fix: 'z' });
+			const withCode = Errors.execution({
+				operation: 'x',
+				reason: 'y',
+				fix: 'z',
+			});
+			const withoutCode = new ExecutionError({
+				operation: 'x',
+				reason: 'y',
+				fix: 'z',
+			});
 
 			expect(Errors.hasCode(withCode)).toBe(true);
 			expect(Errors.hasCode(withoutCode)).toBe(false);
