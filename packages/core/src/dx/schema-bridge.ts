@@ -224,7 +224,7 @@ export type InferDBFromSchema<S extends GeneratedSchema> = {
 /**
  * Map generated column type to ModelIR column type.
  */
-function mapColumnType(genType: GeneratedColumnType): ColumnType {
+function generatedTypeToColumnType(genType: GeneratedColumnType): ColumnType {
 	switch (genType) {
 		case 'string':
 		case 'text':
@@ -272,7 +272,7 @@ function mapRelationType(kind: GeneratedRelationKind): RelationType {
 /**
  * Build a TableIR from generated table definition.
  */
-function buildTableIR(
+function buildTableIRFromDefinition(
 	tableName: string,
 	genTable: GeneratedTable,
 	fkAutoIndex: boolean,
@@ -288,7 +288,7 @@ function buildTableIR(
 		// Column (with unique support)
 		const col: ColumnIR = {
 			name: colName,
-			type: mapColumnType(colDef.type),
+			type: generatedTypeToColumnType(colDef.type),
 			nullable: colDef.nullable ?? false,
 			default: colDef.default,
 		};
@@ -454,7 +454,10 @@ export function buildModelFromSchema(schema: GeneratedSchema): ModelIR {
 
 	// Build tables
 	for (const [tableName, genTable] of Object.entries(schema.tables)) {
-		tables.set(tableName, buildTableIR(tableName, genTable, fkAutoIndex));
+		tables.set(
+			tableName,
+			buildTableIRFromDefinition(tableName, genTable, fkAutoIndex),
+		);
 	}
 
 	// Build relations
