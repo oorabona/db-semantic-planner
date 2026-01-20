@@ -48,3 +48,22 @@ posts where user_id = 2
 # =============================================================================
 posts limit 2
 posts limit 2 offset 2
+
+# =============================================================================
+# 1.7 Mutations (INSERT, UPDATE, DELETE, UPSERT)
+# =============================================================================
+
+# Insert a new user (dry-run by default)
+users insert name = "Diana", email = "diana@example.com"
+
+# Update a user
+users update set name = "Alice Smith" where id = 1
+
+# Delete a post
+posts delete where id = 5
+
+# Upsert - insert or update on conflict
+users upsert name = "Alice", email = "alice@example.com" on email do nothing
+
+# Upsert with update action
+users upsert name = "Bob", email = "bob@example.com" on email do update set name = "Bob Updated"
