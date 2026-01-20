@@ -878,3 +878,20 @@ Kysely's `addColumn().autoIncrement()` uses the IDENTITY approach which is more 
 **Prevention:** Always run `git status` and `ls` on target directories before creating new files. Check if the extraction was partially done in a previous story.
 
 **Location:** `packages/core/src/dx/result-hydrator.ts`, `packages/core/src/dx/query-executor.ts`
+
+### Use Serena rename_symbol for Symbol Renaming (2026-01-20)
+
+**Symptoms:** Manual renaming of classes/functions across multiple files is tedious and error-prone, with risk of missing references.
+
+**Cause:** Attempting to rename symbols by manually editing each file instead of using Serena's semantic tools.
+
+**Solution:** For renaming exported classes, functions, or types across the codebase:
+1. Use `rename_symbol` tool which handles all references automatically
+2. It updates imports, exports, and usages in one operation
+3. Preserves backward compatibility aliases if needed separately
+
+**Pattern:** When renaming `MockAdapter` to `CompileOnlyAdapter`, use `mcp__plugin_serena_serena__rename_symbol` with name_path and new_name parameters. Then manually add legacy aliases in index.ts if backward compatibility is needed.
+
+**Prevention:** Before doing any rename refactoring, check if Serena's rename_symbol can handle it - it's faster and safer than manual find-replace.
+
+**Applies to:** Any symbol renaming across files (classes, functions, types, interfaces)
