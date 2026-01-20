@@ -1,0 +1,58 @@
+# Chapter 3: Blog-Extended Schema
+# QUICKSTART.md - Hierarchical categories, complex filters, order by, combined conditions
+#
+# Usage:
+#   pnpm dbsp repl --schema ./examples/blog-extended.schema.ts \
+#     --db postgresql://postgres:demo@localhost:5432/demo \
+#     --input ./examples/blog-extended.dbsp
+
+# =============================================================================
+# Setup: Create isolated schema and load data
+# =============================================================================
+
+# Create schema (! prefix = raw SQL in natural mode)
+!CREATE SCHEMA IF NOT EXISTS ch3_blog_extended;
+
+# Set schema context for subsequent operations
+.use ch3_blog_extended
+
+# Import DDL (creates tables in schema)
+.import examples/blog-extended.ddl.sql
+
+# Import seed data
+.import examples/blog-extended.seed.sql
+
+# =============================================================================
+# 3.3 Explore Data
+# =============================================================================
+.tables
+authors
+categories
+tags
+posts
+comments limit 10
+
+# =============================================================================
+# 3.3 Hierarchical Categories (Self-Referential)
+# =============================================================================
+categories where parentId is null
+categories include children
+categories where parentId is null include children
+
+# =============================================================================
+# 3.4 Featured and Popular Posts
+# =============================================================================
+posts where featured = true
+posts where viewCount > 1000
+posts where featured = true and viewCount > 1500
+
+# =============================================================================
+# 3.5 Complex Nested Includes
+# =============================================================================
+authors where active = true include posts where published = true include comments where approved = true
+
+# =============================================================================
+# 3.6 ORDER BY
+# =============================================================================
+posts order by viewCount desc
+posts order by viewCount desc limit 3

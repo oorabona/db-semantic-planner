@@ -1,0 +1,53 @@
+# Chapter 4: Scheduling Schema (PostgreSQL Ranges)
+# QUICKSTART.md - Range types (daterange, tstzrange, int4range), range operators
+#
+# Usage:
+#   pnpm dbsp repl --schema ./examples/scheduling.schema.ts \
+#     --db postgresql://postgres:demo@localhost:5432/demo \
+#     --input ./examples/scheduling.dbsp
+
+# =============================================================================
+# Setup: Create isolated schema and load data
+# =============================================================================
+
+# Create schema (! prefix = raw SQL in natural mode)
+!CREATE SCHEMA IF NOT EXISTS ch4_scheduling;
+
+# Set schema context for subsequent operations
+.use ch4_scheduling
+
+# Import DDL (creates tables in schema)
+.import examples/scheduling.ddl.sql
+
+# Import seed data
+.import examples/scheduling.seed.sql
+
+# =============================================================================
+# 4.3 Explore Data
+# =============================================================================
+.tables
+rooms
+roomBookings
+events
+priceTiers
+
+# =============================================================================
+# 4.4 Range Operators
+# =============================================================================
+# Bookings that overlap with a specific period
+roomBookings where bookingPeriod overlaps [2024-01-16,2024-01-20)
+
+# Bookings contained within a month
+roomBookings where bookingPeriod containedBy [2024-01-01,2024-02-01)
+
+# Price tier for quantity 25
+priceTiers where quantityRange contains 25
+
+# Price tier for quantity 25 (Widget A only)
+priceTiers where productName = 'Widget A' and quantityRange contains 25
+
+# =============================================================================
+# 4.5 Rooms with Bookings
+# =============================================================================
+rooms include roomBookings
+rooms include roomBookings where bookingPeriod overlaps [2024-01-22,2024-01-29)

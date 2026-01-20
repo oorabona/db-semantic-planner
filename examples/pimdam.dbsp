@@ -1,0 +1,50 @@
+# Chapter 6: PIM/DAM Schema (Advanced)
+# QUICKSTART.md - Soft deletes, complex M:N, multi-locale, advanced querying patterns
+#
+# Usage:
+#   pnpm dbsp repl --schema ./examples/pimdam.schema.ts \
+#     --db postgresql://postgres:demo@localhost:5432/demo \
+#     --input ./examples/pimdam.dbsp
+
+# =============================================================================
+# Setup: Create isolated schema and load data
+# =============================================================================
+
+# Create schema (! prefix = raw SQL in natural mode)
+!CREATE SCHEMA IF NOT EXISTS ch6_pimdam;
+
+# Set schema context for subsequent operations
+.use ch6_pimdam
+
+# Import DDL (creates tables in schema)
+.import examples/pimdam.ddl.sql
+
+# Import seed data
+.import examples/pimdam.seed.sql
+
+# =============================================================================
+# 6.3 Explore the PIM/DAM Data
+# =============================================================================
+.tables
+categories where active = true
+products where deletedAt is null
+assets where kind = 'image'
+
+# =============================================================================
+# 6.4 ProductImages Junction Table
+# =============================================================================
+productImages where status = 'approved'
+productImages where locale = 'en' include product
+productImages include asset
+
+# =============================================================================
+# 6.5 Advanced Filtering Patterns
+# =============================================================================
+products where active = true and deletedAt is null and categoryId = 7 include category
+products where categoryId = 6
+
+# =============================================================================
+# 6.6 Hierarchical Category Structure
+# =============================================================================
+categories where parentId is null
+categories where parentId is not null include parent

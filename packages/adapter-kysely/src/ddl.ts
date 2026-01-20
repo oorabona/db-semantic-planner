@@ -220,16 +220,30 @@ export function generateDDL(
 		}
 	}
 
+	// ========================================================================
 	// Generate DROP statements (if requested)
+	// Uses CASCADE to automatically handle dependent objects (FK, indexes)
+	// ========================================================================
 	if (includeDropStatements) {
-		// Drop in reverse alphabetical order (or any order with CASCADE)
-		const sortedTables = [...tables].sort((a, b) =>
-			b.name.localeCompare(a.name),
-		);
-		for (const table of sortedTables) {
-			const tableName = schemaName ? `${schemaName}.${table.name}` : table.name;
-			statements.push(`DROP TABLE IF EXISTS "${tableName}" CASCADE;`);
+		const schemaBuilder = schemaName
+			? db.schema.withSchema(schemaName)
+			: db.schema;
+
+		// Drop tables with CASCADE - this automatically handles:
+		// - Foreign key constraints referencing the table
+		// - Indexes on the table
+		// - Any dependent objects
+		// Using CASCADE is more robust than dropping constraints/indexes individually
+		// because it works even when the table doesn't exist yet (first run)
+		for (const table of tables) {
+			const dropTable = schemaBuilder
+				.dropTable(table.name)
+				.ifExists()
+				.cascade()
+				.compile();
+			statements.push(`${dropTable.sql};`);
 		}
+
 		statements.push(''); // Empty line separator
 	}
 

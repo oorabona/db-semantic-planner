@@ -1,0 +1,53 @@
+# Chapter 5: E-Commerce Schema
+# QUICKSTART.md - Multiple FK relations, complex hierarchies, window functions, advanced aggregates
+#
+# Usage:
+#   pnpm dbsp repl --schema ./examples/ecommerce.schema.ts \
+#     --db postgresql://postgres:demo@localhost:5432/demo \
+#     --input ./examples/ecommerce.dbsp
+
+# =============================================================================
+# Setup: Create isolated schema and load data
+# =============================================================================
+
+# Create schema (! prefix = raw SQL in natural mode)
+!CREATE SCHEMA IF NOT EXISTS ch5_ecommerce;
+
+# Set schema context for subsequent operations
+.use ch5_ecommerce
+
+# Import DDL (creates tables in schema)
+.import examples/ecommerce.ddl.sql
+
+# Import seed data
+.import examples/ecommerce.seed.sql
+
+# =============================================================================
+# 5.3 Explore Data
+# =============================================================================
+.tables
+categories
+products where active = true limit 5
+customers
+orders
+
+# =============================================================================
+# 5.4 Complex Relations
+# =============================================================================
+categories include products where active = true
+products include variants limit 3
+customers include orders include orderItems
+
+# =============================================================================
+# 5.5 Aggregates on E-Commerce Data
+# =============================================================================
+orders select sum(total) group by status
+orders select count(*) group by customerId
+orders select avg(total)
+products select count(*) group by active
+
+# =============================================================================
+# 5.6 Window Functions
+# =============================================================================
+products select *, rank() over (partition by categoryId order by price desc) as priceRank
+orders select orderNumber, total, sum(total) over (order by createdAt) as runningTotal

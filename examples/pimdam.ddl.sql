@@ -1,12 +1,24 @@
-create table "categories" ("id" integer not null primary key, "name" varchar(255) not null, "slug" varchar(255) not null, "description" text, "parent_id" integer, "position" integer default '0' not null, "active" boolean default 'true' not null, "created_at" timestamptz default now() not null);
+drop table if exists "categories" cascade;
 
-create table "products" ("id" integer not null primary key, "sku" varchar(255) not null unique, "title" varchar(255) not null, "description" text, "category_id" integer not null, "brand" varchar(255), "active" boolean default 'true' not null, "created_at" timestamptz default now() not null, "updated_at" timestamptz, "deleted_at" timestamptz);
+drop table if exists "products" cascade;
 
-create table "assets" ("id" integer not null primary key, "kind" varchar(255) not null, "filename" varchar(255) not null, "sha256" varchar(255) not null, "mime" varchar(255) not null, "width" integer, "height" integer, "size_bytes" integer not null, "storage_key" varchar(255) not null, "alt_text" varchar(255), "expires_at" timestamptz, "created_at" timestamptz default now() not null);
+drop table if exists "assets" cascade;
 
-create table "product_images" ("id" integer not null primary key, "product_id" integer not null, "asset_id" integer not null, "locale" varchar(255) not null, "status" varchar(255) default '''pending''' not null, "is_main" boolean default 'false' not null, "position" integer default '0' not null, "rejected_reason" varchar(255), "approved_by" varchar(255), "approved_at" timestamptz, "created_at" timestamptz default now() not null, "deleted_at" timestamptz);
+drop table if exists "product_images" cascade;
 
-create table "variants" ("id" integer not null primary key, "product_id" integer not null, "sku" varchar(255) not null unique, "name" varchar(255) not null, "price_cents" integer not null, "compare_at_price_cents" integer, "cost_cents" integer, "stock" integer default '0' not null, "weight_grams" integer, "barcode" varchar(255), "active" boolean default 'true' not null, "created_at" timestamptz default now() not null);
+drop table if exists "variants" cascade;
+
+
+
+create table "categories" ("id" serial primary key, "name" varchar(255) not null, "slug" varchar(255) not null, "description" text, "parent_id" integer, "position" integer default '0' not null, "active" boolean default 'true' not null, "created_at" timestamptz default now() not null);
+
+create table "products" ("id" serial primary key, "sku" varchar(255) not null unique, "title" varchar(255) not null, "description" text, "category_id" integer not null, "brand" varchar(255), "active" boolean default 'true' not null, "created_at" timestamptz default now() not null, "updated_at" timestamptz, "deleted_at" timestamptz);
+
+create table "assets" ("id" serial primary key, "kind" varchar(255) not null, "filename" varchar(255) not null, "sha256" varchar(255) not null, "mime" varchar(255) not null, "width" integer, "height" integer, "size_bytes" integer not null, "storage_key" varchar(255) not null, "alt_text" varchar(255), "expires_at" timestamptz, "created_at" timestamptz default now() not null);
+
+create table "product_images" ("id" serial primary key, "product_id" integer not null, "asset_id" integer not null, "locale" varchar(255) not null, "status" varchar(255) default '''pending''' not null, "is_main" boolean default 'false' not null, "position" integer default '0' not null, "rejected_reason" varchar(255), "approved_by" varchar(255), "approved_at" timestamptz, "created_at" timestamptz default now() not null, "deleted_at" timestamptz);
+
+create table "variants" ("id" serial primary key, "product_id" integer not null, "sku" varchar(255) not null unique, "name" varchar(255) not null, "price_cents" integer not null, "compare_at_price_cents" integer, "cost_cents" integer, "stock" integer default '0' not null, "weight_grams" integer, "barcode" varchar(255), "active" boolean default 'true' not null, "created_at" timestamptz default now() not null);
 
 alter table "categories" add constraint "fk_categories_parent_id" foreign key ("parent_id") references "categories" ("id") on delete set null;
 
@@ -37,5 +49,7 @@ create index "idx_product_images_product_id" on "product_images" ("product_id");
 create index "idx_product_images_locale" on "product_images" ("locale");
 
 create index "idx_product_images_status" on "product_images" ("status");
+
+create index "idx_product_images_asset_id" on "product_images" ("asset_id");
 
 create index "idx_variants_product_id" on "variants" ("product_id");

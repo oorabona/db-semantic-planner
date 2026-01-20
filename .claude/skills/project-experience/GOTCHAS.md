@@ -772,3 +772,57 @@ Kysely's `addColumn().autoIncrement()` uses the IDENTITY approach which is more 
 **Pattern:** Detect dialect with `detectDialect(db)` helper, then branch column type selection based on dialect and autoIncrement flag.
 
 **Prevention:** When implementing auto-increment features for multi-dialect support, always test the generated DDL across all target dialects. PostgreSQL's SERIAL pseudo-type is a common expectation.
+
+## Kysely
+
+### CamelCasePlugin Must Be Consistent Across All Kysely Instances (2026-01-19)
+
+**Symptoms:** SQL queries generate camelCase column names (e.g., `"userId"`) but database has snake_case columns (`user_id`). INCLUDE/JOIN queries fail or return no data.
+
+**Cause:** DDL generation uses CamelCasePlugin to transform schema column names to snake_case, but MockAdapter and db-connection.ts create Kysely instances WITHOUT the plugin.
+
+**Solution:** Add CamelCasePlugin to ALL Kysely instance creation points:
+- mock-adapter.ts for SQL compilation in eval mode
+- db-connection.ts for real database connections
+
+**Prevention:** Whenever creating a new Kysely instance, check if DDL generation uses CamelCasePlugin. If yes, all runtime instances must use it too.
+
+**Location:** `packages/adapter-kysely/src/mock-adapter.ts`, `packages/cli/src/repl/db-connection.ts`
+
+## Schema Validation
+
+### Schema-bridge Validation Must Match All defineSchema Properties (2026-01-19)
+
+**Symptoms:** REPL fails with cryptic error "Invalid type: Expected Object but received Object" when loading schemas with PostgreSQL range types or other extended features.
+
+**Cause:** The ResolvedSchemaValidation valibot schema in schema-bridge.ts didn't include all properties that defineSchema can produce, specifically: range types (daterange, tstzrange, int4range), onDelete on FK references, index on columns, and indexes at schema level.
+
+**Solution:** When adding new features to defineSchema, ALWAYS update schema-bridge.ts validation schemas:
+- GeneratedColumnType type union
+- SchemaColumnTypeSchema picklist
+- mapColumnType and mapSchemaColumnType switch statements
+- Any new properties on ForeignKeyReferenceSchema or ColumnDefinitionSchema
+- Any new top-level schema properties in ResolvedSchemaValidation
+
+**Prevention:** When extending defineSchema with new column types or properties, immediately test with REPL to catch validation mismatches early. The improved error messages now show the exact path and expected vs received values.
+
+**Location:** `packages/core/src/dx/schema-bridge.ts` (lines 34-49, 619-638, 649-667, 773-799)
+
+## DDL Generation
+
+### DROP TABLE IF EXISTS CASCADE Is Safer Than Individual Constraint Drops (2026-01-20)
+
+**Symptoms:** DDL generation with --drop option fails with "relation does not exist" when trying to drop constraints or indexes on tables that don't exist yet.
+
+**Cause:** Using `ALTER TABLE table DROP CONSTRAINT IF EXISTS constraint` fails if the table itself doesn't exist. The IF EXISTS only applies to the constraint, not the table.
+
+**Solution:** Use `DROP TABLE IF EXISTS table CASCADE` instead of individual constraint drops. CASCADE automatically handles:
+- Foreign key constraints referencing the table
+- Indexes on the table
+- Any dependent objects
+
+**Pattern:** In Kysely, use `schemaBuilder.dropTable(tableName).ifExists().cascade()` which generates the proper PostgreSQL syntax.
+
+**Prevention:** When implementing DDL cleanup, prefer CASCADE over manual dependency management. Let the database handle transitive dependencies.
+
+**Location:** `packages/adapter-kysely/src/ddl.ts` (generateDDL function)

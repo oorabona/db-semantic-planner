@@ -153,8 +153,11 @@ describe('generateDDL', () => {
 			const schema = createTestSchema();
 			const ddl = adapter.generateDDL(schema, { includeDropStatements: true });
 
-			// Should include DROP statements
-			expect(ddl.some((s) => s.includes('DROP TABLE IF EXISTS'))).toBe(true);
+			// Should include DROP TABLE ... CASCADE statements
+			// CASCADE automatically handles dependent objects (FK constraints, indexes)
+			const allDdl = ddl.join('\n').toLowerCase();
+			expect(allDdl).toContain('drop table if exists');
+			expect(allDdl).toContain('cascade');
 		});
 	});
 

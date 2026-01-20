@@ -4,6 +4,11 @@ A progressive tutorial from basic to advanced queries with **real data at every 
 
 Each chapter uses a different schema, building in complexity.
 
+> **Output Format Note:** This guide shows simplified output for readability. Actual REPL output uses:
+> - Text table format with `---+---` separators
+> - `include` produces LEFT JOINs with prefixed columns (e.g., `posts.title`), not nested objects
+> - Column names use camelCase from schema (e.g., `authorId`), SQL uses snake_case (e.g., `author_id`)
+
 ---
 
 ## Chapter 0: Prerequisites
@@ -296,7 +301,7 @@ Tables (5):
   - posts
   - comments
   - tags
-  - post_tags
+  - postTags
 ```
 
 ```
@@ -304,9 +309,9 @@ dbsp> .relations posts
 ```
 ```
 Relations for posts:
-  - posts.author: belongsTo → authors
-  - posts.comments: hasMany → comments
-  - posts.tags: manyToMany → tags (via post_tags)
+  - tags.posts: manyToMany → posts
+  - authors.posts: hasMany → posts
+  - comments.post: belongsTo → posts
 ```
 
 ### 2.4 Basic Queries with Data
@@ -412,155 +417,198 @@ dbsp> comments where approved = false
 1 row
 ```
 
-### 2.6 Includes with Filters
+### 2.6 Includes (LEFT JOIN)
 
-**Authors with their published posts:**
+> **Note:** Include produces a LEFT JOIN with prefixed columns. Each parent row is repeated for each related row.
+
+**Authors with their posts:**
+```bash
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'authors include posts'
 ```
-dbsp> authors include posts where published = true
 ```
-```
-┌────┬─────────────┬────────────────────────────────────────────────────────────────────┐
-│ id │ name        │ posts                                                              │
-├────┼─────────────┼────────────────────────────────────────────────────────────────────┤
-│  1 │ Jane Doe    │ [{title:"Getting Started with PostgreSQL",...},                    │
-│    │             │  {title:"TypeScript Best Practices 2024",...}]                     │
-│  2 │ John Smith  │ [{title:"Query Optimization Techniques",...},                      │
-│    │             │  {title:"Introduction to Range Types",...}]                        │
-│  3 │ Emily Chen  │ [{title:"Why Type Safety Matters",...}]                            │
-└────┴─────────────┴────────────────────────────────────────────────────────────────────┘
-3 rows
+> authors include posts
+Main SQL:
+select "t0".*, "t1"."id" as "posts.id", "t1"."title" as "posts.title", ...
+from "authors" as "t0" left join "posts" as "t1" on "t1"."author_id" = "t0"."id"
+
+Plan:
+  Strategy: include-strategy: join, join-type: left
+  Tables: authors, posts
+
+Rows: 6
+id | name       | email          | bio              | posts.id | posts.title
+---+------------+----------------+------------------+----------+-------------------------------------
+1  | Jane Doe   | jane@blog.com  | Senior tech...   | 1        | Getting Started with PostgreSQL
+1  | Jane Doe   | jane@blog.com  | Senior tech...   | 2        | TypeScript Best Practices 2024
+2  | John Smith | john@blog.com  | Full-stack...    | 3        | Query Optimization Techniques
+2  | John Smith | john@blog.com  | Full-stack...    | 4        | Introduction to Range Types
+2  | John Smith | john@blog.com  | Full-stack...    | 5        | Draft: Advanced Indexing
+3  | Emily Chen | emily@blog.com | null             | 6        | Why Type Safety Matters
 ```
 
-**Posts with approved comments only:**
+**Posts with comments:**
+```bash
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts include comments'
 ```
-dbsp> posts include comments where approved = true
 ```
-```
-┌────┬────────────────────────────────────┬────────────────────────────────────────────────────┐
-│ id │ title                              │ comments                                           │
-├────┼────────────────────────────────────┼────────────────────────────────────────────────────┤
-│  1 │ Getting Started with PostgreSQL    │ [{author_name:"Alex Reader",...},                  │
-│    │                                    │  {author_name:"Sam Dev",...}]                      │
-│  2 │ TypeScript Best Practices 2024     │ [{author_name:"Chris Coder",...}]                  │
-│  3 │ Query Optimization Techniques      │ [{author_name:"Pat DBA",...}]                      │
-│  4 │ Introduction to Range Types        │ [{author_name:"Jordan Query",...}]                 │
-│  5 │ Draft: Advanced Indexing           │ []                                                 │
-│  6 │ Why Type Safety Matters            │ [{author_name:"Taylor Types",...}]                 │
-└────┴────────────────────────────────────┴────────────────────────────────────────────────────┘
-6 rows
+> posts include comments
+Main SQL:
+select "t0".*, "t1"."id" as "comments.id", "t1"."author_name" as "comments.author_name", ...
+from "posts" as "t0" left join "comments" as "t1" on "t1"."post_id" = "t0"."id"
+
+Rows: 9
+id | title                              | comments.id | comments.authorName
+---+------------------------------------+-------------+--------------------
+1  | Getting Started with PostgreSQL    | 1           | Alex Reader
+1  | Getting Started with PostgreSQL    | 2           | Sam Dev
+2  | TypeScript Best Practices 2024     | 3           | Chris Coder
+3  | Query Optimization Techniques      | 4           | Pat DBA
+4  | Introduction to Range Types        | 5           | Jordan Query
+4  | Introduction to Range Types        | 6           | Spam Bot
+5  | Draft: Advanced Indexing           | null        | null
+6  | Why Type Safety Matters            | 7           | Taylor Types
 ```
 
 ### 2.7 Many-to-Many Relations (Tags)
 
+> **Note:** Many-to-many includes also produce flat joins, with one row per post-tag combination.
+
 **Posts with their tags:**
+```bash
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts include tags'
 ```
-dbsp> posts include tags
 ```
-```
-┌────┬────────────────────────────────────┬──────────────────────────────────────────────┐
-│ id │ title                              │ tags                                         │
-├────┼────────────────────────────────────┼──────────────────────────────────────────────┤
-│  1 │ Getting Started with PostgreSQL    │ [{name:"PostgreSQL"},{name:"Tutorial"},      │
-│    │                                    │  {name:"Database"}]                          │
-│  2 │ TypeScript Best Practices 2024     │ [{name:"TypeScript"},{name:"Best Practices"}]│
-│  3 │ Query Optimization Techniques      │ [{name:"Database"},{name:"Performance"}]     │
-│  4 │ Introduction to Range Types        │ [{name:"PostgreSQL"},{name:"Database"},      │
-│    │                                    │  {name:"Tutorial"}]                          │
-│  5 │ Draft: Advanced Indexing           │ [{name:"Database"},{name:"Performance"}]     │
-│  6 │ Why Type Safety Matters            │ [{name:"TypeScript"},{name:"Best Practices"}]│
-└────┴────────────────────────────────────┴──────────────────────────────────────────────┘
-6 rows
+> posts include tags
+Main SQL:
+select "t0".*, "t1"."id" as "tags.id", "t1"."name" as "tags.name", "t1"."slug" as "tags.slug"
+from "posts" as "t0"
+left join "post_tags" as "jt" on "jt"."post_id" = "t0"."id"
+left join "tags" as "t1" on "t1"."id" = "jt"."tag_id"
+
+Rows: 14
+id | title                              | tags.id | tags.name      | tags.slug
+---+------------------------------------+---------+----------------+---------------
+1  | Getting Started with PostgreSQL    | 1       | PostgreSQL     | postgresql
+1  | Getting Started with PostgreSQL    | 3       | Tutorial       | tutorial
+1  | Getting Started with PostgreSQL    | 4       | Database       | database
+2  | TypeScript Best Practices 2024     | 2       | TypeScript     | typescript
+2  | TypeScript Best Practices 2024     | 6       | Best Practices | best-practices
+3  | Query Optimization Techniques      | 4       | Database       | database
+3  | Query Optimization Techniques      | 5       | Performance    | performance
+4  | Introduction to Range Types        | 1       | PostgreSQL     | postgresql
+4  | Introduction to Range Types        | 4       | Database       | database
+4  | Introduction to Range Types        | 3       | Tutorial       | tutorial
+5  | Draft: Advanced Indexing           | 4       | Database       | database
+5  | Draft: Advanced Indexing           | 5       | Performance    | performance
+6  | Why Type Safety Matters            | 2       | TypeScript     | typescript
+6  | Why Type Safety Matters            | 6       | Best Practices | best-practices
 ```
 
-**Tags with their posts:**
+**Count tags per post:**
+```bash
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'postTags select count(*) group by postId'
 ```
-dbsp> tags include posts where published = true
 ```
-```
-┌────┬────────────────┬─────────────────────────────────────────────────────────────────────┐
-│ id │ name           │ posts                                                               │
-├────┼────────────────┼─────────────────────────────────────────────────────────────────────┤
-│  1 │ PostgreSQL     │ [{title:"Getting Started with PostgreSQL",...},                     │
-│    │                │  {title:"Introduction to Range Types",...}]                         │
-│  2 │ TypeScript     │ [{title:"TypeScript Best Practices 2024",...},                      │
-│    │                │  {title:"Why Type Safety Matters",...}]                             │
-│  3 │ Tutorial       │ [{title:"Getting Started with PostgreSQL",...},                     │
-│    │                │  {title:"Introduction to Range Types",...}]                         │
-│  4 │ Database       │ [{title:"Getting Started with PostgreSQL",...},                     │
-│    │                │  {title:"Query Optimization Techniques",...},                       │
-│    │                │  {title:"Introduction to Range Types",...}]                         │
-│  5 │ Performance    │ [{title:"Query Optimization Techniques",...}]                       │
-│  6 │ Best Practices │ [{title:"TypeScript Best Practices 2024",...},                      │
-│    │                │  {title:"Why Type Safety Matters",...}]                             │
-└────┴────────────────┴─────────────────────────────────────────────────────────────────────┘
-6 rows
+> postTags select count(*) group by postId
+Main SQL:
+select "t0"."post_id", count(*) as "count" from "post_tags" as "t0" group by "t0"."post_id"
+
+Rows: 6
+postId | count
+-------+------
+1      | 3
+2      | 2
+3      | 2
+4      | 3
+5      | 2
+6      | 2
 ```
 
 ### 2.8 Aggregates
 
 **Count posts per author:**
+```bash
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts select count(*) group by authorId'
 ```
-dbsp> posts aggregate count by author_id
 ```
-```
-┌───────────┬───────┐
-│ author_id │ count │
-├───────────┼───────┤
-│         1 │     2 │
-│         2 │     3 │
-│         3 │     1 │
-└───────────┴───────┘
-3 rows
+> posts select count(*) group by authorId
+Main SQL:
+select "t0"."author_id", count(*) as "count" from "posts" as "t0" group by "t0"."author_id"
+
+Rows: 3
+authorId | count
+---------+------
+2        | 3
+3        | 1
+1        | 2
 ```
 
 **Count published posts:**
+```bash
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts where published = true select count(*)'
 ```
-dbsp> posts where published = true aggregate count
 ```
-```
-┌───────┐
-│ count │
-├───────┤
-│     5 │
-└───────┘
-1 row
+> posts where published = true select count(*)
+Main SQL:
+select count(*) as "count" from "posts" as "t0" where "t0"."published" = $1
+
+Parameters: [true]
+
+Rows: 1
+count
+-----
+5
 ```
 
 **Count comments per post:**
+```bash
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'comments select count(*) group by postId'
 ```
-dbsp> comments aggregate count by post_id
 ```
-```
-┌─────────┬───────┐
-│ post_id │ count │
-├─────────┼───────┤
-│       1 │     2 │
-│       2 │     1 │
-│       3 │     1 │
-│       4 │     2 │
-│       6 │     1 │
-└─────────┴───────┘
-5 rows
+> comments select count(*) group by postId
+Main SQL:
+select "t0"."post_id", count(*) as "count" from "comments" as "t0" group by "t0"."post_id"
+
+Rows: 5
+postId | count
+-------+------
+1      | 2
+2      | 1
+3      | 1
+4      | 2
+6      | 1
 ```
 
 ### 2.9 DISTINCT
 
-**Unique author names who have approved comments:**
+**Count unique author names in approved comments:**
+```bash
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'comments where approved = true select count(distinct authorName)'
 ```
-dbsp> comments where approved = true select distinct author_name
+```
+> comments where approved = true select count(distinct authorName)
+Main SQL:
+select count(distinct "t0"."author_name") as "count_author_name" from "comments" as "t0" where "t0"."approved" = $1
+
+Parameters: [true]
+
+Rows: 1
+countAuthorName
+---------------
+6
+```
+
+**Select distinct (all columns):**
+```bash
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts select distinct'
 ```
 ```
-┌───────────────┐
-│ author_name   │
-├───────────────┤
-│ Alex Reader   │
-│ Sam Dev       │
-│ Chris Coder   │
-│ Pat DBA       │
-│ Jordan Query  │
-│ Taylor Types  │
-└───────────────┘
-6 rows
+> posts select distinct
+Main SQL:
+select distinct "t0".* from "posts" as "t0"
+
+Rows: 6
+(all 6 posts are unique, so all are returned)
 ```
 
 ---
@@ -1334,157 +1382,199 @@ pnpm dbsp repl \
 dbsp> categories where active = true
 ```
 ```
-┌────┬─────────────────────┬───────────┬──────────┬────────┐
-│ id │ name                │ parent_id │ position │ active │
-├────┼─────────────────────┼───────────┼──────────┼────────┤
-│  1 │ Electronics         │ NULL      │        1 │ true   │
-│  2 │ Smartphones         │         1 │        1 │ true   │
-│  3 │ Tablets             │         1 │        2 │ true   │
-│  4 │ Accessories         │         1 │        3 │ true   │
-│  5 │ Furniture           │ NULL      │        2 │ true   │
-│  6 │ Office              │         5 │        1 │ true   │
-│  7 │ Living Room         │         5 │        2 │ true   │
-└────┴─────────────────────┴───────────┴──────────┴────────┘
-7 rows
+┌────┬───────────────────┬───────────┬──────────┬────────┐
+│ id │ name              │ parentId  │ position │ active │
+├────┼───────────────────┼───────────┼──────────┼────────┤
+│  1 │ Electronics       │ null      │        0 │ true   │
+│  2 │ Clothing          │ null      │        1 │ true   │
+│  3 │ Home & Garden     │ null      │        2 │ true   │
+│  4 │ Phones            │         1 │        0 │ true   │
+│  5 │ Computers         │         1 │        1 │ true   │
+│  6 │ Audio             │         1 │        2 │ true   │
+│  7 │ Smartphones       │         4 │        0 │ true   │
+│  8 │ Phone Accessories │         4 │        1 │ true   │
+│  9 │ Men               │         2 │        0 │ true   │
+│ 10 │ Women             │         2 │        1 │ true   │
+└────┴───────────────────┴───────────┴──────────┴────────┘
+10 rows
 ```
 
 **Products (with soft delete support):**
 ```
-dbsp> products where deleted_at is null
+dbsp> products where deletedAt is null
 ```
 ```
-┌────┬───────────────┬────────────────────────────────┬─────────────┬────────────────┐
-│ id │ sku           │ title                          │ category_id │ brand          │
-├────┼───────────────┼────────────────────────────────┼─────────────┼────────────────┤
-│  1 │ SM-GALAXY-S24 │ Samsung Galaxy S24 Ultra       │           2 │ Samsung        │
-│  2 │ IPHONE-15-PRO │ iPhone 15 Pro Max              │           2 │ Apple          │
-│  3 │ IPAD-PRO-13   │ iPad Pro 13-inch M4            │           3 │ Apple          │
-│  4 │ AIRPODS-PRO   │ AirPods Pro 2nd Gen            │           4 │ Apple          │
-│  5 │ DESK-ERGO-01  │ ErgoDesk Pro Standing Desk     │           6 │ ErgoWorks      │
-│  6 │ CHAIR-MESH-01 │ MeshComfort Executive Chair    │           6 │ OfficePro      │
-│  7 │ SOFA-SECT-01  │ ModernLiving Sectional Sofa    │           7 │ HomeStyle      │
-└────┴───────────────┴────────────────────────────────┴─────────────┴────────────────┘
-7 rows
-```
-
-**Soft-deleted products (archived):**
-```
-dbsp> products where deleted_at is not null
-```
-```
-┌────┬───────────────┬────────────────────────────────┬─────────────────────┐
-│ id │ sku           │ title                          │ deleted_at          │
-├────┼───────────────┼────────────────────────────────┼─────────────────────┤
-│  8 │ OLD-PHONE-01  │ Discontinued Model X           │ 2024-01-15 00:00:00 │
-│  9 │ OLD-TAB-01    │ Legacy Tablet 2020             │ 2024-01-10 00:00:00 │
-└────┴───────────────┴────────────────────────────────┴─────────────────────┘
-2 rows
+┌────┬────────────────┬────────────────────────────┬────────────┬─────────┐
+│ id │ sku            │ title                      │ categoryId │ brand   │
+├────┼────────────────┼────────────────────────────┼────────────┼─────────┤
+│  1 │ PHONE-IP15-256 │ iPhone 15 Pro 256GB        │          7 │ Apple   │
+│  2 │ PHONE-IP15-512 │ iPhone 15 Pro 512GB        │          7 │ Apple   │
+│  3 │ PHONE-S24-256  │ Samsung Galaxy S24 256GB   │          7 │ Samsung │
+│  4 │ PHONE-PX8-128  │ Google Pixel 8 128GB       │          7 │ Google  │
+│  6 │ ACC-CASE-IP15  │ iPhone 15 Silicone Case    │          8 │ Apple   │
+│  7 │ ACC-CHRG-USB-C │ USB-C Fast Charger 65W     │          8 │ Anker   │
+│  9 │ AUDIO-APP-MAX  │ AirPods Max                │          6 │ Apple   │
+│ 10 │ AUDIO-APP-PRO2 │ AirPods Pro 2              │          6 │ Apple   │
+│ 12 │ COMP-MBP-14    │ MacBook Pro 14" M3         │          5 │ Apple   │
+│ 13 │ COMP-MBP-16    │ MacBook Pro 16" M3 Max     │          5 │ Apple   │
+└────┴────────────────┴────────────────────────────┴────────────┴─────────┘
+13 rows (showing 10)
 ```
 
-**Images (DAM - Digital Asset Management):**
+> **Note:** Use `deletedAt` (camelCase) in queries, which maps to `deleted_at` in SQL.
+
+**Assets (DAM - Digital Asset Management):**
 ```
-dbsp> images where status = 'approved'
+dbsp> assets where kind = 'image'
 ```
 ```
-┌────┬────────────────────────────────────┬────────────────┬──────────┬──────────┐
-│ id │ filename                           │ content_type   │ size_kb  │ status   │
-├────┼────────────────────────────────────┼────────────────┼──────────┼──────────┤
-│  1 │ galaxy-s24-front.jpg               │ image/jpeg     │     2500 │ approved │
-│  2 │ galaxy-s24-back.jpg                │ image/jpeg     │     2300 │ approved │
-│  3 │ iphone-15-hero.jpg                 │ image/jpeg     │     3200 │ approved │
-│  4 │ iphone-15-colors.jpg               │ image/jpeg     │     2800 │ approved │
-│  5 │ ipad-pro-studio.jpg                │ image/jpeg     │     4500 │ approved │
-│  6 │ airpods-case.jpg                   │ image/jpeg     │     1200 │ approved │
-│  7 │ ergo-desk-office.jpg               │ image/jpeg     │     3800 │ approved │
-└────┴────────────────────────────────────┴────────────────┴──────────┴──────────┘
-7 rows
+┌────┬────────────────────────┬────────────┬───────────┐
+│ id │ filename               │ mime       │ sizeBytes │
+├────┼────────────────────────┼────────────┼───────────┤
+│  1 │ iphone15-front.jpg     │ image/jpeg │    245000 │
+│  2 │ iphone15-back.jpg      │ image/jpeg │    238000 │
+│  3 │ iphone15-side.jpg      │ image/jpeg │    156000 │
+│  4 │ galaxy-s24-front.jpg   │ image/jpeg │    267000 │
+│  5 │ galaxy-s24-back.jpg    │ image/jpeg │    254000 │
+│  6 │ pixel8-front.jpg       │ image/jpeg │    234000 │
+│  7 │ pixel8-camera.jpg      │ image/jpeg │    289000 │
+│  8 │ case-ip15-blue.jpg     │ image/jpeg │     98000 │
+│  9 │ case-ip15-black.jpg    │ image/jpeg │     95000 │
+│ 10 │ charger-65w.jpg        │ image/jpeg │     78000 │
+└────┴────────────────────────┴────────────┴───────────┘
+18 rows (showing 10)
 ```
 
-### 6.4 M:N Product-Image Relationships
+### 6.4 ProductImages Junction Table
 
-**Products with their images:**
+**Product images with approval status:**
 ```
-dbsp> products where deleted_at is null include images where status = 'approved'
+dbsp> productImages where status = 'approved'
 ```
 ```
-┌────┬───────────────┬────────────────────────────────┬───────────────────────────────────────────────┐
-│ id │ sku           │ title                          │ images                                        │
-├────┼───────────────┼────────────────────────────────┼───────────────────────────────────────────────┤
-│  1 │ SM-GALAXY-S24 │ Samsung Galaxy S24 Ultra       │ [{filename:"galaxy-s24-front.jpg",locale:"en"},│
-│    │               │                                │  {filename:"galaxy-s24-back.jpg",locale:"en"}] │
-│  2 │ IPHONE-15-PRO │ iPhone 15 Pro Max              │ [{filename:"iphone-15-hero.jpg",...},         │
-│    │               │                                │  {filename:"iphone-15-colors.jpg",...}]       │
-│  3 │ IPAD-PRO-13   │ iPad Pro 13-inch M4            │ [{filename:"ipad-pro-studio.jpg",...}]        │
-│  4 │ AIRPODS-PRO   │ AirPods Pro 2nd Gen            │ [{filename:"airpods-case.jpg",...}]           │
-│  5 │ DESK-ERGO-01  │ ErgoDesk Pro Standing Desk     │ [{filename:"ergo-desk-office.jpg",...}]       │
-└────┴───────────────┴────────────────────────────────┴───────────────────────────────────────────────┘
-5 rows (with images)
+┌────┬───────────┬─────────┬────────┬──────────┬────────┐
+│ id │ productId │ assetId │ locale │ status   │ isMain │
+├────┼───────────┼─────────┼────────┼──────────┼────────┤
+│  1 │         1 │       1 │ en     │ approved │ true   │
+│  2 │         1 │       2 │ en     │ approved │ false  │
+│  3 │         1 │       3 │ en     │ approved │ false  │
+│  4 │         1 │       1 │ fr     │ approved │ true   │
+│  7 │         3 │       4 │ en     │ approved │ true   │
+│  8 │         3 │       5 │ en     │ approved │ false  │
+│ 10 │         4 │       6 │ en     │ approved │ true   │
+│ 11 │         4 │       7 │ en     │ approved │ false  │
+└────┴───────────┴─────────┴────────┴──────────┴────────┘
+21 rows (showing 8)
 ```
 
-**Images by locale:**
+**Images by locale with product:**
 ```
-dbsp> product_images where locale = 'en' include product include image
+dbsp> productImages where locale = 'en' include product
 ```
 ```
-┌────────────┬──────────┬────────┬──────────────────────────────────────────────────────────┐
-│ product_id │ image_id │ locale │ product                        │ image                   │
-├────────────┼──────────┼────────┼────────────────────────────────┼─────────────────────────┤
-│          1 │        1 │ en     │ {title:"Samsung Galaxy..."}    │ {filename:"galaxy..."}  │
-│          1 │        2 │ en     │ {title:"Samsung Galaxy..."}    │ {filename:"galaxy..."}  │
-│          2 │        3 │ en     │ {title:"iPhone 15 Pro..."}     │ {filename:"iphone..."}  │
-└────────────┴──────────┴────────┴────────────────────────────────┴─────────────────────────┘
+┌────┬───────────┬─────────┬────────┬────────────────────────────┐
+│ id │ productId │ assetId │ locale │ product.title              │
+├────┼───────────┼─────────┼────────┼────────────────────────────┤
+│  1 │         1 │       1 │ en     │ iPhone 15 Pro 256GB        │
+│  2 │         1 │       2 │ en     │ iPhone 15 Pro 256GB        │
+│  3 │         1 │       3 │ en     │ iPhone 15 Pro 256GB        │
+│  7 │         3 │       4 │ en     │ Samsung Galaxy S24 256GB   │
+│  8 │         3 │       5 │ en     │ Samsung Galaxy S24 256GB   │
+│ 10 │         4 │       6 │ en     │ Google Pixel 8 128GB       │
+└────┴───────────┴─────────┴────────┴────────────────────────────┘
+```
+
+**Product images with asset details:**
+```
+dbsp> productImages include asset
+```
+```
+┌────┬───────────┬─────────┬────────────────────────┬────────────┐
+│ id │ productId │ assetId │ asset.filename         │ asset.mime │
+├────┼───────────┼─────────┼────────────────────────┼────────────┤
+│  1 │         1 │       1 │ iphone15-front.jpg     │ image/jpeg │
+│  2 │         1 │       2 │ iphone15-back.jpg      │ image/jpeg │
+│  3 │         1 │       3 │ iphone15-side.jpg      │ image/jpeg │
+│  7 │         3 │       4 │ galaxy-s24-front.jpg   │ image/jpeg │
+│  8 │         3 │       5 │ galaxy-s24-back.jpg    │ image/jpeg │
+│ 10 │         4 │       6 │ pixel8-front.jpg       │ image/jpeg │
+└────┴───────────┴─────────┴────────────────────────┴────────────┘
+25 rows (showing 6)
 ```
 
 ### 6.5 Advanced Filtering Patterns
 
-**Active products in a specific category tree:**
+**Smartphones in category 7 (with category details):**
 ```
-dbsp> products where active = true and deleted_at is null and category_id = 2 include category
-```
-```
-┌────┬───────────────┬────────────────────────────────┬────────────────────────────────┐
-│ id │ sku           │ title                          │ category                       │
-├────┼───────────────┼────────────────────────────────┼────────────────────────────────┤
-│  1 │ SM-GALAXY-S24 │ Samsung Galaxy S24 Ultra       │ {name:"Smartphones",...}       │
-│  2 │ IPHONE-15-PRO │ iPhone 15 Pro Max              │ {name:"Smartphones",...}       │
-└────┴───────────────┴────────────────────────────────┴────────────────────────────────┘
-2 rows
-```
-
-**Products by brand with image count:**
-```
-dbsp> products where deleted_at is null aggregate count by brand
+dbsp> products where active = true and deletedAt is null and categoryId = 7 include category
 ```
 ```
-┌────────────┬───────┐
-│ brand      │ count │
-├────────────┼───────┤
-│ Apple      │     3 │
-│ Samsung    │     1 │
-│ ErgoWorks  │     1 │
-│ OfficePro  │     1 │
-│ HomeStyle  │     1 │
-└────────────┴───────┘
-5 rows
+┌────┬────────────────┬────────────────────────────┬─────────────────┐
+│ id │ sku            │ title                      │ category.name   │
+├────┼────────────────┼────────────────────────────┼─────────────────┤
+│  1 │ PHONE-IP15-256 │ iPhone 15 Pro 256GB        │ Smartphones     │
+│  2 │ PHONE-IP15-512 │ iPhone 15 Pro 512GB        │ Smartphones     │
+│  3 │ PHONE-S24-256  │ Samsung Galaxy S24 256GB   │ Smartphones     │
+│  4 │ PHONE-PX8-128  │ Google Pixel 8 128GB       │ Smartphones     │
+└────┴────────────────┴────────────────────────────┴─────────────────┘
+4 rows
 ```
 
-### 6.6 Recursive Category Queries
+**Audio products (headphones, earbuds):**
+```
+dbsp> products where categoryId = 6
+```
+```
+┌────┬────────────────┬─────────────────────┬─────────┐
+│ id │ sku            │ title               │ brand   │
+├────┼────────────────┼─────────────────────┼─────────┤
+│  9 │ AUDIO-APP-MAX  │ AirPods Max         │ Apple   │
+│ 10 │ AUDIO-APP-PRO2 │ AirPods Pro 2       │ Apple   │
+│ 11 │ AUDIO-SONY-XM5 │ Sony WH-1000XM5     │ Sony    │
+└────┴────────────────┴─────────────────────┴─────────┘
+3 rows
+```
 
-**Get full category hierarchy:**
+### 6.6 Hierarchical Category Structure
+
+> **Note:** The category data demonstrates a 3-level hierarchy:
+> - Level 1 (Root): Electronics, Clothing, Home & Garden
+> - Level 2: Phones, Computers, Audio (under Electronics)
+> - Level 3: Smartphones, Phone Accessories (under Phones)
+
+**Root categories only:**
 ```
-dbsp> categories recursive include children maxDepth 3
+dbsp> categories where parentId is null
 ```
 ```
-┌────┬─────────────────────┬───────────┬─────────────────────────────────────────────────────────┐
-│ id │ name                │ parent_id │ children                                                │
-├────┼─────────────────────┼───────────┼─────────────────────────────────────────────────────────┤
-│  1 │ Electronics         │ NULL      │ [{name:"Smartphones",children:[]},                      │
-│    │                     │           │  {name:"Tablets",children:[]},                          │
-│    │                     │           │  {name:"Accessories",children:[]}]                      │
-│  5 │ Furniture           │ NULL      │ [{name:"Office",children:[]},                           │
-│    │                     │           │  {name:"Living Room",children:[]}]                      │
-└────┴─────────────────────┴───────────┴─────────────────────────────────────────────────────────┘
-2 rows (root categories with full tree)
+┌────┬───────────────┬──────────┬────────┐
+│ id │ name          │ parentId │ active │
+├────┼───────────────┼──────────┼────────┤
+│  1 │ Electronics   │ null     │ true   │
+│  2 │ Clothing      │ null     │ true   │
+│  3 │ Home & Garden │ null     │ true   │
+│ 12 │ Legacy Products │ null   │ false  │
+└────┴───────────────┴──────────┴────────┘
+4 rows
+```
+
+**Categories with parent details:**
+```
+dbsp> categories where parentId is not null include parent
+```
+```
+┌────┬───────────────────┬──────────┬─────────────────┐
+│ id │ name              │ parentId │ parent.name     │
+├────┼───────────────────┼──────────┼─────────────────┤
+│  4 │ Phones            │        1 │ Electronics     │
+│  5 │ Computers         │        1 │ Electronics     │
+│  6 │ Audio             │        1 │ Electronics     │
+│  7 │ Smartphones       │        4 │ Phones          │
+│  8 │ Phone Accessories │        4 │ Phones          │
+│  9 │ Men               │        2 │ Clothing        │
+│ 10 │ Women             │        2 │ Clothing        │
+└────┴───────────────────┴──────────┴─────────────────┘
+8 rows (showing 7)
 ```
 
 ---
