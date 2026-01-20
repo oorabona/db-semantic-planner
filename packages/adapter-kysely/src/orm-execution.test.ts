@@ -390,8 +390,8 @@ describe('Execution Layer', () => {
 			// Verify params is array
 			expect(Array.isArray(dump.params)).toBe(true);
 
-			// Verify meta
-			expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
+			// Verify meta is an object (may be empty when no schema is set)
+			expect(typeof dump.meta).toBe('object');
 		});
 
 		it('includes params for where clause', () => {

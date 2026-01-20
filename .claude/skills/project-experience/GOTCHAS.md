@@ -826,3 +826,19 @@ Kysely's `addColumn().autoIncrement()` uses the IDENTITY approach which is more 
 **Prevention:** When implementing DDL cleanup, prefer CASCADE over manual dependency management. Let the database handle transitive dependencies.
 
 **Location:** `packages/adapter-kysely/src/ddl.ts` (generateDDL function)
+
+## Schema Scoping
+
+### dump.meta.schema Requires adapter.createDump() Not Manual Meta Construction (2026-01-20)
+
+**Symptoms:** When using orm.withSchema() or MockAdapter with schemaName option, the SQL is correctly schema-qualified but dump.meta.schema is undefined.
+
+**Cause:** Both QueryExecutor.dump() and QueryBuilderImpl.dump() were building their own meta object directly instead of using adapter.createDump(). The adapter knows its schemaName but wasn't being asked to populate meta.
+
+**Solution:** Always use adapter.createDump(planReport, compiled) to create the dump. The adapter will include its schemaName in meta.schema. If the adapter doesn't set it, fall back to the context's schemaName.
+
+**Pattern:** When ORM wraps adapter functionality, delegate to adapter methods rather than reimplementing logic. The adapter has private state (like schemaName) that only it can properly expose.
+
+**Prevention:** When adding observability features, verify the full chain: adapter.createDump() creates meta, ORM passes it through, dump output includes all expected fields.
+
+**Location:** `packages/core/src/dx/query-executor.ts` and `packages/core/src/dx/orm.ts` (dump methods)

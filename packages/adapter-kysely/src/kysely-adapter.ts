@@ -319,16 +319,15 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 	 * This is a simple assembly of already-compiled pieces.
 	 */
 	createDump(plan: PlanReport, query: CompiledQuery, meta?: DumpMeta): Dump {
-		// Handle exactOptionalPropertyTypes: only include meta if defined
-		const dump: Dump = {
+		return {
 			plan,
 			sql: query.sql,
 			params: query.parameters,
+			meta: {
+				...(this.schemaName !== undefined && { schema: this.schemaName }),
+				...meta,
+			},
 		};
-		if (meta !== undefined) {
-			return { ...dump, meta };
-		}
-		return dump;
 	}
 
 	// =========================================================================

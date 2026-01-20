@@ -186,15 +186,24 @@ function createMockKysely(dialect: MockDialect): Kysely<unknown> {
 export class MockAdapter implements Adapter<unknown> {
 	private readonly kysely: Kysely<unknown>;
 	private readonly _schemaName?: string;
+	private readonly _dialect: MockDialect;
 	private readonly _capabilities: AdapterCapabilities;
 	private readonly _aliasIncludedColumns: 'always' | 'onCollision';
 
 	constructor(options: MockAdapterOptions = {}) {
 		const dialect = options.dialect ?? 'postgresql';
-		this.kysely = createMockKysely(dialect);
+		this._dialect = dialect;
+
+		// Create base Kysely instance
+		let kyselyInstance = createMockKysely(dialect);
+
+		// Apply schema scoping using Kysely's native API
 		if (options.schemaName !== undefined) {
 			this._schemaName = options.schemaName;
+			kyselyInstance = kyselyInstance.withSchema(options.schemaName);
 		}
+
+		this.kysely = kyselyInstance;
 		this._aliasIncludedColumns = options.aliasIncludedColumns ?? 'always';
 
 		// PostgreSQL capabilities (most permissive)
@@ -414,8 +423,12 @@ export class MockAdapter implements Adapter<unknown> {
 	// =========================================================================
 
 	withSchema(schemaName: string): Adapter<unknown> {
+		// Create a new MockAdapter that preserves dialect and aliasing options
+		// but scopes to the specified schema using Kysely's native withSchema API
 		return new MockAdapter({
+			dialect: this._dialect,
 			schemaName,
+			aliasIncludedColumns: this._aliasIncludedColumns,
 		});
 	}
 

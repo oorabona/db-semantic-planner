@@ -521,20 +521,22 @@ export class QueryExecutor<TResult = unknown> {
 
 		const compiled = adapter.compile(planReport, compileOptions);
 
-		// Build meta with exactOptionalPropertyTypes compliance
-		const meta: { compiledAt: Date; schema?: string } = {
-			compiledAt: new Date(),
-		};
-		if (this.ctx.schemaName !== undefined) {
-			meta.schema = this.ctx.schemaName;
+		// Use adapter.createDump() to properly capture adapter's schema
+		// Then merge with context schema if needed
+		const dump = adapter.createDump(planReport, compiled);
+
+		// If adapter didn't set schema but context has one, add it
+		if (dump.meta?.schema === undefined && this.ctx.schemaName !== undefined) {
+			return {
+				...dump,
+				meta: {
+					...dump.meta,
+					schema: this.ctx.schemaName,
+				},
+			};
 		}
 
-		return {
-			plan: planReport,
-			sql: compiled.sql,
-			params: compiled.parameters as readonly unknown[],
-			meta,
-		};
+		return dump;
 	}
 
 	/**

@@ -58,6 +58,44 @@ describe('MockAdapter', () => {
 			expect(adapter).toBeInstanceOf(MockAdapter);
 		});
 
+		it('produces schema-qualified SQL when schemaName is set', () => {
+			const orm = createOrm({
+				model: testSchema,
+				adapter: createMockAdapter({ schemaName: 'my_tenant' }),
+			});
+
+			const dump = orm.select('users').dump();
+
+			// SQL should include schema qualification via Kysely's native withSchema
+			expect(dump.sql).toContain('"my_tenant"');
+			expect(dump.sql).toContain('"my_tenant"."users"');
+			expect(dump.meta?.schema).toBe('my_tenant');
+		});
+
+		it('withSchema() produces schema-qualified SQL', () => {
+			const adapter = createMockAdapter();
+			const orm = createOrm({ model: testSchema, adapter });
+
+			const scopedOrm = orm.withSchema('tenant_abc');
+			const dump = scopedOrm.select('users').dump();
+
+			// SQL should include schema qualification via Kysely's native withSchema
+			expect(dump.sql).toContain('"tenant_abc"');
+			expect(dump.sql).toContain('"tenant_abc"."users"');
+			expect(dump.meta?.schema).toBe('tenant_abc');
+		});
+
+		it('withSchema() preserves dialect', () => {
+			const adapter = createMockAdapter({ dialect: 'mysql' });
+			const orm = createOrm({ model: testSchema, adapter });
+
+			const scopedOrm = orm.withSchema('tenant_xyz');
+			const dump = scopedOrm.select('users').dump();
+
+			// MySQL uses backticks for identifiers
+			expect(dump.sql).toContain('`tenant_xyz`');
+		});
+
 		it('supports mysql dialect', () => {
 			const adapter = createMockAdapter({ dialect: 'mysql' });
 			expect(adapter).toBeInstanceOf(MockAdapter);
