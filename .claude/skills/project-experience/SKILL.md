@@ -9,8 +9,8 @@ description: Project-specific patterns, gotchas, and learnings for db-semantic-p
 
 **Vision:** Semantic query planning for databases - intent-first approach
 **Generated:** 2026-01-06
-**Updated:** 2026-01-07
-**Phase:** P2 Complete (Multi-dialect capabilities)
+**Updated:** 2026-01-20
+**Phase:** P2 Complete (Multi-dialect capabilities), AUD-004 Complete (Compiler refactoring)
 
 ## Architecture: Ports & Adapters
 
@@ -210,6 +210,43 @@ orm.forTenant('tenant_acme'); // Validated, uses db.withSchema()
 **How to diagnose:** When a feature seems missing, trace the full type chain from user-facing API to adapter. The gap is usually in the intermediate IR types.
 
 **Solution:** Add missing properties to IR types, not just the adapter or schema layers.
+
+### 11. Handler/Dispatcher Pattern with Factory Functions (2026-01-20)
+
+**Context:** Refactoring monolithic switch-based dispatchers (like `compileWhere()` with 12 cases) into modular handler registries.
+
+**Pattern:**
+- Define handler types in `types.ts` (WhereHandler, ExpressionHandler, etc.)
+- Create registries using `Map<string, Handler>` in `registry.ts`
+- For simple handlers: direct functions registered at module load
+- For complex handlers with dependencies: use factory pattern
+
+**Factory pattern for dependency injection:**
+
+```typescript
+// handlers/where/exists.ts
+export function createExistsHandler(helpers: {
+  compileExists: ExistsCompilerFn;
+  compileJoinedRelationConditions: JoinConditionFn;
+}) {
+  return (ctx: CompilerContext, eb: ExpressionBuilder, intent: WhereIntent) => {
+    return helpers.compileExists(ctx, eb, intent);
+  };
+}
+
+// Registration in compiler.ts
+registerComplexWhereHandlers({
+  compileExists,           // Pass existing functions
+  compileJoinedRelationConditions,
+});
+```
+
+**Why factory pattern:**
+- Avoids circular dependencies (handlers don't import compiler.ts directly)
+- Allows handlers to use existing compiler functions without extraction
+- Establishes extensibility pattern first, logic extraction can happen later
+
+**When to apply:** Any large switch statement that dispatches on a `kind` or `type` field.
 
 ---
 

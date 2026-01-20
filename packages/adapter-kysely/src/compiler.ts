@@ -33,9 +33,33 @@ import type {
 	SqlBool,
 } from 'kysely';
 import { type RawBuilder, sql } from 'kysely';
+import {
+	type CompilerContext,
+	applyCteIncludes,
+	applyJoinIncludes,
+	applyJsonAggIncludes,
+	applyLateralIncludes,
+	getExpressionHandler,
+	getWhereHandler,
+	registerComplexWhereHandlers,
+	registerExpressionHandlers,
+	registerIncludeHandlers,
+	registerWhereHandlers,
+} from './compiler/index.js';
 import { CompilationError } from './errors.js';
 import { addWhereSimple, addWhereToJoin } from './recursive-compiler.js';
 import { UnsupportedOperationError } from './stream.js';
+
+// Initialize handler registrations
+registerWhereHandlers();
+registerComplexWhereHandlers({
+	compileExists,
+	compileJoinedRelationConditions,
+	compileRelationFilter,
+	compileSubquery,
+});
+registerExpressionHandlers();
+registerIncludeHandlers();
 
 // ============================================================================
 // Compiler State
@@ -708,7 +732,15 @@ export function compile(
 	);
 
 	// Build the base query using the CTE-enhanced builder
-	let query = buildBaseQuery(intent, rootAlias, builder, schemaName);
+	let query = buildBaseQuery(
+		intent,
+		rootAlias,
+		builder,
+		model,
+		plan,
+		state,
+		schemaName,
+	);
 
 	// Add Window functions (P3-A)
 	if (windows && windows.length > 0) {
@@ -781,7 +813,7 @@ export function compile(
 	// Apply LEFT JOINs for include-strategy: 'join' (CORE-001)
 	// This adds LEFT JOINs for includes that the planner decided to use JOIN
 	if (intent.include) {
-		query = applyIncludeJoins(
+		query = applyJoinIncludes(
 			query,
 			intent.include,
 			plan,
@@ -879,6 +911,9 @@ function buildBaseQuery(
 	alias: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 	kysely: Kysely<any>,
+	model: ModelIR,
+	plan: PlanReport,
+	state: CompilerState,
 	schemaName?: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {
@@ -900,7 +935,15 @@ function buildBaseQuery(
 		query = buildAggregateSelect(query, intent.select, alias);
 	} else if (isSelectWithExpressions(intent.select)) {
 		// Handle select with expressions (COALESCE, etc.)
-		query = buildSelectWithExpressions(query, intent.select, alias);
+		query = buildSelectWithExpressions(
+			query,
+			intent.select,
+			alias,
+			model,
+			plan,
+			state,
+			schemaName,
+		);
 	} else {
 		const fields = intent.select.fields.map((f: string) => `${alias}.${f}`);
 		query = query.select(fields);
@@ -1014,6 +1057,10 @@ function buildSelectWithExpressions(
 	query: SelectQueryBuilder<any, any, any>,
 	select: SelectWithExpressionsIntent,
 	alias: string,
+	model: ModelIR,
+	plan: PlanReport,
+	state: CompilerState,
+	schemaName?: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {
 	let result = query;
@@ -1026,7 +1073,7 @@ function buildSelectWithExpressions(
 
 	// Add expressions
 	for (const expr of select.expressions) {
-		result = addExpressionSelect(result, expr, alias);
+		result = addExpressionSelect(result, expr, alias, model, plan, state, schemaName);
 	}
 
 	return result;
@@ -1040,52 +1087,27 @@ function addExpressionSelect(
 	query: SelectQueryBuilder<any, any, any>,
 	expr: ExpressionIntent,
 	alias: string,
+	model: ModelIR,
+	plan: PlanReport,
+	state: CompilerState,
+	schemaName?: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {
-	switch (expr.kind) {
-		case 'coalesce':
-			return compileCoalesceSelect(query, expr.fields, expr.as, alias);
-
-		case 'raw':
-			// Raw SQL expression - use with caution!
-			return query.select(sql`${sql.raw(expr.sql)}`.as(expr.as));
-
-		case 'window':
-			// Window function expression (DX-021)
-			return compileWindowSelect(query, expr, alias);
-
-		default:
-			throw new CompilationError(
-				`Unknown expression kind: ${(expr as ExpressionIntent).kind}`,
-			);
-	}
-}
-
-/**
- * Compile COALESCE expression for SELECT
- * COALESCE(field1, field2, ...) AS alias
- */
-function compileCoalesceSelect(
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-	query: SelectQueryBuilder<any, any, any>,
-	fields: readonly string[],
-	resultAlias: string,
-	tableAlias: string,
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-): SelectQueryBuilder<any, any, any> {
-	if (fields.length === 0) {
-		throw new CompilationError('COALESCE requires at least one field');
+	// Create context for handlers
+	const ctx: CompilerContext = { model, plan, state };
+	if (schemaName !== undefined) {
+		ctx.schemaName = schemaName;
 	}
 
-	// Build COALESCE(t0.field1, t0.field2, ...) using Kysely's native expression builder
-	return query.select((eb) =>
-		eb
-			.fn(
-				'coalesce',
-				// biome-ignore lint/suspicious/noExplicitAny: Dynamic column references
-				fields.map((f) => eb.ref(`${tableAlias}.${f}` as any)),
-			)
-			.as(resultAlias),
+	// Try registry-based dispatch first
+	const handler = getExpressionHandler(expr.kind);
+	if (handler) {
+		return handler(ctx, query, expr, alias);
+	}
+
+	// Fallback (should not be reached once all handlers are migrated)
+	throw new CompilationError(
+		`Unknown expression kind: ${(expr as ExpressionIntent).kind}`,
 	);
 }
 
@@ -1212,8 +1234,25 @@ function compileWhere(
 	schemaName?: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
 ): any {
+	// Create context with recursive dispatcher
+	const ctx: CompilerContext = { model, plan, state };
+	if (schemaName !== undefined) {
+		ctx.schemaName = schemaName;
+	}
+	// Add compileWhere as dispatcher for recursive handlers
+	ctx.compileWhere = (_innerCtx, innerEb, innerWhere, innerAlias) =>
+		compileWhere(innerEb, innerWhere, innerAlias, model, plan, state, schemaName);
+
+	// Try registry-based dispatch first
+	const handler = getWhereHandler(where.kind);
+	if (handler) {
+		return handler(ctx, eb, where, alias);
+	}
+
+	// Fallback to switch for handlers not yet migrated
 	switch (where.kind) {
 		case 'comparison':
+			// Migrated to registry - this case should not be reached
 			return compileComparison(eb, where, alias);
 
 		case 'like':
@@ -1278,75 +1317,8 @@ function compileWhere(
 				),
 			);
 
-		case 'exists':
-			// Check if relation was already JOINed via filter-strategy: 'join'
-			if (state.joinedFilterRelations.has(where.relation)) {
-				return compileJoinedRelationConditions(
-					eb,
-					{
-						relation: where.relation,
-						...(where.where !== undefined && { where: where.where }),
-						mode: 'some',
-					},
-					alias,
-					model,
-					plan,
-					state,
-					schemaName,
-				);
-			}
-			return compileExists(
-				eb,
-				where,
-				alias,
-				model,
-				plan,
-				state,
-				false,
-				schemaName,
-			);
-
-		case 'notExists':
-			// Check if relation was already JOINed via filter-strategy: 'join'
-			if (state.joinedFilterRelations.has(where.relation)) {
-				return compileJoinedRelationConditions(
-					eb,
-					{
-						relation: where.relation,
-						...(where.where !== undefined && { where: where.where }),
-						mode: 'none',
-					},
-					alias,
-					model,
-					plan,
-					state,
-					schemaName,
-				);
-			}
-			return compileExists(
-				eb,
-				where,
-				alias,
-				model,
-				plan,
-				state,
-				true,
-				schemaName,
-			);
-
-		case 'relationFilter':
-			return compileRelationFilter(
-				eb,
-				where,
-				alias,
-				model,
-				plan,
-				state,
-				schemaName,
-			);
-
-		case 'subquery':
-			return compileSubquery(eb, where, alias, model, plan, state, schemaName);
+		// Complex handlers (exists, notExists, relationFilter, subquery)
+		// are now handled by the registry via registerComplexWhereHandlers()
 
 		default:
 			throw new CompilationError(
@@ -1634,646 +1606,6 @@ function findIncludeStrategyDecision(
 			d.context.sourceTable === sourceTable &&
 			d.context.relation === relationName,
 	);
-}
-
-/**
- * Collect all includes that should use JOIN strategy (decision.choice === 'join').
- */
-function collectJoinIncludes(
-	includes: readonly IncludeIntent[] | undefined,
-	plan: PlanReport,
-	sourceTable: string,
-): Array<{ include: IncludeIntent; relationName: string }> {
-	if (!includes) return [];
-
-	const results: Array<{ include: IncludeIntent; relationName: string }> = [];
-
-	for (const include of includes) {
-		const decision = findIncludeStrategyDecision(
-			plan,
-			sourceTable,
-			include.relation,
-		);
-		if (decision?.choice === 'join') {
-			results.push({
-				include,
-				relationName: include.relation,
-			});
-		}
-	}
-
-	return results;
-}
-
-/**
- * Collect all includes that should use CTE strategy (decision.choice === 'cte').
- * CTE strategy is used for recursive/self-referential relations.
- */
-function collectCteIncludes(
-	includes: readonly IncludeIntent[] | undefined,
-	plan: PlanReport,
-	sourceTable: string,
-	model: ModelIR,
-): Array<{ include: IncludeIntent; relation: RelationIR; cteName: string }> {
-	if (!includes) return [];
-
-	const results: Array<{
-		include: IncludeIntent;
-		relation: RelationIR;
-		cteName: string;
-	}> = [];
-
-	for (const include of includes) {
-		const decision = findIncludeStrategyDecision(
-			plan,
-			sourceTable,
-			include.relation,
-		);
-		if (decision?.choice === 'cte') {
-			const relation = model.getRelation(`${sourceTable}.${include.relation}`);
-			if (relation) {
-				// Use same naming convention as planner (CLI-012)
-				const cteName = `cte_${sourceTable}_${relation.name}`;
-				results.push({
-					include,
-					relation,
-					cteName,
-				});
-			}
-		}
-	}
-
-	return results;
-}
-
-/**
- * Apply CTEs (WITH clause) for all includes that use 'cte' strategy.
- * For recursive relations (self-referential), creates a RECURSIVE CTE.
- */
-function applyCteIncludes(
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-	_kysely: Kysely<any>,
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-	query: SelectQueryBuilder<any, any, any>,
-	includes: readonly IncludeIntent[] | undefined,
-	plan: PlanReport,
-	model: ModelIR,
-	state: CompilerState,
-	rootTable: string,
-	rootAlias: string,
-	schemaName?: string,
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-): SelectQueryBuilder<any, any, any> {
-	if (!includes) return query;
-
-	const cteIncludes = collectCteIncludes(includes, plan, rootTable, model);
-
-	if (cteIncludes.length === 0) {
-		return query;
-	}
-
-	// Get source table definition
-	const sourceTableDef = model.getTable(rootTable);
-	const sourceKeys = normalizePrimaryKey(sourceTableDef?.primaryKey);
-
-	let result = query;
-
-	for (const { include, relation, cteName } of cteIncludes) {
-		const targetTableDef = model.getTable(relation.target);
-		const targetKeys = normalizePrimaryKey(targetTableDef?.primaryKey);
-
-		// Check if CTE exists in plan (CLI-012: real CTE implementation)
-		const cteExists = plan.ctes.some((cte) => cte.name === cteName);
-
-		// If CTE exists, JOIN to CTE name; otherwise fallback to table
-		// Note: Schema prefix is NOT applied to CTEs (they're in local scope)
-		const joinTarget = cteExists
-			? cteName
-			: schemaName
-				? `${schemaName}.${relation.target}`
-				: relation.target;
-
-		// Create alias for the CTE join
-		const cteAlias = getNextAlias(state);
-		state.tableAliases.set(`${relation.target}_include`, cteAlias);
-		state.joinedIncludeRelations.set(include.relation, {
-			alias: cteAlias,
-			targetTable: relation.target,
-			relationName: include.relation,
-			strategy: 'join',
-		});
-
-		// Build JOIN condition based on relation type
-		const fkCols = normalizeForeignKey(relation.foreignKey, 'id');
-
-		if (relation.type === 'belongsTo') {
-			// belongsTo: source.foreignKey = target.primaryKey
-			if (fkCols.length === 1) {
-				result = result.leftJoin(
-					`${joinTarget} as ${cteAlias}`,
-					`${rootAlias}.${fkCols[0]}`,
-					`${cteAlias}.${targetKeys[0]}`,
-				);
-			} else {
-				result = result.leftJoin(`${joinTarget} as ${cteAlias}`, (join) => {
-					let j = join.onRef(
-						`${rootAlias}.${fkCols[0]}`,
-						'=',
-						`${cteAlias}.${targetKeys[0]}`,
-					);
-					for (let i = 1; i < fkCols.length; i++) {
-						j = j.onRef(
-							`${rootAlias}.${fkCols[i]}`,
-							'=',
-							`${cteAlias}.${targetKeys[i]}`,
-						);
-					}
-					return j;
-				});
-			}
-		} else {
-			// hasMany or hasOne: source.primaryKey = target.foreignKey
-			if (fkCols.length === 1) {
-				result = result.leftJoin(
-					`${joinTarget} as ${cteAlias}`,
-					`${cteAlias}.${fkCols[0]}`,
-					`${rootAlias}.${sourceKeys[0]}`,
-				);
-			} else {
-				result = result.leftJoin(`${joinTarget} as ${cteAlias}`, (join) => {
-					let j = join.onRef(
-						`${cteAlias}.${fkCols[0]}`,
-						'=',
-						`${rootAlias}.${sourceKeys[0]}`,
-					);
-					for (let i = 1; i < fkCols.length; i++) {
-						j = j.onRef(
-							`${cteAlias}.${fkCols[i]}`,
-							'=',
-							`${rootAlias}.${sourceKeys[i]}`,
-						);
-					}
-					return j;
-				});
-			}
-		}
-	}
-
-	return result;
-}
-
-/**
- * Collect all includes that should use LATERAL JOIN strategy (decision.choice === 'lateral').
- * Returns include info with relation metadata needed for LATERAL subqueries.
- */
-function collectLateralIncludes(
-	includes: readonly IncludeIntent[] | undefined,
-	plan: PlanReport,
-	sourceTable: string,
-	model: ModelIR,
-): Array<{ include: IncludeIntent; relation: RelationIR }> {
-	if (!includes) return [];
-
-	const results: Array<{ include: IncludeIntent; relation: RelationIR }> = [];
-
-	for (const include of includes) {
-		const decision = findIncludeStrategyDecision(
-			plan,
-			sourceTable,
-			include.relation,
-		);
-		if (decision?.choice === 'lateral') {
-			const relation = model.getRelation(`${sourceTable}.${include.relation}`);
-			if (relation) {
-				results.push({ include, relation });
-			}
-		}
-	}
-
-	return results;
-}
-
-/**
- * Apply LATERAL JOIN for includes that use 'lateral' strategy.
- * LATERAL allows correlated subqueries that reference the outer query.
- * Useful for: limiting N children per parent, ordering within each parent group.
- */
-function applyLateralIncludes(
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-	query: SelectQueryBuilder<any, any, any>,
-	includes: readonly IncludeIntent[] | undefined,
-	plan: PlanReport,
-	model: ModelIR,
-	state: CompilerState,
-	rootTable: string,
-	rootAlias: string,
-	schemaName?: string,
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-): SelectQueryBuilder<any, any, any> {
-	if (!includes) return query;
-
-	const lateralIncludes = collectLateralIncludes(
-		includes,
-		plan,
-		rootTable,
-		model,
-	);
-
-	if (lateralIncludes.length === 0) {
-		return query;
-	}
-
-	// Get source table definition
-	const sourceTableDef = model.getTable(rootTable);
-	const sourceKeys = normalizePrimaryKey(sourceTableDef?.primaryKey);
-
-	let result = query;
-
-	for (const { include, relation } of lateralIncludes) {
-		const targetTableDef = model.getTable(relation.target);
-		const _targetKeys = normalizePrimaryKey(targetTableDef?.primaryKey);
-
-		// Apply schema prefix
-		const targetTable = schemaName
-			? `${schemaName}.${relation.target}`
-			: relation.target;
-
-		// Create alias for the LATERAL subquery
-		const lateralAlias = getNextAlias(state);
-		state.tableAliases.set(`${relation.target}_include`, lateralAlias);
-		state.joinedIncludeRelations.set(include.relation, {
-			alias: lateralAlias,
-			targetTable: relation.target,
-			relationName: include.relation,
-			strategy: 'join',
-		});
-
-		// Build the LATERAL subquery
-		// LEFT JOIN LATERAL (SELECT * FROM target WHERE target.fk = source.pk LIMIT N) AS alias ON true
-		const fkCols = normalizeForeignKey(relation.foreignKey, 'id');
-
-		// For LATERAL, we use sql.raw to create the LATERAL subquery
-		// because Kysely doesn't have native LATERAL support
-		// This creates: LEFT JOIN LATERAL (subquery) AS alias ON true
-		const orderBySql = include.orderBy
-			? `ORDER BY ${include.orderBy.map((o) => `"${o.field}" ${o.direction.toUpperCase()}`).join(', ')}`
-			: '';
-		const limitSql =
-			include.limit !== undefined ? `LIMIT ${include.limit}` : '';
-
-		const lateralSubquery = `LATERAL (
-			SELECT * FROM "${targetTable}"
-			WHERE "${targetTable}"."${fkCols[0]}" = "${rootAlias}"."${sourceKeys[0]}"
-			${orderBySql}
-			${limitSql}
-		) AS "${lateralAlias}"`;
-
-		// Use sql.raw with type assertion for LATERAL - Kysely doesn't have native support
-		// biome-ignore lint/suspicious/noExplicitAny: LATERAL requires raw SQL workaround
-		result = result.leftJoin(sql.raw(lateralSubquery) as any, (join: any) =>
-			join.onTrue(),
-		);
-	}
-
-	return result;
-}
-
-/**
- * Collect all includes that should use JSON_AGG strategy (decision.choice === 'json_agg').
- * Returns include info with relation metadata needed for JSON aggregation.
- */
-function collectJsonAggIncludes(
-	includes: readonly IncludeIntent[] | undefined,
-	plan: PlanReport,
-	sourceTable: string,
-	model: ModelIR,
-): Array<{ include: IncludeIntent; relation: RelationIR }> {
-	if (!includes) return [];
-
-	const results: Array<{ include: IncludeIntent; relation: RelationIR }> = [];
-
-	for (const include of includes) {
-		const decision = findIncludeStrategyDecision(
-			plan,
-			sourceTable,
-			include.relation,
-		);
-		if (decision?.choice === 'json_agg') {
-			const relation = model.getRelation(`${sourceTable}.${include.relation}`);
-			if (relation) {
-				results.push({ include, relation });
-			}
-		}
-	}
-
-	return results;
-}
-
-/**
- * Apply JSON_AGG for includes that use 'json_agg' strategy.
- * Aggregates related rows as a JSON array in a single column.
- * Benefits: No row duplication (unlike JOIN), efficient for to-many relations.
- */
-function applyJsonAggIncludes(
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-	query: SelectQueryBuilder<any, any, any>,
-	includes: readonly IncludeIntent[] | undefined,
-	plan: PlanReport,
-	model: ModelIR,
-	state: CompilerState,
-	rootTable: string,
-	rootAlias: string,
-	schemaName?: string,
-	dialect?: string,
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-): SelectQueryBuilder<any, any, any> {
-	if (!includes) return query;
-
-	const jsonAggIncludes = collectJsonAggIncludes(
-		includes,
-		plan,
-		rootTable,
-		model,
-	);
-
-	if (jsonAggIncludes.length === 0) {
-		return query;
-	}
-
-	// Get source table definition
-	const sourceTableDef = model.getTable(rootTable);
-	const sourceKeys = normalizePrimaryKey(sourceTableDef?.primaryKey);
-
-	let result = query;
-
-	for (const { include, relation } of jsonAggIncludes) {
-		const targetTableDef = model.getTable(relation.target);
-		const _targetKeys = normalizePrimaryKey(targetTableDef?.primaryKey);
-
-		// Apply schema prefix
-		const targetTable = schemaName
-			? `${schemaName}.${relation.target}`
-			: relation.target;
-
-		// Create alias for the JSON column
-		const jsonColumnAlias = `${include.relation}_json`;
-
-		// Build the JSON aggregation subquery
-		// SELECT COALESCE(JSON_AGG(subquery), '[]') FROM (SELECT * FROM target WHERE ...) subquery
-		const fkCols = normalizeForeignKey(relation.foreignKey, 'id');
-
-		// Determine the JSON aggregation function based on dialect
-		// PostgreSQL: json_agg(to_jsonb(row))
-		// SQLite: json_group_array(json_object(...))
-		// MySQL 8+: JSON_ARRAYAGG(JSON_OBJECT(...))
-		const isPostgres = !dialect || dialect === 'postgresql';
-		const isSqlite = dialect === 'sqlite';
-
-		// Build subquery with ordering if specified
-		let orderBySql = '';
-		if (include.orderBy && include.orderBy.length > 0) {
-			orderBySql = `ORDER BY ${include.orderBy.map((o) => `"${o.field}" ${o.direction.toUpperCase()}`).join(', ')}`;
-		}
-
-		// Build the JSON aggregation expression
-		// For PostgreSQL: COALESCE((SELECT json_agg(to_jsonb(t)) FROM target t WHERE ... ORDER BY ...), '[]')
-		// For SQLite: COALESCE((SELECT json_group_array(json(target.*)) FROM target WHERE ... ORDER BY ...), '[]')
-		const jsonAggSql = isPostgres
-			? sql`COALESCE((
-				SELECT json_agg(to_jsonb(__t__) ${orderBySql ? sql.raw(orderBySql) : sql``})
-				FROM ${sql.table(targetTable)} AS __t__
-				WHERE ${sql.ref(`__t__.${fkCols[0]}`)} = ${sql.ref(`${rootAlias}.${sourceKeys[0]}`)}
-			), '[]'::json)`
-			: isSqlite
-				? sql`COALESCE((
-				SELECT json_group_array(json_object('id', __t__.id))
-				FROM ${sql.table(targetTable)} AS __t__
-				WHERE ${sql.ref(`__t__.${fkCols[0]}`)} = ${sql.ref(`${rootAlias}.${sourceKeys[0]}`)}
-				${orderBySql ? sql.raw(orderBySql) : sql``}
-			), '[]')`
-				: sql`'[]'`; // Fallback for unsupported dialects
-
-		// Add the JSON aggregation as a selected column
-		result = result.select(jsonAggSql.as(jsonColumnAlias));
-
-		// Track that we've handled this relation (no need for JOIN)
-		state.joinedIncludeRelations.set(include.relation, {
-			alias: jsonColumnAlias,
-			targetTable: relation.target,
-			relationName: include.relation,
-			strategy: 'json_agg',
-		});
-	}
-
-	return result;
-}
-
-/**
- * Apply LEFT JOINs for all includes that use 'join' strategy.
- * Returns the modified query with JOINs applied.
- */
-function applyIncludeJoins(
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-	query: SelectQueryBuilder<any, any, any>,
-	includes: readonly IncludeIntent[] | undefined,
-	plan: PlanReport,
-	model: ModelIR,
-	state: CompilerState,
-	rootTable: string,
-	rootAlias: string,
-	schemaName?: string,
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-): SelectQueryBuilder<any, any, any> {
-	if (!includes) return query;
-
-	const joinIncludes = collectJoinIncludes(includes, plan, rootTable);
-
-	let result = query;
-
-	for (const { include, relationName } of joinIncludes) {
-		// Skip if already joined
-		if (state.joinedIncludeRelations.has(relationName)) {
-			continue;
-		}
-
-		const relation = lookupResolvedRelation(
-			relationName,
-			rootTable,
-			model,
-			plan,
-		);
-
-		if (!relation) {
-			throw new CompilationError(
-				`Unknown relation for include JOIN: ${rootTable}.${relationName}`,
-			);
-		}
-
-		// Get table definitions - supports composite keys
-		const targetTableDef = model.getTable(relation.target);
-		const targetKeys = normalizePrimaryKey(targetTableDef?.primaryKey);
-
-		const sourceTableDef = model.getTable(relation.source);
-		const sourceKeys = normalizePrimaryKey(sourceTableDef?.primaryKey);
-
-		// Handle M:N (belongsToMany) with through table
-		if (relation.through) {
-			// M:N requires two LEFT JOINs: source → junction → target
-			const junctionAlias = getNextAlias(state);
-			const targetAlias = getNextAlias(state);
-
-			// FK from junction to source (default: {source}Id) - supports composite keys
-			const fkCols = normalizeForeignKey(
-				relation.foreignKey,
-				`${relation.source}Id`,
-			);
-
-			// FK from junction to target (default: {target}Id)
-			const otherKey = relation.otherKey ?? `${relation.target}Id`;
-
-			// Apply schema prefix
-			const junctionTable = schemaName
-				? `${schemaName}.${relation.through}`
-				: relation.through;
-			const targetTable = schemaName
-				? `${schemaName}.${relation.target}`
-				: relation.target;
-
-			// LEFT JOIN 1: source → junction (source.pk = junction.fk) - supports composite keys
-			if (fkCols.length === 1) {
-				result = result.leftJoin(
-					`${junctionTable} as ${junctionAlias}`,
-					`${rootAlias}.${sourceKeys[0]}`,
-					`${junctionAlias}.${fkCols[0]}`,
-				);
-			} else {
-				// Composite key: multiple ON conditions
-				result = result.leftJoin(
-					`${junctionTable} as ${junctionAlias}`,
-					(join) => {
-						let j = join.onRef(
-							`${rootAlias}.${sourceKeys[0]}`,
-							'=',
-							`${junctionAlias}.${fkCols[0]}`,
-						);
-						for (let i = 1; i < fkCols.length; i++) {
-							j = j.onRef(
-								`${rootAlias}.${sourceKeys[i]}`,
-								'=',
-								`${junctionAlias}.${fkCols[i]}`,
-							);
-						}
-						return j;
-					},
-				);
-			}
-
-			// LEFT JOIN 2: junction → target (junction.otherKey = target.pk)
-			// Apply include.where to the target table join
-			result = result.leftJoin(`${targetTable} as ${targetAlias}`, (join) => {
-				let j = join.onRef(
-					`${junctionAlias}.${otherKey}`,
-					'=',
-					`${targetAlias}.${targetKeys[0]}`,
-				);
-				// Add include.where conditions to ON clause
-				j = addWhereToJoin(j, include.where, targetAlias);
-				return j;
-			});
-
-			// Track the target alias (not junction) for column selection
-			state.tableAliases.set(`${relation.target}_include`, targetAlias);
-			state.joinedIncludeRelations.set(relationName, {
-				alias: targetAlias,
-				targetTable: relation.target,
-				relationName,
-				strategy: 'join',
-			});
-		} else {
-			// Non-M:N relations (hasOne, hasMany, belongsTo)
-			const joinAlias = getNextAlias(state);
-			state.tableAliases.set(`${relation.target}_include`, joinAlias);
-			state.joinedIncludeRelations.set(relationName, {
-				alias: joinAlias,
-				targetTable: relation.target,
-				relationName,
-				strategy: 'join',
-			});
-
-			// Build JOIN condition based on relation type - supports composite keys
-			const fkCols = normalizeForeignKey(relation.foreignKey, 'id');
-
-			// Apply schema prefix
-			const targetTable = schemaName
-				? `${schemaName}.${relation.target}`
-				: relation.target;
-
-			// Determine join condition based on relation type
-			// belongsTo: source.foreignKey = target.primaryKey
-			// hasMany/hasOne: source.primaryKey = target.foreignKey
-			// Always use callback form to support include.where filtering
-			if (relation.type === 'belongsTo') {
-				result = result.leftJoin(`${targetTable} as ${joinAlias}`, (join) => {
-					// Add FK conditions
-					let j = join.onRef(
-						`${rootAlias}.${fkCols[0]}`,
-						'=',
-						`${joinAlias}.${targetKeys[0]}`,
-					);
-					for (let i = 1; i < fkCols.length; i++) {
-						j = j.onRef(
-							`${rootAlias}.${fkCols[i]}`,
-							'=',
-							`${joinAlias}.${targetKeys[i]}`,
-						);
-					}
-					// Add include.where conditions to ON clause
-					j = addWhereToJoin(j, include.where, joinAlias);
-					return j;
-				});
-			} else {
-				// hasMany or hasOne
-				result = result.leftJoin(`${targetTable} as ${joinAlias}`, (join) => {
-					// Add FK conditions
-					let j = join.onRef(
-						`${joinAlias}.${fkCols[0]}`,
-						'=',
-						`${rootAlias}.${sourceKeys[0]}`,
-					);
-					for (let i = 1; i < fkCols.length; i++) {
-						j = j.onRef(
-							`${joinAlias}.${fkCols[i]}`,
-							'=',
-							`${rootAlias}.${sourceKeys[i]}`,
-						);
-					}
-					// Add include.where conditions to ON clause
-					j = addWhereToJoin(j, include.where, joinAlias);
-					return j;
-				});
-			}
-		}
-
-		// CLI-015: Recursively process nested includes
-		if (include.include && include.include.length > 0) {
-			// Get the target relation's alias and table for the recursive call
-			const relInfo = state.joinedIncludeRelations.get(relationName);
-			if (relInfo) {
-				result = applyIncludeJoins(
-					result,
-					include.include,
-					plan,
-					model,
-					state,
-					relation.target, // New source table is the relation's target
-					relInfo.alias, // Use the joined alias as root
-					schemaName,
-				);
-			}
-		}
-	}
-
-	return result;
 }
 
 /**

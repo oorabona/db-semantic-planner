@@ -842,3 +842,19 @@ Kysely's `addColumn().autoIncrement()` uses the IDENTITY approach which is more 
 **Prevention:** When adding observability features, verify the full chain: adapter.createDump() creates meta, ORM passes it through, dump output includes all expected fields.
 
 **Location:** `packages/core/src/dx/query-executor.ts` and `packages/core/src/dx/orm.ts` (dump methods)
+
+## Biome Lint
+
+### Biome: Empty Interfaces Trigger noEmptyInterface Rule (2026-01-20)
+
+**Issue:** Biome lint error `noEmptyInterface` when defining an interface with no members.
+
+**Cause:** Empty interfaces are semantically equivalent to the empty object type, which is confusing and rarely intentional.
+
+**Solution:** Use a type alias with `Record<string, never>` instead of an empty interface:
+- Bad: `export interface EmptyHelpers {}`
+- Good: `export type EmptyHelpers = Record<string, never>;`
+
+**When applicable:** Placeholder types for handler helpers that don't currently require any injected dependencies but might in the future.
+
+**Location:** `packages/adapter-kysely/src/compiler/handlers/include/index.ts`

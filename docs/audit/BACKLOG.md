@@ -66,7 +66,7 @@
 
 | ID | Issue | Location | Effort | Owner |
 |----|-------|----------|--------|-------|
-| AUD-004 | compiler.ts is 4735 lines | `adapter-kysely/src/compiler.ts` | L | 🟡 Phase 2 done |
+| AUD-004 | compiler.ts is 4735 lines | `adapter-kysely/src/compiler.ts` | L | ✅ Phase 4 done |
 | AUD-005 | orm.ts is 2351 lines | `core/src/dx/orm.ts` | M | TBD |
 | ~~AUD-006~~ | ~~Update SKILL.md package references~~ | ✅ RESOLVED (2026-01-20) | S | - |
 | ~~AUD-007~~ | ~~Add CHANGELOG.md~~ | ✅ RESOLVED (2026-01-20) | M | - |
@@ -81,19 +81,30 @@
 
 ### Details
 
-**AUD-004: Split compiler.ts** 🟡 Phase 2 Complete (2026-01-20)
+**AUD-004: Split compiler.ts** ✅ Phase 4 Complete (2026-01-20)
 - **Phase 1 DONE:** `mutation-compiler.ts` extracted (349 lines)
   - compileInsert, compileUpdate, compileDelete, compileUpsert
   - compiler.ts reduced from 4736 to 4410 lines (-7%)
 - **Phase 2 DONE:** `recursive-compiler.ts` extracted (1155 lines)
   - compileRecursive, injectAdvancedRecursiveClauses, path tracking, emit join
   - compiler.ts reduced from 4410 to 3301 lines (-25.1%)
-- **Phase 3 EVALUATED:** Further splitting optional
-  - EXISTS section (1533 lines) has complex interdependencies
-  - Optional future work: `select-compiler.ts`, `expression-compiler.ts`
-- **Total reduction:** 4736 → 3301 lines (-30.3%)
-- Benefits: Better maintainability, easier testing, clearer ownership
-- Status: Core refactoring complete, optional phases deferred
+- **Phase 3 DONE:** Handler/dispatcher pattern (compiler/ module)
+  - `compiler/types.ts` - Handler type definitions
+  - `compiler/registry.ts` - Handler registries (Map-based)
+  - `compiler/handlers/where/` - 12 WHERE handlers
+  - `compiler/handlers/expression/` - 3 expression handlers
+  - `compiler/handlers/include/` - 4 include strategy handlers (wrappers)
+  - 25 new files in compiler/ module establishing extensibility pattern
+- **Phase 4 DONE:** Include handlers logic extraction (2026-01-20)
+  - `handlers/include/join.ts` - Full applyJoinIncludes logic
+  - `handlers/include/lateral.ts` - Full applyLateralIncludes logic
+  - `handlers/include/json-agg.ts` - Full applyJsonAggIncludes logic
+  - `handlers/include/cte.ts` - Full applyCteIncludes logic
+  - Removed factory injection pattern - handlers now self-contained
+  - compiler.ts reduced from 3274 to 2633 lines (-19.6%)
+- **Total reduction:** 4736 → 2633 lines (-44.4%)
+- Benefits: Extensible pattern, better testability, clearer ownership, self-contained handlers
+- Status: ✅ COMPLETE - all include handlers contain full logic
 
 **AUD-005: Extract concerns from orm.ts**
 - QueryBuilderImpl currently handles building, execution, hydration

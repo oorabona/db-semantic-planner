@@ -11,6 +11,7 @@
 
 import type {
 	EmitJoinClause,
+	ModelIR,
 	RecursiveAdvancedOptions,
 	RecursiveIntent,
 	RecursivePlanReport,
@@ -43,6 +44,7 @@ import {
 	getCapabilitiesForDialect,
 } from './dialect.js';
 import { CompilationError } from './errors.js';
+import { UnsupportedOperationError } from './stream.js';
 
 // ============================================================================
 // Path Tracking Compiler (ARCH-001)
