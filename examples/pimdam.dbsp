@@ -48,3 +48,28 @@ products where categoryId = 6
 # =============================================================================
 categories where parentId is null
 categories where parentId is not null include parent
+
+# =============================================================================
+# 6.7 Mutations (INSERT, UPDATE, DELETE, UPSERT)
+# =============================================================================
+
+# Insert a new category
+categories insert name = "Accessories", slug = "accessories", active = true
+
+# Insert a new asset
+assets insert filename = "new-image.jpg", url = "https://cdn.example.com/new-image.jpg", kind = "image"
+
+# Update product status
+products update set active = false where id = 5
+
+# Soft delete a product (set deletedAt)
+products update set deletedAt = "2024-12-01T00:00:00Z" where sku = "OLD-PRODUCT"
+
+# Approve a product image
+productImages update set status = "approved" where id = 1
+
+# Delete rejected images
+productImages delete where status = "rejected"
+
+# Upsert product - insert or update on SKU conflict (pimdam uses 'title' not 'name')
+products upsert title = "New Product", sku = "NEW-SKU-001", categoryId = 1, active = true on sku do update set title = "Updated Product"

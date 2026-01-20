@@ -51,3 +51,25 @@ products select count(*) group by active
 # =============================================================================
 products select *, rank() over (partition by categoryId order by price desc) as priceRank
 orders select orderNumber, total, sum(total) over (order by createdAt) as runningTotal
+
+# =============================================================================
+# 5.7 Mutations (INSERT, UPDATE, DELETE, UPSERT)
+# =============================================================================
+
+# Insert a new category
+categories insert name = "Accessories", slug = "accessories"
+
+# Insert a new customer
+customers insert name = "John Doe", email = "john@example.com"
+
+# Update product price
+products update set price = 29.99 where sku = "WIDGET-001"
+
+# Deactivate out-of-stock products
+products update set active = false where id = 5
+
+# Delete cancelled orders
+orders delete where status = "cancelled"
+
+# Upsert product - insert or update on SKU conflict
+products upsert name = "New Widget", sku = "WIDGET-NEW", price = 19.99, categoryId = 1, active = true on sku do update set price = 19.99

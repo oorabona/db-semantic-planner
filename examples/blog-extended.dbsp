@@ -56,3 +56,25 @@ authors where active = true include posts where published = true include comment
 # =============================================================================
 posts order by viewCount desc
 posts order by viewCount desc limit 3
+
+# =============================================================================
+# 3.7 Mutations (INSERT, UPDATE, DELETE, UPSERT)
+# =============================================================================
+
+# Insert a new category (categories only have id, name, parentId)
+categories insert name = "DevOps"
+
+# Insert a new tag
+tags insert name = "kubernetes", slug = "kubernetes"
+
+# Update a post to be featured
+posts update set featured = true where id = 1
+
+# Update view count (use snake_case column names for mutations)
+posts update set view_count = 5000 where id = 1
+
+# Delete draft posts
+posts delete where published = false
+
+# Upsert author - insert or update on email conflict
+authors upsert name = "Charlie", email = "charlie@blog.com", active = true on email do update set name = "Charlie Updated"

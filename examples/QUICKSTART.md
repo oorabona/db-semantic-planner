@@ -689,6 +689,47 @@ Rows: 6
 (all 6 posts are unique, so all are returned)
 ```
 
+### 2.10 Mutations (INSERT, UPDATE, DELETE, UPSERT)
+
+**Insert a new author:**
+```
+dbsp> authors insert name = "David", email = "david@blog.com"
+```
+```
+[DRY-RUN] INSERT (add ! to execute)
+
+SQL:
+insert into "authors" ("name", "email") values ($1, $2)
+
+Parameters: ["David", "david@blog.com"]
+```
+
+**Update an author's bio:**
+```
+dbsp> authors update set bio = "Tech writer and blogger" where id = 1
+```
+```
+[DRY-RUN] UPDATE (add ! to execute)
+
+SQL:
+update "authors" set "bio" = $1 where "id" = $2
+
+Parameters: ["Tech writer and blogger", 1]
+```
+
+**Upsert - insert or update on email conflict:**
+```
+dbsp> authors upsert name = "Alice", email = "alice@blog.com" on email do update set name = "Alice Updated"
+```
+```
+[DRY-RUN] UPSERT (add ! to execute)
+
+SQL:
+insert into "authors" ("name", "email") values ($1, $2) on conflict ("email") do update set "name" = $3
+
+Parameters: ["Alice", "alice@blog.com", "Alice Updated"]
+```
+
 ---
 
 ## Chapter 3: Blog-Extended Schema
@@ -965,6 +1006,47 @@ dbsp> posts order by view_count desc limit 3
 3 rows
 ```
 
+### 3.7 Mutations (INSERT, UPDATE, DELETE, UPSERT)
+
+**Insert a new category:**
+```
+dbsp> categories insert name = "DevOps"
+```
+```
+[DRY-RUN] INSERT (add ! to execute)
+
+SQL:
+insert into "categories" ("name") values ($1)
+
+Parameters: ["DevOps"]
+```
+
+**Update a post to be featured:**
+```
+dbsp> posts update set featured = true where id = 1
+```
+```
+[DRY-RUN] UPDATE (add ! to execute)
+
+SQL:
+update "posts" set "featured" = $1 where "id" = $2
+
+Parameters: [true, 1]
+```
+
+**Upsert author - insert or update on email conflict:**
+```
+dbsp> authors upsert name = "Charlie", email = "charlie@blog.com", active = true on email do update set name = "Charlie Updated"
+```
+```
+[DRY-RUN] UPSERT (add ! to execute)
+
+SQL:
+insert into "authors" ("name", "email", "active") values ($1, $2, $3) on conflict ("email") do update set "name" = $4
+
+Parameters: ["Charlie", "charlie@blog.com", true, "Charlie Updated"]
+```
+
 ---
 
 ## Chapter 4: Scheduling Schema (PostgreSQL Ranges)
@@ -1163,6 +1245,47 @@ dbsp> rooms include room_bookings where booking_period overlaps [2024-01-22,2024
 │  4 │ Training Room        │       50 │ [{booked_by:"Eve",booking_period:"[2024-01-22,...)"}]     │
 └────┴──────────────────────┴──────────┴───────────────────────────────────────────────────────────┘
 2 rows (with non-empty bookings)
+```
+
+### 4.6 Mutations (INSERT, UPDATE, DELETE, UPSERT)
+
+**Insert a new room:**
+```
+dbsp> rooms insert name = "Board Room", capacity = 20
+```
+```
+[DRY-RUN] INSERT (add ! to execute)
+
+SQL:
+insert into "rooms" ("name", "capacity") values ($1, $2)
+
+Parameters: ["Board Room", 20]
+```
+
+**Update room capacity:**
+```
+dbsp> rooms update set capacity = 25 where name = "Conference Room A"
+```
+```
+[DRY-RUN] UPDATE (add ! to execute)
+
+SQL:
+update "rooms" set "capacity" = $1 where "name" = $2
+
+Parameters: [25, "Conference Room A"]
+```
+
+**Upsert room - insert or update on name conflict:**
+```
+dbsp> rooms upsert name = "Meeting Room", capacity = 10 on name do update set capacity = 12
+```
+```
+[DRY-RUN] UPSERT (add ! to execute)
+
+SQL:
+insert into "rooms" ("name", "capacity") values ($1, $2) on conflict ("name") do update set "capacity" = $3
+
+Parameters: ["Meeting Room", 10, 12]
 ```
 
 ---
@@ -1424,6 +1547,47 @@ dbsp> orders select order_number, total, sum(total) over (order by created_at) a
 6 rows
 ```
 
+### 5.7 Mutations (INSERT, UPDATE, DELETE, UPSERT)
+
+**Insert a new category:**
+```
+dbsp> categories insert name = "Accessories", slug = "accessories"
+```
+```
+[DRY-RUN] INSERT (add ! to execute)
+
+SQL:
+insert into "categories" ("name", "slug") values ($1, $2)
+
+Parameters: ["Accessories", "accessories"]
+```
+
+**Update product price:**
+```
+dbsp> products update set price = 29.99 where sku = "WIDGET-001"
+```
+```
+[DRY-RUN] UPDATE (add ! to execute)
+
+SQL:
+update "products" set "price" = $1 where "sku" = $2
+
+Parameters: [29.99, "WIDGET-001"]
+```
+
+**Upsert product - insert or update on SKU conflict:**
+```
+dbsp> products upsert name = "New Widget", sku = "WIDGET-NEW", price = 19.99, categoryId = 1, active = true on sku do update set price = 19.99
+```
+```
+[DRY-RUN] UPSERT (add ! to execute)
+
+SQL:
+insert into "products" ("name", "sku", "price", "category_id", "active") values ($1, $2, $3, $4, $5) on conflict ("sku") do update set "price" = $6
+
+Parameters: ["New Widget", "WIDGET-NEW", 19.99, 1, true, 19.99]
+```
+
 ---
 
 ## Chapter 6: PIM/DAM Schema (Advanced)
@@ -1653,6 +1817,47 @@ dbsp> categories where parentId is not null include parent
 │ 10 │ Women             │        2 │ Clothing        │
 └────┴───────────────────┴──────────┴─────────────────┘
 8 rows (showing 7)
+```
+
+### 6.7 Mutations (INSERT, UPDATE, DELETE, UPSERT)
+
+**Insert a new category:**
+```
+dbsp> categories insert name = "Accessories", slug = "accessories", active = true
+```
+```
+[DRY-RUN] INSERT (add ! to execute)
+
+SQL:
+insert into "categories" ("name", "slug", "active") values ($1, $2, $3)
+
+Parameters: ["Accessories", "accessories", true]
+```
+
+**Soft delete a product (set deletedAt):**
+```
+dbsp> products update set deletedAt = "2024-12-01T00:00:00Z" where sku = "OLD-PRODUCT"
+```
+```
+[DRY-RUN] UPDATE (add ! to execute)
+
+SQL:
+update "products" set "deleted_at" = $1 where "sku" = $2
+
+Parameters: ["2024-12-01T00:00:00Z", "OLD-PRODUCT"]
+```
+
+**Upsert product - insert or update on SKU conflict:**
+```
+dbsp> products upsert title = "New Product", sku = "NEW-SKU-001", categoryId = 1, active = true on sku do update set title = "Updated Product"
+```
+```
+[DRY-RUN] UPSERT (add ! to execute)
+
+SQL:
+insert into "products" ("title", "sku", "category_id", "active") values ($1, $2, $3, $4) on conflict ("sku") do update set "title" = $5
+
+Parameters: ["New Product", "NEW-SKU-001", 1, true, "Updated Product"]
 ```
 
 ---
