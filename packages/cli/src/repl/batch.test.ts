@@ -52,6 +52,7 @@ function createBatchState(overrides?: Partial<BatchState>): BatchState {
 		execEnabled: false,
 		schemaName: undefined,
 		dbConnection: undefined,
+		explainMode: false,
 		...overrides,
 	};
 }
@@ -204,6 +205,67 @@ describe('processDotCommand', () => {
 
 			expect(result.output).toContain('.import <file>');
 			expect(result.output).toContain('Execute SQL file');
+		});
+
+		it('should include .explain in help text', async () => {
+			const state = createBatchState();
+			const result = await processDotCommand('.help', mockSchema, state);
+
+			expect(result.output).toContain('.explain');
+			expect(result.output).toContain('EXPLAIN');
+		});
+	});
+
+	/**
+	 * SC-15 to SC-17: .explain command tests
+	 */
+	describe('.explain command', () => {
+		it('SC-15: should toggle explain mode on', async () => {
+			// Arrange
+			const state = createBatchState({ explainMode: false });
+
+			// Act
+			const result = await processDotCommand('.explain', mockSchema, state);
+
+			// Assert
+			expect(result.output).toContain('EXPLAIN mode: ON');
+			expect(result.stateChange?.explainMode).toBe(true);
+		});
+
+		it('SC-15: should toggle explain mode off', async () => {
+			// Arrange
+			const state = createBatchState({ explainMode: true });
+
+			// Act
+			const result = await processDotCommand('.explain', mockSchema, state);
+
+			// Assert
+			expect(result.output).toContain('EXPLAIN mode: OFF');
+			expect(result.stateChange?.explainMode).toBe(false);
+		});
+
+		it('should enable with explicit "on" argument', async () => {
+			// Arrange
+			const state = createBatchState({ explainMode: false });
+
+			// Act
+			const result = await processDotCommand('.explain on', mockSchema, state);
+
+			// Assert
+			expect(result.output).toContain('EXPLAIN mode: ON');
+			expect(result.stateChange?.explainMode).toBe(true);
+		});
+
+		it('should disable with explicit "off" argument', async () => {
+			// Arrange
+			const state = createBatchState({ explainMode: true });
+
+			// Act
+			const result = await processDotCommand('.explain off', mockSchema, state);
+
+			// Assert
+			expect(result.output).toContain('EXPLAIN mode: OFF');
+			expect(result.stateChange?.explainMode).toBe(false);
 		});
 	});
 });

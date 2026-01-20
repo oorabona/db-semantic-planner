@@ -49,6 +49,8 @@ export interface BatchState {
 	execEnabled: boolean;
 	schemaName: string | undefined;
 	dbConnection: DbConnection | undefined;
+	/** CLI-MUT: Show EXPLAIN output with query results */
+	explainMode: boolean;
 }
 
 /**
@@ -155,6 +157,7 @@ export async function processDotCommand(
   .relations [table]- Show relations (optionally for a specific table)
   .use [schema]     - Set/clear PostgreSQL schema for multi-tenant
   .exec [on|off]    - Toggle or set execution mode (requires --db)
+  .explain [on|off] - Toggle EXPLAIN output for queries
   .import <file>    - Execute SQL file (DDL, seed data)
   .natural          - Switch to natural query mode
   .sql              - Switch to SQL mode
@@ -227,6 +230,28 @@ export async function processDotCommand(
 				output: 'Switched to SQL mode',
 				stateChange: { mode: 'sql' },
 			};
+
+		case '.explain': {
+			// CLI-MUT: Toggle EXPLAIN mode (SC-15 to SC-17)
+			if (arg === 'on') {
+				return {
+					output: '✓ EXPLAIN mode: ON',
+					stateChange: { explainMode: true },
+				};
+			}
+			if (arg === 'off') {
+				return {
+					output: '✓ EXPLAIN mode: OFF',
+					stateChange: { explainMode: false },
+				};
+			}
+			// Toggle when no argument provided
+			const newMode = !state.explainMode;
+			return {
+				output: `✓ EXPLAIN mode: ${newMode ? 'ON' : 'OFF'}`,
+				stateChange: { explainMode: newMode },
+			};
+		}
 
 		case '.import': {
 			// Import and execute a SQL file
@@ -481,6 +506,7 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 		execEnabled: false,
 		schemaName: undefined,
 		dbConnection: undefined,
+		explainMode: false,
 	};
 
 	// Connect to database if URL provided

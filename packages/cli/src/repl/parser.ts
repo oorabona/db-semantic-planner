@@ -10,6 +10,609 @@
  */
 
 import type { ResolvedSchema } from '@dbsp/core';
+import type {
+	Assignment,
+	MutationType,
+	MutationValue,
+	OnConflictClause,
+	ParsedMutation,
+} from './types.js';
+
+// Re-export mutation types for convenience
+export type {
+	MutationType,
+	MutationValue,
+	Assignment,
+	OnConflictClause,
+	ParsedMutation,
+};
+
+// =============================================================================
+// CLI-MUT: Mutation Constants and Helpers
+// =============================================================================
+
+/**
+ * CLI-MUT: Mutation keywords
+ */
+export const MUTATION_KEYWORDS = [
+	'insert',
+	'update',
+	'delete',
+	'upsert',
+] as const;
+
+/**
+ * CLI-MUT: Check if a token is a mutation keyword
+ */
+export function isMutationKeyword(token: string): token is MutationType {
+	return MUTATION_KEYWORDS.includes(token.toLowerCase() as MutationType);
+}
+
+/**
+ * CLI-MUT: Parse a value token into MutationValue
+ * Handles: strings, numbers, booleans, null, JSON, function calls
+ */
+export function parseMutationValue(raw: string): MutationValue {
+	const trimmed = raw.trim();
+
+	// null
+	if (trimmed.toLowerCase() === 'null') {
+		return { type: 'null', raw, value: null };
+	}
+
+	// boolean
+	if (trimmed.toLowerCase() === 'true') {
+		return { type: 'boolean', raw, value: true };
+	}
+	if (trimmed.toLowerCase() === 'false') {
+		return { type: 'boolean', raw, value: false };
+	}
+
+	// number (integer or float)
+	if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+		const num = trimmed.includes('.')
+			? parseFloat(trimmed)
+			: parseInt(trimmed, 10);
+		return { type: 'number', raw, value: num };
+	}
+
+	// function call (e.g., now(), uuid_generate_v4())
+	if (/^[a-z_][a-z0-9_]*\([^)]*\)$/i.test(trimmed)) {
+		return { type: 'function', raw, value: trimmed };
+	}
+
+	// JSON object or array (starts with { or [)
+	if (
+		(trimmed.startsWith('{') || trimmed.startsWith('[')) &&
+		(trimmed.endsWith('}') || trimmed.endsWith(']'))
+	) {
+		try {
+			const parsed = JSON.parse(trimmed);
+			return { type: 'json', raw, value: parsed };
+		} catch {
+			// Not valid JSON, treat as string
+			return { type: 'string', raw, value: trimmed };
+		}
+	}
+
+	// String (already unquoted by tokenizer, or raw value)
+	return { type: 'string', raw, value: trimmed };
+}
+
+/**
+ * CLI-MUT: Parse a single assignment (column = value)
+ * Returns the assignment and the next token index
+ */
+export function parseAssignment(
+	tokens: string[],
+	startIndex: number,
+): { assignment: Assignment; nextIndex: number } {
+	const column = tokens[startIndex];
+	if (!column) {
+		throw new ParseError('Expected column name', startIndex);
+	}
+
+	// Expect '='
+	const eqSign = tokens[startIndex + 1];
+	if (eqSign !== '=') {
+		throw new ParseError(
+			`Expected "=" after column "${column}", got "${eqSign ?? 'end of input'}"`,
+			startIndex + 1,
+		);
+	}
+
+	// Get value
+	const valueToken = tokens[startIndex + 2];
+	if (valueToken === undefined) {
+		throw new ParseError(`Expected value after "${column} ="`, startIndex + 2);
+	}
+
+	const value = parseMutationValue(valueToken);
+
+	return {
+		assignment: { column, value },
+		nextIndex: startIndex + 3,
+	};
+}
+
+/**
+ * CLI-MUT: Parse multiple assignments separated by commas
+ * Stops when encountering a keyword (where, on, !)
+ */
+export function parseAssignments(
+	tokens: string[],
+	startIndex: number,
+): { assignments: Assignment[]; nextIndex: number } {
+	const assignments: Assignment[] = [];
+	let i = startIndex;
+
+	// Keywords that end assignment parsing
+	const stopKeywords = ['where', 'on', 'set', '!'];
+
+	while (i < tokens.length) {
+		const token = tokens[i]?.toLowerCase();
+
+		// Stop on keywords
+		if (token && stopKeywords.includes(token)) {
+			break;
+		}
+
+		// Stop on '!' at end
+		if (tokens[i] === '!') {
+			break;
+		}
+
+		// Parse assignment
+		const { assignment, nextIndex } = parseAssignment(tokens, i);
+		assignments.push(assignment);
+		i = nextIndex;
+
+		// Check for comma (skip it) or stop keyword
+		if (tokens[i] === ',') {
+			i++;
+		} else {
+			const nextToken = tokens[i]?.toLowerCase();
+			if (nextToken && stopKeywords.includes(nextToken)) {
+				break;
+			}
+			// If next token is not a comma or stop keyword, stop
+			// (allows for 'users insert name = "Alice" !' pattern)
+			if (i < tokens.length && tokens[i] !== '!') {
+				// Check if it looks like another column assignment
+				if (tokens[i + 1] !== '=') {
+					break;
+				}
+			}
+		}
+	}
+
+	return { assignments, nextIndex: i };
+}
+
+/**
+ * CLI-MUT: Validate column exists in table schema
+ */
+export function validateColumn(
+	column: string,
+	table: string,
+	schema: ResolvedSchema,
+): void {
+	const tableSchema = schema.tables[table];
+	if (!tableSchema) {
+		throw new ParseError(`Unknown table: "${table}"`);
+	}
+	if (!(column in tableSchema)) {
+		const columns = Object.keys(tableSchema);
+		const suggestion = columns.find(
+			(c) =>
+				c.toLowerCase() === column.toLowerCase() ||
+				c.toLowerCase().startsWith(column.toLowerCase()),
+		);
+		throw new ParseError(
+			`Column "${column}" does not exist in table "${table}"${suggestion ? `. Did you mean "${suggestion}"?` : ''}`,
+		);
+	}
+}
+
+/**
+ * CLI-MUT: Parse INSERT mutation
+ * Syntax: users insert name = "Alice", email = "a@e.com" [!]
+ */
+export function parseInsert(
+	tokens: string[],
+	table: string,
+	startIndex: number,
+	schema: ResolvedSchema,
+): ParsedMutation {
+	// Skip 'insert' keyword
+	let i = startIndex;
+
+	// Parse assignments
+	const { assignments, nextIndex } = parseAssignments(tokens, i);
+	i = nextIndex;
+
+	if (assignments.length === 0) {
+		throw new ParseError(
+			'INSERT requires at least one column assignment (e.g., name = "value")',
+			i,
+		);
+	}
+
+	// Validate all columns exist in table
+	for (const assignment of assignments) {
+		validateColumn(assignment.column, table, schema);
+	}
+
+	// Check for execute immediate flag
+	const executeImmediate = tokens[i] === '!';
+	if (executeImmediate) {
+		i++;
+	}
+
+	return {
+		type: 'insert',
+		table,
+		assignments,
+		executeImmediate,
+	};
+}
+
+/**
+ * CLI-MUT: Parse UPDATE mutation
+ * Syntax: users update set name = "Bob", active = false where id = 1 [!]
+ */
+export function parseUpdate(
+	tokens: string[],
+	table: string,
+	startIndex: number,
+	schema: ResolvedSchema,
+): ParsedMutation {
+	let i = startIndex;
+
+	// Expect 'set' keyword
+	const setKeyword = tokens[i]?.toLowerCase();
+	if (setKeyword !== 'set') {
+		throw new ParseError(
+			`UPDATE requires SET keyword (e.g., users update set name = "value")`,
+			i,
+		);
+	}
+	i++;
+
+	// Parse assignments
+	const { assignments, nextIndex } = parseAssignments(tokens, i);
+	i = nextIndex;
+
+	if (assignments.length === 0) {
+		throw new ParseError(
+			'UPDATE SET requires at least one column assignment',
+			i,
+		);
+	}
+
+	// Validate all columns exist in table
+	for (const assignment of assignments) {
+		validateColumn(assignment.column, table, schema);
+	}
+
+	// Parse optional WHERE clause
+	let where: WhereClause[] | undefined;
+	const whereKeyword = tokens[i]?.toLowerCase();
+	if (whereKeyword === 'where') {
+		i++;
+		where = [];
+		while (i < tokens.length) {
+			// Stop on ! or end
+			if (tokens[i] === '!') break;
+
+			const { clause, nextIndex: nextI } = parseWhereCondition(tokens, i);
+			where.push(clause);
+			i = nextI;
+
+			// Check for "and" to continue
+			const nextToken = tokens[i]?.toLowerCase();
+			if (nextToken === 'and') {
+				i++;
+			} else {
+				break;
+			}
+		}
+	}
+
+	// Check for execute immediate flag
+	const executeImmediate = tokens[i] === '!';
+	if (executeImmediate) {
+		i++;
+	}
+
+	// Safety: require WHERE clause unless ! is used
+	if (!where && !executeImmediate) {
+		throw new ParseError(
+			'UPDATE without WHERE clause requires ! suffix (e.g., users update set active = false !)',
+		);
+	}
+
+	// Build result - use conditional property to satisfy exactOptionalPropertyTypes
+	const result: ParsedMutation = {
+		type: 'update',
+		table,
+		assignments,
+		executeImmediate,
+	};
+	if (where !== undefined) {
+		result.where = where;
+	}
+	return result;
+}
+
+/**
+ * CLI-MUT: Parse DELETE mutation
+ * Syntax: users delete where id = 1 [!]
+ */
+export function parseDelete(
+	tokens: string[],
+	table: string,
+	startIndex: number,
+	_schema: ResolvedSchema,
+): ParsedMutation {
+	let i = startIndex;
+
+	// Parse WHERE clause (required for safety unless using !)
+	let where: WhereClause[] | undefined;
+	const whereKeyword = tokens[i]?.toLowerCase();
+
+	if (whereKeyword === 'where') {
+		i++;
+		where = [];
+		while (i < tokens.length) {
+			// Stop on ! or end
+			if (tokens[i] === '!') break;
+
+			const { clause, nextIndex: nextI } = parseWhereCondition(tokens, i);
+			where.push(clause);
+			i = nextI;
+
+			// Check for "and" to continue
+			const nextToken = tokens[i]?.toLowerCase();
+			if (nextToken === 'and') {
+				i++;
+			} else {
+				break;
+			}
+		}
+	} else if (tokens[i] !== '!' && tokens[i] !== undefined) {
+		// Something other than WHERE or ! - error
+		throw new ParseError(
+			`DELETE requires WHERE clause (e.g., users delete where id = 1). Got "${tokens[i]}"`,
+			i,
+		);
+	}
+
+	// If no WHERE and no !, that's an error
+	if (!where && tokens[i] !== '!') {
+		throw new ParseError(
+			'DELETE without WHERE is not allowed. Use "users delete where true !" to delete all.',
+		);
+	}
+
+	// Check for execute immediate flag
+	const executeImmediate = tokens[i] === '!';
+	if (executeImmediate) {
+		i++;
+	}
+
+	// Build result - use conditional property to satisfy exactOptionalPropertyTypes
+	const result: ParsedMutation = {
+		type: 'delete',
+		table,
+		executeImmediate,
+	};
+	if (where !== undefined) {
+		result.where = where;
+	}
+	return result;
+}
+
+/**
+ * CLI-MUT Block 4: Parse UPSERT mutation
+ * Syntax: users upsert email = "a@e.com", name = "Alice" on email do nothing
+ *         users upsert email = "a@e.com", name = "Alice" on email do update set name = excluded.name
+ *         orders upsert user_id = 1, product_id = 2 on (user_id, product_id) do update set qty = excluded.qty
+ */
+export function parseUpsert(
+	tokens: string[],
+	table: string,
+	startIndex: number,
+	schema: ResolvedSchema,
+): ParsedMutation {
+	let i = startIndex;
+
+	// Parse assignments (same as INSERT)
+	const { assignments, nextIndex } = parseAssignments(tokens, i);
+	i = nextIndex;
+
+	if (assignments.length === 0) {
+		throw new ParseError('UPSERT requires at least one column assignment', i);
+	}
+
+	// Validate all columns exist in table
+	for (const assignment of assignments) {
+		validateColumn(assignment.column, table, schema);
+	}
+
+	// Expect 'on' keyword
+	const onKeyword = tokens[i]?.toLowerCase();
+	if (onKeyword !== 'on') {
+		throw new ParseError(
+			'UPSERT requires ON conflict clause (e.g., on email do nothing)',
+			i,
+		);
+	}
+	i++;
+
+	// Parse conflict columns - either single column or (col1, col2)
+	const conflictColumns: string[] = [];
+	if (tokens[i] === '(') {
+		i++; // Skip opening paren
+		while (i < tokens.length && tokens[i] !== ')') {
+			const col = tokens[i];
+			if (col && col !== ',') {
+				conflictColumns.push(col);
+			}
+			i++;
+		}
+		if (tokens[i] !== ')') {
+			throw new ParseError('Expected ) to close conflict columns', i);
+		}
+		i++; // Skip closing paren
+	} else {
+		// Single column
+		const col = tokens[i];
+		if (!col) {
+			throw new ParseError('Expected conflict column after ON', i);
+		}
+		conflictColumns.push(col);
+		i++;
+	}
+
+	// Validate conflict columns
+	for (const col of conflictColumns) {
+		validateColumn(col, table, schema);
+	}
+
+	// Expect 'do' keyword
+	const doKeyword = tokens[i]?.toLowerCase();
+	if (doKeyword !== 'do') {
+		throw new ParseError(
+			'UPSERT requires DO action (e.g., do nothing, do update)',
+			i,
+		);
+	}
+	i++;
+
+	// Parse action: 'nothing' or 'update'
+	const actionKeyword = tokens[i]?.toLowerCase();
+	let onConflict: OnConflictClause;
+
+	if (actionKeyword === 'nothing') {
+		i++;
+		onConflict = { columns: conflictColumns, action: 'nothing' };
+	} else if (actionKeyword === 'update') {
+		i++;
+		// Expect 'set' keyword
+		const setKeyword = tokens[i]?.toLowerCase();
+		if (setKeyword !== 'set') {
+			throw new ParseError(
+				'DO UPDATE requires SET keyword (e.g., do update set name = excluded.name)',
+				i,
+			);
+		}
+		i++;
+
+		// Parse update assignments (can reference excluded.*)
+		const updateAssignments: Assignment[] = [];
+		while (i < tokens.length) {
+			// Stop on ! or end
+			if (tokens[i] === '!') break;
+
+			const col = tokens[i];
+			if (!col) break;
+
+			// Check for column name (might start new assignment or be continuation)
+			const eqSign = tokens[i + 1];
+			if (eqSign !== '=') {
+				break; // Not an assignment, end of SET clause
+			}
+
+			const valueToken = tokens[i + 2];
+			if (valueToken === undefined) {
+				throw new ParseError(`Expected value after "${col} ="`, i + 2);
+			}
+
+			const value = parseMutationValue(valueToken);
+			updateAssignments.push({ column: col, value });
+			i += 3;
+
+			// Check for comma to continue
+			if (tokens[i] === ',') {
+				i++;
+			} else {
+				break;
+			}
+		}
+
+		if (updateAssignments.length === 0) {
+			throw new ParseError('DO UPDATE SET requires at least one assignment', i);
+		}
+
+		onConflict = {
+			columns: conflictColumns,
+			action: 'update',
+			updateAssignments,
+		};
+	} else {
+		throw new ParseError(
+			`Invalid DO action "${actionKeyword}". Expected: nothing, update`,
+			i,
+		);
+	}
+
+	// Check for execute immediate flag
+	const executeImmediate = tokens[i] === '!';
+	if (executeImmediate) {
+		i++;
+	}
+
+	// Build result
+	return {
+		type: 'upsert',
+		table,
+		assignments,
+		onConflict,
+		executeImmediate,
+	};
+}
+
+/**
+ * CLI-MUT: Check if query is a mutation and parse accordingly
+ * Returns ParsedMutation if mutation, null if SELECT query
+ */
+export function parseMutation(
+	input: string,
+	schema: ResolvedSchema,
+): ParsedMutation | null {
+	const tokens = tokenize(input.trim());
+
+	if (tokens.length < 2) {
+		return null;
+	}
+
+	// First token is table name
+	const tableName = tokens[0];
+	if (!tableName || !schema.tables[tableName]) {
+		return null; // Let parseNaturalQuery handle the error
+	}
+
+	// Second token might be a mutation keyword
+	const action = tokens[1]?.toLowerCase();
+	if (!action || !isMutationKeyword(action)) {
+		return null; // Not a mutation
+	}
+
+	// Dispatch to appropriate parser
+	switch (action) {
+		case 'insert':
+			return parseInsert(tokens, tableName, 2, schema);
+		case 'update':
+			return parseUpdate(tokens, tableName, 2, schema);
+		case 'delete':
+			return parseDelete(tokens, tableName, 2, schema);
+		case 'upsert':
+			return parseUpsert(tokens, tableName, 2, schema);
+		default:
+			return null;
+	}
+}
 
 /**
  * CLI-016: Parsed aggregate expression

@@ -7,7 +7,12 @@
 import type { ResolvedSchema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import type { ParsedQuery } from './parser.js';
-import { executeQuery } from './query-executor.js';
+import {
+	executeMutation,
+	executeQuery,
+	formatMutationResult,
+} from './query-executor.js';
+import type { ParsedMutation } from './types.js';
 
 // Simple test schema
 const testSchema: ResolvedSchema = {
@@ -499,6 +504,412 @@ describe('executeQuery - aggregates (CLI-016)', () => {
 
 			expect(result.error).toBeUndefined();
 			expect(result.sql).not.toContain('tenant_');
+		});
+	});
+});
+
+// CLI-MUT: Mutation schema for INSERT/UPDATE/DELETE/UPSERT tests
+const mutationSchema: ResolvedSchema = {
+	tables: {
+		users: {
+			id: { type: 'integer', primaryKey: true },
+			name: { type: 'string', nullable: false },
+			email: { type: 'string', nullable: false, unique: true },
+			active: { type: 'boolean', default: 'true' },
+		},
+		orders: {
+			id: { type: 'integer', primaryKey: true },
+			user_id: { type: 'integer', references: { table: 'users' } },
+			product_id: { type: 'integer' },
+			quantity: { type: 'integer', default: '1' },
+		},
+	},
+	relations: {},
+	hints: {},
+	indexes: {},
+	conventions: {
+		fkPattern: '{singular}Id',
+		pluralize: true,
+		timestamps: ['createdAt', 'updatedAt'],
+		fkAutoIndex: true,
+	},
+};
+
+describe('executeMutation (CLI-MUT)', () => {
+	describe('INSERT', () => {
+		it('should generate INSERT SQL with values', () => {
+			// Arrange
+			const mutation: ParsedMutation = {
+				type: 'insert',
+				table: 'users',
+				assignments: [
+					{
+						column: 'name',
+						value: { type: 'string', raw: 'Alice', value: 'Alice' },
+					},
+					{
+						column: 'email',
+						value: {
+							type: 'string',
+							raw: 'alice@example.com',
+							value: 'alice@example.com',
+						},
+					},
+				],
+				executeImmediate: false,
+			};
+
+			// Act
+			const result = executeMutation(mutation, mutationSchema);
+
+			// Assert
+			expect(result.error).toBeUndefined();
+			expect(result.type).toBe('insert');
+			expect(result.dryRun).toBe(true);
+			expect(result.sql.toLowerCase()).toContain('insert into');
+			expect(result.sql.toLowerCase()).toContain('users');
+			expect(result.params).toContain('Alice');
+			expect(result.params).toContain('alice@example.com');
+		});
+
+		it('should set dryRun=false when executeImmediate is true', () => {
+			// Arrange
+			const mutation: ParsedMutation = {
+				type: 'insert',
+				table: 'users',
+				assignments: [
+					{
+						column: 'name',
+						value: { type: 'string', raw: 'Bob', value: 'Bob' },
+					},
+				],
+				executeImmediate: true,
+			};
+
+			// Act
+			const result = executeMutation(mutation, mutationSchema);
+
+			// Assert
+			expect(result.dryRun).toBe(false);
+		});
+
+		it('should return error for INSERT without assignments', () => {
+			// Arrange
+			const mutation: ParsedMutation = {
+				type: 'insert',
+				table: 'users',
+				assignments: [],
+				executeImmediate: false,
+			};
+
+			// Act
+			const result = executeMutation(mutation, mutationSchema);
+
+			// Assert
+			expect(result.error).toContain('INSERT requires at least one assignment');
+		});
+	});
+
+	describe('UPDATE', () => {
+		it('should generate UPDATE SQL with SET and WHERE', () => {
+			// Arrange
+			const mutation: ParsedMutation = {
+				type: 'update',
+				table: 'users',
+				assignments: [
+					{
+						column: 'active',
+						value: { type: 'boolean', raw: 'false', value: false },
+					},
+				],
+				where: [{ column: 'id', operator: '=', value: '1' }],
+				executeImmediate: false,
+			};
+
+			// Act
+			const result = executeMutation(mutation, mutationSchema);
+
+			// Assert
+			expect(result.error).toBeUndefined();
+			expect(result.type).toBe('update');
+			expect(result.sql.toLowerCase()).toContain('update');
+			expect(result.sql.toLowerCase()).toContain('users');
+			expect(result.sql.toLowerCase()).toContain('set');
+			expect(result.sql.toLowerCase()).toContain('where');
+		});
+
+		it('should return error for UPDATE without WHERE', () => {
+			// Arrange
+			const mutation: ParsedMutation = {
+				type: 'update',
+				table: 'users',
+				assignments: [
+					{
+						column: 'active',
+						value: { type: 'boolean', raw: 'false', value: false },
+					},
+				],
+				executeImmediate: false,
+			};
+
+			// Act
+			const result = executeMutation(mutation, mutationSchema);
+
+			// Assert
+			expect(result.error).toContain('UPDATE requires WHERE clause');
+		});
+
+		it('should return error for UPDATE without SET assignments', () => {
+			// Arrange
+			const mutation: ParsedMutation = {
+				type: 'update',
+				table: 'users',
+				assignments: [],
+				where: [{ column: 'id', operator: '=', value: '1' }],
+				executeImmediate: false,
+			};
+
+			// Act
+			const result = executeMutation(mutation, mutationSchema);
+
+			// Assert
+			expect(result.error).toContain(
+				'UPDATE requires at least one SET assignment',
+			);
+		});
+	});
+
+	describe('DELETE', () => {
+		it('should generate DELETE SQL with WHERE', () => {
+			// Arrange
+			const mutation: ParsedMutation = {
+				type: 'delete',
+				table: 'users',
+				where: [{ column: 'id', operator: '=', value: '1' }],
+				executeImmediate: false,
+			};
+
+			// Act
+			const result = executeMutation(mutation, mutationSchema);
+
+			// Assert
+			expect(result.error).toBeUndefined();
+			expect(result.type).toBe('delete');
+			expect(result.sql.toLowerCase()).toContain('delete from');
+			expect(result.sql.toLowerCase()).toContain('users');
+			expect(result.sql.toLowerCase()).toContain('where');
+		});
+
+		it('should return error for DELETE without WHERE', () => {
+			// Arrange
+			const mutation: ParsedMutation = {
+				type: 'delete',
+				table: 'users',
+				executeImmediate: false,
+			};
+
+			// Act
+			const result = executeMutation(mutation, mutationSchema);
+
+			// Assert
+			expect(result.error).toContain('DELETE requires WHERE clause');
+		});
+	});
+
+	describe('UPSERT', () => {
+		it('should generate UPSERT SQL with ON CONFLICT DO NOTHING', () => {
+			// Arrange
+			const mutation: ParsedMutation = {
+				type: 'upsert',
+				table: 'users',
+				assignments: [
+					{
+						column: 'name',
+						value: { type: 'string', raw: 'Alice', value: 'Alice' },
+					},
+					{
+						column: 'email',
+						value: {
+							type: 'string',
+							raw: 'alice@test.com',
+							value: 'alice@test.com',
+						},
+					},
+				],
+				onConflict: {
+					columns: ['email'],
+					action: 'nothing',
+				},
+				executeImmediate: false,
+			};
+
+			// Act
+			const result = executeMutation(mutation, mutationSchema);
+
+			// Assert
+			expect(result.error).toBeUndefined();
+			expect(result.type).toBe('upsert');
+			expect(result.sql.toLowerCase()).toContain('insert into');
+			expect(result.sql.toLowerCase()).toContain('on conflict');
+			expect(result.sql.toLowerCase()).toContain('do nothing');
+		});
+
+		it('should generate UPSERT SQL with ON CONFLICT DO UPDATE', () => {
+			// Arrange
+			const mutation: ParsedMutation = {
+				type: 'upsert',
+				table: 'users',
+				assignments: [
+					{
+						column: 'name',
+						value: { type: 'string', raw: 'Alice', value: 'Alice' },
+					},
+					{
+						column: 'email',
+						value: {
+							type: 'string',
+							raw: 'alice@test.com',
+							value: 'alice@test.com',
+						},
+					},
+				],
+				onConflict: {
+					columns: ['email'],
+					action: 'update',
+					updateAssignments: [
+						{
+							column: 'name',
+							value: {
+								type: 'string',
+								raw: 'Alice Updated',
+								value: 'Alice Updated',
+							},
+						},
+					],
+				},
+				executeImmediate: false,
+			};
+
+			// Act
+			const result = executeMutation(mutation, mutationSchema);
+
+			// Assert
+			expect(result.error).toBeUndefined();
+			expect(result.type).toBe('upsert');
+			expect(result.sql.toLowerCase()).toContain('insert into');
+			expect(result.sql.toLowerCase()).toContain('on conflict');
+			expect(result.sql.toLowerCase()).toContain('do update');
+		});
+
+		it('should return error for UPSERT without ON CONFLICT', () => {
+			// Arrange
+			const mutation: ParsedMutation = {
+				type: 'upsert',
+				table: 'users',
+				assignments: [
+					{
+						column: 'name',
+						value: { type: 'string', raw: 'Alice', value: 'Alice' },
+					},
+				],
+				executeImmediate: false,
+			};
+
+			// Act
+			const result = executeMutation(mutation, mutationSchema);
+
+			// Assert
+			expect(result.error).toContain('UPSERT requires ON CONFLICT clause');
+		});
+	});
+
+	describe('formatMutationResult', () => {
+		it('should format dry-run result with SQL and params', () => {
+			// Arrange
+			const result = {
+				type: 'insert' as const,
+				sql: 'INSERT INTO "users" ("name") VALUES ($1)',
+				params: ['Alice'] as readonly unknown[],
+				dryRun: true,
+			};
+
+			// Act
+			const formatted = formatMutationResult(result);
+
+			// Assert
+			expect(formatted).toContain('[DRY-RUN]');
+			expect(formatted).toContain('INSERT');
+			expect(formatted).toContain('add ! to execute');
+			expect(formatted).toContain('INSERT INTO "users"');
+			expect(formatted).toContain('Alice');
+		});
+
+		it('should format executed result differently', () => {
+			// Arrange
+			const result = {
+				type: 'delete' as const,
+				sql: 'DELETE FROM "users" WHERE "id" = $1',
+				params: [1] as readonly unknown[],
+				dryRun: false,
+				rowsAffected: 1,
+			};
+
+			// Act
+			const formatted = formatMutationResult(result);
+
+			// Assert
+			expect(formatted).toContain('[EXECUTED]');
+			expect(formatted).toContain('DELETE');
+			expect(formatted).toContain('Rows affected: 1');
+		});
+
+		it('should format error result', () => {
+			// Arrange
+			const result = {
+				type: 'update' as const,
+				sql: '',
+				params: [] as readonly unknown[],
+				dryRun: true,
+				error: 'UPDATE requires WHERE clause',
+			};
+
+			// Act
+			const formatted = formatMutationResult(result);
+
+			// Assert
+			expect(formatted).toContain('Error:');
+			expect(formatted).toContain('UPDATE requires WHERE clause');
+		});
+	});
+
+	describe('SC-14: SQL injection prevention', () => {
+		it('should bind potentially dangerous values as parameters', () => {
+			// Arrange - attempt SQL injection via value
+			const mutation: ParsedMutation = {
+				type: 'insert',
+				table: 'users',
+				assignments: [
+					{
+						column: 'name',
+						value: {
+							type: 'string',
+							raw: "'; DROP TABLE users; --",
+							value: "'; DROP TABLE users; --",
+						},
+					},
+				],
+				executeImmediate: false,
+			};
+
+			// Act
+			const result = executeMutation(mutation, mutationSchema);
+
+			// Assert
+			expect(result.error).toBeUndefined();
+			// The dangerous string should be bound as a parameter, not interpolated
+			expect(result.params).toContain("'; DROP TABLE users; --");
+			// SQL should NOT contain the raw injection attempt
+			expect(result.sql).not.toContain('DROP TABLE');
 		});
 	});
 });
