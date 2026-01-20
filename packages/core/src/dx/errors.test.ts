@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
 	AmbiguousRelationError,
 	ColumnNotFoundError,
+	ErrorCode,
+	Errors,
 	ExecutionError,
 	findClosestMatch,
+	InvalidOperationError,
 	NotFoundError,
 	RelationNotFoundError,
 	TableNotFoundError,
+	UnsafeOperationError,
 } from './errors.js';
 
 describe('AmbiguousRelationError', () => {
@@ -446,5 +450,135 @@ describe('findClosestMatch', () => {
 	it('handles extra character', () => {
 		const result = findClosestMatch('userss', ['users', 'posts']);
 		expect(result).toBe('users');
+	});
+});
+
+// ============================================================================
+// Error Factory & ErrorCode (AUD-011)
+// ============================================================================
+
+describe('ErrorCode', () => {
+	it('has unique codes for each error type', () => {
+		const codes = Object.values(ErrorCode);
+		const uniqueCodes = new Set(codes);
+		expect(codes.length).toBe(uniqueCodes.size);
+	});
+
+	it('follows DBSP_EXXX format', () => {
+		for (const code of Object.values(ErrorCode)) {
+			expect(code).toMatch(/^DBSP_E\d{3}$/);
+		}
+	});
+});
+
+describe('Errors factory', () => {
+	describe('factory functions', () => {
+		it('creates ExecutionError with code', () => {
+			const error = Errors.execution({
+				operation: 'findMany',
+				reason: 'no adapter',
+				fix: 'provide adapter',
+			});
+			expect(error).toBeInstanceOf(ExecutionError);
+			expect(error.code).toBe(ErrorCode.EXECUTION_ERROR);
+			expect(error.operation).toBe('findMany');
+		});
+
+		it('creates NotFoundError with code', () => {
+			const error = Errors.notFound('users', 'Check your filters');
+			expect(error).toBeInstanceOf(NotFoundError);
+			expect(error.code).toBe(ErrorCode.NOT_FOUND);
+			expect(error.table).toBe('users');
+		});
+
+		it('creates AmbiguousRelationError with code', () => {
+			const error = Errors.ambiguousRelation('users', 'posts', [
+				'authoredPosts',
+				'reviewedPosts',
+			]);
+			expect(error).toBeInstanceOf(AmbiguousRelationError);
+			expect(error.code).toBe(ErrorCode.AMBIGUOUS_RELATION);
+			expect(error.options).toEqual(['authoredPosts', 'reviewedPosts']);
+		});
+
+		it('creates RelationNotFoundError with code', () => {
+			const error = Errors.relationNotFound({
+				table: 'users',
+				requested: 'postss',
+				available: ['posts', 'comments'],
+			});
+			expect(error).toBeInstanceOf(RelationNotFoundError);
+			expect(error.code).toBe(ErrorCode.RELATION_NOT_FOUND);
+			expect(error.suggestion).toBe('posts');
+		});
+
+		it('creates InvalidOperationError with code', () => {
+			const error = Errors.invalidOperation('insert', 'no values provided');
+			expect(error).toBeInstanceOf(InvalidOperationError);
+			expect(error.code).toBe(ErrorCode.INVALID_OPERATION);
+		});
+
+		it('creates UnsafeOperationError with code', () => {
+			const error = Errors.unsafeOperation(
+				'update',
+				'Add a WHERE clause or use .all()',
+			);
+			expect(error).toBeInstanceOf(UnsafeOperationError);
+			expect(error.code).toBe(ErrorCode.UNSAFE_OPERATION);
+		});
+
+		it('creates TableNotFoundError with code', () => {
+			const error = Errors.tableNotFound({
+				requested: 'userz',
+				available: ['users', 'posts'],
+			});
+			expect(error).toBeInstanceOf(TableNotFoundError);
+			expect(error.code).toBe(ErrorCode.TABLE_NOT_FOUND);
+			expect(error.suggestion).toBe('users');
+		});
+
+		it('creates ColumnNotFoundError with code', () => {
+			const error = Errors.columnNotFound({
+				table: 'users',
+				requested: 'emial',
+				available: ['email', 'name'],
+			});
+			expect(error).toBeInstanceOf(ColumnNotFoundError);
+			expect(error.code).toBe(ErrorCode.COLUMN_NOT_FOUND);
+			expect(error.suggestion).toBe('email');
+		});
+	});
+
+	describe('type guards', () => {
+		it('isExecution identifies ExecutionError', () => {
+			const error = new ExecutionError({
+				operation: 'x',
+				reason: 'y',
+				fix: 'z',
+			});
+			expect(Errors.isExecution(error)).toBe(true);
+			expect(Errors.isExecution(new Error('test'))).toBe(false);
+		});
+
+		it('isNotFound identifies NotFoundError', () => {
+			expect(Errors.isNotFound(new NotFoundError('users'))).toBe(true);
+			expect(Errors.isNotFound(new Error('test'))).toBe(false);
+		});
+
+		it('isDbspError identifies any DBSP error', () => {
+			expect(Errors.isDbspError(new ExecutionError({ operation: 'x', reason: 'y', fix: 'z' }))).toBe(true);
+			expect(Errors.isDbspError(new NotFoundError('t'))).toBe(true);
+			expect(Errors.isDbspError(new TableNotFoundError({ requested: 'x', available: [] }))).toBe(true);
+			expect(Errors.isDbspError(new Error('generic'))).toBe(false);
+			expect(Errors.isDbspError('string')).toBe(false);
+		});
+
+		it('hasCode identifies errors with DBSP codes', () => {
+			const withCode = Errors.execution({ operation: 'x', reason: 'y', fix: 'z' });
+			const withoutCode = new ExecutionError({ operation: 'x', reason: 'y', fix: 'z' });
+
+			expect(Errors.hasCode(withCode)).toBe(true);
+			expect(Errors.hasCode(withoutCode)).toBe(false);
+		});
 	});
 });

@@ -7,6 +7,10 @@
 export {
 	AmbiguousRelationError,
 	ColumnNotFoundError,
+	// Error codes for programmatic handling
+	ErrorCode,
+	// Error factory (AUD-011)
+	Errors,
 	ExecutionError,
 	// Utility for fuzzy matching suggestions
 	findClosestMatch,
