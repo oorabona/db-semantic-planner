@@ -1,5 +1,5 @@
 /**
- * MockAdapter - Compile-only adapter for testing and REPL without database connection
+ * CompileOnlyAdapter - Compile-only adapter for testing and REPL without database connection
  *
  * DX-031: Provides an adapter that can compile intents to SQL without requiring
  * a real database connection. Useful for:
@@ -58,14 +58,14 @@ import {
 import { validateIdentifier } from './errors.js';
 
 /**
- * Supported dialects for MockAdapter SQL generation.
+ * Supported dialects for CompileOnlyAdapter SQL generation.
  */
 export type MockDialect = 'postgresql' | 'mysql' | 'sqlite' | 'mssql';
 
 /**
- * Options for creating a MockAdapter.
+ * Options for creating a CompileOnlyAdapter.
  */
-export interface MockAdapterOptions {
+export interface CompileOnlyAdapterOptions {
 	/**
 	 * The SQL dialect to use for query compilation.
 	 * Affects SQL syntax (e.g., parameter placeholders, quoting).
@@ -161,7 +161,7 @@ function createMockKysely(dialect: MockDialect): Kysely<unknown> {
 }
 
 /**
- * MockAdapter - A compile-only adapter for SQL generation without database execution.
+ * CompileOnlyAdapter - A compile-only adapter for SQL generation without database execution.
  *
  * Use this adapter when you need to:
  * - Generate SQL without executing it
@@ -171,11 +171,11 @@ function createMockKysely(dialect: MockDialect): Kysely<unknown> {
  * @example
  * ```typescript
  * import { createOrm } from '@dbsp/core';
- * import { createMockAdapter } from '@dbsp/adapter-kysely';
+ * import { createCompileOnlyAdapter } from '@dbsp/adapter-kysely';
  *
  * const orm = createOrm({
  *   model: mySchema,
- *   adapter: createMockAdapter(),
+ *   adapter: createCompileOnlyAdapter(),
  * });
  *
  * // Get SQL without executing
@@ -183,14 +183,14 @@ function createMockKysely(dialect: MockDialect): Kysely<unknown> {
  * console.log(dump.sql); // SELECT * FROM users WHERE active = $1
  * ```
  */
-export class MockAdapter implements Adapter<unknown> {
+export class CompileOnlyAdapter implements Adapter<unknown> {
 	private readonly kysely: Kysely<unknown>;
 	private readonly _schemaName?: string;
 	private readonly _dialect: MockDialect;
 	private readonly _capabilities: AdapterCapabilities;
 	private readonly _aliasIncludedColumns: 'always' | 'onCollision';
 
-	constructor(options: MockAdapterOptions = {}) {
+	constructor(options: CompileOnlyAdapterOptions = {}) {
 		const dialect = options.dialect ?? 'postgresql';
 		this._dialect = dialect;
 
@@ -222,7 +222,7 @@ export class MockAdapter implements Adapter<unknown> {
 	}
 
 	// =========================================================================
-	// Compilation Methods (the main purpose of MockAdapter)
+	// Compilation Methods (the main purpose of CompileOnlyAdapter)
 	// =========================================================================
 
 	compile<T = unknown>(
@@ -231,7 +231,7 @@ export class MockAdapter implements Adapter<unknown> {
 	): CompiledQuery<T> {
 		if (!options?.model) {
 			throw new Error(
-				'MockAdapter.compile requires options.model to be provided',
+				'CompileOnlyAdapter.compile requires options.model to be provided',
 			);
 		}
 
@@ -256,7 +256,7 @@ export class MockAdapter implements Adapter<unknown> {
 	): CompileResultWithIncludes<T> {
 		if (!options?.model) {
 			throw new Error(
-				'MockAdapter.compileWithIncludes requires options.model to be provided',
+				'CompileOnlyAdapter.compileWithIncludes requires options.model to be provided',
 			);
 		}
 
@@ -316,11 +316,15 @@ export class MockAdapter implements Adapter<unknown> {
 	): CompiledQuery {
 		const schemaName = this._schemaName ?? options?.schemaName;
 
+		// Pass model and dialect to enable compileWhere for WHERE conditions
 		const compiled = compileSeparateInclude(
 			info,
 			parentIds,
 			this.kysely,
 			schemaName,
+			options?.model,
+			undefined, // coreCapabilities - derived from dialect in compileWhere
+			this._dialect,
 		);
 
 		return {
@@ -365,7 +369,7 @@ export class MockAdapter implements Adapter<unknown> {
 	async execute<T>(_query: CompiledQuery<T>): Promise<T[]> {
 		throw new ExecutionError({
 			operation: 'execute',
-			reason: 'MockAdapter does not support query execution',
+			reason: 'CompileOnlyAdapter does not support query execution',
 			fix: 'Use createKyselyAdapter() with a real database connection, or use dump() to get SQL without executing',
 		});
 	}
@@ -373,7 +377,7 @@ export class MockAdapter implements Adapter<unknown> {
 	async executeOne<T>(_query: CompiledQuery<T>): Promise<T | null> {
 		throw new ExecutionError({
 			operation: 'executeOne',
-			reason: 'MockAdapter does not support query execution',
+			reason: 'CompileOnlyAdapter does not support query execution',
 			fix: 'Use createKyselyAdapter() with a real database connection, or use dump() to get SQL without executing',
 		});
 	}
@@ -381,7 +385,7 @@ export class MockAdapter implements Adapter<unknown> {
 	async executeOneOrThrow<T>(_query: CompiledQuery<T>): Promise<T> {
 		throw new ExecutionError({
 			operation: 'executeOneOrThrow',
-			reason: 'MockAdapter does not support query execution',
+			reason: 'CompileOnlyAdapter does not support query execution',
 			fix: 'Use createKyselyAdapter() with a real database connection, or use dump() to get SQL without executing',
 		});
 	}
@@ -392,7 +396,7 @@ export class MockAdapter implements Adapter<unknown> {
 	): Promise<T[]> {
 		throw new ExecutionError({
 			operation: 'executeRaw',
-			reason: 'MockAdapter does not support raw SQL execution',
+			reason: 'CompileOnlyAdapter does not support raw SQL execution',
 			fix: 'Use createKyselyAdapter() with a real database connection',
 		});
 	}
@@ -403,7 +407,7 @@ export class MockAdapter implements Adapter<unknown> {
 	): AsyncIterableIterator<T> {
 		throw new ExecutionError({
 			operation: 'stream',
-			reason: 'MockAdapter does not support streaming',
+			reason: 'CompileOnlyAdapter does not support streaming',
 			fix: 'Use createKyselyAdapter() with a real database connection',
 		});
 	}
@@ -413,7 +417,7 @@ export class MockAdapter implements Adapter<unknown> {
 	): Promise<T> {
 		throw new ExecutionError({
 			operation: 'transaction',
-			reason: 'MockAdapter does not support transactions',
+			reason: 'CompileOnlyAdapter does not support transactions',
 			fix: 'Use createKyselyAdapter() with a real database connection',
 		});
 	}
@@ -423,9 +427,9 @@ export class MockAdapter implements Adapter<unknown> {
 	// =========================================================================
 
 	withSchema(schemaName: string): Adapter<unknown> {
-		// Create a new MockAdapter that preserves dialect and aliasing options
+		// Create a new CompileOnlyAdapter that preserves dialect and aliasing options
 		// but scopes to the specified schema using Kysely's native withSchema API
-		return new MockAdapter({
+		return new CompileOnlyAdapter({
 			dialect: this._dialect,
 			schemaName,
 			aliasIncludedColumns: this._aliasIncludedColumns,
@@ -435,7 +439,7 @@ export class MockAdapter implements Adapter<unknown> {
 	async introspect(): Promise<ModelIR> {
 		throw new ExecutionError({
 			operation: 'introspect',
-			reason: 'MockAdapter does not support database introspection',
+			reason: 'CompileOnlyAdapter does not support database introspection',
 			fix: 'Use createKyselyAdapter() with a real database connection, or provide an explicit schema via defineSchema()',
 		});
 	}
@@ -443,7 +447,7 @@ export class MockAdapter implements Adapter<unknown> {
 	generateDDL(_schema: ModelIR): string[] {
 		throw new ExecutionError({
 			operation: 'generateDDL',
-			reason: 'MockAdapter does not support DDL generation',
+			reason: 'CompileOnlyAdapter does not support DDL generation',
 			fix: 'Use createKyselyAdapter() with a real database connection',
 		});
 	}
@@ -470,23 +474,23 @@ export class MockAdapter implements Adapter<unknown> {
 }
 
 /**
- * Creates a MockAdapter for compile-only SQL generation.
+ * Creates a CompileOnlyAdapter for compile-only SQL generation.
  *
  * @param options - Optional configuration
- * @returns A MockAdapter instance
+ * @returns A CompileOnlyAdapter instance
  *
  * @example
  * ```typescript
  * // Basic usage
- * const mockAdapter = createMockAdapter();
+ * const mockAdapter = createCompileOnlyAdapter();
  *
  * // With schema (multi-tenant)
- * const tenantAdapter = createMockAdapter({ schemaName: 'tenant_123' });
+ * const tenantAdapter = createCompileOnlyAdapter({ schemaName: 'tenant_123' });
  *
  * // Use with ORM
  * const orm = createOrm({
  *   model: mySchema,
- *   adapter: createMockAdapter(),
+ *   adapter: createCompileOnlyAdapter(),
  * });
  *
  * // Preview SQL without execution
@@ -494,6 +498,8 @@ export class MockAdapter implements Adapter<unknown> {
  * console.log(dump.sql);
  * ```
  */
-export function createMockAdapter(options?: MockAdapterOptions): MockAdapter {
-	return new MockAdapter(options);
+export function createCompileOnlyAdapter(
+	options?: CompileOnlyAdapterOptions,
+): CompileOnlyAdapter {
+	return new CompileOnlyAdapter(options);
 }

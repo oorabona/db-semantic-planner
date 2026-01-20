@@ -68,6 +68,7 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly schemaName: string | undefined;
 	private readonly _capabilities: AdapterCapabilities;
 	private readonly explicitDialect: DialectName | undefined;
+	private readonly model: ModelIR | undefined;
 
 	/**
 	 * Create a new KyselyAdapter.
@@ -75,16 +76,19 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 	 * @param db - Kysely instance or Transaction
 	 * @param schemaName - Optional schema name for multi-tenant queries
 	 * @param dialect - Optional explicit dialect (recommended for production/minified builds)
+	 * @param model - Optional ModelIR for WHERE compilation in separate includes
 	 */
 	constructor(
 		// biome-ignore lint/suspicious/noExplicitAny: Kysely requires any for generic database schema
 		db: Kysely<any> | Transaction<any>,
 		schemaName?: string,
 		dialect?: DialectName,
+		model?: ModelIR,
 	) {
 		this.db = db;
 		this.schemaName = schemaName;
 		this.explicitDialect = dialect;
+		this.model = model;
 
 		// Get capabilities from dialect and map to AdapterCapabilities
 		// biome-ignore lint/suspicious/noExplicitAny: Cast needed for Kysely type compatibility
@@ -216,12 +220,15 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 	): CompiledQuery {
 		const schemaName = this.schemaName ?? options?.schemaName;
 
-		// The types are now aligned - pass through directly
+		// Pass model and dialect to enable compileWhere for WHERE conditions
 		const compiled = compileSeparateInclude(
 			info,
 			parentIds,
 			this.db,
 			schemaName,
+			this.model ?? options?.model,
+			undefined, // coreCapabilities - derived from dialect in compileWhere
+			this.explicitDialect,
 		);
 
 		return {
@@ -297,6 +304,7 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 				trx,
 				this.schemaName,
 				this.explicitDialect,
+				this.model,
 			);
 			return fn(txAdapter);
 		});
@@ -309,9 +317,14 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 		// Validate schema name
 		validateIdentifier(schemaName, 'schema');
 
-		// Create scoped Kysely and new adapter
+		// Create scoped Kysely and new adapter, preserving model
 		const scopedDb = this.db.withSchema(schemaName);
-		return new KyselyAdapter<DB>(scopedDb, schemaName, this.explicitDialect);
+		return new KyselyAdapter<DB>(
+			scopedDb,
+			schemaName,
+			this.explicitDialect,
+			this.model,
+		);
 	}
 
 	/**
@@ -508,6 +521,7 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
  * @param db - Kysely instance
  * @param schemaName - Optional schema name for multi-tenant queries
  * @param dialect - Optional explicit dialect (recommended for production/minified builds)
+ * @param model - Optional ModelIR for WHERE compilation in separate includes
  * @returns A new KyselyAdapter instance
  *
  * @example
@@ -515,8 +529,8 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
  * // Auto-detection (works in development)
  * const adapter = createKyselyAdapter(db);
  *
- * // Explicit dialect (recommended for production)
- * const adapter = createKyselyAdapter(db, undefined, 'postgresql');
+ * // With model for full WHERE support in separate includes
+ * const adapter = createKyselyAdapter(db, undefined, 'postgresql', model);
  * ```
  */
 export function createKyselyAdapter<DB = unknown>(
@@ -524,6 +538,7 @@ export function createKyselyAdapter<DB = unknown>(
 	db: Kysely<any>,
 	schemaName?: string,
 	dialect?: DialectName,
+	model?: ModelIR,
 ): KyselyAdapter<DB> {
-	return new KyselyAdapter<DB>(db, schemaName, dialect);
+	return new KyselyAdapter<DB>(db, schemaName, dialect, model);
 }

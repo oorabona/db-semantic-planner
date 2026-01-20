@@ -90,7 +90,9 @@ type ComplexWhereHelpers = {
  * Register complex WHERE handlers that require helper functions.
  * Must be called after registerWhereHandlers() with the helper functions from compiler.ts.
  */
-export function registerComplexWhereHandlers(helpers: ComplexWhereHelpers): void {
+export function registerComplexWhereHandlers(
+	helpers: ComplexWhereHelpers,
+): void {
 	const existsHandler = createExistsHandler(
 		helpers.compileExists,
 		helpers.compileJoinedRelationConditions,

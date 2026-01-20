@@ -34,11 +34,11 @@ import type {
 } from 'kysely';
 import { type RawBuilder, sql } from 'kysely';
 import {
-	type CompilerContext,
 	applyCteIncludes,
 	applyJoinIncludes,
 	applyJsonAggIncludes,
 	applyLateralIncludes,
+	type CompilerContext,
 	getExpressionHandler,
 	getWhereHandler,
 	registerComplexWhereHandlers,
@@ -172,6 +172,9 @@ export function compileSeparateInclude(
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
 	kysely: Kysely<any>,
 	schemaName?: string,
+	model?: ModelIR,
+	coreCapabilities?: CoreDialectCapabilities,
+	dialect?: string,
 ): CompiledQuery {
 	if (parentIds.length === 0) {
 		// Return an empty result query - no parent IDs means no includes to fetch
@@ -188,6 +191,49 @@ export function compileSeparateInclude(
 	const tableName = schemaName
 		? `${schemaName}.${info.targetTable}`
 		: info.targetTable;
+
+	// Helper to apply WHERE conditions using compileWhere
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely query builder generic
+	const applyWhereConditions = (query: SelectQueryBuilder<any, any, any>) => {
+		if (!info.where) return query;
+
+		// Create minimal plan/state for compileWhere (simple filters don't use most fields)
+		const minimalPlan: PlanReport = {
+			rootTable: info.targetTable,
+			intent: { type: 'select', from: info.targetTable },
+			decisions: [],
+			warnings: [],
+			ctes: [],
+			metadata: {
+				planningTimeMs: 0,
+				relationsAnalyzed: 0,
+				isAmbiguous: false,
+			},
+		};
+
+		const minimalState: CompilerState = {
+			aliasCounter: 0,
+			tableAliases: new Map([[info.targetTable, info.targetTable]]),
+			parameters: [],
+			joinedFilterRelations: new Map(),
+			joinedIncludeRelations: new Map(),
+			...(coreCapabilities !== undefined && { coreCapabilities }),
+			...(dialect !== undefined && { dialect }),
+		};
+
+		// Use compileWhere for consistent WHERE compilation
+		return query.where((eb) =>
+			compileWhere(
+				eb,
+				info.where as WhereIntent,
+				info.targetTable,
+				model ?? ({ tables: {} } as ModelIR), // Minimal model for simple filters
+				minimalPlan,
+				minimalState,
+				schemaName,
+			),
+		);
+	};
 
 	// M:N (manyToMany) relation with junction table
 	if (info.through && info.throughSourceKey && info.throughTargetKey) {
@@ -215,9 +261,7 @@ export function compileSeparateInclude(
 			);
 
 		// Add additional WHERE conditions from include intent
-		if (info.where) {
-			query = addSimpleWhere(query, info.where, info.targetTable);
-		}
+		query = applyWhereConditions(query);
 
 		return query.compile();
 	}
@@ -245,9 +289,7 @@ export function compileSeparateInclude(
 	}
 
 	// Add additional WHERE conditions from include intent
-	if (info.where) {
-		query = addSimpleWhere(query, info.where, info.targetTable);
-	}
+	query = applyWhereConditions(query);
 
 	return query.compile();
 }
@@ -446,132 +488,6 @@ export function compileRangeExpression(
  * @param coreCapabilities - Optional dialect capabilities for feature validation
  * @param dialect - Optional dialect name for error messages
  */
-function addSimpleWhere(
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-	query: SelectQueryBuilder<any, any, any>,
-	where: WhereIntent,
-	tableName: string,
-	coreCapabilities?: CoreDialectCapabilities,
-	dialect?: string,
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
-): SelectQueryBuilder<any, any, any> {
-	switch (where.kind) {
-		case 'comparison': {
-			const column = `${tableName}.${where.field}`;
-			switch (where.operator) {
-				case 'eq':
-					return query.where(column, '=', where.value);
-				case 'neq':
-					return query.where(column, '!=', where.value);
-				case 'gt':
-					return query.where(column, '>', where.value);
-				case 'gte':
-					return query.where(column, '>=', where.value);
-				case 'lt':
-					return query.where(column, '<', where.value);
-				case 'lte':
-					return query.where(column, '<=', where.value);
-				default:
-					return query;
-			}
-		}
-		case 'like':
-			return where.caseInsensitive
-				? query.where(`${tableName}.${where.field}`, 'ilike', where.pattern)
-				: query.where(`${tableName}.${where.field}`, 'like', where.pattern);
-		case 'in':
-			return query.where(
-				`${tableName}.${where.field}`,
-				'in',
-				where.values as unknown[],
-			);
-		case 'null':
-			return where.operator === 'isNull'
-				? query.where(`${tableName}.${where.field}`, 'is', null)
-				: query.where(`${tableName}.${where.field}`, 'is not', null);
-		case 'range':
-			return query.where(
-				compileRangeExpression(
-					`${tableName}.${where.field}`,
-					where.operator,
-					where.value,
-					coreCapabilities,
-					dialect,
-				),
-			);
-		case 'and':
-			for (const condition of where.conditions) {
-				query = addSimpleWhere(
-					query,
-					condition,
-					tableName,
-					coreCapabilities,
-					dialect,
-				);
-			}
-			return query;
-		case 'or':
-			return query.where((eb) => {
-				const conditions = where.conditions.map((c: WhereIntent) => {
-					switch (c.kind) {
-						case 'comparison': {
-							const col = `${tableName}.${c.field}`;
-							switch (c.operator) {
-								case 'eq':
-									return eb(col, '=', c.value);
-								case 'neq':
-									return eb(col, '!=', c.value);
-								case 'gt':
-									return eb(col, '>', c.value);
-								case 'gte':
-									return eb(col, '>=', c.value);
-								case 'lt':
-									return eb(col, '<', c.value);
-								case 'lte':
-									return eb(col, '<=', c.value);
-								default:
-									return eb.lit(true);
-							}
-						}
-						case 'like': {
-							const col = `${tableName}.${c.field}`;
-							return c.caseInsensitive
-								? eb(col, 'ilike', c.pattern)
-								: eb(col, 'like', c.pattern);
-						}
-						case 'in': {
-							const col = `${tableName}.${c.field}`;
-							if (c.values.length === 0) {
-								return eb.lit(false);
-							}
-							return eb(col, 'in', [...c.values]);
-						}
-						case 'null': {
-							const col = `${tableName}.${c.field}`;
-							return c.operator === 'isNull'
-								? eb(col, 'is', null)
-								: eb(col, 'is not', null);
-						}
-						case 'range': {
-							const col = `${tableName}.${c.field}`;
-							return compileRangeExpression(
-								col,
-								c.operator,
-								c.value,
-								coreCapabilities,
-								dialect,
-							);
-						}
-						default:
-							return eb.lit(true);
-					}
-				});
-				return eb.or(conditions);
-			});
-		default:
-			return query;
-	}
-}
 
 /**
  * Collect separate includes from intent based on planner decisions.
@@ -1073,7 +989,15 @@ function buildSelectWithExpressions(
 
 	// Add expressions
 	for (const expr of select.expressions) {
-		result = addExpressionSelect(result, expr, alias, model, plan, state, schemaName);
+		result = addExpressionSelect(
+			result,
+			expr,
+			alias,
+			model,
+			plan,
+			state,
+			schemaName,
+		);
 	}
 
 	return result;
@@ -1241,7 +1165,15 @@ function compileWhere(
 	}
 	// Add compileWhere as dispatcher for recursive handlers
 	ctx.compileWhere = (_innerCtx, innerEb, innerWhere, innerAlias) =>
-		compileWhere(innerEb, innerWhere, innerAlias, model, plan, state, schemaName);
+		compileWhere(
+			innerEb,
+			innerWhere,
+			innerAlias,
+			model,
+			plan,
+			state,
+			schemaName,
+		);
 
 	// Try registry-based dispatch first
 	const handler = getWhereHandler(where.kind);
@@ -1595,18 +1527,6 @@ function findFilterStrategyDecision(
 /**
  * Find the planner decision for an include relation.
  */
-function findIncludeStrategyDecision(
-	plan: PlanReport,
-	sourceTable: string,
-	relationName: string,
-): PlanDecision | undefined {
-	return plan.decisions.find(
-		(d) =>
-			d.type === 'include-strategy' &&
-			d.context.sourceTable === sourceTable &&
-			d.context.relation === relationName,
-	);
-}
 
 /**
  * Add SELECT columns for included relations that were JOINed.
