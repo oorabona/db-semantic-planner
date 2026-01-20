@@ -67,7 +67,7 @@
 | ID | Issue | Location | Effort | Owner |
 |----|-------|----------|--------|-------|
 | AUD-004 | compiler.ts is 4735 lines | `adapter-kysely/src/compiler.ts` | L | ✅ Phase 4 done |
-| AUD-005 | orm.ts is 2351 lines | `core/src/dx/orm.ts` | M | TBD |
+| AUD-005 | orm.ts is 2351 lines | `core/src/dx/orm.ts` | M | ✅ DONE |
 | ~~AUD-006~~ | ~~Update SKILL.md package references~~ | ✅ RESOLVED (2026-01-20) | S | - |
 | ~~AUD-007~~ | ~~Add CHANGELOG.md~~ | ✅ RESOLVED (2026-01-20) | M | - |
 | ~~AUD-008~~ | ~~Add CONTRIBUTING.md~~ | ✅ RESOLVED (2026-01-20) | M | - |
@@ -106,11 +106,14 @@
 - Benefits: Extensible pattern, better testability, clearer ownership, self-contained handlers
 - Status: ✅ COMPLETE - all include handlers contain full logic
 
-**AUD-005: Extract concerns from orm.ts**
-- QueryBuilderImpl currently handles building, execution, hydration
-- Extract: QueryExecutor, ResultHydrator classes
-- Keep QueryBuilder focused on intent building
-- Effort: M (~4-6h)
+**AUD-005: Extract concerns from orm.ts** ✅ DONE (2026-01-20)
+- QueryBuilderImpl was handling building, execution, hydration
+- Extracted: ResultHydrator class (DX-103 had already created it)
+- Added missing methods: `hydrateJoinIncludes`, `hydrateJsonAggIncludes`
+- Updated orm.ts to use ResultHydrator instead of private methods
+- Removed duplicate hydration methods from orm.ts
+- **Result:** orm.ts reduced from 2317 to 1776 lines (-23%)
+- QueryBuilder now focused on intent building, ResultHydrator handles hydration
 
 **AUD-006: SKILL.md Updates**
 - References `packages/dx` which is now `packages/core/src/dx`

@@ -858,3 +858,23 @@ Kysely's `addColumn().autoIncrement()` uses the IDENTITY approach which is more 
 **When applicable:** Placeholder types for handler helpers that don't currently require any injected dependencies but might in the future.
 
 **Location:** `packages/adapter-kysely/src/compiler/handlers/include/index.ts`
+
+## Refactoring
+
+### Check for Existing Extraction Classes Before Refactoring (2026-01-20)
+
+**Symptoms:** TypeScript errors about missing exports after creating "new" extracted files during a refactoring session.
+
+**Cause:** Previous work (like DX-103) may have already created extraction classes (e.g., ResultHydrator, QueryExecutor) that other files depend on. Creating a new file with the same name but different structure breaks imports.
+
+**Solution:** Before extracting code during refactoring:
+1. Check if extraction target files already exist
+2. If they exist, examine their structure and adapt to it
+3. Add missing methods to existing classes rather than replacing them
+4. Run typecheck immediately after changes to catch import issues
+
+**Pattern:** Work WITH existing code structure. If DX-103 created a class-based ResultHydrator, add methods to that class rather than replacing it with pure functions.
+
+**Prevention:** Always run `git status` and `ls` on target directories before creating new files. Check if the extraction was partially done in a previous story.
+
+**Location:** `packages/core/src/dx/result-hydrator.ts`, `packages/core/src/dx/query-executor.ts`

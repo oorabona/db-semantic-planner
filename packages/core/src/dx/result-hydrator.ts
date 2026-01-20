@@ -10,6 +10,7 @@
 import type { Adapter, SeparateIncludeInfo } from '../adapter.js';
 import type { RecursiveIntent, WhereIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
+import type { PlanReport } from '../planner.js';
 import { planRecursive } from '../planner.js';
 
 import { RelationNotFoundError } from './errors.js';
@@ -121,6 +122,136 @@ export class ResultHydrator<TResult = unknown> {
 						adapter,
 						compileOptions,
 					);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Hydrate JOIN includes by grouping dot-prefixed columns into nested objects.
+	 * E2E-004: JOIN strategy for to-one relations returns columns like "author.id", "author.name".
+	 */
+	hydrateJoinIncludes(results: TResult[], planReport: PlanReport): void {
+		// Find all JOIN include decisions (to-one relations)
+		const joinDecisions = planReport.decisions.filter(
+			(d) => d.type === 'include-strategy' && d.choice === 'join',
+		);
+
+		if (joinDecisions.length === 0) {
+			return;
+		}
+
+		// Get relation names from decisions
+		const joinRelations = joinDecisions
+			.map((d) => d.context?.relation)
+			.filter((r): r is string => typeof r === 'string');
+
+		if (joinRelations.length === 0) {
+			return;
+		}
+
+		// Process each result row
+		for (const row of results) {
+			if (typeof row !== 'object' || row === null) {
+				continue;
+			}
+
+			const record = row as Record<string, unknown>;
+
+			for (const relationName of joinRelations) {
+				const prefix = `${relationName}.`;
+				const nestedObj: Record<string, unknown> = {};
+				let hasValues = false;
+				let allNull = true;
+
+				// Find all keys with this prefix
+				const keysToDelete: string[] = [];
+				for (const key of Object.keys(record)) {
+					if (key.startsWith(prefix)) {
+						const nestedKey = key.slice(prefix.length);
+						nestedObj[nestedKey] = record[key];
+						keysToDelete.push(key);
+						hasValues = true;
+						if (record[key] !== null) {
+							allNull = false;
+						}
+					}
+				}
+
+				// Set the relation property
+				if (hasValues) {
+					// If all values are null, the related entity doesn't exist (LEFT JOIN returned no match)
+					record[relationName] = allNull ? null : nestedObj;
+
+					// Remove the prefixed keys
+					for (const key of keysToDelete) {
+						delete record[key];
+					}
+				}
+			}
+		}
+	}
+
+	/**
+	 * Hydrate json_agg includes by parsing JSON columns and renaming them.
+	 * E2E-004: json_agg strategy returns data as JSON string in *_json columns.
+	 */
+	hydrateJsonAggIncludes(results: TResult[], planReport: PlanReport): void {
+		// Find all json_agg include decisions
+		const jsonAggDecisions = planReport.decisions.filter(
+			(d) => d.type === 'include-strategy' && d.choice === 'json_agg',
+		);
+
+		if (jsonAggDecisions.length === 0) {
+			return;
+		}
+
+		// Get relation names from decisions
+		const jsonAggRelations = jsonAggDecisions
+			.map((d) => d.context?.relation)
+			.filter((r): r is string => typeof r === 'string');
+
+		if (jsonAggRelations.length === 0) {
+			return;
+		}
+
+		// Process each result row
+		for (const row of results) {
+			if (typeof row !== 'object' || row === null) {
+				continue;
+			}
+
+			const record = row as Record<string, unknown>;
+
+			for (const relationName of jsonAggRelations) {
+				const jsonColumnName = `${relationName}_json`;
+
+				// Check if the JSON column exists
+				if (jsonColumnName in record) {
+					const jsonValue = record[jsonColumnName];
+
+					// Parse JSON if it's a string
+					let parsed: unknown;
+					if (typeof jsonValue === 'string') {
+						try {
+							parsed = JSON.parse(jsonValue);
+						} catch {
+							// If parsing fails, use empty array
+							parsed = [];
+						}
+					} else if (Array.isArray(jsonValue)) {
+						// Already an array (some drivers auto-parse)
+						parsed = jsonValue;
+					} else if (jsonValue === null || jsonValue === undefined) {
+						parsed = [];
+					} else {
+						// Unknown format, use as-is
+						parsed = jsonValue;
+					}
+
+					// Set the relation property and remove the JSON column
+					record[relationName] = parsed;
+					delete record[jsonColumnName];
 				}
 			}
 		}
