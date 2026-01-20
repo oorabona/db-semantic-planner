@@ -12,13 +12,18 @@ import type { WhereHandler } from '../../types.js';
  */
 export function createSubqueryHandler(
 	compileSubquery: (
+		// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
 		eb: any,
 		where: WhereSubqueryIntent,
 		alias: string,
+		// biome-ignore lint/suspicious/noExplicitAny: ModelIR generic
 		model: any,
+		// biome-ignore lint/suspicious/noExplicitAny: PlanReport generic
 		plan: any,
+		// biome-ignore lint/suspicious/noExplicitAny: CompilerState generic
 		state: any,
 		schemaName?: string,
+		// biome-ignore lint/suspicious/noExplicitAny: Kysely expression result
 	) => any,
 ): WhereHandler<WhereSubqueryIntent> {
 	return (ctx, eb, intent, alias) => {

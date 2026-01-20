@@ -33,6 +33,9 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | Project | [**Feature Comparison**](COMPARISON.md) | canonical |
 | Project | [MCP Server Brief](briefs/mcp-server.md) | ready |
 | Project | [MCP Server Backlog](../TODO_MCP.md) | ready |
+| CLI | [**CLI Usage Guide**](CLI_USAGE.md) | canonical |
+| Operations | [**Production Deployment**](PRODUCTION.md) | canonical |
+| API | [**API Reference**](api/index.html) | generated |
 | Core | [Core Overview](plans/core-OVERVIEW.md) | draft |
 | Adapter | [Adapter Overview](plans/adapter-OVERVIEW.md) | draft |
 | Experience | [Project Experience](../.claude/skills/project-experience/SKILL.md) | canonical |
@@ -43,7 +46,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 |-------|---------|----------|---------|--------|
 | core | `packages/core` | [Overview](plans/core-OVERVIEW.md) | [TODO](../TODO_CORE.md) | ✅ Complete |
 | adapter | `packages/adapter-kysely` | [Overview](plans/adapter-OVERVIEW.md) | [TODO](../TODO_ADAPTER.md) | ✅ Complete |
-| cli | `packages/cli` | N/A | [TODO](../TODO.md) | ✅ Complete |
+| cli | `packages/cli` | [CLI Usage](CLI_USAGE.md) | [TODO](../TODO.md) | ✅ Complete |
 | mcp-server | `packages/mcp-server` | [Brief](briefs/mcp-server.md) | [TODO](../TODO_MCP.md) | 🟡 Ready |
 
 **Note:** DX layer (ORM API, filters, query builders) is part of `packages/core/src/dx/` since ARCH-001.

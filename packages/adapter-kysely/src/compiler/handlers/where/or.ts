@@ -26,9 +26,8 @@ export const orHandler: WhereHandler<WhereOrIntent> = (
 		throw new Error('orHandler requires ctx.compileWhere dispatcher');
 	}
 
+	const dispatcher = ctx.compileWhere;
 	return eb.or(
-		intent.conditions.map((c: WhereIntent) =>
-			ctx.compileWhere!(ctx, eb, c, alias),
-		),
+		intent.conditions.map((c: WhereIntent) => dispatcher(ctx, eb, c, alias)),
 	);
 };

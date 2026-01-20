@@ -42,10 +42,11 @@ export function registerWhereHandlers(): void {
 }
 
 /**
- * Register complex WHERE handlers that require helper functions.
- * Must be called after registerWhereHandlers() with the helper functions from compiler.ts.
+ * Helper functions for complex WHERE handlers.
+ * Uses `any` for Kysely generics that cannot be typed precisely at this layer.
  */
-export function registerComplexWhereHandlers(helpers: {
+// biome-ignore lint/suspicious/noExplicitAny: Kysely/ModelIR generics cannot be typed precisely
+type ComplexWhereHelpers = {
 	compileExists: (
 		eb: any,
 		where: any,
@@ -83,7 +84,13 @@ export function registerComplexWhereHandlers(helpers: {
 		state: any,
 		schemaName?: string,
 	) => any;
-}): void {
+};
+
+/**
+ * Register complex WHERE handlers that require helper functions.
+ * Must be called after registerWhereHandlers() with the helper functions from compiler.ts.
+ */
+export function registerComplexWhereHandlers(helpers: ComplexWhereHelpers): void {
 	const existsHandler = createExistsHandler(
 		helpers.compileExists,
 		helpers.compileJoinedRelationConditions,

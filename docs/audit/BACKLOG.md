@@ -168,32 +168,36 @@
 
 | ID | Issue | Location | Effort | Owner |
 |----|-------|----------|--------|-------|
-| AUD-009 | Generate API documentation | All packages | L | TBD |
-| AUD-010 | Add CLI usage guide | `docs/` or `packages/cli/README.md` | M | TBD |
-| AUD-011 | Create error message factory | `core/src/dx/errors.ts` | S | TBD |
-| AUD-012 | Document production deployment | `docs/` | M | TBD |
+| ~~AUD-009~~ | ~~Generate API documentation~~ | ✅ RESOLVED (2026-01-20) | L | - |
+| ~~AUD-010~~ | ~~Add CLI usage guide~~ | ✅ RESOLVED (2026-01-20) | M | - |
+| ~~AUD-011~~ | ~~Create error message factory~~ | ✅ RESOLVED (2026-01-20) | S | - |
+| ~~AUD-012~~ | ~~Document production deployment~~ | ✅ RESOLVED (2026-01-20) | M | - |
 | ~~AUD-013~~ | ~~Add SECURITY.md policy~~ | ✅ RESOLVED (2026-01-20) | S | - |
 
 ### Details
 
-**AUD-009: Generated API Docs**
-- Use TypeDoc or similar to generate API reference
-- Useful for library consumers
-- Effort: L (~1-2d for setup + CI)
+**~~AUD-009: Generated API Docs~~** ✅ RESOLVED (2026-01-20)
+- Added TypeDoc to catalog and devDependencies
+- Created `typedoc.json` configuration for core and adapter packages
+- Added `pnpm docs:api` script to generate docs to `docs/api/`
+- CI integration deferred to future work
 
 **AUD-010: CLI Usage Guide**
 - Document REPL commands, batch mode, code generation
 - Effort: M (~3h)
 
-**AUD-011: Error Message Factory**
-- Centralize error construction for consistency
-- Minor improvement, not blocking
-- Effort: S (~1h)
+**~~AUD-011: Error Message Factory~~** ✅ RESOLVED (2026-01-20)
+- Added `ErrorCode` enum with DBSP_E001-E008 codes for programmatic handling
+- Added `Errors` factory with type-safe factory functions + type guards
+- Exports: `Errors.execution()`, `Errors.tableNotFound()`, `Errors.isDbspError()`, etc.
+- Added 14 new tests covering factory and type guards
+- Backwards compatible: existing error classes unchanged
 
-**AUD-012: Production Deployment Docs**
-- Rate limiting, connection pooling, timeout guidance
-- Important for production users
-- Effort: M (~3h)
+**~~AUD-012: Production Deployment Docs~~** ✅ RESOLVED (2026-01-20)
+- Created `docs/PRODUCTION.md` with comprehensive guidance
+- Covers: connection pooling, timeouts, multi-tenant, error handling
+- Also covers: streaming, EXPLAIN, rate limiting, security, health checks
+- Effort: M (~2h)
 
 **AUD-013: Security Policy**
 - SECURITY.md for vulnerability reporting
@@ -219,11 +223,15 @@
 | P0 | 0 | 0h |
 | P1 | 2 (+1 resolved) | ~16h |
 | P2 | 2 (+10 resolved) | ~20h |
-| P3 | 4 (+1 resolved) | ~22h |
+| P3 | 0 (+5 resolved) | ~0h |
 | Quick Wins | 0 (+3 resolved) | ~0h |
-| **Total** | **8 open** | **~58h** |
+| **Total** | **4 open** | **~36h** |
 
 ### Recently Resolved
+- ✅ AUD-009 (2026-01-20) — TypeDoc API documentation setup (pnpm docs:api)
+- ✅ AUD-012 (2026-01-20) — Production deployment guide (docs/PRODUCTION.md)
+- ✅ AUD-011 (2026-01-20) — Error factory with ErrorCode + Errors namespace
+- ✅ AUD-010 (2026-01-20) — CLI usage guide (docs/CLI_USAGE.md)
 - ✅ AUD-013 (2026-01-20) — SECURITY.md policy added
 - ✅ AUD-003, AUD-006, AUD-007, AUD-008 (2026-01-20) — Documentation updates
 - ✅ NAME-001, NAME-002, NAME-003, NAME-004 (2026-01-20) — Ambiguous naming fixed

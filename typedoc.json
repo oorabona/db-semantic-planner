@@ -1,0 +1,44 @@
+{
+	"$schema": "https://typedoc.org/schema.json",
+	"name": "db-semantic-planner",
+	"entryPoints": [
+		"packages/core/src/index.ts",
+		"packages/adapter-kysely/src/index.ts"
+	],
+	"entryPointStrategy": "expand",
+	"out": "docs/api",
+	"readme": "README.md",
+	"includeVersion": true,
+	"excludePrivate": true,
+	"excludeProtected": true,
+	"excludeInternal": true,
+	"excludeExternals": true,
+	"disableSources": false,
+	"navigationLinks": {
+		"Documentation": "https://github.com/your-org/db-semantic-planner/tree/main/docs",
+		"GitHub": "https://github.com/your-org/db-semantic-planner"
+	},
+	"sidebarLinks": {
+		"Quickstart": "./examples/QUICKSTART.md",
+		"CLI Guide": "./docs/CLI_USAGE.md",
+		"Production Guide": "./docs/PRODUCTION.md"
+	},
+	"categorizeByGroup": true,
+	"categoryOrder": [
+		"Core",
+		"Schema",
+		"Query",
+		"Adapter",
+		"Errors",
+		"Types",
+		"*"
+	],
+	"sort": ["source-order", "alphabetical"],
+	"validation": {
+		"notExported": true,
+		"invalidLink": true,
+		"notDocumented": false
+	},
+	"plugin": [],
+	"tsconfig": "packages/core/tsconfig.json"
+}

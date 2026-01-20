@@ -504,3 +504,250 @@ export class ColumnNotFoundError extends Error {
 		Object.setPrototypeOf(this, ColumnNotFoundError.prototype);
 	}
 }
+
+// ============================================================================
+// Error Codes
+// ============================================================================
+
+/**
+ * Error codes for programmatic error handling.
+ *
+ * Use these codes to identify error types without relying on `instanceof` checks,
+ * which is useful for serialization and cross-boundary error handling.
+ *
+ * @example
+ * ```typescript
+ * try {
+ *   await orm.select('users').all();
+ * } catch (error) {
+ *   if (error.code === ErrorCode.EXECUTION_ERROR) {
+ *     // Handle execution error
+ *   }
+ * }
+ * ```
+ */
+export const ErrorCode = {
+	/** Query execution failed (no adapter configured) */
+	EXECUTION_ERROR: 'DBSP_E001',
+	/** No record found (firstOrThrow) */
+	NOT_FOUND: 'DBSP_E002',
+	/** Ambiguous relation detected in strict mode */
+	AMBIGUOUS_RELATION: 'DBSP_E003',
+	/** Relation not found in schema */
+	RELATION_NOT_FOUND: 'DBSP_E004',
+	/** Invalid operation in current context */
+	INVALID_OPERATION: 'DBSP_E005',
+	/** Unsafe operation blocked */
+	UNSAFE_OPERATION: 'DBSP_E006',
+	/** Table not found in schema */
+	TABLE_NOT_FOUND: 'DBSP_E007',
+	/** Column not found on table */
+	COLUMN_NOT_FOUND: 'DBSP_E008',
+} as const;
+
+export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
+
+// ============================================================================
+// Error Factory
+// ============================================================================
+
+/**
+ * Factory functions for creating DBSP errors with consistent structure.
+ *
+ * Using the factory provides several benefits:
+ * - Consistent error creation across the codebase
+ * - Error codes are automatically attached
+ * - Type-safe error construction
+ * - Centralized error message formatting
+ *
+ * @example
+ * ```typescript
+ * import { Errors } from '@dbsp/core';
+ *
+ * // Create errors with factory
+ * throw Errors.tableNotFound({
+ *   requested: 'userz',
+ *   available: ['users', 'posts', 'comments'],
+ * });
+ *
+ * // Check error type
+ * if (Errors.isTableNotFound(error)) {
+ *   console.log(error.suggestion); // 'users'
+ * }
+ * ```
+ */
+export const Errors = {
+	// -------------------------------------------------------------------------
+	// Factory functions
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Create an execution error (no adapter configured).
+	 */
+	execution(opts: {
+		operation: string;
+		reason: string;
+		fix: string;
+	}): ExecutionError & { code: typeof ErrorCode.EXECUTION_ERROR } {
+		const error = new ExecutionError(opts);
+		return Object.assign(error, { code: ErrorCode.EXECUTION_ERROR });
+	},
+
+	/**
+	 * Create a not found error (firstOrThrow returned no results).
+	 */
+	notFound(
+		table: string,
+		hint?: string,
+	): NotFoundError & { code: typeof ErrorCode.NOT_FOUND } {
+		const error = new NotFoundError(table, hint);
+		return Object.assign(error, { code: ErrorCode.NOT_FOUND });
+	},
+
+	/**
+	 * Create an ambiguous relation error.
+	 */
+	ambiguousRelation(
+		sourceTable: string,
+		targetTable: string,
+		options: readonly string[],
+	): AmbiguousRelationError & { code: typeof ErrorCode.AMBIGUOUS_RELATION } {
+		const error = new AmbiguousRelationError(sourceTable, targetTable, options);
+		return Object.assign(error, { code: ErrorCode.AMBIGUOUS_RELATION });
+	},
+
+	/**
+	 * Create a relation not found error.
+	 */
+	relationNotFound(opts: {
+		table: string;
+		requested: string;
+		available: readonly string[];
+	}): RelationNotFoundError & { code: typeof ErrorCode.RELATION_NOT_FOUND } {
+		const error = new RelationNotFoundError(opts);
+		return Object.assign(error, { code: ErrorCode.RELATION_NOT_FOUND });
+	},
+
+	/**
+	 * Create an invalid operation error.
+	 */
+	invalidOperation(
+		operation: string,
+		reason: string,
+	): InvalidOperationError & { code: typeof ErrorCode.INVALID_OPERATION } {
+		const error = new InvalidOperationError(operation, reason);
+		return Object.assign(error, { code: ErrorCode.INVALID_OPERATION });
+	},
+
+	/**
+	 * Create an unsafe operation error.
+	 */
+	unsafeOperation(
+		operation: string,
+		fix: string,
+	): UnsafeOperationError & { code: typeof ErrorCode.UNSAFE_OPERATION } {
+		const error = new UnsafeOperationError(operation, fix);
+		return Object.assign(error, { code: ErrorCode.UNSAFE_OPERATION });
+	},
+
+	/**
+	 * Create a table not found error.
+	 */
+	tableNotFound(opts: {
+		requested: string;
+		available: readonly string[];
+	}): TableNotFoundError & { code: typeof ErrorCode.TABLE_NOT_FOUND } {
+		const error = new TableNotFoundError(opts);
+		return Object.assign(error, { code: ErrorCode.TABLE_NOT_FOUND });
+	},
+
+	/**
+	 * Create a column not found error.
+	 */
+	columnNotFound(opts: {
+		table: string;
+		requested: string;
+		available: readonly string[];
+	}): ColumnNotFoundError & { code: typeof ErrorCode.COLUMN_NOT_FOUND } {
+		const error = new ColumnNotFoundError(opts);
+		return Object.assign(error, { code: ErrorCode.COLUMN_NOT_FOUND });
+	},
+
+	// -------------------------------------------------------------------------
+	// Type guards
+	// -------------------------------------------------------------------------
+
+	/** Check if error is an ExecutionError */
+	isExecution(error: unknown): error is ExecutionError {
+		return error instanceof ExecutionError;
+	},
+
+	/** Check if error is a NotFoundError */
+	isNotFound(error: unknown): error is NotFoundError {
+		return error instanceof NotFoundError;
+	},
+
+	/** Check if error is an AmbiguousRelationError */
+	isAmbiguousRelation(error: unknown): error is AmbiguousRelationError {
+		return error instanceof AmbiguousRelationError;
+	},
+
+	/** Check if error is a RelationNotFoundError */
+	isRelationNotFound(error: unknown): error is RelationNotFoundError {
+		return error instanceof RelationNotFoundError;
+	},
+
+	/** Check if error is an InvalidOperationError */
+	isInvalidOperation(error: unknown): error is InvalidOperationError {
+		return error instanceof InvalidOperationError;
+	},
+
+	/** Check if error is an UnsafeOperationError */
+	isUnsafeOperation(error: unknown): error is UnsafeOperationError {
+		return error instanceof UnsafeOperationError;
+	},
+
+	/** Check if error is a TableNotFoundError */
+	isTableNotFound(error: unknown): error is TableNotFoundError {
+		return error instanceof TableNotFoundError;
+	},
+
+	/** Check if error is a ColumnNotFoundError */
+	isColumnNotFound(error: unknown): error is ColumnNotFoundError {
+		return error instanceof ColumnNotFoundError;
+	},
+
+	/** Check if error is any DBSP error */
+	isDbspError(
+		error: unknown,
+	): error is
+		| ExecutionError
+		| NotFoundError
+		| AmbiguousRelationError
+		| RelationNotFoundError
+		| InvalidOperationError
+		| UnsafeOperationError
+		| TableNotFoundError
+		| ColumnNotFoundError {
+		return (
+			error instanceof ExecutionError ||
+			error instanceof NotFoundError ||
+			error instanceof AmbiguousRelationError ||
+			error instanceof RelationNotFoundError ||
+			error instanceof InvalidOperationError ||
+			error instanceof UnsafeOperationError ||
+			error instanceof TableNotFoundError ||
+			error instanceof ColumnNotFoundError
+		);
+	},
+
+	/** Check if error has a DBSP error code */
+	hasCode(error: unknown): error is Error & { code: ErrorCode } {
+		return (
+			error instanceof Error &&
+			'code' in error &&
+			typeof (error as { code: unknown }).code === 'string' &&
+			(error as { code: string }).code.startsWith('DBSP_E')
+		);
+	},
+} as const;

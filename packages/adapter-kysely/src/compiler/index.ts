@@ -17,6 +17,20 @@ export {
 	registerComplexWhereHandlers,
 	registerWhereHandlers,
 } from './handlers/where/index.js';
+// Helpers
+export {
+	collectCteIncludes,
+	collectJoinIncludes,
+	collectJsonAggIncludes,
+	collectLateralIncludes,
+	findFilterStrategyDecision,
+	findIncludeStrategyDecision,
+	getNextAlias,
+	getTableFromAlias,
+	lookupResolvedRelation,
+	normalizeForeignKey,
+	normalizePrimaryKey,
+} from './helpers.js';
 // Registry
 export {
 	getExpressionHandler,
@@ -38,17 +52,3 @@ export type {
 	WhereDispatcher,
 	WhereHandler,
 } from './types.js';
-// Helpers
-export {
-	collectCteIncludes,
-	collectJoinIncludes,
-	collectJsonAggIncludes,
-	collectLateralIncludes,
-	findFilterStrategyDecision,
-	findIncludeStrategyDecision,
-	getNextAlias,
-	getTableFromAlias,
-	lookupResolvedRelation,
-	normalizeForeignKey,
-	normalizePrimaryKey,
-} from './helpers.js';

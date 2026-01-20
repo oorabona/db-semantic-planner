@@ -13,7 +13,8 @@
 		"lint": "pnpm biome check .",
 		"lint:fix": "pnpm biome check --write .",
 		"typecheck": "pnpm -r typecheck",
-		"dbsp": "pnpm tsx packages/cli/src/index.ts"
+		"dbsp": "pnpm tsx packages/cli/src/index.ts",
+		"docs:api": "typedoc"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",
@@ -26,6 +27,7 @@
 		"pg": "catalog:",
 		"testcontainers": "^11.11.0",
 		"tsx": "catalog:",
+		"typedoc": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"
 	}

@@ -26,9 +26,8 @@ export const andHandler: WhereHandler<WhereAndIntent> = (
 		throw new Error('andHandler requires ctx.compileWhere dispatcher');
 	}
 
+	const dispatcher = ctx.compileWhere;
 	return eb.and(
-		intent.conditions.map((c: WhereIntent) =>
-			ctx.compileWhere!(ctx, eb, c, alias),
-		),
+		intent.conditions.map((c: WhereIntent) => dispatcher(ctx, eb, c, alias)),
 	);
 };
