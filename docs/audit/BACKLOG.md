@@ -41,7 +41,7 @@
 |----|-------|----------|--------|-------|
 | AUD-001 | MCP server has only 1 test | `packages/mcp-server` | M | TBD |
 | AUD-002 | MCP server incomplete (marked "Ready") | `TODO_MCP.md` | L | TBD |
-| AUD-003 | Update DOCUMENTATION_INDEX.md for ARCH-003 | `docs/DOCUMENTATION_INDEX.md` | S | TBD |
+| ~~AUD-003~~ | ~~Update DOCUMENTATION_INDEX.md for ARCH-003~~ | ✅ RESOLVED (2026-01-20) | S | - |
 
 ### Details
 
@@ -68,9 +68,9 @@
 |----|-------|----------|--------|-------|
 | AUD-004 | compiler.ts is 4735 lines | `adapter-kysely/src/compiler.ts` | L | TBD |
 | AUD-005 | orm.ts is 2351 lines | `core/src/dx/orm.ts` | M | TBD |
-| AUD-006 | Update SKILL.md package references | `.claude/skills/project-experience/SKILL.md` | S | TBD |
-| AUD-007 | Add CHANGELOG.md | Root | M | TBD |
-| AUD-008 | Add CONTRIBUTING.md | Root | M | TBD |
+| ~~AUD-006~~ | ~~Update SKILL.md package references~~ | ✅ RESOLVED (2026-01-20) | S | - |
+| ~~AUD-007~~ | ~~Add CHANGELOG.md~~ | ✅ RESOLVED (2026-01-20) | M | - |
+| ~~AUD-008~~ | ~~Add CONTRIBUTING.md~~ | ✅ RESOLVED (2026-01-20) | M | - |
 | ~~DUP-001~~ | ~~Duplicate `singularize` function~~ | ✅ RESOLVED (2026-01-20) | S | - |
 | ~~DUP-002~~ | ~~Duplicate `parseDotNotationInclude`~~ | ✅ RESOLVED (2026-01-20) | S | - |
 | ~~DUP-003~~ | ~~Similar `getNodeIdAlias` logic~~ | ✅ RESOLVED (2026-01-20) | S | - |
@@ -187,8 +187,8 @@
 
 | ID | Issue | Effort | Impact |
 |----|-------|--------|--------|
-| AUD-QW-001 | Update DOCUMENTATION_INDEX.md package refs | S | Medium |
-| AUD-QW-002 | Update SKILL.md package refs | S | Low |
+| ~~AUD-QW-001~~ | ~~Update DOCUMENTATION_INDEX.md package refs~~ | ✅ (AUD-003) | - |
+| ~~AUD-QW-002~~ | ~~Update SKILL.md package refs~~ | ✅ (AUD-006) | - |
 | AUD-QW-003 | Add SECURITY.md policy | S | Medium |
 
 ---
@@ -198,13 +198,14 @@
 | Priority | Count | Total Effort |
 |----------|-------|--------------|
 | P0 | 0 | 0h |
-| P1 | 3 | ~20h |
-| P2 | 5 (+7 resolved) | ~30h |
+| P1 | 2 (+1 resolved) | ~16h |
+| P2 | 2 (+10 resolved) | ~20h |
 | P3 | 5 | ~24h |
-| Quick Wins | 3 | ~2h |
-| **Total** | **16 open** | **~76h** |
+| Quick Wins | 0 (+3 resolved) | ~0h |
+| **Total** | **9 open** | **~60h** |
 
 ### Recently Resolved
+- ✅ AUD-003, AUD-006, AUD-007, AUD-008 (2026-01-20) — Documentation updates
 - ✅ NAME-001, NAME-002, NAME-003, NAME-004 (2026-01-20) — Ambiguous naming fixed
 - ✅ DUP-001, DUP-002, DUP-003 (2026-01-20) — DRY violations fixed
 

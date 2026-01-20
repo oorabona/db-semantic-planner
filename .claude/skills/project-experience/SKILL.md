@@ -15,9 +15,10 @@ description: Project-specific patterns, gotchas, and learnings for db-semantic-p
 ## Architecture: Ports & Adapters
 
 ```
-packages/core          → DB-agnostic (MUST NOT import adapter code)
-packages/adapter-kysely → Depends on core
-packages/dx            → Depends on core + adapter-kysely
+packages/core           → DB-agnostic, includes DX layer (MUST NOT import adapter code)
+packages/adapter-kysely → SQL Compiler, Kysely Engine (depends on core)
+packages/cli            → dbsp CLI (generate, verify, repl commands)
+packages/mcp-server     → MCP Server for AI assistants (depends on core + adapter)
 ```
 
 **STRICT RULE:** Core has zero knowledge of SQL dialects or Kysely.
@@ -26,9 +27,10 @@ packages/dx            → Depends on core + adapter-kysely
 
 | Scope | Package | Key Concerns |
 |-------|---------|--------------|
-| core | `packages/core` | ModelIR types, IntentAST nodes, Planner decisions |
+| core | `packages/core` | ModelIR types, IntentAST nodes, Planner decisions, DX layer |
 | adapter | `packages/adapter-kysely` | SQL generation, Kysely integration, multi-tenant |
-| dx | `packages/dx` | Strict mode, ambiguity detection, compat helpers |
+| cli | `packages/cli` | Code generation, schema verification, REPL |
+| mcp-server | `packages/mcp-server` | AI assistant integration via MCP protocol |
 
 ## Tech Stack
 

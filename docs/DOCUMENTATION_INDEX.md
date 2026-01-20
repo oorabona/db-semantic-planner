@@ -13,15 +13,15 @@ doc-meta:
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
 
-**Status:** ✅ v1.0 Ready (1344 unit tests across 4 packages)
+**Status:** ✅ v1.0 Ready (1672 unit tests across 4 packages)
 
 ## Architecture: Codegen-First (ARCH-002)
 
 ```
-packages/schema         → Schema DSL, defineSchema(), conventions
-packages/cli            → dbsp CLI (generate, verify commands)
-packages/core           → DB-agnostic, includes DX layer (MUST NOT import adapter)
-packages/adapter-kysely → Depends on core
+packages/core           → Schema DSL, DX layer, Planner (DB-agnostic, MUST NOT import adapter)
+packages/adapter-kysely → SQL Compiler, Kysely Engine (depends on core)
+packages/cli            → dbsp CLI (generate, verify, repl commands)
+packages/mcp-server     → MCP Server for AI assistants (depends on core + adapter)
 ```
 
 ## Quick Links
@@ -41,13 +41,13 @@ packages/adapter-kysely → Depends on core
 
 | Scope | Package | Overview | Backlog | Status |
 |-------|---------|----------|---------|--------|
-| schema | `packages/schema` | N/A | [TODO](../TODO.md) | ✅ Complete |
-| cli | `packages/cli` | N/A | [TODO](../TODO.md) | ✅ Complete |
 | core | `packages/core` | [Overview](plans/core-OVERVIEW.md) | [TODO](../TODO_CORE.md) | ✅ Complete |
 | adapter | `packages/adapter-kysely` | [Overview](plans/adapter-OVERVIEW.md) | [TODO](../TODO_ADAPTER.md) | ✅ Complete |
+| cli | `packages/cli` | N/A | [TODO](../TODO.md) | ✅ Complete |
+| mcp-server | `packages/mcp-server` | [Brief](briefs/mcp-server.md) | [TODO](../TODO_MCP.md) | 🟡 Ready |
 
 **Note:** DX layer (ORM API, filters, query builders) is part of `packages/core/src/dx/` since ARCH-001.
-**Note:** Schema package (`packages/schema`) provides the DSL for schema definition (ARCH-002).
+**Note:** Schema DSL (`defineSchema()`, conventions) is part of `packages/core` since ARCH-002 (merged from former `packages/schema`).
 
 ## Implementation Specifications
 
