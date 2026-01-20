@@ -70,6 +70,8 @@ export interface ReplState {
 	execMode: boolean;
 	/** CLI-020: Database connection active */
 	connected: boolean;
+	/** CLI-MUT: EXPLAIN mode - show query plan with results */
+	explainMode: boolean;
 }
 
 /**
@@ -130,4 +132,65 @@ export interface ExecutionResult {
 	error?: string;
 	/** Was result truncated? */
 	truncated?: boolean;
+}
+
+// =============================================================================
+// CLI-MUT: Mutation Types
+// =============================================================================
+
+/**
+ * CLI-MUT: Mutation type
+ */
+export type MutationType = 'insert' | 'update' | 'delete' | 'upsert';
+
+/**
+ * CLI-MUT: Value type in mutation assignments
+ */
+export interface MutationValue {
+	/** Value type for proper SQL generation */
+	type: 'string' | 'number' | 'boolean' | 'null' | 'function' | 'json';
+	/** Original text as written */
+	raw: string;
+	/** Parsed value for binding */
+	value: unknown;
+}
+
+/**
+ * CLI-MUT: Column assignment (column = value)
+ */
+export interface Assignment {
+	column: string;
+	value: MutationValue;
+}
+
+/**
+ * CLI-MUT: ON CONFLICT clause for UPSERT
+ */
+export interface OnConflictClause {
+	/** Conflict target columns */
+	columns: string[];
+	/** Action on conflict */
+	action: 'nothing' | 'update';
+	/** Assignments for DO UPDATE */
+	updateAssignments?: Assignment[];
+}
+
+/**
+ * CLI-MUT: Parsed mutation result
+ */
+export interface ParsedMutation {
+	/** Mutation type */
+	type: MutationType;
+	/** Target table */
+	table: string;
+	/** Columns for INSERT (when using explicit column list) */
+	columns?: string[];
+	/** Assignments for INSERT/UPDATE/UPSERT */
+	assignments?: Assignment[];
+	/** WHERE clause for UPDATE/DELETE */
+	where?: import('./parser.js').WhereClause[];
+	/** ON CONFLICT clause for UPSERT */
+	onConflict?: OnConflictClause;
+	/** Execute immediately (! suffix) */
+	executeImmediate: boolean;
 }

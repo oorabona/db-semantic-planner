@@ -24,6 +24,7 @@ import {
 	like,
 	lt,
 	lte,
+	type MutationDump,
 	neq,
 	rangeContainedBy,
 	rangeContains,
@@ -40,6 +41,7 @@ import type {
 	AliasingMode,
 	DialectMode,
 	IncludeStrategyMode,
+	ParsedMutation,
 } from './types.js';
 
 /**
@@ -78,6 +80,24 @@ export interface QueryExecutionResult {
 		tables: string[];
 		warnings: string[];
 	};
+	error?: string;
+}
+
+/**
+ * CLI-MUT: Result of mutation execution (compile-only mode)
+ */
+export interface MutationExecutionResult {
+	/** The mutation type that was executed */
+	type: 'insert' | 'update' | 'delete' | 'upsert';
+	/** Compiled SQL statement */
+	sql: string;
+	/** Bound parameters */
+	params: readonly unknown[];
+	/** Whether this is a dry-run (not executed) */
+	dryRun: boolean;
+	/** Number of rows affected (only if executed, else undefined) */
+	rowsAffected?: number;
+	/** Error message if compilation/execution failed */
 	error?: string;
 }
 
@@ -469,6 +489,235 @@ export function formatExecutionResult(result: QueryExecutionResult): string {
 				lines.push(`    - ${w}`);
 			}
 		}
+	}
+
+	return lines.join('\n');
+}
+
+/**
+ * CLI-MUT: Convert assignments to values object for INSERT/UPDATE/UPSERT
+ */
+function assignmentsToValues(
+	assignments: Array<{ column: string; value: { value: unknown } }>,
+): Record<string, unknown> {
+	const values: Record<string, unknown> = {};
+	for (const a of assignments) {
+		values[a.column] = a.value.value;
+	}
+	return values;
+}
+
+/**
+ * CLI-MUT: Execute a mutation (INSERT/UPDATE/DELETE/UPSERT)
+ *
+ * Compiles the mutation to SQL using the ORM. Does not actually execute
+ * against a database unless explicitly requested.
+ */
+export function executeMutation(
+	mutation: ParsedMutation,
+	schema: ResolvedSchema,
+	options?: QueryExecutionOptions,
+): MutationExecutionResult {
+	try {
+		// Create ORM with MockAdapter (compile-only) - same setup as executeQuery
+		const generatedSchema = assertResolvedSchemaToGeneratedSchema(schema);
+		const model = buildModelFromSchema(generatedSchema);
+
+		const dialectToMock = (d: DialectMode | undefined) => {
+			if (!d || d === 'postgresql' || d === 'duckdb') return 'postgresql';
+			if (d === 'mysql') return 'mysql';
+			if (d === 'sqlite') return 'sqlite';
+			if (d === 'mssql') return 'mssql';
+			return 'postgresql';
+		};
+
+		const adapter = createMockAdapter({
+			dialect: dialectToMock(options?.dialect),
+			aliasIncludedColumns: options?.aliasingMode ?? 'always',
+		});
+
+		const baseOrm = createOrm<Record<string, unknown>>({
+			model,
+			adapter,
+		});
+
+		// CLI-021: Apply schema scoping if configured
+		const orm = options?.schemaName
+			? baseOrm.withSchema(options.schemaName)
+			: baseOrm;
+
+		let dump: MutationDump;
+
+		switch (mutation.type) {
+			case 'insert': {
+				if (!mutation.assignments || mutation.assignments.length === 0) {
+					return {
+						type: 'insert',
+						sql: '',
+						params: [],
+						dryRun: !mutation.executeImmediate,
+						error: 'INSERT requires at least one assignment',
+					};
+				}
+				const values = assignmentsToValues(mutation.assignments);
+				dump = orm.insert(mutation.table).values(values).dump();
+				break;
+			}
+
+			case 'update': {
+				if (!mutation.assignments || mutation.assignments.length === 0) {
+					return {
+						type: 'update',
+						sql: '',
+						params: [],
+						dryRun: !mutation.executeImmediate,
+						error: 'UPDATE requires at least one SET assignment',
+					};
+				}
+				if (!mutation.where || mutation.where.length === 0) {
+					return {
+						type: 'update',
+						sql: '',
+						params: [],
+						dryRun: !mutation.executeImmediate,
+						error: 'UPDATE requires WHERE clause for safety',
+					};
+				}
+				const setValues = assignmentsToValues(mutation.assignments);
+				let updateBuilder = orm.update(mutation.table).set(setValues);
+				for (const clause of mutation.where) {
+					const filter = whereClauseToFilter(clause);
+					updateBuilder = updateBuilder.where(filter);
+				}
+				dump = updateBuilder.dump();
+				break;
+			}
+
+			case 'delete': {
+				if (!mutation.where || mutation.where.length === 0) {
+					return {
+						type: 'delete',
+						sql: '',
+						params: [],
+						dryRun: !mutation.executeImmediate,
+						error: 'DELETE requires WHERE clause for safety',
+					};
+				}
+				let deleteBuilder = orm.delete(mutation.table);
+				for (const clause of mutation.where) {
+					const filter = whereClauseToFilter(clause);
+					deleteBuilder = deleteBuilder.where(filter);
+				}
+				dump = deleteBuilder.dump();
+				break;
+			}
+
+			case 'upsert': {
+				if (!mutation.assignments || mutation.assignments.length === 0) {
+					return {
+						type: 'upsert',
+						sql: '',
+						params: [],
+						dryRun: !mutation.executeImmediate,
+						error: 'UPSERT requires at least one assignment',
+					};
+				}
+				if (!mutation.onConflict) {
+					return {
+						type: 'upsert',
+						sql: '',
+						params: [],
+						dryRun: !mutation.executeImmediate,
+						error: 'UPSERT requires ON CONFLICT clause',
+					};
+				}
+				const values = assignmentsToValues(mutation.assignments);
+				let upsertBuilder = orm
+					.upsert(mutation.table)
+					.values(values)
+					.onConflict(mutation.onConflict.columns);
+
+				if (mutation.onConflict.action === 'nothing') {
+					upsertBuilder = upsertBuilder.doNothing();
+				} else if (mutation.onConflict.action === 'update') {
+					if (
+						mutation.onConflict.updateAssignments &&
+						mutation.onConflict.updateAssignments.length > 0
+					) {
+						const updateValues = assignmentsToValues(
+							mutation.onConflict.updateAssignments,
+						);
+						upsertBuilder = upsertBuilder.doUpdate(updateValues);
+					} else {
+						// Default: update all inserted values
+						upsertBuilder = upsertBuilder.doUpdate(values);
+					}
+				}
+				dump = upsertBuilder.dump();
+				break;
+			}
+
+			default: {
+				const _exhaustive: never = mutation.type;
+				return {
+					type: mutation.type,
+					sql: '',
+					params: [],
+					dryRun: true,
+					error: `Unknown mutation type: ${_exhaustive}`,
+				};
+			}
+		}
+
+		return {
+			type: mutation.type,
+			sql: dump.sql,
+			params: dump.parameters,
+			dryRun: !mutation.executeImmediate,
+		};
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return {
+			type: mutation.type,
+			sql: '',
+			params: [],
+			dryRun: !mutation.executeImmediate,
+			error: message,
+		};
+	}
+}
+
+/**
+ * CLI-MUT: Format a mutation execution result for display
+ */
+export function formatMutationResult(result: MutationExecutionResult): string {
+	if (result.error) {
+		return `Error: ${result.error}`;
+	}
+
+	const lines: string[] = [];
+
+	// Dry-run indicator
+	if (result.dryRun) {
+		lines.push(`[DRY-RUN] ${result.type.toUpperCase()} (add ! to execute)`);
+	} else {
+		lines.push(`[EXECUTED] ${result.type.toUpperCase()}`);
+		if (result.rowsAffected !== undefined) {
+			lines.push(`Rows affected: ${result.rowsAffected}`);
+		}
+	}
+	lines.push('');
+
+	// SQL
+	lines.push('SQL:');
+	lines.push(result.sql);
+	lines.push('');
+
+	// Parameters
+	if (result.params.length > 0) {
+		lines.push(
+			`Parameters: [${result.params.map((p) => JSON.stringify(p)).join(', ')}]`,
+		);
 	}
 
 	return lines.join('\n');

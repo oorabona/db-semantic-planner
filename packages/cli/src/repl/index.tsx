@@ -31,8 +31,13 @@ import {
 } from './db-connection.js';
 import { getHistory } from './history.js';
 import { getModeWarning, parseInputMode } from './mode-escape.js';
-import { ParseError, parseNaturalQuery } from './parser.js';
-import { executeQuery } from './query-executor.js';
+import {
+	isMutationKeyword,
+	ParseError,
+	parseMutation,
+	parseNaturalQuery,
+} from './parser.js';
+import { executeMutation, executeQuery } from './query-executor.js';
 import { ExecutionResultDisplay } from './result-formatter.js';
 import type {
 	AliasingMode,
@@ -965,50 +970,123 @@ function ReplApp({ config }: ReplAppProps) {
 					executeOnDb(content, []);
 				}
 			} else {
-				// Natural query handling
-				try {
-					const parsed = parseNaturalQuery(content, config.schema);
-					const result = executeQuery(parsed, config.schema, {
-						aliasingMode,
-						includeStrategy,
-						dialect,
-						...(schemaName && { schemaName }),
-					});
+				// CLI-MUT: Check if this is a mutation (table keyword ...)
+				const words = content.trim().split(/\s+/);
+				const secondWord = words[1]?.toLowerCase() ?? '';
+				const isMutation = words.length >= 2 && isMutationKeyword(secondWord);
 
-					if (result.error) {
-						setQueryResult({
-							sql: '',
-							params: [],
-							error: result.error,
-						});
-					} else {
-						setQueryResult({
-							sql: result.sql,
-							params: result.params,
-							...(result.separateQueries && {
-								separateQueries: result.separateQueries,
-							}),
-							plan: result.plan,
+				if (isMutation) {
+					// CLI-MUT: Mutation handling (INSERT/UPDATE/DELETE/UPSERT)
+					try {
+						const parsed = parseMutation(content, config.schema);
+						if (!parsed) {
+							setQueryResult({
+								sql: '',
+								params: [],
+								error: 'Failed to parse mutation',
+							});
+							return;
+						}
+						const result = executeMutation(parsed, config.schema, {
+							aliasingMode,
+							dialect,
+							...(schemaName && { schemaName }),
 						});
 
-						// Execute if in exec mode and connected
-						if (execMode && connected && dbConnectionRef.current) {
-							executeOnDb(result.sql, result.params);
+						if (result.error) {
+							setQueryResult({
+								sql: '',
+								params: [],
+								error: result.error,
+							});
+						} else {
+							// Display mutation result with dry-run indicator
+							const planInfo = result.dryRun
+								? 'DRY-RUN (add ! to execute)'
+								: 'EXECUTED';
+							setQueryResult({
+								sql: result.sql,
+								params: result.params,
+								plan: {
+									strategy: `${result.type.toUpperCase()} - ${planInfo}`,
+									tables: [parsed.table],
+									warnings: result.dryRun
+										? ['This is a dry-run. Add ! suffix to execute.']
+										: [],
+								},
+							});
+
+							// Execute if ! suffix was used and connected
+							if (
+								!result.dryRun &&
+								execMode &&
+								connected &&
+								dbConnectionRef.current
+							) {
+								executeOnDb(result.sql, result.params);
+							}
+						}
+					} catch (err) {
+						if (err instanceof ParseError) {
+							setQueryResult({
+								sql: '',
+								params: [],
+								error: err.message,
+							});
+						} else {
+							setQueryResult({
+								sql: '',
+								params: [],
+								error: err instanceof Error ? err.message : String(err),
+							});
 						}
 					}
-				} catch (err) {
-					if (err instanceof ParseError) {
-						setQueryResult({
-							sql: '',
-							params: [],
-							error: err.message,
+				} else {
+					// Natural query handling (SELECT)
+					try {
+						const parsed = parseNaturalQuery(content, config.schema);
+						const result = executeQuery(parsed, config.schema, {
+							aliasingMode,
+							includeStrategy,
+							dialect,
+							...(schemaName && { schemaName }),
 						});
-					} else {
-						setQueryResult({
-							sql: '',
-							params: [],
-							error: err instanceof Error ? err.message : String(err),
-						});
+
+						if (result.error) {
+							setQueryResult({
+								sql: '',
+								params: [],
+								error: result.error,
+							});
+						} else {
+							setQueryResult({
+								sql: result.sql,
+								params: result.params,
+								...(result.separateQueries && {
+									separateQueries: result.separateQueries,
+								}),
+								plan: result.plan,
+							});
+
+							// Execute if in exec mode and connected
+							if (execMode && connected && dbConnectionRef.current) {
+								executeOnDb(result.sql, result.params);
+							}
+						}
+					} catch (err) {
+						if (err instanceof ParseError) {
+							setQueryResult({
+								sql: '',
+								params: [],
+								error: err.message,
+							});
+						} else {
+							setQueryResult({
+								sql: '',
+								params: [],
+								error: err instanceof Error ? err.message : String(err),
+							});
+						}
 					}
 				}
 			}
