@@ -1,0 +1,68 @@
+# Chapter 2: Blog Schema
+# QUICKSTART.md - M:N relations, aggregates (count, sum, avg), group by, distinct
+#
+# Usage:
+#   pnpm dbsp repl --schema ./examples/blog.schema.ts \
+#     --db postgresql://postgres:demo@localhost:5432/demo \
+#     --input ./examples/blog.dbsp
+
+# =============================================================================
+# Setup: Create isolated schema and load data
+# =============================================================================
+
+# Create schema (! prefix = raw SQL in natural mode)
+!CREATE SCHEMA IF NOT EXISTS ch2_blog;
+
+# Set schema context for subsequent operations
+.use ch2_blog
+
+# Import DDL (creates tables in ch2_blog schema)
+.import examples/blog.ddl.sql
+
+# Import seed data
+.import examples/blog.seed.sql
+
+# =============================================================================
+# 2.3 Explore Schema
+# =============================================================================
+.tables
+.relations posts
+
+# =============================================================================
+# 2.4 Basic Queries with Data
+# =============================================================================
+authors
+posts
+tags
+
+# =============================================================================
+# 2.5 Filtering
+# =============================================================================
+posts where published = true
+comments where approved = true
+comments where approved = false
+
+# =============================================================================
+# 2.6 Includes (LEFT JOIN)
+# =============================================================================
+authors include posts
+posts include comments
+
+# =============================================================================
+# 2.7 Many-to-Many Relations (Tags)
+# =============================================================================
+posts include tags
+postTags select count(*) group by postId
+
+# =============================================================================
+# 2.8 Aggregates
+# =============================================================================
+posts select count(*) group by authorId
+posts where published = true select count(*)
+comments select count(*) group by postId
+
+# =============================================================================
+# 2.9 DISTINCT
+# =============================================================================
+comments where approved = true select count(distinct authorName)
+posts select distinct

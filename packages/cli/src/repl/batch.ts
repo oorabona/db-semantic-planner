@@ -136,7 +136,12 @@ export async function processDotCommand(
 	input: string,
 	schema: ResolvedSchema,
 	state: BatchState,
-): Promise<{ output: string; stateChange?: Partial<BatchState> }> {
+): Promise<{
+	output: string;
+	stateChange?: Partial<BatchState>;
+	success?: boolean;
+	error?: string;
+}> {
 	const parts = input.split(/\s+/);
 	const command = (parts[0] ?? '').toLowerCase();
 	const arg = parts.slice(1).join(' ').trim();
@@ -239,16 +244,42 @@ export async function processDotCommand(
 			}
 
 			try {
-				const sqlContent = readFileSync(resolvedPath, 'utf-8');
+				let sqlContent = readFileSync(resolvedPath, 'utf-8');
+
+				// If schema is set via .use, prefix with SET search_path
+				if (state.schemaName) {
+					sqlContent = `SET search_path TO "${state.schemaName}", public;\n${sqlContent}`;
+				}
+
 				const result = await state.dbConnection.executeRaw(sqlContent, []);
+
+				// Check for execution errors (returned as result.error, not thrown)
+				if (result.error) {
+					return {
+						output: `❌ Import failed: ${result.error}`,
+						success: false,
+						error: result.error,
+					};
+				}
+
 				const rowInfo =
 					result.rowCount !== undefined
 						? ` (${result.rowCount} rows affected)`
 						: '';
-				return { output: `✅ Imported: ${arg}${rowInfo}` };
+				const schemaInfo = state.schemaName
+					? ` (schema: ${state.schemaName})`
+					: '';
+				return {
+					output: `✅ Imported: ${arg}${rowInfo}${schemaInfo}`,
+					success: true,
+				};
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
-				return { output: `❌ Import failed: ${message}` };
+				return {
+					output: `❌ Import failed: ${message}`,
+					success: false,
+					error: message,
+				};
 			}
 		}
 
@@ -293,6 +324,19 @@ async function executeNaturalQuery(
 					result.sql,
 					result.params as unknown[],
 				);
+
+				// Check for execution errors (returned as result.error, not thrown)
+				if (execResult.error) {
+					return {
+						query: input,
+						success: false,
+						error: `Database error: ${execResult.error}`,
+						sql: result.sql,
+						params: result.params,
+						type: 'query',
+					};
+				}
+
 				const output = [
 					formatExecutionResult(result),
 					'',
@@ -359,6 +403,18 @@ async function executeRawSql(
 
 	try {
 		const result = await state.dbConnection.executeRaw(input, []);
+
+		// Check for execution errors (returned as result.error, not thrown)
+		if (result.error) {
+			return {
+				query: input,
+				success: false,
+				error: `Database error: ${result.error}`,
+				sql: input,
+				type: 'query',
+			};
+		}
+
 		return {
 			query: input,
 			success: true,
@@ -497,12 +553,20 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 			if (cmdResult.stateChange) {
 				Object.assign(state, cmdResult.stateChange);
 			}
-			result = {
+			// Extract error from cmdResult if present (e.g., from .import)
+			const cmdError = cmdResult.error;
+			const cmdSuccess =
+				cmdResult.success ?? !cmdResult.output.startsWith('❌');
+			const baseResult: BatchResult = {
 				query: effectiveQuery,
-				success: !cmdResult.output.startsWith('❌'),
+				success: cmdSuccess && !cmdError,
 				output: cmdResult.output,
 				type: 'command',
 			};
+			if (cmdError) {
+				baseResult.error = cmdError;
+			}
+			result = baseResult;
 		} else if (isRawSql) {
 			// Raw SQL mode
 			result = await executeRawSql(effectiveQuery, state);

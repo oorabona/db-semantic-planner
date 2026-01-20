@@ -43,7 +43,10 @@ export type GeneratedColumnType =
 	| 'timestamp'
 	| 'datetime'
 	| 'json'
-	| 'uuid';
+	| 'uuid'
+	| 'daterange'
+	| 'tstzrange'
+	| 'int4range';
 
 /**
  * Column definition in generated schema.
@@ -243,6 +246,12 @@ function mapColumnType(genType: GeneratedColumnType): ColumnType {
 			return 'json';
 		case 'uuid':
 			return 'uuid';
+		case 'daterange':
+			return 'daterange';
+		case 'tstzrange':
+			return 'tstzrange';
+		case 'int4range':
+			return 'int4range';
 	}
 }
 
@@ -629,6 +638,9 @@ const SchemaColumnTypeSchema = v.picklist([
 	'time',
 	'json',
 	'jsonb',
+	'daterange',
+	'tstzrange',
+	'int4range',
 ]);
 
 /**
@@ -637,6 +649,9 @@ const SchemaColumnTypeSchema = v.picklist([
 const ForeignKeyReferenceSchema = v.object({
 	table: v.string(),
 	column: v.optional(v.string()),
+	onDelete: v.optional(
+		v.picklist(['CASCADE', 'SET NULL', 'RESTRICT', 'NO ACTION']),
+	),
 });
 
 /**
@@ -650,6 +665,7 @@ const ColumnDefinitionSchema = v.object({
 	autoIncrement: v.optional(v.boolean()),
 	default: v.optional(v.string()),
 	references: v.optional(ForeignKeyReferenceSchema),
+	index: v.optional(v.union([v.boolean(), v.string()])),
 });
 
 /**
@@ -760,6 +776,23 @@ const ConventionsDefinitionSchema = v.object({
 });
 
 /**
+ * Index definition schema
+ */
+const IndexDefinitionSchema = v.object({
+	columns: v.array(v.string()),
+	unique: v.optional(v.boolean()),
+	name: v.optional(v.string()),
+});
+
+/**
+ * Indexes definition schema - mapping table name to array of indexes
+ */
+const IndexesDefinitionSchema = v.record(
+	v.string(),
+	v.array(IndexDefinitionSchema),
+);
+
+/**
  * Complete ResolvedSchema validation schema
  */
 export const ResolvedSchemaValidation = v.object({
@@ -767,6 +800,7 @@ export const ResolvedSchemaValidation = v.object({
 	relations: RelationsDefinitionSchema,
 	hints: HintsDefinitionSchema,
 	conventions: ConventionsDefinitionSchema,
+	indexes: v.optional(IndexesDefinitionSchema),
 });
 
 /**
@@ -814,6 +848,12 @@ function mapSchemaColumnType(
 		case 'jsonb':
 			// 'jsonb' maps to 'json' (GeneratedColumnType doesn't distinguish)
 			return 'json';
+		case 'daterange':
+			return 'daterange';
+		case 'tstzrange':
+			return 'tstzrange';
+		case 'int4range':
+			return 'int4range';
 	}
 }
 
@@ -1027,8 +1067,13 @@ export function assertResolvedSchemaToGeneratedSchema(
 ): GeneratedSchema {
 	const result = resolvedSchemaToGeneratedSchema(input);
 	if (!result.success) {
-		const messages = result.errors.map((e) => e.message).join(', ');
-		throw new Error(`Schema validation failed: ${messages}`);
+		const messages = result.errors
+			.map((e) => {
+				const path = e.path?.map((p) => p.key).join('.') || 'root';
+				return `[${path}] ${e.message} (expected: ${e.expected}, received: ${e.received})`;
+			})
+			.join('\n');
+		throw new Error(`Schema validation failed:\n${messages}`);
 	}
 	return result.schema;
 }

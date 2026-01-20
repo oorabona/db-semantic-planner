@@ -1,9 +1,7 @@
 -- Minimal Schema Seed Data
 --
--- Usage:
---   psql -d your_db -f examples/minimal.seed.sql
-
-TRUNCATE posts, users RESTART IDENTITY CASCADE;
+-- Prerequisites: Run minimal.ddl.sql first
+-- Usage: psql -d your_db -f examples/minimal.seed.sql
 
 INSERT INTO users (name, email) VALUES
     ('Alice', 'alice@example.com'),

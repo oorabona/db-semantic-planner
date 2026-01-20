@@ -1,0 +1,50 @@
+# Chapter 1: Minimal Schema (users + posts)
+# QUICKSTART.md - Basic concepts: select, where, limit, offset
+#
+# Usage:
+#   pnpm dbsp repl --schema ./examples/minimal.schema.ts \
+#     --db postgresql://postgres:demo@localhost:5432/demo \
+#     --input ./examples/minimal.dbsp
+
+# =============================================================================
+# Setup: Create isolated schema and load data
+# =============================================================================
+
+# Create schema (! prefix = raw SQL in natural mode)
+!CREATE SCHEMA IF NOT EXISTS ch1_minimal;
+
+# Set schema context for subsequent operations
+.use ch1_minimal
+
+# Import DDL (creates tables in ch1_minimal schema)
+.import examples/minimal.ddl.sql
+
+# Import seed data
+.import examples/minimal.seed.sql
+
+# =============================================================================
+# 1.3 Explore Schema
+# =============================================================================
+.tables
+.schema users
+.relations posts
+
+# =============================================================================
+# 1.4 Basic SELECT
+# =============================================================================
+users
+posts
+
+# =============================================================================
+# 1.5 WHERE Clause
+# =============================================================================
+users where name = 'Alice'
+posts where user_id = 1
+posts where content is null
+posts where user_id = 2
+
+# =============================================================================
+# 1.6 LIMIT and OFFSET
+# =============================================================================
+posts limit 2
+posts limit 2 offset 2
