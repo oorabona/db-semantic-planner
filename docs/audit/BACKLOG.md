@@ -66,7 +66,7 @@
 
 | ID | Issue | Location | Effort | Owner |
 |----|-------|----------|--------|-------|
-| AUD-004 | compiler.ts is 4735 lines | `adapter-kysely/src/compiler.ts` | L | 🟡 Phase 1 done |
+| AUD-004 | compiler.ts is 4735 lines | `adapter-kysely/src/compiler.ts` | L | 🟡 Phase 2 done |
 | AUD-005 | orm.ts is 2351 lines | `core/src/dx/orm.ts` | M | TBD |
 | ~~AUD-006~~ | ~~Update SKILL.md package references~~ | ✅ RESOLVED (2026-01-20) | S | - |
 | ~~AUD-007~~ | ~~Add CHANGELOG.md~~ | ✅ RESOLVED (2026-01-20) | M | - |
@@ -81,16 +81,19 @@
 
 ### Details
 
-**AUD-004: Split compiler.ts** 🟡 Phase 1 Complete (2026-01-20)
+**AUD-004: Split compiler.ts** 🟡 Phase 2 Complete (2026-01-20)
 - **Phase 1 DONE:** `mutation-compiler.ts` extracted (349 lines)
   - compileInsert, compileUpdate, compileDelete, compileUpsert
   - compiler.ts reduced from 4736 to 4410 lines (-7%)
-- Remaining phases:
-  - `recursive-compiler.ts` — CTE and recursive queries (~850 lines)
-  - `select-compiler.ts` — SELECT query compilation (optional)
-  - `expression-compiler.ts` — WHERE, HAVING expressions (optional)
+- **Phase 2 DONE:** `recursive-compiler.ts` extracted (1155 lines)
+  - compileRecursive, injectAdvancedRecursiveClauses, path tracking, emit join
+  - compiler.ts reduced from 4410 to 3301 lines (-25.1%)
+- **Phase 3 EVALUATED:** Further splitting optional
+  - EXISTS section (1533 lines) has complex interdependencies
+  - Optional future work: `select-compiler.ts`, `expression-compiler.ts`
+- **Total reduction:** 4736 → 3301 lines (-30.3%)
 - Benefits: Better maintainability, easier testing, clearer ownership
-- Effort remaining: M (~1d)
+- Status: Core refactoring complete, optional phases deferred
 
 **AUD-005: Extract concerns from orm.ts**
 - QueryBuilderImpl currently handles building, execution, hydration
