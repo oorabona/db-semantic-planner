@@ -11,15 +11,11 @@ export type {
 	SeparateIncludeInfo,
 } from '@dbsp/core';
 // CompileOnlyAdapter (DX-031: compile-only adapter for testing and REPL)
-// Legacy aliases for backwards compatibility
 export {
 	CompileOnlyAdapter,
-	CompileOnlyAdapter as MockAdapter,
 	type CompileOnlyAdapterOptions,
-	type CompileOnlyAdapterOptions as MockAdapterOptions,
 	createCompileOnlyAdapter,
-	createCompileOnlyAdapter as createMockAdapter,
-	type MockDialect, // Keep MockDialect name for internal Kysely mock instance
+	type MockDialect,
 } from './compile-only-adapter.js';
 // Compiler (low-level)
 export {
