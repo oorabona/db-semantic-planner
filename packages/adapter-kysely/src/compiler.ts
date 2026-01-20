@@ -618,7 +618,8 @@ export function compile(
 			? { schemaName: schemaNameOrOptions }
 			: (schemaNameOrOptions ?? {});
 
-	const { schemaName, windows, coreCapabilities, dialect } = options;
+	const { schemaName, windows, coreCapabilities, dialect, aliasIncludedColumns } =
+		options;
 
 	const state: CompilerState = {
 		aliasCounter: 0,
@@ -741,7 +742,13 @@ export function compile(
 		);
 
 		// Add SELECT columns for included relations
-		query = addIncludeSelectColumns(query, state, model);
+		query = addIncludeSelectColumns(
+			query,
+			state,
+			model,
+			rootTable,
+			aliasIncludedColumns,
+		);
 	}
 
 	// Add WHERE clause
@@ -1531,17 +1538,29 @@ function findFilterStrategyDecision(
 /**
  * Add SELECT columns for included relations that were JOINed.
  * Columns are aliased as "relationName.columnName" to avoid conflicts.
+ *
+ * @param aliasIncludedColumns - Aliasing mode:
+ *   - 'always' (default): Alias ALL columns from included tables
+ *   - 'onCollision': Only alias columns that collide with root table columns
  */
 function addIncludeSelectColumns(
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 	query: SelectQueryBuilder<any, any, any>,
 	state: CompilerState,
 	model: ModelIR,
+	rootTable: string,
+	aliasIncludedColumns: 'always' | 'onCollision' = 'always',
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {
 	if (state.joinedIncludeRelations.size === 0) {
 		return query;
 	}
+
+	// Collect root table column names for collision detection
+	const rootTableDef = model.getTable(rootTable);
+	const rootColumnNames = new Set(
+		rootTableDef ? rootTableDef.columns.map((c) => c.name) : [],
+	);
 
 	let result = query;
 
@@ -1559,12 +1578,24 @@ function addIncludeSelectColumns(
 			throw new CompilationError(`Unknown table for include: ${targetTable}`);
 		}
 
-		// Add all columns from the included table with aliased names
+		// Add columns from the included table
 		for (const column of tableDef.columns) {
-			const aliasedName = `${relationName}.${column.name}`;
-			result = result.select(
-				sql`${sql.ref(`${alias}.${column.name}`)}`.as(aliasedName),
-			);
+			const hasCollision =
+				aliasIncludedColumns === 'always' ||
+				rootColumnNames.has(column.name);
+
+			if (hasCollision) {
+				// Alias as "relationName.columnName" to disambiguate
+				const aliasedName = `${relationName}.${column.name}`;
+				result = result.select(
+					sql`${sql.ref(`${alias}.${column.name}`)}`.as(aliasedName),
+				);
+			} else {
+				// No collision - use plain column name as alias (no relation prefix)
+				result = result.select(
+					sql`${sql.ref(`${alias}.${column.name}`)}`.as(column.name),
+				);
+			}
 		}
 	}
 

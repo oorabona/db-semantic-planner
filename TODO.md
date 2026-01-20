@@ -1200,7 +1200,7 @@ SELECT "t0".*, (
 FROM "users" AS "t0"
 ```
 
-**Tests:** 1,427 passing (5 todo for ADAPTER-003 onCollision mode)
+**Tests:** 1,691 passing (ADAPTER-003 onCollision mode fully implemented 2026-01-20)
 
 ---
 

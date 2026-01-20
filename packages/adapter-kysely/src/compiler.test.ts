@@ -3646,7 +3646,7 @@ describe('SQL Compiler', () => {
 // ADAPTER-003: Smart Column Aliasing (onCollision mode)
 // ============================================================================
 
-describe.todo('ADAPTER-003: Smart Column Aliasing - onCollision mode not yet implemented', () => {
+describe('ADAPTER-003: Smart Column Aliasing - onCollision mode', () => {
 	const kysely = createTestKysely();
 
 	// Schema with overlapping column names for collision testing

@@ -895,3 +895,20 @@ Kysely's `addColumn().autoIncrement()` uses the IDENTITY approach which is more 
 **Prevention:** Before doing any rename refactoring, check if Serena's rename_symbol can handle it - it's faster and safer than manual find-replace.
 
 **Applies to:** Any symbol renaming across files (classes, functions, types, interfaces)
+
+### Verify Options Are Actually Used, Not Just Plumbed (2026-01-20)
+
+**Symptoms:** A feature toggle exists in CLI/REPL but changing it has no effect on output.
+
+**Cause:** Option was plumbed through the call chain (CLI → adapter → compiler) but the final function that should use it ignored the parameter completely. TODO.md marked feature as DONE because the plumbing existed.
+
+**Example:** `aliasIncludedColumns: 'onCollision'` was passed to `addIncludeSelectColumns()` but the function always aliased all columns regardless. The REPL had a working toggle that did nothing.
+
+**Solution:** When implementing options that affect behavior:
+1. Trace the option from consumer (API caller, CLI, REPL) to the producer (function that generates output)
+2. Verify the producer function reads and acts on the parameter
+3. Run tests that verify different option values produce different outputs
+
+**Prevention:** Mark feature as DONE only after tests confirm different option values produce different results. Plumbing from consumer to producer is not implementation - the producer must actually use the option.
+
+**Location:** `packages/adapter-kysely/src/compiler.ts` - `addIncludeSelectColumns()` function
