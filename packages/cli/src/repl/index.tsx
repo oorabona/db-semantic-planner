@@ -1229,6 +1229,8 @@ function ReplApp({ config }: ReplAppProps) {
 				aliasingMode={aliasingMode}
 				connected={connected}
 				execMode={execMode}
+				parseMode={parseMode}
+				explainMode={explainMode}
 				{...(schemaName && { schemaName })}
 				{...(config.databaseUrl && {
 					databaseName: getDatabaseName(config.databaseUrl),
