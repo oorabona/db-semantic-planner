@@ -1404,6 +1404,7 @@ export interface WhereClause {
 		| 'in'
 		| 'not in'
 		| 'is'
+		| 'is not'
 		| 'overlaps'
 		| 'contains'
 		| 'containedBy';
@@ -1722,6 +1723,13 @@ function parseWhereCondition(
 	if (op.toLowerCase() === 'not' && tokens[index + 2]?.toLowerCase() === 'in') {
 		operator = 'not in';
 		valueOffset = 3; // column not in value (4 tokens)
+	} else if (
+		op.toLowerCase() === 'is' &&
+		tokens[index + 2]?.toLowerCase() === 'not'
+	) {
+		// CLI-NQL: Handle "is not" as two-token operator (e.g., "is not null")
+		operator = 'is not';
+		valueOffset = 3; // column is not value (4 tokens)
 	} else {
 		switch (op.toLowerCase()) {
 			case '=':

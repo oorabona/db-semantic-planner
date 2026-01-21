@@ -251,6 +251,12 @@ function createComparisonFilter(
 				return isNull(field);
 			}
 			return isNotNull(field);
+		case 'is not':
+			// CLI-NQL: "is not null" syntax
+			if (value === null) {
+				return isNotNull(field);
+			}
+			return isNull(field);
 		case 'in':
 			// CLI-NQL Block 10: IN with array of values
 			if (Array.isArray(value)) {
