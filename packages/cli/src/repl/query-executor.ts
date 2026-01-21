@@ -603,7 +603,26 @@ export function executeQuery(
 
 		// Add includes (CLI-014: with optional where filters)
 		if (query.include && query.include.length > 0) {
+			// CLI-NQL: Collect relations with explicit column selections via relationColumn()
+			// These relations should NOT be added as includes (the JOIN is already done)
+			const relationsWithExplicitColumns = new Set<string>();
+			if (query.columns && query.columns.length > 0) {
+				for (const c of query.columns) {
+					if (isPathExpression(c.column)) {
+						// Extract the top-level relation from path (e.g., "category.parent.name" → "category")
+						const firstSegment = c.column.split('.')[0]!;
+						relationsWithExplicitColumns.add(firstSegment);
+					}
+				}
+			}
+
 			for (const inc of query.include) {
+				// CLI-NQL: Skip include if relation has explicit columns selected
+				// (relationColumn() already handles the JOIN and column selection)
+				if (relationsWithExplicitColumns.has(inc.relation)) {
+					continue;
+				}
+
 				// CLI-014: Build include options with where filter if present
 				const includeOptions = buildIncludeOptions(inc, schema, query.table);
 				builder = builder.include(inc.relation, includeOptions);

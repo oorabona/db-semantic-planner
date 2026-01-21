@@ -58,6 +58,7 @@ export type {
 	ArrayOperator,
 	// Expressions
 	CoalesceExpressionIntent,
+	ColumnAliasIntent,
 	ComparisonOperator,
 	CustomTraversal,
 	// Mutations (DX-010)
@@ -81,8 +82,6 @@ export type {
 	RangeOperator,
 	RankingWindowFunction,
 	RawExpressionIntent,
-	ColumnAliasIntent,
-	RelationColumnIntent,
 	RecursiveAdvancedOptions,
 	RecursiveDedupe,
 	RecursiveEmitOptions,
@@ -90,6 +89,7 @@ export type {
 	RecursiveNodeIdExpr,
 	RecursiveTrackOptions,
 	RecursiveTraversal,
+	RelationColumnIntent,
 	RelationOperator,
 	ScalarSubqueryIntent,
 	SelectAggregateIntent,
@@ -136,6 +136,7 @@ export {
 	isAggregateWindowFunction,
 	// Type guards
 	isCoalesceExpression,
+	isColumnAliasExpression,
 	isCustomTraversal,
 	// Mutation type guards (DX-010)
 	isDeleteIntent,
@@ -144,9 +145,8 @@ export {
 	isMutationIntent,
 	isRankingWindowFunction,
 	isRawExpression,
-	isColumnAliasExpression,
-	isRelationColumnExpression,
 	isRecursiveIntent,
+	isRelationColumnExpression,
 	isSelectAggregate,
 	isSelectAll,
 	isSelectFields,

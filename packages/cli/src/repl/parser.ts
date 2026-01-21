@@ -2772,20 +2772,38 @@ export function parseNaturalQuery(
 				targetInclude.where = targetInclude.where ?? [];
 				targetInclude.where.push(qf.clause);
 			} else {
-				// Table not found in query - error
-				const availableTables = [
-					result.table,
-					...(result.include?.map((inc) => {
-						const qualifiedRel = `${result.table}.${inc.relation}`;
-						const relation =
-							schema.relations[qualifiedRel] ?? schema.relations[inc.relation];
-						return relation?.target ?? inc.relation;
-					}) ?? []),
-				];
-				throw new ParseError(
-					`Qualified column "${qf.targetTable}.${qf.clause.column}" references table "${qf.targetTable}" ` +
-						`which is not in the query. Available tables: ${availableTables.join(', ')}`,
-				);
+				// CLI-NQL: Check if qf.targetTable is a relation NAME (not target table)
+				// This enables auto-include when using relation paths in WHERE
+				// e.g., "products where category.name = 'X'" auto-includes category
+				const qualifiedRelKey = `${result.table}.${qf.targetTable}`;
+				const relationByName =
+					schema.relations[qualifiedRelKey] ?? schema.relations[qf.targetTable];
+
+				if (relationByName) {
+					// Found relation by name → auto-add include with the where clause
+					const newInclude: ParsedInclude = {
+						relation: qf.targetTable,
+						where: [qf.clause],
+					};
+					result.include = result.include ?? [];
+					result.include.push(newInclude);
+				} else {
+					// Table not found in query - error
+					const availableTables = [
+						result.table,
+						...(result.include?.map((inc) => {
+							const qualifiedRel = `${result.table}.${inc.relation}`;
+							const relation =
+								schema.relations[qualifiedRel] ??
+								schema.relations[inc.relation];
+							return relation?.target ?? inc.relation;
+						}) ?? []),
+					];
+					throw new ParseError(
+						`Qualified column "${qf.targetTable}.${qf.clause.column}" references table "${qf.targetTable}" ` +
+							`which is not in the query. Available tables: ${availableTables.join(', ')}`,
+					);
+				}
 			}
 		}
 	}

@@ -958,3 +958,35 @@ Parser sets `raw: true` for unquoted identifiers, executor uses this to decide:
 **Pattern:** After modifying handler registrations in adapter-kysely, ALWAYS rebuild before testing. Tests using vitest with source may pass while runtime fails because vitest reads source directly.
 
 **Location:** `packages/adapter-kysely/src/compiler/handlers/expression/index.ts` (handler registration)
+
+---
+
+### Ink Terminal Key Detection: Backspace vs Delete Confusion
+
+**Symptom:** In Ink REPL, pressing Backspace deletes forward (like Delete), or Delete doesn't work at all.
+
+**Root cause:** Ink's `useInput` hook inconsistently reports key events across terminals:
+- Some terminals send `\x7f` (DEL char) for Backspace
+- Some set `key.delete = true` with empty input for Backspace
+- Some terminals have `key.backspace` correctly set
+- Delete key sends escape sequence `\x1b[3~` but `key.delete` flag may be unreliable
+
+**Solution:** Use multi-condition detection for Backspace and ONLY trust Delete escape sequence:
+
+```typescript
+// Backspace - comprehensive detection
+const isBackspace =
+  key.backspace ||
+  input === '\x7f' ||
+  input === '\x08' ||
+  (key.delete && input === '');
+
+// Delete - ONLY trust the escape sequence
+if (input === '\x1b[3~') { /* forward delete */ }
+```
+
+**Why this happens:** Terminal emulators have inconsistent key mappings. Ink's abstraction layer doesn't normalize all variations.
+
+**Pattern:** Never rely solely on `key.delete` flag - always check the actual input character or escape sequence.
+
+**Location:** `packages/cli/src/repl/components/EnhancedTextInput.tsx` (lines 196-217)

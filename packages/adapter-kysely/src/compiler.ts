@@ -618,8 +618,13 @@ export function compile(
 			? { schemaName: schemaNameOrOptions }
 			: (schemaNameOrOptions ?? {});
 
-	const { schemaName, windows, coreCapabilities, dialect, aliasIncludedColumns } =
-		options;
+	const {
+		schemaName,
+		windows,
+		coreCapabilities,
+		dialect,
+		aliasIncludedColumns,
+	} = options;
 
 	const state: CompilerState = {
 		aliasCounter: 0,
@@ -1581,8 +1586,7 @@ function addIncludeSelectColumns(
 		// Add columns from the included table
 		for (const column of tableDef.columns) {
 			const hasCollision =
-				aliasIncludedColumns === 'always' ||
-				rootColumnNames.has(column.name);
+				aliasIncludedColumns === 'always' || rootColumnNames.has(column.name);
 
 			if (hasCollision) {
 				// Alias as "relationName.columnName" to disambiguate

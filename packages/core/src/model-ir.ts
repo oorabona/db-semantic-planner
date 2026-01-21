@@ -363,7 +363,7 @@ export function getRelationKind(relation: RelationIR): RelationKind {
  * CLI-NQL: Type guard to check if a relation has recursive metadata.
  */
 export function isRecursiveRelation(
-	relation: RelationIR
+	relation: RelationIR,
 ): relation is RelationIR & { recursive: RecursiveMetadata } {
 	return relation.recursive !== undefined;
 }
@@ -383,7 +383,7 @@ export function isSelfReferential(relation: RelationIR): boolean {
 export function createRecursiveMetadata(
 	direction: 'up' | 'down',
 	throughRelation: string,
-	maxDepth = 10
+	maxDepth = 10,
 ): RecursiveMetadata {
 	return {
 		direction,

@@ -47,7 +47,7 @@ const DOT_COMMANDS = [
 		command: '.exec [on|off]',
 		description: 'Toggle execution mode (requires --db connection)',
 	},
-{
+	{
 		command: '.import <file>',
 		description: 'Execute SQL file (DDL, seed data)',
 	},

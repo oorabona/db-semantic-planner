@@ -65,6 +65,16 @@ Extend REPL natural query language to be a complete "new SQL" - simpler for huma
   - Support for `AS alias` syntax per EBNF grammar
   - Query executor uses `col()` helper with native Kysely `eb.ref().as()`
 
+- [x] ✅ Backspace/Delete key swap in REPL (2026-01-21)
+  - Fixed key detection: Backspace checks `key.backspace`, `\x7f`, `\x08`, or `key.delete && input === ''`
+  - Delete key ONLY trusts escape sequence `\x1b[3~` (not `key.delete` flag)
+  - Resolves terminal-specific behavior differences
+
+- [x] ✅ Include column filtering with explicit relation columns (2026-01-21)
+  - Skip include when `relationColumn()` already handles the JOIN
+  - Prevents duplicate columns: `category.name as categoryName include category` no longer returns all category columns
+  - Collects relations with explicit column selections before adding includes
+
 ## Improvements
 
 - [x] ✅ Native column aliasing via `col()` helper (2026-01-21)
