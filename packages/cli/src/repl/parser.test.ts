@@ -261,6 +261,18 @@ describe('parseNaturalQuery', () => {
 				value: null,
 			});
 		});
+
+		it('parses where with is not null', () => {
+			const result = parseNaturalQuery(
+				'posts where body is not null',
+				mockSchema,
+			);
+			expect(result.where?.[0]).toEqual({
+				column: 'body',
+				operator: 'is not',
+				value: null,
+			});
+		});
 	});
 
 	describe('range operators (CLI-018)', () => {
