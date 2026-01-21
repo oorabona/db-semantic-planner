@@ -203,6 +203,8 @@ function ReplApp({ config }: ReplAppProps) {
 		useState<ExecutionResult | null>(null);
 	// CLI-NQL: Parse mode for showing AST
 	const [parseMode, setParseMode] = useState(false);
+	// CLI-NQL: Explain mode for EXPLAIN prefix
+	const [explainMode, setExplainMode] = useState(false);
 
 	// CLI-020: Initialize database connection if URL provided
 	useEffect(() => {
@@ -941,6 +943,37 @@ function ReplApp({ config }: ReplAppProps) {
 						return;
 					}
 
+					case '.explain': {
+						// CLI-NQL: Toggle EXPLAIN mode
+						const arg = args[0]?.toLowerCase();
+
+						if (arg === 'on') {
+							setExplainMode(true);
+							setOutput(
+								<Text color="green">
+									✓ Explain mode: ON - Queries will be prefixed with EXPLAIN
+								</Text>,
+							);
+						} else if (arg === 'off') {
+							setExplainMode(false);
+							setOutput(
+								<Text color="yellow">✓ Explain mode: OFF</Text>,
+							);
+						} else {
+							// Toggle mode when no argument provided
+							const newMode = !explainMode;
+							setExplainMode(newMode);
+							setOutput(
+								<Text color={newMode ? 'green' : 'yellow'}>
+									✓ Explain mode: {newMode ? 'ON' : 'OFF'}
+								</Text>,
+							);
+						}
+						setQueryResult(null);
+						setShowHelp(false);
+						return;
+					}
+
 					default:
 						setOutput(
 							<Text color="red">
@@ -1093,8 +1126,12 @@ function ReplApp({ config }: ReplAppProps) {
 								...(parseMode && { parsedQuery: parsed }),
 							});
 						} else {
+							// CLI-NQL: Apply EXPLAIN prefix if explainMode is on
+							const finalSql = explainMode
+								? `EXPLAIN ${result.sql}`
+								: result.sql;
 							setQueryResult({
-								sql: result.sql,
+								sql: finalSql,
 								params: result.params,
 								...(result.separateQueries && {
 									separateQueries: result.separateQueries,
@@ -1105,7 +1142,7 @@ function ReplApp({ config }: ReplAppProps) {
 
 							// Execute if in exec mode and connected
 							if (execMode && connected && dbConnectionRef.current) {
-								executeOnDb(result.sql, result.params);
+								executeOnDb(finalSql, result.params);
 							}
 						}
 					} catch (err) {
@@ -1140,6 +1177,7 @@ function ReplApp({ config }: ReplAppProps) {
 			connected,
 			schemaName,
 			parseMode,
+			explainMode,
 		],
 	);
 

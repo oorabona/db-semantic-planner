@@ -127,6 +127,12 @@ const DOT_COMMANDS: CompletionSuggestion[] = [
 		type: 'command',
 		description: 'Toggle parse tree (AST) output',
 	},
+	{
+		text: '.explain',
+		label: '.explain',
+		type: 'command',
+		description: 'Toggle EXPLAIN prefix for queries',
+	},
 ];
 
 /**

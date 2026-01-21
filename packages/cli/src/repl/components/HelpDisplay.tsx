@@ -55,6 +55,10 @@ const DOT_COMMANDS = [
 		command: '.parse [on|off]',
 		description: 'Toggle parse tree (AST) output for queries',
 	},
+	{
+		command: '.explain [on|off]',
+		description: 'Toggle EXPLAIN prefix for queries',
+	},
 	{ command: '.clear', description: 'Clear screen and output' },
 	{ command: '.exit / .quit', description: 'Exit REPL' },
 ];
