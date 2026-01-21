@@ -1103,6 +1103,7 @@ function ReplApp({ config }: ReplAppProps) {
 			history,
 			execMode,
 			connected,
+			schemaName,
 		],
 	);
 
