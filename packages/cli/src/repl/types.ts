@@ -114,6 +114,8 @@ export interface QueryResult {
 		warnings: string[];
 	};
 	error?: string;
+	/** CLI-NQL: Parsed query AST for .parse mode */
+	parsedQuery?: unknown;
 }
 
 /**
