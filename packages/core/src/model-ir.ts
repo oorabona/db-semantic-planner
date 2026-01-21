@@ -46,6 +46,48 @@ export type OnDeleteAction = 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
 /** Relation types */
 export type RelationType = 'hasOne' | 'hasMany' | 'belongsTo' | 'belongsToMany';
 
+/**
+ * CLI-NQL: Relation kind for natural query language.
+ * Maps to SQL/database perspective rather than ORM perspective.
+ * - 'many-to-one': Child → Parent (e.g., post.author)
+ * - 'one-to-many': Parent → Children (e.g., author.posts)
+ * - 'many-to-many': M:N via junction (e.g., post.tags)
+ * - 'recursive-up': Ancestors (e.g., category.ancestors)
+ * - 'recursive-down': Descendants (e.g., category.descendants)
+ */
+export type RelationKind =
+	| 'many-to-one'
+	| 'one-to-many'
+	| 'many-to-many'
+	| 'recursive-up'
+	| 'recursive-down';
+
+/**
+ * CLI-NQL: Recursive relation metadata.
+ * For self-referential tables like categories with parentId.
+ */
+export interface RecursiveMetadata {
+	/**
+	 * Direction of traversal.
+	 * - 'up': Traverse to ancestors (parent → grandparent → ...)
+	 * - 'down': Traverse to descendants (children → grandchildren → ...)
+	 */
+	readonly direction: 'up' | 'down';
+
+	/**
+	 * Maximum recursion depth to prevent infinite loops.
+	 * @default 10
+	 */
+	readonly maxDepth: number;
+
+	/**
+	 * The relation name to follow for recursion.
+	 * For 'up': typically 'parent' relation
+	 * For 'down': typically 'children' relation
+	 */
+	readonly through: string;
+}
+
 /** Cardinality for planning */
 export type Cardinality = 'one' | 'many';
 
@@ -232,6 +274,14 @@ export interface RelationIR {
 	 * @default 'auto'
 	 */
 	readonly joinDefault: JoinDefault;
+
+	// --- CLI-NQL: Recursive Relations ---
+
+	/**
+	 * CLI-NQL: Recursive relation metadata for ancestors/descendants.
+	 * Only present for self-referential relations (source === target).
+	 */
+	readonly recursive?: RecursiveMetadata | undefined;
 }
 
 // ============================================================================
@@ -279,4 +329,65 @@ export interface ModelIR {
 
 	/** Check if relation path is ambiguous (multiple relations to same target) */
 	isAmbiguous(sourceTable: string, targetTable: string): AmbiguityCheckResult;
+}
+
+// ============================================================================
+// CLI-NQL: Relation Kind Helpers
+// ============================================================================
+
+/**
+ * CLI-NQL: Convert ORM-style RelationType to database-style RelationKind.
+ * Handles recursive relations when recursive metadata is present.
+ */
+export function getRelationKind(relation: RelationIR): RelationKind {
+	// Check for recursive relation first
+	if (relation.recursive) {
+		return relation.recursive.direction === 'up'
+			? 'recursive-up'
+			: 'recursive-down';
+	}
+
+	// Map ORM types to database perspective
+	switch (relation.type) {
+		case 'belongsTo':
+		case 'hasOne':
+			return 'many-to-one';
+		case 'hasMany':
+			return 'one-to-many';
+		case 'belongsToMany':
+			return 'many-to-many';
+	}
+}
+
+/**
+ * CLI-NQL: Type guard to check if a relation has recursive metadata.
+ */
+export function isRecursiveRelation(
+	relation: RelationIR
+): relation is RelationIR & { recursive: RecursiveMetadata } {
+	return relation.recursive !== undefined;
+}
+
+/**
+ * CLI-NQL: Check if a relation is self-referential (source === target).
+ * Self-referential relations are candidates for recursive traversal.
+ */
+export function isSelfReferential(relation: RelationIR): boolean {
+	return relation.source === relation.target;
+}
+
+/**
+ * CLI-NQL: Create default recursive metadata for a self-referential relation.
+ * Used when schema doesn't explicitly define recursive metadata.
+ */
+export function createRecursiveMetadata(
+	direction: 'up' | 'down',
+	throughRelation: string,
+	maxDepth = 10
+): RecursiveMetadata {
+	return {
+		direction,
+		maxDepth,
+		through: throughRelation,
+	};
 }

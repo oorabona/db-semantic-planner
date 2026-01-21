@@ -1908,6 +1908,7 @@ pnpm dbsp repl --schema ./examples/minimal.schema.ts --dialect mysql
 | `.dump` | Show last query plan |
 | `.sql` | Show last SQL only |
 | `.explain` | Toggle EXPLAIN output (or `.explain on` / `.explain off`) |
+| `.parse` | Toggle parse tree output (or `.parse on` / `.parse off`) |
 | `.help` | Show help |
 | `.exit` | Exit REPL |
 
@@ -1960,6 +1961,101 @@ users upsert name = "A", email = "a@e.com" on email do update set name = "A Upda
 
 # Composite conflict columns
 orders upsert ... on (user_id, product_id) do nothing
+```
+
+### Advanced Query Features (NQL v1)
+
+The REPL supports advanced query features for natural language-style querying:
+
+#### Relation Path Traversal
+
+Navigate through relations using dot notation:
+
+```
+# Filter by related table column (products → category)
+products where category.name = "Electronics"
+
+# Multi-level path (products → category → parent)
+products where category.parent.name = "Electronics"
+
+# Select related columns
+products select title, category.name as categoryName
+```
+
+#### Subqueries
+
+Use subqueries for complex filtering:
+
+```
+# Scalar subquery (find products with max price)
+products where price = (products select max(price))
+
+# IN subquery
+users where id in (orders where total > 100 select distinct userId)
+
+# NOT IN subquery
+categories where id not in (products select categoryId)
+```
+
+#### Existence Checks
+
+Check for existence of related records:
+
+```
+# Categories with products
+categories where has products
+
+# Categories without products (empty categories)
+categories where not has products
+
+# Users who have made orders
+users where has orders
+```
+
+#### INSERT with FK Lookup
+
+Insert data with foreign key lookup from another table:
+
+```
+# Insert product with category looked up by name
+products insert title = "New Phone", categoryId = id from categories where name = "Smartphones"
+
+# With FOR UPDATE (lock the source row during lookup)
+products insert title = "New Phone", categoryId = id from categories where name = "Smartphones" for update
+```
+
+#### Window Functions
+
+Compute rankings and running totals:
+
+```
+# Rank products by price within category
+products select *, rank() over (partition by categoryId order by price desc) as priceRank
+
+# Running total of order amounts
+orders select *, sum(total) over (order by createdAt) as runningTotal
+```
+
+#### Parse Tree Debug
+
+Enable parse tree output to see how queries are interpreted:
+
+```
+dbsp> .parse on
+✓ Parse mode: ON - Queries will show parse tree (AST)
+
+dbsp> users where active = true
+──────────────────────────────────────────────────
+ParsedQuery {
+  table: "users"
+  type: "select"
+  columns: undefined
+  where: [{ column: "active", operator: "=", value: true }]
+}
+──────────────────────────────────────────────────
+
+SQL:
+select "users".* from "users" where "users"."active" = $1
 ```
 
 ---
