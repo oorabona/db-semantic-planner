@@ -103,6 +103,24 @@ const DOT_COMMANDS: CompletionSuggestion[] = [
 		type: 'command',
 		description: 'Show/set SQL dialect',
 	},
+	{
+		text: '.use',
+		label: '.use',
+		type: 'command',
+		description: 'Set schema for queries',
+	},
+	{
+		text: '.exec',
+		label: '.exec',
+		type: 'command',
+		description: 'Toggle execution mode',
+	},
+	{
+		text: '.import',
+		label: '.import',
+		type: 'command',
+		description: 'Execute SQL file',
+	},
 ];
 
 /**
