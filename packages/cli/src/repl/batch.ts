@@ -15,10 +15,14 @@ import {
 import { type AssertionSummary, runAssertions } from './assertion-runner.js';
 import { createDbConnection, type DbConnection } from './db-connection.js';
 import { parseInputMode } from './mode-escape.js';
-import { isMutationKeyword, parseNaturalQuery, parseMutation } from './parser.js';
 import {
-	executeQuery,
+	isMutationKeyword,
+	parseMutation,
+	parseNaturalQuery,
+} from './parser.js';
+import {
 	executeMutation,
+	executeQuery,
 	formatExecutionResult,
 	formatMutationResult,
 	type QueryExecutionOptions,
@@ -53,6 +57,8 @@ export interface BatchState {
 	dbConnection: DbConnection | undefined;
 	/** CLI-MUT: Show EXPLAIN output with query results */
 	explainMode: boolean;
+	/** CLI-NQL: Show parse tree (AST) for queries */
+	parseMode: boolean;
 }
 
 /**
@@ -133,6 +139,49 @@ function formatRelations(schema: ResolvedSchema, tableName?: string): string {
 }
 
 /**
+ * CLI-NQL Block 12: Format a parsed query as a tree for .parse mode
+ */
+function formatParseTree(parsed: unknown): string {
+	const lines = ['─'.repeat(50), 'ParsedQuery {'];
+
+	// Format the parsed object with proper indentation
+	const formatValue = (value: unknown, indent = 2): string => {
+		const pad = ' '.repeat(indent);
+		if (value === null) return 'null';
+		if (value === undefined) return 'undefined';
+		if (typeof value === 'string') return `"${value}"`;
+		if (typeof value === 'number' || typeof value === 'boolean')
+			return String(value);
+		if (Array.isArray(value)) {
+			if (value.length === 0) return '[]';
+			const items = value.map((v) => formatValue(v, indent + 2)).join(', ');
+			return `[${items}]`;
+		}
+		if (typeof value === 'object') {
+			const entries = Object.entries(value);
+			if (entries.length === 0) return '{}';
+			const formatted = entries
+				.map(([k, v]) => `${pad}  ${k}: ${formatValue(v, indent + 2)}`)
+				.join('\n');
+			return `{\n${formatted}\n${pad}}`;
+		}
+		return String(value);
+	};
+
+	// Format top-level properties
+	const obj = parsed as Record<string, unknown>;
+	for (const [key, value] of Object.entries(obj)) {
+		if (value !== undefined) {
+			lines.push(`  ${key}: ${formatValue(value)}`);
+		}
+	}
+
+	lines.push('}');
+	lines.push('─'.repeat(50));
+	return lines.join('\n');
+}
+
+/**
  * Process a dot command (async to support .import)
  * @internal - Exported for testing
  */
@@ -160,6 +209,7 @@ export async function processDotCommand(
   .use [schema]     - Set/clear PostgreSQL schema for multi-tenant
   .exec [on|off]    - Toggle or set execution mode (requires --db)
   .explain [on|off] - Toggle EXPLAIN output for queries
+  .parse [on|off]   - Toggle parse tree (AST) output for queries
   .import <file>    - Execute SQL file (DDL, seed data)
   .natural          - Switch to natural query mode
   .sql              - Switch to SQL mode
@@ -255,6 +305,28 @@ export async function processDotCommand(
 			};
 		}
 
+		case '.parse': {
+			// CLI-NQL: Toggle parse tree (AST) output (SC-21 to SC-23)
+			if (arg === 'on') {
+				return {
+					output: '✓ Parse mode: ON - Queries will show parse tree (AST)',
+					stateChange: { parseMode: true },
+				};
+			}
+			if (arg === 'off') {
+				return {
+					output: '✓ Parse mode: OFF',
+					stateChange: { parseMode: false },
+				};
+			}
+			// Toggle when no argument provided
+			const newParseMode = !state.parseMode;
+			return {
+				output: `✓ Parse mode: ${newParseMode ? 'ON' : 'OFF'}`,
+				stateChange: { parseMode: newParseMode },
+			};
+		}
+
 		case '.import': {
 			// Import and execute a SQL file
 			if (!arg) {
@@ -329,6 +401,10 @@ async function executeNaturalQuery(
 ): Promise<BatchResult> {
 	try {
 		const parsed = parseNaturalQuery(input, schema);
+
+		// CLI-NQL Block 12: Format parse tree if parseMode is enabled
+		const parseTreeOutput = state.parseMode ? formatParseTree(parsed) : '';
+
 		const options: QueryExecutionOptions = {};
 		if (state.schemaName) {
 			options.schemaName = state.schemaName;
@@ -364,16 +440,20 @@ async function executeNaturalQuery(
 					};
 				}
 
-				const output = [
+				const outputParts = [];
+				if (parseTreeOutput) {
+					outputParts.push(parseTreeOutput);
+				}
+				outputParts.push(
 					formatExecutionResult(result),
 					'',
 					`Rows: ${execResult.rowCount}`,
 					formatRows(execResult.rows, execResult.columns),
-				].join('\n');
+				);
 				return {
 					query: input,
 					success: true,
-					output,
+					output: outputParts.join('\n'),
 					sql: result.sql,
 					params: result.params,
 					type: 'query',
@@ -392,10 +472,14 @@ async function executeNaturalQuery(
 			}
 		}
 
+		// Non-exec mode: return SQL only
+		const dryRunOutput = parseTreeOutput
+			? [parseTreeOutput, formatExecutionResult(result)].join('\n')
+			: formatExecutionResult(result);
 		return {
 			query: input,
 			success: true,
-			output: formatExecutionResult(result),
+			output: dryRunOutput,
 			sql: result.sql,
 			params: result.params,
 			type: 'query',
@@ -565,6 +649,7 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 		schemaName: undefined,
 		dbConnection: undefined,
 		explainMode: false,
+		parseMode: false,
 	};
 
 	// Connect to database if URL provided

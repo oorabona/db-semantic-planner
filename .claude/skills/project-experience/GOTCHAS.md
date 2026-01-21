@@ -912,3 +912,30 @@ Kysely's `addColumn().autoIncrement()` uses the IDENTITY approach which is more 
 **Prevention:** Mark feature as DONE only after tests confirm different option values produce different results. Plumbing from consumer to producer is not implementation - the producer must actually use the option.
 
 **Location:** `packages/adapter-kysely/src/compiler.ts` - `addIncludeSelectColumns()` function
+
+---
+
+## REPL/Parser
+
+### MutationValue Needs `raw` Flag for Literal vs Column Reference Detection (2026-01-21)
+
+**Symptoms:** In `INSERT FROM` queries, unquoted identifiers (column refs like `id`) were being treated the same as quoted string literals (`"Phone"`).
+
+**Cause:** Parser produced MutationValue objects with just `value` and `as` fields. When executing `products insert title = "Phone", categoryId = id from categories where name = "Electronics"`, both `"Phone"` and `id` had the same structure, making it impossible for the executor to distinguish them.
+
+**Solution:** Add `raw: boolean` flag to MutationValue type:
+```typescript
+interface MutationValue {
+  value: string;
+  as?: string;
+  raw?: boolean;  // true = unquoted identifier (column ref), false/undefined = quoted literal
+}
+```
+
+Parser sets `raw: true` for unquoted identifiers, executor uses this to decide:
+- `raw: true` → use `eb.ref()` for column reference
+- `raw: false/undefined` → use `eb.val()` or `eb.lit()` for literal value
+
+**Pattern:** When parsing DSL syntax that has both literals and identifiers, always track which is which at parse time. Don't try to infer later.
+
+**Location:** `packages/cli/src/repl/types.ts` (MutationValue type), `packages/cli/src/repl/query-executor.ts` (INSERT FROM execution)

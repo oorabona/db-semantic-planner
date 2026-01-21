@@ -12,10 +12,18 @@
 import type { ResolvedSchema } from '@dbsp/core';
 import type {
 	Assignment,
+	ExistenceCheck,
+	FromClause,
 	MutationType,
 	MutationValue,
 	OnConflictClause,
 	ParsedMutation,
+	ParsedSubquery,
+	PathExpression,
+	PathSegment,
+	RecursiveDirection,
+	RecursiveRelationInfo,
+	SubqueryValue,
 } from './types.js';
 
 // Re-export mutation types for convenience
@@ -25,7 +33,594 @@ export type {
 	Assignment,
 	OnConflictClause,
 	ParsedMutation,
+	ParsedSubquery,
+	SubqueryValue,
+	ExistenceCheck,
+	FromClause,
 };
+
+// Re-export path expression types
+export type { PathExpression, PathSegment };
+
+// Re-export recursive relation types (Block 7)
+export type { RecursiveDirection, RecursiveRelationInfo };
+
+// =============================================================================
+// CLI-NQL: Path Expression Parser
+// =============================================================================
+
+/**
+ * CLI-NQL: Reserved keywords that require quoting when used as identifiers.
+ * Using SQL standard reserved words + NQL-specific keywords.
+ */
+export const RESERVED_KEYWORDS = new Set([
+	// SQL standard
+	'select',
+	'from',
+	'where',
+	'and',
+	'or',
+	'not',
+	'in',
+	'is',
+	'null',
+	'true',
+	'false',
+	'like',
+	'between',
+	'order',
+	'by',
+	'asc',
+	'desc',
+	'limit',
+	'offset',
+	'group',
+	'having',
+	'as',
+	'on',
+	'join',
+	'left',
+	'right',
+	'inner',
+	'outer',
+	'full',
+	'cross',
+	'union',
+	'intersect',
+	'except',
+	'case',
+	'when',
+	'then',
+	'else',
+	'end',
+	'distinct',
+	'all',
+	// NQL-specific
+	'include',
+	'insert',
+	'update',
+	'delete',
+	'upsert',
+	'set',
+	'do',
+	'nothing',
+	'conflict',
+	'has',
+	'ancestors',
+	'descendants',
+	'over',
+	'partition',
+	'for',
+	'each',
+]);
+
+/**
+ * CLI-NQL: Check if a token is a quoted identifier (double-quoted).
+ */
+export function isQuotedIdentifier(token: string): boolean {
+	return token.startsWith('"') && token.endsWith('"') && token.length >= 2;
+}
+
+/**
+ * CLI-NQL: Extract the identifier name from a potentially quoted token.
+ * Returns the name without quotes and whether it was quoted.
+ */
+export function parseIdentifier(token: string): PathSegment {
+	if (isQuotedIdentifier(token)) {
+		return {
+			name: token.slice(1, -1), // Remove surrounding quotes
+			quoted: true,
+		};
+	}
+	return {
+		name: token,
+		quoted: false,
+	};
+}
+
+/**
+ * CLI-NQL: Parse a path expression from a single token.
+ * Handles dot-separated paths like "category.parent.name" or "category"."parent"."name".
+ *
+ * @param token - The raw token (may contain dots)
+ * @returns PathExpression with segments and metadata
+ *
+ * @example
+ * parsePathExpression("category.parent.name")
+ * // → { segments: [{name:"category",quoted:false}, {name:"parent",quoted:false}, {name:"name",quoted:false}], raw: "category.parent.name" }
+ *
+ * @example
+ * parsePathExpression("\"children\"")
+ * // → { segments: [{name:"children",quoted:true}], raw: "\"children\"" }
+ */
+export function parsePathExpression(token: string): PathExpression {
+	const raw = token;
+	const segments: PathSegment[] = [];
+
+	// Handle quoted identifiers that might contain dots literally
+	if (isQuotedIdentifier(token)) {
+		// Single quoted identifier (e.g., "table.name" as a literal identifier)
+		segments.push(parseIdentifier(token));
+		return { segments, raw };
+	}
+
+	// Split by dots, but handle quoted segments
+	// Simple approach: split by '.' for unquoted tokens
+	const parts = token.split('.');
+
+	for (const part of parts) {
+		if (part === '') continue; // Skip empty segments from leading/trailing dots
+		segments.push(parseIdentifier(part));
+	}
+
+	if (segments.length === 0) {
+		// Edge case: empty or only dots
+		throw new ParseError(`Invalid path expression: "${token}"`);
+	}
+
+	return { segments, raw };
+}
+
+/**
+ * CLI-NQL: Convert a PathExpression back to string representation.
+ * Useful for error messages and debugging.
+ */
+export function pathToString(path: PathExpression): string {
+	return path.segments
+		.map((s) => (s.quoted ? `"${s.name}"` : s.name))
+		.join('.');
+}
+
+/**
+ * CLI-NQL: Check if a path expression is a simple column reference (single unquoted segment).
+ */
+export function isSimpleColumn(path: PathExpression): boolean {
+	return (
+		path.segments.length === 1 &&
+		path.segments[0] !== undefined &&
+		!path.segments[0].quoted
+	);
+}
+
+/**
+ * CLI-NQL: Check if a path expression is a qualified column (table.column or relation.column).
+ */
+export function isQualifiedPath(path: PathExpression): boolean {
+	return path.segments.length > 1;
+}
+
+/**
+ * CLI-NQL: Get the first segment (table or relation name in qualified paths).
+ */
+export function getPathRoot(path: PathExpression): PathSegment | undefined {
+	return path.segments[0];
+}
+
+/**
+ * CLI-NQL: Get the last segment (column name in most cases).
+ */
+export function getPathLeaf(path: PathExpression): PathSegment | undefined {
+	return path.segments[path.segments.length - 1];
+}
+
+/**
+ * CLI-NQL: Convert legacy string column to PathExpression.
+ * For backward compatibility with existing code.
+ */
+export function columnToPath(column: string): PathExpression {
+	return parsePathExpression(column);
+}
+
+// =============================================================================
+// CLI-NQL: Subquery Parser (Block 3)
+// =============================================================================
+
+/**
+ * CLI-NQL: Parse a subquery from tokens.
+ * Subquery syntax: `(table [where conditions] [select column])`
+ *
+ * Note: Due to tokenizer behavior, `(table` comes as a single token.
+ * The subquery ends when we find a closing `)` token.
+ *
+ * @example
+ * // Scalar subquery (implicit primary key selection)
+ * parseSubquery(['(categories', 'where', 'name', '=', 'Electronics', ')'], 0)
+ * // → { subquery: { table: 'categories', where: [...] }, nextIndex: 6 }
+ *
+ * @example
+ * // Explicit column selection
+ * parseSubquery(['(categories', 'where', 'active', '=', 'true', 'select', 'id', ')'], 0)
+ * // → { subquery: { table: 'categories', where: [...], selectColumn: 'id' }, nextIndex: 8 }
+ */
+export function parseSubquery(
+	tokens: string[],
+	startIndex: number,
+): { subquery: ParsedSubquery; nextIndex: number } {
+	let i = startIndex;
+
+	// First token should be "(tableName"
+	const firstToken = tokens[i];
+	if (!firstToken || !firstToken.startsWith('(')) {
+		throw new ParseError(
+			`Expected '(' to start subquery, got "${firstToken ?? 'end of input'}"`,
+			i,
+		);
+	}
+
+	// Extract table name from "(tableName" or "(tableName)"
+	let table = firstToken.slice(1); // Remove leading '('
+	if (!table) {
+		throw new ParseError('Expected table name in subquery', i);
+	}
+
+	// Handle case where token is "(tableName)" - complete subquery in one token
+	let completeInOneToken = false;
+	if (table.endsWith(')')) {
+		table = table.slice(0, -1);
+		completeInOneToken = true;
+	}
+	i++;
+
+	const subquery: ParsedSubquery = { table };
+
+	// If the entire subquery was in one token (no WHERE, no SELECT), return early
+	if (completeInOneToken) {
+		return { subquery, nextIndex: i };
+	}
+
+	// Parse optional WHERE clause
+	if (tokens[i]?.toLowerCase() === 'where') {
+		i++;
+		subquery.where = [];
+
+		while (i < tokens.length) {
+			const token = tokens[i];
+			if (!token) break;
+
+			// Stop on closing parenthesis
+			if (token === ')' || token.endsWith(')')) break;
+
+			// Stop on 'select' keyword (explicit column selection)
+			if (token.toLowerCase() === 'select') break;
+
+			// Handle 'and' connector
+			if (token.toLowerCase() === 'and') {
+				i++;
+				continue;
+			}
+
+			// Parse condition: column operator value
+			const column = tokens[i];
+			const operator = tokens[i + 1];
+			let valueToken = tokens[i + 2];
+
+			if (!column || !operator || valueToken === undefined) {
+				throw new ParseError('Incomplete WHERE condition in subquery', i);
+			}
+
+			// Handle value that ends with ')' - it's the last value in subquery
+			let endsSubquery = false;
+			if (valueToken.endsWith(')')) {
+				valueToken = valueToken.slice(0, -1); // Remove trailing ')'
+				endsSubquery = true;
+			}
+
+			// Parse value (simple for now - will be enhanced in later blocks)
+			let value: unknown;
+			const lowerValue = valueToken.toLowerCase();
+			if (lowerValue === 'true') {
+				value = true;
+			} else if (lowerValue === 'false') {
+				value = false;
+			} else if (lowerValue === 'null') {
+				value = null;
+			} else if (!Number.isNaN(Number(valueToken))) {
+				value = Number(valueToken);
+			} else {
+				// String value
+				value = valueToken;
+			}
+
+			subquery.where.push({ column, operator, value });
+			i += 3;
+
+			if (endsSubquery) {
+				// The ')' was already consumed from valueToken
+				return { subquery, nextIndex: i };
+			}
+
+			// Check for 'and' to continue
+			if (tokens[i]?.toLowerCase() !== 'and') {
+				break;
+			}
+		}
+	}
+
+	// Parse optional SELECT clause for explicit column
+	if (tokens[i]?.toLowerCase() === 'select') {
+		i++;
+		let selectCol = tokens[i];
+		if (!selectCol) {
+			throw new ParseError('Expected column name after SELECT in subquery', i);
+		}
+
+		// Handle select column that ends with ')'
+		if (selectCol.endsWith(')')) {
+			selectCol = selectCol.slice(0, -1);
+			subquery.selectColumn = selectCol;
+			i++;
+			return { subquery, nextIndex: i };
+		}
+
+		subquery.selectColumn = selectCol;
+		i++;
+	}
+
+	// Expect closing parenthesis
+	if (tokens[i] !== ')') {
+		throw new ParseError(
+			`Expected ')' to close subquery, got "${tokens[i] ?? 'end of input'}"`,
+			i,
+		);
+	}
+	i++;
+
+	return { subquery, nextIndex: i };
+}
+
+/**
+ * CLI-NQL: Check if a token starts a subquery (starts with '(' but is not a function call).
+ * Function calls look like: count(, sum(, func_name(
+ * Subqueries look like: (table_name
+ */
+export function isSubqueryStart(token: string | undefined): boolean {
+	if (!token || !token.startsWith('(')) return false;
+
+	// Extract what comes after '('
+	let afterParen = token.slice(1);
+	if (!afterParen) return false;
+
+	// Handle case where token ends with ')' - e.g., "(categories)"
+	if (afterParen.endsWith(')')) {
+		afterParen = afterParen.slice(0, -1);
+	}
+	if (!afterParen) return false;
+
+	// Function calls have format: funcname(arg...)
+	// We detect this by checking if the token WITHOUT '(' would be a valid function start
+	// Functions: count, sum, avg, min, max, now, uuid_generate_v4, etc.
+	// Tables: lowercase identifiers that could also be function names...
+
+	// Heuristic: if the entire token matches func(...) pattern, it's a function
+	// If it's just "(identifier", it's a subquery start
+	if (/^[a-z_][a-z0-9_]*\(/i.test(token)) {
+		// This would be like "count(" - not our case since we have "(table"
+		return false;
+	}
+
+	// It starts with '(' followed by an identifier - likely a subquery
+	return /^[a-z_][a-z0-9_]*$/i.test(afterParen);
+}
+
+/**
+ * CLI-NQL: Create a SubqueryValue from a ParsedSubquery.
+ */
+export function createSubqueryValue(subquery: ParsedSubquery): SubqueryValue {
+	return { type: 'subquery', subquery };
+}
+
+// =============================================================================
+// CLI-NQL: Existence Check Parser (has/not has)
+// =============================================================================
+
+/**
+ * CLI-NQL: Check if the current position starts an existence check.
+ * Patterns:
+ * - "has <relation>"
+ * - "not has <relation>"
+ *
+ * @param tokens - Array of tokens
+ * @param index - Current position
+ * @returns true if this is an existence check
+ */
+export function isExistenceCheck(tokens: string[], index: number): boolean {
+	const token = tokens[index]?.toLowerCase();
+	if (token === 'has') {
+		return true;
+	}
+	if (token === 'not' && tokens[index + 1]?.toLowerCase() === 'has') {
+		return true;
+	}
+	return false;
+}
+
+/**
+ * CLI-NQL Block 4: Parse an existence check (has/not has relation [where ...]).
+ *
+ * Grammar:
+ *   existence_check = ("has" | "not" "has") relation [existence_where]
+ *   existence_where = "where" condition ("and" condition)*
+ *
+ * @example
+ * "has products" → { type: 'exists', relation: 'products' }
+ * "not has products" → { type: 'not_exists', relation: 'products' }
+ * "has products where rating > 4" → { type: 'exists', relation: 'products', where: [...] }
+ * "has ancestors where name = 'Root'" → { type: 'exists', relation: 'ancestors', recursive: {...} }
+ *
+ * @param tokens - Array of tokens
+ * @param index - Current position (at 'has' or 'not')
+ * @param schema - Optional schema for recursive relation detection (Block 7)
+ * @param currentTable - Optional current table context for relation lookup
+ * @returns Parsed existence check and next index
+ */
+export function parseExistenceCheck(
+	tokens: string[],
+	index: number,
+	schema?: ResolvedSchema,
+	currentTable?: string,
+): {
+	check: ExistenceCheck;
+	nextIndex: number;
+} {
+	let i = index;
+	let type: 'exists' | 'not_exists' = 'exists';
+
+	// Check for "not has"
+	if (tokens[i]?.toLowerCase() === 'not') {
+		type = 'not_exists';
+		i++; // Skip 'not'
+	}
+
+	// Skip 'has'
+	if (tokens[i]?.toLowerCase() !== 'has') {
+		throw new ParseError('Expected "has" in existence check');
+	}
+	i++;
+
+	// Get relation name
+	const relation = tokens[i];
+	if (!relation) {
+		throw new ParseError('Expected relation name after "has"');
+	}
+	i++;
+
+	const check: ExistenceCheck = { type, relation };
+
+	// CLI-NQL Block 7: Check if this is a recursive relation
+	if (schema && currentTable) {
+		const qualifiedKey = `${currentTable}.${relation}`;
+		const recursiveInfo =
+			getRecursiveRelationInfo(qualifiedKey, schema) ||
+			getRecursiveRelationInfo(relation, schema);
+		if (recursiveInfo) {
+			check.recursive = recursiveInfo;
+		}
+	}
+
+	// Check for optional "where" clause
+	if (tokens[i]?.toLowerCase() === 'where') {
+		i++; // Skip 'where'
+		check.where = [];
+
+		// Parse conditions until we hit a non-condition keyword
+		while (i < tokens.length) {
+			const column = tokens[i];
+			const operator = tokens[i + 1];
+			const valueToken = tokens[i + 2];
+
+			if (!column || !operator || !valueToken) {
+				break;
+			}
+
+			// Stop if we hit a top-level keyword (not an operator or condition part)
+			const columnLower = column.toLowerCase();
+			if (
+				[
+					'include',
+					'limit',
+					'offset',
+					'order',
+					'orderby',
+					'select',
+					'group',
+					'having',
+					'distinct',
+				].includes(columnLower)
+			) {
+				break;
+			}
+
+			// Also stop if we hit another 'has' or 'not has' (new existence check)
+			if (columnLower === 'has' || columnLower === 'not') {
+				break;
+			}
+
+			// Parse the value (use parseExistenceValue for proper type handling)
+			const value = parseExistenceValue(valueToken);
+
+			check.where.push({
+				column,
+				operator,
+				value,
+			});
+
+			i += 3;
+
+			// Check for 'and' to continue
+			const nextToken = tokens[i]?.toLowerCase();
+			if (nextToken === 'and') {
+				// Check if next token after 'and' is a column (continue) or 'has'/'not has' (stop)
+				const afterAnd = tokens[i + 1]?.toLowerCase();
+				if (afterAnd === 'has' || afterAnd === 'not') {
+					// This 'and' connects to another existence check, not a condition
+					break;
+				}
+				i++; // Skip 'and' and continue parsing conditions
+			} else {
+				break;
+			}
+		}
+	}
+
+	return { check, nextIndex: i };
+}
+
+/**
+ * CLI-NQL: Parse a value for existence check where clauses.
+ * Handles: strings (quoted), numbers, booleans, null.
+ */
+function parseExistenceValue(token: string): unknown {
+	const trimmed = token.trim();
+
+	// null
+	if (trimmed.toLowerCase() === 'null') {
+		return null;
+	}
+
+	// boolean
+	if (trimmed.toLowerCase() === 'true') {
+		return true;
+	}
+	if (trimmed.toLowerCase() === 'false') {
+		return false;
+	}
+
+	// number (integer or float)
+	if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+		return trimmed.includes('.') ? parseFloat(trimmed) : parseInt(trimmed, 10);
+	}
+
+	// Quoted string - remove quotes
+	if (
+		(trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+		(trimmed.startsWith('"') && trimmed.endsWith('"'))
+	) {
+		return trimmed.slice(1, -1);
+	}
+
+	// Unquoted value - return as-is
+	return trimmed;
+}
 
 // =============================================================================
 // CLI-MUT: Mutation Constants and Helpers
@@ -243,6 +838,14 @@ export function parseInsert(
 		validateColumn(assignment.column, table, schema);
 	}
 
+	// CLI-NQL Block 6: Parse optional FROM clause for FK lookup or bulk insert
+	let fromClause: FromClause | undefined;
+	if (tokens[i]?.toLowerCase() === 'from') {
+		const result = parseFromClause(tokens, i);
+		fromClause = result.fromClause;
+		i = result.nextIndex;
+	}
+
 	// Check for execute immediate flag
 	const executeImmediate = tokens[i] === '!';
 	if (executeImmediate) {
@@ -253,8 +856,149 @@ export function parseInsert(
 		type: 'insert',
 		table,
 		assignments,
+		...(fromClause && { fromClause }),
 		executeImmediate,
 	};
+}
+
+/**
+ * CLI-NQL Block 6: Parse FROM clause for INSERT mutations
+ * Syntax: from [each] table [as alias] [where conditions] [for update [skip locked]]
+ */
+export function parseFromClause(
+	tokens: string[],
+	startIndex: number,
+): { fromClause: FromClause; nextIndex: number } {
+	let i = startIndex;
+
+	// Skip 'from' keyword
+	if (tokens[i]?.toLowerCase() !== 'from') {
+		throw new ParseError(`Expected 'from' keyword, got "${tokens[i]}"`, i);
+	}
+	i++;
+
+	// Check for 'each' keyword (bulk insert mode)
+	let bulk = false;
+	if (tokens[i]?.toLowerCase() === 'each') {
+		bulk = true;
+		i++;
+	}
+
+	// Parse source table name
+	const table = tokens[i];
+	if (!table) {
+		throw new ParseError('Expected table name after FROM', i);
+	}
+	i++;
+
+	// Check for optional alias (as alias)
+	let alias: string | undefined;
+	if (tokens[i]?.toLowerCase() === 'as') {
+		i++;
+		alias = tokens[i];
+		if (!alias) {
+			throw new ParseError('Expected alias after AS', i);
+		}
+		i++;
+	}
+
+	// Parse optional WHERE clause
+	let where:
+		| Array<{ column: string; operator: string; value: unknown }>
+		| undefined;
+	if (tokens[i]?.toLowerCase() === 'where') {
+		i++;
+		where = [];
+
+		while (i < tokens.length) {
+			const token = tokens[i];
+			if (!token) break;
+
+			// Stop on keywords that end the WHERE clause
+			const lowerToken = token.toLowerCase();
+			if (lowerToken === 'for' || lowerToken === '!') {
+				break;
+			}
+
+			// Handle 'and' connector
+			if (lowerToken === 'and') {
+				i++;
+				continue;
+			}
+
+			// Parse condition: column operator value
+			const column = tokens[i];
+			const operator = tokens[i + 1];
+			const valueToken = tokens[i + 2];
+
+			if (!column || !operator || valueToken === undefined) {
+				throw new ParseError('Incomplete WHERE condition in FROM clause', i);
+			}
+
+			// Parse value
+			let value: unknown;
+			const lowerValue = valueToken.toLowerCase();
+			if (lowerValue === 'true') {
+				value = true;
+			} else if (lowerValue === 'false') {
+				value = false;
+			} else if (lowerValue === 'null') {
+				value = null;
+			} else if (!Number.isNaN(Number(valueToken))) {
+				value = Number(valueToken);
+			} else {
+				// String value - remove quotes if present
+				value = valueToken.replace(/^["']|["']$/g, '');
+			}
+
+			where.push({ column, operator, value });
+			i += 3;
+
+			// Check for 'and' to continue
+			if (tokens[i]?.toLowerCase() !== 'and') {
+				break;
+			}
+		}
+	}
+
+	// Parse optional FOR UPDATE clause
+	let forUpdate = false;
+	let skipLocked = false;
+	if (tokens[i]?.toLowerCase() === 'for') {
+		if (tokens[i + 1]?.toLowerCase() === 'update') {
+			forUpdate = true;
+			i += 2;
+
+			// Check for SKIP LOCKED
+			if (
+				tokens[i]?.toLowerCase() === 'skip' &&
+				tokens[i + 1]?.toLowerCase() === 'locked'
+			) {
+				skipLocked = true;
+				i += 2;
+			}
+		}
+	}
+
+	const fromClause: FromClause = {
+		table,
+		bulk,
+	};
+
+	if (alias) {
+		fromClause.alias = alias;
+	}
+	if (where && where.length > 0) {
+		fromClause.where = where;
+	}
+	if (forUpdate) {
+		fromClause.forUpdate = true;
+		if (skipLocked) {
+			fromClause.skipLocked = true;
+		}
+	}
+
+	return { fromClause, nextIndex: i };
 }
 
 /**
@@ -630,6 +1374,8 @@ export interface ParsedAggregate {
 export interface ParsedQuery {
 	table: string;
 	where?: WhereClause[];
+	/** CLI-NQL: Existence checks (has/not has) */
+	existenceChecks?: ExistenceCheck[];
 	/** CLI-014: Now supports per-relation filters */
 	include?: ParsedInclude[];
 	limit?: number;
@@ -656,6 +1402,7 @@ export interface WhereClause {
 		| '<='
 		| 'like'
 		| 'in'
+		| 'not in'
 		| 'is'
 		| 'overlaps'
 		| 'contains'
@@ -736,6 +1483,10 @@ function tokenize(input: string): string[] {
 		if (inQuote) {
 			if (char === quoteChar) {
 				inQuote = false;
+				// CLI-NQL: Preserve closing double quote for identifiers
+				if (quoteChar === '"') {
+					current += '"';
+				}
 				tokens.push(current);
 				current = '';
 			} else {
@@ -756,6 +1507,12 @@ function tokenize(input: string): string[] {
 			}
 			inQuote = true;
 			quoteChar = char;
+			// CLI-NQL: Preserve double quotes for quoted identifiers
+			// Single quotes = string literal (stripped)
+			// Double quotes = identifier (preserved)
+			if (char === '"') {
+				current = '"'; // Start with the quote to mark it as quoted identifier
+			}
 		} else if (char === ' ' || char === '\t') {
 			if (current) {
 				tokens.push(current);
@@ -959,58 +1716,79 @@ function parseWhereCondition(
 
 	// Normalize operator
 	let operator: WhereClause['operator'];
-	switch (op.toLowerCase()) {
-		case '=':
-			operator = '=';
-			break;
-		case '!=':
-			operator = '!=';
-			break;
-		case '>':
-			operator = '>';
-			break;
-		case '<':
-			operator = '<';
-			break;
-		case '>=':
-			operator = '>=';
-			break;
-		case '<=':
-			operator = '<=';
-			break;
-		case 'like':
-			operator = 'like';
-			break;
-		case 'in':
-			operator = 'in';
-			break;
-		case 'is':
-			operator = 'is';
-			break;
-		// Range operators (PostgreSQL)
-		case 'overlaps':
-			operator = 'overlaps';
-			break;
-		case 'contains':
-			operator = 'contains';
-			break;
-		case 'containedby':
-			operator = 'containedBy';
-			break;
-		default:
-			throw new ParseError(`Unknown operator: ${op}`);
+	let valueOffset = 2; // Default: column op value (3 tokens)
+
+	// CLI-NQL: Handle "not in" as two-token operator
+	if (op.toLowerCase() === 'not' && tokens[index + 2]?.toLowerCase() === 'in') {
+		operator = 'not in';
+		valueOffset = 3; // column not in value (4 tokens)
+	} else {
+		switch (op.toLowerCase()) {
+			case '=':
+				operator = '=';
+				break;
+			case '!=':
+				operator = '!=';
+				break;
+			case '>':
+				operator = '>';
+				break;
+			case '<':
+				operator = '<';
+				break;
+			case '>=':
+				operator = '>=';
+				break;
+			case '<=':
+				operator = '<=';
+				break;
+			case 'like':
+				operator = 'like';
+				break;
+			case 'in':
+				operator = 'in';
+				break;
+			case 'is':
+				operator = 'is';
+				break;
+			// Range operators (PostgreSQL)
+			case 'overlaps':
+				operator = 'overlaps';
+				break;
+			case 'contains':
+				operator = 'contains';
+				break;
+			case 'containedby':
+				operator = 'containedBy';
+				break;
+			default:
+				throw new ParseError(`Unknown operator: ${op}`);
+		}
 	}
 
-	const valueToken = tokens[index + 2];
+	const valueToken = tokens[index + valueOffset];
 	if (!valueToken) {
 		throw new ParseError(`Expected value after "${op}"`);
+	}
+
+	// CLI-NQL: Check for subquery (value starts with '(' followed by table name)
+	if (isSubqueryStart(valueToken)) {
+		const { subquery, nextIndex } = parseSubquery(tokens, index + valueOffset);
+		return {
+			clause: {
+				column,
+				operator,
+				value: createSubqueryValue(subquery),
+			},
+			nextIndex,
+		};
 	}
 
 	const value = parseValue(valueToken);
 
 	return {
 		clause: { column, operator, value },
-		nextIndex: index + 3,
+		nextIndex: index + valueOffset + 1,
 	};
 }
 
@@ -1083,6 +1861,292 @@ function validateRelation(
 	throw new ParseError(
 		`Unknown relation: "${rel}"${suggestion ? `. Did you mean "${suggestion}"?` : ''}`,
 	);
+}
+
+/**
+ * CLI-NQL Block 7: Check if a relation is recursive and return its metadata.
+ *
+ * Supports extended schema format where relations can have a `recursive` property:
+ * ```
+ * relations: {
+ *   'categories.ancestors': {
+ *     kind: 'hasMany',
+ *     target: 'categories',
+ *     foreignKey: 'parentId',
+ *     recursive: { direction: 'up', through: 'parent', maxDepth: 10 }
+ *   }
+ * }
+ * ```
+ *
+ * @returns RecursiveRelationInfo if the relation is recursive, undefined otherwise
+ */
+export function getRecursiveRelationInfo(
+	relationKey: string,
+	schema: ResolvedSchema,
+): RecursiveRelationInfo | undefined {
+	const relation = schema.relations[relationKey] as
+		| (typeof schema.relations)[string]
+		| undefined;
+	if (!relation) return undefined;
+
+	// Check for extended schema format with recursive property
+	const extended = relation as {
+		recursive?: {
+			direction: RecursiveDirection;
+			through: string;
+			maxDepth?: number;
+		};
+	};
+
+	if (extended.recursive) {
+		return {
+			direction: extended.recursive.direction,
+			through: extended.recursive.through,
+			maxDepth: extended.recursive.maxDepth ?? 10,
+		};
+	}
+
+	return undefined;
+}
+
+// =============================================================================
+// CLI-NQL Block 8: Window Expression Parser
+// =============================================================================
+
+/** Window-only functions that can ONLY be used with OVER clause */
+const WINDOW_ONLY_FUNCTIONS = new Set([
+	'rank',
+	'dense_rank',
+	'row_number',
+	'lag',
+	'lead',
+]);
+
+/** Aggregate functions that can be used with OVER clause */
+const AGGREGATE_FUNCTIONS = new Set(['count', 'sum', 'avg', 'min', 'max']);
+
+/** All functions usable in window expressions */
+const WINDOW_FUNCTIONS = new Set([
+	...WINDOW_ONLY_FUNCTIONS,
+	...AGGREGATE_FUNCTIONS,
+]);
+
+/**
+ * CLI-NQL Block 8: Check if a token is a window function name.
+ */
+export function isWindowFunction(token: string): boolean {
+	return WINDOW_FUNCTIONS.has(token.toLowerCase());
+}
+
+/**
+ * CLI-NQL Block 8: Check if a token is a window-only function.
+ */
+export function isWindowOnlyFunction(token: string): boolean {
+	return WINDOW_ONLY_FUNCTIONS.has(token.toLowerCase());
+}
+
+/**
+ * CLI-NQL Block 8: Parse window order clause items.
+ * Handles: "order by price desc, name asc"
+ */
+function parseWindowOrderClause(
+	tokens: string[],
+	startIndex: number,
+): { items: import('./types.js').WindowOrderItem[]; nextIndex: number } {
+	const items: import('./types.js').WindowOrderItem[] = [];
+	let i = startIndex;
+
+	// Skip "order by"
+	if (
+		tokens[i]?.toLowerCase() === 'order' &&
+		tokens[i + 1]?.toLowerCase() === 'by'
+	) {
+		i += 2;
+	}
+
+	while (i < tokens.length) {
+		const token = tokens[i];
+		if (!token || token === ')' || token === 'as') break;
+
+		// Skip comma
+		if (token === ',') {
+			i++;
+			continue;
+		}
+
+		// Column name
+		const column = token;
+		i++;
+
+		// Optional direction
+		let direction: 'asc' | 'desc' = 'asc';
+		const nextToken = tokens[i]?.toLowerCase();
+		if (nextToken === 'asc' || nextToken === 'desc') {
+			direction = nextToken;
+			i++;
+		}
+
+		items.push({ column, direction });
+
+		// Check for comma to continue
+		if (tokens[i] !== ',') break;
+	}
+
+	return { items, nextIndex: i };
+}
+
+/**
+ * CLI-NQL Block 8: Parse window specification from OVER clause.
+ * Handles: "(partition by categoryId order by price desc)"
+ */
+function parseWindowSpec(
+	tokens: string[],
+	startIndex: number,
+): { spec: import('./types.js').WindowSpec; nextIndex: number } {
+	const spec: import('./types.js').WindowSpec = {};
+	let i = startIndex;
+
+	// Skip opening parenthesis
+	if (tokens[i] === '(') i++;
+
+	while (i < tokens.length && tokens[i] !== ')') {
+		const token = tokens[i]?.toLowerCase();
+
+		// PARTITION BY clause
+		if (token === 'partition' && tokens[i + 1]?.toLowerCase() === 'by') {
+			i += 2;
+			const partitionBy: string[] = [];
+
+			while (i < tokens.length) {
+				const col = tokens[i];
+				if (
+					!col ||
+					col === ')' ||
+					col.toLowerCase() === 'order' ||
+					col.toLowerCase() === 'as'
+				)
+					break;
+				if (col !== ',') {
+					partitionBy.push(col);
+				}
+				i++;
+			}
+
+			spec.partitionBy = partitionBy;
+		}
+		// ORDER BY clause
+		else if (token === 'order' && tokens[i + 1]?.toLowerCase() === 'by') {
+			const { items, nextIndex } = parseWindowOrderClause(tokens, i);
+			spec.orderBy = items;
+			i = nextIndex;
+		} else {
+			i++;
+		}
+	}
+
+	// Skip closing parenthesis
+	if (tokens[i] === ')') i++;
+
+	return { spec, nextIndex: i };
+}
+
+/**
+ * CLI-NQL Block 8: Parse a window expression.
+ *
+ * Syntax: function(args) over (partition by ... order by ...) [as alias]
+ *
+ * @example
+ * rank() over (partition by categoryId order by price desc) as priceRank
+ * sum(total) over (order by createdAt) as runningTotal
+ * lag(price, 1, 0) over (order by id)
+ */
+export function parseWindowExpression(
+	tokens: string[],
+	startIndex: number,
+): { expr: import('./types.js').ParsedWindowExpression; nextIndex: number } {
+	let i = startIndex;
+
+	// Get function name
+	const funcName = tokens[i]?.toLowerCase();
+	if (!funcName || !isWindowFunction(funcName)) {
+		throw new ParseError(`Expected window function, got: ${funcName}`, i);
+	}
+	i++;
+
+	// Expect opening parenthesis for function args
+	if (tokens[i] !== '(') {
+		throw new ParseError(`Expected '(' after ${funcName}`, i);
+	}
+	i++;
+
+	// Parse function arguments (until closing paren)
+	const args: string[] = [];
+	while (i < tokens.length && tokens[i] !== ')') {
+		const arg = tokens[i];
+		if (arg && arg !== ',') {
+			args.push(arg);
+		}
+		i++;
+	}
+
+	// Skip closing paren of function
+	if (tokens[i] === ')') i++;
+
+	// Expect "over" keyword
+	if (tokens[i]?.toLowerCase() !== 'over') {
+		throw new ParseError(`Expected 'over' after ${funcName}()`, i);
+	}
+	i++;
+
+	// Parse window spec
+	const { spec, nextIndex } = parseWindowSpec(tokens, i);
+	i = nextIndex;
+
+	// Optional alias
+	let alias: string | undefined;
+	if (tokens[i]?.toLowerCase() === 'as' && tokens[i + 1]) {
+		i++; // skip 'as'
+		alias = tokens[i];
+		i++;
+	}
+
+	return {
+		expr: {
+			function: funcName as import('./types.js').WindowFunction,
+			args,
+			spec,
+			...(alias && { alias }),
+		},
+		nextIndex: i,
+	};
+}
+
+/**
+ * CLI-NQL Block 8: Check if tokens at position start a window expression.
+ * Window expressions start with: function_name ( ... ) over
+ */
+export function isWindowExpression(
+	tokens: string[],
+	startIndex: number,
+): boolean {
+	const funcName = tokens[startIndex]?.toLowerCase();
+	if (!funcName || !isWindowFunction(funcName)) return false;
+
+	// Look for pattern: func ( ... ) over
+	let i = startIndex + 1;
+	if (tokens[i] !== '(') return false;
+
+	// Skip to closing paren
+	let depth = 1;
+	i++;
+	while (i < tokens.length && depth > 0) {
+		if (tokens[i] === '(') depth++;
+		else if (tokens[i] === ')') depth--;
+		i++;
+	}
+
+	// Check for 'over' keyword after function
+	return tokens[i]?.toLowerCase() === 'over';
 }
 
 /**
@@ -1312,33 +2376,50 @@ export function parseNaturalQuery(
 		switch (token) {
 			case 'where': {
 				// Parse where clauses (can have multiple with "and")
+				// CLI-NQL: Also handles existence checks (has/not has)
 				i++;
 
 				while (i < tokens.length) {
-					const { clause, nextIndex } = parseWhereCondition(tokens, i);
-
-					// CLI-014: Check if column is qualified (table.column)
-					if (clause.column.includes('.')) {
-						const [tablePrefix, ...columnParts] = clause.column.split('.');
-						if (tablePrefix) {
-							// Qualified column → store for distribution later
-							pendingQualifiedFilters.push({
-								targetTable: tablePrefix,
-								clause: { ...clause, column: columnParts.join('.') },
-							});
-						}
+					// CLI-NQL: Check for existence check (has/not has)
+					if (isExistenceCheck(tokens, i)) {
+						// Block 7: Pass schema and table for recursive relation detection
+						const { check, nextIndex } = parseExistenceCheck(
+							tokens,
+							i,
+							schema,
+							tableName,
+						);
+						result.existenceChecks = result.existenceChecks ?? [];
+						result.existenceChecks.push(check);
+						i = nextIndex;
 					} else {
-						// Unqualified column → implicit scoping to main table
-						result.where = result.where ?? [];
-						result.where.push(clause);
-					}
+						const { clause, nextIndex } = parseWhereCondition(tokens, i);
 
-					i = nextIndex;
+						// CLI-014: Check if column is qualified (table.column)
+						if (clause.column.includes('.')) {
+							const [tablePrefix, ...columnParts] = clause.column.split('.');
+							if (tablePrefix) {
+								// Qualified column → store for distribution later
+								pendingQualifiedFilters.push({
+									targetTable: tablePrefix,
+									clause: { ...clause, column: columnParts.join('.') },
+								});
+							}
+						} else {
+							// Unqualified column → implicit scoping to main table
+							result.where = result.where ?? [];
+							result.where.push(clause);
+						}
+
+						i = nextIndex;
+					}
 
 					// Check for "and" to continue
 					const nextToken = tokens[i]?.toLowerCase();
 					if (nextToken === 'and') {
 						i++;
+						// Check if next is existence check to handle "and has/not has"
+						// The existence check parser will handle "not has" as well
 					} else {
 						break;
 					}

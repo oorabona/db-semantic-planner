@@ -53,6 +53,7 @@ function createBatchState(overrides?: Partial<BatchState>): BatchState {
 		schemaName: undefined,
 		dbConnection: undefined,
 		explainMode: false,
+		parseMode: false,
 		...overrides,
 	};
 }
@@ -266,6 +267,70 @@ describe('processDotCommand', () => {
 			// Assert
 			expect(result.output).toContain('EXPLAIN mode: OFF');
 			expect(result.stateChange?.explainMode).toBe(false);
+		});
+	});
+
+	/**
+	 * SC-21 to SC-23: .parse command tests
+	 */
+	describe('.parse command', () => {
+		it('should toggle parse mode on when currently off (SC-21)', async () => {
+			// Arrange
+			const state = createBatchState({ parseMode: false });
+
+			// Act
+			const result = await processDotCommand('.parse', mockSchema, state);
+
+			// Assert
+			expect(result.output).toContain('Parse mode: ON');
+			expect(result.stateChange?.parseMode).toBe(true);
+		});
+
+		it('should toggle parse mode off when currently on (SC-23)', async () => {
+			// Arrange
+			const state = createBatchState({ parseMode: true });
+
+			// Act
+			const result = await processDotCommand('.parse', mockSchema, state);
+
+			// Assert
+			expect(result.output).toContain('Parse mode: OFF');
+			expect(result.stateChange?.parseMode).toBe(false);
+		});
+
+		it('should explicitly enable parse mode with ".parse on" (SC-21)', async () => {
+			// Arrange
+			const state = createBatchState({ parseMode: false });
+
+			// Act
+			const result = await processDotCommand('.parse on', mockSchema, state);
+
+			// Assert
+			expect(result.output).toContain('Parse mode: ON');
+			expect(result.stateChange?.parseMode).toBe(true);
+		});
+
+		it('should explicitly disable parse mode with ".parse off" (SC-23)', async () => {
+			// Arrange
+			const state = createBatchState({ parseMode: true });
+
+			// Act
+			const result = await processDotCommand('.parse off', mockSchema, state);
+
+			// Assert
+			expect(result.output).toContain('Parse mode: OFF');
+			expect(result.stateChange?.parseMode).toBe(false);
+		});
+
+		it('should include .parse in help text (SC-22)', async () => {
+			// Arrange
+			const state = createBatchState();
+
+			// Act
+			const result = await processDotCommand('.help', mockSchema, state);
+
+			// Assert
+			expect(result.output).toContain('.parse');
 		});
 	});
 });

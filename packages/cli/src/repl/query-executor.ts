@@ -15,10 +15,12 @@ import {
 	type Dump,
 	distinct as distinctField,
 	eq,
+	exists,
 	gt,
 	gte,
 	type IncludeOptions,
 	type IncludeOptionsWithRecursive,
+	inArray,
 	isNotNull,
 	isNull,
 	like,
@@ -26,10 +28,14 @@ import {
 	lte,
 	type MutationDump,
 	neq,
+	notExists,
 	rangeContainedBy,
 	rangeContains,
 	rangeOverlaps,
+	type ScalarSubqueryIntent,
 	type WhereIntent,
+	type WhereRelationFilterIntent,
+	type WhereSubqueryIntent,
 } from '@dbsp/core';
 import type {
 	ParsedAggregate,
@@ -40,8 +46,12 @@ import type {
 import type {
 	AliasingMode,
 	DialectMode,
+	ExistenceCheck,
 	IncludeStrategyMode,
+	MutationValue,
 	ParsedMutation,
+	ParsedSubquery,
+	SubqueryValue,
 } from './types.js';
 
 /**
@@ -131,7 +141,9 @@ function buildIncludeOptions(
 
 	// Convert where clauses to filter
 	if (inc.where && inc.where.length > 0) {
-		const filters = inc.where.map((clause) => whereClauseToFilter(clause));
+		const filters = inc.where.map((clause) =>
+			whereClauseToFilter(clause, schema),
+		);
 
 		if (filters.length > 0) {
 			if (filters.length === 1) {
@@ -187,52 +199,272 @@ function buildIncludeOptions(
 	};
 }
 
-/**
- * Convert a WhereClause to a filter expression for the ORM
- */
-function whereClauseToFilter(clause: WhereClause): WhereIntent {
-	const { column, operator, value } = clause;
+// =============================================================================
+// CLI-NQL Block 9: Path Expression Resolution
+// =============================================================================
 
+/**
+ * CLI-NQL Block 9: Check if a column is a path expression (contains dots).
+ * A path like "category.parent.name" indicates relation traversal.
+ * Note: Quoted identifiers (e.g., "table"."column") would contain dots too,
+ * but the parser resolves those already, so here we detect unquoted paths.
+ */
+function isPathExpression(column: string): boolean {
+	// Simple check: contains dot and doesn't start/end with quotes
+	// More complex quoted identifier handling could be added if needed
+	return column.includes('.') && !column.startsWith('"');
+}
+
+/**
+ * CLI-NQL Block 9: Parse path segments from a column string.
+ * "category.parent.name" → ["category", "parent", "name"]
+ */
+function parsePathSegments(column: string): string[] {
+	return column.split('.');
+}
+
+/**
+ * CLI-NQL Block 9: Create a simple comparison filter for the final column.
+ */
+function createComparisonFilter(
+	field: string,
+	operator: WhereClause['operator'],
+	value: unknown,
+): WhereIntent {
 	switch (operator) {
 		case '=':
-			return eq(column, value);
+			return eq(field, value);
 		case '!=':
-			return neq(column, value);
+			return neq(field, value);
 		case '>':
-			return gt(column, value as number);
+			return gt(field, value as number);
 		case '<':
-			return lt(column, value as number);
+			return lt(field, value as number);
 		case '>=':
-			return gte(column, value as number);
+			return gte(field, value as number);
 		case '<=':
-			return lte(column, value as number);
+			return lte(field, value as number);
 		case 'like':
-			return like(column, value as string);
+			return like(field, value as string);
 		case 'is':
-			// "is null" or "is not null"
 			if (value === null) {
-				return isNull(column);
+				return isNull(field);
 			}
-			return isNotNull(column);
+			return isNotNull(field);
 		case 'in':
-			// For 'in' operator, we need inArray - but for simplicity,
-			// we'll use eq for single values for now
-			return eq(column, value);
+			// CLI-NQL Block 10: IN with array of values
+			if (Array.isArray(value)) {
+				return inArray(field, value);
+			}
+			// Subquery case handled separately
+			return eq(field, value);
+		case 'not in':
+			// CLI-NQL Block 10: NOT IN - for simple values, convert to neq
+			// Subquery case handled separately
+			return neq(field, value);
 		case 'overlaps':
-			// Range overlaps operator (&&)
-			return rangeOverlaps(column, value as { lower: unknown; upper: unknown });
+			return rangeOverlaps(field, value as { lower: unknown; upper: unknown });
 		case 'contains':
-			// Range contains operator (@>) - range contains element or range
-			return rangeContains(column, value);
+			return rangeContains(field, value);
 		case 'containedBy':
-			// Range contained by operator (<@) - range is contained by another
 			return rangeContainedBy(
-				column,
+				field,
 				value as { lower: unknown; upper: unknown },
 			);
 		default:
 			throw new Error(`Unsupported operator: ${operator}`);
 	}
+}
+
+/**
+ * CLI-NQL Block 9: Convert a path-based WHERE clause to nested relationFilter.
+ *
+ * Example: "category.parent.name = 'X'" becomes:
+ * {
+ *   kind: 'relationFilter',
+ *   relation: 'category',
+ *   mode: 'some',
+ *   where: {
+ *     kind: 'relationFilter',
+ *     relation: 'parent',
+ *     mode: 'some',
+ *     where: { kind: 'comparison', field: 'name', operator: 'eq', value: 'X' }
+ *   }
+ * }
+ *
+ * This generates N-level JOINs in the SQL compiler.
+ */
+function pathToRelationFilter(
+	clause: WhereClause,
+	_schema: ResolvedSchema,
+): WhereIntent {
+	const segments = parsePathSegments(clause.column);
+
+	if (segments.length < 2) {
+		// Not a path, just a simple column - shouldn't happen since we check isPathExpression first
+		return createComparisonFilter(clause.column, clause.operator, clause.value);
+	}
+
+	// Last segment is the field to compare (guaranteed to exist since length >= 2)
+	const fieldName = segments[segments.length - 1] as string;
+	// All segments except last are relations to traverse
+	const relations = segments.slice(0, -1);
+
+	// Create the innermost comparison
+	let currentFilter: WhereIntent = createComparisonFilter(
+		fieldName,
+		clause.operator,
+		clause.value,
+	);
+
+	// Wrap in relationFilter from inside out (reverse order)
+	for (let i = relations.length - 1; i >= 0; i--) {
+		const relationName = relations[i] as string;
+		const relationFilter: WhereRelationFilterIntent = {
+			kind: 'relationFilter',
+			relation: relationName,
+			where: currentFilter,
+			mode: 'some',
+		};
+		currentFilter = relationFilter;
+	}
+
+	return currentFilter;
+}
+
+// =============================================================================
+// CLI-NQL Block 10: Subquery Support
+// =============================================================================
+
+/**
+ * CLI-NQL Block 10: Type guard to check if a value is a SubqueryValue.
+ * SubqueryValue has `type: 'subquery'` and a `subquery` property.
+ */
+function isSubqueryValue(value: unknown): value is SubqueryValue {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		'type' in value &&
+		(value as { type: unknown }).type === 'subquery' &&
+		'subquery' in value
+	);
+}
+
+/**
+ * CLI-NQL Block 10: Convert a ParsedSubquery to ScalarSubqueryIntent.
+ * This creates the intent structure needed by the planner/compiler.
+ */
+function parsedSubqueryToIntent(subq: ParsedSubquery): ScalarSubqueryIntent {
+	// Build WHERE filter if present
+	let whereFilter: WhereIntent | undefined;
+	if (subq.where && subq.where.length > 0) {
+		const filters = subq.where.map((clause) =>
+			createComparisonFilter(
+				clause.column,
+				clause.operator as WhereClause['operator'],
+				clause.value,
+			),
+		);
+		whereFilter = filters.length === 1 ? filters[0] : and(filters);
+	}
+
+	// Build intent with optional where
+	const intent: ScalarSubqueryIntent = whereFilter
+		? {
+				from: subq.table,
+				select: subq.selectColumn ?? 'id',
+				where: whereFilter,
+			}
+		: {
+				from: subq.table,
+				select: subq.selectColumn ?? 'id',
+			};
+
+	return intent;
+}
+
+/**
+ * CLI-NQL Block 10: Create a WhereSubqueryIntent for scalar subquery comparison.
+ * Example: `categoryId = (categories where name = 'X')` generates:
+ * { kind: 'subquery', field: 'categoryId', operator: 'eq', subquery: {...} }
+ */
+function subqueryToWhereIntent(
+	field: string,
+	operator: WhereClause['operator'],
+	subq: ParsedSubquery,
+): WhereSubqueryIntent {
+	// Map parsed operator to comparison operator
+	const opMap: Record<string, 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte'> = {
+		'=': 'eq',
+		'!=': 'neq',
+		'>': 'gt',
+		'>=': 'gte',
+		'<': 'lt',
+		'<=': 'lte',
+	};
+
+	const comparisonOp = opMap[operator] ?? 'eq';
+
+	return {
+		kind: 'subquery',
+		field,
+		operator: comparisonOp,
+		subquery: parsedSubqueryToIntent(subq),
+	};
+}
+
+/**
+ * CLI-NQL Block 10: Convert an ExistenceCheck to WhereIntent.
+ * Generates EXISTS or NOT EXISTS subquery.
+ */
+function existenceCheckToIntent(
+	check: ExistenceCheck,
+): WhereIntent {
+	// Build optional WHERE filter for the existence check
+	let whereFilter: WhereIntent | undefined;
+	if (check.where && check.where.length > 0) {
+		const filters = check.where.map((clause) =>
+			createComparisonFilter(
+				clause.column,
+				clause.operator as WhereClause['operator'],
+				clause.value,
+			),
+		);
+		whereFilter = filters.length === 1 ? filters[0] : and(filters);
+	}
+
+	// Use exists/notExists helper from core
+	if (check.type === 'exists') {
+		return exists(check.relation, whereFilter ? { where: whereFilter } : undefined);
+	}
+	return notExists(check.relation, whereFilter ? { where: whereFilter } : undefined);
+}
+
+/**
+ * Convert a WhereClause to a filter expression for the ORM.
+ * CLI-NQL Block 9: Supports path expressions for N-level JOINs.
+ * CLI-NQL Block 10: Supports subquery values in comparisons.
+ */
+function whereClauseToFilter(
+	clause: WhereClause,
+	schema?: ResolvedSchema,
+): WhereIntent {
+	const { column, value, operator } = clause;
+
+	// CLI-NQL Block 10: Check for subquery values
+	// Subqueries can appear in scalar comparisons (=, !=, etc.) or IN/NOT IN
+	if (isSubqueryValue(value)) {
+		return subqueryToWhereIntent(column, operator, value.subquery);
+	}
+
+	// CLI-NQL Block 9: Check for path expressions (e.g., "category.parent.name")
+	// Path expressions generate nested relationFilter intents for N-level JOINs
+	if (schema && isPathExpression(column)) {
+		return pathToRelationFilter(clause, schema);
+	}
+
+	// Simple column - use direct comparison
+	return createComparisonFilter(column, operator, value);
 }
 
 /**
@@ -323,7 +555,15 @@ export function executeQuery(
 		// Add where clauses
 		if (query.where && query.where.length > 0) {
 			for (const clause of query.where) {
-				const filter = whereClauseToFilter(clause);
+				const filter = whereClauseToFilter(clause, schema);
+				builder = builder.where(filter);
+			}
+		}
+
+		// CLI-NQL Block 10: Add existence checks (has/not has)
+		if (query.existenceChecks && query.existenceChecks.length > 0) {
+			for (const check of query.existenceChecks) {
+				const filter = existenceCheckToIntent(check);
 				builder = builder.where(filter);
 			}
 		}
@@ -352,7 +592,7 @@ export function executeQuery(
 		// CLI-016: Add having
 		if (query.having && query.having.length > 0) {
 			for (const clause of query.having) {
-				const filter = whereClauseToFilter(clause);
+				const filter = whereClauseToFilter(clause, schema);
 				builder = builder.having(filter);
 			}
 		}
@@ -507,6 +747,112 @@ function assignmentsToValues(
 	return values;
 }
 
+
+/**
+ * CLI-NQL Block 11: Build INSERT FROM SQL (SC-12 to SC-14)
+ *
+ * Handles two cases:
+ * 1. Non-bulk (FK lookup): INSERT with scalar subquery
+ *    Example: products insert title = 'Phone', categoryId = id from categories where name = 'X'
+ *    SQL: INSERT INTO products (title, "categoryId") VALUES ('Phone', (SELECT id FROM categories WHERE name = $1))
+ *
+ * 2. Bulk: INSERT...SELECT
+ *    Example: products insert title = name, categoryId = cat_id from each source_data where active = true
+ *    SQL: INSERT INTO products (title, "categoryId") SELECT name, cat_id FROM source_data WHERE active = true
+ */
+function buildInsertFromSql(
+	mutation: ParsedMutation,
+	schemaName?: string,
+): { sql: string; params: unknown[] } {
+	const fromClause = mutation.fromClause!;
+	const assignments = mutation.assignments!;
+	const params: unknown[] = [];
+
+	// Build column list
+	const columns = assignments.map((a) => `"${a.column}"`).join(', ');
+	const tableName = schemaName
+		? `"${schemaName}"."${mutation.table}"`
+		: `"${mutation.table}"`;
+	const sourceTable = schemaName
+		? `"${schemaName}"."${fromClause.table}"`
+		: `"${fromClause.table}"`;
+
+	// Helper: check if value is a column reference (unquoted identifier in raw)
+	const isColumnRef = (val: MutationValue): boolean => {
+		const raw = val.raw.trim();
+		// If raw doesn't start with quotes and looks like an identifier, it's a column ref
+		return (
+			val.type === 'string' &&
+			!raw.startsWith('"') &&
+			!raw.startsWith("'") &&
+			/^[a-z_][a-z0-9_]*$/i.test(raw)
+		);
+	};
+
+	if (fromClause.bulk) {
+		// SC-14: Bulk INSERT...SELECT
+		// INSERT INTO target (cols) SELECT (exprs) FROM source WHERE ...
+		const selectExprs = assignments.map((a) => {
+			const val = a.value;
+			// If it's an unquoted identifier, treat as column reference
+			if (isColumnRef(val)) {
+				return `"${val.value}"`;
+			}
+			// Otherwise it's a literal
+			params.push(val.value);
+			return `$${params.length}`;
+		}).join(', ');
+
+		let sql = `INSERT INTO ${tableName} (${columns}) SELECT ${selectExprs} FROM ${sourceTable}`;
+
+		// Add WHERE clause
+		if (fromClause.where && fromClause.where.length > 0) {
+			const whereClauses = fromClause.where.map((w) => {
+				params.push(w.value);
+				return `"${w.column}" ${w.operator} $${params.length}`;
+			});
+			sql += ` WHERE ${whereClauses.join(' AND ')}`;
+		}
+
+		return { sql, params };
+	}
+
+	// SC-12, SC-13: Non-bulk (scalar subquery for FK lookup)
+	// INSERT INTO target (cols) VALUES (literal, (SELECT col FROM source WHERE ...))
+	const valueExprs = assignments.map((a) => {
+		const val = a.value;
+		// If it's an unquoted identifier, treat as column reference from source
+		if (isColumnRef(val)) {
+			// Build scalar subquery
+			let subquery = `SELECT "${val.value}" FROM ${sourceTable}`;
+
+			if (fromClause.where && fromClause.where.length > 0) {
+				const whereClauses = fromClause.where.map((w) => {
+					params.push(w.value);
+					return `"${w.column}" ${w.operator} $${params.length}`;
+				});
+				subquery += ` WHERE ${whereClauses.join(' AND ')}`;
+			}
+
+			// SC-13: Add FOR UPDATE clause
+			if (fromClause.forUpdate) {
+				subquery += ' FOR UPDATE';
+				if (fromClause.skipLocked) {
+					subquery += ' SKIP LOCKED';
+				}
+			}
+
+			return `(${subquery})`;
+		}
+		// Literal value
+		params.push(val.value);
+		return `$${params.length}`;
+	}).join(', ');
+
+	const sql = `INSERT INTO ${tableName} (${columns}) VALUES (${valueExprs})`;
+	return { sql, params };
+}
+
 /**
  * CLI-MUT: Execute a mutation (INSERT/UPDATE/DELETE/UPSERT)
  *
@@ -559,6 +905,21 @@ export function executeMutation(
 						error: 'INSERT requires at least one assignment',
 					};
 				}
+
+				// CLI-NQL Block 11: Handle INSERT FROM clause (SC-12 to SC-14)
+				if (mutation.fromClause) {
+					const { sql, params } = buildInsertFromSql(
+						mutation,
+						options?.schemaName,
+					);
+					return {
+						type: 'insert',
+						sql,
+						params,
+						dryRun: !mutation.executeImmediate,
+					};
+				}
+
 				const values = assignmentsToValues(mutation.assignments);
 				dump = orm.insert(mutation.table).values(values).dump();
 				break;
@@ -586,7 +947,7 @@ export function executeMutation(
 				const setValues = assignmentsToValues(mutation.assignments);
 				let updateBuilder = orm.update(mutation.table).set(setValues);
 				for (const clause of mutation.where) {
-					const filter = whereClauseToFilter(clause);
+					const filter = whereClauseToFilter(clause, schema);
 					updateBuilder = updateBuilder.where(filter);
 				}
 				dump = updateBuilder.dump();
@@ -605,7 +966,7 @@ export function executeMutation(
 				}
 				let deleteBuilder = orm.delete(mutation.table);
 				for (const clause of mutation.where) {
-					const filter = whereClauseToFilter(clause);
+					const filter = whereClauseToFilter(clause, schema);
 					deleteBuilder = deleteBuilder.where(filter);
 				}
 				dump = deleteBuilder.dump();

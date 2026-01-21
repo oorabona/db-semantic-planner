@@ -1,69 +1,62 @@
-# TODO: CLI-MUT (REPL Mutation Syntax)
+# TODO: CLI-NQL (Natural Query Language v1.0)
 
-**Spec:** docs/plans/CLI-MUT-repl-mutation-syntax.md
-**Status:** ✅ COMPLETE (2026-01-20)
+**Spec:** docs/plans/CLI-NQL-natural-query-language.md
+**Status:** ✅ COMPLETE (2026-01-21)
 
 ## Overview
 
-Extend REPL natural query language with INSERT/UPDATE/DELETE/UPSERT support.
+Extend REPL natural query language to be a complete "new SQL" - simpler for humans and AI.
 
 **Key Features:**
-- SQL-like `key = value` syntax
-- Dry-run default, `!` suffix to execute
-- `.explain` toggle for EXPLAIN output
-- Column validation against schema
-- Bulk operation confirmation (>100 rows)
+- Relation path traversal (N levels): `product.category.parent.name`
+- Quoted identifiers for column escape: `"children"` forces column interpretation
+- Subqueries: `= (subquery)` and `in (subquery)`
+- Existence checks: `has`/`not has` (EXISTS)
+- FK lookup INSERT: `from table where`
+- Recursive relations: ancestors/descendants
+- Window functions: `rank() over (partition by ...)`
+- Parse tree output: `.parse` command
+- Mandatory comma separators for lists
 
 ---
 
 ## Pending
 
-(none)
+(None - all blocks completed)
 
 ---
 
 ## In Progress
 
-(none)
+(None)
 
 ---
 
-## Completed
+## Completed (CLI-NQL)
+
+- [x] ✅ Block 1: Schema Relation Types (2026-01-21)
+- [x] ✅ Block 2: Path Expression Parser — N-level paths + quoted identifiers + comma separators (2026-01-21)
+- [x] ✅ Block 3: Subquery Parser — `(table query_body)` syntax (2026-01-21)
+- [x] ✅ Block 4: Existence Parser — `has`/`not has` keywords (2026-01-21)
+- [x] ✅ Block 5: IN/NOT IN Subquery — Extend `parseWhereCondition()` (2026-01-21)
+- [x] ✅ Block 6: INSERT FROM Parser — `from table where` and `for update` (2026-01-21)
+- [x] ✅ Block 7: Recursive Relations Parser — ancestors/descendants from schema (2026-01-21)
+- [x] ✅ Block 8: Window Expression Parser — `over (partition by ... order by ...)` (2026-01-21)
+- [x] ✅ Block 9: Query Executor - Path Resolution — N-level JOINs and CTEs (2026-01-21)
+- [x] ✅ Block 10: Query Executor - Subqueries — Scalar, IN, EXISTS generation (2026-01-21)
+- [x] ✅ Block 11: INSERT FROM Executor — FK lookup SQL generation (2026-01-21)
+- [x] ✅ Block 12: .parse Command — Parse tree toggle (2026-01-21)
+- [x] ✅ Block 13: Documentation & Tests — QUICKSTART and .dbsp updates (2026-01-21)
+
+**Total: ~20h (13 blocks)**
+
+## Completed (CLI-MUT - Previous Sprint)
 
 - [x] ✅ Block 5: Query Executor Integration (2026-01-20)
-  - executeMutation() function with INSERT/UPDATE/DELETE/UPSERT support
-  - formatMutationResult() for display formatting
-  - MutationExecutionResult type with dryRun indicator
-  - REPL index.tsx integration for mutation handling
-  - SC-13 (column validation), SC-14 (SQL injection prevention) scenarios covered
-  - 15 new integration tests
-
 - [x] ✅ Block 4: UPSERT Parser & Explain Toggle (2026-01-20)
-  - parseUpsert() with DO NOTHING / DO UPDATE SET actions
-  - Single and composite conflict column support (ON col / ON (col1, col2))
-  - .explain dot command with on/off/toggle
-  - Added explainMode to BatchState
-  - SC-10 to SC-12, SC-15 to SC-17 scenarios covered
-  - 17 new unit tests (12 UPSERT + 5 .explain)
-
 - [x] ✅ Block 1: Types & Parser Foundation (2026-01-20)
-  - Added MutationType, ParsedMutation, Assignment, MutationValue, OnConflictClause types
-  - Added explainMode to ReplState
-  - Added MUTATION_KEYWORDS, isMutationKeyword(), parseMutationValue() helpers
-  - 22 new unit tests for mutation helpers
-
 - [x] ✅ Block 2: INSERT Parser (2026-01-20)
-  - Added parseAssignment(), parseAssignments(), validateColumn(), parseInsert()
-  - Added parseMutation() dispatcher function
-  - SC-01, SC-02, SC-03 scenarios covered
-  - 25 new unit tests for INSERT parsing
-
 - [x] ✅ Block 3: UPDATE & DELETE Parsers (2026-01-20)
-  - Added parseUpdate() with SET clause and WHERE requirement
-  - Added parseDelete() with WHERE safety check
-  - Updated parseMutation() dispatcher for UPDATE/DELETE
-  - SC-04 to SC-09 scenarios covered
-  - 17 new unit tests for UPDATE/DELETE parsing
 
 ---
 
@@ -72,3 +65,4 @@ Extend REPL natural query language with INSERT/UPDATE/DELETE/UPSERT support.
 - [ ] `.load <table> <file>` - Bulk CSV/JSON import
 - [ ] RETURNING clause support
 - [ ] Transaction support (BEGIN/COMMIT/ROLLBACK)
+- [ ] Set operations (UNION, INTERSECT, EXCEPT)

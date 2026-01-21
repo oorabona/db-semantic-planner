@@ -1,4 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import type { RelationIR } from './model-ir.js';
+import {
+	createRecursiveMetadata,
+	getRelationKind,
+	isRecursiveRelation,
+	isSelfReferential,
+} from './model-ir.js';
 import {
 	belongsTo,
 	belongsToMany,
@@ -519,6 +526,212 @@ describe('ModelIR', () => {
 
 			// Columns array should be frozen
 			expect(Object.isFrozen(usersTable?.columns)).toBe(true);
+		});
+	});
+});
+
+// ============================================================================
+// CLI-NQL: Relation Kind Helpers Tests
+// ============================================================================
+
+describe('CLI-NQL: Relation Kind Helpers', () => {
+	// Helper to create test RelationIR objects
+	const createRelation = (
+		overrides: Partial<RelationIR>
+	): RelationIR => ({
+		name: 'testRelation',
+		type: 'hasMany',
+		source: 'sourceTable',
+		target: 'targetTable',
+		cardinality: 'many',
+		optionality: 'optional',
+		includeStrategy: 'auto',
+		filterStrategy: 'auto',
+		joinDefault: 'auto',
+		...overrides,
+	});
+
+	describe('getRelationKind', () => {
+		describe('when relation is non-recursive', () => {
+			it('should return many-to-one for belongsTo', () => {
+				// Arrange
+				const relation = createRelation({ type: 'belongsTo' });
+
+				// Act
+				const kind = getRelationKind(relation);
+
+				// Assert
+				expect(kind).toBe('many-to-one');
+			});
+
+			it('should return many-to-one for hasOne', () => {
+				// Arrange
+				const relation = createRelation({ type: 'hasOne' });
+
+				// Act
+				const kind = getRelationKind(relation);
+
+				// Assert
+				expect(kind).toBe('many-to-one');
+			});
+
+			it('should return one-to-many for hasMany', () => {
+				// Arrange
+				const relation = createRelation({ type: 'hasMany' });
+
+				// Act
+				const kind = getRelationKind(relation);
+
+				// Assert
+				expect(kind).toBe('one-to-many');
+			});
+
+			it('should return many-to-many for belongsToMany', () => {
+				// Arrange
+				const relation = createRelation({
+					type: 'belongsToMany',
+					through: 'junctionTable',
+				});
+
+				// Act
+				const kind = getRelationKind(relation);
+
+				// Assert
+				expect(kind).toBe('many-to-many');
+			});
+		});
+
+		describe('when relation is recursive', () => {
+			it('should return recursive-up for recursive up direction', () => {
+				// Arrange
+				const relation = createRelation({
+					source: 'categories',
+					target: 'categories',
+					recursive: {
+						direction: 'up',
+						maxDepth: 10,
+						through: 'parent',
+					},
+				});
+
+				// Act
+				const kind = getRelationKind(relation);
+
+				// Assert
+				expect(kind).toBe('recursive-up');
+			});
+
+			it('should return recursive-down for recursive down direction', () => {
+				// Arrange
+				const relation = createRelation({
+					source: 'categories',
+					target: 'categories',
+					recursive: {
+						direction: 'down',
+						maxDepth: 10,
+						through: 'children',
+					},
+				});
+
+				// Act
+				const kind = getRelationKind(relation);
+
+				// Assert
+				expect(kind).toBe('recursive-down');
+			});
+		});
+	});
+
+	describe('isRecursiveRelation', () => {
+		it('should return true for relation with recursive metadata', () => {
+			// Arrange
+			const relation = createRelation({
+				recursive: {
+					direction: 'up',
+					maxDepth: 10,
+					through: 'parent',
+				},
+			});
+
+			// Act & Assert
+			expect(isRecursiveRelation(relation)).toBe(true);
+		});
+
+		it('should return false for relation without recursive metadata', () => {
+			// Arrange
+			const relation = createRelation({});
+
+			// Act & Assert
+			expect(isRecursiveRelation(relation)).toBe(false);
+		});
+
+		it('should narrow type when true', () => {
+			// Arrange
+			const relation = createRelation({
+				recursive: {
+					direction: 'down',
+					maxDepth: 5,
+					through: 'children',
+				},
+			});
+
+			// Act & Assert
+			if (isRecursiveRelation(relation)) {
+				// Type should be narrowed - recursive is guaranteed
+				expect(relation.recursive.direction).toBe('down');
+				expect(relation.recursive.maxDepth).toBe(5);
+				expect(relation.recursive.through).toBe('children');
+			}
+		});
+	});
+
+	describe('isSelfReferential', () => {
+		it('should return true when source equals target', () => {
+			// Arrange
+			const relation = createRelation({
+				source: 'categories',
+				target: 'categories',
+			});
+
+			// Act & Assert
+			expect(isSelfReferential(relation)).toBe(true);
+		});
+
+		it('should return false when source differs from target', () => {
+			// Arrange
+			const relation = createRelation({
+				source: 'posts',
+				target: 'users',
+			});
+
+			// Act & Assert
+			expect(isSelfReferential(relation)).toBe(false);
+		});
+	});
+
+	describe('createRecursiveMetadata', () => {
+		it('should create metadata with default maxDepth', () => {
+			// Act
+			const metadata = createRecursiveMetadata('up', 'parent');
+
+			// Assert
+			expect(metadata).toEqual({
+				direction: 'up',
+				maxDepth: 10,
+				through: 'parent',
+			});
+		});
+
+		it('should create metadata with custom maxDepth', () => {
+			// Act
+			const metadata = createRecursiveMetadata('down', 'children', 5);
+
+			// Assert
+			expect(metadata).toEqual({
+				direction: 'down',
+				maxDepth: 5,
+				through: 'children',
+			});
 		});
 	});
 });

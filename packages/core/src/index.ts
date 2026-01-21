@@ -24,10 +24,22 @@ export type {
 	ModelIR,
 	OnDeleteAction,
 	Optionality,
+	// CLI-NQL: Recursive relation metadata
+	RecursiveMetadata,
 	RelationIR,
+	// CLI-NQL: Relation kind (database perspective)
+	RelationKind,
 	// Relation types
 	RelationType,
 	TableIR,
+} from './model-ir.js';
+
+// CLI-NQL: Relation kind helpers
+export {
+	createRecursiveMetadata,
+	getRelationKind,
+	isRecursiveRelation,
+	isSelfReferential,
 } from './model-ir.js';
 
 // ============================================================================

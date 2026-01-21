@@ -46,7 +46,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 |-------|---------|----------|---------|--------|
 | core | `packages/core` | [Overview](plans/core-OVERVIEW.md) | [TODO](../TODO_CORE.md) | ✅ Complete |
 | adapter | `packages/adapter-kysely` | [Overview](plans/adapter-OVERVIEW.md) | [TODO](../TODO_ADAPTER.md) | ✅ Complete |
-| cli | `packages/cli` | [CLI Usage](CLI_USAGE.md) | [TODO](../TODO.md) | ✅ Complete |
+| cli | `packages/cli` | [CLI Usage](CLI_USAGE.md) | [TODO](../TODO_CLI.md) | ✅ Complete |
 | mcp-server | `packages/mcp-server` | [Brief](briefs/mcp-server.md) | [TODO](../TODO_MCP.md) | 🟡 Ready |
 
 **Note:** DX layer (ORM API, filters, query builders) is part of `packages/core/src/dx/` since ARCH-001.
@@ -81,6 +81,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | DX-022 | [Recursive via include()](plans/DX-022-recursive-include.md) | dx | ✅ canonical |
 | P3-A | [Window Functions](specs/P3-A-window-functions.md) | core, adapter, dx | ✅ canonical |
 | ARCH-002 | [One Ring Architecture](specs/ARCH-002-one-ring.md) | schema, cli, core | ✅ canonical |
+| CLI-NQL | [Natural Query Language v1.0](plans/CLI-NQL-natural-query-language.md) | cli | ✅ canonical |
 
 ## Golden Query Tests - ✅ Complete
 

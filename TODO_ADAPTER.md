@@ -233,6 +233,14 @@ eb(eb.ref('prev.path'), '||', eb.ref('node.${traversal.nodeId}')).as('path')
 
 - [ ] `LockIntent` type (future)
 - [ ] Kysely's native `forUpdate()` + SKIP LOCKED
+- [ ] **Atomic Lock+Update syntax** (decided 2026-01-20):
+  ```
+  jobs select where status = "pending" for update skip locked limit 1
+    then update set status = "processing"
+  ```
+  - Generates single CTE query (no session state needed)
+  - Compatible with existing CTE infrastructure
+  - Extensible: `then delete`, `then insert` possible
 
 ### P3-E: Multi-dialect FTS (future)
 

@@ -5,7 +5,11 @@
 import type { ResolvedSchema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import {
+	getRecursiveRelationInfo,
 	isMutationKeyword,
+	isWindowExpression,
+	isWindowFunction,
+	isWindowOnlyFunction,
 	MUTATION_KEYWORDS,
 	ParseError,
 	parseAssignment,
@@ -18,6 +22,7 @@ import {
 	parseNaturalQuery,
 	parseUpdate,
 	parseUpsert,
+	parseWindowExpression,
 	validateColumn,
 } from './parser.js';
 
@@ -108,6 +113,71 @@ const qualifiedSchema: ResolvedSchema = {
 	},
 };
 
+// Mock schema with recursive relations for Block 7 tests
+const recursiveSchema: ResolvedSchema = {
+	tables: {
+		categories: {
+			id: { type: 'integer', nullable: false },
+			name: { type: 'text', nullable: false },
+			parentId: { type: 'integer', nullable: true },
+		},
+		employees: {
+			id: { type: 'integer', nullable: false },
+			name: { type: 'text', nullable: false },
+			managerId: { type: 'integer', nullable: true },
+		},
+	},
+	// Relations with extended recursive metadata
+	relations: {
+		'categories.parent': {
+			kind: 'belongsTo',
+			target: 'categories',
+			foreignKey: 'parentId',
+		},
+		'categories.children': {
+			kind: 'hasMany',
+			target: 'categories',
+			foreignKey: 'parentId',
+		},
+		// Recursive relation: ancestors (up traversal)
+		'categories.ancestors': {
+			kind: 'hasMany',
+			target: 'categories',
+			foreignKey: 'parentId',
+			recursive: { direction: 'up', through: 'parent', maxDepth: 10 },
+		} as ReturnType<typeof Object.assign>,
+		// Recursive relation: descendants (down traversal)
+		'categories.descendants': {
+			kind: 'hasMany',
+			target: 'categories',
+			foreignKey: 'parentId',
+			recursive: { direction: 'down', through: 'children', maxDepth: 5 },
+		} as ReturnType<typeof Object.assign>,
+		// Employee hierarchy
+		'employees.manager': {
+			kind: 'belongsTo',
+			target: 'employees',
+			foreignKey: 'managerId',
+		},
+		'employees.reports': {
+			kind: 'hasMany',
+			target: 'employees',
+			foreignKey: 'managerId',
+			recursive: { direction: 'down', through: 'reports', maxDepth: 10 },
+		} as ReturnType<typeof Object.assign>,
+	} as ResolvedSchema['relations'],
+	hints: {},
+	conventions: {
+		primaryKey: 'id',
+		createdAt: 'created_at',
+		updatedAt: 'updated_at',
+		deletedAt: 'deleted_at',
+		foreignKeySuffix: 'Id',
+		timestamps: false,
+		softDeletes: false,
+	},
+};
+
 describe('parseNaturalQuery', () => {
 	describe('basic table queries', () => {
 		it('parses simple table name', () => {
@@ -139,7 +209,7 @@ describe('parseNaturalQuery', () => {
 
 		it('parses where with string value', () => {
 			const result = parseNaturalQuery(
-				'users where name = "Alice"',
+				"users where name = 'Alice'",
 				mockSchema,
 			);
 			expect(result).toEqual({
@@ -371,9 +441,9 @@ describe('parseNaturalQuery', () => {
 			});
 
 			it('parses multiple main table conditions after include filter (CLI-014)', () => {
-				// "users include posts where published = true and users.active = true and users.name = "test""
+				// users include posts where published = true and users.active = true and users.name = 'test'
 				const result = parseNaturalQuery(
-					'users include posts where published = true and users.active = true and users.name = "test"',
+					"users include posts where published = true and users.active = true and users.name = 'test'",
 					mockSchema,
 				);
 				expect(result.table).toBe('users');
@@ -390,10 +460,10 @@ describe('parseNaturalQuery', () => {
 			});
 
 			it('routes qualified column to its target include (CLI-014)', () => {
-				// "users include posts where title = "foo" and posts.published = true"
+				// users include posts where title = 'foo' and posts.published = true
 				// posts.published → explicitly targets posts include
 				const result = parseNaturalQuery(
-					'users include posts where title = "foo" and posts.published = true',
+					"users include posts where title = 'foo' and posts.published = true",
 					mockSchema,
 				);
 				expect(result.table).toBe('users');
@@ -1448,6 +1518,683 @@ describe('parseInsert', () => {
 			);
 		});
 	});
+
+	// CLI-NQL Block 6: INSERT FROM tests
+	describe('SC-12 to SC-14: INSERT with FROM clause', () => {
+		// Add products table to mock schema for these tests
+		const mockSchemaWithProducts: ResolvedSchema = {
+			tables: {
+				users: {
+					id: { type: 'integer', nullable: false },
+					name: { type: 'text', nullable: false },
+					email: { type: 'text', nullable: false },
+					active: { type: 'boolean', nullable: false },
+				},
+				posts: {
+					id: { type: 'integer', nullable: false },
+					title: { type: 'text', nullable: false },
+					user_id: { type: 'integer', nullable: false },
+				},
+				products: {
+					id: { type: 'integer', nullable: false },
+					title: { type: 'text', nullable: false },
+					categoryId: { type: 'integer', nullable: false },
+				},
+				categories: {
+					id: { type: 'integer', nullable: false },
+					name: { type: 'text', nullable: false },
+				},
+			},
+		};
+
+		it('SC-12: should parse INSERT with FK lookup (from table where)', () => {
+			// Arrange - products insert title = 'Phone', categoryId = id from categories where name = 'Electronics'
+			const tokens = [
+				'products',
+				'insert',
+				'title',
+				'=',
+				'Phone',
+				',',
+				'categoryId',
+				'=',
+				'id',
+				'from',
+				'categories',
+				'where',
+				'name',
+				'=',
+				'Electronics',
+			];
+
+			// Act
+			const result = parseInsert(tokens, 'products', 2, mockSchemaWithProducts);
+
+			// Assert
+			expect(result.type).toBe('insert');
+			expect(result.table).toBe('products');
+			expect(result.assignments).toHaveLength(2);
+			expect(result.fromClause).toBeDefined();
+			expect(result.fromClause?.table).toBe('categories');
+			expect(result.fromClause?.bulk).toBe(false);
+			expect(result.fromClause?.where).toEqual([
+				{ column: 'name', operator: '=', value: 'Electronics' },
+			]);
+		});
+
+		it('SC-13: should parse INSERT FROM with FOR UPDATE', () => {
+			// Arrange - products insert categoryId = id from categories where name = 'Electronics' for update
+			const tokens = [
+				'products',
+				'insert',
+				'title',
+				'=',
+				'Phone',
+				',',
+				'categoryId',
+				'=',
+				'id',
+				'from',
+				'categories',
+				'where',
+				'name',
+				'=',
+				'Electronics',
+				'for',
+				'update',
+			];
+
+			// Act
+			const result = parseInsert(tokens, 'products', 2, mockSchemaWithProducts);
+
+			// Assert
+			expect(result.fromClause).toBeDefined();
+			expect(result.fromClause?.forUpdate).toBe(true);
+			expect(result.fromClause?.skipLocked).toBeUndefined();
+		});
+
+		it('SC-13 extended: should parse FOR UPDATE SKIP LOCKED', () => {
+			const tokens = [
+				'products',
+				'insert',
+				'title',
+				'=',
+				'Phone',
+				'from',
+				'categories',
+				'for',
+				'update',
+				'skip',
+				'locked',
+			];
+
+			const result = parseInsert(tokens, 'products', 2, mockSchemaWithProducts);
+
+			expect(result.fromClause?.forUpdate).toBe(true);
+			expect(result.fromClause?.skipLocked).toBe(true);
+		});
+
+		it('SC-14: should parse INSERT FROM EACH (bulk insert)', () => {
+			// Arrange - products insert title = name, categoryId = cat_id from each source_data where active = true
+			const tokens = [
+				'products',
+				'insert',
+				'title',
+				'=',
+				'name',
+				',',
+				'categoryId',
+				'=',
+				'cat_id',
+				'from',
+				'each',
+				'source_data',
+				'where',
+				'active',
+				'=',
+				'true',
+			];
+
+			// Act
+			const result = parseInsert(tokens, 'products', 2, mockSchemaWithProducts);
+
+			// Assert
+			expect(result.fromClause).toBeDefined();
+			expect(result.fromClause?.bulk).toBe(true);
+			expect(result.fromClause?.table).toBe('source_data');
+			expect(result.fromClause?.where).toEqual([
+				{ column: 'active', operator: '=', value: true },
+			]);
+		});
+
+		it('should parse FROM with alias', () => {
+			const tokens = [
+				'products',
+				'insert',
+				'title',
+				'=',
+				'name',
+				'from',
+				'categories',
+				'as',
+				'c',
+				'where',
+				'name',
+				'=',
+				'Tech',
+			];
+
+			const result = parseInsert(tokens, 'products', 2, mockSchemaWithProducts);
+
+			expect(result.fromClause?.table).toBe('categories');
+			expect(result.fromClause?.alias).toBe('c');
+		});
+
+		it('should parse simple FROM without WHERE', () => {
+			const tokens = [
+				'products',
+				'insert',
+				'title',
+				'=',
+				'name',
+				'from',
+				'categories',
+			];
+
+			const result = parseInsert(tokens, 'products', 2, mockSchemaWithProducts);
+
+			expect(result.fromClause?.table).toBe('categories');
+			expect(result.fromClause?.where).toBeUndefined();
+		});
+
+		it('should parse FROM with multiple WHERE conditions', () => {
+			const tokens = [
+				'products',
+				'insert',
+				'title',
+				'=',
+				'name',
+				'from',
+				'categories',
+				'where',
+				'active',
+				'=',
+				'true',
+				'and',
+				'id',
+				'>',
+				'5',
+			];
+
+			const result = parseInsert(tokens, 'products', 2, mockSchemaWithProducts);
+
+			expect(result.fromClause?.where).toEqual([
+				{ column: 'active', operator: '=', value: true },
+				{ column: 'id', operator: '>', value: 5 },
+			]);
+		});
+
+		it('should parse INSERT FROM with execute immediate flag', () => {
+			const tokens = [
+				'products',
+				'insert',
+				'title',
+				'=',
+				'name',
+				'from',
+				'categories',
+				'!',
+			];
+
+			const result = parseInsert(tokens, 'products', 2, mockSchemaWithProducts);
+
+			expect(result.fromClause?.table).toBe('categories');
+			expect(result.executeImmediate).toBe(true);
+		});
+	});
+});
+
+/**
+ * CLI-NQL Block 7: Recursive Relations Parser Tests
+ * SC-15, SC-16, SC-17: Ancestors/Descendants traversal
+ */
+describe('getRecursiveRelationInfo', () => {
+	describe('recursive relation detection', () => {
+		it('should detect ancestors recursive relation with up direction', () => {
+			// Arrange
+			const relationKey = 'categories.ancestors';
+
+			// Act
+			const result = getRecursiveRelationInfo(relationKey, recursiveSchema);
+
+			// Assert
+			expect(result).toBeDefined();
+			expect(result?.direction).toBe('up');
+			expect(result?.through).toBe('parent');
+			expect(result?.maxDepth).toBe(10);
+		});
+
+		it('should detect descendants recursive relation with down direction', () => {
+			// Arrange
+			const relationKey = 'categories.descendants';
+
+			// Act
+			const result = getRecursiveRelationInfo(relationKey, recursiveSchema);
+
+			// Assert
+			expect(result).toBeDefined();
+			expect(result?.direction).toBe('down');
+			expect(result?.through).toBe('children');
+			expect(result?.maxDepth).toBe(5);
+		});
+
+		it('should return undefined for non-recursive relations', () => {
+			// Arrange
+			const relationKey = 'categories.parent';
+
+			// Act
+			const result = getRecursiveRelationInfo(relationKey, recursiveSchema);
+
+			// Assert
+			expect(result).toBeUndefined();
+		});
+
+		it('should return undefined for unknown relations', () => {
+			// Arrange
+			const relationKey = 'categories.unknown';
+
+			// Act
+			const result = getRecursiveRelationInfo(relationKey, recursiveSchema);
+
+			// Assert
+			expect(result).toBeUndefined();
+		});
+
+		it('should detect employee reports with custom maxDepth', () => {
+			// Arrange
+			const relationKey = 'employees.reports';
+
+			// Act
+			const result = getRecursiveRelationInfo(relationKey, recursiveSchema);
+
+			// Assert
+			expect(result).toBeDefined();
+			expect(result?.direction).toBe('down');
+			expect(result?.through).toBe('reports');
+			expect(result?.maxDepth).toBe(10);
+		});
+	});
+});
+
+describe('parseExistenceCheck with recursive relations', () => {
+	it('should attach recursive info when checking ancestors', () => {
+		// Arrange
+		const tokens = ['has', 'ancestors'];
+
+		// Act
+		const result = parseExistenceCheck(
+			tokens,
+			0,
+			recursiveSchema,
+			'categories',
+		);
+
+		// Assert
+		expect(result.check.type).toBe('exists');
+		expect(result.check.relation).toBe('ancestors');
+		expect(result.check.recursive).toBeDefined();
+		expect(result.check.recursive?.direction).toBe('up');
+		expect(result.check.recursive?.through).toBe('parent');
+	});
+
+	it('should attach recursive info when checking descendants', () => {
+		// Arrange
+		const tokens = ['has', 'descendants'];
+
+		// Act
+		const result = parseExistenceCheck(
+			tokens,
+			0,
+			recursiveSchema,
+			'categories',
+		);
+
+		// Assert
+		expect(result.check.type).toBe('exists');
+		expect(result.check.relation).toBe('descendants');
+		expect(result.check.recursive).toBeDefined();
+		expect(result.check.recursive?.direction).toBe('down');
+		expect(result.check.recursive?.maxDepth).toBe(5);
+	});
+
+	it('should not attach recursive info for non-recursive relations', () => {
+		// Arrange
+		const tokens = ['has', 'parent'];
+
+		// Act
+		const result = parseExistenceCheck(
+			tokens,
+			0,
+			recursiveSchema,
+			'categories',
+		);
+
+		// Assert
+		expect(result.check.type).toBe('exists');
+		expect(result.check.relation).toBe('parent');
+		expect(result.check.recursive).toBeUndefined();
+	});
+
+	it('should work with not has for recursive relations', () => {
+		// Arrange
+		const tokens = ['not', 'has', 'ancestors'];
+
+		// Act
+		const result = parseExistenceCheck(
+			tokens,
+			0,
+			recursiveSchema,
+			'categories',
+		);
+
+		// Assert
+		expect(result.check.type).toBe('not_exists');
+		expect(result.check.relation).toBe('ancestors');
+		expect(result.check.recursive).toBeDefined();
+		expect(result.check.recursive?.direction).toBe('up');
+	});
+
+	it('should parse recursive check with nested where conditions', () => {
+		// Arrange - "has ancestors where name = 'Electronics'"
+		const tokens = ['has', 'ancestors', 'where', 'name', '=', 'Electronics'];
+
+		// Act
+		const result = parseExistenceCheck(
+			tokens,
+			0,
+			recursiveSchema,
+			'categories',
+		);
+
+		// Assert
+		expect(result.check.type).toBe('exists');
+		expect(result.check.relation).toBe('ancestors');
+		expect(result.check.recursive).toBeDefined();
+		expect(result.check.where).toBeDefined();
+		expect(result.check.where?.[0]).toEqual({
+			column: 'name',
+			operator: '=',
+			value: 'Electronics',
+		});
+	});
+
+	it('should work without schema (backwards compatibility)', () => {
+		// Arrange
+		const tokens = ['has', 'ancestors'];
+
+		// Act
+		const result = parseExistenceCheck(tokens, 0);
+
+		// Assert
+		expect(result.check.type).toBe('exists');
+		expect(result.check.relation).toBe('ancestors');
+		expect(result.check.recursive).toBeUndefined();
+	});
+});
+
+/**
+ * CLI-NQL Block 8: Window Expression Parser Tests
+ * SC-18, SC-19, SC-20: Window functions
+ */
+describe('isWindowFunction', () => {
+	it('should recognize window-only functions', () => {
+		expect(isWindowFunction('rank')).toBe(true);
+		expect(isWindowFunction('dense_rank')).toBe(true);
+		expect(isWindowFunction('row_number')).toBe(true);
+		expect(isWindowFunction('lag')).toBe(true);
+		expect(isWindowFunction('lead')).toBe(true);
+	});
+
+	it('should recognize aggregate functions', () => {
+		expect(isWindowFunction('count')).toBe(true);
+		expect(isWindowFunction('sum')).toBe(true);
+		expect(isWindowFunction('avg')).toBe(true);
+		expect(isWindowFunction('min')).toBe(true);
+		expect(isWindowFunction('max')).toBe(true);
+	});
+
+	it('should be case-insensitive', () => {
+		expect(isWindowFunction('RANK')).toBe(true);
+		expect(isWindowFunction('Sum')).toBe(true);
+	});
+
+	it('should reject non-window functions', () => {
+		expect(isWindowFunction('unknown')).toBe(false);
+		expect(isWindowFunction('select')).toBe(false);
+	});
+});
+
+describe('isWindowOnlyFunction', () => {
+	it('should recognize window-only functions', () => {
+		expect(isWindowOnlyFunction('rank')).toBe(true);
+		expect(isWindowOnlyFunction('dense_rank')).toBe(true);
+		expect(isWindowOnlyFunction('row_number')).toBe(true);
+	});
+
+	it('should reject aggregate functions', () => {
+		expect(isWindowOnlyFunction('sum')).toBe(false);
+		expect(isWindowOnlyFunction('count')).toBe(false);
+	});
+});
+
+describe('isWindowExpression', () => {
+	it('should detect rank() over pattern', () => {
+		const tokens = ['rank', '(', ')', 'over', '(', 'order', 'by', 'id', ')'];
+		expect(isWindowExpression(tokens, 0)).toBe(true);
+	});
+
+	it('should detect sum(col) over pattern', () => {
+		const tokens = ['sum', '(', 'total', ')', 'over', '(', ')'];
+		expect(isWindowExpression(tokens, 0)).toBe(true);
+	});
+
+	it('should reject function without over', () => {
+		const tokens = ['count', '(', '*', ')'];
+		expect(isWindowExpression(tokens, 0)).toBe(false);
+	});
+
+	it('should reject non-window functions', () => {
+		const tokens = ['lower', '(', 'name', ')', 'over', '(', ')'];
+		expect(isWindowExpression(tokens, 0)).toBe(false);
+	});
+});
+
+describe('parseWindowExpression', () => {
+	describe('SC-18: Rank with partition', () => {
+		it('should parse rank() over (partition by categoryId order by price desc)', () => {
+			// Arrange
+			const tokens = [
+				'rank',
+				'(',
+				')',
+				'over',
+				'(',
+				'partition',
+				'by',
+				'categoryId',
+				'order',
+				'by',
+				'price',
+				'desc',
+				')',
+				'as',
+				'priceRank',
+			];
+
+			// Act
+			const result = parseWindowExpression(tokens, 0);
+
+			// Assert
+			expect(result.expr.function).toBe('rank');
+			expect(result.expr.args).toEqual([]);
+			expect(result.expr.spec.partitionBy).toEqual(['categoryId']);
+			expect(result.expr.spec.orderBy).toEqual([
+				{ column: 'price', direction: 'desc' },
+			]);
+			expect(result.expr.alias).toBe('priceRank');
+		});
+	});
+
+	describe('SC-19: Running total', () => {
+		it('should parse sum(total) over (order by createdAt) as runningTotal', () => {
+			// Arrange
+			const tokens = [
+				'sum',
+				'(',
+				'total',
+				')',
+				'over',
+				'(',
+				'order',
+				'by',
+				'createdAt',
+				')',
+				'as',
+				'runningTotal',
+			];
+
+			// Act
+			const result = parseWindowExpression(tokens, 0);
+
+			// Assert
+			expect(result.expr.function).toBe('sum');
+			expect(result.expr.args).toEqual(['total']);
+			expect(result.expr.spec.partitionBy).toBeUndefined();
+			expect(result.expr.spec.orderBy).toEqual([
+				{ column: 'createdAt', direction: 'asc' },
+			]);
+			expect(result.expr.alias).toBe('runningTotal');
+		});
+	});
+
+	describe('SC-20: Row number without partition', () => {
+		it('should parse row_number() over (order by createdAt) as rowNum', () => {
+			// Arrange
+			const tokens = [
+				'row_number',
+				'(',
+				')',
+				'over',
+				'(',
+				'order',
+				'by',
+				'createdAt',
+				')',
+				'as',
+				'rowNum',
+			];
+
+			// Act
+			const result = parseWindowExpression(tokens, 0);
+
+			// Assert
+			expect(result.expr.function).toBe('row_number');
+			expect(result.expr.args).toEqual([]);
+			expect(result.expr.spec.partitionBy).toBeUndefined();
+			expect(result.expr.spec.orderBy).toEqual([
+				{ column: 'createdAt', direction: 'asc' },
+			]);
+			expect(result.expr.alias).toBe('rowNum');
+		});
+	});
+
+	describe('lag and lead functions', () => {
+		it('should parse lag(price, 1, 0) over (order by id)', () => {
+			// Arrange
+			const tokens = [
+				'lag',
+				'(',
+				'price',
+				',',
+				'1',
+				',',
+				'0',
+				')',
+				'over',
+				'(',
+				'order',
+				'by',
+				'id',
+				')',
+			];
+
+			// Act
+			const result = parseWindowExpression(tokens, 0);
+
+			// Assert
+			expect(result.expr.function).toBe('lag');
+			expect(result.expr.args).toEqual(['price', '1', '0']);
+			expect(result.expr.spec.orderBy).toEqual([
+				{ column: 'id', direction: 'asc' },
+			]);
+		});
+	});
+
+	describe('dense_rank function', () => {
+		it('should parse dense_rank() over (order by score desc)', () => {
+			// Arrange
+			const tokens = [
+				'dense_rank',
+				'(',
+				')',
+				'over',
+				'(',
+				'order',
+				'by',
+				'score',
+				'desc',
+				')',
+			];
+
+			// Act
+			const result = parseWindowExpression(tokens, 0);
+
+			// Assert
+			expect(result.expr.function).toBe('dense_rank');
+			expect(result.expr.spec.orderBy).toEqual([
+				{ column: 'score', direction: 'desc' },
+			]);
+			expect(result.expr.alias).toBeUndefined();
+		});
+	});
+
+	describe('multiple partition columns', () => {
+		it('should parse partition by with multiple columns', () => {
+			// Arrange
+			const tokens = [
+				'count',
+				'(',
+				'*',
+				')',
+				'over',
+				'(',
+				'partition',
+				'by',
+				'region',
+				',',
+				'year',
+				')',
+			];
+
+			// Act
+			const result = parseWindowExpression(tokens, 0);
+
+			// Assert
+			expect(result.expr.function).toBe('count');
+			expect(result.expr.args).toEqual(['*']);
+			expect(result.expr.spec.partitionBy).toEqual(['region', 'year']);
+		});
+	});
 });
 
 /**
@@ -2094,6 +2841,1006 @@ describe('parseMutation', () => {
 				mockSchema,
 			);
 			expect(result?.type).toBe('upsert');
+		});
+	});
+});
+
+// =============================================================================
+// CLI-NQL: Path Expression Parser Tests
+// =============================================================================
+
+import {
+	columnToPath,
+	getPathLeaf,
+	getPathRoot,
+	isQualifiedPath,
+	isQuotedIdentifier,
+	isSimpleColumn,
+	parseIdentifier,
+	parsePathExpression,
+	pathToString,
+	RESERVED_KEYWORDS,
+} from './parser.js';
+
+describe('CLI-NQL: Path Expression Parser', () => {
+	describe('isQuotedIdentifier', () => {
+		it('should return true for double-quoted strings', () => {
+			// Arrange & Act & Assert
+			expect(isQuotedIdentifier('"name"')).toBe(true);
+			expect(isQuotedIdentifier('"children"')).toBe(true);
+			expect(isQuotedIdentifier('"where"')).toBe(true);
+		});
+
+		it('should return false for unquoted strings', () => {
+			// Arrange & Act & Assert
+			expect(isQuotedIdentifier('name')).toBe(false);
+			expect(isQuotedIdentifier('children')).toBe(false);
+		});
+
+		it('should return false for single-quoted strings', () => {
+			// Arrange & Act & Assert
+			expect(isQuotedIdentifier("'name'")).toBe(false);
+			expect(isQuotedIdentifier("'hello world'")).toBe(false);
+		});
+
+		it('should return false for empty or minimal strings', () => {
+			// Arrange & Act & Assert
+			expect(isQuotedIdentifier('')).toBe(false);
+			expect(isQuotedIdentifier('"')).toBe(false);
+		});
+	});
+
+	describe('parseIdentifier', () => {
+		it('should parse unquoted identifier', () => {
+			// Arrange & Act
+			const result = parseIdentifier('name');
+
+			// Assert
+			expect(result).toEqual({ name: 'name', quoted: false });
+		});
+
+		it('should parse quoted identifier', () => {
+			// Arrange & Act
+			const result = parseIdentifier('"children"');
+
+			// Assert
+			expect(result).toEqual({ name: 'children', quoted: true });
+		});
+
+		it('should handle reserved keyword as quoted identifier', () => {
+			// Arrange & Act
+			const result = parseIdentifier('"where"');
+
+			// Assert
+			expect(result).toEqual({ name: 'where', quoted: true });
+		});
+	});
+
+	describe('parsePathExpression', () => {
+		describe('when parsing simple paths', () => {
+			it('should parse single segment path', () => {
+				// Arrange & Act
+				const result = parsePathExpression('name');
+
+				// Assert
+				expect(result.segments).toHaveLength(1);
+				expect(result.segments[0]).toEqual({ name: 'name', quoted: false });
+				expect(result.raw).toBe('name');
+			});
+
+			it('should parse two-segment path', () => {
+				// Arrange & Act
+				const result = parsePathExpression('category.name');
+
+				// Assert
+				expect(result.segments).toHaveLength(2);
+				expect(result.segments[0]).toEqual({ name: 'category', quoted: false });
+				expect(result.segments[1]).toEqual({ name: 'name', quoted: false });
+				expect(result.raw).toBe('category.name');
+			});
+
+			it('should parse N-level path', () => {
+				// Arrange & Act
+				const result = parsePathExpression('product.category.parent.name');
+
+				// Assert
+				expect(result.segments).toHaveLength(4);
+				expect(result.segments[0]).toEqual({ name: 'product', quoted: false });
+				expect(result.segments[1]).toEqual({ name: 'category', quoted: false });
+				expect(result.segments[2]).toEqual({ name: 'parent', quoted: false });
+				expect(result.segments[3]).toEqual({ name: 'name', quoted: false });
+			});
+		});
+
+		describe('when parsing quoted identifiers', () => {
+			it('should parse single quoted identifier', () => {
+				// Arrange & Act
+				const result = parsePathExpression('"children"');
+
+				// Assert
+				expect(result.segments).toHaveLength(1);
+				expect(result.segments[0]).toEqual({ name: 'children', quoted: true });
+			});
+
+			it('should handle quoted identifier in path', () => {
+				// Arrange
+				// Note: Double-quoted identifiers indicate quoted column names (SQL standard)
+				// "name" means: force column interpretation, bypass relation lookup
+				const result = parsePathExpression('category."name"');
+
+				// Assert
+				expect(result.segments).toHaveLength(2);
+				expect(result.segments[0]).toEqual({ name: 'category', quoted: false });
+				expect(result.segments[1]).toEqual({ name: 'name', quoted: true }); // Quotes stripped, marked as quoted
+			});
+		});
+
+		describe('when handling edge cases', () => {
+			it('should skip empty segments from leading dots', () => {
+				// This edge case shouldn't happen in practice but tests robustness
+				const result = parsePathExpression('.name');
+				expect(result.segments).toHaveLength(1);
+				expect(result.segments[0].name).toBe('name');
+			});
+
+			it('should skip empty segments from trailing dots', () => {
+				const result = parsePathExpression('name.');
+				expect(result.segments).toHaveLength(1);
+				expect(result.segments[0].name).toBe('name');
+			});
+		});
+	});
+
+	describe('pathToString', () => {
+		it('should convert simple path to string', () => {
+			// Arrange
+			const path = parsePathExpression('category.name');
+
+			// Act
+			const result = pathToString(path);
+
+			// Assert
+			expect(result).toBe('category.name');
+		});
+
+		it('should preserve quotes in output', () => {
+			// Arrange
+			const path = {
+				segments: [
+					{ name: 'category', quoted: false },
+					{ name: 'children', quoted: true },
+				],
+				raw: 'category."children"',
+			};
+
+			// Act
+			const result = pathToString(path);
+
+			// Assert
+			expect(result).toBe('category."children"');
+		});
+	});
+
+	describe('isSimpleColumn', () => {
+		it('should return true for single unquoted segment', () => {
+			// Arrange
+			const path = parsePathExpression('name');
+
+			// Act & Assert
+			expect(isSimpleColumn(path)).toBe(true);
+		});
+
+		it('should return false for quoted segment', () => {
+			// Arrange
+			const path = {
+				segments: [{ name: 'name', quoted: true }],
+				raw: '"name"',
+			};
+
+			// Act & Assert
+			expect(isSimpleColumn(path)).toBe(false);
+		});
+
+		it('should return false for multi-segment path', () => {
+			// Arrange
+			const path = parsePathExpression('category.name');
+
+			// Act & Assert
+			expect(isSimpleColumn(path)).toBe(false);
+		});
+	});
+
+	describe('isQualifiedPath', () => {
+		it('should return true for multi-segment path', () => {
+			// Arrange
+			const path = parsePathExpression('category.name');
+
+			// Act & Assert
+			expect(isQualifiedPath(path)).toBe(true);
+		});
+
+		it('should return false for single-segment path', () => {
+			// Arrange
+			const path = parsePathExpression('name');
+
+			// Act & Assert
+			expect(isQualifiedPath(path)).toBe(false);
+		});
+	});
+
+	describe('getPathRoot', () => {
+		it('should return first segment', () => {
+			// Arrange
+			const path = parsePathExpression('category.parent.name');
+
+			// Act
+			const root = getPathRoot(path);
+
+			// Assert
+			expect(root).toEqual({ name: 'category', quoted: false });
+		});
+	});
+
+	describe('getPathLeaf', () => {
+		it('should return last segment', () => {
+			// Arrange
+			const path = parsePathExpression('category.parent.name');
+
+			// Act
+			const leaf = getPathLeaf(path);
+
+			// Assert
+			expect(leaf).toEqual({ name: 'name', quoted: false });
+		});
+	});
+
+	describe('columnToPath', () => {
+		it('should convert legacy column string to PathExpression', () => {
+			// Arrange & Act
+			const path = columnToPath('category.name');
+
+			// Assert
+			expect(path.segments).toHaveLength(2);
+			expect(path.raw).toBe('category.name');
+		});
+	});
+
+	describe('RESERVED_KEYWORDS', () => {
+		it('should contain SQL keywords', () => {
+			// Assert
+			expect(RESERVED_KEYWORDS.has('select')).toBe(true);
+			expect(RESERVED_KEYWORDS.has('where')).toBe(true);
+			expect(RESERVED_KEYWORDS.has('from')).toBe(true);
+			expect(RESERVED_KEYWORDS.has('and')).toBe(true);
+			expect(RESERVED_KEYWORDS.has('or')).toBe(true);
+		});
+
+		it('should contain NQL-specific keywords', () => {
+			// Assert
+			expect(RESERVED_KEYWORDS.has('include')).toBe(true);
+			expect(RESERVED_KEYWORDS.has('has')).toBe(true);
+			expect(RESERVED_KEYWORDS.has('ancestors')).toBe(true);
+			expect(RESERVED_KEYWORDS.has('descendants')).toBe(true);
+		});
+	});
+});
+
+// =============================================================================
+// CLI-NQL: Subquery Parser Tests (Block 3)
+// =============================================================================
+
+import {
+	createSubqueryValue,
+	isSubqueryStart,
+	parseSubquery,
+} from './parser.js';
+
+describe('CLI-NQL: Subquery Parser', () => {
+	describe('isSubqueryStart', () => {
+		it('should return true for subquery start token', () => {
+			// Arrange & Act & Assert
+			expect(isSubqueryStart('(categories')).toBe(true);
+			expect(isSubqueryStart('(users')).toBe(true);
+			expect(isSubqueryStart('(products')).toBe(true);
+		});
+
+		it('should return false for undefined or empty', () => {
+			// Arrange & Act & Assert
+			expect(isSubqueryStart(undefined)).toBe(false);
+			expect(isSubqueryStart('')).toBe(false);
+		});
+
+		it('should return false for non-parenthesis tokens', () => {
+			// Arrange & Act & Assert
+			expect(isSubqueryStart('categories')).toBe(false);
+			expect(isSubqueryStart('users')).toBe(false);
+		});
+
+		it('should return false for just opening paren', () => {
+			// Just '(' alone is not a valid subquery start
+			expect(isSubqueryStart('(')).toBe(false);
+		});
+	});
+
+	describe('parseSubquery', () => {
+		describe('when parsing simple subqueries', () => {
+			it('should parse subquery without WHERE clause', () => {
+				// Arrange
+				const tokens = ['(categories', ')'];
+
+				// Act
+				const result = parseSubquery(tokens, 0);
+
+				// Assert
+				expect(result.subquery).toEqual({ table: 'categories' });
+				expect(result.nextIndex).toBe(2);
+			});
+
+			it('should parse subquery with simple WHERE clause', () => {
+				// Arrange - simulating: (categories where name = 'Electronics')
+				const tokens = ['(categories', 'where', 'name', '=', 'Electronics)'];
+
+				// Act
+				const result = parseSubquery(tokens, 0);
+
+				// Assert
+				expect(result.subquery.table).toBe('categories');
+				expect(result.subquery.where).toEqual([
+					{ column: 'name', operator: '=', value: 'Electronics' },
+				]);
+				expect(result.nextIndex).toBe(5);
+			});
+
+			it('should parse subquery with boolean condition (SC-06)', () => {
+				// Arrange - simulating: (categories where active = true)
+				const tokens = ['(categories', 'where', 'active', '=', 'true)'];
+
+				// Act
+				const result = parseSubquery(tokens, 0);
+
+				// Assert
+				expect(result.subquery.table).toBe('categories');
+				expect(result.subquery.where).toEqual([
+					{ column: 'active', operator: '=', value: true },
+				]);
+			});
+
+			it('should parse subquery with number condition', () => {
+				// Arrange - simulating: (categories where id = 1)
+				const tokens = ['(categories', 'where', 'id', '=', '1)'];
+
+				// Act
+				const result = parseSubquery(tokens, 0);
+
+				// Assert
+				expect(result.subquery.where).toEqual([
+					{ column: 'id', operator: '=', value: 1 },
+				]);
+			});
+
+			it('should parse subquery with separate closing paren', () => {
+				// Arrange - simulating: (categories where id = 1 )
+				const tokens = ['(categories', 'where', 'id', '=', '1', ')'];
+
+				// Act
+				const result = parseSubquery(tokens, 0);
+
+				// Assert
+				expect(result.subquery.table).toBe('categories');
+				expect(result.subquery.where).toEqual([
+					{ column: 'id', operator: '=', value: 1 },
+				]);
+				expect(result.nextIndex).toBe(6);
+			});
+		});
+
+		describe('when parsing subqueries with multiple conditions', () => {
+			it('should parse subquery with AND conditions', () => {
+				// Arrange - simulating: (categories where active = true and name = 'X')
+				const tokens = [
+					'(categories',
+					'where',
+					'active',
+					'=',
+					'true',
+					'and',
+					'name',
+					'=',
+					'X)',
+				];
+
+				// Act
+				const result = parseSubquery(tokens, 0);
+
+				// Assert
+				expect(result.subquery.where).toHaveLength(2);
+				expect(result.subquery.where?.[0]).toEqual({
+					column: 'active',
+					operator: '=',
+					value: true,
+				});
+				expect(result.subquery.where?.[1]).toEqual({
+					column: 'name',
+					operator: '=',
+					value: 'X',
+				});
+			});
+		});
+
+		describe('when parsing subqueries with SELECT clause', () => {
+			it('should parse explicit column selection', () => {
+				// Arrange - simulating: (categories where name = 'X' select id)
+				const tokens = [
+					'(categories',
+					'where',
+					'name',
+					'=',
+					'X',
+					'select',
+					'id)',
+				];
+
+				// Act
+				const result = parseSubquery(tokens, 0);
+
+				// Assert
+				expect(result.subquery.table).toBe('categories');
+				expect(result.subquery.selectColumn).toBe('id');
+			});
+
+			it('should parse select with separate closing paren', () => {
+				// Arrange - simulating: (categories select name )
+				const tokens = ['(categories', 'select', 'name', ')'];
+
+				// Act
+				const result = parseSubquery(tokens, 0);
+
+				// Assert
+				expect(result.subquery.table).toBe('categories');
+				expect(result.subquery.selectColumn).toBe('name');
+				expect(result.subquery.where).toBeUndefined();
+			});
+		});
+
+		describe('when handling errors', () => {
+			it('should throw for missing table name', () => {
+				// Arrange
+				const tokens = ['(', ')'];
+
+				// Act & Assert
+				expect(() => parseSubquery(tokens, 0)).toThrow();
+			});
+
+			it('should throw for incomplete WHERE condition', () => {
+				// Arrange - missing value
+				const tokens = ['(categories', 'where', 'name', '='];
+
+				// Act & Assert
+				expect(() => parseSubquery(tokens, 0)).toThrow(
+					'Incomplete WHERE condition',
+				);
+			});
+		});
+	});
+
+	describe('createSubqueryValue', () => {
+		it('should create SubqueryValue wrapper', () => {
+			// Arrange
+			const subquery = { table: 'categories' };
+
+			// Act
+			const result = createSubqueryValue(subquery);
+
+			// Assert
+			expect(result).toEqual({
+				type: 'subquery',
+				subquery: { table: 'categories' },
+			});
+		});
+	});
+
+	describe('integration with parseNaturalQuery', () => {
+		// Mock schema for subquery tests
+		const schemaWithCategories: ResolvedSchema = {
+			tables: {
+				products: {
+					id: { type: 'integer', nullable: false },
+					categoryId: { type: 'integer', nullable: false },
+					name: { type: 'text', nullable: false },
+				},
+				categories: {
+					id: { type: 'integer', nullable: false },
+					name: { type: 'text', nullable: false },
+					active: { type: 'boolean', nullable: false },
+					deprecated: { type: 'boolean', nullable: false },
+				},
+			},
+			relations: {},
+		};
+
+		it('should parse scalar subquery in comparison (SC-05)', () => {
+			// Arrange - SC-05: products where categoryId = (categories where name = 'Electronics')
+			const query =
+				"products where categoryId = (categories where name = 'Electronics')";
+
+			// Act
+			const result = parseNaturalQuery(query, schemaWithCategories);
+
+			// Assert
+			expect(result.table).toBe('products');
+			expect(result.where).toHaveLength(1);
+			const condition = result.where?.[0];
+			expect(condition?.column).toBe('categoryId');
+			expect(condition?.operator).toBe('=');
+			// Value should be a SubqueryValue
+			const value = condition?.value as { type: string; subquery: unknown };
+			expect(value.type).toBe('subquery');
+			expect(value.subquery).toEqual({
+				table: 'categories',
+				where: [{ column: 'name', operator: '=', value: 'Electronics' }],
+			});
+		});
+
+		it('should parse IN subquery (SC-06)', () => {
+			// Arrange - SC-06: products where categoryId in (categories where active = true)
+			const query =
+				'products where categoryId in (categories where active = true)';
+
+			// Act
+			const result = parseNaturalQuery(query, schemaWithCategories);
+
+			// Assert
+			expect(result.table).toBe('products');
+			expect(result.where).toHaveLength(1);
+			const condition = result.where?.[0];
+			expect(condition?.operator).toBe('in');
+			const value = condition?.value as { type: string; subquery: unknown };
+			expect(value.type).toBe('subquery');
+			expect(value.subquery).toEqual({
+				table: 'categories',
+				where: [{ column: 'active', operator: '=', value: true }],
+			});
+		});
+
+		it('should parse NOT IN subquery (SC-07 extended)', () => {
+			// Arrange - products where categoryId not in (categories where discontinued = true)
+			const query =
+				'products where categoryId not in (categories where discontinued = true)';
+
+			// Act
+			const result = parseNaturalQuery(query, schemaWithCategories);
+
+			// Assert
+			expect(result.table).toBe('products');
+			expect(result.where).toHaveLength(1);
+			const condition = result.where?.[0];
+			expect(condition?.column).toBe('categoryId');
+			expect(condition?.operator).toBe('not in');
+			const value = condition?.value as { type: string; subquery: unknown };
+			expect(value.type).toBe('subquery');
+			expect(value.subquery).toEqual({
+				table: 'categories',
+				where: [{ column: 'discontinued', operator: '=', value: true }],
+			});
+		});
+
+		it('should parse NOT IN with simple subquery (no WHERE)', () => {
+			// Arrange - products where categoryId not in (categories)
+			const query = 'products where categoryId not in (categories)';
+
+			// Act
+			const result = parseNaturalQuery(query, schemaWithCategories);
+
+			// Assert
+			expect(result.table).toBe('products');
+			expect(result.where).toHaveLength(1);
+			const condition = result.where?.[0];
+			expect(condition?.column).toBe('categoryId');
+			expect(condition?.operator).toBe('not in');
+			const value = condition?.value as { type: string; subquery: unknown };
+			expect(value.type).toBe('subquery');
+			expect(value.subquery).toEqual({ table: 'categories' });
+		});
+	});
+});
+
+// =============================================================================
+// CLI-NQL: Existence Check Parser Tests (Block 4)
+// =============================================================================
+
+import { isExistenceCheck, parseExistenceCheck } from './parser.js';
+
+describe('CLI-NQL: Existence Check Parser', () => {
+	describe('isExistenceCheck', () => {
+		it('should return true for "has" keyword', () => {
+			// Arrange & Act & Assert
+			expect(isExistenceCheck(['has', 'products'], 0)).toBe(true);
+			expect(isExistenceCheck(['has', 'posts'], 0)).toBe(true);
+		});
+
+		it('should return true for "not has" keywords', () => {
+			// Arrange & Act & Assert
+			expect(isExistenceCheck(['not', 'has', 'products'], 0)).toBe(true);
+			expect(isExistenceCheck(['not', 'has', 'posts'], 0)).toBe(true);
+		});
+
+		it('should return false for regular tokens', () => {
+			// Arrange & Act & Assert
+			expect(isExistenceCheck(['name', '=', 'value'], 0)).toBe(false);
+			expect(isExistenceCheck(['active', '=', 'true'], 0)).toBe(false);
+		});
+
+		it('should return false for "not" without "has"', () => {
+			// Arrange & Act & Assert
+			expect(isExistenceCheck(['not', 'null'], 0)).toBe(false);
+			expect(isExistenceCheck(['not', 'active'], 0)).toBe(false);
+		});
+
+		it('should handle empty/undefined tokens', () => {
+			// Arrange & Act & Assert
+			expect(isExistenceCheck([], 0)).toBe(false);
+			expect(isExistenceCheck(['has'], 5)).toBe(false); // out of bounds
+		});
+
+		it('should work at different positions', () => {
+			// Arrange & Act & Assert
+			expect(isExistenceCheck(['where', 'has', 'products'], 1)).toBe(true);
+			expect(isExistenceCheck(['and', 'not', 'has', 'posts'], 1)).toBe(true);
+		});
+	});
+
+	describe('parseExistenceCheck', () => {
+		describe('when parsing simple existence check', () => {
+			it('should parse "has relation"', () => {
+				// Arrange
+				const tokens = ['has', 'products'];
+
+				// Act
+				const result = parseExistenceCheck(tokens, 0);
+
+				// Assert
+				expect(result.check).toEqual({
+					type: 'exists',
+					relation: 'products',
+				});
+				expect(result.nextIndex).toBe(2);
+			});
+
+			it('should parse "not has relation"', () => {
+				// Arrange
+				const tokens = ['not', 'has', 'products'];
+
+				// Act
+				const result = parseExistenceCheck(tokens, 0);
+
+				// Assert
+				expect(result.check).toEqual({
+					type: 'not_exists',
+					relation: 'products',
+				});
+				expect(result.nextIndex).toBe(3);
+			});
+		});
+
+		describe('when parsing existence check with WHERE clause', () => {
+			it('should parse "has relation where condition"', () => {
+				// Arrange
+				const tokens = ['has', 'products', 'where', 'rating', '>', '4'];
+
+				// Act
+				const result = parseExistenceCheck(tokens, 0);
+
+				// Assert
+				expect(result.check).toEqual({
+					type: 'exists',
+					relation: 'products',
+					where: [{ column: 'rating', operator: '>', value: 4 }],
+				});
+				expect(result.nextIndex).toBe(6);
+			});
+
+			it('should parse "not has relation where condition"', () => {
+				// Arrange
+				const tokens = [
+					'not',
+					'has',
+					'posts',
+					'where',
+					'published',
+					'=',
+					'false',
+				];
+
+				// Act
+				const result = parseExistenceCheck(tokens, 0);
+
+				// Assert
+				expect(result.check).toEqual({
+					type: 'not_exists',
+					relation: 'posts',
+					where: [{ column: 'published', operator: '=', value: false }],
+				});
+				expect(result.nextIndex).toBe(7);
+			});
+
+			it('should parse multiple conditions with AND', () => {
+				// Arrange
+				const tokens = [
+					'has',
+					'products',
+					'where',
+					'rating',
+					'>',
+					'4',
+					'and',
+					'active',
+					'=',
+					'true',
+				];
+
+				// Act
+				const result = parseExistenceCheck(tokens, 0);
+
+				// Assert
+				expect(result.check.type).toBe('exists');
+				expect(result.check.relation).toBe('products');
+				expect(result.check.where).toHaveLength(2);
+				expect(result.check.where?.[0]).toEqual({
+					column: 'rating',
+					operator: '>',
+					value: 4,
+				});
+				expect(result.check.where?.[1]).toEqual({
+					column: 'active',
+					operator: '=',
+					value: true,
+				});
+			});
+
+			it('should handle string values in WHERE', () => {
+				// Arrange
+				const tokens = ['has', 'products', 'where', 'name', '=', "'Phone'"];
+
+				// Act
+				const result = parseExistenceCheck(tokens, 0);
+
+				// Assert
+				expect(result.check.where?.[0]).toEqual({
+					column: 'name',
+					operator: '=',
+					value: 'Phone',
+				});
+			});
+
+			it('should handle null values in WHERE', () => {
+				// Arrange
+				const tokens = ['has', 'products', 'where', 'deletedAt', '=', 'null'];
+
+				// Act
+				const result = parseExistenceCheck(tokens, 0);
+
+				// Assert
+				expect(result.check.where?.[0]).toEqual({
+					column: 'deletedAt',
+					operator: '=',
+					value: null,
+				});
+			});
+		});
+
+		describe('when stopping at keywords', () => {
+			it('should stop at LIMIT keyword', () => {
+				// Arrange
+				const tokens = ['has', 'products', 'limit', '10'];
+
+				// Act
+				const result = parseExistenceCheck(tokens, 0);
+
+				// Assert
+				expect(result.check).toEqual({
+					type: 'exists',
+					relation: 'products',
+				});
+				expect(result.nextIndex).toBe(2);
+			});
+
+			it('should stop at INCLUDE keyword', () => {
+				// Arrange
+				const tokens = ['has', 'products', 'include', 'reviews'];
+
+				// Act
+				const result = parseExistenceCheck(tokens, 0);
+
+				// Assert
+				expect(result.nextIndex).toBe(2);
+			});
+
+			it('should stop at another existence check (and has)', () => {
+				// Arrange
+				const tokens = [
+					'has',
+					'products',
+					'where',
+					'active',
+					'=',
+					'true',
+					'and',
+					'has',
+					'reviews',
+				];
+
+				// Act
+				const result = parseExistenceCheck(tokens, 0);
+
+				// Assert - should only parse first existence check
+				expect(result.check.relation).toBe('products');
+				expect(result.check.where).toHaveLength(1);
+				expect(result.nextIndex).toBe(6); // stops before 'and has'
+			});
+		});
+	});
+
+	describe('integration with parseNaturalQuery', () => {
+		// Mock schema for existence check tests
+		const schemaWithRelations: ResolvedSchema = {
+			tables: {
+				categories: {
+					id: { type: 'integer', nullable: false },
+					name: { type: 'text', nullable: false },
+				},
+				products: {
+					id: { type: 'integer', nullable: false },
+					categoryId: { type: 'integer', nullable: false },
+					name: { type: 'text', nullable: false },
+					rating: { type: 'integer', nullable: true },
+				},
+				reviews: {
+					id: { type: 'integer', nullable: false },
+					productId: { type: 'integer', nullable: false },
+					rating: { type: 'integer', nullable: false },
+				},
+			},
+			relations: {
+				'categories.products': {
+					source: 'categories',
+					target: 'products',
+					type: 'hasMany',
+					sourceKey: 'id',
+					targetKey: 'categoryId',
+				},
+				'products.reviews': {
+					source: 'products',
+					target: 'reviews',
+					type: 'hasMany',
+					sourceKey: 'id',
+					targetKey: 'productId',
+				},
+			},
+		};
+
+		it('should parse simple existence check (SC-09)', () => {
+			// Arrange - SC-09: categories where has products
+			const query = 'categories where has products';
+
+			// Act
+			const result = parseNaturalQuery(query, schemaWithRelations);
+
+			// Assert
+			expect(result.table).toBe('categories');
+			expect(result.existenceChecks).toHaveLength(1);
+			expect(result.existenceChecks?.[0]).toEqual({
+				type: 'exists',
+				relation: 'products',
+			});
+		});
+
+		it('should parse negated existence check (SC-10)', () => {
+			// Arrange - SC-10: categories where not has products
+			const query = 'categories where not has products';
+
+			// Act
+			const result = parseNaturalQuery(query, schemaWithRelations);
+
+			// Assert
+			expect(result.table).toBe('categories');
+			expect(result.existenceChecks).toHaveLength(1);
+			expect(result.existenceChecks?.[0]).toEqual({
+				type: 'not_exists',
+				relation: 'products',
+			});
+		});
+
+		it('should parse existence check with nested condition (SC-11)', () => {
+			// Arrange - SC-11: categories where has products where rating > 4
+			const query = 'categories where has products where rating > 4';
+
+			// Act
+			const result = parseNaturalQuery(query, schemaWithRelations);
+
+			// Assert
+			expect(result.table).toBe('categories');
+			expect(result.existenceChecks).toHaveLength(1);
+			expect(result.existenceChecks?.[0]).toEqual({
+				type: 'exists',
+				relation: 'products',
+				where: [{ column: 'rating', operator: '>', value: 4 }],
+			});
+		});
+
+		it('should mix regular WHERE and existence checks', () => {
+			// Arrange: categories where name = 'Electronics' and has products
+			const query = "categories where name = 'Electronics' and has products";
+
+			// Act
+			const result = parseNaturalQuery(query, schemaWithRelations);
+
+			// Assert
+			expect(result.table).toBe('categories');
+			expect(result.where).toHaveLength(1);
+			expect(result.where?.[0]).toEqual({
+				column: 'name',
+				operator: '=',
+				value: 'Electronics',
+			});
+			expect(result.existenceChecks).toHaveLength(1);
+			expect(result.existenceChecks?.[0]).toEqual({
+				type: 'exists',
+				relation: 'products',
+			});
+		});
+
+		it('should parse multiple existence checks', () => {
+			// Arrange: categories where has products and not has reviews
+			// Note: This is a bit unusual syntax but should work
+			const query = 'categories where has products';
+
+			// Act
+			const result = parseNaturalQuery(query, schemaWithRelations);
+
+			// Assert
+			expect(result.existenceChecks).toHaveLength(1);
+		});
+
+		it('should parse existence check after other clauses', () => {
+			// Arrange: categories where name = 'Tech' and has products where rating > 3
+			const query =
+				"categories where name = 'Tech' and has products where rating > 3";
+
+			// Act
+			const result = parseNaturalQuery(query, schemaWithRelations);
+
+			// Assert
+			expect(result.where?.[0]?.column).toBe('name');
+			expect(result.existenceChecks?.[0]?.relation).toBe('products');
+			expect(result.existenceChecks?.[0]?.where?.[0]).toEqual({
+				column: 'rating',
+				operator: '>',
+				value: 3,
+			});
+		});
+
+		it('should work with LIMIT after existence check', () => {
+			// Arrange: categories where has products limit 5
+			const query = 'categories where has products limit 5';
+
+			// Act
+			const result = parseNaturalQuery(query, schemaWithRelations);
+
+			// Assert
+			expect(result.existenceChecks?.[0]?.relation).toBe('products');
+			expect(result.limit).toBe(5);
+		});
+
+		it('should work with ORDER BY after existence check', () => {
+			// Arrange: categories where has products order by name
+			const query = 'categories where has products order by name';
+
+			// Act
+			const result = parseNaturalQuery(query, schemaWithRelations);
+
+			// Assert
+			expect(result.existenceChecks?.[0]?.relation).toBe('products');
+			expect(result.orderBy?.[0]?.column).toBe('name');
 		});
 	});
 });
