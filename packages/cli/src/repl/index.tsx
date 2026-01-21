@@ -925,9 +925,7 @@ function ReplApp({ config }: ReplAppProps) {
 							);
 						} else if (arg === 'off') {
 							setParseMode(false);
-							setOutput(
-								<Text color="yellow">✓ Parse mode: OFF</Text>,
-							);
+							setOutput(<Text color="yellow">✓ Parse mode: OFF</Text>);
 						} else {
 							// Toggle mode when no argument provided
 							const newMode = !parseMode;
@@ -956,9 +954,7 @@ function ReplApp({ config }: ReplAppProps) {
 							);
 						} else if (arg === 'off') {
 							setExplainMode(false);
-							setOutput(
-								<Text color="yellow">✓ Explain mode: OFF</Text>,
-							);
+							setOutput(<Text color="yellow">✓ Explain mode: OFF</Text>);
 						} else {
 							// Toggle mode when no argument provided
 							const newMode = !explainMode;

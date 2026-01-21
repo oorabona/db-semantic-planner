@@ -613,9 +613,7 @@ describe('Feature 8: Expression Helpers', () => {
 		});
 
 		it('should throw on empty alias', () => {
-			expect(() => col('name', '')).toThrow(
-				'col() requires a non-empty alias',
-			);
+			expect(() => col('name', '')).toThrow('col() requires a non-empty alias');
 		});
 
 		it('should throw on whitespace-only alias', () => {

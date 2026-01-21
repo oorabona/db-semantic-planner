@@ -971,7 +971,9 @@ describe('CLI-NQL Block 9: Path Expression Resolution', () => {
 			// Arrange: products where category.name = 'Electronics'
 			const query: ParsedQuery = {
 				table: 'products',
-				where: [{ column: 'category.name', operator: '=', value: 'Electronics' }],
+				where: [
+					{ column: 'category.name', operator: '=', value: 'Electronics' },
+				],
 			};
 
 			// Act
@@ -992,7 +994,9 @@ describe('CLI-NQL Block 9: Path Expression Resolution', () => {
 			// For very deep paths, the adapter may have limitations.
 			const query: ParsedQuery = {
 				table: 'products',
-				where: [{ column: 'category.parent.name', operator: '=', value: 'Root' }],
+				where: [
+					{ column: 'category.parent.name', operator: '=', value: 'Root' },
+				],
 			};
 
 			// Act
@@ -1053,9 +1057,7 @@ describe('CLI-NQL Block 9: Path Expression Resolution', () => {
 			// Arrange: products where category.name like 'Elec%'
 			const query: ParsedQuery = {
 				table: 'products',
-				where: [
-					{ column: 'category.name', operator: 'like', value: 'Elec%' },
-				],
+				where: [{ column: 'category.name', operator: 'like', value: 'Elec%' }],
 			};
 
 			// Act
@@ -1110,7 +1112,9 @@ describe('CLI-NQL Block 10: Subquery Support', () => {
 							type: 'subquery',
 							subquery: {
 								table: 'categories',
-								where: [{ column: 'name', operator: '=', value: 'Electronics' }],
+								where: [
+									{ column: 'name', operator: '=', value: 'Electronics' },
+								],
 								selectColumn: 'id',
 							},
 						},
@@ -1258,8 +1262,14 @@ describe('CLI-NQL Block 11: INSERT FROM Executor', () => {
 				type: 'insert',
 				table: 'products',
 				assignments: [
-					{ column: 'title', value: { type: 'string', raw: '"Phone"', value: 'Phone' } },
-					{ column: 'categoryId', value: { type: 'string', raw: 'id', value: 'id' } },
+					{
+						column: 'title',
+						value: { type: 'string', raw: '"Phone"', value: 'Phone' },
+					},
+					{
+						column: 'categoryId',
+						value: { type: 'string', raw: 'id', value: 'id' },
+					},
 				],
 				fromClause: {
 					table: 'categories',
@@ -1294,7 +1304,10 @@ describe('CLI-NQL Block 11: INSERT FROM Executor', () => {
 				table: 'items',
 				assignments: [
 					{ column: 'col1', value: { type: 'string', raw: 'id', value: 'id' } },
-					{ column: 'col2', value: { type: 'string', raw: 'code', value: 'code' } },
+					{
+						column: 'col2',
+						value: { type: 'string', raw: 'code', value: 'code' },
+					},
 				],
 				fromClause: {
 					table: 'refs',
@@ -1323,7 +1336,10 @@ describe('CLI-NQL Block 11: INSERT FROM Executor', () => {
 				type: 'insert',
 				table: 'products',
 				assignments: [
-					{ column: 'categoryId', value: { type: 'string', raw: 'id', value: 'id' } },
+					{
+						column: 'categoryId',
+						value: { type: 'string', raw: 'id', value: 'id' },
+					},
 				],
 				fromClause: {
 					table: 'categories',
@@ -1352,7 +1368,10 @@ describe('CLI-NQL Block 11: INSERT FROM Executor', () => {
 				type: 'insert',
 				table: 'products',
 				assignments: [
-					{ column: 'categoryId', value: { type: 'string', raw: 'id', value: 'id' } },
+					{
+						column: 'categoryId',
+						value: { type: 'string', raw: 'id', value: 'id' },
+					},
 				],
 				fromClause: {
 					table: 'categories',
@@ -1382,8 +1401,14 @@ describe('CLI-NQL Block 11: INSERT FROM Executor', () => {
 				type: 'insert',
 				table: 'products',
 				assignments: [
-					{ column: 'title', value: { type: 'string', raw: 'name', value: 'name' } },
-					{ column: 'price', value: { type: 'string', raw: 'basePrice', value: 'basePrice' } },
+					{
+						column: 'title',
+						value: { type: 'string', raw: 'name', value: 'name' },
+					},
+					{
+						column: 'price',
+						value: { type: 'string', raw: 'basePrice', value: 'basePrice' },
+					},
 				],
 				fromClause: {
 					table: 'templates',
@@ -1416,8 +1441,14 @@ describe('CLI-NQL Block 11: INSERT FROM Executor', () => {
 				type: 'insert',
 				table: 'products',
 				assignments: [
-					{ column: 'title', value: { type: 'string', raw: 'name', value: 'name' } }, // column ref
-					{ column: 'status', value: { type: 'string', raw: '"active"', value: 'active' } }, // literal string "active"
+					{
+						column: 'title',
+						value: { type: 'string', raw: 'name', value: 'name' },
+					}, // column ref
+					{
+						column: 'status',
+						value: { type: 'string', raw: '"active"', value: 'active' },
+					}, // literal string "active"
 				],
 				fromClause: {
 					table: 'templates',
@@ -1443,7 +1474,10 @@ describe('CLI-NQL Block 11: INSERT FROM Executor', () => {
 				type: 'insert',
 				table: 'archive',
 				assignments: [
-					{ column: 'data', value: { type: 'string', raw: 'payload', value: 'payload' } },
+					{
+						column: 'data',
+						value: { type: 'string', raw: 'payload', value: 'payload' },
+					},
 				],
 				fromClause: {
 					table: 'source',
@@ -1582,6 +1616,39 @@ describe('CLI-NQL Block 11: INSERT FROM Executor', () => {
 			// Should select both columns (snake_case aliases)
 			expect(result.sql).toMatch(/"cat_name"/i);
 			expect(result.sql).toMatch(/"cat_id"/i);
+		});
+
+		it('should NOT add include columns when explicit relation columns are selected (CLI-NQL)', () => {
+			// CLI-NQL: When selecting explicit columns via path expressions (e.g., category.name),
+			// the include should NOT add all columns from the relation.
+			// products select name, category.name as categoryName include category
+			const query: ParsedQuery = {
+				table: 'products',
+				columns: [
+					{ column: 'name' },
+					{ column: 'category.name', alias: 'categoryName' },
+				],
+				include: [{ relation: 'category' }],
+			};
+
+			const result = executeQuery(query, pathTestSchema);
+
+			// Assert
+			expect(result.error).toBeUndefined();
+			expect(result.sql).toBeDefined();
+			// Should select only the explicit columns, NOT all category columns
+			// The SQL should have category_name aliased column
+			expect(result.sql).toMatch(/"category_name"/i);
+			// Should NOT have category.slug, category.parent_id, etc. (auto-include columns)
+			// Check that there's no separate category columns select (only the explicit one)
+			// The include should be skipped because explicit columns are selected
+			const sql = result.sql!.toLowerCase();
+			// Count occurrences of category columns - should only have the explicitly selected one
+			const categoryColumnMatches =
+				sql.match(/t\d+\.\s*"(id|name|slug|parent_id|sort_order)"/gi) || [];
+			// With the fix, we should NOT see all 5 category columns
+			// The relationColumn() handles the specific column, include is skipped
+			expect(categoryColumnMatches.length).toBeLessThanOrEqual(2); // At most the explicitly selected ones
 		});
 	});
 });

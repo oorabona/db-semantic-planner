@@ -536,9 +536,7 @@ describe('ModelIR', () => {
 
 describe('CLI-NQL: Relation Kind Helpers', () => {
 	// Helper to create test RelationIR objects
-	const createRelation = (
-		overrides: Partial<RelationIR>
-	): RelationIR => ({
+	const createRelation = (overrides: Partial<RelationIR>): RelationIR => ({
 		name: 'testRelation',
 		type: 'hasMany',
 		source: 'sourceTable',

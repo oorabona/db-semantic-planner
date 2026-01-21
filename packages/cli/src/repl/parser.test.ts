@@ -491,6 +491,39 @@ describe('parseNaturalQuery', () => {
 				]);
 			});
 
+			it('auto-includes relation when used in qualified WHERE path (CLI-NQL)', () => {
+				// "posts where author.name = 'John'" without explicit include
+				// should auto-add author include with the where clause
+				const result = parseNaturalQuery(
+					"posts where author.name = 'John'",
+					mockSchema,
+				);
+				expect(result).toEqual({
+					table: 'posts',
+					include: [
+						{
+							relation: 'author',
+							where: [{ column: 'name', operator: '=', value: 'John' }],
+						},
+					],
+				});
+			});
+
+			it('auto-includes relation and merges with existing include (CLI-NQL)', () => {
+				// "users include posts where posts.published = true"
+				// posts is already included, so the where should be merged
+				const result = parseNaturalQuery(
+					'users include posts where posts.published = true',
+					mockSchema,
+				);
+				expect(result.table).toBe('users');
+				expect(result.include).toHaveLength(1);
+				expect(result.include?.[0]).toEqual({
+					relation: 'posts',
+					where: [{ column: 'published', operator: '=', value: true }],
+				});
+			});
+
 			it('throws error for qualified column referencing unknown table (CLI-014)', () => {
 				expect(() =>
 					parseNaturalQuery(

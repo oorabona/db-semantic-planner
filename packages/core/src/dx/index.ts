@@ -27,6 +27,8 @@ export {
 	and,
 	// Expression
 	coalesce,
+	// Column alias (native Kysely API)
+	col,
 	type DistinctField,
 	// Window function builders (DX-021)
 	denseRank,
@@ -63,8 +65,6 @@ export {
 	rank,
 	// Raw SQL escape hatch
 	raw,
-	// Column alias (native Kysely API)
-	col,
 	// Relation column (select from joined table)
 	relationColumn,
 	rowNumber,
