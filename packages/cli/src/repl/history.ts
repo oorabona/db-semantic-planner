@@ -127,6 +127,19 @@ export class CommandHistory {
 	}
 
 	/**
+	 * CLI-MUT: Reverse incremental search (Ctrl+R functionality)
+	 * Returns matches from most recent to oldest
+	 */
+	reverseSearch(query: string): string[] {
+		if (!query) return [];
+		const lower = query.toLowerCase();
+		// Return matches in reverse order (most recent first)
+		return this.history
+			.filter((cmd) => cmd.toLowerCase().includes(lower))
+			.reverse();
+	}
+
+	/**
 	 * Get all history entries
 	 */
 	getAll(): readonly string[] {

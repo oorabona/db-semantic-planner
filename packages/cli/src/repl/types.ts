@@ -13,6 +13,12 @@ export interface ReplConfig {
 	schemaPath: string;
 	/** CLI-020: Optional database connection URL for execution mode */
 	databaseUrl?: string;
+	/** CLI-MUT: Initial schema name for .use (--use flag) */
+	initialSchemaName?: string;
+	/** CLI-MUT: Initial parse mode for .parse (--parse flag) */
+	initialParseMode?: boolean;
+	/** CLI-MUT: Initial exec mode for .exec (--exec flag) */
+	initialExecMode?: boolean;
 }
 
 /**
@@ -271,6 +277,13 @@ export interface ExistenceCheck {
 	type: 'exists' | 'not_exists';
 	/** Relation name to check existence for */
 	relation: string;
+	/**
+	 * CLI-NQL: Cross-table relation for ancestors/descendants.
+	 * @example "products where category has ancestors where name = 'Root'"
+	 * → sourceRelation: 'category', relation: 'ancestors'
+	 * The check traverses 'category' first, then checks ancestors.
+	 */
+	sourceRelation?: string;
 	/** Optional nested WHERE conditions on the related table */
 	where?: Array<{ column: string; operator: string; value: unknown }>;
 	/**

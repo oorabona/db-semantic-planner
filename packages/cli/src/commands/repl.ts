@@ -7,6 +7,7 @@
 
 import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
+import { config } from '../config.js';
 import { loadSchema, loadSchemaFromCwd } from '../utils/schema-loader.js';
 
 export interface ReplOptions {
@@ -25,6 +26,12 @@ export interface ReplOptions {
 	import?: string[];
 	/** CLI-USE: PostgreSQL schema to use (injected as .use command) */
 	use?: string;
+	/** CLI-MUT: Start REPL with parse mode enabled */
+	parse?: boolean;
+	/** CLI-MUT: Start REPL with exec mode enabled */
+	exec?: boolean;
+	/** CLI-CONFIG: Custom config file path (default: ~/.dbsp/config.json) */
+	config?: string;
 }
 
 export const replCommand = new Command('repl')
@@ -56,7 +63,19 @@ export const replCommand = new Command('repl')
 		'--use <schema>',
 		'PostgreSQL schema to use (equivalent to .use command)',
 	)
+	.option('--parse', 'Start REPL with parse mode enabled (.parse toggle)')
+	.option('--exec', 'Start REPL with exec mode enabled (.exec toggle)')
+	.option(
+		'-c, --config <path>',
+		'Custom config file path (default: ~/.dbsp/config.json)',
+	)
 	.action(async (options: ReplOptions) => {
+		// Set custom config path if provided
+		if (options.config) {
+			config.setConfigPath(options.config);
+		}
+		// Load config
+		config.load();
 		try {
 			// Load schema
 			let schemaPath: string;
@@ -78,11 +97,10 @@ export const replCommand = new Command('repl')
 				);
 			}
 
-			// CLI-IMPORT/USE: Validate that --import and --use require batch mode
-			if ((options.import || options.use) && !options.eval && !options.input) {
-				throw new Error(
-					'--import and --use require batch mode (--eval or --input)',
-				);
+			// CLI-IMPORT: Validate that --import requires batch mode (SQL file execution)
+			// Note: --use, --parse, --exec work in interactive mode (REPL state setup)
+			if (options.import && !options.eval && !options.input) {
+				throw new Error('--import requires batch mode (--eval or --input)');
 			}
 
 			// CLI-022: Batch mode - execute queries without interactive UI
@@ -129,10 +147,14 @@ export const replCommand = new Command('repl')
 			// Dynamic import to avoid loading React/Ink for other commands
 			const { startRepl } = await import('../repl/index.js');
 			// CLI-020: Pass database URL if provided
+			// CLI-MUT: Pass initial REPL state options
 			await startRepl({
 				schema,
 				schemaPath,
 				...(options.db && { databaseUrl: options.db }),
+				...(options.use && { initialSchemaName: options.use }),
+				...(options.parse && { initialParseMode: true }),
+				...(options.exec && { initialExecMode: true }),
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);

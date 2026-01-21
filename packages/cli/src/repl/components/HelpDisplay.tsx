@@ -15,7 +15,7 @@ const DOT_COMMANDS = [
 	{ command: '.relations', description: 'List all relations' },
 	{
 		command: '.history',
-		description: 'Show command history (↑/↓ to navigate)',
+		description: 'Show command history (↑/↓ to navigate, Ctrl+R to search)',
 	},
 	{
 		command: '.sql',
@@ -58,6 +58,11 @@ const DOT_COMMANDS = [
 	{
 		command: '.explain [on|off]',
 		description: 'Toggle EXPLAIN prefix for queries',
+	},
+	{
+		command: '.table [option] [value]',
+		description:
+			'Configure table display (borders, overflow, headers, padding)',
 	},
 	{ command: '.clear', description: 'Clear screen and output' },
 	{ command: '.exit / .quit', description: 'Exit REPL' },
