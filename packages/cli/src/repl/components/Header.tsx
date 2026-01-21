@@ -28,6 +28,10 @@ interface HeaderProps {
 	databaseName?: string;
 	/** CLI-021: Active schema name for schema-scoped queries */
 	schemaName?: string;
+	/** CLI-NQL: Parse mode for AST output */
+	parseMode?: boolean;
+	/** CLI-NQL: Explain mode for EXPLAIN prefix */
+	explainMode?: boolean;
 }
 
 /** Short display names for dialects */
@@ -61,6 +65,8 @@ export function Header({
 	execMode,
 	databaseName,
 	schemaName,
+	parseMode,
+	explainMode,
 }: HeaderProps) {
 	return (
 		<Box
@@ -111,6 +117,20 @@ export function Header({
 				<Text color={aliasingMode === 'always' ? 'cyan' : 'yellow'}>
 					{aliasingMode === 'always' ? 'all' : 'collision'}
 				</Text>
+
+				{/* CLI-NQL: Parse and Explain mode indicators */}
+				{parseMode && (
+					<>
+						<Text color="gray"> | </Text>
+						<Text color="blue">[parse]</Text>
+					</>
+				)}
+				{explainMode && (
+					<>
+						<Text color="gray"> | </Text>
+						<Text color="yellow">[explain]</Text>
+					</>
+				)}
 
 				{/* CLI-020: Database connection status */}
 				{connected && (
