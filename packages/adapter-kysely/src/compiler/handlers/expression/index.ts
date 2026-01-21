@@ -6,7 +6,9 @@
 import { registerExpressionHandler } from '../../registry.js';
 import type { ExpressionHandler } from '../../types.js';
 import { coalesceHandler } from './coalesce.js';
+import { columnAliasHandler } from './columnAlias.js';
 import { rawHandler } from './raw.js';
+import { relationColumnHandler } from './relationColumn.js';
 import { windowHandler } from './window.js';
 
 // ============================================================================
@@ -25,8 +27,16 @@ export function registerExpressionHandlers(): void {
 	);
 	registerExpressionHandler('raw', rawHandler as unknown as ExpressionHandler);
 	registerExpressionHandler(
+		'columnAlias',
+		columnAliasHandler as unknown as ExpressionHandler,
+	);
+	registerExpressionHandler(
 		'window',
 		windowHandler as unknown as ExpressionHandler,
+	);
+	registerExpressionHandler(
+		'relationColumn',
+		relationColumnHandler as unknown as ExpressionHandler,
 	);
 }
 
@@ -35,5 +45,7 @@ export function registerExpressionHandlers(): void {
 // ============================================================================
 
 export { coalesceHandler } from './coalesce.js';
+export { columnAliasHandler } from './columnAlias.js';
 export { rawHandler } from './raw.js';
+export { relationColumnHandler } from './relationColumn.js';
 export { windowHandler } from './window.js';

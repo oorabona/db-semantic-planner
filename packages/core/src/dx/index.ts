@@ -63,6 +63,10 @@ export {
 	rank,
 	// Raw SQL escape hatch
 	raw,
+	// Column alias (native Kysely API)
+	col,
+	// Relation column (select from joined table)
+	relationColumn,
 	rowNumber,
 	WindowBuilder,
 	wAvg,

@@ -473,6 +473,92 @@ export function raw(sqlFragment: string, as: string): ExpressionSpec {
 	};
 }
 
+/**
+ * Creates a column alias expression using native Kysely API.
+ * Preferred over raw() for simple column aliasing as it's type-safe and dialect-portable.
+ *
+ * Uses Kysely's `eb.ref(column).as(alias)` internally - no raw SQL.
+ *
+ * @param column - Column name to select
+ * @param alias - Alias for the result column
+ * @returns ExpressionSpec for use in columns()
+ *
+ * @example
+ * ```typescript
+ * // Simple column alias
+ * col('name', 'userName')
+ * // → SELECT "name" AS "userName"
+ *
+ * // Multiple columns with aliases
+ * orm.select('users').columns([
+ *   'id',
+ *   col('name', 'userName'),
+ *   col('email', 'userEmail'),
+ * ])
+ * ```
+ */
+export function col(column: string, alias: string): ExpressionSpec {
+	if (!column || column.trim() === '') {
+		throw new Error('col() requires a non-empty column name');
+	}
+	if (!alias || alias.trim() === '') {
+		throw new Error('col() requires a non-empty alias');
+	}
+	return {
+		__expr: true,
+		intent: { kind: 'columnAlias', column, alias },
+	};
+}
+
+/**
+ * Creates a relation column expression for selecting a column from a related table.
+ * Auto-creates JOINs via the include mechanism and selects with custom alias.
+ *
+ * Uses native Kysely API internally - no raw SQL. The compiler resolves the relation
+ * to its join alias and uses `eb.ref(alias.column).as(as)`.
+ *
+ * @param relation - Relation path to traverse (dot-separated for multi-level)
+ * @param column - Column name to select from the target relation
+ * @param as - Alias for the result column
+ * @returns ExpressionSpec for use in columns()
+ *
+ * @example
+ * ```typescript
+ * // Select from direct relation
+ * relationColumn('category', 'name', 'categoryName')
+ * // → SELECT t1."name" AS "categoryName" (with JOIN to categories)
+ *
+ * // Select from nested relation (multi-level path)
+ * relationColumn('category.parent', 'name', 'parentName')
+ * // → SELECT t2."name" AS "parentName" (with JOINs through category to parent)
+ *
+ * // In a query
+ * orm.select('products').columns([
+ *   'name',
+ *   relationColumn('category', 'name', 'categoryName'),
+ * ])
+ * ```
+ */
+export function relationColumn(
+	relation: string,
+	column: string,
+	as: string,
+): ExpressionSpec {
+	if (!relation || relation.trim() === '') {
+		throw new Error('relationColumn() requires a non-empty relation path');
+	}
+	if (!column || column.trim() === '') {
+		throw new Error('relationColumn() requires a non-empty column name');
+	}
+	if (!as || as.trim() === '') {
+		throw new Error('relationColumn() requires a non-empty alias');
+	}
+	return {
+		__expr: true,
+		intent: { kind: 'relationColumn', relation, column, as },
+	};
+}
+
 // ============================================================================
 // Window Function Builders
 // ============================================================================

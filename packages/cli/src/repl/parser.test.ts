@@ -1097,6 +1097,81 @@ describe('parseNaturalQuery - aggregates (CLI-016)', () => {
 	});
 });
 
+// CLI-NQL: Column selection tests
+describe('parseNaturalQuery - column selection (CLI-NQL)', () => {
+	it('parses single column', () => {
+		const result = parseNaturalQuery('users select name', mockSchema);
+		expect(result.columns).toEqual([{ column: 'name' }]);
+		expect(result.aggregates).toBeUndefined();
+	});
+
+	it('parses multiple columns (comma-separated)', () => {
+		const result = parseNaturalQuery(
+			'users select id, name, email',
+			mockSchema,
+		);
+		expect(result.columns).toEqual([
+			{ column: 'id' },
+			{ column: 'name' },
+			{ column: 'email' },
+		]);
+	});
+
+	it('parses wildcard (*)', () => {
+		const result = parseNaturalQuery('users select *', mockSchema);
+		// Wildcard means "all columns" - columns array should be undefined or empty
+		expect(result.columns).toBeUndefined();
+	});
+
+	it('parses columns with where clause', () => {
+		const result = parseNaturalQuery(
+			'users select id, name where active = true',
+			mockSchema,
+		);
+		expect(result.columns).toEqual([{ column: 'id' }, { column: 'name' }]);
+		expect(result.where).toHaveLength(1);
+		expect(result.where?.[0]?.column).toBe('active');
+	});
+
+	it('parses columns with order by', () => {
+		const result = parseNaturalQuery(
+			'users select name, email order by name',
+			mockSchema,
+		);
+		expect(result.columns).toEqual([{ column: 'name' }, { column: 'email' }]);
+		expect(result.orderBy).toHaveLength(1);
+	});
+
+	it('parses select distinct with columns', () => {
+		const result = parseNaturalQuery('users select distinct name', mockSchema);
+		expect(result.distinct).toBe(true);
+		expect(result.columns).toEqual([{ column: 'name' }]);
+	});
+
+	it('parses column with alias', () => {
+		const result = parseNaturalQuery('users select name as n', mockSchema);
+		expect(result.columns).toEqual([{ column: 'name', alias: 'n' }]);
+	});
+
+	it('parses multiple columns with mixed aliases', () => {
+		const result = parseNaturalQuery(
+			'users select id, name as userName, email',
+			mockSchema,
+		);
+		expect(result.columns).toEqual([
+			{ column: 'id' },
+			{ column: 'name', alias: 'userName' },
+			{ column: 'email' },
+		]);
+	});
+
+	it('parses mixed columns and aggregates', () => {
+		const result = parseNaturalQuery('users select id, count(*)', mockSchema);
+		expect(result.columns).toEqual([{ column: 'id' }]);
+		expect(result.aggregates).toEqual([{ function: 'count' }]);
+	});
+});
+
 describe('parseNaturalQuery - group by (CLI-016)', () => {
 	it('parses simple group by', () => {
 		const result = parseNaturalQuery(

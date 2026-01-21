@@ -939,3 +939,22 @@ Parser sets `raw: true` for unquoted identifiers, executor uses this to decide:
 **Pattern:** When parsing DSL syntax that has both literals and identifiers, always track which is which at parse time. Don't try to infer later.
 
 **Location:** `packages/cli/src/repl/types.ts` (MutationValue type), `packages/cli/src/repl/query-executor.ts` (INSERT FROM execution)
+
+---
+
+### New Handler Not Found: "Unknown expression kind" Runtime Error
+
+**Symptom:** After adding a new handler in adapter-kysely source, get runtime error like `Unknown expression kind: columnAlias` even though the code looks correct.
+
+**Root cause:** The adapter-kysely package was not rebuilt after adding the handler. The handler registration function exists in source but the compiled bundle in `dist/` doesn't include it.
+
+**Solution:**
+1. Always rebuild the package after adding new handlers: `pnpm -C packages/adapter-kysely build`
+2. Verify the handler is in the bundle: `grep -l "handlerName" packages/adapter-kysely/dist/*.js`
+3. If CLI uses the adapter, rebuild CLI too: `pnpm -C packages/cli build`
+
+**Why this happens:** tsup bundles everything into chunk files. Registration happens at module load time via the bundled code, not the source.
+
+**Pattern:** After modifying handler registrations in adapter-kysely, ALWAYS rebuild before testing. Tests using vitest with source may pass while runtime fails because vitest reads source directly.
+
+**Location:** `packages/adapter-kysely/src/compiler/handlers/expression/index.ts` (handler registration)

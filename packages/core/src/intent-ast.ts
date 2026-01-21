@@ -131,12 +131,46 @@ export interface RawExpressionIntent {
 }
 
 /**
+ * Column alias expression: simple column reference with alias
+ * Uses native Kysely eb.ref().as() - type-safe and dialect-portable
+ * @example { kind: 'columnAlias', column: 'name', alias: 'userName' }
+ *          → SELECT "name" AS "userName"
+ */
+export interface ColumnAliasIntent {
+	readonly kind: 'columnAlias';
+	/** Column name to select */
+	readonly column: string;
+	/** Alias for the result column */
+	readonly alias: string;
+}
+
+/**
+ * Relation column expression: select a column from a related table
+ * Auto-creates JOIN via include mechanism and selects with custom alias
+ * @example { kind: 'relationColumn', relation: 'category', column: 'name', as: 'categoryName' }
+ *          → SELECT t1."name" AS "categoryName" (where t1 is the joined category table)
+ * @example { kind: 'relationColumn', relation: 'category.parent', column: 'name', as: 'parentCategoryName' }
+ *          → Multi-level join: products → category → parent, select parent.name
+ */
+export interface RelationColumnIntent {
+	readonly kind: 'relationColumn';
+	/** Relation path to traverse (dot-separated for multi-level) */
+	readonly relation: string;
+	/** Column name to select from the target relation */
+	readonly column: string;
+	/** Alias for the result column */
+	readonly as: string;
+}
+
+/**
  * Expression intent union type - computed/derived values in SELECT
  * Extensible for future expression types (CASE WHEN, etc.)
  */
 export type ExpressionIntent =
 	| CoalesceExpressionIntent
 	| RawExpressionIntent
+	| ColumnAliasIntent
+	| RelationColumnIntent
 	| WindowIntent;
 
 /**
@@ -1335,6 +1369,24 @@ export function isRawExpression(
 	expr: ExpressionIntent,
 ): expr is RawExpressionIntent {
 	return expr.kind === 'raw';
+}
+
+/**
+ * Check if an expression is a column alias expression
+ */
+export function isColumnAliasExpression(
+	expr: ExpressionIntent,
+): expr is ColumnAliasIntent {
+	return expr.kind === 'columnAlias';
+}
+
+/**
+ * Check if an expression is a relation column expression
+ */
+export function isRelationColumnExpression(
+	expr: ExpressionIntent,
+): expr is RelationColumnIntent {
+	return expr.kind === 'relationColumn';
 }
 
 // ============================================================================

@@ -58,6 +58,29 @@ Extend REPL natural query language to be a complete "new SQL" - simpler for huma
 - [x] ✅ Block 2: INSERT Parser (2026-01-20)
 - [x] ✅ Block 3: UPDATE & DELETE Parsers (2026-01-20)
 
+## Bugfixes
+
+- [x] ✅ Column selection with aliases: `select name as n` (2026-01-21)
+  - Parser now handles simple column names (not just aggregates)
+  - Support for `AS alias` syntax per EBNF grammar
+  - Query executor uses `col()` helper with native Kysely `eb.ref().as()`
+
+## Improvements
+
+- [x] ✅ Native column aliasing via `col()` helper (2026-01-21)
+  - Added `ColumnAliasIntent` to core intent-ast
+  - Created `col(column, alias)` helper in core/dx/filters
+  - Implemented native Kysely handler using `eb.ref().as()` (no raw SQL)
+  - Replaces previous `raw()` approach for type-safe, dialect-portable aliasing
+
+- [x] ✅ Relation column auto-JOIN via `relationColumn()` helper (2026-01-21)
+  - Added `RelationColumnIntent` to core intent-ast
+  - Created `relationColumn(relation, column, alias)` helper in core/dx/filters
+  - Implemented `relationColumnHandler` with automatic LEFT JOIN creation
+  - Enables simplified syntax: `products select name, categories.name as categoryName`
+  - Supports multi-level paths: `product.category.parent.name`
+  - Reuses existing JOINs from include/where operations
+
 ---
 
 ## Deferred (v2)
