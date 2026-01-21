@@ -2,15 +2,16 @@
  * DX-030: Query Executor using real semantic planner
  *
  * Converts ParsedQuery to ORM API calls and returns the compiled SQL.
- * Uses MockAdapter for compile-only mode (no database required).
+ * Uses CompileOnlyAdapter for compile-only mode (no database required).
  */
 
-import { createMockAdapter } from '@dbsp/adapter-kysely';
+import { createCompileOnlyAdapter } from '@dbsp/adapter-kysely';
 import type { ResolvedSchema } from '@dbsp/core';
 import {
 	and,
 	assertResolvedSchemaToGeneratedSchema,
 	buildModelFromSchema,
+	col,
 	createOrm,
 	type Dump,
 	distinct as distinctField,
@@ -32,6 +33,7 @@ import {
 	rangeContainedBy,
 	rangeContains,
 	rangeOverlaps,
+	relationColumn,
 	type ScalarSubqueryIntent,
 	type WhereIntent,
 	type WhereRelationFilterIntent,
@@ -423,9 +425,7 @@ function subqueryToWhereIntent(
  * CLI-NQL Block 10: Convert an ExistenceCheck to WhereIntent.
  * Generates EXISTS or NOT EXISTS subquery.
  */
-function existenceCheckToIntent(
-	check: ExistenceCheck,
-): WhereIntent {
+function existenceCheckToIntent(check: ExistenceCheck): WhereIntent {
 	// Build optional WHERE filter for the existence check
 	let whereFilter: WhereIntent | undefined;
 	if (check.where && check.where.length > 0) {
@@ -441,9 +441,15 @@ function existenceCheckToIntent(
 
 	// Use exists/notExists helper from core
 	if (check.type === 'exists') {
-		return exists(check.relation, whereFilter ? { where: whereFilter } : undefined);
+		return exists(
+			check.relation,
+			whereFilter ? { where: whereFilter } : undefined,
+		);
 	}
-	return notExists(check.relation, whereFilter ? { where: whereFilter } : undefined);
+	return notExists(
+		check.relation,
+		whereFilter ? { where: whereFilter } : undefined,
+	);
 }
 
 /**
@@ -535,7 +541,7 @@ export function executeQuery(
 			if (d === 'mssql') return 'mssql';
 			return 'postgresql';
 		};
-		const adapter = createMockAdapter({
+		const adapter = createCompileOnlyAdapter({
 			dialect: dialectToMock(options?.dialect),
 			aliasIncludedColumns: options?.aliasingMode ?? 'always',
 		});
@@ -557,6 +563,27 @@ export function executeQuery(
 
 		// Start building the query (table name comes from user input)
 		let builder = orm.select(query.table);
+
+		// CLI-NQL: Add column projection if specified
+		if (query.columns && query.columns.length > 0) {
+			// Convert ParsedColumn[] to ColumnSpec[]
+			// Use relationColumn() for path expressions (e.g., "categories.name")
+			// Use col() for simple aliases (native Kysely API)
+			const columnSpecs = query.columns.map((c) => {
+				if (isPathExpression(c.column)) {
+					// Path expression like "categories.name" or "category.parent.name"
+					const segments = parsePathSegments(c.column);
+					const relation = segments.slice(0, -1).join('.');
+					const column = segments[segments.length - 1]!;
+					// Use alias if provided, otherwise default to "relation.column"
+					const alias = c.alias || c.column.replace(/\./g, '_');
+					return relationColumn(relation, column, alias);
+				}
+				// Simple column with optional alias
+				return c.alias ? col(c.column, c.alias) : c.column;
+			});
+			builder = builder.columns(columnSpecs);
+		}
 
 		// Add where clauses
 		if (query.where && query.where.length > 0) {
@@ -753,7 +780,6 @@ function assignmentsToValues(
 	return values;
 }
 
-
 /**
  * CLI-NQL Block 11: Build INSERT FROM SQL (SC-12 to SC-14)
  *
@@ -798,16 +824,18 @@ function buildInsertFromSql(
 	if (fromClause.bulk) {
 		// SC-14: Bulk INSERT...SELECT
 		// INSERT INTO target (cols) SELECT (exprs) FROM source WHERE ...
-		const selectExprs = assignments.map((a) => {
-			const val = a.value;
-			// If it's an unquoted identifier, treat as column reference
-			if (isColumnRef(val)) {
-				return `"${val.value}"`;
-			}
-			// Otherwise it's a literal
-			params.push(val.value);
-			return `$${params.length}`;
-		}).join(', ');
+		const selectExprs = assignments
+			.map((a) => {
+				const val = a.value;
+				// If it's an unquoted identifier, treat as column reference
+				if (isColumnRef(val)) {
+					return `"${val.value}"`;
+				}
+				// Otherwise it's a literal
+				params.push(val.value);
+				return `$${params.length}`;
+			})
+			.join(', ');
 
 		let sql = `INSERT INTO ${tableName} (${columns}) SELECT ${selectExprs} FROM ${sourceTable}`;
 
@@ -825,35 +853,37 @@ function buildInsertFromSql(
 
 	// SC-12, SC-13: Non-bulk (scalar subquery for FK lookup)
 	// INSERT INTO target (cols) VALUES (literal, (SELECT col FROM source WHERE ...))
-	const valueExprs = assignments.map((a) => {
-		const val = a.value;
-		// If it's an unquoted identifier, treat as column reference from source
-		if (isColumnRef(val)) {
-			// Build scalar subquery
-			let subquery = `SELECT "${val.value}" FROM ${sourceTable}`;
+	const valueExprs = assignments
+		.map((a) => {
+			const val = a.value;
+			// If it's an unquoted identifier, treat as column reference from source
+			if (isColumnRef(val)) {
+				// Build scalar subquery
+				let subquery = `SELECT "${val.value}" FROM ${sourceTable}`;
 
-			if (fromClause.where && fromClause.where.length > 0) {
-				const whereClauses = fromClause.where.map((w) => {
-					params.push(w.value);
-					return `"${w.column}" ${w.operator} $${params.length}`;
-				});
-				subquery += ` WHERE ${whereClauses.join(' AND ')}`;
-			}
-
-			// SC-13: Add FOR UPDATE clause
-			if (fromClause.forUpdate) {
-				subquery += ' FOR UPDATE';
-				if (fromClause.skipLocked) {
-					subquery += ' SKIP LOCKED';
+				if (fromClause.where && fromClause.where.length > 0) {
+					const whereClauses = fromClause.where.map((w) => {
+						params.push(w.value);
+						return `"${w.column}" ${w.operator} $${params.length}`;
+					});
+					subquery += ` WHERE ${whereClauses.join(' AND ')}`;
 				}
-			}
 
-			return `(${subquery})`;
-		}
-		// Literal value
-		params.push(val.value);
-		return `$${params.length}`;
-	}).join(', ');
+				// SC-13: Add FOR UPDATE clause
+				if (fromClause.forUpdate) {
+					subquery += ' FOR UPDATE';
+					if (fromClause.skipLocked) {
+						subquery += ' SKIP LOCKED';
+					}
+				}
+
+				return `(${subquery})`;
+			}
+			// Literal value
+			params.push(val.value);
+			return `$${params.length}`;
+		})
+		.join(', ');
 
 	const sql = `INSERT INTO ${tableName} (${columns}) VALUES (${valueExprs})`;
 	return { sql, params };
@@ -883,7 +913,7 @@ export function executeMutation(
 			return 'postgresql';
 		};
 
-		const adapter = createMockAdapter({
+		const adapter = createCompileOnlyAdapter({
 			dialect: dialectToMock(options?.dialect),
 			aliasIncludedColumns: options?.aliasingMode ?? 'always',
 		});

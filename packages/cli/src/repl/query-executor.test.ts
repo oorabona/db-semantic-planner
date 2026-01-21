@@ -1465,4 +1465,123 @@ describe('CLI-NQL Block 11: INSERT FROM Executor', () => {
 			expect(result.sql).not.toContain('WHERE');
 		});
 	});
+
+	describe('SC-08: Relation columns in SELECT with auto-JOIN', () => {
+		it('should generate JOIN for single-level relation column with alias', () => {
+			// products select title, category.name as categoryName
+			const query: ParsedQuery = {
+				table: 'products',
+				columns: [
+					{ column: 'title' },
+					{ column: 'category.name', alias: 'categoryName' },
+				],
+			};
+
+			const result = executeQuery(query, pathTestSchema);
+
+			// Assert
+			expect(result.error).toBeUndefined();
+			expect(result.sql).toBeDefined();
+			// Should have SELECT with both columns (lowercase in Kysely)
+			expect(result.sql).toMatch(/select/i);
+			expect(result.sql).toMatch(/"t0"\."title"/);
+			// Should have JOIN to categories
+			expect(result.sql).toMatch(/left join.*"categories"/i);
+			// Should select category.name with alias (snake_case is normal)
+			expect(result.sql).toMatch(/"t\d+"\."name".*as.*"category_name"/i);
+		});
+
+		it('should generate nested JOINs for 2-level relation column', () => {
+			// products select title, category.parent.name as grandParentName
+			const query: ParsedQuery = {
+				table: 'products',
+				columns: [
+					{ column: 'title' },
+					{ column: 'category.parent.name', alias: 'grandParentName' },
+				],
+			};
+
+			const result = executeQuery(query, pathTestSchema);
+
+			// Assert
+			expect(result.error).toBeUndefined();
+			expect(result.sql).toBeDefined();
+			// Should have SELECT
+			expect(result.sql).toMatch(/select/i);
+			expect(result.sql).toMatch(/"t0"\."title"/);
+			// Should have 2 JOINs (products -> category -> parent)
+			const joinCount = (result.sql.match(/left join/gi) || []).length;
+			expect(joinCount).toBeGreaterThanOrEqual(2);
+			// Should select the final column with alias (snake_case)
+			expect(result.sql).toMatch(/"t\d+"\."name".*as.*"grand_parent_name"/i);
+		});
+
+		it('should use default alias when none provided for relation column', () => {
+			// products select title, category.name (no alias -> category_name)
+			const query: ParsedQuery = {
+				table: 'products',
+				columns: [
+					{ column: 'title' },
+					{ column: 'category.name' }, // No alias
+				],
+			};
+
+			const result = executeQuery(query, pathTestSchema);
+
+			// Assert
+			expect(result.error).toBeUndefined();
+			expect(result.sql).toBeDefined();
+			// Should have JOIN
+			expect(result.sql).toMatch(/left join.*"categories"/i);
+			// Should use default alias (dots replaced with underscores)
+			expect(result.sql).toMatch(/"t\d+"\."name".*as.*"category_name"/i);
+		});
+
+		it('should reuse existing JOIN when relation already joined', () => {
+			// products select title, category.name as catName where category.id = 1
+			// Note: WHERE path creates separate JOIN (INNER), SELECT creates LEFT JOIN
+			const query: ParsedQuery = {
+				table: 'products',
+				columns: [
+					{ column: 'title' },
+					{ column: 'category.name', alias: 'catName' },
+				],
+				where: [{ column: 'category.id', operator: '=', value: 1 }],
+			};
+
+			const result = executeQuery(query, pathTestSchema);
+
+			// Assert
+			expect(result.error).toBeUndefined();
+			expect(result.sql).toBeDefined();
+			// Should have JOINs for the relation
+			expect(result.sql).toMatch(/join.*"categories"/i);
+			// Should have the SELECT column with alias (snake_case)
+			expect(result.sql).toMatch(/"t\d+"\."name".*as.*"cat_name"/i);
+		});
+
+		it('should combine multiple relation columns with single JOIN', () => {
+			// products select category.name as catName, category.id as catId
+			const query: ParsedQuery = {
+				table: 'products',
+				columns: [
+					{ column: 'category.name', alias: 'catName' },
+					{ column: 'category.id', alias: 'catId' },
+				],
+			};
+
+			const result = executeQuery(query, pathTestSchema);
+
+			// Assert
+			expect(result.error).toBeUndefined();
+			expect(result.sql).toBeDefined();
+			// Should have only 1 JOIN for category
+			const joinCount = (result.sql.match(/left join.*"categories"/gi) || [])
+				.length;
+			expect(joinCount).toBe(1);
+			// Should select both columns (snake_case aliases)
+			expect(result.sql).toMatch(/"cat_name"/i);
+			expect(result.sql).toMatch(/"cat_id"/i);
+		});
+	});
 });

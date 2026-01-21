@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	and,
 	coalesce,
+	col,
 	distinct,
 	eq,
 	exists,
@@ -29,6 +30,7 @@ import {
 	rangeContains,
 	rangeOverlaps,
 	raw,
+	relationColumn,
 } from './filters.js';
 
 // ============================================================================
@@ -574,6 +576,54 @@ describe('Feature 8: Expression Helpers', () => {
 			});
 		});
 	});
+
+	describe('Scenario 8.3: col() creates ExpressionSpec with columnAlias intent', () => {
+		it('should return ExpressionSpec wrapping ColumnAliasIntent', () => {
+			const result = col('name', 'userName');
+
+			expect(result).toEqual({
+				__expr: true,
+				intent: {
+					kind: 'columnAlias',
+					column: 'name',
+					alias: 'userName',
+				},
+			});
+		});
+
+		it('should handle column names with underscore', () => {
+			const result = col('first_name', 'firstName');
+
+			expect(result.__expr).toBe(true);
+			expect(result.intent.kind).toBe('columnAlias');
+			expect(result.intent.column).toBe('first_name');
+			expect(result.intent.alias).toBe('firstName');
+		});
+
+		it('should throw on empty column name', () => {
+			expect(() => col('', 'alias')).toThrow(
+				'col() requires a non-empty column name',
+			);
+		});
+
+		it('should throw on whitespace-only column name', () => {
+			expect(() => col('  ', 'alias')).toThrow(
+				'col() requires a non-empty column name',
+			);
+		});
+
+		it('should throw on empty alias', () => {
+			expect(() => col('name', '')).toThrow(
+				'col() requires a non-empty alias',
+			);
+		});
+
+		it('should throw on whitespace-only alias', () => {
+			expect(() => col('name', '  ')).toThrow(
+				'col() requires a non-empty alias',
+			);
+		});
+	});
 });
 
 // ============================================================================
@@ -605,6 +655,85 @@ describe('DX-034: distinct() helper', () => {
 			expect(isDistinctField(undefined)).toBe(false);
 			expect(isDistinctField({ field: 'customerId', distinct: false })).toBe(
 				false,
+			);
+		});
+	});
+});
+
+// ============================================================================
+// relationColumn() Helper - Auto-JOIN relation columns
+// ============================================================================
+
+describe('relationColumn() helper', () => {
+	describe('relationColumn()', () => {
+		it('should return ExpressionSpec wrapping RelationColumnIntent', () => {
+			const result = relationColumn('category', 'name', 'categoryName');
+
+			expect(result).toEqual({
+				__expr: true,
+				intent: {
+					kind: 'relationColumn',
+					relation: 'category',
+					column: 'name',
+					as: 'categoryName',
+				},
+			});
+		});
+
+		it('should handle multi-level relation paths', () => {
+			const result = relationColumn(
+				'category.parent',
+				'name',
+				'parentCategoryName',
+			);
+
+			expect(result.__expr).toBe(true);
+			expect(result.intent.kind).toBe('relationColumn');
+			expect(result.intent.relation).toBe('category.parent');
+			expect(result.intent.column).toBe('name');
+			expect(result.intent.as).toBe('parentCategoryName');
+		});
+
+		it('should handle snake_case column names', () => {
+			const result = relationColumn('author', 'first_name', 'authorFirstName');
+
+			expect(result.intent.column).toBe('first_name');
+			expect(result.intent.as).toBe('authorFirstName');
+		});
+
+		it('should throw on empty relation', () => {
+			expect(() => relationColumn('', 'name', 'alias')).toThrow(
+				'relationColumn() requires a non-empty relation path',
+			);
+		});
+
+		it('should throw on whitespace-only relation', () => {
+			expect(() => relationColumn('  ', 'name', 'alias')).toThrow(
+				'relationColumn() requires a non-empty relation path',
+			);
+		});
+
+		it('should throw on empty column', () => {
+			expect(() => relationColumn('category', '', 'alias')).toThrow(
+				'relationColumn() requires a non-empty column name',
+			);
+		});
+
+		it('should throw on whitespace-only column', () => {
+			expect(() => relationColumn('category', '  ', 'alias')).toThrow(
+				'relationColumn() requires a non-empty column name',
+			);
+		});
+
+		it('should throw on empty alias', () => {
+			expect(() => relationColumn('category', 'name', '')).toThrow(
+				'relationColumn() requires a non-empty alias',
+			);
+		});
+
+		it('should throw on whitespace-only alias', () => {
+			expect(() => relationColumn('category', 'name', '  ')).toThrow(
+				'relationColumn() requires a non-empty alias',
 			);
 		});
 	});

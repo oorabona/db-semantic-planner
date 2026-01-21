@@ -1371,8 +1371,20 @@ export interface ParsedAggregate {
 /**
  * Parsed query result
  */
+/**
+ * CLI-NQL: Parsed column specification
+ */
+export interface ParsedColumn {
+	/** Column name */
+	column: string;
+	/** Optional alias (AS clause) */
+	alias?: string;
+}
+
 export interface ParsedQuery {
 	table: string;
+	/** CLI-NQL: Column projection (select name, price as p) */
+	columns?: ParsedColumn[];
 	where?: WhereClause[];
 	/** CLI-NQL: Existence checks (has/not has) */
 	existenceChecks?: ExistenceCheck[];
@@ -2568,8 +2580,8 @@ export function parseNaturalQuery(
 			}
 
 			case 'select': {
-				// CLI-016: Parse aggregate expressions after 'select'
-				// Syntax: select count(*), sum(field) as alias, ...
+				// CLI-NQL: Parse select clause - aggregates, columns, or *
+				// Syntax: select count(*), sum(field) as alias, name, price as p, *
 				// Also handles: select distinct
 				// Note: commas are stripped by tokenizer, so we just keep parsing
 				i++;
@@ -2588,19 +2600,76 @@ export function parseNaturalQuery(
 						// select distinct - SELECT DISTINCT query
 						result.distinct = true;
 						i++;
-						break;
+						// Continue parsing columns after distinct (e.g., "select distinct name, email")
+						// Fall through to column parsing below
 					}
 				}
 
-				// Parse aggregate expressions (keep going while we find aggregates)
-				while (i < tokens.length) {
-					const parsed = parseAggregateExpression(tokens, i);
-					if (!parsed) break;
+				// Keywords that end select clause
+				const selectEndKeywords = [
+					'where',
+					'limit',
+					'offset',
+					'include',
+					'order',
+					'orderby',
+					'group',
+					'having',
+					'from', // CLI-MUT: for INSERT...FROM
+				];
 
-					result.aggregates = result.aggregates ?? [];
-					result.aggregates.push(parsed.aggregate);
-					i = parsed.nextIndex;
-					// No comma check needed - tokenizer strips commas
+				// Parse select items: aggregates or columns
+				while (i < tokens.length) {
+					const token = tokens[i];
+					if (!token) break;
+
+					// Stop if we hit a keyword
+					if (selectEndKeywords.includes(token.toLowerCase())) {
+						break;
+					}
+
+					// Try to parse as aggregate first
+					const parsed = parseAggregateExpression(tokens, i);
+					if (parsed) {
+						result.aggregates = result.aggregates ?? [];
+						result.aggregates.push(parsed.aggregate);
+						i = parsed.nextIndex;
+						continue;
+					}
+
+					// CLI-NQL: Not an aggregate, treat as column name
+					// Handle: *, column, column as alias
+					if (token === '*') {
+						// Wildcard - select all columns (don't add to columns array, it means "all")
+						// We could add a flag but leaving columns undefined means "all" in most ORMs
+						i++;
+						continue;
+					}
+
+					// It's a column name - check for optional "as alias"
+					const columnName = token;
+					i++;
+
+					// Check for "as alias"
+					const parsedColumn: ParsedColumn = { column: columnName };
+					if (tokens[i]?.toLowerCase() === 'as') {
+						i++; // skip 'as'
+						const alias = tokens[i];
+						if (!alias) {
+							throw new ParseError('Expected alias after "as"');
+						}
+						// Check if alias is a keyword (shouldn't be)
+						if (selectEndKeywords.includes(alias.toLowerCase())) {
+							throw new ParseError(
+								`Invalid alias "${alias}" - cannot use keyword as alias`,
+							);
+						}
+						parsedColumn.alias = alias;
+						i++;
+					}
+
+					result.columns = result.columns ?? [];
+					result.columns.push(parsedColumn);
 				}
 				break;
 			}
