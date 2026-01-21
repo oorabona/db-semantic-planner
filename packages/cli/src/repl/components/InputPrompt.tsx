@@ -2,10 +2,11 @@ import React from 'react';
 /**
  * DX-030: REPL Input Prompt Component with History Support
  * CLI-015: Enhanced keyboard shortcuts
+ * CLI-MUT: Ctrl+R reverse history search
  */
 
 import { Box, Text, useInput } from 'ink';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CommandHistory } from '../history.js';
 import type { QueryMode } from '../types.js';
 import { EnhancedTextInput } from './EnhancedTextInput.js';
@@ -47,18 +48,80 @@ export function InputPrompt({
 		undefined,
 	);
 
+	// CLI-MUT: Reverse history search state (Ctrl+R)
+	const [searchMode, setSearchMode] = useState(false);
+	const [searchQuery, setSearchQuery] = useState('');
+	const [searchMatchIndex, setSearchMatchIndex] = useState(0);
+
+	// Compute search matches when query changes
+	const searchMatches = useMemo(() => {
+		if (!history || !searchQuery) return [];
+		return history.reverseSearch(searchQuery);
+	}, [history, searchQuery]);
+
+	// Current match from search results
+	const currentMatch = searchMatches[searchMatchIndex] ?? '';
+
 	// Reset history navigation state when resetKey changes
 	useEffect(() => {
 		setCurrentInput('');
 		setHistoryValue(undefined);
 		setHistoryKey((k) => k + 1);
+		setSearchMode(false);
+		setSearchQuery('');
+		setSearchMatchIndex(0);
 		history?.resetIndex();
 	}, [resetKey, history]);
 
-	// Handle arrow keys for history navigation
-	useInput((_input, key) => {
+	// Handle arrow keys for history navigation and Ctrl+R for reverse search
+	useInput((input, key) => {
 		if (!history) return;
 
+		// CLI-MUT: Ctrl+R triggers reverse search mode
+		if (key.ctrl && input === 'r') {
+			if (searchMode) {
+				// Already in search mode - go to next match
+				if (searchMatches.length > 0) {
+					setSearchMatchIndex((i) => (i + 1) % searchMatches.length);
+				}
+			} else {
+				// Enter search mode
+				setSearchMode(true);
+				setSearchQuery('');
+				setSearchMatchIndex(0);
+			}
+			return;
+		}
+
+		// In search mode, handle special keys
+		if (searchMode) {
+			// Escape cancels search
+			if (key.escape) {
+				setSearchMode(false);
+				setSearchQuery('');
+				setSearchMatchIndex(0);
+				return;
+			}
+
+			// Enter accepts current match
+			if (key.return) {
+				if (currentMatch) {
+					setHistoryValue(currentMatch);
+					setHistoryKey((k) => k + 1);
+					setCurrentInput(currentMatch);
+					onInputChange?.(currentMatch);
+				}
+				setSearchMode(false);
+				setSearchQuery('');
+				setSearchMatchIndex(0);
+				return;
+			}
+
+			// Don't process other keys here - let EnhancedTextInput handle them
+			return;
+		}
+
+		// Normal mode: up/down arrow for history navigation
 		if (key.upArrow) {
 			const prev = history.previous(currentInput);
 			if (prev !== undefined) {
@@ -118,6 +181,49 @@ export function InputPrompt({
 	// Use combined key for resetting: resetKey (external) + historyKey (internal from history nav)
 	const combinedKey = `${resetKey}-${historyKey}`;
 
+	// CLI-MUT: Handle search query input changes
+	const handleSearchChange = useCallback((value: string) => {
+		setSearchQuery(value);
+		setSearchMatchIndex(0); // Reset to first match when query changes
+	}, []);
+
+	// CLI-MUT: Search mode UI
+	if (searchMode) {
+		return (
+			<Box flexDirection="column" marginTop={1}>
+				{/* Show current match preview */}
+				{currentMatch && (
+					<Box>
+						<Text color="gray">→ </Text>
+						<Text color="cyan">{currentMatch}</Text>
+					</Box>
+				)}
+				{/* Search input */}
+				<Box>
+					<Text color="magenta" bold>
+						(reverse-i-search)`
+					</Text>
+					<EnhancedTextInput
+						key={`search-${combinedKey}`}
+						defaultValue={searchQuery}
+						onChange={handleSearchChange}
+						placeholder=""
+					/>
+					<Text color="magenta" bold>
+						':
+					</Text>
+					{searchMatches.length > 0 && (
+						<Text color="gray">
+							{' '}
+							({searchMatchIndex + 1}/{searchMatches.length})
+						</Text>
+					)}
+				</Box>
+			</Box>
+		);
+	}
+
+	// Normal mode UI
 	return (
 		<Box marginTop={1}>
 			<Text color={promptColor} bold>

@@ -75,6 +75,53 @@ Extend REPL natural query language to be a complete "new SQL" - simpler for huma
   - Prevents duplicate columns: `category.name as categoryName include category` no longer returns all category columns
   - Collects relations with explicit column selections before adding includes
 
+- [x] ✅ Qualified WHERE paths stay in main WHERE clause (2026-01-21)
+  - Fixed parser to keep ALL qualified paths (e.g., `category.name`, `category.parent.name`) in main WHERE
+  - Previously, qualified filters were incorrectly distributed to include filters (only filtering includes, not main query)
+
+- [x] ✅ Delete key proper detection using raw stdin (2026-01-21)
+  - Root cause: Ink's `parse-keypress.ts` maps both `\x7f` (Backspace) and `\x1b[3~` (Delete) to `key.delete`
+  - Solution: Use `useStdin` hook to capture raw bytes BEFORE Ink processes them
+  - Delete key now correctly deletes character AFTER cursor (forward delete)
+
+- [x] ✅ CLI flags --use/--parse/--exec work standalone (2026-01-21)
+  - Previously `--use` required `--eval` or `--input` (batch mode)
+  - Now these flags can be used to pre-configure REPL environment
+  - Added `initialSchemaName`, `initialParseMode`, `initialExecMode` to ReplConfig
+
+- [x] ✅ Ctrl+R reverse history search (2026-01-21)
+  - Added `reverseSearch()` method to CommandHistory class
+  - Search mode with visual feedback: `(reverse-i-search): query → match`
+  - Ctrl+R cycles through matches, Enter accepts, Escape cancels
+  - Query executor converts qualified paths to `relationFilter` intents for proper JOIN/EXISTS handling
+  - Fixed `getTableFromAlias()` in compiler to handle `_join` suffix for relation tables
+
+- [x] ✅ ORDER BY alias not prefixed with table alias (2026-01-21)
+  - Added `collectSelectAliases()` to detect aliases from SELECT clause
+  - ORDER BY now uses bare alias (`"salesCount"`) instead of qualified (`"t0"."salesCount"`)
+  - Fixes aggregate/window aliases in ORDER BY clause
+
+- [x] ✅ GROUP BY relation path auto-JOIN (2026-01-21)
+  - Fixed ModelIR API usage: `model.getTable()` instead of `model.tables[]`
+  - Fixed ModelIR API usage: `model.getRelation()` instead of `model.relations[]`
+  - GROUP BY `author.name` now correctly JOINs and uses alias `t1.name`
+
+- [x] ✅ Cross-table ancestors syntax (2026-01-21)
+  - Added `sourceRelation` field to `ExistenceCheck` interface
+  - Extended `isExistenceCheck` to detect `<relation> has ancestors` pattern
+  - Extended `parseExistenceCheck` to resolve cross-table lookup via relation target
+  - Enables: `products where category has ancestors where name = 'Root'`
+
+- [x] ✅ Auto-inferred recursive relations in lookupRelation (2026-01-21)
+  - Fixed `lookupRelation()` to check `getRecursiveRelationInfo()` before throwing errors
+  - Supports automatic inference of `ancestors`/`descendants` from `parent`/`children` relations
+  - Enables: `categories where ancestors.name = 'Root'` without explicit schema definition
+
+- [x] ✅ Qualified WHERE paths stay in main WHERE clause (2026-01-21)
+  - Fixed parser to keep ALL qualified paths (e.g., `author.name`) in main WHERE
+  - Previously, qualified filters were incorrectly distributed to pendingQualifiedFilters
+  - Query executor converts qualified paths to relationFilter intents for proper JOIN/EXISTS
+
 ## Improvements
 
 - [x] ✅ Native column aliasing via `col()` helper (2026-01-21)
@@ -91,10 +138,19 @@ Extend REPL natural query language to be a complete "new SQL" - simpler for huma
   - Supports multi-level paths: `product.category.parent.name`
   - Reuses existing JOINs from include/where operations
 
+- [x] ✅ Table configuration via `.table` command (2026-01-21)
+  - Added `packages/cli/src/config.ts` with ConfigManager singleton
+  - Persistent config at `~/.dbsp/config.json` (override with `-c` flag)
+  - Configurable options: borders, overflow, headers, padding
+  - Result formatter uses @oclif/table with config values
+  - `.table [option] [value]` for viewing/setting, `.table reset` for defaults
+
 ---
 
 ## Deferred (v2)
 
+- [x] ✅ Add unit tests for config module (review finding F-001, S size) (2026-01-21)
+- [x] ✅ Add compiler test for `compileRecursiveExists` (review finding F-002, M size) (2026-01-21)
 - [ ] `.load <table> <file>` - Bulk CSV/JSON import
 - [ ] RETURNING clause support
 - [ ] Transaction support (BEGIN/COMMIT/ROLLBACK)

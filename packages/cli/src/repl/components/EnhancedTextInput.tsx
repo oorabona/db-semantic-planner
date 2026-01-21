@@ -11,8 +11,8 @@
  * - Ctrl+Right / Alt+F: Move word forward
  */
 
-import { Box, Text, useInput } from 'ink';
-import React, { useEffect, useState } from 'react';
+import { Box, Text, useInput, useStdin } from 'ink';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface EnhancedTextInputProps {
 	/** Current value (controlled) */
@@ -84,6 +84,25 @@ export function EnhancedTextInput({
 }: EnhancedTextInputProps) {
 	const [internalValue, setInternalValue] = useState(defaultValue);
 	const [cursor, setCursor] = useState(defaultValue.length);
+
+	// Track raw input to distinguish Delete (\x1b[3~) from Backspace (\x7f)
+	// Ink's parser maps BOTH to key.delete, but we need to differentiate
+	const lastRawInputRef = useRef<string>('');
+	const { stdin } = useStdin();
+
+	// Listen to raw stdin to capture the actual escape sequence
+	useEffect(() => {
+		if (!stdin || isDisabled || !isFocused) return;
+
+		const handleRawData = (data: Buffer) => {
+			lastRawInputRef.current = data.toString();
+		};
+
+		stdin.on('data', handleRawData);
+		return () => {
+			stdin.off('data', handleRawData);
+		};
+	}, [stdin, isDisabled, isFocused]);
 
 	// Support both controlled and uncontrolled modes
 	const value = controlledValue ?? internalValue;
@@ -189,29 +208,34 @@ export function EnhancedTextInput({
 			}
 
 			// === DELETION ===
+			// Use raw input ref to distinguish Delete from Backspace
+			// Ink maps BOTH \x7f and \x1b[3~ to key.delete, but they're different keys!
+			const rawInput = lastRawInputRef.current;
 
-			// Backspace - delete character BEFORE cursor
-			// Handles: key.backspace, \x7f (DEL char from most terminals), \x08 (BS char)
-			// IMPORTANT: Must check BEFORE delete to catch \x7f which some terminals send for backspace
-			const isBackspace =
-				key.backspace ||
-				input === '\x7f' ||
-				input === '\x08' ||
-				(key.delete && input === ''); // Some terminals: key.delete=true but empty input for backspace
-			if (isBackspace) {
-				if (cursor > 0) {
-					const newValue = value.slice(0, cursor - 1) + value.slice(cursor);
-					updateValue(newValue, cursor - 1);
+			// Delete key (forward delete) - Check RAW input for \x1b[3~ sequence
+			// This MUST come before backspace check since both trigger key.delete
+			if (rawInput === '\x1b[3~' || rawInput.startsWith('\x1b[3~')) {
+				if (cursor < value.length) {
+					const newValue = value.slice(0, cursor) + value.slice(cursor + 1);
+					updateValue(newValue, cursor);
 				}
 				return;
 			}
 
-			// Delete key (forward delete) - ONLY the specific escape sequence
-			// Don't trust key.delete as it can be set incorrectly for backspace
-			if (input === '\x1b[3~') {
-				if (cursor < value.length) {
-					const newValue = value.slice(0, cursor) + value.slice(cursor + 1);
-					updateValue(newValue, cursor);
+			// Backspace - delete character BEFORE cursor
+			// Raw input \x7f = backspace on most modern terminals
+			// Raw input \x08 = backspace on some terminals (ctrl+h)
+			// key.backspace = ink detected backspace (when terminal sends \b)
+			const isBackspace =
+				key.backspace ||
+				rawInput === '\x7f' ||
+				rawInput === '\x08' ||
+				input === '\x7f' ||
+				input === '\x08';
+			if (isBackspace) {
+				if (cursor > 0) {
+					const newValue = value.slice(0, cursor - 1) + value.slice(cursor);
+					updateValue(newValue, cursor - 1);
 				}
 				return;
 			}

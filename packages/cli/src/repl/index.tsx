@@ -14,6 +14,14 @@ import React, {
 	useRef,
 	useState,
 } from 'react';
+import {
+	config as appConfig,
+	type BorderStyle,
+	type HeaderFormatter,
+	isValidTableOption,
+	type OverflowStyle,
+	TABLE_OPTIONS,
+} from '../config.js';
 import { CompletionProvider, type CompletionSuggestion } from './completion.js';
 import {
 	CompletionDisplay,
@@ -194,15 +202,18 @@ function ReplApp({ config }: ReplAppProps) {
 	const [inputKey, setInputKey] = useState(0);
 	const [splitView, setSplitView] = useState(false);
 
-	// CLI-020: Execution mode state
-	const [execMode, setExecMode] = useState(false);
+	// CLI-020: Execution mode state (initialExecMode from --exec flag)
+	const [execMode, setExecMode] = useState(config.initialExecMode ?? false);
 	const [connected, setConnected] = useState(false);
-	const [schemaName, setSchemaName] = useState<string | undefined>(undefined);
+	// CLI-MUT: Schema name (initialSchemaName from --use flag)
+	const [schemaName, setSchemaName] = useState<string | undefined>(
+		config.initialSchemaName,
+	);
 	const dbConnectionRef = useRef<DbConnection | null>(null);
 	const [executionResult, setExecutionResult] =
 		useState<ExecutionResult | null>(null);
-	// CLI-NQL: Parse mode for showing AST
-	const [parseMode, setParseMode] = useState(false);
+	// CLI-NQL: Parse mode for showing AST (initialParseMode from --parse flag)
+	const [parseMode, setParseMode] = useState(config.initialParseMode ?? false);
 	// CLI-NQL: Explain mode for EXPLAIN prefix
 	const [explainMode, setExplainMode] = useState(false);
 
@@ -965,6 +976,189 @@ function ReplApp({ config }: ReplAppProps) {
 								</Text>,
 							);
 						}
+						setQueryResult(null);
+						setShowHelp(false);
+						return;
+					}
+
+					case '.table': {
+						// Table display configuration
+						const tableConfig = appConfig.getTable();
+						const option = args[0]?.toLowerCase();
+						const value = args[1]?.toLowerCase();
+
+						// No args: show current config
+						if (!option) {
+							setOutput(
+								<Box flexDirection="column">
+									<Text color="cyan" bold>
+										Table Configuration:
+									</Text>
+									<Text>
+										borders:{' '}
+										<Text color="yellow">{tableConfig.borderStyle}</Text>
+									</Text>
+									<Text>
+										overflow: <Text color="yellow">{tableConfig.overflow}</Text>
+									</Text>
+									<Text>
+										headers:{' '}
+										<Text color="yellow">{tableConfig.headerFormatter}</Text>
+									</Text>
+									<Text>
+										padding: <Text color="yellow">{tableConfig.padding}</Text>
+									</Text>
+									<Text color="gray" dimColor>
+										Config: {appConfig.getConfigPath()}
+									</Text>
+								</Box>,
+							);
+							setQueryResult(null);
+							setShowHelp(false);
+							return;
+						}
+
+						// Reset command
+						if (option === 'reset') {
+							appConfig.resetTable();
+							setOutput(
+								<Text color="green">
+									✓ Table configuration reset to defaults
+								</Text>,
+							);
+							setQueryResult(null);
+							setShowHelp(false);
+							return;
+						}
+
+						// Handle specific options
+						if (option === 'borders' || option === 'border') {
+							if (!value) {
+								setOutput(
+									<Box flexDirection="column">
+										<Text>
+											Current:{' '}
+											<Text color="yellow">{tableConfig.borderStyle}</Text>
+										</Text>
+										<Text color="gray">
+											Options: {TABLE_OPTIONS.borderStyle.join(', ')}
+										</Text>
+									</Box>,
+								);
+							} else if (isValidTableOption('borderStyle', value)) {
+								appConfig.updateTable({ borderStyle: value as BorderStyle });
+								setOutput(<Text color="green">✓ borders = {value}</Text>);
+							} else {
+								setOutput(
+									<Text color="red">
+										Invalid value. Options:{' '}
+										{TABLE_OPTIONS.borderStyle.join(', ')}
+									</Text>,
+								);
+							}
+							setQueryResult(null);
+							setShowHelp(false);
+							return;
+						}
+
+						if (option === 'overflow') {
+							if (!value) {
+								setOutput(
+									<Box flexDirection="column">
+										<Text>
+											Current:{' '}
+											<Text color="yellow">{tableConfig.overflow}</Text>
+										</Text>
+										<Text color="gray">
+											Options: {TABLE_OPTIONS.overflow.join(', ')}
+										</Text>
+									</Box>,
+								);
+							} else if (isValidTableOption('overflow', value)) {
+								appConfig.updateTable({ overflow: value as OverflowStyle });
+								setOutput(<Text color="green">✓ overflow = {value}</Text>);
+							} else {
+								setOutput(
+									<Text color="red">
+										Invalid value. Options: {TABLE_OPTIONS.overflow.join(', ')}
+									</Text>,
+								);
+							}
+							setQueryResult(null);
+							setShowHelp(false);
+							return;
+						}
+
+						if (option === 'headers' || option === 'header') {
+							if (!value) {
+								setOutput(
+									<Box flexDirection="column">
+										<Text>
+											Current:{' '}
+											<Text color="yellow">{tableConfig.headerFormatter}</Text>
+										</Text>
+										<Text color="gray">
+											Options: {TABLE_OPTIONS.headerFormatter.join(', ')}
+										</Text>
+									</Box>,
+								);
+							} else if (isValidTableOption('headerFormatter', value)) {
+								appConfig.updateTable({
+									headerFormatter: value as HeaderFormatter,
+								});
+								setOutput(<Text color="green">✓ headers = {value}</Text>);
+							} else {
+								setOutput(
+									<Text color="red">
+										Invalid value. Options:{' '}
+										{TABLE_OPTIONS.headerFormatter.join(', ')}
+									</Text>,
+								);
+							}
+							setQueryResult(null);
+							setShowHelp(false);
+							return;
+						}
+
+						if (option === 'padding') {
+							if (!value) {
+								setOutput(
+									<Box flexDirection="column">
+										<Text>
+											Current: <Text color="yellow">{tableConfig.padding}</Text>
+										</Text>
+										<Text color="gray">
+											Options: {TABLE_OPTIONS.padding.join(', ')}
+										</Text>
+									</Box>,
+								);
+							} else {
+								const numValue = Number.parseInt(value, 10);
+								if (isValidTableOption('padding', numValue)) {
+									appConfig.updateTable({ padding: numValue });
+									setOutput(<Text color="green">✓ padding = {numValue}</Text>);
+								} else {
+									setOutput(
+										<Text color="red">
+											Invalid value. Options: {TABLE_OPTIONS.padding.join(', ')}
+										</Text>,
+									);
+								}
+							}
+							setQueryResult(null);
+							setShowHelp(false);
+							return;
+						}
+
+						// Unknown option
+						setOutput(
+							<Box flexDirection="column">
+								<Text color="red">Unknown option: {option}</Text>
+								<Text color="gray">
+									Options: borders, overflow, headers, padding, reset
+								</Text>
+							</Box>,
+						);
 						setQueryResult(null);
 						setShowHelp(false);
 						return;

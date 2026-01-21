@@ -990,3 +990,110 @@ if (input === '\x1b[3~') { /* forward delete */ }
 **Pattern:** Never rely solely on `key.delete` flag - always check the actual input character or escape sequence.
 
 **Location:** `packages/cli/src/repl/components/EnhancedTextInput.tsx` (lines 196-217)
+
+---
+
+### ModelIR API: Use getTable()/getRelation() not direct property access (2026-01-21)
+
+**Issue:** GROUP BY relation path fails with "Unknown table: X" or "Cannot read properties of undefined".
+
+**Cause:** Direct property access (`model.tables[tableName]`, `model.relations[relationKey]`) bypasses ModelIR's lookup methods and fails when tables/relations are stored with different key formats.
+
+**Wrong pattern:**
+```typescript
+// ❌ WRONG - direct property access
+const tableDef = model.tables[tableName];
+const relDef = model.relations[`${table}.${relation}`];
+```
+
+**Correct pattern:**
+```typescript
+// ✅ CORRECT - use ModelIR API methods
+const tableDef = model.getTable(tableName);
+const relDef = model.getRelation(`${table}.${relation}`);
+```
+
+**Location:** `packages/adapter-kysely/src/compiler.ts` - any code handling GROUP BY or relation path resolution.
+
+---
+
+### lookupRelation must check getRecursiveRelationInfo before throwing errors (2026-01-21)
+
+**Issue:** `lookupRelation()` throws "Unknown relation: X.ancestors" when using auto-inferred recursive relations like `categories where ancestors.name = 'Root'`.
+
+**Cause:** The function threw an error immediately when a relation wasn't found in the schema, without checking if it could be auto-inferred from `parent`/`children` relations.
+
+**Wrong pattern:**
+```typescript
+// ❌ WRONG - throws immediately without checking for inferred relations
+const relDef = schema.relations.get(qualifiedKey);
+if (!relDef) {
+  throw new Error(`Unknown relation: ${qualifiedKey}`);
+}
+```
+
+**Correct pattern:**
+```typescript
+// ✅ CORRECT - check for inferred recursive relations first
+const relDef = schema.relations.get(qualifiedKey);
+if (!relDef) {
+  const relLower = rel.toLowerCase();
+  if (relLower === 'ancestors' || relLower === 'descendants') {
+    const recursiveInfo = getRecursiveRelationInfo(qualifiedKey, schema);
+    if (recursiveInfo) {
+      // Relation can be auto-inferred - don't throw
+      return { relName: rel, qualifiedKey };
+    }
+  }
+  throw new Error(`Unknown relation: ${qualifiedKey}`);
+}
+```
+
+**Location:** `packages/cli/src/repl/parser.ts` - `lookupRelation()` function (lines 1898-1907)
+
+---
+
+## Ink Terminal: Delete vs Backspace Key Detection (2026-01-21)
+
+**Symptom:** Delete key behaves like Backspace (deletes character before cursor instead of after)
+
+**Cause:** Ink's `parse-keypress.ts` maps BOTH `\x7f` (DEL character = Backspace on modern terminals) AND `\x1b[3~` (Delete escape sequence) to `key.delete`. This makes them indistinguishable through the standard `useInput` hook.
+
+**Why this is confusing:**
+- On modern terminals (iTerm2, VSCode terminal, Windows Terminal), pressing Backspace sends `\x7f`
+- Ink interprets `\x7f` as "delete", setting `key.delete = true`
+- Delete key sends `\x1b[3~`, which Ink ALSO maps to `key.delete = true`
+- Result: Both keys look identical to `useInput`
+
+**Solution:** Use `useStdin` hook to capture raw bytes BEFORE Ink processes them:
+
+```tsx
+const lastRawInputRef = useRef<string>('');
+const { stdin } = useStdin();
+
+useEffect(() => {
+  if (!stdin || isDisabled || !isFocused) return;
+  const handleRawData = (data: Buffer) => {
+    lastRawInputRef.current = data.toString();
+  };
+  stdin.on('data', handleRawData);
+  return () => { stdin.off('data', handleRawData); };
+}, [stdin, isDisabled, isFocused]);
+
+// In key handler:
+const rawInput = lastRawInputRef.current;
+if (rawInput === '\x1b[3~' || rawInput.startsWith('\x1b[3~')) {
+  // This is Delete key - forward delete
+  if (cursor < value.length) {
+    const newValue = value.slice(0, cursor) + value.slice(cursor + 1);
+    updateValue(newValue, cursor);
+  }
+  return;
+}
+// Backspace - \x7f or \x08
+const isBackspace = rawInput === '\x7f' || rawInput === '\x08';
+```
+
+**Key insight:** Check raw input for `\x1b[3~` FIRST, before any other key handling. The escape sequence is unambiguous.
+
+**Location:** `packages/cli/src/repl/components/EnhancedTextInput.tsx`
