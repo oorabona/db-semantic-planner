@@ -121,6 +121,12 @@ const DOT_COMMANDS: CompletionSuggestion[] = [
 		type: 'command',
 		description: 'Execute SQL file',
 	},
+	{
+		text: '.parse',
+		label: '.parse',
+		type: 'command',
+		description: 'Toggle parse tree (AST) output',
+	},
 ];
 
 /**

@@ -47,9 +47,13 @@ const DOT_COMMANDS = [
 		command: '.exec [on|off]',
 		description: 'Toggle execution mode (requires --db connection)',
 	},
-	{
+{
 		command: '.import <file>',
 		description: 'Execute SQL file (DDL, seed data)',
+	},
+	{
+		command: '.parse [on|off]',
+		description: 'Toggle parse tree (AST) output for queries',
 	},
 	{ command: '.clear', description: 'Clear screen and output' },
 	{ command: '.exit / .quit', description: 'Exit REPL' },

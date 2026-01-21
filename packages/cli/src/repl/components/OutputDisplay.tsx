@@ -109,15 +109,79 @@ export function ErrorOutput({ message }: { message: string }) {
 	);
 }
 
+/**
+ * CLI-NQL: Format parsed query as a tree for .parse mode
+ */
+function formatParseTree(parsed: unknown): string {
+	const lines: string[] = [];
+
+	const formatValue = (value: unknown, indent = 2): string => {
+		const pad = ' '.repeat(indent);
+		if (value === null) return 'null';
+		if (value === undefined) return 'undefined';
+		if (typeof value === 'string') return `"${value}"`;
+		if (typeof value === 'number' || typeof value === 'boolean')
+			return String(value);
+		if (Array.isArray(value)) {
+			if (value.length === 0) return '[]';
+			const items = value.map((v) => formatValue(v, indent + 2)).join(', ');
+			return `[${items}]`;
+		}
+		if (typeof value === 'object') {
+			const entries = Object.entries(value);
+			if (entries.length === 0) return '{}';
+			const formatted = entries
+				.map(([k, v]) => `${pad}  ${k}: ${formatValue(v, indent + 2)}`)
+				.join('\n');
+			return `{\n${formatted}\n${pad}}`;
+		}
+		return String(value);
+	};
+
+	lines.push('ParsedQuery {');
+	const obj = parsed as Record<string, unknown>;
+	for (const [key, value] of Object.entries(obj)) {
+		if (value !== undefined) {
+			lines.push(`  ${key}: ${formatValue(value)}`);
+		}
+	}
+	lines.push('}');
+	return lines.join('\n');
+}
+
+export function ParseTreeOutput({ parsed }: { parsed: unknown }) {
+	const treeText = formatParseTree(parsed);
+	return (
+		<Box flexDirection="column" marginY={1}>
+			<Text bold color="blue">
+				🌳 Parse Tree (AST):
+			</Text>
+			<Box borderStyle="single" borderColor="blue" paddingX={1} marginTop={1}>
+				<Text color="white">{treeText}</Text>
+			</Box>
+		</Box>
+	);
+}
+
 export function OutputDisplay({ result }: OutputDisplayProps) {
 	if (!result) return null;
 
 	if (result.error) {
-		return <ErrorOutput message={result.error} />;
+		return (
+			<Box flexDirection="column">
+				<ErrorOutput message={result.error} />
+				{result.parsedQuery !== undefined && (
+					<ParseTreeOutput parsed={result.parsedQuery} />
+				)}
+			</Box>
+		);
 	}
 
 	return (
 		<Box flexDirection="column">
+			{result.parsedQuery !== undefined && (
+				<ParseTreeOutput parsed={result.parsedQuery} />
+			)}
 			<SqlOutput sql={result.sql} params={result.params} label="📝 Main SQL:" />
 			{result.separateQueries && result.separateQueries.length > 0 && (
 				<SeparateQueriesOutput queries={result.separateQueries} />

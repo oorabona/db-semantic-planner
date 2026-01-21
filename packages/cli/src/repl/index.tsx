@@ -201,6 +201,8 @@ function ReplApp({ config }: ReplAppProps) {
 	const dbConnectionRef = useRef<DbConnection | null>(null);
 	const [executionResult, setExecutionResult] =
 		useState<ExecutionResult | null>(null);
+	// CLI-NQL: Parse mode for showing AST
+	const [parseMode, setParseMode] = useState(false);
 
 	// CLI-020: Initialize database connection if URL provided
 	useEffect(() => {
@@ -908,6 +910,37 @@ function ReplApp({ config }: ReplAppProps) {
 						return;
 					}
 
+					case '.parse': {
+						// CLI-NQL: Toggle parse mode (AST output)
+						const arg = args[0]?.toLowerCase();
+
+						if (arg === 'on') {
+							setParseMode(true);
+							setOutput(
+								<Text color="green">
+									✓ Parse mode: ON - Queries will show parse tree (AST)
+								</Text>,
+							);
+						} else if (arg === 'off') {
+							setParseMode(false);
+							setOutput(
+								<Text color="yellow">✓ Parse mode: OFF</Text>,
+							);
+						} else {
+							// Toggle mode when no argument provided
+							const newMode = !parseMode;
+							setParseMode(newMode);
+							setOutput(
+								<Text color={newMode ? 'green' : 'yellow'}>
+									✓ Parse mode: {newMode ? 'ON' : 'OFF'}
+								</Text>,
+							);
+						}
+						setQueryResult(null);
+						setShowHelp(false);
+						return;
+					}
+
 					default:
 						setOutput(
 							<Text color="red">
@@ -1057,6 +1090,7 @@ function ReplApp({ config }: ReplAppProps) {
 								sql: '',
 								params: [],
 								error: result.error,
+								...(parseMode && { parsedQuery: parsed }),
 							});
 						} else {
 							setQueryResult({
@@ -1066,6 +1100,7 @@ function ReplApp({ config }: ReplAppProps) {
 									separateQueries: result.separateQueries,
 								}),
 								plan: result.plan,
+								...(parseMode && { parsedQuery: parsed }),
 							});
 
 							// Execute if in exec mode and connected
@@ -1104,6 +1139,7 @@ function ReplApp({ config }: ReplAppProps) {
 			execMode,
 			connected,
 			schemaName,
+			parseMode,
 		],
 	);
 
