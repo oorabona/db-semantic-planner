@@ -190,9 +190,9 @@ export function EnhancedTextInput({
 
 			// === DELETION ===
 
-			// Backspace - also handle DEL (\x7f), BS (\x08), and key.delete as fallback
-			// Note: Some terminals (WSL) send delete instead of backspace
-			if (key.backspace || key.delete || input === '\x7f' || input === '\x08') {
+			// Backspace - handle BS (\x08), DEL char (\x7f)
+			// Note: \x7f is the ASCII DEL character often sent by Backspace key
+			if (key.backspace || input === '\x7f' || input === '\x08') {
 				if (cursor > 0) {
 					const newValue = value.slice(0, cursor - 1) + value.slice(cursor);
 					updateValue(newValue, cursor - 1);
@@ -200,8 +200,8 @@ export function EnhancedTextInput({
 				return;
 			}
 
-			// Delete key (forward delete) - escape sequence \x1b[3~
-			if (input === '\x1b[3~') {
+			// Delete key (forward delete) - Ink's key.delete or escape sequence \x1b[3~
+			if (key.delete || input === '\x1b[3~') {
 				if (cursor < value.length) {
 					const newValue = value.slice(0, cursor) + value.slice(cursor + 1);
 					updateValue(newValue, cursor);
