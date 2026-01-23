@@ -8,10 +8,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-	type ModelIR,
-	type ResolvedSchema,
 	assertResolvedSchemaToGeneratedSchema,
 	buildModelFromSchema,
+	type ModelIR,
+	type ResolvedSchema,
 } from '@dbsp/core';
 import {
 	parseAssertionFile,
@@ -22,10 +22,10 @@ import { createDbConnection, type DbConnection } from './db-connection.js';
 import { parseInputMode } from './mode-escape.js';
 // NQL v2: Pure NQL - no legacy parser
 import {
-	type NqlCompileOnlyResult,
-	NqlCompileError,
-	NqlParseError,
 	compileNqlToSql,
+	NqlCompileError,
+	type NqlCompileOnlyResult,
+	NqlParseError,
 } from './nql-executor.js';
 import type { QueryMode } from './types.js';
 
@@ -47,6 +47,12 @@ export interface BatchResult {
 	params?: readonly unknown[];
 	error?: string;
 	type: 'command' | 'query' | 'mutation';
+	/** Row count from DB execution (for db.* assertions) */
+	rowCount?: number;
+	/** Column names from DB result (for db.column.exists) */
+	columns?: string[];
+	/** Row data from DB result (for db.value.equals) */
+	rows?: unknown[];
 }
 
 /** @internal - Exported for testing */
@@ -89,7 +95,9 @@ function formatNqlResult(result: NqlCompileOnlyResult): string {
 	// Parameters
 	if (result.params.length > 0) {
 		lines.push('');
-		lines.push(`Parameters: [${result.params.map((p) => JSON.stringify(p)).join(', ')}]`);
+		lines.push(
+			`Parameters: [${result.params.map((p) => JSON.stringify(p)).join(', ')}]`,
+		);
 	}
 
 	return lines.join('\n');
@@ -444,8 +452,10 @@ async function executeNqlQuery(
 
 	try {
 		// Compile NQL to SQL
-		const result = compileNqlToSql(input, state.model,
-			state.schemaName ? { schemaName: state.schemaName } : undefined
+		const result = compileNqlToSql(
+			input,
+			state.model,
+			state.schemaName ? { schemaName: state.schemaName } : undefined,
 		);
 
 		// Determine result type for BatchResult
@@ -753,7 +763,9 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 				console.log(result.output);
 			} else {
 				// Use error field if set, otherwise output already contains the error message
-				console.error(result.error ? `❌ Error: ${result.error}` : result.output);
+				console.error(
+					result.error ? `❌ Error: ${result.error}` : result.output,
+				);
 			}
 		}
 	}
@@ -765,7 +777,8 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 		}
 	).assertionBlocks;
 	if (assertionBlocks) {
-		assertionSummary = runAssertions(assertionBlocks, results, queries);
+		const hasDb = !!state.dbConnection;
+		assertionSummary = runAssertions(assertionBlocks, results, queries, hasDb);
 
 		// Output assertion results in text format
 		if (format === 'text') {
@@ -780,11 +793,14 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 				);
 
 				for (const assertion of qResult.assertions) {
-					const aIcon = assertion.passed ? '  ✓' : '  ✗';
-					if (assertion.passed) {
-						console.log(`${aIcon} ${assertion.type}`);
+					if (assertion.skipped) {
+						console.log(
+							`  ⏭ ${assertion.type} (skipped: ${assertion.skipReason})`,
+						);
+					} else if (assertion.passed) {
+						console.log(`  ✓ ${assertion.type}`);
 					} else {
-						console.log(`${aIcon} ${assertion.type}: ${assertion.message}`);
+						console.log(`  ✗ ${assertion.type}: ${assertion.message}`);
 						if (assertion.actual !== undefined) {
 							const actualStr =
 								typeof assertion.actual === 'string'
@@ -802,6 +818,9 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 			);
 			if (assertionSummary.failed > 0) {
 				console.log(`         ${assertionSummary.failed} FAILED`);
+			}
+			if (assertionSummary.skipped > 0) {
+				console.log(`         ${assertionSummary.skipped} skipped (no DB)`);
 			}
 			console.log('─────────────────────────────────');
 		}

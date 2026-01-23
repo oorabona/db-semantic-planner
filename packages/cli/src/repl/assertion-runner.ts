@@ -17,10 +17,14 @@ import type { BatchResult } from './batch.js';
  */
 export interface AssertionOutcome {
 	type: AssertionType;
-	expected: string | number | boolean | unknown[];
-	actual: string | number | boolean | unknown[] | undefined;
+	expected: unknown;
+	actual: unknown;
 	passed: boolean;
 	message: string | undefined;
+	/** True if assertion was skipped (e.g., db.* without DB connection) */
+	skipped?: boolean;
+	/** Reason for skipping */
+	skipReason?: string;
 }
 
 /**
@@ -41,6 +45,7 @@ export interface AssertionSummary {
 	total: number;
 	passed: number;
 	failed: number;
+	skipped: number;
 	results: QueryAssertionResult[];
 }
 
@@ -64,16 +69,19 @@ export function normalizeSQL(sql: string): string {
  * @param blocks - Parsed assertion blocks
  * @param results - Query execution results
  * @param queries - Original query strings (for matching)
+ * @param hasDb - Whether a database connection is available (for db.* assertions)
  * @returns Summary with detailed results
  */
 export function runAssertions(
 	blocks: AssertionBlock[],
 	results: BatchResult[],
 	queries: string[],
+	hasDb = false,
 ): AssertionSummary {
 	const queryResults: QueryAssertionResult[] = [];
 	let totalPassed = 0;
 	let totalFailed = 0;
+	let totalSkipped = 0;
 
 	for (const block of blocks) {
 		const queryIndex = resolveQueryIndex(block, queries);
@@ -92,10 +100,12 @@ export function runAssertions(
 		let allPassed = true;
 
 		for (const assertion of block.assertions) {
-			const outcome = runSingleAssertion(assertion, result);
+			const outcome = runSingleAssertion(assertion, result, hasDb);
 			outcomes.push(outcome);
 
-			if (outcome.passed) {
+			if (outcome.skipped) {
+				totalSkipped++;
+			} else if (outcome.passed) {
 				totalPassed++;
 			} else {
 				totalFailed++;
@@ -113,9 +123,10 @@ export function runAssertions(
 	}
 
 	return {
-		total: totalPassed + totalFailed,
+		total: totalPassed + totalFailed + totalSkipped,
 		passed: totalPassed,
 		failed: totalFailed,
+		skipped: totalSkipped,
 		results: queryResults,
 	};
 }
@@ -126,8 +137,22 @@ export function runAssertions(
 function runSingleAssertion(
 	assertion: Assertion,
 	result: BatchResult,
+	hasDb: boolean,
 ): AssertionOutcome {
 	const { type, value } = assertion;
+
+	// Skip db.* assertions when no database connection
+	if (type.startsWith('db.') && !hasDb) {
+		return {
+			type,
+			expected: value,
+			actual: undefined,
+			passed: true, // Consider skipped as not-failed
+			message: undefined,
+			skipped: true,
+			skipReason: 'No database connection (dry-run mode)',
+		};
+	}
 
 	switch (type) {
 		// Output assertions
@@ -150,12 +175,32 @@ function runSingleAssertion(
 		case 'sql.matches':
 			return assertMatches('sql', result.sql ?? '', value as string);
 
+		// NEW: sql.table - matches table name (logical or physical)
+		case 'sql.table':
+			return assertSQLTable(result.sql ?? '', value as string);
+
+		// NEW: sql.column - matches column name in SQL
+		case 'sql.column':
+			return assertSQLColumn(result.sql ?? '', value as string);
+
+		// NEW: sql.join - checks for JOIN clause
+		case 'sql.join':
+			return assertSQLJoin(result.sql ?? '', value as string);
+
 		// Params assertions
 		case 'params.equals':
 			return assertParamsEquals(result.params ?? [], value as unknown[]);
 
 		case 'params.length':
 			return assertParamsLength(result.params ?? [], value as number);
+
+		// NEW: params.type - validates parameter types
+		case 'params.type':
+			return assertParamsType(result.params ?? [], value as string[]);
+
+		// NEW: params.value - validates specific param value by index
+		case 'params.value':
+			return assertParamsValue(result.params ?? [], value as unknown);
 
 		// Plan assertion (plan info is in output)
 		case 'plan.contains':
@@ -168,6 +213,22 @@ function runSingleAssertion(
 		// Error assertion
 		case 'error.contains':
 			return assertContains('error', result.error ?? '', value as string);
+
+		// DB assertions (require database connection)
+		case 'db.rows.equals':
+			return assertDbRowsEquals(result, value as number);
+
+		case 'db.rows.min':
+			return assertDbRowsMin(result, value as number);
+
+		case 'db.rows.max':
+			return assertDbRowsMax(result, value as number);
+
+		case 'db.column.exists':
+			return assertDbColumnExists(result, value as string);
+
+		case 'db.value.equals':
+			return assertDbValueEquals(result, value as unknown);
 
 		default:
 			return {
@@ -314,5 +375,330 @@ function assertSuccess(actual: boolean, expected: boolean): AssertionOutcome {
 		message: passed
 			? undefined
 			: `Expected query to ${expected ? 'succeed' : 'fail'}, but it ${actual ? 'succeeded' : 'failed'}`,
+	};
+}
+
+// ============================================================
+// NEW TYPED ASSERTIONS
+// ============================================================
+
+/**
+ * Convert camelCase to snake_case
+ */
+function toSnakeCase(str: string): string {
+	return str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+}
+
+/**
+ * Assert SQL contains table name (handles logical/physical naming)
+ * Matches: "productImages" → product_images, productimages, "productImages"
+ */
+function assertSQLTable(sql: string, tableName: string): AssertionOutcome {
+	const normalizedSql = sql.toLowerCase();
+	const logicalLower = tableName.toLowerCase();
+	const physicalSnake = toSnakeCase(tableName).toLowerCase();
+
+	// Check various forms: logical, physical snake_case, or quoted
+	const found =
+		normalizedSql.includes(logicalLower) ||
+		normalizedSql.includes(physicalSnake) ||
+		normalizedSql.includes(`"${logicalLower}"`) ||
+		normalizedSql.includes(`"${physicalSnake}"`);
+
+	return {
+		type: 'sql.table',
+		expected: tableName,
+		actual: found ? undefined : sql.slice(0, 200),
+		passed: found,
+		message: found
+			? undefined
+			: `Expected SQL to reference table "${tableName}" (or "${physicalSnake}")`,
+	};
+}
+
+/**
+ * Assert SQL contains column name
+ */
+function assertSQLColumn(sql: string, columnName: string): AssertionOutcome {
+	const normalizedSql = sql.toLowerCase();
+	const columnLower = columnName.toLowerCase();
+	const columnSnake = toSnakeCase(columnName).toLowerCase();
+
+	const found =
+		normalizedSql.includes(columnLower) ||
+		normalizedSql.includes(columnSnake) ||
+		normalizedSql.includes(`"${columnLower}"`) ||
+		normalizedSql.includes(`"${columnSnake}"`);
+
+	return {
+		type: 'sql.column',
+		expected: columnName,
+		actual: found ? undefined : sql.slice(0, 200),
+		passed: found,
+		message: found
+			? undefined
+			: `Expected SQL to reference column "${columnName}"`,
+	};
+}
+
+/**
+ * Assert SQL contains JOIN clause (optionally with table name)
+ */
+function assertSQLJoin(sql: string, tableName: string): AssertionOutcome {
+	const normalizedSql = sql.toLowerCase();
+	const tableNameLower = tableName.toLowerCase();
+	const tableSnake = toSnakeCase(tableName).toLowerCase();
+
+	// Check for JOIN with table name
+	const joinPattern = /\bjoin\b/;
+	const hasJoin = joinPattern.test(normalizedSql);
+	const hasTable =
+		normalizedSql.includes(tableNameLower) ||
+		normalizedSql.includes(tableSnake);
+
+	const found = hasJoin && hasTable;
+
+	return {
+		type: 'sql.join',
+		expected: tableName,
+		actual: found ? undefined : sql.slice(0, 200),
+		passed: found,
+		message: found
+			? undefined
+			: `Expected SQL to JOIN with table "${tableName}"`,
+	};
+}
+
+/**
+ * Assert parameter types (string, number, boolean, null, object)
+ */
+function assertParamsType(
+	params: readonly unknown[],
+	expectedTypes: string[],
+): AssertionOutcome {
+	if (params.length !== expectedTypes.length) {
+		return {
+			type: 'params.type',
+			expected: expectedTypes,
+			actual: params.map((p) => typeof p),
+			passed: false,
+			message: `Expected ${expectedTypes.length} params, got ${params.length}`,
+		};
+	}
+
+	const actualTypes: string[] = [];
+	const mismatches: string[] = [];
+
+	for (let i = 0; i < params.length; i++) {
+		const param = params[i];
+		const expectedType = expectedTypes[i];
+		let actualType: string;
+
+		if (param === null) {
+			actualType = 'null';
+		} else if (Array.isArray(param)) {
+			actualType = 'array';
+		} else if (typeof param === 'object') {
+			actualType = 'object';
+		} else {
+			actualType = typeof param;
+		}
+
+		actualTypes.push(actualType);
+
+		if (actualType !== expectedType) {
+			mismatches.push(
+				`Index ${i}: expected ${expectedType}, got ${actualType}`,
+			);
+		}
+	}
+
+	const passed = mismatches.length === 0;
+
+	return {
+		type: 'params.type',
+		expected: expectedTypes,
+		actual: passed ? undefined : actualTypes,
+		passed,
+		message: passed ? undefined : `Type mismatch: ${mismatches.join('; ')}`,
+	};
+}
+
+/**
+ * Assert specific parameter value by index
+ * Value format: { index: number, value: unknown }
+ */
+function assertParamsValue(
+	params: readonly unknown[],
+	spec: unknown,
+): AssertionOutcome {
+	const { index, value } =
+		typeof spec === 'object' && spec !== null
+			? (spec as { index: number; value: unknown })
+			: { index: 0, value: spec };
+
+	if (index >= params.length) {
+		return {
+			type: 'params.value',
+			expected: value,
+			actual: undefined,
+			passed: false,
+			message: `No param at index ${index} (only ${params.length} params)`,
+		};
+	}
+
+	const actual = params[index];
+	const passed = JSON.stringify(actual) === JSON.stringify(value);
+
+	return {
+		type: 'params.value',
+		expected: value,
+		actual: passed ? undefined : actual,
+		passed,
+		message: passed
+			? undefined
+			: `Param at index ${index}: expected ${JSON.stringify(value)}, got ${JSON.stringify(actual)}`,
+	};
+}
+
+// ============================================================
+// DB ASSERTIONS (require database connection)
+// ============================================================
+
+/**
+ * Assert exact row count from query result
+ */
+function assertDbRowsEquals(
+	result: BatchResult,
+	expected: number,
+): AssertionOutcome {
+	const rowCount = result.rowCount ?? 0;
+	const passed = rowCount === expected;
+
+	return {
+		type: 'db.rows.equals',
+		expected,
+		actual: passed ? undefined : rowCount,
+		passed,
+		message: passed ? undefined : `Expected ${expected} rows, got ${rowCount}`,
+	};
+}
+
+/**
+ * Assert minimum row count
+ */
+function assertDbRowsMin(
+	result: BatchResult,
+	expected: number,
+): AssertionOutcome {
+	const rowCount = result.rowCount ?? 0;
+	const passed = rowCount >= expected;
+
+	return {
+		type: 'db.rows.min',
+		expected,
+		actual: passed ? undefined : rowCount,
+		passed,
+		message: passed
+			? undefined
+			: `Expected at least ${expected} rows, got ${rowCount}`,
+	};
+}
+
+/**
+ * Assert maximum row count
+ */
+function assertDbRowsMax(
+	result: BatchResult,
+	expected: number,
+): AssertionOutcome {
+	const rowCount = result.rowCount ?? 0;
+	const passed = rowCount <= expected;
+
+	return {
+		type: 'db.rows.max',
+		expected,
+		actual: passed ? undefined : rowCount,
+		passed,
+		message: passed
+			? undefined
+			: `Expected at most ${expected} rows, got ${rowCount}`,
+	};
+}
+
+/**
+ * Assert column exists in result
+ */
+function assertDbColumnExists(
+	result: BatchResult,
+	columnName: string,
+): AssertionOutcome {
+	const columns = result.columns ?? [];
+	const columnLower = columnName.toLowerCase();
+	const columnSnake = toSnakeCase(columnName).toLowerCase();
+
+	const found = columns.some((col) => {
+		const colLower = col.toLowerCase();
+		return colLower === columnLower || colLower === columnSnake;
+	});
+
+	return {
+		type: 'db.column.exists',
+		expected: columnName,
+		actual: found ? undefined : columns,
+		passed: found,
+		message: found
+			? undefined
+			: `Column "${columnName}" not found in result. Available: ${columns.join(', ')}`,
+	};
+}
+
+/**
+ * Assert specific cell value in result
+ * Value format: { row: number, column: string, value: unknown }
+ */
+function assertDbValueEquals(
+	result: BatchResult,
+	spec: unknown,
+): AssertionOutcome {
+	const { row, column, value } =
+		typeof spec === 'object' && spec !== null
+			? (spec as { row: number; column: string; value: unknown })
+			: { row: 0, column: '', value: spec };
+
+	const rows = result.rows ?? [];
+	if (row >= rows.length) {
+		return {
+			type: 'db.value.equals',
+			expected: value,
+			actual: undefined,
+			passed: false,
+			message: `No row at index ${row} (only ${rows.length} rows)`,
+		};
+	}
+
+	const rowData = rows[row] as Record<string, unknown> | undefined;
+	if (!rowData) {
+		return {
+			type: 'db.value.equals',
+			expected: value,
+			actual: undefined,
+			passed: false,
+			message: `Row ${row} is empty`,
+		};
+	}
+
+	// Try both exact column name and snake_case
+	const actual = rowData[column] ?? rowData[toSnakeCase(column)];
+	const passed = JSON.stringify(actual) === JSON.stringify(value);
+
+	return {
+		type: 'db.value.equals',
+		expected: value,
+		actual: passed ? undefined : actual,
+		passed,
+		message: passed
+			? undefined
+			: `Value at [${row}]["${column}"]: expected ${JSON.stringify(value)}, got ${JSON.stringify(actual)}`,
 	};
 }

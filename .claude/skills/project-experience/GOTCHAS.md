@@ -1198,3 +1198,59 @@ The `(?=\d|-?\d)` lookahead ensures the first character after the bracket is a d
 **Key insight:** When adding tokens that use common delimiters like parentheses, brackets, or commas, ensure the regex won't match unrelated grammar constructs. Use lookahead/lookbehind to scope precisely.
 
 **Location:** `packages/nql/src/lexer/tokens.ts` line 77-80
+
+---
+
+### Grammar-Based Parsing > Complex Regex for Ambiguous Syntax (2026-01-23)
+
+**Issue:** Even with lookahead fixes, the `RangeLiteral` regex still caused conflicts:
+1. `/-?\d+(?:[-:.T]\d+)+/` (date/time pattern) matched decimal numbers like `99.99`
+2. Adding `(` for exclusive bounds created ambiguity with grouped expressions `(a + b)`
+
+**Cause:** Single-token regex approach tries to handle all cases, but complex syntax with shared delimiters (`(`, `)`, `.`) creates cascading conflicts.
+
+**Solution:** Replace complex regex with grammar-based parsing:
+
+1. **Simpler tokens:** `LBracket`, `RBracket`, `RangeValue` (no `(` as range opener at lexer level)
+2. **Dedicated grammar rules:**
+   ```
+   range_comparison = expr range_op range_literal
+   range_op         = "overlaps" | "contains" | "containedBy"
+   range_literal    = ( "[" | "(" ) range_value "," range_value ( "]" | ")" )
+   ```
+3. **Context-sensitive parsing:** `(` is only valid as range opener AFTER a range operator
+4. **Separate `compOp` from `rangeOp`:** Avoids `(` being parsed as grouped expression
+
+**Why grammar > regex:**
+- Context-sensitive: `(` after `overlaps` = range bound, `(` elsewhere = grouping
+- No decimal conflicts: `RangeValue` token only matches date/time patterns
+- EBNF-documentable: Clear grammar rules vs opaque regex
+- Extensible: Easy to add new range operators without regex surgery
+
+**Key insight:** When a token's syntax overlaps with other language constructs, promote to grammar-level parsing. Let the parser (which has context) disambiguate, not the lexer (which is context-free).
+
+**Location:** `packages/nql/src/parser/grammar.ts` (`rangeOpSuffix` rule)
+
+---
+
+### Type-Prefix Convention > Manual Mode Directive for Assertion Categories (2026-01-24)
+
+**Issue:** Initial design for typed assertions used a manual `mode: db` or `mode: dry-run` directive in assertion files to specify which assertions require a database.
+
+**Cause:** Over-engineering. The assumption was that explicit mode declaration would be clearer.
+
+**Solution:** Automatic detection via type prefix convention:
+- `sql.*` assertions (sql.table, sql.contains, sql.matches) → always run (no DB needed)
+- `db.*` assertions (db.rows.equals, db.column.exists) → require database connection
+- Detection: `type.startsWith('db.')` in `requiresDatabase()` function
+- Skip logic: if `!hasDb && requiresDatabase(type)` → mark as skipped with reason
+
+**Why type-prefix > manual mode:**
+- Zero configuration: No extra syntax to learn or forget
+- Self-documenting: Assertion type name reveals its requirements
+- Impossible to misconfigure: No "mode: db" with "sql.contains" mismatch
+- Cleaner assertion files: No boilerplate header needed
+
+**Key insight:** When categories can be unambiguously derived from identifiers, avoid explicit categorization. Convention over configuration reduces cognitive load and eliminates misconfiguration bugs.
+
+**Location:** `packages/cli/src/repl/assertion-parser.ts` (`requiresDatabase()` function)

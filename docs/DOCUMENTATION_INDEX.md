@@ -83,6 +83,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | P3-A | [Window Functions](specs/P3-A-window-functions.md) | core, adapter, dx | ✅ canonical |
 | ARCH-002 | [One Ring Architecture](specs/ARCH-002-one-ring.md) | schema, cli, core | ✅ canonical |
 | CLI-NQL | [Natural Query Language v1.0](plans/CLI-NQL-natural-query-language.md) | cli | ✅ canonical |
+| CLI-ASSERT | [Typed Assertion System](plans/CLI-ASSERT-typed-assertions.md) | cli | ✅ canonical |
 | NQL-AUDIT | [NQL Parser Audit & v2.0 Design](plans/NQL-PARSER-AUDIT-2026-01.md) | nql | ✅ canonical |
 | NQL-SPEC | [NQL v2.0 Parser Specification](plans/NQL-SPEC-2026-01.md) | nql | ✅ canonical |
 | NQLM | [NQL CLI Migration](../TODO_NQL_MIGRATION.md) | cli | ✅ complete |

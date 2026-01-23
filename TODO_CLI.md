@@ -133,6 +133,16 @@ Extend REPL natural query language to be a complete "new SQL" - simpler for huma
   - Replaced `include` with `with`, `order by` with `order`
   - 18 new unit tests for fuzzy matching functions
 
+- [x] ✅ Typed Assertion System (CLI-ASSERT) (2026-01-24)
+  - Added typed SQL assertions: `sql.table`, `sql.column`, `sql.join`
+  - Added typed param assertions: `params.type`, `params.value`
+  - Added db.* assertions: `db.rows.equals`, `db.rows.min`, `db.rows.max`, `db.column.exists`, `db.value.equals`
+  - Added `requiresDatabase()` function for automatic db.* detection
+  - Automatic skip of db.* assertions when no database connection (dry-run mode)
+  - Skip count displayed in summary with ⏭ icon
+  - Logical/physical naming support via `toSnakeCase()` helper
+  - 51 tests in assertion-runner.test.ts, 40 tests in assertion-parser.test.ts
+
 ## Improvements
 
 - [x] ✅ Native column aliasing via `col()` helper (2026-01-21)

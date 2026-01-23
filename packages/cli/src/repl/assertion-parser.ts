@@ -7,6 +7,7 @@
 
 // Valid assertion types
 export const ASSERTION_TYPES = [
+	// Existing (keep for backward compat)
 	'output.contains',
 	'output.equals',
 	'output.matches',
@@ -18,9 +19,33 @@ export const ASSERTION_TYPES = [
 	'plan.contains',
 	'success',
 	'error.contains',
+
+	// NEW: Typed SQL assertions
+	'sql.table', // Table name (logical or physical)
+	'sql.column', // Column name in SQL
+	'sql.join', // JOIN clause present
+
+	// NEW: Typed params assertions
+	'params.type', // Type validation per param
+	'params.value', // Specific param value by index
+
+	// NEW: DB-only assertions (skipped in dry-run)
+	'db.rows.equals', // Exact row count
+	'db.rows.min', // At least N rows
+	'db.rows.max', // At most N rows
+	'db.column.exists', // Column in result
+	'db.value.equals', // Specific cell value
 ] as const;
 
 export type AssertionType = (typeof ASSERTION_TYPES)[number];
+
+/**
+ * Check if an assertion type requires database connection
+ * All db.* assertions need actual query execution
+ */
+export function requiresDatabase(type: AssertionType): boolean {
+	return type.startsWith('db.');
+}
 
 /**
  * A single assertion within a block
