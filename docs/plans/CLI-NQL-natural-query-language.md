@@ -183,356 +183,192 @@ interface RelationDefinition {
 }
 ```
 
-### 4.3 EBNF Grammar (LL(1))
+### 4.3 EBNF Grammar (LL(1) — formal, left-factored)
+
+We replace the ad-hoc description with a formal, LL(1)-friendly grammar. The grammar below is left-factored and avoids left recursion where necessary. Decisions that require inspecting the next token after a completed production (e.g., deciding whether a parsed path is followed by `has` or another operator) are compatible with a single-token lookahead parser if path parsing itself is LL(1).
 
 ```ebnf
-(* ============================================== *)
-(* NQL v1.0 - Natural Query Language Grammar      *)
-(* LL(1) parseable                                *)
-(* ============================================== *)
+(* ------------------------------ *)
+(* Lexical tokens (scanner produces these) *)
+(* ------------------------------ *)
+STRING      = "'" { CHAR } "'" ;
+IDENT       = LETTER { LETTER | DIGIT | "_" } ;
+QIDENT      = '"' IDENT '"' ;   (* quoted identifier, forces column semantics *)
+NUMBER      = ["-"] DIGITS ["." DIGITS] ;
+BOOL        = "true" | "false" ;
+COMMA       = "," ;
+DOT         = "." ;
+LPAREN      = "(" ;
+RPAREN      = ")" ;
+EQ          = "=" ;
+NEQ         = "!=" ;
+LT          = "<" ;
+GT          = ">" ;
+LE          = ">=" ;
+GE          = "<=" ;
+PLUS        = "+" ;
+MINUS       = "-" ;
+STAR        = "*" ;
+SLASH       = "/" ;
+PERCENT     = "%" ;
+COLON       = ":" ;
+AS          = "as" ;
+NULL        = "null" ;
+DEFAULT     = "default" ;
 
-(* ============================================== *)
-(* LEXICAL SPECIFICATION                          *)
-(* ============================================== *)
+(* ------------------------------ *)
+(* Top-level statements *)
+(* ------------------------------ *)
+statement       = command | table_statement ;
+command         = "." IDENT { ANY_TOKEN } ;
+table_statement = IDENT statement_body ;
+statement_body  = mutation_body | query_body ;
 
-(* Case sensitivity:
-   - Keywords: case-INSENSITIVE (where = WHERE = Where)
-   - Identifiers: case-SENSITIVE (preserved as-is)
-   - String literals: case-SENSITIVE
+(* Choose mutation vs query by looking at next token after table IDENT:
+  if next token is a mutation keyword (insert/update/delete/upsert) → mutation_body
+  else → query_body
 *)
 
-(* String literals - SINGLE QUOTES ONLY (SQL standard) *)
-string_lit          = "'" { string_char } "'" ;
-string_char         = any_char_except_single_quote | escape_seq ;
-escape_seq          = "\\" ( "'" | "\\" | "n" | "r" | "t" ) | "''" ;  (* '' = escaped single quote *)
+(* ------------------------------ *)
+(* Query body (clauses are optional, order is flexible but parser will accept in the canonical order shown) *)
+(* ------------------------------ *)
+query_body      = [ where_clause ] [ include_clause ] [ select_clause ] [ group_clause ] [ having_clause ] [ order_clause ] [ limit_clause ] [ offset_clause ] ;
 
-(* Quoted identifiers - DOUBLE QUOTES ONLY (SQL standard) *)
-(* Force identifier interpretation: escape keywords, force column over relation *)
-quoted_identifier   = '"' identifier '"' ;  (* Must be non-empty valid identifier *)
-(* Examples:
-   - "where" as column name (escapes keyword)
-   - "children" forces column (not relation)
-   - "Parent" preserves case (identifiers are case-sensitive)
+(* ------------------------------ *)
+(* WHERE clause and boolean expressions — LL(1) with precedence factored) *)
+(* Precedence: NOT > AND > OR; AND binds tighter than OR *)
+(* ------------------------------ *)
+where_clause    = "where" boolean_expr ;
+boolean_expr    = or_term { "or" or_term } ;
+or_term         = and_factor { "and" and_factor } ;
+and_factor      = [ "not" ] primary_condition ;
+primary_condition = LPAREN boolean_expr RPAREN | condition_atom ;
+
+condition_atom  = comparison | existence_check | in_check | aggregate_condition ;
+
+comparison      = ( path_expr | aggregate_expr ) comp_op value_expr ;
+comp_op         = EQ | NEQ | LT | GT | LE | GE | "like" | "is" [ "not" ] | "overlaps" | "contains" | "containedBy" ;
+
+in_check        = path_expr [ "not" ] "in" ( subquery | literal_list ) ;
+literal_list    = LPAREN literal { COMMA literal } RPAREN ;
+
+aggregate_condition = aggregate_expr comp_op value_expr ;
+
+(* ------------------------------ *)
+(* Existence checks - two forms, left-factored for LL(1):
+  - starts with optional NOT then HAS (rooted existence)
+  - or starts with a path_expr possibly followed by HAS (path-based existence)
+  Parser strategy: try to parse optional NOT; if next token is HAS → has-form; otherwise parse path_expr and then require HAS to be valid existence check.
 *)
+(* ------------------------------ *)
+existence_check = [ "not" ] "has" relation_ref [ where_clause ]
+           | path_expr [ "not" ] "has" [ where_clause ] ;
 
-(* Comments *)
-comment             = line_comment | block_comment ;
-line_comment        = ( "--" | "#" ) { any_char_except_newline } newline ;
-block_comment       = "/*" { any_char } "*/" ;
+relation_ref    = IDENT { DOT IDENT } ;  (* semantic check: each segment must be a relation in schema *)
 
-(* Numbers *)
-number_lit          = [ "-" ] digits [ "." digits ] ;
-digits              = digit { digit } ;
-digit               = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+(* ------------------------------ *)
+(* Path expressions - LL(1): a path is a sequence of segments where each segment is IDENT or QIDENT *)
+(* QIDENT forces column semantics; unquoted IDENT is resolved semantically (relation-first, then column) by the resolver, not by the parser. *)
+(* ------------------------------ *)
+path_expr       = path_segment { DOT path_segment } ;
+path_segment    = QIDENT | IDENT ;
 
-(* Booleans *)
-boolean_lit         = "true" | "false" ;
+(* ------------------------------ *)
+(* Values and subqueries *)
+(* ------------------------------ *)
+value_expr      = expr | subquery | NULL | DEFAULT ;
+subquery        = LPAREN IDENT query_body RPAREN ;
+(* Subqueries must be parenthesized; scalar subqueries implicitly select PK unless an explicit select is present. *)
 
-(* Identifiers *)
-identifier          = letter { letter | digit | "_" } ;
-identifier_chars    = { letter | digit | "_" } ;
-letter              = "a" | ... | "z" | "A" | ... | "Z" ;
+(* ------------------------------ *)
+(* INCLUDE clause - comma-separated list, nested includes allowed. Commas are mandatory between sibling includes. *)
+(* ------------------------------ *)
+include_clause  = "include" include_list ;
+include_list    = include_spec { COMMA include_spec } ;
+include_spec    = IDENT [ where_clause ] [ include_clause ] ;
 
-(* Contextually reserved (only after table_name in position 2) *)
-mutation_keywords   = "insert" | "update" | "delete" | "upsert" ;
+(* ------------------------------ *)
+(* SELECT clause *)
+(* ------------------------------ *)
+select_clause   = "select" [ "distinct" ] select_list ;
+select_list     = select_item { COMMA select_item } ;
+select_item     = "*" | window_expr | aggregate_expr [ "as" IDENT ] | expr [ "as" IDENT ] ;
 
-(* Clause keywords (start new clause) *)
-clause_keywords     = "where" | "include" | "select" | "order" | "group"
-                    | "having" | "limit" | "offset" | "from" | "on" | "set" ;
+agg_function    = "count" | "sum" | "avg" | "min" | "max" ;
+aggregate_expr  = agg_function LPAREN [ "distinct" ] ( STAR | path_expr | relation_filter ) RPAREN ;
+relation_filter = relation_ref [ where_clause ] ;
 
-(* Compound operators (multi-token, handled at parser level) *)
-(* "is not", "not in", "not has", "order by", "group by",
-   "for update", "skip locked", "do nothing", "do update",
-   "partition by" *)
-
-
-(* ============================================== *)
-(* TOP LEVEL                                      *)
-(* ============================================== *)
-
-statement           = command | table_statement ;
-table_statement     = table_name statement_body ;
-statement_body      = mutation_body | query_body ;
-
-(* Lookahead: if token[1] in {insert,update,delete,upsert} → mutation, else query *)
-
-
-(* ============================================== *)
-(* COMMANDS (dot-prefixed)                        *)
-(* ============================================== *)
-
-command             = "." command_name [ command_args ] ;
-command_name        = "tables" | "use" | "import" | "alias" | "explain"
-                    | "split" | "exec" | "dialect" | "include" | "parse" ;
-command_args        = { token } ;
-
-
-(* ============================================== *)
-(* QUERIES                                        *)
-(* ============================================== *)
-
-query_body          = [ where_clause ]
-                      [ include_clause ]
-                      [ select_clause ]
-                      [ group_clause ]
-                      [ having_clause ]
-                      [ order_clause ]
-                      [ limit_clause ]
-                      [ offset_clause ] ;
-
-
-(* ============================================== *)
-(* WHERE CLAUSE                                   *)
-(* ============================================== *)
-
-where_clause        = "where" condition_expr ;
-
-(* Precedence: AND binds tighter than OR *)
-condition_expr      = condition_term { "or" condition_term } ;
-condition_term      = condition_factor { "and" condition_factor } ;
-condition_factor    = condition_atom | "(" condition_expr ")" ;
-
-condition_atom      = comparison | existence_check | in_check | aggregate_condition ;
-
-comparison          = comparable comp_operator value_expr ;
-comparable          = path_expr | aggregate_expr ;
-comp_operator       = "=" | "!=" | ">" | "<" | ">=" | "<="
-                    | "like"
-                    | "is" [ "not" ]
-                    | "overlaps" | "contains" | "containedBy" ;
-
-existence_check     = [ "not" ] "has" relation_path [ where_clause ]
-                    | path_expr [ "not" ] "has" condition_expr ;
-(* Sugar: "category.ancestors has name = 'X'" ≡ "has category.ancestors where name = 'X'" *)
-
-in_check            = path_expr [ "not" ] "in" ( subquery | literal_list ) ;
-literal_list        = "(" literal { "," literal } ")" ;
-
-(* Aggregate in condition: count(relation where ...) >= N *)
-aggregate_condition = aggregate_expr comp_operator value_expr ;
-aggregate_expr      = agg_function "(" [ "distinct" ] ( "*" | path_expr | relation_filter ) ")" ;
-relation_filter     = relation_path [ where_clause ] ;
-
-
-(* ============================================== *)
-(* PATH EXPRESSIONS                               *)
-(* ============================================== *)
-
-path_expr           = path_segment { "." path_segment } ;
-path_segment        = identifier | quoted_identifier ;
-
-(* Resolution rules:
-   - Unquoted: check relations first, then columns, then error
-   - Quoted ("name"): columns ONLY, bypass relation lookup
-*)
-
-relation_path       = identifier { "." identifier } ;
-(* Semantic constraint: ALL segments must be relations (validated against schema) *)
-
-
-(* ============================================== *)
-(* VALUE EXPRESSIONS                              *)
-(* ============================================== *)
-
-value_expr          = expr | subquery | "null" | "default" ;
-(* Note: expr is defined in EXPRESSIONS section below *)
-
-literal             = string_lit | number_lit | boolean_lit | range_lit ;
-
-range_lit           = left_bound range_value "," range_value right_bound ;
-left_bound          = "[" | "(" ;
-right_bound         = "]" | ")" ;
-range_value         = date_lit | number_lit ;
-date_lit            = digit digit digit digit "-" digit digit "-" digit digit ;  (* YYYY-MM-DD *)
-
-
-(* ============================================== *)
-(* SUBQUERIES                                     *)
-(* ============================================== *)
-
-subquery            = "(" table_name query_body ")" ;
-
-(* Scalar subquery: implicitly selects PRIMARY KEY column
-   If explicit column needed: (table where x = y select col) *)
-
-
-(* ============================================== *)
-(* INCLUDE CLAUSE                                 *)
-(* ============================================== *)
-
-include_clause      = "include" include_list ;
-include_list        = include_spec { "," include_spec } ;  (* comma-separated for CONSISTENCY *)
-include_spec        = relation_name [ where_clause ] [ include_clause ] ;
-
-(* Include semantics:
-
-   NESTING via repeated "include" keyword:
-   - "include category include tags" = tags nested IN category (category.tags)
-
-   MULTIPLE ROOTS via comma:
-   - "include category, tags" = two separate root includes
-
-   COMBINED:
-   - "include category include tags, assets" = category.tags + root assets
-
-   Examples:
-   | NQL | Structure |
-   |-----|-----------|
-   | include posts | [posts] |
-   | include posts, comments | [posts, comments] |
-   | include posts include author | [posts → author] |
-   | include posts include author, tags | [posts → author, tags] |
-   | include posts where published = true include author | [posts(filtered) → author] |
-*)
-relation_name       = identifier ;
-
-
-(* ============================================== *)
-(* SELECT CLAUSE                                  *)
-(* ============================================== *)
-
-select_clause       = "select" [ "distinct" ] select_list ;
-select_list         = select_item { "," select_item } ;  (* comma-separated MANDATORY *)
-select_item         = "*"
-                    | window_expr
-                    | aggregate_expr [ "as" alias ]
-                    | expr [ "as" alias ] ;
-
-(* aggregate_expr defined in WHERE CLAUSE section - supports relation_filter *)
-agg_function        = "count" | "sum" | "avg" | "min" | "max" ;
-
-
-(* ============================================== *)
-(* WINDOW FUNCTIONS                               *)
-(* ============================================== *)
-
-window_expr         = window_source "over" "(" window_spec ")" [ "as" alias ] ;
-window_source       = aggregate_expr | window_only_function ;
-window_only_function = ( "rank" | "dense_rank" | "row_number" ) "(" ")"
-                     | ( "lag" | "lead" ) "(" path_expr [ "," number_lit [ "," literal ] ] ")" ;
-
-window_spec         = [ partition_clause ] [ window_order_clause ] ;
-partition_clause    = "partition" "by" path_expr { "," path_expr } ;
+(* ------------------------------ *)
+(* Window expressions (over clause) *)
+(* ------------------------------ *)
+window_expr     = window_source "over" LPAREN window_spec RPAREN [ "as" IDENT ] ;
+window_source   = aggregate_expr | window_only_function ;
+window_only_function = ( "rank" | "dense_rank" | "row_number" ) LPAREN RPAREN
+              | ( "lag" | "lead" ) LPAREN path_expr [ COMMA NUMBER [ COMMA literal ] ] RPAREN ;
+window_spec     = [ partition_clause ] [ window_order_clause ] ;
+partition_clause = "partition" "by" path_expr { COMMA path_expr } ;
 window_order_clause = "order" "by" order_list ;
 
+group_clause    = "group" "by" group_list ;
+group_list      = path_expr { COMMA path_expr } ;
+having_clause   = "having" boolean_expr ;
 
-(* ============================================== *)
-(* GROUP BY / HAVING                              *)
-(* ============================================== *)
+order_clause    = "order" "by" order_list ;
+order_list      = order_item { COMMA order_item } ;
+order_item      = ( path_expr | aggregate_expr | IDENT ) [ "asc" | "desc" ] ;
 
-group_clause        = "group" "by" group_list ;
-group_list          = path_expr { "," path_expr } ;  (* comma-separated MANDATORY *)
-(* Supports: column, relation.column (e.g., category.id) *)
+limit_clause    = "limit" NUMBER ;
+offset_clause   = "offset" NUMBER ;
 
-having_clause       = "having" condition_expr ;
+(* ------------------------------ *)
+(* Mutations: INSERT/UPDATE/DELETE/UPSERT *)
+(* INSERT supports optional FROM clause for FK lookup and FROM EACH for bulk inserts. *)
+(* ------------------------------ *)
+mutation_body   = insert_body | update_body | delete_body | upsert_body ;
+insert_body     = "insert" assignment_list [ from_clause ] [ "!" ] ;
+from_clause     = "from" [ "each" ] IDENT [ "as" IDENT ] [ where_clause ] [ for_update_clause ] ;
+for_update_clause = "for" "update" [ "skip" "locked" ] ;
+update_body     = "update" "set" assignment_list where_clause [ "!" ] ;
+delete_body     = "delete" where_clause [ "!" ] ;
+upsert_body     = "upsert" assignment_list "on" conflict_target "do" conflict_action [ "!" ] ;
+conflict_target = IDENT | LPAREN IDENT { COMMA IDENT } RPAREN ;
+conflict_action = "nothing" | "update" "set" assignment_list ;
 
+assignment_list = assignment { COMMA assignment } ;
+assignment      = IDENT EQ assignment_value ;
+assignment_value = expr | subquery | DEFAULT | NULL ;
 
-(* ============================================== *)
-(* ORDER BY                                       *)
-(* ============================================== *)
+(* ------------------------------ *)
+(* Expressions - arithmetic, function calls, CASE, etc.  *)
+(* Left-factored for LL(1) parsing by using standard precedence climbing or recursive descent with precedence.  *)
+(* ------------------------------ *)
+expr            = add_expr ;
+add_expr        = mul_expr { ( PLUS | MINUS | "||" ) mul_expr } ;
+mul_expr        = unary_expr { ( STAR | SLASH | PERCENT ) unary_expr } ;
+unary_expr      = [ MINUS | "not" ] primary_expr ;
+primary_expr    = literal | path_expr | function_call | LPAREN expr RPAREN | case_expr ;
+function_call   = IDENT LPAREN [ expr_list ] RPAREN ;
+expr_list       = expr { COMMA expr } ;
+case_expr       = "case" { when_clause } [ else_clause ] "end" ;
+when_clause     = "when" boolean_expr "then" expr ;
+else_clause     = "else" expr ;
 
-order_clause        = "order" "by" order_list ;
-order_list          = order_item { "," order_item } ;  (* comma-separated MANDATORY *)
-order_item          = ( path_expr | aggregate_expr | alias ) [ "asc" | "desc" ] ;
-(* Order by supports: column, relation.column, aggregate, or SELECT alias *)
+literal         = STRING | NUMBER | BOOL ;
 
+(* ------------------------------ *)
+(* Notes on LL(1) / LL(k) decidability *)
+(* ------------------------------ *)
+(* - The grammar is left-factored and avoids left recursion.
+  - The main lookahead points are:
+    * After table IDENT to choose mutation vs query (1 token lookahead: next keyword)
+    * After optionally parsing NOT to decide HAS-form vs path-based HAS: the parser inspects the next token (HAS) or tries path_expr then checks for HAS — this is compatible with a single-token lookahead if the scanner separates QIDENT vs IDENT tokens and path_expr parsing is deterministic.
+    * Function call vs path usage: function_call begins with IDENT followed immediately by LPAREN; path_expr begins with IDENT possibly followed by DOT or operator — the immediate LPAREN token disambiguates.
+ - In practice a standard recursive-descent parser with 1-token lookahead (LL(1)) can implement this grammar. A few productions may require peeking one additional token after completing a path segment to decide between `path_expr has` and `path_expr op` but this is achievable by looking at the next token (still LL(1)).
+ - If more complex lookahead is required (very deep ambiguous sequences), we would move to LL(k) or apply local backtracking; however for NQL v1 the grammar is stable as LL(1).
 
-(* ============================================== *)
-(* LIMIT / OFFSET                                 *)
-(* ============================================== *)
-
-limit_clause        = "limit" number_lit ;
-offset_clause       = "offset" number_lit ;
-
-
-(* ============================================== *)
-(* MUTATIONS                                      *)
-(* ============================================== *)
-
-mutation_body       = insert_body | update_body | delete_body | upsert_body ;
-
-(* INSERT with optional FROM clause for FK lookup *)
-insert_body         = "insert" assignment_list [ from_clause ] [ "!" ] ;
-
-from_clause         = "from" [ "each" ] table_name [ "as" alias ]
-                      [ where_clause ] [ for_update_clause ] ;
-for_update_clause   = "for" "update" [ "skip" "locked" ] ;
-
-(* FROM clause semantics:
-
-   - WITHOUT "each": Scalar source - must return 0 or 1 row
-     - 0 rows → ERR-04 "Scalar subquery returned no rows"
-     - 1 row  → path_expr in assignments resolve from source context
-
-   - WITH "each": Bulk insert - source may return multiple rows
-     - Each source row generates one INSERT
-
-   - Path expressions in assignments resolve via source's schema relations:
-     - "id" → source.id (direct column)
-     - "category.id" → source.category.id (relation traversal, generates JOIN)
-     - "category.parent.name" → N-level traversal (multiple JOINs)
-
-   Examples:
-   -- Scalar: single category lookup
-   products insert title='Phone', categoryId=id from categories where name='Electronics'
-
-   -- Bulk with relation traversal (planner generates JOIN)
-   orderItems insert
-     orderId=id,
-     productId=product.id,
-     categoryName=product.category.name
-   from each lineItems where status='pending'
-   -- Resolves: lineItems JOIN products ON lineItems.productId = products.id
-   --           JOIN categories ON products.categoryId = categories.id
-
-   - Alias is optional - when omitted, source table name is used as implicit alias
-*)
-
-(* UPDATE *)
-update_body         = "update" "set" assignment_list where_clause [ "!" ] ;
-
-(* DELETE *)
-delete_body         = "delete" where_clause [ "!" ] ;
-
-(* UPSERT *)
-upsert_body         = "upsert" assignment_list "on" conflict_target "do" conflict_action [ "!" ] ;
-conflict_target     = identifier | "(" identifier { "," identifier } ")" ;
-conflict_action     = "nothing" | "update" "set" assignment_list ;
-
-
-(* ============================================== *)
-(* ASSIGNMENTS                                    *)
-(* ============================================== *)
-
-assignment_list     = assignment { "," assignment } ;  (* comma-separated MANDATORY *)
-assignment          = column_name "=" assignment_value ;
-assignment_value    = expr | subquery | "default" | "null" ;
-
-column_name         = identifier ;
-alias               = identifier ;
-table_name          = identifier ;
-
-
-(* ============================================== *)
-(* EXPRESSIONS (for assignments and comparisons)  *)
-(* ============================================== *)
-
-expr                = add_expr ;
-add_expr            = mul_expr { ( "+" | "-" | "||" ) mul_expr } ;
-mul_expr            = unary_expr { ( "*" | "/" | "%" ) unary_expr } ;
-unary_expr          = [ "-" | "not" ] primary_expr ;
-primary_expr        = literal
-                    | path_expr
-                    | function_call
-                    | "(" expr ")"
-                    | case_expr ;
-
-function_call       = identifier "(" [ expr_list ] ")" ;
-expr_list           = expr { "," expr } ;
-
-case_expr           = "case" { when_clause } [ else_clause ] "end" ;
-when_clause         = "when" condition_expr "then" expr ;
-else_clause         = "else" expr ;
+(* ------------------------------ *)
+(* End of grammar *)
+(* ------------------------------ *)
 ```
 
 ### 4.4 Resolution Rules
@@ -696,7 +532,8 @@ ParsedQuery {
 | Window functions (`over` clause) | P1 | 8 |
 | Schema relation type definitions | P0 | 1 |
 | `.parse` command | P2 | 12 |
-| Mandatory comma separators | P1 | 2 |
+| Mandatory comma separators (strict mode) | P1 | 2 |
+| Formal LL(1) enforcement (parser currently heuristic) | P0 | 0 |
 
 ### 5.3 Grammar Gaps Analysis
 
@@ -732,6 +569,19 @@ ParsedQuery {
 - Current: Tokenizer strips commas, whitespace-separated
 - Target: Commas mandatory for select, order, assignments, group by
 
+### 5.4 Updated gap analysis (post-grammar)
+
+- The grammar has been formalized and left-factored (see §4.3). This eliminates a number of syntactic ambiguities on paper, but does not change the runtime parser implementation yet.
+- Remaining implementation gaps (code vs spec):
+  - The existing `packages/cli/src/repl/parser.ts` is a robust, heuristic token-based parser that already implements many features described in the spec, but it uses ad-hoc lookahead and token heuristics (function vs subquery detection, optional comma tolerance). That means:
+    - Comma handling: tokenizer currently tolerates/strips commas; the spec now requires commas for certain lists (strict mode). Parser needs to be adjusted to enforce comma tokens.
+    - Quoted identifiers: scanner and parser must preserve QIDENTs and enforce column-only semantics when present.
+    - Subquery vs function-call ambiguity: existing heuristics inspect token sequences; formal grammar prefers explicit LPAREN-based disambiguation — minor change but requires careful refactor.
+    - Existence (`has`/`not has`): code supports `has`-style constructs but there are subtle sugar forms (`relation has where` vs `has relation where`) that need canonicalization during lowering.
+    - Recursive relations and INSERT FROM are implemented conceptually via planner+compiler, but parser-level recognition and validation (e.g., `from each`, `for update`) need to be validated/expanded in production tests.
+
+Conclusion: grammar formalization reduces spec ambiguity and enables a migration path. The immediate risk is mismatches between the formal grammar and the current parser heuristics — these should be addressed by either adapting the existing parser to follow the grammar or by replacing it with a formal parser generator.
+
 ## 6. Acceptance Criteria (BDD)
 
 ### Scenario Group: Relation Path Traversal
@@ -763,6 +613,32 @@ Scenario: SC-04 - Invalid relation in path
   Given schema without "foo" relation on products
   When I execute "products where foo.name = 'X'"
   Then error: '"foo" is not a relation on table "products"'
+
+### Additional Parser & Disambiguation Scenarios (new)
+
+@priority:high @type:nominal
+Scenario: SC-33 - Quoted identifier vs relation disambiguation
+  Given table with column "parent" AND relation parent
+  When I execute 'categories where "parent" = 5'
+  Then parser treats "parent" as column and no JOIN is generated
+
+@priority:high @type:nominal
+Scenario: SC-34 - Comma strict mode
+  Given strict parsing mode enabled
+  When I execute "users select id name email"
+  Then parser errors: expected comma between select items
+
+@priority:high @type:nominal
+Scenario: SC-35 - Function call vs subquery disambiguation
+  Given functions `count()` and table `count` exist
+  When I execute "products where count() > 0"
+  Then parser recognizes function `count()` not a subquery
+
+@priority:high @type:nominal
+Scenario: SC-36 - Parser roundtrip safety
+  Given `.parse` on
+  When I execute a complex query with includes, subqueries, and window functions
+  Then `.parse` output can be lowered to the same IntentAST the current executor expects
 ```
 
 ### Scenario Group: Subqueries

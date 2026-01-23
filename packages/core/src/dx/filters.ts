@@ -24,6 +24,7 @@
  */
 
 import type {
+	RecursiveExistsOptions,
 	WhereAndIntent,
 	WhereComparisonIntent,
 	WhereExistsIntent,
@@ -346,39 +347,51 @@ export function not(condition: WhereIntent): WhereNotIntent {
  * EXISTS subquery: filter by existence of related records
  *
  * @param relation - Relation name defined in schema
- * @param options - Optional nested filter on related records
+ * @param options - Optional nested filter on related records, with optional recursive options
  *
  * @example exists('posts') → EXISTS (SELECT 1 FROM posts WHERE ...)
  * @example exists('posts', { where: eq('published', true) })
+ * @example exists('ancestors', { recursive: { direction: 'up', through: 'parent', maxDepth: 10 }, where: eq('name', 'Electronics') })
  */
 export function exists(
 	relation: string,
-	options?: { where?: WhereIntent },
+	options?: { where?: WhereIntent; recursive?: RecursiveExistsOptions },
 ): WhereExistsIntent {
 	const intent: WhereExistsIntent = { kind: 'exists', relation };
+	const result: WhereExistsIntent = { ...intent };
 	if (options?.where !== undefined) {
-		return { ...intent, where: options.where };
+		(result as { where: WhereIntent }).where = options.where;
 	}
-	return intent;
+	if (options?.recursive !== undefined) {
+		(result as { recursive: RecursiveExistsOptions }).recursive =
+			options.recursive;
+	}
+	return result;
 }
 
 /**
  * NOT EXISTS subquery: filter by absence of related records
  *
  * @param relation - Relation name defined in schema
- * @param options - Optional nested filter on related records
+ * @param options - Optional nested filter on related records, with optional recursive options
  *
  * @example notExists('comments') → NOT EXISTS (SELECT 1 FROM comments WHERE ...)
+ * @example notExists('ancestors', { recursive: { direction: 'up', through: 'parent' }, where: eq('name', 'Obsolete') })
  */
 export function notExists(
 	relation: string,
-	options?: { where?: WhereIntent },
+	options?: { where?: WhereIntent; recursive?: RecursiveExistsOptions },
 ): WhereNotExistsIntent {
 	const intent: WhereNotExistsIntent = { kind: 'notExists', relation };
+	const result: WhereNotExistsIntent = { ...intent };
 	if (options?.where !== undefined) {
-		return { ...intent, where: options.where };
+		(result as { where: WhereIntent }).where = options.where;
 	}
-	return intent;
+	if (options?.recursive !== undefined) {
+		(result as { recursive: RecursiveExistsOptions }).recursive =
+			options.recursive;
+	}
+	return result;
 }
 
 // ============================================================================

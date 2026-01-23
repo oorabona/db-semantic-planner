@@ -1063,6 +1063,19 @@ function disambiguateRelation(
 		.filter((r) => r.target === relationName);
 
 	if (relationsToTarget.length === 0) {
+		// Check for virtual recursive relations (ancestors/descendants)
+		// These are auto-inferred from self-referential relations and handled by the compiler
+		if (relationName === 'ancestors' || relationName === 'descendants') {
+			const selfReferentialRelations = model
+				.getRelationsFrom(sourceTable)
+				.filter((r) => r.source === r.target);
+			if (selfReferentialRelations.length > 0) {
+				// Virtual recursive relation - return the underlying self-referential relation
+				// The compiler will handle the actual recursive CTE generation
+				return selfReferentialRelations[0];
+			}
+		}
+
 		// No relation found
 		state.warnings.push({
 			code: 'AMBIGUOUS_RELATION',
@@ -1335,18 +1348,16 @@ function detectRawSqlUsage(intent: QueryIntent, state: PlannerState): void {
 		'type' in intent.select &&
 		intent.select.type === 'expressions'
 	) {
-		const expressions = intent.select.expressions;
-		if (expressions) {
-			for (const expr of expressions) {
-				if (isRawExpression(expr)) {
-					state.warnings.push({
-						code: 'RAW_SQL_USAGE',
-						message: `Raw SQL expression detected: "${expr.sql}" (alias: ${expr.as})`,
-						suggestion:
-							'Raw SQL bypasses type safety and SQL injection protection. ' +
-							'Ensure the SQL is safe and consider using built-in expression helpers instead.',
-					});
-				}
+		for (const col of intent.select.columns) {
+			if (col.type === 'expression' && isRawExpression(col.expression)) {
+				const expr = col.expression;
+				state.warnings.push({
+					code: 'RAW_SQL_USAGE',
+					message: `Raw SQL expression detected: "${expr.sql}" (alias: ${expr.as})`,
+					suggestion:
+						'Raw SQL bypasses type safety and SQL injection protection. ' +
+						'Ensure the SQL is safe and consider using built-in expression helpers instead.',
+				});
 			}
 		}
 	}

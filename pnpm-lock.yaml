@@ -153,6 +153,9 @@ importers:
       '@dbsp/core':
         specifier: workspace:*
         version: link:../core
+      '@dbsp/nql':
+        specifier: workspace:*
+        version: link:../nql
       '@inkjs/ui':
         specifier: 'catalog:'
         version: 2.0.0(ink@6.6.0(@types/react@19.2.8)(react@19.2.3))

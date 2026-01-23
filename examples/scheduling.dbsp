@@ -5,6 +5,8 @@
 #   pnpm dbsp repl --schema ./examples/scheduling.schema.ts \
 #     --db postgresql://postgres:demo@localhost:5432/demo \
 #     --input ./examples/scheduling.dbsp
+#
+# NQL v2 Syntax: uses pipes (|) between operators
 
 # =============================================================================
 # Setup: Create isolated schema and load data
@@ -35,41 +37,41 @@ priceTiers
 # 4.4 Range Operators
 # =============================================================================
 # Bookings that overlap with a specific period
-roomBookings where bookingPeriod overlaps [2024-01-16,2024-01-20)
+roomBookings | where bookingPeriod overlaps [2024-01-16,2024-01-20)
 
 # Bookings contained within a month
-roomBookings where bookingPeriod containedBy [2024-01-01,2024-02-01)
+roomBookings | where bookingPeriod containedBy [2024-01-01,2024-02-01)
 
 # Price tier for quantity 25
-priceTiers where quantityRange contains 25
+priceTiers | where quantityRange contains 25
 
 # Price tier for quantity 25 (Widget A only)
-priceTiers where productName = 'Widget A' and quantityRange contains 25
+priceTiers | where productName = 'Widget A' and quantityRange contains 25
 
 # =============================================================================
 # 4.5 Rooms with Bookings
 # =============================================================================
-rooms include roomBookings
-rooms include roomBookings where bookingPeriod overlaps [2024-01-22,2024-01-29)
+rooms | include roomBookings
+rooms | include roomBookings | where bookingPeriod overlaps [2024-01-22,2024-01-29)
 
 # =============================================================================
-# 4.6 Mutations (INSERT, UPDATE, DELETE, UPSERT)
+# 4.6 Mutations (NQL v2: SQL-like syntax)
 # =============================================================================
 
 # Insert a new room
-rooms insert name = "Board Room", capacity = 20
+insert into rooms set name = "Board Room", capacity = 20
 
 # Insert a new price tier
-priceTiers insert productName = "Widget C", quantityRange = "[1,50)", unitPrice = 15.00
+insert into priceTiers set productName = "Widget C", quantityRange = "[1,50)", unitPrice = 15.00
 
 # Update room capacity
-rooms update set capacity = 25 where name = "Conference Room A"
+update rooms set capacity = 25 where name = "Conference Room A"
 
 # Update event name
-events update set title = "Team Standup (Updated)" where id = 1
+update events set title = "Team Standup (Updated)" where id = 1
 
 # Delete past bookings
-roomBookings delete where id = 99
+delete from roomBookings where id = 99
 
 # Upsert room - insert or update on name conflict
-rooms upsert name = "Meeting Room", capacity = 10 on name do update set capacity = 12
+upsert into rooms on name set name = "Meeting Room", capacity = 12

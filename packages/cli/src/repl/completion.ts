@@ -133,6 +133,12 @@ const DOT_COMMANDS: CompletionSuggestion[] = [
 		type: 'command',
 		description: 'Toggle EXPLAIN prefix for queries',
 	},
+	{
+		text: '.table',
+		label: '.table',
+		type: 'command',
+		description: 'Configure table display options',
+	},
 ];
 
 /**

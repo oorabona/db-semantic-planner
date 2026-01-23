@@ -1764,7 +1764,7 @@ orders | where due in 'next week'
 (* TOP-LEVEL                                                    *)
 (* ============================================================ *)
 
-program       = { let_stmt } statement ;
+program       = { let_stmt | statement } ;  (* Supports interleaving let and statements *)
 statement     = query | mutation_pipeline ;
 
 (* CTE / Variable binding - defines reusable named queries *)
@@ -1859,7 +1859,8 @@ primary_expr  = literal
 scalar_subquery = table_ref "|" query_clause { "|" query_clause } ;
 
 path_expr     = ident_segment { "." ident_segment } ;
-func_call     = IDENT "(" [ expr_list ] ")" ;
+func_call     = IDENT "(" [ func_arg_list ] ")" ;
+func_arg_list = "*" | expr_list ;  (* Star for count(*), expr_list for all other functions *)
 (* Note: Window functions (OVER clause) deferred to v2.1 *)
 
 (* ============================================================ *)
@@ -1909,7 +1910,7 @@ ident_segment   = IDENT | QUOTED_IDENT ;
 IDENT           = /[a-zA-Z_][a-zA-Z0-9_]*/ ;
 QUOTED_IDENT    = /"([^"]|"")*"/ ;   (* Double quotes, escape via "" *)
 STRING          = /'([^']|'')*'/ ;   (* Single quotes, escape via '' *)
-NUMBER          = /[0-9]+(\.[0-9]+)?/ ;
+NUMBER          = /[0-9]+(\.[0-9]+)?/ ;  (* No leading sign - negative via unary_expr *)
 ```
 
 ### 11.7 Semantic Rules
@@ -2006,6 +2007,33 @@ packages/nql/
     ├── semantic.test.ts
     └── e2e.test.ts
 ```
+
+### 11.8.1 Current Implementation Status
+
+**Fully Implemented (Lexer → Parser → Compiler):**
+- All pipeline clauses: `where`, `select`, `with`, `group by`, `order by`, `limit`, `offset`
+- All comparison operators: `=`, `!=`, `<`, `>`, `<=`, `>=`, `like`
+- All logical operators: `and`, `or`, `not`
+- `between` expressions
+- `in` with value lists
+- `is null` / `is not null`
+- Aggregate functions: `count`, `sum`, `avg`, `min`, `max` (single argument)
+- Arithmetic expressions: `+`, `-`, `*`, `/`, `%`
+- All mutations: `insert`, `update`, `delete`, `upsert`
+
+**Parsed but Not Compiled (Known Limitations):**
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `exists (subquery)` | Parser ✅ Compiler ❌ | Deferred: requires subquery compilation |
+| Unary minus in WHERE | Parser ✅ Compiler ❌ | `where price < -5` → use workaround: `where price < 0 - 5` |
+| Multi-arg aggregates | Parser ✅ Compiler ⚠️ | `string_agg(name, ',')` loses separator arg |
+| Scalar subqueries | Parser ✅ Compiler ❌ | `(subquery)` in expressions not yet supported |
+| Variable references | Parser ⚠️ Compiler ❌ | `let` bindings parsed but variables not resolved |
+
+**Not Yet Implemented:**
+- Window functions (`OVER` clause) — deferred to v2.1
+- `distinct on` — deferred to v2.1
 
 ### 11.9 Migration Path
 

@@ -11,11 +11,15 @@ import type {
 	PlanDecision,
 	PlanReport,
 	QueryIntent,
+	RecursiveExistsOptions,
 	RelationIR,
 	SelectAggregateIntent,
+	SelectIntent,
 	SelectWithExpressionsIntent,
 	SubqueryRefIntent,
+	WhereExistsIntent,
 	WhereIntent,
+	WhereNotExistsIntent,
 	WhereSubqueryIntent,
 	WindowIntent,
 } from '@dbsp/core';
@@ -770,9 +774,20 @@ export function compile(
 	}
 
 	// Add GROUP BY
+	// CLI-NQL: Support relation path expressions (e.g., product.name)
 	if (intent.groupBy && intent.groupBy.length > 0) {
 		for (const field of intent.groupBy) {
-			query = query.groupBy(`${rootAlias}.${field}`);
+			const resolved = resolveGroupByField(
+				field,
+				rootAlias,
+				rootTable,
+				model,
+				state,
+				query,
+				schemaName,
+			);
+			query = resolved.query;
+			query = query.groupBy(resolved.column);
 		}
 	}
 
@@ -790,10 +805,17 @@ export function compile(
 	}
 
 	// Add ORDER BY
+	// CLI-NQL: Collect SELECT aliases to avoid table-prefixing them
+	const selectAliases = collectSelectAliases(intent.select);
 	if (intent.orderBy) {
 		for (const order of intent.orderBy) {
 			const direction = order.direction === 'desc' ? 'desc' : 'asc';
-			query = query.orderBy(`${rootAlias}.${order.field}`, direction);
+			// CLI-NQL: If field is an alias from SELECT, use raw SQL (no table prefix)
+			if (selectAliases.has(order.field)) {
+				query = query.orderBy(sql.ref(order.field), direction);
+			} else {
+				query = query.orderBy(`${rootAlias}.${order.field}`, direction);
+			}
 		}
 	}
 
@@ -993,23 +1015,21 @@ function buildSelectWithExpressions(
 ): SelectQueryBuilder<any, any, any> {
 	let result = query;
 
-	// Add regular fields first
-	if (select.fields && select.fields.length > 0) {
-		const fields = select.fields.map((f: string) => `${alias}.${f}`);
-		result = result.select(fields);
-	}
-
-	// Add expressions
-	for (const expr of select.expressions) {
-		result = addExpressionSelect(
-			result,
-			expr,
-			alias,
-			model,
-			plan,
-			state,
-			schemaName,
-		);
+	// Process columns in original order
+	for (const col of select.columns) {
+		if (col.type === 'field') {
+			result = result.select(`${alias}.${col.name}`);
+		} else {
+			result = addExpressionSelect(
+				result,
+				col.expression,
+				alias,
+				model,
+				plan,
+				state,
+				schemaName,
+			);
+		}
 	}
 
 	return result;
@@ -1309,10 +1329,30 @@ function compileComparison(
 // EXISTS Compilation
 // ============================================================================
 
-function compileExists(
+
+/**
+ * CLI-NQL Block 7: Compile recursive EXISTS for ancestors/descendants traversal.
+ *
+ * Generates SQL like:
+ * ```sql
+ * EXISTS (
+ *   WITH RECURSIVE ancestors(id, parent_id, depth) AS (
+ *     SELECT id, parent_id, 1 FROM categories WHERE id = outer.parent_id
+ *     UNION ALL
+ *     SELECT c.id, c.parent_id, a.depth + 1 FROM categories c
+ *     JOIN ancestors a ON c.id = a.parent_id WHERE a.depth < 10
+ *   )
+ *   SELECT 1 FROM ancestors WHERE name = 'Electronics'
+ * )
+ * ```
+ *
+ * NOTE: Uses sql template because Kysely's expression builder doesn't support
+ * inline recursive CTEs inside EXISTS. This is a documented exception per CLAUDE.md.
+ */
+function compileRecursiveExists(
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
-	eb: any,
-	where: { relation: string; where?: WhereIntent },
+	_eb: any,
+	where: { relation: string; where?: WhereIntent; recursive: RecursiveExistsOptions },
 	sourceAlias: string,
 	model: ModelIR,
 	plan: PlanReport,
@@ -1321,6 +1361,194 @@ function compileExists(
 	schemaName?: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
 ): any {
+	const { direction, through, maxDepth = 10 } = where.recursive;
+
+	// Get source table
+	const sourceTable = getTableFromAlias(state, sourceAlias) ?? plan.rootTable;
+	const sourceTableDef = model.getTable(sourceTable);
+	const sourceKeys = normalizePrimaryKey(sourceTableDef?.primaryKey);
+
+	// Find the "through" relation (e.g., 'parent' for ancestors)
+	const throughRelation = model.getRelation(`${sourceTable}.${through}`);
+	if (!throughRelation) {
+		throw new CompilationError(
+			`Cannot find through relation for recursive traversal: ${sourceTable}.${through}`,
+		);
+	}
+
+	// Get FK column (e.g., parentId for parent relation)
+	const fkCols = normalizeForeignKey(throughRelation.foreignKey, 'parentId');
+	const fkCol = fkCols[0];
+	const pkCol = sourceKeys[0];
+
+	// Validate we have the required columns
+	if (!fkCol) {
+		throw new CompilationError(
+			`Cannot determine foreign key for recursive traversal: ${sourceTable}.${through}`,
+		);
+	}
+	if (!pkCol) {
+		throw new CompilationError(
+			`Cannot determine primary key for recursive traversal: ${sourceTable}`,
+		);
+	}
+
+	// CTE name unique to this query
+	const cteName = `_ancestors_${state.aliasCounter++}`;
+	const cteAlias = 'r';
+
+	// Table name with optional schema
+	const tableName = schemaName
+		? sql.raw(`"${schemaName}"."${sourceTable}"`)
+		: sql.raw(`"${sourceTable}"`);
+
+	// Build WHERE clause for the CTE result if present
+	let cteWhereClause: RawBuilder<unknown> = sql`1=1`;
+	if (where.where) {
+		// Compile the nested WHERE against the source table alias (src)
+		cteWhereClause = compileWhereToRaw(where.where, 'src', model, state);
+	}
+
+	// Build the recursive CTE SQL based on direction
+	let existsSql: RawBuilder<unknown>;
+
+	// Use fixed alias 'fk' in CTE to avoid column name transformation issues
+	// sql.ref() handles camelCase→snake_case transformation for table columns
+	const fkCteAlias = 'fk';
+
+	if (direction === 'up') {
+		// Ancestors: traverse UP via parent FK
+		// Base case: SELECT FROM table WHERE id = outer.parentId
+		// Recursive: JOIN on id = fk (go to parent's parent)
+		existsSql = sql`EXISTS (
+			WITH RECURSIVE ${sql.raw(cteName)}(id, ${sql.raw(fkCteAlias)}, _depth) AS (
+				SELECT ${sql.ref('id')}, ${sql.ref(fkCol)}, 1 AS _depth
+				FROM ${tableName}
+				WHERE ${sql.ref('id')} = ${sql.ref(`${sourceAlias}.${fkCol}`)}
+				UNION ALL
+				SELECT ${sql.ref('t.id')}, ${sql.ref(`t.${fkCol}`)}, ${sql.raw(cteAlias)}._depth + 1
+				FROM ${tableName} t
+				INNER JOIN ${sql.raw(cteName)} ${sql.raw(cteAlias)} ON ${sql.ref('t.id')} = ${sql.raw(cteAlias)}.${sql.raw(fkCteAlias)}
+				WHERE ${sql.raw(cteAlias)}._depth < ${maxDepth}
+			)
+			SELECT 1 FROM ${sql.raw(cteName)}
+			INNER JOIN ${tableName} src ON ${sql.ref('src.id')} = ${sql.raw(cteName)}.id
+			WHERE ${cteWhereClause}
+		)`;
+	} else {
+		// Descendants: traverse DOWN via children (reverse FK direction)
+		// Base case: SELECT FROM table WHERE parentId = outer.id
+		// Recursive: JOIN on parentId = id (go to children's children)
+		existsSql = sql`EXISTS (
+			WITH RECURSIVE ${sql.raw(cteName)}(id, ${sql.raw(fkCteAlias)}, _depth) AS (
+				SELECT ${sql.ref('id')}, ${sql.ref(fkCol)}, 1 AS _depth
+				FROM ${tableName}
+				WHERE ${sql.ref(fkCol)} = ${sql.ref(`${sourceAlias}.${pkCol}`)}
+				UNION ALL
+				SELECT ${sql.ref('t.id')}, ${sql.ref(`t.${fkCol}`)}, ${sql.raw(cteAlias)}._depth + 1
+				FROM ${tableName} t
+				INNER JOIN ${sql.raw(cteName)} ${sql.raw(cteAlias)} ON ${sql.ref(`t.${fkCol}`)} = ${sql.raw(cteAlias)}.id
+				WHERE ${sql.raw(cteAlias)}._depth < ${maxDepth}
+			)
+			SELECT 1 FROM ${sql.raw(cteName)}
+			INNER JOIN ${tableName} src ON ${sql.ref('src.id')} = ${sql.raw(cteName)}.id
+			WHERE ${cteWhereClause}
+		)`;
+	}
+
+	if (negate) {
+		return sql`NOT ${existsSql}`;
+	}
+	return existsSql;
+}
+
+/**
+ * Compile a simple WHERE clause to raw SQL for use in recursive CTE.
+ * Handles basic comparisons; complex cases fall back to true.
+ */
+function compileWhereToRaw(
+	where: WhereIntent,
+	alias: string,
+	model: ModelIR,
+	state: CompilerState,
+): RawBuilder<unknown> {
+	if (where.kind === 'comparison') {
+		const column = `"${alias}"."${where.field}"`;
+		const value = where.value;
+
+		switch (where.operator) {
+			case 'eq':
+				return sql`${sql.raw(column)} = ${value}`;
+			case 'neq':
+				return sql`${sql.raw(column)} != ${value}`;
+			case 'gt':
+				return sql`${sql.raw(column)} > ${value}`;
+			case 'gte':
+				return sql`${sql.raw(column)} >= ${value}`;
+			case 'lt':
+				return sql`${sql.raw(column)} < ${value}`;
+			case 'lte':
+				return sql`${sql.raw(column)} <= ${value}`;
+			default:
+				return sql`1=1`;
+		}
+	}
+
+	if (where.kind === 'like') {
+		const column = `"${alias}"."${where.field}"`;
+		return sql`${sql.raw(column)} LIKE ${where.pattern}`;
+	}
+
+	if (where.kind === 'and') {
+		const conditions = where.conditions.map((c) =>
+			compileWhereToRaw(c, alias, model, state),
+		);
+		if (conditions.length === 0) return sql`1=1`;
+		// biome-ignore lint/style/noNonNullAssertion: length check guarantees element exists
+		if (conditions.length === 1) return conditions[0]!;
+		return sql`(${sql.join(conditions, sql` AND `)})`;
+	}
+
+	if (where.kind === 'or') {
+		const conditions = where.conditions.map((c) =>
+			compileWhereToRaw(c, alias, model, state),
+		);
+		if (conditions.length === 0) return sql`1=1`;
+		// biome-ignore lint/style/noNonNullAssertion: length check guarantees element exists
+		if (conditions.length === 1) return conditions[0]!;
+		return sql`(${sql.join(conditions, sql` OR `)})`;
+	}
+
+	// For complex cases, return true (no filtering)
+	return sql`1=1`;
+}
+
+function compileExists(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
+	eb: any,
+	where: { relation: string; where?: WhereIntent; recursive?: RecursiveExistsOptions },
+	sourceAlias: string,
+	model: ModelIR,
+	plan: PlanReport,
+	state: CompilerState,
+	negate: boolean,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
+): any {
+	// CLI-NQL Block 7: Handle recursive exists (ancestors/descendants)
+	if (where.recursive) {
+		return compileRecursiveExists(
+			eb,
+			where as { relation: string; where?: WhereIntent; recursive: RecursiveExistsOptions },
+			sourceAlias,
+			model,
+			plan,
+			state,
+			negate,
+			schemaName,
+		);
+	}
+
 	// Find the relation
 	const sourceTable = getTableFromAlias(state, sourceAlias) ?? plan.rootTable;
 
@@ -2483,6 +2711,176 @@ function buildCTEs(
 // Utilities
 // ============================================================================
 
+/**
+ * CLI-NQL: Resolve a GROUP BY field to its proper column reference.
+ * Handles relation path expressions like "product.name" by adding JOINs if needed.
+ */
+function resolveGroupByField(
+	field: string,
+	rootAlias: string,
+	rootTable: string,
+	model: ModelIR,
+	state: CompilerState,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: SelectQueryBuilder<any, any, any>,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): { query: SelectQueryBuilder<any, any, any>; column: string } {
+	// Simple column - no relation path
+	if (!field.includes('.')) {
+		return { query, column: `${rootAlias}.${field}` };
+	}
+
+	// Relation path expression like "product.name" or "category.parent.name"
+	const segments = field.split('.');
+	const column = segments.pop()!; // Last segment is the column
+	const relationPath = segments.join('.'); // Remaining is the relation path
+
+	// Check if this relation path is already JOINed
+	let joinInfo = state.joinedIncludeRelations.get(relationPath);
+	if (!joinInfo) {
+		const filterInfo = state.joinedFilterRelations.get(relationPath);
+		if (filterInfo) {
+			joinInfo = {
+				alias: filterInfo.alias,
+				targetTable: filterInfo.targetTable,
+				relationName: relationPath,
+				strategy: 'join' as const,
+			};
+		}
+	}
+
+	if (joinInfo) {
+		// Relation already joined - use its alias
+		return { query, column: `${joinInfo.alias}.${column}` };
+	}
+
+	// Need to create the JOIN - traverse the relation path
+	let currentAlias = rootAlias;
+	let currentTableName = rootTable;
+	let result = query;
+
+	for (let i = 0; i < segments.length; i++) {
+		const relName = segments[i];
+		if (!relName) continue;
+		const relationKey = segments.slice(0, i + 1).join('.');
+
+		// Check if this segment is already joined
+		let segmentJoinInfo = state.joinedIncludeRelations.get(relationKey);
+		if (!segmentJoinInfo) {
+			const filterInfo = state.joinedFilterRelations.get(relationKey);
+			if (filterInfo) {
+				segmentJoinInfo = {
+					alias: filterInfo.alias,
+					targetTable: filterInfo.targetTable,
+					relationName: relationKey,
+					strategy: 'join' as const,
+				};
+			}
+		}
+
+		if (segmentJoinInfo) {
+			currentAlias = segmentJoinInfo.alias;
+			currentTableName = segmentJoinInfo.targetTable;
+			continue;
+		}
+
+		// Find the relation definition
+		const currentTableDef = model.getTable(currentTableName);
+		if (!currentTableDef) {
+			throw new Error(`Unknown table: ${currentTableName}`);
+		}
+
+		const relDef = model.getRelation(`${currentTableName}.${relName}`);
+		if (!relDef) {
+			throw new Error(
+				`Relation '${relName}' not found from table '${currentTableName}'`,
+			);
+		}
+
+		// Create alias for the join
+		const joinAlias = getNextAlias(state);
+		const targetTable = schemaName
+			? `${schemaName}.${relDef.target}`
+			: relDef.target;
+
+		// Add LEFT JOIN based on relation type
+		if (relDef.type === 'belongsTo') {
+			// belongsTo: child.fk = parent.pk
+			const fkField = Array.isArray(relDef.foreignKey)
+				? relDef.foreignKey[0]
+				: relDef.foreignKey;
+			result = result.leftJoin(
+				`${targetTable} as ${joinAlias}`,
+				`${currentAlias}.${fkField}`,
+				`${joinAlias}.id`,
+			);
+		} else {
+			// hasOne/hasMany: parent.pk = child.fk
+			const fkField = Array.isArray(relDef.foreignKey)
+				? relDef.foreignKey[0]
+				: relDef.foreignKey;
+			result = result.leftJoin(
+				`${targetTable} as ${joinAlias}`,
+				`${currentAlias}.id`,
+				`${joinAlias}.${fkField}`,
+			);
+		}
+
+		// Track the join
+		state.joinedIncludeRelations.set(relationKey, {
+			alias: joinAlias,
+			targetTable: relDef.target,
+			relationName: relationKey,
+			strategy: 'join',
+		});
+
+		currentAlias = joinAlias;
+		currentTableName = relDef.target;
+	}
+
+	return { query: result, column: `${currentAlias}.${column}` };
+}
+
+/**
+ * CLI-NQL: Collect aliases defined in SELECT clause.
+ * Used to determine if ORDER BY field is an alias (no table prefix needed).
+ */
+function collectSelectAliases(select: SelectIntent | undefined): Set<string> {
+	const aliases = new Set<string>();
+	if (!select) return aliases;
+
+	if (isSelectAggregate(select)) {
+		// Aggregate aliases: COUNT(*) AS count, SUM(price) AS total
+		for (const agg of select.aggregates) {
+			if (agg.as) {
+				aliases.add(agg.as);
+			} else {
+				// Default alias: function_field or function
+				const defaultAlias = agg.field
+					? `${agg.function}_${agg.field}`
+					: agg.function;
+				aliases.add(defaultAlias);
+			}
+		}
+	} else if (isSelectWithExpressions(select)) {
+		// Expression aliases: COALESCE(...) AS name, or WindowIntent with 'alias'
+		for (const col of select.columns) {
+			if (col.type === 'expression') {
+				const expr = col.expression;
+				// WindowIntent uses 'alias', other expressions use 'as'
+				if (expr.kind === 'window') {
+					aliases.add(expr.alias);
+				} else if ('as' in expr) {
+					aliases.add(expr.as);
+				}
+			}
+		}
+	}
+
+	return aliases;
+}
+
 function getNextAlias(state: CompilerState): string {
 	const alias = `t${state.aliasCounter}`;
 	state.aliasCounter++;
@@ -2495,9 +2893,13 @@ function getTableFromAlias(
 ): string | undefined {
 	for (const [table, a] of state.tableAliases) {
 		if (a === alias) {
-			// Handle compound keys like "posts_t1"
+			// Handle compound keys like "posts_t1" or "categories_join"
 			const parts = table.split('_');
-			if (parts.length > 1 && parts[parts.length - 1]?.startsWith('t')) {
+			const lastPart = parts[parts.length - 1];
+			if (
+				parts.length > 1 &&
+				(lastPart?.startsWith('t') || lastPart === 'join')
+			) {
 				return parts.slice(0, -1).join('_');
 			}
 			return table;

@@ -12,7 +12,7 @@
 | Blocks | 6 |
 | Time Budget | 40h |
 | BDD Scenarios | 42 |
-| Tests | 155 passing |
+| Tests | 167 passing |
 
 ## Completed
 
@@ -22,6 +22,7 @@
 - [x] ✅ **Block 4:** Semantic Layer (CST→AST visitor) (2026-01-23)
 - [x] ✅ **Block 5:** Compiler (NQL AST → IntentAST) - 49 tests (2026-01-23)
 - [x] ✅ **Block 6:** Typed expressions, removed raw SQL (2026-01-23)
+- [x] ✅ **P2 Fixes:** Unary minus, multi-arg aggregates, EXISTS error (2026-01-23)
 
 ## Package Structure
 
@@ -34,11 +35,11 @@ packages/nql/
 │   ├── semantic/         # CST→AST visitor
 │   ├── compiler/         # NQL AST → IntentAST
 │   └── errors/           # Typed error codes
-└── tests/                # 155 test cases
+└── tests/                # 167 test cases
     ├── lexer.test.ts     # 32 tests
     ├── parser.test.ts    # 41 tests
-    ├── visitor.test.ts   # 33 tests
-    └── compiler.test.ts  # 49 tests
+    ├── visitor.test.ts   # 35 tests
+    └── compiler.test.ts  # 59 tests
 ```
 
 ## Key Features Implemented
@@ -67,6 +68,14 @@ packages/nql/
 
 - ADR-003: CLI REPL Framework Selection (Chevrotain)
 - NQL v1 parser in `packages/cli/src/repl/parser.ts`
+
+## Backlog (Future Work)
+
+- [ ] **WhereSubqueryExistsIntent** — Add new intent type for arbitrary subquery EXISTS
+  - NQL supports `exists (subquery)` but IntentAST's WhereExistsIntent requires relation name
+  - Need to add `WhereSubqueryExistsIntent` with `subquery: QueryIntent` field to core
+  - Then update compiler to emit this intent for EXISTS expressions
+  - Priority: LOW (workaround: use relation-based `with` + `where`)
 
 ## Out-of-Scope Findings (Codex Review)
 

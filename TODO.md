@@ -23,11 +23,14 @@
 | Codebase Stabilization (STAB-001) | all | ✅ Complete |
 | MCP Server (@dbsp/mcp-server) | mcp-server | 🟡 Ready |
 | Developer Experience (DX) | core, adapter | 🟡 Backlog |
+| NQL v2.0 Parser (@dbsp/nql) | nql | ✅ Complete |
+| NQL CLI Migration (NQLM) | cli, examples | 🟡 Ready |
 
 ## Scope-Specific Backlogs
 
 | File | Scope | Description |
 |------|-------|-------------|
+| `TODO_NQL_MIGRATION.md` | cli, examples | CLI REPL migration to @dbsp/nql |
 | `TODO_MCP.md` | mcp-server | MCP server implementation tasks |
 | `TODO_DX.md` | core, adapter | DX improvements, SOLID fixes, type inference |
 

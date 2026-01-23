@@ -40,12 +40,15 @@ import {
 import { getHistory } from './history.js';
 import { getModeWarning, parseInputMode } from './mode-escape.js';
 import {
-	isMutationKeyword,
-	ParseError,
-	parseMutation,
-	parseNaturalQuery,
-} from './parser.js';
-import { executeMutation, executeQuery } from './query-executor.js';
+	assertResolvedSchemaToGeneratedSchema,
+	buildModelFromSchema,
+	type ModelIR,
+} from '@dbsp/core';
+import {
+	compileNqlToSql,
+	NqlCompileError,
+	NqlParseError,
+} from './nql-executor.js';
 import { ExecutionResultDisplay } from './result-formatter.js';
 import type {
 	AliasingMode,
@@ -264,6 +267,17 @@ function ReplApp({ config }: ReplAppProps) {
 		() => new CompletionProvider(config.schema),
 		[config.schema],
 	);
+
+	// NQL v2: Build ModelIR from schema for NQL compilation
+	const model = useMemo<ModelIR | null>(() => {
+		try {
+			const generatedSchema = assertResolvedSchemaToGeneratedSchema(config.schema);
+			return buildModelFromSchema(generatedSchema);
+		} catch {
+			return null;
+		}
+	}, [config.schema]);
+
 	const [completions, setCompletions] = useState<CompletionSuggestion[]>([]);
 	const [selectedCompletionIndex, setSelectedCompletionIndex] = useState(-1);
 
@@ -1226,129 +1240,80 @@ function ReplApp({ config }: ReplAppProps) {
 					executeOnDb(content, []);
 				}
 			} else {
-				// CLI-MUT: Check if this is a mutation (table keyword ...)
-				const words = content.trim().split(/\s+/);
-				const secondWord = words[1]?.toLowerCase() ?? '';
-				const isMutation = words.length >= 2 && isMutationKeyword(secondWord);
+				// NQL v2: Unified query/mutation handling via @dbsp/nql
+				if (!model) {
+					setQueryResult({
+						sql: '',
+						params: [],
+						error: 'No schema model available for NQL compilation',
+					});
+					return;
+				}
 
-				if (isMutation) {
-					// CLI-MUT: Mutation handling (INSERT/UPDATE/DELETE/UPSERT)
-					try {
-						const parsed = parseMutation(content, config.schema);
-						if (!parsed) {
-							setQueryResult({
-								sql: '',
-								params: [],
-								error: 'Failed to parse mutation',
-							});
-							return;
-						}
-						const result = executeMutation(parsed, config.schema, {
-							aliasingMode,
-							dialect,
-							...(schemaName && { schemaName }),
-						});
+				try {
+					const result = compileNqlToSql(content, model, {
+						dialect: dialect ?? 'postgresql',
+						...(schemaName ? { schemaName } : {}),
+					});
 
-						if (result.error) {
-							setQueryResult({
-								sql: '',
-								params: [],
-								error: result.error,
-							});
-						} else {
-							// Display mutation result with dry-run indicator
-							const planInfo = result.dryRun
-								? 'DRY-RUN (add ! to execute)'
-								: 'EXECUTED';
-							setQueryResult({
-								sql: result.sql,
-								params: result.params,
-								plan: {
-									strategy: `${result.type.toUpperCase()} - ${planInfo}`,
-									tables: [parsed.table],
-									warnings: result.dryRun
-										? ['This is a dry-run. Add ! suffix to execute.']
-										: [],
-								},
-							});
+					// Determine if this is a mutation (for dry-run handling)
+					const isMutation = result.intentType !== 'query';
+					const hasBangSuffix = content.trim().endsWith('!');
+					const isDryRun = isMutation && !hasBangSuffix;
 
-							// Execute if ! suffix was used and connected
-							if (
-								!result.dryRun &&
-								execMode &&
-								connected &&
-								dbConnectionRef.current
-							) {
-								executeOnDb(result.sql, result.params);
-							}
-						}
-					} catch (err) {
-						if (err instanceof ParseError) {
-							setQueryResult({
-								sql: '',
-								params: [],
-								error: err.message,
-							});
-						} else {
-							setQueryResult({
-								sql: '',
-								params: [],
-								error: err instanceof Error ? err.message : String(err),
-							});
-						}
+					// Apply EXPLAIN prefix if explainMode is on (queries only)
+					const finalSql = !isMutation && explainMode
+						? `EXPLAIN ${result.sql}`
+						: result.sql;
+
+					// Build plan info
+					const planInfo = isMutation
+						? isDryRun
+							? 'DRY-RUN (add ! to execute)'
+							: 'EXECUTED'
+						: '';
+
+					setQueryResult({
+						sql: finalSql,
+						params: result.params,
+						plan: {
+							strategy: isMutation
+								? `${result.intentType.toUpperCase()} - ${planInfo}`
+								: 'NQL v2',
+							tables: [],
+							warnings: isDryRun
+								? ['This is a dry-run. Add ! suffix to execute.']
+								: [],
+						},
+					});
+
+					// Execute if appropriate
+					const shouldExecute = isMutation
+						? !isDryRun && execMode && connected && dbConnectionRef.current
+						: execMode && connected && dbConnectionRef.current;
+
+					if (shouldExecute) {
+						executeOnDb(finalSql, result.params);
 					}
-				} else {
-					// Natural query handling (SELECT)
-					try {
-						const parsed = parseNaturalQuery(content, config.schema);
-						const result = executeQuery(parsed, config.schema, {
-							aliasingMode,
-							includeStrategy,
-							dialect,
-							...(schemaName && { schemaName }),
+				} catch (err) {
+					if (err instanceof NqlParseError) {
+						setQueryResult({
+							sql: '',
+							params: [],
+							error: err.message,
 						});
-
-						if (result.error) {
-							setQueryResult({
-								sql: '',
-								params: [],
-								error: result.error,
-								...(parseMode && { parsedQuery: parsed }),
-							});
-						} else {
-							// CLI-NQL: Apply EXPLAIN prefix if explainMode is on
-							const finalSql = explainMode
-								? `EXPLAIN ${result.sql}`
-								: result.sql;
-							setQueryResult({
-								sql: finalSql,
-								params: result.params,
-								...(result.separateQueries && {
-									separateQueries: result.separateQueries,
-								}),
-								plan: result.plan,
-								...(parseMode && { parsedQuery: parsed }),
-							});
-
-							// Execute if in exec mode and connected
-							if (execMode && connected && dbConnectionRef.current) {
-								executeOnDb(finalSql, result.params);
-							}
-						}
-					} catch (err) {
-						if (err instanceof ParseError) {
-							setQueryResult({
-								sql: '',
-								params: [],
-								error: err.message,
-							});
-						} else {
-							setQueryResult({
-								sql: '',
-								params: [],
-								error: err instanceof Error ? err.message : String(err),
-							});
-						}
+					} else if (err instanceof NqlCompileError) {
+						setQueryResult({
+							sql: '',
+							params: [],
+							error: err.message,
+						});
+					} else {
+						setQueryResult({
+							sql: '',
+							params: [],
+							error: err instanceof Error ? err.message : String(err),
+						});
 					}
 				}
 			}

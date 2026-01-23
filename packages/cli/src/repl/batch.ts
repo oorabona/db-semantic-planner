@@ -7,7 +7,12 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { ResolvedSchema } from '@dbsp/core';
+import {
+	type ModelIR,
+	type ResolvedSchema,
+	assertResolvedSchemaToGeneratedSchema,
+	buildModelFromSchema,
+} from '@dbsp/core';
 import {
 	parseAssertionFile,
 	validateAssertionBlocks,
@@ -15,18 +20,13 @@ import {
 import { type AssertionSummary, runAssertions } from './assertion-runner.js';
 import { createDbConnection, type DbConnection } from './db-connection.js';
 import { parseInputMode } from './mode-escape.js';
+// NQL v2: Pure NQL - no legacy parser
 import {
-	isMutationKeyword,
-	parseMutation,
-	parseNaturalQuery,
-} from './parser.js';
-import {
-	executeMutation,
-	executeQuery,
-	formatExecutionResult,
-	formatMutationResult,
-	type QueryExecutionOptions,
-} from './query-executor.js';
+	type NqlCompileOnlyResult,
+	NqlCompileError,
+	NqlParseError,
+	compileNqlToSql,
+} from './nql-executor.js';
 import type { QueryMode } from './types.js';
 
 export interface BatchModeOptions {
@@ -59,6 +59,40 @@ export interface BatchState {
 	explainMode: boolean;
 	/** CLI-NQL: Show parse tree (AST) for queries */
 	parseMode: boolean;
+	/** NQL v2: ModelIR built from schema for NQL compilation */
+	model: ModelIR | undefined;
+}
+
+/**
+ * NQL v2: Convert ResolvedSchema to ModelIR for NQL compilation
+ */
+function buildModelFromResolvedSchema(schema: ResolvedSchema): ModelIR {
+	const generatedSchema = assertResolvedSchemaToGeneratedSchema(schema);
+	return buildModelFromSchema(generatedSchema);
+}
+
+/**
+ * NQL v2: Format NQL compilation result for display
+ */
+function formatNqlResult(result: NqlCompileOnlyResult): string {
+	const lines: string[] = [];
+
+	// Operation type
+	const opType = result.intentType.toUpperCase();
+	lines.push(`[${opType}]`);
+	lines.push('');
+
+	// SQL
+	lines.push('SQL:');
+	lines.push(result.sql);
+
+	// Parameters
+	if (result.params.length > 0) {
+		lines.push('');
+		lines.push(`Parameters: [${result.params.map((p) => JSON.stringify(p)).join(', ')}]`);
+	}
+
+	return lines.join('\n');
 }
 
 /**
@@ -392,33 +426,34 @@ export async function processDotCommand(
 }
 
 /**
- * Execute a natural query
+ * NQL v2: Execute a NQL query (handles both SELECT and mutations)
  */
-async function executeNaturalQuery(
+async function executeNqlQuery(
 	input: string,
-	schema: ResolvedSchema,
 	state: BatchState,
 ): Promise<BatchResult> {
+	// NQL requires ModelIR
+	if (!state.model) {
+		return {
+			query: input,
+			success: false,
+			error: 'No schema model available for NQL compilation',
+			type: 'query',
+		};
+	}
+
 	try {
-		const parsed = parseNaturalQuery(input, schema);
+		// Compile NQL to SQL
+		const result = compileNqlToSql(input, state.model,
+			state.schemaName ? { schemaName: state.schemaName } : undefined
+		);
 
-		// CLI-NQL Block 12: Format parse tree if parseMode is enabled
-		const parseTreeOutput = state.parseMode ? formatParseTree(parsed) : '';
+		// Determine result type for BatchResult
+		const resultType: 'query' | 'mutation' =
+			result.intentType === 'query' ? 'query' : 'mutation';
 
-		const options: QueryExecutionOptions = {};
-		if (state.schemaName) {
-			options.schemaName = state.schemaName;
-		}
-		const result = executeQuery(parsed, schema, options);
-
-		if (result.error) {
-			return {
-				query: input,
-				success: false,
-				error: result.error,
-				type: 'query',
-			};
-		}
+		// Format parse tree if parseMode is enabled
+		const parseTreeOutput = state.parseMode ? formatParseTree(result) : '';
 
 		// If exec mode is enabled and we have a DB connection, execute the query
 		if (state.execEnabled && state.dbConnection) {
@@ -436,7 +471,7 @@ async function executeNaturalQuery(
 						error: `Database error: ${execResult.error}`,
 						sql: result.sql,
 						params: result.params,
-						type: 'query',
+						type: resultType,
 					};
 				}
 
@@ -445,7 +480,7 @@ async function executeNaturalQuery(
 					outputParts.push(parseTreeOutput);
 				}
 				outputParts.push(
-					formatExecutionResult(result),
+					formatNqlResult(result),
 					'',
 					`Rows: ${execResult.rowCount}`,
 					formatRows(execResult.rows, execResult.columns),
@@ -456,7 +491,7 @@ async function executeNaturalQuery(
 					output: outputParts.join('\n'),
 					sql: result.sql,
 					params: result.params,
-					type: 'query',
+					type: resultType,
 				};
 			} catch (execError) {
 				const message =
@@ -467,86 +502,47 @@ async function executeNaturalQuery(
 					error: `Execution error: ${message}`,
 					sql: result.sql,
 					params: result.params,
-					type: 'query',
+					type: resultType,
 				};
 			}
 		}
 
 		// Non-exec mode: return SQL only
 		const dryRunOutput = parseTreeOutput
-			? [parseTreeOutput, formatExecutionResult(result)].join('\n')
-			: formatExecutionResult(result);
+			? [parseTreeOutput, formatNqlResult(result)].join('\n')
+			: formatNqlResult(result);
 		return {
 			query: input,
 			success: true,
 			output: dryRunOutput,
 			sql: result.sql,
 			params: result.params,
-			type: 'query',
+			type: resultType,
 		};
 	} catch (error) {
+		// Handle NQL-specific errors
+		if (error instanceof NqlParseError) {
+			return {
+				query: input,
+				success: false,
+				error: error.message,
+				type: 'query',
+			};
+		}
+		if (error instanceof NqlCompileError) {
+			return {
+				query: input,
+				success: false,
+				error: error.message,
+				type: 'query',
+			};
+		}
 		const message = error instanceof Error ? error.message : String(error);
 		return {
 			query: input,
 			success: false,
 			error: message,
 			type: 'query',
-		};
-	}
-}
-
-/**
- * CLI-MUT: Execute a mutation query (INSERT/UPDATE/DELETE/UPSERT)
- */
-function executeMutationQuery(
-	input: string,
-	schema: ResolvedSchema,
-	state: BatchState,
-): BatchResult {
-	try {
-		const parsed = parseMutation(input, schema);
-		if (!parsed) {
-			return {
-				query: input,
-				success: false,
-				error: 'Failed to parse mutation',
-				type: 'mutation',
-			};
-		}
-
-		const options: QueryExecutionOptions = {};
-		if (state.schemaName) {
-			options.schemaName = state.schemaName;
-		}
-		const result = executeMutation(parsed, schema, options);
-
-		if (result.error) {
-			return {
-				query: input,
-				success: false,
-				error: result.error,
-				type: 'mutation',
-			};
-		}
-
-		// Format the output using formatMutationResult
-		const output = formatMutationResult(result);
-
-		return {
-			query: input,
-			success: true,
-			output,
-			sql: result.sql,
-			params: result.params,
-			type: 'mutation',
-		};
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		return {
-			query: input,
-			success: false,
-			error: message,
-			type: 'mutation',
 		};
 	}
 }
@@ -643,6 +639,9 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 	const { queries, schema, format, databaseUrl, assertFile } = options;
 
 	// Initialize state
+	// NQL v2: Build ModelIR for NQL compilation
+	const model = buildModelFromResolvedSchema(schema);
+
 	const state: BatchState = {
 		mode: 'natural',
 		execEnabled: false,
@@ -650,6 +649,7 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 		dbConnection: undefined,
 		explainMode: false,
 		parseMode: false,
+		model, // NQL v2: ModelIR for compileNqlToSql
 	};
 
 	// Connect to database if URL provided
@@ -740,18 +740,8 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 			// Raw SQL mode
 			result = await executeRawSql(effectiveQuery, state);
 		} else {
-			// CLI-MUT: Check if this is a mutation (table keyword ...)
-			const words = effectiveQuery.trim().split(/\s+/);
-			const secondWord = words[1]?.toLowerCase() ?? '';
-			const isMutation = words.length >= 2 && isMutationKeyword(secondWord);
-
-			if (isMutation) {
-				// CLI-MUT: Mutation handling (INSERT/UPDATE/DELETE/UPSERT)
-				result = executeMutationQuery(effectiveQuery, schema, state);
-			} else {
-				// Natural query mode (SELECT)
-				result = await executeNaturalQuery(effectiveQuery, schema, state);
-			}
+			// NQL v2: Unified execution for queries and mutations
+			result = await executeNqlQuery(effectiveQuery, state);
 		}
 
 		results.push(result);

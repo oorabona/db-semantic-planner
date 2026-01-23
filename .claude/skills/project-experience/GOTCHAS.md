@@ -1097,3 +1097,82 @@ const isBackspace = rawInput === '\x7f' || rawInput === '\x08';
 **Key insight:** Check raw input for `\x1b[3~` FIRST, before any other key handling. The escape sequence is unambiguous.
 
 **Location:** `packages/cli/src/repl/components/EnhancedTextInput.tsx`
+
+---
+
+## External LLM Tools
+
+### Codex Review Requires Minimum 10 Minutes (2026-01-23)
+
+**Issue:** Killing Codex review before it completes loses valuable analysis.
+
+**Cause:** `codex review --commit <sha>` performs deep reasoning with high effort. It explores the codebase, traces dependencies, and analyzes potential bugs thoroughly. This takes time.
+
+**Solution:** Always allow minimum 10 minutes for Codex review to complete:
+```bash
+# Run with generous timeout (10+ min)
+timeout 600 codex review --commit <sha>
+
+# Or run in background and check later
+codex review --commit <sha> &
+```
+
+**Symptoms of premature termination:**
+- Output shows "thinking" blocks but no final summary
+- Analysis loops visible but no conclusion
+
+**Key insight:** Codex's thoroughness is its value. The 3-5 minute mark often shows only exploration, not conclusions. Wait for the full analysis.
+
+---
+
+## NQL Migration
+
+### CLI Dialect Must Map to Adapter Dialect (2026-01-23)
+
+**Issue:** TypeScript error when CLI's `DialectMode` (includes 'duckdb') is passed to `CompileOnlyAdapter` which expects `MockDialect` (postgresql|mysql|sqlite|mssql only).
+
+**Cause:** CLI exposes a broader dialect type to users (DialectMode includes duckdb), but the adapter has a narrower type. This creates a type mismatch at the boundary.
+
+**Solution:** Create a mapping function at the boundary layer:
+```typescript
+// nql-executor.ts
+export type CliDialect = MockDialect | 'duckdb';
+
+function toMockDialect(dialect: CliDialect | undefined): MockDialect {
+  if (dialect === 'duckdb') return 'postgresql';  // DuckDB uses PG-compatible SQL
+  return dialect ?? 'postgresql';
+}
+
+// Usage
+const adapter = createCompileOnlyAdapter({
+  dialect: toMockDialect(options?.dialect),
+});
+```
+
+**Key insight:** When two layers have different type contracts, create an explicit mapping at the boundary. The adapter layer shouldn't know about CLI-specific dialects, and the CLI shouldn't be constrained by adapter internals.
+
+**Location:** `packages/cli/src/repl/nql-executor.ts` lines 241-259
+
+---
+
+### NQL AST Types Are Structurally Compatible But Nominally Different (2026-01-23)
+
+**Issue:** @dbsp/nql's `QueryIntent` and @dbsp/core's `QueryIntent` are structurally identical but TypeScript treats them as different types.
+
+**Cause:** Each package defines its own intent types. While structurally the same, TypeScript's nominal typing prevents direct assignment.
+
+**Solution:** Use type assertion helper functions to bridge the gap:
+```typescript
+// Type compatibility helpers
+function asQueryIntent(intent: NqlQueryIntent): QueryIntent {
+  return intent as unknown as QueryIntent;
+}
+
+function asInsertIntent(intent: NqlMutationIntent): InsertIntent {
+  return intent as unknown as InsertIntent;
+}
+```
+
+**Key insight:** When packages share structural contracts but have separate type definitions, explicit cast functions document the boundary and prevent scattered `as unknown as X` throughout the code.
+
+**Location:** `packages/cli/src/repl/nql-executor.ts` lines 38-56

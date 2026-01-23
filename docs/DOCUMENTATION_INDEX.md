@@ -4,7 +4,7 @@ doc-meta:
   scope: project
   type: reference
   created: 2026-01-06
-  updated: 2026-01-11
+  updated: 2026-01-23
 ---
 
 # Documentation Index
@@ -48,6 +48,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | adapter | `packages/adapter-kysely` | [Overview](plans/adapter-OVERVIEW.md) | [TODO](../TODO_ADAPTER.md) | ✅ Complete |
 | cli | `packages/cli` | [CLI Usage](CLI_USAGE.md) | [TODO](../TODO_CLI.md) | ✅ Complete |
 | mcp-server | `packages/mcp-server` | [Brief](briefs/mcp-server.md) | [TODO](../TODO_MCP.md) | 🟡 Ready |
+| nql | `packages/nql` | [Spec](plans/NQL-SPEC-2026-01.md) | [TODO](../TODO_NQL.md) | ✅ Complete |
 
 **Note:** DX layer (ORM API, filters, query builders) is part of `packages/core/src/dx/` since ARCH-001.
 **Note:** Schema DSL (`defineSchema()`, conventions) is part of `packages/core` since ARCH-002 (merged from former `packages/schema`).
@@ -82,6 +83,9 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | P3-A | [Window Functions](specs/P3-A-window-functions.md) | core, adapter, dx | ✅ canonical |
 | ARCH-002 | [One Ring Architecture](specs/ARCH-002-one-ring.md) | schema, cli, core | ✅ canonical |
 | CLI-NQL | [Natural Query Language v1.0](plans/CLI-NQL-natural-query-language.md) | cli | ✅ canonical |
+| NQL-AUDIT | [NQL Parser Audit & v2.0 Design](plans/NQL-PARSER-AUDIT-2026-01.md) | nql | ✅ canonical |
+| NQL-SPEC | [NQL v2.0 Parser Specification](plans/NQL-SPEC-2026-01.md) | nql | ✅ canonical |
+| NQLM | [NQL CLI Migration](../TODO_NQL_MIGRATION.md) | cli | ✅ complete |
 
 ## Golden Query Tests - ✅ Complete
 

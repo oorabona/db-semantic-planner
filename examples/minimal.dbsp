@@ -5,6 +5,8 @@
 #   pnpm dbsp repl --schema ./examples/minimal.schema.ts \
 #     --db postgresql://postgres:demo@localhost:5432/demo \
 #     --input ./examples/minimal.dbsp
+#
+# NQL v2 Syntax: uses pipes (|) between operators
 
 # =============================================================================
 # Setup: Create isolated schema and load data
@@ -36,34 +38,34 @@ users
 posts
 
 # =============================================================================
-# 1.5 WHERE Clause
+# 1.5 WHERE Clause (NQL v2: pipe before where)
 # =============================================================================
-users where name = 'Alice'
-posts where user_id = 1
-posts where content is null
-posts where user_id = 2
+users | where name = 'Alice'
+posts | where user_id = 1
+posts | where content is null
+posts | where user_id = 2
 
 # =============================================================================
-# 1.6 LIMIT and OFFSET
+# 1.6 LIMIT and OFFSET (NQL v2: pipe before limit/offset)
 # =============================================================================
-posts limit 2
-posts limit 2 offset 2
+posts | limit 2
+posts | limit 2 | offset 2
 
 # =============================================================================
-# 1.7 Mutations (INSERT, UPDATE, DELETE, UPSERT)
+# 1.7 Mutations (NQL v2: SQL-like syntax)
 # =============================================================================
 
 # Insert a new user (dry-run by default)
-users insert name = "Diana", email = "diana@example.com"
+insert into users set name = "Diana", email = "diana@example.com"
 
 # Update a user
-users update set name = "Alice Smith" where id = 1
+update users set name = "Alice Smith" where id = 1
 
 # Delete a post
-posts delete where id = 5
+delete from posts where id = 5
 
-# Upsert - insert or update on conflict
-users upsert name = "Alice", email = "alice@example.com" on email do nothing
+# Upsert - insert or update on conflict (NQL v2: always updates on conflict)
+upsert into users on email set name = "Alice", email = "alice@example.com"
 
-# Upsert with update action
-users upsert name = "Bob", email = "bob@example.com" on email do update set name = "Bob Updated"
+# Upsert with different values
+upsert into users on email set name = "Bob Updated", email = "bob@example.com"

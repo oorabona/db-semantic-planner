@@ -464,6 +464,29 @@ describe('SQL Compiler', () => {
 
 			expect(compiled.sql).toContain('order by');
 		});
+
+		it('should ORDER BY aggregate alias without table prefix (CLI-NQL)', () => {
+			// SELECT productId, COUNT(*) AS salesCount FROM orders GROUP BY productId ORDER BY salesCount DESC
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				select: {
+					type: 'aggregate',
+					fields: ['id'],
+					aggregates: [{ function: 'count', as: 'totalCount' }],
+				},
+				groupBy: ['id'],
+				orderBy: [{ field: 'totalCount', direction: 'desc' }],
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			// The ORDER BY should use "totalCount" not "t0"."totalCount"
+			expect(compiled.sql).toMatch(/order by\s+"totalCount"\s+desc/i);
+			// Should NOT have table prefix for the alias
+			expect(compiled.sql).not.toMatch(/"t0"\."totalCount"/i);
+		});
 	});
 
 	// ============================================================================
@@ -1062,6 +1085,30 @@ describe('SQL Compiler', () => {
 			const compiled = compile(planReport, basicSchema, kysely, 'tenant_abc');
 
 			expect(compiled.sql).toContain('"tenant_abc"."posts"');
+			expect(compiled.sql.toLowerCase()).toContain('group by');
+		});
+
+		it('should GROUP BY relation path with auto-JOIN (CLI-NQL)', () => {
+			// GROUP BY product.categoryId should create a JOIN and use proper alias
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', as: 'postCount' }],
+				},
+				groupBy: ['author.name'],
+			};
+
+			const planReport = plan(intent, basicSchema);
+			const compiled = compile(planReport, basicSchema, kysely);
+
+			// Should contain a LEFT JOIN for the author relation
+			expect(compiled.sql.toLowerCase()).toContain('left join');
+			expect(compiled.sql).toContain('"users"');
+			// GROUP BY should use the joined table alias, not root table
+			// e.g., GROUP BY "t1"."name" not GROUP BY "t0"."author.name"
+			expect(compiled.sql).not.toMatch(/"t0"\."author\.name"/);
 			expect(compiled.sql.toLowerCase()).toContain('group by');
 		});
 	});

@@ -1,5 +1,6 @@
 # Test file for blog schema
 # Aggregate queries from QUICKSTART.md
+# NQL v2 Syntax: uses pipes (|) between operators
 
 # Basic commands
 .tables
@@ -12,14 +13,14 @@ authors
 comments
 
 # Filtered queries
-posts where published = true
-posts include author
+posts | where published = true
+posts | include author
 
 # Aggregate queries (CLI-016)
-posts select count(*)
-posts select count(*) as total_posts
-posts select sum(views) as total_views avg(views) as average
-posts select count(*) as post_count group by authorId
-posts select min(amount) as min_order max(amount) as max_order
-posts select distinct
-posts select count(distinct authorId) as unique_authors
+posts | select count(*)
+posts | select count(*) as total_posts
+posts | select sum(views) as total_views, avg(views) as average
+posts | group by authorId | select count(*) as post_count
+posts | select min(amount) as min_order, max(amount) as max_order
+posts | select distinct
+posts | select count(distinct authorId) as unique_authors
