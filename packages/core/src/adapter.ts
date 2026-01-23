@@ -142,6 +142,7 @@ export interface DumpMeta {
 	readonly schema?: string;
 	readonly queryName?: string;
 	readonly correlationId?: string;
+	readonly compiledAt?: Date;
 }
 
 /**

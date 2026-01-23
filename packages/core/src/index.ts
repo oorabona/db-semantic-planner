@@ -57,6 +57,7 @@ export type {
 	// Operators
 	ArrayOperator,
 	// Expressions
+	AggregateExpressionIntent,
 	CoalesceExpressionIntent,
 	ColumnAliasIntent,
 	ComparisonOperator,

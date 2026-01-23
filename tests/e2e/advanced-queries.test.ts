@@ -12,7 +12,7 @@ import {
 	and,
 	belongsTo,
 	createOrm,
-	defineSchema,
+	defineSchemaBuilder,
 	eq,
 	exists,
 	gt,
@@ -37,7 +37,7 @@ import {
 const SCHEMA = 'advanced_e2e';
 
 // Define the model with all necessary fields
-const advancedModel = defineSchema({
+const advancedModel = defineSchemaBuilder({
 	products: {
 		id: 'integer',
 		name: { type: 'string' },

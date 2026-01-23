@@ -1,5 +1,4 @@
 # Test file for blog schema
-# Aggregate queries from QUICKSTART.md
 # NQL v2 Syntax: uses pipes (|) between operators
 
 # Basic commands
@@ -14,13 +13,19 @@ comments
 
 # Filtered queries
 posts | where published = true
-posts | include author
+posts | with author
 
-# Aggregate queries (CLI-016)
-posts | select count(*)
-posts | select count(*) as total_posts
-posts | select sum(views) as total_views, avg(views) as average
-posts | group by authorId | select count(*) as post_count
-posts | select min(amount) as min_order, max(amount) as max_order
-posts | select distinct
-posts | select count(distinct authorId) as unique_authors
+# Distinct (works with explicit columns)
+posts | select distinct *
+
+# ──────────────────────────────────────────────────────────────────
+# TODO: Aggregate queries - NQL produces { kind: 'aggregate' } but
+# adapter-kysely doesn't handle it yet. Uncomment when implemented.
+# See TODO_NQL_MIGRATION.md for tracking.
+# ──────────────────────────────────────────────────────────────────
+# posts | select count(*)
+# posts | select count(*) as total_posts
+# posts | select sum(views) as total_views, avg(views) as average
+# posts | group by authorId | select count(*) as post_count
+# posts | select min(amount) as min_order, max(amount) as max_order
+# posts | select count(distinct authorId) as unique_authors

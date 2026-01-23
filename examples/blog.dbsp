@@ -47,13 +47,13 @@ comments | where approved = false
 # =============================================================================
 # 2.6 Includes (LEFT JOIN)
 # =============================================================================
-authors | include posts
-posts | include comments
+authors | with posts
+posts | with comments
 
 # =============================================================================
 # 2.7 Many-to-Many Relations (Tags)
 # =============================================================================
-posts | include tags
+posts | with tags
 postTags | group by postId | select count(*)
 
 # =============================================================================

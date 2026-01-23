@@ -5,6 +5,7 @@
 
 import { registerExpressionHandler } from '../../registry.js';
 import type { ExpressionHandler } from '../../types.js';
+import { aggregateHandler } from './aggregate.js';
 import { coalesceHandler } from './coalesce.js';
 import { columnAliasHandler } from './columnAlias.js';
 import { rawHandler } from './raw.js';
@@ -21,6 +22,10 @@ import { windowHandler } from './window.js';
  */
 export function registerExpressionHandlers(): void {
 	// Cast needed: specific handlers have narrower types than the generic registry
+	registerExpressionHandler(
+		'aggregate',
+		aggregateHandler as unknown as ExpressionHandler,
+	);
 	registerExpressionHandler(
 		'coalesce',
 		coalesceHandler as unknown as ExpressionHandler,
@@ -44,6 +49,7 @@ export function registerExpressionHandlers(): void {
 // Re-exports
 // ============================================================================
 
+export { aggregateHandler } from './aggregate.js';
 export { coalesceHandler } from './coalesce.js';
 export { columnAliasHandler } from './columnAlias.js';
 export { rawHandler } from './raw.js';

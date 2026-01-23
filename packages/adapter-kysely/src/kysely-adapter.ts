@@ -338,6 +338,7 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 			params: query.parameters,
 			meta: {
 				...(this.schemaName !== undefined && { schema: this.schemaName }),
+				compiledAt: new Date(),
 				...meta,
 			},
 		};

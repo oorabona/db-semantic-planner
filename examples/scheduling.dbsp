@@ -51,8 +51,8 @@ priceTiers | where productName = 'Widget A' and quantityRange contains 25
 # =============================================================================
 # 4.5 Rooms with Bookings
 # =============================================================================
-rooms | include roomBookings
-rooms | include roomBookings | where bookingPeriod overlaps [2024-01-22,2024-01-29)
+rooms | with roomBookings
+rooms | with roomBookings | where bookingPeriod overlaps [2024-01-22,2024-01-29)
 
 # =============================================================================
 # 4.6 Mutations (NQL v2: SQL-like syntax)

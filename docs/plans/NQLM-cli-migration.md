@@ -159,7 +159,7 @@ Scenario: SC-02 SELECT with aggregation
 @priority:high @type:nominal
 Scenario: SC-03 SELECT with join via include
   Given a schema with "posts" related to "users" via user_id
-  When I execute "posts | include author"
+  When I execute "posts | with author"
   Then I receive posts with nested author objects
 
 @priority:medium @type:edge

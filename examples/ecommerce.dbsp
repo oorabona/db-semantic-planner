@@ -36,9 +36,9 @@ orders
 # =============================================================================
 # 5.4 Complex Relations
 # =============================================================================
-categories | include products | where active = true
-products | include variants | limit 3
-customers | include orders | include orderItems
+categories | with products | where active = true
+products | with variants | limit 3
+customers | with orders | with orderItems
 
 # =============================================================================
 # 5.5 Aggregates on E-Commerce Data

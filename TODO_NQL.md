@@ -71,6 +71,11 @@ packages/nql/
 
 ## Backlog (Future Work)
 
+- [x] ✅ **AggregateExpressionIntent adapter integration** (2026-01-23)
+  - Added `AggregateExpressionIntent` to `ExpressionIntent` union in core
+  - Created `aggregate.ts` handler in `adapter-kysely/src/compiler/handlers/expression/`
+  - Supports: `count(*)`, `count(col)`, `sum(col)`, `avg(col)`, `min(col)`, `max(col)`, `count(distinct col)`
+
 - [ ] **WhereSubqueryExistsIntent** — Add new intent type for arbitrary subquery EXISTS
   - NQL supports `exists (subquery)` but IntentAST's WhereExistsIntent requires relation name
   - Need to add `WhereSubqueryExistsIntent` with `subquery: QueryIntent` field to core

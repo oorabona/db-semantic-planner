@@ -463,6 +463,7 @@ export class CompileOnlyAdapter implements Adapter<unknown> {
 			params: query.parameters as readonly unknown[],
 			meta: {
 				...(this._schemaName !== undefined && { schema: this._schemaName }),
+				compiledAt: new Date(),
 				...meta,
 			},
 		};

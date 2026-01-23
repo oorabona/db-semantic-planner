@@ -38,8 +38,8 @@ comments | limit 10
 # 3.3 Hierarchical Categories (Self-Referential)
 # =============================================================================
 categories | where parentId is null
-categories | include children
-categories | where parentId is null | include children
+categories | with children
+categories | where parentId is null | with children
 
 # =============================================================================
 # 3.4 Featured and Popular Posts
@@ -51,7 +51,7 @@ posts | where featured = true and viewCount > 1500
 # =============================================================================
 # 3.5 Complex Nested Includes
 # =============================================================================
-authors | where active = true | include posts | where published = true | include comments | where approved = true
+authors | where active = true | with posts | where published = true | with comments | where approved = true
 
 # =============================================================================
 # 3.6 ORDER BY
