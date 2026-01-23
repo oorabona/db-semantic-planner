@@ -752,7 +752,8 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 			if (result.success) {
 				console.log(result.output);
 			} else {
-				console.error(`❌ Error: ${result.error}`);
+				// Use error field if set, otherwise output already contains the error message
+				console.error(result.error ? `❌ Error: ${result.error}` : result.output);
 			}
 		}
 	}
