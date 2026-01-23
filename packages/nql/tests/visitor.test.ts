@@ -412,9 +412,7 @@ describe('NQL Visitor - Edge Cases', () => {
 
 	// Bug fix tests: operator order preservation
 	it('preserves mixed +/- operator order (price - discount + tax)', () => {
-		const ast = parseToAst(
-			'products | select price - discount + tax as total',
-		);
+		const ast = parseToAst('products | select price - discount + tax as total');
 		const query = ast.statements[0] as NqlQuery;
 		const selectClause = query.clauses[0] as NqlSelectClause;
 		const item = selectClause.items[0] as NqlSelectExpression;

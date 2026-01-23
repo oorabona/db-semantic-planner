@@ -22,6 +22,7 @@ import type {
 	WhereNullIntent,
 	WhereOrIntent,
 	WhereRangeIntent,
+	WhereRangeOpIntent,
 } from '../src/compiler/index.js';
 import { compile } from '../src/index.js';
 
@@ -326,7 +327,9 @@ describe('NQL Compiler - JOIN (WITH) Clauses', () => {
 	});
 
 	it('compiles join with via AND on condition (regression: bug 3)', () => {
-		const result = compileNql('orders | with user via created_by on user.active = true');
+		const result = compileNql(
+			'orders | with user via created_by on user.active = true',
+		);
 		const query = result.query!;
 
 		expect(query.include).toHaveLength(1);
@@ -704,9 +707,90 @@ describe('NQL Compiler - Bug Fixes', () => {
 	// P2 Fix: EXISTS gives clear error (error comes from visitor before compiler)
 	it('gives clear error for EXISTS subquery', () => {
 		// Arrange: NQL query with EXISTS subquery (not yet supported)
-		const nql = 'users | where exists (orders | where orders.user_id = users.id)';
+		const nql =
+			'users | where exists (orders | where orders.user_id = users.id)';
 
 		// Act & Assert: compilation throws with clear error message
 		expect(() => compileNql(nql)).toThrow(/subquery/i);
+	});
+});
+
+// Range operators tests (PostgreSQL range types)
+describe('NQL Compiler - Range Operators', () => {
+	it('compiles overlaps with range literal', () => {
+		// Arrange: NQL query with overlaps operator
+		const nql = 'bookings | where period overlaps [2024-01-01,2024-01-31]';
+
+		// Act: compile to IntentAST
+		const result = compileNql(nql);
+		const query = result.query!;
+		const where = query.where as WhereRangeOpIntent;
+
+		// Assert: range operator is correctly compiled
+		expect(where.kind).toBe('rangeOp');
+		expect(where.field).toBe('period');
+		expect(where.operator).toBe('overlaps');
+		expect(where.value).toBe('[2024-01-01,2024-01-31]');
+	});
+
+	it('compiles contains with range literal', () => {
+		// Arrange: NQL query with contains operator
+		const nql = 'events | where dateRange contains [2024-06-15,2024-06-15]';
+
+		// Act: compile to IntentAST
+		const result = compileNql(nql);
+		const query = result.query!;
+		const where = query.where as WhereRangeOpIntent;
+
+		// Assert: range operator is correctly compiled
+		expect(where.kind).toBe('rangeOp');
+		expect(where.field).toBe('dateRange');
+		expect(where.operator).toBe('contains');
+		expect(where.value).toBe('[2024-06-15,2024-06-15]');
+	});
+
+	it('compiles containedBy with range literal', () => {
+		// Arrange: NQL query with containedBy operator
+		const nql = 'sessions | where activeHours containedBy [08:00,18:00)';
+
+		// Act: compile to IntentAST
+		const result = compileNql(nql);
+		const query = result.query!;
+		const where = query.where as WhereRangeOpIntent;
+
+		// Assert: range operator is correctly compiled
+		expect(where.kind).toBe('rangeOp');
+		expect(where.field).toBe('activeHours');
+		expect(where.operator).toBe('containedBy');
+		expect(where.value).toBe('[08:00,18:00)');
+	});
+
+	it('compiles range operators with exclusive bounds', () => {
+		// Arrange: NQL query with exclusive bounds notation
+		const nql = 'prices | where validRange overlaps (100,200)';
+
+		// Act: compile to IntentAST
+		const result = compileNql(nql);
+		const query = result.query!;
+		const where = query.where as WhereRangeOpIntent;
+
+		// Assert: range literal with exclusive bounds is preserved
+		expect(where.kind).toBe('rangeOp');
+		expect(where.operator).toBe('overlaps');
+		expect(where.value).toBe('(100,200)');
+	});
+
+	it('compiles range operator with mixed bounds', () => {
+		// Arrange: NQL query with mixed bounds [inclusive, exclusive)
+		const nql = 'inventory | where stockLevel contains [0,100)';
+
+		// Act: compile to IntentAST
+		const result = compileNql(nql);
+		const query = result.query!;
+		const where = query.where as WhereRangeOpIntent;
+
+		// Assert: mixed bounds are preserved
+		expect(where.kind).toBe('rangeOp');
+		expect(where.value).toBe('[0,100)');
 	});
 });

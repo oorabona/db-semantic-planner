@@ -24,9 +24,11 @@ import type {
 	NqlOrderItem,
 	NqlProgram,
 	NqlQuery,
+	NqlRangeLiteral,
 	NqlSelectItem,
 	NqlStatement,
 	NqlSubquery,
+	NqlWindowExpression,
 } from '../parser/ast.js';
 import { nqlParser } from '../parser/grammar.js';
 
@@ -503,6 +505,10 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		if (ctx.LessThanOrEqual) return '<=';
 		if (ctx.GreaterThanOrEqual) return '>=';
 		if (ctx.Like) return 'like';
+		// Range operators (PostgreSQL)
+		if (ctx.Overlaps) return 'overlaps';
+		if (ctx.Contains) return 'contains';
+		if (ctx.ContainedBy) return 'containedBy';
 		throw new Error('Unknown comparison operator');
 	}
 
@@ -661,9 +667,25 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		return { type: 'path', segments };
 	}
 
-	funcCall(ctx: CstContext): NqlFunctionCall {
-		if (!ctx.identSegment) throw new Error('Function call missing name');
-		const name = this.visit(asCstNode(ctx.identSegment[0]));
+	funcCall(ctx: CstContext): NqlFunctionCall | NqlWindowExpression {
+		// Get function name - either from window function keywords or identSegment
+		let name: string;
+		if (ctx.RowNumber) {
+			name = 'row_number';
+		} else if (ctx.Rank) {
+			name = 'rank';
+		} else if (ctx.DenseRank) {
+			name = 'dense_rank';
+		} else if (ctx.Lag) {
+			name = 'lag';
+		} else if (ctx.Lead) {
+			name = 'lead';
+		} else if (ctx.identSegment) {
+			name = this.visit(asCstNode(ctx.identSegment[0]));
+		} else {
+			throw new Error('Function call missing name');
+		}
+
 		const args: NqlExpression[] = [];
 
 		// count(*)
@@ -676,7 +698,58 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			args.push(...argList);
 		}
 
+		// If there's a windowClause, return NqlWindowExpression
+		if (ctx.windowClause) {
+			const windowSpec = this.visit(asCstNode(ctx.windowClause[0])) as {
+				partitionBy: NqlExpression[];
+				orderBy: NqlOrderItem[];
+			};
+			return {
+				type: 'window',
+				function: name,
+				args,
+				partitionBy: windowSpec.partitionBy,
+				orderBy: windowSpec.orderBy,
+			};
+		}
+
 		return { type: 'function', name, args };
+	}
+
+	windowClause(ctx: CstContext): {
+		partitionBy: NqlExpression[];
+		orderBy: NqlOrderItem[];
+	} {
+		let partitionBy: NqlExpression[] = [];
+		let orderBy: NqlOrderItem[] = [];
+
+		if (ctx.partitionClause) {
+			partitionBy = this.visit(
+				asCstNode(ctx.partitionClause[0]),
+			) as NqlExpression[];
+		}
+
+		if (ctx.orderClauseInWindow) {
+			orderBy = this.visit(
+				asCstNode(ctx.orderClauseInWindow[0]),
+			) as NqlOrderItem[];
+		}
+
+		return { partitionBy, orderBy };
+	}
+
+	partitionClause(ctx: CstContext): NqlExpression[] {
+		if (ctx.exprList) {
+			return this.visit(asCstNode(ctx.exprList[0])) as NqlExpression[];
+		}
+		return [];
+	}
+
+	orderClauseInWindow(ctx: CstContext): NqlOrderItem[] {
+		if (ctx.orderList) {
+			return this.visit(asCstNode(ctx.orderList[0])) as NqlOrderItem[];
+		}
+		return [];
 	}
 
 	funcArgList(ctx: CstContext): NqlExpression[] {
@@ -733,7 +806,31 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		if (ctx.Null) {
 			return { type: 'null' };
 		}
+		if (ctx.RangeLiteral) {
+			return this.parseRangeLiteral(getImage(ctx.RangeLiteral[0]));
+		}
 		throw new Error('Invalid literal');
+	}
+
+	/**
+	 * Parse PostgreSQL range literal: [2024-01-01,2024-12-31) or (1,100]
+	 */
+	private parseRangeLiteral(raw: string): NqlRangeLiteral {
+		const lowerInclusive = raw[0] === '[';
+		const upperInclusive = raw[raw.length - 1] === ']';
+		// Extract the inner part: value,value
+		const inner = raw.slice(1, -1);
+		const commaIndex = inner.indexOf(',');
+		const lower = inner.slice(0, commaIndex).trim();
+		const upper = inner.slice(commaIndex + 1).trim();
+		return {
+			type: 'rangeLiteral',
+			value: raw,
+			lowerInclusive,
+			upperInclusive,
+			lower,
+			upper,
+		};
 	}
 
 	// ============================================================

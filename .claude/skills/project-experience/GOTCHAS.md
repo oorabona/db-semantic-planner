@@ -1176,3 +1176,25 @@ function asInsertIntent(intent: NqlMutationIntent): InsertIntent {
 **Key insight:** When packages share structural contracts but have separate type definitions, explicit cast functions document the boundary and prevent scattered `as unknown as X` throughout the code.
 
 **Location:** `packages/cli/src/repl/nql-executor.ts` lines 38-56
+
+---
+
+### Chevrotain Lexer Token Regex Must Be Carefully Ordered and Scoped (2026-01-23)
+
+**Issue:** Adding a `RangeLiteral` token with regex `/[[(]-?[\w.:-]+\s*,\s*-?[\w.:-]+[\])]/` caused UPSERT `ON (col1, col2)` to fail parsing.
+
+**Cause:** The regex matched identifier lists like `(user_id, event_type)` because:
+1. `[[(]` matches `(`
+2. `[\w.:-]+` matches identifiers (letters, underscores)
+3. The pattern is too greedy for what should only match range literals
+
+**Solution:** Use lookahead to ensure values start with digits:
+```regex
+/[[(](?=\d|-?\d)(?:-?\d[\w.:-]*)\s*,\s*(?:-?\d[\w.:-]*)[\])]/
+```
+
+The `(?=\d|-?\d)` lookahead ensures the first character after the bracket is a digit, which range literals have (dates start with year, times start with hour, numbers start with digit) but identifiers don't.
+
+**Key insight:** When adding tokens that use common delimiters like parentheses, brackets, or commas, ensure the regex won't match unrelated grammar constructs. Use lookahead/lookbehind to scope precisely.
+
+**Location:** `packages/nql/src/lexer/tokens.ts` line 77-80

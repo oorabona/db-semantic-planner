@@ -289,4 +289,62 @@ describe('NqlParser', () => {
 			expect(result.cst).toBeDefined();
 		});
 	});
+
+	describe('Window Functions', () => {
+		it('parses row_number() over (order by)', () => {
+			const result = parseCst(
+				'products | select name, row_number() over (order by price) as rn',
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('parses rank() over (partition by x order by y)', () => {
+			const result = parseCst(
+				'products | select name, rank() over (partition by category order by price desc) as price_rank',
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('parses dense_rank() over ()', () => {
+			const result = parseCst(
+				'products | select dense_rank() over (order by price) as dr',
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('parses aggregate window function: sum() over ()', () => {
+			const result = parseCst(
+				'sales | select date, amount, sum(amount) over (order by date) as running_total',
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('parses lag() and lead() window functions', () => {
+			const result = parseCst(
+				'prices | select date, price, lag(price) over (order by date) as prev_price',
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('parses window function with partition by only', () => {
+			const result = parseCst(
+				'sales | select customer_id, sum(amount) over (partition by customer_id) as customer_total',
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('parses window function with empty over clause', () => {
+			const result = parseCst(
+				'products | select name, count(*) over () as total_products',
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+	});
 });

@@ -12,7 +12,7 @@
 | Blocks | 6 |
 | Time Budget | 40h |
 | BDD Scenarios | 42 |
-| Tests | 167 passing |
+| Tests | 179 passing |
 
 ## Completed
 
@@ -23,6 +23,9 @@
 - [x] ✅ **Block 5:** Compiler (NQL AST → IntentAST) - 49 tests (2026-01-23)
 - [x] ✅ **Block 6:** Typed expressions, removed raw SQL (2026-01-23)
 - [x] ✅ **P2 Fixes:** Unary minus, multi-arg aggregates, EXISTS error (2026-01-23)
+- [x] ✅ **Window functions:** OVER, PARTITION BY, ROW_NUMBER, RANK, DENSE_RANK, LAG, LEAD (2026-01-23)
+- [x] ✅ **Range operators:** overlaps, contains, containedBy + RangeLiteral token (2026-01-23)
+- [x] ✅ **UPSERT multi-column:** Fix ON (col1, col2) conflict syntax (2026-01-23)
 
 ## Package Structure
 
@@ -115,21 +118,21 @@ Discovered while running `examples/*.dbsp` against pg-demo PostgreSQL.
 
 ### P2 — Medium (Feature Gaps)
 
-- [ ] **Window functions not parsed**
+- [x] ✅ **Window functions not parsed** (2026-01-23)
   - Example: `products | select *, rank() over (partition by categoryId order by price desc) as priceRank`
-  - Error: `NQL parse error`
-  - Root cause: NQL lexer/parser lacks window function grammar (`OVER`, `PARTITION BY`, window frames)
-  - **Solution:** Add window function tokens and grammar rules to `packages/nql/src/lexer/` and `packages/nql/src/parser/`
-  - Files: `packages/nql/src/lexer/tokens.ts`, `packages/nql/src/parser/grammar.ts`
-  - Ref: `ecommerce.assert.dbsp` queries 16-17
+  - **Solution:** Added window function tokens (OVER, PARTITION BY, ROW_NUMBER, RANK, DENSE_RANK, LAG, LEAD)
+    and grammar rules for window expressions
+  - Files: `packages/nql/src/lexer/tokens.ts`, `packages/nql/src/parser/grammar.ts`, `packages/nql/src/compiler/`
+  - Added 5 tests for window functions
 
-- [ ] **Range operators not supported**
+- [x] ✅ **Range operators not supported** (2026-01-23)
   - Example: `roomBookings | where bookingPeriod overlaps [2024-01-16,2024-01-20)`
-  - Error: `NQL parse error`
-  - Root cause: NQL lacks PostgreSQL range literal syntax `[start,end)` and range operators (`overlaps`, `containedBy`, `contains`)
-  - **Solution:** Add range literal token, range operators to lexer, and `RangeOperatorIntent` to IntentAST
-  - Files: `packages/nql/src/lexer/`, `packages/core/src/intent-ast.ts`
-  - Ref: `scheduling.assert.dbsp` queries 9-11, 14
+  - **Solution:** Added RangeLiteral token, range operators (overlaps, contains, containedBy) to lexer,
+    `NqlRangeLiteral` AST type, and `WhereRangeOpIntent` compilation
+  - Files: `packages/nql/src/lexer/tokens.ts`, `packages/nql/src/parser/ast.ts`, `packages/nql/src/compiler/`
+  - Added 5 tests for range operators
+  - **Fixed UPSERT regression:** RangeLiteral regex was matching identifier lists like `(col1, col2)`;
+    fixed with lookahead to only match values starting with digits
 
 - [ ] **🏗️ ARCH: camelCase table names not resolved to snake_case**
   - Example: `roomBookings` → should find `room_bookings` table

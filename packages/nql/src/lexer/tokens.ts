@@ -35,6 +35,10 @@ export const OrderBy = createToken({
 	name: 'OrderBy',
 	pattern: /order\s+by\b/i,
 });
+export const PartitionBy = createToken({
+	name: 'PartitionBy',
+	pattern: /partition\s+by\b/i,
+});
 export const Limit = createToken({ name: 'Limit', pattern: /limit\b/i });
 export const Offset = createToken({ name: 'Offset', pattern: /offset\b/i });
 export const Distinct = createToken({
@@ -58,6 +62,30 @@ export const Into = createToken({ name: 'Into', pattern: /into\b/i });
 export const In = createToken({ name: 'In', pattern: /in\b/i });
 export const Between = createToken({ name: 'Between', pattern: /between\b/i });
 export const Like = createToken({ name: 'Like', pattern: /like\b/i });
+
+// Range operators (PostgreSQL)
+export const Overlaps = createToken({
+	name: 'Overlaps',
+	pattern: /overlaps\b/i,
+});
+export const Contains = createToken({
+	name: 'Contains',
+	pattern: /contains\b/i,
+});
+export const ContainedBy = createToken({
+	name: 'ContainedBy',
+	pattern: /containedBy\b/i,
+});
+
+// Range literal: [value,value) or (value,value] etc.
+// Matches PostgreSQL range syntax: [inclusive/exclusive bounds with date or number values
+// Supports: dates (2024-01-01), times (08:00), numbers, timestamps (2024-01-01T08:00)
+// IMPORTANT: Must NOT match identifier lists like (col1, col2) used in UPSERT ON clause
+// Uses lookahead to ensure values start with digit or are date-like (YYYY-)
+export const RangeLiteral = createToken({
+	name: 'RangeLiteral',
+	pattern: /[[(](?=\d|-?\d)(?:-?\d[\w.:-]*)\s*,\s*(?:-?\d[\w.:-]*)[\])]/,
+});
 export const Is = createToken({ name: 'Is', pattern: /is\b/i });
 export const Exists = createToken({ name: 'Exists', pattern: /exists\b/i });
 
@@ -75,6 +103,20 @@ export const Null = createToken({ name: 'Null', pattern: /null\b/i });
 
 // Sort direction
 export const Desc = createToken({ name: 'Desc', pattern: /desc\b/i });
+
+// Window functions
+export const Over = createToken({ name: 'Over', pattern: /over\b/i });
+export const RowNumber = createToken({
+	name: 'RowNumber',
+	pattern: /row_number\b/i,
+});
+export const Rank = createToken({ name: 'Rank', pattern: /rank\b/i });
+export const DenseRank = createToken({
+	name: 'DenseRank',
+	pattern: /dense_rank\b/i,
+});
+export const Lag = createToken({ name: 'Lag', pattern: /lag\b/i });
+export const Lead = createToken({ name: 'Lead', pattern: /lead\b/i });
 
 // ============================================================
 // IDENTIFIERS & LITERALS
@@ -149,6 +191,7 @@ export const allTokens = [
 	// Multi-word keywords (must come first)
 	GroupBy,
 	OrderBy,
+	PartitionBy,
 
 	// Keywords (before Identifier!)
 	// IMPORTANT: Order matters for prefix conflicts!
@@ -174,6 +217,9 @@ export const allTokens = [
 	In,
 	Between,
 	Like,
+	Overlaps,
+	ContainedBy, // Must come before Contains (prefix)
+	Contains,
 	Is,
 	Exists,
 	Update,
@@ -185,6 +231,15 @@ export const allTokens = [
 	False,
 	Null,
 	Desc,
+	Over,
+	RowNumber,
+	DenseRank, // Must come before Rank (prefix)
+	Rank,
+	Lag,
+	Lead,
+
+	// Range literal (must come before identifiers and brackets)
+	RangeLiteral,
 
 	// Identifiers & literals
 	Identifier,

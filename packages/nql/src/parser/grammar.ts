@@ -15,7 +15,10 @@ import {
 	Bind,
 	Colon,
 	Comma,
+	ContainedBy,
+	Contains,
 	Delete,
+	DenseRank,
 	Desc,
 	Distinct,
 	Dot,
@@ -32,6 +35,8 @@ import {
 	Insert,
 	Into,
 	Is,
+	Lag,
+	Lead,
 	LessThan,
 	LessThanOrEqual,
 	Let,
@@ -48,11 +53,17 @@ import {
 	On,
 	Or,
 	OrderBy,
+	Over,
+	Overlaps,
+	PartitionBy,
 	Percent,
 	// Operators & Punctuation
 	Pipe,
 	Plus,
 	QuotedIdentifier,
+	RangeLiteral,
+	Rank,
+	RowNumber,
 	RParen,
 	// Keywords
 	Select,
@@ -490,6 +501,10 @@ export class NqlParser extends CstParser {
 			{ ALT: () => this.CONSUME(LessThanOrEqual) },
 			{ ALT: () => this.CONSUME(GreaterThanOrEqual) },
 			{ ALT: () => this.CONSUME(Like) },
+			// Range operators (PostgreSQL)
+			{ ALT: () => this.CONSUME(Overlaps) },
+			{ ALT: () => this.CONSUME(Contains) },
+			{ ALT: () => this.CONSUME(ContainedBy) },
 		]);
 	});
 
@@ -655,11 +670,16 @@ export class NqlParser extends CstParser {
 		this.OR([
 			// Literal
 			{ ALT: () => this.SUBRULE(this.literal) },
-			// Function call: ident(...)
+			// Function call: ident(...) or window function keyword(...)
 			{
 				GATE: () =>
 					(this.LA(1).tokenType === Identifier ||
-						this.LA(1).tokenType === QuotedIdentifier) &&
+						this.LA(1).tokenType === QuotedIdentifier ||
+						this.LA(1).tokenType === RowNumber ||
+						this.LA(1).tokenType === Rank ||
+						this.LA(1).tokenType === DenseRank ||
+						this.LA(1).tokenType === Lag ||
+						this.LA(1).tokenType === Lead) &&
 					this.LA(2).tokenType === LParen,
 				ALT: () => this.SUBRULE(this.funcCall),
 			},
@@ -729,13 +749,53 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * func_call = IDENT "(" [ expr_list ] ")" ;
+	 * func_call = ( window_func | IDENT ) "(" [ func_arg_list ] ")" [ window_clause ] ;
+	 * window_func = "row_number" | "rank" | "dense_rank" | "lag" | "lead" ;
+	 * Regular functions can also have OVER (e.g., sum(x) OVER (...))
 	 */
 	private funcCall = this.RULE('funcCall', () => {
-		this.SUBRULE(this.identSegment);
+		// Window function keyword or regular identifier
+		this.OR([
+			{ ALT: () => this.CONSUME(RowNumber) },
+			{ ALT: () => this.CONSUME(Rank) },
+			{ ALT: () => this.CONSUME(DenseRank) },
+			{ ALT: () => this.CONSUME(Lag) },
+			{ ALT: () => this.CONSUME(Lead) },
+			{ ALT: () => this.SUBRULE(this.identSegment) },
+		]);
 		this.CONSUME(LParen);
 		this.OPTION(() => this.SUBRULE(this.funcArgList));
 		this.CONSUME(RParen);
+		// Optional OVER clause (makes it a window function)
+		this.OPTION2(() => this.SUBRULE(this.windowClause));
+	});
+
+	/**
+	 * window_clause = "over" "(" [ partition_clause ] [ order_clause_in_window ] ")" ;
+	 */
+	private windowClause = this.RULE('windowClause', () => {
+		this.CONSUME(Over);
+		this.CONSUME(LParen);
+		this.OPTION(() => this.SUBRULE(this.partitionClause));
+		this.OPTION2(() => this.SUBRULE(this.orderClauseInWindow));
+		this.CONSUME(RParen);
+	});
+
+	/**
+	 * partition_clause = "partition" "by" expr_list ;
+	 */
+	private partitionClause = this.RULE('partitionClause', () => {
+		this.CONSUME(PartitionBy);
+		this.SUBRULE(this.exprList);
+	});
+
+	/**
+	 * order_clause_in_window = "order" "by" order_list ;
+	 * Same as orderClause but separate rule for clarity
+	 */
+	private orderClauseInWindow = this.RULE('orderClauseInWindow', () => {
+		this.CONSUME(OrderBy);
+		this.SUBRULE(this.orderList);
 	});
 
 	/**
@@ -786,6 +846,8 @@ export class NqlParser extends CstParser {
 			{ ALT: () => this.CONSUME(True) },
 			{ ALT: () => this.CONSUME(False) },
 			{ ALT: () => this.CONSUME(Null) },
+			// PostgreSQL range literal: [value,value) or (value,value]
+			{ ALT: () => this.CONSUME(RangeLiteral) },
 		]);
 	});
 

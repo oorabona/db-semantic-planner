@@ -176,6 +176,7 @@ export type NqlExpression =
 	| NqlIsNullExpression
 	| NqlExistsExpression
 	| NqlFunctionCall
+	| NqlWindowExpression
 	| NqlPathExpression
 	| NqlLiteral
 	| NqlSubquery
@@ -196,7 +197,17 @@ export interface NqlUnaryExpression {
 
 export interface NqlComparisonExpression {
 	type: 'comparison';
-	operator: '=' | '!=' | '<' | '>' | '<=' | '>=' | 'like';
+	operator:
+		| '='
+		| '!='
+		| '<'
+		| '>'
+		| '<='
+		| '>='
+		| 'like'
+		| 'overlaps'
+		| 'contains'
+		| 'containedBy';
 	left: NqlExpression;
 	right: NqlExpression;
 }
@@ -237,7 +248,17 @@ export interface NqlFunctionCall {
 	type: 'function';
 	name: string;
 	args: NqlExpression[];
-	// Note: Window functions (OVER clause) deferred to v2.1
+}
+
+/**
+ * Window expression: function OVER (PARTITION BY ... ORDER BY ...)
+ */
+export interface NqlWindowExpression {
+	type: 'window';
+	function: string; // rank, dense_rank, row_number, lag, lead, or aggregate name
+	args: NqlExpression[]; // function arguments (e.g., field for sum(), offset for lag())
+	partitionBy: NqlExpression[];
+	orderBy: NqlOrderItem[];
 }
 
 export interface NqlPathExpression {
@@ -267,7 +288,8 @@ export type NqlLiteral =
 	| NqlNumberLiteral
 	| NqlBooleanLiteral
 	| NqlNullLiteral
-	| NqlDateRangeLiteral;
+	| NqlDateRangeLiteral
+	| NqlRangeLiteral;
 
 export interface NqlStringLiteral {
 	type: 'string';
@@ -295,6 +317,19 @@ export interface NqlNullLiteral {
 export interface NqlDateRangeLiteral {
 	type: 'dateRange';
 	value: string;
+}
+
+/**
+ * PostgreSQL range literal (e.g., '[2024-01-01,2024-12-31)')
+ * Used with range operators: overlaps, contains, containedBy
+ */
+export interface NqlRangeLiteral {
+	type: 'rangeLiteral';
+	value: string;
+	lowerInclusive: boolean;
+	upperInclusive: boolean;
+	lower: string;
+	upper: string;
 }
 
 // ============================================================
@@ -354,7 +389,12 @@ export function isMutation(node: unknown): node is NqlMutation {
 }
 
 export function isLiteral(expr: NqlExpression): expr is NqlLiteral {
-	return ['string', 'number', 'boolean', 'null', 'dateRange'].includes(
-		expr.type,
-	);
+	return [
+		'string',
+		'number',
+		'boolean',
+		'null',
+		'dateRange',
+		'rangeLiteral',
+	].includes(expr.type);
 }
