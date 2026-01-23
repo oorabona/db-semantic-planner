@@ -502,5 +502,405 @@ describe('assertion-runner', () => {
 				expect(summary.failed).toBe(1);
 			});
 		});
+
+		// ============================================================
+		// NEW TYPED ASSERTIONS (CLI-ASSERT)
+		// ============================================================
+
+		describe('sql.table (logical/physical naming)', () => {
+			it('matches snake_case table name from camelCase', () => {
+				const results = [
+					createResult({
+						sql: 'SELECT * FROM "product_images" WHERE id = $1',
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [
+							{ type: 'sql.table', value: 'productImages', line: 2 },
+						],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query']);
+				expect(summary.passed).toBe(1);
+				expect(summary.failed).toBe(0);
+			});
+
+			it('matches table name with schema prefix', () => {
+				const results = [
+					createResult({
+						sql: 'SELECT * FROM "ch6_pimdam"."product_images"',
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [
+							{ type: 'sql.table', value: 'productImages', line: 2 },
+						],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query']);
+				expect(summary.passed).toBe(1);
+			});
+
+			it('is case insensitive', () => {
+				const results = [
+					createResult({
+						sql: 'SELECT * FROM PRODUCTIMAGES',
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [
+							{ type: 'sql.table', value: 'ProductImages', line: 2 },
+						],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query']);
+				expect(summary.passed).toBe(1);
+			});
+
+			it('fails when table not found', () => {
+				const results = [
+					createResult({
+						sql: 'SELECT * FROM users',
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [{ type: 'sql.table', value: 'posts', line: 2 }],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query']);
+				expect(summary.failed).toBe(1);
+			});
+		});
+
+		describe('sql.column', () => {
+			it('matches column name with snake_case conversion', () => {
+				const results = [
+					createResult({
+						sql: 'SELECT created_at FROM users',
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [{ type: 'sql.column', value: 'createdAt', line: 2 }],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query']);
+				expect(summary.passed).toBe(1);
+			});
+		});
+
+		describe('sql.join', () => {
+			it('verifies JOIN with table name', () => {
+				const results = [
+					createResult({
+						sql: 'SELECT * FROM posts INNER JOIN users ON posts.user_id = users.id',
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [{ type: 'sql.join', value: 'users', line: 2 }],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query']);
+				expect(summary.passed).toBe(1);
+			});
+
+			it('fails when JOIN not found', () => {
+				const results = [
+					createResult({
+						sql: 'SELECT * FROM posts WHERE id = 1',
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [{ type: 'sql.join', value: 'users', line: 2 }],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query']);
+				expect(summary.failed).toBe(1);
+			});
+		});
+
+		describe('params.type', () => {
+			it('validates primitive types correctly', () => {
+				const results = [
+					createResult({
+						params: ['hello', 42, true],
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [
+							{
+								type: 'params.type',
+								value: ['string', 'number', 'boolean'],
+								line: 2,
+							},
+						],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query']);
+				expect(summary.passed).toBe(1);
+			});
+
+			it('detects object where primitive expected', () => {
+				const results = [
+					createResult({
+						params: [{ $ref: 'value' }, 42],
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [
+							{ type: 'params.type', value: ['string', 'number'], line: 2 },
+						],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query']);
+				expect(summary.failed).toBe(1);
+				expect(summary.results[0].assertions[0].message).toContain('object');
+			});
+
+			it('handles null type', () => {
+				const results = [
+					createResult({
+						params: ['hello', null],
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [
+							{ type: 'params.type', value: ['string', 'null'], line: 2 },
+						],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query']);
+				expect(summary.passed).toBe(1);
+			});
+		});
+
+		describe('params.value', () => {
+			it('validates specific param by index', () => {
+				const results = [
+					createResult({
+						params: ['test', 42, true],
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [
+							{ type: 'params.value', value: { index: 1, value: 42 }, line: 2 },
+						],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query']);
+				expect(summary.passed).toBe(1);
+			});
+		});
+
+		describe('db.* assertions with hasDb flag', () => {
+			it('skips db.* assertions when hasDb=false', () => {
+				const results = [
+					createResult({
+						rowCount: 5,
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [{ type: 'db.rows.equals', value: 5, line: 2 }],
+					}),
+				];
+
+				// hasDb = false (default)
+				const summary = runAssertions(blocks, results, ['query'], false);
+				expect(summary.skipped).toBe(1);
+				expect(summary.passed).toBe(0);
+				expect(summary.failed).toBe(0);
+				expect(summary.results[0].assertions[0].skipped).toBe(true);
+				expect(summary.results[0].assertions[0].skipReason).toContain(
+					'dry-run',
+				);
+			});
+
+			it('runs db.* assertions when hasDb=true', () => {
+				const results = [
+					createResult({
+						rowCount: 5,
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [{ type: 'db.rows.equals', value: 5, line: 2 }],
+					}),
+				];
+
+				// hasDb = true
+				const summary = runAssertions(blocks, results, ['query'], true);
+				expect(summary.skipped).toBe(0);
+				expect(summary.passed).toBe(1);
+			});
+
+			it('fails db.rows.equals on count mismatch', () => {
+				const results = [
+					createResult({
+						rowCount: 3,
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [{ type: 'db.rows.equals', value: 5, line: 2 }],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query'], true);
+				expect(summary.failed).toBe(1);
+				expect(summary.results[0].assertions[0].message).toBe(
+					'Expected 5 rows, got 3',
+				);
+			});
+
+			it('validates db.rows.min correctly', () => {
+				const results = [
+					createResult({
+						rowCount: 5,
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [{ type: 'db.rows.min', value: 3, line: 2 }],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query'], true);
+				expect(summary.passed).toBe(1);
+			});
+
+			it('fails db.rows.min below threshold', () => {
+				const results = [
+					createResult({
+						rowCount: 1,
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [{ type: 'db.rows.min', value: 3, line: 2 }],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query'], true);
+				expect(summary.failed).toBe(1);
+				expect(summary.results[0].assertions[0].message).toBe(
+					'Expected at least 3 rows, got 1',
+				);
+			});
+
+			it('validates db.rows.max correctly', () => {
+				const results = [
+					createResult({
+						rowCount: 2,
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [{ type: 'db.rows.max', value: 5, line: 2 }],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query'], true);
+				expect(summary.passed).toBe(1);
+			});
+
+			it('handles db.rows.equals with zero rows', () => {
+				const results = [
+					createResult({
+						rowCount: 0,
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [{ type: 'db.rows.equals', value: 0, line: 2 }],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query'], true);
+				expect(summary.passed).toBe(1);
+			});
+		});
+
+		describe('db.column.exists', () => {
+			it('passes when column exists in result', () => {
+				const results = [
+					createResult({
+						columns: ['id', 'name', 'email'],
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [{ type: 'db.column.exists', value: 'name', line: 2 }],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query'], true);
+				expect(summary.passed).toBe(1);
+			});
+
+			it('fails when column missing', () => {
+				const results = [
+					createResult({
+						columns: ['id', 'email'],
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [{ type: 'db.column.exists', value: 'name', line: 2 }],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query'], true);
+				expect(summary.failed).toBe(1);
+			});
+		});
+
+		describe('db.value.equals', () => {
+			it('validates specific cell value', () => {
+				const results = [
+					createResult({
+						rows: [
+							{ id: 1, name: 'Alice' },
+							{ id: 2, name: 'Bob' },
+						],
+					}),
+				];
+				const blocks = [
+					createBlock({
+						assertions: [
+							{
+								type: 'db.value.equals',
+								value: { row: 0, column: 'name', value: 'Alice' },
+								line: 2,
+							},
+						],
+					}),
+				];
+
+				const summary = runAssertions(blocks, results, ['query'], true);
+				expect(summary.passed).toBe(1);
+			});
+		});
 	});
 });

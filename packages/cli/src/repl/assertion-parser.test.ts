@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	ASSERTION_TYPES,
 	parseAssertionFile,
+	requiresDatabase,
 	resolveQueryIndex,
 	validateAssertionBlocks,
 } from './assertion-parser.js';
@@ -325,6 +326,51 @@ ${type}: ${input}
 			for (const type of expected) {
 				expect(ASSERTION_TYPES).toContain(type);
 			}
+		});
+
+		it('includes new typed SQL assertions', () => {
+			expect(ASSERTION_TYPES).toContain('sql.table');
+			expect(ASSERTION_TYPES).toContain('sql.column');
+			expect(ASSERTION_TYPES).toContain('sql.join');
+		});
+
+		it('includes new typed params assertions', () => {
+			expect(ASSERTION_TYPES).toContain('params.type');
+			expect(ASSERTION_TYPES).toContain('params.value');
+		});
+
+		it('includes new DB-only assertions', () => {
+			expect(ASSERTION_TYPES).toContain('db.rows.equals');
+			expect(ASSERTION_TYPES).toContain('db.rows.min');
+			expect(ASSERTION_TYPES).toContain('db.rows.max');
+			expect(ASSERTION_TYPES).toContain('db.column.exists');
+			expect(ASSERTION_TYPES).toContain('db.value.equals');
+		});
+	});
+
+	describe('requiresDatabase', () => {
+		it('returns true for db.* assertions', () => {
+			expect(requiresDatabase('db.rows.equals')).toBe(true);
+			expect(requiresDatabase('db.rows.min')).toBe(true);
+			expect(requiresDatabase('db.rows.max')).toBe(true);
+			expect(requiresDatabase('db.column.exists')).toBe(true);
+			expect(requiresDatabase('db.value.equals')).toBe(true);
+		});
+
+		it('returns false for sql.* assertions', () => {
+			expect(requiresDatabase('sql.contains')).toBe(false);
+			expect(requiresDatabase('sql.equals')).toBe(false);
+			expect(requiresDatabase('sql.matches')).toBe(false);
+			expect(requiresDatabase('sql.table')).toBe(false);
+			expect(requiresDatabase('sql.column')).toBe(false);
+			expect(requiresDatabase('sql.join')).toBe(false);
+		});
+
+		it('returns false for other assertions', () => {
+			expect(requiresDatabase('output.contains')).toBe(false);
+			expect(requiresDatabase('params.equals')).toBe(false);
+			expect(requiresDatabase('success')).toBe(false);
+			expect(requiresDatabase('error.contains')).toBe(false);
 		});
 	});
 });
