@@ -2,9 +2,10 @@
  * Blog ModelIR
  *
  * Schema definition for semantic query planning.
+ * Uses the defineSchemaBuilder API with explicit relations.
  */
 
-import { belongsTo, defineSchema, hasMany } from '@dbsp/core';
+import { defineSchemaBuilder, hasMany, belongsTo } from '@dbsp/core';
 
 /**
  * Blog schema model for E2E tests.
@@ -13,27 +14,33 @@ import { belongsTo, defineSchema, hasMany } from '@dbsp/core';
  * - authors
  * - posts
  * - comments
+ *
+ * Relations:
+ * - authors.posts (hasMany)
+ * - posts.author (belongsTo)
+ * - posts.comments (hasMany)
+ * - comments.post (belongsTo)
  */
-export const blogModel = defineSchema({
+export const blogModel = defineSchemaBuilder({
 	authors: {
-		id: 'integer',
+		id: { type: 'integer', primaryKey: true },
 		name: { type: 'string' },
 		email: { type: 'string' },
 	},
 	posts: {
-		id: 'integer',
+		id: { type: 'integer', primaryKey: true },
 		title: { type: 'string' },
 		content: { type: 'string' },
-		author_id: 'integer',
+		author_id: { type: 'integer' },
 		published: { type: 'boolean' },
-		created_at: 'timestamp',
+		created_at: { type: 'timestamp' },
 	},
 	comments: {
-		id: 'integer',
-		post_id: 'integer',
+		id: { type: 'integer', primaryKey: true },
+		post_id: { type: 'integer' },
 		author_name: { type: 'string' },
 		content: { type: 'string' },
-		created_at: 'timestamp',
+		created_at: { type: 'timestamp' },
 	},
 })
 	.relations({

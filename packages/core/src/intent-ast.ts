@@ -191,6 +191,25 @@ export interface RelationColumnIntent {
 }
 
 /**
+ * Aggregate expression intent for SELECT expressions
+ * @example { kind: 'aggregate', function: 'count', as: 'total' } → COUNT(*) AS total
+ * @example { kind: 'aggregate', function: 'sum', field: 'price', as: 'total_price' } → SUM(price) AS total_price
+ * @example { kind: 'aggregate', function: 'count', field: 'id', distinct: true, as: 'unique_count' }
+ *          → COUNT(DISTINCT id) AS unique_count
+ */
+export interface AggregateExpressionIntent {
+	readonly kind: 'aggregate';
+	/** Aggregate function */
+	readonly function: AggregateFunction;
+	/** Field to aggregate (optional for count - defaults to *) */
+	readonly field?: string;
+	/** Alias for result column (required) */
+	readonly as: string;
+	/** Whether to apply DISTINCT to the aggregate */
+	readonly distinct?: boolean;
+}
+
+/**
  * Expression intent union type - computed/derived values in SELECT
  * Extensible for future expression types (CASE WHEN, etc.)
  */
@@ -199,7 +218,8 @@ export type ExpressionIntent =
 	| RawExpressionIntent
 	| ColumnAliasIntent
 	| RelationColumnIntent
-	| WindowIntent;
+	| WindowIntent
+	| AggregateExpressionIntent;
 
 /**
  * An ordered column entry - either a plain field name or an expression.

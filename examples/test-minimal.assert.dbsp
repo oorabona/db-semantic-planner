@@ -71,20 +71,21 @@ sql.contains: "published"
 params.equals: [true]
 
 # ─────────────────────────────────────────
-# Query 8: posts include author
-# NOTE: "author" relation doesn't exist in minimal schema (it's "user")
+# Query 8: posts with user
+# "user" relation exists (auto-inferred from userId references)
 # ─────────────────────────────────────────
 --- query: 8
-success: false
-error.contains: author
+success: true
+sql.contains: from "posts"
+sql.contains: left join "users"
 
 # ─────────────────────────────────────────
-# Query 9: users include posts
+# Query 9: users with posts
 # ─────────────────────────────────────────
 --- query: 9
 success: true
 sql.contains: from "users"
-plan.contains: include
+sql.contains: left join "posts"
 
 # ─────────────────────────────────────────
 # Query 10: posts where published = true and authorId = 1

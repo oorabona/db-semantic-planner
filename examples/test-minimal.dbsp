@@ -23,8 +23,8 @@ users | where id = 1
 posts | where published = true
 
 # With relation include
-posts | include author
-users | include posts
+posts | with user
+users | with posts
 
 # Multiple conditions
 posts | where published = true and authorId = 1

@@ -16,7 +16,7 @@ import type { PlanReport } from '@dbsp/core';
 import {
 	belongsTo,
 	createOrm,
-	defineSchema,
+	defineSchemaBuilder,
 	eq,
 	exists,
 	hasMany,
@@ -123,7 +123,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 		describe('E2E-004-A2: hasOne uses JOIN strategy', () => {
 			it('should auto-select JOIN for hasOne relation', async () => {
 				// Create schema with hasOne relationship
-				const schemaWithProfile = defineSchema({
+				const schemaWithProfile = defineSchemaBuilder({
 					users: {
 						id: 'integer',
 						name: 'string',
@@ -263,7 +263,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 		describe('E2E-004-F1: relation hint overrides auto', () => {
 			it('should use JOIN when schema hint specifies it', async () => {
 				// Schema with explicit includeStrategy hint
-				const schemaWithJoinHint = defineSchema({
+				const schemaWithJoinHint = defineSchemaBuilder({
 					users: {
 						id: 'integer',
 						name: 'string',

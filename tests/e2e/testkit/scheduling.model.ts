@@ -6,7 +6,7 @@
  * - daterange, tstzrange, int4range
  */
 
-import { belongsTo, defineSchema, hasMany } from '@dbsp/core';
+import { defineSchemaBuilder, hasMany, belongsTo } from '@dbsp/core';
 
 /**
  * Scheduling schema model for E2E tests.
@@ -17,33 +17,33 @@ import { belongsTo, defineSchema, hasMany } from '@dbsp/core';
  * - events: Events with tstzrange
  * - price_tiers: Quantity-based pricing with int4range
  */
-export const schedulingModel = defineSchema({
+export const schedulingModel = defineSchemaBuilder({
 	rooms: {
-		id: 'integer',
+		id: { type: 'integer', primaryKey: true },
 		name: { type: 'string' },
-		capacity: 'integer',
-		floor: 'integer',
+		capacity: { type: 'integer' },
+		floor: { type: 'integer' },
 	},
 	room_bookings: {
-		id: 'integer',
-		room_id: 'integer',
+		id: { type: 'integer', primaryKey: true },
+		room_id: { type: 'integer' },
 		booked_by: { type: 'string' },
 		booking_period: { type: 'string' }, // PostgreSQL daterange stored as string in model
 		purpose: { type: 'string' },
 	},
 	events: {
-		id: 'integer',
+		id: { type: 'integer', primaryKey: true },
 		title: { type: 'string' },
-		room_id: 'integer',
+		room_id: { type: 'integer' },
 		time_slot: { type: 'string' }, // PostgreSQL tstzrange stored as string in model
 		organizer: { type: 'string' },
-		max_attendees: 'integer',
+		max_attendees: { type: 'integer' },
 	},
 	price_tiers: {
-		id: 'integer',
+		id: { type: 'integer', primaryKey: true },
 		product_name: { type: 'string' },
 		quantity_range: { type: 'string' }, // PostgreSQL int4range stored as string in model
-		unit_price: 'decimal',
+		unit_price: { type: 'decimal' },
 	},
 })
 	.relations({

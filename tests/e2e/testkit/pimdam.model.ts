@@ -4,7 +4,7 @@
  * Schema definition for semantic query planning.
  */
 
-import { belongsTo, defineSchema, hasMany } from '@dbsp/core';
+import { defineSchemaBuilder, hasMany, belongsTo } from '@dbsp/core';
 
 /**
  * PIM/DAM schema model for E2E tests.
@@ -16,52 +16,53 @@ import { belongsTo, defineSchema, hasMany } from '@dbsp/core';
  * - product_images
  * - variants
  */
-export const pimdamModel = defineSchema({
+export const pimdamModel = defineSchemaBuilder({
 	categories: {
-		id: 'integer',
+		id: { type: 'integer', primaryKey: true },
 		name: { type: 'string' },
-		parent_id: 'integer',
+		parent_id: { type: 'integer' },
 	},
 	products: {
-		id: 'integer',
+		id: { type: 'integer', primaryKey: true },
 		sku: { type: 'string' },
 		title: { type: 'string' },
-		category_id: 'integer',
+		category_id: { type: 'integer' },
 		active: { type: 'boolean' },
-		deleted_at: 'timestamp',
+		deleted_at: { type: 'timestamp' },
 	},
 	assets: {
-		id: 'integer',
+		id: { type: 'integer', primaryKey: true },
 		kind: { type: 'string' },
 		sha256: { type: 'string' },
 		mime: { type: 'string' },
-		width: 'integer',
-		height: 'integer',
-		size_bytes: 'integer',
+		width: { type: 'integer' },
+		height: { type: 'integer' },
+		size_bytes: { type: 'integer' },
 		storage_key: { type: 'string' },
-		expires_at: 'timestamp',
-		created_at: 'timestamp',
+		expires_at: { type: 'timestamp' },
+		created_at: { type: 'timestamp' },
 	},
 	product_images: {
-		id: 'integer',
-		product_id: 'integer',
-		asset_id: 'integer',
+		id: { type: 'integer', primaryKey: true },
+		product_id: { type: 'integer' },
+		asset_id: { type: 'integer' },
 		locale: { type: 'string' },
 		status: { type: 'string' },
 		is_main: { type: 'boolean' },
-		position: 'integer',
-		deleted_at: 'timestamp',
+		position: { type: 'integer' },
+		deleted_at: { type: 'timestamp' },
 	},
 	variants: {
-		id: 'integer',
-		product_id: 'integer',
+		id: { type: 'integer', primaryKey: true },
+		product_id: { type: 'integer' },
 		sku: { type: 'string' },
 		name: { type: 'string' },
-		price_cents: 'integer',
-		stock: 'integer',
+		price_cents: { type: 'integer' },
+		stock: { type: 'integer' },
 	},
 })
 	.relations({
+		// Self-referential categories
 		categories: {
 			parent: belongsTo('categories', { foreignKey: 'parent_id' }),
 			children: hasMany('categories', { foreignKey: 'parent_id' }),
@@ -72,12 +73,12 @@ export const pimdamModel = defineSchema({
 			images: hasMany('product_images', { foreignKey: 'product_id' }),
 			variants: hasMany('variants', { foreignKey: 'product_id' }),
 		},
-		assets: {
-			productImages: hasMany('product_images', { foreignKey: 'asset_id' }),
-		},
 		product_images: {
 			product: belongsTo('products', { foreignKey: 'product_id' }),
 			asset: belongsTo('assets', { foreignKey: 'asset_id' }),
+		},
+		assets: {
+			productImages: hasMany('product_images', { foreignKey: 'asset_id' }),
 		},
 		variants: {
 			product: belongsTo('products', { foreignKey: 'product_id' }),

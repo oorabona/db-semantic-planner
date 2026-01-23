@@ -501,10 +501,10 @@ dbsp> comments | where approved = false
 
 **Authors with their posts:**
 ```bash
-pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'authors | include posts'
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'authors | with posts'
 ```
 ```
-> authors | include posts
+> authors | with posts
 Main SQL:
 select "t0".*, "t1"."id" as "posts.id", "t1"."title" as "posts.title", ...
 from "authors" as "t0" left join "posts" as "t1" on "t1"."author_id" = "t0"."id"
@@ -526,10 +526,10 @@ id | name       | email          | bio              | posts.id | posts.title
 
 **Posts with comments:**
 ```bash
-pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts | include comments'
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts | with comments'
 ```
 ```
-> posts | include comments
+> posts | with comments
 Main SQL:
 select "t0".*, "t1"."id" as "comments.id", "t1"."author_name" as "comments.author_name", ...
 from "posts" as "t0" left join "comments" as "t1" on "t1"."post_id" = "t0"."id"
@@ -553,10 +553,10 @@ id | title                              | comments.id | comments.authorName
 
 **Posts with their tags:**
 ```bash
-pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts | include tags'
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts | with tags'
 ```
 ```
-> posts | include tags
+> posts | with tags
 Main SQL:
 select "t0".*, "t1"."id" as "tags.id", "t1"."name" as "tags.name", "t1"."slug" as "tags.slug"
 from "posts" as "t0"
@@ -808,7 +808,7 @@ dbsp> categories | where parent_id is null
 
 **Categories with their children:**
 ```
-dbsp> categories | include children
+dbsp> categories | with children
 ```
 ```
 ┌────┬─────────────────┬───────────┬──────────────────────────────────────────────────────┐
@@ -943,7 +943,7 @@ dbsp> posts | where featured = true and view_count > 1500
 
 **Active authors with published posts and approved comments:**
 ```
-dbsp> authors | where active = true | include posts | where published = true | include comments | where approved = true
+dbsp> authors | where active = true | with posts | where published = true | with comments | where approved = true
 ```
 ```
 ┌────┬─────────────┬────────┬────────────────────────────────────────────────────────────────┐
@@ -958,7 +958,7 @@ dbsp> authors | where active = true | include posts | where published = true | i
 
 **Categories with posts and post counts:**
 ```
-dbsp> categories | include posts | aggregate count by category_id
+dbsp> categories | with posts | aggregate count by category_id
 ```
 ```
 ┌────┬─────────────────────┬────────────┬───────┐
@@ -1217,7 +1217,7 @@ dbsp> price_tiers where product_name = 'Widget A' and quantity_range contains 25
 
 **Rooms with their upcoming bookings:**
 ```
-dbsp> rooms | include room_bookings
+dbsp> rooms | with room_bookings
 ```
 ```
 ┌────┬──────────────────────┬──────────┬───────────────────────────────────────────────────────────┐
@@ -1235,7 +1235,7 @@ dbsp> rooms | include room_bookings
 
 **Rooms with bookings that overlap next week:**
 ```
-dbsp> rooms | include room_bookings | where booking_period overlaps [2024-01-22,2024-01-29)
+dbsp> rooms | with room_bookings | where booking_period overlaps [2024-01-22,2024-01-29)
 ```
 ```
 ┌────┬──────────────────────┬──────────┬───────────────────────────────────────────────────────────┐
@@ -1393,7 +1393,7 @@ dbsp> orders
 
 **Categories with products:**
 ```
-dbsp> categories | include products | where active = true
+dbsp> categories | with products | where active = true
 ```
 ```
 ┌────┬─────────────────────┬───────────────────────────────────────────────────────────┐
@@ -1414,7 +1414,7 @@ dbsp> categories | include products | where active = true
 
 **Products with variants:**
 ```
-dbsp> products | include variants | limit 3
+dbsp> products | with variants | limit 3
 ```
 ```
 ┌────┬──────────────┬─────────────────────────────┬───────────────────────────────────────────┐
@@ -1431,7 +1431,7 @@ dbsp> products | include variants | limit 3
 
 **Customers with orders and items:**
 ```
-dbsp> customers | include orders | include order_items
+dbsp> customers | with orders | with order_items
 ```
 ```
 ┌────┬─────────────┬─────────────────────────────────────────────────────────────────────┐
@@ -1711,7 +1711,7 @@ dbsp> productImages | where status = 'approved'
 
 **Images by locale with product:**
 ```
-dbsp> productImages | where locale = 'en' | include product
+dbsp> productImages | where locale = 'en' | with product
 ```
 ```
 ┌────┬───────────┬─────────┬────────┬────────────────────────────┐
@@ -1728,7 +1728,7 @@ dbsp> productImages | where locale = 'en' | include product
 
 **Product images with asset details:**
 ```
-dbsp> productImages | include asset
+dbsp> productImages | with asset
 ```
 ```
 ┌────┬───────────┬─────────┬────────────────────────┬────────────┐
@@ -1748,7 +1748,7 @@ dbsp> productImages | include asset
 
 **Smartphones in category 7 (with category details):**
 ```
-dbsp> products | where active = true and deletedAt is null and categoryId = 7 | include category
+dbsp> products | where active = true and deletedAt is null and categoryId = 7 | with category
 ```
 ```
 ┌────┬────────────────┬────────────────────────────┬─────────────────┐
@@ -1802,7 +1802,7 @@ dbsp> categories | where parentId is null
 
 **Categories with parent details:**
 ```
-dbsp> categories | where parentId is not null | include parent
+dbsp> categories | where parentId is not null | with parent
 ```
 ```
 ┌────┬───────────────────┬──────────┬─────────────────┐
