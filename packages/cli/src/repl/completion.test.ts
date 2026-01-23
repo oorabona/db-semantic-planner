@@ -104,7 +104,7 @@ describe('CompletionProvider', () => {
 				.filter((s) => s.type === 'keyword')
 				.map((s) => s.text);
 			expect(keywords).toContain('where');
-			expect(keywords).toContain('include');
+			expect(keywords).toContain('with');
 			expect(keywords).toContain('limit');
 		});
 
@@ -160,8 +160,8 @@ describe('CompletionProvider', () => {
 	});
 
 	describe('relation completions', () => {
-		it('should suggest relations after include', () => {
-			const suggestions = provider.complete('users include ');
+		it('should suggest relations after with', () => {
+			const suggestions = provider.complete('users with ');
 			const relations = suggestions
 				.filter((s) => s.type === 'relation')
 				.map((s) => s.text);
@@ -170,7 +170,7 @@ describe('CompletionProvider', () => {
 		});
 
 		it('should filter relations by prefix', () => {
-			const suggestions = provider.complete('users include user');
+			const suggestions = provider.complete('users with user');
 			const relations = suggestions
 				.filter((s) => s.type === 'relation')
 				.map((s) => s.text);
@@ -214,7 +214,7 @@ describe('CompletionProvider', () => {
 		});
 
 		it('should suggest simple relation names for current table', () => {
-			const suggestions = qualifiedProvider.complete('posts include ');
+			const suggestions = qualifiedProvider.complete('posts with ');
 			const relations = suggestions
 				.filter((s) => s.type === 'relation')
 				.map((s) => s.text);
@@ -224,7 +224,7 @@ describe('CompletionProvider', () => {
 		});
 
 		it('should not suggest relations from other tables', () => {
-			const suggestions = qualifiedProvider.complete('posts include ');
+			const suggestions = qualifiedProvider.complete('posts with ');
 			const relations = suggestions
 				.filter((s) => s.type === 'relation')
 				.map((s) => s.text);
@@ -233,7 +233,7 @@ describe('CompletionProvider', () => {
 		});
 
 		it('should suggest correct relations for different table', () => {
-			const suggestions = qualifiedProvider.complete('authors include ');
+			const suggestions = qualifiedProvider.complete('authors with ');
 			const relations = suggestions
 				.filter((s) => s.type === 'relation')
 				.map((s) => s.text);
@@ -344,5 +344,114 @@ describe('formatCompletions', () => {
 		expect(formatted).toContain('item0');
 		expect(formatted).toContain('item4');
 		expect(formatted).not.toContain('item5');
+	});
+});
+
+// Tests for Levenshtein fuzzy matching (ARCH-003)
+import {
+	levenshtein,
+	suggestClosestMatch,
+	enhanceErrorWithSuggestion,
+} from './completion.js';
+
+describe('levenshtein', () => {
+	it('should return 0 for identical strings', () => {
+		expect(levenshtein('hello', 'hello')).toBe(0);
+	});
+
+	it('should be case-insensitive', () => {
+		expect(levenshtein('Hello', 'hello')).toBe(0);
+		expect(levenshtein('ROOMBOOKS', 'roombooks')).toBe(0);
+	});
+
+	it('should calculate distance for single character difference', () => {
+		expect(levenshtein('cat', 'bat')).toBe(1); // substitution
+		expect(levenshtein('cat', 'cats')).toBe(1); // insertion
+		expect(levenshtein('cats', 'cat')).toBe(1); // deletion
+	});
+
+	it('should calculate distance for multiple differences', () => {
+		expect(levenshtein('kitten', 'sitting')).toBe(3);
+		expect(levenshtein('saturday', 'sunday')).toBe(3);
+	});
+
+	it('should handle empty strings', () => {
+		expect(levenshtein('', '')).toBe(0);
+		expect(levenshtein('hello', '')).toBe(5);
+		expect(levenshtein('', 'world')).toBe(5);
+	});
+});
+
+describe('suggestClosestMatch', () => {
+	const tables = ['users', 'orders', 'products', 'categories', 'roomBookings'];
+
+	it('should suggest closest table name (case mismatch)', () => {
+		expect(suggestClosestMatch('roombooking', tables)).toBe('roomBookings');
+	});
+
+	it('should suggest closest table name (typo)', () => {
+		expect(suggestClosestMatch('prodcts', tables)).toBe('products');
+		expect(suggestClosestMatch('usrs', tables)).toBe('users');
+	});
+
+	it('should return null for completely different input', () => {
+		expect(suggestClosestMatch('xyzabc', tables)).toBe(null);
+	});
+
+	it('should return null for empty input', () => {
+		expect(suggestClosestMatch('', tables)).toBe(null);
+	});
+
+	it('should return null for empty candidates', () => {
+		expect(suggestClosestMatch('users', [])).toBe(null);
+	});
+
+	it('should suggest for near matches even when exact exists (distance > 0)', () => {
+		// 'users' to 'orders' has Levenshtein distance of 3, so a match is found
+		// In practice, this function is only called for unknown tables (errors)
+		const result = suggestClosestMatch('usrs', tables); // typo: missing 'e'
+		expect(result).toBe('users');
+	});
+
+	it('should respect maxDistance parameter', () => {
+		// 'abcdef' has distance > 3 from all tables, so it should be null at default
+		expect(suggestClosestMatch('abcdef', tables)).toBe(null);
+		// With higher threshold, closest match is found
+		expect(suggestClosestMatch('abcdef', tables, 6)).not.toBe(null);
+	});
+});
+
+describe('enhanceErrorWithSuggestion', () => {
+	const tables = ['users', 'orders', 'products', 'roomBookings'];
+
+	it('should enhance unknown table error with suggestion', () => {
+		const error = 'Unknown table: roombooking';
+		const enhanced = enhanceErrorWithSuggestion(error, tables);
+		expect(enhanced).toContain("Did you mean 'roomBookings'?");
+	});
+
+	it('should enhance unknown table error (typo)', () => {
+		const error = 'Unknown table: prodcts';
+		const enhanced = enhanceErrorWithSuggestion(error, tables);
+		expect(enhanced).toContain("Did you mean 'products'?");
+	});
+
+	it('should return original error if no close match', () => {
+		const error = 'Unknown table: xyzabc';
+		const enhanced = enhanceErrorWithSuggestion(error, tables);
+		expect(enhanced).toBe(error);
+	});
+
+	it('should return original error if not an unknown table error', () => {
+		const error = 'Some other error';
+		const enhanced = enhanceErrorWithSuggestion(error, tables);
+		expect(enhanced).toBe(error);
+	});
+
+	it('should enhance unknown column error if columns provided', () => {
+		const columns = ['firstName', 'lastName', 'email'];
+		const error = 'Unknown column: fristName';
+		const enhanced = enhanceErrorWithSuggestion(error, tables, columns);
+		expect(enhanced).toContain("Did you mean 'firstName'?");
 	});
 });

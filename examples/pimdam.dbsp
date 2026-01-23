@@ -58,8 +58,8 @@ categories | where parentId is not null | with parent
 # Insert a new category
 insert into categories set name = "Accessories", slug = "accessories", active = true
 
-# Insert a new asset
-insert into assets set filename = "new-image.jpg", url = "https://cdn.example.com/new-image.jpg", kind = "image"
+# Insert a new asset (required: filename, sha256, mime, sizeBytes, storageKey, kind)
+insert into assets set filename = "new-image.jpg", sha256 = "abc123def456", mime = "image/jpeg", sizeBytes = 12345, storageKey = "uploads/new-image.jpg", kind = "image"
 
 # Update product status
 update products set active = false where id = 5

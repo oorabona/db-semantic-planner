@@ -1,13 +1,3 @@
-drop table if exists "rooms" cascade;
-
-drop table if exists "room_bookings" cascade;
-
-drop table if exists "events" cascade;
-
-drop table if exists "price_tiers" cascade;
-
-
-
 create table "rooms" ("id" serial primary key, "name" varchar(255) not null, "capacity" integer not null, "floor" integer not null);
 
 create table "room_bookings" ("id" serial primary key, "room_id" integer not null, "booked_by" varchar(255) not null, "booking_period" daterange not null, "purpose" varchar(255));

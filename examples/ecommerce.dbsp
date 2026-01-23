@@ -61,8 +61,8 @@ orders | select orderNumber, total, sum(total) over (order by createdAt) as runn
 # Insert a new category
 insert into categories set name = "Accessories", slug = "accessories"
 
-# Insert a new customer
-insert into customers set name = "John Doe", email = "john@example.com"
+# Insert a new customer (uses firstName/lastName, not name)
+insert into customers set firstName = "John", lastName = "Doe", email = "john@example.com"
 
 # Update product price
 update products set price = 29.99 where sku = "WIDGET-001"

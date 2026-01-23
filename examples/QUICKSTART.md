@@ -2111,6 +2111,58 @@ This query demonstrates:
 
 ---
 
+## Known Limitations & Configuration Notes
+
+### JSONB Columns
+
+**Current limitation:** NQL doesn't support PostgreSQL JSONB operators (`->`, `->>`, `@>`, etc.).
+
+```
+# This does NOT work (yet):
+products | where metadata->>'status' = 'active'
+```
+
+**Workaround:** Use the DX layer's `raw()` escape hatch in your application code for JSONB queries.
+
+**Planned:** JSONB operator support is on the roadmap (see `TODO_NQL.md`).
+
+### CamelCasePlugin and JSONB Data
+
+When using Kysely's `CamelCasePlugin` (recommended for logical/physical name separation), be aware that **keys inside JSONB column values are also transformed by default**.
+
+| DB Value | JS Result (default) | JS Result (with option) |
+|----------|---------------------|-------------------------|
+| `{"user_id": 123}` | `{"userId": 123}` ❌ | `{"user_id": 123}` ✅ |
+
+**If your JSONB columns contain data with keys that must be preserved**, use the `maintainNestedObjectKeys` option:
+
+```typescript
+import { CamelCasePlugin } from 'kysely';
+
+const db = new Kysely({
+  dialect: new PostgresDialect({...}),
+  plugins: [
+    new CamelCasePlugin({ maintainNestedObjectKeys: true })
+  ]
+});
+```
+
+> **Tradeoff:** This disables key transformation for ALL nested objects, including results from `jsonArrayFrom`/`jsonObjectFrom` helpers. For more granular control, consider extending `CamelCasePlugin`.
+
+### UPSERT Requires UNIQUE Constraint
+
+The `upsert` command requires a UNIQUE or PRIMARY KEY constraint on the conflict column:
+
+```
+# Works if 'sku' has UNIQUE constraint
+upsert into products on sku set name = 'Updated', price = 99.99
+
+# Fails if 'name' has no UNIQUE constraint
+upsert into products on name set price = 50.00
+```
+
+---
+
 ## Cleanup
 
 When done experimenting:

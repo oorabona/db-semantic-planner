@@ -16,8 +16,8 @@
  * Example complex queries:
  *   authors where active = true include posts where published = true include comments where approved = true
  *   posts where featured = true include author where active = true include tags
- *   categories where parent_id is null include children include posts
- *   tags include posts where published = true and view_count > 100
+ *   categories where parentId is null include children include posts
+ *   tags include posts where published = true and viewCount > 100
  */
 
 import { defineSchema } from '@dbsp/core';
@@ -33,7 +33,7 @@ export default defineSchema(
 		categories: {
 			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			name: { type: 'string', nullable: false },
-			parent_id: {
+			parentId: {
 				type: 'integer',
 				nullable: true,
 				references: { table: 'categories' },
@@ -44,12 +44,12 @@ export default defineSchema(
 			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			title: { type: 'string', nullable: false },
 			content: { type: 'text', nullable: false },
-			author_id: {
+			authorId: {
 				type: 'integer',
 				references: { table: 'authors' },
 				index: true,
 			},
-			category_id: {
+			categoryId: {
 				type: 'integer',
 				nullable: true,
 				references: { table: 'categories' },
@@ -57,32 +57,32 @@ export default defineSchema(
 			},
 			published: { type: 'boolean', default: 'false', index: true },
 			featured: { type: 'boolean', default: 'false', index: true },
-			view_count: { type: 'integer', default: '0' },
-			created_at: { type: 'timestamp', default: 'now()' },
+			viewCount: { type: 'integer', default: '0' },
+			createdAt: { type: 'timestamp', default: 'now()' },
 		},
 		comments: {
 			id: { type: 'integer', primaryKey: true, autoIncrement: true },
-			post_id: {
+			postId: {
 				type: 'integer',
 				references: { table: 'posts' },
 				index: true,
 			},
-			author_name: { type: 'string', nullable: false },
+			authorName: { type: 'string', nullable: false },
 			content: { type: 'text', nullable: false },
 			approved: { type: 'boolean', default: 'false', index: true },
-			created_at: { type: 'timestamp', default: 'now()' },
+			createdAt: { type: 'timestamp', default: 'now()' },
 		},
 		tags: {
 			id: { type: 'integer', primaryKey: true, autoIncrement: true },
 			name: { type: 'string', nullable: false },
 			slug: { type: 'string', nullable: false, unique: true },
 		},
-		post_tags: {
+		postTags: {
 			columns: {
-				post_id: { type: 'integer', references: { table: 'posts' }, index: true },
-				tag_id: { type: 'integer', references: { table: 'tags' }, index: true },
+				postId: { type: 'integer', references: { table: 'posts' }, index: true },
+				tagId: { type: 'integer', references: { table: 'tags' }, index: true },
 			},
-			primaryKey: ['post_id', 'tag_id'],
+			primaryKey: ['postId', 'tagId'],
 		} as any, // Composite PK uses TableDefWithConfig format
 	},
 	{
@@ -91,27 +91,27 @@ export default defineSchema(
 			'categories.parent': {
 				kind: 'belongsTo',
 				target: 'categories',
-				foreignKey: 'parent_id',
+				foreignKey: 'parentId',
 			},
 			'categories.children': {
 				kind: 'hasMany',
 				target: 'categories',
-				foreignKey: 'parent_id',
+				foreignKey: 'parentId',
 			},
 			// M:N posts <-> tags
 			'posts.tags': {
 				kind: 'manyToMany',
 				target: 'tags',
-				through: 'post_tags',
-				sourceFk: 'post_id',
-				targetFk: 'tag_id',
+				through: 'postTags',
+				sourceFk: 'postId',
+				targetFk: 'tagId',
 			},
 			'tags.posts': {
 				kind: 'manyToMany',
 				target: 'posts',
-				through: 'post_tags',
-				sourceFk: 'tag_id',
-				targetFk: 'post_id',
+				through: 'postTags',
+				sourceFk: 'tagId',
+				targetFk: 'postId',
 			},
 		},
 	},

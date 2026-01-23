@@ -22,7 +22,11 @@ import {
 	type OverflowStyle,
 	TABLE_OPTIONS,
 } from '../config.js';
-import { CompletionProvider, type CompletionSuggestion } from './completion.js';
+import {
+	CompletionProvider,
+	type CompletionSuggestion,
+	enhanceErrorWithSuggestion,
+} from './completion.js';
 import {
 	CompletionDisplay,
 	Header,
@@ -1296,26 +1300,31 @@ function ReplApp({ config }: ReplAppProps) {
 						executeOnDb(finalSql, result.params);
 					}
 				} catch (err) {
-					if (err instanceof NqlParseError) {
-						setQueryResult({
-							sql: '',
-							params: [],
-							error: err.message,
-						});
-					} else if (err instanceof NqlCompileError) {
-						setQueryResult({
-							sql: '',
-							params: [],
-							error: err.message,
-						});
-					} else {
-						setQueryResult({
-							sql: '',
-							params: [],
-							error: err instanceof Error ? err.message : String(err),
-						});
-					}
+				// Get table names for fuzzy suggestions
+				const tableNames = Object.keys(config.schema.tables);
+				const rawError = err instanceof Error ? err.message : String(err);
+				const enhancedError = enhanceErrorWithSuggestion(rawError, tableNames);
+
+				if (err instanceof NqlParseError) {
+					setQueryResult({
+						sql: '',
+						params: [],
+						error: enhancedError,
+					});
+				} else if (err instanceof NqlCompileError) {
+					setQueryResult({
+						sql: '',
+						params: [],
+						error: enhancedError,
+					});
+				} else {
+					setQueryResult({
+						sql: '',
+						params: [],
+						error: enhancedError,
+					});
 				}
+			}
 			}
 		},
 		[

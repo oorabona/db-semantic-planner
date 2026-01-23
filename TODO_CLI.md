@@ -122,6 +122,17 @@ Extend REPL natural query language to be a complete "new SQL" - simpler for huma
   - Previously, qualified filters were incorrectly distributed to pendingQualifiedFilters
   - Query executor converts qualified paths to relationFilter intents for proper JOIN/EXISTS
 
+- [x] ✅ Levenshtein fuzzy matching for error suggestions (ARCH-003 Block 3) (2026-01-23)
+  - Added `levenshtein()` function for edit distance calculation (case-insensitive)
+  - Added `suggestClosestMatch()` for finding closest candidate within threshold
+  - Added `enhanceErrorWithSuggestion()` for "Did you mean?" error enhancement
+  - Integrated into REPL error handling for unknown tables/columns
+
+- [x] ✅ NQL syntax keywords in tab completion (ARCH-003 Block 4) (2026-01-23)
+  - Updated KEYWORDS to NQL syntax: `|` (pipe), `with`, `select`, `group`, `order`
+  - Replaced `include` with `with`, `order by` with `order`
+  - 18 new unit tests for fuzzy matching functions
+
 ## Improvements
 
 - [x] ✅ Native column aliasing via `col()` helper (2026-01-21)

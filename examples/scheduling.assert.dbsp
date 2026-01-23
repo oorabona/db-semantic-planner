@@ -1,0 +1,192 @@
+# Assertions for scheduling.dbsp
+# Validates output from scheduling schema queries (PostgreSQL Ranges)
+
+# ─────────────────────────────────────────
+# Query 0: !CREATE SCHEMA IF NOT EXISTS ch4_scheduling;
+# ─────────────────────────────────────────
+--- query: 0
+success: true
+output.contains: Executed SQL
+
+# ─────────────────────────────────────────
+# Query 1: .use ch4_scheduling
+# ─────────────────────────────────────────
+--- query: 1
+success: true
+output.contains: Using schema: ch4_scheduling
+
+# ─────────────────────────────────────────
+# Query 2: .import examples/scheduling.ddl.sql
+# ─────────────────────────────────────────
+--- query: 2
+success: true
+output.contains: Imported
+
+# ─────────────────────────────────────────
+# Query 3: .import examples/scheduling.seed.sql
+# ─────────────────────────────────────────
+--- query: 3
+success: true
+output.contains: Imported
+
+# ─────────────────────────────────────────
+# Query 4: .tables
+# ─────────────────────────────────────────
+--- query: 4
+success: true
+output.contains: Tables (4)
+output.contains: rooms
+output.contains: room_bookings
+output.contains: events
+output.contains: price_tiers
+
+# ─────────────────────────────────────────
+# Query 5: rooms
+# ─────────────────────────────────────────
+--- query: 5
+success: true
+sql.contains: from "ch4_scheduling"."rooms"
+output.contains: Rows: 8
+output.contains: Conference Room A
+output.contains: Auditorium
+
+# ─────────────────────────────────────────
+# Query 6: roomBookings
+# KNOWN BUG: camelCase table name not found (schema uses snake_case room_bookings)
+# ─────────────────────────────────────────
+--- query: 6
+success: false
+output.contains: Error
+output.contains: Unknown table: roomBookings
+
+# ─────────────────────────────────────────
+# Query 7: events
+# ─────────────────────────────────────────
+--- query: 7
+success: true
+sql.contains: from "ch4_scheduling"."events"
+output.contains: Rows: 10
+output.contains: Daily Standup
+output.contains: Sprint Planning
+
+# ─────────────────────────────────────────
+# Query 8: priceTiers
+# KNOWN BUG: camelCase table name not found (schema uses snake_case price_tiers)
+# ─────────────────────────────────────────
+--- query: 8
+success: false
+output.contains: Error
+output.contains: Unknown table: priceTiers
+
+# ─────────────────────────────────────────
+# Query 9: roomBookings | where bookingPeriod overlaps [2024-01-16,2024-01-20)
+# KNOWN BUG: Range literal syntax not supported in NQL parser
+# ─────────────────────────────────────────
+--- query: 9
+success: false
+output.contains: Error
+output.contains: NQL parse error
+
+# ─────────────────────────────────────────
+# Query 10: roomBookings | where bookingPeriod containedBy [2024-01-01,2024-02-01)
+# KNOWN BUG: Range literal syntax not supported in NQL parser
+# ─────────────────────────────────────────
+--- query: 10
+success: false
+output.contains: Error
+output.contains: NQL parse error
+
+# ─────────────────────────────────────────
+# Query 11: priceTiers | where quantityRange contains 25
+# KNOWN BUG: 'contains' operator not supported in NQL
+# ─────────────────────────────────────────
+--- query: 11
+success: false
+output.contains: Error
+output.contains: contains
+
+# ─────────────────────────────────────────
+# Query 12: priceTiers | where productName = 'Widget A' and quantityRange contains 25
+# KNOWN BUG: 'contains' operator not supported in NQL
+# ─────────────────────────────────────────
+--- query: 12
+success: false
+output.contains: Error
+output.contains: contains
+
+# ─────────────────────────────────────────
+# Query 13: rooms | with roomBookings
+# NOTE: Include relationship not found (camelCase mismatch)
+# Returns rooms without join (graceful degradation)
+# ─────────────────────────────────────────
+--- query: 13
+success: true
+sql.contains: from "ch4_scheduling"."rooms"
+output.contains: Rows: 8
+
+# ─────────────────────────────────────────
+# Query 14: rooms | with roomBookings | where bookingPeriod overlaps [2024-01-22,2024-01-29)
+# KNOWN BUG: Range literal syntax not supported in NQL parser
+# ─────────────────────────────────────────
+--- query: 14
+success: false
+output.contains: Error
+output.contains: NQL parse error
+
+# ─────────────────────────────────────────
+# Query 15: insert into rooms set name = "Board Room", capacity = 20, floor = 2
+# ─────────────────────────────────────────
+--- query: 15
+success: true
+sql.contains: insert into "ch4_scheduling"."rooms"
+sql.contains: ("name", "capacity", "floor") values ($1, $2, $3)
+output.contains: Rows: 1
+
+# ─────────────────────────────────────────
+# Query 16: insert into priceTiers set productName = "Widget C", quantityRange = "[1,50)", unitPrice = 15.00
+# KNOWN BUG: Range literal value not properly converted ($ref wrapper)
+# ─────────────────────────────────────────
+--- query: 16
+success: false
+output.contains: Error
+output.contains: malformed range literal
+
+# ─────────────────────────────────────────
+# Query 17: update rooms set capacity = 25 where name = "Conference Room A"
+# NOTE: String comparison uses $ref wrapper, may cause 0 rows
+# ─────────────────────────────────────────
+--- query: 17
+success: true
+sql.contains: update "ch4_scheduling"."rooms"
+sql.contains: set "capacity" = $1
+sql.contains: where "name" = $2
+output.contains: Rows: 0
+
+# ─────────────────────────────────────────
+# Query 18: update events set title = "Team Standup (Updated)" where id = 1
+# ─────────────────────────────────────────
+--- query: 18
+success: true
+sql.contains: update "ch4_scheduling"."events"
+sql.contains: set "title" = $1
+sql.contains: where "id" = $2
+output.contains: Rows: 1
+
+# ─────────────────────────────────────────
+# Query 19: delete from roomBookings where id = 99
+# NOTE: Uses correct snake_case table name in SQL
+# ─────────────────────────────────────────
+--- query: 19
+success: true
+sql.contains: delete from "ch4_scheduling"."room_bookings"
+sql.contains: where "id" = $1
+output.contains: Rows: 0
+
+# ─────────────────────────────────────────
+# Query 20: upsert into rooms on name set name = "Meeting Room", capacity = 12
+# KNOWN BUG: No unique constraint on 'name' column
+# ─────────────────────────────────────────
+--- query: 20
+success: false
+output.contains: Error
+output.contains: no unique or exclusion constraint

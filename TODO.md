@@ -25,6 +25,7 @@
 | Developer Experience (DX) | core, adapter | 🟡 Backlog |
 | NQL v2.0 Parser (@dbsp/nql) | nql | ✅ Complete |
 | NQL CLI Migration (NQLM) | cli, examples | 🟡 Ready |
+| Logical/Physical Naming (ARCH-003) | cli, examples | ✅ Complete |
 
 ## Scope-Specific Backlogs
 

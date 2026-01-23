@@ -7,6 +7,97 @@
 import type { ResolvedSchema } from '@dbsp/core';
 
 /**
+ * Levenshtein distance between two strings.
+ * Used for fuzzy matching suggestions.
+ */
+export function levenshtein(a: string, b: string): number {
+	const aLower = a.toLowerCase();
+	const bLower = b.toLowerCase();
+
+	if (aLower === bLower) return 0;
+	if (aLower.length === 0) return bLower.length;
+	if (bLower.length === 0) return aLower.length;
+
+	// Create matrix with proper initialization
+	const matrix: number[][] = Array.from({ length: aLower.length + 1 }, (_, i) =>
+		Array.from({ length: bLower.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)),
+	);
+
+	// Fill matrix
+	for (let i = 1; i <= aLower.length; i++) {
+		for (let j = 1; j <= bLower.length; j++) {
+			const cost = aLower[i - 1] === bLower[j - 1] ? 0 : 1;
+			const deletion = matrix[i - 1]?.[j] ?? 0;
+			const insertion = matrix[i]?.[j - 1] ?? 0;
+			const substitution = matrix[i - 1]?.[j - 1] ?? 0;
+			matrix[i]![j] = Math.min(deletion + 1, insertion + 1, substitution + cost);
+		}
+	}
+
+	return matrix[aLower.length]?.[bLower.length] ?? 0;
+}
+
+/**
+ * Find the closest match from a list of candidates using Levenshtein distance.
+ * Returns null if no match is found within the threshold.
+ *
+ * @param input - The input string to match
+ * @param candidates - List of valid candidates
+ * @param maxDistance - Maximum Levenshtein distance for a suggestion (default: 3)
+ */
+export function suggestClosestMatch(
+	input: string,
+	candidates: string[],
+	maxDistance = 3,
+): string | null {
+	if (!input || candidates.length === 0) return null;
+
+	const matches = candidates
+		.map((c) => ({ name: c, distance: levenshtein(input, c) }))
+		.filter((m) => m.distance <= maxDistance && m.distance > 0)
+		.sort((a, b) => a.distance - b.distance);
+
+	return matches[0]?.name ?? null;
+}
+
+/**
+ * Enhance an error message with a suggestion if the error is about an unknown table/column.
+ *
+ * @param error - The error message
+ * @param tableNames - Available table names
+ * @param columnNames - Available column names (from current table context)
+ */
+export function enhanceErrorWithSuggestion(
+	error: string,
+	tableNames: string[],
+	columnNames: string[] = [],
+): string {
+	// Check for unknown table error
+	const tableMatch = error.match(/Unknown table:\s*(\w+)/i);
+	if (tableMatch?.[1]) {
+		const unknownTable = tableMatch[1];
+		const suggestion = suggestClosestMatch(unknownTable, tableNames);
+		if (suggestion) {
+			return `${error}\n\nDid you mean '${suggestion}'?`;
+		}
+	}
+
+	// Check for unknown column error (if we have column context)
+	if (columnNames.length > 0) {
+		const columnMatch = error.match(/Unknown column:\s*(\w+)/i);
+		if (columnMatch?.[1]) {
+			const unknownColumn = columnMatch[1];
+			const suggestion = suggestClosestMatch(unknownColumn, columnNames);
+			if (suggestion) {
+				return `${error}\n\nDid you mean '${suggestion}'?`;
+			}
+		}
+	}
+
+	return error;
+}
+
+/**
  * Completion suggestion
  */
 export interface CompletionSuggestion {
@@ -145,6 +236,13 @@ const DOT_COMMANDS: CompletionSuggestion[] = [
  * Natural query keywords for completion
  */
 const KEYWORDS: CompletionSuggestion[] = [
+	// Pipe operator (NQL syntax)
+	{
+		text: '|',
+		label: '|',
+		type: 'keyword',
+		description: 'Pipe to next clause',
+	},
 	{
 		text: 'where',
 		label: 'where',
@@ -152,10 +250,22 @@ const KEYWORDS: CompletionSuggestion[] = [
 		description: 'Filter results',
 	},
 	{
-		text: 'include',
-		label: 'include',
+		text: 'with',
+		label: 'with',
 		type: 'keyword',
 		description: 'Include related data',
+	},
+	{
+		text: 'select',
+		label: 'select',
+		type: 'keyword',
+		description: 'Select columns',
+	},
+	{
+		text: 'group',
+		label: 'group',
+		type: 'keyword',
+		description: 'Group by columns',
 	},
 	{ text: 'limit', label: 'limit', type: 'keyword', description: 'Limit rows' },
 	{
@@ -165,8 +275,8 @@ const KEYWORDS: CompletionSuggestion[] = [
 		description: 'Skip rows',
 	},
 	{
-		text: 'order by',
-		label: 'order by',
+		text: 'order',
+		label: 'order',
 		type: 'keyword',
 		description: 'Sort results',
 	},
@@ -388,8 +498,8 @@ export class CompletionProvider {
 		const contextWords = endsWithSpace ? words : words.slice(0, -1);
 		const lastContextWord = contextWords[contextWords.length - 1];
 
-		// After 'include' - expect relation (with table context)
-		if (lastContextWord === 'include') {
+		// After 'with' - expect relation (with table context)
+		if (lastContextWord === 'with') {
 			const table = this.findTableInInput(words);
 			return { expecting: 'relation', partial, table };
 		}
