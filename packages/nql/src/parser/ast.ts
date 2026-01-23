@@ -1,0 +1,360 @@
+/**
+ * NQL Abstract Syntax Tree Types
+ *
+ * These types represent the parsed structure of NQL queries,
+ * independent of the underlying database schema.
+ */
+
+// ============================================================
+// TOP-LEVEL PROGRAM
+// ============================================================
+
+/**
+ * A complete NQL program with let bindings and statements
+ * Supports multiple statements for mutation chaining
+ */
+export interface NqlProgram {
+	type: 'program';
+	bindings: NqlLetBinding[];
+	statements: NqlStatement[];
+}
+
+export interface NqlLetBinding {
+	type: 'let';
+	name: string;
+	query: NqlQuery;
+}
+
+export type NqlStatement = NqlQuery | NqlMutationPipeline;
+
+// ============================================================
+// QUERIES
+// ============================================================
+
+export interface NqlQuery {
+	type: 'query';
+	table: string;
+	clauses: NqlClause[];
+}
+
+// ============================================================
+// MUTATION PIPELINE (with optional RETURNING via pipe)
+// ============================================================
+
+export interface NqlMutationPipeline {
+	type: 'mutationPipeline';
+	mutation: NqlMutation;
+	clauses: NqlMutationClause[];
+}
+
+export type NqlMutation = NqlInsert | NqlUpdate | NqlDelete | NqlUpsert;
+
+export type NqlMutationClause = NqlSelectClause | NqlBindClause;
+
+// ============================================================
+// QUERY CLAUSES
+// ============================================================
+
+export type NqlClause =
+	| NqlWhereClause
+	| NqlSelectClause
+	| NqlWithClause
+	| NqlGroupByClause
+	| NqlOrderByClause
+	| NqlLimitClause
+	| NqlOffsetClause;
+
+/**
+ * Where clause - position determines compilation:
+ * - Before `group by` → SQL WHERE (aggregates forbidden)
+ * - After `group by` → SQL HAVING (aggregates allowed)
+ */
+export interface NqlWhereClause {
+	type: 'where';
+	condition: NqlExpression;
+}
+
+export interface NqlSelectClause {
+	type: 'select';
+	distinct: boolean;
+	items: NqlSelectItem[];
+}
+
+export interface NqlWithClause {
+	type: 'with';
+	joins: NqlJoinSpec[];
+}
+
+export interface NqlGroupByClause {
+	type: 'groupBy';
+	expressions: NqlExpression[];
+}
+
+export interface NqlOrderByClause {
+	type: 'orderBy';
+	items: NqlOrderItem[];
+}
+
+export interface NqlLimitClause {
+	type: 'limit';
+	count: number;
+}
+
+export interface NqlOffsetClause {
+	type: 'offset';
+	count: number;
+}
+
+/**
+ * Capture mutation result into a variable (for chained mutations)
+ * Used with `bind` keyword: `insert ... | bind result | ...`
+ */
+export interface NqlBindClause {
+	type: 'bind';
+	name: string;
+}
+
+// ============================================================
+// SELECT ITEMS
+// ============================================================
+
+export type NqlSelectItem =
+	| NqlSelectStar
+	| NqlSelectRelationStar
+	| NqlSelectExpression;
+
+export interface NqlSelectStar {
+	type: 'star';
+}
+
+export interface NqlSelectRelationStar {
+	type: 'relationStar';
+	relation: string[];
+}
+
+export interface NqlSelectExpression {
+	type: 'expression';
+	expression: NqlExpression;
+	alias?: string;
+}
+
+// ============================================================
+// JOIN SPECIFICATION
+// ============================================================
+
+export interface NqlJoinSpec {
+	relation: string;
+	params?: NqlJoinParam[];
+	via?: string; // Disambiguation when multiple FKs to same table
+	condition?: NqlExpression;
+}
+
+export interface NqlJoinParam {
+	name: string;
+	value: NqlLiteral;
+}
+
+// ============================================================
+// ORDER ITEM
+// ============================================================
+
+export interface NqlOrderItem {
+	expression: NqlExpression;
+	direction: 'asc' | 'desc';
+}
+
+// ============================================================
+// EXPRESSIONS
+// ============================================================
+
+export type NqlExpression =
+	| NqlBinaryExpression
+	| NqlUnaryExpression
+	| NqlComparisonExpression
+	| NqlInExpression
+	| NqlBetweenExpression
+	| NqlIsNullExpression
+	| NqlExistsExpression
+	| NqlFunctionCall
+	| NqlPathExpression
+	| NqlLiteral
+	| NqlSubquery
+	| NqlVariableRef;
+
+export interface NqlBinaryExpression {
+	type: 'binary';
+	operator: 'and' | 'or' | '+' | '-' | '*' | '/' | '%';
+	left: NqlExpression;
+	right: NqlExpression;
+}
+
+export interface NqlUnaryExpression {
+	type: 'unary';
+	operator: 'not' | '-';
+	operand: NqlExpression;
+}
+
+export interface NqlComparisonExpression {
+	type: 'comparison';
+	operator: '=' | '!=' | '<' | '>' | '<=' | '>=' | 'like';
+	left: NqlExpression;
+	right: NqlExpression;
+}
+
+export interface NqlInExpression {
+	type: 'in';
+	negated: boolean;
+	expression: NqlExpression;
+	values: NqlExpression[] | NqlSubquery | NqlDateRangeLiteral;
+}
+
+/**
+ * BETWEEN is a ternary operator: expr BETWEEN low AND high
+ */
+export interface NqlBetweenExpression {
+	type: 'between';
+	expression: NqlExpression;
+	low: NqlExpression;
+	high: NqlExpression;
+}
+
+/**
+ * IS NULL / IS NOT NULL check
+ */
+export interface NqlIsNullExpression {
+	type: 'isNull';
+	expression: NqlExpression;
+	negated: boolean;
+}
+
+export interface NqlExistsExpression {
+	type: 'exists';
+	negated: boolean;
+	subquery: NqlSubquery;
+}
+
+export interface NqlFunctionCall {
+	type: 'function';
+	name: string;
+	args: NqlExpression[];
+	// Note: Window functions (OVER clause) deferred to v2.1
+}
+
+export interface NqlPathExpression {
+	type: 'path';
+	segments: string[];
+}
+
+export interface NqlSubquery {
+	type: 'subquery';
+	query: NqlQuery;
+}
+
+/**
+ * Reference to a let-bound variable
+ */
+export interface NqlVariableRef {
+	type: 'variable';
+	name: string;
+}
+
+// ============================================================
+// LITERALS
+// ============================================================
+
+export type NqlLiteral =
+	| NqlStringLiteral
+	| NqlNumberLiteral
+	| NqlBooleanLiteral
+	| NqlNullLiteral
+	| NqlDateRangeLiteral;
+
+export interface NqlStringLiteral {
+	type: 'string';
+	value: string;
+}
+
+export interface NqlNumberLiteral {
+	type: 'number';
+	value: number;
+}
+
+export interface NqlBooleanLiteral {
+	type: 'boolean';
+	value: boolean;
+}
+
+export interface NqlNullLiteral {
+	type: 'null';
+}
+
+/**
+ * Natural language date range (e.g., 'last 7 days', 'this month')
+ * Semantic layer validates and converts to actual dates
+ */
+export interface NqlDateRangeLiteral {
+	type: 'dateRange';
+	value: string;
+}
+
+// ============================================================
+// MUTATIONS
+// ============================================================
+
+export interface NqlInsert {
+	type: 'insert';
+	table: string;
+	assignments: NqlAssignment[];
+}
+
+export interface NqlUpdate {
+	type: 'update';
+	table: string;
+	assignments: NqlAssignment[];
+	where?: NqlExpression;
+}
+
+export interface NqlDelete {
+	type: 'delete';
+	table: string;
+	where?: NqlExpression; // Optional at parse time, semantic layer validates presence
+}
+
+export interface NqlUpsert {
+	type: 'upsert';
+	table: string;
+	conflictColumns: string[];
+	assignments: NqlAssignment[];
+	where?: NqlExpression;
+}
+
+export interface NqlAssignment {
+	column: string;
+	value: NqlExpression;
+}
+
+// ============================================================
+// HELPER FUNCTIONS
+// ============================================================
+
+export function isQuery(stmt: NqlStatement): stmt is NqlQuery {
+	return stmt.type === 'query';
+}
+
+export function isMutationPipeline(
+	stmt: NqlStatement,
+): stmt is NqlMutationPipeline {
+	return stmt.type === 'mutationPipeline';
+}
+
+export function isMutation(node: unknown): node is NqlMutation {
+	if (typeof node !== 'object' || node === null) return false;
+	const type = (node as { type?: string }).type;
+	return ['insert', 'update', 'delete', 'upsert'].includes(type ?? '');
+}
+
+export function isLiteral(expr: NqlExpression): expr is NqlLiteral {
+	return ['string', 'number', 'boolean', 'null', 'dateRange'].includes(
+		expr.type,
+	);
+}

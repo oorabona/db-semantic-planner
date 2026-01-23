@@ -9,8 +9,8 @@ description: Project-specific patterns, gotchas, and learnings for db-semantic-p
 
 **Vision:** Semantic query planning for databases - intent-first approach
 **Generated:** 2026-01-06
-**Updated:** 2026-01-20
-**Phase:** P2 Complete (Multi-dialect capabilities), AUD-004 Complete (Compiler refactoring)
+**Updated:** 2026-01-23
+**Phase:** P2 Complete, CLI-NQL Complete, NQL v2.0 Parser Complete
 
 ## Architecture: Ports & Adapters
 
@@ -31,6 +31,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | adapter | `packages/adapter-kysely` | SQL generation, Kysely integration, multi-tenant |
 | cli | `packages/cli` | Code generation, schema verification, REPL |
 | mcp-server | `packages/mcp-server` | AI assistant integration via MCP protocol |
+| nql | `packages/nql` | NQL v2.0 parser (Chevrotain, IntentAST output) |
 
 ## Tech Stack
 
@@ -247,6 +248,65 @@ registerComplexWhereHandlers({
 - Establishes extensibility pattern first, logic extraction can happen later
 
 **When to apply:** Any large switch statement that dispatches on a `kind` or `type` field.
+
+### 12. Recursive CTE in EXISTS Requires sql Template (2026-01-21)
+
+**Context:** Implementing `ancestors`/`descendants` traversal via EXISTS subquery with inline recursive CTE.
+
+**Problem:** Kysely's expression builder (`eb`) doesn't support inline recursive CTEs within EXISTS. The `withRecursive()` method only works at the top query level, not nested within an EXISTS clause.
+
+**Solution:** Use `sql` template directly (documented exception to "no raw SQL" rule). This is allowed because:
+1. The recursive CTE pattern cannot be expressed via expression builder
+2. All identifiers come from trusted schema (validated at ORM layer)
+3. Column references use `sql.ref()` for proper parameterization
+
+**Pattern:**
+```typescript
+// compileRecursiveExists uses sql template - ALLOWED EXCEPTION
+const existsSql = sql`EXISTS (
+  WITH RECURSIVE ${sql.raw(cteName)}(id, ${sql.raw(fkCol)}, _depth) AS (
+    SELECT id, ${sql.raw(fkCol)}, 1 AS _depth
+    FROM ${tableName}
+    WHERE id = ${sql.ref(`${sourceAlias}.${fkCol}`)}
+    UNION ALL
+    SELECT t.id, t.${sql.raw(fkCol)}, r._depth + 1
+    FROM ${tableName} t
+    INNER JOIN ${sql.raw(cteName)} r ON ...
+    WHERE r._depth < ${maxDepth}
+  )
+  SELECT 1 FROM ${sql.raw(cteName)}
+  WHERE ${cteWhereClause}
+)`;
+```
+
+**When to apply:** Any recursive tree traversal in WHERE context (ancestors, descendants, hierarchies).
+
+### 13. NQL v2.0 Parser Architecture (2026-01-23)
+
+**Context:** Building standalone NQL parser package (`@dbsp/nql`).
+
+**Key decisions:**
+- Chevrotain-based (same as CLI parser), no codegen needed
+- Pipeline-first syntax: `table | clause | clause` (reads), SQL-style mutations
+- Typed expressions output to IntentAST (no raw SQL ever)
+
+**Layered architecture:**
+1. **Lexer** (`src/lexer/`) — 35+ tokens, handles quoted identifiers, escape sequences
+2. **Parser** (`src/parser/`) — CST generation via Chevrotain grammar
+3. **Visitor** (`src/semantic/`) — CST → NQL AST transformation
+4. **Compiler** (`src/compiler/`) — NQL AST → IntentAST
+
+**Token naming gotcha:** Rename tokens that shadow JavaScript globals.
+
+```typescript
+// BAD: Set shadows global Set
+export const Set = createToken({ name: 'Set', pattern: /set\b/i });
+
+// GOOD: SetKeyword avoids shadowing
+export const SetKeyword = createToken({ name: 'Set', pattern: /set\b/i });
+```
+
+**Why this matters:** Biome's `noShadowRestrictedNames` catches this. The token `name` property stays as `'Set'` for Chevrotain, but the export name changes.
 
 ---
 
