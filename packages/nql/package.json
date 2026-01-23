@@ -1,0 +1,50 @@
+{
+	"name": "@dbsp/nql",
+	"version": "0.1.0",
+	"description": "NQL (Natural Query Language) - A human and LLM-friendly query language for databases",
+	"type": "module",
+	"main": "./dist/index.js",
+	"module": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"import": "./dist/index.js",
+			"types": "./dist/index.d.ts"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsup",
+		"dev": "tsup --watch",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check src tests",
+		"lint:fix": "biome check --write src tests"
+	},
+	"dependencies": {
+		"chevrotain": "catalog:"
+	},
+	"devDependencies": {
+		"@dbsp/core": "workspace:*",
+		"tsup": "catalog:",
+		"typescript": "catalog:",
+		"vitest": "catalog:"
+	},
+	"peerDependencies": {
+		"@dbsp/core": "workspace:*"
+	},
+	"keywords": [
+		"nql",
+		"query-language",
+		"database",
+		"parser",
+		"sql",
+		"natural-language",
+		"llm-friendly"
+	],
+	"author": "",
+	"license": "MIT"
+}

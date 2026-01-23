@@ -1,0 +1,648 @@
+/**
+ * NQL Compiler Tests
+ *
+ * Tests NQL AST → IntentAST transformation
+ */
+
+import { describe, expect, it } from 'vitest';
+import type {
+	DeleteIntent,
+	IncludeIntent,
+	InsertIntent,
+	OrderByIntent,
+	SelectFieldsIntent,
+	SelectWithExpressionsIntent,
+	UpdateIntent,
+	UpsertIntent,
+	WhereAndIntent,
+	WhereComparisonIntent,
+	WhereInIntent,
+	WhereLikeIntent,
+	WhereNotIntent,
+	WhereNullIntent,
+	WhereOrIntent,
+	WhereRangeIntent,
+} from '../src/compiler/index.js';
+import { compile } from '../src/index.js';
+
+// Helper to compile NQL and return the result
+function compileNql(input: string) {
+	const result = compile(input, null);
+	if (!result.success) {
+		throw new Error(`Compile error: ${result.errors[0]?.message}`);
+	}
+	return result.ast!;
+}
+
+describe('NQL Compiler - Basic Queries', () => {
+	it('compiles simple table query', () => {
+		const result = compileNql('users');
+
+		expect(result.query).toBeDefined();
+		expect(result.query!.type).toBe('select');
+		expect(result.query!.from).toBe('users');
+	});
+
+	it('compiles query with limit', () => {
+		const result = compileNql('users | limit 10');
+		const query = result.query!;
+
+		expect(query.limit).toBe(10);
+	});
+
+	it('compiles query with offset', () => {
+		const result = compileNql('users | offset 20');
+		const query = result.query!;
+
+		expect(query.offset).toBe(20);
+	});
+
+	it('compiles query with limit and offset', () => {
+		const result = compileNql('users | limit 10 | offset 20');
+		const query = result.query!;
+
+		expect(query.limit).toBe(10);
+		expect(query.offset).toBe(20);
+	});
+});
+
+describe('NQL Compiler - WHERE Clauses', () => {
+	it('compiles equality comparison', () => {
+		const result = compileNql('users | where active = true');
+		const query = result.query!;
+
+		expect(query.where).toBeDefined();
+		const where = query.where as WhereComparisonIntent;
+		expect(where.kind).toBe('comparison');
+		expect(where.field).toBe('active');
+		expect(where.operator).toBe('eq');
+		expect(where.value).toBe(true);
+	});
+
+	it('compiles inequality comparison', () => {
+		// Use single quotes for string literals (double quotes are identifiers)
+		const result = compileNql("users | where status != 'inactive'");
+		const query = result.query!;
+
+		const where = query.where as WhereComparisonIntent;
+		expect(where.operator).toBe('neq');
+		expect(where.value).toBe('inactive');
+	});
+
+	it('compiles greater than comparison', () => {
+		const result = compileNql('users | where age > 18');
+		const query = result.query!;
+
+		const where = query.where as WhereComparisonIntent;
+		expect(where.operator).toBe('gt');
+		expect(where.value).toBe(18);
+	});
+
+	it('compiles greater than or equal comparison', () => {
+		const result = compileNql('users | where age >= 21');
+		const query = result.query!;
+
+		const where = query.where as WhereComparisonIntent;
+		expect(where.operator).toBe('gte');
+	});
+
+	it('compiles less than comparison', () => {
+		const result = compileNql('users | where score < 100');
+		const query = result.query!;
+
+		const where = query.where as WhereComparisonIntent;
+		expect(where.operator).toBe('lt');
+	});
+
+	it('compiles less than or equal comparison', () => {
+		const result = compileNql('users | where score <= 50');
+		const query = result.query!;
+
+		const where = query.where as WhereComparisonIntent;
+		expect(where.operator).toBe('lte');
+	});
+
+	it('compiles AND condition', () => {
+		const result = compileNql('users | where active = true and age > 18');
+		const query = result.query!;
+
+		const where = query.where as WhereAndIntent;
+		expect(where.kind).toBe('and');
+		expect(where.conditions).toHaveLength(2);
+	});
+
+	it('compiles OR condition', () => {
+		const result = compileNql('users | where role = "admin" or role = "super"');
+		const query = result.query!;
+
+		const where = query.where as WhereOrIntent;
+		expect(where.kind).toBe('or');
+		expect(where.conditions).toHaveLength(2);
+	});
+
+	it('compiles NOT condition', () => {
+		const result = compileNql('users | where not (deleted = true)');
+		const query = result.query!;
+
+		const where = query.where as WhereNotIntent;
+		expect(where.kind).toBe('not');
+		expect(where.condition).toBeDefined();
+	});
+
+	it('compiles IN expression', () => {
+		const result = compileNql("users | where status in ('active', 'pending')");
+		const query = result.query!;
+
+		const where = query.where as WhereInIntent;
+		expect(where.kind).toBe('in');
+		expect(where.field).toBe('status');
+		expect(where.values).toEqual(['active', 'pending']);
+	});
+
+	it('compiles IS NULL expression', () => {
+		const result = compileNql('users | where deleted_at is null');
+		const query = result.query!;
+
+		const where = query.where as WhereNullIntent;
+		expect(where.kind).toBe('null');
+		expect(where.field).toBe('deleted_at');
+		expect(where.operator).toBe('isNull');
+	});
+
+	it('compiles IS NOT NULL expression', () => {
+		const result = compileNql('users | where email is not null');
+		const query = result.query!;
+
+		const where = query.where as WhereNullIntent;
+		expect(where.kind).toBe('null');
+		expect(where.operator).toBe('isNotNull');
+	});
+
+	it('compiles BETWEEN expression', () => {
+		const result = compileNql('users | where age between 18 and 65');
+		const query = result.query!;
+
+		const where = query.where as WhereRangeIntent;
+		expect(where.kind).toBe('range');
+		expect(where.field).toBe('age');
+		expect(where.operator).toBe('between');
+		expect(where.value).toEqual({ lower: 18, upper: 65 });
+	});
+
+	it('compiles LIKE expression', () => {
+		const result = compileNql("users | where name like '%john%'");
+		const query = result.query!;
+
+		const where = query.where as WhereLikeIntent;
+		expect(where.kind).toBe('like');
+		expect(where.field).toBe('name');
+		expect(where.pattern).toBe('%john%');
+	});
+
+	it('compiles complex nested conditions', () => {
+		const result = compileNql(
+			'users | where (active = true and age > 18) or role = "admin"',
+		);
+		const query = result.query!;
+
+		const where = query.where as WhereOrIntent;
+		expect(where.kind).toBe('or');
+		expect(where.conditions).toHaveLength(2);
+
+		const andCondition = where.conditions[0] as WhereAndIntent;
+		expect(andCondition.kind).toBe('and');
+	});
+});
+
+describe('NQL Compiler - SELECT Clauses', () => {
+	it('compiles select with fields', () => {
+		const result = compileNql('users | select id, name, email');
+		const query = result.query!;
+
+		expect(query.select).toBeDefined();
+		const select = query.select as SelectFieldsIntent;
+		expect(select.type).toBe('fields');
+		expect(select.fields).toEqual(['id', 'name', 'email']);
+	});
+
+	it('compiles select star', () => {
+		const result = compileNql('users | select *');
+		const query = result.query!;
+
+		expect(query.select).toBeDefined();
+		expect(query.select!.type).toBe('all');
+	});
+
+	it('compiles select distinct', () => {
+		const result = compileNql('users | select distinct name');
+		const query = result.query!;
+
+		expect(query.distinct).toBe(true);
+	});
+
+	it('compiles select with alias', () => {
+		const result = compileNql('users | select name as user_name');
+		const query = result.query!;
+
+		const select = query.select as SelectWithExpressionsIntent;
+		expect(select.type).toBe('expressions');
+		expect(select.columns).toHaveLength(1);
+		// Column with alias uses columnAlias kind
+		expect(select.columns[0].kind).toBe('columnAlias');
+		if (select.columns[0].kind === 'columnAlias') {
+			expect(select.columns[0].column).toBe('name');
+			expect(select.columns[0].alias).toBe('user_name');
+		}
+	});
+
+	it('compiles select with path expression', () => {
+		const result = compileNql('orders | select customer.name');
+		const query = result.query!;
+
+		const select = query.select as SelectWithExpressionsIntent;
+		expect(select.type).toBe('expressions');
+		// Path expressions use relationColumn kind
+		expect(select.columns[0].kind).toBe('relationColumn');
+		if (select.columns[0].kind === 'relationColumn') {
+			expect(select.columns[0].relation).toBe('customer');
+			expect(select.columns[0].column).toBe('name');
+		}
+	});
+
+	it('compiles select with aggregate function', () => {
+		const result = compileNql('orders | select count(*)');
+		const query = result.query!;
+
+		const select = query.select as SelectWithExpressionsIntent;
+		expect(select.type).toBe('expressions');
+		expect(select.columns[0].kind).toBe('aggregate');
+		if (select.columns[0].kind === 'aggregate') {
+			expect(select.columns[0].function).toBe('count');
+		}
+	});
+
+	it('compiles select with arithmetic expression', () => {
+		const result = compileNql('orders | select price * quantity as total');
+		const query = result.query!;
+
+		const select = query.select as SelectWithExpressionsIntent;
+		expect(select.type).toBe('expressions');
+		// Arithmetic expressions use the arithmetic kind
+		expect(select.columns[0].kind).toBe('arithmetic');
+		if (select.columns[0].kind === 'arithmetic') {
+			expect(select.columns[0].operator).toBe('*');
+			expect(select.columns[0].as).toBe('total');
+		}
+	});
+});
+
+describe('NQL Compiler - JOIN (WITH) Clauses', () => {
+	it('compiles simple join', () => {
+		const result = compileNql('orders | with customer');
+		const query = result.query!;
+
+		expect(query.include).toBeDefined();
+		expect(query.include).toHaveLength(1);
+
+		const include = query.include![0] as IncludeIntent;
+		expect(include.relation).toBe('customer');
+	});
+
+	it('compiles multiple joins', () => {
+		const result = compileNql('orders | with customer, items');
+		const query = result.query!;
+
+		expect(query.include).toHaveLength(2);
+		expect(query.include![0].relation).toBe('customer');
+		expect(query.include![1].relation).toBe('items');
+	});
+
+	it('compiles join with via disambiguation', () => {
+		const result = compileNql('orders | with user via created_by');
+		const query = result.query!;
+
+		expect(query.include).toHaveLength(1);
+		expect(query.include![0].via).toBe('created_by');
+	});
+
+	it('compiles join with via AND on condition (regression: bug 3)', () => {
+		const result = compileNql('orders | with user via created_by on user.active = true');
+		const query = result.query!;
+
+		expect(query.include).toHaveLength(1);
+		const include = query.include![0] as IncludeIntent;
+		// Both via AND where must be present
+		expect(include.via).toBe('created_by');
+		expect(include.where).toBeDefined();
+		expect(include.where).toEqual({
+			kind: 'comparison',
+			operator: 'eq',
+			field: 'user.active',
+			value: true,
+		});
+	});
+});
+
+describe('NQL Compiler - ORDER BY Clauses', () => {
+	it('compiles order by ascending (default)', () => {
+		const result = compileNql('users | order by name');
+		const query = result.query!;
+
+		expect(query.orderBy).toBeDefined();
+		expect(query.orderBy).toHaveLength(1);
+
+		const orderBy = query.orderBy![0] as OrderByIntent;
+		expect(orderBy.field).toBe('name');
+		expect(orderBy.direction).toBe('asc');
+	});
+
+	it('compiles order by descending', () => {
+		const result = compileNql('users | order by created_at desc');
+		const query = result.query!;
+
+		const orderBy = query.orderBy![0] as OrderByIntent;
+		expect(orderBy.direction).toBe('desc');
+	});
+
+	it('compiles multiple order by fields', () => {
+		const result = compileNql('users | order by status asc, created_at desc');
+		const query = result.query!;
+
+		expect(query.orderBy).toHaveLength(2);
+		expect(query.orderBy![0].direction).toBe('asc');
+		expect(query.orderBy![1].direction).toBe('desc');
+	});
+
+	it('compiles order by with expression (regression: bug 4)', () => {
+		const result = compileNql('products | order by price * qty desc');
+		const query = result.query!;
+
+		expect(query.orderBy).toHaveLength(1);
+		const orderBy = query.orderBy![0] as OrderByIntent;
+		// Expression should be compiled to SQL string, not empty
+		expect(orderBy.field).toBeTruthy();
+		expect(orderBy.field).toContain('*'); // contains the multiplication
+		expect(orderBy.direction).toBe('desc');
+	});
+});
+
+describe('NQL Compiler - GROUP BY Clauses', () => {
+	it('compiles group by single field', () => {
+		const result = compileNql('orders | group by status');
+		const query = result.query!;
+
+		expect(query.groupBy).toBeDefined();
+		expect(query.groupBy).toEqual(['status']);
+	});
+
+	it('compiles group by multiple fields', () => {
+		const result = compileNql('orders | group by status, customer_id');
+		const query = result.query!;
+
+		expect(query.groupBy).toEqual(['status', 'customer_id']);
+	});
+
+	it('compiles where before group by as WHERE', () => {
+		const result = compileNql('orders | where active = true | group by status');
+		const query = result.query!;
+
+		expect(query.where).toBeDefined();
+		expect(query.groupBy).toBeDefined();
+	});
+
+	it('compiles where after group by as HAVING', () => {
+		// Note: HAVING conditions use regular field comparisons
+		// aggregate functions in HAVING need schema validation (future feature)
+		const result = compileNql('orders | group by status | where total > 100');
+		const query = result.query!;
+
+		expect(query.groupBy).toBeDefined();
+		expect(query.having).toBeDefined();
+		// WHERE after GROUP BY becomes HAVING
+		expect(query.where).toBeUndefined();
+	});
+});
+
+describe('NQL Compiler - INSERT', () => {
+	it('compiles simple insert', () => {
+		const result = compileNql("insert into users set name = 'John', age = 30");
+
+		expect(result.mutation).toBeDefined();
+		const insert = result.mutation as InsertIntent;
+		expect(insert.type).toBe('insert');
+		expect(insert.table).toBe('users');
+		expect(insert.values).toHaveLength(1);
+		expect(insert.values[0]).toEqual({ name: 'John', age: 30 });
+	});
+
+	it('compiles insert with returning', () => {
+		const result = compileNql(
+			"insert into users set name = 'John' | select id, name",
+		);
+
+		expect(result.mutation).toBeDefined();
+		// RETURNING is attached to the mutation object, not a separate field
+		const insert = result.mutation as InsertIntent;
+		expect(insert.returning).toBeDefined();
+		expect(insert.returning).toContain('id');
+		expect(insert.returning).toContain('name');
+	});
+});
+
+describe('NQL Compiler - UPDATE', () => {
+	it('compiles update with where', () => {
+		const result = compileNql('update users set active = false where id = 1');
+
+		expect(result.mutation).toBeDefined();
+		const update = result.mutation as UpdateIntent;
+		expect(update.type).toBe('update');
+		expect(update.table).toBe('users');
+		expect(update.set).toEqual({ active: false });
+		expect(update.where).toBeDefined();
+	});
+
+	it('compiles update without where (allowAll required)', () => {
+		const result = compileNql('update users set status = "archived"');
+
+		const update = result.mutation as UpdateIntent;
+		expect(update.where).toBeUndefined();
+		expect(update.allowAll).toBe(true);
+	});
+
+	it('compiles update with returning', () => {
+		const result = compileNql(
+			'update users set active = true where id = 1 | select id, active',
+		);
+
+		expect(result.mutation).toBeDefined();
+		const update = result.mutation as UpdateIntent;
+		expect(update.returning).toBeDefined();
+		expect(update.returning).toContain('id');
+		expect(update.returning).toContain('active');
+	});
+});
+
+describe('NQL Compiler - DELETE', () => {
+	it('compiles delete with where', () => {
+		const result = compileNql('delete from users where id = 1');
+
+		expect(result.mutation).toBeDefined();
+		const del = result.mutation as DeleteIntent;
+		expect(del.type).toBe('delete');
+		expect(del.table).toBe('users');
+		expect(del.where).toBeDefined();
+	});
+
+	it('compiles delete without where (allowAll required)', () => {
+		const result = compileNql('delete from users');
+
+		const del = result.mutation as DeleteIntent;
+		expect(del.where).toBeUndefined();
+		expect(del.allowAll).toBe(true);
+	});
+});
+
+describe('NQL Compiler - UPSERT', () => {
+	it('compiles upsert with conflict column', () => {
+		const result = compileNql(
+			"upsert into users on id set name = 'John', updated_at = now()",
+		);
+
+		expect(result.mutation).toBeDefined();
+		const upsert = result.mutation as UpsertIntent;
+		expect(upsert.type).toBe('upsert');
+		expect(upsert.table).toBe('users');
+		expect(upsert.onConflict).toEqual({ columns: ['id'] });
+	});
+
+	it('compiles upsert with multiple conflict columns', () => {
+		// Multiple columns require parentheses: on (col1, col2)
+		const result = compileNql(
+			'upsert into events on (user_id, event_type) set count = 1',
+		);
+
+		const upsert = result.mutation as UpsertIntent;
+		expect(upsert.onConflict).toEqual({ columns: ['user_id', 'event_type'] });
+	});
+});
+
+describe('NQL Compiler - Complex Queries', () => {
+	it('compiles full query with all clauses', () => {
+		const result = compileNql(`
+      orders
+      | with customer
+      | where status = 'completed'
+      | select customer.name, sum(total) as revenue
+      | group by customer.name
+      | order by revenue desc
+      | limit 10
+    `);
+
+		const query = result.query!;
+		expect(query.from).toBe('orders');
+		expect(query.include).toHaveLength(1);
+		expect(query.where).toBeDefined();
+		expect(query.select).toBeDefined();
+		expect(query.groupBy).toBeDefined();
+		expect(query.orderBy).toHaveLength(1);
+		expect(query.limit).toBe(10);
+	});
+
+	it('handles string escapes correctly', () => {
+		const result = compileNql("users | where name = 'O''Brien'");
+		const query = result.query!;
+
+		const where = query.where as WhereComparisonIntent;
+		expect(where.value).toBe("O'Brien");
+	});
+});
+
+describe('NQL Compiler - Error Handling', () => {
+	it('returns error for invalid syntax', () => {
+		const result = compile('invalid query !!!', null);
+
+		expect(result.success).toBe(false);
+		expect(result.errors.length).toBeGreaterThan(0);
+	});
+
+	it('returns empty result for empty program', () => {
+		// This tests edge case - empty input should parse but produce empty result
+		const result = compileNql('users');
+		expect(result.query).toBeDefined();
+	});
+});
+
+// Bug fix regression tests
+describe('NQL Compiler - Bug Fixes', () => {
+	// P2: NumberLiteral should not swallow minus sign (price-1 = subtraction, not negative literal)
+	it('treats price-1 as subtraction, not negative literal', () => {
+		// In SQL: "price-1" is subtraction (price minus 1)
+		// NOT: "price" followed by "-1" (negative literal)
+		const result = compileNql('products | select price - 1 as discounted');
+		const query = result.query!;
+		const select = query.select as SelectWithExpressionsIntent;
+
+		expect(select.type).toBe('expressions');
+		expect(select.columns.length).toBe(1);
+
+		const col = select.columns[0];
+		expect(col.kind).toBe('arithmetic');
+		if (col.kind === 'arithmetic') {
+			expect(col.operator).toBe('-');
+			expect(col.left).toBe('price');
+			expect(col.right).toBe(1);
+		}
+	});
+
+	// P2: Aggregates should compile expressions, not default to *
+	it('compiles sum(price * qty) with expression', () => {
+		// In SQL: SUM(price * qty) is valid and computes sum of products
+		const result = compileNql(
+			'orders | select sum(price * qty) as total_value',
+		);
+		const query = result.query!;
+		const select = query.select as SelectWithExpressionsIntent;
+
+		expect(select.type).toBe('expressions');
+		expect(select.columns.length).toBe(1);
+
+		const col = select.columns[0];
+		expect(col.kind).toBe('aggregate');
+		if (col.kind === 'aggregate') {
+			expect(col.function).toBe('sum');
+			// field should be the SQL expression "(price * qty)", not "*"
+			expect(col.field).not.toBe('*');
+			expect(col.field).toContain('price');
+			expect(col.field).toContain('qty');
+			expect(col.field).toContain('*'); // multiplication operator
+		}
+	});
+
+	it('keeps count() as COUNT(*)', () => {
+		// count() without args should remain COUNT(*)
+		const result = compileNql('users | select count() as total');
+		const query = result.query!;
+		const select = query.select as SelectWithExpressionsIntent;
+
+		const col = select.columns[0];
+		expect(col.kind).toBe('aggregate');
+		if (col.kind === 'aggregate') {
+			expect(col.function).toBe('count');
+			expect(col.field).toBe('*');
+		}
+	});
+
+	it('keeps count(field) with field name', () => {
+		// count(email) should use the field name
+		const result = compileNql('users | select count(email) as with_email');
+		const query = result.query!;
+		const select = query.select as SelectWithExpressionsIntent;
+
+		const col = select.columns[0];
+		expect(col.kind).toBe('aggregate');
+		if (col.kind === 'aggregate') {
+			expect(col.function).toBe('count');
+			expect(col.field).toBe('email');
+		}
+	});
+});

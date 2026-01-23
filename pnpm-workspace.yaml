@@ -34,5 +34,8 @@ catalog:
   # Documentation
   typedoc: ^0.28.6
 
+  # Parser
+  chevrotain: ^11.0.3
+
   # Other
   '@modelcontextprotocol/sdk': ^1.25.2
