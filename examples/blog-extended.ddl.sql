@@ -1,17 +1,3 @@
-drop table if exists "authors" cascade;
-
-drop table if exists "categories" cascade;
-
-drop table if exists "posts" cascade;
-
-drop table if exists "comments" cascade;
-
-drop table if exists "tags" cascade;
-
-drop table if exists "post_tags" cascade;
-
-
-
 create table "authors" ("id" serial primary key, "name" varchar(255) not null, "email" varchar(255) not null unique, "active" boolean default 'true' not null);
 
 create table "categories" ("id" serial primary key, "name" varchar(255) not null, "parent_id" integer);

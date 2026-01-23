@@ -1,0 +1,250 @@
+# Assertions for blog-extended.dbsp
+# Validates output from blog-extended schema queries
+
+# ─────────────────────────────────────────
+# Query 0: !CREATE SCHEMA IF NOT EXISTS ch3_blog_extended;
+# ─────────────────────────────────────────
+--- query: 0
+success: true
+output.contains: Executed SQL
+
+# ─────────────────────────────────────────
+# Query 1: .use ch3_blog_extended
+# ─────────────────────────────────────────
+--- query: 1
+success: true
+output.contains: Using schema: ch3_blog_extended
+
+# ─────────────────────────────────────────
+# Query 2: .import examples/blog-extended.ddl.sql
+# ─────────────────────────────────────────
+--- query: 2
+success: true
+output.contains: Imported
+
+# ─────────────────────────────────────────
+# Query 3: .import examples/blog-extended.seed.sql
+# ─────────────────────────────────────────
+--- query: 3
+success: true
+output.contains: Imported
+
+# ─────────────────────────────────────────
+# Query 4: .tables
+# ─────────────────────────────────────────
+--- query: 4
+success: true
+output.contains: Tables (6)
+output.contains: authors
+output.contains: categories
+output.contains: posts
+output.contains: comments
+output.contains: tags
+output.contains: post_tags
+
+# ─────────────────────────────────────────
+# Query 5: authors
+# ─────────────────────────────────────────
+--- query: 5
+success: true
+sql.contains: from "ch3_blog_extended"."authors"
+output.contains: Rows: 3
+output.contains: Alice Johnson
+output.contains: Bob Smith
+output.contains: Charlie Brown
+
+# ─────────────────────────────────────────
+# Query 6: categories
+# ─────────────────────────────────────────
+--- query: 6
+success: true
+sql.contains: from "ch3_blog_extended"."categories"
+output.contains: Rows: 4
+output.contains: Technology
+output.contains: Web Development
+output.contains: Databases
+output.contains: Lifestyle
+
+# ─────────────────────────────────────────
+# Query 7: tags
+# ─────────────────────────────────────────
+--- query: 7
+success: true
+sql.contains: from "ch3_blog_extended"."tags"
+output.contains: Rows: 5
+output.contains: TypeScript
+output.contains: PostgreSQL
+output.contains: Tutorial
+
+# ─────────────────────────────────────────
+# Query 8: posts
+# ─────────────────────────────────────────
+--- query: 8
+success: true
+sql.contains: from "ch3_blog_extended"."posts"
+output.contains: Rows: 8
+output.contains: TypeScript Fundamentals
+output.contains: PostgreSQL Deep Dive
+
+# ─────────────────────────────────────────
+# Query 9: comments | limit 10
+# ─────────────────────────────────────────
+--- query: 9
+success: true
+sql.contains: from "ch3_blog_extended"."comments"
+sql.contains: limit
+params.equals: [10]
+output.contains: Rows: 10
+output.contains: Great intro!
+output.contains: David
+
+# ─────────────────────────────────────────
+# Query 10: categories | where parentId is null
+# ─────────────────────────────────────────
+--- query: 10
+success: true
+sql.contains: where "t0"."parent_id" is null
+output.contains: Rows: 2
+output.contains: Technology
+output.contains: Lifestyle
+
+# ─────────────────────────────────────────
+# Query 11: categories | with children
+# ─────────────────────────────────────────
+--- query: 11
+success: true
+sql.contains: left join "ch3_blog_extended"."categories" as "t1"
+sql.contains: on "t1"."parent_id" = "t0"."id"
+output.contains: Rows: 5
+output.contains: children.id
+output.contains: children.name
+
+# ─────────────────────────────────────────
+# Query 12: categories | where parentId is null | with children
+# ─────────────────────────────────────────
+--- query: 12
+success: true
+sql.contains: left join
+sql.contains: where "t0"."parent_id" is null
+output.contains: Rows: 3
+output.contains: Technology
+output.contains: Web Development
+output.contains: Databases
+
+# ─────────────────────────────────────────
+# Query 13: posts | where featured = true
+# ─────────────────────────────────────────
+--- query: 13
+success: true
+sql.contains: where "t0"."featured" = $1
+params.equals: [true]
+output.contains: Rows: 2
+output.contains: TypeScript Fundamentals
+output.contains: PostgreSQL Deep Dive
+
+# ─────────────────────────────────────────
+# Query 14: posts | where viewCount > 1000
+# ─────────────────────────────────────────
+--- query: 14
+success: true
+sql.contains: where "t0"."view_count" > $1
+params.equals: [1000]
+output.contains: Rows: 2
+
+# ─────────────────────────────────────────
+# Query 15: posts | where featured = true and viewCount > 1500
+# ─────────────────────────────────────────
+--- query: 15
+success: true
+sql.contains: where
+sql.contains: "t0"."featured" = $1
+sql.contains: "t0"."view_count" > $2
+params.equals: [true, 1500]
+output.contains: Rows: 1
+output.contains: PostgreSQL Deep Dive
+
+# ─────────────────────────────────────────
+# Query 16: authors | where active = true | with posts | where published = true | with comments | where approved = true
+# KNOWN BUG: Nested include with multiple where clauses fails
+# ─────────────────────────────────────────
+--- query: 16
+success: false
+output.contains: Error
+output.contains: column t0.published does not exist
+
+# ─────────────────────────────────────────
+# Query 17: posts | order by viewCount desc
+# ─────────────────────────────────────────
+--- query: 17
+success: true
+sql.contains: order by "t0"."view_count" desc
+output.contains: Rows: 8
+
+# ─────────────────────────────────────────
+# Query 18: posts | order by viewCount desc | limit 3
+# ─────────────────────────────────────────
+--- query: 18
+success: true
+sql.contains: order by "t0"."view_count" desc
+sql.contains: limit
+params.equals: [3]
+output.contains: Rows: 3
+output.contains: PostgreSQL Deep Dive
+output.contains: TypeScript Fundamentals
+output.contains: Advanced TypeScript
+
+# ─────────────────────────────────────────
+# Query 19: insert into categories set name = "DevOps"
+# ─────────────────────────────────────────
+--- query: 19
+success: true
+sql.contains: insert into "ch3_blog_extended"."categories"
+sql.contains: ("name") values ($1)
+output.contains: Rows: 1
+
+# ─────────────────────────────────────────
+# Query 20: insert into tags set name = "kubernetes", slug = "kubernetes"
+# ─────────────────────────────────────────
+--- query: 20
+success: true
+sql.contains: insert into "ch3_blog_extended"."tags"
+sql.contains: ("name", "slug") values ($1, $2)
+output.contains: Rows: 1
+
+# ─────────────────────────────────────────
+# Query 21: update posts set featured = true where id = 1
+# ─────────────────────────────────────────
+--- query: 21
+success: true
+sql.contains: update "ch3_blog_extended"."posts"
+sql.contains: set "featured" = $1
+sql.contains: where "id" = $2
+output.contains: Rows: 1
+
+# ─────────────────────────────────────────
+# Query 22: update posts set view_count = 5000 where id = 1
+# ─────────────────────────────────────────
+--- query: 22
+success: true
+sql.contains: update "ch3_blog_extended"."posts"
+sql.contains: set "view_count" = $1
+sql.contains: where "id" = $2
+output.contains: Rows: 1
+
+# ─────────────────────────────────────────
+# Query 23: delete from posts where published = false
+# EXPECTED: FK constraint violation (posts have related post_tags)
+# ─────────────────────────────────────────
+--- query: 23
+success: false
+output.contains: Error
+output.contains: foreign key constraint
+
+# ─────────────────────────────────────────
+# Query 24: upsert into authors on email set name = "Charlie Updated", email = "charlie@blog.com", active = true
+# ─────────────────────────────────────────
+--- query: 24
+success: true
+sql.contains: insert into "ch3_blog_extended"."authors"
+sql.contains: on conflict ("email") do update
+output.contains: Rows: 1

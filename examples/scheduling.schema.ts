@@ -10,10 +10,10 @@
  *   pnpm dbsp repl --schema ./examples/scheduling.schema.ts
  *   pnpm dbsp generate kysely --schema ./examples/scheduling.schema.ts
  *
- * Example queries:
- *   > room_bookings where booking_period overlaps [2024-01-15,2024-01-20)
- *   > price_tiers where quantity_range contains 25
- *   > rooms include bookings where booking_period containedBy [2024-01-01,2024-02-01)
+ * Example queries (NQL uses logical camelCase names):
+ *   > roomBookings | where bookingPeriod overlaps [2024-01-15,2024-01-20)
+ *   > priceTiers | where quantityRange contains 25
+ *   > rooms | with roomBookings | where bookingPeriod containedBy [2024-01-01,2024-02-01)
  */
 
 import { defineSchema } from '@dbsp/core';
@@ -25,30 +25,30 @@ export default defineSchema({
 		capacity: { type: 'integer' },
 		floor: { type: 'integer' },
 	},
-	room_bookings: {
+	roomBookings: {
 		id: { type: 'integer', primaryKey: true, autoIncrement: true },
-		room_id: { type: 'integer', references: { table: 'rooms', onDelete: 'CASCADE' }, index: true },
-		booked_by: { type: 'string' },
-		booking_period: { type: 'daterange' }, // PostgreSQL daterange
+		roomId: { type: 'integer', references: { table: 'rooms', onDelete: 'CASCADE' }, index: true },
+		bookedBy: { type: 'string' },
+		bookingPeriod: { type: 'daterange' }, // PostgreSQL daterange
 		purpose: { type: 'string', nullable: true },
 	},
 	events: {
 		id: { type: 'integer', primaryKey: true, autoIncrement: true },
 		title: { type: 'string' },
-		room_id: { type: 'integer', references: { table: 'rooms', onDelete: 'CASCADE' }, index: true },
-		time_slot: { type: 'tstzrange' }, // PostgreSQL tstzrange
+		roomId: { type: 'integer', references: { table: 'rooms', onDelete: 'CASCADE' }, index: true },
+		timeSlot: { type: 'tstzrange' }, // PostgreSQL tstzrange
 		organizer: { type: 'string' },
-		max_attendees: { type: 'integer', nullable: true },
+		maxAttendees: { type: 'integer', nullable: true },
 	},
-	price_tiers: {
+	priceTiers: {
 		id: { type: 'integer', primaryKey: true, autoIncrement: true },
-		product_name: { type: 'string', index: true },
-		quantity_range: { type: 'int4range' }, // PostgreSQL int4range
-		unit_price: { type: 'decimal' },
+		productName: { type: 'string', index: true },
+		quantityRange: { type: 'int4range' }, // PostgreSQL int4range
+		unitPrice: { type: 'decimal' },
 	},
 });
 // Relations auto-inferred from `references`:
-// - rooms.room_bookings (hasMany)
+// - rooms.roomBookings (hasMany)
 // - rooms.events (hasMany)
-// - room_bookings.room (belongsTo)
+// - roomBookings.room (belongsTo)
 // - events.room (belongsTo)

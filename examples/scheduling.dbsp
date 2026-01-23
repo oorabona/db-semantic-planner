@@ -58,8 +58,8 @@ rooms | with roomBookings | where bookingPeriod overlaps [2024-01-22,2024-01-29)
 # 4.6 Mutations (NQL v2: SQL-like syntax)
 # =============================================================================
 
-# Insert a new room
-insert into rooms set name = "Board Room", capacity = 20
+# Insert a new room (floor is required)
+insert into rooms set name = "Board Room", capacity = 20, floor = 2
 
 # Insert a new price tier
 insert into priceTiers set productName = "Widget C", quantityRange = "[1,50)", unitPrice = 15.00
@@ -73,5 +73,5 @@ update events set title = "Team Standup (Updated)" where id = 1
 # Delete past bookings
 delete from roomBookings where id = 99
 
-# Upsert room - insert or update on name conflict
-upsert into rooms on name set name = "Meeting Room", capacity = 12
+# Upsert room - insert or update on name conflict (floor required)
+upsert into rooms on name set name = "Meeting Room", capacity = 12, floor = 1
