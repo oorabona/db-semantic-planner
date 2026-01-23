@@ -116,6 +116,8 @@ export type ExpressionIntent =
 			readonly field: string | '*';
 			readonly as?: string;
 			readonly distinct?: boolean;
+			/** Extra arguments for multi-arg aggregates like string_agg(field, separator) */
+			readonly extraArgs?: readonly unknown[];
 	  }
 	| {
 			readonly kind: 'columnAlias';
@@ -444,18 +446,28 @@ export class NqlCompiler {
 						this.expressionToField(expr.args[0]) ??
 						this.expressionToSql(expr.args[0]);
 				}
+				// Collect extra arguments for multi-arg aggregates (e.g., string_agg)
+				// Use expressionToField first for column refs, fallback to expressionToValue
+				const extraArgs =
+					expr.args.length > 1
+						? expr.args
+								.slice(1)
+								.map((a) => this.expressionToField(a) ?? this.expressionToValue(a))
+						: undefined;
 				return {
 					kind: 'aggregate',
 					function: fn as AggregateFunction,
 					field,
 					as: item.alias,
+					...(extraArgs && { extraArgs }),
 				};
 			}
 			// Non-aggregate function (e.g., now(), upper(), coalesce())
+			// Use expressionToField first for column refs, fallback to expressionToValue
 			return {
 				kind: 'function',
 				name: expr.name,
-				args: expr.args.map((a) => this.expressionToValue(a)),
+				args: expr.args.map((a) => this.expressionToField(a) ?? this.expressionToValue(a)),
 				as: item.alias,
 			};
 		}
@@ -505,6 +517,27 @@ export class NqlCompiler {
 				right: rightField ?? this.expressionToValue(expr.right),
 				as: item.alias,
 			};
+		}
+
+		// Unary minus expression (e.g., "-price")
+		if (expr.type === 'unary') {
+			const unary = expr as NqlUnaryExpression;
+			if (unary.operator === '-') {
+				// Convert -expr to (-1) * expr
+				// Use expressionToField first (returns string), fallback to expressionToValue
+				// This matches binary arithmetic behavior for consistency
+				const operandField = this.expressionToField(unary.operand);
+				return {
+					kind: 'arithmetic',
+					left: -1,
+					operator: '*',
+					right: operandField ?? this.expressionToValue(unary.operand),
+					as: item.alias,
+				};
+			}
+			throw new Error(
+				`Unsupported unary operator in SELECT: ${unary.operator}`,
+			);
 		}
 
 		// All expression types should be handled above
@@ -694,6 +727,17 @@ export class NqlCompiler {
 				};
 			}
 
+			case 'exists': {
+				// EXISTS (subquery) syntax is parsed but not yet fully supported
+				// IntentAST WhereExistsIntent requires a relation name, not arbitrary subqueries
+				// Use: table | with relation | where ... instead
+				throw new Error(
+					'EXISTS (subquery) is not yet supported in NQL. ' +
+						'Use relation-based filtering: table | with relation | where ... ' +
+						'or consider using a correlated subquery pattern.',
+				);
+			}
+
 			default:
 				throw new Error(`Unsupported expression type in WHERE: ${expr.type}`);
 		}
@@ -858,6 +902,27 @@ export class NqlCompiler {
 					$left: this.expressionToValue(binary.left),
 					$right: this.expressionToValue(binary.right),
 				};
+			}
+			case 'unary': {
+				// Unary expression (e.g., -price, -5)
+				const unary = expr as NqlUnaryExpression;
+				if (unary.operator === '-') {
+					const operand = this.expressionToValue(unary.operand);
+					// Optimize: if operand is a number, negate it directly
+					if (typeof operand === 'number') {
+						return -operand;
+					}
+					// Otherwise, represent as multiplication by -1
+					return {
+						$op: '*',
+						$left: -1,
+						$right: operand,
+					};
+				}
+				// 'not' operator shouldn't reach here (handled in compileExpression)
+				throw new Error(
+					`Unsupported unary operator in value context: ${unary.operator}`,
+				);
 			}
 			default:
 				throw new Error(`Cannot convert ${expr.type} to value`);

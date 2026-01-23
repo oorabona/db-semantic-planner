@@ -645,4 +645,68 @@ describe('NQL Compiler - Bug Fixes', () => {
 			expect(col.field).toBe('email');
 		}
 	});
+
+	// P2 Fix: Unary minus support
+	it('compiles unary minus with number literal', () => {
+		// Arrange: NQL query with unary minus on number literal
+		const nql = 'users | where balance < -5';
+
+		// Act: compile to IntentAST
+		const result = compileNql(nql);
+		const query = result.query!;
+		const where = query.where as WhereComparisonIntent;
+
+		// Assert: unary minus on number literal produces negated number directly
+		expect(where.field).toBe('balance');
+		expect(where.operator).toBe('lt');
+		expect(where.value).toBe(-5);
+	});
+
+	it('compiles unary minus with field reference in SELECT', () => {
+		// Arrange: NQL query with unary minus on field reference
+		const nql = 'products | select -price as negated';
+
+		// Act: compile to IntentAST
+		const result = compileNql(nql);
+		const query = result.query!;
+		const select = query.select as SelectWithExpressionsIntent;
+		const col = select.columns[0]!;
+
+		// Assert: unary minus with field produces arithmetic (-1 * field)
+		// Field is returned as string (consistent with binary arithmetic)
+		expect(col.kind).toBe('arithmetic');
+		const arith = col as Extract<typeof col, { kind: 'arithmetic' }>;
+		expect(arith.left).toBe(-1);
+		expect(arith.operator).toBe('*');
+		expect(arith.right).toBe('price'); // string, not { $ref } - matches binary arithmetic
+		expect(arith.as).toBe('negated');
+	});
+
+	// P2 Fix: Multi-arg aggregates preserve extraArgs
+	it('preserves extra arguments for string_agg', () => {
+		// Arrange: NQL query with multi-arg aggregate
+		const nql = "users | select string_agg(name, ',') as names";
+
+		// Act: compile to IntentAST
+		const result = compileNql(nql);
+		const query = result.query!;
+		const select = query.select as SelectWithExpressionsIntent;
+		const col = select.columns[0]!;
+
+		// Assert: extra arguments are preserved in extraArgs field
+		expect(col.kind).toBe('aggregate');
+		const agg = col as Extract<typeof col, { kind: 'aggregate' }>;
+		expect(agg.function).toBe('string_agg');
+		expect(agg.field).toBe('name');
+		expect(agg.extraArgs).toEqual([',']);
+	});
+
+	// P2 Fix: EXISTS gives clear error (error comes from visitor before compiler)
+	it('gives clear error for EXISTS subquery', () => {
+		// Arrange: NQL query with EXISTS subquery (not yet supported)
+		const nql = 'users | where exists (orders | where orders.user_id = users.id)';
+
+		// Act & Assert: compilation throws with clear error message
+		expect(() => compileNql(nql)).toThrow(/subquery/i);
+	});
 });
