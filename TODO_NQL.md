@@ -38,11 +38,11 @@ packages/nql/
 │   ├── semantic/         # CST→AST visitor
 │   ├── compiler/         # NQL AST → IntentAST
 │   └── errors/           # Typed error codes
-└── tests/                # 167 test cases
+└── tests/                # 179 test cases
     ├── lexer.test.ts     # 32 tests
-    ├── parser.test.ts    # 41 tests
+    ├── parser.test.ts    # 49 tests (+8 window/range)
     ├── visitor.test.ts   # 35 tests
-    └── compiler.test.ts  # 59 tests
+    └── compiler.test.ts  # 63 tests (+4 window/range)
 ```
 
 ## Key Features Implemented
@@ -51,6 +51,8 @@ packages/nql/
 - Quoted identifiers: `"order"` for reserved words
 - String escapes: `'O''Brien'` SQL-style
 - Typed expressions: `ColumnAliasIntent`, `AggregateIntent`, `ArithmeticIntent`
+- Window functions: `rank() over (partition by x order by y)`
+- Range operators: `overlaps`, `contains`, `containedBy` with `[start,end)` literals
 - No raw SQL in output (security)
 - Full IntentAST compilation
 
