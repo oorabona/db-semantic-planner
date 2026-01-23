@@ -1,21 +1,14 @@
 /**
  * CLI-020: Result Formatter Component
  *
- * Displays database query results in a formatted table.
+ * Displays database query results in a formatted table using @oclif/table.
  */
 
+import { makeTable } from '@oclif/table';
 import { Box, Text } from 'ink';
 import React from 'react';
+import { config } from '../config.js';
 import type { ExecutionResult } from './db-connection.js';
-
-/** Maximum column width for display */
-const MAX_COL_WIDTH = 30;
-
-/** Truncate string to max length with ellipsis */
-function truncate(value: string, maxLen: number): string {
-	if (value.length <= maxLen) return value;
-	return `${value.slice(0, maxLen - 1)}…`;
-}
 
 /** Format a cell value for display */
 function formatValue(value: unknown): string {
@@ -28,33 +21,6 @@ function formatValue(value: unknown): string {
 	if (Array.isArray(value)) return JSON.stringify(value);
 	if (typeof value === 'object') return JSON.stringify(value);
 	return String(value);
-}
-
-/** Calculate column widths based on content */
-function calculateColumnWidths(
-	columns: string[],
-	rows: Record<string, unknown>[],
-): number[] {
-	const widths = columns.map((col) => col.length);
-
-	for (const row of rows) {
-		columns.forEach((col, idx) => {
-			const value = formatValue(row[col]);
-			const currentWidth = widths[idx] ?? 0;
-			widths[idx] = Math.min(
-				MAX_COL_WIDTH,
-				Math.max(currentWidth, value.length),
-			);
-		});
-	}
-
-	return widths;
-}
-
-/** Pad string to width */
-function padCell(value: string, width: number): string {
-	const truncated = truncate(value, width);
-	return truncated.padEnd(width, ' ');
 }
 
 interface ExecutionResultDisplayProps {
@@ -89,38 +55,46 @@ export function ExecutionResultDisplay({
 	}
 
 	const { columns, rows, rowCount, executionTimeMs, truncated } = result;
-	const widths = calculateColumnWidths(columns, rows);
 
-	// Build separator line
-	const separator = '─'.repeat(widths.reduce((sum, w) => sum + w + 3, 0) - 1);
+	// Get table configuration
+	const tableConfig = config.getTable();
+
+	// Format data for @oclif/table
+	const formattedData = rows.map((row) => {
+		const formatted: Record<string, string> = {};
+		for (const col of columns) {
+			formatted[col] = formatValue(row[col]);
+		}
+		return formatted;
+	});
+
+	// Build column config with configured overflow
+	const columnConfig = columns.map((col) => ({
+		key: col,
+		name: col,
+		overflow: tableConfig.overflow,
+	}));
+
+	// Generate table string using @oclif/table
+	// Map 'none' formatter to identity function (oclif/table doesn't have 'none')
+	const headerFormatter =
+		tableConfig.headerFormatter === 'none'
+			? (h: string) => h
+			: tableConfig.headerFormatter;
+
+	const tableOutput = makeTable({
+		data: formattedData,
+		columns: columnConfig,
+		borderStyle: tableConfig.borderStyle,
+		headerOptions: {
+			formatter: headerFormatter,
+		},
+		padding: tableConfig.padding,
+	});
 
 	return (
 		<Box flexDirection="column" marginY={1}>
-			{/* Header */}
-			<Text color="cyan">
-				│{' '}
-				{columns
-					.map((col, idx) => padCell(col, widths[idx] ?? col.length))
-					.join(' │ ')}{' '}
-				│
-			</Text>
-			<Text color="gray">├{separator}┤</Text>
-
-			{/* Rows */}
-			{rows.map((row, rowIdx) => (
-				<Text key={rowIdx}>
-					│{' '}
-					{columns
-						.map((col, idx) =>
-							padCell(formatValue(row[col]), widths[idx] ?? 10),
-						)
-						.join(' │ ')}{' '}
-					│
-				</Text>
-			))}
-
-			{/* Footer */}
-			<Text color="gray">└{separator}┘</Text>
+			<Text>{tableOutput}</Text>
 			<Text color="green">
 				{rowCount} row{rowCount !== 1 ? 's' : ''} ({executionTimeMs}ms)
 				{truncated && (

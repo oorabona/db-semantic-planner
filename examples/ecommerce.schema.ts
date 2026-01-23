@@ -99,13 +99,26 @@ export default defineSchema(
 				target: 'categories',
 				foreignKey: 'parentId',
 			},
-			'categories.children': {
-				kind: 'hasMany',
-				target: 'categories',
-				foreignKey: 'parentId',
-			},
+					'categories.children': {
+			kind: 'hasMany',
+			target: 'categories',
+			foreignKey: 'parentId',
+		},
+		// Recursive relations for ancestor/descendant traversal
+		'categories.ancestors': {
+			kind: 'hasMany',
+			target: 'categories',
+			foreignKey: 'parentId',
+			recursive: { direction: 'up', through: 'parent', maxDepth: 10 },
+		} as ReturnType<typeof Object.assign>,
+		'categories.descendants': {
+			kind: 'hasMany',
+			target: 'categories',
+			foreignKey: 'parentId',
+			recursive: { direction: 'down', through: 'children', maxDepth: 10 },
+		} as ReturnType<typeof Object.assign>,
 
-			// Orders have two addresses (shipping + billing)
+		// Orders have two addresses (shipping + billing)
 			// Need explicit relations because of multiple FKs to same table
 			'orders.shippingAddress': {
 				kind: 'belongsTo',

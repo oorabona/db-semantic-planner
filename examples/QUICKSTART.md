@@ -157,10 +157,10 @@ id | title           | content                         | user_id
 
 **Filter by equality:**
 ```bash
-pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval "users where name = 'Alice'"
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval "users | where name = 'Alice'"
 ```
 ```
-> users where name = 'Alice'
+> users | where name = 'Alice'
 Main SQL:
 select "t0".* from "users" as "t0" where "t0"."name" = $1
 
@@ -174,10 +174,10 @@ id | name  | email
 
 **Filter by user_id:**
 ```bash
-pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts where user_id = 1'
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts | where user_id = 1'
 ```
 ```
-> posts where user_id = 1
+> posts | where user_id = 1
 Main SQL:
 select "t0".* from "posts" as "t0" where "t0"."user_id" = $1
 
@@ -192,10 +192,10 @@ id | title           | content                 | user_id
 
 **Filter with NULL:**
 ```bash
-pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts where content is null'
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts | where content is null'
 ```
 ```
-> posts where content is null
+> posts | where content is null
 Main SQL:
 select "t0".* from "posts" as "t0" where "t0"."content" is null
 
@@ -207,10 +207,10 @@ id | title           | content | user_id
 
 **Filter by user_id:**
 ```bash
-pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts where user_id = 2'
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts | where user_id = 2'
 ```
 ```
-> posts where user_id = 2
+> posts | where user_id = 2
 Main SQL:
 select "t0".* from "posts" as "t0" where "t0"."user_id" = $1
 
@@ -227,10 +227,10 @@ id | title           | content                         | user_id
 
 **First 2 posts:**
 ```bash
-pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts limit 2'
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts | limit 2'
 ```
 ```
-> posts limit 2
+> posts | limit 2
 Main SQL:
 select "t0".* from "posts" as "t0" limit $1
 
@@ -245,10 +245,10 @@ id | title           | content                 | user_id
 
 **Skip first 2, get next 2:**
 ```bash
-pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts limit 2 offset 2'
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts | limit 2 | offset 2'
 ```
 ```
-> posts limit 2 offset 2
+> posts | limit 2 | offset 2
 Main SQL:
 select "t0".* from "posts" as "t0" limit $1 offset $2
 
@@ -269,10 +269,10 @@ The REPL supports data mutations with a safe dry-run mode by default.
 
 **Insert a new user (dry-run):**
 ```bash
-pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'users insert name = "Diana", email = "diana@example.com"'
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'insert into users set name = "Diana", email = "diana@example.com"'
 ```
 ```
-> users insert name = "Diana", email = "diana@example.com"
+> insert into users set name = "Diana", email = "diana@example.com"
 [DRY-RUN] INSERT (add ! to execute)
 
 SQL:
@@ -283,10 +283,10 @@ Parameters: ["Diana", "diana@example.com"]
 
 **Execute the insert immediately with `!` suffix:**
 ```bash
-pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --exec --eval 'users insert name = "Diana", email = "diana@example.com"!'
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --exec --eval 'insert into users set name = "Diana", email = "diana@example.com"!'
 ```
 ```
-> users insert name = "Diana", email = "diana@example.com"!
+> insert into users set name = "Diana", email = "diana@example.com"!
 INSERT (executed)
 
 SQL:
@@ -297,10 +297,10 @@ Parameters: ["Diana", "diana@example.com"]
 
 **Update a user:**
 ```bash
-pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'users update set name = "Alice Smith" where id = 1'
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'update users set name = "Alice Smith" where id = 1'
 ```
 ```
-> users update set name = "Alice Smith" where id = 1
+> update users set name = "Alice Smith" where id = 1
 [DRY-RUN] UPDATE (add ! to execute)
 
 SQL:
@@ -311,10 +311,10 @@ Parameters: ["Alice Smith", 1]
 
 **Delete a post:**
 ```bash
-pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts delete where id = 5'
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'delete from posts where id = 5'
 ```
 ```
-> posts delete where id = 5
+> delete from posts where id = 5
 [DRY-RUN] DELETE (add ! to execute)
 
 SQL:
@@ -327,10 +327,10 @@ Parameters: [5]
 
 **Upsert (INSERT or UPDATE on conflict):**
 ```bash
-pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'users upsert name = "Alice", email = "alice@example.com" on email do update set name = "Alice Updated"'
+pnpm dbsp repl --schema ./examples/minimal.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'upsert into users on email set name = "Alice", email = "alice@example.com"'
 ```
 ```
-> users upsert name = "Alice", email = "alice@example.com" on email do update set name = "Alice Updated"
+> upsert into users on email set name = "Alice", email = "alice@example.com"
 [DRY-RUN] UPSERT (add ! to execute)
 
 SQL:
@@ -449,7 +449,7 @@ dbsp> tags
 
 **Published posts only:**
 ```
-dbsp> posts where published = true
+dbsp> posts | where published = true
 ```
 ```
 ┌────┬────────────────────────────────────┬───────────┬───────────┐
@@ -466,7 +466,7 @@ dbsp> posts where published = true
 
 **Approved comments:**
 ```
-dbsp> comments where approved = true
+dbsp> comments | where approved = true
 ```
 ```
 ┌────┬─────────┬───────────────┬────────────────────────────────────────┐
@@ -484,7 +484,7 @@ dbsp> comments where approved = true
 
 **Unapproved (spam) comments:**
 ```
-dbsp> comments where approved = false
+dbsp> comments | where approved = false
 ```
 ```
 ┌────┬─────────┬───────────┬────────────────────┐
@@ -501,10 +501,10 @@ dbsp> comments where approved = false
 
 **Authors with their posts:**
 ```bash
-pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'authors include posts'
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'authors | include posts'
 ```
 ```
-> authors include posts
+> authors | include posts
 Main SQL:
 select "t0".*, "t1"."id" as "posts.id", "t1"."title" as "posts.title", ...
 from "authors" as "t0" left join "posts" as "t1" on "t1"."author_id" = "t0"."id"
@@ -526,10 +526,10 @@ id | name       | email          | bio              | posts.id | posts.title
 
 **Posts with comments:**
 ```bash
-pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts include comments'
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts | include comments'
 ```
 ```
-> posts include comments
+> posts | include comments
 Main SQL:
 select "t0".*, "t1"."id" as "comments.id", "t1"."author_name" as "comments.author_name", ...
 from "posts" as "t0" left join "comments" as "t1" on "t1"."post_id" = "t0"."id"
@@ -553,10 +553,10 @@ id | title                              | comments.id | comments.authorName
 
 **Posts with their tags:**
 ```bash
-pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts include tags'
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts | include tags'
 ```
 ```
-> posts include tags
+> posts | include tags
 Main SQL:
 select "t0".*, "t1"."id" as "tags.id", "t1"."name" as "tags.name", "t1"."slug" as "tags.slug"
 from "posts" as "t0"
@@ -584,10 +584,10 @@ id | title                              | tags.id | tags.name      | tags.slug
 
 **Count tags per post:**
 ```bash
-pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'postTags select count(*) group by postId'
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'postTags | group by postId | select count(*)'
 ```
 ```
-> postTags select count(*) group by postId
+> postTags | group by postId | select count(*)
 Main SQL:
 select "t0"."post_id", count(*) as "count" from "post_tags" as "t0" group by "t0"."post_id"
 
@@ -606,10 +606,10 @@ postId | count
 
 **Count posts per author:**
 ```bash
-pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts select count(*) group by authorId'
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts | group by authorId | select count(*)'
 ```
 ```
-> posts select count(*) group by authorId
+> posts | group by authorId | select count(*)
 Main SQL:
 select "t0"."author_id", count(*) as "count" from "posts" as "t0" group by "t0"."author_id"
 
@@ -623,10 +623,10 @@ authorId | count
 
 **Count published posts:**
 ```bash
-pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts where published = true select count(*)'
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts | where published = true | select count(*)'
 ```
 ```
-> posts where published = true select count(*)
+> posts | where published = true | select count(*)
 Main SQL:
 select count(*) as "count" from "posts" as "t0" where "t0"."published" = $1
 
@@ -640,10 +640,10 @@ count
 
 **Count comments per post:**
 ```bash
-pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'comments select count(*) group by postId'
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'comments | group by postId | select count(*)'
 ```
 ```
-> comments select count(*) group by postId
+> comments | group by postId | select count(*)
 Main SQL:
 select "t0"."post_id", count(*) as "count" from "comments" as "t0" group by "t0"."post_id"
 
@@ -661,10 +661,10 @@ postId | count
 
 **Count unique author names in approved comments:**
 ```bash
-pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'comments where approved = true select count(distinct authorName)'
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'comments | where approved = true | select count(distinct authorName)'
 ```
 ```
-> comments where approved = true select count(distinct authorName)
+> comments | where approved = true | select count(distinct authorName)
 Main SQL:
 select count(distinct "t0"."author_name") as "count_author_name" from "comments" as "t0" where "t0"."approved" = $1
 
@@ -678,10 +678,10 @@ countAuthorName
 
 **Select distinct (all columns):**
 ```bash
-pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts select distinct'
+pnpm dbsp repl --schema ./examples/blog.schema.ts --db postgresql://postgres:demo@localhost:5432/demo --eval 'posts | select distinct'
 ```
 ```
-> posts select distinct
+> posts | select distinct
 Main SQL:
 select distinct "t0".* from "posts" as "t0"
 
@@ -693,7 +693,7 @@ Rows: 6
 
 **Insert a new author:**
 ```
-dbsp> authors insert name = "David", email = "david@blog.com"
+dbsp> insert into authors set name = "David", email = "david@blog.com"
 ```
 ```
 [DRY-RUN] INSERT (add ! to execute)
@@ -706,7 +706,7 @@ Parameters: ["David", "david@blog.com"]
 
 **Update an author's bio:**
 ```
-dbsp> authors update set bio = "Tech writer and blogger" where id = 1
+dbsp> update authors set bio = "Tech writer and blogger" where id = 1
 ```
 ```
 [DRY-RUN] UPDATE (add ! to execute)
@@ -719,7 +719,7 @@ Parameters: ["Tech writer and blogger", 1]
 
 **Upsert - insert or update on email conflict:**
 ```
-dbsp> authors upsert name = "Alice", email = "alice@blog.com" on email do update set name = "Alice Updated"
+dbsp> upsert into authors on email set name = "Alice", email = "alice@blog.com"
 ```
 ```
 [DRY-RUN] UPSERT (add ! to execute)
@@ -794,7 +794,7 @@ dbsp> categories
 
 **Root categories (no parent):**
 ```
-dbsp> categories where parent_id is null
+dbsp> categories | where parent_id is null
 ```
 ```
 ┌────┬────────────┬───────────┐
@@ -808,7 +808,7 @@ dbsp> categories where parent_id is null
 
 **Categories with their children:**
 ```
-dbsp> categories include children
+dbsp> categories | include children
 ```
 ```
 ┌────┬─────────────────┬───────────┬──────────────────────────────────────────────────────┐
@@ -824,7 +824,7 @@ dbsp> categories include children
 
 **Root categories with their children:**
 ```
-dbsp> categories where parent_id is null include children
+dbsp> categories | where parent_id is null include children
 ```
 ```
 ┌────┬────────────┬───────────┬──────────────────────────────────────────────────────┐
@@ -875,7 +875,7 @@ dbsp> posts
 
 **Comments (15 total - mix of approved/pending):**
 ```
-dbsp> comments limit 10
+dbsp> comments | limit 10
 ```
 ```
 ┌────┬─────────┬─────────────┬──────────────────────────────┬──────────┐
@@ -899,7 +899,7 @@ dbsp> comments limit 10
 
 **Featured posts:**
 ```
-dbsp> posts where featured = true
+dbsp> posts | where featured = true
 ```
 ```
 ┌────┬────────────────────────────────────┬───────────┬──────────┬────────────┐
@@ -913,7 +913,7 @@ dbsp> posts where featured = true
 
 **Popular posts (> 1000 views):**
 ```
-dbsp> posts where view_count > 1000
+dbsp> posts | where view_count > 1000
 ```
 ```
 ┌────┬────────────────────────────────────┬────────────┐
@@ -928,7 +928,7 @@ dbsp> posts where view_count > 1000
 
 **Featured AND popular:**
 ```
-dbsp> posts where featured = true and view_count > 1500
+dbsp> posts | where featured = true and view_count > 1500
 ```
 ```
 ┌────┬────────────────────────────────┬──────────┬────────────┐
@@ -943,7 +943,7 @@ dbsp> posts where featured = true and view_count > 1500
 
 **Active authors with published posts and approved comments:**
 ```
-dbsp> authors where active = true include posts where published = true include comments where approved = true
+dbsp> authors | where active = true | include posts | where published = true | include comments | where approved = true
 ```
 ```
 ┌────┬─────────────┬────────┬────────────────────────────────────────────────────────────────┐
@@ -958,7 +958,7 @@ dbsp> authors where active = true include posts where published = true include c
 
 **Categories with posts and post counts:**
 ```
-dbsp> categories include posts aggregate count by category_id
+dbsp> categories | include posts | aggregate count by category_id
 ```
 ```
 ┌────┬─────────────────────┬────────────┬───────┐
@@ -975,7 +975,7 @@ dbsp> categories include posts aggregate count by category_id
 
 **Posts by view count (descending):**
 ```
-dbsp> posts order by view_count desc
+dbsp> posts | order by view_count desc
 ```
 ```
 ┌────┬────────────────────────────────────┬────────────┐
@@ -993,7 +993,7 @@ dbsp> posts order by view_count desc
 
 **Top 3 most viewed:**
 ```
-dbsp> posts order by view_count desc limit 3
+dbsp> posts | order by view_count desc | limit 3
 ```
 ```
 ┌────┬────────────────────────────────────┬────────────┐
@@ -1010,7 +1010,7 @@ dbsp> posts order by view_count desc limit 3
 
 **Insert a new category:**
 ```
-dbsp> categories insert name = "DevOps"
+dbsp> insert into categories set name = "DevOps"
 ```
 ```
 [DRY-RUN] INSERT (add ! to execute)
@@ -1023,7 +1023,7 @@ Parameters: ["DevOps"]
 
 **Update a post to be featured:**
 ```
-dbsp> posts update set featured = true where id = 1
+dbsp> update posts set featured = true where id = 1
 ```
 ```
 [DRY-RUN] UPDATE (add ! to execute)
@@ -1036,7 +1036,7 @@ Parameters: [true, 1]
 
 **Upsert author - insert or update on email conflict:**
 ```
-dbsp> authors upsert name = "Charlie", email = "charlie@blog.com", active = true on email do update set name = "Charlie Updated"
+dbsp> upsert into authors on email set name = "Charlie", email = "charlie@blog.com", active = true
 ```
 ```
 [DRY-RUN] UPSERT (add ! to execute)
@@ -1217,7 +1217,7 @@ dbsp> price_tiers where product_name = 'Widget A' and quantity_range contains 25
 
 **Rooms with their upcoming bookings:**
 ```
-dbsp> rooms include room_bookings
+dbsp> rooms | include room_bookings
 ```
 ```
 ┌────┬──────────────────────┬──────────┬───────────────────────────────────────────────────────────┐
@@ -1235,7 +1235,7 @@ dbsp> rooms include room_bookings
 
 **Rooms with bookings that overlap next week:**
 ```
-dbsp> rooms include room_bookings where booking_period overlaps [2024-01-22,2024-01-29)
+dbsp> rooms | include room_bookings | where booking_period overlaps [2024-01-22,2024-01-29)
 ```
 ```
 ┌────┬──────────────────────┬──────────┬───────────────────────────────────────────────────────────┐
@@ -1251,7 +1251,7 @@ dbsp> rooms include room_bookings where booking_period overlaps [2024-01-22,2024
 
 **Insert a new room:**
 ```
-dbsp> rooms insert name = "Board Room", capacity = 20
+dbsp> insert into rooms set name = "Board Room", capacity = 20
 ```
 ```
 [DRY-RUN] INSERT (add ! to execute)
@@ -1264,7 +1264,7 @@ Parameters: ["Board Room", 20]
 
 **Update room capacity:**
 ```
-dbsp> rooms update set capacity = 25 where name = "Conference Room A"
+dbsp> update rooms set capacity = 25 where name = "Conference Room A"
 ```
 ```
 [DRY-RUN] UPDATE (add ! to execute)
@@ -1277,7 +1277,7 @@ Parameters: [25, "Conference Room A"]
 
 **Upsert room - insert or update on name conflict:**
 ```
-dbsp> rooms upsert name = "Meeting Room", capacity = 10 on name do update set capacity = 12
+dbsp> upsert into rooms on name set name = "Meeting Room", capacity = 12
 ```
 ```
 [DRY-RUN] UPSERT (add ! to execute)
@@ -1340,7 +1340,7 @@ dbsp> categories
 
 **Products:**
 ```
-dbsp> products where active = true limit 5
+dbsp> products | where active = true | limit 5
 ```
 ```
 ┌────┬──────────────┬─────────────────────────────┬─────────┬───────┬─────────────┐
@@ -1393,7 +1393,7 @@ dbsp> orders
 
 **Categories with products:**
 ```
-dbsp> categories include products where active = true
+dbsp> categories | include products | where active = true
 ```
 ```
 ┌────┬─────────────────────┬───────────────────────────────────────────────────────────┐
@@ -1414,7 +1414,7 @@ dbsp> categories include products where active = true
 
 **Products with variants:**
 ```
-dbsp> products include variants limit 3
+dbsp> products | include variants | limit 3
 ```
 ```
 ┌────┬──────────────┬─────────────────────────────┬───────────────────────────────────────────┐
@@ -1431,7 +1431,7 @@ dbsp> products include variants limit 3
 
 **Customers with orders and items:**
 ```
-dbsp> customers include orders include order_items
+dbsp> customers | include orders | include order_items
 ```
 ```
 ┌────┬─────────────┬─────────────────────────────────────────────────────────────────────┐
@@ -1514,7 +1514,7 @@ dbsp> products aggregate count by active
 
 **Products with rank by price in category:**
 ```
-dbsp> products select *, rank() over (partition by category_id order by price desc) as price_rank
+dbsp> products | select *, rank() over (partition by category_id order by price desc) as price_rank
 ```
 ```
 ┌────┬──────────────┬─────────────────────────────┬─────────┬─────────────┬────────────┐
@@ -1531,7 +1531,7 @@ dbsp> products select *, rank() over (partition by category_id order by price de
 
 **Running total of orders:**
 ```
-dbsp> orders select order_number, total, sum(total) over (order by created_at) as running_total
+dbsp> orders | select order_number, total, sum(total) over (order by created_at) as running_total
 ```
 ```
 ┌───────────────┬─────────┬───────────────┐
@@ -1551,7 +1551,7 @@ dbsp> orders select order_number, total, sum(total) over (order by created_at) a
 
 **Insert a new category:**
 ```
-dbsp> categories insert name = "Accessories", slug = "accessories"
+dbsp> insert into categories set name = "Accessories", slug = "accessories"
 ```
 ```
 [DRY-RUN] INSERT (add ! to execute)
@@ -1564,7 +1564,7 @@ Parameters: ["Accessories", "accessories"]
 
 **Update product price:**
 ```
-dbsp> products update set price = 29.99 where sku = "WIDGET-001"
+dbsp> update products set price = 29.99 where sku = "WIDGET-001"
 ```
 ```
 [DRY-RUN] UPDATE (add ! to execute)
@@ -1577,7 +1577,7 @@ Parameters: [29.99, "WIDGET-001"]
 
 **Upsert product - insert or update on SKU conflict:**
 ```
-dbsp> products upsert name = "New Widget", sku = "WIDGET-NEW", price = 19.99, categoryId = 1, active = true on sku do update set price = 19.99
+dbsp> upsert into products on sku set name = "New Widget", sku = "WIDGET-NEW", price = 19.99, categoryId = 1, active = true
 ```
 ```
 [DRY-RUN] UPSERT (add ! to execute)
@@ -1621,7 +1621,7 @@ pnpm dbsp repl \
 
 **Categories (hierarchical product taxonomy):**
 ```
-dbsp> categories where active = true
+dbsp> categories | where active = true
 ```
 ```
 ┌────┬───────────────────┬───────────┬──────────┬────────┐
@@ -1643,7 +1643,7 @@ dbsp> categories where active = true
 
 **Products (with soft delete support):**
 ```
-dbsp> products where deletedAt is null
+dbsp> products | where deletedAt is null
 ```
 ```
 ┌────┬────────────────┬────────────────────────────┬────────────┬─────────┐
@@ -1667,7 +1667,7 @@ dbsp> products where deletedAt is null
 
 **Assets (DAM - Digital Asset Management):**
 ```
-dbsp> assets where kind = 'image'
+dbsp> assets | where kind = 'image'
 ```
 ```
 ┌────┬────────────────────────┬────────────┬───────────┐
@@ -1691,7 +1691,7 @@ dbsp> assets where kind = 'image'
 
 **Product images with approval status:**
 ```
-dbsp> productImages where status = 'approved'
+dbsp> productImages | where status = 'approved'
 ```
 ```
 ┌────┬───────────┬─────────┬────────┬──────────┬────────┐
@@ -1711,7 +1711,7 @@ dbsp> productImages where status = 'approved'
 
 **Images by locale with product:**
 ```
-dbsp> productImages where locale = 'en' include product
+dbsp> productImages | where locale = 'en' | include product
 ```
 ```
 ┌────┬───────────┬─────────┬────────┬────────────────────────────┐
@@ -1728,7 +1728,7 @@ dbsp> productImages where locale = 'en' include product
 
 **Product images with asset details:**
 ```
-dbsp> productImages include asset
+dbsp> productImages | include asset
 ```
 ```
 ┌────┬───────────┬─────────┬────────────────────────┬────────────┐
@@ -1748,7 +1748,7 @@ dbsp> productImages include asset
 
 **Smartphones in category 7 (with category details):**
 ```
-dbsp> products where active = true and deletedAt is null and categoryId = 7 include category
+dbsp> products | where active = true and deletedAt is null and categoryId = 7 | include category
 ```
 ```
 ┌────┬────────────────┬────────────────────────────┬─────────────────┐
@@ -1764,7 +1764,7 @@ dbsp> products where active = true and deletedAt is null and categoryId = 7 incl
 
 **Audio products (headphones, earbuds):**
 ```
-dbsp> products where categoryId = 6
+dbsp> products | where categoryId = 6
 ```
 ```
 ┌────┬────────────────┬─────────────────────┬─────────┐
@@ -1786,7 +1786,7 @@ dbsp> products where categoryId = 6
 
 **Root categories only:**
 ```
-dbsp> categories where parentId is null
+dbsp> categories | where parentId is null
 ```
 ```
 ┌────┬───────────────┬──────────┬────────┐
@@ -1802,7 +1802,7 @@ dbsp> categories where parentId is null
 
 **Categories with parent details:**
 ```
-dbsp> categories where parentId is not null include parent
+dbsp> categories | where parentId is not null | include parent
 ```
 ```
 ┌────┬───────────────────┬──────────┬─────────────────┐
@@ -1823,7 +1823,7 @@ dbsp> categories where parentId is not null include parent
 
 **Insert a new category:**
 ```
-dbsp> categories insert name = "Accessories", slug = "accessories", active = true
+dbsp> insert into categories set name = "Accessories", slug = "accessories", active = true
 ```
 ```
 [DRY-RUN] INSERT (add ! to execute)
@@ -1836,7 +1836,7 @@ Parameters: ["Accessories", "accessories", true]
 
 **Soft delete a product (set deletedAt):**
 ```
-dbsp> products update set deletedAt = "2024-12-01T00:00:00Z" where sku = "OLD-PRODUCT"
+dbsp> update products set deletedAt = "2024-12-01T00:00:00Z" where sku = "OLD-PRODUCT"
 ```
 ```
 [DRY-RUN] UPDATE (add ! to execute)
@@ -1849,7 +1849,7 @@ Parameters: ["2024-12-01T00:00:00Z", "OLD-PRODUCT"]
 
 **Upsert product - insert or update on SKU conflict:**
 ```
-dbsp> products upsert title = "New Product", sku = "NEW-SKU-001", categoryId = 1, active = true on sku do update set title = "Updated Product"
+dbsp> upsert into products on sku set title = "New Product", sku = "NEW-SKU-001", categoryId = 1, active = true
 ```
 ```
 [DRY-RUN] UPSERT (add ! to execute)
@@ -1928,10 +1928,10 @@ The REPL supports INSERT, UPDATE, DELETE, and UPSERT operations with a **dry-run
 
 | Operation | Syntax | Example |
 |-----------|--------|---------|
-| INSERT | `<table> insert <col> = <val>, ...` | `users insert name = "Alice", email = "a@e.com"` |
-| UPDATE | `<table> update set <col> = <val> where <cond>` | `users update set name = "Bob" where id = 1` |
-| DELETE | `<table> delete where <cond>` | `posts delete where id = 5` |
-| UPSERT | `<table> upsert <col> = <val> on <col> do nothing\|update` | `users upsert name = "A" on email do nothing` |
+| INSERT | `insert into <table> set <col> = <val>, ...` | `insert into users set name = "Alice", email = "a@e.com"` |
+| UPDATE | `update <table> set <col> = <val> where <cond>` | `update users set name = "Bob" where id = 1` |
+| DELETE | `delete from <table> where <cond>` | `delete from posts where id = 5` |
+| UPSERT | `upsert into <table> on <col> set <col> = <val>, ...` | `upsert into users on email set name = "A", email = "a@e.com"` |
 
 **Key features:**
 
@@ -1953,17 +1953,14 @@ The REPL supports INSERT, UPDATE, DELETE, and UPSERT operations with a **dry-run
 **UPSERT conflict handling:**
 
 ```
-# Do nothing on conflict
-users upsert name = "A", email = "a@e.com" on email do nothing
-
-# Update specific columns on conflict
-users upsert name = "A", email = "a@e.com" on email do update set name = "A Updated"
+# Insert or do nothing on conflict
+upsert into users on email set name = "A", email = "a@e.com"
 
 # Composite conflict columns
-orders upsert ... on (user_id, product_id) do nothing
+upsert into orders on (user_id, product_id) set ...
 ```
 
-### Advanced Query Features (NQL v1)
+### Advanced Query Features (NQL v2)
 
 The REPL supports advanced query features for natural language-style querying:
 
@@ -1973,13 +1970,13 @@ Navigate through relations using dot notation:
 
 ```
 # Filter by related table column (products → category)
-products where category.name = "Electronics"
+products | where category.name = "Electronics"
 
 # Multi-level path (products → category → parent)
-products where category.parent.name = "Electronics"
+products | where category.parent.name = "Electronics"
 
 # Select related columns
-products select title, category.name as categoryName
+products | select title, category.name as categoryName
 ```
 
 #### Subqueries
@@ -1988,13 +1985,13 @@ Use subqueries for complex filtering:
 
 ```
 # Scalar subquery (find products with max price)
-products where price = (products select max(price))
+products | where price = (products | select max(price))
 
 # IN subquery
-users where id in (orders where total > 100 select distinct userId)
+users | where id in (orders | where total > 100 | select distinct userId)
 
 # NOT IN subquery
-categories where id not in (products select categoryId)
+categories | where id not in (products | select categoryId)
 ```
 
 #### Existence Checks
@@ -2003,13 +2000,13 @@ Check for existence of related records:
 
 ```
 # Categories with products
-categories where has products
+categories | where has products
 
 # Categories without products (empty categories)
-categories where not has products
+categories | where not has products
 
 # Users who have made orders
-users where has orders
+users | where has orders
 ```
 
 #### INSERT with FK Lookup
@@ -2018,10 +2015,10 @@ Insert data with foreign key lookup from another table:
 
 ```
 # Insert product with category looked up by name
-products insert title = "New Phone", categoryId = id from categories where name = "Smartphones"
+insert into products set title = "New Phone", categoryId = id from categories | where name = "Smartphones"
 
 # With FOR UPDATE (lock the source row during lookup)
-products insert title = "New Phone", categoryId = id from categories where name = "Smartphones" for update
+insert into products set title = "New Phone", categoryId = id from categories | where name = "Smartphones" for update
 ```
 
 #### Window Functions
@@ -2030,10 +2027,10 @@ Compute rankings and running totals:
 
 ```
 # Rank products by price within category
-products select *, rank() over (partition by categoryId order by price desc) as priceRank
+products | select *, rank() over (partition by categoryId order by price desc) as priceRank
 
 # Running total of order amounts
-orders select *, sum(total) over (order by createdAt) as runningTotal
+orders | select *, sum(total) over (order by createdAt) as runningTotal
 ```
 
 #### Parse Tree Debug
@@ -2044,7 +2041,7 @@ Enable parse tree output to see how queries are interpreted:
 dbsp> .parse on
 ✓ Parse mode: ON - Queries will show parse tree (AST)
 
-dbsp> users where active = true
+dbsp> users | where active = true
 ──────────────────────────────────────────────────
 ParsedQuery {
   table: "users"
@@ -2057,6 +2054,60 @@ ParsedQuery {
 SQL:
 select "users".* from "users" where "users"."active" = $1
 ```
+
+#### Real-World Example: Products with Customer Names
+
+This example shows how to traverse multiple relations in a single query using the e-commerce schema (Chapter 5):
+
+**Question:** "Show products in the Electronics category with customer names who ordered them"
+
+**Key insight:** In our hierarchical category structure, products are in leaf categories (e.g., Laptops), not directly in "Electronics". The path is:
+- `Electronics` (id=1) → `Computers` (id=4) → `Laptops` (id=11) → Products
+
+So we need a 3-level path: `category.parent.parent.name = 'Electronics'`
+
+```
+dbsp> .use ch5_ecommerce
+✓ Schema set to: ch5_ecommerce
+
+dbsp> orderItems | select product.name, order.customer.firstName, order.customer.lastName | where product.category.parent.parent.name = 'Electronics' | limit 5
+```
+
+**Result:**
+
+```
+ product_name    | order_customer_first_name | order_customer_last_name
+-----------------+---------------------------+--------------------------
+ ProBook 15      | Alice                     | Johnson
+ UltraLight 13   | Carol                     | Williams
+ SmartPhone X    | Emma                      | Davis
+ SmartPhone SE   | Bob                       | Smith
+ NoiseCancel Pro | Bob                       | Smith
+```
+
+**SQL Generated:**
+
+```sql
+SELECT
+  "product"."name" AS "product_name",
+  "order_customer"."first_name" AS "order_customer_first_name",
+  "order_customer"."last_name" AS "order_customer_last_name"
+FROM "ch5_ecommerce"."order_items" AS "orderItems"
+LEFT JOIN "ch5_ecommerce"."products" AS "product" ON "orderItems"."product_id" = "product"."id"
+LEFT JOIN "ch5_ecommerce"."categories" AS "product_category" ON "product"."category_id" = "product_category"."id"
+LEFT JOIN "ch5_ecommerce"."categories" AS "product_category_parent" ON "product_category"."parent_id" = "product_category_parent"."id"
+LEFT JOIN "ch5_ecommerce"."categories" AS "product_category_parent_parent" ON "product_category_parent"."parent_id" = "product_category_parent_parent"."id"
+LEFT JOIN "ch5_ecommerce"."orders" AS "order" ON "orderItems"."order_id" = "order"."id"
+LEFT JOIN "ch5_ecommerce"."customers" AS "order_customer" ON "order"."customer_id" = "order_customer"."id"
+WHERE "product_category_parent_parent"."name" = $1
+LIMIT $2
+```
+
+This query demonstrates:
+- **Multi-level path traversal**: `product.category.parent.parent.name` (4 levels!)
+- **Cross-relation column selection**: `order.customer.firstName` (selecting through two relations)
+- **Automatic LEFT JOINs**: NQL handles all the joins transparently
+- **Schema scoping**: The `.use` command prefixes all tables with the schema
 
 ---
 

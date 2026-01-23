@@ -5,6 +5,8 @@
 #   pnpm dbsp repl --schema ./examples/ecommerce.schema.ts \
 #     --db postgresql://postgres:demo@localhost:5432/demo \
 #     --input ./examples/ecommerce.dbsp
+#
+# NQL v2 Syntax: uses pipes (|) between operators
 
 # =============================================================================
 # Setup: Create isolated schema and load data
@@ -27,49 +29,49 @@
 # =============================================================================
 .tables
 categories
-products where active = true limit 5
+products | where active = true | limit 5
 customers
 orders
 
 # =============================================================================
 # 5.4 Complex Relations
 # =============================================================================
-categories include products where active = true
-products include variants limit 3
-customers include orders include orderItems
+categories | include products | where active = true
+products | include variants | limit 3
+customers | include orders | include orderItems
 
 # =============================================================================
 # 5.5 Aggregates on E-Commerce Data
 # =============================================================================
-orders select sum(total) group by status
-orders select count(*) group by customerId
-orders select avg(total)
-products select count(*) group by active
+orders | group by status | select sum(total)
+orders | group by customerId | select count(*)
+orders | select avg(total)
+products | group by active | select count(*)
 
 # =============================================================================
 # 5.6 Window Functions
 # =============================================================================
-products select *, rank() over (partition by categoryId order by price desc) as priceRank
-orders select orderNumber, total, sum(total) over (order by createdAt) as runningTotal
+products | select *, rank() over (partition by categoryId order by price desc) as priceRank
+orders | select orderNumber, total, sum(total) over (order by createdAt) as runningTotal
 
 # =============================================================================
-# 5.7 Mutations (INSERT, UPDATE, DELETE, UPSERT)
+# 5.7 Mutations (NQL v2: SQL-like syntax)
 # =============================================================================
 
 # Insert a new category
-categories insert name = "Accessories", slug = "accessories"
+insert into categories set name = "Accessories", slug = "accessories"
 
 # Insert a new customer
-customers insert name = "John Doe", email = "john@example.com"
+insert into customers set name = "John Doe", email = "john@example.com"
 
 # Update product price
-products update set price = 29.99 where sku = "WIDGET-001"
+update products set price = 29.99 where sku = "WIDGET-001"
 
 # Deactivate out-of-stock products
-products update set active = false where id = 5
+update products set active = false where id = 5
 
 # Delete cancelled orders
-orders delete where status = "cancelled"
+delete from orders where status = "cancelled"
 
 # Upsert product - insert or update on SKU conflict
-products upsert name = "New Widget", sku = "WIDGET-NEW", price = 19.99, categoryId = 1, active = true on sku do update set price = 19.99
+upsert into products on sku set name = "New Widget", sku = "WIDGET-NEW", price = 19.99, categoryId = 1, active = true

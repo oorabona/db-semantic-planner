@@ -5,6 +5,8 @@
 #   pnpm dbsp repl --schema ./examples/blog.schema.ts \
 #     --db postgresql://postgres:demo@localhost:5432/demo \
 #     --input ./examples/blog.dbsp
+#
+# NQL v2 Syntax: uses pipes (|) between operators
 
 # =============================================================================
 # Setup: Create isolated schema and load data
@@ -38,53 +40,53 @@ tags
 # =============================================================================
 # 2.5 Filtering
 # =============================================================================
-posts where published = true
-comments where approved = true
-comments where approved = false
+posts | where published = true
+comments | where approved = true
+comments | where approved = false
 
 # =============================================================================
 # 2.6 Includes (LEFT JOIN)
 # =============================================================================
-authors include posts
-posts include comments
+authors | include posts
+posts | include comments
 
 # =============================================================================
 # 2.7 Many-to-Many Relations (Tags)
 # =============================================================================
-posts include tags
-postTags select count(*) group by postId
+posts | include tags
+postTags | group by postId | select count(*)
 
 # =============================================================================
 # 2.8 Aggregates
 # =============================================================================
-posts select count(*) group by authorId
-posts where published = true select count(*)
-comments select count(*) group by postId
+posts | group by authorId | select count(*)
+posts | where published = true | select count(*)
+comments | group by postId | select count(*)
 
 # =============================================================================
 # 2.9 DISTINCT
 # =============================================================================
-comments where approved = true select count(distinct authorName)
-posts select distinct
+comments | where approved = true | select count(distinct authorName)
+posts | select distinct
 
 # =============================================================================
-# 2.10 Mutations (INSERT, UPDATE, DELETE, UPSERT)
+# 2.10 Mutations (NQL v2: SQL-like syntax)
 # =============================================================================
 
 # Insert a new author
-authors insert name = "David", email = "david@blog.com"
+insert into authors set name = "David", email = "david@blog.com"
 
 # Insert a new tag
-tags insert name = "tutorial"
+insert into tags set name = "tutorial"
 
 # Update an author's bio
-authors update set bio = "Tech writer and blogger" where id = 1
+update authors set bio = "Tech writer and blogger" where id = 1
 
 # Approve a comment
-comments update set approved = true where id = 1
+update comments set approved = true where id = 1
 
 # Delete an unapproved comment
-comments delete where approved = false
+delete from comments where approved = false
 
 # Upsert - insert author or update on email conflict
-authors upsert name = "Alice", email = "alice@blog.com" on email do update set name = "Alice Updated"
+upsert into authors on email set name = "Alice Updated", email = "alice@blog.com"

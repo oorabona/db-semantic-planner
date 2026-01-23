@@ -13,6 +13,7 @@ import type {
 	IncludeIntent,
 	IncludeRecursiveOptions,
 	OrderByIntent,
+	OrderedColumn,
 	QueryIntent,
 	SelectAggregateIntent,
 	SelectIntent,
@@ -346,30 +347,31 @@ export class IntentBuilder<TResult = unknown> {
 	 * Set column selection.
 	 */
 	setColumns(columns: readonly ColumnSpec[]): void {
-		// Separate strings and expressions
-		const fields: string[] = [];
-		const expressions: ExpressionIntent[] = [];
+		// Build ordered columns array (preserves original order)
+		const orderedColumns: OrderedColumn[] = [];
+		let hasExpressions = false;
 
 		for (const col of columns) {
 			if (isExpressionSpec(col)) {
-				expressions.push((col as ExpressionSpec).intent);
+				hasExpressions = true;
+				orderedColumns.push({
+					type: 'expression',
+					expression: (col as ExpressionSpec).intent,
+				});
 			} else {
-				fields.push(col as string);
+				orderedColumns.push({ type: 'field', name: col as string });
 			}
 		}
 
-		// If we have expressions, use SelectWithExpressionsIntent
-		if (expressions.length > 0) {
-			const select: SelectWithExpressionsIntent = {
+		// Use SelectWithExpressionsIntent if we have any expressions
+		if (hasExpressions) {
+			this.state.selectIntent = {
 				type: 'expressions',
-				expressions,
+				columns: orderedColumns,
 			};
-			if (fields.length > 0) {
-				(select as { fields: readonly string[] }).fields = fields;
-			}
-			this.state.selectIntent = select;
 		} else {
-			// Simple fields only
+			// Simple fields only - extract field names
+			const fields = orderedColumns.map((c) => (c as { name: string }).name);
 			this.state.selectIntent = { type: 'fields', fields };
 		}
 	}

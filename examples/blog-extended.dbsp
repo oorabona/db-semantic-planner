@@ -5,6 +5,8 @@
 #   pnpm dbsp repl --schema ./examples/blog-extended.schema.ts \
 #     --db postgresql://postgres:demo@localhost:5432/demo \
 #     --input ./examples/blog-extended.dbsp
+#
+# NQL v2 Syntax: uses pipes (|) between operators
 
 # =============================================================================
 # Setup: Create isolated schema and load data
@@ -30,51 +32,51 @@ authors
 categories
 tags
 posts
-comments limit 10
+comments | limit 10
 
 # =============================================================================
 # 3.3 Hierarchical Categories (Self-Referential)
 # =============================================================================
-categories where parentId is null
-categories include children
-categories where parentId is null include children
+categories | where parentId is null
+categories | include children
+categories | where parentId is null | include children
 
 # =============================================================================
 # 3.4 Featured and Popular Posts
 # =============================================================================
-posts where featured = true
-posts where viewCount > 1000
-posts where featured = true and viewCount > 1500
+posts | where featured = true
+posts | where viewCount > 1000
+posts | where featured = true and viewCount > 1500
 
 # =============================================================================
 # 3.5 Complex Nested Includes
 # =============================================================================
-authors where active = true include posts where published = true include comments where approved = true
+authors | where active = true | include posts | where published = true | include comments | where approved = true
 
 # =============================================================================
 # 3.6 ORDER BY
 # =============================================================================
-posts order by viewCount desc
-posts order by viewCount desc limit 3
+posts | order by viewCount desc
+posts | order by viewCount desc | limit 3
 
 # =============================================================================
-# 3.7 Mutations (INSERT, UPDATE, DELETE, UPSERT)
+# 3.7 Mutations (NQL v2: SQL-like syntax)
 # =============================================================================
 
 # Insert a new category (categories only have id, name, parentId)
-categories insert name = "DevOps"
+insert into categories set name = "DevOps"
 
 # Insert a new tag
-tags insert name = "kubernetes", slug = "kubernetes"
+insert into tags set name = "kubernetes", slug = "kubernetes"
 
 # Update a post to be featured
-posts update set featured = true where id = 1
+update posts set featured = true where id = 1
 
 # Update view count (use snake_case column names for mutations)
-posts update set view_count = 5000 where id = 1
+update posts set view_count = 5000 where id = 1
 
 # Delete draft posts
-posts delete where published = false
+delete from posts where published = false
 
 # Upsert author - insert or update on email conflict
-authors upsert name = "Charlie", email = "charlie@blog.com", active = true on email do update set name = "Charlie Updated"
+upsert into authors on email set name = "Charlie Updated", email = "charlie@blog.com", active = true

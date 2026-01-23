@@ -67,6 +67,7 @@ export type {
 	// Emit composition (DX-005)
 	EmitJoinClause,
 	ExpressionIntent,
+	OrderedColumn,
 	// Include
 	IncludeIntent,
 	InsertIntent,
@@ -84,7 +85,10 @@ export type {
 	RawExpressionIntent,
 	RecursiveAdvancedOptions,
 	RecursiveDedupe,
+	// Recursive EXISTS (CLI-NQL Block 7)
+	RecursiveDirection,
 	RecursiveEmitOptions,
+	RecursiveExistsOptions,
 	RecursiveIntent,
 	RecursiveNodeIdExpr,
 	RecursiveTrackOptions,

@@ -29,16 +29,18 @@
 	"dependencies": {
 		"@dbsp/adapter-kysely": "workspace:*",
 		"@dbsp/core": "workspace:*",
+		"@dbsp/nql": "workspace:*",
 		"@inkjs/ui": "catalog:",
+		"@oclif/table": "^0.5.1",
 		"commander": "catalog:",
 		"ink": "catalog:",
 		"ink-table": "catalog:",
 		"react": "catalog:"
 	},
 	"peerDependencies": {
-		"tsx": "^4.21.0",
 		"kysely": "^0.28.0",
-		"pg": "^8.16.0"
+		"pg": "^8.16.0",
+		"tsx": "^4.21.0"
 	},
 	"peerDependenciesMeta": {
 		"tsx": {
@@ -54,9 +56,9 @@
 	"devDependencies": {
 		"@types/node": "catalog:",
 		"@types/react": "catalog:",
+		"tsup": "catalog:",
 		"tsx": "catalog:",
 		"typescript": "catalog:",
-		"tsup": "catalog:",
 		"vitest": "catalog:"
 	}
 }

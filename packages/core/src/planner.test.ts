@@ -1115,12 +1115,16 @@ describe('Semantic Planner', () => {
 				from: 'users',
 				select: {
 					type: 'expressions',
-					fields: ['id', 'name'],
-					expressions: [
+					columns: [
+						{ type: 'field', name: 'id' },
+						{ type: 'field', name: 'name' },
 						{
-							kind: 'raw',
-							sql: 'NOW()',
-							as: 'current_time',
+							type: 'expression',
+							expression: {
+								kind: 'raw',
+								sql: 'NOW()',
+								as: 'current_time',
+							},
 						},
 					],
 				},
@@ -1143,10 +1147,16 @@ describe('Semantic Planner', () => {
 				from: 'users',
 				select: {
 					type: 'expressions',
-					fields: ['id'],
-					expressions: [
-						{ kind: 'raw', sql: 'NOW()', as: 'time1' },
-						{ kind: 'raw', sql: 'CURRENT_USER', as: 'user' },
+					columns: [
+						{ type: 'field', name: 'id' },
+						{
+							type: 'expression',
+							expression: { kind: 'raw', sql: 'NOW()', as: 'time1' },
+						},
+						{
+							type: 'expression',
+							expression: { kind: 'raw', sql: 'CURRENT_USER', as: 'user' },
+						},
 					],
 				},
 			};
@@ -1165,12 +1175,16 @@ describe('Semantic Planner', () => {
 				from: 'users',
 				select: {
 					type: 'expressions',
-					fields: ['id', 'name'],
-					expressions: [
+					columns: [
+						{ type: 'field', name: 'id' },
+						{ type: 'field', name: 'name' },
 						{
-							kind: 'coalesce',
-							fields: ['name', 'email'],
-							as: 'display',
+							type: 'expression',
+							expression: {
+								kind: 'coalesce',
+								fields: ['name', 'email'],
+								as: 'display',
+							},
 						},
 					],
 				},
