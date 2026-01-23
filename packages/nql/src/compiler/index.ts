@@ -20,11 +20,13 @@ import type {
 	NqlOrderItem,
 	NqlProgram,
 	NqlQuery,
+	NqlRangeLiteral,
 	NqlSelectClause,
 	NqlSelectItem,
 	NqlUnaryExpression,
 	NqlUpdate,
 	NqlUpsert,
+	NqlWindowExpression,
 	NqlWithClause,
 } from '../parser/ast.js';
 
@@ -147,7 +149,34 @@ export type ExpressionIntent =
 			readonly kind: 'subquery';
 			readonly query: QueryIntent;
 			readonly as?: string;
+	  }
+	| {
+			readonly kind: 'window';
+			readonly function: WindowFunction;
+			readonly field?: string;
+			readonly alias: string;
+			readonly over: {
+				readonly partitionBy?: readonly string[];
+				readonly orderBy?: readonly WindowOrderBy[];
+			};
 	  };
+
+export type WindowFunction =
+	| 'row_number'
+	| 'rank'
+	| 'dense_rank'
+	| 'sum'
+	| 'avg'
+	| 'count'
+	| 'min'
+	| 'max'
+	| 'lag'
+	| 'lead';
+
+export interface WindowOrderBy {
+	readonly field: string;
+	readonly direction?: SortDirection;
+}
 
 export type AggregateFunction =
 	| 'count'
@@ -164,6 +193,7 @@ export type WhereIntent =
 	| WhereLikeIntent
 	| WhereNullIntent
 	| WhereRangeIntent
+	| WhereRangeOpIntent
 	| WhereAndIntent
 	| WhereOrIntent
 	| WhereNotIntent;
@@ -199,6 +229,15 @@ export interface WhereRangeIntent {
 	readonly field: string;
 	readonly operator: 'between';
 	readonly value: { lower: unknown; upper: unknown };
+}
+
+export type RangeOperator = 'overlaps' | 'contains' | 'containedBy';
+
+export interface WhereRangeOpIntent {
+	readonly kind: 'rangeOp';
+	readonly field: string;
+	readonly operator: RangeOperator;
+	readonly value: string; // PostgreSQL range literal as-is
 }
 
 export interface WhereAndIntent {
@@ -452,7 +491,9 @@ export class NqlCompiler {
 					expr.args.length > 1
 						? expr.args
 								.slice(1)
-								.map((a) => this.expressionToField(a) ?? this.expressionToValue(a))
+								.map(
+									(a) => this.expressionToField(a) ?? this.expressionToValue(a),
+								)
 						: undefined;
 				return {
 					kind: 'aggregate',
@@ -467,8 +508,54 @@ export class NqlCompiler {
 			return {
 				kind: 'function',
 				name: expr.name,
-				args: expr.args.map((a) => this.expressionToField(a) ?? this.expressionToValue(a)),
+				args: expr.args.map(
+					(a) => this.expressionToField(a) ?? this.expressionToValue(a),
+				),
 				as: item.alias,
+			};
+		}
+
+		// Window expression (e.g., rank() over (partition by x order by y))
+		if (expr.type === 'window') {
+			const windowExpr = expr as NqlWindowExpression;
+			const fn = windowExpr.function.toLowerCase() as WindowFunction;
+
+			// For aggregate window functions (sum, avg, etc.), get the field
+			let field: string | undefined;
+			if (windowExpr.args.length > 0) {
+				field =
+					this.expressionToField(windowExpr.args[0]) ??
+					this.expressionToSql(windowExpr.args[0]);
+			}
+
+			// Convert partition by expressions to field names
+			const partitionBy =
+				windowExpr.partitionBy.length > 0
+					? windowExpr.partitionBy.map(
+							(e) => this.expressionToField(e) ?? this.expressionToSql(e),
+						)
+					: undefined;
+
+			// Convert order by to WindowOrderBy format
+			const orderBy =
+				windowExpr.orderBy.length > 0
+					? windowExpr.orderBy.map((o) => ({
+							field:
+								this.expressionToField(o.expression) ??
+								this.expressionToSql(o.expression),
+							direction: o.direction,
+						}))
+					: undefined;
+
+			return {
+				kind: 'window',
+				function: fn,
+				field,
+				alias: item.alias ?? fn, // Use function name as default alias
+				over: {
+					...(partitionBy && { partitionBy }),
+					...(orderBy && { orderBy }),
+				},
 			};
 		}
 
@@ -643,6 +730,22 @@ export class NqlCompiler {
 						kind: 'like',
 						field,
 						pattern: String(pattern),
+					};
+				}
+
+				// Handle range operators (PostgreSQL)
+				if (
+					comp.operator === 'overlaps' ||
+					comp.operator === 'contains' ||
+					comp.operator === 'containedBy'
+				) {
+					// Right side should be a range literal or value
+					const rangeValue = this.expressionToRangeValue(comp.right);
+					return {
+						kind: 'rangeOp',
+						field,
+						operator: comp.operator,
+						value: rangeValue,
 					};
 				}
 
@@ -927,6 +1030,27 @@ export class NqlCompiler {
 			default:
 				throw new Error(`Cannot convert ${expr.type} to value`);
 		}
+	}
+
+	/**
+	 * Extract range value from expression (for range operators)
+	 * Returns either the raw range literal string or a scalar value
+	 */
+	private expressionToRangeValue(expr: NqlExpression): string {
+		if (expr.type === 'rangeLiteral') {
+			const range = expr as NqlRangeLiteral;
+			return range.value;
+		}
+		// For scalar values (e.g., `contains 25`), convert to string
+		if (expr.type === 'number') {
+			return String(expr.value);
+		}
+		if (expr.type === 'string') {
+			return expr.value;
+		}
+		throw new Error(
+			`Range operator requires a range literal or scalar value, got ${expr.type}`,
+		);
 	}
 
 	private expressionToSql(expr: NqlExpression): string {
