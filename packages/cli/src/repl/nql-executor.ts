@@ -8,9 +8,9 @@
  */
 
 import {
-	compile as compileToSql,
 	compileDelete,
 	compileInsert,
+	compile as compileToSql,
 	compileUpdate,
 	compileUpsert,
 	createCompileOnlyAdapter,
@@ -20,16 +20,16 @@ import {
 	type DeleteIntent,
 	type InsertIntent,
 	type ModelIR,
+	plan,
 	type QueryIntent,
 	type UpdateIntent,
 	type UpsertIntent,
-	plan,
 } from '@dbsp/core';
 import {
-	compile as compileNql,
 	type CompileResult,
-	type QueryIntent as NqlQueryIntent,
+	compile as compileNql,
 	type MutationIntent as NqlMutationIntent,
+	type QueryIntent as NqlQueryIntent,
 } from '@dbsp/nql';
 import type { Kysely } from 'kysely';
 
@@ -73,6 +73,51 @@ function isNqlUpsertIntent(m: NqlMutationIntent): boolean {
 }
 
 /**
+ * Extract IntentSummary from NQL compilation result
+ */
+function extractIntentSummary(
+	compiled: CompileResult,
+	intentType: IntentSummary['type'],
+): IntentSummary {
+	if (compiled.query) {
+		const q = compiled.query;
+		return {
+			type: 'query',
+			table: q.from,
+			with: (q.include ?? []).map((i) => i.relation),
+			hasWhere: !!q.where,
+			hasGroupBy: !!(q.groupBy && q.groupBy.length > 0),
+			hasOrderBy: !!(q.orderBy && q.orderBy.length > 0),
+			ctes: [], // CTEs are at program level, not in CompileResult
+		};
+	}
+
+	if (compiled.mutation) {
+		const m = compiled.mutation;
+		return {
+			type: intentType,
+			table: m.table,
+			with: [],
+			hasWhere: 'where' in m && !!m.where,
+			hasGroupBy: false,
+			hasOrderBy: false,
+			ctes: [],
+		};
+	}
+
+	// Fallback for edge cases
+	return {
+		type: intentType,
+		table: '',
+		with: [],
+		hasWhere: false,
+		hasGroupBy: false,
+		hasOrderBy: false,
+		ctes: [],
+	};
+}
+
+/**
  * Error thrown when NQL parsing fails
  */
 export class NqlParseError extends Error {
@@ -112,6 +157,26 @@ export interface NqlExecutionResult {
 }
 
 /**
+ * Simplified intent summary for assertions
+ */
+export interface IntentSummary {
+	/** Intent type */
+	type: 'query' | 'insert' | 'update' | 'delete' | 'upsert';
+	/** Main table name */
+	table: string;
+	/** Relations joined via `with` keyword */
+	with: string[];
+	/** Has WHERE clause */
+	hasWhere: boolean;
+	/** Has GROUP BY clause */
+	hasGroupBy: boolean;
+	/** Has ORDER BY clause */
+	hasOrderBy: boolean;
+	/** CTE names (let bindings) */
+	ctes: string[];
+}
+
+/**
  * Result of NQL compilation (SQL only, no execution)
  */
 export interface NqlCompileOnlyResult {
@@ -121,6 +186,8 @@ export interface NqlCompileOnlyResult {
 	params: readonly unknown[];
 	/** Intent type */
 	intentType: 'query' | 'insert' | 'update' | 'delete' | 'upsert';
+	/** Intent summary for assertions */
+	intent: IntentSummary;
 }
 
 /**
@@ -228,7 +295,9 @@ export async function executeNql(
 			};
 		}
 
-		throw new NqlCompileError(`Unknown mutation type: ${JSON.stringify(mutation)}`);
+		throw new NqlCompileError(
+			`Unknown mutation type: ${JSON.stringify(mutation)}`,
+		);
 	}
 
 	throw new NqlCompileError('NQL compiled to neither query nor mutation');
@@ -286,7 +355,9 @@ export function compileNqlToSql(
 	// Create CompileOnlyAdapter for SQL generation
 	const adapter = createCompileOnlyAdapter({
 		dialect: toMockDialect(options?.dialect),
-		...(options?.schemaName !== undefined && { schemaName: options.schemaName }),
+		...(options?.schemaName !== undefined && {
+			schemaName: options.schemaName,
+		}),
 	});
 
 	// 1. Parse and compile NQL to IntentAST
@@ -302,6 +373,7 @@ export function compileNqlToSql(
 			sql: compiledQuery.sql,
 			params: compiledQuery.parameters,
 			intentType: 'query',
+			intent: extractIntentSummary(compiled, 'query'),
 		};
 	}
 
@@ -315,6 +387,7 @@ export function compileNqlToSql(
 				sql: compiledQuery.sql,
 				params: compiledQuery.parameters,
 				intentType: 'insert',
+				intent: extractIntentSummary(compiled, 'insert'),
 			};
 		}
 
@@ -325,6 +398,7 @@ export function compileNqlToSql(
 				sql: compiledQuery.sql,
 				params: compiledQuery.parameters,
 				intentType: 'update',
+				intent: extractIntentSummary(compiled, 'update'),
 			};
 		}
 
@@ -335,6 +409,7 @@ export function compileNqlToSql(
 				sql: compiledQuery.sql,
 				params: compiledQuery.parameters,
 				intentType: 'delete',
+				intent: extractIntentSummary(compiled, 'delete'),
 			};
 		}
 
@@ -345,10 +420,13 @@ export function compileNqlToSql(
 				sql: compiledQuery.sql,
 				params: compiledQuery.parameters,
 				intentType: 'upsert',
+				intent: extractIntentSummary(compiled, 'upsert'),
 			};
 		}
 
-		throw new NqlCompileError(`Unknown mutation type: ${JSON.stringify(mutation)}`);
+		throw new NqlCompileError(
+			`Unknown mutation type: ${JSON.stringify(mutation)}`,
+		);
 	}
 
 	throw new NqlCompileError('NQL compiled to neither query nor mutation');

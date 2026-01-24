@@ -5,7 +5,7 @@
  * Uses the defineSchemaBuilder API with explicit relations.
  */
 
-import { defineSchemaBuilder, hasMany, belongsTo } from '@dbsp/core';
+import { belongsTo, defineSchemaBuilder, hasMany } from '@dbsp/core';
 
 /**
  * Blog schema model for E2E tests.

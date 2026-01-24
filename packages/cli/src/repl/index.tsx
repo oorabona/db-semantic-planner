@@ -6,6 +6,11 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import {
+	assertResolvedSchemaToGeneratedSchema,
+	buildModelFromSchema,
+	type ModelIR,
+} from '@dbsp/core';
 import { Box, render, Text, useApp, useInput } from 'ink';
 import React, {
 	useCallback,
@@ -43,11 +48,6 @@ import {
 } from './db-connection.js';
 import { getHistory } from './history.js';
 import { getModeWarning, parseInputMode } from './mode-escape.js';
-import {
-	assertResolvedSchemaToGeneratedSchema,
-	buildModelFromSchema,
-	type ModelIR,
-} from '@dbsp/core';
 import {
 	compileNqlToSql,
 	NqlCompileError,
@@ -275,7 +275,9 @@ function ReplApp({ config }: ReplAppProps) {
 	// NQL v2: Build ModelIR from schema for NQL compilation
 	const model = useMemo<ModelIR | null>(() => {
 		try {
-			const generatedSchema = assertResolvedSchemaToGeneratedSchema(config.schema);
+			const generatedSchema = assertResolvedSchemaToGeneratedSchema(
+				config.schema,
+			);
 			return buildModelFromSchema(generatedSchema);
 		} catch {
 			return null;
@@ -1266,9 +1268,8 @@ function ReplApp({ config }: ReplAppProps) {
 					const isDryRun = isMutation && !hasBangSuffix;
 
 					// Apply EXPLAIN prefix if explainMode is on (queries only)
-					const finalSql = !isMutation && explainMode
-						? `EXPLAIN ${result.sql}`
-						: result.sql;
+					const finalSql =
+						!isMutation && explainMode ? `EXPLAIN ${result.sql}` : result.sql;
 
 					// Build plan info
 					const planInfo = isMutation
@@ -1300,31 +1301,34 @@ function ReplApp({ config }: ReplAppProps) {
 						executeOnDb(finalSql, result.params);
 					}
 				} catch (err) {
-				// Get table names for fuzzy suggestions
-				const tableNames = Object.keys(config.schema.tables);
-				const rawError = err instanceof Error ? err.message : String(err);
-				const enhancedError = enhanceErrorWithSuggestion(rawError, tableNames);
+					// Get table names for fuzzy suggestions
+					const tableNames = Object.keys(config.schema.tables);
+					const rawError = err instanceof Error ? err.message : String(err);
+					const enhancedError = enhanceErrorWithSuggestion(
+						rawError,
+						tableNames,
+					);
 
-				if (err instanceof NqlParseError) {
-					setQueryResult({
-						sql: '',
-						params: [],
-						error: enhancedError,
-					});
-				} else if (err instanceof NqlCompileError) {
-					setQueryResult({
-						sql: '',
-						params: [],
-						error: enhancedError,
-					});
-				} else {
-					setQueryResult({
-						sql: '',
-						params: [],
-						error: enhancedError,
-					});
+					if (err instanceof NqlParseError) {
+						setQueryResult({
+							sql: '',
+							params: [],
+							error: enhancedError,
+						});
+					} else if (err instanceof NqlCompileError) {
+						setQueryResult({
+							sql: '',
+							params: [],
+							error: enhancedError,
+						});
+					} else {
+						setQueryResult({
+							sql: '',
+							params: [],
+							error: enhancedError,
+						});
+					}
 				}
-			}
 			}
 		},
 		[

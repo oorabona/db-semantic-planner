@@ -7,7 +7,12 @@
  * - approved field on comments
  */
 
-import { defineSchemaBuilder, hasMany, belongsTo, belongsToMany } from '@dbsp/core';
+import {
+	belongsTo,
+	belongsToMany,
+	defineSchemaBuilder,
+	hasMany,
+} from '@dbsp/core';
 
 export const blogExtendedModel = defineSchemaBuilder({
 	authors: {
@@ -61,10 +66,18 @@ export const blogExtendedModel = defineSchemaBuilder({
 			author: belongsTo('authors', { foreignKey: 'author_id' }),
 			category: belongsTo('categories', { foreignKey: 'category_id' }),
 			comments: hasMany('comments', { foreignKey: 'post_id' }),
-			tags: belongsToMany('tags', { through: 'post_tags', foreignKey: 'post_id', otherKey: 'tag_id' }),
+			tags: belongsToMany('tags', {
+				through: 'post_tags',
+				foreignKey: 'post_id',
+				otherKey: 'tag_id',
+			}),
 		},
 		tags: {
-			posts: belongsToMany('posts', { through: 'post_tags', foreignKey: 'tag_id', otherKey: 'post_id' }),
+			posts: belongsToMany('posts', {
+				through: 'post_tags',
+				foreignKey: 'tag_id',
+				otherKey: 'post_id',
+			}),
 		},
 		authors: {
 			posts: hasMany('posts', { foreignKey: 'author_id' }),

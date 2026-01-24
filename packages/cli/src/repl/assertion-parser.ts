@@ -30,11 +30,21 @@ export const ASSERTION_TYPES = [
 	'params.value', // Specific param value by index
 
 	// NEW: DB-only assertions (skipped in dry-run)
+	'db.success', // Success check (skipped in dry-run)
+	'db.output.contains', // Output contains (skipped in dry-run)
 	'db.rows.equals', // Exact row count
 	'db.rows.min', // At least N rows
 	'db.rows.max', // At most N rows
 	'db.column.exists', // Column in result
 	'db.value.equals', // Specific cell value
+
+	// NEW: Intent AST assertions (semantic verification)
+	'intent.type', // Intent type (query/insert/update/delete/upsert)
+	'intent.table', // Main table name (logical)
+	'intent.with', // Relations joined via `with` keyword (was 'include')
+	'intent.hasWhere', // Has WHERE clause (true/false)
+	'intent.hasGroupBy', // Has GROUP BY (true/false)
+	'intent.hasOrderBy', // Has ORDER BY (true/false)
 ] as const;
 
 export type AssertionType = (typeof ASSERTION_TYPES)[number];
@@ -253,18 +263,25 @@ function parseAssertionValue(
 	switch (type) {
 		// Boolean value
 		case 'success':
+		case 'db.success':
+		case 'intent.hasWhere':
+		case 'intent.hasGroupBy':
+		case 'intent.hasOrderBy':
 			if (valueStr === 'true') return { value: true };
 			if (valueStr === 'false') return { value: false };
 			return {
-				error: `Invalid boolean value for "success": "${valueStr}". Expected "true" or "false"`,
+				error: `Invalid boolean value for "${type}": "${valueStr}". Expected "true" or "false"`,
 			};
 
 		// Numeric value
-		case 'params.length': {
+		case 'params.length':
+		case 'db.rows.equals':
+		case 'db.rows.min':
+		case 'db.rows.max': {
 			const num = parseInt(valueStr, 10);
 			if (Number.isNaN(num) || num < 0) {
 				return {
-					error: `Invalid number for "params.length": "${valueStr}". Expected non-negative integer`,
+					error: `Invalid number for "${type}": "${valueStr}". Expected non-negative integer`,
 				};
 			}
 			return { value: num };
@@ -284,6 +301,34 @@ function parseAssertionValue(
 				return { error: `Invalid JSON for "params.equals": ${valueStr}` };
 			}
 
+		// JSON array value for params.type
+		case 'params.type':
+			try {
+				const parsed = JSON.parse(valueStr);
+				if (!Array.isArray(parsed)) {
+					return {
+						error: `Invalid params.type value: expected JSON array, got ${typeof parsed}`,
+					};
+				}
+				return { value: parsed };
+			} catch (_e) {
+				return { error: `Invalid JSON for "params.type": ${valueStr}` };
+			}
+
+		// JSON value for params.value (format: "index:value")
+		case 'params.value':
+			// Format: index:value or just value (for simple cases)
+			return { value: valueStr };
+
+		// JSON/any value for db.value.equals
+		case 'db.value.equals':
+			// Try to parse as JSON, otherwise treat as string
+			try {
+				return { value: JSON.parse(valueStr) };
+			} catch {
+				return { value: valueStr };
+			}
+
 		// String values (all others)
 		case 'output.contains':
 		case 'output.equals':
@@ -291,8 +336,16 @@ function parseAssertionValue(
 		case 'sql.contains':
 		case 'sql.equals':
 		case 'sql.matches':
+		case 'sql.table':
+		case 'sql.column':
+		case 'sql.join':
 		case 'plan.contains':
 		case 'error.contains':
+		case 'db.column.exists':
+		case 'db.output.contains':
+		case 'intent.type':
+		case 'intent.table':
+		case 'intent.with':
 			// For regex types, validate the pattern
 			if (type.endsWith('.matches')) {
 				try {

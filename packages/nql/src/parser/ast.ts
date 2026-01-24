@@ -171,6 +171,7 @@ export type NqlExpression =
 	| NqlBinaryExpression
 	| NqlUnaryExpression
 	| NqlComparisonExpression
+	| NqlRangeOpExpression
 	| NqlInExpression
 	| NqlBetweenExpression
 	| NqlIsNullExpression
@@ -197,19 +198,21 @@ export interface NqlUnaryExpression {
 
 export interface NqlComparisonExpression {
 	type: 'comparison';
-	operator:
-		| '='
-		| '!='
-		| '<'
-		| '>'
-		| '<='
-		| '>='
-		| 'like'
-		| 'overlaps'
-		| 'contains'
-		| 'containedBy';
+	operator: '=' | '!=' | '<' | '>' | '<=' | '>=' | 'like';
 	left: NqlExpression;
 	right: NqlExpression;
+}
+
+/**
+ * PostgreSQL range operator expression: column RANGE_OP range_literal
+ * Examples: dateRange overlaps [2024-01-01,2024-12-31)
+ */
+export interface NqlRangeOpExpression {
+	type: 'rangeOp';
+	operator: 'overlaps' | 'contains' | 'containedBy';
+	left: NqlExpression;
+	range?: NqlRangeLiteral;
+	scalar?: NqlLiteral;
 }
 
 export interface NqlInExpression {

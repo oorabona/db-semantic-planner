@@ -5,8 +5,8 @@
 # Query 0: !CREATE SCHEMA IF NOT EXISTS ch5_ecommerce;
 # ─────────────────────────────────────────
 --- query: 0
-success: true
-output.contains: Executed SQL
+db.success: true
+db.output.contains: Executed SQL
 
 # ─────────────────────────────────────────
 # Query 1: .use ch5_ecommerce
@@ -19,15 +19,15 @@ output.contains: Using schema: ch5_ecommerce
 # Query 2: .import examples/ecommerce.ddl.sql
 # ─────────────────────────────────────────
 --- query: 2
-success: true
-output.contains: Imported
+db.success: true
+db.output.contains: Imported
 
 # ─────────────────────────────────────────
 # Query 3: .import examples/ecommerce.seed.sql
 # ─────────────────────────────────────────
 --- query: 3
-success: true
-output.contains: Imported
+db.success: true
+db.output.contains: Imported
 
 # ─────────────────────────────────────────
 # Query 4: .tables
@@ -49,10 +49,10 @@ output.contains: orderItems
 --- query: 5
 success: true
 sql.contains: from "ch5_ecommerce"."categories"
-output.contains: Rows: 20
-output.contains: Electronics
-output.contains: Clothing
-output.contains: Books
+db.rows.equals: 20
+db.output.contains: Electronics
+db.output.contains: Clothing
+db.output.contains: Books
 
 # ─────────────────────────────────────────
 # Query 6: products | where active = true | limit 5
@@ -63,9 +63,9 @@ sql.contains: from "ch5_ecommerce"."products"
 sql.contains: where "t0"."active" = $1
 sql.contains: limit
 params.equals: [true, 5]
-output.contains: Rows: 5
-output.contains: ProBook 15
-output.contains: SmartPhone X
+db.rows.equals: 5
+db.output.contains: ProBook 15
+db.output.contains: SmartPhone X
 
 # ─────────────────────────────────────────
 # Query 7: customers
@@ -73,9 +73,9 @@ output.contains: SmartPhone X
 --- query: 7
 success: true
 sql.contains: from "ch5_ecommerce"."customers"
-output.contains: Rows: 5
-output.contains: Alice
-output.contains: Bob
+db.rows.equals: 5
+db.output.contains: Alice
+db.output.contains: Bob
 
 # ─────────────────────────────────────────
 # Query 8: orders
@@ -83,19 +83,20 @@ output.contains: Bob
 --- query: 8
 success: true
 sql.contains: from "ch5_ecommerce"."orders"
-output.contains: Rows: 7
-output.contains: ORD-2024-001
-output.contains: delivered
-output.contains: shipped
+db.rows.equals: 7
+db.output.contains: ORD-2024-001
+db.output.contains: delivered
+db.output.contains: shipped
 
 # ─────────────────────────────────────────
 # Query 9: categories | with products | where active = true
-# KNOWN BUG: Nested include with where clause fails (same as blog-extended)
+# BUG FIXED: Nested include with where clause now works
 # ─────────────────────────────────────────
 --- query: 9
-success: false
-output.contains: Error
-output.contains: column t0.active does not exist
+success: true
+sql.contains: from "ch5_ecommerce"."categories"
+sql.contains: left join "ch5_ecommerce"."products"
+db.rows.equals: 20
 
 # ─────────────────────────────────────────
 # Query 10: products | with variants | limit 3
@@ -106,7 +107,7 @@ sql.contains: left join "ch5_ecommerce"."variants"
 sql.contains: on "t1"."product_id" = "t0"."id"
 sql.contains: limit
 params.equals: [3]
-output.contains: Rows: 3
+db.rows.equals: 3
 output.contains: variants.id
 output.contains: variants.sku
 
@@ -117,61 +118,66 @@ output.contains: variants.sku
 --- query: 11
 success: true
 sql.contains: from "ch5_ecommerce"."customers"
-output.contains: Rows: 5
+db.rows.equals: 5
 
 # ─────────────────────────────────────────
 # Query 12: orders | group by status | select sum(total)
-# KNOWN BUG: Aggregate functions not yet implemented in NQL executor
+# BUG FIXED: Aggregate functions now work
 # ─────────────────────────────────────────
 --- query: 12
-success: false
-output.contains: Error
-output.contains: Cannot read properties of undefined
+success: true
+sql.contains: group by "t0"."status"
+sql.contains: sum
+db.rows.equals: 3
 
 # ─────────────────────────────────────────
 # Query 13: orders | group by customerId | select count(*)
-# KNOWN BUG: Aggregate functions not yet implemented in NQL executor
+# BUG FIXED: Aggregate functions now work
 # ─────────────────────────────────────────
 --- query: 13
-success: false
-output.contains: Error
-output.contains: Cannot read properties of undefined
+success: true
+sql.contains: group by "t0"."customer_id"
+sql.contains: count
+db.rows.equals: 5
 
 # ─────────────────────────────────────────
 # Query 14: orders | select avg(total)
-# KNOWN BUG: Aggregate functions not yet implemented in NQL executor
+# BUG FIXED: Aggregate functions now work
 # ─────────────────────────────────────────
 --- query: 14
-success: false
-output.contains: Error
-output.contains: Cannot read properties of undefined
+success: true
+sql.contains: avg
+db.rows.equals: 1
 
 # ─────────────────────────────────────────
 # Query 15: products | group by active | select count(*)
-# KNOWN BUG: Aggregate functions not yet implemented in NQL executor
+# BUG FIXED: Aggregate functions now work
 # ─────────────────────────────────────────
 --- query: 15
-success: false
-output.contains: Error
-output.contains: Cannot read properties of undefined
+success: true
+sql.contains: group by "t0"."active"
+sql.contains: count
+db.rows.equals: 2
 
 # ─────────────────────────────────────────
 # Query 16: products | select *, rank() over (partition by categoryId order by price desc) as priceRank
-# KNOWN BUG: Window functions not yet supported in NQL parser
+# BUG FIXED: Window functions now work in NQL parser
 # ─────────────────────────────────────────
 --- query: 16
-success: false
-output.contains: Error
-output.contains: NQL parse error
+success: true
+sql.contains: RANK() OVER
+sql.contains: PARTITION BY
+sql.contains: ORDER BY
 
 # ─────────────────────────────────────────
 # Query 17: orders | select orderNumber, total, sum(total) over (order by createdAt) as runningTotal
-# KNOWN BUG: Window functions not yet supported in NQL parser
+# BUG FIXED: Window functions now work in NQL parser
 # ─────────────────────────────────────────
 --- query: 17
-success: false
-output.contains: Error
-output.contains: NQL parse error
+success: true
+sql.contains: SUM
+sql.contains: OVER
+sql.contains: ORDER BY
 
 # ─────────────────────────────────────────
 # Query 18: insert into categories set name = "Accessories", slug = "accessories"
@@ -180,7 +186,7 @@ output.contains: NQL parse error
 success: true
 sql.contains: insert into "ch5_ecommerce"."categories"
 sql.contains: ("name", "slug") values ($1, $2)
-output.contains: Rows: 1
+db.rows.equals: 1
 
 # ─────────────────────────────────────────
 # Query 19: insert into customers set firstName = "John", lastName = "Doe", email = "john@example.com"
@@ -189,7 +195,7 @@ output.contains: Rows: 1
 success: true
 sql.contains: insert into "ch5_ecommerce"."customers"
 sql.contains: ("first_name", "last_name", "email") values ($1, $2, $3)
-output.contains: Rows: 1
+db.rows.equals: 1
 
 # ─────────────────────────────────────────
 # Query 20: update products set price = 29.99 where sku = "WIDGET-001"
@@ -200,7 +206,7 @@ success: true
 sql.contains: update "ch5_ecommerce"."products"
 sql.contains: set "price" = $1
 sql.contains: where "sku" = $2
-output.contains: Rows: 0
+db.rows.equals: 0
 
 # ─────────────────────────────────────────
 # Query 21: update products set active = false where id = 5
@@ -210,7 +216,7 @@ success: true
 sql.contains: update "ch5_ecommerce"."products"
 sql.contains: set "active" = $1
 sql.contains: where "id" = $2
-output.contains: Rows: 1
+db.rows.equals: 1
 
 # ─────────────────────────────────────────
 # Query 22: delete from orders where status = "cancelled"
@@ -220,7 +226,7 @@ output.contains: Rows: 1
 success: true
 sql.contains: delete from "ch5_ecommerce"."orders"
 sql.contains: where "status" = $1
-output.contains: Rows: 0
+db.rows.equals: 0
 
 # ─────────────────────────────────────────
 # Query 23: upsert into products on sku set name = "New Widget", sku = "WIDGET-NEW", price = 19.99, categoryId = 1, active = true
@@ -229,4 +235,4 @@ output.contains: Rows: 0
 success: true
 sql.contains: insert into "ch5_ecommerce"."products"
 sql.contains: on conflict ("sku") do update
-output.contains: Rows: 1
+db.rows.equals: 1

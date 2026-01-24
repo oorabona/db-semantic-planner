@@ -49,6 +49,8 @@ export {
 export type {
 	// Recursive CTE (RFC-001)
 	AdjacencyTraversal,
+	// Expressions
+	AggregateExpressionIntent,
 	// Aggregates
 	AggregateFunction,
 	AggregateIntent,
@@ -56,10 +58,9 @@ export type {
 	AggregateWindowFunction,
 	// Operators
 	ArrayOperator,
-	// Expressions
-	AggregateExpressionIntent,
 	CoalesceExpressionIntent,
 	ColumnAliasIntent,
+	ColumnExpressionIntent,
 	ComparisonOperator,
 	CustomTraversal,
 	// Mutations (DX-010)
@@ -68,7 +69,6 @@ export type {
 	// Emit composition (DX-005)
 	EmitJoinClause,
 	ExpressionIntent,
-	OrderedColumn,
 	// Include
 	IncludeIntent,
 	InsertIntent,

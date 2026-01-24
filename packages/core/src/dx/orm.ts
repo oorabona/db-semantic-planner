@@ -5,11 +5,9 @@ import type {
 	ExpressionIntent,
 	IncludeIntent,
 	OrderByIntent,
-	OrderedColumn,
 	QueryIntent,
 	SelectAggregateIntent,
 	SelectIntent,
-	SelectWithExpressionsIntent,
 	WhereIntent,
 } from '../intent-ast.js';
 import type { IncludeStrategy, ModelIR } from '../model-ir.js';
@@ -813,16 +811,17 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	columns(columns: readonly ColumnSpec[]): QueryBuilder<TResult> {
 		const builder = this.clone();
 
-		// Build ordered columns array (preserves original order)
-		const orderedColumns: OrderedColumn[] = [];
+		// Build columns array (direct ExpressionIntent format - NQL compatible)
+		const expressionColumns: ExpressionIntent[] = [];
 		let hasExpressions = false;
 
 		for (const col of columns) {
 			if (isExpressionSpec(col)) {
 				hasExpressions = true;
-				orderedColumns.push({ type: 'expression', expression: col.intent });
+				expressionColumns.push(col.intent);
 			} else {
-				orderedColumns.push({ type: 'field', name: col });
+				// Simple field → ColumnExpressionIntent (kind: 'column')
+				expressionColumns.push({ kind: 'column', column: col });
 			}
 		}
 
@@ -830,11 +829,13 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		if (hasExpressions) {
 			builder.selectIntent = {
 				type: 'expressions',
-				columns: orderedColumns,
+				columns: expressionColumns,
 			};
 		} else {
 			// Simple fields only - extract field names
-			const fields = orderedColumns.map((c) => (c as { name: string }).name);
+			const fields = expressionColumns.map(
+				(c) => (c as { column: string }).column,
+			);
 			builder.selectIntent = { type: 'fields', fields };
 		}
 

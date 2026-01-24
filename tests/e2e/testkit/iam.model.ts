@@ -4,7 +4,7 @@
  * Defines the schema for IAM entities and their relationships.
  */
 
-import { defineSchemaBuilder, hasMany, belongsTo } from '@dbsp/core';
+import { belongsTo, defineSchemaBuilder, hasMany } from '@dbsp/core';
 
 /**
  * IAM schema ModelIR with snake_case names matching PostgreSQL.
@@ -65,7 +65,9 @@ export const iamModel = defineSchemaBuilder({
 		},
 		// Permissions relations
 		permissions: {
-			role_permissions: hasMany('role_permissions', { foreignKey: 'permission_id' }),
+			role_permissions: hasMany('role_permissions', {
+				foreignKey: 'permission_id',
+			}),
 		},
 		// Junction: user_roles
 		user_roles: {

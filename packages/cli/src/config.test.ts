@@ -3,16 +3,9 @@
  */
 
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-	type BorderStyle,
-	type HeaderFormatter,
-	isValidTableOption,
-	type OverflowStyle,
-	TABLE_OPTIONS,
-} from './config.js';
+import { isValidTableOption, TABLE_OPTIONS } from './config.js';
 
 // Mock the fs and os modules
 // os.homedir must return a value immediately since ConfigManager is a singleton

@@ -195,11 +195,14 @@ STRING      = "'" { CHAR } "'" ;
 IDENT       = LETTER { LETTER | DIGIT | "_" } ;
 QIDENT      = '"' IDENT '"' ;   (* quoted identifier, forces column semantics *)
 NUMBER      = ["-"] DIGITS ["." DIGITS] ;
+RANGE_DATE_TIME = "-"? DIGITS { ("-" | ":" | "T") DIGITS }+ ;  (* Date/time: 2024-01-01, 08:00 *)
 BOOL        = "true" | "false" ;
 COMMA       = "," ;
 DOT         = "." ;
 LPAREN      = "(" ;
 RPAREN      = ")" ;
+LBRACKET    = "[" ;  (* Range literal: inclusive lower bound *)
+RBRACKET    = "]" ;  (* Range literal: inclusive upper bound *)
 EQ          = "=" ;
 NEQ         = "!=" ;
 LT          = "<" ;
@@ -244,10 +247,19 @@ or_term         = and_factor { "and" and_factor } ;
 and_factor      = [ "not" ] primary_condition ;
 primary_condition = LPAREN boolean_expr RPAREN | condition_atom ;
 
-condition_atom  = comparison | existence_check | in_check | aggregate_condition ;
+condition_atom  = comparison | range_comparison | existence_check | in_check | aggregate_condition ;
 
 comparison      = ( path_expr | aggregate_expr ) comp_op value_expr ;
-comp_op         = EQ | NEQ | LT | GT | LE | GE | "like" | "is" [ "not" ] | "overlaps" | "contains" | "containedBy" ;
+comp_op         = EQ | NEQ | LT | GT | LE | GE | "like" | "is" [ "not" ] ;
+
+(* Range operators - separated from comp_op because range_literal uses ( which would be ambiguous *)
+(* with grouped expressions. Range literals ONLY appear after range operators. *)
+range_comparison = path_expr range_op range_literal ;
+range_op        = "overlaps" | "contains" | "containedBy" ;
+range_literal   = ( LBRACKET | LPAREN ) range_value COMMA range_value ( RBRACKET | RPAREN ) ;
+range_value     = NUMBER | RANGE_DATE_TIME ;
+(* LBRACKET/RPAREN = inclusive bound, LPAREN/RBRACKET = exclusive bound *)
+(* e.g., [1,10) = 1 <= x < 10, (0,100] = 0 < x <= 100 *)
 
 in_check        = path_expr [ "not" ] "in" ( subquery | literal_list ) ;
 literal_list    = LPAREN literal { COMMA literal } RPAREN ;

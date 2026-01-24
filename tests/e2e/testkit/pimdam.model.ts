@@ -4,7 +4,7 @@
  * Schema definition for semantic query planning.
  */
 
-import { defineSchemaBuilder, hasMany, belongsTo } from '@dbsp/core';
+import { belongsTo, defineSchemaBuilder, hasMany } from '@dbsp/core';
 
 /**
  * PIM/DAM schema model for E2E tests.

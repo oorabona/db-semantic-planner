@@ -13,11 +13,9 @@ import type {
 	IncludeIntent,
 	IncludeRecursiveOptions,
 	OrderByIntent,
-	OrderedColumn,
 	QueryIntent,
 	SelectAggregateIntent,
 	SelectIntent,
-	SelectWithExpressionsIntent,
 	WhereIntent,
 } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
@@ -347,19 +345,17 @@ export class IntentBuilder<TResult = unknown> {
 	 * Set column selection.
 	 */
 	setColumns(columns: readonly ColumnSpec[]): void {
-		// Build ordered columns array (preserves original order)
-		const orderedColumns: OrderedColumn[] = [];
+		// Build columns array (direct ExpressionIntent format - NQL compatible)
+		const expressionColumns: ExpressionIntent[] = [];
 		let hasExpressions = false;
 
 		for (const col of columns) {
 			if (isExpressionSpec(col)) {
 				hasExpressions = true;
-				orderedColumns.push({
-					type: 'expression',
-					expression: (col as ExpressionSpec).intent,
-				});
+				expressionColumns.push((col as ExpressionSpec).intent);
 			} else {
-				orderedColumns.push({ type: 'field', name: col as string });
+				// Simple field → ColumnExpressionIntent (kind: 'column')
+				expressionColumns.push({ kind: 'column', column: col as string });
 			}
 		}
 
@@ -367,11 +363,13 @@ export class IntentBuilder<TResult = unknown> {
 		if (hasExpressions) {
 			this.state.selectIntent = {
 				type: 'expressions',
-				columns: orderedColumns,
+				columns: expressionColumns,
 			};
 		} else {
 			// Simple fields only - extract field names
-			const fields = orderedColumns.map((c) => (c as { name: string }).name);
+			const fields = expressionColumns.map(
+				(c) => (c as { column: string }).column,
+			);
 			this.state.selectIntent = { type: 'fields', fields };
 		}
 	}

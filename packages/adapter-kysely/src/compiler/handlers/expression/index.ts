@@ -7,6 +7,7 @@ import { registerExpressionHandler } from '../../registry.js';
 import type { ExpressionHandler } from '../../types.js';
 import { aggregateHandler } from './aggregate.js';
 import { coalesceHandler } from './coalesce.js';
+import { columnHandler } from './column.js';
 import { columnAliasHandler } from './columnAlias.js';
 import { rawHandler } from './raw.js';
 import { relationColumnHandler } from './relationColumn.js';
@@ -30,6 +31,10 @@ export function registerExpressionHandlers(): void {
 		'coalesce',
 		coalesceHandler as unknown as ExpressionHandler,
 	);
+	registerExpressionHandler(
+		'column',
+		columnHandler as unknown as ExpressionHandler,
+	);
 	registerExpressionHandler('raw', rawHandler as unknown as ExpressionHandler);
 	registerExpressionHandler(
 		'columnAlias',
@@ -51,6 +56,7 @@ export function registerExpressionHandlers(): void {
 
 export { aggregateHandler } from './aggregate.js';
 export { coalesceHandler } from './coalesce.js';
+export { columnHandler } from './column.js';
 export { columnAliasHandler } from './columnAlias.js';
 export { rawHandler } from './raw.js';
 export { relationColumnHandler } from './relationColumn.js';

@@ -6,7 +6,7 @@
  * - daterange, tstzrange, int4range
  */
 
-import { defineSchemaBuilder, hasMany, belongsTo } from '@dbsp/core';
+import { belongsTo, defineSchemaBuilder, hasMany } from '@dbsp/core';
 
 /**
  * Scheduling schema model for E2E tests.

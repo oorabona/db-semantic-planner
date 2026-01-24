@@ -1819,6 +1819,7 @@ and_expr      = not_expr { "and" not_expr } ;
 not_expr      = [ "not" ] primary_cond ;
 primary_cond  = "(" boolean_expr ")"
               | comparison
+              | range_comparison
               | between_check
               | exists_check
               | in_check
@@ -1827,6 +1828,15 @@ primary_cond  = "(" boolean_expr ")"
 (* Comparisons *)
 comparison    = expr comp_op expr ;
 comp_op       = "=" | "!=" | "<" | ">" | "<=" | ">=" | "like" ;
+
+(* Range operators - separated because range_literal uses ( which conflicts with grouped expr *)
+(* Range literals ONLY appear after range operators, so ( is unambiguous in this context *)
+range_comparison = expr range_op range_literal ;
+range_op         = "overlaps" | "contains" | "containedBy" ;
+range_literal    = ( "[" | "(" ) range_value "," range_value ( "]" | ")" ) ;
+range_value      = NUMBER | RANGE_DATE_TIME ;
+(* Bound semantics: [ or ] = inclusive, ( or ) = exclusive *)
+(* Examples: [1,10) = 1 <= x < 10, (0,100] = 0 < x <= 100, [2024-01-01,2024-12-31] *)
 
 (* BETWEEN: ternary operator (not binary!) *)
 between_check = expr "between" expr "and" expr ;
@@ -1911,6 +1921,7 @@ IDENT           = /[a-zA-Z_][a-zA-Z0-9_]*/ ;
 QUOTED_IDENT    = /"([^"]|"")*"/ ;   (* Double quotes, escape via "" *)
 STRING          = /'([^']|'')*'/ ;   (* Single quotes, escape via '' *)
 NUMBER          = /[0-9]+(\.[0-9]+)?/ ;  (* No leading sign - negative via unary_expr *)
+RANGE_DATE_TIME = /-?[0-9]+(?:[-:T][0-9]+)+/ ;  (* Date/time patterns: 2024-01-01, 08:00, 2024-01-01T08:00:00 *)
 ```
 
 ### 11.7 Semantic Rules

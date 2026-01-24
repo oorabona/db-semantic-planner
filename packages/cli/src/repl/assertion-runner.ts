@@ -215,6 +215,12 @@ function runSingleAssertion(
 			return assertContains('error', result.error ?? '', value as string);
 
 		// DB assertions (require database connection)
+		case 'db.success':
+			return assertSuccess(result.success, value as boolean);
+
+		case 'db.output.contains':
+			return assertContains('output', result.output ?? '', value as string);
+
 		case 'db.rows.equals':
 			return assertDbRowsEquals(result, value as number);
 
@@ -229,6 +235,25 @@ function runSingleAssertion(
 
 		case 'db.value.equals':
 			return assertDbValueEquals(result, value as unknown);
+
+		// Intent AST assertions
+		case 'intent.type':
+			return assertIntentType(result, value as string);
+
+		case 'intent.table':
+			return assertIntentTable(result, value as string);
+
+		case 'intent.with':
+			return assertIntentWith(result, value as string | string[]);
+
+		case 'intent.hasWhere':
+			return assertIntentHasWhere(result, value as boolean);
+
+		case 'intent.hasGroupBy':
+			return assertIntentHasGroupBy(result, value as boolean);
+
+		case 'intent.hasOrderBy':
+			return assertIntentHasOrderBy(result, value as boolean);
 
 		default:
 			return {
@@ -253,9 +278,7 @@ function assertContains(
 	return {
 		type: `${field}.contains` as AssertionType,
 		expected,
-		actual: passed
-			? undefined
-			: actual.slice(0, 200) + (actual.length > 200 ? '...' : ''),
+		actual: passed ? undefined : actual, // Full value, no truncation
 		passed,
 		message: passed ? undefined : `Expected ${field} to contain "${expected}"`,
 	};
@@ -273,9 +296,7 @@ function assertEquals(
 	return {
 		type: `${field}.equals` as AssertionType,
 		expected,
-		actual: passed
-			? undefined
-			: actual.slice(0, 200) + (actual.length > 200 ? '...' : ''),
+		actual: passed ? undefined : actual, // Full value, no truncation
 		passed,
 		message: passed ? undefined : `Expected ${field} to equal "${expected}"`,
 	};
@@ -313,9 +334,7 @@ function assertMatches(
 	return {
 		type: `${field}.matches` as AssertionType,
 		expected: pattern,
-		actual: passed
-			? undefined
-			: actual.slice(0, 200) + (actual.length > 200 ? '...' : ''),
+		actual: passed ? undefined : actual, // Full value, no truncation
 		passed,
 		message: passed ? undefined : `Expected ${field} to match /${pattern}/`,
 	};
@@ -408,7 +427,7 @@ function assertSQLTable(sql: string, tableName: string): AssertionOutcome {
 	return {
 		type: 'sql.table',
 		expected: tableName,
-		actual: found ? undefined : sql.slice(0, 200),
+		actual: found ? undefined : sql, // Full value, no truncation
 		passed: found,
 		message: found
 			? undefined
@@ -433,7 +452,7 @@ function assertSQLColumn(sql: string, columnName: string): AssertionOutcome {
 	return {
 		type: 'sql.column',
 		expected: columnName,
-		actual: found ? undefined : sql.slice(0, 200),
+		actual: found ? undefined : sql, // Full value, no truncation
 		passed: found,
 		message: found
 			? undefined
@@ -442,30 +461,48 @@ function assertSQLColumn(sql: string, columnName: string): AssertionOutcome {
 }
 
 /**
- * Assert SQL contains JOIN clause (optionally with table name)
+ * Assert SQL references a table via JOIN or CTE
+ * Detects: LEFT/RIGHT/INNER/FULL/CROSS JOIN, WITH clause (CTE)
+ * Handles schema-qualified names: "schema"."table" and plain "table"
  */
 function assertSQLJoin(sql: string, tableName: string): AssertionOutcome {
 	const normalizedSql = sql.toLowerCase();
 	const tableNameLower = tableName.toLowerCase();
 	const tableSnake = toSnakeCase(tableName).toLowerCase();
 
-	// Check for JOIN with table name
-	const joinPattern = /\bjoin\b/;
+	// Check for any type of JOIN (left, right, inner, full, cross)
+	const joinPattern = /\b(left|right|inner|full|cross)?\s*join\b/;
 	const hasJoin = joinPattern.test(normalizedSql);
-	const hasTable =
-		normalizedSql.includes(tableNameLower) ||
-		normalizedSql.includes(tableSnake);
 
-	const found = hasJoin && hasTable;
+	// Check for CTE (WITH clause)
+	const ctePattern = new RegExp(
+		`\\bwith\\b[^)]*\\b(${tableNameLower}|${tableSnake})\\b`,
+	);
+	const hasCte = ctePattern.test(normalizedSql);
+
+	// Check for table name (handles schema-qualified: "schema"."table")
+	// Match: "table", "schema"."table", table (unquoted)
+	const tablePatterns = [
+		`"${tableNameLower}"`, // quoted logical
+		`"${tableSnake}"`, // quoted physical
+		`.${tableNameLower}`, // after schema dot
+		`.${tableSnake}`, // after schema dot (snake)
+		` ${tableNameLower} `, // unquoted with spaces
+		` ${tableSnake} `, // unquoted snake
+	];
+	const hasTable = tablePatterns.some((p) => normalizedSql.includes(p));
+
+	// Pass if: (has JOIN AND has table) OR (has CTE with table)
+	const found = (hasJoin && hasTable) || hasCte;
 
 	return {
 		type: 'sql.join',
 		expected: tableName,
-		actual: found ? undefined : sql.slice(0, 200),
+		actual: found ? undefined : sql,
 		passed: found,
 		message: found
 			? undefined
-			: `Expected SQL to JOIN with table "${tableName}"`,
+			: `Expected SQL to reference "${tableName}" via JOIN or CTE`,
 	};
 }
 
@@ -700,5 +737,191 @@ function assertDbValueEquals(
 		message: passed
 			? undefined
 			: `Value at [${row}]["${column}"]: expected ${JSON.stringify(value)}, got ${JSON.stringify(actual)}`,
+	};
+}
+
+// ============================================================
+// INTENT AST ASSERTIONS (semantic verification)
+// ============================================================
+
+/**
+ * Assert intent type (query, insert, update, delete, upsert)
+ */
+function assertIntentType(result: BatchResult, expected: string): AssertionOutcome {
+	const actual = result.intent?.type;
+
+	if (!result.intent) {
+		return {
+			type: 'intent.type',
+			expected,
+			actual: undefined,
+			passed: false,
+			message: 'No intent available (command or parse error)',
+		};
+	}
+
+	const passed = actual === expected;
+
+	return {
+		type: 'intent.type',
+		expected,
+		actual: passed ? undefined : actual,
+		passed,
+		message: passed ? undefined : `Expected intent type "${expected}", got "${actual}"`,
+	};
+}
+
+/**
+ * Assert main table name (logical name)
+ */
+function assertIntentTable(result: BatchResult, expected: string): AssertionOutcome {
+	const actual = result.intent?.table;
+
+	if (!result.intent) {
+		return {
+			type: 'intent.table',
+			expected,
+			actual: undefined,
+			passed: false,
+			message: 'No intent available (command or parse error)',
+		};
+	}
+
+	// Compare case-insensitively for flexibility
+	const passed = actual?.toLowerCase() === expected.toLowerCase();
+
+	return {
+		type: 'intent.table',
+		expected,
+		actual: passed ? undefined : actual,
+		passed,
+		message: passed ? undefined : `Expected table "${expected}", got "${actual}"`,
+	};
+}
+
+/**
+ * Assert relations joined via `with` keyword
+ * Value can be a single string or array of strings
+ */
+function assertIntentWith(
+	result: BatchResult,
+	expected: string | string[],
+): AssertionOutcome {
+	const actual = result.intent?.with ?? [];
+	const expectedArray = Array.isArray(expected) ? expected : [expected];
+
+	if (!result.intent) {
+		return {
+			type: 'intent.with',
+			expected: expectedArray,
+			actual: undefined,
+			passed: false,
+			message: 'No intent available (command or parse error)',
+		};
+	}
+
+	// Check if all expected relations are present (case-insensitive)
+	const actualLower = actual.map((r: string) => r.toLowerCase());
+	const missing = expectedArray.filter(
+		(e) => !actualLower.includes(e.toLowerCase()),
+	);
+
+	const passed = missing.length === 0;
+
+	return {
+		type: 'intent.with',
+		expected: expectedArray,
+		actual: passed ? undefined : actual,
+		passed,
+		message: passed
+			? undefined
+			: `Missing relations: ${missing.join(', ')}. Found: ${actual.join(', ')}`,
+	};
+}
+
+/**
+ * Assert whether intent has WHERE clause
+ */
+function assertIntentHasWhere(result: BatchResult, expected: boolean): AssertionOutcome {
+	const actual = result.intent?.hasWhere ?? false;
+
+	if (!result.intent) {
+		return {
+			type: 'intent.hasWhere',
+			expected,
+			actual: undefined,
+			passed: false,
+			message: 'No intent available (command or parse error)',
+		};
+	}
+
+	const passed = actual === expected;
+
+	return {
+		type: 'intent.hasWhere',
+		expected,
+		actual: passed ? undefined : actual,
+		passed,
+		message: passed
+			? undefined
+			: `Expected hasWhere=${expected}, got ${actual}`,
+	};
+}
+
+/**
+ * Assert whether intent has GROUP BY clause
+ */
+function assertIntentHasGroupBy(result: BatchResult, expected: boolean): AssertionOutcome {
+	const actual = result.intent?.hasGroupBy ?? false;
+
+	if (!result.intent) {
+		return {
+			type: 'intent.hasGroupBy',
+			expected,
+			actual: undefined,
+			passed: false,
+			message: 'No intent available (command or parse error)',
+		};
+	}
+
+	const passed = actual === expected;
+
+	return {
+		type: 'intent.hasGroupBy',
+		expected,
+		actual: passed ? undefined : actual,
+		passed,
+		message: passed
+			? undefined
+			: `Expected hasGroupBy=${expected}, got ${actual}`,
+	};
+}
+
+/**
+ * Assert whether intent has ORDER BY clause
+ */
+function assertIntentHasOrderBy(result: BatchResult, expected: boolean): AssertionOutcome {
+	const actual = result.intent?.hasOrderBy ?? false;
+
+	if (!result.intent) {
+		return {
+			type: 'intent.hasOrderBy',
+			expected,
+			actual: undefined,
+			passed: false,
+			message: 'No intent available (command or parse error)',
+		};
+	}
+
+	const passed = actual === expected;
+
+	return {
+		type: 'intent.hasOrderBy',
+		expected,
+		actual: passed ? undefined : actual,
+		passed,
+		message: passed
+			? undefined
+			: `Expected hasOrderBy=${expected}, got ${actual}`,
 	};
 }

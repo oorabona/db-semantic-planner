@@ -1015,21 +1015,17 @@ function buildSelectWithExpressions(
 ): SelectQueryBuilder<any, any, any> {
 	let result = query;
 
-	// Process columns in original order
+	// Process columns in original order (direct ExpressionIntent format)
 	for (const col of select.columns) {
-		if (col.type === 'field') {
-			result = result.select(`${alias}.${col.name}`);
-		} else {
-			result = addExpressionSelect(
-				result,
-				col.expression,
-				alias,
-				model,
-				plan,
-				state,
-				schemaName,
-			);
-		}
+		result = addExpressionSelect(
+			result,
+			col,
+			alias,
+			model,
+			plan,
+			state,
+			schemaName,
+		);
 	}
 
 	return result;
@@ -1329,7 +1325,6 @@ function compileComparison(
 // EXISTS Compilation
 // ============================================================================
 
-
 /**
  * CLI-NQL Block 7: Compile recursive EXISTS for ancestors/descendants traversal.
  *
@@ -1352,7 +1347,11 @@ function compileComparison(
 function compileRecursiveExists(
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
 	_eb: any,
-	where: { relation: string; where?: WhereIntent; recursive: RecursiveExistsOptions },
+	where: {
+		relation: string;
+		where?: WhereIntent;
+		recursive: RecursiveExistsOptions;
+	},
 	sourceAlias: string,
 	model: ModelIR,
 	plan: PlanReport,
@@ -1526,7 +1525,11 @@ function compileWhereToRaw(
 function compileExists(
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
 	eb: any,
-	where: { relation: string; where?: WhereIntent; recursive?: RecursiveExistsOptions },
+	where: {
+		relation: string;
+		where?: WhereIntent;
+		recursive?: RecursiveExistsOptions;
+	},
 	sourceAlias: string,
 	model: ModelIR,
 	plan: PlanReport,
@@ -1539,7 +1542,11 @@ function compileExists(
 	if (where.recursive) {
 		return compileRecursiveExists(
 			eb,
-			where as { relation: string; where?: WhereIntent; recursive: RecursiveExistsOptions },
+			where as {
+				relation: string;
+				where?: WhereIntent;
+				recursive: RecursiveExistsOptions;
+			},
 			sourceAlias,
 			model,
 			plan,
@@ -2864,16 +2871,16 @@ function collectSelectAliases(select: SelectIntent | undefined): Set<string> {
 			}
 		}
 	} else if (isSelectWithExpressions(select)) {
-		// Expression aliases: COALESCE(...) AS name, or WindowIntent with 'alias'
-		for (const col of select.columns) {
-			if (col.type === 'expression') {
-				const expr = col.expression;
-				// WindowIntent uses 'alias', other expressions use 'as'
-				if (expr.kind === 'window') {
-					aliases.add(expr.alias);
-				} else if ('as' in expr) {
-					aliases.add(expr.as);
-				}
+		// Direct ExpressionIntent format: each col is an expression
+		for (const expr of select.columns) {
+			// WindowIntent uses 'alias', other expressions use 'as'
+			if (expr.kind === 'window') {
+				aliases.add(expr.alias);
+			} else if ('as' in expr && expr.as) {
+				aliases.add(expr.as);
+			} else if (expr.kind === 'column') {
+				// Column expressions without alias use the column name
+				aliases.add(expr.column);
 			}
 		}
 	}

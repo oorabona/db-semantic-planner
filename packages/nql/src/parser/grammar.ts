@@ -36,6 +36,7 @@ import {
 	Into,
 	Is,
 	Lag,
+	LBracket,
 	Lead,
 	LessThan,
 	LessThanOrEqual,
@@ -61,8 +62,9 @@ import {
 	Pipe,
 	Plus,
 	QuotedIdentifier,
-	RangeLiteral,
+	RangeValue,
 	Rank,
+	RBracket,
 	RowNumber,
 	RParen,
 	// Keywords
@@ -473,6 +475,8 @@ export class NqlParser extends CstParser {
 						{ ALT: () => this.SUBRULE(this.inSuffix) },
 						// IS [NOT] NULL
 						{ ALT: () => this.SUBRULE(this.isNullSuffix) },
+						// Range operators (overlaps, contains, containedBy) with range literal
+						{ ALT: () => this.SUBRULE(this.rangeOpSuffix) },
 						// comparison (=, !=, <, >, <=, >=, like)
 						{ ALT: () => this.SUBRULE(this.comparisonSuffix) },
 					]);
@@ -491,6 +495,8 @@ export class NqlParser extends CstParser {
 
 	/**
 	 * comp_op = "=" | "!=" | "<" | ">" | "<=" | ">=" | "like" ;
+	 * Note: Range operators (overlaps, contains, containedBy) are handled
+	 * separately in rangeOpSuffix to allow (value,value) range syntax.
 	 */
 	private compOp = this.RULE('compOp', () => {
 		this.OR([
@@ -501,10 +507,31 @@ export class NqlParser extends CstParser {
 			{ ALT: () => this.CONSUME(LessThanOrEqual) },
 			{ ALT: () => this.CONSUME(GreaterThanOrEqual) },
 			{ ALT: () => this.CONSUME(Like) },
-			// Range operators (PostgreSQL)
+		]);
+	});
+
+	/**
+	 * range_op = "overlaps" | "contains" | "containedBy" ;
+	 * PostgreSQL range operators - handled separately to support (value,value) syntax.
+	 */
+	private rangeOp = this.RULE('rangeOp', () => {
+		this.OR([
 			{ ALT: () => this.CONSUME(Overlaps) },
 			{ ALT: () => this.CONSUME(Contains) },
 			{ ALT: () => this.CONSUME(ContainedBy) },
+		]);
+	});
+
+	/**
+	 * range_op_suffix = range_op (range_literal | literal) ;
+	 * Example: overlaps [1,10) or contains (0,100) or contains 25
+	 * Note: contains can take a scalar value (e.g., contains 25 checks if range contains the value)
+	 */
+	private rangeOpSuffix = this.RULE('rangeOpSuffix', () => {
+		this.SUBRULE(this.rangeOp);
+		this.OR([
+			{ ALT: () => this.SUBRULE(this.rangeLiteral) },
+			{ ALT: () => this.SUBRULE2(this.literal) },
 		]);
 	});
 
@@ -846,8 +873,53 @@ export class NqlParser extends CstParser {
 			{ ALT: () => this.CONSUME(True) },
 			{ ALT: () => this.CONSUME(False) },
 			{ ALT: () => this.CONSUME(Null) },
-			// PostgreSQL range literal: [value,value) or (value,value]
-			{ ALT: () => this.CONSUME(RangeLiteral) },
+			// Note: Range literals are NOT here - they only appear after range operators
+			// (overlaps, contains, containedBy) via rangeOpSuffix rule
+		]);
+	});
+
+	/**
+	 * range_literal = ( "[" | "(" ) range_value "," range_value ( "]" | ")" ) ;
+	 * range_value = RANGE_VALUE | NUMBER | "-" NUMBER ;
+	 *
+	 * PostgreSQL-style range bounds (full support):
+	 * - Opening: [ (inclusive) or ( (exclusive)
+	 * - Closing: ] (inclusive) or ) (exclusive)
+	 * Examples: [1,10], (0,100), [1,10), (0,10]
+	 *
+	 * Note: This is only called from rangeOpSuffix (after overlaps/contains/containedBy),
+	 * so there's no ambiguity with grouped expressions like (a + b).
+	 */
+	private rangeLiteral = this.RULE('rangeLiteral', () => {
+		// Opening: [ (inclusive) or ( (exclusive)
+		this.OR1([
+			{ ALT: () => this.CONSUME(LBracket) },
+			{ ALT: () => this.CONSUME(LParen) },
+		]);
+		this.SUBRULE(this.rangeValue, { LABEL: 'lower' });
+		this.CONSUME(Comma);
+		this.SUBRULE2(this.rangeValue, { LABEL: 'upper' });
+		// Closing: ] (inclusive) or ) (exclusive)
+		this.OR2([
+			{ ALT: () => this.CONSUME(RBracket) },
+			{ ALT: () => this.CONSUME(RParen) },
+		]);
+	});
+
+	/**
+	 * range_value = RANGE_VALUE | NUMBER | "-" NUMBER ;
+	 * RANGE_VALUE matches date/time patterns (2024-01-01, 08:00)
+	 * NUMBER matches plain integers
+	 */
+	private rangeValue = this.RULE('rangeValue', () => {
+		this.OR([
+			{ ALT: () => this.CONSUME(RangeValue) },
+			{
+				ALT: () => {
+					this.OPTION(() => this.CONSUME(Minus));
+					this.CONSUME(NumberLiteral);
+				},
+			},
 		]);
 	});
 

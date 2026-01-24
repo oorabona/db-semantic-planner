@@ -41,9 +41,9 @@ posts
 # 1.5 WHERE Clause (NQL v2: pipe before where)
 # =============================================================================
 users | where name = 'Alice'
-posts | where user_id = 1
+posts | where userId = 1
 posts | where content is null
-posts | where user_id = 2
+posts | where userId = 2
 
 # =============================================================================
 # 1.6 LIMIT and OFFSET (NQL v2: pipe before limit/offset)

@@ -10,7 +10,7 @@
  * - Q8: Ambiguous relations (author/reviewer pattern)
  */
 
-import { defineSchemaBuilder, hasMany, belongsTo } from '@dbsp/core';
+import { belongsTo, defineSchemaBuilder, hasMany } from '@dbsp/core';
 
 /**
  * Extended PIM/DAM schema model for E2E-002 tests.
@@ -196,7 +196,9 @@ export const pimdamExtendedModel = defineSchemaBuilder({
 			attributes: hasMany('family_attributes', { foreignKey: 'family_id' }),
 		},
 		channels: {
-			family_attributes: hasMany('family_attributes', { foreignKey: 'channel_id' }),
+			family_attributes: hasMany('family_attributes', {
+				foreignKey: 'channel_id',
+			}),
 		},
 		family_attributes: {
 			family: belongsTo('families', { foreignKey: 'family_id' }),

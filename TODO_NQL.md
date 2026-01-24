@@ -26,6 +26,7 @@
 - [x] ✅ **Window functions:** OVER, PARTITION BY, ROW_NUMBER, RANK, DENSE_RANK, LAG, LEAD (2026-01-23)
 - [x] ✅ **Range operators:** overlaps, contains, containedBy + RangeLiteral token (2026-01-23)
 - [x] ✅ **UPSERT multi-column:** Fix ON (col1, col2) conflict syntax (2026-01-23)
+- [x] ✅ **Range literal grammar refactor:** Regex → grammar-based parsing (2026-01-23)
 
 ## Package Structure
 
@@ -52,7 +53,7 @@ packages/nql/
 - String escapes: `'O''Brien'` SQL-style
 - Typed expressions: `ColumnAliasIntent`, `AggregateIntent`, `ArithmeticIntent`
 - Window functions: `rank() over (partition by x order by y)`
-- Range operators: `overlaps`, `contains`, `containedBy` with `[start,end)` literals
+- Range operators: `overlaps`, `contains`, `containedBy` with grammar-based `[start,end)` / `(start,end]` literals
 - No raw SQL in output (security)
 - Full IntentAST compilation
 
@@ -136,19 +137,57 @@ Discovered while running `examples/*.dbsp` against pg-demo PostgreSQL.
   - **Fixed UPSERT regression:** RangeLiteral regex was matching identifier lists like `(col1, col2)`;
     fixed with lookahead to only match values starting with digits
 
-- [ ] **🏗️ ARCH: camelCase table names not resolved to snake_case**
+- [x] ✅ **Scalar contains operator** (2026-01-24)
+  - Example: `priceTiers | where quantityRange contains 25`
+  - **Problem:** Parser only accepted range literals after `contains` operator
+  - **Solution:** Updated grammar `rangeOpSuffix` to accept either `rangeLiteral` OR scalar `literal`
+  - **AST change:** `NqlRangeOpExpression` now has optional `range?` and `scalar?` fields
+  - **Compiler:** Handle both range and scalar values in `case 'rangeOp'`
+  - Files: `packages/nql/src/parser/grammar.ts`, `ast.ts`, `semantic/visitor.ts`, `compiler/index.ts`
+  - Tests: All 292 CLI tests pass, 179 NQL tests pass
+
+- [x] ✅ **Intent assertions for semantic verification** (2026-01-24)
+  - **Problem:** SQL string assertions are fragile; intent.* assertions verify IntentAST directly
+  - **Solution:** Added 6 intent assertion types to assertion parser:
+    - `intent.type` — Intent type (query/insert/update/delete/upsert)
+    - `intent.table` — Main table name (logical)
+    - `intent.with` — Relations joined via `with` keyword
+    - `intent.hasWhere` — Has WHERE clause (true/false)
+    - `intent.hasGroupBy` — Has GROUP BY (true/false)
+    - `intent.hasOrderBy` — Has ORDER BY (true/false)
+  - Also improved `sql.join` detection for all JOIN types + CTEs
+  - Files: `packages/cli/src/repl/assertion-parser.ts`, `assertion-runner.ts`
+  - Updated: `examples/*.assert.dbsp` files with intent.* assertions
+  - Tests: All 1895+ tests pass (715 core, 708 adapter, 179 nql, 292 cli, 1 mcp)
+
+- [x] ✅ **Range literal grammar refactor** (2026-01-23)
+  - **Problem:** Complex RangeLiteral regex caused conflicts with NumberLiteral (matched `99.99`)
+    and UPSERT ON clause `(col1, col2)`
+  - **Solution:** Refactored from single regex token to grammar-based parsing:
+    1. Replaced `RangeLiteral` regex with simpler tokens: `LBracket`, `RBracket`, `RangeValue`
+    2. Created dedicated grammar rules: `rangeLiteral`, `rangeOp`, `rangeOpSuffix`
+    3. Range operators separated from `compOp` (avoids `(` ambiguity with grouped expressions)
+    4. Range literals ONLY valid after range operators (context-sensitive parsing)
+    5. Full PostgreSQL range bound support: `[` inclusive, `(` exclusive
+  - Files modified:
+    - `packages/nql/src/lexer/tokens.ts` — Simplified token set
+    - `packages/nql/src/parser/grammar.ts` — New `rangeOpSuffix` rule
+    - `packages/nql/src/parser/ast.ts` — Added `NqlRangeOpExpression` type
+    - `packages/nql/src/semantic/visitor.ts` — `rangeOp`, `rangeOpSuffix` methods
+    - `packages/nql/src/compiler/index.ts` — `rangeOp` case
+  - EBNF documentation updated:
+    - `docs/plans/CLI-NQL-natural-query-language.md`
+    - `docs/plans/NQL-PARSER-AUDIT-2026-01.md`
+  - Tests: 179 passing (no regressions)
+
+- [x] ✅ **🏗️ ARCH: camelCase table names not resolved to snake_case** (2026-01-23)
   - Example: `roomBookings` → should find `room_bookings` table
-  - Error: `Unknown table: roomBookings`
-  - Current: `defineSchema` uses snake_case table names (`room_bookings`)
-  - **Architectural issue:** Schema definition mixes logical and physical naming
-  - **Proposed solution:**
-    1. `defineSchema` should use **logical** camelCase names (`roomBookings`)
-    2. Adapter (Kysely + CamelCasePlugin) transforms to **physical** snake_case
-    3. CLI/parser should resolve user input against logical model names
-    4. This separates concerns: domain model (logical) vs database implementation (physical)
-  - Impact: Schema API change, adapter config, CLI resolution
+  - **Solution (ARCH-003):** Implemented logical/physical naming separation
+    1. Schema uses **logical** camelCase names (`roomBookings`)
+    2. Adapter transforms to **physical** snake_case via CamelCasePlugin
+    3. CLI resolves user input against logical model names
+  - Commit: `d16779e feat(cli,examples): implement logical/physical naming separation (ARCH-003)`
   - Files: `packages/core/src/dx/schema.ts`, `packages/adapter-kysely/src/`, `packages/cli/src/repl/`
-  - Ref: `scheduling.assert.dbsp` queries 6, 8
 
 ### P3 — Low (Edge Cases)
 

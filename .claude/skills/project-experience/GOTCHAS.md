@@ -1254,3 +1254,59 @@ The `(?=\d|-?\d)` lookahead ensures the first character after the bracket is a d
 **Key insight:** When categories can be unambiguously derived from identifiers, avoid explicit categorization. Convention over configuration reduces cognitive load and eliminates misconfiguration bugs.
 
 **Location:** `packages/cli/src/repl/assertion-parser.ts` (`requiresDatabase()` function)
+
+---
+
+### NQL Compiler Output Must Match IntentAST Kind Names Exactly (2026-01-24)
+
+**Issue:** NQL range operators (`overlaps`, `contains`, `containedBy`) failed with "Unknown where kind: rangeOp" even though range operators were implemented.
+
+**Root cause:** NQL compiler emitted `kind: 'rangeOp'` but the Kysely adapter expected `kind: 'range'`. The adapter has a switch statement that matches specific `kind` values - a typo or mismatch silently falls through.
+
+**Discovery process:**
+1. Assertion `scheduling.assert.dbsp` query 9 failed: `"Unknown where kind: rangeOp"`
+2. Traced through NQL compiler → found it emits `{ kind: 'rangeOp', ... }`
+3. Checked Kysely adapter `switch(where.kind)` → found `case 'range':` (not 'rangeOp')
+4. Fix: Changed NQL compiler to emit `kind: 'range'` instead of `kind: 'rangeOp'`
+
+**Prevention:** When adding new IntentAST kinds:
+1. Check existing kinds in `packages/core/src/intent-ast.ts`
+2. Verify exact string match in both emitter and consumer
+3. Run integration tests that actually execute through the full pipeline
+
+**Related gotcha:** Tests that only check `toBe('rangeOp')` passed because they tested the wrong intermediate value. Always trace a new feature end-to-end through SQL generation.
+
+**Location:** `packages/nql/src/compiler/index.ts` (emit side), `packages/adapter-kysely/src/compiler/handlers/where/` (consume side)
+
+---
+
+### Intent Assertions Are More Robust Than SQL String Matching (2026-01-24)
+
+**Pattern discovered:** When testing NQL compilation, `intent.*` assertions are more robust than `sql.*` assertions.
+
+**Why SQL assertions are fragile:**
+1. SQL formatting changes (whitespace, quoting) break `sql.contains` tests
+2. Physical vs logical naming (ARCH-003) means `sql.contains: "product_images"` fails if you use logical name
+3. JOIN order/type changes in optimizer break `sql.contains: left join`
+
+**Better approach - intent.* assertions:**
+```
+# Instead of fragile SQL matching:
+sql.contains: left join "products"
+
+# Use semantic intent verification:
+intent.type: query
+intent.table: products
+intent.with: category
+intent.hasWhere: true
+```
+
+**Key insight:** Intent assertions test the _semantic_ query structure before SQL generation, making them immune to adapter-level formatting changes. Use `sql.*` only when verifying specific SQL syntax is critical (dialect-specific features).
+
+**Assertion types available:**
+- `intent.type` — query/insert/update/delete/upsert
+- `intent.table` — logical table name
+- `intent.with` — relations joined via `with` keyword
+- `intent.hasWhere` / `intent.hasGroupBy` / `intent.hasOrderBy` — boolean flags
+
+**Location:** `packages/cli/src/repl/assertion-parser.ts`, `assertion-runner.ts`

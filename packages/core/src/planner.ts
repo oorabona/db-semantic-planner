@@ -1349,11 +1349,11 @@ function detectRawSqlUsage(intent: QueryIntent, state: PlannerState): void {
 		intent.select.type === 'expressions'
 	) {
 		for (const col of intent.select.columns) {
-			if (col.type === 'expression' && isRawExpression(col.expression)) {
-				const expr = col.expression;
+			// Direct ExpressionIntent format - check if it's a raw expression
+			if (isRawExpression(col)) {
 				state.warnings.push({
 					code: 'RAW_SQL_USAGE',
-					message: `Raw SQL expression detected: "${expr.sql}" (alias: ${expr.as})`,
+					message: `Raw SQL expression detected: "${col.sql}" (alias: ${col.as})`,
 					suggestion:
 						'Raw SQL bypasses type safety and SQL injection protection. ' +
 						'Ensure the SQL is safe and consider using built-in expression helpers instead.',
