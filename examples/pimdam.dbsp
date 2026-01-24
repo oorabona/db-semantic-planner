@@ -52,6 +52,14 @@ categories | where parentId is null
 categories | where parentId is not null | with parent
 
 # =============================================================================
+# 6.6.1 Pseudo-Columns (SPEC-001) - Self-Referential Traversal
+# =============================================================================
+# Filter categories by their parent's name (single-hop traversal)
+categories | where parent.name = 'Electronics'
+categories | where parent.name = 'Phones'
+categories | where parent.id = 1
+
+# =============================================================================
 # 6.7 Mutations (NQL v2: SQL-like syntax)
 # =============================================================================
 

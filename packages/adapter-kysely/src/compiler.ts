@@ -17,9 +17,7 @@ import type {
 	SelectIntent,
 	SelectWithExpressionsIntent,
 	SubqueryRefIntent,
-	WhereExistsIntent,
 	WhereIntent,
-	WhereNotExistsIntent,
 	WhereSubqueryIntent,
 	WindowIntent,
 } from '@dbsp/core';
@@ -42,16 +40,18 @@ import {
 	applyJoinIncludes,
 	applyJsonAggIncludes,
 	applyLateralIncludes,
+	applyPendingPseudoJoins,
 	type CompilerContext,
 	getExpressionHandler,
 	getWhereHandler,
+	preprocessWherePseudoColumns,
 	registerComplexWhereHandlers,
 	registerExpressionHandlers,
 	registerIncludeHandlers,
 	registerWhereHandlers,
 } from './compiler/index.js';
 import { CompilationError } from './errors.js';
-import { addWhereSimple, addWhereToJoin } from './recursive-compiler.js';
+import { addWhereSimple } from './recursive-compiler.js';
 import { UnsupportedOperationError } from './stream.js';
 
 // Initialize handler registrations
@@ -762,6 +762,20 @@ export function compile(
 
 	// Add WHERE clause
 	if (intent.where) {
+		// Pre-process WHERE for pseudo-column references (SPEC-001)
+		// This registers pending JOINs in state.pendingPseudoJoins
+		preprocessWherePseudoColumns(
+			intent.where,
+			rootTable,
+			rootAlias,
+			model,
+			state,
+			schemaName,
+		);
+
+		// Apply pending pseudo-column JOINs before WHERE clause
+		query = applyPendingPseudoJoins(query, state);
+
 		query = addWhere(
 			query,
 			intent.where,
@@ -2740,7 +2754,7 @@ function resolveGroupByField(
 
 	// Relation path expression like "product.name" or "category.parent.name"
 	const segments = field.split('.');
-	const column = segments.pop()!; // Last segment is the column
+	const column = segments.pop() ?? field; // Last segment is the column (fallback to field if no dots)
 	const relationPath = segments.join('.'); // Remaining is the relation path
 
 	// Check if this relation path is already JOINed

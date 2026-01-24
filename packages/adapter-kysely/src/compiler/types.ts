@@ -44,6 +44,19 @@ export interface CompilerState {
 	coreCapabilities?: CoreDialectCapabilities;
 	/** Dialect name for error messages */
 	dialect?: string;
+	/** Pending pseudo-column JOINs to be applied */
+	pendingPseudoJoins?: Map<
+		string,
+		{
+			traversal: 'parent' | 'child';
+			joinAlias: string;
+			targetTable: string;
+			fkColumn: string;
+			pkColumn: string;
+			schemaName?: string;
+			sourceAlias: string;
+		}
+	>;
 }
 
 // ============================================================================

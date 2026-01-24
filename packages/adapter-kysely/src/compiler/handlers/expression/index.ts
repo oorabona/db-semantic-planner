@@ -9,6 +9,7 @@ import { aggregateHandler } from './aggregate.js';
 import { coalesceHandler } from './coalesce.js';
 import { columnHandler } from './column.js';
 import { columnAliasHandler } from './columnAlias.js';
+import { pseudoColumnHandler } from './pseudoColumn.js';
 import { rawHandler } from './raw.js';
 import { relationColumnHandler } from './relationColumn.js';
 import { windowHandler } from './window.js';
@@ -48,6 +49,10 @@ export function registerExpressionHandlers(): void {
 		'relationColumn',
 		relationColumnHandler as unknown as ExpressionHandler,
 	);
+	registerExpressionHandler(
+		'pseudoColumn',
+		pseudoColumnHandler as unknown as ExpressionHandler,
+	);
 }
 
 // ============================================================================
@@ -58,6 +63,7 @@ export { aggregateHandler } from './aggregate.js';
 export { coalesceHandler } from './coalesce.js';
 export { columnHandler } from './column.js';
 export { columnAliasHandler } from './columnAlias.js';
+export { pseudoColumnHandler } from './pseudoColumn.js';
 export { rawHandler } from './raw.js';
 export { relationColumnHandler } from './relationColumn.js';
 export { windowHandler } from './window.js';

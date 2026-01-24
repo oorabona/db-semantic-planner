@@ -5,7 +5,11 @@
 
 import type { WhereComparisonIntent } from '@dbsp/core';
 import { CompilationError } from '../../../errors.js';
-import { resolveFieldAlias } from '../../helpers.js';
+import {
+	isPseudoColumnField,
+	resolveFieldAlias,
+	resolvePseudoColumnReference,
+} from '../../helpers.js';
 import type { WhereHandler } from '../../types.js';
 
 /**
@@ -18,13 +22,30 @@ export const comparisonHandler: WhereHandler<WhereComparisonIntent> = (
 	intent,
 	alias,
 ) => {
-	// P1: Resolve correct alias for fields that may be in joined tables
+	// Get root table for resolution
 	const rootTable =
 		ctx.plan.intent.type === 'select' ? ctx.plan.intent.from : '';
-	const resolvedAlias = rootTable
-		? resolveFieldAlias(intent.field, alias, rootTable, ctx.model, ctx.state)
-		: alias;
-	const column = `${resolvedAlias}.${intent.field}`;
+
+	let column: string;
+
+	// Check if field is a pseudo-column path (e.g., "parent.id")
+	if (isPseudoColumnField(intent.field)) {
+		const ref = resolvePseudoColumnReference(
+			intent.field,
+			alias,
+			rootTable,
+			ctx.model,
+			ctx.state,
+			ctx.schemaName,
+		);
+		column = `${ref.alias}.${ref.column}`;
+	} else {
+		// P1: Resolve correct alias for fields that may be in joined tables
+		const resolvedAlias = rootTable
+			? resolveFieldAlias(intent.field, alias, rootTable, ctx.model, ctx.state)
+			: alias;
+		column = `${resolvedAlias}.${intent.field}`;
+	}
 
 	switch (intent.operator) {
 		case 'eq':

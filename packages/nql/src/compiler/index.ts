@@ -160,7 +160,32 @@ export type ExpressionIntent =
 				readonly partitionBy?: readonly string[];
 				readonly orderBy?: readonly WindowOrderBy[];
 			};
+	  }
+	| {
+			/**
+			 * Pseudo-column access for self-referential traversal.
+			 * Example: parent.name, ascendant.title, child.department
+			 */
+			readonly kind: 'pseudoColumn';
+			/** Traversal type: single-hop (parent/child) or recursive (ascendant/descendant) */
+			readonly traversal: PseudoColumnTraversal;
+			/** The column to access on the target row(s) */
+			readonly targetColumn: string;
+			/** Optional bounded depth for ascendant[N] / descendant[N] syntax */
+			readonly depth?: number;
+			/** Custom role name for multi-FK tables (e.g., 'manager' in manager.ascendant) */
+			readonly role?: string;
+			readonly as?: string;
 	  };
+
+/**
+ * Pseudo-column traversal types for self-referential relations.
+ */
+export type PseudoColumnTraversal =
+	| 'parent' // Single-hop upward
+	| 'child' // Single-hop downward
+	| 'ascendant' // Recursive upward (CTE)
+	| 'descendant'; // Recursive downward (CTE)
 
 export type WindowFunction =
 	| 'row_number'
@@ -615,9 +640,32 @@ export class NqlCompiler {
 			return { kind: 'column', column };
 		}
 
-		// Path expression with multiple segments (e.g., "customer.name")
+		// Path expression with multiple segments (e.g., "customer.name", "parent.name")
 		if (expr.type === 'path' && expr.segments.length > 1) {
 			const segments = expr.segments;
+			const firstSegment = segments[0].toLowerCase();
+
+			// Check for pseudo-column traversal (parent.name, ascendant.title, etc.)
+			if (isPseudoColumnKeyword(firstSegment)) {
+				// V1.0: Simple traversal - pseudo.column syntax
+				// e.g., parent.name, child.department, ascendant.title
+				if (segments.length === 2) {
+					return {
+						kind: 'pseudoColumn',
+						traversal: firstSegment as PseudoColumnTraversal,
+						targetColumn: segments[1],
+						as: item.alias ?? `${firstSegment}.${segments[1]}`,
+					};
+				}
+				// V1.1+: Extended syntax - role.pseudo.column (e.g., manager.parent.name)
+				// or pseudo[depth].column (e.g., ascendant[3].name) - not yet implemented
+				throw new Error(
+					`Extended pseudo-column syntax not yet supported: ${segments.join('.')}. ` +
+						`Use simple traversal: ${firstSegment}.<column>`,
+				);
+			}
+
+			// Regular relation path (e.g., customer.name)
 			const column = segments[segments.length - 1];
 			const relation = segments.slice(0, -1).join('.');
 			return {
@@ -1167,6 +1215,29 @@ function isAggregateFunction(name: string): boolean {
 		'array_agg',
 		'string_agg',
 	].includes(name.toLowerCase());
+}
+
+/**
+ * Pseudo-column keywords for self-referential traversal.
+ * These keywords are used in path expressions to traverse hierarchical relationships.
+ */
+const PSEUDO_COLUMN_KEYWORDS = [
+	'parent',
+	'child',
+	'ascendant',
+	'descendant',
+] as const;
+
+/**
+ * Check if a segment is a pseudo-column keyword.
+ * Pseudo-columns enable traversal of self-referential foreign keys.
+ */
+function isPseudoColumnKeyword(
+	segment: string,
+): segment is PseudoColumnTraversal {
+	return PSEUDO_COLUMN_KEYWORDS.includes(
+		segment.toLowerCase() as PseudoColumnTraversal,
+	);
 }
 
 /**

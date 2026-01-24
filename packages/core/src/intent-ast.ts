@@ -226,6 +226,39 @@ export interface AggregateExpressionIntent {
 }
 
 /**
+ * Pseudo-column traversal types for self-referential relations.
+ * Used by NQL to traverse hierarchical/tree structures.
+ */
+export type PseudoColumnTraversal =
+	| 'parent' // Single-hop upward (direct parent)
+	| 'child' // Single-hop downward (direct children)
+	| 'ascendant' // Recursive upward (all ancestors via CTE)
+	| 'descendant'; // Recursive downward (all descendants via CTE)
+
+/**
+ * Pseudo-column expression intent for self-referential traversal.
+ * Enables access to columns on related rows in hierarchical structures.
+ *
+ * @example { kind: 'pseudoColumn', traversal: 'parent', targetColumn: 'name', as: 'parent.name' }
+ *          → SELECT parent_row.name AS "parent.name" via CTE join
+ * @example { kind: 'pseudoColumn', traversal: 'ascendant', targetColumn: 'title', as: 'ancestor_title' }
+ *          → Recursive CTE to find all ancestors, return their title column
+ */
+export interface PseudoColumnExpressionIntent {
+	readonly kind: 'pseudoColumn';
+	/** Traversal type: single-hop (parent/child) or recursive (ascendant/descendant) */
+	readonly traversal: PseudoColumnTraversal;
+	/** The column to access on the target row(s) */
+	readonly targetColumn: string;
+	/** Alias for result column (required) */
+	readonly as: string;
+	/** Optional bounded depth for ascendant[N] / descendant[N] syntax */
+	readonly depth?: number;
+	/** Custom role name for multi-FK tables (e.g., 'manager' in manager.ascendant) */
+	readonly role?: string;
+}
+
+/**
  * Expression intent union type - computed/derived values in SELECT
  * Extensible for future expression types (CASE WHEN, etc.)
  */
@@ -236,7 +269,8 @@ export type ExpressionIntent =
 	| ColumnAliasIntent
 	| RelationColumnIntent
 	| WindowIntent
-	| AggregateExpressionIntent;
+	| AggregateExpressionIntent
+	| PseudoColumnExpressionIntent;
 
 /**
  * Select with expressions (computed columns).

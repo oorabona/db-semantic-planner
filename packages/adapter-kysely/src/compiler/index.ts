@@ -19,6 +19,7 @@ export {
 } from './handlers/where/index.js';
 // Helpers
 export {
+	applyPendingPseudoJoins,
 	collectCteIncludes,
 	collectJoinIncludes,
 	collectJsonAggIncludes,
@@ -30,6 +31,7 @@ export {
 	lookupResolvedRelation,
 	normalizeForeignKey,
 	normalizePrimaryKey,
+	preprocessWherePseudoColumns,
 } from './helpers.js';
 // Registry
 export {

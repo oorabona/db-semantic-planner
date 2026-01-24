@@ -309,6 +309,324 @@ export function collectJsonAggIncludes(
 }
 
 // ============================================================================
+// Pseudo-Column Keywords
+// ============================================================================
+
+/**
+ * Reserved pseudo-column keywords for self-referential traversal.
+ */
+const PSEUDO_COLUMN_KEYWORDS = [
+	'parent',
+	'child',
+	'ascendant',
+	'descendant',
+] as const;
+
+type PseudoColumnTraversal = (typeof PSEUDO_COLUMN_KEYWORDS)[number];
+
+/**
+ * Check if a field path starts with a pseudo-column keyword.
+ * @param field - Field path like "parent.id" or "name"
+ * @returns True if field is a pseudo-column path
+ */
+export function isPseudoColumnField(field: string): boolean {
+	const dotIndex = field.indexOf('.');
+	if (dotIndex === -1) return false;
+
+	const prefix = field.substring(0, dotIndex).toLowerCase();
+	return PSEUDO_COLUMN_KEYWORDS.includes(prefix as PseudoColumnTraversal);
+}
+
+/**
+ * Parse a pseudo-column field path into its components.
+ * @param field - Field path like "parent.id"
+ * @returns { traversal, column } or null if not a pseudo-column path
+ */
+export function parsePseudoColumnField(
+	field: string,
+): { traversal: PseudoColumnTraversal; column: string } | null {
+	const dotIndex = field.indexOf('.');
+	if (dotIndex === -1) return null;
+
+	const prefix = field.substring(0, dotIndex).toLowerCase();
+	if (!PSEUDO_COLUMN_KEYWORDS.includes(prefix as PseudoColumnTraversal)) {
+		return null;
+	}
+
+	return {
+		traversal: prefix as PseudoColumnTraversal,
+		column: field.substring(dotIndex + 1),
+	};
+}
+
+/**
+ * Resolve a pseudo-column field reference, creating the JOIN if necessary.
+ * Returns the fully qualified column reference (alias.column).
+ *
+ * V1.0: Only supports parent/child (single-hop). Ascendant/descendant throw.
+ *
+ * @param field - Field path like "parent.id"
+ * @param defaultAlias - Current table alias
+ * @param rootTable - Root table name
+ * @param model - Model IR for schema lookup
+ * @param state - Compiler state (mutable - may add joins)
+ * @param schemaName - Optional schema name for multi-tenant
+ * @returns { alias: string, column: string } for building SQL reference
+ */
+export function resolvePseudoColumnReference(
+	field: string,
+	defaultAlias: string,
+	rootTable: string,
+	model: ModelIR,
+	state: CompilerState,
+	schemaName?: string,
+): { alias: string; column: string } {
+	const parsed = parsePseudoColumnField(field);
+	if (!parsed) {
+		// Not a pseudo-column, return default
+		return { alias: defaultAlias, column: field };
+	}
+
+	const { traversal, column } = parsed;
+
+	// V1.0: Only parent/child supported in WHERE
+	if (traversal === 'ascendant' || traversal === 'descendant') {
+		throw new Error(
+			`Recursive traversal '${traversal}' in WHERE clause is not yet supported. ` +
+				`V1.0 supports only parent/child traversal.`,
+		);
+	}
+
+	// Check if we already have a join for this pseudo-column
+	const existingJoin = state.joinedFilterRelations.get(`pseudo_${traversal}`);
+	if (existingJoin) {
+		return { alias: existingJoin.alias, column };
+	}
+
+	// Need to create the JOIN
+	const tableDef = model.getTable(rootTable);
+	if (!tableDef) {
+		throw new Error(`Unknown table: ${rootTable}`);
+	}
+
+	// Find the self-referential FK
+	const pseudoColumns = tableDef.pseudoColumns ?? [];
+	const matchingPseudo = pseudoColumns.find((pc) => {
+		// Match parent/child traversal to the pseudo-column
+		return pc.parentRole === 'parent' || pc.parentRole === traversal;
+	});
+
+	if (!matchingPseudo) {
+		throw new Error(
+			`No self-referential foreign key found for '${traversal}' traversal on table '${rootTable}'. ` +
+				`Ensure the table has a self-referencing FK defined in the schema.`,
+		);
+	}
+
+	// Generate alias for the join
+	const joinAlias = `${traversal}_${state.aliasCounter++}`;
+
+	// Get FK and PK column names
+	const fkColumn = matchingPseudo.foreignKeyColumn;
+	const pkColumn = tableDef.primaryKey ?? 'id';
+
+	// Register the join for later use
+	state.joinedFilterRelations.set(`pseudo_${traversal}`, {
+		alias: joinAlias,
+		targetTable: rootTable,
+	});
+
+	// Normalize pkColumn to string
+	const pkColumnStr: string =
+		typeof pkColumn === 'string'
+			? pkColumn
+			: Array.isArray(pkColumn)
+				? (pkColumn[0] ?? 'id')
+				: 'id';
+
+	// Store join info for the query builder
+	// Note: The actual JOIN will be added when the query is built
+	// We need to track it here so subsequent references use the same alias
+	if (!state.pendingPseudoJoins) {
+		state.pendingPseudoJoins = new Map();
+	}
+	const joinInfo: PseudoJoinInfo = {
+		traversal,
+		joinAlias,
+		targetTable: rootTable,
+		fkColumn,
+		pkColumn: pkColumnStr,
+		sourceAlias: defaultAlias,
+	};
+	if (schemaName !== undefined) {
+		joinInfo.schemaName = schemaName;
+	}
+	state.pendingPseudoJoins.set(`pseudo_${traversal}`, joinInfo);
+
+	return { alias: joinAlias, column };
+}
+
+/**
+ * Info needed to create a pseudo-column JOIN.
+ * Stored in state.pendingPseudoJoins for later application.
+ */
+export interface PseudoJoinInfo {
+	traversal: 'parent' | 'child';
+	joinAlias: string;
+	targetTable: string;
+	fkColumn: string;
+	pkColumn: string;
+	schemaName?: string;
+	sourceAlias: string;
+}
+
+// ============================================================================
+// Pseudo-Column WHERE Pre-Scan and JOIN Application
+// ============================================================================
+
+/**
+ * Pre-scan a WHERE intent to find all pseudo-column field references.
+ * This allows us to set up JOINs before compiling the WHERE clause.
+ *
+ * @param where - The WHERE intent to scan
+ * @returns Array of pseudo-column field paths found
+ */
+export function scanWherePseudoColumns(
+	where: Parameters<typeof isPseudoColumnField>[0] extends string
+		? {
+				readonly field?: string;
+				readonly and?: readonly unknown[];
+				readonly or?: readonly unknown[];
+			}
+		: never,
+): string[] {
+	const results: string[] = [];
+
+	// Helper to recursively scan WHERE intent
+	const scan = (intent: unknown): void => {
+		if (!intent || typeof intent !== 'object') return;
+
+		const obj = intent as Record<string, unknown>;
+
+		// Check field property for pseudo-column reference
+		if (typeof obj.field === 'string' && isPseudoColumnField(obj.field)) {
+			results.push(obj.field);
+		}
+
+		// Recursively scan AND/OR groups
+		if (Array.isArray(obj.and)) {
+			for (const sub of obj.and) {
+				scan(sub);
+			}
+		}
+		if (Array.isArray(obj.or)) {
+			for (const sub of obj.or) {
+				scan(sub);
+			}
+		}
+	};
+
+	scan(where);
+	return results;
+}
+
+/**
+ * Apply all pending pseudo-column JOINs to a query.
+ * Must be called after pre-scanning WHERE but before compiling WHERE clause.
+ *
+ * @param query - The Kysely query builder
+ * @param state - Compiler state containing pendingPseudoJoins
+ * @returns The query with JOINs applied
+ */
+export function applyPendingPseudoJoins<T>(query: T, state: CompilerState): T {
+	if (!state.pendingPseudoJoins || state.pendingPseudoJoins.size === 0) {
+		return query;
+	}
+
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely query builder generic
+	let result = query as any;
+
+	for (const [_key, info] of state.pendingPseudoJoins) {
+		const {
+			traversal,
+			joinAlias,
+			targetTable,
+			fkColumn,
+			pkColumn,
+			schemaName,
+			sourceAlias,
+		} = info;
+
+		// Get schema-qualified table name
+		const tableName = schemaName ? `${schemaName}.${targetTable}` : targetTable;
+
+		// Apply LEFT JOIN based on traversal direction
+		if (traversal === 'parent') {
+			// Going UP: current.fkColumn = parent.pkColumn
+			result = result.leftJoin(
+				`${tableName} as ${joinAlias}`,
+				`${sourceAlias}.${fkColumn}`,
+				`${joinAlias}.${pkColumn}`,
+			);
+		} else {
+			// Going DOWN (child): current.pkColumn = child.fkColumn
+			result = result.leftJoin(
+				`${tableName} as ${joinAlias}`,
+				`${sourceAlias}.${pkColumn}`,
+				`${joinAlias}.${fkColumn}`,
+			);
+		}
+	}
+
+	// Clear pending joins after applying
+	state.pendingPseudoJoins.clear();
+
+	return result as T;
+}
+
+/**
+ * Pre-process WHERE clause for pseudo-columns.
+ * Scans for pseudo-column references and registers pending JOINs in state.
+ *
+ * @param where - The WHERE intent
+ * @param rootTable - Root table name
+ * @param defaultAlias - Default alias for root table
+ * @param model - Model IR
+ * @param state - Compiler state (mutated to add pending joins)
+ * @param schemaName - Optional schema name
+ */
+export function preprocessWherePseudoColumns(
+	where: unknown,
+	rootTable: string,
+	defaultAlias: string,
+	model: ModelIR,
+	state: CompilerState,
+	schemaName?: string,
+): void {
+	// Scan WHERE for pseudo-column fields
+	const pseudoFields = scanWherePseudoColumns(
+		where as {
+			readonly field?: string;
+			readonly and?: readonly unknown[];
+			readonly or?: readonly unknown[];
+		},
+	);
+
+	// For each pseudo-column field, call resolvePseudoColumnReference to register the JOIN
+	for (const field of pseudoFields) {
+		// This will register the pending JOIN in state.pendingPseudoJoins
+		resolvePseudoColumnReference(
+			field,
+			defaultAlias,
+			rootTable,
+			model,
+			state,
+			schemaName,
+		);
+	}
+}
+
+// ============================================================================
 // Field Alias Resolution (P1: WHERE after WITH)
 // ============================================================================
 

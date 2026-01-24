@@ -577,3 +577,34 @@ export { singularize } from '../conventions.js';  // Re-export for consumers
 ```
 
 **Added:** 2026-01-20 (DUP-001, DUP-002, DUP-003 fixes)
+
+### Two-Pass WHERE Pseudo-Column Pattern (SPEC-001)
+
+**Problem:** WHERE handlers run inside `query.where(eb => ...)` callback. Inside this callback, you cannot modify the query to add JOINs needed for pseudo-column references like `parent.name`.
+
+**Solution: Pre-scan and deferred JOIN application**
+
+```typescript
+// Step 1: Pre-scan WHERE intent to detect pseudo-columns
+const pseudoFields = scanWherePseudoColumns(whereIntent);
+
+// Step 2: Register pending JOINs in compiler state
+for (const field of pseudoFields) {
+  resolvePseudoColumnReference(field, alias, table, model, state, schema);
+}
+
+// Step 3: Apply JOINs BEFORE calling addWhere
+query = applyPendingPseudoJoins(query, state);
+
+// Step 4: Now WHERE handlers can reference the joined aliases
+query = addWhere(query, whereIntent, ...);
+```
+
+**Key insight:** The WHERE handlers don't need to add JOINs - they just reference the aliases that were already added by the pre-scan phase.
+
+**Files involved:**
+- `helpers.ts`: `scanWherePseudoColumns`, `applyPendingPseudoJoins`, `preprocessWherePseudoColumns`
+- `compiler.ts`: Integration before `addWhere()` call
+- `types.ts`: `pendingPseudoJoins: Map<string, PseudoJoinInfo>` in CompilerState
+
+**Added:** 2026-01-24 (SPEC-001 Self-Referential Pseudo-Columns V1.0)

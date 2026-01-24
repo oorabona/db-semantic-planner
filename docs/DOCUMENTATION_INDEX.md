@@ -86,6 +86,8 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | CLI-ASSERT | [Typed Assertion System](plans/CLI-ASSERT-typed-assertions.md) | cli | ✅ canonical |
 | NQL-AUDIT | [NQL Parser Audit & v2.0 Design](plans/NQL-PARSER-AUDIT-2026-01.md) | nql | ✅ canonical |
 | NQL-SPEC | [NQL v2.0 Parser Specification](plans/NQL-SPEC-2026-01.md) | nql | ✅ canonical |
+| **NQL-EBNF** | [**NQL Grammar (EBNF)**](specs/NQL-EBNF.md) | nql | ✅ canonical |
+| SPEC-001 | [Self-Ref Pseudo-Columns V1.0](specs/SELF-REF-PSEUDO-COLUMNS-SPEC.md) | core, nql, adapter | ✅ canonical |
 | NQLM | [NQL CLI Migration](../TODO_NQL_MIGRATION.md) | cli | ✅ complete |
 
 ## Golden Query Tests - ✅ Complete

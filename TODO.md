@@ -26,6 +26,7 @@
 | NQL v2.0 Parser (@dbsp/nql) | nql | ✅ Complete |
 | NQL CLI Migration (NQLM) | cli, examples | 🟡 Ready |
 | Logical/Physical Naming (ARCH-003) | cli, examples | ✅ Complete |
+| Self-Ref Pseudo-Columns (SPEC-001) | core, nql, adapter | ✅ Complete (V1.0) |
 
 ## Scope-Specific Backlogs
 
@@ -34,6 +35,30 @@
 | `TODO_NQL_MIGRATION.md` | cli, examples | CLI REPL migration to @dbsp/nql |
 | `TODO_MCP.md` | mcp-server | MCP server implementation tasks |
 | `TODO_DX.md` | core, adapter | DX improvements, SOLID fixes, type inference |
+| `docs/specs/SELF-REF-PSEUDO-COLUMNS-SPEC.md` | core, nql, adapter | Auto-generated pseudo-columns for hierarchies |
+
+## ✅ COMPLETED: SPEC-001 Self-Referential Pseudo-Columns V1.0 (2026-01-24)
+
+**Priority:** HIGH | **Effort:** L (~45 min) | **Breaking:** No
+**Scope:** core, nql, adapter-kysely
+**Started:** 2026-01-24 | **Completed:** 2026-01-24
+
+Auto-generated pseudo-columns for self-referential FK traversal in NQL queries.
+
+### V1.0 Features (Implemented)
+- [x] ✅ Schema detection of self-referential FKs (conventions.ts)
+- [x] ✅ `parentRole`/`childRole` support in schema DSL
+- [x] ✅ NQL lexer tokens for parent/child/ascendant/descendant
+- [x] ✅ NQL compiler PseudoColumnIntent generation
+- [x] ✅ Adapter WHERE handler integration for pseudo-column filtering
+- [x] ✅ Pre-scan WHERE for pseudo-columns, register pending JOINs
+- [x] ✅ E2E tests via pimdam.dbsp assertions
+
+### V1.1 Deferred (Backlog)
+- [ ] Recursive CTE for ascendant/descendant traversal
+- [ ] Chained syntax (`parent.parent.name`)
+- [ ] Bounded depth (`ascendant[N].column`)
+- [ ] Unit tests for adapter pseudo-column helpers
 
 ## ✅ COMPLETED: ALIGN-001 Documentation & API Alignment Sprint (2026-01-11)
 
