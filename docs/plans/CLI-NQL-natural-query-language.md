@@ -185,6 +185,9 @@ interface RelationDefinition {
 
 ### 4.3 EBNF Grammar (LL(1) — formal, left-factored)
 
+> **⚠️ CONSOLIDATED:** The canonical EBNF grammar is now in **[NQL-EBNF.md](../specs/NQL-EBNF.md)**.
+> The grammar below is kept for historical reference but may be outdated.
+
 We replace the ad-hoc description with a formal, LL(1)-friendly grammar. The grammar below is left-factored and avoids left recursion where necessary. Decisions that require inspecting the next token after a completed production (e.g., deciding whether a parsed path is followed by `has` or another operator) are compatible with a single-token lookahead parser if path parsing itself is LL(1).
 
 ```ebnf

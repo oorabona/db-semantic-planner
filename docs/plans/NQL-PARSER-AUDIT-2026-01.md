@@ -1759,6 +1759,9 @@ orders | where due in 'next week'
 
 ### 11.6 Grammar (EBNF)
 
+> **⚠️ CONSOLIDATED:** The canonical EBNF grammar is now in **[NQL-EBNF.md](../specs/NQL-EBNF.md)**.
+> The grammar below is kept for historical reference but may be outdated.
+
 ```ebnf
 (* ============================================================ *)
 (* TOP-LEVEL                                                    *)
