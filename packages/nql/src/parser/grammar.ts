@@ -15,7 +15,6 @@ import {
 	Between,
 	Bind,
 	Child,
-	Colon,
 	Comma,
 	ContainedBy,
 	Contains,
@@ -28,6 +27,7 @@ import {
 	Equals,
 	Exists,
 	False,
+	Flat,
 	From,
 	GreaterThan,
 	GreaterThanOrEqual,
@@ -81,9 +81,7 @@ import {
 	True,
 	Update,
 	Upsert,
-	Via,
 	Where,
-	With,
 } from '../lexer/tokens.js';
 
 /**
@@ -173,14 +171,15 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * query_clause = where_clause | select_clause | with_clause
+	 * query_clause = where_clause | select_clause | flat_clause
 	 *              | group_clause | order_clause | limit_clause | offset_clause ;
+	 * NQL v2.1: Removed with_clause, added flat_clause
 	 */
 	private queryClause = this.RULE('queryClause', () => {
 		this.OR([
 			{ ALT: () => this.SUBRULE(this.whereClause) },
 			{ ALT: () => this.SUBRULE(this.selectClause) },
-			{ ALT: () => this.SUBRULE(this.withClause) },
+			{ ALT: () => this.SUBRULE(this.flatClause) },
 			{ ALT: () => this.SUBRULE(this.groupClause) },
 			{ ALT: () => this.SUBRULE(this.orderClause) },
 			{ ALT: () => this.SUBRULE(this.limitClause) },
@@ -210,15 +209,11 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * with_clause = "with" join_spec { "," join_spec } ;
+	 * flat_clause = "flat" ;
+	 * NQL v2.1: Forces JOIN strategy instead of json_agg for relation includes
 	 */
-	private withClause = this.RULE('withClause', () => {
-		this.CONSUME(With);
-		this.SUBRULE(this.joinSpec);
-		this.MANY(() => {
-			this.CONSUME(Comma);
-			this.SUBRULE2(this.joinSpec);
-		});
+	private flatClause = this.RULE('flatClause', () => {
+		this.CONSUME(Flat);
 	});
 
 	/**
@@ -251,50 +246,6 @@ export class NqlParser extends CstParser {
 	private offsetClause = this.RULE('offsetClause', () => {
 		this.CONSUME(Offset);
 		this.CONSUME(NumberLiteral);
-	});
-
-	// ============================================================
-	// JOIN SPECIFICATION
-	// ============================================================
-
-	/**
-	 * join_spec = ident_segment [ "(" param_list ")" ] [ "via" ident_segment ] [ "on" boolean_expr ] ;
-	 */
-	private joinSpec = this.RULE('joinSpec', () => {
-		this.SUBRULE(this.identSegment);
-		this.OPTION(() => {
-			this.CONSUME(LParen);
-			this.SUBRULE(this.paramList);
-			this.CONSUME(RParen);
-		});
-		this.OPTION2(() => {
-			this.CONSUME(Via);
-			this.SUBRULE2(this.identSegment);
-		});
-		this.OPTION3(() => {
-			this.CONSUME(On);
-			this.SUBRULE(this.booleanExpr);
-		});
-	});
-
-	/**
-	 * param_list = param { "," param } ;
-	 */
-	private paramList = this.RULE('paramList', () => {
-		this.SUBRULE(this.param);
-		this.MANY(() => {
-			this.CONSUME(Comma);
-			this.SUBRULE2(this.param);
-		});
-	});
-
-	/**
-	 * param = IDENT ":" literal ;
-	 */
-	private param = this.RULE('param', () => {
-		this.CONSUME(Identifier);
-		this.CONSUME(Colon);
-		this.SUBRULE(this.literal);
 	});
 
 	// ============================================================

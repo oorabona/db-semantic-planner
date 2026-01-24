@@ -928,10 +928,16 @@ function processInclude(
 		!!include.recursive && relation.source === relation.target;
 
 	// Determine include strategy
-	// Force 'cte' strategy for recursive includes
-	const includeStrategy = isRecursiveInclude
-		? 'cte'
-		: determineIncludeStrategy(relation, opts);
+	// Priority: 1) recursive → cte, 2) include.strategy override, 3) auto-detect
+	let includeStrategy: ResolvedIncludeStrategy;
+	if (isRecursiveInclude) {
+		includeStrategy = 'cte';
+	} else if (include.strategy === 'join') {
+		// NQL v2.1: Honor explicit strategy from intent (| flat clause)
+		includeStrategy = 'join';
+	} else {
+		includeStrategy = determineIncludeStrategy(relation, opts);
+	}
 	const includeDecisionId = generateDecisionId(state, 'include-strategy');
 
 	state.decisions.push({

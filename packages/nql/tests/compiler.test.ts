@@ -8,7 +8,6 @@ import { describe, expect, it } from 'vitest';
 import type {
 	DeleteIntent,
 	ExpressionIntent,
-	IncludeIntent,
 	InsertIntent,
 	OrderByIntent,
 	SelectFieldsIntent,
@@ -298,52 +297,71 @@ describe('NQL Compiler - SELECT Clauses', () => {
 	});
 });
 
-describe('NQL Compiler - JOIN (WITH) Clauses', () => {
-	it('compiles simple join', () => {
-		const result = compileNql('orders | with customer');
+describe('NQL Compiler - FLAT clause (v2.1)', () => {
+	it('parses flat clause successfully', () => {
+		// NQL v2.1: flat clause is recognized (no includes without relation paths)
+		const result = compileNql('orders | flat');
+		const query = result.query!;
+
+		expect(query.from).toBe('orders');
+		expect(query.include).toBeUndefined(); // No relation paths in select
+	});
+
+	it('auto-generates include from relation star in select', () => {
+		// NQL v2.1: relation.* in select auto-generates IncludeIntent
+		const result = compileNql('orders | select *, customer.*');
+		const query = result.query!;
+
+		expect(query.from).toBe('orders');
+		expect(query.include).toBeDefined();
+		expect(query.include).toHaveLength(1);
+		expect(query.include![0].relation).toBe('customer');
+		// Without | flat, strategy is not set (defaults to auto/json_agg)
+		expect(query.include![0].strategy).toBeUndefined();
+	});
+
+	it('applies join strategy when flat clause is used', () => {
+		// NQL v2.1: | flat forces JOIN strategy on all includes
+		const result = compileNql('orders | select *, customer.* | flat');
+		const query = result.query!;
+
+		expect(query.from).toBe('orders');
+		expect(query.include).toBeDefined();
+		expect(query.include).toHaveLength(1);
+		expect(query.include![0].relation).toBe('customer');
+		// With | flat, strategy is set to 'join'
+		expect(query.include![0].strategy).toBe('join');
+	});
+
+	it('auto-generates multiple includes from multiple relation paths', () => {
+		// Multiple relation.* in select generate multiple includes
+		const result = compileNql('orders | select *, customer.*, items.* | flat');
+		const query = result.query!;
+
+		expect(query.include).toBeDefined();
+		expect(query.include).toHaveLength(2);
+		expect(query.include!.map((i) => i.relation)).toContain('customer');
+		expect(query.include!.map((i) => i.relation)).toContain('items');
+		// All includes get join strategy with | flat
+		for (const inc of query.include!) {
+			expect(inc.strategy).toBe('join');
+		}
+	});
+
+	it('auto-generates include from relation.column path', () => {
+		// relation.column also triggers include generation
+		const result = compileNql('orders | select id, customer.name | flat');
 		const query = result.query!;
 
 		expect(query.include).toBeDefined();
 		expect(query.include).toHaveLength(1);
-
-		const include = query.include![0] as IncludeIntent;
-		expect(include.relation).toBe('customer');
-	});
-
-	it('compiles multiple joins', () => {
-		const result = compileNql('orders | with customer, items');
-		const query = result.query!;
-
-		expect(query.include).toHaveLength(2);
 		expect(query.include![0].relation).toBe('customer');
-		expect(query.include![1].relation).toBe('items');
 	});
 
-	it('compiles join with via disambiguation', () => {
-		const result = compileNql('orders | with user via created_by');
-		const query = result.query!;
-
-		expect(query.include).toHaveLength(1);
-		expect(query.include![0].via).toBe('created_by');
-	});
-
-	it('compiles join with via AND on condition (regression: bug 3)', () => {
-		const result = compileNql(
-			'orders | with user via created_by on user.active = true',
-		);
-		const query = result.query!;
-
-		expect(query.include).toHaveLength(1);
-		const include = query.include![0] as IncludeIntent;
-		// Both via AND where must be present
-		expect(include.via).toBe('created_by');
-		expect(include.where).toBeDefined();
-		expect(include.where).toEqual({
-			kind: 'comparison',
-			operator: 'eq',
-			field: 'user.active',
-			value: true,
-		});
+	it('deprecated `with` keyword returns parse error', () => {
+		const result = compile('orders | with customer', null);
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toContain('Flat');
 	});
 });
 
@@ -532,26 +550,29 @@ describe('NQL Compiler - UPSERT', () => {
 
 describe('NQL Compiler - Complex Queries', () => {
 	it('compiles full query with all clauses', () => {
-		// Note: In NQL, WHERE before WITH goes to main query,
-		// WHERE after WITH goes to the include
+		// NQL v2.1: Full query with all clauses including relation path
 		const result = compileNql(`
       orders
       | where status = 'completed'
-      | with customer
-      | select customer.name, sum(total) as revenue
-      | group by customer.name
+      | select name, customer.name as cust_name, sum(total) as revenue
+      | group by name
       | order by revenue desc
       | limit 10
+      | flat
     `);
 
 		const query = result.query!;
 		expect(query.from).toBe('orders');
-		expect(query.include).toHaveLength(1);
-		expect(query.where).toBeDefined(); // WHERE before WITH → main query
+		expect(query.where).toBeDefined();
 		expect(query.select).toBeDefined();
 		expect(query.groupBy).toBeDefined();
 		expect(query.orderBy).toHaveLength(1);
 		expect(query.limit).toBe(10);
+		// NQL v2.1: customer.name triggers include with join strategy
+		expect(query.include).toBeDefined();
+		expect(query.include).toHaveLength(1);
+		expect(query.include![0].relation).toBe('customer');
+		expect(query.include![0].strategy).toBe('join');
 	});
 
 	it('handles string escapes correctly', () => {

@@ -89,8 +89,8 @@ db.output.contains: delivered
 db.output.contains: shipped
 
 # ─────────────────────────────────────────
-# Query 9: categories | with products | where active = true
-# BUG FIXED: Nested include with where clause now works
+# Query 9: categories | select *, products.*
+# NQL v2.1: Filtered includes not yet supported in NQL syntax
 # ─────────────────────────────────────────
 --- query: 9
 success: true
@@ -99,7 +99,7 @@ sql.contains: left join "ch5_ecommerce"."products"
 db.rows.equals: 23
 
 # ─────────────────────────────────────────
-# Query 10: products | with variants | limit 3
+# Query 10: products | select *, variants.* | limit 3
 # ─────────────────────────────────────────
 --- query: 10
 success: true
@@ -112,8 +112,8 @@ output.contains: variants.id
 output.contains: variants.sku
 
 # ─────────────────────────────────────────
-# Query 11: customers | with orders | with orderItems
-# BUG FIXED: Multiple includes now chain correctly (nested)
+# Query 11: customers | select *, orders.*
+# NQL v2.1: Deep nesting (orders.orderItems) requires ORM API
 # ─────────────────────────────────────────
 --- query: 11
 success: true

@@ -6,7 +6,8 @@
 #     --db postgresql://postgres:demo@localhost:5432/demo \
 #     --input ./examples/ecommerce.dbsp
 #
-# NQL v2 Syntax: uses pipes (|) between operators
+# NQL v2.1 Syntax: uses pipes (|) between operators
+# MIGRATION: `with` keyword removed in v2.1, use `select *, relation.*` instead
 
 # =============================================================================
 # Setup: Create isolated schema and load data
@@ -34,11 +35,13 @@ customers
 orders
 
 # =============================================================================
-# 5.4 Complex Relations
+# 5.4 Complex Relations (NQL v2.1)
 # =============================================================================
-categories | with products | where active = true
-products | with variants | limit 3
-customers | with orders | with orderItems
+# Note: Filtered includes (where on relations) not yet supported in NQL v2.1
+categories | select *, products.*
+products | select *, variants.* | limit 3
+# Nested includes (orders.orderItems) - use single level or ORM API for deep nesting
+customers | select *, orders.*
 
 # =============================================================================
 # 5.5 Aggregates on E-Commerce Data

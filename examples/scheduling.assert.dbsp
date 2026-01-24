@@ -115,27 +115,26 @@ success: true
 sql.contains: "quantity_range" @> $2
 
 # ─────────────────────────────────────────
-# Query 13: rooms | with roomBookings
-# BUG FIXED: camelCase mapping now works for includes
+# Query 13: rooms | select *, roomBookings.*
+# NQL v2.1: Relation path triggers include automatically
 # ─────────────────────────────────────────
 --- query: 13
 success: true
 intent.type: query
 intent.table: rooms
-intent.with: roomBookings
+intent.include.relation: roomBookings
 intent.hasWhere: false
 sql.join: roomBookings
 
 # ─────────────────────────────────────────
-# Query 14: rooms | with roomBookings | where bookingPeriod overlaps [2024-01-22,2024-01-29)
-# BUG FIXED: Range operators now work in include.where
-# NOTE: WHERE is on the include (roomBookings), not the main intent (rooms)
+# Query 14: rooms | where roomBookings.bookingPeriod overlaps [2024-01-22,2024-01-29) | select *, roomBookings.*
+# NQL v2.1: Pseudo-column filter + automatic include
 # ─────────────────────────────────────────
 --- query: 14
 success: true
 intent.type: query
 intent.table: rooms
-intent.with: roomBookings
+intent.include.relation: roomBookings
 intent.hasWhere: false
 sql.join: roomBookings
 sql.contains: "booking_period" && $1

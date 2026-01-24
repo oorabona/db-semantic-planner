@@ -15,7 +15,6 @@ import type {
 	NqlInExpression,
 	NqlInsert,
 	NqlIsNullExpression,
-	NqlJoinSpec,
 	NqlMutationPipeline,
 	NqlOrderByClause,
 	NqlOrderItem,
@@ -29,7 +28,6 @@ import type {
 	NqlUpdate,
 	NqlUpsert,
 	NqlWindowExpression,
-	NqlWithClause,
 } from '../parser/ast.js';
 
 // IntentAST types - we define our own compatible types here
@@ -290,6 +288,8 @@ export interface IncludeIntent {
 	readonly via?: string;
 	readonly limit?: number;
 	readonly orderBy?: readonly OrderByIntent[];
+	/** NQL v2.1: Override include strategy ('auto' | 'join') */
+	readonly strategy?: 'auto' | 'join';
 }
 
 export interface OrderByIntent {
@@ -357,6 +357,8 @@ export class NqlCompiler {
 		let orderBy: readonly OrderByIntent[] | undefined;
 		let limit: number | undefined;
 		let offset: number | undefined;
+		// NQL v2.1: | flat forces JOIN strategy instead of json_agg
+		let flatMode = false;
 
 		for (let i = 0; i < query.clauses.length; i++) {
 			const clause = query.clauses[i];
@@ -389,27 +391,11 @@ export class NqlCompiler {
 					select = this.compileSelectClause(clause);
 					distinct = clause.distinct || undefined;
 					break;
-				case 'with': {
-					const newIncludes = this.compileWithClause(clause) as IncludeIntent[];
-					// Check if this WITH should be nested under the previous include
-					if (currentIncludeBatch && currentIncludeBatch.length > 0) {
-						// Nested include: attach to last include's include array
-						const parentInclude =
-							currentIncludeBatch[currentIncludeBatch.length - 1];
-						const existingNested = parentInclude.include || [];
-						(parentInclude as { include: readonly IncludeIntent[] }).include = [
-							...existingNested,
-							...newIncludes,
-						];
-						// Update current batch to the new includes for WHERE association
-						currentIncludeBatch = newIncludes;
-					} else {
-						// First WITH: add to root includes
-						allIncludes.push(...newIncludes);
-						currentIncludeBatch = newIncludes;
-					}
+				case 'flat':
+					// NQL v2.1: | flat forces JOIN strategy for all includes
+					// Mark that we want JOIN strategy - this is processed after all clauses
+					flatMode = true;
 					break;
-				}
 				case 'groupBy':
 					groupBy = this.compileGroupByClause(clause);
 					// Reset include context after groupBy
@@ -424,6 +410,41 @@ export class NqlCompiler {
 				case 'offset':
 					offset = clause.count;
 					break;
+			}
+		}
+
+		// NQL v2.1: Detect relation paths in SELECT and auto-generate includes
+		// This enables implicit relation loading via path expressions (e.g., customer.*, customer.name)
+		if (select && select.type === 'expressions') {
+			const detectedRelations = new Set<string>();
+			for (const expr of select.columns) {
+				if (expr.kind === 'relationColumn') {
+					// Extract top-level relation (first segment for nested paths like category.parent)
+					const topRelation = expr.relation.split('.')[0];
+					detectedRelations.add(topRelation);
+				}
+			}
+			// Create IncludeIntent for each detected relation (if not already present)
+			// Apply flatMode strategy at creation time to avoid mutating readonly objects
+			for (const relation of detectedRelations) {
+				const exists = allIncludes.some((inc) => inc.relation === relation);
+				if (!exists) {
+					const include: IncludeIntent = flatMode
+						? { relation, strategy: 'join' }
+						: { relation };
+					allIncludes.push(include);
+				}
+			}
+		}
+
+		// NQL v2.1: Apply flat mode strategy to pre-existing includes (from explicit syntax if any)
+		// This handles includes that were created before flatMode was detected
+		if (flatMode && allIncludes.length > 0) {
+			for (let i = 0; i < allIncludes.length; i++) {
+				if (!allIncludes[i].strategy) {
+					// Replace with new object including strategy (avoid mutating readonly)
+					allIncludes[i] = { ...allIncludes[i], strategy: 'join' };
+				}
 			}
 		}
 
@@ -721,19 +742,6 @@ export class NqlCompiler {
 				`This expression cannot be compiled to IntentAST. ` +
 				`Consider extending the grammar or using a supported expression.`,
 		);
-	}
-
-	private compileWithClause(clause: NqlWithClause): readonly IncludeIntent[] {
-		return clause.joins.map((join) => this.compileJoinSpec(join));
-	}
-
-	private compileJoinSpec(join: NqlJoinSpec): IncludeIntent {
-		// Build result with optional via and where (both can coexist)
-		return {
-			relation: join.relation,
-			...(join.via && { via: join.via }),
-			...(join.condition && { where: this.compileExpression(join.condition) }),
-		};
 	}
 
 	private compileGroupByClause(clause: NqlGroupByClause): readonly string[] {

@@ -6,7 +6,8 @@
 #     --db postgresql://postgres:demo@localhost:5432/demo \
 #     --input ./examples/blog-extended.dbsp
 #
-# NQL v2 Syntax: uses pipes (|) between operators
+# NQL v2.1 Syntax: uses pipes (|) between operators
+# MIGRATION: `with` keyword removed in v2.1, use `select *, relation.*` instead
 
 # =============================================================================
 # Setup: Create isolated schema and load data
@@ -38,8 +39,8 @@ comments | limit 10
 # 3.3 Hierarchical Categories (Self-Referential)
 # =============================================================================
 categories | where parentId is null
-categories | with children
-categories | where parentId is null | with children
+categories | select *, children.*
+categories | where parentId is null | select *, children.*
 
 # =============================================================================
 # 3.4 Featured and Popular Posts
@@ -49,9 +50,11 @@ posts | where viewCount > 1000
 posts | where featured = true and viewCount > 1500
 
 # =============================================================================
-# 3.5 Complex Nested Includes
+# 3.5 Nested Includes (NQL v2.1 simplified)
 # =============================================================================
-authors | where active = true | with posts | where published = true | with comments | where approved = true
+# Note: Filtered includes (where on relations) not yet supported in NQL v2.1
+# Use ORM API for: include('posts', { where: { published: true } })
+authors | where active = true | select *, posts.*
 
 # =============================================================================
 # 3.6 ORDER BY

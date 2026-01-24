@@ -86,6 +86,9 @@ importers:
       '@dbsp/core':
         specifier: workspace:*
         version: link:packages/core
+      '@dbsp/nql':
+        specifier: workspace:*
+        version: link:packages/nql
       '@testcontainers/postgresql':
         specifier: 'catalog:'
         version: 11.11.0

@@ -23,7 +23,7 @@ export const LineComment = createToken({
 // Query keywords
 export const Select = createToken({ name: 'Select', pattern: /select\b/i });
 export const Where = createToken({ name: 'Where', pattern: /where\b/i });
-export const With = createToken({ name: 'With', pattern: /with\b/i });
+export const Flat = createToken({ name: 'Flat', pattern: /flat\b/i });
 export const Via = createToken({ name: 'Via', pattern: /via\b/i });
 export const Let = createToken({ name: 'Let', pattern: /let\b/i });
 export const Bind = createToken({ name: 'Bind', pattern: /bind\b/i });
@@ -225,7 +225,7 @@ export const allTokens = [
 	// - Asc BEFORE As
 	Select,
 	Where,
-	With,
+	Flat,
 	Via,
 	Let,
 	Bind,

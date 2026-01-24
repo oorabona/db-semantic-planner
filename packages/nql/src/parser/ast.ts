@@ -58,7 +58,7 @@ export type NqlMutationClause = NqlSelectClause | NqlBindClause;
 export type NqlClause =
 	| NqlWhereClause
 	| NqlSelectClause
-	| NqlWithClause
+	| NqlFlatClause
 	| NqlGroupByClause
 	| NqlOrderByClause
 	| NqlLimitClause
@@ -80,9 +80,11 @@ export interface NqlSelectClause {
 	items: NqlSelectItem[];
 }
 
-export interface NqlWithClause {
-	type: 'with';
-	joins: NqlJoinSpec[];
+/**
+ * NQL v2.1: Forces JOIN strategy instead of json_agg for relation includes
+ */
+export interface NqlFlatClause {
+	type: 'flat';
 }
 
 export interface NqlGroupByClause {

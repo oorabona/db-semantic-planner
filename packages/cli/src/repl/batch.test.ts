@@ -54,6 +54,8 @@ function createBatchState(overrides?: Partial<BatchState>): BatchState {
 		dbConnection: undefined,
 		explainMode: false,
 		parseMode: false,
+		model: undefined,
+		outputMode: 'json',
 		...overrides,
 	};
 }
@@ -331,6 +333,84 @@ describe('processDotCommand', () => {
 
 			// Assert
 			expect(result.output).toContain('.parse');
+		});
+	});
+
+	/**
+	 * NQL v2.1: .output command tests
+	 */
+	describe('.output command', () => {
+		it('should show current mode when called without argument', async () => {
+			// Arrange
+			const state = createBatchState({ outputMode: 'json' });
+
+			// Act
+			const result = await processDotCommand('.output', mockSchema, state);
+
+			// Assert
+			expect(result.output).toContain('Current output mode: json');
+			expect(result.stateChange).toBeUndefined();
+		});
+
+		it('should set output mode to json', async () => {
+			// Arrange
+			const state = createBatchState({ outputMode: 'table' });
+
+			// Act
+			const result = await processDotCommand('.output json', mockSchema, state);
+
+			// Assert
+			expect(result.output).toContain('Output mode: json');
+			expect(result.stateChange?.outputMode).toBe('json');
+		});
+
+		it('should set output mode to table', async () => {
+			// Arrange
+			const state = createBatchState({ outputMode: 'json' });
+
+			// Act
+			const result = await processDotCommand('.output table', mockSchema, state);
+
+			// Assert
+			expect(result.output).toContain('Output mode: table');
+			expect(result.stateChange?.outputMode).toBe('table');
+		});
+
+		it('should set output mode to csv', async () => {
+			// Arrange
+			const state = createBatchState({ outputMode: 'json' });
+
+			// Act
+			const result = await processDotCommand('.output csv', mockSchema, state);
+
+			// Assert
+			expect(result.output).toContain('Output mode: csv');
+			expect(result.stateChange?.outputMode).toBe('csv');
+		});
+
+		it('should reject invalid output mode', async () => {
+			// Arrange
+			const state = createBatchState();
+
+			// Act
+			const result = await processDotCommand('.output xml', mockSchema, state);
+
+			// Assert
+			expect(result.output).toContain('Invalid output mode: xml');
+			expect(result.output).toContain('json, table, csv');
+			expect(result.stateChange).toBeUndefined();
+		});
+
+		it('should include .output in help text', async () => {
+			// Arrange
+			const state = createBatchState();
+
+			// Act
+			const result = await processDotCommand('.help', mockSchema, state);
+
+			// Assert
+			expect(result.output).toContain('.output');
+			expect(result.output).toContain('json|table|csv');
 		});
 	});
 });

@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import type {
 	NqlDelete,
+	NqlFlatClause,
 	NqlGroupByClause,
 	NqlInsert,
 	NqlLimitClause,
@@ -20,7 +21,6 @@ import type {
 	NqlUpdate,
 	NqlUpsert,
 	NqlWhereClause,
-	NqlWithClause,
 } from '../src/parser/ast.js';
 import { parseCst } from '../src/parser/index.js';
 import { cstToAst } from '../src/semantic/index.js';
@@ -85,10 +85,11 @@ describe('NQL Visitor - Queries', () => {
 	});
 
 	it('parses query with relation star', () => {
-		const ast = parseToAst('orders | with customer | select customer.*');
+		// NQL v2.1: Relations included via path expressions, no 'with' keyword
+		const ast = parseToAst('orders | select customer.*');
 		const query = ast.statements[0] as NqlQuery;
 
-		const selectClause = query.clauses[1] as NqlSelectClause;
+		const selectClause = query.clauses[0] as NqlSelectClause;
 		expect(selectClause.items[0].type).toBe('relationStar');
 		if (selectClause.items[0].type === 'relationStar') {
 			expect(selectClause.items[0].relation).toEqual(['customer']);
@@ -106,15 +107,14 @@ describe('NQL Visitor - Queries', () => {
 		}
 	});
 
-	it('parses query with join', () => {
-		const ast = parseToAst('orders | with customer');
+	it('parses query with flat clause', () => {
+		// NQL v2.1: 'flat' forces JOIN strategy instead of json_agg
+		const ast = parseToAst('orders | select *, customer.* | flat');
 		const query = ast.statements[0] as NqlQuery;
 
-		expect(query.clauses).toHaveLength(1);
-		const withClause = query.clauses[0] as NqlWithClause;
-		expect(withClause.type).toBe('with');
-		expect(withClause.joins).toHaveLength(1);
-		expect(withClause.joins[0].relation).toBe('customer');
+		expect(query.clauses).toHaveLength(2);
+		const flatClause = query.clauses[1] as NqlFlatClause;
+		expect(flatClause.type).toBe('flat');
 	});
 
 	it('parses query with group by', () => {

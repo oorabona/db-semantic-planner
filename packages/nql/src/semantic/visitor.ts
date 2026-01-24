@@ -138,7 +138,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	queryClause(ctx: CstContext): NqlClause {
 		if (ctx.whereClause) return this.visit(asCstNode(ctx.whereClause[0]));
 		if (ctx.selectClause) return this.visit(asCstNode(ctx.selectClause[0]));
-		if (ctx.withClause) return this.visit(asCstNode(ctx.withClause[0]));
+		if (ctx.flatClause) return this.visit(asCstNode(ctx.flatClause[0]));
 		if (ctx.groupClause) return this.visit(asCstNode(ctx.groupClause[0]));
 		if (ctx.orderClause) return this.visit(asCstNode(ctx.orderClause[0]));
 		if (ctx.limitClause) return this.visit(asCstNode(ctx.limitClause[0]));
@@ -168,14 +168,12 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		return { type: 'select', distinct, items };
 	}
 
-	withClause(ctx: CstContext): NqlClause {
-		const joins: NqlJoinSpec[] = [];
-		if (ctx.joinSpec) {
-			for (const joinCtx of ctx.joinSpec) {
-				joins.push(this.visit(asCstNode(joinCtx)));
-			}
-		}
-		return { type: 'with', joins };
+	/**
+	 * flat_clause = "flat" ;
+	 * NQL v2.1: Forces JOIN strategy instead of json_agg
+	 */
+	flatClause(_ctx: CstContext): NqlClause {
+		return { type: 'flat' };
 	}
 
 	groupClause(ctx: CstContext): NqlClause {
