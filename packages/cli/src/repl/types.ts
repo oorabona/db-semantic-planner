@@ -141,4 +141,3 @@ export interface ExecutionResult {
 	/** Was result truncated? */
 	truncated?: boolean;
 }
-

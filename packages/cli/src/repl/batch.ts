@@ -53,6 +53,15 @@ export interface BatchResult {
 	columns?: string[];
 	/** Row data from DB result (for db.value.equals) */
 	rows?: unknown[];
+	/** Intent summary for intent.* assertions */
+	intent?: {
+		type: 'query' | 'insert' | 'update' | 'delete' | 'upsert';
+		table: string;
+		with: string[];
+		hasWhere: boolean;
+		hasGroupBy: boolean;
+		hasOrderBy: boolean;
+	};
 }
 
 /** @internal - Exported for testing */
@@ -482,6 +491,7 @@ async function executeNqlQuery(
 						sql: result.sql,
 						params: result.params,
 						type: resultType,
+						intent: result.intent,
 					};
 				}
 
@@ -502,6 +512,7 @@ async function executeNqlQuery(
 					sql: result.sql,
 					params: result.params,
 					type: resultType,
+					intent: result.intent,
 				};
 			} catch (execError) {
 				const message =
@@ -513,6 +524,7 @@ async function executeNqlQuery(
 					sql: result.sql,
 					params: result.params,
 					type: resultType,
+					intent: result.intent,
 				};
 			}
 		}
@@ -528,6 +540,7 @@ async function executeNqlQuery(
 			sql: result.sql,
 			params: result.params,
 			type: resultType,
+			intent: result.intent,
 		};
 	} catch (error) {
 		// Handle NQL-specific errors
@@ -800,14 +813,18 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 					} else if (assertion.passed) {
 						console.log(`  ✓ ${assertion.type}`);
 					} else {
-						console.log(`  ✗ ${assertion.type}: ${assertion.message}`);
+						// Vitest-style expected vs actual output
+						console.log(`  ✗ ${assertion.type}`);
+						console.log('');
+						console.log(`    Expected: ${JSON.stringify(assertion.expected)}`);
 						if (assertion.actual !== undefined) {
 							const actualStr =
 								typeof assertion.actual === 'string'
-									? assertion.actual.slice(0, 100)
+									? assertion.actual
 									: JSON.stringify(assertion.actual);
-							console.log(`      actual: ${actualStr}`);
+							console.log(`    Actual:   ${actualStr}`);
 						}
+						console.log('');
 					}
 				}
 			}

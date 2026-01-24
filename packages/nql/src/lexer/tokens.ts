@@ -77,14 +77,20 @@ export const ContainedBy = createToken({
 	pattern: /containedBy\b/i,
 });
 
-// Range literal: [value,value) or (value,value] etc.
-// Matches PostgreSQL range syntax: [inclusive/exclusive bounds with date or number values
-// Supports: dates (2024-01-01), times (08:00), numbers, timestamps (2024-01-01T08:00)
-// IMPORTANT: Must NOT match identifier lists like (col1, col2) used in UPSERT ON clause
-// Uses lookahead to ensure values start with digit or are date-like (YYYY-)
-export const RangeLiteral = createToken({
-	name: 'RangeLiteral',
-	pattern: /[[(](?=\d|-?\d)(?:-?\d[\w.:-]*)\s*,\s*(?:-?\d[\w.:-]*)[\])]/,
+// Range literal tokens (grammar-based approach)
+// Ranges start with [ which is unambiguous in NQL (not used elsewhere)
+// This avoids conflicts with identifier lists like (col1, col2) in UPSERT ON clause
+export const LBracket = createToken({ name: 'LBracket', pattern: /\[/ });
+export const RBracket = createToken({ name: 'RBracket', pattern: /\]/ });
+
+// Range value: matches date/time patterns inside range brackets
+// Pattern: digits followed by at least one separator group (-/:T followed by digits)
+// Examples: 2024-01-01, 08:00, 2024-01-01T08:00:00
+// NOTE: Decimals like 10.5 use NumberLiteral (handled by rangeValue grammar rule)
+// Must come BEFORE NumberLiteral in allTokens to match date patterns first
+export const RangeValue = createToken({
+	name: 'RangeValue',
+	pattern: /-?\d+(?:[-:T]\d+)+/,
 });
 export const Is = createToken({ name: 'Is', pattern: /is\b/i });
 export const Exists = createToken({ name: 'Exists', pattern: /exists\b/i });
@@ -238,8 +244,8 @@ export const allTokens = [
 	Lag,
 	Lead,
 
-	// Range literal (must come before identifiers and brackets)
-	RangeLiteral,
+	// Range values (date/time patterns - must come before NumberLiteral)
+	RangeValue,
 
 	// Identifiers & literals
 	Identifier,
@@ -259,6 +265,8 @@ export const allTokens = [
 	Star,
 	LParen,
 	RParen,
+	LBracket,
+	RBracket,
 	Colon,
 	Equals,
 	LessThan,

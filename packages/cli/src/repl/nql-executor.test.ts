@@ -108,10 +108,7 @@ describe('nql-executor', () => {
 			});
 
 			it('compiles query with where clause', () => {
-				const result = compileNqlToSql(
-					'users | where active = true',
-					model,
-				);
+				const result = compileNqlToSql('users | where active = true', model);
 
 				expect(result.intentType).toBe('query');
 				expect(result.sql.toLowerCase()).toContain('where');
@@ -126,10 +123,7 @@ describe('nql-executor', () => {
 			});
 
 			it('compiles query with select fields', () => {
-				const result = compileNqlToSql(
-					'users | select name, email',
-					model,
-				);
+				const result = compileNqlToSql('users | select name, email', model);
 
 				expect(result.intentType).toBe('query');
 				expect(result.sql.toLowerCase()).toContain('name');
@@ -137,10 +131,7 @@ describe('nql-executor', () => {
 			});
 
 			it('compiles query with order by', () => {
-				const result = compileNqlToSql(
-					'users | order by name asc',
-					model,
-				);
+				const result = compileNqlToSql('users | order by name asc', model);
 
 				expect(result.intentType).toBe('query');
 				expect(result.sql.toLowerCase()).toContain('order by');
@@ -159,10 +150,7 @@ describe('nql-executor', () => {
 			});
 
 			it('compiles query with string comparison', () => {
-				const result = compileNqlToSql(
-					"users | where name = 'Alice'",
-					model,
-				);
+				const result = compileNqlToSql("users | where name = 'Alice'", model);
 
 				expect(result.intentType).toBe('query');
 				expect(result.params).toContain('Alice');
@@ -182,9 +170,9 @@ describe('nql-executor', () => {
 
 		describe('error handling', () => {
 			it('throws NqlParseError for invalid syntax', () => {
-				expect(() =>
-					compileNqlToSql('users | where = invalid', model),
-				).toThrow(NqlParseError);
+				expect(() => compileNqlToSql('users | where = invalid', model)).toThrow(
+					NqlParseError,
+				);
 			});
 
 			it('parse error contains helpful message', () => {
@@ -259,30 +247,21 @@ describe('nql-executor', () => {
 		const model = testModel;
 
 		it('handles escaped quotes in strings', () => {
-			const result = compileNqlToSql(
-				"users | where name = 'O''Brien'",
-				model,
-			);
+			const result = compileNqlToSql("users | where name = 'O''Brien'", model);
 
 			expect(result.intentType).toBe('query');
 			expect(result.params).toContain("O'Brien");
 		});
 
 		it('handles null comparison', () => {
-			const result = compileNqlToSql(
-				'users | where email is null',
-				model,
-			);
+			const result = compileNqlToSql('users | where email is null', model);
 
 			expect(result.intentType).toBe('query');
 			expect(result.sql.toLowerCase()).toContain('is null');
 		});
 
 		it('handles not null comparison', () => {
-			const result = compileNqlToSql(
-				'users | where email is not null',
-				model,
-			);
+			const result = compileNqlToSql('users | where email is not null', model);
 
 			expect(result.intentType).toBe('query');
 			expect(result.sql.toLowerCase()).toContain('is not null');

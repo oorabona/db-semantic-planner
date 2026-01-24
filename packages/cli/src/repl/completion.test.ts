@@ -349,9 +349,9 @@ describe('formatCompletions', () => {
 
 // Tests for Levenshtein fuzzy matching (ARCH-003)
 import {
+	enhanceErrorWithSuggestion,
 	levenshtein,
 	suggestClosestMatch,
-	enhanceErrorWithSuggestion,
 } from './completion.js';
 
 describe('levenshtein', () => {

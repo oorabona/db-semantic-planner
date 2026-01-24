@@ -727,7 +727,7 @@ describe('NQL Compiler - Range Operators', () => {
 		const where = query.where as WhereRangeOpIntent;
 
 		// Assert: range operator is correctly compiled
-		expect(where.kind).toBe('rangeOp');
+		expect(where.kind).toBe('range');
 		expect(where.field).toBe('period');
 		expect(where.operator).toBe('overlaps');
 		expect(where.value).toBe('[2024-01-01,2024-01-31]');
@@ -743,7 +743,7 @@ describe('NQL Compiler - Range Operators', () => {
 		const where = query.where as WhereRangeOpIntent;
 
 		// Assert: range operator is correctly compiled
-		expect(where.kind).toBe('rangeOp');
+		expect(where.kind).toBe('range');
 		expect(where.field).toBe('dateRange');
 		expect(where.operator).toBe('contains');
 		expect(where.value).toBe('[2024-06-15,2024-06-15]');
@@ -759,7 +759,7 @@ describe('NQL Compiler - Range Operators', () => {
 		const where = query.where as WhereRangeOpIntent;
 
 		// Assert: range operator is correctly compiled
-		expect(where.kind).toBe('rangeOp');
+		expect(where.kind).toBe('range');
 		expect(where.field).toBe('activeHours');
 		expect(where.operator).toBe('containedBy');
 		expect(where.value).toBe('[08:00,18:00)');
@@ -775,7 +775,7 @@ describe('NQL Compiler - Range Operators', () => {
 		const where = query.where as WhereRangeOpIntent;
 
 		// Assert: range literal with exclusive bounds is preserved
-		expect(where.kind).toBe('rangeOp');
+		expect(where.kind).toBe('range');
 		expect(where.operator).toBe('overlaps');
 		expect(where.value).toBe('(100,200)');
 	});
@@ -790,7 +790,7 @@ describe('NQL Compiler - Range Operators', () => {
 		const where = query.where as WhereRangeOpIntent;
 
 		// Assert: mixed bounds are preserved
-		expect(where.kind).toBe('rangeOp');
+		expect(where.kind).toBe('range');
 		expect(where.value).toBe('[0,100)');
 	});
 });

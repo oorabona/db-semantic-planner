@@ -20,7 +20,9 @@ export function levenshtein(a: string, b: string): number {
 
 	// Create matrix with proper initialization
 	const matrix: number[][] = Array.from({ length: aLower.length + 1 }, (_, i) =>
-		Array.from({ length: bLower.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)),
+		Array.from({ length: bLower.length + 1 }, (_, j) =>
+			i === 0 ? j : j === 0 ? i : 0,
+		),
 	);
 
 	// Fill matrix
@@ -30,7 +32,11 @@ export function levenshtein(a: string, b: string): number {
 			const deletion = matrix[i - 1]?.[j] ?? 0;
 			const insertion = matrix[i]?.[j - 1] ?? 0;
 			const substitution = matrix[i - 1]?.[j - 1] ?? 0;
-			matrix[i]![j] = Math.min(deletion + 1, insertion + 1, substitution + cost);
+			matrix[i]![j] = Math.min(
+				deletion + 1,
+				insertion + 1,
+				substitution + cost,
+			);
 		}
 	}
 

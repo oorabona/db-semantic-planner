@@ -21,6 +21,7 @@ import type {
 	NqlProgram,
 	NqlQuery,
 	NqlRangeLiteral,
+	NqlRangeOpExpression,
 	NqlSelectClause,
 	NqlSelectItem,
 	NqlUnaryExpression,
@@ -193,7 +194,6 @@ export type WhereIntent =
 	| WhereLikeIntent
 	| WhereNullIntent
 	| WhereRangeIntent
-	| WhereRangeOpIntent
 	| WhereAndIntent
 	| WhereOrIntent
 	| WhereNotIntent;
@@ -224,20 +224,18 @@ export interface WhereNullIntent {
 	readonly operator: NullOperator;
 }
 
+export type RangeOperator = 'overlaps' | 'contains' | 'containedBy' | 'between';
+
+/**
+ * Range filter: field overlaps/contains/containedBy range value
+ * or BETWEEN for lower/upper bounds
+ */
 export interface WhereRangeIntent {
 	readonly kind: 'range';
 	readonly field: string;
-	readonly operator: 'between';
-	readonly value: { lower: unknown; upper: unknown };
-}
-
-export type RangeOperator = 'overlaps' | 'contains' | 'containedBy';
-
-export interface WhereRangeOpIntent {
-	readonly kind: 'rangeOp';
-	readonly field: string;
 	readonly operator: RangeOperator;
-	readonly value: string; // PostgreSQL range literal as-is
+	/** Can be { lower, upper } for BETWEEN or string for PostgreSQL range literal */
+	readonly value: { lower: unknown; upper: unknown } | string;
 }
 
 export interface WhereAndIntent {
@@ -733,22 +731,6 @@ export class NqlCompiler {
 					};
 				}
 
-				// Handle range operators (PostgreSQL)
-				if (
-					comp.operator === 'overlaps' ||
-					comp.operator === 'contains' ||
-					comp.operator === 'containedBy'
-				) {
-					// Right side should be a range literal or value
-					const rangeValue = this.expressionToRangeValue(comp.right);
-					return {
-						kind: 'rangeOp',
-						field,
-						operator: comp.operator,
-						value: rangeValue,
-					};
-				}
-
 				const operator = this.mapComparisonOperator(comp.operator);
 				const value = this.expressionToValue(comp.right);
 
@@ -758,6 +740,39 @@ export class NqlCompiler {
 					operator,
 					value,
 				};
+			}
+
+			case 'rangeOp': {
+				const rangeExpr = expr as NqlRangeOpExpression;
+				const field = this.expressionToField(rangeExpr.left);
+				if (!field) {
+					throw new Error(
+						'Left side of range operator must be a field reference',
+					);
+				}
+				// Handle both range literals and scalar values
+				let rangeValue: string | unknown;
+				// Type assertion needed: NqlRangeOpExpression now has optional 'scalar' field
+				const rangeWithScalar = rangeExpr as unknown as {
+					range?: NqlRangeLiteral;
+					scalar?: NqlExpression;
+				};
+				if (rangeWithScalar.range) {
+					rangeValue = this.expressionToRangeValue(rangeWithScalar.range);
+				} else if (rangeWithScalar.scalar) {
+					// Scalar value for "contains" operator (e.g., contains 25)
+					rangeValue = this.expressionToValue(rangeWithScalar.scalar);
+				} else {
+					throw new Error(
+						'Range operator requires either a range literal or scalar value',
+					);
+				}
+				return {
+					kind: 'range',
+					field,
+					operator: rangeExpr.operator,
+					value: rangeValue,
+				} as WhereRangeIntent;
 			}
 
 			case 'in': {

@@ -159,6 +159,22 @@ export interface RawExpressionIntent {
 }
 
 /**
+ * Simple column expression: just a column reference, optionally aliased
+ * Used by NQL when a column is selected without modification
+ * @example { kind: 'column', column: 'name' }
+ *          → SELECT "name"
+ * @example { kind: 'column', column: 'name', as: 'userName' }
+ *          → SELECT "name" AS "userName"
+ */
+export interface ColumnExpressionIntent {
+	readonly kind: 'column';
+	/** Column name to select */
+	readonly column: string;
+	/** Optional alias for the result column */
+	readonly as?: string;
+}
+
+/**
  * Column alias expression: simple column reference with alias
  * Uses native Kysely eb.ref().as() - type-safe and dialect-portable
  * @example { kind: 'columnAlias', column: 'name', alias: 'userName' }
@@ -214,6 +230,7 @@ export interface AggregateExpressionIntent {
  * Extensible for future expression types (CASE WHEN, etc.)
  */
 export type ExpressionIntent =
+	| ColumnExpressionIntent
 	| CoalesceExpressionIntent
 	| RawExpressionIntent
 	| ColumnAliasIntent
@@ -222,20 +239,13 @@ export type ExpressionIntent =
 	| AggregateExpressionIntent;
 
 /**
- * An ordered column entry - either a plain field name or an expression.
- * Preserves the original order of columns in SELECT.
- */
-export type OrderedColumn =
-	| { readonly type: 'field'; readonly name: string }
-	| { readonly type: 'expression'; readonly expression: ExpressionIntent };
-
-/**
- * Select with expressions (computed columns)
+ * Select with expressions (computed columns).
+ * Columns are ExpressionIntent directly - matches NQL compiler output.
  */
 export interface SelectWithExpressionsIntent {
 	readonly type: 'expressions';
-	/** Columns in their original order */
-	readonly columns: readonly OrderedColumn[];
+	/** Columns as ExpressionIntent (NQL format) */
+	readonly columns: readonly ExpressionIntent[];
 }
 
 // ============================================================================

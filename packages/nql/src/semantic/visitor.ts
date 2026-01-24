@@ -25,6 +25,7 @@ import type {
 	NqlProgram,
 	NqlQuery,
 	NqlRangeLiteral,
+	NqlRangeOpExpression,
 	NqlSelectItem,
 	NqlStatement,
 	NqlSubquery,
@@ -401,6 +402,10 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		if (ctx.isNullSuffix) {
 			return this.buildIsNull(left, asCstNode(ctx.isNullSuffix[0]));
 		}
+		// Range operators (overlaps, contains, containedBy) with range literal
+		if (ctx.rangeOpSuffix) {
+			return this.buildRangeOp(left, asCstNode(ctx.rangeOpSuffix[0]));
+		}
 
 		// Just an expression
 		return left;
@@ -505,11 +510,67 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		if (ctx.LessThanOrEqual) return '<=';
 		if (ctx.GreaterThanOrEqual) return '>=';
 		if (ctx.Like) return 'like';
-		// Range operators (PostgreSQL)
+		throw new Error('Unknown comparison operator');
+	}
+
+	/**
+	 * Range operator: overlaps, contains, containedBy
+	 * Handled separately to support full PostgreSQL range syntax.
+	 */
+	rangeOp(ctx: CstContext): 'overlaps' | 'contains' | 'containedBy' {
 		if (ctx.Overlaps) return 'overlaps';
 		if (ctx.Contains) return 'contains';
 		if (ctx.ContainedBy) return 'containedBy';
-		throw new Error('Unknown comparison operator');
+		throw new Error('Unknown range operator');
+	}
+
+	/**
+	 * Range operator suffix: rangeOp rangeLiteral
+	 * This should not be called directly - handled by buildRangeOp
+	 */
+	rangeOpSuffix(_ctx: CstContext): NqlExpression {
+		throw new Error('rangeOpSuffix should not be visited directly');
+	}
+
+	/**
+	 * Build range comparison expression from column and range operator suffix.
+	 */
+	private buildRangeOp(
+		left: NqlExpression,
+		suffixNode: CstNode,
+	): NqlRangeOpExpression {
+		const suffixCtx = suffixNode.children as CstContext;
+		if (!suffixCtx.rangeOp) {
+			throw new Error('Range op suffix missing operator');
+		}
+		const operator = this.visit(asCstNode(suffixCtx.rangeOp[0])) as
+			| 'overlaps'
+			| 'contains'
+			| 'containedBy';
+
+		// Check if we have a range literal or a scalar literal
+		if (suffixCtx.rangeLiteral) {
+			const range = this.visit(
+				asCstNode(suffixCtx.rangeLiteral[0]),
+			) as NqlRangeLiteral;
+			return {
+				type: 'rangeOp',
+				operator,
+				left,
+				range,
+			};
+		}
+		if (suffixCtx.literal) {
+			const scalar = this.visit(asCstNode(suffixCtx.literal[0])) as NqlLiteral;
+			return {
+				type: 'rangeOp',
+				operator,
+				left,
+				scalar,
+			};
+		}
+
+		throw new Error('Range op suffix missing range literal or scalar value');
 	}
 
 	betweenSuffix(_ctx: CstContext): NqlExpression {
@@ -806,31 +867,60 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		if (ctx.Null) {
 			return { type: 'null' };
 		}
-		if (ctx.RangeLiteral) {
-			return this.parseRangeLiteral(getImage(ctx.RangeLiteral[0]));
+		if (ctx.rangeLiteral) {
+			return this.visit(asCstNode(ctx.rangeLiteral[0])) as NqlRangeLiteral;
 		}
 		throw new Error('Invalid literal');
 	}
 
 	/**
-	 * Parse PostgreSQL range literal: [2024-01-01,2024-12-31) or (1,100]
+	 * Range literal: [ or ( for lower, ] or ) for upper
+	 * Grammar-based parsing for PostgreSQL range syntax.
+	 * Examples: [1,10], (0,100), [1,10), (0,10]
 	 */
-	private parseRangeLiteral(raw: string): NqlRangeLiteral {
-		const lowerInclusive = raw[0] === '[';
-		const upperInclusive = raw[raw.length - 1] === ']';
-		// Extract the inner part: value,value
-		const inner = raw.slice(1, -1);
-		const commaIndex = inner.indexOf(',');
-		const lower = inner.slice(0, commaIndex).trim();
-		const upper = inner.slice(commaIndex + 1).trim();
+	rangeLiteral(ctx: CstContext): NqlRangeLiteral {
+		// Check opening bracket: [ = inclusive, ( = exclusive
+		const lowerInclusive = ctx.LBracket !== undefined;
+		// Check closing bracket: ] = inclusive, ) = exclusive
+		const upperInclusive = ctx.RBracket !== undefined;
+
+		// Get lower and upper values from labeled subrules
+		if (!ctx.lower || !ctx.upper) {
+			throw new Error('Range literal missing lower or upper bound');
+		}
+		const lower = this.visit(asCstNode(ctx.lower[0])) as string;
+		const upper = this.visit(asCstNode(ctx.upper[0])) as string;
+
+		// Reconstruct the raw value for compatibility
+		const openBracket = lowerInclusive ? '[' : '(';
+		const closeBracket = upperInclusive ? ']' : ')';
+		const value = `${openBracket}${lower},${upper}${closeBracket}`;
+
 		return {
 			type: 'rangeLiteral',
-			value: raw,
+			value,
 			lowerInclusive,
 			upperInclusive,
 			lower,
 			upper,
 		};
+	}
+
+	/**
+	 * Range value: RANGE_VALUE (date/time) or optional minus + NUMBER
+	 */
+	rangeValue(ctx: CstContext): string {
+		if (ctx.RangeValue) {
+			return getImage(ctx.RangeValue[0]);
+		}
+		// NumberLiteral with optional Minus
+		const numToken = ctx.NumberLiteral;
+		if (!numToken) {
+			throw new Error('Range value must contain RangeValue or NumberLiteral');
+		}
+		const minus = ctx.Minus ? '-' : '';
+		const num = getImage(numToken[0]);
+		return `${minus}${num}`;
 	}
 
 	// ============================================================
