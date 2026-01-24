@@ -1799,6 +1799,6 @@ These features are intentionally excluded from the library's scope:
 - Risk of future drift between implementations
 
 ### Refactor Plan
-- [ ] 🟡 Merge `CompilerState` interfaces - use single source in types.ts
-- [ ] 🟡 Consolidate schema building - single `buildModelIR()` function used by both CLI and tests
-- [ ] 🟡 Add lint rule or test to prevent local interface shadowing
+- [x] ✅ Merge `CompilerState` interfaces - single source in compiler/types.ts (ARCH-004, 2026-01-24)
+- [x] ✅ Consolidate schema building - `buildModelFromSchema` in core/dx/schema-bridge.ts (ARCH-004, 2026-01-24)
+- [x] ✅ Add architecture tests to prevent interface shadowing (2026-01-24)
