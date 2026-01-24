@@ -137,6 +137,110 @@ export function decapitalize(name: string): string {
 	return name.charAt(0).toLowerCase() + name.slice(1);
 }
 
+/**
+ * Get the inverse relation name for a self-referential FK.
+ * Special case: parent → children (most common hierarchy pattern).
+ * Otherwise: pluralize the belongsTo name (manager → managers).
+ */
+export function getSelfRefInverseName(belongsToName: string): string {
+	// The most common self-ref pattern
+	if (belongsToName === 'parent') return 'children';
+
+	// For other cases, just pluralize (manager → managers)
+	return pluralize(belongsToName);
+}
+
+/**
+ * Pseudo-column metadata for a self-referential FK.
+ * Exported for use by schema builder.
+ */
+export interface SelfRefPseudoColumn {
+	/** FK column name (e.g., 'parentId', 'managerId') */
+	foreignKeyColumn: string;
+	/** Target column (usually 'id') */
+	targetColumn: string;
+	/** Parent role name (e.g., 'parent', 'manager') */
+	parentRole: string;
+	/** Child role name (e.g., 'children', 'subordinates') */
+	childRole: string;
+}
+
+/**
+ * Extract pseudo-column metadata from detected FKs.
+ * Only self-referential FKs produce pseudo-columns.
+ */
+export function extractSelfRefPseudoColumns(
+	tableName: string,
+	fks: DetectedFK[],
+): SelfRefPseudoColumn[] {
+	const selfRefFKs = fks.filter((fk) => fk.targetTable === tableName);
+	if (selfRefFKs.length === 0) return [];
+
+	// Single self-ref FK: use default parent/child keywords
+	// Multiple self-ref FKs: require explicit roles (validated elsewhere)
+	return selfRefFKs.map((fk) => ({
+		foreignKeyColumn: fk.column,
+		targetColumn: fk.targetColumn,
+		parentRole: fk.parentRole ?? fk.inferredName,
+		childRole: fk.childRole ?? getSelfRefInverseName(fk.inferredName),
+	}));
+}
+
+/**
+ * Validate self-referential FK roles for a table.
+ * Returns error messages if validation fails.
+ */
+export function validateSelfRefRoles(
+	tableName: string,
+	pseudoColumns: SelfRefPseudoColumn[],
+	reservedNames: Set<string> = new Set([
+		'parent',
+		'child',
+		'ascendant',
+		'descendant',
+	]),
+): string[] {
+	const errors: string[] = [];
+
+	if (pseudoColumns.length === 0) return errors;
+
+	// Collect all role names for collision detection
+	const allRoles = new Set<string>();
+
+	for (const pc of pseudoColumns) {
+		// Check reserved name collision (only for multi-FK tables)
+		if (pseudoColumns.length > 1) {
+			if (reservedNames.has(pc.parentRole)) {
+				errors.push(
+					`Table '${tableName}': parentRole '${pc.parentRole}' conflicts with reserved keyword. Use a custom role name.`,
+				);
+			}
+			if (reservedNames.has(pc.childRole)) {
+				errors.push(
+					`Table '${tableName}': childRole '${pc.childRole}' conflicts with reserved keyword. Use a custom role name.`,
+				);
+			}
+		}
+
+		// Check cross-collision between different FKs
+		if (allRoles.has(pc.parentRole)) {
+			errors.push(
+				`Table '${tableName}': duplicate parentRole '${pc.parentRole}'. Each self-ref FK needs unique roles.`,
+			);
+		}
+		if (allRoles.has(pc.childRole)) {
+			errors.push(
+				`Table '${tableName}': duplicate childRole '${pc.childRole}'. Each self-ref FK needs unique roles.`,
+			);
+		}
+
+		allRoles.add(pc.parentRole);
+		allRoles.add(pc.childRole);
+	}
+
+	return errors;
+}
+
 // =============================================================================
 // FK Detection
 // =============================================================================
@@ -152,6 +256,10 @@ interface DetectedFK {
 	explicit: boolean;
 	/** Target column (from references.column or default 'id') */
 	targetColumn: string;
+	/** Custom parent role for self-ref FKs (from parentRole or inferred) */
+	parentRole?: string;
+	/** Custom child role for self-ref FKs (from childRole or inferred) */
+	childRole?: string;
 }
 
 /**
@@ -177,13 +285,23 @@ export function detectForeignKeys(
 					? colName.slice(0, -2)
 					: singularize(targetTable);
 
-				fks.push({
+				const isSelfRef = targetTable === tableName;
+				const detectedFK: DetectedFK = {
 					column: colName,
 					targetTable,
 					inferredName,
 					explicit: true,
 					targetColumn: colDef.references.column ?? 'id',
-				});
+				};
+
+				// Add self-ref roles if applicable
+				if (isSelfRef) {
+					detectedFK.parentRole = colDef.references.parentRole ?? inferredName;
+					detectedFK.childRole =
+						colDef.references.childRole ?? getSelfRefInverseName(inferredName);
+				}
+
+				fks.push(detectedFK);
 			}
 			continue; // Skip convention check if explicit reference exists
 		}
@@ -223,6 +341,9 @@ export function detectForeignKeys(
 						inferredName: prefix,
 						explicit: false,
 						targetColumn: 'id',
+						// Auto-infer roles for convention-based self-ref FKs
+						parentRole: prefix,
+						childRole: getSelfRefInverseName(prefix),
 					});
 				}
 			}
@@ -396,9 +517,13 @@ export function inferRelationsFromSchema(
 			}
 
 			// HasMany: target has many of source (inverse)
-			const hasManyName = conventions.pluralize
-				? pluralize(singularize(tableName))
-				: tableName;
+			// For self-referential FKs, use semantic inverse name (parent → children)
+			const isSelfRef = fk.targetTable === tableName;
+			const hasManyName = isSelfRef
+				? getSelfRefInverseName(fk.inferredName)
+				: conventions.pluralize
+					? pluralize(singularize(tableName))
+					: tableName;
 			const hasManyKey = `${fk.targetTable}.${hasManyName}`;
 			if (!(hasManyKey in result)) {
 				const rel: SchemaHasManyRelation = {

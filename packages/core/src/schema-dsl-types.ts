@@ -55,6 +55,20 @@ export interface SchemaForeignKeyReference {
 	column?: string;
 	/** Delete behavior (CASCADE, SET NULL, RESTRICT, NO ACTION) */
 	onDelete?: SchemaOnDeleteAction;
+	/**
+	 * Custom role name for parent direction in self-referential FKs.
+	 * Required when table has multiple self-referential FKs.
+	 * Example: parentRole: 'manager' for managerId FK
+	 * @default 'parent' (for single self-ref FK)
+	 */
+	parentRole?: string;
+	/**
+	 * Custom role name for child direction in self-referential FKs.
+	 * Required when table has multiple self-referential FKs.
+	 * Example: childRole: 'subordinates' for managerId FK
+	 * @default 'children' or pluralized parentRole (for single self-ref FK)
+	 */
+	childRole?: string;
 }
 
 /**

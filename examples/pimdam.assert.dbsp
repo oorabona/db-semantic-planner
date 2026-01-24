@@ -139,26 +139,64 @@ sql.contains: where "t0"."parent_id" is not null
 db.rows.equals: 8
 
 # ─────────────────────────────────────────
-# Query 15: insert into categories set name = 'Accessories', slug = 'accessories', active = true
+# Query 15: categories | where parent.name = 'Electronics' (SPEC-001 pseudo-column)
 # ─────────────────────────────────────────
 --- query: 15
+success: true
+sql.contains: from "ch6_pimdam"."categories"
+sql.contains: left join "ch6_pimdam"."categories" as "parent_1"
+sql.contains: where "parent_1"."name" = $1
+params.equals: ['Electronics']
+db.rows.equals: 3
+db.output.contains: Phones
+db.output.contains: Computers
+db.output.contains: Audio
+
+# ─────────────────────────────────────────
+# Query 16: categories | where parent.name = 'Phones' (SPEC-001 pseudo-column)
+# ─────────────────────────────────────────
+--- query: 16
+success: true
+sql.contains: from "ch6_pimdam"."categories"
+sql.contains: left join "ch6_pimdam"."categories" as "parent_1"
+sql.contains: where "parent_1"."name" = $1
+params.equals: ['Phones']
+db.rows.equals: 2
+db.output.contains: Smartphones
+db.output.contains: Phone Accessories
+
+# ─────────────────────────────────────────
+# Query 17: categories | where parent.id = 1 (SPEC-001 pseudo-column with id)
+# ─────────────────────────────────────────
+--- query: 17
+success: true
+sql.contains: from "ch6_pimdam"."categories"
+sql.contains: left join "ch6_pimdam"."categories" as "parent_1"
+sql.contains: where "parent_1"."id" = $1
+params.equals: [1]
+db.rows.equals: 3
+
+# ─────────────────────────────────────────
+# Query 18: insert into categories set name = 'Accessories', slug = 'accessories', active = true
+# ─────────────────────────────────────────
+--- query: 18
 success: true
 sql.contains: insert into "ch6_pimdam"."categories"
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 16: insert into assets set filename, sha256, mime, sizeBytes, storageKey, kind
+# Query 19: insert into assets set filename, sha256, mime, sizeBytes, storageKey, kind
 # ─────────────────────────────────────────
---- query: 16
+--- query: 19
 success: true
 sql.contains: insert into "ch6_pimdam"."assets"
 sql.contains: ("filename", "sha256", "mime", "size_bytes", "storage_key", "kind") values
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 17: update products set active = false where id = 5
+# Query 20: update products set active = false where id = 5
 # ─────────────────────────────────────────
---- query: 17
+--- query: 20
 success: true
 sql.contains: update "ch6_pimdam"."products"
 sql.contains: set "active" = $1
@@ -166,10 +204,10 @@ sql.contains: where "id" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 18: update products set deletedAt = '2024-12-01T00:00:00Z' where sku = 'OLD-PRODUCT'
+# Query 21: update products set deletedAt = '2024-12-01T00:00:00Z' where sku = 'OLD-PRODUCT'
 # NOTE: Soft delete by setting deletedAt timestamp
 # ─────────────────────────────────────────
---- query: 18
+--- query: 21
 success: true
 sql.contains: update "ch6_pimdam"."products"
 sql.contains: set "deleted_at" = $1
@@ -177,9 +215,9 @@ sql.contains: where "sku" = $2
 db.rows.equals: 0
 
 # ─────────────────────────────────────────
-# Query 19: update productImages set status = 'approved' where id = 1
+# Query 22: update productImages set status = 'approved' where id = 1
 # ─────────────────────────────────────────
---- query: 19
+--- query: 22
 success: true
 sql.contains: update "ch6_pimdam"."product_images"
 sql.contains: set "status" = $1
@@ -187,19 +225,19 @@ sql.contains: where "id" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 20: delete from productImages where status = 'rejected'
+# Query 23: delete from productImages where status = 'rejected'
 # NOTE: Seed data has 1 rejected image (iPhone 15 Pro DE)
 # ─────────────────────────────────────────
---- query: 20
+--- query: 23
 success: true
 sql.contains: delete from "ch6_pimdam"."product_images"
 sql.contains: where "status" = $1
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 21: upsert into products on sku set title = 'Updated Product', sku = 'NEW-SKU-001', categoryId = 1, active = true
+# Query 24: upsert into products on sku set title = 'Updated Product', sku = 'NEW-SKU-001', categoryId = 1, active = true
 # ─────────────────────────────────────────
---- query: 21
+--- query: 24
 success: true
 sql.contains: insert into "ch6_pimdam"."products"
 sql.contains: on conflict ("sku") do update

@@ -109,24 +109,9 @@ export default defineSchema(
 			createdAt: { type: 'timestamp', default: 'now()' },
 		},
 	},
-	{
-		relations: {
-			// Self-referencing for category hierarchy
-			'categories.parent': {
-				kind: 'belongsTo',
-				target: 'categories',
-				foreignKey: 'parentId',
-			},
-			'categories.children': {
-				kind: 'hasMany',
-				target: 'categories',
-				foreignKey: 'parentId',
-			},
-		},
-	},
+	// No explicit relations needed - all auto-inferred from `references`:
+	// - categories.parent, categories.children (self-ref)
+	// - products.category, categories.products
+	// - products.variants, variants.product
+	// - productImages.product, productImages.asset
 );
-// Other relations auto-inferred:
-// - products.category, categories.products
-// - products.variants, variants.product
-// - products.images, productImages.product
-// - assets.productImages, productImages.asset

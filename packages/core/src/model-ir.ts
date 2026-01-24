@@ -88,6 +88,60 @@ export interface RecursiveMetadata {
 	readonly through: string;
 }
 
+/**
+ * Metadata for auto-generated pseudo-columns from self-referential FKs.
+ * These enable intuitive traversal in NQL: parent.name, ascendant.title, etc.
+ */
+export interface PseudoColumnMetadata {
+	/** The table this pseudo-column belongs to */
+	readonly table: string;
+
+	/** The FK column that creates this self-reference */
+	readonly foreignKeyColumn: string;
+
+	/** Target column in the same table (usually 'id') */
+	readonly targetColumn: string;
+
+	/**
+	 * Role names for traversal directions.
+	 * parentRole: singular upward (e.g., 'parent', 'manager')
+	 * childRole: plural downward (e.g., 'children', 'subordinates')
+	 */
+	readonly parentRole: string;
+	readonly childRole: string;
+
+	/**
+	 * Keywords for recursive traversal.
+	 * ascendantKeyword: recursive upward (e.g., 'ascendant', 'manager.ascendant')
+	 * descendantKeyword: recursive downward (e.g., 'descendant', 'manager.descendant')
+	 */
+	readonly ascendantKeyword: string;
+	readonly descendantKeyword: string;
+}
+
+/**
+ * Creates pseudo-column metadata from a self-referential FK.
+ */
+export function createPseudoColumnMetadata(
+	table: string,
+	foreignKeyColumn: string,
+	targetColumn: string,
+	parentRole: string,
+	childRole: string,
+): PseudoColumnMetadata {
+	// For single self-ref FK: ascendant/descendant are direct keywords
+	// For multi-FK: they become scoped (e.g., manager.ascendant)
+	return {
+		table,
+		foreignKeyColumn,
+		targetColumn,
+		parentRole,
+		childRole,
+		ascendantKeyword: 'ascendant',
+		descendantKeyword: 'descendant',
+	};
+}
+
 /** Cardinality for planning */
 export type Cardinality = 'one' | 'many';
 
@@ -208,6 +262,13 @@ export interface TableIR {
 
 	/** Index definitions */
 	readonly indexes: readonly IndexIR[];
+
+	/**
+	 * Auto-generated pseudo-columns from self-referential FKs.
+	 * Each self-ref FK generates: parent/child roles + ascendant/descendant keywords.
+	 * For multi-FK tables, roles are scoped (e.g., manager.ascendant).
+	 */
+	readonly pseudoColumns?: readonly PseudoColumnMetadata[];
 }
 
 /**

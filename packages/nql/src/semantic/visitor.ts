@@ -935,6 +935,19 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			const raw = getImage(ctx.QuotedIdentifier[0]);
 			return raw.slice(1, -1).replace(/""/g, '"');
 		}
+		// Pseudo-column keywords can appear in paths (parent, child, ascendant, descendant)
+		if (ctx.Parent) {
+			return getImage(ctx.Parent[0]);
+		}
+		if (ctx.Child) {
+			return getImage(ctx.Child[0]);
+		}
+		if (ctx.Ascendant) {
+			return getImage(ctx.Ascendant[0]);
+		}
+		if (ctx.Descendant) {
+			return getImage(ctx.Descendant[0]);
+		}
 		throw new Error('Invalid identifier');
 	}
 

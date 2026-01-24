@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import type {
 	DeleteIntent,
+	ExpressionIntent,
 	IncludeIntent,
 	InsertIntent,
 	OrderByIntent,
@@ -794,5 +795,165 @@ describe('NQL Compiler - Range Operators', () => {
 		// Assert: mixed bounds are preserved
 		expect(where.kind).toBe('range');
 		expect(where.value).toBe('[0,100)');
+	});
+});
+
+describe('NQL Compiler - Pseudo-Column Expressions (Self-Referential Traversal)', () => {
+	describe('SELECT clause pseudo-columns', () => {
+		it('compiles parent.column in SELECT', () => {
+			// Arrange: NQL query accessing parent's name
+			const nql = 'employees | select id, name, parent.name';
+
+			// Act: compile to IntentAST
+			const result = compileNql(nql);
+			const query = result.query!;
+			const select = query.select as SelectWithExpressionsIntent;
+
+			// Assert: parent.name becomes pseudoColumn intent
+			expect(select.type).toBe('expressions');
+			const parentCol = select.columns[2] as ExpressionIntent;
+			expect(parentCol.kind).toBe('pseudoColumn');
+			expect(parentCol).toMatchObject({
+				kind: 'pseudoColumn',
+				traversal: 'parent',
+				targetColumn: 'name',
+				as: 'parent.name',
+			});
+		});
+
+		it('compiles child.column in SELECT', () => {
+			// Arrange: NQL query accessing child's department
+			const nql = 'departments | select id, child.name as direct_report';
+
+			// Act
+			const result = compileNql(nql);
+			const select = result.query!.select as SelectWithExpressionsIntent;
+
+			// Assert
+			const childCol = select.columns[1] as ExpressionIntent;
+			expect(childCol).toMatchObject({
+				kind: 'pseudoColumn',
+				traversal: 'child',
+				targetColumn: 'name',
+				as: 'direct_report',
+			});
+		});
+
+		it('compiles ascendant.column in SELECT', () => {
+			// Arrange: recursive upward traversal
+			const nql = 'categories | select id, ascendant.name';
+
+			// Act
+			const result = compileNql(nql);
+			const select = result.query!.select as SelectWithExpressionsIntent;
+
+			// Assert
+			const ascCol = select.columns[1] as ExpressionIntent;
+			expect(ascCol).toMatchObject({
+				kind: 'pseudoColumn',
+				traversal: 'ascendant',
+				targetColumn: 'name',
+				as: 'ascendant.name',
+			});
+		});
+
+		it('compiles descendant.column in SELECT', () => {
+			// Arrange: recursive downward traversal
+			const nql = 'nodes | select id, descendant.label';
+
+			// Act
+			const result = compileNql(nql);
+			const select = result.query!.select as SelectWithExpressionsIntent;
+
+			// Assert
+			const descCol = select.columns[1] as ExpressionIntent;
+			expect(descCol).toMatchObject({
+				kind: 'pseudoColumn',
+				traversal: 'descendant',
+				targetColumn: 'label',
+				as: 'descendant.label',
+			});
+		});
+
+		it('preserves case-insensitive keywords', () => {
+			// Arrange: mixed case keywords
+			const nql = 'employees | select PARENT.name, Child.role';
+
+			// Act
+			const result = compileNql(nql);
+			const select = result.query!.select as SelectWithExpressionsIntent;
+
+			// Assert: normalized to lowercase traversal
+			const parentCol = select.columns[0] as ExpressionIntent;
+			const childCol = select.columns[1] as ExpressionIntent;
+			expect(parentCol.kind).toBe('pseudoColumn');
+			expect((parentCol as { traversal: string }).traversal).toBe('parent');
+			expect(childCol.kind).toBe('pseudoColumn');
+			expect((childCol as { traversal: string }).traversal).toBe('child');
+		});
+	});
+
+	describe('WHERE clause pseudo-columns', () => {
+		it('compiles parent.column in WHERE comparison', () => {
+			// Arrange: filter by parent's department
+			const nql = "employees | where parent.department = 'Engineering'";
+
+			// Act
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereComparisonIntent;
+
+			// Assert: field is the path string, adapter will handle CTE generation
+			expect(where).toMatchObject({
+				kind: 'comparison',
+				field: 'parent.department',
+				operator: 'eq',
+				value: 'Engineering',
+			});
+		});
+
+		it('compiles ascendant.column in WHERE comparison', () => {
+			// Arrange: filter by any ancestor's status
+			const nql = "categories | where ascendant.status = 'active'";
+
+			// Act
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereComparisonIntent;
+
+			// Assert
+			expect(where).toMatchObject({
+				kind: 'comparison',
+				field: 'ascendant.status',
+				operator: 'eq',
+				value: 'active',
+			});
+		});
+
+		it('compiles pseudo-column in WHERE with IS NULL', () => {
+			// Arrange: find root nodes (no parent)
+			const nql = 'nodes | where parent.id is null';
+
+			// Act
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereNullIntent;
+
+			// Assert
+			expect(where).toMatchObject({
+				kind: 'null',
+				field: 'parent.id',
+				operator: 'isNull',
+			});
+		});
+	});
+
+	describe('Error handling', () => {
+		it('rejects extended pseudo-column syntax (V1.1 feature)', () => {
+			// Arrange: V1.1 syntax not yet supported
+			const nql = 'employees | select id, parent.parent.name';
+
+			// Act & Assert: should throw for extended syntax
+			expect(() => compileNql(nql)).toThrow(
+				/Extended pseudo-column syntax not yet supported/,
+			);
+		});
 	});
 });

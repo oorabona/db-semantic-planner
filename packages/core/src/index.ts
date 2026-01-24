@@ -24,6 +24,8 @@ export type {
 	ModelIR,
 	OnDeleteAction,
 	Optionality,
+	// CLI-NQL: Pseudo-columns for self-referential FKs
+	PseudoColumnMetadata,
 	// CLI-NQL: Recursive relation metadata
 	RecursiveMetadata,
 	RelationIR,
@@ -34,8 +36,9 @@ export type {
 	TableIR,
 } from './model-ir.js';
 
-// CLI-NQL: Relation kind helpers
+// CLI-NQL: Relation kind helpers and pseudo-column factory
 export {
+	createPseudoColumnMetadata,
 	createRecursiveMetadata,
 	getRelationKind,
 	isRecursiveRelation,
@@ -79,6 +82,9 @@ export type {
 	OffsetWindowFunction,
 	// OrderBy
 	OrderByIntent,
+	// Pseudo-columns (Self-Referential Traversal)
+	PseudoColumnExpressionIntent,
+	PseudoColumnTraversal,
 	// Query
 	QueryIntent,
 	RangeOperator,

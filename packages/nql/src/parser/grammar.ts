@@ -10,9 +10,11 @@ import {
 	And,
 	As,
 	Asc,
+	Ascendant,
 	allTokens,
 	Between,
 	Bind,
+	Child,
 	Colon,
 	Comma,
 	ContainedBy,
@@ -20,6 +22,7 @@ import {
 	Delete,
 	DenseRank,
 	Desc,
+	Descendant,
 	Distinct,
 	Dot,
 	Equals,
@@ -56,6 +59,8 @@ import {
 	OrderBy,
 	Over,
 	Overlaps,
+	// Pseudo-column keywords (self-referential traversal)
+	Parent,
 	PartitionBy,
 	Percent,
 	// Operators & Punctuation
@@ -90,6 +95,22 @@ export class NqlParser extends CstParser {
 			recoveryEnabled: true, // Enable error recovery for better error messages
 		});
 		this.performSelfAnalysis();
+	}
+
+	/**
+	 * Check if a token type can appear as an identifier segment.
+	 * This includes regular identifiers, quoted identifiers, and pseudo-column keywords
+	 * (parent, child, ascendant, descendant) which can be used in paths.
+	 */
+	private isIdentifierLike(tokenType: unknown): boolean {
+		return (
+			tokenType === Identifier ||
+			tokenType === QuotedIdentifier ||
+			tokenType === Parent ||
+			tokenType === Child ||
+			tokenType === Ascendant ||
+			tokenType === Descendant
+		);
 	}
 
 	// ============================================================
@@ -332,8 +353,7 @@ export class NqlParser extends CstParser {
 				// Continue if next is `.ident`, stop if next is `.*`
 				return (
 					this.LA(1).tokenType === Dot &&
-					(this.LA(2).tokenType === Identifier ||
-						this.LA(2).tokenType === QuotedIdentifier)
+					this.isIdentifierLike(this.LA(2).tokenType)
 				);
 			},
 			DEF: () => {
@@ -352,10 +372,7 @@ export class NqlParser extends CstParser {
 	private isRelationStar(): boolean {
 		// Look ahead to find pattern: ident(.ident)*.star
 		let i = 1;
-		while (
-			this.LA(i).tokenType === Identifier ||
-			this.LA(i).tokenType === QuotedIdentifier
-		) {
+		while (this.isIdentifierLike(this.LA(i).tokenType)) {
 			i++;
 			if (this.LA(i).tokenType === Dot) {
 				i++;
@@ -606,10 +623,7 @@ export class NqlParser extends CstParser {
 		// Look for: ident | ...
 		let i = 1;
 		// Skip identifier(s)
-		while (
-			this.LA(i).tokenType === Identifier ||
-			this.LA(i).tokenType === QuotedIdentifier
-		) {
+		while (this.isIdentifierLike(this.LA(i).tokenType)) {
 			i++;
 			if (this.LA(i).tokenType === Dot) {
 				i++;
@@ -628,10 +642,7 @@ export class NqlParser extends CstParser {
 		// After ( we need ident | to be a subquery
 		if (this.LA(1).tokenType !== LParen) return false;
 		let i = 2;
-		while (
-			this.LA(i).tokenType === Identifier ||
-			this.LA(i).tokenType === QuotedIdentifier
-		) {
+		while (this.isIdentifierLike(this.LA(i).tokenType)) {
 			i++;
 			if (this.LA(i).tokenType === Dot) {
 				i++;
@@ -736,10 +747,7 @@ export class NqlParser extends CstParser {
 	 */
 	private isScalarSubqueryStart(): boolean {
 		let i = 1;
-		while (
-			this.LA(i).tokenType === Identifier ||
-			this.LA(i).tokenType === QuotedIdentifier
-		) {
+		while (this.isIdentifierLike(this.LA(i).tokenType)) {
 			i++;
 			if (this.LA(i).tokenType === Dot) {
 				i++;
@@ -930,6 +938,12 @@ export class NqlParser extends CstParser {
 		this.OR([
 			{ ALT: () => this.CONSUME(Identifier) },
 			{ ALT: () => this.CONSUME(QuotedIdentifier) },
+			// Pseudo-column keywords can appear in paths
+			// If quoted ("parent"), they're real columns, not pseudo-columns
+			{ ALT: () => this.CONSUME(Parent) },
+			{ ALT: () => this.CONSUME(Child) },
+			{ ALT: () => this.CONSUME(Ascendant) },
+			{ ALT: () => this.CONSUME(Descendant) },
 		]);
 	});
 

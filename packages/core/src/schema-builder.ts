@@ -4,21 +4,23 @@
  */
 
 import { ModelIRImpl } from './model-impl.js';
-import type {
-	Cardinality,
-	ColumnIR,
-	ColumnType,
-	FilterStrategy,
-	ForeignKeyIR,
-	IncludeStrategy,
-	IndexIR,
-	JoinDefault,
-	ModelIR,
-	OnDeleteAction,
-	Optionality,
-	RelationIR,
-	RelationType,
-	TableIR,
+import {
+	type Cardinality,
+	type ColumnIR,
+	type ColumnType,
+	createPseudoColumnMetadata,
+	type FilterStrategy,
+	type ForeignKeyIR,
+	type IncludeStrategy,
+	type IndexIR,
+	type JoinDefault,
+	type ModelIR,
+	type OnDeleteAction,
+	type Optionality,
+	type PseudoColumnMetadata,
+	type RelationIR,
+	type RelationType,
+	type TableIR,
 } from './model-ir.js';
 
 // ============================================================================
@@ -44,6 +46,20 @@ export interface FKReference {
 	readonly table: string;
 	readonly column?: string; // default: 'id'
 	readonly onDelete?: OnDeleteAction;
+	/**
+	 * Custom role name for parent direction in self-referential FKs.
+	 * Required when table has multiple self-referential FKs.
+	 * Example: parentRole: 'manager' for managerId FK
+	 * @default inferred from column name (e.g., 'parent' from 'parentId')
+	 */
+	readonly parentRole?: string;
+	/**
+	 * Custom role name for child direction in self-referential FKs.
+	 * Required when table has multiple self-referential FKs.
+	 * Example: childRole: 'subordinates' for managerId FK
+	 * @default 'children' or pluralized parentRole
+	 */
+	readonly childRole?: string;
 }
 
 /**
@@ -466,12 +482,55 @@ class SchemaBuilderImpl<T extends Record<string, TableDef>>
 				}
 			}
 
+			// Extract pseudo-columns from self-referential FKs
+			const pseudoColumns: PseudoColumnMetadata[] = [];
+			for (const fk of foreignKeys) {
+				// Check if FK points to same table (self-referential)
+				// V1: Only support single-column FKs (composite FKs deferred)
+				const fkColumn = fk.columns[0];
+				const targetColumn = fk.references.columns[0];
+				if (
+					fk.references.table === tableName &&
+					fkColumn !== undefined &&
+					targetColumn !== undefined
+				) {
+					// Get column definition for role extraction
+					const rawColDef = columnDefs[fkColumn];
+					const colDef =
+						typeof rawColDef === 'string'
+							? { type: rawColDef as ColumnType }
+							: rawColDef;
+
+					// Infer role names from column name or explicit references
+					const inferredName = fkColumn.endsWith('Id')
+						? fkColumn.slice(0, -2)
+						: 'parent';
+					const parentRole = colDef?.references?.parentRole ?? inferredName;
+					const childRole =
+						colDef?.references?.childRole ??
+						(parentRole === 'parent' ? 'children' : parentRole + 's'); // Simple pluralization fallback
+
+					pseudoColumns.push(
+						createPseudoColumnMetadata(
+							tableName,
+							fkColumn,
+							targetColumn,
+							parentRole,
+							childRole,
+						),
+					);
+				}
+			}
+
 			const table: TableIR = Object.freeze({
 				name: tableName,
 				columns: Object.freeze(columns),
 				primaryKey,
 				foreignKeys: Object.freeze(foreignKeys),
 				indexes: Object.freeze(indexes),
+				...(pseudoColumns.length > 0 && {
+					pseudoColumns: Object.freeze(pseudoColumns),
+				}),
 			});
 
 			tables.set(tableName, table);

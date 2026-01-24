@@ -125,6 +125,25 @@ export const Lag = createToken({ name: 'Lag', pattern: /lag\b/i });
 export const Lead = createToken({ name: 'Lead', pattern: /lead\b/i });
 
 // ============================================================
+// PSEUDO-COLUMN KEYWORDS (Self-Referential Traversal)
+// ============================================================
+
+// Single-hop traversal
+export const Parent = createToken({ name: 'Parent', pattern: /parent\b/i });
+export const Child = createToken({ name: 'Child', pattern: /child\b/i });
+
+// Recursive traversal (CTE-based)
+// Ascendant must come before Asc in allTokens since 'asc' is prefix
+export const Ascendant = createToken({
+	name: 'Ascendant',
+	pattern: /ascendant\b/i,
+});
+export const Descendant = createToken({
+	name: 'Descendant',
+	pattern: /descendant\b/i,
+});
+
+// ============================================================
 // IDENTIFIERS & LITERALS
 // ============================================================
 
@@ -202,6 +221,7 @@ export const allTokens = [
 	// Keywords (before Identifier!)
 	// IMPORTANT: Order matters for prefix conflicts!
 	// - Insert/Into BEFORE In
+	// - Ascendant/Descendant BEFORE Asc/Desc
 	// - Asc BEFORE As
 	Select,
 	Where,
@@ -212,6 +232,11 @@ export const allTokens = [
 	Limit,
 	Offset,
 	Distinct,
+	// Pseudo-column keywords (self-referential traversal)
+	Ascendant, // Must come before Asc
+	Descendant, // Must come before Desc
+	Parent,
+	Child,
 	Asc, // Must come before As
 	As,
 	On,
