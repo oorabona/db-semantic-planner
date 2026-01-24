@@ -1,5 +1,5 @@
 {
-	"name": "@dbsp/core",
+	"name": "@dbsp/types",
 	"version": "0.0.1",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -8,6 +8,10 @@
 		".": {
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
+		},
+		"./internal": {
+			"types": "./dist/internal.d.ts",
+			"import": "./dist/internal.js"
 		}
 	},
 	"files": [
@@ -15,18 +19,11 @@
 	],
 	"scripts": {
 		"build": "tsup",
-		"test": "vitest run",
-		"test:watch": "vitest",
 		"typecheck": "tsc --noEmit"
-	},
-	"dependencies": {
-		"@dbsp/types": "workspace:",
-		"valibot": "catalog:"
 	},
 	"devDependencies": {
 		"@types/node": "catalog:",
 		"typescript": "catalog:",
-		"tsup": "catalog:",
-		"vitest": "catalog:"
+		"tsup": "catalog:"
 	}
 }

@@ -5,10 +5,11 @@
 
 import type { WhereExistsIntent } from '@dbsp/core';
 import type { WhereHandler } from '../../types.js';
+import { createExistsBaseHandler } from './exists-base.js';
 
 /**
  * Factory for EXISTS handler.
- * Requires helper functions from compiler.ts to be injected.
+ * Delegates to shared base handler with negated=false, mode='some'
  */
 export function createExistsHandler(
 	compileExists: (
@@ -42,32 +43,10 @@ export function createExistsHandler(
 		// biome-ignore lint/suspicious/noExplicitAny: Kysely expression result
 	) => any,
 ): WhereHandler<WhereExistsIntent> {
-	return (ctx, eb, intent, alias) => {
-		// Check if relation was already JOINed via filter-strategy: 'join'
-		if (ctx.state.joinedFilterRelations.has(intent.relation)) {
-			return compileJoinedRelationConditions(
-				eb,
-				{
-					relation: intent.relation,
-					...(intent.where !== undefined && { where: intent.where }),
-					mode: 'some',
-				},
-				alias,
-				ctx.model,
-				ctx.plan,
-				ctx.state,
-				ctx.schemaName,
-			);
-		}
-		return compileExists(
-			eb,
-			intent,
-			alias,
-			ctx.model,
-			ctx.plan,
-			ctx.state,
-			false, // not negated
-			ctx.schemaName,
-		);
-	};
+	return createExistsBaseHandler<WhereExistsIntent>(
+		false, // not negated
+		'some', // EXISTS = any match
+		compileExists,
+		compileJoinedRelationConditions,
+	);
 }

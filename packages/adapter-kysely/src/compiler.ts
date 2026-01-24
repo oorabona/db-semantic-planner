@@ -42,6 +42,7 @@ import {
 	applyLateralIncludes,
 	applyPendingPseudoJoins,
 	type CompilerContext,
+	type CompilerState,
 	getExpressionHandler,
 	getWhereHandler,
 	preprocessWherePseudoColumns,
@@ -66,46 +67,10 @@ registerExpressionHandlers();
 registerIncludeHandlers();
 
 // ============================================================================
-// Compiler State
+// Compiler State - imported from ./compiler/types.ts (ARCH-004)
 // ============================================================================
-
-interface CompilerState {
-	/** Current table alias counter */
-	aliasCounter: number;
-	/** Map of table name to alias */
-	tableAliases: Map<string, string>;
-	/** Collected parameters */
-	parameters: unknown[];
-	/** Track relations that have been JOINed for filter-strategy: 'join' */
-	joinedFilterRelations: Map<string, { alias: string; targetTable: string }>;
-	/** Track relations that have been JOINed for include-strategy: 'join' or 'json_agg' */
-	joinedIncludeRelations: Map<
-		string,
-		{
-			alias: string;
-			targetTable: string;
-			relationName: string;
-			strategy: 'join' | 'json_agg';
-		}
-	>;
-	/** Dialect capabilities for feature validation (CORE-004) */
-	coreCapabilities?: CoreDialectCapabilities;
-	/** Dialect name for error messages */
-	dialect?: string;
-	/** Pending pseudo-column JOINs to be applied (SPEC-001) */
-	pendingPseudoJoins?: Map<
-		string,
-		{
-			traversal: 'parent' | 'child';
-			joinAlias: string;
-			targetTable: string;
-			fkColumn: string;
-			pkColumn: string;
-			schemaName?: string;
-			sourceAlias: string;
-		}
-	>;
-}
+// CompilerState now has a single definition in compiler/types.ts to prevent
+// shadowing bugs like the one that caused SPEC-001 JOIN issues.
 
 // ============================================================================
 // Path Tracking Compiler (ARCH-001) - Extracted to recursive-compiler.ts (AUD-004)
@@ -317,12 +282,9 @@ export function compileSeparateInclude(
 
 /**
  * Range value with lower/upper bounds and optional bounds specification.
+ * (Imported from @dbsp/types - ARCH-004)
  */
-interface RangeValue {
-	readonly lower: unknown;
-	readonly upper: unknown;
-	readonly bounds?: '[)' | '[]' | '()' | '(]';
-}
+import type { RangeValue } from '@dbsp/types';
 
 /**
  * Check if a value is a range value (has lower/upper properties).

@@ -4,7 +4,11 @@
  * These replace the old ancestors(), descendants(), subtree() methods (BREAKING CHANGE)
  */
 
-import { belongsTo, createOrm, defineSchemaBuilder, hasMany } from '@dbsp/core';
+import {
+	buildModelFromResolvedSchema,
+	createOrm,
+	defineSchema,
+} from '@dbsp/core';
 import {
 	Kysely,
 	PostgresAdapter,
@@ -39,20 +43,31 @@ function createTestDb() {
 }
 
 // Adjacency model: categories with parent reference
-const categoryModel = defineSchemaBuilder({
-	categories: {
-		id: 'uuid',
-		name: 'string',
-		parentId: { type: 'uuid', nullable: true },
-	},
-})
-	.relations({
-		categories: {
-			parent: belongsTo('categories', { foreignKey: 'parentId' }),
-			children: hasMany('categories', { foreignKey: 'parentId' }),
+const categoryModel = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			categories: {
+				id: { type: 'uuid', primaryKey: true },
+				name: { type: 'string' },
+				parentId: { type: 'uuid', nullable: true },
+			},
 		},
-	})
-	.build();
+		{
+			relations: {
+				'categories.parent': {
+					kind: 'belongsTo',
+					target: 'categories',
+					foreignKey: 'parentId',
+				},
+				'categories.children': {
+					kind: 'hasMany',
+					target: 'categories',
+					foreignKey: 'parentId',
+				},
+			},
+		},
+	),
+);
 
 describe('DX-022: Hierarchy List Methods', () => {
 	describe('listAncestors()', () => {

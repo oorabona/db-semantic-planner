@@ -7,6 +7,7 @@
  * @module adapter
  */
 
+import type { CompileOptionsBase } from '@dbsp/types';
 import type {
 	DeleteIntent,
 	InsertIntent,
@@ -75,10 +76,9 @@ export type AliasIncludedColumnsMode = 'always' | 'onCollision';
 
 /**
  * Options for query compilation.
+ * Extends CompileOptionsBase with core-specific options.
  */
-export interface CompileOptions {
-	/** Schema name for multi-tenant queries */
-	readonly schemaName?: string;
+export interface CompileOptions extends CompileOptionsBase {
 	/** Model IR for relation lookups during compilation */
 	readonly model?: ModelIR;
 	/**

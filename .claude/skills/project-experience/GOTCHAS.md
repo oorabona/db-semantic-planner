@@ -1310,3 +1310,72 @@ intent.hasWhere: true
 - `intent.hasWhere` / `intent.hasGroupBy` / `intent.hasOrderBy` — boolean flags
 
 **Location:** `packages/cli/src/repl/assertion-parser.ts`, `assertion-runner.ts`
+
+---
+
+## Type Management
+
+### Type Shadowing Causes Silent Bugs (2026-01-24)
+
+**Issue:** When a type is defined locally with the same name as an imported type, the local definition shadows the import. If the definitions differ (even slightly), runtime behavior becomes unpredictable.
+
+**Cause:** In ARCH-004, `CompilerState` was defined both in `compiler.ts:72` and `compiler/types.ts:24`. The local interface had different properties, causing the SPEC-001 JOIN bug where pseudo-column JOINs weren't being applied.
+
+**Solution:**
+1. Never duplicate type definitions — import from a single source
+2. Create a shared types package (`@dbsp/types`) for cross-package types
+3. Use TypeScript's `export type { X } from 'module'` for re-exports
+4. When re-exporting AND using locally, you MUST import first:
+   ```typescript
+   // WRONG - X is not available locally
+   export type { X } from 'module';
+   const foo: X = ...; // Error: Cannot find name 'X'
+
+   // CORRECT - import then export
+   import type { X } from 'module';
+   export type { X } from 'module';
+   const foo: X = ...; // Works
+   ```
+
+**Prevention:** During /review, grep for duplicate type definitions across packages
+
+**Location:** `packages/types/` (new shared types package)
+
+---
+
+### Vitest Caching After Package Changes (2026-01-24)
+
+**Issue:** After modifying types in one package (e.g., @dbsp/core), tests in dependent packages (e.g., @dbsp/cli) may still fail even though the types are correct.
+
+**Cause:** Vitest caches compiled modules. When you change a dependency, the cache may not invalidate properly.
+
+**Solution:** Rebuild the changed package before running tests in dependent packages:
+```bash
+pnpm --filter @dbsp/core build
+pnpm --filter @dbsp/cli test
+```
+
+**Prevention:** When changing types in core packages, always rebuild before running dependent package tests.
+
+**Location:** Discovered during ARCH-004 type rationalization
+
+---
+
+### Valibot Schema Must Match TypeScript Type (2026-01-24)
+
+**Issue:** When updating a TypeScript type (e.g., adding `number | boolean` to a union), the corresponding Valibot validation schema must also be updated.
+
+**Cause:** Valibot validates at runtime. If the TS type accepts more values than the schema, runtime validation fails.
+
+**Example:**
+```typescript
+// schema-dsl-types.ts
+default?: string | number | boolean;  // TS type
+
+// schema-bridge.ts - MUST MATCH
+default: v.optional(v.union([v.string(), v.number(), v.boolean()]));
+```
+
+**Prevention:** When modifying types that have validation schemas, search for all Valibot/Zod schemas that validate that type.
+
+**Location:** `packages/core/src/dx/schema-bridge.ts:758`

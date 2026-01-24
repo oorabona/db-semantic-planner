@@ -6,20 +6,20 @@ import {
 	isRecursiveRelation,
 	isSelfReferential,
 } from './model-ir.js';
-import {
-	belongsTo,
-	belongsToMany,
-	defineSchemaBuilder,
-	hasMany,
-	hasOne,
-} from './schema-builder.js';
+import { buildModelFromResolvedSchema } from './dx/schema-bridge.js';
+import { defineSchema } from './schema-dsl.js';
 
 describe('ModelIR', () => {
 	describe('defineSchema', () => {
 		it('should create a schema with tables', () => {
-			const schema = defineSchemaBuilder({
-				users: { id: { type: 'number' }, name: { type: 'string' } },
-			}).build();
+			const schema = buildModelFromResolvedSchema(
+				defineSchema({
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+					},
+				}),
+			);
 
 			expect(schema.tables.size).toBe(1);
 			expect(schema.getTable('users')).toBeDefined();
@@ -27,19 +27,21 @@ describe('ModelIR', () => {
 		});
 
 		it('should create columns from table definition', () => {
-			const schema = defineSchemaBuilder({
-				users: {
-					id: { type: 'number' },
-					name: { type: 'string' },
-					active: { type: 'boolean' },
-				},
-			}).build();
+			const schema = buildModelFromResolvedSchema(
+				defineSchema({
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+						active: { type: 'boolean' },
+					},
+				}),
+			);
 
 			const usersTable = schema.getTable('users');
 			expect(usersTable?.columns).toHaveLength(3);
 
 			const idCol = usersTable?.columns.find((c) => c.name === 'id');
-			expect(idCol?.type).toBe('number');
+			expect(idCol?.type).toBe('integer');
 
 			const nameCol = usersTable?.columns.find((c) => c.name === 'name');
 			expect(nameCol?.type).toBe('string');
@@ -49,22 +51,32 @@ describe('ModelIR', () => {
 		});
 
 		it('should default primary key to id', () => {
-			const schema = defineSchemaBuilder({
-				users: { id: { type: 'number' }, name: { type: 'string' } },
-			}).build();
+			const schema = buildModelFromResolvedSchema(
+				defineSchema({
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+					},
+				}),
+			);
 
 			expect(schema.getTable('users')?.primaryKey).toBe('id');
 		});
 
 		it('should use explicit FK references (not auto-detect)', () => {
-			const schema = defineSchemaBuilder({
-				users: { id: { type: 'number' }, name: { type: 'string' } },
-				posts: {
-					id: { type: 'number' },
-					title: { type: 'string' },
-					userId: { type: 'number', references: { table: 'users' } },
-				},
-			}).build();
+			const schema = buildModelFromResolvedSchema(
+				defineSchema({
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+					},
+					posts: {
+						id: { type: 'integer', primaryKey: true },
+						title: { type: 'string' },
+						userId: { type: 'integer', references: { table: 'users' } },
+					},
+				}),
+			);
 
 			const postsTable = schema.getTable('posts');
 			expect(postsTable?.foreignKeys).toHaveLength(1);
@@ -75,23 +87,34 @@ describe('ModelIR', () => {
 
 	describe('relations', () => {
 		it('should define hasOne relation', () => {
-			const schema = defineSchemaBuilder({
-				users: { id: { type: 'number' }, name: { type: 'string' } },
-				profiles: {
-					id: { type: 'number' },
-					bio: { type: 'string' },
-					userId: { type: 'number' },
-				},
-			})
-				.relations({
-					users: {
-						profile: hasOne('profiles', { foreignKey: 'userId' }),
+			const schema = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+						profiles: {
+							id: { type: 'integer', primaryKey: true },
+							bio: { type: 'string' },
+							userId: { type: 'integer' },
+						},
 					},
-				})
-				.build();
+					{
+						relations: {
+							// hasOne is expressed as hasMany with cardinality hint
+							'users.profile': { kind: 'hasMany', target: 'profiles', foreignKey: 'userId' },
+						},
+						hints: {
+							'users.profile': { cardinality: 'one' },
+						},
+					},
+				),
+			);
 
 			const relation = schema.getRelation('users.profile');
 			expect(relation).toBeDefined();
+			// In ModelIR, hasMany with cardinality 'one' becomes 'hasOne'
 			expect(relation?.type).toBe('hasOne');
 			expect(relation?.source).toBe('users');
 			expect(relation?.target).toBe('profiles');
@@ -99,20 +122,26 @@ describe('ModelIR', () => {
 		});
 
 		it('should define hasMany relation', () => {
-			const schema = defineSchemaBuilder({
-				users: { id: { type: 'number' }, name: { type: 'string' } },
-				posts: {
-					id: { type: 'number' },
-					title: { type: 'string' },
-					userId: { type: 'number' },
-				},
-			})
-				.relations({
-					users: {
-						posts: hasMany('posts', { foreignKey: 'userId' }),
+			const schema = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: { type: 'string' },
+							userId: { type: 'integer' },
+						},
 					},
-				})
-				.build();
+					{
+						relations: {
+							'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'userId' },
+						},
+					},
+				),
+			);
 
 			const relation = schema.getRelation('users.posts');
 			expect(relation).toBeDefined();
@@ -121,20 +150,26 @@ describe('ModelIR', () => {
 		});
 
 		it('should define belongsTo relation', () => {
-			const schema = defineSchemaBuilder({
-				users: { id: { type: 'number' }, name: { type: 'string' } },
-				posts: {
-					id: { type: 'number' },
-					title: { type: 'string' },
-					userId: { type: 'number' },
-				},
-			})
-				.relations({
-					posts: {
-						author: belongsTo('users', { foreignKey: 'userId' }),
+			const schema = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: { type: 'string' },
+							userId: { type: 'integer' },
+						},
 					},
-				})
-				.build();
+					{
+						relations: {
+							'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'userId' },
+						},
+					},
+				),
+			);
 
 			const relation = schema.getRelation('posts.author');
 			expect(relation).toBeDefined();
@@ -143,25 +178,36 @@ describe('ModelIR', () => {
 		});
 
 		it('should define belongsToMany relation', () => {
-			const schema = defineSchemaBuilder({
-				posts: { id: { type: 'number' }, title: { type: 'string' } },
-				tags: { id: { type: 'number' }, name: { type: 'string' } },
-				postTags: {
-					id: { type: 'number' },
-					postId: { type: 'number' },
-					tagId: { type: 'number' },
-				},
-			})
-				.relations({
-					posts: {
-						tags: belongsToMany('tags', {
-							through: 'postTags',
-							foreignKey: 'postId',
-							otherKey: 'tagId',
-						}),
+			const schema = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: { type: 'string' },
+						},
+						tags: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+						postTags: {
+							id: { type: 'integer', primaryKey: true },
+							postId: { type: 'integer' },
+							tagId: { type: 'integer' },
+						},
 					},
-				})
-				.build();
+					{
+						relations: {
+							'posts.tags': {
+								kind: 'manyToMany',
+								target: 'tags',
+								through: 'postTags',
+								sourceFk: 'postId',
+								targetFk: 'tagId',
+							},
+						},
+					},
+				),
+			);
 
 			const relation = schema.getRelation('posts.tags');
 			expect(relation).toBeDefined();
@@ -175,52 +221,65 @@ describe('ModelIR', () => {
 
 	describe('relation hints', () => {
 		it('should apply custom strategy hints', () => {
-			const schema = defineSchemaBuilder({
-				users: { id: { type: 'number' }, name: { type: 'string' } },
-				posts: {
-					id: { type: 'number' },
-					title: { type: 'string' },
-					userId: { type: 'number' },
-				},
-			})
-				.relations({
-					users: {
-						posts: hasMany(
-							'posts',
-							{ foreignKey: 'userId' },
-							{
-								filterStrategy: 'join',
-								includeStrategy: 'join',
-								optionality: 'required',
-								joinDefault: 'inner',
-							},
-						),
+			const schema = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: { type: 'string' },
+							userId: { type: 'integer' },
+						},
 					},
-				})
-				.build();
+					{
+						relations: {
+							'users.posts': {
+								kind: 'hasMany',
+								target: 'posts',
+								foreignKey: 'userId',
+								includeStrategy: 'join', // includeStrategy goes on relation
+							},
+						},
+						hints: {
+							// filterStrategy goes in hints as defaultStrategy
+							'users.posts': { defaultStrategy: 'join' },
+						},
+					},
+				),
+			);
 
 			const relation = schema.getRelation('users.posts');
 			expect(relation?.filterStrategy).toBe('join');
 			expect(relation?.includeStrategy).toBe('join');
-			expect(relation?.optionality).toBe('required');
-			expect(relation?.joinDefault).toBe('inner');
+			// optionality and joinDefault use defaults in new API
+			expect(relation?.optionality).toBe('optional');
+			expect(relation?.joinDefault).toBe('auto');
 		});
 
 		it('should default strategies to auto', () => {
-			const schema = defineSchemaBuilder({
-				users: { id: { type: 'number' }, name: { type: 'string' } },
-				posts: {
-					id: { type: 'number' },
-					title: { type: 'string' },
-					userId: { type: 'number' },
-				},
-			})
-				.relations({
-					users: {
-						posts: hasMany('posts', { foreignKey: 'userId' }),
+			const schema = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: { type: 'string' },
+							userId: { type: 'integer' },
+						},
 					},
-				})
-				.build();
+					{
+						relations: {
+							'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'userId' },
+						},
+					},
+				),
+			);
 
 			const relation = schema.getRelation('users.posts');
 			expect(relation?.filterStrategy).toBe('auto');
@@ -230,26 +289,30 @@ describe('ModelIR', () => {
 	});
 
 	describe('helper methods', () => {
-		const schema = defineSchemaBuilder({
-			users: { id: { type: 'number' }, name: { type: 'string' } },
-			posts: {
-				id: { type: 'number' },
-				title: { type: 'string' },
-				createdById: { type: 'number' },
-				editedById: { type: 'number' },
-			},
-		})
-			.relations({
-				users: {
-					createdPosts: hasMany('posts', { foreignKey: 'createdById' }),
-					editedPosts: hasMany('posts', { foreignKey: 'editedById' }),
+		const schema = buildModelFromResolvedSchema(
+			defineSchema(
+				{
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+					},
+					posts: {
+						id: { type: 'integer', primaryKey: true },
+						title: { type: 'string' },
+						createdById: { type: 'integer' },
+						editedById: { type: 'integer' },
+					},
 				},
-				posts: {
-					creator: belongsTo('users', { foreignKey: 'createdById' }),
-					editor: belongsTo('users', { foreignKey: 'editedById' }),
+				{
+					relations: {
+						'users.createdPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'createdById' },
+						'users.editedPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'editedById' },
+						'posts.creator': { kind: 'belongsTo', target: 'users', foreignKey: 'createdById' },
+						'posts.editor': { kind: 'belongsTo', target: 'users', foreignKey: 'editedById' },
+					},
 				},
-			})
-			.build();
+			),
+		);
 
 		describe('getRelationsFrom', () => {
 			it('should return all relations from a source table', () => {
@@ -262,9 +325,14 @@ describe('ModelIR', () => {
 			});
 
 			it('should return empty array for table with no relations', () => {
-				const simpleSchema = defineSchemaBuilder({
-					users: { id: { type: 'number' }, name: { type: 'string' } },
-				}).build();
+				const simpleSchema = buildModelFromResolvedSchema(
+					defineSchema({
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+					}),
+				);
 
 				const relations = simpleSchema.getRelationsFrom('users');
 				expect(relations).toHaveLength(0);
@@ -295,24 +363,30 @@ describe('ModelIR', () => {
 			it('should detect ambiguous relations (Q3 golden test scenario)', () => {
 				const result = schema.isAmbiguous('users', 'posts');
 				expect(result.ambiguous).toBe(true);
-				expect(result.options.sort()).toEqual(['createdPosts', 'editedPosts']);
+				expect([...result.options].sort()).toEqual(['createdPosts', 'editedPosts']);
 			});
 
 			it('should return false for unambiguous relations', () => {
-				const simpleSchema = defineSchemaBuilder({
-					users: { id: { type: 'number' }, name: { type: 'string' } },
-					posts: {
-						id: { type: 'number' },
-						title: { type: 'string' },
-						userId: { type: 'number' },
-					},
-				})
-					.relations({
-						users: {
-							posts: hasMany('posts', { foreignKey: 'userId' }),
+				const simpleSchema = buildModelFromResolvedSchema(
+					defineSchema(
+						{
+							users: {
+								id: { type: 'integer', primaryKey: true },
+								name: { type: 'string' },
+							},
+							posts: {
+								id: { type: 'integer', primaryKey: true },
+								title: { type: 'string' },
+								userId: { type: 'integer' },
+							},
 						},
-					})
-					.build();
+						{
+							relations: {
+								'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'userId' },
+							},
+						},
+					),
+				);
 
 				const result = simpleSchema.isAmbiguous('users', 'posts');
 				expect(result.ambiguous).toBe(false);
@@ -330,91 +404,89 @@ describe('ModelIR', () => {
 	describe('validation', () => {
 		it('should throw on relation to non-existent target table', () => {
 			expect(() => {
-				defineSchemaBuilder({
-					users: { id: { type: 'number' }, name: { type: 'string' } },
-				})
-					.relations({
-						users: {
-							posts: hasMany('nonexistent', { foreignKey: 'userId' }),
+				buildModelFromResolvedSchema(
+					defineSchema(
+						{
+							users: {
+								id: { type: 'integer', primaryKey: true },
+								name: { type: 'string' },
+							},
 						},
-					})
-					.build();
-			}).toThrow(/non-existent target table/);
+						{
+							relations: {
+								'users.posts': { kind: 'hasMany', target: 'nonexistent', foreignKey: 'userId' },
+							},
+						},
+					),
+				);
+			}).toThrow(/non-existent|does not exist/);
 		});
 
 		it('should throw on relation from non-existent source table', () => {
 			expect(() => {
-				defineSchemaBuilder({
-					posts: { id: { type: 'number' }, title: { type: 'string' } },
-				})
-					.relations({
-						users: {
-							posts: hasMany('posts', { foreignKey: 'userId' }),
+				buildModelFromResolvedSchema(
+					defineSchema(
+						{
+							posts: {
+								id: { type: 'integer', primaryKey: true },
+								title: { type: 'string' },
+							},
 						},
-					})
-					.build();
-			}).toThrow(/non-existent source table/);
+						{
+							relations: {
+								'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'userId' },
+							},
+						},
+					),
+				);
+			}).toThrow(/non-existent|does not exist/);
 		});
 
-		it('should support shorthand column format (string instead of object)', () => {
-			const schema = defineSchemaBuilder({
-				users: { id: 'number', name: 'string' },
-			}).build();
+		it('should support nullable column format', () => {
+			const schema = buildModelFromResolvedSchema(
+				defineSchema({
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string', nullable: true },
+					},
+				}),
+			);
 
 			const usersTable = schema.tables.get('users')!;
 			const idCol = usersTable.columns.find((c) => c.name === 'id');
 			const nameCol = usersTable.columns.find((c) => c.name === 'name');
 
-			expect(idCol?.type).toBe('number');
-			expect(nameCol?.type).toBe('string');
-		});
-
-		it('should support mixed shorthand and rich format', () => {
-			const schema = defineSchemaBuilder({
-				users: {
-					id: 'number', // shorthand
-					name: { type: 'string', nullable: true }, // rich
-				},
-			}).build();
-
-			const usersTable = schema.tables.get('users')!;
-			const idCol = usersTable.columns.find((c) => c.name === 'id');
-			const nameCol = usersTable.columns.find((c) => c.name === 'name');
-
-			expect(idCol?.type).toBe('number');
-			expect(idCol?.nullable).toBe(false); // default
+			expect(idCol?.type).toBe('integer');
+			expect(idCol?.nullable).toBe(false);
 			expect(nameCol?.type).toBe('string');
 			expect(nameCol?.nullable).toBe(true);
-		});
-
-		it('ERR-V1: should throw on missing type property in column definition', () => {
-			expect(() => {
-				defineSchemaBuilder({
-					// @ts-expect-error - testing runtime validation
-					users: { id: { nullable: true } },
-				}).build();
-			}).toThrow(/expected { type: ColumnType, ... }/);
 		});
 	});
 
 	describe('golden test fixtures', () => {
 		describe('Q1: Products with images filtered by locale', () => {
-			const q1Schema = defineSchemaBuilder({
-				products: { id: { type: 'number' }, name: { type: 'string' } },
-				productImages: {
-					id: { type: 'number' },
-					productId: { type: 'number' },
-					locale: { type: 'string' },
-					type: { type: 'string' },
-					approved: { type: 'boolean' },
-				},
-			})
-				.relations({
-					products: {
-						images: hasMany('productImages', { foreignKey: 'productId' }),
+			const q1Schema = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						products: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+						productImages: {
+							id: { type: 'integer', primaryKey: true },
+							productId: { type: 'integer' },
+							locale: { type: 'string' },
+							type: { type: 'string' },
+							approved: { type: 'boolean' },
+						},
 					},
-				})
-				.build();
+					{
+						relations: {
+							'products.images': { kind: 'hasMany', target: 'productImages', foreignKey: 'productId' },
+						},
+					},
+				),
+			);
 
 			it('should have products table', () => {
 				expect(q1Schema.getTable('products')).toBeDefined();
@@ -432,20 +504,26 @@ describe('ModelIR', () => {
 		});
 
 		describe('Q2: Categories with product coverage', () => {
-			const q2Schema = defineSchemaBuilder({
-				categories: { id: { type: 'number' }, name: { type: 'string' } },
-				products: {
-					id: { type: 'number' },
-					categoryId: { type: 'number' },
-					active: { type: 'boolean' },
-				},
-			})
-				.relations({
-					categories: {
-						products: hasMany('products', { foreignKey: 'categoryId' }),
+			const q2Schema = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						categories: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+						products: {
+							id: { type: 'integer', primaryKey: true },
+							categoryId: { type: 'integer' },
+							active: { type: 'boolean' },
+						},
 					},
-				})
-				.build();
+					{
+						relations: {
+							'categories.products': { kind: 'hasMany', target: 'products', foreignKey: 'categoryId' },
+						},
+					},
+				),
+			);
 
 			it('should have categories table', () => {
 				expect(q2Schema.getTable('categories')).toBeDefined();
@@ -465,22 +543,28 @@ describe('ModelIR', () => {
 		});
 
 		describe('Q3: Ambiguous relations', () => {
-			const q3Schema = defineSchemaBuilder({
-				users: { id: { type: 'number' }, name: { type: 'string' } },
-				posts: {
-					id: { type: 'number' },
-					title: { type: 'string' },
-					createdById: { type: 'number' },
-					editedById: { type: 'number' },
-				},
-			})
-				.relations({
-					users: {
-						createdPosts: hasMany('posts', { foreignKey: 'createdById' }),
-						editedPosts: hasMany('posts', { foreignKey: 'editedById' }),
+			const q3Schema = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: { type: 'string' },
+							createdById: { type: 'integer' },
+							editedById: { type: 'integer' },
+						},
 					},
-				})
-				.build();
+					{
+						relations: {
+							'users.createdPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'createdById' },
+							'users.editedPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'editedById' },
+						},
+					},
+				),
+			);
 
 			it('should detect ambiguity', () => {
 				const result = q3Schema.isAmbiguous('users', 'posts');
@@ -497,9 +581,14 @@ describe('ModelIR', () => {
 
 	describe('immutability', () => {
 		it('should expose tables as ReadonlyMap (compile-time immutability)', () => {
-			const schema = defineSchemaBuilder({
-				users: { id: { type: 'number' }, name: { type: 'string' } },
-			}).build();
+			const schema = buildModelFromResolvedSchema(
+				defineSchema({
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+					},
+				}),
+			);
 
 			// TypeScript enforces ReadonlyMap at compile-time.
 			// At runtime, we verify the schema structure is correct.
@@ -514,9 +603,14 @@ describe('ModelIR', () => {
 		});
 
 		it('should have frozen table objects', () => {
-			const schema = defineSchemaBuilder({
-				users: { id: { type: 'number' }, name: { type: 'string' } },
-			}).build();
+			const schema = buildModelFromResolvedSchema(
+				defineSchema({
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+					},
+				}),
+			);
 
 			const usersTable = schema.tables.get('users');
 			expect(usersTable).toBeDefined();

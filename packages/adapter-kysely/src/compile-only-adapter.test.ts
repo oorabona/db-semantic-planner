@@ -4,12 +4,11 @@
  */
 
 import {
-	belongsTo,
+	buildModelFromResolvedSchema,
 	createOrm,
-	defineSchemaBuilder,
+	defineSchema,
 	ExecutionError,
 	eq,
-	hasMany,
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import {
@@ -18,29 +17,30 @@ import {
 } from './compile-only-adapter.js';
 
 // Test schema
-const testSchema = defineSchemaBuilder({
-	users: {
-		id: 'serial',
-		name: { type: 'string' },
-		email: { type: 'string' },
-		active: { type: 'boolean' },
-	},
-	posts: {
-		id: 'serial',
-		title: { type: 'string' },
-		content: 'text',
-		authorId: 'integer',
-	},
-})
-	.relations({
-		users: {
-			posts: hasMany('posts', { foreignKey: 'authorId' }),
+const testSchema = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+				email: { type: 'string' },
+				active: { type: 'boolean' },
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: { type: 'string' },
+				content: { type: 'text' },
+				authorId: { type: 'integer' },
+			},
 		},
-		posts: {
-			author: belongsTo('users', { foreignKey: 'authorId' }),
+		{
+			relations: {
+				'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' },
+				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' },
+			},
 		},
-	})
-	.build();
+	),
+);
 
 describe('CompileOnlyAdapter', () => {
 	describe('createCompileOnlyAdapter factory', () => {

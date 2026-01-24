@@ -25,6 +25,7 @@ import {
 	type RelationType,
 	type TableIR,
 } from '../model-ir.js';
+import type { ResolvedSchema } from '../schema-dsl-types.js';
 
 // ============================================================================
 // Generated Schema Types (from dbsp generate manifest)
@@ -84,6 +85,17 @@ export type GeneratedTable = Record<string, GeneratedColumn>;
 export type GeneratedRelationKind = 'belongsTo' | 'hasMany' | 'manyToMany';
 
 /**
+ * Include strategy for relations.
+ */
+export type GeneratedIncludeStrategy =
+	| 'join'
+	| 'separate'
+	| 'cte'
+	| 'lateral'
+	| 'json_agg'
+	| 'auto';
+
+/**
  * BelongsTo relation in generated schema.
  */
 export interface GeneratedBelongsTo {
@@ -91,6 +103,7 @@ export interface GeneratedBelongsTo {
 	readonly target: string;
 	readonly foreignKey: string;
 	readonly targetKey?: string;
+	readonly includeStrategy?: GeneratedIncludeStrategy;
 }
 
 /**
@@ -101,6 +114,7 @@ export interface GeneratedHasMany {
 	readonly target: string;
 	readonly foreignKey: string;
 	readonly sourceKey?: string;
+	readonly includeStrategy?: GeneratedIncludeStrategy;
 }
 
 /**
@@ -112,6 +126,7 @@ export interface GeneratedManyToMany {
 	readonly through: string;
 	readonly sourceFk: string;
 	readonly targetFk: string;
+	readonly includeStrategy?: GeneratedIncludeStrategy;
 }
 
 /**
@@ -236,9 +251,10 @@ function generatedTypeToColumnType(genType: GeneratedColumnType): ColumnType {
 		case 'text':
 			return 'string';
 		case 'number':
-		case 'integer':
 		case 'decimal':
 			return 'number';
+		case 'integer':
+			return 'integer';
 		case 'bigint':
 			return 'bigint';
 		case 'boolean':
@@ -399,14 +415,18 @@ function buildTableIRFromDefinition(
 		primaryKey = primaryKeys;
 	}
 
-	return {
+	// Freeze columns array for runtime immutability
+	const frozenColumns = Object.freeze(columns);
+
+	// Freeze and return the table object
+	return Object.freeze({
 		name: tableName,
-		columns,
+		columns: frozenColumns,
 		primaryKey,
-		foreignKeys,
-		indexes,
-		...(pseudoColumns.length > 0 && { pseudoColumns }),
-	};
+		foreignKeys: Object.freeze(foreignKeys),
+		indexes: Object.freeze(indexes),
+		...(pseudoColumns.length > 0 && { pseudoColumns: Object.freeze(pseudoColumns) }),
+	});
 }
 
 /**
@@ -437,15 +457,21 @@ function buildRelationIR(
 	const optionality: Optionality =
 		genRelation.kind === 'belongsTo' ? 'optional' : 'optional';
 
+	// Determine relation type - hasMany with cardinality 'one' becomes 'hasOne'
+	let relationType = mapRelationType(genRelation.kind);
+	if (genRelation.kind === 'hasMany' && cardinality === 'one') {
+		relationType = 'hasOne';
+	}
+
 	// Build base relation
 	const baseRelation = {
 		name: relationName,
 		source: sourceTable,
 		target: genRelation.target,
-		type: mapRelationType(genRelation.kind),
+		type: relationType,
 		cardinality,
 		optionality,
-		includeStrategy: 'auto' as IncludeStrategy,
+		includeStrategy: (genRelation.includeStrategy ?? 'auto') as IncludeStrategy,
 		filterStrategy: (hint?.defaultStrategy ?? 'auto') as FilterStrategy,
 		joinDefault: 'auto' as JoinDefault,
 	};
@@ -510,6 +536,26 @@ export function buildModelFromSchema(schema: GeneratedSchema): ModelIR {
 	}
 
 	return new ModelIRImpl(tables, relations);
+}
+
+
+/**
+ * Build ModelIR directly from ResolvedSchema.
+ *
+ * Combines the conversion steps: ResolvedSchema → GeneratedSchema → ModelIR.
+ * This is the canonical path for creating ModelIR from user-defined schemas.
+ *
+ * @example
+ * ```typescript
+ * import { defineSchema, buildModelFromResolvedSchema } from '@dbsp/core';
+ *
+ * const schema = defineSchema({ users: { ... } }, { relations: { ... } });
+ * const model = buildModelFromResolvedSchema(schema);
+ * ```
+ */
+export function buildModelFromResolvedSchema(schema: ResolvedSchema): ModelIR {
+	const generatedSchema = assertResolvedSchemaToGeneratedSchema(schema);
+	return buildModelFromSchema(generatedSchema);
 }
 
 /**
@@ -709,7 +755,7 @@ const ColumnDefinitionSchema = v.object({
 	nullable: v.optional(v.boolean()),
 	unique: v.optional(v.boolean()),
 	autoIncrement: v.optional(v.boolean()),
-	default: v.optional(v.string()),
+	default: v.optional(v.union([v.string(), v.number(), v.boolean()])),
 	references: v.optional(ForeignKeyReferenceSchema),
 	index: v.optional(v.union([v.boolean(), v.string()])),
 });
@@ -753,11 +799,19 @@ const TablesDefinitionSchema = v.record(v.string(), TableDefinitionSchema);
 /**
  * BelongsTo relation schema
  */
+/**
+ * Include strategy schema for relations
+ */
+const IncludeStrategySchema = v.optional(
+	v.picklist(['join', 'separate', 'cte', 'lateral', 'json_agg', 'auto']),
+);
+
 const BelongsToRelationSchema = v.object({
 	kind: v.literal('belongsTo'),
 	target: v.string(),
 	foreignKey: v.string(),
 	targetKey: v.optional(v.string()),
+	includeStrategy: IncludeStrategySchema,
 });
 
 /**
@@ -768,6 +822,7 @@ const HasManyRelationSchema = v.object({
 	target: v.string(),
 	foreignKey: v.string(),
 	sourceKey: v.optional(v.string()),
+	includeStrategy: IncludeStrategySchema,
 });
 
 /**
@@ -779,6 +834,7 @@ const ManyToManyRelationSchema = v.object({
 	through: v.string(),
 	sourceFk: v.string(),
 	targetFk: v.string(),
+	includeStrategy: IncludeStrategySchema,
 });
 
 /**
@@ -925,7 +981,7 @@ function convertColumn(
 		(result as { autoIncrement?: boolean }).autoIncrement = col.autoIncrement;
 	}
 	if (col.default !== undefined) {
-		(result as { default?: string }).default = col.default;
+		(result as { default?: string | number | boolean }).default = col.default;
 	}
 	if (col.references) {
 		const refs: { table: string; column?: string } = {
@@ -956,6 +1012,10 @@ function convertRelation(
 			if (rel.targetKey !== undefined) {
 				(result as { targetKey?: string }).targetKey = rel.targetKey;
 			}
+			if (rel.includeStrategy !== undefined) {
+				(result as { includeStrategy?: GeneratedIncludeStrategy }).includeStrategy =
+					rel.includeStrategy;
+			}
 			return result;
 		}
 		case 'hasMany': {
@@ -967,16 +1027,26 @@ function convertRelation(
 			if (rel.sourceKey !== undefined) {
 				(result as { sourceKey?: string }).sourceKey = rel.sourceKey;
 			}
+			if (rel.includeStrategy !== undefined) {
+				(result as { includeStrategy?: GeneratedIncludeStrategy }).includeStrategy =
+					rel.includeStrategy;
+			}
 			return result;
 		}
-		case 'manyToMany':
-			return {
+		case 'manyToMany': {
+			const result: GeneratedManyToMany = {
 				kind: 'manyToMany',
 				target: rel.target,
 				through: rel.through,
 				sourceFk: rel.sourceFk,
 				targetFk: rel.targetFk,
 			};
+			if (rel.includeStrategy !== undefined) {
+				(result as { includeStrategy?: GeneratedIncludeStrategy }).includeStrategy =
+					rel.includeStrategy;
+			}
+			return result;
+		}
 	}
 }
 

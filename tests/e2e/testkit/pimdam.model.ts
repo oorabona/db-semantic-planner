@@ -4,10 +4,10 @@
  * Schema definition for semantic query planning.
  */
 
-import { belongsTo, defineSchemaBuilder, hasMany } from '@dbsp/core';
+import { buildModelFromResolvedSchema, defineSchema } from '@dbsp/core';
 
 /**
- * PIM/DAM schema model for E2E tests.
+ * PIM/DAM schema for E2E tests.
  *
  * Includes:
  * - categories (self-referential hierarchy)
@@ -16,72 +16,107 @@ import { belongsTo, defineSchemaBuilder, hasMany } from '@dbsp/core';
  * - product_images
  * - variants
  */
-export const pimdamModel = defineSchemaBuilder({
-	categories: {
-		id: { type: 'integer', primaryKey: true },
-		name: { type: 'string' },
-		parent_id: { type: 'integer' },
-	},
-	products: {
-		id: { type: 'integer', primaryKey: true },
-		sku: { type: 'string' },
-		title: { type: 'string' },
-		category_id: { type: 'integer' },
-		active: { type: 'boolean' },
-		deleted_at: { type: 'timestamp' },
-	},
-	assets: {
-		id: { type: 'integer', primaryKey: true },
-		kind: { type: 'string' },
-		sha256: { type: 'string' },
-		mime: { type: 'string' },
-		width: { type: 'integer' },
-		height: { type: 'integer' },
-		size_bytes: { type: 'integer' },
-		storage_key: { type: 'string' },
-		expires_at: { type: 'timestamp' },
-		created_at: { type: 'timestamp' },
-	},
-	product_images: {
-		id: { type: 'integer', primaryKey: true },
-		product_id: { type: 'integer' },
-		asset_id: { type: 'integer' },
-		locale: { type: 'string' },
-		status: { type: 'string' },
-		is_main: { type: 'boolean' },
-		position: { type: 'integer' },
-		deleted_at: { type: 'timestamp' },
-	},
-	variants: {
-		id: { type: 'integer', primaryKey: true },
-		product_id: { type: 'integer' },
-		sku: { type: 'string' },
-		name: { type: 'string' },
-		price_cents: { type: 'integer' },
-		stock: { type: 'integer' },
-	},
-})
-	.relations({
-		// Self-referential categories
+const pimdamSchema = defineSchema(
+	{
 		categories: {
-			parent: belongsTo('categories', { foreignKey: 'parent_id' }),
-			children: hasMany('categories', { foreignKey: 'parent_id' }),
-			products: hasMany('products', { foreignKey: 'category_id' }),
+			id: { type: 'integer', primaryKey: true },
+			name: { type: 'string' },
+			parent_id: { type: 'integer' },
 		},
 		products: {
-			category: belongsTo('categories', { foreignKey: 'category_id' }),
-			images: hasMany('product_images', { foreignKey: 'product_id' }),
-			variants: hasMany('variants', { foreignKey: 'product_id' }),
-		},
-		product_images: {
-			product: belongsTo('products', { foreignKey: 'product_id' }),
-			asset: belongsTo('assets', { foreignKey: 'asset_id' }),
+			id: { type: 'integer', primaryKey: true },
+			sku: { type: 'string' },
+			title: { type: 'string' },
+			category_id: { type: 'integer' },
+			active: { type: 'boolean' },
+			deleted_at: { type: 'timestamp' },
 		},
 		assets: {
-			productImages: hasMany('product_images', { foreignKey: 'asset_id' }),
+			id: { type: 'integer', primaryKey: true },
+			kind: { type: 'string' },
+			sha256: { type: 'string' },
+			mime: { type: 'string' },
+			width: { type: 'integer' },
+			height: { type: 'integer' },
+			size_bytes: { type: 'integer' },
+			storage_key: { type: 'string' },
+			expires_at: { type: 'timestamp' },
+			created_at: { type: 'timestamp' },
+		},
+		product_images: {
+			id: { type: 'integer', primaryKey: true },
+			product_id: { type: 'integer' },
+			asset_id: { type: 'integer' },
+			locale: { type: 'string' },
+			status: { type: 'string' },
+			is_main: { type: 'boolean' },
+			position: { type: 'integer' },
+			deleted_at: { type: 'timestamp' },
 		},
 		variants: {
-			product: belongsTo('products', { foreignKey: 'product_id' }),
+			id: { type: 'integer', primaryKey: true },
+			product_id: { type: 'integer' },
+			sku: { type: 'string' },
+			name: { type: 'string' },
+			price_cents: { type: 'integer' },
+			stock: { type: 'integer' },
 		},
-	})
-	.build();
+	},
+	{
+		relations: {
+			// Self-referential categories
+			'categories.parent': {
+				kind: 'belongsTo',
+				target: 'categories',
+				foreignKey: 'parent_id',
+			},
+			'categories.children': {
+				kind: 'hasMany',
+				target: 'categories',
+				foreignKey: 'parent_id',
+			},
+			'categories.products': {
+				kind: 'hasMany',
+				target: 'products',
+				foreignKey: 'category_id',
+			},
+			'products.category': {
+				kind: 'belongsTo',
+				target: 'categories',
+				foreignKey: 'category_id',
+			},
+			'products.images': {
+				kind: 'hasMany',
+				target: 'product_images',
+				foreignKey: 'product_id',
+			},
+			'products.variants': {
+				kind: 'hasMany',
+				target: 'variants',
+				foreignKey: 'product_id',
+			},
+			'product_images.product': {
+				kind: 'belongsTo',
+				target: 'products',
+				foreignKey: 'product_id',
+			},
+			'product_images.asset': {
+				kind: 'belongsTo',
+				target: 'assets',
+				foreignKey: 'asset_id',
+			},
+			'assets.productImages': {
+				kind: 'hasMany',
+				target: 'product_images',
+				foreignKey: 'asset_id',
+			},
+			'variants.product': {
+				kind: 'belongsTo',
+				target: 'products',
+				foreignKey: 'product_id',
+			},
+		},
+	},
+);
+
+export const pimdamModel = buildModelFromResolvedSchema(pimdamSchema);

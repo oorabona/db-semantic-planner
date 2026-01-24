@@ -5,11 +5,10 @@
 
 import {
 	and,
-	belongsTo,
+	buildModelFromResolvedSchema,
 	createOrm,
-	defineSchemaBuilder,
+	defineSchema,
 	eq,
-	hasMany,
 	inArray,
 	UpsertBuilder,
 } from '@dbsp/core';
@@ -24,29 +23,30 @@ import {
 import { createKyselyAdapter } from './kysely-adapter.js';
 
 // Test schema
-const testModel = defineSchemaBuilder({
-	users: {
-		id: 'integer',
-		name: { type: 'string' },
-		email: { type: 'string' },
-		active: { type: 'boolean' },
-	},
-	posts: {
-		id: 'integer',
-		title: { type: 'string' },
-		content: { type: 'string' },
-		userId: 'integer',
-	},
-})
-	.relations({
-		users: {
-			posts: hasMany('posts', { foreignKey: 'userId' }),
+const testModel = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+				email: { type: 'string' },
+				active: { type: 'boolean' },
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: { type: 'string' },
+				content: { type: 'string' },
+				userId: { type: 'integer' },
+			},
 		},
-		posts: {
-			author: belongsTo('users', { foreignKey: 'userId' }),
+		{
+			relations: {
+				'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'userId' },
+				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'userId' },
+			},
 		},
-	})
-	.build();
+	),
+);
 
 // Database schema types
 interface TestDatabase {

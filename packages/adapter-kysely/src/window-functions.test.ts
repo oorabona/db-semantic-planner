@@ -4,8 +4,9 @@
  */
 
 import {
+	buildModelFromResolvedSchema,
 	createOrm,
-	defineSchemaBuilder,
+	defineSchema,
 	denseRank,
 	lag,
 	lead,
@@ -25,27 +26,29 @@ import { createKyselyAdapter } from './kysely-adapter.js';
 // Test Schema
 // ============================================================================
 
-const testModel = defineSchemaBuilder({
-	products: {
-		id: 'integer',
-		name: { type: 'string' },
-		price: { type: 'number' },
-		categoryId: 'integer',
-		createdAt: { type: 'date' },
-	},
-	sales: {
-		id: 'integer',
-		productId: 'integer',
-		amount: { type: 'number' },
-		date: { type: 'date' },
-	},
-	employees: {
-		id: 'integer',
-		name: { type: 'string' },
-		department: { type: 'string' },
-		salary: { type: 'number' },
-	},
-}).build();
+const testModel = buildModelFromResolvedSchema(
+	defineSchema({
+		products: {
+			id: { type: 'integer', primaryKey: true },
+			name: { type: 'string' },
+			price: { type: 'decimal' },
+			categoryId: { type: 'integer' },
+			createdAt: { type: 'date' },
+		},
+		sales: {
+			id: { type: 'integer', primaryKey: true },
+			productId: { type: 'integer' },
+			amount: { type: 'decimal' },
+			date: { type: 'date' },
+		},
+		employees: {
+			id: { type: 'integer', primaryKey: true },
+			name: { type: 'string' },
+			department: { type: 'string' },
+			salary: { type: 'decimal' },
+		},
+	}),
+);
 
 // Create a mock Kysely instance for testing SQL generation only (no actual execution)
 const mockKysely = new Kysely<any>({

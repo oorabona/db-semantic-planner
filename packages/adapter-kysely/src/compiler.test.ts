@@ -1,7 +1,6 @@
 import {
-	belongsTo,
-	defineSchemaBuilder,
-	hasMany,
+	buildModelFromResolvedSchema,
+	defineSchema,
 	ModelIRImpl,
 	plan,
 	planRecursive,
@@ -51,56 +50,58 @@ function createTestKysely() {
 /**
  * Basic schema: Users with posts
  */
-const basicSchema = defineSchemaBuilder({
-	users: {
-		id: { type: 'number' },
-		name: { type: 'string' },
-		email: { type: 'string' },
-		active: { type: 'boolean' },
-	},
-	posts: {
-		id: { type: 'number' },
-		title: { type: 'string' },
-		content: { type: 'string' },
-		userId: { type: 'number' },
-		published: { type: 'boolean' },
-	},
-})
-	.relations({
-		users: {
-			posts: hasMany('posts', { foreignKey: 'userId' }),
+const basicSchema = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+				email: { type: 'string' },
+				active: { type: 'boolean' },
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: { type: 'string' },
+				content: { type: 'string' },
+				userId: { type: 'integer' },
+				published: { type: 'boolean' },
+			},
 		},
-		posts: {
-			author: belongsTo('users', { foreignKey: 'userId' }),
+		{
+			relations: {
+				'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'userId' },
+				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'userId' },
+			},
 		},
-	})
-	.build();
+	),
+);
 
 /**
  * Q1 Schema: Products with images (EXISTS filter test)
  */
-const q1Schema = defineSchemaBuilder({
-	products: {
-		id: { type: 'number' },
-		name: { type: 'string' },
-	},
-	productImages: {
-		id: { type: 'number' },
-		productId: { type: 'number' },
-		locale: { type: 'string' },
-		type: { type: 'string' },
-		approved: { type: 'boolean' },
-	},
-})
-	.relations({
-		products: {
-			images: hasMany('productImages', { foreignKey: 'productId' }),
+const q1Schema = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			products: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+			},
+			productImages: {
+				id: { type: 'integer', primaryKey: true },
+				productId: { type: 'integer' },
+				locale: { type: 'string' },
+				type: { type: 'string' },
+				approved: { type: 'boolean' },
+			},
 		},
-		productImages: {
-			product: belongsTo('products', { foreignKey: 'productId' }),
+		{
+			relations: {
+				'products.images': { kind: 'hasMany', target: 'productImages', foreignKey: 'productId' },
+				'productImages.product': { kind: 'belongsTo', target: 'products', foreignKey: 'productId' },
+			},
 		},
-	})
-	.build();
+	),
+);
 
 // ============================================================================
 // Basic SELECT Tests
@@ -1303,46 +1304,50 @@ describe('SQL Compiler', () => {
 		/**
 		 * Recursive schema: Categories with parent (for hierarchical traversal)
 		 */
-		const recursiveSchema = defineSchemaBuilder({
-			categories: {
-				id: { type: 'number' },
-				name: { type: 'string' },
-				parentId: { type: 'number' },
-			},
-		})
-			.relations({
-				categories: {
-					parent: belongsTo('categories', { foreignKey: 'parentId' }),
-					children: hasMany('categories', { foreignKey: 'parentId' }),
+		const recursiveSchema = buildModelFromResolvedSchema(
+			defineSchema(
+				{
+					categories: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+						parentId: { type: 'integer' },
+					},
 				},
-			})
-			.build();
+				{
+					relations: {
+						'categories.parent': { kind: 'belongsTo', target: 'categories', foreignKey: 'parentId' },
+						'categories.children': { kind: 'hasMany', target: 'categories', foreignKey: 'parentId' },
+					},
+				},
+			),
+		);
 
 		/**
 		 * Edge-table schema: Roles with edges (for role hierarchy)
 		 */
-		const edgeTableSchema = defineSchemaBuilder({
-			roles: {
-				id: { type: 'number' },
-				name: { type: 'string' },
-			},
-			roleEdges: {
-				id: { type: 'number' },
-				parentRoleId: { type: 'number' },
-				childRoleId: { type: 'number' },
-			},
-		})
-			.relations({
-				roles: {
-					parentEdges: hasMany('roleEdges', { foreignKey: 'childRoleId' }),
-					childEdges: hasMany('roleEdges', { foreignKey: 'parentRoleId' }),
+		const edgeTableSchema = buildModelFromResolvedSchema(
+			defineSchema(
+				{
+					roles: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+					},
+					roleEdges: {
+						id: { type: 'integer', primaryKey: true },
+						parentRoleId: { type: 'integer' },
+						childRoleId: { type: 'integer' },
+					},
 				},
-				roleEdges: {
-					parentRole: belongsTo('roles', { foreignKey: 'parentRoleId' }),
-					childRole: belongsTo('roles', { foreignKey: 'childRoleId' }),
+				{
+					relations: {
+						'roles.parentEdges': { kind: 'hasMany', target: 'roleEdges', foreignKey: 'childRoleId' },
+						'roles.childEdges': { kind: 'hasMany', target: 'roleEdges', foreignKey: 'parentRoleId' },
+						'roleEdges.parentRole': { kind: 'belongsTo', target: 'roles', foreignKey: 'parentRoleId' },
+						'roleEdges.childRole': { kind: 'belongsTo', target: 'roles', foreignKey: 'childRoleId' },
+					},
 				},
-			})
-			.build();
+			),
+		);
 
 		describe('adjacency traversal', () => {
 			it('should generate WITH RECURSIVE SQL for adjacency traversal', () => {
@@ -2935,27 +2940,31 @@ describe('SQL Compiler', () => {
 				const kysely = createTestKysely();
 
 				// Given: users hasMany posts with explicit includeStrategy: 'join'
-				const schemaWithJoinHint = defineSchemaBuilder({
-					users: {
-						id: { type: 'number' },
-						name: { type: 'string' },
-					},
-					posts: {
-						id: { type: 'number' },
-						title: { type: 'string' },
-						userId: { type: 'number' },
-					},
-				})
-					.relations({
-						users: {
-							posts: hasMany(
-								'posts',
-								{ foreignKey: 'userId' },
-								{ includeStrategy: 'join' },
-							),
+				const schemaWithJoinHint = buildModelFromResolvedSchema(
+					defineSchema(
+						{
+							users: {
+								id: { type: 'integer', primaryKey: true },
+								name: { type: 'string' },
+							},
+							posts: {
+								id: { type: 'integer', primaryKey: true },
+								title: { type: 'string' },
+								userId: { type: 'integer' },
+							},
 						},
-					})
-					.build();
+						{
+							relations: {
+								'users.posts': {
+									kind: 'hasMany',
+									target: 'posts',
+									foreignKey: 'userId',
+									includeStrategy: 'join',
+								},
+							},
+						},
+					),
+				);
 
 				// When: I select users with include('posts')
 				const intent: QueryIntent = {
@@ -3145,27 +3154,31 @@ describe('SQL Compiler', () => {
 				const kysely = createTestKysely();
 
 				// Given: users hasMany posts with explicit 'lateral' strategy hint
-				const schemaWithLateral = defineSchemaBuilder({
-					users: {
-						id: { type: 'number' },
-						name: { type: 'string' },
-					},
-					posts: {
-						id: { type: 'number' },
-						title: { type: 'string' },
-						userId: { type: 'number' },
-					},
-				})
-					.relations({
-						users: {
-							posts: hasMany(
-								'posts',
-								{ foreignKey: 'userId' },
-								{ includeStrategy: 'lateral' },
-							),
+				const schemaWithLateral = buildModelFromResolvedSchema(
+					defineSchema(
+						{
+							users: {
+								id: { type: 'integer', primaryKey: true },
+								name: { type: 'string' },
+							},
+							posts: {
+								id: { type: 'integer', primaryKey: true },
+								title: { type: 'string' },
+								userId: { type: 'integer' },
+							},
 						},
-					})
-					.build();
+						{
+							relations: {
+								'users.posts': {
+									kind: 'hasMany',
+									target: 'posts',
+									foreignKey: 'userId',
+									includeStrategy: 'lateral',
+								},
+							},
+						},
+					),
+				);
 
 				// When: I select users with include('posts')
 				const intent: QueryIntent = {
@@ -3194,28 +3207,32 @@ describe('SQL Compiler', () => {
 			it('should support limit and orderBy in LATERAL subquery', () => {
 				const kysely = createTestKysely();
 
-				const schemaWithLateral = defineSchemaBuilder({
-					users: {
-						id: { type: 'number' },
-						name: { type: 'string' },
-					},
-					posts: {
-						id: { type: 'number' },
-						title: { type: 'string' },
-						createdAt: 'Date',
-						userId: { type: 'number' },
-					},
-				})
-					.relations({
-						users: {
-							posts: hasMany(
-								'posts',
-								{ foreignKey: 'userId' },
-								{ includeStrategy: 'lateral' },
-							),
+				const schemaWithLateral = buildModelFromResolvedSchema(
+					defineSchema(
+						{
+							users: {
+								id: { type: 'integer', primaryKey: true },
+								name: { type: 'string' },
+							},
+							posts: {
+								id: { type: 'integer', primaryKey: true },
+								title: { type: 'string' },
+								createdAt: { type: 'timestamp' },
+								userId: { type: 'integer' },
+							},
 						},
-					})
-					.build();
+						{
+							relations: {
+								'users.posts': {
+									kind: 'hasMany',
+									target: 'posts',
+									foreignKey: 'userId',
+									includeStrategy: 'lateral',
+								},
+							},
+						},
+					),
+				);
 
 				// When: I select users with include('posts') with limit and orderBy
 				const intent: QueryIntent = {
@@ -3249,27 +3266,31 @@ describe('SQL Compiler', () => {
 				const kysely = createTestKysely();
 
 				// Given: users hasMany posts with explicit 'json_agg' strategy hint
-				const schemaWithJsonAgg = defineSchemaBuilder({
-					users: {
-						id: { type: 'number' },
-						name: { type: 'string' },
-					},
-					posts: {
-						id: { type: 'number' },
-						title: { type: 'string' },
-						userId: { type: 'number' },
-					},
-				})
-					.relations({
-						users: {
-							posts: hasMany(
-								'posts',
-								{ foreignKey: 'userId' },
-								{ includeStrategy: 'json_agg' },
-							),
+				const schemaWithJsonAgg = buildModelFromResolvedSchema(
+					defineSchema(
+						{
+							users: {
+								id: { type: 'integer', primaryKey: true },
+								name: { type: 'string' },
+							},
+							posts: {
+								id: { type: 'integer', primaryKey: true },
+								title: { type: 'string' },
+								userId: { type: 'integer' },
+							},
 						},
-					})
-					.build();
+						{
+							relations: {
+								'users.posts': {
+									kind: 'hasMany',
+									target: 'posts',
+									foreignKey: 'userId',
+									includeStrategy: 'json_agg',
+								},
+							},
+						},
+					),
+				);
 
 				// When: I select users with include('posts')
 				const intent: QueryIntent = {
@@ -3304,28 +3325,32 @@ describe('SQL Compiler', () => {
 			it('should support orderBy in JSON_AGG aggregation', () => {
 				const kysely = createTestKysely();
 
-				const schemaWithJsonAgg = defineSchemaBuilder({
-					users: {
-						id: { type: 'number' },
-						name: { type: 'string' },
-					},
-					posts: {
-						id: { type: 'number' },
-						title: { type: 'string' },
-						createdAt: 'Date',
-						userId: { type: 'number' },
-					},
-				})
-					.relations({
-						users: {
-							posts: hasMany(
-								'posts',
-								{ foreignKey: 'userId' },
-								{ includeStrategy: 'json_agg' },
-							),
+				const schemaWithJsonAgg = buildModelFromResolvedSchema(
+					defineSchema(
+						{
+							users: {
+								id: { type: 'integer', primaryKey: true },
+								name: { type: 'string' },
+							},
+							posts: {
+								id: { type: 'integer', primaryKey: true },
+								title: { type: 'string' },
+								createdAt: { type: 'timestamp' },
+								userId: { type: 'integer' },
+							},
 						},
-					})
-					.build();
+						{
+							relations: {
+								'users.posts': {
+									kind: 'hasMany',
+									target: 'posts',
+									foreignKey: 'userId',
+									includeStrategy: 'json_agg',
+								},
+							},
+						},
+					),
+				);
 
 				// When: I select users with include('posts') with orderBy
 				const intent: QueryIntent = {
@@ -3354,27 +3379,31 @@ describe('SQL Compiler', () => {
 			it('should return empty JSON array when no related records', () => {
 				const kysely = createTestKysely();
 
-				const schemaWithJsonAgg = defineSchemaBuilder({
-					users: {
-						id: { type: 'number' },
-						name: { type: 'string' },
-					},
-					posts: {
-						id: { type: 'number' },
-						title: { type: 'string' },
-						userId: { type: 'number' },
-					},
-				})
-					.relations({
-						users: {
-							posts: hasMany(
-								'posts',
-								{ foreignKey: 'userId' },
-								{ includeStrategy: 'json_agg' },
-							),
+				const schemaWithJsonAgg = buildModelFromResolvedSchema(
+					defineSchema(
+						{
+							users: {
+								id: { type: 'integer', primaryKey: true },
+								name: { type: 'string' },
+							},
+							posts: {
+								id: { type: 'integer', primaryKey: true },
+								title: { type: 'string' },
+								userId: { type: 'integer' },
+							},
 						},
-					})
-					.build();
+						{
+							relations: {
+								'users.posts': {
+									kind: 'hasMany',
+									target: 'posts',
+									foreignKey: 'userId',
+									includeStrategy: 'json_agg',
+								},
+							},
+						},
+					),
+				);
 
 				const intent: QueryIntent = {
 					type: 'select',
@@ -3699,25 +3728,32 @@ describe('ADAPTER-003: Smart Column Aliasing - onCollision mode', () => {
 	// Schema with overlapping column names for collision testing
 	// users: id, name, createdAt
 	// posts: id, title, userId, createdAt (id and createdAt collide with users)
-	const schemaWithCollisions = defineSchemaBuilder({
-		users: {
-			id: { type: 'number' },
-			name: { type: 'string' },
-			createdAt: { type: 'string' },
-		},
-		posts: {
-			id: { type: 'number' },
-			title: { type: 'string' },
-			userId: { type: 'number' },
-			createdAt: { type: 'string' },
-		},
-	})
-		.relations({
-			posts: {
-				author: belongsTo('users', { foreignKey: 'userId' }),
+	const schemaWithCollisions = buildModelFromResolvedSchema(
+		defineSchema(
+			{
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					name: { type: 'string' },
+					createdAt: { type: 'string' },
+				},
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					title: { type: 'string' },
+					userId: { type: 'integer' },
+					createdAt: { type: 'string' },
+				},
 			},
-		})
-		.build();
+			{
+				relations: {
+					'posts.author': {
+						kind: 'belongsTo',
+						target: 'users',
+						foreignKey: 'userId',
+					},
+				},
+			},
+		),
+	);
 
 	describe("aliasIncludedColumns: 'always' (default)", () => {
 		it('should alias ALL columns from included tables', () => {
@@ -3837,32 +3873,43 @@ describe('ADAPTER-003: Smart Column Aliasing - onCollision mode', () => {
 
 	describe('collision detection across multiple includes', () => {
 		// Schema with multiple relations where column names collide
-		const schemaWithMultipleIncludes = defineSchemaBuilder({
-			comments: {
-				id: { type: 'number' },
-				content: { type: 'string' },
-				postId: { type: 'number' },
-				authorId: { type: 'number' },
-				createdAt: { type: 'string' },
-			},
-			posts: {
-				id: { type: 'number' },
-				title: { type: 'string' },
-				createdAt: { type: 'string' },
-			},
-			users: {
-				id: { type: 'number' },
-				name: { type: 'string' },
-				createdAt: { type: 'string' },
-			},
-		})
-			.relations({
-				comments: {
-					post: belongsTo('posts', { foreignKey: 'postId' }),
-					author: belongsTo('users', { foreignKey: 'authorId' }),
+		const schemaWithMultipleIncludes = buildModelFromResolvedSchema(
+			defineSchema(
+				{
+					comments: {
+						id: { type: 'integer', primaryKey: true },
+						content: { type: 'string' },
+						postId: { type: 'integer' },
+						authorId: { type: 'integer' },
+						createdAt: { type: 'string' },
+					},
+					posts: {
+						id: { type: 'integer', primaryKey: true },
+						title: { type: 'string' },
+						createdAt: { type: 'string' },
+					},
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+						createdAt: { type: 'string' },
+					},
 				},
-			})
-			.build();
+				{
+					relations: {
+						'comments.post': {
+							kind: 'belongsTo',
+							target: 'posts',
+							foreignKey: 'postId',
+						},
+						'comments.author': {
+							kind: 'belongsTo',
+							target: 'users',
+							foreignKey: 'authorId',
+						},
+					},
+				},
+			),
+		);
 
 		it('should detect collisions across root and multiple included tables', () => {
 			// Given: comments with post and author includes
@@ -4099,39 +4146,42 @@ describe('CORE-006: Composite Key Support', () => {
 
 	describe('CTE Include Strategy (CLI-012)', () => {
 		const createCteTestSchema = () =>
-			defineSchemaBuilder({
-				categories: {
-					id: 'integer',
-					name: { type: 'string' },
-					parentId: 'integer',
-				},
-				users: {
-					id: 'integer',
-					name: { type: 'string' },
-				},
-				posts: {
-					id: 'integer',
-					title: { type: 'string' },
-					authorId: 'integer',
-				},
-			})
-				.relations({
-					categories: {
-						parent: belongsTo(
-							'categories',
-							{ foreignKey: 'parentId' },
-							{ includeStrategy: 'cte' },
-						),
+			buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						categories: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+							parentId: { type: 'integer' },
+						},
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: { type: 'string' },
+							authorId: { type: 'integer' },
+						},
 					},
-					users: {
-						posts: hasMany(
-							'posts',
-							{ foreignKey: 'authorId' },
-							{ includeStrategy: 'cte' },
-						),
+					{
+						relations: {
+							'categories.parent': {
+								kind: 'belongsTo',
+								target: 'categories',
+								foreignKey: 'parentId',
+								includeStrategy: 'cte',
+							},
+							'users.posts': {
+								kind: 'hasMany',
+								target: 'posts',
+								foreignKey: 'authorId',
+								includeStrategy: 'cte',
+							},
+						},
 					},
-				})
-				.build();
+				),
+			);
 
 		it('should generate CTE when includeStrategy is cte for self-referential relation', () => {
 			const kysely = createTestKysely();
@@ -4279,41 +4329,44 @@ describe('CORE-006: Composite Key Support', () => {
 		it('should apply filters to nested CTEs (CLI-012b)', () => {
 			const kysely = createTestKysely();
 			// Extended schema with nested relations
-			const model = defineSchemaBuilder({
-				users: {
-					id: 'integer',
-					name: { type: 'string' },
-				},
-				posts: {
-					id: 'integer',
-					title: { type: 'string' },
-					authorId: 'integer',
-					published: { type: 'boolean' },
-				},
-				comments: {
-					id: 'integer',
-					content: { type: 'string' },
-					postId: 'integer',
-					approved: { type: 'boolean' },
-				},
-			})
-				.relations({
-					users: {
-						posts: hasMany(
-							'posts',
-							{ foreignKey: 'authorId' },
-							{ includeStrategy: 'cte' },
-						),
+			const model = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: { type: 'string' },
+							authorId: { type: 'integer' },
+							published: { type: 'boolean' },
+						},
+						comments: {
+							id: { type: 'integer', primaryKey: true },
+							content: { type: 'string' },
+							postId: { type: 'integer' },
+							approved: { type: 'boolean' },
+						},
 					},
-					posts: {
-						comments: hasMany(
-							'comments',
-							{ foreignKey: 'postId' },
-							{ includeStrategy: 'cte' },
-						),
+					{
+						relations: {
+							'users.posts': {
+								kind: 'hasMany',
+								target: 'posts',
+								foreignKey: 'authorId',
+								includeStrategy: 'cte',
+							},
+							'posts.comments': {
+								kind: 'hasMany',
+								target: 'comments',
+								foreignKey: 'postId',
+								includeStrategy: 'cte',
+							},
+						},
 					},
-				})
-				.build();
+				),
+			);
 
 			// Query users -> posts (published) -> comments (approved)
 			const intent: QueryIntent = {
@@ -4361,20 +4414,31 @@ describe('CORE-006: Composite Key Support', () => {
 		describe('recursive CTEs (CLI-012c)', () => {
 			// Helper to create self-referential schema
 			function createRecursiveSchema() {
-				return defineSchemaBuilder({
-					categories: {
-						id: 'integer',
-						name: { type: 'string' },
-						parentId: 'integer',
-					},
-				})
-					.relations({
-						categories: {
-							children: hasMany('categories', { foreignKey: 'parentId' }),
-							parent: belongsTo('categories', { foreignKey: 'parentId' }),
+				return buildModelFromResolvedSchema(
+					defineSchema(
+						{
+							categories: {
+								id: { type: 'integer', primaryKey: true },
+								name: { type: 'string' },
+								parentId: { type: 'integer' },
+							},
 						},
-					})
-					.build();
+						{
+							relations: {
+								'categories.children': {
+									kind: 'hasMany',
+									target: 'categories',
+									foreignKey: 'parentId',
+								},
+								'categories.parent': {
+									kind: 'belongsTo',
+									target: 'categories',
+									foreignKey: 'parentId',
+								},
+							},
+						},
+					),
+				);
 			}
 
 			it('should generate WITH RECURSIVE for self-referential include with recursive option', () => {
@@ -4470,20 +4534,27 @@ describe('CORE-006: Composite Key Support', () => {
 
 			it('should apply include.where filter to recursive CTE', () => {
 				const kysely = createTestKysely();
-				const model = defineSchemaBuilder({
-					categories: {
-						id: 'integer',
-						name: { type: 'string' },
-						parentId: 'integer',
-						active: { type: 'boolean' },
-					},
-				})
-					.relations({
-						categories: {
-							children: hasMany('categories', { foreignKey: 'parentId' }),
+				const model = buildModelFromResolvedSchema(
+					defineSchema(
+						{
+							categories: {
+								id: { type: 'integer', primaryKey: true },
+								name: { type: 'string' },
+								parentId: { type: 'integer' },
+								active: { type: 'boolean' },
+							},
 						},
-					})
-					.build();
+						{
+							relations: {
+								'categories.children': {
+									kind: 'hasMany',
+									target: 'categories',
+									foreignKey: 'parentId',
+								},
+							},
+						},
+					),
+				);
 
 				const intent: QueryIntent = {
 					type: 'select',

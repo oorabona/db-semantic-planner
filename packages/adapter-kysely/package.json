@@ -24,7 +24,8 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@dbsp/core": "workspace:*"
+		"@dbsp/core": "workspace:*",
+		"@dbsp/types": "workspace:"
 	},
 	"peerDependencies": {
 		"kysely": "catalog:"

@@ -122,6 +122,9 @@ importers:
       '@dbsp/core':
         specifier: workspace:*
         version: link:../core
+      '@dbsp/types':
+        specifier: 'workspace:'
+        version: link:../types
     devDependencies:
       '@types/better-sqlite3':
         specifier: 'catalog:'
@@ -202,6 +205,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@dbsp/types':
+        specifier: 'workspace:'
+        version: link:../types
       valibot:
         specifier: 'catalog:'
         version: 1.2.0(typescript@5.9.3)
@@ -249,6 +255,9 @@ importers:
 
   packages/nql:
     dependencies:
+      '@dbsp/types':
+        specifier: 'workspace:'
+        version: link:../types
       chevrotain:
         specifier: 'catalog:'
         version: 11.1.0
@@ -265,6 +274,18 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.0.16(@types/node@22.19.3)(tsx@4.21.0)(yaml@2.8.2)
+
+  packages/types:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.19.3
+      tsup:
+        specifier: 'catalog:'
+        version: 8.5.1(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
 
 packages:
 

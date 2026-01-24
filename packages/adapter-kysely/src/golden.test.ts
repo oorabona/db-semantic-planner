@@ -10,10 +10,8 @@
 
 import {
 	AmbiguousPlanError,
-	belongsTo,
-	belongsToMany,
-	defineSchemaBuilder,
-	hasMany,
+	buildModelFromResolvedSchema,
+	defineSchema,
 	plan,
 	type QueryIntent,
 } from '@dbsp/core';
@@ -45,30 +43,31 @@ function createTestKysely() {
  * - Filter: images where locale='fr' AND type='main' AND approved=true
  * - Expected: EXISTS subquery
  */
-const q1Schema = defineSchemaBuilder({
-	products: {
-		id: { type: 'number' },
-		name: { type: 'string' },
-		sku: { type: 'string' },
-	},
-	productImages: {
-		id: { type: 'number' },
-		productId: { type: 'number' },
-		locale: { type: 'string' },
-		type: { type: 'string' },
-		approved: { type: 'boolean' },
-		url: { type: 'string' },
-	},
-})
-	.relations({
-		products: {
-			images: hasMany('productImages', { foreignKey: 'productId' }),
+const q1Schema = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			products: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+				sku: { type: 'string' },
+			},
+			productImages: {
+				id: { type: 'integer', primaryKey: true },
+				productId: { type: 'integer' },
+				locale: { type: 'string' },
+				type: { type: 'string' },
+				approved: { type: 'boolean' },
+				url: { type: 'string' },
+			},
 		},
-		productImages: {
-			product: belongsTo('products', { foreignKey: 'productId' }),
+		{
+			relations: {
+				'products.images': { kind: 'hasMany', target: 'productImages', foreignKey: 'productId' },
+				'productImages.product': { kind: 'belongsTo', target: 'products', foreignKey: 'productId' },
+			},
 		},
-	})
-	.build();
+	),
+);
 
 // ============================================================================
 // Q2 Schema: Categories with Products
@@ -80,26 +79,27 @@ const q1Schema = defineSchemaBuilder({
  * - When same relation accessed multiple times, extract to CTE
  * - Expected: WITH clause in generated SQL
  */
-const q2Schema = defineSchemaBuilder({
-	categories: {
-		id: { type: 'number' },
-		name: { type: 'string' },
-	},
-	products: {
-		id: { type: 'number' },
-		categoryId: { type: 'number' },
-		active: { type: 'boolean' },
-	},
-})
-	.relations({
-		categories: {
-			products: hasMany('products', { foreignKey: 'categoryId' }),
+const q2Schema = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			categories: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+			},
+			products: {
+				id: { type: 'integer', primaryKey: true },
+				categoryId: { type: 'integer' },
+				active: { type: 'boolean' },
+			},
 		},
-		products: {
-			category: belongsTo('categories', { foreignKey: 'categoryId' }),
+		{
+			relations: {
+				'categories.products': { kind: 'hasMany', target: 'products', foreignKey: 'categoryId' },
+				'products.category': { kind: 'belongsTo', target: 'categories', foreignKey: 'categoryId' },
+			},
 		},
-	})
-	.build();
+	),
+);
 
 // ============================================================================
 // Q3 Schema: Users with Multiple Post Relations
@@ -111,31 +111,32 @@ const q2Schema = defineSchemaBuilder({
  * - Users have reviewed posts (reviewedPosts)
  * - Include "posts" should throw AmbiguousPlanError
  */
-const q3Schema = defineSchemaBuilder({
-	users: {
-		id: { type: 'number' },
-		name: { type: 'string' },
-		email: { type: 'string' },
-	},
-	posts: {
-		id: { type: 'number' },
-		title: { type: 'string' },
-		content: { type: 'string' },
-		authorId: { type: 'number' },
-		reviewerId: { type: 'number' },
-	},
-})
-	.relations({
-		users: {
-			authoredPosts: hasMany('posts', { foreignKey: 'authorId' }),
-			reviewedPosts: hasMany('posts', { foreignKey: 'reviewerId' }),
+const q3Schema = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+				email: { type: 'string' },
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: { type: 'string' },
+				content: { type: 'string' },
+				authorId: { type: 'integer' },
+				reviewerId: { type: 'integer' },
+			},
 		},
-		posts: {
-			author: belongsTo('users', { foreignKey: 'authorId' }),
-			reviewer: belongsTo('users', { foreignKey: 'reviewerId' }),
+		{
+			relations: {
+				'users.authoredPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' },
+				'users.reviewedPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'reviewerId' },
+				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' },
+				'posts.reviewer': { kind: 'belongsTo', target: 'users', foreignKey: 'reviewerId' },
+			},
 		},
-	})
-	.build();
+	),
+);
 
 // ============================================================================
 // Q1: Filter to-many → EXISTS
@@ -681,36 +682,35 @@ describe('Q4: Filter strategy contract enforcement', () => {
 	const kysely = createTestKysely();
 
 	// Schema with both belongsTo and hasMany relations
-	const filterContractSchema = defineSchemaBuilder({
-		posts: {
-			id: { type: 'number' },
-			title: { type: 'string' },
-			authorId: { type: 'number' },
-		},
-		users: {
-			id: { type: 'number' },
-			name: { type: 'string' },
-			role: { type: 'string' },
-		},
-		comments: {
-			id: { type: 'number' },
-			postId: { type: 'number' },
-			content: { type: 'string' },
-		},
-	})
-		.relations({
-			posts: {
-				author: belongsTo('users', { foreignKey: 'authorId' }),
-				comments: hasMany('comments', { foreignKey: 'postId' }),
+	const filterContractSchema = buildModelFromResolvedSchema(
+		defineSchema(
+			{
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					title: { type: 'string' },
+					authorId: { type: 'integer' },
+				},
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					name: { type: 'string' },
+					role: { type: 'string' },
+				},
+				comments: {
+					id: { type: 'integer', primaryKey: true },
+					postId: { type: 'integer' },
+					content: { type: 'string' },
+				},
 			},
-			users: {
-				posts: hasMany('posts', { foreignKey: 'authorId' }),
+			{
+				relations: {
+					'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' },
+					'posts.comments': { kind: 'hasMany', target: 'comments', foreignKey: 'postId' },
+					'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' },
+					'comments.post': { kind: 'belongsTo', target: 'posts', foreignKey: 'postId' },
+				},
 			},
-			comments: {
-				post: belongsTo('posts', { foreignKey: 'postId' }),
-			},
-		})
-		.build();
+		),
+	);
 
 	describe('belongsTo → JOIN strategy (default)', () => {
 		it('should use JOIN for belongsTo filter (posts.author)', () => {
@@ -827,36 +827,33 @@ describe('Q4: Filter strategy contract enforcement', () => {
 
 	describe('explicit strategy override', () => {
 		// Schema with explicit strategy hints
-		const overrideSchema = defineSchemaBuilder({
-			users: {
-				id: { type: 'number' },
-				name: { type: 'string' },
-			},
-			posts: {
-				id: { type: 'number' },
-				userId: { type: 'number' },
-				title: { type: 'string' },
-			},
-		})
-			.relations({
-				users: {
-					// hasMany with explicit JOIN strategy (override default EXISTS)
-					posts: hasMany(
-						'posts',
-						{ foreignKey: 'userId' },
-						{ filterStrategy: 'join' },
-					),
+		const overrideSchema = buildModelFromResolvedSchema(
+			defineSchema(
+				{
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+					},
+					posts: {
+						id: { type: 'integer', primaryKey: true },
+						userId: { type: 'integer' },
+						title: { type: 'string' },
+					},
 				},
-				posts: {
-					// belongsTo with explicit EXISTS strategy (override default JOIN)
-					user: belongsTo(
-						'users',
-						{ foreignKey: 'userId' },
-						{ filterStrategy: 'exists' },
-					),
+				{
+					relations: {
+						'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'userId' },
+						'posts.user': { kind: 'belongsTo', target: 'users', foreignKey: 'userId' },
+					},
+					hints: {
+						// hasMany with explicit JOIN strategy (override default EXISTS)
+						'users.posts': { defaultStrategy: 'join' },
+						// belongsTo with explicit EXISTS strategy (override default JOIN)
+						'posts.user': { defaultStrategy: 'exists' },
+					},
 				},
-			})
-			.build();
+			),
+		);
 
 		it('should respect explicit JOIN override for hasMany', () => {
 			const intent: QueryIntent = {
@@ -929,36 +926,35 @@ describe('Q5: Include strategy contract enforcement', () => {
 	const kysely = createTestKysely();
 
 	// Schema with belongsTo and hasMany relations
-	const includeContractSchema = defineSchemaBuilder({
-		posts: {
-			id: { type: 'number' },
-			title: { type: 'string' },
-			authorId: { type: 'number' },
-		},
-		users: {
-			id: { type: 'number' },
-			name: { type: 'string' },
-			email: { type: 'string' },
-		},
-		comments: {
-			id: { type: 'number' },
-			postId: { type: 'number' },
-			content: { type: 'string' },
-		},
-	})
-		.relations({
-			posts: {
-				author: belongsTo('users', { foreignKey: 'authorId' }),
-				comments: hasMany('comments', { foreignKey: 'postId' }),
+	const includeContractSchema = buildModelFromResolvedSchema(
+		defineSchema(
+			{
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					title: { type: 'string' },
+					authorId: { type: 'integer' },
+				},
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					name: { type: 'string' },
+					email: { type: 'string' },
+				},
+				comments: {
+					id: { type: 'integer', primaryKey: true },
+					postId: { type: 'integer' },
+					content: { type: 'string' },
+				},
 			},
-			users: {
-				posts: hasMany('posts', { foreignKey: 'authorId' }),
+			{
+				relations: {
+					'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' },
+					'posts.comments': { kind: 'hasMany', target: 'comments', foreignKey: 'postId' },
+					'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' },
+					'comments.post': { kind: 'belongsTo', target: 'posts', foreignKey: 'postId' },
+				},
 			},
-			comments: {
-				post: belongsTo('posts', { foreignKey: 'postId' }),
-			},
-		})
-		.build();
+		),
+	);
 
 	describe('belongsTo → JOIN strategy (default)', () => {
 		it('should use LEFT JOIN for belongsTo include', () => {
@@ -1053,31 +1049,28 @@ describe('Q5: Include strategy contract enforcement', () => {
 
 	describe('explicit strategy override', () => {
 		// Schema with explicit include strategy hints
-		const overrideSchema = defineSchemaBuilder({
-			users: {
-				id: { type: 'number' },
-				name: { type: 'string' },
-			},
-			posts: {
-				id: { type: 'number' },
-				userId: { type: 'number' },
-				title: { type: 'string' },
-			},
-		})
-			.relations({
-				users: {
-					// hasMany with explicit JOIN strategy (override default separate)
-					posts: hasMany(
-						'posts',
-						{ foreignKey: 'userId' },
-						{ includeStrategy: 'join' },
-					),
+		const overrideSchema = buildModelFromResolvedSchema(
+			defineSchema(
+				{
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+					},
+					posts: {
+						id: { type: 'integer', primaryKey: true },
+						userId: { type: 'integer' },
+						title: { type: 'string' },
+					},
 				},
-				posts: {
-					user: belongsTo('users', { foreignKey: 'userId' }),
+				{
+					relations: {
+						// hasMany with explicit JOIN strategy (override default separate)
+						'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'userId', includeStrategy: 'join' },
+						'posts.user': { kind: 'belongsTo', target: 'users', foreignKey: 'userId' },
+					},
 				},
-			})
-			.build();
+			),
+		);
 
 		it('should respect explicit JOIN override for hasMany include', () => {
 			const intent: QueryIntent = {
@@ -1115,40 +1108,39 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 	const kysely = createTestKysely();
 
 	// Schema with clear FK directions for testing
-	const fkDirectionSchema = defineSchemaBuilder({
-		posts: {
-			id: { type: 'number' },
-			title: { type: 'string' },
-			authorId: { type: 'number' }, // FK to users.id
-		},
-		users: {
-			id: { type: 'number' },
-			name: { type: 'string' },
-			role: { type: 'string' },
-		},
-		comments: {
-			id: { type: 'number' },
-			postId: { type: 'number' }, // FK to posts.id
-			content: { type: 'string' },
-		},
-	})
-		.relations({
-			posts: {
-				// belongsTo: FK is in posts table (authorId)
-				author: belongsTo('users', { foreignKey: 'authorId' }),
-				// hasMany: FK is in comments table (postId)
-				comments: hasMany('comments', { foreignKey: 'postId' }),
+	const fkDirectionSchema = buildModelFromResolvedSchema(
+		defineSchema(
+			{
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					title: { type: 'string' },
+					authorId: { type: 'integer' }, // FK to users.id
+				},
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					name: { type: 'string' },
+					role: { type: 'string' },
+				},
+				comments: {
+					id: { type: 'integer', primaryKey: true },
+					postId: { type: 'integer' }, // FK to posts.id
+					content: { type: 'string' },
+				},
 			},
-			users: {
-				// hasMany: FK is in posts table (authorId)
-				posts: hasMany('posts', { foreignKey: 'authorId' }),
+			{
+				relations: {
+					// belongsTo: FK is in posts table (authorId)
+					'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' },
+					// hasMany: FK is in comments table (postId)
+					'posts.comments': { kind: 'hasMany', target: 'comments', foreignKey: 'postId' },
+					// hasMany: FK is in posts table (authorId)
+					'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' },
+					// belongsTo: FK is in comments table (postId)
+					'comments.post': { kind: 'belongsTo', target: 'posts', foreignKey: 'postId' },
+				},
 			},
-			comments: {
-				// belongsTo: FK is in comments table (postId)
-				post: belongsTo('posts', { foreignKey: 'postId' }),
-			},
-		})
-		.build();
+		),
+	);
 
 	describe('belongsTo FK direction', () => {
 		it('should use source.fk = target.pk for belongsTo JOIN (posts.author)', () => {
@@ -1193,28 +1185,30 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 
 		it('should use source.fk = target.pk for belongsTo EXISTS (posts.author)', () => {
 			// Use explicit EXISTS strategy for belongsTo
-			const existsSchema = defineSchemaBuilder({
-				posts: {
-					id: { type: 'number' },
-					title: { type: 'string' },
-					authorId: { type: 'number' },
-				},
-				users: {
-					id: { type: 'number' },
-					name: { type: 'string' },
-					role: { type: 'string' },
-				},
-			})
-				.relations({
-					posts: {
-						author: belongsTo(
-							'users',
-							{ foreignKey: 'authorId' },
-							{ filterStrategy: 'exists' },
-						),
+			const existsSchema = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: { type: 'string' },
+							authorId: { type: 'integer' },
+						},
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+							role: { type: 'string' },
+						},
 					},
-				})
-				.build();
+					{
+						relations: {
+							'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' },
+						},
+						hints: {
+							'posts.author': { defaultStrategy: 'exists' },
+						},
+					},
+				),
+			);
 
 			const intent: QueryIntent = {
 				type: 'select',
@@ -1288,27 +1282,29 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 
 		it('should use target.fk = source.pk for hasMany JOIN (explicit override)', () => {
 			// Use explicit JOIN strategy for hasMany
-			const joinSchema = defineSchemaBuilder({
-				users: {
-					id: { type: 'number' },
-					name: { type: 'string' },
-				},
-				posts: {
-					id: { type: 'number' },
-					authorId: { type: 'number' },
-					title: { type: 'string' },
-				},
-			})
-				.relations({
-					users: {
-						posts: hasMany(
-							'posts',
-							{ foreignKey: 'authorId' },
-							{ filterStrategy: 'join' },
-						),
+			const joinSchema = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							authorId: { type: 'integer' },
+							title: { type: 'string' },
+						},
 					},
-				})
-				.build();
+					{
+						relations: {
+							'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' },
+						},
+						hints: {
+							'users.posts': { defaultStrategy: 'join' },
+						},
+					},
+				),
+			);
 
 			const intent: QueryIntent = {
 				type: 'select',
@@ -1373,27 +1369,26 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 
 		it('should use target.fk = source.pk for hasMany include with JOIN override', () => {
 			// Use explicit JOIN strategy for hasMany include
-			const joinIncludeSchema = defineSchemaBuilder({
-				users: {
-					id: { type: 'number' },
-					name: { type: 'string' },
-				},
-				posts: {
-					id: { type: 'number' },
-					authorId: { type: 'number' },
-					title: { type: 'string' },
-				},
-			})
-				.relations({
-					users: {
-						posts: hasMany(
-							'posts',
-							{ foreignKey: 'authorId' },
-							{ includeStrategy: 'join' },
-						),
+			const joinIncludeSchema = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							authorId: { type: 'integer' },
+							title: { type: 'string' },
+						},
 					},
-				})
-				.build();
+					{
+						relations: {
+							'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId', includeStrategy: 'join' },
+						},
+					},
+				),
+			);
 
 			const intent: QueryIntent = {
 				type: 'select',
@@ -1434,38 +1429,31 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 	const kysely = createTestKysely();
 
 	// Schema with M:N relation: posts belongsToMany tags through postTags
-	const mnSchema = defineSchemaBuilder({
-		posts: {
-			id: { type: 'number' },
-			title: { type: 'string' },
-		},
-		tags: {
-			id: { type: 'number' },
-			name: { type: 'string' },
-		},
-		postTags: {
-			id: { type: 'number' },
-			postId: { type: 'number' },
-			tagId: { type: 'number' },
-		},
-	})
-		.relations({
-			posts: {
-				tags: belongsToMany('tags', {
-					through: 'postTags',
-					foreignKey: 'postId',
-					otherKey: 'tagId',
-				}),
+	const mnSchema = buildModelFromResolvedSchema(
+		defineSchema(
+			{
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					title: { type: 'string' },
+				},
+				tags: {
+					id: { type: 'integer', primaryKey: true },
+					name: { type: 'string' },
+				},
+				postTags: {
+					id: { type: 'integer', primaryKey: true },
+					postId: { type: 'integer' },
+					tagId: { type: 'integer' },
+				},
 			},
-			tags: {
-				posts: belongsToMany('posts', {
-					through: 'postTags',
-					foreignKey: 'tagId',
-					otherKey: 'postId',
-				}),
+			{
+				relations: {
+					'posts.tags': { kind: 'manyToMany', target: 'tags', through: 'postTags', sourceFk: 'postId', targetFk: 'tagId' },
+					'tags.posts': { kind: 'manyToMany', target: 'posts', through: 'postTags', sourceFk: 'tagId', targetFk: 'postId' },
+				},
 			},
-		})
-		.build();
+		),
+	);
 
 	describe('M:N filter with JOIN strategy', () => {
 		it('should generate two JOINs for belongsToMany filter (posts.tags)', () => {
@@ -1486,25 +1474,27 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 			};
 
 			// Force JOIN strategy
-			const schemaWithJoin = defineSchemaBuilder({
-				posts: { id: { type: 'number' }, title: { type: 'string' } },
-				tags: { id: { type: 'number' }, name: { type: 'string' } },
-				postTags: {
-					id: { type: 'number' },
-					postId: { type: 'number' },
-					tagId: { type: 'number' },
-				},
-			})
-				.relations({
-					posts: {
-						tags: belongsToMany(
-							'tags',
-							{ through: 'postTags', foreignKey: 'postId', otherKey: 'tagId' },
-							{ filterStrategy: 'join' },
-						),
+			const schemaWithJoin = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						posts: { id: { type: 'integer', primaryKey: true }, title: { type: 'string' } },
+						tags: { id: { type: 'integer', primaryKey: true }, name: { type: 'string' } },
+						postTags: {
+							id: { type: 'integer', primaryKey: true },
+							postId: { type: 'integer' },
+							tagId: { type: 'integer' },
+						},
 					},
-				})
-				.build();
+					{
+						relations: {
+							'posts.tags': { kind: 'manyToMany', target: 'tags', through: 'postTags', sourceFk: 'postId', targetFk: 'tagId' },
+						},
+						hints: {
+							'posts.tags': { defaultStrategy: 'join' },
+						},
+					},
+				),
+			);
 
 			const planReport = plan(intent, schemaWithJoin);
 			const compiled = compile(planReport, schemaWithJoin, kysely);
@@ -1597,25 +1587,24 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 	describe('M:N include with JOIN strategy', () => {
 		it('should generate two LEFT JOINs for belongsToMany include', () => {
 			// Force JOIN strategy for include
-			const schemaWithJoin = defineSchemaBuilder({
-				posts: { id: { type: 'number' }, title: { type: 'string' } },
-				tags: { id: { type: 'number' }, name: { type: 'string' } },
-				postTags: {
-					id: { type: 'number' },
-					postId: { type: 'number' },
-					tagId: { type: 'number' },
-				},
-			})
-				.relations({
-					posts: {
-						tags: belongsToMany(
-							'tags',
-							{ through: 'postTags', foreignKey: 'postId', otherKey: 'tagId' },
-							{ includeStrategy: 'join' },
-						),
+			const schemaWithJoin = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						posts: { id: { type: 'integer', primaryKey: true }, title: { type: 'string' } },
+						tags: { id: { type: 'integer', primaryKey: true }, name: { type: 'string' } },
+						postTags: {
+							id: { type: 'integer', primaryKey: true },
+							postId: { type: 'integer' },
+							tagId: { type: 'integer' },
+						},
 					},
-				})
-				.build();
+					{
+						relations: {
+							'posts.tags': { kind: 'manyToMany', target: 'tags', through: 'postTags', sourceFk: 'postId', targetFk: 'tagId', includeStrategy: 'join' },
+						},
+					},
+				),
+			);
 
 			const intent: QueryIntent = {
 				type: 'select',
@@ -1641,25 +1630,24 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 
 	describe('M:N with custom FK names', () => {
 		it('should use custom foreignKey and otherKey', () => {
-			const customFkSchema = defineSchemaBuilder({
-				users: { id: { type: 'number' }, name: { type: 'string' } },
-				roles: { id: { type: 'number' }, roleName: { type: 'string' } },
-				userRoles: {
-					id: { type: 'number' },
-					user_id: { type: 'number' },
-					role_id: { type: 'number' },
-				},
-			})
-				.relations({
-					users: {
-						roles: belongsToMany('roles', {
-							through: 'userRoles',
-							foreignKey: 'user_id',
-							otherKey: 'role_id',
-						}),
+			const customFkSchema = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						users: { id: { type: 'integer', primaryKey: true }, name: { type: 'string' } },
+						roles: { id: { type: 'integer', primaryKey: true }, roleName: { type: 'string' } },
+						userRoles: {
+							id: { type: 'integer', primaryKey: true },
+							user_id: { type: 'integer' },
+							role_id: { type: 'integer' },
+						},
 					},
-				})
-				.build();
+					{
+						relations: {
+							'users.roles': { kind: 'manyToMany', target: 'roles', through: 'userRoles', sourceFk: 'user_id', targetFk: 'role_id' },
+						},
+					},
+				),
+			);
 
 			const intent: QueryIntent = {
 				type: 'select',

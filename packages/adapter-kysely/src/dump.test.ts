@@ -1,7 +1,6 @@
 import {
-	belongsTo,
-	defineSchemaBuilder,
-	hasMany,
+	buildModelFromResolvedSchema,
+	defineSchema,
 	plan,
 	type QueryIntent,
 } from '@dbsp/core';
@@ -29,30 +28,31 @@ function createTestKysely() {
 	});
 }
 
-const basicSchema = defineSchemaBuilder({
-	users: {
-		id: 'number',
-		name: 'string',
-		email: 'string',
-		active: 'boolean',
-	},
-	posts: {
-		id: 'number',
-		title: 'string',
-		content: 'string',
-		userId: 'number',
-		published: 'boolean',
-	},
-})
-	.relations({
-		users: {
-			posts: hasMany('posts', { foreignKey: 'userId' }),
+const basicSchema = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+				email: { type: 'string' },
+				active: { type: 'boolean' },
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: { type: 'string' },
+				content: { type: 'string' },
+				userId: { type: 'integer' },
+				published: { type: 'boolean' },
+			},
 		},
-		posts: {
-			author: belongsTo('users', { foreignKey: 'userId' }),
+		{
+			relations: {
+				'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'userId' },
+				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'userId' },
+			},
 		},
-	})
-	.build();
+	),
+);
 
 // ============================================================================
 // createDump Tests
@@ -101,7 +101,7 @@ describe('Dump API', () => {
 			};
 
 			const dump = createDump(intent, basicSchema, kysely, {
-				schema: 'acme',
+				schemaName: 'acme',
 				queryName: 'findUsers',
 				correlationId: 'req-123',
 			});
@@ -131,7 +131,7 @@ describe('Dump API', () => {
 			};
 
 			const dump = createDump(intent, basicSchema, kysely, {
-				schema: 'tenant_123',
+				schemaName: 'tenant_123',
 			});
 
 			expect(dump.sql).toContain('tenant_123');
@@ -280,7 +280,7 @@ describe('Dump API', () => {
 				const dump = createDump(intent, basicSchema, kysely, {
 					correlationId: 'trace-789',
 					queryName: 'getUser',
-					schema: 'acme',
+					schemaName: 'acme',
 				});
 
 				// When
@@ -432,20 +432,23 @@ describe('Dump API', () => {
 
 	describe('Recursive Include Integration (DX-017)', () => {
 		// Schema with self-referential relation for recursive queries
-		const recursiveSchema = defineSchemaBuilder({
-			categories: {
-				id: 'number',
-				name: 'string',
-				parentId: { type: 'number', nullable: true },
-			},
-		})
-			.relations({
-				categories: {
-					children: hasMany('categories', { foreignKey: 'parentId' }),
-					parent: belongsTo('categories', { foreignKey: 'parentId' }),
+		const recursiveSchema = buildModelFromResolvedSchema(
+			defineSchema(
+				{
+					categories: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+						parentId: { type: 'integer', nullable: true },
+					},
 				},
-			})
-			.build();
+				{
+					relations: {
+						'categories.children': { kind: 'hasMany', target: 'categories', foreignKey: 'parentId' },
+						'categories.parent': { kind: 'belongsTo', target: 'categories', foreignKey: 'parentId' },
+					},
+				},
+			),
+		);
 
 		it('should generate WITH RECURSIVE SQL for recursive include', () => {
 			// Given - intent with recursive include (as IntentAST)

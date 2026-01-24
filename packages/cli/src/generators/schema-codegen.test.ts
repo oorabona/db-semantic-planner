@@ -4,7 +4,7 @@
  * Tests for generateSchemaFile() which generates TypeScript schema from ModelIR.
  */
 
-import { defineSchemaBuilder } from '@dbsp/core';
+import { buildModelFromResolvedSchema, defineSchema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import {
 	generateSchemaFile,
@@ -14,12 +14,12 @@ import {
 describe('generateSchemaFile', () => {
 	describe('basic structure', () => {
 		it('generates valid schema file with imports', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					name: { type: 'string' },
 				},
-			}).build();
+			}));
 
 			const result = generateSchemaFile(model);
 
@@ -29,11 +29,11 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('generates table definitions', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
-			}).build();
+			}));
 
 			const result = generateSchemaFile(model);
 
@@ -42,14 +42,14 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('generates multiple tables', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
 				posts: {
 					id: { type: 'uuid', primaryKey: true },
 				},
-			}).build();
+			}));
 
 			const result = generateSchemaFile(model);
 
@@ -60,32 +60,32 @@ describe('generateSchemaFile', () => {
 
 	describe('column types', () => {
 		it('generates correct type property', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				test: {
 					id: { type: 'uuid', primaryKey: true },
 					name: { type: 'string' },
-					count: { type: 'number' },
+					count: { type: 'integer' },
 					active: { type: 'boolean' },
 				},
-			}).build();
+			}));
 
 			const result = generateSchemaFile(model);
 
 			expect(result).toContain("type: 'uuid'");
 			expect(result).toContain("type: 'string'");
-			expect(result).toContain("type: 'number'");
+			expect(result).toContain("type: 'integer'");
 			expect(result).toContain("type: 'boolean'");
 		});
 	});
 
 	describe('primary key', () => {
 		it('marks single primary key column', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					name: { type: 'string' },
 				},
-			}).build();
+			}));
 
 			const result = generateSchemaFile(model);
 
@@ -96,13 +96,13 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('does not mark non-primary key columns', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					email: { type: 'string' },
 					name: { type: 'string' },
 				},
-			}).build();
+			}));
 
 			const result = generateSchemaFile(model);
 
@@ -115,12 +115,12 @@ describe('generateSchemaFile', () => {
 
 	describe('nullable columns', () => {
 		it('adds nullable: true for nullable columns', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					bio: { type: 'string', nullable: true },
 				},
-			}).build();
+			}));
 
 			const result = generateSchemaFile(model);
 
@@ -128,12 +128,12 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('omits nullable for non-nullable columns', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					name: { type: 'string' },
 				},
-			}).build();
+			}));
 
 			const result = generateSchemaFile(model);
 
@@ -145,11 +145,11 @@ describe('generateSchemaFile', () => {
 
 	describe('default values', () => {
 		it('includes string default values with quotes', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
 				},
-			}).build();
+			}));
 
 			const result = generateSchemaFile(model);
 
@@ -157,12 +157,12 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('includes numeric default values without quotes', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				posts: {
 					id: { type: 'uuid', primaryKey: true },
-					views: { type: 'number', default: 0 },
+					views: { type: 'integer', default: 0 },
 				},
-			}).build();
+			}));
 
 			const result = generateSchemaFile(model);
 
@@ -170,12 +170,12 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('includes boolean default values', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					active: { type: 'boolean', default: true },
 				},
-			}).build();
+			}));
 
 			const result = generateSchemaFile(model);
 
@@ -185,7 +185,7 @@ describe('generateSchemaFile', () => {
 
 	describe('foreign key references', () => {
 		it('includes references for FK columns', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
@@ -193,7 +193,7 @@ describe('generateSchemaFile', () => {
 					id: { type: 'uuid', primaryKey: true },
 					author_id: { type: 'uuid', references: { table: 'users' } },
 				},
-			}).build();
+			}));
 
 			const result = generateSchemaFile(model);
 
@@ -202,7 +202,7 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('includes column in references when not id', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					email: { type: 'string' },
@@ -214,7 +214,7 @@ describe('generateSchemaFile', () => {
 						references: { table: 'users', column: 'email' },
 					},
 				},
-			}).build();
+			}));
 
 			const result = generateSchemaFile(model);
 
@@ -226,11 +226,11 @@ describe('generateSchemaFile', () => {
 
 	describe('options', () => {
 		it('includes source URL in header (redacted)', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
-			}).build();
+			}));
 
 			const options: SchemaCodegenOptions = {
 				sourceUrl: 'postgresql://user:secret123@localhost/mydb',
@@ -243,11 +243,11 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('includes timestamp in header', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
-			}).build();
+			}));
 
 			const options: SchemaCodegenOptions = {
 				introspectedAt: new Date('2026-01-18T12:00:00Z'),
@@ -259,11 +259,11 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('includes warnings in header', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
-			}).build();
+			}));
 
 			const options: SchemaCodegenOptions = {
 				warnings: [
@@ -282,12 +282,12 @@ describe('generateSchemaFile', () => {
 		it('includes DB type comments when enabled', () => {
 			// For this test, we need to manually create a model with originalDbType
 			// since defineSchema doesn't include that field
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					data: { type: 'json', nullable: true },
 				},
-			}).build();
+			}));
 
 			// Manually set originalDbType on the columns (simulating introspection output)
 			const usersTable = model.tables.get('users');
@@ -312,11 +312,11 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('omits DB type comments when disabled', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
-			}).build();
+			}));
 
 			const options: SchemaCodegenOptions = {
 				includeDbTypeComments: false,
@@ -330,11 +330,11 @@ describe('generateSchemaFile', () => {
 
 	describe('header comment', () => {
 		it('includes auto-generated notice', () => {
-			const model = defineSchemaBuilder({
+			const model = buildModelFromResolvedSchema(defineSchema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
-			}).build();
+			}));
 
 			const result = generateSchemaFile(model);
 

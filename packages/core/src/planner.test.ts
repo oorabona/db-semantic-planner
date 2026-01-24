@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import {
-	belongsTo,
-	defineSchemaBuilder,
-	hasMany,
-	type QueryIntent,
-} from './index.js';
+import { type QueryIntent } from './index.js';
+import { buildModelFromResolvedSchema } from './dx/schema-bridge.js';
+import { defineSchema } from './schema-dsl.js';
 import type { RecursiveIntent } from './intent-ast.js';
 import {
 	AmbiguousPlanError,
@@ -21,79 +18,82 @@ import {
 /**
  * Q1 Schema: Products with images (for EXISTS filter test)
  */
-const q1Schema = defineSchemaBuilder({
-	products: {
-		id: { type: 'number' },
-		name: { type: 'string' },
-	},
-	productImages: {
-		id: { type: 'number' },
-		productId: { type: 'number' },
-		locale: { type: 'string' },
-		type: { type: 'string' },
-		approved: { type: 'boolean' },
-	},
-})
-	.relations({
-		products: {
-			images: hasMany('productImages', { foreignKey: 'productId' }),
+const q1Schema = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			products: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+			},
+			productImages: {
+				id: { type: 'integer', primaryKey: true },
+				productId: { type: 'integer' },
+				locale: { type: 'string' },
+				type: { type: 'string' },
+				approved: { type: 'boolean' },
+			},
 		},
-		productImages: {
-			product: belongsTo('products', { foreignKey: 'productId' }),
+		{
+			relations: {
+				'products.images': { kind: 'hasMany', target: 'productImages', foreignKey: 'productId' },
+				'productImages.product': { kind: 'belongsTo', target: 'products', foreignKey: 'productId' },
+			},
 		},
-	})
-	.build();
+	),
+);
 
 /**
  * Q2 Schema: Categories with products (for CTE extraction test)
  */
-const q2Schema = defineSchemaBuilder({
-	categories: {
-		id: { type: 'number' },
-		name: { type: 'string' },
-	},
-	products: {
-		id: { type: 'number' },
-		categoryId: { type: 'number' },
-		active: { type: 'boolean' },
-	},
-})
-	.relations({
-		categories: {
-			products: hasMany('products', { foreignKey: 'categoryId' }),
+const q2Schema = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			categories: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+			},
+			products: {
+				id: { type: 'integer', primaryKey: true },
+				categoryId: { type: 'integer' },
+				active: { type: 'boolean' },
+			},
 		},
-		products: {
-			category: belongsTo('categories', { foreignKey: 'categoryId' }),
+		{
+			relations: {
+				'categories.products': { kind: 'hasMany', target: 'products', foreignKey: 'categoryId' },
+				'products.category': { kind: 'belongsTo', target: 'categories', foreignKey: 'categoryId' },
+			},
 		},
-	})
-	.build();
+	),
+);
 
 /**
  * Q3 Schema: Users with multiple relations to posts (for ambiguity test)
  */
-const q3Schema = defineSchemaBuilder({
-	users: {
-		id: { type: 'number' },
-		name: { type: 'string' },
-	},
-	posts: {
-		id: { type: 'number' },
-		title: { type: 'string' },
-		createdById: { type: 'number' },
-		editedById: { type: 'number' },
-	},
-})
-	.relations({
-		users: {
-			createdPosts: hasMany('posts', { foreignKey: 'createdById' }),
-			editedPosts: hasMany('posts', { foreignKey: 'editedById' }),
+const q3Schema = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: { type: 'string' },
+				createdById: { type: 'integer' },
+				editedById: { type: 'integer' },
+			},
 		},
-		posts: {
-			creator: belongsTo('users', { foreignKey: 'createdById' }),
-			editor: belongsTo('users', { foreignKey: 'editedById' }),
+		{
+			relations: {
+				'users.createdPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'createdById' },
+				'users.editedPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'editedById' },
+				'posts.creator': { kind: 'belongsTo', target: 'users', foreignKey: 'createdById' },
+				'posts.editor': { kind: 'belongsTo', target: 'users', foreignKey: 'editedById' },
+			},
 		},
-	})
-	.build();
+	),
+);
 
 // ============================================================================
 // Basic Planning Tests
@@ -719,46 +719,50 @@ describe('Semantic Planner', () => {
 		/**
 		 * Recursive schema: Categories with parent (for hierarchical traversal)
 		 */
-		const recursiveSchema = defineSchemaBuilder({
-			categories: {
-				id: { type: 'number' },
-				name: { type: 'string' },
-				parentId: { type: 'number' },
-			},
-		})
-			.relations({
-				categories: {
-					parent: belongsTo('categories', { foreignKey: 'parentId' }),
-					children: hasMany('categories', { foreignKey: 'parentId' }),
+		const recursiveSchema = buildModelFromResolvedSchema(
+			defineSchema(
+				{
+					categories: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+						parentId: { type: 'integer' },
+					},
 				},
-			})
-			.build();
+				{
+					relations: {
+						'categories.parent': { kind: 'belongsTo', target: 'categories', foreignKey: 'parentId' },
+						'categories.children': { kind: 'hasMany', target: 'categories', foreignKey: 'parentId' },
+					},
+				},
+			),
+		);
 
 		/**
 		 * Edge-table schema: Roles with edges (for role hierarchy)
 		 */
-		const edgeTableSchema = defineSchemaBuilder({
-			roles: {
-				id: { type: 'number' },
-				name: { type: 'string' },
-			},
-			roleEdges: {
-				id: { type: 'number' },
-				parentRoleId: { type: 'number' },
-				childRoleId: { type: 'number' },
-			},
-		})
-			.relations({
-				roles: {
-					parentEdges: hasMany('roleEdges', { foreignKey: 'childRoleId' }),
-					childEdges: hasMany('roleEdges', { foreignKey: 'parentRoleId' }),
+		const edgeTableSchema = buildModelFromResolvedSchema(
+			defineSchema(
+				{
+					roles: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+					},
+					roleEdges: {
+						id: { type: 'integer', primaryKey: true },
+						parentRoleId: { type: 'integer' },
+						childRoleId: { type: 'integer' },
+					},
 				},
-				roleEdges: {
-					parentRole: belongsTo('roles', { foreignKey: 'parentRoleId' }),
-					childRole: belongsTo('roles', { foreignKey: 'childRoleId' }),
+				{
+					relations: {
+						'roles.parentEdges': { kind: 'hasMany', target: 'roleEdges', foreignKey: 'childRoleId' },
+						'roles.childEdges': { kind: 'hasMany', target: 'roleEdges', foreignKey: 'parentRoleId' },
+						'roleEdges.parentRole': { kind: 'belongsTo', target: 'roles', foreignKey: 'parentRoleId' },
+						'roleEdges.childRole': { kind: 'belongsTo', target: 'roles', foreignKey: 'childRoleId' },
+					},
 				},
-			})
-			.build();
+			),
+		);
 
 		describe('validateRecursiveShape', () => {
 			it('should pass for valid adjacency-list intent', () => {
@@ -1101,13 +1105,15 @@ describe('Semantic Planner', () => {
 	});
 
 	describe('RAW_SQL_USAGE warning', () => {
-		const simpleSchema = defineSchemaBuilder({
-			users: {
-				id: { type: 'number' },
-				name: { type: 'string' },
-				email: { type: 'string' },
-			},
-		}).build();
+		const simpleSchema = buildModelFromResolvedSchema(
+			defineSchema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					name: { type: 'string' },
+					email: { type: 'string' },
+				},
+			}),
+		);
 
 		it('should warn when raw SQL expression is used in select', () => {
 			const intent: QueryIntent = {

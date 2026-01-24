@@ -6,11 +6,10 @@
 
 import type { OrmInstance } from '@dbsp/core';
 import {
-	belongsTo,
+	buildModelFromResolvedSchema,
 	createOrm,
-	defineSchemaBuilder,
+	defineSchema,
 	eq,
-	hasMany,
 } from '@dbsp/core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
@@ -44,40 +43,39 @@ interface TestDatabase {
 	};
 }
 
-const testModel = defineSchemaBuilder({
-	users: {
-		id: { type: 'number' },
-		name: { type: 'string' },
-		email: { type: 'string' },
-		active: { type: 'boolean' },
-	},
-	posts: {
-		id: { type: 'number' },
-		title: { type: 'string' },
-		content: { type: 'string' },
-		authorId: { type: 'number' },
-		published: { type: 'boolean' },
-	},
-	comments: {
-		id: { type: 'number' },
-		text: { type: 'string' },
-		postId: { type: 'number' },
-		authorId: { type: 'number' },
-	},
-})
-	.relations({
-		users: {
-			posts: hasMany('posts', { foreignKey: 'authorId' }),
+const testModel = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+				email: { type: 'string' },
+				active: { type: 'boolean' },
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: { type: 'string' },
+				content: { type: 'string' },
+				authorId: { type: 'integer' },
+				published: { type: 'boolean' },
+			},
+			comments: {
+				id: { type: 'integer', primaryKey: true },
+				text: { type: 'string' },
+				postId: { type: 'integer' },
+				authorId: { type: 'integer' },
+			},
 		},
-		posts: {
-			author: belongsTo('users', { foreignKey: 'authorId' }),
-			comments: hasMany('comments', { foreignKey: 'postId' }),
+		{
+			relations: {
+				'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' },
+				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' },
+				'posts.comments': { kind: 'hasMany', target: 'comments', foreignKey: 'postId' },
+				'comments.post': { kind: 'belongsTo', target: 'posts', foreignKey: 'postId' },
+			},
 		},
-		comments: {
-			post: belongsTo('posts', { foreignKey: 'postId' }),
-		},
-	})
-	.build();
+	),
+);
 
 // ============================================================================
 // Type-Level Tests

@@ -27,6 +27,7 @@
 | NQL CLI Migration (NQLM) | cli, examples | 🟡 Ready |
 | Logical/Physical Naming (ARCH-003) | cli, examples | ✅ Complete |
 | Self-Ref Pseudo-Columns (SPEC-001) | core, nql, adapter | ✅ Complete (V1.0) |
+| Type Rationalization (ARCH-004) | types, core, adapter, nql | ✅ Complete |
 
 ## Scope-Specific Backlogs
 
@@ -36,6 +37,33 @@
 | `TODO_MCP.md` | mcp-server | MCP server implementation tasks |
 | `TODO_DX.md` | core, adapter | DX improvements, SOLID fixes, type inference |
 | `docs/specs/SELF-REF-PSEUDO-COLUMNS-SPEC.md` | core, nql, adapter | Auto-generated pseudo-columns for hierarchies |
+
+## ✅ COMPLETED: ARCH-004 Type Rationalization (2026-01-24)
+
+**Priority:** HIGH | **Effort:** L (~2h) | **Breaking:** No
+**Scope:** types (new), core, adapter-kysely, nql
+**Started:** 2026-01-24 | **Completed:** 2026-01-24
+
+Audit and consolidation of type/logic duplications across the codebase.
+
+### Problem Addressed
+- CompilerState shadowing caused SPEC-001 JOIN bug
+- SortDirection defined 3 times, RangeValue defined 4 times
+- Maintenance burden from duplicated code
+
+### Changes Made
+- [x] ✅ Created `@dbsp/types` package with subpaths (public + internal)
+- [x] ✅ Consolidated SortDirection (3 → 1 definition)
+- [x] ✅ Consolidated RangeValue (4 → 1 definition)
+- [x] ✅ Fixed CompilerState shadowing (removed duplicate from compiler.ts)
+- [x] ✅ Deduplicated exists/not-exists handlers (shared exists-base.ts)
+- [x] ✅ Documented intentional schema-loader duplication (CLI vs MCP security)
+
+### Deferred (Intentional)
+- Schema-loader duplication: CLI and MCP have different security requirements
+- Table building duplication: Too risky without comprehensive e2e tests
+
+---
 
 ## ✅ COMPLETED: SPEC-001 Self-Referential Pseudo-Columns V1.0 (2026-01-24)
 

@@ -11,7 +11,7 @@ import type {
 	WhereInIntent,
 	WhereLikeIntent,
 	WhereNullIntent,
-} from '../schema-builder.js';
+} from '../intent-ast.js';
 import { eq } from './filters.js';
 import {
 	type FilterOperators,

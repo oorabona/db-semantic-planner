@@ -11,7 +11,7 @@
  */
 
 import { generateDDL, introspect } from '@dbsp/adapter-kysely';
-import { defineSchemaBuilder } from '@dbsp/core';
+import { buildModelFromResolvedSchema, defineSchema } from '@dbsp/core';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { generateSchemaFile } from '../../packages/cli/src/generators/schema-codegen.js';
@@ -38,28 +38,30 @@ describe.skipIf(shouldSkipE2E())('DDL → Introspect Round-Trip', () => {
 
 	it('round-trips a simple schema through DDL and introspection', async () => {
 		// 1. Define a TypeScript schema
-		const originalModel = defineSchemaBuilder({
-			users: {
-				id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
-				email: { type: 'string' },
-				name: { type: 'string', nullable: true },
-				active: { type: 'boolean', default: 'true' },
-				created_at: { type: 'date', default: 'now()' },
-			},
-			posts: {
-				id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
-				title: { type: 'string' },
-				content: { type: 'string', nullable: true },
-				author_id: { type: 'uuid', references: { table: 'users' } },
-				published: { type: 'boolean', default: 'false' },
-			},
-			comments: {
-				id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
-				post_id: { type: 'uuid', references: { table: 'posts' } },
-				author_id: { type: 'uuid', references: { table: 'users' } },
-				body: { type: 'string' },
-			},
-		}).build();
+		const originalModel = buildModelFromResolvedSchema(
+			defineSchema({
+				users: {
+					id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
+					email: { type: 'string' },
+					name: { type: 'string', nullable: true },
+					active: { type: 'boolean', default: 'true' },
+					created_at: { type: 'date', default: 'now()' },
+				},
+				posts: {
+					id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
+					title: { type: 'string' },
+					content: { type: 'string', nullable: true },
+					author_id: { type: 'uuid', references: { table: 'users' } },
+					published: { type: 'boolean', default: 'false' },
+				},
+				comments: {
+					id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
+					post_id: { type: 'uuid', references: { table: 'posts' } },
+					author_id: { type: 'uuid', references: { table: 'users' } },
+					body: { type: 'string' },
+				},
+			}),
+		);
 
 		// 2. Generate DDL from the schema
 		const db = await getTestDb();

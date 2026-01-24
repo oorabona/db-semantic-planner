@@ -5,15 +5,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import {
-	belongsTo,
-	defineSchemaBuilder,
-	hasMany,
-	hasOne,
-} from '../schema-builder.js';
-
 import { AmbiguousRelationError } from './errors.js';
-import { createOrm } from './orm.js';
+import { buildModelFromResolvedSchema, createOrm, defineSchema } from './index.js';
 
 // ============================================================================
 // Test Schema: Q3 Pattern (Users with multiple Post relations)
@@ -25,40 +18,39 @@ import { createOrm } from './orm.js';
  * - Posts have author and reviewer to Users (ambiguous "user")
  * - Users have single profile relation (unambiguous)
  */
-const testSchema = defineSchemaBuilder({
-	users: {
-		id: 'number',
-		name: 'string',
-		email: 'string',
-	},
-	posts: {
-		id: 'number',
-		title: 'string',
-		content: 'string',
-		authorId: 'number',
-		reviewerId: 'number',
-	},
-	profiles: {
-		id: 'number',
-		userId: 'number',
-		bio: 'string',
-	},
-})
-	.relations({
-		users: {
-			authoredPosts: hasMany('posts', { foreignKey: 'authorId' }),
-			reviewedPosts: hasMany('posts', { foreignKey: 'reviewerId' }),
-			profile: hasOne('profiles', { foreignKey: 'userId' }),
+const testSchema = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+				email: { type: 'string' },
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: { type: 'string' },
+				content: { type: 'text' },
+				authorId: { type: 'integer' },
+				reviewerId: { type: 'integer' },
+			},
+			profiles: {
+				id: { type: 'integer', primaryKey: true },
+				userId: { type: 'integer' },
+				bio: { type: 'string' },
+			},
 		},
-		posts: {
-			author: belongsTo('users', { foreignKey: 'authorId' }),
-			reviewer: belongsTo('users', { foreignKey: 'reviewerId' }),
+		{
+			relations: {
+				'users.authoredPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' },
+				'users.reviewedPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'reviewerId' },
+				'users.profile': { kind: 'hasMany', target: 'profiles', foreignKey: 'userId' },
+				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' },
+				'posts.reviewer': { kind: 'belongsTo', target: 'users', foreignKey: 'reviewerId' },
+				'profiles.user': { kind: 'belongsTo', target: 'users', foreignKey: 'userId' },
+			},
 		},
-		profiles: {
-			user: belongsTo('users', { foreignKey: 'userId' }),
-		},
-	})
-	.build();
+	),
+);
 
 // ============================================================================
 // Scenario 1: Strict mode throws on ambiguous relation (nominal)

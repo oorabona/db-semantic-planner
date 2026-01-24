@@ -9,47 +9,59 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { belongsTo, defineSchemaBuilder, hasMany } from '../schema-builder.js';
+import { defineSchema } from '../schema-dsl.js';
 import { InvalidOperationError } from './errors.js';
 import { createOrm } from './orm.js';
+import { buildModelFromResolvedSchema } from './schema-bridge.js';
 import type { RecursiveIncludeOptions } from './types.js';
 
 // ============================================================================
 // Test Schema with Self-Referential Relations
 // ============================================================================
 
-const model = defineSchemaBuilder({
-	categories: {
-		id: 'integer',
-		name: { type: 'string' },
-		parentId: { type: 'integer', nullable: true },
-	},
-	users: {
-		id: 'integer',
-		name: { type: 'string' },
-	},
-	posts: {
-		id: 'integer',
-		title: { type: 'string' },
-		authorId: 'integer',
-	},
-})
-	.relations({
-		categories: {
-			// Self-referential: belongsTo (N:1) for ancestors
-			parent: belongsTo('categories', { foreignKey: 'parentId' }),
-			// Self-referential: hasMany (1:N) for descendants
-			children: hasMany('categories', { foreignKey: 'parentId' }),
+const model = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			categories: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+				parentId: { type: 'integer', nullable: true },
+			},
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: { type: 'string' },
+				authorId: { type: 'integer' },
+			},
 		},
-		users: {
-			// Non-self-referential
-			posts: hasMany('posts', { foreignKey: 'authorId' }),
+		{
+			relations: {
+				// Self-referential: belongsTo (N:1) for ancestors
+				'categories.parent': {
+					kind: 'belongsTo',
+					target: 'categories',
+					foreignKey: 'parentId',
+				},
+				// Self-referential: hasMany (1:N) for descendants
+				'categories.children': {
+					kind: 'hasMany',
+					target: 'categories',
+					foreignKey: 'parentId',
+				},
+				// Non-self-referential
+				'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' },
+				'posts.author': {
+					kind: 'belongsTo',
+					target: 'users',
+					foreignKey: 'authorId',
+				},
+			},
 		},
-		posts: {
-			author: belongsTo('users', { foreignKey: 'authorId' }),
-		},
-	})
-	.build();
+	),
+);
 
 const orm = createOrm({ model });
 

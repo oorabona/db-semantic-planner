@@ -7,7 +7,7 @@
  * @module result-hydrator
  */
 
-import type { Adapter, SeparateIncludeInfo } from '../adapter.js';
+import type { Adapter, CompileOptions, SeparateIncludeInfo } from '../adapter.js';
 import type { RecursiveIntent, WhereIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
@@ -22,11 +22,9 @@ import type { RecursiveIncludeConfig } from './intent-builder.js';
 
 /**
  * Options for hydrating includes.
+ * Requires model (unlike CompileOptions where it's optional).
  */
-export interface HydrateOptions {
-	schemaName?: string;
-	model: ModelIR;
-}
+export type HydrateOptions = Omit<CompileOptions, 'model'> & { model: ModelIR };
 
 // ============================================================================
 // ResultHydrator

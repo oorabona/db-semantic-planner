@@ -83,8 +83,8 @@ export interface SchemaColumnDefinition {
 	nullable?: boolean;
 	/** Whether the column has a unique constraint */
 	unique?: boolean;
-	/** Default value expression (e.g., 'now()', 'gen_random_uuid()') */
-	default?: string;
+	/** Default value (e.g., 'now()', 'gen_random_uuid()', 0, true) */
+	default?: string | number | boolean;
 	/** Explicit foreign key reference (takes priority over conventions) */
 	references?: SchemaForeignKeyReference;
 	/** Create an index on this column (true for auto-name, string for custom name) */
@@ -128,11 +128,30 @@ export type SchemaIndexesDefinition = Record<string, SchemaIndexDefinition[]>;
 export type SchemaRelationKind = 'belongsTo' | 'hasMany' | 'manyToMany';
 
 /**
+ * Strategy for including related data in queries.
+ * - 'join': Use SQL JOIN (default for belongsTo)
+ * - 'separate': Execute separate query
+ * - 'cte': Use Common Table Expression
+ * - 'lateral': Use LATERAL JOIN
+ * - 'json_agg': Use JSON aggregation
+ * - 'auto': Let planner decide based on relation type
+ */
+export type SchemaIncludeStrategy =
+	| 'join'
+	| 'separate'
+	| 'cte'
+	| 'lateral'
+	| 'json_agg'
+	| 'auto';
+
+/**
  * Base properties shared by all relation types.
  */
 interface SchemaRelationBase {
 	/** Target table name */
 	target: string;
+	/** Include strategy hint for the planner */
+	includeStrategy?: SchemaIncludeStrategy;
 }
 
 /**

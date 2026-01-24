@@ -162,11 +162,7 @@ export {
 	hasOne,
 } from './prisma-types.js';
 // QueryExecutor - handles query execution via adapter
-export {
-	type CompileOptions as ExecutorCompileOptions,
-	type ExecutionContext,
-	QueryExecutor,
-} from './query-executor.js';
+export { type ExecutionContext, QueryExecutor } from './query-executor.js';
 // NOTE: RecursiveQueryBuilder is now internal-only (DX-022)
 // Use include({ recursive: true }) API instead
 // Type exports kept for edge-table support (internal use)
@@ -183,11 +179,15 @@ export {
 	type HydrateOptions,
 	ResultHydrator,
 } from './result-hydrator.js';
+// Schema DSL (User-facing API)
+export { defineSchema, SchemaValidationError } from '../schema-dsl.js';
+
 // Schema Bridge (ARCH-002 codegen-first)
 export {
 	// CORE-005: ResolvedSchema → GeneratedSchema converter with Valibot
 	assertResolvedSchemaToGeneratedSchema,
 	buildModelFromSchema,
+	buildModelFromResolvedSchema,
 	// DX-102: Type inference utilities for createOrm
 	type ColumnTypeToTS,
 	type GeneratedBelongsTo,

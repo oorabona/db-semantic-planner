@@ -1,10 +1,9 @@
 import {
-	belongsTo,
+	buildModelFromResolvedSchema,
 	createOrm,
-	defineSchemaBuilder,
+	defineSchema,
 	ExecutionError,
 	eq,
-	hasMany,
 	NotFoundError,
 } from '@dbsp/core';
 import Database from 'better-sqlite3';
@@ -14,27 +13,28 @@ import { InvalidIdentifierError } from './errors.js';
 import { createKyselyAdapter } from './kysely-adapter.js';
 
 // Create proper ModelIR using schema builder
-const testModel = defineSchemaBuilder({
-	users: {
-		id: 'integer',
-		name: { type: 'string' },
-		email: { type: 'string' },
-	},
-	posts: {
-		id: 'integer',
-		title: { type: 'string' },
-		userId: 'integer',
-	},
-})
-	.relations({
-		users: {
-			posts: hasMany('posts', { foreignKey: 'userId' }),
+const testModel = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+				email: { type: 'string' },
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: { type: 'string' },
+				userId: { type: 'integer' },
+			},
 		},
-		posts: {
-			author: belongsTo('users', { foreignKey: 'userId' }),
+		{
+			relations: {
+				'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'userId' },
+				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'userId' },
+			},
 		},
-	})
-	.build();
+	),
+);
 
 // Database schema types
 interface TestDatabase {

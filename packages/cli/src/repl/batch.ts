@@ -8,8 +8,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-	assertResolvedSchemaToGeneratedSchema,
-	buildModelFromSchema,
+	buildModelFromResolvedSchema,
 	type ModelIR,
 	type ResolvedSchema,
 } from '@dbsp/core';
@@ -79,14 +78,6 @@ export interface BatchState {
 	parseMode: boolean;
 	/** NQL v2: ModelIR built from schema for NQL compilation */
 	model: ModelIR | undefined;
-}
-
-/**
- * NQL v2: Convert ResolvedSchema to ModelIR for NQL compilation
- */
-function buildModelFromResolvedSchema(schema: ResolvedSchema): ModelIR {
-	const generatedSchema = assertResolvedSchemaToGeneratedSchema(schema);
-	return buildModelFromSchema(generatedSchema);
 }
 
 /**

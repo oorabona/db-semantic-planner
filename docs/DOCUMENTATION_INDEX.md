@@ -13,13 +13,15 @@ doc-meta:
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
 
-**Status:** ✅ v1.0 Ready (1672 unit tests across 4 packages)
+**Status:** ✅ v1.0 Ready (1904 unit tests across 6 packages)
 
 ## Architecture: Codegen-First (ARCH-002)
 
 ```
+packages/types          → Shared types (@dbsp/types, @dbsp/types/internal)
 packages/core           → Schema DSL, DX layer, Planner (DB-agnostic, MUST NOT import adapter)
 packages/adapter-kysely → SQL Compiler, Kysely Engine (depends on core)
+packages/nql            → Natural Query Language parser (@dbsp/nql)
 packages/cli            → dbsp CLI (generate, verify, repl commands)
 packages/mcp-server     → MCP Server for AI assistants (depends on core + adapter)
 ```
@@ -44,6 +46,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 
 | Scope | Package | Overview | Backlog | Status |
 |-------|---------|----------|---------|--------|
+| types | `packages/types` | [ARCH-004](specs/TYPE-RATIONALIZATION-SPEC.md) | — | ✅ Complete |
 | core | `packages/core` | [Overview](plans/core-OVERVIEW.md) | [TODO](../TODO_CORE.md) | ✅ Complete |
 | adapter | `packages/adapter-kysely` | [Overview](plans/adapter-OVERVIEW.md) | [TODO](../TODO_ADAPTER.md) | ✅ Complete |
 | cli | `packages/cli` | [CLI Usage](CLI_USAGE.md) | [TODO](../TODO_CLI.md) | ✅ Complete |
@@ -88,6 +91,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | NQL-SPEC | [NQL v2.0 Parser Specification](plans/NQL-SPEC-2026-01.md) | nql | ✅ canonical |
 | **NQL-EBNF** | [**NQL Grammar (EBNF)**](specs/NQL-EBNF.md) | nql | ✅ canonical |
 | SPEC-001 | [Self-Ref Pseudo-Columns V1.0](specs/SELF-REF-PSEUDO-COLUMNS-SPEC.md) | core, nql, adapter | ✅ canonical |
+| **ARCH-004** | [**Type Rationalization**](specs/TYPE-RATIONALIZATION-SPEC.md) | types, core, adapter, nql | ✅ canonical |
 | NQLM | [NQL CLI Migration](../TODO_NQL_MIGRATION.md) | cli | ✅ complete |
 
 ## Golden Query Tests - ✅ Complete

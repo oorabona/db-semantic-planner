@@ -4,27 +4,14 @@
  */
 
 import type { PlanReport, WindowIntent } from '@dbsp/core';
+import type { CompileOptionsBase, DumpMeta } from '@dbsp/types';
+
+// Re-export DumpMeta for backward compatibility
+export type { DumpMeta };
 
 // ============================================================================
 // Dump Types
 // ============================================================================
-
-/**
- * Metadata for correlation and debugging
- */
-export interface DumpMeta {
-	/** Schema name (if schema-scoped) */
-	readonly schema?: string;
-
-	/** User-provided query label */
-	readonly queryName?: string;
-
-	/** Correlation ID for distributed tracing */
-	readonly correlationId?: string;
-
-	/** When the query was compiled */
-	readonly compiledAt?: Date;
-}
 
 /**
  * Complete observability output for any query.
@@ -61,18 +48,10 @@ export interface Dump {
 // ============================================================================
 
 /**
- * Options for SQL compilation
+ * Options for SQL compilation.
+ * Extends CompileOptionsBase with Kysely-specific options.
  */
-export interface CompileOptions {
-	/** Schema name for schema-scoped queries */
-	readonly schema?: string;
-
-	/** Query name for logging */
-	readonly queryName?: string;
-
-	/** Correlation ID for tracing */
-	readonly correlationId?: string;
-
+export interface CompileOptions extends CompileOptionsBase {
 	/** Enable CTE extraction for repeated relation access */
 	readonly enableCTEs?: boolean;
 
