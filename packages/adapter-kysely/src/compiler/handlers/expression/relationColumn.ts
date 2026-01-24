@@ -173,8 +173,20 @@ export const relationColumnHandler: ExpressionHandler<RelationColumnIntent> = (
 			finalAlias = joinAlias;
 		}
 
+		// Special case: column === '*' means select all columns from the relation
+		// eb.ref('t1.*') produces invalid SQL: "t1"."*"
+		// selectAll(alias) produces correct SQL: "t1".*
+		if (column === '*') {
+			return result.selectAll(finalAlias);
+		}
+
 		// Use native Kysely API to select the column with alias
 		return result.select((eb) => eb.ref(`${finalAlias}.${column}`).as(as));
+	}
+
+	// Special case: column === '*' for already joined relations
+	if (column === '*') {
+		return query.selectAll(joinInfo.alias);
 	}
 
 	// Relation already joined, just select
