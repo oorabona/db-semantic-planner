@@ -128,20 +128,20 @@ sql.join: roomBookings
 
 # ─────────────────────────────────────────
 # Query 14: rooms | with roomBookings | where bookingPeriod overlaps [2024-01-22,2024-01-29)
-# BUG FIXED: Range operators now work
-# NOTE: Include relationship not found, where applied to main table
+# BUG FIXED: Range operators now work in include.where
+# NOTE: WHERE is on the include (roomBookings), not the main intent (rooms)
 # ─────────────────────────────────────────
 --- query: 14
 success: true
 intent.type: query
 intent.table: rooms
 intent.with: roomBookings
-intent.hasWhere: true
+intent.hasWhere: false
 sql.join: roomBookings
 sql.contains: "booking_period" && $1
 
 # ─────────────────────────────────────────
-# Query 15: insert into rooms set name = "Board Room", capacity = 20, floor = 2
+# Query 15: insert into rooms set name = 'Board Room', capacity = 20, floor = 2
 # ─────────────────────────────────────────
 --- query: 15
 success: true
@@ -150,29 +150,27 @@ sql.contains: ("name", "capacity", "floor") values ($1, $2, $3)
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 16: insert into priceTiers set productName = "Widget C", quantityRange = "[1,50)", unitPrice = 15.00
-# NOTE: Compiles in dry-run, but DB rejects malformed range literal ($ref wrapper)
+# Query 16: insert into priceTiers set productName = 'Widget C', quantityRange = '[1,50)', unitPrice = 15.00
 # ─────────────────────────────────────────
 --- query: 16
 success: true
 intent.type: insert
 intent.table: priceTiers
-db.success: false
-db.output.contains: malformed range literal
+db.success: true
+db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 17: update rooms set capacity = 25 where name = "Conference Room A"
-# NOTE: String comparison uses $ref wrapper, may cause 0 rows
+# Query 17: update rooms set capacity = 25 where name = 'Conference Room A'
 # ─────────────────────────────────────────
 --- query: 17
 success: true
 sql.contains: update "ch4_scheduling"."rooms"
 sql.contains: set "capacity" = $1
 sql.contains: where "name" = $2
-db.rows.equals: 0
+db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 18: update events set title = "Team Standup (Updated)" where id = 1
+# Query 18: update events set title = 'Team Standup (Updated)' where id = 1
 # ─────────────────────────────────────────
 --- query: 18
 success: true
@@ -192,7 +190,7 @@ sql.contains: where "id" = $1
 db.rows.equals: 0
 
 # ─────────────────────────────────────────
-# Query 20: upsert into rooms on name set name = "Meeting Room", capacity = 12
+# Query 20: upsert into rooms on name set name = 'Meeting Room', capacity = 12
 # NOTE: Compiles in dry-run, but DB rejects due to missing unique constraint on 'name'
 # ─────────────────────────────────────────
 --- query: 20

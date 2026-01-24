@@ -194,7 +194,7 @@ db.output.contains: TypeScript Fundamentals
 db.output.contains: Advanced TypeScript
 
 # ─────────────────────────────────────────
-# Query 19: insert into categories set name = "DevOps"
+# Query 19: insert into categories set name = 'DevOps'
 # ─────────────────────────────────────────
 --- query: 19
 success: true
@@ -203,7 +203,7 @@ sql.contains: ("name") values ($1)
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 20: insert into tags set name = "kubernetes", slug = "kubernetes"
+# Query 20: insert into tags set name = 'kubernetes', slug = 'kubernetes'
 # ─────────────────────────────────────────
 --- query: 20
 success: true
@@ -244,7 +244,7 @@ db.success: false
 db.output.contains: foreign key constraint
 
 # ─────────────────────────────────────────
-# Query 24: upsert into authors on email set name = "Charlie Updated", email = "charlie@blog.com", active = true
+# Query 24: upsert into authors on email set name = 'Charlie Updated', email = 'charlie@blog.com', active = true
 # ─────────────────────────────────────────
 --- query: 24
 success: true

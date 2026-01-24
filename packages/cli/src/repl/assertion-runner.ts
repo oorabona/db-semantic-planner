@@ -216,7 +216,11 @@ function runSingleAssertion(
 
 		// DB assertions (require database connection)
 		case 'db.success':
-			return assertSuccess(result.success, value as boolean);
+			// Use dbSuccess if available, fall back to success for backwards compatibility
+			return assertSuccess(
+				result.dbSuccess ?? result.success,
+				value as boolean,
+			);
 
 		case 'db.output.contains':
 			return assertContains('output', result.output ?? '', value as string);
@@ -747,7 +751,10 @@ function assertDbValueEquals(
 /**
  * Assert intent type (query, insert, update, delete, upsert)
  */
-function assertIntentType(result: BatchResult, expected: string): AssertionOutcome {
+function assertIntentType(
+	result: BatchResult,
+	expected: string,
+): AssertionOutcome {
 	const actual = result.intent?.type;
 
 	if (!result.intent) {
@@ -767,14 +774,19 @@ function assertIntentType(result: BatchResult, expected: string): AssertionOutco
 		expected,
 		actual: passed ? undefined : actual,
 		passed,
-		message: passed ? undefined : `Expected intent type "${expected}", got "${actual}"`,
+		message: passed
+			? undefined
+			: `Expected intent type "${expected}", got "${actual}"`,
 	};
 }
 
 /**
  * Assert main table name (logical name)
  */
-function assertIntentTable(result: BatchResult, expected: string): AssertionOutcome {
+function assertIntentTable(
+	result: BatchResult,
+	expected: string,
+): AssertionOutcome {
 	const actual = result.intent?.table;
 
 	if (!result.intent) {
@@ -795,7 +807,9 @@ function assertIntentTable(result: BatchResult, expected: string): AssertionOutc
 		expected,
 		actual: passed ? undefined : actual,
 		passed,
-		message: passed ? undefined : `Expected table "${expected}", got "${actual}"`,
+		message: passed
+			? undefined
+			: `Expected table "${expected}", got "${actual}"`,
 	};
 }
 
@@ -842,7 +856,10 @@ function assertIntentWith(
 /**
  * Assert whether intent has WHERE clause
  */
-function assertIntentHasWhere(result: BatchResult, expected: boolean): AssertionOutcome {
+function assertIntentHasWhere(
+	result: BatchResult,
+	expected: boolean,
+): AssertionOutcome {
 	const actual = result.intent?.hasWhere ?? false;
 
 	if (!result.intent) {
@@ -871,7 +888,10 @@ function assertIntentHasWhere(result: BatchResult, expected: boolean): Assertion
 /**
  * Assert whether intent has GROUP BY clause
  */
-function assertIntentHasGroupBy(result: BatchResult, expected: boolean): AssertionOutcome {
+function assertIntentHasGroupBy(
+	result: BatchResult,
+	expected: boolean,
+): AssertionOutcome {
 	const actual = result.intent?.hasGroupBy ?? false;
 
 	if (!result.intent) {
@@ -900,7 +920,10 @@ function assertIntentHasGroupBy(result: BatchResult, expected: boolean): Asserti
 /**
  * Assert whether intent has ORDER BY clause
  */
-function assertIntentHasOrderBy(result: BatchResult, expected: boolean): AssertionOutcome {
+function assertIntentHasOrderBy(
+	result: BatchResult,
+	expected: boolean,
+): AssertionOutcome {
 	const actual = result.intent?.hasOrderBy ?? false;
 
 	if (!result.intent) {

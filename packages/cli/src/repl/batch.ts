@@ -41,7 +41,10 @@ export interface BatchModeOptions {
 
 export interface BatchResult {
 	query: string;
+	/** NQL compilation success (parsing + semantic analysis) */
 	success: boolean;
+	/** DB execution success (only set when database is connected) */
+	dbSuccess?: boolean;
 	output?: string;
 	sql?: string;
 	params?: readonly unknown[];
@@ -486,8 +489,10 @@ async function executeNqlQuery(
 				if (execResult.error) {
 					return {
 						query: input,
-						success: false,
+						success: true, // NQL compiled successfully
+						dbSuccess: false, // But DB execution failed
 						error: `Database error: ${execResult.error}`,
+						output: `❌ Error: Database error: ${execResult.error}`,
 						sql: result.sql,
 						params: result.params,
 						type: resultType,
@@ -508,19 +513,24 @@ async function executeNqlQuery(
 				return {
 					query: input,
 					success: true,
+					dbSuccess: true, // DB execution succeeded
 					output: outputParts.join('\n'),
 					sql: result.sql,
 					params: result.params,
 					type: resultType,
 					intent: result.intent,
+					rowCount: execResult.rowCount,
 				};
 			} catch (execError) {
 				const message =
 					execError instanceof Error ? execError.message : String(execError);
+				const errorOutput = `Execution error: ${message}`;
 				return {
 					query: input,
-					success: false,
-					error: `Execution error: ${message}`,
+					success: true, // NQL compiled successfully
+					dbSuccess: false, // But DB execution failed
+					error: errorOutput,
+					output: errorOutput, // For db.output.contains assertions
 					sql: result.sql,
 					params: result.params,
 					type: resultType,
@@ -549,6 +559,7 @@ async function executeNqlQuery(
 				query: input,
 				success: false,
 				error: error.message,
+				output: error.message, // For db.output.contains assertions
 				type: 'query',
 			};
 		}
@@ -557,6 +568,7 @@ async function executeNqlQuery(
 				query: input,
 				success: false,
 				error: error.message,
+				output: error.message, // For db.output.contains assertions
 				type: 'query',
 			};
 		}
@@ -565,6 +577,7 @@ async function executeNqlQuery(
 			query: input,
 			success: false,
 			error: message,
+			output: message, // For db.output.contains assertions
 			type: 'query',
 		};
 	}
@@ -594,8 +607,10 @@ async function executeRawSql(
 		if (result.error) {
 			return {
 				query: input,
-				success: false,
+				success: true, // SQL parsed successfully (! prefix)
+				dbSuccess: false, // But DB execution failed
 				error: `Database error: ${result.error}`,
+				output: `❌ Error: Database error: ${result.error}`,
 				sql: input,
 				type: 'query',
 			};
@@ -604,9 +619,11 @@ async function executeRawSql(
 		return {
 			query: input,
 			success: true,
+			dbSuccess: true, // DB execution succeeded
 			output: `Executed SQL: ${result.rowCount ?? 0} rows affected`,
 			sql: input,
 			type: 'query',
+			rowCount: result.rowCount ?? 0,
 		};
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
@@ -614,6 +631,7 @@ async function executeRawSql(
 			query: input,
 			success: false,
 			error: message,
+			output: message, // For db.output.contains assertions
 			sql: input,
 			type: 'query',
 		};
