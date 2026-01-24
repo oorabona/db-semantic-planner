@@ -1749,3 +1749,28 @@ These features are intentionally excluded from the library's scope:
 | **Change tracking / dirty checking** | Not an ORM - this is a query planner |
 | **Migrations** | Use dedicated tools (Kysely migrations, Prisma, etc.) |
 | **Connection pooling** | Delegated to underlying adapter (Kysely) |
+
+## 🔴 Tech Debt - Type Duplication (SPEC-001 Post-Mortem)
+
+**Priority:** HIGH | **Effort:** M (~1h) | **Scope:** adapter-kysely
+
+### Problem Identified
+
+1. **Duplicated `CompilerState` interfaces:**
+   - `packages/adapter-kysely/src/compiler.ts:72` - local interface
+   - `packages/adapter-kysely/src/compiler/types.ts:30` - shared interface
+   - Bug: Adding `pendingPseudoJoins` to types.ts didn't work because compiler.ts shadows it
+
+2. **Duplicated ModelIR construction:**
+   - `packages/core/src/schema-builder.ts` - used by tests, has pseudo-column detection
+   - `packages/core/src/dx/schema-bridge.ts` - used by CLI, was missing pseudo-column detection
+   - Same logic duplicated in two places
+
+### Impact
+- Bug took significant debugging time
+- Risk of future drift between implementations
+
+### Refactor Plan
+- [ ] 🟡 Merge `CompilerState` interfaces - use single source in types.ts
+- [ ] 🟡 Consolidate schema building - single `buildModelIR()` function used by both CLI and tests
+- [ ] 🟡 Add lint rule or test to prevent local interface shadowing

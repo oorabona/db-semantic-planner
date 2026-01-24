@@ -92,6 +92,19 @@ interface CompilerState {
 	coreCapabilities?: CoreDialectCapabilities;
 	/** Dialect name for error messages */
 	dialect?: string;
+	/** Pending pseudo-column JOINs to be applied (SPEC-001) */
+	pendingPseudoJoins?: Map<
+		string,
+		{
+			traversal: 'parent' | 'child';
+			joinAlias: string;
+			targetTable: string;
+			fkColumn: string;
+			pkColumn: string;
+			schemaName?: string;
+			sourceAlias: string;
+		}
+	>;
 }
 
 // ============================================================================

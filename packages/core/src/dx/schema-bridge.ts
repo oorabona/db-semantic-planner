@@ -7,21 +7,23 @@
 
 import * as v from 'valibot';
 import { ModelIRImpl } from '../model-impl.js';
-import type {
-	Cardinality,
-	ColumnIR,
-	ColumnType,
-	FilterStrategy,
-	ForeignKeyIR,
-	IncludeStrategy,
-	IndexIR,
-	JoinDefault,
-	ModelIR,
-	OnDeleteAction,
-	Optionality,
-	RelationIR,
-	RelationType,
-	TableIR,
+import {
+	createPseudoColumnMetadata,
+	type Cardinality,
+	type ColumnIR,
+	type ColumnType,
+	type FilterStrategy,
+	type ForeignKeyIR,
+	type IncludeStrategy,
+	type IndexIR,
+	type JoinDefault,
+	type ModelIR,
+	type OnDeleteAction,
+	type Optionality,
+	type PseudoColumnMetadata,
+	type RelationIR,
+	type RelationType,
+	type TableIR,
 } from '../model-ir.js';
 
 // ============================================================================
@@ -62,6 +64,10 @@ export interface GeneratedColumn {
 		readonly table: string;
 		readonly column?: string;
 		readonly onDelete?: 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
+		/** Role name for parent traversal in self-ref hierarchies (e.g., 'parent') */
+		readonly parentRole?: string;
+		/** Role name for child traversal in self-ref hierarchies (e.g., 'children') */
+		readonly childRole?: string;
 	};
 	/** Create an index on this column (true for auto-name, string for custom name) */
 	readonly index?: boolean | string;
@@ -346,6 +352,40 @@ function buildTableIRFromDefinition(
 		}
 	}
 
+	// Extract pseudo-columns from self-referential FKs
+	const pseudoColumns: PseudoColumnMetadata[] = [];
+	for (const fk of foreignKeys) {
+		// Check if FK points to same table (self-referential)
+		const fkColumn = fk.columns[0];
+		const targetColumn = fk.references.columns[0];
+		if (
+			fk.references.table === tableName &&
+			fkColumn !== undefined &&
+			targetColumn !== undefined
+		) {
+			// Get column definition for role extraction
+			const colDef = genTable[fkColumn];
+			// Infer role names from column name or explicit references
+			const inferredName = fkColumn.endsWith('Id')
+				? fkColumn.slice(0, -2)
+				: 'parent';
+			const parentRole = colDef?.references?.parentRole ?? inferredName;
+			const childRole =
+				colDef?.references?.childRole ??
+				(parentRole === 'parent' ? 'children' : parentRole + 's');
+
+			pseudoColumns.push(
+				createPseudoColumnMetadata(
+					tableName,
+					fkColumn,
+					targetColumn,
+					parentRole,
+					childRole,
+				),
+			);
+		}
+	}
+
 	// Determine primary key - fallback to 'id' if not defined
 	let primaryKey: string | readonly string[];
 	if (primaryKeys.length === 0) {
@@ -365,6 +405,7 @@ function buildTableIRFromDefinition(
 		primaryKey,
 		foreignKeys,
 		indexes,
+		...(pseudoColumns.length > 0 && { pseudoColumns }),
 	};
 }
 
@@ -655,6 +696,8 @@ const ForeignKeyReferenceSchema = v.object({
 	onDelete: v.optional(
 		v.picklist(['CASCADE', 'SET NULL', 'RESTRICT', 'NO ACTION']),
 	),
+	parentRole: v.optional(v.string()),
+	childRole: v.optional(v.string()),
 });
 
 /**
