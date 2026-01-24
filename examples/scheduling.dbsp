@@ -6,7 +6,8 @@
 #     --db postgresql://postgres:demo@localhost:5432/demo \
 #     --input ./examples/scheduling.dbsp
 #
-# NQL v2 Syntax: uses pipes (|) between operators
+# NQL v2.1 Syntax: uses pipes (|) between operators
+# MIGRATION: `with` keyword removed in v2.1, use `select *, relation.*` instead
 
 # =============================================================================
 # Setup: Create isolated schema and load data
@@ -51,8 +52,9 @@ priceTiers | where productName = 'Widget A' and quantityRange contains 25
 # =============================================================================
 # 4.5 Rooms with Bookings
 # =============================================================================
-rooms | with roomBookings
-rooms | with roomBookings | where bookingPeriod overlaps [2024-01-22,2024-01-29)
+rooms | select *, roomBookings.*
+# Filter rooms by booking period, then include all their bookings
+rooms | where roomBookings.bookingPeriod overlaps [2024-01-22,2024-01-29) | select *, roomBookings.*
 
 # =============================================================================
 # 4.6 Mutations (NQL v2: SQL-like syntax)

@@ -608,3 +608,58 @@ query = addWhere(query, whereIntent, ...);
 - `types.ts`: `pendingPseudoJoins: Map<string, PseudoJoinInfo>` in CompilerState
 
 **Added:** 2026-01-24 (SPEC-001 Self-Referential Pseudo-Columns V1.0)
+
+---
+
+## NQL v2.1 Grammar Simplification
+
+### Path Expression Include Detection (2026-01-24)
+
+**Pattern:** Derive relation includes from select clause syntax rather than explicit keywords.
+
+**How it works:** When compiler encounters `posts.*` or `posts.title` in select columns, it automatically registers an IncludeIntent for that relation with default strategy (json_agg for nested, join for flat).
+
+**Implementation locations:**
+- `packages/nql/src/compiler/index.ts`: `extractIncludesFromSelect()` function
+- `packages/nql/src/parser/grammar.ts`: `selectColumn` rule with dotted paths
+- `packages/core/src/intent-ast.ts`: `IncludeIntent.strategy` field
+
+**Why this design:** Eliminates redundant `with` keyword, making NQL syntax closer to natural SQL while maintaining semantic intent extraction.
+
+### Flat Modifier Strategy Enforcement (2026-01-24)
+
+**Pattern:** Use `| flat` clause at end of query to switch include strategy from json_agg to join.
+
+**How it works:**
+1. Parser creates `FlatClause` AST node when `flat` token follows pipe
+2. Compiler sets `strategy: 'join'` on all IncludeIntents when flat clause is present
+3. Adapter generates JOIN instead of json_agg subquery
+
+**Key insight:** Flat mode affects OUTPUT format only, not filter semantics. Pseudo-column WHERE filters still use EXISTS logic.
+
+### REPL State Machine Pattern (2026-01-24)
+
+**Pattern:** Persist user preferences (like output format) in BatchState between REPL commands.
+
+**Implementation:**
+- `BatchState.outputMode`: 'json' | 'table' | 'csv'
+- `.output <mode>` command updates state
+- All subsequent queries use that mode until changed
+
+**Files:**
+- `packages/cli/src/repl/batch.ts`: BatchState, handleDotCommand
+- `packages/cli/src/repl/output-formatter.ts`: formatOutput, formatTableOutput, formatCsvOutput
+
+### Example File Migration Pattern (2026-01-24)
+
+**Pattern:** When deprecating syntax, migrate all examples in a single atomic update.
+
+**Process:**
+1. Identify all affected files using grep
+2. Update each file with new syntax equivalent
+3. Update corresponding .assert.dbsp files with new intent expectations
+4. Run full test suite to verify equivalence
+
+**Example mapping (v2.0 → v2.1):**
+- `authors | with posts` → `authors | select *, posts.*`
+- `posts | with comments | where approved = true` → simplified (filtered includes need ORM API)

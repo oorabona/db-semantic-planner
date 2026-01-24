@@ -268,3 +268,38 @@ new CamelCasePlugin({ maintainNestedObjectKeys: true })
 ```
 
 **Documented in:** `examples/QUICKSTART.md`
+
+---
+
+## ✅ NQL v2.1 — Grammar Simplification (COMPLETED 2026-01-24)
+
+**Spec:** `docs/specs/NQL-V2.1-SIMPLIFICATION-SPEC.md`
+**Status:** ✅ COMPLETE
+**Effort:** L (~4h actual)
+**Breaking:** YES (removed `with` keyword)
+**Adversarial Review:** Completed (Codex + Gemini + Claude consensus)
+
+### Summary
+
+Removed `with` keyword, json_agg by default for relation includes via path expressions.
+
+### Changes
+
+| Before (v2.0) | After (v2.1) |
+|---------------|--------------|
+| `authors \| with posts` | `authors \| select *, posts.*` |
+| N/A | `authors \| select *, posts.* \| flat` (force JOIN) |
+| N/A | `.output json\|table\|csv` (REPL command) |
+
+### Implementation Blocks
+
+- [x] ✅ **Block 1:** Grammar changes — Add `FLAT` token, remove `with` (2026-01-24)
+- [x] ✅ **Block 2:** Compiler — Relation path detection, `| flat` clause (2026-01-24)
+- [x] ✅ **Block 3:** Adapter — Strategy enforcement (json_agg default) (2026-01-24)
+- [x] ✅ **Block 4:** REPL `.output` command + output-formatter.ts (2026-01-24)
+- [x] ✅ **Block 5:** E2E tests + documentation + examples migration (2026-01-24)
+
+### Deferred to v2.2+
+
+- [ ] `batch(N)` streaming — Database-dependent cursor support
+- [ ] Per-relation pagination — Requires subquery strategy

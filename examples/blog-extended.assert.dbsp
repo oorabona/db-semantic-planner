@@ -109,7 +109,7 @@ db.output.contains: Technology
 db.output.contains: Lifestyle
 
 # ─────────────────────────────────────────
-# Query 11: categories | with children
+# Query 11: categories | select *, children.*
 # ─────────────────────────────────────────
 --- query: 11
 success: true
@@ -120,7 +120,7 @@ output.contains: children.id
 output.contains: children.name
 
 # ─────────────────────────────────────────
-# Query 12: categories | where parentId is null | with children
+# Query 12: categories | where parentId is null | select *, children.*
 # ─────────────────────────────────────────
 --- query: 12
 success: true
@@ -164,8 +164,8 @@ db.rows.equals: 1
 db.output.contains: PostgreSQL Deep Dive
 
 # ─────────────────────────────────────────
-# Query 16: authors | where active = true | with posts | where published = true | with comments | where approved = true
-# NOTE: Query parses but nested where on joined tables may not produce correct SQL
+# Query 16: authors | where active = true | select *, posts.*
+# NOTE: NQL v2.1 simplified - filtered includes use ORM API
 # ─────────────────────────────────────────
 --- query: 16
 success: true

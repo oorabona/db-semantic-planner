@@ -1,5 +1,5 @@
 # Test file for blog schema
-# NQL v2 Syntax: uses pipes (|) between operators
+# NQL v2.1 Syntax: uses pipes (|) between operators
 
 # Basic commands
 .tables
@@ -13,7 +13,7 @@ comments
 
 # Filtered queries
 posts | where published = true
-posts | with author
+posts | select *, author.*
 
 # Distinct (works with explicit columns)
 posts | select distinct *

@@ -1379,3 +1379,47 @@ default: v.optional(v.union([v.string(), v.number(), v.boolean()]));
 **Prevention:** When modifying types that have validation schemas, search for all Valibot/Zod schemas that validate that type.
 
 **Location:** `packages/core/src/dx/schema-bridge.ts:758`
+
+---
+
+## NQL v2.1
+
+### NQL Path Expressions Trigger Automatic Includes (2026-01-24)
+
+**Issue:** In NQL v2.1, using a relation path like `posts.*` in select clause automatically registers an include, unlike explicit `with` keyword in v2.0.
+
+**Cause:** The grammar was simplified to derive intent from syntax. Path expressions (dot notation) now signal "include this relation" implicitly.
+
+**How it works:** Compiler detects `relation.*` patterns in select columns and adds them to `intent.include` array with default strategy.
+
+**Prevention:** When migrating from v2.0, replace `| with relation` with `| select *, relation.*` - they produce equivalent IncludeIntent.
+
+**Location:** `packages/nql/src/compiler/index.ts` - `extractIncludesFromSelect()`
+
+---
+
+### NQL Flat Mode Changes Include Strategy Not Filter Semantics (2026-01-24)
+
+**Issue:** Adding `| flat` to an NQL query changes the join strategy from json_agg (nested) to JOIN (flat rows), but does NOT change filter semantics.
+
+**Cause:** User expected `where posts.published = true | flat` to produce flat rows with only published posts. But pseudo-column filters use EXISTS, filtering the parent (authors), not the relation data.
+
+**Semantic difference:**
+- `where posts.published = true` → EXISTS filter, keeps only authors WHO HAVE published posts
+- Old `with posts | where published = true` → filtered the posts INCLUDED, not the authors
+
+**Solution:** For filtered includes (subset of relation data), use ORM API with `where` option on include, not NQL pseudo-column syntax.
+
+**Location:** Documented in `examples/blog.dbsp` section 2.6c
+
+---
+
+### PlanDecision Uses reasoning Not reason (2026-01-24)
+
+**Issue:** TypeScript error when accessing `decision.reason` on PlanDecision interface.
+
+**Cause:** The interface property is named `reasoning`, not `reason`.
+
+**Solution:** Use `decision.reasoning` to access the human-readable rationale for a planner decision.
+
+**Location:** `packages/core/src/intent-ast.ts` - PlanDecision interface

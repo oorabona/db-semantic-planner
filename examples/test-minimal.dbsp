@@ -1,6 +1,6 @@
 # Test file for minimal schema
 # These are the queries from QUICKSTART.md
-# NQL v2 Syntax: uses pipes (|) between operators
+# NQL v2.1 Syntax: uses pipes (|) between operators
 
 # List all tables
 .tables
@@ -23,8 +23,8 @@ users | where id = 1
 posts | where published = true
 
 # With relation include
-posts | with user
-users | with posts
+posts | select *, user.*
+users | select *, posts.*
 
 # Multiple conditions
 posts | where published = true and authorId = 1

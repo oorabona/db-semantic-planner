@@ -2,7 +2,7 @@
 
 **Status:** Canonical
 **Created:** 2026-01-24
-**Version:** 2.2 (reviewed, with pseudo-table extensions)
+**Version:** 3.0 (v2.1 simplification: removed `with`, added `flat`)
 **Scope:** nql, cli
 
 ## Overview
@@ -38,26 +38,26 @@ command           = "." IDENT { ANY_TOKEN } ;
 (* ============================================================ *)
 
 query             = table_ref { "|" query_clause } ;
-table_ref         = ident_segment ;  (* Single table only - joins via `with` *)
+table_ref         = ident_segment ;  (* Single table - relations via path expressions *)
 
 query_clause      = where_clause
                   | select_clause
-                  | with_clause
                   | group_clause
                   | having_clause
                   | order_clause
                   | limit_clause
-                  | offset_clause ;
+                  | offset_clause
+                  | flat_clause ;
 
 (* Clauses *)
 where_clause      = "where" boolean_expr ;
 select_clause     = "select" [ "distinct" ] select_list ;
-with_clause       = "with" join_spec { "," join_spec } ;
 group_clause      = "group" "by" expr_list ;
 having_clause     = "having" boolean_expr ;
 order_clause      = "order" "by" order_list ;
 limit_clause      = "limit" NUMBER ;
 offset_clause     = "offset" NUMBER ;
+flat_clause       = "flat" ;  (* Forces JOIN strategy instead of json_agg *)
 ```
 
 ### 2.1 WHERE vs HAVING Semantics
@@ -69,14 +69,29 @@ offset_clause     = "offset" NUMBER ;
 
 Note: Multiple `where` clauses are allowed — each compiles based on position relative to `group by`.
 
-### 2.2 Joins (`with` clause)
+### 2.2 Relation Inclusion via Path Expressions (v2.1)
 
-```ebnf
-(* Joins with optional disambiguation *)
-join_spec         = ident_segment [ "(" param_list ")" ] [ "via" ident_segment ] [ "on" boolean_expr ] ;
-param_list        = param { "," param } ;
-param             = IDENT ":" literal ;
+Relations are included automatically when referenced via path expressions in `select`:
+
+```sql
+-- Include posts relation (compiles to json_agg by default)
+authors | select name, posts.*
+
+-- Include nested relations
+authors | select name, posts.title, posts.comments.*
+
+-- Force JOIN strategy (flat result, potential row explosion)
+authors | select name, posts.* | flat
 ```
+
+**Default strategy:** `json_agg` (nested JSON, no row explosion)
+**With `| flat`:** JOIN strategy (flat rows, may cause row explosion)
+
+**Column aliasing in flat mode:**
+| Path Expression | Flat Alias |
+|-----------------|------------|
+| `posts.title` | `posts_title` |
+| `posts.comments.content` | `posts_comments_content` |
 
 ### 2.3 Select
 
@@ -490,6 +505,7 @@ This allows schemas with columns named `parent` while still supporting pseudo-ta
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 3.0 | 2026-01-24 | **NQL v2.1 Grammar Simplification:** Removed `with` keyword entirely (BREAKING), added `flat` clause for JOIN strategy, relations now via path expressions in select |
 | 2.2 | 2026-01-24 | Multi-LLM review fixes: H1 (select_item parsing), H2 (subquery disambiguation), H3 (custom tokens), H4 (defer pseudo_table.*), L1 (case requires when), L3 (delete !), M7 (IN literal_list) |
 | 2.1 | 2026-01-24 | Added pseudo-table extensions (V1.0 filtering, V1.1 aggregate/projection) |
 | 2.0 | 2026-01-20 | Pipe syntax, `with` instead of `include`, position-aware WHERE |
@@ -497,6 +513,7 @@ This allows schemas with columns named `parent` while still supporting pseudo-ta
 
 ## References
 
+- [NQL v2.1 Grammar Simplification](NQL-V2.1-SIMPLIFICATION-SPEC.md) — current specification
 - [CLI-NQL Natural Query Language](../plans/CLI-NQL-natural-query-language.md) — original specification (historical)
 - [NQL Parser Audit](../plans/NQL-PARSER-AUDIT-2026-01.md) — audit and v2.0 design (historical)
 - [Self-Ref Pseudo-Columns Spec](SELF-REF-PSEUDO-COLUMNS-SPEC.md) — pseudo-table feature

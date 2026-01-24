@@ -13,6 +13,7 @@ import {
 	Dot,
 	Exists,
 	False,
+	Flat,
 	From,
 	GroupBy,
 	Identifier,
@@ -47,7 +48,6 @@ import {
 	Upsert,
 	Via,
 	Where,
-	With,
 } from '../src/lexer/tokens.js';
 
 describe('NqlLexer', () => {
@@ -175,7 +175,7 @@ describe('NqlLexer', () => {
 			const keywords = [
 				['select', Select],
 				['where', Where],
-				['with', With],
+				['flat', Flat],
 				['via', Via],
 				['let', Let],
 				['bind', Bind],

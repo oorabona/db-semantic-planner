@@ -6,7 +6,8 @@
 #     --db postgresql://postgres:demo@localhost:5432/demo \
 #     --input ./examples/blog.dbsp
 #
-# NQL v2 Syntax: uses pipes (|) between operators
+# NQL v2.1 Syntax: uses pipes (|) between operators
+# MIGRATION: `with` keyword removed in v2.1, use `select *, relation.*` instead
 
 # =============================================================================
 # Setup: Create isolated schema and load data
@@ -45,15 +46,32 @@ comments | where approved = true
 comments | where approved = false
 
 # =============================================================================
-# 2.6 Includes (LEFT JOIN)
+# 2.6 Includes (json_agg nested by default)
 # =============================================================================
-authors | with posts
-posts | with comments
+# Default: nested JSON result (one row per author, posts as array)
+authors | select *, posts.*
+posts | select *, comments.*
+
+# =============================================================================
+# 2.6b Flat Output (| flat forces JOIN, one row per author-post pair)
+# =============================================================================
+# Use | flat for export scenarios or when you need flat rows
+authors | select *, posts.* | flat
+posts | select *, comments.* | flat
+# Equivalent to: .output table mode for viewing
+
+# =============================================================================
+# 2.6c FUTURE: Relation Disambiguation with via (NQL Block 8)
+# =============================================================================
+# When a table has multiple relations to the same target, use `via`:
+# Example: if User has both authoredPosts and reviewedPosts to Post
+#   users | select *, posts.* via authoredPosts
+# For now, use ORM API: include('posts', { via: 'authoredPosts' })
 
 # =============================================================================
 # 2.7 Many-to-Many Relations (Tags)
 # =============================================================================
-posts | with tags
+posts | select *, tags.*
 postTags | group by postId | select count(*)
 
 # =============================================================================

@@ -26,6 +26,7 @@ import {
 	type NqlCompileOnlyResult,
 	NqlParseError,
 } from './nql-executor.js';
+import { formatOutput } from './output-formatter.js';
 import type { QueryMode } from './types.js';
 
 export interface BatchModeOptions {
@@ -78,6 +79,8 @@ export interface BatchState {
 	parseMode: boolean;
 	/** NQL v2: ModelIR built from schema for NQL compilation */
 	model: ModelIR | undefined;
+	/** NQL v2.1: Output display format (json|table|csv) */
+	outputMode: 'json' | 'table' | 'csv';
 }
 
 /**
@@ -255,6 +258,7 @@ export async function processDotCommand(
   .exec [on|off]    - Toggle or set execution mode (requires --db)
   .explain [on|off] - Toggle EXPLAIN output for queries
   .parse [on|off]   - Toggle parse tree (AST) output for queries
+  .output [mode]    - Set output format (json|table|csv)
   .import <file>    - Execute SQL file (DDL, seed data)
   .natural          - Switch to natural query mode
   .sql              - Switch to SQL mode
@@ -369,6 +373,31 @@ export async function processDotCommand(
 			return {
 				output: `✓ Parse mode: ${newParseMode ? 'ON' : 'OFF'}`,
 				stateChange: { parseMode: newParseMode },
+			};
+		}
+
+		case '.output': {
+			// NQL v2.1: Set output display format (json|table|csv)
+			const validModes = ['json', 'table', 'csv'] as const;
+			type OutputMode = (typeof validModes)[number];
+
+			if (!arg) {
+				// Show current mode
+				return {
+					output: `Current output mode: ${state.outputMode}`,
+				};
+			}
+
+			const requestedMode = arg.toLowerCase();
+			if (!validModes.includes(requestedMode as OutputMode)) {
+				return {
+					output: `❌ Invalid output mode: ${arg}. Use: json, table, csv`,
+				};
+			}
+
+			return {
+				output: `✓ Output mode: ${requestedMode}`,
+				stateChange: { outputMode: requestedMode as OutputMode },
 			};
 		}
 
@@ -499,7 +528,7 @@ async function executeNqlQuery(
 					formatNqlResult(result),
 					'',
 					`Rows: ${execResult.rowCount}`,
-					formatRows(execResult.rows, execResult.columns),
+					formatOutput(execResult.rows, execResult.columns, state.outputMode),
 				);
 				return {
 					query: input,
@@ -630,41 +659,6 @@ async function executeRawSql(
 }
 
 /**
- * Format rows as a simple text table
- */
-function formatRows(
-	rows: Record<string, unknown>[],
-	columns: string[],
-): string {
-	if (rows.length === 0) {
-		return '(empty result set)';
-	}
-
-	// Calculate column widths
-	const widths = columns.map((col) => {
-		const maxDataWidth = Math.max(
-			...rows.map((row) => String(row[col] ?? 'null').length),
-		);
-		return Math.max(col.length, maxDataWidth);
-	});
-
-	// Header row
-	const header = columns
-		.map((col, i) => col.padEnd(widths[i] ?? 0))
-		.join(' | ');
-	const separator = widths.map((w) => '-'.repeat(w)).join('-+-');
-
-	// Data rows
-	const dataRows = rows.map((row) =>
-		columns
-			.map((col, i) => String(row[col] ?? 'null').padEnd(widths[i] ?? 0))
-			.join(' | '),
-	);
-
-	return [header, separator, ...dataRows].join('\n');
-}
-
-/**
  * Run batch mode execution
  */
 export async function runBatchMode(options: BatchModeOptions): Promise<void> {
@@ -682,6 +676,7 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 		explainMode: false,
 		parseMode: false,
 		model, // NQL v2: ModelIR for compileNqlToSql
+		outputMode: 'json', // NQL v2.1: Default output format
 	};
 
 	// Connect to database if URL provided

@@ -6,7 +6,8 @@
 #     --db postgresql://postgres:demo@localhost:5432/demo \
 #     --input ./examples/pimdam.dbsp
 #
-# NQL v2 Syntax: uses pipes (|) between operators
+# NQL v2.1 Syntax: uses pipes (|) between operators
+# MIGRATION: `with` keyword removed in v2.1, use `select *, relation.*` instead
 
 # =============================================================================
 # Setup: Create isolated schema and load data
@@ -36,20 +37,20 @@ assets | where kind = 'image'
 # 6.4 ProductImages Junction Table
 # =============================================================================
 productImages | where status = 'approved'
-productImages | where locale = 'en' | with product
-productImages | with asset
+productImages | where locale = 'en' | select *, product.*
+productImages | select *, asset.*
 
 # =============================================================================
 # 6.5 Advanced Filtering Patterns
 # =============================================================================
-products | where active = true and deletedAt is null and categoryId = 7 | with category
+products | where active = true and deletedAt is null and categoryId = 7 | select *, category.*
 products | where categoryId = 6
 
 # =============================================================================
 # 6.6 Hierarchical Category Structure
 # =============================================================================
 categories | where parentId is null
-categories | where parentId is not null | with parent
+categories | where parentId is not null | select *, parent.*
 
 # =============================================================================
 # 6.6.1 Pseudo-Columns (SPEC-001) - Self-Referential Traversal

@@ -36,16 +36,16 @@ describe('NqlParser', () => {
 			expect(result.cst).toBeDefined();
 		});
 
-		it('PARSE-Q05: Join with `with`', () => {
-			const result = parseCst('orders | with customer');
+		it('PARSE-Q05: Flat clause forces JOIN strategy', () => {
+			const result = parseCst('orders | select *, customer.* | flat');
 			expect(result.errors).toHaveLength(0);
 			expect(result.cst).toBeDefined();
 		});
 
-		it('PARSE-Q06: Join with `via` disambiguation', () => {
-			const result = parseCst('orders | with customer via customerId');
-			expect(result.errors).toHaveLength(0);
-			expect(result.cst).toBeDefined();
+		it('PARSE-Q06: Deprecated `with` keyword errors (breaking change v2.1)', () => {
+			const result = parseCst('orders | with customer');
+			expect(result.errors.length).toBeGreaterThan(0);
+			expect(result.errors[0]?.message).toContain('Flat');
 		});
 
 		it('PARSE-Q07: Aggregation with group by', () => {
@@ -114,8 +114,9 @@ describe('NqlParser', () => {
 			expect(result.cst).toBeDefined();
 		});
 
-		it('PARSE-Q17: Relation star', () => {
-			const result = parseCst('orders | with customer | select *, customer.*');
+		it('PARSE-Q17: Relation star (implicit include via path)', () => {
+			// NQL v2.1: Relations included via path expressions, no 'with' keyword
+			const result = parseCst('orders | select *, customer.*');
 			expect(result.errors).toHaveLength(0);
 			expect(result.cst).toBeDefined();
 		});
@@ -250,9 +251,8 @@ describe('NqlParser', () => {
 		});
 
 		it('handles dot notation for columns', () => {
-			const result = parseCst(
-				"orders | with customer | where customer.name = 'John'",
-			);
+			// NQL v2.1: Relations included implicitly via path expressions
+			const result = parseCst("orders | where customer.name = 'John'");
 			expect(result.errors).toHaveLength(0);
 			expect(result.cst).toBeDefined();
 		});

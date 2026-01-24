@@ -81,7 +81,7 @@ sql.contains: where "t0"."status" = $1
 db.rows.equals: 21
 
 # ─────────────────────────────────────────
-# Query 9: productImages | where locale = 'en' | with product
+# Query 9: productImages | where locale = 'en' | select *, product.*
 # ─────────────────────────────────────────
 --- query: 9
 success: true
@@ -90,7 +90,7 @@ sql.contains: left join "ch6_pimdam"."products"
 db.rows.equals: 19
 
 # ─────────────────────────────────────────
-# Query 10: productImages | with asset
+# Query 10: productImages | select *, asset.*
 # ─────────────────────────────────────────
 --- query: 10
 success: true
@@ -99,7 +99,7 @@ sql.contains: left join "ch6_pimdam"."assets"
 db.rows.equals: 25
 
 # ─────────────────────────────────────────
-# Query 11: products | where active = true and deletedAt is null and categoryId = 7 | with category
+# Query 11: products | where active = true and deletedAt is null and categoryId = 7 | select *, category.*
 # ─────────────────────────────────────────
 --- query: 11
 success: true
@@ -129,7 +129,7 @@ sql.contains: where "t0"."parent_id" is null
 db.rows.equals: 4
 
 # ─────────────────────────────────────────
-# Query 14: categories | where parentId is not null | with parent
+# Query 14: categories | where parentId is not null | select *, parent.*
 # ─────────────────────────────────────────
 --- query: 14
 success: true

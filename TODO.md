@@ -38,6 +38,32 @@
 | `TODO_DX.md` | core, adapter | DX improvements, SOLID fixes, type inference |
 | `docs/specs/SELF-REF-PSEUDO-COLUMNS-SPEC.md` | core, nql, adapter | Auto-generated pseudo-columns for hierarchies |
 
+## ✅ COMPLETED: NQL-2.1 Grammar Simplification (2026-01-24)
+
+**Priority:** HIGH | **Effort:** L (~2h) | **Breaking:** Yes (`with` removed)
+**Scope:** nql, cli, core, adapter-kysely
+**Completed:** 2026-01-24
+
+Grammar simplification: remove `with` keyword, add `| flat` modifier, `.output` command.
+
+### Blocks
+
+- [x] ✅ Block 1: Grammar Changes — Add FLAT token, remove WITH (2026-01-24)
+- [x] ✅ Block 2: Compiler — Relation path detection (2026-01-24)
+- [x] ✅ Block 3: Adapter — Strategy enforcement (json_agg vs JOIN) (2026-01-24)
+- [x] ✅ Block 4: REPL .output command (json|table|csv) (2026-01-24)
+- [x] ✅ Block 5: E2E tests + documentation (2026-01-24)
+
+### Future Blocks (Backlog)
+
+| # | Task | Description |
+|---|------|-------------|
+| 6 | `batch(N)` streaming | Database-dependent, needs separate design |
+| 7 | Cursor support | Complex, dialect-specific |
+| 8 | NQL `via` clause | Manual JOIN path disambiguation for multi-FK cases |
+
+---
+
 ## ✅ COMPLETED: ARCH-004 Type Rationalization (2026-01-24)
 
 **Priority:** HIGH | **Effort:** L (~2h) | **Breaking:** No
@@ -509,6 +535,7 @@ Transform db-semantic-planner into a **codegen-first schema platform**:
 
 | # | Block | Description |
 |---|-------|-------------|
+| 8 | NQL `via` clause | Manual JOIN path disambiguation for multi-FK cases |
 | 9 | `dbsp import drizzle` | Import Drizzle schema to SoT |
 | 10 | `dbsp import prisma` | Import Prisma schema to SoT |
 | 11 | `dbsp import db` | Introspect DB to bootstrap SoT |
