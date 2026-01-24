@@ -146,7 +146,7 @@ success: true
 sql.contains: from "ch6_pimdam"."categories"
 sql.contains: left join "ch6_pimdam"."categories" as "parent_1"
 sql.contains: where "parent_1"."name" = $1
-params.equals: ['Electronics']
+params.equals: ["Electronics"]
 db.rows.equals: 3
 db.output.contains: Phones
 db.output.contains: Computers
@@ -160,7 +160,7 @@ success: true
 sql.contains: from "ch6_pimdam"."categories"
 sql.contains: left join "ch6_pimdam"."categories" as "parent_1"
 sql.contains: where "parent_1"."name" = $1
-params.equals: ['Phones']
+params.equals: ["Phones"]
 db.rows.equals: 2
 db.output.contains: Smartphones
 db.output.contains: Phone Accessories
