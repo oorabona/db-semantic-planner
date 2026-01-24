@@ -17,6 +17,10 @@ import type { ExpressionHandler } from '../../types.js';
  * @example
  * { kind: 'column', column: 'name', as: 'userName' }
  * → SELECT "users"."name" AS "userName"
+ *
+ * @example
+ * { kind: 'column', column: '*' }
+ * → SELECT "t0".*
  */
 export const columnHandler: ExpressionHandler<ColumnExpressionIntent> = (
 	_ctx,
@@ -24,6 +28,13 @@ export const columnHandler: ExpressionHandler<ColumnExpressionIntent> = (
 	intent,
 	tableAlias,
 ) => {
+	// Special case: * should use selectAll, not ref
+	// eb.ref('t0.*') produces invalid SQL: "t0"."*"
+	// selectAll(alias) produces correct SQL: "t0".*
+	if (intent.column === '*') {
+		return query.selectAll(tableAlias);
+	}
+
 	if (intent.as) {
 		const alias = intent.as;
 		return query.select((eb) =>

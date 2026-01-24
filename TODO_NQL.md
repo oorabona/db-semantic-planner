@@ -137,6 +137,14 @@ Discovered while running `examples/*.dbsp` against pg-demo PostgreSQL.
   - **Fixed UPSERT regression:** RangeLiteral regex was matching identifier lists like `(col1, col2)`;
     fixed with lookahead to only match values starting with digits
 
+- [x] ✅ **Range operators in include.where not compiled** (2026-01-24)
+  - Example: `rooms | with roomBookings | where bookingPeriod overlaps [2024-01-16,2024-01-20)`
+  - Error: WHERE clause was silently ignored, no range operator in SQL
+  - Root cause: `addWhereToJoin()` only handled comparison, like, and, or, not range operators
+  - **Solution:** Added `kind === 'range'` handling in `addWhereToJoin()` using `compileRangeExpression()`
+  - Files: `packages/adapter-kysely/src/recursive-compiler.ts:886-903`
+  - Ref: `scheduling.assert.dbsp` Query 14
+
 - [x] ✅ **Scalar contains operator** (2026-01-24)
   - Example: `priceTiers | where quantityRange contains 25`
   - **Problem:** Parser only accepted range literals after `contains` operator

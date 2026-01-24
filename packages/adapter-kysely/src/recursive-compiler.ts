@@ -883,6 +883,25 @@ export function addWhereToJoin<_T>(
 		return join;
 	}
 
+	// Handle range operators (overlaps, contains, containedBy)
+	if ('kind' in where && where.kind === 'range') {
+		const w = where as {
+			kind: 'range';
+			field: string;
+			operator: 'overlaps' | 'contains' | 'containedBy';
+			value: unknown;
+		};
+		const fieldRef = `${alias}.${w.field}`;
+		const rangeExpr = compileRangeExpression(
+			fieldRef,
+			w.operator,
+			w.value,
+			undefined, // coreCapabilities - allow any dialect in JOIN ON
+			undefined, // dialect
+		);
+		return join.on(rangeExpr);
+	}
+
 	return join;
 }
 

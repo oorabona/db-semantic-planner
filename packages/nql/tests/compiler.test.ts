@@ -531,10 +531,12 @@ describe('NQL Compiler - UPSERT', () => {
 
 describe('NQL Compiler - Complex Queries', () => {
 	it('compiles full query with all clauses', () => {
+		// Note: In NQL, WHERE before WITH goes to main query,
+		// WHERE after WITH goes to the include
 		const result = compileNql(`
       orders
-      | with customer
       | where status = 'completed'
+      | with customer
       | select customer.name, sum(total) as revenue
       | group by customer.name
       | order by revenue desc
@@ -544,7 +546,7 @@ describe('NQL Compiler - Complex Queries', () => {
 		const query = result.query!;
 		expect(query.from).toBe('orders');
 		expect(query.include).toHaveLength(1);
-		expect(query.where).toBeDefined();
+		expect(query.where).toBeDefined(); // WHERE before WITH → main query
 		expect(query.select).toBeDefined();
 		expect(query.groupBy).toBeDefined();
 		expect(query.orderBy).toHaveLength(1);

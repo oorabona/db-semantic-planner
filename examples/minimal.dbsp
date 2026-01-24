@@ -56,16 +56,16 @@ posts | limit 2 | offset 2
 # =============================================================================
 
 # Insert a new user (dry-run by default)
-insert into users set name = "Diana", email = "diana@example.com"
+insert into users set name = 'Diana', email = 'diana@example.com'
 
 # Update a user
-update users set name = "Alice Smith" where id = 1
+update users set name = 'Alice Smith' where id = 1
 
 # Delete a post
 delete from posts where id = 5
 
 # Upsert - insert or update on conflict (NQL v2: always updates on conflict)
-upsert into users on email set name = "Alice", email = "alice@example.com"
+upsert into users on email set name = 'Alice', email = 'alice@example.com'
 
 # Upsert with different values
-upsert into users on email set name = "Bob Updated", email = "bob@example.com"
+upsert into users on email set name = 'Bob Updated', email = 'bob@example.com'

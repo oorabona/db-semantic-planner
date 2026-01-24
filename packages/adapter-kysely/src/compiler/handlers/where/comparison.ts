@@ -5,6 +5,7 @@
 
 import type { WhereComparisonIntent } from '@dbsp/core';
 import { CompilationError } from '../../../errors.js';
+import { resolveFieldAlias } from '../../helpers.js';
 import type { WhereHandler } from '../../types.js';
 
 /**
@@ -12,12 +13,18 @@ import type { WhereHandler } from '../../types.js';
  * Supports operators: eq, neq, gt, gte, lt, lte
  */
 export const comparisonHandler: WhereHandler<WhereComparisonIntent> = (
-	_ctx,
+	ctx,
 	eb,
 	intent,
 	alias,
 ) => {
-	const column = `${alias}.${intent.field}`;
+	// P1: Resolve correct alias for fields that may be in joined tables
+	const rootTable =
+		ctx.plan.intent.type === 'select' ? ctx.plan.intent.from : '';
+	const resolvedAlias = rootTable
+		? resolveFieldAlias(intent.field, alias, rootTable, ctx.model, ctx.state)
+		: alias;
+	const column = `${resolvedAlias}.${intent.field}`;
 
 	switch (intent.operator) {
 		case 'eq':

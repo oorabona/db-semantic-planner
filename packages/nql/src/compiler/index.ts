@@ -324,7 +324,9 @@ export class NqlCompiler {
 		const havingConditions: WhereIntent[] = [];
 		let select: SelectIntent | undefined;
 		let distinct: boolean | undefined;
-		let include: readonly IncludeIntent[] | undefined;
+		// Use mutable array to accumulate includes and track current batch for WHERE association
+		const allIncludes: IncludeIntent[] = [];
+		let currentIncludeBatch: IncludeIntent[] | undefined;
 		let groupBy: readonly string[] | undefined;
 		let orderBy: readonly OrderByIntent[] | undefined;
 		let limit: number | undefined;
@@ -338,6 +340,20 @@ export class NqlCompiler {
 					const condition = this.compileExpression(clause.condition);
 					if (groupByIndex >= 0 && i > groupByIndex) {
 						havingConditions.push(condition);
+					} else if (currentIncludeBatch && currentIncludeBatch.length > 0) {
+						// WHERE after WITH: attach to current includes
+						// For nested includes, attach to last include in the batch
+						const targetInclude =
+							currentIncludeBatch[currentIncludeBatch.length - 1];
+						if (targetInclude.where) {
+							// Combine with existing where using AND
+							(targetInclude as { where: WhereIntent }).where = {
+								kind: 'and',
+								conditions: [targetInclude.where, condition],
+							};
+						} else {
+							(targetInclude as { where: WhereIntent }).where = condition;
+						}
 					} else {
 						whereConditions.push(condition);
 					}
@@ -347,11 +363,31 @@ export class NqlCompiler {
 					select = this.compileSelectClause(clause);
 					distinct = clause.distinct || undefined;
 					break;
-				case 'with':
-					include = this.compileWithClause(clause);
+				case 'with': {
+					const newIncludes = this.compileWithClause(clause) as IncludeIntent[];
+					// Check if this WITH should be nested under the previous include
+					if (currentIncludeBatch && currentIncludeBatch.length > 0) {
+						// Nested include: attach to last include's include array
+						const parentInclude =
+							currentIncludeBatch[currentIncludeBatch.length - 1];
+						const existingNested = parentInclude.include || [];
+						(parentInclude as { include: readonly IncludeIntent[] }).include = [
+							...existingNested,
+							...newIncludes,
+						];
+						// Update current batch to the new includes for WHERE association
+						currentIncludeBatch = newIncludes;
+					} else {
+						// First WITH: add to root includes
+						allIncludes.push(...newIncludes);
+						currentIncludeBatch = newIncludes;
+					}
 					break;
+				}
 				case 'groupBy':
 					groupBy = this.compileGroupByClause(clause);
+					// Reset include context after groupBy
+					currentIncludeBatch = undefined;
 					break;
 				case 'orderBy':
 					orderBy = this.compileOrderByClause(clause);
@@ -364,6 +400,10 @@ export class NqlCompiler {
 					break;
 			}
 		}
+
+		// Use accumulated includes
+		const include: readonly IncludeIntent[] | undefined =
+			allIncludes.length > 0 ? allIncludes : undefined;
 
 		// Combine WHERE conditions
 		let where: WhereIntent | undefined;

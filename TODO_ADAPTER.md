@@ -208,6 +208,10 @@ eb(eb.ref('prev.path'), '||', eb.ref('node.${traversal.nodeId}')).as('path')
 - [x] ✅ assertWindowFunctionsSupported() capability guard
 - [x] ✅ 17 unit tests for window function compilation
 - [x] ✅ 12 E2E tests with real PostgreSQL
+- [x] ✅ **Fix:** Window function column names now use `sql.ref()` for CamelCasePlugin support (2026-01-24)
+  - Changed from manual string quoting (`"col"`) to `sql.ref()` references
+  - Respects Kysely's CamelCasePlugin transformations
+  - Files: `packages/adapter-kysely/src/compiler/handlers/expression/window.ts`
 
 ### P3-B: FTS Compiler (PostgreSQL)
 

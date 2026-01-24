@@ -139,7 +139,7 @@ sql.contains: where "t0"."parent_id" is not null
 db.rows.equals: 8
 
 # ─────────────────────────────────────────
-# Query 15: insert into categories set name = "Accessories", slug = "accessories", active = true
+# Query 15: insert into categories set name = 'Accessories', slug = 'accessories', active = true
 # ─────────────────────────────────────────
 --- query: 15
 success: true
@@ -166,17 +166,18 @@ sql.contains: where "id" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 18: update products set deletedAt = "2024-12-01T00:00:00Z" where sku = "OLD-PRODUCT"
-# NOTE: Compiles in dry-run. DB may fail due to $ref wrapper around timestamp.
+# Query 18: update products set deletedAt = '2024-12-01T00:00:00Z' where sku = 'OLD-PRODUCT'
+# NOTE: Soft delete by setting deletedAt timestamp
 # ─────────────────────────────────────────
 --- query: 18
 success: true
 sql.contains: update "ch6_pimdam"."products"
 sql.contains: set "deleted_at" = $1
 sql.contains: where "sku" = $2
+db.rows.equals: 0
 
 # ─────────────────────────────────────────
-# Query 19: update productImages set status = "approved" where id = 1
+# Query 19: update productImages set status = 'approved' where id = 1
 # ─────────────────────────────────────────
 --- query: 19
 success: true
@@ -186,17 +187,17 @@ sql.contains: where "id" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 20: delete from productImages where status = "rejected"
-# NOTE: No rejected images exist in seed data
+# Query 20: delete from productImages where status = 'rejected'
+# NOTE: Seed data has 1 rejected image (iPhone 15 Pro DE)
 # ─────────────────────────────────────────
 --- query: 20
 success: true
 sql.contains: delete from "ch6_pimdam"."product_images"
 sql.contains: where "status" = $1
-db.rows.equals: 0
+db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 21: upsert into products on sku set title = "Updated Product", sku = "NEW-SKU-001", categoryId = 1, active = true
+# Query 21: upsert into products on sku set title = 'Updated Product', sku = 'NEW-SKU-001', categoryId = 1, active = true
 # ─────────────────────────────────────────
 --- query: 21
 success: true

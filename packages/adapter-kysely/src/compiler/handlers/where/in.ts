@@ -4,6 +4,7 @@
  */
 
 import type { WhereInIntent } from '@dbsp/core';
+import { resolveFieldAlias } from '../../helpers.js';
 import type { WhereHandler } from '../../types.js';
 
 /**
@@ -11,7 +12,7 @@ import type { WhereHandler } from '../../types.js';
  * Returns false literal for empty arrays (no values can match).
  */
 export const inHandler: WhereHandler<WhereInIntent> = (
-	_ctx,
+	ctx,
 	eb,
 	intent,
 	alias,
@@ -20,5 +21,11 @@ export const inHandler: WhereHandler<WhereInIntent> = (
 	if (intent.values.length === 0) {
 		return eb.lit(false);
 	}
-	return eb(`${alias}.${intent.field}`, 'in', intent.values);
+	// P1: Resolve correct alias for fields that may be in joined tables
+	const rootTable =
+		ctx.plan.intent.type === 'select' ? ctx.plan.intent.from : '';
+	const resolvedAlias = rootTable
+		? resolveFieldAlias(intent.field, alias, rootTable, ctx.model, ctx.state)
+		: alias;
+	return eb(`${resolvedAlias}.${intent.field}`, 'in', intent.values);
 };

@@ -12,6 +12,9 @@ import type { ExpressionHandler } from '../../types.js';
 /**
  * Compiles a window function expression.
  * Produces SQL like: ROW_NUMBER() OVER (PARTITION BY x ORDER BY y) AS alias
+ *
+ * Uses sql.ref() for column references to leverage Kysely's CamelCasePlugin
+ * for automatic name transformation.
  */
 export const windowHandler: ExpressionHandler<WindowIntent> = (
 	_ctx,
@@ -21,50 +24,54 @@ export const windowHandler: ExpressionHandler<WindowIntent> = (
 ) => {
 	const { function: fn, field, alias, over } = intent;
 
-	// Build the OVER clause parts
-	const partitionByParts = over.partitionBy?.length
-		? over.partitionBy.map((col) => `"${col}"`).join(', ')
-		: '';
+	// Build partition by columns using sql.ref() for proper name transformation
+	const partitionByRefs = over.partitionBy?.length
+		? over.partitionBy.map((col) => sql.ref(`${tableAlias}.${col}`))
+		: [];
 
-	const orderByParts = over.orderBy?.length
-		? over.orderBy
-				.map((o) => {
-					const dir = o.direction?.toUpperCase() ?? 'ASC';
-					return `"${o.field}" ${dir}`;
-				})
-				.join(', ')
-		: '';
+	// Build order by expressions using sql.ref() for column + direction
+	const orderByExprs = over.orderBy?.length
+		? over.orderBy.map((o) => {
+				const dir = o.direction?.toUpperCase() ?? 'ASC';
+				return sql`${sql.ref(`${tableAlias}.${o.field}`)} ${sql.raw(dir)}`;
+			})
+		: [];
 
-	// Build OVER clause
-	const overParts: string[] = [];
-	if (partitionByParts) {
-		overParts.push(`PARTITION BY ${partitionByParts}`);
+	// Build OVER clause components
+	let overClause;
+	if (partitionByRefs.length > 0 && orderByExprs.length > 0) {
+		overClause = sql`PARTITION BY ${sql.join(partitionByRefs, sql`, `)} ORDER BY ${sql.join(orderByExprs, sql`, `)}`;
+	} else if (partitionByRefs.length > 0) {
+		overClause = sql`PARTITION BY ${sql.join(partitionByRefs, sql`, `)}`;
+	} else if (orderByExprs.length > 0) {
+		overClause = sql`ORDER BY ${sql.join(orderByExprs, sql`, `)}`;
+	} else {
+		overClause = null;
 	}
-	if (orderByParts) {
-		overParts.push(`ORDER BY ${orderByParts}`);
-	}
-	const overClause = overParts.length ? overParts.join(' ') : '';
 
-	// Build the function call
-	let functionCall: string;
+	// Build the window function expression
+	let windowExpr;
 	if (isAggregateWindowFunction(fn)) {
-		// Aggregate window functions: SUM("field"), AVG("field"), etc.
+		// Aggregate window functions: SUM(field), AVG(field), etc.
 		if (!field) {
 			throw new CompilationError(
 				`Window function '${fn}' requires a field parameter`,
 			);
 		}
-		functionCall = `${fn.toUpperCase()}("${tableAlias}"."${field}")`;
+		const fieldRef = sql.ref(`${tableAlias}.${field}`);
+		if (overClause) {
+			windowExpr = sql`${sql.raw(fn.toUpperCase())}(${fieldRef}) OVER (${overClause})`;
+		} else {
+			windowExpr = sql`${sql.raw(fn.toUpperCase())}(${fieldRef}) OVER ()`;
+		}
 	} else {
 		// Ranking functions: ROW_NUMBER(), RANK(), DENSE_RANK()
-		functionCall = `${fn.toUpperCase()}()`;
+		if (overClause) {
+			windowExpr = sql`${sql.raw(fn.toUpperCase())}() OVER (${overClause})`;
+		} else {
+			windowExpr = sql`${sql.raw(fn.toUpperCase())}() OVER ()`;
+		}
 	}
 
-	// Build the full expression: FUNCTION() OVER (...) AS "alias"
-	const fullExpr = overClause
-		? `${functionCall} OVER (${overClause})`
-		: `${functionCall} OVER ()`;
-
-	// Use sql template tag to add the window function as a select expression
-	return query.select(sql<unknown>`${sql.raw(fullExpr)}`.as(alias));
+	return query.select(windowExpr.as(alias));
 };

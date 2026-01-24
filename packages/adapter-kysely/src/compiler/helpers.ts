@@ -13,6 +13,22 @@ import type {
 import type { CompilerState } from './types.js';
 
 // ============================================================================
+// Naming Convention Helpers
+// ============================================================================
+
+/**
+ * Convert camelCase to snake_case.
+ * Used to match logical field names (from intent) to physical column names (in model).
+ *
+ * @example
+ * camelToSnake('bookingPeriod') // => 'booking_period'
+ * camelToSnake('roomId') // => 'room_id'
+ */
+export function camelToSnake(str: string): string {
+	return str.replace(/([A-Z])/g, '_$1').toLowerCase();
+}
+
+// ============================================================================
 // Alias Management
 // ============================================================================
 
@@ -290,4 +306,77 @@ export function collectJsonAggIncludes(
 	}
 
 	return results;
+}
+
+// ============================================================================
+// Field Alias Resolution (P1: WHERE after WITH)
+// ============================================================================
+
+/**
+ * Resolve the correct table alias for a field in WHERE clause.
+ *
+ * When using `table | with relation | where field = value`, the field might belong
+ * to the joined relation table, not the root table. This function finds the correct alias.
+ *
+ * @param field - The field name to resolve
+ * @param defaultAlias - The default alias to use (usually root table alias)
+ * @param rootTable - The root table name
+ * @param model - The model IR for schema lookup
+ * @param state - Compiler state with joined relations info
+ * @returns The correct alias for the field
+ */
+export function resolveFieldAlias(
+	field: string,
+	defaultAlias: string,
+	rootTable: string,
+	model: ModelIR,
+	state: CompilerState,
+): string {
+	// Convert logical field name to physical for comparison
+	// Intent uses camelCase (bookingPeriod) but model may use snake_case (booking_period)
+	const physicalField = camelToSnake(field);
+
+	// Helper to check if column matches (handles both naming conventions)
+	const columnMatches = (columnName: string): boolean =>
+		columnName === field || columnName === physicalField;
+
+	// 1. Check if field exists in root table
+	const rootTableDef = model.getTable(rootTable);
+	if (rootTableDef) {
+		const rootHasField = rootTableDef.columns.some((c) =>
+			columnMatches(c.name),
+		);
+		if (rootHasField) {
+			return defaultAlias;
+		}
+	}
+
+	// 2. Check if field exists in any joined include relation
+	for (const [_relationName, info] of state.joinedIncludeRelations) {
+		const joinedTableDef = model.getTable(info.targetTable);
+		if (joinedTableDef) {
+			const joinedHasField = joinedTableDef.columns.some((c) =>
+				columnMatches(c.name),
+			);
+			if (joinedHasField) {
+				return info.alias;
+			}
+		}
+	}
+
+	// 3. Check if field exists in any joined filter relation
+	for (const [_relationName, info] of state.joinedFilterRelations) {
+		const joinedTableDef = model.getTable(info.targetTable);
+		if (joinedTableDef) {
+			const joinedHasField = joinedTableDef.columns.some((c) =>
+				columnMatches(c.name),
+			);
+			if (joinedHasField) {
+				return info.alias;
+			}
+		}
+	}
+
+	// 4. Fallback to default alias (for backward compatibility)
+	return defaultAlias;
 }

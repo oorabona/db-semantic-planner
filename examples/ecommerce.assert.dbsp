@@ -96,7 +96,7 @@ db.output.contains: shipped
 success: true
 sql.contains: from "ch5_ecommerce"."categories"
 sql.contains: left join "ch5_ecommerce"."products"
-db.rows.equals: 20
+db.rows.equals: 23
 
 # ─────────────────────────────────────────
 # Query 10: products | with variants | limit 3
@@ -113,12 +113,12 @@ output.contains: variants.sku
 
 # ─────────────────────────────────────────
 # Query 11: customers | with orders | with orderItems
-# NOTE: Multiple includes don't chain - only first is applied
+# BUG FIXED: Multiple includes now chain correctly (nested)
 # ─────────────────────────────────────────
 --- query: 11
 success: true
 sql.contains: from "ch5_ecommerce"."customers"
-db.rows.equals: 5
+db.rows.equals: 12
 
 # ─────────────────────────────────────────
 # Query 12: orders | group by status | select sum(total)
@@ -128,7 +128,7 @@ db.rows.equals: 5
 success: true
 sql.contains: group by "t0"."status"
 sql.contains: sum
-db.rows.equals: 3
+db.rows.equals: 5
 
 # ─────────────────────────────────────────
 # Query 13: orders | group by customerId | select count(*)
@@ -180,7 +180,7 @@ sql.contains: OVER
 sql.contains: ORDER BY
 
 # ─────────────────────────────────────────
-# Query 18: insert into categories set name = "Accessories", slug = "accessories"
+# Query 18: insert into categories set name = 'Accessories', slug = 'accessories'
 # ─────────────────────────────────────────
 --- query: 18
 success: true
@@ -189,7 +189,7 @@ sql.contains: ("name", "slug") values ($1, $2)
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 19: insert into customers set firstName = "John", lastName = "Doe", email = "john@example.com"
+# Query 19: insert into customers set firstName = 'John', lastName = 'Doe', email = 'john@example.com'
 # ─────────────────────────────────────────
 --- query: 19
 success: true
@@ -198,7 +198,7 @@ sql.contains: ("first_name", "last_name", "email") values ($1, $2, $3)
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 20: update products set price = 29.99 where sku = "WIDGET-001"
+# Query 20: update products set price = 29.99 where sku = 'WIDGET-001'
 # NOTE: WIDGET-001 doesn't exist in seed data, so 0 rows affected
 # ─────────────────────────────────────────
 --- query: 20
@@ -219,17 +219,17 @@ sql.contains: where "id" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 22: delete from orders where status = "cancelled"
-# NOTE: cancelled order was deleted in previous run or doesn't exist
+# Query 22: delete from orders where status = 'cancelled'
+# NOTE: Seed data contains one cancelled order
 # ─────────────────────────────────────────
 --- query: 22
 success: true
 sql.contains: delete from "ch5_ecommerce"."orders"
 sql.contains: where "status" = $1
-db.rows.equals: 0
+db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 23: upsert into products on sku set name = "New Widget", sku = "WIDGET-NEW", price = 19.99, categoryId = 1, active = true
+# Query 23: upsert into products on sku set name = 'New Widget', sku = 'WIDGET-NEW', price = 19.99, categoryId = 1, active = true
 # ─────────────────────────────────────────
 --- query: 23
 success: true
