@@ -6,7 +6,7 @@
  * SQL generation tests are in adapter-kysely/src/recursive-query-builder.test.ts
  */
 
-import { belongsTo, defineSchemaBuilder, eq, hasMany } from '@dbsp/core';
+import { buildModelFromResolvedSchema, defineSchema, eq } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import type { Adapter, AdapterCapabilities } from '../adapter.js';
 import { createRecursiveBuilder } from './recursive-query-builder.js';
@@ -15,66 +15,104 @@ import { createRecursiveBuilder } from './recursive-query-builder.js';
 // Test Schema - Role Hierarchy with Edge Table
 // ============================================================================
 
-const roleHierarchyModel = defineSchemaBuilder({
-	roles: {
-		id: { type: 'uuid' },
-		name: { type: 'string' },
-	},
-	roleEdges: {
-		id: { type: 'uuid' },
-		fromRoleId: { type: 'uuid' },
-		toRoleId: { type: 'uuid' },
-	},
-	permissions: {
-		id: { type: 'uuid' },
-		name: { type: 'string' },
-	},
-	rolePermissions: {
-		id: { type: 'uuid' },
-		roleId: { type: 'uuid' },
-		permissionId: { type: 'uuid' },
-	},
-})
-	.relations({
-		roleEdges: {
-			fromRole: belongsTo('roles', { foreignKey: 'fromRoleId' }),
-			toRole: belongsTo('roles', { foreignKey: 'toRoleId' }),
+const roleHierarchyModel = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			roles: {
+				id: { type: 'uuid', primaryKey: true },
+				name: { type: 'string' },
+			},
+			roleEdges: {
+				id: { type: 'uuid', primaryKey: true },
+				fromRoleId: { type: 'uuid' },
+				toRoleId: { type: 'uuid' },
+			},
+			permissions: {
+				id: { type: 'uuid', primaryKey: true },
+				name: { type: 'string' },
+			},
+			rolePermissions: {
+				id: { type: 'uuid', primaryKey: true },
+				roleId: { type: 'uuid' },
+				permissionId: { type: 'uuid' },
+			},
 		},
-		roles: {
-			outgoingEdges: hasMany('roleEdges', { foreignKey: 'fromRoleId' }),
-			incomingEdges: hasMany('roleEdges', { foreignKey: 'toRoleId' }),
-			rolePermissions: hasMany('rolePermissions', { foreignKey: 'roleId' }),
+		{
+			relations: {
+				'roleEdges.fromRole': {
+					kind: 'belongsTo',
+					target: 'roles',
+					foreignKey: 'fromRoleId',
+				},
+				'roleEdges.toRole': {
+					kind: 'belongsTo',
+					target: 'roles',
+					foreignKey: 'toRoleId',
+				},
+				'roles.outgoingEdges': {
+					kind: 'hasMany',
+					target: 'roleEdges',
+					foreignKey: 'fromRoleId',
+				},
+				'roles.incomingEdges': {
+					kind: 'hasMany',
+					target: 'roleEdges',
+					foreignKey: 'toRoleId',
+				},
+				'roles.rolePermissions': {
+					kind: 'hasMany',
+					target: 'rolePermissions',
+					foreignKey: 'roleId',
+				},
+				'rolePermissions.role': {
+					kind: 'belongsTo',
+					target: 'roles',
+					foreignKey: 'roleId',
+				},
+				'rolePermissions.permission': {
+					kind: 'belongsTo',
+					target: 'permissions',
+					foreignKey: 'permissionId',
+				},
+				'permissions.rolePermissions': {
+					kind: 'hasMany',
+					target: 'rolePermissions',
+					foreignKey: 'permissionId',
+				},
+			},
 		},
-		rolePermissions: {
-			role: belongsTo('roles', { foreignKey: 'roleId' }),
-			permission: belongsTo('permissions', { foreignKey: 'permissionId' }),
-		},
-		permissions: {
-			rolePermissions: hasMany('rolePermissions', {
-				foreignKey: 'permissionId',
-			}),
-		},
-	})
-	.build();
+	),
+);
 
 // ============================================================================
 // Test Schema - Category Hierarchy (Adjacency List)
 // ============================================================================
 
-const categoryModel = defineSchemaBuilder({
-	categories: {
-		id: { type: 'uuid' },
-		name: { type: 'string' },
-		parentId: { type: { type: 'uuid' }, nullable: true },
-	},
-})
-	.relations({
-		categories: {
-			parent: belongsTo('categories', { foreignKey: 'parentId' }),
-			children: hasMany('categories', { foreignKey: 'parentId' }),
+const categoryModel = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			categories: {
+				id: { type: 'uuid', primaryKey: true },
+				name: { type: 'string' },
+				parentId: { type: 'uuid', nullable: true },
+			},
 		},
-	})
-	.build();
+		{
+			relations: {
+				'categories.parent': {
+					kind: 'belongsTo',
+					target: 'categories',
+					foreignKey: 'parentId',
+				},
+				'categories.children': {
+					kind: 'hasMany',
+					target: 'categories',
+					foreignKey: 'parentId',
+				},
+			},
+		},
+	),
+);
 
 // ============================================================================
 // Helper - Create Mock Adapter for Intent-Building Tests

@@ -187,32 +187,6 @@ export {
 } from './intent-ast.js';
 
 // ============================================================================
-// Schema Builder
-// ============================================================================
-
-export type {
-	// Builder types
-	ColumnDef,
-	ColumnDefInput,
-	ModelRef,
-	RelationDef,
-	RelationHints,
-	RelationsDef,
-	SchemaBuilder,
-	SchemaBuilderWithRelations,
-	TableDef,
-} from './schema-builder.js';
-export {
-	belongsTo,
-	belongsToMany,
-	// Builder entry point (returns SchemaBuilder)
-	defineSchemaBuilder,
-	hasMany,
-	// Relation helpers
-	hasOne,
-} from './schema-builder.js';
-
-// ============================================================================
 // Schema DSL (User-facing API)
 // ============================================================================
 

@@ -8,43 +8,39 @@
  */
 
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import {
-	belongsTo,
-	defineSchemaBuilder,
-	hasMany,
-	type WhereIntent,
-} from '../schema-builder.js';
-import { and, createOrm, eq, or } from './index.js';
+import type { WhereIntent } from '../intent-ast.js';
+import { and, buildModelFromResolvedSchema, createOrm, defineSchema, eq, or } from './index.js';
 
 // Schema with relations for testing
-const testSchema = defineSchemaBuilder({
-	users: {
-		id: { type: 'number' },
-		name: { type: 'string' },
-		email: { type: 'string' },
-		active: { type: 'boolean' },
-		role: { type: 'string' },
-	},
-	posts: {
-		id: { type: 'number' },
-		title: { type: 'string' },
-		authorId: { type: 'number' },
-		reviewerId: { type: 'number' },
-	},
-})
-	.relations({
-		users: {
-			// Two relations to posts (ambiguous)
-			authoredPosts: hasMany('posts', { foreignKey: 'authorId' }),
-			reviewedPosts: hasMany('posts', { foreignKey: 'reviewerId' }),
+const testSchema = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+				email: { type: 'string' },
+				active: { type: 'boolean' },
+				role: { type: 'string' },
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: { type: 'string' },
+				authorId: { type: 'integer' },
+				reviewerId: { type: 'integer' },
+			},
 		},
-		posts: {
-			// Two relations to users (ambiguous by target)
-			author: belongsTo('users', { foreignKey: 'authorId' }),
-			reviewer: belongsTo('users', { foreignKey: 'reviewerId' }),
+		{
+			relations: {
+				// Two relations from users to posts (ambiguous)
+				'users.authoredPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' },
+				'users.reviewedPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'reviewerId' },
+				// Two relations from posts to users (ambiguous by target)
+				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' },
+				'posts.reviewer': { kind: 'belongsTo', target: 'users', foreignKey: 'reviewerId' },
+			},
 		},
-	})
-	.build();
+	),
+);
 
 describe('DX-011: API Improvements', () => {
 	describe('Block 1: where() AND chaining', () => {

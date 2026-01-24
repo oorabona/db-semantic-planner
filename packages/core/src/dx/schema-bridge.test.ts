@@ -111,7 +111,7 @@ describe('buildModelFromSchema', () => {
 
 			expect(findCol('textCol')?.type).toBe('string');
 			expect(findCol('stringCol')?.type).toBe('string');
-			expect(findCol('intCol')?.type).toBe('number');
+			expect(findCol('intCol')?.type).toBe('integer'); // integer preserved in new API
 			expect(findCol('numCol')?.type).toBe('number');
 			expect(findCol('bigCol')?.type).toBe('bigint');
 			expect(findCol('decCol')?.type).toBe('number');

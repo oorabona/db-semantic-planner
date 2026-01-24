@@ -4,6 +4,7 @@
  * Transforms NQL AST to IntentAST (from @dbsp/core)
  */
 
+import type { SortDirection } from '@dbsp/types';
 import type {
 	NqlBetweenExpression,
 	NqlBinaryExpression,
@@ -296,7 +297,7 @@ export interface OrderByIntent {
 	readonly direction: SortDirection;
 }
 
-export type SortDirection = 'asc' | 'desc';
+export type { SortDirection } from '@dbsp/types';
 
 export type MutationIntent =
 	| InsertIntent

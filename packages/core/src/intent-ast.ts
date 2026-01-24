@@ -55,11 +55,11 @@ export interface RecursiveExistsOptions {
 }
 
 // ============================================================================
-// Sort Direction
+// Sort Direction (re-exported from @dbsp/types for backwards compat)
 // ============================================================================
 
-/** Sort direction */
-export type SortDirection = 'asc' | 'desc';
+import type { SortDirection } from '@dbsp/types';
+export type { SortDirection } from '@dbsp/types';
 
 /** Null handling in sort */
 export type NullsPosition = 'first' | 'last';
@@ -413,15 +413,11 @@ export interface WhereInIntent {
 export type RangeOperator = 'overlaps' | 'contains' | 'containedBy';
 
 /**
- * Range value representation for PostgreSQL range types.
+ * Range value representation for PostgreSQL range types (re-exported from @dbsp/types).
  * Supports: daterange, tsrange, tstzrange, int4range, int8range, numrange
  */
-export interface RangeValue {
-	readonly lower: unknown;
-	readonly upper: unknown;
-	/** Bounds specification: '[)' (default), '[]', '()', '(]' */
-	readonly bounds?: '[)' | '[]' | '()' | '(]';
-}
+import type { RangeValue } from '@dbsp/types';
+export type { RangeValue } from '@dbsp/types';
 
 /**
  * Range filter: field overlaps/contains/containedBy range value

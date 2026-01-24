@@ -25,6 +25,7 @@
 		"lint:fix": "biome check --write src tests"
 	},
 	"dependencies": {
+		"@dbsp/types": "workspace:",
 		"chevrotain": "catalog:"
 	},
 	"devDependencies": {

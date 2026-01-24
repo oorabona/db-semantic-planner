@@ -1,50 +1,70 @@
 import { describe, expect, it } from 'vitest';
-import { belongsTo, defineSchemaBuilder, hasMany } from '../schema-builder.js';
+import { defineSchema } from '../schema-dsl.js';
 import { and, eq, inArray } from './filters.js';
 import { createOrm } from './orm.js';
+import { buildModelFromResolvedSchema } from './schema-bridge.js';
 
 /**
  * Schema for testing API shortcuts.
  */
-const testSchema = defineSchemaBuilder({
-	users: {
-		id: { type: 'number' },
-		name: { type: 'string' },
-		email: { type: 'string' },
-	},
-	order_lines: {
-		order_id: { type: 'number' },
-		product_id: { type: 'number' },
-		quantity: { type: 'number' },
-		price: { type: 'number' },
-	},
-	posts: {
-		id: { type: 'number' },
-		title: { type: 'string' },
-		content: { type: 'string' },
-		author_id: { type: 'number' },
-	},
-	comments: {
-		id: { type: 'number' },
-		text: { type: 'string' },
-		post_id: { type: 'number' },
-		author_id: { type: 'number' },
-	},
-})
-	.relations({
-		users: {
-			posts: hasMany('posts', { foreignKey: 'author_id' }),
+const testSchema = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+				email: { type: 'string' },
+			},
+			order_lines: {
+				order_id: { type: 'integer' },
+				product_id: { type: 'integer' },
+				quantity: { type: 'integer' },
+				price: { type: 'decimal' },
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: { type: 'string' },
+				content: { type: 'text' },
+				author_id: { type: 'integer' },
+			},
+			comments: {
+				id: { type: 'integer', primaryKey: true },
+				text: { type: 'text' },
+				post_id: { type: 'integer' },
+				author_id: { type: 'integer' },
+			},
 		},
-		posts: {
-			author: belongsTo('users', { foreignKey: 'author_id' }),
-			comments: hasMany('comments', { foreignKey: 'post_id' }),
+		{
+			relations: {
+				'users.posts': {
+					kind: 'hasMany',
+					target: 'posts',
+					foreignKey: 'author_id',
+				},
+				'posts.author': {
+					kind: 'belongsTo',
+					target: 'users',
+					foreignKey: 'author_id',
+				},
+				'posts.comments': {
+					kind: 'hasMany',
+					target: 'comments',
+					foreignKey: 'post_id',
+				},
+				'comments.post': {
+					kind: 'belongsTo',
+					target: 'posts',
+					foreignKey: 'post_id',
+				},
+				'comments.author': {
+					kind: 'belongsTo',
+					target: 'users',
+					foreignKey: 'author_id',
+				},
+			},
 		},
-		comments: {
-			post: belongsTo('posts', { foreignKey: 'post_id' }),
-			author: belongsTo('users', { foreignKey: 'author_id' }),
-		},
-	})
-	.build();
+	),
+);
 
 describe('DX-008: API Shortcuts', () => {
 	const orm = createOrm({ model: testSchema });

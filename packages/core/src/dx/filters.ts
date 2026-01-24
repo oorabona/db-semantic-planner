@@ -217,12 +217,8 @@ export function isNull(field: string): WhereNullIntent {
  * Range value for PostgreSQL range types.
  * @see WhereRangeIntent
  */
-export interface RangeValue {
-	readonly lower: unknown;
-	readonly upper: unknown;
-	/** Bounds specification: '[)' (default), '[]', '()', '(]' */
-	readonly bounds?: '[)' | '[]' | '()' | '(]';
-}
+import type { RangeValue } from '@dbsp/types';
+export type { RangeValue } from '@dbsp/types';
 
 /**
  * Range OVERLAPS check: field && range (PostgreSQL)

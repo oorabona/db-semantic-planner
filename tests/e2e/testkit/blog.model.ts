@@ -2,13 +2,13 @@
  * Blog ModelIR
  *
  * Schema definition for semantic query planning.
- * Uses the defineSchemaBuilder API with explicit relations.
+ * Uses defineSchema API with explicit relations.
  */
 
-import { belongsTo, defineSchemaBuilder, hasMany } from '@dbsp/core';
+import { buildModelFromResolvedSchema, defineSchema } from '@dbsp/core';
 
 /**
- * Blog schema model for E2E tests.
+ * Blog schema for E2E tests.
  *
  * Includes:
  * - authors
@@ -21,38 +21,53 @@ import { belongsTo, defineSchemaBuilder, hasMany } from '@dbsp/core';
  * - posts.comments (hasMany)
  * - comments.post (belongsTo)
  */
-export const blogModel = defineSchemaBuilder({
-	authors: {
-		id: { type: 'integer', primaryKey: true },
-		name: { type: 'string' },
-		email: { type: 'string' },
-	},
-	posts: {
-		id: { type: 'integer', primaryKey: true },
-		title: { type: 'string' },
-		content: { type: 'string' },
-		author_id: { type: 'integer' },
-		published: { type: 'boolean' },
-		created_at: { type: 'timestamp' },
-	},
-	comments: {
-		id: { type: 'integer', primaryKey: true },
-		post_id: { type: 'integer' },
-		author_name: { type: 'string' },
-		content: { type: 'string' },
-		created_at: { type: 'timestamp' },
-	},
-})
-	.relations({
+const blogSchema = defineSchema(
+	{
 		authors: {
-			posts: hasMany('posts', { foreignKey: 'author_id' }),
+			id: { type: 'integer', primaryKey: true },
+			name: { type: 'string' },
+			email: { type: 'string' },
 		},
 		posts: {
-			author: belongsTo('authors', { foreignKey: 'author_id' }),
-			comments: hasMany('comments', { foreignKey: 'post_id' }),
+			id: { type: 'integer', primaryKey: true },
+			title: { type: 'string' },
+			content: { type: 'string' },
+			author_id: { type: 'integer' },
+			published: { type: 'boolean' },
+			created_at: { type: 'timestamp' },
 		},
 		comments: {
-			post: belongsTo('posts', { foreignKey: 'post_id' }),
+			id: { type: 'integer', primaryKey: true },
+			post_id: { type: 'integer' },
+			author_name: { type: 'string' },
+			content: { type: 'string' },
+			created_at: { type: 'timestamp' },
 		},
-	})
-	.build();
+	},
+	{
+		relations: {
+			'authors.posts': {
+				kind: 'hasMany',
+				target: 'posts',
+				foreignKey: 'author_id',
+			},
+			'posts.author': {
+				kind: 'belongsTo',
+				target: 'authors',
+				foreignKey: 'author_id',
+			},
+			'posts.comments': {
+				kind: 'hasMany',
+				target: 'comments',
+				foreignKey: 'post_id',
+			},
+			'comments.post': {
+				kind: 'belongsTo',
+				target: 'posts',
+				foreignKey: 'post_id',
+			},
+		},
+	},
+);
+
+export const blogModel = buildModelFromResolvedSchema(blogSchema);

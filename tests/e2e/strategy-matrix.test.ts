@@ -14,13 +14,11 @@
 
 import type { PlanReport } from '@dbsp/core';
 import {
-	belongsTo,
+	buildModelFromResolvedSchema,
 	createOrm,
-	defineSchemaBuilder,
+	defineSchema,
 	eq,
 	exists,
-	hasMany,
-	hasOne,
 	POSTGRESQL_CAPABILITIES,
 } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -123,26 +121,27 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 		describe('E2E-004-A2: hasOne uses JOIN strategy', () => {
 			it('should auto-select JOIN for hasOne relation', async () => {
 				// Create schema with hasOne relationship
-				const schemaWithProfile = defineSchemaBuilder({
-					users: {
-						id: 'integer',
-						name: 'string',
-					},
-					profiles: {
-						id: 'integer',
-						user_id: 'integer',
-						bio: 'string',
-					},
-				})
-					.relations({
-						users: {
-							profile: hasOne('profiles', { foreignKey: 'user_id' }),
+				const schemaWithProfile = buildModelFromResolvedSchema(
+					defineSchema(
+						{
+							users: {
+								id: { type: 'integer', primaryKey: true },
+								name: { type: 'string' },
+							},
+							profiles: {
+								id: { type: 'integer', primaryKey: true },
+								user_id: { type: 'integer' },
+								bio: { type: 'string' },
+							},
 						},
-						profiles: {
-							user: belongsTo('users', { foreignKey: 'user_id' }),
+						{
+							relations: {
+								'users.profile': { kind: 'hasMany', target: 'profiles', foreignKey: 'user_id' },
+								'profiles.user': { kind: 'belongsTo', target: 'users', foreignKey: 'user_id' },
+							},
 						},
-					})
-					.build();
+					),
+				);
 
 				const adapter = await getTestAdapter();
 				const orm = createOrm({
@@ -263,27 +262,26 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 		describe('E2E-004-F1: relation hint overrides auto', () => {
 			it('should use JOIN when schema hint specifies it', async () => {
 				// Schema with explicit includeStrategy hint
-				const schemaWithJoinHint = defineSchemaBuilder({
-					users: {
-						id: 'integer',
-						name: 'string',
-					},
-					posts: {
-						id: 'integer',
-						user_id: 'integer',
-						title: 'string',
-					},
-				})
-					.relations({
-						users: {
-							posts: hasMany(
-								'posts',
-								{ foreignKey: 'user_id' },
-								{ includeStrategy: 'join' },
-							),
+				const schemaWithJoinHint = buildModelFromResolvedSchema(
+					defineSchema(
+						{
+							users: {
+								id: { type: 'integer', primaryKey: true },
+								name: { type: 'string' },
+							},
+							posts: {
+								id: { type: 'integer', primaryKey: true },
+								user_id: { type: 'integer' },
+								title: { type: 'string' },
+							},
 						},
-					})
-					.build();
+						{
+							relations: {
+								'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'user_id', includeStrategy: 'join' },
+							},
+						},
+					),
+				);
 
 				const adapter = await getTestAdapter();
 				const orm = createOrm({

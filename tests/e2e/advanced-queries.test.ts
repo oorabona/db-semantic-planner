@@ -10,14 +10,13 @@
 
 import {
 	and,
-	belongsTo,
+	buildModelFromResolvedSchema,
 	createOrm,
-	defineSchemaBuilder,
+	defineSchema,
 	eq,
 	exists,
 	gt,
 	gte,
-	hasMany,
 	isNotNull,
 	isNull,
 	lt,
@@ -37,47 +36,46 @@ import {
 const SCHEMA = 'advanced_e2e';
 
 // Define the model with all necessary fields
-const advancedModel = defineSchemaBuilder({
-	products: {
-		id: 'integer',
-		name: { type: 'string' },
-		category: { type: 'string' },
-		price: 'decimal',
-		stock: 'integer',
-		created_at: 'timestamp',
-		deleted_at: 'timestamp',
-	},
-	orders: {
-		id: 'integer',
-		product_id: 'integer',
-		quantity: 'integer',
-		total_price: 'decimal',
-		customer_name: { type: 'string' },
-		status: { type: 'string' },
-		created_at: 'timestamp',
-	},
-	reviews: {
-		id: 'integer',
-		product_id: 'integer',
-		rating: 'integer',
-		comment: { type: 'string' },
-		reviewer_name: { type: 'string' },
-		created_at: 'timestamp',
-	},
-})
-	.relations({
-		products: {
-			orders: hasMany('orders', { foreignKey: 'product_id' }),
-			reviews: hasMany('reviews', { foreignKey: 'product_id' }),
+const advancedModel = buildModelFromResolvedSchema(
+	defineSchema(
+		{
+			products: {
+				id: { type: 'integer', primaryKey: true },
+				name: { type: 'string' },
+				category: { type: 'string' },
+				price: { type: 'decimal' },
+				stock: { type: 'integer' },
+				created_at: { type: 'timestamp' },
+				deleted_at: { type: 'timestamp' },
+			},
+			orders: {
+				id: { type: 'integer', primaryKey: true },
+				product_id: { type: 'integer' },
+				quantity: { type: 'integer' },
+				total_price: { type: 'decimal' },
+				customer_name: { type: 'string' },
+				status: { type: 'string' },
+				created_at: { type: 'timestamp' },
+			},
+			reviews: {
+				id: { type: 'integer', primaryKey: true },
+				product_id: { type: 'integer' },
+				rating: { type: 'integer' },
+				comment: { type: 'string' },
+				reviewer_name: { type: 'string' },
+				created_at: { type: 'timestamp' },
+			},
 		},
-		orders: {
-			product: belongsTo('products', { foreignKey: 'product_id' }),
+		{
+			relations: {
+				'products.orders': { kind: 'hasMany', target: 'orders', foreignKey: 'product_id' },
+				'products.reviews': { kind: 'hasMany', target: 'reviews', foreignKey: 'product_id' },
+				'orders.product': { kind: 'belongsTo', target: 'products', foreignKey: 'product_id' },
+				'reviews.product': { kind: 'belongsTo', target: 'products', foreignKey: 'product_id' },
+			},
 		},
-		reviews: {
-			product: belongsTo('products', { foreignKey: 'product_id' }),
-		},
-	})
-	.build();
+	),
+);
 
 // Setup functions
 async function createAdvancedSchema(): Promise<void> {

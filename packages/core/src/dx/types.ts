@@ -203,9 +203,10 @@ export type RelationHints = Readonly<Record<string, string>>;
 // ============================================================================
 
 /**
- * Sort direction for orderBy.
+ * Sort direction for orderBy (re-exported from @dbsp/types).
  */
-export type SortDirection = 'asc' | 'desc';
+import type { SortDirection } from '@dbsp/types';
+export type { SortDirection } from '@dbsp/types';
 
 /**
  * Where to place NULL values in sort order.

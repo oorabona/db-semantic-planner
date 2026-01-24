@@ -2,7 +2,14 @@
  * Schema Loader for MCP Server
  *
  * Loads dbsp schema files with security measures to prevent path traversal attacks.
- * Based on packages/cli/src/utils/schema-loader.ts but with enhanced security.
+ *
+ * NOTE: Similar code exists in packages/cli/src/utils/schema-loader.ts
+ * This MCP version has additional security features required for network-exposed services:
+ * - Path traversal protection (validatePath)
+ * - Allowed roots restriction (allowedRoots)
+ * - Typed error codes (SchemaLoadError.code)
+ * The CLI version is intentionally simpler as it runs locally with user trust.
+ * See ARCH-004 for analysis of this intentional duplication.
  */
 
 import { existsSync, realpathSync } from 'node:fs';

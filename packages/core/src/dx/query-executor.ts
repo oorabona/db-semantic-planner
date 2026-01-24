@@ -19,6 +19,7 @@ import {
 } from './errors.js';
 import { and, eq, inArray } from './filters.js';
 import type { RecursiveIncludeConfig } from './intent-builder.js';
+import type { HydrateOptions } from './result-hydrator.js';
 import { ResultHydrator } from './result-hydrator.js';
 import type {
 	CursorPaginatedResult,
@@ -58,14 +59,6 @@ export interface ExecutionContext<TResult = unknown> {
 	setOffset: (count: number) => void;
 	/** Get count via aggregation */
 	getCount: () => Promise<number>;
-}
-
-/**
- * Compile options for adapter.
- */
-export interface CompileOptions {
-	schemaName?: string;
-	model: ModelIR;
 }
 
 // ============================================================================
@@ -113,12 +106,11 @@ export class QueryExecutor<TResult = unknown> {
 	/**
 	 * Build compile options.
 	 */
-	private buildCompileOptions(): CompileOptions {
-		const options: CompileOptions = { model: this.ctx.model };
-		if (this.ctx.schemaName !== undefined) {
-			options.schemaName = this.ctx.schemaName;
-		}
-		return options;
+	private buildCompileOptions(): HydrateOptions {
+		return {
+			model: this.ctx.model,
+			...(this.ctx.schemaName !== undefined && { schemaName: this.ctx.schemaName }),
+		};
 	}
 
 	/**

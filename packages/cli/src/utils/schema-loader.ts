@@ -3,6 +3,12 @@
  *
  * Loads dbsp.schema.ts files using tsx for TypeScript support.
  * Falls back to native import for .js files.
+ *
+ * NOTE: Similar code exists in packages/mcp-server/src/schema-loader.ts
+ * The MCP version has additional security features (path traversal protection,
+ * allowedRoots, error codes) that are required for network-exposed services.
+ * This CLI version is simpler as it runs locally with user trust.
+ * See ARCH-004 for analysis of this intentional duplication.
  */
 
 import { existsSync } from 'node:fs';

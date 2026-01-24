@@ -19,7 +19,7 @@ export interface ManifestColumn {
 	primaryKey?: boolean;
 	nullable?: boolean;
 	unique?: boolean;
-	default?: string;
+	default?: string | number | boolean;
 	references?: {
 		table: string;
 		column?: string;
