@@ -4,7 +4,7 @@ doc-meta:
   scope: project
   type: reference
   created: 2026-01-06
-  updated: 2026-01-23
+  updated: 2026-01-25
 ---
 
 # Documentation Index
@@ -13,7 +13,7 @@ doc-meta:
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
 
-**Status:** ✅ v1.0 Ready (1904 unit tests across 6 packages)
+**Status:** ✅ v1.0 Ready (1971 unit tests across 6 packages)
 
 ## Architecture: Codegen-First (ARCH-002)
 
@@ -95,6 +95,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | **SPEC-002** | [**Cross-Table Pseudo-Columns**](specs/NQL-V2.1-SIMPLIFICATION-SPEC.md#spec-002) | core, nql, adapter | ✅ canonical |
 | **ARCH-004** | [**Type Rationalization**](specs/TYPE-RATIONALIZATION-SPEC.md) | types, core, adapter, nql | ✅ canonical |
 | NQLM | [NQL CLI Migration](../TODO_NQL_MIGRATION.md) | cli | ✅ complete |
+| **ARCH-005** | [**Unified Schema API**](specs/ARCH-005-unified-schema-api.md) | core, cli, adapter | ✅ canonical |
 
 ## Golden Query Tests - ✅ Complete
 

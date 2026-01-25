@@ -339,14 +339,19 @@ describe('SQL Snapshot Utilities', () => {
 	});
 
 	describe('Vitest Custom Matchers', () => {
+		// Note: Custom matchers are registered at runtime via expect.extend()
+		// TypeScript doesn't see them statically, so we use @ts-expect-error
+
 		describe('toMatchSql', () => {
 			it('should match identical SQL', () => {
 				const sql = 'SELECT * FROM users';
+				// @ts-expect-error - toMatchSql is a custom matcher registered at runtime
 				expect(sql).toMatchSql('SELECT * FROM users');
 			});
 
 			it('should match SQL with different whitespace', () => {
 				const sql = 'SELECT   *   FROM   users';
+				// @ts-expect-error - toMatchSql is a custom matcher registered at runtime
 				expect(sql).toMatchSql('SELECT * FROM users');
 			});
 
@@ -356,11 +361,13 @@ describe('SQL Snapshot Utilities', () => {
           FROM users
           WHERE id = $1
         `;
+				// @ts-expect-error - toMatchSql is a custom matcher registered at runtime
 				expect(sql).toMatchSql('SELECT * FROM users WHERE id = $1');
 			});
 
 			it('should fail for different SQL', () => {
 				expect(() => {
+					// @ts-expect-error - toMatchSql is a custom matcher registered at runtime
 					expect('SELECT * FROM users').toMatchSql('SELECT * FROM products');
 				}).toThrow();
 			});
@@ -371,10 +378,12 @@ describe('SQL Snapshot Utilities', () => {
 			// actual snapshot files. These tests verify the matcher is properly set up.
 
 			it('should be defined on expect', () => {
+				// @ts-expect-error - toMatchSqlSnapshot is a custom matcher registered at runtime
 				expect(typeof expect('').toMatchSqlSnapshot).toBe('function');
 			});
 
 			it('should be defined on expect (toMatchSql)', () => {
+				// @ts-expect-error - toMatchSql is a custom matcher registered at runtime
 				expect(typeof expect('').toMatchSql).toBe('function');
 			});
 		});

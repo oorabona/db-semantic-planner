@@ -1,9 +1,5 @@
 import type { Adapter } from '@dbsp/core';
-import {
-	buildModelFromResolvedSchema,
-	createOrm,
-	defineSchema,
-} from '@dbsp/core';
+import { createOrm, schema } from '@dbsp/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -78,14 +74,12 @@ describe('Zero-Config ORM (with adapter)', () => {
 	// See tests/e2e/introspection.test.ts
 
 	describe('createOrm({ model, adapter }) - sync path', () => {
-		const explicitModel = buildModelFromResolvedSchema(
-			defineSchema({
-				users: {
-					id: { type: 'integer', primaryKey: true },
-					name: { type: 'string' },
-				},
-			}),
-		);
+		const explicitModel = schema({
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string',
+			},
+		}).model;
 
 		it('returns OrmInstance synchronously when model is provided', () => {
 			const orm = createOrm({ model: explicitModel, adapter });

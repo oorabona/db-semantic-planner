@@ -5,11 +5,7 @@
  * for column naming transformations.
  */
 
-import {
-	buildModelFromResolvedSchema,
-	defineSchema,
-	type ModelIR,
-} from '@dbsp/core';
+import { fk, schema, type ModelIR } from '@dbsp/core';
 import { CamelCasePlugin, Kysely, PostgresDialect } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -24,24 +20,22 @@ const mockPool = new pg.Pool({
 
 // Create a simple test schema using ModelIR
 function createTestSchema(): ModelIR {
-	return buildModelFromResolvedSchema(
-		defineSchema({
-			users: {
-				id: { type: 'integer', primaryKey: true },
-				firstName: { type: 'string' },
-				lastName: { type: 'string' },
-				emailAddress: { type: 'string' },
-				createdAt: { type: 'timestamp' },
-			},
-			posts: {
-				id: { type: 'integer', primaryKey: true },
-				postTitle: { type: 'string' },
-				postContent: { type: 'text' },
-				authorId: { type: 'integer' },
-				publishedAt: { type: 'timestamp' },
-			},
-		}),
-	);
+	return schema({
+		users: {
+			id: { type: 'integer', primaryKey: true },
+			firstName: 'string',
+			lastName: 'string',
+			emailAddress: 'string',
+			createdAt: 'timestamp',
+		},
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			postTitle: 'string',
+			postContent: 'text',
+			authorId: fk('users', { as: 'author', inverse: 'posts' }),
+			publishedAt: 'timestamp',
+		},
+	}).model;
 }
 
 describe('generateDDL', () => {
@@ -119,16 +113,14 @@ describe('generateDDL', () => {
 
 		it('transforms table names to snake_case', () => {
 			// Create schema with multi-word table names
-			const schema = buildModelFromResolvedSchema(
-				defineSchema({
-					userProfiles: {
-						id: { type: 'integer', primaryKey: true },
-						profileName: { type: 'string' },
-					},
-				}),
-			);
+			const testSchema = schema({
+				userProfiles: {
+					id: { type: 'integer', primaryKey: true },
+					profileName: 'string',
+				},
+			}).model;
 
-			const ddl = generateDDL(db, schema);
+			const ddl = generateDDL(db, testSchema);
 			const allDdl = ddl.join('\n');
 
 			// Table names should be snake_case
@@ -183,33 +175,29 @@ describe('generateDDL', () => {
 		});
 
 		it('generates UNIQUE constraint on column', () => {
-			const schema = buildModelFromResolvedSchema(
-				defineSchema({
-					users: {
-						id: { type: 'integer', primaryKey: true },
-						email: { type: 'string', unique: true },
-					},
-				}),
-			);
+			const testSchema = schema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					email: { type: 'string', unique: true },
+				},
+			}).model;
 
-			const ddl = generateDDL(db, schema);
+			const ddl = generateDDL(db, testSchema);
 			const createUser = ddl.find((s) => s.includes('create table "users"'));
 
 			expect(createUser).toContain('unique');
 		});
 
 		it.skip('generates autoIncrement column (SERIAL in PostgreSQL)', () => {
-			// TODO: autoIncrement not supported in defineSchema API
-			const schema = buildModelFromResolvedSchema(
-				defineSchema({
-					users: {
-						id: { type: 'integer', primaryKey: true },
-						name: { type: 'string' },
-					},
-				}),
-			);
+			// TODO: autoIncrement not supported in schema() API
+			const testSchema = schema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					name: 'string',
+				},
+			}).model;
 
-			const ddl = generateDDL(db, schema);
+			const ddl = generateDDL(db, testSchema);
 			const createUser = ddl.find((s) => s.includes('create table "users"'));
 
 			// Kysely generates SERIAL for PostgreSQL when autoIncrement is set
@@ -217,40 +205,33 @@ describe('generateDDL', () => {
 		});
 
 		it.skip('generates onDelete CASCADE on foreign key', () => {
-			// TODO: onDelete not fully supported in defineSchema API - needs investigation
-			const schema = buildModelFromResolvedSchema(
-				defineSchema({
-					users: {
-						id: { type: 'integer', primaryKey: true },
-					},
-					posts: {
-						id: { type: 'integer', primaryKey: true },
-						userId: {
-							type: 'integer',
-							references: { table: 'users', onDelete: 'CASCADE' },
-						},
-					},
-				}),
-			);
+			// TODO: onDelete not fully supported in schema() API - needs investigation
+			const testSchema = schema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+				},
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					userId: fk('users', { as: 'user', inverse: 'posts' }),
+				},
+			}).model;
 
-			const ddl = generateDDL(db, schema);
+			const ddl = generateDDL(db, testSchema);
 			const fkStatement = ddl.find((s) => s.includes('foreign key'));
 
 			expect(fkStatement).toContain('on delete cascade');
 		});
 
 		it.skip('generates CREATE INDEX statement', () => {
-			// TODO: column-level index: true not generating CREATE INDEX in defineSchema API
-			const schema = buildModelFromResolvedSchema(
-				defineSchema({
-					users: {
-						id: { type: 'integer', primaryKey: true },
-						email: { type: 'string', index: true },
-					},
-				}),
-			);
+			// TODO: column-level index: true not generating CREATE INDEX in schema() API
+			const testSchema = schema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					email: { type: 'string', index: true },
+				},
+			}).model;
 
-			const ddl = generateDDL(db, schema);
+			const ddl = generateDDL(db, testSchema);
 			const indexStatement = ddl.find((s) => s.includes('create index'));
 
 			expect(indexStatement).toContain('idx_users_email');
@@ -258,31 +239,16 @@ describe('generateDDL', () => {
 		});
 
 		it.skip('generates unique index', () => {
-			// TODO: indexes config in defineSchema options needs investigation
-			const schema = buildModelFromResolvedSchema(
-				defineSchema(
-					{
-						users: {
-							id: { type: 'integer', primaryKey: true },
-							email: { type: 'string' },
-							tenantId: { type: 'string' },
-						},
-					},
-					{
-						indexes: {
-							users: [
-								{
-									columns: ['email', 'tenantId'],
-									unique: true,
-									name: 'uk_users_email_tenant',
-								},
-							],
-						},
-					},
-				),
-			);
+			// TODO: indexes config in schema() options needs investigation
+			const testSchema = schema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					email: 'string',
+					tenantId: 'string',
+				},
+			}).model;
 
-			const ddl = generateDDL(db, schema);
+			const ddl = generateDDL(db, testSchema);
 			const indexStatement = ddl.find((s) =>
 				s.includes('uk_users_email_tenant'),
 			);
@@ -305,24 +271,22 @@ describe('generateDDL', () => {
 		});
 
 		it.skip('generates sequence reset statements for tables with autoIncrement', async () => {
-			// TODO: autoIncrement not supported in defineSchema API - needs ModelIR direct construction
+			// TODO: autoIncrement not supported in schema() API - needs ModelIR direct construction
 			// Import dynamically to test the new functions
 			const { generateSequenceResetStatements } = await import('./ddl.js');
 
-			const schema = buildModelFromResolvedSchema(
-				defineSchema({
-					users: {
-						id: { type: 'integer', primaryKey: true },
-						name: { type: 'string' },
-					},
-					posts: {
-						id: { type: 'integer', primaryKey: true },
-						title: { type: 'string' },
-					},
-				}),
-			);
+			const testSchema = schema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					name: 'string',
+				},
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					title: 'string',
+				},
+			}).model;
 
-			const statements = generateSequenceResetStatements(db, schema);
+			const statements = generateSequenceResetStatements(db, testSchema);
 
 			expect(statements).toHaveLength(2);
 			expect(statements[0]).toContain('setval');
@@ -344,34 +308,30 @@ describe('generateDDL', () => {
 		it('skips tables without autoIncrement columns', async () => {
 			const { generateSequenceResetStatements } = await import('./ddl.js');
 
-			const schema = buildModelFromResolvedSchema(
-				defineSchema({
-					users: {
-						id: { type: 'uuid', primaryKey: true },
-						name: { type: 'string' },
-					},
-				}),
-			);
+			const testSchema = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					name: 'string',
+				},
+			}).model;
 
-			const statements = generateSequenceResetStatements(db, schema);
+			const statements = generateSequenceResetStatements(db, testSchema);
 
 			expect(statements).toHaveLength(0);
 		});
 
 		it.skip('supports schema-qualified sequence names', async () => {
-			// TODO: autoIncrement not supported in defineSchema API - needs ModelIR direct construction
+			// TODO: autoIncrement not supported in schema() API - needs ModelIR direct construction
 			const { generateSequenceResetStatements } = await import('./ddl.js');
 
-			const schema = buildModelFromResolvedSchema(
-				defineSchema({
-					users: {
-						id: { type: 'integer', primaryKey: true },
-						name: { type: 'string' },
-					},
-				}),
-			);
+			const testSchema = schema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					name: 'string',
+				},
+			}).model;
 
-			const statements = generateSequenceResetStatements(db, schema, {
+			const statements = generateSequenceResetStatements(db, testSchema, {
 				schemaName: 'tenant_123',
 			});
 

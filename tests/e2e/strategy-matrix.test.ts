@@ -12,16 +12,14 @@
  * - supportsJsonAgg: true
  */
 
-import type { PlanReport, TypedSchema } from '@dbsp/core';
+import type { PlanReport } from '@dbsp/core';
 import {
-	belongsTo,
-	buildModelFromResolvedSchema,
 	createOrm,
-	defineSchema,
 	eq,
 	exists,
-	hasOne,
+	fk,
 	POSTGRESQL_CAPABILITIES,
+	schema,
 } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -121,30 +119,20 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 		describe('E2E-004-A2: hasOne uses json_agg strategy', () => {
 			it('should auto-select json_agg for hasOne relation', async () => {
-				// Create schema with hasOne relationship using TypedSchema API
-				const schemaWithProfile = {
-					tables: {
-						users: {
-							columns: {
-								id: { type: 'integer', primaryKey: true },
-								name: { type: 'string' },
-							},
-							relations: {
-								profile: hasOne('profiles', { foreignKey: 'userId' }),
-							},
-						},
-						profiles: {
-							columns: {
-								id: { type: 'integer', primaryKey: true },
-								userId: { type: 'integer' },
-								bio: { type: 'string' },
-							},
-							relations: {
-								user: belongsTo('users', { foreignKey: 'userId' }),
-							},
-						},
+				// ARCH-005: Create schema with hasOne relationship using schema() + fk()
+				// unique: true on FK creates 1:1 (hasOne on inverse)
+				const schemaWithProfile = schema({
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: 'string',
 					},
-				} as const satisfies TypedSchema;
+					profiles: {
+						id: { type: 'integer', primaryKey: true },
+						// unique: true makes this 1:1 (hasOne relationship)
+						userId: fk('users', { unique: true }),
+						bio: 'string',
+					},
+				});
 
 				const adapter = await getTestAdapter();
 				const orm = createOrm({
@@ -153,13 +141,15 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 					dialectCapabilities,
 				});
 
-				// When: users include profile (hasOne)
-				const query = orm.select('users').include('profile');
+				// When: users include profile (hasOne via userId_profile relation)
+				// ARCH-005: relation name is userId_profile (auto-inferred from unique FK)
+				const query = orm.select('users').include('userId_profile');
 
 				const dump = query.dump();
 
 				// Then: planner decides strategy: 'json_agg' (same as all relations)
-				const decision = getIncludeStrategyDecision(dump.plan, 'profile');
+				// ARCH-005: relation name is now userId_profile
+				const decision = getIncludeStrategyDecision(dump.plan, 'userId_profile');
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('json_agg');
 
@@ -264,45 +254,41 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 	describe('Section F: Explicit Overrides', () => {
 		describe('E2E-004-F1: relation hint overrides auto', () => {
 			it('should use JOIN when schema hint specifies it', async () => {
-				// Schema with explicit includeStrategy hint
-				const schemaWithJoinHint = buildModelFromResolvedSchema(
-					defineSchema(
-						{
-							users: {
-								id: { type: 'integer', primaryKey: true },
-								name: { type: 'string' },
-							},
-							posts: {
-								id: { type: 'integer', primaryKey: true },
-								user_id: { type: 'integer' },
-								title: { type: 'string' },
-							},
-						},
-						{
-							relations: {
-								'users.posts': {
-									kind: 'hasMany',
-									target: 'posts',
-									foreignKey: 'user_id',
-									includeStrategy: 'join',
-								},
-							},
-						},
-					),
-				);
+				// Create schema with relations
+				const schemaWithJoinHint = schema({
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: 'string',
+					},
+					posts: {
+						id: { type: 'integer', primaryKey: true },
+						userId: fk('users'),
+						title: 'string',
+					},
+				});
+
+				// ARCH-005: Set includeStrategy directly on the relation in ModelIR
+				// Relations are stored at model.relations keyed by "source.relationName"
+				const model = schemaWithJoinHint.model;
+				const usersPostsRel = model.relations.get('users.userId_posts');
+				if (usersPostsRel) {
+					(usersPostsRel as { includeStrategy?: string }).includeStrategy =
+						'join';
+				}
 
 				const adapter = await getTestAdapter();
 				const orm = createOrm({
-					model: schemaWithJoinHint,
+					model,
 					adapter,
 					dialectCapabilities,
 				});
 
-				const query = orm.select('users').include('posts');
+				// ARCH-005: relation name is now userId_posts (auto-inferred inverse)
+				const query = orm.select('users').include('userId_posts');
 				const dump = query.dump();
 
 				// Then: uses JOIN (not json_agg) due to explicit hint
-				const decision = getIncludeStrategyDecision(dump.plan, 'posts');
+				const decision = getIncludeStrategyDecision(dump.plan, 'userId_posts');
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('join');
 

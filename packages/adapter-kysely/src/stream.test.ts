@@ -60,6 +60,11 @@ function createMockDump(overrides?: Partial<Dump>): Dump {
 				from: 'users',
 				select: { type: 'all' },
 			},
+			metadata: {
+				planningTimeMs: 0,
+				relationsAnalyzed: 0,
+				isAmbiguous: false,
+			},
 		},
 		...overrides,
 	};

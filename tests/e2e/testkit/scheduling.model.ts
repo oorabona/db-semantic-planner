@@ -6,71 +6,45 @@
  * - daterange, tstzrange, int4range
  */
 
-import { buildModelFromResolvedSchema, defineSchema } from '@dbsp/core';
+import { fk, schema } from '@dbsp/core';
 
 /**
  * Scheduling schema for E2E tests.
  *
  * Tables:
  * - rooms: Conference rooms
- * - room_bookings: Reservations with daterange
+ * - roomBookings: Reservations with daterange
  * - events: Events with tstzrange
- * - price_tiers: Quantity-based pricing with int4range
+ * - priceTiers: Quantity-based pricing with int4range
  */
-const schedulingSchema = defineSchema(
-	{
-		rooms: {
-			id: { type: 'integer', primaryKey: true },
-			name: { type: 'string' },
-			capacity: { type: 'integer' },
-			floor: { type: 'integer' },
-		},
-		room_bookings: {
-			id: { type: 'integer', primaryKey: true },
-			room_id: { type: 'integer' },
-			booked_by: { type: 'string' },
-			booking_period: { type: 'string' }, // PostgreSQL daterange stored as string in model
-			purpose: { type: 'string' },
-		},
-		events: {
-			id: { type: 'integer', primaryKey: true },
-			title: { type: 'string' },
-			room_id: { type: 'integer' },
-			time_slot: { type: 'string' }, // PostgreSQL tstzrange stored as string in model
-			organizer: { type: 'string' },
-			max_attendees: { type: 'integer' },
-		},
-		price_tiers: {
-			id: { type: 'integer', primaryKey: true },
-			product_name: { type: 'string' },
-			quantity_range: { type: 'string' }, // PostgreSQL int4range stored as string in model
-			unit_price: { type: 'decimal' },
-		},
+const schedulingSchema = schema({
+	rooms: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		capacity: 'integer',
+		floor: 'integer',
 	},
-	{
-		relations: {
-			'rooms.bookings': {
-				kind: 'hasMany',
-				target: 'room_bookings',
-				foreignKey: 'room_id',
-			},
-			'rooms.events': {
-				kind: 'hasMany',
-				target: 'events',
-				foreignKey: 'room_id',
-			},
-			'room_bookings.room': {
-				kind: 'belongsTo',
-				target: 'rooms',
-				foreignKey: 'room_id',
-			},
-			'events.room': {
-				kind: 'belongsTo',
-				target: 'rooms',
-				foreignKey: 'room_id',
-			},
-		},
+	roomBookings: {
+		id: { type: 'integer', primaryKey: true },
+		roomId: fk('rooms'),
+		bookedBy: 'string',
+		bookingPeriod: 'daterange', // PostgreSQL daterange
+		purpose: { type: 'string', nullable: true },
 	},
-);
+	events: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		roomId: fk('rooms'),
+		timeSlot: 'tstzrange', // PostgreSQL tstzrange
+		organizer: 'string',
+		maxAttendees: { type: 'integer', nullable: true },
+	},
+	priceTiers: {
+		id: { type: 'integer', primaryKey: true },
+		productName: 'string',
+		quantityRange: 'int4range', // PostgreSQL int4range
+		unitPrice: 'decimal',
+	},
+});
 
-export const schedulingModel = buildModelFromResolvedSchema(schedulingSchema);
+export const schedulingModel = schedulingSchema.model;

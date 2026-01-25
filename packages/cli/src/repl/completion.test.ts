@@ -28,10 +28,28 @@ const testSchema: ResolvedSchema = {
 		},
 	},
 	relations: {
-		userPosts: { kind: 'one-to-many', target: 'posts' },
-		postComments: { kind: 'one-to-many', target: 'comments' },
-		postAuthor: { kind: 'many-to-one', target: 'users' },
+		userPosts: {
+			kind: 'hasMany',
+			target: 'posts',
+			foreignKey: 'authorId',
+			sourceKey: 'id',
+		},
+		postComments: {
+			kind: 'hasMany',
+			target: 'comments',
+			foreignKey: 'postId',
+			sourceKey: 'id',
+		},
+		postAuthor: { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' },
 	},
+	hints: {},
+	conventions: {
+		fkPattern: '{singular}Id',
+		pluralize: true,
+		timestamps: [],
+		fkAutoIndex: true,
+	},
+	indexes: {},
 };
 
 describe('CompletionProvider', () => {
@@ -203,8 +221,17 @@ describe('CompletionProvider', () => {
 					kind: 'hasMany',
 					target: 'posts',
 					foreignKey: 'authorId',
+					sourceKey: 'id',
 				},
 			},
+			hints: {},
+			conventions: {
+				fkPattern: '{singular}Id',
+				pluralize: true,
+				timestamps: [],
+				fkAutoIndex: true,
+			},
+			indexes: {},
 		};
 
 		let qualifiedProvider: CompletionProvider;

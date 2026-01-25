@@ -369,7 +369,11 @@ describe('processDotCommand', () => {
 			const state = createBatchState({ outputMode: 'json' });
 
 			// Act
-			const result = await processDotCommand('.output table', mockSchema, state);
+			const result = await processDotCommand(
+				'.output table',
+				mockSchema,
+				state,
+			);
 
 			// Assert
 			expect(result.output).toContain('Output mode: table');

@@ -1,37 +1,22 @@
-import {
-	buildModelFromResolvedSchema,
-	createOrm,
-	defineSchema,
-	eq,
-} from '@dbsp/core';
+import { createOrm, eq, fk, schema } from '@dbsp/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createKyselyAdapter } from './kysely-adapter.js';
 
 // Create proper ModelIR using schema builder
-const testModel = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			users: {
-				id: { type: 'integer', primaryKey: true },
-				name: { type: 'string' },
-				balance: { type: 'integer' },
-			},
-			orders: {
-				id: { type: 'integer', primaryKey: true },
-				userId: { type: 'integer' },
-				total: { type: 'integer' },
-			},
-		},
-		{
-			relations: {
-				'users.orders': { kind: 'hasMany', target: 'orders', foreignKey: 'userId' },
-				'orders.user': { kind: 'belongsTo', target: 'users', foreignKey: 'userId' },
-			},
-		},
-	),
-);
+const testModel = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		balance: 'integer',
+	},
+	orders: {
+		id: { type: 'integer', primaryKey: true },
+		userId: fk('users', { as: 'user', inverse: 'orders' }),
+		total: 'integer',
+	},
+}).model;
 
 // Database schema types
 interface TestDatabase {

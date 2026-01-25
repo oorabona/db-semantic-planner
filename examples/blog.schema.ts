@@ -9,84 +9,52 @@
  *   pnpm dbsp generate kysely --schema ./examples/blog.schema.ts
  */
 
-import { defineSchema } from '@dbsp/core';
+// ARCH-005: Use ref() alias to avoid conflict with subquery ref()
+import { ref, schema } from '@dbsp/core';
 
-export default defineSchema(
-	{
-		authors: {
-			id: { type: 'integer', primaryKey: true, autoIncrement: true },
-			name: { type: 'string', nullable: false },
-			email: { type: 'string', nullable: false, unique: true },
-			bio: { type: 'text', nullable: true },
-			createdAt: { type: 'timestamp', default: 'now()' },
-		},
-		posts: {
-			id: { type: 'integer', primaryKey: true, autoIncrement: true },
-			title: { type: 'string', nullable: false },
-			slug: { type: 'string', nullable: false, unique: true },
-			content: { type: 'text', nullable: true },
-			published: { type: 'boolean', default: 'false', index: true },
-			authorId: {
-				type: 'integer',
-				references: { table: 'authors', onDelete: 'CASCADE' },
-				index: true,
-			},
-			createdAt: { type: 'timestamp', default: 'now()' },
-			updatedAt: { type: 'timestamp', nullable: true },
-		},
-		comments: {
-			id: { type: 'integer', primaryKey: true, autoIncrement: true },
-			postId: {
-				type: 'integer',
-				references: { table: 'posts', onDelete: 'CASCADE' },
-				index: true,
-			},
-			authorName: { type: 'string', nullable: false },
-			authorEmail: { type: 'string', nullable: true },
-			content: { type: 'text', nullable: false },
-			approved: { type: 'boolean', default: 'false', index: true },
-			createdAt: { type: 'timestamp', default: 'now()' },
-		},
-		tags: {
-			id: { type: 'integer', primaryKey: true, autoIncrement: true },
-			name: { type: 'string', nullable: false, unique: true },
-			slug: { type: 'string', nullable: false, unique: true },
-		},
-		postTags: {
-			columns: {
-				postId: {
-					type: 'integer',
-					references: { table: 'posts', onDelete: 'CASCADE' },
-					index: true,
-				},
-				tagId: {
-					type: 'integer',
-					references: { table: 'tags', onDelete: 'CASCADE' },
-					index: true,
-				},
-			},
-			primaryKey: ['postId', 'tagId'],
-		} as any, // Composite PK uses TableDefWithConfig format
+export default schema({
+	authors: {
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
+		name: 'string',
+		email: { type: 'string', unique: true },
+		bio: { type: 'text', nullable: true },
+		createdAt: { type: 'timestamp', default: 'now()' },
 	},
-	{
-		relations: {
-			// Explicit M:N relation via junction table
-			'posts.tags': {
-				kind: 'manyToMany',
-				target: 'tags',
-				through: 'postTags',
-				sourceFk: 'postId',
-				targetFk: 'tagId',
-			},
-			'tags.posts': {
-				kind: 'manyToMany',
-				target: 'posts',
-				through: 'postTags',
-				sourceFk: 'tagId',
-				targetFk: 'postId',
-			},
-		},
+	posts: {
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
+		title: 'string',
+		slug: { type: 'string', unique: true },
+		content: { type: 'text', nullable: true },
+		published: { type: 'boolean', default: 'false', index: true },
+		authorId: ref('authors', { onDelete: 'CASCADE' }),
+		createdAt: { type: 'timestamp', default: 'now()' },
+		updatedAt: { type: 'timestamp', nullable: true },
 	},
-);
-// Other relations (authors.posts, posts.author, posts.comments, comments.post)
-// are auto-inferred from `references` definitions
+	comments: {
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
+		postId: ref('posts', { onDelete: 'CASCADE' }),
+		authorName: 'string',
+		authorEmail: { type: 'string', nullable: true },
+		content: 'text',
+		approved: { type: 'boolean', default: 'false', index: true },
+		createdAt: { type: 'timestamp', default: 'now()' },
+	},
+	tags: {
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
+		name: { type: 'string', unique: true },
+		slug: { type: 'string', unique: true },
+	},
+	// ARCH-005: Junction table for M:N - just a table with two FKs
+	postTags: {
+		postId: ref('posts', { onDelete: 'CASCADE' }),
+		tagId: ref('tags', { onDelete: 'CASCADE' }),
+		// Note: Composite PK not directly supported by schema() yet
+		// Use DDL or adapter-level constraints
+	},
+});
+// Relations auto-inferred from ref():
+// - authors.authorId_posts (hasMany)
+// - posts.author (belongsTo), posts.postId_comments (hasMany)
+// - comments.post (belongsTo)
+// - postTags.post (belongsTo), postTags.tag (belongsTo)
+// - posts.postId_postTags (hasMany), tags.tagId_postTags (hasMany)

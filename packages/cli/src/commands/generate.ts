@@ -142,11 +142,14 @@ export const generateCommand = new Command('generate')
 						try {
 							// Import generateDDL from adapter-kysely and schema converters from core
 							const { generateDDL } = await import('@dbsp/adapter-kysely');
-							const { buildModelFromSchema, assertResolvedSchemaToGeneratedSchema } =
-								await import('@dbsp/core');
+							const {
+								buildModelFromSchema,
+								assertResolvedSchemaToGeneratedSchema,
+							} = await import('@dbsp/core');
 
 							// Convert ResolvedSchema to ModelIR via GeneratedSchema (single path)
-							const generatedSchema = assertResolvedSchemaToGeneratedSchema(schema);
+							const generatedSchema =
+								assertResolvedSchemaToGeneratedSchema(schema);
 							const model = buildModelFromSchema(generatedSchema);
 
 							const ddlStatements = generateDDL(db, model, {

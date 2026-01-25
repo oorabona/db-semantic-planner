@@ -174,7 +174,10 @@ describe('nql-executor', () => {
 			});
 
 			it('compiles query with group by', () => {
-				const result = compileNqlToSql('users | group by active | select count(*)', model);
+				const result = compileNqlToSql(
+					'users | group by active | select count(*)',
+					model,
+				);
 				expect(result.intentType).toBe('query');
 				expect(result.sql.toLowerCase()).toContain('group by');
 				expect(result.sql.toLowerCase()).toContain('count(*)');

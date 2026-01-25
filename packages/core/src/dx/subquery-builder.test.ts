@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { objectToWhereIntent } from './object-filter.js';
 import {
 	isSubqueryExpression,
-	ref,
+	outerRef,
 	SubqueryBuilder,
 	SubqueryExpression,
 	subquery,
@@ -31,12 +31,12 @@ describe('subquery factory', () => {
 });
 
 // ============================================================================
-// ref() Function
+// outerRef() Function
 // ============================================================================
 
-describe('ref function', () => {
+describe('outerRef function', () => {
 	it('should create a SubqueryRefIntent', () => {
-		const refIntent = ref('parentId');
+		const refIntent = outerRef('parentId');
 		expect(refIntent).toEqual({
 			kind: 'ref',
 			column: 'parentId',
@@ -44,7 +44,7 @@ describe('ref function', () => {
 	});
 
 	it('should support qualified column names', () => {
-		const refIntent = ref('t0.categoryId');
+		const refIntent = outerRef('t0.categoryId');
 		expect(refIntent).toEqual({
 			kind: 'ref',
 			column: 't0.categoryId',
@@ -90,14 +90,14 @@ describe('SubqueryBuilder', () => {
 			});
 		});
 
-		it('should support ref() in where conditions', () => {
+		it('should support outerRef() in where conditions', () => {
 			const intent = subquery('order_items')
 				.select('price')
 				.where({
 					kind: 'comparison',
 					field: 'orderId',
 					operator: 'eq',
-					value: ref('id'),
+					value: outerRef('id'),
 				})
 				.dump();
 
@@ -166,7 +166,7 @@ describe('SubqueryBuilder', () => {
 					kind: 'comparison',
 					field: 'productId',
 					operator: 'eq',
-					value: ref('id'),
+					value: outerRef('id'),
 				})
 				.avg('rating');
 
@@ -197,7 +197,7 @@ describe('SubqueryBuilder aggregates', () => {
 					kind: 'comparison',
 					field: 'productId',
 					operator: 'eq',
-					value: ref('id'),
+					value: outerRef('id'),
 				})
 				.count();
 
@@ -210,7 +210,7 @@ describe('SubqueryBuilder aggregates', () => {
 					kind: 'comparison',
 					field: 'productId',
 					operator: 'eq',
-					value: ref('id'),
+					value: outerRef('id'),
 				})
 				.count('id');
 
@@ -225,7 +225,7 @@ describe('SubqueryBuilder aggregates', () => {
 					kind: 'comparison',
 					field: 'orderId',
 					operator: 'eq',
-					value: ref('id'),
+					value: outerRef('id'),
 				})
 				.sum('quantity');
 
@@ -240,7 +240,7 @@ describe('SubqueryBuilder aggregates', () => {
 					kind: 'comparison',
 					field: 'productId',
 					operator: 'eq',
-					value: ref('id'),
+					value: outerRef('id'),
 				})
 				.avg('rating');
 
@@ -255,7 +255,7 @@ describe('SubqueryBuilder aggregates', () => {
 					kind: 'comparison',
 					field: 'productId',
 					operator: 'eq',
-					value: ref('id'),
+					value: outerRef('id'),
 				})
 				.min('price');
 
@@ -270,7 +270,7 @@ describe('SubqueryBuilder aggregates', () => {
 					kind: 'comparison',
 					field: 'productId',
 					operator: 'eq',
-					value: ref('id'),
+					value: outerRef('id'),
 				})
 				.max('price');
 
@@ -307,7 +307,7 @@ describe('SubqueryExpression', () => {
 					kind: 'comparison',
 					field: 'productId',
 					operator: 'eq',
-					value: ref('id'),
+					value: outerRef('id'),
 				})
 				.max('price');
 
@@ -371,7 +371,7 @@ describe('subquery + object filter integration', () => {
 				kind: 'comparison',
 				field: 'productId',
 				operator: 'eq',
-				value: ref('id'),
+				value: outerRef('id'),
 			})
 			.max('price');
 
@@ -393,7 +393,7 @@ describe('subquery + object filter integration', () => {
 				kind: 'comparison',
 				field: 'productId',
 				operator: 'eq',
-				value: ref('id'),
+				value: outerRef('id'),
 			})
 			.avg('rating');
 
@@ -415,7 +415,7 @@ describe('subquery + object filter integration', () => {
 				kind: 'comparison',
 				field: 'categoryId',
 				operator: 'eq',
-				value: ref('categoryId'),
+				value: outerRef('categoryId'),
 			})
 			.min('price');
 
@@ -437,7 +437,7 @@ describe('subquery + object filter integration', () => {
 				kind: 'comparison',
 				field: 'productId',
 				operator: 'eq',
-				value: ref('id'),
+				value: outerRef('id'),
 			})
 			.count();
 
@@ -471,7 +471,7 @@ describe('subquery + object filter integration', () => {
 				kind: 'comparison',
 				field: 'productId',
 				operator: 'eq',
-				value: ref('id'),
+				value: outerRef('id'),
 			})
 			.sum('quantity');
 
@@ -494,7 +494,7 @@ describe('subquery + object filter integration', () => {
 				kind: 'comparison',
 				field: 'categoryId',
 				operator: 'eq',
-				value: ref('categoryId'),
+				value: outerRef('categoryId'),
 			})
 			.build();
 
@@ -523,7 +523,7 @@ describe('chaining and immutability', () => {
 				kind: 'comparison',
 				field: 'orderId',
 				operator: 'eq',
-				value: ref('id'),
+				value: outerRef('id'),
 			})
 			.max('unit_price');
 
@@ -563,7 +563,7 @@ describe('chaining and immutability', () => {
 			kind: 'comparison',
 			field: 'productId',
 			operator: 'eq',
-			value: ref('id'),
+			value: outerRef('id'),
 		});
 
 		const sumExpr = base.sum('amount');

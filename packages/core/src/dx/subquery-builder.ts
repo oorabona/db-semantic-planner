@@ -23,11 +23,11 @@ import type {
  * @example
  * // Basic scalar subquery
  * query('products')
- *   .where({ price: { $eq: subquery('prices').select('max_price').where({ categoryId: ref('categoryId') }) } })
+ *   .where({ price: { $eq: subquery('prices').select('max_price').where({ categoryId: outerRef('categoryId') }) } })
  *
  * // With aggregate
  * query('products')
- *   .where({ avgRating: { $gt: subquery('reviews').where({ productId: ref('id') }).avg('rating') } })
+ *   .where({ avgRating: { $gt: subquery('reviews').where({ productId: outerRef('id') }).avg('rating') } })
  */
 export class SubqueryBuilder {
 	private readonly _from: string;
@@ -54,7 +54,7 @@ export class SubqueryBuilder {
 
 	/**
 	 * Add a WHERE condition to the subquery.
-	 * Can include ref() to create correlated subqueries.
+	 * Can include outerRef() to create correlated subqueries.
 	 */
 	where(condition: WhereIntent): SubqueryBuilder {
 		const clone = this.clone();
@@ -219,7 +219,7 @@ export class SubqueryExpression {
  *   price: {
  *     $eq: subquery('products')
  *       .select('price')
- *       .where({ categoryId: ref('categoryId') })
+ *       .where({ categoryId: outerRef('categoryId') })
  *       .max('price')
  *   }
  * })
@@ -237,9 +237,9 @@ export function subquery(table: string): SubqueryBuilder {
  *
  * @example
  * // Reference parent 'id' column in subquery
- * subquery('reviews').where({ productId: ref('id') })
+ * subquery('reviews').where({ productId: outerRef('id') })
  */
-export function ref(column: string): SubqueryRefIntent {
+export function outerRef(column: string): SubqueryRefIntent {
 	return {
 		kind: 'ref',
 		column,
