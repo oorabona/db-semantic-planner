@@ -60,7 +60,7 @@ db.output.contains: Books
 --- query: 6
 success: true
 sql.contains: from "ch5_ecommerce"."products"
-sql.contains: where "t0"."active" = $1
+sql.contains: where "_products"."active" = $1
 sql.contains: limit
 params.equals: [true, 5]
 db.rows.equals: 5
@@ -104,7 +104,7 @@ db.rows.equals: 23
 --- query: 10
 success: true
 sql.contains: left join "ch5_ecommerce"."variants"
-sql.contains: on "t1"."product_id" = "t0"."id"
+sql.contains: on "_products"."id" = "_variants"."product_id"
 sql.contains: limit
 params.equals: [3]
 db.rows.equals: 3
@@ -126,7 +126,7 @@ db.rows.equals: 12
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.contains: group by "t0"."status"
+sql.contains: group by "_orders"."status"
 sql.contains: sum
 db.rows.equals: 5
 
@@ -136,7 +136,7 @@ db.rows.equals: 5
 # ─────────────────────────────────────────
 --- query: 13
 success: true
-sql.contains: group by "t0"."customer_id"
+sql.contains: group by "_orders"."customer_id"
 sql.contains: count
 db.rows.equals: 5
 
@@ -155,7 +155,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 15
 success: true
-sql.contains: group by "t0"."active"
+sql.contains: group by "_products"."active"
 sql.contains: count
 db.rows.equals: 2
 

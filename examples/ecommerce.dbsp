@@ -38,8 +38,8 @@ orders
 # 5.4 Complex Relations (NQL v2.1)
 # =============================================================================
 # Note: Filtered includes (where on relations) not yet supported in NQL v2.1
-categories | select *, products.*
-products | select *, variants.* | limit 3
+categories | select *, products.* | flat
+products | select *, variants.* | flat | limit 3
 # Nested includes (orders.orderItems) - use single level or ORM API for deep nesting
 customers | select *, orders.*
 
