@@ -2,37 +2,44 @@
 # Validates output from ecommerce schema queries
 
 # ─────────────────────────────────────────
-# Query 0: !CREATE SCHEMA IF NOT EXISTS ch5_ecommerce;
+# Query 0: !DROP SCHEMA IF EXISTS ch5_ecommerce CASCADE;
 # ─────────────────────────────────────────
 --- query: 0
 db.success: true
 db.output.contains: Executed SQL
 
 # ─────────────────────────────────────────
-# Query 1: .use ch5_ecommerce
+# Query 1 !CREATE SCHEMA IF NOT EXISTS ch5_ecommerce;
 # ─────────────────────────────────────────
 --- query: 1
+db.success: true
+db.output.contains: Executed SQL
+
+# ─────────────────────────────────────────
+# Query 2 .use ch5_ecommerce
+# ─────────────────────────────────────────
+--- query: 2
 success: true
 output.contains: Using schema: ch5_ecommerce
 
 # ─────────────────────────────────────────
-# Query 2: .import examples/ecommerce.ddl.sql
-# ─────────────────────────────────────────
---- query: 2
-db.success: true
-db.output.contains: Imported
-
-# ─────────────────────────────────────────
-# Query 3: .import examples/ecommerce.seed.sql
+# Query 3 .import examples/ecommerce.ddl.sql
 # ─────────────────────────────────────────
 --- query: 3
 db.success: true
 db.output.contains: Imported
 
 # ─────────────────────────────────────────
-# Query 4: .tables
+# Query 4 .import examples/ecommerce.seed.sql
 # ─────────────────────────────────────────
 --- query: 4
+db.success: true
+db.output.contains: Imported
+
+# ─────────────────────────────────────────
+# Query 5 .tables
+# ─────────────────────────────────────────
+--- query: 5
 success: true
 output.contains: Tables (7)
 output.contains: categories
@@ -44,9 +51,9 @@ output.contains: orders
 output.contains: orderItems
 
 # ─────────────────────────────────────────
-# Query 5: categories
+# Query 6 categories
 # ─────────────────────────────────────────
---- query: 5
+--- query: 6
 success: true
 sql.contains: from "ch5_ecommerce"."categories"
 db.rows.equals: 20
@@ -55,9 +62,9 @@ db.output.contains: Clothing
 db.output.contains: Books
 
 # ─────────────────────────────────────────
-# Query 6: products | where active = true | limit 5
+# Query 7 products | where active = true | limit 5
 # ─────────────────────────────────────────
---- query: 6
+--- query: 7
 success: true
 sql.contains: from "ch5_ecommerce"."products"
 sql.contains: where "_products"."active" = $1
@@ -68,9 +75,9 @@ db.output.contains: ProBook 15
 db.output.contains: SmartPhone X
 
 # ─────────────────────────────────────────
-# Query 7: customers
+# Query 8 customers
 # ─────────────────────────────────────────
---- query: 7
+--- query: 8
 success: true
 sql.contains: from "ch5_ecommerce"."customers"
 db.rows.equals: 5
@@ -78,9 +85,9 @@ db.output.contains: Alice
 db.output.contains: Bob
 
 # ─────────────────────────────────────────
-# Query 8: orders
+# Query 9 orders
 # ─────────────────────────────────────────
---- query: 8
+--- query: 9
 success: true
 sql.contains: from "ch5_ecommerce"."orders"
 db.rows.equals: 7
@@ -89,19 +96,19 @@ db.output.contains: delivered
 db.output.contains: shipped
 
 # ─────────────────────────────────────────
-# Query 9: categories | select *, products.*
+# Query 10 categories | select *, products.*
 # NQL v2.1: Filtered includes not yet supported in NQL syntax
 # ─────────────────────────────────────────
---- query: 9
+--- query: 10
 success: true
 sql.contains: from "ch5_ecommerce"."categories"
 sql.contains: left join "ch5_ecommerce"."products"
-db.rows.equals: 23
+db.rows.equals: 24
 
 # ─────────────────────────────────────────
-# Query 10: products | select *, variants.* | limit 3
+# Query 11 products | select *, variants.* | limit 3
 # ─────────────────────────────────────────
---- query: 10
+--- query: 11
 success: true
 sql.contains: left join "ch5_ecommerce"."variants"
 sql.contains: on "_products"."id" = "_variants"."product_id"
@@ -112,96 +119,96 @@ output.contains: variants.id
 output.contains: variants.sku
 
 # ─────────────────────────────────────────
-# Query 11: customers | select *, orders.*
+# Query 12 customers | select *, orders.*
 # NQL v2.1: Deep nesting (orders.orderItems) requires ORM API
 # ─────────────────────────────────────────
---- query: 11
+--- query: 12
 success: true
 sql.contains: from "ch5_ecommerce"."customers"
-db.rows.equals: 12
+db.rows.equals: 7
 
 # ─────────────────────────────────────────
-# Query 12: orders | group by status | select sum(total)
+# Query 13 orders | group by status | select sum(total)
 # BUG FIXED: Aggregate functions now work
 # ─────────────────────────────────────────
---- query: 12
+--- query: 13
 success: true
 sql.contains: group by "_orders"."status"
 sql.contains: sum
 db.rows.equals: 5
 
 # ─────────────────────────────────────────
-# Query 13: orders | group by customerId | select count(*)
+# Query 14 orders | group by customerId | select count(*)
 # BUG FIXED: Aggregate functions now work
 # ─────────────────────────────────────────
---- query: 13
+--- query: 14
 success: true
 sql.contains: group by "_orders"."customer_id"
 sql.contains: count
 db.rows.equals: 5
 
 # ─────────────────────────────────────────
-# Query 14: orders | select avg(total)
+# Query 15 orders | select avg(total)
 # BUG FIXED: Aggregate functions now work
 # ─────────────────────────────────────────
---- query: 14
+--- query: 15
 success: true
 sql.contains: avg
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 15: products | group by active | select count(*)
+# Query 16 products | group by active | select count(*)
 # BUG FIXED: Aggregate functions now work
 # ─────────────────────────────────────────
---- query: 15
+--- query: 16
 success: true
 sql.contains: group by "_products"."active"
 sql.contains: count
 db.rows.equals: 2
 
 # ─────────────────────────────────────────
-# Query 16: products | select *, rank() over (partition by categoryId order by price desc) as priceRank
+# Query 17 products | select *, rank() over (partition by categoryId order by price desc) as priceRank
 # BUG FIXED: Window functions now work in NQL parser
 # ─────────────────────────────────────────
---- query: 16
+--- query: 17
 success: true
 sql.contains: RANK() OVER
 sql.contains: PARTITION BY
 sql.contains: ORDER BY
 
 # ─────────────────────────────────────────
-# Query 17: orders | select orderNumber, total, sum(total) over (order by createdAt) as runningTotal
+# Query 18 orders | select orderNumber, total, sum(total) over (order by createdAt) as runningTotal
 # BUG FIXED: Window functions now work in NQL parser
 # ─────────────────────────────────────────
---- query: 17
+--- query: 18
 success: true
 sql.contains: SUM
 sql.contains: OVER
 sql.contains: ORDER BY
 
 # ─────────────────────────────────────────
-# Query 18: insert into categories set name = 'Accessories', slug = 'accessories'
+# Query 19 insert into categories set name = 'Accessories', slug = 'accessories'
 # ─────────────────────────────────────────
---- query: 18
+--- query: 19
 success: true
 sql.contains: insert into "ch5_ecommerce"."categories"
 sql.contains: ("name", "slug") values ($1, $2)
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 19: insert into customers set firstName = 'John', lastName = 'Doe', email = 'john@example.com'
+# Query 20 insert into customers set firstName = 'John', lastName = 'Doe', email = 'john@example.com'
 # ─────────────────────────────────────────
---- query: 19
+--- query: 20
 success: true
 sql.contains: insert into "ch5_ecommerce"."customers"
 sql.contains: ("first_name", "last_name", "email") values ($1, $2, $3)
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 20: update products set price = 29.99 where sku = 'WIDGET-001'
+# Query 21 update products set price = 29.99 where sku = 'WIDGET-001'
 # NOTE: WIDGET-001 doesn't exist in seed data, so 0 rows affected
 # ─────────────────────────────────────────
---- query: 20
+--- query: 21
 success: true
 sql.contains: update "ch5_ecommerce"."products"
 sql.contains: set "price" = $1
@@ -209,9 +216,9 @@ sql.contains: where "sku" = $2
 db.rows.equals: 0
 
 # ─────────────────────────────────────────
-# Query 21: update products set active = false where id = 5
+# Query 22 update products set active = false where id = 5
 # ─────────────────────────────────────────
---- query: 21
+--- query: 22
 success: true
 sql.contains: update "ch5_ecommerce"."products"
 sql.contains: set "active" = $1
@@ -219,19 +226,19 @@ sql.contains: where "id" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 22: delete from orders where status = 'cancelled'
+# Query 23 delete from orders where status = 'cancelled'
 # NOTE: Seed data contains one cancelled order
 # ─────────────────────────────────────────
---- query: 22
+--- query: 23
 success: true
 sql.contains: delete from "ch5_ecommerce"."orders"
 sql.contains: where "status" = $1
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 23: upsert into products on sku set name = 'New Widget', sku = 'WIDGET-NEW', price = 19.99, categoryId = 1, active = true
+# Query 24 upsert into products on sku set name = 'New Widget', sku = 'WIDGET-NEW', price = 19.99, categoryId = 1, active = true
 # ─────────────────────────────────────────
---- query: 23
+--- query: 24
 success: true
 sql.contains: insert into "ch5_ecommerce"."products"
 sql.contains: on conflict ("sku") do update
