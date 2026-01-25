@@ -9,9 +9,11 @@
  *   pnpm dbsp generate kysely --schema ./examples/minimal.schema.ts
  */
 
-import { defineSchema } from '@dbsp/core';
+// ARCH-005: Use ref() alias to avoid conflict with subquery ref()
+// Alternatively: import { schema, ref } from '@dbsp/core/dx/schema.js'
+import { ref, schema } from '@dbsp/core';
 
-export default defineSchema({
+export default schema({
 	users: {
 		id: { type: 'integer', primaryKey: true, autoIncrement: true },
 		name: { type: 'string', index: true },
@@ -19,11 +21,11 @@ export default defineSchema({
 	},
 	posts: {
 		id: { type: 'integer', primaryKey: true, autoIncrement: true },
-		title: { type: 'string' },
+		title: 'string',
 		content: { type: 'text', nullable: true },
-		userId: { type: 'integer', references: { table: 'users', onDelete: 'CASCADE' }, index: true },
+		userId: ref('users', { onDelete: 'CASCADE' }),
 	},
 });
-// Relations auto-inferred from `references`:
-// - users.posts (hasMany)
+// Relations auto-inferred from ref():
+// - users.userId_posts (hasMany)
 // - posts.user (belongsTo)

@@ -21,10 +21,10 @@ output.contains: Tables (5)
 
 			expect(result.errors).toHaveLength(0);
 			expect(result.blocks).toHaveLength(1);
-			expect(result.blocks[0].queryIndex).toBe(0);
-			expect(result.blocks[0].assertions).toHaveLength(1);
-			expect(result.blocks[0].assertions[0].type).toBe('output.contains');
-			expect(result.blocks[0].assertions[0].value).toBe('Tables (5)');
+			expect(result.blocks[0]!.queryIndex).toBe(0);
+			expect(result.blocks[0]!.assertions).toHaveLength(1);
+			expect(result.blocks[0]!.assertions[0]!.type).toBe('output.contains');
+			expect(result.blocks[0]!.assertions[0]!.value).toBe('Tables (5)');
 		});
 
 		it('parses a block with match pattern', () => {
@@ -35,9 +35,9 @@ params.equals: [1]
 
 			expect(result.errors).toHaveLength(0);
 			expect(result.blocks).toHaveLength(1);
-			expect(result.blocks[0].queryMatch).toBe('posts where id = 1');
-			expect(result.blocks[0].assertions[0].type).toBe('params.equals');
-			expect(result.blocks[0].assertions[0].value).toEqual([1]);
+			expect(result.blocks[0]!.queryMatch).toBe('posts where id = 1');
+			expect(result.blocks[0]!.assertions[0]!.type).toBe('params.equals');
+			expect(result.blocks[0]!.assertions[0]!.value).toEqual([1]);
 		});
 
 		it('parses multiple assertion blocks', () => {
@@ -55,10 +55,10 @@ success: true
 
 			expect(result.errors).toHaveLength(0);
 			expect(result.blocks).toHaveLength(3);
-			expect(result.blocks[0].queryIndex).toBe(0);
-			expect(result.blocks[1].queryIndex).toBe(1);
-			expect(result.blocks[1].assertions).toHaveLength(2);
-			expect(result.blocks[2].queryIndex).toBe(2);
+			expect(result.blocks[0]!.queryIndex).toBe(0);
+			expect(result.blocks[1]!.queryIndex).toBe(1);
+			expect(result.blocks[1]!.assertions).toHaveLength(2);
+			expect(result.blocks[2]!.queryIndex).toBe(2);
 		});
 
 		it('skips comments and empty lines', () => {
@@ -72,7 +72,7 @@ output.contains: test
 
 			expect(result.errors).toHaveLength(0);
 			expect(result.blocks).toHaveLength(1);
-			expect(result.blocks[0].assertions).toHaveLength(1);
+			expect(result.blocks[0]!.assertions).toHaveLength(1);
 		});
 
 		it('reports error for assertion outside block', () => {
@@ -189,8 +189,8 @@ ${type}: ${input}
 			const result = parseAssertionFile(content);
 
 			expect(result.errors).toHaveLength(0);
-			expect(result.blocks[0].assertions[0].type).toBe(type);
-			expect(result.blocks[0].assertions[0].value).toEqual(expected);
+			expect(result.blocks[0]!.assertions[0]!.type).toBe(type);
+			expect(result.blocks[0]!.assertions[0]!.value).toEqual(expected);
 		});
 	});
 

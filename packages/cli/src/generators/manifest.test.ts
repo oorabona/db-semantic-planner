@@ -37,7 +37,9 @@ describe('generateManifest', () => {
 			fkPattern: '{singular}Id',
 			pluralize: true,
 			timestamps: ['createdAt', 'updatedAt'],
+			fkAutoIndex: true,
 		},
+		indexes: {},
 	};
 
 	it('generates valid JSON output', () => {
@@ -59,19 +61,19 @@ describe('generateManifest', () => {
 
 		// Check users table
 		expect(manifest.tables.users).toBeDefined();
-		expect(manifest.tables.users.id).toEqual({
+		expect(manifest.tables.users!.id).toEqual({
 			type: 'uuid',
 			primaryKey: true,
 		});
-		expect(manifest.tables.users.name).toEqual({
+		expect(manifest.tables.users!.name).toEqual({
 			type: 'string',
 			nullable: false,
 		});
-		expect(manifest.tables.users.email).toEqual({
+		expect(manifest.tables.users!.email).toEqual({
 			type: 'string',
 			unique: true,
 		});
-		expect(manifest.tables.users.createdAt).toEqual({
+		expect(manifest.tables.users!.createdAt).toEqual({
 			type: 'timestamp',
 			default: 'now()',
 		});
@@ -140,6 +142,7 @@ describe('generateManifest', () => {
 			fkPattern: '{singular}Id',
 			pluralize: true,
 			timestamps: ['createdAt', 'updatedAt'],
+			fkAutoIndex: true,
 		});
 	});
 
@@ -147,7 +150,7 @@ describe('generateManifest', () => {
 		const result = generateManifest(sampleSchema);
 		const manifest: SchemaManifest = JSON.parse(result.json);
 
-		expect(manifest.tables.posts.authorId).toEqual({
+		expect(manifest.tables.posts!.authorId).toEqual({
 			type: 'uuid',
 			references: { table: 'users' },
 		});
@@ -168,6 +171,7 @@ describe('generateManifest', () => {
 				timestamps: [],
 				fkAutoIndex: true,
 			},
+			indexes: {},
 		};
 
 		const result = generateManifest(schemaWithSpecialNames);
@@ -175,7 +179,7 @@ describe('generateManifest', () => {
 
 		// JSON handles special characters in keys natively
 		expect(manifest.tables['user-profiles']).toBeDefined();
-		expect(manifest.tables['user-profiles'].id).toEqual({
+		expect(manifest.tables['user-profiles']!.id).toEqual({
 			type: 'uuid',
 			primaryKey: true,
 		});
@@ -219,6 +223,7 @@ describe('generateManifest', () => {
 				timestamps: [],
 				fkAutoIndex: true,
 			},
+			indexes: {},
 		};
 
 		const result = generateManifest(emptySchema);

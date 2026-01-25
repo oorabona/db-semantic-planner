@@ -31,7 +31,9 @@ describe('generateKysely', () => {
 			fkPattern: '{singular}Id',
 			pluralize: true,
 			timestamps: ['createdAt', 'updatedAt'],
+			fkAutoIndex: true,
 		},
+		indexes: {},
 	};
 
 	describe('DB interface', () => {
@@ -140,6 +142,7 @@ describe('generateKysely', () => {
 					timestamps: [],
 					fkAutoIndex: true,
 				},
+				indexes: {},
 			};
 
 			const result = generateKysely(schema);
@@ -165,6 +168,7 @@ describe('generateKysely', () => {
 					timestamps: [],
 					fkAutoIndex: true,
 				},
+				indexes: {},
 			};
 
 			const result = generateKysely(schema);
@@ -198,6 +202,7 @@ describe('generateKysely', () => {
 					timestamps: [],
 					fkAutoIndex: true,
 				},
+				indexes: {},
 			};
 
 			const result = generateKysely(schema);

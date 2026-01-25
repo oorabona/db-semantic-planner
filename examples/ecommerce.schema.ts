@@ -9,134 +9,105 @@
  *   pnpm dbsp generate kysely --schema ./examples/ecommerce.schema.ts
  */
 
-import { defineSchema } from '@dbsp/core';
+// ARCH-005: Use ref() alias to avoid conflict with subquery ref()
+import { ref, schema } from '@dbsp/core';
 
-export default defineSchema(
-	{
-		// Hierarchical categories (self-referencing)
-		categories: {
-			id: { type: 'integer', primaryKey: true, autoIncrement: true },
-			name: { type: 'string', nullable: false },
-			slug: { type: 'string', nullable: false, unique: true },
-			parentId: { type: 'integer', nullable: true, references: { table: 'categories', onDelete: 'SET NULL' }, index: true },
-			sortOrder: { type: 'integer', default: '0' },
-		},
-
-		// Products belong to categories
-		products: {
-			id: { type: 'integer', primaryKey: true, autoIncrement: true },
-			sku: { type: 'string', nullable: false, unique: true },
-			name: { type: 'string', nullable: false },
-			description: { type: 'text', nullable: true },
-			price: { type: 'decimal', nullable: false },
-			stock: { type: 'integer', default: '0' },
-			categoryId: { type: 'integer', references: { table: 'categories', onDelete: 'RESTRICT' }, index: true },
-			active: { type: 'boolean', default: 'true', index: true },
-			createdAt: { type: 'timestamp', default: 'now()' },
-		},
-
-		// Product variants (size, color, etc.)
-		variants: {
-			id: { type: 'integer', primaryKey: true, autoIncrement: true },
-			productId: { type: 'integer', references: { table: 'products', onDelete: 'CASCADE' }, index: true },
-			sku: { type: 'string', nullable: false, unique: true },
-			name: { type: 'string', nullable: false },
-			priceModifier: { type: 'decimal', default: '0' },
-			stock: { type: 'integer', default: '0' },
-		},
-
-		// Customers
-		customers: {
-			id: { type: 'integer', primaryKey: true, autoIncrement: true },
-			email: { type: 'string', nullable: false, unique: true },
-			firstName: { type: 'string', nullable: false },
-			lastName: { type: 'string', nullable: false },
-			phone: { type: 'string', nullable: true },
-			createdAt: { type: 'timestamp', default: 'now()' },
-		},
-
-		// Customer addresses
-		addresses: {
-			id: { type: 'integer', primaryKey: true, autoIncrement: true },
-			customerId: { type: 'integer', references: { table: 'customers', onDelete: 'CASCADE' }, index: true },
-			type: { type: 'string', nullable: false }, // 'billing' | 'shipping'
-			street: { type: 'string', nullable: false },
-			city: { type: 'string', nullable: false },
-			postalCode: { type: 'string', nullable: false },
-			country: { type: 'string', nullable: false },
-			isDefault: { type: 'boolean', default: 'false' },
-		},
-
-		// Orders
-		orders: {
-			id: { type: 'integer', primaryKey: true, autoIncrement: true },
-			orderNumber: { type: 'string', nullable: false, unique: true },
-			customerId: { type: 'integer', references: { table: 'customers', onDelete: 'RESTRICT' }, index: true },
-			status: { type: 'string', default: "'pending'", index: true }, // pending, paid, shipped, delivered
-			total: { type: 'decimal', nullable: false },
-			shippingAddressId: { type: 'integer', references: { table: 'addresses' } },
-			billingAddressId: { type: 'integer', references: { table: 'addresses' } },
-			createdAt: { type: 'timestamp', default: 'now()' },
-			updatedAt: { type: 'timestamp', nullable: true },
-		},
-
-		// Order line items
-		orderItems: {
-			id: { type: 'integer', primaryKey: true, autoIncrement: true },
-			orderId: { type: 'integer', references: { table: 'orders', onDelete: 'CASCADE' }, index: true },
-			productId: { type: 'integer', references: { table: 'products', onDelete: 'RESTRICT' }, index: true },
-			variantId: { type: 'integer', nullable: true, references: { table: 'variants', onDelete: 'SET NULL' } },
-			quantity: { type: 'integer', nullable: false },
-			unitPrice: { type: 'decimal', nullable: false },
-			totalPrice: { type: 'decimal', nullable: false },
-		},
+export default schema({
+	// Hierarchical categories (self-referencing)
+	categories: {
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
+		name: 'string',
+		slug: { type: 'string', unique: true },
+		// ARCH-005: Self-ref with roles for parent/children
+		parentId: ref('categories', {
+			nullable: true,
+			onDelete: 'SET NULL',
+			roles: {
+				parent: 'parent',
+				children: 'children',
+				ancestors: 'ancestors',
+				descendants: 'descendants',
+			},
+		}),
+		sortOrder: { type: 'integer', default: '0' },
 	},
-	{
-		relations: {
-			// Self-referencing for category hierarchy
-			'categories.parent': {
-				kind: 'belongsTo',
-				target: 'categories',
-				foreignKey: 'parentId',
-			},
-					'categories.children': {
-			kind: 'hasMany',
-			target: 'categories',
-			foreignKey: 'parentId',
-		},
-		// Recursive relations for ancestor/descendant traversal
-		'categories.ancestors': {
-			kind: 'hasMany',
-			target: 'categories',
-			foreignKey: 'parentId',
-			recursive: { direction: 'up', through: 'parent', maxDepth: 10 },
-		} as ReturnType<typeof Object.assign>,
-		'categories.descendants': {
-			kind: 'hasMany',
-			target: 'categories',
-			foreignKey: 'parentId',
-			recursive: { direction: 'down', through: 'children', maxDepth: 10 },
-		} as ReturnType<typeof Object.assign>,
 
-		// Orders have two addresses (shipping + billing)
-			// Need explicit relations because of multiple FKs to same table
-			'orders.shippingAddress': {
-				kind: 'belongsTo',
-				target: 'addresses',
-				foreignKey: 'shippingAddressId',
-			},
-			'orders.billingAddress': {
-				kind: 'belongsTo',
-				target: 'addresses',
-				foreignKey: 'billingAddressId',
-			},
-		},
+	// Products belong to categories
+	products: {
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
+		sku: { type: 'string', unique: true },
+		name: 'string',
+		description: { type: 'text', nullable: true },
+		price: 'decimal',
+		stock: { type: 'integer', default: '0' },
+		categoryId: ref('categories', { onDelete: 'RESTRICT' }),
+		active: { type: 'boolean', default: 'true', index: true },
+		createdAt: { type: 'timestamp', default: 'now()' },
 	},
-);
-// Other relations auto-inferred:
-// - products.category, categories.products
-// - products.variants, variants.product
-// - customers.addresses, addresses.customer
-// - customers.orders, orders.customer
-// - orders.orderItems, orderItems.order
+
+	// Product variants (size, color, etc.)
+	variants: {
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
+		productId: ref('products', { onDelete: 'CASCADE' }),
+		sku: { type: 'string', unique: true },
+		name: 'string',
+		priceModifier: { type: 'decimal', default: '0' },
+		stock: { type: 'integer', default: '0' },
+	},
+
+	// Customers
+	customers: {
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
+		email: { type: 'string', unique: true },
+		firstName: 'string',
+		lastName: 'string',
+		phone: { type: 'string', nullable: true },
+		createdAt: { type: 'timestamp', default: 'now()' },
+	},
+
+	// Customer addresses
+	addresses: {
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
+		customerId: ref('customers', { onDelete: 'CASCADE' }),
+		type: 'string', // 'billing' | 'shipping'
+		street: 'string',
+		city: 'string',
+		postalCode: 'string',
+		country: 'string',
+		isDefault: { type: 'boolean', default: 'false' },
+	},
+
+	// Orders
+	orders: {
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
+		orderNumber: { type: 'string', unique: true },
+		customerId: ref('customers', { onDelete: 'RESTRICT' }),
+		status: { type: 'string', default: "'pending'", index: true },
+		total: 'decimal',
+		// ARCH-005: Multi-FK to same table - use 'as' for explicit naming
+		shippingAddressId: ref('addresses', { as: 'shippingAddress', inverse: 'shippingOrders' }),
+		billingAddressId: ref('addresses', { as: 'billingAddress', inverse: 'billingOrders' }),
+		createdAt: { type: 'timestamp', default: 'now()' },
+		updatedAt: { type: 'timestamp', nullable: true },
+	},
+
+	// Order line items
+	orderItems: {
+		id: { type: 'integer', primaryKey: true, autoIncrement: true },
+		orderId: ref('orders', { onDelete: 'CASCADE' }),
+		productId: ref('products', { onDelete: 'RESTRICT' }),
+		variantId: ref('variants', { nullable: true, onDelete: 'SET NULL' }),
+		quantity: 'integer',
+		unitPrice: 'decimal',
+		totalPrice: 'decimal',
+	},
+});
+// Relations auto-inferred from ref():
+// - categories.parent, categories.children, categories.ancestors, categories.descendants (self-ref)
+// - products.category, categories.categoryId_products
+// - products.productId_variants, variants.product
+// - customers.customerId_addresses, addresses.customer
+// - customers.customerId_orders, orders.customer
+// - orders.shippingAddress, orders.billingAddress (explicit 'as')
+// - orders.orderId_orderItems, orderItems.order
 // - orderItems.product, orderItems.variant

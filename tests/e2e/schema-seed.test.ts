@@ -44,21 +44,21 @@ describe.skipIf(shouldSkipE2E())('Schema and Seed', () => {
 			const db = await getTestDb();
 			const result =
 				await sql`SELECT COUNT(*) as count FROM acme.categories`.execute(db);
-			expect(Number(result.rows[0].count)).toBe(2);
+			expect(Number((result.rows[0] as { count: string }).count)).toBe(2);
 		});
 
 		it('should have 4 products', async () => {
 			const db = await getTestDb();
 			const result =
 				await sql`SELECT COUNT(*) as count FROM acme.products`.execute(db);
-			expect(Number(result.rows[0].count)).toBe(4);
+			expect(Number((result.rows[0] as { count: string }).count)).toBe(4);
 		});
 
 		it('should have 6 assets', async () => {
 			const db = await getTestDb();
 			const result =
 				await sql`SELECT COUNT(*) as count FROM acme.assets`.execute(db);
-			expect(Number(result.rows[0].count)).toBe(6);
+			expect(Number((result.rows[0] as { count: string }).count)).toBe(6);
 		});
 
 		it('should have 5 product_images', async () => {
@@ -67,7 +67,7 @@ describe.skipIf(shouldSkipE2E())('Schema and Seed', () => {
 				await sql`SELECT COUNT(*) as count FROM acme.product_images`.execute(
 					db,
 				);
-			expect(Number(result.rows[0].count)).toBe(5);
+			expect(Number((result.rows[0] as { count: string }).count)).toBe(5);
 		});
 
 		it('should have correct Q1 data (1 product with approved FR main image)', async () => {
@@ -127,7 +127,7 @@ describe.skipIf(shouldSkipE2E())('Schema and Seed', () => {
 			const db = await getTestDb();
 			const result =
 				await sql`SELECT COUNT(*) as count FROM globex.products`.execute(db);
-			expect(Number(result.rows[0].count)).toBe(5);
+			expect(Number((result.rows[0] as { count: string }).count)).toBe(5);
 		});
 
 		it('should have different data than acme (3 products with approved FR)', async () => {
@@ -159,14 +159,14 @@ describe.skipIf(shouldSkipE2E())('Schema and Seed', () => {
 			const db = await getTestDb();
 			const result =
 				await sql`SELECT COUNT(*) as count FROM blog_test.authors`.execute(db);
-			expect(Number(result.rows[0].count)).toBe(2);
+			expect(Number((result.rows[0] as { count: string }).count)).toBe(2);
 		});
 
 		it('should have 5 posts', async () => {
 			const db = await getTestDb();
 			const result =
 				await sql`SELECT COUNT(*) as count FROM blog_test.posts`.execute(db);
-			expect(Number(result.rows[0].count)).toBe(5);
+			expect(Number((result.rows[0] as { count: string }).count)).toBe(5);
 		});
 
 		it('should have 3 published posts', async () => {
@@ -174,14 +174,14 @@ describe.skipIf(shouldSkipE2E())('Schema and Seed', () => {
 			const result = await sql`
         SELECT COUNT(*) as count FROM blog_test.posts WHERE published = true
       `.execute(db);
-			expect(Number(result.rows[0].count)).toBe(3);
+			expect(Number((result.rows[0] as { count: string }).count)).toBe(3);
 		});
 
 		it('should have 10 comments', async () => {
 			const db = await getTestDb();
 			const result =
 				await sql`SELECT COUNT(*) as count FROM blog_test.comments`.execute(db);
-			expect(Number(result.rows[0].count)).toBe(10);
+			expect(Number((result.rows[0] as { count: string }).count)).toBe(10);
 		});
 	});
 });

@@ -11,7 +11,7 @@
  */
 
 import { generateDDL, introspect } from '@dbsp/adapter-kysely';
-import { buildModelFromResolvedSchema, defineSchema } from '@dbsp/core';
+import { fk, schema } from '@dbsp/core';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { generateSchemaFile } from '../../packages/cli/src/generators/schema-codegen.js';
@@ -37,31 +37,30 @@ describe.skipIf(shouldSkipE2E())('DDL → Introspect Round-Trip', () => {
 	});
 
 	it('round-trips a simple schema through DDL and introspection', async () => {
-		// 1. Define a TypeScript schema
-		const originalModel = buildModelFromResolvedSchema(
-			defineSchema({
-				users: {
-					id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
-					email: { type: 'string' },
-					name: { type: 'string', nullable: true },
-					active: { type: 'boolean', default: 'true' },
-					created_at: { type: 'date', default: 'now()' },
-				},
-				posts: {
-					id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
-					title: { type: 'string' },
-					content: { type: 'string', nullable: true },
-					author_id: { type: 'uuid', references: { table: 'users' } },
-					published: { type: 'boolean', default: 'false' },
-				},
-				comments: {
-					id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
-					post_id: { type: 'uuid', references: { table: 'posts' } },
-					author_id: { type: 'uuid', references: { table: 'users' } },
-					body: { type: 'string' },
-				},
-			}),
-		);
+		// 1. Define a TypeScript schema using new schema() + fk() API
+		const originalSchema = schema({
+			users: {
+				id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
+				email: 'string',
+				name: { type: 'string', nullable: true },
+				active: { type: 'boolean', default: 'true' },
+				createdAt: { type: 'date', default: 'now()' },
+			},
+			posts: {
+				id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
+				title: 'string',
+				content: { type: 'string', nullable: true },
+				authorId: fk('users'),
+				published: { type: 'boolean', default: 'false' },
+			},
+			comments: {
+				id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
+				postId: fk('posts'),
+				authorId: fk('users'),
+				body: 'string',
+			},
+		});
+		const originalModel = originalSchema.model;
 
 		// 2. Generate DDL from the schema
 		const db = await getTestDb();
@@ -94,11 +93,9 @@ describe.skipIf(shouldSkipE2E())('DDL → Introspect Round-Trip', () => {
 		expect(introspectedModel.tables.has('posts')).toBe(true);
 		expect(introspectedModel.tables.has('comments')).toBe(true);
 
-		// Check generated code structure
-		expect(generatedCode).toContain(
-			"import { defineSchema } from '@dbsp/core'",
-		);
-		expect(generatedCode).toContain('export const schema = defineSchema({');
+		// Check generated code structure (ARCH-005: new schema() + ref() API)
+		expect(generatedCode).toContain("import { schema, ref } from '@dbsp/core'");
+		expect(generatedCode).toContain('export const dbSchema = schema({');
 
 		// Check tables appear in generated code
 		expect(generatedCode).toContain('users: {');
@@ -135,9 +132,9 @@ describe.skipIf(shouldSkipE2E())('DDL → Introspect Round-Trip', () => {
 		expect(authorFk).toBeDefined();
 		expect(authorFk?.references.table).toBe('users');
 
-		// Check generated code contains FK references
-		expect(generatedCode).toContain("references: { table: 'users' }");
-		expect(generatedCode).toContain("references: { table: 'posts' }");
+		// Check generated code contains FK references (ARCH-005: ref() syntax)
+		expect(generatedCode).toContain("ref('users')");
+		expect(generatedCode).toContain("ref('posts')");
 	});
 
 	it('preserves column order', async () => {

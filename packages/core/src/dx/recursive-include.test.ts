@@ -9,59 +9,37 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { defineSchema } from '../schema-dsl.js';
 import { InvalidOperationError } from './errors.js';
 import { createOrm } from './orm.js';
-import { buildModelFromResolvedSchema } from './schema-bridge.js';
+import { ref, schema } from './schema.js';
 import type { RecursiveIncludeOptions } from './types.js';
 
 // ============================================================================
 // Test Schema with Self-Referential Relations
 // ============================================================================
 
-const model = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			categories: {
-				id: { type: 'integer', primaryKey: true },
-				name: { type: 'string' },
-				parentId: { type: 'integer', nullable: true },
-			},
-			users: {
-				id: { type: 'integer', primaryKey: true },
-				name: { type: 'string' },
-			},
-			posts: {
-				id: { type: 'integer', primaryKey: true },
-				title: { type: 'string' },
-				authorId: { type: 'integer' },
-			},
-		},
-		{
-			relations: {
-				// Self-referential: belongsTo (N:1) for ancestors
-				'categories.parent': {
-					kind: 'belongsTo',
-					target: 'categories',
-					foreignKey: 'parentId',
-				},
-				// Self-referential: hasMany (1:N) for descendants
-				'categories.children': {
-					kind: 'hasMany',
-					target: 'categories',
-					foreignKey: 'parentId',
-				},
-				// Non-self-referential
-				'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' },
-				'posts.author': {
-					kind: 'belongsTo',
-					target: 'users',
-					foreignKey: 'authorId',
-				},
-			},
-		},
-	),
-);
+const model = schema({
+	categories: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		// Self-referential: belongsTo (N:1) for ancestors, hasMany (1:N) for descendants
+		parentId: ref('categories', {
+			nullable: true,
+			as: 'parent',
+			inverse: 'children',
+			roles: { parent: 'parent', children: 'children' },
+		}),
+	},
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		authorId: ref('users', { as: 'author', inverse: 'posts' }),
+	},
+}).model;
 
 const orm = createOrm({ model });
 

@@ -4,9 +4,11 @@
  * Provides Kysely instance factory and schema management for E2E tests.
  */
 
-import { type Adapter, createKyselyAdapter } from '@dbsp/adapter-kysely';
+import type { Adapter } from '@dbsp/core';
+import { createKyselyAdapter } from '@dbsp/adapter-kysely';
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
+import { describe } from 'vitest';
 
 const { Pool } = pg;
 
