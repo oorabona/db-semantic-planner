@@ -24,7 +24,7 @@
 | MCP Server (@dbsp/mcp-server) | mcp-server | 🟡 Ready |
 | Developer Experience (DX) | core, adapter | 🟡 Backlog |
 | NQL v2.0 Parser (@dbsp/nql) | nql | ✅ Complete |
-| NQL CLI Migration (NQLM) | cli, examples | 🟡 Ready |
+| NQL CLI Migration (NQLM) | cli, examples | ✅ Complete |
 | Logical/Physical Naming (ARCH-003) | cli, examples | ✅ Complete |
 | Self-Ref Pseudo-Columns (SPEC-001) | core, nql, adapter | ✅ Complete (V1.0) |
 | Cross-Table Pseudo-Cols (SPEC-002) | core, nql, adapter | ✅ Complete |

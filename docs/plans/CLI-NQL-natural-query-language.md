@@ -1,16 +1,21 @@
 ---
 doc-meta:
-  status: canonical
+  status: superseded
+  superseded-by: NQL-SPEC-2026-01.md
   scope: cli
   type: specification
   created: 2026-01-20
-  updated: 2026-01-21
+  updated: 2026-01-25
   completed: 2026-01-21
   complexity: ENTERPRISE
   time-budget: 20h
 ---
 
 # Specification: CLI-NQL - Natural Query Language v1.0
+
+> ⚠️ **SUPERSEDED:** This document describes the legacy v1.0 parser syntax (without pipes).
+> The official implementation is now **[@dbsp/nql](../../packages/nql/)** using v2.0 pipeline syntax.
+> See [NQL-SPEC-2026-01.md](NQL-SPEC-2026-01.md) for the current specification.
 
 ## 0. Quick Reference (ALWAYS VISIBLE)
 

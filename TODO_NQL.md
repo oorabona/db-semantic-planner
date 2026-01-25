@@ -303,3 +303,14 @@ Removed `with` keyword, json_agg by default for relation includes via path expre
 
 - [ ] `batch(N)` streaming — Database-dependent cursor support
 - [ ] Per-relation pagination — Requires subquery strategy
+
+### Known Parser Limitations (2026-01-25)
+
+Discovered while validating `examples/*.dbsp` files:
+
+| Syntax | Status | Workaround |
+|--------|--------|------------|
+| `count(distinct col)` | ❌ Not parsed | Use `select distinct col \| select count(*)` |
+| `select distinct` (no columns) | ❌ Not parsed | Use `select distinct *` or explicit columns |
+
+**Priority:** LOW — rare use cases, workarounds exist

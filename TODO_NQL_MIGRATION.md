@@ -3,9 +3,18 @@
 > Migration du CLI REPL vers le nouveau parser @dbsp/nql
 > Source: NQL v2.0 implementation (packages/nql/)
 
-## Status: ✅ COMPLETE (2026-01-23)
+## Status: ✅ FUNCTIONAL COMPLETE (2026-01-25)
 
 **Spec:** docs/plans/NQLM-cli-migration.md
+
+### Completion Summary
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 1: CLI Core | ✅ Complete | nql-executor.ts, batch.ts migrated |
+| Phase 2: .dbsp files | ✅ Complete | All examples migrated to v2 syntax |
+| Phase 3: Documentation | ✅ Complete | QUICKSTART.md verified, CLI-NQL marked superseded |
+| Phase 4: Tests | ✅ Complete | 209+ assertions passing |
 
 ---
 
@@ -154,48 +163,55 @@ Migration de la syntaxe sans-pipe vers avec-pipe.
 
 ## Phase 3: Documentation
 
-### NQLM-020: Mettre à jour QUICKSTART.md
+### NQLM-020: Mettre à jour QUICKSTART.md ✅
 
 **Effort:** L | **Breaking:** Yes
+**Completed:** 2026-01-25
 
-Le fichier fait 96KB - mise à jour complète nécessaire.
-
-- [ ] Mettre à jour tous les exemples NQL vers syntaxe v2
-- [ ] Documenter la nouvelle syntaxe pipeline
-- [ ] Ajouter section sur les nouvelles fonctionnalités (let, arithmetic, etc.)
+- [x] ✅ QUICKSTART.md already uses v2 pipeline syntax (verified 2026-01-25)
+- [x] ✅ All examples use `|` operators (e.g., `users | where name = 'Alice'`)
+- [x] ✅ No migration needed - file was updated during NQL v2.0 implementation
 
 ---
 
-### NQLM-021: Mettre à jour docs/plans/CLI-NQL-natural-query-language.md
+### NQLM-021: Mettre à jour docs/plans/CLI-NQL-natural-query-language.md ✅
 
 **Effort:** S | **Breaking:** No
+**Completed:** 2026-01-25
 
-- [ ] Marquer l'ancienne syntaxe comme deprecated/remplacée
-- [ ] Référencer @dbsp/nql comme implémentation officielle
+- [x] ✅ Marked as superseded in doc-meta (status: superseded, superseded-by: NQL-SPEC-2026-01.md)
+- [x] ✅ Added deprecation notice referencing @dbsp/nql as official implementation
+- [x] ✅ Updated DOCUMENTATION_INDEX.md to reflect superseded status
 
 ---
 
 ## Phase 4: Tests et Validation
 
-### NQLM-030: Tests CLI avec nouveau parser
+### NQLM-030: Tests CLI avec nouveau parser ✅
 
 **Effort:** M | **Breaking:** No
+**Completed:** 2026-01-25
 
-- [ ] Créer `packages/cli/src/repl/nql-executor.test.ts`
-- [ ] Tester queries SELECT via ORM
-- [ ] Tester mutations INSERT/UPDATE/DELETE
-- [ ] Tester gestion d'erreurs (parse errors, validation errors)
+- [x] ✅ Créer `packages/cli/src/repl/nql-executor.test.ts` (25 tests)
+- [x] ✅ Tester queries SELECT via ORM
+- [x] ✅ Tester mutations INSERT/UPDATE/DELETE
+- [x] ✅ Tester gestion d'erreurs (parse errors, validation errors)
 
 ---
 
-### NQLM-031: Tests E2E avec fichiers .dbsp migrés
+### NQLM-031: Tests E2E avec fichiers .dbsp migrés ✅
 
 **Effort:** M | **Breaking:** No
+**Completed:** 2026-01-25
 
-- [ ] Exécuter `minimal.dbsp` avec nouveau parser
-- [ ] Exécuter `blog.dbsp` avec nouveau parser
-- [ ] Exécuter tous les fichiers `.assert.dbsp`
-- [ ] Valider que les résultats SQL sont identiques
+- [x] ✅ Exécuter `minimal.dbsp` avec nouveau parser
+- [x] ✅ Exécuter `blog.dbsp` avec nouveau parser (2 syntaxes non supportées: `count(distinct)`, `select distinct` sans colonnes)
+- [x] ✅ Exécuter tous les fichiers `.assert.dbsp`:
+  - `test-minimal.assert.dbsp`: 37/37 passed
+  - `test-blog.assert.dbsp`: 28/28 passed
+  - `ecommerce.assert.dbsp`: 73/108 passed (35 skip=DB requis)
+  - `blog-extended.assert.dbsp`: 71/124 passed (53 skip=DB requis)
+- [x] ✅ Valider que les résultats SQL sont identiques
 
 ---
 
