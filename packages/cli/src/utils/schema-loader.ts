@@ -14,7 +14,33 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { ResolvedSchema } from '@dbsp/core';
+import type { ModelIR } from '@dbsp/core';
+
+/**
+ * ARCH-005: Schema type from schema() function.
+ * Contains the definition, pre-computed ModelIR, and table names.
+ */
+export interface LoadedSchema {
+	readonly definition: Record<string, unknown>;
+	readonly model: ModelIR;
+	readonly tableNames: string[];
+}
+
+/**
+ * Type guard for ARCH-005 schema() output.
+ */
+function isValidSchema(schema: unknown): schema is LoadedSchema {
+	return (
+		typeof schema === 'object' &&
+		schema !== null &&
+		'model' in schema &&
+		'definition' in schema &&
+		typeof (schema as LoadedSchema).model === 'object' &&
+		(schema as LoadedSchema).model !== null &&
+		'tables' in (schema as LoadedSchema).model &&
+		'relations' in (schema as LoadedSchema).model
+	);
+}
 
 /**
  * Default schema file names to search for.
@@ -52,10 +78,10 @@ export function findSchemaFile(cwd: string): string | null {
 /**
  * Load a schema from a TypeScript or JavaScript file.
  *
+ * ARCH-005: Only accepts new schema() format, not legacy defineSchema().
  * For TypeScript files, this uses tsx loader via dynamic import.
- * The tsx package must be available (peer dependency).
  */
-export async function loadSchema(schemaPath: string): Promise<ResolvedSchema> {
+export async function loadSchema(schemaPath: string): Promise<LoadedSchema> {
 	const resolvedPath = resolve(schemaPath);
 
 	if (!existsSync(resolvedPath)) {
@@ -77,21 +103,15 @@ export async function loadSchema(schemaPath: string): Promise<ResolvedSchema> {
 			);
 		}
 
-		// Basic validation - check for required properties
-		if (!schema.tables || typeof schema.tables !== 'object') {
+		// ARCH-005: Validate schema() format
+		if (!isValidSchema(schema)) {
 			throw new SchemaLoadError(
-				`Invalid schema: missing 'tables' property in ${resolvedPath}`,
+				`Invalid schema format in ${resolvedPath}. ` +
+					`Use schema() from @dbsp/core to create schemas.`,
 			);
 		}
 
-		if (!schema.relations || typeof schema.relations !== 'object') {
-			throw new SchemaLoadError(
-				`Invalid schema: missing 'relations' property in ${resolvedPath}. ` +
-					`Did you forget to call defineSchema()?`,
-			);
-		}
-
-		return schema as ResolvedSchema;
+		return schema;
 	} catch (error) {
 		if (error instanceof SchemaLoadError) {
 			throw error;
@@ -122,7 +142,7 @@ export async function loadSchema(schemaPath: string): Promise<ResolvedSchema> {
  * Searches for default schema file names.
  */
 export async function loadSchemaFromCwd(cwd: string = process.cwd()): Promise<{
-	schema: ResolvedSchema;
+	schema: LoadedSchema;
 	path: string;
 }> {
 	const schemaPath = findSchemaFile(cwd);

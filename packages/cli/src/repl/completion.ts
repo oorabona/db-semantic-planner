@@ -4,7 +4,7 @@
  * Provides context-aware autocompletion suggestions for the REPL.
  */
 
-import type { ResolvedSchema } from '@dbsp/core';
+import type { LoadedSchema } from '../utils/schema-loader.js';
 
 /**
  * Levenshtein distance between two strings.
@@ -358,16 +358,17 @@ export class CompletionProvider {
 	// Relations per table - key is table name, value is relations for that table
 	private tableRelations: Map<string, CompletionSuggestion[]> = new Map();
 
-	constructor(schema: ResolvedSchema) {
+	constructor(schema: LoadedSchema) {
 		this.initializeFromSchema(schema);
 	}
 
 	/**
 	 * Initialize completions from schema
+	 * ARCH-005: Uses schema.model (ModelIR) directly
 	 */
-	private initializeFromSchema(schema: ResolvedSchema): void {
-		// Build table completions
-		for (const tableName of Object.keys(schema.tables)) {
+	private initializeFromSchema(schema: LoadedSchema): void {
+		// Build table completions from ModelIR
+		for (const [tableName, table] of schema.model.tables) {
 			this.tables.push({
 				text: tableName,
 				label: tableName,
@@ -376,25 +377,20 @@ export class CompletionProvider {
 			});
 
 			// Build column completions for this table
-			const table = schema.tables[tableName];
-			if (table) {
-				const tableColumns: CompletionSuggestion[] = [];
-				for (const [colName, colDef] of Object.entries(table)) {
-					if (colDef) {
-						tableColumns.push({
-							text: colName,
-							label: colName,
-							type: 'column',
-							description: colDef.type,
-						});
-					}
-				}
-				this.columns.set(tableName, tableColumns);
+			const tableColumns: CompletionSuggestion[] = [];
+			for (const col of table.columns) {
+				tableColumns.push({
+					text: col.name,
+					label: col.name,
+					type: 'column',
+					description: col.type,
+				});
 			}
+			this.columns.set(tableName, tableColumns);
 		}
 
-		// Build relation completions
-		for (const relName of Object.keys(schema.relations)) {
+		// Build relation completions from ModelIR
+		for (const [relName] of schema.model.relations) {
 			this.relations.push({
 				text: relName,
 				label: relName,

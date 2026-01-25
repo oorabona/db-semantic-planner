@@ -4,22 +4,23 @@
  * Shows schema browser on the left and query/output on the right.
  */
 
-import type { ResolvedSchema } from '@dbsp/core';
 import { Box, Text } from 'ink';
 import React, { useState } from 'react';
+import type { LoadedSchema } from '../../utils/schema-loader.js';
 
 interface SplitViewProps {
-	schema: ResolvedSchema;
+	schema: LoadedSchema;
 	rightContent: React.ReactNode;
 	width?: number;
 }
 
 /**
  * Schema browser panel
+ * ARCH-005: Uses LoadedSchema with schema.model (ModelIR)
  */
-function SchemaPanel({ schema }: { schema: ResolvedSchema }) {
+function SchemaPanel({ schema }: { schema: LoadedSchema }) {
 	const [expandedTable] = useState<string | null>(null);
-	const tables = Object.keys(schema.tables);
+	const tables = schema.tableNames;
 
 	return (
 		<Box flexDirection="column" padding={1}>
@@ -36,8 +37,7 @@ function SchemaPanel({ schema }: { schema: ResolvedSchema }) {
 				</Text>
 				{tables.map((tableName) => {
 					const isExpanded = expandedTable === tableName;
-					const table = schema.tables[tableName];
-					const columns = table ? Object.keys(table) : [];
+					const table = schema.model.tables.get(tableName);
 
 					return (
 						<Box key={tableName} flexDirection="column" marginLeft={1}>
@@ -46,16 +46,12 @@ function SchemaPanel({ schema }: { schema: ResolvedSchema }) {
 							</Text>
 							{isExpanded && table && (
 								<Box flexDirection="column" marginLeft={2}>
-									{columns.map((col) => {
-										const def = table[col];
-										if (!def) return null;
-										return (
-											<Text key={col} color="gray">
-												{col}: {def.type}
-												{def.nullable ? '' : ' (NOT NULL)'}
-											</Text>
-										);
-									})}
+									{table.columns.map((col) => (
+										<Text key={col.name} color="gray">
+											{col.name}: {col.type}
+											{col.nullable ? '' : ' (NOT NULL)'}
+										</Text>
+									))}
 								</Box>
 							)}
 						</Box>
@@ -66,12 +62,12 @@ function SchemaPanel({ schema }: { schema: ResolvedSchema }) {
 			{/* Relations */}
 			<Box flexDirection="column" marginTop={1}>
 				<Text color="gray" dimColor>
-					Relations ({Object.keys(schema.relations).length}):
+					Relations ({schema.model.relations.size}):
 				</Text>
-				{Object.entries(schema.relations).map(([name, rel]) => (
+				{Array.from(schema.model.relations.entries()).map(([name, rel]) => (
 					<Box key={name} marginLeft={1}>
 						<Text color="gray">
-							• {name}: {rel.kind} → {rel.target}
+							• {name}: {rel.type} → {rel.target}
 						</Text>
 					</Box>
 				))}
@@ -136,9 +132,10 @@ export function SplitView({
 
 /**
  * Simple schema sidebar (more compact version)
+ * ARCH-005: Uses LoadedSchema with schema.model (ModelIR)
  */
-export function SchemaSidebar({ schema }: { schema: ResolvedSchema }) {
-	const tables = Object.keys(schema.tables);
+export function SchemaSidebar({ schema }: { schema: LoadedSchema }) {
+	const tables = schema.tableNames;
 	// Find max table name length for consistent width
 	const maxLen = Math.max(...tables.map((t) => t.length), 10);
 	// Sidebar width: padding(2) + bullet(2) + name + border(2)
@@ -165,7 +162,7 @@ export function SchemaSidebar({ schema }: { schema: ResolvedSchema }) {
 			</Box>
 			<Box marginTop={1}>
 				<Text color="gray" dimColor>
-					{Object.keys(schema.relations).length} relations
+					{schema.model.relations.size} relations
 				</Text>
 			</Box>
 		</Box>
