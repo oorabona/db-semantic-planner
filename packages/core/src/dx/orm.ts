@@ -128,8 +128,17 @@ function typedSchemaToModelIR(schema: TypedSchema): ModelIR {
 				// Map TypedSchema relation kind to GeneratedRelation
 				switch (rel.kind) {
 					case 'hasOne':
+						// hasOne uses hasMany with cardinality 'one' (FK is on target table)
+						// buildModelFromResolvedSchema converts hasMany + cardinality:'one' → hasOne
+						generatedRelations[qualifiedName] = {
+							kind: 'hasMany' as const,
+							target: rel.target,
+							foreignKey: rel.foreignKey ?? `${tableName.replace(/s$/, '')}Id`,
+							cardinality: 'one' as const,
+						};
+						break;
 					case 'hasMany':
-						// Both hasOne and hasMany use GeneratedHasMany (FK is on target table)
+						// hasMany: FK is on target table
 						// Default foreignKey: {sourceTable}Id
 						generatedRelations[qualifiedName] = {
 							kind: 'hasMany' as const,

@@ -12,13 +12,16 @@
  * - supportsJsonAgg: true
  */
 
-import type { PlanReport } from '@dbsp/core';
+import type { PlanReport, TypedSchema } from '@dbsp/core';
 import {
+	belongsTo,
 	buildModelFromResolvedSchema,
 	createOrm,
 	defineSchema,
 	eq,
 	exists,
+	hasMany,
+	hasOne,
 	POSTGRESQL_CAPABILITIES,
 } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -120,32 +123,34 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 		describe('E2E-004-A2: hasOne uses JOIN strategy', () => {
 			it('should auto-select JOIN for hasOne relation', async () => {
-				// Create schema with hasOne relationship
-				const schemaWithProfile = buildModelFromResolvedSchema(
-					defineSchema(
-						{
-							users: {
+				// Create schema with hasOne relationship using TypedSchema API
+				const schemaWithProfile = {
+					tables: {
+						users: {
+							columns: {
 								id: { type: 'integer', primaryKey: true },
 								name: { type: 'string' },
 							},
-							profiles: {
+							relations: {
+								profile: hasOne('profiles', { foreignKey: 'userId' }),
+							},
+						},
+						profiles: {
+							columns: {
 								id: { type: 'integer', primaryKey: true },
-								user_id: { type: 'integer' },
+								userId: { type: 'integer' },
 								bio: { type: 'string' },
 							},
-						},
-						{
 							relations: {
-								'users.profile': { kind: 'hasMany', target: 'profiles', foreignKey: 'user_id' },
-								'profiles.user': { kind: 'belongsTo', target: 'users', foreignKey: 'user_id' },
+								user: belongsTo('users', { foreignKey: 'userId' }),
 							},
 						},
-					),
-				);
+					},
+				} as const satisfies TypedSchema;
 
 				const adapter = await getTestAdapter();
 				const orm = createOrm({
-					model: schemaWithProfile,
+					schema: schemaWithProfile,
 					adapter,
 					dialectCapabilities,
 				});

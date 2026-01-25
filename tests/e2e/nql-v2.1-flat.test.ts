@@ -64,7 +64,7 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 				dialectCapabilities,
 			});
 
-			const query = orm.withSchema(SCHEMA).select('users').include('posts');
+			const query = orm.withSchema(SCHEMA).select('authors').include('posts');
 
 			const dump = query.dump();
 
@@ -82,7 +82,7 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 				dialectCapabilities,
 			});
 
-			const query = orm.withSchema(SCHEMA).select('users').include('posts');
+			const query = orm.withSchema(SCHEMA).select('authors').include('posts');
 
 			const dump = query.dump();
 
@@ -104,7 +104,7 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 				dialectCapabilities,
 			});
 
-			const query = orm.withSchema(SCHEMA).select('users').include('posts');
+			const query = orm.withSchema(SCHEMA).select('authors').include('posts');
 
 			// When: Execute query
 			const results = await query.all();
@@ -136,7 +136,7 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 				dialectCapabilities,
 			});
 
-			const query = orm.withSchema(SCHEMA).select('users').include('posts');
+			const query = orm.withSchema(SCHEMA).select('authors').include('posts');
 
 			// When: Execute query
 			const results = await query.all();
@@ -167,7 +167,7 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 				dialectCapabilities,
 			});
 
-			const query = orm.withSchema(SCHEMA).select('users').include('posts');
+			const query = orm.withSchema(SCHEMA).select('authors').include('posts');
 
 			const dump = query.dump();
 
@@ -188,7 +188,7 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 				dialectCapabilities,
 			});
 
-			const query = orm.withSchema(SCHEMA).select('users').include('posts');
+			const query = orm.withSchema(SCHEMA).select('authors').include('posts');
 
 			const dump = query.dump();
 

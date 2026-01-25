@@ -223,7 +223,7 @@ function runSingleAssertion(
 			);
 
 		case 'db.output.contains':
-			return assertContains('output', result.output ?? '', value as string);
+			return assertContains('output', result.output ?? '', value as string, 'db.output.contains');
 
 		case 'db.rows.equals':
 			return assertDbRowsEquals(result, value as number);
@@ -277,10 +277,11 @@ function assertContains(
 	field: string,
 	actual: string,
 	expected: string,
+	originalType?: AssertionType,
 ): AssertionOutcome {
 	const passed = actual.includes(expected);
 	return {
-		type: `${field}.contains` as AssertionType,
+		type: originalType ?? (`${field}.contains` as AssertionType),
 		expected,
 		actual: passed ? undefined : actual, // Full value, no truncation
 		passed,

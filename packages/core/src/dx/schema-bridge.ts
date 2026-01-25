@@ -115,6 +115,7 @@ export interface GeneratedHasMany {
 	readonly foreignKey: string;
 	readonly sourceKey?: string;
 	readonly includeStrategy?: GeneratedIncludeStrategy;
+	readonly cardinality?: 'one' | 'many';
 }
 
 /**
@@ -446,12 +447,19 @@ function buildRelationIR(
 
 	// Get hints for this relation
 	const hint = hints[qualifiedName];
+	// Check cardinality from: hint > relation definition > inferred from kind
+	const relCardinality =
+		genRelation.kind === 'hasMany'
+			? (genRelation as GeneratedHasMany).cardinality
+			: undefined;
 	const cardinality: Cardinality =
 		hint?.cardinality === 'one'
 			? 'one'
-			: genRelation.kind === 'belongsTo'
+			: relCardinality === 'one'
 				? 'one'
-				: 'many';
+				: genRelation.kind === 'belongsTo'
+					? 'one'
+					: 'many';
 
 	// Determine optionality from nullable FK (for belongsTo) or default to 'optional' for hasMany
 	const optionality: Optionality =
