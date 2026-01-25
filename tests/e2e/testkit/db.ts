@@ -115,9 +115,12 @@ export async function execInSchema(
 
 /**
  * Check if Docker/E2E tests should be skipped.
+ * Skips if SKIP_E2E_TESTS=true OR if DATABASE_URL is not set.
  */
 export function shouldSkipE2E(): boolean {
-	return process.env.SKIP_E2E_TESTS === 'true';
+	if (process.env.SKIP_E2E_TESTS === 'true') return true;
+	if (!process.env.DATABASE_URL) return true;
+	return false;
 }
 
 /**

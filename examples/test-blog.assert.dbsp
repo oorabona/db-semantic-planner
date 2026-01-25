@@ -33,7 +33,7 @@ output.matches: (R|r)elation
 # ─────────────────────────────────────────
 --- query: 3
 success: true
-sql.contains: from "posts"
+sql.equals: select "posts".* from "posts" as "posts"
 params.length: 0
 
 # ─────────────────────────────────────────
@@ -41,7 +41,7 @@ params.length: 0
 # ─────────────────────────────────────────
 --- query: 4
 success: true
-sql.contains: from "authors"
+sql.equals: select "authors".* from "authors" as "authors"
 params.length: 0
 
 # ─────────────────────────────────────────
@@ -49,7 +49,7 @@ params.length: 0
 # ─────────────────────────────────────────
 --- query: 5
 success: true
-sql.contains: from "comments"
+sql.equals: select "comments".* from "comments" as "comments"
 params.length: 0
 
 # ─────────────────────────────────────────
@@ -57,24 +57,22 @@ params.length: 0
 # ─────────────────────────────────────────
 --- query: 6
 success: true
-sql.contains: where
-sql.contains: "published"
+sql.equals: select "posts".* from "posts" as "posts" where "posts"."published" = $1
 params.equals: [true]
 
 # ─────────────────────────────────────────
-# Query 7: posts with author
+# Query 7: posts with author (STRAT-SIMPLIFY: json_agg default)
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.contains: from "posts"
-sql.contains: left join "authors"
+sql.equals: select "posts".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "authors" AS __t__ WHERE "__t__"."id" = "posts"."author_id"), '[]'::json) as "author_json" from "posts" as "posts"
 
 # ─────────────────────────────────────────
 # Query 8: posts select distinct *
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.matches: select\s+distinct
+sql.equals: select distinct "posts".* from "posts" as "posts"
 
 # ──────────────────────────────────────────────────────────────────
 # TODO: Aggregate query assertions - uncomment when NQL aggregate

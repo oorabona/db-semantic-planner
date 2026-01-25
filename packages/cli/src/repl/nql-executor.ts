@@ -18,6 +18,7 @@ import {
 } from '@dbsp/adapter-kysely';
 import {
 	type DeleteIntent,
+	getDialectCapabilities,
 	type InsertIntent,
 	type ModelIR,
 	plan,
@@ -223,7 +224,10 @@ export async function executeNql(
 	if (compiled.query) {
 		// SELECT query - cast NQL type to core type
 		const queryIntent = asQueryIntent(compiled.query);
-		const planReport = plan(queryIntent, model);
+		// Pass PostgreSQL capabilities so planner can use json_agg strategy
+		const planReport = plan(queryIntent, model, {
+			dialectCapabilities: getDialectCapabilities('postgresql'),
+		});
 		const compiledQuery = compileToSql(planReport, model, db, schemaName);
 
 		const result = await db.executeQuery(compiledQuery);
@@ -366,7 +370,11 @@ export function compileNqlToSql(
 	// 2. Compile IntentAST to SQL using adapter
 	if (compiled.query) {
 		const queryIntent = asQueryIntent(compiled.query);
-		const planReport = plan(queryIntent, model);
+		// Pass dialect capabilities so planner can use json_agg strategy
+		const dialectName = toMockDialect(options?.dialect);
+		const planReport = plan(queryIntent, model, {
+			dialectCapabilities: getDialectCapabilities(dialectName),
+		});
 		const compiledQuery = adapter.compile(planReport, { model });
 
 		return {
