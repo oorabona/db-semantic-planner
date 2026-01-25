@@ -13,7 +13,10 @@
 # Setup: Create isolated schema and load data
 # =============================================================================
 
-# Create schema (! prefix = raw SQL in natural mode)
+# Drop existing schema to ensure clean state (! prefix = raw SQL in natural mode)
+!DROP SCHEMA IF EXISTS ch5_ecommerce CASCADE;
+
+# Create fresh schema
 !CREATE SCHEMA IF NOT EXISTS ch5_ecommerce;
 
 # Set schema context for subsequent operations

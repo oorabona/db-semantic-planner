@@ -2,37 +2,44 @@
 # Validates output from PIM/DAM schema queries
 
 # ─────────────────────────────────────────
-# Query 0: !CREATE SCHEMA IF NOT EXISTS ch6_pimdam;
+# Query 0: !DROP SCHEMA IF EXISTS ch6_pimdam CASCADE;
 # ─────────────────────────────────────────
 --- query: 0
 db.success: true
 db.output.contains: Executed SQL
 
 # ─────────────────────────────────────────
-# Query 1: .use ch6_pimdam
+# Query 1 !CREATE SCHEMA IF NOT EXISTS ch6_pimdam;
 # ─────────────────────────────────────────
 --- query: 1
+db.success: true
+db.output.contains: Executed SQL
+
+# ─────────────────────────────────────────
+# Query 2 .use ch6_pimdam
+# ─────────────────────────────────────────
+--- query: 2
 success: true
 output.contains: Using schema: ch6_pimdam
 
 # ─────────────────────────────────────────
-# Query 2: .import examples/pimdam.ddl.sql
-# ─────────────────────────────────────────
---- query: 2
-db.success: true
-db.output.contains: Imported
-
-# ─────────────────────────────────────────
-# Query 3: .import examples/pimdam.seed.sql
+# Query 3 .import examples/pimdam.ddl.sql
 # ─────────────────────────────────────────
 --- query: 3
 db.success: true
 db.output.contains: Imported
 
 # ─────────────────────────────────────────
-# Query 4: .tables
+# Query 4 .import examples/pimdam.seed.sql
 # ─────────────────────────────────────────
 --- query: 4
+db.success: true
+db.output.contains: Imported
+
+# ─────────────────────────────────────────
+# Query 5 .tables
+# ─────────────────────────────────────────
+--- query: 5
 success: true
 output.contains: Tables (5)
 output.contains: categories
@@ -42,9 +49,9 @@ output.contains: productImages
 output.contains: variants
 
 # ─────────────────────────────────────────
-# Query 5: categories | where active = true
+# Query 6 categories | where active = true
 # ─────────────────────────────────────────
---- query: 5
+--- query: 6
 success: true
 sql.contains: from "ch6_pimdam"."categories"
 sql.contains: where "_categories"."active" = $1
@@ -54,54 +61,54 @@ db.output.contains: Electronics
 db.output.contains: Clothing
 
 # ─────────────────────────────────────────
-# Query 6: products | where deletedAt is null
+# Query 7 products | where deletedAt is null
 # ─────────────────────────────────────────
---- query: 6
+--- query: 7
 success: true
 sql.contains: from "ch6_pimdam"."products"
 sql.contains: where "_products"."deleted_at" is null
 db.rows.equals: 13
 
 # ─────────────────────────────────────────
-# Query 7: assets | where kind = 'image'
+# Query 8 assets | where kind = 'image'
 # ─────────────────────────────────────────
---- query: 7
+--- query: 8
 success: true
 sql.contains: from "ch6_pimdam"."assets"
 sql.contains: where "_assets"."kind" = $1
 db.rows.equals: 18
 
 # ─────────────────────────────────────────
-# Query 8: productImages | where status = 'approved'
+# Query 9 productImages | where status = 'approved'
 # ─────────────────────────────────────────
---- query: 8
+--- query: 9
 success: true
 sql.contains: from "ch6_pimdam"."product_images"
 sql.contains: where "_product_images"."status" = $1
 db.rows.equals: 21
 
 # ─────────────────────────────────────────
-# Query 9: productImages | where locale = 'en' | select *, product.*
+# Query 10 productImages | where locale = 'en' | select *, product.*
 # ─────────────────────────────────────────
---- query: 9
+--- query: 10
 success: true
 sql.contains: from "ch6_pimdam"."product_images"
 sql.contains: left join "ch6_pimdam"."products"
 db.rows.equals: 19
 
 # ─────────────────────────────────────────
-# Query 10: productImages | select *, asset.*
+# Query 11 productImages | select *, asset.*
 # ─────────────────────────────────────────
---- query: 10
+--- query: 11
 success: true
 sql.contains: from "ch6_pimdam"."product_images"
 sql.contains: left join "ch6_pimdam"."assets"
 db.rows.equals: 25
 
 # ─────────────────────────────────────────
-# Query 11: products | where active = true and deletedAt is null and categoryId = 7 | select *, category.*
+# Query 12 products | where active = true and deletedAt is null and categoryId = 7 | select *, category.*
 # ─────────────────────────────────────────
---- query: 11
+--- query: 12
 success: true
 sql.contains: from "ch6_pimdam"."products"
 sql.contains: left join "ch6_pimdam"."categories"
@@ -110,9 +117,9 @@ params.equals: [true, 7]
 db.rows.equals: 4
 
 # ─────────────────────────────────────────
-# Query 12: products | where categoryId = 6
+# Query 13 products | where categoryId = 6
 # ─────────────────────────────────────────
---- query: 12
+--- query: 13
 success: true
 sql.contains: from "ch6_pimdam"."products"
 sql.contains: where "_products"."category_id" = $1
@@ -120,18 +127,18 @@ params.equals: [6]
 db.rows.equals: 3
 
 # ─────────────────────────────────────────
-# Query 13: categories | where parentId is null
+# Query 14 categories | where parentId is null
 # ─────────────────────────────────────────
---- query: 13
+--- query: 14
 success: true
 sql.contains: from "ch6_pimdam"."categories"
 sql.contains: where "_categories"."parent_id" is null
 db.rows.equals: 4
 
 # ─────────────────────────────────────────
-# Query 14: categories | where parentId is not null | select *, parent.*
+# Query 15 categories | where parentId is not null | select *, parent.*
 # ─────────────────────────────────────────
---- query: 14
+--- query: 15
 success: true
 sql.contains: from "ch6_pimdam"."categories"
 sql.contains: left join "ch6_pimdam"."categories" as "_parent"
@@ -139,9 +146,9 @@ sql.contains: where "_categories"."parent_id" is not null
 db.rows.equals: 8
 
 # ─────────────────────────────────────────
-# Query 15: categories | where parent.name = 'Electronics' (SPEC-001 pseudo-column)
+# Query 16 categories | where parent.name = 'Electronics' (SPEC-001 pseudo-column)
 # ─────────────────────────────────────────
---- query: 15
+--- query: 16
 success: true
 sql.contains: from "ch6_pimdam"."categories"
 sql.contains: left join "ch6_pimdam"."categories" as "parent_1"
@@ -153,9 +160,9 @@ db.output.contains: Computers
 db.output.contains: Audio
 
 # ─────────────────────────────────────────
-# Query 16: categories | where parent.name = 'Phones' (SPEC-001 pseudo-column)
+# Query 17 categories | where parent.name = 'Phones' (SPEC-001 pseudo-column)
 # ─────────────────────────────────────────
---- query: 16
+--- query: 17
 success: true
 sql.contains: from "ch6_pimdam"."categories"
 sql.contains: left join "ch6_pimdam"."categories" as "parent_1"
@@ -166,9 +173,9 @@ db.output.contains: Smartphones
 db.output.contains: Phone Accessories
 
 # ─────────────────────────────────────────
-# Query 17: categories | where parent.id = 1 (SPEC-001 pseudo-column with id)
+# Query 18 categories | where parent.id = 1 (SPEC-001 pseudo-column with id)
 # ─────────────────────────────────────────
---- query: 17
+--- query: 18
 success: true
 sql.contains: from "ch6_pimdam"."categories"
 sql.contains: left join "ch6_pimdam"."categories" as "parent_1"
@@ -177,26 +184,26 @@ params.equals: [1]
 db.rows.equals: 3
 
 # ─────────────────────────────────────────
-# Query 18: insert into categories set name = 'Accessories', slug = 'accessories', active = true
+# Query 19 insert into categories set name = 'Accessories', slug = 'accessories', active = true
 # ─────────────────────────────────────────
---- query: 18
+--- query: 19
 success: true
 sql.contains: insert into "ch6_pimdam"."categories"
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 19: insert into assets set filename, sha256, mime, sizeBytes, storageKey, kind
+# Query 20 insert into assets set filename, sha256, mime, sizeBytes, storageKey, kind
 # ─────────────────────────────────────────
---- query: 19
+--- query: 20
 success: true
 sql.contains: insert into "ch6_pimdam"."assets"
 sql.contains: ("filename", "sha256", "mime", "size_bytes", "storage_key", "kind") values
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 20: update products set active = false where id = 5
+# Query 21 update products set active = false where id = 5
 # ─────────────────────────────────────────
---- query: 20
+--- query: 21
 success: true
 sql.contains: update "ch6_pimdam"."products"
 sql.contains: set "active" = $1
@@ -204,10 +211,10 @@ sql.contains: where "id" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 21: update products set deletedAt = '2024-12-01T00:00:00Z' where sku = 'OLD-PRODUCT'
+# Query 22 update products set deletedAt = '2024-12-01T00:00:00Z' where sku = 'OLD-PRODUCT'
 # NOTE: Soft delete by setting deletedAt timestamp
 # ─────────────────────────────────────────
---- query: 21
+--- query: 22
 success: true
 sql.contains: update "ch6_pimdam"."products"
 sql.contains: set "deleted_at" = $1
@@ -215,9 +222,9 @@ sql.contains: where "sku" = $2
 db.rows.equals: 0
 
 # ─────────────────────────────────────────
-# Query 22: update productImages set status = 'approved' where id = 1
+# Query 23 update productImages set status = 'approved' where id = 1
 # ─────────────────────────────────────────
---- query: 22
+--- query: 23
 success: true
 sql.contains: update "ch6_pimdam"."product_images"
 sql.contains: set "status" = $1
@@ -225,19 +232,19 @@ sql.contains: where "id" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 23: delete from productImages where status = 'rejected'
+# Query 24 delete from productImages where status = 'rejected'
 # NOTE: Seed data has 1 rejected image (iPhone 15 Pro DE)
 # ─────────────────────────────────────────
---- query: 23
+--- query: 24
 success: true
 sql.contains: delete from "ch6_pimdam"."product_images"
 sql.contains: where "status" = $1
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 24: upsert into products on sku set title = 'Updated Product', sku = 'NEW-SKU-001', categoryId = 1, active = true
+# Query 25 upsert into products on sku set title = 'Updated Product', sku = 'NEW-SKU-001', categoryId = 1, active = true
 # ─────────────────────────────────────────
---- query: 24
+--- query: 25
 success: true
 sql.contains: insert into "ch6_pimdam"."products"
 sql.contains: on conflict ("sku") do update
