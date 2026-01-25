@@ -55,6 +55,12 @@ export const And = createToken({ name: 'And', pattern: /and\b/i });
 export const Or = createToken({ name: 'Or', pattern: /or\b/i });
 export const Not = createToken({ name: 'Not', pattern: /not\b/i });
 
+// SPEC-002: Quantifiers for relation filtering
+export const All = createToken({ name: 'All', pattern: /all\b/i });
+export const Some = createToken({ name: 'Some', pattern: /some\b/i });
+export const None = createToken({ name: 'None', pattern: /none\b/i });
+export const Every = createToken({ name: 'Every', pattern: /every\b/i });
+
 // Comparison operators (keyword-based)
 // Insert/Into must come before In in allTokens array since 'in' is prefix
 export const Insert = createToken({ name: 'Insert', pattern: /insert\b/i });
@@ -243,6 +249,11 @@ export const allTokens = [
 	And,
 	Or,
 	Not,
+	// SPEC-002: Quantifiers (All must come before As prefix-wise, Every before Exists)
+	All,
+	Some,
+	None,
+	Every,
 	Insert, // Must come before In
 	Into, // Must come before In
 	In,

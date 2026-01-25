@@ -178,6 +178,7 @@ export type NqlExpression =
 	| NqlBetweenExpression
 	| NqlIsNullExpression
 	| NqlExistsExpression
+	| NqlRelationFilterExpression
 	| NqlFunctionCall
 	| NqlWindowExpression
 	| NqlPathExpression
@@ -247,6 +248,31 @@ export interface NqlExistsExpression {
 	type: 'exists';
 	negated: boolean;
 	subquery: NqlSubquery;
+}
+
+/**
+ * SPEC-002: Relation filter expression for cross-table pseudo-columns
+ *
+ * Quantifier modes:
+ * - 'some' (default): EXISTS - at least one related record matches
+ * - 'none': NOT EXISTS - no related record matches
+ * - 'every': ALL - every related record matches (vacuous truth if empty)
+ *
+ * Syntax forms:
+ * - Implicit: `posts.featured = true` (some), `not posts.featured = true` (none), `all posts.featured = true` (every)
+ * - Explicit: `some(posts).featured = true`, `none(posts).featured = true`, `every(posts).featured = true`
+ * - With alias: `posts as p, p.featured = true and p.published = true`
+ */
+export interface NqlRelationFilterExpression {
+	type: 'relationFilter';
+	/** Relation path (can be multi-hop, e.g., ['author', 'company']) */
+	relation: string[];
+	/** The filter condition applied to the relation */
+	condition: NqlExpression;
+	/** Quantifier mode */
+	mode: 'some' | 'none' | 'every';
+	/** Optional alias for the relation (for complex conditions) */
+	alias?: string;
 }
 
 export interface NqlFunctionCall {

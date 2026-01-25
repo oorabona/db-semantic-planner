@@ -23,6 +23,7 @@ import type {
 	WhereOrIntent,
 	WhereRangeIntent,
 	WhereRangeOpIntent,
+	WhereRelationFilterIntent,
 } from '../src/compiler/index.js';
 import { compile } from '../src/index.js';
 
@@ -975,6 +976,192 @@ describe('NQL Compiler - Pseudo-Column Expressions (Self-Referential Traversal)'
 			expect(() => compileNql(nql)).toThrow(
 				/Extended pseudo-column syntax not yet supported/,
 			);
+		});
+	});
+});
+
+// ============================================================================
+// SPEC-002: Cross-Table Relation Filters
+// ============================================================================
+describe('NQL Compiler - SPEC-002: Cross-Table Relation Filters', () => {
+	describe('Explicit quantifier syntax', () => {
+		it('compiles some(relation).column = value', () => {
+			// Arrange
+			const nql = 'users | where some(posts).featured = true';
+
+			// Act
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereRelationFilterIntent;
+
+			// Assert
+			expect(where).toMatchObject({
+				kind: 'relationFilter',
+				relation: ['posts'],
+				mode: 'some',
+				where: {
+					kind: 'comparison',
+					field: 'featured',
+					operator: 'eq',
+					value: true,
+				},
+			});
+		});
+
+		it('compiles none(relation).column = value', () => {
+			// Arrange
+			const nql = 'users | where none(posts).draft = true';
+
+			// Act
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereRelationFilterIntent;
+
+			// Assert
+			expect(where).toMatchObject({
+				kind: 'relationFilter',
+				relation: ['posts'],
+				mode: 'none',
+				where: {
+					kind: 'comparison',
+					field: 'draft',
+					operator: 'eq',
+					value: true,
+				},
+			});
+		});
+
+		it('compiles every(relation).column = value', () => {
+			// Arrange
+			const nql = 'users | where every(posts).published = true';
+
+			// Act
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereRelationFilterIntent;
+
+			// Assert
+			expect(where).toMatchObject({
+				kind: 'relationFilter',
+				relation: ['posts'],
+				mode: 'every',
+				where: {
+					kind: 'comparison',
+					field: 'published',
+					operator: 'eq',
+					value: true,
+				},
+			});
+		});
+
+		it('compiles multi-hop relation path', () => {
+			// Arrange
+			const nql = "posts | where some(author.company).name = 'Acme'";
+
+			// Act
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereRelationFilterIntent;
+
+			// Assert
+			expect(where).toMatchObject({
+				kind: 'relationFilter',
+				relation: ['author', 'company'],
+				mode: 'some',
+				where: {
+					kind: 'comparison',
+					field: 'name',
+					operator: 'eq',
+					value: 'Acme',
+				},
+			});
+		});
+
+		it('compiles aliased form with complex condition', () => {
+			// Arrange
+			const nql =
+				"posts | where some(author as a, a.name = 'Alice' and a.active = true)";
+
+			// Act
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereRelationFilterIntent;
+
+			// Assert
+			expect(where).toMatchObject({
+				kind: 'relationFilter',
+				relation: ['author'],
+				mode: 'some',
+				alias: 'a',
+			});
+			expect(where.where.kind).toBe('and');
+		});
+	});
+
+	describe('ALL prefix syntax', () => {
+		it('compiles all relation.column = value', () => {
+			// Arrange
+			const nql = 'users | where all posts.featured = true';
+
+			// Act
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereRelationFilterIntent;
+
+			// Assert
+			expect(where).toMatchObject({
+				kind: 'relationFilter',
+				relation: ['posts'],
+				mode: 'every',
+				where: {
+					kind: 'comparison',
+					field: 'featured',
+					operator: 'eq',
+					value: true,
+				},
+			});
+		});
+
+		it('compiles all with multi-hop path', () => {
+			// Arrange
+			const nql = 'posts | where all author.company.verified = true';
+
+			// Act
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereRelationFilterIntent;
+
+			// Assert: relation is all but last segment, column is last segment
+			expect(where).toMatchObject({
+				kind: 'relationFilter',
+				relation: ['author', 'company'],
+				mode: 'every',
+				where: {
+					kind: 'comparison',
+					field: 'verified',
+					operator: 'eq',
+					value: true,
+				},
+			});
+		});
+	});
+
+	describe('Combined with other WHERE conditions', () => {
+		it('compiles relation filter combined with AND', () => {
+			// Arrange
+			const nql = 'users | where active = true and some(posts).featured = true';
+
+			// Act
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereAndIntent;
+
+			// Assert
+			expect(where.kind).toBe('and');
+			expect(where.conditions).toHaveLength(2);
+			expect(where.conditions[0]).toMatchObject({
+				kind: 'comparison',
+				field: 'active',
+				operator: 'eq',
+				value: true,
+			});
+			expect(where.conditions[1]).toMatchObject({
+				kind: 'relationFilter',
+				relation: ['posts'],
+				mode: 'some',
+			});
 		});
 	});
 });

@@ -7,6 +7,7 @@
 
 import { type CstNode, CstParser, type IToken } from 'chevrotain';
 import {
+	All,
 	And,
 	As,
 	Asc,
@@ -25,6 +26,7 @@ import {
 	Distinct,
 	Dot,
 	Equals,
+	Every,
 	Exists,
 	False,
 	Flat,
@@ -32,7 +34,6 @@ import {
 	GreaterThan,
 	GreaterThanOrEqual,
 	GroupBy,
-	// Identifiers & Literals
 	Identifier,
 	In,
 	Insert,
@@ -48,6 +49,7 @@ import {
 	Limit,
 	LParen,
 	Minus,
+	None,
 	Not,
 	NotEquals,
 	NqlLexer,
@@ -59,11 +61,9 @@ import {
 	OrderBy,
 	Over,
 	Overlaps,
-	// Pseudo-column keywords (self-referential traversal)
 	Parent,
 	PartitionBy,
 	Percent,
-	// Operators & Punctuation
 	Pipe,
 	Plus,
 	QuotedIdentifier,
@@ -72,10 +72,10 @@ import {
 	RBracket,
 	RowNumber,
 	RParen,
-	// Keywords
 	Select,
 	SetKeyword,
 	Slash,
+	Some,
 	Star,
 	StringLiteral,
 	True,
@@ -409,11 +409,10 @@ export class NqlParser extends CstParser {
 
 	/**
 	 * primary_cond = "(" boolean_expr ")"
-	 *              | comparison
-	 *              | between_check
+	 *              | quantified_relation_filter   -- SPEC-002: some()/none()/every()
+	 *              | all_relation_filter          -- SPEC-002: all relation.col = val
 	 *              | exists_check
-	 *              | in_check
-	 *              | is_null_check ;
+	 *              | comparison / between / in / is_null ;
 	 */
 	private primaryCond = this.RULE('primaryCond', () => {
 		this.OR([
@@ -425,6 +424,19 @@ export class NqlParser extends CstParser {
 					this.SUBRULE(this.booleanExpr);
 					this.CONSUME(RParen);
 				},
+			},
+			// SPEC-002: Explicit quantifiers - some()/none()/every()
+			{
+				GATE: () =>
+					this.LA(1).tokenType === Some ||
+					this.LA(1).tokenType === None ||
+					this.LA(1).tokenType === Every,
+				ALT: () => this.SUBRULE(this.quantifiedRelationFilter),
+			},
+			// SPEC-002: ALL quantifier prefix - all relation.col = val
+			{
+				GATE: () => this.LA(1).tokenType === All,
+				ALT: () => this.SUBRULE(this.allRelationFilter),
 			},
 			// EXISTS check
 			{
@@ -522,6 +534,90 @@ export class NqlParser extends CstParser {
 		this.CONSUME(LParen);
 		this.SUBRULE(this.scalarSubquery);
 		this.CONSUME(RParen);
+	});
+
+	// ============================================================
+	// SPEC-002: RELATION FILTER EXPRESSIONS
+	// ============================================================
+
+	/**
+	 * SPEC-002: Explicit quantifier function
+	 * quantified_relation_filter = quantifier "(" path_expr ")" "." ident_segment comp_op expr
+	 *                            | quantifier "(" path_expr [ "as" IDENT ] "," boolean_expr ")" ;
+	 * quantifier = "some" | "none" | "every" ;
+	 *
+	 * Examples:
+	 *   some(posts).featured = true
+	 *   none(posts).published = true
+	 *   every(posts).status = 'approved'
+	 *   some(posts as p, p.featured = true and p.published = true)
+	 */
+	private quantifiedRelationFilter = this.RULE(
+		'quantifiedRelationFilter',
+		() => {
+			// Quantifier keyword
+			this.OR([
+				{ ALT: () => this.CONSUME(Some) },
+				{ ALT: () => this.CONSUME(None) },
+				{ ALT: () => this.CONSUME(Every) },
+			]);
+			this.CONSUME(LParen);
+			// Relation path
+			this.SUBRULE(this.pathExpr);
+			// Check what follows: ) . column or as alias , condition )
+			this.OR2([
+				// Simple form: some(posts).column = value
+				{
+					GATE: () =>
+						this.LA(1).tokenType === RParen && this.LA(2).tokenType === Dot,
+					ALT: () => {
+						this.CONSUME(RParen);
+						this.CONSUME(Dot);
+						this.SUBRULE(this.identSegment);
+						this.SUBRULE(this.compOp);
+						this.SUBRULE(this.expression);
+					},
+				},
+				// Aliased form: some(posts as p, condition)
+				{
+					GATE: () => this.LA(1).tokenType === As,
+					ALT: () => {
+						this.CONSUME(As);
+						this.SUBRULE2(this.identSegment);
+						this.CONSUME(Comma);
+						this.SUBRULE(this.booleanExpr);
+						this.CONSUME2(RParen);
+					},
+				},
+				// Direct condition form: some(posts, condition)
+				{
+					GATE: () => this.LA(1).tokenType === Comma,
+					ALT: () => {
+						this.CONSUME2(Comma);
+						this.SUBRULE2(this.booleanExpr);
+						this.CONSUME3(RParen);
+					},
+				},
+			]);
+		},
+	);
+
+	/**
+	 * SPEC-002: ALL quantifier prefix for implicit relation filter
+	 * all_relation_filter = "all" path_expr comp_op expr ;
+	 *
+	 * The path_expr contains both the relation and column, e.g., posts.featured
+	 * The visitor will split it: relation = all but last segment, column = last segment
+	 *
+	 * Examples:
+	 *   all posts.featured = true   (relation: posts, column: featured)
+	 *   all author.posts.published = true  (relation: author.posts, column: published)
+	 */
+	private allRelationFilter = this.RULE('allRelationFilter', () => {
+		this.CONSUME(All);
+		this.SUBRULE(this.pathExpr);
+		this.SUBRULE(this.compOp);
+		this.SUBRULE(this.expression);
 	});
 
 	/**

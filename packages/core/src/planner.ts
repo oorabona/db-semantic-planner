@@ -53,6 +53,8 @@ export interface PlanDecision {
 		readonly relationType?: string;
 		/** Intent path (e.g., "where.exists.posts") */
 		readonly intentPath?: string;
+		/** Full relation path for multi-hop (SPEC-002), e.g., "author.company" */
+		readonly relationPath?: string;
 	};
 
 	/** The choice made */
@@ -789,7 +791,7 @@ function processWhere(
 }
 
 function processRelationFilter(
-	relationName: string,
+	relationPath: string | readonly string[],
 	sourceTable: string,
 	model: ModelIR,
 	state: PlannerState,
@@ -800,68 +802,99 @@ function processRelationFilter(
 ): void {
 	state.relationsAnalyzed++;
 
-	// Find the relation
-	const relation = disambiguateRelation(
-		relationName,
-		sourceTable,
-		model,
-		state,
-		opts,
-		intentPath,
-	);
+	// Normalize relation path to array (SPEC-002: multi-hop support)
+	const relations = Array.isArray(relationPath)
+		? relationPath
+		: [relationPath];
 
-	if (!relation) {
-		return; // Error already added to warnings or exception thrown
-	}
+	// Process each relation in the chain
+	let currentSource = sourceTable;
+	for (let i = 0; i < relations.length; i++) {
+		const relationName = relations[i];
+		if (!relationName) continue;
 
-	// Track relation access for CTE extraction
-	const relationPath = `${sourceTable}.${relation.name}`;
-	const paths = state.relationAccessCounts.get(relationPath) ?? [];
-	paths.push(intentPath);
-	state.relationAccessCounts.set(relationPath, paths);
+		const isLastInChain = i === relations.length - 1;
+		const chainPath = `${intentPath}[${i}]`;
 
-	// Determine filter strategy
-	const filterStrategy = determineFilterStrategy(
-		relation,
-		opts,
-		mode ?? 'some',
-	);
-
-	const decisionId = generateDecisionId(state, 'filter-strategy');
-	state.decisions.push({
-		id: decisionId,
-		type: 'filter-strategy',
-		context: {
-			sourceTable,
-			target: relation.target,
-			relation: relation.name,
-			intentPath,
-		},
-		choice: filterStrategy,
-		reasoning: generateFilterReasoning(relation, filterStrategy, mode),
-		alternatives: filterStrategy === 'exists' ? ['join'] : ['exists'],
-	});
-
-	// Check for potential row explosion warning
-	if (filterStrategy === 'join' && relation.cardinality === 'many') {
-		state.warnings.push({
-			code: 'POTENTIAL_ROW_EXPLOSION',
-			message: `Using JOIN on to-many relation "${relation.name}" may cause row multiplication`,
-			suggestion: `Consider using EXISTS strategy for relation "${relation.name}"`,
-			relatedDecision: decisionId,
-		});
-	}
-
-	// Process nested where if present
-	if (nestedWhere) {
-		processWhere(
-			nestedWhere,
-			relation.target,
+		// Find the relation
+		const relation = disambiguateRelation(
+			relationName,
+			currentSource,
 			model,
 			state,
 			opts,
-			`${intentPath}.where`,
+			chainPath,
 		);
+
+		if (!relation) {
+			return; // Error already added to warnings or exception thrown
+		}
+
+		// Track relation access for CTE extraction
+		const relPath = `${currentSource}.${relation.name}`;
+		const paths = state.relationAccessCounts.get(relPath) ?? [];
+		paths.push(chainPath);
+		state.relationAccessCounts.set(relPath, paths);
+
+		// Determine filter strategy (only for last relation in chain)
+		if (isLastInChain) {
+			const filterStrategy = determineFilterStrategy(
+				relation,
+				opts,
+				mode ?? 'some',
+			);
+
+			const decisionId = generateDecisionId(state, 'filter-strategy');
+			// SPEC-002: Include full path in context for multi-hop
+			const context: PlanDecision['context'] =
+				relations.length > 1
+					? {
+							sourceTable: currentSource,
+							target: relation.target,
+							relation: relation.name,
+							intentPath: chainPath,
+							relationPath: relations.join('.'),
+						}
+					: {
+							sourceTable: currentSource,
+							target: relation.target,
+							relation: relation.name,
+							intentPath: chainPath,
+						};
+			state.decisions.push({
+				id: decisionId,
+				type: 'filter-strategy',
+				context,
+				choice: filterStrategy,
+				reasoning: generateFilterReasoning(relation, filterStrategy, mode),
+				alternatives: filterStrategy === 'exists' ? ['join'] : ['exists'],
+			});
+
+			// Check for potential row explosion warning
+			if (filterStrategy === 'join' && relation.cardinality === 'many') {
+				state.warnings.push({
+					code: 'POTENTIAL_ROW_EXPLOSION',
+					message: `Using JOIN on to-many relation "${relation.name}" may cause row multiplication`,
+					suggestion: `Consider using EXISTS strategy for relation "${relation.name}"`,
+					relatedDecision: decisionId,
+				});
+			}
+
+			// Process nested where on the final target
+			if (nestedWhere) {
+				processWhere(
+					nestedWhere,
+					relation.target,
+					model,
+					state,
+					opts,
+					`${intentPath}.where`,
+				);
+			}
+		}
+
+		// Move to next table in chain
+		currentSource = relation.target;
 	}
 }
 
@@ -1378,8 +1411,26 @@ function extractCTEs(state: PlannerState, threshold: number): void {
 			const parts = relationPath.split('.');
 			const table = parts[0] ?? 'unknown';
 			const relation = parts[1] ?? 'unknown';
-			// Include table name for uniqueness (e.g., users.posts and comments.posts both have "posts")
 			const cteName = `cte_${table}_${relation}`;
+
+			// SPEC-002: Skip CTE extraction if the include strategy is 'json_agg'.
+			// json_agg uses a subquery that doesn't benefit from CTEs and would conflict.
+			// Other strategies (join, cte, separate) can still use CTE extraction.
+			const includeStrategyDecision = state.decisions.find(
+				(d) =>
+					d.type === 'include-strategy' &&
+					d.context?.sourceTable === table &&
+					d.context?.relation === relation,
+			);
+			if (includeStrategyDecision?.choice === 'json_agg') {
+				// json_agg strategy uses its own subquery - CTE extraction not needed
+				continue;
+			}
+
+			// Skip if CTE already exists (from include processing)
+			if (state.ctes.some((c) => c.name === cteName)) {
+				continue;
+			}
 
 			state.ctes.push({
 				name: cteName,

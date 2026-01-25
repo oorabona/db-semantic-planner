@@ -26,6 +26,7 @@ import type {
 	NqlQuery,
 	NqlRangeLiteral,
 	NqlRangeOpExpression,
+	NqlRelationFilterExpression,
 	NqlSelectItem,
 	NqlStatement,
 	NqlSubquery,
@@ -383,6 +384,14 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			return this.visit(asCstNode(ctx.existsCheck[0]));
 		}
 
+		// SPEC-002: Quantified relation filters
+		if (ctx.quantifiedRelationFilter) {
+			return this.visit(asCstNode(ctx.quantifiedRelationFilter[0]));
+		}
+		if (ctx.allRelationFilter) {
+			return this.visit(asCstNode(ctx.allRelationFilter[0]));
+		}
+
 		// Expression-based conditions
 		if (!ctx.expression) throw new Error('PrimaryCond missing expression');
 		const left = this.visit(asCstNode(ctx.expression[0]));
@@ -582,6 +591,127 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			type: 'exists',
 			negated: !!ctx.Not,
 			subquery: this.visit(asCstNode(ctx.scalarSubquery[0])),
+		};
+	}
+
+	// ============================================================
+	// SPEC-002: RELATION FILTER EXPRESSIONS
+	// ============================================================
+
+	/**
+	 * SPEC-002: Explicit quantifier function
+	 * some(relation).column = value | none(relation).column = value | every(relation).column = value
+	 * some(relation as alias, condition) | some(relation, condition)
+	 */
+	quantifiedRelationFilter(ctx: CstContext): NqlRelationFilterExpression {
+		// Determine quantifier mode
+		let mode: 'some' | 'none' | 'every';
+		if (ctx.Some) {
+			mode = 'some';
+		} else if (ctx.None) {
+			mode = 'none';
+		} else if (ctx.Every) {
+			mode = 'every';
+		} else {
+			throw new Error('quantifiedRelationFilter missing quantifier');
+		}
+
+		// Get relation path
+		if (!ctx.pathExpr)
+			throw new Error('quantifiedRelationFilter missing pathExpr');
+		const pathExpr = this.visit(asCstNode(ctx.pathExpr[0])) as {
+			type: 'path';
+			segments: string[];
+		};
+		const relation = pathExpr.segments;
+
+		// Check which form: simple (.column = value) or aliased/direct condition
+		if (ctx.booleanExpr) {
+			// Aliased or direct condition form
+			const alias = ctx.identSegment
+				? this.visit(asCstNode(ctx.identSegment[0]))
+				: undefined;
+			const condition = this.visit(asCstNode(ctx.booleanExpr[0]));
+			return {
+				type: 'relationFilter',
+				relation,
+				condition,
+				mode,
+				alias,
+			};
+		}
+		// Simple form: some(relation).column = value
+		if (!ctx.identSegment)
+			throw new Error('quantifiedRelationFilter missing column');
+		const column = this.visit(asCstNode(ctx.identSegment[0])) as string;
+		if (!ctx.compOp) throw new Error('quantifiedRelationFilter missing compOp');
+		const operator = this.visit(asCstNode(ctx.compOp[0])) as string;
+		if (!ctx.expression)
+			throw new Error('quantifiedRelationFilter missing expression');
+		const right = this.visit(asCstNode(ctx.expression[0]));
+
+		// Build comparison condition
+		const condition = {
+			type: 'comparison' as const,
+			operator: operator as '=' | '!=' | '<' | '>' | '<=' | '>=' | 'like',
+			left: { type: 'path' as const, segments: [column] },
+			right,
+		};
+
+		return {
+			type: 'relationFilter',
+			relation,
+			condition,
+			mode,
+		};
+	}
+
+	/**
+	 * SPEC-002: ALL quantifier prefix
+	 * all posts.featured = true
+	 *
+	 * pathExpr contains both relation and column (e.g., posts.featured)
+	 * We split: relation = all but last, column = last segment
+	 */
+	allRelationFilter(ctx: CstContext): NqlRelationFilterExpression {
+		// Get full path (includes both relation and column)
+		if (!ctx.pathExpr) throw new Error('allRelationFilter missing pathExpr');
+		const pathExpr = this.visit(asCstNode(ctx.pathExpr[0])) as {
+			type: 'path';
+			segments: string[];
+		};
+		const segments = pathExpr.segments;
+
+		if (segments.length < 2) {
+			throw new Error(
+				`allRelationFilter requires at least relation.column (got: ${segments.join('.')})`,
+			);
+		}
+
+		// Split: relation = all but last, column = last
+		const relation = segments.slice(0, -1);
+		const column = segments[segments.length - 1];
+
+		// Get comparison operator and value
+		if (!ctx.compOp) throw new Error('allRelationFilter missing compOp');
+		const operator = this.visit(asCstNode(ctx.compOp[0])) as string;
+		if (!ctx.expression)
+			throw new Error('allRelationFilter missing expression');
+		const right = this.visit(asCstNode(ctx.expression[0]));
+
+		// Build comparison condition
+		const condition = {
+			type: 'comparison' as const,
+			operator: operator as '=' | '!=' | '<' | '>' | '<=' | '>=' | 'like',
+			left: { type: 'path' as const, segments: [column] },
+			right,
+		};
+
+		return {
+			type: 'relationFilter',
+			relation,
+			condition,
+			mode: 'every', // ALL = every
 		};
 	}
 

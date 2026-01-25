@@ -22,6 +22,7 @@ import type {
 	NqlQuery,
 	NqlRangeLiteral,
 	NqlRangeOpExpression,
+	NqlRelationFilterExpression,
 	NqlSelectClause,
 	NqlSelectItem,
 	NqlUnaryExpression,
@@ -218,6 +219,7 @@ export type WhereIntent =
 	| WhereLikeIntent
 	| WhereNullIntent
 	| WhereRangeIntent
+	| WhereRelationFilterIntent
 	| WhereAndIntent
 	| WhereOrIntent
 	| WhereNotIntent;
@@ -260,6 +262,27 @@ export interface WhereRangeIntent {
 	readonly operator: RangeOperator;
 	/** Can be { lower, upper } for BETWEEN or string for PostgreSQL range literal */
 	readonly value: { lower: unknown; upper: unknown } | string;
+}
+
+/**
+ * SPEC-002: Relation filter for cross-table queries
+ * Produces correlated subqueries (EXISTS/NOT EXISTS/ALL)
+ */
+export interface WhereRelationFilterIntent {
+	readonly kind: 'relationFilter';
+	/** Relation path (can be multi-hop, e.g., ['author', 'company']) */
+	readonly relation: readonly string[];
+	/** Filter conditions on related records */
+	readonly where: WhereIntent;
+	/**
+	 * Match mode:
+	 * - 'some': EXISTS - at least one related record matches
+	 * - 'every': ALL - every related record matches
+	 * - 'none': NOT EXISTS - no related record matches
+	 */
+	readonly mode: 'some' | 'every' | 'none';
+	/** Optional alias for complex conditions */
+	readonly alias?: string;
 }
 
 export interface WhereAndIntent {
@@ -951,6 +974,18 @@ export class NqlCompiler {
 						'Use relation-based filtering: table | with relation | where ... ' +
 						'or consider using a correlated subquery pattern.',
 				);
+			}
+
+			case 'relationFilter': {
+				// SPEC-002: Cross-table relation filters
+				const relFilter = expr as NqlRelationFilterExpression;
+				return {
+					kind: 'relationFilter',
+					relation: relFilter.relation,
+					where: this.compileExpression(relFilter.condition),
+					mode: relFilter.mode,
+					alias: relFilter.alias,
+				};
 			}
 
 			default:

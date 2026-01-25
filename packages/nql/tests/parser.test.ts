@@ -347,4 +347,119 @@ describe('NqlParser', () => {
 			expect(result.cst).toBeDefined();
 		});
 	});
+
+	// ============================================================
+	// SPEC-002: Cross-table Pseudo-columns (Relation Filters)
+	// ============================================================
+	describe('SPEC-002: Relation Filter Parsing', () => {
+		describe('Explicit quantifier syntax', () => {
+			it('parses some(relation).column = value', () => {
+				const result = parseCst('users | where some(posts).featured = true');
+				expect(result.errors).toHaveLength(0);
+				expect(result.cst).toBeDefined();
+			});
+
+			it('parses none(relation).column = value', () => {
+				const result = parseCst('users | where none(posts).published = false');
+				expect(result.errors).toHaveLength(0);
+				expect(result.cst).toBeDefined();
+			});
+
+			it('parses every(relation).column = value', () => {
+				const result = parseCst(
+					"users | where every(posts).status = 'approved'",
+				);
+				expect(result.errors).toHaveLength(0);
+				expect(result.cst).toBeDefined();
+			});
+
+			it('parses some(relation as alias, condition)', () => {
+				const result = parseCst(
+					'users | where some(posts as p, p.featured = true and p.published = true)',
+				);
+				expect(result.errors).toHaveLength(0);
+				expect(result.cst).toBeDefined();
+			});
+
+			it('parses none(relation as alias, condition)', () => {
+				const result = parseCst(
+					"users | where none(orders as o, o.status = 'cancelled' and o.total > 100)",
+				);
+				expect(result.errors).toHaveLength(0);
+				expect(result.cst).toBeDefined();
+			});
+
+			it('parses some(relation, condition) without alias', () => {
+				const result = parseCst('users | where some(posts, featured = true)');
+				expect(result.errors).toHaveLength(0);
+				expect(result.cst).toBeDefined();
+			});
+
+			it('parses multi-hop relation path: some(author.company).name', () => {
+				const result = parseCst(
+					"posts | where some(author.company).name = 'Acme'",
+				);
+				expect(result.errors).toHaveLength(0);
+				expect(result.cst).toBeDefined();
+			});
+		});
+
+		describe('ALL quantifier prefix syntax', () => {
+			it('parses all relation.column = value', () => {
+				const result = parseCst('users | where all posts.featured = true');
+				expect(result.errors).toHaveLength(0);
+				expect(result.cst).toBeDefined();
+			});
+
+			it('parses all with multi-hop path', () => {
+				const result = parseCst(
+					'posts | where all author.company.verified = true',
+				);
+				expect(result.errors).toHaveLength(0);
+				expect(result.cst).toBeDefined();
+			});
+		});
+
+		describe('Quantifier combinations', () => {
+			it('parses AND of quantified filters', () => {
+				const result = parseCst(
+					'users | where some(posts).featured = true and none(posts).draft = true',
+				);
+				expect(result.errors).toHaveLength(0);
+				expect(result.cst).toBeDefined();
+			});
+
+			it('parses OR of quantified filters', () => {
+				const result = parseCst(
+					'users | where some(posts).featured = true or every(posts).published = true',
+				);
+				expect(result.errors).toHaveLength(0);
+				expect(result.cst).toBeDefined();
+			});
+
+			it('parses quantified filter with regular comparison', () => {
+				const result = parseCst(
+					'users | where active = true and some(posts).featured = true',
+				);
+				expect(result.errors).toHaveLength(0);
+				expect(result.cst).toBeDefined();
+			});
+		});
+
+		describe('Comparison operators in quantified filters', () => {
+			it('parses some() with > comparison', () => {
+				const result = parseCst('users | where some(orders).total > 1000');
+				expect(result.errors).toHaveLength(0);
+				expect(result.cst).toBeDefined();
+			});
+
+			it('parses every() with like comparison', () => {
+				const result = parseCst(
+					"users | where every(posts).title like '%important%'",
+				);
+				expect(result.errors).toHaveLength(0);
+				expect(result.cst).toBeDefined();
+			});
+		});
+	});
 });
