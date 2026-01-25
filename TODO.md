@@ -53,6 +53,7 @@ Grammar simplification: remove `with` keyword, add `| flat` modifier, `.output` 
 - [x] ✅ Block 3: Adapter — Strategy enforcement (json_agg vs JOIN) (2026-01-24)
 - [x] ✅ Block 4: REPL .output command (json|table|csv) (2026-01-24)
 - [x] ✅ Block 5: E2E tests + documentation (2026-01-24)
+- [x] ✅ Block 5b: E2E test fixes — hasOne strategy, NQL syntax, semantic aliases (2026-01-25)
 
 ### Future Blocks (Backlog)
 

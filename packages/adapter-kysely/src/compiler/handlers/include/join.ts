@@ -9,7 +9,6 @@ import { CompilationError } from '../../../errors.js';
 import { addWhereToJoin } from '../../../recursive-compiler.js';
 import {
 	collectJoinIncludes,
-	getNextAlias,
 	lookupResolvedRelation,
 	normalizeForeignKey,
 	normalizePrimaryKey,
@@ -67,8 +66,14 @@ export function applyJoinIncludes(
 		// Handle M:N (belongsToMany) with through table
 		if (relation.through) {
 			// M:N requires two LEFT JOINs: source → junction → target
-			const junctionAlias = getNextAlias(state);
-			const targetAlias = getNextAlias(state);
+			// Use semantic names: junction table name for junction, relation name for target
+			// When schema-scoped, prefix to avoid PostgreSQL ambiguity
+			state.aliasCounter++;
+			const junctionAlias = schemaName
+				? `_${relation.through}`
+				: relation.through;
+			state.aliasCounter++;
+			const targetAlias = schemaName ? `_${relationName}` : relationName;
 
 			// FK from junction to source (default: {source}Id) - supports composite keys
 			const fkCols = normalizeForeignKey(
@@ -139,7 +144,10 @@ export function applyJoinIncludes(
 			});
 		} else {
 			// Non-M:N relations (hasOne, hasMany, belongsTo)
-			const joinAlias = getNextAlias(state);
+			// Use relation name as alias for semantic readability
+			// When schema-scoped, prefix to avoid PostgreSQL ambiguity
+			state.aliasCounter++;
+			const joinAlias = schemaName ? `_${relationName}` : relationName;
 			state.tableAliases.set(`${relation.target}_include`, joinAlias);
 			state.joinedIncludeRelations.set(relationName, {
 				alias: joinAlias,

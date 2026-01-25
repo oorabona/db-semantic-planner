@@ -618,8 +618,11 @@ export function compile(
 	const intent = plan.intent;
 	const rootTable = intent.from;
 
-	// Get root alias
-	const rootAlias = getNextAlias(state);
+	// Get root alias - use semantic table name for readability
+	// When schema-scoped, prefix with underscore to avoid PostgreSQL ambiguity
+	// (FROM "schema"."table" AS "table" causes "invalid reference to FROM-clause entry")
+	state.aliasCounter++;
+	const rootAlias = schemaName ? `_${rootTable}` : rootTable;
 	state.tableAliases.set(rootTable, rootAlias);
 
 	// Build CTEs first (must come before selectFrom in Kysely)
@@ -1586,8 +1589,10 @@ function compileExists(
 		);
 	}
 
-	// Get alias for related table
-	const relatedAlias = getNextAlias(state);
+	// Get alias for related table - use relation name for semantic readability
+	// When schema-scoped, prefix to avoid PostgreSQL ambiguity
+	state.aliasCounter++;
+	const relatedAlias = schemaName ? `_${where.relation}` : where.relation;
 	state.tableAliases.set(`${relation.target}_${relatedAlias}`, relatedAlias);
 
 	// Get source table's primary key (supports composite)
@@ -1604,7 +1609,12 @@ function compileExists(
 	// Handle M:N (belongsToMany) with through table
 	if (relation.through) {
 		// M:N EXISTS: SELECT 1 FROM junction JOIN target WHERE junction.fk = source.pk AND target.<conditions>
-		const junctionAlias = getNextAlias(state);
+		// Use real junction table name as alias for semantic readability
+		// When schema-scoped, prefix to avoid PostgreSQL ambiguity
+		state.aliasCounter++;
+		const junctionAlias = schemaName
+			? `_${relation.through}`
+			: relation.through;
 		const targetAlias = relatedAlias;
 
 		// FK from junction to source (default: {source}Id) - supports composite keys
@@ -2002,8 +2012,16 @@ function applyJoinFilters(
 		// Handle M:N (belongsToMany) with through table
 		if (relation.through) {
 			// M:N requires two JOINs: source → junction → target
-			const junctionAlias = getNextAlias(state);
-			const targetAlias = getNextAlias(state);
+			// Use semantic names: junction table name for junction, relation name for target
+			// When schema-scoped, prefix to avoid PostgreSQL ambiguity
+			state.aliasCounter++;
+			const junctionAlias = schemaName
+				? `_${relation.through}`
+				: relation.through;
+			state.aliasCounter++;
+			const targetAlias = schemaName
+				? `_${joinRel.relation}`
+				: joinRel.relation;
 
 			// FK from junction to source (default: {source}Id) - supports composite keys
 			const fkCols = normalizeForeignKey(
@@ -2066,7 +2084,12 @@ function applyJoinFilters(
 			});
 		} else {
 			// Non-M:N relations (hasOne, hasMany, belongsTo)
-			const joinAlias = getNextAlias(state);
+			// Use relation name as alias for semantic readability
+			// When schema-scoped, prefix to avoid PostgreSQL ambiguity
+			state.aliasCounter++;
+			const joinAlias = schemaName
+				? `_${joinRel.relation}`
+				: joinRel.relation;
 			state.tableAliases.set(`${relation.target}_join`, joinAlias);
 			state.joinedFilterRelations.set(joinRel.relation, {
 				alias: joinAlias,
@@ -2794,8 +2817,10 @@ function resolveGroupByField(
 			);
 		}
 
-		// Create alias for the join
-		const joinAlias = getNextAlias(state);
+		// Create alias for the join - use relation name for semantic readability
+		// When schema-scoped, prefix to avoid PostgreSQL ambiguity
+		state.aliasCounter++;
+		const joinAlias = schemaName ? `_${relName}` : relName;
 		const targetTable = schemaName
 			? `${schemaName}.${relDef.target}`
 			: relDef.target;
@@ -2875,12 +2900,6 @@ function collectSelectAliases(select: SelectIntent | undefined): Set<string> {
 	}
 
 	return aliases;
-}
-
-function getNextAlias(state: CompilerState): string {
-	const alias = `t${state.aliasCounter}`;
-	state.aliasCounter++;
-	return alias;
 }
 
 function getTableFromAlias(

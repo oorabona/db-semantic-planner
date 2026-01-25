@@ -1423,3 +1423,38 @@ default: v.optional(v.union([v.string(), v.number(), v.boolean()]));
 **Solution:** Use `decision.reasoning` to access the human-readable rationale for a planner decision.
 
 **Location:** `packages/core/src/intent-ast.ts` - PlanDecision interface
+
+---
+
+### hasOne Cardinality Lost in TypedSchema→ModelIR Conversion (2026-01-25)
+
+**Issue:** E2E test "should auto-select JOIN for hasOne relation" failed - strategy returned `json_agg` instead of `join`.
+
+**Symptoms:** Unit test using `plan()` directly passed, but E2E test through full ORM chain failed.
+
+**Cause:** In `typedSchemaToModelIR`, the hasOne relation was being converted to a hasMany internally WITHOUT preserving the cardinality marker. The planner checks `relation.type === 'hasOne'` to decide strategy, but this info was lost.
+
+**Solution:**
+1. Add `cardinality: 'one'` when converting hasOne to the internal hasMany representation in `typedSchemaToModelIR`
+2. Update `GeneratedHasMany` interface to include optional `cardinality?: 'one' | 'many'`
+3. Read cardinality in `buildRelationIR` and set `relationType = 'hasOne'` when appropriate
+
+**Prevention:** When converting between schema representations, always verify cardinality/type information is preserved through each layer. Add tests that verify the ModelIR has correct relation types, not just the final SQL.
+
+**Location:** `packages/core/src/dx/orm.ts` (typedSchemaToModelIR), `packages/core/src/dx/schema-bridge.ts` (buildRelationIR)
+
+---
+
+### Build Cache Causes E2E vs Unit Test Discrepancy (2026-01-25)
+
+**Issue:** Unit test passed but E2E test failed with the same logic.
+
+**Symptoms:** After fixing TypeScript code, unit tests (same package) pass immediately, but E2E tests (cross-package) still fail with old behavior.
+
+**Cause:** The pnpm monorepo build cache wasn't invalidated. E2E tests import from compiled `dist/` directories, not source. Changes to TypeScript source require `pnpm build` to propagate.
+
+**Solution:** Run `pnpm build` after modifying TypeScript source when E2E tests show unexpected failures.
+
+**Prevention:** When debugging discrepancies between unit and E2E tests, always check if a rebuild is needed. Add this to debugging checklist: "Did I run `pnpm build`?"
+
+**Location:** Monorepo-wide pattern

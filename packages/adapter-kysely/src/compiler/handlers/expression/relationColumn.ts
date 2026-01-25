@@ -4,16 +4,7 @@
  */
 
 import type { RelationColumnIntent } from '@dbsp/core';
-import type { CompilerState, ExpressionHandler } from '../../types.js';
-
-/**
- * Get next alias and increment counter
- */
-function getNextAlias(state: CompilerState): string {
-	const alias = `t${state.aliasCounter}`;
-	state.aliasCounter++;
-	return alias;
-}
+import type { ExpressionHandler } from '../../types.js';
 
 /**
  * Compiles a relation column expression using Kysely's native eb.ref().as() API.
@@ -123,8 +114,10 @@ export const relationColumnHandler: ExpressionHandler<RelationColumnIntent> = (
 				throw new Error(`Unknown target table: ${relDef.target}`);
 			}
 
-			// Create alias for the join
-			const joinAlias = getNextAlias(ctx.state);
+			// Create alias for the join - use relation name for semantic readability
+			// When schema-scoped, prefix to avoid PostgreSQL ambiguity
+			ctx.state.aliasCounter++;
+			const joinAlias = ctx.schemaName ? `_${relName}` : relName;
 
 			// Get join table name (with schema if needed)
 			const joinTableName = ctx.schemaName

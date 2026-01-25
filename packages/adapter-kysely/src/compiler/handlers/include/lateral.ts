@@ -8,7 +8,6 @@ import type { SelectQueryBuilder } from 'kysely';
 import { sql } from 'kysely';
 import {
 	collectLateralIncludes,
-	getNextAlias,
 	normalizeForeignKey,
 	normalizePrimaryKey,
 } from '../../helpers.js';
@@ -72,8 +71,10 @@ export function applyLateralIncludes(
 			? `${schemaName}.${relation.target}`
 			: relation.target;
 
-		// Create alias for the LATERAL subquery
-		const lateralAlias = getNextAlias(state);
+		// Create alias for the LATERAL subquery - use relation name for semantic readability
+		// When schema-scoped, prefix to avoid PostgreSQL ambiguity
+		state.aliasCounter++;
+		const lateralAlias = schemaName ? `_${include.relation}` : include.relation;
 		state.tableAliases.set(`${relation.target}_include`, lateralAlias);
 		state.joinedIncludeRelations.set(include.relation, {
 			alias: lateralAlias,

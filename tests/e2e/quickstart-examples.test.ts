@@ -91,7 +91,7 @@ describe('QUICKSTART Examples - Compile Only', () => {
 		});
 
 		it('should compile query with relation join', () => {
-			const result = runBatchQuery(schema, 'users | with posts');
+			const result = runBatchQuery(schema, 'users | select *, posts.*');
 			expect(result.success).toBe(true);
 			expect(result.stdout).toContain('left join');
 			expect(result.stdout).toContain('"posts"');
@@ -130,7 +130,7 @@ describe('QUICKSTART Examples - Compile Only', () => {
 		});
 
 		it('should compile posts with author relation', () => {
-			const result = runBatchQuery(schema, 'posts | with author');
+			const result = runBatchQuery(schema, 'posts | select *, author.*');
 			expect(result.success).toBe(true);
 			expect(result.stdout).toContain('left join');
 			expect(result.stdout).toContain('"authors"');
@@ -160,7 +160,7 @@ describe('QUICKSTART Examples - Compile Only', () => {
 		});
 
 		it('should compile products with variants', () => {
-			const result = runBatchQuery(schema, 'products | with variants');
+			const result = runBatchQuery(schema, 'products | select *, variants.*');
 			expect(result.success).toBe(true);
 			// Either join or separate strategy
 			expect(
@@ -176,13 +176,13 @@ describe('QUICKSTART Examples - Compile Only', () => {
 			const result = runBatchQuery(schema, '.tables');
 			expect(result.success).toBe(true);
 			expect(result.stdout).toContain('rooms');
-			expect(result.stdout).toContain('room_bookings');
+			expect(result.stdout).toContain('roomBookings');
 		});
 
 		// Note: Range type queries require actual PostgreSQL execution
 		// These tests verify the schema loads correctly
-		it('should compile room_bookings query', () => {
-			const result = runBatchQuery(schema, 'room_bookings');
+		it('should compile roomBookings query', () => {
+			const result = runBatchQuery(schema, 'roomBookings');
 			expect(result.success).toBe(true);
 			expect(result.stdout).toContain('select');
 			expect(result.stdout).toContain('"room_bookings"');

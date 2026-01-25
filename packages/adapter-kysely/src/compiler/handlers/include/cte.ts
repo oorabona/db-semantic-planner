@@ -7,7 +7,6 @@ import type { IncludeIntent, ModelIR, PlanReport } from '@dbsp/core';
 import type { Kysely, SelectQueryBuilder } from 'kysely';
 import {
 	collectCteIncludes,
-	getNextAlias,
 	normalizeForeignKey,
 	normalizePrimaryKey,
 } from '../../helpers.js';
@@ -92,8 +91,10 @@ export function applyCteIncludes(
 				? `${schemaName}.${relation.target}`
 				: relation.target;
 
-		// Create alias for the CTE join
-		const cteAlias = getNextAlias(state);
+		// Create alias for the CTE join - use relation name for semantic readability
+		// When schema-scoped, prefix to avoid PostgreSQL ambiguity
+		state.aliasCounter++;
+		const cteAlias = schemaName ? `_${include.relation}` : include.relation;
 		state.tableAliases.set(`${relation.target}_include`, cteAlias);
 		state.joinedIncludeRelations.set(include.relation, {
 			alias: cteAlias,

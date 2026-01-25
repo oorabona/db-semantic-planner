@@ -121,8 +121,9 @@ describe('SQL Compiler', () => {
 			const compiled = compile(planReport, basicSchema, kysely);
 
 			expect(compiled.sql).toContain('select');
-			expect(compiled.sql).toContain('users');
-			expect(compiled.sql).toContain('t0');
+			// Uses table name as alias for readable SQL
+			expect(compiled.sql).toContain('"users".*');
+			expect(compiled.sql).toContain('from "users"');
 		});
 
 		it('should compile select with specific fields', () => {
@@ -139,7 +140,8 @@ describe('SQL Compiler', () => {
 			const compiled = compile(planReport, basicSchema, kysely);
 
 			expect(compiled.sql).toContain('select');
-			expect(compiled.sql).toContain('t0');
+			// Uses table name as alias for readable SQL
+			expect(compiled.sql).toContain('"users"."id"');
 		});
 
 		it('should use deterministic aliases', () => {
@@ -151,8 +153,8 @@ describe('SQL Compiler', () => {
 			const planReport = plan(intent, basicSchema);
 			const compiled = compile(planReport, basicSchema, kysely);
 
-			// First table always gets t0
-			expect(compiled.sql).toContain('t0');
+			// Uses table name as alias for readable SQL
+			expect(compiled.sql).toContain('"posts".*');
 		});
 
 		it('should support schema prefix for multi-tenant', () => {
@@ -3832,8 +3834,8 @@ describe('ADAPTER-003: Smart Column Aliasing - onCollision mode', () => {
 			expect(sql).not.toContain('"author.name"');
 
 			// But the name column should still be selected (without alias)
-			// In SQLite, unaliased column refs become `"t1"."name"` (double-quoted)
-			expect(sql).toMatch(/"t\d+"\."name"/); // e.g., "t1"."name"
+			// Uses relation name as alias, so it becomes `"author"."name"` (double-quoted)
+			expect(sql).toContain('"author"."name"');
 		});
 
 		it('should produce different SQL than "always" mode', () => {

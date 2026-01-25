@@ -186,8 +186,8 @@ describe('Q1: Filter to-many → EXISTS', () => {
 		// Validate SQL structure
 		expect(compiled.sql).toContain('exists');
 		expect(compiled.sql).toContain('productImages');
-		expect(compiled.sql).toContain('t0'); // root alias
-		expect(compiled.sql).toContain('t1'); // subquery alias
+		expect(compiled.sql).toContain('"products"'); // root alias (semantic)
+		expect(compiled.sql).toContain('"images"'); // subquery alias (relation name)
 
 		// Validate planner decision
 		const filterDecision = planReport.decisions.find(
@@ -244,7 +244,8 @@ describe('Q1: Filter to-many → EXISTS', () => {
 		const compiled = compile(planReport, q1Schema, kysely);
 
 		// EXISTS subquery should correlate on productId = products.id
-		expect(compiled.sql).toContain('t1');
+		// Uses semantic alias: "images" for the relation
+		expect(compiled.sql).toContain('"images"');
 		expect(compiled.sql).toContain('productId');
 	});
 
@@ -1172,15 +1173,15 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			expect(sqlLower).toContain('join');
 
 			// Verify the JOIN uses posts.authorId (source.fk), not users.authorId
-			// The pattern should be: posts alias followed by authorId
-			expect(compiled.sql).toMatch(/"t0"\."authorId"/);
+			// Uses semantic aliases: "posts" for root, "author" for relation
+			expect(compiled.sql).toMatch(/"posts"\."authorId"/);
 
 			// And target should use id (primary key)
-			expect(compiled.sql).toMatch(/"t1"\."id"/);
+			expect(compiled.sql).toMatch(/"author"\."id"/);
 
-			// NEGATIVE TEST: Should NOT have users.authorId pattern
-			// (which would indicate wrong FK direction)
-			expect(compiled.sql).not.toMatch(/"t1"\."authorId"/);
+			// NEGATIVE TEST: Should NOT have author.authorId pattern
+			// (which would indicate wrong FK direction - authorId is on posts, not users)
+			expect(compiled.sql).not.toMatch(/"author"\."authorId"/);
 		});
 
 		it('should use source.fk = target.pk for belongsTo EXISTS (posts.author)', () => {
@@ -1236,13 +1237,13 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			// posts.authorId = users.id (NOT users.authorId = posts.id)
 
 			// The outer table (posts) should correlate via authorId
-			expect(compiled.sql).toMatch(/"t0"\."authorId"/);
+			expect(compiled.sql).toMatch(/"posts"\."authorId"/);
 
-			// The subquery table (users) should use id
-			expect(compiled.sql).toMatch(/"t1"\."id"/);
+			// The subquery table (users, aliased as "author") should use id
+			expect(compiled.sql).toMatch(/"author"\."id"/);
 
-			// NEGATIVE TEST: Should NOT have users.authorId
-			expect(compiled.sql).not.toMatch(/"t1"\."authorId"/);
+			// NEGATIVE TEST: Should NOT have author.authorId (authorId is on posts, not users)
+			expect(compiled.sql).not.toMatch(/"author"\."authorId"/);
 		});
 	});
 
@@ -1273,11 +1274,11 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			// CRITICAL: EXISTS correlation should be target.fk = source.pk
 			// posts.authorId = users.id
 
-			// The subquery table (posts) should have authorId
-			expect(compiled.sql).toMatch(/"t1"\."authorId"/);
+			// The subquery table (aliased as "posts" - relation name) should have authorId
+			expect(compiled.sql).toMatch(/"posts"\."authorId"/);
 
 			// The outer table (users) should correlate via id
-			expect(compiled.sql).toMatch(/"t0"\."id"/);
+			expect(compiled.sql).toMatch(/"users"\."id"/);
 		});
 
 		it('should use target.fk = source.pk for hasMany JOIN (explicit override)', () => {
@@ -1332,11 +1333,11 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			// CRITICAL: JOIN should be target.fk = source.pk
 			// posts.authorId = users.id
 
-			// Target table (posts, t1) should have authorId in JOIN condition
-			expect(compiled.sql).toMatch(/"t1"\."authorId"/);
+			// Target table (aliased as "posts" - relation name) should have authorId in JOIN condition
+			expect(compiled.sql).toMatch(/"posts"\."authorId"/);
 
-			// Source table (users, t0) should have id in JOIN condition
-			expect(compiled.sql).toMatch(/"t0"\."id"/);
+			// Source table (users) should have id in JOIN condition
+			expect(compiled.sql).toMatch(/"users"\."id"/);
 		});
 	});
 
@@ -1357,14 +1358,14 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			// CRITICAL: JOIN should be source.fk = target.pk
 			// posts.authorId = users.id
 
-			// Source table (posts, t0) should have authorId
-			expect(compiled.sql).toMatch(/"t0"\."authorId"/);
+			// Source table (posts) should have authorId
+			expect(compiled.sql).toMatch(/"posts"\."authorId"/);
 
-			// Target table (users, t1) should have id
-			expect(compiled.sql).toMatch(/"t1"\."id"/);
+			// Target table (aliased as "author" - relation name) should have id
+			expect(compiled.sql).toMatch(/"author"\."id"/);
 
-			// NEGATIVE TEST: Should NOT have users.authorId
-			expect(compiled.sql).not.toMatch(/"t1"\."authorId"/);
+			// NEGATIVE TEST: Should NOT have author.authorId (authorId is on posts, not users)
+			expect(compiled.sql).not.toMatch(/"author"\."authorId"/);
 		});
 
 		it('should use target.fk = source.pk for hasMany include with JOIN override', () => {
@@ -1405,11 +1406,11 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			// CRITICAL: JOIN should be target.fk = source.pk
 			// posts.authorId = users.id
 
-			// Target table (posts, t1) should have authorId
-			expect(compiled.sql).toMatch(/"t1"\."authorId"/);
+			// Target table (aliased as "posts" - relation name) should have authorId
+			expect(compiled.sql).toMatch(/"posts"\."authorId"/);
 
-			// Source table (users, t0) should have id
-			expect(compiled.sql).toMatch(/"t0"\."id"/);
+			// Source table (users) should have id
+			expect(compiled.sql).toMatch(/"users"\."id"/);
 		});
 	});
 });
@@ -1508,12 +1509,12 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 
 			// Verify JOIN chain:
 			// posts.id = postTags.postId (first JOIN)
-			expect(compiled.sql).toMatch(/"t0"\."id"/);
-			expect(compiled.sql).toMatch(/"t1"\."postId"/);
+			expect(compiled.sql).toMatch(/"posts"\."id"/);
+			expect(compiled.sql).toMatch(/"postTags"\."postId"/);
 
 			// postTags.tagId = tags.id (second JOIN)
-			expect(compiled.sql).toMatch(/"t1"\."tagId"/);
-			expect(compiled.sql).toMatch(/"t2"\."id"/);
+			expect(compiled.sql).toMatch(/"postTags"\."tagId"/);
+			expect(compiled.sql).toMatch(/"tags"\."id"/);
 		});
 	});
 
@@ -1549,9 +1550,9 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 			expect(compiled.sql).toContain('tags');
 
 			// Verify correlation: postTags.postId = posts.id
-			// Note: alias order depends on state counter
+			// Uses real table names as aliases: "postTags" for junction, "posts" for root
 			expect(compiled.sql).toContain('"postId"');
-			expect(compiled.sql).toMatch(/"t0"\."id"/);
+			expect(compiled.sql).toMatch(/"posts"\."id"/);
 
 			// Verify junction to target: postTags.tagId = tags.id
 			expect(compiled.sql).toContain('"tagId"');
