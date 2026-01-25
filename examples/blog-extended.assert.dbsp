@@ -122,7 +122,7 @@ db.output.contains: Lifestyle
 success: true
 sql.equals: select "_categories".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch3_blog_extended"."categories" AS __t__ WHERE "__t__"."parent_id" = "_categories"."id"), '[]'::json) as "children_json" from "ch3_blog_extended"."categories" as "_categories"
 sql.equals: select "_categories".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch3_blog_extended"."categories" AS __t__ WHERE "__t__"."parent_id" = "_categories"."id"), '[]'::json) as "children_json" from "ch3_blog_extended"."categories" as "_categories"
-db.rows.equals: 5
+db.rows.equals: 4
 output.contains: children_json
 
 # ─────────────────────────────────────────
@@ -132,13 +132,11 @@ output.contains: children_json
 success: true
 sql.equals: select "_categories".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch3_blog_extended"."categories" AS __t__ WHERE "__t__"."parent_id" = "_categories"."id"), '[]'::json) as "children_json" from "ch3_blog_extended"."categories" as "_categories" where "_categories"."parent_id" is null
 sql.equals: select "_categories".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch3_blog_extended"."categories" AS __t__ WHERE "__t__"."parent_id" = "_categories"."id"), '[]'::json) as "children_json" from "ch3_blog_extended"."categories" as "_categories" where "_categories"."parent_id" is null
-db.rows.equals: 3
-# NOTE: Due to column collision (t0.* and t1.* have same names), parent columns
-# are overwritten by child columns. "Technology" (parent) becomes "Web Development" (child).
-# This is a known limitation of flat JOINs - see TODO_NQL.md for fix.
-db.output.contains: Web Development
-db.output.contains: Databases
-db.output.contains: children.name
+db.rows.equals: 2
+# NOTE: childrenJson contains nested array, not flat columns
+db.output.contains: Technology
+db.output.contains: Lifestyle
+db.output.contains: childrenJson
 
 # ─────────────────────────────────────────
 # Query 14 posts | where featured = true
