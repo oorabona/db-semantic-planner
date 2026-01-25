@@ -103,7 +103,7 @@ db.output.contains: David
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.contains: where "t0"."parent_id" is null
+sql.contains: where "_categories"."parent_id" is null
 db.rows.equals: 2
 db.output.contains: Technology
 db.output.contains: Lifestyle
@@ -113,8 +113,8 @@ db.output.contains: Lifestyle
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.contains: left join "ch3_blog_extended"."categories" as "t1"
-sql.contains: on "t0"."id" = "t1"."parent_id"
+sql.contains: left join "ch3_blog_extended"."categories" as "_children"
+sql.contains: on "_categories"."id" = "_children"."parent_id"
 db.rows.equals: 5
 output.contains: children.id
 output.contains: children.name
@@ -125,7 +125,7 @@ output.contains: children.name
 --- query: 12
 success: true
 sql.contains: left join
-sql.contains: where "t0"."parent_id" is null
+sql.contains: where "_categories"."parent_id" is null
 db.rows.equals: 3
 # NOTE: Due to column collision (t0.* and t1.* have same names), parent columns
 # are overwritten by child columns. "Technology" (parent) becomes "Web Development" (child).
@@ -139,7 +139,7 @@ db.output.contains: children.name
 # ─────────────────────────────────────────
 --- query: 13
 success: true
-sql.contains: where "t0"."featured" = $1
+sql.contains: where "_posts"."featured" = $1
 params.equals: [true]
 db.rows.equals: 2
 db.output.contains: TypeScript Fundamentals
@@ -150,7 +150,7 @@ db.output.contains: PostgreSQL Deep Dive
 # ─────────────────────────────────────────
 --- query: 14
 success: true
-sql.contains: where "t0"."view_count" > $1
+sql.contains: where "_posts"."view_count" > $1
 params.equals: [1000]
 db.rows.equals: 2
 
@@ -160,8 +160,8 @@ db.rows.equals: 2
 --- query: 15
 success: true
 sql.contains: where
-sql.contains: "t0"."featured" = $1
-sql.contains: "t0"."view_count" > $2
+sql.contains: "_posts"."featured" = $1
+sql.contains: "_posts"."view_count" > $2
 params.equals: [true, 1500]
 db.rows.equals: 1
 db.output.contains: PostgreSQL Deep Dive
@@ -180,7 +180,7 @@ sql.contains: where
 # ─────────────────────────────────────────
 --- query: 17
 success: true
-sql.contains: order by "t0"."view_count" desc
+sql.contains: order by "_posts"."view_count" desc
 db.rows.equals: 8
 
 # ─────────────────────────────────────────
@@ -188,7 +188,7 @@ db.rows.equals: 8
 # ─────────────────────────────────────────
 --- query: 18
 success: true
-sql.contains: order by "t0"."view_count" desc
+sql.contains: order by "_posts"."view_count" desc
 sql.contains: limit
 params.equals: [3]
 db.rows.equals: 3

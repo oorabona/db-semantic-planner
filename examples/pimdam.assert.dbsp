@@ -47,7 +47,7 @@ output.contains: variants
 --- query: 5
 success: true
 sql.contains: from "ch6_pimdam"."categories"
-sql.contains: where "t0"."active" = $1
+sql.contains: where "_categories"."active" = $1
 params.equals: [true]
 db.rows.equals: 10
 db.output.contains: Electronics
@@ -59,7 +59,7 @@ db.output.contains: Clothing
 --- query: 6
 success: true
 sql.contains: from "ch6_pimdam"."products"
-sql.contains: where "t0"."deleted_at" is null
+sql.contains: where "_products"."deleted_at" is null
 db.rows.equals: 13
 
 # ─────────────────────────────────────────
@@ -68,7 +68,7 @@ db.rows.equals: 13
 --- query: 7
 success: true
 sql.contains: from "ch6_pimdam"."assets"
-sql.contains: where "t0"."kind" = $1
+sql.contains: where "_assets"."kind" = $1
 db.rows.equals: 18
 
 # ─────────────────────────────────────────
@@ -77,7 +77,7 @@ db.rows.equals: 18
 --- query: 8
 success: true
 sql.contains: from "ch6_pimdam"."product_images"
-sql.contains: where "t0"."status" = $1
+sql.contains: where "_product_images"."status" = $1
 db.rows.equals: 21
 
 # ─────────────────────────────────────────
@@ -115,7 +115,7 @@ db.rows.equals: 4
 --- query: 12
 success: true
 sql.contains: from "ch6_pimdam"."products"
-sql.contains: where "t0"."category_id" = $1
+sql.contains: where "_products"."category_id" = $1
 params.equals: [6]
 db.rows.equals: 3
 
@@ -125,7 +125,7 @@ db.rows.equals: 3
 --- query: 13
 success: true
 sql.contains: from "ch6_pimdam"."categories"
-sql.contains: where "t0"."parent_id" is null
+sql.contains: where "_categories"."parent_id" is null
 db.rows.equals: 4
 
 # ─────────────────────────────────────────
@@ -134,8 +134,8 @@ db.rows.equals: 4
 --- query: 14
 success: true
 sql.contains: from "ch6_pimdam"."categories"
-sql.contains: left join "ch6_pimdam"."categories" as "t1"
-sql.contains: where "t0"."parent_id" is not null
+sql.contains: left join "ch6_pimdam"."categories" as "_parent"
+sql.contains: where "_categories"."parent_id" is not null
 db.rows.equals: 8
 
 # ─────────────────────────────────────────
