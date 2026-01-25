@@ -42,7 +42,7 @@ export default schema({
 		id: { type: 'integer', primaryKey: true, autoIncrement: true },
 		title: 'string',
 		content: 'text',
-		authorId: ref('authors'),
+		authorId: ref('authors', { inverse: 'posts' }),
 		categoryId: ref('categories', { nullable: true }),
 		published: { type: 'boolean', default: 'false', index: true },
 		featured: { type: 'boolean', default: 'false', index: true },
