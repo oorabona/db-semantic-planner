@@ -11,8 +11,9 @@
  * Uses PostgreSQL which supports all features including json_agg.
  */
 
-import type { PlanReport } from '@dbsp/core';
-import { createOrm, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import type { PlanReport, QueryIntent } from '@dbsp/core';
+import { createOrm, plan, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import { compile } from '@dbsp/adapter-kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
@@ -21,6 +22,7 @@ import {
 	createBlogSchema,
 	dropBlogSchema,
 	getTestAdapter,
+	getTestDb,
 	seedBlogData,
 	shouldSkipE2E,
 } from './testkit/index.js';
@@ -196,6 +198,189 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 			const decision = getIncludeStrategyDecision(dump.plan, 'posts');
 			expect(decision?.reasoning).toBeDefined();
 			expect(decision?.reasoning?.length).toBeGreaterThan(0);
+		});
+	});
+
+	// =========================================================================
+	// Section D: SPEC-002 Cross-table Relation Filters
+	// =========================================================================
+	describe('Section D: SPEC-002 Cross-table Relation Filters', () => {
+		/**
+		 * Helper to extract filter-strategy decision from plan report.
+		 */
+		function getFilterStrategyDecision(report: PlanReport, relationName: string) {
+			return report.decisions.find(
+				(d) =>
+					d.type === 'filter-strategy' && d.context?.relation === relationName,
+			);
+		}
+
+		it('should filter authors by posts.published using EXISTS via raw Intent', async () => {
+			// SPEC-002: hasMany relation filter with WHERE posts.published = true
+			// Uses raw Intent API since whereRelation() is not yet on QueryBuilder
+			const db = await getTestDb();
+			const adapter = await getTestAdapter();
+
+			// Build intent manually with relation filter (QueryIntent format)
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'authors',
+				where: {
+					kind: 'relationFilter',
+					relation: 'posts',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'published',
+						operator: 'eq',
+						value: true,
+					},
+				},
+			};
+
+			// Plan and compile (with dialectCapabilities for proper strategy selection)
+			const planReport = plan(intent, blogModel, { dialectCapabilities });
+			const compiled = compile(planReport, blogModel, db, SCHEMA);
+
+			// Execute
+			const rows = await adapter.execute(compiled);
+
+			// Then: Should return both authors (both have at least one published post)
+			expect(rows).toHaveLength(2);
+
+			// Check plan decision
+			const decision = getFilterStrategyDecision(planReport, 'posts');
+			expect(decision?.choice).toBe('exists');
+		});
+
+		it('should filter posts by author.name using JOIN via raw Intent', async () => {
+			// SPEC-002: belongsTo relation filter with WHERE author.name = 'Alice'
+			const db = await getTestDb();
+			const adapter = await getTestAdapter();
+
+			// Build intent manually with relation filter (QueryIntent format)
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				where: {
+					kind: 'relationFilter',
+					relation: 'author',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'name',
+						operator: 'eq',
+						value: 'Alice Johnson',
+					},
+				},
+			};
+
+			// Plan and compile (with dialectCapabilities for proper strategy selection)
+			const planReport = plan(intent, blogModel, { dialectCapabilities });
+			const compiled = compile(planReport, blogModel, db, SCHEMA);
+
+			// Execute
+			const rows = await adapter.execute(compiled);
+
+			// Then: Should use JOIN for belongsTo (single row, no explosion risk)
+			const decision = getFilterStrategyDecision(planReport, 'author');
+			expect(decision?.choice).toBe('join');
+
+			// And: Should return only Alice's posts (3 posts)
+			expect(rows).toHaveLength(3);
+		});
+
+		it('should apply shared filter to json_agg when WHERE and SELECT use same relation', async () => {
+			// SPEC-002: Shared filter optimization
+			// When WHERE has posts.published = true, the json_agg should also filter
+			const db = await getTestDb();
+			const adapter = await getTestAdapter();
+
+			// Build intent with both include and relation filter on same relation (QueryIntent format)
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'authors',
+				include: [{ relation: 'posts' }],
+				where: {
+					kind: 'relationFilter',
+					relation: 'posts',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'published',
+						operator: 'eq',
+						value: true,
+					},
+				},
+			};
+
+			// Plan and compile to get SQL (with dialectCapabilities for json_agg strategy)
+			const planReport = plan(intent, blogModel, { dialectCapabilities });
+			const compiled = compile(planReport, blogModel, db, SCHEMA);
+
+			// Debug: check include strategy decision
+			const includeDecision = getIncludeStrategyDecision(planReport, 'posts');
+			console.log('Include strategy decision:', includeDecision?.choice);
+			console.log('Generated SQL:', compiled.sql);
+
+			// Then: SQL should have EXISTS for WHERE check
+			expect(compiled.sql.toLowerCase()).toContain('exists');
+			// And: SQL should have json_agg for include
+			expect(compiled.sql.toLowerCase()).toContain('json_agg');
+			// And: The "published" filter should appear in both EXISTS and json_agg
+			const publishedMatches = compiled.sql.match(/published/gi);
+			expect(publishedMatches?.length).toBeGreaterThanOrEqual(2);
+
+			// Execute and verify results
+			const rows = await adapter.execute(compiled);
+
+			// Should return both authors (both have published posts)
+			expect(rows).toHaveLength(2);
+
+			// Each author should only have published posts in their posts array
+			for (const author of rows) {
+				const posts = (author as { posts_json?: unknown[] }).posts_json ?? [];
+				for (const post of posts as { published?: boolean }[]) {
+					expect(post.published).toBe(true);
+				}
+			}
+		});
+
+		it('should filter posts by comments.author_name using EXISTS via raw Intent', async () => {
+			// SPEC-002: Relation filter on posts -> comments (hasMany)
+			const db = await getTestDb();
+			const adapter = await getTestAdapter();
+
+			// Build intent with relation filter for posts by comment author (QueryIntent format)
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				where: {
+					kind: 'relationFilter',
+					relation: 'comments',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'author_name',
+						operator: 'eq',
+						value: 'Charlie',
+					},
+				},
+			};
+
+			// Plan and compile (with dialectCapabilities for proper strategy selection)
+			const planReport = plan(intent, blogModel, { dialectCapabilities });
+			const compiled = compile(planReport, blogModel, db, SCHEMA);
+
+			// Then: Should use EXISTS for relation filter (hasMany)
+			expect(compiled.sql.toLowerCase()).toContain('exists');
+
+			// Execute
+			const rows = await adapter.execute(compiled);
+
+			// And: Should return post 1 (which has Charlie's comment)
+			expect(rows).toHaveLength(1);
+			expect((rows[0] as { id: number }).id).toBe(1);
 		});
 	});
 });

@@ -43,6 +43,7 @@ import {
 	applyPendingPseudoJoins,
 	type CompilerContext,
 	type CompilerState,
+	extractRelationFiltersForSharing,
 	getExpressionHandler,
 	getWhereHandler,
 	preprocessWherePseudoColumns,
@@ -666,6 +667,12 @@ export function compile(
 			rootAlias,
 			schemaName,
 		);
+	}
+
+	// SPEC-002: Pre-extract relation filters from WHERE for shared filter optimization
+	// This must happen BEFORE include strategies are applied so json_agg can access shared filters
+	if (intent.where) {
+		extractRelationFiltersForSharing(intent.where, state);
 	}
 
 	// Apply CTEs for include-strategy: 'cte' (CLI-011)
@@ -1861,42 +1868,57 @@ function collectJoinFilterRelations(
 	}> = [];
 
 	if (where.kind === 'relationFilter') {
+		// SPEC-002: Multi-hop relations (array) always use EXISTS, not JOIN
+		// Only single-hop (string) relations can use JOIN
+		if (Array.isArray(where.relation)) {
+			return results; // Multi-hop always uses EXISTS
+		}
+		// TypeScript narrowing: Array.isArray doesn't narrow readonly string[], use assertion
+		const relationName = where.relation as string;
 		const decision = findFilterStrategyDecision(
 			plan,
 			sourceTable,
-			where.relation,
+			relationName,
 		);
 		if (decision?.choice === 'join') {
 			results.push({
-				relation: where.relation,
+				relation: relationName,
 				where: where.where,
 				mode: where.mode,
 			});
 		}
 	} else if (where.kind === 'exists') {
 		// Handle exists() helper - maps to mode: 'some'
+		if (Array.isArray(where.relation)) {
+			return results; // Multi-hop always uses EXISTS
+		}
+		const relationName = where.relation as string;
 		const decision = findFilterStrategyDecision(
 			plan,
 			sourceTable,
-			where.relation,
+			relationName,
 		);
 		if (decision?.choice === 'join') {
 			results.push({
-				relation: where.relation,
+				relation: relationName,
 				...(where.where !== undefined && { where: where.where }),
 				mode: 'some',
 			});
 		}
 	} else if (where.kind === 'notExists') {
 		// Handle notExists() helper - maps to mode: 'none'
+		if (Array.isArray(where.relation)) {
+			return results; // Multi-hop always uses EXISTS
+		}
+		const relationName = where.relation as string;
 		const decision = findFilterStrategyDecision(
 			plan,
 			sourceTable,
-			where.relation,
+			relationName,
 		);
 		if (decision?.choice === 'join') {
 			results.push({
-				relation: where.relation,
+				relation: relationName,
 				...(where.where !== undefined && { where: where.where }),
 				mode: 'none',
 			});
@@ -2246,6 +2268,59 @@ function compileRelationFilter(
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
 	eb: any,
 	where: {
+		relation: string | readonly string[];
+		where: WhereIntent;
+		mode: 'some' | 'every' | 'none';
+	},
+	sourceAlias: string,
+	model: ModelIR,
+	plan: PlanReport,
+	state: CompilerState,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
+): any {
+	// SPEC-002: Normalize relation path to array
+	const relationPath = Array.isArray(where.relation)
+		? where.relation
+		: [where.relation];
+
+	// Single-hop: use existing logic
+	if (relationPath.length === 1) {
+		return compileSingleHopRelationFilter(
+			eb,
+			{ relation: relationPath[0], where: where.where, mode: where.mode },
+			sourceAlias,
+			model,
+			plan,
+			state,
+			schemaName,
+		);
+	}
+
+	// SPEC-002: Multi-hop relation path
+	// Strategy: Build nested EXISTS/JOINs based on relation types
+	// - to-one (belongsTo/hasOne): JOIN inside EXISTS
+	// - to-many (hasMany): nested EXISTS
+	return compileMultiHopRelationFilter(
+		eb,
+		{ relation: relationPath, where: where.where, mode: where.mode },
+		sourceAlias,
+		model,
+		plan,
+		state,
+		schemaName,
+	);
+}
+
+
+/**
+ * SPEC-002: Compile single-hop relation filter (original logic).
+ * Used for simple relation paths like 'posts' or ['posts'].
+ */
+function compileSingleHopRelationFilter(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
+	eb: any,
+	where: {
 		relation: string;
 		where: WhereIntent;
 		mode: 'some' | 'every' | 'none';
@@ -2277,6 +2352,15 @@ function compileRelationFilter(
 			state,
 			schemaName,
 		);
+	}
+
+	// SPEC-002: Track relation filter for shared filter optimization in json_agg
+	// Only for 'some' mode - the filter should apply to json_agg results too
+	if (where.mode === 'some') {
+		if (!state.relationFilters) {
+			state.relationFilters = new Map();
+		}
+		state.relationFilters.set(where.relation, where.where);
 	}
 
 	// Default: EXISTS strategy
@@ -2322,6 +2406,321 @@ function compileRelationFilter(
 				true,
 				schemaName,
 			);
+		}
+	}
+}
+
+/**
+ * SPEC-002: Compile multi-hop relation filter.
+ * Example: `posts.author.company.name = 'Acme'` from categories table.
+ *
+ * Strategy:
+ * - First to-many in path → EXISTS subquery start point
+ * - to-one relations after → JOINs inside EXISTS
+ * - Another to-many → nested EXISTS
+ */
+function compileMultiHopRelationFilter(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
+	eb: any,
+	where: {
+		relation: readonly string[];
+		where: WhereIntent;
+		mode: 'some' | 'every' | 'none';
+	},
+	sourceAlias: string,
+	model: ModelIR,
+	plan: PlanReport,
+	state: CompilerState,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
+): any {
+	// Array guaranteed to have at least 2 elements (multi-hop called after length check)
+	const firstRel = where.relation[0] as string;
+	const restPath = where.relation.slice(1);
+
+	// Find the first relation from source table
+	const sourceTable = getTableFromAlias(state, sourceAlias) ?? plan.rootTable;
+	const relation = model.getRelation(`${sourceTable}.${firstRel}`);
+
+	if (!relation) {
+		throw new CompilationError(
+			`Unknown relation: ${sourceTable}.${firstRel}`,
+		);
+	}
+
+	// Determine if first hop is to-one or to-many
+	const isFirstToMany =
+		relation.type === 'hasMany' || relation.type === 'belongsToMany';
+
+	if (isFirstToMany) {
+		// First hop is to-many: Start with EXISTS
+		// Remaining path becomes JOINs or nested conditions inside
+		return compileMultiHopWithExists(
+			eb,
+			{
+				firstRelation: firstRel,
+				remainingPath: restPath,
+				where: where.where,
+				mode: where.mode,
+			},
+			sourceAlias,
+			model,
+			plan,
+			state,
+			schemaName,
+		);
+	}
+
+	// First hop is to-one (belongsTo/hasOne): Could optimize with JOIN
+	// But for SPEC-002, we start simple with EXISTS that includes JOINs
+	return compileMultiHopWithExists(
+		eb,
+		{
+			firstRelation: firstRel,
+			remainingPath: restPath,
+			where: where.where,
+			mode: where.mode,
+		},
+		sourceAlias,
+		model,
+		plan,
+		state,
+		schemaName,
+	);
+}
+
+/**
+ * SPEC-002: Compile multi-hop with EXISTS subquery.
+ * Builds EXISTS (SELECT 1 FROM first_table JOIN ... WHERE condition).
+ */
+function compileMultiHopWithExists(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
+	eb: any,
+	options: {
+		firstRelation: string;
+		remainingPath: readonly string[];
+		where: WhereIntent;
+		mode: 'some' | 'every' | 'none';
+	},
+	sourceAlias: string,
+	model: ModelIR,
+	plan: PlanReport,
+	state: CompilerState,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
+): any {
+	const { firstRelation, remainingPath, where: whereIntent, mode } = options;
+
+	// Find the first relation
+	const sourceTable = getTableFromAlias(state, sourceAlias) ?? plan.rootTable;
+	const relation = model.getRelation(`${sourceTable}.${firstRelation}`);
+
+	if (!relation) {
+		throw new CompilationError(
+			`Unknown relation: ${sourceTable}.${firstRelation}`,
+		);
+	}
+
+	// Generate alias for first relation
+	state.aliasCounter++;
+	const firstAlias = schemaName ? `_${firstRelation}` : firstRelation;
+	state.tableAliases.set(`${relation.target}_${firstAlias}`, firstAlias);
+
+	// Get primary keys for correlation
+	const sourceTableDef = model.getTable(relation.source);
+	const sourceKeys = normalizePrimaryKey(sourceTableDef?.primaryKey);
+	const targetTableDef = model.getTable(relation.target);
+	const targetKeys = normalizePrimaryKey(targetTableDef?.primaryKey);
+	const fkCols = normalizeForeignKey(relation.foreignKey, 'id');
+
+	// Apply schema prefix
+	const targetTable = schemaName
+		? `${schemaName}.${relation.target}`
+		: relation.target;
+
+	// Build base subquery
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	let subquery: any = eb
+		.selectFrom(`${targetTable} as ${firstAlias}`)
+		// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+		.select((innerEb: any) => innerEb.lit(1).as('_exists'));
+
+	// Add FK correlation based on relation type
+	if (relation.type === 'belongsTo') {
+		// belongsTo: source.fk = target.pk
+		if (fkCols.length === 1) {
+			subquery = subquery.whereRef(
+				`${sourceAlias}.${fkCols[0]}`,
+				'=',
+				`${firstAlias}.${targetKeys[0]}`,
+			);
+		} else {
+			// biome-ignore lint/suspicious/noExplicitAny: Kysely ExpressionBuilder requires any
+			subquery = subquery.where((innerEb: any) =>
+				buildCompositeKeyCorrelation(
+					innerEb,
+					sourceAlias,
+					firstAlias,
+					fkCols,
+					targetKeys,
+				),
+			);
+		}
+	} else if (relation.type === 'hasMany' || relation.type === 'hasOne') {
+		// hasMany/hasOne: target.fk = source.pk
+		if (fkCols.length === 1) {
+			subquery = subquery.whereRef(
+				`${firstAlias}.${fkCols[0]}`,
+				'=',
+				`${sourceAlias}.${sourceKeys[0]}`,
+			);
+		} else {
+			// biome-ignore lint/suspicious/noExplicitAny: Kysely ExpressionBuilder requires any
+			subquery = subquery.where((innerEb: any) =>
+				buildCompositeKeyCorrelation(
+					innerEb,
+					firstAlias,
+					sourceAlias,
+					fkCols,
+					sourceKeys,
+				),
+			);
+		}
+	} else if (relation.type === 'belongsToMany' && relation.through) {
+		// M:N: Need to JOIN through table first
+		const junctionAlias = schemaName
+			? `_${relation.through}`
+			: relation.through;
+		const junctionTable = schemaName
+			? `${schemaName}.${relation.through}`
+			: relation.through;
+		const otherKey = relation.otherKey ?? `${relation.target}Id`;
+
+		// Rebuild subquery starting from junction
+		subquery = eb
+			.selectFrom(`${junctionTable} as ${junctionAlias}`)
+			// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+			.select((innerEb: any) => innerEb.lit(1).as('_exists'))
+			.innerJoin(
+				`${targetTable} as ${firstAlias}`,
+				`${junctionAlias}.${otherKey}`,
+				`${firstAlias}.${targetKeys[0]}`,
+			);
+
+		// Correlate junction to source
+		if (fkCols.length === 1) {
+			subquery = subquery.whereRef(
+				`${junctionAlias}.${fkCols[0]}`,
+				'=',
+				`${sourceAlias}.${sourceKeys[0]}`,
+			);
+		}
+	}
+
+	// Now add JOINs for remaining path (to-one relations)
+	let currentAlias = firstAlias;
+	let currentTable = relation.target;
+
+	for (const relName of remainingPath) {
+		const nextRelation = model.getRelation(`${currentTable}.${relName}`);
+
+		if (!nextRelation) {
+			throw new CompilationError(
+				`Unknown relation in path: ${currentTable}.${relName}`,
+			);
+		}
+
+		// Generate alias for this relation
+		state.aliasCounter++;
+		const nextAlias = schemaName ? `_${relName}_${state.aliasCounter}` : relName;
+		state.tableAliases.set(`${nextRelation.target}_${nextAlias}`, nextAlias);
+
+		// Get keys for JOIN
+		const nextTargetDef = model.getTable(nextRelation.target);
+		const nextTargetKeys = normalizePrimaryKey(nextTargetDef?.primaryKey);
+		const nextFkCols = normalizeForeignKey(nextRelation.foreignKey, 'id');
+
+		const nextTargetTable = schemaName
+			? `${schemaName}.${nextRelation.target}`
+			: nextRelation.target;
+
+		// Add JOIN based on relation type
+		if (nextRelation.type === 'belongsTo') {
+			// belongsTo: current.fk = next.pk (LEFT JOIN to handle nullable FKs)
+			subquery = subquery.leftJoin(
+				`${nextTargetTable} as ${nextAlias}`,
+				`${currentAlias}.${nextFkCols[0]}`,
+				`${nextAlias}.${nextTargetKeys[0]}`,
+			);
+		} else if (
+			nextRelation.type === 'hasOne' ||
+			nextRelation.type === 'hasMany'
+		) {
+			// hasOne/hasMany: next.fk = current.pk
+			const currentTableDef = model.getTable(currentTable);
+			const currentKeys = normalizePrimaryKey(currentTableDef?.primaryKey);
+			subquery = subquery.leftJoin(
+				`${nextTargetTable} as ${nextAlias}`,
+				`${nextAlias}.${nextFkCols[0]}`,
+				`${currentAlias}.${currentKeys[0]}`,
+			);
+		}
+
+		currentAlias = nextAlias;
+		currentTable = nextRelation.target;
+	}
+
+	// Add the WHERE condition on the final alias
+	let finalSubquery = subquery;
+	if (whereIntent) {
+		finalSubquery = subquery.where((innerEb: unknown) =>
+			compileWhere(
+				innerEb,
+				whereIntent,
+				currentAlias,
+				model,
+				plan,
+				state,
+				schemaName,
+			),
+		);
+	}
+
+	// Apply mode (some/none/every)
+	switch (mode) {
+		case 'some':
+			return eb.exists(finalSubquery);
+
+		case 'none':
+			return eb.not(eb.exists(finalSubquery));
+
+		case 'every': {
+			// every: NOT EXISTS (... AND NOT condition) AND EXISTS (...)
+			// For simplicity, we rebuild with inverted condition
+			const invertedWhere: WhereIntent = {
+				kind: 'not',
+				condition: whereIntent,
+			};
+
+			// Rebuild subquery with inverted condition
+			let invertedSubquery = subquery;
+			invertedSubquery = subquery.where((innerEb: unknown) =>
+				compileWhere(
+					innerEb,
+					invertedWhere,
+					currentAlias,
+					model,
+					plan,
+					state,
+					schemaName,
+				),
+			);
+
+			// Also need to check existence (non-vacuous truth)
+			return eb.and([
+				eb.not(eb.exists(invertedSubquery)),
+				eb.exists(finalSubquery),
+			]);
 		}
 	}
 }

@@ -627,6 +627,59 @@ export function preprocessWherePseudoColumns(
 }
 
 // ============================================================================
+// SPEC-002: Shared Filter Extraction for json_agg
+// ============================================================================
+
+/**
+ * Extract relation filters from WHERE for shared filter optimization.
+ *
+ * SPEC-002: When a relation filter exists in WHERE (e.g., posts.featured = true),
+ * the same filter should be applied to the json_agg subquery in SELECT.
+ * This ensures consistency between "which rows match" and "which rows are included".
+ *
+ * This function must be called BEFORE include strategies are applied so that
+ * json_agg can access the shared filters from state.relationFilters.
+ *
+ * @param where - The WHERE intent
+ * @param state - Compiler state (mutated to add relation filters)
+ */
+export function extractRelationFiltersForSharing(
+	where: unknown,
+	state: CompilerState,
+): void {
+	if (!where || typeof where !== 'object') return;
+
+	const whereObj = where as {
+		readonly kind?: string;
+		readonly relation?: string;
+		readonly mode?: string;
+		readonly where?: unknown;
+		readonly conditions?: readonly unknown[];
+	};
+
+	// Handle relation filter
+	if (whereObj.kind === 'relationFilter' && whereObj.relation && whereObj.mode === 'some') {
+		if (!state.relationFilters) {
+			state.relationFilters = new Map();
+		}
+		// Store the inner filter for this relation
+		if (whereObj.where) {
+			state.relationFilters.set(whereObj.relation, whereObj.where as import('@dbsp/core').WhereIntent);
+		}
+	}
+
+	// Recursively handle AND/OR conditions
+	if (whereObj.kind === 'and' || whereObj.kind === 'or') {
+		const conditions = whereObj.conditions;
+		if (conditions) {
+			for (const condition of conditions) {
+				extractRelationFiltersForSharing(condition, state);
+			}
+		}
+	}
+}
+
+// ============================================================================
 // Field Alias Resolution (P1: WHERE after WITH)
 // ============================================================================
 
@@ -667,6 +720,34 @@ export function resolveFieldAlias(
 		if (rootHasField) {
 			return defaultAlias;
 		}
+	}
+
+	// SPEC-002 FIX: When inside an EXISTS/subquery, the defaultAlias is the subquery's
+	// table alias (e.g., "_posts"), not the main query's root alias. In this case,
+	// we should NOT resolve to joined relations - the field is in the subquery's table.
+	// Detect this by checking if defaultAlias starts with "_" and differs from root alias.
+	const rootAlias = state.tableAliases.get(rootTable);
+	if (defaultAlias !== rootAlias && defaultAlias.startsWith('_')) {
+		// This is a subquery alias (EXISTS, etc.) - check if field exists in that table
+		// Find the table for this subquery alias
+		for (const [key, alias] of state.tableAliases) {
+			if (alias === defaultAlias) {
+				// Extract table name from key (format: "tableName_alias")
+				const tableName = key.split('_')[0];
+				const tableDefForAlias = model.getTable(tableName ?? '');
+				if (tableDefForAlias) {
+					const hasField = tableDefForAlias.columns.some((c) =>
+						columnMatches(c.name),
+					);
+					if (hasField) {
+						return defaultAlias;
+					}
+				}
+			}
+		}
+		// Field not found in subquery table, but don't fall through to joined relations
+		// since we're in a subquery context - return defaultAlias
+		return defaultAlias;
 	}
 
 	// 2. Check if field exists in any joined include relation

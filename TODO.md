@@ -27,6 +27,7 @@
 | NQL CLI Migration (NQLM) | cli, examples | 🟡 Ready |
 | Logical/Physical Naming (ARCH-003) | cli, examples | ✅ Complete |
 | Self-Ref Pseudo-Columns (SPEC-001) | core, nql, adapter | ✅ Complete (V1.0) |
+| Cross-Table Pseudo-Cols (SPEC-002) | core, nql, adapter | ✅ Complete |
 | Type Rationalization (ARCH-004) | types, core, adapter, nql | ✅ Complete |
 
 ## Scope-Specific Backlogs
@@ -37,6 +38,67 @@
 | `TODO_MCP.md` | mcp-server | MCP server implementation tasks |
 | `TODO_DX.md` | core, adapter | DX improvements, SOLID fixes, type inference |
 | `docs/specs/SELF-REF-PSEUDO-COLUMNS-SPEC.md` | core, nql, adapter | Auto-generated pseudo-columns for hierarchies |
+
+## ✅ COMPLETED: SPEC-002 Cross-Table Pseudo-Columns (2026-01-25)
+
+**Priority:** HIGH | **Effort:** L (~4h) | **Breaking:** No
+**Scope:** nql, core, adapter-kysely
+**Started:** 2026-01-25 | **Completed:** 2026-01-25
+
+Extend pseudo-columns to relations across tables (belongsTo) enabling filters like `posts.author.name`.
+
+### Blocks
+
+- [x] ✅ Block 1: Grammar Update (NQL) — Lexer tokens + Parser rules (2026-01-25)
+  - Added All, Some, None, Every tokens
+  - Added `quantifiedRelationFilter` rule for `some(posts).featured = true`
+  - Added `allRelationFilter` rule for `all posts.featured = true`
+  - Added `NqlRelationFilterExpression` AST type
+  - 15 new parser tests (62 total), 1 new lexer test (33 total)
+- [x] ✅ Block 2: Semantic Analysis (NQL) — Visitor updates (2026-01-25)
+  - Fixed `primaryCond` visitor to dispatch quantifiedRelationFilter/allRelationFilter
+  - Fixed identSegment handling (visit CstNode, not getImage on IToken)
+  - 8 new visitor tests (43 total)
+- [x] ✅ Block 3: NQL Compiler — Emit WhereRelationFilterIntent (2026-01-25)
+  - Added `WhereRelationFilterIntent` type to compiler exports
+  - Handle `relationFilter` case in `compileExpression`
+  - 8 new compiler tests (83 total)
+- [x] ✅ Block 4: Planner Extension (Core) — Multi-hop relation paths (2026-01-25)
+  - Updated `WhereRelationFilterIntent` to accept `string | readonly string[]`
+  - Updated `processRelationFilter` in planner to traverse multi-hop chains
+  - Added `relationPath` to `PlanDecision.context` for observability
+- [x] ✅ Block 5: SQL Compiler (Adapter) — WHERE handlers (2026-01-25)
+  - Added `compileMultiHopRelationFilter` function for multi-hop paths
+  - Added `compileMultiHopWithExists` for EXISTS subquery with JOINs
+  - Updated `compileRelationFilter` to dispatch to multi-hop handler
+  - 6 new compiler tests (711 total adapter tests)
+- [x] ✅ Block 6: SELECT Integration (Adapter) — Combined WHERE+SELECT (2026-01-25)
+  - Fixed TypeScript errors in `collectJoinFilterRelations()` for multi-hop relations
+  - Fixed `resolveFieldAlias()` to detect subquery context (EXISTS) vs main query
+  - Fixed `extractCTEs()` to skip CTE extraction only for json_agg strategy
+- [x] ✅ Block 7: E2E Tests — All BDD scenarios (2026-01-25)
+  - Test: "should apply shared filter to json_agg when WHERE and SELECT use same relation" ✅
+  - 283 E2E tests passing (24 test files)
+
+### Syntax Examples
+
+```nql
+# Explicit quantifiers
+users | where some(posts).featured = true      # EXISTS
+users | where none(posts).published = false    # NOT EXISTS
+users | where every(posts).status = 'approved' # ALL
+
+# ALL prefix syntax
+users | where all posts.featured = true        # Universal quantification
+
+# Aliased form with complex condition
+users | where some(posts as p, p.featured = true and p.published = true)
+
+# Multi-hop relations
+posts | where some(author.company).name = 'Acme'
+```
+
+---
 
 ## ✅ COMPLETED: STRAT-SIMPLIFY Include Strategy Simplification (2026-01-25)
 
@@ -83,6 +145,7 @@ Grammar simplification: remove `with` keyword, add `| flat` modifier, `.output` 
 | 6 | `batch(N)` streaming | Database-dependent, needs separate design |
 | 7 | Cursor support | Complex, dialect-specific |
 | 8 | NQL `via` clause | Manual JOIN path disambiguation for multi-FK cases |
+| 9 | Migrate Where* types to @dbsp/types | Unify WhereIntent/WhereRelationFilterIntent across NQL/core |
 
 ---
 

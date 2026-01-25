@@ -522,8 +522,12 @@ export interface WhereNotExistsIntent {
  */
 export interface WhereRelationFilterIntent {
 	readonly kind: 'relationFilter';
-	/** Relation name */
-	readonly relation: string;
+	/**
+	 * Relation path for filtering.
+	 * - Single relation: 'posts' or ['posts']
+	 * - Multi-hop (SPEC-002): ['author', 'company'] for author.company traversal
+	 */
+	readonly relation: string | readonly string[];
 	/** Filter conditions on related records */
 	readonly where: WhereIntent;
 	/**
@@ -533,6 +537,8 @@ export interface WhereRelationFilterIntent {
 	 * - 'none': No related records match
 	 */
 	readonly mode: 'some' | 'every' | 'none';
+	/** Optional alias for complex conditions (SPEC-002) */
+	readonly alias?: string;
 }
 
 // ============================================================================

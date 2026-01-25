@@ -92,6 +92,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | **NQL-EBNF** | [**NQL Grammar (EBNF)**](specs/NQL-EBNF.md) | nql | ✅ canonical |
 | **NQL-2.1** | [**NQL v2.1 Grammar Simplification**](specs/NQL-V2.1-SIMPLIFICATION-SPEC.md) | nql, cli, adapter | ✅ canonical |
 | SPEC-001 | [Self-Ref Pseudo-Columns V1.0](specs/SELF-REF-PSEUDO-COLUMNS-SPEC.md) | core, nql, adapter | ✅ canonical |
+| **SPEC-002** | [**Cross-Table Pseudo-Columns**](specs/NQL-V2.1-SIMPLIFICATION-SPEC.md#spec-002) | core, nql, adapter | ✅ canonical |
 | **ARCH-004** | [**Type Rationalization**](specs/TYPE-RATIONALIZATION-SPEC.md) | types, core, adapter, nql | ✅ canonical |
 | NQLM | [NQL CLI Migration](../TODO_NQL_MIGRATION.md) | cli | ✅ complete |
 

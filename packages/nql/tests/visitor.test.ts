@@ -16,6 +16,7 @@ import type {
 	NqlOrderByClause,
 	NqlProgram,
 	NqlQuery,
+	NqlRelationFilterExpression,
 	NqlSelectClause,
 	NqlSelectExpression,
 	NqlUpdate,
@@ -443,5 +444,121 @@ describe('NQL Visitor - Edge Cases', () => {
 				expect(item.expression.left.operator).toBe('/'); // inner operator must be /
 			}
 		}
+	});
+});
+
+// ============================================================
+// SPEC-002: Cross-table Pseudo-columns (Relation Filters)
+// ============================================================
+describe('SPEC-002: Relation Filter AST', () => {
+	describe('Explicit quantifier syntax', () => {
+		it('parses some(relation).column = value', () => {
+			const ast = parseToAst('users | where some(posts).featured = true');
+			const query = ast.statements[0] as NqlQuery;
+			const whereClause = query.clauses[0] as NqlWhereClause;
+
+			const filter = whereClause.condition as NqlRelationFilterExpression;
+			expect(filter.type).toBe('relationFilter');
+			expect(filter.mode).toBe('some');
+			expect(filter.relation).toEqual(['posts']);
+			expect(filter.alias).toBeUndefined();
+
+			// Condition should be: featured = true
+			expect(filter.condition.type).toBe('comparison');
+		});
+
+		it('parses none(relation).column = value', () => {
+			const ast = parseToAst('users | where none(posts).published = false');
+			const query = ast.statements[0] as NqlQuery;
+			const whereClause = query.clauses[0] as NqlWhereClause;
+
+			const filter = whereClause.condition as NqlRelationFilterExpression;
+			expect(filter.type).toBe('relationFilter');
+			expect(filter.mode).toBe('none');
+			expect(filter.relation).toEqual(['posts']);
+		});
+
+		it('parses every(relation).column = value', () => {
+			const ast = parseToAst("users | where every(posts).status = 'approved'");
+			const query = ast.statements[0] as NqlQuery;
+			const whereClause = query.clauses[0] as NqlWhereClause;
+
+			const filter = whereClause.condition as NqlRelationFilterExpression;
+			expect(filter.type).toBe('relationFilter');
+			expect(filter.mode).toBe('every');
+			expect(filter.relation).toEqual(['posts']);
+		});
+
+		it('parses some(relation as alias, condition)', () => {
+			const ast = parseToAst(
+				'users | where some(posts as p, p.featured = true and p.published = true)',
+			);
+			const query = ast.statements[0] as NqlQuery;
+			const whereClause = query.clauses[0] as NqlWhereClause;
+
+			const filter = whereClause.condition as NqlRelationFilterExpression;
+			expect(filter.type).toBe('relationFilter');
+			expect(filter.mode).toBe('some');
+			expect(filter.relation).toEqual(['posts']);
+			expect(filter.alias).toBe('p');
+
+			// Condition should be a binary AND expression
+			expect(filter.condition.type).toBe('binary');
+		});
+
+		it('parses some(relation, condition) without alias', () => {
+			const ast = parseToAst('users | where some(posts, featured = true)');
+			const query = ast.statements[0] as NqlQuery;
+			const whereClause = query.clauses[0] as NqlWhereClause;
+
+			const filter = whereClause.condition as NqlRelationFilterExpression;
+			expect(filter.type).toBe('relationFilter');
+			expect(filter.mode).toBe('some');
+			expect(filter.relation).toEqual(['posts']);
+			expect(filter.alias).toBeUndefined();
+		});
+
+		it('parses multi-hop relation path: some(author.company).name', () => {
+			const ast = parseToAst(
+				"posts | where some(author.company).name = 'Acme'",
+			);
+			const query = ast.statements[0] as NqlQuery;
+			const whereClause = query.clauses[0] as NqlWhereClause;
+
+			const filter = whereClause.condition as NqlRelationFilterExpression;
+			expect(filter.type).toBe('relationFilter');
+			expect(filter.mode).toBe('some');
+			expect(filter.relation).toEqual(['author', 'company']);
+		});
+	});
+
+	describe('ALL prefix syntax', () => {
+		it('parses all relation.column = value', () => {
+			const ast = parseToAst('users | where all posts.featured = true');
+			const query = ast.statements[0] as NqlQuery;
+			const whereClause = query.clauses[0] as NqlWhereClause;
+
+			const filter = whereClause.condition as NqlRelationFilterExpression;
+			expect(filter.type).toBe('relationFilter');
+			expect(filter.mode).toBe('every');
+			expect(filter.relation).toEqual(['posts']);
+
+			// Condition should be: featured = true
+			expect(filter.condition.type).toBe('comparison');
+		});
+
+		it('parses all with multi-hop path', () => {
+			const ast = parseToAst(
+				'posts | where all author.company.verified = true',
+			);
+			const query = ast.statements[0] as NqlQuery;
+			const whereClause = query.clauses[0] as NqlWhereClause;
+
+			const filter = whereClause.condition as NqlRelationFilterExpression;
+			expect(filter.type).toBe('relationFilter');
+			expect(filter.mode).toBe('every');
+			// author.company = relation path, verified = column
+			expect(filter.relation).toEqual(['author', 'company']);
+		});
 	});
 });

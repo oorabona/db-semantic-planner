@@ -24,6 +24,7 @@ export {
 	collectJoinIncludes,
 	collectJsonAggIncludes,
 	collectLateralIncludes,
+	extractRelationFiltersForSharing,
 	findFilterStrategyDecision,
 	findIncludeStrategyDecision,
 	getNextAlias,

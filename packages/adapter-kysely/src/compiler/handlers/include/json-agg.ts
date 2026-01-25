@@ -3,8 +3,8 @@
  * Handler for 'json_agg' include strategy - JSON aggregation for includes.
  */
 
-import type { IncludeIntent, ModelIR, PlanReport } from '@dbsp/core';
-import type { SelectQueryBuilder } from 'kysely';
+import type { IncludeIntent, ModelIR, PlanReport, WhereIntent } from '@dbsp/core';
+import type { RawBuilder, SelectQueryBuilder } from 'kysely';
 import { sql } from 'kysely';
 import {
 	collectJsonAggIncludes,
@@ -12,6 +12,66 @@ import {
 	normalizePrimaryKey,
 } from '../../helpers.js';
 import type { CompilerState } from '../../types.js';
+
+/**
+ * SPEC-002: Compile a WhereIntent to raw SQL for use in json_agg subquery.
+ * Uses sql.ref() for column references to ensure proper identifier quoting.
+ */
+function compileSharedFilterToRaw(
+	where: WhereIntent,
+	alias: string,
+): RawBuilder<unknown> {
+	if (where.kind === 'comparison') {
+		// Use sql.ref() for proper identifier escaping
+		const columnRef = sql.ref(`${alias}.${where.field}`);
+		const value = where.value;
+
+		switch (where.operator) {
+			case 'eq':
+				return sql`${columnRef} = ${value}`;
+			case 'neq':
+				return sql`${columnRef} != ${value}`;
+			case 'gt':
+				return sql`${columnRef} > ${value}`;
+			case 'gte':
+				return sql`${columnRef} >= ${value}`;
+			case 'lt':
+				return sql`${columnRef} < ${value}`;
+			case 'lte':
+				return sql`${columnRef} <= ${value}`;
+			default:
+				return sql`1=1`;
+		}
+	}
+
+	if (where.kind === 'like') {
+		const columnRef = sql.ref(`${alias}.${where.field}`);
+		return sql`${columnRef} LIKE ${where.pattern}`;
+	}
+
+	if (where.kind === 'and') {
+		const conditions = where.conditions.map((c) =>
+			compileSharedFilterToRaw(c, alias),
+		);
+		if (conditions.length === 0) return sql`1=1`;
+		// biome-ignore lint/style/noNonNullAssertion: length check guarantees element exists
+		if (conditions.length === 1) return conditions[0]!;
+		return sql`(${sql.join(conditions, sql` AND `)})`;
+	}
+
+	if (where.kind === 'or') {
+		const conditions = where.conditions.map((c) =>
+			compileSharedFilterToRaw(c, alias),
+		);
+		if (conditions.length === 0) return sql`1=1`;
+		// biome-ignore lint/style/noNonNullAssertion: length check guarantees element exists
+		if (conditions.length === 1) return conditions[0]!;
+		return sql`(${sql.join(conditions, sql` OR `)})`;
+	}
+
+	// For complex cases (relation filters, etc.), skip filtering
+	return sql`1=1`;
+}
 
 /**
  * Type for the applyJsonAggIncludes function.
@@ -100,10 +160,17 @@ export function applyJsonAggIncludes(
 		// Build WHERE correlation based on relation type:
 		// - belongsTo: source.foreignKey = target.primaryKey  (posts.authorId = authors.id)
 		// - hasMany/hasOne: target.foreignKey = source.primaryKey  (posts.authorId = authors.id from author's perspective)
-		const whereClause =
+		const correlationClause =
 			relation.type === 'belongsTo'
 				? sql`${sql.ref(`__t__.${targetKeys[0]}`)} = ${sql.ref(`${rootAlias}.${fkCols[0]}`)}`
 				: sql`${sql.ref(`__t__.${fkCols[0]}`)} = ${sql.ref(`${rootAlias}.${sourceKeys[0]}`)}`;
+
+		// SPEC-002: Check for shared filter (relation filter from WHERE clause)
+		// This applies the same filter to json_agg that was used in EXISTS
+		const sharedFilter = state.relationFilters?.get(include.relation);
+		const whereClause = sharedFilter
+			? sql`${correlationClause} AND ${compileSharedFilterToRaw(sharedFilter, '__t__')}`
+			: correlationClause;
 
 		// Build the JSON aggregation expression
 		// For PostgreSQL: COALESCE((SELECT json_agg(to_jsonb(t)) FROM target t WHERE ... ORDER BY ...), '[]')

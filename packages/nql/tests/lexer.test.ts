@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { NqlLexer } from '../src/lexer/index.js';
 import {
+	All,
 	And,
 	As,
 	Asc,
@@ -11,6 +12,7 @@ import {
 	Desc,
 	Distinct,
 	Dot,
+	Every,
 	Exists,
 	False,
 	Flat,
@@ -26,6 +28,7 @@ import {
 	Limit,
 	LParen,
 	Minus,
+	None,
 	Not,
 	Null,
 	NumberLiteral,
@@ -41,6 +44,7 @@ import {
 	Select,
 	SetKeyword,
 	Slash,
+	Some,
 	Star,
 	StringLiteral,
 	True,
@@ -210,6 +214,21 @@ describe('NqlLexer', () => {
 				['like', Like],
 				['is', Is],
 				['exists', Exists],
+			] as const;
+
+			for (const [keyword, expectedToken] of keywords) {
+				const result = NqlLexer.tokenize(keyword);
+				expect(result.errors).toHaveLength(0);
+				expect(result.tokens[0].tokenType).toBe(expectedToken);
+			}
+		});
+
+		it('recognizes quantifier keywords (SPEC-002)', () => {
+			const keywords = [
+				['all', All],
+				['some', Some],
+				['none', None],
+				['every', Every],
 			] as const;
 
 			for (const [keyword, expectedToken] of keywords) {

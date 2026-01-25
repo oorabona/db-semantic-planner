@@ -2,7 +2,7 @@
 
 **Status:** Canonical
 **Created:** 2026-01-24
-**Version:** 3.0 (v2.1 simplification: removed `with`, added `flat`)
+**Version:** 4.0 (SPEC-002: cross-table relations, quantifiers, aliases)
 **Scope:** nql, cli
 
 ## Overview
@@ -128,7 +128,20 @@ primary_cond      = "(" boolean_expr ")"
                   | between_check
                   | exists_check
                   | in_check
-                  | is_null_check ;
+                  | is_null_check
+                  | quantified_relation_check       (* SPEC-002: cross-table filtering *)
+                  | explicit_quantifier ;            (* SPEC-002: some/none/every *)
+
+(* SPEC-002: Quantified relation checks *)
+quantified_relation_check
+                  = [ "not" | "all" ] relation_path_expr comp_op expr ;
+explicit_quantifier
+                  = ( "some" | "none" | "every" ) "(" relation_path ")" "." ident_segment comp_op expr ;
+relation_path     = ident_segment { "." ident_segment } ;        (* relation.relation... *)
+relation_path_expr= relation_path "." ident_segment ;            (* ends with column *)
+
+(* Relation alias for complex conditions *)
+relation_alias    = relation_path "as" IDENT "," boolean_expr ;  (* author as a, a.name = 'X' and a.active = true *)
 
 (* ============================================================ *)
 (* COMPARISONS                                                  *)
@@ -341,7 +354,127 @@ categories | where parent.name = 'Electronics'           -- pseudo-table (unquot
 categories | where "parent" = 'x' and parent.name = 'y'  -- both in same query
 ```
 
-## 5. Mutations
+## 5. Cross-Table Relations (SPEC-002)
+
+**Feature:** V1.0 — filtering and selection via cross-table relation paths
+
+Cross-table pseudo-columns enable intuitive access to related table data via dotted path expressions: `posts.author.name`, `orders.customer.address.city`.
+
+### 5.1 Relation Path Expressions
+
+```ebnf
+(* Relation path - traverses named relations *)
+relation_path     = ident_segment { "." ident_segment } ;
+relation_path_expr= relation_path "." ident_segment ;
+```
+
+**Examples:**
+```sql
+-- belongsTo (to-one)
+posts | where author.name = 'Alice'                      -- EXISTS (optimized: JOIN)
+posts | select title, author.name
+
+-- hasMany (to-many)
+authors | where posts.published = true                   -- EXISTS (default: SOME)
+authors | where NOT posts.published = true               -- NOT EXISTS (NONE)
+authors | where ALL posts.published = true               -- NOT EXISTS + EXISTS (EVERY)
+
+-- Chained relations
+orders | where items.product.category.name = 'Electronics'
+```
+
+### 5.2 Quantifiers for To-Many Relations
+
+| Syntax | Meaning | SQL Pattern |
+|--------|---------|-------------|
+| `relation.col = val` | SOME (default) | `EXISTS (SELECT 1 FROM relation WHERE col = val)` |
+| `NOT relation.col = val` | NONE | `NOT EXISTS (SELECT 1 FROM relation WHERE col = val)` |
+| `ALL relation.col = val` | EVERY | `NOT EXISTS (...WHERE NOT col = val) AND EXISTS (...)` |
+
+**Explicit quantifier functions:**
+```sql
+-- Equivalent to implicit forms but more readable
+authors | where some(posts).published = true             -- same as posts.published = true
+authors | where none(posts).published = true             -- same as NOT posts.published = true
+authors | where every(posts).published = true            -- same as ALL posts.published = true
+```
+
+### 5.3 Relation Alias
+
+For complex conditions on the same relation:
+
+```sql
+-- Without alias (verbose)
+posts | where author.name = 'Alice' and author.active = true
+
+-- With alias (concise)
+posts | where author as a, a.name = 'Alice' and a.active = true
+
+-- Complex: filter and aggregate
+authors | where posts as p, p.published = true and p.views > 1000
+```
+
+### 5.4 Combined WHERE + SELECT Optimization
+
+When the same relation appears in both WHERE and SELECT:
+
+```sql
+posts | where author.name = 'Alice' | select title, author.*
+```
+
+**Optimization:** Reuse the JOIN from WHERE, apply `to_jsonb()` for SELECT.
+
+### 5.5 Cross-Table + Self-Referential Chains
+
+Combine cross-table and self-referential traversal:
+
+```sql
+-- Posts by authors in any subcategory of 'Electronics'
+posts | where author.category.ascendant.name = 'Electronics'
+
+-- Products in categories managed by Alice's team
+products | where category.manager.ascendant.name = 'Alice'
+```
+
+**SQL:** Cross-table JOINs + WITH RECURSIVE for self-ref.
+
+### 5.6 M:N Relations
+
+M:N relations use the same syntax — resolved via junction table:
+
+```sql
+-- Posts with tag named 'TypeScript' (posts ↔ tags via post_tags)
+posts | where tags.name = 'TypeScript'
+-- SQL: EXISTS (SELECT 1 FROM post_tags pt JOIN tags t ON pt.tag_id = t.id WHERE pt.post_id = posts.id AND t.name = ?)
+```
+
+### 5.7 `| flat` with Cross-Table Relations
+
+```sql
+-- Default: json_agg for hasMany in select
+authors | select name, posts.*
+-- Result: { name: "Alice", posts: [{...}, {...}] }
+
+-- With flat: JOIN expansion (row explosion)
+authors | select name, posts.* | flat
+-- Result: { name: "Alice", posts_id: 1, posts_title: "..." }, { name: "Alice", posts_id: 2, ... }
+```
+
+### 5.8 Name Collision Resolution
+
+When a relation name matches a real column:
+
+```sql
+-- 'author' is a real column (string)
+posts | where "author" = 'legacy-field'                  -- real column (quoted)
+
+-- 'author' is also a relation
+posts | where author.name = 'Alice'                      -- relation (unquoted path)
+```
+
+**Resolution order:** Quoted → real column; Unquoted path → relation → column.
+
+## 6. Mutations
 
 ```ebnf
 (* ============================================================ *)
@@ -378,7 +511,7 @@ assignment        = ident_segment "=" ( expr | "default" | "null" ) ;
 
 The `!` suffix forces execution without safety checks (e.g., `update without where`).
 
-## 6. Literals and Tokens
+## 7. Literals and Tokens
 
 ```ebnf
 (* ============================================================ *)
@@ -421,11 +554,11 @@ CUSTOM_ROLE_NAME   = IDENT ;  (* Any custom role name for scoped traversal *)
    to determine if IDENT is a pseudo-table keyword or regular identifier. *)
 ```
 
-## 7. Semantic Rules
+## 8. Semantic Rules
 
 These rules are enforced after parsing:
 
-### 7.1 Position-Aware Aggregates
+### 8.1 Position-Aware Aggregates
 
 | Position | Aggregates Allowed? | Compiles To |
 |----------|-------------------|-------------|
@@ -433,7 +566,7 @@ These rules are enforced after parsing:
 | `where` after `group by` | ✅ Yes | SQL `HAVING` |
 | `having` clause | ✅ Yes | SQL `HAVING` |
 
-### 7.2 Validation Rules
+### 8.2 Validation Rules
 
 | Rule | Error |
 |------|-------|
@@ -445,7 +578,7 @@ These rules are enforced after parsing:
 | Mixed direction pseudo-chain | "Cannot mix parent and child in same traversal chain" |
 | Multi-FK without explicit roles | "Multiple self-referential FKs require parentRole/childRole" |
 
-### 7.3 Resolution Order
+### 8.3 Resolution Order
 
 For path expressions:
 1. Quoted identifier (`"parent"`) → always real column
@@ -453,7 +586,7 @@ For path expressions:
 3. Match against relation names → join path
 4. Fallback → real column
 
-### 7.4 Limits (Configurable)
+### 8.4 Limits (Configurable)
 
 | Limit | Default | Rationale |
 |-------|---------|-----------|
@@ -461,9 +594,9 @@ For path expressions:
 | Max path depth | 10 | Prevent deep traversal |
 | Max recursive depth | 100 | Default `ascendant`/`descendant` limit |
 
-## 8. Parser Notes
+## 9. Parser Notes
 
-### 8.1 LL(1) Compatibility
+### 9.1 LL(1) Compatibility
 
 The grammar is **mostly LL(1)** with documented exceptions requiring bounded lookahead:
 
@@ -480,17 +613,18 @@ The grammar is **mostly LL(1)** with documented exceptions requiring bounded loo
 | `aggregate_expr` vs `window_expr` | Check for `over` after aggregate | 1-token post-parse |
 | `column_ref` alternatives | Semantic resolution | Post-parse |
 
-### 8.2 Lookahead Points
+### 9.2 Lookahead Points
 
 | Position | Lookahead | Decision |
 |----------|-----------|----------|
 | After table ref | 1 token | `insert`/`update`/`delete`/`upsert` → mutation |
 | After IDENT | 1 token | `(` → function call; `.` → path |
-| After `not` | 1 token | `exists` → exists check; `in` → in check |
+| After `not` | 1 token | `exists` → exists check; `in` → in check; `relation.col` → quantified check |
 | After `(` | bounded | Scan for `\|` to decide subquery vs expr |
 | After aggregate | 1 token | `over` → window_expr; else → aggregate_expr |
+| After `all` | 1 token | `relation.col` → ALL quantifier |
 
-### 8.3 Semantic Resolution (H3)
+### 9.3 Semantic Resolution (H3)
 
 Pseudo-table keywords (`parent`, `child`, `ascendant`, `descendant`) and custom roles are **not reserved keywords**. Resolution order:
 
@@ -505,6 +639,7 @@ This allows schemas with columns named `parent` while still supporting pseudo-ta
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 4.0 | 2026-01-25 | **SPEC-002 Cross-Table Relations:** Added quantified relation checks (`NOT`/`ALL` prefixes), explicit quantifiers (`some()`/`none()`/`every()`), relation aliases, Section 5 for cross-table patterns |
 | 3.0 | 2026-01-24 | **NQL v2.1 Grammar Simplification:** Removed `with` keyword entirely (BREAKING), added `flat` clause for JOIN strategy, relations now via path expressions in select |
 | 2.2 | 2026-01-24 | Multi-LLM review fixes: H1 (select_item parsing), H2 (subquery disambiguation), H3 (custom tokens), H4 (defer pseudo_table.*), L1 (case requires when), L3 (delete !), M7 (IN literal_list) |
 | 2.1 | 2026-01-24 | Added pseudo-table extensions (V1.0 filtering, V1.1 aggregate/projection) |
@@ -514,6 +649,7 @@ This allows schemas with columns named `parent` while still supporting pseudo-ta
 ## References
 
 - [NQL v2.1 Grammar Simplification](NQL-V2.1-SIMPLIFICATION-SPEC.md) — current specification
+- [Cross-Table Pseudo-Columns Spec](CROSS-TABLE-PSEUDO-COLUMNS-SPEC.md) — SPEC-002, cross-table relations
+- [Self-Ref Pseudo-Columns Spec](SELF-REF-PSEUDO-COLUMNS-SPEC.md) — SPEC-001, pseudo-table feature
 - [CLI-NQL Natural Query Language](../plans/CLI-NQL-natural-query-language.md) — original specification (historical)
 - [NQL Parser Audit](../plans/NQL-PARSER-AUDIT-2026-01.md) — audit and v2.0 design (historical)
-- [Self-Ref Pseudo-Columns Spec](SELF-REF-PSEUDO-COLUMNS-SPEC.md) — pseudo-table feature

@@ -2631,6 +2631,372 @@ describe('SQL Compiler', () => {
 	});
 
 	// ============================================================================
+	// SPEC-002: Multi-hop Relation Filter Tests
+	// ============================================================================
+
+	describe('SPEC-002: Multi-hop relation filters', () => {
+		/**
+		 * Schema for multi-hop tests:
+		 * companies <- users (belongsTo) <- posts (belongsTo)
+		 *
+		 * This allows testing:
+		 * - posts.author.company (belongsTo chain)
+		 * - companies.employees.posts (hasMany chain)
+		 */
+		const multiHopSchema = buildModelFromResolvedSchema(
+			defineSchema(
+				{
+					companies: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+					},
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: { type: 'string' },
+						companyId: { type: 'integer' },
+					},
+					posts: {
+						id: { type: 'integer', primaryKey: true },
+						title: { type: 'string' },
+						featured: { type: 'boolean' },
+						userId: { type: 'integer' },
+					},
+				},
+				{
+					relations: {
+						'companies.employees': {
+							kind: 'hasMany',
+							target: 'users',
+							foreignKey: 'companyId',
+						},
+						'users.company': {
+							kind: 'belongsTo',
+							target: 'companies',
+							foreignKey: 'companyId',
+						},
+						'users.posts': {
+							kind: 'hasMany',
+							target: 'posts',
+							foreignKey: 'userId',
+						},
+						'posts.author': {
+							kind: 'belongsTo',
+							target: 'users',
+							foreignKey: 'userId',
+						},
+					},
+				},
+			),
+		);
+
+		it('should compile belongsTo chain: posts.author.company.name', () => {
+			// posts | where author.company.name = 'Acme'
+			// Expected: EXISTS with JOIN
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				where: {
+					kind: 'relationFilter',
+					relation: ['author', 'company'],
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'name',
+						operator: 'eq',
+						value: 'Acme',
+					},
+				},
+			};
+
+			const planReport = plan(intent, multiHopSchema);
+			const compiled = compile(planReport, multiHopSchema, kysely);
+
+			// Should have EXISTS subquery
+			expect(compiled.sql).toContain('exists');
+			// Should include users table (author)
+			expect(compiled.sql).toContain('"users"');
+			// Should include companies table
+			expect(compiled.sql).toContain('"companies"');
+			// Should have the filter condition
+			expect(compiled.sql).toContain('"name"');
+		});
+
+		it('should compile hasMany chain: companies.employees.posts (some)', () => {
+			// companies | where some(employees.posts).featured = true
+			// Expected: EXISTS with inner JOIN
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'companies',
+				where: {
+					kind: 'relationFilter',
+					relation: ['employees', 'posts'],
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'featured',
+						operator: 'eq',
+						value: true,
+					},
+				},
+			};
+
+			const planReport = plan(intent, multiHopSchema);
+			const compiled = compile(planReport, multiHopSchema, kysely);
+
+			// Should have EXISTS subquery
+			expect(compiled.sql).toContain('exists');
+			// Should include users table (employees)
+			expect(compiled.sql).toContain('"users"');
+			// Should include posts table
+			expect(compiled.sql).toContain('"posts"');
+			// Should have featured condition
+			expect(compiled.sql).toContain('"featured"');
+		});
+
+		it('should compile hasMany chain with none mode: companies.employees.posts (none)', () => {
+			// companies | where none(employees.posts).featured = true
+			// Expected: NOT EXISTS
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'companies',
+				where: {
+					kind: 'relationFilter',
+					relation: ['employees', 'posts'],
+					mode: 'none',
+					where: {
+						kind: 'comparison',
+						field: 'featured',
+						operator: 'eq',
+						value: true,
+					},
+				},
+			};
+
+			const planReport = plan(intent, multiHopSchema);
+			const compiled = compile(planReport, multiHopSchema, kysely);
+
+			// Should have NOT EXISTS
+			expect(compiled.sql).toContain('not');
+			expect(compiled.sql).toContain('exists');
+		});
+
+		it('should compile hasMany chain with every mode', () => {
+			// companies | where every(employees.posts).featured = true
+			// Expected: NOT EXISTS (... AND NOT condition) AND EXISTS (...)
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'companies',
+				where: {
+					kind: 'relationFilter',
+					relation: ['employees', 'posts'],
+					mode: 'every',
+					where: {
+						kind: 'comparison',
+						field: 'featured',
+						operator: 'eq',
+						value: true,
+					},
+				},
+			};
+
+			const planReport = plan(intent, multiHopSchema);
+			const compiled = compile(planReport, multiHopSchema, kysely);
+
+			// Should have NOT EXISTS for the negated condition
+			expect(compiled.sql).toContain('not');
+			expect(compiled.sql).toContain('exists');
+			// The every mode uses two EXISTS clauses (inverted + existence check)
+			const existsCount = (compiled.sql.match(/exists/gi) || []).length;
+			expect(existsCount).toBeGreaterThanOrEqual(2);
+		});
+
+		it('should handle single-hop relation (backward compat)', () => {
+			// Ensure single-hop still works via the multi-hop code path
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'relationFilter',
+					relation: ['posts'], // Array with one element
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'featured',
+						operator: 'eq',
+						value: true,
+					},
+				},
+			};
+
+			const planReport = plan(intent, multiHopSchema);
+			const compiled = compile(planReport, multiHopSchema, kysely);
+
+			expect(compiled.sql).toContain('exists');
+			expect(compiled.sql).toContain('"posts"');
+			expect(compiled.sql).toContain('"featured"');
+		});
+
+		it('should apply schema prefix to multi-hop relation filter', () => {
+			// Test multi-tenant support
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'posts',
+				where: {
+					kind: 'relationFilter',
+					relation: ['author', 'company'],
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'name',
+						operator: 'eq',
+						value: 'Acme',
+					},
+				},
+			};
+
+			const planReport = plan(intent, multiHopSchema);
+			const compiled = compile(planReport, multiHopSchema, kysely, 'tenant_abc');
+
+			// All tables should have schema prefix
+			expect(compiled.sql).toContain('"tenant_abc"."posts"');
+			expect(compiled.sql).toContain('"tenant_abc"."users"');
+			expect(compiled.sql).toContain('"tenant_abc"."companies"');
+		});
+
+		it('should apply shared filter to json_agg when WHERE and SELECT use same relation', () => {
+			// SPEC-002 Section 6.2: Combined WHERE + SELECT with shared filter
+			// authors | select *, posts.* | where posts.featured = true
+			// The filter should be applied BOTH to EXISTS in WHERE AND to json_agg in SELECT
+
+			// Schema with json_agg strategy for includes
+			const jsonAggSchema = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: { type: 'string' },
+							featured: { type: 'boolean' },
+							userId: { type: 'integer' },
+						},
+					},
+					{
+						relations: {
+							'users.posts': {
+								kind: 'hasMany',
+								target: 'posts',
+								foreignKey: 'userId',
+								includeStrategy: 'json_agg',
+							},
+						},
+					},
+				),
+			);
+
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts' }],
+				where: {
+					kind: 'relationFilter',
+					relation: 'posts',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'featured',
+						operator: 'eq',
+						value: true,
+					},
+				},
+			};
+
+			const planReport = plan(intent, jsonAggSchema);
+			const compiled = compile(planReport, jsonAggSchema, kysely);
+
+			// Should have EXISTS for WHERE
+			expect(compiled.sql).toContain('exists');
+
+			// Should have json_agg for SELECT
+			expect(compiled.sql).toContain('json_agg');
+
+			// The featured filter should appear TWICE:
+			// 1. In the EXISTS subquery (WHERE)
+			// 2. In the json_agg subquery (SELECT - shared filter)
+			const featuredMatches = compiled.sql.match(/"featured"/gi) || [];
+			expect(featuredMatches.length).toBeGreaterThanOrEqual(2);
+		});
+
+		it('should NOT apply shared filter for none mode (inverse semantics)', () => {
+			// When mode is 'none', the filter semantics are inverted
+			// So we should NOT apply the same filter to json_agg
+
+			// Schema with json_agg strategy for includes
+			const jsonAggSchema = buildModelFromResolvedSchema(
+				defineSchema(
+					{
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: { type: 'string' },
+						},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: { type: 'string' },
+							featured: { type: 'boolean' },
+							userId: { type: 'integer' },
+						},
+					},
+					{
+						relations: {
+							'users.posts': {
+								kind: 'hasMany',
+								target: 'posts',
+								foreignKey: 'userId',
+								includeStrategy: 'json_agg',
+							},
+						},
+					},
+				),
+			);
+
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'posts' }],
+				where: {
+					kind: 'relationFilter',
+					relation: 'posts',
+					mode: 'none',
+					where: {
+						kind: 'comparison',
+						field: 'featured',
+						operator: 'eq',
+						value: true,
+					},
+				},
+			};
+
+			const planReport = plan(intent, jsonAggSchema);
+			const compiled = compile(planReport, jsonAggSchema, kysely);
+
+			// Should have NOT EXISTS for WHERE
+			expect(compiled.sql).toContain('not');
+			expect(compiled.sql).toContain('exists');
+
+			// Should have json_agg for SELECT
+			expect(compiled.sql).toContain('json_agg');
+
+			// The featured filter should appear only ONCE (in EXISTS)
+			// json_agg should return ALL posts, not just featured ones
+			// because "none featured" means user has NO featured posts
+			const featuredMatches = compiled.sql.match(/"featured"/gi) || [];
+			expect(featuredMatches.length).toBe(1);
+		});
+	});
+
+	// ============================================================================
 	// CORE-001: Filter Strategy Enforcement
 	// ============================================================================
 
@@ -4609,4 +4975,6 @@ describe('CORE-006: Composite Key Support', () => {
 			});
 		});
 	});
+
 });
+

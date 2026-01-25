@@ -1474,3 +1474,19 @@ default: v.optional(v.union([v.string(), v.number(), v.boolean()]));
 **Prevention:** When implementing a handler for multiple relation types, explicitly consider the JOIN direction for each type. Create a decision matrix: hasMany (parent→children), hasOne (parent→child), belongsTo (child→parent).
 
 **Location:** `packages/adapter-kysely/src/compiler/handlers/include/json-agg.ts`
+
+---
+
+### resolveFieldAlias Must Detect Subquery Context (2026-01-25) — SPEC-002
+
+**Issue:** PostgreSQL error "missing FROM-clause entry for table posts_json" when using WHERE relation filter with SELECT on same relation using json_agg.
+
+**Symptoms:** Query like `users | select id, posts | where some(posts).featured = true` failed. The EXISTS subquery tried to resolve `posts` alias to the CTE alias `posts_json`, but CTEs don't exist in subquery scope.
+
+**Cause:** `resolveFieldAlias()` was designed for main query context where CTEs are available. In subquery context (EXISTS, json_agg correlated subquery), the alias resolution logic incorrectly tried to use CTE aliases that don't exist in that scope.
+
+**Solution:** In `resolveFieldAlias()`, detect subquery context by checking if the current expression is inside an EXISTS or json_agg subquery (identifiable by alias patterns like `__t__` or `_exists`). When in subquery context, return the direct alias without CTE transformation.
+
+**Prevention:** When writing SQL generation code that works at different query levels (main query vs subquery), always consider whether helper functions assume main query context. Add explicit context detection or pass context as parameter.
+
+**Location:** `packages/adapter-kysely/src/compiler/helpers.ts` → `resolveFieldAlias()`

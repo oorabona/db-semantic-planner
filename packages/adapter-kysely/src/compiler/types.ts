@@ -57,6 +57,13 @@ export interface CompilerState {
 			sourceAlias: string;
 		}
 	>;
+	/**
+	 * SPEC-002: Track relation filters applied in WHERE clause.
+	 * Used for shared filter optimization in json_agg SELECT.
+	 * Key: relation name (e.g., 'posts')
+	 * Value: WhereIntent to apply as shared filter
+	 */
+	relationFilters?: Map<string, WhereIntent>;
 }
 
 // ============================================================================
