@@ -13,6 +13,9 @@
 # Setup: Create isolated schema and load data
 # =============================================================================
 
+# Drop existing schema for clean test run
+!DROP SCHEMA IF EXISTS ch4_scheduling CASCADE;
+
 # Create schema (! prefix = raw SQL in natural mode)
 !CREATE SCHEMA IF NOT EXISTS ch4_scheduling;
 

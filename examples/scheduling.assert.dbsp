@@ -2,37 +2,44 @@
 # Validates output from scheduling schema queries (PostgreSQL Ranges)
 
 # ─────────────────────────────────────────
-# Query 0: !CREATE SCHEMA IF NOT EXISTS ch4_scheduling;
+# Query 0: !DROP SCHEMA IF EXISTS ch4_scheduling CASCADE;
 # ─────────────────────────────────────────
 --- query: 0
 db.success: true
 db.output.contains: Executed SQL
 
 # ─────────────────────────────────────────
-# Query 1: .use ch4_scheduling
+# Query 1: !CREATE SCHEMA IF NOT EXISTS ch4_scheduling;
 # ─────────────────────────────────────────
 --- query: 1
+db.success: true
+db.output.contains: Executed SQL
+
+# ─────────────────────────────────────────
+# Query 2: .use ch4_scheduling
+# ─────────────────────────────────────────
+--- query: 2
 success: true
 output.contains: Using schema: ch4_scheduling
 
 # ─────────────────────────────────────────
-# Query 2: .import examples/scheduling.ddl.sql
-# ─────────────────────────────────────────
---- query: 2
-db.success: true
-db.output.contains: Imported
-
-# ─────────────────────────────────────────
-# Query 3: .import examples/scheduling.seed.sql
+# Query 3: .import examples/scheduling.ddl.sql
 # ─────────────────────────────────────────
 --- query: 3
 db.success: true
 db.output.contains: Imported
 
 # ─────────────────────────────────────────
-# Query 4: .tables
+# Query 4: .import examples/scheduling.seed.sql
 # ─────────────────────────────────────────
 --- query: 4
+db.success: true
+db.output.contains: Imported
+
+# ─────────────────────────────────────────
+# Query 5: .tables
+# ─────────────────────────────────────────
+--- query: 5
 success: true
 output.contains: Tables (4)
 output.contains: rooms
@@ -41,9 +48,9 @@ output.contains: events
 output.contains: priceTiers
 
 # ─────────────────────────────────────────
-# Query 5: rooms
+# Query 6: rooms
 # ─────────────────────────────────────────
---- query: 5
+--- query: 6
 success: true
 intent.type: query
 intent.table: rooms
@@ -54,17 +61,17 @@ db.output.contains: Conference Room A
 db.output.contains: Auditorium
 
 # ─────────────────────────────────────────
-# Query 6: roomBookings
+# Query 7: roomBookings
 # BUG FIXED: camelCase table mapping now works
 # ─────────────────────────────────────────
---- query: 6
+--- query: 7
 success: true
 sql.contains: from "ch4_scheduling"."room_bookings"
 
 # ─────────────────────────────────────────
-# Query 7: events
+# Query 8: events
 # ─────────────────────────────────────────
---- query: 7
+--- query: 8
 success: true
 sql.contains: from "ch4_scheduling"."events"
 db.rows.equals: 10
@@ -72,18 +79,18 @@ db.output.contains: Daily Standup
 db.output.contains: Sprint Planning
 
 # ─────────────────────────────────────────
-# Query 8: priceTiers
+# Query 9: priceTiers
 # BUG FIXED: camelCase table mapping now works
 # ─────────────────────────────────────────
---- query: 8
+--- query: 9
 success: true
 sql.contains: from "ch4_scheduling"."price_tiers"
 
 # ─────────────────────────────────────────
-# Query 9: roomBookings | where bookingPeriod overlaps [2024-01-16,2024-01-20)
+# Query 10: roomBookings | where bookingPeriod overlaps [2024-01-16,2024-01-20)
 # BUG FIXED: Range operators now work
 # ─────────────────────────────────────────
---- query: 9
+--- query: 10
 success: true
 intent.type: query
 intent.table: roomBookings
@@ -91,35 +98,35 @@ intent.hasWhere: true
 sql.contains: "booking_period" && $1
 
 # ─────────────────────────────────────────
-# Query 10: roomBookings | where bookingPeriod containedBy [2024-01-01,2024-02-01)
+# Query 11: roomBookings | where bookingPeriod containedBy [2024-01-01,2024-02-01)
 # BUG FIXED: Range operators now work
 # ─────────────────────────────────────────
---- query: 10
+--- query: 11
 success: true
 sql.contains: "booking_period" <@ $1
 
 # ─────────────────────────────────────────
-# Query 11: priceTiers | where quantityRange contains 25
-# BUG FIXED: 'contains' operator now accepts scalar values
-# ─────────────────────────────────────────
---- query: 11
-success: true
-sql.contains: "quantity_range" @> $1
-
-# ─────────────────────────────────────────
-# Query 12: priceTiers | where productName = 'Widget A' and quantityRange contains 25
+# Query 12: priceTiers | where quantityRange contains 25
 # BUG FIXED: 'contains' operator now accepts scalar values
 # ─────────────────────────────────────────
 --- query: 12
 success: true
+sql.contains: "quantity_range" @> $1
+
+# ─────────────────────────────────────────
+# Query 13: priceTiers | where productName = 'Widget A' and quantityRange contains 25
+# BUG FIXED: 'contains' operator now accepts scalar values
+# ─────────────────────────────────────────
+--- query: 13
+success: true
 sql.contains: "quantity_range" @> $2
 
 # ─────────────────────────────────────────
-# Query 13: rooms | select *, roomBookings.*
+# Query 14: rooms | select *, roomBookings.*
 # NQL v2.1: Relation path triggers include automatically
 # ARCH-005: Uses json_agg subquery strategy for hasMany
 # ─────────────────────────────────────────
---- query: 13
+--- query: 14
 success: true
 intent.type: query
 intent.table: rooms
@@ -128,10 +135,10 @@ intent.hasWhere: false
 sql.equals: select "_rooms".*, COALESCE((SELECT json_agg(to_jsonb(__t__) ) FROM "ch4_scheduling"."room_bookings" AS __t__ WHERE "__t__"."room_id" = "_rooms"."id"), '[]'::json) as "room_bookings_json" from "ch4_scheduling"."rooms" as "_rooms"
 
 # ─────────────────────────────────────────
-# Query 14: rooms | where roomBookings.bookingPeriod overlaps [2024-01-22,2024-01-29) | select *, roomBookings.*
+# Query 15: rooms | where roomBookings.bookingPeriod overlaps [2024-01-22,2024-01-29) | select *, roomBookings.*
 # NQL v2.1: Pseudo-column filter + automatic include
 # ─────────────────────────────────────────
---- query: 14
+--- query: 15
 success: true
 intent.type: query
 intent.table: rooms
@@ -140,18 +147,18 @@ intent.hasWhere: true
 sql.contains: "booking_period" && $1
 
 # ─────────────────────────────────────────
-# Query 15: insert into rooms set name = 'Board Room', capacity = 20, floor = 2
+# Query 16: insert into rooms set name = 'Board Room', capacity = 20, floor = 2
 # ─────────────────────────────────────────
---- query: 15
+--- query: 16
 success: true
 sql.contains: insert into "ch4_scheduling"."rooms"
 sql.contains: ("name", "capacity", "floor") values ($1, $2, $3)
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 16: insert into priceTiers set productName = 'Widget C', quantityRange = '[1,50)', unitPrice = 15.00
+# Query 17: insert into priceTiers set productName = 'Widget C', quantityRange = '[1,50)', unitPrice = 15.00
 # ─────────────────────────────────────────
---- query: 16
+--- query: 17
 success: true
 intent.type: insert
 intent.table: priceTiers
@@ -159,9 +166,9 @@ db.success: true
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 17: update rooms set capacity = 25 where name = 'Conference Room A'
+# Query 18: update rooms set capacity = 25 where name = 'Conference Room A'
 # ─────────────────────────────────────────
---- query: 17
+--- query: 18
 success: true
 sql.contains: update "ch4_scheduling"."rooms"
 sql.contains: set "capacity" = $1
@@ -169,9 +176,9 @@ sql.contains: where "name" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 18: update events set title = 'Team Standup (Updated)' where id = 1
+# Query 19: update events set title = 'Team Standup (Updated)' where id = 1
 # ─────────────────────────────────────────
---- query: 18
+--- query: 19
 success: true
 sql.contains: update "ch4_scheduling"."events"
 sql.contains: set "title" = $1
@@ -179,20 +186,20 @@ sql.contains: where "id" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
-# Query 19: delete from roomBookings where id = 99
+# Query 20: delete from roomBookings where id = 99
 # NOTE: Uses correct snake_case table name in SQL
 # ─────────────────────────────────────────
---- query: 19
+--- query: 20
 success: true
 sql.contains: delete from "ch4_scheduling"."room_bookings"
 sql.contains: where "id" = $1
 db.rows.equals: 0
 
 # ─────────────────────────────────────────
-# Query 20: upsert into rooms on name set name = 'Meeting Room', capacity = 12
+# Query 21: upsert into rooms on name set name = 'Meeting Room', capacity = 12
 # NOTE: Compiles in dry-run, but DB rejects due to missing unique constraint on 'name'
 # ─────────────────────────────────────────
---- query: 20
+--- query: 21
 success: true
 intent.type: upsert
 intent.table: rooms
