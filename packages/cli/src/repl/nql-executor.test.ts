@@ -173,9 +173,12 @@ describe('nql-executor', () => {
 				expect(result.sql.toLowerCase()).not.toMatch(/left\s+join/);
 			});
 
-			// TODO: Requires aggregate expression handler in adapter-kysely
-			// NQL produces { kind: 'aggregate' } but adapter lacks handler
-			it.todo('compiles query with group by');
+			it('compiles query with group by', () => {
+				const result = compileNqlToSql('users | group by active | select count(*)', model);
+				expect(result.intentType).toBe('query');
+				expect(result.sql.toLowerCase()).toContain('group by');
+				expect(result.sql.toLowerCase()).toContain('count(*)');
+			});
 		});
 
 		describe('error handling', () => {

@@ -117,12 +117,25 @@ describe('QUICKSTART Examples - Compile Only', () => {
 			expect(result.stdout).toContain('comments');
 		});
 
-		// TODO: NQL aggregate expressions not yet integrated with adapter-kysely compiler
-		// NQL produces { kind: 'aggregate' } but adapter only handles 'coalesce', 'raw', etc.
-		// See TODO_NQL_MIGRATION.md for tracking
-		it.todo('should compile aggregate: count');
-		it.todo('should compile aggregate: count with alias');
-		it.todo('should compile aggregate: group by');
+		it('should compile aggregate: count', () => {
+			const result = runBatchQuery(schema, 'posts | select count(*)');
+			expect(result.success).toBe(true);
+			expect(result.stdout).toContain('count(*)');
+		});
+
+		it('should compile aggregate: count with alias', () => {
+			const result = runBatchQuery(schema, 'posts | select count(*) as total');
+			expect(result.success).toBe(true);
+			expect(result.stdout).toContain('count(*)');
+			expect(result.stdout).toContain('total');
+		});
+
+		it('should compile aggregate: group by', () => {
+			const result = runBatchQuery(schema, 'posts | group by authorId | select count(*)');
+			expect(result.success).toBe(true);
+			expect(result.stdout).toContain('group by');
+			expect(result.stdout).toContain('count(*)');
+		});
 
 		it('should compile distinct', () => {
 			const result = runBatchQuery(schema, 'posts | select distinct *');
