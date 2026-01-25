@@ -117,14 +117,15 @@ sql.contains: "quantity_range" @> $2
 # ─────────────────────────────────────────
 # Query 13: rooms | select *, roomBookings.*
 # NQL v2.1: Relation path triggers include automatically
+# ARCH-005: Uses json_agg subquery strategy for hasMany
 # ─────────────────────────────────────────
 --- query: 13
 success: true
 intent.type: query
 intent.table: rooms
-intent.include.relation: roomBookings
+intent.with: roomBookings
 intent.hasWhere: false
-sql.join: roomBookings
+sql.equals: select "_rooms".*, COALESCE((SELECT json_agg(to_jsonb(__t__) ) FROM "ch4_scheduling"."room_bookings" AS __t__ WHERE "__t__"."room_id" = "_rooms"."id"), '[]'::json) as "room_bookings_json" from "ch4_scheduling"."rooms" as "_rooms"
 
 # ─────────────────────────────────────────
 # Query 14: rooms | where roomBookings.bookingPeriod overlaps [2024-01-22,2024-01-29) | select *, roomBookings.*
@@ -134,9 +135,8 @@ sql.join: roomBookings
 success: true
 intent.type: query
 intent.table: rooms
-intent.include.relation: roomBookings
-intent.hasWhere: false
-sql.join: roomBookings
+intent.with: roomBookings
+intent.hasWhere: true
 sql.contains: "booking_period" && $1
 
 # ─────────────────────────────────────────

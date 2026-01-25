@@ -27,7 +27,7 @@ export default schema({
 	},
 	roomBookings: {
 		id: { type: 'integer', primaryKey: true, autoIncrement: true },
-		roomId: ref('rooms', { onDelete: 'CASCADE' }),
+		roomId: ref('rooms', { onDelete: 'CASCADE', inverse: 'roomBookings' }),
 		bookedBy: 'string',
 		bookingPeriod: 'daterange', // PostgreSQL daterange
 		purpose: { type: 'string', nullable: true },

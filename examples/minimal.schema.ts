@@ -23,9 +23,9 @@ export default schema({
 		id: { type: 'integer', primaryKey: true, autoIncrement: true },
 		title: 'string',
 		content: { type: 'text', nullable: true },
-		userId: ref('users', { onDelete: 'CASCADE' }),
+		userId: ref('users', { onDelete: 'CASCADE', inverse: 'posts' }),
 	},
 });
 // Relations auto-inferred from ref():
-// - users.userId_posts (hasMany)
+// - users.posts (hasMany) - custom inverse name
 // - posts.user (belongsTo)

@@ -40,7 +40,7 @@ export default schema({
 		description: { type: 'text', nullable: true },
 		price: 'decimal',
 		stock: { type: 'integer', default: '0' },
-		categoryId: ref('categories', { onDelete: 'RESTRICT' }),
+		categoryId: ref('categories', { onDelete: 'RESTRICT', inverse: 'products' }),
 		active: { type: 'boolean', default: 'true', index: true },
 		createdAt: { type: 'timestamp', default: 'now()' },
 	},
@@ -48,7 +48,7 @@ export default schema({
 	// Product variants (size, color, etc.)
 	variants: {
 		id: { type: 'integer', primaryKey: true, autoIncrement: true },
-		productId: ref('products', { onDelete: 'CASCADE' }),
+		productId: ref('products', { onDelete: 'CASCADE', inverse: 'variants' }),
 		sku: { type: 'string', unique: true },
 		name: 'string',
 		priceModifier: { type: 'decimal', default: '0' },
@@ -81,7 +81,7 @@ export default schema({
 	orders: {
 		id: { type: 'integer', primaryKey: true, autoIncrement: true },
 		orderNumber: { type: 'string', unique: true },
-		customerId: ref('customers', { onDelete: 'RESTRICT' }),
+		customerId: ref('customers', { onDelete: 'RESTRICT', inverse: 'orders' }),
 		status: { type: 'string', default: "'pending'", index: true },
 		total: 'decimal',
 		// ARCH-005: Multi-FK to same table - use 'as' for explicit naming

@@ -22,10 +22,12 @@ import type {
 	ForeignKeyIR,
 	ModelIR,
 	OnDeleteAction,
+	PseudoColumnMetadata,
 	RelationIR,
 	RelationType,
 	TableIR,
 } from '../model-ir.js';
+import { createPseudoColumnMetadata } from '../model-ir.js';
 
 // ============================================================================
 // Public Types
@@ -480,7 +482,7 @@ function deriveInverseRelation(
  */
 function buildTables(
 	definition: SchemaDefinition,
-	_refsByTable: Map<string, CollectedRef[]>,
+	refsByTable: Map<string, CollectedRef[]>,
 	tableNames: string[],
 ): TableIR[] {
 	const tables: TableIR[] = [];
@@ -579,12 +581,33 @@ function buildTables(
 			finalPk = primaryKey;
 		}
 
+		// Generate pseudo-columns for self-referential FKs
+		const pseudoColumns: PseudoColumnMetadata[] = [];
+		const refs = refsByTable.get(tableName) || [];
+		for (const ref of refs) {
+			if (ref.options.roles && ref.target === tableName) {
+				// Self-referential with roles - generate pseudo-column
+				const pkColumn =
+					typeof finalPk === 'string' ? finalPk : (finalPk[0] ?? 'id');
+				pseudoColumns.push(
+					createPseudoColumnMetadata(
+						tableName,
+						ref.columnName,
+						pkColumn,
+						ref.options.roles.parent,
+						ref.options.roles.children,
+					),
+				);
+			}
+		}
+
 		const table: TableIR = {
 			name: tableName,
 			columns,
 			primaryKey: finalPk,
 			foreignKeys,
 			indexes: [],
+			...(pseudoColumns.length > 0 ? { pseudoColumns } : {}),
 		};
 		tables.push(table);
 	}
