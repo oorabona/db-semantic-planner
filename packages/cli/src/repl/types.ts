@@ -4,12 +4,13 @@ import type React from 'react';
  */
 
 import type { ResolvedSchema } from '@dbsp/core';
+import type { LoadedSchema } from '../utils/schema-loader.js';
 
 /**
  * REPL Configuration passed from CLI command
  */
 export interface ReplConfig {
-	schema: ResolvedSchema;
+	schema: LoadedSchema;
 	schemaPath: string;
 	/** CLI-020: Optional database connection URL for execution mode */
 	databaseUrl?: string;

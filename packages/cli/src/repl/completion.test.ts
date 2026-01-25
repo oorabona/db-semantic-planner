@@ -1,56 +1,128 @@
 /**
  * DX-030 Block 6: Autocompletion Tests
+ * ARCH-005: Updated to use LoadedSchema
  */
 
-import type { ResolvedSchema } from '@dbsp/core';
+import type {
+	ColumnType,
+	ModelIR,
+	RelationIR,
+	RelationType,
+	TableIR,
+} from '@dbsp/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CompletionProvider, formatCompletions } from './completion.js';
+import type { LoadedSchema } from '../utils/schema-loader.js';
+
+// Helper to create a mock LoadedSchema
+function createMockSchema(
+	tables: Record<
+		string,
+		Array<{ name: string; type: ColumnType; nullable?: boolean }>
+	>,
+	relations: Record<
+		string,
+		{
+			type: RelationType;
+			source: string;
+			target: string;
+			foreignKey?: string;
+		}
+	>,
+): LoadedSchema {
+	const tableMap = new Map<string, TableIR>();
+	for (const [tableName, columns] of Object.entries(tables)) {
+		tableMap.set(tableName, {
+			name: tableName,
+			columns: columns.map((c) => ({
+				name: c.name,
+				type: c.type,
+				nullable: c.nullable ?? false,
+			})),
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+		});
+	}
+
+	const relationMap = new Map<string, RelationIR>();
+	for (const [relName, rel] of Object.entries(relations)) {
+		relationMap.set(relName, {
+			name: relName.includes('.') ? relName.split('.')[1]! : relName,
+			type: rel.type,
+			source: rel.source,
+			target: rel.target,
+			foreignKey: rel.foreignKey,
+			// Default strategy values for testing
+			cardinality: rel.type === 'hasMany' || rel.type === 'belongsToMany' ? 'many' : 'one',
+			optionality: 'optional',
+			includeStrategy: 'auto',
+			filterStrategy: 'auto',
+			joinDefault: 'auto',
+		});
+	}
+
+	const model: ModelIR = {
+		tables: tableMap,
+		relations: relationMap,
+		getTable: (name: string) => tableMap.get(name),
+		getRelation: (name: string) => relationMap.get(name),
+		getRelationsFrom: (source: string) =>
+			Array.from(relationMap.values()).filter((r) => r.source === source),
+		getRelationsTo: (target: string) =>
+			Array.from(relationMap.values()).filter((r) => r.target === target),
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
+
+	return {
+		definition: tables,
+		model,
+		tableNames: Object.keys(tables),
+	};
+}
 
 // Test schema
-const testSchema: ResolvedSchema = {
-	tables: {
-		users: {
-			id: { type: 'string', nullable: false },
-			name: { type: 'string', nullable: false },
-			email: { type: 'string', nullable: false },
-			active: { type: 'boolean', nullable: false },
-		},
-		posts: {
-			id: { type: 'string', nullable: false },
-			title: { type: 'string', nullable: false },
-			content: { type: 'string', nullable: true },
-			authorId: { type: 'string', nullable: false },
-		},
-		comments: {
-			id: { type: 'string', nullable: false },
-			postId: { type: 'string', nullable: false },
-			body: { type: 'string', nullable: false },
-		},
+const testSchema = createMockSchema(
+	{
+		users: [
+			{ name: 'id', type: 'string' },
+			{ name: 'name', type: 'string' },
+			{ name: 'email', type: 'string' },
+			{ name: 'active', type: 'boolean' },
+		],
+		posts: [
+			{ name: 'id', type: 'string' },
+			{ name: 'title', type: 'string' },
+			{ name: 'content', type: 'string', nullable: true },
+			{ name: 'authorId', type: 'string' },
+		],
+		comments: [
+			{ name: 'id', type: 'string' },
+			{ name: 'postId', type: 'string' },
+			{ name: 'body', type: 'string' },
+		],
 	},
-	relations: {
+	{
 		userPosts: {
-			kind: 'hasMany',
+			type: 'hasMany',
+			source: 'users',
 			target: 'posts',
 			foreignKey: 'authorId',
-			sourceKey: 'id',
 		},
 		postComments: {
-			kind: 'hasMany',
+			type: 'hasMany',
+			source: 'posts',
 			target: 'comments',
 			foreignKey: 'postId',
-			sourceKey: 'id',
 		},
-		postAuthor: { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' },
+		postAuthor: {
+			type: 'belongsTo',
+			source: 'posts',
+			target: 'users',
+			foreignKey: 'authorId',
+		},
 	},
-	hints: {},
-	conventions: {
-		fkPattern: '{singular}Id',
-		pluralize: true,
-		timestamps: [],
-		fkAutoIndex: true,
-	},
-	indexes: {},
-};
+);
 
 describe('CompletionProvider', () => {
 	let provider: CompletionProvider;
@@ -198,41 +270,35 @@ describe('CompletionProvider', () => {
 	});
 
 	describe('context-aware relation completions (qualified)', () => {
-		// Schema with qualified relation names (as produced by defineSchema)
-		const qualifiedSchema: ResolvedSchema = {
-			tables: {
-				posts: {
-					id: { type: 'string', nullable: false },
-					authorId: { type: 'string', nullable: false },
-					title: { type: 'string', nullable: false },
-				},
-				authors: {
-					id: { type: 'string', nullable: false },
-					name: { type: 'string', nullable: false },
-				},
+		// Schema with qualified relation names (as produced by schema())
+		// ARCH-005: Updated to use createMockSchema
+		const qualifiedSchema = createMockSchema(
+			{
+				posts: [
+					{ name: 'id', type: 'string' },
+					{ name: 'authorId', type: 'string' },
+					{ name: 'title', type: 'string' },
+				],
+				authors: [
+					{ name: 'id', type: 'string' },
+					{ name: 'name', type: 'string' },
+				],
 			},
-			relations: {
+			{
 				'posts.author': {
-					kind: 'belongsTo',
+					type: 'belongsTo',
+					source: 'posts',
 					target: 'authors',
 					foreignKey: 'authorId',
 				},
 				'authors.posts': {
-					kind: 'hasMany',
+					type: 'hasMany',
+					source: 'authors',
 					target: 'posts',
 					foreignKey: 'authorId',
-					sourceKey: 'id',
 				},
 			},
-			hints: {},
-			conventions: {
-				fkPattern: '{singular}Id',
-				pluralize: true,
-				timestamps: [],
-				fkAutoIndex: true,
-			},
-			indexes: {},
-		};
+		);
 
 		let qualifiedProvider: CompletionProvider;
 
