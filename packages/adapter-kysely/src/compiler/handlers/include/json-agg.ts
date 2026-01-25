@@ -80,6 +80,10 @@ export function applyJsonAggIncludes(
 		// SELECT COALESCE(JSON_AGG(subquery), '[]') FROM (SELECT * FROM target WHERE ...) subquery
 		const fkCols = normalizeForeignKey(relation.foreignKey, 'id');
 
+		// Get target table definition for belongsTo correlation
+		const targetTableDef = model.getTable(relation.target);
+		const targetKeys = normalizePrimaryKey(targetTableDef?.primaryKey);
+
 		// Determine the JSON aggregation function based on dialect
 		// PostgreSQL: json_agg(to_jsonb(row))
 		// SQLite: json_group_array(json_object(...))
@@ -93,6 +97,14 @@ export function applyJsonAggIncludes(
 			orderBySql = `ORDER BY ${include.orderBy.map((o) => `"${o.field}" ${o.direction.toUpperCase()}`).join(', ')}`;
 		}
 
+		// Build WHERE correlation based on relation type:
+		// - belongsTo: source.foreignKey = target.primaryKey  (posts.authorId = authors.id)
+		// - hasMany/hasOne: target.foreignKey = source.primaryKey  (posts.authorId = authors.id from author's perspective)
+		const whereClause =
+			relation.type === 'belongsTo'
+				? sql`${sql.ref(`__t__.${targetKeys[0]}`)} = ${sql.ref(`${rootAlias}.${fkCols[0]}`)}`
+				: sql`${sql.ref(`__t__.${fkCols[0]}`)} = ${sql.ref(`${rootAlias}.${sourceKeys[0]}`)}`;
+
 		// Build the JSON aggregation expression
 		// For PostgreSQL: COALESCE((SELECT json_agg(to_jsonb(t)) FROM target t WHERE ... ORDER BY ...), '[]')
 		// For SQLite: COALESCE((SELECT json_group_array(json(target.*)) FROM target WHERE ... ORDER BY ...), '[]')
@@ -100,13 +112,13 @@ export function applyJsonAggIncludes(
 			? sql`COALESCE((
 				SELECT json_agg(to_jsonb(__t__) ${orderBySql ? sql.raw(orderBySql) : sql``})
 				FROM ${sql.table(targetTable)} AS __t__
-				WHERE ${sql.ref(`__t__.${fkCols[0]}`)} = ${sql.ref(`${rootAlias}.${sourceKeys[0]}`)}
+				WHERE ${whereClause}
 			), '[]'::json)`
 			: isSqlite
 				? sql`COALESCE((
 				SELECT json_group_array(json_object('id', __t__.id))
 				FROM ${sql.table(targetTable)} AS __t__
-				WHERE ${sql.ref(`__t__.${fkCols[0]}`)} = ${sql.ref(`${rootAlias}.${sourceKeys[0]}`)}
+				WHERE ${whereClause}
 				${orderBySql ? sql.raw(orderBySql) : sql``}
 			), '[]')`
 				: sql`'[]'`; // Fallback for unsupported dialects

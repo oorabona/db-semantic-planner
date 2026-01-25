@@ -663,3 +663,25 @@ query = addWhere(query, whereIntent, ...);
 **Example mapping (v2.0 → v2.1):**
 - `authors | with posts` → `authors | select *, posts.*`
 - `posts | with comments | where approved = true` → simplified (filtered includes need ORM API)
+
+### Include Strategy Design: Uniform Strategy, Schema-Aware Output (2026-01-25)
+
+**Pattern:** Use a single include strategy (json_agg) for all relation types, but shape the output according to relation cardinality.
+
+**Design Decision:**
+- **Strategy (HOW to fetch):** json_agg for ALL relations (hasOne, hasMany, belongsTo)
+- **Output (WHAT shape):** Array for to-many, unwrapped single object for to-one
+
+**Rationale:**
+- Uniform strategy simplifies planner logic (no special cases)
+- Schema-aware output provides ergonomic API (author object, not author array)
+- `| flat` modifier still available when users need JOIN (large data)
+
+**Implementation:**
+- `selectSmartStrategy()`: Returns 'json_agg' for all relation types
+- `PlanDecision.context.relationType`: Stores relation type for hydration
+- `hydrateJsonAggIncludes()`: Detects to-one and unwraps array to single object
+
+**Files:**
+- `packages/core/src/planner.ts`: selectSmartStrategy, decision context
+- `packages/core/src/dx/result-hydrator.ts`: to-one unwrapping logic

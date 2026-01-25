@@ -38,6 +38,27 @@
 | `TODO_DX.md` | core, adapter | DX improvements, SOLID fixes, type inference |
 | `docs/specs/SELF-REF-PSEUDO-COLUMNS-SPEC.md` | core, nql, adapter | Auto-generated pseudo-columns for hierarchies |
 
+## ✅ COMPLETED: STRAT-SIMPLIFY Include Strategy Simplification (2026-01-25)
+
+**Priority:** MEDIUM | **Effort:** S (~30 min) | **Breaking:** No
+**Scope:** core, adapter-kysely
+**Completed:** 2026-01-25
+
+Simplify include strategy: json_agg default for ALL relations (hasOne, hasMany, belongsTo).
+
+### Changes Made
+- [x] ✅ Remove hasOne/belongsTo → JOIN special case in `selectSmartStrategy`
+- [x] ✅ Fix belongsTo SQL correlation in json-agg.ts (`target.pk = source.fk`)
+- [x] ✅ Add to-one unwrapping in result-hydrator (array → single object)
+- [x] ✅ Update strategy-matrix.test.ts expectations
+
+### Design Decision
+- **to-one relations** (belongsTo/hasOne): JSON unwrapped to single object or null
+- **to-many relations** (hasMany): JSON stays as array
+- **`| flat` modifier** remains available to force JOIN when needed
+
+---
+
 ## ✅ COMPLETED: NQL-2.1 Grammar Simplification (2026-01-24)
 
 **Priority:** HIGH | **Effort:** L (~2h) | **Breaking:** Yes (`with` removed)

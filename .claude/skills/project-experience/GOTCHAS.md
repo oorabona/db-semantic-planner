@@ -1458,3 +1458,19 @@ default: v.optional(v.union([v.string(), v.number(), v.boolean()]));
 **Prevention:** When debugging discrepancies between unit and E2E tests, always check if a rebuild is needed. Add this to debugging checklist: "Did I run `pnpm build`?"
 
 **Location:** Monorepo-wide pattern
+
+---
+
+### belongsTo JSON-Agg Correlation Uses Different Direction (2026-01-25)
+
+**Issue:** When switching to json_agg for belongsTo relations, query failed with "column __t__.author_id does not exist".
+
+**Symptoms:** hasMany json_agg worked fine, but belongsTo produced invalid SQL referencing wrong column.
+
+**Cause:** The json-agg handler used a single correlation pattern for all relation types. hasMany and hasOne use `target.fk = source.pk` (e.g., posts.author_id = authors.id). But belongsTo is the INVERSE: `source.fk = target.pk` (e.g., posts.author_id = authors.id from the post's perspective).
+
+**Solution:** In json-agg.ts, check `relation.type === 'belongsTo'` and use `target.pk = source.fk` instead of `target.fk = source.pk`.
+
+**Prevention:** When implementing a handler for multiple relation types, explicitly consider the JOIN direction for each type. Create a decision matrix: hasMany (parent→children), hasOne (parent→child), belongsTo (child→parent).
+
+**Location:** `packages/adapter-kysely/src/compiler/handlers/include/json-agg.ts`

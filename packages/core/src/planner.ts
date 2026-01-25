@@ -49,6 +49,8 @@ export interface PlanDecision {
 		readonly target?: string;
 		/** Relation name if applicable */
 		readonly relation?: string;
+		/** Relation type (belongsTo, hasMany, hasOne, manyToMany) */
+		readonly relationType?: string;
 		/** Intent path (e.g., "where.exists.posts") */
 		readonly intentPath?: string;
 	};
@@ -947,6 +949,7 @@ function processInclude(
 			sourceTable,
 			target: relation.target,
 			relation: relation.name,
+			relationType: relation.type,
 			intentPath,
 		},
 		choice: includeStrategy,
@@ -1236,7 +1239,7 @@ function determineIncludeStrategy(
  *   - Else → 'join' (let DB optimize, user can override to 'separate' if needed)
  */
 function selectSmartStrategy(
-	relation: RelationIR,
+	_relation: RelationIR,
 	capabilities: DialectCapabilities | undefined,
 	isRecursive: boolean,
 ): ResolvedIncludeStrategy {
@@ -1249,17 +1252,13 @@ function selectSmartStrategy(
 		return 'separate';
 	}
 
-	// To-one relations: JOIN is always optimal (single row, no explosion)
-	if (relation.type === 'hasOne' || relation.type === 'belongsTo') {
-		return 'join';
-	}
-
-	// To-many relations (hasMany, belongsToMany): need smarter selection
-	// Priority: json_agg > lateral > join
+	// Default strategy for ALL relation types: json_agg
 	// Rationale:
 	// - json_agg: aggregates children into single JSON array, no row explosion
+	// - Works for both to-one (hasOne, belongsTo) and to-many (hasMany)
+	// - User can force JOIN via | flat modifier if data is too large for JSON
 	// - lateral: allows per-row subquery with LIMIT, good for "top N children"
-	// - join: fallback, simple but may cause row explosion
+	// - join: fallback when json_agg not supported
 
 	if (capabilities?.supportsJsonAgg) {
 		return 'json_agg';

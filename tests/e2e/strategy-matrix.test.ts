@@ -20,7 +20,6 @@ import {
 	defineSchema,
 	eq,
 	exists,
-	hasMany,
 	hasOne,
 	POSTGRESQL_CAPABILITIES,
 } from '@dbsp/core';
@@ -66,11 +65,11 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 	});
 
 	// =========================================================================
-	// Section A: To-One Relations (Always JOIN)
+	// Section A: To-One Relations (json_agg by default, like all relations)
 	// =========================================================================
-	describe('Section A: To-One Relations (Always JOIN)', () => {
-		describe('E2E-004-A1: belongsTo uses JOIN strategy', () => {
-			it('should auto-select JOIN for belongsTo relation', async () => {
+	describe('Section A: To-One Relations (json_agg by default)', () => {
+		describe('E2E-004-A1: belongsTo uses json_agg strategy', () => {
+			it('should auto-select json_agg for belongsTo relation', async () => {
 				const adapter = await getTestAdapter();
 				const orm = createOrm({
 					model: blogModel,
@@ -87,14 +86,13 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 				const dump = query.dump();
 
-				// Then: planner decides strategy: 'join'
+				// Then: planner decides strategy: 'json_agg' (same as all relations)
 				const decision = getIncludeStrategyDecision(dump.plan, 'author');
 				expect(decision).toBeDefined();
-				expect(decision?.choice).toBe('join');
+				expect(decision?.choice).toBe('json_agg');
 
-				// And: SQL contains LEFT JOIN
-				expect(dump.sql.toLowerCase()).toContain('left join');
-				expect(dump.sql.toLowerCase()).toContain('authors');
+				// And: SQL contains json_agg subquery pattern
+				expect(dump.sql.toLowerCase()).toContain('json_agg');
 			});
 
 			it('should return correct author object for each post', async () => {
@@ -112,7 +110,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 					.columns(['id', 'title'])
 					.execute()) as any[];
 
-				// All posts should have author object
+				// All posts should have author object (unwrapped from array for to-one)
 				expect(posts.length).toBeGreaterThan(0);
 				for (const post of posts) {
 					expect(post.author).toBeDefined();
@@ -121,8 +119,8 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 			});
 		});
 
-		describe('E2E-004-A2: hasOne uses JOIN strategy', () => {
-			it('should auto-select JOIN for hasOne relation', async () => {
+		describe('E2E-004-A2: hasOne uses json_agg strategy', () => {
+			it('should auto-select json_agg for hasOne relation', async () => {
 				// Create schema with hasOne relationship using TypedSchema API
 				const schemaWithProfile = {
 					tables: {
@@ -160,13 +158,13 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 				const dump = query.dump();
 
-				// Then: planner decides strategy: 'join' for hasOne
+				// Then: planner decides strategy: 'json_agg' (same as all relations)
 				const decision = getIncludeStrategyDecision(dump.plan, 'profile');
 				expect(decision).toBeDefined();
-				expect(decision?.choice).toBe('join');
+				expect(decision?.choice).toBe('json_agg');
 
-				// And: SQL contains LEFT JOIN
-				expect(dump.sql.toLowerCase()).toContain('left join');
+				// And: SQL contains json_agg
+				expect(dump.sql.toLowerCase()).toContain('json_agg');
 			});
 		});
 	});
@@ -282,7 +280,12 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 						},
 						{
 							relations: {
-								'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'user_id', includeStrategy: 'join' },
+								'users.posts': {
+									kind: 'hasMany',
+									target: 'posts',
+									foreignKey: 'user_id',
+									includeStrategy: 'join',
+								},
 							},
 						},
 					),
