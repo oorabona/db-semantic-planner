@@ -53,8 +53,7 @@ output.contains: variants
 # ─────────────────────────────────────────
 --- query: 6
 success: true
-sql.contains: from "ch6_pimdam"."categories"
-sql.contains: where "_categories"."active" = $1
+sql.equals: select "_categories".* from "ch6_pimdam"."categories" as "_categories" where "_categories"."active" = $1
 params.equals: [true]
 db.rows.equals: 10
 db.output.contains: Electronics
@@ -65,8 +64,7 @@ db.output.contains: Clothing
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.contains: from "ch6_pimdam"."products"
-sql.contains: where "_products"."deleted_at" is null
+sql.equals: select "_products".* from "ch6_pimdam"."products" as "_products" where "_products"."deleted_at" is null
 db.rows.equals: 13
 
 # ─────────────────────────────────────────
@@ -74,8 +72,7 @@ db.rows.equals: 13
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.contains: from "ch6_pimdam"."assets"
-sql.contains: where "_assets"."kind" = $1
+sql.equals: select "_assets".* from "ch6_pimdam"."assets" as "_assets" where "_assets"."kind" = $1
 db.rows.equals: 18
 
 # ─────────────────────────────────────────
@@ -83,8 +80,7 @@ db.rows.equals: 18
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.contains: from "ch6_pimdam"."product_images"
-sql.contains: where "_product_images"."status" = $1
+sql.equals: select "_product_images".* from "ch6_pimdam"."product_images" as "_product_images" where "_product_images"."status" = $1
 db.rows.equals: 21
 
 # ─────────────────────────────────────────
@@ -92,8 +88,7 @@ db.rows.equals: 21
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.contains: from "ch6_pimdam"."product_images"
-sql.contains: left join "ch6_pimdam"."products"
+sql.equals: select "_product_images".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch6_pimdam"."products" AS __t__ WHERE "__t__"."id" = "_product_images"."product_id"), '[]'::json) as "product_json" from "ch6_pimdam"."product_images" as "_product_images" where "_product_images"."locale" = $1
 db.rows.equals: 19
 
 # ─────────────────────────────────────────
@@ -101,8 +96,7 @@ db.rows.equals: 19
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.contains: from "ch6_pimdam"."product_images"
-sql.contains: left join "ch6_pimdam"."assets"
+sql.equals: select "_product_images".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch6_pimdam"."assets" AS __t__ WHERE "__t__"."id" = "_product_images"."asset_id"), '[]'::json) as "asset_json" from "ch6_pimdam"."product_images" as "_product_images"
 db.rows.equals: 25
 
 # ─────────────────────────────────────────
@@ -110,9 +104,7 @@ db.rows.equals: 25
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.contains: from "ch6_pimdam"."products"
-sql.contains: left join "ch6_pimdam"."categories"
-sql.contains: where
+sql.equals: select "_products".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch6_pimdam"."categories" AS __t__ WHERE "__t__"."id" = "_products"."category_id"), '[]'::json) as "category_json" from "ch6_pimdam"."products" as "_products" where (("_products"."active" = $1 and "_products"."deleted_at" is null) and "_products"."category_id" = $2)
 params.equals: [true, 7]
 db.rows.equals: 4
 
@@ -121,8 +113,7 @@ db.rows.equals: 4
 # ─────────────────────────────────────────
 --- query: 13
 success: true
-sql.contains: from "ch6_pimdam"."products"
-sql.contains: where "_products"."category_id" = $1
+sql.equals: select "_products".* from "ch6_pimdam"."products" as "_products" where "_products"."category_id" = $1
 params.equals: [6]
 db.rows.equals: 3
 
@@ -131,8 +122,7 @@ db.rows.equals: 3
 # ─────────────────────────────────────────
 --- query: 14
 success: true
-sql.contains: from "ch6_pimdam"."categories"
-sql.contains: where "_categories"."parent_id" is null
+sql.equals: select "_categories".* from "ch6_pimdam"."categories" as "_categories" where "_categories"."parent_id" is null
 db.rows.equals: 4
 
 # ─────────────────────────────────────────
@@ -140,9 +130,7 @@ db.rows.equals: 4
 # ─────────────────────────────────────────
 --- query: 15
 success: true
-sql.contains: from "ch6_pimdam"."categories"
-sql.contains: left join "ch6_pimdam"."categories" as "_parent"
-sql.contains: where "_categories"."parent_id" is not null
+sql.equals: select "_categories".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch6_pimdam"."categories" AS __t__ WHERE "__t__"."id" = "_categories"."parent_id"), '[]'::json) as "parent_json" from "ch6_pimdam"."categories" as "_categories" where "_categories"."parent_id" is not null
 db.rows.equals: 8
 
 # ─────────────────────────────────────────
@@ -150,9 +138,7 @@ db.rows.equals: 8
 # ─────────────────────────────────────────
 --- query: 16
 success: true
-sql.contains: from "ch6_pimdam"."categories"
-sql.contains: left join "ch6_pimdam"."categories" as "parent_1"
-sql.contains: where "parent_1"."name" = $1
+sql.equals: select "_categories".* from "ch6_pimdam"."categories" as "_categories" left join "ch6_pimdam"."categories" as "parent_1" on "_categories"."parent_id" = "parent_1"."id" where "parent_1"."name" = $1
 params.equals: ["Electronics"]
 db.rows.equals: 3
 db.output.contains: Phones
@@ -164,9 +150,7 @@ db.output.contains: Audio
 # ─────────────────────────────────────────
 --- query: 17
 success: true
-sql.contains: from "ch6_pimdam"."categories"
-sql.contains: left join "ch6_pimdam"."categories" as "parent_1"
-sql.contains: where "parent_1"."name" = $1
+sql.equals: select "_categories".* from "ch6_pimdam"."categories" as "_categories" left join "ch6_pimdam"."categories" as "parent_1" on "_categories"."parent_id" = "parent_1"."id" where "parent_1"."name" = $1
 params.equals: ["Phones"]
 db.rows.equals: 2
 db.output.contains: Smartphones
@@ -177,9 +161,7 @@ db.output.contains: Phone Accessories
 # ─────────────────────────────────────────
 --- query: 18
 success: true
-sql.contains: from "ch6_pimdam"."categories"
-sql.contains: left join "ch6_pimdam"."categories" as "parent_1"
-sql.contains: where "parent_1"."id" = $1
+sql.equals: select "_categories".* from "ch6_pimdam"."categories" as "_categories" left join "ch6_pimdam"."categories" as "parent_1" on "_categories"."parent_id" = "parent_1"."id" where "parent_1"."id" = $1
 params.equals: [1]
 db.rows.equals: 3
 
@@ -188,7 +170,7 @@ db.rows.equals: 3
 # ─────────────────────────────────────────
 --- query: 19
 success: true
-sql.contains: insert into "ch6_pimdam"."categories"
+sql.equals: insert into "ch6_pimdam"."categories" ("name", "slug", "active") values ($1, $2, $3)
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -196,8 +178,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 20
 success: true
-sql.contains: insert into "ch6_pimdam"."assets"
-sql.contains: ("filename", "sha256", "mime", "size_bytes", "storage_key", "kind") values
+sql.equals: insert into "ch6_pimdam"."assets" ("filename", "sha256", "mime", "size_bytes", "storage_key", "kind") values ($1, $2, $3, $4, $5, $6)
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -205,9 +186,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 21
 success: true
-sql.contains: update "ch6_pimdam"."products"
-sql.contains: set "active" = $1
-sql.contains: where "id" = $2
+sql.equals: update "ch6_pimdam"."products" set "active" = $1 where "id" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -216,9 +195,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 22
 success: true
-sql.contains: update "ch6_pimdam"."products"
-sql.contains: set "deleted_at" = $1
-sql.contains: where "sku" = $2
+sql.equals: update "ch6_pimdam"."products" set "deleted_at" = $1 where "sku" = $2
 db.rows.equals: 0
 
 # ─────────────────────────────────────────
@@ -226,9 +203,7 @@ db.rows.equals: 0
 # ─────────────────────────────────────────
 --- query: 23
 success: true
-sql.contains: update "ch6_pimdam"."product_images"
-sql.contains: set "status" = $1
-sql.contains: where "id" = $2
+sql.equals: update "ch6_pimdam"."product_images" set "status" = $1 where "id" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -237,8 +212,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 24
 success: true
-sql.contains: delete from "ch6_pimdam"."product_images"
-sql.contains: where "status" = $1
+sql.equals: delete from "ch6_pimdam"."product_images" where "status" = $1
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -246,6 +220,5 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 25
 success: true
-sql.contains: insert into "ch6_pimdam"."products"
-sql.contains: on conflict ("sku") do update
+sql.equals: insert into "ch6_pimdam"."products" ("title", "sku", "category_id", "active") values ($1, $2, $3, $4) on conflict ("sku") do update set "title" = $5, "sku" = $6, "category_id" = $7, "active" = $8
 db.rows.equals: 1

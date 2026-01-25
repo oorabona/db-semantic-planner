@@ -4,6 +4,7 @@
  */
 
 import type { RelationColumnIntent } from '@dbsp/core';
+import { findIncludeStrategyDecision } from '../../helpers.js';
 import type { ExpressionHandler } from '../../types.js';
 
 /**
@@ -12,6 +13,10 @@ import type { ExpressionHandler } from '../../types.js';
  *
  * This enables the simplified syntax: `products select name, categories.name as categoryName`
  * No explicit `include()` required - the JOIN is created automatically.
+ *
+ * STRAT-SIMPLIFY: Respects planner's include strategy decision.
+ * - If strategy is 'json_agg', skip flat column selection (data is in JSON column)
+ * - If strategy is 'join' or unspecified, create JOIN for flat columns
  *
  * @example
  * { kind: 'relationColumn', relation: 'category', column: 'name', as: 'categoryName' }
@@ -27,6 +32,21 @@ export const relationColumnHandler: ExpressionHandler<RelationColumnIntent> = (
 
 	// For multi-level paths like "category.parent", split into segments
 	const relationParts = relation.split('.');
+	const topLevelRelation = relationParts[0] ?? relation;
+
+	// STRAT-SIMPLIFY: Check planner's strategy decision BEFORE processing
+	// If json_agg strategy was chosen, skip flat column selection entirely
+	// The json_agg handler will add the JSON column later
+	const strategyDecision = findIncludeStrategyDecision(
+		ctx.plan,
+		ctx.plan.rootTable,
+		topLevelRelation,
+	);
+	if (strategyDecision?.choice === 'json_agg') {
+		// json_agg strategy: data will be in a JSON column, not flat columns
+		// Return query unchanged - the applyJsonAggIncludes handler adds the JSON column
+		return query;
+	}
 
 	// Check if relation is already joined (from include or previous relationColumn)
 	let joinInfo = ctx.state.joinedIncludeRelations.get(relation);
@@ -44,7 +64,7 @@ export const relationColumnHandler: ExpressionHandler<RelationColumnIntent> = (
 		}
 	}
 
-	// If not joined, auto-create the JOIN
+	// If not joined, auto-create the JOIN (only for 'join' strategy or unspecified)
 	if (!joinInfo) {
 		// Get the current root table from state
 		// Note: For multi-level, we need to traverse each segment

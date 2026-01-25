@@ -55,7 +55,7 @@ output.contains: orderItems
 # ─────────────────────────────────────────
 --- query: 6
 success: true
-sql.contains: from "ch5_ecommerce"."categories"
+sql.equals: select "_categories".* from "ch5_ecommerce"."categories" as "_categories"
 db.rows.equals: 20
 db.output.contains: Electronics
 db.output.contains: Clothing
@@ -66,9 +66,9 @@ db.output.contains: Books
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.contains: from "ch5_ecommerce"."products"
-sql.contains: where "_products"."active" = $1
-sql.contains: limit
+sql.equals: select "_products".* from "ch5_ecommerce"."products" as "_products" where "_products"."active" = $1 limit $2
+sql.equals: select "_products".* from "ch5_ecommerce"."products" as "_products" where "_products"."active" = $1 limit $2
+sql.equals: select "_products".* from "ch5_ecommerce"."products" as "_products" where "_products"."active" = $1 limit $2
 params.equals: [true, 5]
 db.rows.equals: 5
 db.output.contains: ProBook 15
@@ -79,7 +79,7 @@ db.output.contains: SmartPhone X
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.contains: from "ch5_ecommerce"."customers"
+sql.equals: select "_customers".* from "ch5_ecommerce"."customers" as "_customers"
 db.rows.equals: 5
 db.output.contains: Alice
 db.output.contains: Bob
@@ -89,7 +89,7 @@ db.output.contains: Bob
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.contains: from "ch5_ecommerce"."orders"
+sql.equals: select "_orders".* from "ch5_ecommerce"."orders" as "_orders"
 db.rows.equals: 7
 db.output.contains: ORD-2024-001
 db.output.contains: delivered
@@ -101,8 +101,8 @@ db.output.contains: shipped
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.contains: from "ch5_ecommerce"."categories"
-sql.contains: left join "ch5_ecommerce"."products"
+sql.equals: select "_categories".*, "_products".*, "_products"."id" as "products.id", "_products"."sku" as "products.sku", "_products"."name" as "products.name", "_products"."description" as "products.description", "_products"."price" as "products.price", "_products"."stock" as "products.stock", "_products"."category_id" as "products.category_id", "_products"."active" as "products.active", "_products"."created_at" as "products.created_at" from "ch5_ecommerce"."categories" as "_categories" left join "ch5_ecommerce"."products" as "_products" on "_categories"."id" = "_products"."category_id"
+sql.equals: select "_categories".*, "_products".*, "_products"."id" as "products.id", "_products"."sku" as "products.sku", "_products"."name" as "products.name", "_products"."description" as "products.description", "_products"."price" as "products.price", "_products"."stock" as "products.stock", "_products"."category_id" as "products.category_id", "_products"."active" as "products.active", "_products"."created_at" as "products.created_at" from "ch5_ecommerce"."categories" as "_categories" left join "ch5_ecommerce"."products" as "_products" on "_categories"."id" = "_products"."category_id"
 db.rows.equals: 24
 
 # ─────────────────────────────────────────
@@ -110,9 +110,9 @@ db.rows.equals: 24
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.contains: left join "ch5_ecommerce"."variants"
-sql.contains: on "_products"."id" = "_variants"."product_id"
-sql.contains: limit
+sql.equals: select "_products".*, "_variants".*, "_variants"."id" as "variants.id", "_variants"."product_id" as "variants.product_id", "_variants"."sku" as "variants.sku", "_variants"."name" as "variants.name", "_variants"."price_modifier" as "variants.price_modifier", "_variants"."stock" as "variants.stock" from "ch5_ecommerce"."products" as "_products" left join "ch5_ecommerce"."variants" as "_variants" on "_products"."id" = "_variants"."product_id" limit $1
+sql.equals: select "_products".*, "_variants".*, "_variants"."id" as "variants.id", "_variants"."product_id" as "variants.product_id", "_variants"."sku" as "variants.sku", "_variants"."name" as "variants.name", "_variants"."price_modifier" as "variants.price_modifier", "_variants"."stock" as "variants.stock" from "ch5_ecommerce"."products" as "_products" left join "ch5_ecommerce"."variants" as "_variants" on "_products"."id" = "_variants"."product_id" limit $1
+sql.equals: select "_products".*, "_variants".*, "_variants"."id" as "variants.id", "_variants"."product_id" as "variants.product_id", "_variants"."sku" as "variants.sku", "_variants"."name" as "variants.name", "_variants"."price_modifier" as "variants.price_modifier", "_variants"."stock" as "variants.stock" from "ch5_ecommerce"."products" as "_products" left join "ch5_ecommerce"."variants" as "_variants" on "_products"."id" = "_variants"."product_id" limit $1
 params.equals: [3]
 db.rows.equals: 3
 output.contains: variants.id
@@ -124,7 +124,7 @@ output.contains: variants.sku
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.contains: from "ch5_ecommerce"."customers"
+sql.equals: select "_customers".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch5_ecommerce"."orders" AS __t__ WHERE "__t__"."customer_id" = "_customers"."id"), '[]'::json) as "orders_json" from "ch5_ecommerce"."customers" as "_customers"
 db.rows.equals: 7
 
 # ─────────────────────────────────────────
@@ -133,8 +133,8 @@ db.rows.equals: 7
 # ─────────────────────────────────────────
 --- query: 13
 success: true
-sql.contains: group by "_orders"."status"
-sql.contains: sum
+sql.equals: select sum("_orders"."total") as "sum_result" from "ch5_ecommerce"."orders" as "_orders" group by "_orders"."status"
+sql.equals: select sum("_orders"."total") as "sum_result" from "ch5_ecommerce"."orders" as "_orders" group by "_orders"."status"
 db.rows.equals: 5
 
 # ─────────────────────────────────────────
@@ -143,8 +143,8 @@ db.rows.equals: 5
 # ─────────────────────────────────────────
 --- query: 14
 success: true
-sql.contains: group by "_orders"."customer_id"
-sql.contains: count
+sql.equals: select count(*) as "count_result" from "ch5_ecommerce"."orders" as "_orders" group by "_orders"."customer_id"
+sql.equals: select count(*) as "count_result" from "ch5_ecommerce"."orders" as "_orders" group by "_orders"."customer_id"
 db.rows.equals: 5
 
 # ─────────────────────────────────────────
@@ -153,7 +153,7 @@ db.rows.equals: 5
 # ─────────────────────────────────────────
 --- query: 15
 success: true
-sql.contains: avg
+sql.equals: select avg("_orders"."total") as "avg_result" from "ch5_ecommerce"."orders" as "_orders"
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -162,8 +162,8 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 16
 success: true
-sql.contains: group by "_products"."active"
-sql.contains: count
+sql.equals: select count(*) as "count_result" from "ch5_ecommerce"."products" as "_products" group by "_products"."active"
+sql.equals: select count(*) as "count_result" from "ch5_ecommerce"."products" as "_products" group by "_products"."active"
 db.rows.equals: 2
 
 # ─────────────────────────────────────────
@@ -172,9 +172,9 @@ db.rows.equals: 2
 # ─────────────────────────────────────────
 --- query: 17
 success: true
-sql.contains: RANK() OVER
-sql.contains: PARTITION BY
-sql.contains: ORDER BY
+sql.equals: select "_products".*, RANK() OVER (PARTITION BY "_products"."category_id" ORDER BY "_products"."price" DESC) as "price_rank" from "ch5_ecommerce"."products" as "_products"
+sql.equals: select "_products".*, RANK() OVER (PARTITION BY "_products"."category_id" ORDER BY "_products"."price" DESC) as "price_rank" from "ch5_ecommerce"."products" as "_products"
+sql.equals: select "_products".*, RANK() OVER (PARTITION BY "_products"."category_id" ORDER BY "_products"."price" DESC) as "price_rank" from "ch5_ecommerce"."products" as "_products"
 
 # ─────────────────────────────────────────
 # Query 18 orders | select orderNumber, total, sum(total) over (order by createdAt) as runningTotal
@@ -182,17 +182,17 @@ sql.contains: ORDER BY
 # ─────────────────────────────────────────
 --- query: 18
 success: true
-sql.contains: SUM
-sql.contains: OVER
-sql.contains: ORDER BY
+sql.equals: select "_orders"."order_number", "_orders"."total", SUM("_orders"."total") OVER (ORDER BY "_orders"."created_at" ASC) as "running_total" from "ch5_ecommerce"."orders" as "_orders"
+sql.equals: select "_orders"."order_number", "_orders"."total", SUM("_orders"."total") OVER (ORDER BY "_orders"."created_at" ASC) as "running_total" from "ch5_ecommerce"."orders" as "_orders"
+sql.equals: select "_orders"."order_number", "_orders"."total", SUM("_orders"."total") OVER (ORDER BY "_orders"."created_at" ASC) as "running_total" from "ch5_ecommerce"."orders" as "_orders"
 
 # ─────────────────────────────────────────
 # Query 19 insert into categories set name = 'Accessories', slug = 'accessories'
 # ─────────────────────────────────────────
 --- query: 19
 success: true
-sql.contains: insert into "ch5_ecommerce"."categories"
-sql.contains: ("name", "slug") values ($1, $2)
+sql.equals: insert into "ch5_ecommerce"."categories" ("name", "slug") values ($1, $2)
+sql.equals: insert into "ch5_ecommerce"."categories" ("name", "slug") values ($1, $2)
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -200,8 +200,8 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 20
 success: true
-sql.contains: insert into "ch5_ecommerce"."customers"
-sql.contains: ("first_name", "last_name", "email") values ($1, $2, $3)
+sql.equals: insert into "ch5_ecommerce"."customers" ("first_name", "last_name", "email") values ($1, $2, $3)
+sql.equals: insert into "ch5_ecommerce"."customers" ("first_name", "last_name", "email") values ($1, $2, $3)
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -210,9 +210,9 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 21
 success: true
-sql.contains: update "ch5_ecommerce"."products"
-sql.contains: set "price" = $1
-sql.contains: where "sku" = $2
+sql.equals: update "ch5_ecommerce"."products" set "price" = $1 where "sku" = $2
+sql.equals: update "ch5_ecommerce"."products" set "price" = $1 where "sku" = $2
+sql.equals: update "ch5_ecommerce"."products" set "price" = $1 where "sku" = $2
 db.rows.equals: 0
 
 # ─────────────────────────────────────────
@@ -220,9 +220,9 @@ db.rows.equals: 0
 # ─────────────────────────────────────────
 --- query: 22
 success: true
-sql.contains: update "ch5_ecommerce"."products"
-sql.contains: set "active" = $1
-sql.contains: where "id" = $2
+sql.equals: update "ch5_ecommerce"."products" set "active" = $1 where "id" = $2
+sql.equals: update "ch5_ecommerce"."products" set "active" = $1 where "id" = $2
+sql.equals: update "ch5_ecommerce"."products" set "active" = $1 where "id" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -231,8 +231,8 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 23
 success: true
-sql.contains: delete from "ch5_ecommerce"."orders"
-sql.contains: where "status" = $1
+sql.equals: delete from "ch5_ecommerce"."orders" where "status" = $1
+sql.equals: delete from "ch5_ecommerce"."orders" where "status" = $1
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -240,6 +240,6 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 24
 success: true
-sql.contains: insert into "ch5_ecommerce"."products"
-sql.contains: on conflict ("sku") do update
+sql.equals: insert into "ch5_ecommerce"."products" ("name", "sku", "price", "category_id", "active") values ($1, $2, $3, $4, $5) on conflict ("sku") do update set "name" = $6, "sku" = $7, "price" = $8, "category_id" = $9, "active" = $10
+sql.equals: insert into "ch5_ecommerce"."products" ("name", "sku", "price", "category_id", "active") values ($1, $2, $3, $4, $5) on conflict ("sku") do update set "name" = $6, "sku" = $7, "price" = $8, "category_id" = $9, "active" = $10
 db.rows.equals: 1

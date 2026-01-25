@@ -163,6 +163,16 @@ describe('nql-executor', () => {
 				expect(result.params).toContain(18);
 			});
 
+			it('uses json_agg for hasMany includes (STRAT-SIMPLIFY)', () => {
+				// users.posts is hasMany, should use json_agg by default
+				const result = compileNqlToSql('users | select *, posts.*', model);
+
+				expect(result.intentType).toBe('query');
+				// Should use json_agg, NOT left join for hasMany
+				expect(result.sql.toLowerCase()).toContain('json_agg');
+				expect(result.sql.toLowerCase()).not.toMatch(/left\s+join/);
+			});
+
 			// TODO: Requires aggregate expression handler in adapter-kysely
 			// NQL produces { kind: 'aggregate' } but adapter lacks handler
 			it.todo('compiles query with group by');

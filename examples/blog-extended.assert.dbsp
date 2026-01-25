@@ -54,7 +54,7 @@ output.contains: postTags
 # ─────────────────────────────────────────
 --- query: 6
 success: true
-sql.contains: from "ch3_blog_extended"."authors"
+sql.equals: select "_authors".* from "ch3_blog_extended"."authors" as "_authors"
 db.rows.equals: 3
 db.output.contains: Alice Johnson
 db.output.contains: Bob Smith
@@ -65,7 +65,7 @@ db.output.contains: Charlie Brown
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.contains: from "ch3_blog_extended"."categories"
+sql.equals: select "_categories".* from "ch3_blog_extended"."categories" as "_categories"
 db.rows.equals: 4
 db.output.contains: Technology
 db.output.contains: Web Development
@@ -77,7 +77,7 @@ db.output.contains: Lifestyle
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.contains: from "ch3_blog_extended"."tags"
+sql.equals: select "_tags".* from "ch3_blog_extended"."tags" as "_tags"
 db.rows.equals: 5
 db.output.contains: TypeScript
 db.output.contains: PostgreSQL
@@ -88,7 +88,7 @@ db.output.contains: Tutorial
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.contains: from "ch3_blog_extended"."posts"
+sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts"
 db.rows.equals: 8
 db.output.contains: TypeScript Fundamentals
 db.output.contains: PostgreSQL Deep Dive
@@ -98,8 +98,8 @@ db.output.contains: PostgreSQL Deep Dive
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.contains: from "ch3_blog_extended"."comments"
-sql.contains: limit
+sql.equals: select "_comments".* from "ch3_blog_extended"."comments" as "_comments" limit $1
+sql.equals: select "_comments".* from "ch3_blog_extended"."comments" as "_comments" limit $1
 params.equals: [10]
 db.rows.equals: 10
 db.output.contains: Great intro!
@@ -110,7 +110,7 @@ db.output.contains: David
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.contains: where "_categories"."parent_id" is null
+sql.equals: select "_categories".* from "ch3_blog_extended"."categories" as "_categories" where "_categories"."parent_id" is null
 db.rows.equals: 2
 db.output.contains: Technology
 db.output.contains: Lifestyle
@@ -120,19 +120,18 @@ db.output.contains: Lifestyle
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.contains: left join "ch3_blog_extended"."categories" as "_children"
-sql.contains: on "_categories"."id" = "_children"."parent_id"
+sql.equals: select "_categories".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch3_blog_extended"."categories" AS __t__ WHERE "__t__"."parent_id" = "_categories"."id"), '[]'::json) as "children_json" from "ch3_blog_extended"."categories" as "_categories"
+sql.equals: select "_categories".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch3_blog_extended"."categories" AS __t__ WHERE "__t__"."parent_id" = "_categories"."id"), '[]'::json) as "children_json" from "ch3_blog_extended"."categories" as "_categories"
 db.rows.equals: 5
-output.contains: children.id
-output.contains: children.name
+output.contains: children_json
 
 # ─────────────────────────────────────────
 # Query 13 categories | where parentId is null | select *, children.*
 # ─────────────────────────────────────────
 --- query: 13
 success: true
-sql.contains: left join
-sql.contains: where "_categories"."parent_id" is null
+sql.equals: select "_categories".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch3_blog_extended"."categories" AS __t__ WHERE "__t__"."parent_id" = "_categories"."id"), '[]'::json) as "children_json" from "ch3_blog_extended"."categories" as "_categories" where "_categories"."parent_id" is null
+sql.equals: select "_categories".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch3_blog_extended"."categories" AS __t__ WHERE "__t__"."parent_id" = "_categories"."id"), '[]'::json) as "children_json" from "ch3_blog_extended"."categories" as "_categories" where "_categories"."parent_id" is null
 db.rows.equals: 3
 # NOTE: Due to column collision (t0.* and t1.* have same names), parent columns
 # are overwritten by child columns. "Technology" (parent) becomes "Web Development" (child).
@@ -146,7 +145,7 @@ db.output.contains: children.name
 # ─────────────────────────────────────────
 --- query: 14
 success: true
-sql.contains: where "_posts"."featured" = $1
+sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts" where "_posts"."featured" = $1
 params.equals: [true]
 db.rows.equals: 2
 db.output.contains: TypeScript Fundamentals
@@ -157,7 +156,7 @@ db.output.contains: PostgreSQL Deep Dive
 # ─────────────────────────────────────────
 --- query: 15
 success: true
-sql.contains: where "_posts"."view_count" > $1
+sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts" where "_posts"."view_count" > $1
 params.equals: [1000]
 db.rows.equals: 2
 
@@ -166,9 +165,9 @@ db.rows.equals: 2
 # ─────────────────────────────────────────
 --- query: 16
 success: true
-sql.contains: where
-sql.contains: "_posts"."featured" = $1
-sql.contains: "_posts"."view_count" > $2
+sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts" where ("_posts"."featured" = $1 and "_posts"."view_count" > $2)
+sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts" where ("_posts"."featured" = $1 and "_posts"."view_count" > $2)
+sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts" where ("_posts"."featured" = $1 and "_posts"."view_count" > $2)
 params.equals: [true, 1500]
 db.rows.equals: 1
 db.output.contains: PostgreSQL Deep Dive
@@ -179,15 +178,15 @@ db.output.contains: PostgreSQL Deep Dive
 # ─────────────────────────────────────────
 --- query: 17
 success: true
-sql.contains: from "ch3_blog_extended"."authors"
-sql.contains: where
+sql.equals: select "_authors".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch3_blog_extended"."posts" AS __t__ WHERE "__t__"."author_id" = "_authors"."id"), '[]'::json) as "posts_json" from "ch3_blog_extended"."authors" as "_authors" where "_authors"."active" = $1
+sql.equals: select "_authors".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch3_blog_extended"."posts" AS __t__ WHERE "__t__"."author_id" = "_authors"."id"), '[]'::json) as "posts_json" from "ch3_blog_extended"."authors" as "_authors" where "_authors"."active" = $1
 
 # ─────────────────────────────────────────
 # Query 18 posts | order by viewCount desc
 # ─────────────────────────────────────────
 --- query: 18
 success: true
-sql.contains: order by "_posts"."view_count" desc
+sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts" order by "_posts"."view_count" desc
 db.rows.equals: 8
 
 # ─────────────────────────────────────────
@@ -195,8 +194,8 @@ db.rows.equals: 8
 # ─────────────────────────────────────────
 --- query: 19
 success: true
-sql.contains: order by "_posts"."view_count" desc
-sql.contains: limit
+sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts" order by "_posts"."view_count" desc limit $1
+sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts" order by "_posts"."view_count" desc limit $1
 params.equals: [3]
 db.rows.equals: 3
 db.output.contains: PostgreSQL Deep Dive
@@ -208,8 +207,8 @@ db.output.contains: Advanced TypeScript
 # ─────────────────────────────────────────
 --- query: 20
 success: true
-sql.contains: insert into "ch3_blog_extended"."categories"
-sql.contains: ("name") values ($1)
+sql.equals: insert into "ch3_blog_extended"."categories" ("name") values ($1)
+sql.equals: insert into "ch3_blog_extended"."categories" ("name") values ($1)
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -217,8 +216,8 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 21
 success: true
-sql.contains: insert into "ch3_blog_extended"."tags"
-sql.contains: ("name", "slug") values ($1, $2)
+sql.equals: insert into "ch3_blog_extended"."tags" ("name", "slug") values ($1, $2)
+sql.equals: insert into "ch3_blog_extended"."tags" ("name", "slug") values ($1, $2)
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -226,9 +225,9 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 22
 success: true
-sql.contains: update "ch3_blog_extended"."posts"
-sql.contains: set "featured" = $1
-sql.contains: where "id" = $2
+sql.equals: update "ch3_blog_extended"."posts" set "featured" = $1 where "id" = $2
+sql.equals: update "ch3_blog_extended"."posts" set "featured" = $1 where "id" = $2
+sql.equals: update "ch3_blog_extended"."posts" set "featured" = $1 where "id" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -236,9 +235,9 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 23
 success: true
-sql.contains: update "ch3_blog_extended"."posts"
-sql.contains: set "view_count" = $1
-sql.contains: where "id" = $2
+sql.equals: update "ch3_blog_extended"."posts" set "view_count" = $1 where "id" = $2
+sql.equals: update "ch3_blog_extended"."posts" set "view_count" = $1 where "id" = $2
+sql.equals: update "ch3_blog_extended"."posts" set "view_count" = $1 where "id" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -248,8 +247,8 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 24
 success: true
-sql.contains: delete from "ch3_blog_extended"."posts"
-sql.contains: where "published" = $1
+sql.equals: delete from "ch3_blog_extended"."posts" where "published" = $1
+sql.equals: delete from "ch3_blog_extended"."posts" where "published" = $1
 db.success: false
 db.output.contains: foreign key constraint
 
@@ -258,6 +257,6 @@ db.output.contains: foreign key constraint
 # ─────────────────────────────────────────
 --- query: 25
 success: true
-sql.contains: insert into "ch3_blog_extended"."authors"
-sql.contains: on conflict ("email") do update
+sql.equals: insert into "ch3_blog_extended"."authors" ("name", "email", "active") values ($1, $2, $3) on conflict ("email") do update set "name" = $4, "email" = $5, "active" = $6
+sql.equals: insert into "ch3_blog_extended"."authors" ("name", "email", "active") values ($1, $2, $3) on conflict ("email") do update set "name" = $4, "email" = $5, "active" = $6
 db.rows.equals: 1

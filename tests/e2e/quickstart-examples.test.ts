@@ -90,10 +90,11 @@ describe('QUICKSTART Examples - Compile Only', () => {
 			expect(result.stdout).toContain('[1]');
 		});
 
-		it('should compile query with relation join', () => {
+		it('should compile query with relation using json_agg (STRAT-SIMPLIFY)', () => {
 			const result = runBatchQuery(schema, 'users | select *, posts.*');
 			expect(result.success).toBe(true);
-			expect(result.stdout).toContain('left join');
+			// STRAT-SIMPLIFY: json_agg is default for ALL relations
+			expect(result.stdout).toContain('json_agg');
 			expect(result.stdout).toContain('"posts"');
 		});
 
@@ -129,10 +130,11 @@ describe('QUICKSTART Examples - Compile Only', () => {
 			expect(result.stdout).toContain('distinct');
 		});
 
-		it('should compile posts with author relation', () => {
+		it('should compile posts with author relation using json_agg (STRAT-SIMPLIFY)', () => {
 			const result = runBatchQuery(schema, 'posts | select *, author.*');
 			expect(result.success).toBe(true);
-			expect(result.stdout).toContain('left join');
+			// STRAT-SIMPLIFY: json_agg is default for ALL relations (including belongsTo)
+			expect(result.stdout).toContain('json_agg');
 			expect(result.stdout).toContain('"authors"');
 		});
 	});
@@ -159,13 +161,11 @@ describe('QUICKSTART Examples - Compile Only', () => {
 			expect(result.stdout).toContain('"stock"');
 		});
 
-		it('should compile products with variants', () => {
+		it('should compile products with variants using json_agg (STRAT-SIMPLIFY)', () => {
 			const result = runBatchQuery(schema, 'products | select *, variants.*');
 			expect(result.success).toBe(true);
-			// Either join or separate strategy
-			expect(
-				result.stdout.includes('join') || result.stdout.includes('SEPARATE'),
-			).toBe(true);
+			// STRAT-SIMPLIFY: json_agg is default for ALL relations (hasMany)
+			expect(result.stdout).toContain('json_agg');
 		});
 	});
 
