@@ -20,6 +20,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@dbsp/nql": "workspace:",
 		"@dbsp/types": "workspace:",
 		"valibot": "catalog:"
 	},

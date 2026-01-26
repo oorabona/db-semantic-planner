@@ -29,6 +29,8 @@ import type {
 	TableIR,
 } from '../model-ir.js';
 import { createPseudoColumnMetadata } from '../model-ir.js';
+import type { InferTables } from './schema-tables-types.js';
+import { createTablesProxy } from './table-ref-factory.js';
 
 // ============================================================================
 // Public Types
@@ -127,6 +129,33 @@ export interface Schema<T extends SchemaDefinition> {
 	readonly model: ModelIR;
 	/** Table names */
 	readonly tableNames: (keyof T)[];
+	/**
+	 * Type-safe table references for query building.
+	 *
+	 * Provides typed access to tables, columns, and relations:
+	 * - `schema.tables.users` returns a TableRef with typed columns
+	 * - `schema.tables.users.id` returns a ColumnRef
+	 * - `schema.tables.users.posts` returns a RelationRef (if relation exists)
+	 * - `schema.tables.users['*']` returns AllColumns for SELECT *
+	 *
+	 * @example
+	 * ```typescript
+	 * const { users, posts } = schema.tables;
+	 *
+	 * // Type-safe column access
+	 * users.id        // ColumnRef<'users', 'id', string>
+	 * users.name      // ColumnRef<'users', 'name', string>
+	 *
+	 * // Type-safe relation access
+	 * users.posts     // RelationRef<'posts', Post[], 'hasMany'>
+	 *
+	 * // Wildcard for SELECT *
+	 * users['*']      // AllColumns<'users', {...}>
+	 * ```
+	 *
+	 * @since DX-040
+	 */
+	readonly tables: InferTables<T>;
 	/**
 	 * Naming convention used when this schema was created.
 	 * Used for validation against adapter's naming convention in createOrm().
@@ -370,11 +399,19 @@ export function isRef(
 export function schema<T extends SchemaDefinition>(definition: T): Schema<T> {
 	// Validate and convert to ModelIR
 	const model = schemaToModelIR(definition);
+	const tableNames = Object.keys(definition) as (keyof T)[];
+
+	// Create type-safe tables proxy (DX-040)
+	const tables = createTablesProxy(
+		model,
+		tableNames as string[],
+	) as InferTables<T>;
 
 	return {
 		definition,
 		model,
-		tableNames: Object.keys(definition) as (keyof T)[],
+		tableNames,
+		tables,
 	};
 }
 

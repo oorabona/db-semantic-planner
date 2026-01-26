@@ -7,9 +7,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ModelIR, RelationIR, TableIR } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { LoadedSchema } from '../utils/schema-loader.js';
 import { type BatchState, processDotCommand } from './batch.js';
 import type { DbConnection, ExecutionResult } from './db-connection.js';
-import type { LoadedSchema } from '../utils/schema-loader.js';
 
 // ARCH-005: Minimal mock schema matching LoadedSchema interface
 const mockTables = new Map<string, TableIR>([

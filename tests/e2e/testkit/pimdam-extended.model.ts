@@ -71,7 +71,11 @@ const pimdamExtendedSchema = schema({
 		deletedAt: { type: 'timestamp', nullable: true },
 		// Ambiguity test: multiple user references with explicit naming
 		authorId: fk('users', { as: 'author', inverse: 'authoredProducts' }),
-		reviewerId: fk('users', { nullable: true, as: 'reviewer', inverse: 'reviewedProducts' }),
+		reviewerId: fk('users', {
+			nullable: true,
+			as: 'reviewer',
+			inverse: 'reviewedProducts',
+		}),
 	},
 
 	assets: {

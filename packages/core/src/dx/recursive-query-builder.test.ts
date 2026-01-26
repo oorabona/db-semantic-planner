@@ -6,7 +6,7 @@
  * SQL generation tests are in adapter-kysely/src/recursive-query-builder.test.ts
  */
 
-import { eq, fk, schema } from '@dbsp/core';
+import { eq, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import type { Adapter, AdapterCapabilities } from '../adapter.js';
 import { createRecursiveBuilder } from './recursive-query-builder.js';
@@ -22,8 +22,8 @@ const roleHierarchyModel = schema({
 	},
 	roleEdges: {
 		id: { type: 'uuid', primaryKey: true },
-		fromRoleId: fk('roles', { as: 'fromRole', inverse: 'outgoingEdges' }),
-		toRoleId: fk('roles', { as: 'toRole', inverse: 'incomingEdges' }),
+		fromRoleId: ref('roles', { as: 'fromRole', inverse: 'outgoingEdges' }),
+		toRoleId: ref('roles', { as: 'toRole', inverse: 'incomingEdges' }),
 	},
 	permissions: {
 		id: { type: 'uuid', primaryKey: true },
@@ -31,8 +31,11 @@ const roleHierarchyModel = schema({
 	},
 	rolePermissions: {
 		id: { type: 'uuid', primaryKey: true },
-		roleId: fk('roles', { as: 'role', inverse: 'rolePermissions' }),
-		permissionId: fk('permissions', { as: 'permission', inverse: 'rolePermissions' }),
+		roleId: ref('roles', { as: 'role', inverse: 'rolePermissions' }),
+		permissionId: ref('permissions', {
+			as: 'permission',
+			inverse: 'rolePermissions',
+		}),
 	},
 }).model;
 
@@ -44,7 +47,7 @@ const categoryModel = schema({
 	categories: {
 		id: { type: 'uuid', primaryKey: true },
 		name: 'string',
-		parentId: fk('categories', {
+		parentId: ref('categories', {
 			nullable: true,
 			as: 'parent',
 			inverse: 'children',

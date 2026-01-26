@@ -131,7 +131,10 @@ describe('QUICKSTART Examples - Compile Only', () => {
 		});
 
 		it('should compile aggregate: group by', () => {
-			const result = runBatchQuery(schema, 'posts | group by authorId | select count(*)');
+			const result = runBatchQuery(
+				schema,
+				'posts | group by authorId | select count(*)',
+			);
 			expect(result.success).toBe(true);
 			expect(result.stdout).toContain('group by');
 			expect(result.stdout).toContain('count(*)');

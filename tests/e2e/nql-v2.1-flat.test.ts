@@ -11,9 +11,9 @@
  * Uses PostgreSQL which supports all features including json_agg.
  */
 
-import type { PlanReport, QueryIntent } from '@dbsp/core';
-import { createOrm, plan, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import { compile } from '@dbsp/adapter-kysely';
+import type { PlanReport, QueryIntent } from '@dbsp/core';
+import { createOrm, POSTGRESQL_CAPABILITIES, plan } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
@@ -208,7 +208,10 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 		/**
 		 * Helper to extract filter-strategy decision from plan report.
 		 */
-		function getFilterStrategyDecision(report: PlanReport, relationName: string) {
+		function getFilterStrategyDecision(
+			report: PlanReport,
+			relationName: string,
+		) {
 			return report.decisions.find(
 				(d) =>
 					d.type === 'filter-strategy' && d.context?.relation === relationName,

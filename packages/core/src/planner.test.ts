@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { type QueryIntent } from './index.js';
 import { ref, schema } from './dx/schema.js';
+import type { QueryIntent } from './index.js';
 import type { RecursiveIntent } from './intent-ast.js';
 import {
 	AmbiguousPlanError,
@@ -41,7 +41,11 @@ const q2Schema = schema({
 	},
 	products: {
 		id: { type: 'integer', primaryKey: true },
-		categoryId: ref('categories', { as: 'category', inverse: 'products', nullable: true }),
+		categoryId: ref('categories', {
+			as: 'category',
+			inverse: 'products',
+			nullable: true,
+		}),
 		active: 'boolean',
 	},
 }).model;

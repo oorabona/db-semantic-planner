@@ -149,7 +149,10 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 				// Then: planner decides strategy: 'json_agg' (same as all relations)
 				// ARCH-005: relation name is now userId_profile
-				const decision = getIncludeStrategyDecision(dump.plan, 'userId_profile');
+				const decision = getIncludeStrategyDecision(
+					dump.plan,
+					'userId_profile',
+				);
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('json_agg');
 

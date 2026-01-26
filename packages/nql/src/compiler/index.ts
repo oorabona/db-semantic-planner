@@ -1,10 +1,47 @@
 /**
  * NQL Compiler
  *
- * Transforms NQL AST to IntentAST (from @dbsp/core)
+ * Transforms NQL AST to IntentAST.
+ *
+ * @since ARCH-007: IntentAST types centralized in @dbsp/types to avoid circular dependencies.
  */
 
-import type { SortDirection } from '@dbsp/types';
+// IntentAST types from @dbsp/types (canonical source)
+import type {
+	AggregateFunction,
+	ComparisonOperator,
+	DeleteIntent,
+	ExpressionIntent,
+	IncludeIntent,
+	InsertIntent,
+	MutationIntent,
+	NullOperator,
+	OrderByIntent,
+	PseudoColumnTraversal,
+	QueryIntent,
+	RangeOperator,
+	SelectAllIntent,
+	SelectFieldsIntent,
+	SelectIntent,
+	SelectWithExpressionsIntent,
+	SortDirection,
+	UpdateIntent,
+	UpsertConflictAction,
+	UpsertConflictTarget,
+	UpsertIntent,
+	WhereAndIntent,
+	WhereComparisonIntent,
+	WhereInIntent,
+	WhereIntent,
+	WhereLikeIntent,
+	WhereNotIntent,
+	WhereNullIntent,
+	WhereOrIntent,
+	WhereRangeIntent,
+	WhereRelationFilterIntent,
+	WindowFunction,
+	WindowOrderBy,
+} from '@dbsp/types';
 import type {
 	NqlBetweenExpression,
 	NqlBinaryExpression,
@@ -31,303 +68,42 @@ import type {
 	NqlWindowExpression,
 } from '../parser/ast.js';
 
-// IntentAST types - we define our own compatible types here
-// to avoid circular dependency with @dbsp/core
-export interface QueryIntent {
-	readonly type: 'select';
-	readonly from: string;
-	readonly select?: SelectIntent;
-	readonly where?: WhereIntent;
-	readonly include?: readonly IncludeIntent[];
-	readonly orderBy?: readonly OrderByIntent[];
-	readonly groupBy?: readonly string[];
-	readonly having?: WhereIntent;
-	readonly distinct?: boolean;
-	readonly limit?: number;
-	readonly offset?: number;
-}
-
-export interface InsertIntent {
-	readonly type: 'insert';
-	readonly table: string;
-	readonly values: readonly Record<string, unknown>[];
-	readonly returning?: readonly string[];
-}
-
-export interface UpdateIntent {
-	readonly type: 'update';
-	readonly table: string;
-	readonly set: Record<string, unknown>;
-	readonly where?: WhereIntent;
-	readonly allowAll?: boolean;
-	readonly returning?: readonly string[];
-}
-
-export interface DeleteIntent {
-	readonly type: 'delete';
-	readonly table: string;
-	readonly where?: WhereIntent;
-	readonly allowAll?: boolean;
-	readonly returning?: readonly string[];
-}
-
-export interface UpsertIntent {
-	readonly type: 'upsert';
-	readonly table: string;
-	readonly values: readonly Record<string, unknown>[];
-	readonly onConflict: UpsertConflictTarget;
-	readonly action: UpsertConflictAction;
-	readonly returning?: readonly string[];
-}
-
-export type UpsertConflictTarget =
-	| { readonly columns: readonly string[] }
-	| { readonly constraint: string };
-
-export type UpsertConflictAction =
-	| { readonly type: 'doNothing' }
-	| {
-			readonly type: 'doUpdate';
-			readonly set?: Record<string, unknown>;
-			readonly where?: WhereIntent;
-	  };
-
-export type SelectIntent =
-	| SelectAllIntent
-	| SelectFieldsIntent
-	| SelectWithExpressionsIntent;
-
-export interface SelectAllIntent {
-	readonly type: 'all';
-}
-
-export interface SelectFieldsIntent {
-	readonly type: 'fields';
-	readonly fields: readonly string[];
-}
-
-export interface SelectWithExpressionsIntent {
-	readonly type: 'expressions';
-	readonly columns: readonly ExpressionIntent[];
-}
-
-export type ExpressionIntent =
-	| { readonly kind: 'column'; readonly column: string; readonly as?: string }
-	| {
-			readonly kind: 'aggregate';
-			readonly function: AggregateFunction;
-			readonly field: string | '*';
-			readonly as?: string;
-			readonly distinct?: boolean;
-			/** Extra arguments for multi-arg aggregates like string_agg(field, separator) */
-			readonly extraArgs?: readonly unknown[];
-	  }
-	| {
-			readonly kind: 'columnAlias';
-			readonly column: string;
-			readonly alias: string;
-	  }
-	| {
-			readonly kind: 'relationColumn';
-			readonly relation: string;
-			readonly column: string;
-			readonly as: string;
-	  }
-	| {
-			readonly kind: 'arithmetic';
-			readonly left: string | number | unknown;
-			readonly operator: '+' | '-' | '*' | '/' | '%';
-			readonly right: string | number | unknown;
-			readonly as?: string;
-	  }
-	| {
-			readonly kind: 'function';
-			readonly name: string;
-			readonly args: readonly unknown[];
-			readonly as?: string;
-	  }
-	| {
-			readonly kind: 'subquery';
-			readonly query: QueryIntent;
-			readonly as?: string;
-	  }
-	| {
-			readonly kind: 'window';
-			readonly function: WindowFunction;
-			readonly field?: string;
-			readonly alias: string;
-			readonly over: {
-				readonly partitionBy?: readonly string[];
-				readonly orderBy?: readonly WindowOrderBy[];
-			};
-	  }
-	| {
-			/**
-			 * Pseudo-column access for self-referential traversal.
-			 * Example: parent.name, ascendant.title, child.department
-			 */
-			readonly kind: 'pseudoColumn';
-			/** Traversal type: single-hop (parent/child) or recursive (ascendant/descendant) */
-			readonly traversal: PseudoColumnTraversal;
-			/** The column to access on the target row(s) */
-			readonly targetColumn: string;
-			/** Optional bounded depth for ascendant[N] / descendant[N] syntax */
-			readonly depth?: number;
-			/** Custom role name for multi-FK tables (e.g., 'manager' in manager.ascendant) */
-			readonly role?: string;
-			readonly as?: string;
-	  };
-
-/**
- * Pseudo-column traversal types for self-referential relations.
- */
-export type PseudoColumnTraversal =
-	| 'parent' // Single-hop upward
-	| 'child' // Single-hop downward
-	| 'ascendant' // Recursive upward (CTE)
-	| 'descendant'; // Recursive downward (CTE)
-
-export type WindowFunction =
-	| 'row_number'
-	| 'rank'
-	| 'dense_rank'
-	| 'sum'
-	| 'avg'
-	| 'count'
-	| 'min'
-	| 'max'
-	| 'lag'
-	| 'lead';
-
-export interface WindowOrderBy {
-	readonly field: string;
-	readonly direction?: SortDirection;
-}
-
-export type AggregateFunction =
-	| 'count'
-	| 'sum'
-	| 'avg'
-	| 'min'
-	| 'max'
-	| 'array_agg'
-	| 'string_agg';
-
-export type WhereIntent =
-	| WhereComparisonIntent
-	| WhereInIntent
-	| WhereLikeIntent
-	| WhereNullIntent
-	| WhereRangeIntent
-	| WhereRelationFilterIntent
-	| WhereAndIntent
-	| WhereOrIntent
-	| WhereNotIntent;
-
-export interface WhereComparisonIntent {
-	readonly kind: 'comparison';
-	readonly field: string;
-	readonly operator: ComparisonOperator;
-	readonly value: unknown;
-}
-
-export interface WhereInIntent {
-	readonly kind: 'in';
-	readonly field: string;
-	readonly values: readonly unknown[];
-}
-
-export interface WhereLikeIntent {
-	readonly kind: 'like';
-	readonly field: string;
-	readonly pattern: string;
-	readonly caseInsensitive?: boolean;
-}
-
-export interface WhereNullIntent {
-	readonly kind: 'null';
-	readonly field: string;
-	readonly operator: NullOperator;
-}
-
-export type RangeOperator = 'overlaps' | 'contains' | 'containedBy' | 'between';
-
-/**
- * Range filter: field overlaps/contains/containedBy range value
- * or BETWEEN for lower/upper bounds
- */
-export interface WhereRangeIntent {
-	readonly kind: 'range';
-	readonly field: string;
-	readonly operator: RangeOperator;
-	/** Can be { lower, upper } for BETWEEN or string for PostgreSQL range literal */
-	readonly value: { lower: unknown; upper: unknown } | string;
-}
-
-/**
- * SPEC-002: Relation filter for cross-table queries
- * Produces correlated subqueries (EXISTS/NOT EXISTS/ALL)
- */
-export interface WhereRelationFilterIntent {
-	readonly kind: 'relationFilter';
-	/** Relation path (can be multi-hop, e.g., ['author', 'company']) */
-	readonly relation: readonly string[];
-	/** Filter conditions on related records */
-	readonly where: WhereIntent;
-	/**
-	 * Match mode:
-	 * - 'some': EXISTS - at least one related record matches
-	 * - 'every': ALL - every related record matches
-	 * - 'none': NOT EXISTS - no related record matches
-	 */
-	readonly mode: 'some' | 'every' | 'none';
-	/** Optional alias for complex conditions */
-	readonly alias?: string;
-}
-
-export interface WhereAndIntent {
-	readonly kind: 'and';
-	readonly conditions: readonly WhereIntent[];
-}
-
-export interface WhereOrIntent {
-	readonly kind: 'or';
-	readonly conditions: readonly WhereIntent[];
-}
-
-export interface WhereNotIntent {
-	readonly kind: 'not';
-	readonly condition: WhereIntent;
-}
-
-export type ComparisonOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte';
-export type NullOperator = 'isNull' | 'isNotNull';
-
-export interface IncludeIntent {
-	readonly relation: string;
-	readonly select?: SelectIntent;
-	readonly where?: WhereIntent;
-	readonly include?: readonly IncludeIntent[];
-	readonly via?: string;
-	readonly limit?: number;
-	readonly orderBy?: readonly OrderByIntent[];
-	/** NQL v2.1: Override include strategy ('auto' | 'join') */
-	readonly strategy?: 'auto' | 'join';
-}
-
-export interface OrderByIntent {
-	readonly field: string;
-	readonly direction: SortDirection;
-}
-
-export type { SortDirection } from '@dbsp/types';
-
-export type MutationIntent =
-	| InsertIntent
-	| UpdateIntent
-	| DeleteIntent
-	| UpsertIntent;
-
+// Re-export all types for backward compatibility
+export type {
+	AggregateFunction,
+	ComparisonOperator,
+	DeleteIntent,
+	ExpressionIntent,
+	IncludeIntent,
+	InsertIntent,
+	MutationIntent,
+	NullOperator,
+	OrderByIntent,
+	PseudoColumnTraversal,
+	QueryIntent,
+	RangeOperator,
+	SelectAllIntent,
+	SelectFieldsIntent,
+	SelectIntent,
+	SelectWithExpressionsIntent,
+	SortDirection,
+	UpdateIntent,
+	UpsertConflictAction,
+	UpsertConflictTarget,
+	UpsertIntent,
+	WhereAndIntent,
+	WhereComparisonIntent,
+	WhereInIntent,
+	WhereIntent,
+	WhereLikeIntent,
+	WhereNotIntent,
+	WhereNullIntent,
+	WhereOrIntent,
+	WhereRangeIntent,
+	WhereRelationFilterIntent,
+	WindowFunction,
+	WindowOrderBy,
+};
 export interface CompileResult {
 	readonly query?: QueryIntent;
 	readonly mutation?: MutationIntent;

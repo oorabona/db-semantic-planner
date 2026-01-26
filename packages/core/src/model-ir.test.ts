@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ref, schema } from './dx/schema.js';
 import type { RelationIR } from './model-ir.js';
 import {
 	createRecursiveMetadata,
@@ -6,7 +7,6 @@ import {
 	isRecursiveRelation,
 	isSelfReferential,
 } from './model-ir.js';
-import { ref, schema } from './dx/schema.js';
 
 describe('ModelIR', () => {
 	describe('schema()', () => {
@@ -87,7 +87,11 @@ describe('ModelIR', () => {
 				profiles: {
 					id: { type: 'integer', primaryKey: true },
 					bio: 'string',
-					userId: ref('users', { unique: true, as: 'user', inverse: 'profile' }),
+					userId: ref('users', {
+						unique: true,
+						as: 'user',
+						inverse: 'profile',
+					}),
 				},
 			}).model;
 
@@ -232,7 +236,11 @@ describe('ModelIR', () => {
 				posts: {
 					id: { type: 'integer', primaryKey: true },
 					title: 'string',
-					userId: ref('users', { as: 'author', inverse: 'posts', nullable: true }),
+					userId: ref('users', {
+						as: 'author',
+						inverse: 'posts',
+						nullable: true,
+					}),
 				},
 			}).model;
 
@@ -302,7 +310,10 @@ describe('ModelIR', () => {
 			it('should detect ambiguous relations (Q3 golden test scenario)', () => {
 				const result = helperSchema.isAmbiguous('users', 'posts');
 				expect(result.ambiguous).toBe(true);
-				expect([...result.options].sort()).toEqual(['createdPosts', 'editedPosts']);
+				expect([...result.options].sort()).toEqual([
+					'createdPosts',
+					'editedPosts',
+				]);
 			});
 
 			it('should return false for unambiguous relations', () => {
@@ -420,7 +431,10 @@ describe('ModelIR', () => {
 				},
 				products: {
 					id: { type: 'integer', primaryKey: true },
-					categoryId: ref('categories', { as: 'category', inverse: 'products' }),
+					categoryId: ref('categories', {
+						as: 'category',
+						inverse: 'products',
+					}),
 					active: 'boolean',
 				},
 			}).model;

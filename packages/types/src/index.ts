@@ -11,12 +11,13 @@
  * @module @dbsp/types
  */
 
+// IntentAST types (shared between core and nql)
+export * from './intent-ast.js';
 // Public adapter types
 export type {
 	CompiledQuery,
 	CompileOptionsBase,
 	DumpMeta,
 } from './public/adapter.js';
-
 // Shared utility types
 export type { RangeValue, SortDirection } from './shared/utils.js';
