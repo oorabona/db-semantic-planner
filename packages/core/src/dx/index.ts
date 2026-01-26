@@ -127,47 +127,9 @@ export {
 // Factory
 export {
 	createOrm,
-	type OrmOptionsWithTypedSchema,
-	// ARCH-005: Unified Schema API options
-	type OrmOptionsWithUnifiedSchema,
+	// ARCH-006: Simplified ORM options (preferred)
+	type SimplifiedOrmOptions,
 } from './orm.js';
-export type {
-	// Relation definitions
-	AnyRelationDef,
-	BelongsToDef,
-	BelongsToManyDef,
-	// Inference utilities
-	ColumnNames,
-	ColumnTypeToTS as PrismaColumnTypeToTS,
-	HasManyDef,
-	HasOneDef,
-	// Include types
-	IncludeSpec,
-	InferColumns,
-	InferColumnType,
-	InferQueryResult,
-	InferRelationNames,
-	InferRelationType,
-	InferTargetRowType,
-	IsToManyRelation,
-	NestedIncludeSpec,
-	RelationDef,
-	RelationKind,
-	RelationTarget,
-	ResolveIncludedRelations,
-	TableNames,
-	// Schema types
-	TypedSchema,
-	TypedTableDef,
-} from './prisma-types.js';
-// DX-110: Prisma-like Type Inference
-export {
-	// Relation helper functions for TypedSchema API
-	belongsTo,
-	belongsToMany,
-	hasMany,
-	hasOne,
-} from './prisma-types.js';
 // QueryExecutor - handles query execution via adapter
 export { type ExecutionContext, QueryExecutor } from './query-executor.js';
 // NOTE: RecursiveQueryBuilder is now internal-only (DX-022)
@@ -248,13 +210,6 @@ export {
 	SubqueryExpression,
 	subquery,
 } from './subquery-builder.js';
-// DX-110: Type-Safe Query Builder
-export type {
-	IncludeState,
-	MergeInclude,
-	TypedOrmInstance,
-	TypedQueryBuilder,
-} from './typed-query-builder.js';
 // Types
 export type {
 	AggregateOptions,
