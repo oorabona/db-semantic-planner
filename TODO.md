@@ -31,6 +31,7 @@
 | Type Rationalization (ARCH-004) | types, core, adapter, nql | ✅ Complete |
 | Unified Schema API (ARCH-005) | core, cli, adapter | ✅ Complete |
 | Simplified ORM Entry Point (ARCH-006) | core, adapter-kysely | ✅ Complete |
+| Type-Safe Query API (DX-040) | core, dx, types, nql | ✅ Complete |
 
 ## Scope-Specific Backlogs
 
@@ -44,12 +45,36 @@
 | `docs/specs/ARCH-006-simplified-orm-entry-point.md` | core, adapter-kysely | Simplified createOrm + getSchemaFromDb |
 | `docs/specs/DX-040-type-safe-query-api.md` | core, dx | Type-Safe Query API (Native + NQL dual approach) |
 
-## 📋 SPEC READY: DX-040 Type-Safe Query API
+## 📋 BACKLOG: Subquery Include Strategy (DX-041)
+
+**Priority:** MEDIUM | **Effort:** M (~4h) | **Breaking:** No
+**Scope:** core, planner, adapter
+
+Add `'subquery'` strategy for includes as alternative to `'separate'`:
+```sql
+-- Instead of 2 queries (separate strategy)
+SELECT * FROM posts WHERE userId IN (SELECT id FROM users WHERE active = true)
+```
+
+**Benefits over 'separate':**
+- Single round-trip (no 2-query overhead)
+- No row explosion (unlike JOIN)
+- Universal SQL support (unlike json_agg)
+
+**Tasks:**
+- [ ] Add `'subquery'` to IncludeStrategy type
+- [ ] Implement in planner strategy selection
+- [ ] Implement in Kysely adapter compiler
+- [ ] Re-enable skipped hydration tests in orm-execution.test.ts
+- [ ] Add `defaultIncludeStrategy` back to SimplifiedOrmOptions
+
+---
+
+## ✅ COMPLETED: DX-040 Type-Safe Query API (2026-01-26)
 
 **Priority:** HIGH | **Effort:** XL (~40h) | **Breaking:** No
 **Scope:** core, dx
 **Spec:** [DX-040](docs/specs/DX-040-type-safe-query-api.md)
-**Status:** Draft spec ready for review
 
 Native TypeScript API with full type inference alongside NQL for complex queries. Dual API approach where both produce same IntentIR.
 
@@ -60,17 +85,20 @@ Native TypeScript API with full type inference alongside NQL for complex queries
 - **Same return types**: Both APIs produce identical result types via IntentIR
 - **Dynamic schema**: Supports runtime introspected schemas
 - **Zero overhead**: All type inference at compile-time
+- **NQL Integration**: @dbsp/nql integrated directly into core (no injection needed)
+- **Type Rationalization**: IntentAST types centralized in @dbsp/types
 
-### Blocks (8 total)
+### Completed Blocks (9 total)
 
-- [ ] Block 1: TableRef/ColumnRef/RelationRef types (~4h)
-- [ ] Block 2: Query builder integration (~6h)
-- [ ] Block 3: Cross-table queries with relation paths (~6h)
-- [ ] Block 4: Expression builders (eq, gt, and, or) (~4h)
-- [ ] Block 5: Aggregation/groupBy with inference (~6h)
-- [ ] Block 6: NQL integration with shared IntentIR (~6h)
-- [ ] Block 7: Dynamic schema support (~4h)
-- [ ] Block 8: E2E tests and documentation (~4h)
+- [x] Block 1: TableRef/ColumnRef/RelationRef types
+- [x] Block 2: Query builder integration
+- [x] Block 3: Cross-table queries with relation paths
+- [x] Block 4: Expression builders (eq, gt, and, or)
+- [x] Block 5: Aggregation/groupBy with inference
+- [x] Block 6: NQL integration with shared IntentIR
+- [x] Block 7: Dynamic schema support
+- [x] Block 8: E2E tests and documentation
+- [x] Block 9: Type rationalization (@dbsp/types centralization)
 
 ---
 

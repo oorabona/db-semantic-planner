@@ -190,18 +190,13 @@ export {
 // Schema DSL (User-facing API)
 // ============================================================================
 
-// ARCH-005: Unified Schema API (NEW - preferred)
-// Exports both `ref` (canonical per spec) and `fk` (alias for compatibility)
+// ARCH-005: Unified Schema API
 export {
 	type ColumnDef,
 	isRef,
-	isRef as isFk, // Alias for compatibility
 	type RefDefinition,
-	type RefDefinition as FkDefinition, // Alias for compatibility
 	type RefOptions,
-	type RefOptions as FkOptions, // Alias for compatibility
 	ref,
-	ref as fk, // Alias for compatibility
 	type Schema,
 	type SchemaColumnType as NewSchemaColumnType,
 	type SchemaDefinition,
@@ -212,9 +207,8 @@ export {
 	type TableDef,
 } from './dx/schema.js';
 
-// DEPRECATED: defineSchema is legacy. Use schema() + ref() instead (ARCH-005).
+// Legacy Schema DSL (prefer schema() + ref() from ARCH-005)
 export {
-	// Main entry point for schema definition
 	defineSchema,
 	SchemaValidationError,
 } from './schema-dsl.js';

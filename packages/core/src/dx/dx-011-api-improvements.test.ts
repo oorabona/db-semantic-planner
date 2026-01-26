@@ -206,5 +206,4 @@ describe('DX-011: API Improvements', () => {
 			});
 		});
 	});
-
 });

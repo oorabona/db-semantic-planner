@@ -5,7 +5,7 @@
  * for column naming transformations.
  */
 
-import { fk, schema, type ModelIR } from '@dbsp/core';
+import { type ModelIR, ref, schema } from '@dbsp/core';
 import { CamelCasePlugin, Kysely, PostgresDialect } from 'kysely';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -32,7 +32,7 @@ function createTestSchema(): ModelIR {
 			id: { type: 'integer', primaryKey: true },
 			postTitle: 'string',
 			postContent: 'text',
-			authorId: fk('users', { as: 'author', inverse: 'posts' }),
+			authorId: ref('users', { as: 'author', inverse: 'posts' }),
 			publishedAt: 'timestamp',
 		},
 	}).model;
@@ -212,7 +212,7 @@ describe('generateDDL', () => {
 				},
 				posts: {
 					id: { type: 'integer', primaryKey: true },
-					userId: fk('users', { as: 'user', inverse: 'posts' }),
+					userId: ref('users', { as: 'user', inverse: 'posts' }),
 				},
 			}).model;
 

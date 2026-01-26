@@ -11,6 +11,7 @@ import type {
 	PlanDecision,
 	PlanReport,
 	QueryIntent,
+	RangeOperator,
 	RecursiveExistsOptions,
 	RelationIR,
 	SelectAggregateIntent,
@@ -425,15 +426,33 @@ function buildRangeLiteral(value: RangeValue): {
 /**
  * Compile a range WHERE condition to SQL.
  * PostgreSQL operators: && (overlaps), @> (contains), <@ (contained by)
+ * Standard SQL: BETWEEN for lower/upper bounds
  */
 export function compileRangeExpression(
 	column: string,
-	operator: 'overlaps' | 'contains' | 'containedBy',
+	operator: RangeOperator,
 	value: unknown,
 	coreCapabilities?: CoreDialectCapabilities,
 	dialect?: string,
 ): RawBuilder<SqlBool> {
-	// Validate range capability if capabilities are provided
+	// Handle BETWEEN operator (standard SQL)
+	if (operator === 'between') {
+		// Value must be { lower, upper } for BETWEEN
+		if (
+			typeof value === 'object' &&
+			value !== null &&
+			'lower' in value &&
+			'upper' in value
+		) {
+			const { lower, upper } = value as { lower: unknown; upper: unknown };
+			return sql`${sql.ref(column)} BETWEEN ${sql.val(lower)} AND ${sql.val(upper)}`;
+		}
+		throw new Error(
+			`BETWEEN operator requires value with 'lower' and 'upper' properties`,
+		);
+	}
+
+	// Validate range capability for PostgreSQL range operators
 	if (coreCapabilities && !coreCapabilities.supportsRangeTypes) {
 		throw new UnsupportedOperationError(
 			'range types',
@@ -2109,9 +2128,7 @@ function applyJoinFilters(
 			// Use relation name as alias for semantic readability
 			// When schema-scoped, prefix to avoid PostgreSQL ambiguity
 			state.aliasCounter++;
-			const joinAlias = schemaName
-				? `_${joinRel.relation}`
-				: joinRel.relation;
+			const joinAlias = schemaName ? `_${joinRel.relation}` : joinRel.relation;
 			state.tableAliases.set(`${relation.target}_join`, joinAlias);
 			state.joinedFilterRelations.set(joinRel.relation, {
 				alias: joinAlias,
@@ -2312,7 +2329,6 @@ function compileRelationFilter(
 	);
 }
 
-
 /**
  * SPEC-002: Compile single-hop relation filter (original logic).
  * Used for simple relation paths like 'posts' or ['posts'].
@@ -2443,9 +2459,7 @@ function compileMultiHopRelationFilter(
 	const relation = model.getRelation(`${sourceTable}.${firstRel}`);
 
 	if (!relation) {
-		throw new CompilationError(
-			`Unknown relation: ${sourceTable}.${firstRel}`,
-		);
+		throw new CompilationError(`Unknown relation: ${sourceTable}.${firstRel}`);
 	}
 
 	// Determine if first hop is to-one or to-many
@@ -2632,7 +2646,9 @@ function compileMultiHopWithExists(
 
 		// Generate alias for this relation
 		state.aliasCounter++;
-		const nextAlias = schemaName ? `_${relName}_${state.aliasCounter}` : relName;
+		const nextAlias = schemaName
+			? `_${relName}_${state.aliasCounter}`
+			: relName;
 		state.tableAliases.set(`${nextRelation.target}_${nextAlias}`, nextAlias);
 
 		// Get keys for JOIN

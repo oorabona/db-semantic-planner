@@ -3,7 +3,7 @@
  * Tests for the compile-only adapter that generates SQL without database execution.
  */
 
-import { createOrm, ExecutionError, eq, fk, schema } from '@dbsp/core';
+import { createOrm, ExecutionError, eq, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import {
 	CompileOnlyAdapter,
@@ -22,7 +22,7 @@ const testSchema = schema({
 		id: { type: 'integer', primaryKey: true },
 		title: 'string',
 		content: 'text',
-		authorId: fk('users', { as: 'author', inverse: 'posts' }),
+		authorId: ref('users', { as: 'author', inverse: 'posts' }),
 	},
 });
 

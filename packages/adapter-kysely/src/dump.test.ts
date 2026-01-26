@@ -1,4 +1,4 @@
-import { fk, plan, schema, type QueryIntent } from '@dbsp/core';
+import { plan, type QueryIntent, ref, schema } from '@dbsp/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { describe, expect, it } from 'vitest';
@@ -34,7 +34,7 @@ const basicSchema = schema({
 		id: { type: 'integer', primaryKey: true },
 		title: 'string',
 		content: 'string',
-		userId: fk('users', { as: 'author', inverse: 'posts' }),
+		userId: ref('users', { as: 'author', inverse: 'posts' }),
 		published: 'boolean',
 	},
 }).model;
@@ -421,7 +421,7 @@ describe('Dump API', () => {
 			categories: {
 				id: { type: 'integer', primaryKey: true },
 				name: 'string',
-				parentId: fk('categories', {
+				parentId: ref('categories', {
 					nullable: true,
 					roles: { parent: 'parent', children: 'children' },
 				}),

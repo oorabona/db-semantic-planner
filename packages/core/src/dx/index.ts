@@ -1,10 +1,9 @@
 /**
  * @dbsp/core/dx
- * Developer Experience enhancements - strict mode, disambiguation, compat helpers.
+ * Developer Experience enhancements - strict mode, disambiguation, type-safe queries.
  */
 
-// Schema DSL (User-facing API)
-// DEPRECATED: defineSchema is legacy. Use schema() + ref() instead (ARCH-005).
+// Legacy Schema DSL (prefer schema() + ref() from ARCH-005)
 export { defineSchema, SchemaValidationError } from '../schema-dsl.js';
 // Errors
 export {
@@ -40,6 +39,8 @@ export {
 	distinct,
 	// Comparison
 	eq,
+	// Relation quantifiers (DX-040 Block 7)
+	every,
 	// Relation
 	exists,
 	gt,
@@ -58,6 +59,7 @@ export {
 	lt,
 	lte,
 	neq,
+	none,
 	not,
 	notExists,
 	or,
@@ -72,6 +74,7 @@ export {
 	// Relation column (select from joined table)
 	relationColumn,
 	rowNumber,
+	some,
 	WindowBuilder,
 	wAvg,
 	wCount,
@@ -118,6 +121,13 @@ export {
 	// DX-026: Upsert support
 	UpsertBuilder,
 } from './mutation-builders.js';
+// NQL Template Literal API (DX-040 Block 8)
+export {
+	createNqlTag,
+	type NqlBuilder,
+	type NqlCompilerFn,
+	type NqlTag,
+} from './nql.js';
 // Object Filter Syntax (DX-012)
 export {
 	type FilterOperators,
@@ -151,8 +161,7 @@ export {
 	ResultHydrator,
 } from './result-hydrator.js';
 
-// ARCH-005: Unified Schema API (NEW - preferred)
-// Exports both `ref` (canonical per spec) and `fk` (alias for compatibility)
+// ARCH-005: Unified Schema API
 export {
 	type ColumnDef,
 	// Type inference helpers (ARCH-006)
@@ -164,14 +173,10 @@ export {
 	type InferredRangeValue,
 	type InferSchemaDB,
 	isRef,
-	isRef as isFk, // Alias for compatibility
 	type JsonValue,
 	type RefDefinition,
-	type RefDefinition as FkDefinition, // Alias for compatibility
 	type RefOptions,
-	type RefOptions as FkOptions, // Alias for compatibility
 	ref,
-	ref as fk, // Alias for compatibility
 	type Schema,
 	type SchemaColumnType,
 	type SchemaDefinition,
@@ -221,6 +226,36 @@ export {
 	SubqueryExpression,
 	subquery,
 } from './subquery-builder.js';
+// DX-040: Type-safe table reference types
+export {
+	// Symbols for metadata access
+	BRAND,
+	// Symbol key types
+	type BrandKey,
+	COLUMN_META,
+	type ColumnMetaKey,
+	RELATION_META,
+	type RelationMetaKey,
+	TABLE_META,
+	type TableMetaKey,
+} from './symbols.js';
+export {
+	// Types
+	type AliasedColumn,
+	type AllColumns,
+	type ColumnRef,
+	type InferColumnTypes,
+	type InferTableRow,
+	// Type guards
+	isAliasedColumn,
+	isAllColumns,
+	isColumnRef,
+	isRelationRef,
+	isTableRef,
+	type RelationRef,
+	type RelationType,
+	type TableRef,
+} from './table-ref.js';
 // Types
 export type {
 	AggregateOptions,

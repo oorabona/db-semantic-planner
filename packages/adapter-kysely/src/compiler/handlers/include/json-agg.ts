@@ -3,7 +3,12 @@
  * Handler for 'json_agg' include strategy - JSON aggregation for includes.
  */
 
-import type { IncludeIntent, ModelIR, PlanReport, WhereIntent } from '@dbsp/core';
+import type {
+	IncludeIntent,
+	ModelIR,
+	PlanReport,
+	WhereIntent,
+} from '@dbsp/core';
 import type { RawBuilder, SelectQueryBuilder } from 'kysely';
 import { sql } from 'kysely';
 import {

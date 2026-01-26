@@ -1,4 +1,4 @@
-import { createOrm, eq, fk, schema } from '@dbsp/core';
+import { createOrm, eq, ref, schema } from '@dbsp/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -13,7 +13,7 @@ const testSchema = schema({
 	},
 	orders: {
 		id: { type: 'integer', primaryKey: true },
-		userId: fk('users', { as: 'user', inverse: 'orders' }),
+		userId: ref('users', { as: 'user', inverse: 'orders' }),
 		total: 'integer',
 	},
 });

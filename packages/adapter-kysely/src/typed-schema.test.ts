@@ -122,10 +122,7 @@ describe('DX-012 Block 2: Typed Schema Generics (ARCH-006)', () => {
 		it('should generate correct SQL for filters', () => {
 			const orm = createOrm({ schema: testSchema, adapter });
 
-			const dump = orm
-				.select('users')
-				.where(eq('active', true))
-				.dump();
+			const dump = orm.select('users').where(eq('active', true)).dump();
 
 			expect(dump.sql).toContain('active');
 		});

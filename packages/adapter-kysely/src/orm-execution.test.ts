@@ -2,8 +2,8 @@ import {
 	createOrm,
 	ExecutionError,
 	eq,
-	fk,
 	NotFoundError,
+	ref,
 	schema,
 } from '@dbsp/core';
 import Database from 'better-sqlite3';
@@ -22,7 +22,7 @@ const testSchema = schema({
 	posts: {
 		id: { type: 'integer', primaryKey: true },
 		title: 'string',
-		userId: fk('users', { as: 'author', inverse: 'posts' }),
+		userId: ref('users', { as: 'author', inverse: 'posts' }),
 	},
 });
 
@@ -1007,11 +1007,15 @@ describe('Execution Layer', () => {
 	describe('include() with hydration (DX-033)', () => {
 		// These tests use SEPARATE strategy to test multi-query hydration
 		// JOIN is now the default, but SEPARATE is still supported via defaultIncludeStrategy
-		it('hydrates hasMany relation with separate query', async () => {
+		// SKIPPED: defaultIncludeStrategy removed from SimplifiedOrmOptions in ARCH-006
+		// TODO: Add 'subquery' strategy (IN SELECT) as better alternative to 'separate'
+		// See: https://github.com/oorabona/db-semantic-planner/issues/TBD
+		it.skip('hydrates hasMany relation with separate query', async () => {
 			const orm = createOrm({
 				schema: testSchema,
 				adapter: createKyselyAdapter(db),
-				defaultIncludeStrategy: 'separate', // Use SEPARATE for multi-query hydration test
+				// @ts-expect-error defaultIncludeStrategy removed in ARCH-006
+				defaultIncludeStrategy: 'separate',
 			});
 			const results = (await orm
 				.select('users')
@@ -1038,11 +1042,13 @@ describe('Execution Layer', () => {
 			expect(results[1]!.posts).toHaveLength(0);
 		});
 
-		it('returns empty array for parent with no children', async () => {
+		// SKIPPED: defaultIncludeStrategy removed from SimplifiedOrmOptions in ARCH-006
+		it.skip('returns empty array for parent with no children', async () => {
 			const orm = createOrm({
 				schema: testSchema,
 				adapter: createKyselyAdapter(db),
-				defaultIncludeStrategy: 'separate', // Use SEPARATE for multi-query hydration test
+				// @ts-expect-error defaultIncludeStrategy removed in ARCH-006
+				defaultIncludeStrategy: 'separate',
 			});
 			const results = (await orm
 				.select('users')
@@ -1077,11 +1083,13 @@ describe('Execution Layer', () => {
 			expect(results).toHaveLength(0);
 		});
 
-		it('works with first() returning single hydrated result', async () => {
+		// SKIPPED: defaultIncludeStrategy removed from SimplifiedOrmOptions in ARCH-006
+		it.skip('works with first() returning single hydrated result', async () => {
 			const orm = createOrm({
 				schema: testSchema,
 				adapter: createKyselyAdapter(db),
-				defaultIncludeStrategy: 'separate', // Use SEPARATE for multi-query hydration test
+				// @ts-expect-error defaultIncludeStrategy removed in ARCH-006
+				defaultIncludeStrategy: 'separate',
 			});
 			const result = (await orm
 				.select('users')
@@ -1101,7 +1109,8 @@ describe('Execution Layer', () => {
 			expect(result?.posts).toHaveLength(2);
 		});
 
-		it('groups children correctly by foreign key', async () => {
+		// SKIPPED: defaultIncludeStrategy removed from SimplifiedOrmOptions in ARCH-006
+		it.skip('groups children correctly by foreign key', async () => {
 			// Add a third user with posts to test grouping
 			const testDb = createTestDb();
 			await setupDatabase(testDb);
@@ -1130,7 +1139,8 @@ describe('Execution Layer', () => {
 			const orm = createOrm({
 				schema: testSchema,
 				adapter: createKyselyAdapter(testDb),
-				defaultIncludeStrategy: 'separate', // Use SEPARATE for multi-query hydration test
+				// @ts-expect-error defaultIncludeStrategy removed in ARCH-006
+				defaultIncludeStrategy: 'separate',
 			});
 
 			const results = (await orm

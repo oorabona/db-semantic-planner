@@ -8,10 +8,10 @@
 import * as v from 'valibot';
 import { ModelIRImpl } from '../model-impl.js';
 import {
-	createPseudoColumnMetadata,
 	type Cardinality,
 	type ColumnIR,
 	type ColumnType,
+	createPseudoColumnMetadata,
 	type FilterStrategy,
 	type ForeignKeyIR,
 	type IncludeStrategy,
@@ -426,7 +426,9 @@ function buildTableIRFromDefinition(
 		primaryKey,
 		foreignKeys: Object.freeze(foreignKeys),
 		indexes: Object.freeze(indexes),
-		...(pseudoColumns.length > 0 && { pseudoColumns: Object.freeze(pseudoColumns) }),
+		...(pseudoColumns.length > 0 && {
+			pseudoColumns: Object.freeze(pseudoColumns),
+		}),
 	});
 }
 
@@ -545,7 +547,6 @@ export function buildModelFromSchema(schema: GeneratedSchema): ModelIR {
 
 	return new ModelIRImpl(tables, relations);
 }
-
 
 /**
  * Build ModelIR directly from ResolvedSchema.
@@ -1021,8 +1022,9 @@ function convertRelation(
 				(result as { targetKey?: string }).targetKey = rel.targetKey;
 			}
 			if (rel.includeStrategy !== undefined) {
-				(result as { includeStrategy?: GeneratedIncludeStrategy }).includeStrategy =
-					rel.includeStrategy;
+				(
+					result as { includeStrategy?: GeneratedIncludeStrategy }
+				).includeStrategy = rel.includeStrategy;
 			}
 			return result;
 		}
@@ -1036,8 +1038,9 @@ function convertRelation(
 				(result as { sourceKey?: string }).sourceKey = rel.sourceKey;
 			}
 			if (rel.includeStrategy !== undefined) {
-				(result as { includeStrategy?: GeneratedIncludeStrategy }).includeStrategy =
-					rel.includeStrategy;
+				(
+					result as { includeStrategy?: GeneratedIncludeStrategy }
+				).includeStrategy = rel.includeStrategy;
 			}
 			return result;
 		}
@@ -1050,8 +1053,9 @@ function convertRelation(
 				targetFk: rel.targetFk,
 			};
 			if (rel.includeStrategy !== undefined) {
-				(result as { includeStrategy?: GeneratedIncludeStrategy }).includeStrategy =
-					rel.includeStrategy;
+				(
+					result as { includeStrategy?: GeneratedIncludeStrategy }
+				).includeStrategy = rel.includeStrategy;
 			}
 			return result;
 		}

@@ -4,7 +4,7 @@
  * Tests for generateSchemaFile() which generates TypeScript schema from ModelIR.
  */
 
-import { fk, schema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import {
 	generateSchemaFile,
@@ -37,7 +37,7 @@ describe('generateSchemaFile', () => {
 				},
 				posts: {
 					id: { type: 'uuid', primaryKey: true },
-					authorId: fk('users'),
+					authorId: ref('users'),
 				},
 			}).model;
 
@@ -214,7 +214,7 @@ describe('generateSchemaFile', () => {
 				},
 				posts: {
 					id: { type: 'uuid', primaryKey: true },
-					author_id: fk('users'),
+					author_id: ref('users'),
 				},
 			}).model;
 
@@ -234,8 +234,8 @@ describe('generateSchemaFile', () => {
 				},
 				posts: {
 					id: { type: 'uuid', primaryKey: true },
-					// Use fk() - the code generator will output ref()
-					author_email: fk('users'),
+					// Use ref() - the code generator will output ref()
+					author_email: ref('users'),
 				},
 			}).model;
 
@@ -253,7 +253,7 @@ describe('generateSchemaFile', () => {
 				},
 				posts: {
 					id: { type: 'uuid', primaryKey: true },
-					authorId: fk('users', { nullable: true }),
+					authorId: ref('users', { nullable: true }),
 				},
 			}).model;
 
@@ -268,7 +268,7 @@ describe('generateSchemaFile', () => {
 				categories: {
 					id: { type: 'uuid', primaryKey: true },
 					name: 'string',
-					parentId: fk('categories', {
+					parentId: ref('categories', {
 						nullable: true,
 						roles: { parent: 'parent', children: 'children' },
 					}),

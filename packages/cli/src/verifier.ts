@@ -176,8 +176,14 @@ function typesCompatible(schemaType: string, dbType: string): boolean {
  * - Schema from schema() (new API)
  * - Raw SchemaDefinition
  */
+import type { LoadedSchema } from './utils/schema-loader.js';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type VerifySchemaInput = ResolvedSchema | Schema<any> | SchemaDefinition;
+type VerifySchemaInput =
+	| ResolvedSchema
+	| Schema<any>
+	| SchemaDefinition
+	| LoadedSchema;
 
 /**
  * Extract tables from various schema input types.

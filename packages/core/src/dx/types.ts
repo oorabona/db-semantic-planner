@@ -14,6 +14,7 @@ import type {
 	UpdateBuilder,
 	UpsertBuilder,
 } from './mutation-builders.js';
+import type { NqlCompilerFn, NqlTag } from './nql.js';
 import type { WhereFilter } from './object-filter.js';
 import type { GeneratedSchema, InferDBFromSchema } from './schema-bridge.js';
 
@@ -299,6 +300,27 @@ interface OrmOptionsBase<DB = unknown> {
 	 * - supportsRecursiveCTE: Enables WITH RECURSIVE for tree traversal
 	 */
 	readonly dialectCapabilities?: DialectCapabilities;
+	/**
+	 * NQL compiler function for template literal queries (DX-040).
+	 *
+	 * When provided, enables the `orm.nql` template tag for writing
+	 * queries in Natural Query Language syntax.
+	 *
+	 * @example
+	 * ```typescript
+	 * import { compile } from '@dbsp/nql';
+	 *
+	 * const orm = createOrm({
+	 *   schema,
+	 *   adapter,
+	 *   nqlCompiler: compile,
+	 * });
+	 *
+	 * // Now you can use NQL:
+	 * const users = await orm.nql<{ name: string }>`users | select name`.all();
+	 * ```
+	 */
+	readonly nqlCompiler?: NqlCompilerFn;
 }
 
 /**
@@ -1462,6 +1484,51 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 
 	// =========================================================================
 	// Raw SQL Execution (DX-027)
+	// =========================================================================
+
+	// =========================================================================
+	// NQL Template Literal API (DX-040 Block 8)
+	// =========================================================================
+
+	/**
+	 * NQL template tag for writing queries in Natural Query Language.
+	 *
+	 * NQL provides a pipe-based syntax that compiles to the same IntentIR
+	 * as the native query builder, ensuring both APIs produce identical
+	 * execution plans and SQL.
+	 *
+	 * ⚠️  Type parameter `T` is required - NQL uses explicit type annotation
+	 * since the query string cannot provide TypeScript inference.
+	 *
+	 * @typeParam T - The expected result row type
+	 * @returns An NqlBuilder with .all(), .first(), .toIntentIR(), .plan(), .dump()
+	 *
+	 * @example
+	 * ```typescript
+	 * // Basic select with explicit type
+	 * type UserRow = { id: string; name: string };
+	 * const users = await orm.nql<UserRow>`users | select id, name`.all();
+	 *
+	 * // Filtering and ordering
+	 * const activeUsers = await orm.nql<UserRow>`
+	 *   users
+	 *   | filter active = true
+	 *   | sort name asc
+	 *   | take 10
+	 * `.all();
+	 *
+	 * // Debug: inspect the IntentIR
+	 * const intent = orm.nql<UserRow>`users | select name`.toIntentIR();
+	 * console.log(JSON.stringify(intent, null, 2));
+	 *
+	 * // Debug: get full dump (plan + SQL + params)
+	 * const { plan, sql, params } = orm.nql<UserRow>`users | select name`.dump();
+	 * ```
+	 */
+	readonly nql: NqlTag;
+
+	// =========================================================================
+	// Raw SQL Escape Hatch
 	// =========================================================================
 
 	/**

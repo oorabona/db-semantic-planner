@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { ref, schema } from './schema.js';
 import { and, eq, inArray } from './filters.js';
 import { createOrm } from './orm.js';
+import { ref, schema } from './schema.js';
 
 /**
  * Schema for testing API shortcuts.
