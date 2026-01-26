@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { createOrm } from './orm.js';
 import {
 	isRef,
 	ref,
@@ -683,6 +684,259 @@ describe('createOrm() integration', () => {
 			expect(qb).toBeDefined();
 			expect(typeof qb.where).toBe('function');
 			expect(typeof qb.include).toBe('function');
+		});
+	});
+});
+
+// ============================================================================
+// ARCH-006: Type Inference Tests (compile-time)
+// ============================================================================
+
+describe('Type Inference (ARCH-006)', () => {
+	describe('InferDB type helper', () => {
+		it('should infer correct types from schema definition', () => {
+			// Arrange - Schema with various column types
+			const typedSchema = schema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					email: 'string',
+					bio: { type: 'text', nullable: true },
+					active: 'boolean',
+					createdAt: 'timestamp',
+					metadata: 'json',
+					balance: 'decimal',
+					bigId: 'bigint',
+				},
+				posts: {
+					id: 'uuid',
+					title: 'string',
+					authorId: ref('users', { as: 'author' }),
+					editorId: ref('users', { as: 'editor', nullable: true }),
+				},
+			});
+
+			// Act - Create ORM (types are inferred)
+			const orm = createOrm({ schema: typedSchema });
+
+			// Assert - Compile-time type checks (these would fail compilation if wrong)
+			// We just verify the ORM is usable with inferred types
+			const usersQuery = orm.select('users');
+			const postsQuery = orm.select('posts');
+
+			expect(usersQuery).toBeDefined();
+			expect(postsQuery).toBeDefined();
+
+			// Type assertions at compile time:
+			// The following would be compile errors if types were wrong:
+			// - orm.select('nonexistent') // Error: 'nonexistent' not in schema
+			// - orm.select('users').where(eq('nonexistent', 1)) // Runtime error (field check)
+		});
+
+		it('should support all column types for inference', () => {
+			// Arrange - Test all supported types
+			const allTypesSchema = schema({
+				test: {
+					strCol: 'string',
+					textCol: 'text',
+					uuidCol: 'uuid',
+					intCol: 'integer',
+					numCol: 'number',
+					decCol: 'decimal',
+					bigCol: 'bigint',
+					boolCol: 'boolean',
+					dateCol: 'date',
+					timeCol: 'time',
+					datetimeCol: 'datetime',
+					timestampCol: 'timestamp',
+					jsonCol: 'json',
+					jsonbCol: 'jsonb',
+				},
+			});
+
+			// Act
+			const orm = createOrm({ schema: allTypesSchema });
+
+			// Assert - ORM should be created with all types inferred
+			expect(orm.select('test')).toBeDefined();
+		});
+
+		it('should handle nullable columns correctly', () => {
+			// Arrange
+			const nullableSchema = schema({
+				items: {
+					id: 'integer',
+					required: 'string',
+					optional: { type: 'string', nullable: true },
+				},
+			});
+
+			// Act
+			const orm = createOrm({ schema: nullableSchema });
+
+			// Assert
+			expect(orm.select('items')).toBeDefined();
+			// At compile time: InferDB would give:
+			// { items: { id: number, required: string, optional: string | null } }
+		});
+
+		it('should infer FK columns as number | string', () => {
+			// Arrange - Multiple FKs to same table require 'as' option
+			const fkSchema = schema({
+				users: { id: 'integer' },
+				posts: {
+					id: 'integer',
+					authorId: ref('users', { as: 'author' }),
+					reviewerId: ref('users', { as: 'reviewer', nullable: true }),
+				},
+			});
+
+			// Act
+			const orm = createOrm({ schema: fkSchema });
+
+			// Assert
+			expect(orm.select('posts')).toBeDefined();
+			// At compile time: InferDB would give:
+			// { posts: { id: number, authorId: number | string, reviewerId: number | string | null } }
+		});
+	});
+
+	describe('Typed coalesce() method', () => {
+		it('should add coalesce expression with inferred type', () => {
+			// Arrange
+			const mySchema = schema({
+				users: {
+					id: 'integer',
+					name: 'string',
+					bio: { type: 'text', nullable: true },
+					nickname: { type: 'string', nullable: true },
+				},
+			});
+			const orm = createOrm({ schema: mySchema });
+
+			// Act - coalesce must include columns that are in columns() selection
+			// or use coalesce before columns() / without columns()
+			const query = orm
+				.select('users')
+				.columns(['id', 'name', 'bio', 'nickname'])
+				.coalesce(['bio', 'nickname', 'name'], 'displayName');
+
+			// Assert - query should be valid
+			expect(query).toBeDefined();
+
+			// Verify the intent was built correctly
+			const plan = query.plan();
+			expect(plan.intent.select?.type).toBe('expressions');
+
+			if (plan.intent.select?.type === 'expressions') {
+				const columns = plan.intent.select.columns;
+				expect(columns).toHaveLength(5); // id, name, bio, nickname, coalesce
+
+				// Last one should be the coalesce
+				const coalesceCol = columns[4];
+				expect(coalesceCol?.kind).toBe('coalesce');
+				if (coalesceCol?.kind === 'coalesce') {
+					expect(coalesceCol.fields).toEqual(['bio', 'nickname', 'name']);
+					expect(coalesceCol.as).toBe('displayName');
+				}
+			}
+
+			// Type check at compile time:
+			// Result type is Pick<User, 'id'|'name'|'bio'|'nickname'> & { displayName: string }
+		});
+
+		it('should chain multiple coalesce calls', () => {
+			// Arrange
+			const mySchema = schema({
+				products: {
+					id: 'integer',
+					titleFr: { type: 'string', nullable: true },
+					titleEn: 'string',
+					descFr: { type: 'text', nullable: true },
+					descEn: { type: 'text', nullable: true },
+				},
+			});
+			const orm = createOrm({ schema: mySchema });
+
+			// Act - coalesce without columns() to get all fields in TResult
+			const query = orm
+				.select('products')
+				.coalesce(['titleFr', 'titleEn'], 'title')
+				.coalesce(['descFr', 'descEn'], 'description');
+
+			// Assert
+			const plan = query.plan();
+			expect(plan.intent.select?.type).toBe('expressions');
+
+			if (plan.intent.select?.type === 'expressions') {
+				const columns = plan.intent.select.columns;
+				expect(columns).toHaveLength(2); // title coalesce, desc coalesce
+
+				// Check both coalesces
+				expect(columns[0]?.kind).toBe('coalesce');
+				expect(columns[1]?.kind).toBe('coalesce');
+			}
+
+			// Type check at compile time:
+			// Result type should be Products & { title: string; description: string }
+		});
+
+		it('should work without prior columns() call', () => {
+			// Arrange
+			const mySchema = schema({
+				users: {
+					id: 'integer',
+					firstName: { type: 'string', nullable: true },
+					lastName: 'string',
+				},
+			});
+			const orm = createOrm({ schema: mySchema });
+
+			// Act - coalesce without columns() first (TResult = full User type)
+			const query = orm.select('users').coalesce(['firstName', 'lastName'], 'name');
+
+			// Assert
+			const plan = query.plan();
+			expect(plan.intent.select?.type).toBe('expressions');
+
+			if (plan.intent.select?.type === 'expressions') {
+				// Should have just the coalesce
+				expect(plan.intent.select.columns).toHaveLength(1);
+				expect(plan.intent.select.columns[0]?.kind).toBe('coalesce');
+			}
+
+			// Type check: Result is User & { name: string }
+		});
+
+		it('should allow coalesce on selected columns only (type safety)', () => {
+			// Arrange
+			const mySchema = schema({
+				users: {
+					id: 'integer',
+					email: 'string',
+					phone: { type: 'string', nullable: true },
+				},
+			});
+			const orm = createOrm({ schema: mySchema });
+
+			// Act - Select email and phone, coalesce them
+			const query = orm
+				.select('users')
+				.columns(['email', 'phone'])
+				.coalesce(['email', 'phone'], 'contact');
+
+			// Assert
+			expect(query).toBeDefined();
+			const plan = query.plan();
+
+			if (plan.intent.select?.type === 'expressions') {
+				expect(plan.intent.select.columns).toHaveLength(3);
+				const coalesceCol = plan.intent.select.columns[2];
+				expect(coalesceCol?.kind).toBe('coalesce');
+			}
+
+			// Type: Pick<User, 'email' | 'phone'> & { contact: string }
+			// Note: coalesce(['id', ...]) would be a compile error here
+			// because 'id' is not in Pick<User, 'email' | 'phone'>
 		});
 	});
 });

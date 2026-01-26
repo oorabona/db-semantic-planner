@@ -153,14 +153,23 @@ export {
 // Exports both `ref` (canonical per spec) and `fk` (alias for compatibility)
 export {
 	type ColumnDef,
+	// Type inference helpers (ARCH-006)
+	type InferColumn,
+	type InferColumnType,
+	type InferDB,
+	type InferRefColumn,
+	type InferRow,
+	type InferredRangeValue,
+	type InferSchemaDB,
 	isRef,
 	isRef as isFk, // Alias for compatibility
-	ref,
-	ref as fk, // Alias for compatibility
+	type JsonValue,
 	type RefDefinition,
 	type RefDefinition as FkDefinition, // Alias for compatibility
 	type RefOptions,
 	type RefOptions as FkOptions, // Alias for compatibility
+	ref,
+	ref as fk, // Alias for compatibility
 	type Schema,
 	type SchemaColumnType,
 	type SchemaDefinition,

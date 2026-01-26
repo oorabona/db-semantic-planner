@@ -129,6 +129,142 @@ export interface Schema<T extends SchemaDefinition> {
 }
 
 // ============================================================================
+// Type Inference Helpers
+// ============================================================================
+
+/**
+ * JSON-compatible value type for json/jsonb columns.
+ */
+export type JsonValue =
+	| string
+	| number
+	| boolean
+	| null
+	| JsonValue[]
+	| { [key: string]: JsonValue };
+
+/**
+ * Range value type for PostgreSQL range types.
+ */
+export interface InferredRangeValue<T> {
+	readonly start: T | null;
+	readonly end: T | null;
+	readonly startInclusive?: boolean;
+	readonly endInclusive?: boolean;
+}
+
+/**
+ * Maps a ColumnType string to its TypeScript type.
+ */
+export type InferColumnType<T extends SchemaColumnType> =
+	// String types
+	T extends 'string' | 'text' | 'uuid'
+		? string
+		: // Numeric types
+			T extends 'number' | 'integer' | 'decimal'
+			? number
+			: // BigInt
+				T extends 'bigint'
+				? bigint
+				: // Boolean
+					T extends 'boolean'
+					? boolean
+					: // Date/time types
+						T extends 'date' | 'time' | 'datetime' | 'timestamp'
+						? Date
+						: // JSON types
+							T extends 'json' | 'jsonb'
+							? JsonValue
+							: // PostgreSQL range types
+								T extends 'daterange'
+								? InferredRangeValue<Date>
+								: T extends 'tsrange' | 'tstzrange'
+									? InferredRangeValue<Date>
+									: T extends 'int4range' | 'int8range'
+										? InferredRangeValue<number>
+										: T extends 'numrange'
+											? InferredRangeValue<number>
+											: // Fallback
+												unknown;
+
+/**
+ * Extracts the type string from a ColumnDef (handles short and long forms).
+ */
+type ExtractColumnType<C extends ColumnDef> = C extends SchemaColumnType
+	? C
+	: C extends { type: infer T extends SchemaColumnType }
+		? T
+		: never;
+
+/**
+ * Checks if a ColumnDef is nullable.
+ */
+type IsNullable<C extends ColumnDef> = C extends { nullable: true }
+	? true
+	: false;
+
+/**
+ * Infers the TypeScript type for a single column definition.
+ * Handles both short form ('string') and long form ({ type: 'string', nullable: true }).
+ */
+export type InferColumn<C extends ColumnDef> =
+	IsNullable<C> extends true
+		? InferColumnType<ExtractColumnType<C>> | null
+		: InferColumnType<ExtractColumnType<C>>;
+
+/**
+ * Infers the FK column type from a RefDefinition.
+ * FK columns are typically number (auto-increment) or string (uuid).
+ * Since we can't know the target PK type at compile time without circular refs,
+ * we use a union of common PK types.
+ */
+export type InferRefColumn<R extends RefDefinition> = R extends {
+	options: { nullable: true };
+}
+	? number | string | null
+	: number | string;
+
+/**
+ * Infers the row type for a single table definition.
+ * Maps each column to its TypeScript type.
+ */
+export type InferRow<T extends TableDef> = {
+	[K in keyof T]: T[K] extends RefDefinition
+		? InferRefColumn<T[K]>
+		: T[K] extends ColumnDef
+			? InferColumn<T[K]>
+			: unknown;
+};
+
+/**
+ * Infers the complete database type from a schema definition.
+ * Maps each table name to its row type.
+ *
+ * @example
+ * ```typescript
+ * const mySchema = schema({
+ *   users: { id: 'integer', email: 'string', bio: { type: 'text', nullable: true } },
+ *   posts: { id: 'integer', title: 'string', authorId: ref('users') },
+ * });
+ *
+ * type DB = InferDB<typeof mySchema.definition>;
+ * // DB = {
+ * //   users: { id: number; email: string; bio: string | null };
+ * //   posts: { id: number; title: string; authorId: number | string };
+ * // }
+ * ```
+ */
+export type InferDB<S extends SchemaDefinition> = {
+	[TableName in keyof S]: InferRow<S[TableName]>;
+};
+
+/**
+ * Helper type to extract the inferred DB type from a Schema instance.
+ */
+export type InferSchemaDB<S extends Schema<SchemaDefinition>> =
+	S extends Schema<infer T> ? InferDB<T> : never;
+
+// ============================================================================
 // Public API
 // ============================================================================
 
