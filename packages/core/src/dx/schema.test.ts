@@ -5,8 +5,9 @@
  * Structure: AAA (Arrange-Act-Assert) for unit tests.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { createOrm } from './orm.js';
+import type { InferDB, InferredRangeValue, JsonValue } from './schema.js';
 import {
 	isRef,
 	ref,
@@ -715,21 +716,31 @@ describe('Type Inference (ARCH-006)', () => {
 				},
 			});
 
-			// Act - Create ORM (types are inferred)
+			// Compile-time type inference check using InferDB
+			type DB = InferDB<typeof typedSchema.definition>;
+
+			// Assert compile-time types for users table
+			expectTypeOf<DB['users']['id']>().toEqualTypeOf<number>();
+			expectTypeOf<DB['users']['email']>().toEqualTypeOf<string>();
+			expectTypeOf<DB['users']['bio']>().toEqualTypeOf<string | null>();
+			expectTypeOf<DB['users']['active']>().toEqualTypeOf<boolean>();
+			expectTypeOf<DB['users']['createdAt']>().toEqualTypeOf<Date>();
+			expectTypeOf<DB['users']['metadata']>().toEqualTypeOf<JsonValue>();
+			expectTypeOf<DB['users']['balance']>().toEqualTypeOf<number>();
+			expectTypeOf<DB['users']['bigId']>().toEqualTypeOf<bigint>();
+
+			// Assert compile-time types for posts table (including FK)
+			expectTypeOf<DB['posts']['id']>().toEqualTypeOf<string>(); // uuid → string
+			expectTypeOf<DB['posts']['title']>().toEqualTypeOf<string>();
+			expectTypeOf<DB['posts']['authorId']>().toEqualTypeOf<number | string>();
+			expectTypeOf<DB['posts']['editorId']>().toEqualTypeOf<
+				number | string | null
+			>();
+
+			// Runtime assertion
 			const orm = createOrm({ schema: typedSchema });
-
-			// Assert - Compile-time type checks (these would fail compilation if wrong)
-			// We just verify the ORM is usable with inferred types
-			const usersQuery = orm.select('users');
-			const postsQuery = orm.select('posts');
-
-			expect(usersQuery).toBeDefined();
-			expect(postsQuery).toBeDefined();
-
-			// Type assertions at compile time:
-			// The following would be compile errors if types were wrong:
-			// - orm.select('nonexistent') // Error: 'nonexistent' not in schema
-			// - orm.select('users').where(eq('nonexistent', 1)) // Runtime error (field check)
+			expect(orm.select('users')).toBeDefined();
+			expect(orm.select('posts')).toBeDefined();
 		});
 
 		it('should support all column types for inference', () => {
@@ -750,13 +761,59 @@ describe('Type Inference (ARCH-006)', () => {
 					timestampCol: 'timestamp',
 					jsonCol: 'json',
 					jsonbCol: 'jsonb',
+					// PostgreSQL range types
+					dateRangeCol: 'daterange',
+					tsRangeCol: 'tsrange',
+					int4RangeCol: 'int4range',
+					numRangeCol: 'numrange',
 				},
 			});
 
-			// Act
-			const orm = createOrm({ schema: allTypesSchema });
+			// Compile-time type checks for all column types
+			type TestRow = InferDB<typeof allTypesSchema.definition>['test'];
 
-			// Assert - ORM should be created with all types inferred
+			// String types → string
+			expectTypeOf<TestRow['strCol']>().toEqualTypeOf<string>();
+			expectTypeOf<TestRow['textCol']>().toEqualTypeOf<string>();
+			expectTypeOf<TestRow['uuidCol']>().toEqualTypeOf<string>();
+
+			// Numeric types → number
+			expectTypeOf<TestRow['intCol']>().toEqualTypeOf<number>();
+			expectTypeOf<TestRow['numCol']>().toEqualTypeOf<number>();
+			expectTypeOf<TestRow['decCol']>().toEqualTypeOf<number>();
+
+			// BigInt → bigint
+			expectTypeOf<TestRow['bigCol']>().toEqualTypeOf<bigint>();
+
+			// Boolean → boolean
+			expectTypeOf<TestRow['boolCol']>().toEqualTypeOf<boolean>();
+
+			// Date/time types → Date
+			expectTypeOf<TestRow['dateCol']>().toEqualTypeOf<Date>();
+			expectTypeOf<TestRow['timeCol']>().toEqualTypeOf<Date>();
+			expectTypeOf<TestRow['datetimeCol']>().toEqualTypeOf<Date>();
+			expectTypeOf<TestRow['timestampCol']>().toEqualTypeOf<Date>();
+
+			// JSON types → JsonValue
+			expectTypeOf<TestRow['jsonCol']>().toEqualTypeOf<JsonValue>();
+			expectTypeOf<TestRow['jsonbCol']>().toEqualTypeOf<JsonValue>();
+
+			// PostgreSQL range types → InferredRangeValue<T>
+			expectTypeOf<TestRow['dateRangeCol']>().toEqualTypeOf<
+				InferredRangeValue<Date>
+			>();
+			expectTypeOf<TestRow['tsRangeCol']>().toEqualTypeOf<
+				InferredRangeValue<Date>
+			>();
+			expectTypeOf<TestRow['int4RangeCol']>().toEqualTypeOf<
+				InferredRangeValue<number>
+			>();
+			expectTypeOf<TestRow['numRangeCol']>().toEqualTypeOf<
+				InferredRangeValue<number>
+			>();
+
+			// Runtime assertion
+			const orm = createOrm({ schema: allTypesSchema });
 			expect(orm.select('test')).toBeDefined();
 		});
 
@@ -770,13 +827,19 @@ describe('Type Inference (ARCH-006)', () => {
 				},
 			});
 
-			// Act
-			const orm = createOrm({ schema: nullableSchema });
+			// Compile-time type checks
+			type ItemRow = InferDB<typeof nullableSchema.definition>['items'];
 
-			// Assert
+			// Required columns should NOT include null
+			expectTypeOf<ItemRow['id']>().toEqualTypeOf<number>();
+			expectTypeOf<ItemRow['required']>().toEqualTypeOf<string>();
+
+			// Optional columns SHOULD include null
+			expectTypeOf<ItemRow['optional']>().toEqualTypeOf<string | null>();
+
+			// Runtime assertion
+			const orm = createOrm({ schema: nullableSchema });
 			expect(orm.select('items')).toBeDefined();
-			// At compile time: InferDB would give:
-			// { items: { id: number, required: string, optional: string | null } }
 		});
 
 		it('should infer FK columns as number | string', () => {
@@ -790,13 +853,20 @@ describe('Type Inference (ARCH-006)', () => {
 				},
 			});
 
-			// Act
-			const orm = createOrm({ schema: fkSchema });
+			// Compile-time type checks
+			type PostRow = InferDB<typeof fkSchema.definition>['posts'];
 
-			// Assert
+			// Regular FK → number | string
+			expectTypeOf<PostRow['authorId']>().toEqualTypeOf<number | string>();
+
+			// Nullable FK → number | string | null
+			expectTypeOf<PostRow['reviewerId']>().toEqualTypeOf<
+				number | string | null
+			>();
+
+			// Runtime assertion
+			const orm = createOrm({ schema: fkSchema });
 			expect(orm.select('posts')).toBeDefined();
-			// At compile time: InferDB would give:
-			// { posts: { id: number, authorId: number | string, reviewerId: number | string | null } }
 		});
 	});
 
