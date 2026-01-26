@@ -1115,3 +1115,11 @@ describe('introspection', () => {
 		});
 	});
 });
+
+// ============================================================================
+// Tests: getSchemaFromDb (ARCH-006)
+// ============================================================================
+
+// NOTE: getSchemaFromDb requires a real database connection because it calls
+// introspect() which queries information_schema. Unit tests cannot mock this
+// effectively. See tests/e2e/introspection.test.ts for e2e tests of getSchemaFromDb.
