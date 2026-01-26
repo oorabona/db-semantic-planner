@@ -4,7 +4,7 @@ doc-meta:
   scope: project
   type: reference
   created: 2026-01-06
-  updated: 2026-01-25
+  updated: 2026-01-26
 ---
 
 # Documentation Index
@@ -96,6 +96,8 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | **ARCH-004** | [**Type Rationalization**](specs/TYPE-RATIONALIZATION-SPEC.md) | types, core, adapter, nql | ✅ canonical |
 | NQLM | [NQL CLI Migration](../TODO_NQL_MIGRATION.md) | cli | ✅ complete |
 | **ARCH-005** | [**Unified Schema API**](specs/ARCH-005-unified-schema-api.md) | core, cli, adapter | ✅ canonical |
+| **ARCH-006** | [**Simplified ORM Entry Point**](specs/ARCH-006-simplified-orm-entry-point.md) | core, adapter-kysely | ✅ canonical |
+| **DX-040** | [**Type-Safe Query API**](specs/DX-040-type-safe-query-api.md) | core, dx | 📋 draft |
 
 ## Golden Query Tests - ✅ Complete
 

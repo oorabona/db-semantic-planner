@@ -42,6 +42,37 @@
 | `docs/specs/SELF-REF-PSEUDO-COLUMNS-SPEC.md` | core, nql, adapter | Auto-generated pseudo-columns for hierarchies |
 | `docs/specs/ARCH-005-unified-schema-api.md` | core, cli, adapter | Unified schema API (schema/ref/manyToMany) |
 | `docs/specs/ARCH-006-simplified-orm-entry-point.md` | core, adapter-kysely | Simplified createOrm + getSchemaFromDb |
+| `docs/specs/DX-040-type-safe-query-api.md` | core, dx | Type-Safe Query API (Native + NQL dual approach) |
+
+## 📋 SPEC READY: DX-040 Type-Safe Query API
+
+**Priority:** HIGH | **Effort:** XL (~40h) | **Breaking:** No
+**Scope:** core, dx
+**Spec:** [DX-040](docs/specs/DX-040-type-safe-query-api.md)
+**Status:** Draft spec ready for review
+
+Native TypeScript API with full type inference alongside NQL for complex queries. Dual API approach where both produce same IntentIR.
+
+### Key Features
+
+- **TableRef/ColumnRef/RelationRef**: Type-safe references to schema elements
+- **Dual API**: Native API for IDE autocomplete + NQL for complex expressions
+- **Same return types**: Both APIs produce identical result types via IntentIR
+- **Dynamic schema**: Supports runtime introspected schemas
+- **Zero overhead**: All type inference at compile-time
+
+### Blocks (8 total)
+
+- [ ] Block 1: TableRef/ColumnRef/RelationRef types (~4h)
+- [ ] Block 2: Query builder integration (~6h)
+- [ ] Block 3: Cross-table queries with relation paths (~6h)
+- [ ] Block 4: Expression builders (eq, gt, and, or) (~4h)
+- [ ] Block 5: Aggregation/groupBy with inference (~6h)
+- [ ] Block 6: NQL integration with shared IntentIR (~6h)
+- [ ] Block 7: Dynamic schema support (~4h)
+- [ ] Block 8: E2E tests and documentation (~4h)
+
+---
 
 ## ✅ COMPLETED: ARCH-006 Simplified ORM Entry Point (2026-01-26)
 
