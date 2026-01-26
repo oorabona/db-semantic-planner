@@ -30,6 +30,7 @@
 | Cross-Table Pseudo-Cols (SPEC-002) | core, nql, adapter | ✅ Complete |
 | Type Rationalization (ARCH-004) | types, core, adapter, nql | ✅ Complete |
 | Unified Schema API (ARCH-005) | core, cli, adapter | ✅ Complete |
+| Simplified ORM Entry Point (ARCH-006) | core, adapter-kysely | 🟡 Ready |
 
 ## Scope-Specific Backlogs
 
@@ -40,6 +41,32 @@
 | `TODO_DX.md` | core, adapter | DX improvements, SOLID fixes, type inference |
 | `docs/specs/SELF-REF-PSEUDO-COLUMNS-SPEC.md` | core, nql, adapter | Auto-generated pseudo-columns for hierarchies |
 | `docs/specs/ARCH-005-unified-schema-api.md` | core, cli, adapter | Unified schema API (schema/ref/manyToMany) |
+| `docs/specs/ARCH-006-simplified-orm-entry-point.md` | core, adapter-kysely | Simplified createOrm + getSchemaFromDb |
+
+## 🟡 NEXT: ARCH-006 Simplified ORM Entry Point
+
+**Priority:** HIGH | **Effort:** L (~8h) | **Breaking:** Yes
+**Scope:** core, adapter-kysely
+**Spec:** [ARCH-006](docs/specs/ARCH-006-simplified-orm-entry-point.md)
+**Dependencies:** ARCH-005 (Complete)
+
+Simplify `createOrm()` API and extract `getSchemaFromDb()` for introspection.
+
+### Goals
+
+- Single `createOrm({ schema })` signature (always sync)
+- Separate `getSchemaFromDb(adapter, options)` for introspection
+- `adapter.namingConvention` as single source of truth
+- Remove: TypedSchema, relationHints, defaultIncludeStrategy
+
+### Blocks
+
+- [ ] 🟡 Block 1: Adapter Enhancement — Add `namingConvention` to Adapter interface (~2h)
+- [ ] ⏳ Block 2: getSchemaFromDb — Extract introspection to return `Schema<T>` (~3h)
+- [ ] ⏳ Block 3: Simplify createOrm — Remove legacy overloads (~2h)
+- [ ] ⏳ Block 4: Cleanup & Migration — Update tests/examples, remove dead code (~1h)
+
+---
 
 ## ✅ COMPLETED: ARCH-005 Unified Schema API (2026-01-25)
 
