@@ -6,7 +6,8 @@
 
 import { describe, expect, it } from 'vitest';
 import { AmbiguousRelationError } from './errors.js';
-import { buildModelFromResolvedSchema, createOrm, defineSchema } from './index.js';
+import { createOrm } from './index.js';
+import { ref, schema } from './schema.js';
 
 // ============================================================================
 // Test Schema: Q3 Pattern (Users with multiple Post relations)
@@ -18,39 +19,25 @@ import { buildModelFromResolvedSchema, createOrm, defineSchema } from './index.j
  * - Posts have author and reviewer to Users (ambiguous "user")
  * - Users have single profile relation (unambiguous)
  */
-const testSchema = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			users: {
-				id: { type: 'integer', primaryKey: true },
-				name: { type: 'string' },
-				email: { type: 'string' },
-			},
-			posts: {
-				id: { type: 'integer', primaryKey: true },
-				title: { type: 'string' },
-				content: { type: 'text' },
-				authorId: { type: 'integer' },
-				reviewerId: { type: 'integer' },
-			},
-			profiles: {
-				id: { type: 'integer', primaryKey: true },
-				userId: { type: 'integer' },
-				bio: { type: 'string' },
-			},
-		},
-		{
-			relations: {
-				'users.authoredPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' },
-				'users.reviewedPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'reviewerId' },
-				'users.profile': { kind: 'hasMany', target: 'profiles', foreignKey: 'userId' },
-				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' },
-				'posts.reviewer': { kind: 'belongsTo', target: 'users', foreignKey: 'reviewerId' },
-				'profiles.user': { kind: 'belongsTo', target: 'users', foreignKey: 'userId' },
-			},
-		},
-	),
-);
+const testSchema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		email: 'string',
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		content: 'text',
+		authorId: ref('users', { as: 'author', inverse: 'authoredPosts' }),
+		reviewerId: ref('users', { as: 'reviewer', inverse: 'reviewedPosts' }),
+	},
+	profiles: {
+		id: { type: 'integer', primaryKey: true },
+		userId: ref('users', { as: 'user', inverse: 'profile' }),
+		bio: 'string',
+	},
+}).model;
 
 // ============================================================================
 // Scenario 1: Strict mode throws on ambiguous relation (nominal)

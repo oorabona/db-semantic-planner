@@ -3,6 +3,9 @@
  * Developer Experience enhancements - strict mode, disambiguation, compat helpers.
  */
 
+// Schema DSL (User-facing API)
+// DEPRECATED: defineSchema is legacy. Use schema() + ref() instead (ARCH-005).
+export { defineSchema, SchemaValidationError } from '../schema-dsl.js';
 // Errors
 export {
 	AmbiguousRelationError,
@@ -20,7 +23,6 @@ export {
 	TableNotFoundError,
 	UnsafeOperationError,
 } from './errors.js';
-
 // Filter Helpers (Drizzle-like)
 export {
 	// Logical
@@ -123,7 +125,12 @@ export {
 	type WhereFilter,
 } from './object-filter.js';
 // Factory
-export { createOrm, type OrmOptionsWithTypedSchema } from './orm.js';
+export {
+	createOrm,
+	type OrmOptionsWithTypedSchema,
+	// ARCH-005: Unified Schema API options
+	type OrmOptionsWithUnifiedSchema,
+} from './orm.js';
 export type {
 	// Relation definitions
 	AnyRelationDef,
@@ -179,15 +186,35 @@ export {
 	type HydrateOptions,
 	ResultHydrator,
 } from './result-hydrator.js';
-// Schema DSL (User-facing API)
-export { defineSchema, SchemaValidationError } from '../schema-dsl.js';
+
+// ARCH-005: Unified Schema API (NEW - preferred)
+// Exports both `ref` (canonical per spec) and `fk` (alias for compatibility)
+export {
+	type ColumnDef,
+	isRef,
+	isRef as isFk, // Alias for compatibility
+	ref,
+	ref as fk, // Alias for compatibility
+	type RefDefinition,
+	type RefDefinition as FkDefinition, // Alias for compatibility
+	type RefOptions,
+	type RefOptions as FkOptions, // Alias for compatibility
+	type Schema,
+	type SchemaColumnType,
+	type SchemaDefinition,
+	SchemaValidationError as SchemaError,
+	type SelfRefRoles,
+	schema,
+	schemaToModelIR,
+	type TableDef,
+} from './schema.js';
 
 // Schema Bridge (ARCH-002 codegen-first)
 export {
 	// CORE-005: ResolvedSchema → GeneratedSchema converter with Valibot
 	assertResolvedSchemaToGeneratedSchema,
-	buildModelFromSchema,
 	buildModelFromResolvedSchema,
+	buildModelFromSchema,
 	// DX-102: Type inference utilities for createOrm
 	type ColumnTypeToTS,
 	type GeneratedBelongsTo,
@@ -216,7 +243,7 @@ export {
 // Subquery Builder (DX-012 Block 3)
 export {
 	isSubqueryExpression,
-	ref,
+	outerRef,
 	SubqueryBuilder,
 	SubqueryExpression,
 	subquery,

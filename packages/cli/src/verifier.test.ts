@@ -2,14 +2,14 @@
  * Tests for ARCH-002 Block 7: Schema Verifier
  */
 
-import { defineSchema } from '@dbsp/core';
+import { schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { type DbTableInfo, formatVerifyResult, verify } from './verifier.js';
 
 describe('verify', () => {
 	describe('table-level drift', () => {
 		it('should detect missing table in database', () => {
-			const schema = defineSchema({
+			const s = schema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					name: { type: 'string' },
@@ -30,7 +30,7 @@ describe('verify', () => {
 				},
 			];
 
-			const result = verify(schema, dbTables);
+			const result = verify(s, dbTables);
 
 			expect(result.valid).toBe(false);
 			expect(result.issues).toContainEqual(
@@ -43,7 +43,7 @@ describe('verify', () => {
 		});
 
 		it('should detect extra table in database', () => {
-			const schema = defineSchema({
+			const s = schema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
@@ -60,7 +60,7 @@ describe('verify', () => {
 				},
 			];
 
-			const result = verify(schema, dbTables);
+			const result = verify(s, dbTables);
 
 			// Extra tables are warnings, not errors
 			expect(result.valid).toBe(true);
@@ -74,7 +74,7 @@ describe('verify', () => {
 		});
 
 		it('should return valid when tables match', () => {
-			const schema = defineSchema({
+			const s = schema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					name: { type: 'string' },
@@ -91,7 +91,7 @@ describe('verify', () => {
 				},
 			];
 
-			const result = verify(schema, dbTables);
+			const result = verify(s, dbTables);
 
 			expect(result.valid).toBe(true);
 			expect(result.issues.filter((i) => i.severity === 'error')).toHaveLength(
@@ -102,7 +102,7 @@ describe('verify', () => {
 
 	describe('column-level drift', () => {
 		it('should detect missing column in database', () => {
-			const schema = defineSchema({
+			const s = schema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					name: { type: 'string' },
@@ -121,7 +121,7 @@ describe('verify', () => {
 				},
 			];
 
-			const result = verify(schema, dbTables);
+			const result = verify(s, dbTables);
 
 			expect(result.valid).toBe(false);
 			expect(result.issues).toContainEqual(
@@ -135,7 +135,7 @@ describe('verify', () => {
 		});
 
 		it('should detect extra column in database', () => {
-			const schema = defineSchema({
+			const s = schema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					name: { type: 'string' },
@@ -153,7 +153,7 @@ describe('verify', () => {
 				},
 			];
 
-			const result = verify(schema, dbTables);
+			const result = verify(s, dbTables);
 
 			// Extra columns are info, not errors
 			expect(result.valid).toBe(true);
@@ -168,7 +168,7 @@ describe('verify', () => {
 		});
 
 		it('should detect type mismatch', () => {
-			const schema = defineSchema({
+			const s = schema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					age: { type: 'integer' },
@@ -185,7 +185,7 @@ describe('verify', () => {
 				},
 			];
 
-			const result = verify(schema, dbTables);
+			const result = verify(s, dbTables);
 
 			expect(result.valid).toBe(false);
 			expect(result.issues).toContainEqual(
@@ -199,7 +199,7 @@ describe('verify', () => {
 		});
 
 		it('should detect nullable mismatch', () => {
-			const schema = defineSchema({
+			const s = schema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					email: { type: 'string', nullable: false },
@@ -216,7 +216,7 @@ describe('verify', () => {
 				},
 			];
 
-			const result = verify(schema, dbTables);
+			const result = verify(s, dbTables);
 
 			expect(result.issues).toContainEqual(
 				expect.objectContaining({
@@ -231,7 +231,7 @@ describe('verify', () => {
 
 	describe('type compatibility', () => {
 		it('should accept varchar as string', () => {
-			const schema = defineSchema({
+			const s = schema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					name: { type: 'string' },
@@ -248,7 +248,7 @@ describe('verify', () => {
 				},
 			];
 
-			const result = verify(schema, dbTables);
+			const result = verify(s, dbTables);
 
 			expect(result.valid).toBe(true);
 			expect(
@@ -257,7 +257,7 @@ describe('verify', () => {
 		});
 
 		it('should accept int4 as integer', () => {
-			const schema = defineSchema({
+			const s = schema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					age: { type: 'integer' },
@@ -274,13 +274,13 @@ describe('verify', () => {
 				},
 			];
 
-			const result = verify(schema, dbTables);
+			const result = verify(s, dbTables);
 
 			expect(result.valid).toBe(true);
 		});
 
 		it('should accept timestamptz as timestamp', () => {
-			const schema = defineSchema({
+			const s = schema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					createdAt: { type: 'timestamp' },
@@ -301,13 +301,13 @@ describe('verify', () => {
 				},
 			];
 
-			const result = verify(schema, dbTables);
+			const result = verify(s, dbTables);
 
 			expect(result.valid).toBe(true);
 		});
 
 		it('should accept jsonb as json', () => {
-			const schema = defineSchema({
+			const s = schema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 					metadata: { type: 'json' },
@@ -324,7 +324,7 @@ describe('verify', () => {
 				},
 			];
 
-			const result = verify(schema, dbTables);
+			const result = verify(s, dbTables);
 
 			expect(result.valid).toBe(true);
 		});

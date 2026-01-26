@@ -5,12 +5,7 @@
  */
 
 import type { OrmInstance } from '@dbsp/core';
-import {
-	buildModelFromResolvedSchema,
-	createOrm,
-	defineSchema,
-	eq,
-} from '@dbsp/core';
+import { createOrm, eq, fk, schema } from '@dbsp/core';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 // ============================================================================
@@ -43,39 +38,27 @@ interface TestDatabase {
 	};
 }
 
-const testModel = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			users: {
-				id: { type: 'integer', primaryKey: true },
-				name: { type: 'string' },
-				email: { type: 'string' },
-				active: { type: 'boolean' },
-			},
-			posts: {
-				id: { type: 'integer', primaryKey: true },
-				title: { type: 'string' },
-				content: { type: 'string' },
-				authorId: { type: 'integer' },
-				published: { type: 'boolean' },
-			},
-			comments: {
-				id: { type: 'integer', primaryKey: true },
-				text: { type: 'string' },
-				postId: { type: 'integer' },
-				authorId: { type: 'integer' },
-			},
-		},
-		{
-			relations: {
-				'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' },
-				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' },
-				'posts.comments': { kind: 'hasMany', target: 'comments', foreignKey: 'postId' },
-				'comments.post': { kind: 'belongsTo', target: 'posts', foreignKey: 'postId' },
-			},
-		},
-	),
-);
+const testModel = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		email: 'string',
+		active: 'boolean',
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		content: 'string',
+		authorId: fk('users', { as: 'author', inverse: 'posts' }),
+		published: 'boolean',
+	},
+	comments: {
+		id: { type: 'integer', primaryKey: true },
+		text: 'string',
+		postId: fk('posts', { as: 'post', inverse: 'comments' }),
+		authorId: fk('users'),
+	},
+}).model;
 
 // ============================================================================
 // Type-Level Tests
@@ -121,16 +104,16 @@ describe('DX-012 Block 2: Typed Schema Generics', () => {
 			orm.select('posts');
 			orm.select('comments');
 
-			// @ts-expect-error - 'invalid' is not a valid table name
-			// orm.select('invalid');
+			// This would be a type error if uncommented:
+			// orm.select('invalid'); // 'invalid' is not a valid table name
 		});
 
 		it('should allow manual type override', () => {
 			const orm = createOrm<TestDatabase>({ model: testModel });
 
-			// Manual override should take precedence
+			// Manual override using second generic parameter
 			type CustomUser = { id: number; customField: string };
-			const builder = orm.select<CustomUser>('users');
+			const builder = orm.select<'users', CustomUser>('users');
 
 			// Use .returns.resolves to check type without calling the method
 			expectTypeOf(builder.all).returns.resolves.toMatchTypeOf<CustomUser[]>();

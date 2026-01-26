@@ -1,21 +1,21 @@
 /**
  * ARCH-002 Block 3+4+5: Generate Command
  * CLI-DDL: Added DDL generation target
+ * ARCH-005: Migrated to schema() API, removed legacy generators
  *
  * dbsp generate <target> - Generate code from schema.
  *
  * Targets:
- * - manifest: Generate ModelIR manifest (JSON-serializable)
- * - kysely: Generate Kysely DB interface + types
  * - ddl: Generate SQL DDL (CREATE TABLE statements)
+ *
+ * Deprecated targets (removed in ARCH-005):
+ * - manifest: Was for legacy defineSchema() format
+ * - kysely: Was for legacy defineSchema() format
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import type { ResolvedSchema } from '@dbsp/core';
 import { Command } from 'commander';
-import { generateKysely } from '../generators/kysely.js';
-import { generateManifest } from '../generators/manifest.js';
 import { loadSchema, loadSchemaFromCwd } from '../utils/schema-loader.js';
 
 /** Default casing by dialect (follows database conventions) */
@@ -28,7 +28,7 @@ const DEFAULT_CASING: Record<string, 'snake' | 'camel'> = {
 
 export const generateCommand = new Command('generate')
 	.description('Generate code from schema')
-	.argument('<target>', 'Target to generate: manifest | kysely | ddl')
+	.argument('<target>', 'Target to generate: ddl')
 	.option('-s, --schema <path>', 'Path to schema file (default: auto-detect)')
 	.option('-o, --out <dir>', 'Output directory (default: ./generated/<target>)')
 	.option('--output <dir>', 'Output directory (alias for --out)')
@@ -56,8 +56,8 @@ export const generateCommand = new Command('generate')
 			},
 		) => {
 			try {
-				// Load schema
-				let schema: ResolvedSchema;
+				// Load schema (ARCH-005: only schema() format supported)
+				let schema: Awaited<ReturnType<typeof loadSchema>>;
 				let schemaPath: string;
 
 				if (options.schema) {
@@ -76,44 +76,8 @@ export const generateCommand = new Command('generate')
 
 				log(`📄 Loaded schema from: ${schemaPath}`);
 
-				// Determine output directory (only used when writing to file)
-				const outDir = outputPath ?? `./generated/${target}`;
-				const resolvedOutDir = resolve(process.cwd(), outDir);
-
 				// Generate based on target
 				switch (target) {
-					case 'manifest': {
-						const manifest = generateManifest(schema);
-						const outPath = resolve(resolvedOutDir, 'schema.json');
-
-						mkdirSync(dirname(outPath), { recursive: true });
-						writeFileSync(outPath, manifest.json, 'utf-8');
-
-						console.log(`✅ Generated manifest: ${outPath}`);
-						console.log(`   Tables: ${Object.keys(schema.tables).length}`);
-						console.log(
-							`   Relations: ${Object.keys(schema.relations).length}`,
-						);
-						break;
-					}
-
-					case 'kysely': {
-						const kysely = generateKysely(schema);
-
-						mkdirSync(resolvedOutDir, { recursive: true });
-
-						const dbPath = resolve(resolvedOutDir, 'DB.ts');
-						const typesPath = resolve(resolvedOutDir, 'types.ts');
-
-						writeFileSync(dbPath, kysely.dbInterface, 'utf-8');
-						writeFileSync(typesPath, kysely.tableTypes, 'utf-8');
-
-						console.log(`✅ Generated Kysely types:`);
-						console.log(`   ${dbPath}`);
-						console.log(`   ${typesPath}`);
-						break;
-					}
-
 					case 'ddl': {
 						// Dynamic import of Kysely and pg (optional peer deps)
 						const { CamelCasePlugin, Kysely, PostgresDialect } = await import(
@@ -140,16 +104,11 @@ export const generateCommand = new Command('generate')
 						});
 
 						try {
-							// Import generateDDL from adapter-kysely and schema converters from core
+							// Import generateDDL from adapter-kysely
 							const { generateDDL } = await import('@dbsp/adapter-kysely');
-							const { buildModelFromSchema, assertResolvedSchemaToGeneratedSchema } =
-								await import('@dbsp/core');
 
-							// Convert ResolvedSchema to ModelIR via GeneratedSchema (single path)
-							const generatedSchema = assertResolvedSchemaToGeneratedSchema(schema);
-							const model = buildModelFromSchema(generatedSchema);
-
-							const ddlStatements = generateDDL(db, model, {
+							// ARCH-005: Use schema.model directly (already ModelIR)
+							const ddlStatements = generateDDL(db, schema.model, {
 								includeDropStatements: options.drop,
 								schemaName: options.schemaName,
 							});
@@ -167,7 +126,7 @@ export const generateCommand = new Command('generate')
 								writeFileSync(outPath, ddlContent, 'utf-8');
 
 								console.log(`✅ Generated DDL: ${outPath}`);
-								console.log(`   Tables: ${Object.keys(schema.tables).length}`);
+								console.log(`   Tables: ${schema.tableNames.length}`);
 								console.log(`   Statements: ${ddlStatements.length}`);
 								console.log(`   Casing: ${casing}`);
 								if (options.drop) {
@@ -188,9 +147,21 @@ export const generateCommand = new Command('generate')
 						break;
 					}
 
+					case 'manifest':
+					case 'kysely':
+						console.error(
+							`❌ Target '${target}' has been removed in ARCH-005.`,
+						);
+						console.error(
+							`   These generators required the legacy defineSchema() format.`,
+						);
+						console.error(`   Use 'ddl' target for SQL generation.`);
+						process.exit(1);
+						break;
+
 					default:
 						console.error(`❌ Unknown target: ${target}`);
-						console.error(`   Available targets: manifest, kysely, ddl`);
+						console.error(`   Available targets: ddl`);
 						process.exit(1);
 				}
 			} catch (error) {

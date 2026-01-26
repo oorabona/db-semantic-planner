@@ -109,30 +109,4 @@ expect.extend({
 	toMatchSql,
 });
 
-// TypeScript declaration merging for custom matchers
-declare module 'vitest' {
-	// biome-ignore lint/suspicious/noExplicitAny: Vitest requires this signature
-	// biome-ignore lint/correctness/noUnusedVariables: Required to match Vitest's Assertion interface
-	interface Assertion<T = any> {
-		/**
-		 * Asserts that SQL matches the stored snapshot file.
-		 * Creates the snapshot if it doesn't exist.
-		 *
-		 * @param snapshotName - Name for the snapshot file (will be sanitized)
-		 */
-		toMatchSqlSnapshot(snapshotName: string): void;
-
-		/**
-		 * Asserts that two SQL strings are equivalent after normalization.
-		 * Useful for inline comparisons without snapshot files.
-		 *
-		 * @param expected - The expected SQL string
-		 */
-		toMatchSql(expected: string): void;
-	}
-
-	interface AsymmetricMatchersContaining {
-		toMatchSqlSnapshot(snapshotName: string): void;
-		toMatchSql(expected: string): void;
-	}
-}
+// Type declarations are in /vitest.d.ts at package root

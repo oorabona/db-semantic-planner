@@ -3,44 +3,28 @@
  * Tests for the compile-only adapter that generates SQL without database execution.
  */
 
-import {
-	buildModelFromResolvedSchema,
-	createOrm,
-	defineSchema,
-	ExecutionError,
-	eq,
-} from '@dbsp/core';
+import { createOrm, ExecutionError, eq, fk, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import {
 	CompileOnlyAdapter,
 	createCompileOnlyAdapter,
 } from './compile-only-adapter.js';
 
-// Test schema
-const testSchema = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			users: {
-				id: { type: 'integer', primaryKey: true },
-				name: { type: 'string' },
-				email: { type: 'string' },
-				active: { type: 'boolean' },
-			},
-			posts: {
-				id: { type: 'integer', primaryKey: true },
-				title: { type: 'string' },
-				content: { type: 'text' },
-				authorId: { type: 'integer' },
-			},
-		},
-		{
-			relations: {
-				'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' },
-				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' },
-			},
-		},
-	),
-);
+// Test schema - keep as Schema<T> for type inference (not .model)
+const testSchema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		email: 'string',
+		active: 'boolean',
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		content: 'text',
+		authorId: fk('users', { as: 'author', inverse: 'posts' }),
+	},
+});
 
 describe('CompileOnlyAdapter', () => {
 	describe('createCompileOnlyAdapter factory', () => {
@@ -63,7 +47,7 @@ describe('CompileOnlyAdapter', () => {
 
 		it('produces schema-qualified SQL when schemaName is set', () => {
 			const orm = createOrm({
-				model: testSchema,
+				schema: testSchema,
 				adapter: createCompileOnlyAdapter({ schemaName: 'my_tenant' }),
 			});
 
@@ -77,7 +61,7 @@ describe('CompileOnlyAdapter', () => {
 
 		it('withSchema() produces schema-qualified SQL', () => {
 			const adapter = createCompileOnlyAdapter();
-			const orm = createOrm({ model: testSchema, adapter });
+			const orm = createOrm({ schema: testSchema, adapter });
 
 			const scopedOrm = orm.withSchema('tenant_abc');
 			const dump = scopedOrm.select('users').dump();
@@ -90,7 +74,7 @@ describe('CompileOnlyAdapter', () => {
 
 		it('withSchema() preserves dialect', () => {
 			const adapter = createCompileOnlyAdapter({ dialect: 'mysql' });
-			const orm = createOrm({ model: testSchema, adapter });
+			const orm = createOrm({ schema: testSchema, adapter });
 
 			const scopedOrm = orm.withSchema('tenant_xyz');
 			const dump = scopedOrm.select('users').dump();
@@ -118,7 +102,7 @@ describe('CompileOnlyAdapter', () => {
 	describe('compile methods', () => {
 		it('compiles SELECT query to SQL', async () => {
 			const orm = createOrm({
-				model: testSchema,
+				schema: testSchema,
 				adapter: createCompileOnlyAdapter(),
 			});
 
@@ -130,7 +114,7 @@ describe('CompileOnlyAdapter', () => {
 
 		it('compiles SELECT with WHERE clause', async () => {
 			const orm = createOrm({
-				model: testSchema,
+				schema: testSchema,
 				adapter: createCompileOnlyAdapter(),
 			});
 
@@ -143,7 +127,7 @@ describe('CompileOnlyAdapter', () => {
 
 		it('compiles INSERT query', async () => {
 			const orm = createOrm({
-				model: testSchema,
+				schema: testSchema,
 				adapter: createCompileOnlyAdapter(),
 			});
 
@@ -160,7 +144,7 @@ describe('CompileOnlyAdapter', () => {
 
 		it('compiles UPDATE query', async () => {
 			const orm = createOrm({
-				model: testSchema,
+				schema: testSchema,
 				adapter: createCompileOnlyAdapter(),
 			});
 
@@ -177,7 +161,7 @@ describe('CompileOnlyAdapter', () => {
 
 		it('compiles DELETE query', async () => {
 			const orm = createOrm({
-				model: testSchema,
+				schema: testSchema,
 				adapter: createCompileOnlyAdapter(),
 			});
 
@@ -189,7 +173,7 @@ describe('CompileOnlyAdapter', () => {
 
 		it('compiles query with schema prefix (multi-tenant)', async () => {
 			const orm = createOrm({
-				model: testSchema,
+				schema: testSchema,
 				adapter: createCompileOnlyAdapter(),
 			});
 
@@ -203,7 +187,7 @@ describe('CompileOnlyAdapter', () => {
 
 		it('compiles query with relation include', async () => {
 			const orm = createOrm({
-				model: testSchema,
+				schema: testSchema,
 				adapter: createCompileOnlyAdapter(),
 			});
 
@@ -277,7 +261,7 @@ describe('CompileOnlyAdapter', () => {
 
 		it('new adapter uses schema in queries', async () => {
 			const orm = createOrm({
-				model: testSchema,
+				schema: testSchema,
 				adapter: createCompileOnlyAdapter(),
 			});
 
@@ -341,14 +325,14 @@ describe('CompileOnlyAdapter', () => {
 	describe('ORM integration', () => {
 		it('works with full ORM workflow (compile only)', async () => {
 			const orm = createOrm({
-				model: testSchema,
+				schema: testSchema,
 				adapter: createCompileOnlyAdapter(),
 			});
 
 			// Build a complex query
 			const dump = await orm
 				.select('posts')
-				.columns('id', 'title')
+				.columns(['id', 'title'])
 				.where(eq('authorId', 1))
 				.orderBy('id', 'desc')
 				.limit(10)
@@ -363,7 +347,7 @@ describe('CompileOnlyAdapter', () => {
 
 		it('execute methods throw helpful error', async () => {
 			const orm = createOrm({
-				model: testSchema,
+				schema: testSchema,
 				adapter: createCompileOnlyAdapter(),
 			});
 

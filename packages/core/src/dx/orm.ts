@@ -50,6 +50,7 @@ import type {
 	TypedTableDef,
 } from './prisma-types.js';
 import { ResultHydrator } from './result-hydrator.js';
+import type { Schema, SchemaDefinition } from './schema.js';
 import {
 	buildModelFromSchema,
 	type GeneratedColumnType,
@@ -216,6 +217,41 @@ export interface OrmOptionsWithTypedSchema<S extends TypedSchema> {
 }
 
 /**
+ * ARCH-005: ORM options using the new unified Schema API.
+ * The Schema object already contains the converted ModelIR.
+ */
+export interface OrmOptionsWithUnifiedSchema<T extends SchemaDefinition> {
+	/**
+	 * Unified Schema from schema() function.
+	 */
+	schema: Schema<T>;
+	/**
+	 * Exclude model to discriminate from OrmOptionsWithModel.
+	 */
+	model?: never;
+	/**
+	 * Optional database adapter.
+	 */
+	adapter?: Adapter<unknown>;
+	/**
+	 * Enable strict mode by default.
+	 */
+	strictMode?: boolean;
+	/**
+	 * Default relation hints.
+	 */
+	relationHints?: RelationHints;
+	/**
+	 * Default include strategy.
+	 */
+	defaultIncludeStrategy?: IncludeStrategy;
+	/**
+	 * Optional dialect capabilities.
+	 */
+	dialectCapabilities?: DialectCapabilities;
+}
+
+/**
  * Create an ORM instance with the specified configuration.
  *
  * @typeParam DB - Database schema type (Kysely-like).
@@ -285,7 +321,11 @@ export function createOrm<DB = Record<string, unknown>>(
 export function createOrm<S extends TypedSchema>(
 	options: OrmOptionsWithTypedSchema<S>,
 ): TypedOrmInstance<S>;
-// Overload 3: With adapter only (async introspection)
+// Overload 3: ARCH-005 - With unified Schema API (schema() + ref())
+export function createOrm<T extends SchemaDefinition>(
+	options: OrmOptionsWithUnifiedSchema<T>,
+): OrmInstance<Record<string, unknown>>;
+// Overload 4: With adapter only (async introspection)
 export function createOrm<DB = Record<string, unknown>>(
 	options: OrmOptionsWithAdapter<DB>,
 ): Promise<OrmInstance<DB>>;
@@ -293,10 +333,12 @@ export function createOrm<DB = Record<string, unknown>>(
 export function createOrm<
 	DB = Record<string, unknown>,
 	S extends TypedSchema = TypedSchema,
+	T extends SchemaDefinition = SchemaDefinition,
 >(
 	options:
 		| OrmOptionsWithModel<DB>
 		| OrmOptionsWithTypedSchema<S>
+		| OrmOptionsWithUnifiedSchema<T>
 		| OrmOptionsWithAdapter<DB>,
 ): OrmInstance<DB> | Promise<OrmInstance<DB>> | TypedOrmInstance<S> {
 	// Extract common options
@@ -305,6 +347,27 @@ export function createOrm<
 	const adapter = options.adapter;
 	const defaultIncludeStrategy = options.defaultIncludeStrategy;
 	const dialectCapabilities = options.dialectCapabilities;
+
+	// ARCH-005: Check for unified Schema (has `model` property on schema)
+	const unifiedSchema = (
+		options as OrmOptionsWithUnifiedSchema<SchemaDefinition>
+	).schema;
+	if (
+		unifiedSchema &&
+		'model' in unifiedSchema &&
+		'definition' in unifiedSchema
+	) {
+		// Unified Schema already has ModelIR
+		return createOrmInstance(
+			unifiedSchema.model,
+			strictMode,
+			relationHints,
+			adapter,
+			undefined, // schemaName
+			defaultIncludeStrategy,
+			dialectCapabilities,
+		);
+	}
 
 	// Extract schema if provided (DX-110: TypedSchema)
 	const typedSchema = (options as OrmOptionsWithTypedSchema<TypedSchema>)

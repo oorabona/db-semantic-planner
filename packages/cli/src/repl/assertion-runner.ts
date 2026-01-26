@@ -223,7 +223,12 @@ function runSingleAssertion(
 			);
 
 		case 'db.output.contains':
-			return assertContains('output', result.output ?? '', value as string, 'db.output.contains');
+			return assertContains(
+				'output',
+				result.output ?? '',
+				value as string,
+				'db.output.contains',
+			);
 
 		case 'db.rows.equals':
 			return assertDbRowsEquals(result, value as number);

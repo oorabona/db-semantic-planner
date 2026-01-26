@@ -6,7 +6,7 @@
  * SQL generation tests are in adapter-kysely/src/recursive-query-builder.test.ts
  */
 
-import { buildModelFromResolvedSchema, defineSchema, eq } from '@dbsp/core';
+import { eq, fk, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import type { Adapter, AdapterCapabilities } from '../adapter.js';
 import { createRecursiveBuilder } from './recursive-query-builder.js';
@@ -15,104 +15,43 @@ import { createRecursiveBuilder } from './recursive-query-builder.js';
 // Test Schema - Role Hierarchy with Edge Table
 // ============================================================================
 
-const roleHierarchyModel = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			roles: {
-				id: { type: 'uuid', primaryKey: true },
-				name: { type: 'string' },
-			},
-			roleEdges: {
-				id: { type: 'uuid', primaryKey: true },
-				fromRoleId: { type: 'uuid' },
-				toRoleId: { type: 'uuid' },
-			},
-			permissions: {
-				id: { type: 'uuid', primaryKey: true },
-				name: { type: 'string' },
-			},
-			rolePermissions: {
-				id: { type: 'uuid', primaryKey: true },
-				roleId: { type: 'uuid' },
-				permissionId: { type: 'uuid' },
-			},
-		},
-		{
-			relations: {
-				'roleEdges.fromRole': {
-					kind: 'belongsTo',
-					target: 'roles',
-					foreignKey: 'fromRoleId',
-				},
-				'roleEdges.toRole': {
-					kind: 'belongsTo',
-					target: 'roles',
-					foreignKey: 'toRoleId',
-				},
-				'roles.outgoingEdges': {
-					kind: 'hasMany',
-					target: 'roleEdges',
-					foreignKey: 'fromRoleId',
-				},
-				'roles.incomingEdges': {
-					kind: 'hasMany',
-					target: 'roleEdges',
-					foreignKey: 'toRoleId',
-				},
-				'roles.rolePermissions': {
-					kind: 'hasMany',
-					target: 'rolePermissions',
-					foreignKey: 'roleId',
-				},
-				'rolePermissions.role': {
-					kind: 'belongsTo',
-					target: 'roles',
-					foreignKey: 'roleId',
-				},
-				'rolePermissions.permission': {
-					kind: 'belongsTo',
-					target: 'permissions',
-					foreignKey: 'permissionId',
-				},
-				'permissions.rolePermissions': {
-					kind: 'hasMany',
-					target: 'rolePermissions',
-					foreignKey: 'permissionId',
-				},
-			},
-		},
-	),
-);
+const roleHierarchyModel = schema({
+	roles: {
+		id: { type: 'uuid', primaryKey: true },
+		name: 'string',
+	},
+	roleEdges: {
+		id: { type: 'uuid', primaryKey: true },
+		fromRoleId: fk('roles', { as: 'fromRole', inverse: 'outgoingEdges' }),
+		toRoleId: fk('roles', { as: 'toRole', inverse: 'incomingEdges' }),
+	},
+	permissions: {
+		id: { type: 'uuid', primaryKey: true },
+		name: 'string',
+	},
+	rolePermissions: {
+		id: { type: 'uuid', primaryKey: true },
+		roleId: fk('roles', { as: 'role', inverse: 'rolePermissions' }),
+		permissionId: fk('permissions', { as: 'permission', inverse: 'rolePermissions' }),
+	},
+}).model;
 
 // ============================================================================
 // Test Schema - Category Hierarchy (Adjacency List)
 // ============================================================================
 
-const categoryModel = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			categories: {
-				id: { type: 'uuid', primaryKey: true },
-				name: { type: 'string' },
-				parentId: { type: 'uuid', nullable: true },
-			},
-		},
-		{
-			relations: {
-				'categories.parent': {
-					kind: 'belongsTo',
-					target: 'categories',
-					foreignKey: 'parentId',
-				},
-				'categories.children': {
-					kind: 'hasMany',
-					target: 'categories',
-					foreignKey: 'parentId',
-				},
-			},
-		},
-	),
-);
+const categoryModel = schema({
+	categories: {
+		id: { type: 'uuid', primaryKey: true },
+		name: 'string',
+		parentId: fk('categories', {
+			nullable: true,
+			as: 'parent',
+			inverse: 'children',
+			roles: { parent: 'parent', children: 'children' },
+		}),
+	},
+}).model;
 
 // ============================================================================
 // Helper - Create Mock Adapter for Intent-Building Tests

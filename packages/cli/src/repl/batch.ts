@@ -7,11 +7,8 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import {
-	buildModelFromResolvedSchema,
-	type ModelIR,
-	type ResolvedSchema,
-} from '@dbsp/core';
+import type { ModelIR } from '@dbsp/core';
+import type { LoadedSchema } from '../utils/schema-loader.js';
 import {
 	parseAssertionFile,
 	validateAssertionBlocks,
@@ -31,7 +28,7 @@ import type { QueryMode } from './types.js';
 
 export interface BatchModeOptions {
 	queries: string[];
-	schema: ResolvedSchema;
+	schema: LoadedSchema;
 	schemaPath: string;
 	format: 'text' | 'json';
 	databaseUrl?: string;
@@ -111,77 +108,64 @@ function formatNqlResult(result: NqlCompileOnlyResult): string {
 
 /**
  * Format table list as text
+ * ARCH-005: Uses schema.model (ModelIR) instead of ResolvedSchema
  */
-function formatTables(schema: ResolvedSchema): string {
-	const tables = Object.keys(schema.tables);
+function formatTables(schema: LoadedSchema): string {
+	const tables = schema.tableNames;
 	return `Tables (${tables.length}):\n${tables.map((t) => `  - ${t}`).join('\n')}`;
 }
 
 /**
  * Format table schema as text
- * TableDefinition IS the columns map (Record<string, ColumnDefinition>)
+ * ARCH-005: Uses schema.model (ModelIR) instead of ResolvedSchema
  */
-function formatTableSchema(schema: ResolvedSchema, tableName: string): string {
-	const table = schema.tables[tableName];
+function formatTableSchema(schema: LoadedSchema, tableName: string): string {
+	const table = schema.model.tables.get(tableName);
 	if (!table) {
 		return `❌ Table not found: ${tableName}`;
 	}
 
 	const lines = [`Table: ${tableName}`, 'Columns:'];
-	// table is directly Record<string, ColumnDefinition>
-	for (const [colName, col] of Object.entries(table)) {
-		if (!col) continue;
+	for (const col of table.columns) {
 		const nullable = col.nullable ? '' : ' (NOT NULL)';
-		lines.push(`  - ${colName}: ${col.type}${nullable}`);
+		lines.push(`  - ${col.name}: ${col.type}${nullable}`);
 	}
 	return lines.join('\n');
 }
 
 /**
  * Get relation description
+ * ARCH-005: RelationIR has 'type' and 'target' fields
  */
-function getRelationDescription(rel: { kind: string; target: string }): string {
-	return `${rel.kind} → ${rel.target}`;
+function getRelationDescription(rel: { type: string; target: string }): string {
+	return `${rel.type} → ${rel.target}`;
 }
 
 /**
  * Format relations as text
+ * ARCH-005: Uses schema.model (ModelIR) instead of ResolvedSchema
  */
-function formatRelations(schema: ResolvedSchema, tableName?: string): string {
-	const relations = Object.entries(schema.relations);
+function formatRelations(schema: LoadedSchema, tableName?: string): string {
+	const relations = Array.from(schema.model.relations.entries());
 
 	if (tableName) {
 		// Filter relations involving this table
 		const tableRelations = relations.filter(
-			([, rel]) =>
-				rel.target === tableName ||
-				Object.keys(schema.tables).some((_t) => {
-					const tableRels = schema.relations;
-					// Check if relation is from this table
-					return (
-						tableRels[
-							`${tableName}.${(rel as { kind: string; target: string }).kind}`
-						] !== undefined
-					);
-				}),
+			([, rel]) => rel.target === tableName || rel.source === tableName,
 		);
 		if (tableRelations.length === 0) {
 			return `No relations found for table: ${tableName}`;
 		}
 		const lines = [`Relations for ${tableName}:`];
 		for (const [name, rel] of tableRelations) {
-			lines.push(
-				`  - ${name}: ${getRelationDescription(rel as { kind: string; target: string })}`,
-			);
+			lines.push(`  - ${name}: ${getRelationDescription(rel)}`);
 		}
 		return lines.join('\n');
 	}
 
 	const lines = [`Relations (${relations.length}):`];
 	for (const [name, rel] of relations) {
-		lines.push(
-			`  - ${name}: ${getRelationDescription(rel as { kind: string; target: string })}`,
-		);
+		lines.push(`  - ${name}: ${getRelationDescription(rel)}`);
 	}
 	return lines.join('\n');
 }
@@ -231,11 +215,12 @@ function formatParseTree(parsed: unknown): string {
 
 /**
  * Process a dot command (async to support .import)
+ * ARCH-005: Uses LoadedSchema instead of ResolvedSchema
  * @internal - Exported for testing
  */
 export async function processDotCommand(
 	input: string,
-	schema: ResolvedSchema,
+	schema: LoadedSchema,
 	state: BatchState,
 ): Promise<{
 	output: string;
@@ -270,8 +255,8 @@ export async function processDotCommand(
 
 		case '.schema':
 			if (!arg) {
-				const tableCount = Object.keys(schema.tables).length;
-				const relationCount = Object.keys(schema.relations).length;
+				const tableCount = schema.tableNames.length;
+				const relationCount = schema.model.relations.size;
 				return {
 					output: `Schema Summary:\n  - Tables: ${tableCount}\n  - Relations: ${relationCount}\n  Use .schema <table> for details`,
 				};
@@ -665,8 +650,8 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 	const { queries, schema, format, databaseUrl, assertFile } = options;
 
 	// Initialize state
-	// NQL v2: Build ModelIR for NQL compilation
-	const model = buildModelFromResolvedSchema(schema);
+	// ARCH-005: Use schema.model directly (already ModelIR)
+	const model = schema.model;
 
 	const state: BatchState = {
 		mode: 'natural',

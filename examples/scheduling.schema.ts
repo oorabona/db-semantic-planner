@@ -16,39 +16,39 @@
  *   > rooms | with roomBookings | where bookingPeriod containedBy [2024-01-01,2024-02-01)
  */
 
-import { defineSchema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 
-export default defineSchema({
+export default schema({
 	rooms: {
 		id: { type: 'integer', primaryKey: true, autoIncrement: true },
-		name: { type: 'string' },
-		capacity: { type: 'integer' },
-		floor: { type: 'integer' },
+		name: 'string',
+		capacity: 'integer',
+		floor: 'integer',
 	},
 	roomBookings: {
 		id: { type: 'integer', primaryKey: true, autoIncrement: true },
-		roomId: { type: 'integer', references: { table: 'rooms', onDelete: 'CASCADE' }, index: true },
-		bookedBy: { type: 'string' },
-		bookingPeriod: { type: 'daterange' }, // PostgreSQL daterange
+		roomId: ref('rooms', { onDelete: 'CASCADE', inverse: 'roomBookings' }),
+		bookedBy: 'string',
+		bookingPeriod: 'daterange', // PostgreSQL daterange
 		purpose: { type: 'string', nullable: true },
 	},
 	events: {
 		id: { type: 'integer', primaryKey: true, autoIncrement: true },
-		title: { type: 'string' },
-		roomId: { type: 'integer', references: { table: 'rooms', onDelete: 'CASCADE' }, index: true },
-		timeSlot: { type: 'tstzrange' }, // PostgreSQL tstzrange
-		organizer: { type: 'string' },
+		title: 'string',
+		roomId: ref('rooms', { onDelete: 'CASCADE' }),
+		timeSlot: 'tstzrange', // PostgreSQL tstzrange
+		organizer: 'string',
 		maxAttendees: { type: 'integer', nullable: true },
 	},
 	priceTiers: {
 		id: { type: 'integer', primaryKey: true, autoIncrement: true },
 		productName: { type: 'string', index: true },
-		quantityRange: { type: 'int4range' }, // PostgreSQL int4range
-		unitPrice: { type: 'decimal' },
+		quantityRange: 'int4range', // PostgreSQL int4range
+		unitPrice: 'decimal',
 	},
 });
-// Relations auto-inferred from `references`:
-// - rooms.roomBookings (hasMany)
-// - rooms.events (hasMany)
+// Relations auto-inferred from ref():
+// - rooms.roomId_roomBookings (hasMany)
+// - rooms.roomId_events (hasMany)
 // - roomBookings.room (belongsTo)
 // - events.room (belongsTo)

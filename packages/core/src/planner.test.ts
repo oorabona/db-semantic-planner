@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { type QueryIntent } from './index.js';
-import { buildModelFromResolvedSchema } from './dx/schema-bridge.js';
-import { defineSchema } from './schema-dsl.js';
+import { ref, schema } from './dx/schema.js';
 import type { RecursiveIntent } from './intent-ast.js';
 import {
 	AmbiguousPlanError,
@@ -18,82 +17,50 @@ import {
 /**
  * Q1 Schema: Products with images (for EXISTS filter test)
  */
-const q1Schema = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			products: {
-				id: { type: 'integer', primaryKey: true },
-				name: { type: 'string' },
-			},
-			productImages: {
-				id: { type: 'integer', primaryKey: true },
-				productId: { type: 'integer' },
-				locale: { type: 'string' },
-				type: { type: 'string' },
-				approved: { type: 'boolean' },
-			},
-		},
-		{
-			relations: {
-				'products.images': { kind: 'hasMany', target: 'productImages', foreignKey: 'productId' },
-				'productImages.product': { kind: 'belongsTo', target: 'products', foreignKey: 'productId' },
-			},
-		},
-	),
-);
+const q1Schema = schema({
+	products: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+	},
+	productImages: {
+		id: { type: 'integer', primaryKey: true },
+		productId: ref('products', { as: 'product', inverse: 'images' }),
+		locale: 'string',
+		type: 'string',
+		approved: 'boolean',
+	},
+}).model;
 
 /**
  * Q2 Schema: Categories with products (for CTE extraction test)
  */
-const q2Schema = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			categories: {
-				id: { type: 'integer', primaryKey: true },
-				name: { type: 'string' },
-			},
-			products: {
-				id: { type: 'integer', primaryKey: true },
-				categoryId: { type: 'integer' },
-				active: { type: 'boolean' },
-			},
-		},
-		{
-			relations: {
-				'categories.products': { kind: 'hasMany', target: 'products', foreignKey: 'categoryId' },
-				'products.category': { kind: 'belongsTo', target: 'categories', foreignKey: 'categoryId' },
-			},
-		},
-	),
-);
+const q2Schema = schema({
+	categories: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+	},
+	products: {
+		id: { type: 'integer', primaryKey: true },
+		categoryId: ref('categories', { as: 'category', inverse: 'products', nullable: true }),
+		active: 'boolean',
+	},
+}).model;
 
 /**
  * Q3 Schema: Users with multiple relations to posts (for ambiguity test)
  */
-const q3Schema = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			users: {
-				id: { type: 'integer', primaryKey: true },
-				name: { type: 'string' },
-			},
-			posts: {
-				id: { type: 'integer', primaryKey: true },
-				title: { type: 'string' },
-				createdById: { type: 'integer' },
-				editedById: { type: 'integer' },
-			},
-		},
-		{
-			relations: {
-				'users.createdPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'createdById' },
-				'users.editedPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'editedById' },
-				'posts.creator': { kind: 'belongsTo', target: 'users', foreignKey: 'createdById' },
-				'posts.editor': { kind: 'belongsTo', target: 'users', foreignKey: 'editedById' },
-			},
-		},
-	),
-);
+const q3Schema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		createdById: ref('users', { as: 'creator', inverse: 'createdPosts' }),
+		editedById: ref('users', { as: 'editor', inverse: 'editedPosts' }),
+	},
+}).model;
 
 // ============================================================================
 // Basic Planning Tests
@@ -719,50 +686,32 @@ describe('Semantic Planner', () => {
 		/**
 		 * Recursive schema: Categories with parent (for hierarchical traversal)
 		 */
-		const recursiveSchema = buildModelFromResolvedSchema(
-			defineSchema(
-				{
-					categories: {
-						id: { type: 'integer', primaryKey: true },
-						name: { type: 'string' },
-						parentId: { type: 'integer' },
-					},
-				},
-				{
-					relations: {
-						'categories.parent': { kind: 'belongsTo', target: 'categories', foreignKey: 'parentId' },
-						'categories.children': { kind: 'hasMany', target: 'categories', foreignKey: 'parentId' },
-					},
-				},
-			),
-		);
+		const recursiveSchema = schema({
+			categories: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string',
+				parentId: ref('categories', {
+					as: 'parent',
+					inverse: 'children',
+					roles: { parent: 'parent', children: 'children' },
+				}),
+			},
+		}).model;
 
 		/**
 		 * Edge-table schema: Roles with edges (for role hierarchy)
 		 */
-		const edgeTableSchema = buildModelFromResolvedSchema(
-			defineSchema(
-				{
-					roles: {
-						id: { type: 'integer', primaryKey: true },
-						name: { type: 'string' },
-					},
-					roleEdges: {
-						id: { type: 'integer', primaryKey: true },
-						parentRoleId: { type: 'integer' },
-						childRoleId: { type: 'integer' },
-					},
-				},
-				{
-					relations: {
-						'roles.parentEdges': { kind: 'hasMany', target: 'roleEdges', foreignKey: 'childRoleId' },
-						'roles.childEdges': { kind: 'hasMany', target: 'roleEdges', foreignKey: 'parentRoleId' },
-						'roleEdges.parentRole': { kind: 'belongsTo', target: 'roles', foreignKey: 'parentRoleId' },
-						'roleEdges.childRole': { kind: 'belongsTo', target: 'roles', foreignKey: 'childRoleId' },
-					},
-				},
-			),
-		);
+		const edgeTableSchema = schema({
+			roles: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string',
+			},
+			roleEdges: {
+				id: { type: 'integer', primaryKey: true },
+				parentRoleId: ref('roles', { as: 'parentRole', inverse: 'childEdges' }),
+				childRoleId: ref('roles', { as: 'childRole', inverse: 'parentEdges' }),
+			},
+		}).model;
 
 		describe('validateRecursiveShape', () => {
 			it('should pass for valid adjacency-list intent', () => {
@@ -1105,15 +1054,13 @@ describe('Semantic Planner', () => {
 	});
 
 	describe('RAW_SQL_USAGE warning', () => {
-		const simpleSchema = buildModelFromResolvedSchema(
-			defineSchema({
-				users: {
-					id: { type: 'integer', primaryKey: true },
-					name: { type: 'string' },
-					email: { type: 'string' },
-				},
-			}),
-		);
+		const simpleSchema = schema({
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string',
+				email: 'string',
+			},
+		}).model;
 
 		it('should warn when raw SQL expression is used in select', () => {
 			const intent: QueryIntent = {

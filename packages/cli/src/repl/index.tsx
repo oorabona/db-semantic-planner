@@ -6,11 +6,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import {
-	assertResolvedSchemaToGeneratedSchema,
-	buildModelFromSchema,
-	type ModelIR,
-} from '@dbsp/core';
+import type { ModelIR, RelationIR } from '@dbsp/core';
 import { Box, render, Text, useApp, useInput } from 'ink';
 import React, {
 	useCallback,
@@ -191,9 +187,10 @@ interface ReplAppProps {
 
 /**
  * Get relation description for display
+ * ARCH-005: Updated for RelationIR (type instead of kind)
  */
-function getRelationDescription(rel: { kind: string; target: string }): string {
-	return `${rel.kind} → ${rel.target}`;
+function getRelationDescription(rel: RelationIR): string {
+	return `${rel.type} → ${rel.target}`;
 }
 
 function ReplApp({ config }: ReplAppProps) {
@@ -272,17 +269,8 @@ function ReplApp({ config }: ReplAppProps) {
 		[config.schema],
 	);
 
-	// NQL v2: Build ModelIR from schema for NQL compilation
-	const model = useMemo<ModelIR | null>(() => {
-		try {
-			const generatedSchema = assertResolvedSchemaToGeneratedSchema(
-				config.schema,
-			);
-			return buildModelFromSchema(generatedSchema);
-		} catch {
-			return null;
-		}
-	}, [config.schema]);
+	// ARCH-005: Use schema.model directly (already ModelIR)
+	const model = useMemo<ModelIR>(() => config.schema.model, [config.schema]);
 
 	const [completions, setCompletions] = useState<CompletionSuggestion[]>([]);
 	const [selectedCompletionIndex, setSelectedCompletionIndex] = useState(-1);
@@ -439,7 +427,8 @@ function ReplApp({ config }: ReplAppProps) {
 					}
 
 					case '.tables': {
-						const tables = Object.keys(config.schema.tables);
+						// ARCH-005: Use tableNames from LoadedSchema
+						const tables = config.schema.tableNames;
 						setShowHelp(false);
 						setQueryResult(null);
 						setOutput(
@@ -456,7 +445,10 @@ function ReplApp({ config }: ReplAppProps) {
 					}
 
 					case '.relations': {
-						const relations = Object.entries(config.schema.relations);
+						// ARCH-005: Use schema.model.relations Map
+						const relations = Array.from(
+							config.schema.model.relations.entries(),
+						);
 						setShowHelp(false);
 						setQueryResult(null);
 						setOutput(
@@ -478,7 +470,8 @@ function ReplApp({ config }: ReplAppProps) {
 					case '.schema': {
 						const tableName = args[0];
 						if (tableName) {
-							const table = config.schema.tables[tableName];
+							// ARCH-005: Use schema.model.tables Map
+							const table = config.schema.model.tables.get(tableName);
 							if (!table) {
 								setOutput(
 									<Text color="red">❌ Table not found: {tableName}</Text>,
@@ -487,8 +480,7 @@ function ReplApp({ config }: ReplAppProps) {
 								setShowHelp(false);
 								return;
 							}
-							// TableDefinition IS the columns map (Record<string, ColumnDefinition>)
-							const columns = Object.entries(table);
+							// ARCH-005: TableIR has columns as ColumnIR[]
 							setOutput(
 								<Box flexDirection="column" marginY={1}>
 									<Text bold color="cyan">
@@ -497,22 +489,20 @@ function ReplApp({ config }: ReplAppProps) {
 									<Text bold color="gray" dimColor>
 										Columns:
 									</Text>
-									{columns.map(([col, def]) => {
-										if (!def) return null;
-										return (
-											<Text key={col}>
-												{' '}
-												• {col}: {def.type}
-												{def.nullable ? '' : ' (NOT NULL)'}
-											</Text>
-										);
-									})}
+									{table.columns.map((col) => (
+										<Text key={col.name}>
+											{' '}
+											• {col.name}: {col.type}
+											{col.nullable ? '' : ' (NOT NULL)'}
+										</Text>
+									))}
 								</Box>,
 							);
 						} else {
 							// Show full schema summary
-							const tableCount = Object.keys(config.schema.tables).length;
-							const relationCount = Object.keys(config.schema.relations).length;
+							// ARCH-005: Use tableNames and model.relations.size
+							const tableCount = config.schema.tableNames.length;
+							const relationCount = config.schema.model.relations.size;
 							setOutput(
 								<Box flexDirection="column" marginY={1}>
 									<Text bold color="cyan">
@@ -1302,7 +1292,8 @@ function ReplApp({ config }: ReplAppProps) {
 					}
 				} catch (err) {
 					// Get table names for fuzzy suggestions
-					const tableNames = Object.keys(config.schema.tables);
+					// ARCH-005: Use tableNames from LoadedSchema
+					const tableNames = config.schema.tableNames;
 					const rawError = err instanceof Error ? err.message : String(err);
 					const enhancedError = enhanceErrorWithSuggestion(
 						rawError,
@@ -1349,8 +1340,9 @@ function ReplApp({ config }: ReplAppProps) {
 		],
 	);
 
-	const tableCount = Object.keys(config.schema.tables).length;
-	const relationCount = Object.keys(config.schema.relations).length;
+	// ARCH-005: Use tableNames and model.relations.size
+	const tableCount = config.schema.tableNames.length;
+	const relationCount = config.schema.model.relations.size;
 
 	// Content area (output, completions, input)
 	const contentArea = (

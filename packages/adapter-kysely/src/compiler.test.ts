@@ -1,16 +1,16 @@
 import {
-	buildModelFromResolvedSchema,
-	defineSchema,
+	fk,
 	ModelIRImpl,
 	plan,
 	planRecursive,
 	type QueryIntent,
 	type RecursiveIntent,
+	schema,
 	type UpsertIntent,
 	type WindowIntent,
 } from '@dbsp/core';
 import Database from 'better-sqlite3';
-import { Kysely, SqliteDialect } from 'kysely';
+import { CompiledQuery, Kysely, SqliteDialect } from 'kysely';
 import { describe, expect, it } from 'vitest';
 import {
 	compile,
@@ -49,59 +49,41 @@ function createTestKysely() {
 
 /**
  * Basic schema: Users with posts
+ * ARCH-005: Migrated to schema() + fk() API
  */
-const basicSchema = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			users: {
-				id: { type: 'integer', primaryKey: true },
-				name: { type: 'string' },
-				email: { type: 'string' },
-				active: { type: 'boolean' },
-			},
-			posts: {
-				id: { type: 'integer', primaryKey: true },
-				title: { type: 'string' },
-				content: { type: 'string' },
-				userId: { type: 'integer' },
-				published: { type: 'boolean' },
-			},
-		},
-		{
-			relations: {
-				'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'userId' },
-				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'userId' },
-			},
-		},
-	),
-);
+const basicSchema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		email: 'string',
+		active: 'boolean',
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		content: 'string',
+		userId: fk('users', { as: 'author', inverse: 'posts' }),
+		published: 'boolean',
+	},
+}).model;
 
 /**
  * Q1 Schema: Products with images (EXISTS filter test)
+ * ARCH-005: Migrated to schema() + fk() API
  */
-const q1Schema = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			products: {
-				id: { type: 'integer', primaryKey: true },
-				name: { type: 'string' },
-			},
-			productImages: {
-				id: { type: 'integer', primaryKey: true },
-				productId: { type: 'integer' },
-				locale: { type: 'string' },
-				type: { type: 'string' },
-				approved: { type: 'boolean' },
-			},
-		},
-		{
-			relations: {
-				'products.images': { kind: 'hasMany', target: 'productImages', foreignKey: 'productId' },
-				'productImages.product': { kind: 'belongsTo', target: 'products', foreignKey: 'productId' },
-			},
-		},
-	),
-);
+const q1Schema = schema({
+	products: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+	},
+	productImages: {
+		id: { type: 'integer', primaryKey: true },
+		productId: fk('products', { as: 'product', inverse: 'images' }),
+		locale: 'string',
+		type: 'string',
+		approved: 'boolean',
+	},
+}).model;
 
 // ============================================================================
 // Basic SELECT Tests
@@ -182,7 +164,7 @@ describe('SQL Compiler', () => {
 				where: {
 					kind: 'comparison',
 					field: 'id',
-					operator: 'eq',
+					operator: 'eq' as const,
 					value: 1,
 				},
 			};
@@ -201,7 +183,7 @@ describe('SQL Compiler', () => {
 				where: {
 					kind: 'comparison',
 					field: 'active',
-					operator: 'neq',
+					operator: 'neq' as const,
 					value: false,
 				},
 			};
@@ -219,7 +201,7 @@ describe('SQL Compiler', () => {
 				where: {
 					kind: 'comparison',
 					field: 'id',
-					operator: 'gt',
+					operator: 'gt' as const,
 					value: 10,
 				},
 			};
@@ -329,10 +311,10 @@ describe('SQL Compiler', () => {
 						{
 							kind: 'comparison',
 							field: 'active',
-							operator: 'eq',
+							operator: 'eq' as const,
 							value: true,
 						},
-						{ kind: 'comparison', field: 'id', operator: 'gt', value: 5 },
+						{ kind: 'comparison', field: 'id', operator: 'gt' as const, value: 5 },
 					],
 				},
 			};
@@ -353,10 +335,10 @@ describe('SQL Compiler', () => {
 						{
 							kind: 'comparison',
 							field: 'name',
-							operator: 'eq',
+							operator: 'eq' as const,
 							value: 'Alice',
 						},
-						{ kind: 'comparison', field: 'name', operator: 'eq', value: 'Bob' },
+						{ kind: 'comparison', field: 'name', operator: 'eq' as const, value: 'Bob' },
 					],
 				},
 			};
@@ -374,7 +356,7 @@ describe('SQL Compiler', () => {
 				where: {
 					kind: 'or',
 					conditions: [
-						{ kind: 'comparison', field: 'id', operator: 'eq', value: 1 },
+						{ kind: 'comparison', field: 'id', operator: 'eq' as const, value: 1 },
 						{
 							kind: 'like',
 							field: 'name',
@@ -406,7 +388,7 @@ describe('SQL Compiler', () => {
 					condition: {
 						kind: 'comparison',
 						field: 'active',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: false,
 					},
 				},
@@ -558,13 +540,13 @@ describe('SQL Compiler', () => {
 							{
 								kind: 'comparison',
 								field: 'locale',
-								operator: 'eq',
+								operator: 'eq' as const,
 								value: 'en',
 							},
 							{
 								kind: 'comparison',
 								field: 'approved',
-								operator: 'eq',
+								operator: 'eq' as const,
 								value: true,
 							},
 						],
@@ -590,7 +572,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison',
 						field: 'type',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: 'thumbnail',
 					},
 				},
@@ -614,7 +596,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison',
 						field: 'approved',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: true,
 					},
 				},
@@ -638,7 +620,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison',
 						field: 'locale',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: 'fr',
 					},
 				},
@@ -677,7 +659,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison',
 						field: 'locale',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: 'fr',
 					},
 				},
@@ -703,7 +685,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison',
 						field: 'approved',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: true,
 					},
 				},
@@ -761,13 +743,13 @@ describe('SQL Compiler', () => {
 								{
 									kind: 'comparison',
 									field: 'name',
-									operator: 'eq',
+									operator: 'eq' as const,
 									value: 'Alice',
 								},
 								{
 									kind: 'comparison',
 									field: 'name',
-									operator: 'eq',
+									operator: 'eq' as const,
 									value: 'Bob',
 								},
 							],
@@ -775,7 +757,7 @@ describe('SQL Compiler', () => {
 						{
 							kind: 'comparison',
 							field: 'active',
-							operator: 'eq',
+							operator: 'eq' as const,
 							value: true,
 						},
 					],
@@ -800,7 +782,7 @@ describe('SQL Compiler', () => {
 						{
 							kind: 'comparison',
 							field: 'active',
-							operator: 'eq',
+							operator: 'eq' as const,
 							value: true,
 						},
 						{ kind: 'like', field: 'email', pattern: '%@example.com' },
@@ -1039,7 +1021,7 @@ describe('SQL Compiler', () => {
 				where: {
 					kind: 'comparison',
 					field: 'published',
-					operator: 'eq',
+					operator: 'eq' as const,
 					value: true,
 				},
 				groupBy: ['userId'],
@@ -1224,7 +1206,7 @@ describe('SQL Compiler', () => {
 				having: {
 					kind: 'comparison',
 					field: 'userId',
-					operator: 'gt',
+					operator: 'gt' as const,
 					value: 5,
 				},
 			};
@@ -1249,7 +1231,7 @@ describe('SQL Compiler', () => {
 				having: {
 					kind: 'comparison',
 					field: 'userId',
-					operator: 'gt',
+					operator: 'gt' as const,
 					value: 0,
 				},
 			};
@@ -1283,7 +1265,7 @@ describe('SQL Compiler', () => {
 				type: 'select',
 				from: 'users',
 				select: {
-					type: 'columns',
+					type: 'fields',
 					fields: ['name', 'email'],
 				},
 				distinct: true,
@@ -1305,51 +1287,34 @@ describe('SQL Compiler', () => {
 	describe('RFC-001: Recursive CTE', () => {
 		/**
 		 * Recursive schema: Categories with parent (for hierarchical traversal)
+		 * ARCH-005: Migrated to schema() + fk() API with self-ref roles
 		 */
-		const recursiveSchema = buildModelFromResolvedSchema(
-			defineSchema(
-				{
-					categories: {
-						id: { type: 'integer', primaryKey: true },
-						name: { type: 'string' },
-						parentId: { type: 'integer' },
-					},
-				},
-				{
-					relations: {
-						'categories.parent': { kind: 'belongsTo', target: 'categories', foreignKey: 'parentId' },
-						'categories.children': { kind: 'hasMany', target: 'categories', foreignKey: 'parentId' },
-					},
-				},
-			),
-		);
+		const recursiveSchema = schema({
+			categories: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string',
+				parentId: fk('categories', {
+					nullable: true,
+					roles: { parent: 'parent', children: 'children' },
+				}),
+			},
+		}).model;
 
 		/**
 		 * Edge-table schema: Roles with edges (for role hierarchy)
+		 * ARCH-005: Migrated to schema() + fk() API with multi-FK
 		 */
-		const edgeTableSchema = buildModelFromResolvedSchema(
-			defineSchema(
-				{
-					roles: {
-						id: { type: 'integer', primaryKey: true },
-						name: { type: 'string' },
-					},
-					roleEdges: {
-						id: { type: 'integer', primaryKey: true },
-						parentRoleId: { type: 'integer' },
-						childRoleId: { type: 'integer' },
-					},
-				},
-				{
-					relations: {
-						'roles.parentEdges': { kind: 'hasMany', target: 'roleEdges', foreignKey: 'childRoleId' },
-						'roles.childEdges': { kind: 'hasMany', target: 'roleEdges', foreignKey: 'parentRoleId' },
-						'roleEdges.parentRole': { kind: 'belongsTo', target: 'roles', foreignKey: 'parentRoleId' },
-						'roleEdges.childRole': { kind: 'belongsTo', target: 'roles', foreignKey: 'childRoleId' },
-					},
-				},
-			),
-		);
+		const edgeTableSchema = schema({
+			roles: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string',
+			},
+			roleEdges: {
+				id: { type: 'integer', primaryKey: true },
+				parentRoleId: fk('roles', { as: 'parentRole', inverse: 'childEdges' }),
+				childRoleId: fk('roles', { as: 'childRole', inverse: 'parentEdges' }),
+			},
+		}).model;
 
 		describe('adjacency traversal', () => {
 			it('should generate WITH RECURSIVE SQL for adjacency traversal', () => {
@@ -1362,7 +1327,7 @@ describe('SQL Compiler', () => {
 						where: {
 							kind: 'comparison',
 							field: 'id',
-							operator: 'eq',
+							operator: 'eq' as const,
 							value: 1,
 						},
 					},
@@ -1403,7 +1368,7 @@ describe('SQL Compiler', () => {
 						direction: 'descendants',
 					},
 					maxDepth: 10,
-					track: { depth: true },
+					track: { depth: {} },
 				};
 
 				const report = planRecursive(intent, recursiveSchema);
@@ -1423,7 +1388,7 @@ describe('SQL Compiler', () => {
 						where: {
 							kind: 'comparison',
 							field: 'id',
-							operator: 'eq',
+							operator: 'eq' as const,
 							value: 5,
 						},
 					},
@@ -1456,7 +1421,7 @@ describe('SQL Compiler', () => {
 						where: {
 							kind: 'comparison',
 							field: 'name',
-							operator: 'eq',
+							operator: 'eq' as const,
 							value: 'admin',
 						},
 					},
@@ -1775,12 +1740,11 @@ describe('SQL Compiler', () => {
 		// ====================================================================
 
 		describe('CORE-007: Advanced recursive options', () => {
-			// Sample compiled SQL for testing injection
-			const sampleCteSQL = {
-				sql: 'WITH RECURSIVE category_tree(node_id, depth) AS (...) SELECT * FROM category_tree',
-				parameters: [],
-				query: { kind: 'SelectQueryNode' },
-			};
+			// Sample compiled SQL for testing injection (using CompiledQuery.raw for proper type)
+			const sampleCteSQL = CompiledQuery.raw(
+				'WITH RECURSIVE category_tree(node_id, depth) AS (...) SELECT * FROM category_tree',
+				[],
+			);
 
 			describe('injectAdvancedRecursiveClauses (unit tests)', () => {
 				it('should inject CYCLE clause when cycle detection is enabled (PostgreSQL)', () => {
@@ -2016,7 +1980,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison' as const,
 						field: 'id',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: 1,
 					},
 				};
@@ -2070,13 +2034,13 @@ describe('SQL Compiler', () => {
 							{
 								kind: 'comparison' as const,
 								field: 'id',
-								operator: 'eq',
+								operator: 'eq' as const,
 								value: 1,
 							},
 							{
 								kind: 'comparison' as const,
 								field: 'active',
-								operator: 'eq',
+								operator: 'eq' as const,
 								value: false,
 							},
 						],
@@ -2099,7 +2063,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison' as const,
 						field: 'id',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: 1,
 					},
 				};
@@ -2120,7 +2084,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison' as const,
 						field: 'id',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: 1,
 					},
 				};
@@ -2183,13 +2147,13 @@ describe('SQL Compiler', () => {
 							{
 								kind: 'comparison' as const,
 								field: 'id',
-								operator: 'eq',
+								operator: 'eq' as const,
 								value: 1,
 							},
 							{
 								kind: 'comparison' as const,
 								field: 'id',
-								operator: 'eq',
+								operator: 'eq' as const,
 								value: 2,
 							},
 						],
@@ -2210,7 +2174,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison' as const,
 						field: 'id',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: 1,
 					},
 				};
@@ -2642,52 +2606,26 @@ describe('SQL Compiler', () => {
 		 * This allows testing:
 		 * - posts.author.company (belongsTo chain)
 		 * - companies.employees.posts (hasMany chain)
+		 *
+		 * ARCH-005: Migrated to schema() + fk() API
 		 */
-		const multiHopSchema = buildModelFromResolvedSchema(
-			defineSchema(
-				{
-					companies: {
-						id: { type: 'integer', primaryKey: true },
-						name: { type: 'string' },
-					},
-					users: {
-						id: { type: 'integer', primaryKey: true },
-						name: { type: 'string' },
-						companyId: { type: 'integer' },
-					},
-					posts: {
-						id: { type: 'integer', primaryKey: true },
-						title: { type: 'string' },
-						featured: { type: 'boolean' },
-						userId: { type: 'integer' },
-					},
-				},
-				{
-					relations: {
-						'companies.employees': {
-							kind: 'hasMany',
-							target: 'users',
-							foreignKey: 'companyId',
-						},
-						'users.company': {
-							kind: 'belongsTo',
-							target: 'companies',
-							foreignKey: 'companyId',
-						},
-						'users.posts': {
-							kind: 'hasMany',
-							target: 'posts',
-							foreignKey: 'userId',
-						},
-						'posts.author': {
-							kind: 'belongsTo',
-							target: 'users',
-							foreignKey: 'userId',
-						},
-					},
-				},
-			),
-		);
+		const multiHopSchema = schema({
+			companies: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string',
+			},
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string',
+				companyId: fk('companies', { as: 'company', inverse: 'employees' }),
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: 'string',
+				featured: 'boolean',
+				userId: fk('users', { as: 'author', inverse: 'posts' }),
+			},
+		}).model;
 
 		it('should compile belongsTo chain: posts.author.company.name', () => {
 			// posts | where author.company.name = 'Acme'
@@ -2702,7 +2640,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison',
 						field: 'name',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: 'Acme',
 					},
 				},
@@ -2734,7 +2672,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison',
 						field: 'featured',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: true,
 					},
 				},
@@ -2766,7 +2704,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison',
 						field: 'featured',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: true,
 					},
 				},
@@ -2793,7 +2731,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison',
 						field: 'featured',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: true,
 					},
 				},
@@ -2822,7 +2760,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison',
 						field: 'featured',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: true,
 					},
 				},
@@ -2848,7 +2786,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison',
 						field: 'name',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: 'Acme',
 					},
 				},
@@ -2869,32 +2807,29 @@ describe('SQL Compiler', () => {
 			// The filter should be applied BOTH to EXISTS in WHERE AND to json_agg in SELECT
 
 			// Schema with json_agg strategy for includes
-			const jsonAggSchema = buildModelFromResolvedSchema(
-				defineSchema(
-					{
-						users: {
-							id: { type: 'integer', primaryKey: true },
-							name: { type: 'string' },
-						},
-						posts: {
-							id: { type: 'integer', primaryKey: true },
-							title: { type: 'string' },
-							featured: { type: 'boolean' },
-							userId: { type: 'integer' },
-						},
+			// ARCH-005: Migrated to schema() + fk() API, apply includeStrategy via relation patch
+			const jsonAggSchema = (() => {
+				const model = schema({
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: 'string',
 					},
-					{
-						relations: {
-							'users.posts': {
-								kind: 'hasMany',
-								target: 'posts',
-								foreignKey: 'userId',
-								includeStrategy: 'json_agg',
-							},
-						},
+					posts: {
+						id: { type: 'integer', primaryKey: true },
+						title: 'string',
+						featured: 'boolean',
+						userId: fk('users', { as: 'author', inverse: 'posts' }),
 					},
-				),
-			);
+				}).model;
+				// Apply includeStrategy hint to relation (cast to mutable for test)
+				const rel = model.relations.get('users.posts');
+				if (rel)
+					(model.relations as Map<string, typeof rel>).set('users.posts', {
+						...rel,
+						includeStrategy: 'json_agg',
+					});
+				return model;
+			})();
 
 			const intent: QueryIntent = {
 				type: 'select',
@@ -2907,7 +2842,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison',
 						field: 'featured',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: true,
 					},
 				},
@@ -2934,32 +2869,29 @@ describe('SQL Compiler', () => {
 			// So we should NOT apply the same filter to json_agg
 
 			// Schema with json_agg strategy for includes
-			const jsonAggSchema = buildModelFromResolvedSchema(
-				defineSchema(
-					{
-						users: {
-							id: { type: 'integer', primaryKey: true },
-							name: { type: 'string' },
-						},
-						posts: {
-							id: { type: 'integer', primaryKey: true },
-							title: { type: 'string' },
-							featured: { type: 'boolean' },
-							userId: { type: 'integer' },
-						},
+			// ARCH-005: Migrated to schema() + fk() API, apply includeStrategy via relation patch
+			const jsonAggSchema = (() => {
+				const model = schema({
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: 'string',
 					},
-					{
-						relations: {
-							'users.posts': {
-								kind: 'hasMany',
-								target: 'posts',
-								foreignKey: 'userId',
-								includeStrategy: 'json_agg',
-							},
-						},
+					posts: {
+						id: { type: 'integer', primaryKey: true },
+						title: 'string',
+						featured: 'boolean',
+						userId: fk('users', { as: 'author', inverse: 'posts' }),
 					},
-				),
-			);
+				}).model;
+				// Apply includeStrategy hint to relation (cast to mutable for test)
+				const rel = model.relations.get('users.posts');
+				if (rel)
+					(model.relations as Map<string, typeof rel>).set('users.posts', {
+						...rel,
+						includeStrategy: 'json_agg',
+					});
+				return model;
+			})();
 
 			const intent: QueryIntent = {
 				type: 'select',
@@ -2972,7 +2904,7 @@ describe('SQL Compiler', () => {
 					where: {
 						kind: 'comparison',
 						field: 'featured',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: true,
 					},
 				},
@@ -3008,6 +2940,7 @@ describe('SQL Compiler', () => {
 				// Given: users hasMany posts
 				// When: filter users by posts condition
 				const intent: QueryIntent = {
+					type: 'select',
 					from: 'users',
 					select: { type: 'all' },
 					where: {
@@ -3017,7 +2950,7 @@ describe('SQL Compiler', () => {
 						where: {
 							kind: 'comparison',
 							field: 'published',
-							operator: 'eq',
+							operator: 'eq' as const,
 							value: true,
 						},
 					},
@@ -3045,6 +2978,7 @@ describe('SQL Compiler', () => {
 				// Given: posts belongsTo users (cardinality: one)
 				// When: filter posts by author condition
 				const intent: QueryIntent = {
+					type: 'select',
 					from: 'posts',
 					select: { type: 'all' },
 					where: {
@@ -3054,7 +2988,7 @@ describe('SQL Compiler', () => {
 						where: {
 							kind: 'comparison',
 							field: 'active',
-							operator: 'eq',
+							operator: 'eq' as const,
 							value: true,
 						},
 					},
@@ -3083,6 +3017,7 @@ describe('SQL Compiler', () => {
 				// Given: users hasMany posts (normally exists)
 				// But: forceFilterStrategy: 'join'
 				const intent: QueryIntent = {
+					type: 'select',
 					from: 'users',
 					select: { type: 'all' },
 					where: {
@@ -3092,7 +3027,7 @@ describe('SQL Compiler', () => {
 						where: {
 							kind: 'comparison',
 							field: 'published',
-							operator: 'eq',
+							operator: 'eq' as const,
 							value: true,
 						},
 					},
@@ -3122,6 +3057,7 @@ describe('SQL Compiler', () => {
 				// Given: posts belongsTo author (normally join)
 				// But: forceFilterStrategy: 'exists'
 				const intent: QueryIntent = {
+					type: 'select',
 					from: 'posts',
 					select: { type: 'all' },
 					where: {
@@ -3131,7 +3067,7 @@ describe('SQL Compiler', () => {
 						where: {
 							kind: 'comparison',
 							field: 'active',
-							operator: 'eq',
+							operator: 'eq' as const,
 							value: true,
 						},
 					},
@@ -3161,6 +3097,7 @@ describe('SQL Compiler', () => {
 				const kysely = createTestKysely();
 
 				const intent: QueryIntent = {
+					type: 'select',
 					from: 'posts',
 					select: { type: 'all' },
 					where: {
@@ -3173,7 +3110,7 @@ describe('SQL Compiler', () => {
 								{
 									kind: 'comparison',
 									field: 'active',
-									operator: 'eq',
+									operator: 'eq' as const,
 									value: true,
 								},
 								{
@@ -3204,6 +3141,7 @@ describe('SQL Compiler', () => {
 				// Given: posts belongsTo author (would use join)
 				// But: mode is 'none' which requires EXISTS pattern
 				const intent: QueryIntent = {
+					type: 'select',
 					from: 'posts',
 					select: { type: 'all' },
 					where: {
@@ -3213,7 +3151,7 @@ describe('SQL Compiler', () => {
 						where: {
 							kind: 'comparison',
 							field: 'active',
-							operator: 'eq',
+							operator: 'eq' as const,
 							value: true,
 						},
 					},
@@ -3308,31 +3246,28 @@ describe('SQL Compiler', () => {
 				const kysely = createTestKysely();
 
 				// Given: users hasMany posts with explicit includeStrategy: 'join'
-				const schemaWithJoinHint = buildModelFromResolvedSchema(
-					defineSchema(
-						{
-							users: {
-								id: { type: 'integer', primaryKey: true },
-								name: { type: 'string' },
-							},
-							posts: {
-								id: { type: 'integer', primaryKey: true },
-								title: { type: 'string' },
-								userId: { type: 'integer' },
-							},
+				// ARCH-005: Migrated to schema() + fk() API, apply includeStrategy via relation patch
+				const schemaWithJoinHint = (() => {
+					const model = schema({
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: 'string',
 						},
-						{
-							relations: {
-								'users.posts': {
-									kind: 'hasMany',
-									target: 'posts',
-									foreignKey: 'userId',
-									includeStrategy: 'join',
-								},
-							},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: 'string',
+							userId: fk('users', { as: 'author', inverse: 'posts' }),
 						},
-					),
-				);
+					}).model;
+					// Apply includeStrategy hint to relation (cast to mutable for test)
+					const rel = model.relations.get('users.posts');
+					if (rel)
+						(model.relations as Map<string, typeof rel>).set('users.posts', {
+							...rel,
+							includeStrategy: 'join',
+						});
+					return model;
+				})();
 
 				// When: I select users with include('posts')
 				const intent: QueryIntent = {
@@ -3387,10 +3322,11 @@ describe('SQL Compiler', () => {
 
 				// And: separateIncludes should contain posts metadata
 				expect(result.separateIncludes).toHaveLength(1);
-				expect(result.separateIncludes[0].relationName).toBe('posts');
-				expect(result.separateIncludes[0].targetTable).toBe('posts');
-				expect(result.separateIncludes[0].foreignKey).toBe('userId');
-				expect(result.separateIncludes[0].sourceKey).toBe('id');
+				const postsInclude = result.separateIncludes[0]!;
+				expect(postsInclude.relationName).toBe('posts');
+				expect(postsInclude.targetTable).toBe('posts');
+				expect(postsInclude.foreignKey).toBe('userId');
+				expect(postsInclude.sourceKey).toBe('id');
 			});
 
 			it('should return empty separateIncludes for JOIN includes', () => {
@@ -3522,31 +3458,27 @@ describe('SQL Compiler', () => {
 				const kysely = createTestKysely();
 
 				// Given: users hasMany posts with explicit 'lateral' strategy hint
-				const schemaWithLateral = buildModelFromResolvedSchema(
-					defineSchema(
-						{
-							users: {
-								id: { type: 'integer', primaryKey: true },
-								name: { type: 'string' },
-							},
-							posts: {
-								id: { type: 'integer', primaryKey: true },
-								title: { type: 'string' },
-								userId: { type: 'integer' },
-							},
+				// ARCH-005: Migrated to schema() + fk() API
+				const schemaWithLateral = (() => {
+					const model = schema({
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: 'string',
 						},
-						{
-							relations: {
-								'users.posts': {
-									kind: 'hasMany',
-									target: 'posts',
-									foreignKey: 'userId',
-									includeStrategy: 'lateral',
-								},
-							},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: 'string',
+							userId: fk('users', { as: 'author', inverse: 'posts' }),
 						},
-					),
-				);
+					}).model;
+					const rel = model.relations.get('users.posts');
+					if (rel)
+						(model.relations as Map<string, typeof rel>).set('users.posts', {
+							...rel,
+							includeStrategy: 'lateral',
+						});
+					return model;
+				})();
 
 				// When: I select users with include('posts')
 				const intent: QueryIntent = {
@@ -3575,32 +3507,28 @@ describe('SQL Compiler', () => {
 			it('should support limit and orderBy in LATERAL subquery', () => {
 				const kysely = createTestKysely();
 
-				const schemaWithLateral = buildModelFromResolvedSchema(
-					defineSchema(
-						{
-							users: {
-								id: { type: 'integer', primaryKey: true },
-								name: { type: 'string' },
-							},
-							posts: {
-								id: { type: 'integer', primaryKey: true },
-								title: { type: 'string' },
-								createdAt: { type: 'timestamp' },
-								userId: { type: 'integer' },
-							},
+				// ARCH-005: Migrated to schema() + fk() API
+				const schemaWithLateral = (() => {
+					const model = schema({
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: 'string',
 						},
-						{
-							relations: {
-								'users.posts': {
-									kind: 'hasMany',
-									target: 'posts',
-									foreignKey: 'userId',
-									includeStrategy: 'lateral',
-								},
-							},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: 'string',
+							createdAt: 'timestamp',
+							userId: fk('users', { as: 'author', inverse: 'posts' }),
 						},
-					),
-				);
+					}).model;
+					const rel = model.relations.get('users.posts');
+					if (rel)
+						(model.relations as Map<string, typeof rel>).set('users.posts', {
+							...rel,
+							includeStrategy: 'lateral',
+						});
+					return model;
+				})();
 
 				// When: I select users with include('posts') with limit and orderBy
 				const intent: QueryIntent = {
@@ -3634,31 +3562,27 @@ describe('SQL Compiler', () => {
 				const kysely = createTestKysely();
 
 				// Given: users hasMany posts with explicit 'json_agg' strategy hint
-				const schemaWithJsonAgg = buildModelFromResolvedSchema(
-					defineSchema(
-						{
-							users: {
-								id: { type: 'integer', primaryKey: true },
-								name: { type: 'string' },
-							},
-							posts: {
-								id: { type: 'integer', primaryKey: true },
-								title: { type: 'string' },
-								userId: { type: 'integer' },
-							},
+				// ARCH-005: Migrated to schema() + fk() API
+				const schemaWithJsonAgg = (() => {
+					const model = schema({
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: 'string',
 						},
-						{
-							relations: {
-								'users.posts': {
-									kind: 'hasMany',
-									target: 'posts',
-									foreignKey: 'userId',
-									includeStrategy: 'json_agg',
-								},
-							},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: 'string',
+							userId: fk('users', { as: 'author', inverse: 'posts' }),
 						},
-					),
-				);
+					}).model;
+					const rel = model.relations.get('users.posts');
+					if (rel)
+						(model.relations as Map<string, typeof rel>).set('users.posts', {
+							...rel,
+							includeStrategy: 'json_agg',
+						});
+					return model;
+				})();
 
 				// When: I select users with include('posts')
 				const intent: QueryIntent = {
@@ -3693,32 +3617,28 @@ describe('SQL Compiler', () => {
 			it('should support orderBy in JSON_AGG aggregation', () => {
 				const kysely = createTestKysely();
 
-				const schemaWithJsonAgg = buildModelFromResolvedSchema(
-					defineSchema(
-						{
-							users: {
-								id: { type: 'integer', primaryKey: true },
-								name: { type: 'string' },
-							},
-							posts: {
-								id: { type: 'integer', primaryKey: true },
-								title: { type: 'string' },
-								createdAt: { type: 'timestamp' },
-								userId: { type: 'integer' },
-							},
+				// ARCH-005: Migrated to schema() + fk() API
+				const schemaWithJsonAgg = (() => {
+					const model = schema({
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: 'string',
 						},
-						{
-							relations: {
-								'users.posts': {
-									kind: 'hasMany',
-									target: 'posts',
-									foreignKey: 'userId',
-									includeStrategy: 'json_agg',
-								},
-							},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: 'string',
+							createdAt: 'timestamp',
+							userId: fk('users', { as: 'author', inverse: 'posts' }),
 						},
-					),
-				);
+					}).model;
+					const rel = model.relations.get('users.posts');
+					if (rel)
+						(model.relations as Map<string, typeof rel>).set('users.posts', {
+							...rel,
+							includeStrategy: 'json_agg',
+						});
+					return model;
+				})();
 
 				// When: I select users with include('posts') with orderBy
 				const intent: QueryIntent = {
@@ -3747,31 +3667,27 @@ describe('SQL Compiler', () => {
 			it('should return empty JSON array when no related records', () => {
 				const kysely = createTestKysely();
 
-				const schemaWithJsonAgg = buildModelFromResolvedSchema(
-					defineSchema(
-						{
-							users: {
-								id: { type: 'integer', primaryKey: true },
-								name: { type: 'string' },
-							},
-							posts: {
-								id: { type: 'integer', primaryKey: true },
-								title: { type: 'string' },
-								userId: { type: 'integer' },
-							},
+				// ARCH-005: Migrated to schema() + fk() API
+				const schemaWithJsonAgg = (() => {
+					const model = schema({
+						users: {
+							id: { type: 'integer', primaryKey: true },
+							name: 'string',
 						},
-						{
-							relations: {
-								'users.posts': {
-									kind: 'hasMany',
-									target: 'posts',
-									foreignKey: 'userId',
-									includeStrategy: 'json_agg',
-								},
-							},
+						posts: {
+							id: { type: 'integer', primaryKey: true },
+							title: 'string',
+							userId: fk('users', { as: 'author', inverse: 'posts' }),
 						},
-					),
-				);
+					}).model;
+					const rel = model.relations.get('users.posts');
+					if (rel)
+						(model.relations as Map<string, typeof rel>).set('users.posts', {
+							...rel,
+							includeStrategy: 'json_agg',
+						});
+					return model;
+				})();
 
 				const intent: QueryIntent = {
 					type: 'select',
@@ -3958,7 +3874,7 @@ describe('SQL Compiler', () => {
 						where: {
 							kind: 'comparison',
 							field: 'active',
-							operator: 'eq',
+							operator: 'eq' as const,
 							value: true,
 						},
 					},
@@ -4096,32 +4012,20 @@ describe('ADAPTER-003: Smart Column Aliasing - onCollision mode', () => {
 	// Schema with overlapping column names for collision testing
 	// users: id, name, createdAt
 	// posts: id, title, userId, createdAt (id and createdAt collide with users)
-	const schemaWithCollisions = buildModelFromResolvedSchema(
-		defineSchema(
-			{
-				users: {
-					id: { type: 'integer', primaryKey: true },
-					name: { type: 'string' },
-					createdAt: { type: 'string' },
-				},
-				posts: {
-					id: { type: 'integer', primaryKey: true },
-					title: { type: 'string' },
-					userId: { type: 'integer' },
-					createdAt: { type: 'string' },
-				},
-			},
-			{
-				relations: {
-					'posts.author': {
-						kind: 'belongsTo',
-						target: 'users',
-						foreignKey: 'userId',
-					},
-				},
-			},
-		),
-	);
+	// ARCH-005: Migrated to schema() + fk() API
+	const schemaWithCollisions = schema({
+		users: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'string',
+			createdAt: 'string',
+		},
+		posts: {
+			id: { type: 'integer', primaryKey: true },
+			title: 'string',
+			userId: fk('users', { as: 'author', inverse: 'posts' }),
+			createdAt: 'string',
+		},
+	}).model;
 
 	describe("aliasIncludedColumns: 'always' (default)", () => {
 		it('should alias ALL columns from included tables', () => {
@@ -4241,43 +4145,26 @@ describe('ADAPTER-003: Smart Column Aliasing - onCollision mode', () => {
 
 	describe('collision detection across multiple includes', () => {
 		// Schema with multiple relations where column names collide
-		const schemaWithMultipleIncludes = buildModelFromResolvedSchema(
-			defineSchema(
-				{
-					comments: {
-						id: { type: 'integer', primaryKey: true },
-						content: { type: 'string' },
-						postId: { type: 'integer' },
-						authorId: { type: 'integer' },
-						createdAt: { type: 'string' },
-					},
-					posts: {
-						id: { type: 'integer', primaryKey: true },
-						title: { type: 'string' },
-						createdAt: { type: 'string' },
-					},
-					users: {
-						id: { type: 'integer', primaryKey: true },
-						name: { type: 'string' },
-						createdAt: { type: 'string' },
-					},
-				},
-				{
-					relations: {
-						'comments.post': {
-							kind: 'belongsTo',
-							target: 'posts',
-							foreignKey: 'postId',
-						},
-						'comments.author': {
-							kind: 'belongsTo',
-							target: 'users',
-							foreignKey: 'authorId',
-						},
-					},
-				},
-			),
-		);
+		// ARCH-005: Migrated to schema() + fk() API
+		const schemaWithMultipleIncludes = schema({
+			comments: {
+				id: { type: 'integer', primaryKey: true },
+				content: 'string',
+				postId: fk('posts', { as: 'post', inverse: 'comments' }),
+				authorId: fk('users', { as: 'author', inverse: 'authoredComments' }),
+				createdAt: 'string',
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				title: 'string',
+				createdAt: 'string',
+			},
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string',
+				createdAt: 'string',
+			},
+		}).model;
 
 		it('should detect collisions across root and multiple included tables', () => {
 			// Given: comments with post and author includes
@@ -4322,7 +4209,7 @@ describe('CORE-006: Composite Key Support', () => {
 	 * tenant_orders has composite FK [tenantId, customerId] -> customers[tenantId, id]
 	 *
 	 * We construct ModelIR manually to set composite primary keys,
-	 * since defineSchema() defaults primaryKey to 'id'.
+	 * since schema() defaults primaryKey to 'id'.
 	 */
 	const compositeKeySchema = (() => {
 		const tables = new Map();
@@ -4436,7 +4323,7 @@ describe('CORE-006: Composite Key Support', () => {
 					where: {
 						kind: 'comparison',
 						field: 'status',
-						operator: 'eq',
+						operator: 'eq' as const,
 						value: 'completed',
 					},
 				},
@@ -4513,43 +4400,42 @@ describe('CORE-006: Composite Key Support', () => {
 	});
 
 	describe('CTE Include Strategy (CLI-012)', () => {
-		const createCteTestSchema = () =>
-			buildModelFromResolvedSchema(
-				defineSchema(
-					{
-						categories: {
-							id: { type: 'integer', primaryKey: true },
-							name: { type: 'string' },
-							parentId: { type: 'integer' },
-						},
-						users: {
-							id: { type: 'integer', primaryKey: true },
-							name: { type: 'string' },
-						},
-						posts: {
-							id: { type: 'integer', primaryKey: true },
-							title: { type: 'string' },
-							authorId: { type: 'integer' },
-						},
-					},
-					{
-						relations: {
-							'categories.parent': {
-								kind: 'belongsTo',
-								target: 'categories',
-								foreignKey: 'parentId',
-								includeStrategy: 'cte',
-							},
-							'users.posts': {
-								kind: 'hasMany',
-								target: 'posts',
-								foreignKey: 'authorId',
-								includeStrategy: 'cte',
-							},
-						},
-					},
-				),
-			);
+		// ARCH-005: Migrated to schema() + fk() API
+		const createCteTestSchema = () => {
+			const model = schema({
+				categories: {
+					id: { type: 'integer', primaryKey: true },
+					name: 'string',
+					parentId: fk('categories', {
+						nullable: true,
+						roles: { parent: 'parent', children: 'children' },
+					}),
+				},
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					name: 'string',
+				},
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					title: 'string',
+					authorId: fk('users', { as: 'author', inverse: 'posts' }),
+				},
+			}).model;
+			// Apply CTE includeStrategy hints
+			const parentRel = model.relations.get('categories.parent');
+			if (parentRel)
+				(model.relations as Map<string, typeof parentRel>).set(
+					'categories.parent',
+					{ ...parentRel, includeStrategy: 'cte' },
+				);
+			const postsRel = model.relations.get('users.posts');
+			if (postsRel)
+				(model.relations as Map<string, typeof postsRel>).set('users.posts', {
+					...postsRel,
+					includeStrategy: 'cte',
+				});
+			return model;
+		};
 
 		it('should generate CTE when includeStrategy is cte for self-referential relation', () => {
 			const kysely = createTestKysely();
@@ -4646,7 +4532,7 @@ describe('CORE-006: Composite Key Support', () => {
 						where: {
 							kind: 'comparison',
 							field: 'title',
-							operator: 'eq',
+							operator: 'eq' as const,
 							value: 'Hello',
 						},
 					},
@@ -4697,44 +4583,41 @@ describe('CORE-006: Composite Key Support', () => {
 		it('should apply filters to nested CTEs (CLI-012b)', () => {
 			const kysely = createTestKysely();
 			// Extended schema with nested relations
-			const model = buildModelFromResolvedSchema(
-				defineSchema(
-					{
-						users: {
-							id: { type: 'integer', primaryKey: true },
-							name: { type: 'string' },
-						},
-						posts: {
-							id: { type: 'integer', primaryKey: true },
-							title: { type: 'string' },
-							authorId: { type: 'integer' },
-							published: { type: 'boolean' },
-						},
-						comments: {
-							id: { type: 'integer', primaryKey: true },
-							content: { type: 'string' },
-							postId: { type: 'integer' },
-							approved: { type: 'boolean' },
-						},
+			// ARCH-005: Migrated to schema() + fk() API
+			const model = (() => {
+				const m = schema({
+					users: {
+						id: { type: 'integer', primaryKey: true },
+						name: 'string',
 					},
-					{
-						relations: {
-							'users.posts': {
-								kind: 'hasMany',
-								target: 'posts',
-								foreignKey: 'authorId',
-								includeStrategy: 'cte',
-							},
-							'posts.comments': {
-								kind: 'hasMany',
-								target: 'comments',
-								foreignKey: 'postId',
-								includeStrategy: 'cte',
-							},
-						},
+					posts: {
+						id: { type: 'integer', primaryKey: true },
+						title: 'string',
+						authorId: fk('users', { as: 'author', inverse: 'posts' }),
+						published: 'boolean',
 					},
-				),
-			);
+					comments: {
+						id: { type: 'integer', primaryKey: true },
+						content: 'string',
+						postId: fk('posts', { as: 'post', inverse: 'comments' }),
+						approved: 'boolean',
+					},
+				}).model;
+				// Apply CTE includeStrategy hints
+				const postsRel = m.relations.get('users.posts');
+				if (postsRel)
+					(m.relations as Map<string, typeof postsRel>).set('users.posts', {
+						...postsRel,
+						includeStrategy: 'cte',
+					});
+				const commentsRel = m.relations.get('posts.comments');
+				if (commentsRel)
+					(m.relations as Map<string, typeof commentsRel>).set(
+						'posts.comments',
+						{ ...commentsRel, includeStrategy: 'cte' },
+					);
+				return m;
+			})();
 
 			// Query users -> posts (published) -> comments (approved)
 			const intent: QueryIntent = {
@@ -4746,7 +4629,7 @@ describe('CORE-006: Composite Key Support', () => {
 						where: {
 							kind: 'comparison',
 							field: 'published',
-							operator: 'eq',
+							operator: 'eq' as const,
 							value: true,
 						},
 						include: [
@@ -4755,7 +4638,7 @@ describe('CORE-006: Composite Key Support', () => {
 								where: {
 									kind: 'comparison',
 									field: 'approved',
-									operator: 'eq',
+									operator: 'eq' as const,
 									value: true,
 								},
 							},
@@ -4781,32 +4664,18 @@ describe('CORE-006: Composite Key Support', () => {
 		// CLI-012c: Recursive CTEs for self-referential relations
 		describe('recursive CTEs (CLI-012c)', () => {
 			// Helper to create self-referential schema
+			// ARCH-005: Migrated to schema() + fk() API
 			function createRecursiveSchema() {
-				return buildModelFromResolvedSchema(
-					defineSchema(
-						{
-							categories: {
-								id: { type: 'integer', primaryKey: true },
-								name: { type: 'string' },
-								parentId: { type: 'integer' },
-							},
-						},
-						{
-							relations: {
-								'categories.children': {
-									kind: 'hasMany',
-									target: 'categories',
-									foreignKey: 'parentId',
-								},
-								'categories.parent': {
-									kind: 'belongsTo',
-									target: 'categories',
-									foreignKey: 'parentId',
-								},
-							},
-						},
-					),
-				);
+				return schema({
+					categories: {
+						id: { type: 'integer', primaryKey: true },
+						name: 'string',
+						parentId: fk('categories', {
+							nullable: true,
+							roles: { parent: 'parent', children: 'children' },
+						}),
+					},
+				}).model;
 			}
 
 			it('should generate WITH RECURSIVE for self-referential include with recursive option', () => {
@@ -4856,7 +4725,7 @@ describe('CORE-006: Composite Key Support', () => {
 							relation: 'children',
 							recursive: {
 								maxDepth: 5,
-								track: { depth: true },
+								track: { depth: {} },
 							},
 						},
 					],
@@ -4902,27 +4771,18 @@ describe('CORE-006: Composite Key Support', () => {
 
 			it('should apply include.where filter to recursive CTE', () => {
 				const kysely = createTestKysely();
-				const model = buildModelFromResolvedSchema(
-					defineSchema(
-						{
-							categories: {
-								id: { type: 'integer', primaryKey: true },
-								name: { type: 'string' },
-								parentId: { type: 'integer' },
-								active: { type: 'boolean' },
-							},
-						},
-						{
-							relations: {
-								'categories.children': {
-									kind: 'hasMany',
-									target: 'categories',
-									foreignKey: 'parentId',
-								},
-							},
-						},
-					),
-				);
+				// ARCH-005: Migrated to schema() + fk() API
+				const model = schema({
+					categories: {
+						id: { type: 'integer', primaryKey: true },
+						name: 'string',
+						parentId: fk('categories', {
+							nullable: true,
+							roles: { parent: 'parent', children: 'children' },
+						}),
+						active: 'boolean',
+					},
+				}).model;
 
 				const intent: QueryIntent = {
 					type: 'select',
@@ -4933,7 +4793,7 @@ describe('CORE-006: Composite Key Support', () => {
 							where: {
 								kind: 'comparison',
 								field: 'active',
-								operator: 'eq',
+								operator: 'eq' as const,
 								value: true,
 							},
 							recursive: { maxDepth: 10 },

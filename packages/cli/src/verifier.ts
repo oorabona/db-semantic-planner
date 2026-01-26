@@ -4,7 +4,7 @@
  * Compares schema definition against real database for drift detection.
  */
 
-import type { ResolvedSchema } from '@dbsp/core';
+import type { ResolvedSchema, Schema, SchemaDefinition } from '@dbsp/core';
 
 // ============================================================================
 // Types
@@ -170,18 +170,47 @@ function typesCompatible(schemaType: string, dbType: string): boolean {
 // ============================================================================
 
 /**
+ * Schema input type for verify function.
+ * Accepts either:
+ * - ResolvedSchema from defineSchema() (legacy)
+ * - Schema from schema() (new API)
+ * - Raw SchemaDefinition
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type VerifySchemaInput = ResolvedSchema | Schema<any> | SchemaDefinition;
+
+/**
+ * Extract tables from various schema input types.
+ */
+function extractTables(
+	input: VerifySchemaInput,
+): Record<string, Record<string, unknown>> {
+	// New Schema type has 'definition' property
+	if ('definition' in input && 'model' in input) {
+		return input.definition as Record<string, Record<string, unknown>>;
+	}
+	// Legacy ResolvedSchema has 'tables' property with 'relations' sibling
+	if ('tables' in input && 'relations' in input) {
+		return input.tables as Record<string, Record<string, unknown>>;
+	}
+	// Raw SchemaDefinition - tables are at top level
+	return input as Record<string, Record<string, unknown>>;
+}
+
+/**
  * Verify schema against database tables.
  *
- * @param schema - Resolved schema from defineSchema()
+ * @param schema - Schema from schema(), defineSchema(), or raw definition
  * @param dbTables - Tables from database introspection
  * @returns Verification result with issues
  */
 export function verify(
-	schema: ResolvedSchema,
+	schema: VerifySchemaInput,
 	dbTables: DbTableInfo[],
 ): VerifyResult {
 	const issues: DriftIssue[] = [];
-	const schemaTableNames = Object.keys(schema.tables);
+	const tables = extractTables(schema);
+	const schemaTableNames = Object.keys(tables);
 	const dbTableNames = dbTables.map((t) => t.name);
 	const dbTableMap = new Map(dbTables.map((t) => [t.name, t]));
 
@@ -214,7 +243,7 @@ export function verify(
 		const dbTable = dbTableMap.get(tableName);
 		if (!dbTable) continue; // Already reported as missing
 
-		const schemaTable = schema.tables[tableName];
+		const schemaTable = tables[tableName];
 		// Safety check (should always exist since we're iterating schemaTableNames)
 		if (!schemaTable) continue;
 
@@ -237,12 +266,17 @@ export function verify(
 				continue;
 			}
 
-			const schemaColumn = schemaTable[columnName];
+			const schemaColumn = schemaTable[columnName] as
+				| { type: string; nullable?: boolean }
+				| undefined;
 			// Safety check (should always exist since we're iterating schemaColumnNames)
-			if (!schemaColumn) continue;
+			if (!schemaColumn || typeof schemaColumn !== 'object') continue;
 
 			// Check type compatibility
-			if (!typesCompatible(schemaColumn.type, dbColumn.dataType)) {
+			if (
+				'type' in schemaColumn &&
+				!typesCompatible(schemaColumn.type, dbColumn.dataType)
+			) {
 				issues.push({
 					severity: 'error',
 					type: 'type_mismatch',
@@ -253,7 +287,8 @@ export function verify(
 			}
 
 			// Check nullable mismatch
-			const schemaNullable = schemaColumn.nullable ?? true;
+			const schemaNullable =
+				'nullable' in schemaColumn ? (schemaColumn.nullable ?? true) : true;
 			if (schemaNullable !== dbColumn.isNullable) {
 				issues.push({
 					severity: 'warning',

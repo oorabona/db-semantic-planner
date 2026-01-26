@@ -9,38 +9,25 @@
 
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { WhereIntent } from '../intent-ast.js';
-import { and, buildModelFromResolvedSchema, createOrm, defineSchema, eq, or } from './index.js';
+import { and, createOrm, eq, or } from './index.js';
+import { ref, schema } from './schema.js';
 
 // Schema with relations for testing
-const testSchema = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			users: {
-				id: { type: 'integer', primaryKey: true },
-				name: { type: 'string' },
-				email: { type: 'string' },
-				active: { type: 'boolean' },
-				role: { type: 'string' },
-			},
-			posts: {
-				id: { type: 'integer', primaryKey: true },
-				title: { type: 'string' },
-				authorId: { type: 'integer' },
-				reviewerId: { type: 'integer' },
-			},
-		},
-		{
-			relations: {
-				// Two relations from users to posts (ambiguous)
-				'users.authoredPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' },
-				'users.reviewedPosts': { kind: 'hasMany', target: 'posts', foreignKey: 'reviewerId' },
-				// Two relations from posts to users (ambiguous by target)
-				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' },
-				'posts.reviewer': { kind: 'belongsTo', target: 'users', foreignKey: 'reviewerId' },
-			},
-		},
-	),
-);
+const testSchema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		email: 'string',
+		active: 'boolean',
+		role: 'string',
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		authorId: ref('users', { as: 'author', inverse: 'authoredPosts' }),
+		reviewerId: ref('users', { as: 'reviewer', inverse: 'reviewedPosts' }),
+	},
+}).model;
 
 describe('DX-011: API Improvements', () => {
 	describe('Block 1: where() AND chaining', () => {

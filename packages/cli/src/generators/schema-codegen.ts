@@ -27,25 +27,51 @@ export interface SchemaCodegenOptions {
 function generateColumnCode(
 	column: TableIR['columns'][number],
 	isPrimaryKey: boolean,
-	foreignKeyRef: { table: string; column?: string } | undefined,
+	fkInfo:
+		| {
+				table: string;
+				column?: string;
+				nullable?: boolean;
+				unique?: boolean;
+				onDelete?: string;
+				isSelfRef?: boolean;
+		  }
+		| undefined,
 	options: SchemaCodegenOptions,
 ): string {
-	const props: string[] = [];
+	// ARCH-005: FK columns become ref() calls
+	if (fkInfo) {
+		return generateRefCode(column, fkInfo, options);
+	}
 
-	// Type is always required (ColumnType values are the same in core and schema)
+	// Check if we can use short form (just 'type' string)
+	const canUseShortForm =
+		!isPrimaryKey &&
+		!column.nullable &&
+		column.default === undefined &&
+		!column.unique;
+
+	if (canUseShortForm) {
+		// Short form: 'type'
+		let code = `'${column.type}'`;
+		if (options.includeDbTypeComments && column.originalDbType) {
+			code += ` /* from: ${column.originalDbType} */`;
+		}
+		return code;
+	}
+
+	// Long form: { type, primaryKey?, nullable?, default?, unique? }
+	const props: string[] = [];
 	props.push(`type: '${column.type}'`);
 
-	// Primary key
 	if (isPrimaryKey) {
 		props.push('primaryKey: true');
 	}
 
-	// Nullable (only add if true, false is default)
 	if (column.nullable) {
 		props.push('nullable: true');
 	}
 
-	// Default value
 	if (column.default !== undefined) {
 		const defaultStr =
 			typeof column.default === 'string'
@@ -54,19 +80,69 @@ function generateColumnCode(
 		props.push(`default: ${defaultStr}`);
 	}
 
-	// Foreign key reference
-	if (foreignKeyRef) {
-		if (foreignKeyRef.column && foreignKeyRef.column !== 'id') {
-			props.push(
-				`references: { table: '${foreignKeyRef.table}', column: '${foreignKeyRef.column}' }`,
-			);
-		} else {
-			props.push(`references: { table: '${foreignKeyRef.table}' }`);
-		}
+	if (column.unique) {
+		props.push('unique: true');
 	}
 
-	// Build the object
 	let code = `{ ${props.join(', ')} }`;
+
+	if (options.includeDbTypeComments && column.originalDbType) {
+		code += ` /* from: ${column.originalDbType} */`;
+	}
+
+	return code;
+}
+
+/**
+ * Generate ref() call for a foreign key column.
+ * ARCH-005: Use ref() instead of references: { table, column }
+ */
+function generateRefCode(
+	column: TableIR['columns'][number],
+	fkInfo: {
+		table: string;
+		column?: string;
+		nullable?: boolean;
+		unique?: boolean;
+		onDelete?: string;
+		isSelfRef?: boolean;
+	},
+	options: SchemaCodegenOptions,
+): string {
+	const refOptions: string[] = [];
+
+	// Nullable FK
+	if (fkInfo.nullable || column.nullable) {
+		refOptions.push('nullable: true');
+	}
+
+	// Unique FK → hasOne (1:1 relation)
+	if (fkInfo.unique || column.unique) {
+		refOptions.push('unique: true');
+	}
+
+	// onDelete action
+	if (fkInfo.onDelete && fkInfo.onDelete !== 'NO ACTION') {
+		refOptions.push(`onDelete: '${fkInfo.onDelete}'`);
+	}
+
+	// Self-referential FK needs roles
+	if (fkInfo.isSelfRef) {
+		// Infer role names from column name
+		// e.g., 'parentId' → parent: 'parent', children: 'children'
+		const baseName = column.name.replace(/Id$/, '');
+		refOptions.push(
+			`roles: { parent: '${baseName}', children: '${baseName === 'parent' ? 'children' : baseName + 's'}' }`,
+		);
+	}
+
+	// Build the ref() call
+	let code: string;
+	if (refOptions.length === 0) {
+		code = `ref('${fkInfo.table}')`;
+	} else {
+		code = `ref('${fkInfo.table}', { ${refOptions.join(', ')} })`;
+	}
 
 	// Add comment for original DB type if requested
 	if (options.includeDbTypeComments && column.originalDbType) {
@@ -83,8 +159,19 @@ function generateTableCode(
 	table: TableIR,
 	options: SchemaCodegenOptions,
 ): string {
-	// Build FK lookup map: column name -> { table, column }
-	const fkMap = new Map<string, { table: string; column?: string }>();
+	// ARCH-005: Build FK info map with extended properties
+	const fkMap = new Map<
+		string,
+		{
+			table: string;
+			column?: string;
+			nullable?: boolean;
+			unique?: boolean;
+			onDelete?: string;
+			isSelfRef?: boolean;
+		}
+	>();
+
 	for (const fk of table.foreignKeys) {
 		const localCol = fk.columns[0];
 		const refCol = fk.references.columns[0];
@@ -94,13 +181,41 @@ function generateTableCode(
 			localCol &&
 			refCol
 		) {
-			// exactOptionalPropertyTypes: omit 'column' when it's 'id' (the default)
-			const entry: { table: string; column?: string } = {
+			// Find the column to check nullable/unique
+			const colDef = table.columns.find((c) => c.name === localCol);
+
+			const entry: {
+				table: string;
+				column?: string;
+				nullable?: boolean;
+				unique?: boolean;
+				onDelete?: string;
+				isSelfRef?: boolean;
+			} = {
 				table: fk.references.table,
+				isSelfRef: fk.references.table === table.name,
 			};
+
+			// Only include column if not 'id' (the default)
 			if (refCol !== 'id') {
 				entry.column = refCol;
 			}
+
+			// Include nullable if true
+			if (colDef?.nullable) {
+				entry.nullable = true;
+			}
+
+			// Include unique if true
+			if (colDef?.unique) {
+				entry.unique = true;
+			}
+
+			// Include onDelete if not the default
+			if (fk.onDelete && fk.onDelete !== 'NO ACTION') {
+				entry.onDelete = fk.onDelete;
+			}
+
 			fkMap.set(localCol, entry);
 		}
 	}
@@ -110,8 +225,8 @@ function generateTableCode(
 			typeof table.primaryKey === 'string'
 				? col.name === table.primaryKey
 				: table.primaryKey.includes(col.name);
-		const fkRef = fkMap.get(col.name);
-		const code = generateColumnCode(col, isPrimaryKey, fkRef, options);
+		const fkInfo = fkMap.get(col.name);
+		const code = generateColumnCode(col, isPrimaryKey, fkInfo, options);
 		return `\t\t${col.name}: ${code}`;
 	});
 
@@ -153,12 +268,21 @@ export function generateSchemaFile(
 	lines.push(' */');
 	lines.push('');
 
-	// Imports
-	lines.push("import { defineSchema } from '@dbsp/core';");
+	// ARCH-005: Check if any table has FKs to determine imports
+	const hasForeignKeys = Array.from(model.tables.values()).some(
+		(table) => table.foreignKeys.length > 0,
+	);
+
+	// Imports - ARCH-005: Use schema() + ref() instead of defineSchema()
+	if (hasForeignKeys) {
+		lines.push("import { schema, ref } from '@dbsp/core';");
+	} else {
+		lines.push("import { schema } from '@dbsp/core';");
+	}
 	lines.push('');
 
-	// Schema definition
-	lines.push('export const schema = defineSchema({');
+	// Schema definition - ARCH-005: Use schema() instead of defineSchema()
+	lines.push('export const dbSchema = schema({');
 
 	// Generate each table
 	const tables = Array.from(model.tables.values());

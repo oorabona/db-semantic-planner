@@ -440,7 +440,7 @@ export class CompileOnlyAdapter implements Adapter<unknown> {
 		throw new ExecutionError({
 			operation: 'introspect',
 			reason: 'CompileOnlyAdapter does not support database introspection',
-			fix: 'Use createKyselyAdapter() with a real database connection, or provide an explicit schema via defineSchema()',
+			fix: 'Use createKyselyAdapter() with a real database connection, or provide an explicit schema via schema()',
 		});
 	}
 

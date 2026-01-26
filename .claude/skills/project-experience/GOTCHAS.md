@@ -1490,3 +1490,19 @@ default: v.optional(v.union([v.string(), v.number(), v.boolean()]));
 **Prevention:** When writing SQL generation code that works at different query levels (main query vs subquery), always consider whether helper functions assume main query context. Add explicit context detection or pass context as parameter.
 
 **Location:** `packages/adapter-kysely/src/compiler/helpers.ts` → `resolveFieldAlias()`
+
+### Export Name Conflicts Between Schema and Subquery APIs (2026-01-25) — ARCH-005
+
+**Issue:** ARCH-005 spec required exporting `ref()` for FK declaration, but a `ref()` function already existed in subquery-builder for correlated subqueries.
+
+**Symptoms:** Initially exported `ref as fk` to avoid conflict, but this broke CLI codegen which generated `import { schema, ref } from '@dbsp/core'`.
+
+**Cause:** Two different semantic concepts used the same function name:
+- `ref('users')` → FK declaration (ARCH-005 schema API)
+- `ref('id')` → Parent column reference in subquery (DX-012 subquery API)
+
+**Solution:** Renamed subquery's `ref()` to `outerRef()` to clearly indicate "reference to outer/parent query column". This follows the naming convention used by Drizzle ORM and other ORMs for correlated subqueries.
+
+**Prevention:** When designing new APIs, search codebase for existing exports with same name. Consider semantic clarity - `outerRef` is clearer than `ref` for its purpose anyway.
+
+**Location:** `packages/core/src/dx/subquery-builder.ts` → `outerRef()` (formerly `ref()`)

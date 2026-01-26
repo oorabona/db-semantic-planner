@@ -1,9 +1,4 @@
-import {
-	buildModelFromResolvedSchema,
-	defineSchema,
-	plan,
-	type QueryIntent,
-} from '@dbsp/core';
+import { fk, plan, schema, type QueryIntent } from '@dbsp/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { describe, expect, it } from 'vitest';
@@ -28,31 +23,21 @@ function createTestKysely() {
 	});
 }
 
-const basicSchema = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			users: {
-				id: { type: 'integer', primaryKey: true },
-				name: { type: 'string' },
-				email: { type: 'string' },
-				active: { type: 'boolean' },
-			},
-			posts: {
-				id: { type: 'integer', primaryKey: true },
-				title: { type: 'string' },
-				content: { type: 'string' },
-				userId: { type: 'integer' },
-				published: { type: 'boolean' },
-			},
-		},
-		{
-			relations: {
-				'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'userId' },
-				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'userId' },
-			},
-		},
-	),
-);
+const basicSchema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		email: 'string',
+		active: 'boolean',
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		content: 'string',
+		userId: fk('users', { as: 'author', inverse: 'posts' }),
+		published: 'boolean',
+	},
+}).model;
 
 // ============================================================================
 // createDump Tests
@@ -432,23 +417,16 @@ describe('Dump API', () => {
 
 	describe('Recursive Include Integration (DX-017)', () => {
 		// Schema with self-referential relation for recursive queries
-		const recursiveSchema = buildModelFromResolvedSchema(
-			defineSchema(
-				{
-					categories: {
-						id: { type: 'integer', primaryKey: true },
-						name: { type: 'string' },
-						parentId: { type: 'integer', nullable: true },
-					},
-				},
-				{
-					relations: {
-						'categories.children': { kind: 'hasMany', target: 'categories', foreignKey: 'parentId' },
-						'categories.parent': { kind: 'belongsTo', target: 'categories', foreignKey: 'parentId' },
-					},
-				},
-			),
-		);
+		const recursiveSchema = schema({
+			categories: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string',
+				parentId: fk('categories', {
+					nullable: true,
+					roles: { parent: 'parent', children: 'children' },
+				}),
+			},
+		}).model;
 
 		it('should generate WITH RECURSIVE SQL for recursive include', () => {
 			// Given - intent with recursive include (as IntentAST)

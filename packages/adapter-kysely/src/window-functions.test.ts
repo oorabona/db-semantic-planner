@@ -4,14 +4,13 @@
  */
 
 import {
-	buildModelFromResolvedSchema,
 	createOrm,
-	defineSchema,
 	denseRank,
 	lag,
 	lead,
 	rank,
 	rowNumber,
+	schema,
 	wAvg,
 	wCount,
 	wMax,
@@ -26,29 +25,27 @@ import { createKyselyAdapter } from './kysely-adapter.js';
 // Test Schema
 // ============================================================================
 
-const testModel = buildModelFromResolvedSchema(
-	defineSchema({
-		products: {
-			id: { type: 'integer', primaryKey: true },
-			name: { type: 'string' },
-			price: { type: 'decimal' },
-			categoryId: { type: 'integer' },
-			createdAt: { type: 'date' },
-		},
-		sales: {
-			id: { type: 'integer', primaryKey: true },
-			productId: { type: 'integer' },
-			amount: { type: 'decimal' },
-			date: { type: 'date' },
-		},
-		employees: {
-			id: { type: 'integer', primaryKey: true },
-			name: { type: 'string' },
-			department: { type: 'string' },
-			salary: { type: 'decimal' },
-		},
-	}),
-);
+const testSchema = schema({
+	products: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		price: 'decimal',
+		categoryId: 'integer',
+		createdAt: 'date',
+	},
+	sales: {
+		id: { type: 'integer', primaryKey: true },
+		productId: 'integer',
+		amount: 'decimal',
+		date: 'date',
+	},
+	employees: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		department: 'string',
+		salary: 'decimal',
+	},
+});
 
 // Create a mock Kysely instance for testing SQL generation only (no actual execution)
 const mockKysely = new Kysely<any>({
@@ -80,7 +77,7 @@ describe('DX-021: Window Functions Integration with columns() API', () => {
 	describe('ranking functions', () => {
 		it('should add ROW_NUMBER window function via columns()', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(mockKysely),
 			});
 
@@ -101,7 +98,7 @@ describe('DX-021: Window Functions Integration with columns() API', () => {
 
 		it('should add RANK with PARTITION BY via columns()', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(mockKysely),
 			});
 
@@ -125,7 +122,7 @@ describe('DX-021: Window Functions Integration with columns() API', () => {
 
 		it('should add DENSE_RANK window function', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(mockKysely),
 			});
 
@@ -141,7 +138,7 @@ describe('DX-021: Window Functions Integration with columns() API', () => {
 	describe('aggregate window functions', () => {
 		it('should add SUM aggregate window function with field', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(mockKysely),
 			});
 
@@ -165,7 +162,7 @@ describe('DX-021: Window Functions Integration with columns() API', () => {
 
 		it('should add AVG aggregate window function', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(mockKysely),
 			});
 
@@ -185,7 +182,7 @@ describe('DX-021: Window Functions Integration with columns() API', () => {
 
 		it('should add COUNT aggregate window function', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(mockKysely),
 			});
 
@@ -203,7 +200,7 @@ describe('DX-021: Window Functions Integration with columns() API', () => {
 
 		it('should add MIN window function', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(mockKysely),
 			});
 
@@ -220,7 +217,7 @@ describe('DX-021: Window Functions Integration with columns() API', () => {
 
 		it('should add MAX window function', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(mockKysely),
 			});
 
@@ -239,7 +236,7 @@ describe('DX-021: Window Functions Integration with columns() API', () => {
 	describe('offset window functions', () => {
 		it('should add LAG offset function', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(mockKysely),
 			});
 
@@ -257,7 +254,7 @@ describe('DX-021: Window Functions Integration with columns() API', () => {
 
 		it('should add LEAD offset function', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(mockKysely),
 			});
 
@@ -277,7 +274,7 @@ describe('DX-021: Window Functions Integration with columns() API', () => {
 	describe('multiple window functions in columns()', () => {
 		it('should support multiple window functions in single columns() call', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(mockKysely),
 			});
 
@@ -305,7 +302,7 @@ describe('DX-021: Window Functions Integration with columns() API', () => {
 	describe('window functions with other query features', () => {
 		it('should work with where()', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(mockKysely),
 			});
 
@@ -321,7 +318,7 @@ describe('DX-021: Window Functions Integration with columns() API', () => {
 
 		it('should work with orderBy() and limit()', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(mockKysely),
 			});
 
@@ -340,7 +337,7 @@ describe('DX-021: Window Functions Integration with columns() API', () => {
 	describe('builder immutability', () => {
 		it('should be immutable - original builder unchanged', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(mockKysely),
 			});
 

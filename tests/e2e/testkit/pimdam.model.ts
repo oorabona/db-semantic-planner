@@ -2,9 +2,10 @@
  * PIM/DAM ModelIR
  *
  * Schema definition for semantic query planning.
+ * Uses schema() + fk() API with auto-inferred relations.
  */
 
-import { buildModelFromResolvedSchema, defineSchema } from '@dbsp/core';
+import { fk, schema } from '@dbsp/core';
 
 /**
  * PIM/DAM schema for E2E tests.
@@ -13,110 +14,57 @@ import { buildModelFromResolvedSchema, defineSchema } from '@dbsp/core';
  * - categories (self-referential hierarchy)
  * - products
  * - assets (DAM)
- * - product_images
+ * - productImages
  * - variants
  */
-const pimdamSchema = defineSchema(
-	{
-		categories: {
-			id: { type: 'integer', primaryKey: true },
-			name: { type: 'string' },
-			parent_id: { type: 'integer' },
-		},
-		products: {
-			id: { type: 'integer', primaryKey: true },
-			sku: { type: 'string' },
-			title: { type: 'string' },
-			category_id: { type: 'integer' },
-			active: { type: 'boolean' },
-			deleted_at: { type: 'timestamp' },
-		},
-		assets: {
-			id: { type: 'integer', primaryKey: true },
-			kind: { type: 'string' },
-			sha256: { type: 'string' },
-			mime: { type: 'string' },
-			width: { type: 'integer' },
-			height: { type: 'integer' },
-			size_bytes: { type: 'integer' },
-			storage_key: { type: 'string' },
-			expires_at: { type: 'timestamp' },
-			created_at: { type: 'timestamp' },
-		},
-		product_images: {
-			id: { type: 'integer', primaryKey: true },
-			product_id: { type: 'integer' },
-			asset_id: { type: 'integer' },
-			locale: { type: 'string' },
-			status: { type: 'string' },
-			is_main: { type: 'boolean' },
-			position: { type: 'integer' },
-			deleted_at: { type: 'timestamp' },
-		},
-		variants: {
-			id: { type: 'integer', primaryKey: true },
-			product_id: { type: 'integer' },
-			sku: { type: 'string' },
-			name: { type: 'string' },
-			price_cents: { type: 'integer' },
-			stock: { type: 'integer' },
-		},
+const pimdamSchema = schema({
+	categories: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		// Self-ref with parent/children
+		parentId: fk('categories', {
+			nullable: true,
+			roles: { parent: 'parent', children: 'children' },
+		}),
 	},
-	{
-		relations: {
-			// Self-referential categories
-			'categories.parent': {
-				kind: 'belongsTo',
-				target: 'categories',
-				foreignKey: 'parent_id',
-			},
-			'categories.children': {
-				kind: 'hasMany',
-				target: 'categories',
-				foreignKey: 'parent_id',
-			},
-			'categories.products': {
-				kind: 'hasMany',
-				target: 'products',
-				foreignKey: 'category_id',
-			},
-			'products.category': {
-				kind: 'belongsTo',
-				target: 'categories',
-				foreignKey: 'category_id',
-			},
-			'products.images': {
-				kind: 'hasMany',
-				target: 'product_images',
-				foreignKey: 'product_id',
-			},
-			'products.variants': {
-				kind: 'hasMany',
-				target: 'variants',
-				foreignKey: 'product_id',
-			},
-			'product_images.product': {
-				kind: 'belongsTo',
-				target: 'products',
-				foreignKey: 'product_id',
-			},
-			'product_images.asset': {
-				kind: 'belongsTo',
-				target: 'assets',
-				foreignKey: 'asset_id',
-			},
-			'assets.productImages': {
-				kind: 'hasMany',
-				target: 'product_images',
-				foreignKey: 'asset_id',
-			},
-			'variants.product': {
-				kind: 'belongsTo',
-				target: 'products',
-				foreignKey: 'product_id',
-			},
-		},
+	products: {
+		id: { type: 'integer', primaryKey: true },
+		sku: 'string',
+		title: 'string',
+		categoryId: fk('categories'),
+		active: 'boolean',
+		deletedAt: { type: 'timestamp', nullable: true },
 	},
-);
+	assets: {
+		id: { type: 'integer', primaryKey: true },
+		kind: 'string',
+		sha256: 'string',
+		mime: 'string',
+		width: { type: 'integer', nullable: true },
+		height: { type: 'integer', nullable: true },
+		sizeBytes: 'integer',
+		storageKey: 'string',
+		expiresAt: { type: 'timestamp', nullable: true },
+		createdAt: 'timestamp',
+	},
+	productImages: {
+		id: { type: 'integer', primaryKey: true },
+		productId: fk('products'),
+		assetId: fk('assets'),
+		locale: 'string',
+		status: 'string',
+		isMain: 'boolean',
+		position: 'integer',
+		deletedAt: { type: 'timestamp', nullable: true },
+	},
+	variants: {
+		id: { type: 'integer', primaryKey: true },
+		productId: fk('products'),
+		sku: 'string',
+		name: 'string',
+		priceCents: 'integer',
+		stock: 'integer',
+	},
+});
 
-export const pimdamModel = buildModelFromResolvedSchema(pimdamSchema);
+export const pimdamModel = pimdamSchema.model;

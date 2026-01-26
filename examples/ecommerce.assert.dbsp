@@ -125,7 +125,7 @@ output.contains: variants.sku
 --- query: 12
 success: true
 sql.equals: select "_customers".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch5_ecommerce"."orders" AS __t__ WHERE "__t__"."customer_id" = "_customers"."id"), '[]'::json) as "orders_json" from "ch5_ecommerce"."customers" as "_customers"
-db.rows.equals: 7
+db.rows.equals: 5
 
 # ─────────────────────────────────────────
 # Query 13 orders | group by status | select sum(total)

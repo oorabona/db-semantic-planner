@@ -5,22 +5,46 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ResolvedSchema } from '@dbsp/core';
+import type { ModelIR, RelationIR, TableIR } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type BatchState, processDotCommand } from './batch.js';
 import type { DbConnection, ExecutionResult } from './db-connection.js';
+import type { LoadedSchema } from '../utils/schema-loader.js';
 
-// Minimal mock schema for testing
-const mockSchema: ResolvedSchema = {
-	tables: {
-		users: {
-			columns: { id: { type: 'integer' }, name: { type: 'text' } },
-			primary: ['id'],
+// ARCH-005: Minimal mock schema matching LoadedSchema interface
+const mockTables = new Map<string, TableIR>([
+	[
+		'users',
+		{
+			name: 'users',
+			columns: [
+				{ name: 'id', type: 'integer', nullable: false },
+				{ name: 'name', type: 'text', nullable: true },
+			],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
 		},
-	},
-	relations: [],
-	config: {},
-} as unknown as ResolvedSchema;
+	],
+]);
+
+const mockRelations = new Map<string, RelationIR>();
+
+const mockModel: ModelIR = {
+	tables: mockTables,
+	relations: mockRelations,
+	getTable: (name: string) => mockTables.get(name),
+	getRelation: (name: string) => mockRelations.get(name),
+	getRelationsFrom: () => [],
+	getRelationsTo: () => [],
+	isAmbiguous: () => ({ ambiguous: false, options: [] }),
+};
+
+const mockSchema: LoadedSchema = {
+	definition: { users: { id: { type: 'integer' }, name: { type: 'text' } } },
+	model: mockModel,
+	tableNames: ['users'],
+};
 
 // Mock database connection factory
 function createMockDbConnection(
@@ -369,7 +393,11 @@ describe('processDotCommand', () => {
 			const state = createBatchState({ outputMode: 'json' });
 
 			// Act
-			const result = await processDotCommand('.output table', mockSchema, state);
+			const result = await processDotCommand(
+				'.output table',
+				mockSchema,
+				state,
+			);
 
 			// Assert
 			expect(result.output).toContain('Output mode: table');

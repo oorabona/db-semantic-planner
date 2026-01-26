@@ -1,10 +1,10 @@
 import {
-	buildModelFromResolvedSchema,
 	createOrm,
-	defineSchema,
 	ExecutionError,
 	eq,
+	fk,
 	NotFoundError,
+	schema,
 } from '@dbsp/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
@@ -12,29 +12,19 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { InvalidIdentifierError } from './errors.js';
 import { createKyselyAdapter } from './kysely-adapter.js';
 
-// Create proper ModelIR using schema builder
-const testModel = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			users: {
-				id: { type: 'integer', primaryKey: true },
-				name: { type: 'string' },
-				email: { type: 'string' },
-			},
-			posts: {
-				id: { type: 'integer', primaryKey: true },
-				title: { type: 'string' },
-				userId: { type: 'integer' },
-			},
-		},
-		{
-			relations: {
-				'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'userId' },
-				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'userId' },
-			},
-		},
-	),
-);
+// Create proper Schema using schema builder
+const testSchema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		email: 'string',
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		userId: fk('users', { as: 'author', inverse: 'posts' }),
+	},
+});
 
 // Database schema types
 interface TestDatabase {
@@ -113,7 +103,7 @@ describe('Execution Layer', () => {
 
 	describe('findMany()', () => {
 		it('throws ExecutionError when db is not configured', async () => {
-			const orm = createOrm({ model: testModel });
+			const orm = createOrm({ schema: testSchema });
 
 			await expect(orm.select('users').all()).rejects.toThrow(ExecutionError);
 			await expect(orm.select('users').all()).rejects.toThrow(
@@ -123,7 +113,7 @@ describe('Execution Layer', () => {
 
 		it('executes query and returns rows when db is configured', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const result = await orm.select('users').all();
@@ -139,7 +129,7 @@ describe('Execution Layer', () => {
 			await setupDatabase(emptyDb);
 
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(emptyDb),
 			});
 			const result = await orm.select('users').all();
@@ -151,14 +141,14 @@ describe('Execution Layer', () => {
 
 	describe('findFirst()', () => {
 		it('throws ExecutionError when db is not configured', async () => {
-			const orm = createOrm({ model: testModel });
+			const orm = createOrm({ schema: testSchema });
 
 			await expect(orm.select('users').first()).rejects.toThrow(ExecutionError);
 		});
 
 		it('returns first row when results exist', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const result = await orm.select('users').first();
@@ -173,7 +163,7 @@ describe('Execution Layer', () => {
 			await setupDatabase(emptyDb);
 
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(emptyDb),
 			});
 			const result = await orm.select('users').first();
@@ -185,7 +175,7 @@ describe('Execution Layer', () => {
 
 	describe('findFirstOrThrow()', () => {
 		it('throws ExecutionError when db is not configured', async () => {
-			const orm = createOrm({ model: testModel });
+			const orm = createOrm({ schema: testSchema });
 
 			await expect(orm.select('users').firstOrThrow()).rejects.toThrow(
 				ExecutionError,
@@ -194,7 +184,7 @@ describe('Execution Layer', () => {
 
 		it('returns first row when results exist', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const result = await orm.select('users').firstOrThrow();
@@ -209,7 +199,7 @@ describe('Execution Layer', () => {
 			await setupDatabase(emptyDb);
 
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(emptyDb),
 			});
 
@@ -228,7 +218,7 @@ describe('Execution Layer', () => {
 			await setupDatabase(emptyDb);
 
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(emptyDb),
 			});
 
@@ -246,7 +236,7 @@ describe('Execution Layer', () => {
 	describe('withSchema()', () => {
 		it('returns a new ORM instance scoped to tenant schema', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -260,7 +250,7 @@ describe('Execution Layer', () => {
 
 		it('preserves strictMode setting', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 				strictMode: true,
 			});
@@ -272,7 +262,7 @@ describe('Execution Layer', () => {
 
 		it('can chain withSchema with query operations', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -288,7 +278,7 @@ describe('Execution Layer', () => {
 		describe('schema name validation (F-001 security fix)', () => {
 			it('accepts valid schema names', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 
@@ -300,7 +290,7 @@ describe('Execution Layer', () => {
 
 			it('rejects schema names with hyphens', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 
@@ -311,7 +301,7 @@ describe('Execution Layer', () => {
 
 			it('rejects schema names starting with numbers', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 
@@ -322,7 +312,7 @@ describe('Execution Layer', () => {
 
 			it('rejects schema names with special characters', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 
@@ -334,7 +324,7 @@ describe('Execution Layer', () => {
 
 			it('rejects SQL injection attempts', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 
@@ -348,7 +338,7 @@ describe('Execution Layer', () => {
 
 			it('rejects empty schema names', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 
@@ -359,7 +349,7 @@ describe('Execution Layer', () => {
 
 	describe('dump()', () => {
 		it('throws ExecutionError when db is not configured', () => {
-			const orm = createOrm({ model: testModel });
+			const orm = createOrm({ schema: testSchema });
 
 			expect(() => orm.select('users').dump()).toThrow(ExecutionError);
 			expect(() => orm.select('users').dump()).toThrow(
@@ -369,7 +359,7 @@ describe('Execution Layer', () => {
 
 		it('returns complete Dump object when db is configured', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm.select('users').dump();
@@ -396,7 +386,7 @@ describe('Execution Layer', () => {
 
 		it('includes params for where clause', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm
@@ -409,7 +399,7 @@ describe('Execution Layer', () => {
 
 		it('includes tenant in meta for withSchema()', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm.withSchema('acme').select('users').dump();
@@ -421,7 +411,7 @@ describe('Execution Layer', () => {
 
 		it('does not include tenant in meta when no tenant', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm.select('users').dump();
@@ -431,7 +421,7 @@ describe('Execution Layer', () => {
 
 		it('works with complex query chain', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm
@@ -448,7 +438,7 @@ describe('Execution Layer', () => {
 
 	describe('execute()', () => {
 		it('throws ExecutionError when db is not configured', async () => {
-			const orm = createOrm({ model: testModel });
+			const orm = createOrm({ schema: testSchema });
 
 			await expect(orm.select('users').execute()).rejects.toThrow(
 				ExecutionError,
@@ -460,7 +450,7 @@ describe('Execution Layer', () => {
 
 		it('is an alias for findMany()', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -472,7 +462,7 @@ describe('Execution Layer', () => {
 
 		it('returns all rows', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const result = await orm.select('users').execute();
@@ -486,7 +476,7 @@ describe('Execution Layer', () => {
 			await setupDatabase(emptyDb);
 
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(emptyDb),
 			});
 			const result = await orm.select('users').execute();
@@ -497,7 +487,7 @@ describe('Execution Layer', () => {
 
 		it('works with where clause', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const result = await orm
@@ -512,7 +502,7 @@ describe('Execution Layer', () => {
 	describe('execution with builder chain', () => {
 		it('executes query with where clause', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const result = await orm
@@ -525,7 +515,7 @@ describe('Execution Layer', () => {
 
 		it('executes query with select', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const result = await orm.select('users').columns(['name']).all();
@@ -537,7 +527,7 @@ describe('Execution Layer', () => {
 
 		it('maintains db through builder chain', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -555,7 +545,7 @@ describe('Execution Layer', () => {
 
 	describe('stream()', () => {
 		it('throws ExecutionError when db is not configured', () => {
-			const orm = createOrm({ model: testModel });
+			const orm = createOrm({ schema: testSchema });
 
 			// stream() throws immediately because it needs db for dump()
 			expect(() => orm.select('users').stream()).toThrow(ExecutionError);
@@ -566,7 +556,7 @@ describe('Execution Layer', () => {
 
 		it('returns an AsyncIterableIterator', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const iterator = orm.select('users').stream();
@@ -577,7 +567,7 @@ describe('Execution Layer', () => {
 
 		it('yields rows one at a time', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const results: unknown[] = [];
@@ -592,7 +582,7 @@ describe('Execution Layer', () => {
 
 		it('supports early break from iteration', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const results: unknown[] = [];
@@ -607,7 +597,7 @@ describe('Execution Layer', () => {
 
 		it('invokes onStart callback before streaming', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const onStart = vi.fn();
@@ -627,7 +617,7 @@ describe('Execution Layer', () => {
 
 		it('accepts chunkSize option', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const results: unknown[] = [];
@@ -641,7 +631,7 @@ describe('Execution Layer', () => {
 
 		it('works with where clause', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const results: unknown[] = [];
@@ -659,7 +649,7 @@ describe('Execution Layer', () => {
 			await setupDatabase(emptyDb);
 
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(emptyDb),
 			});
 			const results: unknown[] = [];
@@ -676,7 +666,7 @@ describe('Execution Layer', () => {
 			// Note: SQLite doesn't support schemas, so this tests the API works
 			// Real schema isolation is tested in E2E with PostgreSQL
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const scopedOrm = orm.withSchema('tenant_123');
@@ -691,7 +681,7 @@ describe('Execution Layer', () => {
 
 		it('preserves query builder state through stream()', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const onStart = vi.fn();
@@ -714,7 +704,7 @@ describe('Execution Layer', () => {
 	describe('orderBy()', () => {
 		it('generates ORDER BY clause in SQL', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm.select('users').orderBy('name').dump();
@@ -725,7 +715,7 @@ describe('Execution Layer', () => {
 
 		it('defaults to ascending order', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm.select('users').orderBy('name').dump();
@@ -735,7 +725,7 @@ describe('Execution Layer', () => {
 
 		it('supports descending order', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm.select('users').orderBy('name', 'desc').dump();
@@ -745,7 +735,7 @@ describe('Execution Layer', () => {
 
 		it('supports chaining multiple orderBy calls', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm
@@ -762,7 +752,7 @@ describe('Execution Layer', () => {
 
 		it('returns results in correct order', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const results = (await orm
@@ -771,13 +761,13 @@ describe('Execution Layer', () => {
 				.all()) as { name: string }[];
 
 			// Alice should come before Bob alphabetically
-			expect(results[0].name).toBe('Alice');
-			expect(results[1].name).toBe('Bob');
+			expect(results[0]!.name).toBe('Alice');
+			expect(results[1]!.name).toBe('Bob');
 		});
 
 		it('returns results in descending order', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const results = (await orm
@@ -786,14 +776,14 @@ describe('Execution Layer', () => {
 				.all()) as { name: string }[];
 
 			// Bob should come before Alice in descending order
-			expect(results[0].name).toBe('Bob');
-			expect(results[1].name).toBe('Alice');
+			expect(results[0]!.name).toBe('Bob');
+			expect(results[1]!.name).toBe('Alice');
 		});
 
 		// DX-024: Object form tests
 		it('supports object form with multiple fields', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm
@@ -811,7 +801,7 @@ describe('Execution Layer', () => {
 
 		it('object form produces correct ordering', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const results = (await orm
@@ -820,14 +810,14 @@ describe('Execution Layer', () => {
 				.all()) as { name: string }[];
 
 			// Bob should come before Alice in descending order
-			expect(results[0].name).toBe('Bob');
-			expect(results[1].name).toBe('Alice');
+			expect(results[0]!.name).toBe('Bob');
+			expect(results[1]!.name).toBe('Alice');
 		});
 
 		// DX-024: Array form tests
 		it('supports array form with OrderBySpec', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm
@@ -842,7 +832,7 @@ describe('Execution Layer', () => {
 
 		it('array form supports nulls option in intent', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm
@@ -858,7 +848,7 @@ describe('Execution Layer', () => {
 
 		it('array form with multiple specs', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm
@@ -876,7 +866,7 @@ describe('Execution Layer', () => {
 
 		it('array form produces correct ordering', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const results = (await orm
@@ -885,15 +875,15 @@ describe('Execution Layer', () => {
 				.all()) as { name: string }[];
 
 			// Bob should come before Alice in descending order
-			expect(results[0].name).toBe('Bob');
-			expect(results[1].name).toBe('Alice');
+			expect(results[0]!.name).toBe('Bob');
+			expect(results[1]!.name).toBe('Alice');
 		});
 	});
 
 	describe('limit()', () => {
 		it('generates LIMIT clause in SQL', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm.select('users').limit(10).dump();
@@ -903,7 +893,7 @@ describe('Execution Layer', () => {
 
 		it('limits the number of results', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const results = await orm.select('users').limit(1).all();
@@ -913,7 +903,7 @@ describe('Execution Layer', () => {
 
 		it('returns all results when limit exceeds count', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const results = await orm.select('users').limit(100).all();
@@ -925,7 +915,7 @@ describe('Execution Layer', () => {
 	describe('offset()', () => {
 		it('generates OFFSET clause in SQL', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm.select('users').offset(5).dump();
@@ -935,7 +925,7 @@ describe('Execution Layer', () => {
 
 		it('skips the specified number of results', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			// Note: SQLite requires LIMIT when using OFFSET
@@ -952,7 +942,7 @@ describe('Execution Layer', () => {
 
 		it('returns empty array when offset exceeds count', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			// Note: SQLite requires LIMIT when using OFFSET
@@ -965,7 +955,7 @@ describe('Execution Layer', () => {
 	describe('pagination (limit + offset)', () => {
 		it('supports pagination with limit and offset', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const dump = orm
@@ -982,7 +972,7 @@ describe('Execution Layer', () => {
 
 		it('returns correct page of results', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			// Page 2 with page size 1
@@ -999,7 +989,7 @@ describe('Execution Layer', () => {
 
 		it('combines with where clause', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const results = await orm
@@ -1019,7 +1009,7 @@ describe('Execution Layer', () => {
 		// JOIN is now the default, but SEPARATE is still supported via defaultIncludeStrategy
 		it('hydrates hasMany relation with separate query', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 				defaultIncludeStrategy: 'separate', // Use SEPARATE for multi-query hydration test
 			});
@@ -1036,21 +1026,21 @@ describe('Execution Layer', () => {
 			expect(results).toHaveLength(2);
 
 			// Alice (id=1) has 2 posts
-			expect(results[0].name).toBe('Alice');
-			expect(results[0].posts).toBeDefined();
-			expect(results[0].posts).toHaveLength(2);
-			expect(results[0].posts?.[0].title).toBe('First Post');
-			expect(results[0].posts?.[1].title).toBe('Second Post');
+			expect(results[0]!.name).toBe('Alice');
+			expect(results[0]!.posts).toBeDefined();
+			expect(results[0]!.posts).toHaveLength(2);
+			expect(results[0]!.posts?.[0]!.title).toBe('First Post');
+			expect(results[0]!.posts?.[1]!.title).toBe('Second Post');
 
 			// Bob (id=2) has 0 posts
-			expect(results[1].name).toBe('Bob');
-			expect(results[1].posts).toBeDefined();
-			expect(results[1].posts).toHaveLength(0);
+			expect(results[1]!.name).toBe('Bob');
+			expect(results[1]!.posts).toBeDefined();
+			expect(results[1]!.posts).toHaveLength(0);
 		});
 
 		it('returns empty array for parent with no children', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 				defaultIncludeStrategy: 'separate', // Use SEPARATE for multi-query hydration test
 			});
@@ -1065,14 +1055,14 @@ describe('Execution Layer', () => {
 			}>;
 
 			expect(results).toHaveLength(1);
-			expect(results[0].name).toBe('Bob');
-			expect(results[0].posts).toBeDefined();
-			expect(results[0].posts).toHaveLength(0);
+			expect(results[0]!.name).toBe('Bob');
+			expect(results[0]!.posts).toBeDefined();
+			expect(results[0]!.posts).toHaveLength(0);
 		});
 
 		it('handles empty parent results gracefully', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const results = (await orm
@@ -1089,7 +1079,7 @@ describe('Execution Layer', () => {
 
 		it('works with first() returning single hydrated result', async () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 				defaultIncludeStrategy: 'separate', // Use SEPARATE for multi-query hydration test
 			});
@@ -1138,7 +1128,7 @@ describe('Execution Layer', () => {
 				.execute();
 
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(testDb),
 				defaultIncludeStrategy: 'separate', // Use SEPARATE for multi-query hydration test
 			});
@@ -1156,18 +1146,18 @@ describe('Execution Layer', () => {
 			expect(results).toHaveLength(3);
 
 			// Alice has 2 posts
-			expect(results[0].posts).toHaveLength(2);
-			expect(results[0].posts?.every((p) => p.title.startsWith('Alice'))).toBe(
+			expect(results[0]!.posts).toHaveLength(2);
+			expect(results[0]!.posts?.every((p) => p.title.startsWith('Alice'))).toBe(
 				true,
 			);
 
 			// Bob has 0 posts
-			expect(results[1].posts).toHaveLength(0);
+			expect(results[1]!.posts).toHaveLength(0);
 
 			// Charlie has 3 posts
-			expect(results[2].posts).toHaveLength(3);
+			expect(results[2]!.posts).toHaveLength(3);
 			expect(
-				results[2].posts?.every((p) => p.title.startsWith('Charlie')),
+				results[2]!.posts?.every((p) => p.title.startsWith('Charlie')),
 			).toBe(true);
 
 			await testDb.destroy();
@@ -1175,7 +1165,7 @@ describe('Execution Layer', () => {
 
 		it('include does not affect query without execution', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 

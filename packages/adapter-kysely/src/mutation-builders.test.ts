@@ -5,48 +5,40 @@
 
 import {
 	and,
-	buildModelFromResolvedSchema,
 	createOrm,
-	defineSchema,
+	type DeleteIntent,
 	eq,
+	ExecutionError,
+	fk,
 	inArray,
+	type InsertIntent,
+	InvalidOperationError,
+	schema,
+	UnsafeOperationError,
+	type UpdateIntent,
 	UpsertBuilder,
+	type UpsertIntent,
 } from '@dbsp/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import {
-	ExecutionError,
-	InvalidOperationError,
-	UnsafeOperationError,
-} from './errors.js';
 import { createKyselyAdapter } from './kysely-adapter.js';
 
 // Test schema
-const testModel = buildModelFromResolvedSchema(
-	defineSchema(
-		{
-			users: {
-				id: { type: 'integer', primaryKey: true },
-				name: { type: 'string' },
-				email: { type: 'string' },
-				active: { type: 'boolean' },
-			},
-			posts: {
-				id: { type: 'integer', primaryKey: true },
-				title: { type: 'string' },
-				content: { type: 'string' },
-				userId: { type: 'integer' },
-			},
-		},
-		{
-			relations: {
-				'users.posts': { kind: 'hasMany', target: 'posts', foreignKey: 'userId' },
-				'posts.author': { kind: 'belongsTo', target: 'users', foreignKey: 'userId' },
-			},
-		},
-	),
-);
+const testModel = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		email: 'string',
+		active: 'boolean',
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		content: 'string',
+		userId: fk('users', { as: 'author', inverse: 'posts' }),
+	},
+}).model;
 
 // Database schema types
 interface TestDatabase {
@@ -155,7 +147,7 @@ describe('Mutation Builders (DX-010)', () => {
 				expect(dump.sql).toContain('insert into');
 				expect(dump.sql.toLowerCase()).toContain('users');
 				expect(dump.intent.type).toBe('insert');
-				expect(dump.intent.values).toHaveLength(1);
+				expect((dump.intent as InsertIntent).values).toHaveLength(1);
 			});
 
 			it('should accept an array for bulk insert', async () => {
@@ -172,7 +164,7 @@ describe('Mutation Builders (DX-010)', () => {
 					.dump();
 
 				expect(dump.intent.type).toBe('insert');
-				expect(dump.intent.values).toHaveLength(2);
+				expect((dump.intent as InsertIntent).values).toHaveLength(2);
 			});
 
 			it('should be immutable - return new builder', async () => {
@@ -335,7 +327,7 @@ describe('Mutation Builders (DX-010)', () => {
 					.where(and(eq('name', 'Alice'), eq('active', 1)))
 					.dump();
 
-				expect(dump.intent.where).toBeDefined();
+				expect((dump.intent as UpdateIntent).where).toBeDefined();
 			});
 		});
 
@@ -358,7 +350,7 @@ describe('Mutation Builders (DX-010)', () => {
 				const dump = orm.updateAll('users').set({ active: 0 }).dump();
 
 				expect(dump.sql).toBeDefined();
-				expect(dump.intent.allowAll).toBe(true);
+				expect((dump.intent as UpdateIntent).allowAll).toBe(true);
 			});
 		});
 
@@ -432,7 +424,7 @@ describe('Mutation Builders (DX-010)', () => {
 					.where(inArray('id', [1, 2]))
 					.dump();
 
-				expect(dump.intent.where).toBeDefined();
+				expect((dump.intent as DeleteIntent).where).toBeDefined();
 			});
 		});
 
@@ -453,7 +445,7 @@ describe('Mutation Builders (DX-010)', () => {
 				const dump = orm.deleteAll('posts').dump();
 
 				expect(dump.sql).toBeDefined();
-				expect(dump.intent.allowAll).toBe(true);
+				expect((dump.intent as DeleteIntent).allowAll).toBe(true);
 			});
 		});
 
@@ -506,7 +498,7 @@ describe('Mutation Builders (DX-010)', () => {
 				const builder = orm.delete('users').where(eq('id', 1)).cascade();
 				const dump = builder.dump();
 
-				expect(dump.intent.cascade).toBe(true);
+				expect((dump.intent as DeleteIntent).cascade).toBe(true);
 			});
 
 			it('should accept specific relations', () => {
@@ -520,7 +512,7 @@ describe('Mutation Builders (DX-010)', () => {
 					.cascade(['posts']);
 				const dump = builder.dump();
 
-				expect(dump.intent.cascade).toEqual(['posts']);
+				expect((dump.intent as DeleteIntent).cascade).toEqual(['posts']);
 			});
 		});
 	});
@@ -655,7 +647,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 				expect(dump.sql.toLowerCase()).toContain('insert into');
 				expect(dump.intent.type).toBe('upsert');
-				expect(dump.intent.values).toHaveLength(1);
+				expect((dump.intent as UpsertIntent).values).toHaveLength(1);
 			});
 
 			it('should accept an array for bulk upsert', () => {
@@ -674,7 +666,7 @@ describe('Mutation Builders (DX-010)', () => {
 					.dump();
 
 				expect(dump.intent.type).toBe('upsert');
-				expect(dump.intent.values).toHaveLength(2);
+				expect((dump.intent as UpsertIntent).values).toHaveLength(2);
 			});
 
 			it('should be immutable - return new builder', () => {
@@ -703,7 +695,7 @@ describe('Mutation Builders (DX-010)', () => {
 					.dump();
 
 				expect(dump.sql.toLowerCase()).toContain('on conflict');
-				expect(dump.intent.onConflict).toHaveProperty('columns');
+				expect((dump.intent as UpsertIntent).onConflict).toHaveProperty('columns');
 			});
 
 			it('should support multiple conflict columns', () => {
@@ -718,7 +710,7 @@ describe('Mutation Builders (DX-010)', () => {
 					.doNothing()
 					.dump();
 
-				expect(dump.intent.onConflict).toEqual({
+				expect((dump.intent as UpsertIntent).onConflict).toEqual({
 					columns: ['title', 'userId'],
 				});
 			});
@@ -737,7 +729,7 @@ describe('Mutation Builders (DX-010)', () => {
 					.doNothing()
 					.dump();
 
-				expect(dump.intent.onConflict).toEqual({
+				expect((dump.intent as UpsertIntent).onConflict).toEqual({
 					constraint: 'users_email_unique',
 				});
 			});
@@ -757,7 +749,7 @@ describe('Mutation Builders (DX-010)', () => {
 					.dump();
 
 				expect(dump.sql.toLowerCase()).toContain('do nothing');
-				expect(dump.intent.action).toEqual({ type: 'doNothing' });
+				expect((dump.intent as UpsertIntent).action).toEqual({ type: 'doNothing' });
 			});
 		});
 
@@ -775,7 +767,7 @@ describe('Mutation Builders (DX-010)', () => {
 					.dump();
 
 				expect(dump.sql.toLowerCase()).toContain('do update');
-				expect(dump.intent.action).toMatchObject({
+				expect((dump.intent as UpsertIntent).action).toMatchObject({
 					type: 'doUpdate',
 					set: { name: 'Updated David' },
 				});
@@ -810,7 +802,7 @@ describe('Mutation Builders (DX-010)', () => {
 					.dump();
 
 				expect(dump.sql.toLowerCase()).toContain('where');
-				expect(dump.intent.action).toMatchObject({
+				expect((dump.intent as UpsertIntent).action).toMatchObject({
 					type: 'doUpdate',
 					where: expect.anything(),
 				});

@@ -29,6 +29,7 @@
 | Self-Ref Pseudo-Columns (SPEC-001) | core, nql, adapter | ✅ Complete (V1.0) |
 | Cross-Table Pseudo-Cols (SPEC-002) | core, nql, adapter | ✅ Complete |
 | Type Rationalization (ARCH-004) | types, core, adapter, nql | ✅ Complete |
+| Unified Schema API (ARCH-005) | core, cli, adapter | ✅ Complete |
 
 ## Scope-Specific Backlogs
 
@@ -38,6 +39,39 @@
 | `TODO_MCP.md` | mcp-server | MCP server implementation tasks |
 | `TODO_DX.md` | core, adapter | DX improvements, SOLID fixes, type inference |
 | `docs/specs/SELF-REF-PSEUDO-COLUMNS-SPEC.md` | core, nql, adapter | Auto-generated pseudo-columns for hierarchies |
+| `docs/specs/ARCH-005-unified-schema-api.md` | core, cli, adapter | Unified schema API (schema/ref/manyToMany) |
+
+## ✅ COMPLETED: ARCH-005 Unified Schema API (2026-01-25)
+
+**Priority:** HIGH | **Effort:** XL (~10h) | **Breaking:** Yes
+**Scope:** core, cli, adapter
+**Spec:** [ARCH-005](docs/specs/ARCH-005-unified-schema-api.md)
+**Started:** 2026-01-25 | **Completed:** 2026-01-25
+
+Unified `defineSchema()`, `TypedSchema`, `GeneratedSchema` into single `schema()` + `ref()` API.
+
+### Achievements
+
+- **72% code reduction** in schema definitions
+- **Automatic relation inference** from FK declarations
+- **Self-referential FK support** with roles (parent/children/ancestors/descendants)
+- **CLI codegen** generates `import { schema, ref }`
+- **Subquery `ref()` → `outerRef()`** renamed to resolve naming conflict
+- **All 6 examples migrated** to new API
+- **All tests migrated** (1971 tests passing)
+
+### Blocks
+
+- [x] ✅ Block 1: Core API — `schema()`, `ref()` + direct ModelIR conversion (2026-01-25)
+- [x] ✅ Block 2: Relation Inference — Auto-detect 1:1, 1:N from FKs (2026-01-25)
+- [x] ✅ Block 3: Self-Ref Support — Roles for hierarchical relations (2026-01-25)
+- [x] ✅ Block 4: CLI Codegen — Generate `schema()` + `ref()` from introspection (2026-01-25)
+- [x] ✅ Block 5: Migrate Examples — 6 `.schema.ts` files (2026-01-25)
+- [x] ✅ Block 6: Migrate E2E Tests — 7 test files (2026-01-25)
+- [x] ✅ Block 7: Migrate Unit Tests — ~50 test files (2026-01-25)
+- [x] ✅ Block 8: Naming Resolution — `ref` → canonical FK, `outerRef` → subquery (2026-01-25)
+
+---
 
 ## ✅ COMPLETED: SPEC-002 Cross-Table Pseudo-Columns (2026-01-25)
 
