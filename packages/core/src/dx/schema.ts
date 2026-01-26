@@ -15,6 +15,7 @@
  * ```
  */
 
+import type { NamingConvention } from '../adapter.js';
 import { ModelIRImpl } from '../model-impl.js';
 import type {
 	ColumnIR,
@@ -126,7 +127,170 @@ export interface Schema<T extends SchemaDefinition> {
 	readonly model: ModelIR;
 	/** Table names */
 	readonly tableNames: (keyof T)[];
+	/**
+	 * Naming convention used when this schema was created.
+	 * Used for validation against adapter's naming convention in createOrm().
+	 * @see NamingConvention
+	 */
+	readonly namingConvention?: NamingConvention;
+	/**
+	 * Timestamp when this schema was introspected from the database.
+	 * Only present for schemas created via getSchemaFromDb().
+	 * Useful for detecting schema drift.
+	 */
+	readonly introspectedAt?: Date;
 }
+
+// ============================================================================
+// Type Inference Helpers
+// ============================================================================
+
+/**
+ * JSON-compatible value type for json/jsonb columns.
+ */
+export type JsonValue =
+	| string
+	| number
+	| boolean
+	| null
+	| JsonValue[]
+	| { [key: string]: JsonValue };
+
+/**
+ * Range value type for PostgreSQL range types.
+ */
+export interface InferredRangeValue<T> {
+	readonly start: T | null;
+	readonly end: T | null;
+	readonly startInclusive?: boolean;
+	readonly endInclusive?: boolean;
+}
+
+/**
+ * Maps a ColumnType string to its TypeScript type.
+ */
+export type InferColumnType<T extends SchemaColumnType> =
+	// String types
+	T extends 'string' | 'text' | 'uuid'
+		? string
+		: // Numeric types
+			T extends 'number' | 'integer' | 'decimal'
+			? number
+			: // BigInt
+				T extends 'bigint'
+				? bigint
+				: // Boolean
+					T extends 'boolean'
+					? boolean
+					: // Date/time types
+						T extends 'date' | 'time' | 'datetime' | 'timestamp'
+						? Date
+						: // JSON types
+							T extends 'json' | 'jsonb'
+							? JsonValue
+							: // PostgreSQL range types
+								T extends 'daterange'
+								? InferredRangeValue<Date>
+								: T extends 'tsrange' | 'tstzrange'
+									? InferredRangeValue<Date>
+									: T extends 'int4range' | 'int8range'
+										? InferredRangeValue<number>
+										: T extends 'numrange'
+											? InferredRangeValue<number>
+											: // Fallback
+												unknown;
+
+/**
+ * Extracts the type string from a ColumnDef (handles short and long forms).
+ */
+type ExtractColumnType<C extends ColumnDef> = C extends SchemaColumnType
+	? C
+	: C extends { type: infer T extends SchemaColumnType }
+		? T
+		: never;
+
+/**
+ * Checks if a ColumnDef is nullable.
+ */
+type IsNullable<C extends ColumnDef> = C extends { nullable: true }
+	? true
+	: false;
+
+/**
+ * Infers the TypeScript type for a single column definition.
+ * Handles both short form ('string') and long form ({ type: 'string', nullable: true }).
+ */
+export type InferColumn<C extends ColumnDef> =
+	IsNullable<C> extends true
+		? InferColumnType<ExtractColumnType<C>> | null
+		: InferColumnType<ExtractColumnType<C>>;
+
+/**
+ * Infers the FK column type from a RefDefinition.
+ *
+ * ⚠️ **Limitation:** FK columns are typed as `number | string` because inferring
+ * the target PK type at compile time would require resolving cross-table references,
+ * which creates circular type dependencies in TypeScript.
+ *
+ * **Why not infer from target table?**
+ * Given `ref('users')`, we'd need to:
+ * 1. Find `users` table in the schema
+ * 2. Find column with `primaryKey: true`
+ * 3. Get its type
+ *
+ * This creates circular refs when tables reference each other (A→B→A).
+ *
+ * **Pragmatic trade-off:** `number | string` covers 99% of PKs (auto-increment int or UUID).
+ *
+ * @example
+ * authorId: ref('users')                        // Type: number | string
+ * editorId: ref('users', { nullable: true })    // Type: number | string | null
+ */
+export type InferRefColumn<R extends RefDefinition> = R extends {
+	options: { nullable: true };
+}
+	? number | string | null
+	: number | string;
+
+/**
+ * Infers the row type for a single table definition.
+ * Maps each column to its TypeScript type.
+ */
+export type InferRow<T extends TableDef> = {
+	[K in keyof T]: T[K] extends RefDefinition
+		? InferRefColumn<T[K]>
+		: T[K] extends ColumnDef
+			? InferColumn<T[K]>
+			: unknown;
+};
+
+/**
+ * Infers the complete database type from a schema definition.
+ * Maps each table name to its row type.
+ *
+ * @example
+ * ```typescript
+ * const mySchema = schema({
+ *   users: { id: 'integer', email: 'string', bio: { type: 'text', nullable: true } },
+ *   posts: { id: 'integer', title: 'string', authorId: ref('users') },
+ * });
+ *
+ * type DB = InferDB<typeof mySchema.definition>;
+ * // DB = {
+ * //   users: { id: number; email: string; bio: string | null };
+ * //   posts: { id: number; title: string; authorId: number | string };
+ * // }
+ * ```
+ */
+export type InferDB<S extends SchemaDefinition> = {
+	[TableName in keyof S]: InferRow<S[TableName]>;
+};
+
+/**
+ * Helper type to extract the inferred DB type from a Schema instance.
+ */
+export type InferSchemaDB<S extends Schema<SchemaDefinition>> =
+	S extends Schema<infer T> ? InferDB<T> : never;
 
 // ============================================================================
 // Public API

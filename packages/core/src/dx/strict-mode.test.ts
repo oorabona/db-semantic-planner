@@ -37,7 +37,7 @@ const testSchema = schema({
 		userId: ref('users', { as: 'user', inverse: 'profile' }),
 		bio: 'string',
 	},
-}).model;
+});
 
 // ============================================================================
 // Scenario 1: Strict mode throws on ambiguous relation (nominal)
@@ -45,7 +45,7 @@ const testSchema = schema({
 
 describe('Scenario 1: Strict mode throws on ambiguous relation', () => {
 	it('should throw AmbiguousRelationError when strictMode is true and relation is ambiguous', () => {
-		const orm = createOrm({ model: testSchema, strictMode: true });
+		const orm = createOrm({ schema: testSchema, strictMode: true });
 
 		expect(() => {
 			orm.select('users').include('posts').plan();
@@ -53,7 +53,7 @@ describe('Scenario 1: Strict mode throws on ambiguous relation', () => {
 	});
 
 	it('should include correct sourceTable in error', () => {
-		const orm = createOrm({ model: testSchema, strictMode: true });
+		const orm = createOrm({ schema: testSchema, strictMode: true });
 
 		try {
 			orm.select('users').include('posts').plan();
@@ -65,7 +65,7 @@ describe('Scenario 1: Strict mode throws on ambiguous relation', () => {
 	});
 
 	it('should include correct targetTable in error', () => {
-		const orm = createOrm({ model: testSchema, strictMode: true });
+		const orm = createOrm({ schema: testSchema, strictMode: true });
 
 		try {
 			orm.select('users').include('posts').plan();
@@ -77,7 +77,7 @@ describe('Scenario 1: Strict mode throws on ambiguous relation', () => {
 	});
 
 	it('should include available options in error', () => {
-		const orm = createOrm({ model: testSchema, strictMode: true });
+		const orm = createOrm({ schema: testSchema, strictMode: true });
 
 		try {
 			orm.select('users').include('posts').plan();
@@ -91,7 +91,7 @@ describe('Scenario 1: Strict mode throws on ambiguous relation', () => {
 	});
 
 	it('should include disambiguation hint in error message', () => {
-		const orm = createOrm({ model: testSchema, strictMode: true });
+		const orm = createOrm({ schema: testSchema, strictMode: true });
 
 		try {
 			orm.select('users').include('posts').plan();
@@ -110,7 +110,7 @@ describe('Scenario 1: Strict mode throws on ambiguous relation', () => {
 
 describe('Scenario 2: Lenient mode resolves ambiguity with warning', () => {
 	it('should not throw when strictMode is false and relation is ambiguous', () => {
-		const orm = createOrm({ model: testSchema, strictMode: false });
+		const orm = createOrm({ schema: testSchema, strictMode: false });
 
 		expect(() => {
 			orm.select('users').include('posts').plan();
@@ -118,7 +118,7 @@ describe('Scenario 2: Lenient mode resolves ambiguity with warning', () => {
 	});
 
 	it('should add warning with code AMBIGUOUS_RELATION', () => {
-		const orm = createOrm({ model: testSchema, strictMode: false });
+		const orm = createOrm({ schema: testSchema, strictMode: false });
 
 		const planReport = orm.select('users').include('posts').plan();
 
@@ -129,7 +129,7 @@ describe('Scenario 2: Lenient mode resolves ambiguity with warning', () => {
 	});
 
 	it('should mention first relation used in warning message', () => {
-		const orm = createOrm({ model: testSchema, strictMode: false });
+		const orm = createOrm({ schema: testSchema, strictMode: false });
 
 		const planReport = orm.select('users').include('posts').plan();
 
@@ -146,7 +146,7 @@ describe('Scenario 2: Lenient mode resolves ambiguity with warning', () => {
 
 describe('Scenario 3: Via hint resolves ambiguity in strict mode', () => {
 	it('should not throw when via hint is provided', () => {
-		const orm = createOrm({ model: testSchema, strictMode: true });
+		const orm = createOrm({ schema: testSchema, strictMode: true });
 
 		expect(() => {
 			orm.select('users').include('posts', { via: 'reviewedPosts' }).plan();
@@ -154,7 +154,7 @@ describe('Scenario 3: Via hint resolves ambiguity in strict mode', () => {
 	});
 
 	it('should use specified relation in plan', () => {
-		const orm = createOrm({ model: testSchema, strictMode: true });
+		const orm = createOrm({ schema: testSchema, strictMode: true });
 
 		const planReport = orm
 			.select('users')
@@ -176,7 +176,7 @@ describe('Scenario 3: Via hint resolves ambiguity in strict mode', () => {
 
 describe('Scenario 4: Via hint works in lenient mode', () => {
 	it('should not throw and not add warning when via hint is provided', () => {
-		const orm = createOrm({ model: testSchema, strictMode: false });
+		const orm = createOrm({ schema: testSchema, strictMode: false });
 
 		const planReport = orm
 			.select('users')
@@ -191,7 +191,7 @@ describe('Scenario 4: Via hint works in lenient mode', () => {
 	});
 
 	it('should use the specified relation', () => {
-		const orm = createOrm({ model: testSchema, strictMode: false });
+		const orm = createOrm({ schema: testSchema, strictMode: false });
 
 		const planReport = orm
 			.select('users')
@@ -208,7 +208,7 @@ describe('Scenario 4: Via hint works in lenient mode', () => {
 
 describe('Scenario 5: Unambiguous relation works in strict mode', () => {
 	it('should not throw for unambiguous relation in strict mode', () => {
-		const orm = createOrm({ model: testSchema, strictMode: true });
+		const orm = createOrm({ schema: testSchema, strictMode: true });
 
 		expect(() => {
 			orm.select('users').include('profile').plan();
@@ -216,7 +216,7 @@ describe('Scenario 5: Unambiguous relation works in strict mode', () => {
 	});
 
 	it('should have no ambiguity warnings', () => {
-		const orm = createOrm({ model: testSchema, strictMode: true });
+		const orm = createOrm({ schema: testSchema, strictMode: true });
 
 		const planReport = orm.select('users').include('profile').plan();
 
@@ -233,13 +233,13 @@ describe('Scenario 5: Unambiguous relation works in strict mode', () => {
 
 describe('Scenario 6: Default strictMode is lenient', () => {
 	it('should default to lenient mode when strictMode not specified', () => {
-		const orm = createOrm({ model: testSchema });
+		const orm = createOrm({ schema: testSchema });
 
 		expect(orm.strictMode).toBe(false);
 	});
 
 	it('should not throw on ambiguous relation with default settings', () => {
-		const orm = createOrm({ model: testSchema });
+		const orm = createOrm({ schema: testSchema });
 
 		expect(() => {
 			orm.select('users').include('posts').plan();
@@ -247,7 +247,7 @@ describe('Scenario 6: Default strictMode is lenient', () => {
 	});
 
 	it('should add warning on ambiguous relation with default settings', () => {
-		const orm = createOrm({ model: testSchema });
+		const orm = createOrm({ schema: testSchema });
 
 		const planReport = orm.select('users').include('posts').plan();
 
@@ -270,7 +270,7 @@ describe('Scenario 7: Invalid via hint behavior', () => {
 	 */
 
 	it('should add warning for non-existent via hint in strict mode', () => {
-		const orm = createOrm({ model: testSchema, strictMode: true });
+		const orm = createOrm({ schema: testSchema, strictMode: true });
 
 		// Plan succeeds but with warning about unknown relation
 		const planReport = orm
@@ -286,7 +286,7 @@ describe('Scenario 7: Invalid via hint behavior', () => {
 	});
 
 	it('should add warning for non-existent via hint in lenient mode', () => {
-		const orm = createOrm({ model: testSchema, strictMode: false });
+		const orm = createOrm({ schema: testSchema, strictMode: false });
 
 		// Plan succeeds but with warning
 		const planReport = orm
@@ -308,7 +308,7 @@ describe('Scenario 7: Invalid via hint behavior', () => {
 
 describe('Scenario 8: Nested include respects strict mode', () => {
 	it('should throw on nested ambiguous relation in strict mode', () => {
-		const orm = createOrm({ model: testSchema, strictMode: true });
+		const orm = createOrm({ schema: testSchema, strictMode: true });
 
 		// Profile -> User (unambiguous) -> Posts (ambiguous)
 		expect(() => {
@@ -322,7 +322,7 @@ describe('Scenario 8: Nested include respects strict mode', () => {
 	});
 
 	it('should resolve nested ambiguity with via hint', () => {
-		const orm = createOrm({ model: testSchema, strictMode: true });
+		const orm = createOrm({ schema: testSchema, strictMode: true });
 
 		// Profile -> User -> Posts with via
 		expect(() => {
@@ -342,7 +342,7 @@ describe('Scenario 8: Nested include respects strict mode', () => {
 
 describe('Scenario 9: Multiple includes with one ambiguous in strict mode', () => {
 	it('should throw AmbiguousRelationError for the ambiguous include', () => {
-		const orm = createOrm({ model: testSchema, strictMode: true });
+		const orm = createOrm({ schema: testSchema, strictMode: true });
 
 		// Include both profile (unambiguous) and posts (ambiguous)
 		expect(() => {
@@ -351,7 +351,7 @@ describe('Scenario 9: Multiple includes with one ambiguous in strict mode', () =
 	});
 
 	it('should mention the ambiguous relation in error, not the unambiguous one', () => {
-		const orm = createOrm({ model: testSchema, strictMode: true });
+		const orm = createOrm({ schema: testSchema, strictMode: true });
 
 		try {
 			orm.select('users').include('profile').include('posts').plan();
@@ -365,7 +365,7 @@ describe('Scenario 9: Multiple includes with one ambiguous in strict mode', () =
 	});
 
 	it('should succeed in lenient mode with multiple includes', () => {
-		const orm = createOrm({ model: testSchema, strictMode: false });
+		const orm = createOrm({ schema: testSchema, strictMode: false });
 
 		expect(() => {
 			orm.select('users').include('profile').include('posts').plan();
@@ -379,7 +379,7 @@ describe('Scenario 9: Multiple includes with one ambiguous in strict mode', () =
 
 describe('Additional Edge Cases', () => {
 	it('should handle chained includes correctly', () => {
-		const orm = createOrm({ model: testSchema, strictMode: false });
+		const orm = createOrm({ schema: testSchema, strictMode: false });
 
 		const planReport = orm
 			.select('users')
@@ -391,7 +391,7 @@ describe('Additional Edge Cases', () => {
 	});
 
 	it('should handle select with include', () => {
-		const orm = createOrm({ model: testSchema, strictMode: false });
+		const orm = createOrm({ schema: testSchema, strictMode: false });
 
 		const planReport = orm
 			.select('users')
@@ -403,7 +403,7 @@ describe('Additional Edge Cases', () => {
 	});
 
 	it('should handle where with include', () => {
-		const orm = createOrm({ model: testSchema, strictMode: false });
+		const orm = createOrm({ schema: testSchema, strictMode: false });
 
 		const planReport = orm
 			.select('users')

@@ -4,8 +4,8 @@ import { Kysely, SqliteDialect } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createKyselyAdapter } from './kysely-adapter.js';
 
-// Create proper ModelIR using schema builder
-const testModel = schema({
+// Create Schema using schema builder (ARCH-006 API)
+const testSchema = schema({
 	users: {
 		id: { type: 'integer', primaryKey: true },
 		name: 'string',
@@ -16,7 +16,7 @@ const testModel = schema({
 		userId: fk('users', { as: 'user', inverse: 'orders' }),
 		total: 'integer',
 	},
-}).model;
+});
 
 // Database schema types
 interface TestDatabase {
@@ -91,7 +91,7 @@ describe('Transaction Support (DX-025)', () => {
 	describe('transaction()', () => {
 		it('should commit on success', async () => {
 			const orm = createOrm<TestDatabase>({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -123,7 +123,7 @@ describe('Transaction Support (DX-025)', () => {
 
 		it('should rollback on exception', async () => {
 			const orm = createOrm<TestDatabase>({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -160,7 +160,7 @@ describe('Transaction Support (DX-025)', () => {
 
 		it('should return value from callback', async () => {
 			const orm = createOrm<TestDatabase>({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -173,7 +173,7 @@ describe('Transaction Support (DX-025)', () => {
 		});
 
 		it('should throw error without database connection', async () => {
-			const orm = createOrm<TestDatabase>({ model: testModel });
+			const orm = createOrm<TestDatabase>({ schema: testSchema });
 
 			await expect(
 				orm.transaction(async () => {
@@ -184,7 +184,7 @@ describe('Transaction Support (DX-025)', () => {
 
 		it('should support nested queries within transaction', async () => {
 			const orm = createOrm<TestDatabase>({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -209,7 +209,7 @@ describe('Transaction Support (DX-025)', () => {
 
 		it('should work with includes in transaction', async () => {
 			const orm = createOrm<TestDatabase>({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -255,7 +255,7 @@ describe('Transaction Support (DX-025)', () => {
 
 		it('should preserve tenant context in transaction', async () => {
 			const orm = createOrm<TestDatabase>({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const scopedOrm = orm.withSchema('tenant_acme');
@@ -279,7 +279,7 @@ describe('Transaction Support (DX-025)', () => {
 	describe('raw() - Raw SQL Escape Hatch (DX-027)', () => {
 		it('should execute raw SQL with parameters', async () => {
 			const orm = createOrm<TestDatabase>({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -296,7 +296,7 @@ describe('Transaction Support (DX-025)', () => {
 
 		it('should execute raw SQL without parameters', async () => {
 			const orm = createOrm<TestDatabase>({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -310,7 +310,7 @@ describe('Transaction Support (DX-025)', () => {
 
 		it('should handle complex raw SQL queries', async () => {
 			const orm = createOrm<TestDatabase>({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -345,7 +345,7 @@ describe('Transaction Support (DX-025)', () => {
 		});
 
 		it('should throw error without adapter', async () => {
-			const orm = createOrm<TestDatabase>({ model: testModel });
+			const orm = createOrm<TestDatabase>({ schema: testSchema });
 
 			await expect(orm.raw('SELECT * FROM users')).rejects.toThrow(
 				'raw() requires an adapter',
@@ -354,7 +354,7 @@ describe('Transaction Support (DX-025)', () => {
 
 		it('should work within transactions', async () => {
 			const orm = createOrm<TestDatabase>({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -383,7 +383,7 @@ describe('Transaction Support (DX-025)', () => {
 
 		it('should handle empty result sets', async () => {
 			const orm = createOrm<TestDatabase>({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -398,7 +398,7 @@ describe('Transaction Support (DX-025)', () => {
 
 		it('should support multiple parameters', async () => {
 			const orm = createOrm<TestDatabase>({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 

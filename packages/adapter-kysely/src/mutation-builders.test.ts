@@ -24,8 +24,8 @@ import { Kysely, SqliteDialect } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createKyselyAdapter } from './kysely-adapter.js';
 
-// Test schema
-const testModel = schema({
+// Test schema (ARCH-006: keep full Schema object, not just ModelIR)
+const testSchema = schema({
 	users: {
 		id: { type: 'integer', primaryKey: true },
 		name: 'string',
@@ -38,7 +38,7 @@ const testModel = schema({
 		content: 'string',
 		userId: fk('users', { as: 'author', inverse: 'posts' }),
 	},
-}).model;
+});
 
 // Database schema types
 interface TestDatabase {
@@ -136,7 +136,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('values()', () => {
 			it('should accept a single object', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -152,7 +152,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should accept an array for bulk insert', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -169,7 +169,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should be immutable - return new builder', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const builder1 = orm.insert('users');
@@ -182,7 +182,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('dump()', () => {
 			it('should return MutationDump with sql and parameters', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -198,14 +198,14 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should throw InvalidOperationError if no values provided', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				expect(() => orm.insert('users').dump()).toThrow(InvalidOperationError);
 			});
 
 			it('should throw ExecutionError if no db configured', () => {
-				const orm = createOrm({ model: testModel });
+				const orm = createOrm({ schema: testSchema });
 				expect(() =>
 					orm.insert('users').values({ name: 'Test', email: 't@e.com' }).dump(),
 				).toThrow(ExecutionError);
@@ -215,7 +215,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('execute()', () => {
 			it('should insert a single row', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				await orm
@@ -231,7 +231,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should insert multiple rows (bulk insert)', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				await orm
@@ -247,7 +247,7 @@ describe('Mutation Builders (DX-010)', () => {
 			});
 
 			it('should throw ExecutionError if no db configured', async () => {
-				const orm = createOrm({ model: testModel });
+				const orm = createOrm({ schema: testSchema });
 				await expect(
 					orm
 						.insert('users')
@@ -266,7 +266,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('set()', () => {
 			it('should set fields to update', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -284,7 +284,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should merge multiple set() calls', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -304,7 +304,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('where()', () => {
 			it('should add WHERE condition', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -318,7 +318,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should support compound conditions', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -334,7 +334,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('safety guards', () => {
 			it('should throw UnsafeOperationError without WHERE clause', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				expect(() => orm.update('users').set({ active: 0 }).dump()).toThrow(
@@ -344,7 +344,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should allow updateAll() without WHERE', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm.updateAll('users').set({ active: 0 }).dump();
@@ -357,7 +357,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('execute()', () => {
 			it('should update matching rows', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				await orm
@@ -376,7 +376,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should update all rows with updateAll()', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				await orm.updateAll('users').set({ active: 0 }).execute();
@@ -387,7 +387,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should throw InvalidOperationError if no fields to update', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				expect(() => orm.update('users').where(eq('id', 1)).dump()).toThrow(
@@ -405,7 +405,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('where()', () => {
 			it('should add WHERE condition', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm.delete('users').where(eq('id', 1)).dump();
@@ -416,7 +416,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should support IN clause', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -431,7 +431,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('safety guards', () => {
 			it('should throw UnsafeOperationError without WHERE clause', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				expect(() => orm.delete('users').dump()).toThrow(UnsafeOperationError);
@@ -439,7 +439,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should allow deleteAll() without WHERE', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm.deleteAll('posts').dump();
@@ -452,7 +452,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('execute()', () => {
 			it('should delete matching rows', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				await orm.delete('users').where(eq('id', 1)).execute();
@@ -464,7 +464,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should delete all rows with deleteAll()', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				await orm.deleteAll('posts').execute();
@@ -475,7 +475,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should delete multiple rows with IN clause', async () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				await orm
@@ -492,7 +492,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('cascade() (placeholder)', () => {
 			it('should set cascade flag', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const builder = orm.delete('users').where(eq('id', 1)).cascade();
@@ -503,7 +503,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should accept specific relations', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const builder = orm
@@ -524,7 +524,7 @@ describe('Mutation Builders (DX-010)', () => {
 	describe('Multi-tenant Mutations', () => {
 		it('should include schema prefix in insert dump', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const scopedOrm = orm.withSchema('tenant_123');
@@ -540,7 +540,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 		it('should include schema prefix in update dump', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const scopedOrm = orm.withSchema('tenant_abc');
@@ -556,7 +556,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 		it('should include schema prefix in delete dump', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const scopedOrm = orm.withSchema('company_x');
@@ -574,7 +574,7 @@ describe('Mutation Builders (DX-010)', () => {
 	describe('OrmInstance factory methods', () => {
 		it('should expose insert() method', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			expect(orm.insert).toBeDefined();
@@ -583,7 +583,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 		it('should expose update() method', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			expect(orm.update).toBeDefined();
@@ -592,7 +592,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 		it('should expose delete() method', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			expect(orm.delete).toBeDefined();
@@ -601,7 +601,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 		it('should expose updateAll() method', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			expect(orm.updateAll).toBeDefined();
@@ -610,7 +610,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 		it('should expose deleteAll() method', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			expect(orm.deleteAll).toBeDefined();
@@ -619,7 +619,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 		it('should expose upsert() method', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			expect(orm.upsert).toBeDefined();
@@ -635,7 +635,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('values()', () => {
 			it('should accept a single object', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -652,7 +652,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should accept an array for bulk upsert', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -671,7 +671,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should be immutable - return new builder', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const builder1 = orm.upsert('users');
@@ -684,7 +684,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('onConflict()', () => {
 			it('should set conflict columns', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -700,7 +700,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should support multiple conflict columns', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -719,7 +719,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('onConflictConstraint()', () => {
 			it('should set constraint name', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -738,7 +738,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('doNothing()', () => {
 			it('should set DO NOTHING action', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -756,7 +756,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('doUpdate()', () => {
 			it('should set DO UPDATE action with explicit SET', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -775,7 +775,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should set DO UPDATE action with auto-update from excluded', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -791,7 +791,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should support WHERE clause in doUpdate', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -812,7 +812,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('dump()', () => {
 			it('should return MutationDump with sql and parameters', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -830,7 +830,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should throw InvalidOperationError if no values provided', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				expect(() =>
@@ -840,7 +840,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should throw InvalidOperationError if no conflict target', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				expect(() =>
@@ -850,7 +850,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should throw InvalidOperationError if no action specified', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				expect(() =>
@@ -863,7 +863,7 @@ describe('Mutation Builders (DX-010)', () => {
 			});
 
 			it('should throw ExecutionError if no db configured', () => {
-				const orm = createOrm({ model: testModel });
+				const orm = createOrm({ schema: testSchema });
 				expect(() =>
 					orm
 						.upsert('users')
@@ -878,7 +878,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('returning()', () => {
 			it('should add RETURNING clause to upsert', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -895,7 +895,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should be chainable', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const builder = orm
@@ -918,7 +918,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('InsertBuilder.returning()', () => {
 			it('should add RETURNING clause to insert', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -933,7 +933,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should be immutable - return new builder', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const builder1 = orm
@@ -948,7 +948,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('UpdateBuilder.returning()', () => {
 			it('should add RETURNING clause to update', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -964,7 +964,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should be immutable - return new builder', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const builder1 = orm
@@ -980,7 +980,7 @@ describe('Mutation Builders (DX-010)', () => {
 		describe('DeleteBuilder.returning()', () => {
 			it('should add RETURNING clause to delete', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const dump = orm
@@ -995,7 +995,7 @@ describe('Mutation Builders (DX-010)', () => {
 
 			it('should be immutable - return new builder', () => {
 				const orm = createOrm({
-					model: testModel,
+					schema: testSchema,
 					adapter: createKyselyAdapter(db),
 				});
 				const builder1 = orm.delete('users').where(eq('id', 1));
@@ -1013,7 +1013,7 @@ describe('Mutation Builders (DX-010)', () => {
 	describe('Multi-tenant Upsert (DX-026)', () => {
 		it('should include schema prefix in upsert dump', () => {
 			const orm = createOrm({
-				model: testModel,
+				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const scopedOrm = orm.withSchema('tenant_xyz');

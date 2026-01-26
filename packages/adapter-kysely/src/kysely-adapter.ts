@@ -19,6 +19,7 @@ import type {
 	DumpMeta,
 	InsertIntent,
 	ModelIR,
+	NamingConvention,
 	PlanReport,
 	RecursivePlanReport,
 	SeparateIncludeInfo,
@@ -67,6 +68,7 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly db: Kysely<any> | Transaction<any>;
 	private readonly schemaName: string | undefined;
 	private readonly _capabilities: AdapterCapabilities;
+	private readonly _namingConvention: NamingConvention;
 	private readonly explicitDialect: DialectName | undefined;
 	private readonly model: ModelIR | undefined;
 
@@ -77,6 +79,7 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 	 * @param schemaName - Optional schema name for multi-tenant queries
 	 * @param dialect - Optional explicit dialect (recommended for production/minified builds)
 	 * @param model - Optional ModelIR for WHERE compilation in separate includes
+	 * @param namingConvention - Naming convention for identifier transformation (ARCH-006)
 	 */
 	constructor(
 		// biome-ignore lint/suspicious/noExplicitAny: Kysely requires any for generic database schema
@@ -84,11 +87,13 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 		schemaName?: string,
 		dialect?: DialectName,
 		model?: ModelIR,
+		namingConvention: NamingConvention = 'preserve',
 	) {
 		this.db = db;
 		this.schemaName = schemaName;
 		this.explicitDialect = dialect;
 		this.model = model;
+		this._namingConvention = namingConvention;
 
 		// Get capabilities from dialect and map to AdapterCapabilities
 		// biome-ignore lint/suspicious/noExplicitAny: Cast needed for Kysely type compatibility
@@ -108,6 +113,25 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 	/** Adapter capabilities for feature detection */
 	get capabilities(): AdapterCapabilities {
 		return this._capabilities;
+	}
+
+	/**
+	 * Naming convention used by this adapter.
+	 * @since ARCH-006
+	 */
+	get namingConvention(): NamingConvention {
+		return this._namingConvention;
+	}
+
+	/**
+	 * Get the underlying Kysely instance.
+	 * Useful for direct database operations or introspection.
+	 * @since ARCH-006
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely requires any for generic database schema
+	getKyselyInstance(): Kysely<any> {
+		// biome-ignore lint/suspicious/noExplicitAny: Kysely requires any for generic database schema
+		return this.db as Kysely<any>;
 	}
 
 	/**
@@ -305,6 +329,7 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 				this.schemaName,
 				this.explicitDialect,
 				this.model,
+				this._namingConvention,
 			);
 			return fn(txAdapter);
 		});
@@ -324,6 +349,7 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 			schemaName,
 			this.explicitDialect,
 			this.model,
+			this._namingConvention,
 		);
 	}
 
@@ -506,29 +532,20 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 /**
  * Create a KyselyAdapter from a Kysely instance.
  *
- * @param db - Kysely database instance
- * @param schemaName - Optional default schema name
- * @returns KyselyAdapter instance
- *
- * @example
- * ```typescript
- * const adapter = createKyselyAdapter(kyselyDb);
- * const orm = createOrm({ model, adapter });
- * ```
- */
-/**
- * Create a KyselyAdapter from a Kysely instance.
- *
  * @param db - Kysely instance
  * @param schemaName - Optional schema name for multi-tenant queries
  * @param dialect - Optional explicit dialect (recommended for production/minified builds)
  * @param model - Optional ModelIR for WHERE compilation in separate includes
+ * @param namingConvention - Naming convention for identifier transformation (ARCH-006)
  * @returns A new KyselyAdapter instance
  *
  * @example
  * ```typescript
- * // Auto-detection (works in development)
+ * // Basic usage with auto-detection
  * const adapter = createKyselyAdapter(db);
+ *
+ * // With CamelCasePlugin enabled
+ * const adapter = createKyselyAdapter(db, undefined, 'postgresql', undefined, 'camelCase');
  *
  * // With model for full WHERE support in separate includes
  * const adapter = createKyselyAdapter(db, undefined, 'postgresql', model);
@@ -540,6 +557,13 @@ export function createKyselyAdapter<DB = unknown>(
 	schemaName?: string,
 	dialect?: DialectName,
 	model?: ModelIR,
+	namingConvention: NamingConvention = 'preserve',
 ): KyselyAdapter<DB> {
-	return new KyselyAdapter<DB>(db, schemaName, dialect, model);
+	return new KyselyAdapter<DB>(
+		db,
+		schemaName,
+		dialect,
+		model,
+		namingConvention,
+	);
 }

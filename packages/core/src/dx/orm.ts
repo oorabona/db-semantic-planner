@@ -18,6 +18,7 @@ import {
 	AmbiguousRelationError,
 	ExecutionError,
 	InvalidOperationError,
+	NamingConventionMismatchError,
 	NotFoundError,
 } from './errors.js';
 import {
@@ -43,23 +44,8 @@ import {
 	objectToWhereIntent,
 	type WhereFilter,
 } from './object-filter.js';
-import type {
-	AnyRelationDef,
-	TableNames,
-	TypedSchema,
-	TypedTableDef,
-} from './prisma-types.js';
 import { ResultHydrator } from './result-hydrator.js';
-import type { Schema, SchemaDefinition } from './schema.js';
-import {
-	buildModelFromSchema,
-	type GeneratedColumnType,
-	type GeneratedSchema,
-} from './schema-bridge.js';
-import type {
-	TypedOrmInstance,
-	TypedQueryBuilder,
-} from './typed-query-builder.js';
+import type { InferDB, Schema, SchemaDefinition } from './schema.js';
 import {
 	type AggregateOptions,
 	type ColumnSpec,
@@ -72,8 +58,6 @@ import {
 	type OrderByRecord,
 	type OrderBySpec,
 	type OrmInstance,
-	type OrmOptionsWithAdapter,
-	type OrmOptionsWithModel,
 	type PaginatedResult,
 	type PaginateOptions,
 	type QueryBuilder,
@@ -84,171 +68,50 @@ import {
 } from './types.js';
 
 // ============================================================================
-// TypedSchema Conversion (DX-110)
+// ARCH-006: Simplified ORM Entry Point
 // ============================================================================
 
 /**
- * Convert TypedSchema to GeneratedSchema format, then to ModelIR.
- * This reuses the existing, well-tested buildModelFromSchema function.
+ * ARCH-006: Simplified ORM options.
+ *
+ * Uses the unified Schema API with required schema and optional adapter.
+ * The schema must be created with `schema()` + `ref()`.
+ *
+ * @example Compile-only (no adapter)
+ * ```typescript
+ * const orm = createOrm({ schema: mySchema });
+ * const { sql, params } = orm.select('users').dump();
+ * ```
+ *
+ * @example Full ORM with adapter
+ * ```typescript
+ * const orm = createOrm({ schema: mySchema, adapter });
+ * const users = await orm.select('users').all();
+ * ```
  */
-function typedSchemaToModelIR(schema: TypedSchema): ModelIR {
-	// Convert TypedSchema to GeneratedSchema format
-	const generatedTables: GeneratedSchema['tables'] = {};
-	const generatedRelations: GeneratedSchema['relations'] = {};
+export interface SimplifiedOrmOptions<
+	T extends SchemaDefinition = SchemaDefinition,
+> {
+	/**
+	 * Schema created with schema() + ref().
+	 * Required - use getSchemaFromDb() for database introspection.
+	 */
+	readonly schema: Schema<T>;
 
-	for (const [tableName, tableDef] of Object.entries(schema.tables)) {
-		const typedTable = tableDef as TypedTableDef;
+	/**
+	 * Adapter for database execution (optional for compile-only).
+	 */
+	readonly adapter?: Adapter<unknown>;
 
-		// Convert columns - use 'as const' to preserve literal types
-		const tableColumns: Record<
-			string,
-			{ type: GeneratedColumnType; primaryKey?: true; nullable?: true }
-		> = {};
-		for (const [colName, colDef] of Object.entries(typedTable.columns)) {
-			const col = colDef as {
-				type: string;
-				primaryKey?: boolean;
-				nullable?: boolean;
-			};
-			tableColumns[colName] = {
-				type: col.type as GeneratedColumnType,
-				...(col.primaryKey === true && { primaryKey: true as const }),
-				...(col.nullable === true && { nullable: true as const }),
-			};
-		}
-		generatedTables[tableName] = tableColumns;
+	/**
+	 * Enable strict mode validation (default: false).
+	 */
+	readonly strictMode?: boolean;
 
-		// Convert relations
-		if (typedTable.relations) {
-			for (const [relationName, relationDef] of Object.entries(
-				typedTable.relations,
-			)) {
-				const rel = relationDef as AnyRelationDef;
-				const qualifiedName = `${tableName}.${relationName}`;
-
-				// Map TypedSchema relation kind to GeneratedRelation
-				switch (rel.kind) {
-					case 'hasOne':
-						// hasOne uses hasMany with cardinality 'one' (FK is on target table)
-						// buildModelFromResolvedSchema converts hasMany + cardinality:'one' → hasOne
-						generatedRelations[qualifiedName] = {
-							kind: 'hasMany' as const,
-							target: rel.target,
-							foreignKey: rel.foreignKey ?? `${tableName.replace(/s$/, '')}Id`,
-							cardinality: 'one' as const,
-						};
-						break;
-					case 'hasMany':
-						// hasMany: FK is on target table
-						// Default foreignKey: {sourceTable}Id
-						generatedRelations[qualifiedName] = {
-							kind: 'hasMany' as const,
-							target: rel.target,
-							foreignKey: rel.foreignKey ?? `${tableName.replace(/s$/, '')}Id`,
-						};
-						break;
-					case 'belongsTo':
-						// FK is on this table pointing to target
-						// Default foreignKey: {targetTable}Id
-						generatedRelations[qualifiedName] = {
-							kind: 'belongsTo' as const,
-							target: rel.target,
-							foreignKey: rel.foreignKey ?? `${rel.target.replace(/s$/, '')}Id`,
-						};
-						break;
-					case 'belongsToMany':
-						generatedRelations[qualifiedName] = {
-							kind: 'manyToMany' as const,
-							target: rel.target,
-							through: rel.through ?? `${tableName}_${rel.target}`,
-							sourceFk: rel.foreignKey ?? `${tableName.replace(/s$/, '')}Id`,
-							targetFk: rel.otherKey ?? `${rel.target.replace(/s$/, '')}Id`,
-						};
-						break;
-				}
-			}
-		}
-	}
-
-	// Create GeneratedSchema and convert to ModelIR
-	const generatedSchema: GeneratedSchema = {
-		tables: generatedTables,
-		relations: generatedRelations,
-		hints: {},
-		conventions: {
-			fkPattern: '{singular}Id',
-			pluralize: true,
-			timestamps: [],
-			fkAutoIndex: true,
-		},
-	};
-
-	return buildModelFromSchema(generatedSchema);
-}
-
-/**
- * Options for createOrm with a TypedSchema (DX-110).
- */
-export interface OrmOptionsWithTypedSchema<S extends TypedSchema> {
 	/**
-	 * TypedSchema with per-table relations for Prisma-like type inference.
+	 * Optional dialect capabilities for strategy selection.
 	 */
-	schema: S;
-	/**
-	 * Optional database adapter.
-	 */
-	adapter?: Adapter<unknown>;
-	/**
-	 * Enable strict mode by default.
-	 */
-	strictMode?: boolean;
-	/**
-	 * Default relation hints.
-	 */
-	relationHints?: RelationHints;
-	/**
-	 * Default include strategy.
-	 */
-	defaultIncludeStrategy?: IncludeStrategy;
-	/**
-	 * Optional dialect capabilities.
-	 */
-	dialectCapabilities?: DialectCapabilities;
-}
-
-/**
- * ARCH-005: ORM options using the new unified Schema API.
- * The Schema object already contains the converted ModelIR.
- */
-export interface OrmOptionsWithUnifiedSchema<T extends SchemaDefinition> {
-	/**
-	 * Unified Schema from schema() function.
-	 */
-	schema: Schema<T>;
-	/**
-	 * Exclude model to discriminate from OrmOptionsWithModel.
-	 */
-	model?: never;
-	/**
-	 * Optional database adapter.
-	 */
-	adapter?: Adapter<unknown>;
-	/**
-	 * Enable strict mode by default.
-	 */
-	strictMode?: boolean;
-	/**
-	 * Default relation hints.
-	 */
-	relationHints?: RelationHints;
-	/**
-	 * Default include strategy.
-	 */
-	defaultIncludeStrategy?: IncludeStrategy;
-	/**
-	 * Optional dialect capabilities.
-	 */
-	dialectCapabilities?: DialectCapabilities;
+	readonly dialectCapabilities?: DialectCapabilities;
 }
 
 /**
@@ -261,194 +124,103 @@ export interface OrmOptionsWithUnifiedSchema<T extends SchemaDefinition> {
  * @param options - Configuration options including model and strictMode
  * @returns An ORM instance for building and planning queries
  *
- * @example With TypedSchema (recommended)
+ * @example With schema() + ref() API (recommended)
  * ```typescript
- * import { hasMany, belongsTo, TypedSchema } from '@dbsp/core';
+ * import { schema, ref, createOrm } from '@dbsp/core';
  *
- * const schema = {
- *   tables: {
- *     users: {
- *       columns: { id: { type: 'uuid', primaryKey: true }, name: { type: 'string' } },
- *       relations: { posts: hasMany('posts', { foreignKey: 'authorId' }) },
- *     },
- *     posts: {
- *       columns: { id: { type: 'uuid', primaryKey: true }, title: { type: 'string' }, authorId: { type: 'uuid' } },
- *       relations: { author: belongsTo('users', { foreignKey: 'authorId' }) },
- *     },
+ * const mySchema = schema({
+ *   users: {
+ *     id: 'uuid',
+ *     name: 'string',
  *   },
- * } as const satisfies TypedSchema;
+ *   posts: {
+ *     id: 'uuid',
+ *     title: 'string',
+ *     authorId: ref('users.id'),
+ *   },
+ * });
  *
- * const orm = createOrm({ schema, adapter });
+ * const orm = createOrm({ schema: mySchema, adapter });
  *
  * // Table names autocomplete, results are typed!
  * const users = await orm.select('users').all();
- * // users: { id: string; name: string }[]
  *
  * // Include relations with type inference
  * const usersWithPosts = await orm.select('users').include('posts').all();
- * // usersWithPosts: { id: string; name: string; posts: { id: string; title: string }[] }[]
+ * ```
+ */
+/**
+ * ARCH-006: Creates an ORM instance from a schema.
+ *
+ * This is the single entry point for creating ORM instances.
+ * The schema must be created with `schema()` + `ref()`.
+ *
+ * For database introspection, use `getSchemaFromDb()` from @dbsp/adapter-kysely:
+ * ```typescript
+ * import { getSchemaFromDb } from '@dbsp/adapter-kysely';
+ * const schema = await getSchemaFromDb(adapter);
+ * const orm = createOrm({ schema, adapter });
  * ```
  *
- * @example With explicit model (sync)
+ * @param options - ORM options with required schema
+ * @returns ORM instance for querying
+ *
+ * @example Compile-only (no adapter)
  * ```typescript
- * interface Database {
- *   users: { id: number; name: string };
- *   posts: { id: number; title: string; authorId: number };
- * }
- *
- * const orm = createOrm<Database>({
- *   model: mySchema,
- *   adapter,
- *   strictMode: true,
- * });
- *
- * // Table names autocomplete, results are typed
- * const users = await orm.select('users').all();
- * // users: { id: number; name: string }[]
+ * const orm = createOrm({ schema: mySchema });
+ * const { sql, params } = orm.select('users').dump();
  * ```
  *
- * @example Zero-config with auto-introspection (async)
+ * @example Full ORM with adapter
  * ```typescript
- * const orm = await createOrm({ adapter });
+ * const orm = createOrm({ schema: mySchema, adapter });
  * const users = await orm.select('users').all();
  * ```
  */
-// Overload 1: With explicit model (sync), DB must be explicitly provided
-export function createOrm<DB = Record<string, unknown>>(
-	options: OrmOptionsWithModel<DB>,
-): OrmInstance<DB>;
-// Overload 2: With TypedSchema (DX-110, Prisma-like inference)
-export function createOrm<S extends TypedSchema>(
-	options: OrmOptionsWithTypedSchema<S>,
-): TypedOrmInstance<S>;
-// Overload 3: ARCH-005 - With unified Schema API (schema() + ref())
 export function createOrm<T extends SchemaDefinition>(
-	options: OrmOptionsWithUnifiedSchema<T>,
-): OrmInstance<Record<string, unknown>>;
-// Overload 4: With adapter only (async introspection)
-export function createOrm<DB = Record<string, unknown>>(
-	options: OrmOptionsWithAdapter<DB>,
-): Promise<OrmInstance<DB>>;
-// Implementation signature
-export function createOrm<
-	DB = Record<string, unknown>,
-	S extends TypedSchema = TypedSchema,
-	T extends SchemaDefinition = SchemaDefinition,
->(
-	options:
-		| OrmOptionsWithModel<DB>
-		| OrmOptionsWithTypedSchema<S>
-		| OrmOptionsWithUnifiedSchema<T>
-		| OrmOptionsWithAdapter<DB>,
-): OrmInstance<DB> | Promise<OrmInstance<DB>> | TypedOrmInstance<S> {
-	// Extract common options
-	const strictMode = options.strictMode ?? false;
-	const relationHints = options.relationHints ?? {};
-	const adapter = options.adapter;
-	const defaultIncludeStrategy = options.defaultIncludeStrategy;
-	const dialectCapabilities = options.dialectCapabilities;
+	options: SimplifiedOrmOptions<T>,
+): OrmInstance<InferDB<T>> {
+	// ARCH-006: schema is always required
+	const {
+		schema: schemaObj,
+		adapter,
+		strictMode = false,
+		dialectCapabilities,
+	} = options;
 
-	// ARCH-005: Check for unified Schema (has `model` property on schema)
-	const unifiedSchema = (
-		options as OrmOptionsWithUnifiedSchema<SchemaDefinition>
-	).schema;
+	// Validate schema has required structure
+	if (!schemaObj || !('model' in schemaObj) || !('definition' in schemaObj)) {
+		throw new Error(
+			'Invalid schema: must be created with schema() function. ' +
+				'For database introspection, use getSchemaFromDb() from @dbsp/adapter-kysely.',
+		);
+	}
+
+	// ARCH-006: Validate naming convention consistency
+	// Only validate if both schema and adapter have namingConvention defined
 	if (
-		unifiedSchema &&
-		'model' in unifiedSchema &&
-		'definition' in unifiedSchema
+		adapter &&
+		schemaObj.namingConvention &&
+		adapter.namingConvention &&
+		schemaObj.namingConvention !== adapter.namingConvention
 	) {
-		// Unified Schema already has ModelIR
-		return createOrmInstance(
-			unifiedSchema.model,
-			strictMode,
-			relationHints,
-			adapter,
-			undefined, // schemaName
-			defaultIncludeStrategy,
-			dialectCapabilities,
-		);
+		throw new NamingConventionMismatchError({
+			schemaConvention: schemaObj.namingConvention,
+			adapterConvention: adapter.namingConvention,
+		});
 	}
 
-	// Extract schema if provided (DX-110: TypedSchema)
-	const typedSchema = (options as OrmOptionsWithTypedSchema<TypedSchema>)
-		.schema;
-	// Extract model if provided
-	const model = (options as OrmOptionsWithModel<DB>).model;
-
-	// If TypedSchema is provided (DX-110), convert and return TypedOrmInstance
-	if (typedSchema) {
-		const convertedModel = typedSchemaToModelIR(typedSchema);
-		const baseOrm = createOrmInstance(
-			convertedModel,
-			strictMode,
-			relationHints,
-			adapter,
-			undefined,
-			defaultIncludeStrategy,
-			dialectCapabilities,
-		);
-
-		// Return type-safe wrapper
-		return {
-			select<T extends TableNames<typeof typedSchema>>(
-				tableName: T,
-			): TypedQueryBuilder<typeof typedSchema, T, undefined> {
-				// tableName is a string at runtime, cast through unknown to bridge untyped baseOrm
-				return baseOrm.select(
-					tableName as unknown as never,
-				) as unknown as TypedQueryBuilder<typeof typedSchema, T, undefined>;
-			},
-			get strictMode(): boolean {
-				return baseOrm.strictMode;
-			},
-			// Forward mutation methods
-			withSchema: (schemaName: string) => baseOrm.withSchema(schemaName),
-			insert: (table: string) => baseOrm.insert(table),
-			update: (table: string) => baseOrm.update(table),
-			delete: (table: string) => baseOrm.delete(table),
-			updateAll: (table: string) => baseOrm.updateAll(table),
-			deleteAll: (table: string) => baseOrm.deleteAll(table),
-			upsert: (table: string) => baseOrm.upsert(table),
-			transaction: baseOrm.transaction.bind(baseOrm),
-			raw: baseOrm.raw.bind(baseOrm),
-			listAncestors: baseOrm.listAncestors.bind(baseOrm),
-			listDescendants: baseOrm.listDescendants.bind(baseOrm),
-			// biome-ignore lint/suspicious/noExplicitAny: TypedOrmInstance is compatible
-		} as any;
-	}
-
-	// If model is provided, create synchronously
-	if (model) {
-		return createOrmInstance(
-			model,
-			strictMode,
-			relationHints,
-			adapter,
-			undefined, // schemaName
-			defaultIncludeStrategy,
-			dialectCapabilities,
-		);
-	}
-
-	// If no model/schema but adapter is provided, introspect and create async
-	if (adapter) {
-		return adapter.introspect().then((introspectedModel) =>
-			createOrmInstance(
-				introspectedModel,
-				strictMode,
-				relationHints,
-				adapter,
-				undefined, // schemaName
-				defaultIncludeStrategy,
-				dialectCapabilities,
-			),
-		);
-	}
-
-	// Neither model nor schema nor adapter - this shouldn't happen with proper types
-	throw new Error(
-		'Either model, schema, or adapter must be provided to createOrm',
-	);
+	// Create ORM instance with schema's ModelIR
+	// Cast to InferDB<T> since createOrmInstance uses internal types
+	return createOrmInstance(
+		schemaObj.model,
+		strictMode,
+		{}, // relationHints removed in ARCH-006
+		adapter,
+		undefined, // schemaName
+		undefined, // defaultIncludeStrategy removed in ARCH-006
+		dialectCapabilities,
+	) as OrmInstance<InferDB<T>>;
 }
 
 /**
@@ -880,7 +652,14 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		return builder;
 	}
 
-	columns(columns: readonly ColumnSpec[]): QueryBuilder<TResult> {
+	// Overload: typed columns (string keys only) → Pick<TResult, K>
+	columns<K extends keyof TResult & string>(
+		columns: readonly K[],
+	): QueryBuilder<Pick<TResult, K>>;
+	// Overload: mixed columns (strings + expressions) → TResult
+	columns(columns: readonly ColumnSpec[]): QueryBuilder<TResult>;
+	// Implementation
+	columns(columns: readonly ColumnSpec[]): QueryBuilder<unknown> {
 		const builder = this.clone();
 
 		// Build columns array (direct ExpressionIntent format - NQL compatible)
@@ -911,7 +690,50 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			builder.selectIntent = { type: 'fields', fields };
 		}
 
-		return builder;
+		return builder as QueryBuilder<unknown>;
+	}
+
+	coalesce<K extends keyof TResult & string, Alias extends string>(
+		fields: readonly K[],
+		as: Alias,
+	): QueryBuilder<TResult & { [P in Alias]: NonNullable<TResult[K]> }> {
+		const builder = this.clone();
+
+		// Create CoalesceExpressionIntent
+		const coalesceIntent: ExpressionIntent = {
+			kind: 'coalesce',
+			fields: fields as unknown as readonly string[],
+			as,
+		};
+
+		// If we already have a SelectWithExpressionsIntent, add to it
+		if (builder.selectIntent?.type === 'expressions') {
+			builder.selectIntent = {
+				type: 'expressions',
+				columns: [...builder.selectIntent.columns, coalesceIntent],
+			};
+		} else if (builder.selectIntent?.type === 'fields') {
+			// Convert fields to expressions and add coalesce
+			const fieldExpressions: ExpressionIntent[] =
+				builder.selectIntent.fields.map(
+					(field) => ({ kind: 'column', column: field }) as ExpressionIntent,
+				);
+			builder.selectIntent = {
+				type: 'expressions',
+				columns: [...fieldExpressions, coalesceIntent],
+			};
+		} else {
+			// No select intent yet - start with coalesce only
+			// This means SELECT * plus the coalesce column
+			builder.selectIntent = {
+				type: 'expressions',
+				columns: [coalesceIntent],
+			};
+		}
+
+		return builder as unknown as QueryBuilder<
+			TResult & { [P in Alias]: NonNullable<TResult[K]> }
+		>;
 	}
 
 	count(

@@ -18,7 +18,7 @@ import type { RecursiveIncludeOptions } from './types.js';
 // Test Schema with Self-Referential Relations
 // ============================================================================
 
-const model = schema({
+const testSchema = schema({
 	categories: {
 		id: { type: 'integer', primaryKey: true },
 		name: 'string',
@@ -39,9 +39,9 @@ const model = schema({
 		title: 'string',
 		authorId: ref('users', { as: 'author', inverse: 'posts' }),
 	},
-}).model;
+});
 
-const orm = createOrm({ model });
+const orm = createOrm({ schema: testSchema });
 
 // ============================================================================
 // Scenario E1: Non-self-referential relation
@@ -193,7 +193,7 @@ import { IntentBuilder } from './intent-builder.js';
 describe('Intent conversion (DX-017)', () => {
 	it('should convert recursive options to IncludeIntent.recursive', () => {
 		// Use IntentBuilder directly to verify intent structure
-		const builder = new IntentBuilder(model, 'categories');
+		const builder = new IntentBuilder(testSchema.model, 'categories');
 		builder.addInclude('children', {
 			recursive: true,
 			direction: 'descendants',
@@ -210,7 +210,7 @@ describe('Intent conversion (DX-017)', () => {
 	});
 
 	it('should convert includeDepth to track.depth', () => {
-		const builder = new IntentBuilder(model, 'categories');
+		const builder = new IntentBuilder(testSchema.model, 'categories');
 		builder.addInclude('children', {
 			recursive: true,
 			direction: 'descendants',
@@ -223,7 +223,7 @@ describe('Intent conversion (DX-017)', () => {
 	});
 
 	it('should NOT store recursive includes in separate array anymore', () => {
-		const builder = new IntentBuilder(model, 'categories');
+		const builder = new IntentBuilder(testSchema.model, 'categories');
 		builder.addInclude('children', {
 			recursive: true,
 			direction: 'descendants',

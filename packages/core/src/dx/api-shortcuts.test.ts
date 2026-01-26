@@ -30,10 +30,10 @@ const testSchema = schema({
 		post_id: ref('posts', { as: 'post', inverse: 'comments' }),
 		author_id: ref('users', { as: 'author' }),
 	},
-}).model;
+});
 
 describe('DX-008: API Shortcuts', () => {
-	const orm = createOrm({ model: testSchema });
+	const orm = createOrm({ schema: testSchema });
 
 	describe('byId() - Simple Primary Key', () => {
 		it('should create correct plan for simple PK lookup', () => {

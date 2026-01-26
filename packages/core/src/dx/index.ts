@@ -18,6 +18,8 @@ export {
 	// Utility for fuzzy matching suggestions
 	findClosestMatch,
 	InvalidOperationError,
+	// Convention mismatch (ARCH-006)
+	NamingConventionMismatchError,
 	NotFoundError,
 	RelationNotFoundError,
 	TableNotFoundError,
@@ -127,47 +129,9 @@ export {
 // Factory
 export {
 	createOrm,
-	type OrmOptionsWithTypedSchema,
-	// ARCH-005: Unified Schema API options
-	type OrmOptionsWithUnifiedSchema,
+	// ARCH-006: Simplified ORM options (preferred)
+	type SimplifiedOrmOptions,
 } from './orm.js';
-export type {
-	// Relation definitions
-	AnyRelationDef,
-	BelongsToDef,
-	BelongsToManyDef,
-	// Inference utilities
-	ColumnNames,
-	ColumnTypeToTS as PrismaColumnTypeToTS,
-	HasManyDef,
-	HasOneDef,
-	// Include types
-	IncludeSpec,
-	InferColumns,
-	InferColumnType,
-	InferQueryResult,
-	InferRelationNames,
-	InferRelationType,
-	InferTargetRowType,
-	IsToManyRelation,
-	NestedIncludeSpec,
-	RelationDef,
-	RelationKind,
-	RelationTarget,
-	ResolveIncludedRelations,
-	TableNames,
-	// Schema types
-	TypedSchema,
-	TypedTableDef,
-} from './prisma-types.js';
-// DX-110: Prisma-like Type Inference
-export {
-	// Relation helper functions for TypedSchema API
-	belongsTo,
-	belongsToMany,
-	hasMany,
-	hasOne,
-} from './prisma-types.js';
 // QueryExecutor - handles query execution via adapter
 export { type ExecutionContext, QueryExecutor } from './query-executor.js';
 // NOTE: RecursiveQueryBuilder is now internal-only (DX-022)
@@ -191,14 +155,23 @@ export {
 // Exports both `ref` (canonical per spec) and `fk` (alias for compatibility)
 export {
 	type ColumnDef,
+	// Type inference helpers (ARCH-006)
+	type InferColumn,
+	type InferColumnType,
+	type InferDB,
+	type InferRefColumn,
+	type InferRow,
+	type InferredRangeValue,
+	type InferSchemaDB,
 	isRef,
 	isRef as isFk, // Alias for compatibility
-	ref,
-	ref as fk, // Alias for compatibility
+	type JsonValue,
 	type RefDefinition,
 	type RefDefinition as FkDefinition, // Alias for compatibility
 	type RefOptions,
 	type RefOptions as FkOptions, // Alias for compatibility
+	ref,
+	ref as fk, // Alias for compatibility
 	type Schema,
 	type SchemaColumnType,
 	type SchemaDefinition,
@@ -248,13 +221,6 @@ export {
 	SubqueryExpression,
 	subquery,
 } from './subquery-builder.js';
-// DX-110: Type-Safe Query Builder
-export type {
-	IncludeState,
-	MergeInclude,
-	TypedOrmInstance,
-	TypedQueryBuilder,
-} from './typed-query-builder.js';
 // Types
 export type {
 	AggregateOptions,

@@ -5,7 +5,9 @@
  * Structure: AAA (Arrange-Act-Assert) for unit tests.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import { createOrm } from './orm.js';
+import type { InferDB, InferredRangeValue, JsonValue } from './schema.js';
 import {
 	isRef,
 	ref,
@@ -683,6 +685,328 @@ describe('createOrm() integration', () => {
 			expect(qb).toBeDefined();
 			expect(typeof qb.where).toBe('function');
 			expect(typeof qb.include).toBe('function');
+		});
+	});
+});
+
+// ============================================================================
+// ARCH-006: Type Inference Tests (compile-time)
+// ============================================================================
+
+describe('Type Inference (ARCH-006)', () => {
+	describe('InferDB type helper', () => {
+		it('should infer correct types from schema definition', () => {
+			// Arrange - Schema with various column types
+			const typedSchema = schema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					email: 'string',
+					bio: { type: 'text', nullable: true },
+					active: 'boolean',
+					createdAt: 'timestamp',
+					metadata: 'json',
+					balance: 'decimal',
+					bigId: 'bigint',
+				},
+				posts: {
+					id: 'uuid',
+					title: 'string',
+					authorId: ref('users', { as: 'author' }),
+					editorId: ref('users', { as: 'editor', nullable: true }),
+				},
+			});
+
+			// Compile-time type inference check using InferDB
+			type DB = InferDB<typeof typedSchema.definition>;
+
+			// Assert compile-time types for users table
+			expectTypeOf<DB['users']['id']>().toEqualTypeOf<number>();
+			expectTypeOf<DB['users']['email']>().toEqualTypeOf<string>();
+			expectTypeOf<DB['users']['bio']>().toEqualTypeOf<string | null>();
+			expectTypeOf<DB['users']['active']>().toEqualTypeOf<boolean>();
+			expectTypeOf<DB['users']['createdAt']>().toEqualTypeOf<Date>();
+			expectTypeOf<DB['users']['metadata']>().toEqualTypeOf<JsonValue>();
+			expectTypeOf<DB['users']['balance']>().toEqualTypeOf<number>();
+			expectTypeOf<DB['users']['bigId']>().toEqualTypeOf<bigint>();
+
+			// Assert compile-time types for posts table (including FK)
+			expectTypeOf<DB['posts']['id']>().toEqualTypeOf<string>(); // uuid → string
+			expectTypeOf<DB['posts']['title']>().toEqualTypeOf<string>();
+			expectTypeOf<DB['posts']['authorId']>().toEqualTypeOf<number | string>();
+			expectTypeOf<DB['posts']['editorId']>().toEqualTypeOf<
+				number | string | null
+			>();
+
+			// Runtime assertion
+			const orm = createOrm({ schema: typedSchema });
+			expect(orm.select('users')).toBeDefined();
+			expect(orm.select('posts')).toBeDefined();
+		});
+
+		it('should support all column types for inference', () => {
+			// Arrange - Test all supported types
+			const allTypesSchema = schema({
+				test: {
+					strCol: 'string',
+					textCol: 'text',
+					uuidCol: 'uuid',
+					intCol: 'integer',
+					numCol: 'number',
+					decCol: 'decimal',
+					bigCol: 'bigint',
+					boolCol: 'boolean',
+					dateCol: 'date',
+					timeCol: 'time',
+					datetimeCol: 'datetime',
+					timestampCol: 'timestamp',
+					jsonCol: 'json',
+					jsonbCol: 'jsonb',
+					// PostgreSQL range types
+					dateRangeCol: 'daterange',
+					tsRangeCol: 'tsrange',
+					int4RangeCol: 'int4range',
+					numRangeCol: 'numrange',
+				},
+			});
+
+			// Compile-time type checks for all column types
+			type TestRow = InferDB<typeof allTypesSchema.definition>['test'];
+
+			// String types → string
+			expectTypeOf<TestRow['strCol']>().toEqualTypeOf<string>();
+			expectTypeOf<TestRow['textCol']>().toEqualTypeOf<string>();
+			expectTypeOf<TestRow['uuidCol']>().toEqualTypeOf<string>();
+
+			// Numeric types → number
+			expectTypeOf<TestRow['intCol']>().toEqualTypeOf<number>();
+			expectTypeOf<TestRow['numCol']>().toEqualTypeOf<number>();
+			expectTypeOf<TestRow['decCol']>().toEqualTypeOf<number>();
+
+			// BigInt → bigint
+			expectTypeOf<TestRow['bigCol']>().toEqualTypeOf<bigint>();
+
+			// Boolean → boolean
+			expectTypeOf<TestRow['boolCol']>().toEqualTypeOf<boolean>();
+
+			// Date/time types → Date
+			expectTypeOf<TestRow['dateCol']>().toEqualTypeOf<Date>();
+			expectTypeOf<TestRow['timeCol']>().toEqualTypeOf<Date>();
+			expectTypeOf<TestRow['datetimeCol']>().toEqualTypeOf<Date>();
+			expectTypeOf<TestRow['timestampCol']>().toEqualTypeOf<Date>();
+
+			// JSON types → JsonValue
+			expectTypeOf<TestRow['jsonCol']>().toEqualTypeOf<JsonValue>();
+			expectTypeOf<TestRow['jsonbCol']>().toEqualTypeOf<JsonValue>();
+
+			// PostgreSQL range types → InferredRangeValue<T>
+			expectTypeOf<TestRow['dateRangeCol']>().toEqualTypeOf<
+				InferredRangeValue<Date>
+			>();
+			expectTypeOf<TestRow['tsRangeCol']>().toEqualTypeOf<
+				InferredRangeValue<Date>
+			>();
+			expectTypeOf<TestRow['int4RangeCol']>().toEqualTypeOf<
+				InferredRangeValue<number>
+			>();
+			expectTypeOf<TestRow['numRangeCol']>().toEqualTypeOf<
+				InferredRangeValue<number>
+			>();
+
+			// Runtime assertion
+			const orm = createOrm({ schema: allTypesSchema });
+			expect(orm.select('test')).toBeDefined();
+		});
+
+		it('should handle nullable columns correctly', () => {
+			// Arrange
+			const nullableSchema = schema({
+				items: {
+					id: 'integer',
+					required: 'string',
+					optional: { type: 'string', nullable: true },
+				},
+			});
+
+			// Compile-time type checks
+			type ItemRow = InferDB<typeof nullableSchema.definition>['items'];
+
+			// Required columns should NOT include null
+			expectTypeOf<ItemRow['id']>().toEqualTypeOf<number>();
+			expectTypeOf<ItemRow['required']>().toEqualTypeOf<string>();
+
+			// Optional columns SHOULD include null
+			expectTypeOf<ItemRow['optional']>().toEqualTypeOf<string | null>();
+
+			// Runtime assertion
+			const orm = createOrm({ schema: nullableSchema });
+			expect(orm.select('items')).toBeDefined();
+		});
+
+		it('should infer FK columns as number | string', () => {
+			// Arrange - Multiple FKs to same table require 'as' option
+			const fkSchema = schema({
+				users: { id: 'integer' },
+				posts: {
+					id: 'integer',
+					authorId: ref('users', { as: 'author' }),
+					reviewerId: ref('users', { as: 'reviewer', nullable: true }),
+				},
+			});
+
+			// Compile-time type checks
+			type PostRow = InferDB<typeof fkSchema.definition>['posts'];
+
+			// Regular FK → number | string
+			expectTypeOf<PostRow['authorId']>().toEqualTypeOf<number | string>();
+
+			// Nullable FK → number | string | null
+			expectTypeOf<PostRow['reviewerId']>().toEqualTypeOf<
+				number | string | null
+			>();
+
+			// Runtime assertion
+			const orm = createOrm({ schema: fkSchema });
+			expect(orm.select('posts')).toBeDefined();
+		});
+	});
+
+	describe('Typed coalesce() method', () => {
+		it('should add coalesce expression with inferred type', () => {
+			// Arrange
+			const mySchema = schema({
+				users: {
+					id: 'integer',
+					name: 'string',
+					bio: { type: 'text', nullable: true },
+					nickname: { type: 'string', nullable: true },
+				},
+			});
+			const orm = createOrm({ schema: mySchema });
+
+			// Act - coalesce must include columns that are in columns() selection
+			// or use coalesce before columns() / without columns()
+			const query = orm
+				.select('users')
+				.columns(['id', 'name', 'bio', 'nickname'])
+				.coalesce(['bio', 'nickname', 'name'], 'displayName');
+
+			// Assert - query should be valid
+			expect(query).toBeDefined();
+
+			// Verify the intent was built correctly
+			const plan = query.plan();
+			expect(plan.intent.select?.type).toBe('expressions');
+
+			if (plan.intent.select?.type === 'expressions') {
+				const columns = plan.intent.select.columns;
+				expect(columns).toHaveLength(5); // id, name, bio, nickname, coalesce
+
+				// Last one should be the coalesce
+				const coalesceCol = columns[4];
+				expect(coalesceCol?.kind).toBe('coalesce');
+				if (coalesceCol?.kind === 'coalesce') {
+					expect(coalesceCol.fields).toEqual(['bio', 'nickname', 'name']);
+					expect(coalesceCol.as).toBe('displayName');
+				}
+			}
+
+			// Type check at compile time:
+			// Result type is Pick<User, 'id'|'name'|'bio'|'nickname'> & { displayName: string }
+		});
+
+		it('should chain multiple coalesce calls', () => {
+			// Arrange
+			const mySchema = schema({
+				products: {
+					id: 'integer',
+					titleFr: { type: 'string', nullable: true },
+					titleEn: 'string',
+					descFr: { type: 'text', nullable: true },
+					descEn: { type: 'text', nullable: true },
+				},
+			});
+			const orm = createOrm({ schema: mySchema });
+
+			// Act - coalesce without columns() to get all fields in TResult
+			const query = orm
+				.select('products')
+				.coalesce(['titleFr', 'titleEn'], 'title')
+				.coalesce(['descFr', 'descEn'], 'description');
+
+			// Assert
+			const plan = query.plan();
+			expect(plan.intent.select?.type).toBe('expressions');
+
+			if (plan.intent.select?.type === 'expressions') {
+				const columns = plan.intent.select.columns;
+				expect(columns).toHaveLength(2); // title coalesce, desc coalesce
+
+				// Check both coalesces
+				expect(columns[0]?.kind).toBe('coalesce');
+				expect(columns[1]?.kind).toBe('coalesce');
+			}
+
+			// Type check at compile time:
+			// Result type should be Products & { title: string; description: string }
+		});
+
+		it('should work without prior columns() call', () => {
+			// Arrange
+			const mySchema = schema({
+				users: {
+					id: 'integer',
+					firstName: { type: 'string', nullable: true },
+					lastName: 'string',
+				},
+			});
+			const orm = createOrm({ schema: mySchema });
+
+			// Act - coalesce without columns() first (TResult = full User type)
+			const query = orm.select('users').coalesce(['firstName', 'lastName'], 'name');
+
+			// Assert
+			const plan = query.plan();
+			expect(plan.intent.select?.type).toBe('expressions');
+
+			if (plan.intent.select?.type === 'expressions') {
+				// Should have just the coalesce
+				expect(plan.intent.select.columns).toHaveLength(1);
+				expect(plan.intent.select.columns[0]?.kind).toBe('coalesce');
+			}
+
+			// Type check: Result is User & { name: string }
+		});
+
+		it('should allow coalesce on selected columns only (type safety)', () => {
+			// Arrange
+			const mySchema = schema({
+				users: {
+					id: 'integer',
+					email: 'string',
+					phone: { type: 'string', nullable: true },
+				},
+			});
+			const orm = createOrm({ schema: mySchema });
+
+			// Act - Select email and phone, coalesce them
+			const query = orm
+				.select('users')
+				.columns(['email', 'phone'])
+				.coalesce(['email', 'phone'], 'contact');
+
+			// Assert
+			expect(query).toBeDefined();
+			const plan = query.plan();
+
+			if (plan.intent.select?.type === 'expressions') {
+				expect(plan.intent.select.columns).toHaveLength(3);
+				const coalesceCol = plan.intent.select.columns[2];
+				expect(coalesceCol?.kind).toBe('coalesce');
+			}
+
+			// Type: Pick<User, 'email' | 'phone'> & { contact: string }
+			// Note: coalesce(['id', ...]) would be a compile error here
+			// because 'id' is not in Pick<User, 'email' | 'phone'>
 		});
 	});
 });
