@@ -206,6 +206,7 @@ export type RelationHints = Readonly<Record<string, string>>;
  * Sort direction for orderBy (re-exported from @dbsp/types).
  */
 import type { SortDirection } from '@dbsp/types';
+
 export type { SortDirection } from '@dbsp/types';
 
 /**
@@ -549,7 +550,46 @@ export interface QueryBuilder<TResult = unknown> {
 	 * // → SELECT id, sku, COALESCE(title_fr, title_en) AS title FROM products
 	 * ```
 	 */
+	columns<K extends keyof TResult & string>(
+		columns: readonly K[],
+	): QueryBuilder<Pick<TResult, K>>;
 	columns(columns: readonly ColumnSpec[]): QueryBuilder<TResult>;
+
+	/**
+	 * Add a COALESCE expression to the select, with full type inference.
+	 *
+	 * Returns the first non-null value from the specified fields.
+	 * The result type is inferred as `NonNullable<TResult[K]>` where K is the union
+	 * of the field types being coalesced.
+	 *
+	 * @typeParam K - Field names from TResult to coalesce
+	 * @typeParam Alias - The alias for the result column (must be a string literal)
+	 * @param fields - Array of field names to check (first non-null wins)
+	 * @param as - Alias for the resulting column
+	 * @returns A new QueryBuilder with the coalesced column added to TResult
+	 *
+	 * @example
+	 * ```typescript
+	 * // Basic coalesce - fallback from bio to name
+	 * const users = await orm.select('users')
+	 *   .columns(['id', 'email'])
+	 *   .coalesce(['bio', 'name'], 'displayText')
+	 *   .all();
+	 * // Type: { id: number; email: string; displayText: string }[]
+	 *
+	 * // Chain multiple coalesces
+	 * const products = await orm.select('products')
+	 *   .columns(['id'])
+	 *   .coalesce(['title_fr', 'title_en'], 'title')
+	 *   .coalesce(['desc_fr', 'desc_en'], 'description')
+	 *   .all();
+	 * // Type: { id: number; title: string; description: string }[]
+	 * ```
+	 */
+	coalesce<K extends keyof TResult & string, Alias extends string>(
+		fields: readonly K[],
+		as: Alias,
+	): QueryBuilder<TResult & { [P in Alias]: NonNullable<TResult[K]> }>;
 
 	/**
 	 * Count rows, optionally counting a specific field.

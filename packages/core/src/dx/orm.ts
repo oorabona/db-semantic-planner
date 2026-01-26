@@ -44,7 +44,7 @@ import {
 	type WhereFilter,
 } from './object-filter.js';
 import { ResultHydrator } from './result-hydrator.js';
-import type { Schema, SchemaDefinition } from './schema.js';
+import type { InferDB, Schema, SchemaDefinition } from './schema.js';
 import {
 	type AggregateOptions,
 	type ColumnSpec,
@@ -178,7 +178,7 @@ export interface SimplifiedOrmOptions<
  */
 export function createOrm<T extends SchemaDefinition>(
 	options: SimplifiedOrmOptions<T>,
-): OrmInstance<Record<string, unknown>> {
+): OrmInstance<InferDB<T>> {
 	// ARCH-006: schema is always required
 	const {
 		schema: schemaObj,
@@ -196,6 +196,7 @@ export function createOrm<T extends SchemaDefinition>(
 	}
 
 	// Create ORM instance with schema's ModelIR
+	// Cast to InferDB<T> since createOrmInstance uses internal types
 	return createOrmInstance(
 		schemaObj.model,
 		strictMode,
@@ -204,7 +205,7 @@ export function createOrm<T extends SchemaDefinition>(
 		undefined, // schemaName
 		undefined, // defaultIncludeStrategy removed in ARCH-006
 		dialectCapabilities,
-	);
+	) as OrmInstance<InferDB<T>>;
 }
 
 /**
@@ -636,7 +637,14 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		return builder;
 	}
 
-	columns(columns: readonly ColumnSpec[]): QueryBuilder<TResult> {
+	// Overload: typed columns (string keys only) → Pick<TResult, K>
+	columns<K extends keyof TResult & string>(
+		columns: readonly K[],
+	): QueryBuilder<Pick<TResult, K>>;
+	// Overload: mixed columns (strings + expressions) → TResult
+	columns(columns: readonly ColumnSpec[]): QueryBuilder<TResult>;
+	// Implementation
+	columns(columns: readonly ColumnSpec[]): QueryBuilder<unknown> {
 		const builder = this.clone();
 
 		// Build columns array (direct ExpressionIntent format - NQL compatible)
@@ -667,7 +675,50 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			builder.selectIntent = { type: 'fields', fields };
 		}
 
-		return builder;
+		return builder as QueryBuilder<unknown>;
+	}
+
+	coalesce<K extends keyof TResult & string, Alias extends string>(
+		fields: readonly K[],
+		as: Alias,
+	): QueryBuilder<TResult & { [P in Alias]: NonNullable<TResult[K]> }> {
+		const builder = this.clone();
+
+		// Create CoalesceExpressionIntent
+		const coalesceIntent: ExpressionIntent = {
+			kind: 'coalesce',
+			fields: fields as unknown as readonly string[],
+			as,
+		};
+
+		// If we already have a SelectWithExpressionsIntent, add to it
+		if (builder.selectIntent?.type === 'expressions') {
+			builder.selectIntent = {
+				type: 'expressions',
+				columns: [...builder.selectIntent.columns, coalesceIntent],
+			};
+		} else if (builder.selectIntent?.type === 'fields') {
+			// Convert fields to expressions and add coalesce
+			const fieldExpressions: ExpressionIntent[] =
+				builder.selectIntent.fields.map(
+					(field) => ({ kind: 'column', column: field }) as ExpressionIntent,
+				);
+			builder.selectIntent = {
+				type: 'expressions',
+				columns: [...fieldExpressions, coalesceIntent],
+			};
+		} else {
+			// No select intent yet - start with coalesce only
+			// This means SELECT * plus the coalesce column
+			builder.selectIntent = {
+				type: 'expressions',
+				columns: [coalesceIntent],
+			};
+		}
+
+		return builder as unknown as QueryBuilder<
+			TResult & { [P in Alias]: NonNullable<TResult[K]> }
+		>;
 	}
 
 	count(
