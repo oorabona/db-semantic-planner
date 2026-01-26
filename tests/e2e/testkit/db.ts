@@ -5,7 +5,10 @@
  */
 
 import type { Adapter } from '@dbsp/core';
-import { createKyselyAdapter } from '@dbsp/adapter-kysely';
+import {
+	createKyselyAdapter,
+	type KyselyAdapter,
+} from '@dbsp/adapter-kysely';
 import { Kysely, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 import { describe } from 'vitest';
@@ -61,10 +64,11 @@ export async function getTestAdapter(): Promise<Adapter<any>> {
 /**
  * Create an adapter for a specific schema (for introspection tests).
  * Unlike getTestAdapter(), this creates a new adapter each time with the schema set.
+ * Returns KyselyAdapter specifically for use with getSchemaFromDb().
  */
 export async function createAdapterForSchema(
 	schemaName: string,
-): Promise<Adapter<any>> {
+): Promise<KyselyAdapter<unknown>> {
 	const database = await getTestDb();
 	return createKyselyAdapter(database, schemaName);
 }

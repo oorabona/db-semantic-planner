@@ -1,8 +1,11 @@
 /**
  * Introspection E2E Tests
  *
- * Tests the auto-introspection path where createOrm({ adapter }) is called
- * without a model, triggering database introspection via information_schema.
+ * Tests the ARCH-006 introspection workflow:
+ * 1. getSchemaFromDb() introspects database and returns Schema<T>
+ * 2. createOrm({ schema, adapter }) creates ORM instance
+ *
+ * The old async path (createOrm({ adapter })) was removed in ARCH-006.
  */
 
 import { getSchemaFromDb } from '@dbsp/adapter-kysely';
@@ -29,17 +32,11 @@ describe.skipIf(shouldSkipE2E())('Auto-Introspection', () => {
 		await closeTestDb();
 	});
 
-	describe('createOrm({ adapter }) - async path', () => {
-		it('returns a Promise when model is not provided', async () => {
+	describe('getSchemaFromDb + createOrm (ARCH-006)', () => {
+		it('creates ORM instance from introspected schema', async () => {
 			const adapter = await createAdapterForSchema(SCHEMA);
-			const result = createOrm({ adapter });
-
-			expect(result).toBeInstanceOf(Promise);
-		});
-
-		it('resolves to an OrmInstance after introspection', async () => {
-			const adapter = await createAdapterForSchema(SCHEMA);
-			const orm = await createOrm({ adapter });
+			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
+			const orm = createOrm({ schema, adapter });
 
 			expect(orm).toBeDefined();
 			expect(orm.select).toBeDefined();
@@ -52,7 +49,8 @@ describe.skipIf(shouldSkipE2E())('Auto-Introspection', () => {
 
 		it('introspects tables from database', async () => {
 			const adapter = await createAdapterForSchema(SCHEMA);
-			const orm = await createOrm({ adapter });
+			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
+			const orm = createOrm({ schema, adapter });
 
 			// Should be able to query introspected tables
 			// Blog schema has: authors, posts, comments
@@ -64,7 +62,8 @@ describe.skipIf(shouldSkipE2E())('Auto-Introspection', () => {
 
 		it('introspects columns from database', async () => {
 			const adapter = await createAdapterForSchema(SCHEMA);
-			const orm = await createOrm({ adapter });
+			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
+			const orm = createOrm({ schema, adapter });
 
 			// Should be able to select specific columns
 			const dump = orm.select('authors').columns(['id', 'name']).dump();
@@ -72,19 +71,16 @@ describe.skipIf(shouldSkipE2E())('Auto-Introspection', () => {
 			expect(dump.sql).toContain('id');
 			expect(dump.sql).toContain('name');
 		});
-	});
 
-	describe('comparison with explicit model', () => {
-		it('produces equivalent queries to explicit model', async () => {
+		it('produces valid queries for introspected schema', async () => {
 			const adapter = await createAdapterForSchema(SCHEMA);
-
-			// Introspected ORM
-			const introspectedOrm = await createOrm({ adapter });
-			const introspectedDump = introspectedOrm.select('authors').dump();
+			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
+			const orm = createOrm({ schema, adapter });
 
 			// The SQL should be valid and query the authors table
-			expect(introspectedDump.sql.toLowerCase()).toContain('select');
-			expect(introspectedDump.sql).toContain('authors');
+			const dump = orm.select('authors').dump();
+			expect(dump.sql.toLowerCase()).toContain('select');
+			expect(dump.sql).toContain('authors');
 		});
 	});
 
@@ -164,6 +160,33 @@ describe.skipIf(shouldSkipE2E())('Auto-Introspection', () => {
 			expect(schema.definition.authors).toBeDefined();
 			expect(schema.definition.posts).toBeDefined();
 			expect(schema.definition.comments).toBeUndefined();
+		});
+
+		it('includes namingConvention from adapter (F-003)', async () => {
+			const adapter = await createAdapterForSchema(SCHEMA);
+			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
+
+			// Schema should have namingConvention from adapter
+			expect(schema.namingConvention).toBeDefined();
+			expect(schema.namingConvention).toBe(adapter.namingConvention);
+		});
+
+		it('includes introspectedAt timestamp (F-004)', async () => {
+			const adapter = await createAdapterForSchema(SCHEMA);
+			const before = new Date();
+			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
+			const after = new Date();
+
+			// Schema should have introspectedAt
+			expect(schema.introspectedAt).toBeDefined();
+			expect(schema.introspectedAt).toBeInstanceOf(Date);
+			// Timestamp should be within test execution window
+			expect(schema.introspectedAt!.getTime()).toBeGreaterThanOrEqual(
+				before.getTime(),
+			);
+			expect(schema.introspectedAt!.getTime()).toBeLessThanOrEqual(
+				after.getTime(),
+			);
 		});
 	});
 });

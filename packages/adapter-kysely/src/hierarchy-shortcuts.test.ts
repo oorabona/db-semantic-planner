@@ -39,7 +39,7 @@ function createTestDb() {
 }
 
 // Adjacency model: categories with parent reference
-const categoryModel = schema({
+const categorySchema = schema({
 	categories: {
 		id: { type: 'uuid', primaryKey: true },
 		name: 'string',
@@ -48,12 +48,12 @@ const categoryModel = schema({
 			roles: { parent: 'parent', children: 'children' },
 		}),
 	},
-}).model;
+});
 
 describe('DX-022: Hierarchy List Methods', () => {
 	describe('listAncestors()', () => {
 		it('should throw when db not configured', async () => {
-			const orm = createOrm({ model: categoryModel });
+			const orm = createOrm({ schema: categorySchema });
 
 			await expect(
 				orm.listAncestors('categories', 42, { parentId: 'parentId' }),
@@ -63,7 +63,7 @@ describe('DX-022: Hierarchy List Methods', () => {
 		it('should have method defined on ORM', () => {
 			const db = createTestDb();
 			const orm = createOrm({
-				model: categoryModel,
+				schema: categorySchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -73,7 +73,7 @@ describe('DX-022: Hierarchy List Methods', () => {
 		it('should have correct signature', () => {
 			const db = createTestDb();
 			const orm = createOrm({
-				model: categoryModel,
+				schema: categorySchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -84,7 +84,7 @@ describe('DX-022: Hierarchy List Methods', () => {
 
 	describe('listDescendants()', () => {
 		it('should throw when db not configured', async () => {
-			const orm = createOrm({ model: categoryModel });
+			const orm = createOrm({ schema: categorySchema });
 
 			await expect(
 				orm.listDescendants('categories', 1, { parentId: 'parentId' }),
@@ -94,7 +94,7 @@ describe('DX-022: Hierarchy List Methods', () => {
 		it('should have method defined on ORM', () => {
 			const db = createTestDb();
 			const orm = createOrm({
-				model: categoryModel,
+				schema: categorySchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -104,7 +104,7 @@ describe('DX-022: Hierarchy List Methods', () => {
 		it('should have correct signature', () => {
 			const db = createTestDb();
 			const orm = createOrm({
-				model: categoryModel,
+				schema: categorySchema,
 				adapter: createKyselyAdapter(db),
 			});
 
@@ -117,7 +117,7 @@ describe('DX-022: Hierarchy List Methods', () => {
 		it('should have listAncestors on tenant ORM', () => {
 			const db = createTestDb();
 			const orm = createOrm({
-				model: categoryModel,
+				schema: categorySchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const scopedOrm = orm.withSchema('tenant_123');
@@ -128,7 +128,7 @@ describe('DX-022: Hierarchy List Methods', () => {
 		it('should have listDescendants on tenant ORM', () => {
 			const db = createTestDb();
 			const orm = createOrm({
-				model: categoryModel,
+				schema: categorySchema,
 				adapter: createKyselyAdapter(db),
 			});
 			const scopedOrm = orm.withSchema('tenant_123');

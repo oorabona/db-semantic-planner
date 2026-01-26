@@ -70,39 +70,39 @@ describe('Zero-Config ORM (with adapter)', () => {
 		await db.destroy();
 	});
 
-	// NOTE: Async introspection tests (createOrm without model) require PostgreSQL
+	// NOTE: Async introspection tests require PostgreSQL
 	// See tests/e2e/introspection.test.ts
 
-	describe('createOrm({ model, adapter }) - sync path', () => {
-		const explicitModel = schema({
+	describe('createOrm({ schema, adapter }) - ARCH-006 API', () => {
+		const testSchema = schema({
 			users: {
 				id: { type: 'integer', primaryKey: true },
 				name: 'string',
 			},
-		}).model;
+		});
 
-		it('returns OrmInstance synchronously when model is provided', () => {
-			const orm = createOrm({ model: explicitModel, adapter });
+		it('returns OrmInstance when schema is provided', () => {
+			const orm = createOrm({ schema: testSchema, adapter });
 
 			// Should NOT be a Promise
 			expect(orm).not.toBeInstanceOf(Promise);
 			expect(orm.select).toBeDefined();
 		});
 
-		it('uses provided model instead of introspecting', () => {
-			const orm = createOrm({ model: explicitModel, adapter });
+		it('uses provided schema for queries', () => {
+			const orm = createOrm({ schema: testSchema, adapter });
 			const dump = orm.select('users').dump();
 
-			// Should work with the explicit model
+			// Should work with the explicit schema
 			expect(dump.sql).toContain('users');
 		});
 	});
 
 	describe('error handling', () => {
-		it('throws when neither model nor adapter is provided', () => {
+		it('throws when schema is missing required structure', () => {
 			// @ts-expect-error - Testing invalid usage
 			expect(() => createOrm({})).toThrow(
-				'Either model, schema, or adapter must be provided to createOrm',
+				'Invalid schema: must be created with schema() function',
 			);
 		});
 	});
