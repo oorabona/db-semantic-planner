@@ -214,9 +214,24 @@ export type InferColumn<C extends ColumnDef> =
 
 /**
  * Infers the FK column type from a RefDefinition.
- * FK columns are typically number (auto-increment) or string (uuid).
- * Since we can't know the target PK type at compile time without circular refs,
- * we use a union of common PK types.
+ *
+ * ⚠️ **Limitation:** FK columns are typed as `number | string` because inferring
+ * the target PK type at compile time would require resolving cross-table references,
+ * which creates circular type dependencies in TypeScript.
+ *
+ * **Why not infer from target table?**
+ * Given `ref('users')`, we'd need to:
+ * 1. Find `users` table in the schema
+ * 2. Find column with `primaryKey: true`
+ * 3. Get its type
+ *
+ * This creates circular refs when tables reference each other (A→B→A).
+ *
+ * **Pragmatic trade-off:** `number | string` covers 99% of PKs (auto-increment int or UUID).
+ *
+ * @example
+ * authorId: ref('users')                        // Type: number | string
+ * editorId: ref('users', { nullable: true })    // Type: number | string | null
  */
 export type InferRefColumn<R extends RefDefinition> = R extends {
 	options: { nullable: true };
