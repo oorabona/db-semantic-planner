@@ -6,7 +6,7 @@ doc-meta:
   created: 2026-01-26
   updated: 2026-01-26
   complexity: ENTERPRISE
-  time-budget: 40h
+  time-budget: 60-80h
 ---
 
 # DX-040: Type-Safe Query API
@@ -17,9 +17,9 @@ doc-meta:
 |------|-------|
 | Scope | core, nql |
 | Complexity | ENTERPRISE |
-| Time budget | ~40h |
+| Time budget | ~60-80h |
 | Blocks | 8 |
-| BDD scenarios | 18 |
+| BDD scenarios | 21 |
 | Risk level | MEDIUM |
 | Breaking changes | No (additive) |
 
@@ -76,7 +76,7 @@ ACCEPTANCE: Same query in NQL and native API produces identical SQL
 - **INV-01:** Native API and NQL MUST produce identical IntentIR for equivalent queries
 - **INV-02:** Native API MUST support ALL features that NQL supports (no capability gap)
 - **INV-03:** Type inference MUST be compile-time only (no runtime type generation)
-- **INV-04:** Table/column objects MUST be zero runtime overhead (just metadata carriers)
+- **INV-04:** Table/column objects MUST have minimal runtime overhead (metadata carriers only, no heavy computation)
 - **INV-05:** Dynamic schemas (introspection) MUST be supported (with `unknown` types)
 
 ### 3.2 Preconditions
@@ -208,19 +208,22 @@ interface AliasedColumn<TTable, TColumn, TType, TAlias extends string>
 ```typescript
 /**
  * Reference to a relation (FK-based join path).
+ * TTargetColumns maps column names to their TypeScript types.
  */
 interface RelationRef<
   TTarget extends string,
   TTargetType,
-  TRelationType extends 'belongsTo' | 'hasMany' | 'hasOne'
+  TRelationType extends 'belongsTo' | 'hasMany' | 'hasOne',
+  TTargetColumns extends Record<string, unknown> = Record<string, unknown>
 > {
   readonly _target: TTarget;
   readonly _type: TTargetType;
   readonly _relationType: TRelationType;
   readonly _brand: 'RelationRef';
+  readonly _columns: TTargetColumns;  // Runtime column metadata
 
   // Access columns through relation (for cross-table queries)
-  readonly [K in keyof TTargetColumns]: ColumnRef<TTarget, K, TTargetColumns[K]>;
+  readonly [K in keyof TTargetColumns]: ColumnRef<TTarget, K & string, TTargetColumns[K]>;
 
   // Wildcard for relation.* in select
   readonly _: AllColumns<TTarget, TTargetColumns>;
@@ -272,9 +275,9 @@ interface FromBuilder<TTable extends TableRef<any, any>> {
   // Filtering
   where(condition: WhereCondition): FromBuilder<TTable>;
 
-  // Relations
-  include<TRel extends keyof TTable & RelationRef<any, any, any>>(
-    relation: TRel
+  // Relations - TRel is a key of TTable where TTable[TRel] is a RelationRef
+  include<TRel extends keyof TTable>(
+    relation: TRel & (TTable[TRel] extends RelationRef<any, any, any, any> ? TRel : never)
   ): FromBuilder<TTable & { [K in TRel]: InferRelation<TTable[TRel]> }>;
 
   // Aggregation
@@ -297,27 +300,36 @@ interface FromBuilder<TTable extends TableRef<any, any>> {
 // Current: eq('name', 'John') - no type checking
 // New: eq(users.name, 'John') - type checked
 
-function eq<TTable extends string, TCol extends string, TType>(
-  column: ColumnRef<TTable, TCol, TType>,
-  value: TType
-): WhereCondition;
+// Expression type union for flexibility
+type Expr<T> = ColumnRef<any, any, T> | AggregateExpr<T> | ScalarExpr<T> | T;
 
-function gt<TTable extends string, TCol extends string, TType extends number | Date>(
-  column: ColumnRef<TTable, TCol, TType>,
-  value: TType
-): WhereCondition;
+// Equality - accepts column, aggregate, or literal
+function eq<T>(left: Expr<T>, right: Expr<T>): WhereCondition;
 
-function like<TTable extends string, TCol extends string>(
-  column: ColumnRef<TTable, TCol, string>,
-  pattern: string
-): WhereCondition;
+// Comparison - accepts column, aggregate, or literal (numeric/date types)
+function gt<T extends number | Date>(left: Expr<T>, right: Expr<T>): WhereCondition;
+function gte<T extends number | Date>(left: Expr<T>, right: Expr<T>): WhereCondition;
+function lt<T extends number | Date>(left: Expr<T>, right: Expr<T>): WhereCondition;
+function lte<T extends number | Date>(left: Expr<T>, right: Expr<T>): WhereCondition;
 
-function isNull<TTable extends string, TCol extends string, TType>(
-  column: ColumnRef<TTable, TCol, TType | null>
-): WhereCondition;
+// String operations - column or scalar expression
+function like(column: Expr<string>, pattern: string): WhereCondition;
+function ilike(column: Expr<string>, pattern: string): WhereCondition;
+
+// Null checks
+function isNull<T>(column: ColumnRef<any, any, T | null>): WhereCondition;
+function isNotNull<T>(column: ColumnRef<any, any, T | null>): WhereCondition;
+
+// IN clause
+function inArray<T>(column: Expr<T>, values: T[]): WhereCondition;
+
+// Boolean composition
+function and(...conditions: WhereCondition[]): WhereCondition;
+function or(...conditions: WhereCondition[]): WhereCondition;
+function not(condition: WhereCondition): WhereCondition;
 
 // Cross-table filter (EXISTS subquery)
-function exists<TRel extends RelationRef<any, any, 'hasMany'>>(
+function exists<TRel extends RelationRef<any, any, 'hasMany', any>>(
   relation: TRel,
   condition: (rel: TRel) => WhereCondition
 ): WhereCondition;
@@ -326,9 +338,10 @@ function exists<TRel extends RelationRef<any, any, 'hasMany'>>(
 #### 4.3.3 SQL Functions (Type-Safe)
 
 ```typescript
-// Aggregates
-function count(): AggregateExpr<number>;
-function count<T>(column: ColumnRef<any, any, T>): AggregateExpr<number>;
+// Aggregates - support column, relation (for count), or expression
+function count(): AggregateExpr<number>;                                          // COUNT(*)
+function count<T>(column: ColumnRef<any, any, T>): AggregateExpr<number>;         // COUNT(column)
+function count<T>(relation: RelationRef<any, T[], any, any>): AggregateExpr<number>; // COUNT(relation.*) → subquery
 function sum<T extends number>(column: ColumnRef<any, any, T>): AggregateExpr<number>;
 function avg<T extends number>(column: ColumnRef<any, any, T>): AggregateExpr<number | null>;
 function min<T>(column: ColumnRef<any, any, T>): AggregateExpr<T | null>;
@@ -502,6 +515,133 @@ const typedSchema = schema(dynamicDef) as Schema<{
 // Option 3: Use NQL with explicit type
 const result = await orm.nql<{ id: number; name: string }>`users`;
 ```
+
+### 4.7 Edge Cases & Considerations
+
+#### 4.7.1 Null/Undefined Semantics
+
+Database `NULL` maps to TypeScript `null`, not `undefined`.
+
+```typescript
+// Schema defines nullable column
+const s = schema({
+  users: {
+    id: 'integer',
+    nickname: 'string?',  // nullable
+    name: 'string'        // required
+  }
+});
+
+// Result type includes null for nullable columns
+type UserResult = {
+  id: number;
+  nickname: string | null;  // NOT string | undefined
+  name: string;
+};
+
+// Coalesce removes null from result type
+orm.from(users)
+  .select(coalesce(users.nickname, users.name).as('displayName'))
+// Result: { displayName: string }[]  (not string | null)
+```
+
+**Rule:** Nullable columns are typed as `T | null`. Use `coalesce()` or `??` to narrow.
+
+#### 4.7.2 Namespace Collisions (Reserved Properties)
+
+TableRef uses `_` prefixed properties for metadata. User columns with these names cause collisions.
+
+**Reserved names:**
+- `_table`, `_brand`, `_` (wildcard)
+
+**Mitigation:**
+```typescript
+// If user has column named '_brand', access via bracket notation
+users['_brand']  // ColumnRef for actual column
+
+// Or use explicit column() helper
+column(users, '_brand')
+```
+
+**Validation:** Schema creation warns if column names collide with reserved properties.
+
+#### 4.7.3 Dynamic Query Composition
+
+Building queries conditionally at runtime:
+
+```typescript
+// Pattern 1: Conditional where clauses
+let query = orm.from(users);
+
+if (filters.name) {
+  query = query.where(eq(users.name, filters.name));
+}
+if (filters.minAge) {
+  query = query.where(gt(users.age, filters.minAge));
+}
+
+const result = await query.all();
+
+// Pattern 2: Builder accumulator for complex logic
+const conditions: WhereCondition[] = [];
+if (filters.name) conditions.push(eq(users.name, filters.name));
+if (filters.active) conditions.push(eq(users.active, true));
+
+const query = orm.from(users)
+  .where(conditions.length > 0 ? and(...conditions) : alwaysTrue())
+  .all();
+
+// Pattern 3: Dynamic column selection
+const columns = [users.id, users.name];
+if (includeEmail) columns.push(users.email);
+
+const query = orm.from(users).pick(...columns);
+// Note: Result type is union of all possible shapes
+```
+
+#### 4.7.4 Circular Type References
+
+Bidirectional relations create circular types. TypeScript handles this but care is needed.
+
+```typescript
+// User has posts, Post has author (User) → circular
+const s = schema({
+  users: { id: 'integer', name: 'string' },
+  posts: { id: 'integer', authorId: ref('users'), title: 'string' }
+});
+
+// users.posts.author would be circular
+// Solution: Limit relation depth in types (default: 2 levels)
+
+users.posts          // ✅ RelationRef<'posts', ...>
+users.posts.title    // ✅ ColumnRef<'posts', 'title', string>
+users.posts.author   // ✅ RelationRef<'users', ...> (1 level back)
+users.posts.author.posts  // ⚠️ Type becomes `any` to break recursion
+
+// Runtime still works; just no type inference beyond depth limit
+```
+
+**Implementation:** Use `type-fest`'s `ConditionalSimplify` or explicit depth counters to prevent "Type instantiation is excessively deep" errors.
+
+#### 4.7.5 Semantic Equivalence Testing
+
+Native API and NQL MUST produce identical IntentIR. Test strategy:
+
+```typescript
+it('native and NQL produce same IntentIR', () => {
+  const nativeIR = orm.from(users)
+    .where(eq(users.name, 'John'))
+    .pick(users.id)
+    .toIntentIR();
+
+  const nqlIR = orm.nql`users | where name = 'John' | select id`.toIntentIR();
+
+  // Deep equality on IntentIR structure
+  expect(normalizeIR(nativeIR)).toEqual(normalizeIR(nqlIR));
+});
+```
+
+**Note:** SQL string comparison is fragile (whitespace, alias naming). Compare IntentIR instead.
 
 ## 5. Acceptance Criteria (BDD)
 
@@ -692,6 +832,36 @@ Scenario: SC-18 Runtime error on invalid column in dynamic schema
   Then throw error "Column 'foo' not found in table 'users'"
 ```
 
+### Scenario Group: Edge Cases
+
+```gherkin
+@priority:medium @type:edge
+Scenario: SC-19 Nullable column type inference
+  Given users.nickname is nullable string
+  When I execute `orm.from(users).pick(users.nickname).all()`
+  Then result type is `{ nickname: string | null }[]`
+  And coalesce(users.nickname, 'default') has type string (not null)
+
+@priority:low @type:edge
+Scenario: SC-20 Reserved property collision warning
+  Given schema with column named '_brand'
+  When schema is created
+  Then console.warn is called with namespace collision warning
+  And column is accessible via `users['_brand']`
+
+@priority:medium @type:edge
+Scenario: SC-21 Dynamic query composition
+  Given filter object with optional name and minAge fields
+  When I build query conditionally:
+    ```
+    let q = orm.from(users);
+    if (filters.name) q = q.where(eq(users.name, filters.name));
+    if (filters.minAge) q = q.where(gt(users.age, filters.minAge));
+    ```
+  Then final query includes only applied filters
+  And TypeScript allows reassignment without type errors
+```
+
 ### Coverage Matrix
 
 | Scenario | Nominal | Edge | Error | Security |
@@ -714,8 +884,17 @@ Scenario: SC-18 Runtime error on invalid column in dynamic schema
 | SC-16 | | ✓ | | |
 | SC-17 | | ✓ | | |
 | SC-18 | | | ✓ | |
+| SC-19 | | ✓ | | |
+| SC-20 | | ✓ | | |
+| SC-21 | | ✓ | | |
 
 ## 6. Implementation Plan
+
+> **Note:** Time estimates revised based on multi-LLM review consensus (Codex, Gemini, LM Studio).
+> Original 40h estimate was optimistic. Realistic range: **60-80h** accounting for:
+> - TypeScript type complexity and compiler edge cases
+> - Comprehensive equivalence testing (Native ↔ NQL)
+> - Edge cases (null semantics, circular refs, dynamic composition)
 
 ### Block 1: Table/Column Reference Types — 6h
 
@@ -765,7 +944,10 @@ Scenario: SC-18 Runtime error on invalid column in dynamic schema
 - [ ] `gt(users.age, 18)` works for number columns
 - [ ] `like(users.name, '%John%')` works for string columns
 
-### Block 4: Query Builder with Type Inference — 8h
+### Block 4: Query Builder with Type Inference — 14h ⚠️
+
+> **Revised up from 8h:** Type inference with generics, method chaining, and conditional types
+> is where most TypeScript complexity lives. Includes fighting compiler edge cases.
 
 **Type:** Feature
 **Dependencies:** Block 2, Block 3
@@ -780,22 +962,29 @@ Scenario: SC-18 Runtime error on invalid column in dynamic schema
 - [ ] `orm.from(users).pick(users.id, users.name).all()` returns `Pick<User, 'id'|'name'>[]`
 - [ ] `orm.from(users).where(eq(users.name, 'John')).all()` works
 - [ ] Result type inferred from select items
+- [ ] Dynamic query composition works (conditional where chaining)
+- [ ] No "Type instantiation is excessively deep" errors
 
-### Block 5: SQL Functions (Aggregates, Scalars) — 6h
+### Block 5: SQL Functions (Aggregates, Scalars) — 10h ⚠️
+
+> **Revised up from 6h:** Function overloads, null semantics, and expression type inference
+> require careful design. CASE expressions add complexity.
 
 **Type:** Feature
 **Dependencies:** Block 4
 **Packages:** core
 
 **Files:**
-- `packages/core/src/dx/functions.ts` — count, sum, avg, coalesce, etc.
+- `packages/core/src/dx/functions.ts` — count, sum, avg, coalesce, case, etc.
 - `packages/core/src/dx/functions.test.ts` — Function tests
 
 **Exit criteria:**
-- [ ] `count()`, `count(users.id)` return AggregateExpr<number>
+- [ ] `count()`, `count(users.id)`, `count(users.posts)` all work
 - [ ] `sum(users.amount)` requires number column
-- [ ] `coalesce(users.nickname, users.name)` infers string
+- [ ] `coalesce(users.nickname, users.name)` infers `string` (removes null)
 - [ ] `.as('alias')` works for result naming
+- [ ] `caseWhen().when().else()` builder works
+- [ ] Null semantics correct (nullable → T | null)
 
 ### Block 6: Window Functions — 4h
 
@@ -812,7 +1001,10 @@ Scenario: SC-18 Runtime error on invalid column in dynamic schema
 - [ ] Result type inferred
 - [ ] SQL generated correctly
 
-### Block 7: Cross-Table Queries — 6h
+### Block 7: Cross-Table Queries — 12h ⚠️
+
+> **Revised up from 6h:** Relation path resolution, EXISTS/JOIN decisions, and adapter
+> modifications are complex. Circular reference handling adds time.
 
 **Type:** Feature
 **Dependencies:** Block 4
@@ -828,20 +1020,28 @@ Scenario: SC-18 Runtime error on invalid column in dynamic schema
 - [ ] `every()`, `none()` quantifiers work
 - [ ] Cross-table GROUP BY generates correct JOIN
 - [ ] Same SQL as NQL equivalent
+- [ ] Circular relation depth limit works (2 levels default)
+- [ ] IntentIR matches NQL for all cross-table patterns
 
-### Block 8: NQL Type Integration — 2h
+### Block 8: NQL Type Integration & Equivalence Testing — 8h ⚠️
+
+> **Revised up from 2h:** Equivalence testing between Native and NQL is critical and
+> requires comprehensive test suite with IntentIR comparison (not SQL string comparison).
 
 **Type:** Feature
-**Dependencies:** Block 4
+**Dependencies:** Block 4, Block 7
 **Packages:** core, nql
 
 **Files:**
 - `packages/core/src/dx/nql.ts` — orm.nql template literal
 - `packages/core/src/dx/nql.test.ts` — Tests
+- `packages/core/src/dx/equivalence.test.ts` — Native ↔ NQL IntentIR comparison tests
 
 **Exit criteria:**
 - [ ] `orm.nql<T>\`query\`` returns T[]
-- [ ] NQL and native API produce identical IntentIR
+- [ ] NQL and native API produce identical IntentIR (not just SQL)
+- [ ] `toIntentIR()` method exposed for debugging
+- [ ] 20+ equivalence test cases covering all query patterns
 - [ ] Documentation for when to use which API
 
 ## 7. Test Strategy
@@ -850,9 +1050,10 @@ Scenario: SC-18 Runtime error on invalid column in dynamic schema
 
 | Level | Count | Focus |
 |-------|-------|-------|
-| Unit | 40+ | Type inference, individual functions |
-| Integration | 15+ | Query builder → IntentIR → SQL |
-| E2E | 5+ | Full execution against PostgreSQL |
+| Unit | 60+ | Type inference, individual functions |
+| Integration | 25+ | Query builder → IntentIR → SQL |
+| E2E | 10+ | Full execution against PostgreSQL |
+| Equivalence | 20+ | Native ↔ NQL IntentIR comparison |
 
 ### Type-Level Tests
 
@@ -867,6 +1068,26 @@ it('pick infers correct result type', () => {
 it('rejects invalid column type in eq', () => {
   // @ts-expect-error - number not assignable to string
   eq(users.name, 123);
+});
+```
+
+### Equivalence Tests (Critical)
+
+Native API and NQL MUST produce identical IntentIR. Compare IntentIR (not SQL strings).
+
+```typescript
+describe('Native ↔ NQL Equivalence', () => {
+  it.each([
+    ['simple select', 'users | select id, name'],
+    ['where clause', 'users | where name = "John"'],
+    ['cross-table', 'users | where posts.published = true'],
+    ['aggregate', 'users | select count(posts.*) as postCount | group by name'],
+    // ... 20+ cases
+  ])('produces same IntentIR: %s', (_, nql) => {
+    const nativeIR = buildNativeEquivalent(nql).toIntentIR();
+    const nqlIR = orm.nql`${nql}`.toIntentIR();
+    expect(normalizeIR(nativeIR)).toEqual(normalizeIR(nqlIR));
+  });
 });
 ```
 
