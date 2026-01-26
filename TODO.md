@@ -61,8 +61,8 @@ Simplify `createOrm()` API and extract `getSchemaFromDb()` for introspection.
 
 ### Blocks
 
-- [ ] 🟡 Block 1: Adapter Enhancement — Add `namingConvention` to Adapter interface (~2h)
-- [ ] ⏳ Block 2: getSchemaFromDb — Extract introspection to return `Schema<T>` (~3h)
+- [x] ✅ Block 1: Adapter Enhancement — Add `namingConvention` to Adapter interface (2026-01-26)
+- [ ] 🟡 Block 2: getSchemaFromDb — Extract introspection to return `Schema<T>` (~3h)
 - [ ] ⏳ Block 3: Simplify createOrm — Remove legacy overloads (~2h)
 - [ ] ⏳ Block 4: Cleanup & Migration — Update tests/examples, remove dead code (~1h)
 

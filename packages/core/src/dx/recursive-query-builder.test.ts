@@ -79,7 +79,11 @@ function createMockAdapter(): Adapter {
 			supportsArrayAgg: true,
 			dialectName: 'mock',
 		} as AdapterCapabilities,
+		namingConvention: 'preserve' as const,
 		compile: notImplemented,
+		compileWithIncludes: notImplemented,
+		compileSeparateInclude: notImplemented,
+		compileUpsert: notImplemented,
 		execute: notImplemented,
 		executeOne: notImplemented,
 		executeOneOrThrow: notImplemented,
@@ -92,6 +96,8 @@ function createMockAdapter(): Adapter {
 		compileDelete: notImplemented,
 		compileRecursive: notImplemented,
 		introspect: notImplemented,
+		executeRaw: notImplemented,
+		generateDDL: notImplemented,
 		validateIdentifier: () => {},
 	};
 }

@@ -22,6 +22,7 @@ import type {
 	DumpMeta,
 	InsertIntent,
 	ModelIR,
+	NamingConvention,
 	PlanReport,
 	RecursivePlanReport,
 	SeparateIncludeInfo,
@@ -85,6 +86,15 @@ export interface CompileOnlyAdapterOptions {
 	 * @default 'always'
 	 */
 	aliasIncludedColumns?: 'always' | 'onCollision';
+
+	/**
+	 * Naming convention for identifier transformation (ARCH-006).
+	 * - 'camelCase': Schema uses camelCase, DB uses snake_case
+	 * - 'snake_case': Both schema and DB use snake_case
+	 * - 'preserve': No transformation
+	 * @default 'preserve'
+	 */
+	namingConvention?: NamingConvention;
 }
 
 /**
@@ -189,6 +199,7 @@ export class CompileOnlyAdapter implements Adapter<unknown> {
 	private readonly _dialect: MockDialect;
 	private readonly _capabilities: AdapterCapabilities;
 	private readonly _aliasIncludedColumns: 'always' | 'onCollision';
+	private readonly _namingConvention: NamingConvention;
 
 	constructor(options: CompileOnlyAdapterOptions = {}) {
 		const dialect = options.dialect ?? 'postgresql';
@@ -205,6 +216,7 @@ export class CompileOnlyAdapter implements Adapter<unknown> {
 
 		this.kysely = kyselyInstance;
 		this._aliasIncludedColumns = options.aliasIncludedColumns ?? 'always';
+		this._namingConvention = options.namingConvention ?? 'preserve';
 
 		// PostgreSQL capabilities (most permissive)
 		this._capabilities = {
@@ -219,6 +231,14 @@ export class CompileOnlyAdapter implements Adapter<unknown> {
 
 	get capabilities(): AdapterCapabilities {
 		return this._capabilities;
+	}
+
+	/**
+	 * Naming convention used by this adapter.
+	 * @since ARCH-006
+	 */
+	get namingConvention(): NamingConvention {
+		return this._namingConvention;
 	}
 
 	// =========================================================================
@@ -427,12 +447,13 @@ export class CompileOnlyAdapter implements Adapter<unknown> {
 	// =========================================================================
 
 	withSchema(schemaName: string): Adapter<unknown> {
-		// Create a new CompileOnlyAdapter that preserves dialect and aliasing options
+		// Create a new CompileOnlyAdapter that preserves dialect, aliasing, and naming options
 		// but scopes to the specified schema using Kysely's native withSchema API
 		return new CompileOnlyAdapter({
 			dialect: this._dialect,
 			schemaName,
 			aliasIncludedColumns: this._aliasIncludedColumns,
+			namingConvention: this._namingConvention,
 		});
 	}
 
