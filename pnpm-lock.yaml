@@ -9,54 +9,21 @@ catalogs:
     '@biomejs/biome':
       specifier: ^2.3.11
       version: 2.3.11
-    '@inkjs/ui':
-      specifier: ^2.0.0
-      version: 2.0.0
-    '@modelcontextprotocol/sdk':
-      specifier: ^1.25.2
-      version: 1.25.2
     '@testcontainers/postgresql':
       specifier: ^11.11.0
       version: 11.11.0
-    '@types/better-sqlite3':
-      specifier: ^7.6.13
-      version: 7.6.13
     '@types/node':
       specifier: ^22.15.29
       version: 22.19.3
     '@types/pg':
       specifier: ^8.16.0
       version: 8.16.0
-    '@types/react':
-      specifier: ^19.2.8
-      version: 19.2.8
-    better-sqlite3:
-      specifier: ^12.6.0
-      version: 12.6.0
-    chevrotain:
-      specifier: ^11.0.3
-      version: 11.1.0
-    commander:
-      specifier: ^14.0.2
-      version: 14.0.2
-    ink:
-      specifier: ^6.6.0
-      version: 6.6.0
-    ink-table:
-      specifier: ^3.1.0
-      version: 3.1.0
     kysely:
       specifier: ^0.28.9
       version: 0.28.9
     pg:
       specifier: ^8.16.3
       version: 8.16.3
-    react:
-      specifier: ^19.2.3
-      version: 19.2.3
-    tsup:
-      specifier: ^8.5.1
-      version: 8.5.1
     tsx:
       specifier: ^4.21.0
       version: 4.21.0
@@ -66,9 +33,6 @@ catalogs:
     typescript:
       specifier: ^5.9.3
       version: 5.9.3
-    valibot:
-      specifier: ^1.2.0
-      version: 1.2.0
     vitest:
       specifier: ^4.0.16
       version: 4.0.16
