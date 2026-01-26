@@ -193,22 +193,22 @@ export {
 // ARCH-005: Unified Schema API (NEW - preferred)
 // Exports both `ref` (canonical per spec) and `fk` (alias for compatibility)
 export {
+	type ColumnDef,
 	isRef,
 	isRef as isFk, // Alias for compatibility
-	ref,
-	ref as fk, // Alias for compatibility
-	schema,
-	SchemaValidationError as SchemaError,
-	schemaToModelIR,
-	type ColumnDef,
 	type RefDefinition,
 	type RefDefinition as FkDefinition, // Alias for compatibility
 	type RefOptions,
 	type RefOptions as FkOptions, // Alias for compatibility
+	ref,
+	ref as fk, // Alias for compatibility
 	type Schema,
 	type SchemaColumnType as NewSchemaColumnType,
 	type SchemaDefinition,
+	SchemaValidationError as SchemaError,
 	type SelfRefRoles,
+	schema,
+	schemaToModelIR,
 	type TableDef,
 } from './dx/schema.js';
 
@@ -333,6 +333,8 @@ export type {
 	DumpMeta,
 	ExecutingAdapter,
 	IntrospectingAdapter,
+	// ARCH-006: Naming convention for identifier transformation
+	NamingConvention,
 	RawSqlAdapter,
 	SeparateIncludeInfo,
 	StreamingAdapter,

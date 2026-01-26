@@ -75,6 +75,17 @@ export interface AdapterStreamOptions {
 export type AliasIncludedColumnsMode = 'always' | 'onCollision';
 
 /**
+ * Naming convention used by the adapter.
+ *
+ * - `'camelCase'`: Database uses snake_case, adapter converts to camelCase (CamelCasePlugin enabled)
+ * - `'snake_case'`: Database uses snake_case, adapter preserves as-is
+ * - `'preserve'`: Adapter preserves identifiers exactly as defined (no transformation)
+ *
+ * @since ARCH-006
+ */
+export type NamingConvention = 'camelCase' | 'snake_case' | 'preserve';
+
+/**
  * Options for query compilation.
  * Extends CompileOptionsBase with core-specific options.
  */
@@ -334,7 +345,20 @@ export interface Adapter<DB = unknown>
 		IntrospectingAdapter,
 		TransactionalAdapter<DB>,
 		RawSqlAdapter,
-		DDLGeneratingAdapter {}
+		DDLGeneratingAdapter {
+	/**
+	 * Naming convention used by this adapter.
+	 *
+	 * This determines how identifiers (table names, column names) are transformed
+	 * between the schema definition and the database:
+	 * - `'camelCase'`: Schema uses camelCase, DB uses snake_case (CamelCasePlugin)
+	 * - `'snake_case'`: Both schema and DB use snake_case
+	 * - `'preserve'`: No transformation, identifiers match exactly
+	 *
+	 * @since ARCH-006
+	 */
+	readonly namingConvention: NamingConvention;
+}
 
 // ============================================================================
 // Feature Detection Helpers (DX-104)
