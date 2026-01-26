@@ -505,6 +505,51 @@ export class ColumnNotFoundError extends Error {
 	}
 }
 
+/**
+ * Error thrown when schema's naming convention doesn't match adapter's naming convention.
+ *
+ * This validation prevents subtle bugs where column names in queries don't match
+ * the expected database column names due to naming convention mismatch.
+ *
+ * @example
+ * ```typescript
+ * const schema = await getSchemaFromDb(adapter); // namingConvention: 'camelCase'
+ * const orm = createOrm({
+ *   schema,
+ *   adapter: createKyselyAdapter(db, { namingConvention: 'snake_case' }),
+ * });
+ * // Throws NamingConventionMismatchError
+ * ```
+ *
+ * @since ARCH-006
+ */
+export class NamingConventionMismatchError extends Error {
+	override readonly name = 'NamingConventionMismatchError' as const;
+
+	/**
+	 * The naming convention used by the schema.
+	 */
+	readonly schemaConvention: string;
+
+	/**
+	 * The naming convention used by the adapter.
+	 */
+	readonly adapterConvention: string;
+
+	constructor(opts: { schemaConvention: string; adapterConvention: string }) {
+		const message =
+			`Naming convention mismatch: Schema uses '${opts.schemaConvention}' but adapter uses '${opts.adapterConvention}'.\n` +
+			`Either align them or recreate the schema with the same naming convention as the adapter.`;
+
+		super(message);
+
+		this.schemaConvention = opts.schemaConvention;
+		this.adapterConvention = opts.adapterConvention;
+
+		Object.setPrototypeOf(this, NamingConventionMismatchError.prototype);
+	}
+}
+
 // ============================================================================
 // Error Codes
 // ============================================================================
@@ -543,6 +588,8 @@ export const ErrorCode = {
 	TABLE_NOT_FOUND: 'DBSP_E007',
 	/** Column not found on table */
 	COLUMN_NOT_FOUND: 'DBSP_E008',
+	/** Schema naming convention doesn't match adapter naming convention */
+	NAMING_CONVENTION_MISMATCH: 'DBSP_E009',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -717,6 +764,13 @@ export const Errors = {
 		return error instanceof ColumnNotFoundError;
 	},
 
+	/** Check if error is a NamingConventionMismatchError */
+	isNamingConventionMismatch(
+		error: unknown,
+	): error is NamingConventionMismatchError {
+		return error instanceof NamingConventionMismatchError;
+	},
+
 	/** Check if error is any DBSP error */
 	isDbspError(
 		error: unknown,
@@ -728,7 +782,8 @@ export const Errors = {
 		| InvalidOperationError
 		| UnsafeOperationError
 		| TableNotFoundError
-		| ColumnNotFoundError {
+		| ColumnNotFoundError
+		| NamingConventionMismatchError {
 		return (
 			error instanceof ExecutionError ||
 			error instanceof NotFoundError ||
@@ -737,7 +792,8 @@ export const Errors = {
 			error instanceof InvalidOperationError ||
 			error instanceof UnsafeOperationError ||
 			error instanceof TableNotFoundError ||
-			error instanceof ColumnNotFoundError
+			error instanceof ColumnNotFoundError ||
+			error instanceof NamingConventionMismatchError
 		);
 	},
 

@@ -15,6 +15,7 @@
  * ```
  */
 
+import type { NamingConvention } from '../adapter.js';
 import { ModelIRImpl } from '../model-impl.js';
 import type {
 	ColumnIR,
@@ -126,6 +127,18 @@ export interface Schema<T extends SchemaDefinition> {
 	readonly model: ModelIR;
 	/** Table names */
 	readonly tableNames: (keyof T)[];
+	/**
+	 * Naming convention used when this schema was created.
+	 * Used for validation against adapter's naming convention in createOrm().
+	 * @see NamingConvention
+	 */
+	readonly namingConvention?: NamingConvention;
+	/**
+	 * Timestamp when this schema was introspected from the database.
+	 * Only present for schemas created via getSchemaFromDb().
+	 * Useful for detecting schema drift.
+	 */
+	readonly introspectedAt?: Date;
 }
 
 // ============================================================================
