@@ -658,13 +658,20 @@ export function extractRelationFiltersForSharing(
 	};
 
 	// Handle relation filter
-	if (whereObj.kind === 'relationFilter' && whereObj.relation && whereObj.mode === 'some') {
+	if (
+		whereObj.kind === 'relationFilter' &&
+		whereObj.relation &&
+		whereObj.mode === 'some'
+	) {
 		if (!state.relationFilters) {
 			state.relationFilters = new Map();
 		}
 		// Store the inner filter for this relation
 		if (whereObj.where) {
-			state.relationFilters.set(whereObj.relation, whereObj.where as import('@dbsp/core').WhereIntent);
+			state.relationFilters.set(
+				whereObj.relation,
+				whereObj.where as import('@dbsp/core').WhereIntent,
+			);
 		}
 	}
 

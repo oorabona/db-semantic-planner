@@ -803,9 +803,7 @@ function processRelationFilter(
 	state.relationsAnalyzed++;
 
 	// Normalize relation path to array (SPEC-002: multi-hop support)
-	const relations = Array.isArray(relationPath)
-		? relationPath
-		: [relationPath];
+	const relations = Array.isArray(relationPath) ? relationPath : [relationPath];
 
 	// Process each relation in the chain
 	let currentSource = sourceTable;

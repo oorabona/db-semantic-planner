@@ -4,7 +4,7 @@
  * These replace the old ancestors(), descendants(), subtree() methods (BREAKING CHANGE)
  */
 
-import { createOrm, fk, schema } from '@dbsp/core';
+import { createOrm, ref, schema } from '@dbsp/core';
 import {
 	Kysely,
 	PostgresAdapter,
@@ -43,7 +43,7 @@ const categorySchema = schema({
 	categories: {
 		id: { type: 'uuid', primaryKey: true },
 		name: 'string',
-		parentId: fk('categories', {
+		parentId: ref('categories', {
 			nullable: true,
 			roles: { parent: 'parent', children: 'children' },
 		}),

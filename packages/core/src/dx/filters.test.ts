@@ -736,3 +736,230 @@ describe('relationColumn() helper', () => {
 		});
 	});
 });
+
+// ============================================================================
+// DX-040: Type-Safe Filter Tests with ColumnRef
+// ============================================================================
+
+import { ref, schema } from './schema.js';
+import { COLUMN_META, TABLE_META } from './table-ref.js';
+
+describe('Type-safe filters with ColumnRef (DX-040)', () => {
+	// Create a test schema with typed tables
+	const testSchema = schema({
+		users: {
+			id: 'integer',
+			name: 'string',
+			age: 'integer',
+			email: 'string',
+			active: 'boolean',
+			score: { type: 'decimal', nullable: true },
+		},
+		posts: {
+			id: 'integer',
+			title: 'string',
+			authorId: ref('users'),
+		},
+	});
+
+	const { users, posts } = testSchema.tables;
+
+	describe('eq() with ColumnRef', () => {
+		it('should accept ColumnRef and extract column name', () => {
+			const result = eq(users.name, 'John');
+
+			expect(result).toEqual({
+				kind: 'comparison',
+				field: 'name',
+				operator: 'eq',
+				value: 'John',
+			});
+		});
+
+		it('should work with number columns', () => {
+			const result = eq(users.age, 25);
+
+			expect(result).toEqual({
+				kind: 'comparison',
+				field: 'age',
+				operator: 'eq',
+				value: 25,
+			});
+		});
+
+		it('should work with boolean columns', () => {
+			const result = eq(users.active, true);
+
+			expect(result).toEqual({
+				kind: 'comparison',
+				field: 'active',
+				operator: 'eq',
+				value: true,
+			});
+		});
+	});
+
+	describe('gt/gte/lt/lte with ColumnRef', () => {
+		it('gt() should accept ColumnRef', () => {
+			const result = gt(users.age, 18);
+
+			expect(result).toEqual({
+				kind: 'comparison',
+				field: 'age',
+				operator: 'gt',
+				value: 18,
+			});
+		});
+
+		it('gte() should accept ColumnRef', () => {
+			const result = gte(users.age, 18);
+
+			expect(result).toEqual({
+				kind: 'comparison',
+				field: 'age',
+				operator: 'gte',
+				value: 18,
+			});
+		});
+
+		it('lt() should accept ColumnRef', () => {
+			const result = lt(users.age, 65);
+
+			expect(result).toEqual({
+				kind: 'comparison',
+				field: 'age',
+				operator: 'lt',
+				value: 65,
+			});
+		});
+
+		it('lte() should accept ColumnRef', () => {
+			const result = lte(users.age, 65);
+
+			expect(result).toEqual({
+				kind: 'comparison',
+				field: 'age',
+				operator: 'lte',
+				value: 65,
+			});
+		});
+	});
+
+	describe('like() with ColumnRef', () => {
+		it('should accept ColumnRef for string columns', () => {
+			const result = like(users.name, '%John%');
+
+			expect(result).toEqual({
+				kind: 'like',
+				field: 'name',
+				pattern: '%John%',
+			});
+		});
+
+		it('should support case-insensitive option', () => {
+			const result = like(users.email, '%@EXAMPLE.COM', true);
+
+			expect(result).toEqual({
+				kind: 'like',
+				field: 'email',
+				pattern: '%@EXAMPLE.COM',
+				caseInsensitive: true,
+			});
+		});
+	});
+
+	describe('isNull/isNotNull with ColumnRef', () => {
+		it('isNull() should accept ColumnRef', () => {
+			const result = isNull(users.score);
+
+			expect(result).toEqual({
+				kind: 'null',
+				field: 'score',
+				operator: 'isNull',
+			});
+		});
+
+		it('isNotNull() should accept ColumnRef', () => {
+			const result = isNotNull(users.email);
+
+			expect(result).toEqual({
+				kind: 'null',
+				field: 'email',
+				operator: 'isNotNull',
+			});
+		});
+	});
+
+	describe('inArray with ColumnRef', () => {
+		it('should accept ColumnRef and array of matching type', () => {
+			const result = inArray(users.name, ['Alice', 'Bob', 'Charlie']);
+
+			expect(result).toEqual({
+				kind: 'in',
+				field: 'name',
+				values: ['Alice', 'Bob', 'Charlie'],
+			});
+		});
+
+		it('should work with number arrays', () => {
+			const result = inArray(users.age, [18, 21, 25]);
+
+			expect(result).toEqual({
+				kind: 'in',
+				field: 'age',
+				values: [18, 21, 25],
+			});
+		});
+	});
+
+	describe('combined with and/or', () => {
+		it('should work in and() combination', () => {
+			const result = and(
+				eq(users.active, true),
+				gt(users.age, 18),
+				like(users.name, '%John%'),
+			);
+
+			expect(result.kind).toBe('and');
+			expect(result.conditions).toHaveLength(3);
+		});
+
+		it('should work in or() combination', () => {
+			const result = or(eq(users.name, 'Alice'), eq(users.name, 'Bob'));
+
+			expect(result.kind).toBe('or');
+			expect(result.conditions).toHaveLength(2);
+		});
+	});
+
+	describe('backward compatibility', () => {
+		it('should still work with string field names', () => {
+			// These should continue to work exactly as before
+			expect(eq('name', 'John')).toEqual({
+				kind: 'comparison',
+				field: 'name',
+				operator: 'eq',
+				value: 'John',
+			});
+
+			expect(gt('age', 18)).toEqual({
+				kind: 'comparison',
+				field: 'age',
+				operator: 'gt',
+				value: 18,
+			});
+
+			expect(like('name', '%John%')).toEqual({
+				kind: 'like',
+				field: 'name',
+				pattern: '%John%',
+			});
+
+			expect(isNull('deletedAt')).toEqual({
+				kind: 'null',
+				field: 'deletedAt',
+				operator: 'isNull',
+			});
+		});
+	});
+});

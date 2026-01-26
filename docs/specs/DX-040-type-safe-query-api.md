@@ -7,6 +7,8 @@ doc-meta:
   updated: 2026-01-26
   complexity: ENTERPRISE
   time-budget: 60-80h
+  hardened: 2026-01-26
+  hardening-source: adversarial-review
 ---
 
 # DX-040: Type-Safe Query API
@@ -19,9 +21,10 @@ doc-meta:
 | Complexity | ENTERPRISE |
 | Time budget | ~60-80h |
 | Blocks | 8 |
-| BDD scenarios | 21 |
+| BDD scenarios | 24 (+3 from hardening) |
 | Risk level | MEDIUM |
 | Breaking changes | No (additive) |
+| Hardened | ✅ 2026-01-26 (adversarial review) |
 
 ## 1. Problem Statement
 
@@ -98,6 +101,8 @@ ACCEPTANCE: Same query in NQL and native API produces identical SQL
 - **ERR-01:** Using non-existent column → TypeScript compile error
 - **ERR-02:** Type mismatch in `eq(users.id, 'string')` → TypeScript compile error
 - **ERR-03:** Dynamic schema with missing column → Runtime error (existing behavior)
+- **ERR-04:** Invalid alias name (not matching `/^[a-zA-Z_][a-zA-Z0-9_]*$/`) → Runtime error with clear message
+- **ERR-05:** Reserved JS identifier as table/column name → Runtime warning (not error) with bracket notation suggestion
 
 ## 4. Technical Design
 
@@ -147,20 +152,54 @@ ACCEPTANCE: Same query in NQL and native API produces identical SQL
 
 ### 4.2 Type System Design
 
+#### 4.2.0 Metadata Symbols (Hardening: No Collision)
+
+**Problem:** Using `_table`, `_brand` as property names could collide with user columns.
+
+**Solution:** Use ES6 Symbols for internal metadata. Symbols cannot collide with string property names.
+
+```typescript
+// packages/core/src/dx/symbols.ts
+
+/** @description Symbol for accessing table name metadata */
+export const TABLE_META = Symbol.for('dbsp:table');
+
+/** @description Symbol for accessing column name metadata */
+export const COLUMN_META = Symbol.for('dbsp:column');
+
+/** @description Symbol for accessing relation metadata */
+export const RELATION_META = Symbol.for('dbsp:relation');
+
+/** @description Symbol for type branding (internal use) */
+export const BRAND = Symbol.for('dbsp:brand');
+```
+
+**Why `Symbol.for()` instead of `Symbol()`:**
+- `Symbol.for()` creates global symbols that survive serialization
+- Same key always returns same symbol (useful for cross-module access)
+
 #### 4.2.1 Table Reference Types
 
 ```typescript
 /**
  * Reference to a table in the schema.
- * Carries table name and column types for inference.
+ *
+ * @typeParam TName - The table name as a string literal type
+ * @typeParam TColumns - Record mapping column names to ColumnRef types
+ * @typeParam TRelations - Record mapping relation names to RelationRef types
+ *
+ * @description
+ * TableRef uses Symbols for internal metadata to avoid collision with user columns.
+ * The wildcard `'*'` is used for SELECT * (cannot be a valid SQL identifier).
  */
 interface TableRef<
   TName extends string,
   TColumns extends Record<string, ColumnRef<TName, string, unknown>>,
   TRelations extends Record<string, RelationRef<string, unknown, RelationType>> = {}
 > {
-  readonly _table: TName;
-  readonly _brand: 'TableRef';
+  // Internal metadata via Symbols (no collision possible)
+  readonly [TABLE_META]: TName;
+  readonly [BRAND]: 'TableRef';
 
   // All columns as ColumnRef objects
   readonly [K in keyof TColumns]: TColumns[K];
@@ -168,9 +207,25 @@ interface TableRef<
   // All relations as RelationRef objects
   readonly [K in keyof TRelations]: TRelations[K];
 
-  // Wildcard for SELECT *
-  readonly _: AllColumns<TName, TColumns>;
+  // Wildcard for SELECT * — '*' is never a valid SQL identifier
+  readonly '*': AllColumns<TName, TColumns>;
 }
+```
+
+**Usage:**
+
+```typescript
+const { users } = s.tables;
+
+// Column access
+users.id           // ColumnRef<'users', 'id', number>
+users.name         // ColumnRef<'users', 'name', string>
+
+// Wildcard (SELECT *)
+users['*']         // AllColumns<'users', {...}>
+
+// Internal metadata (rarely needed by users)
+users[TABLE_META]  // 'users'
 ```
 
 #### 4.2.2 Column Reference Types
@@ -178,19 +233,27 @@ interface TableRef<
 ```typescript
 /**
  * Reference to a column in a table.
- * Carries table name, column name, and TypeScript type.
+ *
+ * @typeParam TTable - The table name
+ * @typeParam TColumn - The column name
+ * @typeParam TType - The TypeScript type of the column value
  */
 interface ColumnRef<
   TTable extends string,
   TColumn extends string,
   TType
 > {
-  readonly _table: TTable;
-  readonly _column: TColumn;
-  readonly _type: TType;
-  readonly _brand: 'ColumnRef';
+  readonly [TABLE_META]: TTable;
+  readonly [COLUMN_META]: TColumn;
+  readonly [BRAND]: 'ColumnRef';
 
-  // Alias support
+  // Type phantom (for inference, not runtime)
+  readonly _type: TType;
+
+  /**
+   * Create an aliased version of this column for result type inference.
+   * @param alias - Must match /^[a-zA-Z_][a-zA-Z0-9_]*$/ (validated at runtime)
+   */
   as<TAlias extends string>(alias: TAlias): AliasedColumn<TTable, TColumn, TType, TAlias>;
 }
 
@@ -208,7 +271,11 @@ interface AliasedColumn<TTable, TColumn, TType, TAlias extends string>
 ```typescript
 /**
  * Reference to a relation (FK-based join path).
- * TTargetColumns maps column names to their TypeScript types.
+ *
+ * @typeParam TTarget - The target table name
+ * @typeParam TTargetType - The TypeScript type of related records
+ * @typeParam TRelationType - 'belongsTo' | 'hasMany' | 'hasOne'
+ * @typeParam TTargetColumns - Record mapping target column names to their types
  */
 interface RelationRef<
   TTarget extends string,
@@ -216,21 +283,126 @@ interface RelationRef<
   TRelationType extends 'belongsTo' | 'hasMany' | 'hasOne',
   TTargetColumns extends Record<string, unknown> = Record<string, unknown>
 > {
-  readonly _target: TTarget;
+  readonly [RELATION_META]: { target: TTarget; type: TRelationType };
+  readonly [BRAND]: 'RelationRef';
   readonly _type: TTargetType;
-  readonly _relationType: TRelationType;
-  readonly _brand: 'RelationRef';
-  readonly _columns: TTargetColumns;  // Runtime column metadata
 
   // Access columns through relation (for cross-table queries)
   readonly [K in keyof TTargetColumns]: ColumnRef<TTarget, K & string, TTargetColumns[K]>;
 
   // Wildcard for relation.* in select
-  readonly _: AllColumns<TTarget, TTargetColumns>;
+  readonly '*': AllColumns<TTarget, TTargetColumns>;
 }
 ```
 
-#### 4.2.4 Schema Table Extraction
+#### 4.2.4 Proxy Implementation (Reserved Words Support)
+
+**Problem:** JavaScript reserved words (`constructor`, `prototype`, `__proto__`) shadow user columns.
+
+**Solution:** Use Proxy to intercept all property access and prioritize column lookup.
+
+```typescript
+const JS_RESERVED = new Set([
+  'constructor', 'prototype', '__proto__',
+  'toString', 'valueOf', 'hasOwnProperty',
+  'isPrototypeOf', 'propertyIsEnumerable'
+]);
+
+function createTableRef<TName extends string, TColumns>(
+  tableName: TName,
+  columns: TColumns,
+  relations: Record<string, RelationDef>
+): TableRef<TName, TColumns> {
+  const columnSet = new Set(Object.keys(columns));
+
+  return new Proxy({} as TableRef<TName, TColumns>, {
+    get(target, prop, receiver) {
+      // Symbol access (internal metadata)
+      if (typeof prop === 'symbol') {
+        if (prop === TABLE_META) return tableName;
+        if (prop === BRAND) return 'TableRef';
+        return undefined;
+      }
+
+      // String access
+      if (typeof prop === 'string') {
+        // Wildcard
+        if (prop === '*') {
+          return createAllColumns(tableName, columns);
+        }
+
+        // Column — ALWAYS prioritized over native properties
+        if (columnSet.has(prop)) {
+          return createColumnRef(tableName, prop, columns[prop]);
+        }
+
+        // Relation
+        if (prop in relations) {
+          return createRelationRef(relations[prop]);
+        }
+
+        // Warn if reserved word that's not a column
+        if (JS_RESERVED.has(prop)) {
+          // Not a column, but user might expect it to be
+          return undefined;
+        }
+      }
+
+      // Unknown property
+      return undefined;
+    },
+
+    has(target, prop) {
+      if (typeof prop === 'symbol') return prop === TABLE_META || prop === BRAND;
+      if (typeof prop === 'string') {
+        return prop === '*' || columnSet.has(prop) || prop in relations;
+      }
+      return false;
+    },
+
+    ownKeys() {
+      return [...columnSet, '*', ...Object.keys(relations)];
+    }
+  });
+}
+```
+
+**Behavior:**
+
+```typescript
+// Schema with reserved word as column name
+const s = schema({
+  users: { id: 'integer', name: 'string', constructor: 'string' }
+});
+
+const { users } = s.tables;
+
+users.id          // ColumnRef ✅
+users.constructor // ColumnRef ✅ (Proxy intercepts, returns column, NOT Function)
+users['*']        // AllColumns ✅
+users.unknown     // undefined ✅
+```
+
+**Warning at schema creation:**
+
+```typescript
+function schema<T>(def: T): Schema<T> {
+  for (const [tableName, tableDef] of Object.entries(def)) {
+    for (const colName of Object.keys(tableDef)) {
+      if (JS_RESERVED.has(colName)) {
+        console.warn(
+          `⚠️ Column '${tableName}.${colName}' uses a JavaScript reserved identifier. ` +
+          `It will work at runtime via Proxy, but TypeScript may show warnings. ` +
+          `Consider using bracket notation: ${tableName}['${colName}']`
+        );
+      }
+    }
+  }
+  // ... rest of implementation
+}
+```
+
+#### 4.2.5 Schema Table Extraction
 
 ```typescript
 // Current schema() returns Schema<T>
@@ -547,23 +719,31 @@ orm.from(users)
 
 **Rule:** Nullable columns are typed as `T | null`. Use `coalesce()` or `??` to narrow.
 
-#### 4.7.2 Namespace Collisions (Reserved Properties)
+#### 4.7.2 Namespace Collisions (Solved via Symbols + Proxy)
 
-TableRef uses `_` prefixed properties for metadata. User columns with these names cause collisions.
+**Previous concern:** Property names could collide with user columns.
 
-**Reserved names:**
-- `_table`, `_brand`, `_` (wildcard)
+**Solution (Hardening 2026-01-26):**
 
-**Mitigation:**
+1. **Symbols for metadata:** `TABLE_META`, `COLUMN_META`, `BRAND` are Symbols — cannot collide with string column names.
+
+2. **`'*'` for wildcard:** The asterisk character is never a valid SQL identifier, so `users['*']` cannot collide.
+
+3. **Proxy for JS reserved words:** Even `constructor`, `prototype`, `__proto__` work as column names via Proxy interception (see section 4.2.4).
+
+**No reserved column names exist.** Any valid SQL column name works.
+
+**Only warning (not error):** Schema creation logs a warning for JS reserved words, suggesting bracket notation for TypeScript clarity:
+
 ```typescript
-// If user has column named '_brand', access via bracket notation
-users['_brand']  // ColumnRef for actual column
+// Warning logged at schema creation, but works at runtime
+const s = schema({
+  users: { id: 'integer', constructor: 'string' }  // ⚠️ Warning logged
+});
 
-// Or use explicit column() helper
-column(users, '_brand')
+users.constructor  // Works via Proxy → ColumnRef
+users['constructor']  // Also works, clearer for TypeScript
 ```
-
-**Validation:** Schema creation warns if column names collide with reserved properties.
 
 #### 4.7.3 Dynamic Query Composition
 
@@ -843,11 +1023,12 @@ Scenario: SC-19 Nullable column type inference
   And coalesce(users.nickname, 'default') has type string (not null)
 
 @priority:low @type:edge
-Scenario: SC-20 Reserved property collision warning
-  Given schema with column named '_brand'
+Scenario: SC-20 JS reserved word as column name (Proxy support)
+  Given schema with column named 'constructor'
   When schema is created
-  Then console.warn is called with namespace collision warning
-  And column is accessible via `users['_brand']`
+  Then console.warn is called suggesting bracket notation
+  And `users.constructor` returns ColumnRef (via Proxy)
+  And `users['constructor']` also works
 
 @priority:medium @type:edge
 Scenario: SC-21 Dynamic query composition
@@ -860,33 +1041,59 @@ Scenario: SC-21 Dynamic query composition
     ```
   Then final query includes only applied filters
   And TypeScript allows reassignment without type errors
+
+@priority:medium @type:edge @hardening
+Scenario: SC-22 Empty schema returns empty tables object
+  Given schema definition with no tables: `schema({})`
+  When I access `s.tables`
+  Then it returns typed empty object `{}`
+  And TypeScript infers type `{}`
+
+@priority:high @type:error @hardening
+Scenario: SC-23 Invalid alias name rejected
+  Given a valid query with column alias
+  When I use invalid alias `.as('invalid-name')`
+  Then throw error "Invalid alias 'invalid-name': must match /^[a-zA-Z_][a-zA-Z0-9_]*$/"
+  When I use valid alias `.as('validName')`
+  Then query succeeds
+
+@priority:medium @type:edge @hardening
+Scenario: SC-24 Wildcard access via bracket notation
+  Given a schema with users table
+  When I access `users['*']`
+  Then it returns AllColumns<'users', {...}>
+  And using in select: `orm.from(users).select(users['*']).all()`
+  Then SQL contains SELECT *
 ```
 
 ### Coverage Matrix
 
-| Scenario | Nominal | Edge | Error | Security |
-|----------|---------|------|-------|----------|
-| SC-01 | ✓ | | | |
-| SC-02 | ✓ | | | |
-| SC-03 | | | ✓ | |
-| SC-04 | ✓ | | | |
-| SC-05 | ✓ | | | |
-| SC-06 | ✓ | | ✓ | |
-| SC-07 | ✓ | | | |
-| SC-08 | ✓ | | | |
-| SC-09 | ✓ | | | |
-| SC-10 | ✓ | | | |
-| SC-11 | ✓ | | | |
-| SC-12 | ✓ | | | |
-| SC-13 | ✓ | | | |
-| SC-14 | ✓ | | | |
-| SC-15 | ✓ | | | |
-| SC-16 | | ✓ | | |
-| SC-17 | | ✓ | | |
-| SC-18 | | | ✓ | |
-| SC-19 | | ✓ | | |
-| SC-20 | | ✓ | | |
-| SC-21 | | ✓ | | |
+| Scenario | Nominal | Edge | Error | Security | Hardening |
+|----------|---------|------|-------|----------|-----------|
+| SC-01 | ✓ | | | | |
+| SC-02 | ✓ | | | | |
+| SC-03 | | | ✓ | | |
+| SC-04 | ✓ | | | | |
+| SC-05 | ✓ | | | | |
+| SC-06 | ✓ | | ✓ | | |
+| SC-07 | ✓ | | | | |
+| SC-08 | ✓ | | | | |
+| SC-09 | ✓ | | | | |
+| SC-10 | ✓ | | | | |
+| SC-11 | ✓ | | | | |
+| SC-12 | ✓ | | | | |
+| SC-13 | ✓ | | | | |
+| SC-14 | ✓ | | | | |
+| SC-15 | ✓ | | | | |
+| SC-16 | | ✓ | | | |
+| SC-17 | | ✓ | | | |
+| SC-18 | | | ✓ | | |
+| SC-19 | | ✓ | | | |
+| SC-20 | | ✓ | | | ✓ |
+| SC-21 | | ✓ | | | |
+| SC-22 | | ✓ | | | ✓ |
+| SC-23 | | | ✓ | ✓ | ✓ |
+| SC-24 | | ✓ | | | ✓ |
 
 ## 6. Implementation Plan
 
@@ -896,37 +1103,45 @@ Scenario: SC-21 Dynamic query composition
 > - Comprehensive equivalence testing (Native ↔ NQL)
 > - Edge cases (null semantics, circular refs, dynamic composition)
 
-### Block 1: Table/Column Reference Types — 6h
+### Block 1: Table/Column Reference Types — 7h (+1h Hardening)
 
 **Type:** Infrastructure
 **Dependencies:** None
 **Packages:** core
 
 **Files:**
-- `packages/core/src/dx/table-ref.ts` — TableRef, ColumnRef, RelationRef types
+- `packages/core/src/dx/symbols.ts` — TABLE_META, COLUMN_META, RELATION_META, BRAND symbols **(H-01)**
+- `packages/core/src/dx/table-ref.ts` — TableRef, ColumnRef, RelationRef types (using Symbols)
 - `packages/core/src/dx/table-ref.test.ts` — Type-level tests
 
 **Exit criteria:**
-- [ ] TableRef<TName, TColumns> type defined
-- [ ] ColumnRef<TTable, TColumn, TType> type defined
+- [ ] Symbols exported: `TABLE_META`, `COLUMN_META`, `RELATION_META`, `BRAND`
+- [ ] TableRef<TName, TColumns> type defined with Symbol metadata
+- [ ] ColumnRef<TTable, TColumn, TType> type defined with Symbol metadata
 - [ ] RelationRef<TTarget, TType, TRelation> type defined
+- [ ] `'*'` wildcard property defined on TableRef and RelationRef **(H-02)**
 - [ ] Type tests pass with expectTypeOf
+- [ ] JSDoc on all exported generic types **(DOC-01)**
 
-### Block 2: Schema Tables Extraction — 4h
+### Block 2: Schema Tables Extraction — 6h (+2h Hardening)
 
 **Type:** Feature
 **Dependencies:** Block 1
 **Packages:** core
 
 **Files:**
-- `packages/core/src/dx/schema.ts` — Add `.tables` property to Schema
-- `packages/core/src/dx/schema.test.ts` — Tests for tables extraction
+- `packages/core/src/dx/schema.ts` — Add `.tables` property with Proxy implementation **(H-03)**
+- `packages/core/src/dx/schema.test.ts` — Tests for tables extraction + reserved words
 
 **Exit criteria:**
-- [ ] `s.tables` returns typed table objects
+- [ ] `s.tables` returns typed table objects via Proxy
 - [ ] `users.id` returns ColumnRef
 - [ ] `users.posts` returns RelationRef (inverse relation)
 - [ ] Relations inferred from ref() declarations
+- [ ] `users['*']` returns AllColumns **(H-02)**
+- [ ] Proxy intercepts JS reserved words (`constructor`, etc.) → returns ColumnRef **(H-03)**
+- [ ] `schema({})` returns empty `.tables` typed as `{}` **(SC-22)**
+- [ ] Warning logged for reserved word column names **(ERR-05)**
 
 ### Block 3: Type-Safe Filter Helpers — 4h
 
@@ -964,6 +1179,7 @@ Scenario: SC-21 Dynamic query composition
 - [ ] Result type inferred from select items
 - [ ] Dynamic query composition works (conditional where chaining)
 - [ ] No "Type instantiation is excessively deep" errors
+- [ ] Alias validation: `.as('invalid-name')` throws with clear error **(ERR-04, SC-23)**
 
 ### Block 5: SQL Functions (Aggregates, Scalars) — 10h ⚠️
 
@@ -1043,6 +1259,7 @@ Scenario: SC-21 Dynamic query composition
 - [ ] `toIntentIR()` method exposed for debugging
 - [ ] 20+ equivalence test cases covering all query patterns
 - [ ] Documentation for when to use which API
+- [ ] Equivalence tests integrated in CI and block merge on failure **(CI-01)**
 
 ## 7. Test Strategy
 
@@ -1099,6 +1316,35 @@ describe('Native ↔ NQL Equivalence', () => {
   - Window function scenarios
   - Dynamic schema cases
 
+### Performance Tests (Hardening PERF-01, PERF-02)
+
+```typescript
+// packages/core/src/dx/performance.test.ts
+
+describe('Type Inference Performance', () => {
+  it('PERF-01: tsc completes in < 5s for 100-table schema', async () => {
+    // Generate 100-table schema fixture
+    const schema100 = generateLargeSchema(100);
+
+    const start = performance.now();
+    // Run tsc on fixture file
+    await execAsync('pnpm tsc --noEmit fixtures/large-schema.ts');
+    const duration = performance.now() - start;
+
+    expect(duration).toBeLessThan(5000);
+  });
+
+  it('PERF-02: IDE autocomplete responds in < 500ms (manual)', () => {
+    // This is a manual verification criterion
+    // Document: Open VSCode, type `users.` and measure autocomplete delay
+    // Acceptance: < 500ms on 20-table schema
+    expect(true).toBe(true); // Placeholder
+  });
+});
+```
+
+**Test Fixture:** `packages/core/src/dx/__fixtures__/large-schema.ts` — 100-table schema for perf testing.
+
 ## 8. Risks & Mitigations
 
 | Risk | Impact | Probability | Mitigation |
@@ -1111,14 +1357,42 @@ describe('Native ↔ NQL Equivalence', () => {
 
 ## 9. Definition of Done
 
+### Core Deliverables
+
 - [ ] All 8 blocks implemented
-- [ ] All 18 BDD scenarios have passing tests
+- [ ] All 24 BDD scenarios have passing tests (+3 from hardening)
 - [ ] Type-level tests verify inference
 - [ ] Integration tests verify IntentIR equivalence
 - [ ] E2E tests verify SQL execution
 - [ ] Documentation updated (API reference, examples)
 - [ ] TODO.md updated
 - [ ] /review clean (no blocking findings)
+
+### Performance Criteria (Hardening PERF-01, PERF-02)
+
+- [ ] **PERF-01:** `tsc` completes type checking in < 5s for 100-table schema test fixture
+- [ ] **PERF-02:** IDE autocomplete responds in < 500ms on 20-table schema (manual verification)
+
+### Developer Experience Criteria (Hardening DX-01)
+
+- [ ] **DX-01:** Type error messages do not exceed 3 levels of generic nesting (verified via sample errors)
+
+### Documentation Criteria (Hardening DOC-01)
+
+- [ ] **DOC-01:** All exported generic types have JSDoc comments explaining:
+  - Each type parameter's purpose
+  - Example usage
+  - Any constraints or edge cases
+
+### CI Integration (Hardening CI-01)
+
+- [ ] **CI-01:** Native ↔ NQL equivalence tests run in CI and block merge on failure
+- [ ] Equivalence test suite covers 20+ query patterns (simple, filter, join, aggregate, window)
+
+### Security Criteria (Hardening ERR-04)
+
+- [ ] **ERR-04:** Alias validation rejects names not matching `/^[a-zA-Z_][a-zA-Z0-9_]*$/`
+- [ ] Validation error message is clear and actionable
 
 ## 10. Appendix: TypeScript Template Literal Inference Limits
 
@@ -1174,3 +1448,40 @@ type ParseAlias<S> = S extends `${infer Col} as ${infer Alias}` ? { col: Col; al
 | Subqueries | 5% | ❌ |
 
 **Conclusion:** ~60-70% of typical queries could theoretically be inferred, but edge cases make it unreliable. **Explicit type annotation for NQL is the pragmatic choice.**
+
+## 11. Hardening Summary (Adversarial Review 2026-01-26)
+
+This spec was hardened via `/adversarial` review applying 5 perspectives.
+
+### Changes from Hardening
+
+| ID | Type | Change | Section |
+|----|------|--------|---------|
+| H-01 | Architecture | Use ES6 Symbols for metadata (`TABLE_META`, `COLUMN_META`, `BRAND`) | 4.2.0 |
+| H-02 | Architecture | Use `'*'` for wildcard (cannot be SQL identifier) | 4.2.1 |
+| H-03 | Architecture | Proxy for JS reserved words support (`constructor`, etc.) | 4.2.4 |
+| H-04 | Security | Alias validation regex `/^[a-zA-Z_][a-zA-Z0-9_]*$/` | 3.4 ERR-04 |
+| H-05 | Edge Case | Empty schema returns typed `{}` | SC-22 |
+| H-06 | Performance | Type inference < 5s for 100-table schema | PERF-01 |
+| H-07 | Performance | IDE autocomplete < 500ms on 20-table schema | PERF-02 |
+| H-08 | DX | Type errors max 3 levels of generic nesting | DX-01 |
+| H-09 | Documentation | JSDoc required on all exported generics | DOC-01 |
+| H-10 | CI | Equivalence tests block merge | CI-01 |
+
+### Perspectives Applied
+
+| Perspective | Challenges | Resolved |
+|-------------|------------|----------|
+| Skeptic 🤔 | 2 | 2 |
+| Edge Case Hunter 🔍 | 4 | 4 |
+| Security Auditor 🔒 | 3 | 2 (1 out of scope) |
+| Performance Pessimist ⚡ | 3 | 3 |
+| Future Maintainer 📅 | 3 | 2 (1 deferred) |
+| **Total** | **15** | **13** |
+
+### Deferred Items
+
+| Item | Reason | Track In |
+|------|--------|----------|
+| Alternative wildcard naming (`$all` vs `'*'`) | Current works, revisit on feedback | TODO_DX.md |
+| Partial NQL type inference | Complex, explicit types pragmatic | Future enhancement |

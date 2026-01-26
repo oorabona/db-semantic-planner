@@ -36,10 +36,76 @@ import type {
 	WhereNullIntent,
 	WhereOrIntent,
 	WhereRangeIntent,
+	WhereRelationFilterIntent,
 	WindowFunction,
 	WindowIntent,
 } from '../intent-ast.js';
+import {
+	COLUMN_META,
+	type ColumnRef,
+	isRelationRef,
+	RELATION_META,
+	RELATION_PATH,
+	type RelationRef,
+} from './table-ref.js';
 import type { ExpressionSpec } from './types.js';
+
+// ============================================================================
+// Type-Safe Column Reference Support (DX-040)
+// ============================================================================
+
+/**
+ * Check if a value is a ColumnRef by checking for the COLUMN_META symbol.
+ * @internal
+ */
+function isColumnRef(
+	value: unknown,
+): value is ColumnRef<string, string, unknown> {
+	return typeof value === 'object' && value !== null && COLUMN_META in value;
+}
+
+/**
+ * Check if a ColumnRef was accessed through a relation (has RELATION_PATH).
+ * @internal
+ */
+function hasRelationPath(
+	col: ColumnRef<string, string, unknown>,
+): col is ColumnRef<string, string, unknown> & {
+	[RELATION_PATH]: readonly string[];
+} {
+	return RELATION_PATH in (col as unknown as object);
+}
+
+/**
+ * Get the relation path from a ColumnRef if it exists.
+ * @internal
+ */
+function getRelationPath(
+	col: ColumnRef<string, string, unknown>,
+): readonly string[] | undefined {
+	if (hasRelationPath(col)) {
+		return (col as unknown as Record<symbol, readonly string[]>)[RELATION_PATH];
+	}
+	return undefined;
+}
+
+/**
+ * Extract the column name from a ColumnRef or string.
+ * @internal
+ */
+function getColumnName(
+	field: ColumnRef<string, string, unknown> | string,
+): string {
+	if (typeof field === 'string') {
+		return field;
+	}
+	// ColumnRef has COLUMN_META symbol property
+	const colName = (field as unknown as Record<symbol, string>)[COLUMN_META];
+	if (colName === undefined) {
+		throw new Error('Invalid ColumnRef: missing COLUMN_META');
+	}
+	return colName;
+}
 
 // ============================================================================
 // Distinct Field Helper (for aggregates)
@@ -104,54 +170,138 @@ export function isDistinctField(value: unknown): value is DistinctField {
  * Equals comparison: field = value
  *
  * @example eq('status', 'active') → status = 'active'
+ * @example eq(users.name, 'John') → type-safe with ColumnRef (DX-040)
  */
-export function eq(field: string, value: unknown): WhereComparisonIntent {
-	return { kind: 'comparison', field, operator: 'eq', value };
+export function eq<T extends string, C extends string, V>(
+	field: ColumnRef<T, C, V>,
+	value: V,
+): WhereComparisonIntent;
+export function eq(field: string, value: unknown): WhereComparisonIntent;
+export function eq(
+	field: ColumnRef<string, string, unknown> | string,
+	value: unknown,
+): WhereComparisonIntent {
+	return {
+		kind: 'comparison',
+		field: getColumnName(field),
+		operator: 'eq',
+		value,
+	};
 }
 
 /**
  * Not equals comparison: field != value
  *
  * @example neq('status', 'deleted') → status != 'deleted'
+ * @example neq(users.status, 'deleted') → type-safe with ColumnRef (DX-040)
  */
-export function neq(field: string, value: unknown): WhereComparisonIntent {
-	return { kind: 'comparison', field, operator: 'neq', value };
+export function neq<T extends string, C extends string, V>(
+	field: ColumnRef<T, C, V>,
+	value: V,
+): WhereComparisonIntent;
+export function neq(field: string, value: unknown): WhereComparisonIntent;
+export function neq(
+	field: ColumnRef<string, string, unknown> | string,
+	value: unknown,
+): WhereComparisonIntent {
+	return {
+		kind: 'comparison',
+		field: getColumnName(field),
+		operator: 'neq',
+		value,
+	};
 }
 
 /**
  * Greater than comparison: field > value
  *
  * @example gt('age', 18) → age > 18
+ * @example gt(users.age, 18) → type-safe with ColumnRef (DX-040)
  */
-export function gt(field: string, value: unknown): WhereComparisonIntent {
-	return { kind: 'comparison', field, operator: 'gt', value };
+export function gt<T extends string, C extends string, V>(
+	field: ColumnRef<T, C, V>,
+	value: V,
+): WhereComparisonIntent;
+export function gt(field: string, value: unknown): WhereComparisonIntent;
+export function gt(
+	field: ColumnRef<string, string, unknown> | string,
+	value: unknown,
+): WhereComparisonIntent {
+	return {
+		kind: 'comparison',
+		field: getColumnName(field),
+		operator: 'gt',
+		value,
+	};
 }
 
 /**
  * Greater than or equal comparison: field >= value
  *
  * @example gte('age', 18) → age >= 18
+ * @example gte(users.age, 18) → type-safe with ColumnRef (DX-040)
  */
-export function gte(field: string, value: unknown): WhereComparisonIntent {
-	return { kind: 'comparison', field, operator: 'gte', value };
+export function gte<T extends string, C extends string, V>(
+	field: ColumnRef<T, C, V>,
+	value: V,
+): WhereComparisonIntent;
+export function gte(field: string, value: unknown): WhereComparisonIntent;
+export function gte(
+	field: ColumnRef<string, string, unknown> | string,
+	value: unknown,
+): WhereComparisonIntent {
+	return {
+		kind: 'comparison',
+		field: getColumnName(field),
+		operator: 'gte',
+		value,
+	};
 }
 
 /**
  * Less than comparison: field < value
  *
  * @example lt('price', 100) → price < 100
+ * @example lt(products.price, 100) → type-safe with ColumnRef (DX-040)
  */
-export function lt(field: string, value: unknown): WhereComparisonIntent {
-	return { kind: 'comparison', field, operator: 'lt', value };
+export function lt<T extends string, C extends string, V>(
+	field: ColumnRef<T, C, V>,
+	value: V,
+): WhereComparisonIntent;
+export function lt(field: string, value: unknown): WhereComparisonIntent;
+export function lt(
+	field: ColumnRef<string, string, unknown> | string,
+	value: unknown,
+): WhereComparisonIntent {
+	return {
+		kind: 'comparison',
+		field: getColumnName(field),
+		operator: 'lt',
+		value,
+	};
 }
 
 /**
  * Less than or equal comparison: field <= value
  *
  * @example lte('price', 100) → price <= 100
+ * @example lte(products.price, 100) → type-safe with ColumnRef (DX-040)
  */
-export function lte(field: string, value: unknown): WhereComparisonIntent {
-	return { kind: 'comparison', field, operator: 'lte', value };
+export function lte<T extends string, C extends string, V>(
+	field: ColumnRef<T, C, V>,
+	value: V,
+): WhereComparisonIntent;
+export function lte(field: string, value: unknown): WhereComparisonIntent;
+export function lte(
+	field: ColumnRef<string, string, unknown> | string,
+	value: unknown,
+): WhereComparisonIntent {
+	return {
+		kind: 'comparison',
+		field: getColumnName(field),
+		operator: 'lte',
+		value,
+	};
 }
 
 // ============================================================================
@@ -161,19 +311,34 @@ export function lte(field: string, value: unknown): WhereComparisonIntent {
 /**
  * LIKE pattern matching: field LIKE pattern
  *
- * @param field - Column name
+ * @param field - Column name or ColumnRef (must be string type)
  * @param pattern - SQL LIKE pattern (use % for wildcards)
  * @param caseInsensitive - If true, uses ILIKE (PostgreSQL) or LOWER()
  *
  * @example like('name', '%john%') → name LIKE '%john%'
  * @example like('email', '%@example.com', true) → email ILIKE '%@example.com'
+ * @example like(users.name, '%John%') → type-safe with ColumnRef (DX-040)
  */
+export function like<T extends string, C extends string>(
+	field: ColumnRef<T, C, string>,
+	pattern: string,
+	caseInsensitive?: boolean,
+): WhereLikeIntent;
 export function like(
 	field: string,
 	pattern: string,
 	caseInsensitive?: boolean,
+): WhereLikeIntent;
+export function like(
+	field: ColumnRef<string, string, string> | string,
+	pattern: string,
+	caseInsensitive?: boolean,
 ): WhereLikeIntent {
-	const intent: WhereLikeIntent = { kind: 'like', field, pattern };
+	const intent: WhereLikeIntent = {
+		kind: 'like',
+		field: getColumnName(field),
+		pattern,
+	};
 	if (caseInsensitive !== undefined) {
 		return { ...intent, caseInsensitive };
 	}
@@ -188,12 +353,21 @@ export function like(
  * IN array check: field IN (values)
  *
  * @example inArray('status', ['active', 'pending']) → status IN ('active', 'pending')
+ * @example inArray(users.role, ['admin', 'moderator']) → type-safe (DX-040)
  */
+export function inArray<T extends string, C extends string, V>(
+	field: ColumnRef<T, C, V>,
+	values: readonly V[],
+): WhereInIntent;
 export function inArray(
 	field: string,
 	values: readonly unknown[],
+): WhereInIntent;
+export function inArray(
+	field: ColumnRef<string, string, unknown> | string,
+	values: readonly unknown[],
 ): WhereInIntent {
-	return { kind: 'in', field, values };
+	return { kind: 'in', field: getColumnName(field), values };
 }
 
 // ============================================================================
@@ -204,9 +378,16 @@ export function inArray(
  * IS NULL check: field IS NULL
  *
  * @example isNull('deletedAt') → deletedAt IS NULL
+ * @example isNull(users.deletedAt) → type-safe (DX-040)
  */
-export function isNull(field: string): WhereNullIntent {
-	return { kind: 'null', field, operator: 'isNull' };
+export function isNull<T extends string, C extends string, V>(
+	field: ColumnRef<T, C, V>,
+): WhereNullIntent;
+export function isNull(field: string): WhereNullIntent;
+export function isNull(
+	field: ColumnRef<string, string, unknown> | string,
+): WhereNullIntent {
+	return { kind: 'null', field: getColumnName(field), operator: 'isNull' };
 }
 
 // ============================================================================
@@ -218,6 +399,7 @@ export function isNull(field: string): WhereNullIntent {
  * @see WhereRangeIntent
  */
 import type { RangeValue } from '@dbsp/types';
+
 export type { RangeValue } from '@dbsp/types';
 
 /**
@@ -277,9 +459,16 @@ export function rangeContainedBy(
  * IS NOT NULL check: field IS NOT NULL
  *
  * @example isNotNull('email') → email IS NOT NULL
+ * @example isNotNull(users.email) → type-safe (DX-040)
  */
-export function isNotNull(field: string): WhereNullIntent {
-	return { kind: 'null', field, operator: 'isNotNull' };
+export function isNotNull<T extends string, C extends string, V>(
+	field: ColumnRef<T, C, V>,
+): WhereNullIntent;
+export function isNotNull(field: string): WhereNullIntent;
+export function isNotNull(
+	field: ColumnRef<string, string, unknown> | string,
+): WhereNullIntent {
+	return { kind: 'null', field: getColumnName(field), operator: 'isNotNull' };
 }
 
 // ============================================================================
@@ -388,6 +577,125 @@ export function notExists(
 			options.recursive;
 	}
 	return result;
+}
+
+// ============================================================================
+// Quantified Relation Filters (DX-040 Block 7)
+// ============================================================================
+
+/**
+ * Get relation name from a RelationRef.
+ * @internal
+ */
+function getRelationName(
+	rel: RelationRef<string, unknown, 'belongsTo' | 'hasMany' | 'hasOne'>,
+): string {
+	const meta = (
+		rel as unknown as Record<symbol, { target: string } | undefined>
+	)[RELATION_META];
+	if (!meta) {
+		throw new Error('Invalid RelationRef: missing RELATION_META');
+	}
+	return meta.target;
+}
+
+/**
+ * EVERY quantifier: filter parent by condition that ALL related records must match
+ *
+ * This generates SQL like: NOT EXISTS (SELECT 1 FROM related WHERE NOT condition)
+ *
+ * @param relation - RelationRef from schema (e.g., users.posts)
+ * @param filter - Callback that receives relation and returns a filter condition
+ *
+ * @example
+ * ```typescript
+ * // Find users where ALL their posts are published
+ * orm.from(users)
+ *   .where(every(users.posts, p => eq(p.published, true)))
+ *
+ * // SQL: ... WHERE NOT EXISTS (
+ * //   SELECT 1 FROM posts WHERE posts.author_id = users.id AND NOT (posts.published = true)
+ * // )
+ * ```
+ */
+export function every<TTarget extends string, TTargetType>(
+	relation: RelationRef<TTarget, TTargetType[], 'hasMany'>,
+	filter: (rel: RelationRef<TTarget, TTargetType[], 'hasMany'>) => WhereIntent,
+): WhereRelationFilterIntent {
+	const relationName = getRelationName(relation);
+	const where = filter(relation);
+	return {
+		kind: 'relationFilter',
+		relation: relationName,
+		where,
+		mode: 'every',
+	};
+}
+
+/**
+ * NONE quantifier: filter parent by condition that NO related records match
+ *
+ * This is equivalent to: NOT EXISTS (SELECT 1 FROM related WHERE condition)
+ *
+ * @param relation - RelationRef from schema (e.g., users.posts)
+ * @param filter - Callback that receives relation and returns a filter condition
+ *
+ * @example
+ * ```typescript
+ * // Find users with no flagged posts
+ * orm.from(users)
+ *   .where(none(users.posts, p => eq(p.flagged, true)))
+ *
+ * // SQL: ... WHERE NOT EXISTS (
+ * //   SELECT 1 FROM posts WHERE posts.author_id = users.id AND posts.flagged = true
+ * // )
+ * ```
+ */
+export function none<TTarget extends string, TTargetType>(
+	relation: RelationRef<TTarget, TTargetType[], 'hasMany'>,
+	filter: (rel: RelationRef<TTarget, TTargetType[], 'hasMany'>) => WhereIntent,
+): WhereRelationFilterIntent {
+	const relationName = getRelationName(relation);
+	const where = filter(relation);
+	return {
+		kind: 'relationFilter',
+		relation: relationName,
+		where,
+		mode: 'none',
+	};
+}
+
+/**
+ * SOME quantifier: filter parent by condition that at least one related record matches
+ *
+ * This is the default behavior for relation filters and is equivalent to EXISTS.
+ *
+ * @param relation - RelationRef from schema (e.g., users.posts)
+ * @param filter - Callback that receives relation and returns a filter condition
+ *
+ * @example
+ * ```typescript
+ * // Find users with at least one published post
+ * orm.from(users)
+ *   .where(some(users.posts, p => eq(p.published, true)))
+ *
+ * // SQL: ... WHERE EXISTS (
+ * //   SELECT 1 FROM posts WHERE posts.author_id = users.id AND posts.published = true
+ * // )
+ * ```
+ */
+export function some<TTarget extends string, TTargetType>(
+	relation: RelationRef<TTarget, TTargetType[], 'hasMany'>,
+	filter: (rel: RelationRef<TTarget, TTargetType[], 'hasMany'>) => WhereIntent,
+): WhereRelationFilterIntent {
+	const relationName = getRelationName(relation);
+	const where = filter(relation);
+	return {
+		kind: 'relationFilter',
+		relation: relationName,
+		where,
+		mode: 'some',
+	};
 }
 
 // ============================================================================
@@ -643,15 +951,24 @@ export class WindowBuilder {
 	/**
 	 * Add partition field(s) to the OVER clause.
 	 * Multiple calls APPEND fields (not replace).
+	 * Supports both string field names and ColumnRef (DX-040).
 	 *
 	 * @example
 	 * sum('amount').partitionBy('user_id').partitionBy('category')
 	 * // → PARTITION BY "user_id", "category"
+	 *
+	 * @example DX-040 with ColumnRef
+	 * rank().partitionBy(users.dept).orderBy(users.salary, 'desc')
 	 */
-	partitionBy(...fields: string[]): WindowBuilder {
+	partitionBy(
+		...fields: (string | ColumnRef<string, string, unknown>)[]
+	): WindowBuilder {
+		const fieldNames = fields.map((f) =>
+			typeof f === 'string' ? f : getColumnName(f),
+		);
 		return new WindowBuilder(
 			this.fnKind,
-			[...this.partitions, ...fields],
+			[...this.partitions, ...fieldNames],
 			this.orders,
 		);
 	}
@@ -659,18 +976,26 @@ export class WindowBuilder {
 	/**
 	 * Add order field to the OVER clause.
 	 * Multiple calls APPEND fields (not replace).
+	 * Supports both string field names and ColumnRef (DX-040).
 	 *
-	 * @param field - Column name to order by
+	 * @param field - Column name or ColumnRef to order by
 	 * @param direction - Sort direction: 'asc' (default) or 'desc'
 	 *
 	 * @example
 	 * rowNumber().orderBy('created_at').orderBy('id', 'desc')
 	 * // → ORDER BY "created_at" ASC, "id" DESC
+	 *
+	 * @example DX-040 with ColumnRef
+	 * rank().partitionBy(users.dept).orderBy(users.salary, 'desc')
 	 */
-	orderBy(field: string, direction: 'asc' | 'desc' = 'asc'): WindowBuilder {
+	orderBy(
+		field: string | ColumnRef<string, string, unknown>,
+		direction: 'asc' | 'desc' = 'asc',
+	): WindowBuilder {
+		const fieldName = typeof field === 'string' ? field : getColumnName(field);
 		return new WindowBuilder(this.fnKind, this.partitions, [
 			...this.orders,
-			{ field, direction },
+			{ field: fieldName, direction },
 		]);
 	}
 

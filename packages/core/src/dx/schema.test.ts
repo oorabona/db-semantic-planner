@@ -5,7 +5,7 @@
  * Structure: AAA (Arrange-Act-Assert) for unit tests.
  */
 
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { createOrm } from './orm.js';
 import type { InferDB, InferredRangeValue, JsonValue } from './schema.js';
 import {
@@ -962,7 +962,9 @@ describe('Type Inference (ARCH-006)', () => {
 			const orm = createOrm({ schema: mySchema });
 
 			// Act - coalesce without columns() first (TResult = full User type)
-			const query = orm.select('users').coalesce(['firstName', 'lastName'], 'name');
+			const query = orm
+				.select('users')
+				.coalesce(['firstName', 'lastName'], 'name');
 
 			// Assert
 			const plan = query.plan();
@@ -1007,6 +1009,378 @@ describe('Type Inference (ARCH-006)', () => {
 			// Type: Pick<User, 'email' | 'phone'> & { contact: string }
 			// Note: coalesce(['id', ...]) would be a compile error here
 			// because 'id' is not in Pick<User, 'email' | 'phone'>
+		});
+	});
+});
+
+// ============================================================================
+// DX-040: schema.tables tests (Block 2)
+// ============================================================================
+
+describe('schema.tables (DX-040)', () => {
+	describe('basic table access', () => {
+		it('should return typed table objects via Proxy', () => {
+			// Arrange
+			const s = schema({
+				users: {
+					id: 'integer',
+					name: 'string',
+					email: 'string',
+				},
+			});
+
+			// Act & Assert
+			expect(s.tables).toBeDefined();
+			expect(s.tables.users).toBeDefined();
+			expect('users' in s.tables).toBe(true);
+		});
+
+		it('should return undefined for non-existent tables', () => {
+			// Arrange
+			const s = schema({
+				users: { id: 'integer' },
+			});
+
+			// Act & Assert
+			// @ts-expect-error - testing runtime behavior for non-existent table
+			expect(s.tables.nonExistent).toBeUndefined();
+		});
+
+		it('should support Object.keys on tables', () => {
+			// Arrange
+			const s = schema({
+				users: { id: 'integer' },
+				posts: { id: 'integer' },
+			});
+
+			// Act
+			const keys = Object.keys(s.tables);
+
+			// Assert
+			expect(keys).toContain('users');
+			expect(keys).toContain('posts');
+			expect(keys).toHaveLength(2);
+		});
+	});
+
+	describe('empty schema', () => {
+		it('should return empty tables object', () => {
+			// Arrange
+			const s = schema({});
+
+			// Act & Assert
+			expect(s.tables).toBeDefined();
+			expect(Object.keys(s.tables)).toHaveLength(0);
+		});
+	});
+});
+
+// Import symbols for runtime tests
+import { BRAND, COLUMN_META, RELATION_META, TABLE_META } from './table-ref.js';
+
+describe('schema.tables runtime metadata (DX-040)', () => {
+	describe('TableRef metadata', () => {
+		it('should have TABLE_META and BRAND symbols', () => {
+			// Arrange
+			const s = schema({
+				users: { id: 'integer', name: 'string' },
+			});
+
+			// Act
+			const tableRef = s.tables.users;
+
+			// Assert
+			expect(tableRef[TABLE_META]).toBe('users');
+			expect(tableRef[BRAND]).toBe('TableRef');
+		});
+	});
+
+	describe('ColumnRef access', () => {
+		it('should return ColumnRef for column access', () => {
+			// Arrange
+			const s = schema({
+				users: { id: 'integer', name: 'string' },
+			});
+
+			// Act
+			const idCol = s.tables.users.id;
+			const nameCol = s.tables.users.name;
+
+			// Assert
+			expect(idCol[TABLE_META]).toBe('users');
+			expect(idCol[COLUMN_META]).toBe('id');
+			expect(idCol[BRAND]).toBe('ColumnRef');
+
+			expect(nameCol[TABLE_META]).toBe('users');
+			expect(nameCol[COLUMN_META]).toBe('name');
+			expect(nameCol[BRAND]).toBe('ColumnRef');
+		});
+
+		it('should return undefined for non-existent columns', () => {
+			// Arrange
+			const s = schema({
+				users: { id: 'integer' },
+			});
+
+			// Act & Assert
+			// @ts-expect-error - testing runtime behavior for non-existent column
+			expect(s.tables.users.nonExistent).toBeUndefined();
+		});
+	});
+
+	describe('AllColumns wildcard', () => {
+		it('should return AllColumns for wildcard access', () => {
+			// Arrange
+			const s = schema({
+				users: { id: 'integer', name: 'string' },
+			});
+
+			// Act
+			const allCols = s.tables.users['*'];
+
+			// Assert
+			expect(allCols[TABLE_META]).toBe('users');
+			expect(allCols[BRAND]).toBe('AllColumns');
+		});
+	});
+
+	describe('RelationRef access (belongsTo)', () => {
+		it('should return RelationRef for ref() declared relations', () => {
+			// Arrange
+			const s = schema({
+				users: { id: 'integer', name: 'string' },
+				posts: {
+					id: 'integer',
+					title: 'string',
+					authorId: ref('users'),
+				},
+			});
+
+			// Act - belongsTo relation (FK in posts -> users)
+			// The relation name is derived from 'authorId' -> 'author' (strips 'Id' suffix)
+			const authorRelation = s.tables.posts.author;
+
+			// Assert
+			expect(authorRelation).toBeDefined();
+			expect(authorRelation[BRAND]).toBe('RelationRef');
+			expect(authorRelation[RELATION_META]).toEqual({
+				target: 'users',
+				type: 'belongsTo',
+			});
+		});
+
+		it('should provide column access through relation', () => {
+			// Arrange
+			const s = schema({
+				users: { id: 'integer', name: 'string' },
+				posts: {
+					id: 'integer',
+					authorId: ref('users'),
+				},
+			});
+
+			// Act - Access column through relation
+			// @ts-expect-error - Type inference for relation column access not complete yet
+			const authorIdCol = s.tables.posts.author.id;
+
+			// Assert
+			expect(authorIdCol[TABLE_META]).toBe('users');
+			expect(authorIdCol[COLUMN_META]).toBe('id');
+			expect(authorIdCol[BRAND]).toBe('ColumnRef');
+		});
+	});
+
+	describe('RelationRef access (hasMany inverse)', () => {
+		it('should return RelationRef for inverse relations', () => {
+			// Arrange
+			const s = schema({
+				users: { id: 'integer', name: 'string' },
+				posts: {
+					id: 'integer',
+					authorId: ref('users'),
+				},
+			});
+
+			// Act - hasMany inverse relation (users -> posts)
+			// posts table has authorId ref to users, so users has inverse 'posts' relation
+			// @ts-expect-error - Type inference for inverse relations not complete yet
+			const postsRelation = s.tables.users.posts;
+
+			// Assert
+			expect(postsRelation).toBeDefined();
+			expect(postsRelation[BRAND]).toBe('RelationRef');
+			expect(postsRelation[RELATION_META]).toEqual({
+				target: 'posts',
+				type: 'hasMany',
+			});
+		});
+	});
+
+	describe('custom relation names', () => {
+		it('should use "as" option for relation name', () => {
+			// Arrange
+			const s = schema({
+				users: { id: 'integer' },
+				posts: {
+					id: 'integer',
+					createdById: ref('users', { as: 'creator' }),
+				},
+			});
+
+			// Act - Relation uses 'as' name instead of column-derived name
+			// @ts-expect-error - Type inference for custom relation names not complete yet
+			const creatorRelation = s.tables.posts.creator;
+
+			// Assert
+			expect(creatorRelation).toBeDefined();
+			expect(creatorRelation[BRAND]).toBe('RelationRef');
+			expect(creatorRelation[RELATION_META].target).toBe('users');
+		});
+	});
+
+	describe('ColumnRef.as() method', () => {
+		it('should return aliased column with _alias property', () => {
+			// Arrange
+			const s = schema({
+				users: { id: 'integer' },
+			});
+
+			// Act
+			const aliasedCol = s.tables.users.id.as('userId');
+
+			// Assert
+			expect(aliasedCol[TABLE_META]).toBe('users');
+			expect(aliasedCol[COLUMN_META]).toBe('id');
+			expect(aliasedCol._alias).toBe('userId');
+		});
+
+		it('should validate alias format', () => {
+			// Arrange
+			const s = schema({
+				users: { id: 'integer' },
+			});
+
+			// Act & Assert - Invalid alias should throw
+			expect(() => s.tables.users.id.as('123invalid')).toThrow(
+				/Invalid alias.*must match/,
+			);
+			expect(() => s.tables.users.id.as('has-dash')).toThrow(
+				/Invalid alias.*must match/,
+			);
+		});
+	});
+
+	describe('JS reserved words handling (H-03, ERR-05)', () => {
+		it('should return ColumnRef for reserved word column names', () => {
+			// Arrange - Use 'delete' as it's a JS keyword but not an object property
+			const s = schema({
+				users: {
+					id: 'integer',
+					delete: 'string', // JS reserved word as column name
+				},
+			});
+
+			// Act - Access reserved word column via bracket notation
+			const deleteCol = s.tables.users['delete'];
+
+			// Assert - Should still work and return ColumnRef
+			expect(deleteCol[BRAND]).toBe('ColumnRef');
+			expect(deleteCol[COLUMN_META]).toBe('delete');
+		});
+
+		it('should log warning for reserved word column access', () => {
+			// Arrange
+			const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+			const s = schema({
+				users: {
+					id: 'integer',
+					delete: 'string',
+				},
+			});
+
+			// Act - Access reserved word column
+			s.tables.users['delete'];
+
+			// Assert - Warning should be logged
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('delete'));
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining('reserved word'),
+			);
+
+			// Cleanup
+			warnSpy.mockRestore();
+		});
+
+		it('should only warn once per reserved word column', () => {
+			// Arrange
+			const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+			const s = schema({
+				users: {
+					id: 'integer',
+					delete: 'string',
+				},
+			});
+
+			// Act - Access same reserved word multiple times
+			s.tables.users['delete'];
+			s.tables.users['delete'];
+			s.tables.users['delete'];
+
+			// Assert - Warning should only be logged once
+			expect(warnSpy).toHaveBeenCalledTimes(1);
+
+			// Cleanup
+			warnSpy.mockRestore();
+		});
+	});
+
+	describe('Proxy enumeration', () => {
+		it('should enumerate columns and relations in ownKeys', () => {
+			// Arrange
+			const s = schema({
+				users: { id: 'integer', name: 'string' },
+				posts: {
+					id: 'integer',
+					authorId: ref('users'),
+				},
+			});
+
+			// Act
+			const postsKeys = Object.keys(s.tables.posts);
+
+			// Assert - Should include columns, relations, and '*'
+			expect(postsKeys).toContain('id');
+			expect(postsKeys).toContain('authorId');
+			expect(postsKeys).toContain('author'); // relation
+			expect(postsKeys).toContain('*');
+		});
+
+		it('should support "in" operator', () => {
+			// Arrange
+			const s = schema({
+				users: { id: 'integer' },
+			});
+
+			// Act & Assert
+			expect('id' in s.tables.users).toBe(true);
+			expect('*' in s.tables.users).toBe(true);
+			expect('nonExistent' in s.tables.users).toBe(false);
+		});
+	});
+
+	describe('caching', () => {
+		it('should return same TableRef instance on repeated access', () => {
+			// Arrange
+			const s = schema({
+				users: { id: 'integer' },
+			});
+
+			// Act
+			const ref1 = s.tables.users;
+			const ref2 = s.tables.users;
+
+			// Assert - Same instance due to caching
+			expect(ref1).toBe(ref2);
 		});
 	});
 });

@@ -7,12 +7,12 @@ import {
 	and,
 	createOrm,
 	type DeleteIntent,
-	eq,
 	ExecutionError,
-	fk,
-	inArray,
+	eq,
 	type InsertIntent,
 	InvalidOperationError,
+	inArray,
+	ref,
 	schema,
 	UnsafeOperationError,
 	type UpdateIntent,
@@ -36,7 +36,7 @@ const testSchema = schema({
 		id: { type: 'integer', primaryKey: true },
 		title: 'string',
 		content: 'string',
-		userId: fk('users', { as: 'author', inverse: 'posts' }),
+		userId: ref('users', { as: 'author', inverse: 'posts' }),
 	},
 });
 
@@ -695,7 +695,9 @@ describe('Mutation Builders (DX-010)', () => {
 					.dump();
 
 				expect(dump.sql.toLowerCase()).toContain('on conflict');
-				expect((dump.intent as UpsertIntent).onConflict).toHaveProperty('columns');
+				expect((dump.intent as UpsertIntent).onConflict).toHaveProperty(
+					'columns',
+				);
 			});
 
 			it('should support multiple conflict columns', () => {
@@ -749,7 +751,9 @@ describe('Mutation Builders (DX-010)', () => {
 					.dump();
 
 				expect(dump.sql.toLowerCase()).toContain('do nothing');
-				expect((dump.intent as UpsertIntent).action).toEqual({ type: 'doNothing' });
+				expect((dump.intent as UpsertIntent).action).toEqual({
+					type: 'doNothing',
+				});
 			});
 		});
 

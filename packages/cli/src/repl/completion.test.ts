@@ -11,8 +11,8 @@ import type {
 	TableIR,
 } from '@dbsp/core';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { CompletionProvider, formatCompletions } from './completion.js';
 import type { LoadedSchema } from '../utils/schema-loader.js';
+import { CompletionProvider, formatCompletions } from './completion.js';
 
 // Helper to create a mock LoadedSchema
 function createMockSchema(
@@ -54,7 +54,8 @@ function createMockSchema(
 			target: rel.target,
 			foreignKey: rel.foreignKey,
 			// Default strategy values for testing
-			cardinality: rel.type === 'hasMany' || rel.type === 'belongsToMany' ? 'many' : 'one',
+			cardinality:
+				rel.type === 'hasMany' || rel.type === 'belongsToMany' ? 'many' : 'one',
 			optionality: 'optional',
 			includeStrategy: 'auto',
 			filterStrategy: 'auto',

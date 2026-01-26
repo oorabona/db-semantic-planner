@@ -17,6 +17,7 @@ import {
 	wMin,
 	wSum,
 } from './filters.js';
+import { ref, schema } from './schema.js';
 import type { ExpressionSpec } from './types.js';
 
 // ============================================================================
@@ -321,6 +322,145 @@ describe('DX-021: Window Functions Builder Pattern', () => {
 			expect(typeof columns[1]).toBe('string');
 			expect((columns[2] as ExpressionSpec).__expr).toBe(true);
 			expect((columns[3] as ExpressionSpec).__expr).toBe(true);
+		});
+	});
+
+	// ============================================================================
+	// DX-040: Type-safe ColumnRef support
+	// ============================================================================
+
+	describe('DX-040: Type-safe ColumnRef support', () => {
+		// Test schema
+		function createTestSchema() {
+			return schema({
+				employees: {
+					id: 'uuid',
+					department: 'string',
+					salary: 'decimal',
+					hireDate: 'timestamp',
+				},
+				sales: {
+					id: 'uuid',
+					product: ref('products'),
+					amount: 'decimal',
+					date: 'timestamp',
+				},
+				products: {
+					id: 'uuid',
+					category: 'string',
+					price: 'decimal',
+				},
+			});
+		}
+
+		it('should accept ColumnRef in partitionBy()', () => {
+			const s = createTestSchema();
+			const { employees } = s.tables;
+
+			const spec = rank()
+				.partitionBy(employees.department)
+				.orderBy('salary', 'desc')
+				.as('dept_rank');
+			const intent = getWindowIntent(spec);
+
+			expect(intent.over.partitionBy).toEqual(['department']);
+		});
+
+		it('should accept ColumnRef in orderBy()', () => {
+			const s = createTestSchema();
+			const { employees } = s.tables;
+
+			const spec = rowNumber()
+				.orderBy(employees.salary, 'desc')
+				.as('salary_rank');
+			const intent = getWindowIntent(spec);
+
+			expect(intent.over.orderBy).toEqual([
+				{ field: 'salary', direction: 'desc' },
+			]);
+		});
+
+		it('should accept ColumnRef in both partitionBy() and orderBy()', () => {
+			const s = createTestSchema();
+			const { employees } = s.tables;
+
+			const spec = rank()
+				.partitionBy(employees.department)
+				.orderBy(employees.salary, 'desc')
+				.as('salary_rank');
+			const intent = getWindowIntent(spec);
+
+			expect(intent.over.partitionBy).toEqual(['department']);
+			expect(intent.over.orderBy).toEqual([
+				{ field: 'salary', direction: 'desc' },
+			]);
+		});
+
+		it('should accept multiple ColumnRefs in partitionBy()', () => {
+			const s = createTestSchema();
+			const { sales, products } = s.tables;
+
+			const spec = wSum('amount')
+				.partitionBy(products.category, sales.date)
+				.as('category_total');
+			const intent = getWindowIntent(spec);
+
+			expect(intent.over.partitionBy).toEqual(['category', 'date']);
+		});
+
+		it('should mix strings and ColumnRefs in partitionBy()', () => {
+			const s = createTestSchema();
+			const { employees } = s.tables;
+
+			const spec = denseRank()
+				.partitionBy('region', employees.department)
+				.orderBy('salary')
+				.as('regional_dept_rank');
+			const intent = getWindowIntent(spec);
+
+			expect(intent.over.partitionBy).toEqual(['region', 'department']);
+		});
+
+		it('wAvg() with ColumnRef partition', () => {
+			const s = createTestSchema();
+			const { employees } = s.tables;
+
+			const spec = wAvg('salary')
+				.partitionBy(employees.department)
+				.as('dept_avg_salary');
+			const intent = getWindowIntent(spec);
+
+			expect(intent.function).toBe('avg');
+			expect(intent.field).toBe('salary');
+			expect(intent.over.partitionBy).toEqual(['department']);
+		});
+
+		it('lag() with ColumnRef orderBy', () => {
+			const s = createTestSchema();
+			const { employees } = s.tables;
+
+			const spec = lag('salary').orderBy(employees.hireDate).as('prev_salary');
+			const intent = getWindowIntent(spec);
+
+			expect(intent.function).toBe('lag');
+			expect(intent.over.orderBy).toEqual([
+				{ field: 'hireDate', direction: 'asc' },
+			]);
+		});
+
+		it('lead() with ColumnRef orderBy desc', () => {
+			const s = createTestSchema();
+			const { employees } = s.tables;
+
+			const spec = lead('salary')
+				.orderBy(employees.salary, 'desc')
+				.as('next_higher_salary');
+			const intent = getWindowIntent(spec);
+
+			expect(intent.function).toBe('lead');
+			expect(intent.over.orderBy).toEqual([
+				{ field: 'salary', direction: 'desc' },
+			]);
 		});
 	});
 });

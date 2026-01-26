@@ -39,6 +39,7 @@ import {
 	UpdateBuilder,
 	UpsertBuilder,
 } from './mutation-builders.js';
+import { createNqlTag, type NqlCompilerFn, type NqlTag } from './nql.js';
 import {
 	isWhereIntent,
 	objectToWhereIntent,
@@ -107,6 +108,20 @@ export interface SimplifiedOrmOptions<
 	 * Enable strict mode validation (default: false).
 	 */
 	readonly strictMode?: boolean;
+
+	/**
+	 * NQL compiler function for template literal queries (DX-040).
+	 *
+	 * @example
+	 * ```typescript
+	 * const orm = createOrm({ schema, adapter });
+	 * const users = await orm.nql<{ name: string }>`users | select name`.all();
+	 * ```
+	 *
+	 * @deprecated Since DX-040: NQL compiler is now integrated directly.
+	 * This option is ignored - @dbsp/nql is automatically used.
+	 */
+	readonly nqlCompiler?: NqlCompilerFn;
 
 	/**
 	 * Optional dialect capabilities for strategy selection.
@@ -186,6 +201,7 @@ export function createOrm<T extends SchemaDefinition>(
 		adapter,
 		strictMode = false,
 		dialectCapabilities,
+		// nqlCompiler is deprecated - @dbsp/nql is integrated directly
 	} = options;
 
 	// Validate schema has required structure
@@ -220,6 +236,7 @@ export function createOrm<T extends SchemaDefinition>(
 		undefined, // schemaName
 		undefined, // defaultIncludeStrategy removed in ARCH-006
 		dialectCapabilities,
+		schemaObj.definition, // schemaDefinition for NQL validation
 	) as OrmInstance<InferDB<T>>;
 }
 
@@ -237,9 +254,20 @@ function createOrmInstance<DB = Record<string, unknown>>(
 	schemaName?: string,
 	defaultIncludeStrategy?: IncludeStrategy,
 	dialectCapabilities?: DialectCapabilities,
+	schemaDefinition?: unknown,
 ): OrmInstance<DB> {
+	// Create NQL template tag (DX-040)
+	// NQL compiler is now integrated directly - @dbsp/nql is imported in nql.ts
+	const nql: NqlTag = createNqlTag(
+		schemaDefinition,
+		model,
+		adapter as Adapter<unknown> | undefined,
+		schemaName,
+	);
+
 	return {
 		strictMode,
+		nql,
 		select<K extends keyof DB & string, TResult = DB[K]>(
 			from: K,
 		): QueryBuilder<TResult> {
@@ -269,6 +297,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				schemaName,
 				defaultIncludeStrategy,
 				dialectCapabilities,
+				schemaDefinition,
 			);
 		},
 
@@ -483,6 +512,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 					schemaName,
 					defaultIncludeStrategy,
 					dialectCapabilities,
+					schemaDefinition,
 				);
 				return fn(txOrm);
 			});

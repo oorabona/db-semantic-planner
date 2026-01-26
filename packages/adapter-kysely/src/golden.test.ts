@@ -10,10 +10,10 @@
 
 import {
 	AmbiguousPlanError,
-	fk,
 	plan,
-	schema,
 	type QueryIntent,
+	ref,
+	schema,
 } from '@dbsp/core';
 import Database from 'better-sqlite3';
 import { Kysely, SqliteDialect } from 'kysely';
@@ -51,7 +51,7 @@ const q1Schema = schema({
 	},
 	productImages: {
 		id: { type: 'integer', primaryKey: true },
-		productId: fk('products', { as: 'product', inverse: 'images' }),
+		productId: ref('products', { as: 'product', inverse: 'images' }),
 		locale: 'string',
 		type: 'string',
 		approved: 'boolean',
@@ -76,7 +76,7 @@ const q2Schema = schema({
 	},
 	products: {
 		id: { type: 'integer', primaryKey: true },
-		categoryId: fk('categories', { as: 'category', inverse: 'products' }),
+		categoryId: ref('categories', { as: 'category', inverse: 'products' }),
 		active: 'boolean',
 	},
 }).model;
@@ -101,8 +101,8 @@ const q3Schema = schema({
 		id: { type: 'integer', primaryKey: true },
 		title: 'string',
 		content: 'string',
-		authorId: fk('users', { as: 'author', inverse: 'authoredPosts' }),
-		reviewerId: fk('users', { as: 'reviewer', inverse: 'reviewedPosts' }),
+		authorId: ref('users', { as: 'author', inverse: 'authoredPosts' }),
+		reviewerId: ref('users', { as: 'reviewer', inverse: 'reviewedPosts' }),
 	},
 }).model;
 
@@ -655,7 +655,7 @@ describe('Q4: Filter strategy contract enforcement', () => {
 		posts: {
 			id: { type: 'integer', primaryKey: true },
 			title: 'string',
-			authorId: fk('users', { as: 'author', inverse: 'posts' }),
+			authorId: ref('users', { as: 'author', inverse: 'posts' }),
 		},
 		users: {
 			id: { type: 'integer', primaryKey: true },
@@ -664,7 +664,7 @@ describe('Q4: Filter strategy contract enforcement', () => {
 		},
 		comments: {
 			id: { type: 'integer', primaryKey: true },
-			postId: fk('posts', { as: 'post', inverse: 'comments' }),
+			postId: ref('posts', { as: 'post', inverse: 'comments' }),
 			content: 'string',
 		},
 	}).model;
@@ -792,7 +792,7 @@ describe('Q4: Filter strategy contract enforcement', () => {
 				},
 				posts: {
 					id: { type: 'integer', primaryKey: true },
-					userId: fk('users', { as: 'user', inverse: 'posts' }),
+					userId: ref('users', { as: 'user', inverse: 'posts' }),
 					title: 'string',
 				},
 			}).model;
@@ -883,7 +883,7 @@ describe('Q5: Include strategy contract enforcement', () => {
 		posts: {
 			id: { type: 'integer', primaryKey: true },
 			title: 'string',
-			authorId: fk('users', { as: 'author', inverse: 'posts' }),
+			authorId: ref('users', { as: 'author', inverse: 'posts' }),
 		},
 		users: {
 			id: { type: 'integer', primaryKey: true },
@@ -892,7 +892,7 @@ describe('Q5: Include strategy contract enforcement', () => {
 		},
 		comments: {
 			id: { type: 'integer', primaryKey: true },
-			postId: fk('posts', { as: 'post', inverse: 'comments' }),
+			postId: ref('posts', { as: 'post', inverse: 'comments' }),
 			content: 'string',
 		},
 	}).model;
@@ -927,7 +927,10 @@ describe('Q5: Include strategy contract enforcement', () => {
 				from: 'posts',
 				select: { type: 'fields', fields: ['id', 'title'] },
 				include: [
-					{ relation: 'author', select: { type: 'fields', fields: ['id', 'name'] } },
+					{
+						relation: 'author',
+						select: { type: 'fields', fields: ['id', 'name'] },
+					},
 				],
 			};
 
@@ -1000,7 +1003,7 @@ describe('Q5: Include strategy contract enforcement', () => {
 				},
 				posts: {
 					id: { type: 'integer', primaryKey: true },
-					userId: fk('users', { as: 'user', inverse: 'posts' }),
+					userId: ref('users', { as: 'user', inverse: 'posts' }),
 					title: 'string',
 				},
 			}).model;
@@ -1052,7 +1055,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 		posts: {
 			id: { type: 'integer', primaryKey: true },
 			title: 'string',
-			authorId: fk('users', { as: 'author', inverse: 'posts' }),
+			authorId: ref('users', { as: 'author', inverse: 'posts' }),
 		},
 		users: {
 			id: { type: 'integer', primaryKey: true },
@@ -1061,13 +1064,13 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 		},
 		comments: {
 			id: { type: 'integer', primaryKey: true },
-			postId: fk('posts', { as: 'post', inverse: 'comments' }),
+			postId: ref('posts', { as: 'post', inverse: 'comments' }),
 			content: 'string',
 		},
 	}).model;
 
 	describe('belongsTo FK direction', () => {
-		it('should use source.fk = target.pk for belongsTo JOIN (posts.author)', () => {
+		it('should use source.ref = target.pk for belongsTo JOIN (posts.author)', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'posts',
@@ -1087,7 +1090,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			const planReport = plan(intent, fkDirectionSchema);
 			const compiled = compile(planReport, fkDirectionSchema, kysely);
 
-			// CRITICAL: Verify FK direction is source.fk = target.pk
+			// CRITICAL: Verify FK direction is source.ref = target.pk
 			// posts.authorId = users.id (NOT users.authorId = posts.id)
 			const sqlLower = compiled.sql.toLowerCase();
 
@@ -1095,7 +1098,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			// t0 = posts (source), t1 = users (target)
 			expect(sqlLower).toContain('join');
 
-			// Verify the JOIN uses posts.authorId (source.fk), not users.authorId
+			// Verify the JOIN uses posts.authorId (source.ref), not users.authorId
 			// Uses semantic aliases: "posts" for root, "author" for relation
 			expect(compiled.sql).toMatch(/"posts"\."authorId"/);
 
@@ -1107,14 +1110,14 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			expect(compiled.sql).not.toMatch(/"author"\."authorId"/);
 		});
 
-		it('should use source.fk = target.pk for belongsTo EXISTS (posts.author)', () => {
+		it('should use source.ref = target.pk for belongsTo EXISTS (posts.author)', () => {
 			// Use explicit EXISTS strategy for belongsTo
 			const existsSchema = (() => {
 				const s = schema({
 					posts: {
 						id: { type: 'integer', primaryKey: true },
 						title: 'string',
-						authorId: fk('users', { as: 'author' }),
+						authorId: ref('users', { as: 'author' }),
 					},
 					users: {
 						id: { type: 'integer', primaryKey: true },
@@ -1125,7 +1128,8 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 				// Apply exists strategy hint (test-only workaround)
 				const postsAuthorRel = s.relations.get('posts.author');
 				if (postsAuthorRel) {
-					(postsAuthorRel as { filterStrategy: string }).filterStrategy = 'exists';
+					(postsAuthorRel as { filterStrategy: string }).filterStrategy =
+						'exists';
 				}
 				return s;
 			})();
@@ -1152,7 +1156,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			// Should use EXISTS
 			expect(compiled.sql.toLowerCase()).toContain('exists');
 
-			// CRITICAL: EXISTS correlation should be source.fk = target.pk
+			// CRITICAL: EXISTS correlation should be source.ref = target.pk
 			// posts.authorId = users.id (NOT users.authorId = posts.id)
 
 			// The outer table (posts) should correlate via authorId
@@ -1167,7 +1171,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 	});
 
 	describe('hasMany FK direction (regression)', () => {
-		it('should use target.fk = source.pk for hasMany EXISTS (users.posts)', () => {
+		it('should use target.ref = source.pk for hasMany EXISTS (users.posts)', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'users',
@@ -1190,7 +1194,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			// hasMany defaults to EXISTS
 			expect(compiled.sql.toLowerCase()).toContain('exists');
 
-			// CRITICAL: EXISTS correlation should be target.fk = source.pk
+			// CRITICAL: EXISTS correlation should be target.ref = source.pk
 			// posts.authorId = users.id
 
 			// The subquery table (aliased as "posts" - relation name) should have authorId
@@ -1200,7 +1204,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			expect(compiled.sql).toMatch(/"users"\."id"/);
 		});
 
-		it('should use target.fk = source.pk for hasMany JOIN (explicit override)', () => {
+		it('should use target.ref = source.pk for hasMany JOIN (explicit override)', () => {
 			// Use explicit JOIN strategy for hasMany
 			const joinSchema = (() => {
 				const s = schema({
@@ -1210,7 +1214,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 					},
 					posts: {
 						id: { type: 'integer', primaryKey: true },
-						authorId: fk('users', { as: 'author', inverse: 'posts' }),
+						authorId: ref('users', { as: 'author', inverse: 'posts' }),
 						title: 'string',
 					},
 				}).model;
@@ -1245,7 +1249,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			expect(compiled.sql.toLowerCase()).toContain('join');
 			expect(compiled.sql.toLowerCase()).not.toContain('exists');
 
-			// CRITICAL: JOIN should be target.fk = source.pk
+			// CRITICAL: JOIN should be target.ref = source.pk
 			// posts.authorId = users.id
 
 			// Target table (aliased as "posts" - relation name) should have authorId in JOIN condition
@@ -1257,7 +1261,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 	});
 
 	describe('include FK direction', () => {
-		it('should use source.fk = target.pk for belongsTo include (posts.author)', () => {
+		it('should use source.ref = target.pk for belongsTo include (posts.author)', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'posts',
@@ -1270,7 +1274,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			// belongsTo include uses LEFT JOIN by default
 			expect(compiled.sql.toLowerCase()).toContain('left join');
 
-			// CRITICAL: JOIN should be source.fk = target.pk
+			// CRITICAL: JOIN should be source.ref = target.pk
 			// posts.authorId = users.id
 
 			// Source table (posts) should have authorId
@@ -1283,7 +1287,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			expect(compiled.sql).not.toMatch(/"author"\."authorId"/);
 		});
 
-		it('should use target.fk = source.pk for hasMany include with JOIN override', () => {
+		it('should use target.ref = source.pk for hasMany include with JOIN override', () => {
 			// Use explicit JOIN strategy for hasMany include
 			const joinIncludeSchema = (() => {
 				const s = schema({
@@ -1293,14 +1297,15 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 					},
 					posts: {
 						id: { type: 'integer', primaryKey: true },
-						authorId: fk('users', { as: 'author', inverse: 'posts' }),
+						authorId: ref('users', { as: 'author', inverse: 'posts' }),
 						title: 'string',
 					},
 				}).model;
 				// Apply join include strategy hint (test-only workaround)
 				const usersPostsRel = s.relations.get('users.posts');
 				if (usersPostsRel) {
-					(usersPostsRel as { includeStrategy: string }).includeStrategy = 'join';
+					(usersPostsRel as { includeStrategy: string }).includeStrategy =
+						'join';
 				}
 				return s;
 			})();
@@ -1317,7 +1322,7 @@ describe('Q6: FK Direction Correctness (CORE-002)', () => {
 			// Should use LEFT JOIN
 			expect(compiled.sql.toLowerCase()).toContain('left join');
 
-			// CRITICAL: JOIN should be target.fk = source.pk
+			// CRITICAL: JOIN should be target.ref = source.pk
 			// posts.authorId = users.id
 
 			// Target table (aliased as "posts" - relation name) should have authorId
@@ -1579,7 +1584,10 @@ describe('Q7: M:N Through Table Support (CORE-002-B)', () => {
 			const customFkSchema = (() => {
 				const s = schema({
 					users: { id: { type: 'integer', primaryKey: true }, name: 'string' },
-					roles: { id: { type: 'integer', primaryKey: true }, roleName: 'string' },
+					roles: {
+						id: { type: 'integer', primaryKey: true },
+						roleName: 'string',
+					},
 					userRoles: {
 						id: { type: 'integer', primaryKey: true },
 						user_id: 'integer',
