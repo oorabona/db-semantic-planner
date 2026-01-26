@@ -112,11 +112,8 @@ export interface OrmOptions<T extends SchemaDefinition = SchemaDefinition> {
   /** Enable strict mode validation (default: false) */
   readonly strictMode?: boolean;
 
-  /** Relation hints for disambiguation */
-  readonly relationHints?: RelationHints;
-
-  /** Default include strategy (default: 'subquery') */
-  readonly defaultIncludeStrategy?: IncludeStrategy;
+  // REMOVED: relationHints - use inverse: in schema definition instead
+  // REMOVED: defaultIncludeStrategy - smart auto-selection is sufficient
 }
 
 /**
@@ -368,6 +365,8 @@ const orm = createOrm({ schema: introSchema, adapter });
 | `hasOne()`, `hasMany()` helpers | `ref()` with options |
 | `typedSchemaToModelIR()` | `schemaToModelIR()` (internal) |
 | `IntrospectionOptions.relationNaming` | `adapter.namingConvention` |
+| `OrmOptions.relationHints` | Use `inverse:` in `ref()` schema definition |
+| `OrmOptions.defaultIncludeStrategy` | Smart auto-selection (removed, not replaced) |
 
 ## Implementation Plan
 
