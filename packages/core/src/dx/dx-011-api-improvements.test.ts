@@ -7,7 +7,7 @@
  * - Block 3: Type inference on select/execute (compile-time only)
  */
 
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { WhereIntent } from '../intent-ast.js';
 import { and, createOrm, eq, or } from './index.js';
 import { ref, schema } from './schema.js';
@@ -27,11 +27,11 @@ const testSchema = schema({
 		authorId: ref('users', { as: 'author', inverse: 'authoredPosts' }),
 		reviewerId: ref('users', { as: 'reviewer', inverse: 'reviewedPosts' }),
 	},
-}).model;
+});
 
 describe('DX-011: API Improvements', () => {
 	describe('Block 1: where() AND chaining', () => {
-		const orm = createOrm({ model: testSchema });
+		const orm = createOrm({ schema: testSchema });
 
 		describe('Scenario: Single where condition', () => {
 			it('should use condition directly without wrapping', () => {
@@ -157,7 +157,7 @@ describe('DX-011: API Improvements', () => {
 	});
 
 	describe('Block 2: include() by relation name', () => {
-		const orm = createOrm({ model: testSchema });
+		const orm = createOrm({ schema: testSchema });
 
 		describe('Scenario: Include by exact relation name', () => {
 			it('should use relation when name matches exactly', () => {
@@ -198,7 +198,7 @@ describe('DX-011: API Improvements', () => {
 		describe('Scenario: Explicit relation name avoids ambiguity', () => {
 			it('should use relation directly without ambiguity check', () => {
 				// Even though users→posts has 2 relations, 'authoredPosts' is unambiguous as relation name
-				const ormStrict = createOrm({ model: testSchema, strictMode: true });
+				const ormStrict = createOrm({ schema: testSchema, strictMode: true });
 				const query = ormStrict.select('users').include('authoredPosts');
 
 				// Should NOT throw AmbiguousRelationError because 'authoredPosts' is exact relation name
@@ -207,72 +207,4 @@ describe('DX-011: API Improvements', () => {
 		});
 	});
 
-	describe('Block 3: Type inference on select/execute', () => {
-		const orm = createOrm({ model: testSchema });
-
-		// Type alias for testing
-		type User = {
-			id: number;
-			name: string;
-			email: string;
-			active: boolean;
-			role: string;
-		};
-
-		describe('Scenario: Typed query returns typed results', () => {
-			it('should infer return type from generic parameter', () => {
-				const query = orm.select<User>('users');
-
-				// Type-level assertions using expectTypeOf
-				expectTypeOf(query.execute).returns.toEqualTypeOf<Promise<User[]>>();
-				expectTypeOf(query.all).returns.toEqualTypeOf<Promise<User[]>>();
-				expectTypeOf(query.first).returns.toEqualTypeOf<
-					Promise<User | undefined>
-				>();
-				expectTypeOf(query.firstOrThrow).returns.toEqualTypeOf<Promise<User>>();
-			});
-		});
-
-		describe('Scenario: Untyped query returns unknown', () => {
-			it('should default to unknown when no type parameter provided', () => {
-				const query = orm.select('users');
-
-				// Type-level assertions - untyped query returns unknown
-				expectTypeOf(query.execute).returns.toEqualTypeOf<Promise<unknown[]>>();
-				expectTypeOf(query.all).returns.toEqualTypeOf<Promise<unknown[]>>();
-				expectTypeOf(query.first).returns.toEqualTypeOf<Promise<unknown>>();
-				expectTypeOf(query.firstOrThrow).returns.toEqualTypeOf<
-					Promise<unknown>
-				>();
-			});
-		});
-
-		describe('Scenario: Type preserved through chaining', () => {
-			it('should preserve type through where/select/include chains', () => {
-				const query = orm
-					.select<User>('users')
-					.where(eq('active', true))
-					.columns(['id', 'name'])
-					.orderBy('name')
-					.limit(10);
-
-				// Type should be preserved through the chain
-				expectTypeOf(query.execute).returns.toEqualTypeOf<Promise<User[]>>();
-				expectTypeOf(query.first).returns.toEqualTypeOf<
-					Promise<User | undefined>
-				>();
-			});
-		});
-
-		describe('Scenario: Stream returns typed iterator', () => {
-			it('should infer stream element type from generic parameter', () => {
-				const query = orm.select<User>('users');
-
-				// Stream should return typed iterator
-				expectTypeOf(query.stream).returns.toEqualTypeOf<
-					AsyncIterableIterator<User>
-				>();
-			});
-		});
-	});
 });

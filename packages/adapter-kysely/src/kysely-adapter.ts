@@ -124,6 +124,17 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	/**
+	 * Get the underlying Kysely instance.
+	 * Useful for direct database operations or introspection.
+	 * @since ARCH-006
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely requires any for generic database schema
+	getKyselyInstance(): Kysely<any> {
+		// biome-ignore lint/suspicious/noExplicitAny: Kysely requires any for generic database schema
+		return this.db as Kysely<any>;
+	}
+
+	/**
 	 * Compile a plan to executable SQL.
 	 */
 	compile<T = unknown>(

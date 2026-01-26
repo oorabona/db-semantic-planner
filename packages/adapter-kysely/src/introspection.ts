@@ -11,11 +11,16 @@ import type {
 	ForeignKeyIR,
 	ModelIR,
 	RelationIR,
+	Schema,
+	SchemaDefinition,
 	TableIR,
 } from '@dbsp/core';
-import { ModelIRImpl } from '@dbsp/core';
+import { schema as createSchema, ModelIRImpl } from '@dbsp/core';
 import type { ColumnMetadata, Kysely, TableMetadata } from 'kysely';
 import { sql } from 'kysely';
+// Note: KyselyAdapter type imported to avoid circular dependency
+// (kysely-adapter.ts imports introspect from here)
+import type { KyselyAdapter } from './kysely-adapter.js';
 
 // ============================================================================
 // Helpers
@@ -476,6 +481,153 @@ export async function introspect(
 		introspectedAt: new Date(),
 		warnings,
 	};
+}
+
+// ============================================================================
+// getSchemaFromDb (ARCH-006)
+// ============================================================================
+
+/**
+ * Options for getSchemaFromDb (simplified from IntrospectionOptions).
+ */
+export interface GetSchemaFromDbOptions {
+	/**
+	 * Database schema to introspect.
+	 * @default 'public' for PostgreSQL
+	 */
+	readonly schema?: string;
+
+	/**
+	 * Tables to include (whitelist). If empty/undefined, includes all.
+	 */
+	readonly tables?: readonly string[];
+
+	/**
+	 * Glob patterns to exclude (e.g., ['_*', 'pg_*']).
+	 */
+	readonly exclude?: readonly string[];
+}
+
+/**
+ * Introspects database and returns a Schema<T>.
+ *
+ * This is the ARCH-006 simplified API for database introspection.
+ * Naming convention is determined by the adapter (no separate option).
+ *
+ * @param adapter - KyselyAdapter instance (provides Kysely connection and naming convention)
+ * @param options - Optional introspection options (schema, tables whitelist, exclude patterns)
+ * @returns Schema<T> ready for use with createOrm()
+ *
+ * @example
+ * ```typescript
+ * const adapter = createKyselyAdapter(db);
+ * const schema = await getSchemaFromDb(adapter, {
+ *   schema: 'public',
+ *   exclude: ['_migrations', 'spatial_*'],
+ * });
+ * const orm = createOrm({ schema, adapter });
+ * ```
+ *
+ * @since ARCH-006
+ */
+export async function getSchemaFromDb<
+	T extends SchemaDefinition = SchemaDefinition,
+>(
+	adapter: KyselyAdapter<unknown>,
+	options: GetSchemaFromDbOptions = {},
+): Promise<Schema<T>> {
+	// Use adapter's naming convention
+	const naming = adapter.namingConvention;
+
+	// Convert options to IntrospectionOptions
+	// Only include defined properties to satisfy exactOptionalPropertyTypes
+	const introspectOptions: IntrospectionOptions = {
+		relationNaming: naming === 'preserve' ? 'snake_case' : naming,
+	};
+	if (options.schema !== undefined) {
+		(introspectOptions as { schema?: string }).schema = options.schema;
+	}
+	if (options.tables !== undefined) {
+		(introspectOptions as { include?: readonly string[] }).include =
+			options.tables;
+	}
+	if (options.exclude !== undefined) {
+		(introspectOptions as { exclude?: readonly string[] }).exclude =
+			options.exclude;
+	}
+
+	// Get the Kysely instance from adapter
+	const db = adapter.getKyselyInstance();
+
+	// Introspect the database
+	const introspected = await introspect(db, introspectOptions);
+
+	// Convert IntrospectedModelIR to SchemaDefinition
+	const definition = modelIRToSchemaDefinition(introspected);
+
+	// Create and return Schema<T>
+	return createSchema(definition as T);
+}
+
+/**
+ * Convert ModelIR back to SchemaDefinition for use with schema() function.
+ *
+ * This reverses the transformation done by schemaToModelIR, producing
+ * a definition that can be passed to createOrm().
+ */
+function modelIRToSchemaDefinition(model: ModelIR): SchemaDefinition {
+	const definition: SchemaDefinition = {};
+
+	for (const [tableName, table] of model.tables) {
+		const tableDef: Record<
+			string,
+			ColumnType | { __brand: 'ref'; target: string; options: object }
+		> = {};
+
+		for (const column of table.columns) {
+			// Check if this column is a foreign key
+			const fk = table.foreignKeys.find((f) => f.columns.includes(column.name));
+
+			if (fk) {
+				// This is a FK column - create a ref definition
+				tableDef[column.name] = {
+					__brand: 'ref' as const,
+					target: fk.references.table,
+					options: {
+						// Find the inverse relation if it exists
+						...findInverseRelation(model, tableName, fk.references.table),
+					},
+				};
+			} else {
+				// Regular column - use the column type
+				tableDef[column.name] = column.type;
+			}
+		}
+
+		// Cast is safe because tableDef contains valid ColumnDef | RefDefinition values
+		definition[tableName] = tableDef as SchemaDefinition[string];
+	}
+
+	return definition;
+}
+
+/**
+ * Find inverse relation metadata for a foreign key.
+ */
+function findInverseRelation(
+	model: ModelIR,
+	sourceTable: string,
+	targetTable: string,
+): { inverse?: string } {
+	// Look for a relation from target table back to source
+	const inverseRelations = model.getRelationsFrom(targetTable);
+	const inverse = inverseRelations.find((r) => r.target === sourceTable);
+
+	if (inverse) {
+		return { inverse: inverse.name };
+	}
+
+	return {};
 }
 
 // ============================================================================

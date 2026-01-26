@@ -71,11 +71,15 @@ export { explain } from './explain.js';
 export type {
 	DetectedHierarchy,
 	ForeignKeyInfo,
+	// ARCH-006: getSchemaFromDb options
+	GetSchemaFromDbOptions,
 	IntrospectedModelIR,
 	IntrospectionOptions,
 } from './introspection.js';
 // Introspection (ADAPTER-006)
 export { introspect } from './introspection.js';
+// ARCH-006: Simplified introspection returning Schema<T>
+export { getSchemaFromDb } from './introspection.js';
 // KyselyAdapter (high-level adapter interface implementation)
 export { createKyselyAdapter, KyselyAdapter } from './kysely-adapter.js';
 // Redaction API (ADAPTER-004)

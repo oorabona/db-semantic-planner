@@ -30,7 +30,7 @@
 | Cross-Table Pseudo-Cols (SPEC-002) | core, nql, adapter | ✅ Complete |
 | Type Rationalization (ARCH-004) | types, core, adapter, nql | ✅ Complete |
 | Unified Schema API (ARCH-005) | core, cli, adapter | ✅ Complete |
-| Simplified ORM Entry Point (ARCH-006) | core, adapter-kysely | 🟡 Ready |
+| Simplified ORM Entry Point (ARCH-006) | core, adapter-kysely | ✅ Complete |
 
 ## Scope-Specific Backlogs
 
@@ -43,28 +43,29 @@
 | `docs/specs/ARCH-005-unified-schema-api.md` | core, cli, adapter | Unified schema API (schema/ref/manyToMany) |
 | `docs/specs/ARCH-006-simplified-orm-entry-point.md` | core, adapter-kysely | Simplified createOrm + getSchemaFromDb |
 
-## 🟡 NEXT: ARCH-006 Simplified ORM Entry Point
+## ✅ COMPLETED: ARCH-006 Simplified ORM Entry Point (2026-01-26)
 
 **Priority:** HIGH | **Effort:** L (~8h) | **Breaking:** Yes
 **Scope:** core, adapter-kysely
 **Spec:** [ARCH-006](docs/specs/ARCH-006-simplified-orm-entry-point.md)
-**Dependencies:** ARCH-005 (Complete)
+**Started:** 2026-01-26 | **Completed:** 2026-01-26
 
-Simplify `createOrm()` API and extract `getSchemaFromDb()` for introspection.
+Simplified `createOrm()` API to single signature and extracted `getSchemaFromDb()` for introspection.
 
-### Goals
+### Achievements
 
-- Single `createOrm({ schema })` signature (always sync)
-- Separate `getSchemaFromDb(adapter, options)` for introspection
-- `adapter.namingConvention` as single source of truth
-- Remove: TypedSchema, relationHints, defaultIncludeStrategy
+- ✅ Single `createOrm({ schema })` signature (always sync)
+- ✅ `getSchemaFromDb(adapter, options)` returns `Schema<T>`
+- ✅ `adapter.namingConvention` as single source of truth
+- ✅ Removed: TypedSchema, typed-query-builder, prisma-types
+- ✅ Breaking change - no backward compatibility
 
-### Blocks
+### Blocks Completed
 
-- [x] ✅ Block 1: Adapter Enhancement — Add `namingConvention` to Adapter interface (2026-01-26)
-- [ ] 🟡 Block 2: getSchemaFromDb — Extract introspection to return `Schema<T>` (~3h)
-- [ ] ⏳ Block 3: Simplify createOrm — Remove legacy overloads (~2h)
-- [ ] ⏳ Block 4: Cleanup & Migration — Update tests/examples, remove dead code (~1h)
+- [x] ✅ Block 1: Add `namingConvention` to Adapter interface (2026-01-26)
+- [x] ✅ Block 2: Implement `getSchemaFromDb()` in adapter-kysely (2026-01-26)
+- [x] ✅ Block 3: Simplify `createOrm` with `SimplifiedOrmOptions` (2026-01-26)
+- [x] ✅ Block 4: Remove TypedSchema and migrate tests (2026-01-26)
 
 ---
 
