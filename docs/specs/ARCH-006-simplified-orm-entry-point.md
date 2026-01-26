@@ -468,13 +468,146 @@ describe('Adapter.namingConvention', () => {
 - Verify naming convention applied consistently
 - Round-trip: introspect → createOrm → query → verify results
 
+## Edge Cases (LLM Consensus Review)
+
+*Validated by: LM Studio, Codex (GPT-5.2), Gemini - 2026-01-26*
+
+### 1. Convention Mismatch
+
+**Risk:** Schema defined with camelCase, adapter configured with snake_case (or vice versa).
+
+**Solution:** Validate in `createOrm()`:
+
+```typescript
+export function createOrm<T extends SchemaDefinition>(
+  options: OrmOptions<T>
+): OrmInstance<SchemaToDb<T>> {
+  const { schema, adapter } = options;
+
+  // Validate naming convention consistency
+  if (adapter && schema.namingConvention && adapter.namingConvention) {
+    if (schema.namingConvention !== adapter.namingConvention) {
+      throw new NamingConventionMismatchError(
+        `Schema uses '${schema.namingConvention}' but adapter uses '${adapter.namingConvention}'. ` +
+        `Either align them or use adapter.withNamingConvention() to override.`
+      );
+    }
+  }
+  // ...
+}
+```
+
+**Schema Enhancement:** Add optional `namingConvention` to `Schema<T>`:
+
+```typescript
+export interface Schema<T extends SchemaDefinition> {
+  readonly definition: T;
+  readonly model: ModelIR;
+  readonly tableNames: readonly string[];
+  readonly namingConvention?: NamingConvention; // NEW: for validation
+}
+```
+
+### 2. Schema Drift (Introspected Schema)
+
+**Risk:** Schema introspected at build time, DB schema changes at runtime.
+
+**Solution:** Add `introspectedAt` timestamp and optional staleness check:
+
+```typescript
+export interface IntrospectedSchema<T> extends Schema<T> {
+  readonly introspectedAt: Date;
+  readonly sourceDb: string; // connection identifier
+}
+
+// Optional: warn if schema is stale
+createOrm({
+  schema: introspectedSchema,
+  adapter,
+  warnIfStaleAfter: 24 * 60 * 60 * 1000 // 24h
+});
+```
+
+### 3. Async Adapter Setup (Connect/Auth)
+
+**Risk:** Adapter requires async initialization (connection pool, auth).
+
+**Solution:** Adapter creation remains sync, connection is lazy:
+
+```typescript
+// Adapter creation is sync (no connection yet)
+const adapter = createKyselyAdapter(db);
+
+// Connection happens on first query
+const orm = createOrm({ schema, adapter });
+await orm.select('users').all(); // <-- connection established here
+```
+
+**For explicit connection control:**
+
+```typescript
+// Explicit connect for warming/health checks
+await adapter.connect(); // optional
+const orm = createOrm({ schema, adapter });
+```
+
+### 4. Legacy System Override
+
+**Risk:** Legacy DB uses mixed naming conventions (some tables camelCase, some snake_case).
+
+**Solution:** Per-table override in schema definition:
+
+```typescript
+const mySchema = schema({
+  users: { id: 'uuid', firstName: 'string' }, // follows adapter convention
+  LEGACY_TBL: {
+    ID: 'number',
+    _naming: 'preserve' // NEW: override for this table only
+  },
+});
+```
+
+### 5. Multi-Tenant Schema Interaction
+
+**Risk:** `orm.withSchema('tenant_123')` combined with namingConvention.
+
+**Solution:** Schema scoping is orthogonal to naming:
+
+```typescript
+const orm = createOrm({ schema, adapter }); // namingConvention from adapter
+const tenantOrm = orm.withSchema('tenant_123'); // same namingConvention
+// SQL: SELECT "first_name" FROM "tenant_123"."users"
+```
+
+**Clarify in docs:** `withSchema()` changes PostgreSQL schema prefix, not naming convention.
+
+### 6. Testing/Mocking Without DB
+
+**Risk:** Tests need ORM without real adapter connection.
+
+**Solution:** Compile-only mode already supports this:
+
+```typescript
+// Test: no adapter, compile-only
+const orm = createOrm({ schema: testSchema });
+const { sql, params } = orm.select('users').where(eq('id', 1)).dump();
+expect(sql).toContain('WHERE');
+
+// Test: mock adapter
+const mockAdapter = createMockAdapter({ namingConvention: 'camelCase' });
+const orm = createOrm({ schema: testSchema, adapter: mockAdapter });
+```
+
 ## Risks & Mitigations
 
-| Risk | Mitigation |
-|------|------------|
-| Breaking change for TypedSchema users | Provide codemod or migration guide |
-| CamelCasePlugin detection unreliable | Default to 'camelCase', allow explicit override |
-| Introspection returns incomplete schema | Add warnings for unmapped types (existing behavior) |
+| Risk | Mitigation | Priority |
+|------|------------|----------|
+| Breaking change for TypedSchema users | Provide codemod or migration guide | HIGH |
+| CamelCasePlugin detection unreliable | Default to 'camelCase', allow explicit override | MEDIUM |
+| Introspection returns incomplete schema | Add warnings for unmapped types (existing) | LOW |
+| **Convention mismatch** (schema vs adapter) | Validate in createOrm(), throw early | HIGH |
+| **Schema drift** after introspection | Add `introspectedAt` metadata, optional staleness warning | MEDIUM |
+| **Legacy mixed conventions** | Per-table `_naming` override | LOW |
 
 ## Success Criteria
 
