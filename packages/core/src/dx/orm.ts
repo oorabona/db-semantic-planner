@@ -18,6 +18,7 @@ import {
 	AmbiguousRelationError,
 	ExecutionError,
 	InvalidOperationError,
+	NamingConventionMismatchError,
 	NotFoundError,
 } from './errors.js';
 import {
@@ -193,6 +194,20 @@ export function createOrm<T extends SchemaDefinition>(
 			'Invalid schema: must be created with schema() function. ' +
 				'For database introspection, use getSchemaFromDb() from @dbsp/adapter-kysely.',
 		);
+	}
+
+	// ARCH-006: Validate naming convention consistency
+	// Only validate if both schema and adapter have namingConvention defined
+	if (
+		adapter &&
+		schemaObj.namingConvention &&
+		adapter.namingConvention &&
+		schemaObj.namingConvention !== adapter.namingConvention
+	) {
+		throw new NamingConventionMismatchError({
+			schemaConvention: schemaObj.namingConvention,
+			adapterConvention: adapter.namingConvention,
+		});
 	}
 
 	// Create ORM instance with schema's ModelIR

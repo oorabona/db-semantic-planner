@@ -18,6 +18,8 @@ export {
 	// Utility for fuzzy matching suggestions
 	findClosestMatch,
 	InvalidOperationError,
+	// Convention mismatch (ARCH-006)
+	NamingConventionMismatchError,
 	NotFoundError,
 	RelationNotFoundError,
 	TableNotFoundError,

@@ -565,8 +565,15 @@ export async function getSchemaFromDb<
 	// Convert IntrospectedModelIR to SchemaDefinition
 	const definition = modelIRToSchemaDefinition(introspected);
 
-	// Create and return Schema<T>
-	return createSchema(definition as T);
+	// Create base Schema<T>
+	const baseSchema = createSchema(definition as T);
+
+	// ARCH-006: Augment with introspection metadata
+	return {
+		...baseSchema,
+		namingConvention: naming,
+		introspectedAt: new Date(),
+	};
 }
 
 /**
