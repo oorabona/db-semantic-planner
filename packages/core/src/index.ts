@@ -61,9 +61,11 @@ export type {
 	AggregateWindowFunction,
 	// Operators
 	ArrayOperator,
+	CaseExpressionIntent,
 	CoalesceExpressionIntent,
 	ColumnAliasIntent,
 	ColumnExpressionIntent,
+	ComparisonExpressionIntent,
 	ComparisonOperator,
 	CustomTraversal,
 	// Mutations (DX-010)
@@ -74,7 +76,9 @@ export type {
 	ExpressionIntent,
 	// Include
 	IncludeIntent,
+	InsertFromIntent,
 	InsertIntent,
+	LiteralExpressionIntent,
 	LogicalOperator,
 	MutationIntent,
 	NullOperator,

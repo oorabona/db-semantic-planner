@@ -10,6 +10,7 @@
 import type { CompileOptionsBase } from '@dbsp/types';
 import type {
 	DeleteIntent,
+	InsertFromIntent,
 	InsertIntent,
 	SelectIntent,
 	UpdateIntent,
@@ -130,6 +131,12 @@ export interface SeparateIncludeInfo {
 	readonly throughSourceKey?: string;
 	/** FK in junction table pointing to target (e.g., 'tagId') */
 	readonly throughTargetKey?: string;
+
+	// --- Subquery optimization (NQL-ALIGN Block 5) ---
+	/** Source/parent table name for subquery optimization */
+	readonly sourceTable?: string;
+	/** Parent query's WHERE conditions for subquery optimization */
+	readonly parentWhere?: WhereIntent;
 }
 
 /**
@@ -209,6 +216,12 @@ export interface CompilingAdapter extends BaseAdapter {
 
 	/** Compile an insert intent to executable SQL. */
 	compileInsert(intent: InsertIntent, options?: CompileOptions): CompiledQuery;
+
+	/** Compile an insert-from intent to executable SQL (NQL-ALIGN). */
+	compileInsertFrom(
+		intent: InsertFromIntent,
+		options?: CompileOptions,
+	): CompiledQuery;
 
 	/** Compile an update intent to executable SQL. */
 	compileUpdate(intent: UpdateIntent, options?: CompileOptions): CompiledQuery;

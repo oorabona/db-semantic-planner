@@ -130,6 +130,13 @@ export const DenseRank = createToken({
 export const Lag = createToken({ name: 'Lag', pattern: /lag\b/i });
 export const Lead = createToken({ name: 'Lead', pattern: /lead\b/i });
 
+// CASE expression keywords
+export const Case = createToken({ name: 'Case', pattern: /case\b/i });
+export const When = createToken({ name: 'When', pattern: /when\b/i });
+export const Then = createToken({ name: 'Then', pattern: /then\b/i });
+export const Else = createToken({ name: 'Else', pattern: /else\b/i });
+export const End = createToken({ name: 'End', pattern: /end\b/i });
+
 // ============================================================
 // PSEUDO-COLUMN KEYWORDS (Self-Referential Traversal)
 // ============================================================
@@ -279,6 +286,12 @@ export const allTokens = [
 	Rank,
 	Lag,
 	Lead,
+	// CASE expression keywords
+	Case,
+	When,
+	Then,
+	Else,
+	End,
 
 	// Range values (date/time patterns - must come before NumberLiteral)
 	RangeValue,

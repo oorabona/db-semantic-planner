@@ -7,11 +7,13 @@ import {
 	Asc,
 	Between,
 	Bind,
+	Case,
 	Comma,
 	Delete,
 	Desc,
 	Distinct,
 	Dot,
+	End,
 	Every,
 	Exists,
 	False,
@@ -47,10 +49,12 @@ import {
 	Some,
 	Star,
 	StringLiteral,
+	Then,
 	True,
 	Update,
 	Upsert,
 	Via,
+	When,
 	Where,
 } from '../src/lexer/tokens.js';
 
@@ -402,6 +406,73 @@ describe('NqlLexer', () => {
 			expect(result.errors).toHaveLength(0);
 			const tokenTypes = result.tokens.map((t) => t.tokenType.name);
 			expect(tokenTypes).toContain('Bind');
+		});
+	});
+
+	describe('LEX-CASE: CASE expression tokens', () => {
+		it('tokenizes simple CASE expression', () => {
+			const query = `case when x then y end`;
+			const result = NqlLexer.tokenize(query);
+			expect(result.errors).toHaveLength(0);
+			const tokens = result.tokens;
+			expect(tokens[0].tokenType).toBe(Case);
+			expect(tokens[1].tokenType).toBe(When);
+			expect(tokens[2].tokenType).toBe(Identifier);
+			expect(tokens[3].tokenType).toBe(Then);
+			expect(tokens[4].tokenType).toBe(Identifier);
+			expect(tokens[5].tokenType).toBe(End);
+		});
+
+		it('tokenizes CASE with ELSE', () => {
+			const query = `case when x then y else z end`;
+			const result = NqlLexer.tokenize(query);
+			expect(result.errors).toHaveLength(0);
+			const tokenTypes = result.tokens.map((t) => t.tokenType.name);
+			expect(tokenTypes).toContain('Case');
+			expect(tokenTypes).toContain('When');
+			expect(tokenTypes).toContain('Then');
+			expect(tokenTypes).toContain('Else');
+			expect(tokenTypes).toContain('End');
+		});
+
+		it('tokenizes CASE keywords case-insensitively', () => {
+			const query = `CASE WHEN price > 100 THEN 'high' ELSE 'low' END`;
+			const result = NqlLexer.tokenize(query);
+			expect(result.errors).toHaveLength(0);
+			expect(result.tokens[0].tokenType).toBe(Case);
+			expect(result.tokens[1].tokenType).toBe(When);
+		});
+
+		it('tokenizes CASE with multiple WHEN clauses', () => {
+			const query = `case when a then 1 when b then 2 else 0 end`;
+			const result = NqlLexer.tokenize(query);
+			expect(result.errors).toHaveLength(0);
+			const whenCount = result.tokens.filter(
+				(t) => t.tokenType === When,
+			).length;
+			const thenCount = result.tokens.filter(
+				(t) => t.tokenType === Then,
+			).length;
+			expect(whenCount).toBe(2);
+			expect(thenCount).toBe(2);
+		});
+
+		it('tokenizes CASE in select clause', () => {
+			const query = `products | select case when price > 100 then 'expensive' else 'cheap' end as tier`;
+			const result = NqlLexer.tokenize(query);
+			expect(result.errors).toHaveLength(0);
+			const tokenTypes = result.tokens.map((t) => t.tokenType.name);
+			expect(tokenTypes).toContain('Select');
+			expect(tokenTypes).toContain('Case');
+			expect(tokenTypes).toContain('As');
+		});
+
+		it('does not match case/when/then/else/end as prefix of identifiers', () => {
+			const query = `caseStudy whenDone thenValue elseWhere endTime`;
+			const result = NqlLexer.tokenize(query);
+			expect(result.errors).toHaveLength(0);
+			// All should be identifiers, not keywords
+			expect(result.tokens.every((t) => t.tokenType === Identifier)).toBe(true);
 		});
 	});
 });

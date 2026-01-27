@@ -311,8 +311,51 @@ export interface ArithmeticExpressionIntent {
 }
 
 /**
+ * Literal value expression: string, number, boolean, or null.
+ * Used in CASE THEN/ELSE clauses for constant values.
+ */
+export interface LiteralExpressionIntent {
+	readonly kind: 'literal';
+	/** The literal value */
+	readonly value: string | number | boolean | null;
+	/** Optional alias */
+	readonly as?: string;
+}
+
+/**
+ * Comparison expression: left operator right.
+ * Used in CASE WHEN conditions.
+ */
+export interface ComparisonExpressionIntent {
+	readonly kind: 'comparison';
+	/** Left side column reference */
+	readonly column: string;
+	/** Comparison operator */
+	readonly operator: '=' | '!=' | '<' | '>' | '<=' | '>=' | 'like';
+	/** Right side value */
+	readonly value: unknown;
+}
+
+/**
+ * CASE expression: conditional logic in SELECT.
+ * CASE WHEN condition THEN result [WHEN ...] [ELSE default] END
+ */
+export interface CaseExpressionIntent {
+	readonly kind: 'case';
+	/** Array of WHEN-THEN pairs */
+	readonly when: ReadonlyArray<{
+		readonly condition: ExpressionIntent;
+		readonly result: ExpressionIntent;
+	}>;
+	/** Optional ELSE clause */
+	readonly else?: ExpressionIntent;
+	/** Alias for result column */
+	readonly as?: string;
+}
+
+/**
  * Expression intent union type - computed/derived values in SELECT
- * Extensible for future expression types (CASE WHEN, etc.)
+ * Extensible for future expression types
  */
 export type ExpressionIntent =
 	| ColumnExpressionIntent
@@ -325,7 +368,10 @@ export type ExpressionIntent =
 	| PseudoColumnExpressionIntent
 	| FunctionExpressionIntent
 	| SubqueryExpressionIntent
-	| ArithmeticExpressionIntent;
+	| ArithmeticExpressionIntent
+	| LiteralExpressionIntent
+	| ComparisonExpressionIntent
+	| CaseExpressionIntent;
 
 /**
  * Select with expressions (computed columns).
@@ -1199,6 +1245,36 @@ export interface InsertIntent {
 }
 
 /**
+ * Insert-from intent - insert rows from a SELECT query.
+ * @example { type: 'insert_from', table: 'archived_users', source: 'users', where: {...} }
+ */
+export interface InsertFromIntent {
+	readonly type: 'insert_from';
+
+	/** Target table to insert into */
+	readonly table: string;
+
+	/** Source table to select from */
+	readonly source: string;
+
+	/** Optional column mapping (defaults to same column names) */
+	readonly columns?: readonly string[];
+
+	/** Filter condition for source rows */
+	readonly where?: WhereIntent;
+
+	/** Limit number of rows to insert */
+	readonly limit?: number;
+
+	/**
+	 * Columns to return from inserted rows (DX-026).
+	 * Requires adapter capability: supportsReturning
+	 * @example ['id', 'created_at']
+	 */
+	readonly returning?: readonly string[];
+}
+
+/**
  * Update intent - update rows matching a condition.
  * @example { type: 'update', table: 'users', set: { name: 'Bob' }, where: ... }
  */
@@ -1327,6 +1403,7 @@ export interface UpsertIntent {
  */
 export type MutationIntent =
 	| InsertIntent
+	| InsertFromIntent
 	| UpdateIntent
 	| DeleteIntent
 	| UpsertIntent;
