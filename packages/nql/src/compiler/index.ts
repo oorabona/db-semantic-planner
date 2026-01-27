@@ -269,7 +269,7 @@ export class NqlCompiler {
 				const exists = allIncludes.some((inc) => inc.relation === relation);
 				if (!exists) {
 					const include: IncludeIntent = flatMode
-						? { relation, strategy: 'join' }
+						? { relation, strategy: 'flat' }
 						: { relation };
 					allIncludes.push(include);
 				}
@@ -282,7 +282,7 @@ export class NqlCompiler {
 			for (let i = 0; i < allIncludes.length; i++) {
 				if (!allIncludes[i].strategy) {
 					// Replace with new object including strategy (avoid mutating readonly)
-					allIncludes[i] = { ...allIncludes[i], strategy: 'join' };
+					allIncludes[i] = { ...allIncludes[i], strategy: 'flat' };
 				}
 			}
 		}

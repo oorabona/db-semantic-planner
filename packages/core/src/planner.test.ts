@@ -1,4 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import {
+	MYSQL_CAPABILITIES,
+	POSTGRESQL_CAPABILITIES,
+} from './dialects/index.js';
 import { ref, schema } from './dx/schema.js';
 import type { QueryIntent } from './index.js';
 import type { RecursiveIntent } from './intent-ast.js';
@@ -451,6 +455,62 @@ describe('Semantic Planner', () => {
 				(d) => d.type === 'include-strategy',
 			);
 			expect(includeDecision).toBeDefined();
+			expect(includeDecision?.choice).toBe('join');
+		});
+
+		it('should choose json_agg when dialect supports it (auto strategy)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [{ relation: 'products' }],
+			};
+
+			const report = plan(intent, q2Schema, {
+				dialectCapabilities: POSTGRESQL_CAPABILITIES,
+			});
+
+			const includeDecision = report.decisions.find(
+				(d) => d.type === 'include-strategy',
+			);
+			expect(includeDecision).toBeDefined();
+			expect(includeDecision?.choice).toBe('json_agg');
+		});
+
+		it('should exclude json_agg when flat strategy is used', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [{ relation: 'products', strategy: 'flat' }],
+			};
+
+			const report = plan(intent, q2Schema, {
+				dialectCapabilities: POSTGRESQL_CAPABILITIES,
+			});
+
+			const includeDecision = report.decisions.find(
+				(d) => d.type === 'include-strategy',
+			);
+			expect(includeDecision).toBeDefined();
+			// flat excludes json_agg → planner picks lateral (next best for PostgreSQL)
+			expect(includeDecision?.choice).toBe('lateral');
+		});
+
+		it('should fallback to join when flat is used and no lateral support', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [{ relation: 'products', strategy: 'flat' }],
+			};
+
+			const report = plan(intent, q2Schema, {
+				dialectCapabilities: MYSQL_CAPABILITIES,
+			});
+
+			const includeDecision = report.decisions.find(
+				(d) => d.type === 'include-strategy',
+			);
+			expect(includeDecision).toBeDefined();
+			// flat excludes json_agg, no lateral → falls back to join
 			expect(includeDecision?.choice).toBe('join');
 		});
 

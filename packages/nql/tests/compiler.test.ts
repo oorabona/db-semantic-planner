@@ -384,8 +384,8 @@ describe('NQL Compiler - FLAT clause (v2.1)', () => {
 		expect(query.include).toHaveLength(1);
 		const inc = query.include![0]!;
 		expect(inc.relation).toBe('customer');
-		// With | flat, strategy is set to 'join'
-		expect(inc.strategy).toBe('join');
+		// With | flat, strategy is set to 'flat' (exclude json_agg, planner picks best)
+		expect(inc.strategy).toBe('flat');
 	});
 
 	it('auto-generates multiple includes from multiple relation paths', () => {
@@ -397,9 +397,9 @@ describe('NQL Compiler - FLAT clause (v2.1)', () => {
 		expect(query.include).toHaveLength(2);
 		expect(query.include!.map((i) => i.relation)).toContain('customer');
 		expect(query.include!.map((i) => i.relation)).toContain('items');
-		// All includes get join strategy with | flat
+		// All includes get flat strategy with | flat
 		for (const inc of query.include!) {
-			expect(inc.strategy).toBe('join');
+			expect(inc.strategy).toBe('flat');
 		}
 	});
 
@@ -689,12 +689,12 @@ describe('NQL Compiler - Complex Queries', () => {
 		expect(query.groupBy).toBeDefined();
 		expect(query.orderBy).toHaveLength(1);
 		expect(query.limit).toBe(10);
-		// NQL v2.1: customer.name triggers include with join strategy
+		// NQL v2.1: customer.name triggers include with flat strategy
 		expect(query.include).toBeDefined();
 		expect(query.include).toHaveLength(1);
 		const inc = query.include![0]!;
 		expect(inc.relation).toBe('customer');
-		expect(inc.strategy).toBe('join');
+		expect(inc.strategy).toBe('flat');
 	});
 
 	it('handles string escapes correctly', () => {
