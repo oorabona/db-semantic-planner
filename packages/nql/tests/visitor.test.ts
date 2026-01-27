@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type {
+	NqlCaseExpression,
 	NqlDelete,
 	NqlFlatClause,
 	NqlGroupByClause,
@@ -559,6 +560,80 @@ describe('SPEC-002: Relation Filter AST', () => {
 			expect(filter.mode).toBe('every');
 			// author.company = relation path, verified = column
 			expect(filter.relation).toEqual(['author', 'company']);
+		});
+	});
+
+	describe('VIS-CASE: CASE expression AST', () => {
+		it('transforms simple CASE WHEN THEN END to AST', () => {
+			const ast = parseToAst(
+				"products | select case when price > 100 then 'expensive' end",
+			);
+			const query = ast.statements[0] as NqlQuery;
+			const selectClause = query.clauses[0] as NqlSelectClause;
+
+			expect(selectClause.items).toHaveLength(1);
+			const caseExpr = (selectClause.items[0] as NqlSelectExpression)
+				.expression as NqlCaseExpression;
+
+			expect(caseExpr.type).toBe('case');
+			expect(caseExpr.whenClauses).toHaveLength(1);
+			expect(caseExpr.elseClause).toBeUndefined();
+		});
+
+		it('transforms CASE with ELSE clause', () => {
+			const ast = parseToAst(
+				"products | select case when price > 100 then 'expensive' else 'cheap' end",
+			);
+			const query = ast.statements[0] as NqlQuery;
+			const selectClause = query.clauses[0] as NqlSelectClause;
+
+			const caseExpr = (selectClause.items[0] as NqlSelectExpression)
+				.expression as NqlCaseExpression;
+
+			expect(caseExpr.type).toBe('case');
+			expect(caseExpr.whenClauses).toHaveLength(1);
+			expect(caseExpr.elseClause).toBeDefined();
+		});
+
+		it('transforms CASE with multiple WHEN clauses', () => {
+			const ast = parseToAst(
+				"products | select case when price > 100 then 'high' when price > 50 then 'medium' else 'low' end",
+			);
+			const query = ast.statements[0] as NqlQuery;
+			const selectClause = query.clauses[0] as NqlSelectClause;
+
+			const caseExpr = (selectClause.items[0] as NqlSelectExpression)
+				.expression as NqlCaseExpression;
+
+			expect(caseExpr.type).toBe('case');
+			expect(caseExpr.whenClauses).toHaveLength(2);
+			expect(caseExpr.elseClause).toBeDefined();
+		});
+
+		it('preserves condition structure in WHEN clauses', () => {
+			const ast = parseToAst(
+				"products | select case when active = true then 'yes' else 'no' end",
+			);
+			const query = ast.statements[0] as NqlQuery;
+			const selectClause = query.clauses[0] as NqlSelectClause;
+
+			const caseExpr = (selectClause.items[0] as NqlSelectExpression)
+				.expression as NqlCaseExpression;
+
+			const whenClause = caseExpr.whenClauses[0];
+			expect(whenClause.condition.type).toBe('comparison');
+			expect(whenClause.result.type).toBe('string');
+		});
+
+		it('preserves alias on CASE expression', () => {
+			const ast = parseToAst(
+				"products | select case when price > 100 then 'high' else 'low' end as tier",
+			);
+			const query = ast.statements[0] as NqlQuery;
+			const selectClause = query.clauses[0] as NqlSelectClause;
+
+			const selectItem = selectClause.items[0] as NqlSelectExpression;
+			expect(selectItem.alias).toBe('tier');
 		});
 	});
 });

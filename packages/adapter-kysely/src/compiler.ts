@@ -97,6 +97,17 @@ export interface InternalCompileOptions {
 	coreCapabilities?: CoreDialectCapabilities;
 	/** Dialect name for error messages */
 	dialect?: string;
+
+	// ============================================================
+	// Global Limits (NQL-ALIGN Block 3)
+	// ============================================================
+
+	/** Maximum depth for recursive CTE queries. @default 10 */
+	maxDepth?: number;
+	/** Maximum number of relation hops. @default 5 */
+	maxTableHops?: number;
+	/** Maximum nesting depth for CASE expressions. @default 10 */
+	maxNestedCase?: number;
 }
 
 // ============================================================================
@@ -127,6 +138,11 @@ export interface SeparateIncludeInfo {
 	throughSourceKey?: string;
 	/** Column in junction table referencing target (e.g., 'tagId') */
 	throughTargetKey?: string;
+	// NQL-ALIGN Block 5: Subquery optimization
+	/** Source/parent table name for subquery optimization */
+	sourceTable?: string;
+	/** Parent query's WHERE conditions for subquery optimization */
+	parentWhere?: WhereIntent;
 }
 
 /**
@@ -160,8 +176,12 @@ export function compileSeparateInclude(
 	coreCapabilities?: CoreDialectCapabilities,
 	dialect?: string,
 ): CompiledQuery {
-	if (parentIds.length === 0) {
-		// Return an empty result query - no parent IDs means no includes to fetch
+	// NQL-ALIGN Block 5: Subquery optimization
+	// When no parentIds provided but we have sourceTable info, use subquery instead of 2 queries
+	const useSubquery = parentIds.length === 0 && info.sourceTable !== undefined;
+
+	if (parentIds.length === 0 && !useSubquery) {
+		// Return an empty result query - no parent IDs and no subquery info
 		const tableName = schemaName
 			? `${schemaName}.${info.targetTable}`
 			: info.targetTable;
@@ -219,6 +239,71 @@ export function compileSeparateInclude(
 		);
 	};
 
+	// NQL-ALIGN Block 5: Helper to build parent subquery for optimization
+	const buildParentSubquery = (sourceKey: string | readonly string[]) => {
+		// sourceTable is guaranteed to be defined when useSubquery is true
+		const sourceTable = info.sourceTable;
+		if (!sourceTable) {
+			throw new Error('buildParentSubquery called without sourceTable');
+		}
+
+		const sourceTableName = schemaName
+			? `${schemaName}.${sourceTable}`
+			: sourceTable;
+		const skCols = Array.isArray(sourceKey) ? sourceKey : [sourceKey];
+
+		// biome-ignore lint/suspicious/noExplicitAny: Kysely SelectQueryBuilder types
+		let subquery: any = kysely.selectFrom(sourceTableName);
+
+		// Select the source key column(s)
+		if (skCols.length === 1) {
+			subquery = subquery.select(skCols[0]);
+		} else {
+			// For composite keys, select all columns (will be used in tuple comparison)
+			subquery = subquery.select(skCols as string[]);
+		}
+
+		// Apply parent WHERE conditions if present
+		if (info.parentWhere) {
+			const parentWhere = info.parentWhere;
+			const minimalPlan: PlanReport = {
+				rootTable: sourceTable,
+				intent: { type: 'select', from: sourceTable },
+				decisions: [],
+				warnings: [],
+				ctes: [],
+				metadata: {
+					planningTimeMs: 0,
+					relationsAnalyzed: 0,
+					isAmbiguous: false,
+				},
+			};
+			const minimalState: CompilerState = {
+				aliasCounter: 0,
+				tableAliases: new Map([[sourceTable, sourceTable]]),
+				parameters: [],
+				joinedFilterRelations: new Map(),
+				joinedIncludeRelations: new Map(),
+				...(coreCapabilities !== undefined && { coreCapabilities }),
+				...(dialect !== undefined && { dialect }),
+			};
+			// biome-ignore lint/suspicious/noExplicitAny: Kysely ExpressionBuilder generic
+			subquery = subquery.where((eb: any) =>
+				compileWhere(
+					eb,
+					parentWhere,
+					sourceTable,
+					model ?? ({ tables: {} } as ModelIR),
+					minimalPlan,
+					minimalState,
+					schemaName,
+				),
+			);
+		}
+
+		return subquery;
+	};
+
 	// M:N (manyToMany) relation with junction table
 	if (info.through && info.throughSourceKey && info.throughTargetKey) {
 		const junctionTable = schemaName
@@ -228,7 +313,7 @@ export function compileSeparateInclude(
 		// SELECT tags.*, postTags.postId as __sourceKey
 		// FROM tags
 		// INNER JOIN postTags ON postTags.tagId = tags.id
-		// WHERE postTags.postId IN (parentIds)
+		// WHERE postTags.postId IN (parentIds | subquery)
 		let query = kysely
 			.selectFrom(tableName)
 			.selectAll(info.targetTable)
@@ -237,12 +322,23 @@ export function compileSeparateInclude(
 				junctionTable,
 				`${info.through}.${info.throughTargetKey}`,
 				`${info.targetTable}.${info.foreignKey as string}`,
-			)
-			.where(
+			);
+
+		// NQL-ALIGN Block 5: Use subquery or parentIds
+		if (useSubquery) {
+			const subquery = buildParentSubquery(info.sourceKey);
+			query = query.where(
+				`${info.through}.${info.throughSourceKey}`,
+				'in',
+				subquery,
+			);
+		} else {
+			query = query.where(
 				`${info.through}.${info.throughSourceKey}`,
 				'in',
 				parentIds as unknown[],
 			);
+		}
 
 		// Add additional WHERE conditions from include intent
 		query = applyWhereConditions(query);
@@ -253,12 +349,28 @@ export function compileSeparateInclude(
 	// Standard 1:N relation (no junction table)
 	let query = kysely.selectFrom(tableName).selectAll();
 
-	// Add WHERE foreignKey IN (parentIds) - handle composite keys
+	// Add WHERE foreignKey IN (parentIds | subquery) - handle composite keys
 	const fkCols = Array.isArray(info.foreignKey)
 		? info.foreignKey
 		: [info.foreignKey];
-	if (fkCols.length === 1) {
-		// Simple case: single column FK
+
+	// NQL-ALIGN Block 5: Use subquery or parentIds
+	if (useSubquery) {
+		// Use subquery: WHERE fk IN (SELECT pk FROM parent WHERE ...)
+		const subquery = buildParentSubquery(info.sourceKey);
+		if (fkCols.length === 1) {
+			query = query.where(fkCols[0], 'in', subquery);
+		} else {
+			// Composite key with subquery - use EXISTS instead
+			// This is a fallback for composite keys with subquery
+			query = query.where((eb) =>
+				eb.exists(
+					subquery.whereRef(fkCols[0], '=', `${info.targetTable}.${fkCols[0]}`),
+				),
+			);
+		}
+	} else if (fkCols.length === 1) {
+		// Simple case: single column FK with parentIds
 		query = query.where(fkCols[0], 'in', parentIds as unknown[]);
 	} else {
 		// Composite key: parentIds should be tuples, use OR conditions
@@ -560,6 +672,11 @@ function collectSeparateIncludes(
 				sourceKey,
 				select: include.select,
 				where: include.where,
+				// NQL-ALIGN Block 5: Subquery optimization info
+				sourceTable,
+				...(plan.intent.where !== undefined && {
+					parentWhere: plan.intent.where,
+				}),
 			});
 		}
 	}
@@ -623,6 +740,10 @@ export function compile(
 		coreCapabilities,
 		dialect,
 		aliasIncludedColumns,
+		// Global limits (NQL-ALIGN Block 3)
+		maxDepth,
+		maxTableHops,
+		maxNestedCase,
 	} = options;
 
 	const state: CompilerState = {
@@ -633,6 +754,10 @@ export function compile(
 		joinedIncludeRelations: new Map(),
 		...(coreCapabilities !== undefined && { coreCapabilities }),
 		...(dialect !== undefined && { dialect }),
+		// Global limits with defaults (NQL-ALIGN Block 3)
+		maxDepth: maxDepth ?? 10,
+		maxTableHops: maxTableHops ?? 5,
+		maxNestedCase: maxNestedCase ?? 10,
 	};
 
 	const intent = plan.intent;
@@ -857,6 +982,7 @@ export function compile(
 export {
 	compileDelete,
 	compileInsert,
+	compileInsertFrom,
 	compileUpdate,
 	compileUpsert,
 } from './mutation-compiler.js';

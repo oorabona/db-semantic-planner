@@ -17,6 +17,7 @@ import type {
 	DeleteIntent,
 	Dump,
 	DumpMeta,
+	InsertFromIntent,
 	InsertIntent,
 	ModelIR,
 	NamingConvention,
@@ -32,6 +33,7 @@ import {
 	compile,
 	compileDelete,
 	compileInsert,
+	compileInsertFrom,
 	compileRecursive,
 	compileSeparateInclude,
 	compileUpdate,
@@ -381,6 +383,22 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 		const schemaName = this.schemaName ?? options?.schemaName;
 
 		const compiled = compileInsert(intent, this.db, schemaName);
+		return {
+			sql: compiled.sql,
+			parameters: compiled.parameters as readonly unknown[],
+		};
+	}
+
+	/**
+	 * Compile an insert-from intent to executable SQL (NQL-ALIGN).
+	 */
+	compileInsertFrom(
+		intent: InsertFromIntent,
+		options?: CompileOptions,
+	): CompiledQuery {
+		const schemaName = this.schemaName ?? options?.schemaName;
+
+		const compiled = compileInsertFrom(intent, this.db, schemaName);
 		return {
 			sql: compiled.sql,
 			parameters: compiled.parameters as readonly unknown[],

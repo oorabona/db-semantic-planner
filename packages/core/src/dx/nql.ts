@@ -117,6 +117,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 	private readonly query: string;
 	private readonly schemaDefinition: unknown;
 	private readonly model: ModelIR;
+	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: Reserved for future schema-scoping support
 	private readonly _schemaName: string | undefined;
 	private readonly adapter: Adapter<unknown> | undefined;
 

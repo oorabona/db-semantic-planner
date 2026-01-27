@@ -462,4 +462,54 @@ describe('NqlParser', () => {
 			});
 		});
 	});
+
+	describe('PARSE-CASE: CASE expression parsing', () => {
+		it('parses simple CASE WHEN THEN END', () => {
+			const result = parseCst(
+				"products | select case when price > 100 then 'expensive' end",
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('parses CASE with ELSE clause', () => {
+			const result = parseCst(
+				"products | select case when price > 100 then 'expensive' else 'cheap' end",
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('parses CASE with multiple WHEN clauses', () => {
+			const result = parseCst(
+				"products | select case when price > 100 then 'high' when price > 50 then 'medium' else 'low' end",
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('parses CASE with alias', () => {
+			const result = parseCst(
+				"products | select case when active = true then 'yes' else 'no' end as status",
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('parses CASE with numeric results', () => {
+			const result = parseCst(
+				'products | select case when stock < 10 then 1 when stock < 50 then 2 else 3 end as priority',
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('parses CASE in mixed select', () => {
+			const result = parseCst(
+				"products | select name, price, case when price > 100 then 'high' else 'low' end as tier",
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+	});
 });

@@ -4419,6 +4419,122 @@ describe('CORE-006: Composite Key Support', () => {
 		});
 	});
 
+	// ============================================================================
+	// NQL-ALIGN Block 5: SEPARATE Subquery Optimization Tests
+	// ============================================================================
+
+	describe('compileSeparateInclude with subquery optimization (NQL-ALIGN Block 5)', () => {
+		it('should use subquery when no parentIds but sourceTable provided', () => {
+			const kysely = createTestKysely();
+
+			// Info with subquery optimization fields
+			const includeInfo = {
+				relationName: 'posts',
+				targetTable: 'posts',
+				foreignKey: 'userId',
+				sourceKey: 'id',
+				// NQL-ALIGN Block 5: Subquery optimization fields
+				sourceTable: 'users',
+			};
+
+			// Call with empty parentIds but with sourceTable
+			const compiled = compileSeparateInclude(includeInfo, [], kysely);
+
+			// Should generate subquery instead of WHERE false
+			expect(compiled.sql).not.toContain('false');
+			// Should have subquery pattern: IN (SELECT ...)
+			expect(compiled.sql).toContain('select');
+			expect(compiled.sql).toContain('from');
+			expect(compiled.sql).toContain('users');
+			// Target table should be posts
+			expect(compiled.sql).toContain('posts');
+		});
+
+		it('should include parent WHERE conditions in subquery', () => {
+			const kysely = createTestKysely();
+
+			// Create a proper model with getTable method for compileWhere
+			const schemaModel = schema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					active: 'boolean',
+				},
+				posts: {
+					id: { type: 'integer', primaryKey: true },
+					userId: ref('users'),
+					title: 'string',
+				},
+			});
+
+			// Info with subquery optimization and parent WHERE
+			const includeInfo = {
+				relationName: 'posts',
+				targetTable: 'posts',
+				foreignKey: 'userId',
+				sourceKey: 'id',
+				sourceTable: 'users',
+				parentWhere: {
+					kind: 'comparison' as const,
+					field: 'active',
+					operator: 'eq' as const,
+					value: true,
+				},
+			};
+
+			// Pass schemaModel.model (ModelIR) as 5th parameter for compileWhere
+			const compiled = compileSeparateInclude(
+				includeInfo,
+				[],
+				kysely,
+				undefined,
+				schemaModel.model,
+			);
+
+			// Should have parent WHERE condition in subquery
+			expect(compiled.sql).toContain('active');
+			// Parameter should include the WHERE value
+			expect(compiled.parameters).toContain(true);
+		});
+
+		it('should fall back to parentIds when no sourceTable provided', () => {
+			const kysely = createTestKysely();
+
+			// Standard info without subquery fields
+			const includeInfo = {
+				relationName: 'posts',
+				targetTable: 'posts',
+				foreignKey: 'userId',
+				sourceKey: 'id',
+				// No sourceTable = no subquery optimization
+			};
+
+			const parentIds = [1, 2, 3];
+			const compiled = compileSeparateInclude(includeInfo, parentIds, kysely);
+
+			// Should use parentIds directly (IN list)
+			expect(compiled.parameters).toContain(1);
+			expect(compiled.parameters).toContain(2);
+			expect(compiled.parameters).toContain(3);
+		});
+
+		it('should return empty result when no parentIds and no sourceTable', () => {
+			const kysely = createTestKysely();
+
+			// Info without subquery fields and empty parentIds
+			const includeInfo = {
+				relationName: 'posts',
+				targetTable: 'posts',
+				foreignKey: 'userId',
+				sourceKey: 'id',
+			};
+
+			const compiled = compileSeparateInclude(includeInfo, [], kysely);
+
+			// Should return WHERE false (empty result)
+			expect(compiled.sql).toContain('false');
+		});
+	});
+
 	describe('CTE Include Strategy (CLI-012)', () => {
 		// ARCH-005: Migrated to schema() + ref() API
 		const createCteTestSchema = () => {
@@ -4853,6 +4969,53 @@ describe('CORE-006: Composite Key Support', () => {
 				// Should use custom alias 'level' instead of 'depth'
 				expect(compiled.sql.toLowerCase()).toContain('level');
 			});
+		});
+	});
+
+	// ============================================================================
+	// NQL-ALIGN Block 3: Global Options Tests
+	// ============================================================================
+
+	describe('Global Options (NQL-ALIGN Block 3)', () => {
+		// Minimal schema for testing global options
+		const optionsTestSchema = schema({
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string',
+			},
+		}).model;
+
+		it('should accept global options in compile', () => {
+			// Arrange
+			const kysely = createTestKysely();
+			const intent: QueryIntent = { type: 'select', from: 'users' };
+			const planReport = plan(intent, optionsTestSchema);
+
+			// Act - compile with global options
+			const compiled = compile(planReport, optionsTestSchema, kysely, {
+				maxDepth: 15,
+				maxTableHops: 7,
+				maxNestedCase: 12,
+			});
+
+			// Assert - compilation succeeds with options
+			expect(compiled.sql).toContain('select');
+			expect(compiled.sql.toLowerCase()).toContain('from');
+		});
+
+		it('should use default values when options are not provided', () => {
+			// Arrange
+			const kysely = createTestKysely();
+			const intent: QueryIntent = { type: 'select', from: 'users' };
+			const planReport = plan(intent, optionsTestSchema);
+
+			// Act - compile without global options
+			const compiled = compile(planReport, optionsTestSchema, kysely);
+
+			// Assert - compilation succeeds with default values
+			// (defaults: maxDepth: 10, maxTableHops: 5, maxNestedCase: 10)
+			expect(compiled.sql).toContain('select');
+			expect(compiled.sql.toLowerCase()).toContain('from');
 		});
 	});
 });

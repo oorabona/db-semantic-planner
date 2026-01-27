@@ -64,6 +64,17 @@ export interface CompilerState {
 	 * Value: WhereIntent to apply as shared filter
 	 */
 	relationFilters?: Map<string, WhereIntent>;
+
+	// ============================================================
+	// Global Limits (NQL-ALIGN Block 3)
+	// ============================================================
+
+	/** Maximum depth for recursive CTE queries. @default 10 */
+	maxDepth?: number;
+	/** Maximum number of relation hops. @default 5 */
+	maxTableHops?: number;
+	/** Maximum nesting depth for CASE expressions. @default 10 */
+	maxNestedCase?: number;
 }
 
 // ============================================================================
@@ -87,6 +98,17 @@ export interface CompilerContext {
 	schemaName?: string;
 	/** Dispatcher for compiling nested WHERE clauses (recursive handlers) */
 	compileWhere?: WhereDispatcher;
+
+	// ============================================================
+	// Global Limits (NQL-ALIGN Block 3)
+	// ============================================================
+
+	/** Maximum depth for recursive CTE queries. @default 10 */
+	maxDepth?: number;
+	/** Maximum number of relation hops. @default 5 */
+	maxTableHops?: number;
+	/** Maximum nesting depth for CASE expressions. @default 10 */
+	maxNestedCase?: number;
 }
 
 // ============================================================================

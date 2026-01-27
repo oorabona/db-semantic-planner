@@ -6,6 +6,7 @@
 
 import type {
 	DeleteIntent,
+	InsertFromIntent,
 	InsertIntent,
 	UpdateIntent,
 	UpsertIntent,
@@ -44,6 +45,63 @@ export function compileInsert(
 	}
 
 	return query.compile();
+}
+
+/**
+ * Compile an InsertFromIntent into a Kysely CompiledQuery.
+ * Implements INSERT INTO target SELECT ... FROM source pattern.
+ * DX-026: Supports RETURNING clause.
+ */
+export function compileInsertFrom(
+	intent: InsertFromIntent,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
+	kysely: Kysely<any>,
+	schemaName?: string,
+): CompiledQuery {
+	const targetTable = schemaName
+		? `${schemaName}.${intent.table}`
+		: intent.table;
+	const sourceTable = schemaName
+		? `${schemaName}.${intent.source}`
+		: intent.source;
+
+	// Build the SELECT query for source
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+	let selectQuery: any = kysely.selectFrom(sourceTable);
+
+	// Select specified columns or all (*)
+	if (intent.columns && intent.columns.length > 0) {
+		selectQuery = selectQuery.select(intent.columns as string[]);
+	} else {
+		selectQuery = selectQuery.selectAll();
+	}
+
+	// Add WHERE clause if present
+	if (intent.where) {
+		selectQuery = addMutationWhere(selectQuery, intent.where);
+	}
+
+	// Add LIMIT if present
+	if (intent.limit !== undefined) {
+		selectQuery = selectQuery.limit(intent.limit);
+	}
+
+	// Build INSERT INTO ... SELECT query
+	// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+	let insertQuery: any = kysely.insertInto(targetTable);
+
+	if (intent.columns && intent.columns.length > 0) {
+		insertQuery = insertQuery.columns(intent.columns as string[]);
+	}
+
+	insertQuery = insertQuery.expression(selectQuery);
+
+	// DX-026: Add RETURNING clause if specified
+	if (intent.returning && intent.returning.length > 0) {
+		insertQuery = insertQuery.returning(intent.returning as string[]);
+	}
+
+	return insertQuery.compile();
 }
 
 /**

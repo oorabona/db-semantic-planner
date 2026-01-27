@@ -20,6 +20,7 @@ import type {
 	DeleteIntent,
 	Dump,
 	DumpMeta,
+	InsertFromIntent,
 	InsertIntent,
 	ModelIR,
 	NamingConvention,
@@ -50,6 +51,7 @@ import {
 	compile,
 	compileDelete,
 	compileInsert,
+	compileInsertFrom,
 	compileRecursive,
 	compileSeparateInclude,
 	compileUpdate,
@@ -356,6 +358,14 @@ export class CompileOnlyAdapter implements Adapter<unknown> {
 	compileInsert(intent: InsertIntent, options?: CompileOptions): CompiledQuery {
 		const schemaName = this._schemaName ?? options?.schemaName;
 		return compileInsert(intent, this.kysely, schemaName);
+	}
+
+	compileInsertFrom(
+		intent: InsertFromIntent,
+		options?: CompileOptions,
+	): CompiledQuery {
+		const schemaName = this._schemaName ?? options?.schemaName;
+		return compileInsertFrom(intent, this.kysely, schemaName);
 	}
 
 	compileUpdate(intent: UpdateIntent, options?: CompileOptions): CompiledQuery {

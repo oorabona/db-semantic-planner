@@ -282,6 +282,31 @@ interface OrmOptionsBase<DB = unknown> {
 	readonly strictMode?: boolean;
 	readonly relationHints?: RelationHints;
 	readonly adapter?: Adapter<DB>;
+
+	// ============================================================
+	// Global Limits (NQL-ALIGN Block 3)
+	// ============================================================
+
+	/**
+	 * Maximum depth for recursive CTE queries.
+	 * Prevents infinite recursion in tree/graph traversals.
+	 * @default 10
+	 */
+	readonly maxDepth?: number;
+
+	/**
+	 * Maximum number of relation hops in a single query.
+	 * Limits paths like `user.posts.comments.author.profile`.
+	 * @default 5
+	 */
+	readonly maxTableHops?: number;
+
+	/**
+	 * Maximum nesting depth for CASE expressions.
+	 * Prevents overly complex conditional logic.
+	 * @default 10
+	 */
+	readonly maxNestedCase?: number;
 	/**
 	 * Default include strategy for relations when set to 'auto'.
 	 * - 'join': Use JOIN (single query, database optimizes) - DEFAULT

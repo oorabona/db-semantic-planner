@@ -6,6 +6,7 @@
 import { registerExpressionHandler } from '../../registry.js';
 import type { ExpressionHandler } from '../../types.js';
 import { aggregateHandler } from './aggregate.js';
+import { caseHandler } from './case.js';
 import { coalesceHandler } from './coalesce.js';
 import { columnHandler } from './column.js';
 import { columnAliasHandler } from './columnAlias.js';
@@ -53,6 +54,10 @@ export function registerExpressionHandlers(): void {
 		'pseudoColumn',
 		pseudoColumnHandler as unknown as ExpressionHandler,
 	);
+	registerExpressionHandler(
+		'case',
+		caseHandler as unknown as ExpressionHandler,
+	);
 }
 
 // ============================================================================
@@ -60,6 +65,7 @@ export function registerExpressionHandlers(): void {
 // ============================================================================
 
 export { aggregateHandler } from './aggregate.js';
+export { caseHandler } from './case.js';
 export { coalesceHandler } from './coalesce.js';
 export { columnHandler } from './column.js';
 export { columnAliasHandler } from './columnAlias.js';

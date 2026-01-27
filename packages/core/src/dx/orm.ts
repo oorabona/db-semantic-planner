@@ -134,6 +134,31 @@ export interface SimplifiedOrmOptions<
 	 * Optional dialect capabilities for strategy selection.
 	 */
 	readonly dialectCapabilities?: DialectCapabilities;
+
+	// ============================================================
+	// Global Limits (NQL-ALIGN Block 3)
+	// ============================================================
+
+	/**
+	 * Maximum depth for recursive CTE queries.
+	 * Prevents infinite recursion in tree/graph traversals.
+	 * @default 10
+	 */
+	readonly maxDepth?: number;
+
+	/**
+	 * Maximum number of relation hops in a single query.
+	 * Limits paths like `user.posts.comments.author.profile`.
+	 * @default 5
+	 */
+	readonly maxTableHops?: number;
+
+	/**
+	 * Maximum nesting depth for CASE expressions.
+	 * Prevents overly complex conditional logic.
+	 * @default 10
+	 */
+	readonly maxNestedCase?: number;
 }
 
 /**

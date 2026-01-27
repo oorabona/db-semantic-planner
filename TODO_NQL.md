@@ -311,3 +311,58 @@ Discovered while validating `examples/*.dbsp` files:
 | `select distinct` (no columns) | ❌ Not parsed | Use `select distinct *` or explicit columns |
 
 **Priority:** LOW — rare use cases, workarounds exist
+
+---
+
+## 📋 BACKLOG: CASE Expression Enhancements (2026-01-27)
+
+Discovered during NQL-ALIGN Block 2 implementation. Current CASE supports "Searched CASE" only.
+
+### Deferred Features
+
+| Feature | Syntax | Priority | Effort |
+|---------|--------|----------|--------|
+| Simple CASE | `case status when 'active' then 1 when 'inactive' then 0 end` | LOW | M |
+| Nested CASE | `case when x then case when y then a else b end else c end` | LOW | S |
+| Column in THEN/ELSE | `case when active then name else 'N/A' end` | MEDIUM | S |
+| Function in THEN/ELSE | `case when x then upper(name) else name end` | MEDIUM | M |
+| CASE in WHERE | `where case when x then y else z end = value` | LOW | M |
+
+### What's Already Working (v2.1)
+
+- ✅ Searched CASE: `case when condition then result end`
+- ✅ Multiple WHEN clauses
+- ✅ ELSE clause
+- ✅ All comparison operators in conditions (=, !=, <, >, <=, >=, like)
+- ✅ Boolean operators in conditions (and, or, not)
+- ✅ Alias: `case ... end as alias`
+- ✅ String/number literals in THEN/ELSE
+
+**Note:** Column refs and functions in THEN/ELSE may already work via `expression` rule — needs testing.
+
+---
+
+## ✅ NQL-ALIGN: Spec/Implementation Alignment (2026-01-27)
+
+**Spec:** docs/plans/NQL-ALIGN-SPEC.md
+**Status:** ✅ COMPLETE
+**Divergences:** docs/specs/NQL-DIVERGENCES.md
+
+### Completed Blocks
+
+| Block | Description | Status |
+|-------|-------------|--------|
+| 1 | CASE Expression Lexer + AST | ✅ |
+| 2 | CASE Compiler + INSERT FROM | ✅ |
+| 3 | Global Limits (maxDepth, maxTableHops, maxNestedCase) | ✅ |
+| 4 | Relation Alias (semantic table names) | ✅ |
+| 5 | SEPARATE Optimization (subquery strategy) | ✅ |
+| 6 | Warnings + Documentation | ✅ |
+
+### Deferred Features
+
+| Feature | Reason | Documented |
+|---------|--------|------------|
+| Scoped traversal `[N]` | Complex CTE modification | ✅ NQL-DIVERGENCES.md |
+| HAVING keyword | WHERE after GROUP BY works | ✅ NQL-DIVERGENCES.md |
+| count(distinct col) | Parser limitation | ✅ NQL-DIVERGENCES.md |
