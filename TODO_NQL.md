@@ -307,10 +307,10 @@ Discovered while validating `examples/*.dbsp` files:
 
 | Syntax | Status | Workaround |
 |--------|--------|------------|
-| `count(distinct col)` | ❌ Not parsed | Use `select distinct col \| select count(*)` |
+| `count(distinct col)` | ✅ Implemented (2026-01-27, NQL-DIVERGE) | — |
 | `select distinct` (no columns) | ❌ Not parsed | Use `select distinct *` or explicit columns |
 
-**Priority:** LOW — rare use cases, workarounds exist
+**Priority:** LOW — `select distinct` without columns is the only remaining limitation
 
 ---
 
@@ -363,6 +363,6 @@ Discovered during NQL-ALIGN Block 2 implementation. Current CASE supports "Searc
 
 | Feature | Reason | Documented |
 |---------|--------|------------|
-| Scoped traversal `[N]` | Complex CTE modification | ✅ NQL-DIVERGENCES.md |
+| ~~Scoped traversal `[N]`~~ | ✅ Implemented (2026-01-27, NQL-DIVERGE) | ✅ NQL-DIVERGENCES.md |
 | HAVING keyword | WHERE after GROUP BY works | ✅ NQL-DIVERGENCES.md |
-| count(distinct col) | Parser limitation | ✅ NQL-DIVERGENCES.md |
+| ~~count(distinct col)~~ | ✅ Implemented (2026-01-27, NQL-DIVERGE) | ✅ NQL-DIVERGENCES.md |

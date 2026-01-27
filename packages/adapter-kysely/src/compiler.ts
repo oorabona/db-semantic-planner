@@ -115,10 +115,10 @@ export interface InternalCompileOptions {
 // ============================================================================
 
 /**
- * Metadata for a separate include query.
- * Used when planner decides include-strategy: 'separate' for hasMany relations.
+ * Metadata for a subquery include query.
+ * Used when planner decides include-strategy: 'subquery' for hasMany relations.
  */
-export interface SeparateIncludeInfo {
+export interface SubqueryIncludeInfo {
 	/** Name of the relation being included */
 	relationName: string;
 	/** Target table to fetch from */
@@ -146,28 +146,28 @@ export interface SeparateIncludeInfo {
 }
 
 /**
- * Result of compiling a query with separate includes.
- * Returned by compileWithIncludes() when there are includes with strategy 'separate'.
+ * Result of compiling a query with subquery includes.
+ * Returned by compileWithIncludes() when there are includes with strategy 'subquery'.
  */
 export interface CompileResultWithIncludes {
 	/** The main query (includes any JOIN includes) */
 	main: CompiledQuery;
-	/** Metadata for separate include queries (empty if all includes use JOIN) */
-	separateIncludes: SeparateIncludeInfo[];
+	/** Metadata for subquery include queries (empty if all includes use JOIN) */
+	subqueryIncludes: SubqueryIncludeInfo[];
 }
 
 /**
- * Compile a separate include query with the given parent IDs.
+ * Compile a subquery include query with the given parent IDs.
  * This is called by the executor after running the main query.
  *
- * @param info - Separate include metadata from compileWithIncludes()
+ * @param info - Subquery include metadata from compileWithIncludes()
  * @param parentIds - IDs from the main query result
  * @param kysely - Kysely instance
  * @param schemaName - Optional schema name for multi-tenant
  * @returns Compiled query for fetching the related records
  */
-export function compileSeparateInclude(
-	info: SeparateIncludeInfo,
+export function compileSubqueryInclude(
+	info: SubqueryIncludeInfo,
 	parentIds: readonly unknown[],
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any for database schema
 	kysely: Kysely<any>,
@@ -176,9 +176,9 @@ export function compileSeparateInclude(
 	coreCapabilities?: CoreDialectCapabilities,
 	dialect?: string,
 ): CompiledQuery {
-	// NQL-ALIGN Block 5: Subquery optimization
-	// When no parentIds provided but we have sourceTable info, use subquery instead of 2 queries
-	const useSubquery = parentIds.length === 0 && info.sourceTable !== undefined;
+	// Always prefer IN (SELECT ...) over IN (values) when sourceTable is available.
+	// This avoids a 2-round-trip pattern and lets the DB optimizer work with the full query.
+	const useSubquery = info.sourceTable !== undefined;
 
 	if (parentIds.length === 0 && !useSubquery) {
 		// Return an empty result query - no parent IDs and no subquery info
@@ -594,26 +594,26 @@ export function compileRangeExpression(
 
 /**
  * Add simple WHERE conditions (non-relational) to a query.
- * Used for separate include queries.
+ * Used for subquery include queries.
  *
  * @param coreCapabilities - Optional dialect capabilities for feature validation
  * @param dialect - Optional dialect name for error messages
  */
 
 /**
- * Collect separate includes from intent based on planner decisions.
+ * Collect subquery includes from intent based on planner decisions.
  */
-function collectSeparateIncludes(
+function collectSubqueryIncludes(
 	includes: readonly IncludeIntent[] | undefined,
 	plan: PlanReport,
 	model: ModelIR,
 	sourceTable: string,
-): SeparateIncludeInfo[] {
+): SubqueryIncludeInfo[] {
 	if (!includes || includes.length === 0) {
 		return [];
 	}
 
-	const result: SeparateIncludeInfo[] = [];
+	const result: SubqueryIncludeInfo[] = [];
 
 	for (const include of includes) {
 		const relationName = include.relation;
@@ -626,8 +626,8 @@ function collectSeparateIncludes(
 				d.context?.relation === relationName,
 		);
 
-		// If planner decided 'separate', collect the info
-		if (decision?.choice === 'separate') {
+		// If planner decided 'subquery', collect the info
+		if (decision?.choice === 'subquery') {
 			// Get relation definition from model
 			const relation = model.getRelation(`${sourceTable}.${relationName}`);
 			if (!relation) {
@@ -655,8 +655,8 @@ function collectSeparateIncludes(
 				foreignKey = unwrapSingletonArray(fkCols);
 				sourceKey = unwrapSingletonArray(sourcePkCols); // Source table's PK (supports composite)
 			} else {
-				// belongsTo: FK is in source table (rare for 'separate', but handle it)
-				// For separate include, we need target's PK
+				// belongsTo: FK is in source table (rare for 'subquery', but handle it)
+				// For subquery include, we need target's PK
 				foreignKey = unwrapSingletonArray(targetPkCols); // Target table's PK (supports composite)
 				const skCols = normalizeForeignKey(
 					relation.foreignKey,
@@ -685,14 +685,14 @@ function collectSeparateIncludes(
 }
 
 /**
- * Compile a PlanReport with full support for separate includes.
- * Returns both the main query and metadata for separate include queries.
+ * Compile a PlanReport with full support for subquery includes.
+ * Returns both the main query and metadata for subquery include queries.
  *
  * @param plan - The plan report from the planner
  * @param model - The model IR
  * @param kysely - Kysely instance
  * @param schemaNameOrOptions - Schema name or options
- * @returns Compile result with main query and separate includes info
+ * @returns Compile result with main query and subquery includes info
  */
 export function compileWithIncludes(
 	plan: PlanReport,
@@ -704,8 +704,8 @@ export function compileWithIncludes(
 	// Compile the main query (uses existing compile function)
 	const main = compile(plan, model, kysely, schemaNameOrOptions);
 
-	// Collect separate includes
-	const separateIncludes = collectSeparateIncludes(
+	// Collect subquery includes
+	const subqueryIncludes = collectSubqueryIncludes(
 		plan.intent.include,
 		plan,
 		model,
@@ -714,7 +714,7 @@ export function compileWithIncludes(
 
 	return {
 		main,
-		separateIncludes,
+		subqueryIncludes,
 	};
 }
 
@@ -3534,7 +3534,7 @@ function buildCompositeKeyCorrelation(
 
 /**
  * Unwrap single-element arrays to strings for backward compatibility.
- * Used by SeparateIncludeInfo to maintain the original API contract.
+ * Used by SubqueryIncludeInfo to maintain the original API contract.
  */
 function unwrapSingletonArray(
 	value: readonly string[],

@@ -832,7 +832,7 @@ function inferRelationsFromForeignKeys(
 				fk.sourceColumns.length === 1 ? firstSourceCol : fk.sourceColumns,
 			cardinality: 'many',
 			optionality: 'optional',
-			includeStrategy: 'separate', // Use 'separate' for hasMany to avoid row explosion
+			includeStrategy: 'subquery', // Use 'subquery' for hasMany to avoid row explosion
 			filterStrategy: 'exists',
 			joinDefault: 'left',
 		};

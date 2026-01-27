@@ -5,10 +5,10 @@
  * Provides SQL compilation and query execution using Kysely.
  */
 
-// Re-export types from core (SeparateIncludeInfo, CompileResultWithIncludes)
+// Re-export types from core (SubqueryIncludeInfo, CompileResultWithIncludes)
 export type {
 	CompileResultWithIncludes,
-	SeparateIncludeInfo,
+	SubqueryIncludeInfo,
 } from '@dbsp/core';
 // CompileOnlyAdapter (DX-031: compile-only adapter for testing and REPL)
 export {
@@ -23,7 +23,7 @@ export {
 	compileDelete,
 	compileInsert,
 	compileRecursive,
-	compileSeparateInclude,
+	compileSubqueryInclude,
 	compileUpdate,
 	// DX-026: Upsert support
 	compileUpsert,

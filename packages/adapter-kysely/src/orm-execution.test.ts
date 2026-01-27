@@ -1008,14 +1008,14 @@ describe('Execution Layer', () => {
 		// These tests use SEPARATE strategy to test multi-query hydration
 		// JOIN is now the default, but SEPARATE is still supported via defaultIncludeStrategy
 		// SKIPPED: defaultIncludeStrategy removed from SimplifiedOrmOptions in ARCH-006
-		// TODO: Add 'subquery' strategy (IN SELECT) as better alternative to 'separate'
+		// TODO: Add 'subquery' strategy (IN SELECT) as better alternative to 'subquery'
 		// See: https://github.com/oorabona/db-semantic-planner/issues/TBD
-		it.skip('hydrates hasMany relation with separate query', async () => {
+		it.skip('hydrates hasMany relation with subquery query', async () => {
 			const orm = createOrm({
 				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 				// @ts-expect-error defaultIncludeStrategy removed in ARCH-006
-				defaultIncludeStrategy: 'separate',
+				defaultIncludeStrategy: 'subquery',
 			});
 			const results = (await orm
 				.select('users')
@@ -1048,7 +1048,7 @@ describe('Execution Layer', () => {
 				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 				// @ts-expect-error defaultIncludeStrategy removed in ARCH-006
-				defaultIncludeStrategy: 'separate',
+				defaultIncludeStrategy: 'subquery',
 			});
 			const results = (await orm
 				.select('users')
@@ -1089,7 +1089,7 @@ describe('Execution Layer', () => {
 				schema: testSchema,
 				adapter: createKyselyAdapter(db),
 				// @ts-expect-error defaultIncludeStrategy removed in ARCH-006
-				defaultIncludeStrategy: 'separate',
+				defaultIncludeStrategy: 'subquery',
 			});
 			const result = (await orm
 				.select('users')
@@ -1140,7 +1140,7 @@ describe('Execution Layer', () => {
 				schema: testSchema,
 				adapter: createKyselyAdapter(testDb),
 				// @ts-expect-error defaultIncludeStrategy removed in ARCH-006
-				defaultIncludeStrategy: 'separate',
+				defaultIncludeStrategy: 'subquery',
 			});
 
 			const results = (await orm

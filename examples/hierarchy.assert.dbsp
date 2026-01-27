@@ -1,0 +1,35 @@
+# Assertions for hierarchy.dbsp
+# Validates pseudo-column traversal with custom roles
+
+# ─────────────────────────────────────────
+# Query 0: employees | select name, title, manager.name
+# Single-hop parent traversal using custom role "manager"
+# ─────────────────────────────────────────
+--- query: 0
+success: true
+sql.equals: select "employees"."name", "employees"."title", "manager_1"."name" as "manager.name" from "employees" as "employees" left join "employees" as "manager_1" on "employees"."manager_id" = "manager_1"."id"
+
+# ─────────────────────────────────────────
+# Query 1: employees | select name, manager.name, manager.manager.name
+# Chained traversal — multiple LEFT JOINs for grandparent access
+# ─────────────────────────────────────────
+--- query: 1
+success: true
+sql.equals: select "employees"."name", "manager_1"."name" as "manager.name", "manager_3"."name" as "manager.manager.name" from "employees" as "employees" left join "employees" as "manager_1" on "employees"."manager_id" = "manager_1"."id" left join "employees" as "manager_2" on "employees"."manager_id" = "manager_2"."id" left join "employees" as "manager_3" on "manager_2"."manager_id" = "manager_3"."id"
+
+# ─────────────────────────────────────────
+# Query 2: employees | select name, salary, manager.name, manager.title
+# Mix regular columns with multiple traversal fields
+# ─────────────────────────────────────────
+--- query: 2
+success: true
+sql.equals: select "employees"."name", "employees"."salary", "manager_1"."name" as "manager.name", "manager_2"."title" as "manager.title" from "employees" as "employees" left join "employees" as "manager_1" on "employees"."manager_id" = "manager_1"."id" left join "employees" as "manager_2" on "employees"."manager_id" = "manager_2"."id"
+
+# ─────────────────────────────────────────
+# Query 3: employees | where managerId = null | select name, title
+# Top-level employees (no manager — CEO)
+# ─────────────────────────────────────────
+--- query: 3
+success: true
+sql.equals: select "employees"."name", "employees"."title" from "employees" as "employees" where "employees"."manager_id" = $1
+params.length: 1

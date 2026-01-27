@@ -1,47 +1,49 @@
 /**
  * @module compiler/handlers/expression/pseudoColumn
- * Handler for pseudo-column expressions - self-referential traversal (parent, child, ascendant, descendant).
+ * Handler for pseudo-column expressions - self-referential traversal.
  *
- * V1.0 Implementation:
- * - Single-hop traversal (parent, child): Direct JOIN to same table
+ * Supports:
+ * - Single-hop traversal: parent.name, child.department, manager.title
+ * - Chained traversal: parent.parent.name, child.child.role
+ * - Custom roles via parentRole/childRole schema configuration
  * - Recursive traversal (ascendant, descendant): NOT YET SUPPORTED (requires CTE)
  *
  * Per SPEC-001: Uses set-based CTE strategy for scalar projection in SELECT.
  */
 
-import type { PseudoColumnExpressionIntent } from '@dbsp/core';
+import type {
+	PseudoColumnExpressionIntent,
+	PseudoColumnMetadata,
+} from '@dbsp/core';
 import type { ExpressionHandler } from '../../types.js';
 
 /**
  * Compiles a pseudo-column expression for self-referential traversal.
  *
- * For V1.0, this implements simple parent/child traversal using self-joins.
- * Recursive traversal (ascendant/descendant) requires CTE generation and is
- * deferred to a future version.
+ * Generates iterative LEFT JOINs for each traversal step:
  *
- * @example
+ * @example Single-hop
  * { kind: 'pseudoColumn', traversal: 'parent', targetColumn: 'name', as: 'parent.name' }
- * → SELECT p1."name" AS "parent.name" FROM employees t0
- *   LEFT JOIN employees p1 ON t0.parentId = p1.id
+ * → SELECT p0."name" AS "parent.name" FROM employees t0
+ *   LEFT JOIN employees p0 ON t0.parentId = p0.id
  *
- * @example
- * { kind: 'pseudoColumn', traversal: 'child', targetColumn: 'name', as: 'child.name' }
- * → SELECT c1."name" AS "child.name" FROM employees t0
- *   LEFT JOIN employees c1 ON t0.id = c1.parentId
+ * @example Custom role
+ * { kind: 'pseudoColumn', traversal: 'manager', targetColumn: 'name', as: 'manager.name' }
+ * → SELECT p0."name" AS "manager.name" FROM employees t0
+ *   LEFT JOIN employees p0 ON t0.managerId = p0.id
+ *
+ * @example Chained multi-hop
+ * { kind: 'pseudoColumn', traversal: 'parent', traversals: ['parent', 'parent'], targetColumn: 'name', as: 'parent.parent.name' }
+ * → SELECT p1."name" AS "parent.parent.name" FROM employees t0
+ *   LEFT JOIN employees p0 ON t0.parentId = p0.id
+ *   LEFT JOIN employees p1 ON p0.parentId = p1.id
  */
 export const pseudoColumnHandler: ExpressionHandler<
 	PseudoColumnExpressionIntent
 > = (ctx, query, intent, currentAlias) => {
-	const { traversal, targetColumn, as: alias, role } = intent;
-
-	// V1.0: Only parent/child supported in SELECT
-	// ascendant/descendant require CTE which we'll add in V1.1
-	if (traversal === 'ascendant' || traversal === 'descendant') {
-		throw new Error(
-			`Recursive traversal '${traversal}' in SELECT is not yet supported. ` +
-				`Use WHERE clause filtering instead, or wait for V1.1.`,
-		);
-	}
+	const { targetColumn, as: alias, role } = intent;
+	const traversals = intent.traversals ?? [intent.traversal];
+	const firstTraversal = traversals[0] ?? intent.traversal;
 
 	// Get the root table from context
 	const rootTable = ctx.plan.rootTable;
@@ -53,37 +55,30 @@ export const pseudoColumnHandler: ExpressionHandler<
 
 	// Find the self-referential FK for this traversal
 	const pseudoColumns = tableDef.pseudoColumns ?? [];
-	const matchingPseudo = pseudoColumns.find((pc) => {
-		// For single-FK tables, 'parent' role matches the default
-		// For multi-FK, match by explicit role
-		if (role) {
-			return (
-				pc.parentRole === role ||
-				pc.childRole === role ||
-				pc.parentRole === traversal ||
-				pc.childRole === traversal
-			);
-		}
-		// Default: match parent/child traversal to the default pseudo-column
-		return pc.parentRole === 'parent' || pc.parentRole === traversal;
-	});
+	const matchingPseudo = findMatchingPseudo(
+		pseudoColumns,
+		firstTraversal,
+		role,
+	);
 
 	if (!matchingPseudo) {
 		throw new Error(
-			`No self-referential foreign key found for '${traversal}' traversal on table '${rootTable}'. ` +
+			`No self-referential foreign key found for '${traversals[0]}' traversal on table '${rootTable}'. ` +
 				`Ensure the table has a self-referencing FK defined in the schema.`,
 		);
 	}
 
-	// Generate unique alias for the joined table
-	const joinAlias = `${traversal}_${ctx.state.aliasCounter++}`;
+	// Validate: no recursive traversals in chained mode
+	// Use model-configured keywords instead of hardcoded strings
+	for (const t of traversals) {
+		if (isRecursiveKeyword(t, matchingPseudo)) {
+			throw new Error(
+				`Recursive traversal '${t}' in SELECT is not yet supported. ` +
+					`Use WHERE clause filtering instead, or wait for V1.1.`,
+			);
+		}
+	}
 
-	// Get schema-qualified table name
-	const targetTableName = ctx.schemaName
-		? `${ctx.schemaName}.${rootTable}`
-		: rootTable;
-
-	// Get FK column and PK column names
 	const fkColumn = matchingPseudo.foreignKeyColumn;
 	const pkColumn = tableDef.primaryKey;
 
@@ -93,27 +88,99 @@ export const pseudoColumnHandler: ExpressionHandler<
 		);
 	}
 
-	// Build the JOIN condition based on traversal direction
-	// parent: current.fkColumn = parent.pkColumn (go UP the tree)
-	// child: current.pkColumn = child.fkColumn (go DOWN the tree)
-	const joinedQuery =
-		traversal === 'parent'
-			? // Going UP: join on current's FK pointing to parent's PK
-				query.leftJoin(
+	const targetTableName = ctx.schemaName
+		? `${ctx.schemaName}.${rootTable}`
+		: rootTable;
+
+	// Iteratively generate LEFT JOINs for each traversal step
+	let currentQuery = query;
+	let prevAlias = currentAlias;
+
+	for (const traversal of traversals) {
+		const joinAlias = `${traversal}_${ctx.state.aliasCounter++}`;
+
+		// Determine JOIN direction from model config:
+		// - parentRole match → go UP (FK → PK): current.fk = joined.pk
+		// - childRole match → go DOWN (PK → FK): current.pk = joined.fk
+		const isParentDirection = isParentTraversal(traversal, matchingPseudo);
+
+		currentQuery = isParentDirection
+			? currentQuery.leftJoin(
 					`${targetTableName} as ${joinAlias}`,
-					`${currentAlias}.${fkColumn}`,
+					`${prevAlias}.${fkColumn}`,
 					`${joinAlias}.${pkColumn}`,
 				)
-			: // traversal === 'child'
-				// Going DOWN: join on parent's PK matching child's FK
-				query.leftJoin(
+			: currentQuery.leftJoin(
 					`${targetTableName} as ${joinAlias}`,
-					`${currentAlias}.${pkColumn}`,
+					`${prevAlias}.${pkColumn}`,
 					`${joinAlias}.${fkColumn}`,
 				);
 
-	// Select the target column from the joined table with the specified alias
-	return joinedQuery.select((eb) =>
-		eb.ref(`${joinAlias}.${targetColumn}`).as(alias),
+		prevAlias = joinAlias;
+	}
+
+	// Select the target column from the last joined alias
+	return currentQuery.select((eb) =>
+		eb.ref(`${prevAlias}.${targetColumn}`).as(alias),
 	);
 };
+
+/**
+ * Find the matching pseudo-column metadata for a traversal keyword.
+ */
+export function findMatchingPseudo(
+	pseudoColumns: readonly PseudoColumnMetadata[],
+	traversalKeyword: string,
+	role?: string,
+): PseudoColumnMetadata | undefined {
+	const keyword = traversalKeyword.toLowerCase();
+
+	return pseudoColumns.find((pc) => {
+		// If explicit role is provided, match against it
+		if (role) {
+			return (
+				pc.parentRole.toLowerCase() === role.toLowerCase() ||
+				pc.childRole.toLowerCase() === role.toLowerCase() ||
+				pc.parentRole.toLowerCase() === keyword ||
+				pc.childRole.toLowerCase() === keyword
+			);
+		}
+		// Match the traversal keyword against any configured role
+		return (
+			pc.parentRole.toLowerCase() === keyword ||
+			pc.childRole.toLowerCase() === keyword ||
+			pc.ascendantKeyword.toLowerCase() === keyword ||
+			pc.descendantKeyword.toLowerCase() === keyword
+		);
+	});
+}
+
+/**
+ * Check if a traversal keyword is a recursive keyword (ascendant/descendant).
+ * Uses model-configured ascendantKeyword/descendantKeyword instead of hardcoded values.
+ */
+export function isRecursiveKeyword(
+	traversal: string,
+	pseudo: PseudoColumnMetadata,
+): boolean {
+	const t = traversal.toLowerCase();
+	return (
+		t === pseudo.ascendantKeyword.toLowerCase() ||
+		t === pseudo.descendantKeyword.toLowerCase()
+	);
+}
+
+/**
+ * Determine if a traversal is in the "parent" direction (upward: FK → PK).
+ * Uses model-configured parentRole/ascendantKeyword.
+ */
+export function isParentTraversal(
+	traversal: string,
+	pseudo: PseudoColumnMetadata,
+): boolean {
+	const t = traversal.toLowerCase();
+	return (
+		t === pseudo.parentRole.toLowerCase() ||
+		t === pseudo.ascendantKeyword.toLowerCase()
+	);
+}

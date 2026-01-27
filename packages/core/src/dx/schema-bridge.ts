@@ -89,7 +89,7 @@ export type GeneratedRelationKind = 'belongsTo' | 'hasMany' | 'manyToMany';
  */
 export type GeneratedIncludeStrategy =
 	| 'join'
-	| 'separate'
+	| 'subquery'
 	| 'cte'
 	| 'lateral'
 	| 'json_agg'
@@ -812,7 +812,7 @@ const TablesDefinitionSchema = v.record(v.string(), TableDefinitionSchema);
  * Include strategy schema for relations
  */
 const IncludeStrategySchema = v.optional(
-	v.picklist(['join', 'separate', 'cte', 'lateral', 'json_agg', 'auto']),
+	v.picklist(['join', 'subquery', 'cte', 'lateral', 'json_agg', 'auto']),
 );
 
 const BelongsToRelationSchema = v.object({

@@ -873,7 +873,7 @@ describe('Q4: Filter strategy contract enforcement', () => {
 /**
  * Q5: Verify planner include-strategy decisions are respected by compiler
  * - belongsTo (cardinality: one) → default: 'join' (LEFT JOIN)
- * - hasMany (cardinality: many) → default: 'separate' (follow-up queries)
+ * - hasMany (cardinality: many) → default: 'subquery' (follow-up queries)
  */
 describe('Q5: Include strategy contract enforcement', () => {
 	const kysely = createTestKysely();
@@ -952,16 +952,16 @@ describe('Q5: Include strategy contract enforcement', () => {
 			};
 
 			const planReport = plan(intent, includeContractSchema, {
-				defaultIncludeStrategy: 'separate',
+				defaultIncludeStrategy: 'subquery',
 			});
 			const compiled = compile(planReport, includeContractSchema, kysely);
 
-			// Verify decision is 'separate'
+			// Verify decision is 'subquery'
 			const includeDecision = planReport.decisions.find(
 				(d) => d.type === 'include-strategy' && d.context?.relation === 'posts',
 			);
 			expect(includeDecision).toBeDefined();
-			expect(includeDecision?.choice).toBe('separate');
+			expect(includeDecision?.choice).toBe('subquery');
 
 			// Main query should NOT have JOIN on posts
 			expect(compiled.sql.toLowerCase()).not.toContain('join');
@@ -977,7 +977,7 @@ describe('Q5: Include strategy contract enforcement', () => {
 			};
 
 			const planReport = plan(intent, includeContractSchema, {
-				defaultIncludeStrategy: 'separate',
+				defaultIncludeStrategy: 'subquery',
 			});
 			const result = compileWithIncludes(
 				planReport,
@@ -985,11 +985,11 @@ describe('Q5: Include strategy contract enforcement', () => {
 				kysely,
 			);
 
-			// Should have separate include info
-			expect(result.separateIncludes).toHaveLength(1);
-			expect(result.separateIncludes[0]?.relationName).toBe('posts');
-			expect(result.separateIncludes[0]?.targetTable).toBe('posts');
-			expect(result.separateIncludes[0]?.foreignKey).toBe('authorId');
+			// Should have subquery include info
+			expect(result.subqueryIncludes).toHaveLength(1);
+			expect(result.subqueryIncludes[0]?.relationName).toBe('posts');
+			expect(result.subqueryIncludes[0]?.targetTable).toBe('posts');
+			expect(result.subqueryIncludes[0]?.foreignKey).toBe('authorId');
 		});
 	});
 

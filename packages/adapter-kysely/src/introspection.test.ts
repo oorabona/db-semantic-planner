@@ -631,7 +631,7 @@ describe('introspection', () => {
 			const result = await introspect(db, { _foreignKeysForTesting: fks });
 
 			const hasMany = result.getRelation('users.posts');
-			expect(hasMany?.includeStrategy).toBe('separate');
+			expect(hasMany?.includeStrategy).toBe('subquery');
 		});
 	});
 

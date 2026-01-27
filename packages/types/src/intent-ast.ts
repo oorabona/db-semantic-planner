@@ -236,14 +236,14 @@ export interface AggregateExpressionIntent {
 }
 
 /**
- * Pseudo-column traversal types for self-referential relations.
+ * Pseudo-column traversal keyword for self-referential relations.
  * Used by NQL to traverse hierarchical/tree structures.
+ *
+ * Default keywords: 'parent', 'child', 'ascendant', 'descendant'.
+ * Custom keywords are supported via schema configuration
+ * (e.g., 'manager', 'managee' via parentRole/childRole).
  */
-export type PseudoColumnTraversal =
-	| 'parent' // Single-hop upward (direct parent)
-	| 'child' // Single-hop downward (direct children)
-	| 'ascendant' // Recursive upward (all ancestors via CTE)
-	| 'descendant'; // Recursive downward (all descendants via CTE)
+export type PseudoColumnTraversal = string;
 
 /**
  * Pseudo-column expression intent for self-referential traversal.
@@ -266,6 +266,11 @@ export interface PseudoColumnExpressionIntent {
 	readonly depth?: number;
 	/** Custom role name for multi-FK tables (e.g., 'manager' in manager.ascendant) */
 	readonly role?: string;
+	/**
+	 * Chained traversals for multi-hop navigation (e.g., parent.parent.name → ['parent', 'parent']).
+	 * When present, overrides single `traversal` field. Each element generates a successive self-join.
+	 */
+	readonly traversals?: readonly PseudoColumnTraversal[];
 }
 
 /**

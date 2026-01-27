@@ -26,7 +26,7 @@ import type {
 	NamingConvention,
 	PlanReport,
 	RecursivePlanReport,
-	SeparateIncludeInfo,
+	SubqueryIncludeInfo,
 	UpdateIntent,
 	UpsertIntent,
 } from '@dbsp/core';
@@ -53,7 +53,7 @@ import {
 	compileInsert,
 	compileInsertFrom,
 	compileRecursive,
-	compileSeparateInclude,
+	compileSubqueryInclude,
 	compileUpdate,
 	compileUpsert,
 	compileWithIncludes,
@@ -289,9 +289,9 @@ export class CompileOnlyAdapter implements Adapter<unknown> {
 		});
 
 		// Convert to adapter-agnostic format (preserving all properties including M:N)
-		const separateIncludes: SeparateIncludeInfo[] = result.separateIncludes.map(
+		const subqueryIncludes: SubqueryIncludeInfo[] = result.subqueryIncludes.map(
 			(info) => {
-				const mapped: SeparateIncludeInfo = {
+				const mapped: SubqueryIncludeInfo = {
 					relationName: info.relationName,
 					targetTable: info.targetTable,
 					foreignKey: info.foreignKey,
@@ -324,22 +324,22 @@ export class CompileOnlyAdapter implements Adapter<unknown> {
 				sql: result.main.sql,
 				parameters: result.main.parameters as readonly unknown[],
 			},
-			separateIncludes,
+			subqueryIncludes,
 		};
 	}
 
 	/**
-	 * Compile a separate include query for given parent IDs (DX-033).
+	 * Compile a subquery include query for given parent IDs (DX-033).
 	 */
-	compileSeparateInclude(
-		info: SeparateIncludeInfo,
+	compileSubqueryInclude(
+		info: SubqueryIncludeInfo,
 		parentIds: readonly unknown[],
 		options?: CompileOptions,
 	): CompiledQuery {
 		const schemaName = this._schemaName ?? options?.schemaName;
 
 		// Pass model and dialect to enable compileWhere for WHERE conditions
-		const compiled = compileSeparateInclude(
+		const compiled = compileSubqueryInclude(
 			info,
 			parentIds,
 			this.kysely,

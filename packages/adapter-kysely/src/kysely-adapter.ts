@@ -23,7 +23,7 @@ import type {
 	NamingConvention,
 	PlanReport,
 	RecursivePlanReport,
-	SeparateIncludeInfo,
+	SubqueryIncludeInfo,
 	UpdateIntent,
 	UpsertIntent,
 } from '@dbsp/core';
@@ -35,7 +35,7 @@ import {
 	compileInsert,
 	compileInsertFrom,
 	compileRecursive,
-	compileSeparateInclude,
+	compileSubqueryInclude,
 	compileUpdate,
 	compileUpsert,
 	compileWithIncludes,
@@ -80,7 +80,7 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 	 * @param db - Kysely instance or Transaction
 	 * @param schemaName - Optional schema name for multi-tenant queries
 	 * @param dialect - Optional explicit dialect (recommended for production/minified builds)
-	 * @param model - Optional ModelIR for WHERE compilation in separate includes
+	 * @param model - Optional ModelIR for WHERE compilation in subquery includes
 	 * @param namingConvention - Naming convention for identifier transformation (ARCH-006)
 	 */
 	constructor(
@@ -174,7 +174,7 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	/**
-	 * Compile a plan with includes, returning separate include metadata (DX-033).
+	 * Compile a plan with includes, returning subquery include metadata (DX-033).
 	 */
 	compileWithIncludes<T = unknown>(
 		plan: PlanReport,
@@ -209,9 +209,9 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 		);
 
 		// Convert to adapter-agnostic format (pass through - types are now aligned)
-		const separateIncludes: SeparateIncludeInfo[] = result.separateIncludes.map(
+		const subqueryIncludes: SubqueryIncludeInfo[] = result.subqueryIncludes.map(
 			(info) => {
-				const mapped: SeparateIncludeInfo = {
+				const mapped: SubqueryIncludeInfo = {
 					relationName: info.relationName,
 					targetTable: info.targetTable,
 					foreignKey: info.foreignKey,
@@ -232,22 +232,22 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
 				sql: result.main.sql,
 				parameters: result.main.parameters as readonly unknown[],
 			},
-			separateIncludes,
+			subqueryIncludes,
 		};
 	}
 
 	/**
-	 * Compile a separate include query for given parent IDs (DX-033).
+	 * Compile a subquery include query for given parent IDs (DX-033).
 	 */
-	compileSeparateInclude(
-		info: SeparateIncludeInfo,
+	compileSubqueryInclude(
+		info: SubqueryIncludeInfo,
 		parentIds: readonly unknown[],
 		options?: CompileOptions,
 	): CompiledQuery {
 		const schemaName = this.schemaName ?? options?.schemaName;
 
 		// Pass model and dialect to enable compileWhere for WHERE conditions
-		const compiled = compileSeparateInclude(
+		const compiled = compileSubqueryInclude(
 			info,
 			parentIds,
 			this.db,
@@ -553,7 +553,7 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
  * @param db - Kysely instance
  * @param schemaName - Optional schema name for multi-tenant queries
  * @param dialect - Optional explicit dialect (recommended for production/minified builds)
- * @param model - Optional ModelIR for WHERE compilation in separate includes
+ * @param model - Optional ModelIR for WHERE compilation in subquery includes
  * @param namingConvention - Naming convention for identifier transformation (ARCH-006)
  * @returns A new KyselyAdapter instance
  *
@@ -565,7 +565,7 @@ export class KyselyAdapter<DB = unknown> implements Adapter<DB> {
  * // With CamelCasePlugin enabled
  * const adapter = createKyselyAdapter(db, undefined, 'postgresql', undefined, 'camelCase');
  *
- * // With model for full WHERE support in separate includes
+ * // With model for full WHERE support in subquery includes
  * const adapter = createKyselyAdapter(db, undefined, 'postgresql', model);
  * ```
  */

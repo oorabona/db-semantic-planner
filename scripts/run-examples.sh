@@ -69,6 +69,7 @@ echo ""
 echo "DRY-RUN TESTS (no database):"
 run_test "test-minimal" "examples/minimal.schema.ts" "examples/test-minimal.dbsp" "examples/test-minimal.assert.dbsp" "no"
 run_test "test-blog" "examples/blog.schema.ts" "examples/test-blog.dbsp" "examples/test-blog.assert.dbsp" "no"
+run_test "hierarchy" "examples/hierarchy.schema.ts" "examples/hierarchy.dbsp" "examples/hierarchy.assert.dbsp" "no"
 
 echo ""
 echo "FULL CHAPTER EXAMPLES (with database):"

@@ -17,7 +17,7 @@ import {
 	compileDelete,
 	compileInsert,
 	compileRecursive,
-	compileSeparateInclude,
+	compileSubqueryInclude,
 	compileUpdate,
 	compileUpsert,
 	compileWindowSelect,
@@ -3229,13 +3229,13 @@ describe('SQL Compiler', () => {
 		});
 
 		describe('BDD Scenario 6: Separate strategy for hasMany include (explicit)', () => {
-			it('should NOT generate JOIN when planner decides include-strategy: separate', () => {
+			it('should NOT generate JOIN when planner decides include-strategy: subquery', () => {
 				const kysely = createTestKysely();
 
 				// Given: users hasMany posts with explicit separate strategy
-				// Note: Since JOIN is now the default, we explicitly request 'separate'
+				// Note: Since JOIN is now the default, we explicitly request 'subquery'
 
-				// When: I select users with include('posts') and defaultIncludeStrategy: 'separate'
+				// When: I select users with include('posts') and defaultIncludeStrategy: 'subquery'
 				const intent: QueryIntent = {
 					type: 'select',
 					from: 'users',
@@ -3244,17 +3244,17 @@ describe('SQL Compiler', () => {
 				};
 
 				const report = plan(intent, basicSchema, {
-					defaultIncludeStrategy: 'separate',
+					defaultIncludeStrategy: 'subquery',
 				});
 
-				// Then: planner decides include-strategy: 'separate'
+				// Then: planner decides include-strategy: 'subquery'
 				const includeDecision = report.decisions.find(
 					(d) => d.type === 'include-strategy',
 				);
 				expect(includeDecision).toBeDefined();
-				expect(includeDecision?.choice).toBe('separate');
+				expect(includeDecision?.choice).toBe('subquery');
 
-				// And: SQL does NOT contain JOIN posts (separate queries will be needed)
+				// And: SQL does NOT contain JOIN posts (subquery queries will be needed)
 				const compiled = compile(report, basicSchema, kysely);
 				expect(compiled.sql.toLowerCase()).not.toContain('join');
 				expect(compiled.sql.toLowerCase()).not.toContain('left join posts');
@@ -3316,12 +3316,12 @@ describe('SQL Compiler', () => {
 			});
 		});
 
-		describe('BDD Scenario 8: compileWithIncludes returns separateIncludes metadata', () => {
-			it('should return separateIncludes for hasMany relations (when using separate strategy)', () => {
+		describe('BDD Scenario 8: compileWithIncludes returns subqueryIncludes metadata', () => {
+			it('should return subqueryIncludes for hasMany relations (when using separate strategy)', () => {
 				const kysely = createTestKysely();
 
-				// Given: users hasMany posts with explicit 'separate' strategy
-				// Note: JOIN is now the default, so we explicitly request 'separate'
+				// Given: users hasMany posts with explicit 'subquery' strategy
+				// Note: JOIN is now the default, so we explicitly request 'subquery'
 				// When: I use compileWithIncludes
 				const intent: QueryIntent = {
 					type: 'select',
@@ -3331,7 +3331,7 @@ describe('SQL Compiler', () => {
 				};
 
 				const report = plan(intent, basicSchema, {
-					defaultIncludeStrategy: 'separate',
+					defaultIncludeStrategy: 'subquery',
 				});
 				const result = compileWithIncludes(report, basicSchema, kysely);
 
@@ -3340,16 +3340,16 @@ describe('SQL Compiler', () => {
 				expect(result.main.sql.toLowerCase()).toContain('select');
 				expect(result.main.sql.toLowerCase()).not.toContain('join posts');
 
-				// And: separateIncludes should contain posts metadata
-				expect(result.separateIncludes).toHaveLength(1);
-				const postsInclude = result.separateIncludes[0]!;
+				// And: subqueryIncludes should contain posts metadata
+				expect(result.subqueryIncludes).toHaveLength(1);
+				const postsInclude = result.subqueryIncludes[0]!;
 				expect(postsInclude.relationName).toBe('posts');
 				expect(postsInclude.targetTable).toBe('posts');
 				expect(postsInclude.foreignKey).toBe('userId');
 				expect(postsInclude.sourceKey).toBe('id');
 			});
 
-			it('should return empty separateIncludes for JOIN includes', () => {
+			it('should return empty subqueryIncludes for JOIN includes', () => {
 				const kysely = createTestKysely();
 
 				// Given: posts belongsTo user (default includeStrategy is 'join')
@@ -3366,16 +3366,16 @@ describe('SQL Compiler', () => {
 				// Then: main query should be compiled with JOIN
 				expect(result.main.sql.toLowerCase()).toContain('left join');
 
-				// And: separateIncludes should be empty (author is JOINed)
-				expect(result.separateIncludes).toHaveLength(0);
+				// And: subqueryIncludes should be empty (author is JOINed)
+				expect(result.subqueryIncludes).toHaveLength(0);
 			});
 		});
 
-		describe('BDD Scenario 9: compileSeparateInclude generates follow-up queries', () => {
-			it('should generate IN query for separate include', () => {
+		describe('BDD Scenario 9: compileSubqueryInclude generates follow-up queries', () => {
+			it('should generate IN query for subquery include', () => {
 				const kysely = createTestKysely();
 
-				// Given: separate include metadata from compileWithIncludes
+				// Given: subquery include metadata from compileWithIncludes
 				const includeInfo = {
 					relationName: 'posts',
 					targetTable: 'posts',
@@ -3383,9 +3383,9 @@ describe('SQL Compiler', () => {
 					sourceKey: 'id',
 				};
 
-				// When: I compile the separate include with parent IDs
+				// When: I compile the subquery include with parent IDs
 				const parentIds = [1, 2, 3];
-				const compiled = compileSeparateInclude(includeInfo, parentIds, kysely);
+				const compiled = compileSubqueryInclude(includeInfo, parentIds, kysely);
 
 				// Then: SQL should contain IN clause with parent IDs
 				expect(compiled.sql.toLowerCase()).toContain('select');
@@ -3404,7 +3404,7 @@ describe('SQL Compiler', () => {
 				};
 
 				// When: parent IDs is empty
-				const compiled = compileSeparateInclude(includeInfo, [], kysely);
+				const compiled = compileSubqueryInclude(includeInfo, [], kysely);
 
 				// Then: SQL should return empty result (WHERE false)
 				expect(compiled.sql.toLowerCase()).toContain('select');
@@ -3421,7 +3421,7 @@ describe('SQL Compiler', () => {
 					sourceKey: 'id',
 				};
 
-				const compiled = compileSeparateInclude(
+				const compiled = compileSubqueryInclude(
 					includeInfo,
 					[1, 2],
 					kysely,
@@ -3447,9 +3447,9 @@ describe('SQL Compiler', () => {
 					throughTargetKey: 'tagId', // postTags.tagId
 				};
 
-				// When: compile separate include with parent post IDs
+				// When: compile subquery include with parent post IDs
 				const parentIds = [1, 2, 3];
-				const compiled = compileSeparateInclude(includeInfo, parentIds, kysely);
+				const compiled = compileSubqueryInclude(includeInfo, parentIds, kysely);
 
 				const sql = compiled.sql.toLowerCase();
 
@@ -4288,7 +4288,7 @@ describe('CORE-006: Composite Key Support', () => {
 			foreignKey: ['tenantId', 'customerId'], // Composite FK
 			cardinality: 'one-to-many',
 			optionality: 'optional',
-			includeStrategy: 'separate', // hasMany defaults to separate
+			includeStrategy: 'subquery', // hasMany defaults to separate
 			filterStrategy: 'exists',
 			joinDefault: 'left',
 		});
@@ -4358,8 +4358,8 @@ describe('CORE-006: Composite Key Support', () => {
 		});
 	});
 
-	describe('SeparateIncludeInfo with composite keys', () => {
-		it('should return array for composite FK in SeparateIncludeInfo', () => {
+	describe('SubqueryIncludeInfo with composite keys', () => {
+		it('should return array for composite FK in SubqueryIncludeInfo', () => {
 			const kysely = createTestKysely();
 			const intent: QueryIntent = {
 				type: 'select',
@@ -4375,7 +4375,7 @@ describe('CORE-006: Composite Key Support', () => {
 			);
 
 			// For composite keys, foreignKey should be an array
-			const includeInfo = result.separateIncludes[0];
+			const includeInfo = result.subqueryIncludes[0];
 			expect(includeInfo).toBeDefined();
 			expect(includeInfo?.relationName).toBe('tenant_orders');
 
@@ -4389,8 +4389,8 @@ describe('CORE-006: Composite Key Support', () => {
 		});
 	});
 
-	describe('compileSeparateInclude with composite keys', () => {
-		it('should compile separate include with composite FK using OR conditions', () => {
+	describe('compileSubqueryInclude with composite keys', () => {
+		it('should compile subquery include with composite FK using OR conditions', () => {
 			const kysely = createTestKysely();
 
 			// Simulate parent tuples: [tenantId, customerId]
@@ -4407,7 +4407,7 @@ describe('CORE-006: Composite Key Support', () => {
 				sourceKey: ['tenantId', 'id'] as readonly string[],
 			};
 
-			const compiled = compileSeparateInclude(includeInfo, parentIds, kysely);
+			const compiled = compileSubqueryInclude(includeInfo, parentIds, kysely);
 
 			// Should produce OR conditions for composite key tuples
 			expect(compiled.sql).toContain('tenant_orders');
@@ -4423,7 +4423,7 @@ describe('CORE-006: Composite Key Support', () => {
 	// NQL-ALIGN Block 5: SEPARATE Subquery Optimization Tests
 	// ============================================================================
 
-	describe('compileSeparateInclude with subquery optimization (NQL-ALIGN Block 5)', () => {
+	describe('compileSubqueryInclude with subquery optimization (NQL-ALIGN Block 5)', () => {
 		it('should use subquery when no parentIds but sourceTable provided', () => {
 			const kysely = createTestKysely();
 
@@ -4438,7 +4438,7 @@ describe('CORE-006: Composite Key Support', () => {
 			};
 
 			// Call with empty parentIds but with sourceTable
-			const compiled = compileSeparateInclude(includeInfo, [], kysely);
+			const compiled = compileSubqueryInclude(includeInfo, [], kysely);
 
 			// Should generate subquery instead of WHERE false
 			expect(compiled.sql).not.toContain('false');
@@ -4482,7 +4482,7 @@ describe('CORE-006: Composite Key Support', () => {
 			};
 
 			// Pass schemaModel.model (ModelIR) as 5th parameter for compileWhere
-			const compiled = compileSeparateInclude(
+			const compiled = compileSubqueryInclude(
 				includeInfo,
 				[],
 				kysely,
@@ -4509,7 +4509,7 @@ describe('CORE-006: Composite Key Support', () => {
 			};
 
 			const parentIds = [1, 2, 3];
-			const compiled = compileSeparateInclude(includeInfo, parentIds, kysely);
+			const compiled = compileSubqueryInclude(includeInfo, parentIds, kysely);
 
 			// Should use parentIds directly (IN list)
 			expect(compiled.parameters).toContain(1);
@@ -4528,7 +4528,7 @@ describe('CORE-006: Composite Key Support', () => {
 				sourceKey: 'id',
 			};
 
-			const compiled = compileSeparateInclude(includeInfo, [], kysely);
+			const compiled = compileSubqueryInclude(includeInfo, [], kysely);
 
 			// Should return WHERE false (empty result)
 			expect(compiled.sql).toContain('false');

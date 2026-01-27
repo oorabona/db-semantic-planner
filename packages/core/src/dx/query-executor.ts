@@ -123,7 +123,7 @@ export class QueryExecutor<TResult = unknown> {
 		const planReport = this.ctx.plan();
 		const compileOptions = this.buildCompileOptions();
 
-		// Use compileWithIncludes to get separate include info for hasMany relations
+		// Use compileWithIncludes to get subquery include info for hasMany relations
 		const compiledWithIncludes = adapter.compileWithIncludes(
 			planReport,
 			compileOptions,
@@ -135,11 +135,11 @@ export class QueryExecutor<TResult = unknown> {
 		// Hydrate json_agg includes (E2E-004: parse JSON columns from json_agg strategy)
 		this.hydrateJsonAggIncludes(mainResults, planReport);
 
-		// Process separate includes (hasMany hydration - DX-033)
-		if (compiledWithIncludes.separateIncludes.length > 0) {
+		// Process subquery includes (hasMany hydration - DX-033)
+		if (compiledWithIncludes.subqueryIncludes.length > 0) {
 			await this.hydrator.hydrateIncludes(
 				mainResults,
-				compiledWithIncludes.separateIncludes,
+				compiledWithIncludes.subqueryIncludes,
 				adapter,
 				compileOptions,
 			);

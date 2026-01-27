@@ -34,6 +34,7 @@
 | Type-Safe Query API (DX-040) | core, dx, types, nql | ✅ Complete |
 | NQL Spec/Implementation Alignment (NQL-ALIGN) | nql, core, adapter-kysely | ✅ Complete |
 | NQL Divergences: scoped [N] + COUNT(DISTINCT) (NQL-DIVERGE) | nql | ✅ Complete |
+| Chained Pseudo-Columns + PlanOptions + Docs (NQL-CHAIN) | core, nql, adapter | ✅ Complete |
 
 ## Scope-Specific Backlogs
 
@@ -338,10 +339,13 @@ Auto-generated pseudo-columns for self-referential FK traversal in NQL queries.
 - [x] ✅ E2E tests via pimdam.dbsp assertions
 
 ### V1.1 Deferred (Backlog)
-- [ ] Recursive CTE for ascendant/descendant traversal
-- [ ] Chained syntax (`parent.parent.name`)
-- [ ] Bounded depth (`ascendant[N].column`)
-- [ ] Unit tests for adapter pseudo-column helpers
+- [x] ✅ Recursive CTE for ascendant/descendant traversal (2026-01-25, SPEC-001)
+- [x] ✅ Chained syntax (`parent.parent.name`) (2026-01-27, NQL-CHAIN+PLANOPTS+DOCS)
+- [x] ✅ Bounded depth (`ascendant[N].column`) (2026-01-27, NQL-DIVERGE)
+- [x] ✅ Dynamic pseudo-column keywords from model config (2026-01-27, NQL-CHAIN+PLANOPTS+DOCS)
+- [x] ✅ PlanOptions (global + per-query) + rename separate→subquery (2026-01-27, NQL-CHAIN+PLANOPTS+DOCS)
+- [x] ✅ Hierarchy example showcase (schema, DDL, seed, NQL queries, assertions) (2026-01-27)
+- [x] ✅ Unit tests for adapter pseudo-column helpers (2026-01-27, 29 tests)
 
 ## ✅ COMPLETED: ALIGN-001 Documentation & API Alignment Sprint (2026-01-11)
 

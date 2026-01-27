@@ -5,8 +5,8 @@ import type {
 	SelectIntent,
 	WhereIntent,
 } from '../intent-ast.js';
-import type { IncludeStrategy, ModelIR } from '../model-ir.js';
-import type { PlanReport } from '../planner.js';
+import type { ModelIR } from '../model-ir.js';
+import type { PlanOptions, PlanReport } from '../planner.js';
 import type { DistinctField } from './filters.js';
 import type {
 	DeleteBuilder,
@@ -308,16 +308,6 @@ interface OrmOptionsBase<DB = unknown> {
 	 */
 	readonly maxNestedCase?: number;
 	/**
-	 * Default include strategy for relations when set to 'auto'.
-	 * - 'join': Use JOIN (single query, database optimizes) - DEFAULT
-	 * - 'separate': Use separate queries (N+1 style with batching)
-	 * - 'cte': Use CTE (Common Table Expression)
-	 * - 'lateral': Use LATERAL JOIN (PostgreSQL)
-	 * - 'json_agg': Use JSON aggregation (PostgreSQL)
-	 * - 'auto': Let planner decide based on relation type
-	 */
-	readonly defaultIncludeStrategy?: IncludeStrategy;
-	/**
 	 * Dialect capabilities for strategy selection.
 	 * When provided, the planner uses these to select optimal strategies:
 	 * - supportsJsonAgg: Enables json_agg for to-many relations
@@ -325,6 +315,25 @@ interface OrmOptionsBase<DB = unknown> {
 	 * - supportsRecursiveCTE: Enables WITH RECURSIVE for tree traversal
 	 */
 	readonly dialectCapabilities?: DialectCapabilities;
+
+	/**
+	 * Plan options passed to the semantic planner.
+	 * Per-query options via `.withPlanOptions()` take precedence over global options.
+	 *
+	 * @example
+	 * ```typescript
+	 * const orm = createOrm({
+	 *   schema,
+	 *   adapter,
+	 *   planOptions: {
+	 *     defaultIncludeStrategy: 'subquery',
+	 *     enableCTEs: true,
+	 *     maxIncludeDepth: 3,
+	 *   },
+	 * });
+	 * ```
+	 */
+	readonly planOptions?: PlanOptions;
 	/**
 	 * NQL compiler function for template literal queries (DX-040).
 	 *
@@ -928,6 +937,23 @@ export interface QueryBuilder<TResult = unknown> {
 	 * ```
 	 */
 	withRelationHint(target: string, relation: string): QueryBuilder<TResult>;
+
+	/**
+	 * Override plan options for this specific query.
+	 * Merges with global planOptions from createOrm(), with per-query values taking precedence.
+	 *
+	 * @param options - Plan options to apply to this query
+	 * @returns A new QueryBuilder with the plan options applied
+	 *
+	 * @example
+	 * ```typescript
+	 * orm.select('users')
+	 *   .withPlanOptions({ defaultIncludeStrategy: 'subquery', maxIncludeDepth: 3 })
+	 *   .include('posts')
+	 *   .all();
+	 * ```
+	 */
+	withPlanOptions(options: PlanOptions): QueryBuilder<TResult>;
 
 	/**
 	 * Generate the execution plan for this query.

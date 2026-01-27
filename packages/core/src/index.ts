@@ -334,8 +334,8 @@ export type {
 	// ARCH-006: Naming convention for identifier transformation
 	NamingConvention,
 	RawSqlAdapter,
-	SeparateIncludeInfo,
 	StreamingAdapter,
+	SubqueryIncludeInfo,
 	TransactionalAdapter,
 } from './adapter.js';
 export {

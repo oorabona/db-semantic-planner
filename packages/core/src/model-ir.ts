@@ -152,7 +152,7 @@ export type Optionality = 'required' | 'optional';
 /**
  * Include strategy for fetching related data.
  * - 'join': Use JOIN (efficient for to-one, risk of row explosion for to-many)
- * - 'separate': Use separate query (safe for to-many, N+1 if not batched)
+ * - 'subquery': Use subquery query (safe for to-many, N+1 if not batched)
  * - 'cte': Use CTE-based include (good for recursive/hierarchical)
  * - 'lateral': Use LATERAL JOIN (PostgreSQL/MSSQL CROSS APPLY, handles LIMIT)
  * - 'json_agg': Use JSON aggregation (PostgreSQL/MySQL/DuckDB, single row per parent)
@@ -160,7 +160,7 @@ export type Optionality = 'required' | 'optional';
  */
 export type IncludeStrategy =
 	| 'join'
-	| 'separate'
+	| 'subquery'
 	| 'cte'
 	| 'lateral'
 	| 'json_agg'
@@ -312,7 +312,7 @@ export interface RelationIR {
 	/**
 	 * How to fetch related data when included.
 	 * - 'join': Use JOIN (efficient for to-one)
-	 * - 'separate': Use separate query (avoids row explosion for to-many)
+	 * - 'subquery': Use subquery query (avoids row explosion for to-many)
 	 * - 'auto': Planner decides based on cardinality
 	 * @default 'auto'
 	 */
