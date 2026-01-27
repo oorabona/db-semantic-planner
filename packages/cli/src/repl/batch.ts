@@ -646,8 +646,26 @@ async function executeRawSql(
 /**
  * Run batch mode execution
  */
-export async function runBatchMode(options: BatchModeOptions): Promise<void> {
-	const { queries, schema, format, databaseUrl, assertFile } = options;
+/**
+ * Result of executing a batch of queries (without side effects).
+ * Used by tests to programmatically run examples.
+ */
+export interface BatchExecutionResult {
+	results: BatchResult[];
+	assertionSummary?: AssertionSummary | undefined;
+}
+
+/**
+ * Core batch execution logic — runs queries and optional assertions,
+ * returning structured results without printing or calling process.exit().
+ *
+ * @param options - Batch mode configuration
+ * @returns Execution results with optional assertion summary
+ */
+export async function executeBatch(
+	options: BatchModeOptions,
+): Promise<BatchExecutionResult> {
+	const { queries, schema, databaseUrl, assertFile } = options;
 
 	// Initialize state
 	// ARCH-005: Use schema.model directly (already ModelIR)
@@ -669,102 +687,125 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 		try {
 			state.dbConnection = await createDbConnection(databaseUrl);
 			state.execEnabled = true; // Enable execution mode when DB is connected
-			console.error(`✅ Connected to database`);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			console.error(`⚠️  Database connection failed: ${message}`);
-			console.error('Continuing in compile-only mode.\n');
+			throw new Error(`Database connection failed: ${message}`);
 		}
 	}
 
-	// DEMO-E2E: Parse assertion file if provided
-	let assertionSummary: AssertionSummary | undefined;
+	// Parse assertion file if provided
+	let assertionBlocks: Parameters<typeof runAssertions>[0] | undefined;
 	if (assertFile) {
-		try {
-			const assertContent = readFileSync(assertFile, 'utf-8');
-			const parseResult = parseAssertionFile(assertContent);
+		const assertContent = readFileSync(assertFile, 'utf-8');
+		const parseResult = parseAssertionFile(assertContent);
 
-			if (parseResult.errors.length > 0) {
-				console.error(`❌ Assertion file parse errors:`);
-				for (const err of parseResult.errors) {
-					console.error(`  Line ${err.line}: ${err.message}`);
-				}
-				process.exit(1);
-			}
-
-			// Validate query references
-			const validationErrors = validateAssertionBlocks(
-				parseResult.blocks,
-				queries.length,
-				queries,
-			);
-			if (validationErrors.length > 0) {
-				console.error(`❌ Assertion validation errors:`);
-				for (const err of validationErrors) {
-					console.error(`  Line ${err.line}: ${err.message}`);
-				}
-				process.exit(1);
-			}
-
-			// Store blocks for later execution
-			(
-				state as BatchState & { assertionBlocks?: typeof parseResult.blocks }
-			).assertionBlocks = parseResult.blocks;
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			console.error(`❌ Failed to read assertion file: ${message}`);
-			process.exit(1);
+		if (parseResult.errors.length > 0) {
+			const errorMessages = parseResult.errors
+				.map((err) => `Line ${err.line}: ${err.message}`)
+				.join('\n');
+			throw new Error(`Assertion file parse errors:\n${errorMessages}`);
 		}
+
+		// Validate query references
+		const validationErrors = validateAssertionBlocks(
+			parseResult.blocks,
+			queries.length,
+			queries,
+		);
+		if (validationErrors.length > 0) {
+			const errorMessages = validationErrors
+				.map((err) => `Line ${err.line}: ${err.message}`)
+				.join('\n');
+			throw new Error(`Assertion validation errors:\n${errorMessages}`);
+		}
+
+		assertionBlocks = parseResult.blocks;
 	}
 
 	const results: BatchResult[] = [];
 
-	for (const query of queries) {
-		// Check for mode escape (! prefix)
-		const { content: effectiveQuery, isRawSql } = parseInputMode(
-			query,
-			state.mode,
-		);
+	try {
+		for (const query of queries) {
+			// Check for mode escape (! prefix)
+			const { content: effectiveQuery, isRawSql } = parseInputMode(
+				query,
+				state.mode,
+			);
 
-		let result: BatchResult;
+			let result: BatchResult;
 
-		// Process dot commands (async for .import support)
-		if (effectiveQuery.startsWith('.')) {
-			const cmdResult = await processDotCommand(effectiveQuery, schema, state);
-			if (cmdResult.stateChange) {
-				Object.assign(state, cmdResult.stateChange);
+			// Process dot commands (async for .import support)
+			if (effectiveQuery.startsWith('.')) {
+				const cmdResult = await processDotCommand(
+					effectiveQuery,
+					schema,
+					state,
+				);
+				if (cmdResult.stateChange) {
+					Object.assign(state, cmdResult.stateChange);
+				}
+				const cmdError = cmdResult.error;
+				const cmdSuccess =
+					cmdResult.success ?? !cmdResult.output.startsWith('❌');
+				const baseResult: BatchResult = {
+					query: effectiveQuery,
+					success: cmdSuccess && !cmdError,
+					output: cmdResult.output,
+					type: 'command',
+				};
+				if (cmdError) {
+					baseResult.error = cmdError;
+				}
+				result = baseResult;
+			} else if (isRawSql) {
+				// Raw SQL mode
+				result = await executeRawSql(effectiveQuery, state);
+			} else {
+				// NQL v2: Unified execution for queries and mutations
+				result = await executeNqlQuery(effectiveQuery, state);
 			}
-			// Extract error from cmdResult if present (e.g., from .import)
-			const cmdError = cmdResult.error;
-			const cmdSuccess =
-				cmdResult.success ?? !cmdResult.output.startsWith('❌');
-			const baseResult: BatchResult = {
-				query: effectiveQuery,
-				success: cmdSuccess && !cmdError,
-				output: cmdResult.output,
-				type: 'command',
-			};
-			if (cmdError) {
-				baseResult.error = cmdError;
-			}
-			result = baseResult;
-		} else if (isRawSql) {
-			// Raw SQL mode
-			result = await executeRawSql(effectiveQuery, state);
-		} else {
-			// NQL v2: Unified execution for queries and mutations
-			result = await executeNqlQuery(effectiveQuery, state);
+
+			results.push(result);
 		}
+	} finally {
+		// Cleanup DB connection
+		if (state.dbConnection) {
+			await state.dbConnection.close();
+		}
+	}
 
-		results.push(result);
+	// Run assertions if provided
+	let assertionSummary: AssertionSummary | undefined;
+	if (assertionBlocks) {
+		const hasDb = !!databaseUrl;
+		assertionSummary = runAssertions(assertionBlocks, results, queries, hasDb);
+	}
 
-		// Output in text format
-		if (format === 'text') {
-			console.log(`\n> ${query}`);
+	return { results, assertionSummary };
+}
+
+export async function runBatchMode(options: BatchModeOptions): Promise<void> {
+	const { queries, format } = options;
+
+	let execution: BatchExecutionResult;
+	try {
+		execution = await executeBatch(options);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		console.error(`❌ ${message}`);
+		process.exit(1);
+	}
+
+	const { results, assertionSummary } = execution;
+
+	// Output results in text format
+	if (format === 'text') {
+		for (let i = 0; i < results.length; i++) {
+			const result = results[i]!;
+			console.log(`\n> ${queries[i]}`);
 			if (result.success) {
 				console.log(result.output);
 			} else {
-				// Use error field if set, otherwise output already contains the error message
 				console.error(
 					result.error ? `❌ Error: ${result.error}` : result.output,
 				);
@@ -772,64 +813,53 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 		}
 	}
 
-	// DEMO-E2E: Run assertions if provided
-	const assertionBlocks = (
-		state as BatchState & {
-			assertionBlocks?: Parameters<typeof runAssertions>[0];
-		}
-	).assertionBlocks;
-	if (assertionBlocks) {
-		const hasDb = !!state.dbConnection;
-		assertionSummary = runAssertions(assertionBlocks, results, queries, hasDb);
+	// Output assertion results in text format
+	if (assertionSummary && format === 'text') {
+		console.log('\n─────────────────────────────────');
+		console.log('ASSERTION RESULTS');
+		console.log('─────────────────────────────────');
 
-		// Output assertion results in text format
-		if (format === 'text') {
-			console.log('\n─────────────────────────────────');
-			console.log('ASSERTION RESULTS');
-			console.log('─────────────────────────────────');
+		for (const qResult of assertionSummary.results) {
+			const icon = qResult.passed ? '✅' : '❌';
+			console.log(
+				`\n${icon} Query ${qResult.queryIndex}: ${qResult.query.slice(0, 50)}${qResult.query.length > 50 ? '...' : ''}`,
+			);
 
-			for (const qResult of assertionSummary.results) {
-				const icon = qResult.passed ? '✅' : '❌';
-				console.log(
-					`\n${icon} Query ${qResult.queryIndex}: ${qResult.query.slice(0, 50)}${qResult.query.length > 50 ? '...' : ''}`,
-				);
-
-				for (const assertion of qResult.assertions) {
-					if (assertion.skipped) {
-						console.log(
-							`  ⏭ ${assertion.type} (skipped: ${assertion.skipReason})`,
-						);
-					} else if (assertion.passed) {
-						console.log(`  ✓ ${assertion.type}`);
-					} else {
-						// Vitest-style expected vs actual output
-						console.log(`  ✗ ${assertion.type}`);
-						console.log('');
-						console.log(`    Expected: ${JSON.stringify(assertion.expected)}`);
-						if (assertion.actual !== undefined) {
-							const actualStr =
-								typeof assertion.actual === 'string'
-									? assertion.actual
-									: JSON.stringify(assertion.actual);
-							console.log(`    Actual:   ${actualStr}`);
-						}
-						console.log('');
+			for (const assertion of qResult.assertions) {
+				if (assertion.skipped) {
+					console.log(
+						`  ⏭ ${assertion.type} (skipped: ${assertion.skipReason})`,
+					);
+				} else if (assertion.passed) {
+					console.log(`  ✓ ${assertion.type}`);
+				} else {
+					// Vitest-style expected vs actual output
+					console.log(`  ✗ ${assertion.type}`);
+					console.log('');
+					console.log(`    Expected: ${JSON.stringify(assertion.expected)}`);
+					if (assertion.actual !== undefined) {
+						const actualStr =
+							typeof assertion.actual === 'string'
+								? assertion.actual
+								: JSON.stringify(assertion.actual);
+						console.log(`    Actual:   ${actualStr}`);
 					}
+					console.log('');
 				}
 			}
-
-			console.log('\n─────────────────────────────────');
-			console.log(
-				`Summary: ${assertionSummary.passed}/${assertionSummary.total} passed`,
-			);
-			if (assertionSummary.failed > 0) {
-				console.log(`         ${assertionSummary.failed} FAILED`);
-			}
-			if (assertionSummary.skipped > 0) {
-				console.log(`         ${assertionSummary.skipped} skipped (no DB)`);
-			}
-			console.log('─────────────────────────────────');
 		}
+
+		console.log('\n─────────────────────────────────');
+		console.log(
+			`Summary: ${assertionSummary.passed}/${assertionSummary.total} passed`,
+		);
+		if (assertionSummary.failed > 0) {
+			console.log(`         ${assertionSummary.failed} FAILED`);
+		}
+		if (assertionSummary.skipped > 0) {
+			console.log(`         ${assertionSummary.skipped} skipped (no DB)`);
+		}
+		console.log('─────────────────────────────────');
 	}
 
 	// Output in JSON format (all at once)
@@ -843,13 +873,8 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 		console.log(JSON.stringify(output, null, 2));
 	}
 
-	// Cleanup
-	if (state.dbConnection) {
-		await state.dbConnection.close();
-	}
-
 	// Exit with error code:
-	// - If assertions provided: exit 1 only if any assertion failed (query failures are expected if asserted)
+	// - If assertions provided: exit 1 only if any assertion failed
 	// - If no assertions: exit 1 if any query failed
 	if (assertionSummary) {
 		if (assertionSummary.failed > 0) {

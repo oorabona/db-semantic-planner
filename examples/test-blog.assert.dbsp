@@ -62,12 +62,12 @@ params.equals: [true]
 
 # ─────────────────────────────────────────
 # Query 7: posts with author (STRAT-SIMPLIFY: json_agg default)
-# FLAT-BUG-001: include JOINs now execute before SELECT expressions,
-# so json_agg column appears before table.* in SELECT order.
+# SELECT expressions now execute before JSON_AGG includes,
+# so posts.* appears before author_json in SELECT order (correct).
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.equals: select COALESCE((SELECT json_agg(to_jsonb(__t__) ) FROM "authors" AS __t__ WHERE "__t__"."id" = "posts"."author_id"), '[]'::json) as "author_json", "posts".* from "posts" as "posts"
+sql.equals: select "posts".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "authors" AS __t__ WHERE "__t__"."id" = "posts"."author_id"), '[]'::json) as "author_json" from "posts" as "posts"
 
 # ─────────────────────────────────────────
 # Query 8: posts | select *, author.* | flat
