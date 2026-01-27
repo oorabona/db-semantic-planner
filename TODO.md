@@ -49,6 +49,34 @@
 | `docs/specs/DX-040-type-safe-query-api.md` | core, dx | Type-Safe Query API (Native + NQL dual approach) |
 | `docs/specs/NQL-DIVERGENCES.md` | nql | NQL spec divergences and deferred features |
 
+## 🐛 BUG: Double JOIN on flat include with relation.* select (FLAT-BUG-001)
+
+**Priority:** HIGH | **Effort:** S (~1h) | **Breaking:** No
+**Scope:** adapter-kysely (compiler)
+
+When using `| flat` with `relation.*` in SELECT, the compiler generates **two JOINs** for the same relation:
+1. A LEFT JOIN from the `relationColumn` expression handler (`select author.*`)
+2. A LATERAL JOIN from the `include` handler (strategy=`flat` → `lateral`)
+
+```sql
+-- BUG: double join for same relation
+SELECT "posts".*, "author".*, "author"."id" AS "author.id", ...
+FROM "posts" AS "posts"
+  LEFT JOIN "authors" AS "author" ON "posts"."author_id" = "author"."id"   -- from relationColumn
+  LEFT JOIN LATERAL (SELECT * FROM "authors" WHERE ...) AS "author" ON true  -- from include (lateral)
+```
+
+**Root cause:** The `relationColumn` handler and the `include` handler independently join the same relation without checking if it's already joined.
+
+**Fix options:**
+1. Have the include handler check `state.includedRelations` before adding a LATERAL
+2. Have the relationColumn handler skip its JOIN when an include already covers the relation
+3. Deduplicate in the compiler's main orchestration loop
+
+**Affected queries:** Any `table | select *, relation.* | flat` pattern
+
+---
+
 ## 📋 BACKLOG: Subquery Include Strategy (DX-041)
 
 **Priority:** MEDIUM | **Effort:** M (~4h) | **Breaking:** No

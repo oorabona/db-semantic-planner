@@ -825,17 +825,21 @@ export interface IncludeIntent {
 	readonly recursive?: IncludeRecursiveOptions;
 
 	/**
-	 * NQL v2.1: Override include strategy for this relation.
-	 * When 'join' is specified, forces LEFT JOIN instead of json_agg.
+	 * NQL v2.1: Override include output strategy for this relation.
 	 *
-	 * - 'auto': Let planner decide (default)
-	 * - 'join': Force LEFT JOIN (flat output, may duplicate parent rows)
+	 * This is an **output strategy** (flat vs nested), not an implementation strategy.
+	 * The planner decides the best implementation (join, subquery, lateral, cte)
+	 * based on relation type and dialect capabilities.
+	 *
+	 * - 'auto': Let planner decide freely, including json_agg (default)
+	 * - 'flat': Exclude json_agg from candidates; planner picks best flat strategy
 	 *
 	 * @example
 	 * // NQL: orders | select *, customer.* | flat
-	 * // Results in: include: [{ relation: 'customer', strategy: 'join' }]
+	 * // Results in: include: [{ relation: 'customer', strategy: 'flat' }]
+	 * // Planner then picks lateral, join, subquery, or cte (never json_agg)
 	 */
-	readonly strategy?: 'auto' | 'join';
+	readonly strategy?: 'auto' | 'flat';
 }
 
 // ============================================================================

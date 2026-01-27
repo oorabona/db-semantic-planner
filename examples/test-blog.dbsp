@@ -15,6 +15,10 @@ comments
 posts | where published = true
 posts | select *, author.*
 
+# Flat output (excludes json_agg, planner picks best flat strategy)
+posts | select *, author.* | flat
+authors | select *, posts.* | flat
+
 # Distinct (works with explicit columns)
 posts | select distinct *
 

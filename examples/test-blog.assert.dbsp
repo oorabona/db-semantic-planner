@@ -68,9 +68,28 @@ success: true
 sql.equals: select "posts".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "authors" AS __t__ WHERE "__t__"."id" = "posts"."author_id"), '[]'::json) as "author_json" from "posts" as "posts"
 
 # ─────────────────────────────────────────
-# Query 8: posts select distinct *
+# Query 8: posts | select *, author.* | flat
+# flat excludes json_agg → planner picks LATERAL (PostgreSQL)
+# BUG: Double join (LEFT JOIN from relationColumn + LATERAL from include)
+# See TODO.md — relation dedup needed
 # ─────────────────────────────────────────
 --- query: 8
+success: true
+sql.equals: select "posts".*, "author".*, "author"."id" as "author.id", "author"."name" as "author.name", "author"."email" as "author.email", "author"."bio" as "author.bio", "author"."created_at" as "author.created_at" from "posts" as "posts" left join "authors" as "author" on "posts"."author_id" = "author"."id" left join LATERAL ( SELECT * FROM "authors" WHERE "authors"."authorId" = "posts"."id" ) AS "author" on true
+
+# ─────────────────────────────────────────
+# Query 9: authors | select *, posts.* | flat
+# flat excludes json_agg → planner picks LATERAL (PostgreSQL)
+# BUG: Same double-join issue as query 8
+# ─────────────────────────────────────────
+--- query: 9
+success: true
+sql.equals: select "authors".*, "posts".*, "posts"."id" as "posts.id", "posts"."title" as "posts.title", "posts"."slug" as "posts.slug", "posts"."content" as "posts.content", "posts"."published" as "posts.published", "posts"."author_id" as "posts.author_id", "posts"."created_at" as "posts.created_at", "posts"."updated_at" as "posts.updated_at" from "authors" as "authors" left join "posts" as "posts" on "authors"."id" = "posts"."author_id" left join LATERAL ( SELECT * FROM "posts" WHERE "posts"."authorId" = "authors"."id" ) AS "posts" on true
+
+# ─────────────────────────────────────────
+# Query 10: posts select distinct *
+# ─────────────────────────────────────────
+--- query: 10
 success: true
 sql.equals: select distinct "posts".* from "posts" as "posts"
 

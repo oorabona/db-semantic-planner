@@ -965,9 +965,14 @@ function processInclude(
 	let includeStrategy: ResolvedIncludeStrategy;
 	if (isRecursiveInclude) {
 		includeStrategy = 'cte';
-	} else if (include.strategy === 'join') {
-		// NQL v2.1: Honor explicit strategy from intent (| flat clause)
-		includeStrategy = 'join';
+	} else if (include.strategy === 'flat') {
+		// NQL v2.1: flat = exclude nested output (json_agg), planner picks best flat strategy
+		includeStrategy = selectSmartStrategy(
+			relation,
+			opts.dialectCapabilities,
+			false,
+			/* excludeNested */ true,
+		);
 	} else {
 		includeStrategy = determineIncludeStrategy(relation, opts);
 	}
@@ -1273,6 +1278,7 @@ function selectSmartStrategy(
 	_relation: RelationIR,
 	capabilities: DialectCapabilities | undefined,
 	isRecursive: boolean,
+	excludeNested = false,
 ): ResolvedIncludeStrategy {
 	// Recursive relations should use CTE
 	if (isRecursive) {
@@ -1291,7 +1297,7 @@ function selectSmartStrategy(
 	// - lateral: allows per-row subquery with LIMIT, good for "top N children"
 	// - join: fallback when json_agg not supported
 
-	if (capabilities?.supportsJsonAgg) {
+	if (capabilities?.supportsJsonAgg && !excludeNested) {
 		return 'json_agg';
 	}
 

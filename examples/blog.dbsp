@@ -53,7 +53,7 @@ authors | select *, posts.*
 posts | select *, comments.*
 
 # =============================================================================
-# 2.6b Flat Output (| flat forces JOIN, one row per author-post pair)
+# 2.6b Flat Output (| flat excludes json_agg, planner picks best flat strategy)
 # =============================================================================
 # Use | flat for export scenarios or when you need flat rows
 authors | select *, posts.* | flat
