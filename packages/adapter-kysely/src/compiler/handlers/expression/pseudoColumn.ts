@@ -6,7 +6,7 @@
  * - Single-hop traversal: parent.name, child.department, manager.title
  * - Chained traversal: parent.parent.name, child.child.role
  * - Custom roles via parentRole/childRole schema configuration
- * - Recursive traversal (ascendant, descendant): NOT YET SUPPORTED (requires CTE)
+ * - Recursive traversal (ascendant, descendant): WITH RECURSIVE CTE (json_agg scalar)
  *
  * Per SPEC-001: Uses set-based CTE strategy for scalar projection in SELECT.
  */
@@ -15,7 +15,13 @@ import type {
 	PseudoColumnExpressionIntent,
 	PseudoColumnMetadata,
 } from '@dbsp/core';
-import type { ExpressionHandler } from '../../types.js';
+import type { SelectQueryBuilder } from 'kysely';
+import { sql } from 'kysely';
+import {
+	buildRecursiveScalarSubquery,
+	buildTableRef,
+} from '../../recursive-cte.js';
+import type { CompilerContext, ExpressionHandler } from '../../types.js';
 
 /**
  * Compiles a pseudo-column expression for self-referential traversal.
@@ -68,24 +74,31 @@ export const pseudoColumnHandler: ExpressionHandler<
 		);
 	}
 
-	// Validate: no recursive traversals in chained mode
-	// Use model-configured keywords instead of hardcoded strings
-	for (const t of traversals) {
-		if (isRecursiveKeyword(t, matchingPseudo)) {
-			throw new Error(
-				`Recursive traversal '${t}' in SELECT is not yet supported. ` +
-					`Use WHERE clause filtering instead, or wait for V1.1.`,
-			);
-		}
-	}
-
 	const fkColumn = matchingPseudo.foreignKeyColumn;
-	const pkColumn = tableDef.primaryKey;
+	const rawPk = tableDef.primaryKey;
 
-	if (!pkColumn) {
+	if (!rawPk) {
 		throw new Error(
 			`Table '${rootTable}' has no primary key. Self-referential traversal requires a primary key.`,
 		);
+	}
+
+	// Normalize composite PK to single column (self-ref hierarchies use single PK)
+	const pkColumn = Array.isArray(rawPk) ? rawPk[0] : rawPk;
+
+	// Check for recursive traversal keywords (ascendant/descendant)
+	// These require WITH RECURSIVE CTE instead of iterative LEFT JOINs
+	for (const t of traversals) {
+		if (isRecursiveKeyword(t, matchingPseudo)) {
+			return compileRecursivePseudoColumn(
+				ctx,
+				query,
+				intent,
+				currentAlias,
+				matchingPseudo,
+				pkColumn,
+			);
+		}
 	}
 
 	const targetTableName = ctx.schemaName
@@ -124,6 +137,72 @@ export const pseudoColumnHandler: ExpressionHandler<
 		eb.ref(`${prevAlias}.${targetColumn}`).as(alias),
 	);
 };
+
+/**
+ * Compile a recursive pseudo-column expression using WITH RECURSIVE CTE.
+ *
+ * Generates a correlated scalar subquery that:
+ * 1. Builds a WITH RECURSIVE CTE traversing the self-referential hierarchy
+ * 2. Aggregates results using json_agg (returns JSON array of values)
+ *
+ * @example ancestors (managementChain.name)
+ * → (WITH RECURSIVE __rc AS (
+ *     SELECT __n.*, 1 AS "__depth" FROM employees __n WHERE __n.id = outer.managerId
+ *     UNION ALL
+ *     SELECT __n.*, __rc.__depth + 1 FROM __rc JOIN employees __n ON __n.id = __rc.managerId WHERE ...
+ *   ) SELECT COALESCE(json_agg(__rc.name ORDER BY __rc.__depth), '[]'::json) FROM __rc)
+ *
+ * @example descendants (allReports.name)
+ * → Similar but reversed: anchor WHERE __n.managerId = outer.id, recursive JOIN __n.managerId = __rc.id
+ */
+function compileRecursivePseudoColumn(
+	ctx: CompilerContext,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: SelectQueryBuilder<any, any, any>,
+	intent: PseudoColumnExpressionIntent,
+	currentAlias: string,
+	pseudo: PseudoColumnMetadata,
+	pkColumn: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
+	const { targetColumn, as: alias } = intent;
+	const traversal =
+		(intent.traversals ?? [intent.traversal])[0] ?? intent.traversal;
+	if (!traversal) {
+		return query;
+	}
+
+	const rootTable = ctx.plan.rootTable;
+	const fkColumn = pseudo.foreignKeyColumn;
+	const maxDepth = ctx.maxDepth ?? ctx.state.maxDepth ?? 100;
+	const isAncestors = isParentTraversal(traversal, pseudo);
+
+	// Generate unique CTE alias
+	const cteAlias = `__rc_${ctx.state.aliasCounter++}`;
+	const tableRef = buildTableRef(rootTable, ctx.schemaName);
+
+	// Build aggregate expression based on targetColumn
+	const cteId = sql.id(cteAlias);
+	const cteDepth = sql.ref(`${cteAlias}.__depth`);
+	const aggregateExpr =
+		targetColumn === '*'
+			? sql`json_agg(to_jsonb(${cteId}) ORDER BY ${cteDepth})`
+			: sql`json_agg(${sql.ref(`${cteAlias}.${targetColumn}`)} ORDER BY ${cteDepth})`;
+
+	const scalarSubquery = buildRecursiveScalarSubquery({
+		cteAlias,
+		tableRef,
+		pkColumn,
+		fkColumn,
+		rootAlias: currentAlias,
+		isAncestors,
+		maxDepth,
+		selectColumns: sql`"__n".*`,
+		aggregateExpr,
+	});
+
+	return query.select(scalarSubquery.as(alias));
+}
 
 /**
  * Find the matching pseudo-column metadata for a traversal keyword.

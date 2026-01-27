@@ -29,6 +29,35 @@ employees | select name, salary, manager.name, manager.title
 employees | where managerId = null | select name, title
 
 # ============================================================
+# 5. Recursive traversal: ancestors (managementChain)
+# ============================================================
+# WITH RECURSIVE CTE — full ancestor chain as JSON array
+employees | select name, managementChain.*
+
+# ============================================================
+# 6. Recursive traversal: ancestors — single column
+# ============================================================
+# Optimized: only id, manager_id, name in CTE; json_agg(name)
+employees | select name, managementChain.name
+
+# ============================================================
+# 7. Recursive traversal: ancestors — multiple columns
+# ============================================================
+# Optimized: json_agg(jsonb_build_object('name', ..., 'title', ...))
+employees | select name, managementChain.name, managementChain.title
+
+# ============================================================
+# 8. Recursive traversal: descendants (allReports)
+# ============================================================
+# WITH RECURSIVE CTE — full descendant chain as JSON array
+employees | select name, allReports.*
+
+# ============================================================
+# 9. Recursive traversal: descendants — single column
+# ============================================================
+employees | select name, allReports.name
+
+# ============================================================
 # TODO: WHERE/ORDER BY with pseudo-columns not yet supported
 # These will work once the planner resolves pseudo-column
 # references in WHERE and ORDER BY clauses.

@@ -958,7 +958,8 @@ function processInclude(
 
 	// CLI-012c: Check for recursive include on self-referential relations
 	const isRecursiveInclude =
-		!!include.recursive && relation.source === relation.target;
+		(!!include.recursive || !!relation.recursive) &&
+		relation.source === relation.target;
 
 	// Determine include strategy
 	// Priority: 1) recursive → cte, 2) include.strategy override, 3) auto-detect

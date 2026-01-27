@@ -35,6 +35,7 @@
 | NQL Spec/Implementation Alignment (NQL-ALIGN) | nql, core, adapter-kysely | ✅ Complete |
 | NQL Divergences: scoped [N] + COUNT(DISTINCT) (NQL-DIVERGE) | nql | ✅ Complete |
 | Chained Pseudo-Columns + PlanOptions + Docs (NQL-CHAIN) | core, nql, adapter | ✅ Complete |
+| FLAT-BUG-001 Fix + CTE WITH RECURSIVE (FLAT-FIX+CTE) | adapter-kysely | ✅ Complete (2026-01-27) |
 
 ## Scope-Specific Backlogs
 

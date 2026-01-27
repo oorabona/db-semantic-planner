@@ -46,15 +46,11 @@ const pseudoColumns = [defaultPseudo, managerPseudo];
 describe('findMatchingPseudo', () => {
 	describe('without explicit role', () => {
 		it('matches parentRole keyword', () => {
-			expect(findMatchingPseudo(pseudoColumns, 'parent')).toBe(
-				defaultPseudo,
-			);
+			expect(findMatchingPseudo(pseudoColumns, 'parent')).toBe(defaultPseudo);
 		});
 
 		it('matches childRole keyword', () => {
-			expect(findMatchingPseudo(pseudoColumns, 'child')).toBe(
-				defaultPseudo,
-			);
+			expect(findMatchingPseudo(pseudoColumns, 'child')).toBe(defaultPseudo);
 		});
 
 		it('matches ascendantKeyword', () => {
@@ -70,9 +66,7 @@ describe('findMatchingPseudo', () => {
 		});
 
 		it('matches custom parentRole (manager)', () => {
-			expect(findMatchingPseudo(pseudoColumns, 'manager')).toBe(
-				managerPseudo,
-			);
+			expect(findMatchingPseudo(pseudoColumns, 'manager')).toBe(managerPseudo);
 		});
 
 		it('matches custom childRole (directReports)', () => {
@@ -94,18 +88,12 @@ describe('findMatchingPseudo', () => {
 		});
 
 		it('is case-insensitive', () => {
-			expect(findMatchingPseudo(pseudoColumns, 'PARENT')).toBe(
-				defaultPseudo,
-			);
-			expect(findMatchingPseudo(pseudoColumns, 'Manager')).toBe(
-				managerPseudo,
-			);
+			expect(findMatchingPseudo(pseudoColumns, 'PARENT')).toBe(defaultPseudo);
+			expect(findMatchingPseudo(pseudoColumns, 'Manager')).toBe(managerPseudo);
 		});
 
 		it('returns undefined for unknown keyword', () => {
-			expect(
-				findMatchingPseudo(pseudoColumns, 'supervisor'),
-			).toBeUndefined();
+			expect(findMatchingPseudo(pseudoColumns, 'supervisor')).toBeUndefined();
 		});
 
 		it('returns undefined for empty list', () => {
@@ -115,9 +103,9 @@ describe('findMatchingPseudo', () => {
 
 	describe('with explicit role', () => {
 		it('matches explicit role against parentRole', () => {
-			expect(
-				findMatchingPseudo(pseudoColumns, 'parent', 'parent'),
-			).toBe(defaultPseudo);
+			expect(findMatchingPseudo(pseudoColumns, 'parent', 'parent')).toBe(
+				defaultPseudo,
+			);
 		});
 
 		it('matches explicit role against childRole', () => {
@@ -127,15 +115,15 @@ describe('findMatchingPseudo', () => {
 		});
 
 		it('matches keyword even when role is provided', () => {
-			expect(
-				findMatchingPseudo(pseudoColumns, 'manager', 'someRole'),
-			).toBe(managerPseudo);
+			expect(findMatchingPseudo(pseudoColumns, 'manager', 'someRole')).toBe(
+				managerPseudo,
+			);
 		});
 
 		it('is case-insensitive with role', () => {
-			expect(
-				findMatchingPseudo(pseudoColumns, 'x', 'MANAGER'),
-			).toBe(managerPseudo);
+			expect(findMatchingPseudo(pseudoColumns, 'x', 'MANAGER')).toBe(
+				managerPseudo,
+			);
 		});
 	});
 });

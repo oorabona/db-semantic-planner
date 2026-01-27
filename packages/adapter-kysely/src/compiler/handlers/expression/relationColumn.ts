@@ -48,6 +48,19 @@ export const relationColumnHandler: ExpressionHandler<RelationColumnIntent> = (
 		return query;
 	}
 
+	// CLI-012c: Skip recursive CTE includes — data is in a scalar JSON subquery,
+	// not available as flat columns from a LEFT JOIN
+	if (strategyDecision?.choice === 'cte') {
+		const isRecursiveCte = ctx.plan.ctes.some(
+			(c: { recursive?: boolean; sourceIntent: string }) =>
+				c.recursive &&
+				c.sourceIntent === `${ctx.plan.rootTable}.${topLevelRelation}`,
+		);
+		if (isRecursiveCte) {
+			return query;
+		}
+	}
+
 	// Check if relation is already joined (from include or previous relationColumn)
 	let joinInfo = ctx.state.joinedIncludeRelations.get(relation);
 

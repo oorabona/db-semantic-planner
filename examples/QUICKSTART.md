@@ -1979,6 +1979,35 @@ products | where category.parent.name = "Electronics"
 products | select title, category.name as categoryName
 ```
 
+#### Recursive Hierarchy Traversal (WITH RECURSIVE)
+
+For self-referential tables with configured ancestor/descendant roles, NQL generates efficient `WITH RECURSIVE` CTEs:
+
+```
+# Schema: employees.managerId → ref('employees', { roles: { ancestors: 'managementChain', descendants: 'allReports' } })
+
+# All ancestors as JSON array (full rows)
+employees | select name, managementChain.*
+# → WITH RECURSIVE __rc AS (SELECT __n.* ... WHERE __n.id = employees.manager_id ...)
+#   json_agg(to_jsonb(__rc)) → [{"id":1,"name":"Alice",...}, {"id":2,"name":"Bob",...}]
+
+# Ancestors — single column (optimized: only PK+FK+name in CTE)
+employees | select name, managementChain.name
+# → json_agg(__rc.name) → ["Alice", "Bob"]
+
+# Ancestors — multiple columns (jsonb_build_object)
+employees | select name, managementChain.name, managementChain.title
+# → json_agg(jsonb_build_object('name', __rc.name, 'title', __rc.title))
+
+# All descendants as JSON array
+employees | select name, allReports.*
+
+# Descendants — single column
+employees | select name, allReports.name
+```
+
+> **Column optimization:** When specific columns are requested (e.g., `managementChain.name`), the CTE only fetches the primary key, foreign key, and requested columns — not the entire row. The `json_agg` output matches exactly what was requested.
+
 #### Subqueries
 
 Use subqueries for complex filtering:

@@ -3260,7 +3260,15 @@ function buildCTEs(
 			? `${schemaName}.${relation.target}`
 			: relation.target;
 
-		// CLI-012c: Check if this is a recursive CTE
+		// CLI-012c: Recursive CTE includes with schema-level recursive metadata
+		// use correlated scalar subquery (compileRecursiveCteInclude in cte.ts).
+		// Only skip standalone CTE when the relation has recursive metadata
+		// (pseudo-columns like managementChain/allReports), not for include-based
+		// recursive CTEs which still use the standalone WITH RECURSIVE path.
+		if (cte.recursive && relation.recursive) {
+			continue;
+		}
+		// CLI-012c: Include-based recursive CTE — use standalone WITH RECURSIVE
 		if (cte.recursive) {
 			builder = buildRecursiveCTE(
 				builder,
@@ -3272,27 +3280,27 @@ function buildCTEs(
 				coreCapabilities,
 				dialect,
 			);
-		} else {
-			// Non-recursive CTE (existing CLI-012b logic)
-			// biome-ignore lint/suspicious/noExplicitAny: Dynamic table name requires any
-			builder = builder.with(cte.name, (db: Kysely<any>) => {
-				// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
-				let cteQuery: any = db.selectFrom(targetTable).selectAll();
-
-				// CLI-012b: Apply include.where filter inside the CTE
-				if (includeIntent?.where) {
-					cteQuery = addWhereSimple(
-						cteQuery,
-						includeIntent.where,
-						relation.target,
-						coreCapabilities,
-						dialect,
-					);
-				}
-
-				return cteQuery;
-			});
+			continue;
 		}
+		// Non-recursive CTE (existing CLI-012b logic)
+		// biome-ignore lint/suspicious/noExplicitAny: Dynamic table name requires any
+		builder = builder.with(cte.name, (db: Kysely<any>) => {
+			// biome-ignore lint/suspicious/noExplicitAny: Dynamic query building
+			let cteQuery: any = db.selectFrom(targetTable).selectAll();
+
+			// CLI-012b: Apply include.where filter inside the CTE
+			if (includeIntent?.where) {
+				cteQuery = addWhereSimple(
+					cteQuery,
+					includeIntent.where,
+					relation.target,
+					coreCapabilities,
+					dialect,
+				);
+			}
+
+			return cteQuery;
+		});
 	}
 
 	return builder;

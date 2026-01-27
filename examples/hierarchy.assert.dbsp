@@ -33,3 +33,48 @@ sql.equals: select "employees"."name", "employees"."salary", "manager_1"."name" 
 success: true
 sql.equals: select "employees"."name", "employees"."title" from "employees" as "employees" where "employees"."manager_id" = $1
 params.length: 1
+
+# ─────────────────────────────────────────
+# Query 4: employees | select name, managementChain.*
+# Recursive CTE (ancestors) — all columns, json_agg(to_jsonb(...))
+# ─────────────────────────────────────────
+--- query: 4
+success: true
+sql.equals: select (WITH RECURSIVE "__rc_1" AS (SELECT "__n".*, 1 AS "__depth", ARRAY["__n"."id"] AS "__visited" FROM "employees" AS "__n" WHERE "__n"."id" = "employees"."manager_id" UNION ALL SELECT "__n".*, "__rc_1"."__depth" + 1, "__rc_1"."__visited" || "__n"."id" FROM "__rc_1" INNER JOIN "employees" AS "__n" ON "__n"."id" = "__rc_1"."manager_id" WHERE "__rc_1"."__depth" < $1 AND "__n"."id" <> ALL("__rc_1"."__visited")) SELECT COALESCE(json_agg(to_jsonb("__rc_1") ORDER BY "__rc_1"."__depth"), '[]'::json) FROM "__rc_1") as "management_chain_json", "employees"."name" from "employees" as "employees"
+params.equals: [10]
+
+# ─────────────────────────────────────────
+# Query 5: employees | select name, managementChain.name
+# Recursive CTE (ancestors) — optimized: only PK+FK+name
+# ─────────────────────────────────────────
+--- query: 5
+success: true
+sql.equals: select (WITH RECURSIVE "__rc_1" AS (SELECT "__n"."id", "__n"."manager_id", "__n"."name", 1 AS "__depth", ARRAY["__n"."id"] AS "__visited" FROM "employees" AS "__n" WHERE "__n"."id" = "employees"."manager_id" UNION ALL SELECT "__n"."id", "__n"."manager_id", "__n"."name", "__rc_1"."__depth" + 1, "__rc_1"."__visited" || "__n"."id" FROM "__rc_1" INNER JOIN "employees" AS "__n" ON "__n"."id" = "__rc_1"."manager_id" WHERE "__rc_1"."__depth" < $1 AND "__n"."id" <> ALL("__rc_1"."__visited")) SELECT COALESCE(json_agg("__rc_1"."name" ORDER BY "__rc_1"."__depth"), '[]'::json) FROM "__rc_1") as "management_chain_json", "employees"."name" from "employees" as "employees"
+params.equals: [10]
+
+# ─────────────────────────────────────────
+# Query 6: employees | select name, managementChain.name, managementChain.title
+# Recursive CTE (ancestors) — optimized: PK+FK+name+title, jsonb_build_object
+# ─────────────────────────────────────────
+--- query: 6
+success: true
+sql.equals: select (WITH RECURSIVE "__rc_1" AS (SELECT "__n"."id", "__n"."manager_id", "__n"."name", "__n"."title", 1 AS "__depth", ARRAY["__n"."id"] AS "__visited" FROM "employees" AS "__n" WHERE "__n"."id" = "employees"."manager_id" UNION ALL SELECT "__n"."id", "__n"."manager_id", "__n"."name", "__n"."title", "__rc_1"."__depth" + 1, "__rc_1"."__visited" || "__n"."id" FROM "__rc_1" INNER JOIN "employees" AS "__n" ON "__n"."id" = "__rc_1"."manager_id" WHERE "__rc_1"."__depth" < $1 AND "__n"."id" <> ALL("__rc_1"."__visited")) SELECT COALESCE(json_agg(jsonb_build_object('name', "__rc_1"."name", 'title', "__rc_1"."title") ORDER BY "__rc_1"."__depth"), '[]'::json) FROM "__rc_1") as "management_chain_json", "employees"."name" from "employees" as "employees"
+params.equals: [10]
+
+# ─────────────────────────────────────────
+# Query 7: employees | select name, allReports.*
+# Recursive CTE (descendants) — all columns, reversed direction
+# ─────────────────────────────────────────
+--- query: 7
+success: true
+sql.equals: select (WITH RECURSIVE "__rc_1" AS (SELECT "__n".*, 1 AS "__depth", ARRAY["__n"."id"] AS "__visited" FROM "employees" AS "__n" WHERE "__n"."manager_id" = "employees"."id" UNION ALL SELECT "__n".*, "__rc_1"."__depth" + 1, "__rc_1"."__visited" || "__n"."id" FROM "__rc_1" INNER JOIN "employees" AS "__n" ON "__n"."manager_id" = "__rc_1"."id" WHERE "__rc_1"."__depth" < $1 AND "__n"."id" <> ALL("__rc_1"."__visited")) SELECT COALESCE(json_agg(to_jsonb("__rc_1") ORDER BY "__rc_1"."__depth"), '[]'::json) FROM "__rc_1") as "all_reports_json", "employees"."name" from "employees" as "employees"
+params.equals: [10]
+
+# ─────────────────────────────────────────
+# Query 8: employees | select name, allReports.name
+# Recursive CTE (descendants) — optimized: only PK+FK+name
+# ─────────────────────────────────────────
+--- query: 8
+success: true
+sql.equals: select (WITH RECURSIVE "__rc_1" AS (SELECT "__n"."id", "__n"."manager_id", "__n"."name", 1 AS "__depth", ARRAY["__n"."id"] AS "__visited" FROM "employees" AS "__n" WHERE "__n"."manager_id" = "employees"."id" UNION ALL SELECT "__n"."id", "__n"."manager_id", "__n"."name", "__rc_1"."__depth" + 1, "__rc_1"."__visited" || "__n"."id" FROM "__rc_1" INNER JOIN "employees" AS "__n" ON "__n"."manager_id" = "__rc_1"."id" WHERE "__rc_1"."__depth" < $1 AND "__n"."id" <> ALL("__rc_1"."__visited")) SELECT COALESCE(json_agg("__rc_1"."name" ORDER BY "__rc_1"."__depth"), '[]'::json) FROM "__rc_1") as "all_reports_json", "employees"."name" from "employees" as "employees"
+params.equals: [10]
