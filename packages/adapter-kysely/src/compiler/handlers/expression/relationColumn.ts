@@ -190,6 +190,11 @@ export const relationColumnHandler: ExpressionHandler<RelationColumnIntent> = (
 		// eb.ref('t1.*') produces invalid SQL: "t1"."*"
 		// selectAll(alias) produces correct SQL: "t1".*
 		if (column === '*') {
+			// FLAT-BUG-001: Mark relation as explicitly selected
+			if (!ctx.state.explicitlySelectedRelations) {
+				ctx.state.explicitlySelectedRelations = new Set();
+			}
+			ctx.state.explicitlySelectedRelations.add(relation);
 			return result.selectAll(finalAlias);
 		}
 
@@ -199,6 +204,12 @@ export const relationColumnHandler: ExpressionHandler<RelationColumnIntent> = (
 
 	// Special case: column === '*' for already joined relations
 	if (column === '*') {
+		// FLAT-BUG-001: Mark relation as explicitly selected so that
+		// addIncludeSelectColumns skips duplicate aliased columns
+		if (!ctx.state.explicitlySelectedRelations) {
+			ctx.state.explicitlySelectedRelations = new Set();
+		}
+		ctx.state.explicitlySelectedRelations.add(relation);
 		return query.selectAll(joinInfo.alias);
 	}
 

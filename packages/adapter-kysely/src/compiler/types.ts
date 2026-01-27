@@ -65,6 +65,13 @@ export interface CompilerState {
 	 */
 	relationFilters?: Map<string, WhereIntent>;
 
+	/**
+	 * FLAT-BUG-001: Relations whose columns were explicitly selected via `relation.*`
+	 * in the SELECT clause by relationColumnHandler. addIncludeSelectColumns
+	 * must skip these to avoid duplicate column output.
+	 */
+	explicitlySelectedRelations?: Set<string>;
+
 	// ============================================================
 	// Global Limits (NQL-ALIGN Block 3)
 	// ============================================================

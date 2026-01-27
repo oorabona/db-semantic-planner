@@ -780,26 +780,19 @@ export function compile(
 		dialect,
 	);
 
-	// Build the base query using the CTE-enhanced builder
-	let query = buildBaseQuery(
-		intent,
-		rootAlias,
-		builder,
-		model,
-		plan,
-		state,
-		schemaName,
-	);
+	// ================================================================
+	// FLAT-BUG-001 FIX: Reordered compilation flow.
+	// Previous order: SELECT expressions → include JOINs
+	//   → relationColumnHandler created duplicate JOINs because
+	//     joinedIncludeRelations was empty during SELECT compilation.
+	// New order: FROM → include JOINs → SELECT expressions
+	//   → relationColumnHandler finds existing JOINs and reuses them.
+	// ================================================================
 
-	// Add Window functions (P3-A)
-	if (windows && windows.length > 0) {
-		for (const window of windows) {
-			query = compileWindowSelect(query, window, rootAlias);
-		}
-	}
+	// Phase 1: Build FROM clause (no SELECT yet)
+	let query = buildFromClause(intent, rootAlias, builder, schemaName);
 
-	// Apply JOIN filters for filter-strategy: 'join' (before WHERE clause)
-	// This adds INNER JOINs for relation filters that the planner decided to use JOIN
+	// Phase 2: Apply JOIN filters for filter-strategy: 'join' (before includes)
 	if (intent.where) {
 		query = applyJoinFilters(
 			query,
@@ -819,9 +812,11 @@ export function compile(
 		extractRelationFiltersForSharing(intent.where, state);
 	}
 
-	// Apply CTEs for include-strategy: 'cte' (CLI-011)
-	// This handles recursive/self-referential includes
+	// Phase 3: Apply include JOINs (populates state.joinedIncludeRelations)
+	// This MUST happen before SELECT expressions so that relationColumnHandler
+	// finds existing JOINs instead of creating duplicate ones.
 	if (intent.include) {
+		// Apply CTEs for include-strategy: 'cte' (CLI-011)
 		query = applyCteIncludes(
 			kysely,
 			query,
@@ -833,11 +828,8 @@ export function compile(
 			rootAlias,
 			schemaName,
 		);
-	}
 
-	// Apply LATERAL JOINs for include-strategy: 'lateral' (CORE-006)
-	// LATERAL allows correlated subqueries with limit/orderBy per parent
-	if (intent.include) {
+		// Apply LATERAL JOINs for include-strategy: 'lateral' (CORE-006)
 		query = applyLateralIncludes(
 			query,
 			intent.include,
@@ -848,11 +840,8 @@ export function compile(
 			rootAlias,
 			schemaName,
 		);
-	}
 
-	// Apply JSON_AGG for include-strategy: 'json_agg' (CORE-006)
-	// Aggregates related rows as JSON array, no row duplication
-	if (intent.include) {
+		// Apply JSON_AGG for include-strategy: 'json_agg' (CORE-006)
 		query = applyJsonAggIncludes(
 			query,
 			intent.include,
@@ -863,11 +852,8 @@ export function compile(
 			rootAlias,
 			schemaName,
 		);
-	}
 
-	// Apply LEFT JOINs for include-strategy: 'join' (CORE-001)
-	// This adds LEFT JOINs for includes that the planner decided to use JOIN
-	if (intent.include) {
+		// Apply LEFT JOINs for include-strategy: 'join' (CORE-001)
 		query = applyJoinIncludes(
 			query,
 			intent.include,
@@ -878,8 +864,25 @@ export function compile(
 			rootAlias,
 			schemaName,
 		);
+	}
 
-		// Add SELECT columns for included relations
+	// Phase 4: Apply SELECT expressions (after include JOINs are registered)
+	// relationColumnHandler will find existing JOINs in joinedIncludeRelations
+	// and mark relations with selectAll(*) in state.explicitlySelectedRelations
+	query = applySelectClause(
+		query,
+		intent,
+		rootAlias,
+		model,
+		plan,
+		state,
+		schemaName,
+	);
+
+	// Phase 5: Add aliased SELECT columns for included relations
+	// MUST run after applySelectClause so that explicitlySelectedRelations
+	// is populated — relations with relation.* in SELECT are skipped here
+	if (intent.include) {
 		query = addIncludeSelectColumns(
 			query,
 			state,
@@ -887,6 +890,13 @@ export function compile(
 			rootTable,
 			aliasIncludedColumns,
 		);
+	}
+
+	// Add Window functions (P3-A)
+	if (windows && windows.length > 0) {
+		for (const window of windows) {
+			query = compileWindowSelect(query, window, rootAlias);
+		}
 	}
 
 	// Add WHERE clause
@@ -1000,14 +1010,18 @@ export {
 // Query Building
 // ============================================================================
 
-function buildBaseQuery(
+/**
+ * FLAT-BUG-001: Build FROM clause only (no SELECT expressions).
+ * SELECT is deferred to applySelectClause() so that include handlers
+ * can register their JOINs in state.joinedIncludeRelations FIRST.
+ * This ensures relationColumnHandler finds existing JOINs instead of
+ * creating duplicate ones.
+ */
+function buildFromClause(
 	intent: QueryIntent,
 	alias: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 	kysely: Kysely<any>,
-	model: ModelIR,
-	plan: PlanReport,
-	state: CompilerState,
 	schemaName?: string,
 	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
 ): SelectQueryBuilder<any, any, any> {
@@ -1021,15 +1035,34 @@ function buildBaseQuery(
 		query = query.distinct();
 	}
 
-	// Add SELECT
+	return query;
+}
+
+/**
+ * FLAT-BUG-001: Apply SELECT clause after include JOINs are registered.
+ * This runs AFTER include handlers so that relationColumnHandler can
+ * find existing JOINs in state.joinedIncludeRelations and reuse them
+ * instead of creating duplicate JOINs.
+ */
+function applySelectClause(
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+	query: SelectQueryBuilder<any, any, any>,
+	intent: QueryIntent,
+	alias: string,
+	model: ModelIR,
+	plan: PlanReport,
+	state: CompilerState,
+	schemaName?: string,
+	// biome-ignore lint/suspicious/noExplicitAny: Kysely generic requires any
+): SelectQueryBuilder<any, any, any> {
 	if (!intent.select || intent.select.type === 'all') {
-		query = query.selectAll(alias);
-	} else if (isSelectAggregate(intent.select)) {
-		// Handle aggregate select
-		query = buildAggregateSelect(query, intent.select, alias);
-	} else if (isSelectWithExpressions(intent.select)) {
-		// Handle select with expressions (COALESCE, etc.)
-		query = buildSelectWithExpressions(
+		return query.selectAll(alias);
+	}
+	if (isSelectAggregate(intent.select)) {
+		return buildAggregateSelect(query, intent.select, alias);
+	}
+	if (isSelectWithExpressions(intent.select)) {
+		return buildSelectWithExpressions(
 			query,
 			intent.select,
 			alias,
@@ -1038,12 +1071,9 @@ function buildBaseQuery(
 			state,
 			schemaName,
 		);
-	} else {
-		const fields = intent.select.fields.map((f: string) => `${alias}.${f}`);
-		query = query.select(fields);
 	}
-
-	return query;
+	const fields = intent.select.fields.map((f: string) => `${alias}.${f}`);
+	return query.select(fields);
 }
 
 /**
@@ -1960,6 +1990,12 @@ function addIncludeSelectColumns(
 
 		// Skip JSON_AGG relations - the data is already in the _json column
 		if (strategy === 'json_agg') {
+			continue;
+		}
+
+		// FLAT-BUG-001: Skip relations explicitly selected via relation.* in SELECT
+		// relationColumnHandler already added selectAll(alias) for these
+		if (state.explicitlySelectedRelations?.has(relationName)) {
 			continue;
 		}
 
