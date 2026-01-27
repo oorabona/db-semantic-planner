@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import type {
 	DeleteIntent,
 	ExpressionIntent,
+	InsertFromIntent,
 	InsertIntent,
 	OrderByIntent,
 	SelectFieldsIntent,
@@ -22,7 +23,6 @@ import type {
 	WhereNullIntent,
 	WhereOrIntent,
 	WhereRangeIntent,
-	WhereRangeOpIntent,
 	WhereRelationFilterIntent,
 } from '../src/compiler/index.js';
 import { compile } from '../src/index.js';
@@ -249,11 +249,12 @@ describe('NQL Compiler - SELECT Clauses', () => {
 		const select = query.select as SelectWithExpressionsIntent;
 		expect(select.type).toBe('expressions');
 		expect(select.columns).toHaveLength(1);
+		const col = select.columns[0]!;
 		// Column with alias uses columnAlias kind
-		expect(select.columns[0].kind).toBe('columnAlias');
-		if (select.columns[0].kind === 'columnAlias') {
-			expect(select.columns[0].column).toBe('name');
-			expect(select.columns[0].alias).toBe('user_name');
+		expect(col.kind).toBe('columnAlias');
+		if (col.kind === 'columnAlias') {
+			expect(col.column).toBe('name');
+			expect(col.alias).toBe('user_name');
 		}
 	});
 
@@ -264,10 +265,11 @@ describe('NQL Compiler - SELECT Clauses', () => {
 		const select = query.select as SelectWithExpressionsIntent;
 		expect(select.type).toBe('expressions');
 		// Path expressions use relationColumn kind
-		expect(select.columns[0].kind).toBe('relationColumn');
-		if (select.columns[0].kind === 'relationColumn') {
-			expect(select.columns[0].relation).toBe('customer');
-			expect(select.columns[0].column).toBe('name');
+		const col = select.columns[0]!;
+		expect(col.kind).toBe('relationColumn');
+		if (col.kind === 'relationColumn') {
+			expect(col.relation).toBe('customer');
+			expect(col.column).toBe('name');
 		}
 	});
 
@@ -277,9 +279,58 @@ describe('NQL Compiler - SELECT Clauses', () => {
 
 		const select = query.select as SelectWithExpressionsIntent;
 		expect(select.type).toBe('expressions');
-		expect(select.columns[0].kind).toBe('aggregate');
-		if (select.columns[0].kind === 'aggregate') {
-			expect(select.columns[0].function).toBe('count');
+		const col = select.columns[0]!;
+		expect(col.kind).toBe('aggregate');
+		if (col.kind === 'aggregate') {
+			expect(col.function).toBe('count');
+		}
+	});
+
+	it('compiles count(distinct col) aggregate', () => {
+		const result = compileNql(
+			'orders | select count(distinct status) as unique_statuses',
+		);
+		const query = result.query!;
+
+		const select = query.select as SelectWithExpressionsIntent;
+		expect(select.type).toBe('expressions');
+		const col = select.columns[0]!;
+		expect(col.kind).toBe('aggregate');
+		if (col.kind === 'aggregate') {
+			expect(col.function).toBe('count');
+			expect(col.field).toBe('status');
+			expect(col.distinct).toBe(true);
+			expect(col.as).toBe('unique_statuses');
+		}
+	});
+
+	it('compiles sum(distinct col) aggregate', () => {
+		const result = compileNql(
+			'orders | select sum(distinct amount) as unique_sum',
+		);
+		const query = result.query!;
+
+		const select = query.select as SelectWithExpressionsIntent;
+		const col = select.columns[0]!;
+		expect(col.kind).toBe('aggregate');
+		if (col.kind === 'aggregate') {
+			expect(col.function).toBe('sum');
+			expect(col.field).toBe('amount');
+			expect(col.distinct).toBe(true);
+		}
+	});
+
+	it('compiles aggregate without distinct (no distinct field)', () => {
+		const result = compileNql('orders | select count(status)');
+		const query = result.query!;
+
+		const select = query.select as SelectWithExpressionsIntent;
+		const col = select.columns[0]!;
+		expect(col.kind).toBe('aggregate');
+		if (col.kind === 'aggregate') {
+			expect(col.function).toBe('count');
+			expect(col.field).toBe('status');
+			expect(col.distinct).toBeUndefined();
 		}
 	});
 
@@ -290,10 +341,11 @@ describe('NQL Compiler - SELECT Clauses', () => {
 		const select = query.select as SelectWithExpressionsIntent;
 		expect(select.type).toBe('expressions');
 		// Arithmetic expressions use the arithmetic kind
-		expect(select.columns[0].kind).toBe('arithmetic');
-		if (select.columns[0].kind === 'arithmetic') {
-			expect(select.columns[0].operator).toBe('*');
-			expect(select.columns[0].as).toBe('total');
+		const col = select.columns[0]!;
+		expect(col.kind).toBe('arithmetic');
+		if (col.kind === 'arithmetic') {
+			expect(col.operator).toBe('*');
+			expect(col.as).toBe('total');
 		}
 	});
 });
@@ -316,9 +368,10 @@ describe('NQL Compiler - FLAT clause (v2.1)', () => {
 		expect(query.from).toBe('orders');
 		expect(query.include).toBeDefined();
 		expect(query.include).toHaveLength(1);
-		expect(query.include![0].relation).toBe('customer');
+		const inc = query.include![0]!;
+		expect(inc.relation).toBe('customer');
 		// Without | flat, strategy is not set (defaults to auto/json_agg)
-		expect(query.include![0].strategy).toBeUndefined();
+		expect(inc.strategy).toBeUndefined();
 	});
 
 	it('applies join strategy when flat clause is used', () => {
@@ -329,9 +382,10 @@ describe('NQL Compiler - FLAT clause (v2.1)', () => {
 		expect(query.from).toBe('orders');
 		expect(query.include).toBeDefined();
 		expect(query.include).toHaveLength(1);
-		expect(query.include![0].relation).toBe('customer');
+		const inc = query.include![0]!;
+		expect(inc.relation).toBe('customer');
 		// With | flat, strategy is set to 'join'
-		expect(query.include![0].strategy).toBe('join');
+		expect(inc.strategy).toBe('join');
 	});
 
 	it('auto-generates multiple includes from multiple relation paths', () => {
@@ -356,7 +410,7 @@ describe('NQL Compiler - FLAT clause (v2.1)', () => {
 
 		expect(query.include).toBeDefined();
 		expect(query.include).toHaveLength(1);
-		expect(query.include![0].relation).toBe('customer');
+		expect(query.include![0]!.relation).toBe('customer');
 	});
 
 	it('deprecated `with` keyword returns parse error', () => {
@@ -383,7 +437,7 @@ describe('NQL Compiler - ORDER BY Clauses', () => {
 		const result = compileNql('users | order by created_at desc');
 		const query = result.query!;
 
-		const orderBy = query.orderBy![0] as OrderByIntent;
+		const orderBy = query.orderBy![0]! as OrderByIntent;
 		expect(orderBy.direction).toBe('desc');
 	});
 
@@ -392,8 +446,8 @@ describe('NQL Compiler - ORDER BY Clauses', () => {
 		const query = result.query!;
 
 		expect(query.orderBy).toHaveLength(2);
-		expect(query.orderBy![0].direction).toBe('asc');
-		expect(query.orderBy![1].direction).toBe('desc');
+		expect(query.orderBy![0]!.direction).toBe('asc');
+		expect(query.orderBy![1]!.direction).toBe('desc');
 	});
 
 	it('compiles order by with expression (regression: bug 4)', () => {
@@ -469,6 +523,72 @@ describe('NQL Compiler - INSERT', () => {
 		expect(insert.returning).toBeDefined();
 		expect(insert.returning).toContain('id');
 		expect(insert.returning).toContain('name');
+	});
+});
+
+describe('NQL Compiler - INSERT FROM (NQL-ALIGN Block 4)', () => {
+	it('compiles simple insert from', () => {
+		const result = compileNql('insert into archived_users from users');
+
+		expect(result.mutation).toBeDefined();
+		const insertFrom = result.mutation as InsertFromIntent;
+		expect(insertFrom.type).toBe('insert_from');
+		expect(insertFrom.table).toBe('archived_users');
+		expect(insertFrom.source).toBe('users');
+	});
+
+	it('compiles insert from with where clause', () => {
+		const result = compileNql(
+			'insert into archived_users from users where active = false',
+		);
+
+		expect(result.mutation).toBeDefined();
+		const insertFrom = result.mutation as InsertFromIntent;
+		expect(insertFrom.type).toBe('insert_from');
+		expect(insertFrom.table).toBe('archived_users');
+		expect(insertFrom.source).toBe('users');
+		expect(insertFrom.where).toBeDefined();
+		const where = insertFrom.where as WhereComparisonIntent;
+		expect(where.field).toBe('active');
+		expect(where.operator).toBe('eq');
+		expect(where.value).toBe(false);
+	});
+
+	it('compiles insert from with limit', () => {
+		const result = compileNql(
+			'insert into archived_users from users limit 100',
+		);
+
+		expect(result.mutation).toBeDefined();
+		const insertFrom = result.mutation as InsertFromIntent;
+		expect(insertFrom.type).toBe('insert_from');
+		expect(insertFrom.table).toBe('archived_users');
+		expect(insertFrom.source).toBe('users');
+		expect(insertFrom.limit).toBe(100);
+	});
+
+	it('compiles insert from with where and limit', () => {
+		const result = compileNql(
+			'insert into archived_users from users where active = false limit 50',
+		);
+
+		expect(result.mutation).toBeDefined();
+		const insertFrom = result.mutation as InsertFromIntent;
+		expect(insertFrom.type).toBe('insert_from');
+		expect(insertFrom.where).toBeDefined();
+		expect(insertFrom.limit).toBe(50);
+	});
+
+	it('compiles insert from with returning', () => {
+		const result = compileNql(
+			'insert into archived_users from users | select id',
+		);
+
+		expect(result.mutation).toBeDefined();
+		const insertFrom = result.mutation as InsertFromIntent;
+		expect(insertFrom.type).toBe('insert_from');
+		expect(insertFrom.returning).toBeDefined();
+		expect(insertFrom.returning).toContain('id');
 	});
 });
 
@@ -572,8 +692,9 @@ describe('NQL Compiler - Complex Queries', () => {
 		// NQL v2.1: customer.name triggers include with join strategy
 		expect(query.include).toBeDefined();
 		expect(query.include).toHaveLength(1);
-		expect(query.include![0].relation).toBe('customer');
-		expect(query.include![0].strategy).toBe('join');
+		const inc = query.include![0]!;
+		expect(inc.relation).toBe('customer');
+		expect(inc.strategy).toBe('join');
 	});
 
 	it('handles string escapes correctly', () => {
@@ -613,7 +734,7 @@ describe('NQL Compiler - Bug Fixes', () => {
 		expect(select.type).toBe('expressions');
 		expect(select.columns.length).toBe(1);
 
-		const col = select.columns[0];
+		const col = select.columns[0]!;
 		expect(col.kind).toBe('arithmetic');
 		if (col.kind === 'arithmetic') {
 			expect(col.operator).toBe('-');
@@ -634,7 +755,7 @@ describe('NQL Compiler - Bug Fixes', () => {
 		expect(select.type).toBe('expressions');
 		expect(select.columns.length).toBe(1);
 
-		const col = select.columns[0];
+		const col = select.columns[0]!;
 		expect(col.kind).toBe('aggregate');
 		if (col.kind === 'aggregate') {
 			expect(col.function).toBe('sum');
@@ -652,7 +773,7 @@ describe('NQL Compiler - Bug Fixes', () => {
 		const query = result.query!;
 		const select = query.select as SelectWithExpressionsIntent;
 
-		const col = select.columns[0];
+		const col = select.columns[0]!;
 		expect(col.kind).toBe('aggregate');
 		if (col.kind === 'aggregate') {
 			expect(col.function).toBe('count');
@@ -666,7 +787,7 @@ describe('NQL Compiler - Bug Fixes', () => {
 		const query = result.query!;
 		const select = query.select as SelectWithExpressionsIntent;
 
-		const col = select.columns[0];
+		const col = select.columns[0]!;
 		expect(col.kind).toBe('aggregate');
 		if (col.kind === 'aggregate') {
 			expect(col.function).toBe('count');
@@ -749,7 +870,7 @@ describe('NQL Compiler - Range Operators', () => {
 		// Act: compile to IntentAST
 		const result = compileNql(nql);
 		const query = result.query!;
-		const where = query.where as WhereRangeOpIntent;
+		const where = query.where as WhereRangeIntent;
 
 		// Assert: range operator is correctly compiled
 		expect(where.kind).toBe('range');
@@ -765,7 +886,7 @@ describe('NQL Compiler - Range Operators', () => {
 		// Act: compile to IntentAST
 		const result = compileNql(nql);
 		const query = result.query!;
-		const where = query.where as WhereRangeOpIntent;
+		const where = query.where as WhereRangeIntent;
 
 		// Assert: range operator is correctly compiled
 		expect(where.kind).toBe('range');
@@ -781,7 +902,7 @@ describe('NQL Compiler - Range Operators', () => {
 		// Act: compile to IntentAST
 		const result = compileNql(nql);
 		const query = result.query!;
-		const where = query.where as WhereRangeOpIntent;
+		const where = query.where as WhereRangeIntent;
 
 		// Assert: range operator is correctly compiled
 		expect(where.kind).toBe('range');
@@ -797,7 +918,7 @@ describe('NQL Compiler - Range Operators', () => {
 		// Act: compile to IntentAST
 		const result = compileNql(nql);
 		const query = result.query!;
-		const where = query.where as WhereRangeOpIntent;
+		const where = query.where as WhereRangeIntent;
 
 		// Assert: range literal with exclusive bounds is preserved
 		expect(where.kind).toBe('range');
@@ -812,7 +933,7 @@ describe('NQL Compiler - Range Operators', () => {
 		// Act: compile to IntentAST
 		const result = compileNql(nql);
 		const query = result.query!;
-		const where = query.where as WhereRangeOpIntent;
+		const where = query.where as WhereRangeIntent;
 
 		// Assert: mixed bounds are preserved
 		expect(where.kind).toBe('range');
@@ -895,6 +1016,88 @@ describe('NQL Compiler - Pseudo-Column Expressions (Self-Referential Traversal)'
 				targetColumn: 'label',
 				as: 'descendant.label',
 			});
+		});
+
+		it('compiles ascendant[N].column with depth hint', () => {
+			// Arrange: bounded upward traversal
+			const nql = 'categories | select id, ascendant[3].name';
+
+			// Act
+			const result = compileNql(nql);
+			const select = result.query!.select as SelectWithExpressionsIntent;
+
+			// Assert: depth hint is passed through
+			const ascCol = select.columns[1] as ExpressionIntent;
+			expect(ascCol).toMatchObject({
+				kind: 'pseudoColumn',
+				traversal: 'ascendant',
+				targetColumn: 'name',
+				as: 'ascendant.name',
+				depth: 3,
+			});
+		});
+
+		it('compiles descendant[N].column with depth hint', () => {
+			// Arrange: bounded downward traversal
+			const nql = 'nodes | select id, descendant[5].label';
+
+			// Act
+			const result = compileNql(nql);
+			const select = result.query!.select as SelectWithExpressionsIntent;
+
+			// Assert
+			const descCol = select.columns[1] as ExpressionIntent;
+			expect(descCol).toMatchObject({
+				kind: 'pseudoColumn',
+				traversal: 'descendant',
+				targetColumn: 'label',
+				as: 'descendant.label',
+				depth: 5,
+			});
+		});
+
+		it('compiles parent.column without depth hint (no depth field)', () => {
+			// Arrange: parent doesn't need depth (always 1 hop)
+			const nql = 'employees | select id, parent.name';
+
+			// Act
+			const result = compileNql(nql);
+			const select = result.query!.select as SelectWithExpressionsIntent;
+
+			// Assert: no depth field for unscoped traversal
+			const parentCol = select.columns[1] as ExpressionIntent;
+			expect(parentCol).toMatchObject({
+				kind: 'pseudoColumn',
+				traversal: 'parent',
+				targetColumn: 'name',
+			});
+			expect(
+				(parentCol as unknown as Record<string, unknown>).depth,
+			).toBeUndefined();
+		});
+
+		it('rejects depth hint on non-recursive traversal parent[N]', () => {
+			const nql = 'employees | select id, parent[2].name';
+			expect(() => compileNql(nql)).toThrow(/not supported on 'parent'/);
+		});
+
+		it('rejects depth hint on non-recursive traversal child[N]', () => {
+			const nql = 'employees | select id, child[3].role';
+			expect(() => compileNql(nql)).toThrow(/not supported on 'child'/);
+		});
+
+		it('rejects depth hint of 0', () => {
+			const nql = 'categories | select id, ascendant[0].name';
+			expect(() => compileNql(nql)).toThrow(
+				/must be an integer between 1 and 100/,
+			);
+		});
+
+		it('rejects depth hint greater than 100', () => {
+			const nql = 'categories | select id, descendant[101].label';
+			expect(() => compileNql(nql)).toThrow(
+				/must be an integer between 1 and 100/,
+			);
 		});
 
 		it('preserves case-insensitive keywords', () => {

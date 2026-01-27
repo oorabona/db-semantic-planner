@@ -47,7 +47,12 @@ export interface NqlMutationPipeline {
 	clauses: NqlMutationClause[];
 }
 
-export type NqlMutation = NqlInsert | NqlUpdate | NqlDelete | NqlUpsert;
+export type NqlMutation =
+	| NqlInsert
+	| NqlInsertFrom
+	| NqlUpdate
+	| NqlDelete
+	| NqlUpsert;
 
 export type NqlMutationClause = NqlSelectClause | NqlBindClause;
 
@@ -181,6 +186,7 @@ export type NqlExpression =
 	| NqlRelationFilterExpression
 	| NqlFunctionCall
 	| NqlWindowExpression
+	| NqlCaseExpression
 	| NqlPathExpression
 	| NqlLiteral
 	| NqlSubquery
@@ -279,6 +285,8 @@ export interface NqlFunctionCall {
 	type: 'function';
 	name: string;
 	args: NqlExpression[];
+	/** Whether DISTINCT modifier was used: count(distinct col) */
+	distinct?: boolean;
 }
 
 /**
@@ -292,9 +300,23 @@ export interface NqlWindowExpression {
 	orderBy: NqlOrderItem[];
 }
 
+/**
+ * CASE expression: CASE WHEN cond THEN result [WHEN ...] [ELSE default] END
+ */
+export interface NqlCaseExpression {
+	type: 'case';
+	whenClauses: Array<{
+		condition: NqlExpression;
+		result: NqlExpression;
+	}>;
+	elseClause?: NqlExpression;
+}
+
 export interface NqlPathExpression {
 	type: 'path';
 	segments: string[];
+	/** Optional depth hint for scoped traversal: ascendant[3].column */
+	depthHint?: number;
 }
 
 export interface NqlSubquery {
@@ -371,6 +393,24 @@ export interface NqlInsert {
 	type: 'insert';
 	table: string;
 	assignments: NqlAssignment[];
+}
+
+/**
+ * INSERT INTO target FROM source query.
+ * @example `insert into archived_users from users | where active = false`
+ */
+export interface NqlInsertFrom {
+	type: 'insert_from';
+	/** Target table to insert into */
+	table: string;
+	/** Source table to select from */
+	source: string;
+	/** Optional column mapping (default: same columns) */
+	columns?: string[];
+	/** WHERE clause to filter source rows */
+	where?: NqlExpression;
+	/** LIMIT clause to restrict rows */
+	limit?: number;
 }
 
 export interface NqlUpdate {

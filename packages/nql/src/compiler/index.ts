@@ -13,6 +13,7 @@ import type {
 	DeleteIntent,
 	ExpressionIntent,
 	IncludeIntent,
+	InsertFromIntent,
 	InsertIntent,
 	MutationIntent,
 	NullOperator,
@@ -45,16 +46,21 @@ import type {
 import type {
 	NqlBetweenExpression,
 	NqlBinaryExpression,
+	NqlBooleanLiteral,
+	NqlCaseExpression,
 	NqlComparisonExpression,
 	NqlDelete,
 	NqlExpression,
 	NqlGroupByClause,
 	NqlInExpression,
 	NqlInsert,
+	NqlInsertFrom,
 	NqlIsNullExpression,
 	NqlMutationPipeline,
+	NqlNumberLiteral,
 	NqlOrderByClause,
 	NqlOrderItem,
+	NqlPathExpression,
 	NqlProgram,
 	NqlQuery,
 	NqlRangeLiteral,
@@ -62,6 +68,7 @@ import type {
 	NqlRelationFilterExpression,
 	NqlSelectClause,
 	NqlSelectItem,
+	NqlStringLiteral,
 	NqlUnaryExpression,
 	NqlUpdate,
 	NqlUpsert,
@@ -75,6 +82,7 @@ export type {
 	DeleteIntent,
 	ExpressionIntent,
 	IncludeIntent,
+	InsertFromIntent,
 	InsertIntent,
 	MutationIntent,
 	NullOperator,
@@ -384,6 +392,7 @@ export class NqlCompiler {
 					function: fn as AggregateFunction,
 					field,
 					as: item.alias,
+					...(expr.distinct && { distinct: true }),
 					...(extraArgs && { extraArgs }),
 				};
 			}
@@ -466,20 +475,42 @@ export class NqlCompiler {
 			const segments = expr.segments;
 			const firstSegment = segments[0].toLowerCase();
 
-			// Check for pseudo-column traversal (parent.name, ascendant.title, etc.)
+			// Check for pseudo-column traversal (parent.name, ascendant.title, ascendant[3].title, etc.)
 			if (isPseudoColumnKeyword(firstSegment)) {
-				// V1.0: Simple traversal - pseudo.column syntax
-				// e.g., parent.name, child.department, ascendant.title
+				// Simple traversal - pseudo.column or pseudo[N].column syntax
+				// e.g., parent.name, child.department, ascendant[3].title
 				if (segments.length === 2) {
+					const depthHint = expr.type === 'path' ? expr.depthHint : undefined;
+
+					// Validate depthHint: only recursive traversals support scoped depth
+					if (depthHint !== undefined) {
+						const RECURSIVE_TRAVERSALS = ['ascendant', 'descendant'];
+						if (!RECURSIVE_TRAVERSALS.includes(firstSegment)) {
+							throw new Error(
+								`Scoped depth [${depthHint}] is not supported on '${firstSegment}'. ` +
+									`Only recursive traversals (ascendant, descendant) support depth hints.`,
+							);
+						}
+						if (
+							!Number.isFinite(depthHint) ||
+							depthHint < 1 ||
+							depthHint > 100
+						) {
+							throw new Error(
+								`Invalid depth hint [${depthHint}]: must be an integer between 1 and 100.`,
+							);
+						}
+					}
+
 					return {
 						kind: 'pseudoColumn',
 						traversal: firstSegment as PseudoColumnTraversal,
 						targetColumn: segments[1],
 						as: item.alias ?? `${firstSegment}.${segments[1]}`,
+						...(depthHint !== undefined && { depth: depthHint }),
 					};
 				}
-				// V1.1+: Extended syntax - role.pseudo.column (e.g., manager.parent.name)
-				// or pseudo[depth].column (e.g., ascendant[3].name) - not yet implemented
+				// Extended syntax - role.pseudo.column (e.g., manager.parent.name) - not yet implemented
 				throw new Error(
 					`Extended pseudo-column syntax not yet supported: ${segments.join('.')}. ` +
 						`Use simple traversal: ${firstSegment}.<column>`,
@@ -532,6 +563,22 @@ export class NqlCompiler {
 			throw new Error(
 				`Unsupported unary operator in SELECT: ${unary.operator}`,
 			);
+		}
+
+		// CASE expression (e.g., "case when price > 100 then 'high' else 'low' end")
+		if (expr.type === 'case') {
+			const caseExpr = expr as NqlCaseExpression;
+			return {
+				kind: 'case' as const,
+				when: caseExpr.whenClauses.map((wc) => ({
+					condition: this.compileExpressionToIntent(wc.condition),
+					result: this.compileExpressionToIntent(wc.result),
+				})),
+				...(caseExpr.elseClause && {
+					else: this.compileExpressionToIntent(caseExpr.elseClause),
+				}),
+				as: item.alias,
+			};
 		}
 
 		// All expression types should be handled above
@@ -793,11 +840,13 @@ export class NqlCompiler {
 	}
 
 	private compileMutation(
-		mutation: NqlInsert | NqlUpdate | NqlDelete | NqlUpsert,
+		mutation: NqlInsert | NqlInsertFrom | NqlUpdate | NqlDelete | NqlUpsert,
 	): MutationIntent {
 		switch (mutation.type) {
 			case 'insert':
 				return this.compileInsert(mutation);
+			case 'insert_from':
+				return this.compileInsertFrom(mutation);
 			case 'update':
 				return this.compileUpdate(mutation);
 			case 'delete':
@@ -817,6 +866,19 @@ export class NqlCompiler {
 			type: 'insert',
 			table: insert.table,
 			values: [values],
+		};
+	}
+
+	private compileInsertFrom(insertFrom: NqlInsertFrom): InsertFromIntent {
+		return {
+			type: 'insert_from',
+			table: insertFrom.table,
+			source: insertFrom.source,
+			columns: insertFrom.columns,
+			where: insertFrom.where
+				? this.compileExpression(insertFrom.where)
+				: undefined,
+			limit: insertFrom.limit,
 		};
 	}
 
@@ -898,6 +960,56 @@ export class NqlCompiler {
 			return expr.segments.join('.');
 		}
 		return null;
+	}
+
+	/**
+	 * Compile an NqlExpression to ExpressionIntent for use in CASE conditions/results.
+	 * Handles comparison expressions (for WHEN conditions) and literals/columns (for THEN/ELSE).
+	 */
+	private compileExpressionToIntent(expr: NqlExpression): ExpressionIntent {
+		// Handle comparison expressions (for CASE WHEN conditions)
+		if (expr.type === 'comparison') {
+			const cmp = expr as NqlComparisonExpression;
+			// Left side should be a path (column reference)
+			if (cmp.left.type !== 'path') {
+				throw new Error(
+					`CASE WHEN condition left side must be a column path, got ${cmp.left.type}`,
+				);
+			}
+			const column = (cmp.left as NqlPathExpression).segments.join('.');
+			const value = this.expressionToValue(cmp.right);
+			return {
+				kind: 'comparison',
+				column,
+				operator: cmp.operator,
+				value,
+			};
+		}
+
+		// Handle literal values (string, number, boolean, null)
+		if (
+			expr.type === 'string' ||
+			expr.type === 'number' ||
+			expr.type === 'boolean' ||
+			expr.type === 'null'
+		) {
+			const value =
+				expr.type === 'null'
+					? null
+					: (expr as NqlStringLiteral | NqlNumberLiteral | NqlBooleanLiteral)
+							.value;
+			return {
+				kind: 'literal',
+				value,
+			};
+		}
+
+		// For other expressions (columns, functions, etc.), wrap and use compileSelectExpression
+		const selectItem: NqlSelectItem = {
+			type: 'expression',
+			expression: expr,
+		};
+		return this.compileSelectExpression(selectItem);
 	}
 
 	private expressionToValue(expr: NqlExpression): unknown {

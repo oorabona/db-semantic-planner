@@ -8,6 +8,7 @@ import type { CstNode, IToken } from 'chevrotain';
 import type {
 	NqlAssignment,
 	NqlBetweenExpression,
+	NqlCaseExpression,
 	NqlClause,
 	NqlExistsExpression,
 	NqlExpression,
@@ -815,6 +816,11 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			return this.visit(asCstNode(ctx.literal[0]));
 		}
 
+		// CASE expression
+		if (ctx.caseExpr) {
+			return this.visit(asCstNode(ctx.caseExpr[0]));
+		}
+
 		// Function call
 		if (ctx.funcCall) {
 			return this.visit(asCstNode(ctx.funcCall[0]));
@@ -838,6 +844,45 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		throw new Error('Invalid primary expression');
 	}
 
+	/**
+	 * Visit CASE expression: CASE WHEN ... THEN ... [ELSE ...] END
+	 * Grammar: CASE (WHEN booleanExpr THEN expression)+ [ELSE expression] END
+	 */
+	caseExpr(ctx: CstContext): NqlCaseExpression {
+		const whenClauses: Array<{
+			condition: NqlExpression;
+			result: NqlExpression;
+		}> = [];
+
+		// booleanExpr nodes are the conditions (one per WHEN)
+		// expression nodes are: [result1, result2, ..., elseResult?]
+		const conditions = ctx.booleanExpr ?? [];
+		const results = ctx.expression ?? [];
+		const hasElse = ctx.Else !== undefined;
+		const whenCount = ctx.When?.length ?? 0;
+
+		for (let i = 0; i < whenCount; i++) {
+			whenClauses.push({
+				condition: this.visit(asCstNode(conditions[i])),
+				result: this.visit(asCstNode(results[i])),
+			});
+		}
+
+		// Handle ELSE clause if present
+		if (hasElse && results.length > whenCount) {
+			return {
+				type: 'case',
+				whenClauses,
+				elseClause: this.visit(asCstNode(results[results.length - 1])),
+			};
+		}
+
+		return {
+			type: 'case',
+			whenClauses,
+		};
+	}
+
 	scalarSubquery(ctx: CstContext): NqlSubquery {
 		if (!ctx.query) throw new Error('Scalar subquery missing query');
 		return {
@@ -853,7 +898,14 @@ export class NqlCstVisitor extends BaseCstVisitor {
 				segments.push(this.visit(asCstNode(segCtx)));
 			}
 		}
-		return { type: 'path', segments };
+		// Optional depth hint: ascendant[3].column
+		let depthHint: number | undefined;
+		if (ctx.NumberLiteral) {
+			depthHint = Number.parseInt(getImage(ctx.NumberLiteral[0]), 10);
+		}
+		return depthHint !== undefined
+			? { type: 'path', segments, depthHint }
+			: { type: 'path', segments };
 	}
 
 	funcCall(ctx: CstContext): NqlFunctionCall | NqlWindowExpression {
@@ -876,14 +928,18 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		}
 
 		const args: NqlExpression[] = [];
+		let distinct = false;
 
 		// count(*)
 		if (ctx.Star) {
 			args.push({ type: 'path', segments: ['*'] });
 		} else if (ctx.funcArgList) {
-			const argList = this.visit(
-				asCstNode(ctx.funcArgList[0]),
-			) as NqlExpression[];
+			// Check for DISTINCT modifier inside funcArgList
+			const argListCtx = asCstNode(ctx.funcArgList[0]);
+			if (argListCtx.children?.Distinct) {
+				distinct = true;
+			}
+			const argList = this.visit(argListCtx) as NqlExpression[];
 			args.push(...argList);
 		}
 
@@ -902,7 +958,9 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			};
 		}
 
-		return { type: 'function', name, args };
+		return distinct
+			? { type: 'function' as const, name, args, distinct }
+			: { type: 'function' as const, name, args };
 	}
 
 	windowClause(ctx: CstContext): {
@@ -1122,6 +1180,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	mutation(ctx: CstContext): NqlMutation {
+		if (ctx.insertFromStmt) return this.visit(asCstNode(ctx.insertFromStmt[0]));
 		if (ctx.insertStmt) return this.visit(asCstNode(ctx.insertStmt[0]));
 		if (ctx.updateStmt) return this.visit(asCstNode(ctx.updateStmt[0]));
 		if (ctx.deleteStmt) return this.visit(asCstNode(ctx.deleteStmt[0]));
@@ -1137,6 +1196,27 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			type: 'insert',
 			table: this.visit(asCstNode(ctx.identSegment[0])),
 			assignments: this.visit(asCstNode(ctx.assignmentList[0])),
+		};
+	}
+
+	insertFromStmt(ctx: CstContext): NqlMutation {
+		if (!ctx.identSegment || ctx.identSegment.length < 2) {
+			throw new Error('Insert FROM missing target or source table');
+		}
+		// identSegment[0] = target table, identSegment[1] = source table
+		const target = this.visit(asCstNode(ctx.identSegment[0])) as string;
+		const source = this.visit(asCstNode(ctx.identSegment[1])) as string;
+
+		return {
+			type: 'insert_from',
+			table: target,
+			source: source,
+			where: ctx.booleanExpr
+				? this.visit(asCstNode(ctx.booleanExpr[0]))
+				: undefined,
+			limit: ctx.NumberLiteral
+				? parseInt(getImage(ctx.NumberLiteral[0]), 10)
+				: undefined,
 		};
 	}
 

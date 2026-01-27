@@ -32,6 +32,8 @@
 | Unified Schema API (ARCH-005) | core, cli, adapter | ✅ Complete |
 | Simplified ORM Entry Point (ARCH-006) | core, adapter-kysely | ✅ Complete |
 | Type-Safe Query API (DX-040) | core, dx, types, nql | ✅ Complete |
+| NQL Spec/Implementation Alignment (NQL-ALIGN) | nql, core, adapter-kysely | ✅ Complete |
+| NQL Divergences: scoped [N] + COUNT(DISTINCT) (NQL-DIVERGE) | nql | ✅ Complete |
 
 ## Scope-Specific Backlogs
 
@@ -44,6 +46,7 @@
 | `docs/specs/ARCH-005-unified-schema-api.md` | core, cli, adapter | Unified schema API (schema/ref/manyToMany) |
 | `docs/specs/ARCH-006-simplified-orm-entry-point.md` | core, adapter-kysely | Simplified createOrm + getSchemaFromDb |
 | `docs/specs/DX-040-type-safe-query-api.md` | core, dx | Type-Safe Query API (Native + NQL dual approach) |
+| `docs/specs/NQL-DIVERGENCES.md` | nql | NQL spec divergences and deferred features |
 
 ## 📋 BACKLOG: Subquery Include Strategy (DX-041)
 
