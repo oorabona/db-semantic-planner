@@ -10,7 +10,7 @@
  * @since DX-040
  */
 
-import { compile as nqlCompile } from '@dbsp/nql';
+import { type NqlCompilerOptions, compile as nqlCompile } from '@dbsp/nql';
 import type { Adapter, Dump } from '../adapter.js';
 import type { QueryIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
@@ -140,8 +140,16 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			return this._intent;
 		}
 
-		// Use integrated @dbsp/nql compiler
-		const result = nqlCompile(this.query, this.schemaDefinition);
+		// Extract dynamic pseudo-column keywords from model configuration
+		const compilerOptions = extractPseudoColumnKeywords(this.model);
+
+		// Use integrated @dbsp/nql compiler with dynamic keywords
+		const result = nqlCompile(
+			this.query,
+			this.schemaDefinition,
+			undefined,
+			compilerOptions,
+		);
 		if (!result.success || !result.ast?.query) {
 			const errors =
 				result.errors?.map((e) => e.message).join(', ') ?? 'Unknown error';
@@ -200,4 +208,40 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		const rows = await this.all();
 		return rows[0] ?? null;
 	}
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Extract pseudo-column keywords from model configuration.
+ * Collects all configured roles and recursive keywords from all tables'
+ * pseudoColumns metadata, falling back to defaults if no configuration exists.
+ */
+export function extractPseudoColumnKeywords(
+	model: ModelIR,
+): NqlCompilerOptions | undefined {
+	const allKeywords = new Set<string>();
+	const recursiveKeywords = new Set<string>();
+
+	for (const table of model.tables.values()) {
+		if (!table.pseudoColumns) continue;
+		for (const pc of table.pseudoColumns) {
+			allKeywords.add(pc.parentRole.toLowerCase());
+			allKeywords.add(pc.childRole.toLowerCase());
+			allKeywords.add(pc.ascendantKeyword.toLowerCase());
+			allKeywords.add(pc.descendantKeyword.toLowerCase());
+			recursiveKeywords.add(pc.ascendantKeyword.toLowerCase());
+			recursiveKeywords.add(pc.descendantKeyword.toLowerCase());
+		}
+	}
+
+	// No pseudo-columns configured → let compiler use defaults
+	if (allKeywords.size === 0) return undefined;
+
+	return {
+		pseudoColumnKeywords: [...allKeywords],
+		recursiveKeywords: [...recursiveKeywords],
+	};
 }

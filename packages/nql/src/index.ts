@@ -44,7 +44,11 @@ export type {
 	WhereOrIntent,
 	WhereRangeIntent,
 } from './compiler/index.js';
-export { createCompiler, NqlCompiler } from './compiler/index.js';
+export {
+	createCompiler,
+	NqlCompiler,
+	type NqlCompilerOptions,
+} from './compiler/index.js';
 // Re-export error types
 export type {
 	NqlError,
@@ -158,6 +162,7 @@ export function compile(
 	input: string,
 	_schema: unknown, // ModelIR from @dbsp/core
 	options?: ParseOptions,
+	compilerOptions?: import('./compiler/index.js').NqlCompilerOptions,
 ): ParseResult<CompileResult> {
 	const parseResult = parse(input, options);
 
@@ -170,7 +175,7 @@ export function compile(
 	}
 
 	try {
-		const compiler = new NqlCompiler();
+		const compiler = new NqlCompiler(compilerOptions);
 		const result = compiler.compile(parseResult.ast);
 
 		return {

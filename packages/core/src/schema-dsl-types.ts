@@ -130,7 +130,7 @@ export type SchemaRelationKind = 'belongsTo' | 'hasMany' | 'manyToMany';
 /**
  * Strategy for including related data in queries.
  * - 'join': Use SQL JOIN (default for belongsTo)
- * - 'separate': Execute separate query
+ * - 'subquery': Execute subquery query
  * - 'cte': Use Common Table Expression
  * - 'lateral': Use LATERAL JOIN
  * - 'json_agg': Use JSON aggregation
@@ -138,7 +138,7 @@ export type SchemaRelationKind = 'belongsTo' | 'hasMany' | 'manyToMany';
  */
 export type SchemaIncludeStrategy =
 	| 'join'
-	| 'separate'
+	| 'subquery'
 	| 'cte'
 	| 'lateral'
 	| 'json_agg'

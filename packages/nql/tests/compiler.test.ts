@@ -1100,6 +1100,73 @@ describe('NQL Compiler - Pseudo-Column Expressions (Self-Referential Traversal)'
 			);
 		});
 
+		it('compiles chained parent.parent.column with traversals array', () => {
+			const nql = 'employees | select id, parent.parent.name';
+			const result = compileNql(nql);
+			const select = result.query!.select as SelectWithExpressionsIntent;
+			const col = select.columns[1] as ExpressionIntent;
+			expect(col).toMatchObject({
+				kind: 'pseudoColumn',
+				traversal: 'parent',
+				targetColumn: 'name',
+				as: 'parent.parent.name',
+			});
+			expect((col as unknown as Record<string, unknown>).traversals).toEqual([
+				'parent',
+				'parent',
+			]);
+		});
+
+		it('compiles triple-chained parent.parent.parent.column', () => {
+			const nql = 'employees | select id, parent.parent.parent.title';
+			const result = compileNql(nql);
+			const select = result.query!.select as SelectWithExpressionsIntent;
+			const col = select.columns[1] as ExpressionIntent;
+			expect(col).toMatchObject({
+				kind: 'pseudoColumn',
+				traversal: 'parent',
+				targetColumn: 'title',
+				as: 'parent.parent.parent.title',
+			});
+			expect((col as unknown as Record<string, unknown>).traversals).toEqual([
+				'parent',
+				'parent',
+				'parent',
+			]);
+		});
+
+		it('compiles chained child.child.column', () => {
+			const nql = 'employees | select id, child.child.role';
+			const result = compileNql(nql);
+			const select = result.query!.select as SelectWithExpressionsIntent;
+			const col = select.columns[1] as ExpressionIntent;
+			expect(col).toMatchObject({
+				kind: 'pseudoColumn',
+				traversal: 'child',
+				targetColumn: 'role',
+				as: 'child.child.role',
+			});
+			expect((col as unknown as Record<string, unknown>).traversals).toEqual([
+				'child',
+				'child',
+			]);
+		});
+
+		it('single-hop parent.column has no traversals field', () => {
+			const nql = 'employees | select id, parent.name';
+			const result = compileNql(nql);
+			const select = result.query!.select as SelectWithExpressionsIntent;
+			const col = select.columns[1] as ExpressionIntent;
+			expect(col).toMatchObject({
+				kind: 'pseudoColumn',
+				traversal: 'parent',
+				targetColumn: 'name',
+			});
+			expect(
+				(col as unknown as Record<string, unknown>).traversals,
+			).toBeUndefined();
+		});
+
 		it('preserves case-insensitive keywords', () => {
 			// Arrange: mixed case keywords
 			const nql = 'employees | select PARENT.name, Child.role';
@@ -1171,14 +1238,9 @@ describe('NQL Compiler - Pseudo-Column Expressions (Self-Referential Traversal)'
 	});
 
 	describe('Error handling', () => {
-		it('rejects extended pseudo-column syntax (V1.1 feature)', () => {
-			// Arrange: V1.1 syntax not yet supported
-			const nql = 'employees | select id, parent.parent.name';
-
-			// Act & Assert: should throw for extended syntax
-			expect(() => compileNql(nql)).toThrow(
-				/Extended pseudo-column syntax not yet supported/,
-			);
+		it('rejects chained pseudo-column path without target column', () => {
+			const nql = 'employees | select id, parent.parent';
+			expect(() => compileNql(nql)).toThrow(/must end with a column name/);
 		});
 	});
 });

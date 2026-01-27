@@ -18,6 +18,7 @@ import {
 } from '@dbsp/adapter-kysely';
 import {
 	type DeleteIntent,
+	extractPseudoColumnKeywords,
 	getDialectCapabilities,
 	type InsertIntent,
 	type ModelIR,
@@ -444,7 +445,8 @@ export function compileNqlToSql(
  * Internal: Parse and compile NQL to IntentAST
  */
 function compileNqlToIntent(nql: string, _model: ModelIR): CompileResult {
-	const result = compileNql(nql, _model);
+	const compilerOptions = extractPseudoColumnKeywords(_model);
+	const result = compileNql(nql, _model, undefined, compilerOptions);
 
 	if (!result.success) {
 		throw new NqlParseError(result.errors);

@@ -462,14 +462,14 @@ describe('Semantic Planner', () => {
 			};
 
 			const report = plan(intent, q2Schema, {
-				defaultIncludeStrategy: 'separate',
+				defaultIncludeStrategy: 'subquery',
 			});
 
 			const includeDecision = report.decisions.find(
 				(d) => d.type === 'include-strategy',
 			);
 			expect(includeDecision).toBeDefined();
-			expect(includeDecision?.choice).toBe('separate');
+			expect(includeDecision?.choice).toBe('subquery');
 		});
 	});
 

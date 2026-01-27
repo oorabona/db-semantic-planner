@@ -85,7 +85,7 @@ function createMockAdapter(): Adapter {
 		namingConvention: 'preserve' as const,
 		compile: notImplemented,
 		compileWithIncludes: notImplemented,
-		compileSeparateInclude: notImplemented,
+		compileSubqueryInclude: notImplemented,
 		compileUpsert: notImplemented,
 		execute: notImplemented,
 		executeOne: notImplemented,

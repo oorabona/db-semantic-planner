@@ -10,7 +10,7 @@ import type {
 	SelectIntent,
 	WhereIntent,
 } from '../intent-ast.js';
-import type { IncludeStrategy, ModelIR } from '../model-ir.js';
+import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions, PlanReport } from '../planner.js';
 import { AmbiguousPlanError, plan } from '../planner.js';
 
@@ -159,6 +159,25 @@ export interface SimplifiedOrmOptions<
 	 * @default 10
 	 */
 	readonly maxNestedCase?: number;
+
+	/**
+	 * Global plan options passed to the semantic planner for every query.
+	 * Per-query overrides via `.withPlanOptions()` take precedence.
+	 *
+	 * @example
+	 * ```typescript
+	 * const orm = createOrm({
+	 *   schema,
+	 *   adapter,
+	 *   planOptions: {
+	 *     defaultIncludeStrategy: 'subquery',
+	 *     enableCTEs: true,
+	 *     maxIncludeDepth: 3,
+	 *   },
+	 * });
+	 * ```
+	 */
+	readonly planOptions?: PlanOptions;
 }
 
 /**
@@ -233,6 +252,7 @@ export function createOrm<T extends SchemaDefinition>(
 		adapter,
 		strictMode = false,
 		dialectCapabilities,
+		planOptions: globalPlanOptions,
 		// nqlCompiler is deprecated - @dbsp/nql is integrated directly
 	} = options;
 
@@ -278,9 +298,9 @@ export function createOrm<T extends SchemaDefinition>(
 		{}, // relationHints removed in ARCH-006
 		adapter,
 		undefined, // schemaName
-		undefined, // defaultIncludeStrategy removed in ARCH-006
 		dialectCapabilities,
 		schemaDefinition,
+		globalPlanOptions,
 	) as OrmInstance<InferDB<T>>;
 }
 
@@ -296,9 +316,9 @@ function createOrmInstance<DB = Record<string, unknown>>(
 	relationHints: RelationHints,
 	adapter?: Adapter<DB>,
 	schemaName?: string,
-	defaultIncludeStrategy?: IncludeStrategy,
 	dialectCapabilities?: DialectCapabilities,
 	schemaDefinition?: unknown,
+	globalPlanOptions?: PlanOptions,
 ): OrmInstance<DB> {
 	// Create NQL template tag (DX-040)
 	// NQL compiler is now integrated directly - @dbsp/nql is imported in nql.ts
@@ -322,8 +342,8 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				relationHints,
 				adapter,
 				schemaName,
-				defaultIncludeStrategy,
 				dialectCapabilities,
+				globalPlanOptions,
 			);
 		},
 		withSchema(schemaName: string): OrmInstance<DB> {
@@ -339,9 +359,9 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				relationHints,
 				scopedAdapter as Adapter<DB> | undefined,
 				schemaName,
-				defaultIncludeStrategy,
 				dialectCapabilities,
 				schemaDefinition,
+				globalPlanOptions,
 			);
 		},
 
@@ -390,7 +410,6 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				relationHints,
 				adapter,
 				schemaName,
-				defaultIncludeStrategy,
 				dialectCapabilities,
 			);
 
@@ -451,7 +470,6 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				relationHints,
 				adapter,
 				schemaName,
-				defaultIncludeStrategy,
 				dialectCapabilities,
 			);
 
@@ -554,9 +572,9 @@ function createOrmInstance<DB = Record<string, unknown>>(
 					relationHints,
 					txAdapter as Adapter<DB>,
 					schemaName,
-					defaultIncludeStrategy,
 					dialectCapabilities,
 					schemaDefinition,
+					globalPlanOptions,
 				);
 				return fn(txOrm);
 			});
@@ -672,8 +690,8 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	private readonly relationHints: RelationHints;
 	private readonly adapter: Adapter | undefined;
 	private readonly schemaName: string | undefined;
-	private readonly defaultIncludeStrategy: IncludeStrategy | undefined;
 	private readonly dialectCapabilities: DialectCapabilities | undefined;
+	private planOptionsOverride: PlanOptions | undefined;
 	private selectIntent?: SelectIntent;
 	private whereIntents: WhereIntent[] = [];
 	private strictModeOverride?: boolean;
@@ -692,8 +710,8 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		relationHints: RelationHints = {},
 		adapter?: Adapter,
 		schemaName?: string,
-		defaultIncludeStrategy?: IncludeStrategy,
 		dialectCapabilities?: DialectCapabilities,
+		globalPlanOptions?: PlanOptions,
 	) {
 		this.model = model;
 		this.strictMode = strictMode;
@@ -701,8 +719,8 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		this.relationHints = relationHints;
 		this.adapter = adapter;
 		this.schemaName = schemaName;
-		this.defaultIncludeStrategy = defaultIncludeStrategy;
 		this.dialectCapabilities = dialectCapabilities;
+		this.planOptionsOverride = globalPlanOptions;
 	}
 
 	include(
@@ -985,6 +1003,16 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		return builder;
 	}
 
+	withPlanOptions(options: PlanOptions): QueryBuilder<TResult> {
+		const builder = this.clone();
+		// Merge with existing planOptions (per-query overrides take precedence)
+		builder.planOptionsOverride = {
+			...builder.planOptionsOverride,
+			...options,
+		};
+		return builder;
+	}
+
 	/**
 	 * Get effective strict mode (override takes precedence over ORM-level).
 	 */
@@ -1000,14 +1028,14 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		// Apply relation hints to includes before planning
 		const intentWithHints = this.applyRelationHints(intent);
 
-		// Build plan options with defaultIncludeStrategy and dialectCapabilities if set
-		const planOptions: PlanOptions = {};
-		if (this.defaultIncludeStrategy) {
-			planOptions.defaultIncludeStrategy = this.defaultIncludeStrategy;
-		}
-		if (this.dialectCapabilities) {
-			planOptions.dialectCapabilities = this.dialectCapabilities;
-		}
+		// Build plan options: dialectCapabilities + per-query overrides
+		const planOptions: PlanOptions = {
+			...(this.dialectCapabilities && {
+				dialectCapabilities: this.dialectCapabilities,
+			}),
+			// planOptions (global + per-query) take highest precedence
+			...this.planOptionsOverride,
+		};
 
 		try {
 			return plan(intentWithHints, this.model, planOptions);
@@ -1032,7 +1060,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			compileOptions.schemaName = this.schemaName;
 		}
 
-		// Use compileWithIncludes to get separate include info for hasMany relations
+		// Use compileWithIncludes to get subquery include info for hasMany relations
 		const compiledWithIncludes = adapter.compileWithIncludes(
 			planReport,
 			compileOptions,
@@ -1054,11 +1082,11 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		// E2E-004: Hydrate JOIN includes by grouping dot-prefixed columns
 		hydrator.hydrateJoinIncludes(mainResults, planReport);
 
-		// Process separate includes (hasMany hydration - DX-033)
-		if (compiledWithIncludes.separateIncludes.length > 0) {
+		// Process subquery includes (hasMany hydration - DX-033)
+		if (compiledWithIncludes.subqueryIncludes.length > 0) {
 			await hydrator.hydrateIncludes(
 				mainResults,
-				compiledWithIncludes.separateIncludes,
+				compiledWithIncludes.subqueryIncludes,
 				adapter,
 				compileOptions,
 			);
@@ -1280,8 +1308,8 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 				{ ...this.relationHints },
 				this.adapter,
 				this.schemaName,
-				this.defaultIncludeStrategy,
 				this.dialectCapabilities,
+				this.planOptionsOverride,
 			);
 			// Copy where conditions but not limit/offset
 			countBuilder.whereIntents.push(...this.whereIntents);
@@ -1711,8 +1739,8 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			{ ...this.relationHints }, // Clone hints to allow per-query additions
 			this.adapter,
 			this.schemaName,
-			this.defaultIncludeStrategy,
 			this.dialectCapabilities,
+			this.planOptionsOverride,
 		);
 		builder.includes.push(...this.includes);
 		builder.recursiveIncludes.push(...this.recursiveIncludes);
@@ -1738,6 +1766,9 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		}
 		if (this.offsetValue !== undefined) {
 			builder.offsetValue = this.offsetValue;
+		}
+		if (this.planOptionsOverride !== undefined) {
+			builder.planOptionsOverride = { ...this.planOptionsOverride };
 		}
 		return builder;
 	}

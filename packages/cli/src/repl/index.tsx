@@ -101,7 +101,7 @@ const STRATEGY_INFO: Record<
 		],
 		dialects: ['postgresql', 'mysql', 'sqlite', 'mssql', 'duckdb'],
 	},
-	separate: {
+	subquery: {
 		name: 'SEPARATE',
 		description: 'Fetch relations in separate batched queries (IN clause)',
 		pros: [
@@ -157,27 +157,27 @@ const DIALECT_INFO: Record<
 	postgresql: {
 		name: 'PostgreSQL',
 		description: 'Full-featured dialect with all strategies available',
-		strategies: ['auto', 'join', 'separate', 'cte', 'lateral', 'json_agg'],
+		strategies: ['auto', 'join', 'subquery', 'cte', 'lateral', 'json_agg'],
 	},
 	mysql: {
 		name: 'MySQL',
 		description: 'MySQL 8.0+ with CTE and JSON support',
-		strategies: ['auto', 'join', 'separate', 'cte', 'json_agg'],
+		strategies: ['auto', 'join', 'subquery', 'cte', 'json_agg'],
 	},
 	sqlite: {
 		name: 'SQLite',
 		description: 'Embedded database with basic strategy support',
-		strategies: ['auto', 'join', 'separate', 'cte'],
+		strategies: ['auto', 'join', 'subquery', 'cte'],
 	},
 	mssql: {
 		name: 'SQL Server',
 		description: 'Microsoft SQL Server with CTE support',
-		strategies: ['auto', 'join', 'separate', 'cte'],
+		strategies: ['auto', 'join', 'subquery', 'cte'],
 	},
 	duckdb: {
 		name: 'DuckDB',
 		description: 'Analytical database with PostgreSQL-like syntax',
-		strategies: ['auto', 'join', 'separate', 'cte', 'json_agg'],
+		strategies: ['auto', 'join', 'subquery', 'cte', 'json_agg'],
 	},
 };
 

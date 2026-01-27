@@ -1,7 +1,7 @@
 /**
  * ResultHydrator - Handles result hydration and recursive include processing.
  *
- * DX-103: Extracted from QueryBuilderImpl to separate hydration logic
+ * DX-103: Extracted from QueryBuilderImpl to subquery hydration logic
  * from intent building and query execution.
  *
  * @module result-hydrator
@@ -10,7 +10,7 @@
 import type {
 	Adapter,
 	CompileOptions,
-	SeparateIncludeInfo,
+	SubqueryIncludeInfo,
 } from '../adapter.js';
 import type { RecursiveIntent, WhereIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
@@ -36,7 +36,7 @@ export type HydrateOptions = Omit<CompileOptions, 'model'> & { model: ModelIR };
 
 /**
  * Handles result hydration including:
- * - Separate include hydration for hasMany relations
+ * - Subquery include hydration for hasMany relations
  * - Recursive include processing via CTEs
  * - Building nested hierarchies from flat results
  *
@@ -54,17 +54,17 @@ export class ResultHydrator<TResult = unknown> {
 	}
 
 	/**
-	 * Hydrate separate includes (hasMany relations) into main results.
+	 * Hydrate subquery includes (hasMany relations) into main results.
 	 */
 	async hydrateIncludes(
 		results: TResult[],
-		separateIncludes: readonly SeparateIncludeInfo[],
+		subqueryIncludes: readonly SubqueryIncludeInfo[],
 		adapter: Adapter,
 		compileOptions: HydrateOptions,
 	): Promise<void> {
 		if (results.length === 0) return;
 
-		for (const includeInfo of separateIncludes) {
+		for (const includeInfo of subqueryIncludes) {
 			// Extract parent IDs from results using sourceKey
 			const parentIds = results
 				.map((r) =>
@@ -78,7 +78,7 @@ export class ResultHydrator<TResult = unknown> {
 			if (parentIds.length === 0) continue;
 
 			// Compile and execute the include query
-			const includeQuery = adapter.compileSeparateInclude(
+			const includeQuery = adapter.compileSubqueryInclude(
 				includeInfo,
 				parentIds,
 				compileOptions,

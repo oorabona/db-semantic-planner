@@ -1,0 +1,38 @@
+# Hierarchy Schema — NQL Query Examples
+# Schema: examples/hierarchy.schema.ts
+#
+# These queries demonstrate pseudo-column features for
+# self-referential traversal with custom roles.
+
+# ============================================================
+# 1. Single-hop traversal: who is each employee's manager?
+# ============================================================
+# Uses custom role "manager" (parentRole from schema config)
+employees | select name, title, manager.name
+
+# ============================================================
+# 2. Chained traversal: skip-level manager (grandparent)
+# ============================================================
+# manager.manager chains two LEFT JOINs
+employees | select name, manager.name, manager.manager.name
+
+# ============================================================
+# 3. Combine traversal with other columns
+# ============================================================
+# Show employee, their manager title, and salary
+employees | select name, salary, manager.name, manager.title
+
+# ============================================================
+# 4. Top-level employees (no manager)
+# ============================================================
+# CEO has no manager — NULL check
+employees | where managerId = null | select name, title
+
+# ============================================================
+# TODO: WHERE/ORDER BY with pseudo-columns not yet supported
+# These will work once the planner resolves pseudo-column
+# references in WHERE and ORDER BY clauses.
+# ============================================================
+# employees | where manager.name = 'Bob' | select name, title
+# employees | where manager.manager.name = 'Alice' | select name, title
+# employees | select name, manager.name | order by manager.name asc

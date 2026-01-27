@@ -119,9 +119,41 @@ export interface CompileResult {
 }
 
 /**
+ * Options for the NQL compiler.
+ * Allows dynamic pseudo-column keywords from schema configuration.
+ */
+export interface NqlCompilerOptions {
+	/**
+	 * All pseudo-column keywords recognized by the compiler.
+	 * These are path expression prefixes that trigger self-referential traversal.
+	 * @default ['parent', 'child', 'ascendant', 'descendant']
+	 * @example ['manager', 'managee', 'ascendant', 'descendant']
+	 */
+	readonly pseudoColumnKeywords?: readonly string[];
+
+	/**
+	 * Subset of pseudo-column keywords that support scoped depth syntax [N].
+	 * Only recursive traversals (ascendant/descendant) support this.
+	 * @default ['ascendant', 'descendant']
+	 */
+	readonly recursiveKeywords?: readonly string[];
+}
+
+/**
  * Compiler that transforms NQL AST to IntentAST
  */
 export class NqlCompiler {
+	private readonly pseudoColumnKeywords: Set<string>;
+	private readonly recursiveKeywords: Set<string>;
+
+	constructor(options?: NqlCompilerOptions) {
+		const keywords =
+			options?.pseudoColumnKeywords ?? DEFAULT_PSEUDO_COLUMN_KEYWORDS;
+		this.pseudoColumnKeywords = new Set(keywords.map((k) => k.toLowerCase()));
+		const recursive = options?.recursiveKeywords ?? DEFAULT_RECURSIVE_KEYWORDS;
+		this.recursiveKeywords = new Set(recursive.map((k) => k.toLowerCase()));
+	}
+
 	/**
 	 * Compile an NQL program to IntentAST
 	 * Returns the first statement's result (multiple statements = batch mode, TBD)
@@ -475,46 +507,66 @@ export class NqlCompiler {
 			const segments = expr.segments;
 			const firstSegment = segments[0].toLowerCase();
 
-			// Check for pseudo-column traversal (parent.name, ascendant.title, ascendant[3].title, etc.)
-			if (isPseudoColumnKeyword(firstSegment)) {
-				// Simple traversal - pseudo.column or pseudo[N].column syntax
-				// e.g., parent.name, child.department, ascendant[3].title
-				if (segments.length === 2) {
-					const depthHint = expr.type === 'path' ? expr.depthHint : undefined;
+			// Check for pseudo-column traversal (parent.name, manager.name, ascendant[3].title, etc.)
+			if (this.pseudoColumnKeywords.has(firstSegment)) {
+				const depthHint = expr.type === 'path' ? expr.depthHint : undefined;
 
-					// Validate depthHint: only recursive traversals support scoped depth
-					if (depthHint !== undefined) {
-						const RECURSIVE_TRAVERSALS = ['ascendant', 'descendant'];
-						if (!RECURSIVE_TRAVERSALS.includes(firstSegment)) {
-							throw new Error(
-								`Scoped depth [${depthHint}] is not supported on '${firstSegment}'. ` +
-									`Only recursive traversals (ascendant, descendant) support depth hints.`,
-							);
-						}
-						if (
-							!Number.isFinite(depthHint) ||
-							depthHint < 1 ||
-							depthHint > 100
-						) {
-							throw new Error(
-								`Invalid depth hint [${depthHint}]: must be an integer between 1 and 100.`,
-							);
-						}
+				// Validate depthHint: only recursive traversals support scoped depth
+				if (depthHint !== undefined) {
+					if (!this.recursiveKeywords.has(firstSegment)) {
+						throw new Error(
+							`Scoped depth [${depthHint}] is not supported on '${firstSegment}'. ` +
+								`Only recursive traversals support depth hints.`,
+						);
 					}
+					if (!Number.isFinite(depthHint) || depthHint < 1 || depthHint > 100) {
+						throw new Error(
+							`Invalid depth hint [${depthHint}]: must be an integer between 1 and 100.`,
+						);
+					}
+				}
 
+				// Collect all consecutive pseudo-column keywords as traversals
+				// e.g., parent.parent.name → traversals=['parent','parent'], targetColumn='name'
+				// e.g., parent.name → traversals=['parent'], targetColumn='name'
+				const traversals: string[] = [firstSegment];
+				let i = 1;
+				while (
+					i < segments.length &&
+					this.pseudoColumnKeywords.has(segments[i].toLowerCase())
+				) {
+					traversals.push(segments[i].toLowerCase());
+					i++;
+				}
+
+				// Last segment must be a non-keyword target column
+				if (i >= segments.length) {
+					throw new Error(
+						`Pseudo-column path must end with a column name: ${segments.join('.')}`,
+					);
+				}
+				const targetColumn = segments[i];
+				const defaultAlias = segments.map((s) => s.toLowerCase()).join('.');
+
+				if (traversals.length === 1) {
+					// Simple single-hop: parent.name
 					return {
 						kind: 'pseudoColumn',
 						traversal: firstSegment as PseudoColumnTraversal,
-						targetColumn: segments[1],
-						as: item.alias ?? `${firstSegment}.${segments[1]}`,
+						targetColumn,
+						as: item.alias ?? defaultAlias,
 						...(depthHint !== undefined && { depth: depthHint }),
 					};
 				}
-				// Extended syntax - role.pseudo.column (e.g., manager.parent.name) - not yet implemented
-				throw new Error(
-					`Extended pseudo-column syntax not yet supported: ${segments.join('.')}. ` +
-						`Use simple traversal: ${firstSegment}.<column>`,
-				);
+
+				// Chained multi-hop: parent.parent.name
+				return {
+					kind: 'pseudoColumn',
+					traversal: traversals[0] as PseudoColumnTraversal,
+					traversals: traversals as PseudoColumnTraversal[],
+					targetColumn,
+					as: item.alias ?? defaultAlias,
+				};
 			}
 
 			// Regular relation path (e.g., customer.name)
@@ -1150,31 +1202,28 @@ function isAggregateFunction(name: string): boolean {
 }
 
 /**
- * Pseudo-column keywords for self-referential traversal.
- * These keywords are used in path expressions to traverse hierarchical relationships.
+ * Default pseudo-column keywords for self-referential traversal.
+ * These can be overridden via NqlCompilerOptions.pseudoColumnKeywords.
  */
-const PSEUDO_COLUMN_KEYWORDS = [
+const DEFAULT_PSEUDO_COLUMN_KEYWORDS: readonly string[] = [
 	'parent',
 	'child',
 	'ascendant',
 	'descendant',
-] as const;
+];
 
 /**
- * Check if a segment is a pseudo-column keyword.
- * Pseudo-columns enable traversal of self-referential foreign keys.
+ * Default recursive keywords that support scoped depth syntax [N].
+ * These can be overridden via NqlCompilerOptions.recursiveKeywords.
  */
-function isPseudoColumnKeyword(
-	segment: string,
-): segment is PseudoColumnTraversal {
-	return PSEUDO_COLUMN_KEYWORDS.includes(
-		segment.toLowerCase() as PseudoColumnTraversal,
-	);
-}
+const DEFAULT_RECURSIVE_KEYWORDS: readonly string[] = [
+	'ascendant',
+	'descendant',
+];
 
 /**
  * Create a compiler instance
  */
-export function createCompiler(): NqlCompiler {
-	return new NqlCompiler();
+export function createCompiler(options?: NqlCompilerOptions): NqlCompiler {
+	return new NqlCompiler(options);
 }

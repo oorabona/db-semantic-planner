@@ -302,21 +302,23 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 		});
 
 		describe('E2E-004-F2: planner option overrides auto', () => {
-			it('should use separate when defaultIncludeStrategy specified', async () => {
+			it('should use subquery when defaultIncludeStrategy specified via planOptions', async () => {
 				const adapter = await getTestAdapter();
 				const orm = createOrm({
 					model: blogModel,
 					adapter,
-					defaultIncludeStrategy: 'separate',
+					planOptions: {
+						defaultIncludeStrategy: 'subquery',
+					},
 				});
 
 				const query = orm.withSchema(SCHEMA).select('authors').include('posts');
 				const dump = query.dump();
 
-				// Then: uses separate (not json_agg) due to planner option
+				// Then: uses subquery (not json_agg) due to planner option
 				const decision = getIncludeStrategyDecision(dump.plan, 'posts');
 				expect(decision).toBeDefined();
-				expect(decision?.choice).toBe('separate');
+				expect(decision?.choice).toBe('subquery');
 			});
 		});
 	});

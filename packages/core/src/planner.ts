@@ -208,7 +208,7 @@ export interface PlanOptions {
 	/**
 	 * Default include strategy for relations when set to 'auto'.
 	 * - 'join': Use JOIN (single query, database optimizes) - RECOMMENDED for to-one
-	 * - 'separate': Use separate queries (N+1 style with batching) - safe for to-many
+	 * - 'subquery': Use subquery queries (N+1 style with batching) - safe for to-many
 	 * - 'cte': Use CTE-based include (good for recursive/hierarchical)
 	 * - 'lateral': Use LATERAL JOIN (PostgreSQL) / CROSS APPLY (MSSQL)
 	 * - 'json_agg': Use JSON aggregation (PostgreSQL/MySQL/DuckDB)
@@ -1224,19 +1224,19 @@ function determineIncludeStrategy(
 			if (strategy === 'lateral' && !capabilities.supportsLateralJoin) {
 				throw new UnsupportedStrategyError(
 					`Strategy 'lateral' is not supported by ${capabilities.name}. ` +
-						`Use 'join', 'separate', or 'json_agg' instead.`,
+						`Use 'join', 'subquery', or 'json_agg' instead.`,
 				);
 			}
 			if (strategy === 'json_agg' && !capabilities.supportsJsonAgg) {
 				throw new UnsupportedStrategyError(
 					`Strategy 'json_agg' is not supported by ${capabilities.name}. ` +
-						`Use 'join', 'separate', or 'lateral' instead.`,
+						`Use 'join', 'subquery', or 'lateral' instead.`,
 				);
 			}
 			if (strategy === 'cte' && !capabilities.supportsRecursiveCTE) {
 				throw new UnsupportedStrategyError(
 					`Strategy 'cte' is not supported by ${capabilities.name}. ` +
-						`Use 'join' or 'separate' instead.`,
+						`Use 'join' or 'subquery' instead.`,
 				);
 			}
 		}
@@ -1262,12 +1262,12 @@ function determineIncludeStrategy(
  * Smart strategy selection based on relation characteristics and dialect.
  *
  * Selection algorithm:
- * - Recursive relations → 'cte' (if supported) or 'separate'
+ * - Recursive relations → 'cte' (if supported) or 'subquery'
  * - hasOne/belongsTo (to-one) → 'join' (always safe, single row)
  * - hasMany/belongsToMany (to-many):
  *   - If dialect supports json_agg → 'json_agg' (single row per parent, no explosion)
  *   - Else if dialect supports lateral → 'lateral' (good with LIMIT)
- *   - Else → 'join' (let DB optimize, user can override to 'separate' if needed)
+ *   - Else → 'join' (let DB optimize, user can override to 'subquery' if needed)
  */
 function selectSmartStrategy(
 	_relation: RelationIR,
@@ -1280,7 +1280,7 @@ function selectSmartStrategy(
 			return 'cte';
 		}
 		// Fallback for dialects without CTE support (rare)
-		return 'separate';
+		return 'subquery';
 	}
 
 	// Default strategy for ALL relation types: json_agg
@@ -1300,7 +1300,7 @@ function selectSmartStrategy(
 	}
 
 	// Fallback: use join (database optimizer handles it)
-	// User can explicitly request 'separate' if row explosion is a concern
+	// User can explicitly request 'subquery' if row explosion is a concern
 	return 'join';
 }
 
@@ -1323,7 +1323,7 @@ function getAlternativeStrategies(
 ): string[] {
 	const allStrategies: ResolvedIncludeStrategy[] = [
 		'join',
-		'separate',
+		'subquery',
 		'cte',
 		'lateral',
 		'json_agg',
@@ -1332,7 +1332,7 @@ function getAlternativeStrategies(
 	// Filter out current strategy and unsupported ones
 	return allStrategies.filter((s) => {
 		if (s === strategy) return false;
-		if (!capabilities) return s === 'join' || s === 'separate'; // No capabilities = only basic strategies
+		if (!capabilities) return s === 'join' || s === 'subquery'; // No capabilities = only basic strategies
 		if (s === 'lateral' && !capabilities.supportsLateralJoin) return false;
 		if (s === 'json_agg' && !capabilities.supportsJsonAgg) return false;
 		if (s === 'cte' && !capabilities.supportsRecursiveCTE) return false;
@@ -1492,8 +1492,8 @@ function generateIncludeReasoning(
 	switch (strategy) {
 		case 'join':
 			return `${prefix} - using JOIN for efficient single-query fetch`;
-		case 'separate':
-			return `${prefix} - using separate query to avoid row multiplication`;
+		case 'subquery':
+			return `${prefix} - using subquery query to avoid row multiplication`;
 		case 'cte':
 			return `${prefix} - using CTE for recursive/hierarchical traversal`;
 		case 'lateral':

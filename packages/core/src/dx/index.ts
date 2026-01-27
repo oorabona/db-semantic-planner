@@ -124,6 +124,7 @@ export {
 // NQL Template Literal API (DX-040 Block 8)
 export {
 	createNqlTag,
+	extractPseudoColumnKeywords,
 	type NqlBuilder,
 	type NqlCompilerFn,
 	type NqlTag,
