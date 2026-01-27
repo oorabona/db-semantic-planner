@@ -1281,7 +1281,7 @@ describe('schema.tables runtime metadata (DX-040)', () => {
 			});
 
 			// Act - Access reserved word column via bracket notation
-			const deleteCol = s.tables.users['delete'];
+			const deleteCol = s.tables.users.delete;
 
 			// Assert - Should still work and return ColumnRef
 			expect(deleteCol[BRAND]).toBe('ColumnRef');
@@ -1299,7 +1299,7 @@ describe('schema.tables runtime metadata (DX-040)', () => {
 			});
 
 			// Act - Access reserved word column
-			s.tables.users['delete'];
+			s.tables.users.delete;
 
 			// Assert - Warning should be logged
 			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('delete'));
@@ -1322,9 +1322,9 @@ describe('schema.tables runtime metadata (DX-040)', () => {
 			});
 
 			// Act - Access same reserved word multiple times
-			s.tables.users['delete'];
-			s.tables.users['delete'];
-			s.tables.users['delete'];
+			s.tables.users.delete;
+			s.tables.users.delete;
+			s.tables.users.delete;
 
 			// Assert - Warning should only be logged once
 			expect(warnSpy).toHaveBeenCalledTimes(1);

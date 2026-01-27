@@ -7,7 +7,7 @@
  * - approved field on comments
  */
 
-import { fk, schema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 
 const blogExtendedSchema = schema({
 	authors: {
@@ -20,7 +20,7 @@ const blogExtendedSchema = schema({
 		id: { type: 'integer', primaryKey: true },
 		name: 'string',
 		// Self-referential with parent/children
-		parentId: fk('categories', {
+		parentId: ref('categories', {
 			nullable: true,
 			roles: { parent: 'parent', children: 'children' },
 		}),
@@ -29,8 +29,8 @@ const blogExtendedSchema = schema({
 		id: { type: 'integer', primaryKey: true },
 		title: 'string',
 		content: 'string',
-		authorId: fk('authors'),
-		categoryId: fk('categories', { nullable: true }),
+		authorId: ref('authors'),
+		categoryId: ref('categories', { nullable: true }),
 		published: 'boolean',
 		featured: 'boolean',
 		viewCount: 'integer',
@@ -38,7 +38,7 @@ const blogExtendedSchema = schema({
 	},
 	comments: {
 		id: { type: 'integer', primaryKey: true },
-		postId: fk('posts'),
+		postId: ref('posts'),
 		authorName: 'string',
 		content: 'string',
 		approved: 'boolean',
@@ -51,8 +51,8 @@ const blogExtendedSchema = schema({
 	},
 	// Junction table for M:N posts <-> tags
 	postTags: {
-		postId: fk('posts'),
-		tagId: fk('tags'),
+		postId: ref('posts'),
+		tagId: ref('tags'),
 	},
 });
 

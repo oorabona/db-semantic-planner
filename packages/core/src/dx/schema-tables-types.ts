@@ -8,13 +8,7 @@
  * @since DX-040
  */
 
-import type {
-	AllColumns,
-	ColumnRef,
-	RelationRef,
-	RelationType,
-	TableRef,
-} from './table-ref.js';
+import type { ColumnRef, RelationRef, TableRef } from './table-ref.js';
 
 // ============================================================================
 // Import schema types (we'll use type-only imports to avoid circular deps)
@@ -214,7 +208,7 @@ type InferRowType<TTable extends TableDef> = {
  * Build RelationRef for a local relation (belongsTo - FK in this table).
  */
 type BuildLocalRelation<
-	TColName extends string,
+	_TColName extends string,
 	TRef extends RefDefinition,
 	TSchema extends SchemaDefinition,
 > = GetRefTarget<TRef> extends keyof TSchema
@@ -230,7 +224,7 @@ type BuildLocalRelation<
  * Build local relations (belongsTo) for a table.
  */
 type BuildLocalRelations<
-	TName extends string,
+	_TName extends string,
 	TTable extends TableDef,
 	TSchema extends SchemaDefinition,
 > = {

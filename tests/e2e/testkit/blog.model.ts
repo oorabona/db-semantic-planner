@@ -2,10 +2,10 @@
  * Blog ModelIR
  *
  * Schema definition for semantic query planning.
- * Uses schema() + fk() API with auto-inferred relations.
+ * Uses schema() + ref() API with auto-inferred relations.
  */
 
-import { fk, schema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 
 /**
  * Blog schema for E2E tests.
@@ -15,7 +15,7 @@ import { fk, schema } from '@dbsp/core';
  * - posts
  * - comments
  *
- * Relations (auto-inferred from fk()):
+ * Relations (auto-inferred from ref()):
  * - authors.authorId_posts (hasMany)
  * - posts.author (belongsTo)
  * - posts.postId_comments (hasMany)
@@ -31,13 +31,13 @@ const blogSchema = schema({
 		id: { type: 'integer', primaryKey: true },
 		title: 'string',
 		content: 'string',
-		authorId: fk('authors'),
+		authorId: ref('authors'),
 		published: 'boolean',
 		createdAt: 'timestamp',
 	},
 	comments: {
 		id: { type: 'integer', primaryKey: true },
-		postId: fk('posts'),
+		postId: ref('posts'),
 		authorName: 'string',
 		content: 'string',
 		createdAt: 'timestamp',

@@ -2,10 +2,10 @@
  * IAM/RBAC ModelIR Definition
  *
  * Defines the schema for IAM entities and their relationships.
- * Uses schema() + fk() API with auto-inferred relations.
+ * Uses schema() + ref() API with auto-inferred relations.
  */
 
-import { fk, schema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 
 /**
  * IAM schema for E2E tests.
@@ -31,26 +31,26 @@ const iamSchema = schema({
 	},
 	// Junction: users <-> roles
 	userRoles: {
-		userId: fk('users'),
-		roleId: fk('roles'),
+		userId: ref('users'),
+		roleId: ref('roles'),
 		grantedAt: 'date',
 	},
 	// Junction: roles <-> permissions
 	rolePermissions: {
-		roleId: fk('roles'),
-		permissionId: fk('permissions'),
+		roleId: ref('roles'),
+		permissionId: ref('permissions'),
 	},
 	// Edge table: role hierarchy (multiple FKs to same table)
 	roleEdges: {
 		id: { type: 'integer', primaryKey: true },
-		parentRoleId: fk('roles', { as: 'parentRole', inverse: 'childEdges' }),
-		childRoleId: fk('roles', { as: 'childRole', inverse: 'parentEdges' }),
+		parentRoleId: ref('roles', { as: 'parentRole', inverse: 'childEdges' }),
+		childRoleId: ref('roles', { as: 'childRole', inverse: 'parentEdges' }),
 	},
 	// SoD rules (multiple FKs to same table)
 	sodRules: {
 		id: { type: 'integer', primaryKey: true },
-		roleAId: fk('roles', { as: 'roleA', inverse: 'sodRulesA' }),
-		roleBId: fk('roles', { as: 'roleB', inverse: 'sodRulesB' }),
+		roleAId: ref('roles', { as: 'roleA', inverse: 'sodRulesA' }),
+		roleBId: ref('roles', { as: 'roleB', inverse: 'sodRulesB' }),
 		reason: 'string',
 	},
 });

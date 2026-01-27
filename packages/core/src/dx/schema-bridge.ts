@@ -389,7 +389,7 @@ function buildTableIRFromDefinition(
 			const parentRole = colDef?.references?.parentRole ?? inferredName;
 			const childRole =
 				colDef?.references?.childRole ??
-				(parentRole === 'parent' ? 'children' : parentRole + 's');
+				(parentRole === 'parent' ? 'children' : `${parentRole}s`);
 
 			pseudoColumns.push(
 				createPseudoColumnMetadata(

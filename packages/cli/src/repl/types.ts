@@ -3,7 +3,6 @@ import type React from 'react';
  * DX-030: REPL Types
  */
 
-import type { ResolvedSchema } from '@dbsp/core';
 import type { LoadedSchema } from '../utils/schema-loader.js';
 
 /**

@@ -13,7 +13,6 @@ import {
 	createOrm,
 	eq,
 	exists,
-	fk,
 	gt,
 	gte,
 	isNotNull,
@@ -21,6 +20,7 @@ import {
 	lt,
 	not,
 	or,
+	ref,
 	schema,
 } from '@dbsp/core';
 import { sql } from 'kysely';
@@ -35,7 +35,7 @@ import {
 // Schema name for this test suite
 const SCHEMA = 'advanced_e2e';
 
-// Define the model with all necessary fields (ARCH-005: schema() + fk() API)
+// Define the model with all necessary fields (ARCH-005: schema() + ref() API)
 const advancedSchema = schema({
 	products: {
 		id: { type: 'integer', primaryKey: true },
@@ -48,7 +48,7 @@ const advancedSchema = schema({
 	},
 	orders: {
 		id: { type: 'integer', primaryKey: true },
-		productId: fk('products'),
+		productId: ref('products'),
 		quantity: 'integer',
 		totalPrice: 'decimal',
 		customerName: 'string',
@@ -57,7 +57,7 @@ const advancedSchema = schema({
 	},
 	reviews: {
 		id: { type: 'integer', primaryKey: true },
-		productId: fk('products'),
+		productId: ref('products'),
 		rating: 'integer',
 		comment: { type: 'string', nullable: true },
 		reviewerName: 'string',

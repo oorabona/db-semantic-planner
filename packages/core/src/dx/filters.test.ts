@@ -742,7 +742,6 @@ describe('relationColumn() helper', () => {
 // ============================================================================
 
 import { ref, schema } from './schema.js';
-import { COLUMN_META, TABLE_META } from './table-ref.js';
 
 describe('Type-safe filters with ColumnRef (DX-040)', () => {
 	// Create a test schema with typed tables

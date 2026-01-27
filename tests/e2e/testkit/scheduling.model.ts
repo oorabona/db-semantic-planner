@@ -6,7 +6,7 @@
  * - daterange, tstzrange, int4range
  */
 
-import { fk, schema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 
 /**
  * Scheduling schema for E2E tests.
@@ -26,7 +26,7 @@ const schedulingSchema = schema({
 	},
 	roomBookings: {
 		id: { type: 'integer', primaryKey: true },
-		roomId: fk('rooms'),
+		roomId: ref('rooms'),
 		bookedBy: 'string',
 		bookingPeriod: 'daterange', // PostgreSQL daterange
 		purpose: { type: 'string', nullable: true },
@@ -34,7 +34,7 @@ const schedulingSchema = schema({
 	events: {
 		id: { type: 'integer', primaryKey: true },
 		title: 'string',
-		roomId: fk('rooms'),
+		roomId: ref('rooms'),
 		timeSlot: 'tstzrange', // PostgreSQL tstzrange
 		organizer: 'string',
 		maxAttendees: { type: 'integer', nullable: true },

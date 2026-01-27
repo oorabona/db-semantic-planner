@@ -57,7 +57,7 @@ describe('DX-040 Block 5: SQL Functions', () => {
 			expect(isAggregateExpr(expr)).toBe(true);
 			expect(expr._intent.kind).toBe('aggregate');
 			expect(expr._intent.function).toBe('count');
-			expect(expr._intent.field).toBeUndefined();
+			expect(expr._intent.field).toBe('*'); // COUNT(*)
 		});
 
 		it('count(column) returns COUNT(column) aggregate', () => {

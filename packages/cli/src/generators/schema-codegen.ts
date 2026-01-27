@@ -132,7 +132,7 @@ function generateRefCode(
 		// e.g., 'parentId' → parent: 'parent', children: 'children'
 		const baseName = column.name.replace(/Id$/, '');
 		refOptions.push(
-			`roles: { parent: '${baseName}', children: '${baseName === 'parent' ? 'children' : baseName + 's'}' }`,
+			`roles: { parent: '${baseName}', children: '${baseName === 'parent' ? 'children' : `${baseName}s`}' }`,
 		);
 	}
 

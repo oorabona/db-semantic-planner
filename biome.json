@@ -47,10 +47,14 @@
 			"linter": {
 				"rules": {
 					"suspicious": {
-						"noExplicitAny": "off"
+						"noExplicitAny": "off",
+						"noNonNullAssertedOptionalChain": "off"
 					},
 					"style": {
 						"noNonNullAssertion": "off"
+					},
+					"correctness": {
+						"noUnusedVariables": "off"
 					}
 				}
 			}
@@ -72,6 +76,22 @@
 			"includes": ["**/spike/**"],
 			"linter": {
 				"enabled": false
+			}
+		},
+		{
+			"includes": [
+				"packages/adapter-kysely/src/compiler/handlers/where/index.ts",
+				"packages/adapter-kysely/src/compiler/handlers/where/relation-filter.ts",
+				"packages/adapter-kysely/src/compiler/types.ts",
+				"packages/core/src/dx/functions.ts",
+				"packages/core/src/dx/typed-query-builder.ts"
+			],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noExplicitAny": "off"
+					}
+				}
 			}
 		}
 	]

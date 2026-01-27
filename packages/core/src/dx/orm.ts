@@ -95,9 +95,16 @@ export interface SimplifiedOrmOptions<
 > {
 	/**
 	 * Schema created with schema() + ref().
-	 * Required - use getSchemaFromDb() for database introspection.
+	 * Either schema or model is required.
 	 */
-	readonly schema: Schema<T>;
+	readonly schema?: Schema<T>;
+
+	/**
+	 * ModelIR directly (alternative to schema).
+	 * Use this when you have ModelIR from introspection or external source.
+	 * Either schema or model is required.
+	 */
+	readonly model?: ModelIR;
 
 	/**
 	 * Adapter for database execution (optional for compile-only).
@@ -195,48 +202,60 @@ export interface SimplifiedOrmOptions<
 export function createOrm<T extends SchemaDefinition>(
 	options: SimplifiedOrmOptions<T>,
 ): OrmInstance<InferDB<T>> {
-	// ARCH-006: schema is always required
 	const {
 		schema: schemaObj,
+		model: modelDirect,
 		adapter,
 		strictMode = false,
 		dialectCapabilities,
 		// nqlCompiler is deprecated - @dbsp/nql is integrated directly
 	} = options;
 
-	// Validate schema has required structure
-	if (!schemaObj || !('model' in schemaObj) || !('definition' in schemaObj)) {
+	// ARCH-006: Either schema or model is required
+	// Schema provides full type inference; model is simpler for introspection/tests
+	let model: ModelIR;
+	let schemaDefinition: unknown;
+
+	if (schemaObj && 'model' in schemaObj) {
+		// Full schema object provided
+		model = schemaObj.model;
+		schemaDefinition = schemaObj.definition;
+
+		// ARCH-006: Validate naming convention consistency
+		if (
+			adapter &&
+			schemaObj.namingConvention &&
+			adapter.namingConvention &&
+			schemaObj.namingConvention !== adapter.namingConvention
+		) {
+			throw new NamingConventionMismatchError({
+				schemaConvention: schemaObj.namingConvention,
+				adapterConvention: adapter.namingConvention,
+			});
+		}
+	} else if (modelDirect) {
+		// ModelIR provided directly (simpler API for introspection/tests)
+		model = modelDirect;
+		schemaDefinition = undefined; // NQL will work without schema validation
+	} else {
 		throw new Error(
-			'Invalid schema: must be created with schema() function. ' +
-				'For database introspection, use getSchemaFromDb() from @dbsp/adapter-kysely.',
+			'Invalid options: must provide either schema (from schema() function) ' +
+				'or model (ModelIR). For database introspection, use getSchemaFromDb() ' +
+				'from @dbsp/adapter-kysely.',
 		);
 	}
 
-	// ARCH-006: Validate naming convention consistency
-	// Only validate if both schema and adapter have namingConvention defined
-	if (
-		adapter &&
-		schemaObj.namingConvention &&
-		adapter.namingConvention &&
-		schemaObj.namingConvention !== adapter.namingConvention
-	) {
-		throw new NamingConventionMismatchError({
-			schemaConvention: schemaObj.namingConvention,
-			adapterConvention: adapter.namingConvention,
-		});
-	}
-
-	// Create ORM instance with schema's ModelIR
+	// Create ORM instance with ModelIR
 	// Cast to InferDB<T> since createOrmInstance uses internal types
 	return createOrmInstance(
-		schemaObj.model,
+		model,
 		strictMode,
 		{}, // relationHints removed in ARCH-006
 		adapter,
 		undefined, // schemaName
 		undefined, // defaultIncludeStrategy removed in ARCH-006
 		dialectCapabilities,
-		schemaObj.definition, // schemaDefinition for NQL validation
+		schemaDefinition,
 	) as OrmInstance<InferDB<T>>;
 }
 
