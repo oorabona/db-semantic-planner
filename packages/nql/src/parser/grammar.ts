@@ -15,6 +15,7 @@ import {
 	allTokens,
 	Between,
 	Bind,
+	Case,
 	Child,
 	Comma,
 	ContainedBy,
@@ -25,6 +26,8 @@ import {
 	Descendant,
 	Distinct,
 	Dot,
+	Else,
+	End,
 	Equals,
 	Every,
 	Exists,
@@ -78,9 +81,11 @@ import {
 	Some,
 	Star,
 	StringLiteral,
+	Then,
 	True,
 	Update,
 	Upsert,
+	When,
 	Where,
 } from '../lexer/tokens.js';
 
@@ -749,12 +754,17 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * primary_expr = literal | path_expr | func_call | "(" expr ")" | "(" scalar_subquery ")" ;
+	 * primary_expr = literal | case_expr | path_expr | func_call | "(" expr ")" | "(" scalar_subquery ")" ;
 	 */
 	private primaryExpr = this.RULE('primaryExpr', () => {
 		this.OR([
 			// Literal
 			{ ALT: () => this.SUBRULE(this.literal) },
+			// CASE expression: CASE WHEN ... THEN ... [ELSE ...] END
+			{
+				GATE: () => this.LA(1).tokenType === Case,
+				ALT: () => this.SUBRULE(this.caseExpr),
+			},
 			// Function call: ident(...) or window function keyword(...)
 			{
 				GATE: () =>
@@ -824,10 +834,38 @@ export class NqlParser extends CstParser {
 	 */
 	private pathExpr = this.RULE('pathExpr', () => {
 		this.SUBRULE(this.identSegment);
+		// Optional depth hint: ascendant[3].column → bounded traversal
+		this.OPTION2(() => {
+			this.CONSUME(LBracket);
+			this.CONSUME(NumberLiteral);
+			this.CONSUME(RBracket);
+		});
 		this.MANY(() => {
 			this.CONSUME(Dot);
 			this.SUBRULE2(this.identSegment);
 		});
+	});
+
+	/**
+	 * case_expr = "CASE" when_clause { when_clause } [ else_clause ] "END" ;
+	 * when_clause = "WHEN" expression "THEN" expression ;
+	 * else_clause = "ELSE" expression ;
+	 */
+	private caseExpr = this.RULE('caseExpr', () => {
+		this.CONSUME(Case);
+		// At least one WHEN clause required
+		this.AT_LEAST_ONE(() => {
+			this.CONSUME(When);
+			this.SUBRULE(this.booleanExpr); // Boolean expression for condition
+			this.CONSUME(Then);
+			this.SUBRULE(this.expression); // Result can be any expression
+		});
+		// Optional ELSE clause
+		this.OPTION(() => {
+			this.CONSUME(Else);
+			this.SUBRULE2(this.expression);
+		});
+		this.CONSUME(End);
 	});
 
 	/**
@@ -881,14 +919,21 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * Function argument list - handles count(*) specially
+	 * Function argument list - handles count(*) and DISTINCT specially
+	 * func_arg_list = "*" | [ "distinct" ] expr_list ;
 	 */
 	private funcArgList = this.RULE('funcArgList', () => {
 		this.OR([
 			// count(*) special case
 			{ ALT: () => this.CONSUME(Star) },
-			// Normal expression list
-			{ ALT: () => this.SUBRULE(this.exprList) },
+			// Optional DISTINCT modifier + expression list
+			// e.g., count(distinct status), sum(distinct price)
+			{
+				ALT: () => {
+					this.OPTION(() => this.CONSUME(Distinct));
+					this.SUBRULE(this.exprList);
+				},
+			},
 		]);
 	});
 
@@ -1028,10 +1073,17 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * mutation = insert_stmt | update_stmt | delete_stmt | upsert_stmt ;
+	 * mutation = insert_from_stmt | insert_stmt | update_stmt | delete_stmt | upsert_stmt ;
+	 * Note: insert_from_stmt must come before insert_stmt because both start with "insert into".
+	 * We use BACKTRACK to resolve the ambiguity.
 	 */
 	private mutation = this.RULE('mutation', () => {
 		this.OR([
+			// BACKTRACK for INSERT FROM (insert into X from Y) vs INSERT SET (insert into X set ...)
+			{
+				ALT: () => this.SUBRULE(this.insertFromStmt),
+				GATE: this.BACKTRACK(this.insertFromStmt),
+			},
 			{ ALT: () => this.SUBRULE(this.insertStmt) },
 			{ ALT: () => this.SUBRULE(this.updateStmt) },
 			{ ALT: () => this.SUBRULE(this.deleteStmt) },
@@ -1048,6 +1100,26 @@ export class NqlParser extends CstParser {
 		this.SUBRULE(this.identSegment);
 		this.CONSUME(SetKeyword);
 		this.SUBRULE(this.assignmentList);
+	});
+
+	/**
+	 * insert_from_stmt = "insert" "into" ident_segment "from" ident_segment [ "where" boolean_expr ] [ "limit" number ] ;
+	 * @example insert into archived_users from users where active = false limit 100
+	 */
+	private insertFromStmt = this.RULE('insertFromStmt', () => {
+		this.CONSUME(Insert);
+		this.CONSUME(Into);
+		this.SUBRULE(this.identSegment); // target table
+		this.CONSUME(From);
+		this.SUBRULE2(this.identSegment); // source table
+		this.OPTION(() => {
+			this.CONSUME(Where);
+			this.SUBRULE(this.booleanExpr);
+		});
+		this.OPTION2(() => {
+			this.CONSUME(Limit);
+			this.CONSUME(NumberLiteral);
+		});
 	});
 
 	/**
