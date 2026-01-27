@@ -99,10 +99,10 @@ describe('Zero-Config ORM (with adapter)', () => {
 	});
 
 	describe('error handling', () => {
-		it('throws when schema is missing required structure', () => {
-			// @ts-expect-error - Testing invalid usage
-			expect(() => createOrm({})).toThrow(
-				'Invalid schema: must be created with schema() function',
+		it('throws when neither schema nor model is provided', () => {
+			// Both schema and model are optional in types, but runtime validation requires at least one
+			expect(() => createOrm({} as any)).toThrow(
+				'Invalid options: must provide either schema (from schema() function) or model (ModelIR)',
 			);
 		});
 	});

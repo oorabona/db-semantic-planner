@@ -17,8 +17,8 @@ import {
 	createOrm,
 	eq,
 	exists,
-	fk,
 	POSTGRESQL_CAPABILITIES,
+	ref,
 	schema,
 } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -119,7 +119,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 
 		describe('E2E-004-A2: hasOne uses json_agg strategy', () => {
 			it('should auto-select json_agg for hasOne relation', async () => {
-				// ARCH-005: Create schema with hasOne relationship using schema() + fk()
+				// ARCH-005: Create schema with hasOne relationship using schema() + ref()
 				// unique: true on FK creates 1:1 (hasOne on inverse)
 				const schemaWithProfile = schema({
 					users: {
@@ -129,7 +129,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 					profiles: {
 						id: { type: 'integer', primaryKey: true },
 						// unique: true makes this 1:1 (hasOne relationship)
-						userId: fk('users', { unique: true }),
+						userId: ref('users', { unique: true }),
 						bio: 'string',
 					},
 				});
@@ -265,7 +265,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 					},
 					posts: {
 						id: { type: 'integer', primaryKey: true },
-						userId: fk('users'),
+						userId: ref('users'),
 						title: 'string',
 					},
 				});

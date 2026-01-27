@@ -70,6 +70,26 @@ SELECT * FROM posts WHERE userId IN (SELECT id FROM users WHERE active = true)
 
 ---
 
+## ✅ COMPLETED: API Simplification + Lint Cleanup (2026-01-27)
+
+**Priority:** LOW | **Effort:** S (~1h) | **Breaking:** No
+**Scope:** core, adapter-kysely
+
+Simplified `createOrm()` API and cleaned up biome lint errors.
+
+### Changes
+- **`createOrm({ model })`**: Now accepts ModelIR directly (in addition to `{ schema }`)
+- **Biome overrides**: Added `biome.json` overrides for intentional `any` usage in Kysely handlers
+- **Lint cleanup**: Removed unused suppressions, fixed implicit any declarations
+- **Test fixes**: Updated `count()` test expectation and error message assertions
+
+### Why
+- `.definition` property was passed through the chain but never actually used (NQL compiler ignores `_schema` param)
+- E2E tests using `{ model: blogModel }` now work without requiring full schema object
+- Cleaner codebase with 0 biome errors
+
+---
+
 ## ✅ COMPLETED: DX-040 Type-Safe Query API (2026-01-26)
 
 **Priority:** HIGH | **Effort:** XL (~40h) | **Breaking:** No

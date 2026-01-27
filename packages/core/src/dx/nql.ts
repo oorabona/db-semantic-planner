@@ -117,9 +117,8 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 	private readonly query: string;
 	private readonly schemaDefinition: unknown;
 	private readonly model: ModelIR;
-	private readonly adapter: Adapter<unknown> | undefined;
-	// Reserved for future multi-tenant support (schema-scoped compile options)
 	private readonly _schemaName: string | undefined;
+	private readonly adapter: Adapter<unknown> | undefined;
 
 	constructor(
 		query: string,

@@ -99,11 +99,9 @@ export interface CompilerContext {
  */
 export type WhereHandler<T extends WhereIntent = WhereIntent> = (
 	ctx: CompilerContext,
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
 	eb: ExpressionBuilder<any, any>,
 	intent: T,
 	alias: string,
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
 ) => any;
 
 /**
@@ -135,9 +133,7 @@ export type IncludeHandler = (
  */
 export type WhereDispatcher = (
 	ctx: CompilerContext,
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression builder
 	eb: ExpressionBuilder<any, any>,
 	where: WhereIntent,
 	alias: string,
-	// biome-ignore lint/suspicious/noExplicitAny: Kysely expression
 ) => any;

@@ -96,24 +96,21 @@ export const pseudoColumnHandler: ExpressionHandler<
 	// Build the JOIN condition based on traversal direction
 	// parent: current.fkColumn = parent.pkColumn (go UP the tree)
 	// child: current.pkColumn = child.fkColumn (go DOWN the tree)
-	let joinedQuery;
-
-	if (traversal === 'parent') {
-		// Going UP: join on current's FK pointing to parent's PK
-		joinedQuery = query.leftJoin(
-			`${targetTableName} as ${joinAlias}`,
-			`${currentAlias}.${fkColumn}`,
-			`${joinAlias}.${pkColumn}`,
-		);
-	} else {
-		// traversal === 'child'
-		// Going DOWN: join on parent's PK matching child's FK
-		joinedQuery = query.leftJoin(
-			`${targetTableName} as ${joinAlias}`,
-			`${currentAlias}.${pkColumn}`,
-			`${joinAlias}.${fkColumn}`,
-		);
-	}
+	const joinedQuery =
+		traversal === 'parent'
+			? // Going UP: join on current's FK pointing to parent's PK
+				query.leftJoin(
+					`${targetTableName} as ${joinAlias}`,
+					`${currentAlias}.${fkColumn}`,
+					`${joinAlias}.${pkColumn}`,
+				)
+			: // traversal === 'child'
+				// Going DOWN: join on parent's PK matching child's FK
+				query.leftJoin(
+					`${targetTableName} as ${joinAlias}`,
+					`${currentAlias}.${pkColumn}`,
+					`${joinAlias}.${fkColumn}`,
+				);
 
 	// Select the target column from the joined table with the specified alias
 	return joinedQuery.select((eb) =>

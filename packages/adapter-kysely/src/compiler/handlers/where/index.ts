@@ -45,7 +45,6 @@ export function registerWhereHandlers(): void {
  * Helper functions for complex WHERE handlers.
  * Uses `any` for Kysely generics that cannot be typed precisely at this layer.
  */
-// biome-ignore lint/suspicious/noExplicitAny: Kysely/ModelIR generics cannot be typed precisely
 type ComplexWhereHelpers = {
 	compileExists: (
 		eb: any,

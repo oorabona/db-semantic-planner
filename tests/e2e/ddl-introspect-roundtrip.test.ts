@@ -11,7 +11,7 @@
  */
 
 import { generateDDL, introspect } from '@dbsp/adapter-kysely';
-import { fk, schema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { generateSchemaFile } from '../../packages/cli/src/generators/schema-codegen.js';
@@ -37,7 +37,7 @@ describe.skipIf(shouldSkipE2E())('DDL → Introspect Round-Trip', () => {
 	});
 
 	it('round-trips a simple schema through DDL and introspection', async () => {
-		// 1. Define a TypeScript schema using new schema() + fk() API
+		// 1. Define a TypeScript schema using new schema() + ref() API
 		const originalSchema = schema({
 			users: {
 				id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
@@ -50,13 +50,13 @@ describe.skipIf(shouldSkipE2E())('DDL → Introspect Round-Trip', () => {
 				id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
 				title: 'string',
 				content: { type: 'string', nullable: true },
-				authorId: fk('users'),
+				authorId: ref('users'),
 				published: { type: 'boolean', default: 'false' },
 			},
 			comments: {
 				id: { type: 'uuid', primaryKey: true, default: 'gen_random_uuid()' },
-				postId: fk('posts'),
-				authorId: fk('users'),
+				postId: ref('posts'),
+				authorId: ref('users'),
 				body: 'string',
 			},
 		});
@@ -126,8 +126,8 @@ describe.skipIf(shouldSkipE2E())('DDL → Introspect Round-Trip', () => {
 		// Check foreign keys
 		const postsTable = introspectedModel.tables.get('posts')!;
 		expect(postsTable.foreignKeys.length).toBeGreaterThan(0);
-		const authorFk = postsTable.foreignKeys.find((fk) =>
-			fk.columns.includes('author_id'),
+		const authorFk = postsTable.foreignKeys.find((ref) =>
+			ref.columns.includes('author_id'),
 		);
 		expect(authorFk).toBeDefined();
 		expect(authorFk?.references.table).toBe('users');

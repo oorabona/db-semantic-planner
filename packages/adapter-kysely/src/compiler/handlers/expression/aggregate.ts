@@ -64,7 +64,6 @@ export const aggregateHandler: ExpressionHandler<AggregateExpressionIntent> = (
 		}
 
 		// Standard aggregate without DISTINCT
-		// biome-ignore lint/suspicious/noExplicitAny: Dynamic aggregate function
 		return eb.fn(fn, [columnRef]).as(outputAlias);
 	});
 };

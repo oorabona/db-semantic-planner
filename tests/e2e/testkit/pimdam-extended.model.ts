@@ -9,10 +9,10 @@
  * - Q7: BOM/Bundles (bundleComponents junction)
  * - Q8: Ambiguous relations (author/reviewer pattern)
  *
- * Uses schema() + fk() API with auto-inferred relations.
+ * Uses schema() + ref() API with auto-inferred relations.
  */
 
-import { fk, schema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 
 /**
  * Extended PIM/DAM schema for E2E-002 tests.
@@ -33,7 +33,7 @@ const pimdamExtendedSchema = schema({
 		name: 'string',
 		path: { type: 'string', nullable: true }, // Materialized path: /1/2/3/
 		// Self-ref with parent/children
-		parentId: fk('categories', {
+		parentId: ref('categories', {
 			nullable: true,
 			roles: { parent: 'parent', children: 'children' },
 		}),
@@ -64,14 +64,14 @@ const pimdamExtendedSchema = schema({
 		nameDefault: { type: 'string', nullable: true },
 		descriptionFr: { type: 'string', nullable: true },
 		descriptionEn: { type: 'string', nullable: true },
-		categoryId: fk('categories'),
-		familyId: fk('families', { nullable: true }),
+		categoryId: ref('categories'),
+		familyId: ref('families', { nullable: true }),
 		active: 'boolean',
 		isBundle: { type: 'boolean', default: 'false' },
 		deletedAt: { type: 'timestamp', nullable: true },
 		// Ambiguity test: multiple user references with explicit naming
-		authorId: fk('users', { as: 'author', inverse: 'authoredProducts' }),
-		reviewerId: fk('users', {
+		authorId: ref('users', { as: 'author', inverse: 'authoredProducts' }),
+		reviewerId: ref('users', {
 			nullable: true,
 			as: 'reviewer',
 			inverse: 'reviewedProducts',
@@ -93,8 +93,8 @@ const pimdamExtendedSchema = schema({
 
 	productImages: {
 		id: { type: 'integer', primaryKey: true },
-		productId: fk('products'),
-		assetId: fk('assets'),
+		productId: ref('products'),
+		assetId: ref('assets'),
 		locale: 'string',
 		status: 'string',
 		isMain: 'boolean',
@@ -105,7 +105,7 @@ const pimdamExtendedSchema = schema({
 
 	variants: {
 		id: { type: 'integer', primaryKey: true },
-		productId: fk('products'),
+		productId: ref('products'),
 		sku: 'string',
 		name: 'string',
 		priceCents: 'integer',
@@ -122,8 +122,8 @@ const pimdamExtendedSchema = schema({
 	// Q1: Completeness - Which attributes are required per family/channel
 	familyAttributes: {
 		id: { type: 'integer', primaryKey: true },
-		familyId: fk('families'),
-		channelId: fk('channels'),
+		familyId: ref('families'),
+		channelId: ref('channels'),
 		attributeName: 'string',
 		isRequired: 'boolean',
 	},
@@ -131,7 +131,7 @@ const pimdamExtendedSchema = schema({
 	// Q1: Completeness - Actual attribute values per product
 	productAttributes: {
 		id: { type: 'integer', primaryKey: true },
-		productId: fk('products'),
+		productId: ref('products'),
 		attributeName: 'string',
 		value: { type: 'string', nullable: true },
 		locale: { type: 'string', nullable: true },
@@ -140,8 +140,8 @@ const pimdamExtendedSchema = schema({
 	// Q7: BOM/Bundles - Components junction (multiple FKs to products)
 	bundleComponents: {
 		id: { type: 'integer', primaryKey: true },
-		bundleId: fk('products', { as: 'bundle', inverse: 'components' }),
-		componentId: fk('products', { as: 'component', inverse: 'bundles' }),
+		bundleId: ref('products', { as: 'bundle', inverse: 'components' }),
+		componentId: ref('products', { as: 'component', inverse: 'bundles' }),
 		quantity: 'integer',
 		position: 'integer',
 	},
@@ -149,8 +149,8 @@ const pimdamExtendedSchema = schema({
 	// Q3: Variant-specific images with locale
 	variantImages: {
 		id: { type: 'integer', primaryKey: true },
-		variantId: fk('variants'),
-		assetId: fk('assets'),
+		variantId: ref('variants'),
+		assetId: ref('assets'),
 		locale: 'string',
 		isMain: 'boolean',
 		position: 'integer',

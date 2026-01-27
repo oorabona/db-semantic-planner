@@ -62,7 +62,7 @@ describe('DX-040 Block 7: Cross-Table Queries', () => {
 			const { users } = s.tables;
 
 			// Direct column access
-			const col = users['name'];
+			const col = users.name;
 
 			// Should NOT have RELATION_PATH symbol
 			expect(RELATION_PATH in (col as unknown as object)).toBe(false);

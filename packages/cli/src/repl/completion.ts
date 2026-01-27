@@ -32,6 +32,7 @@ export function levenshtein(a: string, b: string): number {
 			const deletion = matrix[i - 1]?.[j] ?? 0;
 			const insertion = matrix[i]?.[j - 1] ?? 0;
 			const substitution = matrix[i - 1]?.[j - 1] ?? 0;
+			// biome-ignore lint/style/noNonNullAssertion: Matrix row guaranteed to exist by outer loop initialization
 			matrix[i]![j] = Math.min(
 				deletion + 1,
 				insertion + 1,

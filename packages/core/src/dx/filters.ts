@@ -43,7 +43,6 @@ import type {
 import {
 	COLUMN_META,
 	type ColumnRef,
-	isRelationRef,
 	RELATION_META,
 	RELATION_PATH,
 	type RelationRef,
@@ -58,7 +57,7 @@ import type { ExpressionSpec } from './types.js';
  * Check if a value is a ColumnRef by checking for the COLUMN_META symbol.
  * @internal
  */
-function isColumnRef(
+function _isColumnRef(
 	value: unknown,
 ): value is ColumnRef<string, string, unknown> {
 	return typeof value === 'object' && value !== null && COLUMN_META in value;
@@ -80,7 +79,7 @@ function hasRelationPath(
  * Get the relation path from a ColumnRef if it exists.
  * @internal
  */
-function getRelationPath(
+function _getRelationPath(
 	col: ColumnRef<string, string, unknown>,
 ): readonly string[] | undefined {
 	if (hasRelationPath(col)) {

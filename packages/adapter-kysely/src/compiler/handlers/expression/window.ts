@@ -5,6 +5,7 @@
 
 import type { WindowIntent } from '@dbsp/core';
 import { isAggregateWindowFunction } from '@dbsp/core';
+import type { RawBuilder } from 'kysely';
 import { sql } from 'kysely';
 import { CompilationError } from '../../../errors.js';
 import type { ExpressionHandler } from '../../types.js';
@@ -38,7 +39,7 @@ export const windowHandler: ExpressionHandler<WindowIntent> = (
 		: [];
 
 	// Build OVER clause components
-	let overClause;
+	let overClause: RawBuilder<unknown> | null;
 	if (partitionByRefs.length > 0 && orderByExprs.length > 0) {
 		overClause = sql`PARTITION BY ${sql.join(partitionByRefs, sql`, `)} ORDER BY ${sql.join(orderByExprs, sql`, `)}`;
 	} else if (partitionByRefs.length > 0) {
@@ -50,7 +51,7 @@ export const windowHandler: ExpressionHandler<WindowIntent> = (
 	}
 
 	// Build the window function expression
-	let windowExpr;
+	let windowExpr: RawBuilder<unknown>;
 	if (isAggregateWindowFunction(fn)) {
 		// Aggregate window functions: SUM(field), AVG(field), etc.
 		if (!field) {

@@ -178,9 +178,9 @@ function typesCompatible(schemaType: string, dbType: string): boolean {
  */
 import type { LoadedSchema } from './utils/schema-loader.js';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type VerifySchemaInput =
 	| ResolvedSchema
+	// biome-ignore lint/suspicious/noExplicitAny: Union type needs to accept Schema with any table types
 	| Schema<any>
 	| SchemaDefinition
 	| LoadedSchema;

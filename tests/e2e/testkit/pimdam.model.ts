@@ -2,10 +2,10 @@
  * PIM/DAM ModelIR
  *
  * Schema definition for semantic query planning.
- * Uses schema() + fk() API with auto-inferred relations.
+ * Uses schema() + ref() API with auto-inferred relations.
  */
 
-import { fk, schema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 
 /**
  * PIM/DAM schema for E2E tests.
@@ -22,7 +22,7 @@ const pimdamSchema = schema({
 		id: { type: 'integer', primaryKey: true },
 		name: 'string',
 		// Self-ref with parent/children
-		parentId: fk('categories', {
+		parentId: ref('categories', {
 			nullable: true,
 			roles: { parent: 'parent', children: 'children' },
 		}),
@@ -31,7 +31,7 @@ const pimdamSchema = schema({
 		id: { type: 'integer', primaryKey: true },
 		sku: 'string',
 		title: 'string',
-		categoryId: fk('categories'),
+		categoryId: ref('categories'),
 		active: 'boolean',
 		deletedAt: { type: 'timestamp', nullable: true },
 	},
@@ -49,8 +49,8 @@ const pimdamSchema = schema({
 	},
 	productImages: {
 		id: { type: 'integer', primaryKey: true },
-		productId: fk('products'),
-		assetId: fk('assets'),
+		productId: ref('products'),
+		assetId: ref('assets'),
 		locale: 'string',
 		status: 'string',
 		isMain: 'boolean',
@@ -59,7 +59,7 @@ const pimdamSchema = schema({
 	},
 	variants: {
 		id: { type: 'integer', primaryKey: true },
-		productId: fk('products'),
+		productId: ref('products'),
 		sku: 'string',
 		name: 'string',
 		priceCents: 'integer',
