@@ -6,7 +6,7 @@
 #   --db      Run with database (required for full chapter examples)
 #   --verbose Show full output, not just summary
 
-set -euo pipefail
+set -uo pipefail
 cd "$(dirname "$0")/.."
 
 DB_URL="${DB_URL:-postgresql://postgres:demo@127.0.0.1:5432/demo}"
@@ -14,6 +14,7 @@ USE_DB=false
 VERBOSE=false
 PASS=0
 FAIL=0
+SKIP=0
 FAILED_TESTS=()
 
 # Parse arguments
@@ -34,26 +35,30 @@ run_test() {
 
     echo -n "  $name ... "
 
-    local cmd="pnpm dbsp repl -s $schema -i $input -a $assert"
-    if [ "$needs_db" = "yes" ] && [ "$USE_DB" = "true" ]; then
-        cmd="$cmd -d $DB_URL"
-    elif [ "$needs_db" = "yes" ] && [ "$USE_DB" = "false" ]; then
+    if [ "$needs_db" = "yes" ] && [ "$USE_DB" = "false" ]; then
         echo "SKIPPED (needs --db)"
+        ((SKIP++)) || true
         return
     fi
 
+    local cmd=(pnpm dbsp repl -s "$schema" -i "$input" -a "$assert")
+    if [ "$needs_db" = "yes" ] && [ "$USE_DB" = "true" ]; then
+        cmd+=(-d "$DB_URL")
+    fi
+
     local output
-    output=$($cmd 2>&1) || true
+    local exit_code
+    output=$("${cmd[@]}" 2>&1) && exit_code=0 || exit_code=$?
 
     local summary
     summary=$(echo "$output" | grep -E "^Summary:" | head -1)
 
-    if echo "$summary" | grep -q "FAILED"; then
+    if [ "$exit_code" -ne 0 ]; then
         echo "FAILED - $summary"
         ((FAIL++)) || true
         FAILED_TESTS+=("$name")
         if [ "$VERBOSE" = "true" ]; then
-            echo "$output" | grep -E "^(❌|  ✗)" || true
+            echo "$output" | grep -E "^(  ✗|❌)" || true
         fi
     else
         echo "OK - $summary"
@@ -80,10 +85,10 @@ run_test "scheduling" "examples/scheduling.schema.ts" "examples/scheduling.dbsp"
 
 echo ""
 echo "========================================"
-echo "TOTAL: $PASS passed, $FAIL failed"
+echo "TOTAL: $PASS passed, $FAIL failed, $SKIP skipped"
 if [ ${#FAILED_TESTS[@]} -gt 0 ]; then
     echo "Failed: ${FAILED_TESTS[*]}"
 fi
 echo "========================================"
 
-exit $FAIL
+exit "$FAIL"

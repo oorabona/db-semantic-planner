@@ -841,18 +841,6 @@ export function compile(
 			schemaName,
 		);
 
-		// Apply JSON_AGG for include-strategy: 'json_agg' (CORE-006)
-		query = applyJsonAggIncludes(
-			query,
-			intent.include,
-			plan,
-			model,
-			state,
-			rootTable,
-			rootAlias,
-			schemaName,
-		);
-
 		// Apply LEFT JOINs for include-strategy: 'join' (CORE-001)
 		query = applyJoinIncludes(
 			query,
@@ -878,6 +866,22 @@ export function compile(
 		state,
 		schemaName,
 	);
+
+	// Phase 4b: Apply JSON_AGG for include-strategy: 'json_agg' (CORE-006)
+	// MUST happen AFTER SELECT expressions so that relation columns are selected
+	// before the JSON aggregation columns, ensuring correct column order.
+	if (intent.include) {
+		query = applyJsonAggIncludes(
+			query,
+			intent.include,
+			plan,
+			model,
+			state,
+			rootTable,
+			rootAlias,
+			schemaName,
+		);
+	}
 
 	// Phase 5: Add aliased SELECT columns for included relations
 	// MUST run after applySelectClause so that explicitlySelectedRelations

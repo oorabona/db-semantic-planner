@@ -15,6 +15,14 @@
 		"./generators/schema-codegen": {
 			"types": "./dist/generators/schema-codegen.d.ts",
 			"import": "./dist/generators/schema-codegen.js"
+		},
+		"./batch": {
+			"types": "./dist/repl/batch.d.ts",
+			"import": "./dist/repl/batch.js"
+		},
+		"./schema-loader": {
+			"types": "./dist/utils/schema-loader.d.ts",
+			"import": "./dist/utils/schema-loader.js"
 		}
 	},
 	"files": [

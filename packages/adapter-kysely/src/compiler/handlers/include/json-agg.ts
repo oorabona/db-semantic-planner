@@ -181,18 +181,9 @@ export function applyJsonAggIncludes(
 		// For PostgreSQL: COALESCE((SELECT json_agg(to_jsonb(t)) FROM target t WHERE ... ORDER BY ...), '[]')
 		// For SQLite: COALESCE((SELECT json_group_array(json(target.*)) FROM target WHERE ... ORDER BY ...), '[]')
 		const jsonAggSql = isPostgres
-			? sql`COALESCE((
-				SELECT json_agg(to_jsonb(__t__) ${orderBySql ? sql.raw(orderBySql) : sql``})
-				FROM ${sql.table(targetTable)} AS __t__
-				WHERE ${whereClause}
-			), '[]'::json)`
+			? sql`COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ${sql.table(targetTable)} AS __t__ WHERE ${whereClause}${orderBySql ? sql.raw(` ${orderBySql}`) : sql``}), '[]'::json)`
 			: isSqlite
-				? sql`COALESCE((
-				SELECT json_group_array(json_object('id', __t__.id))
-				FROM ${sql.table(targetTable)} AS __t__
-				WHERE ${whereClause}
-				${orderBySql ? sql.raw(orderBySql) : sql``}
-			), '[]')`
+				? sql`COALESCE((SELECT json_group_array(json_object('id', __t__.id)) FROM ${sql.table(targetTable)} AS __t__ WHERE ${whereClause}${orderBySql ? sql.raw(` ${orderBySql}`) : sql``}), '[]')`
 				: sql`'[]'`; // Fallback for unsupported dialects
 
 		// Add the JSON aggregation as a selected column
