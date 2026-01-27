@@ -103,21 +103,18 @@ Discovered while running `examples/*.dbsp` against pg-demo PostgreSQL.
 
 ### P1 — Critical (Blocking Examples)
 
-- [ ] **Nested includes with where clause fail**
-  - Example: `categories | with products | where active = true`
-  - Error: `column t0.active does not exist`
-  - Root cause: After include, `where` clause still references `t0` (parent) instead of joined table alias
-  - **Solution:** CLI executor must track active table context after `with` and resolve columns to correct alias
-  - Files: `packages/cli/src/repl/query-executor.ts`
-  - Ref: `ecommerce.assert.dbsp` query 9
+- [x] ✅ **OBSOLETE: Nested includes with where clause** (2026-01-27)
+  - Original: `categories | with products | where active = true`
+  - **Status:** OBSOLETE — The `with` keyword was removed in NQL v2.1 (2026-01-24)
+  - New syntax: `categories | select *, products.* | where products.active = true`
+  - The new include syntax works correctly with where clauses
 
-- [ ] **Aggregates fail in CLI executor**
+- [x] ✅ **Aggregates in CLI executor** (2026-01-25)
   - Example: `orders | group by status | select sum(total)`
-  - Error: `Cannot read properties of undefined (reading 'map')`
-  - Root cause: NQL compiler emits `AggregateExpressionIntent` but CLI executor doesn't wire it to adapter
-  - **Solution:** Connect NQL's `AggregateExpressionIntent` output to adapter's aggregate handler in query-executor
-  - Files: `packages/cli/src/repl/query-executor.ts`, `packages/adapter-kysely/src/compiler/handlers/expression/aggregate.ts`
-  - Ref: `ecommerce.assert.dbsp` queries 12-15
+  - **Status:** FIXED — AggregateExpressionIntent handler added and registered
+  - Commits: 8e91c23, ef41f97
+  - Files: `packages/adapter-kysely/src/compiler/handlers/expression/aggregate.ts`
+  - Tests: All aggregate tests pass (ecommerce.assert.dbsp queries 13-16)
 
 ### P2 — Medium (Feature Gaps)
 
