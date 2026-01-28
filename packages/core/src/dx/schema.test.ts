@@ -1383,4 +1383,241 @@ describe('schema.tables runtime metadata (DX-040)', () => {
 			expect(ref1).toBe(ref2);
 		});
 	});
+
+	describe('composite primary keys', () => {
+		it('should produce array PK when multiple columns have primaryKey: true', () => {
+			const s = schema({
+				orderItems: {
+					orderId: { type: 'uuid', primaryKey: true },
+					productId: { type: 'uuid', primaryKey: true },
+					quantity: 'integer',
+				},
+			});
+
+			const table = s.model.tables.get('orderItems');
+			expect(table).toBeDefined();
+			expect(table!.primaryKey).toEqual(['orderId', 'productId']);
+		});
+
+		it('should produce string PK when single column has primaryKey: true', () => {
+			const s = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					name: 'string',
+				},
+			});
+
+			const table = s.model.tables.get('users');
+			expect(table!.primaryKey).toBe('id');
+		});
+	});
+
+	describe('composite foreign keys (table-level constraints)', () => {
+		it('should add composite FK from schema constraints', () => {
+			const s = schema(
+				{
+					orders: {
+						orderId: { type: 'uuid', primaryKey: true },
+						productId: { type: 'uuid', primaryKey: true },
+						total: 'number',
+					},
+					shipments: {
+						id: { type: 'uuid', primaryKey: true },
+						orderId: 'uuid',
+						productId: 'uuid',
+					},
+				},
+				{
+					shipments: {
+						foreignKeys: [
+							ref('orders', {
+								columns: ['orderId', 'productId'],
+								references: ['orderId', 'productId'],
+							}),
+						],
+					},
+				},
+			);
+
+			const table = s.model.tables.get('shipments');
+			expect(table).toBeDefined();
+
+			const compositeFk = table!.foreignKeys.find(
+				(fk) => fk.columns.length === 2,
+			);
+			expect(compositeFk).toBeDefined();
+			expect(compositeFk!.columns).toEqual(['orderId', 'productId']);
+			expect(compositeFk!.references.table).toBe('orders');
+			expect(compositeFk!.references.columns).toEqual(['orderId', 'productId']);
+		});
+
+		it('should support onDelete on composite FK', () => {
+			const s = schema(
+				{
+					parents: {
+						a: { type: 'uuid', primaryKey: true },
+						b: { type: 'uuid', primaryKey: true },
+					},
+					children: {
+						id: { type: 'uuid', primaryKey: true },
+						a: 'uuid',
+						b: 'uuid',
+					},
+				},
+				{
+					children: {
+						foreignKeys: [
+							ref('parents', {
+								columns: ['a', 'b'],
+								references: ['a', 'b'],
+								onDelete: 'CASCADE',
+							}),
+						],
+					},
+				},
+			);
+
+			const table = s.model.tables.get('children');
+			const fk = table!.foreignKeys.find((f) => f.columns.length === 2);
+			expect(fk!.onDelete).toBe('CASCADE');
+		});
+
+		it('should default references to [id] when not specified', () => {
+			const s = schema(
+				{
+					targets: {
+						id: { type: 'uuid', primaryKey: true },
+					},
+					sources: {
+						id: { type: 'uuid', primaryKey: true },
+						targetA: 'uuid',
+						targetB: 'uuid',
+					},
+				},
+				{
+					sources: {
+						foreignKeys: [
+							ref('targets', {
+								columns: ['targetA', 'targetB'],
+							}),
+						],
+					},
+				},
+			);
+
+			const table = s.model.tables.get('sources');
+			const fk = table!.foreignKeys.find((f) => f.columns.length === 2);
+			expect(fk!.references.columns).toEqual(['id']);
+		});
+
+		it('should throw if composite FK has no columns option', () => {
+			expect(() =>
+				schema(
+					{
+						targets: { id: { type: 'uuid', primaryKey: true } },
+						sources: { id: { type: 'uuid', primaryKey: true } },
+					},
+					{
+						sources: {
+							foreignKeys: [ref('targets')],
+						},
+					},
+				),
+			).toThrow(/requires 'columns' option/);
+		});
+	});
+
+	describe('composite indexes (table-level constraints)', () => {
+		it('should add composite index from schema constraints', () => {
+			const s = schema(
+				{
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+						email: 'string',
+						tenantId: 'string',
+					},
+				},
+				{
+					users: {
+						indexes: [
+							{
+								columns: ['email', 'tenantId'],
+								unique: true,
+								name: 'uk_users_email_tenant',
+							},
+						],
+					},
+				},
+			);
+
+			const table = s.model.tables.get('users');
+			expect(table).toBeDefined();
+
+			const idx = table!.indexes.find(
+				(i) => i.name === 'uk_users_email_tenant',
+			);
+			expect(idx).toBeDefined();
+			expect(idx!.columns).toEqual(['email', 'tenantId']);
+			expect(idx!.unique).toBe(true);
+		});
+
+		it('should auto-generate index name when not provided', () => {
+			const s = schema(
+				{
+					events: {
+						id: { type: 'uuid', primaryKey: true },
+						userId: 'uuid',
+						createdAt: 'timestamp',
+					},
+				},
+				{
+					events: {
+						indexes: [{ columns: ['userId', 'createdAt'] }],
+					},
+				},
+			);
+
+			const table = s.model.tables.get('events');
+			const idx = table!.indexes.find((i) => i.columns.length === 2);
+			expect(idx).toBeDefined();
+			expect(idx!.name).toBe('idx_events_userId_createdAt');
+			expect(idx!.unique).toBe(false);
+		});
+
+		it('should merge column-level and table-level indexes', () => {
+			const s = schema(
+				{
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+						email: { type: 'string', index: true },
+						tenantId: 'string',
+					},
+				},
+				{
+					users: {
+						indexes: [
+							{
+								columns: ['email', 'tenantId'],
+								unique: true,
+							},
+						],
+					},
+				},
+			);
+
+			const table = s.model.tables.get('users');
+			expect(table!.indexes).toHaveLength(2);
+
+			// Column-level single index
+			const singleIdx = table!.indexes.find((i) => i.columns.length === 1);
+			expect(singleIdx).toBeDefined();
+			expect(singleIdx!.columns).toEqual(['email']);
+
+			// Table-level composite index
+			const compositeIdx = table!.indexes.find((i) => i.columns.length === 2);
+			expect(compositeIdx).toBeDefined();
+			expect(compositeIdx!.columns).toEqual(['email', 'tenantId']);
+			expect(compositeIdx!.unique).toBe(true);
+		});
+	});
 });
