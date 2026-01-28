@@ -49,14 +49,14 @@ describe.skipIf(shouldSkipE2E())('PostgreSQL Range Types', () => {
 			// Find bookings that overlap with Jan 17-19, 2024
 			const bookings = await orm
 				.withSchema(SCHEMA)
-				.select('room_bookings')
+				.select('roomBookings')
 				.where(
-					rangeOverlaps('booking_period', {
+					rangeOverlaps('bookingPeriod', {
 						lower: '2024-01-17',
 						upper: '2024-01-20',
 					}),
 				)
-				.columns(['id', 'booked_by', 'purpose', 'booking_period'])
+				.columns(['id', 'bookedBy', 'purpose', 'bookingPeriod'])
 				.execute();
 
 			// Should find "Team offsite" (Jan 15-20) and "Monthly board meetings" (Jan 1-31)
@@ -75,7 +75,7 @@ describe.skipIf(shouldSkipE2E())('PostgreSQL Range Types', () => {
 				.withSchema(SCHEMA)
 				.select('events')
 				.where(
-					rangeOverlaps('time_slot', {
+					rangeOverlaps('timeSlot', {
 						lower: '2024-01-15 10:00:00+00',
 						upper: '2024-01-15 12:00:00+00',
 					}),
@@ -95,14 +95,14 @@ describe.skipIf(shouldSkipE2E())('PostgreSQL Range Types', () => {
 			// Find tiers overlapping with quantity 20-60
 			const tiers = await orm
 				.withSchema(SCHEMA)
-				.select('price_tiers')
+				.select('priceTiers')
 				.where(
-					rangeOverlaps('quantity_range', {
+					rangeOverlaps('quantityRange', {
 						lower: 20,
 						upper: 60,
 					}),
 				)
-				.columns(['id', 'product_name', 'quantity_range', 'unit_price'])
+				.columns(['id', 'productName', 'quantityRange', 'unitPrice'])
 				.execute();
 
 			// Should find [10, 50) and [50, 100) tiers
@@ -118,9 +118,9 @@ describe.skipIf(shouldSkipE2E())('PostgreSQL Range Types', () => {
 			// Find bookings that contain Jan 18, 2024
 			const bookings = await orm
 				.withSchema(SCHEMA)
-				.select('room_bookings')
-				.where(rangeContains('booking_period', '2024-01-18'))
-				.columns(['id', 'booked_by', 'purpose'])
+				.select('roomBookings')
+				.where(rangeContains('bookingPeriod', '2024-01-18'))
+				.columns(['id', 'bookedBy', 'purpose'])
 				.execute();
 
 			// Should find "Team offsite" (Jan 15-20) and "Monthly board meetings" (Jan 1-31)
@@ -136,14 +136,14 @@ describe.skipIf(shouldSkipE2E())('PostgreSQL Range Types', () => {
 			// Find tier for quantity 25
 			const tiers = await orm
 				.withSchema(SCHEMA)
-				.select('price_tiers')
-				.where(rangeContains('quantity_range', 25))
-				.columns(['id', 'product_name', 'unit_price'])
+				.select('priceTiers')
+				.where(rangeContains('quantityRange', 25))
+				.columns(['id', 'productName', 'unitPrice'])
 				.execute();
 
 			expect(tiers).toHaveLength(1);
-			expect(tiers[0].unit_price).toBe(
-				schedulingTestData.priceTiers.tierForQty25.unit_price,
+			expect(tiers[0].unitPrice).toBe(
+				schedulingTestData.priceTiers.tierForQty25.unitPrice,
 			);
 		});
 
@@ -154,13 +154,13 @@ describe.skipIf(shouldSkipE2E())('PostgreSQL Range Types', () => {
 			// Find tier for quantity 150 (should be the unlimited tier)
 			const tiers = await orm
 				.withSchema(SCHEMA)
-				.select('price_tiers')
-				.where(rangeContains('quantity_range', 150))
-				.columns(['id', 'product_name', 'unit_price'])
+				.select('priceTiers')
+				.where(rangeContains('quantityRange', 150))
+				.columns(['id', 'productName', 'unitPrice'])
 				.execute();
 
 			expect(tiers).toHaveLength(1);
-			expect(tiers[0].unit_price).toBe('69.99'); // Best bulk price
+			expect(tiers[0].unitPrice).toBe('69.99'); // Best bulk price
 		});
 	});
 
@@ -172,14 +172,14 @@ describe.skipIf(shouldSkipE2E())('PostgreSQL Range Types', () => {
 			// Find bookings fully contained within Jan 1 - Jan 31, 2024
 			const bookings = await orm
 				.withSchema(SCHEMA)
-				.select('room_bookings')
+				.select('roomBookings')
 				.where(
-					rangeContainedBy('booking_period', {
+					rangeContainedBy('bookingPeriod', {
 						lower: '2024-01-01',
 						upper: '2024-02-01',
 					}),
 				)
-				.columns(['id', 'booked_by', 'purpose'])
+				.columns(['id', 'bookedBy', 'purpose'])
 				.execute();
 
 			// All January bookings should be included
@@ -197,7 +197,7 @@ describe.skipIf(shouldSkipE2E())('PostgreSQL Range Types', () => {
 				.withSchema(SCHEMA)
 				.select('events')
 				.where(
-					rangeContainedBy('time_slot', {
+					rangeContainedBy('timeSlot', {
 						lower: '2024-01-15 08:00:00+00',
 						upper: '2024-01-15 18:00:00+00',
 					}),
@@ -223,7 +223,7 @@ describe.skipIf(shouldSkipE2E())('PostgreSQL Range Types', () => {
 				.withSchema(SCHEMA)
 				.select('rooms')
 				.include('bookings', {
-					where: rangeOverlaps('booking_period', {
+					where: rangeOverlaps('bookingPeriod', {
 						lower: '2024-01-15',
 						upper: '2024-01-20',
 					}),
@@ -244,13 +244,13 @@ describe.skipIf(shouldSkipE2E())('PostgreSQL Range Types', () => {
 			// The [100,) tier has no upper bound
 			const tiers = await orm
 				.withSchema(SCHEMA)
-				.select('price_tiers')
-				.where(rangeContains('quantity_range', 500))
-				.columns(['id', 'unit_price'])
+				.select('priceTiers')
+				.where(rangeContains('quantityRange', 500))
+				.columns(['id', 'unitPrice'])
 				.execute();
 
 			expect(tiers).toHaveLength(1);
-			expect(tiers[0].unit_price).toBe('69.99');
+			expect(tiers[0].unitPrice).toBe('69.99');
 		});
 
 		it('should return empty for non-overlapping range', async () => {
@@ -260,9 +260,9 @@ describe.skipIf(shouldSkipE2E())('PostgreSQL Range Types', () => {
 			// No bookings in December 2023
 			const bookings = await orm
 				.withSchema(SCHEMA)
-				.select('room_bookings')
+				.select('roomBookings')
 				.where(
-					rangeOverlaps('booking_period', {
+					rangeOverlaps('bookingPeriod', {
 						lower: '2023-12-01',
 						upper: '2023-12-31',
 					}),

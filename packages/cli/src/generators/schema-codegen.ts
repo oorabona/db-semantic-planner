@@ -8,6 +8,14 @@
 import type { ModelIR, TableIR } from '@dbsp/core';
 
 /**
+ * Convert a snake_case string to camelCase.
+ * @example 'author_id' → 'authorId'
+ */
+function snakeToCamelCase(name: string): string {
+	return name.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
+}
+
+/**
  * Options for schema code generation.
  */
 export interface SchemaCodegenOptions {
@@ -182,7 +190,11 @@ function generateTableCode(
 			refCol
 		) {
 			// Find the column to check nullable/unique
-			const colDef = table.columns.find((c) => c.name === localCol);
+			// FK column names may be snake_case (from raw SQL) while column.name
+			// is camelCase (when CamelCasePlugin is active)
+			const colDef = table.columns.find(
+				(c) => c.name === localCol || c.name === snakeToCamelCase(localCol),
+			);
 
 			const entry: {
 				table: string;
@@ -216,7 +228,13 @@ function generateTableCode(
 				entry.onDelete = fk.onDelete;
 			}
 
+			// Store under both snake_case and camelCase keys so fkMap.get(col.name) works
+			// regardless of naming convention
 			fkMap.set(localCol, entry);
+			const camelCol = snakeToCamelCase(localCol);
+			if (camelCol !== localCol) {
+				fkMap.set(camelCol, entry);
+			}
 		}
 	}
 

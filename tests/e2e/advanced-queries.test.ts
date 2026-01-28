@@ -208,7 +208,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const result = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
+					.where(isNull('deletedAt'))
 					.count()
 					.execute();
 
@@ -223,8 +223,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const result = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
-					.count({ as: 'product_count' })
+					.where(isNull('deletedAt'))
+					.count({ as: 'productCount' })
 					.groupBy(['category'])
 					.execute();
 
@@ -232,8 +232,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				// Verify we have counts per category
 				const electronics = result.find(
 					(r: { category: string }) => r.category === 'electronics',
-				) as { product_count: string };
-				expect(Number(electronics?.product_count)).toBe(3); // Laptop, Mouse, USB Cable
+				) as { productCount: string };
+				expect(Number(electronics?.productCount)).toBe(3); // Laptop, Mouse, USB Cable
 			});
 		});
 
@@ -246,12 +246,12 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 					.withSchema(SCHEMA)
 					.select('orders')
 					.where(eq('status', 'completed'))
-					.sum('total_price', 'total_revenue')
+					.sum('totalPrice', 'totalRevenue')
 					.execute();
 
 				expect(result).toHaveLength(1);
 				const revenue = Number(
-					(result[0] as { total_revenue: string }).total_revenue,
+					(result[0] as { totalRevenue: string }).totalRevenue,
 				);
 				expect(revenue).toBeGreaterThan(5000); // Sum of completed orders
 			});
@@ -263,8 +263,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const result = await orm
 					.withSchema(SCHEMA)
 					.select('orders')
-					.sum('quantity', 'total_quantity')
-					.groupBy(['product_id'])
+					.sum('quantity', 'totalQuantity')
+					.groupBy(['productId'])
 					.execute();
 
 				expect(result.length).toBeGreaterThan(0);
@@ -279,17 +279,17 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const result = await orm
 					.withSchema(SCHEMA)
 					.select('reviews')
-					.avg('rating', 'avg_rating')
-					.groupBy(['product_id'])
+					.avg('rating', 'avgRating')
+					.groupBy(['productId'])
 					.execute();
 
 				expect(result.length).toBeGreaterThan(0);
 
-				// Laptop (product_id=1) has 4 reviews: 5, 4, 5, 4 = avg 4.5
+				// Laptop (productId=1) has 4 reviews: 5, 4, 5, 4 = avg 4.5
 				const laptopReviews = result.find(
-					(r: { product_id: number }) => r.product_id === 1,
-				) as { avg_rating: string };
-				const avgRating = Number(laptopReviews?.avg_rating);
+					(r: { productId: number }) => r.productId === 1,
+				) as { avgRating: string };
+				const avgRating = Number(laptopReviews?.avgRating);
 				expect(avgRating).toBeCloseTo(4.5, 1);
 			});
 		});
@@ -302,22 +302,22 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const minResult = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
-					.min('price', 'min_price')
+					.where(isNull('deletedAt'))
+					.min('price', 'minPrice')
 					.execute();
 
 				const maxResult = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
-					.max('price', 'max_price')
+					.where(isNull('deletedAt'))
+					.max('price', 'maxPrice')
 					.execute();
 
 				const minPrice = Number(
-					(minResult[0] as { min_price: string }).min_price,
+					(minResult[0] as { minPrice: string }).minPrice,
 				);
 				const maxPrice = Number(
-					(maxResult[0] as { max_price: string }).max_price,
+					(maxResult[0] as { maxPrice: string }).maxPrice,
 				);
 
 				expect(minPrice).toBe(5.99); // Pen Pack
@@ -338,7 +338,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const result = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
+					.where(isNull('deletedAt'))
 					.columns(['id', 'name', 'price'])
 					.orderBy('price', 'asc')
 					.execute();
@@ -356,7 +356,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const result = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
+					.where(isNull('deletedAt'))
 					.columns(['id', 'name', 'price'])
 					.orderBy('price', 'desc')
 					.execute();
@@ -374,7 +374,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const result = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
+					.where(isNull('deletedAt'))
 					.columns(['id', 'category', 'name'])
 					.orderBy('category', 'asc')
 					.orderBy('name', 'asc')
@@ -393,7 +393,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const result = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
+					.where(isNull('deletedAt'))
 					.limit(3)
 					.execute();
 
@@ -407,7 +407,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const result = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
+					.where(isNull('deletedAt'))
 					.limit(100)
 					.execute();
 
@@ -423,14 +423,14 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const allProducts = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
+					.where(isNull('deletedAt'))
 					.orderBy('id', 'asc')
 					.execute();
 
 				const offsetProducts = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
+					.where(isNull('deletedAt'))
 					.orderBy('id', 'asc')
 					.limit(100)
 					.offset(3)
@@ -453,7 +453,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const page1 = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
+					.where(isNull('deletedAt'))
 					.orderBy('id', 'asc')
 					.limit(pageSize)
 					.offset(0)
@@ -463,7 +463,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const page2 = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
+					.where(isNull('deletedAt'))
 					.orderBy('id', 'asc')
 					.limit(pageSize)
 					.offset(pageSize)
@@ -473,7 +473,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const page3 = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
+					.where(isNull('deletedAt'))
 					.orderBy('id', 'asc')
 					.limit(pageSize)
 					.offset(pageSize * 2)
@@ -499,7 +499,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const top5 = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
+					.where(isNull('deletedAt'))
 					.columns(['name', 'price'])
 					.orderBy('price', 'desc')
 					.limit(5)
@@ -527,7 +527,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 					.select('products')
 					.where(
 						and(
-							isNull('deleted_at'),
+							isNull('deletedAt'),
 							eq('category', 'electronics'),
 							gt('price', 100),
 						),
@@ -549,7 +549,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 					.select('products')
 					.where(
 						and(
-							isNull('deleted_at'),
+							isNull('deletedAt'),
 							or(eq('category', 'electronics'), eq('category', 'furniture')),
 						),
 					)
@@ -567,7 +567,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const result = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(and(isNull('deleted_at'), not(eq('category', 'electronics'))))
+					.where(and(isNull('deletedAt'), not(eq('category', 'electronics'))))
 					.execute();
 
 				// home: 1, furniture: 2, office: 2 = 5
@@ -586,7 +586,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 					.select('products')
 					.where(
 						and(
-							isNull('deleted_at'),
+							isNull('deletedAt'),
 							or(
 								and(eq('category', 'electronics'), gt('price', 20)),
 								and(eq('category', 'furniture'), gt('stock', 100)),
@@ -612,7 +612,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 					.select('products')
 					.where(
 						and(
-							isNull('deleted_at'),
+							isNull('deletedAt'),
 							not(
 								or(eq('category', 'electronics'), eq('category', 'furniture')),
 							),
@@ -634,7 +634,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 					.select('products')
 					.where(
 						and(
-							isNull('deleted_at'),
+							isNull('deletedAt'),
 							exists('orders'),
 							or(
 								gt('price', 500),
@@ -657,7 +657,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const result = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(and(isNull('deleted_at'), gte('price', 10), lt('price', 100)))
+					.where(and(isNull('deletedAt'), gte('price', 10), lt('price', 100)))
 					.execute();
 
 				// Mouse (29.99), Mug (14.99), Lamp (49.99), Notebook (19.99) = 4
@@ -678,7 +678,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const activeProducts = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
+					.where(isNull('deletedAt'))
 					.execute();
 
 				// 10 products - 2 deleted = 8 active
@@ -692,7 +692,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const countResult = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
+					.where(isNull('deletedAt'))
 					.count()
 					.execute();
 
@@ -721,8 +721,8 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const deletedProducts = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNotNull('deleted_at'))
-					.columns(['id', 'name', 'deleted_at'])
+					.where(isNotNull('deletedAt'))
+					.columns(['id', 'name', 'deletedAt'])
 					.execute();
 
 				expect(deletedProducts).toHaveLength(2);
@@ -741,7 +741,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const activeElectronics = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(and(isNull('deleted_at'), eq('category', 'electronics')))
+					.where(and(isNull('deletedAt'), eq('category', 'electronics')))
 					.execute();
 
 				// 3 active electronics (Laptop, Mouse, USB Cable)
@@ -757,13 +757,13 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const activeWithOrders = await orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(and(isNull('deleted_at'), exists('orders')))
+					.where(and(isNull('deletedAt'), exists('orders')))
 					.execute();
 
 				expect(activeWithOrders.length).toBeGreaterThan(0);
 				// Verify all returned products are not deleted
 				for (const product of activeWithOrders) {
-					expect((product as { deleted_at: unknown }).deleted_at).toBeNull();
+					expect((product as { deletedAt: unknown }).deletedAt).toBeNull();
 				}
 			});
 		});
@@ -776,7 +776,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				const dump = orm
 					.withSchema(SCHEMA)
 					.select('products')
-					.where(isNull('deleted_at'))
+					.where(isNull('deletedAt'))
 					.dump();
 
 				expect(dump.sql.toLowerCase()).toContain('deleted_at');
@@ -797,7 +797,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 			const result = await orm
 				.withSchema(SCHEMA)
 				.select('products')
-				.where(isNull('deleted_at'))
+				.where(isNull('deletedAt'))
 				.count({ as: 'count' })
 				.groupBy(['category'])
 				.execute();
@@ -818,7 +818,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 			const result = await orm
 				.withSchema(SCHEMA)
 				.select('products')
-				.where(and(isNull('deleted_at'), eq('category', 'electronics')))
+				.where(and(isNull('deletedAt'), eq('category', 'electronics')))
 				.columns(['name', 'price'])
 				.orderBy('price', 'desc')
 				.limit(3)
@@ -838,7 +838,7 @@ describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
 				.withSchema(SCHEMA)
 				.select('orders')
 				.where(or(eq('status', 'completed'), eq('status', 'shipped')))
-				.sum('total_price', 'total')
+				.sum('totalPrice', 'total')
 				.execute();
 
 			const total = Number((result[0] as { total: string }).total);

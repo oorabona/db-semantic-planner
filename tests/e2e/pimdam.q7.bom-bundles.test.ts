@@ -69,12 +69,12 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 			`.execute(db);
 
 			const bundle = (
-				result.rows as { bundle_sku: string; total_price_cents: string }[]
+				result.rows as { bundleSku: string; totalPriceCents: string }[]
 			)[0];
 			expect(bundle).toBeDefined();
-			expect(bundle.bundle_sku).toBe('BUNDLE-001');
+			expect(bundle.bundleSku).toBe('BUNDLE-001');
 			// 2*999 + 1*499 = 2497
-			expect(Number(bundle.total_price_cents)).toBe(2497);
+			expect(Number(bundle.totalPriceCents)).toBe(2497);
 		});
 
 		it('should list bundle components with quantities', async () => {
@@ -92,14 +92,14 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 			`.execute(db);
 
 			const components = result.rows as {
-				component_sku: string;
-				component_name: string;
+				componentSku: string;
+				componentName: string;
 				quantity: number;
 			}[];
 			expect(components).toHaveLength(2);
-			expect(components[0].component_sku).toBe('COMPONENT-A');
+			expect(components[0].componentSku).toBe('COMPONENT-A');
 			expect(components[0].quantity).toBe(2);
-			expect(components[1].component_sku).toBe('COMPONENT-B');
+			expect(components[1].componentSku).toBe('COMPONENT-B');
 			expect(components[1].quantity).toBe(1);
 		});
 	});
@@ -200,17 +200,17 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 			`.execute(db);
 
 			const flatBom = result.rows as {
-				component_sku: string;
-				total_quantity: string;
-				max_level: number;
+				componentSku: string;
+				totalQuantity: string;
+				maxLevel: number;
 			}[];
 			// Our bundle has 2 leaf components at level 1
 			expect(flatBom).toHaveLength(2);
 			expect(
-				flatBom.find((c) => c.component_sku === 'COMPONENT-A')?.total_quantity,
+				flatBom.find((c) => c.componentSku === 'COMPONENT-A')?.totalQuantity,
 			).toBe('2');
 			expect(
-				flatBom.find((c) => c.component_sku === 'COMPONENT-B')?.total_quantity,
+				flatBom.find((c) => c.componentSku === 'COMPONENT-B')?.totalQuantity,
 			).toBe('1');
 		});
 	});
@@ -223,7 +223,7 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 			const bundles = await orm
 				.withSchema(SCHEMA)
 				.select('products')
-				.where(eq('is_bundle', true))
+				.where(eq('isBundle', true))
 				.columns(['id', 'sku', 'title'])
 				.execute();
 

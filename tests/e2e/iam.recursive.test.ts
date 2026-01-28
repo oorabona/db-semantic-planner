@@ -69,8 +69,8 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 					nodeTable: 'roles',
 					edgeTable: 'role_edges',
 					nodeId: 'id',
-					edgeFrom: 'parent_role_id',
-					edgeTo: 'child_role_id',
+					edgeFrom: 'parentRoleId',
+					edgeTo: 'childRoleId',
 					direction: 'out', // Traverse to children (inherited roles)
 				},
 				track: {
@@ -97,7 +97,7 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 			// Step 2: Get all permissions for these roles
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(db);
 
-			const permResult = await sql<{ permission_name: string }>`
+			const permResult = await sql<{ permissionName: string }>`
 				SELECT DISTINCT p.name as permission_name
 				FROM role_permissions rp
 				JOIN permissions p ON p.id = rp.permission_id
@@ -107,7 +107,7 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 
 			await sql`SET search_path TO public`.execute(db);
 
-			const permissions = permResult.rows.map((r) => r.permission_name);
+			const permissions = permResult.rows.map((r) => r.permissionName);
 
 			// Verify: admin should have all inherited permissions
 			expect(permissions).toContain('users:delete'); // admin's own
@@ -158,8 +158,8 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 						nodeTable: 'roles',
 						edgeTable: 'role_edges',
 						nodeId: 'id',
-						edgeFrom: 'parent_role_id',
-						edgeTo: 'child_role_id',
+						edgeFrom: 'parentRoleId',
+						edgeTo: 'childRoleId',
 						direction: 'out',
 					},
 					maxDepth: 10,
@@ -179,7 +179,7 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 			// Get permissions for all roles
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(db);
 
-			const permResult = await sql<{ permission_name: string }>`
+			const permResult = await sql<{ permissionName: string }>`
 				SELECT DISTINCT p.name as permission_name
 				FROM role_permissions rp
 				JOIN permissions p ON p.id = rp.permission_id
@@ -189,7 +189,7 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 
 			await sql`SET search_path TO public`.execute(db);
 
-			const permissions = permResult.rows.map((r) => r.permission_name);
+			const permissions = permResult.rows.map((r) => r.permissionName);
 
 			// Each permission should appear exactly once
 			const uniquePermissions = [...new Set(permissions)];
@@ -207,7 +207,7 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 			// Dave has no roles
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(db);
 
-			const userRolesResult = await sql<{ role_id: number }>`
+			const userRolesResult = await sql<{ roleId: number }>`
 				SELECT role_id FROM user_roles WHERE user_id = ${iamTestData.users.dave.id}
 			`.execute(db);
 
@@ -252,8 +252,8 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 					nodeTable: 'roles',
 					edgeTable: 'role_edges',
 					nodeId: 'id',
-					edgeFrom: 'parent_role_id',
-					edgeTo: 'child_role_id',
+					edgeFrom: 'parentRoleId',
+					edgeTo: 'childRoleId',
 					direction: 'out',
 				},
 				track: {
@@ -314,8 +314,8 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 					nodeTable: 'roles',
 					edgeTable: 'role_edges',
 					nodeId: 'id',
-					edgeFrom: 'parent_role_id',
-					edgeTo: 'child_role_id',
+					edgeFrom: 'parentRoleId',
+					edgeTo: 'childRoleId',
 					direction: 'out',
 				},
 				track: {
@@ -380,8 +380,8 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 					nodeTable: 'roles',
 					edgeTable: 'role_edges',
 					nodeId: 'id',
-					edgeFrom: 'child_role_id', // Reverse: from child to parent
-					edgeTo: 'parent_role_id',
+					edgeFrom: 'childRoleId', // Reverse: from child to parent
+					edgeTo: 'parentRoleId',
 					direction: 'out',
 				},
 				track: {
@@ -423,20 +423,20 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(db);
 
 			// Get Charlie's roles
-			const userRolesResult = await sql<{ role_id: number; role_name: string }>`
+			const userRolesResult = await sql<{ roleId: number; roleName: string }>`
 				SELECT ur.role_id, r.name as role_name
 				FROM user_roles ur
 				JOIN roles r ON r.id = ur.role_id
 				WHERE ur.user_id = ${iamTestData.users.charlie.id}
 			`.execute(db);
 
-			const charlieRoleIds = userRolesResult.rows.map((r) => r.role_id);
+			const charlieRoleIds = userRolesResult.rows.map((r) => r.roleId);
 
 			// Check for SoD violations
 			// A violation exists if user has both roles in any SoD rule
 			const sodResult = await sql<{
-				role_a: string;
-				role_b: string;
+				roleA: string;
+				roleB: string;
 				reason: string;
 			}>`
 				SELECT ra.name as role_a, rb.name as role_b, s.reason
@@ -451,8 +451,8 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 
 			// Charlie should have a violation
 			expect(sodResult.rows).toHaveLength(1);
-			expect(sodResult.rows[0].role_a).toBe('approver');
-			expect(sodResult.rows[0].role_b).toBe('requester');
+			expect(sodResult.rows[0].roleA).toBe('approver');
+			expect(sodResult.rows[0].roleB).toBe('requester');
 			expect(sodResult.rows[0].reason).toContain('requester cannot approve');
 		});
 
@@ -462,14 +462,14 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(db);
 
 			// Get Alice's direct roles
-			const userRolesResult = await sql<{ role_id: number }>`
+			const userRolesResult = await sql<{ roleId: number }>`
 				SELECT role_id FROM user_roles WHERE user_id = ${iamTestData.users.alice.id}
 			`.execute(db);
 
-			const aliceRoleIds = userRolesResult.rows.map((r) => r.role_id);
+			const aliceRoleIds = userRolesResult.rows.map((r) => r.roleId);
 
 			// Check for SoD violations
-			const sodResult = await sql<{ role_a: string; role_b: string }>`
+			const sodResult = await sql<{ roleA: string; roleB: string }>`
 				SELECT ra.name as role_a, rb.name as role_b
 				FROM sod_rules s
 				JOIN roles ra ON ra.id = s.role_a_id
@@ -490,14 +490,14 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(db);
 
 			// Get Bob's direct roles
-			const userRolesResult = await sql<{ role_id: number }>`
+			const userRolesResult = await sql<{ roleId: number }>`
 				SELECT role_id FROM user_roles WHERE user_id = ${iamTestData.users.bob.id}
 			`.execute(db);
 
-			const bobRoleIds = userRolesResult.rows.map((r) => r.role_id);
+			const bobRoleIds = userRolesResult.rows.map((r) => r.roleId);
 
 			// Check for SoD violations
-			const sodResult = await sql<{ role_a: string; role_b: string }>`
+			const sodResult = await sql<{ roleA: string; roleB: string }>`
 				SELECT ra.name as role_a, rb.name as role_b
 				FROM sod_rules s
 				JOIN roles ra ON ra.id = s.role_a_id
@@ -545,8 +545,8 @@ describe.skipIf(shouldSkipE2E())('E2E-003: IAM/RBAC Recursive CTE', () => {
 					nodeTable: 'roles',
 					edgeTable: 'role_edges',
 					nodeId: 'id',
-					edgeFrom: 'parent_role_id',
-					edgeTo: 'child_role_id',
+					edgeFrom: 'parentRoleId',
+					edgeTo: 'childRoleId',
 					direction: 'out',
 				},
 				track: {

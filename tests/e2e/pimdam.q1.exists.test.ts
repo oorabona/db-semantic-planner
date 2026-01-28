@@ -44,10 +44,10 @@ describe.skipIf(shouldSkipE2E())(
 					.withSchema('acme')
 					.select('products')
 					.where(
-						exists('images', {
+						exists('productImages', {
 							where: and(
 								eq('locale', 'FR'),
-								eq('is_main', true),
+								eq('isMain', true),
 								eq('status', 'approved'),
 							),
 						}),
@@ -71,10 +71,10 @@ describe.skipIf(shouldSkipE2E())(
 					.withSchema('acme')
 					.select('products')
 					.where(
-						exists('images', {
+						exists('productImages', {
 							where: and(
 								eq('locale', 'FR'),
-								eq('is_main', true),
+								eq('isMain', true),
 								eq('status', 'approved'),
 							),
 						}),
@@ -93,10 +93,10 @@ describe.skipIf(shouldSkipE2E())(
 					.withSchema('acme')
 					.select('products')
 					.where(
-						exists('images', {
+						exists('productImages', {
 							where: and(
 								eq('locale', 'FR'),
-								eq('is_main', true),
+								eq('isMain', true),
 								eq('status', 'approved'),
 							),
 						}),
@@ -116,10 +116,10 @@ describe.skipIf(shouldSkipE2E())(
 					.withSchema('acme')
 					.select('products')
 					.where(
-						exists('images', {
+						exists('productImages', {
 							where: and(
 								eq('locale', 'FR'),
-								eq('is_main', true),
+								eq('isMain', true),
 								eq('status', 'approved'),
 							),
 						}),
@@ -140,10 +140,10 @@ describe.skipIf(shouldSkipE2E())(
 					.withSchema('acme')
 					.select('products')
 					.where(
-						exists('images', {
+						exists('productImages', {
 							where: and(
 								eq('locale', 'FR'),
-								eq('is_main', true),
+								eq('isMain', true),
 								eq('status', 'approved'),
 							),
 						}),
@@ -166,10 +166,10 @@ describe.skipIf(shouldSkipE2E())(
 					.withSchema('globex')
 					.select('products')
 					.where(
-						exists('images', {
+						exists('productImages', {
 							where: and(
 								eq('locale', 'FR'),
-								eq('is_main', true),
+								eq('isMain', true),
 								eq('status', 'approved'),
 							),
 						}),
@@ -193,10 +193,10 @@ describe.skipIf(shouldSkipE2E())(
 					.withSchema('acme')
 					.select('products')
 					.where(
-						exists('images', {
+						exists('productImages', {
 							where: and(
 								eq('locale', 'FR'),
-								eq('is_main', true),
+								eq('isMain', true),
 								eq('status', 'approved'),
 							),
 						}),
@@ -271,7 +271,7 @@ describe.skipIf(shouldSkipE2E())(
 					const dump = orm
 						.withSchema('acme')
 						.select('products')
-						.where(exists('images'))
+						.where(exists('productImages'))
 						.dump();
 
 					// Verify EXISTS strategy is chosen for hasMany

@@ -62,12 +62,12 @@ describe.skipIf(shouldSkipE2E())('Q2: Locale Fallback with COALESCE', () => {
 				.withSchema(TENANT)
 				.select('products')
 				.where(eq('sku', 'WIDGET-001'))
-				.columns(['sku', 'name_fr', 'name_en'])
+				.columns(['sku', 'nameFr', 'nameEn'])
 				.first();
 
 			expect(widget).toBeDefined();
-			expect(widget?.name_fr).toBeNull();
-			expect(widget?.name_en).toBe('Widget Pro');
+			expect(widget?.nameFr).toBeNull();
+			expect(widget?.nameEn).toBe('Widget Pro');
 		});
 
 		it('When I query with coalesce(name_fr, name_en) as display_name', async () => {
@@ -78,12 +78,12 @@ describe.skipIf(shouldSkipE2E())('Q2: Locale Fallback with COALESCE', () => {
 				.withSchema(TENANT)
 				.select('products')
 				.where(eq('sku', 'WIDGET-001'))
-				.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])
+				.columns(['sku', coalesce(['nameFr', 'nameEn'], 'displayName')])
 				.first();
 
 			// Then display_name should be "Widget Pro" (English fallback)
 			expect(result).toBeDefined();
-			expect(result?.display_name).toBe('Widget Pro');
+			expect(result?.displayName).toBe('Widget Pro');
 		});
 	});
 
@@ -99,12 +99,12 @@ describe.skipIf(shouldSkipE2E())('Q2: Locale Fallback with COALESCE', () => {
 				.withSchema(TENANT)
 				.select('products')
 				.where(eq('sku', 'GADGET-001'))
-				.columns(['sku', 'name_fr', 'name_en'])
+				.columns(['sku', 'nameFr', 'nameEn'])
 				.first();
 
 			expect(gadget).toBeDefined();
-			expect(gadget?.name_fr).toBe('Super Bidule');
-			expect(gadget?.name_en).toBe('Super Gadget');
+			expect(gadget?.nameFr).toBe('Super Bidule');
+			expect(gadget?.nameEn).toBe('Super Gadget');
 		});
 
 		it('When I query with coalesce(name_fr, name_en) as display_name', async () => {
@@ -115,12 +115,12 @@ describe.skipIf(shouldSkipE2E())('Q2: Locale Fallback with COALESCE', () => {
 				.withSchema(TENANT)
 				.select('products')
 				.where(eq('sku', 'GADGET-001'))
-				.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])
+				.columns(['sku', coalesce(['nameFr', 'nameEn'], 'displayName')])
 				.first();
 
 			// Then display_name should be "Super Bidule" (French primary)
 			expect(result).toBeDefined();
-			expect(result?.display_name).toBe('Super Bidule');
+			expect(result?.displayName).toBe('Super Bidule');
 		});
 	});
 
@@ -136,13 +136,13 @@ describe.skipIf(shouldSkipE2E())('Q2: Locale Fallback with COALESCE', () => {
 				.withSchema(TENANT)
 				.select('products')
 				.where(eq('sku', 'GIZMO-001'))
-				.columns(['sku', 'name_fr', 'name_en', 'name_default'])
+				.columns(['sku', 'nameFr', 'nameEn', 'nameDefault'])
 				.first();
 
 			expect(gizmo).toBeDefined();
-			expect(gizmo?.name_fr).toBeNull();
-			expect(gizmo?.name_en).toBeNull();
-			expect(gizmo?.name_default).toBe('Default Gizmo');
+			expect(gizmo?.nameFr).toBeNull();
+			expect(gizmo?.nameEn).toBeNull();
+			expect(gizmo?.nameDefault).toBe('Default Gizmo');
 		});
 
 		it('When I query with coalesce(name_fr, name_en, name_default) as display_name', async () => {
@@ -155,13 +155,13 @@ describe.skipIf(shouldSkipE2E())('Q2: Locale Fallback with COALESCE', () => {
 				.where(eq('sku', 'GIZMO-001'))
 				.columns([
 					'sku',
-					coalesce(['name_fr', 'name_en', 'name_default'], 'display_name'),
+					coalesce(['nameFr', 'nameEn', 'nameDefault'], 'displayName'),
 				])
 				.first();
 
 			// Then display_name should be "Default Gizmo"
 			expect(result).toBeDefined();
-			expect(result?.display_name).toBe('Default Gizmo');
+			expect(result?.displayName).toBe('Default Gizmo');
 		});
 	});
 
@@ -178,14 +178,13 @@ describe.skipIf(shouldSkipE2E())('Q2: Locale Fallback with COALESCE', () => {
 			const products = await orm
 				.withSchema(TENANT)
 				.select('products')
-				.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])
+				.columns(['sku', coalesce(['nameFr', 'nameEn'], 'displayName')])
 				.all();
 
 			// Filter in application code (SQL LIKE on COALESCE would require raw)
 			const matching = products.filter(
 				(p) =>
-					typeof p.display_name === 'string' &&
-					p.display_name.includes('Bidule'),
+					typeof p.displayName === 'string' && p.displayName.includes('Bidule'),
 			);
 
 			expect(matching).toHaveLength(1);
@@ -202,7 +201,7 @@ describe.skipIf(shouldSkipE2E())('Q2: Locale Fallback with COALESCE', () => {
 				.where(eq('active', true))
 				.columns([
 					'sku',
-					coalesce(['name_fr', 'name_en', 'name_default'], 'display_name'),
+					coalesce(['nameFr', 'nameEn', 'nameDefault'], 'displayName'),
 				])
 				.all();
 
@@ -211,8 +210,8 @@ describe.skipIf(shouldSkipE2E())('Q2: Locale Fallback with COALESCE', () => {
 
 			// Each product should have a display_name (not null due to COALESCE)
 			for (const p of products) {
-				expect(p.display_name).toBeDefined();
-				expect(typeof p.display_name).toBe('string');
+				expect(p.displayName).toBeDefined();
+				expect(typeof p.displayName).toBe('string');
 			}
 		});
 	});
@@ -228,7 +227,7 @@ describe.skipIf(shouldSkipE2E())('Q2: Locale Fallback with COALESCE', () => {
 			const dump = orm
 				.withSchema(TENANT)
 				.select('products')
-				.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])
+				.columns(['sku', coalesce(['nameFr', 'nameEn'], 'displayName')])
 				.dump();
 
 			expect(dump.sql.toUpperCase()).toContain('COALESCE');
@@ -243,7 +242,7 @@ describe.skipIf(shouldSkipE2E())('Q2: Locale Fallback with COALESCE', () => {
 				.withSchema(TENANT)
 				.select('products')
 				.where(eq('sku', 'WIDGET-001'))
-				.columns(['sku', coalesce(['name_fr', 'name_en'], 'display_name')])
+				.columns(['sku', coalesce(['nameFr', 'nameEn'], 'displayName')])
 				.dump();
 
 			// Should have parameter for sku filter

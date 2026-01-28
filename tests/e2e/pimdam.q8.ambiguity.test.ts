@@ -76,10 +76,10 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			`.execute(db);
 
 			const product = (
-				result.rows as { author_name: string; reviewer_name: string }[]
+				result.rows as { authorName: string; reviewerName: string }[]
 			)[0];
-			expect(product.author_name).toBe('Alice Author');
-			expect(product.reviewer_name).toBe('Bob Reviewer');
+			expect(product.authorName).toBe('Alice Author');
+			expect(product.reviewerName).toBe('Bob Reviewer');
 		});
 
 		it('should query products by different authors', async () => {
@@ -93,9 +93,9 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				WHERE p.author_id = 2
 			`.execute(db);
 
-			const products = result.rows as { sku: string; author_name: string }[];
+			const products = result.rows as { sku: string; authorName: string }[];
 			expect(products.length).toBeGreaterThanOrEqual(1);
-			expect(products[0].author_name).toBe('Bob Reviewer');
+			expect(products[0].authorName).toBe('Bob Reviewer');
 			// Product 5 (EXPIRING-001) has author_id=2
 			expect(products.some((p) => p.sku === 'EXPIRING-001')).toBe(true);
 		});
@@ -111,9 +111,9 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				WHERE p.reviewer_id = 3
 			`.execute(db);
 
-			const products = result.rows as { sku: string; reviewer_name: string }[];
+			const products = result.rows as { sku: string; reviewerName: string }[];
 			expect(products.length).toBeGreaterThanOrEqual(1);
-			expect(products[0].reviewer_name).toBe('Charlie Admin');
+			expect(products[0].reviewerName).toBe('Charlie Admin');
 			// Product 4 (TSHIRT-001) has reviewer_id=3
 			expect(products.some((p) => p.sku === 'TSHIRT-001')).toBe(true);
 		});
@@ -128,14 +128,14 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			const products = await orm
 				.withSchema(SCHEMA)
 				.select('products')
-				.where(eq('author_id', 1))
-				.columns(['id', 'sku', 'title', 'author_id'])
+				.where(eq('authorId', 1))
+				.columns(['id', 'sku', 'title', 'authorId'])
 				.execute();
 
-			const results = products as { sku: string; author_id: number }[];
+			const results = products as { sku: string; authorId: number }[];
 			expect(results.length).toBeGreaterThanOrEqual(1);
-			// All should have author_id=1
-			expect(results.every((p) => p.author_id === 1)).toBe(true);
+			// All should have authorId=1
+			expect(results.every((p) => p.authorId === 1)).toBe(true);
 		});
 
 		it('should filter products by reviewer_id using eq', async () => {
@@ -146,11 +146,11 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			const products = await orm
 				.withSchema(SCHEMA)
 				.select('products')
-				.where(eq('reviewer_id', 3))
-				.columns(['id', 'sku', 'title', 'reviewer_id'])
+				.where(eq('reviewerId', 3))
+				.columns(['id', 'sku', 'title', 'reviewerId'])
 				.execute();
 
-			const results = products as { sku: string; reviewer_id: number }[];
+			const results = products as { sku: string; reviewerId: number }[];
 			expect(results.length).toBeGreaterThanOrEqual(1);
 			// T-Shirt should be in results
 			expect(results.some((p) => p.sku === 'TSHIRT-001')).toBe(true);
@@ -183,17 +183,17 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				.withSchema(SCHEMA)
 				.select('products')
 				.where(eq('sku', 'WIDGET-001'))
-				.columns(['id', 'sku', 'author_id', 'reviewer_id'])
+				.columns(['id', 'sku', 'authorId', 'reviewerId'])
 				.execute();
 
 			const result = products as {
 				sku: string;
-				author_id: number;
-				reviewer_id: number;
+				authorId: number;
+				reviewerId: number;
 			}[];
 			expect(result.length).toBe(1);
-			expect(result[0].author_id).toBe(1); // Alice
-			expect(result[0].reviewer_id).toBe(2); // Bob
+			expect(result[0].authorId).toBe(1); // Alice
+			expect(result[0].reviewerId).toBe(2); // Bob
 		});
 	});
 
@@ -214,14 +214,14 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				ORDER BY u.id
 			`.execute(db);
 
-			const users = result.rows as { name: string; authored_count: string }[];
+			const users = result.rows as { name: string; authoredCount: string }[];
 			// Alice is author of most products
 			const alice = users.find((u) => u.name === 'Alice Author');
-			expect(Number(alice?.authored_count)).toBeGreaterThanOrEqual(5);
+			expect(Number(alice?.authoredCount)).toBeGreaterThanOrEqual(5);
 
 			// Bob authored only product 5
 			const bob = users.find((u) => u.name === 'Bob Reviewer');
-			expect(Number(bob?.authored_count)).toBeGreaterThanOrEqual(1);
+			expect(Number(bob?.authoredCount)).toBeGreaterThanOrEqual(1);
 		});
 
 		it('should query users with their reviewed products count', async () => {
@@ -240,14 +240,14 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				ORDER BY u.id
 			`.execute(db);
 
-			const users = result.rows as { name: string; reviewed_count: string }[];
+			const users = result.rows as { name: string; reviewedCount: string }[];
 			// Bob reviewed most products
 			const bob = users.find((u) => u.name === 'Bob Reviewer');
-			expect(Number(bob?.reviewed_count)).toBeGreaterThanOrEqual(5);
+			expect(Number(bob?.reviewedCount)).toBeGreaterThanOrEqual(5);
 
 			// Charlie reviewed product 4
 			const charlie = users.find((u) => u.name === 'Charlie Admin');
-			expect(Number(charlie?.reviewed_count)).toBeGreaterThanOrEqual(1);
+			expect(Number(charlie?.reviewedCount)).toBeGreaterThanOrEqual(1);
 		});
 	});
 
@@ -399,15 +399,15 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			// Use and() to combine conditions since where() replaces previous condition
 			const mainImages = await orm
 				.withSchema(SCHEMA)
-				.select('product_images')
-				.where(and(eq('product_id', 10), eq('role', 'main')))
-				.columns(['product_id', 'asset_id', 'role', 'position'])
+				.select('productImages')
+				.where(and(eq('productId', 10), eq('role', 'main')))
+				.columns(['productId', 'assetId', 'role', 'position'])
 				.execute();
 
-			const results = mainImages as { product_id: number; role: string }[];
+			const results = mainImages as { productId: number; role: string }[];
 			expect(results.length).toBe(1);
 			expect(results[0].role).toBe('main');
-			expect(results[0].product_id).toBe(10);
+			expect(results[0].productId).toBe(10);
 		});
 
 		it('should demonstrate junction vs FK disambiguation patterns', async () => {
@@ -446,10 +446,10 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			expect(fkPattern.rows.length).toBe(1);
 			expect(junctionPattern.rows.length).toBe(1);
 
-			const fkResult = fkPattern.rows[0] as { author_name: string };
+			const fkResult = fkPattern.rows[0] as { authorName: string };
 			const junctionResult = junctionPattern.rows[0] as { role: string };
 
-			expect(fkResult.author_name).toBe('Alice Author');
+			expect(fkResult.authorName).toBe('Alice Author');
 			expect(junctionResult.role).toBe('main');
 		});
 	});

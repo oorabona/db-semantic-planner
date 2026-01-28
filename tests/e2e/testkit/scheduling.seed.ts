@@ -92,8 +92,8 @@ export const schedulingTestData = {
 	priceTiers: {
 		count: 4,
 		// Tier for quantity 25
-		tierForQty25: { unit_price: '89.99' },
+		tierForQty25: { unitPrice: '89.99' },
 		// Tier for quantity 75
-		tierForQty75: { unit_price: '79.99' },
+		tierForQty75: { unitPrice: '79.99' },
 	},
 };

@@ -696,7 +696,15 @@ export async function executeBatch(
 	// Parse assertion file if provided
 	let assertionBlocks: Parameters<typeof runAssertions>[0] | undefined;
 	if (assertFile) {
-		const assertContent = readFileSync(assertFile, 'utf-8');
+		let assertContent: string;
+		try {
+			assertContent = readFileSync(assertFile, 'utf-8');
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			throw new Error(
+				`Failed to read assertion file: ${assertFile} — ${message}`,
+			);
+		}
 		const parseResult = parseAssertionFile(assertContent);
 
 		if (parseResult.errors.length > 0) {
