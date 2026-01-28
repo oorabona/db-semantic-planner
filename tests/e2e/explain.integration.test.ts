@@ -138,7 +138,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 				'products',
 				'categories',
 				'assets',
-				'product_images',
+				'productImages',
 				'variants',
 			] as const;
 

@@ -21,6 +21,7 @@ import type {
 	ColumnIR,
 	ColumnType,
 	ForeignKeyIR,
+	IndexIR,
 	ModelIR,
 	OnDeleteAction,
 	PseudoColumnMetadata,
@@ -802,12 +803,26 @@ function buildTables(
 			}
 		}
 
+		// Build indexes from column-level index: true declarations
+		const indexes: IndexIR[] = [];
+		for (const [columnName, columnDef] of Object.entries(tableDef)) {
+			if (isRef(columnDef)) continue;
+			const def = normalizeColumnDef(columnDef);
+			if (def.index) {
+				indexes.push({
+					name: `idx_${tableName}_${columnName}`,
+					columns: [columnName],
+					unique: false,
+				});
+			}
+		}
+
 		const table: TableIR = {
 			name: tableName,
 			columns,
 			primaryKey: finalPk,
 			foreignKeys,
-			indexes: [],
+			indexes,
 			...(pseudoColumns.length > 0 ? { pseudoColumns } : {}),
 		};
 		tables.push(table);

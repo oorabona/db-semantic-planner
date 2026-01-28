@@ -118,7 +118,7 @@ describe.skipIf(shouldSkipE2E())('Auto-Introspection', () => {
 			expect(posts).toBeDefined();
 
 			// author_id should be a ref definition
-			const authorIdDef = posts!.author_id;
+			const authorIdDef = posts!.authorId;
 			expect(authorIdDef).toMatchObject({
 				__brand: 'ref',
 				target: 'authors',

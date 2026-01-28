@@ -77,20 +77,20 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 			// Medium (M) has FR and EN images (same asset)
 			// Large (L) has no images
 			const rows = result.rows as {
-				variant_sku: string;
-				variant_name: string;
+				variantSku: string;
+				variantName: string;
 				locale: string | null;
 			}[];
 
-			// Verify we have variants
-			const smallVariants = rows.filter((r) => r.variant_name === 'Small');
+			// Verify we have variants (CamelCasePlugin transforms variant_name → variantName)
+			const smallVariants = rows.filter((r) => r.variantName === 'Small');
 			expect(smallVariants.length).toBe(2); // FR and EN
 			expect(smallVariants.map((r) => r.locale).sort()).toEqual(['EN', 'FR']);
 
-			const mediumVariants = rows.filter((r) => r.variant_name === 'Medium');
+			const mediumVariants = rows.filter((r) => r.variantName === 'Medium');
 			expect(mediumVariants.length).toBe(2); // FR and EN (same asset)
 
-			const largeVariants = rows.filter((r) => r.variant_name === 'Large');
+			const largeVariants = rows.filter((r) => r.variantName === 'Large');
 			expect(largeVariants.length).toBe(1); // No images, just one row with NULL
 			expect(largeVariants[0].locale).toBeNull();
 		});
@@ -106,7 +106,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				.select('variants')
 				.where(
 					and(
-						eq('product_id', 4), // T-Shirt
+						eq('productId', 4), // T-Shirt
 						// Stock > 0 - need gt operator or raw
 					),
 				)
@@ -156,15 +156,15 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 
 			const variants = result.rows as {
 				sku: string;
-				image_path: string | null;
+				imagePath: string | null;
 			}[];
 			// Large has no images
 			const large = variants.find((v) => v.sku === 'TSHIRT-001-L');
-			expect(large?.image_path).toBeNull();
+			expect(large?.imagePath).toBeNull();
 
 			// Small and Medium have images
 			const small = variants.find((v) => v.sku === 'TSHIRT-001-S');
-			expect(small?.image_path).toBeDefined();
+			expect(small?.imagePath).toBeDefined();
 		});
 	});
 
@@ -191,11 +191,11 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				ORDER BY a.expires_at
 			`.execute(db);
 
-			const expiring = result.rows as { id: number; storage_key: string }[];
+			const expiring = result.rows as { id: number; storageKey: string }[];
 			expect(expiring.length).toBeGreaterThanOrEqual(1);
-			expect(
-				expiring.some((a) => a.storage_key.includes('expiring-soon')),
-			).toBe(true);
+			expect(expiring.some((a) => a.storageKey.includes('expiring-soon'))).toBe(
+				true,
+			);
 		});
 
 		it('Q4-02: should exclude assets used only by inactive products', async () => {
@@ -218,10 +218,10 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				)
 			`.execute(db);
 
-			const inactiveOnly = result.rows as { id: number; storage_key: string }[];
+			const inactiveOnly = result.rows as { id: number; storageKey: string }[];
 			// Asset 12 (deleted-product.jpg) is only used by deleted product
 			expect(
-				inactiveOnly.some((a) => a.storage_key.includes('deleted-product')),
+				inactiveOnly.some((a) => a.storageKey.includes('deleted-product')),
 			).toBe(true);
 		});
 
@@ -245,17 +245,17 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 			`.execute(db);
 
 			const expiring = result.rows as {
-				storage_key: string;
-				product_sku: string;
-				product_title: string;
+				storageKey: string;
+				productSku: string;
+				productTitle: string;
 			}[];
 			expect(expiring.length).toBeGreaterThanOrEqual(1);
 
 			// Verify we have product context
 			const expiringAsset = expiring.find((a) =>
-				a.storage_key.includes('expiring'),
+				a.storageKey.includes('expiring'),
 			);
-			expect(expiringAsset?.product_sku).toBe('EXPIRING-001');
+			expect(expiringAsset?.productSku).toBe('EXPIRING-001');
 		});
 	});
 
@@ -273,7 +273,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				.withSchema(SCHEMA)
 				.select('assets')
 				.where(notExists('productImages'))
-				.columns(['id', 'storage_key', 'kind'])
+				.columns(['id', 'storageKey', 'kind'])
 				.dump();
 
 			expect(dump.sql.toUpperCase()).toContain('NOT EXISTS');
@@ -283,13 +283,13 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				.withSchema(SCHEMA)
 				.select('assets')
 				.where(notExists('productImages'))
-				.columns(['id', 'storage_key', 'kind'])
+				.columns(['id', 'storageKey', 'kind'])
 				.execute();
 
 			// Asset 6 (orphan.jpg) has no product_images
 			// Asset 7, 8 (video, document) also have no product_images
-			const orphans = assets as { storage_key: string }[];
-			expect(orphans.some((a) => a.storage_key.includes('orphan'))).toBe(true);
+			const orphans = assets as { storageKey: string }[];
+			expect(orphans.some((a) => a.storageKey.includes('orphan'))).toBe(true);
 		});
 
 		it('Q5-02: should find assets not used by active products', async () => {
@@ -308,12 +308,12 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				)
 			`.execute(db);
 
-			const unused = result.rows as { storage_key: string; kind: string }[];
+			const unused = result.rows as { storageKey: string; kind: string }[];
 			// orphan.jpg, deleted-product.jpg, video, document should be "unused"
-			expect(unused.some((a) => a.storage_key.includes('orphan'))).toBe(true);
-			expect(
-				unused.some((a) => a.storage_key.includes('deleted-product')),
-			).toBe(true);
+			expect(unused.some((a) => a.storageKey.includes('orphan'))).toBe(true);
+			expect(unused.some((a) => a.storageKey.includes('deleted-product'))).toBe(
+				true,
+			);
 		});
 
 		it('Q5-03: should count unused assets by kind', async () => {
@@ -357,7 +357,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 			const dump = orm
 				.withSchema(SCHEMA)
 				.select('variants')
-				.where(exists('images'))
+				.where(exists('variantImages'))
 				.columns(['id', 'sku', 'name'])
 				.dump();
 

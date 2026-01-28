@@ -137,11 +137,17 @@ export interface IntrospectedModelIR extends ModelIR {
 // ============================================================================
 
 interface ForeignKeyRow {
-	source_table: string;
-	source_column: string;
-	target_table: string;
-	target_column: string;
-	constraint_name: string;
+	// Properties may be snake_case or camelCase depending on CamelCasePlugin
+	source_table?: string;
+	sourceTable?: string;
+	source_column?: string;
+	sourceColumn?: string;
+	target_table?: string;
+	targetTable?: string;
+	target_column?: string;
+	targetColumn?: string;
+	constraint_name?: string;
+	constraintName?: string;
 }
 
 // ============================================================================
@@ -563,7 +569,10 @@ export async function getSchemaFromDb<
 	const introspected = await introspect(db, introspectOptions);
 
 	// Convert IntrospectedModelIR to SchemaDefinition
-	const definition = modelIRToSchemaDefinition(introspected);
+	const definition = modelIRToSchemaDefinition(
+		introspected,
+		naming === 'camelCase' ? 'camelCase' : 'preserve',
+	);
 
 	// Create base Schema<T>
 	const baseSchema = createSchema(definition as T);
@@ -582,7 +591,18 @@ export async function getSchemaFromDb<
  * This reverses the transformation done by schemaToModelIR, producing
  * a definition that can be passed to createOrm().
  */
-function modelIRToSchemaDefinition(model: ModelIR): SchemaDefinition {
+/**
+ * Convert a snake_case string to camelCase.
+ * @example 'author_id' → 'authorId'
+ */
+function snakeToCamelCase(name: string): string {
+	return name.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase());
+}
+
+function modelIRToSchemaDefinition(
+	model: ModelIR,
+	naming: 'camelCase' | 'preserve' = 'preserve',
+): SchemaDefinition {
 	const definition: SchemaDefinition = {};
 
 	for (const [tableName, table] of model.tables) {
@@ -592,12 +612,25 @@ function modelIRToSchemaDefinition(model: ModelIR): SchemaDefinition {
 		> = {};
 
 		for (const column of table.columns) {
+			// Apply naming convention to column key
+			const colKey =
+				naming === 'camelCase' ? snakeToCamelCase(column.name) : column.name;
+
 			// Check if this column is a foreign key
-			const fk = table.foreignKeys.find((f) => f.columns.includes(column.name));
+			// FK columns from raw SQL are snake_case, but column.name may be camelCase
+			// (when Kysely uses CamelCasePlugin)
+			const snakeColName = column.name.replace(
+				/[A-Z]/g,
+				(c) => `_${c.toLowerCase()}`,
+			);
+			const fk = table.foreignKeys.find(
+				(f) =>
+					f.columns.includes(column.name) || f.columns.includes(snakeColName),
+			);
 
 			if (fk) {
 				// This is a FK column - create a ref definition
-				tableDef[column.name] = {
+				tableDef[colKey] = {
 					__brand: 'ref' as const,
 					target: fk.references.table,
 					options: {
@@ -607,7 +640,7 @@ function modelIRToSchemaDefinition(model: ModelIR): SchemaDefinition {
 				};
 			} else {
 				// Regular column - use the column type
-				tableDef[column.name] = column.type;
+				tableDef[colKey] = column.type;
 			}
 		}
 
@@ -749,18 +782,24 @@ async function queryForeignKeys(
 	>();
 
 	for (const row of result.rows) {
-		const key = row.constraint_name;
-		const existing = fkByConstraint.get(key);
+		// CamelCasePlugin transforms result keys: source_table → sourceTable
+		const srcTable = row.source_table ?? row.sourceTable ?? '';
+		const srcColumn = row.source_column ?? row.sourceColumn ?? '';
+		const tgtTable = row.target_table ?? row.targetTable ?? '';
+		const tgtColumn = row.target_column ?? row.targetColumn ?? '';
+		const constraintKey = row.constraint_name ?? row.constraintName ?? '';
+
+		const existing = fkByConstraint.get(constraintKey);
 
 		if (existing) {
-			existing.sourceColumns.push(row.source_column);
-			existing.targetColumns.push(row.target_column);
+			existing.sourceColumns.push(srcColumn);
+			existing.targetColumns.push(tgtColumn);
 		} else {
-			fkByConstraint.set(key, {
-				sourceTable: row.source_table,
-				sourceColumns: [row.source_column],
-				targetTable: row.target_table,
-				targetColumns: [row.target_column],
+			fkByConstraint.set(constraintKey, {
+				sourceTable: srcTable,
+				sourceColumns: [srcColumn],
+				targetTable: tgtTable,
+				targetColumns: [tgtColumn],
 			});
 		}
 	}

@@ -71,8 +71,9 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 			const dump = query.dump();
 
 			// Then: Strategy should be json_agg (default for to-many on PostgreSQL)
-			const decision = getIncludeStrategyDecision(dump.plan, 'posts');
-			expect(decision?.choice).toBe('json_agg');
+		// ARCH-005: inverse relation from authorId: ref('authors') → 'author_posts'
+		const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
+		expect(decision?.choice).toBe('json_agg');
 		});
 
 		it('should generate SQL with json_agg subquery for to-many', async () => {
@@ -174,10 +175,11 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 			const dump = query.dump();
 
 			// Then: Plan report should contain include-strategy decision
-			const decision = getIncludeStrategyDecision(dump.plan, 'posts');
-			expect(decision).toBeDefined();
-			expect(decision?.type).toBe('include-strategy');
-			expect(decision?.context?.relation).toBe('posts');
+		// ARCH-005: inverse relation from authorId: ref('authors') → 'author_posts'
+		const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
+		expect(decision).toBeDefined();
+		expect(decision?.type).toBe('include-strategy');
+		expect(decision?.context?.relation).toBe('author_posts');
 			expect(['json_agg', 'join']).toContain(decision?.choice);
 		});
 
@@ -195,7 +197,8 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 			const dump = query.dump();
 
 			// Then: Decision should have a reasoning explaining the choice
-			const decision = getIncludeStrategyDecision(dump.plan, 'posts');
+		// ARCH-005: inverse relation from authorId: ref('authors') → 'author_posts'
+		const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
 			expect(decision?.reasoning).toBeDefined();
 			expect(decision?.reasoning?.length).toBeGreaterThan(0);
 		});
@@ -252,8 +255,9 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 			expect(rows).toHaveLength(2);
 
 			// Check plan decision
-			const decision = getFilterStrategyDecision(planReport, 'posts');
-			expect(decision?.choice).toBe('exists');
+		// ARCH-005: 'posts' resolves to 'author_posts' (inverse of authorId: ref('authors'))
+		const decision = getFilterStrategyDecision(planReport, 'author_posts');
+		expect(decision?.choice).toBe('exists');
 		});
 
 		it('should filter posts by author.name using JOIN via raw Intent', async () => {
@@ -322,7 +326,8 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 			const compiled = compile(planReport, blogModel, db, SCHEMA);
 
 			// Debug: check include strategy decision
-			const includeDecision = getIncludeStrategyDecision(planReport, 'posts');
+		// ARCH-005: 'posts' resolves to 'author_posts' (inverse of authorId: ref('authors'))
+		const includeDecision = getIncludeStrategyDecision(planReport, 'author_posts');
 			console.log('Include strategy decision:', includeDecision?.choice);
 			console.log('Generated SQL:', compiled.sql);
 
@@ -342,7 +347,7 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 
 			// Each author should only have published posts in their posts array
 			for (const author of rows) {
-				const posts = (author as { posts_json?: unknown[] }).posts_json ?? [];
+				const posts = (author as { postsJson?: unknown[] }).postsJson ?? [];
 				for (const post of posts as { published?: boolean }[]) {
 					expect(post.published).toBe(true);
 				}

@@ -1007,15 +1007,11 @@ describe('Execution Layer', () => {
 	describe('include() with hydration (DX-033)', () => {
 		// These tests use SEPARATE strategy to test multi-query hydration
 		// JOIN is now the default, but SEPARATE is still supported via defaultIncludeStrategy
-		// SKIPPED: defaultIncludeStrategy removed from SimplifiedOrmOptions in ARCH-006
-		// TODO: Add 'subquery' strategy (IN SELECT) as better alternative to 'subquery'
-		// See: https://github.com/oorabona/db-semantic-planner/issues/TBD
-		it.skip('hydrates hasMany relation with subquery query', async () => {
+		it('hydrates hasMany relation with subquery query', async () => {
 			const orm = createOrm({
 				schema: testSchema,
 				adapter: createKyselyAdapter(db),
-				// @ts-expect-error defaultIncludeStrategy removed in ARCH-006
-				defaultIncludeStrategy: 'subquery',
+				planOptions: { defaultIncludeStrategy: 'subquery' },
 			});
 			const results = (await orm
 				.select('users')
@@ -1042,13 +1038,11 @@ describe('Execution Layer', () => {
 			expect(results[1]!.posts).toHaveLength(0);
 		});
 
-		// SKIPPED: defaultIncludeStrategy removed from SimplifiedOrmOptions in ARCH-006
-		it.skip('returns empty array for parent with no children', async () => {
+		it('returns empty array for parent with no children', async () => {
 			const orm = createOrm({
 				schema: testSchema,
 				adapter: createKyselyAdapter(db),
-				// @ts-expect-error defaultIncludeStrategy removed in ARCH-006
-				defaultIncludeStrategy: 'subquery',
+				planOptions: { defaultIncludeStrategy: 'subquery' },
 			});
 			const results = (await orm
 				.select('users')
@@ -1083,13 +1077,11 @@ describe('Execution Layer', () => {
 			expect(results).toHaveLength(0);
 		});
 
-		// SKIPPED: defaultIncludeStrategy removed from SimplifiedOrmOptions in ARCH-006
-		it.skip('works with first() returning single hydrated result', async () => {
+		it('works with first() returning single hydrated result', async () => {
 			const orm = createOrm({
 				schema: testSchema,
 				adapter: createKyselyAdapter(db),
-				// @ts-expect-error defaultIncludeStrategy removed in ARCH-006
-				defaultIncludeStrategy: 'subquery',
+				planOptions: { defaultIncludeStrategy: 'subquery' },
 			});
 			const result = (await orm
 				.select('users')
@@ -1109,8 +1101,7 @@ describe('Execution Layer', () => {
 			expect(result?.posts).toHaveLength(2);
 		});
 
-		// SKIPPED: defaultIncludeStrategy removed from SimplifiedOrmOptions in ARCH-006
-		it.skip('groups children correctly by foreign key', async () => {
+		it('groups children correctly by foreign key', async () => {
 			// Add a third user with posts to test grouping
 			const testDb = createTestDb();
 			await setupDatabase(testDb);
@@ -1139,8 +1130,7 @@ describe('Execution Layer', () => {
 			const orm = createOrm({
 				schema: testSchema,
 				adapter: createKyselyAdapter(testDb),
-				// @ts-expect-error defaultIncludeStrategy removed in ARCH-006
-				defaultIncludeStrategy: 'subquery',
+				planOptions: { defaultIncludeStrategy: 'subquery' },
 			});
 
 			const results = (await orm

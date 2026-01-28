@@ -6,7 +6,7 @@
 
 import { createKyselyAdapter, type KyselyAdapter } from '@dbsp/adapter-kysely';
 import type { Adapter } from '@dbsp/core';
-import { Kysely, PostgresDialect, sql } from 'kysely';
+import { CamelCasePlugin, Kysely, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 import { describe } from 'vitest';
 
@@ -39,6 +39,7 @@ export async function getTestDb(): Promise<Kysely<any>> {
 				max: 10,
 			}),
 		}),
+		plugins: [new CamelCasePlugin()],
 	});
 
 	return db;
@@ -54,7 +55,13 @@ export async function getTestAdapter(): Promise<Adapter<any>> {
 	}
 
 	const database = await getTestDb();
-	adapter = createKyselyAdapter(database);
+	adapter = createKyselyAdapter(
+		database,
+		undefined,
+		undefined,
+		undefined,
+		'camelCase',
+	);
 	return adapter;
 }
 
@@ -67,7 +74,13 @@ export async function createAdapterForSchema(
 	schemaName: string,
 ): Promise<KyselyAdapter<unknown>> {
 	const database = await getTestDb();
-	return createKyselyAdapter(database, schemaName);
+	return createKyselyAdapter(
+		database,
+		schemaName,
+		undefined,
+		undefined,
+		'camelCase',
+	);
 }
 
 /**

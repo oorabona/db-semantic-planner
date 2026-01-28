@@ -95,8 +95,8 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 				WHERE attribute_name NOT IN (SELECT attribute_name FROM filled_attrs)
 			`.execute(db);
 
-			const missing = (result.rows as { attribute_name: string }[]).map(
-				(r) => r.attribute_name,
+			const missing = (result.rows as { attributeName: string }[]).map(
+				(r) => r.attributeName,
 			);
 			expect(missing).toContain('price');
 			expect(missing).not.toContain('name');
@@ -284,7 +284,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 			const dump = orm
 				.withSchema(SCHEMA)
 				.select('products')
-				.where(eq('family_id', 1))
+				.where(eq('familyId', 1))
 				.columns(['id', 'sku'])
 				.dump();
 

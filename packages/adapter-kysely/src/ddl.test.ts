@@ -188,11 +188,10 @@ describe('generateDDL', () => {
 			expect(createUser).toContain('unique');
 		});
 
-		it.skip('generates autoIncrement column (SERIAL in PostgreSQL)', () => {
-			// TODO: autoIncrement not supported in schema() API
+		it('generates autoIncrement column (SERIAL in PostgreSQL)', () => {
 			const testSchema = schema({
 				users: {
-					id: { type: 'integer', primaryKey: true },
+					id: { type: 'integer', primaryKey: true, autoIncrement: true },
 					name: 'string',
 				},
 			}).model;
@@ -204,15 +203,18 @@ describe('generateDDL', () => {
 			expect(createUser).toContain('serial');
 		});
 
-		it.skip('generates onDelete CASCADE on foreign key', () => {
-			// TODO: onDelete not fully supported in schema() API - needs investigation
+		it('generates onDelete CASCADE on foreign key', () => {
 			const testSchema = schema({
 				users: {
 					id: { type: 'integer', primaryKey: true },
 				},
 				posts: {
 					id: { type: 'integer', primaryKey: true },
-					userId: ref('users', { as: 'user', inverse: 'posts' }),
+					userId: ref('users', {
+						as: 'user',
+						inverse: 'posts',
+						onDelete: 'CASCADE',
+					}),
 				},
 			}).model;
 
@@ -222,8 +224,7 @@ describe('generateDDL', () => {
 			expect(fkStatement).toContain('on delete cascade');
 		});
 
-		it.skip('generates CREATE INDEX statement', () => {
-			// TODO: column-level index: true not generating CREATE INDEX in schema() API
+		it('generates CREATE INDEX statement', () => {
 			const testSchema = schema({
 				users: {
 					id: { type: 'integer', primaryKey: true },
@@ -238,9 +239,10 @@ describe('generateDDL', () => {
 			expect(indexStatement).toContain('"email"');
 		});
 
-		it.skip('generates unique index', () => {
-			// TODO: indexes config in schema() options needs investigation
-			const testSchema = schema({
+		it('generates unique index', () => {
+			// Multi-column unique index requires ModelIR-level construction
+			// since schema() API only supports column-level index: true
+			const base = schema({
 				users: {
 					id: { type: 'integer', primaryKey: true },
 					email: 'string',
@@ -248,7 +250,28 @@ describe('generateDDL', () => {
 				},
 			}).model;
 
-			const ddl = generateDDL(db, testSchema);
+			// Inject a multi-column unique index into the table's indexes
+			const usersTable = base.tables.get('users')!;
+			const patched = {
+				...base,
+				tables: new Map([
+					[
+						'users',
+						{
+							...usersTable,
+							indexes: [
+								{
+									name: 'uk_users_email_tenant',
+									columns: ['email', 'tenant_id'],
+									unique: true,
+								},
+							],
+						},
+					],
+				]),
+			};
+
+			const ddl = generateDDL(db, patched as ModelIR);
 			const indexStatement = ddl.find((s) =>
 				s.includes('uk_users_email_tenant'),
 			);
@@ -270,18 +293,16 @@ describe('generateDDL', () => {
 			await db.destroy();
 		});
 
-		it.skip('generates sequence reset statements for tables with autoIncrement', async () => {
-			// TODO: autoIncrement not supported in schema() API - needs ModelIR direct construction
-			// Import dynamically to test the new functions
+		it('generates sequence reset statements for tables with autoIncrement', async () => {
 			const { generateSequenceResetStatements } = await import('./ddl.js');
 
 			const testSchema = schema({
 				users: {
-					id: { type: 'integer', primaryKey: true },
+					id: { type: 'integer', primaryKey: true, autoIncrement: true },
 					name: 'string',
 				},
 				posts: {
-					id: { type: 'integer', primaryKey: true },
+					id: { type: 'integer', primaryKey: true, autoIncrement: true },
 					title: 'string',
 				},
 			}).model;
@@ -320,13 +341,12 @@ describe('generateDDL', () => {
 			expect(statements).toHaveLength(0);
 		});
 
-		it.skip('supports schema-qualified sequence names', async () => {
-			// TODO: autoIncrement not supported in schema() API - needs ModelIR direct construction
+		it('supports schema-qualified sequence names', async () => {
 			const { generateSequenceResetStatements } = await import('./ddl.js');
 
 			const testSchema = schema({
 				users: {
-					id: { type: 'integer', primaryKey: true },
+					id: { type: 'integer', primaryKey: true, autoIncrement: true },
 					name: 'string',
 				},
 			}).model;

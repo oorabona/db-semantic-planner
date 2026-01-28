@@ -141,18 +141,14 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 					dialectCapabilities,
 				});
 
-				// When: users include profile (hasOne via userId_profile relation)
-				// ARCH-005: relation name is userId_profile (auto-inferred from unique FK)
-				const query = orm.select('users').include('userId_profile');
+				// When: users include profile (hasOne via user_profiles relation)
+				// ARCH-005: relation name is user_profiles (auto-inferred: localRelation 'user' + '_' + sourceTable 'profiles')
+				const query = orm.select('users').include('user_profiles');
 
 				const dump = query.dump();
 
 				// Then: planner decides strategy: 'json_agg' (same as all relations)
-				// ARCH-005: relation name is now userId_profile
-				const decision = getIncludeStrategyDecision(
-					dump.plan,
-					'userId_profile',
-				);
+				const decision = getIncludeStrategyDecision(dump.plan, 'user_profiles');
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('json_agg');
 
@@ -185,7 +181,8 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 				const dump = query.dump();
 
 				// Then: planner decides strategy: 'json_agg'
-				const decision = getIncludeStrategyDecision(dump.plan, 'posts');
+				// ARCH-005: inverse relation from authorId: ref('authors') → 'author_posts'
+				const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('json_agg');
 
@@ -244,7 +241,8 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 				const dump = query.dump();
 
 				// Then: strategy is json_agg
-				const decision = getIncludeStrategyDecision(dump.plan, 'comments');
+				// ARCH-005: inverse relation from postId: ref('posts') → 'post_comments'
+				const decision = getIncludeStrategyDecision(dump.plan, 'post_comments');
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('json_agg');
 			});
@@ -273,7 +271,7 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 				// ARCH-005: Set includeStrategy directly on the relation in ModelIR
 				// Relations are stored at model.relations keyed by "source.relationName"
 				const model = schemaWithJoinHint.model;
-				const usersPostsRel = model.relations.get('users.userId_posts');
+				const usersPostsRel = model.relations.get('users.user_posts');
 				if (usersPostsRel) {
 					(usersPostsRel as { includeStrategy?: string }).includeStrategy =
 						'join';
@@ -286,12 +284,12 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 					dialectCapabilities,
 				});
 
-				// ARCH-005: relation name is now userId_posts (auto-inferred inverse)
-				const query = orm.select('users').include('userId_posts');
+				// ARCH-005: relation name is user_posts (auto-inferred: localRelation 'user' + '_' + sourceTable 'posts')
+				const query = orm.select('users').include('user_posts');
 				const dump = query.dump();
 
 				// Then: uses JOIN (not json_agg) due to explicit hint
-				const decision = getIncludeStrategyDecision(dump.plan, 'userId_posts');
+				const decision = getIncludeStrategyDecision(dump.plan, 'user_posts');
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('join');
 
@@ -316,7 +314,8 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 				const dump = query.dump();
 
 				// Then: uses subquery (not json_agg) due to planner option
-				const decision = getIncludeStrategyDecision(dump.plan, 'posts');
+				// ARCH-005: inverse relation name is 'author_posts'
+				const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('subquery');
 			});

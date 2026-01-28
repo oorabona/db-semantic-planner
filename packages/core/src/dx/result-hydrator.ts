@@ -16,6 +16,7 @@ import type { RecursiveIntent, WhereIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
 import { planRecursive } from '../planner.js';
+import { hydrateJsonAggIncludes as hydrateJsonAggIncludesShared } from './hydration-utils.js';
 
 import { RelationNotFoundError } from './errors.js';
 import type { RecursiveIncludeConfig } from './intent-builder.js';
@@ -200,78 +201,7 @@ export class ResultHydrator<TResult = unknown> {
 	 * STRAT-SIMPLIFY: For to-one relations (belongsTo/hasOne), unwrap array to single object.
 	 */
 	hydrateJsonAggIncludes(results: TResult[], planReport: PlanReport): void {
-		// Find all json_agg include decisions
-		const jsonAggDecisions = planReport.decisions.filter(
-			(d) => d.type === 'include-strategy' && d.choice === 'json_agg',
-		);
-
-		if (jsonAggDecisions.length === 0) {
-			return;
-		}
-
-		// Build map of relation name -> relation type
-		const relationInfo = new Map<string, { isToOne: boolean }>();
-		for (const decision of jsonAggDecisions) {
-			const relationName = decision.context?.relation;
-			const relationType = decision.context?.relationType;
-			if (typeof relationName === 'string') {
-				// belongsTo and hasOne are to-one relations
-				const isToOne =
-					relationType === 'belongsTo' || relationType === 'hasOne';
-				relationInfo.set(relationName, { isToOne });
-			}
-		}
-
-		if (relationInfo.size === 0) {
-			return;
-		}
-
-		// Process each result row
-		for (const row of results) {
-			if (typeof row !== 'object' || row === null) {
-				continue;
-			}
-
-			const record = row as Record<string, unknown>;
-
-			for (const [relationName, info] of relationInfo) {
-				const jsonColumnName = `${relationName}_json`;
-
-				// Check if the JSON column exists
-				if (jsonColumnName in record) {
-					const jsonValue = record[jsonColumnName];
-
-					// Parse JSON if it's a string
-					let parsed: unknown;
-					if (typeof jsonValue === 'string') {
-						try {
-							parsed = JSON.parse(jsonValue);
-						} catch {
-							// If parsing fails, use empty array or null depending on relation type
-							parsed = info.isToOne ? null : [];
-						}
-					} else if (Array.isArray(jsonValue)) {
-						// Already an array (some drivers auto-parse)
-						parsed = jsonValue;
-					} else if (jsonValue === null || jsonValue === undefined) {
-						parsed = info.isToOne ? null : [];
-					} else {
-						// Unknown format, use as-is
-						parsed = jsonValue;
-					}
-
-					// STRAT-SIMPLIFY: For to-one relations, unwrap array to single object
-					if (info.isToOne && Array.isArray(parsed)) {
-						// Return first element or null if empty
-						parsed = parsed.length > 0 ? parsed[0] : null;
-					}
-
-					// Set the relation property and remove the JSON column
-					record[relationName] = parsed;
-					delete record[jsonColumnName];
-				}
-			}
-		}
+		hydrateJsonAggIncludesShared(results, planReport);
 	}
 
 	/**

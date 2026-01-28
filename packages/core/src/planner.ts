@@ -55,6 +55,8 @@ export interface PlanDecision {
 		readonly intentPath?: string;
 		/** Full relation path for multi-hop (SPEC-002), e.g., "author.company" */
 		readonly relationPath?: string;
+		/** User-provided include alias (e.g., 'author' from .include('author')) */
+		readonly includeAlias?: string;
 	};
 
 	/** The choice made */
@@ -987,6 +989,7 @@ function processInclude(
 			target: relation.target,
 			relation: relation.name,
 			relationType: relation.type,
+			includeAlias: include.relation,
 			intentPath,
 		},
 		choice: includeStrategy,

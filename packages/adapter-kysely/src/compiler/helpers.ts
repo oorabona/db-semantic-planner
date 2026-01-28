@@ -125,7 +125,8 @@ export function findIncludeStrategyDecision(
 		(d) =>
 			d.type === 'include-strategy' &&
 			d.context.sourceTable === sourceTable &&
-			d.context.relation === relationName,
+			(d.context.relation === relationName ||
+				d.context.target === relationName),
 	);
 }
 
@@ -155,6 +156,20 @@ export function lookupResolvedRelation(
 		if (decision?.context.relation) {
 			relation = model.getRelation(
 				`${sourceTable}.${decision.context.relation}`,
+			);
+		}
+	}
+
+	// Also try include-strategy decisions (for JOIN includes)
+	if (!relation) {
+		const includeDecision = findIncludeStrategyDecision(
+			plan,
+			sourceTable,
+			relationName,
+		);
+		if (includeDecision?.context.relation) {
+			relation = model.getRelation(
+				`${sourceTable}.${includeDecision.context.relation}`,
 			);
 		}
 	}
@@ -230,7 +245,10 @@ export function collectCteIncludes(
 			include.relation,
 		);
 		if (decision?.choice === 'cte') {
-			const relation = model.getRelation(`${sourceTable}.${include.relation}`);
+			// Try direct lookup first, then fallback to resolved relation name from decision
+			const relation =
+				model.getRelation(`${sourceTable}.${include.relation}`) ??
+				model.getRelation(`${sourceTable}.${decision.context?.relation}`);
 			if (relation) {
 				// Use same naming convention as planner (CLI-012)
 				const cteName = `cte_${sourceTable}_${relation.name}`;
@@ -267,7 +285,10 @@ export function collectLateralIncludes(
 			include.relation,
 		);
 		if (decision?.choice === 'lateral') {
-			const relation = model.getRelation(`${sourceTable}.${include.relation}`);
+			// Try direct lookup first, then fallback to resolved relation name from decision
+			const relation =
+				model.getRelation(`${sourceTable}.${include.relation}`) ??
+				model.getRelation(`${sourceTable}.${decision.context?.relation}`);
 			if (relation) {
 				results.push({ include, relation });
 			}
@@ -298,7 +319,10 @@ export function collectJsonAggIncludes(
 			include.relation,
 		);
 		if (decision?.choice === 'json_agg') {
-			const relation = model.getRelation(`${sourceTable}.${include.relation}`);
+			// Try direct lookup first, then fallback to resolved relation name from decision
+			const relation =
+				model.getRelation(`${sourceTable}.${include.relation}`) ??
+				model.getRelation(`${sourceTable}.${decision.context?.relation}`);
 			if (relation) {
 				results.push({ include, relation });
 			}

@@ -44,17 +44,17 @@ describe.skipIf(shouldSkipE2E())(
 				.select('products')
 				.where(
 					and(
-						exists('images', {
+						exists('productImages', {
 							where: and(
 								eq('locale', 'FR'),
-								eq('is_main', true),
+								eq('isMain', true),
 								eq('status', 'approved'),
 							),
 						}),
-						exists('images', {
+						exists('productImages', {
 							where: and(
 								eq('locale', 'EN'),
-								eq('is_main', true),
+								eq('isMain', true),
 								eq('status', 'approved'),
 							),
 						}),
@@ -85,7 +85,9 @@ describe.skipIf(shouldSkipE2E())(
 				expect(
 					cteNames.some(
 						(name) =>
-							name.includes('images') || name.includes('product_images'),
+							name.includes('images') ||
+							name.includes('product_images') ||
+							name.includes('productImages'),
 					),
 				).toBe(true);
 			});

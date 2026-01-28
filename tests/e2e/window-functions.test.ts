@@ -6,16 +6,16 @@
  *
  * ## Test Structure (GWT - Given/When/Then)
  *
- * - **Given**: Extended PIM/DAM schema with variants (price_cents, stock)
+ * - **Given**: Extended PIM/DAM schema with variants (priceCents, stock)
  * - **When**: Execute ORM query with window functions via columns()
  * - **Then**: Verify window function results in returned data
  *
  * Test data (from pimdam-extended.seed.ts):
- * - Variant 1: Small, price_cents=1999, stock=10
- * - Variant 2: Medium, price_cents=2199, stock=5
- * - Variant 3: Large, price_cents=2199, stock=0
- * - Variant 4: Standard Charger, price_cents=999, stock=100
- * - Variant 5: Standard Case, price_cents=499, stock=50
+ * - Variant 1: Small, priceCents=1999, stock=10
+ * - Variant 2: Medium, priceCents=2199, stock=5
+ * - Variant 3: Large, priceCents=2199, stock=0
+ * - Variant 4: Standard Charger, priceCents=999, stock=100
+ * - Variant 5: Standard Case, priceCents=499, stock=50
  */
 
 import { createOrm, denseRank, rank, rowNumber, wAvg, wSum } from '@dbsp/core';
@@ -55,33 +55,33 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
-			// Query variants with row_number ordered by price
+			// Query variants with rowNumber ordered by price
 			const results = (await orm
 				.withSchema(SCHEMA)
 				.select('variants')
 				.columns([
 					'id',
 					'name',
-					'price_cents',
-					rowNumber().orderBy('price_cents').as('row_num'),
+					'priceCents',
+					rowNumber().orderBy('priceCents').as('rowNum'),
 				])
 				.all()) as Array<{
 				id: number;
 				name: string;
-				price_cents: number;
-				row_num: string;
+				priceCents: number;
+				rowNum: string;
 			}>;
 
 			expect(results.length).toBeGreaterThan(0);
 
 			// Verify row numbers are assigned
-			const rowNums = results.map((r) => Number(r.row_num));
+			const rowNums = results.map((r) => Number(r.rowNum));
 			expect(rowNums).toContain(1);
 
 			// Verify ordering: cheapest first
-			const cheapest = results.find((r) => Number(r.row_num) === 1);
+			const cheapest = results.find((r) => Number(r.rowNum) === 1);
 			expect(cheapest).toBeDefined();
-			expect(cheapest?.price_cents).toBe(499); // Standard Case is cheapest
+			expect(cheapest?.priceCents).toBe(499); // Standard Case is cheapest
 		});
 
 		it('should generate row numbers ordered by price descending', async () => {
@@ -94,19 +94,19 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 				.columns([
 					'id',
 					'name',
-					'price_cents',
-					rowNumber().orderBy('price_cents', 'desc').as('row_num'),
+					'priceCents',
+					rowNumber().orderBy('priceCents', 'desc').as('rowNum'),
 				])
 				.all()) as Array<{
 				name: string;
-				price_cents: number;
-				row_num: string;
+				priceCents: number;
+				rowNum: string;
 			}>;
 
-			// Verify most expensive is row_num = 1
-			const mostExpensive = results.find((r) => Number(r.row_num) === 1);
+			// Verify most expensive is rowNum = 1
+			const mostExpensive = results.find((r) => Number(r.rowNum) === 1);
 			expect(mostExpensive).toBeDefined();
-			expect(mostExpensive?.price_cents).toBe(2199); // Medium or Large
+			expect(mostExpensive?.priceCents).toBe(2199); // Medium or Large
 		});
 	});
 
@@ -125,21 +125,21 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 				.columns([
 					'id',
 					'name',
-					'price_cents',
-					rank().orderBy('price_cents', 'desc').as('price_rank'),
+					'priceCents',
+					rank().orderBy('priceCents', 'desc').as('priceRank'),
 				])
 				.all()) as Array<{
 				name: string;
-				price_cents: number;
-				price_rank: string;
+				priceCents: number;
+				priceRank: string;
 			}>;
 
 			// Find Medium and Large (both 2199 cents)
-			const tiedItems = results.filter((r) => r.price_cents === 2199);
+			const tiedItems = results.filter((r) => r.priceCents === 2199);
 			expect(tiedItems.length).toBe(2);
 
 			// Both should have rank 1 (tied for first)
-			const ranks = tiedItems.map((r) => Number(r.price_rank));
+			const ranks = tiedItems.map((r) => Number(r.priceRank));
 			expect(ranks).toEqual([1, 1]);
 		});
 
@@ -153,34 +153,34 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 				.select('variants')
 				.columns([
 					'id',
-					'product_id',
+					'productId',
 					'name',
-					'price_cents',
+					'priceCents',
 					rank()
-						.partitionBy('product_id')
-						.orderBy('price_cents')
-						.as('rank_in_product'),
+						.partitionBy('productId')
+						.orderBy('priceCents')
+						.as('rankInProduct'),
 				])
 				.all()) as Array<{
-				product_id: number;
+				productId: number;
 				name: string;
-				price_cents: number;
-				rank_in_product: string;
+				priceCents: number;
+				rankInProduct: string;
 			}>;
 
 			// T-Shirt variants (product_id=4): Small=1999, Medium=2199, Large=2199
-			const tshirtVariants = results.filter((r) => r.product_id === 4);
+			const tshirtVariants = results.filter((r) => r.productId === 4);
 			expect(tshirtVariants.length).toBe(3);
 
 			// Small should be rank 1 within T-Shirt (cheapest)
 			const small = tshirtVariants.find((r) => r.name === 'Small');
-			expect(Number(small?.rank_in_product)).toBe(1);
+			expect(Number(small?.rankInProduct)).toBe(1);
 
 			// Medium and Large should be rank 2 (tied)
 			const medium = tshirtVariants.find((r) => r.name === 'Medium');
 			const large = tshirtVariants.find((r) => r.name === 'Large');
-			expect(Number(medium?.rank_in_product)).toBe(2);
-			expect(Number(large?.rank_in_product)).toBe(2);
+			expect(Number(medium?.rankInProduct)).toBe(2);
+			expect(Number(large?.rankInProduct)).toBe(2);
 		});
 	});
 
@@ -197,19 +197,19 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 				.select('variants')
 				.columns([
 					'name',
-					'price_cents',
-					denseRank().orderBy('price_cents', 'desc').as('dense_rank_price'),
+					'priceCents',
+					denseRank().orderBy('priceCents', 'desc').as('denseRankPrice'),
 				])
 				.all()) as Array<{
 				name: string;
-				price_cents: number;
-				dense_rank_price: string;
+				priceCents: number;
+				denseRankPrice: string;
 			}>;
 
 			// With dense_rank: 2199 (rank 1), 1999 (rank 2), 999 (rank 3), 499 (rank 4)
 			// (rank doesn't skip to 3 after tie at 2199)
 			const ranks = [
-				...new Set(results.map((r) => Number(r.dense_rank_price))),
+				...new Set(results.map((r) => Number(r.denseRankPrice))),
 			].sort((a, b) => a - b);
 			// Should have consecutive ranks: 1, 2, 3, 4
 			expect(ranks).toEqual([1, 2, 3, 4]);
@@ -220,7 +220,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 	// SUM() Running Total Tests
 	// =========================================================================
 	describe('SUM() Running Total', () => {
-		it('should compute running total of price_cents', async () => {
+		it('should compute running total of priceCents', async () => {
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
@@ -229,13 +229,13 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 				.select('variants')
 				.columns([
 					'name',
-					'price_cents',
-					wSum('price_cents').orderBy('price_cents').as('running_total'),
+					'priceCents',
+					wSum('priceCents').orderBy('priceCents').as('runningTotal'),
 				])
 				.all()) as Array<{
 				name: string;
-				price_cents: number;
-				running_total: string;
+				priceCents: number;
+				runningTotal: string;
 			}>;
 
 			// Order by price: 499, 999, 1999, 2199, 2199
@@ -244,17 +244,17 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 
 			// Find the row with cheapest item (first in order)
 			const sortedByPrice = [...results].sort(
-				(a, b) => a.price_cents - b.price_cents,
+				(a, b) => a.priceCents - b.priceCents,
 			);
 
 			// First item running total = its own price
 			const first = sortedByPrice[0];
-			expect(Number(first.running_total)).toBe(first.price_cents);
+			expect(Number(first.runningTotal)).toBe(first.priceCents);
 
 			// Last item running total = sum of all
-			const totalPrice = results.reduce((sum, r) => sum + r.price_cents, 0);
+			const totalPrice = results.reduce((sum, r) => sum + r.priceCents, 0);
 			const lastResult = results.find(
-				(r) => Number(r.running_total) === totalPrice,
+				(r) => Number(r.runningTotal) === totalPrice,
 			);
 			expect(lastResult).toBeDefined();
 		});
@@ -267,32 +267,32 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 				.withSchema(SCHEMA)
 				.select('variants')
 				.columns([
-					'product_id',
+					'productId',
 					'name',
-					'price_cents',
-					wSum('price_cents')
-						.partitionBy('product_id')
-						.orderBy('price_cents')
-						.as('product_running_total'),
+					'priceCents',
+					wSum('priceCents')
+						.partitionBy('productId')
+						.orderBy('priceCents')
+						.as('productRunningTotal'),
 				])
 				.all()) as Array<{
-				product_id: number;
+				productId: number;
 				name: string;
-				price_cents: number;
-				product_running_total: string;
+				priceCents: number;
+				productRunningTotal: string;
 			}>;
 
 			// T-Shirt (product_id=4) total: 1999 + 2199 + 2199 = 6397
-			const tshirtVariants = results.filter((r) => r.product_id === 4);
+			const tshirtVariants = results.filter((r) => r.productId === 4);
 			const maxTshirtTotal = Math.max(
-				...tshirtVariants.map((r) => Number(r.product_running_total)),
+				...tshirtVariants.map((r) => Number(r.productRunningTotal)),
 			);
 			expect(maxTshirtTotal).toBe(6397);
 
 			// Charger (product_id=8) has only one variant: 999
-			const chargerVariants = results.filter((r) => r.product_id === 8);
+			const chargerVariants = results.filter((r) => r.productId === 8);
 			expect(chargerVariants.length).toBe(1);
-			expect(Number(chargerVariants[0].product_running_total)).toBe(999);
+			expect(Number(chargerVariants[0].productRunningTotal)).toBe(999);
 		});
 	});
 
@@ -310,19 +310,19 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 				.columns([
 					'name',
 					'stock',
-					wAvg('stock').orderBy('stock').as('avg_stock'),
+					wAvg('stock').orderBy('stock').as('avgStock'),
 				])
 				.all()) as Array<{
 				name: string;
 				stock: number;
-				avg_stock: string;
+				avgStock: string;
 			}>;
 
 			// Verify avg is computed
 			expect(results.length).toBe(5);
 			results.forEach((r) => {
-				expect(r.avg_stock).toBeDefined();
-				expect(Number(r.avg_stock)).toBeGreaterThanOrEqual(0);
+				expect(r.avgStock).toBeDefined();
+				expect(Number(r.avgStock)).toBeGreaterThanOrEqual(0);
 			});
 		});
 	});
@@ -377,12 +377,12 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 				.select('variants')
 				.columns([
 					'name',
-					'price_cents',
-					rank().orderBy('price_cents', 'desc').as('rank'),
+					'priceCents',
+					rank().orderBy('priceCents', 'desc').as('rank'),
 				])
 				.all()) as Array<{
 				name: string;
-				price_cents: number;
+				priceCents: number;
 				rank: string;
 			}>;
 
@@ -392,12 +392,12 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 				.select('variants')
 				.columns([
 					'name',
-					'price_cents',
-					rank().orderBy('price_cents', 'desc').as('rank'),
+					'priceCents',
+					rank().orderBy('priceCents', 'desc').as('rank'),
 				])
 				.all()) as Array<{
 				name: string;
-				price_cents: number;
+				priceCents: number;
 				rank: string;
 			}>;
 
@@ -409,12 +409,12 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 
 			// Tenant 2 prices are different (5000, 3000 vs tenant 1's 2199, 1999, etc.)
 			const t2Prices = tenant2Results
-				.map((r) => r.price_cents)
+				.map((r) => r.priceCents)
 				.sort((a, b) => b - a);
 			expect(t2Prices).toEqual([5000, 3000]);
 
 			// Verify ranks are computed correctly for each tenant
-			const t2HighestRank = tenant2Results.find((r) => r.price_cents === 5000);
+			const t2HighestRank = tenant2Results.find((r) => r.priceCents === 5000);
 			expect(Number(t2HighestRank?.rank)).toBe(1);
 		});
 
@@ -427,8 +427,8 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 				.select('variants')
 				.columns([
 					'name',
-					'price_cents',
-					rowNumber().orderBy('price_cents').as('row_num'),
+					'priceCents',
+					rowNumber().orderBy('priceCents').as('rowNum'),
 				])
 				.dump();
 
@@ -450,7 +450,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 			const dump = orm
 				.withSchema(SCHEMA)
 				.select('variants')
-				.columns(['name', rowNumber().orderBy('price_cents').as('row_num')])
+				.columns(['name', rowNumber().orderBy('priceCents').as('rowNum')])
 				.dump();
 
 			// Verify SQL contains window function syntax
@@ -468,12 +468,12 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 				.withSchema(SCHEMA)
 				.select('variants')
 				.columns([
-					'product_id',
+					'productId',
 					'name',
 					rank()
-						.partitionBy('product_id')
-						.orderBy('price_cents', 'desc')
-						.as('product_rank'),
+						.partitionBy('productId')
+						.orderBy('priceCents', 'desc')
+						.as('productRank'),
 				])
 				.dump();
 
