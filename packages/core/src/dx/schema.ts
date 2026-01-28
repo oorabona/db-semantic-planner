@@ -98,6 +98,12 @@ export interface RefOptions {
 	// Self-ref only (MANDATORY when source === target)
 	/** Role names for self-referential relations */
 	roles?: SelfRefRoles;
+
+	// Composite FK support (table-level foreignKeys only)
+	/** Source columns forming the composite FK */
+	columns?: readonly string[];
+	/** Target columns (defaults to target table's PK) */
+	references?: readonly string[];
 }
 
 /**
@@ -119,6 +125,46 @@ export type TableDef = Record<string, ColumnDef | RefDefinition>;
  * Schema definition - a record of table names to table definitions.
  */
 export type SchemaDefinition = Record<string, TableDef>;
+
+/**
+ * Table-level constraints for composite indexes and foreign keys.
+ * Used as the 2nd argument to schema() for constraints that span multiple columns.
+ *
+ * @example
+ * ```typescript
+ * schema({
+ *   orderItems: {
+ *     orderId: 'uuid',
+ *     productId: 'uuid',
+ *     quantity: 'integer',
+ *   },
+ * }, {
+ *   orderItems: {
+ *     indexes: [
+ *       { columns: ['orderId', 'productId'], unique: true },
+ *     ],
+ *     foreignKeys: [
+ *       ref('orders', { columns: ['orderId', 'productId'], references: ['orderId', 'productId'] }),
+ *     ],
+ *   },
+ * });
+ * ```
+ */
+export interface SchemaTableOptions {
+	/** Composite indexes for this table */
+	indexes?: Array<{
+		columns: string[];
+		unique?: boolean;
+		name?: string;
+	}>;
+	/** Composite foreign keys for this table (use ref() with columns/references) */
+	foreignKeys?: RefDefinition[];
+}
+
+/**
+ * Per-table constraint options, keyed by table name.
+ */
+export type SchemaConstraints = Record<string, SchemaTableOptions>;
 
 /**
  * Result of schema() function with strongly-typed table/column info.
@@ -397,9 +443,12 @@ export function isRef(
  * const orm = createOrm({ model: db.model, adapter });
  * ```
  */
-export function schema<T extends SchemaDefinition>(definition: T): Schema<T> {
+export function schema<T extends SchemaDefinition>(
+	definition: T,
+	constraints?: SchemaConstraints,
+): Schema<T> {
 	// Validate and convert to ModelIR
-	const model = schemaToModelIR(definition);
+	const model = schemaToModelIR(definition, constraints);
 	const tableNames = Object.keys(definition) as (keyof T)[];
 
 	// Create type-safe tables proxy (DX-040)
@@ -439,7 +488,10 @@ export class SchemaValidationError extends Error {
  *
  * @internal
  */
-export function schemaToModelIR(definition: SchemaDefinition): ModelIR {
+export function schemaToModelIR(
+	definition: SchemaDefinition,
+	constraints?: SchemaConstraints,
+): ModelIR {
 	const tableNames = Object.keys(definition);
 
 	// Phase 1: Validate refs point to existing tables
@@ -448,8 +500,8 @@ export function schemaToModelIR(definition: SchemaDefinition): ModelIR {
 	// Phase 2: Collect all refs and validate constraints
 	const refsByTable = collectRefs(definition);
 
-	// Phase 3: Build tables (columns, PKs, FKs)
-	const tables = buildTables(definition, refsByTable, tableNames);
+	// Phase 3: Build tables (columns, PKs, FKs, indexes)
+	const tables = buildTables(definition, refsByTable, tableNames, constraints);
 
 	// Phase 4: Build relations from refs
 	const relations = buildRelations(definition, refsByTable, tableNames);
@@ -686,6 +738,7 @@ function buildTables(
 	definition: SchemaDefinition,
 	refsByTable: Map<string, CollectedRef[]>,
 	tableNames: string[],
+	constraints?: SchemaConstraints,
 ): TableIR[] {
 	const tables: TableIR[] = [];
 
@@ -814,6 +867,47 @@ function buildTables(
 					columns: [columnName],
 					unique: false,
 				});
+			}
+		}
+
+		// Process table-level constraints (2nd arg to schema())
+		const tableConstraints = constraints?.[tableName];
+		if (tableConstraints) {
+			// Composite indexes
+			if (tableConstraints.indexes) {
+				for (const idx of tableConstraints.indexes) {
+					indexes.push({
+						name: idx.name ?? `idx_${tableName}_${idx.columns.join('_')}`,
+						columns: idx.columns,
+						unique: idx.unique ?? false,
+					});
+				}
+			}
+
+			// Composite foreign keys
+			if (tableConstraints.foreignKeys) {
+				for (const fkRef of tableConstraints.foreignKeys) {
+					if (!fkRef.options.columns?.length) {
+						throw new SchemaValidationError(
+							`Composite FK on "${tableName}" → "${fkRef.target}" requires 'columns' option`,
+							tableName,
+						);
+					}
+					const fk: ForeignKeyIR = {
+						columns: [...fkRef.options.columns],
+						references: {
+							table: fkRef.target,
+							columns: fkRef.options.references
+								? [...fkRef.options.references]
+								: ['id'],
+						},
+					};
+					if (fkRef.options.onDelete) {
+						(fk as { onDelete?: OnDeleteAction }).onDelete =
+							fkRef.options.onDelete;
+					}
+					foreignKeys.push(fk);
+				}
 			}
 		}
 
