@@ -13,6 +13,7 @@ import { deparseSync } from 'pgsql-deparser';
 import {
 	andExpr,
 	booleanConstNode,
+	coalesceExpr,
 	columnRef,
 	columnTarget,
 	countDistinct,
@@ -238,12 +239,13 @@ export class PlanCompiler {
 						});
 					} else if (decision.function === 'coalesce' && decision.args) {
 						// COALESCE: args is array of column names
+						// COALESCE is a SQL keyword (not a function), so use CoalesceExpr
 						const coalesceArgs = (decision.args as string[]).map((col) =>
 							columnRef(col, decision.table, undefined, this.naming),
 						);
 						targetList.push({
 							ResTarget: {
-								val: funcCall('coalesce', coalesceArgs),
+								val: coalesceExpr(coalesceArgs),
 								...(decision.alias
 									? { name: this.naming.toDatabase(decision.alias) }
 									: {}),
