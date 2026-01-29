@@ -30,6 +30,10 @@ import type {
 import type { Pool, PoolClient } from 'pg';
 import { deparseSync } from 'pgsql-deparser';
 import { type CompilerOptions, compilePlan } from './compiler.js';
+import {
+	type GenerateDDLOptions,
+	generateDDL as generateDDLStatements,
+} from './ddl/index.js';
 import { type CompilerContext, createCompilerState } from './handlers/index.js';
 import {
 	compileDelete as compileDeleteMutation,
@@ -498,10 +502,19 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	/**
 	 * Generate DDL statements from a ModelIR schema.
-	 * @stub Phase 3 - DDL Generation
+	 *
+	 * Uses PostgreSQL AST nodes and pgsql-deparser for consistent SQL generation.
+	 * Applies the naming plugin for identifier transformation.
+	 *
+	 * @param schema - The ModelIR schema to generate DDL from
+	 * @returns Array of DDL statements in dependency order
 	 */
-	generateDDL(_schema: ModelIR): string[] {
-		throw new Error('PgsqlAdapter.generateDDL: Not implemented - Phase 3');
+	generateDDL(schema: ModelIR): string[] {
+		const options: GenerateDDLOptions = {
+			...(this.schemaName ? { schemaName: this.schemaName } : {}),
+			naming: this.naming,
+		};
+		return generateDDLStatements(schema, options);
 	}
 
 	// =========================================================================

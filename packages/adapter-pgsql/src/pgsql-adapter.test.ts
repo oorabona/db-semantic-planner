@@ -487,15 +487,6 @@ describe('PgsqlAdapter', () => {
 			);
 		});
 
-		it('generateDDL should throw', () => {
-			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
-
-			const schema = {} as any;
-
-			expect(() => adapter.generateDDL(schema)).toThrow(
-				'Not implemented - Phase 3',
-			);
-		});
+		// generateDDL is now implemented - see ddl.test.ts for comprehensive tests
 	});
 });
