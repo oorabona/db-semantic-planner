@@ -324,8 +324,25 @@ function convertWhereCondition(
 			};
 
 		// Range: { kind: 'range', field: 'age', gte: 18, lte: 65 }
+		// Also handles PostgreSQL range operators: contains (@>), containedBy (<@), overlaps (&&)
 		case 'range': {
-			// Convert range to a comparison or between
+			// Check for PostgreSQL range operators first
+			const rangeOperator = cond.operator as string | undefined;
+			if (
+				rangeOperator === 'contains' ||
+				rangeOperator === 'containedBy' ||
+				rangeOperator === 'overlaps'
+			) {
+				return {
+					type: 'where',
+					column: cond.field as string,
+					operator: rangeOperator,
+					value: cond.value,
+					table: rootTable,
+				};
+			}
+
+			// Convert numeric range to a comparison or between
 			if (cond.gte !== undefined && cond.lte !== undefined) {
 				return {
 					type: 'where',

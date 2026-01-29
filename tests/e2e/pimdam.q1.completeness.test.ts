@@ -288,7 +288,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 				.columns(['id', 'sku'])
 				.dump();
 
-			expect(dump.sql).toContain(`"${SCHEMA}"`);
+			expect(dump.sql).toMatch(new RegExp(`("|)${SCHEMA}\\1\\.`));
 			expect(dump.meta?.schema).toBe(SCHEMA);
 		});
 	});

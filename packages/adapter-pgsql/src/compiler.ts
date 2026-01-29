@@ -8,8 +8,6 @@
  */
 
 import type { Node } from '@pgsql/types';
-import { deparseSync } from 'pgsql-deparser';
-
 import {
 	andExpr,
 	booleanConstNode,
@@ -27,6 +25,8 @@ import {
 	innerJoin,
 	insertStmt,
 	integerNode,
+	jsonAggCorrelation,
+	jsonAggSubquery,
 	leftJoin,
 	likeExpr,
 	ltExpr,
@@ -42,9 +42,10 @@ import {
 	updateStmt,
 	windowFuncCall,
 } from './ast-helpers.js';
+import { deparseQuoted } from './deparse.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
-import { createParamRef } from './param-ref.js';
+import { createParamRef, createTypeCastParamRef } from './param-ref.js';
 
 // ============================================================================
 // Types (simplified for spike - would import from @dbsp/core)
@@ -80,6 +81,13 @@ export interface PlanDecision {
 	// Window function properties
 	readonly partitionBy?: readonly string[];
 	readonly orderBy?: readonly { field: string; direction?: 'asc' | 'desc' }[];
+	// Column data type (for range type casting, e.g. 'daterange', 'int4range')
+	readonly dataType?: string;
+	// JSON aggregation (include strategy: 'json_agg')
+	readonly relationName?: string;
+	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
+	readonly foreignKey?: string;
+	readonly parentKey?: string;
 }
 
 /**
@@ -155,7 +163,7 @@ export class PlanCompiler {
 				throw new Error(`Unsupported query type: ${queryType}`);
 		}
 
-		const sql = deparseSync(ast);
+		const sql = deparseQuoted(ast);
 
 		return {
 			sql,
@@ -297,6 +305,54 @@ export class PlanCompiler {
 							...(decision.alias ? { name: decision.alias } : {}),
 						},
 					});
+					break;
+				}
+
+				case 'selectJsonAgg': {
+					// json_agg include: COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM target AS __t__ WHERE ...), '[]'::json) AS "relation_json"
+					if (
+						decision.relationName &&
+						decision.targetTable &&
+						decision.relationType
+					) {
+						const rootAlias = plan.rootTable;
+
+						// Build correlation WHERE based on relation type
+						// belongsTo: target.pk = parent.fk  (e.g., authors.id = posts.author_id)
+						// hasMany/hasOne: target.fk = parent.pk  (e.g., posts.author_id = authors.id)
+						let whereExpr: Node;
+						if (decision.relationType === 'belongsTo') {
+							// For belongsTo, the FK is in the source table, pointing to target's PK
+							whereExpr = jsonAggCorrelation(
+								rootAlias,
+								decision.foreignKey ?? 'id', // FK in parent (source)
+								'__t__',
+								decision.parentKey ?? 'id', // PK in target
+								this.naming,
+							);
+						} else {
+							// For hasMany/hasOne, the FK is in target table, pointing to source's PK
+							whereExpr = jsonAggCorrelation(
+								rootAlias,
+								decision.parentKey ?? 'id', // PK in parent (source)
+								'__t__',
+								decision.foreignKey ?? 'id', // FK in target
+								this.naming,
+							);
+						}
+
+						// Build the json_agg subquery SELECT
+						// Alias must use {relation}_json pattern for hydration-utils.ts detection
+						targetList.push(
+							jsonAggSubquery(
+								decision.targetTable,
+								whereExpr,
+								`${decision.relationName}_json`,
+								this.schema,
+								this.naming,
+							),
+						);
+					}
 					break;
 				}
 
@@ -623,6 +679,26 @@ export class PlanCompiler {
 			this.naming,
 		);
 
+		// Range operators handle their own parameters (with formatting + type cast)
+		// Must early-return before generic value compilation pushes raw value
+		if (
+			decision.operator === 'contains' ||
+			decision.operator === 'containedBy' ||
+			decision.operator === 'overlaps'
+		) {
+			const rangeOp =
+				decision.operator === 'contains'
+					? '@>'
+					: decision.operator === 'containedBy'
+						? '<@'
+						: '&&';
+			return this.compileRangeOperator(
+				decision,
+				column,
+				rangeOp as '@>' | '<@' | '&&',
+			);
+		}
+
 		let value: Node;
 		if (decision.paramIndex !== undefined) {
 			value = createParamRef(decision.paramIndex);
@@ -678,6 +754,13 @@ export class PlanCompiler {
 				return this.compileInCondition(decision, column, true);
 			case 'between':
 				return this.compileBetweenCondition(decision, column);
+			// PostgreSQL range operators
+			case 'contains':
+				return this.compileRangeOperator(decision, column, '@>');
+			case 'containedBy':
+				return this.compileRangeOperator(decision, column, '<@');
+			case 'overlaps':
+				return this.compileRangeOperator(decision, column, '&&');
 			default:
 				return eqExpr(column, value);
 		}
@@ -708,8 +791,11 @@ export class PlanCompiler {
 		];
 
 		// Build FK correlation condition
-		// Convention: FK column in target is {singularSourceTable}Id pointing to source.id
-		const fkColumn = this.deriveFK(sourceTable);
+		// Use explicit foreignKey from decision if available (resolved from model),
+		// otherwise fall back to convention: {singularSourceTable}Id
+		const fkColumn = decision.foreignKey
+			? (typeof decision.foreignKey === 'string' ? decision.foreignKey : decision.foreignKey[0])
+			: this.deriveFK(sourceTable);
 		const fkCorrelation = eqExpr(
 			columnRef(fkColumn, targetTable, undefined, this.naming),
 			columnRef('id', sourceTable, undefined, this.naming),
@@ -741,7 +827,8 @@ export class PlanCompiler {
 			},
 		};
 
-		// For NOT EXISTS, wrap with NOT
+		// For NOT EXISTS, wrap with NOT BoolExpr
+		// (SubLinkType only has EXISTS_SUBLINK; deparser renders as "NOT (EXISTS ...)")
 		if (decision.operator === 'notExists') {
 			return {
 				BoolExpr: {
@@ -822,6 +909,70 @@ export class PlanCompiler {
 				name: [{ String: { sval: 'BETWEEN' } }],
 				lexpr: column,
 				rexpr: { List: { items: [minNode, maxNode] } },
+			},
+		};
+	}
+
+	/**
+	 * Compile a PostgreSQL range operator condition (@>, <@, &&).
+	 * For range types: column @> value, column <@ range, column && range
+	 *
+	 * Value can be:
+	 * - Scalar (for @> point containment)
+	 * - { lower, upper } object (for range comparison)
+	 */
+	private compileRangeOperator(
+		decision: PlanDecision,
+		column: Node,
+		operator: '@>' | '<@' | '&&',
+	): Node {
+		const value = decision.value;
+
+		// Convert value to appropriate format
+		let paramValue: unknown;
+		let isScalar = false;
+		if (
+			value !== null &&
+			typeof value === 'object' &&
+			'lower' in (value as object)
+		) {
+			// Range value: { lower, upper } → PostgreSQL range literal
+			const range = value as { lower?: unknown; upper?: unknown };
+			// Format as PostgreSQL range literal: [lower,upper)
+			const lower = range.lower ?? '';
+			const upper = range.upper ?? '';
+			paramValue = `[${lower},${upper})`;
+		} else {
+			// Scalar value (for @> point containment)
+			paramValue = value;
+			isScalar = true;
+		}
+
+		const paramIdx = ++this.paramIndex;
+		this.parameters.push(paramValue);
+
+		// Use TypeCast when dataType is available (required for range types like daterange, int4range)
+		// For scalar values (point containment), cast to element type (e.g. 'date' not 'daterange')
+		let castType = decision.dataType;
+		if (castType && isScalar) {
+			// Strip 'range' suffix to get element type: daterange → date, int4range → int4, tstzrange → tstz
+			castType = castType.replace(/range$/, '');
+			// Map PostgreSQL range element type names to proper type names
+			if (castType === 'int4') castType = 'integer';
+			if (castType === 'int8') castType = 'bigint';
+			if (castType === 'tstz') castType = 'timestamptz';
+			if (castType === 'ts') castType = 'timestamp';
+		}
+		const rexpr = castType
+			? createTypeCastParamRef(paramIdx, castType)
+			: createParamRef(paramIdx);
+
+		return {
+			A_Expr: {
+				kind: 'AEXPR_OP',
+				name: [{ String: { sval: operator } }],
+				lexpr: column,
+				rexpr,
 			},
 		};
 	}

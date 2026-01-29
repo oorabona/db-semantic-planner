@@ -124,7 +124,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 				.dump();
 
 			// Verify schema prefix in SQL
-			expect(dump.sql).toContain('"acme"');
+			expect(dump.sql).toContain('acme');
 			expect(dump.sql.toLowerCase()).toContain('select');
 			expect(dump.sql.toLowerCase()).toContain('from');
 		});
@@ -149,7 +149,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 					.columns(['id'])
 					.dump();
 
-				expect(dump.sql).toContain('"acme"');
+				expect(dump.sql).toContain('acme');
 				expect(dump.sql.toLowerCase()).toContain('select');
 			}
 		});

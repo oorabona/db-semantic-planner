@@ -231,7 +231,7 @@ describe.skipIf(shouldSkipE2E())(
 					break;
 				}
 
-				expect(sql).toContain(`"${TENANT_A}"`);
+				expect(sql).toContain(TENANT_A);
 			});
 		});
 

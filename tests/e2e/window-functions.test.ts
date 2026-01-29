@@ -433,7 +433,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 				.dump();
 
 			// Verify schema prefix in SQL
-			expect(dump.sql).toContain(`"${SCHEMA}"`);
+			expect(dump.sql).toContain(SCHEMA);
 			expect(dump.sql.toUpperCase()).toContain('ROW_NUMBER()');
 			expect(dump.sql.toUpperCase()).toContain('OVER');
 		});
@@ -457,7 +457,7 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 			expect(dump.sql.toUpperCase()).toContain('ROW_NUMBER()');
 			expect(dump.sql.toUpperCase()).toContain('OVER');
 			expect(dump.sql.toUpperCase()).toContain('ORDER BY');
-			expect(dump.sql).toContain('"row_num"');
+			expect(dump.sql).toContain('row_num');
 		});
 
 		it('should generate correct SQL for PARTITION BY + ORDER BY', async () => {
