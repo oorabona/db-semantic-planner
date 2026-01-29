@@ -113,7 +113,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				.columns(['id', 'sku', 'name', 'stock'])
 				.dump();
 
-			expect(dump.sql).toContain(`"${SCHEMA}"`);
+			expect(dump.sql).toContain(SCHEMA);
 
 			// Direct SQL to verify in-stock variants
 			const result = await kyselySql`
@@ -276,7 +276,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				.columns(['id', 'storageKey', 'kind'])
 				.dump();
 
-			expect(dump.sql.toUpperCase()).toContain('NOT EXISTS');
+			expect(dump.sql.toUpperCase()).toMatch(/NOT\s*\(?EXISTS/);
 
 			// Execute to verify
 			const assets = await orm
@@ -362,7 +362,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				.dump();
 
 			expect(dump.sql.toUpperCase()).toContain('EXISTS');
-			expect(dump.sql).toContain(`"${SCHEMA}"`);
+			expect(dump.sql).toContain(SCHEMA);
 		});
 
 		it('should generate NOT EXISTS SQL for orphan assets', async () => {
@@ -376,7 +376,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				.where(notExists('productImages'))
 				.dump();
 
-			expect(dump.sql.toUpperCase()).toContain('NOT EXISTS');
+			expect(dump.sql.toUpperCase()).toMatch(/NOT\s*\(?EXISTS/);
 		});
 	});
 });

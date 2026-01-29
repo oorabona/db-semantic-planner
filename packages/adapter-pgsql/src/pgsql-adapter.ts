@@ -29,17 +29,18 @@ import type {
 } from '@dbsp/core';
 import type { Node, SelectStmt } from '@pgsql/types';
 import type { Pool, PoolClient } from 'pg';
-import { deparseSync } from 'pgsql-deparser';
 import { innerJoin, rangeVar } from './ast-helpers.js';
 import {
 	type CompilerOptions,
 	compilePlan,
+	type PlanDecision,
 	type SimplifiedPlanReport,
 } from './compiler.js';
 import {
 	type GenerateDDLOptions,
 	generateDDL as generateDDLStatements,
 } from './ddl/index.js';
+import { deparseQuoted } from './deparse.js';
 import {
 	type CompilerContext,
 	createCompilerState,
@@ -163,6 +164,248 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	// =========================================================================
+	// Private Helpers
+	// =========================================================================
+
+	/**
+	 * Extract selectJsonAgg decisions from plan.decisions for json_agg include strategies.
+	 * These are added to the compiler decisions to generate COALESCE(json_agg(...)) SELECT columns.
+	 */
+	private extractJsonAggDecisions(
+		plan: PlanReport,
+	): SimplifiedPlanReport['decisions'] {
+		// Find include-strategy decisions with choice: 'json_agg'
+		const jsonAggIncludeDecisions = plan.decisions.filter(
+			(d) => d.type === 'include-strategy' && d.choice === 'json_agg',
+		);
+
+		if (jsonAggIncludeDecisions.length === 0) {
+			return [];
+		}
+
+		// Convert to selectJsonAgg decisions for the compiler
+		const results: PlanDecision[] = [];
+
+		for (const d of jsonAggIncludeDecisions) {
+			const context = d.context;
+			// Skip if target table or relation name is not defined
+			// Must match hydrator order: includeAlias takes precedence over relation
+			const relationName = context.includeAlias ?? context.relation;
+			if (!context.target || !relationName) continue;
+
+			// Cast context to access foreignKey (added in Phase 3)
+			const extendedContext = context as typeof context & {
+				foreignKey?: string | readonly string[];
+			};
+
+			// Derive FK name if not explicitly provided
+			// For belongsTo: FK is in source (e.g., posts.authorId -> authors)
+			// For hasMany/hasOne: FK is in target (e.g., authors -> posts.authorId)
+			let foreignKey: string | readonly string[] | undefined =
+				extendedContext.foreignKey;
+			if (!foreignKey && context.relationType) {
+				if (context.relationType === 'belongsTo') {
+					// FK in source points to target's PK
+					foreignKey = `${context.target.replace(/s$/, '')}Id`;
+				} else {
+					// FK in target points to source's PK
+					foreignKey = `${context.sourceTable.replace(/s$/, '')}Id`;
+				}
+			}
+
+			// Resolve relationType with default fallback
+			const relationType = context.relationType as
+				| 'belongsTo'
+				| 'hasMany'
+				| 'hasOne'
+				| undefined;
+
+			results.push({
+				type: 'selectJsonAgg',
+				relationName,
+				targetTable: context.target,
+				...(relationType && { relationType }),
+				foreignKey: Array.isArray(foreignKey)
+					? foreignKey[0]
+					: (foreignKey ?? 'id'),
+				parentKey: 'id', // Default to 'id' as PK - could be enhanced later
+			});
+		}
+
+		return results;
+	}
+
+	/**
+	 * Extract WHERE EXISTS/NOT EXISTS decisions from plan.decisions.
+	 * The planner's filter-strategy decisions contain the correct target table,
+	 * while intentToDecisions only has the relation name.
+	 * Also processes nested conditions from the intent with the correct target table.
+	 */
+	private extractExistsDecisions(
+		plan: PlanReport,
+		model?: ModelIR,
+	): SimplifiedPlanReport['decisions'] {
+		// Find filter-strategy decisions with choice: 'exists' or 'notExists'
+		const existsFilterDecisions = plan.decisions.filter(
+			(d) =>
+				d.type === 'filter-strategy' &&
+				(d.choice === 'exists' || d.choice === 'notExists'),
+		);
+
+		if (existsFilterDecisions.length === 0) {
+			return [];
+		}
+
+		// Helper to find exists/notExists intents in the where clause
+		const findExistsIntents = (
+			where: unknown,
+		): Array<{
+			kind: 'exists' | 'notExists';
+			relation: string;
+			where?: unknown;
+		}> => {
+			if (!where || typeof where !== 'object') return [];
+			const w = where as Record<string, unknown>;
+			if (w.kind === 'exists' || w.kind === 'notExists') {
+				return [
+					w as {
+						kind: 'exists' | 'notExists';
+						relation: string;
+						where?: unknown;
+					},
+				];
+			}
+			// Check nested and/or/not conditions
+			const results: Array<{
+				kind: 'exists' | 'notExists';
+				relation: string;
+				where?: unknown;
+			}> = [];
+			if (w.conditions && Array.isArray(w.conditions)) {
+				for (const c of w.conditions) {
+					results.push(...findExistsIntents(c));
+				}
+			}
+			if (w.condition) {
+				results.push(...findExistsIntents(w.condition));
+			}
+			return results;
+		};
+
+		// Find all exists intents from the plan's where clause
+		const existsIntents = plan.intent?.where
+			? findExistsIntents(plan.intent.where)
+			: [];
+
+		// Convert to where decisions for the compiler
+		const results: PlanDecision[] = [];
+
+		for (const d of existsFilterDecisions) {
+			const context = d.context;
+			// Skip if target table is not defined
+			if (!context.target) continue;
+
+			// Find the matching intent to get nested conditions
+			// Match by relation name or target table (planner may normalize relation names)
+			const matchingIntent = existsIntents.find(
+				(i) =>
+					i.relation === context.relation ||
+					i.relation === context.target ||
+					i.relation === context.includeAlias,
+			);
+
+			// Build nested conditions with correct target table
+			let conditions: PlanDecision[] | undefined;
+			if (matchingIntent?.where) {
+				// Convert nested where using the CORRECT target table
+				const nestedDecisions = this.convertWhereToDecisions(
+					matchingIntent.where,
+					context.target,
+				);
+				if (nestedDecisions.length > 0) {
+					conditions = nestedDecisions;
+				}
+			}
+
+			// Resolve FK from model relation if available
+			// Convention fallback (deriveFK) doesn't work for aliased relations
+			// e.g., bundleComponents.bundleId → products (inverse: 'components')
+			let foreignKey: string | undefined;
+			if (model && context.relation) {
+				const sourceTable = context.sourceTable || plan.rootTable;
+				const rel = model.getRelation(`${sourceTable}.${context.relation}`);
+				if (rel?.foreignKey) {
+					foreignKey = typeof rel.foreignKey === 'string'
+						? rel.foreignKey
+						: rel.foreignKey[0];
+				}
+			}
+
+			const decision: PlanDecision = {
+				type: 'where',
+				// d.choice is always 'exists' (planner doesn't distinguish); use intent.kind for negation
+				operator: matchingIntent?.kind === 'notExists' ? 'notExists' : 'exists',
+				targetTable: context.target,
+				...(foreignKey && { foreignKey }),
+				...(conditions && { conditions }),
+			};
+			results.push(decision);
+		}
+
+		return results;
+	}
+
+	/**
+	 * Convert a WhereIntent to PlanDecisions with the given table name.
+	 * Used for nested conditions in EXISTS where we need the correct target table.
+	 */
+	private convertWhereToDecisions(
+		where: unknown,
+		table: string,
+	): PlanDecision[] {
+		if (!where || typeof where !== 'object') return [];
+		const w = where as Record<string, unknown>;
+
+		switch (w.kind) {
+			case 'comparison':
+				return [
+					{
+						type: 'where',
+						column: w.field as string,
+						operator: w.operator as string,
+						value: w.value,
+						table,
+					},
+				];
+			case 'and': {
+				const conditions = w.conditions as unknown[];
+				const subDecisions = conditions.flatMap((c) =>
+					this.convertWhereToDecisions(c, table),
+				);
+				if (subDecisions.length === 0) return [];
+				if (subDecisions.length === 1) return subDecisions;
+				return [{ type: 'whereAnd', conditions: subDecisions }];
+			}
+			case 'or': {
+				const conditions = w.conditions as unknown[];
+				const subDecisions = conditions.flatMap((c) =>
+					this.convertWhereToDecisions(c, table),
+				);
+				if (subDecisions.length === 0) return [];
+				if (subDecisions.length === 1) return subDecisions;
+				return [{ type: 'whereOr', conditions: subDecisions }];
+			}
+			case 'not': {
+				const subDecisions = this.convertWhereToDecisions(w.condition, table);
+				if (subDecisions.length === 0) return [];
+				return [{ type: 'whereNot', conditions: subDecisions }];
+			}
+			default:
+				return [];
+		}
+	}
+
+	// =========================================================================
 	// CompilingAdapter Methods
 	// =========================================================================
 
@@ -187,10 +430,68 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		if (plan.intent) {
 			// Real usage: convert intent to decisions
-			const decisions = intentToDecisions(plan.intent, plan.rootTable);
-			simplifiedPlan = schemaName
-				? { rootTable: plan.rootTable, decisions, schema: schemaName }
-				: { rootTable: plan.rootTable, decisions };
+			let decisions = intentToDecisions(plan.intent, plan.rootTable);
+
+			// Filter out broken EXISTS decisions from intentToDecisions
+			// (they use relation name as targetTable instead of actual table name)
+			decisions = decisions.filter(
+				(d) =>
+					!(
+						d.type === 'where' &&
+						(d.operator === 'exists' || d.operator === 'notExists')
+					),
+			);
+
+			// Add correct EXISTS decisions from planner's filter-strategy decisions
+			// (they have the actual target table in context.target)
+			const existsDecisions = this.extractExistsDecisions(plan, options?.model);
+
+			// Phase 3: Add selectJsonAgg decisions for json_agg include strategies
+			// Look at plan.decisions (from planner) for include-strategy with choice: 'json_agg'
+			const jsonAggDecisions = this.extractJsonAggDecisions(plan);
+			const allDecisions = [
+			...decisions,
+			...existsDecisions,
+			...jsonAggDecisions,
+		];
+
+		// Enrich range operator decisions with dataType from model
+		// (PostgreSQL requires explicit type casts for range parameters)
+		const model = options?.model;
+		if (model) {
+			for (let i = 0; i < allDecisions.length; i++) {
+				const d = allDecisions[i];
+				if (
+					d &&
+					d.type === 'where' &&
+					(d.operator === 'contains' ||
+						d.operator === 'containedBy' ||
+						d.operator === 'overlaps')
+				) {
+					const tableName = d.table || plan.rootTable;
+					const table = model.getTable(tableName);
+					if (table) {
+						const col = table.columns.find(
+							(c) => c.name === d.column,
+						);
+						if (col?.type.endsWith('range')) {
+							allDecisions[i] = {
+								...d,
+								dataType: col.type,
+							} as typeof d;
+						}
+					}
+				}
+			}
+		}
+
+		simplifiedPlan = schemaName
+				? {
+						rootTable: plan.rootTable,
+						decisions: allDecisions,
+						schema: schemaName,
+					}
+				: { rootTable: plan.rootTable, decisions: allDecisions };
 		} else {
 			// Unit test with mock data: use decisions directly (legacy format)
 			simplifiedPlan = schemaName
@@ -367,7 +668,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			},
 		};
 
-		const sql = deparseSync(selectAst);
+		const sql = deparseQuoted(selectAst);
 
 		return {
 			sql,
@@ -488,7 +789,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			},
 		};
 
-		const sql = deparseSync(selectAst);
+		const sql = deparseQuoted(selectAst);
 
 		return {
 			sql,
@@ -527,7 +828,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		};
 
 		const ast = compileInsertMutation(config, ctx, state);
-		const sql = deparseSync(ast);
+		const sql = deparseQuoted(ast);
 
 		return {
 			sql,
@@ -565,7 +866,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		};
 
 		const ast = compileInsertFromMutation(config, ctx, state);
-		const sql = deparseSync(ast);
+		const sql = deparseQuoted(ast);
 
 		return {
 			sql,
@@ -600,7 +901,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		};
 
 		const ast = compileUpdateMutation(config, ctx, state);
-		const sql = deparseSync(ast);
+		const sql = deparseQuoted(ast);
 
 		return {
 			sql,
@@ -631,7 +932,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		};
 
 		const ast = compileDeleteMutation(config, ctx, state);
-		const sql = deparseSync(ast);
+		const sql = deparseQuoted(ast);
 
 		return {
 			sql,
@@ -716,7 +1017,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		};
 
 		const ast = compileUpsertMutation(config, ctx, state);
-		const sql = deparseSync(ast);
+		const sql = deparseQuoted(ast);
 
 		return {
 			sql,
@@ -816,7 +1117,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		};
 
 		// Deparse AST to SQL
-		const sql = deparseSync({ SelectStmt: selectStmt });
+		const sql = deparseQuoted({ SelectStmt: selectStmt });
 
 		return {
 			sql,

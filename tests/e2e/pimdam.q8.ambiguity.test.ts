@@ -170,7 +170,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				.dump();
 
 			// Plan should include relation metadata showing both relations exist
-			expect(dump.sql).toContain(`"${SCHEMA}"`);
+			expect(dump.sql).toContain(SCHEMA);
 			expect(dump.plan).toBeDefined();
 		});
 
@@ -477,7 +477,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				.dump();
 
 			// Just verify the ORM was created with hints
-			expect(dump.sql).toContain(`"${SCHEMA}"`);
+			expect(dump.sql).toContain(SCHEMA);
 		});
 
 		it('should generate proper SQL for products query', async () => {
@@ -491,7 +491,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				.dump();
 
 			// Verify tenant schema is applied
-			expect(dump.sql).toContain(`"${SCHEMA}".`);
+			expect(dump.sql).toContain(`${SCHEMA}.`);
 			expect(dump.plan).toBeDefined();
 		});
 
@@ -506,7 +506,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				.dump();
 
 			// Verify tenant schema is applied
-			expect(dump.sql).toContain(`"${SCHEMA}".`);
+			expect(dump.sql).toContain(`${SCHEMA}.`);
 			expect(dump.plan).toBeDefined();
 		});
 	});

@@ -133,11 +133,11 @@ export async function getPgsqlAdapter(): Promise<PgsqlAdapter<any>> {
 
 /**
  * Get the default test adapter based on DBSP_COMPARISON_MODE.
- * For backward compatibility with existing tests.
+ * Phase 3: Default to PgsqlAdapter.
  *
- * - 'kysely' or not set: returns KyselyAdapter
- * - 'pgsql': returns PgsqlAdapter
- * - 'compare' or 'strict': returns KyselyAdapter (comparison handled separately)
+ * - 'kysely': returns KyselyAdapter (for backward compatibility testing)
+ * - 'pgsql' or not set: returns PgsqlAdapter (new default)
+ * - 'compare' or 'strict': returns PgsqlAdapter (comparison handled separately)
  */
 export async function getTestAdapter(): Promise<Adapter<any>> {
 	if (defaultAdapter) {
@@ -146,14 +146,15 @@ export async function getTestAdapter(): Promise<Adapter<any>> {
 
 	const mode = getComparisonMode();
 
-	if (mode === 'pgsql') {
-		const adapter = await getPgsqlAdapter();
+	if (mode === 'kysely') {
+		// Explicit request for KyselyAdapter (backward compatibility)
+		const adapter = await getKyselyAdapter();
 		defaultAdapter = adapter;
 		return adapter;
 	}
 
-	// Default to Kysely for backward compatibility
-	const adapter = await getKyselyAdapter();
+	// Default to PgsqlAdapter (Phase 3: PgsqlAdapter is now the default)
+	const adapter = await getPgsqlAdapter();
 	defaultAdapter = adapter;
 	return adapter;
 }

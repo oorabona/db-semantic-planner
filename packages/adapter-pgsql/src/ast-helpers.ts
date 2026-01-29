@@ -778,3 +778,116 @@ export function windowFuncCall(
 
 	return { FuncCall: funcCallObj as FuncCall };
 }
+
+// ============================================================================
+// JSON Aggregation (for include strategies)
+// ============================================================================
+
+/**
+ * Create a json_agg correlated subquery for relation includes.
+ *
+ * Generates:
+ * COALESCE(
+ *   (SELECT json_agg(to_jsonb(__t__)) FROM schema.table AS __t__ WHERE __t__.fk = parent.pk),
+ *   '[]'::json
+ * ) AS "relation_json"
+ *
+ * @param targetTable - The target table name (e.g., 'authors')
+ * @param targetAlias - Alias for the target table in subquery (default: '__t__')
+ * @param whereExpr - The correlation WHERE expression
+ * @param alias - The column alias (e.g., 'author_json')
+ * @param schemaName - Optional schema name
+ * @param naming - Naming plugin for identifier transformation
+ */
+export function jsonAggSubquery(
+	targetTable: string,
+	whereExpr: Node,
+	alias: string,
+	schemaName?: string,
+	naming: NamingPlugin = identityNaming,
+): Node {
+	const targetAlias = '__t__';
+
+	// Build: to_jsonb(__t__) - use row reference (just alias, not alias.*)
+	// In PostgreSQL, __t__ refers to the entire row when used with aggregate/jsonb functions
+	const rowRef: Node = {
+		ColumnRef: {
+			fields: [stringNode(targetAlias)],
+		},
+	};
+
+	const toJsonbCall: Node = {
+		FuncCall: {
+			funcname: [stringNode('to_jsonb')],
+			args: [rowRef],
+		} as FuncCall,
+	};
+
+	// Build: json_agg(to_jsonb(__t__))
+	const jsonAggCall: Node = {
+		FuncCall: {
+			funcname: [stringNode('json_agg')],
+			args: [toJsonbCall],
+		} as FuncCall,
+	};
+
+	// Build the FROM clause: schema.table AS __t__
+	const fromTable = rangeVar(targetTable, targetAlias, schemaName, naming);
+
+	// Build the inner SELECT statement
+	const innerSelect = selectStmt({
+		targetList: [{ ResTarget: { val: jsonAggCall } }],
+		from: [fromTable],
+		where: whereExpr,
+	});
+
+	// Wrap in SubLink (subquery expression)
+	const subLink: Node = {
+		SubLink: {
+			subLinkType: 'EXPR_SUBLINK', // scalar subquery
+			subselect: innerSelect,
+		},
+	};
+
+	// Build: '[]'::json (empty array default)
+	const emptyArrayDefault: Node = {
+		TypeCast: {
+			arg: { A_Const: { sval: { sval: '[]' } } },
+			typeName: {
+				names: [stringNode('json')],
+				typemod: -1,
+			} as TypeName,
+		} as TypeCast,
+	};
+
+	// Build: COALESCE(subquery, '[]'::json)
+	const coalesceNode = coalesceExpr([subLink, emptyArrayDefault]);
+
+	// Wrap in ResTarget with alias
+	return {
+		ResTarget: {
+			val: coalesceNode,
+			name: alias,
+		} as ResTarget,
+	};
+}
+
+/**
+ * Build a correlation WHERE expression for json_agg.
+ *
+ * For belongsTo: target.pk = parent.fk  (e.g., authors.id = posts.author_id)
+ * For hasMany:   target.fk = parent.pk  (e.g., posts.author_id = authors.id)
+ */
+export function jsonAggCorrelation(
+	parentAlias: string,
+	parentColumn: string,
+	targetAlias: string,
+	targetColumn: string,
+	naming: NamingPlugin = identityNaming,
+): Node {
+	// __t__.column = parent.column
+	return eqExpr(
+		columnRef(targetColumn, targetAlias, undefined, naming),
+		columnRef(parentColumn, parentAlias, undefined, naming),
+	);
+}

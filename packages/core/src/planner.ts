@@ -57,6 +57,8 @@ export interface PlanDecision {
 		readonly relationPath?: string;
 		/** User-provided include alias (e.g., 'author' from .include('author')) */
 		readonly includeAlias?: string;
+		/** Foreign key column(s) for include-strategy (Phase 3) */
+		readonly foreignKey?: string | readonly string[];
 	};
 
 	/** The choice made */
@@ -991,6 +993,10 @@ function processInclude(
 			relationType: relation.type,
 			includeAlias: include.relation,
 			intentPath,
+			// Foreign key info for json_agg compilation (Phase 3)
+			...(relation.foreignKey !== undefined && {
+				foreignKey: relation.foreignKey,
+			}),
 		},
 		choice: includeStrategy,
 		reasoning: isRecursiveInclude

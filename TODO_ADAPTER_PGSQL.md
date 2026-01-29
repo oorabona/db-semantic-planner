@@ -63,6 +63,18 @@
 
 ---
 
+## Refactoring Backlog (discovered during Phase 3)
+
+- [ ] **Single source of truth for json_agg relation name**: Currently `extractJsonAggDecisions` (adapter) and `hydration-utils.ts` (core) both compute the relation alias independently with `includeAlias ?? relation`. Centraliser la décision dans le PlanReport pour éliminer la duplication.
+- [ ] **Remove duplicate range operator switch cases**: After early-return for range ops in `compileCondition`, the switch cases `contains`/`containedBy`/`overlaps` are dead code. Nettoyer.
+- [ ] **Fragile SQL assertions (`toContain`)**: E2E tests use `toContain('EXISTS')` etc. which doesn't verify structural correctness. Consider AST-level or snapshot-based assertions.
+- [ ] **Model.getTable() naming confusion**: `getTable()` expects logical (camelCase) names but the adapter context often works with database (snake_case) names. Consider adding `getTableByDbName()` or documenting clearly.
+- [ ] **JOIN compilation for filter-strategy**: The pgsql compiler compiles all filter-strategy decisions as EXISTS subqueries, even when the planner chooses `join`. Implement JOIN-based filter compilation for `belongsTo` (to-one) relations.
+- [ ] **LEFT JOIN compilation for include-strategy**: The pgsql compiler always uses json_agg subqueries for includes. Implement LEFT JOIN when `includeStrategy: 'join'` is specified on a relation.
+- [ ] **CTE/WITH clause generation**: Multi-EXISTS patterns are compiled as flat WHERE conditions. Implement CTE extraction for complex multi-locale/multi-filter patterns.
+
+---
+
 ## Deferred
 
 - [ ] Migration generation (diff-based ALTER statements)

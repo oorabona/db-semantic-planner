@@ -26,7 +26,7 @@ describe('PlanCompiler', () => {
 			const result = compilePlan(plan);
 
 			expect(normalizeSQL(result.sql)).toContain('select');
-			expect(normalizeSQL(result.sql)).toContain('from users');
+			expect(normalizeSQL(result.sql)).toContain('from "users"');
 		});
 
 		it('compiles SELECT with columns', () => {
@@ -495,7 +495,7 @@ describe('PlanCompiler', () => {
 			const result = compilePlan(plan);
 			const normalized = normalizeSQL(result.sql);
 
-			expect(normalized).toContain('public.users');
+			expect(normalized).toContain('"public"."users"');
 		});
 	});
 

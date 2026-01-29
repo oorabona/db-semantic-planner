@@ -86,11 +86,11 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 				.dump();
 
 			// SQL should contain the correct schema
-			expect(acmeDump.sql).toContain('"acme"');
-			expect(acmeDump.sql).not.toContain('"globex"');
+			expect(acmeDump.sql).toContain('acme');
+			expect(acmeDump.sql).not.toContain('globex');
 
-			expect(globexDump.sql).toContain('"globex"');
-			expect(globexDump.sql).not.toContain('"acme"');
+			expect(globexDump.sql).toContain('globex');
+			expect(globexDump.sql).not.toContain('acme');
 		});
 
 		it('should include tenant in dump meta', async () => {
@@ -198,8 +198,8 @@ describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
 			const globexDump = buildQuery('globex').dump();
 
 			// SQL structure should be identical except for schema name
-			const normalizedAcme = acmeDump.sql.replace(/"acme"/g, '"SCHEMA"');
-			const normalizedGlobex = globexDump.sql.replace(/"globex"/g, '"SCHEMA"');
+			const normalizedAcme = acmeDump.sql.replace(/\bacme\b/g, 'SCHEMA');
+			const normalizedGlobex = globexDump.sql.replace(/\bglobex\b/g, 'SCHEMA');
 
 			expect(normalizedAcme).toBe(normalizedGlobex);
 		});
