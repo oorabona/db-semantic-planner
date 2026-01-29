@@ -1,0 +1,213 @@
+/**
+ * @dbsp/adapter-pgsql
+ *
+ * Native PostgreSQL adapter using tree-to-tree transformation:
+ * PlanReport → PostgreSQL AST → SQL (via pgsql-deparser)
+ */
+
+// AST Comparison
+export {
+	assertRoundtrip,
+	type CompareResult,
+	compareAST,
+	compareSQLByAST,
+	normalizeSQL,
+	roundtripTest,
+} from './ast-compare.js';
+// AST Helpers
+export {
+	andExpr,
+	// Expressions
+	binaryExpr,
+	booleanConstNode,
+	coalesce,
+	// Column/table refs
+	columnRef,
+	columnRefStar,
+	columnTarget,
+	countDistinct,
+	countStar,
+	type DeleteOptions,
+	deleteStmt,
+	eqExpr,
+	floatNode,
+	// Functions
+	funcCall,
+	gtExpr,
+	gteExpr,
+	type InsertOptions,
+	ilikeExpr,
+	innerJoin,
+	insertStmt,
+	integerNode,
+	// Joins
+	joinExpr,
+	leftJoin,
+	likeExpr,
+	ltExpr,
+	lteExpr,
+	neExpr,
+	notExpr,
+	nullConstNode,
+	orExpr,
+	rangeVar,
+	resTarget,
+	// Types
+	type SelectOptions,
+	// Statements
+	selectStmt,
+	// Sort
+	sortBy,
+	starTarget,
+	// Basic nodes
+	stringNode,
+	// Type casts
+	typeCast,
+	type UpdateOptions,
+	updateStmt,
+} from './ast-helpers.js';
+// Comparison Adapter
+export {
+	type ComparisonAdapterConfig,
+	type ComparisonMetrics,
+	type ComparisonMode,
+	type ComparisonResult,
+	compareParams,
+	compareSql,
+	createMetricsCollector,
+	deparseWithValidation,
+	formatComparisonResult,
+	generateMetricsSummary,
+	generateSqlDiff,
+	getComparisonMode,
+	isComparisonEnabled,
+	isStrictMode,
+	logMismatch,
+	resetMetrics,
+	type SqlDiff,
+	updateMetrics,
+	validateSqlSyntax,
+} from './comparison-adapter.js';
+// Compiler
+export {
+	type CompiledResult,
+	type CompilerOptions,
+	compilePlan,
+	PlanCompiler,
+	type PlanDecision,
+	type SimplifiedPlanReport,
+} from './compiler.js';
+// EXPLAIN support
+export {
+	buildExplain,
+	buildExplainAnalyzeJson,
+	buildExplainPlan,
+	buildExplainVerbose,
+	type ExplainFormat,
+	type ExplainOptions,
+	type ExplainPlan,
+	getRowEstimates,
+	getTotalExecutionTime,
+	parseExplainJson,
+} from './explain/index.js';
+// Handler Registry
+export {
+	ALL_OPERATORS,
+	COLLECTION_OPERATORS,
+	// Operator constants
+	COMPARISON_OPERATORS,
+	// Types
+	type CompilerContext,
+	type CompilerState,
+	clearHandlers,
+	// State factory
+	createCompilerState,
+	// Dispatcher
+	createWhereDispatcher,
+	type Decision,
+	type ExpressionHandler,
+	getExpressionHandler,
+	getIncludeHandler,
+	getRegisteredOperators,
+	// Debugging
+	getRegistryStats,
+	// Lookup
+	getWhereHandler,
+	hasExpressionHandler,
+	hasIncludeHandler,
+	hasWhereHandler,
+	type IncludeHandler,
+	type IncludeResult,
+	LOGICAL_OPERATORS,
+	NULL_OPERATORS,
+	PATTERN_OPERATORS,
+	registerExpressionHandler,
+	registerIncludeHandler,
+	// Registration
+	registerWhereHandler,
+	type WhereDispatcher,
+	type WhereHandler,
+} from './handlers/index.js';
+// Mutations
+export {
+	buildOnConflictClause,
+	type ConflictAction,
+	type ConflictTarget,
+	compileDelete,
+	compileInsert,
+	compileMutation,
+	compileUpdate,
+	compileUpsert,
+	conditionalUpdate,
+	type DeleteConfig,
+	excludedRef,
+	type InsertConfig,
+	type UpdateConfig,
+	type UpsertConfig,
+} from './mutations/index.js';
+// Naming plugins
+export {
+	CamelCaseNamingPlugin,
+	camelCaseNaming,
+	getNamingPlugin,
+	IdentityNamingPlugin,
+	identityNaming,
+	type NamingPlugin,
+} from './naming-plugin.js';
+// ParamRef validation
+export {
+	collectAndValidateParamRefs,
+	createAnyExpr,
+	createEqualityExpr,
+	createParamRef,
+	createTypeCastParamRef,
+	type ParamRefValidationResult,
+	validateParamRef,
+} from './param-ref.js';
+// Streaming (cursor-based)
+export {
+	buildCloseCursor,
+	buildDeclareCursor,
+	buildFetch,
+	buildFetchAll,
+	buildFetchFirst,
+	buildFetchForward,
+	buildFetchNext,
+	buildStreamingStatements,
+	type CursorHoldOption,
+	type CursorOptions,
+	type CursorScrollOption,
+	type FetchDirection,
+	type FetchOptions,
+	generateCursorName,
+	type StreamConfig,
+} from './streaming/index.js';
+// Validation
+export {
+	InvalidIdentifierError,
+	isReservedKeyword,
+	sanitizeForDisplay,
+	validateIdentifier,
+	validateIdentifiers,
+	validateQualifiedIdentifier,
+} from './validate.js';

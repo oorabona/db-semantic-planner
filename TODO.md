@@ -36,6 +36,8 @@
 | NQL Divergences: scoped [N] + COUNT(DISTINCT) (NQL-DIVERGE) | nql | ✅ Complete |
 | Chained Pseudo-Columns + PlanOptions + Docs (NQL-CHAIN) | core, nql, adapter | ✅ Complete |
 | FLAT-BUG-001 Fix + CTE WITH RECURSIVE (FLAT-FIX+CTE) | adapter-kysely | ✅ Complete (2026-01-27) |
+| PostgreSQL Native Adapter Spike (ADAPTER-PGSQL-SPIKE) | adapter-pgsql | ✅ Complete (2026-01-29) |
+| PostgreSQL Native Adapter Phase 1 (ADAPTER-PGSQL-FULL-FORWARD) | adapter-pgsql | ✅ Complete (2026-01-29) |
 
 ## Scope-Specific Backlogs
 
@@ -49,6 +51,7 @@
 | `docs/specs/ARCH-006-simplified-orm-entry-point.md` | core, adapter-kysely | Simplified createOrm + getSchemaFromDb |
 | `docs/specs/DX-040-type-safe-query-api.md` | core, dx | Type-Safe Query API (Native + NQL dual approach) |
 | `docs/specs/NQL-DIVERGENCES.md` | nql | NQL spec divergences and deferred features |
+| `docs/plans/ADAPTER-PGSQL-SPIKE.md` | adapter-pgsql | PostgreSQL native adapter spike specification |
 
 ## 🐛 BUG: Double JOIN on flat include with relation.* select (FLAT-BUG-001)
 
@@ -1280,40 +1283,48 @@ if (capabilities.recursivePathStyle === 'array') {
 ### ADAPTER-PGSQL-001: Native PostgreSQL Adapter
 
 **Priority:** MEDIUM | **Effort:** L (~20h) | **Breaking:** No
-**Depends on:** CORE-004 (Dialect Capabilities), DX-032 (Conformance Test Framework)
+**Spec:** [ADAPTER-PGSQL-SPIKE](docs/plans/ADAPTER-PGSQL-SPIKE.md) | **Status:** 🟡 Spec drafted
 
-Adapter natif PostgreSQL sans dépendance ORM - utilise `pg` directement.
+Adapter natif PostgreSQL — Plan → PG AST → SQL via `@pgsql/deparser` (forward) + `pg_catalog` → ModelIR (backward).
 
-- [ ] Créer `packages/adapter-pgsql/`
-- [ ] Importer `getDialectCapabilities('postgresql')` depuis core
-- [ ] Implémenter `SqlBuilder` (sérialiseur SQL)
-  - [ ] Utiliser `capabilities.identifierQuote` pour quoting
-  - [ ] Utiliser `capabilities.parameterStyle` pour placeholders
-  - [ ] Clause serialization (SELECT, JOIN, WHERE, etc.)
-- [ ] Implémenter `PgsqlAdapter` avec interface Adapter
-  - [ ] compile methods (utiliser capabilities pour SQL generation)
-  - [ ] execute methods (via `pg` driver)
-  - [ ] transaction support
-  - [ ] streaming support (`pg-cursor`)
-- [ ] Intégrer avec Conformance Test Framework (DX-032)
-- [ ] Tests E2E contre PostgreSQL réel
-- [ ] Documentation
+#### Phase 1: Spike — Forward Path (Plan → PG AST → SQL) — 12h
+- [ ] Block 1: ParamRef validation (BLOCKING gate)
+- [ ] Block 2: AST helpers + core compiler (`compilePgAst()`)
+- [ ] Block 3: Deparse + golden SQL tests (`deparseToSql()`)
+- [ ] Block 4: Roundtrip comparison vs adapter-kysely + `CompilingAdapter`
+- [ ] Block 5: Integration, build, documentation
 
-**Architecture:**
+#### Phase 2: Full Forward (all compile methods)
+- [ ] INSERT / UPDATE / DELETE / UPSERT compilation
+- [ ] Window functions, LATERAL JOIN
+- [ ] Full CompilingAdapter conformance
+
+#### Phase 3: Backward (introspection)
+- [ ] pg_catalog queries → ModelIR
+- [ ] Full IntrospectingAdapter implementation
+
+#### Phase 4: Execution + Sunset
+- [ ] pg driver integration (execute, stream, transact)
+- [ ] Migrate all tests from adapter-kysely
+- [ ] Deprecate adapter-kysely for PostgreSQL
+
+**Architecture (revised):**
 ```
 packages/adapter-pgsql/
   src/
-    sql-builder.ts      # Sérialiseur SQL (utilise DialectCapabilities)
-    pgsql-adapter.ts    # Adapter avec pg driver
+    pg-ast-helpers.ts      # Typed AST node constructors (security layer)
+    pg-compiler.ts         # compilePgAst(): PlanReport → PG AST (tree-to-tree)
+    pg-deparse.ts          # deparseToSql(): PG AST → CompiledQuery via @pgsql/deparser
+    pg-compiling-adapter.ts # CompilingAdapter implementation
     index.ts
-  package.json          # deps: pg, @types/pg, @dbsp/core
+  package.json             # deps: @pgsql/deparser, @dbsp/core
 ```
 
 **Valeur:**
-- Prouve que l'architecture est vraiment ORM-agnostic
-- Valide que CORE-004 (DialectCapabilities) fonctionne hors Kysely
-- Option minimale pour users qui ne veulent pas d'ORM
-- Reference implementation pour futurs adapters natifs (MySQL, SQLite)
+- Tree-to-tree transformation (Plan → PG AST → SQL) — no builder API duplication
+- Full introspection via pg_catalog (PK, FK, indexes, constraints)
+- Battle-tested serializer (@pgsql/deparser: 23,000+ statement tests)
+- SQL injection impossible by construction (typed AST, ParamRef for all values)
 
 ---
 

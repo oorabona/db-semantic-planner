@@ -1,0 +1,283 @@
+/**
+ * Identifier Validation for adapter-pgsql
+ *
+ * Security layer to prevent SQL injection via identifiers.
+ * All table names, column names, schema names, and aliases MUST pass validation.
+ */
+
+// ============================================================================
+// SQL Reserved Keywords (PostgreSQL)
+// ============================================================================
+
+/**
+ * PostgreSQL reserved keywords that cannot be used as unquoted identifiers.
+ * This is a subset of the most common ones - full list is much larger.
+ * We allow these but they must be quoted.
+ */
+const SQL_RESERVED_KEYWORDS = new Set([
+	'all',
+	'analyse',
+	'analyze',
+	'and',
+	'any',
+	'array',
+	'as',
+	'asc',
+	'asymmetric',
+	'authorization',
+	'binary',
+	'both',
+	'case',
+	'cast',
+	'check',
+	'collate',
+	'collation',
+	'column',
+	'concurrently',
+	'constraint',
+	'create',
+	'cross',
+	'current_catalog',
+	'current_date',
+	'current_role',
+	'current_schema',
+	'current_time',
+	'current_timestamp',
+	'current_user',
+	'default',
+	'deferrable',
+	'desc',
+	'distinct',
+	'do',
+	'else',
+	'end',
+	'except',
+	'false',
+	'fetch',
+	'for',
+	'foreign',
+	'freeze',
+	'from',
+	'full',
+	'grant',
+	'group',
+	'having',
+	'ilike',
+	'in',
+	'initially',
+	'inner',
+	'intersect',
+	'into',
+	'is',
+	'isnull',
+	'join',
+	'lateral',
+	'leading',
+	'left',
+	'like',
+	'limit',
+	'localtime',
+	'localtimestamp',
+	'natural',
+	'not',
+	'notnull',
+	'null',
+	'offset',
+	'on',
+	'only',
+	'or',
+	'order',
+	'outer',
+	'overlaps',
+	'placing',
+	'primary',
+	'references',
+	'returning',
+	'right',
+	'select',
+	'session_user',
+	'similar',
+	'some',
+	'symmetric',
+	'table',
+	'tablesample',
+	'then',
+	'to',
+	'trailing',
+	'true',
+	'union',
+	'unique',
+	'user',
+	'using',
+	'variadic',
+	'verbose',
+	'when',
+	'where',
+	'window',
+	'with',
+]);
+
+// ============================================================================
+// Error Types
+// ============================================================================
+
+/**
+ * Error thrown when an identifier fails validation.
+ */
+export class InvalidIdentifierError extends Error {
+	constructor(
+		public readonly identifier: string,
+		public readonly identifierType: string,
+		public readonly reason: string,
+	) {
+		super(`Invalid ${identifierType} identifier "${identifier}": ${reason}`);
+		this.name = 'InvalidIdentifierError';
+	}
+}
+
+// ============================================================================
+// Validation Functions
+// ============================================================================
+
+/**
+ * Validate that a string is a safe SQL identifier.
+ *
+ * Rules:
+ * 1. Must not be empty
+ * 2. Must not exceed 63 characters (PostgreSQL limit)
+ * 3. Must start with letter or underscore
+ * 4. Must contain only alphanumeric, underscore, or dollar sign
+ * 5. Must not contain null bytes or control characters
+ * 6. Reserved keywords are allowed (will be quoted)
+ *
+ * @param value The identifier to validate
+ * @param type Type of identifier (for error messages): 'table', 'column', 'schema', 'alias'
+ * @throws InvalidIdentifierError if validation fails
+ */
+export function validateIdentifier(
+	value: string,
+	type: 'table' | 'column' | 'schema' | 'alias',
+): void {
+	// Rule 1: Not empty
+	if (!value || value.length === 0) {
+		throw new InvalidIdentifierError(value, type, 'cannot be empty');
+	}
+
+	// Rule 2: Length limit
+	if (value.length > 63) {
+		throw new InvalidIdentifierError(
+			value,
+			type,
+			`exceeds maximum length of 63 characters (got ${value.length})`,
+		);
+	}
+
+	// Rule 3 & 4: Character validation
+	// PostgreSQL identifiers: start with letter/underscore, contain letter/digit/underscore/$
+	const validIdentifierPattern = /^[a-zA-Z_][a-zA-Z0-9_$]*$/;
+	if (!validIdentifierPattern.test(value)) {
+		// Check for specific issues
+		if (/[\x00-\x1f\x7f]/.test(value)) {
+			throw new InvalidIdentifierError(
+				value,
+				type,
+				'contains control characters',
+			);
+		}
+		if (/^[0-9]/.test(value)) {
+			throw new InvalidIdentifierError(
+				value,
+				type,
+				'cannot start with a digit',
+			);
+		}
+		if (/[^\w$]/.test(value)) {
+			throw new InvalidIdentifierError(
+				value,
+				type,
+				'contains invalid characters (only letters, digits, underscore, and $ allowed)',
+			);
+		}
+		throw new InvalidIdentifierError(
+			value,
+			type,
+			'does not match valid identifier pattern',
+		);
+	}
+
+	// Rule 5: No null bytes (extra safety)
+	if (value.includes('\0')) {
+		throw new InvalidIdentifierError(value, type, 'contains null byte');
+	}
+
+	// Note: Reserved keywords are allowed - they will be quoted by the AST helpers
+}
+
+/**
+ * Check if an identifier is a SQL reserved keyword.
+ */
+export function isReservedKeyword(value: string): boolean {
+	return SQL_RESERVED_KEYWORDS.has(value.toLowerCase());
+}
+
+/**
+ * Validate a schema-qualified identifier (schema.table).
+ *
+ * @param schemaTable String in format "schema.table" or just "table"
+ * @returns Object with validated schema and table names
+ * @throws InvalidIdentifierError if validation fails
+ */
+export function validateQualifiedIdentifier(schemaTable: string): {
+	schema?: string;
+	table: string;
+} {
+	const parts = schemaTable.split('.');
+
+	if (parts.length === 1) {
+		validateIdentifier(parts[0]!, 'table');
+		return { table: parts[0]! };
+	}
+
+	if (parts.length === 2) {
+		const schema = parts[0]!;
+		const table = parts[1]!;
+		validateIdentifier(schema, 'schema');
+		validateIdentifier(table, 'table');
+		return { schema, table };
+	}
+
+	throw new InvalidIdentifierError(
+		schemaTable,
+		'table',
+		'too many dots in qualified name (expected schema.table or table)',
+	);
+}
+
+/**
+ * Batch validate multiple identifiers.
+ *
+ * @param identifiers Map of identifier values to their types
+ * @throws InvalidIdentifierError on first validation failure
+ */
+export function validateIdentifiers(
+	identifiers: Record<string, 'table' | 'column' | 'schema' | 'alias'>,
+): void {
+	for (const [value, type] of Object.entries(identifiers)) {
+		if (value) {
+			validateIdentifier(value, type);
+		}
+	}
+}
+
+// ============================================================================
+// Sanitization (for display/logging only - NOT for SQL)
+// ============================================================================
+
+/**
+ * Sanitize an identifier for safe logging/display.
+ * NOT for use in SQL - use validateIdentifier + AST helpers for that.
+ */
+export function sanitizeForDisplay(value: string): string {
+	// Replace control characters with placeholders
+	return value.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 100); // Truncate for display
+}

@@ -4,7 +4,7 @@ doc-meta:
   scope: project
   type: reference
   created: 2026-01-06
-  updated: 2026-01-26
+  updated: 2026-01-29
 ---
 
 # Documentation Index
@@ -21,6 +21,7 @@ doc-meta:
 packages/types          → Shared types (@dbsp/types, @dbsp/types/internal)
 packages/core           → Schema DSL, DX layer, Planner (DB-agnostic, MUST NOT import adapter)
 packages/adapter-kysely → SQL Compiler, Kysely Engine (depends on core)
+packages/adapter-pgsql  → PostgreSQL Native Adapter (Plan → PG AST → SQL via pgsql-deparser)
 packages/nql            → Natural Query Language parser (@dbsp/nql)
 packages/cli            → dbsp CLI (generate, verify, repl commands)
 packages/mcp-server     → MCP Server for AI assistants (depends on core + adapter)
@@ -49,6 +50,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | types | `packages/types` | [ARCH-004](specs/TYPE-RATIONALIZATION-SPEC.md) | — | ✅ Complete |
 | core | `packages/core` | [Overview](plans/core-OVERVIEW.md) | [TODO](../TODO_CORE.md) | ✅ Complete |
 | adapter | `packages/adapter-kysely` | [Overview](plans/adapter-OVERVIEW.md) | [TODO](../TODO_ADAPTER.md) | ✅ Complete |
+| adapter-pgsql | `packages/adapter-pgsql` | [Architecture](../packages/adapter-pgsql/ARCHITECTURE.md) | [Full Forward Spec](plans/ADAPTER-PGSQL-FULL-FORWARD.md) | ✅ Complete |
 | cli | `packages/cli` | [CLI Usage](CLI_USAGE.md) | [TODO](../TODO_CLI.md) | ✅ Complete |
 | mcp-server | `packages/mcp-server` | [Brief](briefs/mcp-server.md) | [TODO](../TODO_MCP.md) | 🟡 Ready |
 | nql | `packages/nql` | [Spec](plans/NQL-SPEC-2026-01.md) | [TODO](../TODO_NQL.md) | ✅ Complete |
@@ -98,6 +100,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | **ARCH-005** | [**Unified Schema API**](specs/ARCH-005-unified-schema-api.md) | core, cli, adapter | ✅ canonical |
 | **ARCH-006** | [**Simplified ORM Entry Point**](specs/ARCH-006-simplified-orm-entry-point.md) | core, adapter-kysely | ✅ canonical |
 | **DX-040** | [**Type-Safe Query API**](specs/DX-040-type-safe-query-api.md) | core, dx | 📋 draft |
+| **ADAPTER-PGSQL** | [**Native PG Adapter Spike (Forward)**](plans/ADAPTER-PGSQL-SPIKE.md) | adapter-pgsql | ✅ complete |
 
 ## Golden Query Tests - ✅ Complete
 

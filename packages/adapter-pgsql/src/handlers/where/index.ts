@@ -1,0 +1,103 @@
+/**
+ * WHERE Handlers Registration
+ *
+ * Exports all WHERE handlers and provides a function to register them all.
+ */
+
+import { registerWhereHandler } from '../index.js';
+
+// Handler imports - simple
+import { comparisonHandler } from './comparison.js';
+// Handler imports - complex (exists, subquery, relation)
+import { everyHandler, existsHandler, notExistsHandler } from './exists.js';
+import { inHandler } from './in.js';
+import { likeHandler } from './like.js';
+import { andHandler, notHandler, orHandler } from './logical.js';
+import { nullHandler } from './null.js';
+import {
+	hasNoRelationHandler,
+	hasRelationHandler,
+	relationFilterHandler,
+} from './relation-filter.js';
+import {
+	inSubqueryHandler,
+	notInSubqueryHandler,
+	scalarSubqueryHandler,
+} from './subquery.js';
+
+// Re-export individual handlers
+export { comparisonHandler } from './comparison.js';
+export { everyHandler, existsHandler, notExistsHandler } from './exists.js';
+export { inHandler } from './in.js';
+export { likeHandler } from './like.js';
+export { andHandler, notHandler, orHandler } from './logical.js';
+export { nullHandler } from './null.js';
+export {
+	hasNoRelationHandler,
+	hasRelationHandler,
+	relationFilterHandler,
+} from './relation-filter.js';
+export {
+	inSubqueryHandler,
+	notInSubqueryHandler,
+	scalarSubqueryHandler,
+} from './subquery.js';
+
+/**
+ * All simple WHERE handlers
+ */
+export const simpleWhereHandlers = [
+	comparisonHandler,
+	likeHandler,
+	nullHandler,
+	inHandler,
+	andHandler,
+	orHandler,
+	notHandler,
+];
+
+/**
+ * Complex WHERE handlers (relation filtering, subqueries)
+ */
+export const complexWhereHandlers = [
+	// EXISTS-based
+	existsHandler,
+	notExistsHandler,
+	everyHandler,
+	// Subquery-based
+	scalarSubqueryHandler,
+	inSubqueryHandler,
+	notInSubqueryHandler,
+	// Relation filters
+	relationFilterHandler,
+	hasRelationHandler,
+	hasNoRelationHandler,
+];
+
+/**
+ * All WHERE handlers
+ */
+export const allWhereHandlers = [
+	...simpleWhereHandlers,
+	...complexWhereHandlers,
+];
+
+/**
+ * Register all simple WHERE handlers.
+ * Should be called once at module initialization.
+ */
+export function registerSimpleWhereHandlers(): void {
+	for (const handler of simpleWhereHandlers) {
+		registerWhereHandler(handler);
+	}
+}
+
+/**
+ * Register all WHERE handlers (simple + complex).
+ * Should be called once at module initialization.
+ */
+export function registerAllWhereHandlers(): void {
+	for (const handler of allWhereHandlers) {
+		registerWhereHandler(handler);
+	}
+}

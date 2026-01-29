@@ -93,6 +93,20 @@
 					}
 				}
 			}
+		},
+		{
+			"includes": ["packages/adapter-pgsql/**/*.ts"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noExplicitAny": "off",
+						"noControlCharactersInRegex": "off"
+					},
+					"style": {
+						"noNonNullAssertion": "off"
+					}
+				}
+			}
 		}
 	]
 }

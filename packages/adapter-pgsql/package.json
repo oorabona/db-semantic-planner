@@ -1,0 +1,35 @@
+{
+	"name": "@dbsp/adapter-pgsql",
+	"version": "0.0.1",
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsup",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@dbsp/core": "workspace:*",
+		"@dbsp/types": "workspace:",
+		"@pgsql/types": "17.6.2",
+		"pgsql-deparser": "17.17.2"
+	},
+	"devDependencies": {
+		"@types/node": "catalog:",
+		"pgsql-parser": "17.9.11",
+		"typescript": "catalog:",
+		"tsup": "catalog:",
+		"vitest": "catalog:"
+	}
+}
