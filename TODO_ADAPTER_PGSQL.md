@@ -72,6 +72,7 @@
 - [ ] **JOIN compilation for filter-strategy**: The pgsql compiler compiles all filter-strategy decisions as EXISTS subqueries, even when the planner chooses `join`. Implement JOIN-based filter compilation for `belongsTo` (to-one) relations.
 - [ ] **LEFT JOIN compilation for include-strategy**: The pgsql compiler always uses json_agg subqueries for includes. Implement LEFT JOIN when `includeStrategy: 'join'` is specified on a relation.
 - [ ] **CTE/WITH clause generation**: Multi-EXISTS patterns are compiled as flat WHERE conditions. Implement CTE extraction for complex multi-locale/multi-filter patterns.
+- [ ] **Split extractExistsDecisions**: Method does 3 things (filter decisions, find intents, resolve FK). Extract into smaller focused functions for readability.
 
 ---
 
