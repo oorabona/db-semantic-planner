@@ -38,6 +38,7 @@ import {
 	sortBy,
 	starTarget,
 	updateStmt,
+	windowFuncCall,
 } from './ast-helpers.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
@@ -56,6 +57,7 @@ export interface PlanDecision {
 	readonly table?: string;
 	readonly column?: string;
 	readonly alias?: string;
+	readonly field?: string;
 	readonly operator?: string;
 	readonly value?: unknown;
 	readonly paramIndex?: number;
@@ -73,6 +75,9 @@ export interface PlanDecision {
 	readonly set?: readonly { column: string; value: unknown }[];
 	readonly limit?: number | { paramIndex: number };
 	readonly offset?: number | { paramIndex: number };
+	// Window function properties
+	readonly partitionBy?: readonly string[];
+	readonly orderBy?: readonly { field: string; direction?: 'asc' | 'desc' }[];
 }
 
 /**
@@ -230,6 +235,19 @@ export class PlanCompiler {
 								...(decision.alias ? { name: decision.alias } : {}),
 							},
 						});
+					} else if (decision.function === 'coalesce' && decision.args) {
+						// COALESCE: args is array of column names
+						const coalesceArgs = (decision.args as string[]).map((col) =>
+							columnRef(col, decision.table, undefined, this.naming),
+						);
+						targetList.push({
+							ResTarget: {
+								val: funcCall('coalesce', coalesceArgs),
+								...(decision.alias
+									? { name: this.naming.toDatabase(decision.alias) }
+									: {}),
+							},
+						});
 					} else if (decision.function && decision.column) {
 						targetList.push({
 							ResTarget: {
@@ -246,6 +264,38 @@ export class PlanCompiler {
 						});
 					}
 					break;
+
+				case 'selectWindow': {
+					// Window function: ROW_NUMBER() OVER (PARTITION BY x ORDER BY y) AS alias
+					const windowArgs: Node[] = [];
+					if (decision.field) {
+						windowArgs.push(
+							columnRef(decision.field, decision.table, undefined, this.naming),
+						);
+					}
+					// Build over clause conditionally to satisfy exactOptionalPropertyTypes
+					const overClause: {
+						partitionBy?: readonly string[];
+						orderBy?: readonly { field: string; direction?: 'asc' | 'desc' }[];
+					} = {};
+					if (decision.partitionBy)
+						overClause.partitionBy = decision.partitionBy;
+					if (decision.orderBy) overClause.orderBy = decision.orderBy;
+
+					targetList.push({
+						ResTarget: {
+							val: windowFuncCall(
+								decision.function!,
+								windowArgs,
+								overClause,
+								this.naming,
+								decision.table,
+							),
+							...(decision.alias ? { name: decision.alias } : {}),
+						},
+					});
+					break;
+				}
 
 				case 'where': {
 					const whereExpr = this.compileCondition(decision);

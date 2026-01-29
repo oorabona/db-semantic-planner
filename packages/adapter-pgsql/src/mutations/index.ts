@@ -7,10 +7,12 @@
 export {
 	compileDelete,
 	compileInsert,
+	compileInsertFrom,
 	compileMutation,
 	compileUpdate,
 	type DeleteConfig,
 	type InsertConfig,
+	type InsertFromConfig,
 	type UpdateConfig,
 } from './mutation-compiler.js';
 
