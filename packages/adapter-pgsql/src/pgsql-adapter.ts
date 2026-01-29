@@ -1224,14 +1224,25 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 			// Otherwise, acquire a client and create a transaction
 			const client = await adapter.pool.connect();
+			let committed = false;
 			try {
 				await client.query('BEGIN');
 				yield* adapter.streamWithClient<T>(client, query, chunkSize);
 				await client.query('COMMIT');
+				committed = true;
 			} catch (error) {
 				await client.query('ROLLBACK');
 				throw error;
 			} finally {
+				// On early break, yield* returns without reaching COMMIT.
+				// ROLLBACK the open transaction to avoid leaking it to the pool.
+				if (!committed) {
+					try {
+						await client.query('ROLLBACK');
+					} catch (_) {
+						// Ignore rollback errors during cleanup
+					}
+				}
 				client.release();
 			}
 		}
