@@ -110,6 +110,8 @@ export class PlanCompiler {
 	private readonly schema: string | undefined;
 	private parameters: unknown[] = [];
 	private paramIndex = 0;
+	/** Track root table for EXISTS FK correlation */
+	private currentRootTable = '';
 
 	constructor(options: CompilerOptions = {}) {
 		this.naming = options.naming ?? identityNaming;
@@ -122,6 +124,7 @@ export class PlanCompiler {
 	compile(plan: SimplifiedPlanReport): CompiledResult {
 		this.parameters = [];
 		this.paramIndex = 0;
+		this.currentRootTable = plan.rootTable;
 
 		// Determine query type from decisions
 		const queryType = this.detectQueryType(plan.decisions);
@@ -514,6 +517,25 @@ export class PlanCompiler {
 	// Helpers
 	// --------------------------------------------------------------------------
 
+	/**
+	 * Derive FK column name from source table using convention.
+	 * Convention: FK = {singularSourceTable}Id
+	 * Examples: authors → authorId, posts → postId, categories → categoryId
+	 */
+	private deriveFK(sourceTable: string): string {
+		// Simple singularization: remove trailing 's'
+		// Handles: authors → author, posts → post, comments → comment
+		let singular = sourceTable;
+		if (singular.endsWith('ies')) {
+			// categories → category
+			singular = `${singular.slice(0, -3)}y`;
+		} else if (singular.endsWith('s') && !singular.endsWith('ss')) {
+			// authors → author (but not 'address' → 'addres')
+			singular = singular.slice(0, -1);
+		}
+		return `${singular}Id`;
+	}
+
 	private compileCondition(decision: PlanDecision): Node {
 		const column = columnRef(
 			decision.column ?? 'id',
@@ -568,9 +590,161 @@ export class PlanCompiler {
 						nulltesttype: 'IS_NOT_NULL',
 					},
 				};
+			case 'exists':
+			case 'notExists':
+				return this.compileExistsCondition(decision);
+			case 'in':
+				return this.compileInCondition(decision, column, false);
+			case 'notIn':
+				return this.compileInCondition(decision, column, true);
+			case 'between':
+				return this.compileBetweenCondition(decision, column);
 			default:
 				return eqExpr(column, value);
 		}
+	}
+
+	/**
+	 * Compile an EXISTS or NOT EXISTS subquery condition.
+	 * EXISTS (SELECT 1 FROM targetTable WHERE fk = source.pk [AND conditions])
+	 *
+	 * FK correlation is generated using convention: target.{singularSource}Id = source.id
+	 * Example: EXISTS (SELECT 1 FROM posts WHERE posts.author_id = authors.id)
+	 */
+	private compileExistsCondition(decision: PlanDecision): Node {
+		const targetTable = decision.targetTable;
+		if (!targetTable) {
+			throw new Error('EXISTS condition requires targetTable');
+		}
+
+		const sourceTable = this.currentRootTable;
+
+		// Build SELECT 1 FROM targetTable (no alias - conditions reference table name directly)
+		const targetList: Node[] = [
+			{ ResTarget: { val: { A_Const: { ival: { ival: 1 } } } } },
+		];
+
+		const fromClause: Node[] = [
+			rangeVar(targetTable, undefined, this.schema, this.naming),
+		];
+
+		// Build FK correlation condition
+		// Convention: FK column in target is {singularSourceTable}Id pointing to source.id
+		const fkColumn = this.deriveFK(sourceTable);
+		const fkCorrelation = eqExpr(
+			columnRef(fkColumn, targetTable, undefined, this.naming),
+			columnRef('id', sourceTable, undefined, this.naming),
+		);
+
+		// Build WHERE clause: FK correlation AND user conditions
+		let whereClause: Node = fkCorrelation;
+
+		if (decision.conditions && decision.conditions.length > 0) {
+			const condNodes = decision.conditions.map((c) =>
+				this.compileCondition(c as PlanDecision),
+			);
+			// Combine FK correlation with user conditions using AND
+			whereClause = andExpr(fkCorrelation, ...condNodes);
+		}
+
+		const subSelect: Node = {
+			SelectStmt: {
+				targetList,
+				fromClause,
+				...(whereClause && { whereClause }),
+			},
+		};
+
+		const subLink: Node = {
+			SubLink: {
+				subLinkType: 'EXISTS_SUBLINK',
+				subselect: subSelect,
+			},
+		};
+
+		// For NOT EXISTS, wrap with NOT
+		if (decision.operator === 'notExists') {
+			return {
+				BoolExpr: {
+					boolop: 'NOT_EXPR',
+					args: [subLink],
+				},
+			};
+		}
+
+		return subLink;
+	}
+
+	/**
+	 * Compile an IN or NOT IN condition.
+	 * Uses PostgreSQL idioms: col = ANY($N) for IN, col <> ALL($N) for NOT IN
+	 */
+	private compileInCondition(
+		decision: PlanDecision,
+		column: Node,
+		negate: boolean,
+	): Node {
+		const values = decision.value as unknown[];
+		if (!Array.isArray(values)) {
+			throw new Error('IN condition requires array value');
+		}
+
+		// Handle empty arrays
+		if (values.length === 0) {
+			// Empty IN is always false, empty NOT IN is always true
+			return booleanConstNode(!negate);
+		}
+
+		const paramIdx = ++this.paramIndex;
+		this.parameters.push(values);
+
+		// Use = ANY($N) for IN, <> ALL($N) for NOT IN
+		const funcName = negate ? 'all' : 'any';
+		const op = negate ? '<>' : '=';
+
+		const funcCall: Node = {
+			FuncCall: {
+				funcname: [{ String: { sval: funcName } }],
+				args: [createParamRef(paramIdx)],
+			},
+		};
+
+		return {
+			A_Expr: {
+				kind: 'AEXPR_OP',
+				name: [{ String: { sval: op } }],
+				lexpr: column,
+				rexpr: funcCall,
+			},
+		};
+	}
+
+	/**
+	 * Compile a BETWEEN condition.
+	 * column BETWEEN $1 AND $2
+	 */
+	private compileBetweenCondition(decision: PlanDecision, column: Node): Node {
+		const range = decision.value as [unknown, unknown];
+		if (!Array.isArray(range) || range.length !== 2) {
+			throw new Error('BETWEEN condition requires [min, max] array');
+		}
+
+		const minIdx = ++this.paramIndex;
+		this.parameters.push(range[0]);
+		const minNode = createParamRef(minIdx);
+
+		const maxIdx = ++this.paramIndex;
+		this.parameters.push(range[1]);
+		const maxNode = createParamRef(maxIdx);
+
+		return {
+			A_Expr: {
+				kind: 'AEXPR_BETWEEN',
+				name: [{ String: { sval: 'BETWEEN' } }],
+				lexpr: column,
+				rexpr: { List: { items: [minNode, maxNode] } },
+			},
+		};
 	}
 
 	private compileValue(value: unknown): Node {
@@ -584,22 +758,8 @@ export class PlanCompiler {
 			return createParamRef(paramValue.paramIndex);
 		}
 
-		if (typeof value === 'string') {
-			return { A_Const: { sval: { sval: value } } };
-		}
-
-		if (typeof value === 'number') {
-			if (Number.isInteger(value)) {
-				return { A_Const: { ival: { ival: value } } };
-			}
-			return { A_Const: { fval: { fval: String(value) } } };
-		}
-
-		if (typeof value === 'boolean') {
-			return booleanConstNode(value);
-		}
-
-		// For complex values, use a parameter
+		// Use parameters for all scalar values for consistency with Kysely
+		// and security best practices (prevents SQL injection)
 		const idx = ++this.paramIndex;
 		this.parameters.push(value);
 		return createParamRef(idx);
