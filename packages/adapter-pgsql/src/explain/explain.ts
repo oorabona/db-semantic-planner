@@ -241,6 +241,8 @@ export function getRowEstimates(plans: ExplainPlan[]): {
 	if (plans.length === 0) return { estimated: 0, actual: 0 };
 
 	const rootPlan = plans[0]?.Plan;
+	if (!rootPlan) return { estimated: 0, actual: 0 };
+
 	return {
 		estimated: rootPlan['Plan Rows'] ?? 0,
 		actual: rootPlan['Actual Rows'] ?? 0,

@@ -23,10 +23,12 @@
 		"@dbsp/core": "workspace:*",
 		"@dbsp/types": "workspace:",
 		"@pgsql/types": "17.6.2",
+		"pg": "catalog:",
 		"pgsql-deparser": "17.17.2"
 	},
 	"devDependencies": {
 		"@types/node": "catalog:",
+		"@types/pg": "catalog:",
 		"pgsql-parser": "17.9.11",
 		"typescript": "catalog:",
 		"tsup": "catalog:",

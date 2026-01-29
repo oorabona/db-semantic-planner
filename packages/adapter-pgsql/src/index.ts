@@ -184,6 +184,12 @@ export {
 	type ParamRefValidationResult,
 	validateParamRef,
 } from './param-ref.js';
+// Adapter
+export {
+	createPgsqlAdapter,
+	PgsqlAdapter,
+	type PgsqlAdapterOptions,
+} from './pgsql-adapter.js';
 // Streaming (cursor-based)
 export {
 	buildCloseCursor,

@@ -20,12 +20,13 @@
 
 ---
 
-## Phase 2: Parity Validation 🟡 NEXT
+## Phase 2: Parity Validation 🟡 IN PROGRESS
 
 **Goal:** Ensure adapter-pgsql produces identical SQL to adapter-kysely
+**Spec:** docs/plans/ADAPTER-PGSQL-PHASE2-PARITY.md
 
-- [ ] Wire PgsqlAdapter to core's Adapter interface
-- [ ] Enable DBSP_COMPARISON_MODE=compare in E2E tests
+- [x] ✅ Wire PgsqlAdapter to core's Adapter interface (2026-01-29)
+- [x] ✅ Enable DBSP_COMPARISON_MODE=compare in E2E tests (2026-01-29)
 - [ ] Run full E2E suite with comparison mode
 - [ ] Fix any SQL mismatches found
 - [ ] Enable DBSP_COMPARISON_MODE=strict (fail on mismatch)
