@@ -324,7 +324,17 @@ export function typeCast(arg: Node, typeName: string, isArray = false): Node {
 // ============================================================================
 
 /**
- * Create a FuncCall node
+ * Create a FuncCall node for database functions.
+ *
+ * Note: SQL keywords like COALESCE, NULLIF, CASE, GREATEST, LEAST have their
+ * own dedicated AST nodes (CoalesceExpr, NullIfExpr, CaseExpr, MinMaxExpr).
+ * Use FuncCall for:
+ * - Aggregate functions (count, sum, avg, etc.)
+ * - User-defined functions
+ * - Extension functions (PostGIS, pgcrypto, etc.)
+ *
+ * The pgsql-deparser will quote function names to preserve case.
+ * This is correct behavior for user-defined and extension functions.
  */
 export function funcCall(
 	name: string | string[],
@@ -361,6 +371,14 @@ export function funcCall(
 	}
 
 	return { FuncCall: fc };
+}
+
+/**
+ * Create a COALESCE expression node.
+ * COALESCE is a SQL keyword (not a function), so it uses CoalesceExpr instead of FuncCall.
+ */
+export function coalesceExpr(args: Node[]): Node {
+	return { CoalesceExpr: { args } };
 }
 
 /**
@@ -747,6 +765,8 @@ export function windowFuncCall(
 	}
 
 	// Build the FuncCall with over property
+	// Window functions like row_number, rank, etc. are actual database functions
+	// and will work correctly even when quoted by the deparser
 	const funcCallObj: Record<string, unknown> = {
 		funcname: [stringNode(funcName)],
 		over: windowDef,
