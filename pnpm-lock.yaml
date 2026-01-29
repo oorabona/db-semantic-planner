@@ -83,6 +83,9 @@ importers:
       '@dbsp/adapter-kysely':
         specifier: workspace:*
         version: link:packages/adapter-kysely
+      '@dbsp/adapter-pgsql':
+        specifier: workspace:*
+        version: link:packages/adapter-pgsql
       '@dbsp/core':
         specifier: workspace:*
         version: link:packages/core
@@ -162,6 +165,9 @@ importers:
       '@pgsql/types':
         specifier: 17.6.2
         version: 17.6.2
+      pg:
+        specifier: 'catalog:'
+        version: 8.16.3
       pgsql-deparser:
         specifier: 17.17.2
         version: 17.17.2
@@ -169,6 +175,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 22.19.3
+      '@types/pg':
+        specifier: 'catalog:'
+        version: 8.16.0
       pgsql-parser:
         specifier: 17.9.11
         version: 17.9.11

@@ -102,16 +102,18 @@ export const identityNaming = new IdentityNamingPlugin();
 export const camelCaseNaming = new CamelCaseNamingPlugin();
 
 /**
- * Get a naming plugin by convention name
+ * Get a naming plugin by convention name.
+ * Accepts NamingConvention from @dbsp/core: 'camelCase' | 'snake_case' | 'preserve'
  */
 export function getNamingPlugin(
-	convention: 'identity' | 'camelCase',
+	convention: 'camelCase' | 'snake_case' | 'preserve',
 ): NamingPlugin {
 	switch (convention) {
-		case 'identity':
-			return identityNaming;
 		case 'camelCase':
 			return camelCaseNaming;
+		case 'preserve':
+		case 'snake_case':
+			return identityNaming;
 		default:
 			return identityNaming;
 	}
