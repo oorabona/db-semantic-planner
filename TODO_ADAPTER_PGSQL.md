@@ -40,6 +40,20 @@
 
 **Goal:** Replace adapter-kysely with adapter-pgsql
 
+### Block 1: E2E Parity ✅ Complete (2026-01-29)
+
+- [x] ✅ Wire PgsqlAdapter as default in E2E testkit (2026-01-29)
+- [x] ✅ Fix intent-to-decisions converter for E2E integration (2026-01-29)
+- [x] ✅ Fix nested AND/OR/NOT condition compilation (2026-01-29)
+- [x] ✅ Fix COALESCE using proper CoalesceExpr AST node (2026-01-29)
+- [x] ✅ Fix EXISTS/NOT EXISTS compilation with FK resolution from model (2026-01-29)
+- [x] ✅ Fix json_agg relationName priority (includeAlias ?? relation) (2026-01-29)
+- [x] ✅ Fix range type enrichment with model-based dataType (2026-01-29)
+- [x] ✅ Fix scalar type casting for @> point containment (2026-01-29)
+- [x] ✅ Achieve 291/291 E2E test parity (87 → 0 failures) (2026-01-29)
+
+### Block 2-4: Migration (pending)
+
 - [ ] Update all imports to use @dbsp/adapter-pgsql
 - [ ] Update createOrm() to use PgsqlAdapter by default
 - [ ] Update documentation and examples

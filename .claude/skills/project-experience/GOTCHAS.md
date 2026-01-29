@@ -1506,3 +1506,63 @@ default: v.optional(v.union([v.string(), v.number(), v.boolean()]));
 **Prevention:** When designing new APIs, search codebase for existing exports with same name. Consider semantic clarity - `outerRef` is clearer than `ref` for its purpose anyway.
 
 **Location:** `packages/core/src/dx/subquery-builder.ts` → `outerRef()` (formerly `ref()`)
+
+---
+
+## adapter-pgsql: Planner always sets choice='exists' for both EXISTS and NOT EXISTS (2026-01-29)
+
+**Symptoms:** NOT EXISTS queries generate EXISTS instead of NOT EXISTS in SQL output.
+**Cause:** The planner's filter-strategy decision always sets choice to 'exists' regardless of whether the intent is exists or notExists. The differentiation is only in the intent's kind field.
+**Solution:** Use the matching intent's kind field to determine the operator, not the planner decision's choice field. Check matchingIntent.kind === 'notExists' instead of d.choice === 'notExists'.
+**Prevention:** When bridging planner decisions to compiler decisions, always verify which field carries the actual semantic distinction. Don't assume the choice field captures all nuances.
+**Location:** packages/adapter-pgsql/src/pgsql-adapter.ts — extractExistsDecisions method
+
+---
+
+## adapter-pgsql: deriveFK convention fails for aliased inverse relations (2026-01-29)
+
+**Symptoms:** EXISTS subquery uses wrong FK column — e.g. bundle_components.product_id instead of bundle_components.bundle_id for the 'components' inverse relation.
+**Cause:** The deriveFK method singularizes the source table name to derive the FK column (products → productId). This convention fails when the relation uses an aliased FK like bundleId with inverse 'components'.
+**Solution:** Resolve the FK from the model's RelationIR by looking up the relation via model.getRelation(sourceTable.relationName). Pass the model to extractExistsDecisions and include foreignKey in the decision.
+**Prevention:** Never rely solely on naming conventions for FK resolution. Always prefer explicit FK metadata from the model when available, falling back to convention only as last resort.
+**Location:** packages/adapter-pgsql/src/pgsql-adapter.ts — extractExistsDecisions, packages/adapter-pgsql/src/compiler.ts — compileExistsCondition
+
+---
+
+## adapter-pgsql: Double parameter push for range operators (2026-01-29)
+
+**Symptoms:** PostgreSQL error "could not determine data type of parameter $1" for range queries. The SQL has two parameters ($1 and $2) where only $2 has a type cast.
+**Cause:** The generic value compilation in compileCondition pushes the raw JS object as $1, then compileRangeOperator pushes the formatted range string as $2 with the correct type cast. PostgreSQL cannot infer the type of the uncast $1.
+**Solution:** Add an early return for range operators (contains, containedBy, overlaps) in compileCondition BEFORE the generic value compilation code runs. This prevents the double-push.
+**Prevention:** When adding specialized operator compilation, ensure the generic compilation path is bypassed. Consider using a registry pattern where each operator type has exclusive ownership of its parameter handling.
+**Location:** packages/adapter-pgsql/src/compiler.ts — compileCondition (early return before line 682)
+
+---
+
+## adapter-pgsql: model.getTable() expects logical names, not database names (2026-01-29)
+
+**Symptoms:** Range type enrichment fails silently — getTable returns undefined because it receives snake_case names (booking_period) instead of camelCase (bookingPeriod).
+**Cause:** The NamingPlugin.toDatabase() converts camelCase to snake_case, but model.getTable() indexes tables and columns by their logical (camelCase) names. Calling toDatabase() before getTable() double-converts the name.
+**Solution:** Use the logical table name directly from the plan (plan.rootTable is already in camelCase). Don't pass through NamingPlugin.toDatabase() when looking up model metadata.
+**Prevention:** Model lookups always use logical names. Database naming conversion should only happen at the final SQL generation step (in AST node builders like rangeVar and columnRef).
+**Location:** packages/adapter-pgsql/src/pgsql-adapter.ts — range enrichment in compile()
+
+---
+
+## adapter-pgsql: pgsql-deparser does not quote lowercase identifiers (2026-01-29)
+
+**Symptoms:** Test assertions expecting quoted identifiers like "users" or "public"."users" fail because the deparser outputs users or public.users.
+**Cause:** The pgsql-deparser follows PostgreSQL convention: only quote identifiers that contain uppercase letters, spaces, reserved words, or special characters. Lowercase-only identifiers are valid without quotes.
+**Solution:** Update test assertions to accept both quoted and unquoted forms using regex patterns like /from\s+"?users"?/ instead of exact string matches.
+**Prevention:** When writing SQL assertion tests for the pgsql adapter, use regex or normalize both expected and actual to the same quoting convention. Never assume identifiers will be quoted.
+**Location:** packages/adapter-pgsql/src/__tests__/compiler.test.ts
+
+---
+
+## adapter-pgsql: Range enrichment code can be lost between editing sessions (2026-01-29)
+
+**Symptoms:** Range queries fail after a session where other code was edited in the same area. The dataType enrichment loop is silently absent from the compile() method.
+**Cause:** During multi-session editing with sed/regex replacements, code blocks can be accidentally removed when surrounding code is modified. The enrichment loop has no compile-time check — its absence produces runtime errors only for range queries.
+**Solution:** After any editing session touching compile() or nearby code, verify the range enrichment block is present by searching for "dataType" or "endsWith('range')" in the adapter.
+**Prevention:** Consider extracting the enrichment into a named method (enrichRangeDecisions) that is explicitly called and whose absence would be noticed. Add a unit test that specifically validates range decisions have dataType set.
+**Location:** packages/adapter-pgsql/src/pgsql-adapter.ts — compile() method, range enrichment block
