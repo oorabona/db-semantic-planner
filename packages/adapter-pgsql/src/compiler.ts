@@ -31,6 +31,7 @@ import {
 	ltExpr,
 	lteExpr,
 	neExpr,
+	notExpr,
 	nullConstNode,
 	orExpr,
 	rangeVar,
@@ -587,6 +588,32 @@ export class PlanCompiler {
 	}
 
 	private compileCondition(decision: PlanDecision): Node {
+		// Handle nested compound conditions recursively
+		if (decision.type === 'whereAnd' && decision.conditions) {
+			const andConditions = decision.conditions.map((c) =>
+				this.compileCondition(c as PlanDecision),
+			);
+			return andConditions.length === 1
+				? andConditions[0]!
+				: andExpr(...andConditions);
+		}
+
+		if (decision.type === 'whereOr' && decision.conditions) {
+			const orConditions = decision.conditions.map((c) =>
+				this.compileCondition(c as PlanDecision),
+			);
+			return orConditions.length === 1
+				? orConditions[0]!
+				: orExpr(...orConditions);
+		}
+
+		if (decision.type === 'whereNot' && decision.conditions) {
+			const nested = this.compileCondition(
+				decision.conditions[0] as PlanDecision,
+			);
+			return notExpr(nested);
+		}
+
 		const column = columnRef(
 			decision.column ?? 'id',
 			decision.table,
