@@ -20,7 +20,35 @@
 
 ---
 
-## Phase 2: Introspection 🟡 NEXT
+## Phase 2: Parity Validation 🟡 NEXT
+
+**Goal:** Ensure adapter-pgsql produces identical SQL to adapter-kysely
+
+- [ ] Wire PgsqlAdapter to core's Adapter interface
+- [ ] Enable DBSP_COMPARISON_MODE=compare in E2E tests
+- [ ] Run full E2E suite with comparison mode
+- [ ] Fix any SQL mismatches found
+- [ ] Enable DBSP_COMPARISON_MODE=strict (fail on mismatch)
+- [ ] Document any intentional divergences
+- [ ] DDL generation (CREATE TABLE, ALTER, DROP)
+
+---
+
+## Phase 3: Migration & Sunset
+
+**Goal:** Replace adapter-kysely with adapter-pgsql
+
+- [ ] Update all imports to use @dbsp/adapter-pgsql
+- [ ] Update createOrm() to use PgsqlAdapter by default
+- [ ] Update documentation and examples
+- [ ] Deprecation notice in adapter-kysely
+- [ ] Remove adapter-kysely package
+- [ ] Delete ComparisonAdapter (no longer needed)
+- [ ] Delete DBSP_COMPARISON_MODE handling
+
+---
+
+## Phase 4: Introspection (Post-Sunset)
 
 **Goal:** pg_catalog → ModelIR (schema discovery from live DB)
 
@@ -33,32 +61,8 @@
 
 ---
 
-## Phase 3: Parity Validation
+## Deferred
 
-**Goal:** Ensure adapter-pgsql produces identical SQL to adapter-kysely
-
-- [ ] Enable DBSP_COMPARISON_MODE=strict in CI
-- [ ] Run full E2E suite with comparison mode
-- [ ] Document any intentional divergences
-- [ ] Fix any unintentional mismatches
-
----
-
-## Phase 4: Migration & Sunset
-
-**Goal:** Replace adapter-kysely with adapter-pgsql
-
-- [ ] Update all imports to use @dbsp/adapter-pgsql
-- [ ] Update documentation and examples
-- [ ] Deprecation notice in adapter-kysely
-- [ ] Remove adapter-kysely package
-- [ ] Delete ComparisonAdapter (no longer needed)
-- [ ] Delete DBSP_COMPARISON_MODE handling
-
----
-
-## Deferred (Post-Sunset)
-
-- [ ] DDL generation (CREATE TABLE, migrations)
+- [ ] Migration generation (diff-based ALTER statements)
 - [ ] AST object pooling (if perf issue measured)
 - [ ] Async deparse optimization (if perf issue measured)
