@@ -172,7 +172,11 @@ describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
 
 			// Verify SQL structure
 			expect(dump.sql.toLowerCase()).toContain('select');
-			expect(dump.sql).toContain(`"${SCHEMA}"`);
+			// Schema may be quoted or unquoted depending on adapter
+			// Kysely quotes all identifiers, pgsql-deparser only quotes when necessary
+			expect(
+				dump.sql.includes(`"${SCHEMA}"`) || dump.sql.includes(SCHEMA),
+			).toBe(true);
 			expect(dump.params).toContain(true);
 		});
 
