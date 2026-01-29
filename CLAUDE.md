@@ -126,6 +126,19 @@ module.exports = {
 | Testing | Vitest |
 | Build | tsup (ESM + CJS) |
 
+## Stack (for /generate-tests, /generate-docs)
+
+| Category | Value | Notes |
+|----------|-------|-------|
+| test_framework | vitest | |
+| test_pattern | *.test.ts | colocated with source |
+| assertion_style | expect | vitest built-in |
+| mock_style | vi.mock | vitest built-in |
+| doc_style | tsdoc | @param, @returns, @example |
+| package_manager | pnpm | |
+
+**Note:** Si cette section existe, /generate-tests et /generate-docs skip la détection auto.
+
 ## Adapter Rules (CRITICAL)
 
 **NEVER use raw SQL templates in adapter implementations.** Always use the adapter's native expression builders.
