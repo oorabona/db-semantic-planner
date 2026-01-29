@@ -144,6 +144,9 @@ describe.skipIf(shouldSkipE2E())(
 				// Now onStart should have been called
 				expect(onStart).toHaveBeenCalledOnce();
 				expect(value).toBeDefined();
+
+				// Close the iterator to release the connection/cursor
+				await iterator.return?.();
 			});
 
 			it('should pass dump to onStart with correct schema prefix', async () => {
