@@ -198,15 +198,18 @@ describe('PgsqlAdapter', () => {
 			const adapter = createPgsqlAdapter(pool);
 
 			const intent = {
+				type: 'upsert' as const,
 				table: 'users',
 				values: [{ id: 1, name: 'Alice' }],
-				conflictTarget: ['id'],
-			} as any;
+				onConflict: { columns: ['id'] },
+				action: { type: 'doUpdate' as const },
+			};
 
-			// Phase 2 stub - should throw
-			expect(() => adapter.compileUpsert(intent)).toThrow(
-				'Not implemented - Phase 2',
-			);
+			const compiled = adapter.compileUpsert(intent);
+
+			expect(compiled.sql).toContain('INSERT INTO');
+			expect(compiled.sql).toContain('ON CONFLICT');
+			expect(compiled.parameters).toBeDefined();
 		});
 	});
 
@@ -434,51 +437,74 @@ describe('PgsqlAdapter', () => {
 	});
 
 	describe('stubs (not yet implemented)', () => {
-		it('compileSubqueryInclude should throw', () => {
+		it('compileSubqueryInclude generates SELECT with IN clause', () => {
 			const pool = createMockPool();
 			const adapter = createPgsqlAdapter(pool);
 
-			const info = { relationName: 'posts' } as any;
+			const info = {
+				relationName: 'posts',
+				targetTable: 'posts',
+				foreignKey: 'authorId',
+				sourceKey: 'id',
+			} as any;
 			const parentIds = [1, 2, 3];
 
-			expect(() => adapter.compileSubqueryInclude(info, parentIds)).toThrow(
-				'Not implemented - Phase 3',
-			);
+			const compiled = adapter.compileSubqueryInclude(info, parentIds);
+
+			expect(compiled.sql).toContain('SELECT');
+			expect(compiled.sql).toContain('posts');
+			expect(compiled.sql).toContain('IN');
+			expect(compiled.parameters).toEqual([1, 2, 3]);
 		});
 
-		it('compileInsertFrom should throw', () => {
+		it('compileSubqueryInclude returns empty result for no parent IDs', () => {
 			const pool = createMockPool();
 			const adapter = createPgsqlAdapter(pool);
 
-			const intent = { table: 'users' } as any;
+			const info = {
+				relationName: 'posts',
+				targetTable: 'posts',
+				foreignKey: 'authorId',
+				sourceKey: 'id',
+			} as any;
+			const parentIds: unknown[] = [];
 
-			expect(() => adapter.compileInsertFrom(intent)).toThrow(
-				'Not implemented - Phase 2',
-			);
+			const compiled = adapter.compileSubqueryInclude(info, parentIds);
+
+			expect(compiled.sql).toContain('WHERE FALSE');
+			expect(compiled.parameters).toEqual([]);
 		});
 
-		it('compileRecursive should throw', () => {
+		it('compileInsertFrom generates INSERT ... SELECT', () => {
 			const pool = createMockPool();
 			const adapter = createPgsqlAdapter(pool);
 
-			const report = {} as any;
-			const model = {} as any;
+			const intent = {
+				type: 'insert_from' as const,
+				table: 'archivedUsers',
+				source: 'users',
+				columns: ['id', 'name'],
+			};
 
-			expect(() => adapter.compileRecursive(report, model)).toThrow(
-				'Not implemented - Phase 2',
-			);
+			const compiled = adapter.compileInsertFrom(intent);
+
+			expect(compiled.sql).toContain('INSERT INTO');
+			expect(compiled.sql).toContain('SELECT');
 		});
 
-		it('stream should throw', () => {
+		it('stream returns async iterator', () => {
 			const pool = createMockPool();
 			const adapter = createPgsqlAdapter(pool);
 
 			const query = { sql: 'SELECT * FROM users', parameters: [] };
 
-			expect(() => adapter.stream(query)).toThrow('Not implemented - Phase 2');
+			const iterator = adapter.stream(query);
+
+			// Should return an async iterator
+			expect(typeof iterator[Symbol.asyncIterator]).toBe('function');
 		});
 
-		it('introspect should throw', async () => {
+		it('introspect should throw (Phase 4)', async () => {
 			const pool = createMockPool();
 			const adapter = createPgsqlAdapter(pool);
 

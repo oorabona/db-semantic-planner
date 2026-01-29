@@ -539,7 +539,10 @@ export interface InsertOptions {
 	table: string;
 	schema?: string;
 	columns?: string[];
+	/** VALUES rows for INSERT ... VALUES */
 	values?: Node[][];
+	/** SELECT query for INSERT ... SELECT */
+	selectQuery?: Node;
 	returning?: Node[];
 	onConflict?: {
 		target?: string[];
@@ -575,7 +578,10 @@ export function insertStmt(options: InsertOptions): Node {
 		}));
 	}
 
-	if (options.values && options.values.length > 0) {
+	if (options.selectQuery) {
+		// INSERT ... SELECT: use provided query directly
+		stmt.selectStmt = options.selectQuery;
+	} else if (options.values && options.values.length > 0) {
 		// VALUES clause represented as a SelectStmt with valuesLists
 		// Each row is wrapped in a List node
 		stmt.selectStmt = {
@@ -695,4 +701,60 @@ export function deleteStmt(options: DeleteOptions): Node {
 	}
 
 	return { DeleteStmt: stmt };
+}
+
+// ============================================================================
+// Window Functions
+// ============================================================================
+
+/**
+ * Create a window function call with OVER clause.
+ * Example: ROW_NUMBER() OVER (PARTITION BY x ORDER BY y) AS alias
+ */
+export function windowFuncCall(
+	funcName: string,
+	args: Node[],
+	over: {
+		partitionBy?: readonly string[];
+		orderBy?: readonly { field: string; direction?: 'asc' | 'desc' }[];
+	},
+	naming: NamingPlugin,
+	table?: string,
+): Node {
+	// Build partition clause
+	const partitionClause: Node[] = (over.partitionBy ?? []).map((col) =>
+		columnRef(col, table, undefined, naming),
+	);
+
+	// Build order clause using existing sortBy helper
+	const orderClause: Node[] = (over.orderBy ?? []).map((ob) =>
+		sortBy(
+			columnRef(ob.field, table, undefined, naming),
+			ob.direction === 'desc' ? 'DESC' : 'ASC',
+		),
+	);
+
+	// Window definition
+	const windowDef: Record<string, unknown> = {
+		frameOptions: 1034, // RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW (default)
+	};
+
+	if (partitionClause.length > 0) {
+		windowDef.partitionClause = partitionClause;
+	}
+	if (orderClause.length > 0) {
+		windowDef.orderClause = orderClause;
+	}
+
+	// Build the FuncCall with over property
+	const funcCallObj: Record<string, unknown> = {
+		funcname: [stringNode(funcName)],
+		over: windowDef,
+	};
+
+	if (args.length > 0) {
+		funcCallObj.args = args;
+	}
+
+	return { FuncCall: funcCallObj as FuncCall };
 }

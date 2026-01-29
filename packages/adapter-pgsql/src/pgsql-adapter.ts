@@ -846,11 +846,30 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	/**
 	 * Execute a query and return all results.
+	 * Results are transformed to use model naming convention (e.g., snake_case → camelCase)
 	 */
 	async execute<T>(query: CompiledQuery<T>): Promise<T[]> {
 		const executor = this.client ?? this.pool;
 		const result = await executor.query(query.sql, query.parameters as any[]);
-		return result.rows as T[];
+		return this.transformResultRows(result.rows) as T[];
+	}
+
+	/**
+	 * Transform result rows from database naming to model naming convention.
+	 * For CamelCaseNamingPlugin: price_cents → priceCents
+	 */
+	private transformResultRows(
+		rows: Record<string, unknown>[],
+	): Record<string, unknown>[] {
+		return rows.map((row) => {
+			const transformed: Record<string, unknown> = {};
+			for (const [key, value] of Object.entries(row)) {
+				// Use toModel to convert database column name to model column name
+				const modelKey = this.naming.toModel(key);
+				transformed[modelKey] = value;
+			}
+			return transformed;
+		});
 	}
 
 	/**

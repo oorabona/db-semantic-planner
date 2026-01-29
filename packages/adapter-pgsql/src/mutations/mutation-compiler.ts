@@ -74,6 +74,24 @@ export interface DeleteConfig {
 	returning?: string[];
 }
 
+/**
+ * Configuration for INSERT FROM SELECT compilation
+ */
+export interface InsertFromConfig {
+	/** Target table to insert into */
+	targetTable: string;
+	/** Source table to select from */
+	sourceTable: string;
+	/** Columns to insert (same names in target and source) */
+	columns?: string[];
+	/** WHERE conditions for source query */
+	where?: Decision[];
+	/** LIMIT for source query */
+	limit?: number;
+	/** Columns to return (RETURNING clause) */
+	returning?: string[];
+}
+
 // ============================================================================
 // Compilers
 // ============================================================================
@@ -237,6 +255,121 @@ export function compileDelete(
 	if (returningList) options.returning = returningList;
 
 	return deleteStmt(options);
+}
+
+/**
+ * Compile an INSERT FROM SELECT statement from configuration.
+ * INSERT INTO target (cols) SELECT cols FROM source WHERE ... LIMIT ... RETURNING ...
+ */
+export function compileInsertFrom(
+	config: InsertFromConfig,
+	ctx: CompilerContext,
+	state: CompilerState,
+): Node {
+	const naming = ctx.naming;
+	const _dbTargetTable = naming.toDatabase(config.targetTable);
+	const dbSourceTable = naming.toDatabase(config.sourceTable);
+	const sourceAlias = config.sourceTable;
+
+	// Build column list
+	const dbColumns = config.columns?.map((c) => naming.toDatabase(c));
+
+	// Build SELECT target list
+	let targetList: Node[];
+	if (config.columns && config.columns.length > 0) {
+		targetList = config.columns.map((col) =>
+			resTarget(
+				columnRef(col, sourceAlias, ctx.schema, naming),
+				naming.toDatabase(col),
+			),
+		);
+	} else {
+		// SELECT *
+		targetList = [
+			{
+				ResTarget: {
+					val: { ColumnRef: { fields: [{ A_Star: {} }] } },
+				},
+			},
+		];
+	}
+
+	// Build WHERE clause for source query if present
+	let whereClause: Node | undefined;
+	if (config.where && config.where.length > 0) {
+		const dispatch = createWhereDispatcher();
+		const subCtx = { ...ctx, currentAlias: sourceAlias };
+
+		if (config.where.length === 1) {
+			whereClause = dispatch(config.where[0]!, subCtx, state);
+		} else {
+			const conditions = config.where.map((cond) =>
+				dispatch(cond, subCtx, state),
+			);
+			whereClause = {
+				BoolExpr: {
+					boolop: 'AND_EXPR',
+					args: conditions,
+				},
+			};
+		}
+	}
+
+	// Build LIMIT clause if specified
+	let limitCount: Node | undefined;
+	if (config.limit !== undefined) {
+		limitCount = { A_Const: { ival: { ival: config.limit } } };
+	}
+
+	// Build the SELECT query
+	const sourceRelation: {
+		schemaname?: string;
+		relname: string;
+		inh: boolean;
+		relpersistence: string;
+		alias?: { aliasname: string };
+	} = {
+		relname: dbSourceTable,
+		inh: true,
+		relpersistence: 'p',
+	};
+	if (ctx.schema) {
+		sourceRelation.schemaname = naming.toDatabase(ctx.schema);
+	}
+
+	const selectQuery: Node = {
+		SelectStmt: {
+			targetList,
+			fromClause: [{ RangeVar: sourceRelation }],
+			...(whereClause && { whereClause }),
+			...(limitCount && { limitCount }),
+		},
+	};
+
+	// Build RETURNING clause for INSERT if specified
+	let returningList: Node[] | undefined;
+	if (config.returning && config.returning.length > 0) {
+		returningList = config.returning.map((col) =>
+			resTarget(
+				columnRef(col, config.targetTable, ctx.schema, naming),
+				naming.toDatabase(col),
+			),
+		);
+	}
+
+	// Build INSERT statement with SELECT query
+	// Note: dbTargetTable is computed but table in options uses logical name
+	// as insertStmt applies naming internally
+	const options: InsertOptions = {
+		table: config.targetTable,
+		selectQuery,
+		naming,
+	};
+	if (dbColumns) options.columns = dbColumns;
+	if (ctx.schema) options.schema = ctx.schema;
+	if (returningList) options.returning = returningList;
+
+	return insertStmt(options);
 }
 
 // ============================================================================

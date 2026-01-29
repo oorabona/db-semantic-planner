@@ -91,85 +91,133 @@ function convertSelect(
 	select: SelectIntent,
 	rootTable: string,
 ): PlanDecision[] {
-	// Handle different SelectIntent types
+	// Handle different SelectIntent types using discriminator
+	const selectType = 'type' in select ? select.type : undefined;
+
+	// SelectAllIntent: { all: true }
 	if ('all' in select && select.all === true) {
-		// SelectAllIntent
 		return [{ type: 'select', column: '*', table: rootTable }];
 	}
 
-	if ('columns' in select && Array.isArray(select.columns)) {
-		// SelectFieldsIntent - array of column names
-		return select.columns.map((col: string) => ({
+	// SelectFieldsIntent: { type: 'fields', fields: string[] }
+	if (selectType === 'fields' && 'fields' in select) {
+		return (select.fields as readonly string[]).map((field) => ({
 			type: 'select' as const,
-			column: col,
+			column: field,
 			table: rootTable,
 		}));
 	}
 
-	if ('expressions' in select && Array.isArray(select.expressions)) {
-		// SelectWithExpressionsIntent
+	// SelectWithExpressionsIntent: { type: 'expressions', columns: ExpressionIntent[] }
+	if (selectType === 'expressions' && 'columns' in select) {
 		const decisions: PlanDecision[] = [];
+		const columns = select.columns as readonly unknown[];
 
-		for (const expr of select.expressions) {
-			if (expr.kind === 'column') {
-				decisions.push({
+		for (const exprUnknown of columns) {
+			const expr = exprUnknown as Record<string, unknown>;
+			const exprKind = expr.kind as string;
+
+			if (exprKind === 'column') {
+				const decision: PlanDecision = {
 					type: 'select',
-					column: expr.column,
-					alias: expr.as,
+					column: expr.column as string,
 					table: rootTable,
-				});
-			} else if (expr.kind === 'columnAlias') {
-				decisions.push({
+				};
+				if (expr.as) (decision as { alias: string }).alias = expr.as as string;
+				decisions.push(decision);
+			} else if (exprKind === 'columnAlias') {
+				const decision: PlanDecision = {
 					type: 'select',
-					column: expr.column,
-					alias: expr.alias,
+					column: expr.column as string,
 					table: rootTable,
-				});
-			} else if (expr.kind === 'aggregate') {
+				};
+				if (expr.alias)
+					(decision as { alias: string }).alias = expr.alias as string;
+				decisions.push(decision);
+			} else if (exprKind === 'aggregate') {
 				// Aggregate expressions
-				if (expr.function === 'count' && !expr.field) {
-					decisions.push({
+				const aggFunc = expr.function as string;
+				const aggField = expr.field as string | undefined;
+				const aggAs = expr.as as string | undefined;
+				const aggDistinct = expr.distinct as boolean | undefined;
+
+				if (aggFunc === 'count' && !aggField) {
+					const decision: PlanDecision = {
 						type: 'selectFunction',
 						function: 'count',
 						column: '*',
-						alias: expr.as,
 						table: rootTable,
-					});
-				} else if (expr.function === 'count' && expr.distinct && expr.field) {
-					decisions.push({
+					};
+					if (aggAs) (decision as { alias: string }).alias = aggAs;
+					decisions.push(decision);
+				} else if (aggFunc === 'count' && aggDistinct && aggField) {
+					const decision: PlanDecision = {
 						type: 'selectFunction',
 						function: 'countDistinct',
-						column: expr.field,
-						alias: expr.as,
+						column: aggField,
 						table: rootTable,
-					});
+					};
+					if (aggAs) (decision as { alias: string }).alias = aggAs;
+					decisions.push(decision);
 				} else {
-					decisions.push({
+					const decision: PlanDecision = {
 						type: 'selectFunction',
-						function: expr.function,
-						column: expr.field,
-						alias: expr.as,
+						function: aggFunc,
 						table: rootTable,
-					});
+					};
+					if (aggField) (decision as { column: string }).column = aggField;
+					if (aggAs) (decision as { alias: string }).alias = aggAs;
+					decisions.push(decision);
 				}
-			} else if (expr.kind === 'coalesce') {
+			} else if (exprKind === 'coalesce') {
 				// COALESCE expression - use first field as primary
-				decisions.push({
+				const decision: PlanDecision = {
 					type: 'selectFunction',
 					function: 'coalesce',
-					args: expr.fields,
-					alias: expr.as,
+					args: expr.fields as string[],
 					table: rootTable,
-				});
-			} else if (expr.kind === 'raw') {
+				};
+				if (expr.as) (decision as { alias: string }).alias = expr.as as string;
+				decisions.push(decision);
+			} else if (exprKind === 'raw') {
 				// Raw SQL expression
-				decisions.push({
+				const decision: PlanDecision = {
 					type: 'selectFunction',
 					function: 'raw',
-					args: [expr.sql],
-					alias: expr.as,
+					args: [expr.sql as string],
 					table: rootTable,
-				});
+				};
+				if (expr.as) (decision as { alias: string }).alias = expr.as as string;
+				decisions.push(decision);
+			} else if (exprKind === 'window') {
+				// Window function expression
+				const windowFunc = expr.function as string;
+				const windowAlias = expr.alias as string;
+				const windowField = expr.field as string | undefined;
+				const over = expr.over as {
+					partitionBy?: readonly string[];
+					orderBy?: readonly { field: string; direction?: 'asc' | 'desc' }[];
+				};
+
+				const decision: PlanDecision = {
+					type: 'selectWindow',
+					function: windowFunc,
+					alias: windowAlias,
+					table: rootTable,
+				};
+				if (windowField)
+					(decision as unknown as { field: string }).field = windowField;
+				if (over.partitionBy)
+					(
+						decision as unknown as { partitionBy: readonly string[] }
+					).partitionBy = over.partitionBy;
+				if (over.orderBy)
+					(
+						decision as unknown as {
+							orderBy: readonly { field: string; direction?: 'asc' | 'desc' }[];
+						}
+					).orderBy = over.orderBy;
+				decisions.push(decision);
 			}
 		}
 
@@ -266,12 +314,12 @@ function convertWhereCondition(
 				table: rootTable,
 			};
 
-		// NULL: { kind: 'null', field: 'deleted_at', isNull: true }
+		// NULL: { kind: 'null', field: 'deleted_at', operator: 'isNull' | 'isNotNull' }
 		case 'null':
 			return {
 				type: 'where',
 				column: cond.field as string,
-				operator: cond.isNull ? 'isNull' : 'isNotNull',
+				operator: cond.operator as string, // 'isNull' or 'isNotNull'
 				table: rootTable,
 			};
 
