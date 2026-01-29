@@ -97,6 +97,13 @@ export {
 	type PlanDecision,
 	type SimplifiedPlanReport,
 } from './compiler.js';
+// DDL Generation
+export {
+	type GenerateDDLOptions,
+	generateDDL,
+	mapColumnType,
+	mapOnDeleteAction,
+} from './ddl/index.js';
 // EXPLAIN support
 export {
 	buildExplain,
