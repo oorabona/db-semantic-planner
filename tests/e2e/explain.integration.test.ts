@@ -9,18 +9,18 @@
  */
 
 import { createOrm } from '@dbsp/core';
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createPimdamSchema,
 	dropPimdamSchema,
 	getTestAdapter,
-	getTestDb,
+	getTestPool,
 	pimdamModel,
 	seedAcmeTenant,
 	shouldSkipE2E,
 } from './testkit/index.js';
+import { sql } from './testkit/sql.js';
 
 describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 	beforeAll(async () => {
@@ -38,19 +38,19 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 	 * Helper to run EXPLAIN on a SQL string (no parameters)
 	 */
 	const runExplain = async (sqlStr: string): Promise<string> => {
-		const db = await getTestDb();
+		const pool = await getTestPool();
 		const explainSql = `EXPLAIN (FORMAT JSON) ${sqlStr}`;
 
 		const result = await sql
 			.raw<{ 'QUERY PLAN': object[] }>(explainSql)
-			.execute(db);
+			.execute(pool);
 
 		return JSON.stringify(result.rows[0]['QUERY PLAN'], null, 2);
 	};
 
 	describe('Basic queries (no parameters)', () => {
 		it('should produce valid EXPLAIN output for simple select', async () => {
-			const _db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -75,7 +75,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 		});
 
 		it('should produce valid EXPLAIN for categories query', async () => {
-			const _db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -93,7 +93,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 		});
 
 		it('should produce valid EXPLAIN for assets query', async () => {
-			const _db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -113,7 +113,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 	describe('SQL structure validation', () => {
 		it('should generate SELECT with correct schema prefix', async () => {
-			const _db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -130,7 +130,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 		});
 
 		it('should generate valid SQL for all entity types', async () => {
-			const _db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -155,7 +155,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 		});
 
 		it('should include parameters array even when empty', async () => {
-			const _db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -171,7 +171,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 	describe('Plan characteristics', () => {
 		it('should use Seq Scan on small tables', async () => {
-			const _db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -188,7 +188,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 		});
 
 		it('should estimate reasonable row counts', async () => {
-			const _db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -207,7 +207,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 		});
 
 		it('should show correct relation name in plan', async () => {
-			const _db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -226,7 +226,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 
 	describe('Dump metadata', () => {
 		it('should include tenant in meta', async () => {
-			const _db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -236,7 +236,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 		});
 
 		it('should include compiledAt timestamp', async () => {
-			const _db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
@@ -246,7 +246,7 @@ describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
 		});
 
 		it('should have plan with decisions', async () => {
-			const _db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamModel, adapter });
 

@@ -17,18 +17,18 @@
  */
 
 import { createOrm, eq, exists } from '@dbsp/core';
-import { sql as kyselySql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
 	dropExtendedPimdamSchema,
 	getTestAdapter,
-	getTestDb,
+	getTestPool,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
 	shouldSkipE2E,
 } from './testkit/index.js';
+import { sql as kyselySql } from './testkit/sql.js';
 
 const SCHEMA = 'q7_bom_bundles';
 
@@ -52,7 +52,7 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 
 	describe('Q7-01: Calculate bundle total price from components', () => {
 		it('should calculate total from component variants', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Starter Kit total = 2*999 + 1*499 = 2497
 			const result = await kyselySql`
@@ -66,7 +66,7 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 				JOIN ${kyselySql.ref(SCHEMA)}.variants v ON v.product_id = c.id
 				WHERE b.is_bundle = true AND b.sku = 'BUNDLE-001'
 				GROUP BY b.id, b.sku, b.title
-			`.execute(db);
+			`.execute(pool);
 
 			const bundle = (
 				result.rows as { bundleSku: string; totalPriceCents: string }[]
@@ -78,7 +78,7 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 		});
 
 		it('should list bundle components with quantities', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			const result = await kyselySql`
 				SELECT
@@ -89,7 +89,7 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 				JOIN ${kyselySql.ref(SCHEMA)}.products c ON c.id = bc.component_id
 				WHERE bc.bundle_id = 7
 				ORDER BY bc.position
-			`.execute(db);
+			`.execute(pool);
 
 			const components = result.rows as {
 				componentSku: string;
@@ -106,7 +106,7 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 
 	describe('Q7-02: Check bundle component availability', () => {
 		it('should find bundles with all components in stock', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Find bundles where ALL components have stock > 0
 			const result = await kyselySql`
@@ -122,7 +122,7 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 					WHERE bc.bundle_id = b.id
 					  AND v.stock = 0
 				  )
-			`.execute(db);
+			`.execute(pool);
 
 			const availableBundles = result.rows as { sku: string }[];
 			// Starter Kit has components: Charger (stock 100) and Case (stock 50)
@@ -130,7 +130,7 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 		});
 
 		it('should flag bundles with out-of-stock components', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Find components with stock = 0 for each bundle
 			const result = await kyselySql`
@@ -145,7 +145,7 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 				JOIN ${kyselySql.ref(SCHEMA)}.variants v ON v.product_id = c.id
 				WHERE b.is_bundle = true
 				ORDER BY b.sku, c.sku
-			`.execute(db);
+			`.execute(pool);
 
 			const components = result.rows as {
 				bundle_sku: string;
@@ -159,7 +159,7 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 
 	describe('Q7-03: Recursive BOM (multi-level)', () => {
 		it('should support nested bundles via recursive CTE', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// This demonstrates the pattern for recursive BOM
 			// Even though our test data has only one level, the query supports multi-level
@@ -197,7 +197,7 @@ describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
 				WHERE is_sub_bundle = false  -- Only leaf products
 				GROUP BY component_sku
 				ORDER BY component_sku
-			`.execute(db);
+			`.execute(pool);
 
 			const flatBom = result.rows as {
 				componentSku: string;

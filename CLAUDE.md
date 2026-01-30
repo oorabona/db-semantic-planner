@@ -34,13 +34,13 @@ Semantic query planning for databases - an intent-first approach that transforms
                                │ implements Adapter
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    packages/adapter-kysely                      │
+│                    packages/adapter-pgsql                       │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │  Compiler   │  │KyselyAdapter│  │  Multi-dialect          │  │
-│  │  (SQL gen)  │  │  (Engine)   │  │  (capabilities)         │  │
+│  │  Compiler   │  │ PgsqlAdapter│  │  PostgreSQL-native       │  │
+│  │  (SQL gen)  │  │  (Engine)   │  │  (pg Pool)              │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
 │                                                                 │
-│  PostgreSQL-first • Multi-dialect via capabilities              │
+│  PostgreSQL-native • No ORM dependency • Direct pg Pool         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -48,12 +48,12 @@ Semantic query planning for databases - an intent-first approach that transforms
 
 ```typescript
 import { createOrm, eq } from '@dbsp/core';
-import { createKyselyAdapter } from '@dbsp/adapter-kysely';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 
 // Create ORM with adapter injection
 const orm = createOrm({
   model: schema,
-  adapter: createKyselyAdapter(kyselyDb)
+  adapter: createPgsqlAdapter(pgPool)
 });
 
 // Query with type-safe API
@@ -64,8 +64,8 @@ const users = await orm.select('users').where(eq('active', true)).all();
 
 | Package | May Import | Must NOT Import |
 |---------|------------|-----------------|
-| `packages/core` | Nothing | `adapter-kysely` |
-| `packages/adapter-kysely` | `core` | - |
+| `packages/core` | Nothing | `adapter-pgsql` |
+| `packages/adapter-pgsql` | `core` | - |
 
 ### Enforcing Architecture (Recommended)
 
@@ -80,7 +80,7 @@ const users = await orm.select('users').where(eq('active', true)).all();
   }
 }
 
-// packages/adapter-kysely/tsconfig.json
+// packages/adapter-pgsql/tsconfig.json
 {
   "references": [{ "path": "../core" }],
   "compilerOptions": {
@@ -113,7 +113,7 @@ module.exports = {
 | Scope | Package | Description | Status |
 |-------|---------|-------------|--------|
 | `core` | `packages/core` | Schema, Query AST, Planner, DX layer, Adapter interface | ✅ Complete |
-| `adapter` | `packages/adapter-kysely` | SQL compiler, KyselyAdapter, multi-dialect | ✅ Complete |
+| `adapter` | `packages/adapter-pgsql` | SQL compiler, PgsqlAdapter, PostgreSQL-native | ✅ Complete |
 
 ## Tech Stack
 
@@ -122,7 +122,7 @@ module.exports = {
 | Language | TypeScript (strict mode) |
 | Runtime | Node.js (ESM preferred) |
 | Primary DB | PostgreSQL |
-| Adapter | Kysely (peer dependency) |
+| Adapter | pg (PostgreSQL native) |
 | Testing | Vitest |
 | Build | tsup (ESM + CJS) |
 
@@ -143,31 +143,27 @@ module.exports = {
 
 **NEVER use raw SQL templates in adapter implementations.** Always use the adapter's native expression builders.
 
-### Kysely Adapter (`packages/adapter-kysely`)
+### PostgreSQL Adapter (`packages/adapter-pgsql`)
 
-| Need | ❌ DON'T | ✅ DO |
-|------|---------|-------|
-| SQL function | `` sql`COALESCE(${...})` `` | `eb.fn('coalesce', [...])` |
-| Column reference | `` sql.ref('table.col') `` | `eb.ref('table.col')` |
-| Literal value | `` sql`1` `` | `eb.lit(1)` or `eb.val(value)` |
-| Join references | `` sql.join([...]) `` | Use Kysely's native `.select()` callback |
+The adapter compiles `PlanReport` into parameterized SQL strings using an internal AST-to-SQL compiler. No ORM dependency — queries execute directly against a `pg.Pool`.
 
-### Exception: User Escape Hatch
+| Principle | Detail |
+|-----------|--------|
+| Parameterized queries | All user values use `$N` positional parameters |
+| Identifier quoting | All table/column/schema names double-quoted |
+| No raw SQL in compiler | The compiler builds SQL strings from the plan AST |
 
-The **only** allowed use of `sql` template is for `RawExpressionIntent` — the explicit user escape hatch for arbitrary SQL that cannot be expressed via the planner's intent system:
+### Compile-Only Mode
+
+For CLI/tooling that needs SQL compilation without a database connection:
 
 ```typescript
-// This is OK - it's the user's explicit escape hatch
-case 'raw':
-  return query.select(sql`${sql.raw(expr.sql)}`.as(expr.as));
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const adapter = createPgsqlCompileOnlyAdapter();
+const compiled = adapter.compile(planReport, { model, schemaName });
+// compiled.sql, compiled.parameters — no Pool needed
 ```
-
-### Why This Matters
-
-1. **Type safety:** Native APIs provide better TypeScript inference
-2. **Dialect portability:** Kysely adapts `eb.fn('coalesce')` per dialect; raw SQL doesn't
-3. **Security:** Native APIs handle escaping; raw SQL is injection-prone
-4. **Maintainability:** Easier to understand and refactor
 
 ## Schema Scoping API
 
@@ -189,7 +185,7 @@ Every query produces a `Dump`:
 ```typescript
 type Dump = {
   plan: PlanReport;      // Decisions + reasoning + warnings
-  sql: string;           // Compiled SQL (from Kysely .compile())
+  sql: string;           // Compiled SQL
   params: readonly unknown[]; // Bound parameters
   meta?: {
     schema?: string;      // Schema name if schema-scoped
@@ -209,7 +205,7 @@ type Dump = {
 ## Build Order
 
 ```
-packages/core → packages/adapter-kysely
+packages/core → packages/adapter-pgsql
 ```
 
 ## Workflow
@@ -221,7 +217,7 @@ packages/core → packages/adapter-kysely
 ## NFRs
 
 - **Type safety:** Strong TypeScript types throughout
-- **Zero/minimal runtime deps:** Tree-shakeable, Kysely as peer
+- **Zero/minimal runtime deps:** Tree-shakeable, pg as peer
 - **Full test coverage:** Unit + integration + golden tests
 - **Deterministic:** Same inputs → same SQL/plan (stable aliasing)
 - **Observability:** dump() = plan + SQL + params

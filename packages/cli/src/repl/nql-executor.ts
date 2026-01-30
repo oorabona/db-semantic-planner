@@ -7,15 +7,7 @@
  * Part of NQLM (NQL CLI Migration) - Block 2
  */
 
-import {
-	compileDelete,
-	compileInsert,
-	compile as compileToSql,
-	compileUpdate,
-	compileUpsert,
-	createCompileOnlyAdapter,
-	type MockDialect,
-} from '@dbsp/adapter-kysely';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import {
 	type DeleteIntent,
 	extractPseudoColumnKeywords,
@@ -33,7 +25,6 @@ import {
 	type MutationIntent as NqlMutationIntent,
 	type QueryIntent as NqlQueryIntent,
 } from '@dbsp/nql';
-import type { Kysely } from 'kysely';
 
 // Type compatibility: NQL types are structurally compatible with core types
 // Cast functions to bridge the gap
@@ -193,143 +184,11 @@ export interface NqlCompileOnlyResult {
 }
 
 /**
- * Execute NQL query against a database
- *
- * @param nql - NQL query string
- * @param model - ModelIR schema
- * @param db - Kysely database instance
- * @param schemaName - Optional database schema name
- * @returns Execution result with SQL, params, and rows
- *
- * @example
- * ```typescript
- * const result = await executeNql(
- *   'users | where active = true | limit 10',
- *   model,
- *   kyselyDb
- * );
- * console.log(result.sql);    // SELECT * FROM "users" WHERE "active" = $1 LIMIT 10
- * console.log(result.rows);   // [{ id: 1, name: 'Alice', active: true }, ...]
- * ```
- */
-export async function executeNql(
-	nql: string,
-	model: ModelIR,
-	db: Kysely<unknown>,
-	schemaName?: string,
-): Promise<NqlExecutionResult> {
-	// 1. Parse and compile NQL to IntentAST
-	const compiled = compileNqlToIntent(nql, model);
-
-	// 2. Compile IntentAST to Kysely query and execute
-	if (compiled.query) {
-		// SELECT query - cast NQL type to core type
-		const queryIntent = asQueryIntent(compiled.query);
-		// Pass PostgreSQL capabilities so planner can use json_agg strategy
-		const planReport = plan(queryIntent, model, {
-			dialectCapabilities: getDialectCapabilities('postgresql'),
-		});
-		const compiledQuery = compileToSql(planReport, model, db, schemaName);
-
-		const result = await db.executeQuery(compiledQuery);
-
-		return {
-			sql: compiledQuery.sql,
-			params: compiledQuery.parameters as readonly unknown[],
-			rows: result.rows as readonly Record<string, unknown>[],
-			intentType: 'query',
-		};
-	}
-
-	if (compiled.mutation) {
-		const mutation = compiled.mutation;
-
-		if (isNqlInsertIntent(mutation)) {
-			const intent = asInsertIntent(mutation);
-			const compiledQuery = compileInsert(intent, db, schemaName);
-			const result = await db.executeQuery(compiledQuery);
-
-			return {
-				sql: compiledQuery.sql,
-				params: compiledQuery.parameters as readonly unknown[],
-				rows: result.rows as readonly Record<string, unknown>[],
-				affectedRows: Number(result.numAffectedRows ?? result.rows.length),
-				intentType: 'insert',
-			};
-		}
-
-		if (isNqlUpdateIntent(mutation)) {
-			const intent = asUpdateIntent(mutation);
-			const compiledQuery = compileUpdate(intent, db, schemaName);
-			const result = await db.executeQuery(compiledQuery);
-
-			return {
-				sql: compiledQuery.sql,
-				params: compiledQuery.parameters as readonly unknown[],
-				rows: result.rows as readonly Record<string, unknown>[],
-				affectedRows: Number(result.numAffectedRows ?? 0),
-				intentType: 'update',
-			};
-		}
-
-		if (isNqlDeleteIntent(mutation)) {
-			const intent = asDeleteIntent(mutation);
-			const compiledQuery = compileDelete(intent, db, schemaName);
-			const result = await db.executeQuery(compiledQuery);
-
-			return {
-				sql: compiledQuery.sql,
-				params: compiledQuery.parameters as readonly unknown[],
-				rows: result.rows as readonly Record<string, unknown>[],
-				affectedRows: Number(result.numAffectedRows ?? 0),
-				intentType: 'delete',
-			};
-		}
-
-		if (isNqlUpsertIntent(mutation)) {
-			const intent = asUpsertIntent(mutation);
-			const compiledQuery = compileUpsert(intent, db, schemaName);
-			const result = await db.executeQuery(compiledQuery);
-
-			return {
-				sql: compiledQuery.sql,
-				params: compiledQuery.parameters as readonly unknown[],
-				rows: result.rows as readonly Record<string, unknown>[],
-				affectedRows: Number(result.numAffectedRows ?? result.rows.length),
-				intentType: 'upsert',
-			};
-		}
-
-		throw new NqlCompileError(
-			`Unknown mutation type: ${JSON.stringify(mutation)}`,
-		);
-	}
-
-	throw new NqlCompileError('NQL compiled to neither query nor mutation');
-}
-
-/**
- * Dialect type that includes CLI-supported dialects (superset of MockDialect)
- * DuckDB uses PostgreSQL-compatible syntax so we map it internally.
- */
-export type CliDialect = MockDialect | 'duckdb';
-
-/**
  * Options for NQL compilation
  */
 export interface NqlCompileOptions {
-	/** SQL dialect for query compilation (duckdb maps to postgresql) */
-	dialect?: CliDialect;
 	/** Database schema name for schema-scoped queries */
 	schemaName?: string;
-}
-
-/**
- * Map CLI dialect to MockDialect (duckdb → postgresql)
- */
-function toMockDialect(dialect: CliDialect | undefined): MockDialect {
-	if (dialect === 'duckdb') return 'postgresql';
-	return dialect ?? 'postgresql';
 }
 
 /**
@@ -357,9 +216,8 @@ export function compileNqlToSql(
 	model: ModelIR,
 	options?: NqlCompileOptions,
 ): NqlCompileOnlyResult {
-	// Create CompileOnlyAdapter for SQL generation
-	const adapter = createCompileOnlyAdapter({
-		dialect: toMockDialect(options?.dialect),
+	// Create compile-only adapter for SQL generation (no DB connection needed)
+	const adapter = createPgsqlCompileOnlyAdapter({
 		...(options?.schemaName !== undefined && {
 			schemaName: options.schemaName,
 		}),
@@ -371,10 +229,9 @@ export function compileNqlToSql(
 	// 2. Compile IntentAST to SQL using adapter
 	if (compiled.query) {
 		const queryIntent = asQueryIntent(compiled.query);
-		// Pass dialect capabilities so planner can use json_agg strategy
-		const dialectName = toMockDialect(options?.dialect);
+		// Pass PostgreSQL capabilities so planner can use json_agg strategy
 		const planReport = plan(queryIntent, model, {
-			dialectCapabilities: getDialectCapabilities(dialectName),
+			dialectCapabilities: getDialectCapabilities('postgresql'),
 		});
 		const compiledQuery = adapter.compile(planReport, { model });
 

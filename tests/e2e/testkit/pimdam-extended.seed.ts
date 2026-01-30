@@ -12,14 +12,14 @@
  * - Q8: Ambiguous relations (author/reviewer)
  */
 
-import { sql } from 'kysely';
-import { getTestDb } from './db.js';
+import { getTestPool } from './db.js';
+import { sql } from './sql.js';
 
 /**
  * Seed extended PIM/DAM test data for a tenant.
  */
 export async function seedExtendedPimdam(schemaName: string): Promise<void> {
-	const db = await getTestDb();
+	const pool = await getTestPool();
 	const schema = schemaName;
 
 	// =========================================================================
@@ -31,7 +31,7 @@ export async function seedExtendedPimdam(schemaName: string): Promise<void> {
       (1, 'Alice Author', 'alice@example.com', 'author'),
       (2, 'Bob Reviewer', 'bob@example.com', 'reviewer'),
       (3, 'Charlie Admin', 'charlie@example.com', 'admin')
-  `.execute(db);
+  `.execute(pool);
 
 	// =========================================================================
 	// Families (Q1: Completeness)
@@ -42,7 +42,7 @@ export async function seedExtendedPimdam(schemaName: string): Promise<void> {
       (1, 'Smartphones', 'smartphones'),
       (2, 'Accessories', 'accessories'),
       (3, 'Bundles', 'bundles')
-  `.execute(db);
+  `.execute(pool);
 
 	// =========================================================================
 	// Channels (Q1: Completeness)
@@ -53,7 +53,7 @@ export async function seedExtendedPimdam(schemaName: string): Promise<void> {
       (1, 'Web', 'web'),
       (2, 'Print', 'print'),
       (3, 'Mobile', 'mobile')
-  `.execute(db);
+  `.execute(pool);
 
 	// =========================================================================
 	// Family Attributes (Q1: Required attributes per family/channel)
@@ -71,7 +71,7 @@ export async function seedExtendedPimdam(schemaName: string): Promise<void> {
       (1, 2, 'price', true),
       (2, 1, 'name', true),
       (2, 1, 'price', true)
-  `.execute(db);
+  `.execute(pool);
 
 	// =========================================================================
 	// Categories (Q6: Materialized path hierarchy)
@@ -91,7 +91,7 @@ export async function seedExtendedPimdam(schemaName: string): Promise<void> {
       (4, 'Audio', 1, '/1/4/'),
       (5, 'Clothing', NULL, '/5/'),
       (6, 'T-Shirts', 5, '/5/6/')
-  `.execute(db);
+  `.execute(pool);
 
 	// =========================================================================
 	// Assets
@@ -112,7 +112,7 @@ export async function seedExtendedPimdam(schemaName: string): Promise<void> {
       (10, 'image', 'sha256-a10', 'image/jpeg', 400, 400, 21000, 'assets/variant-s-en.jpg', NULL, NOW()),
       (11, 'image', 'sha256-a11', 'image/jpeg', 400, 400, 22000, 'assets/variant-m.jpg', NULL, NOW()),
       (12, 'image', 'sha256-a12', 'image/jpeg', 400, 400, 23000, 'assets/deleted-product.jpg', NULL, NOW())
-  `.execute(db);
+  `.execute(pool);
 
 	// =========================================================================
 	// Products (Q2: Locale fallback + Q8: Ambiguity)
@@ -139,12 +139,12 @@ export async function seedExtendedPimdam(schemaName: string): Promise<void> {
       (9, 'COMPONENT-B', 'Case', 'Étui', 'Case', 'Case', NULL, NULL, 1, 2, true, false, 1, 2),
       -- Q1: Product for completeness test (66% complete)
       (10, 'IPHONE-15', 'iPhone 15', 'iPhone 15', 'iPhone 15', 'iPhone 15', 'Le dernier iPhone', NULL, 3, 1, true, false, 1, 2)
-  `.execute(db);
+  `.execute(pool);
 
 	// Mark product 6 as deleted
 	await sql`
     UPDATE ${sql.ref(schema)}.products SET deleted_at = NOW() WHERE id = 6
-  `.execute(db);
+  `.execute(pool);
 
 	// =========================================================================
 	// Product Images
@@ -169,7 +169,7 @@ export async function seedExtendedPimdam(schemaName: string): Promise<void> {
       (10, 1, 'FR', 'approved', true, 'main', 0),
       (10, 3, 'FR', 'approved', false, 'gallery', 1),
       (10, 4, 'FR', 'approved', false, 'thumbnail', 2)
-  `.execute(db);
+  `.execute(pool);
 
 	// =========================================================================
 	// Variants (Q3)
@@ -182,7 +182,7 @@ export async function seedExtendedPimdam(schemaName: string): Promise<void> {
       (3, 4, 'TSHIRT-001-L', 'Large', 2199, 0),
       (4, 8, 'COMPONENT-A-V1', 'Standard Charger', 999, 100),
       (5, 9, 'COMPONENT-B-V1', 'Standard Case', 499, 50)
-  `.execute(db);
+  `.execute(pool);
 
 	// =========================================================================
 	// Variant Images (Q3)
@@ -194,7 +194,7 @@ export async function seedExtendedPimdam(schemaName: string): Promise<void> {
       (1, 10, 'EN', true, 0),
       (2, 11, 'FR', true, 0),
       (2, 11, 'EN', true, 0)
-  `.execute(db);
+  `.execute(pool);
 
 	// =========================================================================
 	// Product Attributes (Q1: Completeness)
@@ -206,7 +206,7 @@ export async function seedExtendedPimdam(schemaName: string): Promise<void> {
       (10, 'name', 'iPhone 15', 'fr'),
       (10, 'name', 'iPhone 15', 'en'),
       (10, 'description', 'Le dernier iPhone', 'fr')
-  `.execute(db);
+  `.execute(pool);
 
 	// =========================================================================
 	// Bundle Components (Q7: BOM)
@@ -217,7 +217,7 @@ export async function seedExtendedPimdam(schemaName: string): Promise<void> {
     VALUES
       (7, 8, 2, 0),
       (7, 9, 1, 1)
-  `.execute(db);
+  `.execute(pool);
 }
 
 /**
@@ -226,7 +226,7 @@ export async function seedExtendedPimdam(schemaName: string): Promise<void> {
 export async function seedExtendedPimdamTenant2(
 	schemaName: string,
 ): Promise<void> {
-	const db = await getTestDb();
+	const pool = await getTestPool();
 	const schema = schemaName;
 
 	// Minimal data for tenant isolation tests
@@ -234,29 +234,29 @@ export async function seedExtendedPimdamTenant2(
     INSERT INTO ${sql.ref(schema)}.users (id, name, email, role)
     VALUES
       (1, 'Tenant2 User', 'user@tenant2.com', 'member')
-  `.execute(db);
+  `.execute(pool);
 
 	await sql`
     INSERT INTO ${sql.ref(schema)}.families (id, name, code)
     VALUES
       (1, 'Electronics', 'electronics')
-  `.execute(db);
+  `.execute(pool);
 
 	await sql`
     INSERT INTO ${sql.ref(schema)}.channels (id, name, code)
     VALUES
       (1, 'Web', 'web')
-  `.execute(db);
+  `.execute(pool);
 
 	await sql`
     INSERT INTO ${sql.ref(schema)}.categories (id, name, parent_id, path)
     VALUES
       (1, 'All Products', NULL, '/1/')
-  `.execute(db);
+  `.execute(pool);
 
 	await sql`
     INSERT INTO ${sql.ref(schema)}.products (id, sku, title, name_fr, name_en, category_id, family_id, active, author_id)
     VALUES
       (1, 'TENANT2-001', 'Tenant2 Product', 'Produit T2', 'T2 Product', 1, 1, true, 1)
-  `.execute(db);
+  `.execute(pool);
 }

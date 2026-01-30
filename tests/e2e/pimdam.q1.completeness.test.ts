@@ -18,18 +18,18 @@
  */
 
 import { createOrm, eq } from '@dbsp/core';
-import { sql as kyselySql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
 	dropExtendedPimdamSchema,
 	getTestAdapter,
-	getTestDb,
+	getTestPool,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
 	shouldSkipE2E,
 } from './testkit/index.js';
+import { sql as kyselySql } from './testkit/sql.js';
 
 const SCHEMA = 'q1_completeness';
 
@@ -47,7 +47,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 
 	describe('Q1-01: Calculate completeness ratio per product', () => {
 		it('should calculate 66% completeness for iPhone-15 (2/3 attributes)', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Direct SQL query to calculate completeness
 			// This validates the expected data before testing the ORM approach
@@ -68,7 +68,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 						NULLIF((SELECT COUNT(*)::float FROM required_attrs), 0) * 100 AS ratio
 				)
 				SELECT ratio FROM completeness
-			`.execute(db);
+			`.execute(pool);
 
 			const ratio = (result.rows[0] as { ratio: number }).ratio;
 			// 2/3 = 66.67%
@@ -76,7 +76,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 		});
 
 		it('should identify missing attributes for iPhone-15', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Find which attributes are missing
 			const result = await kyselySql`
@@ -93,7 +93,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 				SELECT attribute_name
 				FROM required_attrs
 				WHERE attribute_name NOT IN (SELECT attribute_name FROM filled_attrs)
-			`.execute(db);
+			`.execute(pool);
 
 			const missing = (result.rows as { attributeName: string }[]).map(
 				(r) => r.attributeName,
@@ -106,7 +106,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 
 	describe('Q1-02: Filter products by completeness threshold', () => {
 		it('should filter products with completeness >= 50%', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Products with at least 50% completeness for web channel
 			const result = await kyselySql`
@@ -145,7 +145,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 				FROM product_completeness
 				WHERE completeness >= 50
 				ORDER BY completeness DESC
-			`.execute(db);
+			`.execute(pool);
 
 			const products = result.rows as {
 				id: number;
@@ -159,7 +159,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 		});
 
 		it('should exclude products with completeness < 50%', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Products with less than 50% completeness
 			const result = await kyselySql`
@@ -196,7 +196,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 				SELECT sku, completeness
 				FROM product_completeness
 				WHERE completeness < 50
-			`.execute(db);
+			`.execute(pool);
 
 			// Products without any product_attributes have 0% completeness
 			const lowCompleteness = result.rows as {
@@ -210,7 +210,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 
 	describe('Q1-03: Multi-channel completeness', () => {
 		it('should calculate different completeness per channel', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// iPhone-15: web requires [name, description, price] → 66%
 			// iPhone-15: print requires [name, description, print_resolution, price] → 50% (has name, description)
@@ -242,7 +242,7 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 				FROM ${kyselySql.ref(SCHEMA)}.channels c
 				WHERE c.code IN ('web', 'print')
 				ORDER BY c.code
-			`.execute(db);
+			`.execute(pool);
 
 			const byChannel = result.rows as {
 				channel: string;

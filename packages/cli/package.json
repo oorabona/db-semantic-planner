@@ -35,7 +35,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@dbsp/adapter-kysely": "workspace:*",
+		"@dbsp/adapter-pgsql": "workspace:*",
 		"@dbsp/core": "workspace:*",
 		"@dbsp/nql": "workspace:*",
 		"@inkjs/ui": "catalog:",
@@ -46,15 +46,11 @@
 		"react": "catalog:"
 	},
 	"peerDependencies": {
-		"kysely": "^0.28.0",
 		"pg": "^8.16.0",
 		"tsx": "^4.21.0"
 	},
 	"peerDependenciesMeta": {
 		"tsx": {
-			"optional": true
-		},
-		"kysely": {
 			"optional": true
 		},
 		"pg": {

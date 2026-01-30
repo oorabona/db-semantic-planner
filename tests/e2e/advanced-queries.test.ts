@@ -23,14 +23,14 @@ import {
 	ref,
 	schema,
 } from '@dbsp/core';
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	getTestAdapter,
-	getTestDb,
+	getTestPool,
 	shouldSkipE2E,
 } from './testkit/index.js';
+import { sql } from './testkit/sql.js';
 
 // Schema name for this test suite
 const SCHEMA = 'advanced_e2e';
@@ -68,10 +68,10 @@ const advancedModel = advancedSchema.model;
 
 // Setup functions
 async function createAdvancedSchema(): Promise<void> {
-	const db = await getTestDb();
+	const pool = await getTestPool();
 
 	// Create schema
-	await sql`CREATE SCHEMA IF NOT EXISTS ${sql.ref(SCHEMA)}`.execute(db);
+	await sql`CREATE SCHEMA IF NOT EXISTS ${sql.ref(SCHEMA)}`.execute(pool);
 
 	// Products table with soft delete
 	await sql`
@@ -84,7 +84,7 @@ async function createAdvancedSchema(): Promise<void> {
       created_at TIMESTAMP DEFAULT NOW(),
       deleted_at TIMESTAMP DEFAULT NULL
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Orders table
 	await sql`
@@ -97,7 +97,7 @@ async function createAdvancedSchema(): Promise<void> {
       status TEXT NOT NULL DEFAULT 'pending',
       created_at TIMESTAMP DEFAULT NOW()
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Reviews table
 	await sql`
@@ -109,11 +109,11 @@ async function createAdvancedSchema(): Promise<void> {
       reviewer_name TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
     )
-  `.execute(db);
+  `.execute(pool);
 }
 
 async function seedAdvancedData(): Promise<void> {
-	const db = await getTestDb();
+	const pool = await getTestPool();
 
 	// Products (10 products, 2 soft-deleted)
 	await sql`
@@ -129,7 +129,7 @@ async function seedAdvancedData(): Promise<void> {
       (8, 'Pen Pack', 'office', 5.99, 800, '2024-01-08', NULL),
       (9, 'Old Product', 'electronics', 99.99, 0, '2023-06-01', '2024-01-15'),
       (10, 'Discontinued Item', 'home', 24.99, 0, '2023-07-01', '2024-02-01')
-  `.execute(db);
+  `.execute(pool);
 
 	// Orders (15 orders across products)
 	await sql`
@@ -150,7 +150,7 @@ async function seedAdvancedData(): Promise<void> {
       (13, 8, 10, 59.90, 'Mia', 'completed', '2024-02-13'),
       (14, 1, 1, 1299.99, 'Noah', 'cancelled', '2024-02-14'),
       (15, 5, 50, 499.50, 'Olivia', 'completed', '2024-02-15')
-  `.execute(db);
+  `.execute(pool);
 
 	// Reviews (20 reviews)
 	await sql`
@@ -176,12 +176,12 @@ async function seedAdvancedData(): Promise<void> {
       (18, 3, 3, 'A bit small', 'Rose', '2024-02-19'),
       (19, 4, 4, 'Easy assembly', 'Sam', '2024-02-20'),
       (20, 6, 5, 'Bright and adjustable', 'Tina', '2024-02-21')
-  `.execute(db);
+  `.execute(pool);
 }
 
 async function dropAdvancedSchema(): Promise<void> {
-	const db = await getTestDb();
-	await sql`DROP SCHEMA IF EXISTS ${sql.ref(SCHEMA)} CASCADE`.execute(db);
+	const pool = await getTestPool();
+	await sql`DROP SCHEMA IF EXISTS ${sql.ref(SCHEMA)} CASCADE`.execute(pool);
 }
 
 describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {

@@ -102,7 +102,7 @@ export interface PgsqlAdapterOptions {
  * ```
  */
 export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
-	private readonly pool: Pool;
+	private readonly pool: Pool | undefined;
 	private readonly client: PoolClient | undefined;
 	private readonly schemaName: string | undefined;
 	private readonly _namingConvention: NamingConvention;
@@ -113,18 +113,27 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	/**
 	 * Create a new PgsqlAdapter.
 	 *
-	 * @param pool - pg.Pool instance or PoolClient (for transactions)
+	 * @param pool - pg.Pool instance, PoolClient (transactions), or undefined (compile-only mode)
 	 * @param options - Optional configuration
 	 */
-	constructor(pool: Pool | PoolClient, options?: PgsqlAdapterOptions) {
-		// Detect if this is a PoolClient (transaction context)
-		if ('release' in pool && typeof pool.release === 'function') {
-			this.client = pool as PoolClient;
-			// For clients, we need to get the pool reference
-			// This is a limitation - we'll use the client directly
-			this.pool = pool as unknown as Pool;
+	constructor(
+		pool?: Pool | PoolClient | undefined,
+		options?: PgsqlAdapterOptions,
+	) {
+		if (pool != null) {
+			// Detect if this is a PoolClient (transaction context)
+			if ('release' in pool && typeof pool.release === 'function') {
+				this.client = pool as PoolClient;
+				// For clients, we need to get the pool reference
+				// This is a limitation - we'll use the client directly
+				this.pool = pool as unknown as Pool;
+			} else {
+				this.pool = pool as Pool;
+				this.client = undefined;
+			}
 		} else {
-			this.pool = pool as Pool;
+			// Compile-only mode — no pool/client
+			this.pool = undefined;
 			this.client = undefined;
 		}
 
@@ -133,15 +142,29 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.naming = getNamingPlugin(this._namingConvention);
 		this.model = options?.model;
 
-		// PostgreSQL capabilities - all features supported
+		// PostgreSQL capabilities — streaming requires a connection
 		this._capabilities = {
 			supportsReturning: true,
 			supportsSchemas: true,
-			supportsStreaming: true,
+			supportsStreaming: pool != null,
 			supportsRecursiveCTE: true,
 			supportsWindowFunctions: true,
 			supportsArrayType: true,
 		};
+	}
+
+	/**
+	 * Returns the pool/client executor, or throws if in compile-only mode.
+	 */
+	private requireConnection(): Pool | PoolClient {
+		const executor = this.client ?? this.pool;
+		if (!executor) {
+			throw new Error(
+				'PgsqlAdapter is in compile-only mode (no database connection). ' +
+					'Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.',
+			);
+		}
+		return executor;
 	}
 
 	/** Adapter capabilities for feature detection */
@@ -160,7 +183,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Get the underlying pg Pool instance.
 	 */
 	getPoolInstance(): Pool {
-		return this.pool;
+		return this.requireConnection() as Pool;
 	}
 
 	// =========================================================================
@@ -1244,7 +1267,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Results are transformed to use model naming convention (e.g., snake_case → camelCase)
 	 */
 	async execute<T>(query: CompiledQuery<T>): Promise<T[]> {
-		const executor = this.client ?? this.pool;
+		const executor = this.requireConnection();
 		const result = await executor.query(query.sql, query.parameters as any[]);
 		return this.transformResultRows(result.rows) as T[];
 	}
@@ -1317,7 +1340,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			}
 
 			// Otherwise, acquire a client and create a transaction
-			const client = await adapter.pool.connect();
+			const pool = adapter.requireConnection() as Pool;
+			const client = await pool.connect();
 			let committed = false;
 			try {
 				await client.query('BEGIN');
@@ -1413,7 +1437,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 
 		// Otherwise, acquire a client and start transaction
-		const client = await this.pool.connect();
+		const pool = this.requireConnection() as Pool;
+		const client = await pool.connect();
 		try {
 			await client.query('BEGIN');
 
@@ -1454,7 +1479,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			}),
 			...(this.model !== undefined && { model: this.model }),
 		};
-		return new PgsqlAdapter<DB>(this.client ?? this.pool, options);
+		return new PgsqlAdapter<DB>(this.client ?? this.pool ?? undefined, options);
 	}
 
 	// =========================================================================
@@ -1470,7 +1495,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		sql: string,
 		parameters: readonly unknown[] = [],
 	): Promise<T[]> {
-		const executor = this.client ?? this.pool;
+		const executor = this.requireConnection();
 		const result = await executor.query(sql, parameters as any[]);
 		return result.rows as T[];
 	}
@@ -1538,4 +1563,27 @@ export function createPgsqlAdapter<DB = unknown>(
 	options?: PgsqlAdapterOptions,
 ): PgsqlAdapter<DB> {
 	return new PgsqlAdapter<DB>(pool, options);
+}
+
+/**
+ * Creates a compile-only PgsqlAdapter for SQL generation without a database connection.
+ *
+ * All compilation methods (compile, compileInsert, etc.), createDump(), and generateDDL()
+ * work normally. Execution methods (execute, stream, transaction, etc.) throw an error.
+ *
+ * @example
+ * ```typescript
+ * import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+ * import { createOrm } from '@dbsp/core';
+ *
+ * const adapter = createPgsqlCompileOnlyAdapter();
+ * const orm = createOrm({ model, adapter });
+ * const dump = await orm.select('users').dump();
+ * console.log(dump.sql);
+ * ```
+ */
+export function createPgsqlCompileOnlyAdapter<DB = unknown>(
+	options?: PgsqlAdapterOptions,
+): PgsqlAdapter<DB> {
+	return new PgsqlAdapter<DB>(undefined, options);
 }

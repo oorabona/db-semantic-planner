@@ -1576,3 +1576,37 @@ default: v.optional(v.union([v.string(), v.number(), v.boolean()]));
 **Solution:** Add the field declaration AND at least one usage in the same edit operation. Alternatively, use Serena's `replace_content` tool which does not trigger the post-edit hook.
 **Prevention:** When adding new class fields or variables that will be used later, always include at least a minimal usage (e.g. reset in constructor) in the same edit.
 **Location:** Any file with class fields — specifically hit on compiler.ts `pendingJoins` array field
+
+---
+
+## Relation-path fields (e.g. "roomBookings.bookingPeriod") are NOT pseudo-columns (2026-01-30)
+
+**Symptoms:** A dotted field like `roomBookings.bookingPeriod` in a WHERE intent produces an invalid 3-level SQL column reference `"_rooms"."room_bookings"."booking_period"` instead of an EXISTS subquery.
+**Cause:** `isPseudoColumnField()` only recognizes `parent.`, `child.`, `ascendant.`, `descendant.` prefixes. A relation name like `roomBookings` falls through to `resolveFieldAlias()`, which treats the entire dotted string as a single column name.
+**Solution:** Detect relation-path fields BEFORE the pseudo-column check using `parseRelationPathField()`. If the prefix matches a known relation in the model, compile as EXISTS subquery. Use a factory pattern (`createComparisonHandler(compileExists)`) to inject the `compileExists` dependency.
+**Prevention:** When adding new dotted-field patterns, always check the dispatch order: relation-path → pseudo-column → normal field.
+**Location:** `packages/adapter-kysely/src/compiler/handlers/where/comparison.ts`, `range.ts`, `helpers.ts`
+
+---
+
+## LATERAL JOIN schema qualification needs separate identifiers (2026-01-30)
+
+**Symptoms:** LATERAL subquery produces `"schema.table"` (single quoted identifier) instead of `"schema"."table"` (separate identifiers), causing PostgreSQL to fail with "relation not found".
+**Cause:** Template literal `"${schemaName}.${relation.target}"` wraps the entire dot-separated path in one set of quotes.
+**Solution:** Use separate identifiers: `"${schemaName}"."${relation.target}"`. Also use an inner alias (e.g. `__table_lat__`) for WHERE clause references inside the LATERAL subquery.
+**Prevention:** Always use separate `"schema"."table"` identifiers in raw SQL. Never concatenate schema+table inside one identifier.
+**Location:** `packages/adapter-kysely/src/compiler/handlers/include/lateral.ts` (removed — adapter-kysely sunset)
+
+---
+
+## adapter-kysely removed — adapter-pgsql is sole adapter (2026-01-30)
+
+**Context:** `packages/adapter-kysely` was deleted. `packages/adapter-pgsql` is now the only adapter. All Kysely dependencies removed from workspace.
+**Migration details:**
+- CLI uses `createPgsqlCompileOnlyAdapter()` (no pool needed for compile-only)
+- E2E testkit uses `tests/e2e/testkit/sql.ts` — custom `sql` tagged template replacing Kysely's `sql` for DDL/seed execution against `pg.Pool`
+- `sql.ref(identifier)` quotes identifiers safely (SQL injection prevention)
+- `sql.lit(value)` creates parameterized `$N` placeholders
+- Phase 4 features (introspect) and Phase 2 features (edge-table recursive) are still pending — related tests use `describe.skip`
+**Prevention:** Never import `kysely` or `@dbsp/adapter-kysely`. Use `@dbsp/adapter-pgsql` for all adapter needs.
+**Location:** `packages/adapter-pgsql/`, `tests/e2e/testkit/sql.ts`

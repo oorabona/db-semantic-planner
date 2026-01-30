@@ -36,8 +36,7 @@ export function hydrateJsonAggIncludes<T>(
 		const relationType = decision.context?.relationType;
 		if (typeof includeAlias === 'string') {
 			// belongsTo and hasOne are to-one relations
-			const isToOne =
-				relationType === 'belongsTo' || relationType === 'hasOne';
+			const isToOne = relationType === 'belongsTo' || relationType === 'hasOne';
 			relationInfo.set(includeAlias, { isToOne });
 		}
 	}
@@ -57,9 +56,8 @@ export function hydrateJsonAggIncludes<T>(
 		for (const [relationName, info] of relationInfo) {
 			const jsonColumnName = `${relationName}_json`;
 			// CamelCasePlugin transforms 'author_json' → 'authorJson' in result set
-			const camelJsonColumnName = jsonColumnName.replace(
-				/_([a-z])/g,
-				(_, c) => c.toUpperCase(),
+			const camelJsonColumnName = jsonColumnName.replace(/_([a-z])/g, (_, c) =>
+				c.toUpperCase(),
 			);
 
 			// Check if the JSON column exists (snake_case or camelCase)

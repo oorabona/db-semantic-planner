@@ -14,17 +14,18 @@
  *   - dave: no roles (edge case)
  */
 
-import { type Kysely, sql } from 'kysely';
+import type pg from 'pg';
+import { sql } from './sql.js';
 
 /**
  * Seed IAM data in the specified schema.
  */
 export async function seedIamData(
-	db: Kysely<unknown>,
+	pool: pg.Pool,
 	schemaName: string,
 ): Promise<void> {
 	// Set search path
-	await sql`SET search_path TO ${sql.ref(schemaName)}`.execute(db);
+	await sql`SET search_path TO ${sql.ref(schemaName)}`.execute(pool);
 
 	// ──────────────────────────────────────────────────────────────────────────
 	// ROLES
@@ -38,10 +39,10 @@ export async function seedIamData(
 			(4, 'auditor', 'Auditor with report access'),
 			(5, 'approver', 'Can approve requests'),
 			(6, 'requester', 'Can create requests')
-	`.execute(db);
+	`.execute(pool);
 
 	// Reset sequence
-	await sql`SELECT setval('roles_id_seq', 6)`.execute(db);
+	await sql`SELECT setval('roles_id_seq', 6)`.execute(pool);
 
 	// ──────────────────────────────────────────────────────────────────────────
 	// PERMISSIONS
@@ -56,10 +57,10 @@ export async function seedIamData(
 			(5, 'reports:export', 'Export reports'),
 			(6, 'requests:create', 'Create new requests'),
 			(7, 'requests:approve', 'Approve pending requests')
-	`.execute(db);
+	`.execute(pool);
 
 	// Reset sequence
-	await sql`SELECT setval('permissions_id_seq', 7)`.execute(db);
+	await sql`SELECT setval('permissions_id_seq', 7)`.execute(pool);
 
 	// ──────────────────────────────────────────────────────────────────────────
 	// ROLE PERMISSIONS
@@ -80,7 +81,7 @@ export async function seedIamData(
 			(5, 7),
 			-- requester: requests:create
 			(6, 6)
-	`.execute(db);
+	`.execute(pool);
 
 	// ──────────────────────────────────────────────────────────────────────────
 	// ROLE HIERARCHY (edge table)
@@ -94,7 +95,7 @@ export async function seedIamData(
 			(2, 3),
 			-- admin -> auditor (admin also inherits from auditor)
 			(1, 4)
-	`.execute(db);
+	`.execute(pool);
 
 	// ──────────────────────────────────────────────────────────────────────────
 	// USERS
@@ -106,10 +107,10 @@ export async function seedIamData(
 			(2, 'bob', 'bob@example.com'),
 			(3, 'charlie', 'charlie@example.com'),
 			(4, 'dave', 'dave@example.com')
-	`.execute(db);
+	`.execute(pool);
 
 	// Reset sequence
-	await sql`SELECT setval('users_id_seq', 4)`.execute(db);
+	await sql`SELECT setval('users_id_seq', 4)`.execute(pool);
 
 	// ──────────────────────────────────────────────────────────────────────────
 	// USER ROLES
@@ -126,7 +127,7 @@ export async function seedIamData(
 			(3, 5),
 			(3, 6)
 			-- dave: no roles (intentionally empty)
-	`.execute(db);
+	`.execute(pool);
 
 	// ──────────────────────────────────────────────────────────────────────────
 	// SEPARATION OF DUTY RULES
@@ -136,10 +137,10 @@ export async function seedIamData(
 		INSERT INTO sod_rules (role_a_id, role_b_id, reason) VALUES
 			-- approver and requester are incompatible (fraud prevention)
 			(5, 6, 'Segregation: requester cannot approve own requests')
-	`.execute(db);
+	`.execute(pool);
 
 	// Reset search path
-	await sql`SET search_path TO public`.execute(db);
+	await sql`SET search_path TO public`.execute(pool);
 }
 
 /**

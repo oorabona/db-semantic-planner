@@ -13,28 +13,22 @@ import {
 } from '../generators/schema-codegen.js';
 
 /**
- * Try to dynamically import Kysely and pg.
- * These are optional peer dependencies.
+ * Try to dynamically import pg.
+ * pg is an optional peer dependency.
  */
 async function createDbConnection(connectionUrl: string) {
 	try {
-		// Dynamic import of Kysely
-		const { Kysely, PostgresDialect } = await import('kysely');
 		const { default: pg } = await import('pg');
 
 		const pool = new pg.Pool({
 			connectionString: connectionUrl,
 		});
 
-		const db = new Kysely<unknown>({
-			dialect: new PostgresDialect({ pool }),
-		});
-
-		return { db, pool };
+		return { pool };
 	} catch (_error) {
 		throw new Error(
-			'kysely and pg are required for introspect command. ' +
-				'Install them with: pnpm add kysely pg',
+			'pg is required for introspect command. ' +
+				'Install it with: pnpm add pg',
 		);
 	}
 }
@@ -72,47 +66,31 @@ export const introspectCommand = new Command('introspect')
 
 			try {
 				// Connect to database
-				const { db, pool } = await createDbConnection(options.db);
+				const { pool } = await createDbConnection(options.db);
 
 				try {
-					// Import introspect from adapter-kysely
-					const { introspect } = await import('@dbsp/adapter-kysely');
-
-					// Parse exclude/include patterns
-					const excludePatterns = options.exclude
-						? options.exclude.split(',').map((p) => p.trim())
-						: [];
-					const includePatterns = options.include
-						? options.include.split(',').map((p) => p.trim())
-						: undefined;
-
-					// Introspect the database
-					// Note: We spread to build options to handle exactOptionalPropertyTypes
-					const model = await introspect(db, {
-						schema: options.schemaName,
-						exclude: excludePatterns,
-						...(includePatterns && { include: includePatterns }),
+					// Import adapter from adapter-pgsql
+					const { createPgsqlAdapter } = await import('@dbsp/adapter-pgsql');
+					const adapter = createPgsqlAdapter(pool, {
+						...(options.schemaName ? { schemaName: options.schemaName } : {}),
 					});
+
+					// Introspect the database (Phase 4 — may throw "Not implemented")
+					const model = await adapter.introspect();
 
 					// Report what we found
 					const tableCount = model.tables.size;
 					const relationCount = model.relations.size;
-					const warningCount = model.warnings.length;
 
 					console.log(
 						`📊 Found ${tableCount} tables, ${relationCount} relations`,
 					);
-					if (warningCount > 0) {
-						console.log(`⚠️  ${warningCount} warnings (see generated file)`);
-					}
 					console.log('');
 
 					// Generate schema file
 					const codegenOptions: SchemaCodegenOptions = {
 						sourceUrl: options.db,
 						includeDbTypeComments: options.dbTypeComments,
-						warnings: model.warnings,
-						introspectedAt: model.introspectedAt,
 					};
 
 					const schemaCode = generateSchemaFile(model, codegenOptions);
@@ -127,7 +105,6 @@ export const introspectCommand = new Command('introspect')
 					console.log(`   Relations: ${relationCount}`);
 				} finally {
 					// Close database connection
-					await db.destroy();
 					await pool.end();
 				}
 			} catch (error) {

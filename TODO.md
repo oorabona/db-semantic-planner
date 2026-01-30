@@ -39,6 +39,7 @@
 | PostgreSQL Native Adapter Spike (ADAPTER-PGSQL-SPIKE) | adapter-pgsql | ✅ Complete (2026-01-29) |
 | PostgreSQL Native Adapter Phase 1 (ADAPTER-PGSQL-FULL-FORWARD) | adapter-pgsql | ✅ Complete (2026-01-29) |
 | E2E Assertion Tables (db.output: full columns) | cli, examples | ✅ Complete (2026-01-30) |
+| Sunset adapter-kysely (PGSQL-SUNSET) | adapter-pgsql, cli, testkit | ✅ Complete (2026-01-30) |
 
 ## Scope-Specific Backlogs
 

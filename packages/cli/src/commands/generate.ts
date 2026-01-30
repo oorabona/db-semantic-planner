@@ -18,14 +18,6 @@ import { dirname, resolve } from 'node:path';
 import { Command } from 'commander';
 import { loadSchema, loadSchemaFromCwd } from '../utils/schema-loader.js';
 
-/** Default casing by dialect (follows database conventions) */
-const DEFAULT_CASING: Record<string, 'snake' | 'camel'> = {
-	postgresql: 'snake',
-	mysql: 'snake',
-	sqlite: 'snake',
-	mssql: 'camel', // MSSQL convention is PascalCase, camel is close enough
-};
-
 export const generateCommand = new Command('generate')
 	.description('Generate code from schema')
 	.argument('<target>', 'Target to generate: ddl')
@@ -79,39 +71,26 @@ export const generateCommand = new Command('generate')
 				// Generate based on target
 				switch (target) {
 					case 'ddl': {
-						// Dynamic import of Kysely and pg (optional peer deps)
-						const { CamelCasePlugin, Kysely, PostgresDialect } = await import(
-							'kysely'
-						);
-						const { default: pg } = await import('pg');
-
 						// Determine casing: explicit option > dialect default > 'snake'
-						const dialect = options.dialect ?? 'postgresql';
-						const casing = options.casing ?? DEFAULT_CASING[dialect] ?? 'snake';
+						const casing = options.casing ?? 'snake';
 
-						// Create a Kysely instance with a mock pool (no actual connection)
-						// This is sufficient for DDL generation which only builds SQL strings
-						const mockPool = new pg.Pool({
-							connectionString: 'postgresql://localhost/mock',
+						// Import adapter from adapter-pgsql (compile-only, no DB connection needed)
+						const { createPgsqlCompileOnlyAdapter } = await import(
+							'@dbsp/adapter-pgsql'
+						);
+
+						const namingConvention =
+							casing === 'snake'
+								? ('camelCase' as const)
+								: ('preserve' as const);
+						const adapter = createPgsqlCompileOnlyAdapter({
+							namingConvention,
+							...(options.schemaName ? { schemaName: options.schemaName } : {}),
 						});
 
-						// Apply CamelCasePlugin for snake_case transformation
-						const plugins = casing === 'snake' ? [new CamelCasePlugin()] : [];
-
-						const db = new Kysely<unknown>({
-							dialect: new PostgresDialect({ pool: mockPool }),
-							plugins,
-						});
-
-						try {
-							// Import generateDDL from adapter-kysely
-							const { generateDDL } = await import('@dbsp/adapter-kysely');
-
+						{
 							// ARCH-005: Use schema.model directly (already ModelIR)
-							const ddlStatements = generateDDL(db, schema.model, {
-								includeDropStatements: options.drop,
-								schemaName: options.schemaName,
-							});
+							const ddlStatements = adapter.generateDDL(schema.model);
 
 							const ddlContent = ddlStatements.join('\n\n');
 							const outputPath = options.out ?? options.output;
@@ -140,9 +119,6 @@ export const generateCommand = new Command('generate')
 								// Info messages (schema loaded) went to stderr
 								console.log(ddlContent);
 							}
-						} finally {
-							await db.destroy();
-							await mockPool.end();
 						}
 						break;
 					}

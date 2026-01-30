@@ -221,11 +221,10 @@ export interface SimplifiedOrmOptions<
  * This is the single entry point for creating ORM instances.
  * The schema must be created with `schema()` + `ref()`.
  *
- * For database introspection, use `getSchemaFromDb()` from @dbsp/adapter-kysely:
+ * For database introspection (when available), use the adapter's introspect method:
  * ```typescript
- * import { getSchemaFromDb } from '@dbsp/adapter-kysely';
- * const schema = await getSchemaFromDb(adapter);
- * const orm = createOrm({ schema, adapter });
+ * const model = await adapter.introspect({ schema: 'public' });
+ * const orm = createOrm({ schema: model, adapter });
  * ```
  *
  * @param options - ORM options with required schema
@@ -286,7 +285,7 @@ export function createOrm<T extends SchemaDefinition>(
 		throw new Error(
 			'Invalid options: must provide either schema (from schema() function) ' +
 				'or model (ModelIR). For database introspection, use getSchemaFromDb() ' +
-				'from @dbsp/adapter-kysely.',
+				'from the adapter (e.g. adapter.introspect()).',
 		);
 	}
 

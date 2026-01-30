@@ -2,84 +2,85 @@
  * Extended Blog DDL - Schema creation/drop for complex testing
  */
 
-import { sql } from 'kysely';
-import { getTestDb } from './db.js';
+import { getTestPool } from './db.js';
+import { sql } from './sql.js';
 
 export async function createBlogExtendedSchema(
 	schemaName: string,
 ): Promise<void> {
-	const db = await getTestDb();
+	const pool = await getTestPool();
+	const s = sql.ref(schemaName);
 
-	await sql`CREATE SCHEMA IF NOT EXISTS ${sql.ref(schemaName)}`.execute(db);
+	await sql`CREATE SCHEMA IF NOT EXISTS ${s}`.execute(pool);
 
 	// Authors
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.authors (
+    CREATE TABLE ${s}.authors (
       id SERIAL PRIMARY KEY,
       name VARCHAR(100) NOT NULL,
       email VARCHAR(200) NOT NULL,
       active BOOLEAN NOT NULL DEFAULT true
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Categories (self-referential)
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.categories (
+    CREATE TABLE ${s}.categories (
       id SERIAL PRIMARY KEY,
       name VARCHAR(100) NOT NULL,
-      parent_id INTEGER REFERENCES ${sql.ref(schemaName)}.categories(id)
+      parent_id INTEGER REFERENCES ${s}.categories(id)
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Posts
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.posts (
+    CREATE TABLE ${s}.posts (
       id SERIAL PRIMARY KEY,
       title VARCHAR(200) NOT NULL,
       content TEXT NOT NULL,
-      author_id INTEGER NOT NULL REFERENCES ${sql.ref(schemaName)}.authors(id),
-      category_id INTEGER REFERENCES ${sql.ref(schemaName)}.categories(id),
+      author_id INTEGER NOT NULL REFERENCES ${s}.authors(id),
+      category_id INTEGER REFERENCES ${s}.categories(id),
       published BOOLEAN NOT NULL DEFAULT false,
       featured BOOLEAN NOT NULL DEFAULT false,
       view_count INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Comments
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.comments (
+    CREATE TABLE ${s}.comments (
       id SERIAL PRIMARY KEY,
-      post_id INTEGER NOT NULL REFERENCES ${sql.ref(schemaName)}.posts(id),
+      post_id INTEGER NOT NULL REFERENCES ${s}.posts(id),
       author_name VARCHAR(100) NOT NULL,
       content TEXT NOT NULL,
       approved BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Tags
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.tags (
+    CREATE TABLE ${s}.tags (
       id SERIAL PRIMARY KEY,
       name VARCHAR(50) NOT NULL,
       slug VARCHAR(50) NOT NULL UNIQUE
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Junction: post_tags (M:N)
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.post_tags (
-      post_id INTEGER NOT NULL REFERENCES ${sql.ref(schemaName)}.posts(id),
-      tag_id INTEGER NOT NULL REFERENCES ${sql.ref(schemaName)}.tags(id),
+    CREATE TABLE ${s}.post_tags (
+      post_id INTEGER NOT NULL REFERENCES ${s}.posts(id),
+      tag_id INTEGER NOT NULL REFERENCES ${s}.tags(id),
       PRIMARY KEY (post_id, tag_id)
     )
-  `.execute(db);
+  `.execute(pool);
 }
 
 export async function dropBlogExtendedSchema(
 	schemaName: string,
 ): Promise<void> {
-	const db = await getTestDb();
-	await sql`DROP SCHEMA IF EXISTS ${sql.ref(schemaName)} CASCADE`.execute(db);
+	const pool = await getTestPool();
+	await sql`DROP SCHEMA IF EXISTS ${sql.ref(schemaName)} CASCADE`.execute(pool);
 }

@@ -1248,7 +1248,6 @@ function ReplApp({ config }: ReplAppProps) {
 
 				try {
 					const result = compileNqlToSql(content, model, {
-						dialect: dialect ?? 'postgresql',
 						...(schemaName ? { schemaName } : {}),
 					});
 

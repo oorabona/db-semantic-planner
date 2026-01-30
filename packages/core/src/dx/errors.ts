@@ -516,7 +516,7 @@ export class ColumnNotFoundError extends Error {
  * const schema = await getSchemaFromDb(adapter); // namingConvention: 'camelCase'
  * const orm = createOrm({
  *   schema,
- *   adapter: createKyselyAdapter(db, { namingConvention: 'snake_case' }),
+ *   adapter: createPgsqlAdapter(pool, { namingConvention: 'snake_case' }),
  * });
  * // Throws NamingConventionMismatchError
  * ```
