@@ -57,9 +57,29 @@ output.contains: orderItems
 success: true
 sql.equals: select "_categories".* from "ch5_ecommerce"."categories" as "_categories"
 db.rows.equals: 20
-db.output.contains: Electronics
-db.output.contains: Clothing
-db.output.contains: Books
+db.output:
+| id | name            | slug            | parent_id | sort_order |
+|----|-----------------|-----------------|-----------|------------|
+| 1  | Electronics     | electronics     | NULL      | 1          |
+| 2  | Clothing        | clothing        | NULL      | 2          |
+| 3  | Books           | books           | NULL      | 3          |
+| 4  | Computers       | computers       | 1         | 1          |
+| 5  | Phones          | phones          | 1         | 2          |
+| 6  | Audio           | audio           | 1         | 3          |
+| 7  | Men             | men             | 2         | 1          |
+| 8  | Women           | women           | 2         | 2          |
+| 9  | Fiction         | fiction         | 3         | 1          |
+| 10 | Non-Fiction     | non-fiction     | 3         | 2          |
+| 11 | Laptops         | laptops         | 4         | 1          |
+| 12 | Desktops        | desktops        | 4         | 2          |
+| 13 | Smartphones     | smartphones     | 5         | 1          |
+| 14 | Headphones      | headphones      | 6         | 1          |
+| 15 | Speakers        | speakers        | 6         | 2          |
+| 16 | T-Shirts        | t-shirts        | 7         | 1          |
+| 17 | Jeans           | jeans           | 7         | 2          |
+| 18 | Dresses         | dresses         | 8         | 1          |
+| 19 | Science Fiction | science-fiction | 9         | 1          |
+| 20 | Technical       | technical       | 10        | 1          |
 
 # ─────────────────────────────────────────
 # Query 7 products | where active = true | limit 5
@@ -67,12 +87,16 @@ db.output.contains: Books
 --- query: 7
 success: true
 sql.equals: select "_products".* from "ch5_ecommerce"."products" as "_products" where "_products"."active" = $1 limit $2
-sql.equals: select "_products".* from "ch5_ecommerce"."products" as "_products" where "_products"."active" = $1 limit $2
-sql.equals: select "_products".* from "ch5_ecommerce"."products" as "_products" where "_products"."active" = $1 limit $2
 params.equals: [true, 5]
 db.rows.equals: 5
-db.output.contains: ProBook 15
-db.output.contains: SmartPhone X
+db.output:
+| id | sku           | name            | description                               | price   | stock | category_id | active | created_at               |
+|----|---------------|-----------------|-------------------------------------------|---------|-------|-------------|--------|--------------------------|
+| 1  | LAPTOP-001    | ProBook 15      | High-performance laptop for professionals | 1299.99 | 50    | 11          | true   | 2024-01-01T08:00:00.000Z |
+| 2  | LAPTOP-002    | UltraLight 13   | Lightweight laptop for travel             | 999.99  | 30    | 11          | true   | 2024-01-01T08:00:00.000Z |
+| 3  | PHONE-001     | SmartPhone X    | Latest flagship smartphone                | 899.99  | 100   | 13          | true   | 2024-01-01T08:00:00.000Z |
+| 4  | PHONE-002     | SmartPhone SE   | Budget-friendly smartphone                | 449.99  | 200   | 13          | true   | 2024-01-01T08:00:00.000Z |
+| 5  | HEADPHONE-001 | NoiseCancel Pro | Premium noise-canceling headphones        | 349.99  | 75    | 14          | true   | 2024-01-01T08:00:00.000Z |
 
 # ─────────────────────────────────────────
 # Query 8 customers
@@ -81,8 +105,14 @@ db.output.contains: SmartPhone X
 success: true
 sql.equals: select "_customers".* from "ch5_ecommerce"."customers" as "_customers"
 db.rows.equals: 5
-db.output.contains: Alice
-db.output.contains: Bob
+db.output:
+| id | email             | first_name | last_name | phone       | created_at               |
+|----|-------------------|------------|-----------|-------------|--------------------------|
+| 1  | alice@example.com | Alice      | Johnson   | +1-555-0101 | 2024-01-01T09:00:00.000Z |
+| 2  | bob@example.com   | Bob        | Smith     | +1-555-0102 | 2024-01-01T09:00:00.000Z |
+| 3  | carol@example.com | Carol      | Williams  | NULL        | 2024-01-02T10:00:00.000Z |
+| 4  | david@example.com | David      | Brown     | +1-555-0104 | 2024-01-03T11:00:00.000Z |
+| 5  | emma@example.com  | Emma       | Davis     | +1-555-0105 | 2024-01-04T12:00:00.000Z |
 
 # ─────────────────────────────────────────
 # Query 9 orders
@@ -91,9 +121,16 @@ db.output.contains: Bob
 success: true
 sql.equals: select "_orders".* from "ch5_ecommerce"."orders" as "_orders"
 db.rows.equals: 7
-db.output.contains: ORD-2024-001
-db.output.contains: delivered
-db.output.contains: shipped
+db.output:
+| id | order_number | customer_id | status    | total   | shipping_address_id | billing_address_id | created_at               | updated_at |
+|----|--------------|-------------|-----------|---------|---------------------|--------------------|--------------------------|------------|
+| 1  | ORD-2024-001 | 1           | delivered | 1499.98 | 1                   | 2                  | 2024-01-05T10:00:00.000Z | NULL       |
+| 2  | ORD-2024-002 | 2           | shipped   | 349.99  | 3                   | 4                  | 2024-01-10T14:30:00.000Z | NULL       |
+| 3  | ORD-2024-003 | 1           | paid      | 94.98   | 1                   | 2                  | 2024-01-12T09:00:00.000Z | NULL       |
+| 4  | ORD-2024-004 | 3           | pending   | 999.99  | 5                   | 6                  | 2024-01-15T11:00:00.000Z | NULL       |
+| 5  | ORD-2024-005 | 4           | delivered | 179.97  | 7                   | 8                  | 2024-01-08T16:00:00.000Z | NULL       |
+| 6  | ORD-2024-006 | 5           | shipped   | 1099.98 | 9                   | 10                 | 2024-01-18T08:00:00.000Z | NULL       |
+| 7  | ORD-2024-007 | 2           | cancelled | 449.99  | 3                   | 4                  | 2024-01-20T12:00:00.000Z | NULL       |
 
 # ─────────────────────────────────────────
 # Query 10 categories | select *, products.* | flat
@@ -131,7 +168,6 @@ db.rows.equals: 5
 --- query: 13
 success: true
 sql.equals: select sum("_orders"."total") as "sum_result" from "ch5_ecommerce"."orders" as "_orders" group by "_orders"."status"
-sql.equals: select sum("_orders"."total") as "sum_result" from "ch5_ecommerce"."orders" as "_orders" group by "_orders"."status"
 db.rows.equals: 5
 
 # ─────────────────────────────────────────
@@ -140,7 +176,6 @@ db.rows.equals: 5
 # ─────────────────────────────────────────
 --- query: 14
 success: true
-sql.equals: select count(*) as "count_result" from "ch5_ecommerce"."orders" as "_orders" group by "_orders"."customer_id"
 sql.equals: select count(*) as "count_result" from "ch5_ecommerce"."orders" as "_orders" group by "_orders"."customer_id"
 db.rows.equals: 5
 
@@ -160,7 +195,6 @@ db.rows.equals: 1
 --- query: 16
 success: true
 sql.equals: select count(*) as "count_result" from "ch5_ecommerce"."products" as "_products" group by "_products"."active"
-sql.equals: select count(*) as "count_result" from "ch5_ecommerce"."products" as "_products" group by "_products"."active"
 db.rows.equals: 2
 
 # ─────────────────────────────────────────
@@ -170,8 +204,6 @@ db.rows.equals: 2
 --- query: 17
 success: true
 sql.equals: select "_products".*, RANK() OVER (PARTITION BY "_products"."category_id" ORDER BY "_products"."price" DESC) as "price_rank" from "ch5_ecommerce"."products" as "_products"
-sql.equals: select "_products".*, RANK() OVER (PARTITION BY "_products"."category_id" ORDER BY "_products"."price" DESC) as "price_rank" from "ch5_ecommerce"."products" as "_products"
-sql.equals: select "_products".*, RANK() OVER (PARTITION BY "_products"."category_id" ORDER BY "_products"."price" DESC) as "price_rank" from "ch5_ecommerce"."products" as "_products"
 
 # ─────────────────────────────────────────
 # Query 18 orders | select orderNumber, total, sum(total) over (order by createdAt) as runningTotal
@@ -180,15 +212,12 @@ sql.equals: select "_products".*, RANK() OVER (PARTITION BY "_products"."categor
 --- query: 18
 success: true
 sql.equals: select "_orders"."order_number", "_orders"."total", SUM("_orders"."total") OVER (ORDER BY "_orders"."created_at" ASC) as "running_total" from "ch5_ecommerce"."orders" as "_orders"
-sql.equals: select "_orders"."order_number", "_orders"."total", SUM("_orders"."total") OVER (ORDER BY "_orders"."created_at" ASC) as "running_total" from "ch5_ecommerce"."orders" as "_orders"
-sql.equals: select "_orders"."order_number", "_orders"."total", SUM("_orders"."total") OVER (ORDER BY "_orders"."created_at" ASC) as "running_total" from "ch5_ecommerce"."orders" as "_orders"
 
 # ─────────────────────────────────────────
 # Query 19 insert into categories set name = 'Accessories', slug = 'accessories'
 # ─────────────────────────────────────────
 --- query: 19
 success: true
-sql.equals: insert into "ch5_ecommerce"."categories" ("name", "slug") values ($1, $2)
 sql.equals: insert into "ch5_ecommerce"."categories" ("name", "slug") values ($1, $2)
 db.rows.equals: 1
 
@@ -197,7 +226,6 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 20
 success: true
-sql.equals: insert into "ch5_ecommerce"."customers" ("first_name", "last_name", "email") values ($1, $2, $3)
 sql.equals: insert into "ch5_ecommerce"."customers" ("first_name", "last_name", "email") values ($1, $2, $3)
 db.rows.equals: 1
 
@@ -208,8 +236,6 @@ db.rows.equals: 1
 --- query: 21
 success: true
 sql.equals: update "ch5_ecommerce"."products" set "price" = $1 where "sku" = $2
-sql.equals: update "ch5_ecommerce"."products" set "price" = $1 where "sku" = $2
-sql.equals: update "ch5_ecommerce"."products" set "price" = $1 where "sku" = $2
 db.rows.equals: 0
 
 # ─────────────────────────────────────────
@@ -217,8 +243,6 @@ db.rows.equals: 0
 # ─────────────────────────────────────────
 --- query: 22
 success: true
-sql.equals: update "ch5_ecommerce"."products" set "active" = $1 where "id" = $2
-sql.equals: update "ch5_ecommerce"."products" set "active" = $1 where "id" = $2
 sql.equals: update "ch5_ecommerce"."products" set "active" = $1 where "id" = $2
 db.rows.equals: 1
 
@@ -229,7 +253,6 @@ db.rows.equals: 1
 --- query: 23
 success: true
 sql.equals: delete from "ch5_ecommerce"."orders" where "status" = $1
-sql.equals: delete from "ch5_ecommerce"."orders" where "status" = $1
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -237,6 +260,5 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 24
 success: true
-sql.equals: insert into "ch5_ecommerce"."products" ("name", "sku", "price", "category_id", "active") values ($1, $2, $3, $4, $5) on conflict ("sku") do update set "name" = $6, "sku" = $7, "price" = $8, "category_id" = $9, "active" = $10
 sql.equals: insert into "ch5_ecommerce"."products" ("name", "sku", "price", "category_id", "active") values ($1, $2, $3, $4, $5) on conflict ("sku") do update set "name" = $6, "sku" = $7, "price" = $8, "category_id" = $9, "active" = $10
 db.rows.equals: 1

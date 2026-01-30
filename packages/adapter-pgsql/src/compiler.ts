@@ -88,6 +88,8 @@ export interface PlanDecision {
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
 	readonly foreignKey?: string;
 	readonly parentKey?: string;
+	// Filter/include strategy choice from planner ('join' | 'exists' | 'json_agg')
+	readonly choice?: string;
 }
 
 /**
@@ -127,6 +129,13 @@ export class PlanCompiler {
 	private paramIndex = 0;
 	/** Track root table for EXISTS FK correlation */
 	private currentRootTable = '';
+	/** Pending JOINs registered by filter/include strategies (flushed in compileSelect) */
+	private pendingJoins: Array<{
+		type: 'JOIN' | 'LEFT JOIN';
+		table: string;
+		alias?: string;
+		on: Node;
+	}> = [];
 
 	constructor(options: CompilerOptions = {}) {
 		this.naming = options.naming ?? identityNaming;
@@ -140,6 +149,7 @@ export class PlanCompiler {
 		this.parameters = [];
 		this.paramIndex = 0;
 		this.currentRootTable = plan.rootTable;
+		this.pendingJoins = [];
 
 		// Determine query type from decisions
 		const queryType = this.detectQueryType(plan.decisions);
@@ -356,7 +366,70 @@ export class PlanCompiler {
 					break;
 				}
 
+				case 'selectLeftJoinInclude': {
+					// LEFT JOIN include: add relation columns with "relation.column" aliases
+					// and register LEFT JOIN for to-one (belongsTo/hasOne) includes
+					if (
+						decision.relationName &&
+						decision.targetTable &&
+						decision.columns
+					) {
+						const cols = decision.columns;
+						// Use relationName as the table alias for column references
+						const colTableRef = decision.relationName;
+
+						// Add each column with "relation.column" alias for hydration
+						for (const col of cols) {
+							targetList.push(
+								columnTarget(
+									col,
+									`${decision.relationName}.${col}`,
+									colTableRef,
+									this.naming,
+								),
+							);
+						}
+
+						// Register LEFT JOIN
+						// For belongsTo: source.FK → target.PK
+						const fk =
+							decision.foreignKey ?? this.deriveFK(decision.targetTable);
+						const onCondition = eqExpr(
+							columnRef('id', decision.relationName, undefined, this.naming),
+							columnRef(fk, plan.rootTable, undefined, this.naming),
+						);
+
+						this.pendingJoins.push({
+							type: 'LEFT JOIN',
+							table: decision.targetTable,
+							// Always alias with relationName for uniqueness
+							// (e.g., "author" and "editor" both from "users")
+							alias: decision.relationName,
+							on: onCondition,
+						});
+					}
+					break;
+				}
+
 				case 'where': {
+					// JOIN filter: register INNER JOIN instead of EXISTS subquery
+					if (
+						decision.operator === 'exists' &&
+						decision.choice === 'join' &&
+						decision.targetTable
+					) {
+						this.registerJoinFilter(decision);
+						// Add user conditions (on joined table) to WHERE
+						if (decision.conditions && decision.conditions.length > 0) {
+							const condNodes = decision.conditions.map((c) =>
+								this.compileCondition(c as PlanDecision),
+							);
+							const combined =
+								condNodes.length === 1 ? condNodes[0]! : andExpr(...condNodes);
+							where = where ? andExpr(where, combined) : combined;
+						}
+						break;
+					}
 					const whereExpr = this.compileCondition(decision);
 					where = where ? andExpr(where, whereExpr) : whereExpr;
 					break;
@@ -455,6 +528,29 @@ export class PlanCompiler {
 					distinct = true;
 					break;
 			}
+		}
+
+		// Flush pending JOINs into FROM clause
+		for (const pj of this.pendingJoins) {
+			const targetRV = rangeVar(
+				pj.table,
+				pj.alias,
+				plan.schema ?? this.schema,
+				this.naming,
+			);
+			const base =
+				from.length > 0
+					? from[0]!
+					: rangeVar(
+							plan.rootTable,
+							undefined,
+							plan.schema ?? this.schema,
+							this.naming,
+						);
+			from[0] =
+				pj.type === 'LEFT JOIN'
+					? leftJoin(base, targetRV, pj.on, pj.alias)
+					: innerJoin(base, targetRV, pj.on, pj.alias);
 		}
 
 		// Default to SELECT * if no columns specified
@@ -754,13 +850,7 @@ export class PlanCompiler {
 				return this.compileInCondition(decision, column, true);
 			case 'between':
 				return this.compileBetweenCondition(decision, column);
-			// PostgreSQL range operators
-			case 'contains':
-				return this.compileRangeOperator(decision, column, '@>');
-			case 'containedBy':
-				return this.compileRangeOperator(decision, column, '<@');
-			case 'overlaps':
-				return this.compileRangeOperator(decision, column, '&&');
+			// Note: range operators (contains/containedBy/overlaps) handled by early return above
 			default:
 				return eqExpr(column, value);
 		}
@@ -794,7 +884,9 @@ export class PlanCompiler {
 		// Use explicit foreignKey from decision if available (resolved from model),
 		// otherwise fall back to convention: {singularSourceTable}Id
 		const fkColumn = decision.foreignKey
-			? (typeof decision.foreignKey === 'string' ? decision.foreignKey : decision.foreignKey[0])
+			? typeof decision.foreignKey === 'string'
+				? decision.foreignKey
+				: decision.foreignKey[0]
 			: this.deriveFK(sourceTable);
 		const fkCorrelation = eqExpr(
 			columnRef(fkColumn, targetTable, undefined, this.naming),
@@ -839,6 +931,37 @@ export class PlanCompiler {
 		}
 
 		return subLink;
+	}
+
+	/**
+	 * Register an INNER JOIN for a belongsTo filter-strategy decision.
+	 * The JOIN replaces the EXISTS subquery when the planner chooses 'join'.
+	 * The ON condition correlates FK → PK (belongsTo: source.FK = target.PK).
+	 */
+	private registerJoinFilter(decision: PlanDecision): void {
+		const targetTable = decision.targetTable!;
+		const sourceTable = this.currentRootTable;
+
+		// For belongsTo: FK is on source table, references target PK
+		// e.g., posts.author_id → authors.id
+		const fkColumn = decision.foreignKey ?? this.deriveFK(targetTable);
+		const onCondition = eqExpr(
+			columnRef('id', targetTable, undefined, this.naming),
+			columnRef(fkColumn, sourceTable, undefined, this.naming),
+		);
+
+		// Use relation-based alias for self-referential tables
+		const alias =
+			targetTable === sourceTable
+				? (decision.relationName ?? `${targetTable}_join`)
+				: undefined;
+
+		this.pendingJoins.push({
+			type: 'JOIN',
+			table: targetTable,
+			...(alias && { alias }),
+			on: onCondition,
+		});
 	}
 
 	/**

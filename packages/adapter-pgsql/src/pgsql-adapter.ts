@@ -245,14 +245,16 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		plan: PlanReport,
 		model?: ModelIR,
 	): SimplifiedPlanReport['decisions'] {
-		// Find filter-strategy decisions with choice: 'exists' or 'notExists'
-		const existsFilterDecisions = plan.decisions.filter(
+		// Find filter-strategy decisions with choice: 'exists', 'notExists', or 'join'
+		const filterDecisions = plan.decisions.filter(
 			(d) =>
 				d.type === 'filter-strategy' &&
-				(d.choice === 'exists' || d.choice === 'notExists'),
+				(d.choice === 'exists' ||
+					d.choice === 'notExists' ||
+					d.choice === 'join'),
 		);
 
-		if (existsFilterDecisions.length === 0) {
+		if (filterDecisions.length === 0) {
 			return [];
 		}
 
@@ -300,7 +302,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		// Convert to where decisions for the compiler
 		const results: PlanDecision[] = [];
 
-		for (const d of existsFilterDecisions) {
+		for (const d of filterDecisions) {
 			const context = d.context;
 			// Skip if target table is not defined
 			if (!context.target) continue;
@@ -335,21 +337,109 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				const sourceTable = context.sourceTable || plan.rootTable;
 				const rel = model.getRelation(`${sourceTable}.${context.relation}`);
 				if (rel?.foreignKey) {
-					foreignKey = typeof rel.foreignKey === 'string'
-						? rel.foreignKey
-						: rel.foreignKey[0];
+					foreignKey =
+						typeof rel.foreignKey === 'string'
+							? rel.foreignKey
+							: rel.foreignKey[0];
 				}
 			}
 
 			const decision: PlanDecision = {
 				type: 'where',
-				// d.choice is always 'exists' (planner doesn't distinguish); use intent.kind for negation
+				// Use intent.kind for negation; use planner choice for strategy
 				operator: matchingIntent?.kind === 'notExists' ? 'notExists' : 'exists',
 				targetTable: context.target,
 				...(foreignKey && { foreignKey }),
 				...(conditions && { conditions }),
+				// Propagate planner's filter strategy choice to compiler
+				...(d.choice === 'join' && { choice: 'join' }),
+				// Pass relation name for alias (self-referential tables)
+				...(context.relation && { relationName: context.relation }),
 			};
 			results.push(decision);
+		}
+
+		return results;
+	}
+
+	/**
+	 * Extract LEFT JOIN include decisions from the plan.
+	 * When the planner chooses 'join' for to-one (belongsTo/hasOne) includes,
+	 * we compile LEFT JOIN instead of json_agg subquery.
+	 */
+	private extractLeftJoinIncludeDecisions(
+		plan: PlanReport,
+	): SimplifiedPlanReport['decisions'] {
+		// Find include-strategy decisions with choice: 'join' (to-one only)
+		const joinIncludeDecisions = plan.decisions.filter(
+			(d) => d.type === 'include-strategy' && d.choice === 'join',
+		);
+
+		if (joinIncludeDecisions.length === 0) {
+			return [];
+		}
+
+		const results: PlanDecision[] = [];
+
+		for (const d of joinIncludeDecisions) {
+			const context = d.context;
+			const relationName = context.includeAlias ?? context.relation;
+			if (!context.target || !relationName) continue;
+
+			// Find matching include intent to get column list
+			const includeIntent = (
+				plan.intent?.include as
+					| Array<{
+							relation: string;
+							select?: { type: string; fields?: readonly string[] };
+					  }>
+					| undefined
+			)?.find(
+				(i) => i.relation === relationName || i.relation === context.relation,
+			);
+
+			// Extract columns from include intent's select
+			// PK ('id') is always included for NULL-detection (missing relation)
+			let columns: string[] = ['id'];
+			if (
+				includeIntent?.select?.type === 'fields' &&
+				includeIntent.select.fields
+			) {
+				const fields = includeIntent.select.fields.filter((f) => f !== 'id');
+				columns = ['id', ...fields];
+			}
+
+			// Derive FK
+			const extendedContext = context as typeof context & {
+				foreignKey?: string | readonly string[];
+			};
+			let foreignKey: string | readonly string[] | undefined =
+				extendedContext.foreignKey;
+			if (!foreignKey && context.relationType) {
+				if (context.relationType === 'belongsTo') {
+					foreignKey = `${context.target.replace(/s$/, '')}Id`;
+				} else {
+					foreignKey = `${context.sourceTable.replace(/s$/, '')}Id`;
+				}
+			}
+
+			const relationType = context.relationType as
+				| 'belongsTo'
+				| 'hasMany'
+				| 'hasOne'
+				| undefined;
+
+			results.push({
+				type: 'selectLeftJoinInclude',
+				relationName,
+				targetTable: context.target,
+				...(relationType && { relationType }),
+				foreignKey: Array.isArray(foreignKey)
+					? foreignKey[0]
+					: (foreignKey ?? 'id'),
+				parentKey: 'id',
+				columns,
+			});
 		}
 
 		return results;
@@ -449,43 +539,47 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			// Phase 3: Add selectJsonAgg decisions for json_agg include strategies
 			// Look at plan.decisions (from planner) for include-strategy with choice: 'json_agg'
 			const jsonAggDecisions = this.extractJsonAggDecisions(plan);
-			const allDecisions = [
-			...decisions,
-			...existsDecisions,
-			...jsonAggDecisions,
-		];
 
-		// Enrich range operator decisions with dataType from model
-		// (PostgreSQL requires explicit type casts for range parameters)
-		const model = options?.model;
-		if (model) {
-			for (let i = 0; i < allDecisions.length; i++) {
-				const d = allDecisions[i];
-				if (
-					d &&
-					d.type === 'where' &&
-					(d.operator === 'contains' ||
-						d.operator === 'containedBy' ||
-						d.operator === 'overlaps')
-				) {
-					const tableName = d.table || plan.rootTable;
-					const table = model.getTable(tableName);
-					if (table) {
-						const col = table.columns.find(
-							(c) => c.name === d.column,
-						);
-						if (col?.type.endsWith('range')) {
-							allDecisions[i] = {
-								...d,
-								dataType: col.type,
-							} as typeof d;
+			// Phase 3 (F-006): Add LEFT JOIN include decisions for to-one relations
+			const leftJoinIncludeDecisions =
+				this.extractLeftJoinIncludeDecisions(plan);
+
+			const allDecisions = [
+				...decisions,
+				...existsDecisions,
+				...jsonAggDecisions,
+				...leftJoinIncludeDecisions,
+			];
+
+			// Enrich range operator decisions with dataType from model
+			// (PostgreSQL requires explicit type casts for range parameters)
+			const model = options?.model;
+			if (model) {
+				for (let i = 0; i < allDecisions.length; i++) {
+					const d = allDecisions[i];
+					if (
+						d &&
+						d.type === 'where' &&
+						(d.operator === 'contains' ||
+							d.operator === 'containedBy' ||
+							d.operator === 'overlaps')
+					) {
+						const tableName = d.table || plan.rootTable;
+						const table = model.getTable(tableName);
+						if (table) {
+							const col = table.columns.find((c) => c.name === d.column);
+							if (col?.type.endsWith('range')) {
+								allDecisions[i] = {
+									...d,
+									dataType: col.type,
+								} as typeof d;
+							}
 						}
 					}
 				}
 			}
-		}
 
-		simplifiedPlan = schemaName
+			simplifiedPlan = schemaName
 				? {
 						rootTable: plan.rootTable,
 						decisions: allDecisions,

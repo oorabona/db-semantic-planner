@@ -373,4 +373,171 @@ ${type}: ${input}
 			expect(requiresDatabase('error.contains')).toBe(false);
 		});
 	});
+
+	describe('db.output table block parsing', () => {
+		it('parses a table block with header and data rows', () => {
+			const content = `--- query: 0
+db.output:
+| id | name  |
+| 1  | Alice |
+| 2  | Bob   |
+`;
+			const result = parseAssertionFile(content);
+
+			expect(result.errors).toHaveLength(0);
+			expect(result.blocks).toHaveLength(1);
+			const assertion = result.blocks[0]!.assertions[0]!;
+			expect(assertion.type).toBe('db.output');
+			expect(assertion.value).toEqual({
+				columns: ['id', 'name'],
+				rows: [
+					['1', 'Alice'],
+					['2', 'Bob'],
+				],
+			});
+		});
+
+		it('ignores separator rows', () => {
+			const content = `--- query: 0
+db.output:
+| id | name  |
+|----|----- |
+| 1  | Alice |
+`;
+			const result = parseAssertionFile(content);
+
+			expect(result.errors).toHaveLength(0);
+			const assertion = result.blocks[0]!.assertions[0]!;
+			expect(assertion.value).toEqual({
+				columns: ['id', 'name'],
+				rows: [['1', 'Alice']],
+			});
+		});
+
+		it('handles escaped pipes in values', () => {
+			const content = `--- query: 0
+db.output:
+| col |
+| foo\\|bar |
+`;
+			const result = parseAssertionFile(content);
+
+			expect(result.errors).toHaveLength(0);
+			const assertion = result.blocks[0]!.assertions[0]!;
+			expect(assertion.value).toEqual({
+				columns: ['col'],
+				rows: [['foo|bar']],
+			});
+		});
+
+		it('ignores blank lines within table block', () => {
+			const content = `--- query: 0
+db.output:
+| id | name  |
+
+| 1  | Alice |
+
+| 2  | Bob   |
+`;
+			const result = parseAssertionFile(content);
+
+			expect(result.errors).toHaveLength(0);
+			const assertion = result.blocks[0]!.assertions[0]!;
+			expect(assertion.value).toEqual({
+				columns: ['id', 'name'],
+				rows: [
+					['1', 'Alice'],
+					['2', 'Bob'],
+				],
+			});
+		});
+
+		it('terminates table block at next --- header', () => {
+			const content = `--- query: 0
+db.output:
+| id |
+| 1  |
+--- query: 1
+success: true
+`;
+			const result = parseAssertionFile(content);
+
+			expect(result.errors).toHaveLength(0);
+			expect(result.blocks).toHaveLength(2);
+			expect(result.blocks[0]!.assertions[0]!.value).toEqual({
+				columns: ['id'],
+				rows: [['1']],
+			});
+			expect(result.blocks[1]!.assertions[0]!.type).toBe('success');
+		});
+
+		it('terminates table block at non-pipe assertion line', () => {
+			const content = `--- query: 0
+db.output:
+| id |
+| 1  |
+success: true
+`;
+			const result = parseAssertionFile(content);
+
+			expect(result.errors).toHaveLength(0);
+			const block = result.blocks[0]!;
+			expect(block.assertions).toHaveLength(2);
+			expect(block.assertions[0]!.type).toBe('db.output');
+			expect(block.assertions[1]!.type).toBe('success');
+		});
+
+		it('reports error when no table rows follow db.output:', () => {
+			const content = `--- query: 0
+db.output:
+success: true
+`;
+			const result = parseAssertionFile(content);
+
+			expect(result.errors).toHaveLength(1);
+			expect(result.errors[0]!.message).toContain('expected table rows');
+		});
+
+		it('handles header-only table (no data rows)', () => {
+			const content = `--- query: 0
+db.output:
+| id | name |
+`;
+			const result = parseAssertionFile(content);
+
+			expect(result.errors).toHaveLength(0);
+			const assertion = result.blocks[0]!.assertions[0]!;
+			expect(assertion.value).toEqual({
+				columns: ['id', 'name'],
+				rows: [],
+			});
+		});
+
+		it('trims whitespace from cell values', () => {
+			const content = `--- query: 0
+db.output:
+|  id  |  name  |
+|  1   |  Alice Johnson  |
+`;
+			const result = parseAssertionFile(content);
+
+			expect(result.errors).toHaveLength(0);
+			const assertion = result.blocks[0]!.assertions[0]!;
+			expect(assertion.value).toEqual({
+				columns: ['id', 'name'],
+				rows: [['1', 'Alice Johnson']],
+			});
+		});
+
+		it('coexists with db.output.contains (different type)', () => {
+			const content = `--- query: 0
+db.output.contains: Alice
+`;
+			const result = parseAssertionFile(content);
+
+			expect(result.errors).toHaveLength(0);
+			expect(result.blocks[0]!.assertions[0]!.type).toBe('db.output.contains');
+			expect(result.blocks[0]!.assertions[0]!.value).toBe('Alice');
+		});
+	});
 });

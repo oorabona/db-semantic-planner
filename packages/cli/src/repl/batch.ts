@@ -525,6 +525,8 @@ async function executeNqlQuery(
 					type: resultType,
 					intent: result.intent,
 					rowCount: execResult.rowCount,
+					rows: execResult.rows,
+					columns: execResult.columns,
 				};
 			} catch (execError) {
 				const message =
@@ -629,6 +631,8 @@ async function executeRawSql(
 			sql: input,
 			type: 'query',
 			rowCount: result.rowCount ?? 0,
+			rows: result.rows,
+			columns: result.columns,
 		};
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);

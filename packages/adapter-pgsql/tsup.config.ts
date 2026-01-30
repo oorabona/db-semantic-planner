@@ -1,9 +1,11 @@
+import { copyFileSync, mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { defineConfig } from 'tsup';
-import { copyFileSync, mkdirSync } from 'fs';
-import { resolve } from 'path';
 
 const copyWasm = () => {
-	const wasmSrc = resolve('../../node_modules/.pnpm/libpg-query@17.7.3/node_modules/libpg-query/wasm/libpg-query.wasm');
+	const wasmSrc = resolve(
+		'../../node_modules/.pnpm/libpg-query@17.7.3/node_modules/libpg-query/wasm/libpg-query.wasm',
+	);
 	const wasmDest = resolve('dist/libpg-query.wasm');
 	mkdirSync('dist', { recursive: true });
 	copyFileSync(wasmSrc, wasmDest);

@@ -56,8 +56,19 @@ success: true
 sql.equals: select "_categories".* from "ch6_pimdam"."categories" as "_categories" where "_categories"."active" = $1
 params.equals: [true]
 db.rows.equals: 10
-db.output.contains: Electronics
-db.output.contains: Clothing
+db.output:
+| id | name              | slug              | description                         | parent_id | position | active | created_at               |
+|----|-------------------|-------------------|-------------------------------------|-----------|----------|--------|--------------------------|
+| 1  | Electronics       | electronics       | Electronic devices and accessories  | NULL      | 0        | true   | 2024-01-01T08:00:00.000Z |
+| 2  | Clothing          | clothing          | Apparel and fashion items           | NULL      | 1        | true   | 2024-01-01T08:00:00.000Z |
+| 3  | Home & Garden     | home-garden       | Home improvement and gardening      | NULL      | 2        | true   | 2024-01-01T08:00:00.000Z |
+| 4  | Phones            | phones            | Smartphones and accessories         | 1         | 0        | true   | 2024-01-01T08:01:00.000Z |
+| 5  | Computers         | computers         | Laptops, desktops, tablets          | 1         | 1        | true   | 2024-01-01T08:01:00.000Z |
+| 6  | Audio             | audio             | Headphones, speakers, earbuds       | 1         | 2        | true   | 2024-01-01T08:01:00.000Z |
+| 7  | Smartphones       | smartphones       | Android and iOS smartphones         | 4         | 0        | true   | 2024-01-01T08:02:00.000Z |
+| 8  | Phone Accessories | phone-accessories | Cases, chargers, screen protectors  | 4         | 1        | true   | 2024-01-01T08:02:00.000Z |
+| 9  | Men               | men               | Mens clothing                       | 2         | 0        | true   | 2024-01-01T08:01:00.000Z |
+| 10 | Women             | women             | Womens clothing                     | 2         | 1        | true   | 2024-01-01T08:01:00.000Z |
 
 # ─────────────────────────────────────────
 # Query 7 products | where deletedAt is null
@@ -141,9 +152,12 @@ success: true
 sql.equals: select "_categories".* from "ch6_pimdam"."categories" as "_categories" left join "ch6_pimdam"."categories" as "parent_1" on "_categories"."parent_id" = "parent_1"."id" where "parent_1"."name" = $1
 params.equals: ["Electronics"]
 db.rows.equals: 3
-db.output.contains: Phones
-db.output.contains: Computers
-db.output.contains: Audio
+db.output:
+| id | name      | slug      | description                    | parent_id | position | active | created_at               |
+|----|-----------|-----------|--------------------------------|-----------|----------|--------|--------------------------|
+| 4  | Phones    | phones    | Smartphones and accessories    | 1         | 0        | true   | 2024-01-01T08:01:00.000Z |
+| 5  | Computers | computers | Laptops, desktops, tablets     | 1         | 1        | true   | 2024-01-01T08:01:00.000Z |
+| 6  | Audio     | audio     | Headphones, speakers, earbuds  | 1         | 2        | true   | 2024-01-01T08:01:00.000Z |
 
 # ─────────────────────────────────────────
 # Query 17 categories | where parent.name = 'Phones' (SPEC-001 pseudo-column)
@@ -153,8 +167,11 @@ success: true
 sql.equals: select "_categories".* from "ch6_pimdam"."categories" as "_categories" left join "ch6_pimdam"."categories" as "parent_1" on "_categories"."parent_id" = "parent_1"."id" where "parent_1"."name" = $1
 params.equals: ["Phones"]
 db.rows.equals: 2
-db.output.contains: Smartphones
-db.output.contains: Phone Accessories
+db.output:
+| id | name              | slug              | description                         | parent_id | position | active | created_at               |
+|----|-------------------|-------------------|-------------------------------------|-----------|----------|--------|--------------------------|
+| 7  | Smartphones       | smartphones       | Android and iOS smartphones         | 4         | 0        | true   | 2024-01-01T08:02:00.000Z |
+| 8  | Phone Accessories | phone-accessories | Cases, chargers, screen protectors  | 4         | 1        | true   | 2024-01-01T08:02:00.000Z |
 
 # ─────────────────────────────────────────
 # Query 18 categories | where parent.id = 1 (SPEC-001 pseudo-column with id)
