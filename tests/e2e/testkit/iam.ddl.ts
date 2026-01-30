@@ -5,17 +5,20 @@
  * Used for testing recursive CTE queries (role hierarchy traversal).
  */
 
-import { type Kysely, sql } from 'kysely';
+import type pg from 'pg';
+import { sql } from './sql.js';
 
 /**
  * Create IAM schema tables in the specified schema.
  */
 export async function createIamSchema(
-	db: Kysely<unknown>,
+	pool: pg.Pool,
 	schemaName: string,
 ): Promise<void> {
+	const s = sql.ref(schemaName);
+
 	// Set search path
-	await sql`SET search_path TO ${sql.ref(schemaName)}`.execute(db);
+	await sql`SET search_path TO ${s}`.execute(pool);
 
 	// Users table
 	await sql`
@@ -25,7 +28,7 @@ export async function createIamSchema(
 			email VARCHAR(255) NOT NULL,
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 		)
-	`.execute(db);
+	`.execute(pool);
 
 	// Roles table
 	await sql`
@@ -34,7 +37,7 @@ export async function createIamSchema(
 			name VARCHAR(100) UNIQUE NOT NULL,
 			description TEXT
 		)
-	`.execute(db);
+	`.execute(pool);
 
 	// Permissions table
 	await sql`
@@ -43,7 +46,7 @@ export async function createIamSchema(
 			name VARCHAR(100) UNIQUE NOT NULL,
 			description TEXT
 		)
-	`.execute(db);
+	`.execute(pool);
 
 	// User-Role junction (many-to-many)
 	await sql`
@@ -53,7 +56,7 @@ export async function createIamSchema(
 			granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (user_id, role_id)
 		)
-	`.execute(db);
+	`.execute(pool);
 
 	// Role-Permission junction (many-to-many)
 	await sql`
@@ -62,7 +65,7 @@ export async function createIamSchema(
 			permission_id INTEGER REFERENCES permissions(id) ON DELETE CASCADE,
 			PRIMARY KEY (role_id, permission_id)
 		)
-	`.execute(db);
+	`.execute(pool);
 
 	// Role hierarchy edges (edge-table for recursive CTE)
 	await sql`
@@ -72,7 +75,7 @@ export async function createIamSchema(
 			child_role_id INTEGER REFERENCES roles(id) ON DELETE CASCADE,
 			UNIQUE (parent_role_id, child_role_id)
 		)
-	`.execute(db);
+	`.execute(pool);
 
 	// Separation of Duty rules (incompatible role pairs)
 	await sql`
@@ -83,18 +86,18 @@ export async function createIamSchema(
 			reason TEXT NOT NULL,
 			UNIQUE (role_a_id, role_b_id)
 		)
-	`.execute(db);
+	`.execute(pool);
 
 	// Reset search path
-	await sql`SET search_path TO public`.execute(db);
+	await sql`SET search_path TO public`.execute(pool);
 }
 
 /**
  * Drop IAM schema tables.
  */
 export async function dropIamSchema(
-	db: Kysely<unknown>,
+	pool: pg.Pool,
 	schemaName: string,
 ): Promise<void> {
-	await sql`DROP SCHEMA IF EXISTS ${sql.ref(schemaName)} CASCADE`.execute(db);
+	await sql`DROP SCHEMA IF EXISTS ${sql.ref(schemaName)} CASCADE`.execute(pool);
 }

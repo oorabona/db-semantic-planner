@@ -11,7 +11,7 @@
  * Uses PostgreSQL which supports all features including json_agg.
  */
 
-import { compile } from '@dbsp/adapter-kysely';
+// Compilation is done through the adapter's compile() method
 import type { PlanReport, QueryIntent } from '@dbsp/core';
 import { createOrm, POSTGRESQL_CAPABILITIES, plan } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -22,7 +22,7 @@ import {
 	createBlogSchema,
 	dropBlogSchema,
 	getTestAdapter,
-	getTestDb,
+	getTestPool,
 	seedBlogData,
 	shouldSkipE2E,
 } from './testkit/index.js';
@@ -71,9 +71,9 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 			const dump = query.dump();
 
 			// Then: Strategy should be json_agg (default for to-many on PostgreSQL)
-		// ARCH-005: inverse relation from authorId: ref('authors') → 'author_posts'
-		const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
-		expect(decision?.choice).toBe('json_agg');
+			// ARCH-005: inverse relation from authorId: ref('authors') → 'author_posts'
+			const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
+			expect(decision?.choice).toBe('json_agg');
 		});
 
 		it('should generate SQL with json_agg subquery for to-many', async () => {
@@ -175,11 +175,11 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 			const dump = query.dump();
 
 			// Then: Plan report should contain include-strategy decision
-		// ARCH-005: inverse relation from authorId: ref('authors') → 'author_posts'
-		const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
-		expect(decision).toBeDefined();
-		expect(decision?.type).toBe('include-strategy');
-		expect(decision?.context?.relation).toBe('author_posts');
+			// ARCH-005: inverse relation from authorId: ref('authors') → 'author_posts'
+			const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
+			expect(decision).toBeDefined();
+			expect(decision?.type).toBe('include-strategy');
+			expect(decision?.context?.relation).toBe('author_posts');
 			expect(['json_agg', 'join']).toContain(decision?.choice);
 		});
 
@@ -197,8 +197,8 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 			const dump = query.dump();
 
 			// Then: Decision should have a reasoning explaining the choice
-		// ARCH-005: inverse relation from authorId: ref('authors') → 'author_posts'
-		const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
+			// ARCH-005: inverse relation from authorId: ref('authors') → 'author_posts'
+			const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
 			expect(decision?.reasoning).toBeDefined();
 			expect(decision?.reasoning?.length).toBeGreaterThan(0);
 		});
@@ -224,7 +224,7 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 		it('should filter authors by posts.published using EXISTS via raw Intent', async () => {
 			// SPEC-002: hasMany relation filter with WHERE posts.published = true
 			// Uses raw Intent API since whereRelation() is not yet on QueryBuilder
-			const db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 
 			// Build intent manually with relation filter (QueryIntent format)
@@ -246,7 +246,10 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 
 			// Plan and compile (with dialectCapabilities for proper strategy selection)
 			const planReport = plan(intent, blogModel, { dialectCapabilities });
-			const compiled = compile(planReport, blogModel, db, SCHEMA);
+			const compiled = adapter.compile(planReport, {
+				model: blogModel,
+				schemaName: SCHEMA,
+			});
 
 			// Execute
 			const rows = await adapter.execute(compiled);
@@ -255,14 +258,14 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 			expect(rows).toHaveLength(2);
 
 			// Check plan decision
-		// ARCH-005: 'posts' resolves to 'author_posts' (inverse of authorId: ref('authors'))
-		const decision = getFilterStrategyDecision(planReport, 'author_posts');
-		expect(decision?.choice).toBe('exists');
+			// ARCH-005: 'posts' resolves to 'author_posts' (inverse of authorId: ref('authors'))
+			const decision = getFilterStrategyDecision(planReport, 'author_posts');
+			expect(decision?.choice).toBe('exists');
 		});
 
 		it('should filter posts by author.name using JOIN via raw Intent', async () => {
 			// SPEC-002: belongsTo relation filter with WHERE author.name = 'Alice'
-			const db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 
 			// Build intent manually with relation filter (QueryIntent format)
@@ -284,7 +287,10 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 
 			// Plan and compile (with dialectCapabilities for proper strategy selection)
 			const planReport = plan(intent, blogModel, { dialectCapabilities });
-			const compiled = compile(planReport, blogModel, db, SCHEMA);
+			const compiled = adapter.compile(planReport, {
+				model: blogModel,
+				schemaName: SCHEMA,
+			});
 
 			// Execute
 			const rows = await adapter.execute(compiled);
@@ -300,7 +306,7 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 		it('should apply shared filter to json_agg when WHERE and SELECT use same relation', async () => {
 			// SPEC-002: Shared filter optimization
 			// When WHERE has posts.published = true, the json_agg should also filter
-			const db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 
 			// Build intent with both include and relation filter on same relation (QueryIntent format)
@@ -323,11 +329,17 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 
 			// Plan and compile to get SQL (with dialectCapabilities for json_agg strategy)
 			const planReport = plan(intent, blogModel, { dialectCapabilities });
-			const compiled = compile(planReport, blogModel, db, SCHEMA);
+			const compiled = adapter.compile(planReport, {
+				model: blogModel,
+				schemaName: SCHEMA,
+			});
 
 			// Debug: check include strategy decision
-		// ARCH-005: 'posts' resolves to 'author_posts' (inverse of authorId: ref('authors'))
-		const includeDecision = getIncludeStrategyDecision(planReport, 'author_posts');
+			// ARCH-005: 'posts' resolves to 'author_posts' (inverse of authorId: ref('authors'))
+			const includeDecision = getIncludeStrategyDecision(
+				planReport,
+				'author_posts',
+			);
 			console.log('Include strategy decision:', includeDecision?.choice);
 			console.log('Generated SQL:', compiled.sql);
 
@@ -356,7 +368,7 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 
 		it('should filter posts by comments.author_name using EXISTS via raw Intent', async () => {
 			// SPEC-002: Relation filter on posts -> comments (hasMany)
-			const db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 
 			// Build intent with relation filter for posts by comment author (QueryIntent format)
@@ -378,7 +390,10 @@ describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
 
 			// Plan and compile (with dialectCapabilities for proper strategy selection)
 			const planReport = plan(intent, blogModel, { dialectCapabilities });
-			const compiled = compile(planReport, blogModel, db, SCHEMA);
+			const compiled = adapter.compile(planReport, {
+				model: blogModel,
+				schemaName: SCHEMA,
+			});
 
 			// Then: Should use EXISTS for relation filter (hasMany)
 			expect(compiled.sql.toLowerCase()).toContain('exists');

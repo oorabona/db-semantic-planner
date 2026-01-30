@@ -57,7 +57,7 @@ export function isExpressionSpec(spec: ColumnSpec): spec is ExpressionSpec {
 
 /**
  * Options for streaming query execution.
- * Re-exports from adapter-kysely for convenience.
+ * Options for configuring streaming behavior.
  */
 export interface StreamOptions {
 	/**

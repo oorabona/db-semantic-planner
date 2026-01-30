@@ -12,7 +12,7 @@ import {
 	createPimdamSchema,
 	dropPimdamSchema,
 	getTestAdapter,
-	getTestDb,
+	getTestPool,
 	pimdamModel,
 	seedAcmeTenant,
 	shouldSkipE2E,
@@ -264,7 +264,7 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 	describe('Overhead analysis', () => {
 		it('should measure ORM overhead vs raw SQL', async () => {
 			const adapter = await getTestAdapter();
-			const db = await getTestDb();
+			const pool = await getTestPool();
 			const orm = createOrm({ model: pimdamModel, adapter });
 
 			// ORM query

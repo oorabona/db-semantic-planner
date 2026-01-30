@@ -66,28 +66,6 @@ export {
 	type UpdateOptions,
 	updateStmt,
 } from './ast-helpers.js';
-// Comparison Adapter
-export {
-	type ComparisonAdapterConfig,
-	type ComparisonMetrics,
-	type ComparisonMode,
-	type ComparisonResult,
-	compareParams,
-	compareSql,
-	createMetricsCollector,
-	deparseWithValidation,
-	formatComparisonResult,
-	generateMetricsSummary,
-	generateSqlDiff,
-	getComparisonMode,
-	isComparisonEnabled,
-	isStrictMode,
-	logMismatch,
-	resetMetrics,
-	type SqlDiff,
-	updateMetrics,
-	validateSqlSyntax,
-} from './comparison-adapter.js';
 // Compiler
 export {
 	type CompiledResult,
@@ -196,6 +174,7 @@ export {
 // Adapter
 export {
 	createPgsqlAdapter,
+	createPgsqlCompileOnlyAdapter,
 	PgsqlAdapter,
 	type PgsqlAdapterOptions,
 } from './pgsql-adapter.js';

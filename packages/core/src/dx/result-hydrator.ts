@@ -16,9 +16,8 @@ import type { RecursiveIntent, WhereIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
 import { planRecursive } from '../planner.js';
-import { hydrateJsonAggIncludes as hydrateJsonAggIncludesShared } from './hydration-utils.js';
-
 import { RelationNotFoundError } from './errors.js';
+import { hydrateJsonAggIncludes as hydrateJsonAggIncludesShared } from './hydration-utils.js';
 import type { RecursiveIncludeConfig } from './intent-builder.js';
 
 // ============================================================================

@@ -20,18 +20,18 @@
  */
 
 import { and, createOrm, eq, exists, notExists } from '@dbsp/core';
-import { sql as kyselySql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
 	dropExtendedPimdamSchema,
 	getTestAdapter,
-	getTestDb,
+	getTestPool,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
 	shouldSkipE2E,
 } from './testkit/index.js';
+import { sql as kyselySql } from './testkit/sql.js';
 
 const SCHEMA = 'q3q5_variants_assets';
 
@@ -52,7 +52,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 	// =========================================================================
 	describe('Q3: Variants with locale-specific images', () => {
 		it('Q3-01: should load product with variants and their images', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Get T-Shirt (id=4) with its variants and their images
 			const result = await kyselySql`
@@ -70,7 +70,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				LEFT JOIN ${kyselySql.ref(SCHEMA)}.assets a ON a.id = vi.asset_id
 				WHERE p.sku = 'TSHIRT-001'
 				ORDER BY v.name, vi.locale
-			`.execute(db);
+			`.execute(pool);
 
 			// T-Shirt has 3 variants: S, M, L
 			// Small (S) has FR and EN images
@@ -96,7 +96,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 		});
 
 		it('Q3-02: should filter variants by stock availability', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
@@ -121,7 +121,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				FROM ${kyselySql.ref(SCHEMA)}.variants
 				WHERE product_id = 4 AND stock > 0
 				ORDER BY name
-			`.execute(db);
+			`.execute(pool);
 
 			const inStock = result.rows as {
 				sku: string;
@@ -134,7 +134,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 		});
 
 		it('Q3-03: should get variant image with locale fallback', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Variant "Medium" has same image for FR and EN
 			// Simulating fallback: prefer FR, fallback to EN
@@ -152,7 +152,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				FROM ${kyselySql.ref(SCHEMA)}.variants v
 				WHERE v.product_id = 4
 				ORDER BY v.name
-			`.execute(db);
+			`.execute(pool);
 
 			const variants = result.rows as {
 				sku: string;
@@ -173,7 +173,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 	// =========================================================================
 	describe('Q4: Expiring assets used by active products', () => {
 		it('Q4-01: should find expiring assets used by active products', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Asset 5 (expiring-soon.jpg) expires in 7 days and is used by active product 5
 			const result = await kyselySql`
@@ -189,7 +189,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 					  AND p.deleted_at IS NULL
 				  )
 				ORDER BY a.expires_at
-			`.execute(db);
+			`.execute(pool);
 
 			const expiring = result.rows as { id: number; storageKey: string }[];
 			expect(expiring.length).toBeGreaterThanOrEqual(1);
@@ -199,7 +199,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 		});
 
 		it('Q4-02: should exclude assets used only by inactive products', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Asset 12 is only used by deleted product 6
 			const result = await kyselySql`
@@ -216,7 +216,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 					  AND p.active = true
 					  AND p.deleted_at IS NULL
 				)
-			`.execute(db);
+			`.execute(pool);
 
 			const inactiveOnly = result.rows as { id: number; storageKey: string }[];
 			// Asset 12 (deleted-product.jpg) is only used by deleted product
@@ -226,7 +226,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 		});
 
 		it('Q4-03: should join assets with product details', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Get expiring assets with their product information
 			const result = await kyselySql`
@@ -242,7 +242,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				  AND a.expires_at < NOW() + INTERVAL '30 days'
 				  AND p.active = true
 				ORDER BY a.expires_at
-			`.execute(db);
+			`.execute(pool);
 
 			const expiring = result.rows as {
 				storageKey: string;
@@ -264,7 +264,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 	// =========================================================================
 	describe('Q5: Unused assets (NOT EXISTS)', () => {
 		it('Q5-01: should find assets not linked to any product', async () => {
-			const _db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
@@ -293,7 +293,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 		});
 
 		it('Q5-02: should find assets not used by active products', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Assets used only by deleted/inactive products
 			const result = await kyselySql`
@@ -306,7 +306,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 					  AND p.deleted_at IS NULL
 					  AND p.active = true
 				)
-			`.execute(db);
+			`.execute(pool);
 
 			const unused = result.rows as { storageKey: string; kind: string }[];
 			// orphan.jpg, deleted-product.jpg, video, document should be "unused"
@@ -317,7 +317,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 		});
 
 		it('Q5-03: should count unused assets by kind', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Count unused assets grouped by kind
 			const result = await kyselySql`
@@ -332,7 +332,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				)
 				GROUP BY a.kind
 				ORDER BY a.kind
-			`.execute(db);
+			`.execute(pool);
 
 			const counts = result.rows as { kind: string; count: string }[];
 			// Should have counts for image, video, document
@@ -349,7 +349,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 	// =========================================================================
 	describe('ORM API: exists/notExists patterns', () => {
 		it('should generate EXISTS SQL for variant images filter', async () => {
-			const _db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 
@@ -366,7 +366,7 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 		});
 
 		it('should generate NOT EXISTS SQL for orphan assets', async () => {
-			const _db = await getTestDb();
+			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: pimdamExtendedModel, adapter });
 

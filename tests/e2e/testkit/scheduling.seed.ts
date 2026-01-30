@@ -4,8 +4,8 @@
  * Test data for PostgreSQL range type E2E tests.
  */
 
-import { sql } from 'kysely';
-import { getTestDb } from './db.js';
+import { getTestPool } from './db.js';
+import { sql } from './sql.js';
 
 /**
  * Seed scheduling data in a schema.
@@ -16,7 +16,7 @@ import { getTestDb } from './db.js';
  * - 4 price tiers (with quantity ranges)
  */
 export async function seedSchedulingData(schemaName: string): Promise<void> {
-	const db = await getTestDb();
+	const pool = await getTestPool();
 
 	// Rooms
 	await sql`
@@ -25,7 +25,7 @@ export async function seedSchedulingData(schemaName: string): Promise<void> {
       (1, 'Conference A', 20, 1),
       (2, 'Conference B', 10, 1),
       (3, 'Board Room', 30, 2)
-  `.execute(db);
+  `.execute(pool);
 
 	// Room bookings with daterange
 	// Format: '[start, end)' - inclusive start, exclusive end
@@ -38,7 +38,7 @@ export async function seedSchedulingData(schemaName: string): Promise<void> {
       (4, 2, 'Diana', '[2024-01-18, 2024-01-19)', 'Interview'),
       (5, 3, 'Eve', '[2024-01-01, 2024-01-31)', 'Monthly board meetings'),
       (6, 1, 'Frank', '[2024-02-01, 2024-02-05)', 'Sprint planning')
-  `.execute(db);
+  `.execute(pool);
 
 	// Events with tstzrange (timezone-aware timestamp range)
 	await sql`
@@ -49,7 +49,7 @@ export async function seedSchedulingData(schemaName: string): Promise<void> {
       (3, 'Tech Talk', 2, '[2024-01-15 11:00:00+00, 2024-01-15 12:00:00+00)', 'Charlie', 20),
       (4, 'All Hands', 3, '[2024-01-16 10:00:00+00, 2024-01-16 11:30:00+00)', 'Diana', 100),
       (5, 'Workshop', 1, '[2024-01-17 09:00:00+00, 2024-01-17 17:00:00+00)', 'Eve', 25)
-  `.execute(db);
+  `.execute(pool);
 
 	// Price tiers with int4range
 	// Different prices based on quantity ordered
@@ -60,7 +60,7 @@ export async function seedSchedulingData(schemaName: string): Promise<void> {
       (2, 'Widget A', '[10, 50)', 89.99),
       (3, 'Widget A', '[50, 100)', 79.99),
       (4, 'Widget A', '[100,)', 69.99)
-  `.execute(db);
+  `.execute(pool);
 }
 
 /**

@@ -99,11 +99,11 @@ describe.skipIf(shouldSkipE2E())(
 				const dump = buildQ2Query(orm, 'acme').dump();
 
 				// SQL should contain WITH clause
-			// Note: pgsql-adapter compiles multi-EXISTS as flat WHERE conditions,
-			// not CTEs. CTE extraction is a future enhancement (TODO_ADAPTER_PGSQL.md).
-			// Both approaches are semantically equivalent.
-			// expect(dump.sql.toUpperCase()).toContain('WITH');
-			expect(dump.sql.toUpperCase()).toContain('EXISTS');
+				// Note: pgsql-adapter compiles multi-EXISTS as flat WHERE conditions,
+				// not CTEs. CTE extraction is a future enhancement (TODO_ADAPTER_PGSQL.md).
+				// Both approaches are semantically equivalent.
+				// expect(dump.sql.toUpperCase()).toContain('WITH');
+				expect(dump.sql.toUpperCase()).toContain('EXISTS');
 			});
 
 			it('should have two EXISTS clauses in SQL', async () => {

@@ -10,8 +10,8 @@
  * - Q8: Ambiguous relations (users table)
  */
 
-import { sql } from 'kysely';
-import { getTestDb } from './db.js';
+import { getTestPool } from './db.js';
+import { sql } from './sql.js';
 
 /**
  * Create the extended PIM/DAM schema tables in a tenant schema.
@@ -19,52 +19,53 @@ import { getTestDb } from './db.js';
 export async function createExtendedPimdamSchema(
 	schemaName: string,
 ): Promise<void> {
-	const db = await getTestDb();
+	const pool = await getTestPool();
+	const s = sql.ref(schemaName);
 
 	// Create schema
-	await sql`CREATE SCHEMA IF NOT EXISTS ${sql.ref(schemaName)}`.execute(db);
+	await sql`CREATE SCHEMA IF NOT EXISTS ${s}`.execute(pool);
 
 	// Users table (for Q8 ambiguity tests)
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.users (
+    CREATE TABLE ${s}.users (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       email TEXT NOT NULL UNIQUE,
       role TEXT NOT NULL DEFAULT 'member'
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Families table (for Q1 completeness)
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.families (
+    CREATE TABLE ${s}.families (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       code TEXT NOT NULL UNIQUE
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Channels table (for Q1 completeness)
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.channels (
+    CREATE TABLE ${s}.channels (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       code TEXT NOT NULL UNIQUE
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Categories table (extended with path for Q6)
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.categories (
+    CREATE TABLE ${s}.categories (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
-      parent_id INTEGER REFERENCES ${sql.ref(schemaName)}.categories(id),
+      parent_id INTEGER REFERENCES ${s}.categories(id),
       path TEXT NOT NULL DEFAULT '/'
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Products table (extended with locale fields and user refs)
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.products (
+    CREATE TABLE ${s}.products (
       id SERIAL PRIMARY KEY,
       sku TEXT NOT NULL UNIQUE,
       title TEXT NOT NULL,
@@ -73,19 +74,19 @@ export async function createExtendedPimdamSchema(
       name_default TEXT,
       description_fr TEXT,
       description_en TEXT,
-      category_id INTEGER REFERENCES ${sql.ref(schemaName)}.categories(id),
-      family_id INTEGER REFERENCES ${sql.ref(schemaName)}.families(id),
+      category_id INTEGER REFERENCES ${s}.categories(id),
+      family_id INTEGER REFERENCES ${s}.families(id),
       active BOOLEAN DEFAULT true,
       is_bundle BOOLEAN DEFAULT false,
       deleted_at TIMESTAMP,
-      author_id INTEGER REFERENCES ${sql.ref(schemaName)}.users(id),
-      reviewer_id INTEGER REFERENCES ${sql.ref(schemaName)}.users(id)
+      author_id INTEGER REFERENCES ${s}.users(id),
+      reviewer_id INTEGER REFERENCES ${s}.users(id)
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Assets table
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.assets (
+    CREATE TABLE ${s}.assets (
       id SERIAL PRIMARY KEY,
       kind TEXT NOT NULL,
       sha256 TEXT NOT NULL,
@@ -97,14 +98,14 @@ export async function createExtendedPimdamSchema(
       expires_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW()
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Product Images (with role for Q8)
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.product_images (
+    CREATE TABLE ${s}.product_images (
       id SERIAL PRIMARY KEY,
-      product_id INTEGER NOT NULL REFERENCES ${sql.ref(schemaName)}.products(id),
-      asset_id INTEGER NOT NULL REFERENCES ${sql.ref(schemaName)}.assets(id),
+      product_id INTEGER NOT NULL REFERENCES ${s}.products(id),
+      asset_id INTEGER NOT NULL REFERENCES ${s}.assets(id),
       locale TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
       is_main BOOLEAN DEFAULT false,
@@ -112,99 +113,99 @@ export async function createExtendedPimdamSchema(
       position INTEGER DEFAULT 0,
       deleted_at TIMESTAMP
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Variants
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.variants (
+    CREATE TABLE ${s}.variants (
       id SERIAL PRIMARY KEY,
-      product_id INTEGER NOT NULL REFERENCES ${sql.ref(schemaName)}.products(id),
+      product_id INTEGER NOT NULL REFERENCES ${s}.products(id),
       sku TEXT NOT NULL UNIQUE,
       name TEXT NOT NULL,
       price_cents INTEGER NOT NULL,
       stock INTEGER DEFAULT 0
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Family attributes (Q1 completeness requirements)
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.family_attributes (
+    CREATE TABLE ${s}.family_attributes (
       id SERIAL PRIMARY KEY,
-      family_id INTEGER NOT NULL REFERENCES ${sql.ref(schemaName)}.families(id),
-      channel_id INTEGER NOT NULL REFERENCES ${sql.ref(schemaName)}.channels(id),
+      family_id INTEGER NOT NULL REFERENCES ${s}.families(id),
+      channel_id INTEGER NOT NULL REFERENCES ${s}.channels(id),
       attribute_name TEXT NOT NULL,
       is_required BOOLEAN DEFAULT true,
       UNIQUE(family_id, channel_id, attribute_name)
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Product attributes (Q1 completeness values)
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.product_attributes (
+    CREATE TABLE ${s}.product_attributes (
       id SERIAL PRIMARY KEY,
-      product_id INTEGER NOT NULL REFERENCES ${sql.ref(schemaName)}.products(id),
+      product_id INTEGER NOT NULL REFERENCES ${s}.products(id),
       attribute_name TEXT NOT NULL,
       value TEXT,
       locale TEXT
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Bundle components (Q7 BOM)
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.bundle_components (
+    CREATE TABLE ${s}.bundle_components (
       id SERIAL PRIMARY KEY,
-      bundle_id INTEGER NOT NULL REFERENCES ${sql.ref(schemaName)}.products(id),
-      component_id INTEGER NOT NULL REFERENCES ${sql.ref(schemaName)}.products(id),
+      bundle_id INTEGER NOT NULL REFERENCES ${s}.products(id),
+      component_id INTEGER NOT NULL REFERENCES ${s}.products(id),
       quantity INTEGER NOT NULL DEFAULT 1,
       position INTEGER DEFAULT 0,
       UNIQUE(bundle_id, component_id)
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Variant images (Q3)
 	await sql`
-    CREATE TABLE ${sql.ref(schemaName)}.variant_images (
+    CREATE TABLE ${s}.variant_images (
       id SERIAL PRIMARY KEY,
-      variant_id INTEGER NOT NULL REFERENCES ${sql.ref(schemaName)}.variants(id),
-      asset_id INTEGER NOT NULL REFERENCES ${sql.ref(schemaName)}.assets(id),
+      variant_id INTEGER NOT NULL REFERENCES ${s}.variants(id),
+      asset_id INTEGER NOT NULL REFERENCES ${s}.assets(id),
       locale TEXT NOT NULL,
       is_main BOOLEAN DEFAULT false,
       position INTEGER DEFAULT 0
     )
-  `.execute(db);
+  `.execute(pool);
 
 	// Indexes for performance
 	await sql`
-    CREATE INDEX idx_${sql.raw(schemaName)}_products_family ON ${sql.ref(schemaName)}.products(family_id)
-  `.execute(db);
+    CREATE INDEX ${sql.ref(`idx_${schemaName}_products_family`)} ON ${s}.products(family_id)
+  `.execute(pool);
 
 	await sql`
-    CREATE INDEX idx_${sql.raw(schemaName)}_products_category ON ${sql.ref(schemaName)}.products(category_id)
-  `.execute(db);
+    CREATE INDEX ${sql.ref(`idx_${schemaName}_products_category`)} ON ${s}.products(category_id)
+  `.execute(pool);
 
 	await sql`
-    CREATE INDEX idx_${sql.raw(schemaName)}_categories_path ON ${sql.ref(schemaName)}.categories(path)
-  `.execute(db);
+    CREATE INDEX ${sql.ref(`idx_${schemaName}_categories_path`)} ON ${s}.categories(path)
+  `.execute(pool);
 
 	await sql`
-    CREATE INDEX idx_${sql.raw(schemaName)}_product_images_product_id ON ${sql.ref(schemaName)}.product_images(product_id)
-  `.execute(db);
+    CREATE INDEX ${sql.ref(`idx_${schemaName}_product_images_product_id`)} ON ${s}.product_images(product_id)
+  `.execute(pool);
 
 	await sql`
-    CREATE INDEX idx_${sql.raw(schemaName)}_product_images_lookup ON ${sql.ref(schemaName)}.product_images(product_id, locale, is_main, status)
-  `.execute(db);
+    CREATE INDEX ${sql.ref(`idx_${schemaName}_product_images_lookup`)} ON ${s}.product_images(product_id, locale, is_main, status)
+  `.execute(pool);
 
 	await sql`
-    CREATE INDEX idx_${sql.raw(schemaName)}_family_attributes_family ON ${sql.ref(schemaName)}.family_attributes(family_id)
-  `.execute(db);
+    CREATE INDEX ${sql.ref(`idx_${schemaName}_family_attributes_family`)} ON ${s}.family_attributes(family_id)
+  `.execute(pool);
 
 	await sql`
-    CREATE INDEX idx_${sql.raw(schemaName)}_product_attributes_product ON ${sql.ref(schemaName)}.product_attributes(product_id)
-  `.execute(db);
+    CREATE INDEX ${sql.ref(`idx_${schemaName}_product_attributes_product`)} ON ${s}.product_attributes(product_id)
+  `.execute(pool);
 
 	await sql`
-    CREATE INDEX idx_${sql.raw(schemaName)}_bundle_components_bundle ON ${sql.ref(schemaName)}.bundle_components(bundle_id)
-  `.execute(db);
+    CREATE INDEX ${sql.ref(`idx_${schemaName}_bundle_components_bundle`)} ON ${s}.bundle_components(bundle_id)
+  `.execute(pool);
 }
 
 /**
@@ -213,6 +214,6 @@ export async function createExtendedPimdamSchema(
 export async function dropExtendedPimdamSchema(
 	schemaName: string,
 ): Promise<void> {
-	const db = await getTestDb();
-	await sql`DROP SCHEMA IF EXISTS ${sql.ref(schemaName)} CASCADE`.execute(db);
+	const pool = await getTestPool();
+	await sql`DROP SCHEMA IF EXISTS ${sql.ref(schemaName)} CASCADE`.execute(pool);
 }

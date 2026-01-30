@@ -103,7 +103,7 @@ describe('nql-executor', () => {
 				const result = compileNqlToSql('users', model);
 
 				expect(result.intentType).toBe('query');
-				expect(result.sql).toContain('select');
+				expect(result.sql.toLowerCase()).toContain('select');
 				expect(result.sql.toLowerCase()).toContain('users');
 			});
 

@@ -14,70 +14,86 @@ import {
 } from '../verifier.js';
 
 /**
- * Try to dynamically import Kysely and pg.
- * These are optional peer dependencies.
+ * Try to dynamically import pg.
+ * pg is an optional peer dependency.
  */
 async function createDbConnection(connectionUrl: string) {
 	try {
-		// Dynamic import of Kysely
-		const { Kysely, PostgresDialect } = await import('kysely');
 		const { default: pg } = await import('pg');
 
 		const pool = new pg.Pool({
 			connectionString: connectionUrl,
 		});
 
-		const db = new Kysely<unknown>({
-			dialect: new PostgresDialect({ pool }),
-		});
-
-		return { db, pool };
+		return { pool };
 	} catch (_error) {
 		throw new Error(
-			'kysely and pg are required for verify command. ' +
-				'Install them with: pnpm add kysely pg',
+			'pg is required for verify command. ' + 'Install it with: pnpm add pg',
 		);
 	}
 }
 
 /**
- * Introspect database tables using Kysely's introspection API.
- * Note: Using 'any' types for dynamically-imported Kysely introspection results.
+ * Introspect database tables using pg information_schema queries.
  */
 async function introspectDatabase(
-	// biome-ignore lint/suspicious/noExplicitAny: Dynamic import - accepting any Kysely instance
-	db: any,
+	pool: import('pg').Pool,
 	schemaName?: string,
 ): Promise<DbTableInfo[]> {
-	const tables = await db.introspection.getTables({
-		withInternalKyselyTables: false,
-	});
+	const targetSchema = schemaName ?? 'public';
 
-	// Filter by schema if specified
-	const filteredTables = schemaName
-		? // biome-ignore lint/suspicious/noExplicitAny: Kysely TableMetadata from introspection
-			tables.filter((t: any) => t.schema === schemaName)
-		: // biome-ignore lint/suspicious/noExplicitAny: Kysely TableMetadata from introspection
-			tables.filter((t: any) => t.schema === 'public');
+	// Get tables in the target schema
+	const tablesResult = await pool.query(
+		`SELECT table_name FROM information_schema.tables
+		 WHERE table_schema = $1 AND table_type = 'BASE TABLE'
+		 ORDER BY table_name`,
+		[targetSchema],
+	);
 
-	// Get column info for each table
 	const result: DbTableInfo[] = [];
-	for (const table of filteredTables) {
-		// biome-ignore lint/suspicious/noExplicitAny: Kysely ColumnMetadata type from introspection
-		const columns: DbColumnInfo[] = table.columns.map((col: any) => ({
-			name: col.name,
-			dataType: col.dataType,
-			isNullable: col.isNullable,
-			isPrimaryKey:
-				col.name ===
-				// biome-ignore lint/suspicious/noExplicitAny: Kysely ColumnMetadata type
-				table.columns.find((c: any) => c.hasDefaultValue && c.name === 'id')
-					?.name,
-			hasDefault: col.hasDefaultValue,
+
+	for (const tableRow of tablesResult.rows) {
+		const tableName = tableRow.table_name as string;
+
+		// Get columns for this table
+		const columnsResult = await pool.query(
+			`SELECT
+				column_name,
+				data_type,
+				is_nullable,
+				column_default
+			 FROM information_schema.columns
+			 WHERE table_schema = $1 AND table_name = $2
+			 ORDER BY ordinal_position`,
+			[targetSchema, tableName],
+		);
+
+		// Get primary key columns
+		const pkResult = await pool.query(
+			`SELECT kcu.column_name
+			 FROM information_schema.table_constraints tc
+			 JOIN information_schema.key_column_usage kcu
+			   ON tc.constraint_name = kcu.constraint_name
+			   AND tc.table_schema = kcu.table_schema
+			 WHERE tc.table_schema = $1
+			   AND tc.table_name = $2
+			   AND tc.constraint_type = 'PRIMARY KEY'`,
+			[targetSchema, tableName],
+		);
+		const pkColumns = new Set(
+			pkResult.rows.map((r) => r.column_name as string),
+		);
+
+		const columns: DbColumnInfo[] = columnsResult.rows.map((col) => ({
+			name: col.column_name as string,
+			dataType: col.data_type as string,
+			isNullable: (col.is_nullable as string) === 'YES',
+			isPrimaryKey: pkColumns.has(col.column_name as string),
+			hasDefault: col.column_default != null,
 		}));
 
 		result.push({
-			name: table.name,
+			name: tableName,
 			columns,
 		});
 	}
@@ -120,11 +136,11 @@ export const verifyCommand = new Command('verify')
 				const schema = await loadSchema(schemaPath);
 
 				// Connect to database
-				const { db, pool } = await createDbConnection(options.db);
+				const { pool } = await createDbConnection(options.db);
 
 				try {
 					// Introspect database
-					const dbTables = await introspectDatabase(db, options.schemaName);
+					const dbTables = await introspectDatabase(pool, options.schemaName);
 
 					// Verify
 					const result = verify(schema, dbTables);
@@ -140,7 +156,6 @@ export const verifyCommand = new Command('verify')
 					process.exit(result.valid ? 0 : 1);
 				} finally {
 					// Close database connection
-					await db.destroy();
 					await pool.end();
 				}
 			} catch (error) {

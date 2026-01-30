@@ -18,18 +18,18 @@
  */
 
 import { createOrm, like } from '@dbsp/core';
-import { sql as kyselySql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
 	dropExtendedPimdamSchema,
 	getTestAdapter,
-	getTestDb,
+	getTestPool,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
 	shouldSkipE2E,
 } from './testkit/index.js';
+import { sql as kyselySql } from './testkit/sql.js';
 
 const SCHEMA = 'q6_category_tree';
 
@@ -59,7 +59,7 @@ describe.skipIf(shouldSkipE2E())(
 
 		describe('Q6-01: Find all products in category subtree', () => {
 			it('should find products in Electronics and all descendants', async () => {
-				const db = await getTestDb();
+				const pool = await getTestPool();
 
 				// Products in Electronics (/1/) and all children
 				const result = await kyselySql`
@@ -68,7 +68,7 @@ describe.skipIf(shouldSkipE2E())(
 				JOIN ${kyselySql.ref(SCHEMA)}.categories c ON c.id = p.category_id
 				WHERE c.path LIKE '/1/%'
 				ORDER BY p.sku
-			`.execute(db);
+			`.execute(pool);
 
 				const products = result.rows as {
 					sku: string;
@@ -81,14 +81,14 @@ describe.skipIf(shouldSkipE2E())(
 			});
 
 			it('should find products only in Clothing subtree', async () => {
-				const db = await getTestDb();
+				const pool = await getTestPool();
 
 				const result = await kyselySql`
 				SELECT p.sku, c.name AS category_name
 				FROM ${kyselySql.ref(SCHEMA)}.products p
 				JOIN ${kyselySql.ref(SCHEMA)}.categories c ON c.id = p.category_id
 				WHERE c.path LIKE '/5/%'
-			`.execute(db);
+			`.execute(pool);
 
 				const products = result.rows as { sku: string }[];
 				// Only T-Shirt is in Clothing/T-Shirts (/5/6/)
@@ -99,7 +99,7 @@ describe.skipIf(shouldSkipE2E())(
 
 		describe('Q6-02: Get category breadcrumb', () => {
 			it('should get ancestors for Smartphones category', async () => {
-				const db = await getTestDb();
+				const pool = await getTestPool();
 
 				// Smartphones has path /1/2/3/
 				// Breadcrumb should be: Electronics -> Phones -> Smartphones
@@ -108,7 +108,7 @@ describe.skipIf(shouldSkipE2E())(
 				FROM ${kyselySql.ref(SCHEMA)}.categories
 				WHERE '/1/2/3/' LIKE path || '%'
 				ORDER BY path
-			`.execute(db);
+			`.execute(pool);
 
 				const breadcrumb = result.rows as { name: string; path: string }[];
 				expect(breadcrumb).toHaveLength(3);
@@ -118,7 +118,7 @@ describe.skipIf(shouldSkipE2E())(
 			});
 
 			it('should get ancestors for T-Shirts category', async () => {
-				const db = await getTestDb();
+				const pool = await getTestPool();
 
 				// T-Shirts has path /5/6/
 				const result = await kyselySql`
@@ -126,7 +126,7 @@ describe.skipIf(shouldSkipE2E())(
 				FROM ${kyselySql.ref(SCHEMA)}.categories
 				WHERE '/5/6/' LIKE path || '%'
 				ORDER BY path
-			`.execute(db);
+			`.execute(pool);
 
 				const breadcrumb = result.rows as { name: string }[];
 				expect(breadcrumb).toHaveLength(2);
@@ -137,7 +137,7 @@ describe.skipIf(shouldSkipE2E())(
 
 		describe('Q6-03: Count products per category with descendants', () => {
 			it('should count products including descendants', async () => {
-				const db = await getTestDb();
+				const pool = await getTestPool();
 
 				// Count products in each category including all descendants
 				const result = await kyselySql`
@@ -154,7 +154,7 @@ describe.skipIf(shouldSkipE2E())(
 					) AS product_count
 				FROM ${kyselySql.ref(SCHEMA)}.categories c
 				ORDER BY c.path
-			`.execute(db);
+			`.execute(pool);
 
 				const counts = result.rows as {
 					name: string;
@@ -176,7 +176,7 @@ describe.skipIf(shouldSkipE2E())(
 			});
 
 			it('should correctly count leaf categories', async () => {
-				const db = await getTestDb();
+				const pool = await getTestPool();
 
 				// Audio (/1/4/) is a leaf with no products
 				const result = await kyselySql`
@@ -187,7 +187,7 @@ describe.skipIf(shouldSkipE2E())(
 				LEFT JOIN ${kyselySql.ref(SCHEMA)}.products p ON p.category_id = c.id AND p.deleted_at IS NULL
 				WHERE c.name = 'Audio'
 				GROUP BY c.id, c.name
-			`.execute(db);
+			`.execute(pool);
 
 				const audio = (
 					result.rows as { name: string; directCount: string }[]
@@ -231,7 +231,7 @@ describe.skipIf(shouldSkipE2E())(
 
 		describe('Recursive CTE alternative (for complex hierarchies)', () => {
 			it('should traverse category hierarchy with recursive CTE', async () => {
-				const db = await getTestDb();
+				const pool = await getTestPool();
 
 				// Alternative approach using recursive CTE (useful for adjacency list without path)
 				const result = await kyselySql`
@@ -250,7 +250,7 @@ describe.skipIf(shouldSkipE2E())(
 				)
 				SELECT * FROM category_tree
 				ORDER BY depth, name
-			`.execute(db);
+			`.execute(pool);
 
 				const tree = result.rows as { name: string; depth: number }[];
 				expect(tree.length).toBe(4); // Electronics + Phones + Smartphones + Audio

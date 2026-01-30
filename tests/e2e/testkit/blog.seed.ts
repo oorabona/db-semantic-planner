@@ -4,8 +4,8 @@
  * Test data for Q5 (Blog scenario).
  */
 
-import { sql } from 'kysely';
-import { getTestDb } from './db.js';
+import { getTestPool } from './db.js';
+import { sql } from './sql.js';
 
 /**
  * Seed blog data in a schema.
@@ -15,7 +15,7 @@ import { getTestDb } from './db.js';
  * - 10 comments
  */
 export async function seedBlogData(schemaName: string): Promise<void> {
-	const db = await getTestDb();
+	const pool = await getTestPool();
 
 	// Authors
 	await sql`
@@ -23,7 +23,7 @@ export async function seedBlogData(schemaName: string): Promise<void> {
     VALUES
       (1, 'Alice Johnson', 'alice@example.com'),
       (2, 'Bob Smith', 'bob@example.com')
-  `.execute(db);
+  `.execute(pool);
 
 	// Posts (3 published, 2 drafts)
 	await sql`
@@ -34,7 +34,7 @@ export async function seedBlogData(schemaName: string): Promise<void> {
       (3, 'Introduction to PostgreSQL', 'PostgreSQL is a powerful database...', 2, true, '2024-03-10 09:15:00'),
       (4, 'Draft: React Best Practices', 'Work in progress...', 1, false, '2024-04-01 11:00:00'),
       (5, 'Draft: Database Optimization', 'Coming soon...', 2, false, '2024-04-05 16:45:00')
-  `.execute(db);
+  `.execute(pool);
 
 	// Comments
 	await sql`
@@ -50,5 +50,5 @@ export async function seedBlogData(schemaName: string): Promise<void> {
       (8, 3, 'Jack', 'Looking forward to more DB content.', '2024-03-13 16:30:00'),
       (9, 1, 'Kate', 'Bookmarked for later!', '2024-03-20 10:00:00'),
       (10, 2, 'Leo', 'This helped me at work.', '2024-03-25 09:00:00')
-  `.execute(db);
+  `.execute(pool);
 }

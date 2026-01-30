@@ -4,7 +4,6 @@
  * Manages PostgreSQL connection for REPL execution mode.
  */
 
-import { CamelCasePlugin, Kysely, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -22,8 +21,8 @@ export interface DbConnection {
 	ping(): Promise<boolean>;
 	/** Close the connection */
 	close(): Promise<void>;
-	/** Get the underlying Kysely instance */
-	getKysely(): Kysely<Record<string, unknown>>;
+	/** Get the underlying pg Pool */
+	getPool(): pg.Pool;
 }
 
 export interface ExecutionResult {
@@ -63,16 +62,9 @@ export async function createDbConnection(
 		idleTimeoutMillis: 30000,
 	});
 
-	// Create Kysely instance with CamelCasePlugin
-	// This ensures column names match DDL generation (camelCase → snake_case)
-	const db = new Kysely<Record<string, unknown>>({
-		dialect: new PostgresDialect({ pool }),
-		plugins: [new CamelCasePlugin()],
-	});
-
 	// Test connection
 	try {
-		await sql`SELECT 1`.execute(db);
+		await pool.query('SELECT 1');
 	} catch (error) {
 		await pool.end();
 		const message = error instanceof Error ? error.message : String(error);
@@ -88,8 +80,7 @@ export async function createDbConnection(
 
 			try {
 				// Always use pool.query() for consistent physical column names.
-				// The pg driver returns snake_case column names as stored in the DB,
-				// unlike Kysely's sql.raw() which applies CamelCasePlugin transforms.
+				// The pg driver returns snake_case column names as stored in the DB.
 				const poolResult = await pool.query(query, [...params]);
 				const endTime = performance.now();
 				const executionTimeMs = Math.round(endTime - startTime);
@@ -124,7 +115,7 @@ export async function createDbConnection(
 
 		async ping(): Promise<boolean> {
 			try {
-				await sql`SELECT 1`.execute(db);
+				await pool.query('SELECT 1');
 				return true;
 			} catch {
 				return false;
@@ -132,11 +123,11 @@ export async function createDbConnection(
 		},
 
 		async close(): Promise<void> {
-			await db.destroy();
+			await pool.end();
 		},
 
-		getKysely(): Kysely<Record<string, unknown>> {
-			return db;
+		getPool(): pg.Pool {
+			return pool;
 		},
 	};
 }

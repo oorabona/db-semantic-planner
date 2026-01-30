@@ -9,11 +9,11 @@
  * - 5 tags with M:N relationships
  */
 
-import { sql } from 'kysely';
-import { getTestDb } from './db.js';
+import { getTestPool } from './db.js';
+import { sql } from './sql.js';
 
 export async function seedBlogExtendedData(schemaName: string): Promise<void> {
-	const db = await getTestDb();
+	const pool = await getTestPool();
 
 	// Authors
 	await sql`
@@ -22,7 +22,7 @@ export async function seedBlogExtendedData(schemaName: string): Promise<void> {
       (1, 'Alice Johnson', 'alice@example.com', true),
       (2, 'Bob Smith', 'bob@example.com', true),
       (3, 'Charlie Brown', 'charlie@example.com', false)
-  `.execute(db);
+  `.execute(pool);
 
 	// Categories (hierarchical)
 	await sql`
@@ -32,7 +32,7 @@ export async function seedBlogExtendedData(schemaName: string): Promise<void> {
       (2, 'Web Development', 1),
       (3, 'Databases', 1),
       (4, 'Lifestyle', NULL)
-  `.execute(db);
+  `.execute(pool);
 
 	// Posts (varied data for complex filtering)
 	await sql`
@@ -47,7 +47,7 @@ export async function seedBlogExtendedData(schemaName: string): Promise<void> {
       (6, 'Draft: React Patterns', 'WIP...', 1, 2, false, false, 0, '2024-04-10'),
       (7, 'Draft: Redis Caching', 'Coming soon...', 2, 3, false, false, 0, '2024-04-15'),
       (8, 'Inactive Author Post', 'Old content...', 3, 1, true, false, 50, '2023-12-01')
-  `.execute(db);
+  `.execute(pool);
 
 	// Comments (mix of approved/pending)
 	await sql`
@@ -69,7 +69,7 @@ export async function seedBlogExtendedData(schemaName: string): Promise<void> {
       (13, 1, 'Noah', 'Still relevant!', true, '2024-04-05'),
       (14, 8, 'Olivia', 'Old but gold', true, '2024-01-01'),
       (15, 8, 'Peter', 'Pending...', false, '2024-01-02')
-  `.execute(db);
+  `.execute(pool);
 
 	// Tags
 	await sql`
@@ -80,7 +80,7 @@ export async function seedBlogExtendedData(schemaName: string): Promise<void> {
       (3, 'Tutorial', 'tutorial'),
       (4, 'Advanced', 'advanced'),
       (5, 'Beginner', 'beginner')
-  `.execute(db);
+  `.execute(pool);
 
 	// Post-Tags (M:N relationships)
 	await sql`
@@ -93,7 +93,7 @@ export async function seedBlogExtendedData(schemaName: string): Promise<void> {
       (5, 5),                   -- Work-Life: beginner
       (6, 1), (6, 4),          -- Draft React: typescript, advanced
       (7, 2)                    -- Draft Redis: postgresql
-  `.execute(db);
+  `.execute(pool);
 }
 
 /**

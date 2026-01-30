@@ -11,14 +11,13 @@ import type { Adapter, Dump } from '../adapter.js';
 import type { OrderByIntent, WhereIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
-import { hydrateJsonAggIncludes as hydrateJsonAggIncludesShared } from './hydration-utils.js';
-
 import {
 	ExecutionError,
 	InvalidOperationError,
 	NotFoundError,
 } from './errors.js';
 import { and, eq, inArray } from './filters.js';
+import { hydrateJsonAggIncludes as hydrateJsonAggIncludesShared } from './hydration-utils.js';
 import type { RecursiveIncludeConfig } from './intent-builder.js';
 import type { HydrateOptions } from './result-hydrator.js';
 import { ResultHydrator } from './result-hydrator.js';

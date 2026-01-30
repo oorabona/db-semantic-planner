@@ -515,4 +515,107 @@ describe('PgsqlAdapter', () => {
 
 		// generateDDL is now implemented - see ddl.test.ts for comprehensive tests
 	});
+
+	// =========================================================================
+	// Compile-Only Mode (dry-run)
+	// =========================================================================
+
+	describe('compile-only mode', () => {
+		it('should create adapter without pool via factory', () => {
+			const adapter = new PgsqlAdapter(undefined, {});
+
+			expect(adapter).toBeInstanceOf(PgsqlAdapter);
+			expect(adapter.namingConvention).toBe('preserve');
+			expect(adapter.capabilities.supportsStreaming).toBe(false);
+		});
+
+		it('should compile SELECT in compile-only mode', () => {
+			const adapter = new PgsqlAdapter(undefined, {});
+			const plan: PlanReport = {
+				rootTable: 'users',
+				decisions: [{ type: 'select', column: 'id' }] as any,
+			} as unknown as PlanReport;
+
+			const result = adapter.compile(plan);
+			expect(result.sql).toContain('SELECT');
+			expect(result.sql).toContain('users');
+		});
+
+		it('should throw on execute in compile-only mode', async () => {
+			const adapter = new PgsqlAdapter(undefined, {});
+			await expect(
+				adapter.execute({ sql: 'SELECT 1', parameters: [] }),
+			).rejects.toThrow('compile-only mode');
+		});
+
+		it('should throw on stream in compile-only mode', async () => {
+			const adapter = new PgsqlAdapter(undefined, {});
+			const iter = adapter.stream({ sql: 'SELECT 1', parameters: [] });
+			await expect(iter.next()).rejects.toThrow('compile-only mode');
+		});
+
+		it('should throw on transaction in compile-only mode', async () => {
+			const adapter = new PgsqlAdapter(undefined, {});
+			await expect(adapter.transaction(async () => {})).rejects.toThrow(
+				'compile-only mode',
+			);
+		});
+
+		it('should throw on executeRaw in compile-only mode', async () => {
+			const adapter = new PgsqlAdapter(undefined, {});
+			await expect(adapter.executeRaw('SELECT 1')).rejects.toThrow(
+				'compile-only mode',
+			);
+		});
+
+		it('should create schema-scoped compile-only adapter via withSchema', async () => {
+			const adapter = new PgsqlAdapter(undefined, {});
+			const scoped = adapter.withSchema('tenant_1');
+
+			expect(scoped).toBeInstanceOf(PgsqlAdapter);
+			// Scoped adapter should also be in compile-only mode
+			await expect(
+				scoped.execute({ sql: 'SELECT 1', parameters: [] }),
+			).rejects.toThrow('compile-only mode');
+		});
+
+		it('should generate DDL in compile-only mode', () => {
+			const schema = {
+				tables: new Map([
+					[
+						'users',
+						{
+							name: 'users',
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								{ name: 'name', type: 'string', nullable: false },
+							],
+							primaryKey: 'id',
+							foreignKeys: [],
+							indexes: [],
+						},
+					],
+				]),
+				relations: new Map(),
+			} as any;
+
+			const adapter = new PgsqlAdapter(undefined, {});
+			const ddl = adapter.generateDDL(schema);
+			expect(ddl.length).toBeGreaterThan(0);
+			expect(ddl[0]).toContain('CREATE TABLE');
+		});
+
+		it('should createDump in compile-only mode', () => {
+			const adapter = new PgsqlAdapter(undefined, {});
+			const plan: PlanReport = {
+				rootTable: 'users',
+				decisions: [{ type: 'select', column: 'id' }] as any,
+			} as unknown as PlanReport;
+			const query = adapter.compile(plan);
+			const dump = adapter.createDump(plan, query);
+
+			expect(dump.sql).toContain('SELECT');
+			expect(dump.params).toBeDefined();
+		});
+	});
 });

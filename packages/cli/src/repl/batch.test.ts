@@ -64,7 +64,7 @@ function createMockDbConnection(
 		}),
 		ping: vi.fn().mockResolvedValue(true),
 		close: vi.fn().mockResolvedValue(undefined),
-		getKysely: vi.fn() as unknown as DbConnection['getKysely'],
+		getPool: vi.fn() as unknown as DbConnection['getPool'],
 		...overrides,
 	};
 }

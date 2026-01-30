@@ -18,39 +18,17 @@ export {
 	blogExtendedTestData,
 	seedBlogExtendedData,
 } from './blog-extended.seed.js';
-// Comparison utilities
-export {
-	assertComparison,
-	type ComparisonExecutionResult,
-	type ComparisonMode,
-	compareExecution,
-	compareMutationExecution,
-	compareResults,
-	deepEqual,
-	executeMutationWithComparison,
-	executeWithComparison,
-	formatComparisonResult,
-	logComparisonMismatch,
-	type ResultDiff,
-	RollbackSignal,
-} from './comparison.js';
 // Database utilities
 export {
 	closeTestDb,
-	createAdapterForSchema,
 	createPgsqlAdapterForSchema,
 	createSchema,
 	describeE2E,
 	dropSchema,
 	execInSchema,
-	getComparisonAdapters,
-	getKyselyAdapter,
 	getPgsqlAdapter,
 	getTestAdapter,
-	getTestDb,
 	getTestPool,
-	isComparisonModeEnabled,
-	isStrictComparisonMode,
 	shouldSkipE2E,
 } from './db.js';
 // IAM/RBAC
@@ -79,3 +57,6 @@ export {
 } from './scheduling.ddl.js';
 export { schedulingModel } from './scheduling.model.js';
 export { schedulingTestData, seedSchedulingData } from './scheduling.seed.js';
+export type { SqlResult } from './sql.js';
+// SQL utilities (Kysely-compatible API for pg Pool)
+export { SqlFragment, sql } from './sql.js';

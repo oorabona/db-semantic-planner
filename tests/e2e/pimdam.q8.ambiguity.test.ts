@@ -24,18 +24,18 @@ import {
 	eq,
 	type RelationHints,
 } from '@dbsp/core';
-import { sql as kyselySql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createExtendedPimdamSchema,
 	dropExtendedPimdamSchema,
 	getTestAdapter,
-	getTestDb,
+	getTestPool,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
 	shouldSkipE2E,
 } from './testkit/index.js';
+import { sql as kyselySql } from './testkit/sql.js';
 
 const SCHEMA = 'q8_ambiguity';
 
@@ -60,7 +60,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 
 	describe('Q8-01: Direct named relations (no ambiguity)', () => {
 		it('should query product author via named relation', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Direct SQL to verify the data structure
 			const result = await kyselySql`
@@ -73,7 +73,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				JOIN ${kyselySql.ref(SCHEMA)}.users author ON author.id = p.author_id
 				JOIN ${kyselySql.ref(SCHEMA)}.users reviewer ON reviewer.id = p.reviewer_id
 				WHERE p.sku = 'WIDGET-001'
-			`.execute(db);
+			`.execute(pool);
 
 			const product = (
 				result.rows as { authorName: string; reviewerName: string }[]
@@ -83,7 +83,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should query products by different authors', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Find products authored by Bob (author_id=2)
 			const result = await kyselySql`
@@ -91,7 +91,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				FROM ${kyselySql.ref(SCHEMA)}.products p
 				JOIN ${kyselySql.ref(SCHEMA)}.users u ON u.id = p.author_id
 				WHERE p.author_id = 2
-			`.execute(db);
+			`.execute(pool);
 
 			const products = result.rows as { sku: string; authorName: string }[];
 			expect(products.length).toBeGreaterThanOrEqual(1);
@@ -101,7 +101,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should query products with different reviewer', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Find products reviewed by Charlie (reviewer_id=3)
 			const result = await kyselySql`
@@ -109,7 +109,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				FROM ${kyselySql.ref(SCHEMA)}.products p
 				JOIN ${kyselySql.ref(SCHEMA)}.users u ON u.id = p.reviewer_id
 				WHERE p.reviewer_id = 3
-			`.execute(db);
+			`.execute(pool);
 
 			const products = result.rows as { sku: string; reviewerName: string }[];
 			expect(products.length).toBeGreaterThanOrEqual(1);
@@ -199,7 +199,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 
 	describe('Q8-04: Users with inverse relations', () => {
 		it('should query users with their authored products count', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Count products authored by each user
 			const result = await kyselySql`
@@ -212,7 +212,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				WHERE p.deleted_at IS NULL
 				GROUP BY u.id, u.name
 				ORDER BY u.id
-			`.execute(db);
+			`.execute(pool);
 
 			const users = result.rows as { name: string; authoredCount: string }[];
 			// Alice is author of most products
@@ -225,7 +225,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should query users with their reviewed products count', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			// Count products reviewed by each user
 			const result = await kyselySql`
@@ -238,7 +238,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				WHERE p.deleted_at IS NULL
 				GROUP BY u.id, u.name
 				ORDER BY u.id
-			`.execute(db);
+			`.execute(pool);
 
 			const users = result.rows as { name: string; reviewedCount: string }[];
 			// Bob reviewed most products
@@ -253,7 +253,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 
 	describe('Q8-05: Cross-reference queries', () => {
 		it('should find products where author and reviewer are different', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			const result = await kyselySql`
 				SELECT p.sku, author.name AS author, reviewer.name AS reviewer
@@ -263,7 +263,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				WHERE p.author_id != p.reviewer_id
 				  AND p.deleted_at IS NULL
 				ORDER BY p.sku
-			`.execute(db);
+			`.execute(pool);
 
 			const products = result.rows as {
 				sku: string;
@@ -277,14 +277,14 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should find products where author and reviewer are same', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			const result = await kyselySql`
 				SELECT p.sku
 				FROM ${kyselySql.ref(SCHEMA)}.products p
 				WHERE p.author_id = p.reviewer_id
 				  AND p.deleted_at IS NULL
-			`.execute(db);
+			`.execute(pool);
 
 			// None of our test products have same author/reviewer
 			expect(result.rows.length).toBe(0);
@@ -305,7 +305,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		 */
 
 		it('should query all images for a product with roles', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			const result = await kyselySql`
 				SELECT
@@ -318,7 +318,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				JOIN ${kyselySql.ref(SCHEMA)}.assets a ON a.id = pi.asset_id
 				WHERE pi.product_id = 10
 				ORDER BY pi.position
-			`.execute(db);
+			`.execute(pool);
 
 			const images = result.rows as {
 				role: string;
@@ -335,7 +335,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should filter product images by role=main', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			const result = await kyselySql`
 				SELECT
@@ -346,7 +346,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				JOIN ${kyselySql.ref(SCHEMA)}.assets a ON a.id = pi.asset_id
 				WHERE pi.product_id = 10
 				  AND pi.role = 'main'
-			`.execute(db);
+			`.execute(pool);
 
 			const images = result.rows as { role: string; storage_key: string }[];
 			expect(images.length).toBe(1);
@@ -354,7 +354,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should filter product images by role=gallery', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			const result = await kyselySql`
 				SELECT
@@ -365,7 +365,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				JOIN ${kyselySql.ref(SCHEMA)}.assets a ON a.id = pi.asset_id
 				WHERE pi.product_id = 10
 				  AND pi.role = 'gallery'
-			`.execute(db);
+			`.execute(pool);
 
 			const images = result.rows as { role: string; storage_key: string }[];
 			expect(images.length).toBe(1);
@@ -373,7 +373,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should filter product images by role=thumbnail', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			const result = await kyselySql`
 				SELECT
@@ -384,7 +384,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				JOIN ${kyselySql.ref(SCHEMA)}.assets a ON a.id = pi.asset_id
 				WHERE pi.product_id = 10
 				  AND pi.role = 'thumbnail'
-			`.execute(db);
+			`.execute(pool);
 
 			const images = result.rows as { role: string; storage_key: string }[];
 			expect(images.length).toBe(1);
@@ -411,7 +411,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 		});
 
 		it('should demonstrate junction vs FK disambiguation patterns', async () => {
-			const db = await getTestDb();
+			const pool = await getTestPool();
 
 			/**
 			 * This test documents the two disambiguation patterns:
@@ -432,7 +432,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				FROM ${kyselySql.ref(SCHEMA)}.products p
 				JOIN ${kyselySql.ref(SCHEMA)}.users author ON author.id = p.author_id
 				WHERE p.id = 1
-			`.execute(db);
+			`.execute(pool);
 
 			const junctionPattern = await kyselySql`
 				SELECT p.sku, a.storage_key, pi.role
@@ -440,7 +440,7 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				JOIN ${kyselySql.ref(SCHEMA)}.product_images pi ON pi.product_id = p.id
 				JOIN ${kyselySql.ref(SCHEMA)}.assets a ON a.id = pi.asset_id
 				WHERE p.id = 10 AND pi.role = 'main'
-			`.execute(db);
+			`.execute(pool);
 
 			// Both patterns should work
 			expect(fkPattern.rows.length).toBe(1);

@@ -318,11 +318,11 @@ describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
 				expect(decision?.choice).toBe('join');
 
 				// SQL uses LEFT JOIN, not json_agg
-			// Note: pgsql-adapter always compiles includes as json_agg subqueries;
-			// LEFT JOIN compilation is a future enhancement (TODO_ADAPTER_PGSQL.md).
-			// The planner decision above is the authoritative contract test.
-			// expect(dump.sql.toLowerCase()).toContain('left join');
-			// expect(dump.sql.toLowerCase()).not.toMatch(/json_agg/);
+				// Note: pgsql-adapter always compiles includes as json_agg subqueries;
+				// LEFT JOIN compilation is a future enhancement (TODO_ADAPTER_PGSQL.md).
+				// The planner decision above is the authoritative contract test.
+				// expect(dump.sql.toLowerCase()).toContain('left join');
+				// expect(dump.sql.toLowerCase()).not.toMatch(/json_agg/);
 			});
 		});
 

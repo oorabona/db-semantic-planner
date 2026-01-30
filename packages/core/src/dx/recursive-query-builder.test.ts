@@ -3,7 +3,7 @@
  * Unit tests for RecursiveQueryBuilder (DX-005)
  *
  * NOTE: These tests only verify intent-building logic (core package).
- * SQL generation tests are in adapter-kysely/src/recursive-query-builder.test.ts
+ * SQL generation tests are in adapter-pgsql/src/__tests__/
  */
 
 import { eq, ref, schema } from '@dbsp/core';
@@ -62,12 +62,12 @@ const categoryModel = schema({
 
 /**
  * Mock adapter that only supports intent building.
- * SQL generation tests are in adapter-kysely.
+ * SQL generation tests are in adapter-pgsql.
  */
 function createMockAdapter(): Adapter {
 	const notImplemented = () => {
 		throw new Error(
-			'Not implemented in mock adapter - use adapter-kysely for SQL tests',
+			'Not implemented in mock adapter - use adapter-pgsql for SQL tests',
 		);
 	};
 
@@ -528,8 +528,8 @@ describe('RecursiveQueryBuilder', () => {
 	});
 
 	// ============================================================================
-	// NOTE: dump() and SQL generation tests are in adapter-kysely
-	// See: packages/adapter-kysely/src/recursive-query-builder.test.ts
+	// NOTE: dump() and SQL generation tests are in adapter-pgsql
+	// See: packages/adapter-pgsql/src/__tests__/
 	// ============================================================================
 
 	// ============================================================================
