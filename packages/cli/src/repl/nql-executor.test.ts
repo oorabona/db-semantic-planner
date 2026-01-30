@@ -72,24 +72,24 @@ const testModel = buildModelFromSchema(generatedSchema);
 
 describe('nql-executor', () => {
 	describe('isNqlQuery', () => {
-		it('returns true for valid NQL queries', () => {
+		it('returns true for valid NQL queries', async () => {
 			expect(isNqlQuery('users')).toBe(true);
 			expect(isNqlQuery('users | where active = true')).toBe(true);
 			expect(isNqlQuery('posts | select title, content')).toBe(true);
 		});
 
-		it('returns false for REPL commands', () => {
+		it('returns false for REPL commands', async () => {
 			expect(isNqlQuery('.tables')).toBe(false);
 			expect(isNqlQuery('.schema')).toBe(false);
 			expect(isNqlQuery('.help')).toBe(false);
 		});
 
-		it('returns false for raw SQL commands', () => {
+		it('returns false for raw SQL commands', async () => {
 			expect(isNqlQuery('!SELECT 1')).toBe(false);
 			expect(isNqlQuery('!SELECT * FROM users')).toBe(false);
 		});
 
-		it('returns false for empty input', () => {
+		it('returns false for empty input', async () => {
 			expect(isNqlQuery('')).toBe(false);
 			expect(isNqlQuery('   ')).toBe(false);
 		});
@@ -99,46 +99,46 @@ describe('nql-executor', () => {
 		const model = testModel;
 
 		describe('SELECT queries', () => {
-			it('compiles simple table scan', () => {
-				const result = compileNqlToSql('users', model);
+			it('compiles simple table scan', async () => {
+				const result = await compileNqlToSql('users', model);
 
 				expect(result.intentType).toBe('query');
 				expect(result.sql.toLowerCase()).toContain('select');
 				expect(result.sql.toLowerCase()).toContain('users');
 			});
 
-			it('compiles query with where clause', () => {
-				const result = compileNqlToSql('users | where active = true', model);
+			it('compiles query with where clause', async () => {
+				const result = await compileNqlToSql('users | where active = true', model);
 
 				expect(result.intentType).toBe('query');
 				expect(result.sql.toLowerCase()).toContain('where');
 				expect(result.params).toContain(true);
 			});
 
-			it('compiles query with limit', () => {
-				const result = compileNqlToSql('users | limit 10', model);
+			it('compiles query with limit', async () => {
+				const result = await compileNqlToSql('users | limit 10', model);
 
 				expect(result.intentType).toBe('query');
 				expect(result.sql.toLowerCase()).toContain('limit');
 			});
 
-			it('compiles query with select fields', () => {
-				const result = compileNqlToSql('users | select name, email', model);
+			it('compiles query with select fields', async () => {
+				const result = await compileNqlToSql('users | select name, email', model);
 
 				expect(result.intentType).toBe('query');
 				expect(result.sql.toLowerCase()).toContain('name');
 				expect(result.sql.toLowerCase()).toContain('email');
 			});
 
-			it('compiles query with order by', () => {
-				const result = compileNqlToSql('users | order by name asc', model);
+			it('compiles query with order by', async () => {
+				const result = await compileNqlToSql('users | order by name asc', model);
 
 				expect(result.intentType).toBe('query');
 				expect(result.sql.toLowerCase()).toContain('order by');
 			});
 
-			it('compiles query with multiple clauses', () => {
-				const result = compileNqlToSql(
+			it('compiles query with multiple clauses', async () => {
+				const result = await compileNqlToSql(
 					'users | where active = true | select name, email | order by name | limit 10',
 					model,
 				);
@@ -149,23 +149,23 @@ describe('nql-executor', () => {
 				expect(result.sql.toLowerCase()).toContain('limit');
 			});
 
-			it('compiles query with string comparison', () => {
-				const result = compileNqlToSql("users | where name = 'Alice'", model);
+			it('compiles query with string comparison', async () => {
+				const result = await compileNqlToSql("users | where name = 'Alice'", model);
 
 				expect(result.intentType).toBe('query');
 				expect(result.params).toContain('Alice');
 			});
 
-			it('compiles query with numeric comparison', () => {
-				const result = compileNqlToSql('users | where age > 18', model);
+			it('compiles query with numeric comparison', async () => {
+				const result = await compileNqlToSql('users | where age > 18', model);
 
 				expect(result.intentType).toBe('query');
 				expect(result.params).toContain(18);
 			});
 
-			it('uses json_agg for hasMany includes (STRAT-SIMPLIFY)', () => {
+			it('uses json_agg for hasMany includes (STRAT-SIMPLIFY)', async () => {
 				// users.posts is hasMany, should use json_agg by default
-				const result = compileNqlToSql('users | select *, posts.*', model);
+				const result = await compileNqlToSql('users | select *, posts.*', model);
 
 				expect(result.intentType).toBe('query');
 				// Should use json_agg, NOT left join for hasMany
@@ -173,8 +173,8 @@ describe('nql-executor', () => {
 				expect(result.sql.toLowerCase()).not.toMatch(/left\s+join/);
 			});
 
-			it('compiles query with group by', () => {
-				const result = compileNqlToSql(
+			it('compiles query with group by', async () => {
+				const result = await compileNqlToSql(
 					'users | group by active | select count(*)',
 					model,
 				);
@@ -185,15 +185,15 @@ describe('nql-executor', () => {
 		});
 
 		describe('error handling', () => {
-			it('throws NqlParseError for invalid syntax', () => {
-				expect(() => compileNqlToSql('users | where = invalid', model)).toThrow(
+			it('throws NqlParseError for invalid syntax', async () => {
+				await expect(compileNqlToSql('users | where = invalid', model)).rejects.toThrow(
 					NqlParseError,
 				);
 			});
 
-			it('parse error contains helpful message', () => {
+			it('parse error contains helpful message', async () => {
 				try {
-					compileNqlToSql('users | where = invalid', model);
+					await compileNqlToSql('users | where = invalid', model);
 					expect.fail('Should have thrown');
 				} catch (e) {
 					expect(e).toBeInstanceOf(NqlParseError);
@@ -206,7 +206,7 @@ describe('nql-executor', () => {
 	describe('getNqlIntent', () => {
 		const model = testModel;
 
-		it('returns query intent for SELECT', () => {
+		it('returns query intent for SELECT', async () => {
 			const result = getNqlIntent('users | where active = true', model);
 
 			expect(result.query).toBeDefined();
@@ -214,19 +214,19 @@ describe('nql-executor', () => {
 			expect(result.query?.from).toBe('users');
 		});
 
-		it('query intent includes where clause', () => {
+		it('query intent includes where clause', async () => {
 			const result = getNqlIntent('users | where active = true', model);
 
 			expect(result.query?.where).toBeDefined();
 		});
 
-		it('query intent includes limit', () => {
+		it('query intent includes limit', async () => {
 			const result = getNqlIntent('users | limit 10', model);
 
 			expect(result.query?.limit).toBe(10);
 		});
 
-		it('query intent includes offset', () => {
+		it('query intent includes offset', async () => {
 			const result = getNqlIntent('users | offset 5', model);
 
 			expect(result.query?.offset).toBe(5);
@@ -236,24 +236,24 @@ describe('nql-executor', () => {
 	describe('multiline queries', () => {
 		const model = testModel;
 
-		it('compiles multiline query', () => {
+		it('compiles multiline query', async () => {
 			const nql = `users
 				| where active = true
 				| limit 10`;
 
-			const result = compileNqlToSql(nql, model);
+			const result = await compileNqlToSql(nql, model);
 
 			expect(result.intentType).toBe('query');
 			expect(result.sql.toLowerCase()).toContain('where');
 			expect(result.sql.toLowerCase()).toContain('limit');
 		});
 
-		it('compiles query with comments', () => {
+		it('compiles query with comments', async () => {
 			const nql = `users # get all users
 				| where active = true # only active
 				| limit 10`;
 
-			const result = compileNqlToSql(nql, model);
+			const result = await compileNqlToSql(nql, model);
 
 			expect(result.intentType).toBe('query');
 		});
@@ -262,22 +262,22 @@ describe('nql-executor', () => {
 	describe('edge cases', () => {
 		const model = testModel;
 
-		it('handles escaped quotes in strings', () => {
-			const result = compileNqlToSql("users | where name = 'O''Brien'", model);
+		it('handles escaped quotes in strings', async () => {
+			const result = await compileNqlToSql("users | where name = 'O''Brien'", model);
 
 			expect(result.intentType).toBe('query');
 			expect(result.params).toContain("O'Brien");
 		});
 
-		it('handles null comparison', () => {
-			const result = compileNqlToSql('users | where email is null', model);
+		it('handles null comparison', async () => {
+			const result = await compileNqlToSql('users | where email is null', model);
 
 			expect(result.intentType).toBe('query');
 			expect(result.sql.toLowerCase()).toContain('is null');
 		});
 
-		it('handles not null comparison', () => {
-			const result = compileNqlToSql('users | where email is not null', model);
+		it('handles not null comparison', async () => {
+			const result = await compileNqlToSql('users | where email is not null', model);
 
 			expect(result.intentType).toBe('query');
 			expect(result.sql.toLowerCase()).toContain('is not null');

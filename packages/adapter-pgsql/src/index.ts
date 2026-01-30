@@ -5,15 +5,7 @@
  * PlanReport → PostgreSQL AST → SQL (via pgsql-deparser)
  */
 
-// AST Comparison
-export {
-	assertRoundtrip,
-	type CompareResult,
-	compareAST,
-	compareSQLByAST,
-	normalizeSQL,
-	roundtripTest,
-} from './ast-compare.js';
+// AST Comparison functions are lazy-loaded in tests only
 // AST Helpers
 export {
 	andExpr,

@@ -7,7 +7,6 @@
  * Part of NQLM (NQL CLI Migration) - Block 2
  */
 
-import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import {
 	type DeleteIntent,
 	extractPseudoColumnKeywords,
@@ -211,11 +210,16 @@ export interface NqlCompileOptions {
  * console.log(result.params); // [true]
  * ```
  */
-export function compileNqlToSql(
+export async function compileNqlToSql(
 	nql: string,
 	model: ModelIR,
 	options?: NqlCompileOptions,
-): NqlCompileOnlyResult {
+): Promise<NqlCompileOnlyResult> {
+	// Lazy-load adapter to avoid loading pgsql-parser at module init time
+	// pgsql-parser has issues with ESM dynamic requires, so we defer its import
+	// until it's actually needed (CLI-PGSQL-LAZY-LOAD)
+	const { createPgsqlCompileOnlyAdapter } = await import('@dbsp/adapter-pgsql');
+
 	// Create compile-only adapter for SQL generation (no DB connection needed)
 	const adapter = createPgsqlCompileOnlyAdapter({
 		...(options?.schemaName !== undefined && {
