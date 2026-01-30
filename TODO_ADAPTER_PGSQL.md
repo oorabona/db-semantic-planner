@@ -85,6 +85,8 @@
 - [x] ✅ **Model.getTable() naming confusion** (2026-01-30): `resolveLogicalName()` utility added in `naming.ts` with 11 unit tests.
 - [x] ✅ **JOIN compilation for filter-strategy** (2026-01-30): JOIN filter dispatch added to compiler for `choice === 'join'` decisions. 8 unit tests.
 - [x] ✅ **LEFT JOIN compilation for include-strategy** (2026-01-30): LEFT JOIN include dispatch added for `selectLeftJoinInclude` decisions. 6 unit tests.
+- [ ] **BUG: Pseudo-column filter on relation path generates invalid SQL**: Query `rooms | where roomBookings.bookingPeriod overlaps [range] | select *, roomBookings.*` compiles to `"_rooms"."room_bookings"."booking_period" && $1` — PostgreSQL rejects this as `missing FROM-clause entry for table "room_bookings"`. The compiler should resolve the relation path to a proper subquery or JOIN condition instead of emitting a 3-level qualified column. Repro: `scheduling.assert.dbsp` query 15.
+- [ ] **BUG: LATERAL JOIN schema qualification**: `ecommerce.assert.dbsp` queries 10-11 use LATERAL JOIN with `"ch5_ecommerce.products"` (dot inside quotes = single identifier) instead of `"ch5_ecommerce"."products"` (schema-qualified). The compiler emits the table reference as a single quoted identifier rather than separating schema and table. Repro: `ecommerce.dbsp` queries with `products | where ... | select *, reviews.*`.
 - [ ] **CTE/WITH clause generation**: Multi-EXISTS patterns are compiled as flat WHERE conditions. Implement CTE extraction for complex multi-locale/multi-filter patterns.
 - [ ] **Split extractExistsDecisions**: Method does 3 things (filter decisions, find intents, resolve FK). Extract into smaller focused functions for readability.
 

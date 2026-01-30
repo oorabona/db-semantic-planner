@@ -55,7 +55,7 @@ success: true
 intent.type: query
 intent.table: rooms
 intent.hasWhere: false
-sql.contains: from "ch4_scheduling"."rooms"
+sql.equals: select "_rooms".* from "ch4_scheduling"."rooms" as "_rooms"
 db.rows.equals: 8
 db.output:
 | id | name             | capacity | floor |
@@ -75,7 +75,23 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.contains: from "ch4_scheduling"."room_bookings"
+sql.equals: select "_room_bookings".* from "ch4_scheduling"."room_bookings" as "_room_bookings"
+db.output:
+| id | room_id | booked_by     | booking_period          | purpose               |
+| -- | ------- | ------------- | ----------------------- | --------------------- |
+| 1  | 1       | Alice Johnson | [2024-01-15,2024-01-17) | Product planning      |
+| 2  | 1       | Bob Smith     | [2024-01-20,2024-01-21) | Client meeting        |
+| 3  | 1       | Carol White   | [2024-01-25,2024-01-28) | Team workshop         |
+| 4  | 2       | David Brown   | [2024-01-10,2024-01-12) | Interview sessions    |
+| 5  | 2       | Eve Davis     | [2024-01-18,2024-01-19) | Code review           |
+| 6  | 3       | Frank Miller  | [2024-01-08,2024-01-09) | Board meeting         |
+| 7  | 3       | Grace Lee     | [2024-01-15,2024-01-16) | Strategy session      |
+| 8  | 3       | Henry Wilson  | [2024-01-22,2024-01-24) | Investor presentation |
+| 9  | 4       | Ivy Chen      | [2024-01-02,2024-01-05) | New hire onboarding   |
+| 10 | 4       | Jack Taylor   | [2024-01-15,2024-01-20) | Technical training    |
+| 11 | 4       | Karen Adams   | [2024-01-29,2024-02-02) | Certification prep    |
+| 12 | 7       | CEO Office    | [2024-01-01,2024-01-31) | Executive reserved    |
+| 13 | 8       | HR Team       | [2024-01-10,2024-01-11) | All-hands meeting     |
 
 # ─────────────────────────────────────────
 # Query 8: events
@@ -83,10 +99,21 @@ sql.contains: from "ch4_scheduling"."room_bookings"
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.contains: from "ch4_scheduling"."events"
+sql.equals: select "_events".* from "ch4_scheduling"."events" as "_events"
 db.rows.equals: 10
-db.output.contains: Daily Standup
-db.output.contains: Sprint Planning
+db.output:
+| id | title                 | room_id | time_slot                                           | organizer           | max_attendees |
+| -- | --------------------- | ------- | --------------------------------------------------- | ------------------- | ------------- |
+| 1  | Daily Standup         | 5       | ["2024-01-15 09:00:00+00","2024-01-15 09:30:00+00") | Scrum Master        | 10            |
+| 2  | Sprint Planning       | 1       | ["2024-01-15 10:00:00+00","2024-01-15 12:00:00+00") | Product Owner       | 15            |
+| 3  | Design Review         | 2       | ["2024-01-15 11:00:00+00","2024-01-15 12:00:00+00") | Design Lead         | 8             |
+| 4  | Tech Talk: PostgreSQL | 4       | ["2024-01-15 14:00:00+00","2024-01-15 15:30:00+00") | Senior Dev          | 40            |
+| 5  | 1:1 Meeting           | 6       | ["2024-01-15 14:00:00+00","2024-01-15 14:30:00+00") | Manager             | 2             |
+| 6  | Code Review Session   | 2       | ["2024-01-15 15:00:00+00","2024-01-15 16:00:00+00") | Tech Lead           | 6             |
+| 7  | Company Offsite       | 8       | ["2024-01-20 08:00:00+00","2024-01-20 18:00:00+00") | HR Director         | 150           |
+| 8  | Hackathon             | 4       | ["2024-01-25 09:00:00+00","2024-01-26 18:00:00+00") | Engineering         | 50            |
+| 9  | Team Happy Hour       | 1       | ["2024-01-15 17:00:00+00","2024-01-15 19:00:00+00") | Team Lead           | 20            |
+| 10 | Board Dinner          | 7       | ["2024-01-15 18:00:00+00","2024-01-15 21:00:00+00") | Executive Assistant | 12            |
 
 # ─────────────────────────────────────────
 # Query 9: priceTiers
@@ -94,7 +121,27 @@ db.output.contains: Sprint Planning
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.contains: from "ch4_scheduling"."price_tiers"
+sql.equals: select "_price_tiers".* from "ch4_scheduling"."price_tiers" as "_price_tiers"
+db.output:
+| id | product_name | quantity_range | unit_price |
+| -- | ------------ | -------------- | ---------- |
+| 1  | Widget Pro   | [1,10)         | 99.99      |
+| 2  | Widget Pro   | [10,50)        | 89.99      |
+| 3  | Widget Pro   | [50,100)       | 79.99      |
+| 4  | Widget Pro   | [100,500)      | 69.99      |
+| 5  | Widget Pro   | [500,)         | 59.99      |
+| 6  | Gadget Basic | [1,5)          | 29.99      |
+| 7  | Gadget Basic | [5,25)         | 24.99      |
+| 8  | Gadget Basic | [25,100)       | 19.99      |
+| 9  | Gadget Basic | [100,)         | 14.99      |
+| 10 | API Calls    | [1,1000)       | 0.01       |
+| 11 | API Calls    | [1000,10000)   | 0.008      |
+| 12 | API Calls    | [10000,100000) | 0.005      |
+| 13 | API Calls    | [100000,)      | 0.002      |
+| 14 | Team License | [1,5)          | 199.00     |
+| 15 | Team License | [5,20)         | 149.00     |
+| 16 | Team License | [20,100)       | 99.00      |
+| 17 | Team License | [100,)         | 79.00      |
 
 # ─────────────────────────────────────────
 # Query 10: roomBookings | where bookingPeriod overlaps [2024-01-16,2024-01-20)
@@ -105,7 +152,14 @@ success: true
 intent.type: query
 intent.table: roomBookings
 intent.hasWhere: true
-sql.contains: "booking_period" && $1
+sql.equals: select "_room_bookings".* from "ch4_scheduling"."room_bookings" as "_room_bookings" where "_room_bookings"."booking_period" && $1
+db.output:
+| id | room_id | booked_by     | booking_period          | purpose            |
+| -- | ------- | ------------- | ----------------------- | ------------------ |
+| 1  | 1       | Alice Johnson | [2024-01-15,2024-01-17) | Product planning   |
+| 5  | 2       | Eve Davis     | [2024-01-18,2024-01-19) | Code review        |
+| 10 | 4       | Jack Taylor   | [2024-01-15,2024-01-20) | Technical training |
+| 12 | 7       | CEO Office    | [2024-01-01,2024-01-31) | Executive reserved |
 
 # ─────────────────────────────────────────
 # Query 11: roomBookings | where bookingPeriod containedBy [2024-01-01,2024-02-01)
@@ -113,7 +167,22 @@ sql.contains: "booking_period" && $1
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.contains: "booking_period" <@ $1
+sql.equals: select "_room_bookings".* from "ch4_scheduling"."room_bookings" as "_room_bookings" where "_room_bookings"."booking_period" <@ $1
+db.output:
+| id | room_id | booked_by     | booking_period          | purpose               |
+| -- | ------- | ------------- | ----------------------- | --------------------- |
+| 1  | 1       | Alice Johnson | [2024-01-15,2024-01-17) | Product planning      |
+| 2  | 1       | Bob Smith     | [2024-01-20,2024-01-21) | Client meeting        |
+| 3  | 1       | Carol White   | [2024-01-25,2024-01-28) | Team workshop         |
+| 4  | 2       | David Brown   | [2024-01-10,2024-01-12) | Interview sessions    |
+| 5  | 2       | Eve Davis     | [2024-01-18,2024-01-19) | Code review           |
+| 6  | 3       | Frank Miller  | [2024-01-08,2024-01-09) | Board meeting         |
+| 7  | 3       | Grace Lee     | [2024-01-15,2024-01-16) | Strategy session      |
+| 8  | 3       | Henry Wilson  | [2024-01-22,2024-01-24) | Investor presentation |
+| 9  | 4       | Ivy Chen      | [2024-01-02,2024-01-05) | New hire onboarding   |
+| 10 | 4       | Jack Taylor   | [2024-01-15,2024-01-20) | Technical training    |
+| 12 | 7       | CEO Office    | [2024-01-01,2024-01-31) | Executive reserved    |
+| 13 | 8       | HR Team       | [2024-01-10,2024-01-11) | All-hands meeting     |
 
 # ─────────────────────────────────────────
 # Query 12: priceTiers | where quantityRange contains 25
@@ -121,7 +190,14 @@ sql.contains: "booking_period" <@ $1
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.contains: "quantity_range" @> $1
+sql.equals: select "_price_tiers".* from "ch4_scheduling"."price_tiers" as "_price_tiers" where "_price_tiers"."quantity_range" @> $1::integer
+db.output:
+| id | product_name | quantity_range | unit_price |
+| -- | ------------ | -------------- | ---------- |
+| 2  | Widget Pro   | [10,50)        | 89.99      |
+| 8  | Gadget Basic | [25,100)       | 19.99      |
+| 10 | API Calls    | [1,1000)       | 0.01       |
+| 16 | Team License | [20,100)       | 99.00      |
 
 # ─────────────────────────────────────────
 # Query 13: priceTiers | where productName = 'Widget A' and quantityRange contains 25
@@ -129,7 +205,8 @@ sql.contains: "quantity_range" @> $1
 # ─────────────────────────────────────────
 --- query: 13
 success: true
-sql.contains: "quantity_range" @> $2
+sql.equals: select "_price_tiers".* from "ch4_scheduling"."price_tiers" as "_price_tiers" where ("_price_tiers"."product_name" = $1 and "_price_tiers"."quantity_range" @> $2::integer)
+db.rows.equals: 0
 
 # ─────────────────────────────────────────
 # Query 14: rooms | select *, roomBookings.*
@@ -143,6 +220,17 @@ intent.table: rooms
 intent.with: roomBookings
 intent.hasWhere: false
 sql.equals: select "_rooms".*, COALESCE((SELECT json_agg(to_jsonb(__t__) ) FROM "ch4_scheduling"."room_bookings" AS __t__ WHERE "__t__"."room_id" = "_rooms"."id"), '[]'::json) as "room_bookings_json" from "ch4_scheduling"."rooms" as "_rooms"
+db.output:
+| id | name              | capacity | floor | room_bookings_json                                                                                                                                                                                                                                                                                                                                                           |
+| -- | ----------------- | -------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1  | Conference Room A | 20       | 1     | [{"id":1,"purpose":"Product planning","room_id":1,"booked_by":"Alice Johnson","booking_period":"[2024-01-15,2024-01-17)"},{"id":2,"purpose":"Client meeting","room_id":1,"booked_by":"Bob Smith","booking_period":"[2024-01-20,2024-01-21)"},{"id":3,"purpose":"Team workshop","room_id":1,"booked_by":"Carol White","booking_period":"[2024-01-25,2024-01-28)"}]            |
+| 2  | Conference Room B | 10       | 1     | [{"id":4,"purpose":"Interview sessions","room_id":2,"booked_by":"David Brown","booking_period":"[2024-01-10,2024-01-12)"},{"id":5,"purpose":"Code review","room_id":2,"booked_by":"Eve Davis","booking_period":"[2024-01-18,2024-01-19)"}]                                                                                                                                   |
+| 3  | Board Room        | 30       | 2     | [{"id":6,"purpose":"Board meeting","room_id":3,"booked_by":"Frank Miller","booking_period":"[2024-01-08,2024-01-09)"},{"id":7,"purpose":"Strategy session","room_id":3,"booked_by":"Grace Lee","booking_period":"[2024-01-15,2024-01-16)"},{"id":8,"purpose":"Investor presentation","room_id":3,"booked_by":"Henry Wilson","booking_period":"[2024-01-22,2024-01-24)"}]     |
+| 4  | Training Room     | 50       | 2     | [{"id":9,"purpose":"New hire onboarding","room_id":4,"booked_by":"Ivy Chen","booking_period":"[2024-01-02,2024-01-05)"},{"id":10,"purpose":"Technical training","room_id":4,"booked_by":"Jack Taylor","booking_period":"[2024-01-15,2024-01-20)"},{"id":11,"purpose":"Certification prep","room_id":4,"booked_by":"Karen Adams","booking_period":"[2024-01-29,2024-02-02)"}] |
+| 5  | Huddle Space 1    | 4        | 1     | []                                                                                                                                                                                                                                                                                                                                                                           |
+| 6  | Huddle Space 2    | 4        | 1     | []                                                                                                                                                                                                                                                                                                                                                                           |
+| 7  | Executive Suite   | 15       | 3     | [{"id":12,"purpose":"Executive reserved","room_id":7,"booked_by":"CEO Office","booking_period":"[2024-01-01,2024-01-31)"}]                                                                                                                                                                                                                                                   |
+| 8  | Auditorium        | 200      | 0     | [{"id":13,"purpose":"All-hands meeting","room_id":8,"booked_by":"HR Team","booking_period":"[2024-01-10,2024-01-11)"}]                                                                                                                                                                                                                                                       |
 
 # ─────────────────────────────────────────
 # Query 15: rooms | where roomBookings.bookingPeriod overlaps [2024-01-22,2024-01-29) | select *, roomBookings.*
@@ -154,15 +242,17 @@ intent.type: query
 intent.table: rooms
 intent.with: roomBookings
 intent.hasWhere: true
-sql.contains: "booking_period" && $1
+sql.equals: select "_rooms".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch4_scheduling"."room_bookings" AS __t__ WHERE "__t__"."room_id" = "_rooms"."id"), '[]'::json) as "room_bookings_json" from "ch4_scheduling"."rooms" as "_rooms" where "_rooms"."room_bookings"."booking_period" && $1
+# BUG: Generated SQL has invalid path "_rooms"."room_bookings"."booking_period" — pseudo-column filter on relation path not correctly compiled
+db.success: false
+db.output.contains: missing FROM-clause entry for table
 
 # ─────────────────────────────────────────
 # Query 16: insert into rooms set name = 'Board Room', capacity = 20, floor = 2
 # ─────────────────────────────────────────
 --- query: 16
 success: true
-sql.contains: insert into "ch4_scheduling"."rooms"
-sql.contains: ("name", "capacity", "floor") values ($1, $2, $3)
+sql.equals: insert into "ch4_scheduling"."rooms" ("name", "capacity", "floor") values ($1, $2, $3)
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -180,9 +270,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 18
 success: true
-sql.contains: update "ch4_scheduling"."rooms"
-sql.contains: set "capacity" = $1
-sql.contains: where "name" = $2
+sql.equals: update "ch4_scheduling"."rooms" set "capacity" = $1 where "name" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -190,9 +278,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 19
 success: true
-sql.contains: update "ch4_scheduling"."events"
-sql.contains: set "title" = $1
-sql.contains: where "id" = $2
+sql.equals: update "ch4_scheduling"."events" set "title" = $1 where "id" = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -201,8 +287,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 20
 success: true
-sql.contains: delete from "ch4_scheduling"."room_bookings"
-sql.contains: where "id" = $1
+sql.equals: delete from "ch4_scheduling"."room_bookings" where "id" = $1
 db.rows.equals: 0
 
 # ─────────────────────────────────────────

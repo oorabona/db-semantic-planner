@@ -156,6 +156,13 @@ success: true
 sql.equals: select "_categories".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch3_blog_extended"."categories" AS __t__ WHERE "__t__"."parent_id" = "_categories"."id"), '[]'::json) as "children_json" from "ch3_blog_extended"."categories" as "_categories"
 db.rows.equals: 4
 output.contains: children_json
+db.output:
+| id | name            | parent_id | children_json                                                                               |
+|----|-----------------|-----------|---------------------------------------------------------------------------------------------|
+| 1  | Technology      | NULL      | [{"id":2,"name":"Web Development","parent_id":1},{"id":3,"name":"Databases","parent_id":1}] |
+| 2  | Web Development | 1         | []                                                                                          |
+| 3  | Databases       | 1         | []                                                                                          |
+| 4  | Lifestyle       | NULL      | []                                                                                          |
 
 # ─────────────────────────────────────────
 # Query 13 categories | where parentId is null | select *, children.*
@@ -168,6 +175,11 @@ db.rows.equals: 2
 db.output.contains: Technology
 db.output.contains: Lifestyle
 db.output.contains: children_json
+db.output:
+| id | name       | parent_id | children_json                                                                               |
+|----|------------|-----------|---------------------------------------------------------------------------------------------|
+| 1  | Technology | NULL      | [{"id":2,"name":"Web Development","parent_id":1},{"id":3,"name":"Databases","parent_id":1}] |
+| 4  | Lifestyle  | NULL      | []                                                                                          |
 
 # ─────────────────────────────────────────
 # Query 14 posts | where featured = true
@@ -191,6 +203,11 @@ success: true
 sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts" where "_posts"."view_count" > $1
 params.equals: [1000]
 db.rows.equals: 2
+db.output:
+| id | title                   | content              | author_id | category_id | published | featured | view_count | created_at               |
+|----|-------------------------|----------------------|-----------|-------------|-----------|----------|------------|--------------------------|
+| 1  | TypeScript Fundamentals | Learn TS basics...   | 1         | 2           | true      | true     | 1500       | 2024-01-15T00:00:00.000Z |
+| 3  | PostgreSQL Deep Dive    | Master PostgreSQL... | 2         | 3           | true      | true     | 2000       | 2024-03-10T00:00:00.000Z |
 
 # ─────────────────────────────────────────
 # Query 16 posts | where featured = true and viewCount > 1500
@@ -212,6 +229,11 @@ db.output:
 --- query: 17
 success: true
 sql.equals: select "_authors".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch3_blog_extended"."posts" AS __t__ WHERE "__t__"."author_id" = "_authors"."id"), '[]'::json) as "posts_json" from "ch3_blog_extended"."authors" as "_authors" where "_authors"."active" = $1
+db.output:
+| id | name          | email             | active | posts_json                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+|----|---------------|-------------------|--------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1  | Alice Johnson | alice@example.com | true   | [{"id":1,"title":"TypeScript Fundamentals","content":"Learn TS basics...","featured":true,"author_id":1,"published":true,"created_at":"2024-01-15T00:00:00+00:00","view_count":1500,"category_id":2},{"id":2,"title":"Advanced TypeScript","content":"Generics and beyond...","featured":false,"author_id":1,"published":true,"created_at":"2024-02-20T00:00:00+00:00","view_count":800,"category_id":2},{"id":5,"title":"Work-Life Balance","content":"Tips for developers...","featured":false,"author_id":1,"published":true,"created_at":"2024-04-01T00:00:00+00:00","view_count":300,"category_id":4},{"id":6,"title":"Draft: React Patterns","content":"WIP...","featured":false,"author_id":1,"published":false,"created_at":"2024-04-10T00:00:00+00:00","view_count":0,"category_id":2}] |
+| 2  | Bob Smith     | bob@example.com   | true   | [{"id":3,"title":"PostgreSQL Deep Dive","content":"Master PostgreSQL...","featured":true,"author_id":2,"published":true,"created_at":"2024-03-10T00:00:00+00:00","view_count":2000,"category_id":3},{"id":4,"title":"MongoDB vs PostgreSQL","content":"Comparison guide...","featured":false,"author_id":2,"published":true,"created_at":"2024-03-15T00:00:00+00:00","view_count":600,"category_id":3},{"id":7,"title":"Draft: Redis Caching","content":"Coming soon...","featured":false,"author_id":2,"published":false,"created_at":"2024-04-15T00:00:00+00:00","view_count":0,"category_id":3}]                                                                                                                                                                                              |
 
 # ─────────────────────────────────────────
 # Query 18 posts | order by viewCount desc
@@ -220,6 +242,17 @@ sql.equals: select "_authors".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM
 success: true
 sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts" order by "_posts"."view_count" desc
 db.rows.equals: 8
+db.output:
+| id | title                   | content                | author_id | category_id | published | featured | view_count | created_at               |
+|----|-------------------------|------------------------|-----------|-------------|-----------|----------|------------|--------------------------|
+| 3  | PostgreSQL Deep Dive    | Master PostgreSQL...   | 2         | 3           | true      | true     | 2000       | 2024-03-10T00:00:00.000Z |
+| 1  | TypeScript Fundamentals | Learn TS basics...     | 1         | 2           | true      | true     | 1500       | 2024-01-15T00:00:00.000Z |
+| 2  | Advanced TypeScript     | Generics and beyond... | 1         | 2           | true      | false    | 800        | 2024-02-20T00:00:00.000Z |
+| 4  | MongoDB vs PostgreSQL   | Comparison guide...    | 2         | 3           | true      | false    | 600        | 2024-03-15T00:00:00.000Z |
+| 5  | Work-Life Balance       | Tips for developers... | 1         | 4           | true      | false    | 300        | 2024-04-01T00:00:00.000Z |
+| 8  | Inactive Author Post    | Old content...         | 3         | 1           | true      | false    | 50         | 2023-12-01T00:00:00.000Z |
+| 6  | Draft: React Patterns   | WIP...                 | 1         | 2           | false     | false    | 0          | 2024-04-10T00:00:00.000Z |
+| 7  | Draft: Redis Caching    | Coming soon...         | 2         | 3           | false     | false    | 0          | 2024-04-15T00:00:00.000Z |
 
 # ─────────────────────────────────────────
 # Query 19 posts | order by viewCount desc | limit 3
