@@ -776,6 +776,7 @@ function assertDbOutput(
 	const normalize = (val: unknown): string => {
 		if (val === null || val === undefined) return 'NULL';
 		if (val instanceof Date) return val.toISOString();
+		if (typeof val === 'object') return JSON.stringify(val);
 		return String(val);
 	};
 
