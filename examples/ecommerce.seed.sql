@@ -39,21 +39,21 @@ INSERT INTO categories (id, name, slug, parent_id, sort_order) VALUES
 SELECT setval('categories_id_seq', 20, true);
 
 -- Products
-INSERT INTO products (sku, name, description, price, stock, category_id, active) VALUES
-    ('LAPTOP-001', 'ProBook 15', 'High-performance laptop for professionals', 1299.99, 50, 11, TRUE),
-    ('LAPTOP-002', 'UltraLight 13', 'Lightweight laptop for travel', 999.99, 30, 11, TRUE),
-    ('PHONE-001', 'SmartPhone X', 'Latest flagship smartphone', 899.99, 100, 13, TRUE),
-    ('PHONE-002', 'SmartPhone SE', 'Budget-friendly smartphone', 449.99, 200, 13, TRUE),
-    ('HEADPHONE-001', 'NoiseCancel Pro', 'Premium noise-canceling headphones', 349.99, 75, 14, TRUE),
-    ('HEADPHONE-002', 'BudsPro', 'True wireless earbuds', 199.99, 150, 14, TRUE),
-    ('SPEAKER-001', 'SoundBar 500', 'Home theater soundbar', 299.99, 40, 15, TRUE),
-    ('TSHIRT-001', 'Classic Tee', '100% cotton t-shirt', 29.99, 500, 16, TRUE),
-    ('JEANS-001', 'Slim Fit Denim', 'Modern slim fit jeans', 79.99, 200, 17, TRUE),
-    ('DRESS-001', 'Summer Dress', 'Lightweight summer dress', 89.99, 100, 18, TRUE),
-    ('BOOK-001', 'Dune', 'Classic science fiction novel', 14.99, 1000, 19, TRUE),
-    ('BOOK-002', 'PostgreSQL Guide', 'Complete database guide', 49.99, 200, 20, TRUE),
-    ('DESKTOP-001', 'PowerStation', 'High-end desktop workstation', 2499.99, 20, 12, TRUE),
-    ('PHONE-003', 'SmartPhone Max', 'Premium smartphone (discontinued)', 1099.99, 0, 13, FALSE);
+INSERT INTO products (sku, name, description, price, stock, category_id, active, created_at) VALUES
+    ('LAPTOP-001', 'ProBook 15', 'High-performance laptop for professionals', 1299.99, 50, 11, TRUE, '2024-01-01 08:00:00+00'),
+    ('LAPTOP-002', 'UltraLight 13', 'Lightweight laptop for travel', 999.99, 30, 11, TRUE, '2024-01-01 08:00:00+00'),
+    ('PHONE-001', 'SmartPhone X', 'Latest flagship smartphone', 899.99, 100, 13, TRUE, '2024-01-01 08:00:00+00'),
+    ('PHONE-002', 'SmartPhone SE', 'Budget-friendly smartphone', 449.99, 200, 13, TRUE, '2024-01-01 08:00:00+00'),
+    ('HEADPHONE-001', 'NoiseCancel Pro', 'Premium noise-canceling headphones', 349.99, 75, 14, TRUE, '2024-01-01 08:00:00+00'),
+    ('HEADPHONE-002', 'BudsPro', 'True wireless earbuds', 199.99, 150, 14, TRUE, '2024-01-01 08:00:00+00'),
+    ('SPEAKER-001', 'SoundBar 500', 'Home theater soundbar', 299.99, 40, 15, TRUE, '2024-01-01 08:00:00+00'),
+    ('TSHIRT-001', 'Classic Tee', '100% cotton t-shirt', 29.99, 500, 16, TRUE, '2024-01-01 08:00:00+00'),
+    ('JEANS-001', 'Slim Fit Denim', 'Modern slim fit jeans', 79.99, 200, 17, TRUE, '2024-01-01 08:00:00+00'),
+    ('DRESS-001', 'Summer Dress', 'Lightweight summer dress', 89.99, 100, 18, TRUE, '2024-01-01 08:00:00+00'),
+    ('BOOK-001', 'Dune', 'Classic science fiction novel', 14.99, 1000, 19, TRUE, '2024-01-01 08:00:00+00'),
+    ('BOOK-002', 'PostgreSQL Guide', 'Complete database guide', 49.99, 200, 20, TRUE, '2024-01-01 08:00:00+00'),
+    ('DESKTOP-001', 'PowerStation', 'High-end desktop workstation', 2499.99, 20, 12, TRUE, '2024-01-01 08:00:00+00'),
+    ('PHONE-003', 'SmartPhone Max', 'Premium smartphone (discontinued)', 1099.99, 0, 13, FALSE, '2024-01-01 08:00:00+00');
 
 -- Variants
 INSERT INTO variants (product_id, sku, name, price_modifier, stock) VALUES
@@ -77,12 +77,12 @@ INSERT INTO variants (product_id, sku, name, price_modifier, stock) VALUES
     (9, 'JEANS-001-36', 'Waist 36"', 0, 20);
 
 -- Customers
-INSERT INTO customers (email, first_name, last_name, phone) VALUES
-    ('alice@example.com', 'Alice', 'Johnson', '+1-555-0101'),
-    ('bob@example.com', 'Bob', 'Smith', '+1-555-0102'),
-    ('carol@example.com', 'Carol', 'Williams', NULL),
-    ('david@example.com', 'David', 'Brown', '+1-555-0104'),
-    ('emma@example.com', 'Emma', 'Davis', '+1-555-0105');
+INSERT INTO customers (email, first_name, last_name, phone, created_at) VALUES
+    ('alice@example.com', 'Alice', 'Johnson', '+1-555-0101', '2024-01-01 09:00:00+00'),
+    ('bob@example.com', 'Bob', 'Smith', '+1-555-0102', '2024-01-01 09:00:00+00'),
+    ('carol@example.com', 'Carol', 'Williams', NULL, '2024-01-02 10:00:00+00'),
+    ('david@example.com', 'David', 'Brown', '+1-555-0104', '2024-01-03 11:00:00+00'),
+    ('emma@example.com', 'Emma', 'Davis', '+1-555-0105', '2024-01-04 12:00:00+00');
 
 -- Addresses
 INSERT INTO addresses (customer_id, type, street, city, postal_code, country, is_default) VALUES

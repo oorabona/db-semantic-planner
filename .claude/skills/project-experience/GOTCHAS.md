@@ -1566,3 +1566,13 @@ default: v.optional(v.union([v.string(), v.number(), v.boolean()]));
 **Solution:** After any editing session touching compile() or nearby code, verify the range enrichment block is present by searching for "dataType" or "endsWith('range')" in the adapter.
 **Prevention:** Consider extracting the enrichment into a named method (enrichRangeDecisions) that is explicitly called and whose absence would be noticed. Add a unit test that specifically validates range decisions have dataType set.
 **Location:** packages/adapter-pgsql/src/pgsql-adapter.ts — compile() method, range enrichment block
+
+---
+
+## Biome post-edit hook removes "unused" fields before usage is added (2026-01-30)
+
+**Symptoms:** A newly declared class field (e.g. `pendingJoins`) gets renamed to `_pendingJoins` or removed entirely by the linter before you can add the code that uses it.
+**Cause:** The post-edit-lint hook runs `biome check --write --unsafe` after every Edit tool call. If a field is declared in one edit but its usage is added in a subsequent edit, biome sees it as unused and auto-prefixes with underscore or removes it.
+**Solution:** Add the field declaration AND at least one usage in the same edit operation. Alternatively, use Serena's `replace_content` tool which does not trigger the post-edit hook.
+**Prevention:** When adding new class fields or variables that will be used later, always include at least a minimal usage (e.g. reset in constructor) in the same edit.
+**Location:** Any file with class fields — specifically hit on compiler.ts `pendingJoins` array field

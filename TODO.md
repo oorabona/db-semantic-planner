@@ -38,6 +38,7 @@
 | FLAT-BUG-001 Fix + CTE WITH RECURSIVE (FLAT-FIX+CTE) | adapter-kysely | ✅ Complete (2026-01-27) |
 | PostgreSQL Native Adapter Spike (ADAPTER-PGSQL-SPIKE) | adapter-pgsql | ✅ Complete (2026-01-29) |
 | PostgreSQL Native Adapter Phase 1 (ADAPTER-PGSQL-FULL-FORWARD) | adapter-pgsql | ✅ Complete (2026-01-29) |
+| E2E Assertion Tables (db.output: full columns) | cli, examples | ✅ Complete (2026-01-30) |
 
 ## Scope-Specific Backlogs
 

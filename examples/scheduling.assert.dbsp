@@ -57,8 +57,17 @@ intent.table: rooms
 intent.hasWhere: false
 sql.contains: from "ch4_scheduling"."rooms"
 db.rows.equals: 8
-db.output.contains: Conference Room A
-db.output.contains: Auditorium
+db.output:
+| id | name             | capacity | floor |
+|----|------------------|----------|-------|
+| 1  | Conference Room A | 20      | 1     |
+| 2  | Conference Room B | 10      | 1     |
+| 3  | Board Room       | 30       | 2     |
+| 4  | Training Room    | 50       | 2     |
+| 5  | Huddle Space 1   | 4        | 1     |
+| 6  | Huddle Space 2   | 4        | 1     |
+| 7  | Executive Suite  | 15       | 3     |
+| 8  | Auditorium       | 200      | 0     |
 
 # ─────────────────────────────────────────
 # Query 7: roomBookings
@@ -70,6 +79,7 @@ sql.contains: from "ch4_scheduling"."room_bookings"
 
 # ─────────────────────────────────────────
 # Query 8: events
+# NOTE: time_slot (tstzrange) excluded — timezone-dependent stringification
 # ─────────────────────────────────────────
 --- query: 8
 success: true

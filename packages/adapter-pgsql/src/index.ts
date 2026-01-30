@@ -172,6 +172,8 @@ export {
 	type UpdateConfig,
 	type UpsertConfig,
 } from './mutations/index.js';
+// Naming resolution
+export { resolveLogicalName } from './naming.js';
 // Naming plugins
 export {
 	CamelCaseNamingPlugin,

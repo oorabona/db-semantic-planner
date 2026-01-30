@@ -87,55 +87,23 @@ export async function createDbConnection(
 			const startTime = performance.now();
 
 			try {
-				// Use pool.query for:
-				// 1. Parameterized queries
-				// 2. Multi-statement SQL (contains multiple semicolons)
-				// sql.raw() only supports single statements
-				const isMultiStatement =
-					query.split(';').filter((s) => s.trim()).length > 1;
-
-				if (params.length > 0 || isMultiStatement) {
-					const poolResult = await pool.query(query, [...params]);
-					const endTime = performance.now();
-					const executionTimeMs = Math.round(endTime - startTime);
-
-					// Multi-statement queries may return different result structures
-					// Handle both single result and array of results
-					const rows = (poolResult.rows ?? []) as Record<string, unknown>[];
-					const columns = poolResult.fields?.map((f) => f.name) ?? [];
-					const rowCount = poolResult.rowCount ?? rows?.length ?? 0;
-					const truncated = rows.length > MAX_ROWS;
-					const limitedRows = truncated ? rows.slice(0, MAX_ROWS) : rows;
-
-					return {
-						rows: limitedRows,
-						columns,
-						rowCount,
-						executionTimeMs,
-						truncated,
-					};
-				}
-
-				// Single statement without params - use sql.raw (benefits from Kysely plugins)
-				const result = await sql
-					.raw<Record<string, unknown>>(query)
-					.execute(db);
-
+				// Always use pool.query() for consistent physical column names.
+				// The pg driver returns snake_case column names as stored in the DB,
+				// unlike Kysely's sql.raw() which applies CamelCasePlugin transforms.
+				const poolResult = await pool.query(query, [...params]);
 				const endTime = performance.now();
 				const executionTimeMs = Math.round(endTime - startTime);
 
-				// Get column names from first row or empty array
-				const rows = result.rows as Record<string, unknown>[];
-				const columns = rows.length > 0 && rows[0] ? Object.keys(rows[0]) : [];
-
-				// Truncate if needed
+				const rows = (poolResult.rows ?? []) as Record<string, unknown>[];
+				const columns = poolResult.fields?.map((f) => f.name) ?? [];
+				const rowCount = poolResult.rowCount ?? rows?.length ?? 0;
 				const truncated = rows.length > MAX_ROWS;
 				const limitedRows = truncated ? rows.slice(0, MAX_ROWS) : rows;
 
 				return {
 					rows: limitedRows,
 					columns,
-					rowCount: rows.length,
+					rowCount,
 					executionTimeMs,
 					truncated,
 				};

@@ -376,7 +376,13 @@ export interface ModelIR {
 
 	// --- Helper Methods ---
 
-	/** Get table by name */
+	/**
+	 * Get table by logical name.
+	 *
+	 * @param name - Logical table name (camelCase, e.g. "postComments").
+	 *   This is the model-level name, NOT the database name (e.g. "post_comments").
+	 *   Use adapter-side naming utilities to convert DB names to logical names.
+	 */
 	getTable(name: string): TableIR | undefined;
 
 	/** Get relation by qualified name "source.relationName" */

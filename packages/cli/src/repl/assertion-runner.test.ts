@@ -903,4 +903,220 @@ describe('assertion-runner', () => {
 			});
 		});
 	});
+
+	describe('db.output table assertion', () => {
+		it('passes when rows match exactly', () => {
+			const blocks = [
+				createBlock({
+					assertions: [
+						{
+							type: 'db.output',
+							value: {
+								columns: ['id', 'name'],
+								rows: [
+									['1', 'Alice'],
+									['2', 'Bob'],
+								],
+							},
+							line: 1,
+						},
+					],
+				}),
+			];
+			const results = [
+				createResult({
+					rows: [
+						{ id: '1', name: 'Alice' },
+						{ id: '2', name: 'Bob' },
+					],
+				}),
+			];
+
+			const summary = runAssertions(blocks, results, ['query'], true);
+			expect(summary.passed).toBe(1);
+			expect(summary.failed).toBe(0);
+		});
+
+		it('fails on row count mismatch', () => {
+			const blocks = [
+				createBlock({
+					assertions: [
+						{
+							type: 'db.output',
+							value: {
+								columns: ['id'],
+								rows: [['1'], ['2']],
+							},
+							line: 1,
+						},
+					],
+				}),
+			];
+			const results = [
+				createResult({
+					rows: [{ id: '1' }, { id: '2' }, { id: '3' }],
+				}),
+			];
+
+			const summary = runAssertions(blocks, results, ['query'], true);
+			expect(summary.failed).toBe(1);
+			const outcome = summary.results[0]!.assertions[0]!;
+			expect(outcome.message).toContain('Expected 2 rows, got 3');
+		});
+
+		it('fails on column value mismatch', () => {
+			const blocks = [
+				createBlock({
+					assertions: [
+						{
+							type: 'db.output',
+							value: {
+								columns: ['id', 'name'],
+								rows: [['1', 'Alice']],
+							},
+							line: 1,
+						},
+					],
+				}),
+			];
+			const results = [
+				createResult({
+					rows: [{ id: '1', name: 'Bob' }],
+				}),
+			];
+
+			const summary = runAssertions(blocks, results, ['query'], true);
+			expect(summary.failed).toBe(1);
+			const outcome = summary.results[0]!.assertions[0]!;
+			expect(outcome.message).toContain('column "name"');
+			expect(outcome.message).toContain('Alice');
+			expect(outcome.message).toContain('Bob');
+		});
+
+		it('handles NULL matching', () => {
+			const blocks = [
+				createBlock({
+					assertions: [
+						{
+							type: 'db.output',
+							value: {
+								columns: ['id', 'bio'],
+								rows: [['1', 'NULL']],
+							},
+							line: 1,
+						},
+					],
+				}),
+			];
+			const results = [
+				createResult({
+					rows: [{ id: '1', bio: null }],
+				}),
+			];
+
+			const summary = runAssertions(blocks, results, ['query'], true);
+			expect(summary.passed).toBe(1);
+		});
+
+		it('checks only listed columns (ignores extra)', () => {
+			const blocks = [
+				createBlock({
+					assertions: [
+						{
+							type: 'db.output',
+							value: {
+								columns: ['id', 'name'],
+								rows: [['1', 'Alice']],
+							},
+							line: 1,
+						},
+					],
+				}),
+			];
+			const results = [
+				createResult({
+					rows: [
+						{
+							id: '1',
+							name: 'Alice',
+							email: 'alice@test.com',
+							created_at: '2026-01-01',
+						},
+					],
+				}),
+			];
+
+			const summary = runAssertions(blocks, results, ['query'], true);
+			expect(summary.passed).toBe(1);
+		});
+
+		it('fails when expected column not in results', () => {
+			const blocks = [
+				createBlock({
+					assertions: [
+						{
+							type: 'db.output',
+							value: {
+								columns: ['id', 'nonexistent'],
+								rows: [['1', 'val']],
+							},
+							line: 1,
+						},
+					],
+				}),
+			];
+			const results = [
+				createResult({
+					rows: [{ id: '1', name: 'Alice' }],
+				}),
+			];
+
+			const summary = runAssertions(blocks, results, ['query'], true);
+			expect(summary.failed).toBe(1);
+			const outcome = summary.results[0]!.assertions[0]!;
+			expect(outcome.message).toContain('nonexistent');
+		});
+
+		it('skips in dry-run mode (no DB)', () => {
+			const blocks = [
+				createBlock({
+					assertions: [
+						{
+							type: 'db.output',
+							value: {
+								columns: ['id'],
+								rows: [['1']],
+							},
+							line: 1,
+						},
+					],
+				}),
+			];
+			const results = [createResult({})];
+
+			const summary = runAssertions(blocks, results, ['query'], false);
+			expect(summary.skipped).toBe(1);
+		});
+
+		it('handles empty expected rows (header only)', () => {
+			const blocks = [
+				createBlock({
+					assertions: [
+						{
+							type: 'db.output',
+							value: {
+								columns: ['id', 'name'],
+								rows: [],
+							},
+							line: 1,
+						},
+					],
+				}),
+			];
+			const results = [createResult({ rows: [] })];
+
+			const summary = runAssertions(blocks, results, ['query'], true);
+			expect(summary.passed).toBe(1);
+		});
+	});
 });

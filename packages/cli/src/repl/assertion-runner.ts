@@ -8,6 +8,7 @@ import type {
 	Assertion,
 	AssertionBlock,
 	AssertionType,
+	TableAssertionData,
 } from './assertion-parser.js';
 import { resolveQueryIndex } from './assertion-parser.js';
 import type { BatchResult } from './batch.js';
@@ -221,6 +222,9 @@ function runSingleAssertion(
 				result.dbSuccess ?? result.success,
 				value as boolean,
 			);
+
+		case 'db.output':
+			return assertDbOutput(result, value as TableAssertionData);
 
 		case 'db.output.contains':
 			return assertContains(
@@ -747,6 +751,120 @@ function assertDbValueEquals(
 		message: passed
 			? undefined
 			: `Value at [${row}]["${column}"]: expected ${JSON.stringify(value)}, got ${JSON.stringify(actual)}`,
+	};
+}
+
+// ============================================================
+// DB OUTPUT TABLE ASSERTION (row-by-row comparison)
+// ============================================================
+
+/**
+ * Assert db.output table: compare parsed markdown table against actual DB rows.
+ * - Row count must match exactly
+ * - Only listed columns are checked (extra actual columns ignored)
+ * - Values compared as trimmed strings
+ * - "NULL" (case-sensitive) matches null/undefined actual values
+ */
+function assertDbOutput(
+	result: BatchResult,
+	tableData: TableAssertionData,
+): AssertionOutcome {
+	const { columns, rows: expectedRows } = tableData;
+	const actualRows = (result.rows ?? []) as Record<string, unknown>[];
+
+	// Normalize a value for string comparison (Date → ISO, etc.)
+	const normalize = (val: unknown): string => {
+		if (val === null || val === undefined) return 'NULL';
+		if (val instanceof Date) return val.toISOString();
+		return String(val);
+	};
+
+	// Helper: format actual rows as markdown table for error messages
+	const formatActualTable = (): string => {
+		if (actualRows.length === 0) return '(no rows)';
+		const actualCols =
+			columns.length > 0 ? columns : Object.keys(actualRows[0]!);
+		const header = `| ${actualCols.join(' | ')} |`;
+		const separator = `| ${actualCols.map(() => '---').join(' | ')} |`;
+		const rows = actualRows.map((row) => {
+			const cells = actualCols.map((col) => normalize(row[col]));
+			return `| ${cells.join(' | ')} |`;
+		});
+		return [header, separator, ...rows].join('\n');
+	};
+
+	// Row count check
+	if (actualRows.length !== expectedRows.length) {
+		return {
+			type: 'db.output',
+			expected: `${expectedRows.length} rows`,
+			actual: `${actualRows.length} rows`,
+			passed: false,
+			message: `Expected ${expectedRows.length} rows, got ${actualRows.length}\nActual data:\n${formatActualTable()}`,
+		};
+	}
+
+	// Check expected columns exist in actual result (if any rows)
+	if (actualRows.length > 0) {
+		const firstRow = actualRows[0]!;
+		for (const col of columns) {
+			if (!(col in firstRow)) {
+				return {
+					type: 'db.output',
+					expected: `column "${col}" in results`,
+					actual: `columns: ${Object.keys(firstRow).join(', ')}`,
+					passed: false,
+					message: `Expected column "${col}" not found in results. Available: ${Object.keys(firstRow).join(', ')}\nActual data:\n${formatActualTable()}`,
+				};
+			}
+		}
+	}
+
+	// Row-by-row, column-by-column comparison
+	for (let r = 0; r < expectedRows.length; r++) {
+		const expectedRow = expectedRows[r]!;
+		const actualRow = actualRows[r]!;
+
+		for (let c = 0; c < columns.length; c++) {
+			const col = columns[c]!;
+			const expectedVal = expectedRow[c] ?? '';
+			const actualVal = actualRow[col];
+			const normalizedActual = normalize(actualVal);
+
+			// NULL handling: "NULL" (case-sensitive) matches null/undefined
+			const expectedIsNull = expectedVal === 'NULL';
+			const actualIsNull = actualVal === null || actualVal === undefined;
+
+			if (expectedIsNull && actualIsNull) continue;
+			if (expectedIsNull !== actualIsNull) {
+				return {
+					type: 'db.output',
+					expected: expectedVal,
+					actual: normalizedActual,
+					passed: false,
+					message: `Row ${r + 1}, column "${col}": expected ${expectedVal}, got ${normalizedActual}\nActual data:\n${formatActualTable()}`,
+				};
+			}
+
+			// String comparison (trimmed, with Date→ISO normalization)
+			if (normalizedActual.trim() !== expectedVal.trim()) {
+				return {
+					type: 'db.output',
+					expected: expectedVal,
+					actual: normalizedActual,
+					passed: false,
+					message: `Row ${r + 1}, column "${col}": expected "${expectedVal}", got "${normalizedActual}"\nActual data:\n${formatActualTable()}`,
+				};
+			}
+		}
+	}
+
+	return {
+		type: 'db.output',
+		expected: `${expectedRows.length} rows matching`,
+		actual: `${expectedRows.length} rows matching`,
+		passed: true,
+		message: undefined,
 	};
 }
 

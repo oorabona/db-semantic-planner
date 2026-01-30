@@ -35,6 +35,7 @@ export const ASSERTION_TYPES = [
 	'db.rows.equals', // Exact row count
 	'db.rows.min', // At least N rows
 	'db.rows.max', // At most N rows
+	'db.output', // Table block assertion (multiline row comparison)
 	'db.column.exists', // Column in result
 	'db.value.equals', // Specific cell value
 
@@ -58,11 +59,20 @@ export function requiresDatabase(type: AssertionType): boolean {
 }
 
 /**
+ * Parsed table data for db.output table assertions.
+ * columns: header names; rows: cell values as trimmed strings.
+ */
+export interface TableAssertionData {
+	columns: string[];
+	rows: string[][];
+}
+
+/**
  * A single assertion within a block
  */
 export interface Assertion {
 	type: AssertionType;
-	value: string | number | boolean | unknown[];
+	value: string | number | boolean | unknown[] | TableAssertionData;
 	line: number;
 }
 
@@ -152,7 +162,22 @@ export function parseAssertionFile(content: string): ParseResult {
 			if (assertion.error) {
 				errors.push({ line: lineNum, message: assertion.error });
 			} else if (assertion.assertion) {
-				currentBlock.assertions.push(assertion.assertion);
+				// db.output table block: collect pipe-delimited rows from subsequent lines
+				if (
+					assertion.assertion.type === 'db.output' &&
+					assertion.assertion.value === ''
+				) {
+					const tableResult = parseTableBlock(lines, i + 1);
+					if (tableResult.error) {
+						errors.push({ line: lineNum, message: tableResult.error });
+					} else if (tableResult.data) {
+						assertion.assertion.value = tableResult.data;
+						currentBlock.assertions.push(assertion.assertion);
+					}
+					i += tableResult.linesConsumed; // skip past consumed table lines
+				} else {
+					currentBlock.assertions.push(assertion.assertion);
+				}
 			}
 		} else {
 			// Assertion outside of any block
@@ -329,6 +354,10 @@ function parseAssertionValue(
 				return { value: valueStr };
 			}
 
+		// Table block assertion: db.output has no inline value (table follows on next lines)
+		case 'db.output':
+			return { value: '' }; // Marker — table data parsed separately by parseAssertionFile
+
 		// String values (all others)
 		case 'output.contains':
 		case 'output.equals':
@@ -359,6 +388,100 @@ function parseAssertionValue(
 		default:
 			return { error: `Unhandled assertion type: ${type}` };
 	}
+}
+
+// ============================================================================
+// Table block parsing helpers (for db.output)
+// ============================================================================
+
+/**
+ * Check if a pipe-delimited line is a separator row (e.g. |---|---|)
+ */
+function isSeparatorRow(line: string): boolean {
+	return /^\|[\s\-:|]+\|$/.test(line.trim());
+}
+
+/**
+ * Parse a pipe-delimited row into an array of trimmed cell values.
+ * Handles escaped pipes (\|) within cell values.
+ */
+function parseTableCells(line: string): string[] {
+	let inner = line.trim();
+	// Strip leading/trailing pipes
+	if (inner.startsWith('|')) inner = inner.slice(1);
+	if (inner.endsWith('|')) inner = inner.slice(0, -1);
+
+	const cells: string[] = [];
+	let current = '';
+	for (let i = 0; i < inner.length; i++) {
+		if (inner[i] === '\\' && i + 1 < inner.length && inner[i + 1] === '|') {
+			current += '|';
+			i++; // skip escaped pipe
+		} else if (inner[i] === '|') {
+			cells.push(current.trim());
+			current = '';
+		} else {
+			current += inner[i];
+		}
+	}
+	cells.push(current.trim());
+	return cells;
+}
+
+/**
+ * Parse a table block starting at `startIndex` in the lines array.
+ * Collects pipe-delimited rows, skips blanks and separator rows.
+ * Returns parsed TableAssertionData and number of lines consumed.
+ */
+function parseTableBlock(
+	lines: string[],
+	startIndex: number,
+): { data?: TableAssertionData; linesConsumed: number; error?: string } {
+	const tableLines: string[] = [];
+	let consumed = 0;
+
+	for (let j = startIndex; j < lines.length; j++) {
+		const raw = lines[j];
+		if (raw === undefined) break;
+		const trimmed = raw.trim();
+
+		// Blank lines within table are ignored (not terminators)
+		if (!trimmed) {
+			consumed++;
+			continue;
+		}
+
+		// Pipe-delimited line → part of the table
+		if (trimmed.startsWith('|')) {
+			tableLines.push(trimmed);
+			consumed++;
+			continue;
+		}
+
+		// Any other line (including --- block headers) → end of table
+		break;
+	}
+
+	if (tableLines.length === 0) {
+		return {
+			linesConsumed: consumed,
+			error: 'db.output: expected table rows starting with |',
+		};
+	}
+
+	// Filter out separator rows
+	const dataLines = tableLines.filter((l) => !isSeparatorRow(l));
+	if (dataLines.length === 0) {
+		return {
+			linesConsumed: consumed,
+			error: 'db.output: table has only separator rows, no header or data',
+		};
+	}
+
+	const columns = parseTableCells(dataLines[0]!);
+	const rows = dataLines.slice(1).map((l) => parseTableCells(l));
+
+	return { data: { columns, rows }, linesConsumed: consumed };
 }
 
 /**

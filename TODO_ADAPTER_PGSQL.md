@@ -80,11 +80,11 @@
 ## Refactoring Backlog (discovered during Phase 3)
 
 - [ ] **Single source of truth for json_agg relation name**: Currently `extractJsonAggDecisions` (adapter) and `hydration-utils.ts` (core) both compute the relation alias independently with `includeAlias ?? relation`. Centraliser la décision dans le PlanReport pour éliminer la duplication.
-- [ ] **Remove duplicate range operator switch cases**: After early-return for range ops in `compileCondition`, the switch cases `contains`/`containedBy`/`overlaps` are dead code. Nettoyer.
-- [ ] **Fragile SQL assertions (`toContain`)**: E2E tests use `toContain('EXISTS')` etc. which doesn't verify structural correctness. Consider AST-level or snapshot-based assertions.
-- [ ] **Model.getTable() naming confusion**: `getTable()` expects logical (camelCase) names but the adapter context often works with database (snake_case) names. Consider adding `getTableByDbName()` or documenting clearly.
-- [ ] **JOIN compilation for filter-strategy**: The pgsql compiler compiles all filter-strategy decisions as EXISTS subqueries, even when the planner chooses `join`. Implement JOIN-based filter compilation for `belongsTo` (to-one) relations.
-- [ ] **LEFT JOIN compilation for include-strategy**: The pgsql compiler always uses json_agg subqueries for includes. Implement LEFT JOIN when `includeStrategy: 'join'` is specified on a relation.
+- [x] ✅ **Remove duplicate range operator switch cases** (2026-01-30): Dead code removed from `compileCondition` switch — range ops handled by early return.
+- [x] ✅ **Fragile SQL assertions (`toContain`)** (2026-01-30): `db.output` table assertion added to CLI parser+runner with 19 unit tests. Fixed `batch.ts` to forward `rows`/`columns` from `ExecutionResult` to `BatchResult`. Validated E2E against real PostgreSQL — `blog-extended.assert.dbsp` uses `db.output:` table block for authors query (291/291 E2E pass).
+- [x] ✅ **Model.getTable() naming confusion** (2026-01-30): `resolveLogicalName()` utility added in `naming.ts` with 11 unit tests.
+- [x] ✅ **JOIN compilation for filter-strategy** (2026-01-30): JOIN filter dispatch added to compiler for `choice === 'join'` decisions. 8 unit tests.
+- [x] ✅ **LEFT JOIN compilation for include-strategy** (2026-01-30): LEFT JOIN include dispatch added for `selectLeftJoinInclude` decisions. 6 unit tests.
 - [ ] **CTE/WITH clause generation**: Multi-EXISTS patterns are compiled as flat WHERE conditions. Implement CTE extraction for complex multi-locale/multi-filter patterns.
 - [ ] **Split extractExistsDecisions**: Method does 3 things (filter decisions, find intents, resolve FK). Extract into smaller focused functions for readability.
 
