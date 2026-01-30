@@ -6,7 +6,7 @@
 import { registerWhereHandler } from '../../registry.js';
 import type { WhereHandler } from '../../types.js';
 import { andHandler } from './and.js';
-import { comparisonHandler } from './comparison.js';
+import { createComparisonHandler } from './comparison.js';
 import { createExistsHandler } from './exists.js';
 import { inHandler } from './in.js';
 import { likeHandler } from './like.js';
@@ -14,7 +14,7 @@ import { notHandler } from './not.js';
 import { createNotExistsHandler } from './not-exists.js';
 import { nullHandler } from './null.js';
 import { orHandler } from './or.js';
-import { rangeHandler } from './range.js';
+import { createRangeHandler } from './range.js';
 import { createRelationFilterHandler } from './relation-filter.js';
 import { createSubqueryHandler } from './subquery.js';
 
@@ -28,14 +28,9 @@ import { createSubqueryHandler } from './subquery.js';
  */
 export function registerWhereHandlers(): void {
 	// Cast needed: specific handlers have narrower types than the generic registry
-	registerWhereHandler(
-		'comparison',
-		comparisonHandler as unknown as WhereHandler,
-	);
 	registerWhereHandler('like', likeHandler as unknown as WhereHandler);
 	registerWhereHandler('in', inHandler as unknown as WhereHandler);
 	registerWhereHandler('null', nullHandler as unknown as WhereHandler);
-	registerWhereHandler('range', rangeHandler as unknown as WhereHandler);
 	registerWhereHandler('and', andHandler as unknown as WhereHandler);
 	registerWhereHandler('or', orHandler as unknown as WhereHandler);
 	registerWhereHandler('not', notHandler as unknown as WhereHandler);
@@ -92,6 +87,16 @@ type ComplexWhereHelpers = {
 export function registerComplexWhereHandlers(
 	helpers: ComplexWhereHelpers,
 ): void {
+	// Comparison and range handlers need compileExists for relation-path fields
+	const comparisonHandler = createComparisonHandler(helpers.compileExists);
+	const rangeHandler = createRangeHandler(helpers.compileExists);
+
+	registerWhereHandler(
+		'comparison',
+		comparisonHandler as unknown as WhereHandler,
+	);
+	registerWhereHandler('range', rangeHandler as unknown as WhereHandler);
+
 	const existsHandler = createExistsHandler(
 		helpers.compileExists,
 		helpers.compileJoinedRelationConditions,
@@ -123,7 +128,7 @@ export function registerComplexWhereHandlers(
 
 // Simple handlers
 export { andHandler } from './and.js';
-export { comparisonHandler } from './comparison.js';
+export { createComparisonHandler } from './comparison.js';
 // Complex handler factories
 export { createExistsHandler } from './exists.js';
 export { inHandler } from './in.js';
@@ -132,6 +137,6 @@ export { notHandler } from './not.js';
 export { createNotExistsHandler } from './not-exists.js';
 export { nullHandler } from './null.js';
 export { orHandler } from './or.js';
-export { rangeHandler } from './range.js';
+export { createRangeHandler } from './range.js';
 export { createRelationFilterHandler } from './relation-filter.js';
 export { createSubqueryHandler } from './subquery.js';

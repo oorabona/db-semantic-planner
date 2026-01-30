@@ -242,10 +242,8 @@ intent.type: query
 intent.table: rooms
 intent.with: roomBookings
 intent.hasWhere: true
-sql.equals: select "_rooms".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch4_scheduling"."room_bookings" AS __t__ WHERE "__t__"."room_id" = "_rooms"."id"), '[]'::json) as "room_bookings_json" from "ch4_scheduling"."rooms" as "_rooms" where "_rooms"."room_bookings"."booking_period" && $1
-# BUG: Generated SQL has invalid path "_rooms"."room_bookings"."booking_period" — pseudo-column filter on relation path not correctly compiled
-db.success: false
-db.output.contains: missing FROM-clause entry for table
+sql.equals: select "_rooms".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch4_scheduling"."room_bookings" AS __t__ WHERE "__t__"."room_id" = "_rooms"."id"), '[]'::json) as "room_bookings_json" from "ch4_scheduling"."rooms" as "_rooms" where exists (select 1 as "_exists" from "ch4_scheduling"."room_bookings" as "_room_bookings" where "_room_bookings"."room_id" = "_rooms"."id" and "_room_bookings"."booking_period" && $1)
+db.success: true
 
 # ─────────────────────────────────────────
 # Query 16: insert into rooms set name = 'Board Room', capacity = 20, floor = 2

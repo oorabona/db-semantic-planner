@@ -362,6 +362,38 @@ export function isPseudoColumnField(field: string): boolean {
 }
 
 /**
+ * Check if a dotted field path is a relation path (e.g., "roomBookings.bookingPeriod").
+ * Returns the parsed relation name and column if the prefix matches a relation from rootTable.
+ * @param field - Field path like "roomBookings.bookingPeriod"
+ * @param rootTable - The root table to look up relations from
+ * @param model - Model IR for relation lookup
+ * @returns { relation, column } or null if not a relation path
+ */
+export function parseRelationPathField(
+	field: string,
+	rootTable: string,
+	model: ModelIR,
+): { relation: string; column: string } | null {
+	const dotIndex = field.indexOf('.');
+	if (dotIndex === -1) return null;
+
+	const prefix = field.substring(0, dotIndex);
+	const column = field.substring(dotIndex + 1);
+
+	// Skip pseudo-column keywords (handled separately)
+	if (isPseudoColumnField(field)) return null;
+
+	// Check if the prefix matches a relation from the root table
+	const qualifiedName = `${rootTable}.${prefix}`;
+	const relation = model.getRelation(qualifiedName);
+	if (relation) {
+		return { relation: prefix, column };
+	}
+
+	return null;
+}
+
+/**
  * Parse a pseudo-column field path into its components.
  * @param field - Field path like "parent.id"
  * @returns { traversal, column } or null if not a pseudo-column path
