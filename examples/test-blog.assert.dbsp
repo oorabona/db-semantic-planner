@@ -76,7 +76,7 @@ sql.equals: select "posts".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "a
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.equals: select "posts".*, "author".* from "posts" as "posts" left join LATERAL ( SELECT * FROM "authors" WHERE "authors"."authorId" = "posts"."id" ) AS "author" on true
+sql.equals: select "posts".*, "author".* from "posts" as "posts" left join LATERAL ( SELECT * FROM "authors" AS "__authors_lat__" WHERE "__authors_lat__"."authorId" = "posts"."id" ) AS "author" on true
 
 # ─────────────────────────────────────────
 # Query 9: authors | select *, posts.* | flat
@@ -85,7 +85,7 @@ sql.equals: select "posts".*, "author".* from "posts" as "posts" left join LATER
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.equals: select "authors".*, "posts".* from "authors" as "authors" left join LATERAL ( SELECT * FROM "posts" WHERE "posts"."authorId" = "authors"."id" ) AS "posts" on true
+sql.equals: select "authors".*, "posts".* from "authors" as "authors" left join LATERAL ( SELECT * FROM "posts" AS "__posts_lat__" WHERE "__posts_lat__"."authorId" = "authors"."id" ) AS "posts" on true
 
 # ─────────────────────────────────────────
 # Query 10: posts select distinct *
