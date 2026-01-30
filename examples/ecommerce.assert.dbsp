@@ -138,9 +138,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.equals: select "_categories".*, "_products".* from "ch5_ecommerce"."categories" as "_categories" left join LATERAL ( SELECT * FROM "ch5_ecommerce.products" WHERE "ch5_ecommerce.products"."categoryId" = "_categories"."id" ) AS "_products" on true
-# NOTE: db.rows.equals skipped — LATERAL JOIN schema qualification bug
-# produces "ch5_ecommerce.products" instead of "ch5_ecommerce"."products"
+sql.equals: select "_categories".*, "_products".* from "ch5_ecommerce"."categories" as "_categories" left join LATERAL ( SELECT * FROM "ch5_ecommerce"."products" AS "__products_lat__" WHERE "__products_lat__"."categoryId" = "_categories"."id" ) AS "_products" on true
 
 # ─────────────────────────────────────────
 # Query 11 products | select *, variants.* | flat | limit 3
@@ -148,9 +146,8 @@ sql.equals: select "_categories".*, "_products".* from "ch5_ecommerce"."categori
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.equals: select "_products".*, "_variants".* from "ch5_ecommerce"."products" as "_products" left join LATERAL ( SELECT * FROM "ch5_ecommerce.variants" WHERE "ch5_ecommerce.variants"."productId" = "_products"."id" ) AS "_variants" on true limit $1
+sql.equals: select "_products".*, "_variants".* from "ch5_ecommerce"."products" as "_products" left join LATERAL ( SELECT * FROM "ch5_ecommerce"."variants" AS "__variants_lat__" WHERE "__variants_lat__"."productId" = "_products"."id" ) AS "_variants" on true limit $1
 params.equals: [3]
-# NOTE: db.rows/output.contains skipped — LATERAL JOIN schema qualification bug
 
 # ─────────────────────────────────────────
 # Query 12 customers | select *, orders.*

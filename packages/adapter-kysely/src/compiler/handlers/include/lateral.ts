@@ -66,15 +66,16 @@ export function applyLateralIncludes(
 	let result = query;
 
 	for (const { include, relation } of lateralIncludes) {
-		// Apply schema prefix
-		const targetTable = schemaName
-			? `${schemaName}.${relation.target}`
-			: relation.target;
+		// Build schema-qualified table reference with separate identifiers
+		const qualifiedTable = schemaName
+			? `"${schemaName}"."${relation.target}"`
+			: `"${relation.target}"`;
 
 		// Create alias for the LATERAL subquery - use relation name for semantic readability
 		// When schema-scoped, prefix to avoid PostgreSQL ambiguity
 		state.aliasCounter++;
 		const lateralAlias = schemaName ? `_${include.relation}` : include.relation;
+		const innerAlias = `__${relation.target}_lat__`;
 		state.tableAliases.set(`${relation.target}_include`, lateralAlias);
 		state.joinedIncludeRelations.set(include.relation, {
 			alias: lateralAlias,
@@ -84,7 +85,7 @@ export function applyLateralIncludes(
 		});
 
 		// Build the LATERAL subquery
-		// LEFT JOIN LATERAL (SELECT * FROM target WHERE target.fk = source.pk LIMIT N) AS alias ON true
+		// LEFT JOIN LATERAL (SELECT * FROM schema.target AS alias WHERE alias.fk = source.pk LIMIT N) AS alias ON true
 		const fkCols = normalizeForeignKey(relation.foreignKey, 'id');
 
 		// For LATERAL, we use sql.raw to create the LATERAL subquery
@@ -97,8 +98,8 @@ export function applyLateralIncludes(
 			include.limit !== undefined ? `LIMIT ${include.limit}` : '';
 
 		const lateralSubquery = `LATERAL (
-			SELECT * FROM "${targetTable}"
-			WHERE "${targetTable}"."${fkCols[0]}" = "${rootAlias}"."${sourceKeys[0]}"
+			SELECT * FROM ${qualifiedTable} AS "${innerAlias}"
+			WHERE "${innerAlias}"."${fkCols[0]}" = "${rootAlias}"."${sourceKeys[0]}"
 			${orderBySql}
 			${limitSql}
 		) AS "${lateralAlias}"`;
