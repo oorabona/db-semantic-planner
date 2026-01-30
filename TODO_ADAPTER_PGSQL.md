@@ -87,8 +87,10 @@
 - [x] ✅ **LEFT JOIN compilation for include-strategy** (2026-01-30): LEFT JOIN include dispatch added for `selectLeftJoinInclude` decisions. 6 unit tests.
 - [x] ✅ **BUG: Pseudo-column filter on relation path generates invalid SQL** (2026-01-30): Fixed in adapter-kysely — relation-path fields (e.g., `roomBookings.bookingPeriod`) now compile as EXISTS subqueries instead of invalid 3-level column refs. Added `parseRelationPathField()` helper, converted comparison/range handlers to factory pattern. Updated `scheduling.assert.dbsp` Q15. 290/291 E2E pass.
 - [x] ✅ **BUG: LATERAL JOIN schema qualification** (2026-01-30): Fixed in `adapter-kysely/lateral.ts` — separate schema/table identifiers + inner alias for WHERE clause. Updated assertions in `ecommerce.assert.dbsp` (Q10/Q11) and `test-blog.assert.dbsp` (Q8/Q9). 290/291 E2E pass.
+- [ ] **BUG: `via` hint ambiguity resolution generates invalid SQL**: `pimdam.q8.ambiguity.test.ts` Q8-07 — query with `via` hint to resolve ambiguous relations produces `invalid reference to FROM-clause entry for table "products"`. The compiler emits a table reference that PostgreSQL rejects because the alias/scope is incorrect. Repro: `pimdam.q8.ambiguity.test.ts > Q8-07: should execute query successfully when ambiguity is resolved with via hint`.
 - [ ] **CTE/WITH clause generation**: Multi-EXISTS patterns are compiled as flat WHERE conditions. Implement CTE extraction for complex multi-locale/multi-filter patterns.
 - [ ] **Split extractExistsDecisions**: Method does 3 things (filter decisions, find intents, resolve FK). Extract into smaller focused functions for readability.
+- [ ] **Refactor: extract relation-path detection to shared helper**: `comparison.ts` and `range.ts` both duplicate identical relation-path → EXISTS logic (lines 37-67). Extract to a shared `compileRelationPathAsExists()` helper. Low priority.
 
 ---
 
