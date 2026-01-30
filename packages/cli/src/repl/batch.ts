@@ -469,7 +469,7 @@ async function executeNqlQuery(
 
 	try {
 		// Compile NQL to SQL
-		const result = compileNqlToSql(
+		const result = await compileNqlToSql(
 			input,
 			state.model,
 			state.schemaName ? { schemaName: state.schemaName } : undefined,
