@@ -194,12 +194,11 @@ function generateCreateTable(
 		elements.push(generateColumnDef(col, naming));
 	}
 
-	// Add primary key constraint
-	const pkColumns = Array.isArray(table.primaryKey)
-		? table.primaryKey
-		: [table.primaryKey];
-
-	if (pkColumns.length > 0) {
+	// Add primary key constraint (omit if no PK defined)
+	if (table.primaryKey !== undefined) {
+		const pkColumns = Array.isArray(table.primaryKey)
+			? table.primaryKey
+			: [table.primaryKey];
 		const pkCols = pkColumns
 			.map((col) => quoteIdentifier(naming.toDatabase(col)))
 			.join(', ');

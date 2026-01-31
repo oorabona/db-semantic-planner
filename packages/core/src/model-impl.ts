@@ -150,13 +150,19 @@ export class ModelIRImpl implements ModelIR {
 	private validate(): void {
 		const errors: string[] = [];
 
-		// Validate all tables have primary keys
+		// Validate PK columns exist when PK is defined
 		for (const table of this.tables.values()) {
-			if (
-				!table.primaryKey ||
-				(Array.isArray(table.primaryKey) && table.primaryKey.length === 0)
-			) {
-				errors.push(`Table "${table.name}" has no primary key defined`);
+			if (table.primaryKey) {
+				const pkCols = Array.isArray(table.primaryKey)
+					? table.primaryKey
+					: [table.primaryKey];
+				for (const pk of pkCols) {
+					if (!table.columns.some((c) => c.name === pk)) {
+						errors.push(
+							`Table "${table.name}" primary key column "${pk}" not found in columns`,
+						);
+					}
+				}
 			}
 		}
 

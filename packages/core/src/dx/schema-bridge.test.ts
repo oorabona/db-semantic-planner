@@ -412,7 +412,7 @@ describe('buildModelFromSchema', () => {
 			expect(users.primaryKey).toBe('id');
 		});
 
-		it('should fallback to first column when no id column exists', () => {
+		it('should omit primaryKey when no id column and no FK columns exist', () => {
 			const schema: GeneratedSchema = {
 				tables: {
 					settings: {
@@ -433,7 +433,7 @@ describe('buildModelFromSchema', () => {
 			const model = buildModelFromSchema(schema);
 			const settings = model.getTable('settings')!;
 
-			expect(settings.primaryKey).toBe('key');
+			expect(settings.primaryKey).toBeUndefined();
 		});
 
 		it('should handle composite primary key', () => {

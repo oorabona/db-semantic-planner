@@ -254,8 +254,8 @@ export interface TableIR {
 	/** Column definitions */
 	readonly columns: readonly ColumnIR[];
 
-	/** Primary key (single column or composite) */
-	readonly primaryKey: string | readonly string[];
+	/** Primary key (single column or composite); omitted for junction tables without explicit PK */
+	readonly primaryKey?: string | readonly string[];
 
 	/** Foreign key constraints */
 	readonly foreignKeys: readonly ForeignKeyIR[];

@@ -15,7 +15,7 @@
  * ```
  */
 
-import type { NamingConvention } from '../adapter.js';
+import type { DbCasing, NamingConvention } from '../adapter.js';
 import { ModelIRImpl } from '../model-impl.js';
 import type {
 	ColumnIR,
@@ -204,8 +204,12 @@ export interface Schema<T extends SchemaDefinition> {
 	 */
 	readonly tables: InferTables<T>;
 	/**
-	 * Naming convention used when this schema was created.
-	 * Used for validation against adapter's naming convention in createOrm().
+	 * DB column casing (intuitive). Preferred over namingConvention.
+	 * @see DbCasing
+	 */
+	readonly dbCasing?: DbCasing;
+	/**
+	 * @deprecated Use dbCasing. Legacy naming convention.
 	 * @see NamingConvention
 	 */
 	readonly namingConvention?: NamingConvention;
@@ -826,14 +830,20 @@ function buildTables(
 			}
 		}
 
-		// Default PK to 'id' if none specified
-		let finalPk: string | readonly string[];
-		if (primaryKey.length === 0) {
-			finalPk = 'id';
-		} else if (primaryKey.length === 1) {
-			finalPk = primaryKey[0] as string;
+		// Determine PK: explicit > composite FK > 'id' column > omit
+		let finalPk: string | readonly string[] | undefined;
+		if (primaryKey.length > 0) {
+			finalPk =
+				primaryKey.length === 1 ? (primaryKey[0] as string) : primaryKey;
 		} else {
-			finalPk = primaryKey;
+			// No explicit PK — infer from FK columns or 'id'
+			const fkColumns = foreignKeys.flatMap((fk) => fk.columns);
+			if (fkColumns.length > 0) {
+				finalPk = fkColumns.length === 1 ? fkColumns[0] : fkColumns;
+			} else {
+				const hasId = columns.some((c) => c.name === 'id');
+				finalPk = hasId ? 'id' : undefined;
+			}
 		}
 
 		// Generate pseudo-columns for self-referential FKs
@@ -843,7 +853,7 @@ function buildTables(
 			if (ref.options.roles && ref.target === tableName) {
 				// Self-referential with roles - generate pseudo-column
 				const pkColumn =
-					typeof finalPk === 'string' ? finalPk : (finalPk[0] ?? 'id');
+					typeof finalPk === 'string' ? finalPk : (finalPk?.[0] ?? 'id');
 				pseudoColumns.push(
 					createPseudoColumnMetadata(
 						tableName,
@@ -914,7 +924,7 @@ function buildTables(
 		const table: TableIR = {
 			name: tableName,
 			columns,
-			primaryKey: finalPk,
+			...(finalPk !== undefined ? { primaryKey: finalPk } : {}),
 			foreignKeys,
 			indexes,
 			...(pseudoColumns.length > 0 ? { pseudoColumns } : {}),
