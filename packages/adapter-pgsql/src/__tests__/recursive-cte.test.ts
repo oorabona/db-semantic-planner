@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { deparseQuoted } from '../deparse.js';
 import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 import {
 	buildCycleCheck,
@@ -169,6 +170,260 @@ describe('Cycle Detection', () => {
 	describe('isPg14CycleSupported', () => {
 		it('should return false by default', () => {
 			expect(isPg14CycleSupported()).toBe(false);
+		});
+	});
+});
+
+// ============================================================================
+// Edge-Table CTE Tests
+// ============================================================================
+
+describe('Edge-Table Recursive CTE', () => {
+	const naming = new CamelCaseNamingPlugin();
+
+	const edgeConfig: RecursiveCteConfig = {
+		cteAlias: '__rc_0',
+		table: 'roles',
+		pkColumn: 'id',
+		fkColumn: '', // unused in edge-table mode
+		outerAlias: 't0',
+		isAncestors: false,
+		maxDepth: 10,
+		selectColumns: ['id', 'name'],
+		edgeTable: 'roleEdges',
+		edgeFrom: 'parentRoleId',
+		edgeTo: 'childRoleId',
+		anchorWhere: {
+			A_Expr: {
+				kind: 'AEXPR_OP',
+				name: [{ String: { sval: '=' } }],
+				lexpr: {
+					ColumnRef: {
+						fields: [{ String: { sval: '__n' } }, { String: { sval: 'name' } }],
+					},
+				},
+				rexpr: { A_Const: { sval: { sval: 'admin' } } },
+			},
+		},
+		ctx: {
+			naming,
+			rootTable: 'roles',
+			maxRecursiveDepth: 10,
+		},
+	};
+
+	describe('buildRecursiveCte (edge-table, direction: out)', () => {
+		it('should build CTE with edge-table JOINs', () => {
+			const { cte, extraCtes } = buildRecursiveCte(edgeConfig);
+
+			const cteNode = (cte as any).CommonTableExpr;
+			expect(cteNode.ctename).toBe('__rc_0');
+			expect(cteNode.cterecursive).toBe(true);
+
+			// No extra CTEs for non-bidirectional
+			expect(extraCtes).toBeUndefined();
+
+			// UNION ALL structure
+			const union = cteNode.ctequery.SelectStmt;
+			expect(union.op).toBe('SETOP_UNION');
+			expect(union.all).toBe(true);
+
+			// Recursive part should have a JoinExpr (nested: cte JOIN edge JOIN node)
+			const rarg = union.rarg;
+			expect(rarg.fromClause).toHaveLength(1);
+			expect(rarg.fromClause[0]).toHaveProperty('JoinExpr');
+
+			// The outer join is edge-to-node
+			const outerJoin = rarg.fromClause[0].JoinExpr;
+			expect(outerJoin.jointype).toBe('JOIN_INNER');
+			// Inner join is cte-to-edge
+			expect(outerJoin.larg).toHaveProperty('JoinExpr');
+		});
+
+		it('should produce valid SQL via deparseQuoted', () => {
+			const { cte } = buildRecursiveCte(edgeConfig);
+			const cteNode = (cte as any).CommonTableExpr;
+
+			// Build a wrapping SELECT to deparse
+			const sql = deparseQuoted({
+				SelectStmt: {
+					targetList: [
+						{
+							ResTarget: {
+								val: { ColumnRef: { fields: [{ A_Star: {} }] } },
+							},
+						},
+					],
+					fromClause: [
+						{
+							RangeVar: {
+								relname: '__rc_0',
+								inh: true,
+								relpersistence: 'p',
+							},
+						},
+					],
+					withClause: {
+						ctes: [cte],
+						recursive: true,
+					},
+				},
+			});
+
+			// Should contain edge table JOIN
+			expect(sql).toContain('role_edges');
+			expect(sql).toContain('parent_role_id');
+			expect(sql).toContain('child_role_id');
+			// Should contain node table
+			expect(sql).toContain('roles');
+			// Should contain RECURSIVE keyword
+			expect(sql).toContain('RECURSIVE');
+			// Should contain cycle detection
+			expect(sql).toContain('__visited');
+			// Should contain depth tracking
+			expect(sql).toContain('__depth');
+		});
+	});
+
+	describe('buildRecursiveCte (edge-table, direction: in — swapped)', () => {
+		it('should work with swapped edgeFrom/edgeTo', () => {
+			const inConfig: RecursiveCteConfig = {
+				...edgeConfig,
+				// For 'in' direction, caller swaps edgeFrom/edgeTo
+				edgeFrom: 'childRoleId',
+				edgeTo: 'parentRoleId',
+			};
+
+			const { cte } = buildRecursiveCte(inConfig);
+			const cteNode = (cte as any).CommonTableExpr;
+
+			const sql = deparseQuoted({
+				SelectStmt: {
+					targetList: [
+						{
+							ResTarget: {
+								val: { ColumnRef: { fields: [{ A_Star: {} }] } },
+							},
+						},
+					],
+					fromClause: [
+						{
+							RangeVar: {
+								relname: '__rc_0',
+								inh: true,
+								relpersistence: 'p',
+							},
+						},
+					],
+					withClause: {
+						ctes: [cte],
+						recursive: true,
+					},
+				},
+			});
+
+			// For 'in' direction, edgeFrom is childRoleId and edgeTo is parentRoleId
+			expect(sql).toContain('child_role_id');
+			expect(sql).toContain('parent_role_id');
+			expect(cteNode.cterecursive).toBe(true);
+		});
+	});
+
+	describe('buildRecursiveCte (edge-table with path tracking)', () => {
+		it('should include __path column when trackPath is true', () => {
+			const pathConfig: RecursiveCteConfig = {
+				...edgeConfig,
+				trackPath: true,
+			};
+
+			const { cte } = buildRecursiveCte(pathConfig);
+			const cteNode = (cte as any).CommonTableExpr;
+			const union = cteNode.ctequery.SelectStmt;
+
+			// Anchor should have __path target
+			const anchorTargets = union.larg.targetList;
+			const pathTarget = anchorTargets.find(
+				(t: any) => t.ResTarget?.name === '__path',
+			);
+			expect(pathTarget).toBeDefined();
+
+			// Recursive should also have __path target
+			const recursiveTargets = union.rarg.targetList;
+			const recPathTarget = recursiveTargets.find(
+				(t: any) => t.ResTarget?.name === '__path',
+			);
+			expect(recPathTarget).toBeDefined();
+		});
+	});
+
+	describe('buildRecursiveCte (bidirectional — UNION)', () => {
+		it('should produce __edges_bidir CTE with UNION', () => {
+			const bidirConfig: RecursiveCteConfig = {
+				...edgeConfig,
+				bidirectionalStrategy: 'union',
+			};
+
+			const { cte, extraCtes } = buildRecursiveCte(bidirConfig);
+
+			// Should have the extra __edges_bidir CTE
+			expect(extraCtes).toBeDefined();
+			expect(extraCtes).toHaveLength(1);
+
+			const bidirCte = (extraCtes![0] as any).CommonTableExpr;
+			expect(bidirCte.ctename).toBe('__edges_bidir');
+			expect(bidirCte.cterecursive).toBe(false);
+
+			// The bidir CTE should be UNION (not UNION ALL)
+			const bidirUnion = bidirCte.ctequery.SelectStmt;
+			expect(bidirUnion.op).toBe('SETOP_UNION');
+			expect(bidirUnion.all).toBeFalsy();
+
+			// Main CTE should reference __edges_bidir
+			const sql = deparseQuoted({
+				SelectStmt: {
+					targetList: [
+						{
+							ResTarget: {
+								val: { ColumnRef: { fields: [{ A_Star: {} }] } },
+							},
+						},
+					],
+					fromClause: [
+						{
+							RangeVar: {
+								relname: '__rc_0',
+								inh: true,
+								relpersistence: 'p',
+							},
+						},
+					],
+					withClause: {
+						ctes: [...extraCtes!, cte],
+						recursive: true,
+					},
+				},
+			});
+
+			expect(sql).toContain('__edges_bidir');
+			expect(sql).toContain('from_id');
+			expect(sql).toContain('to_id');
+		});
+	});
+
+	describe('buildRecursiveCte (bidirectional — UNION ALL / directed-only)', () => {
+		it('should produce __edges_bidir CTE with UNION ALL', () => {
+			const bidirAllConfig: RecursiveCteConfig = {
+				...edgeConfig,
+				bidirectionalStrategy: 'union-all',
+			};
+
+			const { extraCtes } = buildRecursiveCte(bidirAllConfig);
+
+			expect(extraCtes).toBeDefined();
+			const bidirCte = (extraCtes![0] as any).CommonTableExpr;
+			const bidirUnion = bidirCte.ctequery.SelectStmt;
+			expect(bidirUnion.op).toBe('SETOP_UNION');
+			expect(bidirUnion.all).toBe(true);
 		});
 	});
 });

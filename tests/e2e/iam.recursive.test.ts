@@ -9,16 +9,17 @@
  * Uses edge-table traversal pattern (role_edges junction table).
  */
 
-// TODO(Phase-2): Re-enable when adapter-pgsql supports edge-table traversal
-// compileRecursive() in adapter-pgsql only supports adjacency traversal (Phase 1)
-// IAM tests use role_edges (edge-table) which requires Phase 2
+import type { PgsqlAdapter } from '@dbsp/adapter-pgsql';
 import { planRecursive, type RecursiveIntent } from '@dbsp/core';
+import type { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	createIamSchema,
 	createSchema,
+	describeE2E,
 	dropIamSchema,
 	dropSchema,
+	getPgsqlAdapter,
 	getTestPool,
 	iamModel,
 	iamTestData,
@@ -28,10 +29,27 @@ import { sql } from './testkit/sql.js';
 
 const IAM_SCHEMA = 'iam_test';
 
-// TODO(Phase-2): adapter-pgsql needs edge-table traversal to run these tests
-describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]', () => {
+/** Helper: compile and execute a recursive CTE */
+async function execRecursive<T extends Record<string, unknown>>(
+	adapter: PgsqlAdapter<unknown>,
+	pool: Pool,
+	intent: RecursiveIntent,
+): Promise<T[]> {
+	const report = planRecursive(intent, iamModel);
+	const compiled = adapter.compileRecursive(report, iamModel, {
+		schemaName: IAM_SCHEMA,
+	});
+	const result = await pool.query<T>(compiled.sql, [...compiled.parameters]);
+	return result.rows;
+}
+
+describeE2E('E2E-003: IAM/RBAC Recursive CTE', () => {
+	let pool: Pool;
+	let adapter: PgsqlAdapter<unknown>;
+
 	beforeAll(async () => {
-		const pool = await getTestPool();
+		pool = await getTestPool();
+		adapter = await getPgsqlAdapter();
 		await dropSchema(IAM_SCHEMA);
 		await createSchema(IAM_SCHEMA);
 		await createIamSchema(pool, IAM_SCHEMA);
@@ -39,7 +57,7 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 	});
 
 	afterAll(async () => {
-		const pool = await getTestPool();
+		pool = await getTestPool();
 		await dropIamSchema(pool, IAM_SCHEMA);
 	});
 
@@ -49,8 +67,6 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 
 	describe('Effective Permissions via Role Hierarchy', () => {
 		it('should compute effective permissions for admin (inherits manager + employee + auditor)', async () => {
-			const pool = await getTestPool();
-
 			// Step 1: Build recursive intent to traverse role hierarchy from admin
 			const roleHierarchyIntent: RecursiveIntent = {
 				type: 'recursive',
@@ -73,7 +89,7 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 					nodeId: 'id',
 					edgeFrom: 'parentRoleId',
 					edgeTo: 'childRoleId',
-					direction: 'out', // Traverse to children (inherited roles)
+					direction: 'out',
 				},
 				track: {
 					depth: { as: 'depth' },
@@ -82,19 +98,15 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 				dedupe: 'final',
 			};
 
-			// Plan and compile the recursive CTE
-			const report = planRecursive(roleHierarchyIntent, iamModel);
-			const compiled = compileRecursive(report, iamModel, db, IAM_SCHEMA);
-
-			// Execute to get all roles in hierarchy
-			const roleResult = await db.executeQuery<{
+			// Plan, compile, and execute
+			const roles = await execRecursive<{
 				id: number;
 				name: string;
 				depth: number;
-			}>(compiled);
+			}>(adapter, pool, roleHierarchyIntent);
 
 			// Extract role IDs from hierarchy
-			const roleIds = roleResult.rows.map((r) => r.id);
+			const roleIds = roles.map((r) => r.id);
 
 			// Step 2: Get all permissions for these roles
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(pool);
@@ -120,17 +132,12 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 
 			// Should match expected effective permissions
 			expect(permissions.sort()).toEqual(
-				iamTestData.effectivePermissions.alice.sort(),
+				[...iamTestData.effectivePermissions.alice].sort(),
 			);
 		});
 
 		it('should deduplicate permissions from multiple inheritance paths', async () => {
-			const pool = await getTestPool();
-
 			// Bob has manager + auditor roles
-			// Both manager and auditor eventually lead to different permission sets
-			// This tests that we don't get duplicates
-
 			const bobRoleIds = [
 				iamTestData.roles.manager.id,
 				iamTestData.roles.auditor.id,
@@ -168,12 +175,9 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 					dedupe: 'final',
 				};
 
-				const report = planRecursive(intent, iamModel);
-				const compiled = compileRecursive(report, iamModel, db, IAM_SCHEMA);
+				const rows = await execRecursive<{ id: number }>(adapter, pool, intent);
 
-				const result = await db.executeQuery<{ id: number }>(compiled);
-
-				for (const row of result.rows) {
+				for (const row of rows) {
 					allRoleIds.add(row.id);
 				}
 			}
@@ -199,13 +203,11 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 
 			// Verify expected permissions for Bob
 			expect(permissions.sort()).toEqual(
-				iamTestData.effectivePermissions.bob.sort(),
+				[...iamTestData.effectivePermissions.bob].sort(),
 			);
 		});
 
 		it('should return empty permissions for user with no roles', async () => {
-			const pool = await getTestPool();
-
 			// Dave has no roles
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(pool);
 
@@ -232,8 +234,6 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 
 	describe('Role Hierarchy Traversal', () => {
 		it('should traverse descendants with depth tracking', async () => {
-			const pool = await getTestPool();
-
 			// Start from admin, traverse to all descendants
 			const intent: RecursiveIntent = {
 				type: 'recursive',
@@ -265,17 +265,14 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 				dedupe: 'final',
 			};
 
-			const report = planRecursive(intent, iamModel);
-			const compiled = compileRecursive(report, iamModel, db, IAM_SCHEMA);
-
-			const result = await db.executeQuery<{
+			const rows = await execRecursive<{
 				id: number;
 				name: string;
 				depth: number;
-			}>(compiled);
+			}>(adapter, pool, intent);
 
-			// Filter out the root node (admin itself at depth 0)
-			const descendants = result.rows.filter((r) => r.depth > 0);
+			// Filter out the root node (admin itself at depth 1)
+			const descendants = rows.filter((r) => r.depth > 1);
 
 			// Verify descendants
 			expect(descendants).toHaveLength(3); // manager, employee, auditor
@@ -285,18 +282,13 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 			const employeeRow = descendants.find((r) => r.name === 'employee');
 			const auditorRow = descendants.find((r) => r.name === 'auditor');
 
-			expect(managerRow?.depth).toBe(1);
-			expect(employeeRow?.depth).toBe(2);
-			expect(auditorRow?.depth).toBe(1);
+			expect(managerRow?.depth).toBe(2);
+			expect(employeeRow?.depth).toBe(3);
+			expect(auditorRow?.depth).toBe(2);
 		});
 
 		it('should traverse descendants with path tracking', async () => {
-			const pool = await getTestPool();
-			const capabilities = getCapabilities(db);
-
-			// Choose strategy based on dialect
-			const pathStrategy = capabilities.supportsArrayType ? 'array' : 'string';
-
+			// PostgreSQL always supports ARRAY type — use array strategy
 			const intent: RecursiveIntent = {
 				type: 'recursive',
 				cteName: 'role_path',
@@ -323,8 +315,6 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 				track: {
 					depth: { as: 'depth' },
 					path: {
-						strategy: pathStrategy,
-						separator: ' > ',
 						as: 'path',
 					},
 				},
@@ -332,37 +322,26 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 				dedupe: 'final',
 			};
 
-			const report = planRecursive(intent, iamModel);
-			const compiled = compileRecursive(report, iamModel, db, IAM_SCHEMA);
-
-			const result = await db.executeQuery<{
+			const rows = await execRecursive<{
 				id: number;
 				name: string;
 				depth: number;
-				path: unknown;
-			}>(compiled);
+				path: string[];
+			}>(adapter, pool, intent);
 
 			// Find employee row to check path
-			const employeeRow = result.rows.find((r) => r.name === 'employee');
+			const employeeRow = rows.find((r) => r.name === 'employee');
 			expect(employeeRow).toBeDefined();
-			expect(employeeRow?.depth).toBe(2);
+			expect(employeeRow?.depth).toBe(3); // admin=1, manager=2, employee=3
 
-			// Path should show the hierarchy
-			// For array strategy: [adminId, managerId, employeeId]
-			// For string strategy: "adminId > managerId > employeeId"
-			if (pathStrategy === 'array') {
-				expect(Array.isArray(employeeRow?.path)).toBe(true);
-				expect((employeeRow?.path as number[]).length).toBe(3);
-			} else {
-				expect(typeof employeeRow?.path).toBe('string');
-				expect((employeeRow?.path as string).split(' > ').length).toBe(3);
-			}
+			// Path should show the hierarchy as text array
+			// ARRAY[adminId::text, managerId::text, employeeId::text]
+			expect(Array.isArray(employeeRow?.path)).toBe(true);
+			expect(employeeRow?.path.length).toBe(3);
 		});
 
 		it('should traverse ancestors (reverse direction)', async () => {
-			const pool = await getTestPool();
-
-			// Start from employee, traverse to ancestors
+			// Start from employee, traverse to ancestors via reverse edge direction
 			const intent: RecursiveIntent = {
 				type: 'recursive',
 				cteName: 'role_ancestors',
@@ -393,17 +372,14 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 				dedupe: 'final',
 			};
 
-			const report = planRecursive(intent, iamModel);
-			const compiled = compileRecursive(report, iamModel, db, IAM_SCHEMA);
-
-			const result = await db.executeQuery<{
+			const rows = await execRecursive<{
 				id: number;
 				name: string;
 				depth: number;
-			}>(compiled);
+			}>(adapter, pool, intent);
 
-			// Filter out root (employee itself)
-			const ancestors = result.rows.filter((r) => r.depth > 0);
+			// Filter out root (employee itself at depth 1)
+			const ancestors = rows.filter((r) => r.depth > 1);
 
 			// employee -> manager -> admin
 			expect(ancestors).toHaveLength(2);
@@ -420,12 +396,13 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 
 	describe('Separation of Duty (SoD) Detection', () => {
 		it('should detect SoD violation for charlie (approver + requester)', async () => {
-			const pool = await getTestPool();
-
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(pool);
 
 			// Get Charlie's roles
-			const userRolesResult = await sql<{ role_id: number; role_name: string }>`
+			const userRolesResult = await sql<{
+				role_id: number;
+				role_name: string;
+			}>`
 				SELECT ur.role_id, r.name as role_name
 				FROM user_roles ur
 				JOIN roles r ON r.id = ur.role_id
@@ -435,7 +412,6 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 			const charlieRoleIds = userRolesResult.rows.map((r) => r.role_id);
 
 			// Check for SoD violations
-			// A violation exists if user has both roles in any SoD rule
 			const sodResult = await sql<{
 				role_a: string;
 				role_b: string;
@@ -453,14 +429,12 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 
 			// Charlie should have a violation
 			expect(sodResult.rows).toHaveLength(1);
-			expect(sodResult.rows[0].role_a).toBe('approver');
-			expect(sodResult.rows[0].role_b).toBe('requester');
-			expect(sodResult.rows[0].reason).toContain('requester cannot approve');
+			expect(sodResult.rows[0]!.role_a).toBe('approver');
+			expect(sodResult.rows[0]!.role_b).toBe('requester');
+			expect(sodResult.rows[0]!.reason).toContain('requester cannot approve');
 		});
 
 		it('should NOT detect SoD violation for alice (admin only)', async () => {
-			const pool = await getTestPool();
-
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(pool);
 
 			// Get Alice's direct roles
@@ -471,7 +445,10 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 			const aliceRoleIds = userRolesResult.rows.map((r) => r.role_id);
 
 			// Check for SoD violations
-			const sodResult = await sql<{ role_a: string; role_b: string }>`
+			const sodResult = await sql<{
+				role_a: string;
+				role_b: string;
+			}>`
 				SELECT ra.name as role_a, rb.name as role_b
 				FROM sod_rules s
 				JOIN roles ra ON ra.id = s.role_a_id
@@ -487,8 +464,6 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 		});
 
 		it('should NOT detect SoD violation for bob (manager + auditor)', async () => {
-			const pool = await getTestPool();
-
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(pool);
 
 			// Get Bob's direct roles
@@ -499,7 +474,10 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 			const bobRoleIds = userRolesResult.rows.map((r) => r.role_id);
 
 			// Check for SoD violations
-			const sodResult = await sql<{ role_a: string; role_b: string }>`
+			const sodResult = await sql<{
+				role_a: string;
+				role_b: string;
+			}>`
 				SELECT ra.name as role_a, rb.name as role_b
 				FROM sod_rules s
 				JOIN roles ra ON ra.id = s.role_a_id
@@ -516,18 +494,12 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 	});
 
 	// ═══════════════════════════════════════════════════════════════════════════
-	// ARCH-001: PATH TRACKING STRATEGIES
+	// PATH TRACKING STRATEGIES
 	// ═══════════════════════════════════════════════════════════════════════════
 
-	describe('ARCH-001: Path Tracking Strategies', () => {
+	describe('Path Tracking Strategies', () => {
 		it('should use array strategy by default for PostgreSQL (path tracking)', async () => {
-			const pool = await getTestPool();
-
-			// Verify PostgreSQL capabilities
-			const caps = getCapabilities(db);
-			expect(caps.supportsArrayType).toBe(true);
-
-			// Build intent with default path tracking (no explicit strategy)
+			// Build intent with default path tracking
 			const intent: RecursiveIntent = {
 				type: 'recursive',
 				cteName: 'role_tree',
@@ -552,33 +524,35 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 					direction: 'out',
 				},
 				track: {
-					path: {}, // No explicit strategy - should default to array for PostgreSQL
+					path: { as: '__path' },
 				},
 				maxDepth: 10,
 			};
 
 			const report = planRecursive(intent, iamModel);
-			const compiled = compileRecursive(report, iamModel, db, IAM_SCHEMA);
+			const compiled = adapter.compileRecursive(report, iamModel, {
+				schemaName: IAM_SCHEMA,
+			});
 
 			// PostgreSQL uses ARRAY[] for path initialization
 			expect(compiled.sql).toContain('ARRAY[');
 			// And || for array concatenation in recursive step
-			expect(compiled.sql).toMatch(/"path"\s*\|\|/);
+			expect(compiled.sql).toContain('||');
 
 			// Verify it actually executes and returns array paths
-			const result = await db.executeQuery<{
+			const result = await pool.query<{
 				id: number;
 				name: string;
-				path: number[];
-			}>(compiled);
+				__path: string[];
+			}>(compiled.sql, [...compiled.parameters]);
 
 			// Should have at least the root + descendants
 			expect(result.rows.length).toBeGreaterThan(0);
 
-			// Path should be an array of role IDs
+			// Path should be an array of role IDs (as text)
 			const adminRow = result.rows.find((r) => r.name === 'admin');
 			expect(adminRow).toBeDefined();
-			expect(Array.isArray(adminRow?.path)).toBe(true);
+			expect(Array.isArray(adminRow?.__path)).toBe(true);
 		});
 	});
 });

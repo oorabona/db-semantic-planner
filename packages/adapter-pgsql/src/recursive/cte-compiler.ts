@@ -41,7 +41,7 @@ export interface RecursiveCteConfig {
 	table: string;
 	/** Primary key column */
 	pkColumn: string;
-	/** Foreign key column for self-reference */
+	/** Foreign key column for self-reference (adjacency mode only) */
 	fkColumn: string;
 	/** Outer query alias to correlate with */
 	outerAlias: string;
@@ -57,6 +57,20 @@ export interface RecursiveCteConfig {
 	usePg14Cycle?: boolean;
 	/** Compiler context */
 	ctx: CompilerContext;
+
+	// Edge-table mode (optional — when set, uses edge-table traversal)
+	/** Edge table name (e.g., "role_edges") */
+	edgeTable?: string;
+	/** Source column in edge table (e.g., "parent_role_id") */
+	edgeFrom?: string;
+	/** Target column in edge table (e.g., "child_role_id") */
+	edgeTo?: string;
+	/** Bidirectional strategy: 'union' (safe, dedup) or 'union-all' (no dedup) */
+	bidirectionalStrategy?: 'union' | 'union-all';
+
+	// Anchor filter (for edge-table mode — WHERE on anchor node)
+	/** Anchor WHERE clause node (pre-built AST) */
+	anchorWhere?: Node;
 }
 
 // ============================================================================
@@ -89,7 +103,14 @@ export interface RecursiveCteConfig {
 export function buildRecursiveCte(config: RecursiveCteConfig): {
 	cte: Node;
 	cteSelect: Node;
+	/** Additional CTEs needed (e.g., __edges_bidir for bidirectional) */
+	extraCtes?: Node[];
 } {
+	// Delegate to edge-table builder if edge-table mode
+	if (config.edgeTable) {
+		return buildEdgeTableRecursiveCte(config);
+	}
+
 	const {
 		cteAlias,
 		table,
@@ -502,6 +523,339 @@ function buildRecursiveJoin(
 			quals: joinCondition,
 		},
 	};
+}
+
+// ============================================================================
+// Edge-Table CTE Builder
+// ============================================================================
+
+/**
+ * Build a recursive CTE that traverses through an edge (junction) table.
+ *
+ * Edge-table (direction: out):
+ * ```sql
+ * WITH RECURSIVE cte AS (
+ *   SELECT n.cols, 1 AS __depth, ARRAY[n.id] AS __visited
+ *   FROM nodeTable n WHERE <anchor>
+ *   UNION ALL
+ *   SELECT n.cols, __depth+1, __visited || n.id
+ *   FROM cte
+ *   INNER JOIN edgeTable e ON e.edgeFrom = cte.id
+ *   INNER JOIN nodeTable n ON n.id = e.edgeTo
+ *   WHERE __depth < maxDepth AND n.id <> ALL(__visited)
+ * )
+ * ```
+ *
+ * Bidirectional (direction: both) prepends a `__edges_bidir` CTE:
+ * ```sql
+ * WITH RECURSIVE
+ *   __edges_bidir AS (
+ *     SELECT edgeFrom AS from_id, edgeTo AS to_id FROM edgeTable
+ *     UNION [ALL]
+ *     SELECT edgeTo AS from_id, edgeFrom AS to_id FROM edgeTable
+ *   ),
+ *   cte AS (... INNER JOIN __edges_bidir e ON e.from_id = cte.id ...)
+ * ```
+ */
+function buildEdgeTableRecursiveCte(config: RecursiveCteConfig): {
+	cte: Node;
+	cteSelect: Node;
+	extraCtes?: Node[];
+} {
+	const {
+		cteAlias,
+		table,
+		pkColumn,
+		edgeTable,
+		edgeFrom,
+		edgeTo,
+		maxDepth,
+		selectColumns,
+		trackPath = false,
+		usePg14Cycle = false,
+		bidirectionalStrategy,
+		anchorWhere: externalAnchorWhere,
+		ctx,
+	} = config;
+
+	if (!edgeTable || !edgeFrom || !edgeTo) {
+		throw new Error(
+			'edgeTable, edgeFrom, and edgeTo are required for edge-table traversal',
+		);
+	}
+
+	const naming = ctx.naming;
+	const dbTable = naming.toDatabase(table);
+	const dbPk = naming.toDatabase(pkColumn);
+	const dbEdgeTable = naming.toDatabase(edgeTable);
+	const dbEdgeFrom = naming.toDatabase(edgeFrom);
+	const dbEdgeTo = naming.toDatabase(edgeTo);
+	const innerAlias = '__n';
+	const edgeAlias = '__e';
+	const isBidirectional = bidirectionalStrategy !== undefined;
+	const bidirCteAlias = '__edges_bidir';
+
+	// ── Anchor SELECT ───────────────────────────────────────────────────────
+
+	const anchorTargets: Node[] = buildTargetList(
+		selectColumns,
+		innerAlias,
+		ctx,
+		{ isAnchor: true, trackPath, pkColumn: dbPk },
+	);
+
+	// Anchor WHERE: use external filter (from intent.start.where compilation)
+	// or fall back to a trivial TRUE (should not happen in practice)
+	const anchorWhere: Node = externalAnchorWhere ?? {
+		A_Const: { boolval: { boolval: true } },
+	};
+
+	const anchorSelect: SelectStmt = {
+		targetList: anchorTargets,
+		fromClause: [
+			{
+				RangeVar: {
+					relname: dbTable,
+					...(ctx.schema && { schemaname: ctx.schema }),
+					inh: true,
+					relpersistence: 'p',
+					alias: { aliasname: innerAlias },
+				},
+			},
+		],
+		whereClause: anchorWhere,
+	};
+
+	// ── Recursive SELECT ────────────────────────────────────────────────────
+
+	const recursiveTargets: Node[] = buildTargetList(
+		selectColumns,
+		innerAlias,
+		ctx,
+		{ isAnchor: false, trackPath, pkColumn: dbPk, cteAlias },
+	);
+
+	const recursiveWhere = buildRecursiveWhere(
+		cteAlias,
+		innerAlias,
+		dbPk,
+		maxDepth,
+		usePg14Cycle,
+	);
+
+	// FROM cte JOIN edge ON edge.from = cte.pk JOIN node ON node.pk = edge.to
+	const edgeJoinSource = isBidirectional ? bidirCteAlias : dbEdgeTable;
+	const edgeJoinFromCol = isBidirectional ? 'from_id' : dbEdgeFrom;
+	const edgeJoinToCol = isBidirectional ? 'to_id' : dbEdgeTo;
+
+	// Build: cte JOIN edgeTable e ON e.edgeFrom = cte.pk
+	const cteToEdgeJoin: Node = {
+		JoinExpr: {
+			jointype: 'JOIN_INNER',
+			larg: {
+				RangeVar: {
+					relname: cteAlias,
+					inh: true,
+					relpersistence: 'p',
+				},
+			},
+			rarg: {
+				RangeVar: {
+					relname: edgeJoinSource,
+					...(!isBidirectional && ctx.schema && { schemaname: ctx.schema }),
+					inh: true,
+					relpersistence: 'p',
+					alias: { aliasname: edgeAlias },
+				},
+			},
+			quals: eqExpr(
+				{
+					ColumnRef: {
+						fields: [
+							{ String: { sval: edgeAlias } },
+							{ String: { sval: edgeJoinFromCol } },
+						],
+					},
+				},
+				{
+					ColumnRef: {
+						fields: [
+							{ String: { sval: cteAlias } },
+							{ String: { sval: dbPk } },
+						],
+					},
+				},
+			),
+		},
+	};
+
+	// Build: (cte JOIN edge) JOIN nodeTable n ON n.pk = e.edgeTo
+	const fullRecursiveJoin: Node = {
+		JoinExpr: {
+			jointype: 'JOIN_INNER',
+			larg: cteToEdgeJoin,
+			rarg: {
+				RangeVar: {
+					relname: dbTable,
+					...(ctx.schema && { schemaname: ctx.schema }),
+					inh: true,
+					relpersistence: 'p',
+					alias: { aliasname: innerAlias },
+				},
+			},
+			quals: eqExpr(
+				{
+					ColumnRef: {
+						fields: [
+							{ String: { sval: innerAlias } },
+							{ String: { sval: dbPk } },
+						],
+					},
+				},
+				{
+					ColumnRef: {
+						fields: [
+							{ String: { sval: edgeAlias } },
+							{ String: { sval: edgeJoinToCol } },
+						],
+					},
+				},
+			),
+		},
+	};
+
+	const recursiveSelect: SelectStmt = {
+		targetList: recursiveTargets,
+		fromClause: [fullRecursiveJoin],
+		whereClause: recursiveWhere,
+	};
+
+	// ── UNION ALL ───────────────────────────────────────────────────────────
+
+	const unionSelect: Node = {
+		SelectStmt: {
+			op: 'SETOP_UNION',
+			all: true,
+			larg: anchorSelect,
+			rarg: recursiveSelect,
+		},
+	};
+
+	const cte: CommonTableExpr = {
+		ctename: cteAlias,
+		ctequery: unionSelect,
+		cterecursive: true,
+	};
+
+	if (usePg14Cycle) {
+		buildPg14CycleClause(dbPk);
+	}
+
+	// ── Bidirectional __edges_bidir CTE ─────────────────────────────────────
+
+	const extraCtes: Node[] = [];
+
+	if (isBidirectional) {
+		const useUnionAll = bidirectionalStrategy === 'union-all';
+
+		// SELECT edgeFrom AS from_id, edgeTo AS to_id FROM edgeTable
+		const forwardSelect: SelectStmt = {
+			targetList: [
+				{
+					ResTarget: {
+						val: {
+							ColumnRef: {
+								fields: [{ String: { sval: dbEdgeFrom } }],
+							},
+						},
+						name: 'from_id',
+					},
+				},
+				{
+					ResTarget: {
+						val: {
+							ColumnRef: {
+								fields: [{ String: { sval: dbEdgeTo } }],
+							},
+						},
+						name: 'to_id',
+					},
+				},
+			],
+			fromClause: [
+				{
+					RangeVar: {
+						relname: dbEdgeTable,
+						...(ctx.schema && { schemaname: ctx.schema }),
+						inh: true,
+						relpersistence: 'p',
+					},
+				},
+			],
+		};
+
+		// SELECT edgeTo AS from_id, edgeFrom AS to_id FROM edgeTable (reversed)
+		const reverseSelect: SelectStmt = {
+			targetList: [
+				{
+					ResTarget: {
+						val: {
+							ColumnRef: {
+								fields: [{ String: { sval: dbEdgeTo } }],
+							},
+						},
+						name: 'from_id',
+					},
+				},
+				{
+					ResTarget: {
+						val: {
+							ColumnRef: {
+								fields: [{ String: { sval: dbEdgeFrom } }],
+							},
+						},
+						name: 'to_id',
+					},
+				},
+			],
+			fromClause: [
+				{
+					RangeVar: {
+						relname: dbEdgeTable,
+						...(ctx.schema && { schemaname: ctx.schema }),
+						inh: true,
+						relpersistence: 'p',
+					},
+				},
+			],
+		};
+
+		const bidirUnion: Node = {
+			SelectStmt: {
+				op: 'SETOP_UNION',
+				all: useUnionAll,
+				larg: forwardSelect,
+				rarg: reverseSelect,
+			},
+		};
+
+		const bidirCte: CommonTableExpr = {
+			ctename: bidirCteAlias,
+			ctequery: bidirUnion,
+			cterecursive: false,
+		};
+
+		extraCtes.push({ CommonTableExpr: bidirCte });
+	}
+
+	const result: { cte: Node; cteSelect: Node; extraCtes?: Node[] } = {
+		cte: { CommonTableExpr: cte },
+		cteSelect: unionSelect,
+	};
+	if (extraCtes.length > 0) {
+		result.extraCtes = extraCtes;
+	}
+	return result;
 }
 
 // ============================================================================
