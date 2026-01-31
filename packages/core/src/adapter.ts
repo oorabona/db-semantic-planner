@@ -87,6 +87,48 @@ export type AliasIncludedColumnsMode = 'always' | 'onCollision';
 export type NamingConvention = 'camelCase' | 'snake_case' | 'preserve';
 
 /**
+ * Describes the casing convention used for column names in the database.
+ * This is the intuitive "what does your DB look like?" type:
+ *
+ * - `'snake_case'`: DB columns use snake_case → adapter transforms to camelCase for JS
+ * - `'camelCase'`: DB columns use camelCase → no transformation needed
+ * - `'preserve'`: No transformation applied
+ *
+ * @since PGSQL-PHASE2
+ */
+export type DbCasing = 'snake_case' | 'camelCase' | 'preserve';
+
+/**
+ * Convert legacy NamingConvention to the new DbCasing type.
+ * Legacy: 'camelCase' meant "transform snake_case DB columns to camelCase"
+ * New:    'snake_case' means "DB uses snake_case" (direct description)
+ */
+export function toDbCasing(nc: NamingConvention): DbCasing {
+	switch (nc) {
+		case 'camelCase':
+			return 'snake_case';
+		case 'snake_case':
+			return 'snake_case';
+		case 'preserve':
+			return 'preserve';
+	}
+}
+
+/**
+ * Convert DbCasing to the legacy NamingConvention for backward compatibility.
+ */
+export function toNamingConvention(casing: DbCasing): NamingConvention {
+	switch (casing) {
+		case 'snake_case':
+			return 'camelCase';
+		case 'camelCase':
+			return 'preserve';
+		case 'preserve':
+			return 'preserve';
+	}
+}
+
+/**
  * Options for query compilation.
  * Extends CompileOptionsBase with core-specific options.
  */
