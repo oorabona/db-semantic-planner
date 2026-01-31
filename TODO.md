@@ -2051,6 +2051,39 @@ See **DIALECT-001** in "In Progress" section above.
   - Performance benchmarks - 8 tests
   - Total: 73 passing (all .todo() tests enabled 2026-01-07)
 
+## Open Bugs
+
+### 🐛 CLI REPL: missing `--casing` flag (naming convention mismatch with DDL)
+- **Issue:** `pnpm dbsp repl` has no `--casing` flag, defaults to `preserve` naming convention. But `generate ddl` defaults to `--casing snake` (which maps to `camelCase` convention internally). This means DDL creates snake_case tables (`user_roles`) while REPL queries reference camelCase (`userRoles`).
+- **Impact:** Examples must use `--casing none` for DDL generation to work with REPL, or REPL needs a `--casing` flag
+- **Workaround:** Generate DDL with `--casing none` to preserve logical names
+- **Fix:** Add `--casing <snake|camel|none>` flag to the REPL command in `packages/cli/src/repl/`
+
+### 🔧 Naming convention semantics are inverted (ARCH)
+- **Issue:** `namingConvention: 'camelCase'` means "the **model** is camelCase" (→ convert to snake_case for DB). Logically it should mean "the **DB** uses camelCase" (→ no conversion needed). Current semantics are Kysely-inherited and counterintuitive.
+- **CLI mapping is also confusing:** `--casing snake` → internal `namingConvention: 'camelCase'` (because "output DDL in snake_case, so model must be camelCase")
+- **Proposed fix:** Rename to `dbNaming` or `databaseCasing` with inverted semantics:
+  - `dbNaming: 'snake_case'` → model is camelCase, DB is snake_case (convert)
+  - `dbNaming: 'camelCase'` → no conversion (DB matches model)
+  - `dbNaming: 'preserve'` → identity
+- **Impact:** Breaking change on adapter options + CLI flags. Requires migration of all callers (adapter, CLI generate, CLI repl, E2E testkit).
+- **Scope:** `packages/adapter-pgsql/src/naming-plugin.ts`, `packages/cli/src/commands/generate.ts`, `tests/e2e/`
+
+### 🐛 NQL: deep multi-junction traversal not supported in select
+- **Issue:** NQL `select` with deep relation paths through multiple junction tables (e.g. `users | select *, userRoles.role.rolePermissions.permission.*`) does not fully resolve the chain. Only the first junction level is included in the SQL output; deeper levels are silently dropped.
+- **Example:** `users | select *, userRoles.roleId, userRoles.role.rolePermissions.permission.*` returns `userRoles_json` but does not nest `rolePermissions` or `permissions` inside it.
+- **Impact:** Cannot express "show each user with their permissions" in NQL — requires programmatic API
+- **Workaround:** Use the ORM API with nested includes, or write raw SQL with multi-level JOINs
+- **Scope:** `packages/nql/`, `packages/core/src/planner/`
+
+### 🐛 DDL Generator: composite PK not supported for tables without `id` column
+- **Issue:** `generate ddl` always emits `PRIMARY KEY ("id")` even for junction tables that have no `id` column (e.g. composite PK on `(user_id, role_id)`)
+- **Impact:** Junction tables without a surrogate `id` get invalid DDL
+- **Workaround:** Add `id: { type: 'integer', primaryKey: true, autoIncrement: true }` to junction tables
+- **Fix:** DDL generator should support composite PK from multiple FK columns when no explicit PK is defined
+
+---
+
 ## Fixed Issues
 
 ### ✅ EXISTS Schema Prefix (2026-01-07)
