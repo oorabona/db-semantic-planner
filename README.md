@@ -15,11 +15,8 @@ Semantic query planning for databases. An intent-first approach that transforms 
 ## Installation
 
 ```bash
-# Core packages
-pnpm add @dbsp/core @dbsp/adapter-kysely
-
-# Schema definition (optional, for codegen workflow)
-pnpm add @dbsp/schema
+# Core + PostgreSQL adapter
+pnpm add @dbsp/core @dbsp/adapter-pgsql
 
 # CLI (optional, for code generation and REPL)
 pnpm add -D @dbsp/cli
@@ -27,109 +24,40 @@ pnpm add -D @dbsp/cli
 
 ## Quick Start
 
-### Option A: Codegen Workflow (Recommended)
-
-#### 1. Define your schema (`dbsp.schema.ts`)
+### Define Your Schema
 
 ```typescript
-import { defineSchema } from '@dbsp/schema';
+import { schema, ref } from '@dbsp/core';
 
-// Simple: Tables only (relations auto-inferred from FK references)
-const schema = defineSchema({
+const db = schema({
   users: {
-    id: { type: 'integer', primaryKey: true },
-    name: { type: 'string' },
-    email: { type: 'string' },
-    createdAt: { type: 'datetime' },
+    id: 'uuid',
+    name: 'string',
+    email: 'string',
+    createdAt: 'datetime',
   },
   posts: {
-    id: { type: 'integer', primaryKey: true },
-    title: { type: 'string' },
-    content: { type: 'string', nullable: true },
-    authorId: { type: 'integer', references: { table: 'users' } },
-    published: { type: 'boolean' },
+    id: 'uuid',
+    title: 'string',
+    content: 'string?',
+    authorId: ref('users'),
+    published: 'boolean',
   },
 });
-
-// With explicit relations (for complex cases like many-to-many)
-const schemaWithRelations = defineSchema(
-  {
-    users: {
-      id: { type: 'integer', primaryKey: true },
-      name: { type: 'string' },
-    },
-    roles: {
-      id: { type: 'integer', primaryKey: true },
-      name: { type: 'string' },
-    },
-    user_roles: {
-      userId: { type: 'integer', references: { table: 'users' } },
-      roleId: { type: 'integer', references: { table: 'roles' } },
-    },
-  },
-  {
-    relations: {
-      'users.roles': { kind: 'manyToMany', target: 'roles', through: 'user_roles' },
-      'roles.users': { kind: 'manyToMany', target: 'users', through: 'user_roles' },
-    },
-  }
-);
-
-export default schema;
 ```
 
-#### 2. Generate Kysely types
-
-```bash
-# Generate typed database interface
-npx dbsp generate kysely --schema ./dbsp.schema.ts --output ./src/generated
-```
-
-This generates two files:
-
-```typescript
-// src/generated/types.ts
-import type { Generated, ColumnType } from 'kysely';
-
-export interface UsersTable {
-  id: Generated<number>;
-  name: string;
-  email: string;
-  createdAt: ColumnType<Date, Date | string | undefined, Date | string>;
-}
-
-export interface PostsTable {
-  id: Generated<number>;
-  title: string;
-  content: string | null;
-  authorId: number;
-  published: Generated<boolean>;
-}
-```
-
-```typescript
-// src/generated/DB.ts
-import type { UsersTable, PostsTable } from './types.js';
-
-export interface DB {
-  users: UsersTable;
-  posts: PostsTable;
-}
-```
-
-#### 3. Use with the ORM
+### Create ORM and Query
 
 ```typescript
 import { createOrm, eq } from '@dbsp/core';
-import { createKyselyAdapter } from '@dbsp/adapter-kysely';
-import { Kysely, PostgresDialect } from 'kysely';
-import type { DB } from './generated/DB.js';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { Pool } from 'pg';
 
-const kysely = new Kysely<DB>({ dialect: new PostgresDialect({ pool }) });
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 const orm = createOrm({
-  schema,  // Schema from @dbsp/schema
-  adapter: createKyselyAdapter(kysely),
+  schema: db,
+  adapter: createPgsqlAdapter(pool),
 });
 
 // Type-safe queries
@@ -138,51 +66,12 @@ const activeUsers = await orm
   .where(eq('email', 'user@example.com'))
   .all();
 
-// With relations
+// With relations (auto-inferred from ref())
 const postsWithAuthors = await orm
   .select('posts')
   .where(eq('published', true))
   .include('author')
   .all();
-```
-
-### Option B: Manual Schema Definition
-
-```typescript
-import { createOrm, eq } from '@dbsp/core';
-import { createKyselyAdapter } from '@dbsp/adapter-kysely';
-
-// Low-level ModelIR format (advanced users only)
-const model = {
-  tables: {
-    users: {
-      name: 'users',
-      columns: [
-        { name: 'id', type: 'number', primaryKey: true },
-        { name: 'name', type: 'string' },
-        { name: 'email', type: 'string' },
-      ],
-    },
-    posts: {
-      name: 'posts',
-      columns: [
-        { name: 'id', type: 'number', primaryKey: true },
-        { name: 'title', type: 'string' },
-        { name: 'authorId', type: 'number' },
-      ],
-      foreignKeys: [{ column: 'authorId', references: { table: 'users', column: 'id' } }],
-    },
-  },
-  relations: {
-    users: { posts: { kind: 'hasMany', target: 'posts', foreignKey: 'authorId' } },
-    posts: { author: { kind: 'belongsTo', target: 'users', foreignKey: 'authorId' } },
-  },
-};
-
-const orm = createOrm({
-  model,
-  adapter: createKyselyAdapter(kysely),
-});
 ```
 
 ---
@@ -216,22 +105,6 @@ dbsp <command>
 
 ### Commands
 
-#### `dbsp generate kysely`
-
-Generate Kysely type definitions from your schema.
-
-```bash
-dbsp generate kysely --schema ./dbsp.schema.ts --output ./src/generated
-```
-
-Generates:
-- `DB.ts` - Main database interface
-- `types.ts` - Table type definitions
-
-Options:
-- `-s, --schema <path>` - Path to schema file (default: auto-detect `dbsp.schema.ts`)
-- `-o, --output <dir>` - Output directory (default: `./generated/kysely`)
-
 #### `dbsp generate manifest`
 
 Generate a JSON manifest of your schema (useful for tooling/MCP). Outputs JSON format.
@@ -241,17 +114,6 @@ dbsp generate manifest --schema ./dbsp.schema.ts --output ./generated
 ```
 
 Generates `schema.json` in the output directory.
-
-The manifest is a JSON file containing the resolved schema structure:
-
-```json
-{
-  "tables": { "users": { ... }, "posts": { ... } },
-  "relations": { "users.posts": { ... }, "posts.author": { ... } },
-  "hints": {},
-  "conventions": { "fkPattern": "{table}Id", "pluralize": true, "timestamps": [] }
-}
-```
 
 #### `dbsp verify`
 
@@ -459,34 +321,28 @@ console.log(dump.plan);     // { decisions: [...], warnings: [...] }
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        @dbsp/cli                  │
+│                        @dbsp/cli                                │
 │  dbsp generate | dbsp verify | dbsp repl                        │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
 ┌──────────────────────────────┼──────────────────────────────────┐
 │                              ▼                                   │
-│  @dbsp/schema                                     │
-│  defineSchema() → GeneratedSchema                                │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │
-┌──────────────────────────────┼──────────────────────────────────┐
-│                              ▼                                   │
-│  @dbsp/core                                       │
+│  @dbsp/core                                                      │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
 │  │  ModelIR    │  │  IntentAST  │  │  Semantic Planner       │  │
 │  │  (Schema)   │→→│  (Query)    │→→│  (Plan + Decisions)     │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │  DX Layer: createOrm(), eq(), include(), etc.           │    │
+│  │  DX Layer: schema(), createOrm(), eq(), ref(), etc.     │    │
 │  └─────────────────────────────────────────────────────────┘    │
 └──────────────────────────────┬──────────────────────────────────┘
                                │ implements Adapter
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  @dbsp/adapter-kysely                             │
+│  @dbsp/adapter-pgsql                                            │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │  SQL Compiler (PlanReport → Kysely CompiledQuery)       │    │
-│  │  KyselyAdapter, MockAdapter (for REPL/testing)          │    │
+│  │  SQL Compiler (PlanReport → PostgreSQL AST → SQL)       │    │
+│  │  PgsqlAdapter (pg Pool), CompileOnlyAdapter (no DB)     │    │
 │  └─────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -495,23 +351,20 @@ console.log(dump.plan);     // { decisions: [...], warnings: [...] }
 
 | Package | Description |
 |---------|-------------|
-| `@dbsp/schema` | Schema DSL (`defineSchema()`) |
-| `@dbsp/core` | Query intents, semantic planning, ORM API |
-| `@dbsp/adapter-kysely` | SQL compilation via Kysely |
+| `@dbsp/core` | Schema DSL, query intents, semantic planning, ORM API |
+| `@dbsp/adapter-pgsql` | PostgreSQL-native SQL compilation + execution (pg Pool) |
+| `@dbsp/nql` | Natural Query Language parser |
+| `@dbsp/types` | Shared type definitions |
 | `@dbsp/cli` | CLI tools (generate, verify, repl) |
+| `@dbsp/mcp-server` | MCP Server for AI assistants |
 
 ## API Reference
-
-### Schema Package
-
-| Export | Description |
-|--------|-------------|
-| `defineSchema()` | Create a schema with tables, columns, and auto-inferred relations |
 
 ### Core Package
 
 | Export | Description |
 |--------|-------------|
+| `schema()` | Define tables, columns, and relations with `ref()` |
 | `createOrm()` | Create an ORM instance with adapter |
 | `eq()`, `neq()`, `gt()`, `gte()`, `lt()`, `lte()` | Comparison filters |
 | `like()`, `ilike()` | Pattern matching filters |
@@ -524,8 +377,8 @@ console.log(dump.plan);     // { decisions: [...], warnings: [...] }
 
 | Export | Description |
 |--------|-------------|
-| `createKyselyAdapter()` | Create adapter for Kysely instance |
-| `createMockAdapter()` | Create compile-only adapter (no DB required) |
+| `createPgsqlAdapter()` | Create adapter for pg Pool instance |
+| `createPgsqlCompileOnlyAdapter()` | Create compile-only adapter (no DB required) |
 
 ## Planner Decisions
 
@@ -550,9 +403,6 @@ Ready-to-use example schemas in the `examples/` directory:
 **Quick test:**
 
 ```bash
-# Generate Kysely types from minimal schema
-pnpm dbsp generate kysely --schema ./examples/minimal.schema.ts
-
 # Start REPL with blog schema
 pnpm dbsp repl --schema ./examples/blog.schema.ts
 ```
@@ -587,13 +437,13 @@ pnpm lint
 
 ## Status
 
-**✅ v1.0 Ready** - 1300+ tests passing
+**✅ v1.0 Ready** - 2,180+ tests passing across 6 packages
 
-- Schema: DSL with convention inference (54 tests)
-- Core: ModelIR, IntentAST, Semantic Planner, DX Layer (543 tests)
-- Adapter: SQL Compiler, Multi-tenant, Observability, Multi-dialect (628 tests)
-- CLI: Generate, Verify, REPL (106 tests)
-- E2E: PostgreSQL integration (Testcontainers)
+- Core: Schema DSL, ModelIR, IntentAST, Semantic Planner, DX Layer (824 tests)
+- Adapter: PostgreSQL-native SQL Compiler, Multi-tenant, Observability (451 tests)
+- NQL: Natural Query Language parser (257 tests)
+- CLI: Generate, Verify, REPL (314 tests)
+- E2E: PostgreSQL integration via Testcontainers (333 tests)
 
 ## License
 
