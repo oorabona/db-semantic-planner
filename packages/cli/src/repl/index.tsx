@@ -325,7 +325,7 @@ function ReplApp({ config }: ReplAppProps) {
 			: undefined;
 
 	const handleSubmit = useCallback(
-		(value: string) => {
+		async (value: string) => {
 			const trimmed = value.trim();
 			if (!trimmed) return;
 
@@ -1247,7 +1247,7 @@ function ReplApp({ config }: ReplAppProps) {
 				}
 
 				try {
-					const result = compileNqlToSql(content, model, {
+					const result = await compileNqlToSql(content, model, {
 						...(schemaName ? { schemaName } : {}),
 					});
 

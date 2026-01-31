@@ -784,7 +784,9 @@ function assertDbOutput(
 	const formatActualTable = (): string => {
 		if (actualRows.length === 0) return '(no rows)';
 		const actualCols =
-			columns.length > 0 ? columns : Object.keys(actualRows[0]!);
+			columns.length > 0
+				? columns
+				: Object.keys(actualRows[0] as Record<string, unknown>);
 		const header = `| ${actualCols.join(' | ')} |`;
 		const separator = `| ${actualCols.map(() => '---').join(' | ')} |`;
 		const rows = actualRows.map((row) => {
@@ -807,7 +809,7 @@ function assertDbOutput(
 
 	// Check expected columns exist in actual result (if any rows)
 	if (actualRows.length > 0) {
-		const firstRow = actualRows[0]!;
+		const firstRow = actualRows[0] as Record<string, unknown>;
 		for (const col of columns) {
 			if (!(col in firstRow)) {
 				return {
