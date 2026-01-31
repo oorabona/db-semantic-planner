@@ -7,7 +7,11 @@
 import type { PlanReport } from '@dbsp/core';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
-import { createPgsqlAdapter, PgsqlAdapter } from './pgsql-adapter.js';
+import {
+	createPgsqlAdapter,
+	createPgsqlCompileOnlyAdapter,
+	PgsqlAdapter,
+} from './pgsql-adapter.js';
 
 // ============================================================================
 // Mock Pool
@@ -504,12 +508,11 @@ describe('PgsqlAdapter', () => {
 			expect(typeof iterator[Symbol.asyncIterator]).toBe('function');
 		});
 
-		it('introspect should throw (Phase 4)', async () => {
-			const pool = createMockPool();
-			const adapter = createPgsqlAdapter(pool);
+		it('introspect should throw on compile-only adapter', async () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
 
 			await expect(adapter.introspect()).rejects.toThrow(
-				'Not implemented - Phase 4',
+				'Cannot introspect without a database connection',
 			);
 		});
 

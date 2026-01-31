@@ -27,6 +27,13 @@ export interface SchemaCodegenOptions {
 	readonly warnings?: readonly string[];
 	/** Timestamp of introspection */
 	readonly introspectedAt?: Date;
+	/**
+	 * Database column casing convention.
+	 * When set to 'snake_case', column names are converted to camelCase
+	 * and a `dbCasing: 'snake_case'` comment is added to the generated code.
+	 * @default 'preserve'
+	 */
+	readonly dbCasing?: 'snake_case' | 'camelCase' | 'preserve';
 }
 
 /**
@@ -238,6 +245,8 @@ function generateTableCode(
 		}
 	}
 
+	const shouldCamelCase = options.dbCasing === 'snake_case';
+
 	const columnLines = table.columns.map((col) => {
 		const isPrimaryKey = table.primaryKey
 			? typeof table.primaryKey === 'string'
@@ -246,7 +255,8 @@ function generateTableCode(
 			: false;
 		const fkInfo = fkMap.get(col.name);
 		const code = generateColumnCode(col, isPrimaryKey, fkInfo, options);
-		return `\t\t${col.name}: ${code}`;
+		const colName = shouldCamelCase ? snakeToCamelCase(col.name) : col.name;
+		return `\t\t${colName}: ${code}`;
 	});
 
 	return `\t${table.name}: {\n${columnLines.join(',\n')},\n\t}`;
@@ -293,10 +303,13 @@ export function generateSchemaFile(
 	);
 
 	// Imports - ARCH-005: Use schema() + ref() instead of defineSchema()
+	const coreImports = ['schema'];
 	if (hasForeignKeys) {
-		lines.push("import { schema, ref } from '@dbsp/core';");
-	} else {
-		lines.push("import { schema } from '@dbsp/core';");
+		coreImports.push('ref');
+	}
+	lines.push(`import { ${coreImports.join(', ')} } from '@dbsp/core';`);
+	if (options.dbCasing && options.dbCasing !== 'preserve') {
+		lines.push("import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';");
 	}
 	lines.push('');
 
@@ -310,6 +323,30 @@ export function generateSchemaFile(
 
 	lines.push('});');
 	lines.push('');
+
+	// Usage hint with dbCasing
+	if (options.dbCasing && options.dbCasing !== 'preserve') {
+		lines.push('/**');
+		lines.push(
+			` * Usage: columns above are camelCase; the database uses ${options.dbCasing}.`,
+		);
+		lines.push(
+			' * Pass dbCasing to the adapter so it maps camelCase ↔ snake_case automatically.',
+		);
+		lines.push(' *');
+		lines.push(' * @example');
+		lines.push(' * ```typescript');
+		lines.push(' * const orm = createOrm({');
+		lines.push(' *   model: dbSchema.model,');
+		lines.push(
+			` *   adapter: createPgsqlAdapter(pool, { dbCasing: '${options.dbCasing}' }),`,
+		);
+		lines.push(' * });');
+		lines.push(' * ```');
+		lines.push(' */');
+		lines.push(`export const dbCasing = '${options.dbCasing}' as const;`);
+		lines.push('');
+	}
 
 	return lines.join('\n');
 }

@@ -51,6 +51,11 @@ import {
 } from './handlers/index.js';
 import { intentToDecisions } from './intent-to-decisions.js';
 import {
+	type IntrospectedModelIR,
+	type IntrospectionOptions,
+	introspect as introspectDb,
+} from './introspection.js';
+import {
 	compileDelete as compileDeleteMutation,
 	compileInsertFrom as compileInsertFromMutation,
 	compileInsert as compileInsertMutation,
@@ -1819,10 +1824,26 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	/**
 	 * Introspect the database schema and return a ModelIR.
-	 * @stub Phase 4 - Introspection
+	 *
+	 * @param options - Optional introspection options (schema, include/exclude filters)
+	 * @returns IntrospectedModelIR with tables, relations, and hierarchy metadata
+	 *
+	 * @example
+	 * ```typescript
+	 * const model = await adapter.introspect();
+	 * const model = await adapter.introspect({ schema: 'tenant_1' });
+	 * const model = await adapter.introspect({ exclude: ['_prisma*'] });
+	 * ```
 	 */
-	async introspect(): Promise<ModelIR> {
-		throw new Error('PgsqlAdapter.introspect: Not implemented - Phase 4');
+	async introspect(
+		options?: IntrospectionOptions,
+	): Promise<IntrospectedModelIR> {
+		if (!this.pool) {
+			throw new Error(
+				'Cannot introspect without a database connection (compile-only adapter)',
+			);
+		}
+		return introspectDb(this.pool, options);
 	}
 
 	// =========================================================================

@@ -125,6 +125,13 @@ export {
 	type WhereDispatcher,
 	type WhereHandler,
 } from './handlers/index.js';
+// Introspection
+export {
+	type DetectedHierarchy,
+	type IntrospectedModelIR,
+	type IntrospectionOptions,
+	introspect,
+} from './introspection.js';
 // Mutations
 export {
 	buildOnConflictClause,
