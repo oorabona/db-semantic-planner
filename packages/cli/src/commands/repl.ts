@@ -32,6 +32,8 @@ export interface ReplOptions {
 	exec?: boolean;
 	/** CLI-CONFIG: Custom config file path (default: ~/.dbsp/config.json) */
 	config?: string;
+	/** CLI-CASING: Column naming convention (describes DB column casing) */
+	casing?: 'snake' | 'camel' | 'none';
 }
 
 export const replCommand = new Command('repl')
@@ -65,6 +67,10 @@ export const replCommand = new Command('repl')
 	)
 	.option('--parse', 'Start REPL with parse mode enabled (.parse toggle)')
 	.option('--exec', 'Start REPL with exec mode enabled (.exec toggle)')
+	.option(
+		'--casing <type>',
+		'Column naming convention: snake (DB uses snake_case), camel (DB uses camelCase), none (preserve as-is)',
+	)
 	.option(
 		'-c, --config <path>',
 		'Custom config file path (default: ~/.dbsp/config.json)',
@@ -103,6 +109,16 @@ export const replCommand = new Command('repl')
 				throw new Error('--import requires batch mode (--eval or --input)');
 			}
 
+			// CLI-CASING: Map --casing flag to dbCasing (intuitive: describes DB columns)
+			const dbCasing =
+				options.casing === 'snake'
+					? ('snake_case' as const)
+					: options.casing === 'camel'
+						? ('camelCase' as const)
+						: options.casing === 'none'
+							? ('preserve' as const)
+							: undefined;
+
 			// CLI-022: Batch mode - execute queries without interactive UI
 			if (options.eval || options.input) {
 				const { runBatchMode } = await import('../repl/batch.js');
@@ -140,6 +156,7 @@ export const replCommand = new Command('repl')
 					format: options.format ?? 'text',
 					...(options.db && { databaseUrl: options.db }),
 					...(options.assert && { assertFile: options.assert }),
+					...(dbCasing && { dbCasing }),
 				});
 				return;
 			}
@@ -155,6 +172,7 @@ export const replCommand = new Command('repl')
 				...(options.use && { initialSchemaName: options.use }),
 				...(options.parse && { initialParseMode: true }),
 				...(options.exec && { initialExecMode: true }),
+				...(dbCasing && { dbCasing }),
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
