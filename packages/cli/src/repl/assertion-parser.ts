@@ -478,7 +478,8 @@ function parseTableBlock(
 		};
 	}
 
-	const columns = parseTableCells(dataLines[0]!);
+	const headerLine = dataLines[0] as string;
+	const columns = parseTableCells(headerLine);
 	const rows = dataLines.slice(1).map((l) => parseTableCells(l));
 
 	return { data: { columns, rows }, linesConsumed: consumed };
