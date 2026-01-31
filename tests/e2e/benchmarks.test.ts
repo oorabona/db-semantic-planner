@@ -15,7 +15,7 @@ import {
 	getTestPool,
 	pimdamModel,
 	seedAcmeTenant,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 
 /**
@@ -80,7 +80,7 @@ function formatResult(result: BenchmarkResult): string {
 	].join('\n');
 }
 
-describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
+describe('Performance Benchmarks', () => {
 	const ITERATIONS = 100;
 	const results: BenchmarkResult[] = [];
 

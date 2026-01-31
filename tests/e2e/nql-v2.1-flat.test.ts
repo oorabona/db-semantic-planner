@@ -24,7 +24,7 @@ import {
 	getTestAdapter,
 	getTestPool,
 	seedBlogData,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 
 const dialectCapabilities = POSTGRESQL_CAPABILITIES;
@@ -39,7 +39,7 @@ function getIncludeStrategyDecision(report: PlanReport, relationName: string) {
 	);
 }
 
-describe.skipIf(shouldSkipE2E())('E2E: NQL v2.1 Strategy Behavior', () => {
+describe('E2E: NQL v2.1 Strategy Behavior', () => {
 	const SCHEMA = 'nql_v21_flat_e2e';
 
 	beforeAll(async () => {

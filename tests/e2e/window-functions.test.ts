@@ -28,13 +28,13 @@ import {
 	getTestPool,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 
 const SCHEMA = 'dx021_window_functions';
 const SCHEMA_TENANT2 = 'dx021_window_tenant2';
 
-describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
+describe('DX-021: Window Functions E2E', () => {
 	beforeAll(async () => {
 		// Set up test schema
 		await dropExtendedPimdamSchema(SCHEMA);

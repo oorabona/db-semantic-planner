@@ -15,10 +15,10 @@ import {
 	pimdamModel,
 	seedAcmeTenant,
 	seedGlobexTenant,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 
-describe.skipIf(shouldSkipE2E())('Q4: Multi-tenant Isolation', () => {
+describe('Q4: Multi-tenant Isolation', () => {
 	beforeAll(async () => {
 		await dropPimdamSchema('acme');
 		await dropPimdamSchema('globex');

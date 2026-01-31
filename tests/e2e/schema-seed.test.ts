@@ -15,11 +15,11 @@ import {
 	seedAcmeTenant,
 	seedBlogData,
 	seedGlobexTenant,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 import { sql } from './testkit/sql.js';
 
-describe.skipIf(shouldSkipE2E())('Schema and Seed', () => {
+describe('Schema and Seed', () => {
 	beforeAll(async () => {
 		// Clean up any existing schemas
 		await dropPimdamSchema('acme');

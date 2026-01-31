@@ -29,13 +29,13 @@ import {
 	getTestPool,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 import { sql as kyselySql } from './testkit/sql.js';
 
 const SCHEMA = 'q3q5_variants_assets';
 
-describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
+describe('Q3-Q5: Variants and Assets', () => {
 	beforeAll(async () => {
 		await dropExtendedPimdamSchema(SCHEMA);
 		await createExtendedPimdamSchema(SCHEMA);

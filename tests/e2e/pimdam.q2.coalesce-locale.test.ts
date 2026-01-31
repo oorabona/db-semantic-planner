@@ -32,10 +32,10 @@ import {
 	getTestAdapter,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 
-describe.skipIf(shouldSkipE2E())('Q2: Locale Fallback with COALESCE', () => {
+describe('Q2: Locale Fallback with COALESCE', () => {
 	const TENANT = 'e2e_coalesce';
 
 	beforeAll(async () => {

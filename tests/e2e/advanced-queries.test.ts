@@ -28,7 +28,7 @@ import {
 	closeTestDb,
 	getTestAdapter,
 	getTestPool,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 import { sql } from './testkit/sql.js';
 
@@ -184,7 +184,7 @@ async function dropAdvancedSchema(): Promise<void> {
 	await sql`DROP SCHEMA IF EXISTS ${sql.ref(SCHEMA)} CASCADE`.execute(pool);
 }
 
-describe.skipIf(shouldSkipE2E())('E2E-ADV: Advanced Query Patterns', () => {
+describe('E2E-ADV: Advanced Query Patterns', () => {
 	beforeAll(async () => {
 		await dropAdvancedSchema();
 		await createAdvancedSchema();

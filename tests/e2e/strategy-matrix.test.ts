@@ -35,7 +35,7 @@ import {
 	dropBlogSchema,
 	getTestAdapter,
 	seedBlogData,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 
 /**
@@ -48,7 +48,7 @@ function getIncludeStrategyDecision(report: PlanReport, relationName: string) {
 	);
 }
 
-describe.skipIf(shouldSkipE2E())('E2E-004: Strategy Matrix', () => {
+describe('E2E-004: Strategy Matrix', () => {
 	const SCHEMA = 'strategy_matrix_e2e';
 
 	beforeAll(async () => {

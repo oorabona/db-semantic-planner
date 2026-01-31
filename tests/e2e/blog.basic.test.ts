@@ -16,10 +16,10 @@ import {
 	dropBlogSchema,
 	getTestAdapter,
 	seedBlogData,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 
-describe.skipIf(shouldSkipE2E())('Q5: Blog Scenario', () => {
+describe('Q5: Blog Scenario', () => {
 	const SCHEMA = 'blog_e2e';
 
 	beforeAll(async () => {

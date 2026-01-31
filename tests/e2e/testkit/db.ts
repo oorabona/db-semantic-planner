@@ -7,7 +7,6 @@
 import { createPgsqlAdapter, type PgsqlAdapter } from '@dbsp/adapter-pgsql';
 import type { Adapter } from '@dbsp/core';
 import pg from 'pg';
-import { describe } from 'vitest';
 import { sql } from './sql.js';
 
 const { Pool } = pg;
@@ -141,24 +140,18 @@ export async function execInSchema(
 // ============================================================================
 
 /**
- * Check if Docker/E2E tests should be skipped.
- * Skips if SKIP_E2E_TESTS=true OR if DATABASE_URL is not set.
+ * Assert that E2E test infrastructure is available.
+ * Throws if DATABASE_URL is not set — testcontainers globalSetup must run first.
+ *
+ * @deprecated No longer needed. Testcontainers always provides a database via globalSetup.
+ * Existing callers should be removed. This function is kept temporarily for migration.
  */
-export function shouldSkipE2E(): boolean {
-	if (process.env.SKIP_E2E_TESTS === 'true') return true;
-	if (!process.env.DATABASE_URL) return true;
-	return false;
-}
-
-/**
- * Skip test helper for use in describe blocks.
- */
-export function describeE2E(
-	name: string,
-	fn: () => void,
-): ReturnType<typeof describe> | undefined {
-	if (shouldSkipE2E()) {
-		return describe.skip(name, fn);
+export function shouldSkipE2E(): false {
+	if (!process.env.DATABASE_URL) {
+		throw new Error(
+			'DATABASE_URL not set. Testcontainers globalSetup must run before E2E tests. ' +
+				'Run tests via: pnpm vitest --config tests/e2e/vitest.config.e2e.ts',
+		);
 	}
-	return describe(name, fn);
+	return false;
 }

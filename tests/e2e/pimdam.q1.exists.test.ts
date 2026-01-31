@@ -14,10 +14,10 @@ import {
 	pimdamModel,
 	seedAcmeTenant,
 	seedGlobexTenant,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 
-describe.skipIf(shouldSkipE2E())(
+describe(
 	'Q1: Products with approved FR main image',
 	() => {
 		beforeAll(async () => {

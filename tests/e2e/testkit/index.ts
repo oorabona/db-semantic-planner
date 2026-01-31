@@ -23,7 +23,6 @@ export {
 	closeTestDb,
 	createPgsqlAdapterForSchema,
 	createSchema,
-	describeE2E,
 	dropSchema,
 	execInSchema,
 	getPgsqlAdapter,

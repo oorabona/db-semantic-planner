@@ -27,7 +27,7 @@ import {
 	getTestPool,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 import { sql as kyselySql } from './testkit/sql.js';
 
@@ -43,7 +43,7 @@ const SCHEMA = 'q6_category_tree';
  * Clothing (/5/)
  *   └── T-Shirts (/5/6/)
  */
-describe.skipIf(shouldSkipE2E())(
+describe(
 	'Q6: Category Tree (Materialized Path)',
 	() => {
 		beforeAll(async () => {
