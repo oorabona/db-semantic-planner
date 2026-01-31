@@ -328,6 +328,8 @@ export type {
 	// DX-033: Include hydration
 	CompileResultWithIncludes,
 	CompilingAdapter,
+	// PGSQL-PHASE2: Intuitive DB casing convention
+	DbCasing,
 	DDLGeneratingAdapter,
 	Dump,
 	DumpMeta,
@@ -350,6 +352,8 @@ export {
 	supportsRawSql,
 	supportsStreaming,
 	supportsTransactions,
+	toDbCasing,
+	toNamingConvention,
 	UnsupportedCapabilityError,
 } from './adapter.js';
 

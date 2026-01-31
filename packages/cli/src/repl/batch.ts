@@ -34,7 +34,9 @@ export interface BatchModeOptions {
 	databaseUrl?: string;
 	/** DEMO-E2E: Path to assertion file (.assert.dbsp) */
 	assertFile?: string;
-	/** Naming convention for identifier mapping (default: 'preserve') */
+	/** DB column casing (intuitive: describes what the DB looks like). Preferred over namingConvention. */
+	dbCasing?: 'snake_case' | 'camelCase' | 'preserve';
+	/** @deprecated Use dbCasing. Legacy naming convention for identifier mapping (default: 'preserve') */
 	namingConvention?: 'camelCase' | 'snake_case' | 'preserve';
 }
 
@@ -80,7 +82,9 @@ export interface BatchState {
 	model: ModelIR | undefined;
 	/** NQL v2.1: Output display format (json|table|csv) */
 	outputMode: 'json' | 'table' | 'csv';
-	/** Naming convention for identifier mapping */
+	/** DB column casing (intuitive). Preferred over namingConvention. */
+	dbCasing?: 'snake_case' | 'camelCase' | 'preserve';
+	/** @deprecated Use dbCasing */
 	namingConvention?: 'camelCase' | 'snake_case' | 'preserve';
 }
 
@@ -475,7 +479,9 @@ async function executeNqlQuery(
 		// Compile NQL to SQL
 		const compileOptions: import('./nql-executor.js').NqlCompileOptions = {};
 		if (state.schemaName) compileOptions.schemaName = state.schemaName;
-		if (state.namingConvention)
+		// Prefer dbCasing over deprecated namingConvention
+		if (state.dbCasing) compileOptions.dbCasing = state.dbCasing;
+		else if (state.namingConvention)
 			compileOptions.namingConvention = state.namingConvention;
 		const result = await compileNqlToSql(
 			input,
@@ -677,8 +683,14 @@ export interface BatchExecutionResult {
 export async function executeBatch(
 	options: BatchModeOptions,
 ): Promise<BatchExecutionResult> {
-	const { queries, schema, databaseUrl, assertFile, namingConvention } =
-		options;
+	const {
+		queries,
+		schema,
+		databaseUrl,
+		assertFile,
+		dbCasing,
+		namingConvention,
+	} = options;
 
 	// Initialize state
 	// ARCH-005: Use schema.model directly (already ModelIR)
@@ -692,7 +704,8 @@ export async function executeBatch(
 		explainMode: false,
 		parseMode: false,
 		model, // NQL v2: ModelIR for compileNqlToSql
-		...(namingConvention && { namingConvention }),
+		...(dbCasing && { dbCasing }),
+		...(!dbCasing && namingConvention && { namingConvention }),
 		outputMode: 'json', // NQL v2.1: Default output format
 	};
 

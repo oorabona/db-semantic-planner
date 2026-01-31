@@ -14,6 +14,7 @@ import type {
 	CompiledQuery,
 	CompileOptions,
 	CompileResultWithIncludes,
+	DbCasing,
 	DeleteIntent,
 	Dump,
 	DumpMeta,
@@ -27,6 +28,7 @@ import type {
 	UpdateIntent,
 	UpsertIntent,
 } from '@dbsp/core';
+import { toNamingConvention } from '@dbsp/core';
 import type { Node, SelectStmt } from '@pgsql/types';
 import type { Pool, PoolClient } from 'pg';
 import { innerJoin, rangeVar } from './ast-helpers.js';
@@ -151,7 +153,15 @@ function resolveIncludeAlias(context: {
 export interface PgsqlAdapterOptions {
 	/** Schema name for multi-tenant queries */
 	readonly schemaName?: string;
-	/** Naming convention for identifier transformation */
+	/**
+	 * DB column casing convention (intuitive semantics).
+	 * - `'snake_case'`: DB columns are snake_case → transform to camelCase for JS
+	 * - `'camelCase'`: DB columns are camelCase → no transformation
+	 * - `'preserve'`: No transformation
+	 * Preferred over `namingConvention`.
+	 */
+	readonly dbCasing?: DbCasing;
+	/** @deprecated Use `dbCasing` instead. Legacy naming convention for identifier transformation */
 	readonly namingConvention?: NamingConvention;
 	/** Optional model for WHERE compilation */
 	readonly model?: ModelIR;
@@ -213,7 +223,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 
 		this.schemaName = options?.schemaName;
-		this._namingConvention = options?.namingConvention ?? 'preserve';
+		// Prefer dbCasing (intuitive) over legacy namingConvention
+		this._namingConvention = options?.dbCasing
+			? toNamingConvention(options.dbCasing)
+			: (options?.namingConvention ?? 'preserve');
 		this.naming = getNamingPlugin(this._namingConvention);
 		this.model = options?.model;
 
@@ -1282,7 +1295,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	/**
 	 * Compile a recursive CTE plan to executable SQL.
-	 * @stub Phase 2 - Recursive CTE
+	 * Supports adjacency-list and edge-table traversal modes.
 	 */
 	compileRecursive(
 		report: RecursivePlanReport,
@@ -1291,71 +1304,168 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	): CompiledQuery {
 		const schemaName = this.schemaName ?? options?.schemaName;
 		const intent = report.intent;
+		const traversal = intent.traversal;
 
-		// Validate traversal kind is adjacency (edge-table not yet supported in Phase 1)
-		if (intent.traversal.kind !== 'adjacency') {
+		const trackPath = intent.track?.path !== undefined;
+		const trackDepth = intent.track?.depth !== undefined;
+
+		let config: RecursiveCteConfig;
+
+		if (traversal.kind === 'edge-table') {
+			const table = traversal.nodeTable;
+			const pkColumn = traversal.nodeId;
+			const ctx: CompilerContext = {
+				naming: this.naming,
+				rootTable: table,
+				...(schemaName !== undefined && { schema: schemaName }),
+				maxRecursiveDepth: intent.maxDepth,
+			};
+
+			// Get columns to select
+			const startSelect = intent.start.select ?? [];
+			const nodeIdColumn =
+				intent.start.nodeIdExpr.kind === 'column'
+					? intent.start.nodeIdExpr.name
+					: pkColumn;
+			const selectColumns = Array.from(new Set([nodeIdColumn, ...startSelect]));
+
+			// Edge-table traversal: join through a junction table
+			const edgeFrom =
+				traversal.direction === 'in' ? traversal.edgeTo : traversal.edgeFrom;
+			const edgeTo =
+				traversal.direction === 'in' ? traversal.edgeFrom : traversal.edgeTo;
+
+			// Build anchor WHERE from intent.start.where
+			const anchorWhere = intent.start.where
+				? this.buildRecursiveAnchorWhere(intent.start.where, '__n')
+				: undefined;
+
+			const base: RecursiveCteConfig = {
+				cteAlias: intent.cteName,
+				table,
+				pkColumn,
+				fkColumn: '', // unused in edge-table mode
+				outerAlias: 't0',
+				isAncestors: false,
+				maxDepth: intent.maxDepth,
+				selectColumns,
+				trackPath,
+				usePg14Cycle: false,
+				edgeTable: traversal.edgeTable,
+				edgeFrom,
+				edgeTo,
+				ctx,
+			};
+
+			// Add optional properties only when defined
+			if (traversal.direction === 'both') {
+				base.bidirectionalStrategy =
+					traversal.edgeStorageHint === 'directed-only' ? 'union-all' : 'union';
+			}
+			if (anchorWhere) {
+				base.anchorWhere = anchorWhere;
+			}
+
+			config = base;
+		} else if (traversal.kind === 'adjacency') {
+			const table = traversal.nodeTable;
+			const pkColumn = traversal.nodeId;
+			const ctx: CompilerContext = {
+				naming: this.naming,
+				rootTable: table,
+				...(schemaName !== undefined && { schema: schemaName }),
+				maxRecursiveDepth: intent.maxDepth,
+			};
+
+			const startSelect = intent.start.select ?? [];
+			const nodeIdColumn =
+				intent.start.nodeIdExpr.kind === 'column'
+					? intent.start.nodeIdExpr.name
+					: pkColumn;
+			const selectColumns = Array.from(new Set([nodeIdColumn, ...startSelect]));
+
+			// Adjacency-list traversal: self-referencing FK
+			config = {
+				cteAlias: intent.cteName,
+				table,
+				pkColumn,
+				fkColumn: traversal.parentId,
+				outerAlias: 't0',
+				isAncestors: traversal.direction === 'ancestors',
+				maxDepth: intent.maxDepth,
+				selectColumns,
+				trackPath,
+				usePg14Cycle: false,
+				ctx,
+			};
+		} else {
 			throw new Error(
-				`PgsqlAdapter.compileRecursive: Only adjacency traversal is supported in Phase 1, got '${intent.traversal.kind}'`,
+				`PgsqlAdapter.compileRecursive: Unsupported traversal kind '${(traversal as any).kind}'`,
 			);
 		}
 
-		const traversal = intent.traversal;
-		const table = traversal.nodeTable;
-		const pkColumn = traversal.nodeId;
-		const fkColumn = traversal.parentId;
-		const isAncestors = traversal.direction === 'ancestors';
-
-		// Create compiler context
-		const ctx: CompilerContext = {
-			naming: this.naming,
-			rootTable: table,
-			...(schemaName !== undefined && { schema: schemaName }),
-			maxRecursiveDepth: intent.maxDepth,
-		};
-
-		// Get columns to select (from start.select or all columns from nodeIdExpr)
-		const startSelect = intent.start.select ?? [];
-		const nodeIdColumn =
-			intent.start.nodeIdExpr.kind === 'column'
-				? intent.start.nodeIdExpr.name
-				: pkColumn;
-
-		// Combine nodeId + additional select columns, ensure unique
-		const selectColumns = Array.from(new Set([nodeIdColumn, ...startSelect]));
-
-		// Build recursive CTE config
-		const config: RecursiveCteConfig = {
-			cteAlias: intent.cteName,
-			table,
-			pkColumn,
-			fkColumn,
-			outerAlias: 't0', // Outer query alias (for anchor WHERE correlation)
-			isAncestors,
-			maxDepth: intent.maxDepth,
-			selectColumns,
-			trackPath: intent.track?.path !== undefined,
-			usePg14Cycle: false, // TODO: detect PostgreSQL version in Phase 2
-			ctx,
-		};
-
 		// Build the recursive CTE
-		const { cte } = buildRecursiveCte(config);
+		const { cte, extraCtes } = buildRecursiveCte(config);
 
-		// Build the final SELECT that uses the CTE
-		const selectStmt: SelectStmt = {
-			targetList: selectColumns.map((col: string) => ({
+		// Build final target list (include __depth and __path when tracked)
+		const finalTargets: Node[] = config.selectColumns.map((col: string) => ({
+			ResTarget: {
+				val: {
+					ColumnRef: {
+						fields: [
+							{ String: { sval: config.cteAlias } },
+							{ String: { sval: this.naming.toDatabase(col) } },
+						],
+					},
+				},
+				name: this.naming.toDatabase(col),
+			},
+		}));
+
+		if (trackDepth) {
+			const depthAlias = intent.track?.depth?.as ?? '__depth';
+			finalTargets.push({
 				ResTarget: {
 					val: {
 						ColumnRef: {
 							fields: [
 								{ String: { sval: config.cteAlias } },
-								{ String: { sval: this.naming.toDatabase(col) } },
+								{ String: { sval: '__depth' } },
 							],
 						},
 					},
-					name: this.naming.toDatabase(col),
+					name: depthAlias,
 				},
-			})),
+			});
+		}
+
+		if (trackPath) {
+			const pathAlias = intent.track?.path?.as ?? '__path';
+			finalTargets.push({
+				ResTarget: {
+					val: {
+						ColumnRef: {
+							fields: [
+								{ String: { sval: config.cteAlias } },
+								{ String: { sval: '__path' } },
+							],
+						},
+					},
+					name: pathAlias,
+				},
+			});
+		}
+
+		// Assemble all CTEs (extra CTEs like __edges_bidir go first)
+		const ctes: Node[] = [];
+		if (extraCtes) {
+			ctes.push(...extraCtes);
+		}
+		ctes.push(cte);
+
+		// Build the final SELECT that uses the CTE
+		const selectStmt: SelectStmt = {
+			targetList: finalTargets,
 			fromClause: [
 				{
 					RangeVar: {
@@ -1366,7 +1476,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				},
 			],
 			withClause: {
-				ctes: [cte],
+				ctes,
 				recursive: true,
 			},
 		};
@@ -1376,8 +1486,95 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		return {
 			sql,
-			parameters: [], // Recursive CTEs typically don't have parameters in basic form
+			parameters: [],
 		};
+	}
+
+	/**
+	 * Build an anchor WHERE clause AST node from a WhereIntent.
+	 * Used for edge-table recursive CTE anchor queries.
+	 */
+	private buildRecursiveAnchorWhere(where: unknown, tableAlias: string): Node {
+		if (!where || typeof where !== 'object') {
+			return { A_Const: { boolval: { boolval: true } } };
+		}
+		const w = where as Record<string, unknown>;
+
+		switch (w.kind) {
+			case 'comparison': {
+				const dbCol = this.naming.toDatabase(w.field as string);
+				const left: Node = {
+					ColumnRef: {
+						fields: [
+							{ String: { sval: tableAlias } },
+							{ String: { sval: dbCol } },
+						],
+					},
+				};
+				const op = this.mapComparisonOperator(w.operator as string);
+				const right: Node = this.valueToNode(w.value);
+				return {
+					A_Expr: {
+						kind: 'AEXPR_OP',
+						name: [{ String: { sval: op } }],
+						lexpr: left,
+						rexpr: right,
+					},
+				};
+			}
+			case 'and': {
+				const conditions = (w.conditions as unknown[]).map((c) =>
+					this.buildRecursiveAnchorWhere(c, tableAlias),
+				);
+				if (conditions.length === 1) return conditions[0]!;
+				return { BoolExpr: { boolop: 'AND_EXPR', args: conditions } };
+			}
+			case 'or': {
+				const conditions = (w.conditions as unknown[]).map((c) =>
+					this.buildRecursiveAnchorWhere(c, tableAlias),
+				);
+				if (conditions.length === 1) return conditions[0]!;
+				return { BoolExpr: { boolop: 'OR_EXPR', args: conditions } };
+			}
+			default:
+				return { A_Const: { boolval: { boolval: true } } };
+		}
+	}
+
+	/** Map a WhereIntent operator to SQL operator string */
+	private mapComparisonOperator(op: string): string {
+		const map: Record<string, string> = {
+			eq: '=',
+			neq: '!=',
+			gt: '>',
+			gte: '>=',
+			lt: '<',
+			lte: '<=',
+			like: 'LIKE',
+			ilike: 'ILIKE',
+		};
+		return map[op] ?? '=';
+	}
+
+	/** Convert a JS value to an AST A_Const node */
+	private valueToNode(value: unknown): Node {
+		if (typeof value === 'string') {
+			return { A_Const: { sval: { sval: value } } };
+		}
+		if (typeof value === 'number') {
+			if (Number.isInteger(value)) {
+				return { A_Const: { ival: { ival: value } } };
+			}
+			return { A_Const: { fval: { fval: String(value) } } };
+		}
+		if (typeof value === 'boolean') {
+			return { A_Const: { boolval: { boolval: value } } };
+		}
+		if (value === null) {
+			return { A_Const: { isnull: true } };
+		}
+		// Fallback: string representation
+		return { A_Const: { sval: { sval: String(value) } } };
 	}
 
 	/**
