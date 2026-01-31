@@ -67,6 +67,81 @@ import {
 import { validateIdentifier } from './validate.js';
 
 // ============================================================================
+// Shared Helpers
+// ============================================================================
+
+/** Intent shape returned by findExistsIntents. */
+type ExistsIntent = {
+	kind: 'exists' | 'notExists';
+	relation: string;
+	where?: unknown;
+};
+
+/**
+ * Recursively find exists/notExists/relationFilter intents in a where clause tree.
+ */
+function findExistsIntents(where: unknown): ExistsIntent[] {
+	if (!where || typeof where !== 'object') return [];
+	const w = where as Record<string, unknown>;
+	if (
+		w.kind === 'exists' ||
+		w.kind === 'notExists' ||
+		w.kind === 'relationFilter'
+	) {
+		return [w as ExistsIntent];
+	}
+	const results: ExistsIntent[] = [];
+	if (w.conditions && Array.isArray(w.conditions)) {
+		for (const c of w.conditions) {
+			results.push(...findExistsIntents(c));
+		}
+	}
+	if (w.condition) {
+		results.push(...findExistsIntents(w.condition));
+	}
+	return results;
+}
+
+/** Result of resolving a relation's FK and type from the model. */
+type ResolvedRelation = {
+	target: string;
+	foreignKey: string | undefined;
+	relationType: 'belongsTo' | 'hasMany' | 'hasOne' | undefined;
+};
+
+/**
+ * Resolve a relation's target table, FK, and type from the ModelIR.
+ * Returns undefined if the relation is not found.
+ */
+function resolveRelation(
+	model: ModelIR,
+	sourceTable: string,
+	relationName: string,
+): ResolvedRelation | undefined {
+	const rel = model.getRelation(`${sourceTable}.${relationName}`);
+	if (!rel) return undefined;
+	const foreignKey =
+		typeof rel.foreignKey === 'string' ? rel.foreignKey : rel.foreignKey?.[0];
+	const relationType = rel.type as
+		| 'belongsTo'
+		| 'hasMany'
+		| 'hasOne'
+		| undefined;
+	return { target: rel.target, foreignKey, relationType };
+}
+
+/**
+ * Compute the include alias for a json_agg decision.
+ * Convention: includeAlias (user-provided) takes precedence over relation (canonical).
+ */
+function resolveIncludeAlias(context: {
+	includeAlias?: string;
+	relation?: string;
+}): string | undefined {
+	return context.includeAlias ?? context.relation;
+}
+
+// ============================================================================
 // Options
 // ============================================================================
 
@@ -212,8 +287,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		for (const d of jsonAggIncludeDecisions) {
 			const context = d.context;
 			// Skip if target table or relation name is not defined
-			// Must match hydrator order: includeAlias takes precedence over relation
-			const relationName = context.includeAlias ?? context.relation;
+			// Convention: includeAlias ?? relation (shared with core/hydration-utils.ts)
+			const relationName = resolveIncludeAlias(context);
 			if (!context.target || !relationName) continue;
 
 			// Cast context to access foreignKey (added in Phase 3)
@@ -281,45 +356,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			return [];
 		}
 
-		// Helper to find exists/notExists intents in the where clause
-		const findExistsIntents = (
-			where: unknown,
-		): Array<{
-			kind: 'exists' | 'notExists';
-			relation: string;
-			where?: unknown;
-		}> => {
-			if (!where || typeof where !== 'object') return [];
-			const w = where as Record<string, unknown>;
-			if (
-				w.kind === 'exists' ||
-				w.kind === 'notExists' ||
-				w.kind === 'relationFilter'
-			) {
-				return [
-					w as {
-						kind: 'exists' | 'notExists';
-						relation: string;
-						where?: unknown;
-					},
-				];
-			}
-			// Check nested and/or/not conditions
-			const results: Array<{
-				kind: 'exists' | 'notExists';
-				relation: string;
-				where?: unknown;
-			}> = [];
-			if (w.conditions && Array.isArray(w.conditions)) {
-				for (const c of w.conditions) {
-					results.push(...findExistsIntents(c));
-				}
-			}
-			if (w.condition) {
-				results.push(...findExistsIntents(w.condition));
-			}
-			return results;
-		};
+		// Uses module-level findExistsIntents()
 
 		// Find all exists intents from the plan's where clause
 		const existsIntents = plan.intent?.where
@@ -357,19 +394,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			}
 
 			// Resolve FK from model relation if available
-			// Convention fallback (deriveFK) doesn't work for aliased relations
-			// e.g., bundleComponents.bundleId → products (inverse: 'components')
-			let foreignKey: string | undefined;
-			if (model && context.relation) {
-				const sourceTable = context.sourceTable || plan.rootTable;
-				const rel = model.getRelation(`${sourceTable}.${context.relation}`);
-				if (rel?.foreignKey) {
-					foreignKey =
-						typeof rel.foreignKey === 'string'
-							? rel.foreignKey
-							: rel.foreignKey[0];
-				}
-			}
+			const foreignKey =
+				model && context.relation
+					? resolveRelation(
+							model,
+							context.sourceTable || plan.rootTable,
+							context.relation,
+						)?.foreignKey
+					: undefined;
 
 			const decision: PlanDecision = {
 				type: 'where',
@@ -566,35 +598,23 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const targetColumn = d.column.substring(dotIndex + 1);
 
 			// Resolve relation from model
-			const rel = model.getRelation(`${rootTable}.${relationName}`);
-			if (!rel) return d; // No matching relation — leave as-is
+			const resolved = resolveRelation(model, rootTable, relationName);
+			if (!resolved) return d; // No matching relation — leave as-is
 
-			const foreignKey =
-				typeof rel.foreignKey === 'string'
-					? rel.foreignKey
-					: rel.foreignKey?.[0];
-
-			// Convert to EXISTS subquery
-			// Include relationType so compiler knows FK direction
-			const relationType = rel.type as
-				| 'belongsTo'
-				| 'hasMany'
-				| 'hasOne'
-				| undefined;
 			return {
 				type: 'where',
 				operator: 'exists',
-				targetTable: rel.target,
+				targetTable: resolved.target,
 				relationName,
-				...(foreignKey && { foreignKey }),
-				...(relationType && { relationType }),
+				...(resolved.foreignKey && { foreignKey: resolved.foreignKey }),
+				...(resolved.relationType && { relationType: resolved.relationType }),
 				conditions: [
 					{
 						type: 'where',
 						column: targetColumn,
 						operator: d.operator,
 						value: d.value,
-						table: rel.target,
+						table: resolved.target,
 					},
 				],
 			} as PlanDecision;

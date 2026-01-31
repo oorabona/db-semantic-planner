@@ -31,6 +31,7 @@ export function hydrateJsonAggIncludes<T>(
 	// STRAT-SIMPLIFY: Track to-one relations for [0] extraction
 	const relationInfo = new Map<string, { isToOne: boolean }>();
 	for (const decision of jsonAggDecisions) {
+		// Convention: includeAlias ?? relation (shared with adapter-pgsql/resolveIncludeAlias)
 		const includeAlias =
 			decision.context?.includeAlias ?? decision.context?.relation;
 		const relationType = decision.context?.relationType;

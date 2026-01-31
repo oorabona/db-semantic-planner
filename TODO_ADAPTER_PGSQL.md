@@ -52,15 +52,14 @@
 - [x] ✅ Fix scalar type casting for @> point containment (2026-01-29)
 - [x] ✅ Achieve 291/291 E2E test parity (87 → 0 failures) (2026-01-29)
 
-### Block 2-4: Migration (pending)
+### Block 2-4: Migration ✅ Complete (2026-01-30)
 
-- [ ] Update all imports to use @dbsp/adapter-pgsql
-- [ ] Update createOrm() to use PgsqlAdapter by default
-- [ ] Update documentation and examples
-- [ ] Deprecation notice in adapter-kysely
-- [ ] Remove adapter-kysely package
-- [ ] Delete ComparisonAdapter (no longer needed)
-- [ ] Delete DBSP_COMPARISON_MODE handling
+- [x] ✅ Update all imports to use @dbsp/adapter-pgsql (2026-01-30)
+- [x] ✅ Update createOrm() to use PgsqlAdapter by default (2026-01-30)
+- [x] ✅ Update documentation and examples (2026-01-30)
+- [x] ✅ Remove adapter-kysely package (2026-01-30)
+- [x] ✅ Delete ComparisonAdapter (2026-01-30)
+- [x] ✅ Delete DBSP_COMPARISON_MODE handling (2026-01-30)
 
 ---
 
@@ -79,7 +78,7 @@
 
 ## Refactoring Backlog (discovered during Phase 3)
 
-- [ ] **Single source of truth for json_agg relation name**: Currently `extractJsonAggDecisions` (adapter) and `hydration-utils.ts` (core) both compute the relation alias independently with `includeAlias ?? relation`. Centraliser la décision dans le PlanReport pour éliminer la duplication.
+- [x] ✅ **Single source of truth for json_agg relation name** (2026-01-31): Extracted `resolveIncludeAlias()` helper in adapter, added convention comment in core/hydration-utils.ts. Both reference shared pattern `includeAlias ?? relation`.
 - [x] ✅ **Remove duplicate range operator switch cases** (2026-01-30): Dead code removed from `compileCondition` switch — range ops handled by early return.
 - [x] ✅ **Fragile SQL assertions (`toContain`)** (2026-01-30): `db.output` table assertion added to CLI parser+runner with 19 unit tests. Fixed `batch.ts` to forward `rows`/`columns` from `ExecutionResult` to `BatchResult`. Validated E2E against real PostgreSQL — `blog-extended.assert.dbsp` uses `db.output:` table block for authors query (291/291 E2E pass).
 - [x] ✅ **Model.getTable() naming confusion** (2026-01-30): `resolveLogicalName()` utility added in `naming.ts` with 11 unit tests.
@@ -89,8 +88,8 @@
 - [x] ✅ **BUG: LATERAL JOIN schema qualification** (2026-01-30): Fixed in `adapter-kysely/lateral.ts` — separate schema/table identifiers + inner alias for WHERE clause. Updated assertions in `ecommerce.assert.dbsp` (Q10/Q11) and `test-blog.assert.dbsp` (Q8/Q9). 290/291 E2E pass.
 - [ ] **BUG: `via` hint ambiguity resolution generates invalid SQL**: `pimdam.q8.ambiguity.test.ts` Q8-07 — query with `via` hint to resolve ambiguous relations produces `invalid reference to FROM-clause entry for table "products"`. The compiler emits a table reference that PostgreSQL rejects because the alias/scope is incorrect. Repro: `pimdam.q8.ambiguity.test.ts > Q8-07: should execute query successfully when ambiguity is resolved with via hint`.
 - [ ] **CTE/WITH clause generation**: Multi-EXISTS patterns are compiled as flat WHERE conditions. Implement CTE extraction for complex multi-locale/multi-filter patterns.
-- [ ] **Split extractExistsDecisions**: Method does 3 things (filter decisions, find intents, resolve FK). Extract into smaller focused functions for readability.
-- [ ] **Refactor: extract relation-path detection to shared helper**: `comparison.ts` and `range.ts` both duplicate identical relation-path → EXISTS logic (lines 37-67). Extract to a shared `compileRelationPathAsExists()` helper. Low priority.
+- [x] ✅ **Split extractExistsDecisions** (2026-01-31): Extracted `findExistsIntents()` and `resolveRelation()` to module-level helpers. FK resolution shared with `convertDottedFieldsToExists()`.
+- [x] ✅ **Refactor: extract relation-path detection to shared helper** (2026-01-31): `resolveRelation()` extracted as shared helper for FK resolution. Note: `range.ts` never existed — original TODO was inaccurate. The actual duplication was between `extractExistsDecisions` and `convertDottedFieldsToExists`, now deduplicated.
 
 ---
 
