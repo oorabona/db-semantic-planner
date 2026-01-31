@@ -21,6 +21,21 @@ import type { ModelIR } from './model-ir.js';
 import type { PlanReport, RecursivePlanReport } from './planner.js';
 
 // ============================================================================
+// Logger
+// ============================================================================
+
+/**
+ * Minimal logger interface for adapter debug/error logging.
+ * Adapters accept an optional logger for observability without
+ * coupling to any specific logging framework.
+ */
+export interface AdapterLogger {
+	debug?(message: string, ...args: unknown[]): void;
+	warn?(message: string, ...args: unknown[]): void;
+	error?(message: string, ...args: unknown[]): void;
+}
+
+// ============================================================================
 // Capabilities
 // ============================================================================
 

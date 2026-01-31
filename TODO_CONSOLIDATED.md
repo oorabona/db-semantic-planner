@@ -38,10 +38,10 @@
 | 3.1 | Extract shared RETURNING clause compilation (5 locations → 1 helper) | #15 | 2.0 | ✅ (2026-01-31) |
 | 3.2 | Extract shared FK derivation utility (2 locations → 1) | #16 | 2.0 | ✅ (2026-01-31) |
 | 3.3 | Replace `Math.random()` with `crypto.randomUUID()` for cursor names | #23 | 1.0 | ✅ (2026-01-31) |
-| 3.4 | Log rollback errors at debug level (silent suppression) | #24 | 1.0 | ⏸️ Deferred — needs logging interface on PgsqlAdapter (Phase 5 scope) |
+| 3.4 | Log rollback errors at debug level (silent suppression) | #24 | 1.0 | ✅ (2026-01-31) AdapterLogger interface in core, PgsqlAdapterOptions.logger |
 | 3.5 | Mark `validate()` stub as @deprecated in NQL | #25 | 1.0 | ✅ (2026-01-31) |
 | 3.6 | Remove deprecated exports (NqlCompilerFn, nqlCompiler option) | #26 | 1.0 | ✅ (2026-01-31) |
-| 3.7 | Replace 61 `throw new Error()` with NqlError in visitor | #13 | 2.0 | ⏸️ Deferred — needs NqlError class (not just interface), sized M not S |
+| 3.7 | Replace 61 `throw new Error()` with NqlError in visitor | #13 | 2.0 | ✅ (2026-01-31) NqlSemanticException class, 61 throw → NqlSemanticException |
 
 **Exit criteria:** All quick wins applied. Tests green. No regressions.
 
@@ -60,7 +60,7 @@
 | 4A.5 | Group child results by foreign key | ✅ (already in result-hydrator.ts) |
 | 4A.6 | Hydrate parent objects with nested children | ✅ (already in result-hydrator.ts) |
 | 4A.7 | Handle nested includes (recursive hydration) | ✅ (already in result-hydrator.ts) |
-| 4A.8 | Add integration tests | ⏸️ E2E requires live DB; unit tests exist in orm-execution.test.ts |
+| 4A.8 | Add integration tests | ✅ (2026-01-31) E2E Section I: hasMany, belongsTo, pagination, planner decision |
 
 ### 4B: DX-041 Subquery Include Strategy (5 tasks)
 
@@ -69,7 +69,7 @@
 | 4B.1 | Add `'subquery'` to IncludeStrategy type | ✅ (already in model-ir.ts) |
 | 4B.2 | Implement in planner strategy selection | ✅ (planner.ts:1268) |
 | 4B.3 | Implement in adapter-pgsql compiler | ✅ (compileSubqueryInclude, lines 819-956) |
-| 4B.4 | Re-enable skipped hydration tests in orm-execution.test.ts | ⏸️ Check if any remain |
+| 4B.4 | Re-enable skipped hydration tests in orm-execution.test.ts | ✅ (2026-01-31) No skipped tests found in suite |
 | 4B.5 | Add `defaultIncludeStrategy` back to SimplifiedOrmOptions | ✅ (PlanOptions.defaultIncludeStrategy exists) |
 
 ### 4C: Phase 4 Introspection PostgreSQL (8 tasks)
@@ -135,6 +135,8 @@
 | 2026-01-31 | Phase 1 | 3/3 | README, CLAUDE.md, DOC_INDEX updated. Also fixed DX-040 status (Phase 2.3) |
 | 2026-01-31 | Phase 2 | 4/4 | ARCH-006 Canonical, ARCH-002 merge note, DX-040 complete, Q8-07 via hint bug fixed (reversed priority in resolveIncludeAlias + extractLeftJoinIncludeDecisions). Also removed shouldSkipE2E from 22 test files. |
 | 2026-01-31 | Phase 3 | 5/7 | RETURNING helper (5→1), FK derivation helper (2→1), crypto.randomUUID, validate() @deprecated, removed NqlCompilerFn+nqlCompiler. Items 3.4 (needs logger interface) and 3.7 (needs NqlError class) deferred. All tests green: adapter 468, core 820. |
-| 2026-01-31 | Phase 4A | 7/8 | DX-033: compileWithIncludes() implemented (was stub). Discovered 4A.2-4A.7 already exist in QueryExecutor + ResultHydrator. 4A.8 (E2E integration tests) deferred. |
-| 2026-01-31 | Phase 4B | 4/5 | DX-041: Already fully implemented (type, planner, adapter, tests). 4B.4 (re-enable skipped tests) needs check. |
+| 2026-01-31 | Phase 4A | 8/8 | DX-033: compileWithIncludes() implemented. Fixed json_agg hydration column name resolution, belongsTo FK mapping, to-one unwrapping. 4 E2E tests added (Section I). |
+| 2026-01-31 | Phase 4B | 5/5 | DX-041: Fully implemented. No skipped tests found. |
+| 2026-01-31 | Phase 3.4 | 1/1 | AdapterLogger interface in core, PgsqlAdapterOptions.logger, rollback debug logging |
+| 2026-01-31 | Phase 3.7 | 1/1 | NqlSemanticException class replaces 61 throw new Error() in visitor.ts |
 

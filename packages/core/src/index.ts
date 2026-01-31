@@ -317,6 +317,7 @@ export type {
 	// Full adapter type (all capabilities)
 	Adapter,
 	AdapterCapabilities,
+	AdapterLogger,
 	AdapterStreamOptions,
 	// DX-104: Split interfaces (ISP compliance)
 	AliasIncludedColumnsMode,
