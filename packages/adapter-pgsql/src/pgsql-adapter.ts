@@ -572,6 +572,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * NQL compiles `parent.name = 'Electronics'` as a comparison with field "parent.name",
 	 * but this refers to a relation traversal, not a literal column.
 	 * Uses the model to resolve the relation and target table.
+	 *
+	 * @example
+	 * // Input decision: { type: 'where', column: 'parent.name', operator: '=', value: 'Electronics' }
+	 * // Output decision: { type: 'where', operator: 'exists', targetTable: 'categories',
+	 * //   relationName: 'parent', relationType: 'belongsTo',
+	 * //   conditions: [{ type: 'where', column: 'name', operator: '=', value: 'Electronics', table: 'categories' }] }
 	 */
 	private convertDottedFieldsToExists(
 		decisions: PlanDecision[],

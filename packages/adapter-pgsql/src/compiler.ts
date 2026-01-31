@@ -872,6 +872,11 @@ export class PlanCompiler {
 	/**
 	 * Recursively rewrite the `table` field in a PlanDecision tree.
 	 * Used for json_agg filter conditions that need to reference the inner alias (__t__).
+	 *
+	 * @example
+	 * // Rewrite table references inside a json_agg subquery:
+	 * // { type: 'where', column: 'active', table: 'posts' }
+	 * // → { type: 'where', column: 'active', table: '__t__' }
 	 */
 	private rewriteConditionTable(
 		decision: PlanDecision,
@@ -901,7 +906,16 @@ export class PlanCompiler {
 	 * EXISTS (SELECT 1 FROM targetTable WHERE fk = source.pk [AND conditions])
 	 *
 	 * FK correlation is generated using convention: target.{singularSource}Id = source.id
-	 * Example: EXISTS (SELECT 1 FROM posts WHERE posts.author_id = authors.id)
+	 *
+	 * @example
+	 * // hasMany: authors → posts
+	 * // SQL: EXISTS (SELECT 1 FROM "posts" WHERE "posts"."author_id" = "authors"."id")
+	 *
+	 * // belongsTo with self-ref: categories.parent → categories
+	 * // SQL: EXISTS (SELECT 1 FROM "categories" AS "parent" WHERE "parent"."id" = "categories"."parent_id")
+	 *
+	 * // NOT EXISTS:
+	 * // SQL: NOT (EXISTS (SELECT 1 FROM "posts" WHERE "posts"."author_id" = "authors"."id"))
 	 */
 	private compileExistsCondition(decision: PlanDecision): Node {
 		const targetTable = decision.targetTable;
