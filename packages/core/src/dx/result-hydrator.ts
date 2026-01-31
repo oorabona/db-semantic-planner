@@ -103,14 +103,19 @@ export class ResultHydrator<TResult = unknown> {
 			}
 
 			// Attach children to parent objects
+			// For to-one relations (belongsTo/hasOne), unwrap to single object
+			const isToOne =
+				includeInfo.relationType === 'belongsTo' ||
+				includeInfo.relationType === 'hasOne';
 			for (const result of results) {
 				const parentId = this.extractKeyValue(
 					result as Record<string, unknown>,
 					includeInfo.sourceKey,
 				);
 				const children = childrenByParentId.get(parentId) ?? [];
-				(result as Record<string, unknown>)[includeInfo.relationName] =
-					children;
+				(result as Record<string, unknown>)[includeInfo.relationName] = isToOne
+					? (children[0] ?? null)
+					: children;
 			}
 
 			// Process nested includes recursively if present

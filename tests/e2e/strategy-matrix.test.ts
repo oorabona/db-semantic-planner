@@ -33,9 +33,9 @@ import {
 	closeTestDb,
 	createBlogSchema,
 	dropBlogSchema,
+	getPgsqlAdapter,
 	getTestAdapter,
 	seedBlogData,
-	
 } from './testkit/index.js';
 
 /**
@@ -515,6 +515,125 @@ describe('E2E-004: Strategy Matrix', () => {
 				// Both have their posts
 				expect(firstPage[0].posts.length).toBeGreaterThan(0);
 				expect(secondPage[0].posts.length).toBeGreaterThan(0);
+			});
+		});
+	});
+
+	// =========================================================================
+	// Section I: Subquery Include Execution (DX-033 + DX-041)
+	// =========================================================================
+	describe('Section I: Subquery Include Execution (DX-033)', () => {
+		describe('E2E-004-I1: subquery include hydrates hasMany', () => {
+			it('should execute and hydrate hasMany via subquery strategy', async () => {
+				const adapter = await getTestAdapter();
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					planOptions: {
+						defaultIncludeStrategy: 'subquery',
+					},
+				});
+
+				const authors = (await orm
+					.withSchema(SCHEMA)
+					.select('authors')
+					.include('posts')
+					.orderBy('id', 'asc')
+					.execute()) as any[];
+
+				// Then: authors are returned with hydrated posts array
+				expect(authors.length).toBeGreaterThan(0);
+				for (const author of authors) {
+					expect(Array.isArray(author.posts)).toBe(true);
+					expect(author.posts.length).toBeGreaterThan(0);
+					for (const post of author.posts) {
+						expect(post.title).toBeDefined();
+					}
+				}
+			});
+		});
+
+		describe('E2E-004-I2: subquery include hydrates belongsTo', () => {
+			it('should execute and hydrate belongsTo via subquery strategy', async () => {
+				const adapter = await getTestAdapter();
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					planOptions: {
+						defaultIncludeStrategy: 'subquery',
+					},
+				});
+
+				const posts = (await orm
+					.withSchema(SCHEMA)
+					.select('posts')
+					.include('author')
+					.orderBy('id', 'asc')
+					.execute()) as any[];
+
+				// Then: posts are returned with hydrated author object
+				expect(posts.length).toBeGreaterThan(0);
+				for (const post of posts) {
+					expect(post.author).toBeDefined();
+					expect(post.author.name).toBeDefined();
+				}
+			});
+		});
+
+		describe('E2E-004-I3: subquery include with pagination', () => {
+			it('should preserve parent pagination with subquery includes', async () => {
+				const adapter = await getTestAdapter();
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					planOptions: {
+						defaultIncludeStrategy: 'subquery',
+					},
+				});
+
+				const authors = (await orm
+					.withSchema(SCHEMA)
+					.select('authors')
+					.include('posts')
+					.orderBy('id', 'asc')
+					.limit(1)
+					.execute()) as any[];
+
+				// Then: exactly 1 author, but with all their posts
+				expect(authors).toHaveLength(1);
+				expect(Array.isArray(authors[0].posts)).toBe(true);
+				expect(authors[0].posts.length).toBeGreaterThan(0);
+			});
+		});
+
+		describe('E2E-004-I4: subquery planner decision', () => {
+			it('should produce subquery decision in plan report', async () => {
+				const adapter = await getPgsqlAdapter();
+				const orm = createOrm({
+					model: blogModel,
+					adapter,
+					planOptions: {
+						defaultIncludeStrategy: 'subquery',
+					},
+				});
+
+				const query = orm.withSchema(SCHEMA).select('authors').include('posts');
+
+				const dump = query.dump();
+				const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
+				expect(decision).toBeDefined();
+				expect(decision?.choice).toBe('subquery');
+
+				// And: compileWithIncludes returns subquery metadata
+				const compiled = adapter.compileWithIncludes(dump.plan, {
+					model: blogModel,
+					schemaName: SCHEMA,
+				});
+				expect(compiled.subqueryIncludes.length).toBeGreaterThan(0);
+
+				const includeInfo = compiled.subqueryIncludes[0]!;
+				expect(includeInfo.relationName).toBe('posts');
+				expect(includeInfo.targetTable).toBe('posts');
 			});
 		});
 	});

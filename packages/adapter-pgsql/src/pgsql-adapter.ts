@@ -803,15 +803,27 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const ctx = d.context;
 			if (!ctx.target) continue;
 
-			const relationName = ctx.relation ?? ctx.includeAlias;
+			const relationName = ctx.includeAlias ?? ctx.relation;
 			if (!relationName) continue;
 
 			// Derive FK using shared helper
-			const foreignKey = deriveForeignKey(ctx) ?? 'id';
-			const fk = Array.isArray(foreignKey) ? foreignKey[0]! : foreignKey;
+			const rawFk = deriveForeignKey(ctx) ?? 'id';
+			const fk = Array.isArray(rawFk) ? rawFk[0]! : rawFk;
 
-			// Determine source key (PK of parent table)
-			const sourceKey = ctx.relationType === 'belongsTo' ? fk : 'id';
+			// For subquery include, we need:
+			// - sourceKey: column on the parent result to extract IDs from
+			// - foreignKey: column on the target table to match via WHERE ... IN
+			//
+			// belongsTo (posts → author): FK=authorId is on source.
+			//   Extract authorId from parents → SELECT * FROM authors WHERE id IN (...)
+			//   sourceKey=authorId, foreignKey=id (target PK)
+			//
+			// hasMany (authors → posts): FK=authorId is on target.
+			//   Extract id from parents → SELECT * FROM posts WHERE author_id IN (...)
+			//   sourceKey=id, foreignKey=authorId (target FK)
+			const isBelongsTo = ctx.relationType === 'belongsTo';
+			const sourceKey = isBelongsTo ? fk : 'id';
+			const targetFk = isBelongsTo ? 'id' : fk;
 
 			// Find matching include intent for select/where passthrough
 			const includeIntent = (
@@ -823,10 +835,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const entry: SubqueryIncludeInfo = {
 				relationName,
 				targetTable: ctx.target,
-				foreignKey: fk,
+				foreignKey: targetFk,
 				sourceKey,
 				sourceTable: ctx.sourceTable ?? plan.rootTable,
 			};
+			if (typeof ctx.relationType === 'string') {
+				// biome-ignore lint: exactOptionalPropertyTypes workaround
+				(entry as unknown as Record<string, unknown>).relationType =
+					ctx.relationType;
+			}
 			if (includeIntent?.select != null) {
 				(entry as { select: SubqueryIncludeInfo['select'] }).select =
 					includeIntent.select as SubqueryIncludeInfo['select'];

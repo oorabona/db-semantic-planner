@@ -25,20 +25,32 @@ export function hydrateJsonAggIncludes<T>(
 		return;
 	}
 
-	// Build map of include alias -> relation type
-	// Use includeAlias (user-provided name) for column mapping since the compiler
-	// uses include.relation for the JSON column alias (e.g., 'author_json')
+	// Build map of relation names -> relation type
+	// The adapter compiler uses the canonical relation name (context.relation) for
+	// the JSON column alias (e.g., 'author_posts' → 'author_posts_json').
+	// We also track the includeAlias (user-provided name) for fallback matching.
 	// STRAT-SIMPLIFY: Track to-one relations for [0] extraction
-	const relationInfo = new Map<string, { isToOne: boolean }>();
+	const relationInfo = new Map<
+		string,
+		{ isToOne: boolean; includeAlias?: string; canonicalName?: string }
+	>();
 	for (const decision of jsonAggDecisions) {
-		// Convention: includeAlias ?? relation (shared with adapter-pgsql/resolveIncludeAlias)
-		const includeAlias =
-			decision.context?.includeAlias ?? decision.context?.relation;
+		const canonicalName = decision.context?.relation;
+		const includeAlias = decision.context?.includeAlias;
 		const relationType = decision.context?.relationType;
-		if (typeof includeAlias === 'string') {
-			// belongsTo and hasOne are to-one relations
-			const isToOne = relationType === 'belongsTo' || relationType === 'hasOne';
-			relationInfo.set(includeAlias, { isToOne });
+		const isToOne = relationType === 'belongsTo' || relationType === 'hasOne';
+
+		// Primary key: canonical relation name (matches adapter SQL alias)
+		if (typeof canonicalName === 'string') {
+			relationInfo.set(canonicalName, {
+				isToOne,
+				includeAlias:
+					typeof includeAlias === 'string' ? includeAlias : canonicalName,
+				canonicalName,
+			});
+		} else if (typeof includeAlias === 'string') {
+			// Fallback: use includeAlias if no canonical name
+			relationInfo.set(includeAlias, { isToOne, includeAlias });
 		}
 	}
 
@@ -55,19 +67,31 @@ export function hydrateJsonAggIncludes<T>(
 		const record = row as Record<string, unknown>;
 
 		for (const [relationName, info] of relationInfo) {
-			const jsonColumnName = `${relationName}_json`;
-			// CamelCasePlugin transforms 'author_json' → 'authorJson' in result set
-			const camelJsonColumnName = jsonColumnName.replace(/_([a-z])/g, (_, c) =>
-				c.toUpperCase(),
-			);
+			// The adapter generates the JSON column alias from the canonical relation name
+			// (e.g., 'author_posts' → 'author_posts_json'). The naming plugin may
+			// transform it to camelCase (e.g., 'authorPostsJson').
+			// We try both the canonical name and the includeAlias as base names.
+			const candidates = [relationName];
+			if (info.includeAlias && info.includeAlias !== relationName) {
+				candidates.push(info.includeAlias);
+			}
 
-			// Check if the JSON column exists (snake_case or camelCase)
-			const actualColumnName =
-				jsonColumnName in record
-					? jsonColumnName
-					: camelJsonColumnName in record
-						? camelJsonColumnName
-						: null;
+			let actualColumnName: string | null = null;
+			for (const baseName of candidates) {
+				const snakeJson = `${baseName}_json`;
+				const camelJson = snakeJson.replace(/_([a-z])/g, (_, c: string) =>
+					c.toUpperCase(),
+				);
+				if (snakeJson in record) {
+					actualColumnName = snakeJson;
+					break;
+				}
+				if (camelJson in record) {
+					actualColumnName = camelJson;
+					break;
+				}
+			}
+
 			if (actualColumnName) {
 				const jsonValue = record[actualColumnName];
 
@@ -77,27 +101,25 @@ export function hydrateJsonAggIncludes<T>(
 					try {
 						parsed = JSON.parse(jsonValue);
 					} catch {
-						// If parsing fails, use empty array or null depending on relation type
 						parsed = info.isToOne ? null : [];
 					}
 				} else if (Array.isArray(jsonValue)) {
-					// Already an array (some drivers auto-parse)
 					parsed = jsonValue;
 				} else if (jsonValue === null || jsonValue === undefined) {
 					parsed = info.isToOne ? null : [];
 				} else {
-					// Unknown format, use as-is
 					parsed = jsonValue;
 				}
 
 				// STRAT-SIMPLIFY: For to-one relations, unwrap array to single object
 				if (info.isToOne && Array.isArray(parsed)) {
-					// Return first element or null if empty
 					parsed = parsed.length > 0 ? parsed[0] : null;
 				}
 
-				// Set the relation property and remove the JSON column
-				record[relationName] = parsed;
+				// Set property using includeAlias (user-facing name, e.g., 'posts')
+				// and remove the raw JSON column
+				const outputKey = info.includeAlias ?? relationName;
+				record[outputKey] = parsed;
 				delete record[actualColumnName];
 			}
 		}

@@ -174,6 +174,10 @@ export interface SubqueryIncludeInfo {
 	/** FK in junction table pointing to target (e.g., 'tagId') */
 	readonly throughTargetKey?: string;
 
+	// --- Relation metadata ---
+	/** Relation type for to-one unwrapping (belongsTo/hasOne → single object) */
+	readonly relationType?: string;
+
 	// --- Subquery optimization (NQL-ALIGN Block 5) ---
 	/** Source/parent table name for subquery optimization */
 	readonly sourceTable?: string;
