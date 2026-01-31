@@ -291,7 +291,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 16
 success: true
-sql.equals: SELECT categories.* FROM ch6_pimdam.categories WHERE categories."parent.name" = $1
+sql.equals: SELECT categories.* FROM ch6_pimdam.categories WHERE EXISTS (SELECT 1 FROM ch6_pimdam.categories AS parent WHERE parent.id = categories.parent_id AND parent.name = $1)
 params.equals: ["Electronics"]
 db.rows.equals: 3
 db.output:
@@ -306,7 +306,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 17
 success: true
-sql.equals: SELECT categories.* FROM ch6_pimdam.categories WHERE categories."parent.name" = $1
+sql.equals: SELECT categories.* FROM ch6_pimdam.categories WHERE EXISTS (SELECT 1 FROM ch6_pimdam.categories AS parent WHERE parent.id = categories.parent_id AND parent.name = $1)
 params.equals: ["Phones"]
 db.rows.equals: 2
 db.output:
@@ -320,7 +320,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 18
 success: true
-sql.equals: SELECT categories.* FROM ch6_pimdam.categories WHERE categories."parent.id" = $1
+sql.equals: SELECT categories.* FROM ch6_pimdam.categories WHERE EXISTS (SELECT 1 FROM ch6_pimdam.categories AS parent WHERE parent.id = categories.parent_id AND parent.id = $1)
 params.equals: [1]
 db.rows.equals: 3
 db.output:
