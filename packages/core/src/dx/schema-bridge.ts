@@ -403,17 +403,20 @@ function buildTableIRFromDefinition(
 		}
 	}
 
-	// Determine primary key - fallback to 'id' if not defined
-	let primaryKey: string | readonly string[];
-	if (primaryKeys.length === 0) {
-		// Fallback: check if 'id' column exists, otherwise use first column
-		const hasId = columns.some((c) => c.name === 'id');
-		primaryKey = hasId ? 'id' : (columns[0]?.name ?? 'id');
-	} else if (primaryKeys.length === 1) {
-		// TypeScript needs explicit type assertion here
-		primaryKey = primaryKeys[0] as string;
+	// Determine PK: explicit > composite FK > 'id' column > omit
+	let primaryKey: string | readonly string[] | undefined;
+	if (primaryKeys.length > 0) {
+		primaryKey =
+			primaryKeys.length === 1 ? (primaryKeys[0] as string) : primaryKeys;
 	} else {
-		primaryKey = primaryKeys;
+		// No explicit PK — infer from FK columns or 'id'
+		const fkColumns = foreignKeys.flatMap((fk) => fk.columns);
+		if (fkColumns.length > 0) {
+			primaryKey = fkColumns.length === 1 ? fkColumns[0] : fkColumns;
+		} else {
+			const hasId = columns.some((c) => c.name === 'id');
+			primaryKey = hasId ? 'id' : undefined;
+		}
 	}
 
 	// Freeze columns array for runtime immutability
@@ -423,7 +426,7 @@ function buildTableIRFromDefinition(
 	return Object.freeze({
 		name: tableName,
 		columns: frozenColumns,
-		primaryKey,
+		...(primaryKey !== undefined ? { primaryKey } : {}),
 		foreignKeys: Object.freeze(foreignKeys),
 		indexes: Object.freeze(indexes),
 		...(pseudoColumns.length > 0 && {
