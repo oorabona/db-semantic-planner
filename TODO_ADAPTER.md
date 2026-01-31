@@ -234,7 +234,7 @@ eb(eb.ref('prev.path'), '||', eb.ref('node.${traversal.nodeId}')).as('path')
   - Operators: && (overlaps), @> (contains), <@ (containedBy)
 - [x] Integration in `addSimpleWhere()` (4 switch cases)
 - [x] Helper functions: `isRangeValue()`, `buildRangeLiteral()`
-- [ ] Extend DialectCapabilities with `supportsRangeTypes` (TODO: future, not blocking)
+- [x] ✅ Extend DialectCapabilities with `supportsRangeTypes` — already in core/dialects (all 5 dialects)
 - [x] Unit tests in core (5 tests for DX helpers)
 
 ### P3-D: FOR UPDATE SKIP LOCKED (Job Queue pattern)
