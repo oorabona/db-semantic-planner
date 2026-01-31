@@ -403,4 +403,140 @@ describe('generateSchemaFile', () => {
 			expect(result).toContain('Review before using in production.');
 		});
 	});
+
+	describe('dbCasing option', () => {
+		it('converts snake_case column names to camelCase when dbCasing is snake_case', () => {
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					first_name: 'string',
+					last_name: 'string',
+					created_at: 'datetime',
+				},
+			}).model;
+
+			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+
+			expect(result).toContain('firstName:');
+			expect(result).toContain('lastName:');
+			expect(result).toContain('createdAt:');
+			// Original snake_case names should NOT appear as keys
+			expect(result).not.toMatch(/\tfirst_name:/);
+			expect(result).not.toMatch(/\tlast_name:/);
+			expect(result).not.toMatch(/\tcreated_at:/);
+		});
+
+		it('converts FK column names to camelCase', () => {
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					author_id: ref('users'),
+				},
+			}).model;
+
+			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+
+			expect(result).toContain("authorId: ref('users')");
+			expect(result).not.toMatch(/\tauthor_id:/);
+		});
+
+		it('preserves column names when dbCasing is preserve', () => {
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					first_name: 'string',
+				},
+			}).model;
+
+			const result = generateSchemaFile(model, { dbCasing: 'preserve' });
+
+			expect(result).toContain('first_name:');
+			expect(result).not.toContain('firstName:');
+		});
+
+		it('preserves column names when dbCasing is not set', () => {
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					first_name: 'string',
+				},
+			}).model;
+
+			const result = generateSchemaFile(model);
+
+			expect(result).toContain('first_name:');
+		});
+
+		it('exports dbCasing constant when snake_case', () => {
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+			}).model;
+
+			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+
+			expect(result).toContain(
+				"export const dbCasing = 'snake_case' as const;",
+			);
+		});
+
+		it('adds adapter import when dbCasing is set', () => {
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+			}).model;
+
+			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+
+			expect(result).toContain(
+				"import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';",
+			);
+		});
+
+		it('does not export dbCasing when preserve', () => {
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+			}).model;
+
+			const result = generateSchemaFile(model, { dbCasing: 'preserve' });
+
+			expect(result).not.toContain('export const dbCasing');
+		});
+
+		it('includes usage hint with dbCasing in example', () => {
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+			}).model;
+
+			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+
+			expect(result).toContain("dbCasing: 'snake_case'");
+			expect(result).toContain('createPgsqlAdapter(pool');
+		});
+
+		it('keeps table names unchanged (they are DB identifiers)', () => {
+			const model = schema({
+				user_profiles: {
+					id: { type: 'uuid', primaryKey: true },
+					display_name: 'string',
+				},
+			}).model;
+
+			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+
+			// Table name stays snake_case
+			expect(result).toContain('user_profiles: {');
+			// Column name becomes camelCase
+			expect(result).toContain('displayName:');
+		});
+	});
 });

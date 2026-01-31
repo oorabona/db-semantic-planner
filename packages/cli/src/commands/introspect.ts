@@ -45,6 +45,11 @@ export const introspectCommand = new Command('introspect')
 	)
 	.option('--include <patterns>', 'Tables to include (comma-separated)')
 	.option('--no-db-type-comments', 'Omit original DB type comments')
+	.option(
+		'--db-casing <casing>',
+		'Database column casing (snake_case → camelCase in generated code)',
+		'snake_case',
+	)
 	.action(
 		async (options: {
 			db: string;
@@ -53,6 +58,7 @@ export const introspectCommand = new Command('introspect')
 			exclude: string;
 			include?: string;
 			dbTypeComments: boolean;
+			dbCasing: 'snake_case' | 'camelCase' | 'preserve';
 		}) => {
 			// Redact password in URL for logging
 			const redactedUrl = options.db.replace(/:[^:@]+@/, ':***@');
@@ -69,28 +75,46 @@ export const introspectCommand = new Command('introspect')
 				const { pool } = await createDbConnection(options.db);
 
 				try {
-					// Import adapter from adapter-pgsql
-					const { createPgsqlAdapter } = await import('@dbsp/adapter-pgsql');
-					const adapter = createPgsqlAdapter(pool, {
-						...(options.schemaName ? { schemaName: options.schemaName } : {}),
-					});
+					// Import introspect from adapter-pgsql
+					const { introspect } = await import('@dbsp/adapter-pgsql');
 
-					// Introspect the database (Phase 4 — may throw "Not implemented")
-					const model = await adapter.introspect();
+					// Build introspection options from CLI flags
+					const excludePatterns = options.exclude
+						? options.exclude.split(',').map((s) => s.trim())
+						: undefined;
+					const includePatterns = options.include
+						? options.include.split(',').map((s) => s.trim())
+						: undefined;
+
+					// Introspect the database directly (returns IntrospectedModelIR)
+					const model = await introspect(pool, {
+						schema: options.schemaName,
+						...(excludePatterns ? { exclude: excludePatterns } : {}),
+						...(includePatterns ? { include: includePatterns } : {}),
+					});
 
 					// Report what we found
 					const tableCount = model.tables.size;
 					const relationCount = model.relations.size;
+					const hierarchyCount = model.hierarchies?.length ?? 0;
 
 					console.log(
-						`📊 Found ${tableCount} tables, ${relationCount} relations`,
+						`📊 Found ${tableCount} tables, ${relationCount} relations, ${hierarchyCount} hierarchies`,
 					);
+					if (model.warnings?.length) {
+						for (const w of model.warnings) {
+							console.log(`   ⚠️  ${w}`);
+						}
+					}
 					console.log('');
 
-					// Generate schema file
+					// Generate schema file — pass metadata from introspection
 					const codegenOptions: SchemaCodegenOptions = {
 						sourceUrl: options.db,
 						includeDbTypeComments: options.dbTypeComments,
+						warnings: model.warnings,
+						introspectedAt: model.introspectedAt,
+						dbCasing: options.dbCasing,
 					};
 
 					const schemaCode = generateSchemaFile(model, codegenOptions);
