@@ -4,14 +4,6 @@
  * Runs assertions against query results and collects pass/fail outcomes.
  */
 
-import type {
-	Assertion,
-	AssertionBlock,
-	AssertionType,
-	TableAssertionData,
-} from './assertion-parser.js';
-import { resolveQueryIndex } from './assertion-parser.js';
-import type { BatchResult } from './batch.js';
 import {
 	assertContains,
 	assertDbColumnExists,
@@ -38,6 +30,14 @@ import {
 	assertSQLTable,
 	assertSuccess,
 } from './assertion-functions.js';
+import type {
+	Assertion,
+	AssertionBlock,
+	AssertionType,
+	TableAssertionData,
+} from './assertion-parser.js';
+import { resolveQueryIndex } from './assertion-parser.js';
+import type { BatchResult } from './batch.js';
 
 // Re-export normalizeSQL from assertion-functions (public API)
 export { normalizeSQL } from './assertion-functions.js';
