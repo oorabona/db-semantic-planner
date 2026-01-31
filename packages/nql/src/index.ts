@@ -202,6 +202,5 @@ export function compile(
  * Format NQL AST as canonical string
  */
 export function format(_ast: NqlProgram): string {
-	// TODO: Implement in Block 6
-	throw new Error('Not implemented yet - see Block 6');
+	throw new Error('Not implemented yet — NQL formatter is deferred');
 }

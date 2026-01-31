@@ -578,8 +578,7 @@ export class DeleteBuilder<T = void> {
 			});
 		}
 
-		// TODO: Implement cascade delete logic (multiple statements)
-		// For now, just execute the single delete
+		// Cascade delete (multi-statement) deferred — single delete for now
 		const intent = this.buildIntent();
 		const compileOptions = this.schemaName
 			? { schemaName: this.schemaName }

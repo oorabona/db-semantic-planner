@@ -509,8 +509,8 @@ function convertWhereCondition(
 		}
 
 		// Subquery: { kind: 'subquery', ... }
+		// Requires WhereSubqueryExistsIntent (see TODO_NQL.md)
 		case 'subquery':
-			// TODO: Handle subquery conditions
 			return null;
 
 		default:

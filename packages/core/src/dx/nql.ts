@@ -156,9 +156,8 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			throw new Error(`NQL compilation failed: ${errors}`);
 		}
 
-		// Type assertion: NQL's QueryIntent is structurally compatible with core's QueryIntent
-		// The types are defined separately but have the same structure.
-		// TODO: Unify types by having NQL import from core (ARCH issue)
+		// Type assertion: NQL imports QueryIntent from @dbsp/types (ARCH-007),
+		// structurally identical to core's re-export.
 		this._intent = result.ast.query as QueryIntent;
 		return this._intent;
 	}
