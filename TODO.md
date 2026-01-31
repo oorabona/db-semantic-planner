@@ -40,6 +40,7 @@
 | PostgreSQL Native Adapter Phase 1 (ADAPTER-PGSQL-FULL-FORWARD) | adapter-pgsql | ✅ Complete (2026-01-29) |
 | E2E Assertion Tables (db.output: full columns) | cli, examples | ✅ Complete (2026-01-30) |
 | Sunset adapter-kysely (PGSQL-SUNSET) | adapter-pgsql, cli, testkit | ✅ Complete (2026-01-30) |
+| PGSQL Phase 1 Compiler Bugs (PGSQL-PHASE1) | adapter-pgsql | ✅ Complete (2026-01-31) |
 
 ## Scope-Specific Backlogs
 
@@ -80,6 +81,39 @@ FROM "posts" AS "posts"
 3. Deduplicate in the compiler's main orchestration loop
 
 **Affected queries:** Any `table | select *, relation.* | flat` pattern
+
+---
+
+## ✅ COMPLETED: PGSQL Phase 1 Compiler Bugs (PGSQL-PHASE1) (2026-01-31)
+
+**Priority:** HIGH | **Effort:** M (~4h) | **Breaking:** No
+**Scope:** adapter-pgsql (compiler, pgsql-adapter)
+
+Fixed 3 categories of compiler bugs in the PostgreSQL native adapter:
+
+### Changes
+- **LATERAL schema qualification:** Removed erroneous `ctx.schema` from `columnRef()` calls inside LATERAL/json_agg/left-join subqueries (13 fixes across 4 include handlers). Inner aliases must not be schema-qualified.
+- **relationFilter matcher:** Added `kind === 'relationFilter'` to `findExistsIntents()` so relation-path filters produce correct EXISTS conditions.
+- **JoinExpr alias wrapping:** Fixed missing alias on JoinExpr nodes that masked the root table ref.
+- **Dotted-field → EXISTS:** New `convertDottedFieldsToExists()` detects `parent.name` fields, resolves relations via ModelIR, and converts to proper EXISTS subqueries with correct FK direction for belongsTo/hasMany.
+- **Self-referential EXISTS aliasing:** When target === source table, inner table gets aliased to avoid ambiguous column refs.
+- **json_agg filter propagation:** Cross-references EXISTS decisions with json_agg decisions to propagate filter conditions into both subqueries.
+
+### Tests
+- 462 unit tests pass
+- 280 E2E tests pass (742 total)
+
+---
+
+## 📋 BACKLOG: JSDoc @example Tags for New Methods (DX-042)
+
+**Priority:** LOW | **Effort:** S (~30min) | **Breaking:** No
+**Scope:** adapter-pgsql
+
+Add JSDoc `@example` tags to new public/internal methods introduced in PGSQL-PHASE1:
+- `convertDottedFieldsToExists()` in pgsql-adapter.ts
+- `rewriteConditionTable()` in compiler.ts
+- `compileExistsCondition()` in compiler.ts
 
 ---
 

@@ -351,6 +351,19 @@ export class PlanCompiler {
 							);
 						}
 
+						// Merge filter conditions if present (relation filter propagation)
+						// Rewrite table references to __t__ (json_agg inner alias)
+						if (
+							decision.conditions &&
+							(decision.conditions as PlanDecision[]).length > 0
+						) {
+							const condNodes = (decision.conditions as PlanDecision[]).map(
+								(c) =>
+									this.compileCondition(this.rewriteConditionTable(c, '__t__')),
+							);
+							whereExpr = andExpr(whereExpr, ...condNodes);
+						}
+
 						// Build the json_agg subquery SELECT
 						// Alias must use {relation}_json pattern for hydration-utils.ts detection
 						targetList.push(
@@ -857,6 +870,33 @@ export class PlanCompiler {
 	}
 
 	/**
+	 * Recursively rewrite the `table` field in a PlanDecision tree.
+	 * Used for json_agg filter conditions that need to reference the inner alias (__t__).
+	 */
+	private rewriteConditionTable(
+		decision: PlanDecision,
+		newTable: string,
+	): PlanDecision {
+		if (
+			(decision.type === 'whereAnd' ||
+				decision.type === 'whereOr' ||
+				decision.type === 'whereNot') &&
+			decision.conditions
+		) {
+			return {
+				...decision,
+				conditions: (decision.conditions as PlanDecision[]).map((c) =>
+					this.rewriteConditionTable(c, newTable),
+				),
+			} as PlanDecision;
+		}
+		if (decision.table) {
+			return { ...decision, table: newTable } as PlanDecision;
+		}
+		return decision;
+	}
+
+	/**
 	 * Compile an EXISTS or NOT EXISTS subquery condition.
 	 * EXISTS (SELECT 1 FROM targetTable WHERE fk = source.pk [AND conditions])
 	 *
@@ -871,13 +911,21 @@ export class PlanCompiler {
 
 		const sourceTable = this.currentRootTable;
 
-		// Build SELECT 1 FROM targetTable (no alias - conditions reference table name directly)
+		// For self-referential relations (target === source), alias the inner table
+		// to avoid ambiguous column references (e.g., categories.parent_id = categories.id)
+		const needsAlias = targetTable === sourceTable;
+		const innerAlias = needsAlias
+			? decision.relationName || `${targetTable}_1`
+			: undefined;
+		const innerRef = innerAlias || targetTable;
+
+		// Build SELECT 1 FROM targetTable [AS alias]
 		const targetList: Node[] = [
 			{ ResTarget: { val: { A_Const: { ival: { ival: 1 } } } } },
 		];
 
 		const fromClause: Node[] = [
-			rangeVar(targetTable, undefined, this.schema, this.naming),
+			rangeVar(targetTable, innerAlias, this.schema, this.naming),
 		];
 
 		// Build FK correlation condition
@@ -888,18 +936,33 @@ export class PlanCompiler {
 				? decision.foreignKey
 				: decision.foreignKey[0]
 			: this.deriveFK(sourceTable);
-		const fkCorrelation = eqExpr(
-			columnRef(fkColumn, targetTable, undefined, this.naming),
-			columnRef('id', sourceTable, undefined, this.naming),
-		);
+
+		// For belongsTo: FK is in source (outer), PK is in target (inner)
+		// e.g., categories.parent_id = parent.id
+		// For hasMany/hasOne (default): FK is in target (inner), PK is in source (outer)
+		// e.g., posts.author_id = authors.id
+		const fkCorrelation =
+			decision.relationType === 'belongsTo'
+				? eqExpr(
+						columnRef('id', innerRef, undefined, this.naming),
+						columnRef(fkColumn, sourceTable, undefined, this.naming),
+					)
+				: eqExpr(
+						columnRef(fkColumn, innerRef, undefined, this.naming),
+						columnRef('id', sourceTable, undefined, this.naming),
+					);
 
 		// Build WHERE clause: FK correlation AND user conditions
 		let whereClause: Node = fkCorrelation;
 
 		if (decision.conditions && decision.conditions.length > 0) {
-			const condNodes = decision.conditions.map((c) =>
-				this.compileCondition(c as PlanDecision),
-			);
+			// Rewrite condition table references to use inner alias if needed
+			const conditions = innerAlias
+				? (decision.conditions as PlanDecision[]).map((c) =>
+						this.rewriteConditionTable(c, innerRef),
+					)
+				: (decision.conditions as PlanDecision[]);
+			const condNodes = conditions.map((c) => this.compileCondition(c));
 			// Combine FK correlation with user conditions using AND
 			whereClause = andExpr(fkCorrelation, ...condNodes);
 		}

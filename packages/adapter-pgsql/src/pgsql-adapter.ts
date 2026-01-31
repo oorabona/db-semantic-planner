@@ -522,6 +522,85 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 	}
 
+	/**
+	 * Convert dotted-field comparisons (e.g., "parent.name") to EXISTS subqueries.
+	 * NQL compiles `parent.name = 'Electronics'` as a comparison with field "parent.name",
+	 * but this refers to a relation traversal, not a literal column.
+	 * Uses the model to resolve the relation and target table.
+	 */
+	private convertDottedFieldsToExists(
+		decisions: PlanDecision[],
+		rootTable: string,
+		model: ModelIR,
+	): PlanDecision[] {
+		return decisions.map((d) => {
+			// Recurse into compound conditions
+			if (
+				(d.type === 'whereAnd' ||
+					d.type === 'whereOr' ||
+					d.type === 'whereNot') &&
+				d.conditions
+			) {
+				return {
+					...d,
+					conditions: this.convertDottedFieldsToExists(
+						d.conditions as PlanDecision[],
+						rootTable,
+						model,
+					),
+				};
+			}
+
+			// Only handle 'where' comparisons with dotted column
+			if (
+				d.type !== 'where' ||
+				!d.column ||
+				typeof d.column !== 'string' ||
+				!d.column.includes('.')
+			)
+				return d;
+
+			// Split: "parent.name" → ["parent", "name"]
+			const dotIndex = d.column.indexOf('.');
+			const relationName = d.column.substring(0, dotIndex);
+			const targetColumn = d.column.substring(dotIndex + 1);
+
+			// Resolve relation from model
+			const rel = model.getRelation(`${rootTable}.${relationName}`);
+			if (!rel) return d; // No matching relation — leave as-is
+
+			const foreignKey =
+				typeof rel.foreignKey === 'string'
+					? rel.foreignKey
+					: rel.foreignKey?.[0];
+
+			// Convert to EXISTS subquery
+			// Include relationType so compiler knows FK direction
+			const relationType = rel.type as
+				| 'belongsTo'
+				| 'hasMany'
+				| 'hasOne'
+				| undefined;
+			return {
+				type: 'where',
+				operator: 'exists',
+				targetTable: rel.target,
+				relationName,
+				...(foreignKey && { foreignKey }),
+				...(relationType && { relationType }),
+				conditions: [
+					{
+						type: 'where',
+						column: targetColumn,
+						operator: d.operator,
+						value: d.value,
+						table: rel.target,
+					},
+				],
+			} as PlanDecision;
+		});
+	}
+
 	// =========================================================================
 	// CompilingAdapter Methods
 	// =========================================================================
@@ -559,6 +638,17 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					),
 			);
 
+			// Convert dotted-field comparisons (e.g., "parent.name") to EXISTS subqueries
+			// NQL compiles relation-path filters as plain comparisons with dotted field names
+			const resolvedModel = options?.model ?? this.model;
+			if (resolvedModel) {
+				decisions = this.convertDottedFieldsToExists(
+					decisions,
+					plan.rootTable,
+					resolvedModel,
+				);
+			}
+
 			// Add correct EXISTS decisions from planner's filter-strategy decisions
 			// (they have the actual target table in context.target)
 			const existsDecisions = this.extractExistsDecisions(plan, options?.model);
@@ -571,10 +661,34 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const leftJoinIncludeDecisions =
 				this.extractLeftJoinIncludeDecisions(plan);
 
+			// Propagate filter conditions from EXISTS to matching json_agg decisions
+			// When a relation is both filtered and included, the filter should appear
+			// in both the EXISTS subquery AND the json_agg subquery
+			const enrichedJsonAggDecisions = jsonAggDecisions.map((jd) => {
+				if (jd.type !== 'selectJsonAgg' || !jd.relationName) return jd;
+
+				// Check planner-derived EXISTS decisions
+				// Match by relationName OR targetTable (planner may resolve aliases differently)
+				const matchingExists = existsDecisions.find(
+					(ed) =>
+						ed.type === 'where' &&
+						(ed.operator === 'exists' || ed.operator === 'notExists') &&
+						(ed.relationName === jd.relationName ||
+							ed.targetTable === jd.targetTable) &&
+						ed.conditions &&
+						(ed.conditions as PlanDecision[]).length > 0,
+				);
+
+				if (matchingExists?.conditions) {
+					return { ...jd, conditions: matchingExists.conditions };
+				}
+				return jd;
+			});
+
 			const allDecisions = [
 				...decisions,
 				...existsDecisions,
-				...jsonAggDecisions,
+				...enrichedJsonAggDecisions,
 				...leftJoinIncludeDecisions,
 			];
 
