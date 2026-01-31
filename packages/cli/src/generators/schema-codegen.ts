@@ -239,10 +239,11 @@ function generateTableCode(
 	}
 
 	const columnLines = table.columns.map((col) => {
-		const isPrimaryKey =
-			typeof table.primaryKey === 'string'
+		const isPrimaryKey = table.primaryKey
+			? typeof table.primaryKey === 'string'
 				? col.name === table.primaryKey
-				: table.primaryKey.includes(col.name);
+				: table.primaryKey.includes(col.name)
+			: false;
 		const fkInfo = fkMap.get(col.name);
 		const code = generateColumnCode(col, isPrimaryKey, fkInfo, options);
 		return `\t\t${col.name}: ${code}`;
