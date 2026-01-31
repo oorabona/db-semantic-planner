@@ -291,7 +291,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}> => {
 			if (!where || typeof where !== 'object') return [];
 			const w = where as Record<string, unknown>;
-			if (w.kind === 'exists' || w.kind === 'notExists') {
+			if (
+				w.kind === 'exists' ||
+				w.kind === 'notExists' ||
+				w.kind === 'relationFilter'
+			) {
 				return [
 					w as {
 						kind: 'exists' | 'notExists';

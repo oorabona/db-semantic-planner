@@ -28,7 +28,7 @@ function buildCteTargets(
 	if (columns && columns.length > 0) {
 		return columns.map((col) => ({
 			ResTarget: {
-				val: columnRef(col, alias, ctx.schema, ctx.naming),
+				val: columnRef(col, alias, undefined, ctx.naming),
 				name: ctx.naming.toDatabase(col),
 			},
 		}));
@@ -130,8 +130,8 @@ function buildCteJoin(
 ): Node {
 	// Join condition: source.fk = cte.pk
 	const joinCondition = eqExpr(
-		columnRef(sourceColumn, sourceAlias, ctx.schema, ctx.naming),
-		columnRef(targetColumn, cteAlias, ctx.schema, ctx.naming),
+		columnRef(sourceColumn, sourceAlias, undefined, ctx.naming),
+		columnRef(targetColumn, cteAlias, undefined, ctx.naming),
 	);
 
 	// Reference the CTE as if it were a table

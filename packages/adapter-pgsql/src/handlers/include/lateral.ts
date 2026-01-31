@@ -28,7 +28,7 @@ function buildLateralTargets(
 	if (columns && columns.length > 0) {
 		return columns.map((col) => ({
 			ResTarget: {
-				val: columnRef(col, alias, ctx.schema, ctx.naming),
+				val: columnRef(col, alias, undefined, ctx.naming),
 			},
 		}));
 	}
@@ -66,8 +66,8 @@ function buildLateralSubquery(
 	// Build the correlation condition
 	// LATERAL can reference outer columns directly
 	const whereClause = eqExpr(
-		columnRef(targetColumn, innerAlias, ctx.schema, ctx.naming),
-		columnRef(sourceColumn, outerAlias, ctx.schema, ctx.naming),
+		columnRef(targetColumn, innerAlias, undefined, ctx.naming),
+		columnRef(sourceColumn, outerAlias, undefined, ctx.naming),
 	);
 
 	// Build target list
