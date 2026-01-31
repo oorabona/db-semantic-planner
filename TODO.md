@@ -85,15 +85,14 @@ Fixed 3 categories of compiler bugs in the PostgreSQL native adapter:
 
 ---
 
-## 📋 BACKLOG: JSDoc @example Tags for New Methods (DX-042)
+## ✅ COMPLETED: JSDoc @example Tags for New Methods (DX-042) (2026-01-31)
 
 **Priority:** LOW | **Effort:** S (~30min) | **Breaking:** No
 **Scope:** adapter-pgsql
 
-Add JSDoc `@example` tags to new public/internal methods introduced in PGSQL-PHASE1:
-- `convertDottedFieldsToExists()` in pgsql-adapter.ts
-- `rewriteConditionTable()` in compiler.ts
-- `compileExistsCondition()` in compiler.ts
+- [x] ✅ `convertDottedFieldsToExists()` in pgsql-adapter.ts (2026-01-31)
+- [x] ✅ `rewriteConditionTable()` in compiler.ts (2026-01-31)
+- [x] ✅ `compileExistsCondition()` in compiler.ts (2026-01-31)
 
 ---
 
@@ -551,35 +550,18 @@ Add `--output` as alias for existing `--out` option for better discoverability.
 
 ---
 
-### CORE-005: ResolvedSchema → GeneratedSchema Converter
+### ✅ CORE-005: ResolvedSchema → GeneratedSchema Converter (2026-01-31)
 
 **Priority:** HIGH | **Effort:** S (~2h) | **Breaking:** No
 **Scope:** core
 **Validation:** Valibot
 
-Secure the REPL by replacing unsafe cast with proper type-safe conversion.
-
-**Problem:**
-```typescript
-// packages/cli/src/repl/query-executor.ts:87-88 — UNSAFE!
-const orm = createOrm<any>({
-  schema: schema as unknown as GeneratedSchema,
-  adapter: createMockAdapter(),
-});
-```
-
-**Solution:**
-- [ ] Create `resolvedSchemaToGeneratedSchema()` function in schema-bridge.ts
-- [ ] Add Valibot schema for validation
-- [ ] Handle type mapping (ResolvedColumn → GeneratedColumn)
-- [ ] Handle relation mapping (ResolvedRelation → GeneratedRelation)
-- [ ] Update query-executor.ts to use the converter
-- [ ] Add tests for conversion edge cases
-
-**Files to modify:**
-- `packages/core/src/dx/schema-bridge.ts` - Add converter function
-- `packages/cli/src/repl/query-executor.ts` - Use converter
-- `packages/core/src/dx/schema-bridge.test.ts` - Add tests
+- [x] ✅ `resolvedSchemaToGeneratedSchema()` in schema-bridge.ts (with Valibot validation)
+- [x] ✅ `assertResolvedSchemaToGeneratedSchema()` throwing variant
+- [x] ✅ Type mapping (SchemaColumnType → GeneratedColumnType)
+- [x] ✅ Relation mapping + hints + conventions
+- [x] ✅ REPL uses `assertResolvedSchemaToGeneratedSchema()` (unsafe cast removed)
+- [x] ✅ Tests in schema-bridge.test.ts
 
 ---
 
