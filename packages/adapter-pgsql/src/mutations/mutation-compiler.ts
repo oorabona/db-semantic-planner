@@ -29,6 +29,29 @@ import type {
 } from '../handlers/types.js';
 
 // ============================================================================
+// Shared Helpers
+// ============================================================================
+
+/**
+ * Build RETURNING clause AST nodes from column names.
+ * Shared across INSERT, UPDATE, DELETE, UPSERT, and INSERT FROM.
+ */
+export function buildReturningList(
+	columns: readonly string[] | undefined,
+	tableRef: string,
+	ctx: CompilerContext,
+): Node[] | undefined {
+	if (!columns || columns.length === 0) return undefined;
+	const { naming } = ctx;
+	return columns.map((col) =>
+		resTarget(
+			columnRef(col, tableRef, ctx.schema, naming),
+			naming.toDatabase(col),
+		),
+	);
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -114,15 +137,7 @@ export function compileInsert(
 	);
 
 	// Build RETURNING clause if specified
-	let returningList: Node[] | undefined;
-	if (config.returning && config.returning.length > 0) {
-		returningList = config.returning.map((col) =>
-			resTarget(
-				columnRef(col, dbTable, ctx.schema, naming),
-				naming.toDatabase(col),
-			),
-		);
-	}
+	const returningList = buildReturningList(config.returning, dbTable, ctx);
 
 	// Build INSERT statement using helper
 	// Use spread to conditionally include optional properties (exactOptionalPropertyTypes)
@@ -179,15 +194,7 @@ export function compileUpdate(
 	}
 
 	// Build RETURNING clause if specified
-	let returningList: Node[] | undefined;
-	if (config.returning && config.returning.length > 0) {
-		returningList = config.returning.map((col) =>
-			resTarget(
-				columnRef(col, tableAlias, ctx.schema, naming),
-				naming.toDatabase(col),
-			),
-		);
-	}
+	const returningList = buildReturningList(config.returning, tableAlias, ctx);
 
 	// Build UPDATE statement (exactOptionalPropertyTypes compatible)
 	const options: UpdateOptions = {
@@ -235,15 +242,7 @@ export function compileDelete(
 	}
 
 	// Build RETURNING clause if specified
-	let returningList: Node[] | undefined;
-	if (config.returning && config.returning.length > 0) {
-		returningList = config.returning.map((col) =>
-			resTarget(
-				columnRef(col, tableAlias, ctx.schema, naming),
-				naming.toDatabase(col),
-			),
-		);
-	}
+	const returningList = buildReturningList(config.returning, tableAlias, ctx);
 
 	// Build DELETE statement (exactOptionalPropertyTypes compatible)
 	const options: DeleteOptions = {
@@ -347,15 +346,11 @@ export function compileInsertFrom(
 	};
 
 	// Build RETURNING clause for INSERT if specified
-	let returningList: Node[] | undefined;
-	if (config.returning && config.returning.length > 0) {
-		returningList = config.returning.map((col) =>
-			resTarget(
-				columnRef(col, config.targetTable, ctx.schema, naming),
-				naming.toDatabase(col),
-			),
-		);
-	}
+	const returningList = buildReturningList(
+		config.returning,
+		config.targetTable,
+		ctx,
+	);
 
 	// Build INSERT statement with SELECT query
 	// Note: dbTargetTable is computed but table in options uses logical name

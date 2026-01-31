@@ -10,12 +10,13 @@
  */
 
 import type { InferClause, Node, OnConflictClause } from '@pgsql/types';
-import { columnRef, resTarget } from '../ast-helpers.js';
+import { columnRef } from '../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
 } from '../handlers/types.js';
+import { buildReturningList } from './mutation-compiler.js';
 
 // ============================================================================
 // Types
@@ -162,15 +163,7 @@ export function compileUpsert(
 	const onConflict = buildOnConflictClause(config, ctx, state);
 
 	// Build RETURNING clause if specified
-	let returningList: Node[] | undefined;
-	if (config.returning && config.returning.length > 0) {
-		returningList = config.returning.map((col) =>
-			resTarget(
-				columnRef(col, dbTable, ctx.schema, naming),
-				naming.toDatabase(col),
-			),
-		);
-	}
+	const returningList = buildReturningList(config.returning, dbTable, ctx);
 
 	// Build INSERT statement with ON CONFLICT
 	return {
