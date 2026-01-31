@@ -1,8 +1,8 @@
 # ARCH-006: Simplified ORM Entry Point
 
-**Status:** Draft
+**Status:** Canonical
 **Created:** 2026-01-26
-**Scope:** core, adapter-kysely
+**Scope:** core, adapter-pgsql
 **Breaking:** Yes
 **Effort:** L (~8h)
 **Dependencies:** ARCH-005 (Unified Schema API)

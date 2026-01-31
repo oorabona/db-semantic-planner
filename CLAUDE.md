@@ -13,7 +13,7 @@ Semantic query planning for databases - an intent-first approach that transforms
 - **Observable:** Every decision is inspectable via dump()
 - **Deterministic:** Same inputs always produce same SQL/plan
 - **Secure:** Identifier validation, parameter binding, no raw SQL exposure
-- **Native Adapter APIs:** ALWAYS use adapter primitives (e.g., Kysely's `eb.fn()`, `eb.ref()`, `eb.lit()`), NEVER raw SQL templates except for explicit user escape hatches (see Adapter Rules below)
+- **Native Adapter APIs:** ALWAYS use adapter primitives (parameterized queries, AST-based compilation), NEVER raw SQL templates except for explicit user escape hatches (see Adapter Rules below)
 
 ## Architecture: Ports & Adapters (ARCH-001)
 

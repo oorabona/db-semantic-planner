@@ -1,8 +1,10 @@
 # ARCH-002 v2: Codegen-First "One Ring" - Technical Specification
 
-> **Status:** CANONICAL  
-> **Brief:** [docs/briefs/ARCH-002-one-ring.md](../briefs/ARCH-002-one-ring.md)  
-> **Scope:** core, schema, cli, kysely
+> **Status:** CANONICAL
+> **Brief:** [docs/briefs/ARCH-002-one-ring.md](../briefs/ARCH-002-one-ring.md)
+> **Scope:** core, cli
+>
+> **Note (2026-01-31):** This spec was written when `packages/schema` existed as a separate package. Schema DSL has since been merged into `packages/core/src/dx/schema.ts` (see ADR-002). File paths below reflect the original design; the current implementation lives in core.
 
 ---
 

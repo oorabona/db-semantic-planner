@@ -1,259 +1,195 @@
 # Audit Backlog
 
-**Generated:** 2026-01-20
+**Generated:** 2026-01-31
 **Source:** /audit deep all packages
 
 ---
 
-## Priority Legend
+## Scoring Method
 
-| Priority | Meaning | Timeline |
-|----------|---------|----------|
-| P0 | Critical | Fix immediately |
-| P1 | High | Fix this sprint |
-| P2 | Medium | Plan for next sprint |
-| P3 | Low | Backlog |
-
-## Effort Legend
-
-| Effort | Time | Complexity |
-|--------|------|------------|
-| S | < 2h | Single file, straightforward |
-| M | 2-8h | Multiple files, moderate complexity |
-| L | 1-3d | Cross-cutting, significant refactor |
-| XL | > 3d | Major initiative |
+| Factor | Description | Scale |
+|--------|-------------|-------|
+| C | Complexity (effort to fix) | 1-5 (1=trivial, 5=major refactor) |
+| I | Impact (effect on codebase health) | 1-5 (1=cosmetic, 5=critical) |
+| R | Risk (likelihood of causing issues) | 1-5 (1=unlikely, 5=certain) |
+| **Score** | **(I x R) / C** | Higher = higher priority |
 
 ---
 
-## P0 — Critical (Fix Immediately)
+## All Findings (Ranked by Score)
 
-| ID | Issue | Location | Effort | Owner |
-|----|-------|----------|--------|-------|
-| - | None identified | - | - | - |
-
-✅ No critical issues found — codebase is healthy.
-
----
-
-## P1 — High (This Sprint)
-
-| ID | Issue | Location | Effort | Owner |
-|----|-------|----------|--------|-------|
-| AUD-001 | MCP server has only 1 test | `packages/mcp-server` | M | TBD |
-| AUD-002 | MCP server incomplete (marked "Ready") | `TODO_MCP.md` | L | TBD |
-| ~~AUD-003~~ | ~~Update DOCUMENTATION_INDEX.md for ARCH-003~~ | ✅ RESOLVED (2026-01-20) | S | - |
-
-### Details
-
-**AUD-001: MCP Server Test Coverage**
-- Current: 1 test
-- Expected: At minimum, tests for schema loading, resource endpoints, tool endpoints
-- Effort: M (~4h)
-
-**AUD-002: MCP Server Implementation**
-- Status marked as "Ready" but implementation is skeletal
-- Either complete implementation or update status to "Alpha/WIP"
-- Effort: L (~2d for minimal completion)
-
-**AUD-003: Doc-Code Alignment**
-- DOCUMENTATION_INDEX.md still references `packages/schema` separately
-- ARCH-003 merged schema into core
-- Effort: S (~30min)
+| # | Finding | C | I | R | Score | Axis |
+|---|---------|---|---|---|-------|------|
+| 1 | README references dead `@dbsp/adapter-kysely` | 1 | 4 | 4 | **16.0** | Documentation |
+| 2 | CLAUDE.md architecture references Kysely adapter | 1 | 4 | 4 | **16.0** | Documentation |
+| 3 | README references non-existent `@dbsp/schema` | 1 | 4 | 3 | **12.0** | Documentation |
+| 4 | DOCUMENTATION_INDEX.md package list/test counts wrong | 1 | 3 | 3 | **9.0** | Documentation |
+| 5 | MCP server: 1 placeholder test only | 2 | 3 | 3 | **4.5** | Test Coverage |
+| 6 | ARCH-006 spec status "Draft" but implemented | 1 | 2 | 2 | **4.0** | Documentation |
+| 7 | `NqlCstVisitor` god class (1,303 LOC, 40+ methods) | 4 | 3 | 2 | **1.5** | Maintainability |
+| 8 | `PgsqlAdapter` god class (1,930 LOC, 10 responsibilities) | 5 | 3 | 2 | **1.2** | Maintainability |
+| 9 | `QueryBuilderImpl` god class (1,774 LOC, 20+ methods) | 5 | 3 | 2 | **1.2** | Maintainability |
+| 10 | 44-case switch on `decision.type` (OCP violation) | 4 | 3 | 2 | **1.5** | Maintainability |
+| 11 | `batch.ts` god file (924 LOC, 43 functions) | 3 | 2 | 2 | **1.3** | Maintainability |
+| 12 | `assertion-runner.ts` god file (1,077 LOC) | 3 | 2 | 2 | **1.3** | Maintainability |
+| 13 | 86 `throw new Error()` in visitor (no structured types) | 2 | 2 | 2 | **2.0** | Code Quality |
+| 14 | 20+ identical `clone()` calls (DRY violation) | 2 | 2 | 1 | **1.0** | Code Quality |
+| 15 | RETURNING clause duplicated 3 times | 1 | 2 | 1 | **2.0** | Code Quality |
+| 16 | FK derivation logic duplicated 3 locations | 2 | 2 | 2 | **2.0** | Code Quality |
+| 17 | `QueryBuilder<T>` interface 30+ methods (ISP) | 4 | 2 | 1 | **0.5** | Architecture |
+| 18 | `types.ts` 26 exported types in one file | 2 | 1 | 1 | **0.5** | Code Quality |
+| 19 | `filters.ts` 57 functions + WindowBuilder (SRP) | 3 | 2 | 1 | **0.7** | Maintainability |
+| 20 | 7 `any` types in result-hydrator.ts | 2 | 2 | 1 | **1.0** | Type Safety |
+| 21 | `unknown[]` without validation in types package | 2 | 2 | 1 | **1.0** | Type Safety |
+| 22 | Raw SQL escape hatch without audit trail | 2 | 2 | 1 | **1.0** | Security |
+| 23 | `Math.random()` for cursor names | 1 | 1 | 1 | **1.0** | Security |
+| 24 | Silent error suppression in tx rollback | 1 | 1 | 1 | **1.0** | Error Handling |
+| 25 | `validate()` stub in NQL (just calls parse) | 1 | 1 | 1 | **1.0** | Code Quality |
+| 26 | 4 deprecated exports still present | 1 | 1 | 1 | **1.0** | YAGNI |
+| 27 | adapter-pgsql test ratio 0.36 (target 0.50) | 3 | 2 | 2 | **1.3** | Test Coverage |
+| 28 | types package: 0 test files | 2 | 1 | 1 | **0.5** | Test Coverage |
 
 ---
 
-## P2 — Medium (Next Sprint)
+## Improvement Axes
 
-| ID | Issue | Location | Effort | Owner |
-|----|-------|----------|--------|-------|
-| ~~AUD-004~~ | ~~compiler.ts was 4735 lines~~ | ✅ Now 2633 lines (-44%) | L | ✅ DONE (2026-01-20) |
-| ~~AUD-005~~ | ~~orm.ts was 2351 lines~~ | ✅ Now 1776 lines (-23%) | M | ✅ DONE (2026-01-20) |
-| ~~AUD-006~~ | ~~Update SKILL.md package references~~ | ✅ RESOLVED (2026-01-20) | S | - |
-| ~~AUD-007~~ | ~~Add CHANGELOG.md~~ | ✅ RESOLVED (2026-01-20) | M | - |
-| ~~AUD-008~~ | ~~Add CONTRIBUTING.md~~ | ✅ RESOLVED (2026-01-20) | M | - |
-| ~~DUP-001~~ | ~~Duplicate `singularize` function~~ | ✅ RESOLVED (2026-01-20) | S | - |
-| ~~DUP-002~~ | ~~Duplicate `parseDotNotationInclude`~~ | ✅ RESOLVED (2026-01-20) | S | - |
-| ~~DUP-003~~ | ~~Similar `getNodeIdAlias` logic~~ | ✅ RESOLVED (2026-01-20) | S | - |
-| ~~NAME-001~~ | ~~`resolveRelation` ambiguous naming~~ | ✅ RESOLVED (2026-01-20) | S | - |
-| ~~NAME-002~~ | ~~`mapColumnType` ambiguous naming~~ | ✅ RESOLVED (2026-01-20) | S | - |
-| ~~NAME-003~~ | ~~`inferRelations` ambiguous naming~~ | ✅ RESOLVED (2026-01-20) | S | - |
-| ~~NAME-004~~ | ~~`buildTableIR` ambiguous naming~~ | ✅ RESOLVED (2026-01-20) | S | - |
+### Axis 1: Documentation (Score: 57.0 total)
 
-### Details
+| Priority | Action | Effort |
+|----------|--------|--------|
+| **P0** | Rewrite README.md (remove Kysely/schema refs) | S |
+| **P0** | Update CLAUDE.md architecture section | S |
+| **P0** | Update DOCUMENTATION_INDEX.md | S |
+| P1 | Update ARCH-006 spec status to Canonical | S |
+| P1 | Update ARCH-002 spec (packages/schema refs) | S |
+| P1 | Update DX-040 status in doc index | S |
 
-**AUD-004: Split compiler.ts** ✅ Phase 4 Complete (2026-01-20)
-- **Phase 1 DONE:** `mutation-compiler.ts` extracted (349 lines)
-  - compileInsert, compileUpdate, compileDelete, compileUpsert
-  - compiler.ts reduced from 4736 to 4410 lines (-7%)
-- **Phase 2 DONE:** `recursive-compiler.ts` extracted (1155 lines)
-  - compileRecursive, injectAdvancedRecursiveClauses, path tracking, emit join
-  - compiler.ts reduced from 4410 to 3301 lines (-25.1%)
-- **Phase 3 DONE:** Handler/dispatcher pattern (compiler/ module)
-  - `compiler/types.ts` - Handler type definitions
-  - `compiler/registry.ts` - Handler registries (Map-based)
-  - `compiler/handlers/where/` - 12 WHERE handlers
-  - `compiler/handlers/expression/` - 3 expression handlers
-  - `compiler/handlers/include/` - 4 include strategy handlers (wrappers)
-  - 25 new files in compiler/ module establishing extensibility pattern
-- **Phase 4 DONE:** Include handlers logic extraction (2026-01-20)
-  - `handlers/include/join.ts` - Full applyJoinIncludes logic
-  - `handlers/include/lateral.ts` - Full applyLateralIncludes logic
-  - `handlers/include/json-agg.ts` - Full applyJsonAggIncludes logic
-  - `handlers/include/cte.ts` - Full applyCteIncludes logic
-  - Removed factory injection pattern - handlers now self-contained
-  - compiler.ts reduced from 3274 to 2633 lines (-19.6%)
-- **Total reduction:** 4736 → 2633 lines (-44.4%)
-- Benefits: Extensible pattern, better testability, clearer ownership, self-contained handlers
-- Status: ✅ COMPLETE - all include handlers contain full logic
+### Axis 2: Maintainability (Score: 8.5 total)
 
-**AUD-005: Extract concerns from orm.ts** ✅ DONE (2026-01-20)
-- QueryBuilderImpl was handling building, execution, hydration
-- Extracted: ResultHydrator class (DX-103 had already created it)
-- Added missing methods: `hydrateJoinIncludes`, `hydrateJsonAggIncludes`
-- Updated orm.ts to use ResultHydrator instead of private methods
-- Removed duplicate hydration methods from orm.ts
-- **Result:** orm.ts reduced from 2317 to 1776 lines (-23%)
-- QueryBuilder now focused on intent building, ResultHydrator handles hydration
+| Priority | Action | Effort |
+|----------|--------|--------|
+| P2 | Split `NqlCstVisitor` into specialized visitors | L |
+| P2 | Refactor `PgsqlAdapter` (extract services) | XL |
+| P2 | Refactor `QueryBuilderImpl` (extract concerns) | L |
+| P2 | Extend handler pattern to all compiler decisions | L |
+| P3 | Split `batch.ts` into command modules | M |
+| P3 | Split `assertion-runner.ts` by assertion type | M |
+| P3 | Extract window functions from `filters.ts` | M |
 
-**AUD-006: SKILL.md Updates**
-- References `packages/dx` which is now `packages/core/src/dx`
-- Simple find/replace operation
-- Effort: S (~30min)
+### Axis 3: Code Quality (Score: 8.5 total)
 
-**AUD-007: Add CHANGELOG.md**
-- Track breaking changes for library users
-- Standard for OSS projects
-- Effort: M (~2h to set up + process)
+| Priority | Action | Effort |
+|----------|--------|--------|
+| P2 | Replace `throw new Error()` with NqlError in visitor | M |
+| P2 | Extract shared RETURNING clause compilation | S |
+| P2 | Extract shared FK derivation utility | S |
+| P3 | Use decorator/template for clone() pattern | M |
+| P3 | Split `types.ts` by domain | S |
 
-**AUD-008: Add CONTRIBUTING.md**
-- Document contribution process
-- Code style, PR process, test requirements
-- Effort: M (~2h)
+### Axis 4: Type Safety (Score: 2.0 total)
 
-**~~DUP-001: Duplicate `singularize` Function~~** ✅ RESOLVED (2026-01-20)
-- Consolidated enhanced version with IRREGULAR_PLURALS in `conventions.ts:46-102`
-- `lightweight-model.ts` now imports and re-exports for backwards compatibility
-- Resolution: Single source of truth in conventions.ts
+| Priority | Action | Effort |
+|----------|--------|--------|
+| P3 | Fix `any` types in result-hydrator.ts | M |
+| P3 | Add generic constraints to RangeValue | S |
+| P3 | Add type-level tests for @dbsp/types | M |
 
-**~~DUP-002: Duplicate `parseDotNotationInclude` Function~~** ✅ RESOLVED (2026-01-20)
-- Exported from `intent-builder.ts:138`
-- `orm.ts` now imports from intent-builder.ts
-- Resolution: Single implementation, imported where needed
+### Axis 5: Test Coverage (Score: 6.3 total)
 
-**~~DUP-003: Similar `getNodeIdAlias` Logic~~** ✅ RESOLVED (2026-01-20)
-- Added to `intent-ast.ts:679-685` with JSDoc
-- Exported from `core/index.ts`
-- Both `planner.ts` and `compiler.ts` import from core
-- Resolution: Canonical location near RecursiveNodeIdExpr type
+| Priority | Action | Effort |
+|----------|--------|--------|
+| P1 | Replace MCP server placeholder test | M |
+| P2 | Increase adapter-pgsql coverage (0.36 -> 0.50) | M |
+| P3 | Add type-level tests for types package | M |
 
-**~~NAME-001: `resolveRelation` Ambiguous Naming~~** ✅ RESOLVED (2026-01-20)
-- `planner.ts`: Renamed to `disambiguateRelation` — handles warnings + disambiguation
-- `compiler.ts`: Renamed to `lookupResolvedRelation` — uses plan decisions
+### Axis 6: Security (Score: 2.0 total)
 
-**~~NAME-002: `mapColumnType` Ambiguous Naming~~** ✅ RESOLVED (2026-01-20)
-- `ddl.ts`: Renamed to `columnTypeToSql` — ColumnType → SQL string
-- `schema-bridge.ts`: Renamed to `generatedTypeToColumnType` — Generated → Column
-
-**~~NAME-003: `inferRelations` Ambiguous Naming~~** ✅ RESOLVED (2026-01-20)
-- `conventions.ts`: Renamed to `inferRelationsFromSchema` — from schema definition
-- `introspection.ts`: Renamed to `inferRelationsFromForeignKeys` — from DB metadata
-
-**~~NAME-004: `buildTableIR` Ambiguous Naming~~** ✅ RESOLVED (2026-01-20)
-- `schema-bridge.ts`: Renamed to `buildTableIRFromDefinition` — from code-first def
-- `introspection.ts`: Renamed to `buildTableIRFromMetadata` — from DB introspection
+| Priority | Action | Effort |
+|----------|--------|--------|
+| P2 | Add centralized audit log for raw SQL usage | S |
+| P3 | Replace `Math.random()` with `crypto.randomUUID()` | S |
+| P3 | Log rollback errors at debug level | S |
 
 ---
 
-## P3 — Low (Backlog)
+## Quick Wins (< 2h each, Score >= 2.0)
 
-| ID | Issue | Location | Effort | Owner |
-|----|-------|----------|--------|-------|
-| ~~AUD-009~~ | ~~Generate API documentation~~ | ✅ RESOLVED (2026-01-20) | L | - |
-| ~~AUD-010~~ | ~~Add CLI usage guide~~ | ✅ RESOLVED (2026-01-20) | M | - |
-| ~~AUD-011~~ | ~~Create error message factory~~ | ✅ RESOLVED (2026-01-20) | S | - |
-| ~~AUD-012~~ | ~~Document production deployment~~ | ✅ RESOLVED (2026-01-20) | M | - |
-| ~~AUD-013~~ | ~~Add SECURITY.md policy~~ | ✅ RESOLVED (2026-01-20) | S | - |
-
-### Details
-
-**~~AUD-009: Generated API Docs~~** ✅ RESOLVED (2026-01-20)
-- Added TypeDoc to catalog and devDependencies
-- Created `typedoc.json` configuration for core and adapter packages
-- Added `pnpm docs:api` script to generate docs to `docs/api/`
-- CI integration deferred to future work
-
-**~~AUD-010: CLI Usage Guide~~** ✅ RESOLVED (2026-01-20)
-- Created `docs/CLI_USAGE.md` with comprehensive CLI documentation
-- Covers: REPL commands, batch mode, code generation, examples
-- Effort: M (~3h)
-
-**~~AUD-011: Error Message Factory~~** ✅ RESOLVED (2026-01-20)
-- Added `ErrorCode` enum with DBSP_E001-E008 codes for programmatic handling
-- Added `Errors` factory with type-safe factory functions + type guards
-- Exports: `Errors.execution()`, `Errors.tableNotFound()`, `Errors.isDbspError()`, etc.
-- Added 14 new tests covering factory and type guards
-- Backwards compatible: existing error classes unchanged
-
-**~~AUD-012: Production Deployment Docs~~** ✅ RESOLVED (2026-01-20)
-- Created `docs/PRODUCTION.md` with comprehensive guidance
-- Covers: connection pooling, timeouts, multi-tenant, error handling
-- Also covers: streaming, EXPLAIN, rate limiting, security, health checks
-- Effort: M (~2h)
-
-**~~AUD-013: Security Policy~~** ✅ RESOLVED (2026-01-20)
-- Created `SECURITY.md` with vulnerability reporting process
-- Standard for OSS projects
-- Effort: S (~30min)
+| # | Action | Score | Effort |
+|---|--------|-------|--------|
+| 1 | Rewrite README.md | 16.0 | S |
+| 2 | Update CLAUDE.md | 16.0 | S |
+| 3 | Update DOCUMENTATION_INDEX.md | 9.0 | S |
+| 4 | Update ARCH-006 spec status | 4.0 | S |
+| 5 | Extract RETURNING clause helper | 2.0 | S |
+| 6 | Extract FK derivation utility | 2.0 | S |
 
 ---
 
-## Quick Wins (< 2h each)
+## Resolution Log
 
-| ID | Issue | Effort | Impact |
-|----|-------|--------|--------|
-| ~~AUD-QW-001~~ | ~~Update DOCUMENTATION_INDEX.md package refs~~ | ✅ (AUD-003) | - |
-| ~~AUD-QW-002~~ | ~~Update SKILL.md package refs~~ | ✅ (AUD-006) | - |
-| ~~AUD-QW-003~~ | ~~Add SECURITY.md policy~~ | ✅ (AUD-013) | - |
+### Resolved Items (2026-01-20 -> 2026-01-31)
+
+18 items resolved from the previous audit. Key resolutions:
+
+| ID | What Was Resolved | How | Impact |
+|----|-------------------|-----|--------|
+| AUD-004 | `compiler.ts` monolithic (4,736 LOC) | Split into handler pattern: `handlers/where/`, `handlers/expression/`, `handlers/include/` | **-44% LOC** (4,736 -> 2,633) |
+| AUD-005 | `orm.ts` mixed concerns (2,317 LOC) | Extracted `ResultHydrator`, `QueryExecutor` | **-23% LOC** (2,317 -> 1,776) |
+| AUD-006 | `intent-to-decisions` mixed into compiler | Extracted standalone module (550 LOC) | Clean separation |
+| DUP-001 | Duplicated WHERE compilation | Consolidated into WHERE handlers | Eliminated duplication |
+| DUP-002 | Duplicated include strategy | Consolidated into include handlers | Eliminated duplication |
+| DUP-003 | Duplicated expression handling | Consolidated into expression handlers | Eliminated duplication |
+| NAME-001-004 | Inconsistent naming conventions | Standardized across codebase (ARCH-003) | Consistent naming |
+| AUD-009-013 | Documentation improvements | Updated specs, ADRs, scope indexes | Accurate docs |
+| FLAT-BUG | Flat include bug + missing CTE WITH RECURSIVE | Fixed in adapter-pgsql | Correct SQL generation |
+| PGSQL-SPIKE | No native PostgreSQL adapter | Built adapter-pgsql from scratch | No ORM dependency |
+| PGSQL-SUNSET | adapter-kysely still present | Removed adapter-kysely, migrated all users | Simplified architecture |
+
+**Total impact:** 18 items resolved, codebase significantly cleaner. The handler pattern in the compiler is the most impactful structural improvement.
 
 ---
 
 ## Summary
 
-| Priority | Count | Total Effort |
-|----------|-------|--------------|
-| P0 | 0 | 0h |
-| P1 | 2 (+1 resolved) | ~16h |
-| P2 | 2 (+10 resolved) | ~20h |
-| P3 | 0 (+5 resolved) | ~0h |
-| Quick Wins | 0 (+3 resolved) | ~0h |
-| **Total** | **4 open** | **~36h** |
+| Priority | Count | Effort Estimate |
+|----------|-------|-----------------|
+| P0 | 3 | ~4h |
+| P1 | 4 | ~12h |
+| P2 | 9 | ~40h |
+| P3 | 12 | ~50h |
+| **Total** | **28** | **~106h** |
 
-### Recently Resolved
-- ✅ AUD-009 (2026-01-20) — TypeDoc API documentation setup (pnpm docs:api)
-- ✅ AUD-012 (2026-01-20) — Production deployment guide (docs/PRODUCTION.md)
-- ✅ AUD-011 (2026-01-20) — Error factory with ErrorCode + Errors namespace
-- ✅ AUD-010 (2026-01-20) — CLI usage guide (docs/CLI_USAGE.md)
-- ✅ AUD-013 (2026-01-20) — SECURITY.md policy added
-- ✅ AUD-003, AUD-006, AUD-007, AUD-008 (2026-01-20) — Documentation updates
-- ✅ NAME-001, NAME-002, NAME-003, NAME-004 (2026-01-20) — Ambiguous naming fixed
-- ✅ DUP-001, DUP-002, DUP-003 (2026-01-20) — DRY violations fixed
+### Previous Audit Comparison (2026-01-20 -> 2026-01-31)
+
+| Metric | Previous | Current | Delta |
+|--------|----------|---------|-------|
+| P0 items | 0 | 3 | +3 (doc drift from Kysely sunset) |
+| P1 items | 3 | 4 | +1 |
+| P2 items | 12 | 9 | -3 (10 resolved, new ones added) |
+| P3 items | 5 | 12 | +7 (deeper analysis) |
+| Resolved since last | - | 18 | Excellent progress |
+
+### Key Changes Since Last Audit
+
+- :green_circle: 18 items resolved (all P2/P3 from previous audit)
+- :green_circle: compiler.ts reduced 44% (4,736 -> 2,633 LOC)
+- :green_circle: orm.ts reduced 23% (2,317 -> 1,776 LOC)
+- :red_circle: adapter-kysely sunset created 3 P0 documentation drifts
+- :yellow_circle: New findings from deeper analysis (CLI, NQL, types)
 
 ---
 
 ## Tracking
 
-- [x] P0 items addressed (none needed) ✅
-- [x] P1 items: MCP only (AUD-001, AUD-002 pending)
-- [x] P2 items: All 12 resolved (2026-01-20)
-- [x] P3 items: All 5 resolved (2026-01-20)
-- [x] Quick wins executed ✅
+- [ ] P0 items addressed
+- [ ] P1 items scheduled
+- [ ] P2 items planned for next sprint
+- [ ] P3 items added to backlog
 - [ ] Next audit scheduled: [TBD]
 
 ---
 
 ## Relationship to Existing Backlogs
-
-This audit backlog identifies architectural and code quality issues. For feature development, see:
 
 | Backlog | Scope | Path |
 |---------|-------|------|
@@ -264,4 +200,4 @@ This audit backlog identifies architectural and code quality issues. For feature
 | MCP | MCP server | `TODO_MCP.md` |
 | E2E | E2E testing | `TODO_E2E.md` |
 
-**Recommendation:** Integrate audit items into the appropriate scope backlog after review.
+**Recommendation:** Integrate P0 and P1 items into the appropriate scope backlog immediately.

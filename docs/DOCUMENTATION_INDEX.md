@@ -13,14 +13,13 @@ doc-meta:
 
 **Vision:** Semantic query planning for databases - intent-first approach that transforms declarative query intents into optimized SQL with full observability.
 
-**Status:** ✅ v1.0 Ready (1971 unit tests across 6 packages)
+**Status:** ✅ v1.0 Ready (2,180+ tests across 6 packages)
 
 ## Architecture: Codegen-First (ARCH-002)
 
 ```
 packages/types          → Shared types (@dbsp/types, @dbsp/types/internal)
 packages/core           → Schema DSL, DX layer, Planner (DB-agnostic, MUST NOT import adapter)
-packages/adapter-kysely → SQL Compiler, Kysely Engine (depends on core)
 packages/adapter-pgsql  → PostgreSQL Native Adapter (Plan → PG AST → SQL via pgsql-deparser)
 packages/nql            → Natural Query Language parser (@dbsp/nql)
 packages/cli            → dbsp CLI (generate, verify, repl commands)
@@ -49,7 +48,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 |-------|---------|----------|---------|--------|
 | types | `packages/types` | [ARCH-004](specs/TYPE-RATIONALIZATION-SPEC.md) | — | ✅ Complete |
 | core | `packages/core` | [Overview](plans/core-OVERVIEW.md) | [TODO](../TODO_CORE.md) | ✅ Complete |
-| adapter | `packages/adapter-kysely` | [Overview](plans/adapter-OVERVIEW.md) | [TODO](../TODO_ADAPTER.md) | ✅ Complete |
+| adapter (legacy) | `packages/adapter-kysely` | — | — | ⛔ Sunset (2026-01-30) |
 | adapter-pgsql | `packages/adapter-pgsql` | [Architecture](../packages/adapter-pgsql/ARCHITECTURE.md) | [Full Forward Spec](plans/ADAPTER-PGSQL-FULL-FORWARD.md) | ✅ Complete |
 | cli | `packages/cli` | [CLI Usage](CLI_USAGE.md) | [TODO](../TODO_CLI.md) | ✅ Complete |
 | mcp-server | `packages/mcp-server` | [Brief](briefs/mcp-server.md) | [TODO](../TODO_MCP.md) | 🟡 Ready |
@@ -99,7 +98,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | NQLM | [NQL CLI Migration](../TODO_NQL_MIGRATION.md) | cli | ✅ complete |
 | **ARCH-005** | [**Unified Schema API**](specs/ARCH-005-unified-schema-api.md) | core, cli, adapter | ✅ canonical |
 | **ARCH-006** | [**Simplified ORM Entry Point**](specs/ARCH-006-simplified-orm-entry-point.md) | core, adapter-kysely | ✅ canonical |
-| **DX-040** | [**Type-Safe Query API**](specs/DX-040-type-safe-query-api.md) | core, dx | 📋 draft |
+| **DX-040** | [**Type-Safe Query API**](specs/DX-040-type-safe-query-api.md) | core, dx | ✅ complete |
 | **ADAPTER-PGSQL** | [**Native PG Adapter Spike (Forward)**](plans/ADAPTER-PGSQL-SPIKE.md) | adapter-pgsql | ✅ complete |
 
 ## Golden Query Tests - ✅ Complete
@@ -123,7 +122,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | Streaming | Cursor/streaming support | AsyncIterableIterator | ✅ | 14 |
 | Infrastructure | Container lifecycle | Testcontainers | ✅ | 5 |
 
-**Note:** 9 tests marked as `.todo()` due to known EXISTS schema prefix bug (F-001).
+**Note:** EXISTS schema prefix bug (F-001) fixed in adapter-pgsql. 1 `.todo()` test remaining.
 
 ## Tech Stack
 
@@ -132,8 +131,8 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | Language | TypeScript | Strict mode |
 | Runtime | Node.js | ESM preferred |
 | Primary DB | PostgreSQL | Primary focus |
-| Adapter | Kysely | Peer dependency |
-| Testing | Vitest | Golden tests |
+| Adapter | pg (PostgreSQL native) | No ORM dependency |
+| Testing | Vitest | Golden tests + E2E |
 | Build | tsup | ESM + CJS |
 
 ## Completed Phases

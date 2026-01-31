@@ -1,8 +1,8 @@
 # Codebase Audit: db-semantic-planner
 
-**Date:** 2026-01-20
+**Date:** 2026-01-31
 **Mode:** deep
-**Scope:** full (all packages)
+**Scope:** full (all 6 packages)
 
 ---
 
@@ -10,37 +10,25 @@
 
 | Dimension | Score | Status |
 |-----------|-------|--------|
-| Architecture | 9/10 | 🟢 |
-| Code Quality | 8/10 | 🟢 |
-| Principle Compliance | 8.5/10 | 🟢 |
-| Documentation | 9/10 | 🟢 |
-| Test Coverage | 9/10 | 🟢 |
+| Architecture | 9/10 | :green_circle: |
+| Code Quality | 7/10 | :yellow_circle: |
+| Principle Compliance | 7/10 | :yellow_circle: |
+| Documentation | 4/10 | :red_circle: |
+| Test Coverage | 7/10 | :yellow_circle: |
 
-**Overall Health:** 🟢 Good
-
-The db-semantic-planner codebase is well-architected with a clean Ports & Adapters pattern separating the DB-agnostic core from the Kysely adapter. All 1686 unit tests pass (5 todo), documentation is comprehensive, and security has been independently audited with no critical issues.
+**Overall Health:** :yellow_circle: Needs Attention — Architecture is excellent, but documentation drift after adapter-kysely sunset is critical.
 
 ---
 
-## Key Findings (Top 5)
+## Key Findings (Top 5 by Priority Score)
 
-1. ~~**compiler.ts was 4735 lines**~~ — ✅ RESOLVED (2026-01-20)
-   - Split into compiler/ module: 2633 lines remaining (-44%), with mutation-compiler.ts, recursive-compiler.ts, handlers/
-
-2. ~~**orm.ts was 2351 lines**~~ — ✅ RESOLVED (2026-01-20)
-   - Extracted ResultHydrator: 1776 lines remaining (-23%), hydration logic moved to result-hydrator.ts
-
-3. **Dual schema definition paths require synchronization** — Priority: P3 — Effort: S
-   - Both `@dbsp/schema` and `@dbsp/core/schema-builder` exist; documented but increases maintenance burden
-
-4. **Type chain propagation gaps possible** — Priority: P3 — Effort: S
-   - Features in adapter layer may not reach users if intermediate IR types don't expose them (documented in GOTCHAS)
-
-5. ~~**DRY violations: 3 function duplications**~~ — ✅ RESOLVED (2026-01-20)
-   - `singularize`, `parseDotNotationInclude`, `getNodeIdAlias` consolidated to single locations
-
-6. **mcp-server has minimal implementation** — Priority: P1 — Effort: M
-   - Only 4 source files, 1 test; marked as "Ready" but incomplete for production use
+| # | Finding | C | I | R | Score | Axis |
+|---|---------|---|---|---|-------|------|
+| 1 | **CLAUDE.md references dead Kysely adapter** | C1 | I4 | R3 | 12.0 | Documentation |
+| 2 | **README references non-existent `@dbsp/adapter-kysely` and `@dbsp/schema`** | C2 | I4 | R4 | 8.0 | Documentation |
+| 3 | **God class: `PgsqlAdapter` (1,930 LOC, 10+ responsibilities)** | C3 | I3 | R2 | 2.0 | Maintainability |
+| 4 | **God class: `QueryBuilderImpl` (1,774 LOC, 20+ methods)** | C3 | I3 | R2 | 2.0 | Maintainability |
+| 5 | **compiler.ts 44-case switch violates OCP** | C3 | I3 | R2 | 2.0 | Maintainability |
 
 ---
 
@@ -48,78 +36,48 @@ The db-semantic-planner codebase is well-architected with a clean Ports & Adapte
 
 | Metric | Value |
 |--------|-------|
-| Source files | 180 |
-| Lines of code | ~75,000 |
-| Test files | 45 |
-| Tests (unit) | 1,691 (5 todo) |
-| Dependencies | 5 direct, 18 dev |
-| TODO/FIXME count | 11 |
-| @ts-expect-error count | 8 (all in tests) |
-| Packages | 4 |
+| Source files | 123 (non-test) |
+| Lines of code | ~47,168 |
+| Test files | 85 (59 unit + 26 e2e) |
+| Test assertions | ~4,367 |
+| Dependencies | 13 direct (workspace catalog) |
+| TODO files | 10 |
+| Documentation files | 92 |
+| Packages | 6 (core, adapter-pgsql, nql, types, cli, mcp-server) |
 
 ---
 
 ## Quick Stats by Area
 
-| Area | Files | LOC | Tests | Health |
-|------|-------|-----|-------|--------|
-| core | 49 | ~25,000 | 345 | 🟢 |
-| adapter-kysely | 35 | ~20,000 | 701 | 🟢 |
-| cli | 33 | ~8,000 | 297 | 🟢 |
-| mcp-server | 4 | ~500 | 1 | 🟡 |
-
----
-
-## Test Results Summary
-
-| Package | Tests | Passed | Skipped/Todo | Duration |
-|---------|-------|--------|--------------|----------|
-| @dbsp/core | 687 | 687 | 0 | ~2s |
-| @dbsp/adapter-kysely | 706 | 701 | 5 todo | ~600ms |
-| @dbsp/cli | 297 | 297 | 0 | ~450ms |
-| @dbsp/mcp-server | 1 | 1 | 0 | ~140ms |
-| **Total** | **1,691** | **1,686** | **5** | **~3.2s** |
+| Area | Source Files | Source LOC | Test Files | Issues | Health |
+|------|-------------|-----------|------------|--------|--------|
+| core | 33 | 19,865 | 24 | 8 | :yellow_circle: |
+| adapter-pgsql | 50 | 13,757 | 18 | 6 | :yellow_circle: |
+| cli | 21 | 6,194 | 12 | 3 | :yellow_circle: |
+| nql | 11 | 4,990 | 4 | 4 | :yellow_circle: |
+| types | 5 | 1,851 | 0 | 1 | :green_circle: |
+| mcp-server | 3 | 511 | 1 | 1 | :red_circle: |
+| Documentation | 92 files | - | - | 8 major drifts | :red_circle: |
+| Security | all | - | - | 1 (by design) | :green_circle: |
 
 ---
 
 ## Recommendations
 
 ### Immediate (P0)
-- None identified — codebase is in good health
+- Rewrite README.md: remove all `@dbsp/adapter-kysely` and `@dbsp/schema` references
+- Update CLAUDE.md architecture section (Kysely references)
+- Update DOCUMENTATION_INDEX.md (package list, test counts, architecture diagram)
 
 ### Short-term (P1)
-- Complete MCP server implementation or update status from "Ready" to "Alpha"
-- Add integration tests for mcp-server package
+- Update spec statuses (ARCH-006 Draft→Implemented, DX-040 Draft→Complete)
+- Add raw SQL audit trail logging (currently console.warn only)
+- Increase adapter-pgsql test coverage (0.36 ratio → target 0.50)
+- Replace MCP server placeholder test
 
-### Medium-term (P2-P3) — ✅ ADDRESSED
-- ~~Consider splitting `compiler.ts` into focused modules~~ — **DONE** (compiler/ module with handlers)
-- ~~Extract query execution concerns from `QueryBuilderImpl` in `orm.ts`~~ — **DONE** (ResultHydrator extracted)
-- Large file issues resolved: compiler.ts -44%, orm.ts -23%
-
----
-
-## Architecture Highlights
-
-### Strengths
-- Clean Ports & Adapters pattern with strict dependency direction
-- Comprehensive interface segregation in adapter layer (Adapter → CompilingAdapter → ExecutingAdapter → etc.)
-- Zero raw SQL in adapter code (except user escape hatch)
-- Deterministic query planning with full observability via `dump()`
-- Strong TypeScript usage with minimal type suppressions
-
-### Areas for Improvement
-- ~~Large files could benefit from decomposition~~ — **DONE** (compiler.ts, orm.ts split)
-- MCP server package is skeletal compared to other packages
-- E2E tests require external PostgreSQL container (documented, acceptable tradeoff)
-
----
-
-## Security Status
-
-Last security audit: **2026-01-08** — Verdict: **✅ SECURE**
-- 0 critical, 0 high, 0 medium vulnerabilities
-- SQL injection prevented via parameter binding
-- Multi-tenant isolation via validated schema names
-- Sensitive data redaction in logs
-
-See: `docs/reports/SECURITY_AUDIT_2026-01-08.md`
+### Medium-term (P2-P3)
+- Refactor god classes (orm.ts, pgsql-adapter.ts, compiler.ts)
+- Split NQL visitor into specialized visitors (1,303 LOC)
+- Segregate QueryBuilder interface (ISP compliance)
+- Extract window functions from filters.ts (1,180 LOC)
+- Add type-level tests for @dbsp/types package

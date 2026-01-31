@@ -1,187 +1,104 @@
 # Engineering Principles Compliance
 
+**Date:** 2026-01-31
+
+---
+
 ## SOLID Principles
 
 ### Single Responsibility (SRP)
 
 | Status | Count | Details |
 |--------|-------|---------|
-| ✅ Compliant | 95% | Most modules have focused responsibilities |
-| ✅ Resolved | 0 | Large files split (2026-01-20) |
+| :green_circle: Compliant | ~90 files | Most files have single responsibility |
+| :yellow_circle: Violations | 8 files | Files with multiple responsibilities |
 
-**Previously Identified (Now Resolved):**
+**Violations:**
 
-| File:Line | Class/Function | Issue | Resolution |
-|-----------|----------------|-------|------------|
-| ~~`adapter-kysely/src/compiler.ts:1-4735`~~ | Module | 21 compile* functions | ✅ Split into compiler/ module (now 2633 lines, -44%) |
-| ~~`core/src/dx/orm.ts:1-2351`~~ | QueryBuilderImpl | Multiple concerns | ✅ ResultHydrator extracted (now 1776 lines, -23%) |
-
-**Compliance Score:** 9/10
-
----
+| File:Line | Class/Function | Issue | Severity |
+|-----------|----------------|-------|----------|
+| `core/src/dx/orm.ts:683-1774` | `QueryBuilderImpl` | God class: 15 fields, 20+ methods, 7 responsibilities (building, execution, cloning, pagination, etc.) | HIGH |
+| `adapter-pgsql/src/pgsql-adapter.ts:189-1930` | `PgsqlAdapter` | God class: 10 responsibilities (compilation, execution, DDL, transactions, streaming, mutations, etc.) | HIGH |
+| `core/src/dx/types.ts` | (entire file) | 26 exported types mixing query, orm, pagination, streaming, aggregation | MEDIUM |
+| `core/src/dx/filters.ts` | (entire file) | 57 functions + WindowBuilder class mixing comparison, logical, relation, window, array, range filters | MEDIUM |
+| `core/src/planner.ts` | `plan()` | 1,544 LOC with 22 internal helpers covering where, includes, CTEs, joins, ambiguity | MEDIUM |
+| `adapter-pgsql/src/compiler.ts` | `PlanCompiler` | Handles SELECT + INSERT + UPDATE + DELETE compilation (1,250 LOC) | MEDIUM |
+| `nql/src/semantic/visitor.ts` | `NqlCstVisitor` | 1,303 LOC, 40+ methods for all CST->AST transformations | HIGH |
+| `cli/src/repl/batch.ts` | (entire file) | 924 LOC, 43 functions: dot commands, execution, formatting, state | HIGH |
 
 ### Open/Closed (OCP)
 
 | Status | Observation |
 |--------|-------------|
-| ✅ Good | Extension via adapter interface pattern |
+| :yellow_circle: | Mostly compliant via Handler pattern and Adapter interface, but compiler has large switch |
 
-**Analysis:**
-- Adapter interface allows new database adapters without modifying core
-- Strategy pattern for filter/include decisions is extensible
-- Intent types can be extended for new query patterns
+**Violations:**
 
-**Examples of good OCP:**
-- `Adapter` interface: `adapter-kysely/src/kysely-adapter.ts:1-529`
-- Strategy selection: `core/src/planner.ts:200-300`
-- Filter type extensibility: `core/src/dx/filters.ts`
+| File:Line | Issue | Severity |
+|-----------|-------|----------|
+| `adapter-pgsql/src/compiler.ts:159-580` | 44-case switch on `decision.type` -- not extensible without modifying compiler | HIGH |
+| `core/src/planner.ts:717` | 6-case switch on `where.kind` | LOW |
 
-**Compliance Score:** 9/10
-
----
+**Mitigation:** The handler pattern (`handlers/where/`, `handlers/expression/`, `handlers/include/`) already extracts logic for WHERE, expression, and include strategies. The remaining 44-case switch could be progressively migrated to this pattern.
 
 ### Liskov Substitution (LSP)
 
 | Status | Observation |
 |--------|-------------|
-| ✅ Good | Interface contracts maintained |
-
-**Analysis:**
-- `KyselyAdapter` correctly implements all `Adapter` interface methods
-- Mock adapter in tests properly substitutes for real adapter
-- No behavioral surprises in subtype implementations
-
-**Evidence:**
-- All adapter methods have consistent signatures
-- Error handling follows consistent patterns
-- Tests use both real and mock adapters interchangeably
-
-**Compliance Score:** 9/10
-
----
+| :green_circle: | No violations found. Error hierarchy and adapter implementations are consistent. |
 
 ### Interface Segregation (ISP)
 
 | Status | Observation |
 |--------|-------------|
-| ✅ Excellent | Well-segregated adapter interfaces |
+| :yellow_circle: | Adapter interface well-split, but QueryBuilder has 30+ methods |
 
-**Analysis:**
-The adapter interfaces are excellently segregated:
+**Violations:**
 
-```typescript
-// From core/src/adapter.ts
-interface BaseAdapter { capabilities; validateIdentifier }
-interface CompilingAdapter extends BaseAdapter { compile, compileInsert, ... }
-interface ExecutingAdapter extends CompilingAdapter { execute, executeOne }
-interface StreamingAdapter extends ExecutingAdapter { stream }
-interface TransactionalAdapter extends ExecutingAdapter { transaction, withSchema }
-interface IntrospectingAdapter { introspect }
-interface DDLGeneratingAdapter { generateDDL }
-interface RawSqlAdapter { executeRaw }
-```
+| File:Line | Issue | Severity |
+|-----------|-------|----------|
+| `core/src/dx/types.ts:400-700` | `QueryBuilder<TResult>` interface has 30+ methods (where, include, paginate, stream, aggregate, etc.) | MEDIUM |
 
-- Clients only depend on interfaces they use
-- Capability detection allows graceful degradation
-- No forced implementation of unused methods
+**Positive example -- Adapter interface segregation:**
 
-**Compliance Score:** 10/10
+The `Adapter` port interface in `core/src/adapter.ts` is well-segregated:
+- `Adapter<DB>` -- core query/mutation operations
+- `CompileOnlyAdapter` -- SQL compilation without DB connection (used by CLI)
+- `StreamingAdapter` -- cursor-based streaming (optional capability)
+- `DDLAdapter` -- schema DDL generation (optional capability)
 
----
+This segregation allows `createPgsqlCompileOnlyAdapter()` to implement only compilation without requiring a pg Pool, demonstrating proper ISP compliance at the architecture boundary.
 
 ### Dependency Inversion (DIP)
 
 | Status | Observation |
 |--------|-------------|
-| ✅ Good | Core depends on abstractions |
+| :green_circle: | Excellent. Core depends on Adapter interface, zero imports from adapter-pgsql. |
 
-**Analysis:**
-- Core package defines `Adapter` interface (abstraction)
-- Adapter-kysely implements that interface (concrete)
-- DX layer uses adapter through interface, not concrete type
-- Kysely is a peer dependency, not hard-coded
-
-**Dependency flow:**
-```
-core (defines Adapter interface)
-    ↓ depends on abstraction
-adapter-kysely (implements Adapter)
-    ↓ uses
-Kysely (peer dependency)
-```
-
-**Compliance Score:** 9/10
+**Evidence:** `packages/core/` has zero imports from `packages/adapter-pgsql/`. All adapter interaction goes through the `Adapter<DB>` interface defined in `core/src/adapter.ts`.
 
 ---
 
 ## DRY (Don't Repeat Yourself)
 
-### Duplicated Function Detection
+### Current Duplicated Logic
 
-```bash
-# Command to find duplicate function names
-grep -rn "^export function\|^function" --include="*.ts" packages/*/src/**/*.ts \
-  | grep -v test.ts \
-  | awk -F: '{print $3}' | sed 's/function //' | sed 's/(.*/:/' \
-  | sort | uniq -c | sort -rn | head -10
-```
+| Logic | Locations | Severity |
+|-------|-----------|----------|
+| `clone()` calls at start of every fluent method | `core/src/dx/orm.ts` (20+ occurrences) | HIGH |
+| FK derivation from table name | `adapter-pgsql/src/pgsql-adapter.ts:318,492` + `compiler.ts:743` | MEDIUM |
+| RETURNING clause compilation | `adapter-pgsql/src/compiler.ts:610,662,704` | MEDIUM |
+| Schema qualification pattern | Multiple locations in compiler + adapter | LOW |
+| `throw new Error()` without structured types | `nql/src/semantic/visitor.ts` (86 occurrences) | MEDIUM |
 
-### ⚠️ Duplicated Functions Found
+### Resolved Since Previous Audit (2026-01-20)
 
-| Function | File 1 | File 2 | Severity |
-|----------|--------|--------|----------|
-| `singularize` | `core/src/conventions.ts:43` | `core/src/dx/lightweight-model.ts:353` | **High** |
-| `parseDotNotationInclude` | `core/src/dx/intent-builder.ts:138` | `core/src/dx/orm.ts:745` | **High** |
-| `getNodeIdAlias` | `core/src/planner.ts:289` | `adapter-kysely/src/compiler.ts:1581` | Medium |
-
-#### DUP-001: `singularize` — Two different implementations
-
-```typescript
-// conventions.ts - version simple (12 lignes)
-export function singularize(name: string): string {
-  if (name.endsWith('ies')) return `${name.slice(0, -3)}y`;
-  // ...
-}
-
-// lightweight-model.ts - version avancée (30 lignes)
-export function singularize(tableName: string): string {
-  const irregular = IRREGULAR_PLURALS[lower]; // Gère "people" → "person"
-  // ... plus de logique, gestion de la casse
-}
-```
-
-**Recommendation:** Garder la version avancée dans `conventions.ts`, supprimer de `lightweight-model.ts`.
-
-#### DUP-002: `parseDotNotationInclude` — Code quasi-identique
-
-Les deux implémentations sont **copier-collées** avec seulement le type d'options qui diffère.
-
-**Recommendation:** Extraire dans un module partagé avec type générique.
-
-#### DUP-003: `getNodeIdAlias` — Logique similaire
-
-- `planner.ts` gère le cas `'literal'` explicitement
-- `compiler.ts` utilise un fallback direct
-
-**Recommendation:** Déplacer vers `intent-ast.ts` (proche du type `RecursiveNodeIdExpr`).
-
-### Same Name, Different Purpose (NOT duplications)
-
-| Function | Context 1 | Context 2 | Why different |
-|----------|-----------|-----------|---------------|
-| `resolveRelation` | planner.ts | compiler.ts | Planner: warnings + disambiguation / Compiler: uses plan decisions |
-| `mapColumnType` | ddl.ts | schema-bridge.ts | DDL: ColumnType→SQL / Bridge: GeneratedType→ColumnType |
-| `inferRelations` | conventions.ts | introspection.ts | Schema definition vs DB introspection |
-| `buildTableIR` | schema-bridge.ts | introspection.ts | From definition vs from introspection |
-
-### Pattern Usage (Not Duplication)
-
-| Pattern | Occurrences | Assessment |
-|---------|-------------|------------|
-| `eb.fn()` usage | ~50 | ✅ Consistent Kysely API usage |
-| `eb.ref()` usage | ~40 | ✅ Necessary for column refs |
-
-**Compliance Score:** 6/10 ⚠️ (3 duplications à corriger)
+| What | Before | After | Reduction |
+|------|--------|-------|-----------|
+| `compiler.ts` duplication | 4,736 LOC, monolithic | 2,633 LOC, handlers extracted | **-44%** |
+| `orm.ts` responsibilities | 2,317 LOC, mixed concerns | 1,776 LOC, ResultHydrator + QueryExecutor extracted | **-23%** |
+| `PlanDecision` handler pattern | Inline in compiler switch | `handlers/where/`, `handlers/expression/`, `handlers/include/` | Extensible |
+| `intent-to-decisions.ts` | Mixed into compiler | Standalone 550 LOC module | Separated |
 
 ---
 
@@ -189,109 +106,72 @@ Les deux implémentations sont **copier-collées** avec seulement le type d'opti
 
 ### Over-Engineering Detected
 
-| Location | Issue | Simplification |
-|----------|-------|----------------|
-| None critical | - | - |
-
-**Analysis:**
-The codebase avoids over-engineering:
-- No unnecessary abstractions
-- No premature optimization
-- Clear, direct code paths
-- Configuration has sensible defaults
-
-### Complexity Concerns
-
-| File | Concern | Assessment |
-|------|---------|------------|
-| compiler.ts | 2633 lines | ✅ Split into modules (-44%), handlers extracted |
-| planner.ts | Multiple strategy branches | ✅ Appropriate for decision complexity |
-| intent-ast.ts | Many intent types | ✅ Necessary for type safety |
-
-**Compliance Score:** 8/10
+| Location | Issue | Severity |
+|----------|-------|----------|
+| `core/src/dx/orm.ts:1733-1770` | Manual cloning of 15 fields with conditionals (38 LOC) | MEDIUM |
+| `core/src/dx/intent-builder.ts:64-140` | 10+ type assertions to bypass exactOptionalPropertyTypes | MEDIUM |
+| `adapter-pgsql/src/pgsql-adapter.ts:582-649` | Complex recursive dotted-field->EXISTS conversion | MEDIUM |
 
 ---
 
 ## YAGNI (You Ain't Gonna Need It)
 
-### Unused Code
+### Deprecated Code Still Present
 
-```bash
-# Dead code scan - no unused exports found
-# All public APIs have tests or documentation
-```
+| Item | Location | Issue |
+|------|----------|-------|
+| `nqlCompiler` parameter | `core/src/dx/orm.ts:128` | @deprecated but still exported |
+| `NqlCompilerFn` type | `core/src/dx/nql.ts:27` | @deprecated |
+| `namingConvention` option | `core/src/dx/schema.ts:212` | @deprecated (use dbCasing) |
+| `validate()` function | `nql/src/index.ts:149-156` | Stub -- just calls `parse()` |
 
-| Item | Type | Last Used | Action |
-|------|------|-----------|--------|
-| None found | - | - | - |
+### Dead Code
 
-### Premature Abstractions
-
-| Abstraction | Actual Uses | Issue |
-|-------------|-------------|-------|
-| None found | - | - |
-
-**Analysis:**
-The codebase follows YAGNI well:
-- Features are implemented when needed (backlog items documented)
-- No speculative code
-- Out-of-scope features clearly documented as deferred
-
-**Compliance Score:** 9/10
-
----
-
-## Compliance Summary
-
-| Principle | Score | Status |
-|-----------|-------|--------|
-| SRP | 8/10 | 🟢 |
-| OCP | 9/10 | 🟢 |
-| LSP | 9/10 | 🟢 |
-| ISP | 10/10 | 🟢 |
-| DIP | 9/10 | 🟢 |
-| DRY | 6/10 | 🟡 |
-| KISS | 8/10 | 🟢 |
-| YAGNI | 9/10 | 🟢 |
-
-**Overall Principle Compliance:** 8.5/10 🟢
-
----
-
-## Recommendations
-
-### High Priority (P1)
-
-1. **Split compiler.ts** into focused modules
-   - `select-compiler.ts` — SELECT query compilation
-   - `mutation-compiler.ts` — INSERT/UPDATE/DELETE
-   - `recursive-compiler.ts` — CTE and recursive queries
-   - `expression-compiler.ts` — WHERE, HAVING expressions
-
-### Medium Priority (P2)
-
-2. **Extract concerns from QueryBuilderImpl**
-   - `QueryExecutor` — execution logic
-   - `ResultHydrator` — include hydration
-   - Keep QueryBuilder focused on intent building
-
-### Low Priority (P3)
-
-3. **Create error message factory**
-   - Centralize error message construction
-   - Improve consistency across packages
+No significant dead code detected. Codebase appears actively maintained.
 
 ---
 
 ## Intentional Tradeoffs
 
-The following patterns appear to violate principles but are documented as intentional:
+These are documented conscious decisions, not violations:
 
-| Pattern | Reason | Documentation |
+| Pattern | Reason | Documented In |
 |---------|--------|---------------|
-| Large compiler.ts | All SQL generation in one file for locality | To be addressed |
-| WeakMap for plugin state | Memory safety tradeoff | GOTCHAS.md #4 |
-| Dual schema paths | Different use cases | SKILL.md Architecture |
-| PostgreSQL-first | Focus over breadth | CLAUDE.md |
+| `QueryBuilderImpl` god class | Fluent API ergonomics require single entry point; splitting would break method chaining | ADR-002 |
+| 44-case switch in compiler | Handler migration is progressive; full registry pattern would add indirection for low churn code | BACKLOG #10 |
+| `any` types in result-hydrator | Hydration transforms heterogeneous query results; generic constraints would over-constrain the API | biome-ignore comments |
+| `unknown[]` in intent-ast | Intent AST is a transport format; validation happens at boundaries (NQL compiler, planner) | ARCH-004 |
 
-These are not violations — they are conscious decisions with documented rationale.
+---
+
+## Same Name, Different Purpose
+
+| Symbol | Location A | Location B | Purpose A | Purpose B |
+|--------|-----------|-----------|-----------|-----------|
+| `compile()` | `nql/compiler` | `adapter-pgsql/compiler` | NQL AST -> IntentAST | PlanReport -> PostgreSQL AST |
+| `validate()` | `nql/index.ts` | `adapter-pgsql/validate.ts` | NQL parse validation (stub) | Identifier validation (regex) |
+| `plan()` | `core/planner.ts` | (unique) | Intent -> PlanReport | -- |
+| `Adapter` | `core/adapter.ts` | (unique) | Port interface | -- |
+
+---
+
+## Compliance Summary
+
+| Principle | Score | Status | Trend |
+|-----------|-------|--------|-------|
+| SRP | 6/10 | :yellow_circle: | -> (stable) |
+| OCP | 7/10 | :yellow_circle: | up (handlers extracted) |
+| LSP | 10/10 | :green_circle: | -> |
+| ISP | 7/10 | :yellow_circle: | -> |
+| DIP | 10/10 | :green_circle: | -> |
+| DRY | 6/10 | :yellow_circle: | up (compiler -44%) |
+| KISS | 7/10 | :yellow_circle: | -> |
+| YAGNI | 8/10 | :green_circle: | -> |
+
+**Overall Principle Compliance:** 7/10
+
+### Resolution History
+
+| Audit Date | Items Resolved | Notable Improvements |
+|------------|---------------|---------------------|
+| 2026-01-20 -> 2026-01-31 | 18 items | compiler.ts -44%, orm.ts -23%, handler pattern introduced, intent-to-decisions extracted |

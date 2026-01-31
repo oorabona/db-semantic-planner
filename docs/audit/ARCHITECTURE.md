@@ -5,206 +5,147 @@
 ```mermaid
 graph TB
     subgraph "External"
-        User[User/Application]
-        ExtDB[(PostgreSQL/SQLite/MySQL)]
-        AI[AI Tools via MCP]
+        User[Developer / CLI User]
+        PG[(PostgreSQL)]
+        MCP[MCP Client]
     end
 
     subgraph "db-semantic-planner"
-        Core["@dbsp/core<br/>(Schema, Planner, DX)"]
-        Adapter["@dbsp/adapter-kysely<br/>(SQL Compiler)"]
-        CLI["@dbsp/cli<br/>(REPL, Codegen)"]
-        MCP["@dbsp/mcp-server<br/>(MCP Protocol)"]
+        Core["@dbsp/core<br/>Schema + Planner + DX"]
+        Adapter["@dbsp/adapter-pgsql<br/>SQL Compiler + Executor"]
+        NQL["@dbsp/nql<br/>NQL Parser"]
+        Types["@dbsp/types<br/>Shared Types"]
+        CLI["@dbsp/cli<br/>REPL + Batch"]
+        MCPSrv["@dbsp/mcp-server<br/>MCP Protocol"]
     end
 
+    User --> CLI
     User --> Core
+    MCP --> MCPSrv
     Core --> Adapter
-    Adapter --> ExtDB
+    Core --> NQL
+    Core --> Types
+    NQL --> Types
+    Adapter --> Core
+    Adapter --> Types
+    Adapter --> PG
     CLI --> Core
+    CLI --> NQL
     CLI --> Adapter
-    MCP --> Core
-    AI --> MCP
+    MCPSrv --> Core
 ```
 
-## Component Diagram
+## Component Diagram (Ports & Adapters)
 
 ```mermaid
 graph TB
-    subgraph "@dbsp/core"
-        subgraph "Schema Layer"
-            ModelIR[ModelIR<br/>Schema Definition]
-            SchemaBuilder[Schema Builder<br/>Fluent DSL]
-            SchemaBridge[Schema Bridge<br/>Type Conversion]
+    subgraph "packages/core (DB-Agnostic)"
+        subgraph "Domain Layer"
+            ModelIR["model-ir.ts<br/>Schema IR (460 LOC)"]
+            IntentAST["intent-ast.ts<br/>Query AST (re-exports)"]
+            Planner["planner.ts<br/>Semantic Planner (1,544 LOC)"]
         end
 
-        subgraph "Query Layer"
-            IntentAST[IntentAST<br/>Query Representation]
-            Planner[Semantic Planner<br/>Strategy Decisions]
+        subgraph "DX Layer (dx/)"
+            ORM["orm.ts<br/>Public API (1,774 LOC)"]
+            Filters["filters.ts<br/>57 filter helpers (1,180 LOC)"]
+            QueryExec["query-executor.ts<br/>Execution (623 LOC)"]
+            IntentBuilder["intent-builder.ts<br/>AST Builder (643 LOC)"]
+            SchemaDSL["schema.ts<br/>Schema DSL (1,084 LOC)"]
         end
 
-        subgraph "DX Layer"
-            ORM[createOrm<br/>Entry Point]
-            QueryBuilder[QueryBuilder<br/>Fluent API]
-            Filters[Filters<br/>eq/and/or/exists]
-            MutationBuilders[Mutation Builders<br/>insert/update/delete]
-        end
-
-        subgraph "Adapter Interface"
-            AdapterInterface[Adapter Interface<br/>Ports Definition]
-        end
+        AdapterIF["adapter.ts<br/>Port Interface (535 LOC)"]
     end
 
-    subgraph "@dbsp/adapter-kysely"
-        KyselyAdapter[KyselyAdapter<br/>Implementation]
-        Compiler[SQL Compiler<br/>Intent → SQL]
-        Dialect[Dialect Detection<br/>Capabilities]
-        DDL[DDL Generator<br/>Schema Migration]
-        Stream[Streaming<br/>Cursor Support]
-        Introspection[Introspection<br/>Schema Discovery]
+    subgraph "packages/adapter-pgsql (PostgreSQL)"
+        PgsqlAdapter["pgsql-adapter.ts<br/>Adapter Impl (1,930 LOC)"]
+        Compiler["compiler.ts<br/>SQL Compiler (1,250 LOC)"]
+        Handlers["handlers/<br/>Decision Handlers (2,263 LOC)"]
+        ASTHelpers["ast-helpers.ts<br/>PG AST Factory (893 LOC)"]
+        Validate["validate.ts<br/>Identifier Validation"]
     end
 
-    SchemaBuilder --> ModelIR
-    SchemaBridge --> ModelIR
-    ORM --> QueryBuilder
-    QueryBuilder --> IntentAST
-    IntentAST --> Planner
-    Planner --> AdapterInterface
-    AdapterInterface --> KyselyAdapter
-    KyselyAdapter --> Compiler
-    KyselyAdapter --> DDL
-    KyselyAdapter --> Stream
-    KyselyAdapter --> Introspection
-    Compiler --> Dialect
+    ORM --> Planner
+    ORM --> AdapterIF
+    Planner --> ModelIR
+    Planner --> IntentAST
+    PgsqlAdapter -.->|implements| AdapterIF
+    PgsqlAdapter --> Compiler
+    Compiler --> Handlers
+    Compiler --> ASTHelpers
+    PgsqlAdapter --> Validate
 ```
 
-## Package/Module Structure
+## Package Structure
 
-| Package | Purpose | Dependencies |
-|---------|---------|--------------|
-| `@dbsp/core` | DB-agnostic schema, planning, DX layer | valibot |
-| `@dbsp/adapter-kysely` | SQL compilation, execution, streaming | @dbsp/core, kysely (peer) |
-| `@dbsp/cli` | REPL interface, code generation | @dbsp/core, @dbsp/adapter-kysely, ink, commander |
-| `@dbsp/mcp-server` | MCP protocol for AI tools | @dbsp/core, @dbsp/adapter-kysely, @modelcontextprotocol/sdk |
+| Package | Purpose | LOC | Dependencies |
+|---------|---------|-----|--------------|
+| `@dbsp/types` | Shared TypeScript types (IntentAST, utils) | 1,851 | none |
+| `@dbsp/nql` | NQL parser (Chevrotain-based) | 4,990 | `@dbsp/types`, `chevrotain` |
+| `@dbsp/core` | Schema, Planner, DX layer, Adapter interface | 19,865 | `@dbsp/nql`, `@dbsp/types`, `valibot` |
+| `@dbsp/adapter-pgsql` | PostgreSQL-native SQL compiler + executor | 13,757 | `@dbsp/core`, `@dbsp/types`, `pg`, `pgsql-deparser` |
+| `@dbsp/cli` | Interactive REPL + batch execution | 6,194 | `@dbsp/core`, `@dbsp/nql`, `@dbsp/adapter-pgsql`, `ink`, `commander` |
+| `@dbsp/mcp-server` | Model Context Protocol server | 511 | `@dbsp/core`, `@modelcontextprotocol/sdk` |
 
 ## Dependency Graph
 
 ```mermaid
 graph LR
+    Types["@dbsp/types"]
+    NQL["@dbsp/nql"]
     Core["@dbsp/core"]
-    Adapter["@dbsp/adapter-kysely"]
+    Adapter["@dbsp/adapter-pgsql"]
     CLI["@dbsp/cli"]
     MCP["@dbsp/mcp-server"]
 
+    NQL --> Types
+    Core --> Types
+    Core --> NQL
     Adapter --> Core
+    Adapter --> Types
     CLI --> Core
+    CLI --> NQL
     CLI --> Adapter
     MCP --> Core
-    MCP --> Adapter
 ```
+
+**Architecture Compliance:** :green_circle: No violations detected. Core does not import adapter code.
 
 ## Architecture Patterns Used
 
 | Pattern | Where | Evaluation |
 |---------|-------|------------|
-| Ports & Adapters | Core ↔ Adapter | ✅ Clean separation |
-| Interface Segregation | Adapter interfaces | ✅ Well-designed |
-| Builder Pattern | QueryBuilder, SchemaBuilder | ✅ Fluent APIs |
-| Strategy Pattern | Filter/Include strategies | ✅ Configurable |
-| Factory Pattern | createOrm, createKyselyAdapter | ✅ Clear entry points |
-| Visitor Pattern | Intent compilation | ⚠️ Large switch statements |
+| Ports & Adapters | core ↔ adapter-pgsql | :green_circle: Excellent |
+| Intent-first (Declarative) | QueryIntent → PlanReport → SQL | :green_circle: Excellent |
+| Discriminated Unions | IntentAST, WhereIntent, Decision | :green_circle: Proper |
+| Handler Registry | adapter-pgsql/handlers/ | :green_circle: Extensible |
+| Immutable Builders | QueryBuilder clone pattern | :yellow_circle: Verbose (20+ clones) |
+| AST-based SQL Generation | compiler → ast-helpers → deparser | :green_circle: Secure |
 
-## Core Package Structure
-
-```
-packages/core/src/
-├── index.ts              # Public exports
-├── adapter.ts            # Adapter interface definitions
-├── model-ir.ts           # Schema representation
-├── schema-builder.ts     # Fluent schema DSL
-├── schema-dsl.ts         # DSL helpers
-├── schema-dsl-types.ts   # DSL type definitions
-├── intent-ast.ts         # Query intent representation
-├── planner.ts            # Semantic planning logic
-├── conventions.ts        # Naming conventions
-├── dialects/
-│   └── index.ts          # Dialect type utilities
-└── dx/
-    ├── index.ts          # DX layer exports
-    ├── orm.ts            # createOrm, QueryBuilder
-    ├── types.ts          # Type definitions
-    ├── filters.ts        # eq, and, or, exists, etc.
-    ├── intent-builder.ts # Intent construction
-    ├── mutation-builders.ts # insert/update/delete
-    ├── schema-bridge.ts  # Schema type conversion
-    ├── query-executor.ts # Execution utilities
-    ├── errors.ts         # Error types
-    └── ...               # Additional DX modules
-```
-
-## Adapter-Kysely Package Structure
-
-```
-packages/adapter-kysely/src/
-├── index.ts              # Public exports
-├── kysely-adapter.ts     # KyselyAdapter implementation
-├── compiler.ts           # SQL compilation (2633 lines, split into modules)
-├── compiler/             # Handler modules extracted from compiler.ts
-├── dialect.ts            # Dialect detection & capabilities
-├── ddl.ts                # DDL generation
-├── dump.ts               # Query dump utilities
-├── stream.ts             # Cursor/streaming support
-├── explain.ts            # EXPLAIN support
-├── introspection.ts      # Schema introspection
-├── redact.ts             # Parameter redaction
-├── errors.ts             # Adapter errors
-├── types.ts              # Type definitions
-└── test-utils/           # Test utilities
-```
-
-## Data Flow Overview
+## Compilation Pipeline
 
 ```mermaid
 sequenceDiagram
-    participant App as Application
-    participant ORM as createOrm()
-    participant QB as QueryBuilder
+    participant U as User Code
+    participant ORM as ORM (core/dx)
+    participant NQL as NQL Parser
     participant P as Planner
+    participant A as Adapter
     participant C as Compiler
-    participant K as Kysely
-    participant DB as Database
+    participant PG as PostgreSQL
 
-    App->>ORM: select('users').where(eq('active', true))
-    ORM->>QB: Build fluent chain
-    QB->>QB: Accumulate intents
-    App->>QB: .all() or .dump()
-    QB->>P: plan(intent, model)
-    P->>P: Decide strategies (EXISTS vs JOIN)
-    P-->>QB: PlanReport
-    QB->>C: compile(plan)
-    C->>C: Generate SQL
-    C-->>K: CompiledQuery
-    K->>DB: Execute with params
-    DB-->>App: Results
+    U->>ORM: orm.select('users').where(eq('active', true)).all()
+    ORM->>ORM: Build QueryIntent via IntentBuilder
+    ORM->>P: plan(intent, model)
+    P-->>ORM: PlanReport (decisions + warnings)
+    ORM->>A: compile(planReport, options)
+    A->>C: PlanCompiler.compile(decisions)
+    C->>C: Decision dispatch → Handler registry
+    C->>C: Build PostgreSQL AST nodes
+    C-->>A: deparseQuoted(ast) → SQL + params
+    A->>PG: pool.query(sql, params)
+    PG-->>A: ResultSet
+    A->>A: transformResultRows (naming)
+    A-->>ORM: T[] results
+    ORM-->>U: typed results
 ```
-
-## Architectural Decisions
-
-| Decision | Rationale | ADR |
-|----------|-----------|-----|
-| Intent-first planning | Planner decides strategy, not developer | ADR-001 |
-| DX layer in core | Simplify package structure | ADR-002 |
-| Ink for CLI REPL | React-like terminal UI | ADR-003 |
-| Layered core structure | Clear separation of concerns | ADR-004 |
-| Kysely as adapter | Type-safe, multi-dialect ready | CLAUDE.md |
-| EXISTS default for to-many | Prevent row explosion | Project SKILL.md |
-
-## Strict Dependency Rules
-
-| Package | May Import | Must NOT Import |
-|---------|------------|-----------------|
-| `@dbsp/core` | Nothing (except valibot) | adapter-kysely, cli, mcp-server |
-| `@dbsp/adapter-kysely` | @dbsp/core | cli, mcp-server |
-| `@dbsp/cli` | @dbsp/core, @dbsp/adapter-kysely | mcp-server |
-| `@dbsp/mcp-server` | @dbsp/core, @dbsp/adapter-kysely | cli |
-
-**Enforcement:** TypeScript project references and path aliases prevent violations.

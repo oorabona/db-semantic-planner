@@ -1,281 +1,359 @@
 # Data Flow Analysis
 
-## Critical Path: Query Execution
+**Date:** 2026-01-31
+
+---
+
+## Critical Path 1: NQL String -> SQL Query
 
 ### Description
 
-The primary path from user query to database results. This is the most frequently executed code path and represents the core value proposition of the library.
+The primary path from NQL query string to parameterized SQL. This is the core compilation pipeline.
 
 ### Sequence Diagram
 
 ```mermaid
 sequenceDiagram
-    participant App as Application
+    participant U as User Code
+    participant NQL as NQL Tag (core/dx/nql.ts)
+    participant L as Lexer (nql/lexer)
+    participant P as Parser (nql/parser/grammar.ts)
+    participant V as Visitor (nql/semantic/visitor.ts)
+    participant C as NQL Compiler (nql/compiler)
+    participant PL as Planner (core/planner.ts)
+    participant SC as SQL Compiler (adapter/compiler.ts)
+    participant D as Deparser
+    participant PG as PostgreSQL
+
+    U->>NQL: orm.nql`users | select name`.all()
+    NQL->>L: tokenize(input)
+    L-->>P: Token[]
+    P->>P: Parse CST (Chevrotain)
+    P-->>V: ConcreteSyntaxTree
+    V->>V: Transform CST -> AST
+    V-->>C: NqlProgram
+    C->>C: Compile AST -> IntentAST
+    C-->>NQL: QueryIntent
+    NQL->>PL: plan(intent, model)
+    PL-->>NQL: PlanReport (decisions + warnings)
+    NQL->>SC: compile(planReport)
+    SC->>SC: Decision dispatch -> Handlers
+    SC->>SC: Build PostgreSQL AST nodes
+    SC-->>D: AST
+    D-->>NQL: SQL + params
+    NQL->>PG: pool.query(sql, params)
+    PG-->>U: T[] results
+```
+
+### Step Details
+
+| Step | File:Line | Input | Output | LOC |
+|------|-----------|-------|--------|-----|
+| 1. Template tag | `core/src/dx/nql.ts:90` | NQL string | `NqlBuilder<T>` | 206 |
+| 2a. Lexer | `nql/src/lexer/tokens.ts` | String | Token[] | 330 |
+| 2b. Parser | `nql/src/parser/grammar.ts` | Token[] | CST | 1,247 |
+| 2c. Visitor | `nql/src/semantic/visitor.ts:80` | CST | `NqlProgram` | 1,303 |
+| 2d. Compiler | `nql/src/compiler/index.ts:178` | `NqlProgram` | `QueryIntent` | 1,287 |
+| 3. Planner | `core/src/planner.ts` | Intent + Model | `PlanReport` | 1,544 |
+| 4. SQL Compiler | `adapter-pgsql/src/compiler.ts:125` | PlanReport | PostgreSQL AST | 1,250 |
+| 5. Deparser | `adapter-pgsql/src/deparse.ts` | AST | SQL string | 10 |
+| 6. Executor | `adapter-pgsql/src/pgsql-adapter.ts:1610` | SQL + params | `T[]` | - |
+
+**Total critical path LOC:** ~7,177
+
+### Data Transformations
+
+| Step | Transformation | Key Logic |
+|------|---------------|-----------|
+| Lexer -> Parser | String -> Token[] -> CST | Chevrotain tokenization + parsing |
+| Visitor | CST -> NqlProgram (typed AST) | 40+ visitor methods, discriminated unions |
+| NQL Compiler | NqlProgram -> QueryIntent | Pipe operators -> nested intents |
+| Planner | Intent -> PlanReport (decisions) | Strategy selection (WHERE, JOIN, include) |
+| SQL Compiler | Decisions -> PostgreSQL AST nodes | Handler dispatch per decision type |
+| Deparser | AST -> parameterized SQL string | `pgsql-deparser` library |
+
+### Security Checkpoints
+
+| Checkpoint | Location | What's Validated |
+|------------|----------|-----------------|
+| NQL parsing | `nql/parser` | Syntax validation (Chevrotain grammar) |
+| Value binding | `adapter-pgsql/param-ref.ts` | All values -> $N parameters |
+| Identifier quoting | `adapter-pgsql/deparse.ts` | Double-quoted identifiers |
+
+### Test Coverage
+
+- :green_circle: NQL: `core/src/dx/nql.test.ts`
+- :green_circle: NQL Compiler: `nql/tests/compiler.test.ts`
+- :green_circle: Planner: `core/src/planner.test.ts`
+- :green_circle: SQL Compiler: `adapter-pgsql/src/__tests__/compiler.test.ts`
+
+---
+
+## Critical Path 2: Schema Definition -> ModelIR
+
+### Description
+
+Transforms user schema DSL into the internal ModelIR representation used by the planner.
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant U as User Code
+    participant S as Schema DSL (core/dx/schema.ts)
+    participant R as Relation Inference
+    participant M as ModelIR Builder
     participant ORM as createOrm()
-    participant QB as QueryBuilder
+
+    U->>S: schema({ users: { id: 'uuid', email: ref('contacts') } })
+    S->>S: Validate schema definition (valibot)
+    S->>R: Detect ref() declarations
+    R->>R: Infer belongsTo/hasMany relations
+    R->>R: Detect self-referential patterns
+    R-->>M: RelationIR[]
+    M->>M: Build TableIR, ColumnIR, ForeignKeyIR
+    M-->>S: ModelIR
+    S-->>ORM: Schema<DB> { definition, model }
+    ORM-->>U: OrmInstance<DB>
+```
+
+### Step Details
+
+| Step | File:Line | Input | Output |
+|------|-----------|-------|--------|
+| 1. Schema DSL | `core/src/dx/schema.ts:250` | Schema definition | `Schema<DB>` |
+| 2. Relation inference | `core/src/dx/schema.ts:450` | `ref()` declarations | `RelationIR[]` |
+| 3. Model builder | `core/src/dx/schema.ts:700` | Tables + Relations | `ModelIR` |
+| 4. ORM creation | `core/src/dx/orm.ts:80` | Model + Adapter | `OrmInstance<DB>` |
+
+### Test Coverage
+
+- :green_circle: Schema DSL: `core/src/dx/schema.test.ts`
+- :green_circle: ModelIR: `core/src/model-ir.test.ts`
+
+---
+
+## Critical Path 3: Multi-Tenant Query (withSchema)
+
+### Description
+
+Schema-scoped queries for multi-tenant applications. Security-critical path.
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant U as User Code
+    participant ORM as ORM (core/dx/orm.ts)
+    participant V as Validator (adapter/validate.ts)
+    participant A as Adapter (pgsql-adapter.ts)
+    participant C as Compiler
+    participant PG as PostgreSQL
+
+    U->>ORM: orm.withSchema('tenant_123')
+    ORM->>V: validateIdentifier('tenant_123')
+    V-->>ORM: OK (or throw InvalidIdentifierError)
+    ORM->>A: adapter.withSchema('tenant_123')
+    A-->>ORM: Scoped adapter (immutable clone)
+    U->>ORM: scopedOrm.select('users').all()
+    ORM->>C: compile(plan, { schema: 'tenant_123' })
+    C-->>A: SELECT * FROM "tenant_123"."users"
+    A->>PG: pool.query(sql, params)
+    PG-->>U: T[] results
+```
+
+### Security Controls
+
+| Control | Location | Description |
+|---------|----------|-------------|
+| Identifier validation | `validate.ts:156-213` | Regex `/^[a-zA-Z_][a-zA-Z0-9_$]*$/`, max 63 chars |
+| Immutable scoping | `orm.ts:348-356` | Clone pattern prevents mutation |
+| SQL quoting | `deparse.ts` | Double-quoted identifiers via deparser |
+| Injection test | `pgsql-adapter.test.ts:342` | Verifies `tenant"; DROP TABLE` throws |
+
+### Test Coverage
+
+- :green_circle: Unit: `adapter-pgsql/src/pgsql-adapter.test.ts:326`
+- :green_circle: E2E: `tests/e2e/pimdam.q4.multitenant.test.ts`
+
+---
+
+## Critical Path 4: dump() Observability
+
+### Description
+
+Every query is inspectable via `dump()` before execution. Returns plan decisions, compiled SQL, and bound parameters.
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant U as User Code
+    participant QB as QueryBuilder (orm.ts)
     participant IB as IntentBuilder
-    participant P as Planner
+    participant PL as Planner
     participant C as Compiler
-    participant K as KyselyAdapter
-    participant DB as Database
+    participant A as Adapter
 
-    App->>ORM: select('users').where(eq('active', true))
-    ORM->>QB: new QueryBuilderImpl(model, adapter)
-    QB->>QB: .where() accumulates whereIntents
-    App->>QB: .all()
+    U->>QB: orm.select('users').where(eq('active', true)).dump()
     QB->>IB: buildIntent()
-    IB-->>QB: QueryIntent AST
-    QB->>P: plan(intent, model, options)
-    P->>P: Determine filter strategy
-    P->>P: Determine include strategy
-    P->>P: Extract CTEs if needed
-    P-->>QB: PlanReport
-    QB->>C: compile(plan, dialect)
-    C->>C: Build Kysely query
-    C->>C: Add WHERE clauses
-    C->>C: Add JOINs for includes
-    C-->>K: CompiledQuery
-    K->>DB: Execute with parameters
-    DB-->>K: Raw results
-    K-->>App: Typed results
+    IB-->>QB: QueryIntent
+    QB->>PL: plan(intent, model)
+    PL-->>QB: PlanReport { decisions, warnings }
+    QB->>A: compile(planReport, options)
+    A->>C: PlanCompiler.compile(decisions)
+    C-->>A: CompiledQuery { sql, parameters }
+    A-->>U: Dump { plan, sql, params, meta }
 ```
 
-### Files Involved
+### Dump Structure
 
-| File | Role | Key Lines |
-|------|------|-----------|
-| `core/src/dx/orm.ts` | QueryBuilder, execution | L100-500 |
-| `core/src/dx/intent-builder.ts` | Intent construction | L1-643 |
-| `core/src/planner.ts` | Strategy decisions | L1-1475 |
-| `adapter-kysely/src/compiler.ts` | SQL generation | L831-2400 |
-| `adapter-kysely/src/kysely-adapter.ts` | Execution | L200-350 |
+```typescript
+interface Dump {
+  plan: PlanReport;           // Decisions + reasoning + warnings
+  sql: string;                // Parameterized SQL ($1, $2, ...)
+  params: readonly unknown[]; // Bound parameter values
+  meta?: {
+    schema?: string;          // Multi-tenant schema name
+    compiledAt: Date;
+    queryName?: string;       // Optional label
+    correlationId?: string;
+  };
+}
+```
 
-### Data Transformations
+### Observability Collection Points
 
-| Stage | Input | Output | Validation |
-|-------|-------|--------|------------|
-| QueryBuilder | Method calls | Intent accumulation | Type-safe methods |
-| IntentBuilder | Builder state | QueryIntent AST | Type guards |
-| Planner | QueryIntent | PlanReport | Model validation |
-| Compiler | PlanReport | CompiledQuery | Dialect checks |
-| Execution | CompiledQuery | DB results | Parameter binding |
+| Point | File | What |
+|-------|------|------|
+| Filter strategy | `planner.ts` | WHERE vs EXISTS vs JOIN decision |
+| Include strategy | `planner.ts` | json_agg vs JOIN vs lateral vs CTE |
+| Ambiguity warnings | `planner.ts` | Ambiguous relation names |
+| Row explosion warnings | `planner.ts` | Potential cartesian product |
+| Schema context | `pgsql-adapter.ts:1595` | Multi-tenant schema name |
 
-### Security Checkpoints
+### Test Coverage
 
-- ✅ Input validated via TypeScript at boundary
-- ✅ Schema names validated via `validateIdentifier()`
-- ✅ Parameters bound (never interpolated)
-- ✅ Audit logging via `dump()` observability
-
-### Issues
-
-| Issue | Location | Impact |
-|-------|----------|--------|
-| Large compile function | compiler.ts:831 | Maintainability |
+- :green_circle: Unit: `adapter-pgsql/src/pgsql-adapter.test.ts:374`
+- :green_circle: E2E: `tests/e2e/pimdam.q1.exists.test.ts:38`
 
 ---
 
-## Critical Path: Multi-tenant Query
+## Critical Path 5: Mutation with RETURNING
 
 ### Description
 
-Query execution with schema-based tenant isolation. Critical for SaaS deployments.
+INSERT, UPDATE, DELETE, and UPSERT operations with optional RETURNING clause for retrieving affected rows.
 
 ### Sequence Diagram
 
 ```mermaid
 sequenceDiagram
-    participant App as Application
-    participant ORM as OrmInstance
-    participant V as validateIdentifier()
-    participant K as Kysely
-    participant C as Compiler
-    participant DB as Database
+    participant U as User Code
+    participant MB as MutationBuilder (mutation-builders.ts)
+    participant IB as IntentBuilder
+    participant PL as Planner
+    participant C as Compiler (compiler.ts)
+    participant A as PgsqlAdapter
+    participant PG as PostgreSQL
 
-    App->>ORM: withSchema("tenant_123")
-    ORM->>V: validateIdentifier(schema, "schema")
-    alt Invalid identifier
-        V-->>App: InvalidIdentifierError
-    else Valid identifier
-        V-->>ORM: OK
-        ORM->>K: db.withSchema("tenant_123")
-        K-->>ORM: Scoped Kysely instance
-        ORM-->>App: Tenant-scoped OrmInstance
+    U->>MB: orm.insert('users', { name: 'Alice' }).returning('*')
+    MB->>IB: buildMutationIntent()
+    IB-->>PL: MutationIntent { type: 'insert', returning: ['*'] }
+    PL-->>C: PlanReport (mutation decisions)
+    C->>C: Compile INSERT ... RETURNING
+    C-->>A: SQL + params
+    A->>PG: pool.query(sql, params)
+    PG-->>U: T[] (returned rows)
+```
+
+### RETURNING Clause Compilation
+
+The RETURNING clause is compiled in 3 locations (DRY violation -- see BACKLOG #15):
+
+| Mutation | Location | SQL Pattern |
+|----------|----------|-------------|
+| INSERT | `compiler.ts:610` | `INSERT INTO ... RETURNING ...` |
+| UPDATE | `compiler.ts:662` | `UPDATE ... SET ... RETURNING ...` |
+| DELETE | `compiler.ts:704` | `DELETE FROM ... RETURNING ...` |
+
+### Data Transformations
+
+| Step | Transformation |
+|------|---------------|
+| MutationBuilder | Fluent API -> MutationIntent |
+| Compiler | MutationIntent -> INSERT/UPDATE/DELETE AST with RETURNING node |
+| Deparser | AST -> parameterized SQL |
+| Result hydration | Raw rows -> typed `T[]` (via ResultHydrator) |
+
+### Security Checkpoints
+
+| Checkpoint | What's Validated |
+|------------|-----------------|
+| Values | All mutation values -> $N parameters |
+| Column names | Validated against ModelIR (only known columns) |
+| RETURNING columns | Validated against ModelIR |
+| Schema qualification | Applied if withSchema() active |
+
+### Test Coverage
+
+- :green_circle: Unit: `adapter-pgsql/src/__tests__/mutations.test.ts`
+- :green_circle: E2E: `tests/e2e/pimdam.q3.mutations.test.ts`
+
+---
+
+## Critical Path 6: Streaming Query (Cursor-Based)
+
+### Description
+
+Large result sets streamed via PostgreSQL cursors to avoid loading all rows into memory.
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant U as User Code
+    participant QB as QueryBuilder (orm.ts)
+    participant A as PgsqlAdapter
+    participant PG as PostgreSQL
+
+    U->>QB: orm.select('events').stream({ batchSize: 100 })
+    QB->>A: compile + stream request
+    A->>PG: BEGIN
+    A->>PG: DECLARE cursor_xxx CURSOR FOR SELECT ...
+    loop For each batch
+        A->>PG: FETCH 100 FROM cursor_xxx
+        PG-->>A: Row[] (up to 100)
+        A-->>U: yield Row[] (async iterator)
     end
-
-    App->>ORM: select('users').all()
-    ORM->>C: compile(plan, { schemaName: "tenant_123" })
-    C->>C: Prefix all tables with schema
-    C->>C: Thread schema to subqueries
-    C-->>K: CompiledQuery
-    K->>DB: SELECT * FROM "tenant_123"."users"
-    DB-->>App: Tenant-isolated results
+    A->>PG: CLOSE cursor_xxx
+    A->>PG: COMMIT
 ```
 
-### Files Involved
+### Cursor Management
 
-| File | Role | Key Lines |
-|------|------|-----------|
-| `core/src/dx/orm.ts` | withSchema() method | L120-140 |
-| `core/src/dx/errors.ts` | InvalidIdentifierError | L50-80 |
-| `adapter-kysely/src/compiler.ts` | Schema prefixing | L64, 128, 166 |
-| `adapter-kysely/src/kysely-adapter.ts` | withSchema() | L100-120 |
+| Aspect | Detail |
+|--------|--------|
+| Cursor naming | `cursor_${Math.random()}` (SEC-002: should use crypto.randomUUID) |
+| Transaction | Implicit BEGIN/COMMIT wrapping |
+| Batch size | Configurable via `stream({ batchSize: N })` |
+| Cleanup | CLOSE + COMMIT on iterator completion or error |
+| Error handling | Rollback on error, cursor always closed |
 
-### Data Transformations
+### Test Coverage
 
-| Stage | Input | Output | Validation |
-|-------|-------|--------|------------|
-| withSchema | Raw schema name | Validated name | Regex pattern |
-| Compiler | schemaName option | Prefixed SQL | N/A |
-| Execution | Prefixed query | Scoped results | DB isolation |
-
-### Security Checkpoints
-
-- ✅ Schema name validated against `IDENTIFIER_PATTERN`
-- ✅ Schema passed to Kysely's native `withSchema()`
-- ✅ Subqueries (EXISTS) also receive schema prefix
-- ✅ No SQL injection possible via schema name
-
-### Issues
-
-| Issue | Location | Impact |
-|-------|----------|--------|
-| None identified | - | - |
+- :green_circle: Unit: `adapter-pgsql/src/__tests__/streaming.test.ts`
+- :green_circle: E2E: `tests/e2e/pimdam.q5.streaming.test.ts`
 
 ---
 
-## Critical Path: Mutation with Returning
+## Data Flow Summary
 
-### Description
-
-Insert/update/delete operations with RETURNING clause for immediate result access.
-
-### Sequence Diagram
-
-```mermaid
-sequenceDiagram
-    participant App as Application
-    participant ORM as OrmInstance
-    participant MB as MutationBuilder
-    participant C as Compiler
-    participant K as KyselyAdapter
-    participant DB as Database
-
-    App->>ORM: insert('users', { name: 'John' })
-    ORM->>MB: Create insert intent
-    App->>MB: .returning(['id', 'name'])
-    MB->>MB: Add returning columns
-    App->>MB: .execute()
-    MB->>C: compileInsert(intent, options)
-    C->>C: Build INSERT ... RETURNING
-    C-->>K: CompiledQuery
-    K->>DB: INSERT INTO users (...) RETURNING id, name
-    DB-->>K: Inserted row
-    K-->>App: { id: 1, name: 'John' }
-```
-
-### Files Involved
-
-| File | Role | Key Lines |
-|------|------|-----------|
-| `core/src/dx/mutation-builders.ts` | Insert/Update/Delete builders | L1-877 |
-| `adapter-kysely/src/compiler.ts` | compileInsert | L1025-1050 |
-| `adapter-kysely/src/compiler.ts` | compileUpdate | L1052-1088 |
-| `adapter-kysely/src/compiler.ts` | compileDelete | L1090-1125 |
-| `adapter-kysely/src/compiler.ts` | compileUpsert | L1127-1355 |
-
-### Data Transformations
-
-| Stage | Input | Output | Validation |
-|-------|-------|--------|------------|
-| MutationBuilder | User data | MutationIntent | Type-safe API |
-| Compiler | MutationIntent | SQL + params | Type mapping |
-| Execution | CompiledQuery | DB results | Param binding |
-
-### Security Checkpoints
-
-- ✅ Values passed as parameters (never interpolated)
-- ✅ Column names validated at compile time
-- ✅ RETURNING columns validated against schema
-
-### Issues
-
-| Issue | Location | Impact |
-|-------|----------|--------|
-| RETURNING requires dialect support | dialect.ts | Feature availability |
-
----
-
-## Critical Path: Streaming Query
-
-### Description
-
-Large result set processing via cursor-based streaming.
-
-### Sequence Diagram
-
-```mermaid
-sequenceDiagram
-    participant App as Application
-    participant QB as QueryBuilder
-    participant K as KyselyAdapter
-    participant S as stream.ts
-    participant DB as Database
-
-    App->>QB: select('logs').stream()
-    QB->>QB: Check adapter.capabilities.supportsStreaming
-    alt Not supported
-        QB-->>App: UnsupportedCapabilityError
-    else Supported
-        QB->>K: stream(compiledQuery, options)
-        K->>S: Create AsyncIterableIterator
-        S->>DB: Open cursor
-        loop For each chunk
-            S->>DB: FETCH chunkSize
-            DB-->>S: Rows chunk
-            S-->>App: yield* rows
-        end
-        S->>DB: Close cursor
-    end
-```
-
-### Files Involved
-
-| File | Role | Key Lines |
-|------|------|-----------|
-| `core/src/dx/orm.ts` | stream() method | L800-850 |
-| `adapter-kysely/src/stream.ts` | streamQuery() | L1-277 |
-| `adapter-kysely/src/kysely-adapter.ts` | stream() method | L300-320 |
-
-### Data Transformations
-
-| Stage | Input | Output | Validation |
-|-------|-------|--------|------------|
-| QueryBuilder | Query intent | Capability check | Dialect support |
-| Adapter | CompiledQuery | Cursor | Transaction |
-| Stream | DB cursor | AsyncIterableIterator | Chunk size |
-
-### Security Checkpoints
-
-- ✅ Same security as regular queries
-- ✅ Cursor isolated within transaction
-- ✅ Memory-bounded via chunk size
-
-### Issues
-
-| Issue | Location | Impact |
-|-------|----------|--------|
-| Requires transaction support | stream.ts | DB-specific |
-
----
-
-## Summary: Critical Paths
-
-| Path | Frequency | Security | Complexity | Health |
-|------|-----------|----------|------------|--------|
-| Query Execution | Very High | ✅ | High | 🟢 |
-| Multi-tenant Query | High | ✅ | Medium | 🟢 |
-| Mutation + Returning | High | ✅ | Medium | 🟢 |
-| Streaming Query | Low | ✅ | Medium | 🟢 |
-
-All critical paths have proper security checkpoints and are well-tested.
+| Flow | Files Touched | Total LOC | Security | Test Coverage |
+|------|---------------|-----------|----------|---------------|
+| NQL -> SQL | 10+ | ~7,177 | :green_circle: Parameterized | :green_circle: Full |
+| Schema -> ModelIR | 4 | ~2,500 | :green_circle: Validated | :green_circle: Full |
+| withSchema | 5 | ~500 | :green_circle: Injection-proof | :green_circle: Unit + E2E |
+| dump() | 6 | ~3,000 | N/A (read-only) | :green_circle: Full |
+| Mutations + RETURNING | 5 | ~1,500 | :green_circle: Parameterized | :green_circle: Unit + E2E |
+| Streaming (cursors) | 3 | ~400 | :yellow_circle: Math.random cursor | :green_circle: Unit + E2E |

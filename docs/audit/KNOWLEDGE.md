@@ -1,6 +1,6 @@
 # Knowledge System Audit
 
-**Date:** 2026-01-20
+**Date:** 2026-01-31
 **Project:** db-semantic-planner
 
 ---
@@ -9,117 +9,105 @@
 
 ### Files Found
 
-| Type | Path | Lines | Last Updated | Status |
-|------|------|-------|--------------|--------|
-| README | README.md | 575 | 2026-01-15 | ✅ |
-| CLAUDE.md | CLAUDE.md | 221 | 2026-01-15 | ✅ |
-| Doc Index | docs/DOCUMENTATION_INDEX.md | 194 | 2026-01-15 | ✅ |
-| Skills | .claude/skills/project-experience/SKILL.md | 449 | 2026-01-07 | ✅ |
-| Gotchas | .claude/skills/project-experience/GOTCHAS.md | 200+ | 2026-01-19 | ✅ |
-| ADRs | docs/adrs/ | 4 files | 2026-01-15 | ✅ |
-| Specs | docs/specs/ | 15+ files | varies | ✅ |
-| Plans | docs/plans/ | 15+ files | varies | ✅ |
-| Security Reports | docs/reports/ | 2 files | 2026-01-08 | ✅ |
-| RFCs | docs/rfcs/ | 1 file | 2026-01-15 | ✅ |
-| Studies | docs/studies/ | 1 file | varies | ✅ |
-| Comparison | docs/COMPARISON.md | 620 | 2026-01-11 | ✅ |
+| Category | Count | Location |
+|----------|-------|----------|
+| Specs | 28 | `docs/specs/` |
+| ADRs | 6 | `docs/adr/` |
+| Scope indexes | 5 | `docs/scopes/` |
+| Guides | 6 | `docs/` (CLI_USAGE, PRODUCTION, etc.) |
+| TODO/Backlog | 10 | Root + `docs/` |
+| Audit | 8 | `docs/audit/` |
+| API docs | generated | `docs/api/` |
+| Root docs | 6 | README, CLAUDE.md, CHANGELOG, etc. |
+| **Total** | **~92** | - |
 
-**Total documentation files:** 58
+### Documentation Health
 
-### Missing Documentation
-
-| Expected | Reason | Priority |
-|----------|--------|----------|
-| CONTRIBUTING.md | Standard for OSS projects | P3 |
-| CHANGELOG.md | Track breaking changes | P2 |
-| API reference (generated) | Useful for library users | P3 |
+| Document | Status | Issues |
+|----------|--------|--------|
+| `README.md` | :red_circle: CRITICAL | References non-existent `@dbsp/adapter-kysely` and `@dbsp/schema` |
+| `CLAUDE.md` | :red_circle: CRITICAL | Architecture diagram references Kysely adapter |
+| `DOCUMENTATION_INDEX.md` | :red_circle: CRITICAL | Package list includes dead packages, test counts wrong |
+| `docs/specs/ARCH-002-one-ring.md` | :yellow_circle: STALE | References `packages/schema` (merged into core) |
+| `docs/specs/ARCH-006-simplified-orm-entry-point.md` | :yellow_circle: STALE | Status: "Draft" but fully implemented |
+| `TODO.md` | :green_circle: CURRENT | Epics accurately tracked |
+| `CHANGELOG.md` | :green_circle: CURRENT | Up to date |
+| `SECURITY.md` | :green_circle: CURRENT | Vulnerability policy in place |
 
 ---
 
 ## 2. Documentation as Understanding Source
 
-### Insights from Documentation
+### Where Knowledge Lives
 
-**Architectural decisions explained in docs:**
+| Type of Knowledge | Primary Source | Quality |
+|-------------------|---------------|---------|
+| Architecture decisions | `docs/adr/` (6 ADRs) | :green_circle: Well-documented rationale |
+| Implementation specs | `docs/specs/` (28 specs) | :green_circle: Detailed, implementation-ready |
+| API surface | TypeDoc-generated `docs/api/` | :green_circle: Auto-generated, always current |
+| Tradeoff rationale | ADR-002, ADR-004, CLAUDE.md | :green_circle: Documented conscious decisions |
+| Naming conventions | ARCH-003 spec | :green_circle: Complete with before/after |
+| Schema DSL design | ARCH-005 spec | :green_circle: Canonical reference |
+| Query pipeline | DATA-FLOWS.md (this audit) | :green_circle: Full sequence diagrams |
+| GOTCHAS/workarounds | `.claude/skills/project-experience/` | :green_circle: Actively maintained |
 
-| Decision | Source | Explained Why | Still Valid |
-|----------|--------|---------------|-------------|
-| Ports & Adapters | CLAUDE.md | ✅ Clear rationale | ✅ |
-| Intent-first planning | ADR-001 | ✅ Comprehensive | ✅ |
-| DX layer in core | ADR-002 | ✅ Detailed | ✅ |
-| Ink for CLI REPL | ADR-003 | ✅ Comparison included | ✅ |
-| Layered core structure | ADR-004 | ✅ Full analysis | ✅ |
-| EXISTS default for to-many | SKILL.md | ✅ Clear reasoning | ✅ |
-| Schema-per-tenant | SKILL.md | ✅ Security rationale | ✅ |
+### Key Insights from Documentation
 
-**Tradeoffs documented:**
+- **ADR-002** documents why DX layer was merged into core (reduces cross-package complexity)
+- **ADR-004** documents why core uses layered structure (Core Layer + DX Layer)
+- **ARCH-003** explains the logical/physical naming split (user-facing vs DB-facing identifiers)
+- **ARCH-005** explains why schema DSL uses `ref()` declarations instead of explicit FK definitions
+- **GOTCHAS.md** captures recurring issues (e.g., "Never duplicate production logic in test infrastructure")
 
-| Tradeoff | Source | Context |
-|----------|--------|---------|
-| JOIN vs EXISTS for filtering | SKILL.md #2 | Row explosion prevention |
-| CTE extraction threshold | planner.ts | Performance vs complexity |
-| Kysely as adapter | CLAUDE.md | Type safety vs coupling |
-| PostgreSQL-first | DOCUMENTATION_INDEX.md | Focus over breadth |
+### Understanding Gaps
 
-**Gotchas that explain "weird" code:**
-
-| Pattern | Location | GOTCHAS Entry | Validated |
-|---------|----------|---------------|-----------|
-| exactOptionalPropertyTypes | dx/orm.ts | GOTCHAS.md #1 | ✅ |
-| Via hint uses relation lookup | planner.ts | GOTCHAS.md #2 | ✅ |
-| CompiledQuery.raw() for EXPLAIN | explain.ts | GOTCHAS.md #4 | ✅ |
-| WeakMap for plugin state | various | SKILL.md #4 | ✅ |
-| Testcontainers Ryuk disabled | e2e config | GOTCHAS.md #5 | ✅ |
-| Type chain propagation | IR types | GOTCHAS.md #10 | ✅ |
-
-### Value Assessment
-
-| Question | Answer |
-|----------|--------|
-| Did docs help understand code? | ✅ Yes — comprehensive |
-| Were tradeoffs documented? | ✅ Yes — in ADRs and SKILL.md |
-| Were gotchas discoverable? | ✅ Yes — well-organized |
+| Gap | Impact | Recommendation |
+|-----|--------|---------------|
+| No migration guide from adapter-kysely | New users confused by old examples | Create `docs/MIGRATION.md` |
+| No architectural decision record for adapter-pgsql | Design rationale undocumented | Create ADR-007 |
+| MCP server design intent undocumented | Unclear what "Ready" means | Add design doc or update TODO_MCP.md |
 
 ---
 
-## 3. Doc ↔ Code Coherence (Gap Analysis)
+## 3. Doc-Code Coherence Analysis
 
-### Drift Detection
+### Critical Drifts (8 MAJOR)
 
-**Methodology:**
-1. Compared documented patterns vs actual implementation
-2. Checked API docs vs real endpoints
-3. Verified README setup instructions
-4. Cross-checked SKILL.md patterns with codebase
+| # | Document | Claim | Reality | Severity |
+|---|----------|-------|---------|----------|
+| 1 | README.md:18-19 | `pnpm add @dbsp/adapter-kysely` | Package sunset 2026-01-30; use `@dbsp/adapter-pgsql` | **CRITICAL** |
+| 2 | README.md:22,35 | `import from '@dbsp/schema'` | Package never existed; use `@dbsp/core` | **CRITICAL** |
+| 3 | CLAUDE.md:20-40 | Architecture shows `@dbsp/adapter-kysely` | Should be `@dbsp/adapter-pgsql` | **CRITICAL** |
+| 4 | DOCUMENTATION_INDEX.md:20-27 | Package list includes `adapter-kysely` | Actual: adapter-pgsql, cli, core, mcp-server, nql, types | **MAJOR** |
+| 5 | DOCUMENTATION_INDEX.md:16 | "1,971 unit tests" | Actual: ~2,159 tests | **MAJOR** |
+| 6 | ARCH-002 spec:25-26 | `packages/schema` path | Schema DSL in `packages/core/src/dx/schema.ts` | **MAJOR** |
+| 7 | ARCH-006 spec:2 | Status: "Draft" | Fully implemented in `core/src/dx/orm.ts:71` | **MAJOR** |
+| 8 | README code examples | `createKyselyAdapter(kysely)` | Should be `createPgsqlAdapter(pgPool)` | **CRITICAL** |
 
-### Findings
+### Root Cause
 
-| Document | Claim | Reality | Drift Level |
-|----------|-------|---------|-------------|
-| DOCUMENTATION_INDEX.md | "packages/schema" | Merged into core (ARCH-003) | 🟡 Minor |
-| SKILL.md:L20 | "packages/dx" as separate | DX in core since ADR-002 | 🟡 Minor |
-| DOCUMENTATION_INDEX.md:L16 | "v1.0 Ready" | mcp-server incomplete | 🟡 Minor |
-| README.md | Setup instructions | Match current API | 🟢 Accurate |
-| CLAUDE.md | Architecture rules | Match implementation | 🟢 Accurate |
-| Security audit | 2026-01-08 | Still accurate | 🟢 Accurate |
-
-### Drift by Severity
-
-| Level | Count | Examples |
-|-------|-------|----------|
-| 🔴 Major (doc is wrong) | 0 | N/A |
-| 🟡 Minor (doc is incomplete) | 3 | Package references need update |
-| 🟢 Accurate | 55 | Most documentation |
+The adapter-kysely sunset (2026-01-30, commit `2f9a603`) created significant documentation debt. User-facing docs were not updated when the architectural change occurred.
 
 ### Drift Score
 
 | Metric | Value |
 |--------|-------|
-| Docs checked | 58 |
-| Accurate | 55 |
-| Minor drift | 3 |
-| Major drift | 0 |
-| **Coherence rate** | **95%** |
+| Docs checked | 15 |
+| Accurate | 7 |
+| Minor drift | 0 |
+| Major drift | 8 |
+| **Coherence rate** | **47%** |
+
+### Verified Accurate Documentation
+
+| Document | Status |
+|----------|--------|
+| ADR-002 (dx merged into core) | :green_circle: Accurate |
+| ADR-004 (core layered structure) | :green_circle: Accurate |
+| Dependency rules (CLAUDE.md:65-68) | :green_circle: Accurate |
+| Tech stack (CLAUDE.md:120-127) | :green_circle: Accurate |
+| All `docs/` quick links | :green_circle: Files exist |
+| API docs (`docs/api/`) | :green_circle: Generated |
 
 ---
 
@@ -129,45 +117,42 @@
 
 | Criterion | Score | Notes |
 |-----------|-------|-------|
-| Clear hierarchy (headings) | 9/10 | Consistent use of H1-H4 |
-| Table of contents | 8/10 | Present in main docs |
-| Cross-references work | 9/10 | Good linking between docs |
-| Consistent formatting | 9/10 | Tables, code blocks |
-| Searchable (keywords present) | 8/10 | Good keyword coverage |
+| Clear hierarchy (headings) | 8/10 | Consistent heading structure across docs |
+| Table of contents | 6/10 | DOCUMENTATION_INDEX.md exists but stale |
+| Cross-references work | 5/10 | Several broken references to dead packages |
+| Consistent formatting | 8/10 | Markdown tables, code blocks used consistently |
+| Searchable (keywords present) | 7/10 | Good keyword density in specs |
 
 ### Completeness
 
 | Criterion | Score | Notes |
 |-----------|-------|-------|
-| Setup instructions | 9/10 | README + examples folder |
-| Architecture overview | 10/10 | CLAUDE.md + docs/plans |
-| API documentation | 7/10 | In-code, no generated docs |
-| Decision rationale (ADRs) | 10/10 | 4 comprehensive ADRs |
-| Constraints documented | 9/10 | SKILL.md gotchas |
-| Contributing guide | 3/10 | Missing CONTRIBUTING.md |
+| Setup instructions | 3/10 | README references wrong packages |
+| Architecture overview | 8/10 | CLAUDE.md has good overview (but stale refs) |
+| API documentation | 9/10 | Auto-generated TypeDoc |
+| Decision rationale (ADRs) | 8/10 | 6 ADRs cover key decisions |
+| Constraints documented | 7/10 | NFRs in CLAUDE.md |
+| Contributing guide | 2/10 | No CONTRIBUTING.md |
 
 ### Freshness
 
 | Document | Last Updated | Last Code Change | Gap | Status |
 |----------|--------------|------------------|-----|--------|
-| DOCUMENTATION_INDEX.md | 2026-01-15 | 2026-01-19 | 4d | ⚠️ |
-| CLAUDE.md | 2026-01-15 | 2026-01-19 | 4d | ✅ |
-| SKILL.md | 2026-01-07 | 2026-01-19 | 12d | ⚠️ |
-| Security Report | 2026-01-08 | N/A | N/A | ✅ |
-
-**Freshness rules:**
-- 🟢 ✅ Updated within 30 days of related code change
-- 🟡 ⚠️ 30-90 days gap
-- 🔴 > 90 days gap or never updated
+| README.md | Pre-sunset | 2026-01-30 | >1d | :red_circle: |
+| CLAUDE.md | Pre-sunset | 2026-01-30 | >1d | :red_circle: |
+| DOCUMENTATION_INDEX.md | Pre-sunset | 2026-01-30 | >1d | :red_circle: |
+| docs/api/ | Auto-generated | Current | 0d | :green_circle: |
+| TODO.md | 2026-01-31 | Current | 0d | :green_circle: |
+| CHANGELOG.md | 2026-01-31 | Current | 0d | :green_circle: |
 
 ### Language & Clarity
 
 | Criterion | Score | Notes |
 |-----------|-------|-------|
-| Technical accuracy | 9/10 | Correct terminology |
-| Audience-appropriate | 9/10 | Developer-focused |
-| Examples present | 9/10 | Code examples in most docs |
-| No jargon without definition | 8/10 | Some terms assumed known |
+| Technical accuracy | 6/10 | Accurate where current, but stale references |
+| Audience-appropriate | 8/10 | Good developer-level detail |
+| Examples present | 4/10 | Code examples reference dead packages |
+| No jargon without definition | 7/10 | Most terms explained in specs |
 
 ---
 
@@ -176,32 +161,76 @@
 | Dimension | Weight | Score | Weighted |
 |-----------|--------|-------|----------|
 | Inventory (docs exist) | 20% | 9/10 | 1.8 |
-| Understanding value | 20% | 10/10 | 2.0 |
-| Doc-code coherence | 30% | 9/10 | 2.7 |
-| Quality (structure/nav) | 15% | 9/10 | 1.35 |
-| Freshness | 15% | 8/10 | 1.2 |
-| **Total** | **100%** | | **9.05/10** |
+| Understanding value | 20% | 8/10 | 1.6 |
+| Doc-code coherence | 30% | 4/10 | 1.2 |
+| Quality (structure/nav) | 15% | 6/10 | 0.9 |
+| Freshness | 15% | 4/10 | 0.6 |
+| **Total** | **100%** | | **6.1/10** |
 
-**Overall Status:** 🟢 Healthy
+**Overall Status:** :yellow_circle: Needs Attention
+
+**Rationale:** The documentation system is comprehensive (92 files, 28 specs, 6 ADRs) and the architecture is well-documented in specs/ADRs. However, user-facing documentation (README, CLAUDE.md) is critically outdated due to the adapter-kysely sunset. New users following README instructions will encounter immediate failures. Once P0 items are fixed, the score should jump to ~8/10.
 
 ---
 
-## 6. Recommendations
+## 6. Spec Status Alignment
+
+| Spec | Doc Status | Actual Status | Action Needed |
+|------|------------|---------------|---------------|
+| ARCH-001 | Canonical | Implemented | :green_circle: Aligned |
+| ARCH-002 | Canonical | Implemented | :yellow_circle: References dead `packages/schema` |
+| ARCH-003 | Canonical | Implemented | :green_circle: Aligned |
+| ARCH-004 | Canonical | Implemented | :green_circle: Aligned |
+| ARCH-005 | Canonical | Implemented | :green_circle: Aligned |
+| ARCH-006 | **Draft** | **Implemented** | :red_circle: Update to Canonical |
+| DX-040 | **Draft** | **Complete** | :red_circle: Update to Complete |
+
+---
+
+## 7. TODO/Backlog Coherence
+
+| Backlog | Status | Notes |
+|---------|--------|-------|
+| `TODO.md` | :green_circle: | Epics accurately tracked, completed items dated |
+| `TODO_CORE.md` | :green_circle: | Aligned with core package state |
+| `TODO_ADAPTER.md` | :green_circle: | Reflects adapter-pgsql as sole adapter |
+| `TODO_DX.md` | :green_circle: | DX backlog current |
+| `TODO_MCP.md` | :yellow_circle: | MCP status "Ready" but implementation skeletal |
+| `TODO_E2E.md` | :green_circle: | E2E test tracking current |
+
+---
+
+## 8. Recommendations
 
 ### Immediate (P0)
-- None required — documentation is healthy
+
+1. **Rewrite README.md** -- Remove all `@dbsp/adapter-kysely` and `@dbsp/schema` references
+2. **Update CLAUDE.md** -- Fix architecture diagram and API examples
+3. **Update DOCUMENTATION_INDEX.md** -- Fix package list, test counts, architecture diagram
 
 ### Short-term (P1)
-- Update DOCUMENTATION_INDEX.md to reflect ARCH-003 merge
-- Update SKILL.md package references (packages/dx → packages/core/src/dx)
 
-### Medium-term (P2-P3)
-- Add CONTRIBUTING.md for OSS contributions
-- Add CHANGELOG.md for tracking breaking changes
-- Consider generating API docs from TypeScript
+4. **Update ARCH-006 spec** -- Change status from "Draft" to "Canonical"
+5. **Update DX-040 status** -- Change from "draft" to "complete" in index
+6. **Update ARCH-002 spec** -- Replace `packages/schema` references with `packages/core/src/dx/schema.ts`
+
+### Medium-term (P2)
+
+7. **Create migration guide** -- Document adapter-kysely -> adapter-pgsql migration
+8. **Audit all code examples** -- Ensure examples use current API (`createPgsqlAdapter`, `schema()`, `ref()`)
+9. **Create ADR-007** -- Document adapter-pgsql design rationale
 
 ### Quick Wins
-- [x] GOTCHAS.md is comprehensive and current
-- [x] ADRs explain all major decisions
-- [ ] Fix minor package path references in 3 docs (~30 min)
-- [ ] Add CONTRIBUTING.md (~1h)
+
+- [ ] Fix README package references (P0, ~30 min)
+- [ ] Update CLAUDE.md architecture diagram (P0, ~30 min)
+- [ ] Update DOCUMENTATION_INDEX.md counts (P0, ~15 min)
+- [ ] Change ARCH-006 status to Canonical (P1, ~5 min)
+
+---
+
+## Documentation Score: 4/10 :red_circle:
+
+**Rationale:** Architecture is well-documented in specs/ADRs, but user-facing documentation (README, CLAUDE.md) is critically outdated due to the adapter-kysely sunset. New users following README instructions will encounter immediate failures.
+
+**Projected score after P0 fixes:** ~8/10
