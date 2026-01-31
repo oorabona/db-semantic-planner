@@ -253,25 +253,25 @@ export class NqlCompiler {
 		}
 
 		// NQL v2.1: Detect relation paths in SELECT and auto-generate includes
-		// This enables implicit relation loading via path expressions (e.g., customer.*, customer.name)
+		// Supports deep dotted paths (e.g., userRoles.role.rolePermissions.permission)
+		// by building nested IncludeIntent trees.
 		if (select && select.type === 'expressions') {
-			const detectedRelations = new Set<string>();
+			const relationPaths = new Set<string>();
 			for (const expr of select.columns) {
 				if (expr.kind === 'relationColumn') {
-					// Extract top-level relation (first segment for nested paths like category.parent)
-					const topRelation = expr.relation.split('.')[0];
-					detectedRelations.add(topRelation);
+					relationPaths.add(expr.relation);
 				}
 			}
-			// Create IncludeIntent for each detected relation (if not already present)
-			// Apply flatMode strategy at creation time to avoid mutating readonly objects
-			for (const relation of detectedRelations) {
-				const exists = allIncludes.some((inc) => inc.relation === relation);
-				if (!exists) {
-					const include: IncludeIntent = flatMode
-						? { relation, strategy: 'flat' }
-						: { relation };
-					allIncludes.push(include);
+			if (relationPaths.size > 0) {
+				const nestedIncludes = buildNestedIncludes(relationPaths, flatMode);
+				// Merge with existing includes (avoid duplicates at top level)
+				for (const inc of nestedIncludes) {
+					const exists = allIncludes.some(
+						(existing) => existing.relation === inc.relation,
+					);
+					if (!exists) {
+						allIncludes.push(inc);
+					}
 				}
 			}
 		}
@@ -1220,6 +1220,64 @@ const DEFAULT_RECURSIVE_KEYWORDS: readonly string[] = [
 	'ascendant',
 	'descendant',
 ];
+
+/**
+ * Build nested IncludeIntent[] from a set of dotted relation paths.
+ *
+ * Given paths like:
+ *   - "userRoles.role"
+ *   - "userRoles.role.rolePermissions.permission"
+ *
+ * Produces:
+ *   [{ relation: "userRoles", include: [
+ *     { relation: "role", include: [
+ *       { relation: "rolePermissions", include: [
+ *         { relation: "permission" }
+ *       ]}
+ *     ]}
+ *   ]}]
+ *
+ * Strategy-agnostic: the planner/adapter decides execution strategy.
+ * flatMode propagates to all levels when enabled.
+ */
+function buildNestedIncludes(
+	paths: Set<string>,
+	flatMode: boolean,
+): IncludeIntent[] {
+	// Build a tree structure from all paths
+	interface TreeNode {
+		children: Map<string, TreeNode>;
+	}
+	const root: TreeNode = { children: new Map() };
+
+	for (const path of paths) {
+		const segments = path.split('.');
+		let node = root;
+		for (const segment of segments) {
+			if (!node.children.has(segment)) {
+				node.children.set(segment, { children: new Map() });
+			}
+			node = node.children.get(segment)!;
+		}
+	}
+
+	// Convert tree to nested IncludeIntent[]
+	function treeToIncludes(node: TreeNode): IncludeIntent[] {
+		const includes: IncludeIntent[] = [];
+		for (const [relation, child] of node.children) {
+			const childIncludes = treeToIncludes(child);
+			const include: IncludeIntent = {
+				relation,
+				...(flatMode ? { strategy: 'flat' as const } : {}),
+				...(childIncludes.length > 0 ? { include: childIncludes } : {}),
+			};
+			includes.push(include);
+		}
+		return includes;
+	}
+
+	return treeToIncludes(root);
+}
 
 /**
  * Create a compiler instance
