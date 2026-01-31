@@ -1,8 +1,12 @@
-# Adapter Scope Backlog (`packages/adapter-kysely`)
+# Adapter Scope Backlog (`packages/adapter-kysely`) — ⚠️ HISTORICAL
 
-**Package:** `packages/adapter-kysely`
-**Status:** ✅ Complete (Foundation + P1 + P2)
-**Dependencies:** `packages/core`, `kysely` (peer)
+> **⚠️ adapter-kysely was sunset on 2026-01-30 (PGSQL-SUNSET).**
+> This file is kept for historical reference only. Active adapter work is in `TODO_ADAPTER_PGSQL.md`.
+> Pending items (FTS, Range capabilities, FOR UPDATE) should be implemented in `adapter-pgsql`.
+
+**Package:** ~~`packages/adapter-kysely`~~ → `packages/adapter-pgsql`
+**Status:** ⏭️ Sunset — replaced by adapter-pgsql
+**Dependencies:** `packages/core`, `pg` (peer)
 
 ## Architecture Constraint
 

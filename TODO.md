@@ -115,7 +115,7 @@ SELECT * FROM posts WHERE userId IN (SELECT id FROM users WHERE active = true)
 **Tasks:**
 - [ ] Add `'subquery'` to IncludeStrategy type
 - [ ] Implement in planner strategy selection
-- [ ] Implement in Kysely adapter compiler
+- [ ] Implement in adapter-pgsql compiler
 - [ ] Re-enable skipped hydration tests in orm-execution.test.ts
 - [ ] Add `defaultIncludeStrategy` back to SimplifiedOrmOptions
 
@@ -568,8 +568,8 @@ Add `--output` as alias for existing `--out` option for better discoverability.
 ### DX-033: Include Execution with Hydration
 
 **Priority:** HIGH | **Effort:** M (~8h) | **Breaking:** No
-**Scope:** core, adapter-kysely
-**Depends on:** CORE-005
+**Scope:** core, adapter-pgsql
+**Depends on:** ✅ CORE-005 (done)
 
 Make `include()` actually fetch related data for hasMany relations with separate strategy.
 
@@ -799,17 +799,13 @@ Transform db-semantic-planner into a **codegen-first schema platform**:
 | # | Block | Description |
 |---|-------|-------------|
 | 8 | NQL `via` clause | Manual JOIN path disambiguation for multi-FK cases |
-| 9 | `dbsp import drizzle` | Import Drizzle schema to SoT |
-| 10 | `dbsp import prisma` | Import Prisma schema to SoT |
-| 11 | `dbsp import db` | Introspect DB to bootstrap SoT |
-| 12 | `dbsp generate drizzle` | Generate Drizzle schema from SoT |
-| 13 | Prisma adapter | Compile to `$queryRaw(Prisma.sql)` |
+| 9 | `dbsp import db` | Introspect DB to bootstrap SoT (Phase 3 introspection) |
 
-### Future Native Adapters (Long-term)
+### Future Native Adapters (Direct DB connectors — no ORM intermediary)
 
-- [ ] `db-semantic-planner/pgsql` — Native PostgreSQL (information_schema)
-- [ ] `db-semantic-planner/mysql` — Native MySQL
-- [ ] `db-semantic-planner/sqlite` — Native SQLite
+- [x] ✅ `adapter-pgsql` — Native PostgreSQL via pg Pool (2026-01-29)
+- [ ] `adapter-mysql` — Native MySQL (mysql2)
+- [ ] `adapter-sqlite` — Native SQLite (better-sqlite3)
 
 ## Recently Completed
 
@@ -1140,14 +1136,14 @@ packages/core/
     ├── scenarios.ts              # IntentAST + PlanReport attendus
     └── runner.ts                 # ConformanceTestRunner interface
 
-packages/adapter-kysely/
+packages/adapter-pgsql/
   fixtures/conformance/
-    └── expected-sql/             # SQL attendu pour Kysely
+    └── expected-sql/             # SQL attendu pour PostgreSQL
   src/conformance.test.ts         # Implémente le runner
 
-packages/adapter-drizzle/  (futur)
+packages/adapter-mysql/  (futur)
   fixtures/conformance/
-    └── expected-sql/             # SQL attendu pour Drizzle
+    └── expected-sql/             # SQL attendu pour MySQL
   src/conformance.test.ts         # Même runner, SQL différent
 ```
 
@@ -1280,49 +1276,16 @@ if (capabilities.recursivePathStyle === 'array') {
 
 ### ADAPTER-PGSQL-001: Native PostgreSQL Adapter
 
-**Priority:** MEDIUM | **Effort:** L (~20h) | **Breaking:** No
-**Spec:** [ADAPTER-PGSQL-SPIKE](docs/plans/ADAPTER-PGSQL-SPIKE.md) | **Status:** 🟡 Spec drafted
+**Priority:** MEDIUM | **Effort:** L | **Breaking:** No
+**Spec:** [ADAPTER-PGSQL-SPIKE](docs/plans/ADAPTER-PGSQL-SPIKE.md)
 
-Adapter natif PostgreSQL — Plan → PG AST → SQL via `@pgsql/deparser` (forward) + `pg_catalog` → ModelIR (backward).
-
-#### Phase 1: Spike — Forward Path (Plan → PG AST → SQL) — 12h
-- [ ] Block 1: ParamRef validation (BLOCKING gate)
-- [ ] Block 2: AST helpers + core compiler (`compilePgAst()`)
-- [ ] Block 3: Deparse + golden SQL tests (`deparseToSql()`)
-- [ ] Block 4: Roundtrip comparison vs adapter-kysely + `CompilingAdapter`
-- [ ] Block 5: Integration, build, documentation
-
-#### Phase 2: Full Forward (all compile methods)
-- [ ] INSERT / UPDATE / DELETE / UPSERT compilation
-- [ ] Window functions, LATERAL JOIN
-- [ ] Full CompilingAdapter conformance
-
-#### Phase 3: Backward (introspection)
+#### ✅ Phase 1: Forward Path (Plan → PG AST → SQL) — COMPLETE (2026-01-29)
+#### ✅ Phase 2: Full Forward (SELECT/INSERT/UPDATE/DELETE/UPSERT, Window, LATERAL, json_agg) — COMPLETE (2026-01-29)
+#### Phase 3: Backward (introspection) — PENDING
 - [ ] pg_catalog queries → ModelIR
 - [ ] Full IntrospectingAdapter implementation
-
-#### Phase 4: Execution + Sunset
-- [ ] pg driver integration (execute, stream, transact)
-- [ ] Migrate all tests from adapter-kysely
-- [ ] Deprecate adapter-kysely for PostgreSQL
-
-**Architecture (revised):**
-```
-packages/adapter-pgsql/
-  src/
-    pg-ast-helpers.ts      # Typed AST node constructors (security layer)
-    pg-compiler.ts         # compilePgAst(): PlanReport → PG AST (tree-to-tree)
-    pg-deparse.ts          # deparseToSql(): PG AST → CompiledQuery via @pgsql/deparser
-    pg-compiling-adapter.ts # CompilingAdapter implementation
-    index.ts
-  package.json             # deps: @pgsql/deparser, @dbsp/core
-```
-
-**Valeur:**
-- Tree-to-tree transformation (Plan → PG AST → SQL) — no builder API duplication
-- Full introspection via pg_catalog (PK, FK, indexes, constraints)
-- Battle-tested serializer (@pgsql/deparser: 23,000+ statement tests)
-- SQL injection impossible by construction (typed AST, ParamRef for all values)
+#### ✅ Phase 4: Execution + Sunset — COMPLETE (2026-01-30)
+- adapter-kysely sunset, adapter-pgsql is sole adapter
 
 ---
 
@@ -1939,18 +1902,18 @@ categories include all parent      # All ancestors via CTE
 - ✅ DX-022: Remove `createRecursiveQuery()`, use `include({ recursive: true })` (DONE 2026-01-10)
 
 **Architecture principle:**
-- Passthrough, pas réimplémentation : on expose ce que l'adapter supporte
-- Si Kysely/Drizzle ne supporte pas → erreur de l'adapter, pas de hack
+- Full-stack ORM: native DB connectors (pg, mysql2, better-sqlite3), no ORM intermediary
+- Each adapter compiles Plan → dialect-specific SQL directly
 
-### Multi-dialect Support (`packages/adapter-kysely`)
+### ⏭️ ~~Multi-dialect Support via adapter-kysely~~ — DROPPED
 
-See **DIALECT-001** in "In Progress" section above.
+adapter-kysely sunset (2026-01-30). Multi-dialect via native adapters (adapter-mysql, adapter-sqlite).
 
-### Additional Adapters
+### Future Native Adapters
 
-- [ ] Drizzle adapter - TBD (uses same Typed Intents, different compilation)
-- [ ] Prisma adapter - TBD (uses same Typed Intents, different compilation)
-- [x] ⏭️ Direct pg adapter - **SUPERSEDED** by ADR-001 (Typed Intents use each ORM's raw escape hatch)
+- [x] ✅ `adapter-pgsql` — PostgreSQL native (pg Pool) (2026-01-29)
+- [ ] `adapter-mysql` — MySQL native (mysql2) — TBD
+- [ ] `adapter-sqlite` — SQLite native (better-sqlite3) — TBD
 
 ### Query Features (P2)
 
@@ -2070,7 +2033,7 @@ _No open bugs._
 
 ```
 packages/core           → (nothing)
-packages/adapter-kysely → packages/core
+packages/adapter-pgsql  → packages/core
 ```
 
 Note: `packages/dx` was merged into `packages/core` in ARCH-001 (2026-01-10).
@@ -2094,11 +2057,11 @@ These features are intentionally excluded from the library's scope:
 | **NL-to-SQL / AI generation** | Separate concern, would be a different library/layer |
 | **Change tracking / dirty checking** | Not an ORM - this is a query planner |
 | **Migrations** | Use dedicated tools (Kysely migrations, Prisma, etc.) |
-| **Connection pooling** | Delegated to underlying adapter (Kysely) |
+| **Connection pooling** | Delegated to underlying driver (pg Pool) |
 
-## 🔴 Tech Debt - Type Duplication (SPEC-001 Post-Mortem)
+## ✅ Tech Debt - Type Duplication (SPEC-001 Post-Mortem) — RESOLVED (ARCH-004, 2026-01-24)
 
-**Priority:** HIGH | **Effort:** M (~1h) | **Scope:** adapter-kysely
+**Priority:** ~~HIGH~~ | **Scope:** ~~adapter-kysely~~ (sunset)
 
 ### Problem Identified
 

@@ -88,14 +88,14 @@ packages/nql/
   - Then update compiler to emit this intent for EXISTS expressions
   - Priority: LOW (workaround: use relation-based `with` + `where`)
 
-## Out-of-Scope Findings (Codex Review)
+## ⏭️ Out-of-Scope Findings (Codex Review) — OBSOLETE
 
-These were found during review but are in other packages:
+These were found in adapter-kysely which has been **sunset** (2026-01-30). Verified not applicable to adapter-pgsql:
 
-- [ ] `adapter-kysely`: Hard-coded `id` in recursive CTE (compiler.ts:1424)
-- [ ] `adapter-kysely`: GROUP BY joins use hardcoded `id` (compiler.ts:2807)
-- [ ] `cli`: Cross-table existence ignores sourceRelation (query-executor.ts:453)
-- [ ] `adapter-kysely`: columnAlias not in ORDER BY aliases (compiler.ts:2867)
+- [x] ⏭️ `adapter-kysely`: Hard-coded `id` in recursive CTE — adapter-pgsql uses parameterized `pkColumn`
+- [x] ⏭️ `adapter-kysely`: GROUP BY joins use hardcoded `id` — adapter-pgsql uses `decision.column`
+- [x] ⏭️ `cli`: Cross-table existence ignores sourceRelation — properly handled in adapter-pgsql
+- [x] ⏭️ `adapter-kysely`: columnAlias not in ORDER BY aliases — adapter-pgsql uses `ResTarget` wrapping
 
 ## Bugs from Example Testing (2026-01-23)
 
@@ -196,20 +196,14 @@ Discovered while running `examples/*.dbsp` against pg-demo PostgreSQL.
 
 ### P3 — Low (Edge Cases)
 
-- [ ] **Timestamp string becomes $ref wrapper**
-  - Example: `update products set deletedAt = "2024-12-01T00:00:00Z" where sku = "OLD-PRODUCT"`
-  - Error: `invalid input syntax for type timestamp`
-  - Root cause: Quoted strings in SET clause become `{ $ref: "..." }` instead of literal value
-  - **Solution:** Compiler should detect ISO 8601 timestamps and emit typed literal, or handle in adapter
-  - Files: `packages/nql/src/compiler/`, `packages/adapter-kysely/src/compiler/`
-  - Ref: `pimdam.assert.dbsp` query 18
+- [x] ⏭️ **Timestamp string becomes $ref wrapper** — adapter-kysely specific, NQL compiler now handles string literals correctly (2026-01-31)
 
 - [ ] **Range literal in INSERT not converted**
   - Example: `insert into priceTiers set quantityRange = "[1,50)"`
   - Error: `malformed range literal`
   - Root cause: Range string value passed as-is instead of PostgreSQL range syntax
-  - **Solution:** Detect range pattern in string values for range columns, convert to proper PostgreSQL literal
-  - Files: `packages/adapter-kysely/src/compiler/`
+  - **Solution:** Detect range pattern in mutation-compiler `valueToNode()` for range columns
+  - Files: `packages/adapter-pgsql/src/mutations/mutation-compiler.ts`
   - Ref: `scheduling.assert.dbsp` query 16
 
 ### Config/Doc (Not Bugs)
