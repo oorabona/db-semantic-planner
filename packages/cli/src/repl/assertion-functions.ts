@@ -9,8 +9,8 @@
  */
 
 import type { AssertionType, TableAssertionData } from './assertion-parser.js';
-import type { BatchResult } from './batch.js';
 import type { AssertionOutcome } from './assertion-runner.js';
+import type { BatchResult } from './batch.js';
 
 // ============================================================
 // Helpers
@@ -100,7 +100,10 @@ export function assertMatches(
 /**
  * Assert query success/failure
  */
-export function assertSuccess(actual: boolean, expected: boolean): AssertionOutcome {
+export function assertSuccess(
+	actual: boolean,
+	expected: boolean,
+): AssertionOutcome {
 	const passed = actual === expected;
 	return {
 		type: 'success',
@@ -120,7 +123,10 @@ export function assertSuccess(actual: boolean, expected: boolean): AssertionOutc
 /**
  * Assert SQL equality with normalization
  */
-export function assertSQLEquals(actual: string, expected: string): AssertionOutcome {
+export function assertSQLEquals(
+	actual: string,
+	expected: string,
+): AssertionOutcome {
 	const normalizedActual = normalizeSQL(actual);
 	const normalizedExpected = normalizeSQL(expected);
 	const passed = normalizedActual === normalizedExpected;
@@ -140,7 +146,10 @@ export function assertSQLEquals(actual: string, expected: string): AssertionOutc
  * Assert SQL contains table name (handles logical/physical naming)
  * Matches: "productImages" → product_images, productimages, "productImages"
  */
-export function assertSQLTable(sql: string, tableName: string): AssertionOutcome {
+export function assertSQLTable(
+	sql: string,
+	tableName: string,
+): AssertionOutcome {
 	const normalizedSql = sql.toLowerCase();
 	const logicalLower = tableName.toLowerCase();
 	const physicalSnake = toSnakeCase(tableName).toLowerCase();
@@ -166,7 +175,10 @@ export function assertSQLTable(sql: string, tableName: string): AssertionOutcome
 /**
  * Assert SQL contains column name
  */
-export function assertSQLColumn(sql: string, columnName: string): AssertionOutcome {
+export function assertSQLColumn(
+	sql: string,
+	columnName: string,
+): AssertionOutcome {
 	const normalizedSql = sql.toLowerCase();
 	const columnLower = columnName.toLowerCase();
 	const columnSnake = toSnakeCase(columnName).toLowerCase();
@@ -193,7 +205,10 @@ export function assertSQLColumn(sql: string, columnName: string): AssertionOutco
  * Detects: LEFT/RIGHT/INNER/FULL/CROSS JOIN, WITH clause (CTE)
  * Handles schema-qualified names: "schema"."table" and plain "table"
  */
-export function assertSQLJoin(sql: string, tableName: string): AssertionOutcome {
+export function assertSQLJoin(
+	sql: string,
+	tableName: string,
+): AssertionOutcome {
 	const normalizedSql = sql.toLowerCase();
 	const tableNameLower = tableName.toLowerCase();
 	const tableSnake = toSnakeCase(tableName).toLowerCase();

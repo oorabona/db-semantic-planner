@@ -878,15 +878,15 @@ export function relationColumn(
 // ============================================================================
 
 export {
-	WindowBuilder,
-	rowNumber,
-	rank,
 	denseRank,
-	wSum,
-	wAvg,
-	wCount,
-	wMin,
-	wMax,
 	lag,
 	lead,
+	rank,
+	rowNumber,
+	WindowBuilder,
+	wAvg,
+	wCount,
+	wMax,
+	wMin,
+	wSum,
 } from './window-functions.js';
