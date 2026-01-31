@@ -2083,3 +2083,17 @@ These features are intentionally excluded from the library's scope:
 - [x] ✅ Merge `CompilerState` interfaces - single source in compiler/types.ts (ARCH-004, 2026-01-24)
 - [x] ✅ Consolidate schema building - `buildModelFromSchema` in core/dx/schema-bridge.ts (ARCH-004, 2026-01-24)
 - [x] ✅ Add architecture tests to prevent interface shadowing (2026-01-24)
+
+## ✅ SRP Extractions - Phase 5 M-Items (2026-01-31)
+
+Behavior-preserving module splits for maintainability:
+
+- [x] ✅ **5.5** Extract `processDotCommand` + format helpers → `dot-commands.ts` (batch.ts 924→582)
+- [x] ✅ **5.6** Extract 25 assertion functions → `assertion-functions.ts` (assertion-runner.ts 1077→295)
+- [x] ✅ **5.7** Extract WindowBuilder + factory functions → `window-functions.ts` (filters.ts 1180→892)
+
+### Remaining (backlogged — L/XL effort)
+- [ ] **5.1** Split NqlCstVisitor (visitor.ts ~1300 lines) — L
+- [ ] **5.3** Refactor QueryBuilderImpl (typed-query-builder.ts ~1028 lines) — L
+- [ ] **5.4** Extend handler pattern in compiler.ts (~1250 lines) — L
+- [ ] **5.2** Refactor PgsqlAdapter (pgsql-adapter.ts ~2012 lines) — XL
