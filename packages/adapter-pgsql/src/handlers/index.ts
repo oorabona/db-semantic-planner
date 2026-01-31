@@ -16,6 +16,8 @@ import type {
 	WhereHandler,
 } from './types.js';
 
+import { registerAllWhereHandlers } from './where/index.js';
+
 // Re-export types
 export * from './types.js';
 
@@ -139,6 +141,100 @@ export function hasIncludeHandler(
 // ============================================================================
 
 /**
+ * Normalize symbolic operator names (from IntentAST) to SQL operator symbols.
+ * IntentAST uses 'eq', 'ne', 'lt', etc. but handlers register for '=', '!=', '<', etc.
+ */
+const OPERATOR_ALIASES: Record<string, string> = {
+	eq: '=',
+	ne: '!=',
+	neq: '!=',
+	lt: '<',
+	lte: '<=',
+	gt: '>',
+	gte: '>=',
+};
+
+let handlersInitialized = false;
+
+/**
+ * Ensure all WHERE handlers are registered (lazy initialization).
+ * Called on first dispatch to avoid circular import issues.
+ */
+function ensureHandlersRegistered(): void {
+	if (handlersInitialized || whereHandlers.size > 0) return;
+	handlersInitialized = true;
+	registerAllWhereHandlers();
+}
+
+/**
+ * Normalize a WhereIntent (IntentAST format) into a Decision (handler format).
+ * WhereIntent uses `kind` + `field`, Decision uses `type` + `column` + `operator`.
+ */
+function normalizeToDecision(input: Decision): Decision {
+	// If it already has `column`, it's already a Decision — pass through
+	if (input.column !== undefined) return input;
+
+	const raw = input as unknown as Record<string, unknown>;
+	const kind = raw.kind as string | undefined;
+	if (!kind) return input;
+
+	switch (kind) {
+		case 'comparison':
+			return {
+				type: 'where',
+				column: raw.field as string,
+				operator: raw.operator as string,
+				value: raw.value,
+			};
+		case 'and':
+			return {
+				type: 'and',
+				operator: 'and',
+				conditions: ((raw.conditions as unknown[]) ?? []).map((c) =>
+					normalizeToDecision(c as Decision),
+				),
+			};
+		case 'or':
+			return {
+				type: 'or',
+				operator: 'or',
+				conditions: ((raw.conditions as unknown[]) ?? []).map((c) =>
+					normalizeToDecision(c as Decision),
+				),
+			};
+		case 'not':
+			return {
+				type: 'not',
+				operator: 'not',
+				conditions: [normalizeToDecision(raw.condition as Decision)],
+			};
+		case 'null':
+			return {
+				type: 'where',
+				column: raw.field as string,
+				operator: raw.operator as string,
+			};
+		case 'in':
+			return {
+				type: 'where',
+				column: raw.field as string,
+				operator: 'in',
+				values: raw.values as readonly unknown[],
+			};
+		case 'like':
+			return {
+				type: 'where',
+				column: raw.field as string,
+				operator: raw.caseInsensitive ? 'ilike' : 'like',
+				value: raw.pattern,
+			};
+		default:
+			// Pass through for types already in Decision format or unknown
+			return input;
+	}
+}
+
+/**
  * Create a WHERE dispatcher that looks up handlers from the registry.
  */
 export function createWhereDispatcher(): WhereDispatcher {
@@ -147,9 +243,15 @@ export function createWhereDispatcher(): WhereDispatcher {
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node => {
-		const operator = decision.operator ?? '=';
+		ensureHandlersRegistered();
+		const normalized = normalizeToDecision(decision);
+		const rawOperator = normalized.operator ?? '=';
+		const operator = OPERATOR_ALIASES[rawOperator] ?? rawOperator;
 		const handler = getWhereHandler(operator);
-		return handler.compile(decision, ctx, state, createWhereDispatcher());
+		// Pass normalized decision with resolved operator so handler's switch matches
+		const resolved =
+			operator !== rawOperator ? { ...normalized, operator } : normalized;
+		return handler.compile(resolved, ctx, state, createWhereDispatcher());
 	};
 }
 
@@ -194,6 +296,7 @@ export function clearHandlers(): void {
 	whereHandlers.clear();
 	expressionHandlers.clear();
 	includeHandlers.clear();
+	handlersInitialized = false;
 }
 
 // ============================================================================

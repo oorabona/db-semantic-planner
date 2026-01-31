@@ -337,30 +337,29 @@ describe.skipIf(shouldSkipE2E())('DX-021: Window Functions E2E', () => {
 			await createExtendedPimdamSchema(SCHEMA_TENANT2);
 			// Seed with different data
 			const pool = await getTestPool();
-			const { sql } = await import('kysely');
 			// Insert only 2 variants with different prices
-			await sql`
-				INSERT INTO ${sql.ref(SCHEMA_TENANT2)}.users (id, name, email, role)
+			await pool.query(`
+				INSERT INTO ${SCHEMA_TENANT2}.users (id, name, email, role)
 				VALUES (1, 'T2 User', 't2@test.com', 'admin')
-			`.execute(pool);
-			await sql`
-				INSERT INTO ${sql.ref(SCHEMA_TENANT2)}.families (id, name, code)
+			`);
+			await pool.query(`
+				INSERT INTO ${SCHEMA_TENANT2}.families (id, name, code)
 				VALUES (1, 'Test Family', 'test')
-			`.execute(pool);
-			await sql`
-				INSERT INTO ${sql.ref(SCHEMA_TENANT2)}.categories (id, name, parent_id, path)
+			`);
+			await pool.query(`
+				INSERT INTO ${SCHEMA_TENANT2}.categories (id, name, parent_id, path)
 				VALUES (1, 'Test Cat', NULL, '/1/')
-			`.execute(pool);
-			await sql`
-				INSERT INTO ${sql.ref(SCHEMA_TENANT2)}.products (id, sku, title, category_id, family_id, active, author_id)
+			`);
+			await pool.query(`
+				INSERT INTO ${SCHEMA_TENANT2}.products (id, sku, title, category_id, family_id, active, author_id)
 				VALUES (1, 'T2-PROD', 'Tenant2 Product', 1, 1, true, 1)
-			`.execute(pool);
-			await sql`
-				INSERT INTO ${sql.ref(SCHEMA_TENANT2)}.variants (id, product_id, sku, name, price_cents, stock)
+			`);
+			await pool.query(`
+				INSERT INTO ${SCHEMA_TENANT2}.variants (id, product_id, sku, name, price_cents, stock)
 				VALUES
 					(1, 1, 'T2-V1', 'Variant A', 5000, 20),
 					(2, 1, 'T2-V2', 'Variant B', 3000, 30)
-			`.execute(pool);
+			`);
 		});
 
 		afterAll(async () => {

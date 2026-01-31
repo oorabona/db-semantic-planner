@@ -34,6 +34,8 @@ export interface BatchModeOptions {
 	databaseUrl?: string;
 	/** DEMO-E2E: Path to assertion file (.assert.dbsp) */
 	assertFile?: string;
+	/** Naming convention for identifier mapping (default: 'preserve') */
+	namingConvention?: 'camelCase' | 'snake_case' | 'preserve';
 }
 
 export interface BatchResult {
@@ -78,6 +80,8 @@ export interface BatchState {
 	model: ModelIR | undefined;
 	/** NQL v2.1: Output display format (json|table|csv) */
 	outputMode: 'json' | 'table' | 'csv';
+	/** Naming convention for identifier mapping */
+	namingConvention?: 'camelCase' | 'snake_case' | 'preserve';
 }
 
 /**
@@ -469,10 +473,14 @@ async function executeNqlQuery(
 
 	try {
 		// Compile NQL to SQL
+		const compileOptions: import('./nql-executor.js').NqlCompileOptions = {};
+		if (state.schemaName) compileOptions.schemaName = state.schemaName;
+		if (state.namingConvention)
+			compileOptions.namingConvention = state.namingConvention;
 		const result = await compileNqlToSql(
 			input,
 			state.model,
-			state.schemaName ? { schemaName: state.schemaName } : undefined,
+			Object.keys(compileOptions).length > 0 ? compileOptions : undefined,
 		);
 
 		// Determine result type for BatchResult
@@ -669,7 +677,8 @@ export interface BatchExecutionResult {
 export async function executeBatch(
 	options: BatchModeOptions,
 ): Promise<BatchExecutionResult> {
-	const { queries, schema, databaseUrl, assertFile } = options;
+	const { queries, schema, databaseUrl, assertFile, namingConvention } =
+		options;
 
 	// Initialize state
 	// ARCH-005: Use schema.model directly (already ModelIR)
@@ -683,6 +692,7 @@ export async function executeBatch(
 		explainMode: false,
 		parseMode: false,
 		model, // NQL v2: ModelIR for compileNqlToSql
+		...(namingConvention && { namingConvention }),
 		outputMode: 'json', // NQL v2.1: Default output format
 	};
 

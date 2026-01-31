@@ -54,7 +54,7 @@ output.contains: postTags
 # ─────────────────────────────────────────
 --- query: 6
 success: true
-sql.equals: select "_authors".* from "ch3_blog_extended"."authors" as "_authors"
+sql.equals: SELECT authors.* FROM ch3_blog_extended.authors
 db.rows.equals: 3
 db.output:
 | id | name           | email               | active |
@@ -68,7 +68,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.equals: select "_categories".* from "ch3_blog_extended"."categories" as "_categories"
+sql.equals: SELECT categories.* FROM ch3_blog_extended.categories
 db.rows.equals: 4
 db.output:
 | id | name            | parent_id |
@@ -83,7 +83,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.equals: select "_tags".* from "ch3_blog_extended"."tags" as "_tags"
+sql.equals: SELECT tags.* FROM ch3_blog_extended.tags
 db.rows.equals: 5
 db.output:
 | id | name       | slug       |
@@ -99,7 +99,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts"
+sql.equals: SELECT posts.* FROM ch3_blog_extended.posts
 db.rows.equals: 8
 db.output:
 | id | title                   | content                | author_id | category_id | published | featured | view_count | created_at               |
@@ -118,8 +118,8 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.equals: select "_comments".* from "ch3_blog_extended"."comments" as "_comments" limit $1
-params.equals: [10]
+sql.equals: SELECT comments.* FROM ch3_blog_extended.comments LIMIT 10
+params.equals: []
 db.rows.equals: 10
 db.output:
 | id | post_id | author_name | content                | approved | created_at               |
@@ -140,7 +140,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.equals: select "_categories".* from "ch3_blog_extended"."categories" as "_categories" where "_categories"."parent_id" is null
+sql.equals: SELECT categories.* FROM ch3_blog_extended.categories WHERE categories.parent_id IS NULL
 db.rows.equals: 2
 db.output:
 | id | name       | parent_id |
@@ -153,7 +153,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.equals: select "_categories".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch3_blog_extended"."categories" AS __t__ WHERE "__t__"."parent_id" = "_categories"."id"), '[]'::json) as "children_json" from "ch3_blog_extended"."categories" as "_categories"
+sql.equals: SELECT categories.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch3_blog_extended.categories AS __t__ WHERE __t__.parent_id = categories.id), '[]'::json) AS children_json FROM ch3_blog_extended.categories
 db.rows.equals: 4
 output.contains: children_json
 db.output:
@@ -170,7 +170,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 13
 success: true
-sql.equals: select "_categories".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch3_blog_extended"."categories" AS __t__ WHERE "__t__"."parent_id" = "_categories"."id"), '[]'::json) as "children_json" from "ch3_blog_extended"."categories" as "_categories" where "_categories"."parent_id" is null
+sql.equals: SELECT categories.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch3_blog_extended.categories AS __t__ WHERE __t__.parent_id = categories.id), '[]'::json) AS children_json FROM ch3_blog_extended.categories WHERE categories.parent_id IS NULL
 db.rows.equals: 2
 db.output.contains: Technology
 db.output.contains: Lifestyle
@@ -186,7 +186,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 14
 success: true
-sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts" where "_posts"."featured" = $1
+sql.equals: SELECT posts.* FROM ch3_blog_extended.posts WHERE posts.featured = $1
 params.equals: [true]
 db.rows.equals: 2
 db.output:
@@ -200,7 +200,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 15
 success: true
-sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts" where "_posts"."view_count" > $1
+sql.equals: SELECT posts.* FROM ch3_blog_extended.posts WHERE posts.view_count > $1
 params.equals: [1000]
 db.rows.equals: 2
 db.output:
@@ -214,8 +214,8 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 16
 success: true
-sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts" where ("_posts"."featured" = $1 and "_posts"."view_count" > $2)
-params.equals: [true, 1500]
+sql.equals: SELECT posts.* FROM ch3_blog_extended.posts WHERE posts.featured = $1 AND posts.view_count > $2
+params.equals: [true,1500]
 db.rows.equals: 1
 db.output:
 | id | title                | content              | author_id | category_id | published | featured | view_count | created_at               |
@@ -228,7 +228,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 17
 success: true
-sql.equals: select "_authors".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch3_blog_extended"."posts" AS __t__ WHERE "__t__"."author_id" = "_authors"."id"), '[]'::json) as "posts_json" from "ch3_blog_extended"."authors" as "_authors" where "_authors"."active" = $1
+sql.equals: SELECT authors.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch3_blog_extended.posts AS __t__ WHERE __t__.author_id = authors.id), '[]'::json) AS posts_json FROM ch3_blog_extended.authors WHERE authors.active = $1
 db.output:
 | id | name          | email             | active | posts_json                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 |----|---------------|-------------------|--------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -240,7 +240,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 18
 success: true
-sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts" order by "_posts"."view_count" desc
+sql.equals: SELECT posts.* FROM ch3_blog_extended.posts ORDER BY posts.view_count DESC
 db.rows.equals: 8
 db.output:
 | id | title                   | content                | author_id | category_id | published | featured | view_count | created_at               |
@@ -259,8 +259,8 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 19
 success: true
-sql.equals: select "_posts".* from "ch3_blog_extended"."posts" as "_posts" order by "_posts"."view_count" desc limit $1
-params.equals: [3]
+sql.equals: SELECT posts.* FROM ch3_blog_extended.posts ORDER BY posts.view_count DESC LIMIT 3
+params.equals: []
 db.rows.equals: 3
 db.output:
 | id | title                   | content                | author_id | category_id | published | featured | view_count | created_at               |
@@ -274,7 +274,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 20
 success: true
-sql.equals: insert into "ch3_blog_extended"."categories" ("name") values ($1)
+sql.equals: INSERT INTO ch3_blog_extended.categories ( name ) VALUES ( $1 )
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -282,7 +282,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 21
 success: true
-sql.equals: insert into "ch3_blog_extended"."tags" ("name", "slug") values ($1, $2)
+sql.equals: INSERT INTO ch3_blog_extended.tags ( name, slug ) VALUES ( $1, $2 )
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -290,7 +290,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 22
 success: true
-sql.equals: update "ch3_blog_extended"."posts" set "featured" = $1 where "id" = $2
+sql.equals: UPDATE ch3_blog_extended.posts SET featured = $1 WHERE ch3_blog_extended.posts.id = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -298,7 +298,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 23
 success: true
-sql.equals: update "ch3_blog_extended"."posts" set "view_count" = $1 where "id" = $2
+sql.equals: UPDATE ch3_blog_extended.posts SET view_count = $1 WHERE ch3_blog_extended.posts.id = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -308,7 +308,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 24
 success: true
-sql.equals: delete from "ch3_blog_extended"."posts" where "published" = $1
+sql.equals: DELETE FROM ch3_blog_extended.posts WHERE ch3_blog_extended.posts.published = $1
 db.success: false
 db.output.contains: foreign key constraint
 
@@ -317,5 +317,5 @@ db.output.contains: foreign key constraint
 # ─────────────────────────────────────────
 --- query: 25
 success: true
-sql.equals: insert into "ch3_blog_extended"."authors" ("name", "email", "active") values ($1, $2, $3) on conflict ("email") do update set "name" = $4, "email" = $5, "active" = $6
+sql.equals: INSERT INTO ch3_blog_extended.authors ( name, email, active ) VALUES ( $1, $2, $3 ) ON CONFLICT (email) DO UPDATE SET name = excluded.name, email = excluded.email, active = excluded.active
 db.rows.equals: 1

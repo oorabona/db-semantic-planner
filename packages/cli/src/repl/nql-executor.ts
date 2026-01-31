@@ -188,6 +188,8 @@ export interface NqlCompileOnlyResult {
 export interface NqlCompileOptions {
 	/** Database schema name for schema-scoped queries */
 	schemaName?: string;
+	/** Naming convention for identifier mapping (default: 'preserve') */
+	namingConvention?: 'camelCase' | 'snake_case' | 'preserve';
 }
 
 /**
@@ -224,6 +226,9 @@ export async function compileNqlToSql(
 	const adapter = createPgsqlCompileOnlyAdapter({
 		...(options?.schemaName !== undefined && {
 			schemaName: options.schemaName,
+		}),
+		...(options?.namingConvention !== undefined && {
+			namingConvention: options.namingConvention,
 		}),
 	});
 

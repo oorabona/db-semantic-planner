@@ -77,20 +77,20 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 			// Medium (M) has FR and EN images (same asset)
 			// Large (L) has no images
 			const rows = result.rows as {
-				variantSku: string;
-				variantName: string;
+				variant_sku: string;
+				variant_name: string;
 				locale: string | null;
 			}[];
 
-			// Verify we have variants (CamelCasePlugin transforms variant_name → variantName)
-			const smallVariants = rows.filter((r) => r.variantName === 'Small');
+			// Verify we have variants (raw SQL returns snake_case column names)
+			const smallVariants = rows.filter((r) => r.variant_name === 'Small');
 			expect(smallVariants.length).toBe(2); // FR and EN
 			expect(smallVariants.map((r) => r.locale).sort()).toEqual(['EN', 'FR']);
 
-			const mediumVariants = rows.filter((r) => r.variantName === 'Medium');
+			const mediumVariants = rows.filter((r) => r.variant_name === 'Medium');
 			expect(mediumVariants.length).toBe(2); // FR and EN (same asset)
 
-			const largeVariants = rows.filter((r) => r.variantName === 'Large');
+			const largeVariants = rows.filter((r) => r.variant_name === 'Large');
 			expect(largeVariants.length).toBe(1); // No images, just one row with NULL
 			expect(largeVariants[0].locale).toBeNull();
 		});
@@ -156,15 +156,15 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 
 			const variants = result.rows as {
 				sku: string;
-				imagePath: string | null;
+				image_path: string | null;
 			}[];
 			// Large has no images
 			const large = variants.find((v) => v.sku === 'TSHIRT-001-L');
-			expect(large?.imagePath).toBeNull();
+			expect(large?.image_path).toBeNull();
 
 			// Small and Medium have images
 			const small = variants.find((v) => v.sku === 'TSHIRT-001-S');
-			expect(small?.imagePath).toBeDefined();
+			expect(small?.image_path).toBeDefined();
 		});
 	});
 
@@ -191,11 +191,11 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				ORDER BY a.expires_at
 			`.execute(pool);
 
-			const expiring = result.rows as { id: number; storageKey: string }[];
+			const expiring = result.rows as { id: number; storage_key: string }[];
 			expect(expiring.length).toBeGreaterThanOrEqual(1);
-			expect(expiring.some((a) => a.storageKey.includes('expiring-soon'))).toBe(
-				true,
-			);
+			expect(
+				expiring.some((a) => a.storage_key.includes('expiring-soon')),
+			).toBe(true);
 		});
 
 		it('Q4-02: should exclude assets used only by inactive products', async () => {
@@ -218,10 +218,10 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				)
 			`.execute(pool);
 
-			const inactiveOnly = result.rows as { id: number; storageKey: string }[];
+			const inactiveOnly = result.rows as { id: number; storage_key: string }[];
 			// Asset 12 (deleted-product.jpg) is only used by deleted product
 			expect(
-				inactiveOnly.some((a) => a.storageKey.includes('deleted-product')),
+				inactiveOnly.some((a) => a.storage_key.includes('deleted-product')),
 			).toBe(true);
 		});
 
@@ -245,17 +245,17 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 			`.execute(pool);
 
 			const expiring = result.rows as {
-				storageKey: string;
-				productSku: string;
-				productTitle: string;
+				storage_key: string;
+				product_sku: string;
+				product_title: string;
 			}[];
 			expect(expiring.length).toBeGreaterThanOrEqual(1);
 
 			// Verify we have product context
 			const expiringAsset = expiring.find((a) =>
-				a.storageKey.includes('expiring'),
+				a.storage_key.includes('expiring'),
 			);
-			expect(expiringAsset?.productSku).toBe('EXPIRING-001');
+			expect(expiringAsset?.product_sku).toBe('EXPIRING-001');
 		});
 	});
 
@@ -308,12 +308,12 @@ describe.skipIf(shouldSkipE2E())('Q3-Q5: Variants and Assets', () => {
 				)
 			`.execute(pool);
 
-			const unused = result.rows as { storageKey: string; kind: string }[];
+			const unused = result.rows as { storage_key: string; kind: string }[];
 			// orphan.jpg, deleted-product.jpg, video, document should be "unused"
-			expect(unused.some((a) => a.storageKey.includes('orphan'))).toBe(true);
-			expect(unused.some((a) => a.storageKey.includes('deleted-product'))).toBe(
-				true,
-			);
+			expect(unused.some((a) => a.storage_key.includes('orphan'))).toBe(true);
+			expect(
+				unused.some((a) => a.storage_key.includes('deleted-product')),
+			).toBe(true);
 		});
 
 		it('Q5-03: should count unused assets by kind', async () => {

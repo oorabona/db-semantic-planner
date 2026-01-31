@@ -1065,6 +1065,9 @@ export class PlanCompiler {
 			const lower = range.lower ?? '';
 			const upper = range.upper ?? '';
 			paramValue = `[${lower},${upper})`;
+		} else if (typeof value === 'string' && /^\[.*,.*[)\]]$/.test(value)) {
+			// Range literal string (e.g., "[2024-01-16,2024-01-17)") from NQL parser
+			paramValue = value;
 		} else {
 			// Scalar value (for @> point containment)
 			paramValue = value;

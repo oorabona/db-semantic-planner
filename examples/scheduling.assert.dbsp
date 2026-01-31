@@ -55,7 +55,7 @@ success: true
 intent.type: query
 intent.table: rooms
 intent.hasWhere: false
-sql.equals: select "_rooms".* from "ch4_scheduling"."rooms" as "_rooms"
+sql.equals: SELECT rooms.* FROM ch4_scheduling.rooms
 db.rows.equals: 8
 db.output:
 | id | name             | capacity | floor |
@@ -75,7 +75,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.equals: select "_room_bookings".* from "ch4_scheduling"."room_bookings" as "_room_bookings"
+sql.equals: SELECT room_bookings.* FROM ch4_scheduling.room_bookings
 db.output:
 | id | room_id | booked_by     | booking_period          | purpose               |
 | -- | ------- | ------------- | ----------------------- | --------------------- |
@@ -99,7 +99,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.equals: select "_events".* from "ch4_scheduling"."events" as "_events"
+sql.equals: SELECT events.* FROM ch4_scheduling.events
 db.rows.equals: 10
 db.output:
 | id | title                 | room_id | time_slot                                           | organizer           | max_attendees |
@@ -121,7 +121,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.equals: select "_price_tiers".* from "ch4_scheduling"."price_tiers" as "_price_tiers"
+sql.equals: SELECT price_tiers.* FROM ch4_scheduling.price_tiers
 db.output:
 | id | product_name | quantity_range | unit_price |
 | -- | ------------ | -------------- | ---------- |
@@ -152,7 +152,7 @@ success: true
 intent.type: query
 intent.table: roomBookings
 intent.hasWhere: true
-sql.equals: select "_room_bookings".* from "ch4_scheduling"."room_bookings" as "_room_bookings" where "_room_bookings"."booking_period" && $1
+sql.equals: SELECT room_bookings.* FROM ch4_scheduling.room_bookings WHERE room_bookings.booking_period && CAST($1 AS daterange)
 db.output:
 | id | room_id | booked_by     | booking_period          | purpose            |
 | -- | ------- | ------------- | ----------------------- | ------------------ |
@@ -167,7 +167,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.equals: select "_room_bookings".* from "ch4_scheduling"."room_bookings" as "_room_bookings" where "_room_bookings"."booking_period" <@ $1
+sql.equals: SELECT room_bookings.* FROM ch4_scheduling.room_bookings WHERE room_bookings.booking_period <@ CAST($1 AS daterange)
 db.output:
 | id | room_id | booked_by     | booking_period          | purpose               |
 | -- | ------- | ------------- | ----------------------- | --------------------- |
@@ -190,7 +190,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.equals: select "_price_tiers".* from "ch4_scheduling"."price_tiers" as "_price_tiers" where "_price_tiers"."quantity_range" @> $1::integer
+sql.equals: SELECT price_tiers.* FROM ch4_scheduling.price_tiers WHERE price_tiers.quantity_range @> CAST($1 AS integer)
 db.output:
 | id | product_name | quantity_range | unit_price |
 | -- | ------------ | -------------- | ---------- |
@@ -205,7 +205,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 13
 success: true
-sql.equals: select "_price_tiers".* from "ch4_scheduling"."price_tiers" as "_price_tiers" where ("_price_tiers"."product_name" = $1 and "_price_tiers"."quantity_range" @> $2::integer)
+sql.equals: SELECT price_tiers.* FROM ch4_scheduling.price_tiers WHERE price_tiers.product_name = $1 AND price_tiers.quantity_range @> $2
 db.rows.equals: 0
 
 # ─────────────────────────────────────────
@@ -219,9 +219,9 @@ intent.type: query
 intent.table: rooms
 intent.with: roomBookings
 intent.hasWhere: false
-sql.equals: select "_rooms".*, COALESCE((SELECT json_agg(to_jsonb(__t__) ) FROM "ch4_scheduling"."room_bookings" AS __t__ WHERE "__t__"."room_id" = "_rooms"."id"), '[]'::json) as "room_bookings_json" from "ch4_scheduling"."rooms" as "_rooms"
+sql.equals: SELECT rooms.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch4_scheduling.room_bookings AS __t__ WHERE __t__.room_id = rooms.id), '[]'::json) AS "roomBookings_json" FROM ch4_scheduling.rooms
 db.output:
-| id | name              | capacity | floor | room_bookings_json                                                                                                                                                                                                                                                                                                                                                           |
+| id | name              | capacity | floor | roomBookings_json                                                                                                                                                                                                                                                                                                                                                           |
 | -- | ----------------- | -------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1  | Conference Room A | 20       | 1     | [{"id":1,"purpose":"Product planning","room_id":1,"booked_by":"Alice Johnson","booking_period":"[2024-01-15,2024-01-17)"},{"id":2,"purpose":"Client meeting","room_id":1,"booked_by":"Bob Smith","booking_period":"[2024-01-20,2024-01-21)"},{"id":3,"purpose":"Team workshop","room_id":1,"booked_by":"Carol White","booking_period":"[2024-01-25,2024-01-28)"}]            |
 | 2  | Conference Room B | 10       | 1     | [{"id":4,"purpose":"Interview sessions","room_id":2,"booked_by":"David Brown","booking_period":"[2024-01-10,2024-01-12)"},{"id":5,"purpose":"Code review","room_id":2,"booked_by":"Eve Davis","booking_period":"[2024-01-18,2024-01-19)"}]                                                                                                                                   |
@@ -242,7 +242,7 @@ intent.type: query
 intent.table: rooms
 intent.with: roomBookings
 intent.hasWhere: true
-sql.equals: select "_rooms".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch4_scheduling"."room_bookings" AS __t__ WHERE "__t__"."room_id" = "_rooms"."id"), '[]'::json) as "room_bookings_json" from "ch4_scheduling"."rooms" as "_rooms" where exists (select 1 as "_exists" from "ch4_scheduling"."room_bookings" as "_room_bookings" where "_room_bookings"."room_id" = "_rooms"."id" and "_room_bookings"."booking_period" && $1)
+sql.equals: SELECT rooms.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch4_scheduling.room_bookings AS __t__ WHERE __t__.room_id = rooms.id), '[]'::json) AS "roomBookings_json" FROM ch4_scheduling.rooms WHERE rooms."room_bookings.booking_period" && $1
 db.success: true
 
 # ─────────────────────────────────────────
@@ -250,7 +250,7 @@ db.success: true
 # ─────────────────────────────────────────
 --- query: 16
 success: true
-sql.equals: insert into "ch4_scheduling"."rooms" ("name", "capacity", "floor") values ($1, $2, $3)
+sql.equals: INSERT INTO ch4_scheduling.rooms ( name, capacity, floor ) VALUES ( $1, $2, $3 )
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -268,7 +268,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 18
 success: true
-sql.equals: update "ch4_scheduling"."rooms" set "capacity" = $1 where "name" = $2
+sql.equals: UPDATE ch4_scheduling.rooms SET capacity = $1 WHERE ch4_scheduling.rooms.name = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -276,7 +276,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 19
 success: true
-sql.equals: update "ch4_scheduling"."events" set "title" = $1 where "id" = $2
+sql.equals: UPDATE ch4_scheduling.events SET title = $1 WHERE ch4_scheduling.events.id = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -285,7 +285,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 20
 success: true
-sql.equals: delete from "ch4_scheduling"."room_bookings" where "id" = $1
+sql.equals: DELETE FROM ch4_scheduling.room_bookings WHERE ch4_scheduling.room_bookings.id = $1
 db.rows.equals: 0
 
 # ─────────────────────────────────────────

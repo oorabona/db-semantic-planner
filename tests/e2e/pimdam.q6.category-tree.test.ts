@@ -159,20 +159,20 @@ describe.skipIf(shouldSkipE2E())(
 				const counts = result.rows as {
 					name: string;
 					path: string;
-					productCount: string;
+					product_count: string;
 				}[];
 
 				// Electronics (/1/) should have all products in its subtree
 				const electronics = counts.find((c) => c.name === 'Electronics');
-				expect(Number(electronics?.productCount)).toBeGreaterThanOrEqual(4);
+				expect(Number(electronics?.product_count)).toBeGreaterThanOrEqual(4);
 
 				// Smartphones (/1/2/3/) has direct products
 				const smartphones = counts.find((c) => c.name === 'Smartphones');
-				expect(Number(smartphones?.productCount)).toBeGreaterThanOrEqual(4);
+				expect(Number(smartphones?.product_count)).toBeGreaterThanOrEqual(4);
 
 				// Clothing (/5/) has products in T-Shirts
 				const clothing = counts.find((c) => c.name === 'Clothing');
-				expect(Number(clothing?.productCount)).toBeGreaterThanOrEqual(1);
+				expect(Number(clothing?.product_count)).toBeGreaterThanOrEqual(1);
 			});
 
 			it('should correctly count leaf categories', async () => {
@@ -190,9 +190,9 @@ describe.skipIf(shouldSkipE2E())(
 			`.execute(pool);
 
 				const audio = (
-					result.rows as { name: string; directCount: string }[]
+					result.rows as { name: string; direct_count: string }[]
 				)[0];
-				expect(Number(audio?.directCount)).toBe(0);
+				expect(Number(audio?.direct_count)).toBe(0);
 			});
 		});
 
