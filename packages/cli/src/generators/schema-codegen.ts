@@ -151,12 +151,16 @@ function generateRefCode(
 		);
 	}
 
-	// Build the ref() call
+	// Build the ref() call — table name converted if dbCasing applies
+	const refTable =
+		options.dbCasing === 'snake_case'
+			? snakeToCamelCase(fkInfo.table)
+			: fkInfo.table;
 	let code: string;
 	if (refOptions.length === 0) {
-		code = `ref('${fkInfo.table}')`;
+		code = `ref('${refTable}')`;
 	} else {
-		code = `ref('${fkInfo.table}', { ${refOptions.join(', ')} })`;
+		code = `ref('${refTable}', { ${refOptions.join(', ')} })`;
 	}
 
 	// Add comment for original DB type if requested
@@ -259,7 +263,8 @@ function generateTableCode(
 		return `\t\t${colName}: ${code}`;
 	});
 
-	return `\t${table.name}: {\n${columnLines.join(',\n')},\n\t}`;
+	const tableName = shouldCamelCase ? snakeToCamelCase(table.name) : table.name;
+	return `\t${tableName}: {\n${columnLines.join(',\n')},\n\t}`;
 }
 
 /**
