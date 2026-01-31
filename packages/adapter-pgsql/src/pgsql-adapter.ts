@@ -10,6 +10,7 @@
 import type {
 	Adapter,
 	AdapterCapabilities,
+	AdapterLogger,
 	AdapterStreamOptions,
 	CompiledQuery,
 	CompileOptions,
@@ -195,6 +196,8 @@ export interface PgsqlAdapterOptions {
 	readonly namingConvention?: NamingConvention;
 	/** Optional model for WHERE compilation */
 	readonly model?: ModelIR;
+	/** Optional logger for debug/error messages */
+	readonly logger?: AdapterLogger;
 }
 
 // ============================================================================
@@ -223,6 +226,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly _namingConvention: NamingConvention;
 	private readonly naming: NamingPlugin;
 	private readonly model: ModelIR | undefined;
+	private readonly logger: AdapterLogger | undefined;
 	private readonly _capabilities: AdapterCapabilities;
 
 	/**
@@ -259,6 +263,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			: (options?.namingConvention ?? 'preserve');
 		this.naming = getNamingPlugin(this._namingConvention);
 		this.model = options?.model;
+		this.logger = options?.logger;
 
 		// PostgreSQL capabilities — streaming requires a connection
 		this._capabilities = {
@@ -1749,9 +1754,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				if (!committed) {
 					try {
 						await client.query('ROLLBACK');
-					} catch (_rollbackErr) {
+					} catch (rollbackErr) {
 						// Rollback errors during cleanup are non-actionable;
 						// the connection returns to the pool regardless.
+						adapter.logger?.debug?.(
+							'Rollback failed during cleanup',
+							rollbackErr,
+						);
 					}
 				}
 				client.release();

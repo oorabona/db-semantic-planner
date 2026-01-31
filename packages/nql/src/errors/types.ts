@@ -73,6 +73,8 @@ export const NqlErrorCodes = {
 	SEM_DUPLICATE_BINDING: 'ERR-SEM-004',
 	SEM_UNKNOWN_TABLE: 'ERR-SEM-005',
 	SEM_INVALID_IDENTIFIER: 'ERR-SEM-006',
+	SEM_INVALID_SYNTAX: 'ERR-SEM-007',
+	SEM_UNREACHABLE: 'ERR-SEM-008',
 
 	// Limit errors
 	LIMIT_SUBQUERY_DEPTH: 'ERR-LIMIT-001',
@@ -139,4 +141,31 @@ export function createSemanticError(
 		suggestion,
 		relatedSymbol,
 	};
+}
+
+/**
+ * Throwable semantic error class.
+ * Extends Error for compatibility with catch/toThrow patterns
+ * while carrying structured NQL error metadata.
+ */
+export class NqlSemanticException extends Error {
+	readonly code: `ERR-SEM-${string}`;
+	readonly location?: SourceLocation;
+	readonly suggestion?: string;
+	readonly relatedSymbol?: string;
+
+	constructor(
+		code: string,
+		message: string,
+		location?: SourceLocation,
+		suggestion?: string,
+		relatedSymbol?: string,
+	) {
+		super(message);
+		this.name = 'NqlSemanticException';
+		this.code = code as `ERR-SEM-${string}`;
+		this.location = location;
+		this.suggestion = suggestion;
+		this.relatedSymbol = relatedSymbol;
+	}
 }
