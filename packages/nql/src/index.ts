@@ -143,15 +143,16 @@ export function parse(
 }
 
 /**
- * Parse and validate NQL input against a schema
- * (Schema validation is a future feature - currently just parses)
+ * Parse and validate NQL input against a schema.
+ *
+ * @deprecated This is a stub — it just calls `parse()`. Use `parse()` directly.
+ * Schema validation will be a separate feature when implemented.
  */
 export function validate(
 	input: string,
-	_schema: unknown, // ModelIR from @dbsp/core
+	_schema: unknown,
 	options?: ParseOptions,
 ): ParseResult<NqlProgram> {
-	// For now, just parse. Schema validation will be added in Block 6.
 	return parse(input, options);
 }
 

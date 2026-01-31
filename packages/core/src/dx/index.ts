@@ -126,7 +126,6 @@ export {
 	createNqlTag,
 	extractPseudoColumnKeywords,
 	type NqlBuilder,
-	type NqlCompilerFn,
 	type NqlTag,
 } from './nql.js';
 // Object Filter Syntax (DX-012)

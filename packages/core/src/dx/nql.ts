@@ -22,22 +22,6 @@ import { plan as executePlan } from '../planner.js';
 // ============================================================================
 
 /**
- * NQL compiler function type.
- *
- * @deprecated Since DX-040: NQL compiler is now integrated directly.
- * This type is kept for backward compatibility but will be removed in a future version.
- * You no longer need to pass `nqlCompiler` to `createOrm()`.
- */
-export type NqlCompilerFn = (
-	query: string,
-	schema: unknown,
-) => {
-	success: boolean;
-	intent?: QueryIntent;
-	errors?: Array<{ message: string }>;
-};
-
-/**
  * NQL query builder with type-safe result.
  *
  * @typeParam T - The expected result row type

@@ -39,7 +39,7 @@ import {
 	UpdateBuilder,
 	UpsertBuilder,
 } from './mutation-builders.js';
-import { createNqlTag, type NqlCompilerFn, type NqlTag } from './nql.js';
+import { createNqlTag, type NqlTag } from './nql.js';
 import {
 	isWhereIntent,
 	objectToWhereIntent,
@@ -115,20 +115,6 @@ export interface SimplifiedOrmOptions<
 	 * Enable strict mode validation (default: false).
 	 */
 	readonly strictMode?: boolean;
-
-	/**
-	 * NQL compiler function for template literal queries (DX-040).
-	 *
-	 * @example
-	 * ```typescript
-	 * const orm = createOrm({ schema, adapter });
-	 * const users = await orm.nql<{ name: string }>`users | select name`.all();
-	 * ```
-	 *
-	 * @deprecated Since DX-040: NQL compiler is now integrated directly.
-	 * This option is ignored - @dbsp/nql is automatically used.
-	 */
-	readonly nqlCompiler?: NqlCompilerFn;
 
 	/**
 	 * Optional dialect capabilities for strategy selection.
