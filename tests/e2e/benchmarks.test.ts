@@ -276,20 +276,16 @@ describe.skipIf(shouldSkipE2E())('Performance Benchmarks', () => {
 			);
 			results.push(ormResult);
 
-			// Raw SQL equivalent (via Kysely)
+			// Raw SQL equivalent (via pool.query)
 			const rawStart = performance.now();
 			for (let i = 0; i < ITERATIONS; i++) {
-				await db
-					.withSchema('acme')
-					.selectFrom('products')
-					.selectAll()
-					.execute();
+				await pool.query('SELECT * FROM acme.products');
 			}
 			const rawEnd = performance.now();
 			const rawExecutionMs = (rawEnd - rawStart) / ITERATIONS;
 
 			const overheadResult: BenchmarkResult = {
-				name: 'Raw Kysely Query',
+				name: 'Raw SQL Query',
 				compilationMs: 0,
 				executionMs: rawExecutionMs,
 				totalMs: rawExecutionMs,

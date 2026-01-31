@@ -40,7 +40,7 @@ output.matches: (R|r)elation
 # ─────────────────────────────────────────
 --- query: 4
 success: true
-sql.equals: select "users".* from "users" as "users"
+sql.equals: SELECT users.* FROM users
 params.length: 0
 
 # ─────────────────────────────────────────
@@ -48,7 +48,7 @@ params.length: 0
 # ─────────────────────────────────────────
 --- query: 5
 success: true
-sql.equals: select "posts".* from "posts" as "posts"
+sql.equals: SELECT posts.* FROM posts
 params.length: 0
 
 # ─────────────────────────────────────────
@@ -56,7 +56,7 @@ params.length: 0
 # ─────────────────────────────────────────
 --- query: 6
 success: true
-sql.equals: select "users".* from "users" as "users" where "users"."id" = $1
+sql.equals: SELECT users.* FROM users WHERE users.id = $1
 params.equals: [1]
 
 # ─────────────────────────────────────────
@@ -65,7 +65,7 @@ params.equals: [1]
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.equals: select "posts".* from "posts" as "posts" where "posts"."published" = $1
+sql.equals: SELECT posts.* FROM posts WHERE posts.published = $1
 params.equals: [true]
 
 # ─────────────────────────────────────────
@@ -74,21 +74,21 @@ params.equals: [true]
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.equals: select "posts".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "users" AS __t__ WHERE "__t__"."id" = "posts"."user_id"), '[]'::json) as "user_json" from "posts" as "posts"
+sql.equals: SELECT posts.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM users AS __t__ WHERE __t__.id = posts.user_id), '[]'::json) AS user_json FROM posts
 
 # ─────────────────────────────────────────
 # Query 9: users with posts (STRAT-SIMPLIFY: json_agg default)
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.equals: select "users".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "posts" AS __t__ WHERE "__t__"."user_id" = "users"."id"), '[]'::json) as "posts_json" from "users" as "users"
+sql.equals: SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM posts AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS posts_json FROM users
 
 # ─────────────────────────────────────────
 # Query 10: posts where published = true and authorId = 1
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.equals: select "posts".* from "posts" as "posts" where ("posts"."published" = $1 and "posts"."author_id" = $2)
+sql.equals: SELECT posts.* FROM posts WHERE posts.published = $1 AND posts.author_id = $2
 params.length: 2
 
 # ─────────────────────────────────────────
@@ -97,7 +97,7 @@ params.length: 2
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.equals: select "posts".* from "posts" as "posts" limit $1
+sql.equals: SELECT posts.* FROM posts LIMIT 10
 
 # ─────────────────────────────────────────
 # Query 12: posts limit 10 offset 20
@@ -105,4 +105,4 @@ sql.equals: select "posts".* from "posts" as "posts" limit $1
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.equals: select "posts".* from "posts" as "posts" limit $1 offset $2
+sql.equals: SELECT posts.* FROM posts LIMIT 10 OFFSET 20

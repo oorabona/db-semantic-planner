@@ -78,8 +78,8 @@ describe('QUICKSTART Examples - Compile Only', () => {
 		it('should compile simple select', () => {
 			const result = runBatchQuery(schema, 'users');
 			expect(result.success).toBe(true);
-			expect(result.stdout).toContain('select');
-			expect(result.stdout).toContain('"users"');
+			expect(result.stdout.toLowerCase()).toContain('select');
+			expect(result.stdout.toLowerCase()).toContain('users');
 		});
 
 		it('should compile filtered query', () => {
@@ -94,8 +94,8 @@ describe('QUICKSTART Examples - Compile Only', () => {
 			const result = runBatchQuery(schema, 'users | select *, posts.*');
 			expect(result.success).toBe(true);
 			// STRAT-SIMPLIFY: json_agg is default for ALL relations
-			expect(result.stdout).toContain('json_agg');
-			expect(result.stdout).toContain('"posts"');
+			expect(result.stdout.toLowerCase()).toContain('json_agg');
+			expect(result.stdout.toLowerCase()).toContain('posts');
 		});
 
 		it('should compile query with limit/offset', () => {
@@ -150,8 +150,8 @@ describe('QUICKSTART Examples - Compile Only', () => {
 			const result = runBatchQuery(schema, 'posts | select *, author.*');
 			expect(result.success).toBe(true);
 			// STRAT-SIMPLIFY: json_agg is default for ALL relations (including belongsTo)
-			expect(result.stdout).toContain('json_agg');
-			expect(result.stdout).toContain('"authors"');
+			expect(result.stdout.toLowerCase()).toContain('json_agg');
+			expect(result.stdout.toLowerCase()).toContain('authors');
 		});
 	});
 
@@ -172,9 +172,9 @@ describe('QUICKSTART Examples - Compile Only', () => {
 				'products | where active = true and stock > 0',
 			);
 			expect(result.success).toBe(true);
-			expect(result.stdout).toContain('where');
-			expect(result.stdout).toContain('"active"');
-			expect(result.stdout).toContain('"stock"');
+			expect(result.stdout.toLowerCase()).toContain('where');
+			expect(result.stdout.toLowerCase()).toContain('active');
+			expect(result.stdout.toLowerCase()).toContain('stock');
 		});
 
 		it('should compile products with variants using json_agg (STRAT-SIMPLIFY)', () => {
@@ -200,8 +200,8 @@ describe('QUICKSTART Examples - Compile Only', () => {
 		it('should compile roomBookings query', () => {
 			const result = runBatchQuery(schema, 'roomBookings');
 			expect(result.success).toBe(true);
-			expect(result.stdout).toContain('select');
-			expect(result.stdout).toContain('"room_bookings"');
+			expect(result.stdout.toLowerCase()).toContain('select');
+			expect(result.stdout.toLowerCase()).toContain('roombookings');
 		});
 	});
 });

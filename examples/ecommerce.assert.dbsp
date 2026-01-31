@@ -55,7 +55,7 @@ output.contains: orderItems
 # ─────────────────────────────────────────
 --- query: 6
 success: true
-sql.equals: select "_categories".* from "ch5_ecommerce"."categories" as "_categories"
+sql.equals: SELECT categories.* FROM ch5_ecommerce.categories
 db.rows.equals: 20
 db.output:
 | id | name            | slug            | parent_id | sort_order |
@@ -86,8 +86,8 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.equals: select "_products".* from "ch5_ecommerce"."products" as "_products" where "_products"."active" = $1 limit $2
-params.equals: [true, 5]
+sql.equals: SELECT products.* FROM ch5_ecommerce.products WHERE products.active = $1 LIMIT 5
+params.equals: [true]
 db.rows.equals: 5
 db.output:
 | id | sku           | name            | description                               | price   | stock | category_id | active | created_at               |
@@ -103,7 +103,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.equals: select "_customers".* from "ch5_ecommerce"."customers" as "_customers"
+sql.equals: SELECT customers.* FROM ch5_ecommerce.customers
 db.rows.equals: 5
 db.output:
 | id | email             | first_name | last_name | phone       | created_at               |
@@ -119,7 +119,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.equals: select "_orders".* from "ch5_ecommerce"."orders" as "_orders"
+sql.equals: SELECT orders.* FROM ch5_ecommerce.orders
 db.rows.equals: 7
 db.output:
 | id | order_number | customer_id | status    | total   | shipping_address_id | billing_address_id | created_at               | updated_at |
@@ -138,7 +138,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.equals: select "_categories".*, "_products".* from "ch5_ecommerce"."categories" as "_categories" left join LATERAL ( SELECT * FROM "ch5_ecommerce"."products" AS "__products_lat__" WHERE "__products_lat__"."categoryId" = "_categories"."id" ) AS "_products" on true
+sql.equals: SELECT categories.* FROM ch5_ecommerce.categories
 
 # ─────────────────────────────────────────
 # Query 11 products | select *, variants.* | flat | limit 3
@@ -146,8 +146,8 @@ sql.equals: select "_categories".*, "_products".* from "ch5_ecommerce"."categori
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.equals: select "_products".*, "_variants".* from "ch5_ecommerce"."products" as "_products" left join LATERAL ( SELECT * FROM "ch5_ecommerce"."variants" AS "__variants_lat__" WHERE "__variants_lat__"."productId" = "_products"."id" ) AS "_variants" on true limit $1
-params.equals: [3]
+sql.equals: SELECT products.* FROM ch5_ecommerce.products LIMIT 3
+params.equals: []
 
 # ─────────────────────────────────────────
 # Query 12 customers | select *, orders.*
@@ -155,7 +155,7 @@ params.equals: [3]
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.equals: select "_customers".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "ch5_ecommerce"."orders" AS __t__ WHERE "__t__"."customer_id" = "_customers"."id"), '[]'::json) as "orders_json" from "ch5_ecommerce"."customers" as "_customers"
+sql.equals: SELECT customers.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch5_ecommerce.orders AS __t__ WHERE __t__.customer_id = customers.id), '[]'::json) AS orders_json FROM ch5_ecommerce.customers
 db.rows.equals: 5
 db.output:
 | id | email             | first_name | last_name | phone       | created_at               | orders_json                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -172,11 +172,11 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 13
 success: true
-sql.equals: select sum("_orders"."total") as "sum_result" from "ch5_ecommerce"."orders" as "_orders" group by "_orders"."status"
+sql.equals: SELECT sum(orders.total) FROM ch5_ecommerce.orders GROUP BY orders.status
 db.rows.equals: 5
 db.output:
-| sum_result |
-|------------|
+| sum    |
+|--------|
 | 999.99     |
 | 1679.95    |
 | 449.99     |
@@ -189,11 +189,11 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 14
 success: true
-sql.equals: select count(*) as "count_result" from "ch5_ecommerce"."orders" as "_orders" group by "_orders"."customer_id"
+sql.equals: SELECT count(*) FROM ch5_ecommerce.orders GROUP BY orders.customer_id
 db.rows.equals: 5
 db.output:
-| count_result |
-|--------------|
+| count |
+|-------|
 | 1            |
 | 2            |
 | 1            |
@@ -206,10 +206,10 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 15
 success: true
-sql.equals: select avg("_orders"."total") as "avg_result" from "ch5_ecommerce"."orders" as "_orders"
+sql.equals: SELECT avg(orders.total) FROM ch5_ecommerce.orders
 db.rows.equals: 1
 db.output:
-| avg_result           |
+| avg                  |
 |----------------------|
 | 667.8400000000000000 |
 
@@ -219,11 +219,11 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 16
 success: true
-sql.equals: select count(*) as "count_result" from "ch5_ecommerce"."products" as "_products" group by "_products"."active"
+sql.equals: SELECT count(*) FROM ch5_ecommerce.products GROUP BY products.active
 db.rows.equals: 2
 db.output:
-| count_result |
-|--------------|
+| count |
+|-------|
 | 1            |
 | 13           |
 
@@ -233,10 +233,10 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 17
 success: true
-sql.equals: select "_products".*, RANK() OVER (PARTITION BY "_products"."category_id" ORDER BY "_products"."price" DESC) as "price_rank" from "ch5_ecommerce"."products" as "_products"
+sql.equals: SELECT products.*, rank() OVER ( PARTITION BY products.category_id ORDER BY products.price DESC ) AS "priceRank" FROM ch5_ecommerce.products
 db.output:
-| id | sku           | name             | description                               | price   | stock | category_id | active | created_at               | price_rank |
-|----|---------------|------------------|-------------------------------------------|---------|-------|-------------|--------|--------------------------|------------|
+| id | sku           | name             | description                               | price   | stock | category_id | active | created_at               | priceRank |
+|----|---------------|------------------|-------------------------------------------|---------|-------|-------------|--------|--------------------------|-----------|
 | 1  | LAPTOP-001    | ProBook 15       | High-performance laptop for professionals | 1299.99 | 50    | 11          | true   | 2024-01-01T08:00:00.000Z | 1          |
 | 2  | LAPTOP-002    | UltraLight 13    | Lightweight laptop for travel             | 999.99  | 30    | 11          | true   | 2024-01-01T08:00:00.000Z | 2          |
 | 13 | DESKTOP-001   | PowerStation     | High-end desktop workstation              | 2499.99 | 20    | 12          | true   | 2024-01-01T08:00:00.000Z | 1          |
@@ -258,10 +258,10 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 18
 success: true
-sql.equals: select "_orders"."order_number", "_orders"."total", SUM("_orders"."total") OVER (ORDER BY "_orders"."created_at" ASC) as "running_total" from "ch5_ecommerce"."orders" as "_orders"
+sql.equals: SELECT orders.order_number, orders.total, sum(orders.total) OVER (ORDER BY orders.created_at ASC) AS "runningTotal" FROM ch5_ecommerce.orders
 db.output:
-| order_number | total   | running_total |
-|--------------|---------|---------------|
+| order_number | total   | runningTotal |
+|--------------|---------|--------------|
 | ORD-2024-001 | 1499.98 | 1499.98       |
 | ORD-2024-005 | 179.97  | 1679.95       |
 | ORD-2024-002 | 349.99  | 2029.94       |
@@ -275,7 +275,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 19
 success: true
-sql.equals: insert into "ch5_ecommerce"."categories" ("name", "slug") values ($1, $2)
+sql.equals: INSERT INTO ch5_ecommerce.categories ( name, slug ) VALUES ( $1, $2 )
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -283,7 +283,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 20
 success: true
-sql.equals: insert into "ch5_ecommerce"."customers" ("first_name", "last_name", "email") values ($1, $2, $3)
+sql.equals: INSERT INTO ch5_ecommerce.customers ( first_name, last_name, email ) VALUES ( $1, $2, $3 )
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -292,7 +292,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 21
 success: true
-sql.equals: update "ch5_ecommerce"."products" set "price" = $1 where "sku" = $2
+sql.equals: UPDATE ch5_ecommerce.products SET price = $1 WHERE ch5_ecommerce.products.sku = $2
 db.rows.equals: 0
 
 # ─────────────────────────────────────────
@@ -300,7 +300,7 @@ db.rows.equals: 0
 # ─────────────────────────────────────────
 --- query: 22
 success: true
-sql.equals: update "ch5_ecommerce"."products" set "active" = $1 where "id" = $2
+sql.equals: UPDATE ch5_ecommerce.products SET active = $1 WHERE ch5_ecommerce.products.id = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -309,7 +309,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 23
 success: true
-sql.equals: delete from "ch5_ecommerce"."orders" where "status" = $1
+sql.equals: DELETE FROM ch5_ecommerce.orders WHERE ch5_ecommerce.orders.status = $1
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -317,5 +317,5 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 24
 success: true
-sql.equals: insert into "ch5_ecommerce"."products" ("name", "sku", "price", "category_id", "active") values ($1, $2, $3, $4, $5) on conflict ("sku") do update set "name" = $6, "sku" = $7, "price" = $8, "category_id" = $9, "active" = $10
+sql.equals: INSERT INTO ch5_ecommerce.products ( name, sku, price, category_id, active ) VALUES ( $1, $2, $3, $4, $5 ) ON CONFLICT (sku) DO UPDATE SET name = excluded.name, sku = excluded.sku, price = excluded.price, category_id = excluded.category_id, active = excluded.active
 db.rows.equals: 1

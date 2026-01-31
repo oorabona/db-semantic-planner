@@ -76,10 +76,10 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			`.execute(pool);
 
 			const product = (
-				result.rows as { authorName: string; reviewerName: string }[]
+				result.rows as { author_name: string; reviewer_name: string }[]
 			)[0];
-			expect(product.authorName).toBe('Alice Author');
-			expect(product.reviewerName).toBe('Bob Reviewer');
+			expect(product.author_name).toBe('Alice Author');
+			expect(product.reviewer_name).toBe('Bob Reviewer');
 		});
 
 		it('should query products by different authors', async () => {
@@ -93,9 +93,9 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				WHERE p.author_id = 2
 			`.execute(pool);
 
-			const products = result.rows as { sku: string; authorName: string }[];
+			const products = result.rows as { sku: string; author_name: string }[];
 			expect(products.length).toBeGreaterThanOrEqual(1);
-			expect(products[0].authorName).toBe('Bob Reviewer');
+			expect(products[0].author_name).toBe('Bob Reviewer');
 			// Product 5 (EXPIRING-001) has author_id=2
 			expect(products.some((p) => p.sku === 'EXPIRING-001')).toBe(true);
 		});
@@ -111,9 +111,9 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				WHERE p.reviewer_id = 3
 			`.execute(pool);
 
-			const products = result.rows as { sku: string; reviewerName: string }[];
+			const products = result.rows as { sku: string; reviewer_name: string }[];
 			expect(products.length).toBeGreaterThanOrEqual(1);
-			expect(products[0].reviewerName).toBe('Charlie Admin');
+			expect(products[0].reviewer_name).toBe('Charlie Admin');
 			// Product 4 (TSHIRT-001) has reviewer_id=3
 			expect(products.some((p) => p.sku === 'TSHIRT-001')).toBe(true);
 		});
@@ -214,14 +214,14 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				ORDER BY u.id
 			`.execute(pool);
 
-			const users = result.rows as { name: string; authoredCount: string }[];
+			const users = result.rows as { name: string; authored_count: string }[];
 			// Alice is author of most products
 			const alice = users.find((u) => u.name === 'Alice Author');
-			expect(Number(alice?.authoredCount)).toBeGreaterThanOrEqual(5);
+			expect(Number(alice?.authored_count)).toBeGreaterThanOrEqual(5);
 
 			// Bob authored only product 5
 			const bob = users.find((u) => u.name === 'Bob Reviewer');
-			expect(Number(bob?.authoredCount)).toBeGreaterThanOrEqual(1);
+			expect(Number(bob?.authored_count)).toBeGreaterThanOrEqual(1);
 		});
 
 		it('should query users with their reviewed products count', async () => {
@@ -240,14 +240,14 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 				ORDER BY u.id
 			`.execute(pool);
 
-			const users = result.rows as { name: string; reviewedCount: string }[];
+			const users = result.rows as { name: string; reviewed_count: string }[];
 			// Bob reviewed most products
 			const bob = users.find((u) => u.name === 'Bob Reviewer');
-			expect(Number(bob?.reviewedCount)).toBeGreaterThanOrEqual(5);
+			expect(Number(bob?.reviewed_count)).toBeGreaterThanOrEqual(5);
 
 			// Charlie reviewed product 4
 			const charlie = users.find((u) => u.name === 'Charlie Admin');
-			expect(Number(charlie?.reviewedCount)).toBeGreaterThanOrEqual(1);
+			expect(Number(charlie?.reviewed_count)).toBeGreaterThanOrEqual(1);
 		});
 	});
 
@@ -446,10 +446,10 @@ describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
 			expect(fkPattern.rows.length).toBe(1);
 			expect(junctionPattern.rows.length).toBe(1);
 
-			const fkResult = fkPattern.rows[0] as { authorName: string };
+			const fkResult = fkPattern.rows[0] as { author_name: string };
 			const junctionResult = junctionPattern.rows[0] as { role: string };
 
-			expect(fkResult.authorName).toBe('Alice Author');
+			expect(fkResult.author_name).toBe('Alice Author');
 			expect(junctionResult.role).toBe('main');
 		});
 	});

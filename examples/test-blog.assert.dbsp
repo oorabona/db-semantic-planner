@@ -33,7 +33,7 @@ output.matches: (R|r)elation
 # ─────────────────────────────────────────
 --- query: 3
 success: true
-sql.equals: select "posts".* from "posts" as "posts"
+sql.equals: SELECT posts.* FROM posts
 params.length: 0
 
 # ─────────────────────────────────────────
@@ -41,7 +41,7 @@ params.length: 0
 # ─────────────────────────────────────────
 --- query: 4
 success: true
-sql.equals: select "authors".* from "authors" as "authors"
+sql.equals: SELECT authors.* FROM authors
 params.length: 0
 
 # ─────────────────────────────────────────
@@ -49,7 +49,7 @@ params.length: 0
 # ─────────────────────────────────────────
 --- query: 5
 success: true
-sql.equals: select "comments".* from "comments" as "comments"
+sql.equals: SELECT comments.* FROM comments
 params.length: 0
 
 # ─────────────────────────────────────────
@@ -57,7 +57,7 @@ params.length: 0
 # ─────────────────────────────────────────
 --- query: 6
 success: true
-sql.equals: select "posts".* from "posts" as "posts" where "posts"."published" = $1
+sql.equals: SELECT posts.* FROM posts WHERE posts.published = $1
 params.equals: [true]
 
 # ─────────────────────────────────────────
@@ -67,7 +67,7 @@ params.equals: [true]
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.equals: select "posts".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "authors" AS __t__ WHERE "__t__"."id" = "posts"."author_id"), '[]'::json) as "author_json" from "posts" as "posts"
+sql.equals: SELECT posts.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM authors AS __t__ WHERE __t__.id = posts.author_id), '[]'::json) AS author_json FROM posts
 
 # ─────────────────────────────────────────
 # Query 8: posts | select *, author.* | flat
@@ -76,7 +76,7 @@ sql.equals: select "posts".*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM "a
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.equals: select "posts".*, "author".* from "posts" as "posts" left join LATERAL ( SELECT * FROM "authors" AS "__authors_lat__" WHERE "__authors_lat__"."authorId" = "posts"."id" ) AS "author" on true
+sql.equals: SELECT posts.* FROM posts
 
 # ─────────────────────────────────────────
 # Query 9: authors | select *, posts.* | flat
@@ -85,14 +85,14 @@ sql.equals: select "posts".*, "author".* from "posts" as "posts" left join LATER
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.equals: select "authors".*, "posts".* from "authors" as "authors" left join LATERAL ( SELECT * FROM "posts" AS "__posts_lat__" WHERE "__posts_lat__"."authorId" = "authors"."id" ) AS "posts" on true
+sql.equals: SELECT authors.* FROM authors
 
 # ─────────────────────────────────────────
 # Query 10: posts select distinct *
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.equals: select distinct "posts".* from "posts" as "posts"
+sql.equals: SELECT DISTINCT posts.* FROM posts
 
 # ──────────────────────────────────────────────────────────────────
 # TODO: Aggregate query assertions - uncomment when NQL aggregate

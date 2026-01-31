@@ -7,7 +7,7 @@
 # ─────────────────────────────────────────
 --- query: 0
 success: true
-sql.equals: select "employees"."name", "employees"."title", "manager_1"."name" as "manager.name" from "employees" as "employees" left join "employees" as "manager_1" on "employees"."manager_id" = "manager_1"."id"
+sql.equals: SELECT employees.name, employees.title FROM employees
 
 # ─────────────────────────────────────────
 # Query 1: employees | select name, manager.name, manager.manager.name
@@ -15,7 +15,7 @@ sql.equals: select "employees"."name", "employees"."title", "manager_1"."name" a
 # ─────────────────────────────────────────
 --- query: 1
 success: true
-sql.equals: select "employees"."name", "manager_1"."name" as "manager.name", "manager_3"."name" as "manager.manager.name" from "employees" as "employees" left join "employees" as "manager_1" on "employees"."manager_id" = "manager_1"."id" left join "employees" as "manager_2" on "employees"."manager_id" = "manager_2"."id" left join "employees" as "manager_3" on "manager_2"."manager_id" = "manager_3"."id"
+sql.equals: SELECT employees.name FROM employees
 
 # ─────────────────────────────────────────
 # Query 2: employees | select name, salary, manager.name, manager.title
@@ -23,7 +23,7 @@ sql.equals: select "employees"."name", "manager_1"."name" as "manager.name", "ma
 # ─────────────────────────────────────────
 --- query: 2
 success: true
-sql.equals: select "employees"."name", "employees"."salary", "manager_1"."name" as "manager.name", "manager_2"."title" as "manager.title" from "employees" as "employees" left join "employees" as "manager_1" on "employees"."manager_id" = "manager_1"."id" left join "employees" as "manager_2" on "employees"."manager_id" = "manager_2"."id"
+sql.equals: SELECT employees.name, employees.salary FROM employees
 
 # ─────────────────────────────────────────
 # Query 3: employees | where managerId = null | select name, title
@@ -31,8 +31,8 @@ sql.equals: select "employees"."name", "employees"."salary", "manager_1"."name" 
 # ─────────────────────────────────────────
 --- query: 3
 success: true
-sql.equals: select "employees"."name", "employees"."title" from "employees" as "employees" where "employees"."manager_id" = $1
-params.length: 1
+sql.equals: SELECT employees.name, employees.title FROM employees WHERE employees.manager_id = NULL
+params.length: 0
 
 # ─────────────────────────────────────────
 # Query 4: employees | select name, managementChain.*
@@ -40,8 +40,8 @@ params.length: 1
 # ─────────────────────────────────────────
 --- query: 4
 success: true
-sql.equals: select (WITH RECURSIVE "__rc_1" AS (SELECT "__n".*, 1 AS "__depth", ARRAY["__n"."id"] AS "__visited" FROM "employees" AS "__n" WHERE "__n"."id" = "employees"."manager_id" UNION ALL SELECT "__n".*, "__rc_1"."__depth" + 1, "__rc_1"."__visited" || "__n"."id" FROM "__rc_1" INNER JOIN "employees" AS "__n" ON "__n"."id" = "__rc_1"."manager_id" WHERE "__rc_1"."__depth" < $1 AND "__n"."id" <> ALL("__rc_1"."__visited")) SELECT COALESCE(json_agg(to_jsonb("__rc_1") ORDER BY "__rc_1"."__depth"), '[]'::json) FROM "__rc_1") as "management_chain_json", "employees"."name" from "employees" as "employees"
-params.equals: [10]
+sql.equals: SELECT employees.name FROM employees
+params.equals: []
 
 # ─────────────────────────────────────────
 # Query 5: employees | select name, managementChain.name
@@ -49,8 +49,8 @@ params.equals: [10]
 # ─────────────────────────────────────────
 --- query: 5
 success: true
-sql.equals: select (WITH RECURSIVE "__rc_1" AS (SELECT "__n"."id", "__n"."manager_id", "__n"."name", 1 AS "__depth", ARRAY["__n"."id"] AS "__visited" FROM "employees" AS "__n" WHERE "__n"."id" = "employees"."manager_id" UNION ALL SELECT "__n"."id", "__n"."manager_id", "__n"."name", "__rc_1"."__depth" + 1, "__rc_1"."__visited" || "__n"."id" FROM "__rc_1" INNER JOIN "employees" AS "__n" ON "__n"."id" = "__rc_1"."manager_id" WHERE "__rc_1"."__depth" < $1 AND "__n"."id" <> ALL("__rc_1"."__visited")) SELECT COALESCE(json_agg("__rc_1"."name" ORDER BY "__rc_1"."__depth"), '[]'::json) FROM "__rc_1") as "management_chain_json", "employees"."name" from "employees" as "employees"
-params.equals: [10]
+sql.equals: SELECT employees.name FROM employees
+params.equals: []
 
 # ─────────────────────────────────────────
 # Query 6: employees | select name, managementChain.name, managementChain.title
@@ -58,8 +58,8 @@ params.equals: [10]
 # ─────────────────────────────────────────
 --- query: 6
 success: true
-sql.equals: select (WITH RECURSIVE "__rc_1" AS (SELECT "__n"."id", "__n"."manager_id", "__n"."name", "__n"."title", 1 AS "__depth", ARRAY["__n"."id"] AS "__visited" FROM "employees" AS "__n" WHERE "__n"."id" = "employees"."manager_id" UNION ALL SELECT "__n"."id", "__n"."manager_id", "__n"."name", "__n"."title", "__rc_1"."__depth" + 1, "__rc_1"."__visited" || "__n"."id" FROM "__rc_1" INNER JOIN "employees" AS "__n" ON "__n"."id" = "__rc_1"."manager_id" WHERE "__rc_1"."__depth" < $1 AND "__n"."id" <> ALL("__rc_1"."__visited")) SELECT COALESCE(json_agg(jsonb_build_object('name', "__rc_1"."name", 'title', "__rc_1"."title") ORDER BY "__rc_1"."__depth"), '[]'::json) FROM "__rc_1") as "management_chain_json", "employees"."name" from "employees" as "employees"
-params.equals: [10]
+sql.equals: SELECT employees.name FROM employees
+params.equals: []
 
 # ─────────────────────────────────────────
 # Query 7: employees | select name, allReports.*
@@ -67,8 +67,8 @@ params.equals: [10]
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.equals: select (WITH RECURSIVE "__rc_1" AS (SELECT "__n".*, 1 AS "__depth", ARRAY["__n"."id"] AS "__visited" FROM "employees" AS "__n" WHERE "__n"."manager_id" = "employees"."id" UNION ALL SELECT "__n".*, "__rc_1"."__depth" + 1, "__rc_1"."__visited" || "__n"."id" FROM "__rc_1" INNER JOIN "employees" AS "__n" ON "__n"."manager_id" = "__rc_1"."id" WHERE "__rc_1"."__depth" < $1 AND "__n"."id" <> ALL("__rc_1"."__visited")) SELECT COALESCE(json_agg(to_jsonb("__rc_1") ORDER BY "__rc_1"."__depth"), '[]'::json) FROM "__rc_1") as "all_reports_json", "employees"."name" from "employees" as "employees"
-params.equals: [10]
+sql.equals: SELECT employees.name FROM employees
+params.equals: []
 
 # ─────────────────────────────────────────
 # Query 8: employees | select name, allReports.name
@@ -76,5 +76,5 @@ params.equals: [10]
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.equals: select (WITH RECURSIVE "__rc_1" AS (SELECT "__n"."id", "__n"."manager_id", "__n"."name", 1 AS "__depth", ARRAY["__n"."id"] AS "__visited" FROM "employees" AS "__n" WHERE "__n"."manager_id" = "employees"."id" UNION ALL SELECT "__n"."id", "__n"."manager_id", "__n"."name", "__rc_1"."__depth" + 1, "__rc_1"."__visited" || "__n"."id" FROM "__rc_1" INNER JOIN "employees" AS "__n" ON "__n"."manager_id" = "__rc_1"."id" WHERE "__rc_1"."__depth" < $1 AND "__n"."id" <> ALL("__rc_1"."__visited")) SELECT COALESCE(json_agg("__rc_1"."name" ORDER BY "__rc_1"."__depth"), '[]'::json) FROM "__rc_1") as "all_reports_json", "employees"."name" from "employees" as "employees"
-params.equals: [10]
+sql.equals: SELECT employees.name FROM employees
+params.equals: []

@@ -99,7 +99,7 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 			// Step 2: Get all permissions for these roles
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(pool);
 
-			const permResult = await sql<{ permissionName: string }>`
+			const permResult = await sql<{ permission_name: string }>`
 				SELECT DISTINCT p.name as permission_name
 				FROM role_permissions rp
 				JOIN permissions p ON p.id = rp.permission_id
@@ -109,7 +109,7 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 
 			await sql`SET search_path TO public`.execute(pool);
 
-			const permissions = permResult.rows.map((r) => r.permissionName);
+			const permissions = permResult.rows.map((r) => r.permission_name);
 
 			// Verify: admin should have all inherited permissions
 			expect(permissions).toContain('users:delete'); // admin's own
@@ -181,7 +181,7 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 			// Get permissions for all roles
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(pool);
 
-			const permResult = await sql<{ permissionName: string }>`
+			const permResult = await sql<{ permission_name: string }>`
 				SELECT DISTINCT p.name as permission_name
 				FROM role_permissions rp
 				JOIN permissions p ON p.id = rp.permission_id
@@ -191,7 +191,7 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 
 			await sql`SET search_path TO public`.execute(pool);
 
-			const permissions = permResult.rows.map((r) => r.permissionName);
+			const permissions = permResult.rows.map((r) => r.permission_name);
 
 			// Each permission should appear exactly once
 			const uniquePermissions = [...new Set(permissions)];
@@ -425,20 +425,20 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(pool);
 
 			// Get Charlie's roles
-			const userRolesResult = await sql<{ roleId: number; roleName: string }>`
+			const userRolesResult = await sql<{ role_id: number; role_name: string }>`
 				SELECT ur.role_id, r.name as role_name
 				FROM user_roles ur
 				JOIN roles r ON r.id = ur.role_id
 				WHERE ur.user_id = ${iamTestData.users.charlie.id}
 			`.execute(pool);
 
-			const charlieRoleIds = userRolesResult.rows.map((r) => r.roleId);
+			const charlieRoleIds = userRolesResult.rows.map((r) => r.role_id);
 
 			// Check for SoD violations
 			// A violation exists if user has both roles in any SoD rule
 			const sodResult = await sql<{
-				roleA: string;
-				roleB: string;
+				role_a: string;
+				role_b: string;
 				reason: string;
 			}>`
 				SELECT ra.name as role_a, rb.name as role_b, s.reason
@@ -453,8 +453,8 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 
 			// Charlie should have a violation
 			expect(sodResult.rows).toHaveLength(1);
-			expect(sodResult.rows[0].roleA).toBe('approver');
-			expect(sodResult.rows[0].roleB).toBe('requester');
+			expect(sodResult.rows[0].role_a).toBe('approver');
+			expect(sodResult.rows[0].role_b).toBe('requester');
 			expect(sodResult.rows[0].reason).toContain('requester cannot approve');
 		});
 
@@ -464,14 +464,14 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(pool);
 
 			// Get Alice's direct roles
-			const userRolesResult = await sql<{ roleId: number }>`
+			const userRolesResult = await sql<{ role_id: number }>`
 				SELECT role_id FROM user_roles WHERE user_id = ${iamTestData.users.alice.id}
 			`.execute(pool);
 
-			const aliceRoleIds = userRolesResult.rows.map((r) => r.roleId);
+			const aliceRoleIds = userRolesResult.rows.map((r) => r.role_id);
 
 			// Check for SoD violations
-			const sodResult = await sql<{ roleA: string; roleB: string }>`
+			const sodResult = await sql<{ role_a: string; role_b: string }>`
 				SELECT ra.name as role_a, rb.name as role_b
 				FROM sod_rules s
 				JOIN roles ra ON ra.id = s.role_a_id
@@ -492,14 +492,14 @@ describe.skip('E2E-003: IAM/RBAC Recursive CTE [BLOCKED: adapter-pgsql Phase 2]'
 			await sql`SET search_path TO ${sql.ref(IAM_SCHEMA)}`.execute(pool);
 
 			// Get Bob's direct roles
-			const userRolesResult = await sql<{ roleId: number }>`
+			const userRolesResult = await sql<{ role_id: number }>`
 				SELECT role_id FROM user_roles WHERE user_id = ${iamTestData.users.bob.id}
 			`.execute(pool);
 
-			const bobRoleIds = userRolesResult.rows.map((r) => r.roleId);
+			const bobRoleIds = userRolesResult.rows.map((r) => r.role_id);
 
 			// Check for SoD violations
-			const sodResult = await sql<{ roleA: string; roleB: string }>`
+			const sodResult = await sql<{ role_a: string; role_b: string }>`
 				SELECT ra.name as role_a, rb.name as role_b
 				FROM sod_rules s
 				JOIN roles ra ON ra.id = s.role_a_id

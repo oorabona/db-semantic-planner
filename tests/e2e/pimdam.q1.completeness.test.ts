@@ -95,8 +95,8 @@ describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
 				WHERE attribute_name NOT IN (SELECT attribute_name FROM filled_attrs)
 			`.execute(pool);
 
-			const missing = (result.rows as { attributeName: string }[]).map(
-				(r) => r.attributeName,
+			const missing = (result.rows as { attribute_name: string }[]).map(
+				(r) => r.attribute_name,
 			);
 			expect(missing).toContain('price');
 			expect(missing).not.toContain('name');
