@@ -1249,6 +1249,7 @@ function ReplApp({ config }: ReplAppProps) {
 				try {
 					const result = await compileNqlToSql(content, model, {
 						...(schemaName ? { schemaName } : {}),
+						...(config.dbCasing ? { dbCasing: config.dbCasing } : {}),
 					});
 
 					// Determine if this is a mutation (for dry-run handling)

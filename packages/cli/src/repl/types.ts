@@ -19,6 +19,8 @@ export interface ReplConfig {
 	initialParseMode?: boolean;
 	/** CLI-MUT: Initial exec mode for .exec (--exec flag) */
 	initialExecMode?: boolean;
+	/** CLI-CASING: DB column casing convention (describes what the DB uses) */
+	dbCasing?: 'snake_case' | 'camelCase' | 'preserve';
 }
 
 /**
