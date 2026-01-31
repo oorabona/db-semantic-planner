@@ -1,0 +1,270 @@
+# Assertions for iam.dbsp
+# Validates output from IAM/RBAC schema queries
+# Note: E2E test runner uses namingConvention: 'camelCase' → SQL uses snake_case identifiers
+
+# ─────────────────────────────────────────
+# Query 0: !DROP SCHEMA IF EXISTS iam_example CASCADE;
+# ─────────────────────────────────────────
+--- query: 0
+db.success: true
+db.output.contains: Executed SQL
+
+# ─────────────────────────────────────────
+# Query 1: !CREATE SCHEMA IF NOT EXISTS iam_example;
+# ─────────────────────────────────────────
+--- query: 1
+db.success: true
+db.output.contains: Executed SQL
+
+# ─────────────────────────────────────────
+# Query 2: .use iam_example
+# ─────────────────────────────────────────
+--- query: 2
+success: true
+output.contains: Using schema: iam_example
+
+# ─────────────────────────────────────────
+# Query 3: .import examples/iam.ddl.sql
+# ─────────────────────────────────────────
+--- query: 3
+db.success: true
+db.output.contains: Imported
+
+# ─────────────────────────────────────────
+# Query 4: .import examples/iam.seed.sql
+# ─────────────────────────────────────────
+--- query: 4
+db.success: true
+db.output.contains: Imported
+
+# ─────────────────────────────────────────
+# Query 5: .tables
+# ─────────────────────────────────────────
+--- query: 5
+success: true
+output.contains: Tables (9)
+output.contains: users
+output.contains: roles
+output.contains: permissions
+output.contains: resources
+output.contains: userRoles
+output.contains: rolePermissions
+output.contains: roleEdges
+output.contains: sodRules
+output.contains: auditLog
+
+# ─────────────────────────────────────────
+# Query 6: .relations roles
+# ─────────────────────────────────────────
+--- query: 6
+success: true
+output.contains: Relations for roles
+output.contains: roles.userRoles: hasMany
+output.contains: roles.rolePermissions: hasMany
+output.contains: roles.childEdges: hasMany
+output.contains: roles.parentEdges: hasMany
+output.contains: roles.sodRulesA: hasMany
+output.contains: roles.sodRulesB: hasMany
+
+# ─────────────────────────────────────────
+# Query 7: .schema roleEdges
+# ─────────────────────────────────────────
+--- query: 7
+success: true
+output.contains: Table: roleEdges
+output.contains: id: integer
+output.contains: parentRoleId: integer
+output.contains: childRoleId: integer
+
+# ─────────────────────────────────────────
+# Query 8: users
+# ─────────────────────────────────────────
+--- query: 8
+success: true
+sql.contains: users
+db.rows.equals: 6
+
+# ─────────────────────────────────────────
+# Query 9: users | where active = true
+# ─────────────────────────────────────────
+--- query: 9
+success: true
+sql.contains: users
+sql.contains: active
+params.equals: [true]
+db.rows.equals: 5
+
+# ─────────────────────────────────────────
+# Query 10: roles
+# ─────────────────────────────────────────
+--- query: 10
+success: true
+sql.contains: roles
+db.rows.equals: 9
+
+# ─────────────────────────────────────────
+# Query 11: roles | where active = true
+# ─────────────────────────────────────────
+--- query: 11
+success: true
+sql.contains: roles
+sql.contains: active
+params.equals: [true]
+db.rows.equals: 9
+
+# ─────────────────────────────────────────
+# Query 12: permissions
+# ─────────────────────────────────────────
+--- query: 12
+success: true
+sql.contains: permissions
+db.rows.equals: 13
+
+# ─────────────────────────────────────────
+# Query 13: permissions | where resource = 'users'
+# ─────────────────────────────────────────
+--- query: 13
+success: true
+sql.contains: permissions
+sql.contains: resource
+params.equals: ["users"]
+db.rows.equals: 4
+
+# ─────────────────────────────────────────
+# Query 14: users | select *, userRoles.*
+# ─────────────────────────────────────────
+--- query: 14
+success: true
+sql.contains: users.*
+sql.contains: json_agg
+db.rows.equals: 6
+
+# ─────────────────────────────────────────
+# Query 15: roles | select *, rolePermissions.*
+# ─────────────────────────────────────────
+--- query: 15
+success: true
+sql.contains: roles.*
+sql.contains: json_agg
+db.rows.equals: 9
+
+# ─────────────────────────────────────────
+# Query 16: userRoles | where userId = 1
+# ─────────────────────────────────────────
+--- query: 16
+success: true
+sql.contains: user_roles
+params.equals: [1]
+db.rows.equals: 1
+
+# ─────────────────────────────────────────
+# Query 17: rolePermissions | where roleId = 2
+# ─────────────────────────────────────────
+--- query: 17
+success: true
+sql.contains: role_permissions
+params.equals: [2]
+db.rows.equals: 2
+
+# ─────────────────────────────────────────
+# Query 18: roleEdges
+# ─────────────────────────────────────────
+--- query: 18
+success: true
+sql.contains: role_edges
+db.rows.equals: 7
+
+# ─────────────────────────────────────────
+# Query 19: roleEdges | select *, parentRole.*, childRole.*
+# ─────────────────────────────────────────
+--- query: 19
+success: true
+sql.contains: role_edges
+sql.contains: json_agg
+db.rows.equals: 7
+
+# ─────────────────────────────────────────
+# Query 20: sodRules
+# ─────────────────────────────────────────
+--- query: 20
+success: true
+sql.contains: sod_rules
+db.rows.equals: 2
+
+# ─────────────────────────────────────────
+# Query 21: sodRules | select *, roleA.*, roleB.*
+# ─────────────────────────────────────────
+--- query: 21
+success: true
+sql.contains: sod_rules
+sql.contains: json_agg
+db.rows.equals: 2
+
+# ─────────────────────────────────────────
+# Query 22: resources
+# ─────────────────────────────────────────
+--- query: 22
+success: true
+sql.contains: resources
+db.rows.equals: 8
+
+# ─────────────────────────────────────────
+# Query 23: resources | where parentId is null
+# ─────────────────────────────────────────
+--- query: 23
+success: true
+sql.contains: resources
+sql.contains: parent_id
+sql.contains: IS NULL
+db.rows.equals: 1
+
+# ─────────────────────────────────────────
+# Query 24: userRoles | group by roleId | select roleId, count(*) as userCount
+# ─────────────────────────────────────────
+--- query: 24
+success: true
+sql.contains: user_roles
+sql.contains: count(*)
+sql.contains: GROUP BY
+db.rows.equals: 8
+
+# ─────────────────────────────────────────
+# Query 25: rolePermissions | group by roleId | select roleId, count(*) as permCount
+# ─────────────────────────────────────────
+--- query: 25
+success: true
+sql.contains: role_permissions
+sql.contains: count(*)
+sql.contains: GROUP BY
+db.rows.equals: 9
+
+# ─────────────────────────────────────────
+# Query 26: roleEdges | group by parentRoleId | select parentRoleId, count(*) as childCount
+# ─────────────────────────────────────────
+--- query: 26
+success: true
+sql.contains: role_edges
+sql.contains: count(*)
+sql.contains: GROUP BY
+db.rows.equals: 5
+
+# ─────────────────────────────────────────
+# Query 27: users | where active = true | select *, userRoles.roleId, userRoles.role.rolePermissions.permission.*
+# ─────────────────────────────────────────
+--- query: 27
+success: true
+sql.contains: users
+sql.contains: user_roles
+sql.contains: active
+params.equals: [true]
+db.rows.equals: 5
+
+# ─────────────────────────────────────────
+# Query 28: auditLog | where action = 'login' | select userId, resource, timestamp
+# ─────────────────────────────────────────
+--- query: 28
+success: true
+sql.contains: audit_log
+sql.contains: action
+params.equals: ["login"]
+db.rows.equals: 4

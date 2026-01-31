@@ -1,0 +1,88 @@
+# IAM / RBAC Example
+# Demonstrates: junction tables, edge-table hierarchy, dual-FK disambiguation,
+# self-ref adjacency list, SoD rules, aggregation, audit trail.
+#
+# Usage:
+#   pnpm dbsp repl --schema ./examples/iam.schema.ts \
+#     --db postgresql://postgres:demo@localhost:5432/demo \
+#     --input ./examples/iam.dbsp
+#
+# NQL v2.1 Syntax: pipes (|) between operators
+
+# =============================================================================
+# Setup: Create isolated schema and load data
+# =============================================================================
+
+# Drop existing schema (! prefix = raw SQL)
+!DROP SCHEMA IF EXISTS iam_example CASCADE;
+
+# Create fresh schema
+!CREATE SCHEMA IF NOT EXISTS iam_example;
+
+# Set schema context
+.use iam_example
+
+# Import DDL and seed data
+.import examples/iam.ddl.sql
+.import examples/iam.seed.sql
+
+# =============================================================================
+# Explore
+# =============================================================================
+.tables
+.relations roles
+.schema roleEdges
+
+# =============================================================================
+# Basic queries
+# =============================================================================
+users
+users | where active = true
+roles
+roles | where active = true
+permissions
+permissions | where resource = 'users'
+
+# =============================================================================
+# Junction includes
+# =============================================================================
+users | select *, userRoles.*
+roles | select *, rolePermissions.*
+userRoles | where userId = 1
+rolePermissions | where roleId = 2
+
+# =============================================================================
+# Edge table — role hierarchy
+# =============================================================================
+roleEdges
+roleEdges | select *, parentRole.*, childRole.*
+
+# =============================================================================
+# SoD rules — dual-FK disambiguation
+# =============================================================================
+sodRules
+sodRules | select *, roleA.*, roleB.*
+
+# =============================================================================
+# Resources hierarchy — self-ref adjacency list
+# =============================================================================
+resources
+resources | where parentId is null
+
+# =============================================================================
+# Aggregates
+# =============================================================================
+userRoles | group by roleId | select roleId, count(*) as userCount
+rolePermissions | group by roleId | select roleId, count(*) as permCount
+roleEdges | group by parentRoleId | select parentRoleId, count(*) as childCount
+
+# =============================================================================
+# User permissions — for each active user, show their permissions
+# (traverses users -> userRoles -> roles -> rolePermissions -> permissions)
+# =============================================================================
+users | where active = true | select *, userRoles.roleId, userRoles.role.rolePermissions.permission.*
+
+# =============================================================================
+# Audit trail
+# =============================================================================
+auditLog | where action = 'login' | select userId, resource, timestamp
