@@ -1610,3 +1610,28 @@ default: v.optional(v.union([v.string(), v.number(), v.boolean()]));
 - Phase 4 features (introspect) and Phase 2 features (edge-table recursive) are still pending — related tests use `describe.skip`
 **Prevention:** Never import `kysely` or `@dbsp/adapter-kysely`. Use `@dbsp/adapter-pgsql` for all adapter needs.
 **Location:** `packages/adapter-pgsql/`, `tests/e2e/testkit/sql.ts`
+
+## belongsTo vs hasMany FK direction in EXISTS subqueries (2026-01-31)
+
+**Context:** When generating EXISTS subqueries for relation-path filters, the FK correlation direction depends on the relation type.
+**Problem:** Using the same `inner.fk = outer.id` pattern for all relations produces wrong SQL for belongsTo.
+**Root cause:** In belongsTo, the FK lives in the *source* (outer) table, not the target (inner). So the correlation must be `inner.id = outer.fk`, not `inner.fk = outer.id`.
+**Fix:** Check `relationType` on the decision: belongsTo → `inner.id = outer.fk`, hasMany/hasOne → `inner.fk = outer.id`.
+**Prevention:** Always carry `relationType` through PlanDecision when generating EXISTS. Never assume FK is always in the target table.
+**Location:** `packages/adapter-pgsql/src/compiler.ts` (compileExistsCondition)
+
+## Self-referential table EXISTS needs inner alias (2026-01-31)
+
+**Context:** When a table references itself (e.g., categories → categories via parent_id), EXISTS subqueries produce ambiguous column references.
+**Problem:** `WHERE categories.parent_id = categories.id` — both inner and outer reference the same table name.
+**Fix:** When `targetTable === sourceTable`, alias the inner table using `relationName` (e.g., `parent`). Then `WHERE parent.id = categories.parent_id`.
+**Prevention:** Always check `targetTable === sourceTable` before generating EXISTS correlation. Use `rewriteConditionTable()` to update conditions for the inner alias.
+**Location:** `packages/adapter-pgsql/src/compiler.ts` (compileExistsCondition)
+
+## json_agg filter propagation requires matching by targetTable OR relationName (2026-01-31)
+
+**Context:** When a relation is both filtered (EXISTS) and included (json_agg), the filter should appear in both subqueries.
+**Problem:** The planner may resolve relation aliases differently — EXISTS may use `author_posts` (canonical) while json_agg uses `posts` (user alias).
+**Fix:** Match by `targetTable` (always consistent) OR by `relationName`. Use `rewriteConditionTable()` to adapt conditions for the json_agg inner alias `__t__`.
+**Prevention:** Never rely solely on `relationName` matching between different decision types. Always include `targetTable` as fallback matcher.
+**Location:** `packages/adapter-pgsql/src/pgsql-adapter.ts` (compile method), `packages/adapter-pgsql/src/compiler.ts` (selectJsonAgg case)
