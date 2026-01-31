@@ -41,6 +41,7 @@
 | E2E Assertion Tables (db.output: full columns) | cli, examples | ✅ Complete (2026-01-30) |
 | Sunset adapter-kysely (PGSQL-SUNSET) | adapter-pgsql, cli, testkit | ✅ Complete (2026-01-30) |
 | PGSQL Phase 1 Compiler Bugs (PGSQL-PHASE1) | adapter-pgsql | ✅ Complete (2026-01-31) |
+| Backlog Bugs Batch (BACKLOG-BUGS) | cli, core, adapter, nql | ✅ Complete (2026-01-31) |
 
 ## Scope-Specific Backlogs
 
