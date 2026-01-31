@@ -13,7 +13,7 @@ import {
 	createBlogSchema,
 	dropBlogSchema,
 	seedBlogData,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 
 const ROOT_DIR = resolve(import.meta.dirname, '../..');
@@ -211,12 +211,11 @@ describe('QUICKSTART Examples - Compile Only', () => {
 
 // E2E tests with actual database execution
 // These tests are skipped when DATABASE_URL is not set
-describe.skipIf(shouldSkipE2E())('QUICKSTART Examples - With Database', () => {
+describe('QUICKSTART Examples - With Database', () => {
 	const SCHEMA = 'quickstart_e2e';
 
 	beforeAll(async () => {
 		// Skip setup if DATABASE_URL is not available
-		if (shouldSkipE2E()) return;
 		await dropBlogSchema(SCHEMA);
 		await createBlogSchema(SCHEMA);
 		await seedBlogData(SCHEMA);
@@ -224,7 +223,6 @@ describe.skipIf(shouldSkipE2E())('QUICKSTART Examples - With Database', () => {
 
 	afterAll(async () => {
 		// Skip teardown if DATABASE_URL is not available
-		if (shouldSkipE2E()) return;
 		await dropBlogSchema(SCHEMA);
 		await closeTestDb();
 	});

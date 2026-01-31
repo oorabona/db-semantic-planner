@@ -33,7 +33,7 @@ import {
 	getTestPool,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 import { sql as kyselySql } from './testkit/sql.js';
 
@@ -46,7 +46,7 @@ const SCHEMA = 'q8_ambiguity';
  * - Product 4 (T-Shirt): author_id=1, reviewer_id=3
  * - Product 5 (Expiring): author_id=2, reviewer_id=1
  */
-describe.skipIf(shouldSkipE2E())('Q8: Ambiguity via/role', () => {
+describe('Q8: Ambiguity via/role', () => {
 	beforeAll(async () => {
 		await dropExtendedPimdamSchema(SCHEMA);
 		await createExtendedPimdamSchema(SCHEMA);

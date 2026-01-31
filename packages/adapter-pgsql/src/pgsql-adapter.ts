@@ -66,6 +66,7 @@ import {
 	buildRecursiveCte,
 	type RecursiveCteConfig,
 } from './recursive/index.js';
+import { generateCursorName } from './streaming/cursor.js';
 import { validateIdentifier } from './validate.js';
 
 // ============================================================================
@@ -134,13 +135,34 @@ function resolveRelation(
 
 /**
  * Compute the include alias for a json_agg decision.
- * Convention: includeAlias (user-provided) takes precedence over relation (canonical).
+ * Convention: relation (canonical, resolved by planner) takes precedence over includeAlias (target table).
  */
 function resolveIncludeAlias(context: {
 	includeAlias?: string;
 	relation?: string;
 }): string | undefined {
-	return context.includeAlias ?? context.relation;
+	return context.relation ?? context.includeAlias;
+}
+
+/**
+ * Derive a foreign key name from planner context when not explicitly provided.
+ * For belongsTo: FK is in source table (e.g., posts.authorId → authors).
+ * For hasMany/hasOne: FK is in target table (e.g., authors → posts.authorId).
+ */
+function deriveForeignKey(context: {
+	foreignKey?: string | readonly string[];
+	relationType?: string;
+	target?: string;
+	sourceTable?: string;
+}): string | readonly string[] | undefined {
+	if (context.foreignKey) return context.foreignKey;
+	if (!context.relationType) return undefined;
+	if (context.relationType === 'belongsTo') {
+		return context.target ? `${context.target.replace(/s$/, '')}Id` : undefined;
+	}
+	return context.sourceTable
+		? `${context.sourceTable.replace(/s$/, '')}Id`
+		: undefined;
 }
 
 // ============================================================================
@@ -300,29 +322,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		for (const d of jsonAggIncludeDecisions) {
 			const context = d.context;
 			// Skip if target table or relation name is not defined
-			// Convention: includeAlias ?? relation (shared with core/hydration-utils.ts)
+			// Convention: relation ?? includeAlias (relation = canonical name from planner)
 			const relationName = resolveIncludeAlias(context);
 			if (!context.target || !relationName) continue;
 
-			// Cast context to access foreignKey (added in Phase 3)
+			// Derive FK from context (shared helper)
 			const extendedContext = context as typeof context & {
 				foreignKey?: string | readonly string[];
 			};
-
-			// Derive FK name if not explicitly provided
-			// For belongsTo: FK is in source (e.g., posts.authorId -> authors)
-			// For hasMany/hasOne: FK is in target (e.g., authors -> posts.authorId)
-			let foreignKey: string | readonly string[] | undefined =
-				extendedContext.foreignKey;
-			if (!foreignKey && context.relationType) {
-				if (context.relationType === 'belongsTo') {
-					// FK in source points to target's PK
-					foreignKey = `${context.target.replace(/s$/, '')}Id`;
-				} else {
-					// FK in target points to source's PK
-					foreignKey = `${context.sourceTable.replace(/s$/, '')}Id`;
-				}
-			}
+			const foreignKey = deriveForeignKey(extendedContext);
 
 			// Resolve relationType with default fallback
 			const relationType = context.relationType as
@@ -339,7 +347,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				foreignKey: Array.isArray(foreignKey)
 					? foreignKey[0]
 					: (foreignKey ?? 'id'),
-				parentKey: 'id', // Default to 'id' as PK - could be enhanced later
+				parentKey: 'id',
 			});
 		}
 
@@ -455,7 +463,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		for (const d of joinIncludeDecisions) {
 			const context = d.context;
-			const relationName = context.includeAlias ?? context.relation;
+			const relationName = context.relation ?? context.includeAlias;
 			if (!context.target || !relationName) continue;
 
 			// Find matching include intent to get column list
@@ -481,19 +489,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				columns = ['id', ...fields];
 			}
 
-			// Derive FK
+			// Derive FK from context (shared helper)
 			const extendedContext = context as typeof context & {
 				foreignKey?: string | readonly string[];
 			};
-			let foreignKey: string | readonly string[] | undefined =
-				extendedContext.foreignKey;
-			if (!foreignKey && context.relationType) {
-				if (context.relationType === 'belongsTo') {
-					foreignKey = `${context.target.replace(/s$/, '')}Id`;
-				} else {
-					foreignKey = `${context.sourceTable.replace(/s$/, '')}Id`;
-				}
-			}
+			const foreignKey = deriveForeignKey(extendedContext);
 
 			const relationType = context.relationType as
 				| 'belongsTo'
@@ -1698,8 +1698,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				if (!committed) {
 					try {
 						await client.query('ROLLBACK');
-					} catch (_) {
-						// Ignore rollback errors during cleanup
+					} catch (rollbackError) {
+						// Log rollback errors at debug level — silent suppression masks issues
+						if (typeof process !== 'undefined' && process.env.DEBUG) {
+							console.debug(
+								'[dbsp] ROLLBACK failed during stream cleanup:',
+								rollbackError,
+							);
+						}
 					}
 				}
 				client.release();
@@ -1718,7 +1724,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		chunkSize: number,
 	): AsyncIterableIterator<T> {
 		// Generate unique cursor name
-		const cursorName = `__cursor_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+		const cursorName = generateCursorName();
 
 		// Declare cursor
 		await client.query(

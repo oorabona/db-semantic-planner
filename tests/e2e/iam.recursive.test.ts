@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	createIamSchema,
 	createSchema,
-	describeE2E,
+	
 	dropIamSchema,
 	dropSchema,
 	getPgsqlAdapter,
@@ -43,7 +43,7 @@ async function execRecursive<T extends Record<string, unknown>>(
 	return result.rows;
 }
 
-describeE2E('E2E-003: IAM/RBAC Recursive CTE', () => {
+describe('E2E-003: IAM/RBAC Recursive CTE', () => {
 	let pool: Pool;
 	let adapter: PgsqlAdapter<unknown>;
 

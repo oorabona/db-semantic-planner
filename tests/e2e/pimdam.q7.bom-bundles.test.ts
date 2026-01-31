@@ -26,7 +26,7 @@ import {
 	getTestPool,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 import { sql as kyselySql } from './testkit/sql.js';
 
@@ -38,7 +38,7 @@ const SCHEMA = 'q7_bom_bundles';
  *   - 2x Charger (component, id=8, variant price: 999)
  *   - 1x Case (component, id=9, variant price: 499)
  */
-describe.skipIf(shouldSkipE2E())('Q7: BOM / Bundles', () => {
+describe('Q7: BOM / Bundles', () => {
 	beforeAll(async () => {
 		await dropExtendedPimdamSchema(SCHEMA);
 		await createExtendedPimdamSchema(SCHEMA);

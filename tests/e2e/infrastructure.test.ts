@@ -10,11 +10,11 @@ import {
 	createSchema,
 	dropSchema,
 	getTestPool,
-	shouldSkipE2E,
+	
 } from './testkit/db.js';
 import { sql } from './testkit/sql.js';
 
-describe.skipIf(shouldSkipE2E())('E2E Infrastructure', () => {
+describe('E2E Infrastructure', () => {
 	beforeAll(async () => {
 		// Ensure clean state
 		const _db = await getTestPool();

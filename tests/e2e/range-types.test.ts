@@ -24,10 +24,10 @@ import {
 	schedulingModel,
 	schedulingTestData,
 	seedSchedulingData,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 
-describe.skipIf(shouldSkipE2E())('PostgreSQL Range Types', () => {
+describe('PostgreSQL Range Types', () => {
 	const SCHEMA = 'scheduling_e2e';
 
 	beforeAll(async () => {

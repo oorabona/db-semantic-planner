@@ -18,11 +18,11 @@ import {
 	getTestPool,
 	pimdamModel,
 	seedAcmeTenant,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 import { sql } from './testkit/sql.js';
 
-describe.skipIf(shouldSkipE2E())('EXPLAIN Integration', () => {
+describe('EXPLAIN Integration', () => {
 	beforeAll(async () => {
 		await dropPimdamSchema('acme');
 		await createPimdamSchema('acme');

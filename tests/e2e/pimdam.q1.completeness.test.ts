@@ -27,13 +27,13 @@ import {
 	getTestPool,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 import { sql as kyselySql } from './testkit/sql.js';
 
 const SCHEMA = 'q1_completeness';
 
-describe.skipIf(shouldSkipE2E())('Q1: Attribute Completeness', () => {
+describe('Q1: Attribute Completeness', () => {
 	beforeAll(async () => {
 		await dropExtendedPimdamSchema(SCHEMA);
 		await createExtendedPimdamSchema(SCHEMA);

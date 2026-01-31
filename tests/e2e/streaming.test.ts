@@ -14,10 +14,10 @@ import {
 	dropBlogSchema,
 	getTestAdapter,
 	seedBlogData,
-	shouldSkipE2E,
+	
 } from './testkit/index.js';
 
-describe.skipIf(shouldSkipE2E())(
+describe(
 	'STREAMING-001: Cursor/Streaming Support',
 	() => {
 		const SCHEMA = 'streaming_e2e';
