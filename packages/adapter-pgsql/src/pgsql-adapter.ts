@@ -145,17 +145,25 @@ function resolveIncludeAlias(context: {
 }
 
 /**
- * Derive a foreign key name from planner context when not explicitly provided.
- * For belongsTo: FK is in source table (e.g., posts.authorId → authors).
- * For hasMany/hasOne: FK is in target table (e.g., authors → posts.authorId).
+ * Derive a foreign key name from an include-strategy decision context.
+ * Falls back to a naive singularize+Id convention when the planner
+ * does not provide an explicit FK.
+ *
+ * @example
+ * deriveForeignKey({ foreignKey: 'author_id', relationType: 'belongsTo', target: 'users' })
+ * // => 'author_id'
+ * deriveForeignKey({ relationType: 'belongsTo', target: 'users', sourceTable: 'posts' })
+ * // => 'userId'
  */
 function deriveForeignKey(context: {
 	foreignKey?: string | readonly string[];
+	sourceFK?: string | readonly string[];
 	relationType?: string;
 	target?: string;
 	sourceTable?: string;
 }): string | readonly string[] | undefined {
-	if (context.foreignKey) return context.foreignKey;
+	const fk = context.foreignKey ?? context.sourceFK;
+	if (fk) return fk;
 	if (!context.relationType) return undefined;
 	if (context.relationType === 'belongsTo') {
 		return context.target ? `${context.target.replace(/s$/, '')}Id` : undefined;
@@ -326,13 +334,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const relationName = resolveIncludeAlias(context);
 			if (!context.target || !relationName) continue;
 
-			// Derive FK from context (shared helper)
-			const extendedContext = context as typeof context & {
-				foreignKey?: string | readonly string[];
-			};
-			const foreignKey = deriveForeignKey(extendedContext);
-
-			// Resolve relationType with default fallback
+			const foreignKey = deriveForeignKey(context) ?? 'id';
 			const relationType = context.relationType as
 				| 'belongsTo'
 				| 'hasMany'
@@ -344,9 +346,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				relationName,
 				targetTable: context.target,
 				...(relationType && { relationType }),
-				foreignKey: Array.isArray(foreignKey)
-					? foreignKey[0]
-					: (foreignKey ?? 'id'),
+				foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
 				parentKey: 'id',
 			});
 		}
@@ -489,12 +489,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				columns = ['id', ...fields];
 			}
 
-			// Derive FK from context (shared helper)
-			const extendedContext = context as typeof context & {
-				foreignKey?: string | readonly string[];
-			};
-			const foreignKey = deriveForeignKey(extendedContext);
-
+			const foreignKey = deriveForeignKey(context) ?? 'id';
 			const relationType = context.relationType as
 				| 'belongsTo'
 				| 'hasMany'
@@ -506,9 +501,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				relationName,
 				targetTable: context.target,
 				...(relationType && { relationType }),
-				foreignKey: Array.isArray(foreignKey)
-					? foreignKey[0]
-					: (foreignKey ?? 'id'),
+				foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
 				parentKey: 'id',
 				columns,
 			});
@@ -798,13 +791,54 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		plan: PlanReport,
 		options?: CompileOptions,
 	): CompileResultWithIncludes<T> {
-		// Phase 3: Implement include compilation
-		// For now, compile main query and return empty subqueryIncludes
 		const main = this.compile<T>(plan, options);
-		return {
-			main,
-			subqueryIncludes: [],
-		};
+
+		// Extract subquery include info from planner decisions
+		// Decisions with choice === 'subquery' need separate execution
+		const subqueryIncludes: SubqueryIncludeInfo[] = [];
+
+		for (const d of plan.decisions) {
+			if (d.type !== 'include-strategy' || d.choice !== 'subquery') continue;
+
+			const ctx = d.context;
+			if (!ctx.target) continue;
+
+			const relationName = ctx.relation ?? ctx.includeAlias;
+			if (!relationName) continue;
+
+			// Derive FK using shared helper
+			const foreignKey = deriveForeignKey(ctx) ?? 'id';
+			const fk = Array.isArray(foreignKey) ? foreignKey[0]! : foreignKey;
+
+			// Determine source key (PK of parent table)
+			const sourceKey = ctx.relationType === 'belongsTo' ? fk : 'id';
+
+			// Find matching include intent for select/where passthrough
+			const includeIntent = (
+				plan.intent?.include as Array<Record<string, unknown>> | undefined
+			)?.find(
+				(i) => i.relation === relationName || i.relation === ctx.includeAlias,
+			);
+
+			const entry: SubqueryIncludeInfo = {
+				relationName,
+				targetTable: ctx.target,
+				foreignKey: fk,
+				sourceKey,
+				sourceTable: ctx.sourceTable ?? plan.rootTable,
+			};
+			if (includeIntent?.select != null) {
+				(entry as { select: SubqueryIncludeInfo['select'] }).select =
+					includeIntent.select as SubqueryIncludeInfo['select'];
+			}
+			if (includeIntent?.where != null) {
+				(entry as { where: SubqueryIncludeInfo['where'] }).where =
+					includeIntent.where as SubqueryIncludeInfo['where'];
+			}
+			subqueryIncludes.push(entry);
+		}
+
+		return { main, subqueryIncludes };
 	}
 
 	/**
@@ -1698,14 +1732,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				if (!committed) {
 					try {
 						await client.query('ROLLBACK');
-					} catch (rollbackError) {
-						// Log rollback errors at debug level — silent suppression masks issues
-						if (typeof process !== 'undefined' && process.env.DEBUG) {
-							console.debug(
-								'[dbsp] ROLLBACK failed during stream cleanup:',
-								rollbackError,
-							);
-						}
+					} catch (_rollbackErr) {
+						// Rollback errors during cleanup are non-actionable;
+						// the connection returns to the pool regardless.
 					}
 				}
 				client.release();
