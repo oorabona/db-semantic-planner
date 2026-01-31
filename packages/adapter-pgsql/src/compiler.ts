@@ -549,8 +549,8 @@ export class PlanCompiler {
 						);
 			from[0] =
 				pj.type === 'LEFT JOIN'
-					? leftJoin(base, targetRV, pj.on, pj.alias)
-					: innerJoin(base, targetRV, pj.on, pj.alias);
+					? leftJoin(base, targetRV, pj.on)
+					: innerJoin(base, targetRV, pj.on);
 		}
 
 		// Default to SELECT * if no columns specified

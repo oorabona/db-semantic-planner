@@ -35,7 +35,7 @@ function buildJsonBuildObject(
 			A_Const: { sval: { sval: ctx.naming.toDatabase(col) } },
 		});
 		// Add value (column reference)
-		args.push(columnRef(col, alias, ctx.schema, ctx.naming));
+		args.push(columnRef(col, alias, undefined, ctx.naming));
 	}
 
 	return {
@@ -70,7 +70,7 @@ function buildJsonAgg(
 	if (orderBy && orderBy.length > 0 && alias && ctx) {
 		funcCall.agg_order = orderBy.map((item) => ({
 			SortBy: {
-				node: columnRef(item.column, alias, ctx.schema, ctx.naming),
+				node: columnRef(item.column, alias, undefined, ctx.naming),
 				sortby_dir: item.direction === 'DESC' ? 'SORTBY_DESC' : 'SORTBY_ASC',
 				sortby_nulls: 'SORTBY_NULLS_DEFAULT',
 			},
@@ -120,8 +120,8 @@ function buildJsonAggSubquery(
 ): Node {
 	// Build WHERE correlation
 	const whereClause = eqExpr(
-		columnRef(targetColumn, innerAlias, ctx.schema, ctx.naming),
-		columnRef(sourceColumn, outerAlias, ctx.schema, ctx.naming),
+		columnRef(targetColumn, innerAlias, undefined, ctx.naming),
+		columnRef(sourceColumn, outerAlias, undefined, ctx.naming),
 	);
 
 	// Build json_build_object for each row

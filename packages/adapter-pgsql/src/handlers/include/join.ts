@@ -29,8 +29,8 @@ function buildLeftJoin(
 	ctx: CompilerContext,
 ): Node {
 	// Build the join condition: source.fk = target.pk
-	const leftCol = columnRef(sourceColumn, sourceAlias, ctx.schema, ctx.naming);
-	const rightCol = columnRef(targetColumn, targetAlias, ctx.schema, ctx.naming);
+	const leftCol = columnRef(sourceColumn, sourceAlias, undefined, ctx.naming);
+	const rightCol = columnRef(targetColumn, targetAlias, undefined, ctx.naming);
 	const joinCondition = eqExpr(leftCol, rightCol);
 
 	const joinExpr: JoinExpr = {
@@ -57,7 +57,7 @@ function buildIncludeTargets(
 		if (columns && columns.length > 0) {
 			// Select specific columns
 			for (const col of columns) {
-				const colRef = columnRef(col, targetAlias, ctx.schema, ctx.naming);
+				const colRef = columnRef(col, targetAlias, undefined, ctx.naming);
 				targets.push({
 					ResTarget: {
 						val: colRef,
