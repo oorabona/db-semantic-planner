@@ -2,7 +2,10 @@
 
 ## In Progress
 
-(None)
+- [x] ✅ [NQL] Fix BETWEEN not compiled to SQL WHERE clause (#NQL-BUG-1) (2026-02-02)
+- [x] ✅ [NQL] Fix IN operator `"any"` quoting — should be ANY not "any" (#NQL-BUG-2) (2026-02-02)
+- [x] ✅ [NQL] Fix NOT IN not compiled to SQL WHERE clause (#NQL-BUG-3) (2026-02-02)
+- [x] ✅ [NQL] Fix CASE WHEN not compiled to SQL SELECT list (#NQL-BUG-4) (2026-02-02)
 
 ---
 

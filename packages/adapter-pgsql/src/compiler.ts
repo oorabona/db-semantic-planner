@@ -22,6 +22,7 @@ import {
 	insertStmt,
 	integerNode,
 	leftJoin,
+	notExpr,
 	orExpr,
 	rangeVar,
 	selectStmt,
@@ -494,6 +495,23 @@ export class PlanCompiler {
 					break;
 				}
 
+				case 'selectExpression': {
+					if (
+						(decision as unknown as Record<string, unknown>).expressionType ===
+						'case'
+					) {
+						const caseNode = this.compileCaseExpression(decision);
+						const alias = decision.alias;
+						targetList.push({
+							ResTarget: {
+								val: caseNode,
+								...(alias ? { name: alias } : {}),
+							},
+						});
+					}
+					break;
+				}
+
 				case 'includeStrategy': {
 					// Unified include dispatch via handler registry
 					const includeResult = this.compileIncludeViaHandler(decision, plan);
@@ -563,6 +581,20 @@ export class PlanCompiler {
 								? orConditions[0]!
 								: orExpr(...orConditions);
 						where = where ? andExpr(where, combined) : combined;
+					}
+					break;
+
+				case 'whereNot':
+					if (decision.conditions) {
+						const notConditions = decision.conditions.map((c) =>
+							compileCondition(c, this.condCtx(), this.state),
+						);
+						const innerExpr =
+							notConditions.length === 1
+								? notConditions[0]!
+								: andExpr(...notConditions);
+						const negated = notExpr(innerExpr);
+						where = where ? andExpr(where, negated) : negated;
 					}
 					break;
 
@@ -700,6 +732,49 @@ export class PlanCompiler {
 		}
 
 		return selectStmt(options);
+	}
+
+	// --------------------------------------------------------------------------
+	// CASE Expression Compilation
+	// --------------------------------------------------------------------------
+
+	private compileCaseExpression(decision: PlanDecision): Node {
+		const conditions = (decision as unknown as Record<string, unknown>)
+			.conditions as Array<{ when: PlanDecision; then: unknown }> | undefined;
+		const elseValue = (decision as unknown as Record<string, unknown>).value;
+
+		if (!conditions || conditions.length === 0) {
+			throw new Error('CASE requires at least one WHEN condition');
+		}
+
+		const args: Node[] = conditions.map((cond) => {
+			const whenExpr = compileCondition(cond.when, this.condCtx(), this.state);
+
+			const paramNumber = ++this.state.paramIndex;
+			this.state.parameters.push(cond.then);
+			const thenResult = createParamRef(paramNumber);
+
+			return {
+				CaseWhen: {
+					expr: whenExpr,
+					result: thenResult,
+				},
+			};
+		});
+
+		let defresult: Node | undefined;
+		if (elseValue !== undefined) {
+			const paramNumber = ++this.state.paramIndex;
+			this.state.parameters.push(elseValue);
+			defresult = createParamRef(paramNumber);
+		}
+
+		return {
+			CaseExpr: {
+				args,
+				...(defresult ? { defresult } : {}),
+			},
+		};
 	}
 
 	// --------------------------------------------------------------------------

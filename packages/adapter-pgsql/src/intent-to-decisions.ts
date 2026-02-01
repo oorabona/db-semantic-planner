@@ -218,6 +218,31 @@ function convertSelect(
 						}
 					).orderBy = over.orderBy;
 				decisions.push(decision);
+			} else if (exprKind === 'case') {
+				// CASE WHEN ... THEN ... ELSE ... END expression
+				const whenClauses = expr.when as Array<{
+					condition: Record<string, unknown>;
+					result: Record<string, unknown>;
+				}>;
+				const conditions = whenClauses.map((wc) => ({
+					when: convertCaseConditionToDecision(wc.condition, rootTable),
+					then: extractExpressionValue(wc.result),
+				}));
+
+				const decision: PlanDecision = {
+					type: 'selectExpression' as string,
+					expressionType: 'case',
+					conditions,
+					table: rootTable,
+				} as PlanDecision;
+				if (expr.else) {
+					(decision as unknown as Record<string, unknown>).value = extractExpressionValue(
+						expr.else as Record<string, unknown>,
+					);
+				}
+				if (expr.as)
+					(decision as unknown as Record<string, unknown>).alias = expr.as as string;
+				decisions.push(decision);
 			}
 		}
 
@@ -338,6 +363,18 @@ function convertWhereCondition(
 					column: cond.field as string,
 					operator: rangeOperator,
 					value: cond.value,
+					table: rootTable,
+				};
+			}
+
+			// NQL BETWEEN produces { operator: 'between', value: { lower, upper } }
+			if (rangeOperator === 'between') {
+				const rangeVal = cond.value as { lower: unknown; upper: unknown };
+				return {
+					type: 'where',
+					column: cond.field as string,
+					operator: 'between',
+					value: [rangeVal.lower, rangeVal.upper],
 					table: rootTable,
 				};
 			}
@@ -547,4 +584,40 @@ function convertOrderBy(order: OrderByIntent, rootTable: string): PlanDecision {
 	}
 
 	return decision;
+}
+
+// ============================================================================
+// CASE expression helpers
+// ============================================================================
+
+/**
+ * Convert a CASE WHEN condition (ExpressionIntent) to a PlanDecision
+ * that compileCondition can handle.
+ */
+function convertCaseConditionToDecision(
+	expr: Record<string, unknown>,
+	rootTable: string,
+): PlanDecision {
+	if (expr.kind === 'comparison') {
+		return {
+			type: 'where',
+			column: expr.column as string,
+			operator: expr.operator as string,
+			value: expr.value,
+			table: rootTable,
+		};
+	}
+	// Fallback: wrap unknown expressions
+	throw new Error(
+		`Unsupported CASE WHEN condition kind: ${expr.kind as string}`,
+	);
+}
+
+/**
+ * Extract a scalar value from an ExpressionIntent.
+ */
+function extractExpressionValue(expr: Record<string, unknown>): unknown {
+	if (expr.kind === 'literal') return expr.value;
+	if (expr.kind === 'column') return { $ref: expr.column };
+	return expr;
 }

@@ -4,8 +4,8 @@
  * Handles: in, notIn
  */
 
-import type { FuncCall, Node } from '@pgsql/types';
-import { binaryExpr, booleanConstNode, stringNode } from '../../ast-helpers.js';
+import type { Node } from '@pgsql/types';
+import { booleanConstNode } from '../../ast-helpers.js';
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
@@ -17,20 +17,8 @@ import { COLLECTION_OPERATORS } from '../types.js';
 import { buildColumnRef } from './utils.js';
 
 /**
- * Create a FuncCall node for ANY($N)
- * PostgreSQL idiom: col = ANY($1) is equivalent to col IN (...)
- */
-function createAnyFuncCall(paramNumber: number): Node {
-	const funcCall: FuncCall = {
-		funcname: [stringNode('any')],
-		args: [createParamRef(paramNumber)],
-	};
-	return { FuncCall: funcCall };
-}
-
-/**
  * Create IN expression using = ANY($N)
- * PostgreSQL idiom: col = ANY($1) is equivalent to col IN (...)
+ * Uses AEXPR_OP_ANY to avoid pg-deparse quoting "any" as an identifier
  */
 function createInExpr(
 	columnNode: Node,
@@ -39,13 +27,19 @@ function createInExpr(
 ): Node {
 	state.paramIndex++;
 	state.parameters.push(values);
-	const anyExpr = createAnyFuncCall(state.paramIndex);
-	return binaryExpr('=', columnNode, anyExpr);
+	return {
+		A_Expr: {
+			kind: 'AEXPR_OP_ANY',
+			name: [{ String: { sval: '=' } }],
+			lexpr: columnNode,
+			rexpr: createParamRef(state.paramIndex),
+		},
+	};
 }
 
 /**
  * Create NOT IN expression using <> ALL($N)
- * PostgreSQL idiom: col <> ALL($1) is equivalent to col NOT IN (...)
+ * Uses AEXPR_OP_ALL to avoid pg-deparse quoting "all" as an identifier
  */
 function createNotInExpr(
 	columnNode: Node,
@@ -54,13 +48,14 @@ function createNotInExpr(
 ): Node {
 	state.paramIndex++;
 	state.parameters.push(values);
-	// For NOT IN, we use != ALL which is equivalent
-	// ALL() returns true if comparison is true for all array elements
-	const allFuncCall: FuncCall = {
-		funcname: [stringNode('all')],
-		args: [createParamRef(state.paramIndex)],
+	return {
+		A_Expr: {
+			kind: 'AEXPR_OP_ALL',
+			name: [{ String: { sval: '<>' } }],
+			lexpr: columnNode,
+			rexpr: createParamRef(state.paramIndex),
+		},
 	};
-	return binaryExpr('<>', columnNode, { FuncCall: allFuncCall });
 }
 
 /**
