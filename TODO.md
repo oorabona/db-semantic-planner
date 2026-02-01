@@ -19,8 +19,7 @@
 ### [MCP] #6: Replace MCP server placeholder test — Score 4.5 — Effort: M
 - Only 1 placeholder test exists for the entire MCP server package
 
-### [Core] #5: Comparison filter factory — Score 3.0 — Effort: S
-- eq/neq/gt/gte/lt/lte share 120 LOC of boilerplate; extract single factory function
+### ~[Core] #5: Comparison filter factory~ — ✅ Already done (createComparisonFilter exists)
 
 ---
 
