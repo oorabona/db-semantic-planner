@@ -17,6 +17,11 @@
 		"dbsp": "pnpm tsx packages/cli/src/index.ts",
 		"docs:api": "typedoc"
 	},
+	"pnpm": {
+		"overrides": {
+			"lodash@>=4.0.0 <4.17.23": ">=4.17.23"
+		}
+	},
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",
 		"@dbsp/adapter-pgsql": "workspace:*",

@@ -27,7 +27,8 @@
 	"dependencies": {
 		"@dbsp/adapter-pgsql": "workspace:*",
 		"@dbsp/core": "workspace:*",
-		"@modelcontextprotocol/sdk": "catalog:"
+		"@modelcontextprotocol/sdk": "catalog:",
+		"hono": "catalog:"
 	},
 	"peerDependencies": {
 		"tsx": "^4.0.0"
