@@ -83,6 +83,11 @@ roleEdges | group by parentRoleId | select parentRoleId, count(*) as childCount
 users | where active = true | select *, userRoles.roleId, userRoles.role.rolePermissions.permission.*
 
 # =============================================================================
+# User permissions — flat mode (forces JOIN strategy instead of nested json_agg)
+# =============================================================================
+users | where active = true | select *, userRoles.roleId, userRoles.role.rolePermissions.permission.* | flat
+
+# =============================================================================
 # Audit trail
 # =============================================================================
 auditLog | where action = 'login' | select userId, resource, timestamp

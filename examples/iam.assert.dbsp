@@ -247,7 +247,19 @@ db.rows.equals: 5
 # ─────────────────────────────────────────
 # Query 28: auditLog | where action = 'login' | select userId, resource, timestamp
 # ─────────────────────────────────────────
+# Query 28: users | where active = true | select *, userRoles.roleId, userRoles.role.rolePermissions.permission.* | flat
+# ─────────────────────────────────────────
+# Same as query 27 but with | flat — forces JOIN strategy instead of nested json_agg
 --- query: 28
+success: true
+# NOTE: | flat currently produces SELECT users.* without any includes.
+# Root cause: planner emits include-strategy choice='lateral', but compiler
+# only handles 'json_agg' and 'join'. See TODO.md for tracking.
+
+# ─────────────────────────────────────────
+# Query 29: auditLog | where action = 'login' | select userId, resource, timestamp
+# ─────────────────────────────────────────
+--- query: 29
 success: true
 sql.equals: SELECT audit_log.user_id, audit_log.resource, audit_log."timestamp" FROM iam_example.audit_log WHERE audit_log.action = $1
 params.equals: ["login"]
