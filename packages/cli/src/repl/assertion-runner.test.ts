@@ -158,24 +158,6 @@ describe('assertion-runner', () => {
 			});
 		});
 
-		describe('sql.contains', () => {
-			it('passes when SQL contains expected text', () => {
-				const results = [
-					createResult({ sql: 'SELECT * FROM "posts" WHERE "published" = $1' }),
-				];
-				const blocks = [
-					createBlock({
-						assertions: [
-							{ type: 'sql.contains', value: 'WHERE "published"', line: 2 },
-						],
-					}),
-				];
-
-				const summary = runAssertions(blocks, results, ['query']);
-				expect(summary.passed).toBe(1);
-			});
-		});
-
 		describe('sql.equals', () => {
 			it('passes with normalized comparison', () => {
 				const results = [createResult({ sql: 'SELECT  *  FROM  "users"' })];
@@ -380,7 +362,11 @@ describe('assertion-runner', () => {
 				const blocks = [
 					createBlock({
 						assertions: [
-							{ type: 'sql.contains', value: 'FROM "posts"', line: 2 },
+							{
+								type: 'sql.equals',
+								value: 'SELECT * FROM "posts" WHERE "published" = $1',
+								line: 2,
+							},
 							{ type: 'params.equals', value: [true], line: 3 },
 							{ type: 'success', value: true, line: 4 },
 						],
@@ -404,7 +390,7 @@ describe('assertion-runner', () => {
 				const blocks = [
 					createBlock({
 						assertions: [
-							{ type: 'sql.contains', value: 'FROM "posts"', line: 2 },
+							{ type: 'sql.equals', value: 'SELECT * FROM "posts"', line: 2 },
 							{ type: 'params.equals', value: [false], line: 3 }, // will fail
 						],
 					}),
@@ -460,7 +446,13 @@ describe('assertion-runner', () => {
 				const blocks = [
 					createBlock({
 						queryMatch: 'posts where id = 1',
-						assertions: [{ type: 'sql.contains', value: 'WHERE id', line: 2 }],
+						assertions: [
+							{
+								type: 'sql.equals',
+								value: 'SELECT * FROM posts WHERE id = $1',
+								line: 2,
+							},
+						],
 					}),
 				];
 
@@ -494,7 +486,7 @@ describe('assertion-runner', () => {
 				];
 				const blocks = [
 					createBlock({
-						assertions: [{ type: 'sql.contains', value: 'SELECT', line: 2 }],
+						assertions: [{ type: 'sql.equals', value: 'SELECT', line: 2 }],
 					}),
 				];
 

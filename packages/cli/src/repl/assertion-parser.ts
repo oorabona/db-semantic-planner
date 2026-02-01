@@ -11,7 +11,6 @@ export const ASSERTION_TYPES = [
 	'output.contains',
 	'output.equals',
 	'output.matches',
-	'sql.contains',
 	'sql.equals',
 	'sql.matches',
 	'params.equals',
@@ -362,7 +361,6 @@ function parseAssertionValue(
 		case 'output.contains':
 		case 'output.equals':
 		case 'output.matches':
-		case 'sql.contains':
 		case 'sql.equals':
 		case 'sql.matches':
 		case 'sql.table':
