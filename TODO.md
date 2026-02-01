@@ -79,10 +79,10 @@
 - Fix: Tree-structured decisions (intentPath-based) + recursive compileJsonAggDecision with nested json_agg subqueries
 - Query 27 now returns 5 rows correctly with depth-based aliases (__t__, __t1__, __t2__, __t3__)
 
-### [Infra] pnpm test at root should run ALL package tests — Priority: MEDIUM
-- Currently: `pnpm test` root runs only ~295 tests (some workspaces)
-- Expected: should run all ~1900+ tests across core, nql, adapter-pgsql, cli, mcp-server
-- `pnpm test -F <package>` should filter to a single package
+### [Infra] ✅ pnpm test at root — VERIFIED WORKING (2026-02-01)
+- `pnpm test` runs test:unit (pnpm -r test → 1896 tests) + test:e2e (295 tests)
+- Total: 2191 tests across core, nql, adapter-pgsql, cli, mcp-server + e2e
+- Filter: `pnpm -C packages/<name> test` for single package
 
 (Phase 5 SRP archived → docs/historic/done-2026-02.md)
 
