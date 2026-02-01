@@ -84,6 +84,13 @@
 - Total: 2191 tests across core, nql, adapter-pgsql, cli, mcp-server + e2e
 - Filter: `pnpm -C packages/<name> test` for single package
 
+### [Adapter] BUG: `| flat` drops all includes — Priority: HIGH
+- `users | ... | select *, userRoles.* | flat` produces `SELECT users.*` without any includes
+- Root cause: planner emits `choice: 'lateral'` for flat strategy (PostgreSQL supports lateral)
+- But compiler only handles `choice: 'json_agg'` and `choice: 'join'` — `'lateral'` silently falls through
+- Fix needed: implement lateral join compilation in adapter, or fallback to 'join' when 'lateral' is unsupported
+- Tested in iam.assert.dbsp query 28 (success: true only, no SQL assertion yet)
+
 (Phase 5 SRP archived → docs/historic/done-2026-02.md)
 
 ---

@@ -219,6 +219,10 @@ export class PlanCompiler {
 							key: child.relationName,
 							node: resTarget.ResTarget.val,
 						});
+					} else if (process.env.NODE_ENV !== 'production') {
+						console.warn(
+							`[PlanCompiler] Failed to extract ResTarget.val for child relation "${child.relationName}" at depth ${depth + 1}`,
+						);
 					}
 				}
 			}
