@@ -8,12 +8,13 @@
 
 ## Pending
 
-### [NQL] Range literal in INSERT not converted
-- **Example:** `insert into priceTiers set quantityRange = "[1,50)"`
-- **Error:** `malformed range literal`
-- **Root cause:** Range string value passed as-is instead of PostgreSQL range syntax
-- **Solution:** Detect range pattern in mutation-compiler `valueToNode()` for range columns
-- **Files:** `packages/adapter-pgsql/src/mutations/mutation-compiler.ts`
+(None)
+
+---
+
+## Completed
+
+- [x] ✅ [NQL] Range literal in INSERT/UPDATE — type-cast for range columns (2026-02-01)
 
 ---
 

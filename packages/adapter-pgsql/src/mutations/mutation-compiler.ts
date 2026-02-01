@@ -27,6 +27,7 @@ import type {
 	CompilerState,
 	Decision,
 } from '../handlers/types.js';
+import { createTypeCastParamRef } from '../param-ref.js';
 
 // ============================================================================
 // Shared Helpers
@@ -69,6 +70,8 @@ export interface InsertConfig {
 	returning?: string[];
 	/** Subquery for INSERT ... SELECT */
 	selectQuery?: Node;
+	/** Column database types for type-cast emission (e.g. range types) */
+	columnTypes?: Record<string, string>;
 }
 
 /**
@@ -83,6 +86,8 @@ export interface UpdateConfig {
 	where?: Decision[];
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
+	/** Column database types for type-cast emission (e.g. range types) */
+	columnTypes?: Record<string, string>;
 }
 
 /**
@@ -132,8 +137,14 @@ export function compileInsert(
 	const dbColumns = config.columns.map((c) => naming.toDatabase(c));
 
 	// Build VALUES as Node[][] (each row is Node[])
+	const columnTypes = config.columnTypes;
+	const columns = config.columns;
 	const valuesRows: Node[][] = config.values.map((row) =>
-		row.map((val) => valueToNode(val, state)),
+		row.map((val, i) => {
+			const colName = columns[i];
+			const dbType = colName ? columnTypes?.[colName] : undefined;
+			return valueToNode(val, state, dbType);
+		}),
 	);
 
 	// Build RETURNING clause if specified
@@ -165,10 +176,11 @@ export function compileUpdate(
 	const tableAlias = config.table;
 
 	// Build SET clause - convert unknown values to Node
+	const columnTypes = config.columnTypes;
 	const setClause: Array<{ column: string; value: Node }> = config.set.map(
 		({ column, value }) => ({
 			column: naming.toDatabase(column),
-			value: valueToNode(value, state),
+			value: valueToNode(value, state, columnTypes?.[column]),
 		}),
 	);
 
@@ -375,7 +387,21 @@ export function compileInsertFrom(
  * Convert a JavaScript value to an AST node.
  * Uses parameters for actual values.
  */
-function valueToNode(value: unknown, state: CompilerState): Node {
+/** PostgreSQL range types that require explicit type-cast on parameter binding */
+export const RANGE_TYPES = new Set([
+	'daterange',
+	'tsrange',
+	'tstzrange',
+	'int4range',
+	'int8range',
+	'numrange',
+]);
+
+function valueToNode(
+	value: unknown,
+	state: CompilerState,
+	dbType?: string,
+): Node {
 	if (value === null || value === undefined) {
 		return { A_Const: { isnull: true } };
 	}
@@ -383,6 +409,11 @@ function valueToNode(value: unknown, state: CompilerState): Node {
 	// Add to parameters and return a ParamRef
 	state.parameters.push(value);
 	state.paramIndex++;
+
+	// Range types require explicit cast ($N::int4range) for PostgreSQL to parse the literal
+	if (dbType && RANGE_TYPES.has(dbType)) {
+		return createTypeCastParamRef(state.paramIndex, dbType);
+	}
 
 	return {
 		ParamRef: {
