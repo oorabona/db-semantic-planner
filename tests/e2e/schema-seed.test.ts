@@ -15,7 +15,6 @@ import {
 	seedAcmeTenant,
 	seedBlogData,
 	seedGlobexTenant,
-	
 } from './testkit/index.js';
 import { sql } from './testkit/sql.js';
 

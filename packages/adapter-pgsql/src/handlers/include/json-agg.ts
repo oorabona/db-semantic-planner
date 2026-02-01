@@ -8,7 +8,7 @@
  */
 
 import type { Node, SelectStmt } from '@pgsql/types';
-import { columnRef, eqExpr, rangeVar } from '../../ast-helpers.js';
+import { columnRef, fkCorrelation, rangeVar } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -119,9 +119,12 @@ function buildJsonAggSubquery(
 	ctx: CompilerContext,
 ): Node {
 	// Build WHERE correlation
-	const whereClause = eqExpr(
-		columnRef(targetColumn, innerAlias, undefined, ctx.naming),
-		columnRef(sourceColumn, outerAlias, undefined, ctx.naming),
+	const whereClause = fkCorrelation(
+		targetColumn,
+		innerAlias,
+		sourceColumn,
+		outerAlias,
+		ctx.naming,
 	);
 
 	// Build json_build_object for each row

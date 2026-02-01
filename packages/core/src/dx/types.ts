@@ -482,19 +482,6 @@ export type IncludeOptionsWithRecursive =
 	| RecursiveIncludeOptions;
 
 /**
- * Type guard to check if include options are recursive.
- */
-export function isRecursiveIncludeOptions(
-	options: IncludeOptionsWithRecursive | undefined,
-): options is RecursiveIncludeOptions {
-	return (
-		options !== undefined &&
-		'recursive' in options &&
-		options.recursive === true
-	);
-}
-
-/**
  * Utility type for picking fields from an object type.
  * Used for type inference in select().
  */

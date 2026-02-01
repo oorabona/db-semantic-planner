@@ -24,7 +24,6 @@ import {
 	schedulingModel,
 	schedulingTestData,
 	seedSchedulingData,
-	
 } from './testkit/index.js';
 
 describe('PostgreSQL Range Types', () => {

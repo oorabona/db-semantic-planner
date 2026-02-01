@@ -15,7 +15,6 @@ import {
 	pimdamModel,
 	seedAcmeTenant,
 	seedGlobexTenant,
-	
 } from './testkit/index.js';
 
 describe('Q4: Multi-tenant Isolation', () => {

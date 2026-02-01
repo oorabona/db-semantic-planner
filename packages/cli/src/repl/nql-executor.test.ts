@@ -108,7 +108,10 @@ describe('nql-executor', () => {
 			});
 
 			it('compiles query with where clause', async () => {
-				const result = await compileNqlToSql('users | where active = true', model);
+				const result = await compileNqlToSql(
+					'users | where active = true',
+					model,
+				);
 
 				expect(result.intentType).toBe('query');
 				expect(result.sql.toLowerCase()).toContain('where');
@@ -123,7 +126,10 @@ describe('nql-executor', () => {
 			});
 
 			it('compiles query with select fields', async () => {
-				const result = await compileNqlToSql('users | select name, email', model);
+				const result = await compileNqlToSql(
+					'users | select name, email',
+					model,
+				);
 
 				expect(result.intentType).toBe('query');
 				expect(result.sql.toLowerCase()).toContain('name');
@@ -131,7 +137,10 @@ describe('nql-executor', () => {
 			});
 
 			it('compiles query with order by', async () => {
-				const result = await compileNqlToSql('users | order by name asc', model);
+				const result = await compileNqlToSql(
+					'users | order by name asc',
+					model,
+				);
 
 				expect(result.intentType).toBe('query');
 				expect(result.sql.toLowerCase()).toContain('order by');
@@ -150,7 +159,10 @@ describe('nql-executor', () => {
 			});
 
 			it('compiles query with string comparison', async () => {
-				const result = await compileNqlToSql("users | where name = 'Alice'", model);
+				const result = await compileNqlToSql(
+					"users | where name = 'Alice'",
+					model,
+				);
 
 				expect(result.intentType).toBe('query');
 				expect(result.params).toContain('Alice');
@@ -165,7 +177,10 @@ describe('nql-executor', () => {
 
 			it('uses json_agg for hasMany includes (STRAT-SIMPLIFY)', async () => {
 				// users.posts is hasMany, should use json_agg by default
-				const result = await compileNqlToSql('users | select *, posts.*', model);
+				const result = await compileNqlToSql(
+					'users | select *, posts.*',
+					model,
+				);
 
 				expect(result.intentType).toBe('query');
 				// Should use json_agg, NOT left join for hasMany
@@ -186,9 +201,9 @@ describe('nql-executor', () => {
 
 		describe('error handling', () => {
 			it('throws NqlParseError for invalid syntax', async () => {
-				await expect(compileNqlToSql('users | where = invalid', model)).rejects.toThrow(
-					NqlParseError,
-				);
+				await expect(
+					compileNqlToSql('users | where = invalid', model),
+				).rejects.toThrow(NqlParseError);
 			});
 
 			it('parse error contains helpful message', async () => {
@@ -263,21 +278,30 @@ describe('nql-executor', () => {
 		const model = testModel;
 
 		it('handles escaped quotes in strings', async () => {
-			const result = await compileNqlToSql("users | where name = 'O''Brien'", model);
+			const result = await compileNqlToSql(
+				"users | where name = 'O''Brien'",
+				model,
+			);
 
 			expect(result.intentType).toBe('query');
 			expect(result.params).toContain("O'Brien");
 		});
 
 		it('handles null comparison', async () => {
-			const result = await compileNqlToSql('users | where email is null', model);
+			const result = await compileNqlToSql(
+				'users | where email is null',
+				model,
+			);
 
 			expect(result.intentType).toBe('query');
 			expect(result.sql.toLowerCase()).toContain('is null');
 		});
 
 		it('handles not null comparison', async () => {
-			const result = await compileNqlToSql('users | where email is not null', model);
+			const result = await compileNqlToSql(
+				'users | where email is not null',
+				model,
+			);
 
 			expect(result.intentType).toBe('query');
 			expect(result.sql.toLowerCase()).toContain('is not null');

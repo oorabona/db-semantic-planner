@@ -32,7 +32,6 @@ import {
 	getTestAdapter,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
-	
 } from './testkit/index.js';
 
 describe('Q2: Locale Fallback with COALESCE', () => {

@@ -8,7 +8,12 @@
  */
 
 import type { JoinExpr, Node } from '@pgsql/types';
-import { columnRef, eqExpr, rangeVar } from '../../ast-helpers.js';
+import {
+	columnRef,
+	fkCorrelation,
+	rangeVar,
+	starTarget,
+} from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -29,9 +34,13 @@ function buildLeftJoin(
 	ctx: CompilerContext,
 ): Node {
 	// Build the join condition: source.fk = target.pk
-	const leftCol = columnRef(sourceColumn, sourceAlias, undefined, ctx.naming);
-	const rightCol = columnRef(targetColumn, targetAlias, undefined, ctx.naming);
-	const joinCondition = eqExpr(leftCol, rightCol);
+	const joinCondition = fkCorrelation(
+		sourceColumn,
+		sourceAlias,
+		targetColumn,
+		targetAlias,
+		ctx.naming,
+	);
 
 	const joinExpr: JoinExpr = {
 		jointype: 'JOIN_LEFT',
@@ -67,18 +76,7 @@ function buildIncludeTargets(
 			}
 		} else {
 			// Select all columns from the relation (relation.*)
-			targets.push({
-				ResTarget: {
-					val: {
-						ColumnRef: {
-							fields: [
-								{ String: { sval: ctx.naming.toDatabase(targetAlias) } },
-								{ A_Star: {} },
-							],
-						},
-					},
-				},
-			});
+			targets.push(starTarget(targetAlias, ctx.naming));
 		}
 	}
 

@@ -30,6 +30,34 @@ import type {
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 
+/**
+ * Normalize SQL for comparison: collapse whitespace, lowercase, trim.
+ * Canonical implementation — imported by ast-compare.ts and external consumers.
+ */
+export function normalizeSQL(sql: string): string {
+	return sql
+		.toLowerCase()
+		.replace(/\s+/g, ' ')
+		.replace(/\(\s+/g, '(')
+		.replace(/\s+\)/g, ')')
+		.replace(/,\s+/g, ', ')
+		.replace(/;\s*$/, '')
+		.trim();
+}
+
+// ============================================================================
+// Internal Helpers
+// ============================================================================
+
+function applyReturningList(
+	stmt: { returningList?: Node[] },
+	returning: Node[] | undefined,
+): void {
+	if (returning && returning.length > 0) {
+		stmt.returningList = returning;
+	}
+}
+
 // ============================================================================
 // Basic Value Nodes
 // ============================================================================
@@ -219,6 +247,23 @@ export function binaryExpr(
  */
 export function eqExpr(left: Node, right: Node): Node {
 	return binaryExpr('=', left, right);
+}
+
+/**
+ * Build an FK-based correlation condition: alias1.col1 = alias2.col2
+ * Used by all include handlers (JOIN, LATERAL, CTE, JSON_AGG).
+ */
+export function fkCorrelation(
+	col1: string,
+	alias1: string,
+	col2: string,
+	alias2: string,
+	naming: NamingPlugin,
+): Node {
+	return eqExpr(
+		columnRef(col1, alias1, undefined, naming),
+		columnRef(col2, alias2, undefined, naming),
+	);
 }
 
 /**
@@ -609,9 +654,7 @@ export function insertStmt(options: InsertOptions): Node {
 		};
 	}
 
-	if (options.returning && options.returning.length > 0) {
-		stmt.returningList = options.returning;
-	}
+	applyReturningList(stmt, options.returning);
 
 	// ON CONFLICT handling would go here (complex, defer for now)
 
@@ -666,9 +709,7 @@ export function updateStmt(options: UpdateOptions): Node {
 		stmt.fromClause = options.from;
 	}
 
-	if (options.returning && options.returning.length > 0) {
-		stmt.returningList = options.returning;
-	}
+	applyReturningList(stmt, options.returning);
 
 	return { UpdateStmt: stmt };
 }
@@ -714,9 +755,7 @@ export function deleteStmt(options: DeleteOptions): Node {
 		stmt.usingClause = options.using;
 	}
 
-	if (options.returning && options.returning.length > 0) {
-		stmt.returningList = options.returning;
-	}
+	applyReturningList(stmt, options.returning);
 
 	return { DeleteStmt: stmt };
 }

@@ -11,10 +11,7 @@ import type { CompilerContext, CompilerState } from '../types.js';
 /**
  * Build column reference from decision column, using current alias or root table.
  */
-export function buildColumnRef(
-	column: string,
-	ctx: CompilerContext,
-): Node {
+export function buildColumnRef(column: string, ctx: CompilerContext): Node {
 	const alias = ctx.currentAlias ?? ctx.rootTable;
 	return columnRef(column, alias, ctx.schema, ctx.naming);
 }
@@ -22,10 +19,7 @@ export function buildColumnRef(
 /**
  * Build parameter reference and register value in compiler state.
  */
-export function buildParamRef(
-	value: unknown,
-	state: CompilerState,
-): Node {
+export function buildParamRef(value: unknown, state: CompilerState): Node {
 	state.paramIndex++;
 	state.parameters.push(value);
 	return createParamRef(state.paramIndex);

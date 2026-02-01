@@ -29,7 +29,6 @@ import {
 	getTestPool,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
-	
 } from './testkit/index.js';
 import { sql as kyselySql } from './testkit/sql.js';
 

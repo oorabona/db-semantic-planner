@@ -24,6 +24,7 @@
  */
 
 import type {
+	ComparisonOperator,
 	RecursiveExistsOptions,
 	WhereAndIntent,
 	WhereComparisonIntent,
@@ -146,28 +147,35 @@ export function isDistinctField(value: unknown): value is DistinctField {
 // Comparison Operators
 // ============================================================================
 
+type ComparisonFilter = {
+	<T extends string, C extends string, V>(
+		field: ColumnRef<T, C, V>,
+		value: V,
+	): WhereComparisonIntent;
+	(field: string, value: unknown): WhereComparisonIntent;
+};
+
+function createComparisonFilter(
+	operator: ComparisonOperator,
+): ComparisonFilter {
+	return (
+		field: ColumnRef<string, string, unknown> | string,
+		value: unknown,
+	): WhereComparisonIntent => ({
+		kind: 'comparison',
+		field: getColumnName(field),
+		operator,
+		value,
+	});
+}
+
 /**
  * Equals comparison: field = value
  *
  * @example eq('status', 'active') → status = 'active'
  * @example eq(users.name, 'John') → type-safe with ColumnRef (DX-040)
  */
-export function eq<T extends string, C extends string, V>(
-	field: ColumnRef<T, C, V>,
-	value: V,
-): WhereComparisonIntent;
-export function eq(field: string, value: unknown): WhereComparisonIntent;
-export function eq(
-	field: ColumnRef<string, string, unknown> | string,
-	value: unknown,
-): WhereComparisonIntent {
-	return {
-		kind: 'comparison',
-		field: getColumnName(field),
-		operator: 'eq',
-		value,
-	};
-}
+export const eq: ComparisonFilter = createComparisonFilter('eq');
 
 /**
  * Not equals comparison: field != value
@@ -175,22 +183,7 @@ export function eq(
  * @example neq('status', 'deleted') → status != 'deleted'
  * @example neq(users.status, 'deleted') → type-safe with ColumnRef (DX-040)
  */
-export function neq<T extends string, C extends string, V>(
-	field: ColumnRef<T, C, V>,
-	value: V,
-): WhereComparisonIntent;
-export function neq(field: string, value: unknown): WhereComparisonIntent;
-export function neq(
-	field: ColumnRef<string, string, unknown> | string,
-	value: unknown,
-): WhereComparisonIntent {
-	return {
-		kind: 'comparison',
-		field: getColumnName(field),
-		operator: 'neq',
-		value,
-	};
-}
+export const neq: ComparisonFilter = createComparisonFilter('neq');
 
 /**
  * Greater than comparison: field > value
@@ -198,22 +191,7 @@ export function neq(
  * @example gt('age', 18) → age > 18
  * @example gt(users.age, 18) → type-safe with ColumnRef (DX-040)
  */
-export function gt<T extends string, C extends string, V>(
-	field: ColumnRef<T, C, V>,
-	value: V,
-): WhereComparisonIntent;
-export function gt(field: string, value: unknown): WhereComparisonIntent;
-export function gt(
-	field: ColumnRef<string, string, unknown> | string,
-	value: unknown,
-): WhereComparisonIntent {
-	return {
-		kind: 'comparison',
-		field: getColumnName(field),
-		operator: 'gt',
-		value,
-	};
-}
+export const gt: ComparisonFilter = createComparisonFilter('gt');
 
 /**
  * Greater than or equal comparison: field >= value
@@ -221,22 +199,7 @@ export function gt(
  * @example gte('age', 18) → age >= 18
  * @example gte(users.age, 18) → type-safe with ColumnRef (DX-040)
  */
-export function gte<T extends string, C extends string, V>(
-	field: ColumnRef<T, C, V>,
-	value: V,
-): WhereComparisonIntent;
-export function gte(field: string, value: unknown): WhereComparisonIntent;
-export function gte(
-	field: ColumnRef<string, string, unknown> | string,
-	value: unknown,
-): WhereComparisonIntent {
-	return {
-		kind: 'comparison',
-		field: getColumnName(field),
-		operator: 'gte',
-		value,
-	};
-}
+export const gte: ComparisonFilter = createComparisonFilter('gte');
 
 /**
  * Less than comparison: field < value
@@ -244,22 +207,7 @@ export function gte(
  * @example lt('price', 100) → price < 100
  * @example lt(products.price, 100) → type-safe with ColumnRef (DX-040)
  */
-export function lt<T extends string, C extends string, V>(
-	field: ColumnRef<T, C, V>,
-	value: V,
-): WhereComparisonIntent;
-export function lt(field: string, value: unknown): WhereComparisonIntent;
-export function lt(
-	field: ColumnRef<string, string, unknown> | string,
-	value: unknown,
-): WhereComparisonIntent {
-	return {
-		kind: 'comparison',
-		field: getColumnName(field),
-		operator: 'lt',
-		value,
-	};
-}
+export const lt: ComparisonFilter = createComparisonFilter('lt');
 
 /**
  * Less than or equal comparison: field <= value
@@ -267,22 +215,7 @@ export function lt(
  * @example lte('price', 100) → price <= 100
  * @example lte(products.price, 100) → type-safe with ColumnRef (DX-040)
  */
-export function lte<T extends string, C extends string, V>(
-	field: ColumnRef<T, C, V>,
-	value: V,
-): WhereComparisonIntent;
-export function lte(field: string, value: unknown): WhereComparisonIntent;
-export function lte(
-	field: ColumnRef<string, string, unknown> | string,
-	value: unknown,
-): WhereComparisonIntent {
-	return {
-		kind: 'comparison',
-		field: getColumnName(field),
-		operator: 'lte',
-		value,
-	};
-}
+export const lte: ComparisonFilter = createComparisonFilter('lte');
 
 // ============================================================================
 // String Operators

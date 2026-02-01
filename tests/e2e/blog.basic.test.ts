@@ -16,7 +16,6 @@ import {
 	dropBlogSchema,
 	getTestAdapter,
 	seedBlogData,
-	
 } from './testkit/index.js';
 
 describe('Q5: Blog Scenario', () => {

@@ -16,7 +16,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	createIamSchema,
 	createSchema,
-	
 	dropIamSchema,
 	dropSchema,
 	getPgsqlAdapter,

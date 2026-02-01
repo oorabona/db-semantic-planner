@@ -28,7 +28,6 @@ import {
 	getTestPool,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
-	
 } from './testkit/index.js';
 
 const SCHEMA = 'dx021_window_functions';
