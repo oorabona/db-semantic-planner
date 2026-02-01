@@ -273,10 +273,13 @@ describe('lateral handler', () => {
 	it('throws when targetTable is missing', () => {
 		const ctx = makeCtx('users');
 		const state = createCompilerState();
-		const decision = buildDecision({
-			targetTable: undefined,
-			relation: undefined,
-		});
+		const decision = {
+			type: 'includeStrategy',
+			sourceColumn: 'id',
+			targetColumn: 'user_id',
+			relationType: 'hasMany',
+			strategy: 'lateral',
+		} as Decision;
 
 		expect(() => lateralIncludeHandler.compile(decision, ctx, state)).toThrow(
 			'LATERAL include requires targetTable',
@@ -288,7 +291,7 @@ describe('lateral handler', () => {
 	it('handles decision with no limit (no LIMIT clause in SQL)', () => {
 		const ctx = makeCtx('users');
 		const state = createCompilerState();
-		const decision = buildDecision({ limit: undefined });
+		const decision = buildDecision({});
 
 		const result = lateralIncludeHandler.compile(decision, ctx, state);
 		const sql = joinToSQL(result.join!, 'users');
