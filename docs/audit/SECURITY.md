@@ -1,7 +1,7 @@
 # Security Analysis
 
-**Date:** 2026-01-31
-**Overall Rating:** :green_circle: STRONG (A-)
+**Date:** 2026-02-01
+**Overall Rating:** :yellow_circle: GOOD (B+) — downgraded due to 8 dependency vulnerabilities
 
 ---
 
@@ -13,7 +13,7 @@
 | Input validation | :green_circle: | Identifier validation + param binding |
 | SQL injection prevention | :green_circle: | AST-based SQL gen + parameterized queries |
 | Schema/tenant isolation | :green_circle: | validateIdentifier() on schema names |
-| Secure dependencies | :green_circle: | All current versions (pg 8.16.3, etc.) |
+| Secure dependencies | :red_circle: | **8 vulnerabilities** (6 moderate, 2 high) via `pnpm audit` |
 | Error handling safe | :green_circle: | CLI redacts DB URLs, adapter re-throws |
 | No eval/Function | :green_circle: | Zero dynamic code execution |
 | No ReDoS risk | :green_circle: | All NQL regex patterns are linear-time |
@@ -29,7 +29,7 @@
 | A03: Injection | :red_circle: Critical | :green_circle: SAFE | AST-based SQL generation, parameterized queries, identifier quoting |
 | A04: Insecure Design | :yellow_circle: Partial | :green_circle: Good | Ports & Adapters architecture, immutable query building |
 | A05: Security Misconfiguration | :yellow_circle: Partial | :green_circle: Good | Compile-only mode, no default credentials |
-| A06: Vulnerable Components | :yellow_circle: Partial | :green_circle: Clean | `pnpm audit` clean, minimal dependencies |
+| A06: Vulnerable Components | :yellow_circle: Partial | :red_circle: **8 vulns** | `pnpm audit`: 6 moderate, 2 high (was clean on 01-31) |
 | A07: Auth Failures | :white_circle: N/A | - | No auth layer |
 | A08: Data Integrity | :yellow_circle: Partial | :green_circle: Good | Parameterized queries prevent tampering |
 | A09: Logging/Monitoring | :yellow_circle: Partial | :yellow_circle: Limited | `dump()` for observability, but no audit trail for raw SQL escape hatch |
@@ -107,7 +107,7 @@ orm.withSchema('tenant"; DROP TABLE users--');
 | ID | Severity | Issue | Location |
 |----|----------|-------|----------|
 | SEC-001 | MEDIUM | Raw SQL escape hatch without audit trail | `adapter-pgsql/src/handlers/expression/raw.ts:26-41` |
-| SEC-002 | LOW | Cursor names use `Math.random()` (not crypto) | `adapter-pgsql/src/pgsql-adapter.ts:1721` |
+| ~~SEC-002~~ | ~~LOW~~ | ~~Cursor names use `Math.random()`~~ | **RESOLVED:** `crypto.randomUUID()` in `streaming/cursor.ts:225` |
 | SEC-003 | LOW | Silent error suppression in tx rollback | `adapter-pgsql/src/pgsql-adapter.ts:1700-1704` |
 | SEC-004 | INFO | `parameters as any[]` for pg compatibility | `adapter-pgsql/src/pgsql-adapter.ts:1612` |
 
@@ -138,18 +138,20 @@ orm.withSchema('tenant"; DROP TABLE users--');
 
 **Supply chain notes:**
 - All dependencies are well-known, actively maintained packages
-- `pnpm audit` reports 0 vulnerabilities as of 2026-01-31
+- `pnpm audit` reports **8 vulnerabilities** as of 2026-02-01 (was 0 on 01-31)
+- **Action required:** Run `pnpm audit --fix` or update affected packages
 - Minimal dependency tree for a database toolkit
 
 ---
 
 ## Recommendations
 
-1. **Add centralized audit logging** for raw SQL usage (currently `console.warn` only)
-2. **Replace `Math.random()`** with `crypto.randomUUID()` for cursor names
-3. **Log rollback errors at debug level** instead of silent suppression
-4. Run `pnpm audit` in CI/CD pipeline
-5. Consider fuzz testing NQL parser with random inputs
+1. **Fix 8 dependency vulnerabilities** (P0 — run `pnpm audit --fix` or update packages)
+2. **Add centralized audit logging** for raw SQL usage (currently `console.warn` only)
+3. ~~**Replace `Math.random()`** with `crypto.randomUUID()`~~ — **DONE** (cursor.ts:225)
+4. **Log rollback errors at debug level** instead of silent suppression
+5. Run `pnpm audit` in CI/CD pipeline
+6. Consider fuzz testing NQL parser with random inputs
 
 ---
 
@@ -158,4 +160,4 @@ orm.withSchema('tenant"; DROP TABLE users--');
 - Project security policy: `SECURITY.md` (root)
 - Identifier validation: `packages/adapter-pgsql/src/validate.ts`
 - Multi-tenant tests: `tests/e2e/pimdam.q4.multitenant.test.ts`
-- Previous audit: 2026-01-20 (18 items resolved since)
+- Previous audit: 2026-01-31 (SEC-002 resolved, 8 new dep vulns appeared)

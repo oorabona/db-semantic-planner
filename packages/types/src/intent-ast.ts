@@ -228,11 +228,11 @@ export interface AggregateExpressionIntent {
 	/** Field to aggregate (or '*' for count) */
 	readonly field: string | '*';
 	/** Alias for result column */
-	readonly as?: string;
+	readonly as?: string | undefined;
 	/** Whether to apply DISTINCT to the aggregate */
-	readonly distinct?: boolean;
+	readonly distinct?: boolean | undefined;
 	/** Extra arguments for multi-arg aggregates like string_agg(field, separator) */
-	readonly extraArgs?: readonly unknown[];
+	readonly extraArgs?: readonly unknown[] | undefined;
 }
 
 /**
@@ -284,7 +284,7 @@ export interface FunctionExpressionIntent {
 	/** Function arguments */
 	readonly args: readonly unknown[];
 	/** Alias for result column */
-	readonly as?: string;
+	readonly as?: string | undefined;
 }
 
 /**
@@ -296,7 +296,7 @@ export interface SubqueryExpressionIntent {
 	/** The nested query */
 	readonly query: QueryIntent;
 	/** Alias for result column */
-	readonly as?: string;
+	readonly as?: string | undefined;
 }
 
 /**
@@ -312,7 +312,7 @@ export interface ArithmeticExpressionIntent {
 	/** Right operand (column name or value) */
 	readonly right: string | number | unknown;
 	/** Alias for result column */
-	readonly as?: string;
+	readonly as?: string | undefined;
 }
 
 /**
@@ -324,7 +324,7 @@ export interface LiteralExpressionIntent {
 	/** The literal value */
 	readonly value: string | number | boolean | null;
 	/** Optional alias */
-	readonly as?: string;
+	readonly as?: string | undefined;
 }
 
 /**
@@ -353,9 +353,9 @@ export interface CaseExpressionIntent {
 		readonly result: ExpressionIntent;
 	}>;
 	/** Optional ELSE clause */
-	readonly else?: ExpressionIntent;
+	readonly else?: ExpressionIntent | undefined;
 	/** Alias for result column */
-	readonly as?: string;
+	readonly as?: string | undefined;
 }
 
 /**
@@ -446,7 +446,7 @@ export interface WindowIntent {
 	readonly function: WindowFunction;
 
 	/** Field for aggregate/offset functions (required for sum/avg/count/min/max/lag/lead) */
-	readonly field?: string;
+	readonly field?: string | undefined;
 
 	/** Result column alias (required) */
 	readonly alias: string;
@@ -454,9 +454,9 @@ export interface WindowIntent {
 	/** OVER clause specification */
 	readonly over: {
 		/** PARTITION BY columns (optional) */
-		readonly partitionBy?: readonly string[];
+		readonly partitionBy?: readonly string[] | undefined;
 		/** ORDER BY specification (optional but recommended for ranking) */
-		readonly orderBy?: readonly WindowOrderBy[];
+		readonly orderBy?: readonly WindowOrderBy[] | undefined;
 	};
 }
 
@@ -645,7 +645,7 @@ export interface WhereRelationFilterIntent {
 	 */
 	readonly mode: 'some' | 'every' | 'none';
 	/** Optional alias for complex conditions (SPEC-002) */
-	readonly alias?: string;
+	readonly alias?: string | undefined;
 }
 
 // ============================================================================
@@ -784,33 +784,33 @@ export interface IncludeIntent {
 	readonly relation: string;
 
 	/** What columns to select from related records */
-	readonly select?: SelectIntent;
+	readonly select?: SelectIntent | undefined;
 
 	/** Filter conditions on related records */
-	readonly where?: WhereIntent;
+	readonly where?: WhereIntent | undefined;
 
 	/** Nested includes for deep loading */
-	readonly include?: readonly IncludeIntent[];
+	readonly include?: readonly IncludeIntent[] | undefined;
 
 	/**
 	 * Explicit relation path for disambiguation.
 	 * Use when multiple relations exist between same tables.
 	 * @example 'author' or 'editor' when User has both relations to Post
 	 */
-	readonly via?: string;
+	readonly via?: string | undefined;
 
 	/**
 	 * Maximum number of related records to include per parent.
 	 * Only effective with LATERAL JOIN strategy (PostgreSQL/DuckDB/MSSQL).
 	 * @example limit: 5 - fetch at most 5 related records per parent
 	 */
-	readonly limit?: number;
+	readonly limit?: number | undefined;
 
 	/**
 	 * Order by for related records (used with limit).
 	 * @example orderBy: [{ field: 'createdAt', direction: 'desc' }]
 	 */
-	readonly orderBy?: readonly OrderByIntent[];
+	readonly orderBy?: readonly OrderByIntent[] | undefined;
 
 	/**
 	 * CLI-012c: Enable recursive CTE for self-referential relations.
@@ -822,7 +822,7 @@ export interface IncludeIntent {
 	 *   recursive: { maxDepth: 10, track: { depth: true } }
 	 * }]
 	 */
-	readonly recursive?: IncludeRecursiveOptions;
+	readonly recursive?: IncludeRecursiveOptions | undefined;
 
 	/**
 	 * NQL v2.1: Override include output strategy for this relation.
@@ -839,7 +839,7 @@ export interface IncludeIntent {
 	 * // Results in: include: [{ relation: 'customer', strategy: 'flat' }]
 	 * // Planner then picks lateral, join, subquery, or cte (never json_agg)
 	 */
-	readonly strategy?: 'auto' | 'flat';
+	readonly strategy?: 'auto' | 'flat' | undefined;
 }
 
 // ============================================================================
@@ -1267,13 +1267,13 @@ export interface InsertFromIntent {
 	readonly source: string;
 
 	/** Optional column mapping (defaults to same column names) */
-	readonly columns?: readonly string[];
+	readonly columns?: readonly string[] | undefined;
 
 	/** Filter condition for source rows */
-	readonly where?: WhereIntent;
+	readonly where?: WhereIntent | undefined;
 
 	/** Limit number of rows to insert */
-	readonly limit?: number;
+	readonly limit?: number | undefined;
 
 	/**
 	 * Columns to return from inserted rows (DX-026).

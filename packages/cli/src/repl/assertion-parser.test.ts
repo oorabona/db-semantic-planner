@@ -45,7 +45,7 @@ params.equals: [1]
 output.contains: Tables
 
 --- query: 1
-sql.contains: SELECT
+sql.equals: SELECT
 params.length: 0
 
 --- query: 2
@@ -83,8 +83,8 @@ output.contains: valid
 			const result = parseAssertionFile(content);
 
 			expect(result.errors).toHaveLength(1);
-			expect(result.errors[0].line).toBe(1);
-			expect(result.errors[0].message).toContain('outside of any block');
+			expect(result.errors[0]!.line).toBe(1);
+			expect(result.errors[0]!.message).toContain('outside of any block');
 		});
 
 		it('reports error for invalid block header', () => {
@@ -95,10 +95,10 @@ output.contains: test
 
 			// Two errors: invalid header + orphan assertion (block not started)
 			expect(result.errors).toHaveLength(2);
-			expect(result.errors[0].line).toBe(1);
-			expect(result.errors[0].message).toContain('Invalid block header');
-			expect(result.errors[1].line).toBe(2);
-			expect(result.errors[1].message).toContain('outside of any block');
+			expect(result.errors[0]!.line).toBe(1);
+			expect(result.errors[0]!.message).toContain('Invalid block header');
+			expect(result.errors[1]!.line).toBe(2);
+			expect(result.errors[1]!.message).toContain('outside of any block');
 		});
 
 		it('reports error for unknown assertion type', () => {
@@ -108,9 +108,9 @@ unknown.type: value
 			const result = parseAssertionFile(content);
 
 			expect(result.errors).toHaveLength(1);
-			expect(result.errors[0].line).toBe(2);
-			expect(result.errors[0].message).toContain('Unknown assertion type');
-			expect(result.errors[0].message).toContain('unknown.type');
+			expect(result.errors[0]!.line).toBe(2);
+			expect(result.errors[0]!.message).toContain('Unknown assertion type');
+			expect(result.errors[0]!.message).toContain('unknown.type');
 		});
 
 		it('reports error for invalid boolean value', () => {
@@ -120,7 +120,7 @@ success: maybe
 			const result = parseAssertionFile(content);
 
 			expect(result.errors).toHaveLength(1);
-			expect(result.errors[0].message).toContain('Invalid boolean');
+			expect(result.errors[0]!.message).toContain('Invalid boolean');
 		});
 
 		it('reports error for invalid params.length value', () => {
@@ -130,7 +130,7 @@ params.length: abc
 			const result = parseAssertionFile(content);
 
 			expect(result.errors).toHaveLength(1);
-			expect(result.errors[0].message).toContain('Invalid number');
+			expect(result.errors[0]!.message).toContain('Invalid number');
 		});
 
 		it('reports error for invalid JSON in params.equals', () => {
@@ -140,7 +140,7 @@ params.equals: not json
 			const result = parseAssertionFile(content);
 
 			expect(result.errors).toHaveLength(1);
-			expect(result.errors[0].message).toContain('Invalid JSON');
+			expect(result.errors[0]!.message).toContain('Invalid JSON');
 		});
 
 		it('reports error for invalid regex pattern', () => {
@@ -150,7 +150,7 @@ sql.matches: [invalid(regex
 			const result = parseAssertionFile(content);
 
 			expect(result.errors).toHaveLength(1);
-			expect(result.errors[0].message).toContain('Invalid regex');
+			expect(result.errors[0]!.message).toContain('Invalid regex');
 		});
 
 		it('includes line numbers in all errors', () => {
@@ -173,7 +173,6 @@ success: maybe
 			['output.contains', 'text value', 'text value'],
 			['output.equals', 'exact text', 'exact text'],
 			['output.matches', '\\d+', '\\d+'],
-			['sql.contains', 'SELECT', 'SELECT'],
 			['sql.equals', 'SELECT * FROM users', 'SELECT * FROM users'],
 			['sql.matches', 'SELECT.*FROM', 'SELECT.*FROM'],
 			['params.equals', '[1, "test", true]', [1, 'test', true]],
@@ -206,8 +205,8 @@ ${type}: ${input}
 			const errors = validateAssertionBlocks(blocks, 3, ['a', 'b', 'c']);
 
 			expect(errors).toHaveLength(1);
-			expect(errors[0].message).toContain('out of bounds');
-			expect(errors[0].message).toContain('0-2');
+			expect(errors[0]!.message).toContain('out of bounds');
+			expect(errors[0]!.message).toContain('0-2');
 		});
 
 		it('validates query match exists', () => {
@@ -225,7 +224,7 @@ ${type}: ${input}
 			]);
 
 			expect(errors).toHaveLength(1);
-			expect(errors[0].message).toContain('No query matches');
+			expect(errors[0]!.message).toContain('No query matches');
 		});
 
 		it('detects ambiguous match (ERR-06)', () => {
@@ -243,9 +242,9 @@ ${type}: ${input}
 			]);
 
 			expect(errors).toHaveLength(1);
-			expect(errors[0].message).toContain('Ambiguous match');
-			expect(errors[0].message).toContain('0, 2');
-			expect(errors[0].message).toContain('Use query index instead');
+			expect(errors[0]!.message).toContain('Ambiguous match');
+			expect(errors[0]!.message).toContain('0, 2');
+			expect(errors[0]!.message).toContain('Use query index instead');
 		});
 
 		it('warns about empty blocks', () => {
@@ -253,7 +252,7 @@ ${type}: ${input}
 			const errors = validateAssertionBlocks(blocks, 3, ['a', 'b', 'c']);
 
 			expect(errors).toHaveLength(1);
-			expect(errors[0].message).toContain('no assertions');
+			expect(errors[0]!.message).toContain('no assertions');
 		});
 
 		it('passes valid blocks', () => {
@@ -313,7 +312,6 @@ ${type}: ${input}
 				'output.contains',
 				'output.equals',
 				'output.matches',
-				'sql.contains',
 				'sql.equals',
 				'sql.matches',
 				'params.equals',
@@ -358,7 +356,6 @@ ${type}: ${input}
 		});
 
 		it('returns false for sql.* assertions', () => {
-			expect(requiresDatabase('sql.contains')).toBe(false);
 			expect(requiresDatabase('sql.equals')).toBe(false);
 			expect(requiresDatabase('sql.matches')).toBe(false);
 			expect(requiresDatabase('sql.table')).toBe(false);

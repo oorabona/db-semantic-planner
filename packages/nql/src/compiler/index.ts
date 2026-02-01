@@ -56,8 +56,10 @@ import type {
 	NqlInsert,
 	NqlInsertFrom,
 	NqlIsNullExpression,
+	NqlLimitClause,
 	NqlMutationPipeline,
 	NqlNumberLiteral,
+	NqlOffsetClause,
 	NqlOrderByClause,
 	NqlOrderItem,
 	NqlPathExpression,
@@ -72,6 +74,7 @@ import type {
 	NqlUnaryExpression,
 	NqlUpdate,
 	NqlUpsert,
+	NqlWhereClause,
 	NqlWindowExpression,
 } from '../parser/ast.js';
 
@@ -163,7 +166,7 @@ export class NqlCompiler {
 			return {};
 		}
 
-		const stmt = program.statements[0];
+		const stmt = program.statements[0]!;
 
 		if (stmt.type === 'query') {
 			return { query: this.compileQuery(stmt) };
@@ -178,7 +181,7 @@ export class NqlCompiler {
 		// Track if we've seen groupBy (for WHERE vs HAVING)
 		let groupByIndex = -1;
 		for (let i = 0; i < query.clauses.length; i++) {
-			if (query.clauses[i].type === 'groupBy') {
+			if (query.clauses[i]?.type === 'groupBy') {
 				groupByIndex = i;
 				break;
 			}
@@ -200,18 +203,20 @@ export class NqlCompiler {
 		let flatMode = false;
 
 		for (let i = 0; i < query.clauses.length; i++) {
-			const clause = query.clauses[i];
+			const clause = query.clauses[i]!;
 
 			switch (clause.type) {
 				case 'where': {
-					const condition = this.compileExpression(clause.condition);
+					const condition = this.compileExpression(
+						(clause as NqlWhereClause).condition,
+					);
 					if (groupByIndex >= 0 && i > groupByIndex) {
 						havingConditions.push(condition);
 					} else if (currentIncludeBatch && currentIncludeBatch.length > 0) {
 						// WHERE after WITH: attach to current includes
 						// For nested includes, attach to last include in the batch
 						const targetInclude =
-							currentIncludeBatch[currentIncludeBatch.length - 1];
+							currentIncludeBatch[currentIncludeBatch.length - 1]!;
 						if (targetInclude.where) {
 							// Combine with existing where using AND
 							(targetInclude as { where: WhereIntent }).where = {
@@ -227,8 +232,8 @@ export class NqlCompiler {
 					break;
 				}
 				case 'select':
-					select = this.compileSelectClause(clause);
-					distinct = clause.distinct || undefined;
+					select = this.compileSelectClause(clause as NqlSelectClause);
+					distinct = (clause as NqlSelectClause).distinct || undefined;
 					break;
 				case 'flat':
 					// NQL v2.1: | flat forces JOIN strategy for all includes
@@ -236,18 +241,18 @@ export class NqlCompiler {
 					flatMode = true;
 					break;
 				case 'groupBy':
-					groupBy = this.compileGroupByClause(clause);
+					groupBy = this.compileGroupByClause(clause as NqlGroupByClause);
 					// Reset include context after groupBy
 					currentIncludeBatch = undefined;
 					break;
 				case 'orderBy':
-					orderBy = this.compileOrderByClause(clause);
+					orderBy = this.compileOrderByClause(clause as NqlOrderByClause);
 					break;
 				case 'limit':
-					limit = clause.count;
+					limit = (clause as NqlLimitClause).count;
 					break;
 				case 'offset':
-					offset = clause.count;
+					offset = (clause as NqlOffsetClause).count;
 					break;
 			}
 		}
@@ -280,9 +285,10 @@ export class NqlCompiler {
 		// This handles includes that were created before flatMode was detected
 		if (flatMode && allIncludes.length > 0) {
 			for (let i = 0; i < allIncludes.length; i++) {
-				if (!allIncludes[i].strategy) {
+				const inc = allIncludes[i]!;
+				if (!inc.strategy) {
 					// Replace with new object including strategy (avoid mutating readonly)
-					allIncludes[i] = { ...allIncludes[i], strategy: 'flat' };
+					allIncludes[i] = { ...inc, strategy: 'flat' } as IncludeIntent;
 				}
 			}
 		}
@@ -326,7 +332,7 @@ export class NqlCompiler {
 	}
 
 	private compileSelectClause(clause: NqlSelectClause): SelectIntent {
-		if (clause.items.length === 1 && clause.items[0].type === 'star') {
+		if (clause.items.length === 1 && clause.items[0]?.type === 'star') {
 			return { type: 'all' };
 		}
 
@@ -354,7 +360,7 @@ export class NqlCompiler {
 				const expr = item.expression;
 				if (expr.type === 'path' && expr.segments.length === 1 && !item.alias) {
 					// Simple field reference
-					simpleFields.push(expr.segments[0]);
+					simpleFields.push(expr.segments[0]!);
 				} else {
 					hasExpressions = true;
 				}
@@ -406,8 +412,8 @@ export class NqlCompiler {
 					// Try simple field first, fall back to SQL expression for complex args
 					// e.g., sum(price * qty) → field = "(price * qty)"
 					field =
-						this.expressionToField(expr.args[0]) ??
-						this.expressionToSql(expr.args[0]);
+						this.expressionToField(expr.args[0]!) ??
+						this.expressionToSql(expr.args[0]!);
 				}
 				// Collect extra arguments for multi-arg aggregates (e.g., string_agg)
 				// Use expressionToField first for column refs, fallback to expressionToValue
@@ -423,7 +429,7 @@ export class NqlCompiler {
 					kind: 'aggregate',
 					function: fn as AggregateFunction,
 					field,
-					as: item.alias,
+					...(item.alias !== undefined && { as: item.alias }),
 					...(expr.distinct && { distinct: true }),
 					...(extraArgs && { extraArgs }),
 				};
@@ -436,7 +442,7 @@ export class NqlCompiler {
 				args: expr.args.map(
 					(a) => this.expressionToField(a) ?? this.expressionToValue(a),
 				),
-				as: item.alias,
+				...(item.alias !== undefined && { as: item.alias }),
 			};
 		}
 
@@ -449,8 +455,8 @@ export class NqlCompiler {
 			let field: string | undefined;
 			if (windowExpr.args.length > 0) {
 				field =
-					this.expressionToField(windowExpr.args[0]) ??
-					this.expressionToSql(windowExpr.args[0]);
+					this.expressionToField(windowExpr.args[0]!) ??
+					this.expressionToSql(windowExpr.args[0]!);
 			}
 
 			// Convert partition by expressions to field names
@@ -475,7 +481,7 @@ export class NqlCompiler {
 			return {
 				kind: 'window',
 				function: fn,
-				field,
+				...(field !== undefined && { field }),
 				alias: item.alias ?? fn, // Use function name as default alias
 				over: {
 					...(partitionBy && { partitionBy }),
@@ -489,13 +495,13 @@ export class NqlCompiler {
 			return {
 				kind: 'subquery',
 				query: this.compileQuery(expr.query),
-				as: item.alias,
+				...(item.alias !== undefined && { as: item.alias }),
 			};
 		}
 
 		// Simple path expression (single segment, e.g., "name")
 		if (expr.type === 'path' && expr.segments.length === 1) {
-			const column = expr.segments[0];
+			const column = expr.segments[0]!;
 			if (item.alias) {
 				return { kind: 'columnAlias', column, alias: item.alias };
 			}
@@ -505,10 +511,11 @@ export class NqlCompiler {
 		// Path expression with multiple segments (e.g., "customer.name", "parent.name")
 		if (expr.type === 'path' && expr.segments.length > 1) {
 			const segments = expr.segments;
-			const firstSegment = segments[0].toLowerCase();
+			const firstSegmentLower = (segments[0] as string).toLowerCase();
 
 			// Check for pseudo-column traversal (parent.name, manager.name, ascendant[3].title, etc.)
-			if (this.pseudoColumnKeywords.has(firstSegment)) {
+			if (this.pseudoColumnKeywords.has(firstSegmentLower)) {
+				const firstSegment: string = firstSegmentLower;
 				const depthHint = expr.type === 'path' ? expr.depthHint : undefined;
 
 				// Validate depthHint: only recursive traversals support scoped depth
@@ -533,9 +540,9 @@ export class NqlCompiler {
 				let i = 1;
 				while (
 					i < segments.length &&
-					this.pseudoColumnKeywords.has(segments[i].toLowerCase())
+					this.pseudoColumnKeywords.has((segments[i] as string).toLowerCase())
 				) {
-					traversals.push(segments[i].toLowerCase());
+					traversals.push((segments[i] as string).toLowerCase());
 					i++;
 				}
 
@@ -545,7 +552,7 @@ export class NqlCompiler {
 						`Pseudo-column path must end with a column name: ${segments.join('.')}`,
 					);
 				}
-				const targetColumn = segments[i];
+				const targetColumn = segments[i]!;
 				const defaultAlias = segments.map((s) => s.toLowerCase()).join('.');
 
 				if (traversals.length === 1) {
@@ -562,7 +569,7 @@ export class NqlCompiler {
 				// Chained multi-hop: parent.parent.name
 				return {
 					kind: 'pseudoColumn',
-					traversal: traversals[0] as PseudoColumnTraversal,
+					traversal: traversals[0]! as PseudoColumnTraversal,
 					traversals: traversals as PseudoColumnTraversal[],
 					targetColumn,
 					as: item.alias ?? defaultAlias,
@@ -570,7 +577,7 @@ export class NqlCompiler {
 			}
 
 			// Regular relation path (e.g., customer.name)
-			const column = segments[segments.length - 1];
+			const column = segments[segments.length - 1]!;
 			const relation = segments.slice(0, -1).join('.');
 			return {
 				kind: 'relationColumn',
@@ -592,7 +599,7 @@ export class NqlCompiler {
 				left: leftField ?? this.expressionToValue(expr.left),
 				operator: expr.operator as '+' | '-' | '*' | '/' | '%',
 				right: rightField ?? this.expressionToValue(expr.right),
-				as: item.alias,
+				...(item.alias !== undefined && { as: item.alias }),
 			};
 		}
 
@@ -609,7 +616,7 @@ export class NqlCompiler {
 					left: -1,
 					operator: '*',
 					right: operandField ?? this.expressionToValue(unary.operand),
-					as: item.alias,
+					...(item.alias !== undefined && { as: item.alias }),
 				};
 			}
 			throw new Error(
@@ -629,7 +636,7 @@ export class NqlCompiler {
 				...(caseExpr.elseClause && {
 					else: this.compileExpressionToIntent(caseExpr.elseClause),
 				}),
-				as: item.alias,
+				...(item.alias !== undefined && { as: item.alias }),
 			};
 		}
 
@@ -859,7 +866,7 @@ export class NqlCompiler {
 					relation: relFilter.relation,
 					where: this.compileExpression(relFilter.condition),
 					mode: relFilter.mode,
-					alias: relFilter.alias,
+					...(relFilter.alias !== undefined && { alias: relFilter.alias }),
 				};
 			}
 
@@ -926,11 +933,11 @@ export class NqlCompiler {
 			type: 'insert_from',
 			table: insertFrom.table,
 			source: insertFrom.source,
-			columns: insertFrom.columns,
-			where: insertFrom.where
-				? this.compileExpression(insertFrom.where)
-				: undefined,
-			limit: insertFrom.limit,
+			...(insertFrom.columns !== undefined && { columns: insertFrom.columns }),
+			...(insertFrom.where !== undefined && {
+				where: this.compileExpression(insertFrom.where),
+			}),
+			...(insertFrom.limit !== undefined && { limit: insertFrom.limit }),
 		};
 	}
 

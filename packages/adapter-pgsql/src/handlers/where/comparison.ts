@@ -6,7 +6,6 @@
 
 import type { Node } from '@pgsql/types';
 import {
-	columnRef,
 	eqExpr,
 	gtExpr,
 	gteExpr,
@@ -14,7 +13,6 @@ import {
 	lteExpr,
 	neExpr,
 } from '../../ast-helpers.js';
-import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -22,23 +20,7 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { COMPARISON_OPERATORS } from '../types.js';
-
-/**
- * Build column reference from decision column
- */
-function buildColumnRef(column: string, ctx: CompilerContext): Node {
-	const alias = ctx.currentAlias ?? ctx.rootTable;
-	return columnRef(column, alias, ctx.schema, ctx.naming);
-}
-
-/**
- * Build parameter reference and register value
- */
-function buildParamRef(value: unknown, state: CompilerState): Node {
-	state.paramIndex++;
-	state.parameters.push(value);
-	return createParamRef(state.paramIndex);
-}
+import { buildColumnRef, buildParamRef } from './utils.js';
 
 /**
  * Comparison operators handler

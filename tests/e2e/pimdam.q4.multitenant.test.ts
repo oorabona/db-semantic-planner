@@ -15,7 +15,6 @@ import {
 	pimdamModel,
 	seedAcmeTenant,
 	seedGlobexTenant,
-	
 } from './testkit/index.js';
 
 describe('Q4: Multi-tenant Isolation', () => {
@@ -47,7 +46,7 @@ describe('Q4: Multi-tenant Isolation', () => {
 
 			// Acme has 4 products: PROD-001, PROD-002, PROD-003, PROD-004
 			expect(products).toHaveLength(4);
-			const skus = products.map((p: { sku: string }) => p.sku);
+			const skus = products.map((p: any) => p.sku);
 			expect(skus.every((sku) => sku.startsWith('PROD-'))).toBe(true);
 			expect(skus).not.toContain('GLX-001');
 		});
@@ -64,7 +63,7 @@ describe('Q4: Multi-tenant Isolation', () => {
 
 			// Globex has 5 products: GLX-001 through GLX-005
 			expect(products).toHaveLength(5);
-			const skus = products.map((p: { sku: string }) => p.sku);
+			const skus = products.map((p: any) => p.sku);
 			expect(skus.every((sku) => sku.startsWith('GLX-'))).toBe(true);
 			expect(skus).not.toContain('PROD-001');
 		});
@@ -175,8 +174,8 @@ describe('Q4: Multi-tenant Isolation', () => {
 			const globexActive = await buildQuery('globex').execute();
 
 			// Verify results are different
-			const acmeSkus = acmeActive.map((p: { sku: string }) => p.sku);
-			const globexSkus = globexActive.map((p: { sku: string }) => p.sku);
+			const acmeSkus = acmeActive.map((p: any) => p.sku);
+			const globexSkus = globexActive.map((p: any) => p.sku);
 
 			// No overlap between tenant SKUs
 			const intersection = acmeSkus.filter((sku) => globexSkus.includes(sku));

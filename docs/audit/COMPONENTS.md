@@ -1,7 +1,7 @@
 # Component Analysis
 
-**Date:** 2026-01-31
-**Scope:** All 6 packages
+**Date:** 2026-02-01
+**Scope:** All 6 packages — focus DRY, execution paths, dead code
 
 ---
 
@@ -13,10 +13,10 @@
 |-----------|-------|
 | Path | `packages/core` |
 | Purpose | DB-agnostic schema definition, query planning, DX layer |
-| Source files | 33 |
-| LOC | 19,865 |
+| Source files | 34 |
+| LOC | 19,915 |
 | Test files | 24 |
-| Test ratio | 0.72 (excellent) |
+| Test ratio | 0.71 (excellent) |
 | Dependencies | `@dbsp/nql`, `@dbsp/types`, `valibot` |
 
 ### Architecture Layers
@@ -48,7 +48,7 @@ DX Layer (dx/)
 
 | ID | Severity | Issue |
 |----|----------|-------|
-| CORE-001 | HIGH | `QueryBuilderImpl` god class (1,774 LOC, 15 fields, 20+ methods, 7 responsibilities) |
+| CORE-001 | HIGH | `QueryBuilderImpl` god class (1,091 LOC, 15 fields, 20+ methods, 7 responsibilities) — reduced from 1,774 |
 | CORE-002 | HIGH | 20+ identical `clone()` calls at start of every fluent method (DRY) |
 | CORE-003 | MEDIUM | `types.ts` has 26 exported types mixing query, orm, pagination, aggregation |
 | CORE-004 | MEDIUM | `filters.ts` has 57 functions + WindowBuilder class (SRP) |
@@ -57,6 +57,11 @@ DX Layer (dx/)
 | CORE-007 | MEDIUM | 7 `any` types in `result-hydrator.ts` with biome-ignore |
 | CORE-008 | LOW | 10+ type assertions in `intent-builder.ts` (exactOptionalPropertyTypes workaround) |
 | CORE-009 | LOW | 4 deprecated exports still present (nqlCompiler, NqlCompilerFn, namingConvention, validate()) |
+| CORE-010 | HIGH | **NEW:** `getColumnName()` duplicated 4× (filters, functions, window-functions, typed-query-builder) |
+| CORE-011 | HIGH | **NEW:** Comparison filters (eq/neq/gt/gte/lt/lte) — 120 LOC identical boilerplate |
+| CORE-012 | MEDIUM | **NEW:** `isRecursiveIncludeOptions()` exported from both types.ts and intent-builder.ts |
+| CORE-013 | MEDIUM | **NEW:** Mutation builder constructors — 56 identical field assignments across 4 builders |
+| CORE-014 | MEDIUM | **NEW:** `_getRelationPath()` private function in filters.ts — never called |
 
 ### Strengths
 
@@ -76,9 +81,9 @@ DX Layer (dx/)
 |-----------|-------|
 | Path | `packages/adapter-pgsql` |
 | Purpose | PostgreSQL-native SQL compiler + executor |
-| Source files | 50 |
-| LOC | 13,757 |
-| Test files | 18 |
+| Source files | 53 |
+| LOC | 14,529 |
+| Test files | 19 |
 | Test ratio | 0.36 (moderate) |
 | Dependencies | `@dbsp/core`, `@dbsp/types`, `pg`, `pgsql-deparser` |
 
@@ -108,13 +113,17 @@ streaming/ — Cursor-based streaming
 
 | ID | Severity | Issue |
 |----|----------|-------|
-| PGSQL-001 | HIGH | `PgsqlAdapter` god class (1,930 LOC, 97 functions, 10 responsibilities) |
-| PGSQL-002 | HIGH | 44-case switch on `decision.type` in compiler (OCP violation) |
+| PGSQL-001 | HIGH | `PgsqlAdapter` god class (1,592 LOC, 21+ methods, 10 responsibilities) — reduced from 1,930 |
+| PGSQL-002 | HIGH | 15-case switch on `decision.type` in compiler (OCP violation) — reduced from 44 |
 | PGSQL-003 | MEDIUM | RETURNING clause compilation duplicated 3 times |
 | PGSQL-004 | MEDIUM | FK derivation logic duplicated in 3 locations |
-| PGSQL-005 | MEDIUM | Complex recursive dotted-field→EXISTS conversion |
-| PGSQL-006 | LOW | `Math.random()` for cursor names (not crypto) |
+| PGSQL-005 | MEDIUM | `compileSubqueryIncludeManyToMany()` — 550+ LOC, deeply nested (was: dotted-field→EXISTS) |
+| PGSQL-006 | ~~LOW~~ | ~~`Math.random()` for cursor names~~ — **RESOLVED:** now uses `crypto.randomUUID()` |
 | PGSQL-007 | LOW | Silent error suppression in transaction rollback |
+| PGSQL-008 | HIGH | **NEW:** `buildColumnRef()` duplicated in 4 WHERE handlers |
+| PGSQL-009 | MEDIUM | **NEW:** `buildParamRef()` duplicated in 2 handlers |
+| PGSQL-010 | MEDIUM | **NEW:** Column target building duplicated in join/lateral handlers |
+| PGSQL-011 | MEDIUM | **NEW:** JSON_AGG FK direction logic duplicated across compiler, json-agg, subquery |
 
 ### Strengths
 

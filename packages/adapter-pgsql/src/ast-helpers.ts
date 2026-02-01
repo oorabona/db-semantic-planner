@@ -30,6 +30,34 @@ import type {
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 
+/**
+ * Normalize SQL for comparison: collapse whitespace, lowercase, trim.
+ * Canonical implementation — imported by ast-compare.ts and external consumers.
+ */
+export function normalizeSQL(sql: string): string {
+	return sql
+		.toLowerCase()
+		.replace(/\s+/g, ' ')
+		.replace(/\(\s+/g, '(')
+		.replace(/\s+\)/g, ')')
+		.replace(/,\s+/g, ', ')
+		.replace(/;\s*$/, '')
+		.trim();
+}
+
+// ============================================================================
+// Internal Helpers
+// ============================================================================
+
+function applyReturningList(
+	stmt: { returningList?: Node[] },
+	returning: Node[] | undefined,
+): void {
+	if (returning && returning.length > 0) {
+		stmt.returningList = returning;
+	}
+}
+
 // ============================================================================
 // Basic Value Nodes
 // ============================================================================
@@ -219,6 +247,23 @@ export function binaryExpr(
  */
 export function eqExpr(left: Node, right: Node): Node {
 	return binaryExpr('=', left, right);
+}
+
+/**
+ * Build an FK-based correlation condition: alias1.col1 = alias2.col2
+ * Used by all include handlers (JOIN, LATERAL, CTE, JSON_AGG).
+ */
+export function fkCorrelation(
+	col1: string,
+	alias1: string,
+	col2: string,
+	alias2: string,
+	naming: NamingPlugin,
+): Node {
+	return eqExpr(
+		columnRef(col1, alias1, undefined, naming),
+		columnRef(col2, alias2, undefined, naming),
+	);
 }
 
 /**
@@ -502,6 +547,8 @@ export interface SelectOptions {
 	limit?: Node;
 	offset?: Node;
 	distinct?: boolean | Node[];
+	/** WITH clause (e.g., CTEs) — { ctes: Node[], recursive?: boolean } */
+	withClause?: { ctes: Node[]; recursive?: boolean };
 }
 
 /**
@@ -544,6 +591,13 @@ export function selectStmt(options: SelectOptions): Node {
 		stmt.distinctClause = [];
 	} else if (Array.isArray(options.distinct) && options.distinct.length > 0) {
 		stmt.distinctClause = options.distinct;
+	}
+
+	if (options.withClause && options.withClause.ctes.length > 0) {
+		stmt.withClause = {
+			ctes: options.withClause.ctes,
+			recursive: options.withClause.recursive ?? false,
+		};
 	}
 
 	return { SelectStmt: stmt };
@@ -609,9 +663,7 @@ export function insertStmt(options: InsertOptions): Node {
 		};
 	}
 
-	if (options.returning && options.returning.length > 0) {
-		stmt.returningList = options.returning;
-	}
+	applyReturningList(stmt, options.returning);
 
 	// ON CONFLICT handling would go here (complex, defer for now)
 
@@ -666,9 +718,7 @@ export function updateStmt(options: UpdateOptions): Node {
 		stmt.fromClause = options.from;
 	}
 
-	if (options.returning && options.returning.length > 0) {
-		stmt.returningList = options.returning;
-	}
+	applyReturningList(stmt, options.returning);
 
 	return { UpdateStmt: stmt };
 }
@@ -714,9 +764,7 @@ export function deleteStmt(options: DeleteOptions): Node {
 		stmt.usingClause = options.using;
 	}
 
-	if (options.returning && options.returning.length > 0) {
-		stmt.returningList = options.returning;
-	}
+	applyReturningList(stmt, options.returning);
 
 	return { DeleteStmt: stmt };
 }
@@ -805,8 +853,14 @@ export function jsonAggSubquery(
 	alias: string,
 	schemaName?: string,
 	naming: NamingPlugin = identityNaming,
+	options?: {
+		/** Nested child subqueries to merge via jsonb_build_object */
+		childNodes?: readonly { key: string; node: Node }[];
+		/** Override the default __t__ alias (for nested depth) */
+		innerAlias?: string;
+	},
 ): Node {
-	const targetAlias = '__t__';
+	const targetAlias = options?.innerAlias ?? '__t__';
 
 	// Build: to_jsonb(__t__) - use row reference (just alias, not alias.*)
 	// In PostgreSQL, __t__ refers to the entire row when used with aggregate/jsonb functions
@@ -816,14 +870,41 @@ export function jsonAggSubquery(
 		},
 	};
 
-	const toJsonbCall: Node = {
+	let toJsonbCall: Node = {
 		FuncCall: {
 			funcname: [stringNode('to_jsonb')],
 			args: [rowRef],
 		} as FuncCall,
 	};
 
-	// Build: json_agg(to_jsonb(__t__))
+	// If there are nested children, merge them via:
+	// to_jsonb(__t__) || jsonb_build_object('child1', <subquery1>, 'child2', <subquery2>)
+	if (options?.childNodes && options.childNodes.length > 0) {
+		const buildObjectArgs: Node[] = [];
+		for (const child of options.childNodes) {
+			buildObjectArgs.push({ A_Const: { sval: { sval: child.key } } });
+			buildObjectArgs.push(child.node);
+		}
+
+		const jsonbBuildObject: Node = {
+			FuncCall: {
+				funcname: [stringNode('jsonb_build_object')],
+				args: buildObjectArgs,
+			} as FuncCall,
+		};
+
+		// to_jsonb(__t__) || jsonb_build_object(...)
+		toJsonbCall = {
+			A_Expr: {
+				kind: 'AEXPR_OP',
+				name: [stringNode('||')],
+				lexpr: toJsonbCall,
+				rexpr: jsonbBuildObject,
+			},
+		};
+	}
+
+	// Build: json_agg(to_jsonb(__t__) [|| jsonb_build_object(...)])
 	const jsonAggCall: Node = {
 		FuncCall: {
 			funcname: [stringNode('json_agg')],

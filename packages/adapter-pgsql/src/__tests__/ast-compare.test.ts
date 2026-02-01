@@ -7,9 +7,9 @@ import {
 	assertRoundtrip,
 	compareAST,
 	compareSQLByAST,
-	normalizeSQL,
 	roundtripTest,
 } from '../ast-compare.js';
+import { normalizeSQL } from '../ast-helpers.js';
 
 describe('compareAST', () => {
 	it('compares equal primitives', () => {

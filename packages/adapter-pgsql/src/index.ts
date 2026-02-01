@@ -5,7 +5,6 @@
  * PlanReport → PostgreSQL AST → SQL (via pgsql-deparser)
  */
 
-// AST Comparison functions are lazy-loaded in tests only
 // AST Helpers
 export {
 	andExpr,

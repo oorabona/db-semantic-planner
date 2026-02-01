@@ -1,22 +1,22 @@
 # Codebase Audit: db-semantic-planner
 
-**Date:** 2026-01-31
+**Date:** 2026-02-01
 **Mode:** deep
-**Scope:** full (all 6 packages)
+**Scope:** full (all 6 packages) — focus DRY, execution paths, dead code
 
 ---
 
 ## Executive Summary
 
-| Dimension | Score | Status |
-|-----------|-------|--------|
-| Architecture | 9/10 | :green_circle: |
-| Code Quality | 7/10 | :yellow_circle: |
-| Principle Compliance | 7/10 | :yellow_circle: |
-| Documentation | 4/10 | :red_circle: |
-| Test Coverage | 7/10 | :yellow_circle: |
+| Dimension | Score | Status | Trend |
+|-----------|-------|--------|-------|
+| Architecture | 9/10 | :green_circle: | :arrow_right: |
+| Code Quality | 7/10 | :yellow_circle: | :arrow_right: |
+| Principle Compliance | 7/10 | :yellow_circle: | :arrow_right: (DRY :arrow_down:) |
+| Documentation | 7/10 | :yellow_circle: | :arrow_up: (was 4/10) |
+| Test Coverage | 7/10 | :yellow_circle: | :arrow_right: |
 
-**Overall Health:** :yellow_circle: Needs Attention — Architecture is excellent, but documentation drift after adapter-kysely sunset is critical.
+**Overall Health:** :yellow_circle: Needs Attention — Architecture is excellent, documentation significantly improved, but DRY violations are the primary weakness (12 new findings). Dependency vulnerabilities require immediate attention.
 
 ---
 
@@ -24,26 +24,29 @@
 
 | # | Finding | C | I | R | Score | Axis |
 |---|---------|---|---|---|-------|------|
-| 1 | **CLAUDE.md references dead Kysely adapter** | C1 | I4 | R3 | 12.0 | Documentation |
-| 2 | **README references non-existent `@dbsp/adapter-kysely` and `@dbsp/schema`** | C2 | I4 | R4 | 8.0 | Documentation |
-| 3 | **God class: `PgsqlAdapter` (1,930 LOC, 10+ responsibilities)** | C3 | I3 | R2 | 2.0 | Maintainability |
-| 4 | **God class: `QueryBuilderImpl` (1,774 LOC, 20+ methods)** | C3 | I3 | R2 | 2.0 | Maintainability |
-| 5 | **compiler.ts 44-case switch violates OCP** | C3 | I3 | R2 | 2.0 | Maintainability |
+| 1 | **DOCUMENTATION_INDEX.md still has 4 Kysely refs** | C1 | I3 | R3 | 9.0 | Documentation |
+| 2 | **8 dependency vulnerabilities (pnpm audit)** | C2 | I4 | R4 | 8.0 | Security |
+| 3 | **getColumnName() duplicated 4×** across core/dx | C1 | I3 | R2 | 6.0 | DRY |
+| 4 | **buildColumnRef() duplicated 4×** in WHERE handlers | C1 | I3 | R2 | 6.0 | DRY |
+| 5 | **MCP server: placeholder test only** | C2 | I3 | R3 | 4.5 | Test Coverage |
 
 ---
 
 ## Metrics
 
-| Metric | Value |
-|--------|-------|
-| Source files | 123 (non-test) |
-| Lines of code | ~47,168 |
-| Test files | 85 (59 unit + 26 e2e) |
-| Test assertions | ~4,367 |
-| Dependencies | 13 direct (workspace catalog) |
-| TODO files | 10 |
-| Documentation files | 92 |
-| Packages | 6 (core, adapter-pgsql, nql, types, cli, mcp-server) |
+| Metric | Previous (01-31) | Current (02-01) | Delta |
+|--------|-----------------|-----------------|-------|
+| Source files | 123 | 129 | +6 |
+| Lines of code | ~47,168 | ~48,240 | +1,072 |
+| Test files | 85 | 86 | +1 |
+| Test lines | ~28,800 | ~29,734 | +934 |
+| Dependencies | 13 direct | 13 direct | — |
+| Packages | 6 | 6 | — |
+| Backlog items | 28 | 35 | +7 (deeper analysis) |
+| Resolved items | 18 | 5 (this cycle) | — |
+| DRY violations | 5 known | 17 total (12 new) | :red_circle: |
+| Dead code items | 1 | 6 | +5 |
+| Dep vulnerabilities | 0 | 8 | :red_circle: |
 
 ---
 
@@ -51,33 +54,36 @@
 
 | Area | Source Files | Source LOC | Test Files | Issues | Health |
 |------|-------------|-----------|------------|--------|--------|
-| core | 33 | 19,865 | 24 | 8 | :yellow_circle: |
-| adapter-pgsql | 50 | 13,757 | 18 | 6 | :yellow_circle: |
-| cli | 21 | 6,194 | 12 | 3 | :yellow_circle: |
-| nql | 11 | 4,990 | 4 | 4 | :yellow_circle: |
+| core | 34 | 19,915 | 24 | 10 (3 DRY high) | :yellow_circle: |
+| adapter-pgsql | 53 | 14,529 | 19 | 9 (2 DRY high) | :yellow_circle: |
+| cli | 23 | 6,303 | 12 | 3 | :yellow_circle: |
+| nql | 11 | 5,017 | 4 | 5 (dead code) | :yellow_circle: |
 | types | 5 | 1,851 | 0 | 1 | :green_circle: |
-| mcp-server | 3 | 511 | 1 | 1 | :red_circle: |
-| Documentation | 92 files | - | - | 8 major drifts | :red_circle: |
-| Security | all | - | - | 1 (by design) | :green_circle: |
+| mcp-server | 3 | 511 | 1 | 2 | :red_circle: |
+| Security | all | — | — | 8 dep vulns | :red_circle: |
+| Documentation | — | — | — | 1 remaining drift | :yellow_circle: |
 
 ---
 
 ## Recommendations
 
 ### Immediate (P0)
-- Rewrite README.md: remove all `@dbsp/adapter-kysely` and `@dbsp/schema` references
-- Update CLAUDE.md architecture section (Kysely references)
-- Update DOCUMENTATION_INDEX.md (package list, test counts, architecture diagram)
+- Fix DOCUMENTATION_INDEX.md (4 Kysely refs remaining)
+- Audit and fix 8 dependency vulnerabilities
+- Extract `getColumnName()` to shared module (trivial, high impact)
+- Extract `buildColumnRef()` to shared handler module (trivial, high impact)
+- Remove unimplemented `format()` from NQL exports
 
 ### Short-term (P1)
-- Update spec statuses (ARCH-006 Draft→Implemented, DX-040 Draft→Complete)
-- Add raw SQL audit trail logging (currently console.warn only)
-- Increase adapter-pgsql test coverage (0.36 ratio → target 0.50)
+- Create comparison filter factory (reduce 120 LOC boilerplate)
+- Consolidate `normalizeSQL()` to single location
+- Extract `buildReturningList()`, `buildParamRef()` helpers
+- Remove duplicate `isRecursiveIncludeOptions()`
 - Replace MCP server placeholder test
 
 ### Medium-term (P2-P3)
-- Refactor god classes (orm.ts, pgsql-adapter.ts, compiler.ts)
-- Split NQL visitor into specialized visitors (1,303 LOC)
-- Segregate QueryBuilder interface (ISP compliance)
-- Extract window functions from filters.ts (1,180 LOC)
-- Add type-level tests for @dbsp/types package
+- Extract mutation builder base class (DRY)
+- Structural clone helper for builders
+- NQL compiler method extractions
+- Reduce adapter-pgsql public API surface (50+ internal exports)
+- Progressive SRP extractions (PgsqlAdapter, NQL compiler)

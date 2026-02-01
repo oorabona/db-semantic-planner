@@ -81,7 +81,7 @@ output.contains: childRoleId: integer
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.contains: users
+sql.equals: SELECT users.* FROM iam_example.users
 db.rows.equals: 6
 
 # ─────────────────────────────────────────
@@ -89,8 +89,7 @@ db.rows.equals: 6
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.contains: users
-sql.contains: active
+sql.equals: SELECT users.* FROM iam_example.users WHERE users.active = $1
 params.equals: [true]
 db.rows.equals: 5
 
@@ -99,7 +98,7 @@ db.rows.equals: 5
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.contains: roles
+sql.equals: SELECT roles.* FROM iam_example.roles
 db.rows.equals: 9
 
 # ─────────────────────────────────────────
@@ -107,8 +106,7 @@ db.rows.equals: 9
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.contains: roles
-sql.contains: active
+sql.equals: SELECT roles.* FROM iam_example.roles WHERE roles.active = $1
 params.equals: [true]
 db.rows.equals: 9
 
@@ -117,7 +115,7 @@ db.rows.equals: 9
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.contains: permissions
+sql.equals: SELECT permissions.* FROM iam_example.permissions
 db.rows.equals: 13
 
 # ─────────────────────────────────────────
@@ -125,8 +123,7 @@ db.rows.equals: 13
 # ─────────────────────────────────────────
 --- query: 13
 success: true
-sql.contains: permissions
-sql.contains: resource
+sql.equals: SELECT permissions.* FROM iam_example.permissions WHERE permissions.resource = $1
 params.equals: ["users"]
 db.rows.equals: 4
 
@@ -135,8 +132,7 @@ db.rows.equals: 4
 # ─────────────────────────────────────────
 --- query: 14
 success: true
-sql.contains: users.*
-sql.contains: json_agg
+sql.equals: SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM iam_example.user_roles AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS "userRoles_json" FROM iam_example.users
 db.rows.equals: 6
 
 # ─────────────────────────────────────────
@@ -144,8 +140,7 @@ db.rows.equals: 6
 # ─────────────────────────────────────────
 --- query: 15
 success: true
-sql.contains: roles.*
-sql.contains: json_agg
+sql.equals: SELECT roles.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM iam_example.role_permissions AS __t__ WHERE __t__.role_id = roles.id), '[]'::json) AS "rolePermissions_json" FROM iam_example.roles
 db.rows.equals: 9
 
 # ─────────────────────────────────────────
@@ -153,7 +148,7 @@ db.rows.equals: 9
 # ─────────────────────────────────────────
 --- query: 16
 success: true
-sql.contains: user_roles
+sql.equals: SELECT user_roles.* FROM iam_example.user_roles WHERE user_roles.user_id = $1
 params.equals: [1]
 db.rows.equals: 1
 
@@ -162,7 +157,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 17
 success: true
-sql.contains: role_permissions
+sql.equals: SELECT role_permissions.* FROM iam_example.role_permissions WHERE role_permissions.role_id = $1
 params.equals: [2]
 db.rows.equals: 2
 
@@ -171,7 +166,7 @@ db.rows.equals: 2
 # ─────────────────────────────────────────
 --- query: 18
 success: true
-sql.contains: role_edges
+sql.equals: SELECT role_edges.* FROM iam_example.role_edges
 db.rows.equals: 7
 
 # ─────────────────────────────────────────
@@ -179,8 +174,7 @@ db.rows.equals: 7
 # ─────────────────────────────────────────
 --- query: 19
 success: true
-sql.contains: role_edges
-sql.contains: json_agg
+sql.equals: SELECT role_edges.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM iam_example.roles AS __t__ WHERE __t__.id = role_edges.parent_role_id), '[]'::json) AS "parentRole_json", COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM iam_example.roles AS __t__ WHERE __t__.id = role_edges.child_role_id), '[]'::json) AS "childRole_json" FROM iam_example.role_edges
 db.rows.equals: 7
 
 # ─────────────────────────────────────────
@@ -188,7 +182,7 @@ db.rows.equals: 7
 # ─────────────────────────────────────────
 --- query: 20
 success: true
-sql.contains: sod_rules
+sql.equals: SELECT sod_rules.* FROM iam_example.sod_rules
 db.rows.equals: 2
 
 # ─────────────────────────────────────────
@@ -196,8 +190,7 @@ db.rows.equals: 2
 # ─────────────────────────────────────────
 --- query: 21
 success: true
-sql.contains: sod_rules
-sql.contains: json_agg
+sql.equals: SELECT sod_rules.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM iam_example.roles AS __t__ WHERE __t__.id = sod_rules.role_a_id), '[]'::json) AS "roleA_json", COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM iam_example.roles AS __t__ WHERE __t__.id = sod_rules.role_b_id), '[]'::json) AS "roleB_json" FROM iam_example.sod_rules
 db.rows.equals: 2
 
 # ─────────────────────────────────────────
@@ -205,7 +198,7 @@ db.rows.equals: 2
 # ─────────────────────────────────────────
 --- query: 22
 success: true
-sql.contains: resources
+sql.equals: SELECT resources.* FROM iam_example.resources
 db.rows.equals: 8
 
 # ─────────────────────────────────────────
@@ -213,9 +206,7 @@ db.rows.equals: 8
 # ─────────────────────────────────────────
 --- query: 23
 success: true
-sql.contains: resources
-sql.contains: parent_id
-sql.contains: IS NULL
+sql.equals: SELECT resources.* FROM iam_example.resources WHERE resources.parent_id IS NULL
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -223,9 +214,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 24
 success: true
-sql.contains: user_roles
-sql.contains: count(*)
-sql.contains: GROUP BY
+sql.equals: SELECT user_roles.role_id, count(*) AS "userCount" FROM iam_example.user_roles GROUP BY user_roles.role_id
 db.rows.equals: 8
 
 # ─────────────────────────────────────────
@@ -233,9 +222,7 @@ db.rows.equals: 8
 # ─────────────────────────────────────────
 --- query: 25
 success: true
-sql.contains: role_permissions
-sql.contains: count(*)
-sql.contains: GROUP BY
+sql.equals: SELECT role_permissions.role_id, count(*) AS "permCount" FROM iam_example.role_permissions GROUP BY role_permissions.role_id
 db.rows.equals: 9
 
 # ─────────────────────────────────────────
@@ -243,28 +230,36 @@ db.rows.equals: 9
 # ─────────────────────────────────────────
 --- query: 26
 success: true
-sql.contains: role_edges
-sql.contains: count(*)
-sql.contains: GROUP BY
+sql.equals: SELECT role_edges.parent_role_id, count(*) AS "childCount" FROM iam_example.role_edges GROUP BY role_edges.parent_role_id
 db.rows.equals: 5
 
 # ─────────────────────────────────────────
 # Query 27: users | where active = true | select *, userRoles.roleId, userRoles.role.rolePermissions.permission.*
 # ─────────────────────────────────────────
+# Deep relation traversal (4 levels): users → userRoles → role → rolePermissions → permission
+# Uses nested json_agg subqueries with depth-based aliases (__t__, __t1__, __t2__, __t3__)
 --- query: 27
 success: true
-sql.contains: users
-sql.contains: user_roles
-sql.contains: active
+sql.equals: SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) || jsonb_build_object('role', COALESCE((SELECT json_agg(to_jsonb(__t1__) || jsonb_build_object('rolePermissions', COALESCE((SELECT json_agg(to_jsonb(__t2__) || jsonb_build_object('permission', COALESCE((SELECT json_agg(to_jsonb(__t3__)) FROM iam_example.permissions AS __t3__ WHERE __t3__.id = __t2__.permission_id), '[]'::json))) FROM iam_example.role_permissions AS __t2__ WHERE __t2__.role_id = __t1__.id), '[]'::json))) FROM iam_example.roles AS __t1__ WHERE __t1__.id = __t__.role_id), '[]'::json))) FROM iam_example.user_roles AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS "userRoles_json" FROM iam_example.users WHERE users.active = $1
 params.equals: [true]
 db.rows.equals: 5
 
 # ─────────────────────────────────────────
 # Query 28: auditLog | where action = 'login' | select userId, resource, timestamp
 # ─────────────────────────────────────────
+# Query 28: users | where active = true | select *, userRoles.roleId, userRoles.role.rolePermissions.permission.* | flat
+# ─────────────────────────────────────────
+# Same as query 27 but with | flat — forces JOIN strategy instead of nested json_agg
 --- query: 28
 success: true
-sql.contains: audit_log
-sql.contains: action
+sql.equals: SELECT users.* FROM iam_example.users LEFT JOIN LATERAL ( SELECT user_roles_inner_0.* FROM iam_example.user_roles AS user_roles_inner_0 WHERE user_roles_inner_0.user_id = users.id ) AS user_roles_lat_0 ON true LEFT JOIN LATERAL ( SELECT roles_inner_1.* FROM iam_example.roles AS roles_inner_1 WHERE roles_inner_1.id = user_roles_lat_0.role_id ) AS roles_lat_1 ON true LEFT JOIN LATERAL ( SELECT role_permissions_inner_2.* FROM iam_example.role_permissions AS role_permissions_inner_2 WHERE role_permissions_inner_2.role_id = roles_lat_1.id ) AS role_permissions_lat_2 ON true LEFT JOIN LATERAL ( SELECT permissions_inner_3.* FROM iam_example.permissions AS permissions_inner_3 WHERE permissions_inner_3.id = role_permissions_lat_2.permission_id ) AS permissions_lat_3 ON true WHERE users.active = $1
+params.equals: [true]
+
+# ─────────────────────────────────────────
+# Query 29: auditLog | where action = 'login' | select userId, resource, timestamp
+# ─────────────────────────────────────────
+--- query: 29
+success: true
+sql.equals: SELECT audit_log.user_id, audit_log.resource, audit_log."timestamp" FROM iam_example.audit_log WHERE audit_log.action = $1
 params.equals: ["login"]
 db.rows.equals: 4

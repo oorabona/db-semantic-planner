@@ -43,6 +43,14 @@ export interface MutationDump {
 	};
 }
 
+/** Shared base options for all mutation builders */
+type MutationBaseOpts = {
+	table: string;
+	model: ModelIR;
+	adapter?: Adapter | undefined;
+	schemaName?: string | undefined;
+};
+
 // ============================================================================
 // Insert Builder
 // ============================================================================
@@ -59,14 +67,21 @@ export class InsertBuilder<T = void> {
 	private readonly valuesData: readonly Record<string, unknown>[];
 	private readonly returningColumns: readonly string[] | undefined;
 
-	constructor(opts: {
-		table: string;
-		model: ModelIR;
-		adapter?: Adapter | undefined;
-		schemaName?: string | undefined;
-		values?: readonly Record<string, unknown>[] | undefined;
-		returning?: readonly string[] | undefined;
-	}) {
+	private get baseOpts(): MutationBaseOpts {
+		return {
+			table: this.table,
+			model: this.model,
+			adapter: this.adapter,
+			schemaName: this.schemaName,
+		};
+	}
+
+	constructor(
+		opts: MutationBaseOpts & {
+			values?: readonly Record<string, unknown>[] | undefined;
+			returning?: readonly string[] | undefined;
+		},
+	) {
 		this.table = opts.table;
 		this.model = opts.model;
 		this.adapter = opts.adapter;
@@ -84,10 +99,7 @@ export class InsertBuilder<T = void> {
 	): InsertBuilder<T> {
 		const valueArray = Array.isArray(data) ? data : [data];
 		return new InsertBuilder({
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
+			...this.baseOpts,
 			values: valueArray,
 			returning: this.returningColumns,
 		});
@@ -110,10 +122,7 @@ export class InsertBuilder<T = void> {
 		columns: readonly string[],
 	): InsertBuilder<R[]> {
 		return new InsertBuilder<R[]>({
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
+			...this.baseOpts,
 			values: this.valuesData,
 			returning: columns,
 		});
@@ -224,16 +233,23 @@ export class UpdateBuilder<T = void> {
 	private readonly allowAllFlag: boolean;
 	private readonly returningColumns: readonly string[] | undefined;
 
-	constructor(opts: {
-		table: string;
-		model: ModelIR;
-		adapter?: Adapter | undefined;
-		schemaName?: string | undefined;
-		set?: Record<string, unknown> | undefined;
-		where?: WhereIntent | undefined;
-		allowAll?: boolean | undefined;
-		returning?: readonly string[] | undefined;
-	}) {
+	private get baseOpts(): MutationBaseOpts {
+		return {
+			table: this.table,
+			model: this.model,
+			adapter: this.adapter,
+			schemaName: this.schemaName,
+		};
+	}
+
+	constructor(
+		opts: MutationBaseOpts & {
+			set?: Record<string, unknown> | undefined;
+			where?: WhereIntent | undefined;
+			allowAll?: boolean | undefined;
+			returning?: readonly string[] | undefined;
+		},
+	) {
 		this.table = opts.table;
 		this.model = opts.model;
 		this.adapter = opts.adapter;
@@ -250,10 +266,7 @@ export class UpdateBuilder<T = void> {
 	 */
 	set(data: Record<string, unknown>): UpdateBuilder<T> {
 		return new UpdateBuilder({
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
+			...this.baseOpts,
 			set: { ...this.setData, ...data },
 			where: this.whereIntent,
 			allowAll: this.allowAllFlag,
@@ -266,10 +279,7 @@ export class UpdateBuilder<T = void> {
 	 */
 	where(condition: WhereIntent): UpdateBuilder<T> {
 		return new UpdateBuilder({
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
+			...this.baseOpts,
 			set: this.setData,
 			where: condition,
 			allowAll: this.allowAllFlag,
@@ -294,10 +304,7 @@ export class UpdateBuilder<T = void> {
 		columns: readonly string[],
 	): UpdateBuilder<R[]> {
 		return new UpdateBuilder<R[]>({
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
+			...this.baseOpts,
 			set: this.setData,
 			where: this.whereIntent,
 			allowAll: this.allowAllFlag,
@@ -418,16 +425,23 @@ export class DeleteBuilder<T = void> {
 	private readonly cascadeRelations: boolean | readonly string[] | undefined;
 	private readonly returningColumns: readonly string[] | undefined;
 
-	constructor(opts: {
-		table: string;
-		model: ModelIR;
-		adapter?: Adapter | undefined;
-		schemaName?: string | undefined;
-		where?: WhereIntent | undefined;
-		allowAll?: boolean | undefined;
-		cascade?: boolean | readonly string[] | undefined;
-		returning?: readonly string[] | undefined;
-	}) {
+	private get baseOpts(): MutationBaseOpts {
+		return {
+			table: this.table,
+			model: this.model,
+			adapter: this.adapter,
+			schemaName: this.schemaName,
+		};
+	}
+
+	constructor(
+		opts: MutationBaseOpts & {
+			where?: WhereIntent | undefined;
+			allowAll?: boolean | undefined;
+			cascade?: boolean | readonly string[] | undefined;
+			returning?: readonly string[] | undefined;
+		},
+	) {
 		this.table = opts.table;
 		this.model = opts.model;
 		this.adapter = opts.adapter;
@@ -443,10 +457,7 @@ export class DeleteBuilder<T = void> {
 	 */
 	where(condition: WhereIntent): DeleteBuilder<T> {
 		return new DeleteBuilder({
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
+			...this.baseOpts,
 			where: condition,
 			allowAll: this.allowAllFlag,
 			cascade: this.cascadeRelations,
@@ -461,10 +472,7 @@ export class DeleteBuilder<T = void> {
 	 */
 	cascade(relations?: readonly string[]): DeleteBuilder<T> {
 		return new DeleteBuilder({
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
+			...this.baseOpts,
 			where: this.whereIntent,
 			allowAll: this.allowAllFlag,
 			cascade: relations ?? true,
@@ -488,10 +496,7 @@ export class DeleteBuilder<T = void> {
 		columns: readonly string[],
 	): DeleteBuilder<R[]> {
 		return new DeleteBuilder<R[]>({
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
+			...this.baseOpts,
 			where: this.whereIntent,
 			allowAll: this.allowAllFlag,
 			cascade: this.cascadeRelations,
@@ -637,16 +642,23 @@ export class UpsertBuilder<T = void> {
 	private readonly conflictAction: UpsertConflictAction | undefined;
 	private readonly returningColumns: readonly string[] | undefined;
 
-	constructor(opts: {
-		table: string;
-		model: ModelIR;
-		adapter?: Adapter | undefined;
-		schemaName?: string | undefined;
-		values?: readonly Record<string, unknown>[] | undefined;
-		onConflict?: UpsertConflictTarget | undefined;
-		action?: UpsertConflictAction | undefined;
-		returning?: readonly string[] | undefined;
-	}) {
+	private get baseOpts(): MutationBaseOpts {
+		return {
+			table: this.table,
+			model: this.model,
+			adapter: this.adapter,
+			schemaName: this.schemaName,
+		};
+	}
+
+	constructor(
+		opts: MutationBaseOpts & {
+			values?: readonly Record<string, unknown>[] | undefined;
+			onConflict?: UpsertConflictTarget | undefined;
+			action?: UpsertConflictAction | undefined;
+			returning?: readonly string[] | undefined;
+		},
+	) {
 		this.table = opts.table;
 		this.model = opts.model;
 		this.adapter = opts.adapter;
@@ -666,10 +678,7 @@ export class UpsertBuilder<T = void> {
 	): UpsertBuilder<T> {
 		const valueArray = Array.isArray(data) ? data : [data];
 		return new UpsertBuilder({
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
+			...this.baseOpts,
 			values: valueArray,
 			onConflict: this.conflictTarget,
 			action: this.conflictAction,
@@ -683,10 +692,7 @@ export class UpsertBuilder<T = void> {
 	 */
 	onConflict(columns: readonly string[]): UpsertBuilder<T> {
 		return new UpsertBuilder({
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
+			...this.baseOpts,
 			values: this.valuesData,
 			onConflict: { columns },
 			action: this.conflictAction,
@@ -700,10 +706,7 @@ export class UpsertBuilder<T = void> {
 	 */
 	onConflictConstraint(constraintName: string): UpsertBuilder<T> {
 		return new UpsertBuilder({
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
+			...this.baseOpts,
 			values: this.valuesData,
 			onConflict: { constraint: constraintName },
 			action: this.conflictAction,
@@ -728,10 +731,7 @@ export class UpsertBuilder<T = void> {
 			...(where && { where }),
 		};
 		return new UpsertBuilder({
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
+			...this.baseOpts,
 			values: this.valuesData,
 			onConflict: this.conflictTarget,
 			action,
@@ -744,10 +744,7 @@ export class UpsertBuilder<T = void> {
 	 */
 	doNothing(): UpsertBuilder<T> {
 		return new UpsertBuilder({
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
+			...this.baseOpts,
 			values: this.valuesData,
 			onConflict: this.conflictTarget,
 			action: { type: 'doNothing' },
@@ -763,10 +760,7 @@ export class UpsertBuilder<T = void> {
 		columns: readonly string[],
 	): UpsertBuilder<R[]> {
 		return new UpsertBuilder<R[]>({
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
+			...this.baseOpts,
 			values: this.valuesData,
 			onConflict: this.conflictTarget,
 			action: this.conflictAction,

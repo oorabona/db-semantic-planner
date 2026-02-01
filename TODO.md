@@ -14,7 +14,13 @@
 
 ## Completed
 
-- [x] ✅ [NQL] Range literal in INSERT/UPDATE — type-cast for range columns (2026-02-01)
+- [x] ✅ [Adapter] HANDLER-WIRE: Wire include strategy handlers into compiler (2026-02-01)
+  - Unified `compileIncludeViaHandler` bridge with explicit `mapToHandlerDecision` mapper
+  - json_agg (nested), join, lateral (deep flat nesting), CTE all wired
+  - Deep `| flat` nesting: recursive `compileLateralCascade` produces cascaded LEFT JOIN LATERAL
+  - 10 lateral handler tests, 2222 total tests passing
+
+(Archived → docs/historic/done-2026-02.md)
 
 ---
 
@@ -74,11 +80,14 @@
 
 ## Backlog
 
-### [Refactor] SRP Extractions - Phase 5 L/XL Items
-- [ ] **5.1** Split `NqlCstVisitor` into specialized visitors (~1300 lines, L effort)
-- [ ] **5.2** Refactor `PgsqlAdapter` — extract services (~2012 lines, XL effort)
-- [ ] **5.3** Refactor `QueryBuilderImpl` — extract concerns (~1028 lines, L effort)
-- [ ] **5.4** Extend handler pattern to all 44 compiler decisions (~1250 lines, L effort)
+(Archived → docs/historic/done-2026-02.md)
+
+### [Adapter] CTE include handler bridge incomplete — Priority: MEDIUM
+- [x] ✅ RESOLVED (2026-02-01) — CTE bridge fully wired: pendingCtes + withClause in selectStmt
+- CTE handler produces `{ cte, join }`, compiler collects cte into pendingCtes, applies via WITH clause
+- hierarchy.assert.dbsp queries 4-8 validate CTE SQL output
+
+(Phase 5 SRP archived → docs/historic/done-2026-02.md)
 
 ---
 

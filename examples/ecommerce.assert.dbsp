@@ -134,19 +134,19 @@ db.output:
 
 # ─────────────────────────────────────────
 # Query 10 categories | select *, products.* | flat
-# Uses LATERAL JOIN for flat include strategy
+# Uses LATERAL JOIN for flat include strategy (HANDLER-WIRE: now wired)
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.equals: SELECT categories.* FROM ch5_ecommerce.categories
+sql.equals: SELECT categories.* FROM ch5_ecommerce.categories LEFT JOIN LATERAL ( SELECT products_inner_0.* FROM ch5_ecommerce.products AS products_inner_0 WHERE products_inner_0.category_id = categories.id ) AS products_lat_0 ON true
 
 # ─────────────────────────────────────────
 # Query 11 products | select *, variants.* | flat | limit 3
-# Uses LATERAL JOIN for flat include strategy
+# Uses LATERAL JOIN for flat include strategy (HANDLER-WIRE: now wired)
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.equals: SELECT products.* FROM ch5_ecommerce.products LIMIT 3
+sql.equals: SELECT products.* FROM ch5_ecommerce.products LEFT JOIN LATERAL ( SELECT variants_inner_0.* FROM ch5_ecommerce.variants AS variants_inner_0 WHERE variants_inner_0.product_id = products.id ) AS variants_lat_0 ON true LIMIT 3
 params.equals: []
 
 # ─────────────────────────────────────────

@@ -29,7 +29,6 @@ import {
 	getTestPool,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
-	
 } from './testkit/index.js';
 import { sql as kyselySql } from './testkit/sql.js';
 
@@ -92,7 +91,7 @@ describe('Q3-Q5: Variants and Assets', () => {
 
 			const largeVariants = rows.filter((r) => r.variant_name === 'Large');
 			expect(largeVariants.length).toBe(1); // No images, just one row with NULL
-			expect(largeVariants[0].locale).toBeNull();
+			expect(largeVariants[0]!.locale).toBeNull();
 		});
 
 		it('Q3-02: should filter variants by stock availability', async () => {

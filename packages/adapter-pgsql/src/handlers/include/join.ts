@@ -4,11 +4,12 @@
  * Implements the 'join' include strategy using LEFT JOIN.
  * This is the simplest strategy: adds a LEFT JOIN to the FROM clause.
  *
- * Produces: LEFT JOIN related_table ON source.fk = related.pk
+ * Produces: LEFT JOIN related_table AS relation ON source.fk = related.pk
+ * With aliased columns: "relation.column" for hydration
  */
 
 import type { JoinExpr, Node } from '@pgsql/types';
-import { columnRef, eqExpr, rangeVar } from '../../ast-helpers.js';
+import { columnTarget, fkCorrelation, rangeVar } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -28,10 +29,14 @@ function buildLeftJoin(
 	targetColumn: string,
 	ctx: CompilerContext,
 ): Node {
-	// Build the join condition: source.fk = target.pk
-	const leftCol = columnRef(sourceColumn, sourceAlias, undefined, ctx.naming);
-	const rightCol = columnRef(targetColumn, targetAlias, undefined, ctx.naming);
-	const joinCondition = eqExpr(leftCol, rightCol);
+	// Build the join condition: source.sourceColumn = target.targetColumn
+	const joinCondition = fkCorrelation(
+		sourceColumn,
+		sourceAlias,
+		targetColumn,
+		targetAlias,
+		ctx.naming,
+	);
 
 	const joinExpr: JoinExpr = {
 		jointype: 'JOIN_LEFT',
@@ -40,49 +45,6 @@ function buildLeftJoin(
 	};
 
 	return { JoinExpr: joinExpr };
-}
-
-/**
- * Build select targets for included columns
- */
-function buildIncludeTargets(
-	includeDecisions: readonly Decision[],
-	targetAlias: string,
-	ctx: CompilerContext,
-): Node[] {
-	const targets: Node[] = [];
-
-	for (const incl of includeDecisions) {
-		const columns = incl.columns;
-		if (columns && columns.length > 0) {
-			// Select specific columns
-			for (const col of columns) {
-				const colRef = columnRef(col, targetAlias, undefined, ctx.naming);
-				targets.push({
-					ResTarget: {
-						val: colRef,
-						name: ctx.naming.toDatabase(`${incl.relation}_${col}`),
-					},
-				});
-			}
-		} else {
-			// Select all columns from the relation (relation.*)
-			targets.push({
-				ResTarget: {
-					val: {
-						ColumnRef: {
-							fields: [
-								{ String: { sval: ctx.naming.toDatabase(targetAlias) } },
-								{ A_Star: {} },
-							],
-						},
-					},
-				},
-			});
-		}
-	}
-
-	return targets;
 }
 
 /**
@@ -99,25 +61,23 @@ export const joinIncludeHandler: IncludeHandler = {
 	compile(
 		decision: Decision,
 		ctx: CompilerContext,
-		state: CompilerState,
+		_state: CompilerState,
 	): IncludeResult {
 		const relation = decision.relation;
 		const targetTable = decision.targetTable ?? relation;
-		const sourceColumn = decision.sourceColumn ?? 'id';
-		const targetColumn = decision.targetColumn ?? `${ctx.rootTable}_id`;
 
 		if (!targetTable) {
 			throw new Error('JOIN include requires targetTable');
 		}
 
-		// Generate unique alias
-		const existingAliases = state.aliases.size;
-		const targetAlias = `${targetTable}_join_${existingAliases}`;
-		state.aliases.set(`join_${targetTable}`, targetAlias);
-
+		// Use relationName as alias for uniqueness
+		// (e.g., "author" and "editor" both from "users")
+		const targetAlias = relation ?? targetTable;
 		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
+		const sourceColumn = decision.sourceColumn ?? 'id';
+		const targetColumn = decision.targetColumn ?? `${ctx.rootTable}_id`;
 
-		// Build the JOIN
+		// Build the LEFT JOIN
 		const join = buildLeftJoin(
 			targetTable,
 			targetAlias,
@@ -127,15 +87,20 @@ export const joinIncludeHandler: IncludeHandler = {
 			ctx,
 		);
 
-		// Build targets for nested includes if present
-		const includeDecisions = decision.include;
-		const targets = includeDecisions
-			? buildIncludeTargets(includeDecisions, targetAlias, ctx)
-			: undefined;
+		// Build column targets with "relation.column" aliases for hydration
+		const targets: Node[] = [];
+		const columns = decision.columns;
+		if (columns && columns.length > 0) {
+			for (const col of columns) {
+				targets.push(
+					columnTarget(col, `${relation}.${col}`, targetAlias, ctx.naming),
+				);
+			}
+		}
 
 		return {
 			join,
-			...(targets && targets.length > 0 && { targets }),
+			...(targets.length > 0 && { targets }),
 		};
 	},
 };

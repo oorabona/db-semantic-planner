@@ -24,7 +24,6 @@ import {
 	getTestAdapter,
 	getTestPool,
 	seedBlogData,
-	
 } from './testkit/index.js';
 
 const dialectCapabilities = POSTGRESQL_CAPABILITIES;

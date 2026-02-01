@@ -112,7 +112,7 @@ export function ErrorOutput({ message }: { message: string }) {
 /**
  * CLI-NQL: Format parsed query as a tree for .parse mode
  */
-function formatParseTree(parsed: unknown): string {
+export function formatParseTree(parsed: unknown): string {
 	const lines: string[] = [];
 
 	const formatValue = (value: unknown, indent = 2): string => {

@@ -10,7 +10,6 @@
 import type { Node } from '@pgsql/types';
 import {
 	andExpr,
-	booleanConstNode,
 	coalesceExpr,
 	columnRef,
 	columnTarget,
@@ -19,21 +18,10 @@ import {
 	deleteStmt,
 	eqExpr,
 	funcCall,
-	gtExpr,
-	gteExpr,
-	ilikeExpr,
 	innerJoin,
 	insertStmt,
 	integerNode,
-	jsonAggCorrelation,
-	jsonAggSubquery,
 	leftJoin,
-	likeExpr,
-	ltExpr,
-	lteExpr,
-	neExpr,
-	notExpr,
-	nullConstNode,
 	orExpr,
 	rangeVar,
 	selectStmt,
@@ -42,10 +30,84 @@ import {
 	updateStmt,
 	windowFuncCall,
 } from './ast-helpers.js';
+import {
+	type ConditionContext,
+	type ConditionState,
+	compileCondition,
+	compileValue,
+	deriveFK,
+} from './compiler-conditions.js';
 import { deparseQuoted } from './deparse.js';
+import { registerAllIncludeHandlers } from './handlers/include/index.js';
+import { getIncludeHandler } from './handlers/index.js';
+import type {
+	CompilerContext as HandlerCompilerContext,
+	CompilerState as HandlerCompilerState,
+	Decision as HandlerDecision,
+} from './handlers/types.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
-import { createParamRef, createTypeCastParamRef } from './param-ref.js';
+import { createParamRef } from './param-ref.js';
+
+// ============================================================================
+// PlanDecision → HandlerDecision mapper
+// ============================================================================
+
+/**
+ * Recursively map a PlanDecision tree to a HandlerDecision tree.
+ *
+ * Both types are structurally similar but nominally distinct. This explicit
+ * mapper avoids `as unknown as` double casts by doing the conversion
+ * field-by-field, including recursive children/conditions.
+ */
+function mapToHandlerDecision(
+	pd: PlanDecision,
+	rootTable: string,
+): HandlerDecision {
+	return {
+		type: pd.type,
+		table: pd.table,
+		column: pd.column,
+		alias: pd.alias,
+		operator: pd.operator,
+		value: pd.value,
+		paramIndex: pd.paramIndex,
+		direction: pd.direction,
+		joinType: pd.joinType,
+		sourceColumn:
+			pd.relationType === 'belongsTo'
+				? (pd.foreignKey ?? `${pd.targetTable}_id`)
+				: (pd.parentKey ?? 'id'),
+		targetColumn:
+			pd.relationType === 'belongsTo'
+				? (pd.parentKey ?? 'id')
+				: (pd.foreignKey ?? `${rootTable}_id`),
+		targetTable: pd.targetTable,
+		function: pd.function,
+		args: pd.args,
+		columns: pd.columns,
+		values: pd.values,
+		set: pd.set,
+		limit: pd.limit,
+		offset: pd.offset,
+		strategy: (pd.choice === 'subquery'
+			? 'json_agg'
+			: pd.choice) as HandlerDecision['strategy'],
+		relation: pd.relationName,
+		relationName: pd.relationName,
+		relationType: pd.relationType,
+		foreignKey: pd.foreignKey,
+		parentKey: pd.parentKey,
+		children: pd.children?.map((c) =>
+			mapToHandlerDecision(c, pd.targetTable ?? rootTable),
+		),
+		conditions: pd.conditions?.map((c) => mapToHandlerDecision(c, rootTable)),
+		orderBy: pd.orderBy?.map((o) => ({
+			column: o.field,
+			direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
+		})),
+	} as HandlerDecision;
+}
 
 // ============================================================================
 // Types (simplified for spike - would import from @dbsp/core)
@@ -84,10 +146,14 @@ export interface PlanDecision {
 	// Column data type (for range type casting, e.g. 'daterange', 'int4range')
 	readonly dataType?: string;
 	// JSON aggregation (include strategy: 'json_agg')
+	readonly sourceTable?: string;
 	readonly relationName?: string;
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
 	readonly foreignKey?: string;
 	readonly parentKey?: string;
+	// Nested json_agg children (for deep relation traversal)
+	readonly children?: readonly PlanDecision[];
+	readonly intentPath?: string;
 	// Filter/include strategy choice from planner ('join' | 'exists' | 'json_agg')
 	readonly choice?: string;
 }
@@ -122,11 +188,18 @@ export interface CompilerOptions {
 /**
  * Compile a PlanReport to SQL via PostgreSQL AST
  */
+let includeHandlersInitialized = false;
+function ensureIncludeHandlersRegistered(): void {
+	if (includeHandlersInitialized) return;
+	includeHandlersInitialized = true;
+	registerAllIncludeHandlers();
+}
+
 export class PlanCompiler {
 	private readonly naming: NamingPlugin;
 	private readonly schema: string | undefined;
-	private parameters: unknown[] = [];
-	private paramIndex = 0;
+	/** Mutable state shared with extracted condition/value compilation functions */
+	private state: ConditionState = { parameters: [], paramIndex: 0 };
 	/** Track root table for EXISTS FK correlation */
 	private currentRootTable = '';
 	/** Pending JOINs registered by filter/include strategies (flushed in compileSelect) */
@@ -136,20 +209,123 @@ export class PlanCompiler {
 		alias?: string;
 		on: Node;
 	}> = [];
+	/** Raw JOIN AST nodes from include handlers (e.g., LATERAL) */
+	private rawJoins: Node[] = [];
+	/** CTE nodes from include handlers (e.g., CTE strategy) */
+	private pendingCtes: Node[] = [];
 
 	constructor(options: CompilerOptions = {}) {
 		this.naming = options.naming ?? identityNaming;
 		this.schema = options.schema ?? undefined;
 	}
 
+	/** Build immutable context for condition compilation functions */
+	private condCtx(): ConditionContext {
+		return {
+			naming: this.naming,
+			schema: this.schema,
+			rootTable: this.currentRootTable,
+		};
+	}
+
+	/**
+	 * Bridge PlanDecision to handler Decision and dispatch to include handler.
+	 * Returns targets and optional pending joins to apply.
+	 */
+	private compileIncludeViaHandler(
+		decision: PlanDecision,
+		plan: SimplifiedPlanReport,
+	): {
+		targets?: Node[];
+		rawJoin?: Node;
+		additionalJoins?: Node[];
+		cte?: Node;
+	} {
+		ensureIncludeHandlersRegistered();
+
+		const strategy = decision.choice as
+			| 'json_agg'
+			| 'join'
+			| 'lateral'
+			| 'cte'
+			| 'subquery'
+			| undefined;
+		if (!strategy)
+			throw new Error(
+				`Include decision missing strategy choice: ${JSON.stringify(decision)}`,
+			);
+
+		// Bridge PlanDecision -> handler Decision via explicit mapper
+		// (mapper handles subquery → json_agg mapping internally)
+		const handlerDecision = mapToHandlerDecision(decision, plan.rootTable);
+
+		const handler = getIncludeHandler(
+			handlerDecision.strategy as 'json_agg' | 'join' | 'lateral' | 'cte',
+		);
+
+		// Pre-compile filter conditions for the handler (e.g., EXISTS propagation)
+		if (
+			decision.conditions &&
+			(decision.conditions as PlanDecision[]).length > 0
+		) {
+			const innerAlias = '__t__';
+			const condNodes = (decision.conditions as PlanDecision[]).map((c) => {
+				// Rewrite condition table references to use the inner alias
+				const rewritten = { ...c, table: innerAlias };
+				return compileCondition(rewritten, this.condCtx(), this.state);
+			});
+			const combined =
+				condNodes.length === 1 ? condNodes[0]! : andExpr(...condNodes);
+			(
+				handlerDecision as unknown as Record<string, unknown>
+			)._compiledFilterWhere = combined;
+		}
+
+		// Bridge compiler state -> handler context + state
+		const ctx = {
+			naming: this.naming,
+			rootTable: plan.rootTable,
+			currentAlias: plan.rootTable,
+			maxRecursiveDepth: 100,
+			...(this.schema != null && { schema: this.schema }),
+		} as HandlerCompilerContext;
+
+		const handlerState: HandlerCompilerState = {
+			parameters: this.state.parameters,
+			paramIndex: this.state.paramIndex,
+			ctes: new Map(),
+			aliases: new Map(),
+			joins: [],
+		};
+
+		const result = handler.compile(handlerDecision, ctx, handlerState);
+
+		// Sync parameters back
+		this.state.paramIndex = handlerState.paramIndex;
+
+		const out: {
+			targets?: Node[];
+			rawJoin?: Node;
+			additionalJoins?: Node[];
+			cte?: Node;
+		} = {};
+		if (result.targets) out.targets = result.targets;
+		if (result.join) out.rawJoin = result.join;
+		if (result.lateral) out.rawJoin = result.lateral;
+		if (result.additionalJoins) out.additionalJoins = result.additionalJoins;
+		if (result.cte) out.cte = result.cte;
+		return out;
+	}
+
 	/**
 	 * Compile a simplified plan report to SQL
 	 */
 	compile(plan: SimplifiedPlanReport): CompiledResult {
-		this.parameters = [];
-		this.paramIndex = 0;
+		this.state = { parameters: [], paramIndex: 0 };
 		this.currentRootTable = plan.rootTable;
 		this.pendingJoins = [];
+		this.rawJoins = [];
+		this.pendingCtes = [];
 
 		// Determine query type from decisions
 		const queryType = this.detectQueryType(plan.decisions);
@@ -177,7 +353,7 @@ export class PlanCompiler {
 
 		return {
 			sql,
-			parameters: this.parameters,
+			parameters: this.state.parameters,
 			ast,
 		};
 	}
@@ -318,108 +494,20 @@ export class PlanCompiler {
 					break;
 				}
 
-				case 'selectJsonAgg': {
-					// json_agg include: COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM target AS __t__ WHERE ...), '[]'::json) AS "relation_json"
-					if (
-						decision.relationName &&
-						decision.targetTable &&
-						decision.relationType
-					) {
-						const rootAlias = plan.rootTable;
-
-						// Build correlation WHERE based on relation type
-						// belongsTo: target.pk = parent.fk  (e.g., authors.id = posts.author_id)
-						// hasMany/hasOne: target.fk = parent.pk  (e.g., posts.author_id = authors.id)
-						let whereExpr: Node;
-						if (decision.relationType === 'belongsTo') {
-							// For belongsTo, the FK is in the source table, pointing to target's PK
-							whereExpr = jsonAggCorrelation(
-								rootAlias,
-								decision.foreignKey ?? 'id', // FK in parent (source)
-								'__t__',
-								decision.parentKey ?? 'id', // PK in target
-								this.naming,
-							);
-						} else {
-							// For hasMany/hasOne, the FK is in target table, pointing to source's PK
-							whereExpr = jsonAggCorrelation(
-								rootAlias,
-								decision.parentKey ?? 'id', // PK in parent (source)
-								'__t__',
-								decision.foreignKey ?? 'id', // FK in target
-								this.naming,
-							);
-						}
-
-						// Merge filter conditions if present (relation filter propagation)
-						// Rewrite table references to __t__ (json_agg inner alias)
-						if (
-							decision.conditions &&
-							(decision.conditions as PlanDecision[]).length > 0
-						) {
-							const condNodes = (decision.conditions as PlanDecision[]).map(
-								(c) =>
-									this.compileCondition(this.rewriteConditionTable(c, '__t__')),
-							);
-							whereExpr = andExpr(whereExpr, ...condNodes);
-						}
-
-						// Build the json_agg subquery SELECT
-						// Alias must use {relation}_json pattern for hydration-utils.ts detection
-						targetList.push(
-							jsonAggSubquery(
-								decision.targetTable,
-								whereExpr,
-								`${decision.relationName}_json`,
-								this.schema,
-								this.naming,
-							),
-						);
+				case 'includeStrategy': {
+					// Unified include dispatch via handler registry
+					const includeResult = this.compileIncludeViaHandler(decision, plan);
+					if (includeResult.targets) {
+						targetList.push(...includeResult.targets);
 					}
-					break;
-				}
-
-				case 'selectLeftJoinInclude': {
-					// LEFT JOIN include: add relation columns with "relation.column" aliases
-					// and register LEFT JOIN for to-one (belongsTo/hasOne) includes
-					if (
-						decision.relationName &&
-						decision.targetTable &&
-						decision.columns
-					) {
-						const cols = decision.columns;
-						// Use relationName as the table alias for column references
-						const colTableRef = decision.relationName;
-
-						// Add each column with "relation.column" alias for hydration
-						for (const col of cols) {
-							targetList.push(
-								columnTarget(
-									col,
-									`${decision.relationName}.${col}`,
-									colTableRef,
-									this.naming,
-								),
-							);
-						}
-
-						// Register LEFT JOIN
-						// For belongsTo: source.FK → target.PK
-						const fk =
-							decision.foreignKey ?? this.deriveFK(decision.targetTable);
-						const onCondition = eqExpr(
-							columnRef('id', decision.relationName, undefined, this.naming),
-							columnRef(fk, plan.rootTable, undefined, this.naming),
-						);
-
-						this.pendingJoins.push({
-							type: 'LEFT JOIN',
-							table: decision.targetTable,
-							// Always alias with relationName for uniqueness
-							// (e.g., "author" and "editor" both from "users")
-							alias: decision.relationName,
-							on: onCondition,
-						});
+					if (includeResult.rawJoin) {
+						this.rawJoins.push(includeResult.rawJoin);
+					}
+					if (includeResult.additionalJoins) {
+						this.rawJoins.push(...includeResult.additionalJoins);
+					}
+					if (includeResult.cte) {
+						this.pendingCtes.push(includeResult.cte);
 					}
 					break;
 				}
@@ -435,7 +523,7 @@ export class PlanCompiler {
 						// Add user conditions (on joined table) to WHERE
 						if (decision.conditions && decision.conditions.length > 0) {
 							const condNodes = decision.conditions.map((c) =>
-								this.compileCondition(c as PlanDecision),
+								compileCondition(c as PlanDecision, this.condCtx(), this.state),
 							);
 							const combined =
 								condNodes.length === 1 ? condNodes[0]! : andExpr(...condNodes);
@@ -443,7 +531,11 @@ export class PlanCompiler {
 						}
 						break;
 					}
-					const whereExpr = this.compileCondition(decision);
+					const whereExpr = compileCondition(
+						decision,
+						this.condCtx(),
+						this.state,
+					);
 					where = where ? andExpr(where, whereExpr) : whereExpr;
 					break;
 				}
@@ -451,7 +543,7 @@ export class PlanCompiler {
 				case 'whereAnd':
 					if (decision.conditions) {
 						const andConditions = decision.conditions.map((c) =>
-							this.compileCondition(c),
+							compileCondition(c, this.condCtx(), this.state),
 						);
 						const combined =
 							andConditions.length === 1
@@ -464,7 +556,7 @@ export class PlanCompiler {
 				case 'whereOr':
 					if (decision.conditions) {
 						const orConditions = decision.conditions.map((c) =>
-							this.compileCondition(c),
+							compileCondition(c, this.condCtx(), this.state),
 						);
 						const combined =
 							orConditions.length === 1
@@ -516,7 +608,7 @@ export class PlanCompiler {
 					break;
 
 				case 'having':
-					having = this.compileCondition(decision);
+					having = compileCondition(decision, this.condCtx(), this.state);
 					break;
 
 				case 'limit':
@@ -524,7 +616,7 @@ export class PlanCompiler {
 						limit = integerNode(decision.limit);
 					} else if (decision.limit?.paramIndex !== undefined) {
 						limit = createParamRef(decision.limit.paramIndex);
-						this.parameters.push(undefined); // Placeholder
+						this.state.parameters.push(undefined); // Placeholder
 					}
 					break;
 
@@ -533,7 +625,7 @@ export class PlanCompiler {
 						offset = integerNode(decision.offset);
 					} else if (decision.offset?.paramIndex !== undefined) {
 						offset = createParamRef(decision.offset.paramIndex);
-						this.parameters.push(undefined); // Placeholder
+						this.state.parameters.push(undefined); // Placeholder
 					}
 					break;
 
@@ -566,6 +658,25 @@ export class PlanCompiler {
 					: innerJoin(base, targetRV, pj.on);
 		}
 
+		// Flush raw JOIN nodes from include handlers (e.g., LATERAL)
+		for (const rawJoin of this.rawJoins) {
+			const base =
+				from.length > 0
+					? from[0]!
+					: rangeVar(
+							plan.rootTable,
+							undefined,
+							plan.schema ?? this.schema,
+							this.naming,
+						);
+			// Raw joins are pre-built JoinExpr — inject base table as larg
+			const joinExpr = rawJoin as { JoinExpr?: Record<string, unknown> };
+			if (joinExpr.JoinExpr) {
+				joinExpr.JoinExpr.larg = base;
+				from[0] = rawJoin;
+			}
+		}
+
 		// Default to SELECT * if no columns specified
 		if (targetList.length === 0) {
 			targetList.push(starTarget(undefined, this.naming));
@@ -584,6 +695,9 @@ export class PlanCompiler {
 		if (limit) options.limit = limit;
 		if (offset) options.offset = offset;
 		if (distinct) options.distinct = distinct;
+		if (this.pendingCtes.length > 0) {
+			options.withClause = { ctes: this.pendingCtes, recursive: false };
+		}
 
 		return selectStmt(options);
 	}
@@ -603,7 +717,7 @@ export class PlanCompiler {
 					columns.push(...decision.columns);
 				}
 				if (decision.values) {
-					const row = decision.values.map((v) => this.compileValue(v));
+					const row = decision.values.map((v) => compileValue(v, this.state));
 					values.push(row);
 				}
 			} else if (decision.type === 'returning') {
@@ -651,12 +765,16 @@ export class PlanCompiler {
 					for (const s of decision.set) {
 						set.push({
 							column: s.column,
-							value: this.compileValue(s.value),
+							value: compileValue(s.value, this.state),
 						});
 					}
 				}
 			} else if (decision.type === 'where') {
-				const whereExpr = this.compileCondition(decision);
+				const whereExpr = compileCondition(
+					decision,
+					this.condCtx(),
+					this.state,
+				);
 				where = where ? andExpr(where, whereExpr) : whereExpr;
 			} else if (decision.type === 'returning') {
 				if (decision.column === '*') {
@@ -698,7 +816,11 @@ export class PlanCompiler {
 
 		for (const decision of plan.decisions) {
 			if (decision.type === 'where') {
-				const whereExpr = this.compileCondition(decision);
+				const whereExpr = compileCondition(
+					decision,
+					this.condCtx(),
+					this.state,
+				);
 				where = where ? andExpr(where, whereExpr) : whereExpr;
 			} else if (decision.type === 'returning') {
 				if (decision.column === '*') {
@@ -732,283 +854,8 @@ export class PlanCompiler {
 	}
 
 	// --------------------------------------------------------------------------
-	// Helpers
+	// Helpers (condition compilation extracted to compiler-conditions.ts)
 	// --------------------------------------------------------------------------
-
-	/**
-	 * Derive FK column name from source table using convention.
-	 * Convention: FK = {singularSourceTable}Id
-	 * Examples: authors → authorId, posts → postId, categories → categoryId
-	 */
-	private deriveFK(sourceTable: string): string {
-		// Simple singularization: remove trailing 's'
-		// Handles: authors → author, posts → post, comments → comment
-		let singular = sourceTable;
-		if (singular.endsWith('ies')) {
-			// categories → category
-			singular = `${singular.slice(0, -3)}y`;
-		} else if (singular.endsWith('s') && !singular.endsWith('ss')) {
-			// authors → author (but not 'address' → 'addres')
-			singular = singular.slice(0, -1);
-		}
-		return `${singular}Id`;
-	}
-
-	private compileCondition(decision: PlanDecision): Node {
-		// Handle nested compound conditions recursively
-		if (decision.type === 'whereAnd' && decision.conditions) {
-			const andConditions = decision.conditions.map((c) =>
-				this.compileCondition(c as PlanDecision),
-			);
-			return andConditions.length === 1
-				? andConditions[0]!
-				: andExpr(...andConditions);
-		}
-
-		if (decision.type === 'whereOr' && decision.conditions) {
-			const orConditions = decision.conditions.map((c) =>
-				this.compileCondition(c as PlanDecision),
-			);
-			return orConditions.length === 1
-				? orConditions[0]!
-				: orExpr(...orConditions);
-		}
-
-		if (decision.type === 'whereNot' && decision.conditions) {
-			const nested = this.compileCondition(
-				decision.conditions[0] as PlanDecision,
-			);
-			return notExpr(nested);
-		}
-
-		const column = columnRef(
-			decision.column ?? 'id',
-			decision.table,
-			undefined,
-			this.naming,
-		);
-
-		// Range operators handle their own parameters (with formatting + type cast)
-		// Must early-return before generic value compilation pushes raw value
-		if (
-			decision.operator === 'contains' ||
-			decision.operator === 'containedBy' ||
-			decision.operator === 'overlaps'
-		) {
-			const rangeOp =
-				decision.operator === 'contains'
-					? '@>'
-					: decision.operator === 'containedBy'
-						? '<@'
-						: '&&';
-			return this.compileRangeOperator(
-				decision,
-				column,
-				rangeOp as '@>' | '<@' | '&&',
-			);
-		}
-
-		let value: Node;
-		if (decision.paramIndex !== undefined) {
-			value = createParamRef(decision.paramIndex);
-			this.parameters.push(decision.value);
-		} else {
-			value = this.compileValue(decision.value);
-		}
-
-		switch (decision.operator) {
-			case '=':
-			case 'eq':
-				return eqExpr(column, value);
-			case '!=':
-			case '<>':
-			case 'ne':
-				return neExpr(column, value);
-			case '<':
-			case 'lt':
-				return ltExpr(column, value);
-			case '<=':
-			case 'lte':
-				return lteExpr(column, value);
-			case '>':
-			case 'gt':
-				return gtExpr(column, value);
-			case '>=':
-			case 'gte':
-				return gteExpr(column, value);
-			case 'like':
-				return likeExpr(column, value);
-			case 'ilike':
-				return ilikeExpr(column, value);
-			case 'isNull':
-				return {
-					NullTest: {
-						arg: column,
-						nulltesttype: 'IS_NULL',
-					},
-				};
-			case 'isNotNull':
-				return {
-					NullTest: {
-						arg: column,
-						nulltesttype: 'IS_NOT_NULL',
-					},
-				};
-			case 'exists':
-			case 'notExists':
-				return this.compileExistsCondition(decision);
-			case 'in':
-				return this.compileInCondition(decision, column, false);
-			case 'notIn':
-				return this.compileInCondition(decision, column, true);
-			case 'between':
-				return this.compileBetweenCondition(decision, column);
-			// Note: range operators (contains/containedBy/overlaps) handled by early return above
-			default:
-				return eqExpr(column, value);
-		}
-	}
-
-	/**
-	 * Recursively rewrite the `table` field in a PlanDecision tree.
-	 * Used for json_agg filter conditions that need to reference the inner alias (__t__).
-	 *
-	 * @example
-	 * // Rewrite table references inside a json_agg subquery:
-	 * // { type: 'where', column: 'active', table: 'posts' }
-	 * // → { type: 'where', column: 'active', table: '__t__' }
-	 */
-	private rewriteConditionTable(
-		decision: PlanDecision,
-		newTable: string,
-	): PlanDecision {
-		if (
-			(decision.type === 'whereAnd' ||
-				decision.type === 'whereOr' ||
-				decision.type === 'whereNot') &&
-			decision.conditions
-		) {
-			return {
-				...decision,
-				conditions: (decision.conditions as PlanDecision[]).map((c) =>
-					this.rewriteConditionTable(c, newTable),
-				),
-			} as PlanDecision;
-		}
-		if (decision.table) {
-			return { ...decision, table: newTable } as PlanDecision;
-		}
-		return decision;
-	}
-
-	/**
-	 * Compile an EXISTS or NOT EXISTS subquery condition.
-	 * EXISTS (SELECT 1 FROM targetTable WHERE fk = source.pk [AND conditions])
-	 *
-	 * FK correlation is generated using convention: target.{singularSource}Id = source.id
-	 *
-	 * @example
-	 * // hasMany: authors → posts
-	 * // SQL: EXISTS (SELECT 1 FROM "posts" WHERE "posts"."author_id" = "authors"."id")
-	 *
-	 * // belongsTo with self-ref: categories.parent → categories
-	 * // SQL: EXISTS (SELECT 1 FROM "categories" AS "parent" WHERE "parent"."id" = "categories"."parent_id")
-	 *
-	 * // NOT EXISTS:
-	 * // SQL: NOT (EXISTS (SELECT 1 FROM "posts" WHERE "posts"."author_id" = "authors"."id"))
-	 */
-	private compileExistsCondition(decision: PlanDecision): Node {
-		const targetTable = decision.targetTable;
-		if (!targetTable) {
-			throw new Error('EXISTS condition requires targetTable');
-		}
-
-		const sourceTable = this.currentRootTable;
-
-		// For self-referential relations (target === source), alias the inner table
-		// to avoid ambiguous column references (e.g., categories.parent_id = categories.id)
-		const needsAlias = targetTable === sourceTable;
-		const innerAlias = needsAlias
-			? decision.relationName || `${targetTable}_1`
-			: undefined;
-		const innerRef = innerAlias || targetTable;
-
-		// Build SELECT 1 FROM targetTable [AS alias]
-		const targetList: Node[] = [
-			{ ResTarget: { val: { A_Const: { ival: { ival: 1 } } } } },
-		];
-
-		const fromClause: Node[] = [
-			rangeVar(targetTable, innerAlias, this.schema, this.naming),
-		];
-
-		// Build FK correlation condition
-		// Use explicit foreignKey from decision if available (resolved from model),
-		// otherwise fall back to convention: {singularSourceTable}Id
-		const fkColumn = decision.foreignKey
-			? typeof decision.foreignKey === 'string'
-				? decision.foreignKey
-				: decision.foreignKey[0]
-			: this.deriveFK(sourceTable);
-
-		// For belongsTo: FK is in source (outer), PK is in target (inner)
-		// e.g., categories.parent_id = parent.id
-		// For hasMany/hasOne (default): FK is in target (inner), PK is in source (outer)
-		// e.g., posts.author_id = authors.id
-		const fkCorrelation =
-			decision.relationType === 'belongsTo'
-				? eqExpr(
-						columnRef('id', innerRef, undefined, this.naming),
-						columnRef(fkColumn, sourceTable, undefined, this.naming),
-					)
-				: eqExpr(
-						columnRef(fkColumn, innerRef, undefined, this.naming),
-						columnRef('id', sourceTable, undefined, this.naming),
-					);
-
-		// Build WHERE clause: FK correlation AND user conditions
-		let whereClause: Node = fkCorrelation;
-
-		if (decision.conditions && decision.conditions.length > 0) {
-			// Rewrite condition table references to use inner alias if needed
-			const conditions = innerAlias
-				? (decision.conditions as PlanDecision[]).map((c) =>
-						this.rewriteConditionTable(c, innerRef),
-					)
-				: (decision.conditions as PlanDecision[]);
-			const condNodes = conditions.map((c) => this.compileCondition(c));
-			// Combine FK correlation with user conditions using AND
-			whereClause = andExpr(fkCorrelation, ...condNodes);
-		}
-
-		const subSelect: Node = {
-			SelectStmt: {
-				targetList,
-				fromClause,
-				...(whereClause && { whereClause }),
-			},
-		};
-
-		const subLink: Node = {
-			SubLink: {
-				subLinkType: 'EXISTS_SUBLINK',
-				subselect: subSelect,
-			},
-		};
-
-		// For NOT EXISTS, wrap with NOT BoolExpr
-		// (SubLinkType only has EXISTS_SUBLINK; deparser renders as "NOT (EXISTS ...)")
-		if (decision.operator === 'notExists') {
-			return {
-				BoolExpr: {
-					boolop: 'NOT_EXPR',
-					args: [subLink],
-				},
-			};
-		}
-
-		return subLink;
-	}
 
 	/**
 	 * Register an INNER JOIN for a belongsTo filter-strategy decision.
@@ -1021,7 +868,7 @@ export class PlanCompiler {
 
 		// For belongsTo: FK is on source table, references target PK
 		// e.g., posts.author_id → authors.id
-		const fkColumn = decision.foreignKey ?? this.deriveFK(targetTable);
+		const fkColumn = decision.foreignKey ?? deriveFK(targetTable);
 		const onCondition = eqExpr(
 			columnRef('id', targetTable, undefined, this.naming),
 			columnRef(fkColumn, sourceTable, undefined, this.naming),
@@ -1039,163 +886,6 @@ export class PlanCompiler {
 			...(alias && { alias }),
 			on: onCondition,
 		});
-	}
-
-	/**
-	 * Compile an IN or NOT IN condition.
-	 * Uses PostgreSQL idioms: col = ANY($N) for IN, col <> ALL($N) for NOT IN
-	 */
-	private compileInCondition(
-		decision: PlanDecision,
-		column: Node,
-		negate: boolean,
-	): Node {
-		const values = decision.value as unknown[];
-		if (!Array.isArray(values)) {
-			throw new Error('IN condition requires array value');
-		}
-
-		// Handle empty arrays
-		if (values.length === 0) {
-			// Empty IN is always false, empty NOT IN is always true
-			return booleanConstNode(!negate);
-		}
-
-		const paramIdx = ++this.paramIndex;
-		this.parameters.push(values);
-
-		// Use = ANY($N) for IN, <> ALL($N) for NOT IN
-		const funcName = negate ? 'all' : 'any';
-		const op = negate ? '<>' : '=';
-
-		const funcCall: Node = {
-			FuncCall: {
-				funcname: [{ String: { sval: funcName } }],
-				args: [createParamRef(paramIdx)],
-			},
-		};
-
-		return {
-			A_Expr: {
-				kind: 'AEXPR_OP',
-				name: [{ String: { sval: op } }],
-				lexpr: column,
-				rexpr: funcCall,
-			},
-		};
-	}
-
-	/**
-	 * Compile a BETWEEN condition.
-	 * column BETWEEN $1 AND $2
-	 */
-	private compileBetweenCondition(decision: PlanDecision, column: Node): Node {
-		const range = decision.value as [unknown, unknown];
-		if (!Array.isArray(range) || range.length !== 2) {
-			throw new Error('BETWEEN condition requires [min, max] array');
-		}
-
-		const minIdx = ++this.paramIndex;
-		this.parameters.push(range[0]);
-		const minNode = createParamRef(minIdx);
-
-		const maxIdx = ++this.paramIndex;
-		this.parameters.push(range[1]);
-		const maxNode = createParamRef(maxIdx);
-
-		return {
-			A_Expr: {
-				kind: 'AEXPR_BETWEEN',
-				name: [{ String: { sval: 'BETWEEN' } }],
-				lexpr: column,
-				rexpr: { List: { items: [minNode, maxNode] } },
-			},
-		};
-	}
-
-	/**
-	 * Compile a PostgreSQL range operator condition (@>, <@, &&).
-	 * For range types: column @> value, column <@ range, column && range
-	 *
-	 * Value can be:
-	 * - Scalar (for @> point containment)
-	 * - { lower, upper } object (for range comparison)
-	 */
-	private compileRangeOperator(
-		decision: PlanDecision,
-		column: Node,
-		operator: '@>' | '<@' | '&&',
-	): Node {
-		const value = decision.value;
-
-		// Convert value to appropriate format
-		let paramValue: unknown;
-		let isScalar = false;
-		if (
-			value !== null &&
-			typeof value === 'object' &&
-			'lower' in (value as object)
-		) {
-			// Range value: { lower, upper } → PostgreSQL range literal
-			const range = value as { lower?: unknown; upper?: unknown };
-			// Format as PostgreSQL range literal: [lower,upper)
-			const lower = range.lower ?? '';
-			const upper = range.upper ?? '';
-			paramValue = `[${lower},${upper})`;
-		} else if (typeof value === 'string' && /^\[.*,.*[)\]]$/.test(value)) {
-			// Range literal string (e.g., "[2024-01-16,2024-01-17)") from NQL parser
-			paramValue = value;
-		} else {
-			// Scalar value (for @> point containment)
-			paramValue = value;
-			isScalar = true;
-		}
-
-		const paramIdx = ++this.paramIndex;
-		this.parameters.push(paramValue);
-
-		// Use TypeCast when dataType is available (required for range types like daterange, int4range)
-		// For scalar values (point containment), cast to element type (e.g. 'date' not 'daterange')
-		let castType = decision.dataType;
-		if (castType && isScalar) {
-			// Strip 'range' suffix to get element type: daterange → date, int4range → int4, tstzrange → tstz
-			castType = castType.replace(/range$/, '');
-			// Map PostgreSQL range element type names to proper type names
-			if (castType === 'int4') castType = 'integer';
-			if (castType === 'int8') castType = 'bigint';
-			if (castType === 'tstz') castType = 'timestamptz';
-			if (castType === 'ts') castType = 'timestamp';
-		}
-		const rexpr = castType
-			? createTypeCastParamRef(paramIdx, castType)
-			: createParamRef(paramIdx);
-
-		return {
-			A_Expr: {
-				kind: 'AEXPR_OP',
-				name: [{ String: { sval: operator } }],
-				lexpr: column,
-				rexpr,
-			},
-		};
-	}
-
-	private compileValue(value: unknown): Node {
-		if (value === null || value === undefined) {
-			return nullConstNode();
-		}
-
-		if (typeof value === 'object' && 'paramIndex' in (value as object)) {
-			const paramValue = value as { paramIndex: number; value?: unknown };
-			this.parameters.push(paramValue.value);
-			return createParamRef(paramValue.paramIndex);
-		}
-
-		// Use parameters for all scalar values for consistency with Kysely
-		// and security best practices (prevents SQL injection)
-		const idx = ++this.paramIndex;
-		this.parameters.push(value);
-		return createParamRef(idx);
 	}
 
 	private compileJoin(

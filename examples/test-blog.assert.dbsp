@@ -72,20 +72,20 @@ sql.equals: SELECT posts.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM auth
 # ─────────────────────────────────────────
 # Query 8: posts | select *, author.* | flat
 # flat excludes json_agg → planner picks LATERAL (PostgreSQL)
-# FLAT-BUG-001 FIXED: Single LATERAL JOIN (no duplicate LEFT JOIN)
+# HANDLER-WIRE: LATERAL handler now wired, produces actual LATERAL JOIN
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.equals: SELECT posts.* FROM posts
+sql.equals: SELECT posts.* FROM posts LEFT JOIN LATERAL ( SELECT authors_inner_0.* FROM authors AS authors_inner_0 WHERE authors_inner_0.id = posts.author_id ) AS authors_lat_0 ON true
 
 # ─────────────────────────────────────────
 # Query 9: authors | select *, posts.* | flat
 # flat excludes json_agg → planner picks LATERAL (PostgreSQL)
-# FLAT-BUG-001 FIXED: Single LATERAL JOIN (no duplicate LEFT JOIN)
+# HANDLER-WIRE: LATERAL handler now wired, produces actual LATERAL JOIN
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.equals: SELECT authors.* FROM authors
+sql.equals: SELECT authors.* FROM authors LEFT JOIN LATERAL ( SELECT posts_inner_0.* FROM posts AS posts_inner_0 WHERE posts_inner_0.author_id = authors.id ) AS posts_lat_0 ON true
 
 # ─────────────────────────────────────────
 # Query 10: posts select distinct *
@@ -104,7 +104,7 @@ sql.equals: SELECT DISTINCT posts.* FROM posts
 # --- query: N
 # success: true
 # sql.matches: count\s*\(\s*\*\s*\)
-# sql.contains: from "posts"
+# sql.equals: from "posts"
 
 # # Query N+1: posts select count(*) as total_posts
 # --- query: N+1
@@ -117,24 +117,24 @@ sql.equals: SELECT DISTINCT posts.* FROM posts
 # success: true
 # sql.matches: sum\s*\(
 # sql.matches: avg\s*\(
-# sql.contains: "views"
+# sql.equals: "views"
 
 # # Query N+3: posts select count(*) as post_count group by authorId
 # --- query: N+3
 # success: true
 # sql.matches: count\s*\(\s*\*\s*\)
 # sql.matches: group\s+by
-# sql.contains: "authorId"
+# sql.equals: "authorId"
 
 # # Query N+4: posts select min(amount) as min_order max(amount) as max_order
 # --- query: N+4
 # success: true
 # sql.matches: min\s*\(
 # sql.matches: max\s*\(
-# sql.contains: "amount"
+# sql.equals: "amount"
 
 # # Query N+5: posts select count(distinct authorId) as unique_authors
 # --- query: N+5
 # success: true
 # sql.matches: count\s*\(\s*distinct
-# sql.contains: "authorId"
+# sql.equals: "authorId"

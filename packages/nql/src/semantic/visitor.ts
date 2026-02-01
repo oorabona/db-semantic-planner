@@ -5,6 +5,7 @@
  */
 
 import type { CstNode, IToken } from 'chevrotain';
+import { NqlErrorCodes, NqlSemanticException } from '../errors/index.js';
 import type {
 	NqlAssignment,
 	NqlBetweenExpression,
@@ -34,7 +35,6 @@ import type {
 	NqlWindowExpression,
 } from '../parser/ast.js';
 import { nqlParser } from '../parser/grammar.js';
-import { NqlSemanticException, NqlErrorCodes } from '../errors/index.js';
 
 // Helper type for CST context - values are arrays of CstNode or IToken
 type CstContext = Record<string, (CstNode | IToken)[] | undefined>;
@@ -47,7 +47,10 @@ function isCstNode(value: CstNode | IToken): value is CstNode {
 // Helper to safely extract CstNode from context array
 function asCstNode(value: CstNode | IToken): CstNode {
 	if (!isCstNode(value)) {
-		throw new NqlSemanticException(NqlErrorCodes.SEM_UNREACHABLE, `Expected CstNode but got IToken: ${(value as IToken).image}`);
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_UNREACHABLE,
+			`Expected CstNode but got IToken: ${(value as IToken).image}`,
+		);
 	}
 	return value;
 }
@@ -55,7 +58,10 @@ function asCstNode(value: CstNode | IToken): CstNode {
 // Helper to get token image
 function getImage(value: CstNode | IToken): string {
 	if (isCstNode(value)) {
-		throw new NqlSemanticException(NqlErrorCodes.SEM_UNREACHABLE, 'Expected IToken but got CstNode');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_UNREACHABLE,
+			'Expected IToken but got CstNode',
+		);
 	}
 	return (value as IToken).image;
 }
@@ -97,20 +103,26 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 	letStatement(ctx: CstContext): NqlLetBinding {
 		if (!ctx.identSegment || !ctx.query) {
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Invalid let statement');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Invalid let statement',
+			);
 		}
 		return {
 			type: 'let',
-			name: this.visit(asCstNode(ctx.identSegment[0])),
-			query: this.visit(asCstNode(ctx.query[0])),
+			name: this.visit(asCstNode(ctx.identSegment[0]!)),
+			query: this.visit(asCstNode(ctx.query[0]!)),
 		};
 	}
 
 	statement(ctx: CstContext): NqlStatement {
-		if (ctx.query) return this.visit(asCstNode(ctx.query[0]));
+		if (ctx.query) return this.visit(asCstNode(ctx.query[0]!));
 		if (ctx.mutationPipeline)
-			return this.visit(asCstNode(ctx.mutationPipeline[0]));
-		throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Invalid statement');
+			return this.visit(asCstNode(ctx.mutationPipeline[0]!));
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			'Invalid statement',
+		);
 	}
 
 	// ============================================================
@@ -118,8 +130,12 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	// ============================================================
 
 	query(ctx: CstContext): NqlQuery {
-		if (!ctx.tableRef) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Query missing table');
-		const table = this.visit(asCstNode(ctx.tableRef[0]));
+		if (!ctx.tableRef)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Query missing table',
+			);
+		const table = this.visit(asCstNode(ctx.tableRef[0]!));
 		const clauses: NqlClause[] = [];
 
 		if (ctx.queryClause) {
@@ -132,26 +148,37 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	tableRef(ctx: CstContext): string {
-		if (!ctx.identSegment) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Table ref missing identifier');
-		return this.visit(asCstNode(ctx.identSegment[0]));
+		if (!ctx.identSegment)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Table ref missing identifier',
+			);
+		return this.visit(asCstNode(ctx.identSegment[0]!));
 	}
 
 	queryClause(ctx: CstContext): NqlClause {
-		if (ctx.whereClause) return this.visit(asCstNode(ctx.whereClause[0]));
-		if (ctx.selectClause) return this.visit(asCstNode(ctx.selectClause[0]));
-		if (ctx.flatClause) return this.visit(asCstNode(ctx.flatClause[0]));
-		if (ctx.groupClause) return this.visit(asCstNode(ctx.groupClause[0]));
-		if (ctx.orderClause) return this.visit(asCstNode(ctx.orderClause[0]));
-		if (ctx.limitClause) return this.visit(asCstNode(ctx.limitClause[0]));
-		if (ctx.offsetClause) return this.visit(asCstNode(ctx.offsetClause[0]));
-		throw new NqlSemanticException(NqlErrorCodes.SEM_UNREACHABLE, 'Unknown query clause');
+		if (ctx.whereClause) return this.visit(asCstNode(ctx.whereClause[0]!));
+		if (ctx.selectClause) return this.visit(asCstNode(ctx.selectClause[0]!));
+		if (ctx.flatClause) return this.visit(asCstNode(ctx.flatClause[0]!));
+		if (ctx.groupClause) return this.visit(asCstNode(ctx.groupClause[0]!));
+		if (ctx.orderClause) return this.visit(asCstNode(ctx.orderClause[0]!));
+		if (ctx.limitClause) return this.visit(asCstNode(ctx.limitClause[0]!));
+		if (ctx.offsetClause) return this.visit(asCstNode(ctx.offsetClause[0]!));
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_UNREACHABLE,
+			'Unknown query clause',
+		);
 	}
 
 	whereClause(ctx: CstContext): NqlClause {
-		if (!ctx.booleanExpr) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Where clause missing expression');
+		if (!ctx.booleanExpr)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Where clause missing expression',
+			);
 		return {
 			type: 'where',
-			condition: this.visit(asCstNode(ctx.booleanExpr[0])),
+			condition: this.visit(asCstNode(ctx.booleanExpr[0]!)),
 		};
 	}
 
@@ -161,7 +188,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 		if (ctx.selectList) {
 			const listItems = this.visit(
-				asCstNode(ctx.selectList[0]),
+				asCstNode(ctx.selectList[0]!),
 			) as NqlSelectItem[];
 			items.push(...listItems);
 		}
@@ -180,7 +207,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	groupClause(ctx: CstContext): NqlClause {
 		const expressions: NqlExpression[] = [];
 		if (ctx.exprList) {
-			const exprs = this.visit(asCstNode(ctx.exprList[0])) as NqlExpression[];
+			const exprs = this.visit(asCstNode(ctx.exprList[0]!)) as NqlExpression[];
 			expressions.push(...exprs);
 		}
 		return { type: 'groupBy', expressions };
@@ -190,7 +217,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		const items: NqlOrderItem[] = [];
 		if (ctx.orderList) {
 			const orderItems = this.visit(
-				asCstNode(ctx.orderList[0]),
+				asCstNode(ctx.orderList[0]!),
 			) as NqlOrderItem[];
 			items.push(...orderItems);
 		}
@@ -198,18 +225,26 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	limitClause(ctx: CstContext): NqlClause {
-		if (!ctx.NumberLiteral) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Limit clause missing number');
+		if (!ctx.NumberLiteral)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Limit clause missing number',
+			);
 		return {
 			type: 'limit',
-			count: parseInt(getImage(ctx.NumberLiteral[0]), 10),
+			count: parseInt(getImage(ctx.NumberLiteral[0]!), 10),
 		};
 	}
 
 	offsetClause(ctx: CstContext): NqlClause {
-		if (!ctx.NumberLiteral) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Offset clause missing number');
+		if (!ctx.NumberLiteral)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Offset clause missing number',
+			);
 		return {
 			type: 'offset',
-			count: parseInt(getImage(ctx.NumberLiteral[0]), 10),
+			count: parseInt(getImage(ctx.NumberLiteral[0]!), 10),
 		};
 	}
 
@@ -218,25 +253,29 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	// ============================================================
 
 	joinSpec(ctx: CstContext): NqlJoinSpec {
-		if (!ctx.identSegment) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Join spec missing relation');
-		const relation = this.visit(asCstNode(ctx.identSegment[0]));
+		if (!ctx.identSegment)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Join spec missing relation',
+			);
+		const relation = this.visit(asCstNode(ctx.identSegment[0]!));
 		let via: string | undefined;
 		let condition: NqlExpression | undefined;
 		let params: NqlJoinParam[] | undefined;
 
 		// Handle via disambiguation
 		if (ctx.Via && ctx.identSegment.length > 1) {
-			via = this.visit(asCstNode(ctx.identSegment[1]));
+			via = this.visit(asCstNode(ctx.identSegment[1]!));
 		}
 
 		// Handle params
 		if (ctx.paramList) {
-			params = this.visit(asCstNode(ctx.paramList[0]));
+			params = this.visit(asCstNode(ctx.paramList[0]!));
 		}
 
 		// Handle ON condition
 		if (ctx.On && ctx.booleanExpr) {
-			condition = this.visit(asCstNode(ctx.booleanExpr[0]));
+			condition = this.visit(asCstNode(ctx.booleanExpr[0]!));
 		}
 
 		return { relation, via, condition, params };
@@ -254,11 +293,14 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 	param(ctx: CstContext): NqlJoinParam {
 		if (!ctx.identSegment || !ctx.literal) {
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Param missing name or value');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Param missing name or value',
+			);
 		}
 		return {
-			name: this.visit(asCstNode(ctx.identSegment[0])),
-			value: this.visit(asCstNode(ctx.literal[0])),
+			name: this.visit(asCstNode(ctx.identSegment[0]!)),
+			value: this.visit(asCstNode(ctx.literal[0]!)),
 		};
 	}
 
@@ -284,14 +326,18 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 		// Relation star (relation.*)
 		if (ctx.relationStarExpr) {
-			return this.visit(asCstNode(ctx.relationStarExpr[0]));
+			return this.visit(asCstNode(ctx.relationStarExpr[0]!));
 		}
 
 		// Expression with optional alias
-		if (!ctx.expression) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Select item missing expression');
-		const expression = this.visit(asCstNode(ctx.expression[0]));
+		if (!ctx.expression)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Select item missing expression',
+			);
+		const expression = this.visit(asCstNode(ctx.expression[0]!));
 		const alias = ctx.identSegment
-			? this.visit(asCstNode(ctx.identSegment[0]))
+			? this.visit(asCstNode(ctx.identSegment[0]!))
 			: undefined;
 
 		return { type: 'expression', expression, alias };
@@ -322,8 +368,12 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	orderItem(ctx: CstContext): NqlOrderItem {
-		if (!ctx.expression) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Order item missing expression');
-		const expression = this.visit(asCstNode(ctx.expression[0]));
+		if (!ctx.expression)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Order item missing expression',
+			);
+		const expression = this.visit(asCstNode(ctx.expression[0]!));
 		const direction: 'asc' | 'desc' = ctx.Desc ? 'desc' : 'asc';
 		return { expression, direction };
 	}
@@ -333,17 +383,25 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	// ============================================================
 
 	booleanExpr(ctx: CstContext): NqlExpression {
-		if (!ctx.orExpr) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Boolean expr missing orExpr');
-		return this.visit(asCstNode(ctx.orExpr[0]));
+		if (!ctx.orExpr)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Boolean expr missing orExpr',
+			);
+		return this.visit(asCstNode(ctx.orExpr[0]!));
 	}
 
 	orExpr(ctx: CstContext): NqlExpression {
-		if (!ctx.andExpr) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Or expr missing andExpr');
-		let left = this.visit(asCstNode(ctx.andExpr[0]));
+		if (!ctx.andExpr)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Or expr missing andExpr',
+			);
+		let left = this.visit(asCstNode(ctx.andExpr[0]!));
 
 		if (ctx.andExpr.length > 1) {
 			for (let i = 1; i < ctx.andExpr.length; i++) {
-				const right = this.visit(asCstNode(ctx.andExpr[i]));
+				const right = this.visit(asCstNode(ctx.andExpr[i]!));
 				left = { type: 'binary', operator: 'or', left, right };
 			}
 		}
@@ -351,12 +409,16 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	andExpr(ctx: CstContext): NqlExpression {
-		if (!ctx.notExpr) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'And expr missing notExpr');
-		let left = this.visit(asCstNode(ctx.notExpr[0]));
+		if (!ctx.notExpr)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'And expr missing notExpr',
+			);
+		let left = this.visit(asCstNode(ctx.notExpr[0]!));
 
 		if (ctx.notExpr.length > 1) {
 			for (let i = 1; i < ctx.notExpr.length; i++) {
-				const right = this.visit(asCstNode(ctx.notExpr[i]));
+				const right = this.visit(asCstNode(ctx.notExpr[i]!));
 				left = { type: 'binary', operator: 'and', left, right };
 			}
 		}
@@ -364,8 +426,12 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	notExpr(ctx: CstContext): NqlExpression {
-		if (!ctx.primaryCond) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Not expr missing primaryCond');
-		const expr = this.visit(asCstNode(ctx.primaryCond[0]));
+		if (!ctx.primaryCond)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Not expr missing primaryCond',
+			);
+		const expr = this.visit(asCstNode(ctx.primaryCond[0]!));
 
 		if (ctx.Not) {
 			return { type: 'unary', operator: 'not', operand: expr };
@@ -376,42 +442,46 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	primaryCond(ctx: CstContext): NqlExpression {
 		// Parenthesized boolean expression
 		if (ctx.booleanExpr) {
-			return this.visit(asCstNode(ctx.booleanExpr[0]));
+			return this.visit(asCstNode(ctx.booleanExpr[0]!));
 		}
 
 		// EXISTS check
 		if (ctx.existsCheck) {
-			return this.visit(asCstNode(ctx.existsCheck[0]));
+			return this.visit(asCstNode(ctx.existsCheck[0]!));
 		}
 
 		// SPEC-002: Quantified relation filters
 		if (ctx.quantifiedRelationFilter) {
-			return this.visit(asCstNode(ctx.quantifiedRelationFilter[0]));
+			return this.visit(asCstNode(ctx.quantifiedRelationFilter[0]!));
 		}
 		if (ctx.allRelationFilter) {
-			return this.visit(asCstNode(ctx.allRelationFilter[0]));
+			return this.visit(asCstNode(ctx.allRelationFilter[0]!));
 		}
 
 		// Expression-based conditions
-		if (!ctx.expression) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'PrimaryCond missing expression');
-		const left = this.visit(asCstNode(ctx.expression[0]));
+		if (!ctx.expression)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'PrimaryCond missing expression',
+			);
+		const left = this.visit(asCstNode(ctx.expression[0]!));
 
 		// Check for suffix
 		if (ctx.comparisonSuffix) {
-			return this.buildComparison(left, asCstNode(ctx.comparisonSuffix[0]));
+			return this.buildComparison(left, asCstNode(ctx.comparisonSuffix[0]!));
 		}
 		if (ctx.betweenSuffix) {
-			return this.buildBetween(left, asCstNode(ctx.betweenSuffix[0]));
+			return this.buildBetween(left, asCstNode(ctx.betweenSuffix[0]!));
 		}
 		if (ctx.inSuffix) {
-			return this.buildIn(left, asCstNode(ctx.inSuffix[0]));
+			return this.buildIn(left, asCstNode(ctx.inSuffix[0]!));
 		}
 		if (ctx.isNullSuffix) {
-			return this.buildIsNull(left, asCstNode(ctx.isNullSuffix[0]));
+			return this.buildIsNull(left, asCstNode(ctx.isNullSuffix[0]!));
 		}
 		// Range operators (overlaps, contains, containedBy) with range literal
 		if (ctx.rangeOpSuffix) {
-			return this.buildRangeOp(left, asCstNode(ctx.rangeOpSuffix[0]));
+			return this.buildRangeOp(left, asCstNode(ctx.rangeOpSuffix[0]!));
 		}
 
 		// Just an expression
@@ -424,9 +494,12 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	): NqlExpression {
 		const suffixCtx = suffixNode.children as CstContext;
 		if (!suffixCtx.compOp || !suffixCtx.expression) {
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Comparison suffix missing operator or expression');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Comparison suffix missing operator or expression',
+			);
 		}
-		const operator = this.visit(asCstNode(suffixCtx.compOp[0])) as
+		const operator = this.visit(asCstNode(suffixCtx.compOp[0]!)) as
 			| '='
 			| '!='
 			| '<'
@@ -434,7 +507,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			| '<='
 			| '>='
 			| 'like';
-		const right = this.visit(asCstNode(suffixCtx.expression[0]));
+		const right = this.visit(asCstNode(suffixCtx.expression[0]!));
 		return { type: 'comparison', operator, left, right };
 	}
 
@@ -444,13 +517,16 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	): NqlBetweenExpression {
 		const suffixCtx = suffixNode.children as CstContext;
 		if (!suffixCtx.expression || suffixCtx.expression.length < 2) {
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Between suffix missing expressions');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Between suffix missing expressions',
+			);
 		}
 		return {
 			type: 'between',
 			expression: left,
-			low: this.visit(asCstNode(suffixCtx.expression[0])),
-			high: this.visit(asCstNode(suffixCtx.expression[1])),
+			low: this.visit(asCstNode(suffixCtx.expression[0]!)),
+			high: this.visit(asCstNode(suffixCtx.expression[1]!)),
 		};
 	}
 
@@ -460,7 +536,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 		// Date range literal
 		if (suffixCtx.StringLiteral) {
-			const raw = getImage(suffixCtx.StringLiteral[0]);
+			const raw = getImage(suffixCtx.StringLiteral[0]!);
 			const value = raw.slice(1, -1).replace(/''/g, "'");
 			return {
 				type: 'in',
@@ -476,7 +552,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 				type: 'in',
 				negated,
 				expression: left,
-				values: this.visit(asCstNode(suffixCtx.scalarSubquery[0])),
+				values: this.visit(asCstNode(suffixCtx.scalarSubquery[0]!)),
 			};
 		}
 
@@ -484,7 +560,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		const values: NqlExpression[] = [];
 		if (suffixCtx.valueList) {
 			const listValues = this.visit(
-				asCstNode(suffixCtx.valueList[0]),
+				asCstNode(suffixCtx.valueList[0]!),
 			) as NqlExpression[];
 			values.push(...listValues);
 		}
@@ -506,7 +582,10 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 	comparisonSuffix(_ctx: CstContext): NqlExpression {
 		// This should not be called directly - handled by buildComparison
-		throw new NqlSemanticException(NqlErrorCodes.SEM_UNREACHABLE, 'comparisonSuffix should not be visited directly');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_UNREACHABLE,
+			'comparisonSuffix should not be visited directly',
+		);
 	}
 
 	compOp(ctx: CstContext): string {
@@ -517,7 +596,10 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		if (ctx.LessThanOrEqual) return '<=';
 		if (ctx.GreaterThanOrEqual) return '>=';
 		if (ctx.Like) return 'like';
-		throw new NqlSemanticException(NqlErrorCodes.SEM_UNREACHABLE, 'Unknown comparison operator');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_UNREACHABLE,
+			'Unknown comparison operator',
+		);
 	}
 
 	/**
@@ -528,7 +610,10 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		if (ctx.Overlaps) return 'overlaps';
 		if (ctx.Contains) return 'contains';
 		if (ctx.ContainedBy) return 'containedBy';
-		throw new NqlSemanticException(NqlErrorCodes.SEM_UNREACHABLE, 'Unknown range operator');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_UNREACHABLE,
+			'Unknown range operator',
+		);
 	}
 
 	/**
@@ -536,7 +621,10 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	 * This should not be called directly - handled by buildRangeOp
 	 */
 	rangeOpSuffix(_ctx: CstContext): NqlExpression {
-		throw new NqlSemanticException(NqlErrorCodes.SEM_UNREACHABLE, 'rangeOpSuffix should not be visited directly');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_UNREACHABLE,
+			'rangeOpSuffix should not be visited directly',
+		);
 	}
 
 	/**
@@ -548,9 +636,12 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	): NqlRangeOpExpression {
 		const suffixCtx = suffixNode.children as CstContext;
 		if (!suffixCtx.rangeOp) {
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Range op suffix missing operator');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Range op suffix missing operator',
+			);
 		}
-		const operator = this.visit(asCstNode(suffixCtx.rangeOp[0])) as
+		const operator = this.visit(asCstNode(suffixCtx.rangeOp[0]!)) as
 			| 'overlaps'
 			| 'contains'
 			| 'containedBy';
@@ -558,7 +649,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		// Check if we have a range literal or a scalar literal
 		if (suffixCtx.rangeLiteral) {
 			const range = this.visit(
-				asCstNode(suffixCtx.rangeLiteral[0]),
+				asCstNode(suffixCtx.rangeLiteral[0]!),
 			) as NqlRangeLiteral;
 			return {
 				type: 'rangeOp',
@@ -568,7 +659,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			};
 		}
 		if (suffixCtx.literal) {
-			const scalar = this.visit(asCstNode(suffixCtx.literal[0])) as NqlLiteral;
+			const scalar = this.visit(asCstNode(suffixCtx.literal[0]!)) as NqlLiteral;
 			return {
 				type: 'rangeOp',
 				operator,
@@ -577,20 +668,30 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			};
 		}
 
-		throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Range op suffix missing range literal or scalar value');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			'Range op suffix missing range literal or scalar value',
+		);
 	}
 
 	betweenSuffix(_ctx: CstContext): NqlExpression {
 		// This should not be called directly - handled by buildBetween
-		throw new NqlSemanticException(NqlErrorCodes.SEM_UNREACHABLE, 'betweenSuffix should not be visited directly');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_UNREACHABLE,
+			'betweenSuffix should not be visited directly',
+		);
 	}
 
 	existsCheck(ctx: CstContext): NqlExistsExpression {
-		if (!ctx.scalarSubquery) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Exists missing subquery');
+		if (!ctx.scalarSubquery)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Exists missing subquery',
+			);
 		return {
 			type: 'exists',
 			negated: !!ctx.Not,
-			subquery: this.visit(asCstNode(ctx.scalarSubquery[0])),
+			subquery: this.visit(asCstNode(ctx.scalarSubquery[0]!)),
 		};
 	}
 
@@ -613,13 +714,19 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		} else if (ctx.Every) {
 			mode = 'every';
 		} else {
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'quantifiedRelationFilter missing quantifier');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'quantifiedRelationFilter missing quantifier',
+			);
 		}
 
 		// Get relation path
 		if (!ctx.pathExpr)
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'quantifiedRelationFilter missing pathExpr');
-		const pathExpr = this.visit(asCstNode(ctx.pathExpr[0])) as {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'quantifiedRelationFilter missing pathExpr',
+			);
+		const pathExpr = this.visit(asCstNode(ctx.pathExpr[0]!)) as {
 			type: 'path';
 			segments: string[];
 		};
@@ -629,9 +736,9 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		if (ctx.booleanExpr) {
 			// Aliased or direct condition form
 			const alias = ctx.identSegment
-				? this.visit(asCstNode(ctx.identSegment[0]))
+				? this.visit(asCstNode(ctx.identSegment[0]!))
 				: undefined;
-			const condition = this.visit(asCstNode(ctx.booleanExpr[0]));
+			const condition = this.visit(asCstNode(ctx.booleanExpr[0]!));
 			return {
 				type: 'relationFilter',
 				relation,
@@ -642,19 +749,29 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		}
 		// Simple form: some(relation).column = value
 		if (!ctx.identSegment)
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'quantifiedRelationFilter missing column');
-		const column = this.visit(asCstNode(ctx.identSegment[0])) as string;
-		if (!ctx.compOp) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'quantifiedRelationFilter missing compOp');
-		const operator = this.visit(asCstNode(ctx.compOp[0])) as string;
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'quantifiedRelationFilter missing column',
+			);
+		const column = this.visit(asCstNode(ctx.identSegment[0]!)) as string;
+		if (!ctx.compOp)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'quantifiedRelationFilter missing compOp',
+			);
+		const operator = this.visit(asCstNode(ctx.compOp[0]!)) as string;
 		if (!ctx.expression)
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'quantifiedRelationFilter missing expression');
-		const right = this.visit(asCstNode(ctx.expression[0]));
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'quantifiedRelationFilter missing expression',
+			);
+		const right = this.visit(asCstNode(ctx.expression[0]!));
 
 		// Build comparison condition
 		const condition = {
 			type: 'comparison' as const,
 			operator: operator as '=' | '!=' | '<' | '>' | '<=' | '>=' | 'like',
-			left: { type: 'path' as const, segments: [column] },
+			left: { type: 'path' as const, segments: [column] as string[] },
 			right,
 		};
 
@@ -675,15 +792,22 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	 */
 	allRelationFilter(ctx: CstContext): NqlRelationFilterExpression {
 		// Get full path (includes both relation and column)
-		if (!ctx.pathExpr) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'allRelationFilter missing pathExpr');
-		const pathExpr = this.visit(asCstNode(ctx.pathExpr[0])) as {
+		if (!ctx.pathExpr)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'allRelationFilter missing pathExpr',
+			);
+		const pathExpr = this.visit(asCstNode(ctx.pathExpr[0]!)) as {
 			type: 'path';
 			segments: string[];
 		};
 		const segments = pathExpr.segments;
 
 		if (segments.length < 2) {
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, `allRelationFilter requires at least relation.column (got: ${segments.join('.')})`);
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`allRelationFilter requires at least relation.column (got: ${segments.join('.')})`,
+			);
 		}
 
 		// Split: relation = all but last, column = last
@@ -691,17 +815,24 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		const column = segments[segments.length - 1];
 
 		// Get comparison operator and value
-		if (!ctx.compOp) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'allRelationFilter missing compOp');
-		const operator = this.visit(asCstNode(ctx.compOp[0])) as string;
+		if (!ctx.compOp)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'allRelationFilter missing compOp',
+			);
+		const operator = this.visit(asCstNode(ctx.compOp[0]!)) as string;
 		if (!ctx.expression)
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'allRelationFilter missing expression');
-		const right = this.visit(asCstNode(ctx.expression[0]));
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'allRelationFilter missing expression',
+			);
+		const right = this.visit(asCstNode(ctx.expression[0]!));
 
 		// Build comparison condition
 		const condition = {
 			type: 'comparison' as const,
 			operator: operator as '=' | '!=' | '<' | '>' | '<=' | '>=' | 'like',
-			left: { type: 'path' as const, segments: [column] },
+			left: { type: 'path' as const, segments: [column] as string[] },
 			right,
 		};
 
@@ -715,12 +846,18 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 	inSuffix(_ctx: CstContext): NqlExpression {
 		// This should not be called directly - handled by buildIn
-		throw new NqlSemanticException(NqlErrorCodes.SEM_UNREACHABLE, 'inSuffix should not be visited directly');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_UNREACHABLE,
+			'inSuffix should not be visited directly',
+		);
 	}
 
 	isNullSuffix(_ctx: CstContext): NqlExpression {
 		// This should not be called directly - handled by buildIsNull
-		throw new NqlSemanticException(NqlErrorCodes.SEM_UNREACHABLE, 'isNullSuffix should not be visited directly');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_UNREACHABLE,
+			'isNullSuffix should not be visited directly',
+		);
 	}
 
 	// ============================================================
@@ -728,13 +865,21 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	// ============================================================
 
 	expression(ctx: CstContext): NqlExpression {
-		if (!ctx.addExpr) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Expression missing addExpr');
-		return this.visit(asCstNode(ctx.addExpr[0]));
+		if (!ctx.addExpr)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Expression missing addExpr',
+			);
+		return this.visit(asCstNode(ctx.addExpr[0]!));
 	}
 
 	addExpr(ctx: CstContext): NqlExpression {
-		if (!ctx.mulExpr) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'AddExpr missing mulExpr');
-		let left = this.visit(asCstNode(ctx.mulExpr[0]));
+		if (!ctx.mulExpr)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'AddExpr missing mulExpr',
+			);
+		let left = this.visit(asCstNode(ctx.mulExpr[0]!));
 
 		if (ctx.mulExpr.length > 1) {
 			// Collect operators in token order (by startOffset)
@@ -753,7 +898,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			ops.sort((a, b) => a.offset - b.offset);
 
 			for (let i = 1; i < ctx.mulExpr.length; i++) {
-				const right = this.visit(asCstNode(ctx.mulExpr[i]));
+				const right = this.visit(asCstNode(ctx.mulExpr[i]!));
 				const op = ops[i - 1]?.op || '+';
 				left = { type: 'binary', operator: op, left, right };
 			}
@@ -763,8 +908,12 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	mulExpr(ctx: CstContext): NqlExpression {
-		if (!ctx.unaryExpr) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'MulExpr missing unaryExpr');
-		let left = this.visit(asCstNode(ctx.unaryExpr[0]));
+		if (!ctx.unaryExpr)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'MulExpr missing unaryExpr',
+			);
+		let left = this.visit(asCstNode(ctx.unaryExpr[0]!));
 
 		if (ctx.unaryExpr.length > 1) {
 			// Collect operators in token order (by startOffset)
@@ -788,7 +937,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			ops.sort((a, b) => a.offset - b.offset);
 
 			for (let i = 1; i < ctx.unaryExpr.length; i++) {
-				const right = this.visit(asCstNode(ctx.unaryExpr[i]));
+				const right = this.visit(asCstNode(ctx.unaryExpr[i]!));
 				const op = ops[i - 1]?.op || '*';
 				left = { type: 'binary', operator: op, left, right };
 			}
@@ -798,8 +947,12 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	unaryExpr(ctx: CstContext): NqlExpression {
-		if (!ctx.primaryExpr) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'UnaryExpr missing primaryExpr');
-		const expr = this.visit(asCstNode(ctx.primaryExpr[0]));
+		if (!ctx.primaryExpr)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'UnaryExpr missing primaryExpr',
+			);
+		const expr = this.visit(asCstNode(ctx.primaryExpr[0]!));
 
 		if (ctx.Minus) {
 			return { type: 'unary', operator: '-', operand: expr };
@@ -810,35 +963,38 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	primaryExpr(ctx: CstContext): NqlExpression {
 		// Literals
 		if (ctx.literal) {
-			return this.visit(asCstNode(ctx.literal[0]));
+			return this.visit(asCstNode(ctx.literal[0]!));
 		}
 
 		// CASE expression
 		if (ctx.caseExpr) {
-			return this.visit(asCstNode(ctx.caseExpr[0]));
+			return this.visit(asCstNode(ctx.caseExpr[0]!));
 		}
 
 		// Function call
 		if (ctx.funcCall) {
-			return this.visit(asCstNode(ctx.funcCall[0]));
+			return this.visit(asCstNode(ctx.funcCall[0]!));
 		}
 
 		// Path expression
 		if (ctx.pathExpr) {
-			return this.visit(asCstNode(ctx.pathExpr[0]));
+			return this.visit(asCstNode(ctx.pathExpr[0]!));
 		}
 
 		// Parenthesized expression
 		if (ctx.LParen && ctx.expression) {
-			return this.visit(asCstNode(ctx.expression[0]));
+			return this.visit(asCstNode(ctx.expression[0]!));
 		}
 
 		// Scalar subquery
 		if (ctx.scalarSubquery) {
-			return this.visit(asCstNode(ctx.scalarSubquery[0]));
+			return this.visit(asCstNode(ctx.scalarSubquery[0]!));
 		}
 
-		throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Invalid primary expression');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			'Invalid primary expression',
+		);
 	}
 
 	/**
@@ -860,8 +1016,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 		for (let i = 0; i < whenCount; i++) {
 			whenClauses.push({
-				condition: this.visit(asCstNode(conditions[i])),
-				result: this.visit(asCstNode(results[i])),
+				condition: this.visit(asCstNode(conditions[i]!)),
+				result: this.visit(asCstNode(results[i]!)),
 			});
 		}
 
@@ -870,7 +1026,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			return {
 				type: 'case',
 				whenClauses,
-				elseClause: this.visit(asCstNode(results[results.length - 1])),
+				elseClause: this.visit(asCstNode(results[results.length - 1]!)),
 			};
 		}
 
@@ -881,10 +1037,14 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	scalarSubquery(ctx: CstContext): NqlSubquery {
-		if (!ctx.query) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Scalar subquery missing query');
+		if (!ctx.query)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Scalar subquery missing query',
+			);
 		return {
 			type: 'subquery',
-			query: this.visit(asCstNode(ctx.query[0])),
+			query: this.visit(asCstNode(ctx.query[0]!)),
 		};
 	}
 
@@ -898,7 +1058,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		// Optional depth hint: ascendant[3].column
 		let depthHint: number | undefined;
 		if (ctx.NumberLiteral) {
-			depthHint = Number.parseInt(getImage(ctx.NumberLiteral[0]), 10);
+			depthHint = Number.parseInt(getImage(ctx.NumberLiteral[0]!), 10);
 		}
 		return depthHint !== undefined
 			? { type: 'path', segments, depthHint }
@@ -919,9 +1079,12 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		} else if (ctx.Lead) {
 			name = 'lead';
 		} else if (ctx.identSegment) {
-			name = this.visit(asCstNode(ctx.identSegment[0]));
+			name = this.visit(asCstNode(ctx.identSegment[0]!));
 		} else {
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Function call missing name');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Function call missing name',
+			);
 		}
 
 		const args: NqlExpression[] = [];
@@ -932,7 +1095,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			args.push({ type: 'path', segments: ['*'] });
 		} else if (ctx.funcArgList) {
 			// Check for DISTINCT modifier inside funcArgList
-			const argListCtx = asCstNode(ctx.funcArgList[0]);
+			const argListCtx = asCstNode(ctx.funcArgList[0]!);
 			if (argListCtx.children?.Distinct) {
 				distinct = true;
 			}
@@ -942,7 +1105,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 		// If there's a windowClause, return NqlWindowExpression
 		if (ctx.windowClause) {
-			const windowSpec = this.visit(asCstNode(ctx.windowClause[0])) as {
+			const windowSpec = this.visit(asCstNode(ctx.windowClause[0]!)) as {
 				partitionBy: NqlExpression[];
 				orderBy: NqlOrderItem[];
 			};
@@ -969,13 +1132,13 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 		if (ctx.partitionClause) {
 			partitionBy = this.visit(
-				asCstNode(ctx.partitionClause[0]),
+				asCstNode(ctx.partitionClause[0]!),
 			) as NqlExpression[];
 		}
 
 		if (ctx.orderClauseInWindow) {
 			orderBy = this.visit(
-				asCstNode(ctx.orderClauseInWindow[0]),
+				asCstNode(ctx.orderClauseInWindow[0]!),
 			) as NqlOrderItem[];
 		}
 
@@ -984,14 +1147,14 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 	partitionClause(ctx: CstContext): NqlExpression[] {
 		if (ctx.exprList) {
-			return this.visit(asCstNode(ctx.exprList[0])) as NqlExpression[];
+			return this.visit(asCstNode(ctx.exprList[0]!)) as NqlExpression[];
 		}
 		return [];
 	}
 
 	orderClauseInWindow(ctx: CstContext): NqlOrderItem[] {
 		if (ctx.orderList) {
-			return this.visit(asCstNode(ctx.orderList[0])) as NqlOrderItem[];
+			return this.visit(asCstNode(ctx.orderList[0]!)) as NqlOrderItem[];
 		}
 		return [];
 	}
@@ -1001,7 +1164,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		// - Star (for count(*)) - handled in funcCall
 		// - exprList (normal function arguments)
 		if (ctx.exprList) {
-			return this.visit(asCstNode(ctx.exprList[0])) as NqlExpression[];
+			return this.visit(asCstNode(ctx.exprList[0]!)) as NqlExpression[];
 		}
 		return [];
 	}
@@ -1032,13 +1195,13 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 	literal(ctx: CstContext): NqlLiteral {
 		if (ctx.StringLiteral) {
-			const raw = getImage(ctx.StringLiteral[0]);
+			const raw = getImage(ctx.StringLiteral[0]!);
 			return { type: 'string', value: raw.slice(1, -1).replace(/''/g, "'") };
 		}
 		if (ctx.NumberLiteral) {
 			return {
 				type: 'number',
-				value: parseFloat(getImage(ctx.NumberLiteral[0])),
+				value: parseFloat(getImage(ctx.NumberLiteral[0]!)),
 			};
 		}
 		if (ctx.True) {
@@ -1051,9 +1214,12 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			return { type: 'null' };
 		}
 		if (ctx.rangeLiteral) {
-			return this.visit(asCstNode(ctx.rangeLiteral[0])) as NqlRangeLiteral;
+			return this.visit(asCstNode(ctx.rangeLiteral[0]!)) as NqlRangeLiteral;
 		}
-		throw new NqlSemanticException(NqlErrorCodes.SEM_UNREACHABLE, 'Invalid literal');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_UNREACHABLE,
+			'Invalid literal',
+		);
 	}
 
 	/**
@@ -1069,10 +1235,13 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 		// Get lower and upper values from labeled subrules
 		if (!ctx.lower || !ctx.upper) {
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Range literal missing lower or upper bound');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Range literal missing lower or upper bound',
+			);
 		}
-		const lower = this.visit(asCstNode(ctx.lower[0])) as string;
-		const upper = this.visit(asCstNode(ctx.upper[0])) as string;
+		const lower = this.visit(asCstNode(ctx.lower[0]!)) as string;
+		const upper = this.visit(asCstNode(ctx.upper[0]!)) as string;
 
 		// Reconstruct the raw value for compatibility
 		const openBracket = lowerInclusive ? '[' : '(';
@@ -1094,15 +1263,18 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	 */
 	rangeValue(ctx: CstContext): string {
 		if (ctx.RangeValue) {
-			return getImage(ctx.RangeValue[0]);
+			return getImage(ctx.RangeValue[0]!);
 		}
 		// NumberLiteral with optional Minus
 		const numToken = ctx.NumberLiteral;
 		if (!numToken) {
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Range value must contain RangeValue or NumberLiteral');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Range value must contain RangeValue or NumberLiteral',
+			);
 		}
 		const minus = ctx.Minus ? '-' : '';
-		const num = getImage(numToken[0]);
+		const num = getImage(numToken[0]!);
 		return `${minus}${num}`;
 	}
 
@@ -1112,26 +1284,29 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 	identSegment(ctx: CstContext): string {
 		if (ctx.Identifier) {
-			return getImage(ctx.Identifier[0]);
+			return getImage(ctx.Identifier[0]!);
 		}
 		if (ctx.QuotedIdentifier) {
-			const raw = getImage(ctx.QuotedIdentifier[0]);
+			const raw = getImage(ctx.QuotedIdentifier[0]!);
 			return raw.slice(1, -1).replace(/""/g, '"');
 		}
 		// Pseudo-column keywords can appear in paths (parent, child, ascendant, descendant)
 		if (ctx.Parent) {
-			return getImage(ctx.Parent[0]);
+			return getImage(ctx.Parent[0]!);
 		}
 		if (ctx.Child) {
-			return getImage(ctx.Child[0]);
+			return getImage(ctx.Child[0]!);
 		}
 		if (ctx.Ascendant) {
-			return getImage(ctx.Ascendant[0]);
+			return getImage(ctx.Ascendant[0]!);
 		}
 		if (ctx.Descendant) {
-			return getImage(ctx.Descendant[0]);
+			return getImage(ctx.Descendant[0]!);
 		}
-		throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Invalid identifier');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			'Invalid identifier',
+		);
 	}
 
 	identList(ctx: CstContext): string[] {
@@ -1149,8 +1324,12 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	// ============================================================
 
 	mutationPipeline(ctx: CstContext): NqlMutationPipeline {
-		if (!ctx.mutation) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Mutation pipeline missing mutation');
-		const mutation = this.visit(asCstNode(ctx.mutation[0]));
+		if (!ctx.mutation)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Mutation pipeline missing mutation',
+			);
+		const mutation = this.visit(asCstNode(ctx.mutation[0]!));
 		const clauses: NqlMutationClause[] = [];
 
 		if (ctx.mutationClause) {
@@ -1163,107 +1342,134 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	mutationClause(ctx: CstContext): NqlMutationClause {
-		if (ctx.selectClause) return this.visit(asCstNode(ctx.selectClause[0]));
-		if (ctx.bindClause) return this.visit(asCstNode(ctx.bindClause[0]));
-		throw new NqlSemanticException(NqlErrorCodes.SEM_UNREACHABLE, 'Unknown mutation clause');
+		if (ctx.selectClause) return this.visit(asCstNode(ctx.selectClause[0]!));
+		if (ctx.bindClause) return this.visit(asCstNode(ctx.bindClause[0]!));
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_UNREACHABLE,
+			'Unknown mutation clause',
+		);
 	}
 
 	bindClause(ctx: CstContext): NqlMutationClause {
-		if (!ctx.identSegment) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Bind clause missing name');
+		if (!ctx.identSegment)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Bind clause missing name',
+			);
 		return {
 			type: 'bind',
-			name: this.visit(asCstNode(ctx.identSegment[0])),
+			name: this.visit(asCstNode(ctx.identSegment[0]!)),
 		};
 	}
 
 	mutation(ctx: CstContext): NqlMutation {
-		if (ctx.insertFromStmt) return this.visit(asCstNode(ctx.insertFromStmt[0]));
-		if (ctx.insertStmt) return this.visit(asCstNode(ctx.insertStmt[0]));
-		if (ctx.updateStmt) return this.visit(asCstNode(ctx.updateStmt[0]));
-		if (ctx.deleteStmt) return this.visit(asCstNode(ctx.deleteStmt[0]));
-		if (ctx.upsertStmt) return this.visit(asCstNode(ctx.upsertStmt[0]));
-		throw new NqlSemanticException(NqlErrorCodes.SEM_UNREACHABLE, 'Unknown mutation type');
+		if (ctx.insertFromStmt)
+			return this.visit(asCstNode(ctx.insertFromStmt[0]!));
+		if (ctx.insertStmt) return this.visit(asCstNode(ctx.insertStmt[0]!));
+		if (ctx.updateStmt) return this.visit(asCstNode(ctx.updateStmt[0]!));
+		if (ctx.deleteStmt) return this.visit(asCstNode(ctx.deleteStmt[0]!));
+		if (ctx.upsertStmt) return this.visit(asCstNode(ctx.upsertStmt[0]!));
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_UNREACHABLE,
+			'Unknown mutation type',
+		);
 	}
 
 	insertStmt(ctx: CstContext): NqlMutation {
 		if (!ctx.identSegment || !ctx.assignmentList) {
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Insert missing table or assignments');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Insert missing table or assignments',
+			);
 		}
 		return {
 			type: 'insert',
-			table: this.visit(asCstNode(ctx.identSegment[0])),
-			assignments: this.visit(asCstNode(ctx.assignmentList[0])),
+			table: this.visit(asCstNode(ctx.identSegment[0]!)),
+			assignments: this.visit(asCstNode(ctx.assignmentList[0]!)),
 		};
 	}
 
 	insertFromStmt(ctx: CstContext): NqlMutation {
 		if (!ctx.identSegment || ctx.identSegment.length < 2) {
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Insert FROM missing target or source table');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Insert FROM missing target or source table',
+			);
 		}
 		// identSegment[0] = target table, identSegment[1] = source table
-		const target = this.visit(asCstNode(ctx.identSegment[0])) as string;
-		const source = this.visit(asCstNode(ctx.identSegment[1])) as string;
+		const target = this.visit(asCstNode(ctx.identSegment[0]!)) as string;
+		const source = this.visit(asCstNode(ctx.identSegment[1]!)) as string;
 
 		return {
 			type: 'insert_from',
 			table: target,
 			source: source,
 			where: ctx.booleanExpr
-				? this.visit(asCstNode(ctx.booleanExpr[0]))
+				? this.visit(asCstNode(ctx.booleanExpr[0]!))
 				: undefined,
 			limit: ctx.NumberLiteral
-				? parseInt(getImage(ctx.NumberLiteral[0]), 10)
+				? parseInt(getImage(ctx.NumberLiteral[0]!), 10)
 				: undefined,
 		};
 	}
 
 	updateStmt(ctx: CstContext): NqlMutation {
 		if (!ctx.identSegment || !ctx.assignmentList) {
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Update missing table or assignments');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Update missing table or assignments',
+			);
 		}
 		return {
 			type: 'update',
-			table: this.visit(asCstNode(ctx.identSegment[0])),
-			assignments: this.visit(asCstNode(ctx.assignmentList[0])),
+			table: this.visit(asCstNode(ctx.identSegment[0]!)),
+			assignments: this.visit(asCstNode(ctx.assignmentList[0]!)),
 			where: ctx.booleanExpr
-				? this.visit(asCstNode(ctx.booleanExpr[0]))
+				? this.visit(asCstNode(ctx.booleanExpr[0]!))
 				: undefined,
 		};
 	}
 
 	deleteStmt(ctx: CstContext): NqlMutation {
-		if (!ctx.identSegment) throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Delete missing table');
+		if (!ctx.identSegment)
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Delete missing table',
+			);
 		return {
 			type: 'delete',
-			table: this.visit(asCstNode(ctx.identSegment[0])),
+			table: this.visit(asCstNode(ctx.identSegment[0]!)),
 			where: ctx.booleanExpr
-				? this.visit(asCstNode(ctx.booleanExpr[0]))
+				? this.visit(asCstNode(ctx.booleanExpr[0]!))
 				: undefined,
 		};
 	}
 
 	upsertStmt(ctx: CstContext): NqlMutation {
 		if (!ctx.identSegment || !ctx.assignmentList) {
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Upsert missing table or assignments');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Upsert missing table or assignments',
+			);
 		}
 
 		// Conflict columns
 		const conflictColumns: string[] = [];
 		if (ctx.identList) {
-			const cols = this.visit(asCstNode(ctx.identList[0])) as string[];
+			const cols = this.visit(asCstNode(ctx.identList[0]!)) as string[];
 			conflictColumns.push(...cols);
 		} else if (ctx.identSegment.length > 1) {
 			// Single conflict column without parens
-			conflictColumns.push(this.visit(asCstNode(ctx.identSegment[1])));
+			conflictColumns.push(this.visit(asCstNode(ctx.identSegment[1]!)));
 		}
 
 		return {
 			type: 'upsert',
-			table: this.visit(asCstNode(ctx.identSegment[0])),
+			table: this.visit(asCstNode(ctx.identSegment[0]!)),
 			conflictColumns,
-			assignments: this.visit(asCstNode(ctx.assignmentList[0])),
+			assignments: this.visit(asCstNode(ctx.assignmentList[0]!)),
 			where: ctx.booleanExpr
-				? this.visit(asCstNode(ctx.booleanExpr[0]))
+				? this.visit(asCstNode(ctx.booleanExpr[0]!))
 				: undefined,
 		};
 	}
@@ -1280,11 +1486,14 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 	assignment(ctx: CstContext): NqlAssignment {
 		if (!ctx.identSegment || !ctx.expression) {
-			throw new NqlSemanticException(NqlErrorCodes.SEM_INVALID_SYNTAX, 'Assignment missing column or value');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Assignment missing column or value',
+			);
 		}
 		return {
-			column: this.visit(asCstNode(ctx.identSegment[0])),
-			value: this.visit(asCstNode(ctx.expression[0])),
+			column: this.visit(asCstNode(ctx.identSegment[0]!)),
+			value: this.visit(asCstNode(ctx.expression[0]!)),
 		};
 	}
 }

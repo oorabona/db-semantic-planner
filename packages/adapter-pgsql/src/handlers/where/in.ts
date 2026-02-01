@@ -5,12 +5,7 @@
  */
 
 import type { FuncCall, Node } from '@pgsql/types';
-import {
-	binaryExpr,
-	booleanConstNode,
-	columnRef,
-	stringNode,
-} from '../../ast-helpers.js';
+import { binaryExpr, booleanConstNode, stringNode } from '../../ast-helpers.js';
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
@@ -19,14 +14,7 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { COLLECTION_OPERATORS } from '../types.js';
-
-/**
- * Build column reference from decision column
- */
-function buildColumnRef(column: string, ctx: CompilerContext): Node {
-	const alias = ctx.currentAlias ?? ctx.rootTable;
-	return columnRef(column, alias, ctx.schema, ctx.naming);
-}
+import { buildColumnRef } from './utils.js';
 
 /**
  * Create a FuncCall node for ANY($N)

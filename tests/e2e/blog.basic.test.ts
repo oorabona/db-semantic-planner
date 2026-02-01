@@ -16,7 +16,6 @@ import {
 	dropBlogSchema,
 	getTestAdapter,
 	seedBlogData,
-	
 } from './testkit/index.js';
 
 describe('Q5: Blog Scenario', () => {
@@ -45,7 +44,7 @@ describe('Q5: Blog Scenario', () => {
 				.execute();
 
 			expect(authors).toHaveLength(2);
-			const names = authors.map((a: { name: string }) => a.name);
+			const names = authors.map((a: any) => a.name);
 			expect(names).toContain('Alice Johnson');
 			expect(names).toContain('Bob Smith');
 		});

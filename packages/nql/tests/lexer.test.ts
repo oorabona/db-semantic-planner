@@ -79,8 +79,8 @@ describe('NqlLexer', () => {
 			const result = NqlLexer.tokenize('products');
 			expect(result.errors).toHaveLength(0);
 			expect(result.tokens).toHaveLength(1);
-			expect(result.tokens[0].tokenType).toBe(Identifier);
-			expect(result.tokens[0].image).toBe('products');
+			expect(result.tokens[0]!.tokenType).toBe(Identifier);
+			expect(result.tokens[0]!.image).toBe('products');
 		});
 	});
 
@@ -91,21 +91,21 @@ describe('NqlLexer', () => {
 
 			const tokenTypes = result.tokens.map((t) => t.tokenType.name);
 			expect(tokenTypes).toContain('QuotedIdentifier');
-			expect(result.tokens[0].image).toBe('"order"');
+			expect(result.tokens[0]!.image).toBe('"order"');
 		});
 
 		it('tokenizes quoted identifier with special characters', () => {
 			const result = NqlLexer.tokenize('"user-id" = 5');
 			expect(result.errors).toHaveLength(0);
-			expect(result.tokens[0].tokenType).toBe(QuotedIdentifier);
-			expect(result.tokens[0].image).toBe('"user-id"');
+			expect(result.tokens[0]!.tokenType).toBe(QuotedIdentifier);
+			expect(result.tokens[0]!.image).toBe('"user-id"');
 		});
 
 		it('tokenizes escaped quotes in identifier', () => {
 			const result = NqlLexer.tokenize('"col""name"');
 			expect(result.errors).toHaveLength(0);
-			expect(result.tokens[0].tokenType).toBe(QuotedIdentifier);
-			expect(result.tokens[0].image).toBe('"col""name"');
+			expect(result.tokens[0]!.tokenType).toBe(QuotedIdentifier);
+			expect(result.tokens[0]!.image).toBe('"col""name"');
 		});
 	});
 
@@ -154,15 +154,15 @@ describe('NqlLexer', () => {
 		it('tokenizes integer', () => {
 			const result = NqlLexer.tokenize('100');
 			expect(result.errors).toHaveLength(0);
-			expect(result.tokens[0].tokenType).toBe(NumberLiteral);
-			expect(result.tokens[0].image).toBe('100');
+			expect(result.tokens[0]!.tokenType).toBe(NumberLiteral);
+			expect(result.tokens[0]!.image).toBe('100');
 		});
 
 		it('tokenizes decimal', () => {
 			const result = NqlLexer.tokenize('99.99');
 			expect(result.errors).toHaveLength(0);
-			expect(result.tokens[0].tokenType).toBe(NumberLiteral);
-			expect(result.tokens[0].image).toBe('99.99');
+			expect(result.tokens[0]!.tokenType).toBe(NumberLiteral);
+			expect(result.tokens[0]!.image).toBe('99.99');
 		});
 
 		it('tokenizes negative number as unary minus + number', () => {
@@ -171,10 +171,10 @@ describe('NqlLexer', () => {
 			const result = NqlLexer.tokenize('-42');
 			expect(result.errors).toHaveLength(0);
 			expect(result.tokens.length).toBe(2);
-			expect(result.tokens[0].tokenType).toBe(Minus);
-			expect(result.tokens[0].image).toBe('-');
-			expect(result.tokens[1].tokenType).toBe(NumberLiteral);
-			expect(result.tokens[1].image).toBe('42');
+			expect(result.tokens[0]!.tokenType).toBe(Minus);
+			expect(result.tokens[0]!.image).toBe('-');
+			expect(result.tokens[1]!.tokenType).toBe(NumberLiteral);
+			expect(result.tokens[1]!.image).toBe('42');
 		});
 	});
 
@@ -199,16 +199,16 @@ describe('NqlLexer', () => {
 			for (const [keyword, expectedToken] of keywords) {
 				const result = NqlLexer.tokenize(keyword);
 				expect(result.errors).toHaveLength(0);
-				expect(result.tokens[0].tokenType).toBe(expectedToken);
+				expect(result.tokens[0]!.tokenType).toBe(expectedToken);
 			}
 		});
 
 		it('recognizes boolean operators', () => {
 			const result = NqlLexer.tokenize('and or not');
 			expect(result.errors).toHaveLength(0);
-			expect(result.tokens[0].tokenType).toBe(And);
-			expect(result.tokens[1].tokenType).toBe(Or);
-			expect(result.tokens[2].tokenType).toBe(Not);
+			expect(result.tokens[0]!.tokenType).toBe(And);
+			expect(result.tokens[1]!.tokenType).toBe(Or);
+			expect(result.tokens[2]!.tokenType).toBe(Not);
 		});
 
 		it('recognizes comparison keywords', () => {
@@ -223,7 +223,7 @@ describe('NqlLexer', () => {
 			for (const [keyword, expectedToken] of keywords) {
 				const result = NqlLexer.tokenize(keyword);
 				expect(result.errors).toHaveLength(0);
-				expect(result.tokens[0].tokenType).toBe(expectedToken);
+				expect(result.tokens[0]!.tokenType).toBe(expectedToken);
 			}
 		});
 
@@ -238,7 +238,7 @@ describe('NqlLexer', () => {
 			for (const [keyword, expectedToken] of keywords) {
 				const result = NqlLexer.tokenize(keyword);
 				expect(result.errors).toHaveLength(0);
-				expect(result.tokens[0].tokenType).toBe(expectedToken);
+				expect(result.tokens[0]!.tokenType).toBe(expectedToken);
 			}
 		});
 
@@ -256,23 +256,23 @@ describe('NqlLexer', () => {
 			for (const [keyword, expectedToken] of keywords) {
 				const result = NqlLexer.tokenize(keyword);
 				expect(result.errors).toHaveLength(0);
-				expect(result.tokens[0].tokenType).toBe(expectedToken);
+				expect(result.tokens[0]!.tokenType).toBe(expectedToken);
 			}
 		});
 
 		it('recognizes literals', () => {
 			const result = NqlLexer.tokenize('true false null');
 			expect(result.errors).toHaveLength(0);
-			expect(result.tokens[0].tokenType).toBe(True);
-			expect(result.tokens[1].tokenType).toBe(False);
-			expect(result.tokens[2].tokenType).toBe(Null);
+			expect(result.tokens[0]!.tokenType).toBe(True);
+			expect(result.tokens[1]!.tokenType).toBe(False);
+			expect(result.tokens[2]!.tokenType).toBe(Null);
 		});
 
 		it('recognizes sort directions', () => {
 			const result = NqlLexer.tokenize('asc desc');
 			expect(result.errors).toHaveLength(0);
-			expect(result.tokens[0].tokenType).toBe(Asc);
-			expect(result.tokens[1].tokenType).toBe(Desc);
+			expect(result.tokens[0]!.tokenType).toBe(Asc);
+			expect(result.tokens[1]!.tokenType).toBe(Desc);
 		});
 	});
 
@@ -282,14 +282,14 @@ describe('NqlLexer', () => {
 			for (const kw of cases) {
 				const result = NqlLexer.tokenize(kw);
 				expect(result.errors).toHaveLength(0);
-				expect(result.tokens[0].tokenType).toBe(Select);
+				expect(result.tokens[0]!.tokenType).toBe(Select);
 			}
 		});
 
 		it('preserves identifier case', () => {
 			const result = NqlLexer.tokenize('ProductName');
 			expect(result.errors).toHaveLength(0);
-			expect(result.tokens[0].image).toBe('ProductName');
+			expect(result.tokens[0]!.image).toBe('ProductName');
 		});
 	});
 
@@ -311,21 +311,21 @@ describe('NqlLexer', () => {
 		it('tokenizes arithmetic operators', () => {
 			const result = NqlLexer.tokenize('+ - * / %');
 			expect(result.errors).toHaveLength(0);
-			expect(result.tokens[0].tokenType).toBe(Plus);
-			expect(result.tokens[1].tokenType).toBe(Minus);
-			expect(result.tokens[2].tokenType).toBe(Star);
-			expect(result.tokens[3].tokenType).toBe(Slash);
-			expect(result.tokens[4].tokenType).toBe(Percent);
+			expect(result.tokens[0]!.tokenType).toBe(Plus);
+			expect(result.tokens[1]!.tokenType).toBe(Minus);
+			expect(result.tokens[2]!.tokenType).toBe(Star);
+			expect(result.tokens[3]!.tokenType).toBe(Slash);
+			expect(result.tokens[4]!.tokenType).toBe(Percent);
 		});
 
 		it('tokenizes punctuation', () => {
 			const result = NqlLexer.tokenize('( ) , . |');
 			expect(result.errors).toHaveLength(0);
-			expect(result.tokens[0].tokenType).toBe(LParen);
-			expect(result.tokens[1].tokenType).toBe(RParen);
-			expect(result.tokens[2].tokenType).toBe(Comma);
-			expect(result.tokens[3].tokenType).toBe(Dot);
-			expect(result.tokens[4].tokenType).toBe(Pipe);
+			expect(result.tokens[0]!.tokenType).toBe(LParen);
+			expect(result.tokens[1]!.tokenType).toBe(RParen);
+			expect(result.tokens[2]!.tokenType).toBe(Comma);
+			expect(result.tokens[3]!.tokenType).toBe(Dot);
+			expect(result.tokens[4]!.tokenType).toBe(Pipe);
 		});
 	});
 
@@ -397,7 +397,7 @@ describe('NqlLexer', () => {
 			const query = `let active_users = users | where active = true`;
 			const result = NqlLexer.tokenize(query);
 			expect(result.errors).toHaveLength(0);
-			expect(result.tokens[0].tokenType).toBe(Let);
+			expect(result.tokens[0]!.tokenType).toBe(Let);
 		});
 
 		it('tokenizes mutation with bind', () => {
@@ -415,12 +415,12 @@ describe('NqlLexer', () => {
 			const result = NqlLexer.tokenize(query);
 			expect(result.errors).toHaveLength(0);
 			const tokens = result.tokens;
-			expect(tokens[0].tokenType).toBe(Case);
-			expect(tokens[1].tokenType).toBe(When);
-			expect(tokens[2].tokenType).toBe(Identifier);
-			expect(tokens[3].tokenType).toBe(Then);
-			expect(tokens[4].tokenType).toBe(Identifier);
-			expect(tokens[5].tokenType).toBe(End);
+			expect(tokens[0]!.tokenType).toBe(Case);
+			expect(tokens[1]!.tokenType).toBe(When);
+			expect(tokens[2]!.tokenType).toBe(Identifier);
+			expect(tokens[3]!.tokenType).toBe(Then);
+			expect(tokens[4]!.tokenType).toBe(Identifier);
+			expect(tokens[5]!.tokenType).toBe(End);
 		});
 
 		it('tokenizes CASE with ELSE', () => {
@@ -439,8 +439,8 @@ describe('NqlLexer', () => {
 			const query = `CASE WHEN price > 100 THEN 'high' ELSE 'low' END`;
 			const result = NqlLexer.tokenize(query);
 			expect(result.errors).toHaveLength(0);
-			expect(result.tokens[0].tokenType).toBe(Case);
-			expect(result.tokens[1].tokenType).toBe(When);
+			expect(result.tokens[0]!.tokenType).toBe(Case);
+			expect(result.tokens[1]!.tokenType).toBe(When);
 		});
 
 		it('tokenizes CASE with multiple WHEN clauses', () => {

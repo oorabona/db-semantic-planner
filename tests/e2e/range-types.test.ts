@@ -24,7 +24,6 @@ import {
 	schedulingModel,
 	schedulingTestData,
 	seedSchedulingData,
-	
 } from './testkit/index.js';
 
 describe('PostgreSQL Range Types', () => {
@@ -61,7 +60,7 @@ describe('PostgreSQL Range Types', () => {
 
 			// Should find "Team offsite" (Jan 15-20) and "Monthly board meetings" (Jan 1-31)
 			expect(bookings.length).toBeGreaterThanOrEqual(2);
-			const purposes = bookings.map((b: { purpose: string }) => b.purpose);
+			const purposes = bookings.map((b) => b.purpose);
 			expect(purposes).toContain('Team offsite');
 			expect(purposes).toContain('Monthly board meetings');
 		});
@@ -84,7 +83,7 @@ describe('PostgreSQL Range Types', () => {
 				.execute();
 
 			// Should find "Tech Talk" (11:00-12:00)
-			const titles = events.map((e: { title: string }) => e.title);
+			const titles = events.map((e) => e.title);
 			expect(titles).toContain('Tech Talk');
 		});
 
@@ -124,7 +123,7 @@ describe('PostgreSQL Range Types', () => {
 				.execute();
 
 			// Should find "Team offsite" (Jan 15-20) and "Monthly board meetings" (Jan 1-31)
-			const purposes = bookings.map((b: { purpose: string }) => b.purpose);
+			const purposes = bookings.map((b) => b.purpose);
 			expect(purposes).toContain('Team offsite');
 			expect(purposes).toContain('Monthly board meetings');
 		});
@@ -142,7 +141,7 @@ describe('PostgreSQL Range Types', () => {
 				.execute();
 
 			expect(tiers).toHaveLength(1);
-			expect(tiers[0].unitPrice).toBe(
+			expect(tiers[0]!.unitPrice).toBe(
 				schedulingTestData.priceTiers.tierForQty25.unitPrice,
 			);
 		});
@@ -160,7 +159,7 @@ describe('PostgreSQL Range Types', () => {
 				.execute();
 
 			expect(tiers).toHaveLength(1);
-			expect(tiers[0].unitPrice).toBe('69.99'); // Best bulk price
+			expect(tiers[0]!.unitPrice).toBe('69.99'); // Best bulk price
 		});
 	});
 
@@ -206,7 +205,7 @@ describe('PostgreSQL Range Types', () => {
 				.execute();
 
 			// Should find all Jan 15 events
-			const titles = events.map((e: { title: string }) => e.title);
+			const titles = events.map((e) => e.title);
 			for (const expected of schedulingTestData.events.onJan15) {
 				expect(titles).toContain(expected);
 			}
@@ -250,7 +249,7 @@ describe('PostgreSQL Range Types', () => {
 				.execute();
 
 			expect(tiers).toHaveLength(1);
-			expect(tiers[0].unitPrice).toBe('69.99');
+			expect(tiers[0]!.unitPrice).toBe('69.99');
 		});
 
 		it('should return empty for non-overlapping range', async () => {

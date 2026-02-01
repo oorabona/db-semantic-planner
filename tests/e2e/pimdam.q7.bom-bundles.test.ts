@@ -26,7 +26,6 @@ import {
 	getTestPool,
 	pimdamExtendedModel,
 	seedExtendedPimdam,
-	
 } from './testkit/index.js';
 import { sql as kyselySql } from './testkit/sql.js';
 
@@ -72,9 +71,9 @@ describe('Q7: BOM / Bundles', () => {
 				result.rows as { bundle_sku: string; total_price_cents: string }[]
 			)[0];
 			expect(bundle).toBeDefined();
-			expect(bundle.bundle_sku).toBe('BUNDLE-001');
+			expect(bundle!.bundle_sku).toBe('BUNDLE-001');
 			// 2*999 + 1*499 = 2497
-			expect(Number(bundle.total_price_cents)).toBe(2497);
+			expect(Number(bundle!.total_price_cents)).toBe(2497);
 		});
 
 		it('should list bundle components with quantities', async () => {
@@ -97,10 +96,10 @@ describe('Q7: BOM / Bundles', () => {
 				quantity: number;
 			}[];
 			expect(components).toHaveLength(2);
-			expect(components[0].component_sku).toBe('COMPONENT-A');
-			expect(components[0].quantity).toBe(2);
-			expect(components[1].component_sku).toBe('COMPONENT-B');
-			expect(components[1].quantity).toBe(1);
+			expect(components[0]!.component_sku).toBe('COMPONENT-A');
+			expect(components[0]!.quantity).toBe(2);
+			expect(components[1]!.component_sku).toBe('COMPONENT-B');
+			expect(components[1]!.quantity).toBe(1);
 		});
 	});
 

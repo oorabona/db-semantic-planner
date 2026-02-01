@@ -152,7 +152,7 @@ describe('CamelCaseNamingPlugin', () => {
 
 describe('getNamingPlugin', () => {
 	it('returns identity plugin', () => {
-		const plugin = getNamingPlugin('identity');
+		const plugin = getNamingPlugin('preserve');
 		expect(plugin).toBe(identityNaming);
 		expect(plugin.toDatabase('createdAt')).toBe('createdAt');
 	});

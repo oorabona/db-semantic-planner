@@ -395,7 +395,7 @@ describe('E2E-004: Strategy Matrix', () => {
 				expect(authorsWithPublished).toHaveLength(2);
 
 				// No duplicates - each author appears once
-				const ids = authorsWithPublished.map((a: { id: number }) => a.id);
+				const ids = authorsWithPublished.map((a: any) => a.id);
 				const uniqueIds = [...new Set(ids)];
 				expect(uniqueIds.length).toBe(ids.length);
 			});
