@@ -82,10 +82,14 @@ export interface PlanDecision {
 	// Column data type (for range type casting, e.g. 'daterange', 'int4range')
 	readonly dataType?: string;
 	// JSON aggregation (include strategy: 'json_agg')
+	readonly sourceTable?: string;
 	readonly relationName?: string;
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
 	readonly foreignKey?: string;
 	readonly parentKey?: string;
+	// Nested json_agg children (for deep relation traversal)
+	readonly children?: readonly PlanDecision[];
+	readonly intentPath?: string;
 	// Filter/include strategy choice from planner ('join' | 'exists' | 'json_agg')
 	readonly choice?: string;
 }
@@ -147,6 +151,91 @@ export class PlanCompiler {
 			schema: this.schema,
 			rootTable: this.currentRootTable,
 		};
+	}
+
+	/**
+	 * Recursively compile a selectJsonAgg decision into a json_agg subquery node.
+	 * For nested includes, produces nested json_agg with jsonb_build_object merging.
+	 * Each depth level uses a unique alias (__t0__, __t1__, etc.) to avoid conflicts.
+	 */
+	private compileJsonAggDecision(
+		decision: PlanDecision,
+		parentAlias: string,
+		depth: number,
+	): Node {
+		const innerAlias = depth === 0 ? '__t__' : `__t${depth}__`;
+
+		// Build correlation WHERE based on relation type
+		let whereExpr: Node;
+		if (decision.relationType === 'belongsTo') {
+			whereExpr = jsonAggCorrelation(
+				parentAlias,
+				decision.foreignKey ?? 'id',
+				innerAlias,
+				decision.parentKey ?? 'id',
+				this.naming,
+			);
+		} else {
+			whereExpr = jsonAggCorrelation(
+				parentAlias,
+				decision.parentKey ?? 'id',
+				innerAlias,
+				decision.foreignKey ?? 'id',
+				this.naming,
+			);
+		}
+
+		// Merge filter conditions if present
+		if (
+			decision.conditions &&
+			(decision.conditions as PlanDecision[]).length > 0
+		) {
+			const condNodes = (decision.conditions as PlanDecision[]).map((c) =>
+				compileCondition(
+					rewriteConditionTable(c, innerAlias),
+					this.condCtx(),
+					this.state,
+				),
+			);
+			whereExpr = andExpr(whereExpr, ...condNodes);
+		}
+
+		// Recursively compile children
+		let childNodes: { key: string; node: Node }[] | undefined;
+		if (decision.children && decision.children.length > 0) {
+			childNodes = [];
+			for (const child of decision.children) {
+				if (child.relationName && child.targetTable && child.relationType) {
+					// Recursively compile child — parent alias is this level's inner alias
+					const childSubquery = this.compileJsonAggDecision(
+						child,
+						innerAlias,
+						depth + 1,
+					);
+					// Extract the COALESCE node from the ResTarget wrapper
+					const resTarget = childSubquery as { ResTarget?: { val: Node } };
+					if (resTarget.ResTarget?.val) {
+						childNodes.push({
+							key: child.relationName,
+							node: resTarget.ResTarget.val,
+						});
+					}
+				}
+			}
+			if (childNodes.length === 0) childNodes = undefined;
+		}
+
+		return jsonAggSubquery(
+			decision.targetTable!,
+			whereExpr,
+			`${decision.relationName}_json`,
+			this.schema,
+			this.naming,
+			{
+				...(childNodes && { childNodes }),
+				innerAlias,
+			},
+		);
 	}
 
 	/**
@@ -325,66 +414,18 @@ export class PlanCompiler {
 				}
 
 				case 'selectJsonAgg': {
-					// json_agg include: COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM target AS __t__ WHERE ...), '[]'::json) AS "relation_json"
+					// json_agg include with recursive nesting support
 					if (
 						decision.relationName &&
 						decision.targetTable &&
 						decision.relationType
 					) {
-						const rootAlias = plan.rootTable;
-
-						// Build correlation WHERE based on relation type
-						// belongsTo: target.pk = parent.fk  (e.g., authors.id = posts.author_id)
-						// hasMany/hasOne: target.fk = parent.pk  (e.g., posts.author_id = authors.id)
-						let whereExpr: Node;
-						if (decision.relationType === 'belongsTo') {
-							// For belongsTo, the FK is in the source table, pointing to target's PK
-							whereExpr = jsonAggCorrelation(
-								rootAlias,
-								decision.foreignKey ?? 'id', // FK in parent (source)
-								'__t__',
-								decision.parentKey ?? 'id', // PK in target
-								this.naming,
-							);
-						} else {
-							// For hasMany/hasOne, the FK is in target table, pointing to source's PK
-							whereExpr = jsonAggCorrelation(
-								rootAlias,
-								decision.parentKey ?? 'id', // PK in parent (source)
-								'__t__',
-								decision.foreignKey ?? 'id', // FK in target
-								this.naming,
-							);
-						}
-
-						// Merge filter conditions if present (relation filter propagation)
-						// Rewrite table references to __t__ (json_agg inner alias)
-						if (
-							decision.conditions &&
-							(decision.conditions as PlanDecision[]).length > 0
-						) {
-							const condNodes = (decision.conditions as PlanDecision[]).map(
-								(c) =>
-									compileCondition(
-										rewriteConditionTable(c, '__t__'),
-										this.condCtx(),
-										this.state,
-									),
-							);
-							whereExpr = andExpr(whereExpr, ...condNodes);
-						}
-
-						// Build the json_agg subquery SELECT
-						// Alias must use {relation}_json pattern for hydration-utils.ts detection
-						targetList.push(
-							jsonAggSubquery(
-								decision.targetTable,
-								whereExpr,
-								`${decision.relationName}_json`,
-								this.schema,
-								this.naming,
-							),
+						const node = this.compileJsonAggDecision(
+							decision,
+							plan.rootTable,
+							0,
 						);
+						targetList.push(node);
 					}
 					break;
 				}

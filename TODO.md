@@ -74,14 +74,10 @@
 
 ## Backlog
 
-### [Core] BUG: Deep relation traversal (4+ levels) returns 0 rows in IAM example — Priority: HIGH
-- Query: `users | where active = true | select *, userRoles.roleId, userRoles.role.rolePermissions.permission.*`
-- Expected: 5 rows (active users), Actual: 0 rows
-- SQL produces incorrect correlated subqueries (correlates to users.id/users.role_id instead of chaining through intermediate tables)
-- Now tested with sql.equals (full SQL comparison) — db.rows.equals: 0 reflects the bug
-- Pre-existing bug (not introduced by DRY refactoring)
-- Fails in `tests/e2e/example-assertions.test.ts` → iam → query 27 (121/122 pass)
-- Likely cause: include strategy doesn't propagate schema context or produces incorrect JOINs at depth 4
+### [Core] ✅ BUG: Deep relation traversal (4+ levels) returns 0 rows in IAM example — FIXED (2026-02-01)
+- Root cause: extractJsonAggDecisions flattened nested includes into siblings; compiler correlated all to root table
+- Fix: Tree-structured decisions (intentPath-based) + recursive compileJsonAggDecision with nested json_agg subqueries
+- Query 27 now returns 5 rows correctly with depth-based aliases (__t__, __t1__, __t2__, __t3__)
 
 ### [Infra] pnpm test at root should run ALL package tests — Priority: MEDIUM
 - Currently: `pnpm test` root runs only ~295 tests (some workspaces)

@@ -355,7 +355,38 @@ export function extractExistsDecisions(
 }
 
 /**
+ * Convert a planner include-strategy decision to a selectJsonAgg decision.
+ */
+function toJsonAggDecision(
+	d: PlanReport['decisions'][number],
+): PlanDecision | undefined {
+	const context = d.context;
+	const relationName = resolveIncludeAlias(context);
+	if (!context.target || !relationName) return undefined;
+
+	const foreignKey = deriveForeignKey(context) ?? 'id';
+	const relationType = context.relationType as
+		| 'belongsTo'
+		| 'hasMany'
+		| 'hasOne'
+		| undefined;
+
+	return {
+		type: 'selectJsonAgg',
+		relationName,
+		targetTable: context.target,
+		...(context.sourceTable && { sourceTable: context.sourceTable }),
+		...(relationType && { relationType }),
+		foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
+		parentKey: 'id',
+		...(context.intentPath && { intentPath: context.intentPath }),
+	};
+}
+
+/**
  * Extract JSON_AGG include decisions from include-strategy plan decisions.
+ * Builds a tree structure for nested includes so the compiler can generate
+ * nested json_agg subqueries (e.g., users → userRoles → role → ...).
  */
 export function extractJsonAggDecisions(
 	plan: PlanReport,
@@ -369,34 +400,56 @@ export function extractJsonAggDecisions(
 		return [];
 	}
 
-	// Convert to selectJsonAgg decisions for the compiler
-	const results: PlanDecision[] = [];
-
+	// Convert all to flat decisions with intentPath
+	const allDecisions: (PlanDecision & { intentPath?: string })[] = [];
 	for (const d of jsonAggIncludeDecisions) {
-		const context = d.context;
-		// Skip if target table or relation name is not defined
-		// Convention: relation ?? includeAlias (relation = canonical name from planner)
-		const relationName = resolveIncludeAlias(context);
-		if (!context.target || !relationName) continue;
-
-		const foreignKey = deriveForeignKey(context) ?? 'id';
-		const relationType = context.relationType as
-			| 'belongsTo'
-			| 'hasMany'
-			| 'hasOne'
-			| undefined;
-
-		results.push({
-			type: 'selectJsonAgg',
-			relationName,
-			targetTable: context.target,
-			...(relationType && { relationType }),
-			foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
-			parentKey: 'id',
-		});
+		const decision = toJsonAggDecision(d);
+		if (decision) allDecisions.push(decision);
 	}
 
-	return results;
+	// Build tree: group children under their parent using intentPath
+	// Root level: intentPath matches /^include\[\d+\]$/
+	// Nested: intentPath matches /^include\[\d+\](\.include\[\d+\])+$/
+	const decisionsByPath = new Map<string, PlanDecision>();
+	for (const d of allDecisions) {
+		if (d.intentPath) decisionsByPath.set(d.intentPath, d);
+	}
+
+	// Find parent intentPath by removing the last .include[N] segment
+	function parentPath(path: string): string | undefined {
+		const lastDot = path.lastIndexOf('.include[');
+		return lastDot > 0 ? path.substring(0, lastDot) : undefined;
+	}
+
+	// Collect children for each decision
+	const childrenMap = new Map<string, PlanDecision[]>();
+	const rootDecisions: PlanDecision[] = [];
+
+	for (const d of allDecisions) {
+		const pp = d.intentPath ? parentPath(d.intentPath) : undefined;
+		if (pp && decisionsByPath.has(pp)) {
+			// This is a nested include — attach to parent
+			const siblings = childrenMap.get(pp) ?? [];
+			siblings.push(d);
+			childrenMap.set(pp, siblings);
+		} else {
+			// Root-level include
+			rootDecisions.push(d);
+		}
+	}
+
+	// Recursively attach children to build tree
+	function attachChildren(decision: PlanDecision): PlanDecision {
+		const path = decision.intentPath;
+		const children = path ? childrenMap.get(path) : undefined;
+		if (!children || children.length === 0) return decision;
+		return {
+			...decision,
+			children: children.map(attachChildren),
+		};
+	}
+
+	return rootDecisions.map(attachChildren);
 }
 
 /**
