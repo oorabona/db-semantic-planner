@@ -80,4 +80,8 @@
 
 ## Completed
 
-(Archived → docs/historic/done-2026-02.md)
+- [x] ✅ [Adapter] PGSQL-008/009: Extract buildColumnRef/buildParamRef into where/utils.ts (2026-02-01)
+- [x] ✅ [Core] CORE-010: Extract getColumnName() into column-utils.ts (2026-02-01)
+- [x] ✅ [Docs] Fix 4 Kysely references in DOCUMENTATION_INDEX.md (2026-02-01)
+
+(Earlier items archived → docs/historic/done-2026-02.md)
