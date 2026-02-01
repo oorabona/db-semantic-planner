@@ -40,7 +40,7 @@ params.length: 0
 # ─────────────────────────────────────────
 --- query: 4
 success: true
-sql.equals: SELECT employees.name FROM employees
+sql.equals: WITH management_chain_cte AS (SELECT employees_inner_0.* FROM employees AS employees_inner_0) SELECT employees.name FROM employees LEFT JOIN management_chain_cte AS management_chain_ref_0 ON employees.id = management_chain_ref_0.manager_id
 params.equals: []
 
 # ─────────────────────────────────────────
@@ -49,7 +49,7 @@ params.equals: []
 # ─────────────────────────────────────────
 --- query: 5
 success: true
-sql.equals: SELECT employees.name FROM employees
+sql.equals: WITH management_chain_cte AS (SELECT employees_inner_0.* FROM employees AS employees_inner_0) SELECT employees.name FROM employees LEFT JOIN management_chain_cte AS management_chain_ref_0 ON employees.id = management_chain_ref_0.manager_id
 params.equals: []
 
 # ─────────────────────────────────────────
@@ -58,7 +58,7 @@ params.equals: []
 # ─────────────────────────────────────────
 --- query: 6
 success: true
-sql.equals: SELECT employees.name FROM employees
+sql.equals: WITH management_chain_cte AS (SELECT employees_inner_0.* FROM employees AS employees_inner_0) SELECT employees.name FROM employees LEFT JOIN management_chain_cte AS management_chain_ref_0 ON employees.id = management_chain_ref_0.manager_id
 params.equals: []
 
 # ─────────────────────────────────────────
@@ -67,7 +67,7 @@ params.equals: []
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.equals: SELECT employees.name FROM employees
+sql.equals: WITH all_reports_cte AS (SELECT employees_inner_0.* FROM employees AS employees_inner_0) SELECT employees.name FROM employees LEFT JOIN all_reports_cte AS all_reports_ref_0 ON employees.id = all_reports_ref_0.manager_id
 params.equals: []
 
 # ─────────────────────────────────────────
@@ -76,5 +76,5 @@ params.equals: []
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.equals: SELECT employees.name FROM employees
+sql.equals: WITH all_reports_cte AS (SELECT employees_inner_0.* FROM employees AS employees_inner_0) SELECT employees.name FROM employees LEFT JOIN all_reports_cte AS all_reports_ref_0 ON employees.id = all_reports_ref_0.manager_id
 params.equals: []

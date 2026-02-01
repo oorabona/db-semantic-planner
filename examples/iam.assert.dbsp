@@ -252,9 +252,8 @@ db.rows.equals: 5
 # Same as query 27 but with | flat — forces JOIN strategy instead of nested json_agg
 --- query: 28
 success: true
-# NOTE: | flat currently produces SELECT users.* without any includes.
-# Root cause: planner emits include-strategy choice='lateral', but compiler
-# only handles 'json_agg' and 'join'. See TODO.md for tracking.
+sql.equals: SELECT users.* FROM iam_example.users LEFT JOIN LATERAL ( SELECT user_roles_inner_0.* FROM iam_example.user_roles AS user_roles_inner_0 WHERE user_roles_inner_0.user_id = users.id ) AS user_roles_lat_0 ON true LEFT JOIN LATERAL ( SELECT roles_inner_1.* FROM iam_example.roles AS roles_inner_1 WHERE roles_inner_1.id = user_roles_lat_0.role_id ) AS roles_lat_1 ON true LEFT JOIN LATERAL ( SELECT role_permissions_inner_2.* FROM iam_example.role_permissions AS role_permissions_inner_2 WHERE role_permissions_inner_2.role_id = roles_lat_1.id ) AS role_permissions_lat_2 ON true LEFT JOIN LATERAL ( SELECT permissions_inner_3.* FROM iam_example.permissions AS permissions_inner_3 WHERE permissions_inner_3.id = role_permissions_lat_2.permission_id ) AS permissions_lat_3 ON true WHERE users.active = $1
+params.equals: [true]
 
 # ─────────────────────────────────────────
 # Query 29: auditLog | where action = 'login' | select userId, resource, timestamp

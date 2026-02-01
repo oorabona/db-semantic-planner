@@ -27,9 +27,7 @@ function makePlanReport(
 	} as unknown as PlanReport;
 }
 
-function makeIncludeDecision(
-	context: Record<string, unknown>,
-): Decision {
+function makeIncludeDecision(context: Record<string, unknown>): Decision {
 	return {
 		id: 'test',
 		type: 'include-strategy',

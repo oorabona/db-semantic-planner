@@ -547,6 +547,8 @@ export interface SelectOptions {
 	limit?: Node;
 	offset?: Node;
 	distinct?: boolean | Node[];
+	/** WITH clause (e.g., CTEs) — { ctes: Node[], recursive?: boolean } */
+	withClause?: { ctes: Node[]; recursive?: boolean };
 }
 
 /**
@@ -589,6 +591,13 @@ export function selectStmt(options: SelectOptions): Node {
 		stmt.distinctClause = [];
 	} else if (Array.isArray(options.distinct) && options.distinct.length > 0) {
 		stmt.distinctClause = options.distinct;
+	}
+
+	if (options.withClause && options.withClause.ctes.length > 0) {
+		stmt.withClause = {
+			ctes: options.withClause.ctes,
+			recursive: options.withClause.recursive ?? false,
+		};
 	}
 
 	return { SelectStmt: stmt };
