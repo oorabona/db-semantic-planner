@@ -1,3 +1,4 @@
+/* biome-ignore-all lint/style/noNonNullAssertion: Chevrotain CST access requires non-null assertions on ctx.rule[0] patterns */
 /**
  * NQL CST-to-AST Visitor
  *

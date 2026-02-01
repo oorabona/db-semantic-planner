@@ -54,11 +54,11 @@
 - #29 CLI assertion factory (24 functions, 80% boilerplate) — M
 - #33 adapter-pgsql test ratio 0.36 → 0.50 — L
 
-### Dead Code Cleanup (4 items, ~2h)
-- #24 Remove `NqlLimitError`, `NqlWarning` unused interfaces — S
-- #25 Remove `_getRelationPath()` dead private function — S
-- #26 Remove `@deprecated namingConvention` property — S
-- #27 Remove `validate()` stub or implement properly — S
+### ~Dead Code Cleanup (4 items, ~2h)~ — 3/4 DONE
+- ~#24 Remove `NqlLimitError` unused interface~ — ✅ DONE (2026-02-01) (NqlWarning is used)
+- ~#25 Remove `_getRelationPath()` + `hasRelationPath()` dead functions~ — ✅ DONE (2026-02-01)
+- #26 Remove `@deprecated namingConvention` property — **Deferred** (deeply used, requires full migration to dbCasing)
+- ~#27 Remove `validate()` stub~ — ✅ DONE (2026-02-01)
 
 ### SRP / God Classes (4 items, ~40h)
 - #16 NqlCstVisitor 1,303 LOC — extract category helpers — M

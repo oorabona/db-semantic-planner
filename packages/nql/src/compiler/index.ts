@@ -1,3 +1,4 @@
+/* biome-ignore-all lint/style/noNonNullAssertion: NQL AST node access requires non-null assertions on validated parse tree */
 /**
  * NQL Compiler
  *
