@@ -38,9 +38,9 @@ export function normalizeSQL(sql: string): string {
 	return sql
 		.toLowerCase()
 		.replace(/\s+/g, ' ')
+		.replace(/\s*,\s*/g, ', ')
 		.replace(/\(\s+/g, '(')
 		.replace(/\s+\)/g, ')')
-		.replace(/,\s+/g, ', ')
 		.replace(/;\s*$/, '')
 		.trim();
 }

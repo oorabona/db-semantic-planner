@@ -8,23 +8,13 @@
  * Extracted from assertion-runner.ts for SRP (Phase 5.6).
  */
 
+import { normalizeSQL } from '@dbsp/adapter-pgsql';
 import type { AssertionType, TableAssertionData } from './assertion-parser.js';
 import type { AssertionOutcome } from './assertion-runner.js';
 import type { BatchResult } from './batch.js';
 
-/**
- * Normalize SQL for comparison: collapse whitespace, lowercase, trim.
- * Canonical implementation in @dbsp/adapter-pgsql ast-helpers.ts.
- */
-export function normalizeSQL(sql: string): string {
-	return sql
-		.replace(/\s+/g, ' ')
-		.replace(/\s*,\s*/g, ', ')
-		.replace(/\s*\(\s*/g, '(')
-		.replace(/\s*\)\s*/g, ')')
-		.trim()
-		.toLowerCase();
-}
+// Re-export canonical normalizeSQL from adapter (DRY consolidation)
+export { normalizeSQL };
 
 // ============================================================
 // Helpers

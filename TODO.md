@@ -2,92 +2,102 @@
 
 ## In Progress
 
-(None - all active work completed)
-
----
-
-## Pending
-
 (None)
 
 ---
 
-## Completed
+## Pending — HIGH Priority
 
-- [x] ✅ [Adapter] HANDLER-WIRE: Wire include strategy handlers into compiler (2026-02-01)
-  - Unified `compileIncludeViaHandler` bridge with explicit `mapToHandlerDecision` mapper
-  - json_agg (nested), join, lateral (deep flat nesting), CTE all wired
-  - Deep `| flat` nesting: recursive `compileLateralCascade` produces cascaded LEFT JOIN LATERAL
-  - 10 lateral handler tests, 2222 total tests passing
+> Audit items with Score ≥ 3.0 — details in `docs/audit/BACKLOG.md`
 
-(Archived → docs/historic/done-2026-02.md)
+### ~[Security] #2: Fix 8 dependency vulnerabilities~ — ✅ Already clean (pnpm audit: 0 vulns)
+
+### ~[NQL] #9: Remove `format()` stub~ — ✅ DONE (2026-02-01)
+
+### ~[Adapter+CLI] #7: Consolidate `normalizeSQL()`~ — ✅ DONE (2026-02-01)
+
+### [MCP] #6: Replace MCP server placeholder test — Score 4.5 — Effort: M
+- Only 1 placeholder test exists for the entire MCP server package
+
+### [Core] #5: Comparison filter factory — Score 3.0 — Effort: S
+- eq/neq/gt/gte/lt/lte share 120 LOC of boilerplate; extract single factory function
+
+---
+
+## Pending — MEDIUM Priority
+
+> Audit items Score 2.0–2.9 + existing feature requests
+
+### [NQL] JSONB Operators Support — Effort: M (~4h)
+- Operators: `->`, `->>`, `@>`, `<@`, `?`, `#>`, `#>>`
+- Workaround: `raw()` escape hatch
+
+### [Adapter] #8: Extract `buildReturningList()` helper — Score 2.0 — Effort: S
+### ~[Core] #28: Remove duplicate `isRecursiveIncludeOptions()`~ — ✅ Already clean (1 definition only)
+### [Adapter] #11: Move AST helpers to internal export path — Score 2.0 — Effort: M
+### [Adapter] #12: Move handler registry to internal export path — Score 2.0 — Effort: M
+### [Docs] DOCS-001: User documentation (Getting Started, API Guide)
+### [Docs] DOCS-002: Migration guides (from-prisma, from-drizzle, from-kysely)
+### [Docs] DOCS-003: Pattern guides (multi-tenant, recursive queries, window functions)
+
+---
+
+## Pending — LOW Priority
+
+> Audit P2 items (Score < 2.0) — grouped by axis
+
+### DRY Consolidation (7 items, ~20h)
+- #13 Mutation builder boilerplate (56 identical field assignments) — M
+- #14 Column target building duplicate (join/lateral) — S
+- #15 JSON_AGG correlation FK direction duplicate — M
+- #22 Clone methods: manual 15-field copying (3 classes) — M
+- #23 NQL context validation: 61 identical patterns — S
+- #29 CLI assertion factory (24 functions, 80% boilerplate) — M
+- #33 adapter-pgsql test ratio 0.36 → 0.50 — L
+
+### Dead Code Cleanup (4 items, ~2h)
+- #24 Remove `NqlLimitError`, `NqlWarning` unused interfaces — S
+- #25 Remove `_getRelationPath()` dead private function — S
+- #26 Remove `@deprecated namingConvention` property — S
+- #27 Remove `validate()` stub or implement properly — S
+
+### SRP / God Classes (4 items, ~40h)
+- #16 NqlCstVisitor 1,303 LOC — extract category helpers — M
+- #17 NQL compiler 1,142 LOC — extract clause compilers — M
+- #18 PgsqlAdapter 1,592 LOC — extract M2M, introspection — L
+- #21 `compileSubqueryIncludeManyToMany` 550+ LOC — extract to module — M
+
+### Other
+- #32 `any` types in result-hydrator.ts (7 occurrences) — S
+- #35 Raw SQL escape hatch: add centralized audit trail — S
 
 ---
 
 ## Blocked / Deferred
 
 ### [Adapter] Migration generation (diff-based ALTER statements) — Deferred
-- **Goal:** Generate ALTER TABLE statements from schema diffs
-- **Depends on:** DDL generator maturity
+- Depends on: DDL generator maturity
 
-### [Adapter] AST object pooling — Deferred
-- **Goal:** Reduce GC pressure on high-throughput query compilation
-- **Condition:** Only if perf issue measured via benchmarks
-
-### [Adapter] Async deparse optimization — Deferred
-- **Goal:** Non-blocking SQL deparsing for streaming scenarios
-- **Condition:** Only if perf issue measured via benchmarks
-
-### [NQL] JSONB Operators Support — Effort: M (~4h) — Priority: MEDIUM
-- **Required operators:** `->`, `->>`, `@>`, `<@`, `?`, `#>`, `#>>`
-- **Implementation:** Add lexer tokens, parser grammar, AST types, compiler
-- **Workaround:** Use `raw()` escape hatch until implemented
-
+### [Adapter] AST object pooling — Deferred (perf-gated)
+### [Adapter] Async deparse optimization — Deferred (perf-gated)
 ### [NQL] CASE Expression Enhancements — Priority: LOW
-- **Deferred:** Simple CASE, nested CASE, column/function in THEN/ELSE, CASE in WHERE
-
 ### [CLI] .load <table> <file> — Bulk CSV/JSON import — Priority: LOW
-
 ### [CLI] RETURNING clause support — Priority: LOW
-
 ### [CLI] Transaction support (BEGIN/COMMIT/ROLLBACK) — Priority: LOW
-
 ### [CLI] Set operations (UNION, INTERSECT, EXCEPT) — Priority: LOW
-
-### [Docs] DOCS-001: User documentation (Getting Started, API Guide) — Priority: MEDIUM
-
-### [Docs] DOCS-002: Migration guides (from-prisma, from-drizzle, from-kysely) — Priority: MEDIUM
-
-### [Docs] DOCS-003: Pattern guides (multi-tenant, recursive queries, window functions) — Priority: MEDIUM
-
 ### [Core] P3-B: FTSIntent (PostgreSQL Full-Text Search) — Priority: LOW
-
 ### [Adapter] P3-B: FTS Compiler (PostgreSQL) — Priority: LOW
-
 ### [Adapter] P3-D: FOR UPDATE SKIP LOCKED (Job Queue pattern) — Priority: LOW
-
 ### [Adapter] P3-E: Multi-dialect FTS (MySQL, SQLite) — Priority: LOW
+### [Core] Future Native Adapters (adapter-mysql, adapter-sqlite)
+### [Architecture] DX-032: Conformance Test Framework — Effort: M (~12h) — Depends on: multi-adapter
 
-### [Core] Future Native Adapters
-- [ ] `adapter-mysql` — MySQL native (mysql2)
-- [ ] `adapter-sqlite` — SQLite native (better-sqlite3)
-
-### [Architecture] DX-032: Conformance Test Framework — Priority: HIGH — Effort: M (~12h)
-- **Depends on:** Multi-adapter support
-- **Goal:** DRY framework for multi-adapter testing
-
----
-
-## Backlog
-
-(Archived → docs/historic/done-2026-02.md)
-
-### [Adapter] CTE include handler bridge incomplete — Priority: MEDIUM
-- [x] ✅ RESOLVED (2026-02-01) — CTE bridge fully wired: pendingCtes + withClause in selectStmt
-- CTE handler produces `{ cte, join }`, compiler collects cte into pendingCtes, applies via WITH clause
-- hierarchy.assert.dbsp queries 4-8 validate CTE SQL output
-
-(Phase 5 SRP archived → docs/historic/done-2026-02.md)
+### Audit P3 items (deferred, Score < 1.0)
+- #19 QueryBuilderImpl extraction (1,091 LOC) — L
+- #20 Extend handler pattern to remaining compiler switch cases — L
+- #30 QueryBuilder<T> interface ISP (30+ methods) — L
+- #31 types.ts 26 exports in one file — M
+- #34 intent-ast.ts 1,750 LOC single file — L
 
 ---
 

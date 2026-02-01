@@ -223,8 +223,8 @@
 
 ## Tracking
 
-- [ ] P0 items addressed
-- [ ] P1 items scheduled
-- [ ] P2 items planned
-- [ ] P3 items in backlog
+- [x] P0 items addressed (all 5 resolved as of 2026-02-01)
+- [x] P1 items scheduled (consolidated into TODO.md HIGH/MEDIUM 2026-02-01)
+- [x] P2 items planned (consolidated into TODO.md LOW 2026-02-01)
+- [x] P3 items in backlog (consolidated into TODO.md Blocked/Deferred 2026-02-01)
 - [ ] Next audit scheduled: [TBD]
