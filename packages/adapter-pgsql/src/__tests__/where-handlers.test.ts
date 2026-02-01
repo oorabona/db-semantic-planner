@@ -179,8 +179,7 @@ describe('WHERE Handlers', () => {
 				operator: 'in',
 				value: ['active', 'pending', 'review'],
 			});
-			// Note: deparser quotes function names as identifiers
-			expect(result.sql).toBe('users.status = "any"($1)');
+			expect(result.sql).toBe('users.status = ANY ($1)');
 			expect(result.params).toEqual([['active', 'pending', 'review']]);
 		});
 
@@ -191,7 +190,7 @@ describe('WHERE Handlers', () => {
 				operator: 'notIn',
 				value: ['banned', 'suspended'],
 			});
-			expect(result.sql).toBe('users.role <> "all"($1)');
+			expect(result.sql).toBe('users.role <> ALL ($1)');
 			expect(result.params).toEqual([['banned', 'suspended']]);
 		});
 

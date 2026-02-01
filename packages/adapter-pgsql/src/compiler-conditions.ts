@@ -165,7 +165,7 @@ export function compileCondition(
 		ctx.naming,
 	);
 
-	// Range operators handle their own parameters (with formatting + type cast)
+	// Operators that handle their own parameters — early return before generic compileValue
 	if (
 		decision.operator === 'contains' ||
 		decision.operator === 'containedBy' ||
@@ -183,6 +183,18 @@ export function compileCondition(
 			rangeOp as '@>' | '<@' | '&&',
 			state,
 		);
+	}
+	if (decision.operator === 'in') {
+		return compileInCondition(decision, column, false, state);
+	}
+	if (decision.operator === 'notIn') {
+		return compileInCondition(decision, column, true, state);
+	}
+	if (decision.operator === 'between') {
+		return compileBetweenCondition(decision, column, state);
+	}
+	if (decision.operator === 'exists' || decision.operator === 'notExists') {
+		return compileExistsCondition(decision, ctx, state);
 	}
 
 	let value: Node;
@@ -231,15 +243,6 @@ export function compileCondition(
 					nulltesttype: 'IS_NOT_NULL',
 				},
 			};
-		case 'exists':
-		case 'notExists':
-			return compileExistsCondition(decision, ctx, state);
-		case 'in':
-			return compileInCondition(decision, column, false, state);
-		case 'notIn':
-			return compileInCondition(decision, column, true, state);
-		case 'between':
-			return compileBetweenCondition(decision, column, state);
 		default:
 			return eqExpr(column, value);
 	}
@@ -361,22 +364,17 @@ function compileInCondition(
 	const paramIdx = ++state.paramIndex;
 	state.parameters.push(values);
 
-	const funcName = negate ? 'all' : 'any';
+	// Use AEXPR_OP_ANY / AEXPR_OP_ALL instead of FuncCall to avoid
+	// pg-deparse quoting "any"/"all" as identifiers
+	const kind = negate ? 'AEXPR_OP_ALL' : 'AEXPR_OP_ANY';
 	const op = negate ? '<>' : '=';
-
-	const funcCallNode: Node = {
-		FuncCall: {
-			funcname: [{ String: { sval: funcName } }],
-			args: [createParamRef(paramIdx)],
-		},
-	};
 
 	return {
 		A_Expr: {
-			kind: 'AEXPR_OP',
+			kind,
 			name: [{ String: { sval: op } }],
 			lexpr: column,
-			rexpr: funcCallNode,
+			rexpr: createParamRef(paramIdx),
 		},
 	};
 }
