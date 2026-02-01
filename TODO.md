@@ -75,10 +75,10 @@
 ## Backlog
 
 ### [Refactor] SRP Extractions - Phase 5 L/XL Items
-- [ ] **5.1** Split `NqlCstVisitor` into specialized visitors (~1300 lines, L effort)
-- [ ] **5.2** Refactor `PgsqlAdapter` — extract services (~2012 lines, XL effort)
-- [ ] **5.3** Refactor `QueryBuilderImpl` — extract concerns (~1028 lines, L effort)
-- [ ] **5.4** Extend handler pattern to all 44 compiler decisions (~1250 lines, L effort)
+- [x] ✅ **5.4** Extract condition compilation from PlanCompiler → `compiler-conditions.ts` (-34%, 2026-02-01)
+- [x] ✅ **5.2** Extract decision extractors from PgsqlAdapter → `plan-decision-extractor.ts` (-22%, 2026-02-01)
+- [x] ⏭️ **5.1** NqlCstVisitor split — Skipped: Chevrotain `validateVisitor()` requires all grammar rules on one class (2026-02-01)
+- [x] ⏭️ **5.3** QueryBuilderImpl — Skipped: already 377 lines, no meaningful extraction target (2026-02-01)
 
 ---
 
