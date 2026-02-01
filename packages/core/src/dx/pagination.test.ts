@@ -215,40 +215,56 @@ describe('Pagination: hasNextPage/hasPrevPage logic', () => {
 describe('Pagination: Cursor condition building', () => {
 	describe('single orderBy field', () => {
 		it('should use gt for forward + asc', () => {
-			const sortDir = 'asc';
-			const direction = 'forward';
+			const sortDir: 'asc' | 'desc' = 'asc' as 'asc' | 'desc';
+			const direction: 'forward' | 'backward' = 'forward' as
+				| 'forward'
+				| 'backward';
 			const isAsc =
-				sortDir === 'asc' ? direction === 'forward' : direction === 'backward';
+				(sortDir as string) === 'asc'
+					? (direction as string) === 'forward'
+					: (direction as string) === 'backward';
 			const operator = isAsc ? 'gt' : 'lt';
 
 			expect(operator).toBe('gt');
 		});
 
 		it('should use lt for forward + desc', () => {
-			const sortDir = 'desc';
-			const direction = 'forward';
+			const sortDir: 'asc' | 'desc' = 'desc' as 'asc' | 'desc';
+			const direction: 'forward' | 'backward' = 'forward' as
+				| 'forward'
+				| 'backward';
 			const isAsc =
-				sortDir === 'asc' ? direction === 'forward' : direction === 'backward';
+				(sortDir as string) === 'asc'
+					? (direction as string) === 'forward'
+					: (direction as string) === 'backward';
 			const operator = isAsc ? 'gt' : 'lt';
 
 			expect(operator).toBe('lt');
 		});
 
 		it('should use lt for backward + asc', () => {
-			const sortDir = 'asc';
-			const direction = 'backward';
+			const sortDir: 'asc' | 'desc' = 'asc' as 'asc' | 'desc';
+			const direction: 'forward' | 'backward' = 'backward' as
+				| 'forward'
+				| 'backward';
 			const isAsc =
-				sortDir === 'asc' ? direction === 'forward' : direction === 'backward';
+				(sortDir as string) === 'asc'
+					? (direction as string) === 'forward'
+					: (direction as string) === 'backward';
 			const operator = isAsc ? 'gt' : 'lt';
 
 			expect(operator).toBe('lt');
 		});
 
 		it('should use gt for backward + desc', () => {
-			const sortDir = 'desc';
-			const direction = 'backward';
+			const sortDir: 'asc' | 'desc' = 'desc' as 'asc' | 'desc';
+			const direction: 'forward' | 'backward' = 'backward' as
+				| 'forward'
+				| 'backward';
 			const isAsc =
-				sortDir === 'asc' ? direction === 'forward' : direction === 'backward';
+				(sortDir as string) === 'asc'
+					? (direction as string) === 'forward'
+					: (direction as string) === 'backward';
 			const operator = isAsc ? 'gt' : 'lt';
 
 			expect(operator).toBe('gt');

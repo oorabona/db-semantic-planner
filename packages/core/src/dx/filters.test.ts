@@ -460,7 +460,7 @@ describe('Feature 7: Composition', () => {
 
 		expect(result.kind).toBe('and');
 		expect(result.conditions).toHaveLength(2);
-		expect(result.conditions[1].kind).toBe('or');
+		expect(result.conditions[1]!.kind).toBe('or');
 	});
 
 	it('should support exists with complex where', () => {
@@ -546,8 +546,10 @@ describe('Feature 8: Expression Helpers', () => {
 
 			expect(result.__expr).toBe(true);
 			expect(result.intent.kind).toBe('raw');
-			expect(result.intent.sql).toContain('CASE WHEN');
-			expect(result.intent.as).toBe('statusLabel');
+			if (result.intent.kind === 'raw') {
+				expect(result.intent.sql).toContain('CASE WHEN');
+				expect(result.intent.as).toBe('statusLabel');
+			}
 		});
 
 		it('should throw on empty alias', () => {
@@ -596,8 +598,10 @@ describe('Feature 8: Expression Helpers', () => {
 
 			expect(result.__expr).toBe(true);
 			expect(result.intent.kind).toBe('columnAlias');
-			expect(result.intent.column).toBe('first_name');
-			expect(result.intent.alias).toBe('firstName');
+			if (result.intent.kind === 'columnAlias') {
+				expect(result.intent.column).toBe('first_name');
+				expect(result.intent.alias).toBe('firstName');
+			}
 		});
 
 		it('should throw on empty column name', () => {
@@ -687,16 +691,20 @@ describe('relationColumn() helper', () => {
 
 			expect(result.__expr).toBe(true);
 			expect(result.intent.kind).toBe('relationColumn');
-			expect(result.intent.relation).toBe('category.parent');
-			expect(result.intent.column).toBe('name');
-			expect(result.intent.as).toBe('parentCategoryName');
+			if (result.intent.kind === 'relationColumn') {
+				expect(result.intent.relation).toBe('category.parent');
+				expect(result.intent.column).toBe('name');
+				expect(result.intent.as).toBe('parentCategoryName');
+			}
 		});
 
 		it('should handle snake_case column names', () => {
 			const result = relationColumn('author', 'first_name', 'authorFirstName');
 
-			expect(result.intent.column).toBe('first_name');
-			expect(result.intent.as).toBe('authorFirstName');
+			if (result.intent.kind === 'relationColumn') {
+				expect(result.intent.column).toBe('first_name');
+				expect(result.intent.as).toBe('authorFirstName');
+			}
 		});
 
 		it('should throw on empty relation', () => {

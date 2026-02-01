@@ -204,9 +204,9 @@ describe('Intent conversion (DX-017)', () => {
 
 		expect(intent.include).toBeDefined();
 		expect(intent.include?.length).toBe(1);
-		expect(intent.include?.[0].relation).toBe('children');
-		expect(intent.include?.[0].recursive).toBeDefined();
-		expect(intent.include?.[0].recursive).toEqual({ maxDepth: 10 });
+		expect(intent.include?.[0]!.relation).toBe('children');
+		expect(intent.include?.[0]!.recursive).toBeDefined();
+		expect(intent.include?.[0]!.recursive).toEqual({ maxDepth: 10 });
 	});
 
 	it('should convert includeDepth to track.depth', () => {
@@ -219,7 +219,7 @@ describe('Intent conversion (DX-017)', () => {
 
 		const intent = builder.buildIntent();
 
-		expect(intent.include?.[0].recursive?.track?.depth).toBe(true);
+		expect(intent.include?.[0]!.recursive?.track?.depth).toBe(true);
 	});
 
 	it('should NOT store recursive includes in separate array anymore', () => {
@@ -233,7 +233,7 @@ describe('Intent conversion (DX-017)', () => {
 
 		// Recursive includes should be in the main includes array
 		expect(intent.include?.length).toBe(1);
-		expect(intent.include?.[0].recursive).toBeDefined();
+		expect(intent.include?.[0]!.recursive).toBeDefined();
 
 		// recursiveIncludes should be empty (or not exist)
 		expect(
@@ -261,8 +261,8 @@ describe('ORM path for recursive includes (DX-017)', () => {
 
 		// Verify the include has recursive set
 		expect(internalBuilder.includes.length).toBe(1);
-		expect(internalBuilder.includes[0].relation).toBe('children');
-		expect(internalBuilder.includes[0].recursive).toBeDefined();
+		expect(internalBuilder.includes[0]!.relation).toBe('children');
+		expect(internalBuilder.includes[0]!.recursive).toBeDefined();
 
 		// Access the internal intent through plan()
 		const planReport = builder.plan();

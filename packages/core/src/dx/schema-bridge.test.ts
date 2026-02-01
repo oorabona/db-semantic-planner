@@ -149,9 +149,9 @@ describe('buildModelFromSchema', () => {
 			const posts = model.getTable('posts')!;
 
 			expect(posts.foreignKeys).toHaveLength(1);
-			expect(posts.foreignKeys[0].columns).toEqual(['authorId']);
-			expect(posts.foreignKeys[0].references.table).toBe('users');
-			expect(posts.foreignKeys[0].references.columns).toEqual(['id']);
+			expect(posts.foreignKeys[0]!.columns).toEqual(['authorId']);
+			expect(posts.foreignKeys[0]!.references.table).toBe('users');
+			expect(posts.foreignKeys[0]!.references.columns).toEqual(['id']);
 		});
 
 		it('should use explicit column reference when provided', () => {
@@ -182,7 +182,7 @@ describe('buildModelFromSchema', () => {
 			const model = buildModelFromSchema(schema);
 			const posts = model.getTable('posts')!;
 
-			expect(posts.foreignKeys[0].references.columns).toEqual(['legacyId']);
+			expect(posts.foreignKeys[0]!.references.columns).toEqual(['legacyId']);
 		});
 	});
 
@@ -533,8 +533,8 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 			expect(result.success).toBe(true);
 			if (result.success) {
 				expect(result.schema.tables.users).toBeDefined();
-				expect(result.schema.tables.users.id.type).toBe('uuid');
-				expect(result.schema.tables.users.name.type).toBe('string');
+				expect(result.schema.tables.users!.id!.type).toBe('uuid');
+				expect(result.schema.tables.users!.name!.type).toBe('string');
 				expect(result.schema.conventions.fkPattern).toBe('{singular}Id');
 			}
 		});
@@ -566,8 +566,8 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 			expect(result.success).toBe(true);
 			if (result.success) {
 				// 'time' maps to 'timestamp', 'jsonb' maps to 'json'
-				expect(result.schema.tables.test.timeCol.type).toBe('timestamp');
-				expect(result.schema.tables.test.jsonbCol.type).toBe('json');
+				expect(result.schema.tables.test!.timeCol!.type).toBe('timestamp');
+				expect(result.schema.tables.test!.jsonbCol!.type).toBe('json');
 			}
 		});
 
@@ -621,9 +621,9 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 
 			expect(result.success).toBe(true);
 			if (result.success) {
-				expect(result.schema.relations['posts.author'].kind).toBe('belongsTo');
-				expect(result.schema.relations['users.posts'].kind).toBe('hasMany');
-				expect(result.schema.relations['posts.tags'].kind).toBe('manyToMany');
+				expect(result.schema.relations['posts.author']!.kind).toBe('belongsTo');
+				expect(result.schema.relations['users.posts']!.kind).toBe('hasMany');
+				expect(result.schema.relations['posts.tags']!.kind).toBe('manyToMany');
 			}
 		});
 
@@ -665,10 +665,10 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 
 			expect(result.success).toBe(true);
 			if (result.success) {
-				expect(result.schema.hints['users.posts'].defaultStrategy).toBe(
+				expect(result.schema.hints['users.posts']!.defaultStrategy).toBe(
 					'exists',
 				);
-				expect(result.schema.hints['users.posts'].cardinality).toBe('many');
+				expect(result.schema.hints['users.posts']!.cardinality).toBe('many');
 			}
 		});
 
@@ -702,7 +702,7 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 
 			expect(result.success).toBe(true);
 			if (result.success) {
-				expect(result.schema.tables.posts.authorId.references).toEqual({
+				expect(result.schema.tables.posts!.authorId!.references).toEqual({
 					table: 'users',
 					column: 'id',
 				});
@@ -1014,8 +1014,8 @@ describe('normalizeSchema (DX-100)', () => {
 		};
 		const result = normalizeSchema(resolved);
 		// Should have been converted
-		expect(result.tables.events.eventTime.type).toBe('timestamp'); // time -> timestamp
-		expect(result.tables.events.data.type).toBe('json'); // jsonb -> json
+		expect(result.tables.events!.eventTime!.type).toBe('timestamp'); // time -> timestamp
+		expect(result.tables.events!.data!.type).toBe('json'); // jsonb -> json
 	});
 
 	it('should throw for invalid schema structure', async () => {
@@ -1078,7 +1078,7 @@ describe('normalizeSchema (DX-100)', () => {
 		};
 		const result = normalizeSchema(resolved);
 		expect(result.relations['posts.author']).toBeDefined();
-		expect(result.relations['posts.author'].kind).toBe('belongsTo');
+		expect(result.relations['posts.author']!.kind).toBe('belongsTo');
 	});
 
 	describe('fkAutoIndex behavior', () => {
@@ -1140,9 +1140,9 @@ describe('normalizeSchema (DX-100)', () => {
 
 			// With fkAutoIndex: true, auto-index should be created for authorId
 			expect(postsTable.indexes).toHaveLength(1);
-			expect(postsTable.indexes[0].name).toBe('idx_posts_authorId');
-			expect(postsTable.indexes[0].columns).toEqual(['authorId']);
-			expect(postsTable.indexes[0].unique).toBe(false);
+			expect(postsTable.indexes[0]!.name).toBe('idx_posts_authorId');
+			expect(postsTable.indexes[0]!.columns).toEqual(['authorId']);
+			expect(postsTable.indexes[0]!.unique).toBe(false);
 		});
 	});
 });

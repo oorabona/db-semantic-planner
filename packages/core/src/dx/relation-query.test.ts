@@ -94,7 +94,7 @@ describe('DX-040 Block 7: Cross-Table Queries', () => {
 			const { users } = s.tables;
 
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const filter = every(users.posts as any, (p: any) =>
+			const filter = every((users as any).posts as any, (p: any) =>
 				eq(p.published, true),
 			);
 
@@ -116,7 +116,9 @@ describe('DX-040 Block 7: Cross-Table Queries', () => {
 			const { users } = s.tables;
 
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const filter = none(users.posts as any, (p: any) => eq(p.flagged, true));
+			const filter = none((users as any).posts as any, (p: any) =>
+				eq(p.flagged, true),
+			);
 
 			expect(filter.kind).toBe('relationFilter');
 			expect(filter.relation).toBe('posts');
@@ -136,7 +138,7 @@ describe('DX-040 Block 7: Cross-Table Queries', () => {
 			const { users } = s.tables;
 
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const filter = some(users.posts as any, (p: any) =>
+			const filter = some((users as any).posts as any, (p: any) =>
 				eq(p.published, true),
 			);
 

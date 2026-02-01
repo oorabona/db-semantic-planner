@@ -116,7 +116,7 @@ describe('DDL Generator', () => {
 
 	describe('CREATE TABLE', () => {
 		it('should generate CREATE TABLE with simple columns', () => {
-			const schema: ModelIR = {
+			const schema = {
 				tables: new Map([
 					[
 						'users',
@@ -145,7 +145,7 @@ describe('DDL Generator', () => {
 					],
 				]),
 				relations: new Map(),
-			};
+			} as unknown as ModelIR;
 
 			const ddl = generateDDL(schema);
 
@@ -159,7 +159,7 @@ describe('DDL Generator', () => {
 		});
 
 		it('should generate CREATE TABLE with composite primary key', () => {
-			const schema: ModelIR = {
+			const schema = {
 				tables: new Map([
 					[
 						'post_tags',
@@ -176,7 +176,7 @@ describe('DDL Generator', () => {
 					],
 				]),
 				relations: new Map(),
-			};
+			} as unknown as ModelIR;
 
 			const ddl = generateDDL(schema);
 
@@ -187,7 +187,7 @@ describe('DDL Generator', () => {
 		});
 
 		it('should handle default values', () => {
-			const schema: ModelIR = {
+			const schema = {
 				tables: new Map([
 					[
 						'posts',
@@ -222,7 +222,7 @@ describe('DDL Generator', () => {
 					],
 				]),
 				relations: new Map(),
-			};
+			} as unknown as ModelIR;
 
 			const ddl = generateDDL(schema);
 
@@ -234,7 +234,7 @@ describe('DDL Generator', () => {
 		});
 
 		it('should support schema scoping', () => {
-			const schema: ModelIR = {
+			const schema = {
 				tables: new Map([
 					[
 						'users',
@@ -255,7 +255,7 @@ describe('DDL Generator', () => {
 					],
 				]),
 				relations: new Map(),
-			};
+			} as unknown as ModelIR;
 
 			const ddl = generateDDL(schema, { schemaName: 'tenant_123' });
 
@@ -265,7 +265,7 @@ describe('DDL Generator', () => {
 
 	describe('FOREIGN KEY', () => {
 		it('should generate ALTER TABLE ADD CONSTRAINT for foreign keys', () => {
-			const schema: ModelIR = {
+			const schema = {
 				tables: new Map([
 					[
 						'users',
@@ -310,7 +310,7 @@ describe('DDL Generator', () => {
 					],
 				]),
 				relations: new Map(),
-			};
+			} as unknown as ModelIR;
 
 			const ddl = generateDDL(schema);
 
@@ -327,7 +327,7 @@ describe('DDL Generator', () => {
 		});
 
 		it('should support composite foreign keys', () => {
-			const schema: ModelIR = {
+			const schema = {
 				tables: new Map([
 					[
 						'post_tags',
@@ -371,7 +371,7 @@ describe('DDL Generator', () => {
 					],
 				]),
 				relations: new Map(),
-			};
+			} as unknown as ModelIR;
 
 			const ddl = generateDDL(schema);
 
@@ -386,7 +386,7 @@ describe('DDL Generator', () => {
 
 	describe('CREATE INDEX', () => {
 		it('should generate CREATE INDEX statements', () => {
-			const schema: ModelIR = {
+			const schema = {
 				tables: new Map([
 					[
 						'users',
@@ -418,7 +418,7 @@ describe('DDL Generator', () => {
 					],
 				]),
 				relations: new Map(),
-			};
+			} as unknown as ModelIR;
 
 			const ddl = generateDDL(schema);
 
@@ -439,7 +439,7 @@ describe('DDL Generator', () => {
 		});
 
 		it('should auto-generate indexes for FK columns', () => {
-			const schema: ModelIR = {
+			const schema = {
 				tables: new Map([
 					[
 						'users',
@@ -483,7 +483,7 @@ describe('DDL Generator', () => {
 					],
 				]),
 				relations: new Map(),
-			};
+			} as unknown as ModelIR;
 
 			const ddl = generateDDL(schema, { fkAutoIndex: true });
 
@@ -494,7 +494,7 @@ describe('DDL Generator', () => {
 		});
 
 		it('should skip auto-index if fkAutoIndex is false', () => {
-			const schema: ModelIR = {
+			const schema = {
 				tables: new Map([
 					[
 						'users',
@@ -538,7 +538,7 @@ describe('DDL Generator', () => {
 					],
 				]),
 				relations: new Map(),
-			};
+			} as unknown as ModelIR;
 
 			const ddl = generateDDL(schema, { fkAutoIndex: false });
 
@@ -549,7 +549,7 @@ describe('DDL Generator', () => {
 
 	describe('DROP TABLE', () => {
 		it('should generate DROP TABLE IF EXISTS with CASCADE', () => {
-			const schema: ModelIR = {
+			const schema = {
 				tables: new Map([
 					[
 						'users',
@@ -570,7 +570,7 @@ describe('DDL Generator', () => {
 					],
 				]),
 				relations: new Map(),
-			};
+			} as unknown as ModelIR;
 
 			const ddl = generateDDL(schema, { includeDropStatements: true });
 
@@ -578,7 +578,7 @@ describe('DDL Generator', () => {
 		});
 
 		it('should drop tables in reverse order', () => {
-			const schema: ModelIR = {
+			const schema = {
 				tables: new Map([
 					[
 						'users',
@@ -622,7 +622,7 @@ describe('DDL Generator', () => {
 					],
 				]),
 				relations: new Map(),
-			};
+			} as unknown as ModelIR;
 
 			const ddl = generateDDL(schema, { includeDropStatements: true });
 
@@ -640,7 +640,7 @@ describe('DDL Generator', () => {
 
 	describe('Full Schema DDL', () => {
 		it('should generate complete DDL for a multi-table schema', () => {
-			const schema: ModelIR = {
+			const schema = {
 				tables: new Map([
 					[
 						'users',
@@ -704,7 +704,7 @@ describe('DDL Generator', () => {
 					],
 				]),
 				relations: new Map(),
-			};
+			} as unknown as ModelIR;
 
 			const ddl = generateDDL(schema);
 

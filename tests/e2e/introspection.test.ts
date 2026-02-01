@@ -14,10 +14,15 @@ import { createOrm } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
-	createAdapterForSchema,
 	createBlogSchema,
+	createPgsqlAdapterForSchema,
 	dropBlogSchema,
 } from './testkit/index.js';
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const getSchemaFromDb = (..._args: any[]): any => {
+	throw new Error('Not implemented');
+};
 
 const SCHEMA = 'introspection_test';
 
@@ -35,7 +40,7 @@ describe.skip('Auto-Introspection [BLOCKED: adapter-pgsql Phase 4]', () => {
 
 	describe('getSchemaFromDb + createOrm (ARCH-006)', () => {
 		it('creates ORM instance from introspected schema', async () => {
-			const adapter = await createAdapterForSchema(SCHEMA);
+			const adapter = await createPgsqlAdapterForSchema(SCHEMA);
 			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
 			const orm = createOrm({ schema, adapter });
 
@@ -49,7 +54,7 @@ describe.skip('Auto-Introspection [BLOCKED: adapter-pgsql Phase 4]', () => {
 		});
 
 		it('introspects tables from database', async () => {
-			const adapter = await createAdapterForSchema(SCHEMA);
+			const adapter = await createPgsqlAdapterForSchema(SCHEMA);
 			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
 			const orm = createOrm({ schema, adapter });
 
@@ -62,7 +67,7 @@ describe.skip('Auto-Introspection [BLOCKED: adapter-pgsql Phase 4]', () => {
 		});
 
 		it('introspects columns from database', async () => {
-			const adapter = await createAdapterForSchema(SCHEMA);
+			const adapter = await createPgsqlAdapterForSchema(SCHEMA);
 			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
 			const orm = createOrm({ schema, adapter });
 
@@ -74,7 +79,7 @@ describe.skip('Auto-Introspection [BLOCKED: adapter-pgsql Phase 4]', () => {
 		});
 
 		it('produces valid queries for introspected schema', async () => {
-			const adapter = await createAdapterForSchema(SCHEMA);
+			const adapter = await createPgsqlAdapterForSchema(SCHEMA);
 			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
 			const orm = createOrm({ schema, adapter });
 
@@ -87,7 +92,7 @@ describe.skip('Auto-Introspection [BLOCKED: adapter-pgsql Phase 4]', () => {
 
 	describe('getSchemaFromDb (ARCH-006)', () => {
 		it('returns a Schema with definition from database', async () => {
-			const adapter = await createAdapterForSchema(SCHEMA);
+			const adapter = await createPgsqlAdapterForSchema(SCHEMA);
 			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
 
 			expect(schema).toBeDefined();
@@ -99,7 +104,7 @@ describe.skip('Auto-Introspection [BLOCKED: adapter-pgsql Phase 4]', () => {
 		});
 
 		it('introspects column types correctly', async () => {
-			const adapter = await createAdapterForSchema(SCHEMA);
+			const adapter = await createPgsqlAdapterForSchema(SCHEMA);
 			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
 
 			// authors table has: id (serial → number), name (varchar → string), bio (text), email (varchar)
@@ -111,7 +116,7 @@ describe.skip('Auto-Introspection [BLOCKED: adapter-pgsql Phase 4]', () => {
 		});
 
 		it('converts foreign keys to ref definitions', async () => {
-			const adapter = await createAdapterForSchema(SCHEMA);
+			const adapter = await createPgsqlAdapterForSchema(SCHEMA);
 			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
 
 			// posts table has author_id FK to authors
@@ -127,7 +132,7 @@ describe.skip('Auto-Introspection [BLOCKED: adapter-pgsql Phase 4]', () => {
 		});
 
 		it('can be used to create an ORM instance', async () => {
-			const adapter = await createAdapterForSchema(SCHEMA);
+			const adapter = await createPgsqlAdapterForSchema(SCHEMA);
 			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
 
 			// Create ORM with introspected schema
@@ -140,7 +145,7 @@ describe.skip('Auto-Introspection [BLOCKED: adapter-pgsql Phase 4]', () => {
 		});
 
 		it('respects tables whitelist option', async () => {
-			const adapter = await createAdapterForSchema(SCHEMA);
+			const adapter = await createPgsqlAdapterForSchema(SCHEMA);
 			const schema = await getSchemaFromDb(adapter, {
 				schema: SCHEMA,
 				tables: ['authors'],
@@ -152,7 +157,7 @@ describe.skip('Auto-Introspection [BLOCKED: adapter-pgsql Phase 4]', () => {
 		});
 
 		it('respects exclude patterns option', async () => {
-			const adapter = await createAdapterForSchema(SCHEMA);
+			const adapter = await createPgsqlAdapterForSchema(SCHEMA);
 			const schema = await getSchemaFromDb(adapter, {
 				schema: SCHEMA,
 				exclude: ['comments'],
@@ -164,7 +169,7 @@ describe.skip('Auto-Introspection [BLOCKED: adapter-pgsql Phase 4]', () => {
 		});
 
 		it('includes namingConvention from adapter (F-003)', async () => {
-			const adapter = await createAdapterForSchema(SCHEMA);
+			const adapter = await createPgsqlAdapterForSchema(SCHEMA);
 			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
 
 			// Schema should have namingConvention from adapter
@@ -173,7 +178,7 @@ describe.skip('Auto-Introspection [BLOCKED: adapter-pgsql Phase 4]', () => {
 		});
 
 		it('includes introspectedAt timestamp (F-004)', async () => {
-			const adapter = await createAdapterForSchema(SCHEMA);
+			const adapter = await createPgsqlAdapterForSchema(SCHEMA);
 			const before = new Date();
 			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
 			const after = new Date();

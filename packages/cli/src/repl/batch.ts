@@ -13,7 +13,9 @@ import {
 	validateAssertionBlocks,
 } from './assertion-parser.js';
 import { type AssertionSummary, runAssertions } from './assertion-runner.js';
+import { formatParseTree } from './components/OutputDisplay.js';
 import { createDbConnection, type DbConnection } from './db-connection.js';
+import { processDotCommand } from './dot-commands.js';
 import { parseInputMode } from './mode-escape.js';
 // NQL v2: Pure NQL - no legacy parser
 import {

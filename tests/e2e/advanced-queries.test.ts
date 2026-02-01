@@ -226,7 +226,7 @@ describe('E2E-ADV: Advanced Query Patterns', () => {
 				expect(result.length).toBeGreaterThan(0);
 				// Verify we have counts per category
 				const electronics = result.find(
-					(r: { category: string }) => r.category === 'electronics',
+					(r: any) => r.category === 'electronics',
 				) as { productCount: string };
 				expect(Number(electronics?.productCount)).toBe(3); // Laptop, Mouse, USB Cable
 			});
@@ -281,9 +281,9 @@ describe('E2E-ADV: Advanced Query Patterns', () => {
 				expect(result.length).toBeGreaterThan(0);
 
 				// Laptop (productId=1) has 4 reviews: 5, 4, 5, 4 = avg 4.5
-				const laptopReviews = result.find(
-					(r: { productId: number }) => r.productId === 1,
-				) as { avgRating: string };
+				const laptopReviews = result.find((r: any) => r.productId === 1) as {
+					avgRating: string;
+				};
 				const avgRating = Number(laptopReviews?.avgRating);
 				expect(avgRating).toBeCloseTo(4.5, 1);
 			});
@@ -338,9 +338,9 @@ describe('E2E-ADV: Advanced Query Patterns', () => {
 					.orderBy('price', 'asc')
 					.execute();
 
-				const prices = result.map((p: { price: string }) => Number(p.price));
+				const prices = result.map((p: any) => Number(p.price));
 				for (let i = 1; i < prices.length; i++) {
-					expect(prices[i]).toBeGreaterThanOrEqual(prices[i - 1]);
+					expect(prices[i]!).toBeGreaterThanOrEqual(prices[i - 1]!);
 				}
 			});
 
@@ -356,9 +356,9 @@ describe('E2E-ADV: Advanced Query Patterns', () => {
 					.orderBy('price', 'desc')
 					.execute();
 
-				const prices = result.map((p: { price: string }) => Number(p.price));
+				const prices = result.map((p: any) => Number(p.price));
 				for (let i = 1; i < prices.length; i++) {
-					expect(prices[i]).toBeLessThanOrEqual(prices[i - 1]);
+					expect(prices[i]!).toBeLessThanOrEqual(prices[i - 1]!);
 				}
 			});
 
@@ -479,9 +479,7 @@ describe('E2E-ADV: Advanced Query Patterns', () => {
 				expect(page3).toHaveLength(2); // Only 8 active products, so last page has 2
 
 				// Verify no duplicates across pages
-				const allIds = [...page1, ...page2, ...page3].map(
-					(p: { id: number }) => p.id,
-				);
+				const allIds = [...page1, ...page2, ...page3].map((p: any) => p.id);
 				const uniqueIds = new Set(allIds);
 				expect(uniqueIds.size).toBe(8);
 			});
@@ -721,7 +719,7 @@ describe('E2E-ADV: Advanced Query Patterns', () => {
 					.execute();
 
 				expect(deletedProducts).toHaveLength(2);
-				const names = deletedProducts.map((p: { name: string }) => p.name);
+				const names = deletedProducts.map((p: any) => p.name);
 				expect(names).toContain('Old Product');
 				expect(names).toContain('Discontinued Item');
 			});
@@ -799,7 +797,7 @@ describe('E2E-ADV: Advanced Query Patterns', () => {
 
 			expect(result.length).toBeGreaterThan(0);
 			const totalCount = result.reduce(
-				(sum: number, r: { count: string }) => sum + Number(r.count),
+				(sum: number, r: any) => sum + Number(r.count),
 				0,
 			);
 			expect(totalCount).toBe(8);

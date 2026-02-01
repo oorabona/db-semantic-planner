@@ -31,7 +31,7 @@ import { cstToAst } from '../src/semantic/index.js';
 function parseToAst(input: string): NqlProgram {
 	const result = parseCst(input);
 	if (result.errors.length > 0) {
-		throw new Error(`Parse error: ${result.errors[0].message}`);
+		throw new Error(`Parse error: ${result.errors[0]!.message}`);
 	}
 	return cstToAst(result.cst!);
 }
@@ -83,7 +83,7 @@ describe('NQL Visitor - Queries', () => {
 
 		const selectClause = query.clauses[0] as NqlSelectClause;
 		expect(selectClause.items).toHaveLength(1);
-		expect(selectClause.items[0].type).toBe('star');
+		expect(selectClause.items[0]!.type).toBe('star');
 	});
 
 	it('parses query with relation star', () => {
@@ -92,9 +92,9 @@ describe('NQL Visitor - Queries', () => {
 		const query = ast.statements[0] as NqlQuery;
 
 		const selectClause = query.clauses[0] as NqlSelectClause;
-		expect(selectClause.items[0].type).toBe('relationStar');
-		if (selectClause.items[0].type === 'relationStar') {
-			expect(selectClause.items[0].relation).toEqual(['customer']);
+		expect(selectClause.items[0]!.type).toBe('relationStar');
+		if (selectClause.items[0]!.type === 'relationStar') {
+			expect(selectClause.items[0]!.relation).toEqual(['customer']);
 		}
 	});
 
@@ -103,9 +103,9 @@ describe('NQL Visitor - Queries', () => {
 		const query = ast.statements[0] as NqlQuery;
 
 		const selectClause = query.clauses[0] as NqlSelectClause;
-		expect(selectClause.items[0].type).toBe('expression');
-		if (selectClause.items[0].type === 'expression') {
-			expect(selectClause.items[0].alias).toBe('user_name');
+		expect(selectClause.items[0]!.type).toBe('expression');
+		if (selectClause.items[0]!.type === 'expression') {
+			expect(selectClause.items[0]!.alias).toBe('user_name');
 		}
 	});
 
@@ -135,7 +135,7 @@ describe('NQL Visitor - Queries', () => {
 		const orderByClause = query.clauses[0] as NqlOrderByClause;
 		expect(orderByClause.type).toBe('orderBy');
 		expect(orderByClause.items).toHaveLength(1);
-		expect(orderByClause.items[0].direction).toBe('desc');
+		expect(orderByClause.items[0]!.direction).toBe('desc');
 	});
 
 	it('parses query with limit and offset', () => {
@@ -234,11 +234,11 @@ describe('NQL Visitor - Expressions', () => {
 		const query = ast.statements[0] as NqlQuery;
 		const selectClause = query.clauses[0] as NqlSelectClause;
 
-		expect(selectClause.items[0].type).toBe('expression');
-		if (selectClause.items[0].type === 'expression') {
-			expect(selectClause.items[0].expression.type).toBe('function');
-			if (selectClause.items[0].expression.type === 'function') {
-				expect(selectClause.items[0].expression.name).toBe('count');
+		expect(selectClause.items[0]!.type).toBe('expression');
+		if (selectClause.items[0]!.type === 'expression') {
+			expect(selectClause.items[0]!.expression.type).toBe('function');
+			if (selectClause.items[0]!.expression.type === 'function') {
+				expect(selectClause.items[0]!.expression.name).toBe('count');
 			}
 		}
 	});
@@ -248,9 +248,9 @@ describe('NQL Visitor - Expressions', () => {
 		const query = ast.statements[0] as NqlQuery;
 		const selectClause = query.clauses[0] as NqlSelectClause;
 
-		expect(selectClause.items[0].type).toBe('expression');
-		if (selectClause.items[0].type === 'expression') {
-			expect(selectClause.items[0].expression.type).toBe('binary');
+		expect(selectClause.items[0]!.type).toBe('expression');
+		if (selectClause.items[0]!.type === 'expression') {
+			expect(selectClause.items[0]!.expression.type).toBe('binary');
 		}
 	});
 
@@ -259,11 +259,11 @@ describe('NQL Visitor - Expressions', () => {
 		const query = ast.statements[0] as NqlQuery;
 		const selectClause = query.clauses[0] as NqlSelectClause;
 
-		expect(selectClause.items[0].type).toBe('expression');
-		if (selectClause.items[0].type === 'expression') {
-			expect(selectClause.items[0].expression.type).toBe('path');
-			if (selectClause.items[0].expression.type === 'path') {
-				expect(selectClause.items[0].expression.segments).toEqual([
+		expect(selectClause.items[0]!.type).toBe('expression');
+		if (selectClause.items[0]!.type === 'expression') {
+			expect(selectClause.items[0]!.expression.type).toBe('path');
+			if (selectClause.items[0]!.expression.type === 'path') {
+				expect(selectClause.items[0]!.expression.segments).toEqual([
 					'customer',
 					'name',
 				]);
@@ -348,7 +348,7 @@ describe('NQL Visitor - Mutations', () => {
 		const pipeline = ast.statements[0] as NqlMutationPipeline;
 
 		expect(pipeline.clauses).toHaveLength(1);
-		expect(pipeline.clauses[0].type).toBe('select');
+		expect(pipeline.clauses[0]!.type).toBe('select');
 	});
 });
 
@@ -360,8 +360,8 @@ describe('NQL Visitor - Let Bindings', () => {
 		);
 
 		expect(ast.bindings).toHaveLength(1);
-		expect(ast.bindings[0].name).toBe('activeUsers');
-		expect(ast.bindings[0].query.type).toBe('query');
+		expect(ast.bindings[0]!.name).toBe('activeUsers');
+		expect(ast.bindings[0]!.query.type).toBe('query');
 
 		expect(ast.statements).toHaveLength(1);
 	});
@@ -620,7 +620,7 @@ describe('SPEC-002: Relation Filter AST', () => {
 			const caseExpr = (selectClause.items[0] as NqlSelectExpression)
 				.expression as NqlCaseExpression;
 
-			const whenClause = caseExpr.whenClauses[0];
+			const whenClause = caseExpr.whenClauses[0]!;
 			expect(whenClause.condition.type).toBe('comparison');
 			expect(whenClause.result.type).toBe('string');
 		});
