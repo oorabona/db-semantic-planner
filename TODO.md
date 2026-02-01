@@ -74,15 +74,18 @@
 
 ## Backlog
 
+### [Core] BUG: Deep relation traversal (4+ levels) returns 0 rows in IAM example — Priority: HIGH
+- Query: `users | where active = true | select *, userRoles.roleId, userRoles.role.rolePermissions.permission.*`
+- Expected: 5 rows (active users), Actual: 0 rows
+- SQL compiles correctly (sql.contains assertions pass) but DB execution returns empty
+- Pre-existing bug (not introduced by DRY refactoring)
+- Fails in `tests/e2e/example-assertions.test.ts` → iam → query 27 (121/122 pass)
+- Likely cause: include strategy doesn't propagate schema context or produces incorrect JOINs at depth 4
+
 (Phase 5 SRP archived → docs/historic/done-2026-02.md)
 
 ---
 
 ## Completed
 
-- [x] ✅ [Security] Resolve 8 pnpm audit vulnerabilities — hono, lodash, lodash-es (2026-02-01)
-- [x] ✅ [Adapter] PGSQL-008/009: Extract buildColumnRef/buildParamRef into where/utils.ts (2026-02-01)
-- [x] ✅ [Core] CORE-010: Extract getColumnName() into column-utils.ts (2026-02-01)
-- [x] ✅ [Docs] Fix 4 Kysely references in DOCUMENTATION_INDEX.md (2026-02-01)
-
-(Earlier items archived → docs/historic/done-2026-02.md)
+(Archived → docs/historic/done-2026-02.md)
