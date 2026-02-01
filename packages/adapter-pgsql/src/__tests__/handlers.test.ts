@@ -6,18 +6,14 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
 	ALL_OPERATORS,
 	COLLECTION_OPERATORS,
-	// Constants
 	COMPARISON_OPERATORS,
 	clearHandlers,
-	// Factory
 	createCompilerState,
 	type ExpressionHandler,
 	getExpressionHandler,
 	getIncludeHandler,
 	getRegisteredOperators,
-	// Debugging
 	getRegistryStats,
-	// Lookup
 	getWhereHandler,
 	hasExpressionHandler,
 	hasIncludeHandler,
@@ -28,11 +24,9 @@ import {
 	PATTERN_OPERATORS,
 	registerExpressionHandler,
 	registerIncludeHandler,
-	// Registration
 	registerWhereHandler,
-	// Types
 	type WhereHandler,
-} from '../index.js';
+} from '../handlers/index.js';
 
 describe('Handler Infrastructure', () => {
 	beforeEach(() => {

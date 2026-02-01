@@ -31,10 +31,10 @@
 - Operators: `->`, `->>`, `@>`, `<@`, `?`, `#>`, `#>>`
 - Workaround: `raw()` escape hatch
 
-### [Adapter] #8: Extract `buildReturningList()` helper — Score 2.0 — Effort: S
+### ~[Adapter] #8: Extract `buildReturningList()` helper~ — ✅ Already done (shared in mutation-compiler.ts)
 ### ~[Core] #28: Remove duplicate `isRecursiveIncludeOptions()`~ — ✅ Already clean (1 definition only)
-### [Adapter] #11: Move AST helpers to internal export path — Score 2.0 — Effort: M
-### [Adapter] #12: Move handler registry to internal export path — Score 2.0 — Effort: M
+### ~[Adapter] #11: Move AST helpers to internal export path~ — ✅ DONE (2026-02-01)
+### ~[Adapter] #12: Move handler registry to internal export path~ — ✅ DONE (2026-02-01)
 ### [Docs] DOCS-001: User documentation (Getting Started, API Guide)
 ### [Docs] DOCS-002: Migration guides (from-prisma, from-drizzle, from-kysely)
 ### [Docs] DOCS-003: Pattern guides (multi-tenant, recursive queries, window functions)

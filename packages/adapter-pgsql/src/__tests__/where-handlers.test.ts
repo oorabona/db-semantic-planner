@@ -5,16 +5,16 @@
 import { deparseSync } from 'pgsql-deparser';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-	registerAllWhereHandlers,
-	registerSimpleWhereHandlers,
-} from '../handlers/where/index.js';
-import {
 	type CompilerContext,
 	clearHandlers,
 	createCompilerState,
 	createWhereDispatcher,
 	type Decision,
-} from '../index.js';
+} from '../handlers/index.js';
+import {
+	registerAllWhereHandlers,
+	registerSimpleWhereHandlers,
+} from '../handlers/where/index.js';
 import { identityNaming } from '../naming-plugin.js';
 
 // Helper to compile a decision to SQL
