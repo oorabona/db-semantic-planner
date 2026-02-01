@@ -48,7 +48,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 |-------|---------|----------|---------|--------|
 | types | `packages/types` | [ARCH-004](specs/TYPE-RATIONALIZATION-SPEC.md) | — | ✅ Complete |
 | core | `packages/core` | [Overview](plans/core-OVERVIEW.md) | [TODO](../TODO_CORE.md) | ✅ Complete |
-| adapter (legacy) | `packages/adapter-kysely` | — | — | ⛔ Sunset (2026-01-30) |
+| adapter (legacy) | ~~`packages/adapter-kysely`~~ | — | — | ⛔ Removed (2026-01-30) |
 | adapter-pgsql | `packages/adapter-pgsql` | [Architecture](../packages/adapter-pgsql/ARCHITECTURE.md) | [Full Forward Spec](plans/ADAPTER-PGSQL-FULL-FORWARD.md) | ✅ Complete |
 | cli | `packages/cli` | [CLI Usage](CLI_USAGE.md) | [TODO](../TODO_CLI.md) | ✅ Complete |
 | mcp-server | `packages/mcp-server` | [Brief](briefs/mcp-server.md) | [TODO](../TODO_MCP.md) | 🟡 Ready |
@@ -65,7 +65,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | CORE-002 | IntentAST | core | ✅ implemented (no spec) |
 | CORE-003 | [Semantic Planner](specs/CORE-003-semantic-planner.md) | core | ✅ canonical |
 | CORE-001-PC | [Planner → Compiler Contract](plans/CORE-001-planner-compiler-contract.md) | core, adapter | ✅ canonical |
-| ADAPTER-001 | [Kysely Dump/Compile/Execute](specs/ADAPTER-001-kysely-dump-compile-execute.md) | adapter | ✅ canonical |
+| ADAPTER-001 | [Dump/Compile/Execute](specs/ADAPTER-001-kysely-dump-compile-execute.md) | adapter | ✅ canonical (historic: originated as Kysely spec) |
 | ADAPTER-002 | Multi-tenant | adapter | ✅ implemented (in ADAPTER-001) |
 | ADAPTER-004 | [Enhanced Observability](specs/ADAPTER-004-enhanced-observability.md) | adapter | ✅ canonical |
 | ADAPTER-006 | [Schema Introspection](specs/ADAPTER-006-schema-introspection.md) | adapter | ✅ canonical |
@@ -97,7 +97,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | **ARCH-004** | [**Type Rationalization**](specs/TYPE-RATIONALIZATION-SPEC.md) | types, core, adapter, nql | ✅ canonical |
 | NQLM | [NQL CLI Migration](../TODO_NQL_MIGRATION.md) | cli | ✅ complete |
 | **ARCH-005** | [**Unified Schema API**](specs/ARCH-005-unified-schema-api.md) | core, cli, adapter | ✅ canonical |
-| **ARCH-006** | [**Simplified ORM Entry Point**](specs/ARCH-006-simplified-orm-entry-point.md) | core, adapter-kysely | ✅ canonical |
+| **ARCH-006** | [**Simplified ORM Entry Point**](specs/ARCH-006-simplified-orm-entry-point.md) | core, adapter-pgsql | ✅ canonical |
 | **DX-040** | [**Type-Safe Query API**](specs/DX-040-type-safe-query-api.md) | core, dx | ✅ complete |
 | **ADAPTER-PGSQL** | [**Native PG Adapter Spike (Forward)**](plans/ADAPTER-PGSQL-SPIKE.md) | adapter-pgsql | ✅ complete |
 
@@ -142,7 +142,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 - ✅ ModelIR schema definition with planning hints (29 tests)
 - ✅ IntentAST query types with type guards (35 tests)
 - ✅ Semantic planner (EXISTS vs JOIN, CTE extraction) (29 tests)
-- ✅ SQL compilation via Kysely (59 tests)
+- ✅ SQL compilation via adapter-pgsql (59 tests)
 - ✅ Multi-tenant (schema prefix support)
 - ✅ Observability (`createDump()` returning plan + sql + params)
 - ✅ 3 golden-query acceptance tests (Q1, Q2, Q3 = 18 tests)

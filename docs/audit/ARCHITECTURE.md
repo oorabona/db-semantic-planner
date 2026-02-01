@@ -47,7 +47,7 @@ graph TB
         end
 
         subgraph "DX Layer (dx/)"
-            ORM["orm.ts<br/>Public API (1,774 LOC)"]
+            ORM["orm.ts<br/>Public API (1,091 LOC)"]
             Filters["filters.ts<br/>57 filter helpers (1,180 LOC)"]
             QueryExec["query-executor.ts<br/>Execution (623 LOC)"]
             IntentBuilder["intent-builder.ts<br/>AST Builder (643 LOC)"]
@@ -58,7 +58,7 @@ graph TB
     end
 
     subgraph "packages/adapter-pgsql (PostgreSQL)"
-        PgsqlAdapter["pgsql-adapter.ts<br/>Adapter Impl (1,930 LOC)"]
+        PgsqlAdapter["pgsql-adapter.ts<br/>Adapter Impl (1,592 LOC)"]
         Compiler["compiler.ts<br/>SQL Compiler (1,250 LOC)"]
         Handlers["handlers/<br/>Decision Handlers (2,263 LOC)"]
         ASTHelpers["ast-helpers.ts<br/>PG AST Factory (893 LOC)"]
@@ -82,8 +82,8 @@ graph TB
 |---------|---------|-----|--------------|
 | `@dbsp/types` | Shared TypeScript types (IntentAST, utils) | 1,851 | none |
 | `@dbsp/nql` | NQL parser (Chevrotain-based) | 4,990 | `@dbsp/types`, `chevrotain` |
-| `@dbsp/core` | Schema, Planner, DX layer, Adapter interface | 19,865 | `@dbsp/nql`, `@dbsp/types`, `valibot` |
-| `@dbsp/adapter-pgsql` | PostgreSQL-native SQL compiler + executor | 13,757 | `@dbsp/core`, `@dbsp/types`, `pg`, `pgsql-deparser` |
+| `@dbsp/core` | Schema, Planner, DX layer, Adapter interface | 19,915 | `@dbsp/nql`, `@dbsp/types`, `valibot` |
+| `@dbsp/adapter-pgsql` | PostgreSQL-native SQL compiler + executor | 14,529 | `@dbsp/core`, `@dbsp/types`, `pg`, `pgsql-deparser` |
 | `@dbsp/cli` | Interactive REPL + batch execution | 6,194 | `@dbsp/core`, `@dbsp/nql`, `@dbsp/adapter-pgsql`, `ink`, `commander` |
 | `@dbsp/mcp-server` | Model Context Protocol server | 511 | `@dbsp/core`, `@modelcontextprotocol/sdk` |
 

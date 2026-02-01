@@ -1,6 +1,6 @@
 # Knowledge System Audit
 
-**Date:** 2026-01-31
+**Date:** 2026-02-01
 **Project:** db-semantic-planner
 
 ---
@@ -25,11 +25,11 @@
 
 | Document | Status | Issues |
 |----------|--------|--------|
-| `README.md` | :red_circle: CRITICAL | References non-existent `@dbsp/adapter-kysely` and `@dbsp/schema` |
-| `CLAUDE.md` | :red_circle: CRITICAL | Architecture diagram references Kysely adapter |
-| `DOCUMENTATION_INDEX.md` | :red_circle: CRITICAL | Package list includes dead packages, test counts wrong |
+| `README.md` | :green_circle: FIXED | ~~References non-existent packages~~ — Corrected 2026-02-01 |
+| `CLAUDE.md` | :green_circle: FIXED | ~~Architecture references Kysely~~ — Corrected 2026-02-01 |
+| `DOCUMENTATION_INDEX.md` | :yellow_circle: PARTIAL | 4 Kysely references remaining (lines 51, 68, 100, 145) |
 | `docs/specs/ARCH-002-one-ring.md` | :yellow_circle: STALE | References `packages/schema` (merged into core) |
-| `docs/specs/ARCH-006-simplified-orm-entry-point.md` | :yellow_circle: STALE | Status: "Draft" but fully implemented |
+| `docs/specs/ARCH-006-simplified-orm-entry-point.md` | :green_circle: FIXED | Status updated to "Canonical" |
 | `TODO.md` | :green_circle: CURRENT | Epics accurately tracked |
 | `CHANGELOG.md` | :green_circle: CURRENT | Up to date |
 | `SECURITY.md` | :green_circle: CURRENT | Vulnerability policy in place |
@@ -75,14 +75,14 @@
 
 | # | Document | Claim | Reality | Severity |
 |---|----------|-------|---------|----------|
-| 1 | README.md:18-19 | `pnpm add @dbsp/adapter-kysely` | Package sunset 2026-01-30; use `@dbsp/adapter-pgsql` | **CRITICAL** |
-| 2 | README.md:22,35 | `import from '@dbsp/schema'` | Package never existed; use `@dbsp/core` | **CRITICAL** |
-| 3 | CLAUDE.md:20-40 | Architecture shows `@dbsp/adapter-kysely` | Should be `@dbsp/adapter-pgsql` | **CRITICAL** |
-| 4 | DOCUMENTATION_INDEX.md:20-27 | Package list includes `adapter-kysely` | Actual: adapter-pgsql, cli, core, mcp-server, nql, types | **MAJOR** |
-| 5 | DOCUMENTATION_INDEX.md:16 | "1,971 unit tests" | Actual: ~2,159 tests | **MAJOR** |
-| 6 | ARCH-002 spec:25-26 | `packages/schema` path | Schema DSL in `packages/core/src/dx/schema.ts` | **MAJOR** |
-| 7 | ARCH-006 spec:2 | Status: "Draft" | Fully implemented in `core/src/dx/orm.ts:71` | **MAJOR** |
-| 8 | README code examples | `createKyselyAdapter(kysely)` | Should be `createPgsqlAdapter(pgPool)` | **CRITICAL** |
+| 1 | ~~README.md~~ | ~~adapter-kysely~~ | **RESOLVED** 2026-02-01 | :green_circle: Fixed |
+| 2 | ~~README.md~~ | ~~@dbsp/schema~~ | **RESOLVED** 2026-02-01 | :green_circle: Fixed |
+| 3 | ~~CLAUDE.md~~ | ~~Kysely architecture~~ | **RESOLVED** 2026-02-01 | :green_circle: Fixed |
+| 4 | DOCUMENTATION_INDEX.md:51,68,100,145 | 4 Kysely references | Still present | **MAJOR** |
+| 5 | DOCUMENTATION_INDEX.md | Test counts | Needs update | **MINOR** |
+| 6 | ARCH-002 spec:25-26 | `packages/schema` path | Schema DSL in core | **MAJOR** |
+| 7 | ~~ARCH-006 spec~~ | ~~Status: "Draft"~~ | **RESOLVED** → Canonical | :green_circle: Fixed |
+| 8 | ~~README code examples~~ | ~~createKyselyAdapter~~ | **RESOLVED** 2026-02-01 | :green_circle: Fixed |
 
 ### Root Cause
 

@@ -1,7 +1,7 @@
 # Audit Backlog
 
-**Generated:** 2026-01-31
-**Source:** /audit deep all packages
+**Generated:** 2026-02-01
+**Source:** /audit deep all packages — focus DRY, execution paths, dead code
 
 ---
 
@@ -12,170 +12,212 @@
 | C | Complexity (effort to fix) | 1-5 (1=trivial, 5=major refactor) |
 | I | Impact (effect on codebase health) | 1-5 (1=cosmetic, 5=critical) |
 | R | Risk (likelihood of causing issues) | 1-5 (1=unlikely, 5=certain) |
-| **Score** | **(I x R) / C** | Higher = higher priority |
+| **Score** | **(I × R) / C** | Higher = higher priority |
 
 ---
 
 ## All Findings (Ranked by Score)
 
-| # | Finding | C | I | R | Score | Axis |
-|---|---------|---|---|---|-------|------|
-| 1 | README references dead `@dbsp/adapter-kysely` | 1 | 4 | 4 | **16.0** | Documentation |
-| 2 | CLAUDE.md architecture references Kysely adapter | 1 | 4 | 4 | **16.0** | Documentation |
-| 3 | README references non-existent `@dbsp/schema` | 1 | 4 | 3 | **12.0** | Documentation |
-| 4 | DOCUMENTATION_INDEX.md package list/test counts wrong | 1 | 3 | 3 | **9.0** | Documentation |
-| 5 | MCP server: 1 placeholder test only | 2 | 3 | 3 | **4.5** | Test Coverage |
-| 6 | ARCH-006 spec status "Draft" but implemented | 1 | 2 | 2 | **4.0** | Documentation |
-| 7 | `NqlCstVisitor` god class (1,303 LOC, 40+ methods) | 4 | 3 | 2 | **1.5** | Maintainability |
-| 8 | `PgsqlAdapter` god class (1,930 LOC, 10 responsibilities) | 5 | 3 | 2 | **1.2** | Maintainability |
-| 9 | `QueryBuilderImpl` god class (1,774 LOC, 20+ methods) | 5 | 3 | 2 | **1.2** | Maintainability |
-| 10 | 44-case switch on `decision.type` (OCP violation) | 4 | 3 | 2 | **1.5** | Maintainability |
-| 11 | `batch.ts` god file (924 LOC, 43 functions) | 3 | 2 | 2 | **1.3** | Maintainability |
-| 12 | `assertion-runner.ts` god file (1,077 LOC) | 3 | 2 | 2 | **1.3** | Maintainability |
-| 13 | 86 `throw new Error()` in visitor (no structured types) | 2 | 2 | 2 | **2.0** | Code Quality |
-| 14 | 20+ identical `clone()` calls (DRY violation) | 2 | 2 | 1 | **1.0** | Code Quality |
-| 15 | RETURNING clause duplicated 3 times | 1 | 2 | 1 | **2.0** | Code Quality |
-| 16 | FK derivation logic duplicated 3 locations | 2 | 2 | 2 | **2.0** | Code Quality |
-| 17 | `QueryBuilder<T>` interface 30+ methods (ISP) | 4 | 2 | 1 | **0.5** | Architecture |
-| 18 | `types.ts` 26 exported types in one file | 2 | 1 | 1 | **0.5** | Code Quality |
-| 19 | `filters.ts` 57 functions + WindowBuilder (SRP) | 3 | 2 | 1 | **0.7** | Maintainability |
-| 20 | 7 `any` types in result-hydrator.ts | 2 | 2 | 1 | **1.0** | Type Safety |
-| 21 | `unknown[]` without validation in types package | 2 | 2 | 1 | **1.0** | Type Safety |
-| 22 | Raw SQL escape hatch without audit trail | 2 | 2 | 1 | **1.0** | Security |
-| 23 | `Math.random()` for cursor names | 1 | 1 | 1 | **1.0** | Security |
-| 24 | Silent error suppression in tx rollback | 1 | 1 | 1 | **1.0** | Error Handling |
-| 25 | `validate()` stub in NQL (just calls parse) | 1 | 1 | 1 | **1.0** | Code Quality |
-| 26 | 4 deprecated exports still present | 1 | 1 | 1 | **1.0** | YAGNI |
-| 27 | adapter-pgsql test ratio 0.36 (target 0.50) | 3 | 2 | 2 | **1.3** | Test Coverage |
-| 28 | types package: 0 test files | 2 | 1 | 1 | **0.5** | Test Coverage |
+| # | Finding | C | I | R | Score | Axis | New? |
+|---|---------|---|---|---|-------|------|------|
+| 1 | DOCUMENTATION_INDEX.md still has 4 Kysely references | 1 | 3 | 3 | **9.0** | Documentation | |
+| 2 | `pnpm audit`: 8 vulnerabilities (6 moderate, 2 high) | 2 | 4 | 4 | **8.0** | Security | NEW |
+| 3 | **getColumnName()** duplicated 4× across core/dx | 1 | 3 | 2 | **6.0** | DRY | NEW |
+| 4 | **buildColumnRef()** duplicated 4× in WHERE handlers | 1 | 3 | 2 | **6.0** | DRY | NEW |
+| 5 | **Comparison filters** (eq/neq/gt/gte/lt/lte) — 120 LOC boilerplate | 2 | 3 | 2 | **3.0** | DRY | NEW |
+| 6 | MCP server: 1 placeholder test only | 2 | 3 | 3 | **4.5** | Test Coverage | |
+| 7 | **normalizeSQL()** — 3 different implementations | 1 | 2 | 2 | **4.0** | DRY | NEW |
+| 8 | RETURNING clause compiled 3× (INSERT/UPDATE/DELETE) | 1 | 2 | 1 | **2.0** | DRY | |
+| 9 | `format()` exported but unimplemented (throws) in NQL | 1 | 2 | 2 | **4.0** | Dead Code | NEW |
+| 10 | **buildParamRef()** duplicated in 2 handlers | 1 | 2 | 1 | **2.0** | DRY | NEW |
+| 11 | 50+ AST helpers exported but internal-only | 2 | 2 | 2 | **2.0** | API Surface | NEW |
+| 12 | Handler registry API (20+ exports) unused cross-package | 2 | 2 | 2 | **2.0** | API Surface | NEW |
+| 13 | **Mutation builder** — 56 identical field assignments | 2 | 2 | 1 | **1.0** | DRY | NEW |
+| 14 | **Column target building** duplicated (join/lateral) | 2 | 2 | 1 | **1.0** | DRY | NEW |
+| 15 | **JSON_AGG correlation** — FK direction duplicated | 3 | 2 | 2 | **1.3** | DRY | NEW |
+| 16 | NqlCstVisitor god class (1,303 LOC) | 4 | 3 | 2 | **1.5** | SRP | |
+| 17 | NQL compiler god class (1,142 LOC) | 4 | 3 | 2 | **1.5** | SRP | NEW |
+| 18 | PgsqlAdapter god class (1,592 LOC) | 5 | 3 | 2 | **1.2** | SRP | |
+| 19 | QueryBuilderImpl (1,091 LOC) | 5 | 3 | 2 | **1.2** | SRP | |
+| 20 | 15-case switch on `decision.type` (OCP) | 4 | 3 | 2 | **1.5** | OCP | |
+| 21 | `compileSubqueryIncludeManyToMany()` — 550+ LOC | 4 | 2 | 2 | **1.0** | KISS | NEW |
+| 22 | **Clone methods** — manual 15-field copying (3 classes) | 3 | 2 | 2 | **1.3** | DRY | NEW |
+| 23 | **NQL context validation** — 61 identical patterns | 2 | 2 | 1 | **1.0** | DRY | NEW |
+| 24 | `NqlLimitError`, `NqlWarning` — unused interfaces | 1 | 1 | 1 | **1.0** | Dead Code | NEW |
+| 25 | `_getRelationPath()` — private, not called | 1 | 1 | 1 | **1.0** | Dead Code | NEW |
+| 26 | `@deprecated namingConvention` still present | 1 | 1 | 1 | **1.0** | Dead Code | |
+| 27 | `validate()` stub in NQL | 1 | 1 | 1 | **1.0** | Dead Code | |
+| 28 | `isRecursiveIncludeOptions()` exported from 2 files | 1 | 2 | 1 | **2.0** | DRY | NEW |
+| 29 | CLI assertion functions — 24 functions, 80% boilerplate | 3 | 2 | 1 | **0.7** | DRY | NEW |
+| 30 | `QueryBuilder<T>` interface 30+ methods (ISP) | 4 | 2 | 1 | **0.5** | ISP | |
+| 31 | `types.ts` 26 exported types in one file | 2 | 1 | 1 | **0.5** | SRP | |
+| 32 | `any` types in result-hydrator.ts (7) | 2 | 2 | 1 | **1.0** | Type Safety | |
+| 33 | adapter-pgsql test ratio 0.36 (target 0.50) | 3 | 2 | 2 | **1.3** | Test Coverage | |
+| 34 | intent-ast.ts — 1,750 LOC single file, no domain split | 3 | 1 | 1 | **0.3** | SRP | NEW |
+| 35 | SEC-001: Raw SQL escape hatch without audit trail | 2 | 2 | 1 | **1.0** | Security | |
 
 ---
 
 ## Improvement Axes
 
-### Axis 1: Documentation (Score: 57.0 total)
+### Axis 1: DRY Consolidation (Score: 38.3 total) — PRIMARY FOCUS
 
-| Priority | Action | Effort |
-|----------|--------|--------|
-| **P0** | Rewrite README.md (remove Kysely/schema refs) | S |
-| **P0** | Update CLAUDE.md architecture section | S |
-| **P0** | Update DOCUMENTATION_INDEX.md | S |
-| P1 | Update ARCH-006 spec status to Canonical | S |
-| P1 | Update ARCH-002 spec (packages/schema refs) | S |
-| P1 | Update DX-040 status in doc index | S |
+**Goal:** Eliminate duplicated logic; extract shared helpers. Most impactful axis for codebase health.
 
-### Axis 2: Maintainability (Score: 8.5 total)
+| Priority | ID | Action | Effort | Package |
+|----------|----|----|--------|---------|
+| **P0** | 3 | Extract `getColumnName()` to `core/src/dx/symbols.ts` | S | core |
+| **P0** | 4 | Extract `buildColumnRef()` to `handlers/where/shared.ts` | S | adapter |
+| **P1** | 5 | Create comparison filter factory (single function, operator param) | S | core |
+| **P1** | 7 | Consolidate `normalizeSQL()` to single shared location | S | adapter+cli |
+| **P1** | 8 | Extract `buildReturningList()` helper in compiler | S | adapter |
+| **P1** | 10 | Move `buildParamRef()` to `handlers/shared.ts` | S | adapter |
+| **P1** | 28 | Remove duplicate `isRecursiveIncludeOptions()` from intent-builder | S | core |
+| **P2** | 13 | Extract base mutation builder class or composition | M | core |
+| **P2** | 14 | Extract shared column target builder for include handlers | S | adapter |
+| **P2** | 15 | Extract JSON_AGG correlation helper | M | adapter |
+| **P2** | 22 | Structural clone helper (replace manual field copying) | M | core |
+| **P2** | 23 | Extract `validateContext()` helper for NQL visitor | S | nql |
+| **P3** | 29 | Create assertion factory for CLI assertion functions | M | cli |
 
-| Priority | Action | Effort |
-|----------|--------|--------|
-| P2 | Split `NqlCstVisitor` into specialized visitors | L |
-| P2 | Refactor `PgsqlAdapter` (extract services) | XL |
-| P2 | Refactor `QueryBuilderImpl` (extract concerns) | L |
-| P2 | Extend handler pattern to all compiler decisions | L |
-| P3 | Split `batch.ts` into command modules | M |
-| P3 | Split `assertion-runner.ts` by assertion type | M |
-| P3 | Extract window functions from `filters.ts` | M |
+**Recommended approach:** Start with P0 (trivial extractions, 1 file each). Then P1 (still small, high value). P2 items are moderate refactors.
+**Total effort:** ~30h | **Avg complexity:** C1.5
 
-### Axis 3: Code Quality (Score: 8.5 total)
+### Axis 2: Dead Code Cleanup (Score: 13.0 total)
 
-| Priority | Action | Effort |
-|----------|--------|--------|
-| P2 | Replace `throw new Error()` with NqlError in visitor | M |
-| P2 | Extract shared RETURNING clause compilation | S |
-| P2 | Extract shared FK derivation utility | S |
-| P3 | Use decorator/template for clone() pattern | M |
-| P3 | Split `types.ts` by domain | S |
+**Goal:** Remove unused code, reduce API surface, improve clarity.
 
-### Axis 4: Type Safety (Score: 2.0 total)
+| Priority | ID | Action | Effort | Package |
+|----------|----|----|--------|---------|
+| **P0** | 9 | Remove or mark `@internal` the `format()` stub in NQL | S | nql |
+| **P1** | 11 | Move AST helpers to internal export path | M | adapter |
+| **P1** | 12 | Move handler registry to internal export path | M | adapter |
+| **P2** | 24 | Remove `NqlLimitError`, `NqlWarning` unused interfaces | S | nql |
+| **P2** | 25 | Remove `_getRelationPath()` dead private function | S | core |
+| **P2** | 26 | Remove `@deprecated namingConvention` property | S | core |
+| **P2** | 27 | Remove `validate()` stub or implement properly | S | nql |
 
-| Priority | Action | Effort |
-|----------|--------|--------|
-| P3 | Fix `any` types in result-hydrator.ts | M |
-| P3 | Add generic constraints to RangeValue | S |
-| P3 | Add type-level tests for @dbsp/types | M |
+**Recommended approach:** P0 is trivial delete. P1 requires creating `exports` field in package.json or `@internal` tags.
+**Total effort:** ~12h
 
-### Axis 5: Test Coverage (Score: 6.3 total)
+### Axis 3: Security (Score: 9.0 total)
 
-| Priority | Action | Effort |
-|----------|--------|--------|
-| P1 | Replace MCP server placeholder test | M |
-| P2 | Increase adapter-pgsql coverage (0.36 -> 0.50) | M |
-| P3 | Add type-level tests for types package | M |
+**Goal:** Fix dependency vulnerabilities, complete audit trail.
 
-### Axis 6: Security (Score: 2.0 total)
+| Priority | ID | Action | Effort |
+|----------|----|----|--------|
+| **P0** | 2 | Audit and fix 8 dependency vulnerabilities (pnpm audit) | M |
+| **P2** | 35 | Add centralized audit log for raw SQL usage | S |
 
-| Priority | Action | Effort |
-|----------|--------|--------|
-| P2 | Add centralized audit log for raw SQL usage | S |
-| P3 | Replace `Math.random()` with `crypto.randomUUID()` | S |
-| P3 | Log rollback errors at debug level | S |
+**Total effort:** ~6h
+
+### Axis 4: Documentation (Score: 9.0 total)
+
+**Goal:** Eliminate remaining doc-code drift.
+
+| Priority | ID | Action | Effort |
+|----------|----|----|--------|
+| **P0** | 1 | Update DOCUMENTATION_INDEX.md (remove 4 Kysely refs) | S |
+
+**Total effort:** ~1h
+
+### Axis 5: SRP / Execution Path Clarity (Score: 8.6 total)
+
+**Goal:** Break down god classes and complex functions for clearer execution paths.
+
+| Priority | ID | Action | Effort |
+|----------|----|----|--------|
+| P2 | 16 | NqlCstVisitor — extract category-specific helpers (can't split class due to Chevrotain) | M |
+| P2 | 17 | NQL compiler — extract compileWhereClause, compileSortClause to helpers | M |
+| P2 | 18 | PgsqlAdapter — extract M2M compilation, introspection, result transformation | L |
+| P2 | 21 | Extract `compileSubqueryIncludeManyToMany` into dedicated module | M |
+| P3 | 19 | QueryBuilderImpl — extract aggregation, pagination methods | L |
+| P3 | 20 | Extend handler pattern to remaining compiler switch cases | L |
+
+**Recommended approach:** These are progressive extractions. Start with 21 (isolated 550 LOC function), then 17 (NQL compiler methods).
+**Total effort:** ~60h
+
+### Axis 6: Test Coverage (Score: 6.8 total)
+
+| Priority | ID | Action | Effort |
+|----------|----|----|--------|
+| P1 | 6 | Replace MCP server placeholder test | M |
+| P2 | 33 | Increase adapter-pgsql test ratio (0.36 → 0.50) | L |
+
+**Total effort:** ~20h
 
 ---
 
-## Quick Wins (< 2h each, Score >= 2.0)
+## Quick Wins (C1-C2, Score ≥ 2.0)
 
-| # | Action | Score | Effort |
-|---|--------|-------|--------|
-| 1 | Rewrite README.md | 16.0 | S |
-| 2 | Update CLAUDE.md | 16.0 | S |
-| 3 | Update DOCUMENTATION_INDEX.md | 9.0 | S |
-| 4 | Update ARCH-006 spec status | 4.0 | S |
-| 5 | Extract RETURNING clause helper | 2.0 | S |
-| 6 | Extract FK derivation utility | 2.0 | S |
+| # | Action | Score | Effort | Package |
+|---|--------|-------|--------|---------|
+| 1 | Update DOCUMENTATION_INDEX.md | 9.0 | S | docs |
+| 2 | Extract `getColumnName()` to shared module | 6.0 | S | core |
+| 3 | Extract `buildColumnRef()` to shared handler module | 6.0 | S | adapter |
+| 4 | Remove/mark `format()` in NQL | 4.0 | S | nql |
+| 5 | Consolidate `normalizeSQL()` | 4.0 | S | adapter+cli |
+| 6 | Comparison filter factory | 3.0 | S | core |
+| 7 | Extract `buildReturningList()` | 2.0 | S | adapter |
+| 8 | Remove duplicate `isRecursiveIncludeOptions()` | 2.0 | S | core |
+| 9 | Move `buildParamRef()` to shared | 2.0 | S | adapter |
 
 ---
 
 ## Resolution Log
 
-### Resolved Items (2026-01-20 -> 2026-01-31)
+### Resolved Items (2026-01-31 → 2026-02-01)
 
-18 items resolved from the previous audit. Key resolutions:
+| What Was Resolved | How | Impact |
+|-------------------|-----|--------|
+| README Kysely references | Rewritten with adapter-pgsql | P0 doc drift fixed |
+| CLAUDE.md Kysely references | Updated architecture section | P0 doc drift fixed |
+| `Math.random()` cursor names | Replaced with `crypto.randomUUID()` | SEC-002 fixed |
+| ARCH-006 status "Draft" | Updated to "Canonical" | P1 doc alignment |
+| PgsqlAdapter bloat (1,930 LOC) | Extracted plan-decision-extractor.ts, compiler-conditions.ts | -18% LOC (→ 1,592) |
 
-| ID | What Was Resolved | How | Impact |
-|----|-------------------|-----|--------|
-| AUD-004 | `compiler.ts` monolithic (4,736 LOC) | Split into handler pattern: `handlers/where/`, `handlers/expression/`, `handlers/include/` | **-44% LOC** (4,736 -> 2,633) |
-| AUD-005 | `orm.ts` mixed concerns (2,317 LOC) | Extracted `ResultHydrator`, `QueryExecutor` | **-23% LOC** (2,317 -> 1,776) |
-| AUD-006 | `intent-to-decisions` mixed into compiler | Extracted standalone module (550 LOC) | Clean separation |
-| DUP-001 | Duplicated WHERE compilation | Consolidated into WHERE handlers | Eliminated duplication |
-| DUP-002 | Duplicated include strategy | Consolidated into include handlers | Eliminated duplication |
-| DUP-003 | Duplicated expression handling | Consolidated into expression handlers | Eliminated duplication |
-| NAME-001-004 | Inconsistent naming conventions | Standardized across codebase (ARCH-003) | Consistent naming |
-| AUD-009-013 | Documentation improvements | Updated specs, ADRs, scope indexes | Accurate docs |
-| FLAT-BUG | Flat include bug + missing CTE WITH RECURSIVE | Fixed in adapter-pgsql | Correct SQL generation |
-| PGSQL-SPIKE | No native PostgreSQL adapter | Built adapter-pgsql from scratch | No ORM dependency |
-| PGSQL-SUNSET | adapter-kysely still present | Removed adapter-kysely, migrated all users | Simplified architecture |
+### Resolved Items (2026-01-20 → 2026-01-31)
 
-**Total impact:** 18 items resolved, codebase significantly cleaner. The handler pattern in the compiler is the most impactful structural improvement.
+18 items resolved. Key resolutions:
+
+| What | How | Impact |
+|------|-----|--------|
+| `compiler.ts` monolithic (4,736 LOC) | Handler pattern: `handlers/where/`, `handlers/expression/`, `handlers/include/` | -44% LOC |
+| `orm.ts` mixed concerns (2,317 LOC) | Extracted `ResultHydrator`, `QueryExecutor` | -23% LOC |
+| `intent-to-decisions` mixed into compiler | Extracted standalone module | Clean separation |
+| Documentation improvements | Updated specs, ADRs, scope indexes | Accurate docs |
+| Inconsistent naming conventions | Standardized across codebase (ARCH-003) | Consistent naming |
 
 ---
 
 ## Summary
 
-| Priority | Count | Effort Estimate |
-|----------|-------|-----------------|
-| P0 | 3 | ~4h |
-| P1 | 4 | ~12h |
-| P2 | 9 | ~40h |
-| P3 | 12 | ~50h |
-| **Total** | **28** | **~106h** |
+| Priority | Count | Effort Estimate | Avg Score |
+|----------|-------|-----------------|-----------|
+| P0 | 5 | ~8h | 6.6 |
+| P1 | 7 | ~18h | 3.0 |
+| P2 | 14 | ~55h | 1.2 |
+| P3 | 9 | ~40h | 0.6 |
+| **Total** | **35** | **~121h** | |
 
-### Previous Audit Comparison (2026-01-20 -> 2026-01-31)
+### Previous Audit Comparison (2026-01-31 → 2026-02-01)
 
 | Metric | Previous | Current | Delta |
 |--------|----------|---------|-------|
-| P0 items | 0 | 3 | +3 (doc drift from Kysely sunset) |
-| P1 items | 3 | 4 | +1 |
-| P2 items | 12 | 9 | -3 (10 resolved, new ones added) |
-| P3 items | 5 | 12 | +7 (deeper analysis) |
-| Resolved since last | - | 18 | Excellent progress |
+| P0 items | 3 | 5 | +2 (dep vulns + DRY extractions) |
+| P1 items | 4 | 7 | +3 (DRY consolidation) |
+| P2 items | 9 | 14 | +5 (deeper DRY analysis) |
+| P3 items | 12 | 9 | -3 (some resolved) |
+| Resolved since last | - | 5 | Good progress |
+| Total items | 28 | 35 | +7 (deeper analysis found more) |
 
 ### Key Changes Since Last Audit
 
-- :green_circle: 18 items resolved (all P2/P3 from previous audit)
-- :green_circle: compiler.ts reduced 44% (4,736 -> 2,633 LOC)
-- :green_circle: orm.ts reduced 23% (2,317 -> 1,776 LOC)
-- :red_circle: adapter-kysely sunset created 3 P0 documentation drifts
-- :yellow_circle: New findings from deeper analysis (CLI, NQL, types)
+- :green_circle: 5 items resolved (README, CLAUDE.md, Math.random, ARCH-006, PgsqlAdapter extraction)
+- :green_circle: PgsqlAdapter reduced 18% (1,930 → 1,592 LOC)
+- :red_circle: 12 NEW DRY violations discovered (deep focus analysis)
+- :red_circle: 8 dependency vulnerabilities appeared (pnpm audit)
+- :yellow_circle: 6 dead code items identified for cleanup
 
 ---
 
@@ -183,21 +225,6 @@
 
 - [ ] P0 items addressed
 - [ ] P1 items scheduled
-- [ ] P2 items planned for next sprint
-- [ ] P3 items added to backlog
+- [ ] P2 items planned
+- [ ] P3 items in backlog
 - [ ] Next audit scheduled: [TBD]
-
----
-
-## Relationship to Existing Backlogs
-
-| Backlog | Scope | Path |
-|---------|-------|------|
-| Main | All | `TODO.md` |
-| Core | Core package | `TODO_CORE.md` |
-| Adapter | Adapter package | `TODO_ADAPTER.md` |
-| DX | Developer experience | `TODO_DX.md` |
-| MCP | MCP server | `TODO_MCP.md` |
-| E2E | E2E testing | `TODO_E2E.md` |
-
-**Recommendation:** Integrate P0 and P1 items into the appropriate scope backlog immediately.

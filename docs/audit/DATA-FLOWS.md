@@ -1,6 +1,6 @@
 # Data Flow Analysis
 
-**Date:** 2026-01-31
+**Date:** 2026-02-01
 
 ---
 
@@ -269,7 +269,7 @@ sequenceDiagram
 
 ### RETURNING Clause Compilation
 
-The RETURNING clause is compiled in 3 locations (DRY violation -- see BACKLOG #15):
+The RETURNING clause is compiled in 3 locations (DRY violation -- see BACKLOG #8):
 
 | Mutation | Location | SQL Pattern |
 |----------|----------|-------------|
@@ -334,7 +334,7 @@ sequenceDiagram
 
 | Aspect | Detail |
 |--------|--------|
-| Cursor naming | `cursor_${Math.random()}` (SEC-002: should use crypto.randomUUID) |
+| Cursor naming | `cursor_${crypto.randomUUID()}` (SEC-002: **RESOLVED** 2026-02-01) |
 | Transaction | Implicit BEGIN/COMMIT wrapping |
 | Batch size | Configurable via `stream({ batchSize: N })` |
 | Cleanup | CLOSE + COMMIT on iterator completion or error |
@@ -356,4 +356,4 @@ sequenceDiagram
 | withSchema | 5 | ~500 | :green_circle: Injection-proof | :green_circle: Unit + E2E |
 | dump() | 6 | ~3,000 | N/A (read-only) | :green_circle: Full |
 | Mutations + RETURNING | 5 | ~1,500 | :green_circle: Parameterized | :green_circle: Unit + E2E |
-| Streaming (cursors) | 3 | ~400 | :yellow_circle: Math.random cursor | :green_circle: Unit + E2E |
+| Streaming (cursors) | 3 | ~400 | :green_circle: crypto.randomUUID | :green_circle: Unit + E2E |
