@@ -77,10 +77,16 @@
 ### [Core] BUG: Deep relation traversal (4+ levels) returns 0 rows in IAM example — Priority: HIGH
 - Query: `users | where active = true | select *, userRoles.roleId, userRoles.role.rolePermissions.permission.*`
 - Expected: 5 rows (active users), Actual: 0 rows
-- SQL compiles correctly (sql.contains assertions pass) but DB execution returns empty
+- SQL produces incorrect correlated subqueries (correlates to users.id/users.role_id instead of chaining through intermediate tables)
+- Now tested with sql.equals (full SQL comparison) — db.rows.equals: 0 reflects the bug
 - Pre-existing bug (not introduced by DRY refactoring)
 - Fails in `tests/e2e/example-assertions.test.ts` → iam → query 27 (121/122 pass)
 - Likely cause: include strategy doesn't propagate schema context or produces incorrect JOINs at depth 4
+
+### [Infra] pnpm test at root should run ALL package tests — Priority: MEDIUM
+- Currently: `pnpm test` root runs only ~295 tests (some workspaces)
+- Expected: should run all ~1900+ tests across core, nql, adapter-pgsql, cli, mcp-server
+- `pnpm test -F <package>` should filter to a single package
 
 (Phase 5 SRP archived → docs/historic/done-2026-02.md)
 
