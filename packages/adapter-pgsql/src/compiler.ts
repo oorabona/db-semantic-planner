@@ -21,8 +21,6 @@ import {
 	innerJoin,
 	insertStmt,
 	integerNode,
-	jsonAggCorrelation,
-	jsonAggSubquery,
 	leftJoin,
 	orExpr,
 	rangeVar,
@@ -38,9 +36,15 @@ import {
 	compileCondition,
 	compileValue,
 	deriveFK,
-	rewriteConditionTable,
 } from './compiler-conditions.js';
 import { deparseQuoted } from './deparse.js';
+import { registerAllIncludeHandlers } from './handlers/include/index.js';
+import { getIncludeHandler } from './handlers/index.js';
+import type {
+	CompilerContext as HandlerCompilerContext,
+	CompilerState as HandlerCompilerState,
+	Decision as HandlerDecision,
+} from './handlers/types.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 import { createParamRef } from './param-ref.js';
@@ -124,6 +128,13 @@ export interface CompilerOptions {
 /**
  * Compile a PlanReport to SQL via PostgreSQL AST
  */
+let includeHandlersInitialized = false;
+function ensureIncludeHandlersRegistered(): void {
+	if (includeHandlersInitialized) return;
+	includeHandlersInitialized = true;
+	registerAllIncludeHandlers();
+}
+
 export class PlanCompiler {
 	private readonly naming: NamingPlugin;
 	private readonly schema: string | undefined;
@@ -138,6 +149,8 @@ export class PlanCompiler {
 		alias?: string;
 		on: Node;
 	}> = [];
+	/** Raw JOIN AST nodes from include handlers (e.g., LATERAL) */
+	private rawJoins: Node[] = [];
 
 	constructor(options: CompilerOptions = {}) {
 		this.naming = options.naming ?? identityNaming;
@@ -154,92 +167,114 @@ export class PlanCompiler {
 	}
 
 	/**
-	 * Recursively compile a selectJsonAgg decision into a json_agg subquery node.
-	 * For nested includes, produces nested json_agg with jsonb_build_object merging.
-	 * Each depth level uses a unique alias (__t0__, __t1__, etc.) to avoid conflicts.
+	 * Bridge PlanDecision to handler Decision and dispatch to include handler.
+	 * Returns targets and optional pending joins to apply.
 	 */
-	private compileJsonAggDecision(
+	private compileIncludeViaHandler(
 		decision: PlanDecision,
-		parentAlias: string,
-		depth: number,
-	): Node {
-		const innerAlias = depth === 0 ? '__t__' : `__t${depth}__`;
+		plan: SimplifiedPlanReport,
+	): {
+		targets?: Node[];
+		rawJoin?: Node;
+	} {
+		ensureIncludeHandlersRegistered();
 
-		// Build correlation WHERE based on relation type
-		let whereExpr: Node;
-		if (decision.relationType === 'belongsTo') {
-			whereExpr = jsonAggCorrelation(
-				parentAlias,
-				decision.foreignKey ?? 'id',
-				innerAlias,
-				decision.parentKey ?? 'id',
-				this.naming,
+		const strategy = decision.choice as
+			| 'json_agg'
+			| 'join'
+			| 'lateral'
+			| 'cte'
+			| 'subquery'
+			| undefined;
+		if (!strategy)
+			throw new Error(
+				`Include decision missing strategy choice: ${JSON.stringify(decision)}`,
 			);
-		} else {
-			whereExpr = jsonAggCorrelation(
-				parentAlias,
-				decision.parentKey ?? 'id',
-				innerAlias,
-				decision.foreignKey ?? 'id',
-				this.naming,
-			);
-		}
 
-		// Merge filter conditions if present
+		// Map subquery to json_agg (PostgreSQL always supports json_agg)
+		const effectiveStrategy = strategy === 'subquery' ? 'json_agg' : strategy;
+
+		const handler = getIncludeHandler(
+			effectiveStrategy as 'json_agg' | 'join' | 'lateral' | 'cte',
+		);
+
+		// Bridge PlanDecision -> handler Decision
+		const handlerDecision = {
+			type: decision.type,
+			relation: decision.relationName,
+			relationName: decision.relationName,
+			targetTable: decision.targetTable,
+			// For belongsTo: FK is on source table (e.g. posts.author_id → authors.id)
+			// For hasMany/hasOne: FK is on target table (e.g. posts.id ← comments.post_id)
+			sourceColumn:
+				decision.relationType === 'belongsTo'
+					? (decision.foreignKey ?? `${decision.targetTable}_id`)
+					: (decision.parentKey ?? 'id'),
+			targetColumn:
+				decision.relationType === 'belongsTo'
+					? (decision.parentKey ?? 'id')
+					: (decision.foreignKey ?? `${plan.rootTable}_id`),
+			columns: decision.columns,
+			strategy: effectiveStrategy as 'json_agg' | 'join' | 'lateral' | 'cte',
+			relationType: decision.relationType,
+			foreignKey: decision.foreignKey,
+			parentKey: decision.parentKey,
+			children: decision.children as unknown as readonly HandlerDecision[],
+			orderBy: decision.orderBy?.map((o) => ({
+				column: o.field,
+				direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
+			})),
+			conditions: decision.conditions as unknown as readonly HandlerDecision[],
+		} as unknown as HandlerDecision;
+
+		// Pre-compile filter conditions (from EXISTS propagation) for the handler.
+		// The handler can't call compileCondition (compiler-internal), so we compile
+		// here and pass the compiled AST node via _compiledFilterWhere.
 		if (
 			decision.conditions &&
 			(decision.conditions as PlanDecision[]).length > 0
 		) {
-			const condNodes = (decision.conditions as PlanDecision[]).map((c) =>
-				compileCondition(
-					rewriteConditionTable(c, innerAlias),
-					this.condCtx(),
-					this.state,
-				),
-			);
-			whereExpr = andExpr(whereExpr, ...condNodes);
+			// Determine the inner alias the handler will use (depth 0 = __t__)
+			const innerAlias = '__t__';
+			const condNodes = (decision.conditions as PlanDecision[]).map((c) => {
+				// Rewrite condition table references to use the inner alias
+				const rewritten = { ...c, table: innerAlias };
+				return compileCondition(rewritten, this.condCtx(), this.state);
+			});
+			const combined =
+				condNodes.length === 1 ? condNodes[0]! : andExpr(...condNodes);
+			(
+				handlerDecision as unknown as Record<string, unknown>
+			)._compiledFilterWhere = combined;
 		}
 
-		// Recursively compile children
-		let childNodes: { key: string; node: Node }[] | undefined;
-		if (decision.children && decision.children.length > 0) {
-			childNodes = [];
-			for (const child of decision.children) {
-				if (child.relationName && child.targetTable && child.relationType) {
-					// Recursively compile child — parent alias is this level's inner alias
-					const childSubquery = this.compileJsonAggDecision(
-						child,
-						innerAlias,
-						depth + 1,
-					);
-					// Extract the COALESCE node from the ResTarget wrapper
-					const resTarget = childSubquery as { ResTarget?: { val: Node } };
-					if (resTarget.ResTarget?.val) {
-						childNodes.push({
-							key: child.relationName,
-							node: resTarget.ResTarget.val,
-						});
-					} else if (process.env.NODE_ENV !== 'production') {
-						console.warn(
-							`[PlanCompiler] Failed to extract ResTarget.val for child relation "${child.relationName}" at depth ${depth + 1}`,
-						);
-					}
-				}
-			}
-			if (childNodes.length === 0) childNodes = undefined;
-		}
+		// Bridge compiler state -> handler context + state
+		const ctx = {
+			naming: this.naming,
+			rootTable: plan.rootTable,
+			currentAlias: plan.rootTable,
+			maxRecursiveDepth: 100,
+			...(this.schema != null && { schema: this.schema }),
+		} as HandlerCompilerContext;
 
-		return jsonAggSubquery(
-			decision.targetTable!,
-			whereExpr,
-			`${decision.relationName}_json`,
-			this.schema,
-			this.naming,
-			{
-				...(childNodes && { childNodes }),
-				innerAlias,
-			},
-		);
+		const handlerState: HandlerCompilerState = {
+			parameters: this.state.parameters,
+			paramIndex: this.state.paramIndex,
+			ctes: new Map(),
+			aliases: new Map(),
+			joins: [],
+		};
+
+		const result = handler.compile(handlerDecision, ctx, handlerState);
+
+		// Sync parameters back
+		this.state.paramIndex = handlerState.paramIndex;
+
+		const out: { targets?: Node[]; rawJoin?: Node } = {};
+		if (result.targets) out.targets = result.targets;
+		if (result.join) out.rawJoin = result.join;
+		if (result.lateral) out.rawJoin = result.lateral;
+		return out;
 	}
 
 	/**
@@ -249,6 +284,7 @@ export class PlanCompiler {
 		this.state = { parameters: [], paramIndex: 0 };
 		this.currentRootTable = plan.rootTable;
 		this.pendingJoins = [];
+		this.rawJoins = [];
 
 		// Determine query type from decisions
 		const queryType = this.detectQueryType(plan.decisions);
@@ -417,63 +453,14 @@ export class PlanCompiler {
 					break;
 				}
 
-				case 'selectJsonAgg': {
-					// json_agg include with recursive nesting support
-					if (
-						decision.relationName &&
-						decision.targetTable &&
-						decision.relationType
-					) {
-						const node = this.compileJsonAggDecision(
-							decision,
-							plan.rootTable,
-							0,
-						);
-						targetList.push(node);
+				case 'includeStrategy': {
+					// Unified include dispatch via handler registry
+					const includeResult = this.compileIncludeViaHandler(decision, plan);
+					if (includeResult.targets) {
+						targetList.push(...includeResult.targets);
 					}
-					break;
-				}
-
-				case 'selectLeftJoinInclude': {
-					// LEFT JOIN include: add relation columns with "relation.column" aliases
-					// and register LEFT JOIN for to-one (belongsTo/hasOne) includes
-					if (
-						decision.relationName &&
-						decision.targetTable &&
-						decision.columns
-					) {
-						const cols = decision.columns;
-						// Use relationName as the table alias for column references
-						const colTableRef = decision.relationName;
-
-						// Add each column with "relation.column" alias for hydration
-						for (const col of cols) {
-							targetList.push(
-								columnTarget(
-									col,
-									`${decision.relationName}.${col}`,
-									colTableRef,
-									this.naming,
-								),
-							);
-						}
-
-						// Register LEFT JOIN
-						// For belongsTo: source.FK → target.PK
-						const fk = decision.foreignKey ?? deriveFK(decision.targetTable);
-						const onCondition = eqExpr(
-							columnRef('id', decision.relationName, undefined, this.naming),
-							columnRef(fk, plan.rootTable, undefined, this.naming),
-						);
-
-						this.pendingJoins.push({
-							type: 'LEFT JOIN',
-							table: decision.targetTable,
-							// Always alias with relationName for uniqueness
-							// (e.g., "author" and "editor" both from "users")
-							alias: decision.relationName,
-							on: onCondition,
-						});
+					if (includeResult.rawJoin) {
+						this.rawJoins.push(includeResult.rawJoin);
 					}
 					break;
 				}
@@ -622,6 +609,25 @@ export class PlanCompiler {
 				pj.type === 'LEFT JOIN'
 					? leftJoin(base, targetRV, pj.on)
 					: innerJoin(base, targetRV, pj.on);
+		}
+
+		// Flush raw JOIN nodes from include handlers (e.g., LATERAL)
+		for (const rawJoin of this.rawJoins) {
+			const base =
+				from.length > 0
+					? from[0]!
+					: rangeVar(
+							plan.rootTable,
+							undefined,
+							plan.schema ?? this.schema,
+							this.naming,
+						);
+			// Raw joins are pre-built JoinExpr — inject base table as larg
+			const joinExpr = rawJoin as { JoinExpr?: Record<string, unknown> };
+			if (joinExpr.JoinExpr) {
+				joinExpr.JoinExpr.larg = base;
+				from[0] = rawJoin;
+			}
 		}
 
 		// Default to SELECT * if no columns specified

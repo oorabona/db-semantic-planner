@@ -355,6 +355,183 @@ export function extractExistsDecisions(
 }
 
 /**
+ * Extract ALL include decisions from include-strategy plan decisions.
+ * Produces decisions with type 'includeStrategy' for all strategies:
+ * - json_agg, subquery → tree-structured with children (like extractJsonAggDecisions)
+ * - join → flat decisions with columns (like extractLeftJoinIncludeDecisions)
+ * - lateral → tree-structured with children
+ * - cte → flat decisions
+ *
+ * Each decision carries its `choice` field for the compiler to dispatch via handlers.
+ */
+export function extractAllIncludeDecisions(
+	plan: PlanReport,
+): SimplifiedPlanReport['decisions'] {
+	const includeDecisions = plan.decisions.filter(
+		(d) => d.type === 'include-strategy',
+	);
+
+	if (includeDecisions.length === 0) return [];
+
+	// Separate by strategy group
+	const treeStrategies = new Set(['json_agg', 'subquery', 'lateral']);
+	const treeDecisions: (PlanDecision & { intentPath?: string })[] = [];
+	const flatDecisions: PlanDecision[] = [];
+
+	for (const d of includeDecisions) {
+		const choice = d.choice as string;
+		if (treeStrategies.has(choice)) {
+			// Convert to tree-compatible decision (json_agg / lateral / subquery)
+			const converted = toIncludeDecision(d, choice);
+			if (converted) treeDecisions.push(converted);
+		} else if (choice === 'join') {
+			// Convert to flat join decision
+			const converted = toJoinIncludeDecision(d, plan);
+			if (converted) flatDecisions.push(converted);
+		} else if (choice === 'cte') {
+			// CTE: skip for now — the CTE handler produces { cte, join } but the compiler
+			// bridge doesn't yet handle the WITH clause from result.cte. Wiring CTE fully
+			// requires adding CTE accumulation to the compiler. Tracked as follow-up.
+		}
+	}
+
+	// Build tree for json_agg / lateral / subquery (using intentPath)
+	const builtTree = buildIncludeTree(treeDecisions);
+
+	return [...builtTree, ...flatDecisions];
+}
+
+/**
+ * Convert a planner include-strategy decision to an includeStrategy decision.
+ */
+function toIncludeDecision(
+	d: PlanReport['decisions'][number],
+	choice: string,
+): (PlanDecision & { intentPath?: string }) | undefined {
+	const context = d.context;
+	const relationName = resolveIncludeAlias(context);
+	if (!context.target || !relationName) return undefined;
+
+	const foreignKey = deriveForeignKey(context) ?? 'id';
+	const relationType = context.relationType as
+		| 'belongsTo'
+		| 'hasMany'
+		| 'hasOne'
+		| undefined;
+
+	// Map subquery to json_agg — PostgreSQL always supports json_agg,
+	// so the subquery strategy is implemented via json_agg correlated subquery
+	const effectiveChoice = choice === 'subquery' ? 'json_agg' : choice;
+
+	return {
+		type: 'includeStrategy',
+		choice: effectiveChoice,
+		relationName,
+		targetTable: context.target,
+		...(context.sourceTable && { sourceTable: context.sourceTable }),
+		...(relationType && { relationType }),
+		foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
+		parentKey: 'id',
+		...(context.intentPath && { intentPath: context.intentPath }),
+	};
+}
+
+/**
+ * Convert a planner include-strategy decision with choice 'join' to an includeStrategy decision.
+ */
+function toJoinIncludeDecision(
+	d: PlanReport['decisions'][number],
+	plan: PlanReport,
+): PlanDecision | undefined {
+	const context = d.context;
+	const relationName = context.relation ?? context.includeAlias;
+	if (!context.target || !relationName) return undefined;
+
+	// Find matching include intent to get column list
+	const includeIntent = (
+		plan.intent?.include as
+			| Array<{
+					relation: string;
+					select?: { type: string; fields?: readonly string[] };
+			  }>
+			| undefined
+	)?.find(
+		(i) => i.relation === relationName || i.relation === context.relation,
+	);
+
+	let columns: string[] = ['id'];
+	if (includeIntent?.select?.type === 'fields' && includeIntent.select.fields) {
+		const fields = includeIntent.select.fields.filter((f) => f !== 'id');
+		columns = ['id', ...fields];
+	}
+
+	const foreignKey = deriveForeignKey(context) ?? 'id';
+	const relationType = context.relationType as
+		| 'belongsTo'
+		| 'hasMany'
+		| 'hasOne'
+		| undefined;
+
+	return {
+		type: 'includeStrategy',
+		choice: 'join',
+		relationName,
+		targetTable: context.target,
+		...(relationType && { relationType }),
+		foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
+		parentKey: 'id',
+		columns,
+	};
+}
+
+/**
+ * Build tree structure from flat include decisions using intentPath.
+ * Groups children under their parents for nested json_agg / lateral compilation.
+ */
+function buildIncludeTree(
+	allDecisions: (PlanDecision & { intentPath?: string })[],
+): PlanDecision[] {
+	const decisionsByPath = new Map<
+		string,
+		PlanDecision & { intentPath?: string }
+	>();
+	for (const d of allDecisions) {
+		if (d.intentPath) decisionsByPath.set(d.intentPath, d);
+	}
+
+	function parentPath(path: string): string | undefined {
+		const lastDot = path.lastIndexOf('.include[');
+		return lastDot > 0 ? path.substring(0, lastDot) : undefined;
+	}
+
+	const childrenMap = new Map<string, PlanDecision[]>();
+	const rootDecisions: PlanDecision[] = [];
+
+	for (const d of allDecisions) {
+		const pp = d.intentPath ? parentPath(d.intentPath) : undefined;
+		if (pp && decisionsByPath.has(pp)) {
+			const siblings = childrenMap.get(pp) ?? [];
+			siblings.push(d);
+			childrenMap.set(pp, siblings);
+		} else {
+			rootDecisions.push(d);
+		}
+	}
+
+	function attachChildren(decision: PlanDecision): PlanDecision {
+		const path = decision.intentPath;
+		const children = path ? childrenMap.get(path) : undefined;
+		if (!children || children.length === 0) return decision;
+		return {
+			...decision,
+			children: children.map(attachChildren),
+		};
+	}
+
+	return rootDecisions.map(attachChildren);
+}
+
+/**
  * Convert a planner include-strategy decision to a selectJsonAgg decision.
  */
 function toJsonAggDecision(

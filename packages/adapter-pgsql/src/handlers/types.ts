@@ -93,7 +93,13 @@ export interface Decision {
 	// Include-specific
 	readonly strategy?: 'join' | 'lateral' | 'json_agg' | 'cte';
 	readonly relation?: string;
+	readonly relationName?: string;
 	readonly include?: readonly Decision[];
+	// Relation metadata (for json_agg nesting)
+	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
+	readonly foreignKey?: string;
+	readonly parentKey?: string;
+	readonly children?: readonly Decision[];
 	// Window function specific
 	readonly partition?: readonly string[];
 	readonly orderBy?: readonly { column: string; direction?: 'ASC' | 'DESC' }[];

@@ -36,7 +36,8 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 				decisions: [
 					{ type: 'select', column: '*', table: 'posts' },
 					{
-						type: 'selectLeftJoinInclude',
+						type: 'includeStrategy',
+						choice: 'join',
 						relationName: 'author',
 						targetTable: 'authors',
 						relationType: 'belongsTo',
@@ -52,8 +53,8 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 			// Should contain LEFT JOIN, not json_agg
 			expect(result.sql).toContain('LEFT JOIN');
 			expect(result.sql).not.toContain('json_agg');
-			// ON condition: target PK = source FK
-			expect(result.sql).toMatch(/author\.id\s*=\s*posts\.author_id/);
+			// ON condition: source FK = target PK (or equivalent)
+			expect(result.sql).toMatch(/posts\.author_id\s*=\s*author\.id/);
 			// Aliased columns for hydration
 			expect(result.sql).toContain('"author.id"');
 			expect(result.sql).toContain('"author.name"');
@@ -66,7 +67,8 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 				decisions: [
 					{ type: 'select', column: '*', table: 'posts' },
 					{
-						type: 'selectLeftJoinInclude',
+						type: 'includeStrategy',
+						choice: 'join',
 						relationName: 'author',
 						targetTable: 'authors',
 						relationType: 'belongsTo',
@@ -90,7 +92,8 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 				decisions: [
 					{ type: 'select', column: '*', table: 'posts' },
 					{
-						type: 'selectLeftJoinInclude',
+						type: 'includeStrategy',
+						choice: 'join',
 						relationName: 'author',
 						targetTable: 'authors',
 						relationType: 'belongsTo',
@@ -115,7 +118,8 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 				decisions: [
 					{ type: 'select', column: '*', table: 'authors' },
 					{
-						type: 'selectJsonAgg',
+						type: 'includeStrategy',
+						choice: 'json_agg',
 						relationName: 'posts',
 						targetTable: 'posts',
 						relationType: 'hasMany',
@@ -140,7 +144,8 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 					{ type: 'select', column: '*', table: 'posts' },
 					// author (belongsTo users)
 					{
-						type: 'selectLeftJoinInclude',
+						type: 'includeStrategy',
+						choice: 'join',
 						relationName: 'author',
 						targetTable: 'users',
 						relationType: 'belongsTo',
@@ -150,7 +155,8 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 					} satisfies PlanDecision,
 					// editor (belongsTo users)
 					{
-						type: 'selectLeftJoinInclude',
+						type: 'includeStrategy',
+						choice: 'join',
 						relationName: 'editor',
 						targetTable: 'users',
 						relationType: 'belongsTo',
@@ -182,7 +188,8 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 					{ type: 'select', column: '*', table: 'posts' },
 					// LEFT JOIN include for author
 					{
-						type: 'selectLeftJoinInclude',
+						type: 'includeStrategy',
+						choice: 'join',
 						relationName: 'author',
 						targetTable: 'authors',
 						relationType: 'belongsTo',
