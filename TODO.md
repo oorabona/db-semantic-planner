@@ -74,22 +74,12 @@
 
 ## Backlog
 
-### [Core] ✅ BUG: Deep relation traversal (4+ levels) returns 0 rows in IAM example — FIXED (2026-02-01)
-- Root cause: extractJsonAggDecisions flattened nested includes into siblings; compiler correlated all to root table
-- Fix: Tree-structured decisions (intentPath-based) + recursive compileJsonAggDecision with nested json_agg subqueries
-- Query 27 now returns 5 rows correctly with depth-based aliases (__t__, __t1__, __t2__, __t3__)
+(Archived → docs/historic/done-2026-02.md)
 
-### [Infra] ✅ pnpm test at root — VERIFIED WORKING (2026-02-01)
-- `pnpm test` runs test:unit (pnpm -r test → 1896 tests) + test:e2e (295 tests)
-- Total: 2191 tests across core, nql, adapter-pgsql, cli, mcp-server + e2e
-- Filter: `pnpm -C packages/<name> test` for single package
-
-### [Adapter] BUG: `| flat` drops all includes — Priority: HIGH
-- `users | ... | select *, userRoles.* | flat` produces `SELECT users.*` without any includes
-- Root cause: planner emits `choice: 'lateral'` for flat strategy (PostgreSQL supports lateral)
-- But compiler only handles `choice: 'json_agg'` and `choice: 'join'` — `'lateral'` silently falls through
-- Fix needed: implement lateral join compilation in adapter, or fallback to 'join' when 'lateral' is unsupported
-- Tested in iam.assert.dbsp query 28 (success: true only, no SQL assertion yet)
+### [Adapter] CTE include handler bridge incomplete — Priority: MEDIUM
+- CTE handler exists and produces `{ cte, join }` but compiler bridge only handles `join`, not WITH clause
+- CTE decisions skipped in extractor until bridge supports `result.cte` → WITH clause injection
+- Workaround: CTE queries fall back to direct LEFT JOIN (correct but less optimal)
 
 (Phase 5 SRP archived → docs/historic/done-2026-02.md)
 

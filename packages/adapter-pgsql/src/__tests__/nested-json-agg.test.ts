@@ -21,7 +21,8 @@ function buildJsonAggDecision(
 	overrides: Partial<PlanDecision> = {},
 ): PlanDecision {
 	return {
-		type: 'selectJsonAgg',
+		type: 'includeStrategy',
+		choice: 'json_agg',
 		relationName: 'posts',
 		targetTable: 'posts',
 		relationType: 'hasMany',
@@ -192,7 +193,8 @@ describe('Nested json_agg compilation', () => {
 	it('skips children with missing required fields', () => {
 		// Build child without relationType (omitted, not undefined)
 		const brokenChild: PlanDecision = {
-			type: 'selectJsonAgg',
+			type: 'includeStrategy',
+			choice: 'json_agg',
 			relationName: 'orphan',
 			targetTable: 'orphans',
 			foreignKey: 'user_id',

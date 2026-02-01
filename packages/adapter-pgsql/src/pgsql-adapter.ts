@@ -72,9 +72,8 @@ import { getNamingPlugin, type NamingPlugin } from './naming-plugin.js';
 import {
 	convertDottedFieldsToExists,
 	deriveForeignKey,
+	extractAllIncludeDecisions,
 	extractExistsDecisions,
-	extractJsonAggDecisions,
-	extractLeftJoinIncludeDecisions,
 	mapComparisonOperator,
 	valueToNode,
 } from './plan-decision-extractor.js';
@@ -299,21 +298,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			// (they have the actual target table in context.target)
 			const existsDecisions = extractExistsDecisions(plan, options?.model);
 
-			// Phase 3: Add selectJsonAgg decisions for json_agg include strategies
-			// Look at plan.decisions (from planner) for include-strategy with choice: 'json_agg'
-			const jsonAggDecisions = extractJsonAggDecisions(plan);
+			// Phase 3: Extract ALL include decisions (json_agg, join, lateral, cte, subquery)
+			const unifiedIncludeDecisions = extractAllIncludeDecisions(plan);
 
-			// Phase 3 (F-006): Add LEFT JOIN include decisions for to-one relations
-			const leftJoinIncludeDecisions = extractLeftJoinIncludeDecisions(plan);
-
-			// Propagate filter conditions from EXISTS to matching json_agg decisions
+			// Propagate filter conditions from EXISTS to matching include decisions
 			// When a relation is both filtered and included, the filter should appear
-			// in both the EXISTS subquery AND the json_agg subquery
-			const enrichedJsonAggDecisions = jsonAggDecisions.map((jd) => {
-				if (jd.type !== 'selectJsonAgg' || !jd.relationName) return jd;
+			// in both the EXISTS subquery AND the include subquery
+			const enrichedUnifiedDecisions = unifiedIncludeDecisions.map((jd) => {
+				if (jd.type !== 'includeStrategy' || !jd.relationName) return jd;
 
-				// Check planner-derived EXISTS decisions
-				// Match by relationName OR targetTable (planner may resolve aliases differently)
 				const matchingExists = existsDecisions.find(
 					(ed) =>
 						ed.type === 'where' &&
@@ -333,8 +326,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const allDecisions = [
 				...decisions,
 				...existsDecisions,
-				...enrichedJsonAggDecisions,
-				...leftJoinIncludeDecisions,
+				...enrichedUnifiedDecisions,
 			];
 
 			// Enrich range operator decisions with dataType from model

@@ -2,13 +2,18 @@
  * JSON_AGG Include Strategy Handler
  *
  * Implements the 'json_agg' include strategy using PostgreSQL's json_agg.
- * Aggregates related records into a JSON array in a single query.
+ * Uses to_jsonb(__t__) for wildcard row selection, with recursive nesting
+ * via jsonb_build_object merge for child relations.
  *
- * Produces: (SELECT json_agg(json_build_object(...)) FROM related WHERE fk = source.pk) AS relation
+ * Produces: COALESCE((SELECT json_agg(to_jsonb(__t__) [|| jsonb_build_object(...)]) FROM target AS __t__ WHERE ...), '[]'::json) AS relation
  */
 
-import type { Node, SelectStmt } from '@pgsql/types';
-import { columnRef, fkCorrelation, rangeVar } from '../../ast-helpers.js';
+import type { Node } from '@pgsql/types';
+import {
+	andExpr,
+	jsonAggCorrelation,
+	jsonAggSubquery,
+} from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -18,143 +23,106 @@ import type {
 } from '../types.js';
 
 /**
- * Build json_build_object call for selected columns
- *
- * json_build_object('col1', t.col1, 'col2', t.col2, ...)
+ * Recursively compile a json_agg decision into a ResTarget node.
+ * For nested includes, produces nested json_agg with jsonb_build_object merging.
+ * Each depth level uses a unique alias (__t0__, __t1__, etc.) to avoid conflicts.
  */
-function buildJsonBuildObject(
-	columns: readonly string[],
-	alias: string,
+function compileJsonAggRecursive(
+	decision: Decision,
+	parentAlias: string,
+	depth: number,
 	ctx: CompilerContext,
+	_state: CompilerState,
 ): Node {
-	const args: Node[] = [];
+	const innerAlias = depth === 0 ? '__t__' : `__t${depth}__`;
 
-	for (const col of columns) {
-		// Add key (column name)
-		args.push({
-			A_Const: { sval: { sval: ctx.naming.toDatabase(col) } },
-		});
-		// Add value (column reference)
-		args.push(columnRef(col, alias, undefined, ctx.naming));
+	const relation = decision.relation ?? decision.relationName;
+	const targetTable = decision.targetTable ?? relation;
+
+	if (!targetTable) {
+		throw new Error('JSON_AGG include requires targetTable');
+	}
+	if (!relation) {
+		throw new Error('JSON_AGG include requires relation name');
 	}
 
-	return {
-		FuncCall: {
-			funcname: [{ String: { sval: 'json_build_object' } }],
-			args,
-		},
-	};
-}
-
-/**
- * Build json_agg call
- *
- * json_agg(expression) or json_agg(expression ORDER BY ...)
- */
-function buildJsonAgg(
-	expression: Node,
-	orderBy?: readonly { column: string; direction?: 'ASC' | 'DESC' }[],
-	alias?: string,
-	ctx?: CompilerContext,
-): Node {
-	const funcCall: {
-		funcname: Node[];
-		args: Node[];
-		agg_order?: Node[];
-	} = {
-		funcname: [{ String: { sval: 'json_agg' } }],
-		args: [expression],
-	};
-
-	// Add ORDER BY if specified
-	if (orderBy && orderBy.length > 0 && alias && ctx) {
-		funcCall.agg_order = orderBy.map((item) => ({
-			SortBy: {
-				node: columnRef(item.column, alias, undefined, ctx.naming),
-				sortby_dir: item.direction === 'DESC' ? 'SORTBY_DESC' : 'SORTBY_ASC',
-				sortby_nulls: 'SORTBY_NULLS_DEFAULT',
-			},
-		}));
+	// Build correlation WHERE based on relation type
+	let whereExpr: Node;
+	if (decision.relationType === 'belongsTo') {
+		whereExpr = jsonAggCorrelation(
+			parentAlias,
+			decision.foreignKey ?? 'id',
+			innerAlias,
+			decision.parentKey ?? 'id',
+			ctx.naming,
+		);
+	} else {
+		whereExpr = jsonAggCorrelation(
+			parentAlias,
+			decision.parentKey ?? 'id',
+			innerAlias,
+			decision.foreignKey ?? 'id',
+			ctx.naming,
+		);
 	}
 
-	return { FuncCall: funcCall };
-}
+	// Merge pre-compiled filter conditions (from EXISTS propagation via bridge)
+	const compiledFilter = (decision as unknown as Record<string, unknown>)
+		._compiledFilterWhere as Node | undefined;
+	if (compiledFilter) {
+		whereExpr = andExpr(whereExpr, compiledFilter);
+	}
 
-/**
- * Build COALESCE to handle NULL (no related records)
- *
- * COALESCE(json_agg(...), '[]'::json)
- */
-function wrapWithCoalesce(jsonAgg: Node): Node {
-	return {
-		CoalesceExpr: {
-			args: [
-				jsonAgg,
-				{
-					TypeCast: {
-						arg: { A_Const: { sval: { sval: '[]' } } },
-						typeName: {
-							names: [{ String: { sval: 'json' } }],
-						},
-					},
-				},
-			],
-		},
-	};
-}
+	// Recursively compile children
+	let childNodes: { key: string; node: Node }[] | undefined;
+	if (decision.children && decision.children.length > 0) {
+		childNodes = [];
+		for (const child of decision.children) {
+			const childRelation = child.relation ?? child.relationName;
+			if (childRelation && child.targetTable && child.relationType) {
+				const childResTarget = compileJsonAggRecursive(
+					child,
+					innerAlias,
+					depth + 1,
+					ctx,
+					_state,
+				);
+				// Extract the COALESCE node from the ResTarget wrapper
+				const resTarget = childResTarget as { ResTarget?: { val: Node } };
+				if (resTarget.ResTarget?.val) {
+					childNodes.push({
+						key: childRelation,
+						node: resTarget.ResTarget.val,
+					});
+				}
+			}
+		}
+		if (childNodes.length === 0) childNodes = undefined;
+	}
 
-/**
- * Build a correlated subquery for json_agg
- */
-function buildJsonAggSubquery(
-	targetTable: string,
-	innerAlias: string,
-	outerAlias: string,
-	sourceColumn: string,
-	targetColumn: string,
-	columns: readonly string[],
-	orderBy:
-		| readonly { column: string; direction?: 'ASC' | 'DESC' }[]
-		| undefined,
-	ctx: CompilerContext,
-): Node {
-	// Build WHERE correlation
-	const whereClause = fkCorrelation(
-		targetColumn,
-		innerAlias,
-		sourceColumn,
-		outerAlias,
+	return jsonAggSubquery(
+		targetTable,
+		whereExpr,
+		`${relation}_json`,
+		ctx.schema,
 		ctx.naming,
+		{
+			...(childNodes && { childNodes }),
+			innerAlias,
+		},
 	);
-
-	// Build json_build_object for each row
-	const jsonObject = buildJsonBuildObject(columns, innerAlias, ctx);
-
-	// Wrap in json_agg
-	const jsonAgg = buildJsonAgg(jsonObject, orderBy, innerAlias, ctx);
-
-	// Wrap in COALESCE to return [] instead of NULL
-	const coalesced = wrapWithCoalesce(jsonAgg);
-
-	const stmt: SelectStmt = {
-		targetList: [{ ResTarget: { val: coalesced } }],
-		fromClause: [rangeVar(targetTable, innerAlias, ctx.schema, ctx.naming)],
-		whereClause,
-	};
-
-	return { SelectStmt: stmt };
 }
 
 /**
  * JSON_AGG strategy include handler
  *
- * Uses correlated subquery with json_agg to embed related records as JSON array.
- * Best for: hasMany relationships (1:N)
+ * Uses correlated subquery with json_agg + to_jsonb to embed related records as JSON array.
+ * Supports recursive nesting for deep relation traversal.
  *
  * Advantages:
  * - No row explosion (parent row count is preserved)
  * - Full related data in a single column
- * - Result is immediately usable as JSON
+ * - Recursive nesting via jsonb_build_object merge
  *
  * Disadvantages:
  * - Correlated subquery can be slower for large datasets
@@ -168,55 +136,18 @@ export const jsonAggIncludeHandler: IncludeHandler = {
 		ctx: CompilerContext,
 		state: CompilerState,
 	): IncludeResult {
-		const relation = decision.relation;
-		const targetTable = decision.targetTable ?? relation;
-		const sourceColumn = decision.sourceColumn ?? 'id';
-		const targetColumn = decision.targetColumn ?? `${ctx.rootTable}_id`;
-		const columns = decision.columns ?? ['id']; // Default to id if no columns specified
-		const orderBy = decision.orderBy;
-
-		if (!targetTable) {
-			throw new Error('JSON_AGG include requires targetTable');
-		}
-
-		if (!relation) {
-			throw new Error('JSON_AGG include requires relation name');
-		}
-
-		// Generate unique alias
-		const existingAliases = state.aliases.size;
-		const innerAlias = `${targetTable}_json_${existingAliases}`;
-		state.aliases.set(`json_${targetTable}`, innerAlias);
-
 		const outerAlias = ctx.currentAlias ?? ctx.rootTable;
 
-		// Build the correlated subquery
-		const subquery = buildJsonAggSubquery(
-			targetTable,
-			innerAlias,
+		const resTarget = compileJsonAggRecursive(
+			decision,
 			outerAlias,
-			sourceColumn,
-			targetColumn,
-			columns,
-			orderBy,
+			0,
 			ctx,
+			state,
 		);
 
-		// Wrap subquery as a scalar subquery in SELECT list
-		const target: Node = {
-			ResTarget: {
-				val: {
-					SubLink: {
-						subLinkType: 'EXPR_SUBLINK',
-						subselect: subquery,
-					},
-				},
-				name: ctx.naming.toDatabase(relation),
-			},
-		};
-
 		return {
-			targets: [target],
+			targets: [resTarget],
 		};
 	},
 };
