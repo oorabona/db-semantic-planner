@@ -41,9 +41,9 @@ describe('assertion-runner', () => {
 			expect(normalizeSQL(input)).toBe(expected);
 		});
 
-		it('removes spaces around parentheses', () => {
+		it('removes spaces inside parentheses', () => {
 			const input = 'SELECT * FROM users WHERE id IN ( 1, 2, 3 )';
-			const expected = 'select * from users where id in(1, 2, 3)';
+			const expected = 'select * from users where id in (1, 2, 3)';
 			expect(normalizeSQL(input)).toBe(expected);
 		});
 

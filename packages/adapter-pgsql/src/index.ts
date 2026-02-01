@@ -38,6 +38,8 @@ export {
 	ltExpr,
 	lteExpr,
 	neExpr,
+	// Utilities
+	normalizeSQL,
 	notExpr,
 	nullConstNode,
 	orExpr,
