@@ -13,11 +13,10 @@ import type { QueryIntent, SelectIntent, WhereIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
 import { plan as executePlan } from '../planner.js';
-
+import { getColumnName } from './column-utils.js';
 import { and } from './filters.js';
 import {
 	BRAND,
-	COLUMN_META,
 	type ColumnRef,
 	type InferTableRow,
 	TABLE_META,
@@ -42,17 +41,6 @@ type InferPickedColumns<TCols extends readonly ColumnRef<any, any, any>[]> = {
 		? CName
 		: never]: K extends ColumnRef<any, any, infer CType> ? CType : never;
 };
-
-/**
- * Helper to extract column name from ColumnRef.
- */
-function getColumnName(col: ColumnRef<any, any, any>): string {
-	const name = (col as unknown as Record<symbol, string>)[COLUMN_META];
-	if (name === undefined) {
-		throw new Error('Invalid ColumnRef: missing COLUMN_META');
-	}
-	return name;
-}
 
 /**
  * Helper to extract table name from TableRef.

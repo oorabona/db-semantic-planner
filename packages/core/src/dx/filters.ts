@@ -38,6 +38,7 @@ import type {
 	WhereRangeIntent,
 	WhereRelationFilterIntent,
 } from '../intent-ast.js';
+import { getColumnName } from './column-utils.js';
 import {
 	COLUMN_META,
 	type ColumnRef,
@@ -84,24 +85,6 @@ function _getRelationPath(
 		return (col as unknown as Record<symbol, readonly string[]>)[RELATION_PATH];
 	}
 	return undefined;
-}
-
-/**
- * Extract the column name from a ColumnRef or string.
- * @internal
- */
-function getColumnName(
-	field: ColumnRef<string, string, unknown> | string,
-): string {
-	if (typeof field === 'string') {
-		return field;
-	}
-	// ColumnRef has COLUMN_META symbol property
-	const colName = (field as unknown as Record<symbol, string>)[COLUMN_META];
-	if (colName === undefined) {
-		throw new Error('Invalid ColumnRef: missing COLUMN_META');
-	}
-	return colName;
 }
 
 // ============================================================================
