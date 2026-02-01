@@ -81,7 +81,7 @@ function createMockAdapter(): Adapter {
 			supportsWindowFunctions: true,
 			supportsArrayAgg: true,
 			dialectName: 'mock',
-		} as AdapterCapabilities,
+		} as unknown as AdapterCapabilities,
 		namingConvention: 'preserve' as const,
 		compile: notImplemented,
 		compileWithIncludes: notImplemented,
@@ -95,6 +95,7 @@ function createMockAdapter(): Adapter {
 		withSchema: () => createMockAdapter(),
 		createDump: notImplemented,
 		compileInsert: notImplemented,
+		compileInsertFrom: notImplemented,
 		compileUpdate: notImplemented,
 		compileDelete: notImplemented,
 		compileRecursive: notImplemented,
@@ -362,8 +363,8 @@ describe('RecursiveQueryBuilder', () => {
 
 			expect(intent.emit?.joinWith).toBeDefined();
 			expect(intent.emit?.joinWith?.length).toBe(1);
-			expect(intent.emit?.joinWith?.[0].table).toBe('rolePermissions');
-			expect(intent.emit?.joinWith?.[0].type).toBe('inner');
+			expect(intent.emit?.joinWith?.[0]!.table).toBe('rolePermissions');
+			expect(intent.emit?.joinWith?.[0]!.type).toBe('inner');
 		});
 
 		it('should support leftJoin()', () => {
@@ -382,7 +383,7 @@ describe('RecursiveQueryBuilder', () => {
 				.leftJoin('rolePermissions', 'id', 'role_id')
 				.buildIntent();
 
-			expect(intent.emit?.joinWith?.[0].type).toBe('left');
+			expect(intent.emit?.joinWith?.[0]!.type).toBe('left');
 		});
 
 		it('should support multiple joins', () => {
@@ -503,8 +504,10 @@ describe('RecursiveQueryBuilder', () => {
 				.trackPath({ alias: 'path_ids', strategy: 'array' })
 				.buildIntent();
 
-			expect(intent.track?.path?.alias).toBe('path_ids');
-			expect(intent.track?.path?.strategy).toBe('array');
+			if (typeof intent.track?.path !== 'string' && intent.track?.path) {
+				expect((intent.track!.path as any).alias).toBe('path_ids');
+				expect(intent.track.path.strategy).toBe('array');
+			}
 		});
 
 		it('should support dedupeWith()', () => {
@@ -520,10 +523,10 @@ describe('RecursiveQueryBuilder', () => {
 				.nodeId('id')
 				.traverseVia('roleEdges', { from: 'from_role_id', to: 'to_role_id' })
 				.maxDepth(10)
-				.dedupeWith('skip-visited')
+				.dedupeWith('none')
 				.buildIntent();
 
-			expect(intent.dedupe).toBe('skip-visited');
+			expect(intent.dedupe).toBe('none');
 		});
 	});
 

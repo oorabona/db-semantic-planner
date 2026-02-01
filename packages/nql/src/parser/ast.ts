@@ -151,9 +151,9 @@ export interface NqlSelectExpression {
 
 export interface NqlJoinSpec {
 	relation: string;
-	params?: NqlJoinParam[];
-	via?: string; // Disambiguation when multiple FKs to same table
-	condition?: NqlExpression;
+	params?: NqlJoinParam[] | undefined;
+	via?: string | undefined; // Disambiguation when multiple FKs to same table
+	condition?: NqlExpression | undefined;
 }
 
 export interface NqlJoinParam {
@@ -406,11 +406,11 @@ export interface NqlInsertFrom {
 	/** Source table to select from */
 	source: string;
 	/** Optional column mapping (default: same columns) */
-	columns?: string[];
+	columns?: string[] | undefined;
 	/** WHERE clause to filter source rows */
-	where?: NqlExpression;
+	where?: NqlExpression | undefined;
 	/** LIMIT clause to restrict rows */
-	limit?: number;
+	limit?: number | undefined;
 }
 
 export interface NqlUpdate {

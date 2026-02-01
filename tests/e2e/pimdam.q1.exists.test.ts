@@ -152,7 +152,7 @@ describe('Q1: Products with approved FR main image', () => {
 
 			// Acme: PROD-001 and PROD-002 have approved FR main images
 			expect(products).toHaveLength(2);
-			const skus = products.map((p: { sku: string }) => p.sku);
+			const skus = products.map((p: any) => p.sku);
 			expect(skus).toContain('PROD-001');
 			expect(skus).toContain('PROD-002');
 		});
@@ -178,7 +178,7 @@ describe('Q1: Products with approved FR main image', () => {
 
 			// Globex: GLX-001, GLX-002, GLX-003 have approved FR main images
 			expect(products).toHaveLength(3);
-			const skus = products.map((p: { sku: string }) => p.sku);
+			const skus = products.map((p: any) => p.sku);
 			expect(skus).toContain('GLX-001');
 			expect(skus).toContain('GLX-002');
 			expect(skus).toContain('GLX-003');

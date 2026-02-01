@@ -77,7 +77,7 @@ describe('assertion-runner', () => {
 				const summary = runAssertions(blocks, results, ['query']);
 				expect(summary.passed).toBe(1);
 				expect(summary.failed).toBe(0);
-				expect(summary.results[0].passed).toBe(true);
+				expect(summary.results[0]!.passed).toBe(true);
 			});
 
 			it('fails when output does not contain expected text', () => {
@@ -93,8 +93,8 @@ describe('assertion-runner', () => {
 				const summary = runAssertions(blocks, results, ['query']);
 				expect(summary.passed).toBe(0);
 				expect(summary.failed).toBe(1);
-				expect(summary.results[0].passed).toBe(false);
-				expect(summary.results[0].assertions[0].message).toContain('contain');
+				expect(summary.results[0]!.passed).toBe(false);
+				expect(summary.results[0]!.assertions[0]!.message).toContain('contain');
 			});
 		});
 
@@ -249,7 +249,9 @@ describe('assertion-runner', () => {
 
 				const summary = runAssertions(blocks, results, ['query']);
 				expect(summary.failed).toBe(1);
-				expect(summary.results[0].assertions[0].message).toContain('mismatch');
+				expect(summary.results[0]!.assertions[0]!.message).toContain(
+					'mismatch',
+				);
 			});
 		});
 
@@ -276,7 +278,7 @@ describe('assertion-runner', () => {
 
 				const summary = runAssertions(blocks, results, ['query']);
 				expect(summary.failed).toBe(1);
-				expect(summary.results[0].assertions[0].message).toContain(
+				expect(summary.results[0]!.assertions[0]!.message).toContain(
 					'Expected 3 params, got 2',
 				);
 			});
@@ -341,7 +343,7 @@ describe('assertion-runner', () => {
 
 				const summary = runAssertions(blocks, results, ['query']);
 				expect(summary.failed).toBe(1);
-				expect(summary.results[0].assertions[0].message).toContain('succeed');
+				expect(summary.results[0]!.assertions[0]!.message).toContain('succeed');
 			});
 		});
 
@@ -389,7 +391,7 @@ describe('assertion-runner', () => {
 				expect(summary.total).toBe(3);
 				expect(summary.passed).toBe(3);
 				expect(summary.failed).toBe(0);
-				expect(summary.results[0].assertions).toHaveLength(3);
+				expect(summary.results[0]!.assertions).toHaveLength(3);
 			});
 
 			it('marks block as failed if any assertion fails', () => {
@@ -411,7 +413,7 @@ describe('assertion-runner', () => {
 				const summary = runAssertions(blocks, results, ['query']);
 				expect(summary.passed).toBe(1);
 				expect(summary.failed).toBe(1);
-				expect(summary.results[0].passed).toBe(false);
+				expect(summary.results[0]!.passed).toBe(false);
 			});
 		});
 
@@ -497,7 +499,7 @@ describe('assertion-runner', () => {
 				];
 
 				const summary = runAssertions(blocks, results, ['query']);
-				expect(summary.results[0].querySuccess).toBe(false);
+				expect(summary.results[0]!.querySuccess).toBe(false);
 				// Assertion fails because sql is empty
 				expect(summary.failed).toBe(1);
 			});
@@ -671,7 +673,7 @@ describe('assertion-runner', () => {
 
 				const summary = runAssertions(blocks, results, ['query']);
 				expect(summary.failed).toBe(1);
-				expect(summary.results[0].assertions[0].message).toContain('object');
+				expect(summary.results[0]!.assertions[0]!.message).toContain('object');
 			});
 
 			it('handles null type', () => {
@@ -703,7 +705,11 @@ describe('assertion-runner', () => {
 				const blocks = [
 					createBlock({
 						assertions: [
-							{ type: 'params.value', value: { index: 1, value: 42 }, line: 2 },
+							{
+								type: 'params.value',
+								value: { index: 1, value: 42 } as any,
+								line: 2,
+							},
 						],
 					}),
 				];
@@ -731,8 +737,8 @@ describe('assertion-runner', () => {
 				expect(summary.skipped).toBe(1);
 				expect(summary.passed).toBe(0);
 				expect(summary.failed).toBe(0);
-				expect(summary.results[0].assertions[0].skipped).toBe(true);
-				expect(summary.results[0].assertions[0].skipReason).toContain(
+				expect(summary.results[0]!.assertions[0]!.skipped).toBe(true);
+				expect(summary.results[0]!.assertions[0]!.skipReason).toContain(
 					'dry-run',
 				);
 			});
@@ -769,7 +775,7 @@ describe('assertion-runner', () => {
 
 				const summary = runAssertions(blocks, results, ['query'], true);
 				expect(summary.failed).toBe(1);
-				expect(summary.results[0].assertions[0].message).toBe(
+				expect(summary.results[0]!.assertions[0]!.message).toBe(
 					'Expected 5 rows, got 3',
 				);
 			});
@@ -804,7 +810,7 @@ describe('assertion-runner', () => {
 
 				const summary = runAssertions(blocks, results, ['query'], true);
 				expect(summary.failed).toBe(1);
-				expect(summary.results[0].assertions[0].message).toBe(
+				expect(summary.results[0]!.assertions[0]!.message).toBe(
 					'Expected at least 3 rows, got 1',
 				);
 			});
@@ -891,7 +897,7 @@ describe('assertion-runner', () => {
 						assertions: [
 							{
 								type: 'db.value.equals',
-								value: { row: 0, column: 'name', value: 'Alice' },
+								value: { row: 0, column: 'name', value: 'Alice' } as any,
 								line: 2,
 							},
 						],

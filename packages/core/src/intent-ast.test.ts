@@ -567,16 +567,16 @@ describe('IntentAST', () => {
 			];
 
 			const [i0, i1, i2, i3, i4, i5, i6, i7, i8, i9] = intents;
-			expect(isWhereComparison(i0)).toBe(true);
-			expect(isWhereLike(i1)).toBe(true);
-			expect(isWhereIn(i2)).toBe(true);
-			expect(isWhereNull(i3)).toBe(true);
-			expect(isWhereAnd(i4)).toBe(true);
-			expect(isWhereOr(i5)).toBe(true);
-			expect(isWhereNot(i6)).toBe(true);
-			expect(isWhereExists(i7)).toBe(true);
-			expect(isWhereNotExists(i8)).toBe(true);
-			expect(isWhereRelationFilter(i9)).toBe(true);
+			expect(isWhereComparison(i0!)).toBe(true);
+			expect(isWhereLike(i1!)).toBe(true);
+			expect(isWhereIn(i2!)).toBe(true);
+			expect(isWhereNull(i3!)).toBe(true);
+			expect(isWhereAnd(i4!)).toBe(true);
+			expect(isWhereOr(i5!)).toBe(true);
+			expect(isWhereNot(i6!)).toBe(true);
+			expect(isWhereExists(i7!)).toBe(true);
+			expect(isWhereNotExists(i8!)).toBe(true);
+			expect(isWhereRelationFilter(i9!)).toBe(true);
 		});
 
 		it('should correctly identify logical vs non-logical intents', () => {
@@ -939,8 +939,7 @@ describe('IntentAST', () => {
 		it('should not identify query intents as mutations', () => {
 			const query: QueryIntent = { type: 'select', from: 'users' };
 
-			// @ts-expect-error - Testing runtime behavior
-			expect(isMutationIntent(query)).toBe(false);
+			expect(isMutationIntent(query as any)).toBe(false);
 		});
 	});
 
@@ -1025,7 +1024,7 @@ describe('IntentAST', () => {
 				},
 			};
 
-			expect(window.over.orderBy?.[0].direction).toBeUndefined();
+			expect(window.over.orderBy?.[0]!.direction).toBeUndefined();
 			expect(isWindowIntent(window)).toBe(true);
 		});
 

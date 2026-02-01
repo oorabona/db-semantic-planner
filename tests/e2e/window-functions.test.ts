@@ -248,7 +248,7 @@ describe('DX-021: Window Functions E2E', () => {
 
 			// First item running total = its own price
 			const first = sortedByPrice[0];
-			expect(Number(first.runningTotal)).toBe(first.priceCents);
+			expect(Number(first!.runningTotal)).toBe(first!.priceCents);
 
 			// Last item running total = sum of all
 			const totalPrice = results.reduce((sum, r) => sum + r.priceCents, 0);
@@ -291,7 +291,7 @@ describe('DX-021: Window Functions E2E', () => {
 			// Charger (product_id=8) has only one variant: 999
 			const chargerVariants = results.filter((r) => r.productId === 8);
 			expect(chargerVariants.length).toBe(1);
-			expect(Number(chargerVariants[0].productRunningTotal)).toBe(999);
+			expect(Number(chargerVariants[0]!.productRunningTotal)).toBe(999);
 		});
 	});
 

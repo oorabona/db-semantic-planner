@@ -40,11 +40,9 @@ describe('EXPLAIN Integration', () => {
 		const pool = await getTestPool();
 		const explainSql = `EXPLAIN (FORMAT JSON) ${sqlStr}`;
 
-		const result = await sql
-			.raw<{ 'QUERY PLAN': object[] }>(explainSql)
-			.execute(pool);
+		const result = await sql.raw(explainSql).execute(pool);
 
-		return JSON.stringify(result.rows[0]['QUERY PLAN'], null, 2);
+		return JSON.stringify(result.rows[0]!['QUERY PLAN'], null, 2);
 	};
 
 	describe('Basic queries (no parameters)', () => {

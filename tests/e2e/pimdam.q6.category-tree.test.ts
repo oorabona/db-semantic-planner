@@ -109,9 +109,9 @@ describe('Q6: Category Tree (Materialized Path)', () => {
 
 			const breadcrumb = result.rows as { name: string; path: string }[];
 			expect(breadcrumb).toHaveLength(3);
-			expect(breadcrumb[0].name).toBe('Electronics');
-			expect(breadcrumb[1].name).toBe('Phones');
-			expect(breadcrumb[2].name).toBe('Smartphones');
+			expect(breadcrumb[0]!.name).toBe('Electronics');
+			expect(breadcrumb[1]!.name).toBe('Phones');
+			expect(breadcrumb[2]!.name).toBe('Smartphones');
 		});
 
 		it('should get ancestors for T-Shirts category', async () => {
@@ -127,8 +127,8 @@ describe('Q6: Category Tree (Materialized Path)', () => {
 
 			const breadcrumb = result.rows as { name: string }[];
 			expect(breadcrumb).toHaveLength(2);
-			expect(breadcrumb[0].name).toBe('Clothing');
-			expect(breadcrumb[1].name).toBe('T-Shirts');
+			expect(breadcrumb[0]!.name).toBe('Clothing');
+			expect(breadcrumb[1]!.name).toBe('T-Shirts');
 		});
 	});
 

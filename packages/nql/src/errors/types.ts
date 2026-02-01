@@ -15,27 +15,27 @@ export interface SourceLocation {
 export interface NqlError {
 	code: string;
 	message: string;
-	location?: SourceLocation;
-	suggestion?: string;
+	location?: SourceLocation | undefined;
+	suggestion?: string | undefined;
 }
 
 /** Lexer errors (tokenization failures) */
 export interface NqlLexerError extends NqlError {
 	code: `ERR-LEX-${string}`;
-	unexpectedChar?: string;
+	unexpectedChar?: string | undefined;
 }
 
 /** Parser errors (syntax errors) */
 export interface NqlParseError extends NqlError {
 	code: `ERR-PARSE-${string}`;
-	expected?: string[];
-	found?: string;
+	expected?: string[] | undefined;
+	found?: string | undefined;
 }
 
 /** Semantic errors (validation failures) */
 export interface NqlSemanticError extends NqlError {
 	code: `ERR-SEM-${string}`;
-	relatedSymbol?: string;
+	relatedSymbol?: string | undefined;
 }
 
 /** Limit errors (complexity exceeded) */
@@ -49,8 +49,8 @@ export interface NqlLimitError extends NqlError {
 export interface NqlWarning {
 	code: string;
 	message: string;
-	location?: SourceLocation;
-	suggestion?: string;
+	location?: SourceLocation | undefined;
+	suggestion?: string | undefined;
 }
 
 /** Error codes enum for type safety */
@@ -104,8 +104,8 @@ export function createLexerError(
 	return {
 		code: code as `ERR-LEX-${string}`,
 		message,
-		location,
-		unexpectedChar,
+		location: location as SourceLocation | undefined,
+		unexpectedChar: unexpectedChar as string | undefined,
 	};
 }
 
@@ -120,9 +120,9 @@ export function createParseError(
 	return {
 		code: code as `ERR-PARSE-${string}`,
 		message,
-		location,
-		expected,
-		found,
+		location: location as SourceLocation | undefined,
+		expected: expected as string[] | undefined,
+		found: found as string | undefined,
 	};
 }
 
@@ -137,9 +137,9 @@ export function createSemanticError(
 	return {
 		code: code as `ERR-SEM-${string}`,
 		message,
-		location,
-		suggestion,
-		relatedSymbol,
+		location: location as SourceLocation | undefined,
+		suggestion: suggestion as string | undefined,
+		relatedSymbol: relatedSymbol as string | undefined,
 	};
 }
 
@@ -150,9 +150,9 @@ export function createSemanticError(
  */
 export class NqlSemanticException extends Error {
 	readonly code: `ERR-SEM-${string}`;
-	readonly location?: SourceLocation;
-	readonly suggestion?: string;
-	readonly relatedSymbol?: string;
+	readonly location?: SourceLocation | undefined;
+	readonly suggestion?: string | undefined;
+	readonly relatedSymbol?: string | undefined;
 
 	constructor(
 		code: string,
@@ -164,8 +164,8 @@ export class NqlSemanticException extends Error {
 		super(message);
 		this.name = 'NqlSemanticException';
 		this.code = code as `ERR-SEM-${string}`;
-		this.location = location;
-		this.suggestion = suggestion;
-		this.relatedSymbol = relatedSymbol;
+		this.location = location as SourceLocation | undefined;
+		this.suggestion = suggestion as string | undefined;
+		this.relatedSymbol = relatedSymbol as string | undefined;
 	}
 }

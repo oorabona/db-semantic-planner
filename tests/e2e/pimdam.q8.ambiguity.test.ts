@@ -76,7 +76,7 @@ describe('Q8: Ambiguity via/role', () => {
 
 			const product = (
 				result.rows as { author_name: string; reviewer_name: string }[]
-			)[0];
+			)[0]!;
 			expect(product.author_name).toBe('Alice Author');
 			expect(product.reviewer_name).toBe('Bob Reviewer');
 		});
@@ -94,7 +94,7 @@ describe('Q8: Ambiguity via/role', () => {
 
 			const products = result.rows as { sku: string; author_name: string }[];
 			expect(products.length).toBeGreaterThanOrEqual(1);
-			expect(products[0].author_name).toBe('Bob Reviewer');
+			expect(products[0]!.author_name).toBe('Bob Reviewer');
 			// Product 5 (EXPIRING-001) has author_id=2
 			expect(products.some((p) => p.sku === 'EXPIRING-001')).toBe(true);
 		});
@@ -112,7 +112,7 @@ describe('Q8: Ambiguity via/role', () => {
 
 			const products = result.rows as { sku: string; reviewer_name: string }[];
 			expect(products.length).toBeGreaterThanOrEqual(1);
-			expect(products[0].reviewer_name).toBe('Charlie Admin');
+			expect(products[0]!.reviewer_name).toBe('Charlie Admin');
 			// Product 4 (TSHIRT-001) has reviewer_id=3
 			expect(products.some((p) => p.sku === 'TSHIRT-001')).toBe(true);
 		});
@@ -191,8 +191,8 @@ describe('Q8: Ambiguity via/role', () => {
 				reviewerId: number;
 			}[];
 			expect(result.length).toBe(1);
-			expect(result[0].authorId).toBe(1); // Alice
-			expect(result[0].reviewerId).toBe(2); // Bob
+			expect(result[0]!.authorId).toBe(1); // Alice
+			expect(result[0]!.reviewerId).toBe(2); // Bob
 		});
 	});
 
@@ -349,7 +349,7 @@ describe('Q8: Ambiguity via/role', () => {
 
 			const images = result.rows as { role: string; storage_key: string }[];
 			expect(images.length).toBe(1);
-			expect(images[0].role).toBe('main');
+			expect(images[0]!.role).toBe('main');
 		});
 
 		it('should filter product images by role=gallery', async () => {
@@ -368,7 +368,7 @@ describe('Q8: Ambiguity via/role', () => {
 
 			const images = result.rows as { role: string; storage_key: string }[];
 			expect(images.length).toBe(1);
-			expect(images[0].role).toBe('gallery');
+			expect(images[0]!.role).toBe('gallery');
 		});
 
 		it('should filter product images by role=thumbnail', async () => {
@@ -387,7 +387,7 @@ describe('Q8: Ambiguity via/role', () => {
 
 			const images = result.rows as { role: string; storage_key: string }[];
 			expect(images.length).toBe(1);
-			expect(images[0].role).toBe('thumbnail');
+			expect(images[0]!.role).toBe('thumbnail');
 		});
 
 		it('should query via ORM with role filter using eq and and()', async () => {
@@ -405,8 +405,8 @@ describe('Q8: Ambiguity via/role', () => {
 
 			const results = mainImages as { productId: number; role: string }[];
 			expect(results.length).toBe(1);
-			expect(results[0].role).toBe('main');
-			expect(results[0].productId).toBe(10);
+			expect(results[0]!.role).toBe('main');
+			expect(results[0]!.productId).toBe(10);
 		});
 
 		it('should demonstrate junction vs FK disambiguation patterns', async () => {
@@ -465,6 +465,7 @@ describe('Q8: Ambiguity via/role', () => {
 			const orm = createOrm({
 				model: pimdamExtendedModel,
 				adapter,
+				// @ts-expect-error — relationHints doesn't exist on type
 				relationHints: hints,
 			});
 
@@ -681,7 +682,7 @@ describe('Q8: Ambiguity via/role', () => {
 
 			const results = products as { sku: string }[];
 			expect(results.length).toBe(1);
-			expect(results[0].sku).toBe('WIDGET-001');
+			expect(results[0]!.sku).toBe('WIDGET-001');
 		});
 	});
 });
