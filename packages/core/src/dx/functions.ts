@@ -14,6 +14,7 @@ import type {
 	RawExpressionIntent,
 } from '../intent-ast.js';
 
+import { getColumnName } from './column-utils.js';
 import { COLUMN_META, type ColumnRef, type RelationRef } from './table-ref.js';
 
 // ============================================================================
@@ -80,17 +81,6 @@ export interface CaseExpr<T> {
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-/**
- * Extract column name from a ColumnRef.
- */
-function getColumnName(col: ColumnRef<any, any, any>): string {
-	const name = (col as unknown as Record<symbol, string>)[COLUMN_META];
-	if (name === undefined) {
-		throw new Error('Invalid ColumnRef: missing COLUMN_META');
-	}
-	return name;
-}
 
 /**
  * Validate an alias name.
