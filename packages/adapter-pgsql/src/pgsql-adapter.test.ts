@@ -215,6 +215,112 @@ describe('PgsqlAdapter', () => {
 			expect(compiled.sql).toContain('ON CONFLICT');
 			expect(compiled.parameters).toBeDefined();
 		});
+
+		it('should emit type-cast for range columns in INSERT', () => {
+			const pool = createMockPool();
+			const model = {
+				tables: new Map([
+					[
+						'priceTiers',
+						{
+							name: 'price_tiers',
+							columns: [
+								{ name: 'name', type: 'string', nullable: false },
+								{
+									name: 'quantityRange',
+									type: 'int4range',
+									nullable: false,
+								},
+							],
+							foreignKeys: [],
+							indexes: [],
+						},
+					],
+				]),
+				relations: new Map(),
+				getTable(name: string) {
+					return this.tables.get(name);
+				},
+				getRelation() {
+					return undefined;
+				},
+				getRelationsFrom() {
+					return [];
+				},
+				getRelationsTo() {
+					return [];
+				},
+				isAmbiguous() {
+					return { ambiguous: false as const };
+				},
+			} as any;
+
+			const adapter = createPgsqlAdapter(pool, { model });
+
+			const intent = {
+				table: 'priceTiers',
+				values: [{ name: 'Tier 1', quantityRange: '[1,50)' }],
+			} as any;
+
+			const compiled = adapter.compileInsert(intent);
+
+			// Should contain int4range type cast in SQL (CAST($N AS int4range))
+			expect(compiled.sql).toContain('int4range');
+			expect(compiled.parameters).toEqual(['Tier 1', '[1,50)']);
+		});
+
+		it('should emit type-cast for range columns in UPDATE', () => {
+			const pool = createMockPool();
+			const model = {
+				tables: new Map([
+					[
+						'priceTiers',
+						{
+							name: 'price_tiers',
+							columns: [
+								{ name: 'name', type: 'string', nullable: false },
+								{
+									name: 'quantityRange',
+									type: 'int4range',
+									nullable: false,
+								},
+							],
+							foreignKeys: [],
+							indexes: [],
+						},
+					],
+				]),
+				relations: new Map(),
+				getTable(name: string) {
+					return this.tables.get(name);
+				},
+				getRelation() {
+					return undefined;
+				},
+				getRelationsFrom() {
+					return [];
+				},
+				getRelationsTo() {
+					return [];
+				},
+				isAmbiguous() {
+					return { ambiguous: false as const };
+				},
+			} as any;
+
+			const adapter = createPgsqlAdapter(pool, { model });
+
+			const intent = {
+				table: 'priceTiers',
+				set: { name: 'Updated Tier', quantityRange: '[10,100)' },
+			} as any;
+
+			const compiled = adapter.compileUpdate(intent);
+
+			// Should contain int4range type cast in SQL (CAST($N AS int4range))
+			expect(compiled.sql).toContain('int4range');
+			expect(compiled.parameters).toEqual(['Updated Tier', '[10,100)']);
+		});
 	});
 
 	describe('execute', () => {

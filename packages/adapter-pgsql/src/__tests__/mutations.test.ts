@@ -138,6 +138,36 @@ describe('Mutation Compiler', () => {
 			expect(stmt.selectStmt.SelectStmt.valuesLists).toHaveLength(3);
 			expect(state.parameters).toEqual(['tag1', 'tag2', 'tag3']);
 		});
+
+		it('should emit TypeCast for range type columns', () => {
+			const ctx = createContext('priceTiers');
+			const state = createState();
+
+			const config: InsertConfig = {
+				table: 'priceTiers',
+				columns: ['name', 'quantityRange'],
+				values: [['Tier 1', '[1,50)']],
+				columnTypes: { quantityRange: 'int4range' },
+			};
+
+			const result = compileInsert(config, ctx, state);
+			const stmt = (result as any).InsertStmt;
+			const valuesRow = stmt.selectStmt.SelectStmt.valuesLists[0].List.items;
+
+			// First column (name) should be a plain ParamRef
+			expect(valuesRow[0]).toHaveProperty('ParamRef');
+			expect(valuesRow[0].ParamRef.number).toBe(1);
+
+			// Second column (quantityRange) should be a TypeCast wrapping ParamRef
+			expect(valuesRow[1]).toHaveProperty('TypeCast');
+			expect(valuesRow[1].TypeCast.arg).toHaveProperty('ParamRef');
+			expect(valuesRow[1].TypeCast.arg.ParamRef.number).toBe(2);
+			expect(valuesRow[1].TypeCast.typeName.names[0].String.sval).toBe(
+				'int4range',
+			);
+
+			expect(state.parameters).toEqual(['Tier 1', '[1,50)']);
+		});
 	});
 
 	describe('compileUpdate', () => {
@@ -217,6 +247,37 @@ describe('Mutation Compiler', () => {
 
 			expect(stmt.returningList).toBeDefined();
 			expect(stmt.returningList).toHaveLength(3);
+		});
+
+		it('should emit TypeCast for range type columns in SET', () => {
+			const ctx = createContext('priceTiers');
+			const state = createState();
+
+			const config: UpdateConfig = {
+				table: 'priceTiers',
+				set: [
+					{ column: 'name', value: 'Updated Tier' },
+					{ column: 'quantityRange', value: '[10,100)' },
+				],
+				columnTypes: { quantityRange: 'int4range' },
+			};
+
+			const result = compileUpdate(config, ctx, state);
+			const stmt = (result as any).UpdateStmt;
+
+			// First SET target (name) should have a plain ParamRef
+			const nameTarget = stmt.targetList[0].ResTarget.val;
+			expect(nameTarget).toHaveProperty('ParamRef');
+
+			// Second SET target (quantityRange) should have a TypeCast
+			const rangeTarget = stmt.targetList[1].ResTarget.val;
+			expect(rangeTarget).toHaveProperty('TypeCast');
+			expect(rangeTarget.TypeCast.arg.ParamRef.number).toBe(2);
+			expect(rangeTarget.TypeCast.typeName.names[0].String.sval).toBe(
+				'int4range',
+			);
+
+			expect(state.parameters).toEqual(['Updated Tier', '[10,100)']);
 		});
 	});
 

@@ -64,6 +64,7 @@ import {
 	type DeleteConfig,
 	type InsertConfig,
 	type InsertFromConfig,
+	RANGE_TYPES,
 	type UpdateConfig,
 	type UpsertConfig,
 } from './mutations/index.js';
@@ -370,6 +371,31 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * while intentToDecisions only has the relation name.
 	 * Also processes nested conditions from the intent with the correct target table.
 	 */
+
+	/**
+	 * Look up column database types for the given table and column names.
+	 * Returns a mapping of column names to their DB type strings,
+	 * but only for columns whose type requires explicit type-casting (e.g. range types).
+	 * Returns undefined if no type-cast columns are found (or model unavailable).
+	 */
+	private getColumnTypes(
+		tableName: string,
+		columns: string[],
+	): Record<string, string> | undefined {
+		if (!this.model) return undefined;
+		const table = this.model.getTable(tableName);
+		if (!table) return undefined;
+		let result: Record<string, string> | undefined;
+		for (const col of columns) {
+			const columnIR = table.columns.find((c) => c.name === col);
+			if (columnIR && RANGE_TYPES.has(columnIR.type)) {
+				result ??= {};
+				result[col] = columnIR.type;
+			}
+		}
+		return result;
+	}
+
 	private extractExistsDecisions(
 		plan: PlanReport,
 		model?: ModelIR,
@@ -1155,11 +1181,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			columns.map((col) => row[col]),
 		);
 
+		const columnTypes = this.getColumnTypes(intent.table, columns);
+
 		const config: InsertConfig = {
 			table: intent.table,
 			columns,
 			values,
 			...(intent.returning && { returning: [...intent.returning] }),
+			...(columnTypes && { columnTypes }),
 		};
 
 		const ast = compileInsertMutation(config, ctx, state);
@@ -1225,6 +1254,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const state = createCompilerState();
 
 		// Convert UpdateIntent to UpdateConfig
+		const setColumns = Object.keys(intent.set ?? {});
+		const columnTypes = this.getColumnTypes(intent.table, setColumns);
+
 		const config: UpdateConfig = {
 			table: intent.table,
 			set: Object.entries(intent.set ?? {}).map(([column, value]) => ({
@@ -1233,6 +1265,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			})),
 			...(intent.where && { where: [intent.where as any] }),
 			...(intent.returning && { returning: [...intent.returning] }),
+			...(columnTypes && { columnTypes }),
 		};
 
 		const ast = compileUpdateMutation(config, ctx, state);

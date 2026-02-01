@@ -13,6 +13,7 @@ export {
 	type DeleteConfig,
 	type InsertConfig,
 	type InsertFromConfig,
+	RANGE_TYPES,
 	type UpdateConfig,
 } from './mutation-compiler.js';
 
