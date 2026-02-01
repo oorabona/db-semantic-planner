@@ -5,7 +5,6 @@
  */
 
 import type { Node, NullTest } from '@pgsql/types';
-import { columnRef } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -13,14 +12,7 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { NULL_OPERATORS } from '../types.js';
-
-/**
- * Build column reference from decision column
- */
-function buildColumnRef(column: string, ctx: CompilerContext): Node {
-	const alias = ctx.currentAlias ?? ctx.rootTable;
-	return columnRef(column, alias, ctx.schema, ctx.naming);
-}
+import { buildColumnRef } from './utils.js';
 
 /**
  * Create a NullTest node
