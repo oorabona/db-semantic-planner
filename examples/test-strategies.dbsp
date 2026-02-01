@@ -1,0 +1,128 @@
+# Strategy Coverage Queries
+# Tests ALL include strategies + uncovered NQL features
+# NQL v2.1 Syntax
+
+# =============================================================================
+# Setup: Create isolated schema and load data
+# =============================================================================
+
+# Drop existing schema (! prefix = raw SQL)
+!DROP SCHEMA IF EXISTS test_strategies CASCADE;
+
+# Create fresh schema
+!CREATE SCHEMA IF NOT EXISTS test_strategies;
+
+# Set schema context
+.use test_strategies
+
+# Import DDL and seed data
+.import examples/test-strategies.ddl.sql
+.import examples/test-strategies.seed.sql
+
+# =============================================================================
+# Explore
+# =============================================================================
+.tables
+.relations orgs
+
+# =============================================================================
+# Strategy: json_agg (default for 1:N includes)
+# =============================================================================
+
+# 1:N include — orgs with departments (json_agg)
+orgs | select *, departments.*
+
+# 1:N include — departments with employees (json_agg)
+departments | select *, employees.*
+
+# M:N through junction — employees with assignments (json_agg)
+employees | select *, assignments.*
+
+# =============================================================================
+# Strategy: flat / lateral (| flat modifier)
+# =============================================================================
+
+# Same as above but flat — forces lateral JOIN
+orgs | select *, departments.* | flat
+
+# departments→employees forced lateral
+departments | select *, employees.* | flat
+
+# =============================================================================
+# Strategy: CTE (self-referencing traversal)
+# =============================================================================
+
+# Ancestors — recursive CTE up the hierarchy
+orgs | select name, ancestors.*
+
+# Descendants — recursive CTE down the hierarchy
+orgs | select name, descendants.*
+
+# =============================================================================
+# Deep nesting (4 levels): orgs → departments → employees → assignments → project
+# =============================================================================
+
+# Deep nesting with json_agg
+orgs | select *, departments.employees.assignments.project.*
+
+# Deep nesting with flat
+orgs | select *, departments.employees.assignments.project.* | flat
+
+# =============================================================================
+# NQL features: between, like, in, not
+# =============================================================================
+
+# BETWEEN — should filter salary range
+employees | where salary between 50000 and 100000
+
+# LIKE
+employees | where name like 'A%'
+
+# IN
+employees | where departmentId in (1, 2, 3)
+
+# NOT IN
+employees | where departmentId not in (4, 5)
+
+# =============================================================================
+# NQL features: CASE WHEN
+# =============================================================================
+
+# CASE expression in select
+employees | select name, case when salary > 80000 then 'senior' when salary > 50000 then 'mid' else 'junior' end as level
+
+# =============================================================================
+# NQL features: aggregates + order by
+# =============================================================================
+
+# GROUP BY with aggregate
+assignments | group by projectId | select projectId, count(*) as memberCount
+
+# ORDER BY + LIMIT
+employees | order by salary desc | limit 5
+
+# =============================================================================
+# NQL features: mutations
+# =============================================================================
+
+# INSERT
+insert into tasks set title = 'New task', projectId = 1, priority = 1
+
+# UPDATE
+update tasks set completed = true where id = 1
+
+# DELETE
+delete from tasks where completed = true
+
+# UPSERT
+upsert into employees on email set name = 'Jane', email = 'jane@test.com', departmentId = 1, salary = 75000, hireDate = '2024-01-15', active = true
+
+# =============================================================================
+# NQL features: distinct, belongsTo include
+# =============================================================================
+
+# SELECT DISTINCT
+employees | select distinct departmentId
+
+# belongsTo include (single parent)
+tasks | select *, assignee.*

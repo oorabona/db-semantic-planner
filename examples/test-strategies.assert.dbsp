@@ -1,0 +1,308 @@
+# Assertions for test-strategies.dbsp
+# Validates ALL include strategies + NQL features
+# Note: E2E test runner uses namingConvention: 'camelCase' → SQL uses snake_case identifiers
+
+# =============================================================================
+# Setup (queries 0–4)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 0: !DROP SCHEMA IF EXISTS test_strategies CASCADE;
+# ─────────────────────────────────────────
+--- query: 0
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 1: !CREATE SCHEMA IF NOT EXISTS test_strategies;
+# ─────────────────────────────────────────
+--- query: 1
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 2: .use test_strategies
+# ─────────────────────────────────────────
+--- query: 2
+success: true
+output.contains: Using schema: test_strategies
+
+# ─────────────────────────────────────────
+# Query 3: .import examples/test-strategies.ddl.sql
+# ─────────────────────────────────────────
+--- query: 3
+db.success: true
+db.output.contains: Imported
+
+# ─────────────────────────────────────────
+# Query 4: .import examples/test-strategies.seed.sql
+# ─────────────────────────────────────────
+--- query: 4
+db.success: true
+db.output.contains: Imported
+
+# =============================================================================
+# Explore (queries 5–6)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 5: .tables
+# ─────────────────────────────────────────
+--- query: 5
+success: true
+output.contains: Tables (6)
+output.contains: orgs
+output.contains: departments
+output.contains: employees
+output.contains: projects
+output.contains: assignments
+output.contains: tasks
+
+# ─────────────────────────────────────────
+# Query 6: .relations orgs
+# ─────────────────────────────────────────
+--- query: 6
+success: true
+output.contains: Relations for orgs
+output.contains: orgs.parent: belongsTo
+output.contains: orgs.children: hasMany
+output.contains: orgs.ancestors: hasMany
+output.contains: orgs.descendants: hasMany
+output.contains: orgs.departments: hasMany
+
+# =============================================================================
+# Strategy: json_agg (queries 7–9)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 7: orgs | select *, departments.* — json_agg (1:N)
+# ─────────────────────────────────────────
+--- query: 7
+success: true
+sql.equals: SELECT orgs.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM test_strategies.departments AS __t__ WHERE __t__.org_id = orgs.id), '[]'::json) AS departments_json FROM test_strategies.orgs
+db.rows.equals: 3
+
+# ─────────────────────────────────────────
+# Query 8: departments | select *, employees.* — json_agg (1:N)
+# ─────────────────────────────────────────
+--- query: 8
+success: true
+sql.equals: SELECT departments.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM test_strategies.employees AS __t__ WHERE __t__.department_id = departments.id), '[]'::json) AS employees_json FROM test_strategies.departments
+db.rows.equals: 3
+
+# ─────────────────────────────────────────
+# Query 9: employees | select *, assignments.* — json_agg (M:N junction)
+# ─────────────────────────────────────────
+--- query: 9
+success: true
+sql.equals: SELECT employees.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM test_strategies.assignments AS __t__ WHERE __t__.employee_id = employees.id), '[]'::json) AS assignments_json FROM test_strategies.employees
+db.rows.equals: 6
+
+# =============================================================================
+# Strategy: flat / lateral (queries 10–11)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 10: orgs | select *, departments.* | flat — LATERAL JOIN
+# Seed: Corp→(Backend,Frontend), Engineering→(Backend,Frontend), Sales→(Outbound)
+# Lateral produces one row per parent×child: Corp×0 + Engineering×2 + Sales×1 = 3
+# But Corp has no direct departments → 1 row (NULL lateral). Total = 1+2+1 = 4?
+# Actually lateral LEFT JOIN: 3 orgs, Backend+Frontend→org2, Outbound→org3
+# org1(Corp)→no dept→1 row, org2(Eng)→2 depts→2 rows, org3(Sales)→1 dept→1 row = 4
+# ─────────────────────────────────────────
+--- query: 10
+success: true
+sql.equals: SELECT orgs.* FROM test_strategies.orgs LEFT JOIN LATERAL ( SELECT departments_inner_0.* FROM test_strategies.departments AS departments_inner_0 WHERE departments_inner_0.org_id = orgs.id ) AS departments_lat_0 ON true
+db.rows.equals: 4
+
+# ─────────────────────────────────────────
+# Query 11: departments | select *, employees.* | flat — LATERAL JOIN
+# Backend→2 emps, Frontend→2 emps, Outbound→2 emps = 6
+# ─────────────────────────────────────────
+--- query: 11
+success: true
+sql.equals: SELECT departments.* FROM test_strategies.departments LEFT JOIN LATERAL ( SELECT employees_inner_0.* FROM test_strategies.employees AS employees_inner_0 WHERE employees_inner_0.department_id = departments.id ) AS employees_lat_0 ON true
+db.rows.equals: 6
+
+# =============================================================================
+# Strategy: CTE (queries 12–13)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 12: orgs | select name, ancestors.* — CTE (recursive ancestors)
+# CTE LEFT JOIN: each org joined with orgs where org.id = cte.parent_id
+# org1(Corp): no children with parent_id=1? → Engineering(parent=1), Sales(parent=1) → 2 matches
+# org2(Eng): no children with parent_id=2 → 0 matches → 1 NULL row
+# org3(Sales): no children with parent_id=3 → 0 matches → 1 NULL row
+# Total: 2+1+1 = 4? Actually depends on exact CTE semantics. Use false to discover.
+# ─────────────────────────────────────────
+--- query: 12
+success: true
+sql.equals: WITH ancestors_cte AS (SELECT orgs_inner_0.* FROM test_strategies.orgs AS orgs_inner_0) SELECT orgs.name FROM test_strategies.orgs LEFT JOIN ancestors_cte AS ancestors_ref_0 ON orgs.id = ancestors_ref_0.parent_id
+
+# ─────────────────────────────────────────
+# Query 13: orgs | select name, descendants.* — CTE (recursive descendants)
+# Same CTE structure, same join condition → same row count
+# ─────────────────────────────────────────
+--- query: 13
+success: true
+sql.equals: WITH descendants_cte AS (SELECT orgs_inner_0.* FROM test_strategies.orgs AS orgs_inner_0) SELECT orgs.name FROM test_strategies.orgs LEFT JOIN descendants_cte AS descendants_ref_0 ON orgs.id = descendants_ref_0.parent_id
+
+# =============================================================================
+# Deep nesting 4 levels (queries 14–15)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 14: orgs deep nesting with json_agg (4 levels)
+# json_agg returns 1 row per org regardless of nesting depth
+# ─────────────────────────────────────────
+--- query: 14
+success: true
+sql.equals: SELECT orgs.*, COALESCE((SELECT json_agg(to_jsonb(__t__) || jsonb_build_object('employees', COALESCE((SELECT json_agg(to_jsonb(__t1__) || jsonb_build_object('assignments', COALESCE((SELECT json_agg(to_jsonb(__t2__) || jsonb_build_object('project', COALESCE((SELECT json_agg(to_jsonb(__t3__)) FROM test_strategies.projects AS __t3__ WHERE __t3__.id = __t2__.project_id), '[]'::json))) FROM test_strategies.assignments AS __t2__ WHERE __t2__.employee_id = __t1__.id), '[]'::json))) FROM test_strategies.employees AS __t1__ WHERE __t1__.department_id = __t__.id), '[]'::json))) FROM test_strategies.departments AS __t__ WHERE __t__.org_id = orgs.id), '[]'::json) AS departments_json FROM test_strategies.orgs
+db.rows.equals: 3
+
+# ─────────────────────────────────────────
+# Query 15: orgs deep nesting with flat (4-level LATERAL)
+# Lateral fan-out: orgs×depts×emps×assignments×projects
+# Corp→0 depts→1 NULL row; Eng→2 depts→4 emps→5 assignments→... complex fan-out
+# ─────────────────────────────────────────
+--- query: 15
+success: true
+sql.equals: SELECT orgs.* FROM test_strategies.orgs LEFT JOIN LATERAL ( SELECT departments_inner_0.* FROM test_strategies.departments AS departments_inner_0 WHERE departments_inner_0.org_id = orgs.id ) AS departments_lat_0 ON true LEFT JOIN LATERAL ( SELECT employees_inner_1.* FROM test_strategies.employees AS employees_inner_1 WHERE employees_inner_1.department_id = departments_lat_0.id ) AS employees_lat_1 ON true LEFT JOIN LATERAL ( SELECT assignments_inner_2.* FROM test_strategies.assignments AS assignments_inner_2 WHERE assignments_inner_2.employee_id = employees_lat_1.id ) AS assignments_lat_2 ON true LEFT JOIN LATERAL ( SELECT projects_inner_3.* FROM test_strategies.projects AS projects_inner_3 WHERE projects_inner_3.id = assignments_lat_2.project_id ) AS projects_lat_3 ON true
+
+# =============================================================================
+# NQL features: between, like, in, not in (queries 16–19)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 16: employees | where salary between 50000 and 100000
+# ─────────────────────────────────────────
+--- query: 16
+success: true
+sql.equals: SELECT employees.* FROM test_strategies.employees WHERE employees.salary BETWEEN $1 AND $2
+params.equals: [50000,100000]
+db.rows.equals: 3
+
+# ─────────────────────────────────────────
+# Query 17: employees | where name like 'A%'
+# Seed: only Alice matches
+# ─────────────────────────────────────────
+--- query: 17
+success: true
+sql.equals: SELECT employees.* FROM test_strategies.employees WHERE employees.name LIKE $1
+params.equals: ["A%"]
+db.rows.equals: 1
+
+# ─────────────────────────────────────────
+# Query 18: employees | where departmentId in (1, 2, 3)
+# ─────────────────────────────────────────
+--- query: 18
+success: true
+sql.equals: SELECT employees.* FROM test_strategies.employees WHERE employees.department_id = ANY ($1)
+params.equals: [[1,2,3]]
+db.rows.equals: 6
+
+# ─────────────────────────────────────────
+# Query 19: employees | where departmentId not in (4, 5)
+# ─────────────────────────────────────────
+--- query: 19
+success: true
+sql.equals: SELECT employees.* FROM test_strategies.employees WHERE NOT (employees.department_id = ANY ($1))
+params.equals: [[4,5]]
+db.rows.equals: 6
+
+# =============================================================================
+# NQL features: CASE WHEN (query 20)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 20: employees CASE expression in select
+# ─────────────────────────────────────────
+--- query: 20
+success: true
+sql.equals: SELECT employees.name, CASE WHEN employees.salary > $1 THEN $2 WHEN employees.salary > $3 THEN $4 ELSE $5 END AS level FROM test_strategies.employees
+params.equals: [80000,"senior",50000,"mid","junior"]
+db.rows.equals: 6
+
+# =============================================================================
+# NQL features: aggregates, order by, limit (queries 21–22)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 21: assignments | group by projectId | select projectId, count(*)
+# Seed: project 1 has 3 assignments, project 2 has 2 → 2 groups
+# ─────────────────────────────────────────
+--- query: 21
+success: true
+sql.equals: SELECT assignments.project_id, count(*) AS "memberCount" FROM test_strategies.assignments GROUP BY assignments.project_id
+db.rows.equals: 2
+
+# ─────────────────────────────────────────
+# Query 22: employees | order by salary desc | limit 5
+# Seed: 6 employees, limit 5 → top 5 by salary
+# ─────────────────────────────────────────
+--- query: 22
+success: true
+sql.equals: SELECT employees.* FROM test_strategies.employees ORDER BY employees.salary DESC LIMIT 5
+db.rows.equals: 5
+
+# =============================================================================
+# NQL features: mutations (queries 23–26)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 23: insert into tasks
+# ─────────────────────────────────────────
+--- query: 23
+success: true
+sql.equals: INSERT INTO test_strategies.tasks ( title, project_id, priority ) VALUES ( $1, $2, $3 )
+params.equals: ["New task",1,1]
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 24: update tasks set completed = true where id = 1
+# ─────────────────────────────────────────
+--- query: 24
+success: true
+sql.equals: UPDATE test_strategies.tasks SET completed = $1 WHERE test_strategies.tasks.id = $2
+params.equals: [true,1]
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 25: delete from tasks where completed = true
+# Seed: task 1 was completed (seed) + task 1 just set to true (Q24) = same row
+# ─────────────────────────────────────────
+--- query: 25
+success: true
+sql.equals: DELETE FROM test_strategies.tasks WHERE test_strategies.tasks.completed = $1
+params.equals: [true]
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 26: upsert into employees on email
+# ─────────────────────────────────────────
+--- query: 26
+success: true
+sql.equals: INSERT INTO test_strategies.employees ( name, email, department_id, salary, hire_date, active ) VALUES ( $1, $2, $3, $4, $5, $6 ) ON CONFLICT (email) DO UPDATE SET name = excluded.name, email = excluded.email, department_id = excluded.department_id, salary = excluded.salary, hire_date = excluded.hire_date, active = excluded.active
+params.equals: ["Jane","jane@test.com",1,75000,"2024-01-15",true]
+db.success: true
+
+# =============================================================================
+# NQL features: distinct, belongsTo include (queries 27–28)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 27: employees | select distinct departmentId
+# After upsert (Q26): Jane added to dept 1 → still 3 distinct depts
+# ─────────────────────────────────────────
+--- query: 27
+success: true
+sql.equals: SELECT DISTINCT employees.department_id FROM test_strategies.employees
+db.rows.equals: 3
+
+# ─────────────────────────────────────────
+# Query 28: tasks | select *, assignee.* — belongsTo include (json_agg for parent)
+# After insert(Q23) + delete(Q25): 5 original - 1 deleted + 1 inserted = 5
+# ─────────────────────────────────────────
+--- query: 28
+success: true
+sql.equals: SELECT tasks.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM test_strategies.employees AS __t__ WHERE __t__.id = tasks.assignee_id), '[]'::json) AS assignee_json FROM test_strategies.tasks
+db.rows.equals: 5
