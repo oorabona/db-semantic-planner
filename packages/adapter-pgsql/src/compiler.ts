@@ -50,6 +50,66 @@ import { identityNaming } from './naming-plugin.js';
 import { createParamRef } from './param-ref.js';
 
 // ============================================================================
+// PlanDecision → HandlerDecision mapper
+// ============================================================================
+
+/**
+ * Recursively map a PlanDecision tree to a HandlerDecision tree.
+ *
+ * Both types are structurally similar but nominally distinct. This explicit
+ * mapper avoids `as unknown as` double casts by doing the conversion
+ * field-by-field, including recursive children/conditions.
+ */
+function mapToHandlerDecision(
+	pd: PlanDecision,
+	rootTable: string,
+): HandlerDecision {
+	return {
+		type: pd.type,
+		table: pd.table,
+		column: pd.column,
+		alias: pd.alias,
+		operator: pd.operator,
+		value: pd.value,
+		paramIndex: pd.paramIndex,
+		direction: pd.direction,
+		joinType: pd.joinType,
+		sourceColumn:
+			pd.relationType === 'belongsTo'
+				? (pd.foreignKey ?? `${pd.targetTable}_id`)
+				: (pd.parentKey ?? 'id'),
+		targetColumn:
+			pd.relationType === 'belongsTo'
+				? (pd.parentKey ?? 'id')
+				: (pd.foreignKey ?? `${rootTable}_id`),
+		targetTable: pd.targetTable,
+		function: pd.function,
+		args: pd.args,
+		columns: pd.columns,
+		values: pd.values,
+		set: pd.set,
+		limit: pd.limit,
+		offset: pd.offset,
+		strategy: (pd.choice === 'subquery'
+			? 'json_agg'
+			: pd.choice) as HandlerDecision['strategy'],
+		relation: pd.relationName,
+		relationName: pd.relationName,
+		relationType: pd.relationType,
+		foreignKey: pd.foreignKey,
+		parentKey: pd.parentKey,
+		children: pd.children?.map((c) =>
+			mapToHandlerDecision(c, pd.targetTable ?? rootTable),
+		),
+		conditions: pd.conditions?.map((c) => mapToHandlerDecision(c, rootTable)),
+		orderBy: pd.orderBy?.map((o) => ({
+			column: o.field,
+			direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
+		})),
+	} as HandlerDecision;
+}
+
+// ============================================================================
 // Types (simplified for spike - would import from @dbsp/core)
 // ============================================================================
 
@@ -151,6 +211,8 @@ export class PlanCompiler {
 	}> = [];
 	/** Raw JOIN AST nodes from include handlers (e.g., LATERAL) */
 	private rawJoins: Node[] = [];
+	/** CTE nodes from include handlers (e.g., CTE strategy) */
+	private pendingCtes: Node[] = [];
 
 	constructor(options: CompilerOptions = {}) {
 		this.naming = options.naming ?? identityNaming;
@@ -176,6 +238,8 @@ export class PlanCompiler {
 	): {
 		targets?: Node[];
 		rawJoin?: Node;
+		additionalJoins?: Node[];
+		cte?: Node;
 	} {
 		ensureIncludeHandlersRegistered();
 
@@ -191,50 +255,19 @@ export class PlanCompiler {
 				`Include decision missing strategy choice: ${JSON.stringify(decision)}`,
 			);
 
-		// Map subquery to json_agg (PostgreSQL always supports json_agg)
-		const effectiveStrategy = strategy === 'subquery' ? 'json_agg' : strategy;
+		// Bridge PlanDecision -> handler Decision via explicit mapper
+		// (mapper handles subquery → json_agg mapping internally)
+		const handlerDecision = mapToHandlerDecision(decision, plan.rootTable);
 
 		const handler = getIncludeHandler(
-			effectiveStrategy as 'json_agg' | 'join' | 'lateral' | 'cte',
+			handlerDecision.strategy as 'json_agg' | 'join' | 'lateral' | 'cte',
 		);
 
-		// Bridge PlanDecision -> handler Decision
-		const handlerDecision = {
-			type: decision.type,
-			relation: decision.relationName,
-			relationName: decision.relationName,
-			targetTable: decision.targetTable,
-			// For belongsTo: FK is on source table (e.g. posts.author_id → authors.id)
-			// For hasMany/hasOne: FK is on target table (e.g. posts.id ← comments.post_id)
-			sourceColumn:
-				decision.relationType === 'belongsTo'
-					? (decision.foreignKey ?? `${decision.targetTable}_id`)
-					: (decision.parentKey ?? 'id'),
-			targetColumn:
-				decision.relationType === 'belongsTo'
-					? (decision.parentKey ?? 'id')
-					: (decision.foreignKey ?? `${plan.rootTable}_id`),
-			columns: decision.columns,
-			strategy: effectiveStrategy as 'json_agg' | 'join' | 'lateral' | 'cte',
-			relationType: decision.relationType,
-			foreignKey: decision.foreignKey,
-			parentKey: decision.parentKey,
-			children: decision.children as unknown as readonly HandlerDecision[],
-			orderBy: decision.orderBy?.map((o) => ({
-				column: o.field,
-				direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
-			})),
-			conditions: decision.conditions as unknown as readonly HandlerDecision[],
-		} as unknown as HandlerDecision;
-
-		// Pre-compile filter conditions (from EXISTS propagation) for the handler.
-		// The handler can't call compileCondition (compiler-internal), so we compile
-		// here and pass the compiled AST node via _compiledFilterWhere.
+		// Pre-compile filter conditions for the handler (e.g., EXISTS propagation)
 		if (
 			decision.conditions &&
 			(decision.conditions as PlanDecision[]).length > 0
 		) {
-			// Determine the inner alias the handler will use (depth 0 = __t__)
 			const innerAlias = '__t__';
 			const condNodes = (decision.conditions as PlanDecision[]).map((c) => {
 				// Rewrite condition table references to use the inner alias
@@ -270,10 +303,17 @@ export class PlanCompiler {
 		// Sync parameters back
 		this.state.paramIndex = handlerState.paramIndex;
 
-		const out: { targets?: Node[]; rawJoin?: Node } = {};
+		const out: {
+			targets?: Node[];
+			rawJoin?: Node;
+			additionalJoins?: Node[];
+			cte?: Node;
+		} = {};
 		if (result.targets) out.targets = result.targets;
 		if (result.join) out.rawJoin = result.join;
 		if (result.lateral) out.rawJoin = result.lateral;
+		if (result.additionalJoins) out.additionalJoins = result.additionalJoins;
+		if (result.cte) out.cte = result.cte;
 		return out;
 	}
 
@@ -285,6 +325,7 @@ export class PlanCompiler {
 		this.currentRootTable = plan.rootTable;
 		this.pendingJoins = [];
 		this.rawJoins = [];
+		this.pendingCtes = [];
 
 		// Determine query type from decisions
 		const queryType = this.detectQueryType(plan.decisions);
@@ -461,6 +502,12 @@ export class PlanCompiler {
 					}
 					if (includeResult.rawJoin) {
 						this.rawJoins.push(includeResult.rawJoin);
+					}
+					if (includeResult.additionalJoins) {
+						this.rawJoins.push(...includeResult.additionalJoins);
+					}
+					if (includeResult.cte) {
+						this.pendingCtes.push(includeResult.cte);
 					}
 					break;
 				}
@@ -648,6 +695,9 @@ export class PlanCompiler {
 		if (limit) options.limit = limit;
 		if (offset) options.offset = offset;
 		if (distinct) options.distinct = distinct;
+		if (this.pendingCtes.length > 0) {
+			options.withClause = { ctes: this.pendingCtes, recursive: false };
+		}
 
 		return selectStmt(options);
 	}

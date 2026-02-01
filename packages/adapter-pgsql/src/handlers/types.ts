@@ -211,6 +211,8 @@ export interface IncludeResult {
 	targets?: Node[];
 	/** JOIN to add to FROM clause */
 	join?: Node;
+	/** Additional JOINs for cascaded includes (e.g., flat deep nesting) */
+	additionalJoins?: Node[];
 	/** CTE to add to WITH clause */
 	cte?: Node;
 	/** Subquery for LATERAL */

@@ -389,9 +389,9 @@ export function extractAllIncludeDecisions(
 			const converted = toJoinIncludeDecision(d, plan);
 			if (converted) flatDecisions.push(converted);
 		} else if (choice === 'cte') {
-			// CTE: skip for now — the CTE handler produces { cte, join } but the compiler
-			// bridge doesn't yet handle the WITH clause from result.cte. Wiring CTE fully
-			// requires adding CTE accumulation to the compiler. Tracked as follow-up.
+			// CTE: produces WITH clause + LEFT JOIN to CTE
+			const converted = toIncludeDecision(d, choice);
+			if (converted) flatDecisions.push(converted);
 		}
 	}
 

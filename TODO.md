@@ -14,6 +14,12 @@
 
 ## Completed
 
+- [x] ✅ [Adapter] HANDLER-WIRE: Wire include strategy handlers into compiler (2026-02-01)
+  - Unified `compileIncludeViaHandler` bridge with explicit `mapToHandlerDecision` mapper
+  - json_agg (nested), join, lateral (deep flat nesting), CTE all wired
+  - Deep `| flat` nesting: recursive `compileLateralCascade` produces cascaded LEFT JOIN LATERAL
+  - 10 lateral handler tests, 2222 total tests passing
+
 (Archived → docs/historic/done-2026-02.md)
 
 ---
@@ -77,9 +83,9 @@
 (Archived → docs/historic/done-2026-02.md)
 
 ### [Adapter] CTE include handler bridge incomplete — Priority: MEDIUM
-- CTE handler exists and produces `{ cte, join }` but compiler bridge only handles `join`, not WITH clause
-- CTE decisions skipped in extractor until bridge supports `result.cte` → WITH clause injection
-- Workaround: CTE queries fall back to direct LEFT JOIN (correct but less optimal)
+- [x] ✅ RESOLVED (2026-02-01) — CTE bridge fully wired: pendingCtes + withClause in selectStmt
+- CTE handler produces `{ cte, join }`, compiler collects cte into pendingCtes, applies via WITH clause
+- hierarchy.assert.dbsp queries 4-8 validate CTE SQL output
 
 (Phase 5 SRP archived → docs/historic/done-2026-02.md)
 
