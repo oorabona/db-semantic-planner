@@ -104,7 +104,7 @@ sql.equals: SELECT DISTINCT posts.* FROM posts
 # --- query: N
 # success: true
 # sql.matches: count\s*\(\s*\*\s*\)
-# sql.contains: from "posts"
+# sql.equals: from "posts"
 
 # # Query N+1: posts select count(*) as total_posts
 # --- query: N+1
@@ -117,24 +117,24 @@ sql.equals: SELECT DISTINCT posts.* FROM posts
 # success: true
 # sql.matches: sum\s*\(
 # sql.matches: avg\s*\(
-# sql.contains: "views"
+# sql.equals: "views"
 
 # # Query N+3: posts select count(*) as post_count group by authorId
 # --- query: N+3
 # success: true
 # sql.matches: count\s*\(\s*\*\s*\)
 # sql.matches: group\s+by
-# sql.contains: "authorId"
+# sql.equals: "authorId"
 
 # # Query N+4: posts select min(amount) as min_order max(amount) as max_order
 # --- query: N+4
 # success: true
 # sql.matches: min\s*\(
 # sql.matches: max\s*\(
-# sql.contains: "amount"
+# sql.equals: "amount"
 
 # # Query N+5: posts select count(distinct authorId) as unique_authors
 # --- query: N+5
 # success: true
 # sql.matches: count\s*\(\s*distinct
-# sql.contains: "authorId"
+# sql.equals: "authorId"

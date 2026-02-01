@@ -45,7 +45,7 @@ params.equals: [1]
 output.contains: Tables
 
 --- query: 1
-sql.contains: SELECT
+sql.equals: SELECT
 params.length: 0
 
 --- query: 2
@@ -173,7 +173,6 @@ success: maybe
 			['output.contains', 'text value', 'text value'],
 			['output.equals', 'exact text', 'exact text'],
 			['output.matches', '\\d+', '\\d+'],
-			['sql.contains', 'SELECT', 'SELECT'],
 			['sql.equals', 'SELECT * FROM users', 'SELECT * FROM users'],
 			['sql.matches', 'SELECT.*FROM', 'SELECT.*FROM'],
 			['params.equals', '[1, "test", true]', [1, 'test', true]],
@@ -313,7 +312,6 @@ ${type}: ${input}
 				'output.contains',
 				'output.equals',
 				'output.matches',
-				'sql.contains',
 				'sql.equals',
 				'sql.matches',
 				'params.equals',
@@ -358,7 +356,6 @@ ${type}: ${input}
 		});
 
 		it('returns false for sql.* assertions', () => {
-			expect(requiresDatabase('sql.contains')).toBe(false);
 			expect(requiresDatabase('sql.equals')).toBe(false);
 			expect(requiresDatabase('sql.matches')).toBe(false);
 			expect(requiresDatabase('sql.table')).toBe(false);

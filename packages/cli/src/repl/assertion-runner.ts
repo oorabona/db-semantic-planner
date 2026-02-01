@@ -182,9 +182,6 @@ function runSingleAssertion(
 			return assertMatches('output', result.output ?? '', value as string);
 
 		// SQL assertions
-		case 'sql.contains':
-			return assertContains('sql', result.sql ?? '', value as string);
-
 		case 'sql.equals':
 			return assertSQLEquals(result.sql ?? '', value as string);
 
