@@ -14,7 +14,7 @@
 
 ## Completed
 
-- [x] ✅ [NQL] Range literal in INSERT/UPDATE — type-cast for range columns (2026-02-01)
+(Archived → docs/historic/done-2026-02.md)
 
 ---
 
@@ -74,11 +74,7 @@
 
 ## Backlog
 
-### [Refactor] SRP Extractions - Phase 5 L/XL Items
-- [x] ✅ **5.4** Extract condition compilation from PlanCompiler → `compiler-conditions.ts` (-34%, 2026-02-01)
-- [x] ✅ **5.2** Extract decision extractors from PgsqlAdapter → `plan-decision-extractor.ts` (-22%, 2026-02-01)
-- [x] ⏭️ **5.1** NqlCstVisitor split — Skipped: Chevrotain `validateVisitor()` requires all grammar rules on one class (2026-02-01)
-- [x] ⏭️ **5.3** QueryBuilderImpl — Skipped: already 377 lines, no meaningful extraction target (2026-02-01)
+(Phase 5 SRP archived → docs/historic/done-2026-02.md)
 
 ---
 
