@@ -236,15 +236,13 @@ db.rows.equals: 5
 # ─────────────────────────────────────────
 # Query 27: users | where active = true | select *, userRoles.roleId, userRoles.role.rolePermissions.permission.*
 # ─────────────────────────────────────────
-# NOTE: Query 27 SQL is KNOWN BUGGY — deep relation traversal (4+ levels) produces incorrect
-# correlated subqueries (correlates to users.id/users.role_id/users.permission_id instead of
-# chaining through intermediate tables). See TODO.md backlog for tracking.
-# The sql.equals below matches the CURRENT (buggy) output; db.rows.equals: 0 reflects the bug.
+# Deep relation traversal (4 levels): users → userRoles → role → rolePermissions → permission
+# Uses nested json_agg subqueries with depth-based aliases (__t__, __t1__, __t2__, __t3__)
 --- query: 27
 success: true
-sql.equals: SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM iam_example.user_roles AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS "userRoles_json", COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM iam_example.roles AS __t__ WHERE __t__.id = users.role_id), '[]'::json) AS role_json, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM iam_example.role_permissions AS __t__ WHERE __t__.role_id = users.id), '[]'::json) AS "rolePermissions_json", COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM iam_example.permissions AS __t__ WHERE __t__.id = users.permission_id), '[]'::json) AS permission_json FROM iam_example.users WHERE users.active = $1
+sql.equals: SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) || jsonb_build_object('role', COALESCE((SELECT json_agg(to_jsonb(__t1__) || jsonb_build_object('rolePermissions', COALESCE((SELECT json_agg(to_jsonb(__t2__) || jsonb_build_object('permission', COALESCE((SELECT json_agg(to_jsonb(__t3__)) FROM iam_example.permissions AS __t3__ WHERE __t3__.id = __t2__.permission_id), '[]'::json))) FROM iam_example.role_permissions AS __t2__ WHERE __t2__.role_id = __t1__.id), '[]'::json))) FROM iam_example.roles AS __t1__ WHERE __t1__.id = __t__.role_id), '[]'::json))) FROM iam_example.user_roles AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS "userRoles_json" FROM iam_example.users WHERE users.active = $1
 params.equals: [true]
-db.rows.equals: 0
+db.rows.equals: 5
 
 # ─────────────────────────────────────────
 # Query 28: auditLog | where action = 'login' | select userId, resource, timestamp

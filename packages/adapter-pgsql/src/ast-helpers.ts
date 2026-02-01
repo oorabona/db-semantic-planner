@@ -844,8 +844,14 @@ export function jsonAggSubquery(
 	alias: string,
 	schemaName?: string,
 	naming: NamingPlugin = identityNaming,
+	options?: {
+		/** Nested child subqueries to merge via jsonb_build_object */
+		childNodes?: readonly { key: string; node: Node }[];
+		/** Override the default __t__ alias (for nested depth) */
+		innerAlias?: string;
+	},
 ): Node {
-	const targetAlias = '__t__';
+	const targetAlias = options?.innerAlias ?? '__t__';
 
 	// Build: to_jsonb(__t__) - use row reference (just alias, not alias.*)
 	// In PostgreSQL, __t__ refers to the entire row when used with aggregate/jsonb functions
@@ -855,14 +861,41 @@ export function jsonAggSubquery(
 		},
 	};
 
-	const toJsonbCall: Node = {
+	let toJsonbCall: Node = {
 		FuncCall: {
 			funcname: [stringNode('to_jsonb')],
 			args: [rowRef],
 		} as FuncCall,
 	};
 
-	// Build: json_agg(to_jsonb(__t__))
+	// If there are nested children, merge them via:
+	// to_jsonb(__t__) || jsonb_build_object('child1', <subquery1>, 'child2', <subquery2>)
+	if (options?.childNodes && options.childNodes.length > 0) {
+		const buildObjectArgs: Node[] = [];
+		for (const child of options.childNodes) {
+			buildObjectArgs.push({ A_Const: { sval: { sval: child.key } } });
+			buildObjectArgs.push(child.node);
+		}
+
+		const jsonbBuildObject: Node = {
+			FuncCall: {
+				funcname: [stringNode('jsonb_build_object')],
+				args: buildObjectArgs,
+			} as FuncCall,
+		};
+
+		// to_jsonb(__t__) || jsonb_build_object(...)
+		toJsonbCall = {
+			A_Expr: {
+				kind: 'AEXPR_OP',
+				name: [stringNode('||')],
+				lexpr: toJsonbCall,
+				rexpr: jsonbBuildObject,
+			},
+		};
+	}
+
+	// Build: json_agg(to_jsonb(__t__) [|| jsonb_build_object(...)])
 	const jsonAggCall: Node = {
 		FuncCall: {
 			funcname: [stringNode('json_agg')],
