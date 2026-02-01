@@ -5,15 +5,12 @@
  *
  * @example
  * ```typescript
- * import { parse, validate, compile } from '@dbsp/nql';
+ * import { parse, compile } from '@dbsp/nql';
  *
  * // Parse only (no schema validation)
  * const result = parse('products | where active = true');
  *
- * // Parse + validate against schema
- * const validated = validate('products | where active = true', schema);
- *
- * // Parse + validate + compile to IntentAST
+ * // Parse + compile to IntentAST
  * const intent = compile('products | where active = true', schema);
  * ```
  */
@@ -140,20 +137,6 @@ export function parse(
 			warnings: [],
 		};
 	}
-}
-
-/**
- * Parse and validate NQL input against a schema.
- *
- * @deprecated This is a stub — it just calls `parse()`. Use `parse()` directly.
- * Schema validation will be a separate feature when implemented.
- */
-export function validate(
-	input: string,
-	_schema: unknown,
-	options?: ParseOptions,
-): ParseResult<NqlProgram> {
-	return parse(input, options);
 }
 
 /**

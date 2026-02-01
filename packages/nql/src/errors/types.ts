@@ -38,13 +38,6 @@ export interface NqlSemanticError extends NqlError {
 	relatedSymbol?: string | undefined;
 }
 
-/** Limit errors (complexity exceeded) */
-export interface NqlLimitError extends NqlError {
-	code: `ERR-LIMIT-${string}`;
-	limit: number;
-	actual: number;
-}
-
 /** Warning (non-fatal issues) */
 export interface NqlWarning {
 	code: string;

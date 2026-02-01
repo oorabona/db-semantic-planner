@@ -41,10 +41,8 @@ import type {
 } from '../intent-ast.js';
 import { getColumnName } from './column-utils.js';
 import {
-	COLUMN_META,
 	type ColumnRef,
 	RELATION_META,
-	RELATION_PATH,
 	type RelationRef,
 } from './table-ref.js';
 import type { ExpressionSpec } from './types.js';
@@ -52,41 +50,6 @@ import type { ExpressionSpec } from './types.js';
 // ============================================================================
 // Type-Safe Column Reference Support (DX-040)
 // ============================================================================
-
-/**
- * Check if a value is a ColumnRef by checking for the COLUMN_META symbol.
- * @internal
- */
-function _isColumnRef(
-	value: unknown,
-): value is ColumnRef<string, string, unknown> {
-	return typeof value === 'object' && value !== null && COLUMN_META in value;
-}
-
-/**
- * Check if a ColumnRef was accessed through a relation (has RELATION_PATH).
- * @internal
- */
-function hasRelationPath(
-	col: ColumnRef<string, string, unknown>,
-): col is ColumnRef<string, string, unknown> & {
-	[RELATION_PATH]: readonly string[];
-} {
-	return RELATION_PATH in (col as unknown as object);
-}
-
-/**
- * Get the relation path from a ColumnRef if it exists.
- * @internal
- */
-function _getRelationPath(
-	col: ColumnRef<string, string, unknown>,
-): readonly string[] | undefined {
-	if (hasRelationPath(col)) {
-		return (col as unknown as Record<symbol, readonly string[]>)[RELATION_PATH];
-	}
-	return undefined;
-}
 
 // ============================================================================
 // Distinct Field Helper (for aggregates)
