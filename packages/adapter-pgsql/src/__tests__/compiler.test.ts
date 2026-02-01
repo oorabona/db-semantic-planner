@@ -7,7 +7,7 @@
 
 import { parseSync } from 'pgsql-parser';
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-compare.js';
+import { normalizeSQL } from '../ast-helpers.js';
 import {
 	compilePlan,
 	PlanCompiler,

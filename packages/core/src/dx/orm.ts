@@ -30,6 +30,7 @@ import {
 } from './filters.js';
 import {
 	includeOptionsToIntent,
+	isRecursiveIncludeOptions,
 	parseDotNotationInclude,
 	validateRecursiveInclude,
 } from './intent-builder.js';
@@ -54,7 +55,6 @@ import {
 	type CursorPaginateOptions,
 	type IncludeOptionsWithRecursive,
 	isExpressionSpec,
-	isRecursiveIncludeOptions,
 	type ListHierarchyOptions,
 	type OrderByRecord,
 	type OrderBySpec,

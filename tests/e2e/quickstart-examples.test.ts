@@ -13,7 +13,6 @@ import {
 	createBlogSchema,
 	dropBlogSchema,
 	seedBlogData,
-	
 } from './testkit/index.js';
 
 const ROOT_DIR = resolve(import.meta.dirname, '../..');

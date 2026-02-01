@@ -12,23 +12,23 @@ import type { AssertionType, TableAssertionData } from './assertion-parser.js';
 import type { AssertionOutcome } from './assertion-runner.js';
 import type { BatchResult } from './batch.js';
 
-// ============================================================
-// Helpers
-// ============================================================
-
 /**
- * Normalize SQL for comparison by collapsing whitespace
- * This handles formatting differences between generated and expected SQL
+ * Normalize SQL for comparison: collapse whitespace, lowercase, trim.
+ * Canonical implementation in @dbsp/adapter-pgsql ast-helpers.ts.
  */
 export function normalizeSQL(sql: string): string {
 	return sql
-		.replace(/\s+/g, ' ') // Collapse multiple whitespace to single space
-		.replace(/\s*,\s*/g, ', ') // Normalize comma spacing
-		.replace(/\s*\(\s*/g, '(') // Remove spaces around opening parens
-		.replace(/\s*\)\s*/g, ')') // Remove spaces around closing parens
+		.replace(/\s+/g, ' ')
+		.replace(/\s*,\s*/g, ', ')
+		.replace(/\s*\(\s*/g, '(')
+		.replace(/\s*\)\s*/g, ')')
 		.trim()
 		.toLowerCase();
 }
+
+// ============================================================
+// Helpers
+// ============================================================
 
 /**
  * Convert camelCase to snake_case
@@ -143,62 +143,44 @@ export function assertSQLEquals(
 }
 
 /**
- * Assert SQL contains table name (handles logical/physical naming)
- * Matches: "productImages" → product_images, productimages, "productImages"
+ * Factory for SQL identifier assertions (table/column).
+ * Matches: logical name, physical snake_case, or quoted variants.
  */
-export function assertSQLTable(
-	sql: string,
-	tableName: string,
-): AssertionOutcome {
-	const normalizedSql = sql.toLowerCase();
-	const logicalLower = tableName.toLowerCase();
-	const physicalSnake = toSnakeCase(tableName).toLowerCase();
+function createSQLIdentifierAssertion(
+	assertionType: AssertionType,
+	label: string,
+) {
+	return (sql: string, name: string): AssertionOutcome => {
+		const normalizedSql = sql.toLowerCase();
+		const logicalLower = name.toLowerCase();
+		const physicalSnake = toSnakeCase(name).toLowerCase();
 
-	// Check various forms: logical, physical snake_case, or quoted
-	const found =
-		normalizedSql.includes(logicalLower) ||
-		normalizedSql.includes(physicalSnake) ||
-		normalizedSql.includes(`"${logicalLower}"`) ||
-		normalizedSql.includes(`"${physicalSnake}"`);
+		const found =
+			normalizedSql.includes(logicalLower) ||
+			normalizedSql.includes(physicalSnake) ||
+			normalizedSql.includes(`"${logicalLower}"`) ||
+			normalizedSql.includes(`"${physicalSnake}"`);
 
-	return {
-		type: 'sql.table',
-		expected: tableName,
-		actual: found ? undefined : sql, // Full value, no truncation
-		passed: found,
-		message: found
-			? undefined
-			: `Expected SQL to reference table "${tableName}" (or "${physicalSnake}")`,
+		return {
+			type: assertionType,
+			expected: name,
+			actual: found ? undefined : sql,
+			passed: found,
+			message: found
+				? undefined
+				: `Expected SQL to reference ${label} "${name}"${physicalSnake !== logicalLower ? ` (or "${physicalSnake}")` : ''}`,
+		};
 	};
 }
 
-/**
- * Assert SQL contains column name
- */
-export function assertSQLColumn(
-	sql: string,
-	columnName: string,
-): AssertionOutcome {
-	const normalizedSql = sql.toLowerCase();
-	const columnLower = columnName.toLowerCase();
-	const columnSnake = toSnakeCase(columnName).toLowerCase();
-
-	const found =
-		normalizedSql.includes(columnLower) ||
-		normalizedSql.includes(columnSnake) ||
-		normalizedSql.includes(`"${columnLower}"`) ||
-		normalizedSql.includes(`"${columnSnake}"`);
-
-	return {
-		type: 'sql.column',
-		expected: columnName,
-		actual: found ? undefined : sql, // Full value, no truncation
-		passed: found,
-		message: found
-			? undefined
-			: `Expected SQL to reference column "${columnName}"`,
-	};
-}
+export const assertSQLTable = createSQLIdentifierAssertion(
+	'sql.table',
+	'table',
+);
+export const assertSQLColumn = createSQLIdentifierAssertion(
+	'sql.column',
+	'column',
+);
 
 /**
  * Assert SQL references a table via JOIN or CTE
@@ -390,66 +372,43 @@ export function assertParamsValue(
 // DB ASSERTIONS (require database connection)
 // ============================================================
 
-/**
- * Assert exact row count from query result
- */
-export function assertDbRowsEquals(
-	result: BatchResult,
-	expected: number,
-): AssertionOutcome {
-	const rowCount = result.rowCount ?? 0;
-	const passed = rowCount === expected;
+type RowCountComparator = (actual: number, expected: number) => boolean;
 
-	return {
-		type: 'db.rows.equals',
-		expected,
-		actual: passed ? undefined : rowCount,
-		passed,
-		message: passed ? undefined : `Expected ${expected} rows, got ${rowCount}`,
+function createRowCountAssertion(
+	assertionType: AssertionType,
+	compare: RowCountComparator,
+	messageTemplate: (expected: number, actual: number) => string,
+) {
+	return (result: BatchResult, expected: number): AssertionOutcome => {
+		const rowCount = result.rowCount ?? 0;
+		const passed = compare(rowCount, expected);
+		return {
+			type: assertionType,
+			expected,
+			actual: passed ? undefined : rowCount,
+			passed,
+			message: passed ? undefined : messageTemplate(expected, rowCount),
+		};
 	};
 }
 
-/**
- * Assert minimum row count
- */
-export function assertDbRowsMin(
-	result: BatchResult,
-	expected: number,
-): AssertionOutcome {
-	const rowCount = result.rowCount ?? 0;
-	const passed = rowCount >= expected;
+export const assertDbRowsEquals = createRowCountAssertion(
+	'db.rows.equals',
+	(a, e) => a === e,
+	(e, a) => `Expected ${e} rows, got ${a}`,
+);
 
-	return {
-		type: 'db.rows.min',
-		expected,
-		actual: passed ? undefined : rowCount,
-		passed,
-		message: passed
-			? undefined
-			: `Expected at least ${expected} rows, got ${rowCount}`,
-	};
-}
+export const assertDbRowsMin = createRowCountAssertion(
+	'db.rows.min',
+	(a, e) => a >= e,
+	(e, a) => `Expected at least ${e} rows, got ${a}`,
+);
 
-/**
- * Assert maximum row count
- */
-export function assertDbRowsMax(
-	result: BatchResult,
-	expected: number,
-): AssertionOutcome {
-	const rowCount = result.rowCount ?? 0;
-	const passed = rowCount <= expected;
-
-	return {
-		type: 'db.rows.max',
-		expected,
-		actual: passed ? undefined : rowCount,
-		passed,
-		message: passed
-			? undefined
-			: `Expected at most ${expected} rows, got ${rowCount}`,
-	};
-}
+export const assertDbRowsMax = createRowCountAssertion(
+	'db.rows.max',
+	(a, e) => a <= e,
+	(e, a) => `Expected at most ${e} rows, got ${a}`,
+);
 
 /**
  * Assert column exists in result
@@ -751,97 +710,48 @@ export function assertIntentWith(
 }
 
 /**
- * Assert whether intent has WHERE clause
+ * Factory for intent boolean flag assertions (hasWhere, hasGroupBy, hasOrderBy).
  */
-export function assertIntentHasWhere(
-	result: BatchResult,
-	expected: boolean,
-): AssertionOutcome {
-	const actual = result.intent?.hasWhere ?? false;
+function createIntentBooleanAssertion(
+	assertionType: AssertionType,
+	field: string,
+) {
+	return (result: BatchResult, expected: boolean): AssertionOutcome => {
+		if (!result.intent) {
+			return {
+				type: assertionType,
+				expected,
+				actual: undefined,
+				passed: false,
+				message: 'No intent available (command or parse error)',
+			};
+		}
 
-	if (!result.intent) {
+		const actual =
+			((result.intent as Record<string, unknown>)[field] as boolean) ?? false;
+		const passed = actual === expected;
+
 		return {
-			type: 'intent.hasWhere',
+			type: assertionType,
 			expected,
-			actual: undefined,
-			passed: false,
-			message: 'No intent available (command or parse error)',
+			actual: passed ? undefined : actual,
+			passed,
+			message: passed
+				? undefined
+				: `Expected ${field}=${expected}, got ${actual}`,
 		};
-	}
-
-	const passed = actual === expected;
-
-	return {
-		type: 'intent.hasWhere',
-		expected,
-		actual: passed ? undefined : actual,
-		passed,
-		message: passed
-			? undefined
-			: `Expected hasWhere=${expected}, got ${actual}`,
 	};
 }
 
-/**
- * Assert whether intent has GROUP BY clause
- */
-export function assertIntentHasGroupBy(
-	result: BatchResult,
-	expected: boolean,
-): AssertionOutcome {
-	const actual = result.intent?.hasGroupBy ?? false;
-
-	if (!result.intent) {
-		return {
-			type: 'intent.hasGroupBy',
-			expected,
-			actual: undefined,
-			passed: false,
-			message: 'No intent available (command or parse error)',
-		};
-	}
-
-	const passed = actual === expected;
-
-	return {
-		type: 'intent.hasGroupBy',
-		expected,
-		actual: passed ? undefined : actual,
-		passed,
-		message: passed
-			? undefined
-			: `Expected hasGroupBy=${expected}, got ${actual}`,
-	};
-}
-
-/**
- * Assert whether intent has ORDER BY clause
- */
-export function assertIntentHasOrderBy(
-	result: BatchResult,
-	expected: boolean,
-): AssertionOutcome {
-	const actual = result.intent?.hasOrderBy ?? false;
-
-	if (!result.intent) {
-		return {
-			type: 'intent.hasOrderBy',
-			expected,
-			actual: undefined,
-			passed: false,
-			message: 'No intent available (command or parse error)',
-		};
-	}
-
-	const passed = actual === expected;
-
-	return {
-		type: 'intent.hasOrderBy',
-		expected,
-		actual: passed ? undefined : actual,
-		passed,
-		message: passed
-			? undefined
-			: `Expected hasOrderBy=${expected}, got ${actual}`,
-	};
-}
+export const assertIntentHasWhere = createIntentBooleanAssertion(
+	'intent.hasWhere',
+	'hasWhere',
+);
+export const assertIntentHasGroupBy = createIntentBooleanAssertion(
+	'intent.hasGroupBy',
+	'hasGroupBy',
+);
+export const assertIntentHasOrderBy = createIntentBooleanAssertion(
+	'intent.hasOrderBy',
+	'hasOrderBy',
+);

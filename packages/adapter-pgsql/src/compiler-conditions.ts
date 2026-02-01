@@ -37,7 +37,7 @@ import { createParamRef, createTypeCastParamRef } from './param-ref.js';
 /** Immutable context for condition compilation */
 export interface ConditionContext {
 	readonly naming: NamingPlugin;
-	readonly schema?: string;
+	readonly schema?: string | undefined;
 	readonly rootTable: string;
 }
 

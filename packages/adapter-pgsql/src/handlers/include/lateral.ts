@@ -8,7 +8,12 @@
  */
 
 import type { JoinExpr, Node, SelectStmt } from '@pgsql/types';
-import { columnRef, eqExpr, rangeVar } from '../../ast-helpers.js';
+import {
+	columnRef,
+	fkCorrelation,
+	rangeVar,
+	starTarget,
+} from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -34,20 +39,7 @@ function buildLateralTargets(
 	}
 
 	// Select all columns
-	return [
-		{
-			ResTarget: {
-				val: {
-					ColumnRef: {
-						fields: [
-							{ String: { sval: ctx.naming.toDatabase(alias) } },
-							{ A_Star: {} },
-						],
-					},
-				},
-			},
-		},
-	];
+	return [starTarget(alias, ctx.naming)];
 }
 
 /**
@@ -65,9 +57,12 @@ function buildLateralSubquery(
 ): Node {
 	// Build the correlation condition
 	// LATERAL can reference outer columns directly
-	const whereClause = eqExpr(
-		columnRef(targetColumn, innerAlias, undefined, ctx.naming),
-		columnRef(sourceColumn, outerAlias, undefined, ctx.naming),
+	const whereClause = fkCorrelation(
+		targetColumn,
+		innerAlias,
+		sourceColumn,
+		outerAlias,
+		ctx.naming,
 	);
 
 	// Build target list

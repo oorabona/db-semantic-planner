@@ -29,6 +29,7 @@ import {
 	integerNode,
 	leftJoin,
 	ltExpr,
+	normalizeSQL,
 	orExpr,
 	rangeVar,
 	selectStmt,
@@ -39,16 +40,6 @@ import {
 } from '../ast-helpers.js';
 import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 import { createParamRef } from '../param-ref.js';
-
-/**
- * Normalize SQL for comparison
- * - Lowercase
- * - Collapse whitespace
- * - Remove trailing semicolons
- */
-function normalizeSQL(sql: string): string {
-	return sql.toLowerCase().replace(/\s+/g, ' ').replace(/;\s*$/, '').trim();
-}
 
 /**
  * Assert that two SQL strings are semantically equivalent

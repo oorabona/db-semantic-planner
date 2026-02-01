@@ -70,23 +70,19 @@ import {
 } from './mutations/index.js';
 import { getNamingPlugin, type NamingPlugin } from './naming-plugin.js';
 import {
-	buildRecursiveCte,
-	type RecursiveCteConfig,
-} from './recursive/index.js';
-import { generateCursorName } from './streaming/cursor.js';
-import {
 	convertDottedFieldsToExists,
-	convertWhereToDecisions,
 	deriveForeignKey,
 	extractExistsDecisions,
 	extractJsonAggDecisions,
 	extractLeftJoinIncludeDecisions,
-	findExistsIntents,
 	mapComparisonOperator,
-	resolveIncludeAlias,
-	resolveRelation,
 	valueToNode,
 } from './plan-decision-extractor.js';
+import {
+	buildRecursiveCte,
+	type RecursiveCteConfig,
+} from './recursive/index.js';
+import { generateCursorName } from './streaming/cursor.js';
 import { validateIdentifier } from './validate.js';
 
 // ============================================================================
@@ -308,8 +304,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const jsonAggDecisions = extractJsonAggDecisions(plan);
 
 			// Phase 3 (F-006): Add LEFT JOIN include decisions for to-one relations
-			const leftJoinIncludeDecisions =
-				extractLeftJoinIncludeDecisions(plan);
+			const leftJoinIncludeDecisions = extractLeftJoinIncludeDecisions(plan);
 
 			// Propagate filter conditions from EXISTS to matching json_agg decisions
 			// When a relation is both filtered and included, the filter should appear
@@ -458,7 +453,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				sourceTable: ctx.sourceTable ?? plan.rootTable,
 			};
 			if (typeof ctx.relationType === 'string') {
-				// biome-ignore lint: exactOptionalPropertyTypes workaround
 				(entry as unknown as Record<string, unknown>).relationType =
 					ctx.relationType;
 			}
@@ -519,11 +513,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				state,
 			);
 		}
-
-		// Build table name
-		const _tableName = schemaName
-			? `"${this.naming.toDatabase(schemaName)}"."${this.naming.toDatabase(info.targetTable)}"`
-			: `"${this.naming.toDatabase(info.targetTable)}"`;
 
 		// Build SELECT target list
 		const targetList = [
@@ -1222,7 +1211,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				return { A_Const: { boolval: { boolval: true } } };
 		}
 	}
-
 
 	/**
 	 * Create a dump for observability.

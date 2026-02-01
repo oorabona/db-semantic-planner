@@ -24,12 +24,7 @@ import {
 	schema,
 } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import {
-	closeTestDb,
-	getTestAdapter,
-	getTestPool,
-	
-} from './testkit/index.js';
+import { closeTestDb, getTestAdapter, getTestPool } from './testkit/index.js';
 import { sql } from './testkit/sql.js';
 
 // Schema name for this test suite

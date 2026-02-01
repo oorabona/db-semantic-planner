@@ -191,20 +191,6 @@ export function assertRoundtrip(sql: string): void {
 }
 
 /**
- * Normalize SQL for string comparison
- */
-export function normalizeSQL(sql: string): string {
-	return sql
-		.toLowerCase()
-		.replace(/\s+/g, ' ')
-		.replace(/\(\s+/g, '(')
-		.replace(/\s+\)/g, ')')
-		.replace(/,\s+/g, ', ')
-		.replace(/;\s*$/, '')
-		.trim();
-}
-
-/**
  * Compare two SQL strings by parsing both and comparing ASTs
  */
 export function compareSQLByAST(sql1: string, sql2: string): CompareResult {

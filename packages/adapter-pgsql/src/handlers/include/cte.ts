@@ -8,7 +8,12 @@
  */
 
 import type { CommonTableExpr, JoinExpr, Node, SelectStmt } from '@pgsql/types';
-import { columnRef, eqExpr, rangeVar } from '../../ast-helpers.js';
+import {
+	columnRef,
+	fkCorrelation,
+	rangeVar,
+	starTarget,
+} from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -35,20 +40,7 @@ function buildCteTargets(
 	}
 
 	// Select all columns
-	return [
-		{
-			ResTarget: {
-				val: {
-					ColumnRef: {
-						fields: [
-							{ String: { sval: ctx.naming.toDatabase(alias) } },
-							{ A_Star: {} },
-						],
-					},
-				},
-			},
-		},
-	];
+	return [starTarget(alias, ctx.naming)];
 }
 
 /**
@@ -129,9 +121,12 @@ function buildCteJoin(
 	ctx: CompilerContext,
 ): Node {
 	// Join condition: source.fk = cte.pk
-	const joinCondition = eqExpr(
-		columnRef(sourceColumn, sourceAlias, undefined, ctx.naming),
-		columnRef(targetColumn, cteAlias, undefined, ctx.naming),
+	const joinCondition = fkCorrelation(
+		sourceColumn,
+		sourceAlias,
+		targetColumn,
+		cteAlias,
+		ctx.naming,
 	);
 
 	// Reference the CTE as if it were a table

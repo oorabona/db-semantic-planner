@@ -10,7 +10,6 @@ import {
 	createSchema,
 	dropSchema,
 	getTestPool,
-	
 } from './testkit/db.js';
 import { sql } from './testkit/sql.js';
 
