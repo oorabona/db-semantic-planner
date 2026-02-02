@@ -625,6 +625,7 @@ export class ReplEngine {
 			const queryResult: QueryResult = {
 				sql: finalSql,
 				params: result.params,
+				intent: result.intent,
 				plan: {
 					strategy: isMutation
 						? `${result.intentType.toUpperCase()} - ${planInfo}`

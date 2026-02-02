@@ -7,8 +7,28 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { ModelIR } from '@dbsp/core';
 import type { LoadedSchema } from '../utils/schema-loader.js';
-import type { BatchState } from './batch.js';
+import type { DbConnection } from './db-connection.js';
+import type { QueryMode } from './types.js';
+
+/** Shared state interface used by dot-commands and batch mode. */
+export interface BatchState {
+	mode: QueryMode;
+	execEnabled: boolean;
+	schemaName: string | undefined;
+	dbConnection: DbConnection | undefined;
+	/** CLI-MUT: Show EXPLAIN output with query results */
+	explainMode: boolean;
+	/** CLI-NQL: Show parse tree (AST) for queries */
+	parseMode: boolean;
+	/** NQL v2: ModelIR built from schema for NQL compilation */
+	model: ModelIR | undefined;
+	/** NQL v2.1: Output display format (json|table|csv) */
+	outputMode: 'json' | 'table' | 'csv';
+	/** DB column casing (intuitive). */
+	dbCasing?: 'snake_case' | 'camelCase' | 'preserve';
+}
 
 // ============================================================================
 // Format Helpers

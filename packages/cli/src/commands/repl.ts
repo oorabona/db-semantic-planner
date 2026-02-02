@@ -8,6 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { config } from '../config.js';
+import { parseDbspLines } from '../repl/dbsp-parser.js';
 import { loadSchema, loadSchemaFromCwd } from '../utils/schema-loader.js';
 
 export interface ReplOptions {
@@ -142,26 +143,7 @@ export const replCommand = new Command('repl')
 
 				if (options.input) {
 					const content = readFileSync(options.input, 'utf-8');
-					const rawLines = content.split('\n');
-					let buffer = '';
-					for (const line of rawLines) {
-						const trimmed = line.trim();
-						if (!trimmed || trimmed.startsWith('#')) {
-							if (buffer) {
-								queries.push(buffer);
-								buffer = '';
-							}
-							continue;
-						}
-						if (trimmed.endsWith('\\')) {
-							buffer += (buffer ? '\n' : '') + trimmed.slice(0, -1);
-						} else {
-							buffer += (buffer ? '\n' : '') + trimmed;
-							queries.push(buffer);
-							buffer = '';
-						}
-					}
-					if (buffer) queries.push(buffer);
+					queries.push(...parseDbspLines(content));
 				}
 
 				await runBatchMode({
