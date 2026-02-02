@@ -62,120 +62,66 @@ const products = await orm.nql<Product[]>`products | where active = true`.all();
 
 ### Example Schemas
 
-The examples below use tables from schemas shipped with the project:
+Examples in this guide use three schemas shipped with the project. Each is a separate file loaded independently:
 
-- [`examples/blog.schema.ts`](../../examples/blog.schema.ts) — `authors`, `posts`, `comments`, `tags`, `postTags`
-- [`examples/ecommerce.schema.ts`](../../examples/ecommerce.schema.ts) — `products`, `orders`, `orderItems`, `customers`, `categories`, `variants`, `addresses`
-- [`examples/hierarchy.schema.ts`](../../examples/hierarchy.schema.ts) — `employees`, `departments`, `projects`
+#### Blog — `examples/blog.schema.ts`
 
-Examples freely mix tables from all three schemas — each query uses whichever table best illustrates the feature. All table and column names match the schemas above.
+```bash
+pnpm dbsp repl -s examples/blog.schema.ts
+```
 
-Here's a consolidated view of the key tables referenced in this guide:
+Tables: `authors`, `posts`, `comments`, `tags`, `postTags`
 
 ```typescript
-import { schema, ref } from '@dbsp/core';
-
-// === Blog schema ===
-export default schema({
-  authors: {
-    id: { type: 'integer', primaryKey: true, autoIncrement: true },
-    name: 'string',
-    email: { type: 'string', unique: true },
-    bio: { type: 'text', nullable: true },
-    createdAt: { type: 'timestamp', default: 'now()' },
-  },
-  posts: {
-    id: { type: 'integer', primaryKey: true, autoIncrement: true },
-    title: 'string',
-    slug: { type: 'string', unique: true },
-    content: { type: 'text', nullable: true },
-    published: { type: 'boolean', default: 'false' },
-    authorId: ref('authors', { onDelete: 'CASCADE', inverse: 'posts' }),
-    createdAt: { type: 'timestamp', default: 'now()' },
-    updatedAt: { type: 'timestamp', nullable: true },
-  },
-  comments: {
-    id: { type: 'integer', primaryKey: true, autoIncrement: true },
-    postId: ref('posts', { onDelete: 'CASCADE', inverse: 'comments' }),
-    authorName: 'string',
-    authorEmail: { type: 'string', nullable: true },
-    content: 'text',
-    approved: { type: 'boolean', default: 'false' },
-    createdAt: { type: 'timestamp', default: 'now()' },
-  },
-  tags: {
-    id: { type: 'integer', primaryKey: true, autoIncrement: true },
-    name: { type: 'string', unique: true },
-    slug: { type: 'string', unique: true },
-  },
-  postTags: {
-    postId: ref('posts', { onDelete: 'CASCADE' }),
-    tagId: ref('tags', { onDelete: 'CASCADE' }),
-  },
-});
-
-// === Ecommerce schema (key tables) ===
-export default schema({
-  products: {
-    id: { type: 'integer', primaryKey: true, autoIncrement: true },
-    sku: { type: 'string', unique: true },
-    name: 'string',
-    price: 'decimal',
-    stock: { type: 'integer', default: '0' },
-    categoryId: ref('categories', { onDelete: 'RESTRICT', inverse: 'products' }),
-    active: { type: 'boolean', default: 'true' },
-    createdAt: { type: 'timestamp', default: 'now()' },
-  },
-  orders: {
-    id: { type: 'integer', primaryKey: true, autoIncrement: true },
-    orderNumber: { type: 'string', unique: true },
-    customerId: ref('customers', { onDelete: 'RESTRICT', inverse: 'orders' }),
-    status: { type: 'string', default: "'pending'" },
-    total: 'decimal',
-    createdAt: { type: 'timestamp', default: 'now()' },
-  },
-  orderItems: {
-    id: { type: 'integer', primaryKey: true, autoIncrement: true },
-    orderId: ref('orders', { onDelete: 'CASCADE' }),
-    productId: ref('products', { onDelete: 'RESTRICT' }),
-    quantity: 'integer',
-    unitPrice: 'decimal',
-    totalPrice: 'decimal',
-  },
-  customers: {
-    id: { type: 'integer', primaryKey: true, autoIncrement: true },
-    email: { type: 'string', unique: true },
-    firstName: 'string',
-    lastName: 'string',
-    createdAt: { type: 'timestamp', default: 'now()' },
-  },
-  categories: {
-    id: { type: 'integer', primaryKey: true, autoIncrement: true },
-    name: 'string',
-    slug: { type: 'string', unique: true },
-    parentId: ref('categories', { nullable: true, roles: { parent: 'parent', children: 'children' } }),
-  },
-});
-
-// === Hierarchy schema ===
-export default schema({
-  employees: {
-    id: { type: 'integer', primaryKey: true, autoIncrement: true },
-    name: 'string',
-    title: 'string',
-    salary: 'decimal',
-    managerId: ref('employees', {
-      nullable: true,
-      roles: {
-        parent: 'manager',
-        children: 'directReports',
-        ancestors: 'managementChain',
-        descendants: 'allReports',
-      },
-    }),
-  },
+schema({
+  authors:  { id, name, email, bio?, createdAt },
+  posts:    { id, title, slug, content?, published, authorId → authors, createdAt, updatedAt? },
+  comments: { id, postId → posts, authorName, authorEmail?, content, approved, createdAt },
+  tags:     { id, name, slug },
+  postTags: { postId → posts, tagId → tags },  // M:N junction
 });
 ```
+
+#### Ecommerce — `examples/ecommerce.schema.ts`
+
+```bash
+pnpm dbsp repl -s examples/ecommerce.schema.ts
+```
+
+Tables: `categories`, `products`, `variants`, `customers`, `addresses`, `orders`, `orderItems`
+
+```typescript
+schema({
+  categories: { id, name, slug, parentId? → categories (self-ref: parent/children/ancestors/descendants), sortOrder },
+  products:   { id, sku, name, description?, price, stock, categoryId → categories, active, createdAt },
+  variants:   { id, productId → products, sku, name, priceModifier, stock },
+  customers:  { id, email, firstName, lastName, phone?, createdAt },
+  addresses:  { id, customerId → customers, type, street, city, postalCode, country, isDefault },
+  orders:     { id, orderNumber, customerId → customers, status, total, shippingAddressId → addresses,
+                billingAddressId → addresses, createdAt, updatedAt? },
+  orderItems: { id, orderId → orders, productId → products, variantId? → variants, quantity, unitPrice, totalPrice },
+});
+```
+
+#### Hierarchy — `examples/hierarchy.schema.ts`
+
+```bash
+pnpm dbsp repl -s examples/hierarchy.schema.ts
+```
+
+Tables: `departments`, `employees`, `projects`
+
+```typescript
+schema({
+  departments: { id, name, budget? },
+  employees:   { id, name, email, title, departmentId → departments, managerId? → employees
+                 (self-ref: manager/directReports/managementChain/allReports), hireDate, salary },
+  projects:    { id, name, leadId → employees, departmentId → departments, status },
+});
+```
+
+> Throughout this guide, a **schema badge** indicates which schema to load for each example group:
+> *blog*, *ecommerce*, or *hierarchy*.
 
 ---
 
@@ -207,6 +153,8 @@ products | where active = true   # Inline comment
 ---
 
 ## 3. WHERE (Filtering)
+
+> Uses *blog* and *ecommerce* schemas.
 
 ### Comparison Operators
 
@@ -297,6 +245,8 @@ customers | where exists (orders | where customerId = customers.id)
 
 ## 4. SELECT (Projection)
 
+> Uses *blog* and *ecommerce* schemas.
+
 ### All Columns
 
 ```
@@ -339,6 +289,8 @@ Standard operator precedence: `*`, `/`, `%` bind tighter than `+`, `-`.
 ---
 
 ## 5. Includes (Relations)
+
+> Uses *blog* and *ecommerce* schemas.
 
 ### Nested JSON (Default)
 
@@ -390,6 +342,8 @@ The planner automatically resolves junction tables.
 
 ## 6. Aggregates & GROUP BY
 
+> Uses *blog* and *ecommerce* schemas.
+
 ### Aggregate Functions
 
 ```
@@ -428,6 +382,8 @@ orders | group by status | where count(*) > 10 | select status, count(*)
 
 ## 7. ORDER BY, LIMIT, OFFSET
 
+> Uses *blog* and *ecommerce* schemas.
+
 ### Sorting
 
 ```
@@ -446,6 +402,8 @@ posts | order by createdAt desc | limit 10 | offset 20
 ---
 
 ## 8. Window Functions
+
+> Uses *ecommerce* schema.
 
 ### Syntax
 
@@ -485,6 +443,8 @@ products | select name, count(*) over () as totalProducts
 
 ## 9. CASE Expressions
 
+> Uses *ecommerce* schema.
+
 ```
 # Simple
 products | select case when price > 100 then 'expensive' end
@@ -503,6 +463,8 @@ products | select name, price, case when price > 100 then 'high' else 'low' end 
 ---
 
 ## 10. Hierarchy / Recursive Traversal
+
+> Uses *hierarchy* schema (`pnpm dbsp repl -s examples/hierarchy.schema.ts`).
 
 Requires a schema with self-referential `ref()` and `roles` configured.
 
@@ -541,6 +503,8 @@ employees | select name, allReports.name
 ---
 
 ## 11. Mutations
+
+> Uses *ecommerce* and *blog* schemas.
 
 ### INSERT
 
@@ -604,6 +568,8 @@ insert into orderItems set orderId = order.id, productId = 5, quantity = 2, unit
 ---
 
 ## 12. Advanced Features
+
+> Uses *ecommerce* schema unless noted.
 
 ### LET Bindings (CTEs)
 
