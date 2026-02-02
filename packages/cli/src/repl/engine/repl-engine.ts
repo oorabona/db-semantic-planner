@@ -147,6 +147,9 @@ export class ReplEngine {
 		const trimmed = input.trim();
 		if (!trimmed) return;
 
+		// Skip comment-only lines (e.g. pasted from .dbsp files)
+		if (trimmed.startsWith('#')) return;
+
 		// --- Dot commands ---
 		if (trimmed.startsWith('.')) {
 			await this.processDotCommand(trimmed);

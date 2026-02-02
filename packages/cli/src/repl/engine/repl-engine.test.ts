@@ -88,6 +88,16 @@ describe('ReplEngine', () => {
 		expect(events).toHaveLength(0);
 	});
 
+	it('ignores comment-only lines', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('# This is a comment');
+		await engine.submit('  # Indented comment');
+
+		expect(events).toHaveLength(0);
+	});
+
 	it('emits exit on .exit command', async () => {
 		const engine = createEngine();
 		const events = collectEvents(engine);

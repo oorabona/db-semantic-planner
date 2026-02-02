@@ -154,8 +154,10 @@ posts | where published = true | select title, slug | order by createdAt desc | 
 
 ### Comments
 
+Comments start with `#` and extend to end of line:
+
 ```
-# This is a comment
+# Full-line comment (ignored by REPL and .dbsp files)
 products | where active = true   # Inline comment
 ```
 
