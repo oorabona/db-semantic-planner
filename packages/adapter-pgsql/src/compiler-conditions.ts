@@ -185,10 +185,10 @@ export function compileCondition(
 		);
 	}
 	if (decision.operator === 'in') {
-		return compileInCondition(decision, column, false, state);
+		return compileInCondition(decision, column, false, state, ctx);
 	}
 	if (decision.operator === 'notIn') {
-		return compileInCondition(decision, column, true, state);
+		return compileInCondition(decision, column, true, state, ctx);
 	}
 	if (decision.operator === 'between') {
 		return compileBetweenCondition(decision, column, state);
@@ -351,7 +351,13 @@ function compileInCondition(
 	column: Node,
 	negate: boolean,
 	state: ConditionState,
+	ctx?: ConditionContext,
 ): Node {
+	// IN (subquery): field IN (SELECT col FROM table WHERE ...)
+	if (decision.subquery) {
+		return compileInSubquery(decision, column, negate, state, ctx);
+	}
+
 	const values = decision.value as unknown[];
 	if (!Array.isArray(values)) {
 		throw new Error('IN condition requires array value');
@@ -375,6 +381,69 @@ function compileInCondition(
 			name: [{ String: { sval: op } }],
 			lexpr: column,
 			rexpr: createParamRef(paramIdx),
+		},
+		};
+}
+
+/**
+ * Compile IN (subquery): field IN (SELECT col FROM table WHERE ...)
+ * Uses SubLink with ANY_SUBLINK / ALL_SUBLINK to match pg semantics.
+ */
+function compileInSubquery(
+	decision: PlanDecision,
+	column: Node,
+	negate: boolean,
+	state: ConditionState,
+	ctx?: ConditionContext,
+): Node {
+	const sub = decision.subquery as {
+		from: string;
+		select: string;
+		where?: unknown;
+	};
+
+	// Build inner SELECT: SELECT col FROM table
+	const selectColumn = sub.select || '*';
+	const innerTargetList: Node[] = [
+		{
+			ResTarget: {
+				val: columnRef(selectColumn, sub.from, undefined, ctx?.naming),
+			},
+		},
+	];
+
+	const innerFromClause: Node[] = [
+		rangeVar(sub.from, undefined, ctx?.schema, ctx?.naming),
+	];
+
+	// Build inner WHERE if present
+	let innerWhere: Node | undefined;
+	if (sub.where) {
+		innerWhere = compileCondition(
+			sub.where as PlanDecision,
+			ctx ?? { naming: { toColumn: (n: string) => n, toTable: (n: string) => n }, rootTable: sub.from },
+			state,
+		);
+	}
+
+	const subSelect: Node = {
+		SelectStmt: {
+			targetList: innerTargetList,
+			fromClause: innerFromClause,
+			...(innerWhere && { whereClause: innerWhere }),
+		},
+	};
+
+	// SubLink: column IN (SELECT ...) or column NOT IN (SELECT ...)
+	const subLinkType = negate ? 'ALL_SUBLINK' : 'ANY_SUBLINK';
+	const op = negate ? '<>' : '=';
+
+	return {
+		SubLink: {
+			subLinkType,
+			subselect: subSelect,
+			testexpr: column,
+			operName: [{ String: { sval: op } }],
 		},
 	};
 }

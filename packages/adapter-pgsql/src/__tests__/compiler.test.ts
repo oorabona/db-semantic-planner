@@ -629,4 +629,91 @@ describe('PlanCompiler', () => {
 			expect(parsed.stmts).toHaveLength(1);
 		});
 	});
+
+	describe('IN (subquery) conditions', () => {
+		it('compiles WHERE field IN (SELECT col FROM table)', () => {
+			const plan: SimplifiedPlanReport = {
+				rootTable: 'orders',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{
+						type: 'where',
+						column: 'customer_id',
+						operator: 'in',
+						subquery: {
+							from: 'active_customers',
+							select: 'id',
+						},
+					},
+				],
+			};
+
+			const result = compilePlan(plan);
+			const normalized = normalizeSQL(result.sql);
+
+			expect(normalized).toContain('= any');
+			expect(normalized).toContain('select');
+			expect(normalized).toContain('active_customers');
+			expect(result.parameters).toHaveLength(0);
+		});
+
+		it('compiles WHERE field NOT IN (SELECT col FROM table)', () => {
+			const plan: SimplifiedPlanReport = {
+				rootTable: 'orders',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{
+						type: 'where',
+						column: 'customer_id',
+						operator: 'notIn',
+						subquery: {
+							from: 'blocked_customers',
+							select: 'id',
+						},
+					},
+				],
+			};
+
+			const result = compilePlan(plan);
+			const normalized = normalizeSQL(result.sql);
+
+			expect(normalized).toContain('<> all');
+			expect(normalized).toContain('select');
+			expect(normalized).toContain('blocked_customers');
+			expect(result.parameters).toHaveLength(0);
+		});
+
+		it('compiles WHERE field IN (SELECT col FROM table WHERE cond)', () => {
+			const plan: SimplifiedPlanReport = {
+				rootTable: 'orders',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{
+						type: 'where',
+						column: 'customer_id',
+						operator: 'in',
+						subquery: {
+							from: 'customers',
+							select: 'id',
+							where: {
+								type: 'where',
+								column: 'active',
+								operator: '=',
+								value: true,
+								table: 'customers',
+							},
+						},
+					},
+				],
+			};
+
+			const result = compilePlan(plan);
+			const normalized = normalizeSQL(result.sql);
+
+			expect(normalized).toContain('= any');
+			expect(normalized).toContain('customers');
+			expect(normalized).toContain('active');
+			expect(result.parameters).toEqual([true]);
+		});
+	});
 });

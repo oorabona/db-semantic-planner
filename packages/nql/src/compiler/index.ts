@@ -22,6 +22,7 @@ import type {
 	PseudoColumnTraversal,
 	QueryIntent,
 	RangeOperator,
+	ScalarSubqueryIntent,
 	SelectAllIntent,
 	SelectFieldsIntent,
 	SelectIntent,
@@ -94,6 +95,7 @@ export type {
 	PseudoColumnTraversal,
 	QueryIntent,
 	RangeOperator,
+	ScalarSubqueryIntent,
 	SelectAllIntent,
 	SelectFieldsIntent,
 	SelectIntent,
@@ -792,7 +794,34 @@ export class NqlCompiler {
 					'type' in inExpr.values &&
 					inExpr.values.type === 'subquery'
 				) {
-					throw new Error('Subquery in IN clause not yet supported');
+					// Compile inner subquery to ScalarSubqueryIntent
+					const innerQuery = this.compileQuery(inExpr.values.query);
+					let selectField = '*';
+					if (innerQuery.select?.type === 'fields' && innerQuery.select.fields[0]) {
+						selectField = innerQuery.select.fields[0];
+					} else if (innerQuery.select?.type === 'expressions' && innerQuery.select.columns[0]) {
+						const col = innerQuery.select.columns[0];
+						selectField = col.kind === 'column' ? col.column : col.kind === 'columnAlias' ? (col as { kind: 'columnAlias'; column: string }).column : '*';
+					}
+
+					const subquery: ScalarSubqueryIntent = {
+						from: innerQuery.from,
+						select: selectField,
+						...(innerQuery.where && { where: innerQuery.where }),
+					};
+
+					const result: WhereInIntent = {
+						kind: 'in',
+						field,
+						values: [],
+						subquery,
+					};
+
+					if (inExpr.negated) {
+						return { kind: 'not', condition: result };
+					}
+
+					return result;
 				} else if (
 					'type' in inExpr.values &&
 					inExpr.values.type === 'dateRange'
