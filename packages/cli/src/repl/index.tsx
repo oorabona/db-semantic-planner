@@ -212,13 +212,22 @@ function ReplApp({ config }: ReplAppProps) {
 			setPanelView(null);
 			return;
 		}
-		// Tab: cycle through completions
-		if (key.tab && completions.length > 0 && engineState.mode === 'natural') {
-			const nextIndex =
-				selectedCompletionIndex < 0
-					? 0
-					: (selectedCompletionIndex + 1) % completions.length;
-			setSelectedCompletionIndex(nextIndex);
+		// Tab: cycle panel views when panel is open, otherwise cycle completions
+		if (key.tab) {
+			if (panelView !== null) {
+				const views: PanelView[] = ['sql', 'plan', 'results', 'params', 'dump'];
+				const currentIdx = views.indexOf(panelView);
+				const nextIdx = (currentIdx + 1) % views.length;
+				setPanelView(views[nextIdx]!);
+				return;
+			}
+			if (completions.length > 0 && engineState.mode === 'natural') {
+				const nextIndex =
+					selectedCompletionIndex < 0
+						? 0
+						: (selectedCompletionIndex + 1) % completions.length;
+				setSelectedCompletionIndex(nextIndex);
+			}
 		}
 	});
 
@@ -252,15 +261,19 @@ function ReplApp({ config }: ReplAppProps) {
 			? completions[selectedCompletionIndex]?.text
 			: undefined;
 
-	const handleSubmit = useCallback(
-		async (value: string) => {
-			const trimmed = value.trim();
-			if (!trimmed) return;
+	// --- Submission queue (handles multiline paste safely) ---
+	const submitQueueRef = useRef<string[]>([]);
+	const isProcessingRef = useRef(false);
 
-			// Reset UI
-			setInputKey((k) => k + 1);
-			setCompletions([]);
-			setShowHelp(false);
+	const processQueue = useCallback(async () => {
+		if (isProcessingRef.current) return;
+		isProcessingRef.current = true;
+
+		while (submitQueueRef.current.length > 0) {
+			const trimmed = submitQueueRef.current.shift()!;
+
+			// Save to command history (up/down navigation + .history)
+			history.add(trimmed);
 
 			// Create conversation entry BEFORE submitting to engine
 			const entry = conversation.addEntry(trimmed);
@@ -272,8 +285,26 @@ function ReplApp({ config }: ReplAppProps) {
 
 			// Clear current entry ref
 			currentEntryIdRef.current = null;
+		}
+
+		isProcessingRef.current = false;
+	}, [engine, conversation, history]);
+
+	const handleSubmit = useCallback(
+		(value: string) => {
+			const trimmed = value.trim();
+			if (!trimmed) return;
+
+			// Reset UI
+			setInputKey((k) => k + 1);
+			setCompletions([]);
+			setShowHelp(false);
+
+			// Enqueue and process sequentially
+			submitQueueRef.current.push(trimmed);
+			processQueue();
 		},
-		[engine, conversation],
+		[processQueue],
 	);
 
 	// --- Derived values for Header ---
@@ -319,6 +350,8 @@ function ReplApp({ config }: ReplAppProps) {
 					view={panelView}
 					queryResult={lastQueryResult}
 					executionResult={lastExecResult}
+					execMode={engineState.execMode}
+					onViewChange={setPanelView}
 				/>
 			)}
 		</Box>

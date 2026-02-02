@@ -2,8 +2,9 @@
  * InspectionPanel — Anchored panel below the input area.
  *
  * Displays detailed inspection of the last query result (SQL, plan, results,
- * params, parse tree) without polluting the conversation scroll.
- * Activated by dot commands: .sql, .plan, .results, .params, .dump, .parse
+ * params, dump) without polluting the conversation scroll.
+ * Tab bar at top cycles through views with Tab key.
+ * Activated by dot commands: .show sql|plan|results|params|dump
  * Closed by: .close, Esc
  */
 
@@ -23,24 +24,45 @@ interface InspectionPanelProps {
 	view: PanelView;
 	queryResult: QueryResult | null;
 	executionResult: ExecutionResult | null;
+	execMode: boolean;
+	onViewChange: (view: PanelView) => void;
 }
 
-const PANEL_TITLES: Record<PanelView, string> = {
+const ALL_VIEWS: PanelView[] = ['sql', 'plan', 'results', 'params', 'dump'];
+
+const TAB_LABELS: Record<PanelView, string> = {
 	sql: 'SQL',
-	plan: 'Query Plan',
+	plan: 'Plan',
 	results: 'Results',
-	params: 'Parameters',
-	dump: 'Full Dump',
+	params: 'Params',
+	dump: 'Dump',
 };
 
-function PanelHeader({ view }: { view: PanelView }) {
+function TabBar({
+	activeView,
+	execMode,
+}: { activeView: PanelView; execMode: boolean }) {
 	return (
 		<Box>
-			<Text bold color="blue">
-				{'╸ '}
-				{PANEL_TITLES[view]}
-			</Text>
-			<Text color="gray"> (.close or Esc to dismiss)</Text>
+			{ALL_VIEWS.map((v, i) => {
+				const isActive = v === activeView;
+				const isDimmed = v === 'results' && !execMode;
+				return (
+					<React.Fragment key={v}>
+						{i > 0 && <Text color="gray"> </Text>}
+						{isActive ? (
+							<Text bold inverse color="blue">
+								{` ${TAB_LABELS[v]} `}
+							</Text>
+						) : (
+							<Text color={isDimmed ? 'gray' : 'white'} dimColor={isDimmed}>
+								{` ${TAB_LABELS[v]} `}
+							</Text>
+						)}
+					</React.Fragment>
+				);
+			})}
+			<Text color="gray"> Tab↹ cycle · Esc close</Text>
 		</Box>
 	);
 }
@@ -49,6 +71,7 @@ function PanelContent({
 	view,
 	queryResult,
 	executionResult,
+	execMode,
 }: InspectionPanelProps) {
 	if (!queryResult && !executionResult) {
 		return <Text color="gray">No query result to inspect.</Text>;
@@ -79,10 +102,16 @@ function PanelContent({
 		}
 
 		case 'results': {
+			if (!execMode)
+				return (
+					<Text color="gray">
+						Not in execution mode. Use .exec to enable.
+					</Text>
+				);
 			if (!executionResult)
 				return (
 					<Text color="gray">
-						No execution results. Use .exec to enable execution mode.
+						No execution results yet. Run a query with .exec enabled.
 					</Text>
 				);
 			return <ExecutionResultDisplay result={executionResult} />;
@@ -148,7 +177,7 @@ export function InspectionPanel(props: InspectionPanelProps) {
 			paddingX={1}
 			marginTop={1}
 		>
-			<PanelHeader view={props.view} />
+			<TabBar activeView={props.view} execMode={props.execMode} />
 			<Box flexDirection="column" marginTop={1}>
 				<PanelContent {...props} />
 			</Box>

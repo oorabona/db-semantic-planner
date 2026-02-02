@@ -50,27 +50,25 @@ function QuerySummary({
 			return <Text color="red">✗ {queryResult.error}</Text>;
 		}
 		if (!execResult) {
-			// Compilation-only mode — show plan summary
+			// Compilation-only mode — show compact SQL preview
 			const plan = queryResult.plan;
-			if (plan) {
-				parts.push(plan.strategy);
-				if (plan.decisions.length > 0)
-					parts.push(
-						`${plan.decisions.length} decision${plan.decisions.length !== 1 ? 's' : ''}`,
-					);
-				if (plan.cteCount > 0)
-					parts.push(`${plan.cteCount} CTE${plan.cteCount !== 1 ? 's' : ''}`);
-				if (plan.planningTimeMs > 0)
-					parts.push(`${plan.planningTimeMs.toFixed(1)}ms`);
-			}
+			if (plan?.rootTable) parts.push(plan.rootTable);
+			if (plan && plan.cteCount > 0)
+				parts.push(`${plan.cteCount} CTE${plan.cteCount !== 1 ? 's' : ''}`);
 			if (
 				queryResult.separateQueries &&
 				queryResult.separateQueries.length > 0
 			) {
 				parts.push(
-					`${queryResult.separateQueries.length} separate quer${queryResult.separateQueries.length !== 1 ? 'ies' : 'y'}`,
+					`+${queryResult.separateQueries.length} quer${queryResult.separateQueries.length !== 1 ? 'ies' : 'y'}`,
 				);
 			}
+			if (plan && plan.planningTimeMs > 0)
+				parts.push(`${plan.planningTimeMs.toFixed(1)}ms`);
+			if (plan?.warnings && plan.warnings.length > 0)
+				parts.push(
+					`${plan.warnings.length} warning${plan.warnings.length !== 1 ? 's' : ''}`,
+				);
 		}
 	}
 
@@ -119,9 +117,11 @@ function ConversationEntryView({
 		<Box flexDirection="column" marginBottom={1}>
 			{/* Prompt echo */}
 			{entry.input && (
-				<Text color="gray" dimColor>
-					{'> '}
-					{entry.input}
+				<Text>
+					<Text color="blue" bold>
+						{'❯ '}
+					</Text>
+					<Text bold>{entry.input}</Text>
 				</Text>
 			)}
 

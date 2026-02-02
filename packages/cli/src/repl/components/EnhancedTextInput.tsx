@@ -159,13 +159,13 @@ export function EnhancedTextInput({
 			if (key.return) {
 				// Shift+Enter → insert newline (terminals that support distinct sequence)
 				if (key.shift) {
-					const newValue = val.slice(0, cur) + '\n' + val.slice(cur);
+					const newValue = `${val.slice(0, cur)}\n${val.slice(cur)}`;
 					updateValue(newValue, cur + 1);
 					return;
 				}
 				// Backslash continuation: if line ends with \, replace \ with newline
 				if (val.endsWith('\\')) {
-					const newValue = val.slice(0, -1) + '\n';
+					const newValue = `${val.slice(0, -1)}\n`;
 					updateValue(newValue, newValue.length);
 					return;
 				}
@@ -327,29 +327,37 @@ export function EnhancedTextInput({
 
 			// Regular character input
 			if (input && !key.ctrl && !key.meta) {
-				// Detect multiline paste: input string contains line breaks
-				// (Ink may send entire paste as one input with literal \n/\r)
+				// Detect multiline paste: input string contains line breaks.
+				// Terminal may deliver pasted text in multiple chunks — a chunk
+				// boundary can fall mid-line, so we only submit lines that are
+				// followed by a newline and keep the trailing fragment in the
+				// input buffer for the next chunk to complete.
 				if (input.includes('\n') || input.includes('\r')) {
-					const lines = input
-						.split(/\r\n|\r|\n/)
-						.map((l) => l.trim())
-						.filter(Boolean);
-					if (lines.length > 1) {
-						// Multi-line paste: submit each line as separate query
-						valueRef.current = '';
-						cursorRef.current = 0;
-						for (const line of lines) {
+					// Merge current buffer with pasted text
+					const fullText = val.slice(0, cur) + input + val.slice(cur);
+					const parts = fullText.split(/\r\n|\r|\n/);
+					const endsWithNewline = /[\r\n]$/.test(input);
+
+					// Complete lines = those followed by a newline
+					const completeLines = endsWithNewline ? parts : parts.slice(0, -1);
+					const remainder = endsWithNewline
+						? ''
+						: (parts[parts.length - 1] ?? '');
+
+					const toSubmit = completeLines.map((l) => l.trim()).filter(Boolean);
+
+					if (toSubmit.length > 0) {
+						// Submit complete lines, keep remainder in buffer
+						valueRef.current = remainder;
+						cursorRef.current = remainder.length;
+						for (const line of toSubmit) {
 							onSubmit?.(line);
 						}
 						return;
 					}
-					// Single line with trailing newline → use content without newline
-					if (lines.length === 1) {
-						const line = lines[0]!;
-						const newValue = val.slice(0, cur) + line + val.slice(cur);
-						updateValue(newValue, cur + line.length);
-						return;
-					}
+
+					// No complete lines — just place content in buffer
+					updateValue(remainder, remainder.length);
 					return;
 				}
 				const newValue = val.slice(0, cur) + input + val.slice(cur);
