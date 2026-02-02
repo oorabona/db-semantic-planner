@@ -816,17 +816,11 @@ export class NqlParser extends CstParser {
 	}
 
 	/**
-	 * scalar_subquery = table_ref "|" query_clause { "|" query_clause } ;
-	 * MUST have at least one pipe to disambiguate from (expr)
+	 * scalar_subquery = query ;
+	 * Delegates to the `query` rule (gate already ensures at least one pipe).
 	 */
 	private scalarSubquery = this.RULE('scalarSubquery', () => {
-		this.SUBRULE(this.tableRef);
-		this.CONSUME(Pipe);
-		this.SUBRULE(this.queryClause);
-		this.MANY(() => {
-			this.CONSUME2(Pipe);
-			this.SUBRULE2(this.queryClause);
-		});
+		this.SUBRULE(this.query);
 	});
 
 	/**
