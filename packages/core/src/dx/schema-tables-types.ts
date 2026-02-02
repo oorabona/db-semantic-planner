@@ -57,19 +57,26 @@ type ColumnDef =
 
 /**
  * Ref definition marker.
+ * Generic over target and options to preserve literal types for inference.
  */
-interface RefDefinition {
+interface RefDefinition<
+	TTarget extends string = string,
+	TOptions extends RefOptionsShape = RefOptionsShape,
+> {
 	readonly __brand: 'ref';
-	readonly target: string;
-	readonly options: {
-		as?: string;
-		inverse?: string;
-		nullable?: boolean;
-		unique?: boolean;
-		onDelete?: string;
-		onUpdate?: string;
-		roles?: unknown;
-	};
+	readonly target: TTarget;
+	readonly options: TOptions;
+}
+
+/** Shape of ref options (structural, avoids importing RefOptions). */
+interface RefOptionsShape {
+	as?: string;
+	inverse?: string;
+	nullable?: boolean;
+	unique?: boolean;
+	onDelete?: string;
+	onUpdate?: string;
+	roles?: unknown;
 }
 
 /**

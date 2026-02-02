@@ -422,7 +422,7 @@ function compileInSubquery(
 		innerWhere = compileCondition(
 			sub.where as PlanDecision,
 			ctx ?? {
-				naming: { toColumn: (n: string) => n, toTable: (n: string) => n },
+				naming: { toDatabase: (n: string) => n, toModel: (n: string) => n },
 				rootTable: sub.from,
 			},
 			state,

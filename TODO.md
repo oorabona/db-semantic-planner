@@ -18,6 +18,7 @@
 
 ### [MCP] #6: Replace MCP server placeholder test — Score 4.5 — Effort: M
 - Only 1 placeholder test exists for the entire MCP server package
+- 7 TODO stubs in `server.ts`: MCP-003 (schema_list_tables), MCP-004 (schema_get_relations), MCP-005 (query_plan), MCP-006 (intent_validate), MCP-007/a/b (resources: manifest, intent-schema, cookbook)
 
 ### ~[Core] #5: Comparison filter factory~ — ✅ Already done (createComparisonFilter exists)
 
@@ -35,6 +36,14 @@
 ### ~[Core] #28: Remove duplicate `isRecursiveIncludeOptions()`~ — ✅ Already clean (1 definition only)
 ### ~[Adapter] #11: Move AST helpers to internal export path~ — ✅ DONE (2026-02-01)
 ### ~[Adapter] #12: Move handler registry to internal export path~ — ✅ DONE (2026-02-01)
+### [Adapter] ON CONFLICT / Upsert support — Effort: M
+- `ast-helpers.ts:668`: `// ON CONFLICT handling would go here (complex, defer for now)`
+- Currently no upsert compilation; `compileUpsert()` exists but ON CONFLICT clause not built
+
+### ~[Core] Type inference gaps (nullable refs, relations)~ — ✅ DONE (2026-02-02)
+- Made `RefDefinition` and `ref()` generic to preserve literal option types
+- Fixed: nullable FK inference, relation column access, inverse relations, custom relation names
+
 ### [Docs] DOCS-001: User documentation (Getting Started, API Guide)
 ### [Docs] DOCS-002: Migration guides (from-prisma, from-drizzle, from-kysely)
 ### [Docs] DOCS-003: Pattern guides (multi-tenant, recursive queries, window functions)
@@ -79,6 +88,12 @@
 
 ### [Adapter] AST object pooling — Deferred (perf-gated)
 ### [Adapter] Async deparse optimization — Deferred (perf-gated)
+### [-] ⏭️ Deferred: [NQL] IN (dateRange) — requires semantic date expansion (#NQL-GAP-3)
+### [-] ⏭️ Deferred: [NQL] Window fn lag/lead offset/default — P3+ (`intent-ast.ts:399,474`)
+### [-] ⏭️ Deferred: [NQL] UNION mode (vs UNION ALL) — not implemented (`intent-ast.ts:1151`)
+### [-] ⏭️ Deferred: [Core] Cascade delete (multi-statement) — single delete only (`mutation-builders.ts:586`)
+### [-] ⏭️ Deferred: [Adapter] `compileWithIncludes()` Phase 3 completion — partially implemented (`pgsql-adapter.ts:422`)
+### [-] ⏭️ Deferred: [Adapter] Cycle detection placeholder — depends on `@pgsql/types` version (`cycle-detection.ts:144`)
 ### [NQL] CASE Expression Enhancements — Priority: LOW
 ### [CLI] .load <table> <file> — Bulk CSV/JSON import — Priority: LOW
 ### [CLI] RETURNING clause support — Priority: LOW
