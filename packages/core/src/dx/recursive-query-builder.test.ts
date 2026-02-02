@@ -82,7 +82,7 @@ function createMockAdapter(): Adapter {
 			supportsArrayAgg: true,
 			dialectName: 'mock',
 		} as unknown as AdapterCapabilities,
-		namingConvention: 'preserve' as const,
+		dbCasing: 'preserve' as const,
 		compile: notImplemented,
 		compileWithIncludes: notImplemented,
 		compileSubqueryInclude: notImplemented,

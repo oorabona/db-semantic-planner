@@ -22,14 +22,12 @@ import type {
 	InsertFromIntent,
 	InsertIntent,
 	ModelIR,
-	NamingConvention,
 	PlanReport,
 	RecursivePlanReport,
 	SubqueryIncludeInfo,
 	UpdateIntent,
 	UpsertIntent,
 } from '@dbsp/core';
-import { toNamingConvention } from '@dbsp/core';
 import type { Node, SelectStmt } from '@pgsql/types';
 import type { Pool, PoolClient } from 'pg';
 import { innerJoin, rangeVar } from './ast-helpers.js';
@@ -68,7 +66,10 @@ import {
 	type UpdateConfig,
 	type UpsertConfig,
 } from './mutations/index.js';
-import { getNamingPlugin, type NamingPlugin } from './naming-plugin.js';
+import {
+	getNamingPluginForDbCasing,
+	type NamingPlugin,
+} from './naming-plugin.js';
 import {
 	convertDottedFieldsToExists,
 	deriveForeignKey,
@@ -99,11 +100,8 @@ export interface PgsqlAdapterOptions {
 	 * - `'snake_case'`: DB columns are snake_case → transform to camelCase for JS
 	 * - `'camelCase'`: DB columns are camelCase → no transformation
 	 * - `'preserve'`: No transformation
-	 * Preferred over `namingConvention`.
 	 */
 	readonly dbCasing?: DbCasing;
-	/** @deprecated Use `dbCasing` instead. Legacy naming convention for identifier transformation */
-	readonly namingConvention?: NamingConvention;
 	/** Optional model for WHERE compilation */
 	readonly model?: ModelIR;
 	/** Optional logger for debug/error messages */
@@ -133,7 +131,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly pool: Pool | undefined;
 	private readonly client: PoolClient | undefined;
 	private readonly schemaName: string | undefined;
-	private readonly _namingConvention: NamingConvention;
+	private readonly _dbCasing: DbCasing;
 	private readonly naming: NamingPlugin;
 	private readonly model: ModelIR | undefined;
 	private readonly logger: AdapterLogger | undefined;
@@ -167,11 +165,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 
 		this.schemaName = options?.schemaName;
-		// Prefer dbCasing (intuitive) over legacy namingConvention
-		this._namingConvention = options?.dbCasing
-			? toNamingConvention(options.dbCasing)
-			: (options?.namingConvention ?? 'preserve');
-		this.naming = getNamingPlugin(this._namingConvention);
+		this._dbCasing = options?.dbCasing ?? 'preserve';
+		this.naming = getNamingPluginForDbCasing(this._dbCasing);
 		this.model = options?.model;
 		this.logger = options?.logger;
 
@@ -206,10 +201,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	/**
-	 * Naming convention used by this adapter.
+	 * DB column casing convention used by this adapter.
 	 */
-	get namingConvention(): NamingConvention {
-		return this._namingConvention;
+	get dbCasing(): DbCasing {
+		return this._dbCasing;
 	}
 
 	/**
@@ -1457,8 +1452,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			// Create transaction-scoped adapter
 			const txOptions: PgsqlAdapterOptions = {
 				...(this.schemaName !== undefined && { schemaName: this.schemaName }),
-				...(this._namingConvention !== undefined && {
-					namingConvention: this._namingConvention,
+				...(this._dbCasing !== undefined && {
+					dbCasing: this._dbCasing,
 				}),
 				...(this.model !== undefined && { model: this.model }),
 			};
@@ -1486,8 +1481,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		// Create new adapter with schema scope
 		const options: PgsqlAdapterOptions = {
 			schemaName,
-			...(this._namingConvention !== undefined && {
-				namingConvention: this._namingConvention,
+			...(this._dbCasing !== undefined && {
+				dbCasing: this._dbCasing,
 			}),
 			...(this.model !== undefined && { model: this.model }),
 		};
@@ -1567,7 +1562,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
  * const adapter = createPgsqlAdapter(pool);
  *
  * // With naming convention
- * const adapter = createPgsqlAdapter(pool, { namingConvention: 'camelCase' });
+ * const adapter = createPgsqlAdapter(pool, { dbCasing: 'snake_case' });
  * ```
  */
 export function createPgsqlAdapter<DB = unknown>(

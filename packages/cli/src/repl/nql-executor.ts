@@ -188,10 +188,8 @@ export interface NqlCompileOnlyResult {
 export interface NqlCompileOptions {
 	/** Database schema name for schema-scoped queries */
 	schemaName?: string;
-	/** DB column casing (intuitive). Preferred over namingConvention. */
+	/** DB column casing — describes what casing the database uses (default: 'preserve') */
 	dbCasing?: 'snake_case' | 'camelCase' | 'preserve';
-	/** @deprecated Use dbCasing. Legacy naming convention for identifier mapping (default: 'preserve') */
-	namingConvention?: 'camelCase' | 'snake_case' | 'preserve';
 }
 
 /**
@@ -229,14 +227,9 @@ export async function compileNqlToSql(
 		...(options?.schemaName !== undefined && {
 			schemaName: options.schemaName,
 		}),
-		// Prefer dbCasing over deprecated namingConvention
 		...(options?.dbCasing !== undefined && {
 			dbCasing: options.dbCasing,
 		}),
-		...(options?.dbCasing === undefined &&
-			options?.namingConvention !== undefined && {
-				namingConvention: options.namingConvention,
-			}),
 	});
 
 	// 1. Parse and compile NQL to IntentAST

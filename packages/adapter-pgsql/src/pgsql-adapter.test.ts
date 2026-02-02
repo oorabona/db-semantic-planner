@@ -37,7 +37,7 @@ describe('PgsqlAdapter', () => {
 			const adapter = new PgsqlAdapter(pool);
 
 			expect(adapter).toBeInstanceOf(PgsqlAdapter);
-			expect(adapter.namingConvention).toBe('preserve');
+			expect(adapter.dbCasing).toBe('preserve');
 			expect(adapter.capabilities).toEqual({
 				supportsReturning: true,
 				supportsSchemas: true,
@@ -48,13 +48,13 @@ describe('PgsqlAdapter', () => {
 			});
 		});
 
-		it('should create adapter with custom naming convention', () => {
+		it('should create adapter with custom dbCasing', () => {
 			const pool = createMockPool();
 			const adapter = new PgsqlAdapter(pool, {
-				namingConvention: 'camelCase',
+				dbCasing: 'snake_case',
 			});
 
-			expect(adapter.namingConvention).toBe('camelCase');
+			expect(adapter.dbCasing).toBe('snake_case');
 		});
 
 		it('should create adapter with schema name', () => {
@@ -538,11 +538,11 @@ describe('PgsqlAdapter', () => {
 		it('should pass options to adapter', () => {
 			const pool = createMockPool();
 			const adapter = createPgsqlAdapter(pool, {
-				namingConvention: 'snake_case',
+				dbCasing: 'snake_case',
 				schemaName: 'public',
 			});
 
-			expect(adapter.namingConvention).toBe('snake_case');
+			expect(adapter.dbCasing).toBe('snake_case');
 		});
 	});
 
@@ -634,7 +634,7 @@ describe('PgsqlAdapter', () => {
 			const adapter = new PgsqlAdapter(undefined, {});
 
 			expect(adapter).toBeInstanceOf(PgsqlAdapter);
-			expect(adapter.namingConvention).toBe('preserve');
+			expect(adapter.dbCasing).toBe('preserve');
 			expect(adapter.capabilities.supportsStreaming).toBe(false);
 		});
 

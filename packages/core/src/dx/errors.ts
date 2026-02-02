@@ -513,10 +513,10 @@ export class ColumnNotFoundError extends Error {
  *
  * @example
  * ```typescript
- * const schema = await getSchemaFromDb(adapter); // namingConvention: 'camelCase'
+ * const schema = await getSchemaFromDb(adapter); // dbCasing: 'snake_case'
  * const orm = createOrm({
  *   schema,
- *   adapter: createPgsqlAdapter(pool, { namingConvention: 'snake_case' }),
+ *   adapter: createPgsqlAdapter(pool, { dbCasing: 'preserve' }),
  * });
  * // Throws NamingConventionMismatchError
  * ```
@@ -527,24 +527,24 @@ export class NamingConventionMismatchError extends Error {
 	override readonly name = 'NamingConventionMismatchError' as const;
 
 	/**
-	 * The naming convention used by the schema.
+	 * The DB casing used by the schema.
 	 */
-	readonly schemaConvention: string;
+	readonly schemaCasing: string;
 
 	/**
-	 * The naming convention used by the adapter.
+	 * The DB casing used by the adapter.
 	 */
-	readonly adapterConvention: string;
+	readonly adapterCasing: string;
 
-	constructor(opts: { schemaConvention: string; adapterConvention: string }) {
+	constructor(opts: { schemaCasing: string; adapterCasing: string }) {
 		const message =
-			`Naming convention mismatch: Schema uses '${opts.schemaConvention}' but adapter uses '${opts.adapterConvention}'.\n` +
-			`Either align them or recreate the schema with the same naming convention as the adapter.`;
+			`DB casing mismatch: Schema uses '${opts.schemaCasing}' but adapter uses '${opts.adapterCasing}'.\n` +
+			`Either align them or recreate the schema with the same dbCasing as the adapter.`;
 
 		super(message);
 
-		this.schemaConvention = opts.schemaConvention;
-		this.adapterConvention = opts.adapterConvention;
+		this.schemaCasing = opts.schemaCasing;
+		this.adapterCasing = opts.adapterCasing;
 
 		Object.setPrototypeOf(this, NamingConventionMismatchError.prototype);
 	}

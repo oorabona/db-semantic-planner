@@ -79,12 +79,12 @@ export const generateCommand = new Command('generate')
 							'@dbsp/adapter-pgsql'
 						);
 
-						const namingConvention =
+						const dbCasing =
 							casing === 'snake'
-								? ('camelCase' as const)
+								? ('snake_case' as const)
 								: ('preserve' as const);
 						const adapter = createPgsqlCompileOnlyAdapter({
-							namingConvention,
+							dbCasing,
 							...(options.schemaName ? { schemaName: options.schemaName } : {}),
 						});
 

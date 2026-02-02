@@ -77,7 +77,7 @@ export { resolveLogicalName } from './naming.js';
 export {
 	CamelCaseNamingPlugin,
 	camelCaseNaming,
-	getNamingPlugin,
+	getNamingPluginForDbCasing,
 	IdentityNamingPlugin,
 	identityNaming,
 	type NamingPlugin,

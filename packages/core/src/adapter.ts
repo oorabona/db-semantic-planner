@@ -91,17 +91,6 @@ export interface AdapterStreamOptions {
 export type AliasIncludedColumnsMode = 'always' | 'onCollision';
 
 /**
- * Naming convention used by the adapter.
- *
- * - `'camelCase'`: Database uses snake_case, adapter converts to camelCase (CamelCasePlugin enabled)
- * - `'snake_case'`: Database uses snake_case, adapter preserves as-is
- * - `'preserve'`: Adapter preserves identifiers exactly as defined (no transformation)
- *
- * @since ARCH-006
- */
-export type NamingConvention = 'camelCase' | 'snake_case' | 'preserve';
-
-/**
  * Describes the casing convention used for column names in the database.
  * This is the intuitive "what does your DB look like?" type:
  *
@@ -112,36 +101,6 @@ export type NamingConvention = 'camelCase' | 'snake_case' | 'preserve';
  * @since PGSQL-PHASE2
  */
 export type DbCasing = 'snake_case' | 'camelCase' | 'preserve';
-
-/**
- * Convert legacy NamingConvention to the new DbCasing type.
- * Legacy: 'camelCase' meant "transform snake_case DB columns to camelCase"
- * New:    'snake_case' means "DB uses snake_case" (direct description)
- */
-export function toDbCasing(nc: NamingConvention): DbCasing {
-	switch (nc) {
-		case 'camelCase':
-			return 'snake_case';
-		case 'snake_case':
-			return 'snake_case';
-		case 'preserve':
-			return 'preserve';
-	}
-}
-
-/**
- * Convert DbCasing to the legacy NamingConvention for backward compatibility.
- */
-export function toNamingConvention(casing: DbCasing): NamingConvention {
-	switch (casing) {
-		case 'snake_case':
-			return 'camelCase';
-		case 'camelCase':
-			return 'preserve';
-		case 'preserve':
-			return 'preserve';
-	}
-}
 
 /**
  * Options for query compilation.
@@ -431,7 +390,7 @@ export interface Adapter<DB = unknown>
 	 *
 	 * @since ARCH-006
 	 */
-	readonly namingConvention: NamingConvention;
+	readonly dbCasing: DbCasing;
 }
 
 // ============================================================================

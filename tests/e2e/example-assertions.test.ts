@@ -95,7 +95,7 @@ describe('Example Assertions (dynamic)', () => {
 					schemaPath: example.schemaPath,
 					format: 'text',
 					assertFile: example.assertPath,
-					namingConvention: 'camelCase',
+					dbCasing: 'snake_case',
 					...(dbUrl && { databaseUrl: dbUrl }),
 				});
 
