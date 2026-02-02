@@ -54,7 +54,8 @@
 
 > Audit P2 items (Score < 2.0) — grouped by axis
 
-### DRY Consolidation (3 remaining of 7)
+### DRY Consolidation (3 remaining of 8)
+- [x] ✅ DRY batch mode: route through ReplEngine, extract dbsp-parser, -167 lines (2026-02-02)
 - [-] ⏭️ Deferred: #23 NQL context validation — better done during #16 SRP extraction
 - [-] ⏭️ Deferred: #29 CLI assertion factory — lower value, standalone story
 - [-] ⏭️ Deferred: #33 adapter-pgsql test ratio — L-size, standalone story

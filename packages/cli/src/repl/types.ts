@@ -4,6 +4,7 @@ import type React from 'react';
  */
 
 import type { LoadedSchema } from '../utils/schema-loader.js';
+import type { IntentSummary } from './nql-executor.js';
 
 /**
  * REPL Configuration passed from CLI command
@@ -136,6 +137,8 @@ export interface QueryResult {
 	error?: string;
 	/** CLI-NQL: Parsed query AST for .parse mode */
 	parsedQuery?: unknown;
+	/** Intent summary for batch assertions + introspection */
+	intent?: IntentSummary;
 }
 
 /**

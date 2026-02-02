@@ -2,34 +2,23 @@
  * CLI-022: Batch Mode for REPL
  *
  * Executes queries from files or command line without interactive UI.
- * Supports dot commands and natural queries.
+ * Routes all input through ReplEngine.submit() for a single processing path.
  */
 
 import { readFileSync } from 'node:fs';
-import type { ModelIR } from '@dbsp/core';
-import type { LoadedSchema } from '../utils/schema-loader.js';
 import {
 	parseAssertionFile,
 	validateAssertionBlocks,
 } from './assertion-parser.js';
 import { type AssertionSummary, runAssertions } from './assertion-runner.js';
-import { formatParseTree } from './components/OutputDisplay.js';
-import { createDbConnection, type DbConnection } from './db-connection.js';
-import { processDotCommand } from './dot-commands.js';
-import { parseInputMode } from './mode-escape.js';
-// NQL v2: Pure NQL - no legacy parser
-import {
-	compileNqlToSql,
-	NqlCompileError,
-	type NqlCompileOnlyResult,
-	NqlParseError,
-} from './nql-executor.js';
+import type { EngineEvent } from './engine/engine-types.js';
+import { ReplEngine } from './engine/repl-engine.js';
+import type { IntentSummary } from './nql-executor.js';
 import { formatOutput } from './output-formatter.js';
-import type { QueryMode } from './types.js';
 
 export interface BatchModeOptions {
 	queries: string[];
-	schema: LoadedSchema;
+	schema: import('../utils/schema-loader.js').LoadedSchema;
 	schemaPath: string;
 	format: 'text' | 'json';
 	databaseUrl?: string;
@@ -57,266 +46,9 @@ export interface BatchResult {
 	/** Row data from DB result (for db.value.equals) */
 	rows?: unknown[];
 	/** Intent summary for intent.* assertions */
-	intent?: {
-		type: 'query' | 'insert' | 'update' | 'delete' | 'upsert';
-		table: string;
-		with: string[];
-		hasWhere: boolean;
-		hasGroupBy: boolean;
-		hasOrderBy: boolean;
-	};
+	intent?: IntentSummary;
 }
 
-/** @internal - Exported for testing */
-export interface BatchState {
-	mode: QueryMode;
-	execEnabled: boolean;
-	schemaName: string | undefined;
-	dbConnection: DbConnection | undefined;
-	/** CLI-MUT: Show EXPLAIN output with query results */
-	explainMode: boolean;
-	/** CLI-NQL: Show parse tree (AST) for queries */
-	parseMode: boolean;
-	/** NQL v2: ModelIR built from schema for NQL compilation */
-	model: ModelIR | undefined;
-	/** NQL v2.1: Output display format (json|table|csv) */
-	outputMode: 'json' | 'table' | 'csv';
-	/** DB column casing (intuitive). */
-	dbCasing?: 'snake_case' | 'camelCase' | 'preserve';
-}
-
-/**
- * NQL v2: Format NQL compilation result for display
- */
-function formatNqlResult(result: NqlCompileOnlyResult): string {
-	const lines: string[] = [];
-
-	// Operation type
-	const opType = result.intentType.toUpperCase();
-	lines.push(`[${opType}]`);
-	lines.push('');
-
-	// SQL
-	lines.push('SQL:');
-	lines.push(result.sql);
-
-	// Parameters
-	if (result.params.length > 0) {
-		lines.push('');
-		lines.push(
-			`Parameters: [${result.params.map((p) => JSON.stringify(p)).join(', ')}]`,
-		);
-	}
-
-	return lines.join('\n');
-}
-
-// Re-export processDotCommand from dot-commands (extracted for SRP — Phase 5.5)
-export { processDotCommand } from './dot-commands.js';
-
-/**
- * NQL v2: Execute a NQL query (handles both SELECT and mutations)
- */
-async function executeNqlQuery(
-	input: string,
-	state: BatchState,
-): Promise<BatchResult> {
-	// NQL requires ModelIR
-	if (!state.model) {
-		return {
-			query: input,
-			success: false,
-			error: 'No schema model available for NQL compilation',
-			type: 'query',
-		};
-	}
-
-	try {
-		// Compile NQL to SQL
-		const compileOptions: import('./nql-executor.js').NqlCompileOptions = {};
-		if (state.schemaName) compileOptions.schemaName = state.schemaName;
-		if (state.dbCasing) compileOptions.dbCasing = state.dbCasing;
-		const result = await compileNqlToSql(
-			input,
-			state.model,
-			Object.keys(compileOptions).length > 0 ? compileOptions : undefined,
-		);
-
-		// Determine result type for BatchResult
-		const resultType: 'query' | 'mutation' =
-			result.intentType === 'query' ? 'query' : 'mutation';
-
-		// Format parse tree if parseMode is enabled
-		const parseTreeOutput = state.parseMode ? formatParseTree(result) : '';
-
-		// If exec mode is enabled and we have a DB connection, execute the query
-		if (state.execEnabled && state.dbConnection) {
-			try {
-				const execResult = await state.dbConnection.executeRaw(
-					result.sql,
-					result.params as unknown[],
-				);
-
-				// Check for execution errors (returned as result.error, not thrown)
-				if (execResult.error) {
-					return {
-						query: input,
-						success: true, // NQL compiled successfully
-						dbSuccess: false, // But DB execution failed
-						error: `Database error: ${execResult.error}`,
-						output: `❌ Error: Database error: ${execResult.error}`,
-						sql: result.sql,
-						params: result.params,
-						type: resultType,
-						intent: result.intent,
-					};
-				}
-
-				const outputParts = [];
-				if (parseTreeOutput) {
-					outputParts.push(parseTreeOutput);
-				}
-				outputParts.push(
-					formatNqlResult(result),
-					'',
-					`Rows: ${execResult.rowCount}`,
-					formatOutput(execResult.rows, execResult.columns, state.outputMode),
-				);
-				return {
-					query: input,
-					success: true,
-					dbSuccess: true, // DB execution succeeded
-					output: outputParts.join('\n'),
-					sql: result.sql,
-					params: result.params,
-					type: resultType,
-					intent: result.intent,
-					rowCount: execResult.rowCount,
-					rows: execResult.rows,
-					columns: execResult.columns,
-				};
-			} catch (execError) {
-				const message =
-					execError instanceof Error ? execError.message : String(execError);
-				const errorOutput = `Execution error: ${message}`;
-				return {
-					query: input,
-					success: true, // NQL compiled successfully
-					dbSuccess: false, // But DB execution failed
-					error: errorOutput,
-					output: errorOutput, // For db.output.contains assertions
-					sql: result.sql,
-					params: result.params,
-					type: resultType,
-					intent: result.intent,
-				};
-			}
-		}
-
-		// Non-exec mode: return SQL only
-		const dryRunOutput = parseTreeOutput
-			? [parseTreeOutput, formatNqlResult(result)].join('\n')
-			: formatNqlResult(result);
-		return {
-			query: input,
-			success: true,
-			output: dryRunOutput,
-			sql: result.sql,
-			params: result.params,
-			type: resultType,
-			intent: result.intent,
-		};
-	} catch (error) {
-		// Handle NQL-specific errors
-		if (error instanceof NqlParseError) {
-			return {
-				query: input,
-				success: false,
-				error: error.message,
-				output: error.message, // For db.output.contains assertions
-				type: 'query',
-			};
-		}
-		if (error instanceof NqlCompileError) {
-			return {
-				query: input,
-				success: false,
-				error: error.message,
-				output: error.message, // For db.output.contains assertions
-				type: 'query',
-			};
-		}
-		const message = error instanceof Error ? error.message : String(error);
-		return {
-			query: input,
-			success: false,
-			error: message,
-			output: message, // For db.output.contains assertions
-			type: 'query',
-		};
-	}
-}
-
-/**
- * Execute a raw SQL query (in SQL mode)
- */
-async function executeRawSql(
-	input: string,
-	state: BatchState,
-): Promise<BatchResult> {
-	if (!state.execEnabled || !state.dbConnection) {
-		return {
-			query: input,
-			success: true,
-			output: `[SQL Mode - Compile only]\n${input}`,
-			sql: input,
-			type: 'query',
-		};
-	}
-
-	try {
-		const result = await state.dbConnection.executeRaw(input, []);
-
-		// Check for execution errors (returned as result.error, not thrown)
-		if (result.error) {
-			return {
-				query: input,
-				success: true, // SQL parsed successfully (! prefix)
-				dbSuccess: false, // But DB execution failed
-				error: `Database error: ${result.error}`,
-				output: `❌ Error: Database error: ${result.error}`,
-				sql: input,
-				type: 'query',
-			};
-		}
-
-		return {
-			query: input,
-			success: true,
-			dbSuccess: true, // DB execution succeeded
-			output: `Executed SQL: ${result.rowCount ?? 0} rows affected`,
-			sql: input,
-			type: 'query',
-			rowCount: result.rowCount ?? 0,
-			rows: result.rows,
-			columns: result.columns,
-		};
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		return {
-			query: input,
-			success: false,
-			error: message,
-			output: message, // For db.output.contains assertions
-			sql: input,
-			type: 'query',
-		};
-	}
-}
-
-/**
- * Run batch mode execution
- */
 /**
  * Result of executing a batch of queries (without side effects).
  * Used by tests to programmatically run examples.
@@ -326,43 +58,158 @@ export interface BatchExecutionResult {
 	assertionSummary?: AssertionSummary | undefined;
 }
 
+// Re-export processDotCommand from dot-commands (used by batch.test.ts)
+export { processDotCommand } from './dot-commands.js';
+// Re-export BatchState type for dot-commands compatibility
+export type { BatchState } from './dot-commands.js';
+
+/**
+ * Map collected engine events to a BatchResult for a single query.
+ *
+ * Event patterns:
+ *   NQL success:  query-result → [execution-result]
+ *   NQL error:    query-result (with .error)
+ *   Raw SQL:      query-result → [execution-result]
+ *   Dot command:  info | error [+ state-change]
+ */
+function mapEventsToBatchResult(
+	query: string,
+	events: EngineEvent[],
+	outputMode: 'json' | 'table' | 'csv',
+): BatchResult {
+	const queryResultEvent = events.find((e) => e.type === 'query-result');
+	const execResultEvent = events.find((e) => e.type === 'execution-result');
+	const infoEvent = events.find((e) => e.type === 'info');
+	const errorEvent = events.find((e) => e.type === 'error');
+
+	// --- Query result (NQL or raw SQL) ---
+	if (queryResultEvent?.type === 'query-result') {
+		const qr = queryResultEvent.result;
+
+		// Compilation error
+		if (qr.error) {
+			return {
+				query,
+				success: false,
+				error: qr.error,
+				output: qr.error,
+				type: 'query',
+			};
+		}
+
+		// Determine type from intent
+		const resultType: 'query' | 'mutation' =
+			qr.intent && qr.intent.type !== 'query' ? 'mutation' : 'query';
+
+		// Build output text (compile-only display)
+		const opLabel = qr.plan?.strategy ?? 'QUERY';
+		const outputLines = [`[${opLabel}]`, '', 'SQL:', qr.sql];
+		if (qr.params.length > 0) {
+			outputLines.push(
+				'',
+				`Parameters: [${qr.params.map((p) => JSON.stringify(p)).join(', ')}]`,
+			);
+		}
+
+		const base: BatchResult = {
+			query,
+			success: true,
+			output: outputLines.join('\n'),
+			sql: qr.sql,
+			params: qr.params,
+			type: resultType,
+			...(qr.intent && { intent: qr.intent }),
+		};
+
+		// Augment with execution result if present
+		if (execResultEvent?.type === 'execution-result') {
+			const er = execResultEvent.result;
+
+			if (er.error) {
+				base.dbSuccess = false;
+				base.error = `Database error: ${er.error}`;
+				base.output = `❌ Error: Database error: ${er.error}`;
+			} else {
+				base.dbSuccess = true;
+				base.rowCount = er.rowCount;
+				base.rows = er.rows;
+				base.columns = er.columns;
+				base.output = [
+					...outputLines,
+					'',
+					`Rows: ${er.rowCount}`,
+					formatOutput(er.rows, er.columns, outputMode),
+				].join('\n');
+			}
+		}
+
+		return base;
+	}
+
+	// --- Dot command (info/error events) ---
+	if (errorEvent?.type === 'error') {
+		return {
+			query,
+			success: false,
+			error: errorEvent.message,
+			output: errorEvent.message,
+			type: 'command',
+		};
+	}
+
+	if (infoEvent?.type === 'info') {
+		return {
+			query,
+			success: true,
+			output: infoEvent.message,
+			type: 'command',
+		};
+	}
+
+	// Fallback: events we don't map (exit, clear, show-panel, etc.)
+	return {
+		query,
+		success: true,
+		output: '',
+		type: 'command',
+	};
+}
+
 /**
  * Core batch execution logic — runs queries and optional assertions,
  * returning structured results without printing or calling process.exit().
  *
- * @param options - Batch mode configuration
- * @returns Execution results with optional assertion summary
+ * All input is routed through ReplEngine.submit() for a single processing path.
  */
 export async function executeBatch(
 	options: BatchModeOptions,
 ): Promise<BatchExecutionResult> {
-	const { queries, schema, databaseUrl, assertFile, dbCasing } = options;
+	const { queries, schema, schemaPath, databaseUrl, assertFile, dbCasing } =
+		options;
 
-	// Initialize state
-	// ARCH-005: Use schema.model directly (already ModelIR)
-	const model = schema.model;
-
-	const state: BatchState = {
-		mode: 'natural',
-		execEnabled: false,
-		schemaName: undefined,
-		dbConnection: undefined,
-		explainMode: false,
-		parseMode: false,
-		model, // NQL v2: ModelIR for compileNqlToSql
+	// Create engine with same config as interactive REPL
+	const engine = new ReplEngine({
+		schema,
+		schemaPath,
+		...(databaseUrl && { databaseUrl }),
 		...(dbCasing && { dbCasing }),
-		outputMode: 'json', // NQL v2.1: Default output format
-	};
+		initialExecMode: !!databaseUrl,
+	});
 
-	// Connect to database if URL provided
-	if (databaseUrl) {
-		try {
-			state.dbConnection = await createDbConnection(databaseUrl);
-			state.execEnabled = true; // Enable execution mode when DB is connected
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			throw new Error(`Database connection failed: ${message}`);
-		}
+	// Initialize (connects to DB if configured)
+	// Suppress init events (connection messages) — batch doesn't display them
+	const initEvents: EngineEvent[] = [];
+	const unsubInit = engine.on((e) => initEvents.push(e));
+	await engine.init();
+	unsubInit();
+
+	// Check for DB connection failure during init
+	const initError = initEvents.find(
+		(e) => e.type === 'error' && e.message.includes('Connection failed'),
+	);
+	if (initError?.type === 'error') {
+		await engine.destroy();
+		throw new Error(`Database connection failed: ${initError.message}`);
 	}
 
 	// Parse assertion file if provided
@@ -372,6 +219,7 @@ export async function executeBatch(
 		try {
 			assertContent = readFileSync(assertFile, 'utf-8');
 		} catch (error) {
+			await engine.destroy();
 			const message = error instanceof Error ? error.message : String(error);
 			throw new Error(
 				`Failed to read assertion file: ${assertFile} — ${message}`,
@@ -380,6 +228,7 @@ export async function executeBatch(
 		const parseResult = parseAssertionFile(assertContent);
 
 		if (parseResult.errors.length > 0) {
+			await engine.destroy();
 			const errorMessages = parseResult.errors
 				.map((err) => `Line ${err.line}: ${err.message}`)
 				.join('\n');
@@ -393,6 +242,7 @@ export async function executeBatch(
 			queries,
 		);
 		if (validationErrors.length > 0) {
+			await engine.destroy();
 			const errorMessages = validationErrors
 				.map((err) => `Line ${err.line}: ${err.message}`)
 				.join('\n');
@@ -403,55 +253,30 @@ export async function executeBatch(
 	}
 
 	const results: BatchResult[] = [];
+	// Track output mode from engine state for formatting
+	let outputMode: 'json' | 'table' | 'csv' =
+		engine.getState().outputMode ?? 'json';
 
 	try {
 		for (const query of queries) {
-			// Check for mode escape (! prefix)
-			const { content: effectiveQuery, isRawSql } = parseInputMode(
-				query,
-				state.mode,
-			);
-
-			let result: BatchResult;
-
-			// Process dot commands (async for .import support)
-			if (effectiveQuery.startsWith('.')) {
-				const cmdResult = await processDotCommand(
-					effectiveQuery,
-					schema,
-					state,
-				);
-				if (cmdResult.stateChange) {
-					Object.assign(state, cmdResult.stateChange);
+			// Collect events for this query
+			const events: EngineEvent[] = [];
+			const unsub = engine.on((e) => {
+				events.push(e);
+				// Track output mode changes from .output command
+				if (e.type === 'state-change') {
+					outputMode = e.state.outputMode ?? outputMode;
 				}
-				const cmdError = cmdResult.error;
-				const cmdSuccess =
-					cmdResult.success ?? !cmdResult.output.startsWith('❌');
-				const baseResult: BatchResult = {
-					query: effectiveQuery,
-					success: cmdSuccess && !cmdError,
-					output: cmdResult.output,
-					type: 'command',
-				};
-				if (cmdError) {
-					baseResult.error = cmdError;
-				}
-				result = baseResult;
-			} else if (isRawSql) {
-				// Raw SQL mode
-				result = await executeRawSql(effectiveQuery, state);
-			} else {
-				// NQL v2: Unified execution for queries and mutations
-				result = await executeNqlQuery(effectiveQuery, state);
-			}
+			});
 
-			results.push(result);
+			await engine.submit(query);
+			unsub();
+
+			// Map events → BatchResult
+			results.push(mapEventsToBatchResult(query, events, outputMode));
 		}
 	} finally {
-		// Cleanup DB connection
-		if (state.dbConnection) {
-			await state.dbConnection.close();
-		}
+		await engine.destroy();
 	}
 
 	// Run assertions if provided
