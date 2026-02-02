@@ -328,36 +328,24 @@ export function EnhancedTextInput({
 			// Regular character input
 			if (input && !key.ctrl && !key.meta) {
 				// Detect multiline paste: input string contains line breaks.
-				// Terminal may deliver pasted text in multiple chunks — a chunk
-				// boundary can fall mid-line, so we only submit lines that are
-				// followed by a newline and keep the trailing fragment in the
-				// input buffer for the next chunk to complete.
+				// Submit every non-empty line immediately — the user pasted
+				// a block of text and expects all lines to execute.
 				if (input.includes('\n') || input.includes('\r')) {
-					// Merge current buffer with pasted text
 					const fullText = val.slice(0, cur) + input + val.slice(cur);
 					const parts = fullText.split(/\r\n|\r|\n/);
-					const endsWithNewline = /[\r\n]$/.test(input);
-
-					// Complete lines = those followed by a newline
-					const completeLines = endsWithNewline ? parts : parts.slice(0, -1);
-					const remainder = endsWithNewline
-						? ''
-						: (parts[parts.length - 1] ?? '');
-
-					const toSubmit = completeLines.map((l) => l.trim()).filter(Boolean);
+					const toSubmit = parts.map((l) => l.trim()).filter(Boolean);
 
 					if (toSubmit.length > 0) {
-						// Submit complete lines, keep remainder in buffer
-						valueRef.current = remainder;
-						cursorRef.current = remainder.length;
+						valueRef.current = '';
+						cursorRef.current = 0;
 						for (const line of toSubmit) {
 							onSubmit?.(line);
 						}
 						return;
 					}
 
-					// No complete lines — just place content in buffer
-					updateValue(remainder, remainder.length);
+					// All lines were blank — clear buffer
+					updateValue('', 0);
 					return;
 				}
 				const newValue = val.slice(0, cur) + input + val.slice(cur);
