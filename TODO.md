@@ -36,6 +36,11 @@
 ### ~[Core] #28: Remove duplicate `isRecursiveIncludeOptions()`~ — ✅ Already clean (1 definition only)
 ### ~[Adapter] #11: Move AST helpers to internal export path~ — ✅ DONE (2026-02-01)
 ### ~[Adapter] #12: Move handler registry to internal export path~ — ✅ DONE (2026-02-01)
+### [Core] IN subquery → relation traversal normalization — Effort: M
+- `where id in (orders | select customerId | where ...)` is semantically identical to `where orders.status = ...`
+- Planner should recognize IN-subquery patterns reducible to relation traversal and normalize
+- Lets planner choose optimal strategy (JOIN, EXISTS, lateral) instead of forcing IN (SELECT ...)
+
 ### [Adapter] ON CONFLICT / Upsert support — Effort: M
 - `ast-helpers.ts:668`: `// ON CONFLICT handling would go here (complex, defer for now)`
 - Currently no upsert compilation; `compileUpsert()` exists but ON CONFLICT clause not built
