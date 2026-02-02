@@ -7,7 +7,7 @@ Semantic query planning for databases. An intent-first approach that transforms 
 - **Intent-first queries** - Describe what you want, not how to get it
 - **Semantic planning** - Automatic EXISTS vs JOIN decisions based on cardinality
 - **CTE extraction** - Common subqueries automatically optimized
-- **Multi-tenant** - Schema-per-tenant with `forTenant()` API
+- **Multi-tenant** - Schema-per-tenant with `withSchema()` API
 - **Full observability** - Inspect plans, SQL, and parameters before execution
 - **Type-safe** - Full TypeScript support with strict types
 - **CLI tools** - Generate types, verify schemas, interactive REPL
@@ -294,7 +294,7 @@ const categories = await orm
 
 ```typescript
 // Schema-per-tenant isolation
-const tenantOrm = orm.forTenant('acme_corp');
+const tenantOrm = orm.withSchema('acme_corp');
 
 const users = await tenantOrm.select('users').all();
 // SQL: SELECT * FROM "acme_corp"."users"
@@ -314,6 +314,72 @@ console.log(dump.sql);      // SELECT * FROM "users" WHERE "active" = $1
 console.log(dump.params);   // [true]
 console.log(dump.plan);     // { decisions: [...], warnings: [...] }
 ```
+
+---
+
+## Mutations
+
+```typescript
+// Insert
+await orm.insert('users')
+  .values({ name: 'Alice', email: 'alice@example.com' })
+  .returning(['id', 'name'])
+  .execute();
+
+// Update
+await orm.update('users')
+  .set({ name: 'Alice Smith' })
+  .where(eq('id', 1))
+  .execute();
+
+// Delete
+await orm.delete('posts')
+  .where(eq('published', false))
+  .execute();
+
+// Upsert (insert or update on conflict)
+await orm.upsert('users')
+  .values({ name: 'Alice', email: 'alice@example.com' })
+  .onConflict(['email'])
+  .doUpdate()
+  .execute();
+```
+
+All mutations support `dump()` for SQL preview and `returning()` for PostgreSQL RETURNING.
+
+See [ORM API Guide](docs/guides/orm-api.md#5-mutations) for full mutation reference.
+
+---
+
+## NQL (Natural Query Language)
+
+A pipe-based query language for the CLI/REPL and `.dbsp` files:
+
+```
+# Basic query
+users | where active = true | select id, name | limit 10
+
+# Includes (nested JSON)
+authors | select *, posts.*
+
+# Aggregates
+orders | group by status | select status, count(*), sum(amount)
+
+# Window functions
+products | select name, rank() over (partition by category order by price) as priceRank
+
+# Mutations
+insert into users set name = 'Alice', email = 'alice@example.com'
+update users set active = false where lastLogin < '2024-01-01'
+```
+
+Use in TypeScript via template literals:
+
+```typescript
+const results = await orm.nql<User[]>`users | where active = true`.all();
+```
+
+See [NQL Reference](docs/guides/nql-reference.md) for complete syntax.
 
 ---
 
@@ -364,14 +430,25 @@ console.log(dump.plan);     // { decisions: [...], warnings: [...] }
 
 | Export | Description |
 |--------|-------------|
-| `schema()` | Define tables, columns, and relations with `ref()` |
+| `schema()`, `ref()` | Define tables, columns, and relations |
 | `createOrm()` | Create an ORM instance with adapter |
 | `eq()`, `neq()`, `gt()`, `gte()`, `lt()`, `lte()` | Comparison filters |
-| `like()`, `ilike()` | Pattern matching filters |
+| `like()` | Pattern matching filter |
 | `isNull()`, `isNotNull()` | Null checks |
 | `inArray()` | Array membership |
 | `and()`, `or()`, `not()` | Logical operators |
 | `exists()`, `notExists()` | Subquery existence checks |
+| `some()`, `every()`, `none()` | Relation quantifier filters |
+| `rangeOverlaps()`, `rangeContains()`, `rangeContainedBy()` | PostgreSQL range operators |
+| `count()`, `sum()`, `avg()`, `min()`, `max()` | Aggregate helpers (on QueryBuilder) |
+| `rowNumber()`, `rank()`, `denseRank()` | Window ranking functions |
+| `wSum()`, `wAvg()`, `wCount()`, `wMin()`, `wMax()` | Window aggregate functions |
+| `lag()`, `lead()` | Window offset functions |
+| `coalesce()`, `raw()`, `col()`, `distinct()` | Expression helpers |
+| `subquery()`, `outerRef()` | Correlated subquery builders |
+| `Errors` | Error factory with type guards |
+
+See [ORM API Guide](docs/guides/orm-api.md) for complete API documentation.
 
 ### Adapter Package
 
@@ -408,6 +485,14 @@ pnpm dbsp repl --schema ./examples/blog.schema.ts
 ```
 
 See [examples/QUICKSTART.md](examples/QUICKSTART.md) for detailed usage guide.
+
+### Guides
+
+| Guide | Description |
+|-------|-------------|
+| [ORM API Guide](docs/guides/orm-api.md) | Complete TypeScript API reference — schema, queries, mutations, pagination, errors |
+| [NQL Reference](docs/guides/nql-reference.md) | Pipe-based query language — syntax, operators, window functions, hierarchy |
+| [CLI Usage](docs/CLI_USAGE.md) | CLI commands — generate, verify, repl |
 
 ---
 
