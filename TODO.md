@@ -90,6 +90,9 @@
 ### [-] ⏭️ Deferred: [Adapter] `compileWithIncludes()` Phase 3 completion — partially implemented (`pgsql-adapter.ts:422`)
 ### [-] ⏭️ Deferred: [Adapter] Cycle detection placeholder — depends on `@pgsql/types` version (`cycle-detection.ts:144`)
 ### [NQL] CASE Expression Enhancements — Priority: LOW
+### [CLI] Extract shared plan summary formatting — Priority: LOW
+QuerySummary in ConversationView.tsx duplicates plan summary logic from OutputDisplay. Extract to shared utility.
+
 ### [CLI] .load <table> <file> — Bulk CSV/JSON import — Priority: LOW
 ### [CLI] RETURNING clause support — Priority: LOW
 ### [CLI] Transaction support (BEGIN/COMMIT/ROLLBACK) — Priority: LOW
