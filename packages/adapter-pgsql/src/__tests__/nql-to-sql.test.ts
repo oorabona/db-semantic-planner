@@ -9,7 +9,13 @@
  * real NQL input, and the adapter compiles them to real SQL.
  */
 
-import { plan, ref, schema } from '@dbsp/core';
+import {
+	POSTGRESQL_CAPABILITIES,
+	plan,
+	type QueryIntent,
+	ref,
+	schema,
+} from '@dbsp/core';
 import { compile } from '@dbsp/nql';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
@@ -47,7 +53,9 @@ function nqlToSQL(nql: string): string {
 		);
 	}
 
-	const planReport = plan(compiled.ast.query, testSchema.model);
+	const planReport = plan(compiled.ast.query, testSchema.model, {
+		dialectCapabilities: POSTGRESQL_CAPABILITIES,
+	});
 
 	const adapter = createPgsqlCompileOnlyAdapter();
 	const result = adapter.compile(planReport, { model: testSchema.model });
@@ -131,5 +139,71 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(sql).toContain('.salary');
 		// But should NOT contain employees.* anywhere
 		expect(sql).not.toMatch(/employees\.\*/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// ORM-level tests: Intent → Plan → SQL (for features NQL can't express yet)
+// ---------------------------------------------------------------------------
+describe('Intent → SQL compile-only pipeline', () => {
+	function intentToSQL(intent: QueryIntent): string {
+		const planReport = plan(intent, testSchema.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const result = adapter.compile(planReport, { model: testSchema.model });
+		return normalizeSQL(result.sql);
+	}
+
+	// Regression: LATERAL subquery must contain LIMIT when include.limit is set
+	it('propagates include.limit into LATERAL subquery', () => {
+		const sql = intentToSQL({
+			type: 'select',
+			from: 'departments',
+			select: { type: 'fields', fields: ['id', 'name'] },
+			include: [
+				{
+					relation: 'employees',
+					strategy: 'flat',
+					limit: 3,
+				},
+			],
+		});
+		// LATERAL should be used (not plain LEFT JOIN) because limit is set
+		expect(sql).toContain('lateral');
+		// The LIMIT must appear inside the LATERAL subquery
+		expect(sql).toContain('limit 3');
+	});
+
+	it('does not use LATERAL when include has no limit', () => {
+		const sql = intentToSQL({
+			type: 'select',
+			from: 'departments',
+			select: { type: 'fields', fields: ['id'] },
+			include: [{ relation: 'employees', strategy: 'flat' }],
+		});
+		// Plain LEFT JOIN (no LATERAL) when no per-include limit
+		expect(sql).toContain('left join');
+		expect(sql).not.toContain('lateral');
+	});
+
+	it('includes parent columns with LATERAL and specific select', () => {
+		const sql = intentToSQL({
+			type: 'select',
+			from: 'departments',
+			select: { type: 'fields', fields: ['id', 'name'] },
+			include: [
+				{
+					relation: 'employees',
+					strategy: 'flat',
+					limit: 5,
+				},
+			],
+		});
+		// Parent columns must appear in the SELECT
+		expect(sql).toContain('departments.id');
+		expect(sql).toContain('departments.name');
+		// LATERAL subquery must have limit
+		expect(sql).toContain('limit 5');
 	});
 });

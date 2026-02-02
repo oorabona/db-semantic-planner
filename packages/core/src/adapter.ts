@@ -8,6 +8,7 @@
  */
 
 import type { CompileOptionsBase } from '@dbsp/types';
+import type { DialectCapabilities } from './dialects/index.js';
 import type {
 	DeleteIntent,
 	InsertFromIntent,
@@ -203,6 +204,18 @@ export interface Dump {
 export interface BaseAdapter {
 	/** Adapter capabilities for feature detection */
 	readonly capabilities: AdapterCapabilities;
+
+	/**
+	 * Dialect capabilities for planner strategy selection.
+	 * Determines which SQL features the adapter's database supports
+	 * (LATERAL JOIN, json_agg, window functions, etc.).
+	 *
+	 * The planner uses these to choose optimal include strategies:
+	 * - `supportsLateralJoin` → enables LATERAL for per-parent LIMIT
+	 * - `supportsJsonAgg` → enables json_agg for nested includes
+	 * - etc.
+	 */
+	readonly dialectCapabilities: DialectCapabilities;
 
 	/**
 	 * Validate an identifier (table name, column name, schema name).

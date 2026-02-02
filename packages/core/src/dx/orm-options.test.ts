@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { createOrm } from './orm.js';
+import { createMockAdapter } from './test-utils.js';
 import { schema } from './schema.js';
 
 /**
@@ -25,6 +26,7 @@ describe('NQL-ALIGN Block 3: Global ORM Options', () => {
 		it('should accept maxDepth option in createOrm', () => {
 			// Arrange & Act - should not throw
 			const orm = createOrm({
+				adapter: createMockAdapter(),
 				schema: testSchema,
 				maxDepth: 5,
 			});
@@ -37,6 +39,7 @@ describe('NQL-ALIGN Block 3: Global ORM Options', () => {
 		it('should accept maxTableHops option in createOrm', () => {
 			// Arrange & Act - should not throw
 			const orm = createOrm({
+				adapter: createMockAdapter(),
 				schema: testSchema,
 				maxTableHops: 3,
 			});
@@ -49,6 +52,7 @@ describe('NQL-ALIGN Block 3: Global ORM Options', () => {
 		it('should accept maxNestedCase option in createOrm', () => {
 			// Arrange & Act - should not throw
 			const orm = createOrm({
+				adapter: createMockAdapter(),
 				schema: testSchema,
 				maxNestedCase: 8,
 			});
@@ -61,6 +65,7 @@ describe('NQL-ALIGN Block 3: Global ORM Options', () => {
 		it('should accept all global options together', () => {
 			// Arrange & Act - should not throw
 			const orm = createOrm({
+				adapter: createMockAdapter(),
 				schema: testSchema,
 				maxDepth: 15,
 				maxTableHops: 7,
@@ -77,6 +82,7 @@ describe('NQL-ALIGN Block 3: Global ORM Options', () => {
 		it('should work with strictMode enabled', () => {
 			// Arrange & Act
 			const orm = createOrm({
+				adapter: createMockAdapter(),
 				schema: testSchema,
 				strictMode: true,
 				maxDepth: 10,
@@ -91,6 +97,7 @@ describe('NQL-ALIGN Block 3: Global ORM Options', () => {
 		it('should work without any options (uses defaults)', () => {
 			// Arrange & Act - no options provided
 			const orm = createOrm({
+				adapter: createMockAdapter(),
 				schema: testSchema,
 			});
 

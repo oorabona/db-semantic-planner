@@ -3,8 +3,8 @@
  *
  * @example
  * ```typescript
- * const orm = createOrm({ model: schema }); // No db!
- * await orm.select('users').findMany(); // Throws ExecutionError
+ * const orm = createOrm({ model: schema, adapter: mockAdapter }); // Mock adapter
+ * await orm.select('users').findMany(); // Throws ExecutionError (mock can't execute)
  * ```
  */
 export class ExecutionError extends Error {

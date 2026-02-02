@@ -394,7 +394,7 @@ export function extractAllIncludeDecisions(
 		const choice = d.choice as string;
 		if (treeStrategies.has(choice)) {
 			// Convert to tree-compatible decision (json_agg / lateral / subquery)
-			const converted = toIncludeDecision(d, choice, defaultPk, deriveFk);
+			const converted = toIncludeDecision(d, choice, plan, defaultPk, deriveFk);
 			if (converted) treeDecisions.push(converted);
 		} else if (choice === 'join') {
 			// Convert to flat join decision
@@ -402,7 +402,7 @@ export function extractAllIncludeDecisions(
 			if (converted) flatDecisions.push(converted);
 		} else if (choice === 'cte') {
 			// CTE: produces WITH clause + LEFT JOIN to CTE
-			const converted = toIncludeDecision(d, choice, defaultPk, deriveFk);
+			const converted = toIncludeDecision(d, choice, plan, defaultPk, deriveFk);
 			if (converted) flatDecisions.push(converted);
 		}
 	}
@@ -419,6 +419,7 @@ export function extractAllIncludeDecisions(
 function toIncludeDecision(
 	d: PlanReport['decisions'][number],
 	choice: string,
+	plan: PlanReport,
 	defaultPk: string = DEFAULT_PK_COLUMN,
 	deriveFk: FkColumnDerivation = defaultFkDerivation,
 ): (PlanDecision & { intentPath?: string }) | undefined {
@@ -438,6 +439,16 @@ function toIncludeDecision(
 	// so the subquery strategy is implemented via json_agg correlated subquery
 	const effectiveChoice = choice === 'subquery' ? 'json_agg' : choice;
 
+	// Extract per-include limit from the original intent
+	const includeIntent = (
+		plan.intent?.include as
+			| Array<{ relation: string; limit?: number }>
+			| undefined
+	)?.find(
+		(i) => i.relation === relationName || i.relation === context.relation,
+	);
+	const limit = includeIntent?.limit;
+
 	return {
 		type: 'includeStrategy',
 		choice: effectiveChoice,
@@ -448,6 +459,7 @@ function toIncludeDecision(
 		foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
 		parentKey: 'id',
 		...(context.intentPath && { intentPath: context.intentPath }),
+		...(limit != null && { limit }),
 	};
 }
 

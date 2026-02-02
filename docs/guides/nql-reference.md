@@ -354,12 +354,20 @@ Standard operator precedence: `*`, `/`, `%` bind tighter than `+`, `-`.
 
 ### Nested JSON (Default)
 
-Select columns from related tables to auto-include them:
+Select columns from related tables to auto-include them. The planner uses
+`json_agg` to aggregate children into a single JSON array per parent row:
 
 **blog:**
 ```
 # Include all post columns as nested JSON array
 authors | select *, posts.*
+```
+
+```sql
+-- Produced SQL (json_agg):
+SELECT authors.*, json_agg(posts.*) AS posts
+FROM authors LEFT JOIN posts ON authors.id = posts.author_id
+GROUP BY authors.id
 ```
 
 Result shape (nested):
@@ -380,12 +388,40 @@ orderItems | select id, product.name, product.category.name
 
 ### Flat Mode
 
-Use `| flat` to force JOIN strategy (flat rows instead of nested JSON):
+Use `| flat` to get flat rows instead of nested JSON. The planner picks the
+best SQL strategy automatically:
 
-**blog:**
+**LEFT JOIN** — default for `| flat` (simple, well-optimized by PostgreSQL):
 ```
+# All columns → LEFT JOIN
 authors | select *, posts.* | flat
+
+# Specific columns → LEFT JOIN with column projection
+authors | select id, posts.title, posts.createdAt | flat
 ```
+
+```sql
+-- Produced SQL (LEFT JOIN):
+SELECT authors.*, posts."title", posts."createdAt"
+FROM authors LEFT JOIN posts ON authors.id = posts.author_id
+```
+
+**LATERAL JOIN** — used when `| flat` includes a per-row LIMIT:
+```
+# Top 3 posts per author → LATERAL subquery
+authors | select *, posts.* | flat | limit 3
+```
+
+```sql
+-- Produced SQL (LATERAL):
+SELECT authors.*, posts_lat_0.*
+FROM authors LEFT JOIN LATERAL (
+  SELECT * FROM posts WHERE author_id = authors.id LIMIT 3
+) AS posts_lat_0 ON true
+```
+
+> **When is LATERAL used?** Only when a per-row LIMIT is needed. Without LIMIT,
+> a standard LEFT JOIN is simpler and faster. The planner chooses automatically.
 
 Result shape (flat):
 ```json
@@ -403,6 +439,18 @@ posts | select *, tags.*
 ```
 
 The planner automatically resolves junction tables.
+
+### Include Strategy Summary
+
+| NQL | SQL Strategy | When |
+|-----|-------------|------|
+| `select *, relation.*` | `json_agg` | Default — nested JSON array, no row explosion |
+| `select *, relation.* \| flat` | `LEFT JOIN` | Flat rows, simple and fast |
+| `select *, relation.* \| flat \| limit N` | `LEFT JOIN LATERAL` | Flat rows with per-parent LIMIT |
+| `select name, ancestors.*` | `CTE` | Recursive/hierarchical relations |
+
+The planner picks the optimal strategy automatically. You only control the
+output shape (`| flat`) and constraints (`| limit N`).
 
 ---
 

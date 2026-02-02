@@ -75,19 +75,19 @@ import {
 /**
  * ARCH-006: Simplified ORM options.
  *
- * Uses the unified Schema API with required schema and optional adapter.
+ * Uses the unified Schema API with required schema and adapter.
  * The schema must be created with `schema()` + `ref()`.
- *
- * @example Compile-only (no adapter)
- * ```typescript
- * const orm = createOrm({ schema: mySchema });
- * const { sql, params } = orm.select('users').dump();
- * ```
  *
  * @example Full ORM with adapter
  * ```typescript
  * const orm = createOrm({ schema: mySchema, adapter });
  * const users = await orm.select('users').all();
+ * ```
+ *
+ * @example Tests with mock adapter
+ * ```typescript
+ * import { createMockAdapter } from './test-utils.js';
+ * const orm = createOrm({ schema: mySchema, adapter: createMockAdapter() });
  * ```
  */
 export interface SimplifiedOrmOptions<
@@ -107,19 +107,18 @@ export interface SimplifiedOrmOptions<
 	readonly model?: ModelIR;
 
 	/**
-	 * Adapter for database execution (optional for compile-only).
+	 * Adapter for database operations.
+	 *
+	 * Required — provides dialect capabilities for planner strategy selection.
+	 * For compile-only usage (no DB), use `createMockAdapter()` from test-utils
+	 * or `createPgsqlCompileOnlyAdapter()` from adapter-pgsql.
 	 */
-	readonly adapter?: Adapter<unknown>;
+	readonly adapter: Adapter<unknown>;
 
 	/**
 	 * Enable strict mode validation (default: false).
 	 */
 	readonly strictMode?: boolean;
-
-	/**
-	 * Optional dialect capabilities for strategy selection.
-	 */
-	readonly dialectCapabilities?: DialectCapabilities;
 
 	// ============================================================
 	// Global Limits (NQL-ALIGN Block 3)
@@ -216,13 +215,7 @@ export interface SimplifiedOrmOptions<
  * @param options - ORM options with required schema
  * @returns ORM instance for querying
  *
- * @example Compile-only (no adapter)
- * ```typescript
- * const orm = createOrm({ schema: mySchema });
- * const { sql, params } = orm.select('users').dump();
- * ```
- *
- * @example Full ORM with adapter
+ * @example With database adapter
  * ```typescript
  * const orm = createOrm({ schema: mySchema, adapter });
  * const users = await orm.select('users').all();
@@ -236,9 +229,7 @@ export function createOrm<T extends SchemaDefinition>(
 		model: modelDirect,
 		adapter,
 		strictMode = false,
-		dialectCapabilities,
 		planOptions: globalPlanOptions,
-		// nqlCompiler is deprecated - @dbsp/nql is integrated directly
 	} = options;
 
 	// ARCH-006: Either schema or model is required
@@ -283,7 +274,7 @@ export function createOrm<T extends SchemaDefinition>(
 		{}, // relationHints removed in ARCH-006
 		adapter,
 		undefined, // schemaName
-		dialectCapabilities,
+		adapter.dialectCapabilities,
 		schemaDefinition,
 		globalPlanOptions,
 	) as OrmInstance<InferDB<T>>;
