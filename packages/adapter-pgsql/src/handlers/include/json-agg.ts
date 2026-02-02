@@ -21,6 +21,7 @@ import type {
 	IncludeHandler,
 	IncludeResult,
 } from '../types.js';
+import { deriveFkColumns } from './shared.js';
 
 /**
  * Recursively compile a json_agg decision into a ResTarget node.
@@ -47,24 +48,14 @@ function compileJsonAggRecursive(
 	}
 
 	// Build correlation WHERE based on relation type
-	let whereExpr: Node;
-	if (decision.relationType === 'belongsTo') {
-		whereExpr = jsonAggCorrelation(
-			parentAlias,
-			decision.foreignKey ?? 'id',
-			innerAlias,
-			decision.parentKey ?? 'id',
-			ctx.naming,
-		);
-	} else {
-		whereExpr = jsonAggCorrelation(
-			parentAlias,
-			decision.parentKey ?? 'id',
-			innerAlias,
-			decision.foreignKey ?? 'id',
-			ctx.naming,
-		);
-	}
+	const { sourceColumn, targetColumn } = deriveFkColumns(decision, parentAlias);
+	let whereExpr: Node = jsonAggCorrelation(
+		parentAlias,
+		sourceColumn,
+		innerAlias,
+		targetColumn,
+		ctx.naming,
+	);
 
 	// Merge pre-compiled filter conditions (from EXISTS propagation via bridge)
 	const compiledFilter = (decision as unknown as Record<string, unknown>)

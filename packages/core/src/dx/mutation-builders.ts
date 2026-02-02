@@ -4,7 +4,7 @@
  * Part of DX-010: Mutations.
  */
 
-import type { Adapter } from '../adapter.js';
+import type { Adapter, CompiledQuery, CompileOptions } from '../adapter.js';
 import type {
 	DeleteIntent,
 	InsertIntent,
@@ -52,22 +52,54 @@ type MutationBaseOpts = {
 };
 
 // ============================================================================
-// Insert Builder
+// Abstract Base
 // ============================================================================
 
 /**
- * Builder for INSERT operations.
- * Immutable - each method returns a new builder instance.
+ * Abstract base class for mutation builders.
+ * Consolidates shared fields, adapter validation, dump(), and execute() logic.
+ *
+ * Subclasses implement:
+ * - `buildIntent()`: construct the mutation-specific intent
+ * - `compileIntent()`: call the correct adapter.compile* method
+ * - `operationName`: label used in error messages
  */
-export class InsertBuilder<T = void> {
-	private readonly table: string;
-	private readonly model: ModelIR;
-	private readonly adapter: Adapter | undefined;
-	private readonly schemaName: string | undefined;
-	private readonly valuesData: readonly Record<string, unknown>[];
-	private readonly returningColumns: readonly string[] | undefined;
+abstract class MutationBuilderBase<
+	T,
+	TIntent extends InsertIntent | UpdateIntent | DeleteIntent | UpsertIntent,
+> {
+	protected readonly table: string;
+	protected readonly model: ModelIR;
+	protected readonly adapter: Adapter | undefined;
+	protected readonly schemaName: string | undefined;
+	protected readonly returningColumns: readonly string[] | undefined;
 
-	private get baseOpts(): MutationBaseOpts {
+	protected constructor(
+		opts: MutationBaseOpts & {
+			returning?: readonly string[] | undefined;
+		},
+	) {
+		this.table = opts.table;
+		this.model = opts.model;
+		this.adapter = opts.adapter;
+		this.schemaName = opts.schemaName;
+		this.returningColumns = opts.returning;
+	}
+
+	/** Label used in ExecutionError messages (e.g. 'insert', 'update'). */
+	protected abstract readonly operationName: string;
+
+	/** Construct the mutation-specific intent AST node. */
+	protected abstract buildIntent(): TIntent;
+
+	/** Delegate to the adapter's mutation-specific compile method. */
+	protected abstract compileIntent(
+		adapter: Adapter,
+		intent: TIntent,
+		options?: CompileOptions,
+	): CompiledQuery;
+
+	protected get baseOpts(): MutationBaseOpts {
 		return {
 			table: this.table,
 			model: this.model,
@@ -76,18 +108,82 @@ export class InsertBuilder<T = void> {
 		};
 	}
 
+	/** Require a configured adapter or throw. */
+	protected requireAdapter(operation: string): Adapter {
+		if (!this.adapter) {
+			throw new ExecutionError({
+				operation,
+				reason: 'Adapter not configured',
+				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
+			});
+		}
+		return this.adapter;
+	}
+
+	dump(): MutationDump {
+		const adapter = this.requireAdapter('dump');
+		const intent = this.buildIntent();
+		const compileOptions = this.schemaName
+			? { schemaName: this.schemaName }
+			: undefined;
+		const compiled = this.compileIntent(adapter, intent, compileOptions);
+
+		const meta: { compiledAt: Date; schema?: string } = {
+			compiledAt: new Date(),
+		};
+		if (this.schemaName !== undefined) {
+			meta.schema = this.schemaName;
+		}
+
+		return {
+			sql: compiled.sql,
+			parameters: compiled.parameters,
+			intent,
+			meta,
+		};
+	}
+
+	async execute(): Promise<T> {
+		const adapter = this.requireAdapter(this.operationName);
+		const intent = this.buildIntent();
+		const compileOptions = this.schemaName
+			? { schemaName: this.schemaName }
+			: undefined;
+		const compiled = this.compileIntent(adapter, intent, compileOptions);
+
+		if (this.returningColumns && this.returningColumns.length > 0) {
+			const result = await adapter.execute(compiled);
+			return result as T;
+		}
+		await adapter.execute(compiled);
+		return undefined as T;
+	}
+}
+
+// ============================================================================
+// Insert Builder
+// ============================================================================
+
+/**
+ * Builder for INSERT operations.
+ * Immutable - each method returns a new builder instance.
+ */
+export class InsertBuilder<T = void> extends MutationBuilderBase<
+	T,
+	InsertIntent
+> {
+	private readonly valuesData: readonly Record<string, unknown>[];
+
+	protected readonly operationName = 'insert';
+
 	constructor(
 		opts: MutationBaseOpts & {
 			values?: readonly Record<string, unknown>[] | undefined;
 			returning?: readonly string[] | undefined;
 		},
 	) {
-		this.table = opts.table;
-		this.model = opts.model;
-		this.adapter = opts.adapter;
-		this.schemaName = opts.schemaName;
+		super(opts);
 		this.valuesData = opts.values ?? [];
-		this.returningColumns = opts.returning;
 	}
 
 	/**
@@ -128,10 +224,7 @@ export class InsertBuilder<T = void> {
 		});
 	}
 
-	/**
-	 * Build the insert intent.
-	 */
-	private buildIntent(): InsertIntent {
+	protected buildIntent(): InsertIntent {
 		if (this.valuesData.length === 0) {
 			throw new InvalidOperationError(
 				'insert',
@@ -152,66 +245,12 @@ export class InsertBuilder<T = void> {
 		return intent;
 	}
 
-	/**
-	 * Compile and return the dump without executing.
-	 * Useful for observability and debugging.
-	 */
-	dump(): MutationDump {
-		if (!this.adapter) {
-			throw new ExecutionError({
-				operation: 'dump',
-				reason: 'Adapter not configured',
-				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
-			});
-		}
-
-		const intent = this.buildIntent();
-		const compileOptions = this.schemaName
-			? { schemaName: this.schemaName }
-			: undefined;
-		const compiled = this.adapter.compileInsert(intent, compileOptions);
-
-		const meta: { compiledAt: Date; schema?: string } = {
-			compiledAt: new Date(),
-		};
-		if (this.schemaName !== undefined) {
-			meta.schema = this.schemaName;
-		}
-
-		return {
-			sql: compiled.sql,
-			parameters: compiled.parameters,
-			intent,
-			meta,
-		};
-	}
-
-	/**
-	 * Execute the insert operation.
-	 * Returns void if no returning() specified, or array of returned rows.
-	 */
-	async execute(): Promise<T> {
-		if (!this.adapter) {
-			throw new ExecutionError({
-				operation: 'insert',
-				reason: 'Adapter not configured',
-				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
-			});
-		}
-
-		const intent = this.buildIntent();
-		const compileOptions = this.schemaName
-			? { schemaName: this.schemaName }
-			: undefined;
-		const compiled = this.adapter.compileInsert(intent, compileOptions);
-
-		// Execute the compiled query
-		if (this.returningColumns && this.returningColumns.length > 0) {
-			const result = await this.adapter.execute(compiled);
-			return result as T;
-		}
-		await this.adapter.execute(compiled);
-		return undefined as T;
+	protected compileIntent(
+		adapter: Adapter,
+		intent: InsertIntent,
+		options?: CompileOptions,
+	): CompiledQuery {
+		return adapter.compileInsert(intent, options);
 	}
 }
 
@@ -223,24 +262,15 @@ export class InsertBuilder<T = void> {
  * Builder for UPDATE operations.
  * Immutable - each method returns a new builder instance.
  */
-export class UpdateBuilder<T = void> {
-	private readonly table: string;
-	private readonly model: ModelIR;
-	private readonly adapter: Adapter | undefined;
-	private readonly schemaName: string | undefined;
+export class UpdateBuilder<T = void> extends MutationBuilderBase<
+	T,
+	UpdateIntent
+> {
 	private readonly setData: Record<string, unknown>;
 	private readonly whereIntent: WhereIntent | undefined;
 	private readonly allowAllFlag: boolean;
-	private readonly returningColumns: readonly string[] | undefined;
 
-	private get baseOpts(): MutationBaseOpts {
-		return {
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
-		};
-	}
+	protected readonly operationName = 'update';
 
 	constructor(
 		opts: MutationBaseOpts & {
@@ -250,14 +280,10 @@ export class UpdateBuilder<T = void> {
 			returning?: readonly string[] | undefined;
 		},
 	) {
-		this.table = opts.table;
-		this.model = opts.model;
-		this.adapter = opts.adapter;
-		this.schemaName = opts.schemaName;
+		super(opts);
 		this.setData = opts.set ?? {};
 		this.whereIntent = opts.where;
 		this.allowAllFlag = opts.allowAll ?? false;
-		this.returningColumns = opts.returning;
 	}
 
 	/**
@@ -312,10 +338,7 @@ export class UpdateBuilder<T = void> {
 		});
 	}
 
-	/**
-	 * Build the update intent.
-	 */
-	private buildIntent(): UpdateIntent {
+	protected buildIntent(): UpdateIntent {
 		if (Object.keys(this.setData).length === 0) {
 			throw new InvalidOperationError('update', 'No fields to update');
 		}
@@ -346,64 +369,12 @@ export class UpdateBuilder<T = void> {
 		return intent;
 	}
 
-	/**
-	 * Compile and return the dump without executing.
-	 */
-	dump(): MutationDump {
-		if (!this.adapter) {
-			throw new ExecutionError({
-				operation: 'dump',
-				reason: 'Adapter not configured',
-				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
-			});
-		}
-
-		const intent = this.buildIntent();
-		const compileOptions = this.schemaName
-			? { schemaName: this.schemaName }
-			: undefined;
-		const compiled = this.adapter.compileUpdate(intent, compileOptions);
-
-		const meta: { compiledAt: Date; schema?: string } = {
-			compiledAt: new Date(),
-		};
-		if (this.schemaName !== undefined) {
-			meta.schema = this.schemaName;
-		}
-
-		return {
-			sql: compiled.sql,
-			parameters: compiled.parameters,
-			intent,
-			meta,
-		};
-	}
-
-	/**
-	 * Execute the update operation.
-	 * Returns void if no returning() specified, or array of returned rows.
-	 */
-	async execute(): Promise<T> {
-		if (!this.adapter) {
-			throw new ExecutionError({
-				operation: 'update',
-				reason: 'Adapter not configured',
-				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
-			});
-		}
-
-		const intent = this.buildIntent();
-		const compileOptions = this.schemaName
-			? { schemaName: this.schemaName }
-			: undefined;
-		const compiled = this.adapter.compileUpdate(intent, compileOptions);
-
-		if (this.returningColumns && this.returningColumns.length > 0) {
-			const result = await this.adapter.execute(compiled);
-			return result as T;
-		}
-		await this.adapter.execute(compiled);
-		return undefined as T;
+	protected compileIntent(
+		adapter: Adapter,
+		intent: UpdateIntent,
+		options?: CompileOptions,
+	): CompiledQuery {
+		return adapter.compileUpdate(intent, options);
 	}
 }
 
@@ -415,24 +386,15 @@ export class UpdateBuilder<T = void> {
  * Builder for DELETE operations.
  * Immutable - each method returns a new builder instance.
  */
-export class DeleteBuilder<T = void> {
-	private readonly table: string;
-	private readonly model: ModelIR;
-	private readonly adapter: Adapter | undefined;
-	private readonly schemaName: string | undefined;
+export class DeleteBuilder<T = void> extends MutationBuilderBase<
+	T,
+	DeleteIntent
+> {
 	private readonly whereIntent: WhereIntent | undefined;
 	private readonly allowAllFlag: boolean;
 	private readonly cascadeRelations: boolean | readonly string[] | undefined;
-	private readonly returningColumns: readonly string[] | undefined;
 
-	private get baseOpts(): MutationBaseOpts {
-		return {
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
-		};
-	}
+	protected readonly operationName = 'delete';
 
 	constructor(
 		opts: MutationBaseOpts & {
@@ -442,14 +404,10 @@ export class DeleteBuilder<T = void> {
 			returning?: readonly string[] | undefined;
 		},
 	) {
-		this.table = opts.table;
-		this.model = opts.model;
-		this.adapter = opts.adapter;
-		this.schemaName = opts.schemaName;
+		super(opts);
 		this.whereIntent = opts.where;
 		this.allowAllFlag = opts.allowAll ?? false;
 		this.cascadeRelations = opts.cascade;
-		this.returningColumns = opts.returning;
 	}
 
 	/**
@@ -504,10 +462,7 @@ export class DeleteBuilder<T = void> {
 		});
 	}
 
-	/**
-	 * Build the delete intent.
-	 */
-	private buildIntent(): DeleteIntent {
+	protected buildIntent(): DeleteIntent {
 		if (!this.whereIntent && !this.allowAllFlag) {
 			throw new UnsafeOperationError(
 				'delete',
@@ -536,66 +491,12 @@ export class DeleteBuilder<T = void> {
 		return intent;
 	}
 
-	/**
-	 * Compile and return the dump without executing.
-	 */
-	dump(): MutationDump {
-		if (!this.adapter) {
-			throw new ExecutionError({
-				operation: 'dump',
-				reason: 'Adapter not configured',
-				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
-			});
-		}
-
-		const intent = this.buildIntent();
-		const compileOptions = this.schemaName
-			? { schemaName: this.schemaName }
-			: undefined;
-		const compiled = this.adapter.compileDelete(intent, compileOptions);
-
-		const meta: { compiledAt: Date; schema?: string } = {
-			compiledAt: new Date(),
-		};
-		if (this.schemaName !== undefined) {
-			meta.schema = this.schemaName;
-		}
-
-		return {
-			sql: compiled.sql,
-			parameters: compiled.parameters,
-			intent,
-			meta,
-		};
-	}
-
-	/**
-	 * Execute the delete operation.
-	 * Returns void if no returning() specified, or array of returned rows.
-	 * Note: Cascade deletes are executed as multiple statements.
-	 */
-	async execute(): Promise<T> {
-		if (!this.adapter) {
-			throw new ExecutionError({
-				operation: 'delete',
-				reason: 'Adapter not configured',
-				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
-			});
-		}
-
-		// Cascade delete (multi-statement) deferred — single delete for now
-		const intent = this.buildIntent();
-		const compileOptions = this.schemaName
-			? { schemaName: this.schemaName }
-			: undefined;
-		const compiled = this.adapter.compileDelete(intent, compileOptions);
-
-		if (this.returningColumns && this.returningColumns.length > 0) {
-			const result = await this.adapter.execute(compiled);
-			return result as T;
-		}
-		await this.adapter.execute(compiled);
-		return undefined as T;
+	protected compileIntent(
+		adapter: Adapter,
+		intent: DeleteIntent,
+		options?: CompileOptions,
+	): CompiledQuery {
+		return adapter.compileDelete(intent, options);
 	}
 }
 
@@ -632,24 +533,15 @@ export class DeleteBuilder<T = void> {
  *   .execute();
  * ```
  */
-export class UpsertBuilder<T = void> {
-	private readonly table: string;
-	private readonly model: ModelIR;
-	private readonly adapter: Adapter | undefined;
-	private readonly schemaName: string | undefined;
+export class UpsertBuilder<T = void> extends MutationBuilderBase<
+	T,
+	UpsertIntent
+> {
 	private readonly valuesData: readonly Record<string, unknown>[];
 	private readonly conflictTarget: UpsertConflictTarget | undefined;
 	private readonly conflictAction: UpsertConflictAction | undefined;
-	private readonly returningColumns: readonly string[] | undefined;
 
-	private get baseOpts(): MutationBaseOpts {
-		return {
-			table: this.table,
-			model: this.model,
-			adapter: this.adapter,
-			schemaName: this.schemaName,
-		};
-	}
+	protected readonly operationName = 'upsert';
 
 	constructor(
 		opts: MutationBaseOpts & {
@@ -659,14 +551,10 @@ export class UpsertBuilder<T = void> {
 			returning?: readonly string[] | undefined;
 		},
 	) {
-		this.table = opts.table;
-		this.model = opts.model;
-		this.adapter = opts.adapter;
-		this.schemaName = opts.schemaName;
+		super(opts);
 		this.valuesData = opts.values ?? [];
 		this.conflictTarget = opts.onConflict;
 		this.conflictAction = opts.action;
-		this.returningColumns = opts.returning;
 	}
 
 	/**
@@ -768,10 +656,7 @@ export class UpsertBuilder<T = void> {
 		});
 	}
 
-	/**
-	 * Build the upsert intent.
-	 */
-	private buildIntent(): UpsertIntent {
+	protected buildIntent(): UpsertIntent {
 		if (this.valuesData.length === 0) {
 			throw new InvalidOperationError(
 				'upsert',
@@ -808,63 +693,11 @@ export class UpsertBuilder<T = void> {
 		return intent;
 	}
 
-	/**
-	 * Compile and return the dump without executing.
-	 */
-	dump(): MutationDump {
-		if (!this.adapter) {
-			throw new ExecutionError({
-				operation: 'dump',
-				reason: 'Adapter not configured',
-				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
-			});
-		}
-
-		const intent = this.buildIntent();
-		const compileOptions = this.schemaName
-			? { schemaName: this.schemaName }
-			: undefined;
-		const compiled = this.adapter.compileUpsert(intent, compileOptions);
-
-		const meta: { compiledAt: Date; schema?: string } = {
-			compiledAt: new Date(),
-		};
-		if (this.schemaName !== undefined) {
-			meta.schema = this.schemaName;
-		}
-
-		return {
-			sql: compiled.sql,
-			parameters: compiled.parameters,
-			intent,
-			meta,
-		};
-	}
-
-	/**
-	 * Execute the upsert operation.
-	 * Returns void if no returning() specified, or array of returned rows.
-	 */
-	async execute(): Promise<T> {
-		if (!this.adapter) {
-			throw new ExecutionError({
-				operation: 'upsert',
-				reason: 'Adapter not configured',
-				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
-			});
-		}
-
-		const intent = this.buildIntent();
-		const compileOptions = this.schemaName
-			? { schemaName: this.schemaName }
-			: undefined;
-		const compiled = this.adapter.compileUpsert(intent, compileOptions);
-
-		if (this.returningColumns && this.returningColumns.length > 0) {
-			const result = await this.adapter.execute(compiled);
-			return result as T;
-		}
-		await this.adapter.execute(compiled);
-		return undefined as T;
+	protected compileIntent(
+		adapter: Adapter,
+		intent: UpsertIntent,
+		options?: CompileOptions,
+	): CompiledQuery {
+		return adapter.compileUpsert(intent, options);
 	}
 }

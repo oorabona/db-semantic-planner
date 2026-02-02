@@ -226,6 +226,7 @@ function convertSelect(
 				}>;
 				const conditions = whenClauses.map((wc) => ({
 					when: convertCaseConditionToDecision(wc.condition, rootTable),
+					// biome-ignore lint/suspicious/noThenProperty: intentional reserved word in decision object
 					then: extractExpressionValue(wc.result),
 				}));
 

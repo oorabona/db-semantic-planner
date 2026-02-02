@@ -630,6 +630,7 @@ export class IntentBuilder<TResult = unknown> {
 			{
 				selectIntent: this.state.selectIntent,
 				whereIntents: [...this.state.whereIntents],
+				havingIntents: [...this.state.havingIntents],
 				includes: [...this.state.includes],
 				recursiveIncludes: [...this.state.recursiveIncludes],
 				aggregates: [...this.state.aggregates],
@@ -637,6 +638,7 @@ export class IntentBuilder<TResult = unknown> {
 				orderByIntents: [...this.state.orderByIntents],
 				limitValue: this.state.limitValue,
 				offsetValue: this.state.offsetValue,
+				isDistinct: this.state.isDistinct,
 			},
 		);
 	}
