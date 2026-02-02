@@ -236,12 +236,38 @@ function convertSelect(
 					table: rootTable,
 				} as PlanDecision;
 				if (expr.else) {
-					(decision as unknown as Record<string, unknown>).value = extractExpressionValue(
-						expr.else as Record<string, unknown>,
-					);
+					(decision as unknown as Record<string, unknown>).value =
+						extractExpressionValue(expr.else as Record<string, unknown>);
 				}
 				if (expr.as)
-					(decision as unknown as Record<string, unknown>).alias = expr.as as string;
+					(decision as unknown as Record<string, unknown>).alias =
+						expr.as as string;
+				decisions.push(decision);
+			} else if (exprKind === 'relationColumn') {
+				// Relation column: SELECT relation.column AS alias
+				const decision: PlanDecision = {
+					type: 'selectRelationColumn',
+					relation: expr.relation as string,
+					column: (expr.column ?? '*') as string,
+					table: rootTable,
+				};
+				if (expr.as) (decision as { alias: string }).alias = expr.as as string;
+				decisions.push(decision);
+			} else if (exprKind === 'pseudoColumn') {
+				// Pseudo-column expressions (e.g. manager.name, ancestors.*) are hints
+				// to the planner — they trigger include strategy decisions (CTE, json_agg)
+				// which handle the actual SQL generation. The pseudo-column handler in
+				// the expression registry is reserved for standalone DX API usage via
+				// selectPseudoColumn decisions created directly by user code.
+			} else if (exprKind === 'arithmetic') {
+				// Arithmetic expression: SELECT left op right AS alias
+				const decision: PlanDecision = {
+					type: 'selectArithmetic',
+					operator: expr.operator as string,
+					args: [expr.left, expr.right],
+					table: rootTable,
+				};
+				if (expr.as) (decision as { alias: string }).alias = expr.as as string;
 				decisions.push(decision);
 			}
 		}
@@ -335,11 +361,15 @@ function convertWhereCondition(
 				type: 'where',
 				column: cond.field as string,
 				operator: cond.not ? 'notIn' : 'in',
-				value: (cond as Record<string, unknown>).subquery ? undefined : cond.values,
+				value: (cond as Record<string, unknown>).subquery
+					? undefined
+					: cond.values,
 				table: rootTable,
 			};
 			if ((cond as Record<string, unknown>).subquery) {
-				(result as Record<string, unknown>).subquery = (cond as Record<string, unknown>).subquery;
+				(result as Record<string, unknown>).subquery = (
+					cond as Record<string, unknown>
+				).subquery;
 			}
 			return result;
 		}
@@ -590,7 +620,6 @@ function convertOrderBy(order: OrderByIntent, rootTable: string): PlanDecision {
 
 	return decision;
 }
-
 
 // ============================================================================
 // CASE expression helpers

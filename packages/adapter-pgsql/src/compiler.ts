@@ -39,8 +39,9 @@ import {
 	deriveFK,
 } from './compiler-conditions.js';
 import { deparseQuoted } from './deparse.js';
+import { registerAllExpressionHandlers } from './handlers/expression/index.js';
 import { registerAllIncludeHandlers } from './handlers/include/index.js';
-import { getIncludeHandler } from './handlers/index.js';
+import { getExpressionHandler, getIncludeHandler } from './handlers/index.js';
 import type {
 	CompilerContext as HandlerCompilerContext,
 	CompilerState as HandlerCompilerState,
@@ -94,11 +95,13 @@ function mapToHandlerDecision(
 		strategy: (pd.choice === 'subquery'
 			? 'json_agg'
 			: pd.choice) as HandlerDecision['strategy'],
-		relation: pd.relationName,
+		relation: pd.relation ?? pd.relationName,
 		relationName: pd.relationName,
 		relationType: pd.relationType,
 		foreignKey: pd.foreignKey,
 		parentKey: pd.parentKey,
+		traversal: pd.traversal,
+		maxDepth: pd.maxDepth,
 		children: pd.children?.map((c) =>
 			mapToHandlerDecision(c, pd.targetTable ?? rootTable),
 		),
@@ -157,7 +160,21 @@ export interface PlanDecision {
 	readonly intentPath?: string;
 	// Filter/include strategy choice from planner ('join' | 'exists' | 'json_agg')
 	readonly choice?: string;
-	readonly subquery?: { readonly from: string; readonly select: string; readonly where?: PlanDecision };
+	// IN (subquery) reference
+	readonly subquery?: {
+		readonly from: string;
+		readonly select: string;
+		readonly where?: PlanDecision;
+	};
+	// Expression type discriminator (e.g. 'case' for CASE WHEN)
+	readonly expressionType?: string;
+	// Relation column properties
+	readonly relation?: string;
+	// Pseudo-column (recursive traversal) properties
+	readonly traversal?: string;
+	readonly maxDepth?: number;
+	readonly role?: string;
+	// Arithmetic expressions use args: [left, right] instead of dedicated fields
 }
 
 /**
@@ -195,6 +212,13 @@ function ensureIncludeHandlersRegistered(): void {
 	if (includeHandlersInitialized) return;
 	includeHandlersInitialized = true;
 	registerAllIncludeHandlers();
+}
+
+let expressionHandlersInitialized = false;
+function ensureExpressionHandlersRegistered(): void {
+	if (expressionHandlersInitialized) return;
+	expressionHandlersInitialized = true;
+	registerAllExpressionHandlers();
 }
 
 export class PlanCompiler {
@@ -464,12 +488,8 @@ export class PlanCompiler {
 					}
 					break;
 
-
 				case 'selectExpression': {
-					if (
-						(decision as unknown as Record<string, unknown>).expressionType ===
-						'case'
-					) {
+					if (decision.expressionType === 'case') {
 						const caseNode = this.compileCaseExpression(decision);
 						const alias = decision.alias;
 						targetList.push({
@@ -479,6 +499,48 @@ export class PlanCompiler {
 							},
 						});
 					}
+					break;
+				}
+
+				case 'selectRelationColumn':
+				case 'selectPseudoColumn':
+				case 'selectArithmetic': {
+					ensureExpressionHandlersRegistered();
+					const exprType =
+						decision.type === 'selectRelationColumn'
+							? 'relationColumn'
+							: decision.type === 'selectPseudoColumn'
+								? 'pseudoColumn'
+								: 'arithmetic';
+					const handler = getExpressionHandler(exprType);
+					const exprCtx = {
+						naming: this.naming,
+						rootTable: plan.rootTable,
+						currentAlias: plan.rootTable,
+						maxRecursiveDepth: 100,
+						...((plan.schema ?? this.schema)
+							? { schema: plan.schema ?? this.schema }
+							: {}),
+					} as HandlerCompilerContext;
+					const exprState: HandlerCompilerState = {
+						parameters: this.state.parameters,
+						paramIndex: this.state.paramIndex,
+						ctes: new Map(),
+						aliases: new Map(),
+						joins: [],
+					};
+					const handlerDecision = mapToHandlerDecision(
+						decision,
+						plan.rootTable,
+					);
+					const node = handler.compile(handlerDecision, exprCtx, exprState);
+					this.state.paramIndex = exprState.paramIndex;
+					targetList.push({
+						ResTarget: {
+							val: node,
+							...(decision.alias ? { name: decision.alias } : {}),
+						},
+					});
 					break;
 				}
 
@@ -585,7 +647,6 @@ export class PlanCompiler {
 						where = where ? andExpr(where, combined) : combined;
 					}
 					break;
-
 
 				case 'whereNot':
 					if (decision.conditions) {

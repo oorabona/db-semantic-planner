@@ -797,11 +797,22 @@ export class NqlCompiler {
 					// Compile inner subquery to ScalarSubqueryIntent
 					const innerQuery = this.compileQuery(inExpr.values.query);
 					let selectField = '*';
-					if (innerQuery.select?.type === 'fields' && innerQuery.select.fields[0]) {
+					if (
+						innerQuery.select?.type === 'fields' &&
+						innerQuery.select.fields[0]
+					) {
 						selectField = innerQuery.select.fields[0];
-					} else if (innerQuery.select?.type === 'expressions' && innerQuery.select.columns[0]) {
+					} else if (
+						innerQuery.select?.type === 'expressions' &&
+						innerQuery.select.columns[0]
+					) {
 						const col = innerQuery.select.columns[0];
-						selectField = col.kind === 'column' ? col.column : col.kind === 'columnAlias' ? (col as { kind: 'columnAlias'; column: string }).column : '*';
+						selectField =
+							col.kind === 'column'
+								? col.column
+								: col.kind === 'columnAlias'
+									? (col as { kind: 'columnAlias'; column: string }).column
+									: '*';
 					}
 
 					const subquery: ScalarSubqueryIntent = {
@@ -826,8 +837,12 @@ export class NqlCompiler {
 					'type' in inExpr.values &&
 					inExpr.values.type === 'dateRange'
 				) {
-					// Date range requires semantic expansion (future)
-					throw new Error('Date range in IN clause not yet supported');
+					// Date range requires semantic date expansion (planned for future release)
+					throw new Error(
+						'Date range in IN clause is not yet supported. ' +
+							'Use explicit BETWEEN instead:\n' +
+							'  table | where date between "2024-01-01" and "2024-12-31"',
+					);
 				} else {
 					values = [];
 				}
@@ -882,9 +897,11 @@ export class NqlCompiler {
 				// IntentAST WhereExistsIntent requires a relation name, not arbitrary subqueries
 				// Use: table | with relation | where ... instead
 				throw new Error(
-					'EXISTS (subquery) is not yet supported in NQL. ' +
-						'Use relation-based filtering: table | with relation | where ... ' +
-						'or consider using a correlated subquery pattern.',
+					'EXISTS (subquery) is not supported in NQL. ' +
+						'Use relation filters instead:\n' +
+						'  orders | with customer | where customer.active = true\n' +
+						'  orders | where exists(customer, active = true)\n' +
+						'These compile to efficient EXISTS subqueries automatically.',
 				);
 			}
 

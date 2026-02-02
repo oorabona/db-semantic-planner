@@ -716,4 +716,122 @@ describe('PlanCompiler', () => {
 			expect(result.parameters).toEqual([true]);
 		});
 	});
+
+	describe('selectRelationColumn decisions', () => {
+		it('compiles relation column via expression handler', () => {
+			const plan: SimplifiedPlanReport = {
+				rootTable: 'orders',
+				decisions: [
+					{
+						type: 'selectRelationColumn',
+						relation: 'customer',
+						column: 'name',
+						table: 'orders',
+						alias: 'customer_name',
+					},
+				],
+			};
+
+			const result = compilePlan(plan);
+			const normalized = normalizeSQL(result.sql);
+
+			// The relation handler uses the relation name as table ref
+			expect(normalized).toContain('customer');
+			expect(normalized).toContain('.name');
+			expect(normalized).toContain('customer_name');
+		});
+	});
+
+	describe('selectArithmetic decisions', () => {
+		it('compiles arithmetic expression price * quantity', () => {
+			const plan: SimplifiedPlanReport = {
+				rootTable: 'order_items',
+				decisions: [
+					{
+						type: 'selectArithmetic',
+						operator: '*',
+						args: ['price', 'quantity'],
+						table: 'order_items',
+						alias: 'total',
+					},
+				],
+			};
+
+			const result = compilePlan(plan);
+			const normalized = normalizeSQL(result.sql);
+
+			expect(normalized).toContain('*');
+			expect(normalized).toContain('price');
+			expect(normalized).toContain('quantity');
+			expect(normalized).toContain('total');
+		});
+
+		it('compiles arithmetic with literal operand', () => {
+			const plan: SimplifiedPlanReport = {
+				rootTable: 'products',
+				decisions: [
+					{
+						type: 'selectArithmetic',
+						operator: '*',
+						args: ['price', 1.1],
+						table: 'products',
+						alias: 'with_tax',
+					},
+				],
+			};
+
+			const result = compilePlan(plan);
+			const normalized = normalizeSQL(result.sql);
+
+			expect(normalized).toContain('price');
+			expect(normalized).toContain('with_tax');
+			expect(result.parameters).toEqual([1.1]);
+		});
+
+		it('compiles negation as arithmetic -1 * field', () => {
+			const plan: SimplifiedPlanReport = {
+				rootTable: 'accounts',
+				decisions: [
+					{
+						type: 'selectArithmetic',
+						operator: '*',
+						args: [-1, 'balance'],
+						table: 'accounts',
+						alias: 'negative_balance',
+					},
+				],
+			};
+
+			const result = compilePlan(plan);
+			const normalized = normalizeSQL(result.sql);
+
+			expect(normalized).toContain('balance');
+			expect(normalized).toContain('negative_balance');
+			expect(result.parameters).toEqual([-1]);
+		});
+	});
+
+	describe('selectPseudoColumn decisions', () => {
+		it('compiles pseudo-column (recursive traversal) via expression handler', () => {
+			const plan: SimplifiedPlanReport = {
+				rootTable: 'employees',
+				decisions: [
+					{
+						type: 'selectPseudoColumn',
+						traversal: 'ancestors',
+						column: 'name',
+						table: 'employees',
+						alias: 'ancestor_names',
+					},
+				],
+			};
+
+			const result = compilePlan(plan);
+			const normalized = normalizeSQL(result.sql);
+
+			// Pseudo-column handler generates recursive CTE subquery
+			expect(normalized).toContain('recursive');
+			expect(normalized).toContain('employees');
+		});
+	});
 });

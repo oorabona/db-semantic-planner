@@ -14,6 +14,7 @@ import {
 	minHandler,
 	sumHandler,
 } from './aggregate.js';
+import { arithmeticHandler } from './arithmetic.js';
 import { caseHandler, simpleCaseHandler } from './case.js';
 import {
 	coalesceHandler,
@@ -57,6 +58,7 @@ export {
 	minHandler,
 	sumHandler,
 } from './aggregate.js';
+export { arithmeticHandler } from './arithmetic.js';
 export { caseHandler, simpleCaseHandler } from './case.js';
 export {
 	coalesceHandler,
@@ -180,6 +182,7 @@ export const allExpressionHandlers = [
 	...rawExpressionHandlers,
 	...pseudoExpressionHandlers,
 	...relationExpressionHandlers,
+	arithmeticHandler,
 ];
 
 /**
