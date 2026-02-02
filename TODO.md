@@ -54,20 +54,18 @@
 
 > Audit P2 items (Score < 2.0) — grouped by axis
 
-### DRY Consolidation (3 remaining of 8)
-- [x] ✅ DRY batch mode: route through ReplEngine, extract dbsp-parser, -167 lines (2026-02-02)
-- [-] ⏭️ Deferred: #23 NQL context validation — better done during #16 SRP extraction
+### DRY Consolidation (2 remaining of 8)
 - [-] ⏭️ Deferred: #29 CLI assertion factory — lower value, standalone story
 - [-] ⏭️ Deferred: #33 adapter-pgsql test ratio — L-size, standalone story
 
 ### ~Dead Code Cleanup (4 items, ~2h)~ — 4/4 DONE
 - ~#24 Remove `NqlLimitError` unused interface~ — ✅ DONE (2026-02-01) (NqlWarning is used)
 - ~#25 Remove `_getRelationPath()` + `hasRelationPath()` dead functions~ — ✅ DONE (2026-02-01)
-- [x] ✅ #26 Remove `@deprecated namingConvention` — full migration to `dbCasing` (2026-02-02)
+- ~#26 Remove `@deprecated namingConvention`~ — ✅ DONE (2026-02-02)
 - ~#27 Remove `validate()` stub~ — ✅ DONE (2026-02-01)
 
 ### SRP / God Classes (4 items, ~40h)
-- [-] ⏭️ Deferred: #16 NqlCstVisitor 1,303 LOC — L-size, dedicated story
+- [-] ⏭️ Deferred: #16 NqlCstVisitor 1,349 LOC (was 1,510) — L-size, dedicated story
 - [-] ⏭️ Deferred: #17 NQL compiler 1,142 LOC — L-size, dedicated story
 - [-] ⏭️ Deferred: #18 PgsqlAdapter 1,592 LOC — L-size, dedicated story
 - [-] ⏭️ Deferred: #21 compileSubqueryIncludeManyToMany — only 117 LOC (audit overestimated), low value
