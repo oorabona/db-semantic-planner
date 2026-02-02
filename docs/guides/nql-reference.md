@@ -46,71 +46,119 @@ pnpm link /path/to/db-semantic-planner/packages/cli
 **In the REPL:**
 ```bash
 pnpm dbsp repl --schema ./schema.ts
-> users | where active = true | select id, name
+> products | where active = true | select id, name
 ```
 
 **In `.dbsp` files:**
 ```
 # comments start with #
-users | where active = true | select id, name
+products | where active = true | select id, name
 ```
 
 **In TypeScript:**
 ```typescript
-const users = await orm.nql<User[]>`users | where active = true`.all();
+const products = await orm.nql<Product[]>`products | where active = true`.all();
 ```
 
 ### Example Schemas
 
-The examples below use tables from three schemas shipped with the project:
+The examples below use tables from schemas shipped with the project:
 
-- [`examples/minimal.schema.ts`](../../examples/minimal.schema.ts) — `users`, `posts`
 - [`examples/blog.schema.ts`](../../examples/blog.schema.ts) — `authors`, `posts`, `comments`, `tags`, `postTags`
+- [`examples/ecommerce.schema.ts`](../../examples/ecommerce.schema.ts) — `products`, `orders`, `orderItems`, `customers`, `categories`, `variants`, `addresses`
 - [`examples/hierarchy.schema.ts`](../../examples/hierarchy.schema.ts) — `employees`, `departments`, `projects`
+
+Examples freely mix tables from all three schemas — each query uses whichever table best illustrates the feature. All table and column names match the schemas above.
 
 Here's a consolidated view of the key tables referenced in this guide:
 
 ```typescript
 import { schema, ref } from '@dbsp/core';
 
+// === Blog schema ===
 export default schema({
-  // — minimal —
-  users: {
+  authors: {
     id: { type: 'integer', primaryKey: true, autoIncrement: true },
     name: 'string',
     email: { type: 'string', unique: true },
-    active: { type: 'boolean', default: 'true' },
-    age: 'integer',
-    role: 'string',
-    department: 'string',
-    deletedAt: { type: 'timestamp', nullable: true },
+    bio: { type: 'text', nullable: true },
+    createdAt: { type: 'timestamp', default: 'now()' },
   },
   posts: {
     id: { type: 'integer', primaryKey: true, autoIncrement: true },
     title: 'string',
+    slug: { type: 'string', unique: true },
     content: { type: 'text', nullable: true },
     published: { type: 'boolean', default: 'false' },
-    views: { type: 'integer', default: '0' },
-    authorId: ref('users', { onDelete: 'CASCADE', inverse: 'posts' }),
+    authorId: ref('authors', { onDelete: 'CASCADE', inverse: 'posts' }),
     createdAt: { type: 'timestamp', default: 'now()' },
+    updatedAt: { type: 'timestamp', nullable: true },
   },
-  // — blog (extends minimal with richer relations) —
   comments: {
     id: { type: 'integer', primaryKey: true, autoIncrement: true },
     postId: ref('posts', { onDelete: 'CASCADE', inverse: 'comments' }),
     authorName: 'string',
+    authorEmail: { type: 'string', nullable: true },
     content: 'text',
     approved: { type: 'boolean', default: 'false' },
+    createdAt: { type: 'timestamp', default: 'now()' },
   },
   tags: {
     id: { type: 'integer', primaryKey: true, autoIncrement: true },
     name: { type: 'string', unique: true },
+    slug: { type: 'string', unique: true },
   },
   postTags: {
     postId: ref('posts', { onDelete: 'CASCADE' }),
     tagId: ref('tags', { onDelete: 'CASCADE' }),
   },
-  // — hierarchy (self-referential) —
+});
+
+// === Ecommerce schema (key tables) ===
+export default schema({
+  products: {
+    id: { type: 'integer', primaryKey: true, autoIncrement: true },
+    sku: { type: 'string', unique: true },
+    name: 'string',
+    price: 'decimal',
+    stock: { type: 'integer', default: '0' },
+    categoryId: ref('categories', { onDelete: 'RESTRICT', inverse: 'products' }),
+    active: { type: 'boolean', default: 'true' },
+    createdAt: { type: 'timestamp', default: 'now()' },
+  },
+  orders: {
+    id: { type: 'integer', primaryKey: true, autoIncrement: true },
+    orderNumber: { type: 'string', unique: true },
+    customerId: ref('customers', { onDelete: 'RESTRICT', inverse: 'orders' }),
+    status: { type: 'string', default: "'pending'" },
+    total: 'decimal',
+    createdAt: { type: 'timestamp', default: 'now()' },
+  },
+  orderItems: {
+    id: { type: 'integer', primaryKey: true, autoIncrement: true },
+    orderId: ref('orders', { onDelete: 'CASCADE' }),
+    productId: ref('products', { onDelete: 'RESTRICT' }),
+    quantity: 'integer',
+    unitPrice: 'decimal',
+    totalPrice: 'decimal',
+  },
+  customers: {
+    id: { type: 'integer', primaryKey: true, autoIncrement: true },
+    email: { type: 'string', unique: true },
+    firstName: 'string',
+    lastName: 'string',
+    createdAt: { type: 'timestamp', default: 'now()' },
+  },
+  categories: {
+    id: { type: 'integer', primaryKey: true, autoIncrement: true },
+    name: 'string',
+    slug: { type: 'string', unique: true },
+    parentId: ref('categories', { nullable: true, roles: { parent: 'parent', children: 'children' } }),
+  },
+});
+
+// === Hierarchy schema ===
+export default schema({
   employees: {
     id: { type: 'integer', primaryKey: true, autoIncrement: true },
     name: 'string',
@@ -129,8 +177,6 @@ export default schema({
 });
 ```
 
-Some examples also reference generic tables (`products`, `orders`, `sales`, `prices`, `bookings`, `events`) to illustrate specific features — their columns are self-explanatory from context.
-
 ---
 
 ## 2. Basic Syntax
@@ -138,7 +184,7 @@ Some examples also reference generic tables (`products`, `orders`, `sales`, `pri
 ### Table Scan
 
 ```
-users
+authors
 ```
 
 Returns all rows and columns from the table.
@@ -148,14 +194,14 @@ Returns all rows and columns from the table.
 Chain clauses with `|`:
 
 ```
-users | where active = true | select id, name | order by name | limit 10
+products | where active = true | select id, name | order by name | limit 10
 ```
 
 ### Comments
 
 ```
 # This is a comment
-users | where active = true   # Inline comment
+products | where active = true   # Inline comment
 ```
 
 ---
@@ -165,61 +211,61 @@ users | where active = true   # Inline comment
 ### Comparison Operators
 
 ```
-users | where age = 21
-users | where name != 'John'
-users | where price > 100
-users | where price >= 100
-users | where stock < 50
-users | where remaining <= 10
+authors | where name = 'Alice'
+authors | where name != 'John'
+products | where price > 100
+products | where price >= 100
+products | where stock < 50
+orders | where total <= 10
 ```
 
 ### Pattern Matching
 
 ```
-users | where name like 'A%'
-users | where email like '%@example.com'
+authors | where name like 'A%'
+authors | where email like '%@example.com'
 ```
 
 ### BETWEEN
 
 ```
-products | where price between 100 and 500
+products | where price between 10 and 500
 ```
 
 ### IN (Value List)
 
 ```
-users | where status in ('active', 'pending', 'approved')
-users | where id in (1, 2, 3)
+orders | where status in ('pending', 'shipped', 'delivered')
+products | where id in (1, 2, 3)
 ```
 
 ### IN (Subquery)
 
 ```
-users | where id in (orders | select userId | where status = 'completed')
+customers | where id in (orders | select customerId | where status = 'delivered')
 ```
 
 ### NULL Checks
 
 ```
-users | where email is null
-users | where name is not null
+authors | where bio is null
+posts | where updatedAt is not null
 ```
 
 ### Logical Operators
 
 ```
 # AND
-users | where active = true and age > 18
+products | where active = true and price > 50
 
 # OR
-users | where role = 'admin' or role = 'super'
+orders | where status = 'pending' or status = 'shipped'
 
 # NOT
-users | where not (deleted = true)
+comments | where not (approved = true)
 
 # Parentheses for grouping
-users | where (role = 'admin' or role = 'editor') and active = true
+products | where (stock < 10 or stock > 1000) and active = true
 ```
 
 ### Relation Filters
@@ -228,36 +274,23 @@ Filter by related records using quantifiers:
 
 ```
 # SOME — at least one related record matches
-users | where some(posts).published = true
+authors | where some(posts).published = true
 
 # NONE — no related record matches
-users | where none(posts).draft = true
+authors | where none(posts).published = false
 
 # EVERY — all related records match
-users | where every(posts).published = true
+authors | where every(posts).published = true
 
 # With aliases for complex conditions
-users | where some(posts as p, p.featured = true and p.published = true)
-users | where none(orders as o, o.status = 'cancelled' and o.total > 100)
+authors | where some(posts as p, p.published = true and p.title like '%Guide%')
+customers | where none(orders as o, o.status = 'cancelled' and o.total > 100)
 ```
 
 ### EXISTS Subquery
 
 ```
 customers | where exists (orders | where customerId = customers.id)
-```
-
-### Range Operators (PostgreSQL)
-
-```
-# Overlap
-bookings | where period overlaps [2024-01-01,2024-01-31]
-
-# Contains
-events | where dateRange contains [2024-06-15,2024-06-15]
-
-# Contained by
-events | where dateRange containedBy [2024-01-01,2024-12-31]
 ```
 
 ---
@@ -267,14 +300,14 @@ events | where dateRange containedBy [2024-01-01,2024-12-31]
 ### All Columns
 
 ```
-users | select *
-users                    # implicit select *
+authors | select *
+authors                    # implicit select *
 ```
 
 ### Specific Columns
 
 ```
-users | select id, name, email
+authors | select id, name, email
 ```
 
 ### Aliases
@@ -287,18 +320,18 @@ products | select price * 1.1 as priceWithTax
 ### DISTINCT
 
 ```
-users | select distinct department
+orders | select distinct status
 comments | select count(distinct authorName)
 ```
 
 ### Arithmetic Expressions
 
 ```
-products | select price + tax as total
-products | select quantity * price as lineTotal
-products | select price - discount as finalPrice
-products | select total / count as average
-products | select amount % 100 as remainder
+orderItems | select unitPrice + 5 as shippingTotal
+orderItems | select quantity * unitPrice as lineTotal
+products | select price - 10 as discountedPrice
+orderItems | select totalPrice / quantity as effectiveUnitPrice
+orderItems | select quantity % 3 as remainder
 ```
 
 Standard operator precedence: `*`, `/`, `%` bind tighter than `+`, `-`.
@@ -316,10 +349,10 @@ Select columns from related tables to auto-include them:
 authors | select *, posts.*
 
 # Include specific columns from relation
-orders | select id, customer.name, customer.email
+orders | select id, customer.firstName, customer.email
 
 # Deep nesting
-posts | select title, author.name, author.company.industry
+orderItems | select id, product.name, product.category.name
 ```
 
 Result shape (nested):
@@ -360,9 +393,9 @@ The planner automatically resolves junction tables.
 ### Aggregate Functions
 
 ```
-users | select count(*)
-orders | select sum(amount)
-orders | select avg(amount)
+posts | select count(*)
+orders | select sum(total)
+orders | select avg(total)
 products | select min(price), max(price)
 ```
 
@@ -376,7 +409,7 @@ orders | select count(distinct customerId) as uniqueCustomers
 
 ```
 orders | group by status | select status, count(*) as total
-posts | group by authorId | select authorId, count(*), sum(views)
+posts | group by authorId | select authorId, count(*)
 ```
 
 ### WHERE vs HAVING
@@ -385,7 +418,7 @@ Position relative to `group by` determines behavior:
 
 ```
 # WHERE — filters individual rows (before grouping)
-orders | where amount > 100 | group by status | select status, count(*)
+orders | where total > 100 | group by status | select status, count(*)
 
 # HAVING — filters aggregated groups (after grouping)
 orders | group by status | where count(*) > 10 | select status, count(*)
@@ -398,9 +431,9 @@ orders | group by status | where count(*) > 10 | select status, count(*)
 ### Sorting
 
 ```
-users | order by name
-users | order by createdAt desc
-users | order by lastName asc, firstName asc
+authors | order by name
+posts | order by createdAt desc
+customers | order by lastName asc, firstName asc
 ```
 
 ### Pagination
@@ -424,22 +457,22 @@ function() over ([partition by expr] [order by expr [asc|desc]])
 
 ```
 products | select name, row_number() over (order by price) as rn
-products | select name, rank() over (partition by category order by price desc) as priceRank
+products | select name, rank() over (partition by categoryId order by price desc) as priceRank
 products | select name, dense_rank() over (order by price) as dr
 ```
 
 ### Lag / Lead (Previous / Next Row)
 
 ```
-prices | select date, price, lag(price) over (order by date) as prevPrice
-prices | select date, price, lead(price) over (order by date) as nextPrice
+orders | select orderNumber, total, lag(total) over (order by createdAt) as prevTotal
+orders | select orderNumber, total, lead(total) over (order by createdAt) as nextTotal
 ```
 
 ### Aggregate Windows
 
 ```
-sales | select date, amount, sum(amount) over (order by date) as runningTotal
-sales | select customerId, sum(amount) over (partition by customerId) as customerTotal
+orders | select orderNumber, total, sum(total) over (order by createdAt) as runningTotal
+orderItems | select orderId, totalPrice, sum(totalPrice) over (partition by orderId) as orderTotal
 ```
 
 ### Empty OVER
@@ -512,26 +545,26 @@ employees | select name, allReports.name
 ### INSERT
 
 ```
-insert into products set name = 'iPhone', price = 999
+insert into products set sku = 'IPH-15', name = 'iPhone', price = 999, categoryId = 1
 
 # With RETURNING (pipe to select)
-insert into products set name = 'iPhone', price = 999 | select id, name
+insert into products set sku = 'IPH-15', name = 'iPhone', price = 999, categoryId = 1 | select id, name
 ```
 
 ### INSERT FROM (Bulk Copy)
 
 ```
-# Copy all rows
-insert into archivedUsers from users
+# Copy rows from a filtered query
+insert into orderItems from orderItems | where orderId = 1
 
 # With filter
-insert into archivedUsers from users where active = false
+insert into addresses from addresses | where customerId = 5
 
 # With limit
-insert into archivedUsers from users limit 100
+insert into orderItems from orderItems | where orderId = 1 | limit 10
 
 # With RETURNING
-insert into archivedUsers from users where active = false | select id
+insert into addresses from addresses | where customerId = 5 | select id
 ```
 
 ### UPDATE
@@ -540,7 +573,7 @@ insert into archivedUsers from users where active = false | select id
 update products set price = 899 where id = 1
 
 # With RETURNING
-update users set active = true where id = 1 | select id, active
+update orders set status = 'shipped' where id = 1 | select id, status
 ```
 
 ### DELETE
@@ -553,10 +586,10 @@ delete from products where id = 1
 
 ```
 # Single conflict column
-upsert into users on email set name = 'Alice', email = 'alice@example.com'
+upsert into customers on email set firstName = 'Alice', lastName = 'Smith', email = 'alice@example.com'
 
 # Multiple conflict columns
-upsert into events on (userId, eventType) set count = 1
+upsert into orderItems on (orderId, productId) set quantity = 2, unitPrice = 29.99, totalPrice = 59.98
 ```
 
 ### Mutation Chaining with BIND
@@ -564,8 +597,8 @@ upsert into events on (userId, eventType) set count = 1
 Chain mutations where the second uses results from the first:
 
 ```
-insert into orders set customerId = 1 | bind order
-insert into orderItems set orderId = order.id, productId = 5
+insert into orders set customerId = 1, orderNumber = 'ORD-100', total = 59.99, shippingAddressId = 1, billingAddressId = 1 | bind order
+insert into orderItems set orderId = order.id, productId = 5, quantity = 2, unitPrice = 29.99, totalPrice = 59.98
 ```
 
 ---
@@ -604,9 +637,9 @@ Prefix with `!` for raw SQL:
 ### Identifiers
 
 ```
-users              # unquoted (standard)
+authors            # unquoted (standard)
 "order"            # quoted (reserved keyword)
-"user-id"          # quoted (special characters)
+"order-items"      # quoted (special characters)
 "Order Details"    # quoted (spaces)
 ```
 
@@ -616,7 +649,7 @@ In the interactive REPL, dot commands provide schema introspection:
 
 ```
 .tables              # List all tables
-.schema users        # Show table columns
+.schema authors      # Show table columns
 .relations posts     # Show table relations
 .use tenant_123      # Set schema context
 .import file.sql     # Execute SQL file
@@ -656,13 +689,13 @@ In the interactive REPL, dot commands provide schema introspection:
 
 | NQL | ORM API |
 |-----|---------|
-| `users` | `orm.select('users').all()` |
-| `users \| where active = true` | `orm.select('users').where(eq('active', true))` |
-| `users \| select id, name` | `orm.select('users').columns(['id', 'name'])` |
-| `users \| select *, posts.*` | `orm.select('users').include('posts')` |
-| `users \| order by name desc` | `orm.select('users').orderBy('name', 'desc')` |
-| `users \| limit 10` | `orm.select('users').limit(10)` |
+| `authors` | `orm.select('authors').all()` |
+| `products \| where active = true` | `orm.select('products').where(eq('active', true))` |
+| `authors \| select id, name` | `orm.select('authors').columns(['id', 'name'])` |
+| `authors \| select *, posts.*` | `orm.select('authors').include('posts')` |
+| `authors \| order by name desc` | `orm.select('authors').orderBy('name', 'desc')` |
+| `posts \| limit 10` | `orm.select('posts').limit(10)` |
 | `posts \| group by authorId \| select count(*)` | `orm.select('posts').groupBy(['authorId']).count()` |
-| `insert into users set name = 'A'` | `orm.insert('users').values({ name: 'A' }).execute()` |
-| `update users set x = 1 where id = 1` | `orm.update('users').set({ x: 1 }).where(eq('id', 1)).execute()` |
-| `delete from users where id = 1` | `orm.delete('users').where(eq('id', 1)).execute()` |
+| `insert into authors set name = 'A', email = 'a@b.c'` | `orm.insert('authors').values({ name: 'A', email: 'a@b.c' }).execute()` |
+| `update orders set status = 'shipped' where id = 1` | `orm.update('orders').set({ status: 'shipped' }).where(eq('id', 1)).execute()` |
+| `delete from comments where id = 1` | `orm.delete('comments').where(eq('id', 1)).execute()` |
