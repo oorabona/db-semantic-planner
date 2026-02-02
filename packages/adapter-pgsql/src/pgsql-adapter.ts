@@ -7,26 +7,28 @@
  * @module pgsql-adapter
  */
 
-import type {
-	Adapter,
-	AdapterCapabilities,
-	AdapterLogger,
-	AdapterStreamOptions,
-	CompiledQuery,
-	CompileOptions,
-	CompileResultWithIncludes,
-	DbCasing,
-	DeleteIntent,
-	Dump,
-	DumpMeta,
-	InsertFromIntent,
-	InsertIntent,
-	ModelIR,
-	PlanReport,
-	RecursivePlanReport,
-	SubqueryIncludeInfo,
-	UpdateIntent,
-	UpsertIntent,
+import {
+	type Adapter,
+	type AdapterCapabilities,
+	type AdapterLogger,
+	type AdapterStreamOptions,
+	type CompiledQuery,
+	type CompileOptions,
+	type CompileResultWithIncludes,
+	type DbCasing,
+	type DeleteIntent,
+	type DialectCapabilities,
+	type Dump,
+	type DumpMeta,
+	type InsertFromIntent,
+	type InsertIntent,
+	type ModelIR,
+	type PlanReport,
+	POSTGRESQL_CAPABILITIES,
+	type RecursivePlanReport,
+	type SubqueryIncludeInfo,
+	type UpdateIntent,
+	type UpsertIntent,
 } from '@dbsp/core';
 import type { Node, SelectStmt } from '@pgsql/types';
 import type { Pool, PoolClient } from 'pg';
@@ -211,6 +213,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	/** Adapter capabilities for feature detection */
 	get capabilities(): AdapterCapabilities {
 		return this._capabilities;
+	}
+
+	/** PostgreSQL dialect capabilities for planner strategy selection */
+	get dialectCapabilities(): DialectCapabilities {
+		return POSTGRESQL_CAPABILITIES;
 	}
 
 	/**

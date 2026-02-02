@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import type { WhereIntent } from '../intent-ast.js';
 import { and, createOrm, eq, or } from './index.js';
+import { createMockAdapter } from './test-utils.js';
 import { ref, schema } from './schema.js';
 
 // Schema with relations for testing
@@ -31,7 +32,7 @@ const testSchema = schema({
 
 describe('DX-011: API Improvements', () => {
 	describe('Block 1: where() AND chaining', () => {
-		const orm = createOrm({ schema: testSchema });
+		const orm = createOrm({ adapter: createMockAdapter(), schema: testSchema });
 
 		describe('Scenario: Single where condition', () => {
 			it('should use condition directly without wrapping', () => {
@@ -157,7 +158,7 @@ describe('DX-011: API Improvements', () => {
 	});
 
 	describe('Block 2: include() by relation name', () => {
-		const orm = createOrm({ schema: testSchema });
+		const orm = createOrm({ adapter: createMockAdapter(), schema: testSchema });
 
 		describe('Scenario: Include by exact relation name', () => {
 			it('should use relation when name matches exactly', () => {
@@ -198,7 +199,7 @@ describe('DX-011: API Improvements', () => {
 		describe('Scenario: Explicit relation name avoids ambiguity', () => {
 			it('should use relation directly without ambiguity check', () => {
 				// Even though users→posts has 2 relations, 'authoredPosts' is unambiguous as relation name
-				const ormStrict = createOrm({ schema: testSchema, strictMode: true });
+				const ormStrict = createOrm({ adapter: createMockAdapter(), schema: testSchema, strictMode: true });
 				const query = ormStrict.select('users').include('authoredPosts');
 
 				// Should NOT throw AmbiguousRelationError because 'authoredPosts' is exact relation name

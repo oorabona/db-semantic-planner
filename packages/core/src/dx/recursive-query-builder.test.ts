@@ -8,7 +8,7 @@
 
 import { eq, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import type { Adapter, AdapterCapabilities } from '../adapter.js';
+import { createMockAdapter } from './test-utils.js';
 import { createRecursiveBuilder } from './recursive-query-builder.js';
 
 // ============================================================================
@@ -56,55 +56,7 @@ const categoryModel = schema({
 	},
 }).model;
 
-// ============================================================================
-// Helper - Create Mock Adapter for Intent-Building Tests
-// ============================================================================
 
-/**
- * Mock adapter that only supports intent building.
- * SQL generation tests are in adapter-pgsql.
- */
-function createMockAdapter(): Adapter {
-	const notImplemented = () => {
-		throw new Error(
-			'Not implemented in mock adapter - use adapter-pgsql for SQL tests',
-		);
-	};
-
-	return {
-		capabilities: {
-			supportsReturning: true,
-			supportsJsonAgg: true,
-			supportsLateralJoin: true,
-			supportsRecursiveCte: true,
-			supportsCte: true,
-			supportsWindowFunctions: true,
-			supportsArrayAgg: true,
-			dialectName: 'mock',
-		} as unknown as AdapterCapabilities,
-		dbCasing: 'preserve' as const,
-		compile: notImplemented,
-		compileWithIncludes: notImplemented,
-		compileSubqueryInclude: notImplemented,
-		compileUpsert: notImplemented,
-		execute: notImplemented,
-		executeOne: notImplemented,
-		executeOneOrThrow: notImplemented,
-		stream: notImplemented as () => AsyncIterableIterator<never>,
-		transaction: notImplemented,
-		withSchema: () => createMockAdapter(),
-		createDump: notImplemented,
-		compileInsert: notImplemented,
-		compileInsertFrom: notImplemented,
-		compileUpdate: notImplemented,
-		compileDelete: notImplemented,
-		compileRecursive: notImplemented,
-		introspect: notImplemented,
-		executeRaw: notImplemented,
-		generateDDL: notImplemented,
-		validateIdentifier: () => {},
-	};
-}
 
 // ============================================================================
 // Validation Tests

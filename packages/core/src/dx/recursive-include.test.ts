@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest';
 import { InvalidOperationError } from './errors.js';
 import { createOrm } from './orm.js';
+import { createMockAdapter } from './test-utils.js';
 import { ref, schema } from './schema.js';
 import type { RecursiveIncludeOptions } from './types.js';
 
@@ -41,7 +42,7 @@ const testSchema = schema({
 	},
 });
 
-const orm = createOrm({ schema: testSchema });
+const orm = createOrm({ adapter: createMockAdapter(), schema: testSchema });
 
 // ============================================================================
 // Scenario E1: Non-self-referential relation
