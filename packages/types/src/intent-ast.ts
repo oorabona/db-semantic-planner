@@ -508,6 +508,8 @@ export interface WhereInIntent {
 	readonly kind: 'in';
 	readonly field: string;
 	readonly values: readonly unknown[];
+	/** Optional subquery producing the value set (when present, values is empty) */
+	readonly subquery?: ScalarSubqueryIntent;
 }
 
 /**

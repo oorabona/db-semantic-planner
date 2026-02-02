@@ -329,15 +329,20 @@ function convertWhereCondition(
 				table: rootTable,
 			};
 
-		// IN: { kind: 'in', field: 'id', values: [1, 2, 3] }
-		case 'in':
-			return {
+		// IN: { kind: 'in', field: 'id', values: [1, 2, 3] } or { kind: 'in', field: 'id', subquery: {...} }
+		case 'in': {
+			const result: PlanDecision = {
 				type: 'where',
 				column: cond.field as string,
 				operator: cond.not ? 'notIn' : 'in',
-				value: cond.values,
+				value: (cond as Record<string, unknown>).subquery ? undefined : cond.values,
 				table: rootTable,
 			};
+			if ((cond as Record<string, unknown>).subquery) {
+				(result as Record<string, unknown>).subquery = (cond as Record<string, unknown>).subquery;
+			}
+			return result;
+		}
 
 		// NULL: { kind: 'null', field: 'deleted_at', operator: 'isNull' | 'isNotNull' }
 		case 'null':
@@ -585,6 +590,7 @@ function convertOrderBy(order: OrderByIntent, rootTable: string): PlanDecision {
 
 	return decision;
 }
+
 
 // ============================================================================
 // CASE expression helpers

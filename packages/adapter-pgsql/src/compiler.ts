@@ -157,6 +157,7 @@ export interface PlanDecision {
 	readonly intentPath?: string;
 	// Filter/include strategy choice from planner ('join' | 'exists' | 'json_agg')
 	readonly choice?: string;
+	readonly subquery?: { readonly from: string; readonly select: string; readonly where?: PlanDecision };
 }
 
 /**
@@ -463,6 +464,24 @@ export class PlanCompiler {
 					}
 					break;
 
+
+				case 'selectExpression': {
+					if (
+						(decision as unknown as Record<string, unknown>).expressionType ===
+						'case'
+					) {
+						const caseNode = this.compileCaseExpression(decision);
+						const alias = decision.alias;
+						targetList.push({
+							ResTarget: {
+								val: caseNode,
+								...(alias ? { name: alias } : {}),
+							},
+						});
+					}
+					break;
+				}
+
 				case 'selectWindow': {
 					// Window function: ROW_NUMBER() OVER (PARTITION BY x ORDER BY y) AS alias
 					const windowArgs: Node[] = [];
@@ -492,23 +511,6 @@ export class PlanCompiler {
 							...(decision.alias ? { name: decision.alias } : {}),
 						},
 					});
-					break;
-				}
-
-				case 'selectExpression': {
-					if (
-						(decision as unknown as Record<string, unknown>).expressionType ===
-						'case'
-					) {
-						const caseNode = this.compileCaseExpression(decision);
-						const alias = decision.alias;
-						targetList.push({
-							ResTarget: {
-								val: caseNode,
-								...(alias ? { name: alias } : {}),
-							},
-						});
-					}
 					break;
 				}
 
@@ -583,6 +585,7 @@ export class PlanCompiler {
 						where = where ? andExpr(where, combined) : combined;
 					}
 					break;
+
 
 				case 'whereNot':
 					if (decision.conditions) {
@@ -733,6 +736,10 @@ export class PlanCompiler {
 
 		return selectStmt(options);
 	}
+
+	// --------------------------------------------------------------------------
+	// INSERT Compilation
+	// --------------------------------------------------------------------------
 
 	// --------------------------------------------------------------------------
 	// CASE Expression Compilation
