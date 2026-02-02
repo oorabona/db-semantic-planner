@@ -57,6 +57,7 @@ export class ReplEngine {
 	private dbConnection: DbConnection | null = null;
 	private completionProvider: CompletionProvider;
 	private databaseUrl: string | undefined;
+	private continuationBuffer = '';
 
 	constructor(config: EngineConfig) {
 		this.schema = config.schema;
@@ -145,20 +146,35 @@ export class ReplEngine {
 	 */
 	async submit(input: string): Promise<void> {
 		const trimmed = input.trim();
-		if (!trimmed) return;
 
-		// Skip comment-only lines (e.g. pasted from .dbsp files)
-		if (trimmed.startsWith('#')) return;
+		// Blank line or comment — flush continuation buffer (separator) and skip
+		if (!trimmed || trimmed.startsWith('#')) {
+			this.continuationBuffer = '';
+			return;
+		}
+
+		// Backslash continuation: accumulate and wait for next line
+		if (trimmed.endsWith('\\')) {
+			this.continuationBuffer +=
+				(this.continuationBuffer ? '\n' : '') + trimmed.slice(0, -1);
+			return;
+		}
+
+		// Merge continuation buffer with current line
+		const merged = this.continuationBuffer
+			? `${this.continuationBuffer}\n${trimmed}`
+			: trimmed;
+		this.continuationBuffer = '';
 
 		// --- Dot commands ---
-		if (trimmed.startsWith('.')) {
-			await this.processDotCommand(trimmed);
+		if (merged.startsWith('.')) {
+			await this.processDotCommand(merged);
 			return;
 		}
 
 		// --- Query execution ---
 		const { content, isRawSql, escaped } = parseInputMode(
-			trimmed,
+			merged,
 			this.state.mode,
 		);
 

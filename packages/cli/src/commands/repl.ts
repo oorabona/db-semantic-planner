@@ -8,7 +8,6 @@
 import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { config } from '../config.js';
-import { parseDbspLines } from '../repl/dbsp-parser.js';
 import { loadSchema, loadSchemaFromCwd } from '../utils/schema-loader.js';
 
 export interface ReplOptions {
@@ -143,7 +142,7 @@ export const replCommand = new Command('repl')
 
 				if (options.input) {
 					const content = readFileSync(options.input, 'utf-8');
-					queries.push(...parseDbspLines(content));
+					queries.push(...content.split('\n'));
 				}
 
 				await runBatchMode({
