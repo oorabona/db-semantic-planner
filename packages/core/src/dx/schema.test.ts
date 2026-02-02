@@ -733,10 +733,9 @@ describe('Type Inference (ARCH-006)', () => {
 			expectTypeOf<DB['posts']['id']>().toEqualTypeOf<string>(); // uuid → string
 			expectTypeOf<DB['posts']['title']>().toEqualTypeOf<string>();
 			expectTypeOf<DB['posts']['authorId']>().toEqualTypeOf<number | string>();
-			// TODO: Fix type inference for nullable refs
-			// expectTypeOf<DB['posts']['editorId']>().toEqualTypeOf<
-			// 	number | string | null
-			// >();
+			expectTypeOf<DB['posts']['editorId']>().toEqualTypeOf<
+				number | string | null
+			>();
 
 			// Runtime assertion
 			const orm = createOrm({ schema: typedSchema });
@@ -862,7 +861,6 @@ describe('Type Inference (ARCH-006)', () => {
 
 			// Nullable FK → number | string | null
 			expectTypeOf<PostRow['reviewerId']>().toEqualTypeOf<
-				// @ts-expect-error — FK type inference produces wider union
 				number | string | null
 			>();
 
@@ -1182,7 +1180,6 @@ describe('schema.tables runtime metadata (DX-040)', () => {
 			});
 
 			// Act - Access column through relation
-			// @ts-expect-error - Type inference for relation column access not complete yet
 			const authorIdCol = s.tables.posts.author.id;
 
 			// Assert
@@ -1205,7 +1202,6 @@ describe('schema.tables runtime metadata (DX-040)', () => {
 
 			// Act - hasMany inverse relation (users -> posts)
 			// posts table has authorId ref to users, so users has inverse 'posts' relation
-			// @ts-expect-error - Type inference for inverse relations not complete yet
 			const postsRelation = s.tables.users.posts;
 
 			// Assert
@@ -1230,13 +1226,12 @@ describe('schema.tables runtime metadata (DX-040)', () => {
 			});
 
 			// Act - Relation uses 'as' name instead of column-derived name
-			// @ts-expect-error - Type inference for custom relation names not complete yet
 			const creatorRelation = s.tables.posts.creator;
 
 			// Assert
 			expect(creatorRelation).toBeDefined();
-			expect(creatorRelation[BRAND]).toBe('RelationRef');
-			expect(creatorRelation[RELATION_META].target).toBe('users');
+			expect(creatorRelation![BRAND]).toBe('RelationRef');
+			expect(creatorRelation![RELATION_META].target).toBe('users');
 		});
 	});
 

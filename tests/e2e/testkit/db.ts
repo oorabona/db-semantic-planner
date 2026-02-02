@@ -60,7 +60,7 @@ export async function getPgsqlAdapter(): Promise<PgsqlAdapter<any>> {
 
 	const pool = await getTestPool();
 	pgsqlAdapter = createPgsqlAdapter(pool, {
-		namingConvention: 'camelCase',
+		dbCasing: 'snake_case',
 	});
 	return pgsqlAdapter;
 }
@@ -82,7 +82,7 @@ export async function createPgsqlAdapterForSchema(
 	const pool = await getTestPool();
 	return createPgsqlAdapter(pool, {
 		schemaName,
-		namingConvention: 'camelCase',
+		dbCasing: 'snake_case',
 	});
 }
 

@@ -24,6 +24,7 @@ import type {
 	IncludeHandler,
 	IncludeResult,
 } from '../types.js';
+import { deriveFkColumns } from './shared.js';
 
 /**
  * Build column targets for the LATERAL subquery
@@ -110,30 +111,7 @@ function buildLateralJoin(
 	return { JoinExpr: joinExpr };
 }
 
-/**
- * Derive source and target columns for a child decision based on its relation type.
- *
- * For belongsTo: the FK is on the parent side (e.g., user_roles.role_id → roles.id)
- *   → sourceColumn = foreignKey (role_id), targetColumn = parentKey (id)
- * For hasMany/hasOne: the FK is on the child side (e.g., roles.id ← role_permissions.role_id)
- *   → sourceColumn = parentKey (id), targetColumn = foreignKey (role_id)
- */
-function deriveChildColumns(
-	child: Decision,
-	parentTable: string,
-): { sourceColumn: string; targetColumn: string } {
-	if (child.relationType === 'belongsTo') {
-		return {
-			sourceColumn: child.foreignKey ?? `${child.targetTable}_id`,
-			targetColumn: child.parentKey ?? 'id',
-		};
-	}
-	// hasMany or hasOne
-	return {
-		sourceColumn: child.parentKey ?? 'id',
-		targetColumn: child.foreignKey ?? `${parentTable}_id`,
-	};
-}
+// FK direction derivation: use deriveFkColumns from shared.ts
 
 /**
  * Recursively compile a decision and its children into a cascade of LATERAL JOINs.
@@ -182,7 +160,7 @@ function compileLateralCascade(
 	if (decision.children && decision.children.length > 0) {
 		for (const child of decision.children) {
 			const { sourceColumn: childSrc, targetColumn: childTgt } =
-				deriveChildColumns(child, targetTable);
+				deriveFkColumns(child, targetTable);
 			const childResult = compileLateralCascade(
 				child,
 				lateralAlias,

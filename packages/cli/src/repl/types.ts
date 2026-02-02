@@ -118,8 +118,20 @@ export interface QueryResult {
 	separateQueries?: SeparateQueryResult[];
 	plan?: {
 		strategy: string;
+		rootTable: string;
 		tables: string[];
-		warnings: string[];
+		decisions: Array<{
+			type: string;
+			context: string;
+			choice: string;
+			reasoning: string;
+		}>;
+		warnings: Array<{
+			message: string;
+			suggestion?: string;
+		}>;
+		cteCount: number;
+		planningTimeMs: number;
 	};
 	error?: string;
 	/** CLI-NQL: Parsed query AST for .parse mode */

@@ -226,6 +226,7 @@ function convertSelect(
 				}>;
 				const conditions = whenClauses.map((wc) => ({
 					when: convertCaseConditionToDecision(wc.condition, rootTable),
+					// biome-ignore lint/suspicious/noThenProperty: intentional reserved word in decision object
 					then: extractExpressionValue(wc.result),
 				}));
 
@@ -234,7 +235,7 @@ function convertSelect(
 					expressionType: 'case',
 					conditions,
 					table: rootTable,
-				} as PlanDecision;
+				} as unknown as PlanDecision;
 				if (expr.else) {
 					(decision as unknown as Record<string, unknown>).value =
 						extractExpressionValue(expr.else as Record<string, unknown>);
@@ -367,7 +368,7 @@ function convertWhereCondition(
 				table: rootTable,
 			};
 			if ((cond as Record<string, unknown>).subquery) {
-				(result as Record<string, unknown>).subquery = (
+				(result as unknown as Record<string, unknown>).subquery = (
 					cond as Record<string, unknown>
 				).subquery;
 			}

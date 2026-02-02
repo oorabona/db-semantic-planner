@@ -7,8 +7,8 @@
  * This module bridges that gap.
  */
 
-import type { ModelIR, NamingConvention } from '@dbsp/core';
-import { getNamingPlugin } from './naming-plugin.js';
+import type { DbCasing, ModelIR } from '@dbsp/core';
+import { getNamingPluginForDbCasing } from './naming-plugin.js';
 
 /**
  * Resolve a database table name to the corresponding logical model name.
@@ -32,9 +32,9 @@ import { getNamingPlugin } from './naming-plugin.js';
 export function resolveLogicalName(
 	model: ModelIR,
 	dbName: string,
-	convention: NamingConvention,
+	casing: DbCasing,
 ): string | undefined {
-	const plugin = getNamingPlugin(convention);
+	const plugin = getNamingPluginForDbCasing(casing);
 	const logicalName = plugin.toModel(dbName);
 
 	// Try converted name first

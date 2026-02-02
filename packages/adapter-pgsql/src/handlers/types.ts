@@ -26,6 +26,8 @@ export interface CompilerContext {
 	readonly currentAlias?: string;
 	/** Maximum recursive depth (default: 100) */
 	readonly maxRecursiveDepth: number;
+	/** Optional callback for raw SQL audit trail */
+	readonly onRawSQL?: (sql: string) => void;
 }
 
 // ============================================================================
