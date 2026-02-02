@@ -1221,13 +1221,17 @@ function ReplApp({ config }: ReplAppProps) {
 					params: [],
 					plan: {
 						strategy: 'RAW_SQL',
+						rootTable: '',
 						tables: [],
+						decisions: [],
 						warnings: [
-							getModeWarning(mode, escaped),
+							{ message: getModeWarning(mode, escaped) },
 							...(execMode && connected
 								? []
-								: ['(compile-only, use .exec on to execute)']),
-						],
+								: [{ message: '(compile-only, use .exec on to execute)' }]),
+						].filter((w) => w.message),
+						cteCount: 0,
+						planningTimeMs: 0,
 					},
 				});
 
@@ -1268,6 +1272,7 @@ function ReplApp({ config }: ReplAppProps) {
 							: 'EXECUTED'
 						: '';
 
+					const pr = result.planReport;
 					setQueryResult({
 						sql: finalSql,
 						params: result.params,
@@ -1275,10 +1280,40 @@ function ReplApp({ config }: ReplAppProps) {
 							strategy: isMutation
 								? `${result.intentType.toUpperCase()} - ${planInfo}`
 								: 'NQL v2',
-							tables: [],
-							warnings: isDryRun
-								? ['This is a dry-run. Add ! suffix to execute.']
-								: [],
+							rootTable: pr?.rootTable ?? '',
+							tables: [
+								...new Set(
+									pr?.decisions
+										.map((d) => d.context.sourceTable)
+										.filter(Boolean) ?? [],
+								),
+							],
+							decisions:
+								pr?.decisions.map((d) => ({
+									type: d.type,
+									context: [d.context.sourceTable, d.context.target]
+										.filter(Boolean)
+										.join(' → '),
+									choice: d.choice,
+									reasoning: d.reasoning,
+								})) ?? [],
+							warnings: [
+								...(isDryRun
+									? [
+											{
+												message: 'This is a dry-run. Add ! suffix to execute.',
+											},
+										]
+									: []),
+								...(pr?.warnings.map((w) => ({
+									message: w.message,
+									...(w.suggestion !== undefined && {
+										suggestion: w.suggestion,
+									}),
+								})) ?? []),
+							],
+							cteCount: pr?.ctes.length ?? 0,
+							planningTimeMs: pr?.metadata.planningTimeMs ?? 0,
 						},
 					});
 

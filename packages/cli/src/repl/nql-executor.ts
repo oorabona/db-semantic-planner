@@ -13,6 +13,7 @@ import {
 	getDialectCapabilities,
 	type InsertIntent,
 	type ModelIR,
+	type PlanReport,
 	plan,
 	type QueryIntent,
 	type UpdateIntent,
@@ -180,6 +181,8 @@ export interface NqlCompileOnlyResult {
 	intentType: 'query' | 'insert' | 'update' | 'delete' | 'upsert';
 	/** Intent summary for assertions */
 	intent: IntentSummary;
+	/** Full plan report (only for queries — mutations don't have one) */
+	planReport?: PlanReport;
 }
 
 /**
@@ -249,6 +252,7 @@ export async function compileNqlToSql(
 			params: compiledQuery.parameters,
 			intentType: 'query',
 			intent: extractIntentSummary(compiled, 'query'),
+			planReport,
 		};
 	}
 
