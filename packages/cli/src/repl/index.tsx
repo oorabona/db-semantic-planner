@@ -4,6 +4,7 @@
  * Thin Ink UI wrapper around ReplEngine + ConversationView.
  * Business logic lives in engine/repl-engine.ts.
  * History is displayed as a scrollable conversation.
+ * Inspection panel anchored below input for detail views.
  */
 
 import { Box, render, useApp, useInput } from 'ink';
@@ -20,16 +21,18 @@ import {
 	Header,
 	HelpDisplay,
 	InputPrompt,
+	InspectionPanel,
 } from './components/index.js';
 import { ConversationManager, ConversationView } from './conversation/index.js';
 import { getDatabaseName } from './db-connection.js';
 import {
 	type EngineEvent,
 	type EngineState,
+	type PanelView,
 	ReplEngine,
 } from './engine/index.js';
 import { getHistory } from './history.js';
-import type { ReplConfig } from './types.js';
+import type { ExecutionResult, QueryResult, ReplConfig } from './types.js';
 
 interface ReplAppProps {
 	config: ReplConfig;
@@ -75,8 +78,15 @@ function ReplApp({ config }: ReplAppProps) {
 	const [entries, setEntries] = useState(conversation.getEntries());
 	const [showHelp, setShowHelp] = useState(false);
 	const [inputKey, setInputKey] = useState(0);
-	// Re-render trigger (incremented when conversation changes)
-	const [, setRenderTick] = useState(0);
+
+	// --- Inspection panel state ---
+	const [panelView, setPanelView] = useState<PanelView | null>(null);
+	const [lastQueryResult, setLastQueryResult] = useState<QueryResult | null>(
+		null,
+	);
+	const [lastExecResult, setLastExecResult] = useState<ExecutionResult | null>(
+		null,
+	);
 
 	// --- Completions ---
 	const completionProvider = useMemo(
@@ -128,6 +138,9 @@ function ReplApp({ config }: ReplAppProps) {
 				case 'clear':
 					conversation.clear();
 					setShowHelp(false);
+					setPanelView(null);
+					setLastQueryResult(null);
+					setLastExecResult(null);
 					refreshEntries();
 					break;
 
@@ -144,11 +157,23 @@ function ReplApp({ config }: ReplAppProps) {
 					break;
 
 				case 'query-result':
+					if (currentEntryIdRef.current !== null) {
+						conversation.appendEvent(currentEntryIdRef.current, event);
+						refreshEntries();
+					}
+					// Track for panel inspection
+					setLastQueryResult(event.result);
+					// Auto-update panel if open
+					break;
+
 				case 'execution-result':
 					if (currentEntryIdRef.current !== null) {
 						conversation.appendEvent(currentEntryIdRef.current, event);
 						refreshEntries();
 					}
+					// Track for panel inspection
+					setLastExecResult(event.result);
+					setLastQueryResult(event.query);
 					break;
 
 				case 'show-history': {
@@ -160,6 +185,18 @@ function ReplApp({ config }: ReplAppProps) {
 					appendToCurrentOrCreate({ type: 'info', message: msg });
 					break;
 				}
+
+				case 'show-panel':
+					setPanelView(event.view);
+					break;
+
+				case 'close-panel':
+					setPanelView(null);
+					break;
+
+				case 'layout-change':
+					// Layout state is in engine, UI re-renders via state-change
+					break;
 			}
 		});
 		return unsub;
@@ -169,6 +206,11 @@ function ReplApp({ config }: ReplAppProps) {
 	useInput((inputChar, key) => {
 		if (key.ctrl && inputChar === 'c') {
 			exit();
+		}
+		// Escape closes panel
+		if (key.escape && panelView !== null) {
+			setPanelView(null);
+			return;
 		}
 		// Tab: cycle through completions
 		if (key.tab && completions.length > 0 && engineState.mode === 'natural') {
@@ -244,7 +286,10 @@ function ReplApp({ config }: ReplAppProps) {
 			{showHelp && <HelpDisplay />}
 
 			{/* Conversation history */}
-			<ConversationView entries={entries} />
+			<ConversationView
+				entries={entries}
+				outputLayout={engineState.outputLayout}
+			/>
 
 			{/* Completions (only in natural mode) */}
 			{engineState.mode === 'natural' &&
@@ -267,6 +312,15 @@ function ReplApp({ config }: ReplAppProps) {
 				onCompletionAccepted={handleCompletionAccepted}
 				applyCompletion={handleApplyCompletion}
 			/>
+
+			{/* Anchored inspection panel (below input, above status) */}
+			{panelView !== null && (
+				<InspectionPanel
+					view={panelView}
+					queryResult={lastQueryResult}
+					executionResult={lastExecResult}
+				/>
+			)}
 		</Box>
 	);
 

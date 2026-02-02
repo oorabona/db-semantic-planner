@@ -25,17 +25,15 @@ import {
 } from '../db-connection.js';
 import { processDotCommand } from '../dot-commands.js';
 import { getModeWarning, parseInputMode } from '../mode-escape.js';
-import {
-	compileNqlToSql,
-	NqlCompileError,
-	NqlParseError,
-} from '../nql-executor.js';
+import { compileNqlToSql } from '../nql-executor.js';
 import type { QueryResult } from '../types.js';
 import type {
 	EngineConfig,
 	EngineEvent,
 	EngineEventHandler,
 	EngineState,
+	OutputLayout,
+	PanelView,
 } from './engine-types.js';
 
 /**
@@ -81,6 +79,7 @@ export class ReplEngine {
 			}),
 			...(config.dbCasing !== undefined && { dbCasing: config.dbCasing }),
 			outputMode: 'json',
+			outputLayout: 'full',
 		};
 	}
 
@@ -314,6 +313,73 @@ export class ReplEngine {
 
 			case '.table': {
 				this.handleTableConfig(arg);
+				return;
+			}
+
+			// Panel inspection commands — open anchored panel below input
+			// Usage: .show sql | plan | results | params | dump
+			case '.show': {
+				const validViews: PanelView[] = [
+					'sql',
+					'plan',
+					'results',
+					'params',
+					'dump',
+				];
+				const viewArg = arg?.toLowerCase();
+
+				if (!viewArg) {
+					this.emit({
+						type: 'info',
+						message: `📋 Inspection panel views: ${validViews.join(', ')}\nUsage: .show ${validViews.join(' | ')}`,
+					});
+				} else if (validViews.includes(viewArg as PanelView)) {
+					this.emit({ type: 'show-panel', view: viewArg as PanelView });
+				} else {
+					this.emit({
+						type: 'error',
+						message: `❌ Unknown panel view: ${viewArg}. Available: ${validViews.join(', ')}`,
+					});
+				}
+				return;
+			}
+
+			case '.close': {
+				this.emit({ type: 'close-panel' });
+				return;
+			}
+
+			case '.layout': {
+				const validLayouts: OutputLayout[] = [
+					'compact',
+					'results',
+					'sql',
+					'full',
+				];
+				const layoutArg = arg?.toLowerCase();
+
+				if (!layoutArg) {
+					this.emit({
+						type: 'info',
+						message: `📐 Output layout: ${this.state.outputLayout}\nAvailable: ${validLayouts.join(', ')}\nUsage: .layout ${validLayouts.join(' | ')}`,
+					});
+				} else if (validLayouts.includes(layoutArg as OutputLayout)) {
+					this.state.outputLayout = layoutArg as OutputLayout;
+					this.emitStateChange();
+					this.emit({
+						type: 'layout-change',
+						layout: this.state.outputLayout,
+					});
+					this.emit({
+						type: 'info',
+						message: `✓ Output layout: ${layoutArg}`,
+					});
+				} else {
+					this.emit({
+						type: 'error',
+						message: `❌ Unknown layout: ${layoutArg}. Available: ${validLayouts.join(', ')}`,
+					});
+				}
 				return;
 			}
 		}

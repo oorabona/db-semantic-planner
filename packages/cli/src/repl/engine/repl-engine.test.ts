@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { EngineEvent } from './engine-types.js';
 import { ReplEngine } from './repl-engine.js';
 
@@ -60,6 +60,7 @@ describe('ReplEngine', () => {
 		expect(state.includeStrategy).toBe('auto');
 		expect(state.dialect).toBe('postgresql');
 		expect(state.outputMode).toBe('json');
+		expect(state.outputLayout).toBe('full');
 	});
 
 	it('respects initial config', () => {
@@ -235,17 +236,18 @@ describe('ReplEngine', () => {
 		}
 	});
 
-	it('subscribes and unsubscribes listeners', () => {
+	it('subscribes and unsubscribes listeners', async () => {
 		const engine = createEngine();
 		const events: EngineEvent[] = [];
 
 		const unsub = engine.on((e) => events.push(e));
-		engine['emit']({ type: 'clear' });
-		expect(events).toHaveLength(1);
+		await engine.submit('.clear');
+		expect(events.some((e) => e.type === 'clear')).toBe(true);
+		const countAfterFirst = events.length;
 
 		unsub();
-		engine['emit']({ type: 'clear' });
-		expect(events).toHaveLength(1); // No new event after unsub
+		await engine.submit('.clear');
+		expect(events).toHaveLength(countAfterFirst); // No new events after unsub
 	});
 
 	it('cleans up on destroy', async () => {
@@ -253,5 +255,126 @@ describe('ReplEngine', () => {
 		await engine.destroy();
 
 		expect(engine.getState().connected).toBe(false);
+	});
+
+	// --- Panel commands (.show <view>) ---
+
+	it('emits show-panel for .show sql', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.show sql');
+		expect(events).toContainEqual({ type: 'show-panel', view: 'sql' });
+	});
+
+	it('emits show-panel for .show plan', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.show plan');
+		expect(events).toContainEqual({ type: 'show-panel', view: 'plan' });
+	});
+
+	it('emits show-panel for .show results', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.show results');
+		expect(events).toContainEqual({ type: 'show-panel', view: 'results' });
+	});
+
+	it('emits show-panel for .show params', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.show params');
+		expect(events).toContainEqual({ type: 'show-panel', view: 'params' });
+	});
+
+	it('emits show-panel for .show dump', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.show dump');
+		expect(events).toContainEqual({ type: 'show-panel', view: 'dump' });
+	});
+
+	it('shows available views for .show without argument', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.show');
+		const info = events.find(
+			(e) =>
+				e.type === 'info' &&
+				'message' in e &&
+				e.message.includes('Inspection panel'),
+		);
+		expect(info).toBeDefined();
+	});
+
+	it('rejects invalid .show view', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.show invalid');
+		const error = events.find(
+			(e) =>
+				e.type === 'error' &&
+				'message' in e &&
+				e.message.includes('Unknown panel view'),
+		);
+		expect(error).toBeDefined();
+	});
+
+	it('emits close-panel for .close command', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.close');
+		expect(events).toContainEqual({ type: 'close-panel' });
+	});
+
+	// --- Layout commands ---
+
+	it('changes layout with .layout compact', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.layout compact');
+
+		expect(engine.getState().outputLayout).toBe('compact');
+		expect(events).toContainEqual({
+			type: 'layout-change',
+			layout: 'compact',
+		});
+	});
+
+	it('shows current layout without argument', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.layout');
+		const info = events.find(
+			(e) =>
+				e.type === 'info' &&
+				'message' in e &&
+				e.message.includes('Output layout'),
+		);
+		expect(info).toBeDefined();
+	});
+
+	it('rejects invalid layout', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.layout invalid');
+		const error = events.find(
+			(e) =>
+				e.type === 'error' &&
+				'message' in e &&
+				e.message.includes('Unknown layout'),
+		);
+		expect(error).toBeDefined();
 	});
 });
