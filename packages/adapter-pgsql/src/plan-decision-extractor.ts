@@ -10,6 +10,11 @@
 
 import type { ModelIR, PlanReport } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
+import {
+	DEFAULT_PK_COLUMN,
+	defaultFkDerivation,
+	type FkColumnDerivation,
+} from './assert-field.js';
 import type { PlanDecision, SimplifiedPlanReport } from './compiler.js';
 
 // ============================================================================
@@ -89,23 +94,28 @@ export function resolveIncludeAlias(context: {
 
 /**
  * Derive foreign key from planner decision context.
- * Uses explicit FK if available, otherwise derives from table name.
+ * Uses explicit FK if available, otherwise derives from table name
+ * using the configurable FK derivation convention.
  */
-export function deriveForeignKey(context: {
-	foreignKey?: string | readonly string[];
-	sourceFK?: string | readonly string[];
-	relationType?: string;
-	target?: string;
-	sourceTable?: string;
-}): string | readonly string[] | undefined {
+export function deriveForeignKey(
+	context: {
+		foreignKey?: string | readonly string[];
+		sourceFK?: string | readonly string[];
+		relationType?: string;
+		target?: string;
+		sourceTable?: string;
+	},
+	deriveFk: FkColumnDerivation = defaultFkDerivation,
+	defaultPk: string = DEFAULT_PK_COLUMN,
+): string | readonly string[] | undefined {
 	const fk = context.foreignKey ?? context.sourceFK;
 	if (fk) return fk;
 	if (!context.relationType) return undefined;
 	if (context.relationType === 'belongsTo') {
-		return context.target ? `${context.target.replace(/s$/, '')}Id` : undefined;
+		return context.target ? deriveFk(context.target, defaultPk) : undefined;
 	}
 	return context.sourceTable
-		? `${context.sourceTable.replace(/s$/, '')}Id`
+		? deriveFk(context.sourceTable, defaultPk)
 		: undefined;
 }
 
@@ -366,6 +376,8 @@ export function extractExistsDecisions(
  */
 export function extractAllIncludeDecisions(
 	plan: PlanReport,
+	defaultPk: string = DEFAULT_PK_COLUMN,
+	deriveFk: FkColumnDerivation = defaultFkDerivation,
 ): SimplifiedPlanReport['decisions'] {
 	const includeDecisions = plan.decisions.filter(
 		(d) => d.type === 'include-strategy',
@@ -382,15 +394,15 @@ export function extractAllIncludeDecisions(
 		const choice = d.choice as string;
 		if (treeStrategies.has(choice)) {
 			// Convert to tree-compatible decision (json_agg / lateral / subquery)
-			const converted = toIncludeDecision(d, choice);
+			const converted = toIncludeDecision(d, choice, defaultPk, deriveFk);
 			if (converted) treeDecisions.push(converted);
 		} else if (choice === 'join') {
 			// Convert to flat join decision
-			const converted = toJoinIncludeDecision(d, plan);
+			const converted = toJoinIncludeDecision(d, plan, defaultPk, deriveFk);
 			if (converted) flatDecisions.push(converted);
 		} else if (choice === 'cte') {
 			// CTE: produces WITH clause + LEFT JOIN to CTE
-			const converted = toIncludeDecision(d, choice);
+			const converted = toIncludeDecision(d, choice, defaultPk, deriveFk);
 			if (converted) flatDecisions.push(converted);
 		}
 	}
@@ -407,12 +419,15 @@ export function extractAllIncludeDecisions(
 function toIncludeDecision(
 	d: PlanReport['decisions'][number],
 	choice: string,
+	defaultPk: string = DEFAULT_PK_COLUMN,
+	deriveFk: FkColumnDerivation = defaultFkDerivation,
 ): (PlanDecision & { intentPath?: string }) | undefined {
 	const context = d.context;
 	const relationName = resolveIncludeAlias(context);
 	if (!context.target || !relationName) return undefined;
 
-	const foreignKey = deriveForeignKey(context) ?? 'id';
+	const foreignKey =
+		deriveForeignKey(context, deriveFk, defaultPk) ?? defaultPk;
 	const relationType = context.relationType as
 		| 'belongsTo'
 		| 'hasMany'
@@ -442,6 +457,8 @@ function toIncludeDecision(
 function toJoinIncludeDecision(
 	d: PlanReport['decisions'][number],
 	plan: PlanReport,
+	defaultPk: string = DEFAULT_PK_COLUMN,
+	deriveFk: FkColumnDerivation = defaultFkDerivation,
 ): PlanDecision | undefined {
 	const context = d.context;
 	const relationName = context.relation ?? context.includeAlias;
@@ -465,7 +482,8 @@ function toJoinIncludeDecision(
 		columns = ['id', ...fields];
 	}
 
-	const foreignKey = deriveForeignKey(context) ?? 'id';
+	const foreignKey =
+		deriveForeignKey(context, deriveFk, defaultPk) ?? defaultPk;
 	const relationType = context.relationType as
 		| 'belongsTo'
 		| 'hasMany'
@@ -536,12 +554,15 @@ function buildIncludeTree(
  */
 function toJsonAggDecision(
 	d: PlanReport['decisions'][number],
+	defaultPk: string = DEFAULT_PK_COLUMN,
+	deriveFk: FkColumnDerivation = defaultFkDerivation,
 ): PlanDecision | undefined {
 	const context = d.context;
 	const relationName = resolveIncludeAlias(context);
 	if (!context.target || !relationName) return undefined;
 
-	const foreignKey = deriveForeignKey(context) ?? 'id';
+	const foreignKey =
+		deriveForeignKey(context, deriveFk, defaultPk) ?? defaultPk;
 	const relationType = context.relationType as
 		| 'belongsTo'
 		| 'hasMany'
@@ -567,6 +588,8 @@ function toJsonAggDecision(
  */
 export function extractJsonAggDecisions(
 	plan: PlanReport,
+	defaultPk: string = DEFAULT_PK_COLUMN,
+	deriveFk: FkColumnDerivation = defaultFkDerivation,
 ): SimplifiedPlanReport['decisions'] {
 	// Find include-strategy decisions with choice: 'json_agg'
 	const jsonAggIncludeDecisions = plan.decisions.filter(
@@ -580,7 +603,7 @@ export function extractJsonAggDecisions(
 	// Convert all to flat decisions with intentPath
 	const allDecisions: (PlanDecision & { intentPath?: string })[] = [];
 	for (const d of jsonAggIncludeDecisions) {
-		const decision = toJsonAggDecision(d);
+		const decision = toJsonAggDecision(d, defaultPk, deriveFk);
 		if (decision) allDecisions.push(decision);
 	}
 
@@ -634,6 +657,8 @@ export function extractJsonAggDecisions(
  */
 export function extractLeftJoinIncludeDecisions(
 	plan: PlanReport,
+	defaultPk: string = DEFAULT_PK_COLUMN,
+	deriveFk: FkColumnDerivation = defaultFkDerivation,
 ): SimplifiedPlanReport['decisions'] {
 	// Find include-strategy decisions with choice: 'join' (to-one only)
 	const joinIncludeDecisions = plan.decisions.filter(
@@ -674,7 +699,8 @@ export function extractLeftJoinIncludeDecisions(
 			columns = ['id', ...fields];
 		}
 
-		const foreignKey = deriveForeignKey(context) ?? 'id';
+		const foreignKey =
+			deriveForeignKey(context, deriveFk, defaultPk) ?? defaultPk;
 		const relationType = context.relationType as
 			| 'belongsTo'
 			| 'hasMany'

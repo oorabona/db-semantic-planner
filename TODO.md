@@ -41,6 +41,12 @@
 - Planner should recognize IN-subquery patterns reducible to relation traversal and normalize
 - Lets planner choose optimal strategy (JOIN, EXISTS, lateral) instead of forcing IN (SELECT ...)
 
+### [Adapter] Enhance `singularize()` for irregular plurals — Effort: M
+- `assert-field.ts:singularize()` handles basic English plurals only (trailing `s`, `ies`)
+- Doesn't handle: children→child, people→person, data→datum, etc.
+- Current behavior is sufficient for common table names (users, posts, categories)
+- Enhancement: add lookup table for common irregular plurals or allow user override
+
 ### [Adapter] ON CONFLICT / Upsert support — Effort: M
 - `ast-helpers.ts:668`: `// ON CONFLICT handling would go here (complex, defer for now)`
 - Currently no upsert compilation; `compileUpsert()` exists but ON CONFLICT clause not built

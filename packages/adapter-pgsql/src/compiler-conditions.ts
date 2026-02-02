@@ -10,6 +10,12 @@
 
 import type { Node } from '@pgsql/types';
 import {
+	DEFAULT_PK_COLUMN,
+	defaultFkDerivation,
+	type FkColumnDerivation,
+	requiredColumn,
+} from './assert-field.js';
+import {
 	andExpr,
 	booleanConstNode,
 	columnRef,
@@ -39,6 +45,8 @@ export interface ConditionContext {
 	readonly naming: NamingPlugin;
 	readonly schema?: string | undefined;
 	readonly rootTable: string;
+	readonly defaultPk?: string;
+	readonly deriveFk?: FkColumnDerivation;
 }
 
 /** Mutable state accumulated during compilation */
@@ -50,20 +58,6 @@ export interface ConditionState {
 // ============================================================================
 // Pure Utilities
 // ============================================================================
-
-/**
- * Derive foreign key column name from table name using simple singularization.
- * Handles: authors → authorId, posts → postId, categories → categoryId
- */
-export function deriveFK(sourceTable: string): string {
-	let singular = sourceTable;
-	if (singular.endsWith('ies')) {
-		singular = `${singular.slice(0, -3)}y`;
-	} else if (singular.endsWith('s') && !singular.endsWith('ss')) {
-		singular = singular.slice(0, -1);
-	}
-	return `${singular}Id`;
-}
 
 /**
  * Recursively rewrite table references in a condition tree.
@@ -158,8 +152,13 @@ export function compileCondition(
 		return notExpr(nested);
 	}
 
+	// EXISTS/notExists use sourceColumn/targetColumn, not column — dispatch before column extraction
+	if (decision.operator === 'exists' || decision.operator === 'notExists') {
+		return compileExistsCondition(decision, ctx, state);
+	}
+
 	const column = columnRef(
-		decision.column ?? 'id',
+		requiredColumn(decision.column, 'column', 'compileCondition'),
 		decision.table,
 		undefined,
 		ctx.naming,
@@ -192,9 +191,6 @@ export function compileCondition(
 	}
 	if (decision.operator === 'between') {
 		return compileBetweenCondition(decision, column, state);
-	}
-	if (decision.operator === 'exists' || decision.operator === 'notExists') {
-		return compileExistsCondition(decision, ctx, state);
 	}
 
 	let value: Node;
@@ -288,19 +284,23 @@ function compileExistsCondition(
 		? typeof decision.foreignKey === 'string'
 			? decision.foreignKey
 			: decision.foreignKey[0]
-		: deriveFK(sourceTable);
+		: (ctx.deriveFk ?? defaultFkDerivation)(
+				sourceTable,
+				ctx.defaultPk ?? DEFAULT_PK_COLUMN,
+			);
 
 	// belongsTo: FK is in source (outer), PK is in target (inner)
 	// hasMany/hasOne: FK is in target (inner), PK is in source (outer)
+	const defaultPk = ctx.defaultPk ?? DEFAULT_PK_COLUMN;
 	const fkCorrelation =
 		decision.relationType === 'belongsTo'
 			? eqExpr(
-					columnRef('id', innerRef, undefined, ctx.naming),
+					columnRef(defaultPk, innerRef, undefined, ctx.naming),
 					columnRef(fkColumn, sourceTable, undefined, ctx.naming),
 				)
 			: eqExpr(
 					columnRef(fkColumn, innerRef, undefined, ctx.naming),
-					columnRef('id', sourceTable, undefined, ctx.naming),
+					columnRef(defaultPk, sourceTable, undefined, ctx.naming),
 				);
 
 	let whereClause: Node = fkCorrelation;

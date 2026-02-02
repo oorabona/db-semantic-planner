@@ -12,6 +12,11 @@
  */
 
 import type { JoinExpr, Node } from '@pgsql/types';
+import {
+	DEFAULT_PK_COLUMN,
+	defaultFkDerivation,
+	requiredColumn,
+} from '../../assert-field.js';
 import { columnRef, eqExpr, rangeVar } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
@@ -52,8 +57,17 @@ function buildJoinFilter(
 ): Node {
 	const relation = decision.relation;
 	const targetTable = decision.targetTable ?? relation;
-	const sourceColumn = decision.sourceColumn ?? 'id';
-	const targetColumn = decision.targetColumn ?? `${ctx.rootTable}_id`;
+	const sourceColumn = requiredColumn(
+		decision.sourceColumn,
+		'sourceColumn',
+		'relation filter',
+	);
+	const targetColumn =
+		decision.targetColumn ??
+		(ctx.deriveFkColumnName ?? defaultFkDerivation)(
+			ctx.rootTable,
+			ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
+		);
 
 	if (!targetTable) {
 		throw new Error('Relation filter requires targetTable');

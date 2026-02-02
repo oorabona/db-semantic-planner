@@ -9,6 +9,7 @@
  */
 
 import type { CommonTableExpr, Node, SelectStmt, SubLink } from '@pgsql/types';
+import { requiredColumn } from '../../assert-field.js';
 import {
 	binaryExpr,
 	coalesce,
@@ -441,9 +442,17 @@ export const pseudoColumnHandler: ExpressionHandler = {
 		state: CompilerState,
 	): Node {
 		const traversal = decision.traversal;
-		const targetColumn = decision.column ?? 'id';
+		const targetColumn = requiredColumn(
+			decision.column,
+			'column',
+			'pseudo traversal',
+		);
 		const table = decision.table ?? ctx.rootTable;
-		const pkColumn = decision.pkColumn ?? 'id';
+		const pkColumn = requiredColumn(
+			decision.pkColumn,
+			'pkColumn',
+			'pseudo traversal',
+		);
 		const fkColumn = decision.fkColumn ?? 'parent_id';
 		const maxDepth = decision.maxDepth ?? ctx.maxRecursiveDepth;
 
@@ -495,9 +504,17 @@ export const singleHopPseudoHandler: ExpressionHandler = {
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
-		const targetColumn = decision.column ?? 'id';
+		const targetColumn = requiredColumn(
+			decision.column,
+			'column',
+			'single-hop pseudo',
+		);
 		const table = decision.table ?? ctx.rootTable;
-		const pkColumn = decision.pkColumn ?? 'id';
+		const pkColumn = requiredColumn(
+			decision.pkColumn,
+			'pkColumn',
+			'single-hop pseudo',
+		);
 		const fkColumn = decision.fkColumn ?? 'parent_id';
 		const traversal = decision.traversal ?? 'parent';
 
@@ -607,7 +624,11 @@ export const chainedPseudoHandler: ExpressionHandler = {
 	): Node {
 		const traversals = decision.traversals;
 		const table = decision.table ?? ctx.rootTable;
-		const pkColumn = decision.pkColumn ?? 'id';
+		const pkColumn = requiredColumn(
+			decision.pkColumn,
+			'pkColumn',
+			'chained pseudo',
+		);
 		const fkColumn = decision.fkColumn ?? 'parent_id';
 
 		if (!traversals || traversals.length === 0) {
@@ -622,7 +643,13 @@ export const chainedPseudoHandler: ExpressionHandler = {
 		// Build from innermost to outermost
 		// Start with the final column selection
 		const lastTraversal = traversals[traversals.length - 1]!;
-		const targetCol = naming.toDatabase(lastTraversal.targetColumn ?? 'id');
+		const targetCol = naming.toDatabase(
+			requiredColumn(
+				lastTraversal.targetColumn,
+				'targetColumn',
+				'chained pseudo',
+			),
+		);
 
 		// Build nested subqueries from inside out
 		let currentExpr: Node = {

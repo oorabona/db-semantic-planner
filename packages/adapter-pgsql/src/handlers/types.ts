@@ -6,6 +6,7 @@
  */
 
 import type { Node } from '@pgsql/types';
+import type { FkColumnDerivation } from '../assert-field.js';
 import type { NamingPlugin } from '../naming-plugin.js';
 
 // ============================================================================
@@ -28,6 +29,10 @@ export interface CompilerContext {
 	readonly maxRecursiveDepth: number;
 	/** Optional callback for raw SQL audit trail */
 	readonly onRawSQL?: (sql: string) => void;
+	/** Default primary key column name for convention fallbacks (default: 'id') */
+	readonly defaultPkColumnName?: string;
+	/** Convention for deriving FK column names: (tableName, pkName) => fkColumnName */
+	readonly deriveFkColumnName?: FkColumnDerivation;
 }
 
 // ============================================================================

@@ -48,7 +48,12 @@ function compileJsonAggRecursive(
 	}
 
 	// Build correlation WHERE based on relation type
-	const { sourceColumn, targetColumn } = deriveFkColumns(decision, parentAlias);
+	const { sourceColumn, targetColumn } = deriveFkColumns(
+		decision,
+		parentAlias,
+		ctx.defaultPkColumnName,
+		ctx.deriveFkColumnName,
+	);
 	let whereExpr: Node = jsonAggCorrelation(
 		parentAlias,
 		sourceColumn,
