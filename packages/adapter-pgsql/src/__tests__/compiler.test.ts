@@ -821,6 +821,7 @@ describe('PlanCompiler', () => {
 						traversal: 'ancestors',
 						column: 'name',
 						table: 'employees',
+						pkColumn: 'id',
 						alias: 'ancestor_names',
 					},
 				],

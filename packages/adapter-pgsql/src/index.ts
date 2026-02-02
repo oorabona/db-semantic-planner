@@ -5,6 +5,12 @@
  * PlanReport → PostgreSQL AST → SQL (via pgsql-deparser)
  */
 
+// Assert & Convention helpers — public API
+export {
+	DEFAULT_PK_COLUMN,
+	defaultFkDerivation,
+	type FkColumnDerivation,
+} from './assert-field.js';
 // AST Helpers — public API (internal helpers remain in ./ast-helpers.js)
 export { normalizeSQL } from './ast-helpers.js';
 // Compiler

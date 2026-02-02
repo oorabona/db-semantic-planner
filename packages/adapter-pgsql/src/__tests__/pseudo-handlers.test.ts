@@ -69,6 +69,7 @@ describe('Pseudo-Column Handlers', () => {
 				traversal: 'descendant',
 				column: 'id',
 				table: 'employees',
+				pkColumn: 'id',
 			};
 
 			const result = pseudoColumnHandler.compile(
@@ -86,6 +87,7 @@ describe('Pseudo-Column Handlers', () => {
 			const decision = {
 				type: 'pseudoColumn',
 				column: 'name',
+				pkColumn: 'id',
 			};
 
 			expect(() => {
@@ -107,6 +109,7 @@ describe('Pseudo-Column Handlers', () => {
 				traversal: 'parent',
 				column: 'name',
 				table: 'employees',
+				pkColumn: 'id',
 			};
 
 			const result = singleHopPseudoHandler.compile(
@@ -131,6 +134,7 @@ describe('Pseudo-Column Handlers', () => {
 				traversal: 'child',
 				column: 'name',
 				table: 'employees',
+				pkColumn: 'id',
 			};
 
 			const result = singleHopPseudoHandler.compile(
@@ -157,6 +161,7 @@ describe('Pseudo-Column Handlers', () => {
 			const decision = {
 				type: 'chainedPseudo',
 				column: 'name',
+				pkColumn: 'id',
 			};
 
 			expect(() => {
@@ -169,6 +174,7 @@ describe('Pseudo-Column Handlers', () => {
 			const decision = {
 				type: 'chainedPseudo',
 				table: 'employees',
+				pkColumn: 'id',
 				traversals: [
 					{ traversal: 'parent' },
 					{ traversal: 'parent', targetColumn: 'name' },

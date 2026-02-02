@@ -9,6 +9,12 @@
 
 import type { Node } from '@pgsql/types';
 import {
+	DEFAULT_PK_COLUMN,
+	defaultFkDerivation,
+	type FkColumnDerivation,
+	requiredColumn,
+} from './assert-field.js';
+import {
 	andExpr,
 	coalesceExpr,
 	columnRef,
@@ -36,7 +42,6 @@ import {
 	type ConditionState,
 	compileCondition,
 	compileValue,
-	deriveFK,
 } from './compiler-conditions.js';
 import { deparseQuoted } from './deparse.js';
 import { registerAllExpressionHandlers } from './handlers/expression/index.js';
@@ -65,6 +70,8 @@ import { createParamRef } from './param-ref.js';
 function mapToHandlerDecision(
 	pd: PlanDecision,
 	rootTable: string,
+	defaultPk: string,
+	deriveFk: FkColumnDerivation,
 ): HandlerDecision {
 	return {
 		type: pd.type,
@@ -78,12 +85,13 @@ function mapToHandlerDecision(
 		joinType: pd.joinType,
 		sourceColumn:
 			pd.relationType === 'belongsTo'
-				? (pd.foreignKey ?? `${pd.targetTable}_id`)
-				: (pd.parentKey ?? 'id'),
+				? (pd.foreignKey ??
+					(pd.targetTable ? deriveFk(pd.targetTable, defaultPk) : defaultPk))
+				: (pd.parentKey ?? defaultPk),
 		targetColumn:
 			pd.relationType === 'belongsTo'
-				? (pd.parentKey ?? 'id')
-				: (pd.foreignKey ?? `${rootTable}_id`),
+				? (pd.parentKey ?? defaultPk)
+				: (pd.foreignKey ?? deriveFk(rootTable, defaultPk)),
 		targetTable: pd.targetTable,
 		function: pd.function,
 		args: pd.args,
@@ -101,11 +109,15 @@ function mapToHandlerDecision(
 		foreignKey: pd.foreignKey,
 		parentKey: pd.parentKey,
 		traversal: pd.traversal,
+		pkColumn: pd.pkColumn,
+		fkColumn: pd.fkColumn,
 		maxDepth: pd.maxDepth,
 		children: pd.children?.map((c) =>
-			mapToHandlerDecision(c, pd.targetTable ?? rootTable),
+			mapToHandlerDecision(c, pd.targetTable ?? rootTable, defaultPk, deriveFk),
 		),
-		conditions: pd.conditions?.map((c) => mapToHandlerDecision(c, rootTable)),
+		conditions: pd.conditions?.map((c) =>
+			mapToHandlerDecision(c, rootTable, defaultPk, deriveFk),
+		),
 		orderBy: pd.orderBy?.map((o) => ({
 			column: o.field,
 			direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
@@ -172,6 +184,8 @@ export interface PlanDecision {
 	readonly relation?: string;
 	// Pseudo-column (recursive traversal) properties
 	readonly traversal?: string;
+	readonly pkColumn?: string;
+	readonly fkColumn?: string;
 	readonly maxDepth?: number;
 	readonly role?: string;
 	// Arithmetic expressions use args: [left, right] instead of dedicated fields
@@ -202,6 +216,10 @@ export interface CompiledResult {
 export interface CompilerOptions {
 	readonly naming?: NamingPlugin;
 	readonly schema?: string;
+	/** Default primary key column name convention (default: 'id') */
+	readonly defaultPkColumnName?: string;
+	/** Convention for deriving FK column names: (tableName, pkName) => fkColumnName */
+	readonly deriveFkColumnName?: FkColumnDerivation;
 }
 
 /**
@@ -224,6 +242,8 @@ function ensureExpressionHandlersRegistered(): void {
 export class PlanCompiler {
 	private readonly naming: NamingPlugin;
 	private readonly schema: string | undefined;
+	private readonly defaultPk: string;
+	private readonly deriveFk: FkColumnDerivation;
 	/** Mutable state shared with extracted condition/value compilation functions */
 	private state: ConditionState = { parameters: [], paramIndex: 0 };
 	/** Track root table for EXISTS FK correlation */
@@ -243,6 +263,8 @@ export class PlanCompiler {
 	constructor(options: CompilerOptions = {}) {
 		this.naming = options.naming ?? identityNaming;
 		this.schema = options.schema ?? undefined;
+		this.defaultPk = options.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
+		this.deriveFk = options.deriveFkColumnName ?? defaultFkDerivation;
 	}
 
 	/** Build immutable context for condition compilation functions */
@@ -283,7 +305,12 @@ export class PlanCompiler {
 
 		// Bridge PlanDecision -> handler Decision via explicit mapper
 		// (mapper handles subquery → json_agg mapping internally)
-		const handlerDecision = mapToHandlerDecision(decision, plan.rootTable);
+		const handlerDecision = mapToHandlerDecision(
+			decision,
+			plan.rootTable,
+			this.defaultPk,
+			this.deriveFk,
+		);
 
 		const handler = getIncludeHandler(
 			handlerDecision.strategy as 'json_agg' | 'join' | 'lateral' | 'cte',
@@ -313,6 +340,8 @@ export class PlanCompiler {
 			rootTable: plan.rootTable,
 			currentAlias: plan.rootTable,
 			maxRecursiveDepth: 100,
+			defaultPkColumnName: this.defaultPk,
+			deriveFkColumnName: this.deriveFk,
 			...(this.schema != null && { schema: this.schema }),
 		} as HandlerCompilerContext;
 
@@ -518,6 +547,8 @@ export class PlanCompiler {
 						rootTable: plan.rootTable,
 						currentAlias: plan.rootTable,
 						maxRecursiveDepth: 100,
+						defaultPkColumnName: this.defaultPk,
+						deriveFkColumnName: this.deriveFk,
 						...((plan.schema ?? this.schema)
 							? { schema: plan.schema ?? this.schema }
 							: {}),
@@ -532,6 +563,8 @@ export class PlanCompiler {
 					const handlerDecision = mapToHandlerDecision(
 						decision,
 						plan.rootTable,
+						this.defaultPk,
+						this.deriveFk,
 					);
 					const node = handler.compile(handlerDecision, exprCtx, exprState);
 					this.state.paramIndex = exprState.paramIndex;
@@ -1011,9 +1044,10 @@ export class PlanCompiler {
 
 		// For belongsTo: FK is on source table, references target PK
 		// e.g., posts.author_id → authors.id
-		const fkColumn = decision.foreignKey ?? deriveFK(targetTable);
+		const fkColumn =
+			decision.foreignKey ?? this.deriveFk(targetTable, this.defaultPk);
 		const onCondition = eqExpr(
-			columnRef('id', targetTable, undefined, this.naming),
+			columnRef(this.defaultPk, targetTable, undefined, this.naming),
 			columnRef(fkColumn, sourceTable, undefined, this.naming),
 		);
 
@@ -1050,13 +1084,13 @@ export class PlanCompiler {
 
 		const onCondition = eqExpr(
 			columnRef(
-				decision.sourceColumn ?? 'id',
+				requiredColumn(decision.sourceColumn, 'sourceColumn', 'compileJoin'),
 				undefined,
 				undefined,
 				this.naming,
 			),
 			columnRef(
-				decision.targetColumn ?? 'id',
+				requiredColumn(decision.targetColumn, 'targetColumn', 'compileJoin'),
 				decision.alias ?? decision.targetTable,
 				undefined,
 				this.naming,

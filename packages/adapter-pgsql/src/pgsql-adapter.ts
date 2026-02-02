@@ -30,6 +30,11 @@ import type {
 } from '@dbsp/core';
 import type { Node, SelectStmt } from '@pgsql/types';
 import type { Pool, PoolClient } from 'pg';
+import {
+	DEFAULT_PK_COLUMN,
+	defaultFkDerivation,
+	type FkColumnDerivation,
+} from './assert-field.js';
 import { innerJoin, rangeVar } from './ast-helpers.js';
 import {
 	type CompilerOptions,
@@ -106,6 +111,10 @@ export interface PgsqlAdapterOptions {
 	readonly model?: ModelIR;
 	/** Optional logger for debug/error messages */
 	readonly logger?: AdapterLogger;
+	/** Default primary key column name for convention fallbacks (default: 'id') */
+	readonly defaultPkColumnName?: string;
+	/** Convention for deriving FK column names: (tableName, pkName) => fkColumnName */
+	readonly deriveFkColumnName?: FkColumnDerivation;
 }
 
 // ============================================================================
@@ -136,6 +145,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly model: ModelIR | undefined;
 	private readonly logger: AdapterLogger | undefined;
 	private readonly _capabilities: AdapterCapabilities;
+	private readonly defaultPk: string;
+	private readonly deriveFk: FkColumnDerivation;
 
 	/**
 	 * Create a new PgsqlAdapter.
@@ -169,6 +180,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.naming = getNamingPluginForDbCasing(this._dbCasing);
 		this.model = options?.model;
 		this.logger = options?.logger;
+		this.defaultPk = options?.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
+		this.deriveFk = options?.deriveFkColumnName ?? defaultFkDerivation;
 
 		// PostgreSQL capabilities — streaming requires a connection
 		this._capabilities = {
@@ -254,9 +267,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	): CompiledQuery<T> {
 		const schemaName = this.schemaName ?? options?.schemaName;
 
-		const compilerOptions: CompilerOptions = schemaName
-			? { naming: this.naming, schema: schemaName }
-			: { naming: this.naming };
+		const compilerOptions: CompilerOptions = {
+			naming: this.naming,
+			...(schemaName && { schema: schemaName }),
+			defaultPkColumnName: this.defaultPk,
+			deriveFkColumnName: this.deriveFk,
+		};
 
 		// Convert PlanReport (core) → SimplifiedPlanReport (pgsql compiler)
 		// The core's plan.decisions contain observability data, not SQL instructions.
@@ -294,7 +310,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const existsDecisions = extractExistsDecisions(plan, options?.model);
 
 			// Phase 3: Extract ALL include decisions (json_agg, join, lateral, cte, subquery)
-			const unifiedIncludeDecisions = extractAllIncludeDecisions(plan);
+			const unifiedIncludeDecisions = extractAllIncludeDecisions(
+				plan,
+				this.defaultPk,
+				this.deriveFk,
+			);
 
 			// Propagate filter conditions from EXISTS to matching include decisions
 			// When a relation is both filtered and included, the filter should appear
@@ -436,7 +456,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			if (!relationName) continue;
 
 			// Derive FK using shared helper
-			const rawFk = deriveForeignKey(ctx) ?? 'id';
+			const rawFk =
+				deriveForeignKey(ctx, this.deriveFk, this.defaultPk) ?? this.defaultPk;
 			const fk = Array.isArray(rawFk) ? rawFk[0]! : rawFk;
 
 			// For subquery include, we need:

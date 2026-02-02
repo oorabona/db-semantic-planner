@@ -12,6 +12,11 @@
 
 import type { JoinExpr, Node, SelectStmt } from '@pgsql/types';
 import {
+	DEFAULT_PK_COLUMN,
+	defaultFkDerivation,
+	requiredColumn,
+} from '../../assert-field.js';
+import {
 	columnRef,
 	fkCorrelation,
 	rangeVar,
@@ -160,7 +165,12 @@ function compileLateralCascade(
 	if (decision.children && decision.children.length > 0) {
 		for (const child of decision.children) {
 			const { sourceColumn: childSrc, targetColumn: childTgt } =
-				deriveFkColumns(child, targetTable);
+				deriveFkColumns(
+					child,
+					targetTable,
+					ctx.defaultPkColumnName,
+					ctx.deriveFkColumnName,
+				);
 			const childResult = compileLateralCascade(
 				child,
 				lateralAlias,
@@ -199,8 +209,17 @@ export const lateralIncludeHandler: IncludeHandler = {
 		ctx: CompilerContext,
 		state: CompilerState,
 	): IncludeResult {
-		const sourceColumn = decision.sourceColumn ?? 'id';
-		const targetColumn = decision.targetColumn ?? `${ctx.rootTable}_id`;
+		const sourceColumn = requiredColumn(
+			decision.sourceColumn,
+			'sourceColumn',
+			'lateral include',
+		);
+		const targetColumn =
+			decision.targetColumn ??
+			(ctx.deriveFkColumnName ?? defaultFkDerivation)(
+				ctx.rootTable,
+				ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
+			);
 		const outerAlias = ctx.currentAlias ?? ctx.rootTable;
 
 		const { joins } = compileLateralCascade(

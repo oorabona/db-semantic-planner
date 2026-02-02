@@ -4,6 +4,11 @@
  * Extracted from lateral.ts and json-agg.ts to eliminate FK direction duplication.
  */
 
+import {
+	DEFAULT_PK_COLUMN,
+	defaultFkDerivation,
+	type FkColumnDerivation,
+} from '../../assert-field.js';
 import type { Decision } from '../types.js';
 
 /**
@@ -18,16 +23,22 @@ import type { Decision } from '../types.js';
 export function deriveFkColumns(
 	decision: Decision,
 	parentTable: string,
+	defaultPk: string = DEFAULT_PK_COLUMN,
+	deriveFk: FkColumnDerivation = defaultFkDerivation,
 ): { sourceColumn: string; targetColumn: string } {
 	if (decision.relationType === 'belongsTo') {
 		return {
-			sourceColumn: decision.foreignKey ?? `${decision.targetTable}_id`,
-			targetColumn: decision.parentKey ?? 'id',
+			sourceColumn:
+				decision.foreignKey ??
+				(decision.targetTable
+					? deriveFk(decision.targetTable, defaultPk)
+					: defaultPk),
+			targetColumn: decision.parentKey ?? defaultPk,
 		};
 	}
 	// hasMany or hasOne
 	return {
-		sourceColumn: decision.parentKey ?? 'id',
-		targetColumn: decision.foreignKey ?? `${parentTable}_id`,
+		sourceColumn: decision.parentKey ?? defaultPk,
+		targetColumn: decision.foreignKey ?? deriveFk(parentTable, defaultPk),
 	};
 }
