@@ -299,10 +299,26 @@ sql.equals: SELECT DISTINCT employees.department_id FROM test_strategies.employe
 db.rows.equals: 3
 
 # ─────────────────────────────────────────
-# Query 28: tasks | select *, assignee.* — belongsTo include (json_agg for parent)
-# After insert(Q23) + delete(Q25): 5 original - 1 deleted + 1 inserted = 5
+# Query 28: departments | where id in (employees | select departmentId | where active = true)
 # ─────────────────────────────────────────
 --- query: 28
+success: true
+sql.equals: SELECT departments.* FROM departments WHERE departments.id = ANY (SELECT employees."departmentId" FROM employees WHERE employees.active = $1)
+params.equals: [true]
+
+# ─────────────────────────────────────────
+# Query 29: departments | where employees.active = true — relation traversal (semantically equivalent)
+# ─────────────────────────────────────────
+--- query: 29
+success: true
+sql.equals: SELECT departments.* FROM departments WHERE EXISTS (SELECT 1 FROM employees WHERE employees."departmentId" = departments.id AND employees.active = $1)
+params.equals: [true]
+
+# ─────────────────────────────────────────
+# Query 30: tasks | select *, assignee.* — belongsTo include (json_agg for parent)
+# After insert(Q23) + delete(Q25): 5 original - 1 deleted + 1 inserted = 5
+# ─────────────────────────────────────────
+--- query: 30
 success: true
 sql.equals: SELECT tasks.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM test_strategies.employees AS __t__ WHERE __t__.id = tasks.assignee_id), '[]'::json) AS assignee_json FROM test_strategies.tasks
 db.rows.equals: 5

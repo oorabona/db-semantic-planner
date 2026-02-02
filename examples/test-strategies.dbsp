@@ -124,5 +124,11 @@ upsert into employees on email set name = 'Jane', email = 'jane@test.com', depar
 # SELECT DISTINCT
 employees | select distinct departmentId
 
+# IN (subquery) — should produce correct WHERE in subquery
+departments | where id in (employees | select departmentId | where active = true)
+
+# Relation traversal — semantically equivalent to IN subquery above
+departments | where employees.active = true
+
 # belongsTo include (single parent)
 tasks | select *, assignee.*

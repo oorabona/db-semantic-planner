@@ -416,17 +416,18 @@ function compileInSubquery(
 		rangeVar(sub.from, undefined, ctx?.schema, ctx?.naming),
 	];
 
-	// Build inner WHERE if present
+	// Build inner WHERE if present — use subquery's own table as rootTable
 	let innerWhere: Node | undefined;
 	if (sub.where) {
-		innerWhere = compileCondition(
-			sub.where as PlanDecision,
-			ctx ?? {
-				naming: { toDatabase: (n: string) => n, toModel: (n: string) => n },
-				rootTable: sub.from,
+		const subCtx: ConditionContext = {
+			naming: ctx?.naming ?? {
+				toDatabase: (n: string) => n,
+				toModel: (n: string) => n,
 			},
-			state,
-		);
+			rootTable: sub.from,
+			...(ctx?.schema && { schema: ctx.schema }),
+		};
+		innerWhere = compileCondition(sub.where as PlanDecision, subCtx, state);
 	}
 
 	const subSelect: Node = {

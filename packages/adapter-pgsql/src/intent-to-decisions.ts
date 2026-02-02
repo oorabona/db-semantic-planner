@@ -358,19 +358,30 @@ function convertWhereCondition(
 
 		// IN: { kind: 'in', field: 'id', values: [1, 2, 3] } or { kind: 'in', field: 'id', subquery: {...} }
 		case 'in': {
+			const rawSubquery = (cond as Record<string, unknown>).subquery as
+				| Record<string, unknown>
+				| undefined;
 			const result: PlanDecision = {
 				type: 'where',
 				column: cond.field as string,
 				operator: cond.not ? 'notIn' : 'in',
-				value: (cond as Record<string, unknown>).subquery
-					? undefined
-					: cond.values,
+				value: rawSubquery ? undefined : cond.values,
 				table: rootTable,
 			};
-			if ((cond as Record<string, unknown>).subquery) {
-				(result as unknown as Record<string, unknown>).subquery = (
-					cond as Record<string, unknown>
-				).subquery;
+			if (rawSubquery) {
+				// Convert subquery's inner where from WhereIntent → PlanDecision
+				const convertedSubquery = { ...rawSubquery };
+				if (rawSubquery.where) {
+					const innerWhere = convertWhereCondition(
+						rawSubquery.where as WhereIntent,
+						rawSubquery.from as string,
+					);
+					if (innerWhere) {
+						convertedSubquery.where = innerWhere;
+					}
+				}
+				(result as unknown as Record<string, unknown>).subquery =
+					convertedSubquery;
 			}
 			return result;
 		}
