@@ -43,26 +43,26 @@ pnpm link /path/to/db-semantic-planner/packages/cli
 
 ### Using NQL
 
-**In the REPL:**
+**In the REPL** (load one schema at a time):
 ```bash
-pnpm dbsp repl --schema ./schema.ts
-> products | where active = true | select id, name
+pnpm dbsp repl -s examples/blog.schema.ts
+> posts | where published = true | select title, author.name
 ```
 
 **In `.dbsp` files:**
 ```
 # comments start with #
-products | where active = true | select id, name
+posts | where published = true | select title
 ```
 
 **In TypeScript:**
 ```typescript
-const products = await orm.nql<Product[]>`products | where active = true`.all();
+const posts = await orm.nql<Post[]>`posts | where published = true`.all();
 ```
 
 ### Example Schemas
 
-Examples in this guide use three schemas shipped with the project. Each is a separate file loaded independently:
+Examples in this guide use three schemas shipped with the project. Each is a **separate file** — you load one at a time with `dbsp repl -s`. Every code block below is labeled with its schema so you can copy-paste directly.
 
 #### Blog — `examples/blog.schema.ts`
 
@@ -120,17 +120,20 @@ schema({
 });
 ```
 
-> Throughout this guide, a **schema badge** indicates which schema to load for each example group:
-> *blog*, *ecommerce*, or *hierarchy*.
-
 ---
 
 ## 2. Basic Syntax
 
 ### Table Scan
 
+**blog:**
 ```
 authors
+```
+
+**ecommerce:**
+```
+products
 ```
 
 Returns all rows and columns from the table.
@@ -139,8 +142,14 @@ Returns all rows and columns from the table.
 
 Chain clauses with `|`:
 
+**ecommerce:**
 ```
 products | where active = true | select id, name | order by name | limit 10
+```
+
+**blog:**
+```
+posts | where published = true | select title, slug | order by createdAt desc | limit 10
 ```
 
 ### Comments
@@ -154,13 +163,17 @@ products | where active = true   # Inline comment
 
 ## 3. WHERE (Filtering)
 
-> Uses *blog* and *ecommerce* schemas.
-
 ### Comparison Operators
 
+**blog:**
 ```
 authors | where name = 'Alice'
 authors | where name != 'John'
+posts | where published = true
+```
+
+**ecommerce:**
+```
 products | where price > 100
 products | where price >= 100
 products | where stock < 50
@@ -169,19 +182,33 @@ orders | where total <= 10
 
 ### Pattern Matching
 
+**blog:**
 ```
 authors | where name like 'A%'
 authors | where email like '%@example.com'
 ```
 
+**ecommerce:**
+```
+products | where name like '%Phone%'
+customers | where email like '%@gmail.com'
+```
+
 ### BETWEEN
 
+**ecommerce:**
 ```
 products | where price between 10 and 500
 ```
 
+**hierarchy:**
+```
+employees | where salary between 50000 and 100000
+```
+
 ### IN (Value List)
 
+**ecommerce:**
 ```
 orders | where status in ('pending', 'shipped', 'delivered')
 products | where id in (1, 2, 3)
@@ -189,19 +216,28 @@ products | where id in (1, 2, 3)
 
 ### IN (Subquery)
 
+**ecommerce:**
 ```
 customers | where id in (orders | select customerId | where status = 'delivered')
 ```
 
 ### NULL Checks
 
+**blog:**
 ```
 authors | where bio is null
 posts | where updatedAt is not null
 ```
 
+**ecommerce:**
+```
+products | where description is null
+customers | where phone is not null
+```
+
 ### Logical Operators
 
+**ecommerce:**
 ```
 # AND
 products | where active = true and price > 50
@@ -209,17 +245,24 @@ products | where active = true and price > 50
 # OR
 orders | where status = 'pending' or status = 'shipped'
 
+# Parentheses for grouping
+products | where (stock < 10 or stock > 1000) and active = true
+```
+
+**blog:**
+```
 # NOT
 comments | where not (approved = true)
 
-# Parentheses for grouping
-products | where (stock < 10 or stock > 1000) and active = true
+# Combined
+posts | where published = true and (title like '%Guide%' or title like '%Tutorial%')
 ```
 
 ### Relation Filters
 
 Filter by related records using quantifiers:
 
+**blog:**
 ```
 # SOME — at least one related record matches
 authors | where some(posts).published = true
@@ -232,11 +275,16 @@ authors | where every(posts).published = true
 
 # With aliases for complex conditions
 authors | where some(posts as p, p.published = true and p.title like '%Guide%')
+```
+
+**ecommerce:**
+```
 customers | where none(orders as o, o.status = 'cancelled' and o.total > 100)
 ```
 
 ### EXISTS Subquery
 
+**ecommerce:**
 ```
 customers | where exists (orders | where customerId = customers.id)
 ```
@@ -245,10 +293,9 @@ customers | where exists (orders | where customerId = customers.id)
 
 ## 4. SELECT (Projection)
 
-> Uses *blog* and *ecommerce* schemas.
-
 ### All Columns
 
+**blog:**
 ```
 authors | select *
 authors                    # implicit select *
@@ -256,12 +303,19 @@ authors                    # implicit select *
 
 ### Specific Columns
 
+**blog:**
 ```
 authors | select id, name, email
 ```
 
+**ecommerce:**
+```
+products | select sku, name, price
+```
+
 ### Aliases
 
+**ecommerce:**
 ```
 products | select name as productName, price as cost
 products | select price * 1.1 as priceWithTax
@@ -269,13 +323,19 @@ products | select price * 1.1 as priceWithTax
 
 ### DISTINCT
 
+**ecommerce:**
 ```
 orders | select distinct status
+```
+
+**blog:**
+```
 comments | select count(distinct authorName)
 ```
 
 ### Arithmetic Expressions
 
+**ecommerce:**
 ```
 orderItems | select unitPrice + 5 as shippingTotal
 orderItems | select quantity * unitPrice as lineTotal
@@ -290,21 +350,14 @@ Standard operator precedence: `*`, `/`, `%` bind tighter than `+`, `-`.
 
 ## 5. Includes (Relations)
 
-> Uses *blog* and *ecommerce* schemas.
-
 ### Nested JSON (Default)
 
 Select columns from related tables to auto-include them:
 
+**blog:**
 ```
 # Include all post columns as nested JSON array
 authors | select *, posts.*
-
-# Include specific columns from relation
-orders | select id, customer.firstName, customer.email
-
-# Deep nesting
-orderItems | select id, product.name, product.category.name
 ```
 
 Result shape (nested):
@@ -314,10 +367,20 @@ Result shape (nested):
 ]
 ```
 
+**ecommerce:**
+```
+# Include specific columns from relation
+orders | select id, customer.firstName, customer.email
+
+# Deep nesting
+orderItems | select id, product.name, product.category.name
+```
+
 ### Flat Mode
 
 Use `| flat` to force JOIN strategy (flat rows instead of nested JSON):
 
+**blog:**
 ```
 authors | select *, posts.* | flat
 ```
@@ -332,6 +395,7 @@ Result shape (flat):
 
 ### Many-to-Many Relations
 
+**blog:**
 ```
 posts | select *, tags.*
 ```
@@ -342,12 +406,15 @@ The planner automatically resolves junction tables.
 
 ## 6. Aggregates & GROUP BY
 
-> Uses *blog* and *ecommerce* schemas.
-
 ### Aggregate Functions
 
+**blog:**
 ```
 posts | select count(*)
+```
+
+**ecommerce:**
+```
 orders | select sum(total)
 orders | select avg(total)
 products | select min(price), max(price)
@@ -355,14 +422,20 @@ products | select min(price), max(price)
 
 ### COUNT DISTINCT
 
+**ecommerce:**
 ```
 orders | select count(distinct customerId) as uniqueCustomers
 ```
 
 ### GROUP BY
 
+**ecommerce:**
 ```
 orders | group by status | select status, count(*) as total
+```
+
+**blog:**
+```
 posts | group by authorId | select authorId, count(*)
 ```
 
@@ -370,6 +443,7 @@ posts | group by authorId | select authorId, count(*)
 
 Position relative to `group by` determines behavior:
 
+**ecommerce:**
 ```
 # WHERE — filters individual rows (before grouping)
 orders | where total > 100 | group by status | select status, count(*)
@@ -382,18 +456,23 @@ orders | group by status | where count(*) > 10 | select status, count(*)
 
 ## 7. ORDER BY, LIMIT, OFFSET
 
-> Uses *blog* and *ecommerce* schemas.
-
 ### Sorting
 
+**blog:**
 ```
 authors | order by name
 posts | order by createdAt desc
+```
+
+**ecommerce:**
+```
 customers | order by lastName asc, firstName asc
+products | order by price desc
 ```
 
 ### Pagination
 
+**blog:**
 ```
 posts | order by createdAt desc | limit 10
 posts | order by createdAt desc | limit 10 | offset 20
@@ -403,8 +482,6 @@ posts | order by createdAt desc | limit 10 | offset 20
 
 ## 8. Window Functions
 
-> Uses *ecommerce* schema.
-
 ### Syntax
 
 ```
@@ -413,6 +490,7 @@ function() over ([partition by expr] [order by expr [asc|desc]])
 
 ### Row Numbering
 
+**ecommerce:**
 ```
 products | select name, row_number() over (order by price) as rn
 products | select name, rank() over (partition by categoryId order by price desc) as priceRank
@@ -421,6 +499,7 @@ products | select name, dense_rank() over (order by price) as dr
 
 ### Lag / Lead (Previous / Next Row)
 
+**ecommerce:**
 ```
 orders | select orderNumber, total, lag(total) over (order by createdAt) as prevTotal
 orders | select orderNumber, total, lead(total) over (order by createdAt) as nextTotal
@@ -428,6 +507,7 @@ orders | select orderNumber, total, lead(total) over (order by createdAt) as nex
 
 ### Aggregate Windows
 
+**ecommerce:**
 ```
 orders | select orderNumber, total, sum(total) over (order by createdAt) as runningTotal
 orderItems | select orderId, totalPrice, sum(totalPrice) over (partition by orderId) as orderTotal
@@ -435,6 +515,7 @@ orderItems | select orderId, totalPrice, sum(totalPrice) over (partition by orde
 
 ### Empty OVER
 
+**ecommerce:**
 ```
 products | select name, count(*) over () as totalProducts
 ```
@@ -443,8 +524,7 @@ products | select name, count(*) over () as totalProducts
 
 ## 9. CASE Expressions
 
-> Uses *ecommerce* schema.
-
+**ecommerce:**
 ```
 # Simple
 products | select case when price > 100 then 'expensive' end
@@ -460,16 +540,26 @@ end as tier
 products | select name, price, case when price > 100 then 'high' else 'low' end as tier
 ```
 
+**hierarchy:**
+```
+employees | select name, case
+  when salary > 100000 then 'senior'
+  when salary > 60000 then 'mid'
+  else 'junior'
+end as level
+```
+
 ---
 
 ## 10. Hierarchy / Recursive Traversal
 
-> Uses *hierarchy* schema (`pnpm dbsp repl -s examples/hierarchy.schema.ts`).
+> Load: `pnpm dbsp repl -s examples/hierarchy.schema.ts`
 
 Requires a schema with self-referential `ref()` and `roles` configured.
 
 ### Single-Hop Traversal
 
+**hierarchy:**
 ```
 # Direct parent
 employees | select name, title, manager.name
@@ -480,6 +570,7 @@ employees | select name, manager.name, manager.manager.name
 
 ### Recursive Ancestors
 
+**hierarchy:**
 ```
 # Full ancestor chain as JSON array
 employees | select name, managementChain.*
@@ -490,6 +581,7 @@ employees | select name, managementChain.name, managementChain.title
 
 ### Recursive Descendants
 
+**hierarchy:**
 ```
 # Full descendant chain
 employees | select name, allReports.*
@@ -504,10 +596,9 @@ employees | select name, allReports.name
 
 ## 11. Mutations
 
-> Uses *ecommerce* and *blog* schemas.
-
 ### INSERT
 
+**ecommerce:**
 ```
 insert into products set sku = 'IPH-15', name = 'iPhone', price = 999, categoryId = 1
 
@@ -515,14 +606,18 @@ insert into products set sku = 'IPH-15', name = 'iPhone', price = 999, categoryI
 insert into products set sku = 'IPH-15', name = 'iPhone', price = 999, categoryId = 1 | select id, name
 ```
 
+**blog:**
+```
+insert into authors set name = 'Alice', email = 'alice@example.com'
+insert into posts set title = 'Hello', slug = 'hello', authorId = 1 | select id, title
+```
+
 ### INSERT FROM (Bulk Copy)
 
+**ecommerce:**
 ```
 # Copy rows from a filtered query
 insert into orderItems from orderItems | where orderId = 1
-
-# With filter
-insert into addresses from addresses | where customerId = 5
 
 # With limit
 insert into orderItems from orderItems | where orderId = 1 | limit 10
@@ -533,6 +628,7 @@ insert into addresses from addresses | where customerId = 5 | select id
 
 ### UPDATE
 
+**ecommerce:**
 ```
 update products set price = 899 where id = 1
 
@@ -540,14 +636,26 @@ update products set price = 899 where id = 1
 update orders set status = 'shipped' where id = 1 | select id, status
 ```
 
+**blog:**
+```
+update posts set published = true where authorId = 1
+```
+
 ### DELETE
 
+**ecommerce:**
 ```
 delete from products where id = 1
 ```
 
+**blog:**
+```
+delete from comments where approved = false
+```
+
 ### UPSERT
 
+**ecommerce:**
 ```
 # Single conflict column
 upsert into customers on email set firstName = 'Alice', lastName = 'Smith', email = 'alice@example.com'
@@ -560,6 +668,7 @@ upsert into orderItems on (orderId, productId) set quantity = 2, unitPrice = 29.
 
 Chain mutations where the second uses results from the first:
 
+**ecommerce:**
 ```
 insert into orders set customerId = 1, orderNumber = 'ORD-100', total = 59.99, shippingAddressId = 1, billingAddressId = 1 | bind order
 insert into orderItems set orderId = order.id, productId = 5, quantity = 2, unitPrice = 29.99, totalPrice = 59.98
@@ -569,20 +678,25 @@ insert into orderItems set orderId = order.id, productId = 5, quantity = 2, unit
 
 ## 12. Advanced Features
 
-> Uses *ecommerce* schema unless noted.
-
 ### LET Bindings (CTEs)
 
 Define reusable query fragments:
 
+**ecommerce:**
 ```
 let activeProducts = products | where active = true
 activeProducts | select name, price | order by price
 ```
 
+**blog:**
+```
+let recentPosts = posts | where published = true | order by createdAt desc | limit 10
+recentPosts | select title, author.name
+```
+
 ### Raw SQL Escape Hatch
 
-Prefix with `!` for raw SQL:
+Prefix with `!` for raw SQL (works with any schema):
 
 ```
 !CREATE SCHEMA IF NOT EXISTS tenant_123
@@ -615,7 +729,8 @@ In the interactive REPL, dot commands provide schema introspection:
 
 ```
 .tables              # List all tables
-.schema authors      # Show table columns
+.schema authors      # Show table columns (blog)
+.schema products     # Show table columns (ecommerce)
 .relations posts     # Show table relations
 .use tenant_123      # Set schema context
 .import file.sql     # Execute SQL file
@@ -653,15 +768,23 @@ In the interactive REPL, dot commands provide schema introspection:
 
 ### NQL vs ORM API
 
+**blog:**
+
 | NQL | ORM API |
 |-----|---------|
 | `authors` | `orm.select('authors').all()` |
-| `products \| where active = true` | `orm.select('products').where(eq('active', true))` |
 | `authors \| select id, name` | `orm.select('authors').columns(['id', 'name'])` |
 | `authors \| select *, posts.*` | `orm.select('authors').include('posts')` |
 | `authors \| order by name desc` | `orm.select('authors').orderBy('name', 'desc')` |
 | `posts \| limit 10` | `orm.select('posts').limit(10)` |
 | `posts \| group by authorId \| select count(*)` | `orm.select('posts').groupBy(['authorId']).count()` |
 | `insert into authors set name = 'A', email = 'a@b.c'` | `orm.insert('authors').values({ name: 'A', email: 'a@b.c' }).execute()` |
-| `update orders set status = 'shipped' where id = 1` | `orm.update('orders').set({ status: 'shipped' }).where(eq('id', 1)).execute()` |
 | `delete from comments where id = 1` | `orm.delete('comments').where(eq('id', 1)).execute()` |
+
+**ecommerce:**
+
+| NQL | ORM API |
+|-----|---------|
+| `products \| where active = true` | `orm.select('products').where(eq('active', true))` |
+| `orders \| select distinct status` | `orm.select('orders').columns(['status']).distinct()` |
+| `update orders set status = 'shipped' where id = 1` | `orm.update('orders').set({ status: 'shipped' }).where(eq('id', 1)).execute()` |
