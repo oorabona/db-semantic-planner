@@ -108,12 +108,16 @@ export interface RefOptions {
 
 /**
  * Marker type for ref() declarations in schema.
+ * Generic over target and options to preserve literal types for inference.
  * @internal
  */
-export interface RefDefinition {
+export interface RefDefinition<
+	TTarget extends string = string,
+	TOptions extends RefOptions = RefOptions,
+> {
 	readonly __brand: 'ref';
-	readonly target: string;
-	readonly options: RefOptions;
+	readonly target: TTarget;
+	readonly options: TOptions;
 }
 
 /**
@@ -401,11 +405,14 @@ export type InferSchemaDB<S extends Schema<SchemaDefinition>> =
  * parentId: ref('categories', { roles: { parent: 'parent', children: 'children' } })
  * ```
  */
-export function ref(target: string, options: RefOptions = {}): RefDefinition {
+export function ref<
+	TTarget extends string,
+	TOptions extends RefOptions = Record<string, never>,
+>(target: TTarget, options?: TOptions): RefDefinition<TTarget, TOptions> {
 	return {
 		__brand: 'ref',
 		target,
-		options,
+		options: (options ?? {}) as TOptions,
 	};
 }
 
