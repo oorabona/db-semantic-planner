@@ -74,27 +74,81 @@ export function PlanOutput({
 }: {
 	plan: NonNullable<QueryResult['plan']>;
 }) {
+	const hasDecisions = plan.decisions.length > 0;
+	const hasWarnings = plan.warnings.length > 0;
+	const hasCtes = plan.cteCount > 0;
+	const isCompact = !hasDecisions && !hasCtes && !hasWarnings;
+
+	// Compact one-liner for simple queries
+	if (isCompact) {
+		return (
+			<Box marginY={1}>
+				<Text bold color="magenta">
+					📋 Query Plan:{' '}
+				</Text>
+				<Text color="cyan">
+					{plan.rootTable || plan.strategy}
+					{' (no decisions)'}
+				</Text>
+				{plan.planningTimeMs > 0 && (
+					<Text color="gray"> ⏱ {plan.planningTimeMs.toFixed(1)}ms</Text>
+				)}
+			</Box>
+		);
+	}
+
 	return (
 		<Box flexDirection="column" marginY={1}>
 			<Text bold color="magenta">
 				📋 Query Plan:
 			</Text>
 			<Box paddingLeft={2} flexDirection="column">
-				<Text>
-					Strategy: <Text color="cyan">{plan.strategy}</Text>
-				</Text>
-				<Text>
-					Tables: <Text color="cyan">{plan.tables.join(', ')}</Text>
-				</Text>
-				{plan.warnings.length > 0 && (
+				{plan.rootTable && (
+					<Text>
+						Root: <Text color="cyan">{plan.rootTable}</Text>
+					</Text>
+				)}
+				{plan.tables.length > 0 && (
+					<Text>
+						Tables: <Text color="cyan">{plan.tables.join(', ')}</Text>
+					</Text>
+				)}
+				{hasDecisions && (
 					<Box flexDirection="column" marginTop={1}>
-						<Text color="yellow">⚠️ Warnings:</Text>
-						{plan.warnings.map((w, i) => (
-							<Text key={i} color="yellow">
-								• {w}
+						<Text bold>Decisions:</Text>
+						{plan.decisions.map((d, i) => (
+							<Text key={i}>
+								<Text color="gray"> • </Text>
+								<Text color="blue">{d.type}</Text>
+								<Text color="gray">: </Text>
+								<Text color="cyan">{d.context}</Text>
+								<Text color="gray"> — </Text>
+								<Text color="green">{d.choice}</Text>
+								<Text color="gray"> ({d.reasoning})</Text>
 							</Text>
 						))}
 					</Box>
+				)}
+				{hasCtes && (
+					<Text>
+						CTEs: <Text color="cyan">{plan.cteCount} extracted</Text>
+					</Text>
+				)}
+				{hasWarnings && (
+					<Box flexDirection="column" marginTop={1}>
+						<Text color="yellow">⚠️ Warnings:</Text>
+						{plan.warnings.map((w, i) => (
+							<Box key={i} flexDirection="column">
+								<Text color="yellow"> • {w.message}</Text>
+								{w.suggestion && <Text color="gray"> → {w.suggestion}</Text>}
+							</Box>
+						))}
+					</Box>
+				)}
+				{plan.planningTimeMs > 0 && (
+					<Text color="gray">
+						⏱ Planning: {plan.planningTimeMs.toFixed(1)}ms
+					</Text>
 				)}
 			</Box>
 		</Box>

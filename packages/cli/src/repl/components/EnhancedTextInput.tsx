@@ -85,6 +85,13 @@ export function EnhancedTextInput({
 	const [internalValue, setInternalValue] = useState(defaultValue);
 	const [cursor, setCursor] = useState(defaultValue.length);
 
+	// Refs mirror state for synchronous access during paste batches.
+	// React batches useState updates, so within a single stdin chunk (paste),
+	// each useInput callback sees the stale closure value. Refs update
+	// immediately, letting each keystroke build on the previous one.
+	const valueRef = useRef(defaultValue);
+	const cursorRef = useRef(defaultValue.length);
+
 	// Track raw input to distinguish Delete (\x1b[3~) from Backspace (\x7f)
 	// Ink's parser maps BOTH to key.delete, but we need to differentiate
 	const lastRawInputRef = useRef<string>('');
@@ -110,23 +117,33 @@ export function EnhancedTextInput({
 	// Sync cursor when value changes externally
 	useEffect(() => {
 		if (controlledValue !== undefined) {
-			setCursor(Math.min(cursor, controlledValue.length));
+			const synced = Math.min(cursorRef.current, controlledValue.length);
+			cursorRef.current = synced;
+			setCursor(synced);
+			valueRef.current = controlledValue;
 		}
-	}, [controlledValue, cursor]);
+	}, [controlledValue]);
 
 	// Reset when defaultValue changes (for history navigation)
 	useEffect(() => {
 		if (controlledValue === undefined) {
 			setInternalValue(defaultValue);
 			setCursor(defaultValue.length);
+			valueRef.current = defaultValue;
+			cursorRef.current = defaultValue.length;
 		}
 	}, [defaultValue, controlledValue]);
 
 	const updateValue = (newValue: string, newCursor?: number) => {
+		const nc = newCursor ?? newValue.length;
+		// Update refs synchronously (critical for paste batches)
+		valueRef.current = newValue;
+		cursorRef.current = nc;
+		// Update state for rendering
 		if (controlledValue === undefined) {
 			setInternalValue(newValue);
 		}
-		setCursor(newCursor ?? newValue.length);
+		setCursor(nc);
 		onChange?.(newValue);
 	};
 
@@ -134,9 +151,30 @@ export function EnhancedTextInput({
 		(input, key) => {
 			if (isDisabled || !isFocused) return;
 
-			// Submit on Enter
+			// Read from refs for correct values during paste batches
+			const val = valueRef.current;
+			const cur = cursorRef.current;
+
+			// Submit on Enter (with multiline support)
 			if (key.return) {
-				onSubmit?.(value);
+				// Shift+Enter → insert newline (terminals that support distinct sequence)
+				if (key.shift) {
+					const newValue = val.slice(0, cur) + '\n' + val.slice(cur);
+					updateValue(newValue, cur + 1);
+					return;
+				}
+				// Backslash continuation: if line ends with \, replace \ with newline
+				if (val.endsWith('\\')) {
+					const newValue = val.slice(0, -1) + '\n';
+					updateValue(newValue, newValue.length);
+					return;
+				}
+				// Normal Enter → submit, then reset refs immediately so next
+				// pasted line starts fresh (before React re-renders)
+				const submitted = val;
+				valueRef.current = '';
+				cursorRef.current = 0;
+				onSubmit?.(submitted);
 				return;
 			}
 
@@ -149,24 +187,28 @@ export function EnhancedTextInput({
 
 			// Home key - move to beginning (native in Ink 6.6.0+)
 			if (key.home) {
+				cursorRef.current = 0;
 				setCursor(0);
 				return;
 			}
 
 			// End key - move to end (native in Ink 6.6.0+)
 			if (key.end) {
-				setCursor(value.length);
+				cursorRef.current = val.length;
+				setCursor(val.length);
 				return;
 			}
 
 			// Left arrow
 			if (key.leftArrow) {
 				if (key.ctrl || key.meta) {
-					// Ctrl+Left: Move to previous word
-					setCursor(findPrevWordStart(value, cursor));
+					const nc = findPrevWordStart(val, cur);
+					cursorRef.current = nc;
+					setCursor(nc);
 				} else {
-					// Simple left
-					setCursor(Math.max(0, cursor - 1));
+					const nc = Math.max(0, cur - 1);
+					cursorRef.current = nc;
+					setCursor(nc);
 				}
 				return;
 			}
@@ -174,58 +216,63 @@ export function EnhancedTextInput({
 			// Right arrow
 			if (key.rightArrow) {
 				if (key.ctrl || key.meta) {
-					// Ctrl+Right: Move to next word
-					setCursor(findNextWordEnd(value, cursor));
+					const nc = findNextWordEnd(val, cur);
+					cursorRef.current = nc;
+					setCursor(nc);
 				} else {
-					// Simple right
-					setCursor(Math.min(value.length, cursor + 1));
+					const nc = Math.min(val.length, cur + 1);
+					cursorRef.current = nc;
+					setCursor(nc);
 				}
 				return;
 			}
 
 			// Home (Ctrl+A in terminal) - move to beginning
 			if (key.ctrl && input === 'a') {
+				cursorRef.current = 0;
 				setCursor(0);
 				return;
 			}
 
 			// End (Ctrl+E in terminal) - move to end
 			if (key.ctrl && input === 'e') {
-				setCursor(value.length);
+				cursorRef.current = val.length;
+				setCursor(val.length);
 				return;
 			}
 
 			// Alt+B - move word backward (like Ctrl+Left)
 			if (key.meta && input === 'b') {
-				setCursor(findPrevWordStart(value, cursor));
+				const nc = findPrevWordStart(val, cur);
+				cursorRef.current = nc;
+				setCursor(nc);
 				return;
 			}
 
 			// Alt+F - move word forward (like Ctrl+Right)
 			if (key.meta && input === 'f') {
-				setCursor(findNextWordEnd(value, cursor));
+				const nc = findNextWordEnd(val, cur);
+				cursorRef.current = nc;
+				setCursor(nc);
 				return;
 			}
 
 			// === DELETION ===
 			// Use raw input ref to distinguish Delete from Backspace
-			// Ink maps BOTH \x7f and \x1b[3~ to key.delete, but they're different keys!
+			// Ink maps BOTH \x7f and \x1b[3~ to key.delete, but we need to differentiate
 			const rawInput = lastRawInputRef.current;
 
 			// Delete key (forward delete) - Check RAW input for \x1b[3~ sequence
 			// This MUST come before backspace check since both trigger key.delete
 			if (rawInput === '\x1b[3~' || rawInput.startsWith('\x1b[3~')) {
-				if (cursor < value.length) {
-					const newValue = value.slice(0, cursor) + value.slice(cursor + 1);
-					updateValue(newValue, cursor);
+				if (cur < val.length) {
+					const newValue = val.slice(0, cur) + val.slice(cur + 1);
+					updateValue(newValue, cur);
 				}
 				return;
 			}
 
 			// Backspace - delete character BEFORE cursor
-			// Raw input \x7f = backspace on most modern terminals
-			// Raw input \x08 = backspace on some terminals (ctrl+h)
-			// key.backspace = ink detected backspace (when terminal sends \b)
 			const isBackspace =
 				key.backspace ||
 				rawInput === '\x7f' ||
@@ -233,40 +280,40 @@ export function EnhancedTextInput({
 				input === '\x7f' ||
 				input === '\x08';
 			if (isBackspace) {
-				if (cursor > 0) {
-					const newValue = value.slice(0, cursor - 1) + value.slice(cursor);
-					updateValue(newValue, cursor - 1);
+				if (cur > 0) {
+					const newValue = val.slice(0, cur - 1) + val.slice(cur);
+					updateValue(newValue, cur - 1);
 				}
 				return;
 			}
 
 			// Ctrl+W - delete word backward
 			if (key.ctrl && input === 'w') {
-				const wordStart = findPrevWordStart(value, cursor);
-				const newValue = value.slice(0, wordStart) + value.slice(cursor);
+				const wordStart = findPrevWordStart(val, cur);
+				const newValue = val.slice(0, wordStart) + val.slice(cur);
 				updateValue(newValue, wordStart);
 				return;
 			}
 
 			// Ctrl+U - delete from cursor to beginning
 			if (key.ctrl && input === 'u') {
-				const newValue = value.slice(cursor);
+				const newValue = val.slice(cur);
 				updateValue(newValue, 0);
 				return;
 			}
 
 			// Ctrl+K - delete from cursor to end
 			if (key.ctrl && input === 'k') {
-				const newValue = value.slice(0, cursor);
-				updateValue(newValue, cursor);
+				const newValue = val.slice(0, cur);
+				updateValue(newValue, cur);
 				return;
 			}
 
 			// Ctrl+H - same as backspace (terminal convention)
 			if (key.ctrl && input === 'h') {
-				if (cursor > 0) {
-					const newValue = value.slice(0, cursor - 1) + value.slice(cursor);
-					updateValue(newValue, cursor - 1);
+				if (cur > 0) {
+					const newValue = val.slice(0, cur - 1) + val.slice(cur);
+					updateValue(newValue, cur - 1);
 				}
 				return;
 			}
@@ -280,35 +327,102 @@ export function EnhancedTextInput({
 
 			// Regular character input
 			if (input && !key.ctrl && !key.meta) {
-				const newValue = value.slice(0, cursor) + input + value.slice(cursor);
-				updateValue(newValue, cursor + input.length);
+				// Detect multiline paste: input string contains line breaks
+				// (Ink may send entire paste as one input with literal \n/\r)
+				if (input.includes('\n') || input.includes('\r')) {
+					const lines = input
+						.split(/\r\n|\r|\n/)
+						.map((l) => l.trim())
+						.filter(Boolean);
+					if (lines.length > 1) {
+						// Multi-line paste: submit each line as separate query
+						valueRef.current = '';
+						cursorRef.current = 0;
+						for (const line of lines) {
+							onSubmit?.(line);
+						}
+						return;
+					}
+					// Single line with trailing newline → use content without newline
+					if (lines.length === 1) {
+						const line = lines[0]!;
+						const newValue = val.slice(0, cur) + line + val.slice(cur);
+						updateValue(newValue, cur + line.length);
+						return;
+					}
+					return;
+				}
+				const newValue = val.slice(0, cur) + input + val.slice(cur);
+				updateValue(newValue, cur + input.length);
 			}
 		},
 		{ isActive: isFocused && !isDisabled },
 	);
 
-	// Render the input with cursor
+	// Render the input with cursor (supports multiline)
 	const showPlaceholder = value.length === 0;
+	const isMultiline = value.includes('\n');
 
-	// Build the display with cursor
+	if (showPlaceholder) {
+		return (
+			<Box>
+				<Text inverse> </Text>
+				<Text dimColor>{placeholder}</Text>
+			</Box>
+		);
+	}
+
+	// Multiline rendering: split by newlines, show cursor on correct line
+	if (isMultiline) {
+		const lines = value.split('\n');
+		let charsSoFar = 0;
+
+		return (
+			<Box flexDirection="column">
+				{lines.map((line, lineIdx) => {
+					const lineStart = charsSoFar;
+					charsSoFar += line.length + 1; // +1 for the \n
+
+					const cursorInThisLine =
+						cursor >= lineStart && cursor < lineStart + line.length + 1;
+
+					if (!cursorInThisLine) {
+						return (
+							<Text key={lineIdx}>
+								{lineIdx > 0 && <Text color="gray">... </Text>}
+								{line}
+							</Text>
+						);
+					}
+
+					const cursorInLine = cursor - lineStart;
+					const before = line.slice(0, cursorInLine);
+					const at = line[cursorInLine] ?? ' ';
+					const after = line.slice(cursorInLine + 1);
+
+					return (
+						<Text key={lineIdx}>
+							{lineIdx > 0 && <Text color="gray">... </Text>}
+							{before}
+							<Text inverse>{at}</Text>
+							{after}
+						</Text>
+					);
+				})}
+			</Box>
+		);
+	}
+
+	// Single-line rendering (original)
 	const beforeCursor = value.slice(0, cursor);
 	const atCursor = value[cursor] ?? ' ';
 	const afterCursor = value.slice(cursor + 1);
 
 	return (
 		<Box>
-			{showPlaceholder ? (
-				<>
-					<Text inverse> </Text>
-					<Text dimColor>{placeholder}</Text>
-				</>
-			) : (
-				<>
-					<Text>{beforeCursor}</Text>
-					<Text inverse>{atCursor}</Text>
-					<Text>{afterCursor}</Text>
-				</>
-			)}
+			<Text>{beforeCursor}</Text>
+			<Text inverse>{atCursor}</Text>
+			<Text>{afterCursor}</Text>
 		</Box>
 	);
 }
