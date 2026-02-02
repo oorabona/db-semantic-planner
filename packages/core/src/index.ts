@@ -336,8 +336,6 @@ export type {
 	DumpMeta,
 	ExecutingAdapter,
 	IntrospectingAdapter,
-	// ARCH-006: Naming convention for identifier transformation
-	NamingConvention,
 	RawSqlAdapter,
 	StreamingAdapter,
 	SubqueryIncludeInfo,
@@ -353,8 +351,6 @@ export {
 	supportsRawSql,
 	supportsStreaming,
 	supportsTransactions,
-	toDbCasing,
-	toNamingConvention,
 	UnsupportedCapabilityError,
 } from './adapter.js';
 

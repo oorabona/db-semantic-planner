@@ -59,10 +59,10 @@
 - [-] ⏭️ Deferred: #29 CLI assertion factory — lower value, standalone story
 - [-] ⏭️ Deferred: #33 adapter-pgsql test ratio — L-size, standalone story
 
-### ~Dead Code Cleanup (4 items, ~2h)~ — 3/4 DONE
+### ~Dead Code Cleanup (4 items, ~2h)~ — 4/4 DONE
 - ~#24 Remove `NqlLimitError` unused interface~ — ✅ DONE (2026-02-01) (NqlWarning is used)
 - ~#25 Remove `_getRelationPath()` + `hasRelationPath()` dead functions~ — ✅ DONE (2026-02-01)
-- #26 Remove `@deprecated namingConvention` property — **Deferred** (deeply used, requires full migration to dbCasing)
+- [x] ✅ #26 Remove `@deprecated namingConvention` — full migration to `dbCasing` (2026-02-02)
 - ~#27 Remove `validate()` stub~ — ✅ DONE (2026-02-01)
 
 ### SRP / God Classes (4 items, ~40h)

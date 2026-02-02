@@ -15,7 +15,7 @@
  * ```
  */
 
-import type { DbCasing, NamingConvention } from '../adapter.js';
+import type { DbCasing } from '../adapter.js';
 import { ModelIRImpl } from '../model-impl.js';
 import type {
 	ColumnIR,
@@ -208,15 +208,10 @@ export interface Schema<T extends SchemaDefinition> {
 	 */
 	readonly tables: InferTables<T>;
 	/**
-	 * DB column casing (intuitive). Preferred over namingConvention.
+	 * DB column casing — describes what casing the database uses.
 	 * @see DbCasing
 	 */
 	readonly dbCasing?: DbCasing;
-	/**
-	 * @deprecated Use dbCasing. Legacy naming convention.
-	 * @see NamingConvention
-	 */
-	readonly namingConvention?: NamingConvention;
 	/**
 	 * Timestamp when this schema was introspected from the database.
 	 * Only present for schemas created via getSchemaFromDb().

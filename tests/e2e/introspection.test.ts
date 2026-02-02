@@ -168,13 +168,13 @@ describe.skip('Auto-Introspection [BLOCKED: adapter-pgsql Phase 4]', () => {
 			expect(schema.definition.comments).toBeUndefined();
 		});
 
-		it('includes namingConvention from adapter (F-003)', async () => {
+		it('includes dbCasing from adapter (F-003)', async () => {
 			const adapter = await createPgsqlAdapterForSchema(SCHEMA);
 			const schema = await getSchemaFromDb(adapter, { schema: SCHEMA });
 
-			// Schema should have namingConvention from adapter
-			expect(schema.namingConvention).toBeDefined();
-			expect(schema.namingConvention).toBe(adapter.namingConvention);
+			// Schema should have dbCasing from adapter
+			expect(schema.dbCasing).toBeDefined();
+			expect(schema.dbCasing).toBe(adapter.dbCasing);
 		});
 
 		it('includes introspectedAt timestamp (F-004)', async () => {

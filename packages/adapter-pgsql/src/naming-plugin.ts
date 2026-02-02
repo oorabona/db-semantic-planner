@@ -102,25 +102,6 @@ export const identityNaming = new IdentityNamingPlugin();
 export const camelCaseNaming = new CamelCaseNamingPlugin();
 
 /**
- * Get a naming plugin by legacy NamingConvention.
- * 'camelCase' means "DB is snake_case, transform to camelCase" (confusing legacy semantics).
- * Prefer `getNamingPluginForDbCasing()` for new code.
- */
-export function getNamingPlugin(
-	convention: 'camelCase' | 'snake_case' | 'preserve',
-): NamingPlugin {
-	switch (convention) {
-		case 'camelCase':
-			return camelCaseNaming;
-		case 'preserve':
-		case 'snake_case':
-			return identityNaming;
-		default:
-			return identityNaming;
-	}
-}
-
-/**
  * Get a naming plugin by DbCasing (intuitive semantics).
  * - `'snake_case'`: DB uses snake_case → CamelCaseNamingPlugin (transforms to camelCase)
  * - `'camelCase'`: DB uses camelCase → IdentityNamingPlugin (no transform)

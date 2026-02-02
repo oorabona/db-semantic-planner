@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	CamelCaseNamingPlugin,
 	camelCaseNaming,
-	getNamingPlugin,
+	getNamingPluginForDbCasing,
 	IdentityNamingPlugin,
 	identityNaming,
 } from '../naming-plugin.js';
@@ -150,17 +150,23 @@ describe('CamelCaseNamingPlugin', () => {
 	});
 });
 
-describe('getNamingPlugin', () => {
-	it('returns identity plugin', () => {
-		const plugin = getNamingPlugin('preserve');
+describe('getNamingPluginForDbCasing', () => {
+	it('returns camelCase plugin for snake_case DB casing', () => {
+		const plugin = getNamingPluginForDbCasing('snake_case');
+		expect(plugin).toBe(camelCaseNaming);
+		expect(plugin.toDatabase('createdAt')).toBe('created_at');
+	});
+
+	it('returns identity plugin for camelCase DB casing', () => {
+		const plugin = getNamingPluginForDbCasing('camelCase');
 		expect(plugin).toBe(identityNaming);
 		expect(plugin.toDatabase('createdAt')).toBe('createdAt');
 	});
 
-	it('returns camelCase plugin', () => {
-		const plugin = getNamingPlugin('camelCase');
-		expect(plugin).toBe(camelCaseNaming);
-		expect(plugin.toDatabase('createdAt')).toBe('created_at');
+	it('returns identity plugin for preserve DB casing', () => {
+		const plugin = getNamingPluginForDbCasing('preserve');
+		expect(plugin).toBe(identityNaming);
+		expect(plugin.toDatabase('createdAt')).toBe('createdAt');
 	});
 });
 

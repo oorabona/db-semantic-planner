@@ -251,16 +251,16 @@ export function createOrm<T extends SchemaDefinition>(
 		model = schemaObj.model;
 		schemaDefinition = schemaObj.definition;
 
-		// ARCH-006: Validate naming convention consistency
+		// ARCH-006: Validate casing consistency
 		if (
 			adapter &&
-			schemaObj.namingConvention &&
-			adapter.namingConvention &&
-			schemaObj.namingConvention !== adapter.namingConvention
+			schemaObj.dbCasing &&
+			adapter.dbCasing &&
+			schemaObj.dbCasing !== adapter.dbCasing
 		) {
 			throw new NamingConventionMismatchError({
-				schemaConvention: schemaObj.namingConvention,
-				adapterConvention: adapter.namingConvention,
+				schemaCasing: schemaObj.dbCasing,
+				adapterCasing: adapter.dbCasing,
 			});
 		}
 	} else if (modelDirect) {
