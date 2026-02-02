@@ -16,6 +16,17 @@ import type {
 } from '../types.js';
 
 /**
+ * Output layout controls what appears inline in the conversation flow.
+ * Detail inspection uses the anchored panel (.sql, .plan, .results, etc.).
+ */
+export type OutputLayout = 'compact' | 'results' | 'sql' | 'full';
+
+/**
+ * Panel view types for the anchored inspection panel below input.
+ */
+export type PanelView = 'sql' | 'plan' | 'results' | 'params' | 'dump';
+
+/**
  * Events emitted by the engine for UI consumption.
  */
 export type EngineEvent =
@@ -26,7 +37,10 @@ export type EngineEvent =
 	| { type: 'clear' }
 	| { type: 'exit' }
 	| { type: 'state-change'; state: EngineState }
-	| { type: 'show-history' };
+	| { type: 'show-history' }
+	| { type: 'show-panel'; view: PanelView }
+	| { type: 'close-panel' }
+	| { type: 'layout-change'; layout: OutputLayout };
 
 /**
  * Engine state — mirrors the business-relevant state from the REPL.
@@ -44,6 +58,7 @@ export interface EngineState {
 	schemaName?: string;
 	dbCasing?: 'snake_case' | 'camelCase' | 'preserve';
 	outputMode: 'json' | 'table' | 'csv';
+	outputLayout: OutputLayout;
 }
 
 /**
