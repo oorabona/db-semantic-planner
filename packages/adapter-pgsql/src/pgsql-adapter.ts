@@ -351,6 +351,68 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					.map((d) => d.relationName as string)
 					.filter(Boolean),
 			);
+
+			// Collect specific columns per relation from selectRelationColumn
+			// decisions that will be deduplicated. This preserves column info
+			// that would otherwise be lost when selectRelationColumn is removed.
+			const relationColumnsMap = new Map<string, string[]>();
+			if (includedRelations.size > 0) {
+				for (const d of decisions) {
+					if (d.type === 'selectRelationColumn' && d.relation && d.column) {
+						const col = d.column as string;
+						if (col === '*') continue; // Star = no column restriction
+						const rootRelation = (d.relation as string).split('.')[0] ?? '';
+						if (includedRelations.has(rootRelation)) {
+							const existing = relationColumnsMap.get(rootRelation);
+							if (existing) {
+								if (!existing.includes(col)) existing.push(col);
+							} else {
+								relationColumnsMap.set(rootRelation, [col]);
+							}
+						}
+					}
+				}
+
+				// Inject collected columns into matching includeStrategy decisions
+				if (relationColumnsMap.size > 0) {
+					for (const d of enrichedUnifiedDecisions) {
+						if (d.type === 'includeStrategy' && d.relationName) {
+							const cols = relationColumnsMap.get(d.relationName as string);
+							if (cols) {
+								(d as unknown as Record<string, unknown>).columns = cols;
+							}
+						}
+					}
+				}
+
+				// Validate injected columns exist in target table schema
+				const validationModel = options?.model ?? this.model;
+				if (validationModel && relationColumnsMap.size > 0) {
+					for (const d of enrichedUnifiedDecisions) {
+						if (d.type === 'includeStrategy' && d.columns && d.targetTable) {
+							const targetTable = validationModel.getTable(
+								d.targetTable as string,
+							);
+							if (targetTable) {
+								const validColumnNames = new Set(
+									targetTable.columns.map((c) => c.name),
+								);
+								const invalid = (d.columns as string[]).filter(
+									(c) => !validColumnNames.has(c),
+								);
+								if (invalid.length > 0) {
+									throw new Error(
+										`Unknown column(s) ${invalid.map((c) => `'${c}'`).join(', ')} ` +
+											`in relation '${d.relationName}' (table '${d.targetTable}'). ` +
+											`Available: ${[...validColumnNames].join(', ')}`,
+									);
+								}
+							}
+						}
+					}
+				}
+			}
+
 			const deduplicatedDecisions =
 				includedRelations.size > 0
 					? decisions.filter((d) => {

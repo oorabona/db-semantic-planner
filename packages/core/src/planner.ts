@@ -972,11 +972,13 @@ function processInclude(
 		includeStrategy = 'cte';
 	} else if (include.strategy === 'flat') {
 		// NQL v2.1: flat = exclude nested output (json_agg), planner picks best flat strategy
+		// lateral only when per-row LIMIT is needed; otherwise join is simpler
 		includeStrategy = selectSmartStrategy(
 			relation,
 			opts.dialectCapabilities,
 			false,
 			/* excludeNested */ true,
+			/* hasLimit */ include.limit != null,
 		);
 	} else {
 		includeStrategy = determineIncludeStrategy(relation, opts);
@@ -1289,6 +1291,7 @@ function selectSmartStrategy(
 	capabilities: DialectCapabilities | undefined,
 	isRecursive: boolean,
 	excludeNested = false,
+	hasLimit = false,
 ): ResolvedIncludeStrategy {
 	// Recursive relations should use CTE
 	if (isRecursive) {
@@ -1304,14 +1307,15 @@ function selectSmartStrategy(
 	// - json_agg: aggregates children into single JSON array, no row explosion
 	// - Works for both to-one (hasOne, belongsTo) and to-many (hasMany)
 	// - User can force JOIN via | flat modifier if data is too large for JSON
-	// - lateral: allows per-row subquery with LIMIT, good for "top N children"
-	// - join: fallback when json_agg not supported
+	// - lateral: only when per-row LIMIT is needed (top N children pattern)
+	// - join: simple flat strategy, well-optimized by the database
 
 	if (capabilities?.supportsJsonAgg && !excludeNested) {
 		return 'json_agg';
 	}
 
-	if (capabilities?.supportsLateralJoin) {
+	// LATERAL only when per-row LIMIT is needed — otherwise join is simpler and faster
+	if (hasLimit && capabilities?.supportsLateralJoin) {
 		return 'lateral';
 	}
 
@@ -1513,7 +1517,7 @@ function generateIncludeReasoning(
 		case 'cte':
 			return `${prefix} - using CTE for recursive/hierarchical traversal`;
 		case 'lateral':
-			return `${prefix} - using LATERAL JOIN for per-row subquery with LIMIT support`;
+			return `${prefix} - using LATERAL JOIN for per-row correlated subquery (LIMIT per parent)`;
 		case 'json_agg':
 			return `${prefix} - using JSON aggregation to avoid row explosion`;
 	}

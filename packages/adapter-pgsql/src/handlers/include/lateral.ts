@@ -130,7 +130,7 @@ function compileLateralCascade(
 	targetColumn: string,
 	ctx: CompilerContext,
 	state: CompilerState,
-): { joins: Node[]; lateralAlias: string } {
+): { joins: Node[]; targets: Node[]; lateralAlias: string } {
 	const targetTable = decision.targetTable ?? decision.relation;
 	const columns = decision.columns;
 	const limit = typeof decision.limit === 'number' ? decision.limit : undefined;
@@ -161,6 +161,9 @@ function compileLateralCascade(
 	const join = buildLateralJoin(subquery, lateralAlias, ctx);
 	const joins: Node[] = [join];
 
+	// Build outer SELECT targets referencing the lateral alias
+	const targets: Node[] = buildLateralTargets(columns, lateralAlias, ctx);
+
 	// Recursively compile children
 	if (decision.children && decision.children.length > 0) {
 		for (const child of decision.children) {
@@ -180,10 +183,11 @@ function compileLateralCascade(
 				state,
 			);
 			joins.push(...childResult.joins);
+			targets.push(...childResult.targets);
 		}
 	}
 
-	return { joins, lateralAlias };
+	return { joins, targets, lateralAlias };
 }
 
 /**
@@ -222,7 +226,7 @@ export const lateralIncludeHandler: IncludeHandler = {
 			);
 		const outerAlias = ctx.currentAlias ?? ctx.rootTable;
 
-		const { joins } = compileLateralCascade(
+		const { joins, targets } = compileLateralCascade(
 			decision,
 			outerAlias,
 			sourceColumn,
@@ -235,6 +239,7 @@ export const lateralIncludeHandler: IncludeHandler = {
 		const [primary, ...additional] = joins as [Node, ...Node[]];
 
 		return {
+			targets,
 			lateral: primary,
 			join: primary,
 			...(additional.length > 0 && { additionalJoins: additional }),

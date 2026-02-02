@@ -286,6 +286,104 @@ describe('lateral handler', () => {
 		);
 	});
 
+	// F-004: Outer SELECT targets — star expansion
+	it('returns targets with star expansion for lateral alias', () => {
+		const ctx = makeCtx('users');
+		const state = createCompilerState();
+		const decision = buildDecision();
+
+		const result = lateralIncludeHandler.compile(decision, ctx, state);
+
+		expect(result.targets).toBeDefined();
+		expect(result.targets!.length).toBe(1);
+
+		// Deparse the target to verify it references posts_lat_0.*
+		const stmt = {
+			SelectStmt: {
+				targetList: result.targets!,
+				fromClause: [
+					{
+						RangeVar: { relname: 'users', inh: true, relpersistence: 'p' },
+					},
+				],
+			},
+		};
+		const sql = normalizeSQL(deparseSync(stmt));
+		expect(sql).toContain('posts_lat_0.*');
+	});
+
+	// F-005: Outer SELECT targets — explicit columns
+	it('returns targets with explicit columns for lateral alias', () => {
+		const ctx = makeCtx('users');
+		const state = createCompilerState();
+		const decision = buildDecision({
+			columns: ['id', 'title', 'content'],
+		});
+
+		const result = lateralIncludeHandler.compile(decision, ctx, state);
+
+		expect(result.targets).toBeDefined();
+		expect(result.targets!.length).toBe(3);
+
+		const stmt = {
+			SelectStmt: {
+				targetList: result.targets!,
+				fromClause: [
+					{
+						RangeVar: { relname: 'users', inh: true, relpersistence: 'p' },
+					},
+				],
+			},
+		};
+		const sql = normalizeSQL(deparseSync(stmt));
+		expect(sql).toContain('posts_lat_0.id');
+		expect(sql).toContain('posts_lat_0.title');
+		expect(sql).toContain('posts_lat_0.content');
+	});
+
+	// F-006: Cascaded lateral targets include all levels
+	it('returns targets for all cascade levels', () => {
+		const ctx = makeCtx('users');
+		const state = createCompilerState();
+		const decision = buildDecision({
+			relation: 'orders',
+			targetTable: 'orders',
+			sourceColumn: 'id',
+			targetColumn: 'customer_id',
+			children: [
+				{
+					type: 'includeStrategy',
+					relation: 'items',
+					targetTable: 'items',
+					strategy: 'lateral',
+					relationType: 'hasMany',
+					foreignKey: 'order_id',
+					parentKey: 'id',
+				},
+			] as readonly Decision[],
+		});
+
+		const result = lateralIncludeHandler.compile(decision, ctx, state);
+
+		expect(result.targets).toBeDefined();
+		// 2 targets: orders_lat_0.* + items_lat_1.*
+		expect(result.targets!.length).toBe(2);
+
+		const stmt = {
+			SelectStmt: {
+				targetList: result.targets!,
+				fromClause: [
+					{
+						RangeVar: { relname: 'users', inh: true, relpersistence: 'p' },
+					},
+				],
+			},
+		};
+		const sql = normalizeSQL(deparseSync(stmt));
+		expect(sql).toContain('orders_lat_0.*');
+		expect(sql).toContain('items_lat_1.*');
+	});
+
 	// F-003: orderBy — not directly supported in lateral subquery handler,
 	// but handler correctly passes through limit which uses same pattern
 	it('handles decision with no limit (no LIMIT clause in SQL)', () => {
