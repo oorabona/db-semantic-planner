@@ -476,7 +476,7 @@ describe('Semantic Planner', () => {
 			expect(includeDecision?.choice).toBe('json_agg');
 		});
 
-		it('should exclude json_agg when flat strategy is used', () => {
+		it('should use join when flat strategy is used without limit', () => {
 			const intent: QueryIntent = {
 				type: 'select',
 				from: 'categories',
@@ -491,7 +491,26 @@ describe('Semantic Planner', () => {
 				(d) => d.type === 'include-strategy',
 			);
 			expect(includeDecision).toBeDefined();
-			// flat excludes json_agg → planner picks lateral (next best for PostgreSQL)
+			// flat without limit → join (simpler, better optimized by DB)
+			expect(includeDecision?.choice).toBe('join');
+		});
+
+		it('should use lateral when flat strategy is used with limit', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				include: [{ relation: 'products', strategy: 'flat', limit: 3 }],
+			};
+
+			const report = plan(intent, q2Schema, {
+				dialectCapabilities: POSTGRESQL_CAPABILITIES,
+			});
+
+			const includeDecision = report.decisions.find(
+				(d) => d.type === 'include-strategy',
+			);
+			expect(includeDecision).toBeDefined();
+			// flat + limit → lateral (per-row LIMIT requires correlated subquery)
 			expect(includeDecision?.choice).toBe('lateral');
 		});
 

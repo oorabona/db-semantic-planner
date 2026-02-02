@@ -55,6 +55,17 @@
 - Made `RefDefinition` and `ref()` generic to preserve literal option types
 - Fixed: nullable FK inference, relation column access, inverse relations, custom relation names
 
+### ~[Adapter] Lateral JOIN column propagation + validation~ — ✅ DONE (2026-02-02)
+- Fixed: `select id, relation.col | flat` now produces `lat_0.col` instead of `lat_0.*`
+- Added: column validation against schema (unknown columns throw before query)
+- Added: NQL → SQL compile-only integration test layer (`nql-to-sql.test.ts`)
+
+### [CLI] Enrich query plan display — Effort: M
+- PlanReport contains rich info (alternatives, FK used, relation type, CTE details, ambiguity) but CLI shows minimal
+- Relation traversal decisions (WHERE EXISTS, IN subquery, FK choice) not shown at all → "no decisions"
+- CTE details hidden (only count), warning codes hidden, decision alternatives hidden
+- Goal: show WHERE strategy, FK used, relation type, CTE purpose, alternatives considered
+
 ### [Docs] DOCS-001: User documentation (Getting Started, API Guide)
 ### [Docs] DOCS-002: Migration guides (from-prisma, from-drizzle, from-kysely)
 ### [Docs] DOCS-003: Pattern guides (multi-tenant, recursive queries, window functions)
