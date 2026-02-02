@@ -2,19 +2,7 @@
 
 ## In Progress
 
-- [x] ✅ [NQL] Fix BETWEEN not compiled to SQL WHERE clause (#NQL-BUG-1) (2026-02-02)
-- [x] ✅ [NQL] Fix IN operator `"any"` quoting — should be ANY not "any" (#NQL-BUG-2) (2026-02-02)
-- [x] ✅ [NQL] Fix NOT IN not compiled to SQL WHERE clause (#NQL-BUG-3) (2026-02-02)
-- [x] ✅ [NQL] Fix CASE WHEN not compiled to SQL SELECT list (#NQL-BUG-4) (2026-02-02)
-
-- [ ] 🟡 [NQL] Implement IN (subquery) compilation (#NQL-GAP-1)
-- [ ] 🟡 [NQL] Implement EXISTS (subquery) compilation (#NQL-GAP-2)
-- [ ] 🟡 [NQL] Implement IN (dateRange) compilation (#NQL-GAP-3)
-- [ ] 🟡 [Adapter] Fix silent drop: SELECT relationColumn (e.g. customer.name) (#NQL-GAP-4)
-- [ ] 🟡 [Adapter] Fix silent drop: SELECT pseudoColumn (parent, child) (#NQL-GAP-5)
-- [ ] 🟡 [Adapter] Fix silent drop: SELECT arithmetic (a + b) (#NQL-GAP-6)
-- [ ] 🟡 [Adapter] Fix silent drop: SELECT unary (-amount) (#NQL-GAP-7)
-- [ ] 🟡 [Docs] Create ARCHITECTURE.md — consolidated architecture reference (#DOCS-ARCH)
+(Archived → docs/historic/done-2026-02.md)
 
 ---
 

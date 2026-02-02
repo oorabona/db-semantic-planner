@@ -382,7 +382,7 @@ function compileInCondition(
 			lexpr: column,
 			rexpr: createParamRef(paramIdx),
 		},
-		};
+	};
 }
 
 /**
@@ -421,7 +421,10 @@ function compileInSubquery(
 	if (sub.where) {
 		innerWhere = compileCondition(
 			sub.where as PlanDecision,
-			ctx ?? { naming: { toColumn: (n: string) => n, toTable: (n: string) => n }, rootTable: sub.from },
+			ctx ?? {
+				naming: { toColumn: (n: string) => n, toTable: (n: string) => n },
+				rootTable: sub.from,
+			},
 			state,
 		);
 	}

@@ -323,8 +323,37 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				return jd;
 			});
 
+			// Deduplicate: remove selectRelationColumn decisions for relations
+			// already covered by an include strategy.
+			// Include handlers (json_agg, lateral, CTE, join) already compile the
+			// relation's columns — emitting both would produce duplicate columns.
+			// Standalone relation expressions (no matching include) are kept.
+			// Note: selectPseudoColumn (recursive traversals like manager.name)
+			// are never covered by includes — they always compile independently.
+			const includedRelations = new Set(
+				enrichedUnifiedDecisions
+					.filter((d) => d.type === 'includeStrategy')
+					.map((d) => d.relationName as string)
+					.filter(Boolean),
+			);
+			const deduplicatedDecisions =
+				includedRelations.size > 0
+					? decisions.filter((d) => {
+							if (d.type === 'selectRelationColumn' && d.relation) {
+								// relation may be a dotted path (e.g. "userRoles.role.permissions")
+								// — check if the root segment is covered by an include
+								const rel = d.relation as string;
+								const rootRelation = rel.split('.')[0] ?? rel;
+								if (includedRelations.has(rootRelation)) {
+									return false; // covered by include strategy
+								}
+							}
+							return true;
+						})
+					: decisions;
+
 			const allDecisions = [
-				...decisions,
+				...deduplicatedDecisions,
 				...existsDecisions,
 				...enrichedUnifiedDecisions,
 			];
