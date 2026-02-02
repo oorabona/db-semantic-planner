@@ -61,7 +61,7 @@ export const rawHandler: ExpressionHandler = {
 
 	compile(
 		decision: Decision,
-		_ctx: CompilerContext,
+		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
 		const sql = decision.value;
@@ -73,6 +73,9 @@ export const rawHandler: ExpressionHandler = {
 		if (sql.length === 0) {
 			throw new Error('Raw expression cannot be empty');
 		}
+
+		// Audit trail callback (opt-in)
+		ctx.onRawSQL?.(sql);
 
 		// Log warning in development
 		if (process.env.NODE_ENV !== 'production') {

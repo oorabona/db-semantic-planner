@@ -24,6 +24,9 @@ import type { RecursiveIncludeConfig } from './intent-builder.js';
 // Helper Types
 // ============================================================================
 
+/** A database result row — typed loosely since row shapes are dynamic. */
+type ResultRow = Record<string, unknown>;
+
 /**
  * Options for hydrating includes.
  * Requires model (unlike CompileOptions where it's optional).
@@ -212,15 +215,18 @@ export class ResultHydrator<TResult = unknown> {
 	 * Process recursive includes via CTEs.
 	 */
 	async processRecursiveIncludes(
-		// biome-ignore lint/suspicious/noExplicitAny: Result rows can have any shape
-		results: any[],
+		results: unknown[],
 		recursiveIncludes: readonly RecursiveIncludeConfig[],
 		adapter: Adapter,
 	): Promise<void> {
 		if (results.length === 0) return;
 
 		for (const config of recursiveIncludes) {
-			await this.processOneRecursiveInclude(results, config, adapter);
+			await this.processOneRecursiveInclude(
+				results as ResultRow[],
+				config,
+				adapter,
+			);
 		}
 	}
 
@@ -228,8 +234,7 @@ export class ResultHydrator<TResult = unknown> {
 	 * Process a single recursive include.
 	 */
 	private async processOneRecursiveInclude(
-		// biome-ignore lint/suspicious/noExplicitAny: Result rows can have any shape
-		results: any[],
+		results: ResultRow[],
 		config: RecursiveIncludeConfig,
 		adapter: Adapter,
 	): Promise<void> {
@@ -410,10 +415,8 @@ export class ResultHydrator<TResult = unknown> {
 	 * Merge recursive results back into main results.
 	 */
 	private mergeRecursiveResults(
-		// biome-ignore lint/suspicious/noExplicitAny: Result rows can have any shape
-		results: any[],
-		// biome-ignore lint/suspicious/noExplicitAny: Recursive result rows can have any shape
-		recursiveRows: any[],
+		results: ResultRow[],
+		recursiveRows: ResultRow[],
 		relation: string,
 		direction: 'ancestors' | 'descendants',
 		foreignKey: string,
@@ -421,8 +424,7 @@ export class ResultHydrator<TResult = unknown> {
 		omitSelf: boolean,
 	): void {
 		// Build a map from start ID to recursive results
-		// biome-ignore lint/suspicious/noExplicitAny: Recursive result rows can have any shape
-		const resultsByStartId = new Map<unknown, any[]>();
+		const resultsByStartId = new Map<unknown, ResultRow[]>();
 
 		for (const row of recursiveRows) {
 			// The recursive CTE returns rows with a _start_id or similar marker
@@ -472,16 +474,16 @@ export class ResultHydrator<TResult = unknown> {
 	 * Build nested hierarchy from flat recursive results.
 	 */
 	private buildNestedHierarchy(
-		// biome-ignore lint/suspicious/noExplicitAny: Recursive result rows can have any shape
-		rows: any[],
+		rows: ResultRow[],
 		direction: 'ancestors' | 'descendants',
 		foreignKey: string,
-		// biome-ignore lint/suspicious/noExplicitAny: Nested result can have any shape
-	): any {
+	): ResultRow | ResultRow[] | null {
 		if (rows.length === 0) return direction === 'ancestors' ? null : [];
 
 		// Sort by depth
-		const sorted = [...rows].sort((a, b) => (a.depth ?? 0) - (b.depth ?? 0));
+		const sorted = [...rows].sort(
+			(a, b) => ((a.depth as number) ?? 0) - ((b.depth as number) ?? 0),
+		);
 
 		if (direction === 'ancestors') {
 			// For ancestors, build a chain: self -> parent -> grandparent
@@ -499,10 +501,8 @@ export class ResultHydrator<TResult = unknown> {
 		}
 
 		// For descendants, build a tree structure
-		// biome-ignore lint/suspicious/noExplicitAny: Building nested tree structure
-		const nodeMap = new Map<unknown, any>();
-		// biome-ignore lint/suspicious/noExplicitAny: Building nested tree structure
-		const roots: any[] = [];
+		const nodeMap = new Map<unknown, ResultRow>();
+		const roots: ResultRow[] = [];
 
 		for (const row of sorted) {
 			const node = { ...row, children: [] };
@@ -512,7 +512,7 @@ export class ResultHydrator<TResult = unknown> {
 			if (parentId !== null && parentId !== undefined) {
 				const parent = nodeMap.get(parentId);
 				if (parent) {
-					parent.children.push(node);
+					(parent.children as ResultRow[]).push(node);
 				} else {
 					roots.push(node);
 				}
