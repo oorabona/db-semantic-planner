@@ -16,7 +16,6 @@
 
 - [ ] [NQL] JSONB Operators Support — Effort: M
 - [ ] [Adapter] Enhance `singularize()` for irregular plurals — Effort: M
-- [ ] [Adapter] ON CONFLICT / Upsert support — Effort: M
 - [ ] [CLI] Enrich query plan display — Effort: M
 - [ ] [Docs] DOCS-001: User documentation (Getting Started, API Guide)
 - [ ] [Docs] DOCS-002: Migration guides (from-prisma, from-drizzle, from-kysely)
@@ -67,7 +66,5 @@
 ---
 
 ## Completed
-
-- [x] ✅ [Adapter] json_agg column projection — jsonb_build_object for specific columns (2026-02-03)
 
 (Archived → docs/historic/done-2026-02.md)
