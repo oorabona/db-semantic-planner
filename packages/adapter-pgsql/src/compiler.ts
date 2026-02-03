@@ -172,11 +172,18 @@ export interface PlanDecision {
 	readonly intentPath?: string;
 	// Filter/include strategy choice from planner ('join' | 'exists' | 'json_agg')
 	readonly choice?: string;
-	// IN (subquery) reference
+	// IN (subquery) reference — carries the full QueryIntent shape
 	readonly subquery?: {
+		readonly type?: string;
 		readonly from: string;
-		readonly select: string;
-		readonly where?: PlanDecision;
+		readonly select?: unknown;
+		readonly where?: PlanDecision | unknown;
+		readonly orderBy?: readonly { field: string; direction?: string }[];
+		readonly groupBy?: readonly string[];
+		readonly having?: unknown;
+		readonly distinct?: boolean;
+		readonly limit?: number;
+		readonly offset?: number;
 	};
 	// Expression type discriminator (e.g. 'case' for CASE WHEN)
 	readonly expressionType?: string;

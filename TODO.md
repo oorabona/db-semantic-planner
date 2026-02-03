@@ -2,7 +2,7 @@
 
 ## In Progress
 
-(None)
+(none)
 
 ---
 
@@ -14,10 +14,8 @@
 
 ## Pending — MEDIUM
 
-- [ ] [NQL] HAVING support (aggregate filter after GROUP BY) — Effort: S
-- [ ] [Adapter] json_agg column projection — Effort: M
+- [ ] [Adapter] json_agg column projection (to_jsonb selects all columns, ignores decision.columns) — Effort: M
 - [ ] [NQL] JSONB Operators Support — Effort: M
-- [ ] [Core] IN subquery → relation traversal normalization — Effort: M
 - [ ] [Adapter] Enhance `singularize()` for irregular plurals — Effort: M
 - [ ] [Adapter] ON CONFLICT / Upsert support — Effort: M
 - [ ] [CLI] Enrich query plan display — Effort: M
