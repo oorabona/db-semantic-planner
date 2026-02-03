@@ -108,6 +108,7 @@ function compileJsonAggRecursive(
 			...(childNodes && { childNodes }),
 			innerAlias,
 			...(limit !== undefined && { limit }),
+			...(decision.columns && { columns: decision.columns }),
 		},
 	);
 }

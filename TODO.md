@@ -14,7 +14,6 @@
 
 ## Pending — MEDIUM
 
-- [ ] [Adapter] json_agg column projection (to_jsonb selects all columns, ignores decision.columns) — Effort: M
 - [ ] [NQL] JSONB Operators Support — Effort: M
 - [ ] [Adapter] Enhance `singularize()` for irregular plurals — Effort: M
 - [ ] [Adapter] ON CONFLICT / Upsert support — Effort: M
@@ -69,8 +68,6 @@
 
 ## Completed
 
-- [x] ✅ [Adapter] Fix `relation.*` wildcard column propagation in flat/join includes (2026-02-03)
-- [x] ✅ [Adapter] Replace hardcoded `'id'` with `defaultPk` in plan-decision-extractor (2026-02-03)
-- [x] ✅ [CLI] Fix input wrapping — horizontal scrolling window for long input lines (2026-02-03)
+- [x] ✅ [Adapter] json_agg column projection — jsonb_build_object for specific columns (2026-02-03)
 
 (Archived → docs/historic/done-2026-02.md)

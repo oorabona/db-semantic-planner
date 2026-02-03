@@ -105,13 +105,28 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(sql).toContain('employees');
 		// Wildcard must produce star target, not just 'id'
 		// SQL should have employees.* (star) NOT just "employees"."id"
-		expect(sql).not.toMatch(/"employees_0"\."id"\s+as\s+"employees\.id"\s*from/i);
+		expect(sql).not.toMatch(
+			/"employees_0"\."id"\s+as\s+"employees\.id"\s*from/i,
+		);
 	});
 
 	it('compiles include without flat (json_agg or join)', () => {
 		const sql = nqlToSQL('departments | select *, employees.*');
 		// Planner picks best strategy (json_agg for 1:N, or join)
 		expect(sql).toContain('employees');
+	});
+
+	it('projects specific columns in json_agg include', () => {
+		const sql = nqlToSQL(
+			'departments | select id, employees.name, employees.email',
+		);
+		// Should use jsonb_build_object for column projection instead of to_jsonb
+		expect(sql).toContain('jsonb_build_object');
+		expect(sql).not.toContain('to_jsonb');
+		// Projected columns: name, email (from employees.name, employees.email)
+		// PK (id) is added by extractor for NULL detection
+		expect(sql).toContain("'name'");
+		expect(sql).toContain("'email'");
 	});
 
 	it('compiles order by', () => {
@@ -149,7 +164,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 	// Regression test: relation.* with where + alias + flat must produce all columns
 	it('produces star target for relation.* in flat include with where and alias', () => {
 		const sql = nqlToSQL(
-			"departments | where employees.salary > 50000 | select id as deptId, employees.* | limit 5 | flat",
+			'departments | where employees.salary > 50000 | select id as deptId, employees.* | limit 5 | flat',
 		);
 		// Must have join to employees
 		expect(sql).toContain('employees');
@@ -158,7 +173,9 @@ describe('NQL → SQL compile-only pipeline', () => {
 		// Must have alias deptId
 		expect(sql).toContain('deptid');
 		// Must NOT have only employees.id — should have star/all columns
-		expect(sql).not.toMatch(/"employees_0"\."id"\s+as\s+"employees\.id"\s*from/i);
+		expect(sql).not.toMatch(
+			/"employees_0"\."id"\s+as\s+"employees\.id"\s*from/i,
+		);
 	});
 
 	// Regression test: specific relation columns must NOT produce star
