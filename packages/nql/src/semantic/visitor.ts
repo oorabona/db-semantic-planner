@@ -135,8 +135,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		requireFields(ctx, ['identSegment', 'query'], 'Invalid let statement');
 		return {
 			type: 'let',
-			name: this.visit(asCstNode(ctx.identSegment![0]!)),
-			query: this.visit(asCstNode(ctx.query![0]!)),
+			name: this.visit(asCstNode(ctx.identSegment[0]!)),
+			query: this.visit(asCstNode(ctx.query[0]!)),
 		};
 	}
 
@@ -155,9 +155,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	// ============================================================
 
 	query(ctx: CstContext): NqlQuery {
-		const table = this.visit(
-			asCstNode(requireFirst(ctx, 'tableRef', 'Query missing table')),
-		);
+		requireFirst(ctx, 'tableRef', 'Query missing table');
+		const table = this.visit(asCstNode(ctx.tableRef[0]!));
 		const clauses: NqlClause[] = [];
 
 		if (ctx.queryClause) {
@@ -170,11 +169,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	tableRef(ctx: CstContext): string {
-		return this.visit(
-			asCstNode(
-				requireFirst(ctx, 'identSegment', 'Table ref missing identifier'),
-			),
-		);
+		requireFirst(ctx, 'identSegment', 'Table ref missing identifier');
+		return this.visit(asCstNode(ctx.identSegment[0]!));
 	}
 
 	queryClause(ctx: CstContext): NqlClause {
@@ -189,13 +185,10 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	whereClause(ctx: CstContext): NqlClause {
+		requireFirst(ctx, 'booleanExpr', 'Where clause missing expression');
 		return {
 			type: 'where',
-			condition: this.visit(
-				asCstNode(
-					requireFirst(ctx, 'booleanExpr', 'Where clause missing expression'),
-				),
-			),
+			condition: this.visit(asCstNode(ctx.booleanExpr[0]!)),
 		};
 	}
 
@@ -242,26 +235,25 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	limitClause(ctx: CstContext): NqlClause {
-		return {
-			type: 'limit',
-			count: parseInt(
-				getImage(
-					requireFirst(ctx, 'NumberLiteral', 'Limit clause missing number'),
-				),
-				10,
-			),
-		};
+		requireFirst(ctx, 'NumberLiteral', 'Limit clause missing number');
+		const count = parseInt(getImage(ctx.NumberLiteral[0]!), 10);
+		// Check for relation path (identSegment nodes before the number)
+		const segments = ctx.identSegment;
+		if (segments && segments.length > 0) {
+			const parts: string[] = [];
+			for (const seg of segments) {
+				parts.push(this.visit(asCstNode(seg)));
+			}
+			return { type: 'limit', count, relation: parts.join('.') };
+		}
+		return { type: 'limit', count };
 	}
 
 	offsetClause(ctx: CstContext): NqlClause {
+		requireFirst(ctx, 'NumberLiteral', 'Offset clause missing number');
 		return {
 			type: 'offset',
-			count: parseInt(
-				getImage(
-					requireFirst(ctx, 'NumberLiteral', 'Offset clause missing number'),
-				),
-				10,
-			),
+			count: parseInt(getImage(ctx.NumberLiteral[0]!), 10),
 		};
 	}
 
@@ -270,18 +262,15 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	// ============================================================
 
 	joinSpec(ctx: CstContext): NqlJoinSpec {
-		const relation = this.visit(
-			asCstNode(
-				requireFirst(ctx, 'identSegment', 'Join spec missing relation'),
-			),
-		);
+		requireFirst(ctx, 'identSegment', 'Join spec missing relation');
+		const relation = this.visit(asCstNode(ctx.identSegment[0]!));
 		let via: string | undefined;
 		let condition: NqlExpression | undefined;
 		let params: NqlJoinParam[] | undefined;
 
 		// Handle via disambiguation
-		if (ctx.Via && ctx.identSegment!.length > 1) {
-			via = this.visit(asCstNode(ctx.identSegment![1]!));
+		if (ctx.Via && ctx.identSegment.length > 1) {
+			via = this.visit(asCstNode(ctx.identSegment[1]!));
 		}
 
 		// Handle params
@@ -314,8 +303,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			'Param missing name or value',
 		);
 		return {
-			name: this.visit(asCstNode(ctx.identSegment![0]!)),
-			value: this.visit(asCstNode(ctx.literal![0]!)),
+			name: this.visit(asCstNode(ctx.identSegment[0]!)),
+			value: this.visit(asCstNode(ctx.literal[0]!)),
 		};
 	}
 
@@ -345,11 +334,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		}
 
 		// Expression with optional alias
-		const expression = this.visit(
-			asCstNode(
-				requireFirst(ctx, 'expression', 'Select item missing expression'),
-			),
-		);
+		requireFirst(ctx, 'expression', 'Select item missing expression');
+		const expression = this.visit(asCstNode(ctx.expression[0]!));
 		const alias = ctx.identSegment
 			? this.visit(asCstNode(ctx.identSegment[0]!))
 			: undefined;
@@ -382,11 +368,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	orderItem(ctx: CstContext): NqlOrderItem {
-		const expression = this.visit(
-			asCstNode(
-				requireFirst(ctx, 'expression', 'Order item missing expression'),
-			),
-		);
+		requireFirst(ctx, 'expression', 'Order item missing expression');
+		const expression = this.visit(asCstNode(ctx.expression[0]!));
 		const direction: 'asc' | 'desc' = ctx.Desc ? 'desc' : 'asc';
 		return { expression, direction };
 	}
@@ -396,19 +379,17 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	// ============================================================
 
 	booleanExpr(ctx: CstContext): NqlExpression {
-		return this.visit(
-			asCstNode(requireFirst(ctx, 'orExpr', 'Boolean expr missing orExpr')),
-		);
+		requireFirst(ctx, 'orExpr', 'Boolean expr missing orExpr');
+		return this.visit(asCstNode(ctx.orExpr[0]!));
 	}
 
 	orExpr(ctx: CstContext): NqlExpression {
-		let left = this.visit(
-			asCstNode(requireFirst(ctx, 'andExpr', 'Or expr missing andExpr')),
-		);
+		requireFirst(ctx, 'andExpr', 'Or expr missing andExpr');
+		let left = this.visit(asCstNode(ctx.andExpr[0]!));
 
-		if (ctx.andExpr!.length > 1) {
-			for (let i = 1; i < ctx.andExpr!.length; i++) {
-				const right = this.visit(asCstNode(ctx.andExpr![i]!));
+		if (ctx.andExpr.length > 1) {
+			for (let i = 1; i < ctx.andExpr.length; i++) {
+				const right = this.visit(asCstNode(ctx.andExpr[i]!));
 				left = { type: 'binary', operator: 'or', left, right };
 			}
 		}
@@ -416,13 +397,12 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	andExpr(ctx: CstContext): NqlExpression {
-		let left = this.visit(
-			asCstNode(requireFirst(ctx, 'notExpr', 'And expr missing notExpr')),
-		);
+		requireFirst(ctx, 'notExpr', 'And expr missing notExpr');
+		let left = this.visit(asCstNode(ctx.notExpr[0]!));
 
-		if (ctx.notExpr!.length > 1) {
-			for (let i = 1; i < ctx.notExpr!.length; i++) {
-				const right = this.visit(asCstNode(ctx.notExpr![i]!));
+		if (ctx.notExpr.length > 1) {
+			for (let i = 1; i < ctx.notExpr.length; i++) {
+				const right = this.visit(asCstNode(ctx.notExpr[i]!));
 				left = { type: 'binary', operator: 'and', left, right };
 			}
 		}
@@ -430,11 +410,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	notExpr(ctx: CstContext): NqlExpression {
-		const expr = this.visit(
-			asCstNode(
-				requireFirst(ctx, 'primaryCond', 'Not expr missing primaryCond'),
-			),
-		);
+		requireFirst(ctx, 'primaryCond', 'Not expr missing primaryCond');
+		const expr = this.visit(asCstNode(ctx.primaryCond[0]!));
 
 		if (ctx.Not) {
 			return { type: 'unary', operator: 'not', operand: expr };
@@ -462,11 +439,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		}
 
 		// Expression-based conditions
-		const left = this.visit(
-			asCstNode(
-				requireFirst(ctx, 'expression', 'PrimaryCond missing expression'),
-			),
-		);
+		requireFirst(ctx, 'expression', 'PrimaryCond missing expression');
+		const left = this.visit(asCstNode(ctx.expression[0]!));
 
 		// Check for suffix
 		if (ctx.comparisonSuffix) {
@@ -495,12 +469,13 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		suffixNode: CstNode,
 	): NqlExpression {
 		const suffixCtx = suffixNode.children as CstContext;
-		requireFields(
-			suffixCtx,
-			['compOp', 'expression'],
-			'Comparison suffix missing operator or expression',
-		);
-		const operator = this.visit(asCstNode(suffixCtx.compOp![0]!)) as
+		if (!suffixCtx.compOp || !suffixCtx.expression) {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Comparison suffix missing operator or expression',
+			);
+		}
+		const operator = this.visit(asCstNode(suffixCtx.compOp[0]!)) as
 			| '='
 			| '!='
 			| '<'
@@ -508,7 +483,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			| '<='
 			| '>='
 			| 'like';
-		const right = this.visit(asCstNode(suffixCtx.expression![0]!));
+		const right = this.visit(asCstNode(suffixCtx.expression[0]!));
 		return { type: 'comparison', operator, left, right };
 	}
 
@@ -669,14 +644,11 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	existsCheck(ctx: CstContext): NqlExistsExpression {
+		requireFirst(ctx, 'scalarSubquery', 'Exists missing subquery');
 		return {
 			type: 'exists',
 			negated: !!ctx.Not,
-			subquery: this.visit(
-				asCstNode(
-					requireFirst(ctx, 'scalarSubquery', 'Exists missing subquery'),
-				),
-			),
+			subquery: this.visit(asCstNode(ctx.scalarSubquery[0]!)),
 		};
 	}
 
@@ -706,15 +678,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		}
 
 		// Get relation path
-		const pathExpr = this.visit(
-			asCstNode(
-				requireFirst(
-					ctx,
-					'pathExpr',
-					'quantifiedRelationFilter missing pathExpr',
-				),
-			),
-		) as {
+		requireFirst(ctx, 'pathExpr', 'quantifiedRelationFilter missing pathExpr');
+		const pathExpr = this.visit(asCstNode(ctx.pathExpr[0]!)) as {
 			type: 'path';
 			segments: string[];
 		};
@@ -736,29 +701,20 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			};
 		}
 		// Simple form: some(relation).column = value
-		const column = this.visit(
-			asCstNode(
-				requireFirst(
-					ctx,
-					'identSegment',
-					'quantifiedRelationFilter missing column',
-				),
-			),
-		) as string;
-		const operator = this.visit(
-			asCstNode(
-				requireFirst(ctx, 'compOp', 'quantifiedRelationFilter missing compOp'),
-			),
-		) as string;
-		const right = this.visit(
-			asCstNode(
-				requireFirst(
-					ctx,
-					'expression',
-					'quantifiedRelationFilter missing expression',
-				),
-			),
+		requireFirst(
+			ctx,
+			'identSegment',
+			'quantifiedRelationFilter missing column',
 		);
+		const column = this.visit(asCstNode(ctx.identSegment[0]!)) as string;
+		requireFirst(ctx, 'compOp', 'quantifiedRelationFilter missing compOp');
+		const operator = this.visit(asCstNode(ctx.compOp[0]!)) as string;
+		requireFirst(
+			ctx,
+			'expression',
+			'quantifiedRelationFilter missing expression',
+		);
+		const right = this.visit(asCstNode(ctx.expression[0]!));
 
 		// Build comparison condition
 		const condition = {
@@ -785,11 +741,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	 */
 	allRelationFilter(ctx: CstContext): NqlRelationFilterExpression {
 		// Get full path (includes both relation and column)
-		const pathExpr = this.visit(
-			asCstNode(
-				requireFirst(ctx, 'pathExpr', 'allRelationFilter missing pathExpr'),
-			),
-		) as {
+		requireFirst(ctx, 'pathExpr', 'allRelationFilter missing pathExpr');
+		const pathExpr = this.visit(asCstNode(ctx.pathExpr[0]!)) as {
 			type: 'path';
 			segments: string[];
 		};
@@ -807,16 +760,10 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		const column = segments[segments.length - 1];
 
 		// Get comparison operator and value
-		const operator = this.visit(
-			asCstNode(
-				requireFirst(ctx, 'compOp', 'allRelationFilter missing compOp'),
-			),
-		) as string;
-		const right = this.visit(
-			asCstNode(
-				requireFirst(ctx, 'expression', 'allRelationFilter missing expression'),
-			),
-		);
+		requireFirst(ctx, 'compOp', 'allRelationFilter missing compOp');
+		const operator = this.visit(asCstNode(ctx.compOp[0]!)) as string;
+		requireFirst(ctx, 'expression', 'allRelationFilter missing expression');
+		const right = this.visit(asCstNode(ctx.expression[0]!));
 
 		// Build comparison condition
 		const condition = {
@@ -849,17 +796,15 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	// ============================================================
 
 	expression(ctx: CstContext): NqlExpression {
-		return this.visit(
-			asCstNode(requireFirst(ctx, 'addExpr', 'Expression missing addExpr')),
-		);
+		requireFirst(ctx, 'addExpr', 'Expression missing addExpr');
+		return this.visit(asCstNode(ctx.addExpr[0]!));
 	}
 
 	addExpr(ctx: CstContext): NqlExpression {
-		let left = this.visit(
-			asCstNode(requireFirst(ctx, 'mulExpr', 'AddExpr missing mulExpr')),
-		);
+		requireFirst(ctx, 'mulExpr', 'AddExpr missing mulExpr');
+		let left = this.visit(asCstNode(ctx.mulExpr[0]!));
 
-		if (ctx.mulExpr!.length > 1) {
+		if (ctx.mulExpr.length > 1) {
 			// Collect operators in token order (by startOffset)
 			const ops: { op: '+' | '-'; offset: number }[] = [];
 			if (ctx.Plus) {
@@ -875,8 +820,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			// Sort by position in source
 			ops.sort((a, b) => a.offset - b.offset);
 
-			for (let i = 1; i < ctx.mulExpr!.length; i++) {
-				const right = this.visit(asCstNode(ctx.mulExpr![i]!));
+			for (let i = 1; i < ctx.mulExpr.length; i++) {
+				const right = this.visit(asCstNode(ctx.mulExpr[i]!));
 				const op = ops[i - 1]?.op || '+';
 				left = { type: 'binary', operator: op, left, right };
 			}
@@ -886,11 +831,10 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	mulExpr(ctx: CstContext): NqlExpression {
-		let left = this.visit(
-			asCstNode(requireFirst(ctx, 'unaryExpr', 'MulExpr missing unaryExpr')),
-		);
+		requireFirst(ctx, 'unaryExpr', 'MulExpr missing unaryExpr');
+		let left = this.visit(asCstNode(ctx.unaryExpr[0]!));
 
-		if (ctx.unaryExpr!.length > 1) {
+		if (ctx.unaryExpr.length > 1) {
 			// Collect operators in token order (by startOffset)
 			const ops: { op: '*' | '/' | '%'; offset: number }[] = [];
 			if (ctx.Star) {
@@ -911,8 +855,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			// Sort by position in source
 			ops.sort((a, b) => a.offset - b.offset);
 
-			for (let i = 1; i < ctx.unaryExpr!.length; i++) {
-				const right = this.visit(asCstNode(ctx.unaryExpr![i]!));
+			for (let i = 1; i < ctx.unaryExpr.length; i++) {
+				const right = this.visit(asCstNode(ctx.unaryExpr[i]!));
 				const op = ops[i - 1]?.op || '*';
 				left = { type: 'binary', operator: op, left, right };
 			}
@@ -922,11 +866,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	unaryExpr(ctx: CstContext): NqlExpression {
-		const expr = this.visit(
-			asCstNode(
-				requireFirst(ctx, 'primaryExpr', 'UnaryExpr missing primaryExpr'),
-			),
-		);
+		requireFirst(ctx, 'primaryExpr', 'UnaryExpr missing primaryExpr');
+		const expr = this.visit(asCstNode(ctx.primaryExpr[0]!));
 
 		if (ctx.Minus) {
 			return { type: 'unary', operator: '-', operand: expr };
@@ -1011,11 +952,10 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	scalarSubquery(ctx: CstContext): NqlSubquery {
+		requireFirst(ctx, 'query', 'Scalar subquery missing query');
 		return {
 			type: 'subquery',
-			query: this.visit(
-				asCstNode(requireFirst(ctx, 'query', 'Scalar subquery missing query')),
-			),
+			query: this.visit(asCstNode(ctx.query[0]!)),
 		};
 	}
 
@@ -1207,8 +1147,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			['lower', 'upper'],
 			'Range literal missing lower or upper bound',
 		);
-		const lower = this.visit(asCstNode(ctx.lower![0]!)) as string;
-		const upper = this.visit(asCstNode(ctx.upper![0]!)) as string;
+		const lower = this.visit(asCstNode(ctx.lower[0]!)) as string;
+		const upper = this.visit(asCstNode(ctx.upper[0]!)) as string;
 
 		// Reconstruct the raw value for compatibility
 		const openBracket = lowerInclusive ? '[' : '(';
@@ -1291,11 +1231,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	// ============================================================
 
 	mutationPipeline(ctx: CstContext): NqlMutationPipeline {
-		const mutation = this.visit(
-			asCstNode(
-				requireFirst(ctx, 'mutation', 'Mutation pipeline missing mutation'),
-			),
-		);
+		requireFirst(ctx, 'mutation', 'Mutation pipeline missing mutation');
+		const mutation = this.visit(asCstNode(ctx.mutation[0]!));
 		const clauses: NqlMutationClause[] = [];
 
 		if (ctx.mutationClause) {
@@ -1314,13 +1251,10 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	bindClause(ctx: CstContext): NqlMutationClause {
+		requireFirst(ctx, 'identSegment', 'Bind clause missing name');
 		return {
 			type: 'bind',
-			name: this.visit(
-				asCstNode(
-					requireFirst(ctx, 'identSegment', 'Bind clause missing name'),
-				),
-			),
+			name: this.visit(asCstNode(ctx.identSegment[0]!)),
 		};
 	}
 
@@ -1342,8 +1276,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		);
 		return {
 			type: 'insert',
-			table: this.visit(asCstNode(ctx.identSegment![0]!)),
-			assignments: this.visit(asCstNode(ctx.assignmentList![0]!)),
+			table: this.visit(asCstNode(ctx.identSegment[0]!)),
+			assignments: this.visit(asCstNode(ctx.assignmentList[0]!)),
 		};
 	}
 
@@ -1379,8 +1313,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		);
 		return {
 			type: 'update',
-			table: this.visit(asCstNode(ctx.identSegment![0]!)),
-			assignments: this.visit(asCstNode(ctx.assignmentList![0]!)),
+			table: this.visit(asCstNode(ctx.identSegment[0]!)),
+			assignments: this.visit(asCstNode(ctx.assignmentList[0]!)),
 			where: ctx.booleanExpr
 				? this.visit(asCstNode(ctx.booleanExpr[0]!))
 				: undefined,
@@ -1388,11 +1322,10 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	deleteStmt(ctx: CstContext): NqlMutation {
+		requireFirst(ctx, 'identSegment', 'Delete missing table');
 		return {
 			type: 'delete',
-			table: this.visit(
-				asCstNode(requireFirst(ctx, 'identSegment', 'Delete missing table')),
-			),
+			table: this.visit(asCstNode(ctx.identSegment[0]!)),
 			where: ctx.booleanExpr
 				? this.visit(asCstNode(ctx.booleanExpr[0]!))
 				: undefined,
@@ -1411,16 +1344,16 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		if (ctx.identList) {
 			const cols = this.visit(asCstNode(ctx.identList[0]!)) as string[];
 			conflictColumns.push(...cols);
-		} else if (ctx.identSegment!.length > 1) {
+		} else if (ctx.identSegment.length > 1) {
 			// Single conflict column without parens
-			conflictColumns.push(this.visit(asCstNode(ctx.identSegment![1]!)));
+			conflictColumns.push(this.visit(asCstNode(ctx.identSegment[1]!)));
 		}
 
 		return {
 			type: 'upsert',
-			table: this.visit(asCstNode(ctx.identSegment![0]!)),
+			table: this.visit(asCstNode(ctx.identSegment[0]!)),
 			conflictColumns,
-			assignments: this.visit(asCstNode(ctx.assignmentList![0]!)),
+			assignments: this.visit(asCstNode(ctx.assignmentList[0]!)),
 			where: ctx.booleanExpr
 				? this.visit(asCstNode(ctx.booleanExpr[0]!))
 				: undefined,
@@ -1444,8 +1377,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			'Assignment missing column or value',
 		);
 		return {
-			column: this.visit(asCstNode(ctx.identSegment![0]!)),
-			value: this.visit(asCstNode(ctx.expression![0]!)),
+			column: this.visit(asCstNode(ctx.identSegment[0]!)),
+			value: this.visit(asCstNode(ctx.expression[0]!)),
 		};
 	}
 }

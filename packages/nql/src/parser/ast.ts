@@ -105,6 +105,7 @@ export interface NqlOrderByClause {
 export interface NqlLimitClause {
 	type: 'limit';
 	count: number;
+	relation?: string;
 }
 
 export interface NqlOffsetClause {

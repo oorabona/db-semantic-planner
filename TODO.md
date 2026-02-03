@@ -2,7 +2,7 @@
 
 ## In Progress
 
-(nothing)
+(None)
 
 ---
 
@@ -14,7 +14,6 @@
 
 ## Pending — MEDIUM
 
-- [ ] [NQL] Per-include LIMIT syntax (`| flat N`) — Effort: M
 - [ ] [NQL] HAVING support (aggregate filter after GROUP BY) — Effort: S
 - [ ] [Adapter] json_agg column projection — Effort: M
 - [ ] [NQL] JSONB Operators Support — Effort: M
