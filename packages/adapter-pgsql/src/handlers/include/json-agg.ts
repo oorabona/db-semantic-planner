@@ -96,6 +96,8 @@ function compileJsonAggRecursive(
 		if (childNodes.length === 0) childNodes = undefined;
 	}
 
+	const limit = typeof decision.limit === 'number' ? decision.limit : undefined;
+
 	return jsonAggSubquery(
 		targetTable,
 		whereExpr,
@@ -105,6 +107,7 @@ function compileJsonAggRecursive(
 		{
 			...(childNodes && { childNodes }),
 			innerAlias,
+			...(limit !== undefined && { limit }),
 		},
 	);
 }

@@ -367,15 +367,19 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				for (const d of decisions) {
 					if (d.type === 'selectRelationColumn' && d.relation && d.column) {
 						const col = d.column as string;
-						if (col === '*') continue; // Star = no column restriction
 						const rootRelation = (d.relation as string).split('.')[0] ?? '';
-						if (includedRelations.has(rootRelation)) {
-							const existing = relationColumnsMap.get(rootRelation);
-							if (existing) {
-								if (!existing.includes(col)) existing.push(col);
-							} else {
-								relationColumnsMap.set(rootRelation, [col]);
-							}
+					if (includedRelations.has(rootRelation)) {
+						if (col === '*') {
+							// Wildcard: select all columns from relation
+							relationColumnsMap.set(rootRelation, ['*']);
+							continue;
+						}
+						const existing = relationColumnsMap.get(rootRelation);
+						if (existing && !existing.includes('*')) {
+							if (!existing.includes(col)) existing.push(col);
+						} else if (!existing) {
+							relationColumnsMap.set(rootRelation, [col]);
+						}
 						}
 					}
 				}
@@ -396,7 +400,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				const validationModel = options?.model ?? this.model;
 				if (validationModel && relationColumnsMap.size > 0) {
 					for (const d of enrichedUnifiedDecisions) {
-						if (d.type === 'includeStrategy' && d.columns && d.targetTable) {
+						if (d.type === 'includeStrategy' && d.columns && d.targetTable && !((d.columns as string[]).length === 1 && (d.columns as string[])[0] === '*')) {
 							const targetTable = validationModel.getTable(
 								d.targetTable as string,
 							);

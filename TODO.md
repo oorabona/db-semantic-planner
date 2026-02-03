@@ -71,4 +71,8 @@
 
 ## Completed
 
+- [x] ✅ [Adapter] Fix `relation.*` wildcard column propagation in flat/join includes (2026-02-03)
+- [x] ✅ [Adapter] Replace hardcoded `'id'` with `defaultPk` in plan-decision-extractor (2026-02-03)
+- [x] ✅ [CLI] Fix input wrapping — horizontal scrolling window for long input lines (2026-02-03)
+
 (Archived → docs/historic/done-2026-02.md)

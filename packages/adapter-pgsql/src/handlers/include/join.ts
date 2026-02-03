@@ -14,7 +14,7 @@ import {
 	defaultFkDerivation,
 	requiredColumn,
 } from '../../assert-field.js';
-import { columnTarget, fkCorrelation, rangeVar } from '../../ast-helpers.js';
+import { columnTarget, fkCorrelation, rangeVar, starTarget } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -105,10 +105,15 @@ export const joinIncludeHandler: IncludeHandler = {
 		const targets: Node[] = [];
 		const columns = decision.columns;
 		if (columns && columns.length > 0) {
-			for (const col of columns) {
-				targets.push(
-					columnTarget(col, `${relation}.${col}`, targetAlias, ctx.naming),
-				);
+			if (columns.length === 1 && columns[0] === '*') {
+				// Wildcard: select all columns from the joined relation
+				targets.push(starTarget(targetAlias, ctx.naming));
+			} else {
+				for (const col of columns) {
+					targets.push(
+						columnTarget(col, `${relation}.${col}`, targetAlias, ctx.naming),
+					);
+				}
 			}
 		}
 
