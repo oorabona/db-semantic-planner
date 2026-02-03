@@ -1382,10 +1382,11 @@ function applyIncludeLimit(
 			strategy: 'flat',
 		};
 	} else {
-		// Deep path: recurse into nested includes
+		// Deep path: force flat on intermediate segment (LATERAL cascade required)
+		// and recurse into nested includes
 		const nested = [...(includes[idx]!.include ?? [])];
 		applyIncludeLimit(nested, segments.slice(1).join('.'), limit);
-		includes[idx] = { ...includes[idx]!, include: nested };
+		includes[idx] = { ...includes[idx]!, strategy: 'flat', include: nested };
 	}
 }
 

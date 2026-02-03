@@ -39,7 +39,7 @@ function buildLateralTargets(
 	alias: string,
 	ctx: CompilerContext,
 ): Node[] {
-	if (columns && columns.length > 0) {
+	if (columns && columns.length > 0 && !(columns.length === 1 && columns[0] === '*')) {
 		return columns.map((col) => ({
 			ResTarget: {
 				val: columnRef(col, alias, undefined, ctx.naming),

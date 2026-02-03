@@ -973,12 +973,14 @@ function processInclude(
 	} else if (include.strategy === 'flat') {
 		// NQL v2.1: flat = exclude nested output (json_agg), planner picks best flat strategy
 		// lateral only when per-row LIMIT is needed; otherwise join is simpler
+		// Also use lateral when any nested child has a limit (LATERAL cascade required)
+		const needsLateral = include.limit != null || hasNestedLimit(include);
 		includeStrategy = selectSmartStrategy(
 			relation,
 			opts.dialectCapabilities,
 			false,
 			/* excludeNested */ true,
-			/* hasLimit */ include.limit != null,
+			/* hasLimit */ needsLateral,
 		);
 	} else {
 		includeStrategy = determineIncludeStrategy(relation, opts);
@@ -1273,6 +1275,19 @@ function determineIncludeStrategy(
 
 	// 3. Smart auto selection based on relation type + dialect
 	return selectSmartStrategy(relation, capabilities, isRecursive);
+}
+
+/**
+ * Check if any nested include (recursively) has a limit set.
+ * Used to determine if an intermediate ancestor needs LATERAL for cascade.
+ */
+function hasNestedLimit(include: IncludeIntent): boolean {
+	if (!include.include || include.include.length === 0) return false;
+	for (const child of include.include) {
+		if (child.limit != null) return true;
+		if (hasNestedLimit(child)) return true;
+	}
+	return false;
 }
 
 /**

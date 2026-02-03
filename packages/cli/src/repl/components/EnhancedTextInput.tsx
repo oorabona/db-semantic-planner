@@ -11,7 +11,7 @@
  * - Ctrl+Right / Alt+F: Move word forward
  */
 
-import { Box, Text, useInput, useStdin } from 'ink';
+import { Box, Text, useInput, useStdin, useStdout } from 'ink';
 import React, { useEffect, useRef, useState } from 'react';
 
 interface EnhancedTextInputProps {
@@ -91,6 +91,7 @@ export function EnhancedTextInput({
 	// immediately, letting each keystroke build on the previous one.
 	const valueRef = useRef(defaultValue);
 	const cursorRef = useRef(defaultValue.length);
+	const { stdout } = useStdout();
 
 	// Track raw input to distinguish Delete (\x1b[3~) from Backspace (\x7f)
 	// Ink's parser maps BOTH to key.delete, but we need to differentiate
@@ -409,16 +410,52 @@ export function EnhancedTextInput({
 		);
 	}
 
-	// Single-line rendering (original)
-	const beforeCursor = value.slice(0, cursor);
-	const atCursor = value[cursor] ?? ' ';
-	const afterCursor = value.slice(cursor + 1);
+	// Single-line rendering with horizontal scrolling window
+	// Prevents terminal wrapping issues by keeping visible text within terminal width
+	const termWidth = (stdout?.columns ?? 80) - 4; // Reserve space for prompt + margin
+	const len = value.length;
+
+	if (len <= termWidth) {
+		// Fits on one line — no scrolling needed
+		const beforeCursor = value.slice(0, cursor);
+		const atCursor = value[cursor] ?? ' ';
+		const afterCursor = value.slice(cursor + 1);
+
+		return (
+			<Box>
+				<Text>{beforeCursor}</Text>
+				<Text inverse>{atCursor}</Text>
+				<Text>{afterCursor}</Text>
+			</Box>
+		);
+	}
+
+	// Scrolling window: show a portion of the text, keep cursor visible
+	const ellipsis = '…';
+	const usable = termWidth - 2; // Reserve 2 chars for potential ellipsis on each side
+	// Center the window on the cursor
+	let windowStart = cursor - Math.floor(usable / 2);
+	if (windowStart < 0) windowStart = 0;
+	if (windowStart + usable > len) windowStart = Math.max(0, len - usable);
+
+	const windowEnd = Math.min(windowStart + usable, len);
+	const showLeftEllipsis = windowStart > 0;
+	const showRightEllipsis = windowEnd < len;
+
+	const visibleText = value.slice(windowStart, windowEnd);
+	const cursorInWindow = cursor - windowStart;
+
+	const before = visibleText.slice(0, cursorInWindow);
+	const at = visibleText[cursorInWindow] ?? ' ';
+	const after = visibleText.slice(cursorInWindow + 1);
 
 	return (
 		<Box>
-			<Text>{beforeCursor}</Text>
-			<Text inverse>{atCursor}</Text>
-			<Text>{afterCursor}</Text>
+			{showLeftEllipsis && <Text color="gray">{ellipsis}</Text>}
+			<Text>{before}</Text>
+			<Text inverse>{at}</Text>
+			<Text>{after}</Text>
+			{showRightEllipsis && <Text color="gray">{ellipsis}</Text>}
 		</Box>
 	);
 }

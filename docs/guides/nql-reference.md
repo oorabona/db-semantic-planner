@@ -221,7 +221,14 @@ products | where id in (1, 2, 3)
 **ecommerce:**
 ```
 customers | where id in (orders | select customerId | where status = 'delivered')
+
+# With limit and order by inside the subquery
+customers | where id in (orders | select customerId | order by total desc | limit 10)
 ```
+
+> Subquery `limit` and `order by` are propagated to SQL. See
+> [Three Forms of LIMIT](#three-forms-of-limit) for the difference between
+> subquery limit, outer limit, and per-include limit.
 
 ### NULL Checks
 
@@ -406,10 +413,13 @@ SELECT authors.*, posts."title", posts."createdAt"
 FROM authors LEFT JOIN posts ON authors.id = posts.author_id
 ```
 
-**LATERAL JOIN** — used when `| flat` includes a per-row LIMIT:
+**LATERAL JOIN** — used when a per-include LIMIT caps children per parent:
 ```
 # Top 3 posts per author → LATERAL subquery
-authors | select *, posts.* | flat | limit 3
+authors | select *, posts.* | limit posts 3 | flat
+
+# Without explicit | flat — per-include limit implies flat automatically
+authors | select *, posts.* | limit posts 3
 ```
 
 ```sql
@@ -420,8 +430,9 @@ FROM authors LEFT JOIN LATERAL (
 ) AS posts_lat_0 ON true
 ```
 
-> **When is LATERAL used?** Only when a per-row LIMIT is needed. Without LIMIT,
-> a standard LEFT JOIN is simpler and faster. The planner chooses automatically.
+> **When is LATERAL used?** Only when `| limit <relation> N` is set. Without a
+> per-include limit, a standard LEFT JOIN is simpler and faster. The planner
+> chooses automatically.
 
 Result shape (flat):
 ```json
@@ -446,11 +457,11 @@ The planner automatically resolves junction tables.
 |-----|-------------|------|
 | `select *, relation.*` | `json_agg` | Default — nested JSON array, no row explosion |
 | `select *, relation.* \| flat` | `LEFT JOIN` | Flat rows, simple and fast |
-| `select *, relation.* \| flat \| limit N` | `LEFT JOIN LATERAL` | Flat rows with per-parent LIMIT |
+| `select *, relation.* \| limit relation N` | `LEFT JOIN LATERAL` | Flat rows with per-parent LIMIT (implicit flat) |
 | `select name, ancestors.*` | `CTE` | Recursive/hierarchical relations |
 
-The planner picks the optimal strategy automatically. You only control the
-output shape (`| flat`) and constraints (`| limit N`).
+The planner picks the optimal strategy automatically. You control the
+output shape (`| flat`) and per-include constraints (`| limit <relation> N`).
 
 ---
 
@@ -527,6 +538,108 @@ products | order by price desc
 posts | order by createdAt desc | limit 10
 posts | order by createdAt desc | limit 10 | offset 20
 ```
+
+### Three Forms of LIMIT
+
+NQL has three distinct uses of LIMIT. They look similar but have very different semantics:
+
+#### 1. Outer Limit — `| limit N`
+
+Caps the total number of rows returned by the query:
+
+**blog:**
+```
+# Return at most 10 posts
+posts | order by createdAt desc | limit 10
+```
+
+```sql
+SELECT * FROM posts ORDER BY created_at DESC LIMIT 10
+```
+
+#### 2. Per-Include Limit — `| limit <relation> N`
+
+Caps child rows **per parent** using a LATERAL JOIN:
+
+**blog:**
+```
+# Top 3 posts PER author
+authors | select id, name, posts.* | limit posts 3
+```
+
+```sql
+SELECT authors.id, authors.name, posts_lat_0.*
+FROM authors LEFT JOIN LATERAL (
+  SELECT * FROM posts WHERE author_id = authors.id LIMIT 3
+) AS posts_lat_0 ON true
+```
+
+Every author gets at most 3 posts. If there are 100 authors, you get up to 300 rows.
+
+#### 3. Subquery Limit — `| limit N` inside `in (...)`
+
+Caps the total rows of the subquery used as a WHERE filter:
+
+**ecommerce:**
+```
+# Customers whose ID appears in the first 5 delivered orders
+customers | where id in (orders | select customerId | where status = 'delivered' | limit 5)
+```
+
+```sql
+SELECT * FROM customers
+WHERE id IN (SELECT customer_id FROM orders WHERE status = $1 LIMIT 5)
+```
+
+This filters **which parents** are returned, not how many children each parent gets.
+
+#### Comparison
+
+Given 50 customers, each with 10 orders:
+
+| Form | NQL | Effect | Rows returned |
+|------|-----|--------|---------------|
+| Outer limit | `customers \| limit 5` | First 5 customers | 5 |
+| Per-include limit | `customers \| select *, orders.* \| limit orders 3` | All 50 customers × max 3 orders each | Up to 150 |
+| Subquery limit | `customers \| where id in (orders \| select customerId \| limit 5)` | Customers matching the first 5 order rows (1-5 customers) | 1–5 |
+| Combined | `customers \| select *, orders.* \| limit orders 3 \| limit 10` | First 10 customers × max 3 orders each | Up to 30 |
+
+#### Per-Include Limit — Additional Examples
+
+**ecommerce:**
+```
+# Top 5 order items per order
+orders | select id, orderNumber, orderItems.* | limit orderItems 5
+
+# Multiple per-include limits on different relations
+customers | select id, orders.*, addresses.* | limit orders 3 | limit addresses 2
+
+# Combined: 3 orders per customer, max 10 customers
+customers | select id, orders.* | limit orders 3 | limit 10
+```
+
+**hierarchy:**
+```
+# Top 2 employees per department
+departments | select id, name, employees.* | limit employees 2
+
+# Combined: 2 employees per department, max 5 departments
+departments | select id, name, employees.* | limit employees 2 | limit 5
+```
+
+**dotted-path (deep nesting):**
+```
+# Top 3 employees per department, across all companies
+companies | select id, departments.employees.* | limit departments.employees 3
+```
+
+> Dotted paths work for deep nesting: `limit departments.employees 3` applies the
+> limit to the `employees` level while forcing all ancestor includes (`departments`)
+> to use LATERAL cascade.
+
+> **How it works:** `| limit <relation> N` forces `strategy: 'flat'` on that
+> include (LATERAL JOIN required — `json_agg` cannot honor per-parent limits).
+> `| flat` is implicit and can be omitted.
 
 ---
 

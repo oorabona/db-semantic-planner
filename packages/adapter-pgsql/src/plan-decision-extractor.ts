@@ -93,6 +93,45 @@ export function resolveIncludeAlias(context: {
 }
 
 /**
+ * Resolve an include intent by following the intentPath through the nested include tree.
+ * intentPath is e.g. "include[0]" or "include[0].include[0]" for deeply nested includes.
+ * Falls back to flat search by relation name if intentPath is not available.
+ */
+function resolveIncludeByPath(
+	includes:
+		| Array<{ relation: string; limit?: number; include?: unknown[] }>
+		| undefined,
+	intentPath: string | undefined,
+	relationName: string,
+): { relation: string; limit?: number } | undefined {
+	if (!includes) return undefined;
+
+	// Try intentPath-based traversal first
+	if (intentPath) {
+		// Parse path segments like "include[0].include[1]"
+		const indexPattern = /include\[(\d+)\]/g;
+		let current: unknown[] = includes;
+		let resolved: { relation: string; limit?: number } | undefined;
+		let execResult = indexPattern.exec(intentPath);
+
+		while (execResult !== null) {
+			const idx = parseInt(execResult[1]!, 10);
+			const item = current[idx] as
+				| { relation: string; limit?: number; include?: unknown[] }
+				| undefined;
+			if (!item) break;
+			resolved = item;
+			current = (item.include as unknown[]) ?? [];
+			execResult = indexPattern.exec(intentPath);
+		}
+		if (resolved) return resolved;
+	}
+
+	// Fallback: flat search by relation name (top-level only)
+	return includes.find((i) => i.relation === relationName);
+}
+
+/**
  * Derive foreign key from planner decision context.
  * Uses explicit FK if available, otherwise derives from table name
  * using the configurable FK derivation convention.
@@ -439,13 +478,14 @@ function toIncludeDecision(
 	// so the subquery strategy is implemented via json_agg correlated subquery
 	const effectiveChoice = choice === 'subquery' ? 'json_agg' : choice;
 
-	// Extract per-include limit from the original intent
-	const includeIntent = (
+	// Extract per-include limit from the original intent using intentPath
+	// intentPath is e.g. "include[0]" or "include[0].include[0]" for nested
+	const includeIntent = resolveIncludeByPath(
 		plan.intent?.include as
-			| Array<{ relation: string; limit?: number }>
-			| undefined
-	)?.find(
-		(i) => i.relation === relationName || i.relation === context.relation,
+			| Array<{ relation: string; limit?: number; include?: unknown[] }>
+			| undefined,
+		context.intentPath,
+		relationName,
 	);
 	const limit = includeIntent?.limit;
 
@@ -457,7 +497,7 @@ function toIncludeDecision(
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),
 		foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
-		parentKey: 'id',
+		parentKey: defaultPk,
 		...(context.intentPath && { intentPath: context.intentPath }),
 		...(limit != null && { limit }),
 	};
@@ -488,10 +528,10 @@ function toJoinIncludeDecision(
 		(i) => i.relation === relationName || i.relation === context.relation,
 	);
 
-	let columns: string[] = ['id'];
+	let columns: string[] = [defaultPk];
 	if (includeIntent?.select?.type === 'fields' && includeIntent.select.fields) {
-		const fields = includeIntent.select.fields.filter((f) => f !== 'id');
-		columns = ['id', ...fields];
+		const fields = includeIntent.select.fields.filter((f) => f !== defaultPk);
+		columns = [defaultPk, ...fields];
 	}
 
 	const foreignKey =
@@ -509,7 +549,7 @@ function toJoinIncludeDecision(
 		targetTable: context.target,
 		...(relationType && { relationType }),
 		foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
-		parentKey: 'id',
+		parentKey: defaultPk,
 		columns,
 	};
 }
@@ -588,7 +628,7 @@ function toJsonAggDecision(
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),
 		foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
-		parentKey: 'id',
+		parentKey: defaultPk,
 		...(context.intentPath && { intentPath: context.intentPath }),
 	};
 }
@@ -701,14 +741,14 @@ export function extractLeftJoinIncludeDecisions(
 		);
 
 		// Extract columns from include intent's select
-		// PK ('id') is always included for NULL-detection (missing relation)
-		let columns: string[] = ['id'];
+		// PK is always included for NULL-detection (missing relation)
+		let columns: string[] = [defaultPk];
 		if (
 			includeIntent?.select?.type === 'fields' &&
 			includeIntent.select.fields
 		) {
-			const fields = includeIntent.select.fields.filter((f) => f !== 'id');
-			columns = ['id', ...fields];
+			const fields = includeIntent.select.fields.filter((f) => f !== defaultPk);
+			columns = [defaultPk, ...fields];
 		}
 
 		const foreignKey =
@@ -725,7 +765,7 @@ export function extractLeftJoinIncludeDecisions(
 			targetTable: context.target,
 			...(relationType && { relationType }),
 			foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
-			parentKey: 'id',
+			parentKey: defaultPk,
 			columns,
 		});
 	}

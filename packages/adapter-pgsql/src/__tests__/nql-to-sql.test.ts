@@ -103,7 +103,9 @@ describe('NQL → SQL compile-only pipeline', () => {
 	it('uses star for flat include with relation.*', () => {
 		const sql = nqlToSQL('departments | select id, employees.* | flat');
 		expect(sql).toContain('employees');
-		// Should include employees columns (star or individual expansion)
+		// Wildcard must produce star target, not just 'id'
+		// SQL should have employees.* (star) NOT just "employees"."id"
+		expect(sql).not.toMatch(/"employees_0"\."id"\s+as\s+"employees\.id"\s*from/i);
 	});
 
 	it('compiles include without flat (json_agg or join)', () => {
@@ -142,6 +144,21 @@ describe('NQL → SQL compile-only pipeline', () => {
 		);
 		expect(sql).toContain('limit 5');
 		expect(sql).toContain('order by');
+	});
+
+	// Regression test: relation.* with where + alias + flat must produce all columns
+	it('produces star target for relation.* in flat include with where and alias', () => {
+		const sql = nqlToSQL(
+			"departments | where employees.salary > 50000 | select id as deptId, employees.* | limit 5 | flat",
+		);
+		// Must have join to employees
+		expect(sql).toContain('employees');
+		// Must have LIMIT 5
+		expect(sql).toContain('limit 5');
+		// Must have alias deptId
+		expect(sql).toContain('deptid');
+		// Must NOT have only employees.id — should have star/all columns
+		expect(sql).not.toMatch(/"employees_0"\."id"\s+as\s+"employees\.id"\s*from/i);
 	});
 
 	// Regression test: specific relation columns must NOT produce star
@@ -253,5 +270,79 @@ describe('Intent → SQL compile-only pipeline', () => {
 		expect(sql).toContain('departments.name');
 		// LATERAL subquery must have limit
 		expect(sql).toContain('limit 5');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 3-level schema: companies → departments → employees
+// Used for dotted-path per-include limit tests
+// ---------------------------------------------------------------------------
+const threeLevel = schema({
+	companies: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+	},
+	departments: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		companyId: ref('companies', {
+			onDelete: 'CASCADE',
+			inverse: 'departments',
+		}),
+	},
+	employees: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		departmentId: ref('departments', {
+			onDelete: 'CASCADE',
+			inverse: 'employees',
+		}),
+	},
+});
+
+function threeLevelSQL(nql: string): string {
+	const compiled = compile(nql, threeLevel.model);
+	if (!compiled.success || !compiled.ast?.query) {
+		throw new Error(
+			`NQL compilation failed: ${compiled.errors.map((e: { message: string }) => e.message).join(', ')}`,
+		);
+	}
+
+	const planReport = plan(compiled.ast.query, threeLevel.model, {
+		dialectCapabilities: POSTGRESQL_CAPABILITIES,
+	});
+
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const result = adapter.compile(planReport, { model: threeLevel.model });
+	return normalizeSQL(result.sql);
+}
+
+describe('Dotted-path per-include limit', () => {
+	it('compiles dotted-path limit into LATERAL cascade', () => {
+		const sql = threeLevelSQL(
+			'companies | select id, departments.employees.* | limit departments.employees 3',
+		);
+		// Both levels must be LATERAL (not json_agg) for dotted-path limit
+		expect(sql.toLowerCase()).toContain('lateral');
+		// The inner LATERAL subquery for employees must have LIMIT 3
+		expect(sql).toContain('limit 3');
+	});
+
+	it('applies limit only to the nested level, not the parent', () => {
+		const sql = threeLevelSQL(
+			'companies | select id, departments.employees.* | limit departments.employees 3',
+		);
+		// Should have exactly one LIMIT (on employees, not departments)
+		const limitMatches = sql.match(/limit \d+/gi);
+		expect(limitMatches).toHaveLength(1);
+		expect(limitMatches![0]).toMatch(/limit 3/i);
+	});
+
+	it('forces flat strategy on intermediate ancestors', () => {
+		const sql = threeLevelSQL(
+			'companies | select id, departments.employees.* | limit departments.employees 3',
+		);
+		// departments level should be LATERAL (flat), not json_agg
+		expect(sql.toLowerCase()).not.toContain('json_agg');
 	});
 });

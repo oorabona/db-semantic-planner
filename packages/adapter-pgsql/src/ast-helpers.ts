@@ -858,6 +858,8 @@ export function jsonAggSubquery(
 		childNodes?: readonly { key: string; node: Node }[];
 		/** Override the default __t__ alias (for nested depth) */
 		innerAlias?: string;
+		/** Optional LIMIT on the subquery rows */
+		limit?: number;
 	},
 ): Node {
 	const targetAlias = options?.innerAlias ?? '__t__';
@@ -916,10 +918,15 @@ export function jsonAggSubquery(
 	const fromTable = rangeVar(targetTable, targetAlias, schemaName, naming);
 
 	// Build the inner SELECT statement
+	const limitNode =
+		options?.limit !== undefined
+			? { A_Const: { ival: { ival: options.limit } } }
+			: undefined;
 	const innerSelect = selectStmt({
 		targetList: [{ ResTarget: { val: jsonAggCall } }],
 		from: [fromTable],
 		where: whereExpr,
+		...(limitNode && { limit: limitNode }),
 	});
 
 	// Wrap in SubLink (subquery expression)
