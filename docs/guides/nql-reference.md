@@ -386,11 +386,32 @@ Result shape (nested):
 
 **ecommerce:**
 ```
-# Include specific columns from relation
+# Include specific columns from relation (column projection)
 orders | select id, customer.firstName, customer.email
 
 # Deep nesting
 orderItems | select id, product.name, product.category.name
+```
+
+When you select specific relation columns (not `relation.*`), the planner
+projects only those columns inside the JSON aggregate:
+
+```sql
+-- orders | select id, customer.firstName, customer.email
+SELECT orders.id,
+  COALESCE((SELECT json_agg(jsonb_build_object('first_name', __t__.first_name, 'email', __t__.email))
+    FROM customers AS __t__ WHERE __t__.id = orders.customer_id), '[]'::json) AS customer_json
+FROM orders
+```
+
+Compare with `relation.*` which uses the full row:
+
+```sql
+-- orders | select id, customer.*
+SELECT orders.id,
+  COALESCE((SELECT json_agg(to_jsonb(__t__))
+    FROM customers AS __t__ WHERE __t__.id = orders.customer_id), '[]'::json) AS customer_json
+FROM orders
 ```
 
 ### Flat Mode
