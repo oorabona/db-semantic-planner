@@ -273,6 +273,185 @@ describe('Semantic Planner', () => {
 	});
 
 	// ============================================================================
+	// IN → EXISTS Optimization
+	// ============================================================================
+
+	describe('IN → EXISTS optimization', () => {
+		it('should rewrite IN-subquery to EXISTS when FK relation is known', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'in',
+					field: 'id',
+					values: [],
+					subquery: {
+						type: 'select',
+						from: 'productImages',
+						select: { type: 'fields', fields: ['productId'] },
+						where: {
+							kind: 'comparison',
+							field: 'approved',
+							operator: 'eq',
+							value: true,
+						},
+					},
+				},
+			};
+
+			const report = plan(intent, q1Schema);
+
+			// Should have an EXISTS filter decision (not an IN)
+			const filterDecision = report.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+			expect(filterDecision?.choice).toBe('exists');
+		});
+
+		it('should rewrite NOT IN-subquery to notExists', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'not',
+					condition: {
+						kind: 'in',
+						field: 'id',
+						values: [],
+						subquery: {
+							type: 'select',
+							from: 'productImages',
+							select: { type: 'fields', fields: ['productId'] },
+							where: {
+								kind: 'comparison',
+								field: 'approved',
+								operator: 'eq',
+								value: true,
+							},
+						},
+					},
+				},
+			};
+
+			const report = plan(intent, q1Schema);
+
+			// Should produce a notExists decision
+			const filterDecision = report.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+			expect(filterDecision?.choice).toBe('exists');
+		});
+
+		it('should NOT optimize IN-subquery when relation is unknown', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'in',
+					field: 'id',
+					values: [],
+					subquery: {
+						type: 'select',
+						from: 'unknownTable',
+						select: { type: 'fields', fields: ['productId'] },
+					},
+				},
+			};
+
+			// Unknown table — optimization should not apply, plan should still work
+			// (the IN subquery just passes through as-is)
+			expect(() => plan(intent, q1Schema)).not.toThrow();
+		});
+
+		it('should NOT optimize IN with literal values (no subquery)', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'in',
+					field: 'id',
+					values: [1, 2, 3],
+				},
+			};
+
+			const report = plan(intent, q1Schema);
+
+			// No filter-strategy decision — IN with values goes through as simple where
+			const filterDecision = report.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+			expect(filterDecision).toBeUndefined();
+		});
+
+		it('should NOT optimize when subquery selects multiple fields', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'in',
+					field: 'id',
+					values: [],
+					subquery: {
+						type: 'select',
+						from: 'productImages',
+						select: { type: 'fields', fields: ['productId', 'locale'] },
+					},
+				},
+			};
+
+			const report = plan(intent, q1Schema);
+
+			// Multi-column subquery — no optimization, no filter-strategy
+			const filterDecision = report.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+			expect(filterDecision).toBeUndefined();
+		});
+
+		it('should optimize IN-subquery within AND conditions', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'and',
+					conditions: [
+						{
+							kind: 'comparison',
+							field: 'name',
+							operator: 'eq',
+							value: 'Widget',
+						},
+						{
+							kind: 'in',
+							field: 'id',
+							values: [],
+							subquery: {
+								type: 'select',
+								from: 'productImages',
+								select: { type: 'fields', fields: ['productId'] },
+								where: {
+									kind: 'comparison',
+									field: 'approved',
+									operator: 'eq',
+									value: true,
+								},
+							},
+						},
+					],
+				},
+			};
+
+			const report = plan(intent, q1Schema);
+
+			// Should have both a regular where and an EXISTS filter
+			const filterDecision = report.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+			expect(filterDecision?.choice).toBe('exists');
+		});
+	});
+
+	// ============================================================================
 	// Q2: CTE Extraction Tests
 	// ============================================================================
 

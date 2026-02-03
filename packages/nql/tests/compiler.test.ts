@@ -161,7 +161,7 @@ describe('NQL Compiler - WHERE Clauses', () => {
 		expect(where.values).toEqual(['active', 'pending']);
 	});
 
-	it('propagates limit and order by from IN subquery to ScalarSubqueryIntent', () => {
+	it('propagates limit and order by from IN subquery to QueryIntent', () => {
 		const result = compileNql(
 			'users | where id in (orders | select customer_id | order by created_at desc | limit 10)',
 		);

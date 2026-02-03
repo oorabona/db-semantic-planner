@@ -509,7 +509,7 @@ export interface WhereInIntent {
 	readonly field: string;
 	readonly values: readonly unknown[];
 	/** Optional subquery producing the value set (when present, values is empty) */
-	readonly subquery?: ScalarSubqueryIntent;
+	readonly subquery?: QueryIntent;
 }
 
 /**
@@ -689,30 +689,15 @@ export interface WhereSubqueryIntent {
 	/** Comparison operator */
 	readonly operator: ComparisonOperator;
 	/** Subquery producing scalar value */
-	readonly subquery: ScalarSubqueryIntent;
+	readonly subquery: QueryIntent;
 }
 
 /**
  * Scalar subquery intent - produces a single value.
  * Simplified QueryIntent for subquery context.
  */
-export interface ScalarSubqueryIntent {
-	/** Target table for subquery */
-	readonly from: string;
-	/** Field to select (single scalar) */
-	readonly select: string;
-	/** Optional filter (can include SubqueryRefIntent values) */
-	readonly where?: WhereIntent;
-	/** Optional aggregate function */
-	readonly aggregate?: {
-		readonly fn: 'count' | 'sum' | 'avg' | 'min' | 'max';
-		readonly field: string;
-	};
-	/** Optional limit on subquery rows */
-	readonly limit?: number;
-	/** Optional ordering for subquery */
-	readonly orderBy?: readonly OrderByIntent[];
-}
+/** @deprecated Use QueryIntent instead — subqueries are full queries with contextual validation */
+export type ScalarSubqueryIntent = QueryIntent;
 
 /**
  * Where intent - filter conditions union type

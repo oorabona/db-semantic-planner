@@ -11,7 +11,12 @@ import {
 	isRawExpression,
 	type QueryIntent,
 	type RecursiveIntent,
+	type WhereAndIntent,
+	type WhereExistsIntent,
+	type WhereInIntent,
 	type WhereIntent,
+	type WhereNotIntent,
+	type WhereOrIntent,
 } from './intent-ast.js';
 import type { IncludeStrategy, ModelIR, RelationIR } from './model-ir.js';
 
@@ -436,9 +441,14 @@ export function plan(
 		throw new Error(`Unknown table: ${intent.from}`);
 	}
 
+	// Optimize IN-subquery → EXISTS when relation is known in schema
+	const optimizedWhere = intent.where
+		? optimizeInToExists(intent.where, intent.from, model)
+		: undefined;
+
 	// Process where clause
-	if (intent.where) {
-		processWhere(intent.where, intent.from, model, state, opts, 'where');
+	if (optimizedWhere) {
+		processWhere(optimizedWhere, intent.from, model, state, opts, 'where');
 	}
 
 	// Process includes
@@ -700,6 +710,125 @@ function generateBidirectionalReasoning(
 	return strategy === 'union'
 		? 'edgeStorageHint=unknown, using UNION to eliminate potential duplicates'
 		: 'UNION ALL used despite unknown storage hint (may produce duplicates)';
+}
+
+// ============================================================================
+// IN → EXISTS Optimization
+// ============================================================================
+
+/**
+ * Optimize IN (subquery) → EXISTS when the subquery targets a known relation.
+ *
+ * Pattern detected:
+ *   WHERE id IN (SELECT customer_id FROM orders WHERE ...)
+ * Rewritten to:
+ *   WHERE EXISTS (SELECT 1 FROM orders WHERE orders.customer_id = outer.id AND ...)
+ *
+ * This is a standard SQL optimization: EXISTS short-circuits on first match,
+ * while IN materializes the full set. The rewrite is valid when the subquery
+ * selects a FK column that references the outer table's PK.
+ */
+function optimizeInToExists(
+	where: WhereIntent,
+	sourceTable: string,
+	model: ModelIR,
+): WhereIntent {
+	switch (where.kind) {
+		case 'in': {
+			const inWhere = where as WhereInIntent;
+			if (!inWhere.subquery) return where;
+
+			// Extract the single column from the subquery's select
+			const subSelect = inWhere.subquery.select;
+			if (!subSelect || subSelect.type !== 'fields') return where;
+			const fields = (subSelect as { fields?: readonly string[] }).fields;
+			if (!fields || fields.length !== 1) return where;
+			const subColumn = fields[0]!;
+
+			// Look for a relation from sourceTable to subquery's table
+			// where the FK column matches the subquery's selected column
+			const relationsFrom = model.getRelationsFrom(sourceTable);
+			const sourceTableIR = model.getTable(sourceTable);
+			// For composite PKs, only the first column is checked — multi-column
+			// IN-subquery optimization is not supported (falls through as-is).
+			const sourcePk =
+				typeof sourceTableIR?.primaryKey === 'string'
+					? sourceTableIR.primaryKey
+					: (sourceTableIR?.primaryKey?.[0] ?? 'id');
+
+			let matchedRelation: string | undefined;
+
+			for (const rel of relationsFrom) {
+				if (rel.target !== inWhere.subquery.from) continue;
+				const fk =
+					typeof rel.foreignKey === 'string'
+						? rel.foreignKey
+						: rel.foreignKey?.[0];
+
+				// hasMany: outer.pk IN (SELECT fk FROM target WHERE ...)
+				// The subquery selects the FK column, outer field is PK
+				if (
+					rel.type === 'hasMany' &&
+					fk === subColumn &&
+					inWhere.field === sourcePk
+				) {
+					matchedRelation = rel.name;
+					break;
+				}
+			}
+
+			if (!matchedRelation) return where;
+
+			// Rewrite to EXISTS (NOT IN is handled by the 'not' case below)
+			const existsWhere: WhereExistsIntent = {
+				kind: 'exists',
+				relation: matchedRelation,
+				// Forward the subquery's inner WHERE conditions
+				...(inWhere.subquery.where && { where: inWhere.subquery.where }),
+			} as WhereExistsIntent;
+
+			return existsWhere;
+		}
+
+		case 'and': {
+			const andWhere = where as WhereAndIntent;
+			const optimized = andWhere.conditions.map((c) =>
+				optimizeInToExists(c, sourceTable, model),
+			);
+			if (optimized.every((c, i) => c === andWhere.conditions[i])) return where;
+			return { kind: 'and', conditions: optimized } as WhereAndIntent;
+		}
+
+		case 'or': {
+			const orWhere = where as WhereOrIntent;
+			const optimized = orWhere.conditions.map((c) =>
+				optimizeInToExists(c, sourceTable, model),
+			);
+			if (optimized.every((c, i) => c === orWhere.conditions[i])) return where;
+			return { kind: 'or', conditions: optimized } as WhereOrIntent;
+		}
+
+		case 'not': {
+			const notWhere = where as WhereNotIntent;
+			const optimized = optimizeInToExists(
+				notWhere.condition,
+				sourceTable,
+				model,
+			);
+			if (optimized === notWhere.condition) return where;
+			// NOT(EXISTS) → notExists (direct, no wrapper)
+			if (optimized.kind === 'exists') {
+				return {
+					...optimized,
+					kind: 'notExists',
+				} as unknown as WhereIntent;
+			}
+			return { kind: 'not', condition: optimized } as WhereNotIntent;
+		}
+
+		default:
+			return where;
+	}
 }
 
 // ============================================================================

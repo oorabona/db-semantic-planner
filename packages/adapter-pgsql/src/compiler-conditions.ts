@@ -390,6 +390,52 @@ function compileInCondition(
  * Compile IN (subquery): field IN (SELECT col FROM table WHERE ...)
  * Uses SubLink with ANY_SUBLINK / ALL_SUBLINK to match pg semantics.
  */
+
+/**
+ * Extract scalar column name from a SelectIntent for subquery context.
+ * Subqueries in IN/EXISTS/scalar comparison must produce a single column.
+ */
+function extractSubqueryColumn(select?: {
+	type: string;
+	fields?: readonly string[];
+	columns?: readonly { kind: string; column?: string }[];
+	aggregates?: readonly { function: string; field?: string }[];
+}): string {
+	if (!select) return '*';
+
+	switch (select.type) {
+		case 'fields': {
+			const fields = select.fields;
+			if (!fields || fields.length === 0) return '*';
+			if (fields.length > 1) {
+				throw new Error(
+					`Subquery must select exactly one column, got ${fields.length}: ${fields.join(', ')}`,
+				);
+			}
+			return fields[0]!;
+		}
+		case 'all':
+			return '*';
+		case 'expressions': {
+			const cols = select.columns;
+			if (!cols || cols.length === 0) return '*';
+			if (cols.length > 1) {
+				throw new Error(
+					`Subquery must select exactly one column, got ${cols.length} expressions`,
+				);
+			}
+			const col = cols[0]!;
+			return col.column ?? '*';
+		}
+		case 'aggregate': {
+			// Aggregate subqueries (COUNT, SUM, etc.) are always scalar
+			return '*';
+		}
+		default:
+			return '*';
+	}
+}
+
 function compileInSubquery(
 	decision: PlanDecision,
 	column: Node,
@@ -397,23 +443,59 @@ function compileInSubquery(
 	state: ConditionState,
 	ctx?: ConditionContext,
 ): Node {
-	const sub = decision.subquery as {
+	const sub = decision.subquery as unknown as {
 		from: string;
-		select: string;
+		select?: {
+			type: string;
+			fields?: readonly string[];
+			columns?: readonly { kind: string; column?: string }[];
+			aggregates?: readonly { function: string; field?: string }[];
+		};
 		where?: unknown;
 		limit?: number;
 		orderBy?: readonly { field: string; direction?: string }[];
+		groupBy?: readonly string[];
+		having?: unknown;
+		distinct?: boolean;
+		offset?: number;
 	};
 
-	// Build inner SELECT: SELECT col FROM table
-	const selectColumn = sub.select || '*';
-	const innerTargetList: Node[] = [
-		{
+	// Build target list from SelectIntent
+	const innerTargetList: Node[] = [];
+	if (sub.select?.type === 'aggregate' && sub.select.aggregates?.length) {
+		// Aggregate subquery: SELECT COUNT(*), AVG(col), etc.
+		const agg = sub.select.aggregates[0]!;
+		const aggField = agg.field ?? '*';
+		let targetVal: Node;
+		if (aggField === '*') {
+			targetVal = {
+				FuncCall: {
+					funcname: [
+						{ String: { sval: (agg.function as string).toLowerCase() } },
+					],
+					agg_star: true,
+				},
+			};
+		} else {
+			targetVal = {
+				FuncCall: {
+					funcname: [
+						{ String: { sval: (agg.function as string).toLowerCase() } },
+					],
+					args: [columnRef(aggField, sub.from, undefined, ctx?.naming)],
+				},
+			};
+		}
+		innerTargetList.push({ ResTarget: { val: targetVal } });
+	} else {
+		// Scalar column subquery
+		const selectColumn = extractSubqueryColumn(sub.select);
+		innerTargetList.push({
 			ResTarget: {
 				val: columnRef(selectColumn, sub.from, undefined, ctx?.naming),
 			},
-		},
-	];
+		});
+	}
 
 	const innerFromClause: Node[] = [
 		rangeVar(sub.from, undefined, ctx?.schema, ctx?.naming),
@@ -450,14 +532,48 @@ function compileInSubquery(
 		});
 	}
 
+	// Build GROUP BY if present
+	let innerGroupClause: Node[] | undefined;
+	if (sub.groupBy && sub.groupBy.length > 0) {
+		innerGroupClause = sub.groupBy.map((field) =>
+			columnRef(field, sub.from, undefined, ctx?.naming),
+		);
+	}
+
+	// Build HAVING if present
+	let innerHavingClause: Node | undefined;
+	if (sub.having) {
+		const subCtxHaving: ConditionContext = {
+			naming: ctx?.naming ?? {
+				toDatabase: (n: string) => n,
+				toModel: (n: string) => n,
+			},
+			rootTable: sub.from,
+			...(ctx?.schema && { schema: ctx.schema }),
+		};
+		innerHavingClause = compileCondition(
+			sub.having as PlanDecision,
+			subCtxHaving,
+			state,
+		);
+	}
+
 	const subSelect: Node = {
 		SelectStmt: {
+			...(sub.distinct && {
+				distinctClause: [{ A_Const: { ival: { ival: 0 } } }],
+			}),
 			targetList: innerTargetList,
 			fromClause: innerFromClause,
 			...(innerWhere && { whereClause: innerWhere }),
+			...(innerGroupClause && { groupClause: innerGroupClause }),
+			...(innerHavingClause && { havingClause: innerHavingClause }),
 			...(innerSortClause && { sortClause: innerSortClause }),
 			...(sub.limit !== undefined && {
 				limitCount: { A_Const: { ival: { ival: sub.limit } } },
+			}),
+			...(sub.offset !== undefined && {
+				limitOffset: { A_Const: { ival: { ival: sub.offset } } },
 			}),
 		},
 	};

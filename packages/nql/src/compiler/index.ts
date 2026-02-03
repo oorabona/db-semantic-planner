@@ -22,7 +22,6 @@ import type {
 	PseudoColumnTraversal,
 	QueryIntent,
 	RangeOperator,
-	ScalarSubqueryIntent,
 	SelectAllIntent,
 	SelectFieldsIntent,
 	SelectIntent,
@@ -95,7 +94,6 @@ export type {
 	PseudoColumnTraversal,
 	QueryIntent,
 	RangeOperator,
-	ScalarSubqueryIntent,
 	SelectAllIntent,
 	SelectFieldsIntent,
 	SelectIntent,
@@ -819,34 +817,8 @@ export class NqlCompiler {
 					'type' in inExpr.values &&
 					inExpr.values.type === 'subquery'
 				) {
-					// Compile inner subquery to ScalarSubqueryIntent
-					const innerQuery = this.compileQuery(inExpr.values.query);
-					let selectField = '*';
-					if (
-						innerQuery.select?.type === 'fields' &&
-						innerQuery.select.fields[0]
-					) {
-						selectField = innerQuery.select.fields[0];
-					} else if (
-						innerQuery.select?.type === 'expressions' &&
-						innerQuery.select.columns[0]
-					) {
-						const col = innerQuery.select.columns[0];
-						selectField =
-							col.kind === 'column'
-								? col.column
-								: col.kind === 'columnAlias'
-									? (col as { kind: 'columnAlias'; column: string }).column
-									: '*';
-					}
-
-					const subquery: ScalarSubqueryIntent = {
-						from: innerQuery.from,
-						select: selectField,
-						...(innerQuery.where && { where: innerQuery.where }),
-						...(innerQuery.limit !== undefined && { limit: innerQuery.limit }),
-						...(innerQuery.orderBy && { orderBy: innerQuery.orderBy }),
-					};
+					// Subquery is a full QueryIntent — contextual validation at adapter level
+					const subquery = this.compileQuery(inExpr.values.query);
 
 					const result: WhereInIntent = {
 						kind: 'in',
