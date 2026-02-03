@@ -10,6 +10,7 @@
  */
 
 import {
+	isUpsertIntent,
 	POSTGRESQL_CAPABILITIES,
 	plan,
 	type QueryIntent,
@@ -59,6 +60,28 @@ function nqlToSQL(nql: string): string {
 
 	const adapter = createPgsqlCompileOnlyAdapter();
 	const result = adapter.compile(planReport, { model: testSchema.model });
+
+	return normalizeSQL(result.sql);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: NQL mutation → normalized SQL
+// ---------------------------------------------------------------------------
+function nqlMutationToSQL(nql: string): string {
+	const compiled = compile(nql, testSchema.model);
+	if (!compiled.success || !compiled.ast?.mutation) {
+		throw new Error(
+			`NQL mutation compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+
+	const mutation = compiled.ast.mutation;
+	if (!isUpsertIntent(mutation)) {
+		throw new Error(`Expected UpsertIntent, got ${mutation.type}`);
+	}
+
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const result = adapter.compileUpsert(mutation, { model: testSchema.model });
 
 	return normalizeSQL(result.sql);
 }
@@ -361,5 +384,60 @@ describe('Dotted-path per-include limit', () => {
 		);
 		// departments level should be LATERAL (flat), not json_agg
 		expect(sql.toLowerCase()).not.toContain('json_agg');
+	});
+});
+
+// ===========================================================================
+// Upsert (ON CONFLICT) — NQL → SQL
+// ===========================================================================
+describe('NQL → SQL upsert (ON CONFLICT)', () => {
+	it('compiles upsert with single conflict column', () => {
+		const sql = nqlMutationToSQL(
+			"upsert into employees on email set name = 'Alice', email = 'alice@co.com', salary = 90000",
+		);
+		expect(sql).toContain('insert into');
+		expect(sql).toContain('employees');
+		expect(sql).toContain('on conflict');
+		expect(sql).toContain('email');
+		expect(sql).toContain('do update set');
+	});
+
+	it('compiles upsert with composite conflict columns', () => {
+		const sql = nqlMutationToSQL(
+			"upsert into employees on (name, email) set name = 'Alice', email = 'alice@co.com', salary = 90000",
+		);
+		expect(sql).toContain('on conflict');
+		// Both conflict columns should be in the ON CONFLICT clause
+		const conflictMatch = sql.match(/on conflict\s*\(([^)]+)\)/i);
+		expect(conflictMatch).toBeTruthy();
+		expect(conflictMatch![1]).toContain('name');
+		expect(conflictMatch![1]).toContain('email');
+	});
+
+	it('uses EXCLUDED references in DO UPDATE SET', () => {
+		const sql = nqlMutationToSQL(
+			"upsert into employees on email set name = 'Alice', email = 'alice@co.com', salary = 90000",
+		);
+		// DO UPDATE SET columns should use EXCLUDED.column
+		expect(sql).toContain('excluded');
+	});
+
+	it('parameterizes values', () => {
+		const compiled = compile(
+			"upsert into employees on email set name = 'Alice', email = 'alice@co.com', salary = 90000",
+			testSchema.model,
+		);
+		expect(compiled.success).toBe(true);
+		const mutation = compiled.ast!.mutation!;
+		expect(isUpsertIntent(mutation)).toBe(true);
+
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const result = adapter.compileUpsert(mutation as any, {
+			model: testSchema.model,
+		});
+
+		// Values should be parameterized ($1, $2, ...)
+		expect(result.sql).toMatch(/\$\d+/);
+		expect(result.parameters.length).toBeGreaterThan(0);
 	});
 });

@@ -837,7 +837,15 @@ delete from products where id = 1
 delete from comments where approved = false
 ```
 
-### UPSERT
+### UPSERT (ON CONFLICT)
+
+Insert a row, or update it if a conflict occurs on the specified column(s).
+
+**Syntax:**
+```
+upsert into <table> on <column> set <col> = <val>, ...
+upsert into <table> on (<col1>, <col2>) set <col> = <val>, ...
+```
 
 **ecommerce:**
 ```
@@ -847,6 +855,32 @@ upsert into customers on email set firstName = 'Alice', lastName = 'Smith', emai
 # Multiple conflict columns
 upsert into orderItems on (orderId, productId) set quantity = 2, unitPrice = 29.99, totalPrice = 59.98
 ```
+
+**Generated SQL (single conflict column):**
+```sql
+INSERT INTO customers (first_name, last_name, email)
+VALUES ($1, $2, $3)
+ON CONFLICT (email)
+DO UPDATE SET
+  first_name = EXCLUDED.first_name,
+  last_name  = EXCLUDED.last_name,
+  email      = EXCLUDED.email
+```
+
+**Generated SQL (composite conflict columns):**
+```sql
+INSERT INTO order_items (quantity, unit_price, total_price, order_id, product_id)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (order_id, product_id)
+DO UPDATE SET
+  quantity    = EXCLUDED.quantity,
+  unit_price  = EXCLUDED.unit_price,
+  total_price = EXCLUDED.total_price
+```
+
+- The `on` clause specifies the unique constraint column(s) for conflict detection
+- `DO UPDATE SET` automatically uses `EXCLUDED.<column>` references to update with the new values
+- All values are parameterized (`$1`, `$2`, ...) — no SQL injection risk
 
 ### Mutation Chaining with BIND
 
