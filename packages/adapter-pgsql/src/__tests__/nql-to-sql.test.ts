@@ -129,6 +129,21 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(sql).toContain('departmentid');
 	});
 
+	it('propagates limit from IN subquery to SQL', () => {
+		const sql = nqlToSQL(
+			'departments | where id in (employees | select departmentId | limit 5)',
+		);
+		expect(sql).toContain('limit 5');
+	});
+
+	it('propagates order by from IN subquery to SQL', () => {
+		const sql = nqlToSQL(
+			'departments | where id in (employees | select departmentId | order by salary desc | limit 5)',
+		);
+		expect(sql).toContain('limit 5');
+		expect(sql).toContain('order by');
+	});
+
 	// Regression test: specific relation columns must NOT produce star
 	it('does not produce star when specific relation columns are selected', () => {
 		const sql = nqlToSQL(
@@ -154,6 +169,39 @@ describe('Intent → SQL compile-only pipeline', () => {
 		const result = adapter.compile(planReport, { model: testSchema.model });
 		return normalizeSQL(result.sql);
 	}
+
+	// NQL per-include limit: | limit <relation> N
+	it('compiles per-include limit into LATERAL subquery via NQL', () => {
+		const sql = nqlToSQL(
+			'departments | select id, employees.* | limit employees 3 | flat',
+		);
+		// LATERAL should be used because per-include limit forces flat
+		expect(sql).toContain('lateral');
+		expect(sql).toContain('limit 3');
+	});
+
+	it('compiles per-include limit with implicit flat (no explicit | flat)', () => {
+		const sql = nqlToSQL(
+			'departments | select id, employees.* | limit employees 3',
+		);
+		// Even without explicit | flat, per-include limit forces LATERAL
+		expect(sql).toContain('lateral');
+		expect(sql).toContain('limit 3');
+	});
+
+	it('combines per-include limit with outer limit', () => {
+		const sql = nqlToSQL(
+			'departments | select id, employees.* | limit employees 3 | limit 5',
+		);
+		expect(sql).toContain('lateral');
+		// Inner LATERAL limit
+		expect(sql).toContain('limit 3');
+		// Outer limit on the main query
+		// Count occurrences of "limit" — should have both
+		const limitMatches = sql.match(/limit \d+/g) ?? [];
+		expect(limitMatches).toContain('limit 3');
+		expect(limitMatches).toContain('limit 5');
+	});
 
 	// Regression: LATERAL subquery must contain LIMIT when include.limit is set
 	it('propagates include.limit into LATERAL subquery', () => {

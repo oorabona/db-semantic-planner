@@ -31,6 +31,7 @@ import {
 	nullConstNode,
 	orExpr,
 	rangeVar,
+	sortBy,
 } from './ast-helpers.js';
 import type { PlanDecision } from './compiler.js';
 import type { NamingPlugin } from './naming-plugin.js';
@@ -400,6 +401,8 @@ function compileInSubquery(
 		from: string;
 		select: string;
 		where?: unknown;
+		limit?: number;
+		orderBy?: readonly { field: string; direction?: string }[];
 	};
 
 	// Build inner SELECT: SELECT col FROM table
@@ -430,11 +433,32 @@ function compileInSubquery(
 		innerWhere = compileCondition(sub.where as PlanDecision, subCtx, state);
 	}
 
+	// Build ORDER BY if present
+	let innerSortClause: Node[] | undefined;
+	if (sub.orderBy && sub.orderBy.length > 0) {
+		innerSortClause = sub.orderBy.map((item) => {
+			const dir =
+				item.direction === 'desc'
+					? ('DESC' as const)
+					: item.direction === 'asc'
+						? ('ASC' as const)
+						: ('DEFAULT' as const);
+			return sortBy(
+				columnRef(item.field, sub.from, undefined, ctx?.naming),
+				dir,
+			);
+		});
+	}
+
 	const subSelect: Node = {
 		SelectStmt: {
 			targetList: innerTargetList,
 			fromClause: innerFromClause,
 			...(innerWhere && { whereClause: innerWhere }),
+			...(innerSortClause && { sortClause: innerSortClause }),
+			...(sub.limit !== undefined && {
+				limitCount: { A_Const: { ival: { ival: sub.limit } } },
+			}),
 		},
 	};
 

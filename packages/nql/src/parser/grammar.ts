@@ -238,10 +238,20 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * limit_clause = "limit" NUMBER ;
+	 * limit_clause = "limit" [ident_segment ("." ident_segment)*] NUMBER ;
 	 */
 	private limitClause = this.RULE('limitClause', () => {
 		this.CONSUME(Limit);
+		// Per-include limit: limit <relation> <N>
+		// Outer limit:       limit <N>
+		// LL(1): IDENTIFIER → per-include, NUMBER → outer
+		this.OPTION(() => {
+			this.SUBRULE(this.identSegment);
+			this.MANY(() => {
+				this.CONSUME(Dot);
+				this.SUBRULE2(this.identSegment);
+			});
+		});
 		this.CONSUME(NumberLiteral);
 	});
 

@@ -161,6 +161,21 @@ describe('NQL Compiler - WHERE Clauses', () => {
 		expect(where.values).toEqual(['active', 'pending']);
 	});
 
+	it('propagates limit and order by from IN subquery to ScalarSubqueryIntent', () => {
+		const result = compileNql(
+			'users | where id in (orders | select customer_id | order by created_at desc | limit 10)',
+		);
+		const query = result.query!;
+
+		const where = query.where as WhereInIntent;
+		expect(where.kind).toBe('in');
+		expect(where.subquery).toBeDefined();
+		expect(where.subquery!.limit).toBe(10);
+		expect(where.subquery!.orderBy).toBeDefined();
+		expect(where.subquery!.orderBy![0]!.field).toBe('created_at');
+		expect(where.subquery!.orderBy![0]!.direction).toBe('desc');
+	});
+
 	it('compiles IS NULL expression', () => {
 		const result = compileNql('users | where deleted_at is null');
 		const query = result.query!;
@@ -411,6 +426,78 @@ describe('NQL Compiler - FLAT clause (v2.1)', () => {
 		expect(query.include).toBeDefined();
 		expect(query.include).toHaveLength(1);
 		expect(query.include![0]!.relation).toBe('customer');
+	});
+
+	it('applies per-include limit with implicit flat strategy', () => {
+		const result = compileNql(
+			'customers | select id, orders.* | limit orders 3',
+		);
+		const query = result.query!;
+
+		expect(query.include).toBeDefined();
+		expect(query.include).toHaveLength(1);
+		const inc = query.include![0]!;
+		expect(inc.relation).toBe('orders');
+		expect(inc.limit).toBe(3);
+		// LATERAL required for per-parent limit → implicit flat
+		expect(inc.strategy).toBe('flat');
+		// Outer limit should be unset
+		expect(query.limit).toBeUndefined();
+	});
+
+	it('applies per-include limit alongside outer limit', () => {
+		const result = compileNql(
+			'customers | select id, orders.* | limit orders 3 | limit 5',
+		);
+		const query = result.query!;
+
+		expect(query.limit).toBe(5);
+		expect(query.include).toBeDefined();
+		const inc = query.include![0]!;
+		expect(inc.limit).toBe(3);
+		expect(inc.strategy).toBe('flat');
+	});
+
+	it('applies per-include limit with explicit flat', () => {
+		const result = compileNql(
+			'customers | select id, orders.* | limit orders 3 | flat',
+		);
+		const query = result.query!;
+
+		const inc = query.include![0]!;
+		expect(inc.limit).toBe(3);
+		expect(inc.strategy).toBe('flat');
+	});
+
+	it('applies per-include limit to multiple relations', () => {
+		const result = compileNql(
+			'customers | select id, orders.*, tags.* | limit orders 3 | limit tags 5',
+		);
+		const query = result.query!;
+
+		expect(query.include).toHaveLength(2);
+		const ordersInc = query.include!.find((i) => i.relation === 'orders')!;
+		const tagsInc = query.include!.find((i) => i.relation === 'tags')!;
+		expect(ordersInc.limit).toBe(3);
+		expect(ordersInc.strategy).toBe('flat');
+		expect(tagsInc.limit).toBe(5);
+		expect(tagsInc.strategy).toBe('flat');
+	});
+
+	it('throws error when per-include limit targets non-included relation', () => {
+		expect(() => compileNql('customers | limit orders 3')).toThrowError(
+			/not included in the query/,
+		);
+	});
+
+	it('last-write-wins for duplicate per-include limit', () => {
+		const result = compileNql(
+			'customers | select id, orders.* | limit orders 3 | limit orders 5',
+		);
+		const query = result.query!;
+
+		const inc = query.include![0]!;
+		expect(inc.limit).toBe(5);
 	});
 
 	it('deprecated `with` keyword returns parse error', () => {

@@ -150,6 +150,56 @@ describe('NQL Visitor - Queries', () => {
 		expect(offsetClause.type).toBe('offset');
 		expect(offsetClause.count).toBe(20);
 	});
+
+	it('parses per-include limit', () => {
+		const ast = parseToAst('customers | select id, orders.* | limit orders 3');
+		const query = ast.statements[0] as NqlQuery;
+
+		const limitClause = query.clauses.find(
+			(c) => c.type === 'limit',
+		) as NqlLimitClause;
+		expect(limitClause.type).toBe('limit');
+		expect(limitClause.count).toBe(3);
+		expect(limitClause.relation).toBe('orders');
+	});
+
+	it('parses per-include limit with dotted path', () => {
+		const ast = parseToAst(
+			'customers | select id, orders.items.* | limit orders.items 5',
+		);
+		const query = ast.statements[0] as NqlQuery;
+
+		const limitClause = query.clauses.find(
+			(c) => c.type === 'limit',
+		) as NqlLimitClause;
+		expect(limitClause.count).toBe(5);
+		expect(limitClause.relation).toBe('orders.items');
+	});
+
+	it('parses per-include limit alongside outer limit', () => {
+		const ast = parseToAst(
+			'customers | select id, orders.* | limit orders 3 | limit 5',
+		);
+		const query = ast.statements[0] as NqlQuery;
+
+		const limits = query.clauses.filter(
+			(c) => c.type === 'limit',
+		) as NqlLimitClause[];
+		expect(limits).toHaveLength(2);
+
+		const perInclude = limits.find((l) => l.relation);
+		const outer = limits.find((l) => !l.relation);
+		expect(perInclude!.count).toBe(3);
+		expect(perInclude!.relation).toBe('orders');
+		expect(outer!.count).toBe(5);
+	});
+
+	it('outer limit has no relation field', () => {
+		const ast = parseToAst('users | limit 10');
+		const query = ast.statements[0] as NqlQuery;
+		const limitClause = query.clauses[0] as NqlLimitClause;
+		expect(limitClause.relation).toBeUndefined();
+	});
 });
 
 describe('NQL Visitor - Expressions', () => {
