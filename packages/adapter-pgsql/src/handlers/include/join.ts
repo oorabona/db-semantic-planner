@@ -9,6 +9,11 @@
  */
 
 import type { JoinExpr, Node } from '@pgsql/types';
+import {
+	DEFAULT_PK_COLUMN,
+	defaultFkDerivation,
+	requiredColumn,
+} from '../../assert-field.js';
 import { columnTarget, fkCorrelation, rangeVar } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
@@ -74,8 +79,17 @@ export const joinIncludeHandler: IncludeHandler = {
 		// (e.g., "author" and "editor" both from "users")
 		const targetAlias = relation ?? targetTable;
 		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
-		const sourceColumn = decision.sourceColumn ?? 'id';
-		const targetColumn = decision.targetColumn ?? `${ctx.rootTable}_id`;
+		const sourceColumn = requiredColumn(
+			decision.sourceColumn,
+			'sourceColumn',
+			'JOIN include',
+		);
+		const targetColumn =
+			decision.targetColumn ??
+			(ctx.deriveFkColumnName ?? defaultFkDerivation)(
+				ctx.rootTable,
+				ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
+			);
 
 		// Build the LEFT JOIN
 		const join = buildLeftJoin(

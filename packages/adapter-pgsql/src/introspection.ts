@@ -23,6 +23,7 @@ import type {
 } from '@dbsp/core';
 import { ModelIRImpl } from '@dbsp/core';
 import type { Pool } from 'pg';
+import { DEFAULT_PK_COLUMN } from './assert-field.js';
 
 // ============================================================================
 // Types
@@ -394,7 +395,8 @@ function detectHierarchies(
 		if (fk.source === fk.target && fk.cols.length === 1) {
 			const table = tables.get(fk.source);
 			const pk = table?.primaryKey;
-			const nodeIdColumn = typeof pk === 'string' ? pk : (pk?.[0] ?? 'id');
+			const nodeIdColumn =
+				typeof pk === 'string' ? pk : (pk?.[0] ?? DEFAULT_PK_COLUMN);
 
 			hierarchies.push({
 				type: 'adjacency',
@@ -425,7 +427,7 @@ function detectHierarchies(
 		const nodeIdColumn =
 			typeof nodeTable?.primaryKey === 'string'
 				? nodeTable.primaryKey
-				: (nodeTable?.primaryKey?.[0] ?? 'id');
+				: (nodeTable?.primaryKey?.[0] ?? DEFAULT_PK_COLUMN);
 
 		hierarchies.push({
 			type: 'edge-table',

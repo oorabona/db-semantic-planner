@@ -727,4 +727,207 @@ describe('PgsqlAdapter', () => {
 			expect(dump.params).toBeDefined();
 		});
 	});
+
+	// ========================================================================
+	// Column propagation from selectRelationColumn → includeStrategy
+	// ========================================================================
+
+	describe('column propagation to include strategy', () => {
+		/**
+		 * Build a PlanReport that triggers:
+		 * 1. intentToDecisions → selectRelationColumn decisions
+		 * 2. extractAllIncludeDecisions → includeStrategy decisions
+		 * 3. Deduplication merges column info before compiling
+		 */
+		function buildPlanWithRelationColumns(
+			rootTable: string,
+			selectExprs: unknown[],
+			includeDecisions: unknown[],
+		): PlanReport {
+			return {
+				rootTable,
+				intent: {
+					type: 'query',
+					table: rootTable,
+					select: {
+						type: 'expressions',
+						columns: selectExprs,
+					},
+				},
+				decisions: includeDecisions,
+			} as unknown as PlanReport;
+		}
+
+		function lateralInclude(relation: string, targetTable: string): unknown {
+			return {
+				type: 'include-strategy',
+				choice: 'lateral',
+				context: {
+					relation,
+					target: targetTable,
+					relationType: 'hasMany',
+					sourceTable: undefined,
+				},
+			};
+		}
+
+		it('propagates specific columns from selectRelationColumn to lateral include', () => {
+			const adapter = new PgsqlAdapter(undefined, {});
+			const plan = buildPlanWithRelationColumns(
+				'customers',
+				[
+					{ kind: 'column', column: 'id' },
+					{
+						kind: 'relationColumn',
+						relation: 'orders',
+						column: 'name',
+					},
+				],
+				[lateralInclude('orders', 'orders')],
+			);
+
+			const compiled = adapter.compile(plan);
+			// Should have specific column, not star
+			expect(compiled.sql).toContain('orders_lat_0.name');
+			expect(compiled.sql).not.toContain('orders_lat_0.*');
+		});
+
+		it('propagates multiple columns for same relation', () => {
+			const adapter = new PgsqlAdapter(undefined, {});
+			const plan = buildPlanWithRelationColumns(
+				'customers',
+				[
+					{ kind: 'column', column: 'id' },
+					{
+						kind: 'relationColumn',
+						relation: 'orders',
+						column: 'name',
+					},
+					{
+						kind: 'relationColumn',
+						relation: 'orders',
+						column: 'total',
+					},
+				],
+				[lateralInclude('orders', 'orders')],
+			);
+
+			const compiled = adapter.compile(plan);
+			expect(compiled.sql).toContain('orders_lat_0.name');
+			expect(compiled.sql).toContain('orders_lat_0.total');
+			expect(compiled.sql).not.toContain('orders_lat_0.*');
+		});
+
+		it('keeps star expansion when column is *', () => {
+			const adapter = new PgsqlAdapter(undefined, {});
+			const plan = buildPlanWithRelationColumns(
+				'customers',
+				[
+					{ kind: 'column', column: 'id' },
+					{
+						kind: 'relationColumn',
+						relation: 'orders',
+						column: '*',
+					},
+				],
+				[lateralInclude('orders', 'orders')],
+			);
+
+			const compiled = adapter.compile(plan);
+			expect(compiled.sql).toContain('orders_lat_0.*');
+		});
+
+		it('validates columns against model schema', () => {
+			const model = {
+				getTable: (name: string) => {
+					if (name === 'orders') {
+						return {
+							name: 'orders',
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								{
+									name: 'name',
+									type: 'string',
+									nullable: false,
+								},
+								{
+									name: 'total',
+									type: 'numeric',
+									nullable: false,
+								},
+							],
+							primaryKey: 'id',
+							foreignKeys: [],
+							indexes: [],
+						};
+					}
+					return undefined;
+				},
+				getRelation: () => undefined,
+			};
+
+			const adapter = new PgsqlAdapter(undefined, {});
+			const plan = buildPlanWithRelationColumns(
+				'customers',
+				[
+					{ kind: 'column', column: 'id' },
+					{
+						kind: 'relationColumn',
+						relation: 'orders',
+						column: 'nonexistent',
+					},
+				],
+				[lateralInclude('orders', 'orders')],
+			);
+
+			expect(() => adapter.compile(plan, { model } as any)).toThrow(
+				/Unknown column.*'nonexistent'.*relation 'orders'.*table 'orders'/,
+			);
+		});
+
+		it('skips validation when no model is provided', () => {
+			const adapter = new PgsqlAdapter(undefined, {});
+			const plan = buildPlanWithRelationColumns(
+				'customers',
+				[
+					{ kind: 'column', column: 'id' },
+					{
+						kind: 'relationColumn',
+						relation: 'orders',
+						column: 'anything',
+					},
+				],
+				[lateralInclude('orders', 'orders')],
+			);
+
+			// Should not throw — no model means no validation
+			const compiled = adapter.compile(plan);
+			expect(compiled.sql).toContain('orders_lat_0.anything');
+		});
+
+		it('skips validation when target table not found in model', () => {
+			const model = {
+				getTable: () => undefined, // No tables known
+				getRelation: () => undefined,
+			};
+
+			const adapter = new PgsqlAdapter(undefined, {});
+			const plan = buildPlanWithRelationColumns(
+				'customers',
+				[
+					{ kind: 'column', column: 'id' },
+					{
+						kind: 'relationColumn',
+						relation: 'orders',
+						column: 'anything',
+					},
+				],
+				[lateralInclude('orders', 'orders')],
+			);
+
+			// Should not throw — table not in model = fail open
+			const compiled = adapter.compile(plan, { model } as any);
+			expect(compiled.sql).toContain('orders_lat_0.anything');
+		});
+	});
 });

@@ -68,6 +68,30 @@ describe('NqlParser', () => {
 			expect(result.cst).toBeDefined();
 		});
 
+		it('PARSE-Q09b: Per-include limit', () => {
+			const result = parseCst(
+				'customers | select id, orders.* | limit orders 3',
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('PARSE-Q09c: Per-include limit with dotted path', () => {
+			const result = parseCst(
+				'customers | select id, orders.items.* | limit orders.items 5',
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('PARSE-Q09d: Per-include limit + outer limit', () => {
+			const result = parseCst(
+				'customers | select id, orders.* | limit orders 3 | limit 5',
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
 		it('PARSE-Q10: BETWEEN expression', () => {
 			const result = parseCst('products | where price between 100 and 500');
 			expect(result.errors).toHaveLength(0);

@@ -8,6 +8,7 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { createOrm } from './orm.js';
 import type { InferDB, InferredRangeValue, JsonValue } from './schema.js';
+import { createMockAdapter } from './test-utils.js';
 import {
 	isRef,
 	ref,
@@ -654,7 +655,7 @@ describe('createOrm() integration', () => {
 			});
 
 			// Act - should not throw, should return OrmInstance
-			const orm = createOrm({ schema: mySchema });
+			const orm = createOrm({ adapter: createMockAdapter(), schema: mySchema });
 
 			// Assert - ORM should have select method
 			expect(typeof orm.select).toBe('function');
@@ -678,7 +679,7 @@ describe('createOrm() integration', () => {
 			});
 
 			// Act
-			const orm = createOrm({ schema: mySchema });
+			const orm = createOrm({ adapter: createMockAdapter(), schema: mySchema });
 			const qb = orm.select('categories');
 
 			// Assert - QueryBuilder should be functional
@@ -738,7 +739,7 @@ describe('Type Inference (ARCH-006)', () => {
 			>();
 
 			// Runtime assertion
-			const orm = createOrm({ schema: typedSchema });
+			const orm = createOrm({ adapter: createMockAdapter(), schema: typedSchema });
 			expect(orm.select('users')).toBeDefined();
 			expect(orm.select('posts')).toBeDefined();
 		});
@@ -813,7 +814,7 @@ describe('Type Inference (ARCH-006)', () => {
 			>();
 
 			// Runtime assertion
-			const orm = createOrm({ schema: allTypesSchema });
+			const orm = createOrm({ adapter: createMockAdapter(), schema: allTypesSchema });
 			expect(orm.select('test')).toBeDefined();
 		});
 
@@ -838,7 +839,7 @@ describe('Type Inference (ARCH-006)', () => {
 			expectTypeOf<ItemRow['optional']>().toEqualTypeOf<string | null>();
 
 			// Runtime assertion
-			const orm = createOrm({ schema: nullableSchema });
+			const orm = createOrm({ adapter: createMockAdapter(), schema: nullableSchema });
 			expect(orm.select('items')).toBeDefined();
 		});
 
@@ -865,7 +866,7 @@ describe('Type Inference (ARCH-006)', () => {
 			>();
 
 			// Runtime assertion
-			const orm = createOrm({ schema: fkSchema });
+			const orm = createOrm({ adapter: createMockAdapter(), schema: fkSchema });
 			expect(orm.select('posts')).toBeDefined();
 		});
 	});
@@ -881,7 +882,7 @@ describe('Type Inference (ARCH-006)', () => {
 					nickname: { type: 'string', nullable: true },
 				},
 			});
-			const orm = createOrm({ schema: mySchema });
+			const orm = createOrm({ adapter: createMockAdapter(), schema: mySchema });
 
 			// Act - coalesce must include columns that are in columns() selection
 			// or use coalesce before columns() / without columns()
@@ -925,7 +926,7 @@ describe('Type Inference (ARCH-006)', () => {
 					descEn: { type: 'text', nullable: true },
 				},
 			});
-			const orm = createOrm({ schema: mySchema });
+			const orm = createOrm({ adapter: createMockAdapter(), schema: mySchema });
 
 			// Act - coalesce without columns() to get all fields in TResult
 			const query = orm
@@ -959,7 +960,7 @@ describe('Type Inference (ARCH-006)', () => {
 					lastName: 'string',
 				},
 			});
-			const orm = createOrm({ schema: mySchema });
+			const orm = createOrm({ adapter: createMockAdapter(), schema: mySchema });
 
 			// Act - coalesce without columns() first (TResult = full User type)
 			const query = orm
@@ -988,7 +989,7 @@ describe('Type Inference (ARCH-006)', () => {
 					phone: { type: 'string', nullable: true },
 				},
 			});
-			const orm = createOrm({ schema: mySchema });
+			const orm = createOrm({ adapter: createMockAdapter(), schema: mySchema });
 
 			// Act - Select email and phone, coalesce them
 			const query = orm

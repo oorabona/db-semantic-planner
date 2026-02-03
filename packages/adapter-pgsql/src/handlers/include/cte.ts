@@ -9,6 +9,11 @@
 
 import type { CommonTableExpr, JoinExpr, Node, SelectStmt } from '@pgsql/types';
 import {
+	DEFAULT_PK_COLUMN,
+	defaultFkDerivation,
+	requiredColumn,
+} from '../../assert-field.js';
+import {
 	columnRef,
 	fkCorrelation,
 	rangeVar,
@@ -173,8 +178,17 @@ export const cteIncludeHandler: IncludeHandler = {
 	): IncludeResult {
 		const relation = decision.relation;
 		const targetTable = decision.targetTable ?? relation;
-		const sourceColumn = decision.sourceColumn ?? 'id';
-		const targetColumn = decision.targetColumn ?? `${ctx.rootTable}_id`;
+		const sourceColumn = requiredColumn(
+			decision.sourceColumn,
+			'sourceColumn',
+			'CTE include',
+		);
+		const targetColumn =
+			decision.targetColumn ??
+			(ctx.deriveFkColumnName ?? defaultFkDerivation)(
+				ctx.rootTable,
+				ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
+			);
 		const columns = decision.columns;
 		const conditions = decision.conditions;
 

@@ -10,7 +10,6 @@
 import {
 	type DeleteIntent,
 	extractPseudoColumnKeywords,
-	getDialectCapabilities,
 	type InsertIntent,
 	type ModelIR,
 	type PlanReport,
@@ -241,9 +240,9 @@ export async function compileNqlToSql(
 	// 2. Compile IntentAST to SQL using adapter
 	if (compiled.query) {
 		const queryIntent = asQueryIntent(compiled.query);
-		// Pass PostgreSQL capabilities so planner can use json_agg strategy
+		// Read capabilities from adapter (always available on BaseAdapter)
 		const planReport = plan(queryIntent, model, {
-			dialectCapabilities: getDialectCapabilities('postgresql'),
+			dialectCapabilities: adapter.dialectCapabilities,
 		});
 		const compiledQuery = adapter.compile(planReport, { model });
 

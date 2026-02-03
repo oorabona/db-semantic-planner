@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { and, eq, inArray } from './filters.js';
 import { createOrm } from './orm.js';
+import { createMockAdapter } from './test-utils.js';
 import { ref, schema } from './schema.js';
 
 /**
@@ -33,7 +34,7 @@ const testSchema = schema({
 });
 
 describe('DX-008: API Shortcuts', () => {
-	const orm = createOrm({ schema: testSchema });
+	const orm = createOrm({ adapter: createMockAdapter(), schema: testSchema });
 
 	describe('byId() - Simple Primary Key', () => {
 		it('should create correct plan for simple PK lookup', () => {

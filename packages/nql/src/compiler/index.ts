@@ -204,6 +204,8 @@ export class NqlCompiler {
 		let offset: number | undefined;
 		// NQL v2.1: | flat forces JOIN strategy instead of json_agg
 		let flatMode = false;
+		// NQL: per-include limits (e.g. | limit orders 3)
+		const includeLimits = new Map<string, number>();
 
 		for (let i = 0; i < query.clauses.length; i++) {
 			const clause = query.clauses[i]!;
@@ -251,9 +253,16 @@ export class NqlCompiler {
 				case 'orderBy':
 					orderBy = this.compileOrderByClause(clause as NqlOrderByClause);
 					break;
-				case 'limit':
-					limit = (clause as NqlLimitClause).count;
+				case 'limit': {
+					const lc = clause as NqlLimitClause;
+					if (lc.relation) {
+						// Per-include limit — collect for later merge
+						includeLimits.set(lc.relation, lc.count);
+					} else {
+						limit = lc.count;
+					}
 					break;
+				}
 				case 'offset':
 					offset = (clause as NqlOffsetClause).count;
 					break;
@@ -293,6 +302,22 @@ export class NqlCompiler {
 					// Replace with new object including strategy (avoid mutating readonly)
 					allIncludes[i] = { ...inc, strategy: 'flat' } as IncludeIntent;
 				}
+			}
+		}
+
+		// Apply per-include limits
+		if (includeLimits.size > 0) {
+			for (const [relation, limitCount] of includeLimits) {
+				const rootRelation = relation.split('.')[0]!;
+				const targetInclude = allIncludes.find(
+					(inc) => inc.relation === rootRelation,
+				);
+				if (!targetInclude) {
+					throw new Error(
+						`limit for relation '${relation}' specified but '${rootRelation}' is not included in the query`,
+					);
+				}
+				applyIncludeLimit(allIncludes, relation, limitCount);
 			}
 		}
 
@@ -819,6 +844,8 @@ export class NqlCompiler {
 						from: innerQuery.from,
 						select: selectField,
 						...(innerQuery.where && { where: innerQuery.where }),
+						...(innerQuery.limit !== undefined && { limit: innerQuery.limit }),
+						...(innerQuery.orderBy && { orderBy: innerQuery.orderBy }),
 					};
 
 					const result: WhereInIntent = {
@@ -1331,6 +1358,35 @@ function buildNestedIncludes(
 	}
 
 	return treeToIncludes(root);
+}
+
+/**
+ * Apply a per-include limit to the correct level of a nested include tree.
+ * Also sets strategy to 'flat' (LATERAL required for per-parent limiting).
+ */
+function applyIncludeLimit(
+	includes: IncludeIntent[],
+	path: string,
+	limit: number,
+): void {
+	const segments = path.split('.');
+	const root = segments[0]!;
+	const idx = includes.findIndex((inc) => inc.relation === root);
+	if (idx === -1) return;
+
+	if (segments.length === 1) {
+		// Top-level: apply limit + implicit flat (LATERAL required for per-parent limit)
+		includes[idx] = {
+			...includes[idx]!,
+			limit,
+			strategy: 'flat',
+		};
+	} else {
+		// Deep path: recurse into nested includes
+		const nested = [...(includes[idx]!.include ?? [])];
+		applyIncludeLimit(nested, segments.slice(1).join('.'), limit);
+		includes[idx] = { ...includes[idx]!, include: nested };
+	}
 }
 
 /**

@@ -718,7 +718,9 @@ function createIntentBooleanAssertion(
 		}
 
 		const actual =
-			((result.intent as Record<string, unknown>)[field] as boolean) ?? false;
+			((result.intent as unknown as Record<string, unknown>)[
+				field
+			] as boolean) ?? false;
 		const passed = actual === expected;
 
 		return {

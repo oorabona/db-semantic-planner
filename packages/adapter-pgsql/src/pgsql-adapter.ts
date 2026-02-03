@@ -7,29 +7,36 @@
  * @module pgsql-adapter
  */
 
-import type {
-	Adapter,
-	AdapterCapabilities,
-	AdapterLogger,
-	AdapterStreamOptions,
-	CompiledQuery,
-	CompileOptions,
-	CompileResultWithIncludes,
-	DbCasing,
-	DeleteIntent,
-	Dump,
-	DumpMeta,
-	InsertFromIntent,
-	InsertIntent,
-	ModelIR,
-	PlanReport,
-	RecursivePlanReport,
-	SubqueryIncludeInfo,
-	UpdateIntent,
-	UpsertIntent,
+import {
+	type Adapter,
+	type AdapterCapabilities,
+	type AdapterLogger,
+	type AdapterStreamOptions,
+	type CompiledQuery,
+	type CompileOptions,
+	type CompileResultWithIncludes,
+	type DbCasing,
+	type DeleteIntent,
+	type DialectCapabilities,
+	type Dump,
+	type DumpMeta,
+	type InsertFromIntent,
+	type InsertIntent,
+	type ModelIR,
+	type PlanReport,
+	POSTGRESQL_CAPABILITIES,
+	type RecursivePlanReport,
+	type SubqueryIncludeInfo,
+	type UpdateIntent,
+	type UpsertIntent,
 } from '@dbsp/core';
 import type { Node, SelectStmt } from '@pgsql/types';
 import type { Pool, PoolClient } from 'pg';
+import {
+	DEFAULT_PK_COLUMN,
+	defaultFkDerivation,
+	type FkColumnDerivation,
+} from './assert-field.js';
 import { innerJoin, rangeVar } from './ast-helpers.js';
 import {
 	type CompilerOptions,
@@ -106,6 +113,10 @@ export interface PgsqlAdapterOptions {
 	readonly model?: ModelIR;
 	/** Optional logger for debug/error messages */
 	readonly logger?: AdapterLogger;
+	/** Default primary key column name for convention fallbacks (default: 'id') */
+	readonly defaultPkColumnName?: string;
+	/** Convention for deriving FK column names: (tableName, pkName) => fkColumnName */
+	readonly deriveFkColumnName?: FkColumnDerivation;
 }
 
 // ============================================================================
@@ -136,6 +147,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly model: ModelIR | undefined;
 	private readonly logger: AdapterLogger | undefined;
 	private readonly _capabilities: AdapterCapabilities;
+	private readonly defaultPk: string;
+	private readonly deriveFk: FkColumnDerivation;
 
 	/**
 	 * Create a new PgsqlAdapter.
@@ -169,6 +182,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.naming = getNamingPluginForDbCasing(this._dbCasing);
 		this.model = options?.model;
 		this.logger = options?.logger;
+		this.defaultPk = options?.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
+		this.deriveFk = options?.deriveFkColumnName ?? defaultFkDerivation;
 
 		// PostgreSQL capabilities — streaming requires a connection
 		this._capabilities = {
@@ -198,6 +213,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	/** Adapter capabilities for feature detection */
 	get capabilities(): AdapterCapabilities {
 		return this._capabilities;
+	}
+
+	/** PostgreSQL dialect capabilities for planner strategy selection */
+	get dialectCapabilities(): DialectCapabilities {
+		return POSTGRESQL_CAPABILITIES;
 	}
 
 	/**
@@ -254,9 +274,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	): CompiledQuery<T> {
 		const schemaName = this.schemaName ?? options?.schemaName;
 
-		const compilerOptions: CompilerOptions = schemaName
-			? { naming: this.naming, schema: schemaName }
-			: { naming: this.naming };
+		const compilerOptions: CompilerOptions = {
+			naming: this.naming,
+			...(schemaName && { schema: schemaName }),
+			defaultPkColumnName: this.defaultPk,
+			deriveFkColumnName: this.deriveFk,
+		};
 
 		// Convert PlanReport (core) → SimplifiedPlanReport (pgsql compiler)
 		// The core's plan.decisions contain observability data, not SQL instructions.
@@ -294,7 +317,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const existsDecisions = extractExistsDecisions(plan, options?.model);
 
 			// Phase 3: Extract ALL include decisions (json_agg, join, lateral, cte, subquery)
-			const unifiedIncludeDecisions = extractAllIncludeDecisions(plan);
+			const unifiedIncludeDecisions = extractAllIncludeDecisions(
+				plan,
+				this.defaultPk,
+				this.deriveFk,
+			);
 
 			// Propagate filter conditions from EXISTS to matching include decisions
 			// When a relation is both filtered and included, the filter should appear
@@ -331,6 +358,68 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					.map((d) => d.relationName as string)
 					.filter(Boolean),
 			);
+
+			// Collect specific columns per relation from selectRelationColumn
+			// decisions that will be deduplicated. This preserves column info
+			// that would otherwise be lost when selectRelationColumn is removed.
+			const relationColumnsMap = new Map<string, string[]>();
+			if (includedRelations.size > 0) {
+				for (const d of decisions) {
+					if (d.type === 'selectRelationColumn' && d.relation && d.column) {
+						const col = d.column as string;
+						if (col === '*') continue; // Star = no column restriction
+						const rootRelation = (d.relation as string).split('.')[0] ?? '';
+						if (includedRelations.has(rootRelation)) {
+							const existing = relationColumnsMap.get(rootRelation);
+							if (existing) {
+								if (!existing.includes(col)) existing.push(col);
+							} else {
+								relationColumnsMap.set(rootRelation, [col]);
+							}
+						}
+					}
+				}
+
+				// Inject collected columns into matching includeStrategy decisions
+				if (relationColumnsMap.size > 0) {
+					for (const d of enrichedUnifiedDecisions) {
+						if (d.type === 'includeStrategy' && d.relationName) {
+							const cols = relationColumnsMap.get(d.relationName as string);
+							if (cols) {
+								(d as unknown as Record<string, unknown>).columns = cols;
+							}
+						}
+					}
+				}
+
+				// Validate injected columns exist in target table schema
+				const validationModel = options?.model ?? this.model;
+				if (validationModel && relationColumnsMap.size > 0) {
+					for (const d of enrichedUnifiedDecisions) {
+						if (d.type === 'includeStrategy' && d.columns && d.targetTable) {
+							const targetTable = validationModel.getTable(
+								d.targetTable as string,
+							);
+							if (targetTable) {
+								const validColumnNames = new Set(
+									targetTable.columns.map((c) => c.name),
+								);
+								const invalid = (d.columns as string[]).filter(
+									(c) => !validColumnNames.has(c),
+								);
+								if (invalid.length > 0) {
+									throw new Error(
+										`Unknown column(s) ${invalid.map((c) => `'${c}'`).join(', ')} ` +
+											`in relation '${d.relationName}' (table '${d.targetTable}'). ` +
+											`Available: ${[...validColumnNames].join(', ')}`,
+									);
+								}
+							}
+						}
+					}
+				}
+			}
+
 			const deduplicatedDecisions =
 				includedRelations.size > 0
 					? decisions.filter((d) => {
@@ -436,7 +525,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			if (!relationName) continue;
 
 			// Derive FK using shared helper
-			const rawFk = deriveForeignKey(ctx) ?? 'id';
+			const rawFk =
+				deriveForeignKey(ctx, this.deriveFk, this.defaultPk) ?? this.defaultPk;
 			const fk = Array.isArray(rawFk) ? rawFk[0]! : rawFk;
 
 			// For subquery include, we need:

@@ -708,6 +708,10 @@ export interface ScalarSubqueryIntent {
 		readonly fn: 'count' | 'sum' | 'avg' | 'min' | 'max';
 		readonly field: string;
 	};
+	/** Optional limit on subquery rows */
+	readonly limit?: number;
+	/** Optional ordering for subquery */
+	readonly orderBy?: readonly OrderByIntent[];
 }
 
 /**

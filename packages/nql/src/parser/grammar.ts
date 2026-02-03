@@ -238,10 +238,20 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * limit_clause = "limit" NUMBER ;
+	 * limit_clause = "limit" [ident_segment ("." ident_segment)*] NUMBER ;
 	 */
 	private limitClause = this.RULE('limitClause', () => {
 		this.CONSUME(Limit);
+		// Per-include limit: limit <relation> <N>
+		// Outer limit:       limit <N>
+		// LL(1): IDENTIFIER → per-include, NUMBER → outer
+		this.OPTION(() => {
+			this.SUBRULE(this.identSegment);
+			this.MANY(() => {
+				this.CONSUME(Dot);
+				this.SUBRULE2(this.identSegment);
+			});
+		});
 		this.CONSUME(NumberLiteral);
 	});
 
@@ -816,17 +826,11 @@ export class NqlParser extends CstParser {
 	}
 
 	/**
-	 * scalar_subquery = table_ref "|" query_clause { "|" query_clause } ;
-	 * MUST have at least one pipe to disambiguate from (expr)
+	 * scalar_subquery = query ;
+	 * Delegates to the `query` rule (gate already ensures at least one pipe).
 	 */
 	private scalarSubquery = this.RULE('scalarSubquery', () => {
-		this.SUBRULE(this.tableRef);
-		this.CONSUME(Pipe);
-		this.SUBRULE(this.queryClause);
-		this.MANY(() => {
-			this.CONSUME2(Pipe);
-			this.SUBRULE2(this.queryClause);
-		});
+		this.SUBRULE(this.query);
 	});
 
 	/**
