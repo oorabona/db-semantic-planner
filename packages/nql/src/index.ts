@@ -17,6 +17,7 @@
 
 // Re-export compiler types
 export type {
+	ColumnValidatorSchema,
 	CompileResult,
 	DeleteIntent,
 	ExpressionIntent,
@@ -81,7 +82,11 @@ export interface ParseResult<T> {
 	warnings: import('./errors/types.js').NqlWarning[];
 }
 
-import { type CompileResult, NqlCompiler } from './compiler/index.js';
+import {
+	type ColumnValidatorSchema,
+	type CompileResult,
+	NqlCompiler,
+} from './compiler/index.js';
 import { NqlErrorCodes } from './errors/index.js';
 import type { NqlProgram } from './parser/ast.js';
 import { parseCst } from './parser/index.js';
@@ -144,7 +149,7 @@ export function parse(
  */
 export function compile(
 	input: string,
-	_schema: unknown, // ModelIR from @dbsp/core
+	schema: unknown, // ModelIR from @dbsp/core — satisfies ColumnValidatorSchema
 	options?: ParseOptions,
 	compilerOptions?: import('./compiler/index.js').NqlCompilerOptions,
 ): ParseResult<CompileResult> {
@@ -159,7 +164,11 @@ export function compile(
 	}
 
 	try {
-		const compiler = new NqlCompiler(compilerOptions);
+		const validatorSchema =
+			schema && hasColumnValidatorShape(schema)
+				? (schema as ColumnValidatorSchema)
+				: undefined;
+		const compiler = new NqlCompiler(compilerOptions, validatorSchema);
 		const result = compiler.compile(parseResult.ast);
 
 		return {
@@ -180,4 +189,14 @@ export function compile(
 			warnings: [],
 		};
 	}
+}
+
+/** Runtime check: does the schema satisfy the ColumnValidatorSchema duck-type? */
+function hasColumnValidatorShape(obj: unknown): obj is ColumnValidatorSchema {
+	return (
+		typeof obj === 'object' &&
+		obj !== null &&
+		typeof (obj as Record<string, unknown>).getTable === 'function' &&
+		typeof (obj as Record<string, unknown>).getRelationsFrom === 'function'
+	);
 }
