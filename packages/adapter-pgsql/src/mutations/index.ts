@@ -10,11 +10,13 @@ export {
 	compileInsertFrom,
 	compileMutation,
 	compileUpdate,
+	compileUpsertFrom,
 	type DeleteConfig,
 	type InsertConfig,
 	type InsertFromConfig,
 	RANGE_TYPES,
 	type UpdateConfig,
+	type UpsertFromConfig,
 } from './mutation-compiler.js';
 
 export {

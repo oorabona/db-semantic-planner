@@ -1287,8 +1287,11 @@ export interface InsertFromIntent {
 	/** Target table to insert into */
 	readonly table: string;
 
-	/** Source table to select from */
+	/** Source table to select from (table name or bound reference) */
 	readonly source: string;
+
+	/** Optional source query (when source is a bound reference from `| bind`) */
+	readonly sourceQuery?: QueryIntent | undefined;
 
 	/** Optional column mapping (defaults to same column names) */
 	readonly columns?: readonly string[] | undefined;
@@ -1303,6 +1306,42 @@ export interface InsertFromIntent {
 	 * Columns to return from inserted rows (DX-026).
 	 * Requires adapter capability: supportsReturning
 	 * @example ['id', 'created_at']
+	 */
+	readonly returning?: readonly string[];
+}
+
+/**
+ * Upsert from intent - bulk upsert by selecting rows from a source table or CTE.
+ * Produces: INSERT INTO target SELECT ... FROM source ON CONFLICT (columns) DO UPDATE SET ...
+ * @example upsert into authors on id from counts
+ */
+export interface UpsertFromIntent {
+	readonly type: 'upsert_from';
+
+	/** Target table to upsert into */
+	readonly table: string;
+
+	/** Source table or bound CTE reference */
+	readonly source: string;
+
+	/** Optional source query (when source is a bound reference from `| bind`) */
+	readonly sourceQuery?: QueryIntent | undefined;
+
+	/** Conflict target columns for ON CONFLICT */
+	readonly conflictColumns: readonly string[];
+
+	/** Optional column mapping (defaults to same column names) */
+	readonly columns?: readonly string[] | undefined;
+
+	/** Filter condition for source rows */
+	readonly where?: WhereIntent | undefined;
+
+	/** Limit number of rows */
+	readonly limit?: number | undefined;
+
+	/**
+	 * Columns to return from affected rows.
+	 * Requires adapter capability: supportsReturning
 	 */
 	readonly returning?: readonly string[];
 }
@@ -1437,6 +1476,7 @@ export interface UpsertIntent {
 export type MutationIntent =
 	| InsertIntent
 	| InsertFromIntent
+	| UpsertFromIntent
 	| UpdateIntent
 	| DeleteIntent
 	| UpsertIntent;

@@ -15,6 +15,7 @@ import type {
 	ModelIR,
 	PlanDecision,
 	PlanReport,
+	UpsertFromIntent,
 } from '@dbsp/core';
 import {
 	isDeleteIntent,
@@ -184,6 +185,13 @@ function compileMutation(
 	if ((mutation as InsertFromIntent).type === 'insert_from') {
 		const result = adapter.compileInsertFrom(
 			mutation as InsertFromIntent,
+			options,
+		);
+		return { sql: result.sql, params: result.parameters };
+	}
+	if ((mutation as { type: string }).type === 'upsert_from') {
+		const result = adapter.compileUpsertFrom(
+			mutation as UpsertFromIntent,
 			options,
 		);
 		return { sql: result.sql, params: result.parameters };
@@ -520,18 +528,8 @@ async function main() {
 			inCodeBlock = false;
 			output.push(line);
 
-			// Only process NQL blocks (not bash, ts, sql, etc.)
-			if (
-				codeBlockLang === 'bash' ||
-				codeBlockLang === 'typescript' ||
-				codeBlockLang === 'ts' ||
-				codeBlockLang === 'sql' ||
-				codeBlockLang === 'json' ||
-				codeBlockLang === 'jsonc' ||
-				codeBlockLang === 'javascript' ||
-				codeBlockLang === 'js' ||
-				codeBlockLang === 'markdown'
-			) {
+			// Only process blocks explicitly tagged as NQL
+			if (codeBlockLang !== 'nql') {
 				continue;
 			}
 

@@ -13,7 +13,7 @@ NQL (Natural Query Language) is a pipe-based query language that compiles to the
 - **`.dbsp` files** for batch queries and test assertions
 - **Template literals** in TypeScript via `orm.nql`
 
-```
+```nql
 table | operator | operator | ...
 ```
 
@@ -50,7 +50,7 @@ pnpm dbsp repl -s examples/blog.schema.ts
 ```
 
 **In `.dbsp` files:**
-```
+```nql
 # comments start with #
 posts | where published = true | select title
 ```
@@ -73,6 +73,7 @@ SELECT posts.title
 **Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
 
 </details>
+
 
 
 
@@ -150,7 +151,7 @@ schema({
 ### Table Scan
 
 **blog:**
-```
+```nql
 authors
 ```
 
@@ -174,8 +175,9 @@ SELECT authors.*
 
 
 
+
 **ecommerce:**
-```
+```nql
 products
 ```
 
@@ -199,6 +201,7 @@ SELECT products.*
 
 
 
+
 Returns all rows and columns from the table.
 
 ### Pipe Operators
@@ -206,7 +209,7 @@ Returns all rows and columns from the table.
 Chain clauses with `|`:
 
 **ecommerce:**
-```
+```nql
 products | where active = true | select id, name | order by name | limit 10
 ```
 
@@ -240,8 +243,9 @@ SELECT
 
 
 
+
 **blog:**
-```
+```nql
 posts | where published = true | select title, slug | order by createdAt desc | limit 10
 ```
 
@@ -275,11 +279,12 @@ SELECT
 
 
 
+
 ### Comments
 
 Comments start with `#` and extend to end of line:
 
-```
+```nql
 # Full-line comment (ignored by REPL and .dbsp files)
 products | where active = true   # Inline comment
 ```
@@ -307,6 +312,7 @@ SELECT products.*
 
 
 
+
 ---
 
 ## 3. WHERE (Filtering)
@@ -314,7 +320,7 @@ SELECT products.*
 ### Comparison Operators
 
 **blog:**
-```
+```nql
 authors | where name = 'Alice'
 authors | where name != 'John'
 posts | where published = true
@@ -325,15 +331,15 @@ posts | where published = true
 
 **SQL:**
 ```sql
-SELECT authors.*
+SELECT posts.*
 
-  FROM authors
+  FROM posts
 
   WHERE
-  authors.name = $1
+  posts.published = $1
 ```
 
-**Parameters:** `["Alice"]`
+**Parameters:** `[true]`
 
 **Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
 
@@ -343,8 +349,9 @@ SELECT authors.*
 
 
 
+
 **ecommerce:**
-```
+```nql
 products | where price > 100
 products | where price >= 100
 products | where stock < 50
@@ -356,15 +363,15 @@ orders | where total <= 10
 
 **SQL:**
 ```sql
-SELECT products.*
+SELECT orders.*
 
-  FROM products
+  FROM orders
 
   WHERE
-  products.price > $1
+  orders.total <= $1
 ```
 
-**Parameters:** `[100]`
+**Parameters:** `[10]`
 
 **Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
 
@@ -374,10 +381,11 @@ SELECT products.*
 
 
 
+
 ### Pattern Matching
 
 **blog:**
-```
+```nql
 authors | where name like 'A%'
 authors | where email like '%@example.com'
 ```
@@ -392,10 +400,10 @@ SELECT authors.*
   FROM authors
 
   WHERE
-  authors.name LIKE $1
+  authors.email LIKE $1
 ```
 
-**Parameters:** `["A%"]`
+**Parameters:** `["%@example.com"]`
 
 **Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
 
@@ -405,8 +413,9 @@ SELECT authors.*
 
 
 
+
 **ecommerce:**
-```
+```nql
 products | where name like '%Phone%'
 customers | where email like '%@gmail.com'
 ```
@@ -416,15 +425,15 @@ customers | where email like '%@gmail.com'
 
 **SQL:**
 ```sql
-SELECT products.*
+SELECT customers.*
 
-  FROM products
+  FROM customers
 
   WHERE
-  products.name LIKE $1
+  customers.email LIKE $1
 ```
 
-**Parameters:** `["%Phone%"]`
+**Parameters:** `["%@gmail.com"]`
 
 **Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
 
@@ -434,10 +443,11 @@ SELECT products.*
 
 
 
+
 ### BETWEEN
 
 **ecommerce:**
-```
+```nql
 products | where price between 10 and 500
 ```
 
@@ -464,8 +474,9 @@ SELECT products.*
 
 
 
+
 **hierarchy:**
-```
+```nql
 employees | where salary between 50000 and 100000
 ```
 
@@ -492,10 +503,11 @@ SELECT employees.*
 
 
 
+
 ### IN (Value List)
 
 **ecommerce:**
-```
+```nql
 orders | where status in ('pending', 'shipped', 'delivered')
 products | where id in (1, 2, 3)
 ```
@@ -505,15 +517,15 @@ products | where id in (1, 2, 3)
 
 **SQL:**
 ```sql
-SELECT orders.*
+SELECT products.*
 
-  FROM orders
+  FROM products
 
   WHERE
-  orders.status = ANY ($1)
+  products.id = ANY ($1)
 ```
 
-**Parameters:** `[["pending","shipped","delivered"]]`
+**Parameters:** `[[1,2,3]]`
 
 **Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
 
@@ -523,10 +535,11 @@ SELECT orders.*
 
 
 
+
 ### IN (Subquery)
 
 **ecommerce:**
-```
+```nql
 customers | where id in (orders | select customerId | where status = 'delivered')
 
 # With limit and order by inside the subquery
@@ -572,6 +585,7 @@ SELECT customers.*
 
 
 
+
 > Subquery `limit` and `order by` are propagated to SQL. See
 > [Three Forms of LIMIT](#three-forms-of-limit) for the difference between
 > subquery limit, outer limit, and per-include limit.
@@ -579,7 +593,7 @@ SELECT customers.*
 ### NULL Checks
 
 **blog:**
-```
+```nql
 authors | where bio is null
 posts | where updatedAt is not null
 ```
@@ -589,12 +603,12 @@ posts | where updatedAt is not null
 
 **SQL:**
 ```sql
-SELECT authors.*
+SELECT posts.*
 
-  FROM authors
+  FROM posts
 
   WHERE
-  authors.bio IS NULL
+  posts."updatedAt" IS NOT NULL
 ```
 
 **Parameters:** _none_
@@ -607,8 +621,9 @@ SELECT authors.*
 
 
 
+
 **ecommerce:**
-```
+```nql
 products | where description is null
 customers | where phone is not null
 ```
@@ -618,12 +633,12 @@ customers | where phone is not null
 
 **SQL:**
 ```sql
-SELECT products.*
+SELECT customers.*
 
-  FROM products
+  FROM customers
 
   WHERE
-  products.description IS NULL
+  customers.phone IS NOT NULL
 ```
 
 **Parameters:** _none_
@@ -636,10 +651,11 @@ SELECT products.*
 
 
 
+
 ### Logical Operators
 
 **ecommerce:**
-```
+```nql
 # AND
 products | where active = true and price > 50
 
@@ -674,8 +690,9 @@ SELECT products.*
 
 
 
+
 **blog:**
-```
+```nql
 # NOT
 comments | where not (approved = true)
 
@@ -706,12 +723,13 @@ SELECT comments.*
 
 
 
+
 ### Relation Filters
 
 Filter by related records using quantifiers:
 
 **blog:**
-```
+```nql
 # SOME — at least one related record matches
 authors | where some(posts).published = true
 
@@ -759,8 +777,9 @@ SELECT authors.*
 
 
 
+
 **ecommerce:**
-```
+```nql
 customers | where none(orders as o, o.status = 'cancelled' and o.total > 100)
 ```
 
@@ -799,10 +818,11 @@ SELECT customers.*
 
 
 
+
 ### EXISTS Subquery
 
 **ecommerce:**
-```
+```nql
 customers | where exists (orders | where customerId = customers.id)
 ```
 
@@ -813,7 +833,7 @@ customers | where exists (orders | where customerId = customers.id)
 ### All Columns
 
 **blog:**
-```
+```nql
 authors | select *
 authors                    # implicit select *
 ```
@@ -838,10 +858,11 @@ SELECT authors.*
 
 
 
+
 ### Specific Columns
 
 **blog:**
-```
+```nql
 authors | select id, name, email
 ```
 
@@ -868,8 +889,9 @@ SELECT
 
 
 
+
 **ecommerce:**
-```
+```nql
 products | select sku, name, price
 ```
 
@@ -896,10 +918,11 @@ SELECT
 
 
 
+
 ### Aliases
 
 **ecommerce:**
-```
+```nql
 products | select name as productName, price as cost
 products | select price * 1.1 as priceWithTax
 ```
@@ -910,17 +933,17 @@ products | select price * 1.1 as priceWithTax
 **SQL:**
 ```sql
 SELECT
-  products.name AS "productName",
-  products.price AS cost
+  products.price * $1 AS "priceWithTax"
 
   FROM products
 ```
 
-**Parameters:** _none_
+**Parameters:** `[1.1]`
 
-**Why NQL?** This 98-character NQL expression compiles to 79 characters of SQL (0.8× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
+**Why NQL?** This 98-character NQL expression compiles to 60 characters of SQL (0.6× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
 
 </details>
+
 
 
 
@@ -929,7 +952,7 @@ SELECT
 ### DISTINCT
 
 **ecommerce:**
-```
+```nql
 orders | select distinct status
 ```
 
@@ -953,8 +976,9 @@ SELECT DISTINCT orders.status
 
 
 
+
 **blog:**
-```
+```nql
 comments | select count(distinct authorName)
 ```
 
@@ -978,10 +1002,11 @@ SELECT count(DISTINCT comments."authorName")
 
 
 
+
 ### Arithmetic Expressions
 
 **ecommerce:**
-```
+```nql
 orderItems | select unitPrice + 5 as shippingTotal
 orderItems | select quantity * unitPrice as lineTotal
 products | select price - 10 as discountedPrice
@@ -995,16 +1020,17 @@ orderItems | select quantity % 3 as remainder
 **SQL:**
 ```sql
 SELECT
-  "orderItems"."unitPrice" + $1 AS "shippingTotal"
+  "orderItems".quantity % $1 AS remainder
 
   FROM "orderItems"
 ```
 
-**Parameters:** `[5]`
+**Parameters:** `[3]`
 
-**Why NQL?** This 262-character NQL expression compiles to 75 characters of SQL (0.3× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
+**Why NQL?** This 262-character NQL expression compiles to 66 characters of SQL (0.3× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
 
 </details>
+
 
 
 
@@ -1022,7 +1048,7 @@ Select columns from related tables to auto-include them. The planner uses
 `json_agg` to aggregate children into a single JSON array per parent row:
 
 **blog:**
-```
+```nql
 # Include all post columns as nested JSON array
 authors | select *, posts.*
 ```
@@ -1059,6 +1085,7 @@ SELECT
 
 
 
+
 ```sql
 -- Produced SQL (json_agg):
 SELECT authors.*, json_agg(posts.*) AS posts
@@ -1074,7 +1101,7 @@ Result shape (nested):
 ```
 
 **ecommerce:**
-```
+```nql
 # Include specific columns from relation (column projection)
 orders | select id, customer.firstName, customer.email
 
@@ -1114,6 +1141,7 @@ COALESCE((SELECT json_agg(jsonb_build_object('firstName', __t__."firstName", 'em
 
 
 
+
 When you select specific relation columns (not `relation.*`), the planner
 projects only those columns inside the JSON aggregate:
 
@@ -1141,7 +1169,7 @@ Use `| flat` to get flat rows instead of nested JSON. The planner picks the
 best SQL strategy automatically:
 
 **LEFT JOIN** — default for `| flat` (simple, well-optimized by PostgreSQL):
-```
+```nql
 # All columns → LEFT JOIN
 authors | select *, posts.* | flat
 
@@ -1179,6 +1207,7 @@ SELECT
 
 
 
+
 ```sql
 -- Produced SQL (LEFT JOIN):
 SELECT authors.*, posts."title", posts."createdAt"
@@ -1186,7 +1215,7 @@ FROM authors LEFT JOIN posts ON authors.id = posts.author_id
 ```
 
 **LATERAL JOIN** — used when a per-include LIMIT caps children per parent:
-```
+```nql
 # Top 3 posts per author → LATERAL subquery
 authors | select *, posts.* | limit posts 3 | flat
 
@@ -1231,6 +1260,7 @@ SELECT
 
 
 
+
 ```sql
 -- Produced SQL (LATERAL):
 SELECT authors.*, posts_lat_0.*
@@ -1254,7 +1284,7 @@ Result shape (flat):
 ### Many-to-Many Relations
 
 **blog:**
-```
+```nql
 posts | select *, tags.*
 ```
 
@@ -1275,6 +1305,7 @@ SELECT
 **Why NQL?** Even the simplest query benefits from the planner: table names are double-quoted (safe for reserved words), aliases are generated, and the result is a fully parameterized query ready for `pg.Pool.query()`.
 
 </details>
+
 
 
 
@@ -1301,7 +1332,7 @@ output shape (`| flat`) and per-include constraints (`| limit <relation> N`).
 ### Aggregate Functions
 
 **blog:**
-```
+```nql
 posts | select count(*)
 ```
 
@@ -1325,8 +1356,9 @@ SELECT count(*)
 
 
 
+
 **ecommerce:**
-```
+```nql
 orders | select sum(total)
 orders | select avg(total)
 products | select min(price), max(price)
@@ -1337,16 +1369,19 @@ products | select min(price), max(price)
 
 **SQL:**
 ```sql
-SELECT sum(orders.total)
+SELECT
+  min(products.price),
+  max(products.price)
 
-  FROM orders
+  FROM products
 ```
 
 **Parameters:** _none_
 
-**Why NQL?** This 94-character NQL expression compiles to 36 characters of SQL (0.4× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
+**Why NQL?** This 94-character NQL expression compiles to 65 characters of SQL (0.7× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
 
 </details>
+
 
 
 
@@ -1355,7 +1390,7 @@ SELECT sum(orders.total)
 ### COUNT DISTINCT
 
 **ecommerce:**
-```
+```nql
 orders | select count(distinct customerId) as uniqueCustomers
 ```
 
@@ -1379,10 +1414,11 @@ SELECT count(DISTINCT orders."customerId") AS "uniqueCustomers"
 
 
 
+
 ### GROUP BY
 
 **ecommerce:**
-```
+```nql
 orders | group by status | select status, count(*) as total
 ```
 
@@ -1411,8 +1447,9 @@ SELECT
 
 
 
+
 **blog:**
-```
+```nql
 posts | group by authorId | select authorId, count(*)
 ```
 
@@ -1441,12 +1478,13 @@ SELECT
 
 
 
+
 ### WHERE vs HAVING
 
 Position relative to `group by` determines behavior:
 
 **ecommerce:**
-```
+```nql
 # WHERE — filters individual rows (before grouping)
 orders | where total > 100 | group by status | select status, count(*)
 
@@ -1482,6 +1520,7 @@ SELECT
 
 
 
+
 ---
 
 ## 7. ORDER BY, LIMIT, OFFSET
@@ -1489,7 +1528,7 @@ SELECT
 ### Sorting
 
 **blog:**
-```
+```nql
 authors | order by name
 posts | order by createdAt desc
 ```
@@ -1499,17 +1538,17 @@ posts | order by createdAt desc
 
 **SQL:**
 ```sql
-SELECT authors.*
+SELECT posts.*
 
-  FROM authors
+  FROM posts
 
   ORDER BY
-  authors.name ASC
+  posts."createdAt" DESC
 ```
 
 **Parameters:** _none_
 
-**Why NQL?** This 55-character NQL expression compiles to 57 characters of SQL (1.0× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
+**Why NQL?** This 55-character NQL expression compiles to 59 characters of SQL (1.1× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
 
 </details>
 
@@ -1517,8 +1556,9 @@ SELECT authors.*
 
 
 
+
 **ecommerce:**
-```
+```nql
 customers | order by lastName asc, firstName asc
 products | order by price desc
 ```
@@ -1528,20 +1568,20 @@ products | order by price desc
 
 **SQL:**
 ```sql
-SELECT customers.*
+SELECT products.*
 
-  FROM customers
+  FROM products
 
   ORDER BY
-  customers."lastName" ASC,
-  customers."firstName" ASC
+  products.price DESC
 ```
 
 **Parameters:** _none_
 
-**Why NQL?** This 79-character NQL expression compiles to 98 characters of SQL (1.2× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
+**Why NQL?** This 79-character NQL expression compiles to 62 characters of SQL (0.8× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
 
 </details>
+
 
 
 
@@ -1550,7 +1590,7 @@ SELECT customers.*
 ### Pagination
 
 **blog:**
-```
+```nql
 posts | order by createdAt desc | limit 10
 posts | order by createdAt desc | limit 10 | offset 20
 ```
@@ -1568,13 +1608,15 @@ SELECT posts.*
   posts."createdAt" DESC
 
   LIMIT 10
+OFFSET 20
 ```
 
 **Parameters:** _none_
 
-**Why NQL?** This 97-character NQL expression compiles to 68 characters of SQL (0.7× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
+**Why NQL?** This 97-character NQL expression compiles to 78 characters of SQL (0.8× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
 
 </details>
+
 
 
 
@@ -1589,7 +1631,7 @@ NQL has three distinct uses of LIMIT. They look similar but have very different 
 Caps the total number of rows returned by the query:
 
 **blog:**
-```
+```nql
 # Return at most 10 posts
 posts | order by createdAt desc | limit 10
 ```
@@ -1619,6 +1661,7 @@ SELECT posts.*
 
 
 
+
 ```sql
 SELECT * FROM posts ORDER BY created_at DESC LIMIT 10
 ```
@@ -1628,7 +1671,7 @@ SELECT * FROM posts ORDER BY created_at DESC LIMIT 10
 Caps child rows **per parent** using a LATERAL JOIN:
 
 **blog:**
-```
+```nql
 # Top 3 posts PER author
 authors | select id, name, posts.* | limit posts 3
 ```
@@ -1671,6 +1714,7 @@ SELECT
 
 
 
+
 ```sql
 SELECT authors.id, authors.name, posts_lat_0.*
 FROM authors LEFT JOIN LATERAL (
@@ -1685,7 +1729,7 @@ Every author gets at most 3 posts. If there are 100 authors, you get up to 300 r
 Caps the total rows of the subquery used as a WHERE filter:
 
 **ecommerce:**
-```
+```nql
 # Customers whose ID appears in the first 5 delivered orders
 customers | where id in (orders | select customerId | where status = 'delivered' | limit 5)
 ```
@@ -1731,6 +1775,7 @@ SELECT customers.*
 
 
 
+
 ```sql
 SELECT * FROM customers
 WHERE id IN (SELECT customer_id FROM orders WHERE status = $1 LIMIT 5)
@@ -1752,7 +1797,7 @@ Given 50 customers, each with 10 orders:
 #### Per-Include Limit — Additional Examples
 
 **ecommerce:**
-```
+```nql
 # Top 5 order items per order
 orders | select id, orderNumber, orderItems.* | limit orderItems 5
 
@@ -1802,8 +1847,9 @@ SELECT
 
 
 
+
 **hierarchy:**
-```
+```nql
 # Top 2 employees per department
 departments | select id, name, employees.* | limit employees 2
 
@@ -1849,8 +1895,9 @@ SELECT
 
 
 
+
 **dotted-path (deep nesting):**
-```
+```nql
 # Top 3 employees per department, across all companies
 companies | select id, departments.employees.* | limit departments.employees 3
 ```
@@ -1869,14 +1916,14 @@ companies | select id, departments.employees.* | limit departments.employees 3
 
 ### Syntax
 
-```
+```nql
 function() over ([partition by expr] [order by expr [asc|desc]])
 ```
 
 ### Row Numbering
 
 **ecommerce:**
-```
+```nql
 products | select name, row_number() over (order by price) as rn
 products | select name, rank() over (partition by categoryId order by price desc) as priceRank
 products | select name, dense_rank() over (order by price) as dr
@@ -1889,8 +1936,8 @@ products | select name, dense_rank() over (order by price) as dr
 ```sql
 SELECT
   products.name,
-  row_number() OVER (
-  ORDER BY products.price ASC) AS rn
+  dense_rank() OVER (
+  ORDER BY products.price ASC) AS dr
 
   FROM products
 ```
@@ -1905,10 +1952,11 @@ SELECT
 
 
 
+
 ### Lag / Lead (Previous / Next Row)
 
 **ecommerce:**
-```
+```nql
 orders | select orderNumber, total, lag(total) over (order by createdAt) as prevTotal
 orders | select orderNumber, total, lead(total) over (order by createdAt) as nextTotal
 ```
@@ -1921,17 +1969,18 @@ orders | select orderNumber, total, lead(total) over (order by createdAt) as nex
 SELECT
   orders."orderNumber",
   orders.total,
-  lag(orders.total) OVER (
-  ORDER BY orders."createdAt" ASC) AS "prevTotal"
+  lead(orders.total) OVER (
+  ORDER BY orders."createdAt" ASC) AS "nextTotal"
 
   FROM orders
 ```
 
 **Parameters:** _none_
 
-**Why NQL?** This 172-character NQL expression compiles to 132 characters of SQL (0.8× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
+**Why NQL?** This 172-character NQL expression compiles to 133 characters of SQL (0.8× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
 
 </details>
+
 
 
 
@@ -1940,7 +1989,7 @@ SELECT
 ### Aggregate Windows
 
 **ecommerce:**
-```
+```nql
 orders | select orderNumber, total, sum(total) over (order by createdAt) as runningTotal
 orderItems | select orderId, totalPrice, sum(totalPrice) over (partition by orderId) as orderTotal
 ```
@@ -1951,19 +2000,19 @@ orderItems | select orderId, totalPrice, sum(totalPrice) over (partition by orde
 **SQL:**
 ```sql
 SELECT
-  orders."orderNumber",
-  orders.total,
-  sum(orders.total) OVER (
-  ORDER BY orders."createdAt" ASC) AS "runningTotal"
+  "orderItems"."orderId",
+  "orderItems"."totalPrice",
+  sum("orderItems"."totalPrice") OVER (PARTITION BY "orderItems"."orderId") AS "orderTotal"
 
-  FROM orders
+  FROM "orderItems"
 ```
 
 **Parameters:** _none_
 
-**Why NQL?** This 187-character NQL expression compiles to 135 characters of SQL (0.7× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
+**Why NQL?** This 187-character NQL expression compiles to 171 characters of SQL (0.9× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
 
 </details>
+
 
 
 
@@ -1972,7 +2021,7 @@ SELECT
 ### Empty OVER
 
 **ecommerce:**
-```
+```nql
 products | select name, count(*) over () as totalProducts
 ```
 
@@ -1998,12 +2047,13 @@ SELECT
 
 
 
+
 ---
 
 ## 9. CASE Expressions
 
 **ecommerce:**
-```
+```nql
 # Simple
 products | select case when price > 100 then 'expensive' end
 
@@ -2041,8 +2091,9 @@ SELECT
 
 
 
+
 **hierarchy:**
-```
+```nql
 employees | select name, case
   when salary > 100000 then 'senior'
   when salary > 60000 then 'mid'
@@ -2076,6 +2127,7 @@ SELECT
 
 
 
+
 ---
 
 ## 10. Hierarchy / Recursive Traversal
@@ -2087,7 +2139,7 @@ Requires a schema with self-referential `ref()` and `roles` configured.
 ### Single-Hop Traversal
 
 **hierarchy:**
-```
+```nql
 # Direct parent
 employees | select name, title, manager.name
 
@@ -2128,10 +2180,11 @@ COALESCE((SELECT json_agg(jsonb_build_object('name', __t__.name))
 
 
 
+
 ### Recursive Ancestors
 
 **hierarchy:**
-```
+```nql
 # Full ancestor chain as JSON array
 employees | select name, managementChain.*
 
@@ -2171,10 +2224,11 @@ SELECT employees.name
 
 
 
+
 ### Recursive Descendants
 
 **hierarchy:**
-```
+```nql
 # Full descendant chain
 employees | select name, allReports.*
 
@@ -2214,6 +2268,7 @@ SELECT employees.name
 
 
 
+
 > The role names (`manager`, `managementChain`, `allReports`) come from the schema's `roles` option on the self-referential `ref()`.
 
 ---
@@ -2223,7 +2278,7 @@ SELECT employees.name
 ### INSERT
 
 **ecommerce:**
-```
+```nql
 insert into products set sku = 'IPH-15', name = 'iPhone', price = 999, categoryId = 1
 
 # With RETURNING (pipe to select)
@@ -2259,8 +2314,9 @@ INSERT INTO products (
 
 
 
+
 **blog:**
-```
+```nql
 insert into authors set name = 'Alice', email = 'alice@example.com'
 insert into posts set title = 'Hello', slug = 'hello', authorId = 1 | select id, title
 ```
@@ -2270,17 +2326,20 @@ insert into posts set title = 'Hello', slug = 'hello', authorId = 1 | select id,
 
 **SQL:**
 ```sql
-INSERT INTO authors (
-  name,
-  email
+INSERT INTO posts (
+  title,
+  slug,
+  "authorId"
 ) VALUES
   (
     $1,
-    $2
-  )
+    $2,
+    $3
+  ) 
+  RETURNING posts.id AS id, posts.title AS title
 ```
 
-**Parameters:** `["Alice", "alice@example.com"]`
+**Parameters:** `["Hello", "hello", 1]`
 
 **Why NQL?** `INSERT` mutations are automatically parameterized — every value becomes a `$N` placeholder, preventing SQL injection. Column names are validated against the schema and double-quoted in the output SQL.
 
@@ -2290,10 +2349,11 @@ INSERT INTO authors (
 
 
 
+
 ### INSERT FROM (Bulk Copy)
 
 **ecommerce:**
-```
+```nql
 # Copy rows from a filtered query
 insert into orderItems from orderItems | where orderId = 1
 
@@ -2307,7 +2367,7 @@ insert into addresses from addresses | where customerId = 5 | select id
 ### UPDATE
 
 **ecommerce:**
-```
+```nql
 update products set price = 899 where id = 1
 
 # With RETURNING
@@ -2333,8 +2393,9 @@ UPDATE products SET price = $1
 
 
 
+
 **blog:**
-```
+```nql
 update posts set published = true where authorId = 1
 ```
 
@@ -2357,10 +2418,11 @@ UPDATE posts SET published = $1
 
 
 
+
 ### DELETE
 
 **ecommerce:**
-```
+```nql
 delete from products where id = 1
 ```
 
@@ -2384,8 +2446,9 @@ DELETE
 
 
 
+
 **blog:**
-```
+```nql
 delete from comments where approved = false
 ```
 
@@ -2409,18 +2472,19 @@ DELETE
 
 
 
+
 ### UPSERT (ON CONFLICT)
 
 Insert a row, or update it if a conflict occurs on the specified column(s).
 
 **Syntax:**
-```
+```nql
 upsert into <table> on <column> set <col> = <val>, ...
 upsert into <table> on (<col1>, <col2>) set <col> = <val>, ...
 ```
 
 **ecommerce:**
-```
+```nql
 # Single conflict column
 upsert into customers on email set firstName = 'Alice', lastName = 'Smith', email = 'alice@example.com'
 
@@ -2459,6 +2523,7 @@ INSERT INTO customers (
 
 
 
+
 **Generated SQL (single conflict column):**
 ```sql
 INSERT INTO customers (first_name, last_name, email)
@@ -2490,7 +2555,7 @@ DO UPDATE SET
 Chain mutations where the second uses results from the first:
 
 **ecommerce:**
-```
+```nql
 insert into orders set customerId = 1, orderNumber = 'ORD-100', total = 59.99, shippingAddressId = 1, billingAddressId = 1 | bind order
 insert into orderItems set orderId = order.id, productId = 5, quantity = 2, unitPrice = 29.99, totalPrice = 59.98
 ```
@@ -2499,20 +2564,20 @@ insert into orderItems set orderId = order.id, productId = 5, quantity = 2, unit
 
 ## 12. Advanced Features
 
-### LET Bindings (CTEs)
+### Bind (CTEs)
 
-Define reusable query fragments:
+Capture a query result as a named CTE for use in subsequent statements:
 
 **ecommerce:**
-```
-let activeProducts = products | where active = true
-activeProducts | select name, price | order by price
+```text
+products | where active = true | bind activeProducts
+insert into featuredProducts from activeProducts
 ```
 
 **blog:**
-```
-let recentPosts = posts | where published = true | order by createdAt desc | limit 10
-recentPosts | select title, author.name
+```text
+posts | where published = true | order by createdAt desc | limit 10 | bind recentPosts
+insert into highlights from recentPosts
 ```
 
 ### Raw SQL Escape Hatch
@@ -2537,28 +2602,12 @@ Prefix with `!` for raw SQL (works with any schema):
 
 ### Identifiers
 
-```
+```text
 authors            # unquoted (standard)
 "order"            # quoted (reserved keyword)
 "order-items"      # quoted (special characters)
 "Order Details"    # quoted (spaces)
 ```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT authors.*
-
-  FROM authors
-```
-
-**Parameters:** _none_
-
-**Why NQL?** This 45-character NQL expression compiles to 29 characters of SQL (0.6× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
 
 
 
@@ -2595,7 +2644,7 @@ In the interactive REPL, dot commands provide schema introspection:
 
 ### Reserved Keywords
 
-**Query:** `select`, `where`, `flat`, `via`, `let`, `bind`, `group`, `by`, `order`, `limit`, `offset`, `distinct`
+**Query:** `select`, `where`, `flat`, `via`, `bind`, `group`, `by`, `order`, `limit`, `offset`, `distinct`
 
 **Boolean:** `and`, `or`, `not`, `all`, `some`, `none`, `every`
 

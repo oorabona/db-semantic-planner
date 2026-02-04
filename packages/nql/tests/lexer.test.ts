@@ -25,7 +25,6 @@ import {
 	Insert,
 	Into,
 	Is,
-	Let,
 	Like,
 	Limit,
 	LParen,
@@ -185,7 +184,6 @@ describe('NqlLexer', () => {
 				['where', Where],
 				['flat', Flat],
 				['via', Via],
-				['let', Let],
 				['bind', Bind],
 				['group by', GroupBy],
 				['order by', OrderBy],
@@ -391,13 +389,6 @@ describe('NqlLexer', () => {
 			expect(tokenTypes).toContain('Insert');
 			expect(tokenTypes).toContain('Into');
 			expect(tokenTypes).toContain('Set');
-		});
-
-		it('tokenizes let binding', () => {
-			const query = `let active_users = users | where active = true`;
-			const result = NqlLexer.tokenize(query);
-			expect(result.errors).toHaveLength(0);
-			expect(result.tokens[0]!.tokenType).toBe(Let);
 		});
 
 		it('tokenizes mutation with bind', () => {

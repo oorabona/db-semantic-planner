@@ -2,13 +2,12 @@
 
 ## In Progress
 
-(None)
-
 ---
 
 ## Pending — HIGH
 
 - [ ] [MCP] #6: Replace MCP server placeholder test — Score 4.5, Effort: M
+- [ ] [Adapter] Subquery expansion in mutation WHERE clauses — IN(subquery) flattened to parameter instead of inline SQL subquery. Effort: M
 
 ---
 
@@ -65,7 +64,5 @@
 ---
 
 ## Completed
-
-- [x] ✅ [NQL] Column validation — compile-time column existence checking (2026-02-04)
 
 (Archived → docs/historic/done-2026-02.md)

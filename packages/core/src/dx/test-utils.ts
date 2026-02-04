@@ -80,6 +80,7 @@ export function createMockAdapter(options?: MockAdapterOptions): Adapter {
 		compileUpdate: notImplemented,
 		compileDelete: notImplemented,
 		compileUpsert: notImplemented,
+		compileUpsertFrom: notImplemented,
 		compileRecursive: notImplemented,
 		createDump: notImplemented,
 		execute: notImplemented,

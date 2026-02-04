@@ -10,6 +10,9 @@
  */
 
 import {
+	isDeleteIntent,
+	isInsertIntent,
+	isUpdateIntent,
 	isUpsertIntent,
 	POSTGRESQL_CAPABILITIES,
 	plan,
@@ -18,6 +21,7 @@ import {
 	schema,
 } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
+import type { InsertFromIntent, UpsertFromIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -703,5 +707,258 @@ describe('Bug regressions', () => {
 					' and categories_exists_0.name <> categories.name))',
 			);
 		});
+	});
+});
+
+// ===========================================================================
+// Mutation NQL → SQL E2E tests
+// ===========================================================================
+
+const mutationSchema = schema({
+	authors: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		email: 'string',
+		active: 'boolean',
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		published: 'boolean',
+		featured: 'boolean',
+		userId: ref('authors', { inverse: 'posts' }),
+	},
+	comments: {
+		id: { type: 'integer', primaryKey: true },
+		body: 'string',
+		postId: ref('posts', { inverse: 'comments' }),
+	},
+	archivedPosts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		published: 'boolean',
+		userId: { type: 'integer' },
+	},
+});
+
+/**
+ * General NQL mutation → SQL helper that dispatches to the correct adapter method.
+ */
+function mutationToSQL(nql: string): {
+	sql: string;
+	params: readonly unknown[];
+} {
+	const compiled = compile(nql, mutationSchema.model);
+	if (!compiled.success || !compiled.ast?.mutation) {
+		throw new Error(
+			`NQL mutation compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+
+	const mutation = compiled.ast.mutation;
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const opts = { model: mutationSchema.model };
+
+	let result: { sql: string; parameters: readonly unknown[] };
+	if (isUpdateIntent(mutation)) {
+		result = adapter.compileUpdate(mutation, opts);
+	} else if (isDeleteIntent(mutation)) {
+		result = adapter.compileDelete(mutation, opts);
+	} else if (isUpsertIntent(mutation)) {
+		result = adapter.compileUpsert(mutation, opts);
+	} else if (isInsertIntent(mutation)) {
+		result = adapter.compileInsert(mutation, opts);
+	} else if (mutation.type === 'insert_from') {
+		result = adapter.compileInsertFrom(mutation as InsertFromIntent, opts);
+	} else if (mutation.type === 'upsert_from') {
+		result = adapter.compileUpsertFrom(mutation as UpsertFromIntent, opts);
+	} else {
+		throw new Error(
+			`Unsupported mutation type: ${(mutation as { type: string }).type}`,
+		);
+	}
+
+	return { sql: normalizeSQL(result.sql), params: result.parameters };
+}
+
+describe('NQL → SQL mutation E2E', () => {
+	it('S1: update with IN subquery flattened to parameter', () => {
+		const { sql } = mutationToSQL(
+			'update authors set active = false where id in (posts | where published = false | select userId)',
+		);
+		// Note: subquery is compiled to a parameter ($2), not inline SQL subquery.
+		// Full subquery expansion in mutations is a future enhancement.
+		expect(sql).toEqual(
+			'update authors set active = $1 where authors.id = any ($2)',
+		);
+	});
+
+	it('S2: delete with NOT IN subquery flattened to parameter', () => {
+		const { sql } = mutationToSQL(
+			'delete from comments where postId not in (posts | select id)',
+		);
+		expect(sql).toEqual(
+			'delete from comments where not (comments."postid" = any ($1))',
+		);
+	});
+
+	it('S3: insert from with where', () => {
+		const { sql } = mutationToSQL(
+			'insert into archivedPosts from posts where published = false',
+		);
+		expect(sql).toEqual(
+			'insert into "archivedposts" select * from posts where posts.published = $1',
+		);
+	});
+
+	it('S4: update with RETURNING', () => {
+		const { sql } = mutationToSQL(
+			'update authors set active = false where id = 1 | select id, name',
+		);
+		expect(sql).toEqual(
+			'update authors set active = $1 where authors.id = $2 returning authors.id as id, authors.name as name',
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// NQL → SQL bind + CTE E2E tests (Block 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compile a multi-statement NQL program with bindings to SQL.
+ * Handles CTE generation from bound queries.
+ */
+function bindToSQL(
+	nql: string,
+	model: ReturnType<typeof schema>['model'],
+): { sql: string; params: readonly unknown[] } {
+	const compiled = compile(nql, model);
+	if (!compiled.success || !compiled.ast) {
+		throw new Error(
+			`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+
+	const ast = compiled.ast;
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const opts = { model };
+	const allParams: unknown[] = [];
+
+	// Compile each binding to SQL for CTE generation
+	const ctes: string[] = [];
+	if (ast.bindings) {
+		for (const [name, queryIntent] of ast.bindings) {
+			const planReport = plan(queryIntent, model, {
+				dialectCapabilities: POSTGRESQL_CAPABILITIES,
+			});
+			const result = adapter.compile(planReport, opts);
+			ctes.push(`"${name}" as (${normalizeSQL(result.sql)})`);
+			allParams.push(...result.parameters);
+		}
+	}
+
+	// Compile the final statement (mutation or query)
+	let finalSql: string;
+	if (ast.mutation) {
+		const mutation = ast.mutation;
+		let result: { sql: string; parameters: readonly unknown[] };
+		if (isUpdateIntent(mutation)) {
+			result = adapter.compileUpdate(mutation, opts);
+		} else if (isDeleteIntent(mutation)) {
+			result = adapter.compileDelete(mutation, opts);
+		} else if (isInsertIntent(mutation)) {
+			result = adapter.compileInsert(mutation, opts);
+		} else if (mutation.type === 'insert_from') {
+			result = adapter.compileInsertFrom(mutation as InsertFromIntent, opts);
+		} else if (mutation.type === 'upsert_from') {
+			result = adapter.compileUpsertFrom(mutation as UpsertFromIntent, opts);
+		} else {
+			throw new Error(
+				`Unsupported mutation type: ${(mutation as { type: string }).type}`,
+			);
+		}
+		finalSql = normalizeSQL(result.sql);
+		allParams.push(...result.parameters);
+	} else if (ast.query) {
+		const planReport = plan(ast.query, model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+		const result = adapter.compile(planReport, opts);
+		finalSql = normalizeSQL(result.sql);
+		allParams.push(...result.parameters);
+	} else {
+		throw new Error('No query or mutation in compiled result');
+	}
+
+	// Wrap with CTEs if present
+	if (ctes.length > 0) {
+		finalSql = `with ${ctes.join(', ')} ${finalSql}`;
+	}
+
+	return { sql: finalSql, params: allParams };
+}
+
+describe('NQL → SQL bind + CTE E2E', () => {
+	it('D3: query bind + insert from produces CTE-wrapped SQL', () => {
+		const { sql } = bindToSQL(
+			'posts | where published = false | select id | bind subset\ninsert into archivedPosts from subset',
+			mutationSchema.model,
+		);
+		expect(sql).toEqual(
+			'with "subset" as (select posts.id from posts where posts.published = $1) insert into "archivedposts" select * from subset',
+		);
+	});
+
+	it('D4: query bind + delete using bound ref in WHERE subquery', () => {
+		const { sql } = bindToSQL(
+			'posts | where published = false | select id | bind toDelete\ndelete from comments where postId in (toDelete)',
+			mutationSchema.model,
+		);
+		// Note: subquery IN is flattened to parameter (known bug — see TODO.md)
+		// Ideally: ... WHERE comments."postid" = ANY(SELECT "id" FROM "toDelete")
+		expect(sql).toEqual(
+			'with "toDelete" as (select posts.id from posts where posts.published = $1) delete from comments where comments."postid" = any ($1)',
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// NQL → SQL upsert-from E2E tests (Block 4)
+// ---------------------------------------------------------------------------
+describe('NQL → SQL upsert-from E2E', () => {
+	it('E1: basic upsert from compiles to INSERT ... SELECT ... ON CONFLICT', () => {
+		const { sql } = mutationToSQL('upsert into authors on id from posts');
+		expect(sql).toEqual(
+			'insert into authors (id, name, email, active)' +
+				' select posts.id as id, posts.name as name, posts.email as email, posts.active as active from posts' +
+				' on conflict (id) do update set name = excluded.name, email = excluded.email, active = excluded.active',
+		);
+	});
+
+	it('E2: upsert from with WHERE clause on source', () => {
+		const { sql, params } = mutationToSQL(
+			'upsert into authors on id from posts where published = true',
+		);
+		expect(sql).toEqual(
+			'insert into authors (id, name, email, active)' +
+				' select posts.id as id, posts.name as name, posts.email as email, posts.active as active from posts' +
+				' where posts.published = $1' +
+				' on conflict (id) do update set name = excluded.name, email = excluded.email, active = excluded.active',
+		);
+		expect(params).toEqual([true]);
+	});
+
+	it('E3: multi-statement bind + upsert from produces CTE-wrapped SQL', () => {
+		const { sql } = bindToSQL(
+			'posts | where published = true | select userId | bind active\nupsert into authors on id from active',
+			mutationSchema.model,
+		);
+		expect(sql).toEqual(
+			'with "active" as (select posts."userid" from posts where posts.published = $1)' +
+				' insert into authors (id, name, email, active)' +
+				' select active.id as id, active.name as name, active.email as email, active.active as active from active' +
+				' on conflict (id) do update set name = excluded.name, email = excluded.email, active = excluded.active',
+		);
 	});
 });

@@ -25,7 +25,6 @@ export const Select = createToken({ name: 'Select', pattern: /select\b/i });
 export const Where = createToken({ name: 'Where', pattern: /where\b/i });
 export const Flat = createToken({ name: 'Flat', pattern: /flat\b/i });
 export const Via = createToken({ name: 'Via', pattern: /via\b/i });
-export const Let = createToken({ name: 'Let', pattern: /let\b/i });
 export const Bind = createToken({ name: 'Bind', pattern: /bind\b/i });
 export const GroupBy = createToken({
 	name: 'GroupBy',
@@ -240,7 +239,6 @@ export const allTokens = [
 	Where,
 	Flat,
 	Via,
-	Let,
 	Bind,
 	Limit,
 	Offset,

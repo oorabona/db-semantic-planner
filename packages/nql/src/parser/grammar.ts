@@ -47,7 +47,6 @@ import {
 	Lead,
 	LessThan,
 	LessThanOrEqual,
-	Let,
 	Like,
 	Limit,
 	LParen,
@@ -121,26 +120,13 @@ export class NqlParser extends CstParser {
 	// ============================================================
 
 	/**
-	 * program = { let_stmt | statement } ;
-	 * Supports multiple statements (queries or mutations) with optional let bindings
+	 * program = { statement } ;
+	 * Supports multiple statements (queries or mutations)
 	 */
 	public program = this.RULE('program', () => {
 		this.MANY(() => {
-			this.OR([
-				{ ALT: () => this.SUBRULE(this.letStatement) },
-				{ ALT: () => this.SUBRULE(this.statement) },
-			]);
+			this.SUBRULE(this.statement);
 		});
-	});
-
-	/**
-	 * let_stmt = "let" IDENT "=" query ;
-	 */
-	private letStatement = this.RULE('letStatement', () => {
-		this.CONSUME(Let);
-		this.SUBRULE(this.identSegment);
-		this.CONSUME(Equals);
-		this.SUBRULE(this.query);
 	});
 
 	/**
@@ -177,8 +163,7 @@ export class NqlParser extends CstParser {
 
 	/**
 	 * query_clause = where_clause | select_clause | flat_clause
-	 *              | group_clause | order_clause | limit_clause | offset_clause ;
-	 * NQL v2.1: Removed with_clause, added flat_clause
+	 *              | group_clause | order_clause | limit_clause | offset_clause | bind_clause ;
 	 */
 	private queryClause = this.RULE('queryClause', () => {
 		this.OR([
@@ -189,6 +174,7 @@ export class NqlParser extends CstParser {
 			{ ALT: () => this.SUBRULE(this.orderClause) },
 			{ ALT: () => this.SUBRULE(this.limitClause) },
 			{ ALT: () => this.SUBRULE(this.offsetClause) },
+			{ ALT: () => this.SUBRULE(this.bindClause) },
 		]);
 	});
 
@@ -1091,6 +1077,11 @@ export class NqlParser extends CstParser {
 			{ ALT: () => this.SUBRULE(this.insertStmt) },
 			{ ALT: () => this.SUBRULE(this.updateStmt) },
 			{ ALT: () => this.SUBRULE(this.deleteStmt) },
+			// BACKTRACK for UPSERT FROM (upsert into X on Y from Z) vs UPSERT SET (upsert into X on Y set ...)
+			{
+				ALT: () => this.SUBRULE(this.upsertFromStmt),
+				GATE: this.BACKTRACK(this.upsertFromStmt),
+			},
 			{ ALT: () => this.SUBRULE(this.upsertStmt) },
 		]);
 	});
@@ -1182,6 +1173,42 @@ export class NqlParser extends CstParser {
 		this.OPTION(() => {
 			this.CONSUME(Where);
 			this.SUBRULE(this.booleanExpr);
+		});
+	});
+
+	/**
+	 * upsert_from_stmt = "upsert" "into" ident_segment "on" ( "(" ident_list ")" | ident_segment ) "from" ident_segment [ "where" boolean_expr ] [ "limit" number ] ;
+	 * @example upsert into authors on id from counts
+	 * @example upsert into authors on (id, email) from counts where active = true
+	 */
+	private upsertFromStmt = this.RULE('upsertFromStmt', () => {
+		this.CONSUME(Upsert);
+		this.CONSUME(Into);
+		this.SUBRULE(this.identSegment); // target table
+		this.CONSUME(On);
+		this.OR([
+			{
+				ALT: () => {
+					this.CONSUME(LParen);
+					this.SUBRULE(this.identList);
+					this.CONSUME(RParen);
+				},
+			},
+			{
+				ALT: () => {
+					this.SUBRULE2(this.identSegment); // single conflict column
+				},
+			},
+		]);
+		this.CONSUME(From);
+		this.SUBRULE3(this.identSegment); // source table
+		this.OPTION(() => {
+			this.CONSUME(Where);
+			this.SUBRULE(this.booleanExpr);
+		});
+		this.OPTION2(() => {
+			this.CONSUME(Limit);
+			this.CONSUME(NumberLiteral);
 		});
 	});
 
