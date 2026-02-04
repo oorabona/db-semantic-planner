@@ -2,7 +2,7 @@
 
 ## In Progress
 
-(none)
+(None)
 
 ---
 
@@ -16,7 +16,6 @@
 
 - [ ] [NQL] JSONB Operators Support — Effort: M
 - [ ] [Adapter] Enhance `singularize()` for irregular plurals — Effort: M
-- [ ] [CLI] Enrich query plan display — Effort: M
 - [ ] [Docs] DOCS-001: User documentation (Getting Started, API Guide)
 - [ ] [Docs] DOCS-002: Migration guides (from-prisma, from-drizzle, from-kysely)
 - [ ] [Docs] DOCS-003: Pattern guides (multi-tenant, recursive queries, window functions)

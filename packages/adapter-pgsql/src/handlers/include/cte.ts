@@ -35,13 +35,15 @@ function buildCteTargets(
 	alias: string,
 	ctx: CompilerContext,
 ): Node[] {
-	if (columns && columns.length > 0) {
-		return columns.map((col) => ({
-			ResTarget: {
-				val: columnRef(col, alias, undefined, ctx.naming),
-				name: ctx.naming.toDatabase(col),
-			},
-		}));
+	if (columns && columns.length > 0 && !columns.every((c) => c === '*')) {
+		return columns
+			.filter((col) => col !== '*')
+			.map((col) => ({
+				ResTarget: {
+					val: columnRef(col, alias, undefined, ctx.naming),
+					name: ctx.naming.toDatabase(col),
+				},
+			}));
 	}
 
 	// Select all columns

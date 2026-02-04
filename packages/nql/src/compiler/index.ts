@@ -703,7 +703,10 @@ export class NqlCompiler {
 		return { field: sqlExpr, direction: item.direction };
 	}
 
-	private compileExpression(expr: NqlExpression): WhereIntent {
+	private compileExpression(
+		expr: NqlExpression,
+		aliasContext?: string,
+	): WhereIntent {
 		switch (expr.type) {
 			case 'binary': {
 				const binary = expr as NqlBinaryExpression;
@@ -711,8 +714,8 @@ export class NqlCompiler {
 					return {
 						kind: 'and',
 						conditions: [
-							this.compileExpression(binary.left),
-							this.compileExpression(binary.right),
+							this.compileExpression(binary.left, aliasContext),
+							this.compileExpression(binary.right, aliasContext),
 						],
 					};
 				}
@@ -720,8 +723,8 @@ export class NqlCompiler {
 					return {
 						kind: 'or',
 						conditions: [
-							this.compileExpression(binary.left),
-							this.compileExpression(binary.right),
+							this.compileExpression(binary.left, aliasContext),
+							this.compileExpression(binary.right, aliasContext),
 						],
 					};
 				}
@@ -736,7 +739,7 @@ export class NqlCompiler {
 				if (unary.operator === 'not') {
 					return {
 						kind: 'not',
-						condition: this.compileExpression(unary.operand),
+						condition: this.compileExpression(unary.operand, aliasContext),
 					};
 				}
 				throw new Error(`Unsupported unary operator: ${unary.operator}`);
@@ -744,7 +747,7 @@ export class NqlCompiler {
 
 			case 'comparison': {
 				const comp = expr as NqlComparisonExpression;
-				const field = this.expressionToField(comp.left);
+				const field = this.expressionToField(comp.left, aliasContext);
 				if (!field) {
 					throw new Error('Left side of comparison must be a field reference');
 				}
@@ -772,7 +775,7 @@ export class NqlCompiler {
 
 			case 'rangeOp': {
 				const rangeExpr = expr as NqlRangeOpExpression;
-				const field = this.expressionToField(rangeExpr.left);
+				const field = this.expressionToField(rangeExpr.left, aliasContext);
 				if (!field) {
 					throw new Error(
 						'Left side of range operator must be a field reference',
@@ -805,7 +808,7 @@ export class NqlCompiler {
 
 			case 'in': {
 				const inExpr = expr as NqlInExpression;
-				const field = this.expressionToField(inExpr.expression);
+				const field = this.expressionToField(inExpr.expression, aliasContext);
 				if (!field) {
 					throw new Error('IN expression must reference a field');
 				}
@@ -861,7 +864,7 @@ export class NqlCompiler {
 
 			case 'between': {
 				const between = expr as NqlBetweenExpression;
-				const field = this.expressionToField(between.expression);
+				const field = this.expressionToField(between.expression, aliasContext);
 				if (!field) {
 					throw new Error('BETWEEN expression must reference a field');
 				}
@@ -879,7 +882,7 @@ export class NqlCompiler {
 
 			case 'isNull': {
 				const isNull = expr as NqlIsNullExpression;
-				const field = this.expressionToField(isNull.expression);
+				const field = this.expressionToField(isNull.expression, aliasContext);
 				if (!field) {
 					throw new Error('IS NULL expression must reference a field');
 				}
@@ -910,7 +913,7 @@ export class NqlCompiler {
 				return {
 					kind: 'relationFilter',
 					relation: relFilter.relation,
-					where: this.compileExpression(relFilter.condition),
+					where: this.compileExpression(relFilter.condition, relFilter.alias),
 					mode: relFilter.mode,
 					...(relFilter.alias !== undefined && { alias: relFilter.alias }),
 				};
@@ -1060,9 +1063,21 @@ export class NqlCompiler {
 		return columns;
 	}
 
-	private expressionToField(expr: NqlExpression): string | null {
+	private expressionToField(
+		expr: NqlExpression,
+		aliasContext?: string,
+	): string | null {
 		if (expr.type === 'path') {
-			return expr.segments.join('.');
+			const segments = expr.segments;
+			// Strip relation filter alias prefix (e.g., "o.status" → "status" when alias is "o")
+			if (
+				aliasContext &&
+				segments.length > 1 &&
+				segments[0] === aliasContext
+			) {
+				return segments.slice(1).join('.');
+			}
+			return segments.join('.');
 		}
 		return null;
 	}

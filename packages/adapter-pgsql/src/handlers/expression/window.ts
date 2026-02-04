@@ -298,6 +298,23 @@ export const genericWindowHandler: ExpressionHandler = {
 			throw new Error('Window function requires function name');
 		}
 
+		// count() without a column → count(*) using agg_star
+		const isCountStar =
+			funcName.toLowerCase() === 'count' &&
+			!decision.column &&
+			(!decision.args || decision.args.length === 0);
+
+		if (isCountStar) {
+			const windowDef = buildWindowDef(decision, ctx);
+			return {
+				FuncCall: {
+					funcname: [{ String: { sval: 'count' } }],
+					agg_star: true,
+					over: windowDef,
+				},
+			};
+		}
+
 		const args: Node[] = [];
 
 		// Add column if specified

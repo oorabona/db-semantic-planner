@@ -822,6 +822,9 @@ export function windowFuncCall(
 
 	if (args.length > 0) {
 		funcCallObj.args = args;
+	} else if (funcName.toLowerCase() === 'count') {
+		// count() without args → count(*) via agg_star
+		funcCallObj.agg_star = true;
 	}
 
 	return { FuncCall: funcCallObj as FuncCall };
