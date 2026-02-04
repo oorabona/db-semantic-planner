@@ -7,7 +7,8 @@
 ## Pending — HIGH
 
 - [ ] [MCP] #6: Replace MCP server placeholder test — Score 4.5, Effort: M
-- [ ] [Adapter] Subquery expansion in mutation WHERE clauses — IN(subquery) flattened to parameter instead of inline SQL subquery. Effort: M
+- [x] ✅ [Adapter] Subquery expansion in mutation WHERE clauses — IN(subquery) now produces inline SQL subquery (2026-02-04)
+- [ ] [Adapter] Bound CTE ref in IN() resolved as value, not inline subquery — separate from direct subquery fix. Effort: S
 
 ---
 
