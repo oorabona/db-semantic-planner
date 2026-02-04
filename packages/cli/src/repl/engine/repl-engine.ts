@@ -49,6 +49,24 @@ const DIALECT_STRATEGIES: Record<string, readonly string[]> = {
 	duckdb: ['auto', 'join', 'subquery', 'cte', 'json_agg'],
 };
 
+/**
+ * Check if the last character of the input is inside a single-quoted string literal.
+ * NQL uses SQL-style single quotes; escaped quotes are '' (doubled).
+ */
+export function isInsideStringLiteral(input: string): boolean {
+	let inString = false;
+	for (let i = 0; i < input.length - 1; i++) {
+		if (input[i] === "'") {
+			if (inString && i + 1 < input.length - 1 && input[i + 1] === "'") {
+				i++; // skip escaped quote ''
+			} else {
+				inString = !inString;
+			}
+		}
+	}
+	return inString;
+}
+
 export class ReplEngine {
 	private state: EngineState;
 	private listeners: EngineEventHandler[] = [];
@@ -642,13 +660,19 @@ export class ReplEngine {
 		}
 
 		try {
-			const result = await compileNqlToSql(content, this.model, {
+			// Strip trailing ! (bang suffix = execute mutation) before compilation
+			// Must verify the ! is outside string literals (odd number of unescaped quotes = inside string)
+			const trimmed = content.trim();
+			const hasBangSuffix =
+				trimmed.endsWith('!') && !isInsideStringLiteral(trimmed);
+			const nqlContent = hasBangSuffix ? trimmed.slice(0, -1).trim() : content;
+
+			const result = await compileNqlToSql(nqlContent, this.model, {
 				...(this.state.schemaName ? { schemaName: this.state.schemaName } : {}),
 				...(this.state.dbCasing ? { dbCasing: this.state.dbCasing } : {}),
 			});
 
 			const isMutation = result.intentType !== 'query';
-			const hasBangSuffix = content.trim().endsWith('!');
 			const isDryRun = isMutation && !hasBangSuffix;
 
 			// Apply EXPLAIN prefix if explainMode is on (queries only)

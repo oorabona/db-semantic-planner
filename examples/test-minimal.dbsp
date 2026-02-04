@@ -27,7 +27,7 @@ posts | select *, user.*
 users | select *, posts.*
 
 # Multiple conditions
-posts | where published = true and authorId = 1
+posts | where published = true and userId = 1
 
 # With limit/offset
 posts | limit 10

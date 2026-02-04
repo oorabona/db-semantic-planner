@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EngineEvent } from './engine-types.js';
-import { ReplEngine } from './repl-engine.js';
+import { isInsideStringLiteral, ReplEngine } from './repl-engine.js';
 
 /**
  * Minimal schema for testing (no DB needed).
@@ -543,5 +543,51 @@ describe('ReplEngine', () => {
 				}
 			}
 		}
+	});
+});
+
+describe('isInsideStringLiteral', () => {
+	it('should return false for bang outside string', () => {
+		expect(isInsideStringLiteral("insert into users set name = 'John'!")).toBe(
+			false,
+		);
+	});
+
+	it('should return true for bang inside string literal', () => {
+		expect(isInsideStringLiteral("insert into users set name = 'John!'")).toBe(
+			true,
+		);
+	});
+
+	it('should return false for bang after closed string with bang inside', () => {
+		expect(isInsideStringLiteral("insert into users set name = 'John!'!")).toBe(
+			false,
+		);
+	});
+
+	it('should return false for no string literals', () => {
+		expect(isInsideStringLiteral('update users set active = true!')).toBe(
+			false,
+		);
+	});
+
+	it('should handle escaped quotes (doubled single quotes)', () => {
+		expect(
+			isInsideStringLiteral("insert into users set name = 'O''Brien'!"),
+		).toBe(false);
+	});
+
+	it('should return true when bang is inside string with escaped quotes', () => {
+		expect(
+			isInsideStringLiteral("insert into users set name = 'O''Brien!'"),
+		).toBe(true);
+	});
+
+	it('should handle multiple string literals', () => {
+		expect(
+			isInsideStringLiteral(
+				"insert into users set name = 'Alice', email = 'alice@test.com'!",
+			),
+		).toBe(false);
 	});
 });

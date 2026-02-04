@@ -6,14 +6,14 @@
 # ─────────────────────────────────────────
 --- query: 0
 db.success: true
-db.output.contains: Executed SQL
+db.output.contains: [RAW_SQL]
 
 # ─────────────────────────────────────────
 # Query 1: !CREATE SCHEMA IF NOT EXISTS ch4_scheduling;
 # ─────────────────────────────────────────
 --- query: 1
 db.success: true
-db.output.contains: Executed SQL
+db.output.contains: [RAW_SQL]
 
 # ─────────────────────────────────────────
 # Query 2: .use ch4_scheduling

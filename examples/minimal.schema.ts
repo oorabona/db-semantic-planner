@@ -23,6 +23,7 @@ export default schema({
 		id: { type: 'integer', primaryKey: true, autoIncrement: true },
 		title: 'string',
 		content: { type: 'text', nullable: true },
+		published: { type: 'boolean', default: 'false' },
 		userId: ref('users', { onDelete: 'CASCADE', inverse: 'posts' }),
 	},
 });
