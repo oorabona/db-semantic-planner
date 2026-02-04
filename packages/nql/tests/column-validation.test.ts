@@ -340,6 +340,55 @@ describe('Column Validation', () => {
 			);
 			expect(result.success).toBe(true);
 		});
+
+		it('should accept valid column in dot-syntax relation filter', () => {
+			const result = compile(
+				'users | where some(orders).status = true',
+				schema,
+			);
+			expect(result.success).toBe(true);
+		});
+
+		it('should reject invalid column in dot-syntax relation filter', () => {
+			const result = compile(
+				'users | where some(orders).statusX = true',
+				schema,
+			);
+			expect(result.success).toBe(false);
+			expect(result.errors[0]?.message).toContain(
+				"Column 'statusX' does not exist on table 'orders'",
+			);
+		});
+	});
+
+	describe('snake_case ↔ camelCase column name matching', () => {
+		it('should accept snake_case equivalent of camelCase schema column', () => {
+			const result = compile('users | where created_at is null', schema);
+			expect(result.success).toBe(true);
+		});
+
+		it('should accept camelCase column directly', () => {
+			const result = compile('users | where createdAt is null', schema);
+			expect(result.success).toBe(true);
+		});
+
+		it('should reject column that matches neither camelCase nor snake_case', () => {
+			const result = compile('users | where created_att is null', schema);
+			expect(result.success).toBe(false);
+			expect(result.errors[0]?.message).toContain(
+				"Column 'created_att' does not exist on table 'users'",
+			);
+		});
+
+		it('should accept snake_case column in SELECT', () => {
+			const result = compile('orders | select id, user_id, created_at', schema);
+			expect(result.success).toBe(true);
+		});
+
+		it('should accept snake_case column in ORDER BY', () => {
+			const result = compile('users | order by created_at desc', schema);
+			expect(result.success).toBe(true);
+		});
 	});
 
 	describe('backward compatibility — no schema', () => {

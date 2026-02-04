@@ -150,11 +150,34 @@ export interface ColumnValidatorSchema {
 class ColumnValidator {
 	constructor(private readonly schema: ColumnValidatorSchema) {}
 
+	/**
+	 * Convert camelCase to snake_case for column name matching.
+	 * NQL queries may use either form (e.g., viewCount or view_count).
+	 */
+	private static toSnakeCase(name: string): string {
+		return name.replace(/[A-Z]/g, (ch) => `_${ch.toLowerCase()}`);
+	}
+
+	/**
+	 * Check if a query column matches a schema column.
+	 * Accepts exact match OR snake_case ↔ camelCase equivalence.
+	 */
+	private static columnsMatch(queryCol: string, schemaCol: string): boolean {
+		if (queryCol === schemaCol) return true;
+		// Compare snake_case forms: camelCase schema name vs snake_case query name
+		return (
+			ColumnValidator.toSnakeCase(queryCol) ===
+			ColumnValidator.toSnakeCase(schemaCol)
+		);
+	}
+
 	validateColumn(table: string, column: string): void {
 		if (column === '*') return;
 		const tableInfo = this.schema.getTable(table);
 		if (!tableInfo) return; // Unknown table → graceful degradation
-		const exists = tableInfo.columns.some((c) => c.name === column);
+		const exists = tableInfo.columns.some((c) =>
+			ColumnValidator.columnsMatch(column, c.name),
+		);
 		if (!exists) {
 			const available = tableInfo.columns.map((c) => c.name).join(', ');
 			throw new NqlSemanticException(
@@ -271,6 +294,11 @@ export class NqlCompiler {
 					this.validateColumn(this.currentFromTable, field);
 				}
 			}
+			return;
+		}
+		// If inside a relation filter (dot-syntax, no alias), validate against relation target
+		if (this.currentRelationTarget && !field.includes('.')) {
+			this.validateColumn(this.currentRelationTarget, field);
 			return;
 		}
 		// Simple column on root table
