@@ -153,8 +153,12 @@ export function compileCondition(
 		return notExpr(nested);
 	}
 
-	// EXISTS/notExists use sourceColumn/targetColumn, not column — dispatch before column extraction
-	if (decision.operator === 'exists' || decision.operator === 'notExists') {
+	// EXISTS/notExists/every use sourceColumn/targetColumn, not column — dispatch before column extraction
+	if (
+		decision.operator === 'exists' ||
+		decision.operator === 'notExists' ||
+		decision.operator === 'every'
+	) {
 		return compileExistsCondition(decision, ctx, state);
 	}
 
@@ -303,6 +307,49 @@ function compileExistsCondition(
 					columnRef(fkColumn, innerRef, undefined, ctx.naming),
 					columnRef(defaultPk, sourceTable, undefined, ctx.naming),
 				);
+
+	// For 'every' mode, invert conditions: NOT EXISTS (... WHERE fk=pk AND NOT conditions)
+	if (decision.operator === 'every') {
+		let invertedWhereClause: Node = fkCorrelation;
+		if (decision.conditions && decision.conditions.length > 0) {
+			const conditions = innerAlias
+				? (decision.conditions as PlanDecision[]).map((c) =>
+						rewriteConditionTable(c, innerRef),
+					)
+				: (decision.conditions as PlanDecision[]);
+			const condNodes = conditions.map((c) => compileCondition(c, ctx, state));
+			const notConds: Node = {
+				BoolExpr: {
+					boolop: 'NOT_EXPR',
+					args:
+						condNodes.length === 1
+							? condNodes
+							: [{ BoolExpr: { boolop: 'AND_EXPR', args: condNodes } }],
+				},
+			};
+			invertedWhereClause = andExpr(fkCorrelation, notConds);
+		}
+		const everySubSelect: Node = {
+			SelectStmt: {
+				targetList,
+				fromClause,
+				...(invertedWhereClause && { whereClause: invertedWhereClause }),
+			},
+		};
+		return {
+			BoolExpr: {
+				boolop: 'NOT_EXPR',
+				args: [
+					{
+						SubLink: {
+							subLinkType: 'EXISTS_SUBLINK',
+							subselect: everySubSelect,
+						},
+					},
+				],
+			},
+		};
+	}
 
 	let whereClause: Node = fkCorrelation;
 

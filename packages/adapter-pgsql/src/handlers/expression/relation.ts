@@ -9,7 +9,7 @@
  */
 
 import type { Node, ResTarget } from '@pgsql/types';
-import { columnRef } from '../../ast-helpers.js';
+import { columnRef, columnRefStar } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -78,6 +78,11 @@ export const relationColumnHandler: ExpressionHandler = {
 
 		// Look up the alias for this relation from state
 		const alias = state.aliases.get(relation) ?? relation;
+
+		// Wildcard: relation.* should produce unquoted * (A_Star), not quoted "*"
+		if (column === '*') {
+			return columnRefStar(alias, ctx.naming);
+		}
 
 		return columnRef(column, alias, ctx.schema, ctx.naming);
 	},

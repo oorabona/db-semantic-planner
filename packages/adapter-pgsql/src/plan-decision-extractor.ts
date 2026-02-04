@@ -22,9 +22,10 @@ import type { PlanDecision, SimplifiedPlanReport } from './compiler.js';
 // ============================================================================
 
 export type ExistsIntent = {
-	kind: 'exists' | 'notExists';
-	relation: string;
+	kind: 'exists' | 'notExists' | 'relationFilter';
+	relation: string | readonly string[];
 	where?: unknown;
+	mode?: 'some' | 'none' | 'every';
 };
 
 export type ResolvedRelation = {
@@ -224,6 +225,46 @@ export function convertWhereToDecisions(
 					table,
 				},
 			];
+		case 'like':
+			return [
+				{
+					type: 'where',
+					column: w.field as string,
+					operator: 'like',
+					value: w.pattern,
+					table,
+				},
+			];
+		case 'in':
+			return [
+				{
+					type: 'where',
+					column: w.field as string,
+					operator: 'in',
+					value: w.values ?? w.subquery,
+					table,
+				},
+			];
+		case 'range':
+			return [
+				{
+					type: 'where',
+					column: w.field as string,
+					operator: (w.operator as string) ?? 'between',
+					value: w.value,
+					table,
+				},
+			];
+		case 'null':
+			return [
+				{
+					type: 'where',
+					column: w.field as string,
+					operator: w.operator as string,
+					value: null,
+					table,
+				},
+			];
 		case 'and': {
 			const conditions = w.conditions as unknown[];
 			const subDecisions = conditions.flatMap((c) =>
@@ -355,12 +396,20 @@ export function extractExistsDecisions(
 
 		// Find the matching intent to get nested conditions
 		// Match by relation name or target table (planner may normalize relation names)
-		const matchingIntent = existsIntents.find(
-			(i) =>
-				i.relation === context.relation ||
-				i.relation === context.target ||
-				i.relation === context.includeAlias,
-		);
+		// Note: relationFilter intents from NQL have relation as string[] (e.g., ['posts'])
+		const matchingIntent = existsIntents.find((i) => {
+			const rel =
+				Array.isArray(i.relation) && i.relation.length > 0
+					? i.relation[0]
+					: typeof i.relation === 'string'
+						? i.relation
+						: undefined;
+			return (
+				rel === context.relation ||
+				rel === context.target ||
+				rel === context.includeAlias
+			);
+		});
 
 		// Build nested conditions with correct target table
 		let conditions: PlanDecision[] | undefined;
@@ -385,10 +434,24 @@ export function extractExistsDecisions(
 					)?.foreignKey
 				: undefined;
 
+		// Determine operator from intent kind and mode
+		// - exists → exists
+		// - notExists → notExists
+		// - relationFilter + mode='none' → notExists
+		// - relationFilter + mode='every' → every (special NOT EXISTS with inverted conditions)
+		// - relationFilter + mode='some' (default) → exists
+		let operator: string = 'exists';
+		if (matchingIntent?.kind === 'notExists') {
+			operator = 'notExists';
+		} else if (matchingIntent?.kind === 'relationFilter') {
+			const mode = (matchingIntent as ExistsIntent).mode ?? 'some';
+			if (mode === 'none') operator = 'notExists';
+			else if (mode === 'every') operator = 'every';
+		}
+
 		const decision: PlanDecision = {
 			type: 'where',
-			// Use intent.kind for negation; use planner choice for strategy
-			operator: matchingIntent?.kind === 'notExists' ? 'notExists' : 'exists',
+			operator,
 			targetTable: context.target,
 			...(foreignKey && { foreignKey }),
 			...(conditions && { conditions }),

@@ -441,3 +441,166 @@ describe('NQL → SQL upsert (ON CONFLICT)', () => {
 		expect(result.parameters.length).toBeGreaterThan(0);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Bug regression: some()/none()/every(), count() OVER, relation.*
+// ---------------------------------------------------------------------------
+
+const blogSchema = schema({
+	authors: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		published: 'boolean',
+		authorId: ref('authors', { inverse: 'posts' }),
+	},
+	tags: {
+		id: { type: 'integer', primaryKey: true },
+		label: 'string',
+	},
+	postTags: {
+		id: { type: 'integer', primaryKey: true },
+		postId: ref('posts', { inverse: 'tags', through: true }),
+		tagId: ref('tags', { inverse: 'posts', through: true }),
+	},
+});
+
+function blogToSQL(nql: string): { sql: string; params: readonly unknown[] } {
+	const compiled = compile(nql, blogSchema.model);
+	if (!compiled.success || !compiled.ast?.query) {
+		throw new Error(
+			`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+	const planReport = plan(compiled.ast.query, blogSchema.model, {
+		dialectCapabilities: POSTGRESQL_CAPABILITIES,
+	});
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const result = adapter.compile(planReport, { model: blogSchema.model });
+	return { sql: normalizeSQL(result.sql), params: result.parameters };
+}
+
+describe('Bug regressions', () => {
+	describe('some()/none()/every() relation filters', () => {
+		it('some() compiles to EXISTS with condition', () => {
+			const { sql, params } = blogToSQL(
+				'authors | where some(posts).published = true',
+			);
+			expect(sql).toContain('exists');
+			expect(sql).toContain('published');
+			expect(params).toContain(true);
+		});
+
+		it('none() compiles to NOT EXISTS with condition', () => {
+			const { sql, params } = blogToSQL(
+				'authors | where none(posts).published = false',
+			);
+			expect(sql).toContain('not (exists');
+			expect(params).toContain(false);
+		});
+
+		it('every() compiles to NOT EXISTS with inverted condition', () => {
+			const { sql, params } = blogToSQL(
+				'authors | where every(posts).published = true',
+			);
+			// every(posts).published = true → NOT EXISTS (... AND NOT (published = $1))
+			expect(sql).toContain('not (exists');
+			expect(sql).toContain('and not (');
+			expect(params).toContain(true);
+			// Must only have ONE parameter (not duplicated)
+			expect(params).toHaveLength(1);
+		});
+	});
+
+	describe('aliased relation filters', () => {
+		it('some(posts as p, p.published = true) strips alias from column', () => {
+			const { sql, params } = blogToSQL(
+				'authors | where some(posts as p, p.published = true)',
+			);
+			expect(sql).toContain('exists');
+			expect(sql).toContain('published');
+			// Must NOT contain "p.published" as a quoted column name
+			expect(sql).not.toContain('"p.published"');
+			expect(params).toContain(true);
+		});
+
+		it('none(posts as p, p.published = false) strips alias from column', () => {
+			const { sql, params } = blogToSQL(
+				'authors | where none(posts as p, p.published = false)',
+			);
+			expect(sql).toContain('not (exists');
+			expect(sql).not.toContain('"p.published"');
+			expect(params).toContain(false);
+		});
+
+		it('every(posts as p, p.published = true) strips alias from column', () => {
+			const { sql, params } = blogToSQL(
+				'authors | where every(posts as p, p.published = true)',
+			);
+			expect(sql).toContain('not (exists');
+			expect(sql).not.toContain('"p.published"');
+			expect(params).toContain(true);
+			expect(params).toHaveLength(1);
+		});
+
+		it('alias with compound condition strips prefix from both fields', () => {
+			const { sql, params } = blogToSQL(
+				"authors | where none(posts as p, p.published = true and p.title = 'draft')",
+			);
+			expect(sql).not.toContain('"p.published"');
+			expect(sql).not.toContain('"p.title"');
+			expect(params).toContain(true);
+			expect(params).toContain('draft');
+		});
+	});
+
+	describe('non-comparison operators in relation filters', () => {
+		it('LIKE inside some() is preserved in EXISTS', () => {
+			const { sql, params } = blogToSQL(
+				"authors | where some(posts as p, p.published = true and p.title like '%Guide%')",
+			);
+			expect(sql).toContain('exists');
+			expect(sql).toContain('like');
+			expect(params).toContain(true);
+			expect(params).toContain('%Guide%');
+		});
+
+		it('IN inside some() is preserved in EXISTS', () => {
+			const { sql, params } = blogToSQL(
+				"authors | where some(posts as p, p.status in ('draft', 'review'))",
+			);
+			expect(sql).toContain('exists');
+			expect(sql).toContain('any');
+			expect(params.length).toBeGreaterThan(0);
+		});
+
+		it('IS NULL inside none() is preserved in NOT EXISTS', () => {
+			const { sql } = blogToSQL(
+				'authors | where none(posts as p, p.title is null)',
+			);
+			expect(sql).toContain('not (exists');
+			expect(sql).toContain('is null');
+		});
+	});
+
+	describe('window count(*)', () => {
+		it('count() over () produces count(*) not count()', () => {
+			const sql = nqlToSQL(
+				'employees | select name, count() over () as totalEmployees',
+			);
+			expect(sql).toContain('count(*)');
+			expect(sql).not.toMatch(/count\(\s*\)(?!\s*over)/i); // no empty count() (ignoring count(*) OVER)
+		});
+	});
+
+	describe('relation.* wildcard expansion', () => {
+		it('relation.* uses unquoted star (A_Star)', () => {
+			const { sql } = blogToSQL('authors | select *, posts.*');
+			// Must NOT quote the star: posts."*" is wrong
+			expect(sql).not.toContain('"*"');
+		});
+	});
+});
