@@ -34,6 +34,7 @@ import type {
 	EngineState,
 	OutputLayout,
 	PanelView,
+	PlanVerbosity,
 } from './engine-types.js';
 
 /**
@@ -81,6 +82,7 @@ export class ReplEngine {
 			...(config.dbCasing !== undefined && { dbCasing: config.dbCasing }),
 			outputMode: 'json',
 			outputLayout: 'full',
+			planVerbosity: 'normal',
 		};
 	}
 
@@ -401,6 +403,31 @@ export class ReplEngine {
 				}
 				return;
 			}
+
+			case '.plan': {
+				const validLevels: PlanVerbosity[] = ['compact', 'normal', 'verbose'];
+				const level = arg?.toLowerCase();
+
+				if (!level) {
+					this.emit({
+						type: 'info',
+						message: `📋 Plan verbosity: ${this.state.planVerbosity}\nAvailable: ${validLevels.join(', ')}\nUsage: .plan ${validLevels.join(' | ')}`,
+					});
+				} else if (validLevels.includes(level as PlanVerbosity)) {
+					this.state.planVerbosity = level as PlanVerbosity;
+					this.emitStateChange();
+					this.emit({
+						type: 'info',
+						message: `✓ Plan verbosity: ${level}`,
+					});
+				} else {
+					this.emit({
+						type: 'error',
+						message: `❌ Invalid plan verbosity: ${level}. Use: ${validLevels.join(', ')}`,
+					});
+				}
+				return;
+			}
 		}
 
 		// Delegate to shared dot-command processor (used by batch mode too)
@@ -661,6 +688,25 @@ export class ReplEngine {
 								.join(' → '),
 							choice: d.choice,
 							reasoning: d.reasoning,
+							...(d.alternatives.length > 0 && {
+								alternatives: [...d.alternatives],
+							}),
+							...(d.context.foreignKey !== undefined && {
+								foreignKey:
+									typeof d.context.foreignKey === 'string'
+										? d.context.foreignKey
+										: [...d.context.foreignKey],
+							}),
+							...(d.context.relationType !== undefined && {
+								relationType: d.context.relationType,
+							}),
+							...(d.context.intentPath !== undefined && {
+								intentPath: d.context.intentPath,
+							}),
+							...(d.context.relationPath !== undefined && {
+								relationPath: d.context.relationPath,
+							}),
+							...(d.id !== undefined && { decisionId: d.id }),
 						})) ?? [],
 					warnings: [
 						...(isDryRun
@@ -669,10 +715,38 @@ export class ReplEngine {
 						...(pr?.warnings.map((w) => ({
 							message: w.message,
 							...(w.suggestion !== undefined && { suggestion: w.suggestion }),
+							...(w.code !== undefined && { code: w.code }),
+							...(w.relatedDecision !== undefined && {
+								relatedDecision: w.relatedDecision,
+							}),
 						})) ?? []),
 					],
 					cteCount: pr?.ctes.length ?? 0,
 					planningTimeMs: pr?.metadata.planningTimeMs ?? 0,
+					...(pr?.ctes && pr.ctes.length > 0
+						? {
+								ctes: pr.ctes.map((c) => ({
+									name: c.name,
+									purpose: c.purpose,
+									...(c.recursive && { recursive: c.recursive }),
+									...(c.referencedBy.length > 0 && {
+										referencedBy: [...c.referencedBy],
+									}),
+								})),
+							}
+						: {}),
+					...(pr?.metadata
+						? {
+								metadata: {
+									relationsAnalyzed: pr.metadata.relationsAnalyzed,
+									isAmbiguous: pr.metadata.isAmbiguous,
+									...(pr.metadata.ambiguousOptions &&
+										pr.metadata.ambiguousOptions.length > 0 && {
+											ambiguousOptions: [...pr.metadata.ambiguousOptions],
+										}),
+								},
+							}
+						: {}),
 				},
 			};
 

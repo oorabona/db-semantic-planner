@@ -41,7 +41,10 @@ const TAB_LABELS: Record<PanelView, string> = {
 function TabBar({
 	activeView,
 	execMode,
-}: { activeView: PanelView; execMode: boolean }) {
+}: {
+	activeView: PanelView;
+	execMode: boolean;
+}) {
 	return (
 		<Box>
 			{ALL_VIEWS.map((v, i) => {
@@ -98,15 +101,13 @@ function PanelContent({
 		case 'plan': {
 			if (!queryResult?.plan)
 				return <Text color="gray">No query plan available.</Text>;
-			return <PlanOutput plan={queryResult.plan} />;
+			return <PlanOutput plan={queryResult.plan} verbosity="verbose" />;
 		}
 
 		case 'results': {
 			if (!execMode)
 				return (
-					<Text color="gray">
-						Not in execution mode. Use .exec to enable.
-					</Text>
+					<Text color="gray">Not in execution mode. Use .exec to enable.</Text>
 				);
 			if (!executionResult)
 				return (
@@ -153,7 +154,9 @@ function PanelContent({
 										queries={queryResult.separateQueries}
 									/>
 								)}
-							{queryResult.plan && <PlanOutput plan={queryResult.plan} />}
+							{queryResult.plan && (
+								<PlanOutput plan={queryResult.plan} verbosity="verbose" />
+							)}
 							{queryResult.parsedQuery !== undefined && (
 								<ParseTreeOutput parsed={queryResult.parsedQuery} />
 							)}

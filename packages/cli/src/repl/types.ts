@@ -126,13 +126,32 @@ export interface QueryResult {
 			context: string;
 			choice: string;
 			reasoning: string;
+			alternatives?: string[];
+			foreignKey?: string | string[];
+			relationType?: string;
+			intentPath?: string;
+			relationPath?: string;
+			decisionId?: string;
 		}>;
 		warnings: Array<{
 			message: string;
 			suggestion?: string;
+			code?: string;
+			relatedDecision?: string;
 		}>;
 		cteCount: number;
 		planningTimeMs: number;
+		ctes?: Array<{
+			name: string;
+			purpose: string;
+			recursive?: boolean;
+			referencedBy?: string[];
+		}>;
+		metadata?: {
+			relationsAnalyzed: number;
+			isAmbiguous: boolean;
+			ambiguousOptions?: string[];
+		};
 	};
 	error?: string;
 	/** CLI-NQL: Parsed query AST for .parse mode */

@@ -4,10 +4,12 @@ import React from 'react';
  */
 
 import { Box, Text } from 'ink';
+import type { PlanVerbosity } from '../engine/engine-types.js';
 import type { QueryResult, SeparateQueryResult } from '../types.js';
 
 interface OutputDisplayProps {
 	result: QueryResult | null;
+	planVerbosity?: PlanVerbosity;
 }
 
 export function SqlOutput({
@@ -71,24 +73,27 @@ export function SeparateQueriesOutput({
 
 export function PlanOutput({
 	plan,
+	verbosity = 'normal',
 }: {
 	plan: NonNullable<QueryResult['plan']>;
+	verbosity?: PlanVerbosity;
 }) {
 	const hasDecisions = plan.decisions.length > 0;
 	const hasWarnings = plan.warnings.length > 0;
 	const hasCtes = plan.cteCount > 0;
-	const isCompact = !hasDecisions && !hasCtes && !hasWarnings;
 
-	// Compact one-liner for simple queries
-	if (isCompact) {
+	// Compact mode: always one-liner summary
+	if (verbosity === 'compact' || (!hasDecisions && !hasCtes && !hasWarnings)) {
 		return (
 			<Box marginY={1}>
 				<Text bold color="magenta">
-					📋 Query Plan:{' '}
+					📋 Plan:{' '}
 				</Text>
 				<Text color="cyan">
 					{plan.rootTable || plan.strategy}
-					{' (no decisions)'}
+					{hasDecisions
+						? ` (${plan.decisions.length} decision${plan.decisions.length > 1 ? 's' : ''}${hasWarnings ? `, ${plan.warnings.length} warning${plan.warnings.length > 1 ? 's' : ''}` : ''})`
+						: ' (no decisions)'}
 				</Text>
 				{plan.planningTimeMs > 0 && (
 					<Text color="gray"> ⏱ {plan.planningTimeMs.toFixed(1)}ms</Text>
@@ -117,33 +122,104 @@ export function PlanOutput({
 					<Box flexDirection="column" marginTop={1}>
 						<Text bold>Decisions:</Text>
 						{plan.decisions.map((d, i) => (
-							<Text key={i}>
-								<Text color="gray"> • </Text>
-								<Text color="blue">{d.type}</Text>
-								<Text color="gray">: </Text>
-								<Text color="cyan">{d.context}</Text>
-								<Text color="gray"> — </Text>
-								<Text color="green">{d.choice}</Text>
-								<Text color="gray"> ({d.reasoning})</Text>
-							</Text>
+							<Box key={i} flexDirection="column">
+								<Text>
+									<Text color="gray"> • </Text>
+									<Text color="blue">{d.type}</Text>
+									<Text color="gray">: </Text>
+									<Text color="cyan">{d.context}</Text>
+									<Text color="gray"> — </Text>
+									<Text color="green">{d.choice}</Text>
+									<Text color="gray"> ({d.reasoning})</Text>
+								</Text>
+								{verbosity === 'verbose' && (
+									<Box paddingLeft={4} flexDirection="column">
+										{d.alternatives && d.alternatives.length > 0 && (
+											<Text color="gray">
+												├ Alternatives: {d.alternatives.join(', ')}
+											</Text>
+										)}
+										{d.foreignKey && (
+											<Text color="gray">
+												├ FK:{' '}
+												{Array.isArray(d.foreignKey)
+													? d.foreignKey.join(', ')
+													: d.foreignKey}
+											</Text>
+										)}
+										{d.relationType && (
+											<Text color="gray">├ Relation: {d.relationType}</Text>
+										)}
+										{(d.intentPath || d.relationPath) && (
+											<Text color="gray">
+												└ Path: {d.intentPath ?? d.relationPath}
+											</Text>
+										)}
+									</Box>
+								)}
+							</Box>
 						))}
 					</Box>
 				)}
-				{hasCtes && (
-					<Text>
-						CTEs: <Text color="cyan">{plan.cteCount} extracted</Text>
-					</Text>
+				{verbosity === 'verbose' && plan.ctes && plan.ctes.length > 0 ? (
+					<Box flexDirection="column" marginTop={1}>
+						<Text bold>CTEs:</Text>
+						{plan.ctes.map((c, i) => (
+							<Box key={i} flexDirection="column">
+								<Text>
+									<Text color="gray"> • </Text>
+									<Text color="cyan">{c.name}</Text>
+									<Text color="gray">
+										{' '}
+										— {c.purpose}
+										{c.recursive ? ' (recursive)' : ''}
+									</Text>
+								</Text>
+								{c.referencedBy && c.referencedBy.length > 0 && (
+									<Text color="gray">
+										{'   └ Referenced by: '}
+										{c.referencedBy.join(', ')}
+									</Text>
+								)}
+							</Box>
+						))}
+					</Box>
+				) : (
+					hasCtes && (
+						<Text>
+							CTEs: <Text color="cyan">{plan.cteCount} extracted</Text>
+						</Text>
+					)
 				)}
 				{hasWarnings && (
 					<Box flexDirection="column" marginTop={1}>
 						<Text color="yellow">⚠️ Warnings:</Text>
 						{plan.warnings.map((w, i) => (
 							<Box key={i} flexDirection="column">
-								<Text color="yellow"> • {w.message}</Text>
+								<Text color="yellow">
+									{' '}
+									• {w.code ? `${w.code}: ` : ''}
+									{w.message}
+								</Text>
 								{w.suggestion && <Text color="gray"> → {w.suggestion}</Text>}
+								{verbosity === 'verbose' && w.relatedDecision && (
+									<Text color="gray">
+										{' '}
+										└ Related decision: {w.relatedDecision}
+									</Text>
+								)}
 							</Box>
 						))}
 					</Box>
+				)}
+				{verbosity === 'verbose' && plan.metadata && (
+					<Text color="gray" dimColor>
+						📊 Metadata: {plan.metadata.relationsAnalyzed} relation
+						{plan.metadata.relationsAnalyzed !== 1 ? 's' : ''} analyzed
+						{plan.metadata.isAmbiguous
+							? ` | ambiguous (${plan.metadata.ambiguousOptions?.join(', ')})`
+							: ' | not ambiguous'}
+					</Text>
 				)}
 				{plan.planningTimeMs > 0 && (
 					<Text color="gray">
@@ -217,7 +293,7 @@ export function ParseTreeOutput({ parsed }: { parsed: unknown }) {
 	);
 }
 
-export function OutputDisplay({ result }: OutputDisplayProps) {
+export function OutputDisplay({ result, planVerbosity }: OutputDisplayProps) {
 	if (!result) return null;
 
 	if (result.error) {
@@ -240,7 +316,9 @@ export function OutputDisplay({ result }: OutputDisplayProps) {
 			{result.separateQueries && result.separateQueries.length > 0 && (
 				<SeparateQueriesOutput queries={result.separateQueries} />
 			)}
-			{result.plan && <PlanOutput plan={result.plan} />}
+			{result.plan && (
+				<PlanOutput plan={result.plan} verbosity={planVerbosity ?? 'normal'} />
+			)}
 		</Box>
 	);
 }

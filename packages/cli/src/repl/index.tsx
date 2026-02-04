@@ -320,6 +320,7 @@ function ReplApp({ config }: ReplAppProps) {
 			<ConversationView
 				entries={entries}
 				outputLayout={engineState.outputLayout}
+				planVerbosity={engineState.planVerbosity}
 			/>
 
 			{/* Completions (only in natural mode) */}
