@@ -8,7 +8,6 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { createOrm } from './orm.js';
 import type { InferDB, InferredRangeValue, JsonValue } from './schema.js';
-import { createMockAdapter } from './test-utils.js';
 import {
 	isRef,
 	ref,
@@ -16,6 +15,7 @@ import {
 	schema,
 	schemaToModelIR,
 } from './schema.js';
+import { createMockAdapter } from './test-utils.js';
 
 describe('ref()', () => {
 	describe('when called with target only', () => {
@@ -739,7 +739,10 @@ describe('Type Inference (ARCH-006)', () => {
 			>();
 
 			// Runtime assertion
-			const orm = createOrm({ adapter: createMockAdapter(), schema: typedSchema });
+			const orm = createOrm({
+				adapter: createMockAdapter(),
+				schema: typedSchema,
+			});
 			expect(orm.select('users')).toBeDefined();
 			expect(orm.select('posts')).toBeDefined();
 		});
@@ -814,7 +817,10 @@ describe('Type Inference (ARCH-006)', () => {
 			>();
 
 			// Runtime assertion
-			const orm = createOrm({ adapter: createMockAdapter(), schema: allTypesSchema });
+			const orm = createOrm({
+				adapter: createMockAdapter(),
+				schema: allTypesSchema,
+			});
 			expect(orm.select('test')).toBeDefined();
 		});
 
@@ -839,7 +845,10 @@ describe('Type Inference (ARCH-006)', () => {
 			expectTypeOf<ItemRow['optional']>().toEqualTypeOf<string | null>();
 
 			// Runtime assertion
-			const orm = createOrm({ adapter: createMockAdapter(), schema: nullableSchema });
+			const orm = createOrm({
+				adapter: createMockAdapter(),
+				schema: nullableSchema,
+			});
 			expect(orm.select('items')).toBeDefined();
 		});
 

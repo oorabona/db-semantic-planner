@@ -2,25 +2,19 @@
 
 ## In Progress
 
-(None)
-
 ---
 
 ## Pending — HIGH
 
 - [ ] [MCP] #6: Replace MCP server placeholder test — Score 4.5, Effort: M
+- [ ] [Adapter] Subquery expansion in mutation WHERE clauses — IN(subquery) flattened to parameter instead of inline SQL subquery. Effort: M
 
 ---
 
 ## Pending — MEDIUM
 
-- [ ] [NQL] HAVING support (aggregate filter after GROUP BY) — Effort: S
-- [ ] [Adapter] json_agg column projection — Effort: M
 - [ ] [NQL] JSONB Operators Support — Effort: M
-- [ ] [Core] IN subquery → relation traversal normalization — Effort: M
 - [ ] [Adapter] Enhance `singularize()` for irregular plurals — Effort: M
-- [ ] [Adapter] ON CONFLICT / Upsert support — Effort: M
-- [ ] [CLI] Enrich query plan display — Effort: M
 - [ ] [Docs] DOCS-001: User documentation (Getting Started, API Guide)
 - [ ] [Docs] DOCS-002: Migration guides (from-prisma, from-drizzle, from-kysely)
 - [ ] [Docs] DOCS-003: Pattern guides (multi-tenant, recursive queries, window functions)
@@ -70,9 +64,5 @@
 ---
 
 ## Completed
-
-- [x] ✅ [Adapter] Fix `relation.*` wildcard column propagation in flat/join includes (2026-02-03)
-- [x] ✅ [Adapter] Replace hardcoded `'id'` with `defaultPk` in plan-decision-extractor (2026-02-03)
-- [x] ✅ [CLI] Fix input wrapping — horizontal scrolling window for long input lines (2026-02-03)
 
 (Archived → docs/historic/done-2026-02.md)

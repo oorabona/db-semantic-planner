@@ -197,6 +197,76 @@ describe('json-agg handler', () => {
 		expect(sql).not.toContain('jsonb_build_object');
 	});
 
+	it('projects specific columns via jsonb_build_object when columns specified', () => {
+		const ctx = makeCtx('users');
+		const state = createCompilerState();
+		const decision = buildDecision({
+			columns: ['id', 'title', 'created_at'],
+		});
+
+		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const sql = targetsToSQL(result.targets!);
+
+		// Should use jsonb_build_object instead of to_jsonb
+		expect(sql).toContain('jsonb_build_object');
+		expect(sql).not.toContain('to_jsonb');
+		// Each column appears as key + reference
+		expect(sql).toContain("'id'");
+		expect(sql).toContain('__t__.id');
+		expect(sql).toContain("'title'");
+		expect(sql).toContain('__t__.title');
+		expect(sql).toContain("'created_at'");
+		expect(sql).toContain('__t__.created_at');
+	});
+
+	it('uses to_jsonb for wildcard columns', () => {
+		const ctx = makeCtx('users');
+		const state = createCompilerState();
+		const decision = buildDecision({
+			columns: ['*'],
+		});
+
+		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const sql = targetsToSQL(result.targets!);
+
+		// Wildcard should fall back to to_jsonb(__t__)
+		expect(sql).toContain('to_jsonb');
+		expect(sql).not.toContain('jsonb_build_object');
+	});
+
+	it('projects columns with nested children (merge via ||)', () => {
+		const ctx = makeCtx('users');
+		const state = createCompilerState();
+		const decision = buildDecision({
+			relation: 'userRoles',
+			targetTable: 'user_roles',
+			relationType: 'hasMany',
+			foreignKey: 'user_id',
+			parentKey: 'id',
+			columns: ['id', 'role_id'],
+			children: [
+				buildDecision({
+					relation: 'role',
+					targetTable: 'roles',
+					relationType: 'belongsTo',
+					foreignKey: 'role_id',
+					parentKey: 'id',
+				}),
+			],
+		});
+
+		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const sql = targetsToSQL(result.targets!);
+
+		// Parent should use jsonb_build_object for column projection
+		expect(sql).toContain("jsonb_build_object('id'");
+		expect(sql).toContain("'role_id'");
+		// Should merge with child via ||
+		expect(sql).toContain('||');
+		// Child (no columns specified) should use to_jsonb
+		expect(sql).toContain('to_jsonb');
+	});
+
 	it('produces valid parseable SQL', () => {
 		const ctx = makeCtx('users');
 		const state = createCompilerState();

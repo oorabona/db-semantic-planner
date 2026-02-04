@@ -6,14 +6,14 @@
 # ─────────────────────────────────────────
 --- query: 0
 db.success: true
-db.output.contains: Executed SQL
+db.output.contains: [RAW_SQL]
 
 # ─────────────────────────────────────────
 # Query 1 !CREATE SCHEMA IF NOT EXISTS ch5_ecommerce;
 # ─────────────────────────────────────────
 --- query: 1
 db.success: true
-db.output.contains: Executed SQL
+db.output.contains: [RAW_SQL]
 
 # ─────────────────────────────────────────
 # Query 2 .use ch5_ecommerce
@@ -134,19 +134,19 @@ db.output:
 
 # ─────────────────────────────────────────
 # Query 10 categories | select *, products.* | flat
-# Uses LATERAL JOIN for flat include strategy (HANDLER-WIRE: now wired)
+# flat: simple JOIN (no per-include limit)
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.equals: SELECT categories.* FROM ch5_ecommerce.categories LEFT JOIN LATERAL ( SELECT products_inner_0.* FROM ch5_ecommerce.products AS products_inner_0 WHERE products_inner_0.category_id = categories.id ) AS products_lat_0 ON true
+sql.equals: SELECT categories.*, products.* FROM ch5_ecommerce.categories LEFT JOIN ch5_ecommerce.products AS products ON categories.id = products.category_id
 
 # ─────────────────────────────────────────
 # Query 11 products | select *, variants.* | flat | limit 3
-# Uses LATERAL JOIN for flat include strategy (HANDLER-WIRE: now wired)
+# flat: simple JOIN (global LIMIT, not per-include limit)
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.equals: SELECT products.* FROM ch5_ecommerce.products LEFT JOIN LATERAL ( SELECT variants_inner_0.* FROM ch5_ecommerce.variants AS variants_inner_0 WHERE variants_inner_0.product_id = products.id ) AS variants_lat_0 ON true LIMIT 3
+sql.equals: SELECT products.*, variants.* FROM ch5_ecommerce.products LEFT JOIN ch5_ecommerce.variants AS variants ON products.id = variants.product_id LIMIT 3
 params.equals: []
 
 # ─────────────────────────────────────────
@@ -292,7 +292,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 21
 success: true
-sql.equals: UPDATE ch5_ecommerce.products SET price = $1 WHERE ch5_ecommerce.products.sku = $2
+sql.equals: UPDATE ch5_ecommerce.products SET price = $1 WHERE products.sku = $2
 db.rows.equals: 0
 
 # ─────────────────────────────────────────
@@ -300,7 +300,7 @@ db.rows.equals: 0
 # ─────────────────────────────────────────
 --- query: 22
 success: true
-sql.equals: UPDATE ch5_ecommerce.products SET active = $1 WHERE ch5_ecommerce.products.id = $2
+sql.equals: UPDATE ch5_ecommerce.products SET active = $1 WHERE products.id = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -309,7 +309,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 23
 success: true
-sql.equals: DELETE FROM ch5_ecommerce.orders WHERE ch5_ecommerce.orders.status = $1
+sql.equals: DELETE FROM ch5_ecommerce.orders WHERE orders.status = $1
 db.rows.equals: 1
 
 # ─────────────────────────────────────────

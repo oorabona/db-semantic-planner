@@ -483,6 +483,39 @@ export type OffsetWindowFunction = 'lag' | 'lead';
  * Comparison filter: field op value
  * Examples: eq, neq, gt, gte, lt, lte
  */
+
+/**
+ * Typed field reference for cross-table column comparisons in relation filters.
+ *
+ * When using aliased relation filters like `some(orders as o, o.total > minOrder)`,
+ * the RHS `minOrder` is a reference to the parent table's column, not a literal value.
+ * FieldRef captures this distinction so the adapter can compile it as a column reference
+ * instead of a parameterized value.
+ *
+ * @example
+ * // some(rel as r, r.col > bareCol) → value: { kind: 'fieldRef', column: 'bareCol', scope: 'outer' }
+ * // some(rel as r, r.col > r.otherCol) → value: { kind: 'fieldRef', column: 'otherCol', scope: 'inner' }
+ * // some(a as x, some(b as y, y.f > x.g)) → value: { kind: 'fieldRef', column: 'g', scope: 'outer', alias: 'x' }
+ */
+export interface FieldRef {
+	readonly kind: 'fieldRef';
+	readonly column: string;
+	readonly scope: 'inner' | 'outer';
+	/** Named alias for outer scope (when referencing a specific outer alias in nested filters) */
+	readonly alias?: string;
+}
+
+/**
+ * Type guard for FieldRef values
+ */
+export function isFieldRef(value: unknown): value is FieldRef {
+	return (
+		value !== null &&
+		typeof value === 'object' &&
+		(value as Record<string, unknown>).kind === 'fieldRef'
+	);
+}
+
 export interface WhereComparisonIntent {
 	readonly kind: 'comparison';
 	readonly field: string;
@@ -509,7 +542,7 @@ export interface WhereInIntent {
 	readonly field: string;
 	readonly values: readonly unknown[];
 	/** Optional subquery producing the value set (when present, values is empty) */
-	readonly subquery?: ScalarSubqueryIntent;
+	readonly subquery?: QueryIntent;
 }
 
 /**
@@ -689,30 +722,15 @@ export interface WhereSubqueryIntent {
 	/** Comparison operator */
 	readonly operator: ComparisonOperator;
 	/** Subquery producing scalar value */
-	readonly subquery: ScalarSubqueryIntent;
+	readonly subquery: QueryIntent;
 }
 
 /**
  * Scalar subquery intent - produces a single value.
  * Simplified QueryIntent for subquery context.
  */
-export interface ScalarSubqueryIntent {
-	/** Target table for subquery */
-	readonly from: string;
-	/** Field to select (single scalar) */
-	readonly select: string;
-	/** Optional filter (can include SubqueryRefIntent values) */
-	readonly where?: WhereIntent;
-	/** Optional aggregate function */
-	readonly aggregate?: {
-		readonly fn: 'count' | 'sum' | 'avg' | 'min' | 'max';
-		readonly field: string;
-	};
-	/** Optional limit on subquery rows */
-	readonly limit?: number;
-	/** Optional ordering for subquery */
-	readonly orderBy?: readonly OrderByIntent[];
-}
+/** @deprecated Use QueryIntent instead — subqueries are full queries with contextual validation */
+export type ScalarSubqueryIntent = QueryIntent;
 
 /**
  * Where intent - filter conditions union type
@@ -1269,8 +1287,11 @@ export interface InsertFromIntent {
 	/** Target table to insert into */
 	readonly table: string;
 
-	/** Source table to select from */
+	/** Source table to select from (table name or bound reference) */
 	readonly source: string;
+
+	/** Optional source query (when source is a bound reference from `| bind`) */
+	readonly sourceQuery?: QueryIntent | undefined;
 
 	/** Optional column mapping (defaults to same column names) */
 	readonly columns?: readonly string[] | undefined;
@@ -1285,6 +1306,42 @@ export interface InsertFromIntent {
 	 * Columns to return from inserted rows (DX-026).
 	 * Requires adapter capability: supportsReturning
 	 * @example ['id', 'created_at']
+	 */
+	readonly returning?: readonly string[];
+}
+
+/**
+ * Upsert from intent - bulk upsert by selecting rows from a source table or CTE.
+ * Produces: INSERT INTO target SELECT ... FROM source ON CONFLICT (columns) DO UPDATE SET ...
+ * @example upsert into authors on id from counts
+ */
+export interface UpsertFromIntent {
+	readonly type: 'upsert_from';
+
+	/** Target table to upsert into */
+	readonly table: string;
+
+	/** Source table or bound CTE reference */
+	readonly source: string;
+
+	/** Optional source query (when source is a bound reference from `| bind`) */
+	readonly sourceQuery?: QueryIntent | undefined;
+
+	/** Conflict target columns for ON CONFLICT */
+	readonly conflictColumns: readonly string[];
+
+	/** Optional column mapping (defaults to same column names) */
+	readonly columns?: readonly string[] | undefined;
+
+	/** Filter condition for source rows */
+	readonly where?: WhereIntent | undefined;
+
+	/** Limit number of rows */
+	readonly limit?: number | undefined;
+
+	/**
+	 * Columns to return from affected rows.
+	 * Requires adapter capability: supportsReturning
 	 */
 	readonly returning?: readonly string[];
 }
@@ -1419,6 +1476,7 @@ export interface UpsertIntent {
 export type MutationIntent =
 	| InsertIntent
 	| InsertFromIntent
+	| UpsertFromIntent
 	| UpdateIntent
 	| DeleteIntent
 	| UpsertIntent;

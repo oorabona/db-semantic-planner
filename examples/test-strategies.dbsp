@@ -106,16 +106,16 @@ employees | order by salary desc | limit 5
 # =============================================================================
 
 # INSERT
-insert into tasks set title = 'New task', projectId = 1, priority = 1
+insert into tasks set title = 'New task', projectId = 1, priority = 1!
 
 # UPDATE
-update tasks set completed = true where id = 1
+update tasks set completed = true where id = 1!
 
 # DELETE
-delete from tasks where completed = true
+delete from tasks where completed = true!
 
 # UPSERT
-upsert into employees on email set name = 'Jane', email = 'jane@test.com', departmentId = 1, salary = 75000, hireDate = '2024-01-15', active = true
+upsert into employees on email set name = 'Jane', email = 'jane@test.com', departmentId = 1, salary = 75000, hireDate = '2024-01-15', active = true!
 
 # =============================================================================
 # NQL features: distinct, belongsTo include

@@ -101,25 +101,23 @@ db.rows.equals: 6
 # =============================================================================
 
 # ─────────────────────────────────────────
-# Query 10: orgs | select *, departments.* | flat — LATERAL JOIN
+# Query 10: orgs | select *, departments.* | flat — simple JOIN
 # Seed: Corp→(Backend,Frontend), Engineering→(Backend,Frontend), Sales→(Outbound)
-# Lateral produces one row per parent×child: Corp×0 + Engineering×2 + Sales×1 = 3
-# But Corp has no direct departments → 1 row (NULL lateral). Total = 1+2+1 = 4?
-# Actually lateral LEFT JOIN: 3 orgs, Backend+Frontend→org2, Outbound→org3
-# org1(Corp)→no dept→1 row, org2(Eng)→2 depts→2 rows, org3(Sales)→1 dept→1 row = 4
+# JOIN produces one row per parent×child: Corp×0 + Engineering×2 + Sales×1 = 3
+# Corp has no direct departments → 1 row (NULL join). Total = 1+2+1 = 4
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.equals: SELECT orgs.* FROM test_strategies.orgs LEFT JOIN LATERAL ( SELECT departments_inner_0.* FROM test_strategies.departments AS departments_inner_0 WHERE departments_inner_0.org_id = orgs.id ) AS departments_lat_0 ON true
+sql.equals: SELECT orgs.*, departments.* FROM test_strategies.orgs LEFT JOIN test_strategies.departments AS departments ON orgs.id = departments.org_id
 db.rows.equals: 4
 
 # ─────────────────────────────────────────
-# Query 11: departments | select *, employees.* | flat — LATERAL JOIN
+# Query 11: departments | select *, employees.* | flat — simple JOIN
 # Backend→2 emps, Frontend→2 emps, Outbound→2 emps = 6
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.equals: SELECT departments.* FROM test_strategies.departments LEFT JOIN LATERAL ( SELECT employees_inner_0.* FROM test_strategies.employees AS employees_inner_0 WHERE employees_inner_0.department_id = departments.id ) AS employees_lat_0 ON true
+sql.equals: SELECT departments.*, employees.* FROM test_strategies.departments LEFT JOIN test_strategies.employees AS employees ON departments.id = employees.department_id
 db.rows.equals: 6
 
 # =============================================================================
@@ -166,7 +164,7 @@ db.rows.equals: 3
 # ─────────────────────────────────────────
 --- query: 15
 success: true
-sql.equals: SELECT orgs.* FROM test_strategies.orgs LEFT JOIN LATERAL ( SELECT departments_inner_0.* FROM test_strategies.departments AS departments_inner_0 WHERE departments_inner_0.org_id = orgs.id ) AS departments_lat_0 ON true LEFT JOIN LATERAL ( SELECT employees_inner_1.* FROM test_strategies.employees AS employees_inner_1 WHERE employees_inner_1.department_id = departments_lat_0.id ) AS employees_lat_1 ON true LEFT JOIN LATERAL ( SELECT assignments_inner_2.* FROM test_strategies.assignments AS assignments_inner_2 WHERE assignments_inner_2.employee_id = employees_lat_1.id ) AS assignments_lat_2 ON true LEFT JOIN LATERAL ( SELECT projects_inner_3.* FROM test_strategies.projects AS projects_inner_3 WHERE projects_inner_3.id = assignments_lat_2.project_id ) AS projects_lat_3 ON true
+sql.equals: SELECT orgs.*, departments.*, employees.id AS "employees.id", assignments.id AS "assignments.id", project.id AS "project.id" FROM test_strategies.orgs LEFT JOIN test_strategies.departments AS departments ON orgs.id = departments.org_id LEFT JOIN test_strategies.employees AS employees ON orgs.id = employees.department_id LEFT JOIN test_strategies.assignments AS assignments ON orgs.id = assignments.employee_id LEFT JOIN test_strategies.projects AS project ON orgs.project_id = project.id
 
 # =============================================================================
 # NQL features: between, like, in, not in (queries 16–19)
@@ -262,7 +260,7 @@ db.success: true
 # ─────────────────────────────────────────
 --- query: 24
 success: true
-sql.equals: UPDATE test_strategies.tasks SET completed = $1 WHERE test_strategies.tasks.id = $2
+sql.equals: UPDATE test_strategies.tasks SET completed = $1 WHERE tasks.id = $2
 params.equals: [true,1]
 db.success: true
 
@@ -272,7 +270,7 @@ db.success: true
 # ─────────────────────────────────────────
 --- query: 25
 success: true
-sql.equals: DELETE FROM test_strategies.tasks WHERE test_strategies.tasks.completed = $1
+sql.equals: DELETE FROM test_strategies.tasks WHERE tasks.completed = $1
 params.equals: [true]
 db.success: true
 
@@ -303,7 +301,7 @@ db.rows.equals: 3
 # ─────────────────────────────────────────
 --- query: 28
 success: true
-sql.equals: SELECT departments.* FROM departments WHERE departments.id = ANY (SELECT employees."departmentId" FROM employees WHERE employees.active = $1)
+sql.equals: SELECT departments.* FROM test_strategies.departments WHERE departments.id = ANY (SELECT employees_subq_0.department_id FROM test_strategies.employees AS employees_subq_0 WHERE employees_subq_0.active = $1) AND EXISTS (SELECT 1 FROM test_strategies.employees AS employees_exists_1 WHERE departments.id = employees_exists_1.department_id)
 params.equals: [true]
 
 # ─────────────────────────────────────────
@@ -311,7 +309,7 @@ params.equals: [true]
 # ─────────────────────────────────────────
 --- query: 29
 success: true
-sql.equals: SELECT departments.* FROM departments WHERE EXISTS (SELECT 1 FROM employees WHERE employees."departmentId" = departments.id AND employees.active = $1)
+sql.equals: SELECT departments.* FROM test_strategies.departments WHERE EXISTS (SELECT 1 FROM test_strategies.employees AS employees_exists_0 WHERE departments.id = employees_exists_0.department_id AND employees_exists_0.active = $1)
 params.equals: [true]
 
 # ─────────────────────────────────────────

@@ -175,6 +175,31 @@ function normalizeToDecision(input: Decision): Decision {
 	if (input.column !== undefined) return input;
 
 	const raw = input as unknown as Record<string, unknown>;
+
+	// Handle PlanDecision compound types (from compiler.ts WHERE compilation)
+	// These have `type` but no `kind` and no `column`
+	const planType = raw.type as string | undefined;
+	if (
+		planType === 'whereAnd' ||
+		planType === 'whereOr' ||
+		planType === 'whereNot'
+	) {
+		const op =
+			planType === 'whereAnd' ? 'and' : planType === 'whereOr' ? 'or' : 'not';
+		return {
+			type: op,
+			operator: op,
+			conditions: ((raw.conditions as unknown[]) ?? []).map((c) =>
+				normalizeToDecision(c as Decision),
+			),
+		};
+	}
+
+	// Handle PlanDecision 'having' type — same as 'where', just different type label
+	if (planType === 'having' && !raw.kind) {
+		return { ...input, type: 'where' } as Decision;
+	}
+
 	const kind = raw.kind as string | undefined;
 	if (!kind) return input;
 
@@ -316,12 +341,14 @@ export * from './where/index.js';
 
 export {
 	andHandler,
+	betweenHandler,
 	comparisonHandler,
 	inHandler,
 	likeHandler,
 	notHandler,
 	nullHandler,
 	orHandler,
+	rangeHandler,
 	registerSimpleWhereHandlers,
 	simpleWhereHandlers,
 } from './where/index.js';

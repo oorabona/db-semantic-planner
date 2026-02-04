@@ -28,6 +28,7 @@ import {
 	type RecursivePlanReport,
 	type SubqueryIncludeInfo,
 	type UpdateIntent,
+	type UpsertFromIntent,
 	type UpsertIntent,
 } from '@dbsp/core';
 import type { Node, SelectStmt } from '@pgsql/types';
@@ -65,6 +66,7 @@ import {
 	compileInsertFrom as compileInsertFromMutation,
 	compileInsert as compileInsertMutation,
 	compileUpdate as compileUpdateMutation,
+	compileUpsertFrom as compileUpsertFromMutation,
 	compileUpsert as compileUpsertMutation,
 	type DeleteConfig,
 	type InsertConfig,
@@ -72,6 +74,7 @@ import {
 	RANGE_TYPES,
 	type UpdateConfig,
 	type UpsertConfig,
+	type UpsertFromConfig,
 } from './mutations/index.js';
 import {
 	getNamingPluginForDbCasing,
@@ -368,18 +371,18 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					if (d.type === 'selectRelationColumn' && d.relation && d.column) {
 						const col = d.column as string;
 						const rootRelation = (d.relation as string).split('.')[0] ?? '';
-					if (includedRelations.has(rootRelation)) {
-						if (col === '*') {
-							// Wildcard: select all columns from relation
-							relationColumnsMap.set(rootRelation, ['*']);
-							continue;
-						}
-						const existing = relationColumnsMap.get(rootRelation);
-						if (existing && !existing.includes('*')) {
-							if (!existing.includes(col)) existing.push(col);
-						} else if (!existing) {
-							relationColumnsMap.set(rootRelation, [col]);
-						}
+						if (includedRelations.has(rootRelation)) {
+							if (col === '*') {
+								// Wildcard: select all columns from relation
+								relationColumnsMap.set(rootRelation, ['*']);
+								continue;
+							}
+							const existing = relationColumnsMap.get(rootRelation);
+							if (existing && !existing.includes('*')) {
+								if (!existing.includes(col)) existing.push(col);
+							} else if (!existing) {
+								relationColumnsMap.set(rootRelation, [col]);
+							}
 						}
 					}
 				}
@@ -400,7 +403,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				const validationModel = options?.model ?? this.model;
 				if (validationModel && relationColumnsMap.size > 0) {
 					for (const d of enrichedUnifiedDecisions) {
-						if (d.type === 'includeStrategy' && d.columns && d.targetTable && !((d.columns as string[]).length === 1 && (d.columns as string[])[0] === '*')) {
+						if (
+							d.type === 'includeStrategy' &&
+							d.columns &&
+							d.targetTable &&
+							!(
+								(d.columns as string[]).length === 1 &&
+								(d.columns as string[])[0] === '*'
+							)
+						) {
 							const targetTable = validationModel.getTable(
 								d.targetTable as string,
 							);
@@ -1066,6 +1077,54 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		};
 
 		const ast = compileUpsertMutation(config, ctx, state);
+		const sql = deparseQuoted(ast);
+
+		return {
+			sql,
+			parameters: state.parameters,
+		};
+	}
+
+	/**
+	 * Compile an upsert-from intent to executable SQL (NQL-BIND).
+	 * INSERT INTO target SELECT ... FROM source ON CONFLICT (cols) DO UPDATE SET ...
+	 */
+	compileUpsertFrom(
+		intent: UpsertFromIntent,
+		options?: CompileOptions,
+	): CompiledQuery {
+		const schemaName = this.schemaName ?? options?.schemaName;
+
+		const ctx: CompilerContext = {
+			naming: this.naming,
+			rootTable: intent.source,
+			...(schemaName !== undefined && { schema: schemaName }),
+			maxRecursiveDepth: 100,
+		};
+		const state = createCompilerState();
+
+		// Derive columns from model if not explicitly specified (needed for ON CONFLICT SET)
+		let columns: string[] | undefined;
+		if (intent.columns) {
+			columns = [...intent.columns];
+		} else if (options?.model) {
+			const targetTable = options.model.getTable(intent.table);
+			if (targetTable) {
+				columns = targetTable.columns.map((c) => c.name);
+			}
+		}
+
+		const config: UpsertFromConfig = {
+			targetTable: intent.table,
+			sourceTable: intent.source,
+			conflictColumns: [...intent.conflictColumns],
+			...(columns && { columns }),
+			...(intent.where && { where: [intent.where as unknown as Decision] }),
+			...(intent.limit !== undefined && { limit: intent.limit }),
+			...(intent.returning && { returning: [...intent.returning] }),
+		};
+
+		const ast = compileUpsertFromMutation(config, ctx, state);
 		const sql = deparseQuoted(ast);
 
 		return {

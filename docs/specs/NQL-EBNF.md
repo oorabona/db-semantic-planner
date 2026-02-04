@@ -2,7 +2,7 @@
 
 **Status:** Canonical
 **Created:** 2026-01-24
-**Version:** 4.0 (SPEC-002: cross-table relations, quantifiers, aliases)
+**Version:** 5.0 (NQL-BIND: bind generalization, insert-from, upsert-from)
 **Scope:** nql, cli
 
 ## Overview
@@ -20,11 +20,8 @@ This document is the **single source of truth** for NQL (Natural Query Language)
 (* ============================================================ *)
 
 program           = { line } ;
-line              = [ let_stmt | statement ] NEWLINE ;  (* Line-oriented parsing *)
+line              = [ statement ] NEWLINE ;             (* Line-oriented parsing *)
 statement         = command | query | mutation_pipeline ;
-
-(* CTE / Variable binding - defines reusable named queries *)
-let_stmt          = "let" IDENT "=" query ;
 
 (* REPL commands (.help, .schema, etc.) *)
 command           = "." IDENT { ANY_TOKEN } ;
@@ -47,7 +44,8 @@ query_clause      = where_clause
                   | order_clause
                   | limit_clause
                   | offset_clause
-                  | flat_clause ;
+                  | flat_clause
+                  | bind_clause ;
 
 (* Clauses *)
 where_clause      = "where" boolean_expr ;
@@ -487,7 +485,8 @@ mutation_clause   = select_clause | bind_clause ;
 (* bind captures mutation result into a variable for chaining *)
 bind_clause       = "bind" IDENT ;
 
-mutation          = insert_stmt | update_stmt | delete_stmt | upsert_stmt ;
+mutation          = insert_stmt | update_stmt | delete_stmt | upsert_stmt
+                  | insert_from_stmt | upsert_from_stmt ;
 
 insert_stmt       = "insert" "into" ident_segment "set" assignment_list
                     [ from_clause ] [ "!" ] ;
@@ -497,6 +496,14 @@ update_stmt       = "update" ident_segment "set" assignment_list
 delete_stmt       = "delete" "from" ident_segment ( "where" boolean_expr [ "!" ] | "!" ) ;
 upsert_stmt       = "upsert" "into" ident_segment "on" "(" ident_list ")"
                     "set" assignment_list [ "!" ] ;
+
+(* Bulk insert from source table or bound CTE *)
+insert_from_stmt  = "insert" "into" ident_segment "from" ident_segment
+                    [ where_clause ] [ limit_clause ] ;
+
+(* Bulk upsert from source table or bound CTE *)
+upsert_from_stmt  = "upsert" "into" ident_segment "on" ident_list
+                    "from" ident_segment [ where_clause ] [ limit_clause ] ;
 
 (* INSERT FROM clause for FK lookup and bulk inserts *)
 from_clause       = "from" [ "each" ] ident_segment [ "as" ident_segment ]
@@ -571,8 +578,7 @@ These rules are enforced after parsing:
 | Rule | Error |
 |------|-------|
 | `where` before `group by` contains aggregate | "Aggregate functions not allowed before GROUP BY" |
-| Duplicate `let` binding name | "Variable 'X' already defined" |
-| Circular `let` reference | "Circular reference detected: X → Y → X" |
+| Duplicate `bind` name | "Binding 'X' already defined" |
 | Unknown column/table | "Column 'X' not found. Did you mean 'Y'?" |
 | `select` with aggregate + non-grouped column | "Column 'X' must be in GROUP BY or aggregate" |
 | Mixed direction pseudo-chain | "Cannot mix parent and child in same traversal chain" |
@@ -639,6 +645,7 @@ This allows schemas with columns named `parent` while still supporting pseudo-ta
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 5.0 | 2026-02-04 | **NQL-BIND:** Removed `let` keyword (dead code), generalized `bind` clause to queries (CTE capture), added `insert_from_stmt` and `upsert_from_stmt` for bulk insert/upsert from source table or bound CTE |
 | 4.0 | 2026-01-25 | **SPEC-002 Cross-Table Relations:** Added quantified relation checks (`NOT`/`ALL` prefixes), explicit quantifiers (`some()`/`none()`/`every()`), relation aliases, Section 5 for cross-table patterns |
 | 3.0 | 2026-01-24 | **NQL v2.1 Grammar Simplification:** Removed `with` keyword entirely (BREAKING), added `flat` clause for JOIN strategy, relations now via path expressions in select |
 | 2.2 | 2026-01-24 | Multi-LLM review fixes: H1 (select_item parsing), H2 (subquery disambiguation), H3 (custom tokens), H4 (defer pseudo_table.*), L1 (case requires when), L3 (delete !), M7 (IN literal_list) |

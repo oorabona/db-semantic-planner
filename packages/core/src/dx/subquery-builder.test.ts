@@ -60,7 +60,7 @@ describe('SubqueryBuilder', () => {
 	describe('select()', () => {
 		it('should set the select field', () => {
 			const intent = subquery('products').select('price').dump();
-			expect(intent.select).toBe('price');
+			expect(intent.select).toEqual({ type: 'fields', fields: ['price'] });
 		});
 
 		it('should be immutable (return new builder)', () => {
@@ -132,12 +132,12 @@ describe('SubqueryBuilder', () => {
 		it('should return SubqueryExpression with select', () => {
 			const expr = subquery('products').select('price').build();
 			expect(expr).toBeInstanceOf(SubqueryExpression);
-			expect(expr.intent.select).toBe('price');
+			expect(expr.intent.select).toEqual({ type: 'fields', fields: ['price'] });
 		});
 	});
 
 	describe('dump()', () => {
-		it('should return the ScalarSubqueryIntent', () => {
+		it('should return the QueryIntent', () => {
 			const intent = subquery('products')
 				.select('price')
 				.where({
@@ -149,8 +149,9 @@ describe('SubqueryBuilder', () => {
 				.dump();
 
 			expect(intent).toEqual({
+				type: 'select',
 				from: 'products',
-				select: 'price',
+				select: { type: 'fields', fields: ['price'] },
 				where: {
 					kind: 'comparison',
 					field: 'active',
@@ -171,15 +172,18 @@ describe('SubqueryBuilder', () => {
 				.avg('rating');
 
 			expect(intent.intent).toEqual({
+				type: 'select',
 				from: 'reviews',
-				select: 'rating',
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'avg', field: 'rating' }],
+				},
 				where: {
 					kind: 'comparison',
 					field: 'productId',
 					operator: 'eq',
 					value: { kind: 'ref', column: 'id' },
 				},
-				aggregate: { fn: 'avg', field: 'rating' },
 			});
 		});
 	});
@@ -201,7 +205,10 @@ describe('SubqueryBuilder aggregates', () => {
 				})
 				.count();
 
-			expect(expr.intent.aggregate).toEqual({ fn: 'count', field: '*' });
+			expect(expr.intent.select).toEqual({
+				type: 'aggregate',
+				aggregates: [{ function: 'count', field: '*' }],
+			});
 		});
 
 		it('should create count aggregate with specific field', () => {
@@ -214,7 +221,10 @@ describe('SubqueryBuilder aggregates', () => {
 				})
 				.count('id');
 
-			expect(expr.intent.aggregate).toEqual({ fn: 'count', field: 'id' });
+			expect(expr.intent.select).toEqual({
+				type: 'aggregate',
+				aggregates: [{ function: 'count', field: 'id' }],
+			});
 		});
 	});
 
@@ -229,7 +239,10 @@ describe('SubqueryBuilder aggregates', () => {
 				})
 				.sum('quantity');
 
-			expect(expr.intent.aggregate).toEqual({ fn: 'sum', field: 'quantity' });
+			expect(expr.intent.select).toEqual({
+				type: 'aggregate',
+				aggregates: [{ function: 'sum', field: 'quantity' }],
+			});
 		});
 	});
 
@@ -244,7 +257,10 @@ describe('SubqueryBuilder aggregates', () => {
 				})
 				.avg('rating');
 
-			expect(expr.intent.aggregate).toEqual({ fn: 'avg', field: 'rating' });
+			expect(expr.intent.select).toEqual({
+				type: 'aggregate',
+				aggregates: [{ function: 'avg', field: 'rating' }],
+			});
 		});
 	});
 
@@ -259,7 +275,10 @@ describe('SubqueryBuilder aggregates', () => {
 				})
 				.min('price');
 
-			expect(expr.intent.aggregate).toEqual({ fn: 'min', field: 'price' });
+			expect(expr.intent.select).toEqual({
+				type: 'aggregate',
+				aggregates: [{ function: 'min', field: 'price' }],
+			});
 		});
 	});
 
@@ -274,7 +293,10 @@ describe('SubqueryBuilder aggregates', () => {
 				})
 				.max('price');
 
-			expect(expr.intent.aggregate).toEqual({ fn: 'max', field: 'price' });
+			expect(expr.intent.select).toEqual({
+				type: 'aggregate',
+				aggregates: [{ function: 'max', field: 'price' }],
+			});
 		});
 	});
 });
@@ -290,12 +312,13 @@ describe('SubqueryExpression', () => {
 	});
 
 	describe('toIntent()', () => {
-		it('should return the underlying ScalarSubqueryIntent', () => {
+		it('should return the underlying QueryIntent', () => {
 			const expr = subquery('products').select('price').build();
 			const intent = expr.toIntent();
 			expect(intent).toEqual({
+				type: 'select',
 				from: 'products',
-				select: 'price',
+				select: { type: 'fields', fields: ['price'] },
 			});
 		});
 	});
@@ -317,15 +340,18 @@ describe('SubqueryExpression', () => {
 				field: 'price',
 				operator: 'eq',
 				subquery: {
+					type: 'select',
 					from: 'prices',
-					select: 'price',
+					select: {
+						type: 'aggregate',
+						aggregates: [{ function: 'max', field: 'price' }],
+					},
 					where: {
 						kind: 'comparison',
 						field: 'productId',
 						operator: 'eq',
 						value: { kind: 'ref', column: 'id' },
 					},
-					aggregate: { fn: 'max', field: 'price' },
 				},
 			});
 		});
@@ -528,15 +554,18 @@ describe('chaining and immutability', () => {
 			.max('unit_price');
 
 		expect(expr.intent).toEqual({
+			type: 'select',
 			from: 'order_items',
-			select: 'unit_price',
+			select: {
+				type: 'aggregate',
+				aggregates: [{ function: 'max', field: 'unit_price' }],
+			},
 			where: {
 				kind: 'comparison',
 				field: 'orderId',
 				operator: 'eq',
 				value: { kind: 'ref', column: 'id' },
 			},
-			aggregate: { fn: 'max', field: 'unit_price' },
 		});
 	});
 
@@ -570,9 +599,30 @@ describe('chaining and immutability', () => {
 		const avgExpr = base.avg('amount');
 		const countExpr = base.count();
 
-		expect(sumExpr.intent.aggregate?.fn).toBe('sum');
-		expect(avgExpr.intent.aggregate?.fn).toBe('avg');
-		expect(countExpr.intent.aggregate?.fn).toBe('count');
+		expect(
+			(
+				sumExpr.intent.select as {
+					type: string;
+					aggregates: { function: string }[];
+				}
+			).aggregates[0]?.function,
+		).toBe('sum');
+		expect(
+			(
+				avgExpr.intent.select as {
+					type: string;
+					aggregates: { function: string }[];
+				}
+			).aggregates[0]?.function,
+		).toBe('avg');
+		expect(
+			(
+				countExpr.intent.select as {
+					type: string;
+					aggregates: { function: string }[];
+				}
+			).aggregates[0]?.function,
+		).toBe('count');
 	});
 });
 
@@ -584,20 +634,26 @@ describe('edge cases', () => {
 	it('should handle subquery without where clause', () => {
 		const intent = subquery('settings').select('max_items').dump();
 		expect(intent).toEqual({
+			type: 'select',
 			from: 'settings',
-			select: 'max_items',
+			select: { type: 'fields', fields: ['max_items'] },
 		});
 	});
 
 	it('should handle aggregate without explicit select', () => {
 		const expr = subquery('products').count();
-		expect(expr.intent.select).toBe('*');
+		expect(expr.intent.select).toEqual({
+			type: 'aggregate',
+			aggregates: [{ function: 'count', field: '*' }],
+		});
 	});
 
-	it('should preserve explicit select when aggregate is used', () => {
+	it('should use aggregate select even when explicit select was set', () => {
 		const expr = subquery('products').select('some_field').sum('total');
-		// Explicit select() takes precedence over aggregate field
-		expect(expr.intent.select).toBe('some_field');
-		expect(expr.intent.aggregate).toEqual({ fn: 'sum', field: 'total' });
+		// Aggregate overrides explicit select
+		expect(expr.intent.select).toEqual({
+			type: 'aggregate',
+			aggregates: [{ function: 'sum', field: 'total' }],
+		});
 	});
 });

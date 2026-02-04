@@ -6,7 +6,7 @@
 
 import type {
 	ComparisonOperator,
-	ScalarSubqueryIntent,
+	QueryIntent,
 	SubqueryRefIntent,
 	WhereIntent,
 	WhereSubqueryIntent,
@@ -126,20 +126,26 @@ export class SubqueryBuilder {
 			);
 		}
 
-		// Build intent object conditionally to satisfy exactOptionalPropertyTypes
-		const baseIntent = {
-			from: this._from,
-			select: this._select ?? this._aggregate?.field ?? '*',
-		};
+		// Build a full QueryIntent — subqueries are queries with contextual validation
+		const selectField = this._select ?? this._aggregate?.field ?? '*';
 
-		// Add optional properties only if defined
-		const intent: ScalarSubqueryIntent = this._where
-			? this._aggregate
-				? { ...baseIntent, where: this._where, aggregate: this._aggregate }
-				: { ...baseIntent, where: this._where }
-			: this._aggregate
-				? { ...baseIntent, aggregate: this._aggregate }
-				: baseIntent;
+		const intent: QueryIntent = {
+			type: 'select',
+			from: this._from,
+			// Aggregate overrides plain field select
+			select: this._aggregate
+				? {
+						type: 'aggregate',
+						aggregates: [
+							{
+								function: this._aggregate.fn,
+								field: this._aggregate.field,
+							},
+						],
+					}
+				: { type: 'fields', fields: [selectField] },
+			...(this._where && { where: this._where }),
+		};
 
 		return new SubqueryExpression(intent);
 	}
@@ -147,7 +153,7 @@ export class SubqueryBuilder {
 	/**
 	 * Get the intent for debugging/inspection.
 	 */
-	dump(): ScalarSubqueryIntent {
+	dump(): QueryIntent {
 		return this.build().toIntent();
 	}
 
@@ -173,16 +179,16 @@ export class SubqueryBuilder {
  */
 export class SubqueryExpression {
 	readonly _type = 'subquery' as const;
-	readonly intent: ScalarSubqueryIntent;
+	readonly intent: QueryIntent;
 
-	constructor(intent: ScalarSubqueryIntent) {
+	constructor(intent: QueryIntent) {
 		this.intent = intent;
 	}
 
 	/**
 	 * Get the underlying intent.
 	 */
-	toIntent(): ScalarSubqueryIntent {
+	toIntent(): QueryIntent {
 		return this.intent;
 	}
 

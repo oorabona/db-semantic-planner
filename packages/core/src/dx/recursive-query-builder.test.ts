@@ -8,8 +8,8 @@
 
 import { eq, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { createMockAdapter } from './test-utils.js';
 import { createRecursiveBuilder } from './recursive-query-builder.js';
+import { createMockAdapter } from './test-utils.js';
 
 // ============================================================================
 // Test Schema - Role Hierarchy with Edge Table
@@ -55,8 +55,6 @@ const categoryModel = schema({
 		}),
 	},
 }).model;
-
-
 
 // ============================================================================
 // Validation Tests

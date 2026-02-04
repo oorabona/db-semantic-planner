@@ -8,8 +8,8 @@
 
 import { describe, expect, it } from 'vitest';
 import { createOrm } from './orm.js';
-import { createMockAdapter } from './test-utils.js';
 import { schema } from './schema.js';
+import { createMockAdapter } from './test-utils.js';
 
 /**
  * Minimal schema for testing options propagation.

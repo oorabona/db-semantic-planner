@@ -12,7 +12,7 @@
 import { Box, Text } from 'ink';
 import React from 'react';
 import { OutputDisplay } from '../components/OutputDisplay.js';
-import type { OutputLayout } from '../engine/engine-types.js';
+import type { OutputLayout, PlanVerbosity } from '../engine/engine-types.js';
 import { ExecutionResultDisplay } from '../result-formatter.js';
 import type { ExecutionResult, QueryResult } from '../types.js';
 import type { ConversationEntry } from './conversation-model.js';
@@ -20,6 +20,7 @@ import type { ConversationEntry } from './conversation-model.js';
 interface ConversationViewProps {
 	entries: readonly ConversationEntry[];
 	outputLayout: OutputLayout;
+	planVerbosity: PlanVerbosity;
 }
 
 /** Compact one-line summary for a query result. */
@@ -84,9 +85,11 @@ function QuerySummary({
 function ConversationEntryView({
 	entry,
 	outputLayout,
+	planVerbosity,
 }: {
 	entry: ConversationEntry;
 	outputLayout: OutputLayout;
+	planVerbosity: PlanVerbosity;
 }) {
 	// Extract relevant events for display
 	let queryResult: QueryResult | null = null;
@@ -139,7 +142,9 @@ function ConversationEntryView({
 			{hasQueryOutput && outputLayout === 'sql' && (
 				<Box flexDirection="column">
 					<QuerySummary queryResult={queryResult} execResult={execResult} />
-					{queryResult && <OutputDisplay result={queryResult} />}
+					{queryResult && (
+						<OutputDisplay result={queryResult} planVerbosity={planVerbosity} />
+					)}
 				</Box>
 			)}
 
@@ -152,7 +157,9 @@ function ConversationEntryView({
 
 			{hasQueryOutput && outputLayout === 'full' && (
 				<Box flexDirection="column">
-					{queryResult && <OutputDisplay result={queryResult} />}
+					{queryResult && (
+						<OutputDisplay result={queryResult} planVerbosity={planVerbosity} />
+					)}
 					{execResult && <ExecutionResultDisplay result={execResult} />}
 				</Box>
 			)}
@@ -163,6 +170,7 @@ function ConversationEntryView({
 export function ConversationView({
 	entries,
 	outputLayout,
+	planVerbosity,
 }: ConversationViewProps) {
 	if (entries.length === 0) return null;
 
@@ -173,6 +181,7 @@ export function ConversationView({
 					key={entry.id}
 					entry={entry}
 					outputLayout={outputLayout}
+					planVerbosity={planVerbosity}
 				/>
 			))}
 		</Box>

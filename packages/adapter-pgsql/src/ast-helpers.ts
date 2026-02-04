@@ -822,6 +822,9 @@ export function windowFuncCall(
 
 	if (args.length > 0) {
 		funcCallObj.args = args;
+	} else if (funcName.toLowerCase() === 'count') {
+		// count() without args → count(*) via agg_star
+		funcCallObj.agg_star = true;
 	}
 
 	return { FuncCall: funcCallObj as FuncCall };
@@ -860,24 +863,46 @@ export function jsonAggSubquery(
 		innerAlias?: string;
 		/** Optional LIMIT on the subquery rows */
 		limit?: number;
+		/** Column projection — if specified, use jsonb_build_object instead of to_jsonb(__t__) */
+		columns?: readonly string[];
 	},
 ): Node {
 	const targetAlias = options?.innerAlias ?? '__t__';
 
-	// Build: to_jsonb(__t__) - use row reference (just alias, not alias.*)
-	// In PostgreSQL, __t__ refers to the entire row when used with aggregate/jsonb functions
-	const rowRef: Node = {
-		ColumnRef: {
-			fields: [stringNode(targetAlias)],
-		},
-	};
+	// Build row expression: either projected columns or full row
+	const cols = options?.columns;
+	const hasProjection =
+		cols && cols.length > 0 && !(cols.length === 1 && cols[0] === '*');
 
-	let toJsonbCall: Node = {
-		FuncCall: {
-			funcname: [stringNode('to_jsonb')],
-			args: [rowRef],
-		} as FuncCall,
-	};
+	let toJsonbCall: Node;
+	if (hasProjection) {
+		// Column projection: jsonb_build_object('col1', __t__."col1", 'col2', __t__."col2", ...)
+		const projArgs: Node[] = [];
+		for (const col of cols) {
+			projArgs.push({ A_Const: { sval: { sval: naming.toDatabase(col) } } });
+			projArgs.push(columnRef(col, targetAlias, undefined, naming));
+		}
+		toJsonbCall = {
+			FuncCall: {
+				funcname: [stringNode('jsonb_build_object')],
+				args: projArgs,
+			} as FuncCall,
+		};
+	} else {
+		// Full row: to_jsonb(__t__)
+		// In PostgreSQL, __t__ refers to the entire row when used with aggregate/jsonb functions
+		const rowRef: Node = {
+			ColumnRef: {
+				fields: [stringNode(targetAlias)],
+			},
+		};
+		toJsonbCall = {
+			FuncCall: {
+				funcname: [stringNode('to_jsonb')],
+				args: [rowRef],
+			} as FuncCall,
+		};
+	}
 
 	// If there are nested children, merge them via:
 	// to_jsonb(__t__) || jsonb_build_object('child1', <subquery1>, 'child2', <subquery2>)

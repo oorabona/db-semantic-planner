@@ -34,6 +34,7 @@ import type {
 	EngineState,
 	OutputLayout,
 	PanelView,
+	PlanVerbosity,
 } from './engine-types.js';
 
 /**
@@ -47,6 +48,24 @@ const DIALECT_STRATEGIES: Record<string, readonly string[]> = {
 	mssql: ['auto', 'join', 'subquery', 'cte'],
 	duckdb: ['auto', 'join', 'subquery', 'cte', 'json_agg'],
 };
+
+/**
+ * Check if the last character of the input is inside a single-quoted string literal.
+ * NQL uses SQL-style single quotes; escaped quotes are '' (doubled).
+ */
+export function isInsideStringLiteral(input: string): boolean {
+	let inString = false;
+	for (let i = 0; i < input.length - 1; i++) {
+		if (input[i] === "'") {
+			if (inString && i + 1 < input.length - 1 && input[i + 1] === "'") {
+				i++; // skip escaped quote ''
+			} else {
+				inString = !inString;
+			}
+		}
+	}
+	return inString;
+}
 
 export class ReplEngine {
 	private state: EngineState;
@@ -81,6 +100,7 @@ export class ReplEngine {
 			...(config.dbCasing !== undefined && { dbCasing: config.dbCasing }),
 			outputMode: 'json',
 			outputLayout: 'full',
+			planVerbosity: 'normal',
 		};
 	}
 
@@ -401,6 +421,31 @@ export class ReplEngine {
 				}
 				return;
 			}
+
+			case '.plan': {
+				const validLevels: PlanVerbosity[] = ['compact', 'normal', 'verbose'];
+				const level = arg?.toLowerCase();
+
+				if (!level) {
+					this.emit({
+						type: 'info',
+						message: `📋 Plan verbosity: ${this.state.planVerbosity}\nAvailable: ${validLevels.join(', ')}\nUsage: .plan ${validLevels.join(' | ')}`,
+					});
+				} else if (validLevels.includes(level as PlanVerbosity)) {
+					this.state.planVerbosity = level as PlanVerbosity;
+					this.emitStateChange();
+					this.emit({
+						type: 'info',
+						message: `✓ Plan verbosity: ${level}`,
+					});
+				} else {
+					this.emit({
+						type: 'error',
+						message: `❌ Invalid plan verbosity: ${level}. Use: ${validLevels.join(', ')}`,
+					});
+				}
+				return;
+			}
 		}
 
 		// Delegate to shared dot-command processor (used by batch mode too)
@@ -615,13 +660,19 @@ export class ReplEngine {
 		}
 
 		try {
-			const result = await compileNqlToSql(content, this.model, {
+			// Strip trailing ! (bang suffix = execute mutation) before compilation
+			// Must verify the ! is outside string literals (odd number of unescaped quotes = inside string)
+			const trimmed = content.trim();
+			const hasBangSuffix =
+				trimmed.endsWith('!') && !isInsideStringLiteral(trimmed);
+			const nqlContent = hasBangSuffix ? trimmed.slice(0, -1).trim() : content;
+
+			const result = await compileNqlToSql(nqlContent, this.model, {
 				...(this.state.schemaName ? { schemaName: this.state.schemaName } : {}),
 				...(this.state.dbCasing ? { dbCasing: this.state.dbCasing } : {}),
 			});
 
 			const isMutation = result.intentType !== 'query';
-			const hasBangSuffix = content.trim().endsWith('!');
 			const isDryRun = isMutation && !hasBangSuffix;
 
 			// Apply EXPLAIN prefix if explainMode is on (queries only)
@@ -661,6 +712,25 @@ export class ReplEngine {
 								.join(' → '),
 							choice: d.choice,
 							reasoning: d.reasoning,
+							...(d.alternatives.length > 0 && {
+								alternatives: [...d.alternatives],
+							}),
+							...(d.context.foreignKey !== undefined && {
+								foreignKey:
+									typeof d.context.foreignKey === 'string'
+										? d.context.foreignKey
+										: [...d.context.foreignKey],
+							}),
+							...(d.context.relationType !== undefined && {
+								relationType: d.context.relationType,
+							}),
+							...(d.context.intentPath !== undefined && {
+								intentPath: d.context.intentPath,
+							}),
+							...(d.context.relationPath !== undefined && {
+								relationPath: d.context.relationPath,
+							}),
+							...(d.id !== undefined && { decisionId: d.id }),
 						})) ?? [],
 					warnings: [
 						...(isDryRun
@@ -669,10 +739,38 @@ export class ReplEngine {
 						...(pr?.warnings.map((w) => ({
 							message: w.message,
 							...(w.suggestion !== undefined && { suggestion: w.suggestion }),
+							...(w.code !== undefined && { code: w.code }),
+							...(w.relatedDecision !== undefined && {
+								relatedDecision: w.relatedDecision,
+							}),
 						})) ?? []),
 					],
 					cteCount: pr?.ctes.length ?? 0,
 					planningTimeMs: pr?.metadata.planningTimeMs ?? 0,
+					...(pr?.ctes && pr.ctes.length > 0
+						? {
+								ctes: pr.ctes.map((c) => ({
+									name: c.name,
+									purpose: c.purpose,
+									...(c.recursive && { recursive: c.recursive }),
+									...(c.referencedBy.length > 0 && {
+										referencedBy: [...c.referencedBy],
+									}),
+								})),
+							}
+						: {}),
+					...(pr?.metadata
+						? {
+								metadata: {
+									relationsAnalyzed: pr.metadata.relationsAnalyzed,
+									isAmbiguous: pr.metadata.isAmbiguous,
+									...(pr.metadata.ambiguousOptions &&
+										pr.metadata.ambiguousOptions.length > 0 && {
+											ambiguousOptions: [...pr.metadata.ambiguousOptions],
+										}),
+								},
+							}
+						: {}),
 				},
 			};
 

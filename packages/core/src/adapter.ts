@@ -15,6 +15,7 @@ import type {
 	InsertIntent,
 	SelectIntent,
 	UpdateIntent,
+	UpsertFromIntent,
 	UpsertIntent,
 	WhereIntent,
 } from './intent-ast.js';
@@ -264,6 +265,12 @@ export interface CompilingAdapter extends BaseAdapter {
 
 	/** Compile an upsert intent to executable SQL (DX-026). */
 	compileUpsert(intent: UpsertIntent, options?: CompileOptions): CompiledQuery;
+
+	/** Compile an upsert-from intent to executable SQL (NQL-BIND). */
+	compileUpsertFrom(
+		intent: UpsertFromIntent,
+		options?: CompileOptions,
+	): CompiledQuery;
 
 	/** Compile a recursive CTE plan to executable SQL. */
 	compileRecursive(

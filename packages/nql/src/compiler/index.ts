@@ -13,6 +13,7 @@ import type {
 	ComparisonOperator,
 	DeleteIntent,
 	ExpressionIntent,
+	FieldRef,
 	IncludeIntent,
 	InsertFromIntent,
 	InsertIntent,
@@ -22,7 +23,6 @@ import type {
 	PseudoColumnTraversal,
 	QueryIntent,
 	RangeOperator,
-	ScalarSubqueryIntent,
 	SelectAllIntent,
 	SelectFieldsIntent,
 	SelectIntent,
@@ -31,6 +31,7 @@ import type {
 	UpdateIntent,
 	UpsertConflictAction,
 	UpsertConflictTarget,
+	UpsertFromIntent,
 	UpsertIntent,
 	WhereAndIntent,
 	WhereComparisonIntent,
@@ -45,6 +46,7 @@ import type {
 	WindowFunction,
 	WindowOrderBy,
 } from '@dbsp/types';
+import { NqlErrorCodes, NqlSemanticException } from '../errors/index.js';
 import type {
 	NqlBetweenExpression,
 	NqlBinaryExpression,
@@ -59,6 +61,7 @@ import type {
 	NqlInsertFrom,
 	NqlIsNullExpression,
 	NqlLimitClause,
+	NqlMutation,
 	NqlMutationPipeline,
 	NqlNumberLiteral,
 	NqlOffsetClause,
@@ -72,10 +75,12 @@ import type {
 	NqlRelationFilterExpression,
 	NqlSelectClause,
 	NqlSelectItem,
+	NqlStatement,
 	NqlStringLiteral,
 	NqlUnaryExpression,
 	NqlUpdate,
 	NqlUpsert,
+	NqlUpsertFrom,
 	NqlWhereClause,
 	NqlWindowExpression,
 } from '../parser/ast.js';
@@ -95,7 +100,6 @@ export type {
 	PseudoColumnTraversal,
 	QueryIntent,
 	RangeOperator,
-	ScalarSubqueryIntent,
 	SelectAllIntent,
 	SelectFieldsIntent,
 	SelectIntent,
@@ -104,6 +108,7 @@ export type {
 	UpdateIntent,
 	UpsertConflictAction,
 	UpsertConflictTarget,
+	UpsertFromIntent,
 	UpsertIntent,
 	WhereAndIntent,
 	WhereComparisonIntent,
@@ -122,6 +127,91 @@ export interface CompileResult {
 	readonly query?: QueryIntent;
 	readonly mutation?: MutationIntent;
 	readonly returning?: readonly string[];
+	/** Named bindings from `| bind X` clauses (CTE source queries) */
+	readonly bindings?: ReadonlyMap<string, QueryIntent>;
+}
+
+/**
+ * Duck-type interface for schema-based column validation.
+ * Loose coupling: ModelIR from @dbsp/core satisfies this shape without direct import.
+ */
+export interface ColumnValidatorSchema {
+	getTable(name: string):
+		| {
+				readonly columns: readonly { readonly name: string }[];
+				readonly pseudoColumns?: readonly {
+					readonly parentRole: string;
+					readonly childRole: string;
+				}[];
+		  }
+		| undefined;
+	getRelationsFrom(
+		sourceTable: string,
+	): readonly { readonly name: string; readonly target: string }[];
+}
+
+/**
+ * Validates column references against the schema.
+ * When no schema is provided, validation is skipped (backward compat).
+ */
+class ColumnValidator {
+	constructor(private readonly schema: ColumnValidatorSchema) {}
+
+	/**
+	 * Convert camelCase to snake_case for column name matching.
+	 * NQL queries may use either form (e.g., viewCount or view_count).
+	 */
+	private static toSnakeCase(name: string): string {
+		return name.replace(/[A-Z]/g, (ch) => `_${ch.toLowerCase()}`);
+	}
+
+	/**
+	 * Check if a query column matches a schema column.
+	 * Accepts exact match OR snake_case ↔ camelCase equivalence.
+	 */
+	private static columnsMatch(queryCol: string, schemaCol: string): boolean {
+		if (queryCol === schemaCol) return true;
+		// Compare snake_case forms: camelCase schema name vs snake_case query name
+		return (
+			ColumnValidator.toSnakeCase(queryCol) ===
+			ColumnValidator.toSnakeCase(schemaCol)
+		);
+	}
+
+	validateColumn(table: string, column: string): void {
+		if (column === '*') return;
+		const tableInfo = this.schema.getTable(table);
+		if (!tableInfo) return; // Unknown table → graceful degradation
+		const exists = tableInfo.columns.some((c) =>
+			ColumnValidator.columnsMatch(column, c.name),
+		);
+		if (!exists) {
+			const available = tableInfo.columns.map((c) => c.name).join(', ');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_UNKNOWN_COLUMN,
+				`Column '${column}' does not exist on table '${table}'. Available columns: ${available}`,
+			);
+		}
+	}
+
+	validateTable(table: string): void {
+		const tableInfo = this.schema.getTable(table);
+		if (!tableInfo) {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_UNKNOWN_TABLE,
+				`Table '${table}' does not exist in the schema`,
+			);
+		}
+	}
+
+	resolveRelationTarget(
+		sourceTable: string,
+		relationName: string,
+	): string | undefined {
+		const relations = this.schema.getRelationsFrom(sourceTable);
+		const rel = relations.find((r) => r.name === relationName);
+		return rel?.target;
+	}
 }
 
 /**
@@ -151,36 +241,157 @@ export interface NqlCompilerOptions {
 export class NqlCompiler {
 	private readonly pseudoColumnKeywords: Set<string>;
 	private readonly recursiveKeywords: Set<string>;
+	private readonly validator: ColumnValidator | null;
+	/** Current root table for column validation context. Set at start of compileQuery/compileMutation. */
+	private currentFromTable: string | undefined;
+	/** Target table of the current relation filter (for inner scope validation). */
+	private currentRelationTarget: string | undefined;
 
-	constructor(options?: NqlCompilerOptions) {
+	constructor(options?: NqlCompilerOptions, schema?: ColumnValidatorSchema) {
 		const keywords =
 			options?.pseudoColumnKeywords ?? DEFAULT_PSEUDO_COLUMN_KEYWORDS;
 		this.pseudoColumnKeywords = new Set(keywords.map((k) => k.toLowerCase()));
 		const recursive = options?.recursiveKeywords ?? DEFAULT_RECURSIVE_KEYWORDS;
 		this.recursiveKeywords = new Set(recursive.map((k) => k.toLowerCase()));
+		this.validator = schema ? new ColumnValidator(schema) : null;
+	}
+
+	/** Validate a column exists on the given table (no-op if no schema). */
+	private validateColumn(table: string, column: string): void {
+		this.validator?.validateColumn(table, column);
+	}
+
+	/** Validate a table exists in the schema (no-op if no schema). */
+	private validateTable(table: string): void {
+		this.validator?.validateTable(table);
+	}
+
+	/** Resolve the target table of a relation from sourceTable. Returns undefined if not found. */
+	private resolveRelationTarget(
+		sourceTable: string,
+		relationName: string,
+	): string | undefined {
+		return this.validator?.resolveRelationTarget(sourceTable, relationName);
+	}
+
+	/**
+	 * Validate a WHERE field reference against the current table context.
+	 * Handles dotted paths (relation.column) and aliased context (relation filters).
+	 */
+	private validateWhereField(
+		field: string,
+		aliasContext?: string,
+		originalExpr?: NqlExpression,
+	): void {
+		if (!this.validator) return;
+		if (aliasContext) {
+			// Inside relation filter — determine if field is inner or outer scope
+			const isInnerScope =
+				originalExpr?.type === 'path' &&
+				(originalExpr as NqlPathExpression).segments.length > 1 &&
+				(originalExpr as NqlPathExpression).segments[0] === aliasContext;
+			if (isInnerScope) {
+				// Inner scope → validate against relation's target table
+				if (this.currentRelationTarget && !field.includes('.')) {
+					this.validateColumn(this.currentRelationTarget, field);
+				}
+			} else {
+				// Outer scope (bare column or non-alias-prefixed) → validate against root table
+				if (this.currentFromTable && !field.includes('.')) {
+					this.validateColumn(this.currentFromTable, field);
+				}
+			}
+			return;
+		}
+		// If inside a relation filter (dot-syntax, no alias), validate against relation target
+		if (this.currentRelationTarget && !field.includes('.')) {
+			this.validateColumn(this.currentRelationTarget, field);
+			return;
+		}
+		// Simple column on root table
+		if (this.currentFromTable && !field.includes('.')) {
+			this.validateColumn(this.currentFromTable, field);
+		}
 	}
 
 	/**
 	 * Compile an NQL program to IntentAST
-	 * Returns the first statement's result (multiple statements = batch mode, TBD)
+	 *
+	 * Supports multi-statement programs with `| bind X` for CTE chaining:
+	 *   posts | select userId | bind subset
+	 *   insert into archive from subset
+	 *
+	 * Earlier statements with `| bind` are stored in a bindings map.
+	 * Later statements referencing a bound name (e.g. `insert from X`)
+	 * get the bound QueryIntent attached as `sourceQuery`.
 	 */
 	compile(program: NqlProgram): CompileResult {
 		if (program.statements.length === 0) {
 			return {};
 		}
 
-		const stmt = program.statements[0]!;
-
-		if (stmt.type === 'query') {
-			return { query: this.compileQuery(stmt) };
-		} else if (stmt.type === 'mutationPipeline') {
-			return this.compileMutationPipeline(stmt);
+		// Single statement fast path (no bind possible across statements)
+		if (program.statements.length === 1) {
+			return this.compileSingleStatement(program.statements[0]!);
 		}
 
+		// Multi-statement: build bindings map, resolve references
+		const bindings = new Map<string, QueryIntent>();
+		let lastResult: CompileResult = {};
+
+		for (const stmt of program.statements) {
+			lastResult = this.compileSingleStatement(stmt, bindings);
+
+			// Extract bind name from this statement's clauses
+			const bindName = this.extractBindName(stmt);
+			if (bindName && lastResult.query) {
+				bindings.set(bindName, lastResult.query);
+			}
+		}
+
+		// Return the last statement's result with accumulated bindings
+		if (bindings.size > 0) {
+			return { ...lastResult, bindings };
+		}
+		return lastResult;
+	}
+
+	/**
+	 * Compile a single statement, optionally resolving bound references.
+	 */
+	private compileSingleStatement(
+		stmt: NqlStatement,
+		bindings?: Map<string, QueryIntent>,
+	): CompileResult {
+		if (stmt.type === 'query') {
+			return { query: this.compileQuery(stmt) };
+		}
+		if (stmt.type === 'mutationPipeline') {
+			return this.compileMutationPipeline(stmt, bindings);
+		}
 		return {};
 	}
 
+	/**
+	 * Extract the bind name from a statement's clauses, if any.
+	 */
+	private extractBindName(stmt: NqlStatement): string | undefined {
+		if (stmt.type === 'query') {
+			for (const clause of stmt.clauses) {
+				if (clause.type === 'bind') return clause.name;
+			}
+		} else if (stmt.type === 'mutationPipeline') {
+			for (const clause of stmt.clauses) {
+				if (clause.type === 'bind') return clause.name;
+			}
+		}
+		return undefined;
+	}
+
 	private compileQuery(query: NqlQuery): QueryIntent {
+		this.currentFromTable = query.table;
+		this.validateTable(query.table);
+
 		// Track if we've seen groupBy (for WHERE vs HAVING)
 		let groupByIndex = -1;
 		for (let i = 0; i < query.clauses.length; i++) {
@@ -265,6 +476,9 @@ export class NqlCompiler {
 				}
 				case 'offset':
 					offset = (clause as NqlOffsetClause).count;
+					break;
+				case 'bind':
+					// Bind is a metadata marker — extracted by extractBindName(), no compilation needed
 					break;
 			}
 		}
@@ -388,6 +602,9 @@ export class NqlCompiler {
 				const expr = item.expression;
 				if (expr.type === 'path' && expr.segments.length === 1 && !item.alias) {
 					// Simple field reference
+					if (this.currentFromTable) {
+						this.validateColumn(this.currentFromTable, expr.segments[0]!);
+					}
 					simpleFields.push(expr.segments[0]!);
 				} else {
 					hasExpressions = true;
@@ -442,6 +659,10 @@ export class NqlCompiler {
 					field =
 						this.expressionToField(expr.args[0]!) ??
 						this.expressionToSql(expr.args[0]!);
+					// Validate aggregate field if it's a simple column
+					if (this.currentFromTable && field !== '*' && !field.includes('.')) {
+						this.validateColumn(this.currentFromTable, field);
+					}
 				}
 				// Collect extra arguments for multi-arg aggregates (e.g., string_agg)
 				// Use expressionToField first for column refs, fallback to expressionToValue
@@ -490,20 +711,35 @@ export class NqlCompiler {
 			// Convert partition by expressions to field names
 			const partitionBy =
 				windowExpr.partitionBy.length > 0
-					? windowExpr.partitionBy.map(
-							(e) => this.expressionToField(e) ?? this.expressionToSql(e),
-						)
+					? windowExpr.partitionBy.map((e) => {
+							const f = this.expressionToField(e) ?? this.expressionToSql(e);
+							if (
+								this.currentFromTable &&
+								!f.includes('.') &&
+								!f.includes('(')
+							) {
+								this.validateColumn(this.currentFromTable, f);
+							}
+							return f;
+						})
 					: undefined;
 
 			// Convert order by to WindowOrderBy format
 			const orderBy =
 				windowExpr.orderBy.length > 0
-					? windowExpr.orderBy.map((o) => ({
-							field:
+					? windowExpr.orderBy.map((o) => {
+							const f =
 								this.expressionToField(o.expression) ??
-								this.expressionToSql(o.expression),
-							direction: o.direction,
-						}))
+								this.expressionToSql(o.expression);
+							if (
+								this.currentFromTable &&
+								!f.includes('.') &&
+								!f.includes('(')
+							) {
+								this.validateColumn(this.currentFromTable, f);
+							}
+							return { field: f, direction: o.direction };
+						})
 					: undefined;
 
 			return {
@@ -530,6 +766,9 @@ export class NqlCompiler {
 		// Simple path expression (single segment, e.g., "name")
 		if (expr.type === 'path' && expr.segments.length === 1) {
 			const column = expr.segments[0]!;
+			if (this.currentFromTable) {
+				this.validateColumn(this.currentFromTable, column);
+			}
 			if (item.alias) {
 				return { kind: 'columnAlias', column, alias: item.alias };
 			}
@@ -581,6 +820,10 @@ export class NqlCompiler {
 					);
 				}
 				const targetColumn = segments[i]!;
+				// Pseudo-columns traverse the same table (self-referential)
+				if (this.currentFromTable) {
+					this.validateColumn(this.currentFromTable, targetColumn);
+				}
 				const defaultAlias = segments.map((s) => s.toLowerCase()).join('.');
 
 				if (traversals.length === 1) {
@@ -607,6 +850,16 @@ export class NqlCompiler {
 			// Regular relation path (e.g., customer.name)
 			const column = segments[segments.length - 1]!;
 			const relation = segments.slice(0, -1).join('.');
+			// Validate relation and column on target table
+			if (this.currentFromTable && this.validator) {
+				const targetTable = this.resolveRelationTarget(
+					this.currentFromTable,
+					segments[0]!,
+				);
+				if (targetTable) {
+					this.validateColumn(targetTable, column);
+				}
+			}
 			return {
 				kind: 'relationColumn',
 				relation,
@@ -680,7 +933,11 @@ export class NqlCompiler {
 	private compileGroupByClause(clause: NqlGroupByClause): readonly string[] {
 		return clause.expressions.map((expr) => {
 			if (expr.type === 'path') {
-				return expr.segments.join('.');
+				const field = expr.segments.join('.');
+				if (this.currentFromTable && !field.includes('.')) {
+					this.validateColumn(this.currentFromTable, field);
+				}
+				return field;
 			}
 			// For complex expressions, return string representation
 			return this.expressionToSql(expr);
@@ -697,6 +954,13 @@ export class NqlCompiler {
 		// Try to get field from path expression
 		const field = this.expressionToField(item.expression);
 		if (field) {
+			if (
+				this.currentFromTable &&
+				!field.includes('.') &&
+				!field.includes('(')
+			) {
+				this.validateColumn(this.currentFromTable, field);
+			}
 			return { field, direction: item.direction };
 		}
 
@@ -705,7 +969,11 @@ export class NqlCompiler {
 		return { field: sqlExpr, direction: item.direction };
 	}
 
-	private compileExpression(expr: NqlExpression): WhereIntent {
+	private compileExpression(
+		expr: NqlExpression,
+		aliasContext?: string,
+		outerAliases?: string[],
+	): WhereIntent {
 		switch (expr.type) {
 			case 'binary': {
 				const binary = expr as NqlBinaryExpression;
@@ -713,8 +981,8 @@ export class NqlCompiler {
 					return {
 						kind: 'and',
 						conditions: [
-							this.compileExpression(binary.left),
-							this.compileExpression(binary.right),
+							this.compileExpression(binary.left, aliasContext, outerAliases),
+							this.compileExpression(binary.right, aliasContext, outerAliases),
 						],
 					};
 				}
@@ -722,8 +990,8 @@ export class NqlCompiler {
 					return {
 						kind: 'or',
 						conditions: [
-							this.compileExpression(binary.left),
-							this.compileExpression(binary.right),
+							this.compileExpression(binary.left, aliasContext, outerAliases),
+							this.compileExpression(binary.right, aliasContext, outerAliases),
 						],
 					};
 				}
@@ -738,7 +1006,11 @@ export class NqlCompiler {
 				if (unary.operator === 'not') {
 					return {
 						kind: 'not',
-						condition: this.compileExpression(unary.operand),
+						condition: this.compileExpression(
+							unary.operand,
+							aliasContext,
+							outerAliases,
+						),
 					};
 				}
 				throw new Error(`Unsupported unary operator: ${unary.operator}`);
@@ -746,14 +1018,20 @@ export class NqlCompiler {
 
 			case 'comparison': {
 				const comp = expr as NqlComparisonExpression;
-				const field = this.expressionToField(comp.left);
+				const field = this.expressionToField(comp.left, aliasContext);
 				if (!field) {
 					throw new Error('Left side of comparison must be a field reference');
 				}
+				// Validate WHERE column on current table context
+				this.validateWhereField(field, aliasContext, comp.left);
 
 				// Handle LIKE specially
 				if (comp.operator === 'like') {
-					const pattern = this.expressionToValue(comp.right);
+					const pattern = this.resolveFilterValue(
+						comp.right,
+						aliasContext,
+						outerAliases,
+					);
 					return {
 						kind: 'like',
 						field,
@@ -762,7 +1040,11 @@ export class NqlCompiler {
 				}
 
 				const operator = this.mapComparisonOperator(comp.operator);
-				const value = this.expressionToValue(comp.right);
+				const value = this.resolveFilterValue(
+					comp.right,
+					aliasContext,
+					outerAliases,
+				);
 
 				return {
 					kind: 'comparison',
@@ -774,12 +1056,13 @@ export class NqlCompiler {
 
 			case 'rangeOp': {
 				const rangeExpr = expr as NqlRangeOpExpression;
-				const field = this.expressionToField(rangeExpr.left);
+				const field = this.expressionToField(rangeExpr.left, aliasContext);
 				if (!field) {
 					throw new Error(
 						'Left side of range operator must be a field reference',
 					);
 				}
+				this.validateWhereField(field, aliasContext, rangeExpr.left);
 				// Handle both range literals and scalar values
 				let rangeValue: string | unknown;
 				// Type assertion needed: NqlRangeOpExpression now has optional 'scalar' field
@@ -791,7 +1074,11 @@ export class NqlCompiler {
 					rangeValue = this.expressionToRangeValue(rangeWithScalar.range);
 				} else if (rangeWithScalar.scalar) {
 					// Scalar value for "contains" operator (e.g., contains 25)
-					rangeValue = this.expressionToValue(rangeWithScalar.scalar);
+					rangeValue = this.resolveFilterValue(
+						rangeWithScalar.scalar,
+						aliasContext,
+						outerAliases,
+					);
 				} else {
 					throw new Error(
 						'Range operator requires either a range literal or scalar value',
@@ -807,46 +1094,23 @@ export class NqlCompiler {
 
 			case 'in': {
 				const inExpr = expr as NqlInExpression;
-				const field = this.expressionToField(inExpr.expression);
+				const field = this.expressionToField(inExpr.expression, aliasContext);
 				if (!field) {
 					throw new Error('IN expression must reference a field');
 				}
+				this.validateWhereField(field, aliasContext, inExpr.expression);
 
 				let values: unknown[];
 				if (Array.isArray(inExpr.values)) {
-					values = inExpr.values.map((v) => this.expressionToValue(v));
+					values = inExpr.values.map((v) =>
+						this.resolveFilterValue(v, aliasContext, outerAliases),
+					);
 				} else if (
 					'type' in inExpr.values &&
 					inExpr.values.type === 'subquery'
 				) {
-					// Compile inner subquery to ScalarSubqueryIntent
-					const innerQuery = this.compileQuery(inExpr.values.query);
-					let selectField = '*';
-					if (
-						innerQuery.select?.type === 'fields' &&
-						innerQuery.select.fields[0]
-					) {
-						selectField = innerQuery.select.fields[0];
-					} else if (
-						innerQuery.select?.type === 'expressions' &&
-						innerQuery.select.columns[0]
-					) {
-						const col = innerQuery.select.columns[0];
-						selectField =
-							col.kind === 'column'
-								? col.column
-								: col.kind === 'columnAlias'
-									? (col as { kind: 'columnAlias'; column: string }).column
-									: '*';
-					}
-
-					const subquery: ScalarSubqueryIntent = {
-						from: innerQuery.from,
-						select: selectField,
-						...(innerQuery.where && { where: innerQuery.where }),
-						...(innerQuery.limit !== undefined && { limit: innerQuery.limit }),
-						...(innerQuery.orderBy && { orderBy: innerQuery.orderBy }),
-					};
+					// Subquery is a full QueryIntent — contextual validation at adapter level
+					const subquery = this.compileQuery(inExpr.values.query);
 
 					const result: WhereInIntent = {
 						kind: 'in',
@@ -889,28 +1153,38 @@ export class NqlCompiler {
 
 			case 'between': {
 				const between = expr as NqlBetweenExpression;
-				const field = this.expressionToField(between.expression);
+				const field = this.expressionToField(between.expression, aliasContext);
 				if (!field) {
 					throw new Error('BETWEEN expression must reference a field');
 				}
+				this.validateWhereField(field, aliasContext, between.expression);
 
 				return {
 					kind: 'range',
 					field,
 					operator: 'between',
 					value: {
-						lower: this.expressionToValue(between.low),
-						upper: this.expressionToValue(between.high),
+						lower: this.resolveFilterValue(
+							between.low,
+							aliasContext,
+							outerAliases,
+						),
+						upper: this.resolveFilterValue(
+							between.high,
+							aliasContext,
+							outerAliases,
+						),
 					},
 				};
 			}
 
 			case 'isNull': {
 				const isNull = expr as NqlIsNullExpression;
-				const field = this.expressionToField(isNull.expression);
+				const field = this.expressionToField(isNull.expression, aliasContext);
 				if (!field) {
 					throw new Error('IS NULL expression must reference a field');
 				}
+				this.validateWhereField(field, aliasContext, isNull.expression);
 
 				return {
 					kind: 'null',
@@ -935,10 +1209,28 @@ export class NqlCompiler {
 			case 'relationFilter': {
 				// SPEC-002: Cross-table relation filters
 				const relFilter = expr as NqlRelationFilterExpression;
+				// Build alias stack: current aliasContext (if any) becomes an outer alias for nested filters
+				const nestedOuterAliases = aliasContext
+					? [...(outerAliases ?? []), aliasContext]
+					: (outerAliases ?? []);
+				// Resolve relation target for inner scope validation (first segment of relation path)
+				const prevRelationTarget = this.currentRelationTarget;
+				if (this.currentFromTable && this.validator && relFilter.relation[0]) {
+					this.currentRelationTarget = this.resolveRelationTarget(
+						this.currentFromTable,
+						relFilter.relation[0],
+					);
+				}
+				const where = this.compileExpression(
+					relFilter.condition,
+					relFilter.alias,
+					nestedOuterAliases,
+				);
+				this.currentRelationTarget = prevRelationTarget;
 				return {
 					kind: 'relationFilter',
 					relation: relFilter.relation,
-					where: this.compileExpression(relFilter.condition),
+					where,
 					mode: relFilter.mode,
 					...(relFilter.alias !== undefined && { alias: relFilter.alias }),
 				};
@@ -951,8 +1243,12 @@ export class NqlCompiler {
 
 	private compileMutationPipeline(
 		pipeline: NqlMutationPipeline,
+		bindings?: Map<string, QueryIntent>,
 	): CompileResult {
-		const mutation = this.compileMutation(pipeline.mutation);
+		// Set table context for mutation column validation
+		this.currentFromTable = pipeline.mutation.table;
+
+		const mutation = this.compileMutation(pipeline.mutation, bindings);
 
 		// Extract RETURNING from select clauses
 		let returning: readonly string[] | undefined;
@@ -973,25 +1269,30 @@ export class NqlCompiler {
 	}
 
 	private compileMutation(
-		mutation: NqlInsert | NqlInsertFrom | NqlUpdate | NqlDelete | NqlUpsert,
+		mutation: NqlMutation,
+		bindings?: Map<string, QueryIntent>,
 	): MutationIntent {
 		switch (mutation.type) {
 			case 'insert':
 				return this.compileInsert(mutation);
 			case 'insert_from':
-				return this.compileInsertFrom(mutation);
+				return this.compileInsertFrom(mutation, bindings);
 			case 'update':
 				return this.compileUpdate(mutation);
 			case 'delete':
 				return this.compileDelete(mutation);
 			case 'upsert':
 				return this.compileUpsert(mutation);
+			case 'upsert_from':
+				return this.compileUpsertFrom(mutation, bindings);
 		}
 	}
 
 	private compileInsert(insert: NqlInsert): InsertIntent {
+		this.validateTable(insert.table);
 		const values: Record<string, unknown> = {};
 		for (const assignment of insert.assignments) {
+			this.validateColumn(insert.table, assignment.column);
 			values[assignment.column] = this.expressionToValue(assignment.value);
 		}
 
@@ -1002,11 +1303,20 @@ export class NqlCompiler {
 		};
 	}
 
-	private compileInsertFrom(insertFrom: NqlInsertFrom): InsertFromIntent {
+	private compileInsertFrom(
+		insertFrom: NqlInsertFrom,
+		bindings?: Map<string, QueryIntent>,
+	): InsertFromIntent {
+		// Check if source references a bound query
+		const sourceQuery = bindings?.get(insertFrom.source);
+		// WHERE applies to the source table, not target
+		this.currentFromTable = insertFrom.source;
+
 		return {
 			type: 'insert_from',
 			table: insertFrom.table,
 			source: insertFrom.source,
+			...(sourceQuery !== undefined && { sourceQuery }),
 			...(insertFrom.columns !== undefined && { columns: insertFrom.columns }),
 			...(insertFrom.where !== undefined && {
 				where: this.compileExpression(insertFrom.where),
@@ -1016,8 +1326,11 @@ export class NqlCompiler {
 	}
 
 	private compileUpdate(update: NqlUpdate): UpdateIntent {
+		this.currentFromTable = update.table;
+		this.validateTable(update.table);
 		const set: Record<string, unknown> = {};
 		for (const assignment of update.assignments) {
+			this.validateColumn(update.table, assignment.column);
 			set[assignment.column] = this.expressionToValue(assignment.value);
 		}
 
@@ -1039,6 +1352,8 @@ export class NqlCompiler {
 	}
 
 	private compileDelete(del: NqlDelete): DeleteIntent {
+		this.currentFromTable = del.table;
+		this.validateTable(del.table);
 		if (del.where) {
 			return {
 				type: 'delete',
@@ -1055,9 +1370,16 @@ export class NqlCompiler {
 	}
 
 	private compileUpsert(upsert: NqlUpsert): UpsertIntent {
+		this.validateTable(upsert.table);
 		const values: Record<string, unknown> = {};
 		for (const assignment of upsert.assignments) {
+			this.validateColumn(upsert.table, assignment.column);
 			values[assignment.column] = this.expressionToValue(assignment.value);
+		}
+
+		// Also validate conflict columns
+		for (const col of upsert.conflictColumns) {
+			this.validateColumn(upsert.table, col);
 		}
 
 		return {
@@ -1066,6 +1388,30 @@ export class NqlCompiler {
 			values: [values],
 			onConflict: { columns: upsert.conflictColumns },
 			action: { type: 'doUpdate', set: values },
+		};
+	}
+
+	private compileUpsertFrom(
+		upsertFrom: NqlUpsertFrom,
+		bindings?: Map<string, QueryIntent>,
+	): UpsertFromIntent {
+		const sourceQuery = bindings?.get(upsertFrom.source);
+		// WHERE applies to the source table, not target
+		this.currentFromTable = upsertFrom.source;
+
+		return {
+			type: 'upsert_from',
+			table: upsertFrom.table,
+			source: upsertFrom.source,
+			conflictColumns: upsertFrom.conflictColumns,
+			...(sourceQuery !== undefined && { sourceQuery }),
+			...(upsertFrom.columns !== undefined && {
+				columns: upsertFrom.columns,
+			}),
+			...(upsertFrom.where !== undefined && {
+				where: this.compileExpression(upsertFrom.where),
+			}),
+			...(upsertFrom.limit !== undefined && { limit: upsertFrom.limit }),
 		};
 	}
 
@@ -1080,6 +1426,9 @@ export class NqlCompiler {
 			if (item.type === 'expression') {
 				const field = this.expressionToField(item.expression);
 				if (field) {
+					if (this.currentFromTable && !field.includes('.')) {
+						this.validateColumn(this.currentFromTable, field);
+					}
 					columns.push(item.alias ?? field);
 				}
 			}
@@ -1088,9 +1437,17 @@ export class NqlCompiler {
 		return columns;
 	}
 
-	private expressionToField(expr: NqlExpression): string | null {
+	private expressionToField(
+		expr: NqlExpression,
+		aliasContext?: string,
+	): string | null {
 		if (expr.type === 'path') {
-			return expr.segments.join('.');
+			const segments = expr.segments;
+			// Strip relation filter alias prefix (e.g., "o.status" → "status" when alias is "o")
+			if (aliasContext && segments.length > 1 && segments[0] === aliasContext) {
+				return segments.slice(1).join('.');
+			}
+			return segments.join('.');
 		}
 		return null;
 	}
@@ -1198,6 +1555,74 @@ export class NqlCompiler {
 			default:
 				throw new Error(`Cannot convert ${expr.type} to value`);
 		}
+	}
+
+	/**
+	 * Resolve a filter RHS value, producing FieldRef when inside an aliased relation filter.
+	 * Outside alias context, delegates to expressionToValue().
+	 * Inside alias context, path expressions produce typed FieldRef objects:
+	 *   - alias-prefixed path → inner scope (same relation)
+	 *   - outer alias-prefixed path → outer scope (parent relation)
+	 *   - bare column path → outer scope (root table)
+	 */
+	private resolveFilterValue(
+		expr: NqlExpression,
+		aliasContext?: string,
+		outerAliases?: string[],
+	): unknown {
+		// No alias context → standard value resolution (literals, $ref, etc.)
+		if (!aliasContext) return this.expressionToValue(expr);
+
+		// Only path expressions can produce FieldRef
+		if (expr.type === 'path') {
+			const segments = (expr as NqlPathExpression).segments;
+			// alias-prefixed: e.g., "r.col" when aliasContext = "r"
+			if (segments.length > 1 && segments[0] === aliasContext) {
+				const column = segments.slice(1).join('.');
+				// Validate inner scope column against relation's target table
+				if (this.currentRelationTarget && !column.includes('.')) {
+					this.validateColumn(this.currentRelationTarget, column);
+				}
+				return {
+					kind: 'fieldRef',
+					column,
+					scope: 'inner',
+				} satisfies FieldRef;
+			}
+			// outer alias-prefixed: e.g., "x.col" when outerAliases includes "x"
+			const firstSegment = segments[0];
+			if (
+				outerAliases &&
+				firstSegment &&
+				segments.length > 1 &&
+				outerAliases.includes(firstSegment)
+			) {
+				const column = segments.slice(1).join('.');
+				// Outer alias → validate against root table
+				if (this.currentFromTable && !column.includes('.')) {
+					this.validateColumn(this.currentFromTable, column);
+				}
+				return {
+					kind: 'fieldRef',
+					column,
+					scope: 'outer',
+					alias: firstSegment,
+				} satisfies FieldRef;
+			}
+			// bare column in aliased context → outer scope reference to root table
+			const bareColumn = segments.join('.');
+			if (this.currentFromTable && !bareColumn.includes('.')) {
+				this.validateColumn(this.currentFromTable, bareColumn);
+			}
+			return {
+				kind: 'fieldRef',
+				column: bareColumn,
+				scope: 'outer',
+			} satisfies FieldRef;
+		}
+
+		// Non-path expressions (literals, functions, etc.) → standard value
+		return this.expressionToValue(expr);
 	}
 
 	/**
@@ -1393,6 +1818,9 @@ function applyIncludeLimit(
 /**
  * Create a compiler instance
  */
-export function createCompiler(options?: NqlCompilerOptions): NqlCompiler {
-	return new NqlCompiler(options);
+export function createCompiler(
+	options?: NqlCompilerOptions,
+	schema?: ColumnValidatorSchema,
+): NqlCompiler {
+	return new NqlCompiler(options, schema);
 }

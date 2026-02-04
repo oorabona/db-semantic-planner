@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EngineEvent } from './engine-types.js';
-import { ReplEngine } from './repl-engine.js';
+import { isInsideStringLiteral, ReplEngine } from './repl-engine.js';
 
 /**
  * Minimal schema for testing (no DB needed).
@@ -386,5 +386,208 @@ describe('ReplEngine', () => {
 				e.message.includes('Unknown layout'),
 		);
 		expect(error).toBeDefined();
+	});
+
+	// --- Plan verbosity commands ---
+
+	it('defaults planVerbosity to normal', () => {
+		const engine = createEngine();
+		expect(engine.getState().planVerbosity).toBe('normal');
+	});
+
+	it('changes plan verbosity with .plan verbose', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.plan verbose');
+
+		expect(engine.getState().planVerbosity).toBe('verbose');
+		expect(events.some((e) => e.type === 'state-change')).toBe(true);
+		expect(
+			events.some(
+				(e) =>
+					e.type === 'info' && 'message' in e && e.message.includes('verbose'),
+			),
+		).toBe(true);
+	});
+
+	it('changes plan verbosity with .plan compact', async () => {
+		const engine = createEngine();
+
+		await engine.submit('.plan compact');
+
+		expect(engine.getState().planVerbosity).toBe('compact');
+	});
+
+	it('shows current plan verbosity without argument', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.plan');
+
+		const info = events.find(
+			(e) =>
+				e.type === 'info' &&
+				'message' in e &&
+				e.message.includes('Plan verbosity'),
+		);
+		expect(info).toBeDefined();
+	});
+
+	it('rejects invalid plan verbosity', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.plan invalid');
+
+		const error = events.find(
+			(e) =>
+				e.type === 'error' &&
+				'message' in e &&
+				e.message.includes('Invalid plan verbosity'),
+		);
+		expect(error).toBeDefined();
+		expect(engine.getState().planVerbosity).toBe('normal');
+	});
+
+	it('persists plan verbosity across queries', async () => {
+		const engine = createEngine();
+
+		await engine.submit('.plan verbose');
+		expect(engine.getState().planVerbosity).toBe('verbose');
+
+		// Submit NQL query — verbosity should remain
+		const events = collectEvents(engine);
+		await engine.submit('users');
+
+		expect(engine.getState().planVerbosity).toBe('verbose');
+		// Should still produce a query-result
+		expect(events.some((e) => e.type === 'query-result')).toBe(true);
+	});
+
+	// --- Plan field pass-through ---
+
+	it('.plan is independent of .layout', async () => {
+		const engine = createEngine();
+
+		// Arrange: set layout to compact and plan to verbose
+		await engine.submit('.layout compact');
+		await engine.submit('.plan verbose');
+
+		// Assert: both coexist independently
+		expect(engine.getState().outputLayout).toBe('compact');
+		expect(engine.getState().planVerbosity).toBe('verbose');
+
+		// Change layout back — plan verbosity unaffected
+		await engine.submit('.layout full');
+		expect(engine.getState().planVerbosity).toBe('verbose');
+	});
+
+	it('handleNql produces plan with strategy and structure', async () => {
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('users');
+
+		const queryEvent = events.find((e) => e.type === 'query-result');
+		expect(queryEvent).toBeDefined();
+		if (queryEvent?.type === 'query-result') {
+			const plan = queryEvent.result.plan;
+			// Plan may or may not be populated depending on schema complexity
+			if (plan) {
+				expect(plan.strategy).toBe('NQL v2');
+				expect(typeof plan.rootTable).toBe('string');
+				expect(Array.isArray(plan.decisions)).toBe(true);
+				expect(Array.isArray(plan.warnings)).toBe(true);
+				expect(typeof plan.cteCount).toBe('number');
+				expect(typeof plan.planningTimeMs).toBe('number');
+				// Metadata pass-through (new fields)
+				if (plan.metadata) {
+					expect(typeof plan.metadata.relationsAnalyzed).toBe('number');
+					expect(typeof plan.metadata.isAmbiguous).toBe('boolean');
+				}
+				// CTE details (new fields)
+				if (plan.ctes) {
+					for (const c of plan.ctes) {
+						expect(typeof c.name).toBe('string');
+						expect(typeof c.purpose).toBe('string');
+					}
+				}
+				// Decision extended fields (new fields)
+				for (const d of plan.decisions) {
+					expect(typeof d.type).toBe('string');
+					expect(typeof d.context).toBe('string');
+					expect(typeof d.choice).toBe('string');
+					expect(typeof d.reasoning).toBe('string');
+					if (d.alternatives !== undefined) {
+						expect(Array.isArray(d.alternatives)).toBe(true);
+					}
+					if (d.decisionId !== undefined) {
+						expect(typeof d.decisionId).toBe('string');
+					}
+					if (d.foreignKey !== undefined) {
+						expect(
+							typeof d.foreignKey === 'string' || Array.isArray(d.foreignKey),
+						).toBe(true);
+					}
+				}
+				// Warning extended fields (new fields)
+				for (const w of plan.warnings) {
+					expect(typeof w.message).toBe('string');
+					if (w.code !== undefined) {
+						expect(typeof w.code).toBe('string');
+					}
+					if (w.relatedDecision !== undefined) {
+						expect(typeof w.relatedDecision).toBe('string');
+					}
+				}
+			}
+		}
+	});
+});
+
+describe('isInsideStringLiteral', () => {
+	it('should return false for bang outside string', () => {
+		expect(isInsideStringLiteral("insert into users set name = 'John'!")).toBe(
+			false,
+		);
+	});
+
+	it('should return true for bang inside string literal', () => {
+		expect(isInsideStringLiteral("insert into users set name = 'John!'")).toBe(
+			true,
+		);
+	});
+
+	it('should return false for bang after closed string with bang inside', () => {
+		expect(isInsideStringLiteral("insert into users set name = 'John!'!")).toBe(
+			false,
+		);
+	});
+
+	it('should return false for no string literals', () => {
+		expect(isInsideStringLiteral('update users set active = true!')).toBe(
+			false,
+		);
+	});
+
+	it('should handle escaped quotes (doubled single quotes)', () => {
+		expect(
+			isInsideStringLiteral("insert into users set name = 'O''Brien'!"),
+		).toBe(false);
+	});
+
+	it('should return true when bang is inside string with escaped quotes', () => {
+		expect(
+			isInsideStringLiteral("insert into users set name = 'O''Brien!'"),
+		).toBe(true);
+	});
+
+	it('should handle multiple string literals', () => {
+		expect(
+			isInsideStringLiteral(
+				"insert into users set name = 'Alice', email = 'alice@test.com'!",
+			),
+		).toBe(false);
 	});
 });

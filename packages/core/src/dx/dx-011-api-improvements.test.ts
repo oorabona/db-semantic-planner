@@ -10,8 +10,8 @@
 import { describe, expect, it } from 'vitest';
 import type { WhereIntent } from '../intent-ast.js';
 import { and, createOrm, eq, or } from './index.js';
-import { createMockAdapter } from './test-utils.js';
 import { ref, schema } from './schema.js';
+import { createMockAdapter } from './test-utils.js';
 
 // Schema with relations for testing
 const testSchema = schema({
@@ -199,7 +199,11 @@ describe('DX-011: API Improvements', () => {
 		describe('Scenario: Explicit relation name avoids ambiguity', () => {
 			it('should use relation directly without ambiguity check', () => {
 				// Even though users→posts has 2 relations, 'authoredPosts' is unambiguous as relation name
-				const ormStrict = createOrm({ adapter: createMockAdapter(), schema: testSchema, strictMode: true });
+				const ormStrict = createOrm({
+					adapter: createMockAdapter(),
+					schema: testSchema,
+					strictMode: true,
+				});
 				const query = ormStrict.select('users').include('authoredPosts');
 
 				// Should NOT throw AmbiguousRelationError because 'authoredPosts' is exact relation name

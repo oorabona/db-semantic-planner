@@ -22,6 +22,14 @@ import type {
 export type OutputLayout = 'compact' | 'results' | 'sql' | 'full';
 
 /**
+ * Plan verbosity controls detail level within plan output.
+ * - compact: one-liner summary
+ * - normal: decisions + warnings (default, unchanged behavior)
+ * - verbose: all fields including alternatives, FK, CTE details, metadata
+ */
+export type PlanVerbosity = 'compact' | 'normal' | 'verbose';
+
+/**
  * Panel view types for the anchored inspection panel below input.
  */
 export type PanelView = 'sql' | 'plan' | 'results' | 'params' | 'dump';
@@ -59,6 +67,7 @@ export interface EngineState {
 	dbCasing?: 'snake_case' | 'camelCase' | 'preserve';
 	outputMode: 'json' | 'table' | 'csv';
 	outputLayout: OutputLayout;
+	planVerbosity: PlanVerbosity;
 }
 
 /**
