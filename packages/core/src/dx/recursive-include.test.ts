@@ -11,8 +11,8 @@
 import { describe, expect, it } from 'vitest';
 import { InvalidOperationError } from './errors.js';
 import { createOrm } from './orm.js';
-import { createMockAdapter } from './test-utils.js';
 import { ref, schema } from './schema.js';
+import { createMockAdapter } from './test-utils.js';
 import type { RecursiveIncludeOptions } from './types.js';
 
 // ============================================================================

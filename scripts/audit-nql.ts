@@ -320,7 +320,7 @@ async function main() {
 							}),
 						);
 						entry.warnings = (
-							(planReport as Record<string, unknown>)
+							(planReport as unknown as Record<string, unknown>)
 								.warnings as Array<{
 								message?: string;
 							}> | null

@@ -62,7 +62,6 @@ describe('E2E: NQL v2.1 Strategy Behavior', () => {
 			const orm = createOrm({
 				model: blogModel,
 				adapter,
-				dialectCapabilities,
 			});
 
 			const query = orm.withSchema(SCHEMA).select('authors').include('posts');
@@ -81,7 +80,6 @@ describe('E2E: NQL v2.1 Strategy Behavior', () => {
 			const orm = createOrm({
 				model: blogModel,
 				adapter,
-				dialectCapabilities,
 			});
 
 			const query = orm.withSchema(SCHEMA).select('authors').include('posts');
@@ -103,7 +101,6 @@ describe('E2E: NQL v2.1 Strategy Behavior', () => {
 			const orm = createOrm({
 				model: blogModel,
 				adapter,
-				dialectCapabilities,
 			});
 
 			const query = orm.withSchema(SCHEMA).select('authors').include('posts');
@@ -135,7 +132,6 @@ describe('E2E: NQL v2.1 Strategy Behavior', () => {
 			const orm = createOrm({
 				model: blogModel,
 				adapter,
-				dialectCapabilities,
 			});
 
 			const query = orm.withSchema(SCHEMA).select('authors').include('posts');
@@ -166,7 +162,6 @@ describe('E2E: NQL v2.1 Strategy Behavior', () => {
 			const orm = createOrm({
 				model: blogModel,
 				adapter,
-				dialectCapabilities,
 			});
 
 			const query = orm.withSchema(SCHEMA).select('authors').include('posts');
@@ -188,7 +183,6 @@ describe('E2E: NQL v2.1 Strategy Behavior', () => {
 			const orm = createOrm({
 				model: blogModel,
 				adapter,
-				dialectCapabilities,
 			});
 
 			const query = orm.withSchema(SCHEMA).select('authors').include('posts');

@@ -37,21 +37,20 @@ import {
 	updateStmt,
 	windowFuncCall,
 } from './ast-helpers.js';
-import {
-	type ConditionContext,
-	type ConditionState,
-	compileCondition,
-	compileValue,
-} from './compiler-conditions.js';
 import { deparseQuoted } from './deparse.js';
 import { registerAllExpressionHandlers } from './handlers/expression/index.js';
 import { registerAllIncludeHandlers } from './handlers/include/index.js';
-import { getExpressionHandler, getIncludeHandler } from './handlers/index.js';
+import {
+	createWhereDispatcher,
+	getExpressionHandler,
+	getIncludeHandler,
+} from './handlers/index.js';
 import type {
 	CompilerContext as HandlerCompilerContext,
 	CompilerState as HandlerCompilerState,
 	Decision as HandlerDecision,
 } from './handlers/types.js';
+import { compileValue } from './handlers/where/utils.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 import { createParamRef } from './param-ref.js';
@@ -108,6 +107,7 @@ function mapToHandlerDecision(
 		relationType: pd.relationType,
 		foreignKey: pd.foreignKey,
 		parentKey: pd.parentKey,
+		dataType: (pd as unknown as { dataType?: string }).dataType,
 		traversal: pd.traversal,
 		pkColumn: pd.pkColumn,
 		fkColumn: pd.fkColumn,
@@ -172,18 +172,11 @@ export interface PlanDecision {
 	readonly intentPath?: string;
 	// Filter/include strategy choice from planner ('join' | 'exists' | 'json_agg')
 	readonly choice?: string;
-	// IN (subquery) reference — carries the full QueryIntent shape
+	// IN (subquery) reference
 	readonly subquery?: {
-		readonly type?: string;
 		readonly from: string;
-		readonly select?: unknown;
-		readonly where?: PlanDecision | unknown;
-		readonly orderBy?: readonly { field: string; direction?: string }[];
-		readonly groupBy?: readonly string[];
-		readonly having?: unknown;
-		readonly distinct?: boolean;
-		readonly limit?: number;
-		readonly offset?: number;
+		readonly select: string;
+		readonly where?: PlanDecision;
 	};
 	// Expression type discriminator (e.g. 'case' for CASE WHEN)
 	readonly expressionType?: string;
@@ -252,7 +245,13 @@ export class PlanCompiler {
 	private readonly defaultPk: string;
 	private readonly deriveFk: FkColumnDerivation;
 	/** Mutable state shared with extracted condition/value compilation functions */
-	private state: ConditionState = { parameters: [], paramIndex: 0 };
+	private state: HandlerCompilerState = {
+		parameters: [],
+		paramIndex: 0,
+		ctes: new Map(),
+		aliases: new Map(),
+		joins: [],
+	};
 	/** Track root table for EXISTS FK correlation */
 	private currentRootTable = '';
 	/** Pending JOINs registered by filter/include strategies (flushed in compileSelect) */
@@ -274,13 +273,94 @@ export class PlanCompiler {
 		this.deriveFk = options.deriveFkColumnName ?? defaultFkDerivation;
 	}
 
-	/** Build immutable context for condition compilation functions */
-	private condCtx(): ConditionContext {
+	/** Build immutable context for handler-based WHERE compilation */
+	private handlerCtx(): HandlerCompilerContext {
 		return {
 			naming: this.naming,
-			schema: this.schema,
 			rootTable: this.currentRootTable,
-		};
+			maxRecursiveDepth: 100,
+			defaultPkColumnName: this.defaultPk,
+			deriveFkColumnName: this.deriveFk,
+			...(this.schema != null && { schema: this.schema }),
+		} as HandlerCompilerContext;
+	}
+
+	/**
+	 * Dispatch a PlanDecision through the unified WHERE handler system.
+	 * Bridges PlanCompiler's state to handler types, calls dispatcher, syncs back.
+	 */
+	private dispatchWhere(
+		decision: PlanDecision,
+		ctxOverrides?: Partial<HandlerCompilerContext>,
+	): Node {
+		const dispatcher = createWhereDispatcher();
+		const mapped = mapToHandlerDecision(
+			decision,
+			this.currentRootTable,
+			this.defaultPk,
+			this.deriveFk,
+		);
+		// Handle IN/NOT IN subquery: remap to inSubquery/notInSubquery
+		// Subquery can be in `decision.subquery` (direct PlanDecision) or
+		// `decision.value` (from plan-decision-extractor which puts it in value)
+		const sub =
+			decision.subquery ??
+			(decision.value &&
+			typeof decision.value === 'object' &&
+			'from' in (decision.value as object)
+				? (decision.value as PlanDecision['subquery'])
+				: undefined);
+		if (sub && (decision.operator === 'in' || decision.operator === 'notIn')) {
+			const op = decision.operator === 'notIn' ? 'notInSubquery' : 'inSubquery';
+			// Extract selectColumn: may be a string or a SelectIntent with fields
+			const rawSelect = sub.select as unknown;
+			const selectColumn =
+				typeof rawSelect === 'string'
+					? rawSelect
+					: rawSelect &&
+							typeof rawSelect === 'object' &&
+							'fields' in (rawSelect as object)
+						? ((rawSelect as { fields?: readonly string[] }).fields?.[0] ?? '*')
+						: '*';
+			const subConditions = sub.where
+				? [
+						mapToHandlerDecision(
+							sub.where,
+							sub.from,
+							this.defaultPk,
+							this.deriveFk,
+						),
+					]
+				: [];
+			const rawLimit = (sub as unknown as { limit?: number }).limit;
+			const rawOrderBy = (
+				sub as unknown as {
+					orderBy?: readonly { field: string; direction?: string }[];
+				}
+			).orderBy;
+			const subDecision = {
+				...mapped,
+				operator: op,
+				targetTable: sub.from,
+				selectColumn,
+				conditions: subConditions,
+				...(rawLimit != null && { limit: rawLimit }),
+				...(rawOrderBy && {
+					orderBy: rawOrderBy.map((o) => ({
+						column: o.field,
+						direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
+					})),
+				}),
+			} as HandlerDecision;
+			const ctx = ctxOverrides
+				? { ...this.handlerCtx(), ...ctxOverrides }
+				: this.handlerCtx();
+			return dispatcher(subDecision, ctx, this.state);
+		}
+		const ctx = ctxOverrides
+			? { ...this.handlerCtx(), ...ctxOverrides }
+			: this.handlerCtx();
+		return dispatcher(mapped, ctx, this.state);
 	}
 
 	/**
@@ -332,7 +412,7 @@ export class PlanCompiler {
 			const condNodes = (decision.conditions as PlanDecision[]).map((c) => {
 				// Rewrite condition table references to use the inner alias
 				const rewritten = { ...c, table: innerAlias };
-				return compileCondition(rewritten, this.condCtx(), this.state);
+				return this.dispatchWhere(rewritten);
 			});
 			const combined =
 				condNodes.length === 1 ? condNodes[0]! : andExpr(...condNodes);
@@ -341,15 +421,10 @@ export class PlanCompiler {
 			)._compiledFilterWhere = combined;
 		}
 
-		// Bridge compiler state -> handler context + state
+		// Bridge compiler context for include handler (may need different currentAlias)
 		const ctx = {
-			naming: this.naming,
-			rootTable: plan.rootTable,
+			...this.handlerCtx(),
 			currentAlias: plan.rootTable,
-			maxRecursiveDepth: 100,
-			defaultPkColumnName: this.defaultPk,
-			deriveFkColumnName: this.deriveFk,
-			...(this.schema != null && { schema: this.schema }),
 		} as HandlerCompilerContext;
 
 		const handlerState: HandlerCompilerState = {
@@ -383,7 +458,13 @@ export class PlanCompiler {
 	 * Compile a simplified plan report to SQL
 	 */
 	compile(plan: SimplifiedPlanReport): CompiledResult {
-		this.state = { parameters: [], paramIndex: 0 };
+		this.state = {
+			parameters: [],
+			paramIndex: 0,
+			ctes: new Map(),
+			aliases: new Map(),
+			joins: [],
+		};
 		this.currentRootTable = plan.rootTable;
 		this.pendingJoins = [];
 		this.rawJoins = [];
@@ -644,8 +725,11 @@ export class PlanCompiler {
 						this.registerJoinFilter(decision);
 						// Add user conditions (on joined table) to WHERE
 						if (decision.conditions && decision.conditions.length > 0) {
+							const joinTarget = decision.targetTable!;
 							const condNodes = decision.conditions.map((c) =>
-								compileCondition(c as PlanDecision, this.condCtx(), this.state),
+								this.dispatchWhere(c as PlanDecision, {
+									currentAlias: joinTarget,
+								}),
 							);
 							const combined =
 								condNodes.length === 1 ? condNodes[0]! : andExpr(...condNodes);
@@ -653,11 +737,7 @@ export class PlanCompiler {
 						}
 						break;
 					}
-					const whereExpr = compileCondition(
-						decision,
-						this.condCtx(),
-						this.state,
-					);
+					const whereExpr = this.dispatchWhere(decision);
 					where = where ? andExpr(where, whereExpr) : whereExpr;
 					break;
 				}
@@ -665,7 +745,7 @@ export class PlanCompiler {
 				case 'whereAnd':
 					if (decision.conditions) {
 						const andConditions = decision.conditions.map((c) =>
-							compileCondition(c, this.condCtx(), this.state),
+							this.dispatchWhere(c),
 						);
 						const combined =
 							andConditions.length === 1
@@ -678,7 +758,7 @@ export class PlanCompiler {
 				case 'whereOr':
 					if (decision.conditions) {
 						const orConditions = decision.conditions.map((c) =>
-							compileCondition(c, this.condCtx(), this.state),
+							this.dispatchWhere(c),
 						);
 						const combined =
 							orConditions.length === 1
@@ -691,7 +771,7 @@ export class PlanCompiler {
 				case 'whereNot':
 					if (decision.conditions) {
 						const notConditions = decision.conditions.map((c) =>
-							compileCondition(c, this.condCtx(), this.state),
+							this.dispatchWhere(c),
 						);
 						const innerExpr =
 							notConditions.length === 1
@@ -744,7 +824,7 @@ export class PlanCompiler {
 					break;
 
 				case 'having':
-					having = compileCondition(decision, this.condCtx(), this.state);
+					having = this.dispatchWhere(decision);
 					break;
 
 				case 'limit':
@@ -856,7 +936,7 @@ export class PlanCompiler {
 		}
 
 		const args: Node[] = conditions.map((cond) => {
-			const whenExpr = compileCondition(cond.when, this.condCtx(), this.state);
+			const whenExpr = this.dispatchWhere(cond.when);
 
 			const paramNumber = ++this.state.paramIndex;
 			this.state.parameters.push(cond.then);
@@ -953,11 +1033,7 @@ export class PlanCompiler {
 					}
 				}
 			} else if (decision.type === 'where') {
-				const whereExpr = compileCondition(
-					decision,
-					this.condCtx(),
-					this.state,
-				);
+				const whereExpr = this.dispatchWhere(decision);
 				where = where ? andExpr(where, whereExpr) : whereExpr;
 			} else if (decision.type === 'returning') {
 				if (decision.column === '*') {
@@ -999,11 +1075,7 @@ export class PlanCompiler {
 
 		for (const decision of plan.decisions) {
 			if (decision.type === 'where') {
-				const whereExpr = compileCondition(
-					decision,
-					this.condCtx(),
-					this.state,
-				);
+				const whereExpr = this.dispatchWhere(decision);
 				where = where ? andExpr(where, whereExpr) : whereExpr;
 			} else if (decision.type === 'returning') {
 				if (decision.column === '*') {
@@ -1037,7 +1109,7 @@ export class PlanCompiler {
 	}
 
 	// --------------------------------------------------------------------------
-	// Helpers (condition compilation extracted to compiler-conditions.ts)
+	// Helpers (condition compilation via handler dispatcher)
 	// --------------------------------------------------------------------------
 
 	/**

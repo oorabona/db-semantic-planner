@@ -20,7 +20,7 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { COMPARISON_OPERATORS } from '../types.js';
-import { buildColumnRef, buildParamRef } from './utils.js';
+import { buildColumnRef, compileValueOrFieldRef } from './utils.js';
 
 /**
  * Comparison operators handler
@@ -49,7 +49,7 @@ export const comparisonHandler: WhereHandler = {
 		}
 
 		const left = buildColumnRef(column, ctx);
-		const right = buildParamRef(value, state);
+		const right = compileValueOrFieldRef(value, ctx, state);
 
 		switch (operator) {
 			case COMPARISON_OPERATORS.EQ:

@@ -242,7 +242,7 @@ intent.type: query
 intent.table: rooms
 intent.with: roomBookings
 intent.hasWhere: true
-sql.equals: SELECT rooms.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch4_scheduling.room_bookings AS __t__ WHERE __t__.room_id = rooms.id), '[]'::json) AS "roomBookings_json" FROM ch4_scheduling.rooms WHERE EXISTS (SELECT 1 FROM ch4_scheduling.room_bookings WHERE room_bookings.room_id = rooms.id AND room_bookings.booking_period && $1)
+sql.equals: SELECT rooms.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch4_scheduling.room_bookings AS __t__ WHERE __t__.room_id = rooms.id), '[]'::json) AS "roomBookings_json" FROM ch4_scheduling.rooms WHERE EXISTS (SELECT 1 FROM ch4_scheduling.room_bookings AS room_bookings_exists_0 WHERE rooms.id = room_bookings_exists_0.room_id AND room_bookings_exists_0.booking_period && $1)
 db.success: true
 
 # ─────────────────────────────────────────
@@ -268,7 +268,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 18
 success: true
-sql.equals: UPDATE ch4_scheduling.rooms SET capacity = $1 WHERE ch4_scheduling.rooms.name = $2
+sql.equals: UPDATE ch4_scheduling.rooms SET capacity = $1 WHERE rooms.name = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -276,7 +276,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 19
 success: true
-sql.equals: UPDATE ch4_scheduling.events SET title = $1 WHERE ch4_scheduling.events.id = $2
+sql.equals: UPDATE ch4_scheduling.events SET title = $1 WHERE events.id = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -285,7 +285,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 20
 success: true
-sql.equals: DELETE FROM ch4_scheduling.room_bookings WHERE ch4_scheduling.room_bookings.id = $1
+sql.equals: DELETE FROM ch4_scheduling.room_bookings WHERE room_bookings.id = $1
 db.rows.equals: 0
 
 # ─────────────────────────────────────────

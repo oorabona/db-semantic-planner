@@ -603,4 +603,105 @@ describe('Bug regressions', () => {
 			expect(sql).not.toContain('"*"');
 		});
 	});
+
+	// -------------------------------------------------------------------------
+	// FieldRef: column-to-column comparisons in aliased relation filters
+	// -------------------------------------------------------------------------
+	describe('FieldRef compilation (alias resolution)', () => {
+		// Self-referential schema: categories with parent → children
+		const categorySchema = schema({
+			categories: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string',
+				sortOrder: { type: 'integer', nullable: true },
+				parentId: ref('categories', {
+					onDelete: 'SET NULL',
+					nullable: true,
+					roles: { parent: 'parent', children: 'children' },
+				}),
+			},
+		});
+
+		function categoryNqlToSQL(nql: string): string {
+			const compiled = compile(nql, categorySchema.model);
+			if (!compiled.success || !compiled.ast?.query) {
+				throw new Error(
+					`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+				);
+			}
+			const planReport = plan(compiled.ast.query, categorySchema.model, {
+				dialectCapabilities: POSTGRESQL_CAPABILITIES,
+			});
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const result = adapter.compile(planReport, {
+				model: categorySchema.model,
+			});
+			return normalizeSQL(result.sql);
+		}
+
+		it('self-ref: aliased column vs outer column compiles to column-to-column comparison', () => {
+			// d.sortOrder → inner column ref; bare sortOrder → outer column ref
+			const sql = categoryNqlToSQL(
+				'categories | where some(children as d, d.sortOrder > sortOrder)',
+			);
+			// Column-to-column: both sides are column refs, no $1 parameter
+			expect(sql).toEqual(
+				'select categories.* from categories where exists' +
+					' (select 1 from categories as categories_exists_0' +
+					' where categories.id = categories_exists_0."parentid"' +
+					' and categories_exists_0."sortorder" > categories."sortorder")',
+			);
+		});
+
+		it('regular literal value is still parameterized', () => {
+			const sql = categoryNqlToSQL(
+				'categories | where some(children as d, d.sortOrder > 10)',
+			);
+			// Literal 10 → $1 parameter, not a column ref
+			expect(sql).toEqual(
+				'select categories.* from categories where exists' +
+					' (select 1 from categories as categories_exists_0' +
+					' where categories.id = categories_exists_0."parentid"' +
+					' and categories_exists_0."sortorder" > $1)',
+			);
+		});
+
+		it('self-ref equality: d.name = name compiles to column-to-column', () => {
+			const sql = categoryNqlToSQL(
+				'categories | where some(children as d, d.name = name)',
+			);
+			expect(sql).toEqual(
+				'select categories.* from categories where exists' +
+					' (select 1 from categories as categories_exists_0' +
+					' where categories.id = categories_exists_0."parentid"' +
+					' and categories_exists_0.name = categories.name)',
+			);
+		});
+
+		it('non-self-ref: aliased column vs literal in regular relation', () => {
+			// Using the testSchema (departments → employees)
+			const sql = nqlToSQL(
+				'departments | where some(employees as e, e.salary > 50000)',
+			);
+			expect(sql).toEqual(
+				'select departments.* from departments where exists' +
+					' (select 1 from employees as employees_exists_0' +
+					' where departments.id = employees_exists_0."departmentid"' +
+					' and employees_exists_0.salary > $1)',
+			);
+		});
+
+		it('aliased filter with multiple conditions (AND)', () => {
+			const sql = categoryNqlToSQL(
+				'categories | where some(children as d, d.sortOrder > sortOrder and d.name != name)',
+			);
+			expect(sql).toEqual(
+				'select categories.* from categories where exists' +
+					' (select 1 from categories as categories_exists_0' +
+					' where categories.id = categories_exists_0."parentid"' +
+					' and (categories_exists_0."sortorder" > categories."sortorder"' +
+					' and categories_exists_0.name <> categories.name))',
+			);
+		});
+	});
 });

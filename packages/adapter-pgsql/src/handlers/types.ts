@@ -33,6 +33,8 @@ export interface CompilerContext {
 	readonly defaultPkColumnName?: string;
 	/** Convention for deriving FK column names: (tableName, pkName) => fkColumnName */
 	readonly deriveFkColumnName?: FkColumnDerivation;
+	/** Alias of the outer (parent) query — used for FieldRef scope:'outer' resolution in EXISTS subqueries */
+	readonly outerAlias?: string;
 }
 
 // ============================================================================
@@ -83,6 +85,7 @@ export interface Decision {
 	readonly operator?: string;
 	readonly value?: unknown;
 	readonly paramIndex?: number;
+	readonly dataType?: string;
 	readonly direction?: 'ASC' | 'DESC';
 	readonly nulls?: 'FIRST' | 'LAST';
 	readonly joinType?: 'inner' | 'left';

@@ -4,6 +4,7 @@
  * Tests NQL AST → IntentAST transformation
  */
 
+import type { FieldRef } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import type {
 	DeleteIntent,
@@ -1514,6 +1515,125 @@ describe('NQL Compiler - SPEC-002: Cross-Table Relation Filters', () => {
 				relation: ['posts'],
 				mode: 'some',
 			});
+		});
+	});
+
+	describe('FieldRef in aliased relation filters', () => {
+		it('produces inner FieldRef for alias-prefixed RHS', () => {
+			// some(rel as r, r.col > r.otherCol) → RHS is inner scope FieldRef
+			const nql = 'users | where some(posts as p, p.views > p.likes)';
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereRelationFilterIntent;
+
+			expect(where).toMatchObject({
+				kind: 'relationFilter',
+				relation: ['posts'],
+				alias: 'p',
+				mode: 'some',
+			});
+
+			const inner = where.where as WhereComparisonIntent;
+			expect(inner.kind).toBe('comparison');
+			expect(inner.field).toBe('views');
+			expect(inner.value).toEqual({
+				kind: 'fieldRef',
+				column: 'likes',
+				scope: 'inner',
+			} satisfies FieldRef);
+		});
+
+		it('produces outer FieldRef for bare column RHS in aliased context', () => {
+			// some(rel as r, r.col > bareCol) → RHS is outer scope FieldRef
+			const nql = 'users | where some(posts as p, p.authorId > id)';
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereRelationFilterIntent;
+			const inner = where.where as WhereComparisonIntent;
+
+			expect(inner.field).toBe('authorId');
+			expect(inner.value).toEqual({
+				kind: 'fieldRef',
+				column: 'id',
+				scope: 'outer',
+			} satisfies FieldRef);
+		});
+
+		it('produces outer FieldRef with alias for nested scope reference', () => {
+			// some(a as x, some(b as y, y.f > x.f)) → x.f resolves to outer scope via stack
+			const nql =
+				'departments | where some(teams as t, some(members as m, m.teamId > t.id))';
+			const result = compileNql(nql);
+			const outerFilter = result.query!.where as WhereRelationFilterIntent;
+
+			expect(outerFilter).toMatchObject({
+				kind: 'relationFilter',
+				relation: ['teams'],
+				alias: 't',
+			});
+
+			const innerFilter = outerFilter.where as WhereRelationFilterIntent;
+			expect(innerFilter).toMatchObject({
+				kind: 'relationFilter',
+				relation: ['members'],
+				alias: 'm',
+			});
+
+			const comparison = innerFilter.where as WhereComparisonIntent;
+			expect(comparison.field).toBe('teamId');
+			expect(comparison.value).toEqual({
+				kind: 'fieldRef',
+				column: 'id',
+				scope: 'outer',
+				alias: 't',
+			} satisfies FieldRef);
+		});
+
+		it('preserves literal values in non-aliased relation filters', () => {
+			// some(orders).status = 'shipped' → literal value, not FieldRef
+			const nql = "users | where some(orders).status = 'shipped'";
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereRelationFilterIntent;
+			const inner = where.where as WhereComparisonIntent;
+
+			expect(inner.field).toBe('status');
+			expect(inner.value).toBe('shipped');
+		});
+
+		it('preserves literal values in aliased filter with literal RHS', () => {
+			// some(rel as r, r.status = 'active') → literal 'active', not FieldRef
+			const nql = "users | where some(posts as p, p.status = 'active')";
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereRelationFilterIntent;
+			const inner = where.where as WhereComparisonIntent;
+
+			expect(inner.field).toBe('status');
+			expect(inner.value).toBe('active');
+		});
+
+		it('preserves numeric values in aliased filter with numeric RHS', () => {
+			const nql = 'users | where some(posts as p, p.views > 100)';
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereRelationFilterIntent;
+			const inner = where.where as WhereComparisonIntent;
+
+			expect(inner.field).toBe('views');
+			expect(inner.value).toBe(100);
+		});
+
+		it('produces FieldRef for LHS field stripping alias and RHS bare column', () => {
+			// Verify LHS alias stripping still works alongside RHS FieldRef
+			const nql = 'users | where some(posts as p, p.userId > createdAt)';
+			const result = compileNql(nql);
+			const where = result.query!.where as WhereRelationFilterIntent;
+			const inner = where.where as WhereComparisonIntent;
+
+			// LHS: alias stripped → 'userId'
+			expect(inner.field).toBe('userId');
+			// RHS: bare column in aliased context → outer scope
+			expect(inner.value).toEqual({
+				kind: 'fieldRef',
+				column: 'createdAt',
+				scope: 'outer',
+			} satisfies FieldRef);
 		});
 	});
 });

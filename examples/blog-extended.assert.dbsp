@@ -290,7 +290,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 22
 success: true
-sql.equals: UPDATE ch3_blog_extended.posts SET featured = $1 WHERE ch3_blog_extended.posts.id = $2
+sql.equals: UPDATE ch3_blog_extended.posts SET featured = $1 WHERE posts.id = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -298,7 +298,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 23
 success: true
-sql.equals: UPDATE ch3_blog_extended.posts SET view_count = $1 WHERE ch3_blog_extended.posts.id = $2
+sql.equals: UPDATE ch3_blog_extended.posts SET view_count = $1 WHERE posts.id = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -308,7 +308,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 24
 success: true
-sql.equals: DELETE FROM ch3_blog_extended.posts WHERE ch3_blog_extended.posts.published = $1
+sql.equals: DELETE FROM ch3_blog_extended.posts WHERE posts.published = $1
 db.success: false
 db.output.contains: foreign key constraint
 
