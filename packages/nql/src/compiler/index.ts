@@ -13,6 +13,7 @@ import type {
 	ComparisonOperator,
 	DeleteIntent,
 	ExpressionIntent,
+	FieldRef,
 	IncludeIntent,
 	InsertFromIntent,
 	InsertIntent,
@@ -706,6 +707,7 @@ export class NqlCompiler {
 	private compileExpression(
 		expr: NqlExpression,
 		aliasContext?: string,
+		outerAliases?: string[],
 	): WhereIntent {
 		switch (expr.type) {
 			case 'binary': {
@@ -714,8 +716,8 @@ export class NqlCompiler {
 					return {
 						kind: 'and',
 						conditions: [
-							this.compileExpression(binary.left, aliasContext),
-							this.compileExpression(binary.right, aliasContext),
+							this.compileExpression(binary.left, aliasContext, outerAliases),
+							this.compileExpression(binary.right, aliasContext, outerAliases),
 						],
 					};
 				}
@@ -723,8 +725,8 @@ export class NqlCompiler {
 					return {
 						kind: 'or',
 						conditions: [
-							this.compileExpression(binary.left, aliasContext),
-							this.compileExpression(binary.right, aliasContext),
+							this.compileExpression(binary.left, aliasContext, outerAliases),
+							this.compileExpression(binary.right, aliasContext, outerAliases),
 						],
 					};
 				}
@@ -739,7 +741,11 @@ export class NqlCompiler {
 				if (unary.operator === 'not') {
 					return {
 						kind: 'not',
-						condition: this.compileExpression(unary.operand, aliasContext),
+						condition: this.compileExpression(
+							unary.operand,
+							aliasContext,
+							outerAliases,
+						),
 					};
 				}
 				throw new Error(`Unsupported unary operator: ${unary.operator}`);
@@ -754,7 +760,11 @@ export class NqlCompiler {
 
 				// Handle LIKE specially
 				if (comp.operator === 'like') {
-					const pattern = this.expressionToValue(comp.right);
+					const pattern = this.resolveFilterValue(
+						comp.right,
+						aliasContext,
+						outerAliases,
+					);
 					return {
 						kind: 'like',
 						field,
@@ -763,7 +773,11 @@ export class NqlCompiler {
 				}
 
 				const operator = this.mapComparisonOperator(comp.operator);
-				const value = this.expressionToValue(comp.right);
+				const value = this.resolveFilterValue(
+					comp.right,
+					aliasContext,
+					outerAliases,
+				);
 
 				return {
 					kind: 'comparison',
@@ -792,7 +806,11 @@ export class NqlCompiler {
 					rangeValue = this.expressionToRangeValue(rangeWithScalar.range);
 				} else if (rangeWithScalar.scalar) {
 					// Scalar value for "contains" operator (e.g., contains 25)
-					rangeValue = this.expressionToValue(rangeWithScalar.scalar);
+					rangeValue = this.resolveFilterValue(
+						rangeWithScalar.scalar,
+						aliasContext,
+						outerAliases,
+					);
 				} else {
 					throw new Error(
 						'Range operator requires either a range literal or scalar value',
@@ -815,7 +833,9 @@ export class NqlCompiler {
 
 				let values: unknown[];
 				if (Array.isArray(inExpr.values)) {
-					values = inExpr.values.map((v) => this.expressionToValue(v));
+					values = inExpr.values.map((v) =>
+						this.resolveFilterValue(v, aliasContext, outerAliases),
+					);
 				} else if (
 					'type' in inExpr.values &&
 					inExpr.values.type === 'subquery'
@@ -874,8 +894,16 @@ export class NqlCompiler {
 					field,
 					operator: 'between',
 					value: {
-						lower: this.expressionToValue(between.low),
-						upper: this.expressionToValue(between.high),
+						lower: this.resolveFilterValue(
+							between.low,
+							aliasContext,
+							outerAliases,
+						),
+						upper: this.resolveFilterValue(
+							between.high,
+							aliasContext,
+							outerAliases,
+						),
 					},
 				};
 			}
@@ -910,10 +938,18 @@ export class NqlCompiler {
 			case 'relationFilter': {
 				// SPEC-002: Cross-table relation filters
 				const relFilter = expr as NqlRelationFilterExpression;
+				// Build alias stack: current aliasContext (if any) becomes an outer alias for nested filters
+				const nestedOuterAliases = aliasContext
+					? [...(outerAliases ?? []), aliasContext]
+					: (outerAliases ?? []);
 				return {
 					kind: 'relationFilter',
 					relation: relFilter.relation,
-					where: this.compileExpression(relFilter.condition, relFilter.alias),
+					where: this.compileExpression(
+						relFilter.condition,
+						relFilter.alias,
+						nestedOuterAliases,
+					),
 					mode: relFilter.mode,
 					...(relFilter.alias !== undefined && { alias: relFilter.alias }),
 				};
@@ -1070,11 +1106,7 @@ export class NqlCompiler {
 		if (expr.type === 'path') {
 			const segments = expr.segments;
 			// Strip relation filter alias prefix (e.g., "o.status" → "status" when alias is "o")
-			if (
-				aliasContext &&
-				segments.length > 1 &&
-				segments[0] === aliasContext
-			) {
+			if (aliasContext && segments.length > 1 && segments[0] === aliasContext) {
 				return segments.slice(1).join('.');
 			}
 			return segments.join('.');
@@ -1185,6 +1217,60 @@ export class NqlCompiler {
 			default:
 				throw new Error(`Cannot convert ${expr.type} to value`);
 		}
+	}
+
+	/**
+	 * Resolve a filter RHS value, producing FieldRef when inside an aliased relation filter.
+	 * Outside alias context, delegates to expressionToValue().
+	 * Inside alias context, path expressions produce typed FieldRef objects:
+	 *   - alias-prefixed path → inner scope (same relation)
+	 *   - outer alias-prefixed path → outer scope (parent relation)
+	 *   - bare column path → outer scope (root table)
+	 */
+	private resolveFilterValue(
+		expr: NqlExpression,
+		aliasContext?: string,
+		outerAliases?: string[],
+	): unknown {
+		// No alias context → standard value resolution (literals, $ref, etc.)
+		if (!aliasContext) return this.expressionToValue(expr);
+
+		// Only path expressions can produce FieldRef
+		if (expr.type === 'path') {
+			const segments = (expr as NqlPathExpression).segments;
+			// alias-prefixed: e.g., "r.col" when aliasContext = "r"
+			if (segments.length > 1 && segments[0] === aliasContext) {
+				return {
+					kind: 'fieldRef',
+					column: segments.slice(1).join('.'),
+					scope: 'inner',
+				} satisfies FieldRef;
+			}
+			// outer alias-prefixed: e.g., "x.col" when outerAliases includes "x"
+			const firstSegment = segments[0];
+			if (
+				outerAliases &&
+				firstSegment &&
+				segments.length > 1 &&
+				outerAliases.includes(firstSegment)
+			) {
+				return {
+					kind: 'fieldRef',
+					column: segments.slice(1).join('.'),
+					scope: 'outer',
+					alias: firstSegment,
+				} satisfies FieldRef;
+			}
+			// bare column in aliased context → outer scope reference to root table
+			return {
+				kind: 'fieldRef',
+				column: segments.join('.'),
+				scope: 'outer',
+			} satisfies FieldRef;
+		}
+
+		// Non-path expressions (literals, functions, etc.) → standard value
+		return this.expressionToValue(expr);
 	}
 
 	/**

@@ -14,7 +14,12 @@ import {
 	defaultFkDerivation,
 	requiredColumn,
 } from '../../assert-field.js';
-import { columnTarget, fkCorrelation, rangeVar, starTarget } from '../../ast-helpers.js';
+import {
+	columnTarget,
+	fkCorrelation,
+	rangeVar,
+	starTarget,
+} from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,

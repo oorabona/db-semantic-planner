@@ -13,20 +13,8 @@
  */
 
 import type { PlanReport } from '@dbsp/core';
-import {
-	createOrm,
-	eq,
-	exists,
-	POSTGRESQL_CAPABILITIES,
-	ref,
-	schema,
-} from '@dbsp/core';
+import { createOrm, eq, exists, ref, schema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-
-/**
- * PostgreSQL dialect capabilities for auto strategy selection.
- */
-const dialectCapabilities = POSTGRESQL_CAPABILITIES;
 
 import {
 	blogModel,
@@ -72,7 +60,6 @@ describe('E2E-004: Strategy Matrix', () => {
 				const orm = createOrm({
 					model: blogModel,
 					adapter,
-					dialectCapabilities,
 				});
 
 				// When: posts include author (belongsTo)
@@ -98,7 +85,6 @@ describe('E2E-004: Strategy Matrix', () => {
 				const orm = createOrm({
 					model: blogModel,
 					adapter,
-					dialectCapabilities,
 				});
 
 				const posts = (await orm
@@ -138,7 +124,6 @@ describe('E2E-004: Strategy Matrix', () => {
 				const orm = createOrm({
 					schema: schemaWithProfile,
 					adapter,
-					dialectCapabilities,
 				});
 
 				// When: users include profile (hasOne via user_profiles relation)
@@ -168,7 +153,6 @@ describe('E2E-004: Strategy Matrix', () => {
 				const orm = createOrm({
 					model: blogModel,
 					adapter,
-					dialectCapabilities,
 				});
 
 				// When: authors include posts (hasMany) with PostgreSQL
@@ -195,7 +179,6 @@ describe('E2E-004: Strategy Matrix', () => {
 				const orm = createOrm({
 					model: blogModel,
 					adapter,
-					dialectCapabilities,
 				});
 
 				// DEBUG: check dump first
@@ -252,7 +235,6 @@ describe('E2E-004: Strategy Matrix', () => {
 				const orm = createOrm({
 					model: blogModel,
 					adapter,
-					dialectCapabilities,
 				});
 
 				// When: posts include comments (hasMany)
@@ -305,7 +287,6 @@ describe('E2E-004: Strategy Matrix', () => {
 				const orm = createOrm({
 					model,
 					adapter,
-					dialectCapabilities,
 				});
 
 				// ARCH-005: relation name is user_posts (auto-inferred: localRelation 'user' + '_' + sourceTable 'posts')
@@ -359,7 +340,6 @@ describe('E2E-004: Strategy Matrix', () => {
 				const orm = createOrm({
 					model: blogModel,
 					adapter,
-					dialectCapabilities,
 				});
 
 				// When: filter authors by having published posts
@@ -381,7 +361,6 @@ describe('E2E-004: Strategy Matrix', () => {
 				const orm = createOrm({
 					model: blogModel,
 					adapter,
-					dialectCapabilities,
 				});
 
 				const authorsWithPublished = (await orm
@@ -417,7 +396,6 @@ describe('E2E-004: Strategy Matrix', () => {
 				const orm = createOrm({
 					model: blogModel,
 					adapter,
-					dialectCapabilities,
 				});
 
 				const query = orm
@@ -437,7 +415,6 @@ describe('E2E-004: Strategy Matrix', () => {
 				const orm = createOrm({
 					model: blogModel,
 					adapter,
-					dialectCapabilities,
 				});
 
 				const postsWithComments = (await orm
@@ -463,7 +440,6 @@ describe('E2E-004: Strategy Matrix', () => {
 				const orm = createOrm({
 					model: blogModel,
 					adapter,
-					dialectCapabilities,
 				});
 
 				// When: limit 1 author with posts
@@ -487,7 +463,6 @@ describe('E2E-004: Strategy Matrix', () => {
 				const orm = createOrm({
 					model: blogModel,
 					adapter,
-					dialectCapabilities,
 				});
 
 				// Get first author

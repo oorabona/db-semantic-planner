@@ -483,6 +483,39 @@ export type OffsetWindowFunction = 'lag' | 'lead';
  * Comparison filter: field op value
  * Examples: eq, neq, gt, gte, lt, lte
  */
+
+/**
+ * Typed field reference for cross-table column comparisons in relation filters.
+ *
+ * When using aliased relation filters like `some(orders as o, o.total > minOrder)`,
+ * the RHS `minOrder` is a reference to the parent table's column, not a literal value.
+ * FieldRef captures this distinction so the adapter can compile it as a column reference
+ * instead of a parameterized value.
+ *
+ * @example
+ * // some(rel as r, r.col > bareCol) → value: { kind: 'fieldRef', column: 'bareCol', scope: 'outer' }
+ * // some(rel as r, r.col > r.otherCol) → value: { kind: 'fieldRef', column: 'otherCol', scope: 'inner' }
+ * // some(a as x, some(b as y, y.f > x.g)) → value: { kind: 'fieldRef', column: 'g', scope: 'outer', alias: 'x' }
+ */
+export interface FieldRef {
+	readonly kind: 'fieldRef';
+	readonly column: string;
+	readonly scope: 'inner' | 'outer';
+	/** Named alias for outer scope (when referencing a specific outer alias in nested filters) */
+	readonly alias?: string;
+}
+
+/**
+ * Type guard for FieldRef values
+ */
+export function isFieldRef(value: unknown): value is FieldRef {
+	return (
+		value !== null &&
+		typeof value === 'object' &&
+		(value as Record<string, unknown>).kind === 'fieldRef'
+	);
+}
+
 export interface WhereComparisonIntent {
 	readonly kind: 'comparison';
 	readonly field: string;

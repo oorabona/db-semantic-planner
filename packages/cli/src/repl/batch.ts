@@ -58,10 +58,10 @@ export interface BatchExecutionResult {
 	assertionSummary?: AssertionSummary | undefined;
 }
 
-// Re-export processDotCommand from dot-commands (used by batch.test.ts)
-export { processDotCommand } from './dot-commands.js';
 // Re-export BatchState type for dot-commands compatibility
 export type { BatchState } from './dot-commands.js';
+// Re-export processDotCommand from dot-commands (used by batch.test.ts)
+export { processDotCommand } from './dot-commands.js';
 
 /**
  * Map collected engine events to a BatchResult for a single query.

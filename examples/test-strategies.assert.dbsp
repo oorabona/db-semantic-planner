@@ -260,7 +260,7 @@ db.success: true
 # ─────────────────────────────────────────
 --- query: 24
 success: true
-sql.equals: UPDATE test_strategies.tasks SET completed = $1 WHERE test_strategies.tasks.id = $2
+sql.equals: UPDATE test_strategies.tasks SET completed = $1 WHERE tasks.id = $2
 params.equals: [true,1]
 db.success: true
 
@@ -270,7 +270,7 @@ db.success: true
 # ─────────────────────────────────────────
 --- query: 25
 success: true
-sql.equals: DELETE FROM test_strategies.tasks WHERE test_strategies.tasks.completed = $1
+sql.equals: DELETE FROM test_strategies.tasks WHERE tasks.completed = $1
 params.equals: [true]
 db.success: true
 
@@ -301,7 +301,7 @@ db.rows.equals: 3
 # ─────────────────────────────────────────
 --- query: 28
 success: true
-sql.equals: SELECT departments.* FROM test_strategies.departments WHERE departments.id = ANY (SELECT employees.department_id FROM test_strategies.employees WHERE employees.active = $1) AND EXISTS (SELECT 1 FROM test_strategies.employees WHERE employees.department_id = departments.id)
+sql.equals: SELECT departments.* FROM test_strategies.departments WHERE departments.id = ANY (SELECT employees_subq_0.department_id FROM test_strategies.employees AS employees_subq_0 WHERE employees_subq_0.active = $1) AND EXISTS (SELECT 1 FROM test_strategies.employees AS employees_exists_1 WHERE departments.id = employees_exists_1.department_id)
 params.equals: [true]
 
 # ─────────────────────────────────────────
@@ -309,7 +309,7 @@ params.equals: [true]
 # ─────────────────────────────────────────
 --- query: 29
 success: true
-sql.equals: SELECT departments.* FROM test_strategies.departments WHERE EXISTS (SELECT 1 FROM test_strategies.employees WHERE employees.department_id = departments.id AND employees.active = $1)
+sql.equals: SELECT departments.* FROM test_strategies.departments WHERE EXISTS (SELECT 1 FROM test_strategies.employees AS employees_exists_0 WHERE departments.id = employees_exists_0.department_id AND employees_exists_0.active = $1)
 params.equals: [true]
 
 # ─────────────────────────────────────────

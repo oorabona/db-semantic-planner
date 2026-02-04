@@ -452,6 +452,98 @@ describe('Semantic Planner', () => {
 	});
 
 	// ============================================================================
+	// Self-referential relation detection in filter-strategy decisions
+	// ============================================================================
+
+	describe('Self-ref detection in filter-strategy decisions', () => {
+		const selfRefSchema = schema({
+			categories: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string',
+				parentId: ref('categories', {
+					as: 'parent',
+					inverse: 'children',
+					roles: { parent: 'parent', children: 'children' },
+				}),
+			},
+		}).model;
+
+		it('should set isSelfRef=true for self-referential relation filter', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'categories',
+				where: {
+					kind: 'relationFilter',
+					relation: ['children'],
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'name',
+						operator: 'eq',
+						value: 'Electronics',
+					},
+				},
+			};
+
+			const report = plan(intent, selfRefSchema);
+			const filterDecision = report.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+
+			expect(filterDecision).toBeDefined();
+			expect(filterDecision?.context.isSelfRef).toBe(true);
+			expect(filterDecision?.reasoning).toContain('[self-referential]');
+		});
+
+		it('should not set isSelfRef for non-self-referential relation filter', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'relationFilter',
+					relation: ['images'],
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'approved',
+						operator: 'eq',
+						value: true,
+					},
+				},
+			};
+
+			const report = plan(intent, q1Schema);
+			const filterDecision = report.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+
+			expect(filterDecision).toBeDefined();
+			expect(filterDecision?.context.isSelfRef).toBeUndefined();
+			expect(filterDecision?.reasoning).not.toContain('[self-referential]');
+		});
+
+		it('should preserve existing filter-strategy decisions for non-self-ref', () => {
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'products',
+				where: {
+					kind: 'exists',
+					relation: 'images',
+				},
+			};
+
+			const report = plan(intent, q1Schema);
+			const filterDecision = report.decisions.find(
+				(d) => d.type === 'filter-strategy',
+			);
+
+			expect(filterDecision).toBeDefined();
+			expect(filterDecision?.choice).toBe('exists');
+			expect(filterDecision?.context.isSelfRef).toBeUndefined();
+		});
+	});
+
+	// ============================================================================
 	// Q2: CTE Extraction Tests
 	// ============================================================================
 

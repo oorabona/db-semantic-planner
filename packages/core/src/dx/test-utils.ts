@@ -6,14 +6,10 @@
  * that need createOrm() with controllable dialect capabilities.
  */
 
-import type {
-	Adapter,
-	AdapterCapabilities,
-	DbCasing,
-} from '../adapter.js';
+import type { Adapter, AdapterCapabilities, DbCasing } from '../adapter.js';
 import {
-	POSTGRESQL_CAPABILITIES,
 	type DialectCapabilities,
+	POSTGRESQL_CAPABILITIES,
 } from '../dialects/index.js';
 
 // ============================================================================
@@ -55,11 +51,8 @@ export interface MockAdapterOptions {
  * The mock adapter's primary purpose is to provide `dialectCapabilities` and
  * `capabilities` for planner strategy selection in core tests.
  */
-export function createMockAdapter(
-	options?: MockAdapterOptions,
-): Adapter {
-	const dialectCaps =
-		options?.dialectCapabilities ?? POSTGRESQL_CAPABILITIES;
+export function createMockAdapter(options?: MockAdapterOptions): Adapter {
+	const dialectCaps = options?.dialectCapabilities ?? POSTGRESQL_CAPABILITIES;
 	const dbCasing = options?.dbCasing ?? 'preserve';
 
 	const notImplemented = () => {

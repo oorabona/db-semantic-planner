@@ -7,7 +7,7 @@
  */
 
 import type { Node, SelectStmt, SubLink, SubLinkType } from '@pgsql/types';
-import { columnRef, rangeVar } from '../../ast-helpers.js';
+import { columnRef, integerNode, rangeVar, sortBy } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -100,10 +100,11 @@ function buildScalarSubquery(
 			};
 		} else {
 			// Aggregate with column (e.g., AVG(price))
+			// Alias is query-scoped, not schema-qualified
 			const aggArg = columnRef(
 				selectColumn,
 				targetAlias,
-				ctx.schema,
+				undefined,
 				ctx.naming,
 			);
 			targetVal = {
@@ -114,15 +115,17 @@ function buildScalarSubquery(
 			};
 		}
 	} else {
-		// SELECT column
-		targetVal = columnRef(selectColumn, targetAlias, ctx.schema, ctx.naming);
+		// SELECT column — alias is query-scoped, not schema-qualified
+		targetVal = columnRef(selectColumn, targetAlias, undefined, ctx.naming);
 	}
 
 	// Build WHERE clause if conditions exist
 	let whereClause: Node | undefined;
 	if (decision.conditions && decision.conditions.length > 0) {
+		// Strip schema — nested conditions reference the aliased table
+		const { schema: _schema, ...ctxWithoutSchema } = ctx;
 		const subCtx: CompilerContext = {
-			...ctx,
+			...ctxWithoutSchema,
 			rootTable: targetTable,
 			currentAlias: targetAlias,
 		};
@@ -147,6 +150,26 @@ function buildScalarSubquery(
 		fromClause: [rangeVar(targetTable, targetAlias, ctx.schema, ctx.naming)],
 		...(whereClause && { whereClause }),
 	};
+
+	// Add ORDER BY if present
+	if (decision.orderBy && decision.orderBy.length > 0) {
+		stmt.sortClause = decision.orderBy.map((o) =>
+			sortBy(
+				columnRef(o.column, targetAlias, undefined, ctx.naming),
+				o.direction ?? 'ASC',
+				'DEFAULT',
+			),
+		);
+	}
+
+	// Add LIMIT if present
+	if (decision.limit != null) {
+		const limitVal =
+			typeof decision.limit === 'number'
+				? decision.limit
+				: (decision.limit as { paramIndex: number }).paramIndex;
+		stmt.limitCount = integerNode(limitVal);
+	}
 
 	return { SelectStmt: stmt };
 }
@@ -182,7 +205,7 @@ export const scalarSubqueryHandler: WhereHandler = {
 		}
 
 		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
-		const leftOperand = columnRef(column, sourceAlias, ctx.schema, ctx.naming);
+		const leftOperand = columnRef(column, sourceAlias, undefined, ctx.naming);
 		const subquery = buildScalarSubquery(decision, ctx, state, dispatch);
 
 		return createScalarSubLink(subquery, operator, leftOperand);
@@ -210,7 +233,7 @@ export const inSubqueryHandler: WhereHandler = {
 		}
 
 		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
-		const leftOperand = columnRef(column, sourceAlias, ctx.schema, ctx.naming);
+		const leftOperand = columnRef(column, sourceAlias, undefined, ctx.naming);
 		const subquery = buildScalarSubquery(decision, ctx, state, dispatch);
 
 		const subLink: SubLink = {
@@ -245,7 +268,7 @@ export const notInSubqueryHandler: WhereHandler = {
 		}
 
 		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
-		const leftOperand = columnRef(column, sourceAlias, ctx.schema, ctx.naming);
+		const leftOperand = columnRef(column, sourceAlias, undefined, ctx.naming);
 		const subquery = buildScalarSubquery(decision, ctx, state, dispatch);
 
 		const subLink: SubLink = {

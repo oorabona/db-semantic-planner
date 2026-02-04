@@ -291,7 +291,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 16
 success: true
-sql.equals: SELECT categories.* FROM ch6_pimdam.categories WHERE EXISTS (SELECT 1 FROM ch6_pimdam.categories AS parent WHERE parent.id = categories.parent_id AND parent.name = $1)
+sql.equals: SELECT categories.* FROM ch6_pimdam.categories WHERE EXISTS (SELECT 1 FROM ch6_pimdam.categories AS categories_exists_0 WHERE categories.parent_id = categories_exists_0.id AND categories_exists_0.name = $1)
 params.equals: ["Electronics"]
 db.rows.equals: 3
 db.output:
@@ -306,7 +306,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 17
 success: true
-sql.equals: SELECT categories.* FROM ch6_pimdam.categories WHERE EXISTS (SELECT 1 FROM ch6_pimdam.categories AS parent WHERE parent.id = categories.parent_id AND parent.name = $1)
+sql.equals: SELECT categories.* FROM ch6_pimdam.categories WHERE EXISTS (SELECT 1 FROM ch6_pimdam.categories AS categories_exists_0 WHERE categories.parent_id = categories_exists_0.id AND categories_exists_0.name = $1)
 params.equals: ["Phones"]
 db.rows.equals: 2
 db.output:
@@ -320,7 +320,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 18
 success: true
-sql.equals: SELECT categories.* FROM ch6_pimdam.categories WHERE EXISTS (SELECT 1 FROM ch6_pimdam.categories AS parent WHERE parent.id = categories.parent_id AND parent.id = $1)
+sql.equals: SELECT categories.* FROM ch6_pimdam.categories WHERE EXISTS (SELECT 1 FROM ch6_pimdam.categories AS categories_exists_0 WHERE categories.parent_id = categories_exists_0.id AND categories_exists_0.id = $1)
 params.equals: [1]
 db.rows.equals: 3
 db.output:
@@ -351,7 +351,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 21
 success: true
-sql.equals: UPDATE ch6_pimdam.products SET active = $1 WHERE ch6_pimdam.products.id = $2
+sql.equals: UPDATE ch6_pimdam.products SET active = $1 WHERE products.id = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -360,7 +360,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 22
 success: true
-sql.equals: UPDATE ch6_pimdam.products SET deleted_at = $1 WHERE ch6_pimdam.products.sku = $2
+sql.equals: UPDATE ch6_pimdam.products SET deleted_at = $1 WHERE products.sku = $2
 db.rows.equals: 0
 
 # ─────────────────────────────────────────
@@ -368,7 +368,7 @@ db.rows.equals: 0
 # ─────────────────────────────────────────
 --- query: 23
 success: true
-sql.equals: UPDATE ch6_pimdam.product_images SET status = $1 WHERE ch6_pimdam.product_images.id = $2
+sql.equals: UPDATE ch6_pimdam.product_images SET status = $1 WHERE product_images.id = $2
 db.rows.equals: 1
 
 # ─────────────────────────────────────────
@@ -377,7 +377,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 24
 success: true
-sql.equals: DELETE FROM ch6_pimdam.product_images WHERE ch6_pimdam.product_images.status = $1
+sql.equals: DELETE FROM ch6_pimdam.product_images WHERE product_images.status = $1
 db.rows.equals: 1
 
 # ─────────────────────────────────────────

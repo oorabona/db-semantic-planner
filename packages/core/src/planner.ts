@@ -64,6 +64,8 @@ export interface PlanDecision {
 		readonly includeAlias?: string;
 		/** Foreign key column(s) for include-strategy (Phase 3) */
 		readonly foreignKey?: string | readonly string[];
+		/** Whether the relation is self-referential (source === target) */
+		readonly isSelfRef?: boolean;
 	};
 
 	/** The choice made */
@@ -976,28 +978,28 @@ function processRelationFilter(
 			);
 
 			const decisionId = generateDecisionId(state, 'filter-strategy');
+			// Detect self-referential relation (source === target)
+			const isSelfRef = relation.source === relation.target;
 			// SPEC-002: Include full path in context for multi-hop
-			const context: PlanDecision['context'] =
-				relations.length > 1
-					? {
-							sourceTable: currentSource,
-							target: relation.target,
-							relation: relation.name,
-							intentPath: chainPath,
-							relationPath: relations.join('.'),
-						}
-					: {
-							sourceTable: currentSource,
-							target: relation.target,
-							relation: relation.name,
-							intentPath: chainPath,
-						};
+			const context: PlanDecision['context'] = {
+				sourceTable: currentSource,
+				target: relation.target,
+				relation: relation.name,
+				intentPath: chainPath,
+				...(relations.length > 1 && { relationPath: relations.join('.') }),
+				...(isSelfRef && { isSelfRef }),
+			};
 			state.decisions.push({
 				id: decisionId,
 				type: 'filter-strategy',
 				context,
 				choice: filterStrategy,
-				reasoning: generateFilterReasoning(relation, filterStrategy, mode),
+				reasoning: generateFilterReasoning(
+					relation,
+					filterStrategy,
+					mode,
+					isSelfRef,
+				),
 				alternatives: filterStrategy === 'exists' ? ['join'] : ['exists'],
 			});
 
@@ -1631,18 +1633,20 @@ function generateFilterReasoning(
 	relation: RelationIR,
 	strategy: 'exists' | 'join',
 	mode?: 'some' | 'every' | 'none',
+	isSelfRef?: boolean,
 ): string {
 	const modeText = mode ? ` (mode: ${mode})` : '';
+	const selfRefText = isSelfRef ? ' [self-referential]' : '';
 
 	if (strategy === 'exists') {
 		return (
-			`Relation ${relation.source}.${relation.name} has cardinality "${relation.cardinality}"${modeText} - ` +
+			`Relation ${relation.source}.${relation.name} has cardinality "${relation.cardinality}"${modeText}${selfRefText} - ` +
 			`using EXISTS to avoid row explosion`
 		);
 	}
 
 	return (
-		`Relation ${relation.source}.${relation.name} has cardinality "${relation.cardinality}"${modeText} - ` +
+		`Relation ${relation.source}.${relation.name} has cardinality "${relation.cardinality}"${modeText}${selfRefText} - ` +
 		`using JOIN for efficient single-row access`
 	);
 }

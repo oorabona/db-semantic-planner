@@ -55,8 +55,10 @@ function buildCorrelation(
 	targetColumn: string,
 	ctx: CompilerContext,
 ): Node {
-	const left = columnRef(sourceColumn, sourceAlias, ctx.schema, ctx.naming);
-	const right = columnRef(targetColumn, targetAlias, ctx.schema, ctx.naming);
+	// Neither source nor target uses schema — column references are query-scoped.
+	// Schema is only for FROM/JOIN clause table entries (rangeVar).
+	const left = columnRef(sourceColumn, sourceAlias, undefined, ctx.naming);
+	const right = columnRef(targetColumn, targetAlias, undefined, ctx.naming);
 	return eqExpr(left, right);
 }
 
@@ -109,11 +111,15 @@ function buildExistsSubquery(
 	// Build WHERE clause (correlation + nested conditions)
 	let whereClause = correlation;
 	if (decision.conditions && decision.conditions.length > 0) {
-		// Create context for subquery with target alias
+		// Create context for subquery with target alias.
+		// Schema is stripped because nested conditions reference the aliased table,
+		// and aliases are query-scoped (not schema-qualified).
+		const { schema: _schema, ...ctxWithoutSchema } = ctx;
 		const subCtx: CompilerContext = {
-			...ctx,
+			...ctxWithoutSchema,
 			rootTable: targetTable,
 			currentAlias: targetAlias,
+			outerAlias: sourceAlias,
 		};
 
 		// Compile nested conditions
