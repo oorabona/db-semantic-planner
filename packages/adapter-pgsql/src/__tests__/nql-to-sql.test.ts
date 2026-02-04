@@ -782,23 +782,21 @@ function mutationToSQL(nql: string): {
 }
 
 describe('NQL → SQL mutation E2E', () => {
-	it('S1: update with IN subquery flattened to parameter', () => {
+	it('S1: update with IN subquery produces inline SQL subquery', () => {
 		const { sql } = mutationToSQL(
 			'update authors set active = false where id in (posts | where published = false | select userId)',
 		);
-		// Note: subquery is compiled to a parameter ($2), not inline SQL subquery.
-		// Full subquery expansion in mutations is a future enhancement.
 		expect(sql).toEqual(
-			'update authors set active = $1 where authors.id = any ($2)',
+			'update authors set active = $1 where authors.id = any (select posts_subq_0."userid" from posts as posts_subq_0 where posts_subq_0.published = $2)',
 		);
 	});
 
-	it('S2: delete with NOT IN subquery flattened to parameter', () => {
+	it('S2: delete with NOT IN subquery produces inline SQL subquery', () => {
 		const { sql } = mutationToSQL(
 			'delete from comments where postId not in (posts | select id)',
 		);
 		expect(sql).toEqual(
-			'delete from comments where not (comments."postid" = any ($1))',
+			'delete from comments where not (comments."postid" = any (select posts_subq_0.id from posts as posts_subq_0))',
 		);
 	});
 
@@ -915,8 +913,9 @@ describe('NQL → SQL bind + CTE E2E', () => {
 			'posts | where published = false | select id | bind toDelete\ndelete from comments where postId in (toDelete)',
 			mutationSchema.model,
 		);
-		// Note: subquery IN is flattened to parameter (known bug — see TODO.md)
-		// Ideally: ... WHERE comments."postid" = ANY(SELECT "id" FROM "toDelete")
+		// Note: bound CTE ref in IN() is resolved as value, not inline subquery.
+		// Inline subquery expansion works for direct subqueries (see S1/S2).
+		// Bound CTE ref expansion is tracked separately.
 		expect(sql).toEqual(
 			'with "toDelete" as (select posts.id from posts where posts.published = $1) delete from comments where comments."postid" = any ($1)',
 		);

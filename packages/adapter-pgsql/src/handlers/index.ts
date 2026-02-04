@@ -239,13 +239,52 @@ function normalizeToDecision(input: Decision): Decision {
 				column: raw.field as string,
 				operator: raw.operator as string,
 			};
-		case 'in':
+		case 'in': {
+			const sub = raw.subquery as Record<string, unknown> | undefined;
+			if (sub) {
+				// IN/NOT IN with subquery → route to inSubquery/notInSubquery handler
+				const rawSelect = sub.select as unknown;
+				const selectColumn =
+					typeof rawSelect === 'string'
+						? rawSelect
+						: rawSelect &&
+								typeof rawSelect === 'object' &&
+								'fields' in (rawSelect as object)
+							? ((rawSelect as { fields?: readonly string[] }).fields?.[0] ??
+								'*')
+							: '*';
+				const subConditions = sub.where
+					? [normalizeToDecision(sub.where as Decision)]
+					: [];
+				const rawLimit = sub.limit as number | undefined;
+				const rawOrderBy = sub.orderBy as
+					| readonly { field: string; direction?: string }[]
+					| undefined;
+				return {
+					type: 'where',
+					column: raw.field as string,
+					operator: raw.not ? 'notInSubquery' : 'inSubquery',
+					targetTable: sub.from as string,
+					selectColumn,
+					conditions: subConditions,
+					...(rawLimit != null && { limit: rawLimit }),
+					...(rawOrderBy && {
+						orderBy: rawOrderBy.map((o) => ({
+							column: o.field,
+							direction: (o.direction?.toUpperCase() ?? 'ASC') as
+								| 'ASC'
+								| 'DESC',
+						})),
+					}),
+				} as Decision;
+			}
 			return {
 				type: 'where',
 				column: raw.field as string,
-				operator: 'in',
+				operator: raw.not ? 'notIn' : 'in',
 				values: raw.values as readonly unknown[],
 			};
+		}
 		case 'like':
 			return {
 				type: 'where',
