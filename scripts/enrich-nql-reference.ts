@@ -409,11 +409,14 @@ function formatDecisionsTable(decisions: readonly PlanDecision[]): string {
 // Enrichment block generation
 // ---------------------------------------------------------------------------
 
-function generateEnrichmentBlock(result: CompileResult, nql: string): string {
+function generateEnrichmentBlock(result: CompileResult, nql: string, label?: string): string {
 	const lines: string[] = [];
+	const summary = label
+		? `Compiled SQL & Plan — \`${label}\``
+		: 'Compiled SQL & Plan';
 	lines.push('');
 	lines.push('<details>');
-	lines.push('<summary>Compiled SQL & Plan</summary>');
+	lines.push(`<summary>${summary}</summary>`);
 	lines.push('');
 
 	// SQL
@@ -542,38 +545,39 @@ async function main() {
 				continue;
 			}
 
-			// Compile and generate enrichment for the first compilable query in the block
-			// (Most blocks have one query; multi-query blocks get the first one enriched)
-			const nql = compilableQueries[0]!;
-			const schemaName = sectionToSchema(
-				currentSectionNum,
-				currentSubsection,
-				nql,
-			);
-			const schemaObj = schemas[schemaName];
-
-			try {
-				const isMutation = /^\s*(insert|update|delete|upsert)\b/i.test(nql);
-				const result = isMutation
-					? compileMutation(nql, schemaObj)
-					: compileQuery(nql, schemaObj);
-
-				const enrichment = generateEnrichmentBlock(result, nql);
-				output.push(enrichment);
-				compiled++;
-
-				if (compilableQueries.length > 1) {
-					console.log(
-						`  ℹ️  Block at line ${codeBlockStartIdx + 1} has ${compilableQueries.length} queries, enriched first only`,
-					);
-				}
-			} catch (err) {
-				errors++;
-				console.error(
-					`  ❌ Failed to compile (line ${codeBlockStartIdx + 1}): ${nql.slice(0, 60)}`,
+			// Compile and generate enrichment for ALL compilable queries in the block
+			const isMultiQuery = compilableQueries.length > 1;
+			let blockCompiled = 0;
+			for (const nql of compilableQueries) {
+				const schemaName = sectionToSchema(
+					currentSectionNum,
+					currentSubsection,
+					nql,
 				);
-				console.error(`     ${(err as Error).message}`);
+				const schemaObj = schemas[schemaName];
+
+				try {
+					const isMutation = /^\s*(insert|update|delete|upsert)\b/i.test(nql);
+					const result = isMutation
+						? compileMutation(nql, schemaObj)
+						: compileQuery(nql, schemaObj);
+
+					// For multi-query blocks, add a truncated NQL label to distinguish enrichments
+					const label = isMultiQuery
+						? nql.replace(/\n/g, ' ').slice(0, 60) + (nql.length > 60 ? '…' : '')
+						: undefined;
+					const enrichment = generateEnrichmentBlock(result, nql, label);
+					output.push(enrichment);
+					blockCompiled++;
+				} catch (err) {
+					errors++;
+					console.error(
+						`  ❌ Failed to compile (line ${codeBlockStartIdx + 1}): ${nql.slice(0, 60)}`,
+					);
+					console.error(`     ${(err as Error).message}`);
+				}
 			}
+			compiled += blockCompiled;
 
 			continue;
 		}
