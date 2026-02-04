@@ -570,7 +570,7 @@ describe('Bug regressions', () => {
 
 		it('IN inside some() is preserved in EXISTS', () => {
 			const { sql, params } = blogToSQL(
-				"authors | where some(posts as p, p.status in ('draft', 'review'))",
+				"authors | where some(posts as p, p.title in ('draft', 'review'))",
 			);
 			expect(sql).toContain('exists');
 			expect(sql).toContain('any');
