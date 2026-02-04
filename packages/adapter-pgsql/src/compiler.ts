@@ -412,7 +412,7 @@ export class PlanCompiler {
 			const condNodes = (decision.conditions as PlanDecision[]).map((c) => {
 				// Rewrite condition table references to use the inner alias
 				const rewritten = { ...c, table: innerAlias };
-				return this.dispatchWhere(rewritten);
+				return this.dispatchWhere(rewritten, { currentAlias: innerAlias });
 			});
 			const combined =
 				condNodes.length === 1 ? condNodes[0]! : andExpr(...condNodes);

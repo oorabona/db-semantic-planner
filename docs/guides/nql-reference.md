@@ -543,18 +543,18 @@ SELECT customers.*
   FROM customers
 
   WHERE
-  customers.id = ANY (SELECT orders."customerId"
+  customers.id = ANY (SELECT orders_subq_0."customerId"
 
-  FROM orders
+  FROM orders AS orders_subq_0
 
   WHERE
-  orders.status = $1)
+  orders_subq_0.status = $1)
   AND EXISTS (SELECT 1
 
-  FROM orders
+  FROM orders AS orders_exists_1
 
   WHERE
-  orders."customerId" = customers.id)
+  customers.id = orders_exists_1."customerId")
 ```
 
 **Parameters:** `["delivered"]`
@@ -737,11 +737,11 @@ SELECT authors.*
   WHERE
   EXISTS (SELECT 1
 
-  FROM posts
+  FROM posts AS posts_exists_0
 
   WHERE
-  posts."authorId" = authors.id
-  AND posts.published = $1)
+  authors.id = posts_exists_0."authorId"
+  AND posts_exists_0.published = $1)
 ```
 
 **Parameters:** `[true]`
@@ -776,12 +776,12 @@ SELECT customers.*
   WHERE
   NOT (EXISTS (SELECT 1
 
-  FROM orders
+  FROM orders AS orders_exists_0
 
   WHERE
-  orders."customerId" = customers.id
-  AND (orders.status = $1
-  AND orders.total > $2)))
+  customers.id = orders_exists_0."customerId"
+  AND (orders_exists_0.status = $1
+  AND orders_exists_0.total > $2)))
 ```
 
 **Parameters:** `["cancelled", 100]`
@@ -1700,20 +1700,20 @@ SELECT customers.*
   FROM customers
 
   WHERE
-  customers.id = ANY (SELECT orders."customerId"
+  customers.id = ANY (SELECT orders_subq_0."customerId"
 
-  FROM orders
+  FROM orders AS orders_subq_0
 
   WHERE
-  orders.status = $1
+  orders_subq_0.status = $1
 
   LIMIT 5)
   AND EXISTS (SELECT 1
 
-  FROM orders
+  FROM orders AS orders_exists_1
 
   WHERE
-  orders."customerId" = customers.id)
+  customers.id = orders_exists_1."customerId")
 ```
 
 **Parameters:** `["delivered"]`
