@@ -68,22 +68,22 @@ categories | where parent.id = 1
 # =============================================================================
 
 # Insert a new category
-insert into categories set name = 'Accessories', slug = 'accessories', active = true
+insert into categories set name = 'Accessories', slug = 'accessories', active = true!
 
 # Insert a new asset (required: filename, sha256, mime, sizeBytes, storageKey, kind)
-insert into assets set filename = 'new-image.jpg', sha256 = 'abc123def456', mime = 'image/jpeg', sizeBytes = 12345, storageKey = 'uploads/new-image.jpg', kind = 'image'
+insert into assets set filename = 'new-image.jpg', sha256 = 'abc123def456', mime = 'image/jpeg', sizeBytes = 12345, storageKey = 'uploads/new-image.jpg', kind = 'image'!
 
 # Update product status
-update products set active = false where id = 5
+update products set active = false where id = 5!
 
 # Soft delete a product (set deletedAt)
-update products set deletedAt = '2024-12-01T00:00:00Z' where sku = 'OLD-PRODUCT'
+update products set deletedAt = '2024-12-01T00:00:00Z' where sku = 'OLD-PRODUCT'!
 
 # Approve a product image
-update productImages set status = 'approved' where id = 1
+update productImages set status = 'approved' where id = 1!
 
 # Delete rejected images
-delete from productImages where status = 'rejected'
+delete from productImages where status = 'rejected'!
 
 # Upsert product - insert or update on SKU conflict (pimdam uses 'title' not 'name')
-upsert into products on sku set title = 'Updated Product', sku = 'NEW-SKU-001', categoryId = 1, active = true
+upsert into products on sku set title = 'Updated Product', sku = 'NEW-SKU-001', categoryId = 1, active = true!

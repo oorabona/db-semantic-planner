@@ -64,19 +64,19 @@ rooms | where roomBookings.bookingPeriod overlaps [2024-01-22,2024-01-29) | sele
 # =============================================================================
 
 # Insert a new room (floor is required)
-insert into rooms set name = 'Board Room', capacity = 20, floor = 2
+insert into rooms set name = 'Board Room', capacity = 20, floor = 2!
 
 # Insert a new price tier
-insert into priceTiers set productName = 'Widget C', quantityRange = '[1,50)', unitPrice = 15.00
+insert into priceTiers set productName = 'Widget C', quantityRange = '[1,50)', unitPrice = 15.00!
 
 # Update room capacity
-update rooms set capacity = 25 where name = 'Conference Room A'
+update rooms set capacity = 25 where name = 'Conference Room A'!
 
 # Update event name
-update events set title = 'Team Standup (Updated)' where id = 1
+update events set title = 'Team Standup (Updated)' where id = 1!
 
 # Delete past bookings
-delete from roomBookings where id = 99
+delete from roomBookings where id = 99!
 
 # Upsert room - insert or update on name conflict (floor required)
-upsert into rooms on name set name = 'Meeting Room', capacity = 12, floor = 1
+upsert into rooms on name set name = 'Meeting Room', capacity = 12, floor = 1!

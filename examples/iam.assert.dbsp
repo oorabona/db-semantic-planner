@@ -7,14 +7,14 @@
 # ─────────────────────────────────────────
 --- query: 0
 db.success: true
-db.output.contains: Executed SQL
+db.output.contains: [RAW_SQL]
 
 # ─────────────────────────────────────────
 # Query 1: !CREATE SCHEMA IF NOT EXISTS iam_example;
 # ─────────────────────────────────────────
 --- query: 1
 db.success: true
-db.output.contains: Executed SQL
+db.output.contains: [RAW_SQL]
 
 # ─────────────────────────────────────────
 # Query 2: .use iam_example

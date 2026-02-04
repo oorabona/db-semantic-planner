@@ -84,11 +84,11 @@ success: true
 sql.equals: SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM posts AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS posts_json FROM users
 
 # ─────────────────────────────────────────
-# Query 10: posts where published = true and authorId = 1
+# Query 10: posts where published = true and userId = 1
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.equals: SELECT posts.* FROM posts WHERE posts.published = $1 AND posts.author_id = $2
+sql.equals: SELECT posts.* FROM posts WHERE posts.published = $1 AND posts.user_id = $2
 params.length: 2
 
 # ─────────────────────────────────────────
