@@ -13,7 +13,7 @@
 ## Pending — MEDIUM
 
 - [ ] [NQL] JSONB Operators Support — Effort: M
-- [ ] [Adapter] Enhance `singularize()` for irregular plurals — Effort: M
+- [x] ✅ [Adapter] Enhance `singularize()` for irregular plurals (2026-02-05)
 - [ ] [Docs] DOCS-001: User documentation (Getting Started, API Guide)
 - [ ] [Docs] DOCS-002: Migration guides (from-prisma, from-drizzle, from-kysely)
 - [ ] [Docs] DOCS-003: Pattern guides (multi-tenant, recursive queries, window functions)

@@ -267,6 +267,7 @@ export {
 	decapitalize,
 	detectForeignKeys,
 	detectManyToMany,
+	IRREGULAR_PLURALS,
 	inferRelationsFromSchema,
 	pluralize,
 	singularize,

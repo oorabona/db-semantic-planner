@@ -41,9 +41,16 @@ export const DEFAULT_CONVENTIONS: Required<SchemaConventionsDefinition> = {
  * Simple heuristic: remove trailing 's' if present.
  */
 /**
- * Mapping of irregular plural forms to their singular equivalents.
+ * Built-in mapping of irregular plural forms to their singular equivalents.
+ * Import and extend this to handle domain-specific irregular plurals:
+ *
+ * ```ts
+ * import { IRREGULAR_PLURALS, singularize } from '@dbsp/core';
+ * const custom = { ...IRREGULAR_PLURALS, matrices: 'matrix', indices: 'index' };
+ * singularize('matrices', custom); // 'matrix'
+ * ```
  */
-const IRREGULAR_PLURALS: Record<string, string> = {
+export const IRREGULAR_PLURALS: Record<string, string> = {
 	people: 'person',
 	children: 'child',
 	men: 'man',
@@ -58,10 +65,24 @@ const IRREGULAR_PLURALS: Record<string, string> = {
 	phenomena: 'phenomenon',
 };
 
-export function singularize(name: string): string {
+export function singularize(
+	name: string,
+	overrides?: Record<string, string>,
+): string {
 	const lower = name.toLowerCase();
 
-	// Check irregular plurals
+	// Check user-provided overrides first
+	if (overrides) {
+		const override = overrides[lower];
+		if (override !== undefined) {
+			if (name[0]?.toUpperCase() === name[0]) {
+				return override.charAt(0).toUpperCase() + override.slice(1);
+			}
+			return override;
+		}
+	}
+
+	// Check built-in irregular plurals
 	const irregular = IRREGULAR_PLURALS[lower];
 	if (irregular !== undefined) {
 		// Preserve original case pattern
