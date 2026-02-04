@@ -71,21 +71,19 @@ sql.equals: SELECT posts.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM auth
 
 # ─────────────────────────────────────────
 # Query 8: posts | select *, author.* | flat
-# flat excludes json_agg → planner picks LATERAL (PostgreSQL)
-# HANDLER-WIRE: LATERAL handler now wired, produces actual LATERAL JOIN
+# flat excludes json_agg → planner picks simple JOIN (no per-include limit)
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.equals: SELECT posts.* FROM posts LEFT JOIN LATERAL ( SELECT authors_inner_0.* FROM authors AS authors_inner_0 WHERE authors_inner_0.id = posts.author_id ) AS authors_lat_0 ON true
+sql.equals: SELECT posts.*, author.* FROM posts LEFT JOIN authors AS author ON posts.author_id = author.id
 
 # ─────────────────────────────────────────
 # Query 9: authors | select *, posts.* | flat
-# flat excludes json_agg → planner picks LATERAL (PostgreSQL)
-# HANDLER-WIRE: LATERAL handler now wired, produces actual LATERAL JOIN
+# flat excludes json_agg → planner picks simple JOIN (no per-include limit)
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.equals: SELECT authors.* FROM authors LEFT JOIN LATERAL ( SELECT posts_inner_0.* FROM posts AS posts_inner_0 WHERE posts_inner_0.author_id = authors.id ) AS posts_lat_0 ON true
+sql.equals: SELECT authors.*, posts.* FROM authors LEFT JOIN posts AS posts ON authors.id = posts.author_id
 
 # ─────────────────────────────────────────
 # Query 10: posts select distinct *
