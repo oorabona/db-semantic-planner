@@ -897,3 +897,97 @@ const results = await orm.raw<{ count: number }>(
 ```
 
 > **Warning:** `raw()` bypasses the planner and type safety. Use only when the ORM API is insufficient.
+
+## 9. Naming Conventions
+
+The adapter automatically derives foreign key column names from table names using a `singularize(tableName) + "_" + pkColumn` convention. For example, the `posts` table with PK `id` produces FK column `post_id`.
+
+Both the primary key convention and the FK derivation function are configurable.
+
+### Adapter Options
+
+```typescript
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+
+const adapter = createPgsqlAdapter(pool, {
+  // Default PK column name (default: 'id')
+  defaultPkColumnName: 'uuid',
+
+  // Custom FK derivation (default: singularize(table) + '_' + pk)
+  deriveFkColumnName: (tableName, pkColumnName) =>
+    `fk_${singularize(tableName)}_${pkColumnName}`,
+});
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `defaultPkColumnName` | `string` | `'id'` | Convention fallback when schema metadata doesn't provide an explicit PK column |
+| `deriveFkColumnName` | `(table: string, pk: string) => string` | `singularize(table)_pk` | Derives FK column names from the referenced table and its PK |
+
+### `singularize()` and `pluralize()` — Importable Helpers
+
+These are optional utility functions, exported from `@dbsp/core`, useful for building custom FK derivation or other naming logic:
+
+```typescript
+import { singularize, pluralize, IRREGULAR_PLURALS } from '@dbsp/core';
+
+singularize('posts');       // → 'post'
+singularize('categories');  // → 'category'
+singularize('people');      // → 'person' (built-in irregular)
+
+pluralize('post');          // → 'posts'
+pluralize('category');      // → 'categories'
+pluralize('person');        // → 'people' (built-in irregular)
+```
+
+#### Custom Overrides
+
+Pass a `Record<string, string>` to `singularize()` for domain-specific plurals not covered by the built-in rules:
+
+```typescript
+const domainOverrides = {
+  matrices: 'matrix',
+  alumni: 'alumnus',
+  indices: 'index',
+};
+
+singularize('matrices', domainOverrides); // → 'matrix'
+singularize('users', domainOverrides);    // → 'user' (falls through to built-in rules)
+```
+
+Overrides take priority over built-in irregular plurals:
+
+```typescript
+singularize('people', { people: 'individual' }); // → 'individual' (overrides built-in 'person')
+```
+
+#### `IRREGULAR_PLURALS` — Built-in Map
+
+The `IRREGULAR_PLURALS` constant is exported for inspection or extension:
+
+```typescript
+import { IRREGULAR_PLURALS } from '@dbsp/core';
+
+// Built-in: people→person, children→child, men→man, women→woman,
+//           teeth→tooth, feet→foot, geese→goose, mice→mouse,
+//           data→datum, media→medium, criteria→criterion, phenomena→phenomenon
+```
+
+#### Putting It Together
+
+A fully custom FK naming strategy using a Map of overrides:
+
+```typescript
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { singularize } from '@dbsp/core';
+
+const myPlurals: Record<string, string> = {
+  matrices: 'matrix',
+  alumni: 'alumnus',
+};
+
+const adapter = createPgsqlAdapter(pool, {
+  deriveFkColumnName: (tableName, pkColumnName) =>
+    `${singularize(tableName, myPlurals)}_${pkColumnName}`,
+});
+```

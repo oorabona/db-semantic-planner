@@ -231,6 +231,30 @@ describe('FK Inference', () => {
 			expect(singularize('boss')).toBe('boss');
 			expect(singularize('class')).toBe('class');
 		});
+
+		it('should apply user-provided overrides before built-in rules', () => {
+			// Custom domain-specific plurals
+			expect(singularize('matrices', { matrices: 'matrix' })).toBe('matrix');
+			expect(singularize('alumni', { alumni: 'alumnus' })).toBe('alumnus');
+		});
+
+		it('should preserve case with overrides', () => {
+			expect(singularize('Matrices', { matrices: 'matrix' })).toBe('Matrix');
+		});
+
+		it('should let overrides shadow built-in irregulars', () => {
+			// Default: people → person
+			expect(singularize('people')).toBe('person');
+			// Override: people → individual
+			expect(singularize('people', { people: 'individual' })).toBe(
+				'individual',
+			);
+		});
+
+		it('should fall through to built-in rules when override does not match', () => {
+			expect(singularize('users', { matrices: 'matrix' })).toBe('user');
+			expect(singularize('people', { matrices: 'matrix' })).toBe('person');
+		});
 	});
 
 	describe('inferForeignKey', () => {

@@ -22,14 +22,7 @@ export type FkColumnDerivation = (
 	pkColumnName: string,
 ) => string;
 
-/**
- * Simple English plurals → singular: removes trailing 's', handles 'ies' → 'y'.
- */
-function singularize(name: string): string {
-	if (name.endsWith('ies')) return `${name.slice(0, -3)}y`;
-	if (name.endsWith('s') && !name.endsWith('ss')) return name.slice(0, -1);
-	return name;
-}
+import { singularize } from '@dbsp/core';
 
 export const defaultFkDerivation: FkColumnDerivation = (
 	tableName,
