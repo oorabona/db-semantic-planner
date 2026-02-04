@@ -120,6 +120,7 @@ export type {
 	// Upsert (DX-026)
 	UpsertConflictAction,
 	UpsertConflictTarget,
+	UpsertFromIntent,
 	UpsertIntent,
 	// Where (filters)
 	WhereAndIntent,

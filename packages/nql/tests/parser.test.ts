@@ -4,7 +4,7 @@ import { parseCst } from '../src/parser/index.js';
 /**
  * Parser Tests - Based on BDD scenarios from NQL-SPEC-2026-01.md
  *
- * PARSE-Q01 to PARSE-Q18: Query scenarios
+ * PARSE-Q01 to PARSE-Q17: Query scenarios
  * PARSE-M01 to PARSE-M07: Mutation scenarios
  */
 
@@ -141,16 +141,6 @@ describe('NqlParser', () => {
 		it('PARSE-Q17: Relation star (implicit include via path)', () => {
 			// NQL v2.1: Relations included via path expressions, no 'with' keyword
 			const result = parseCst('orders | select *, customer.*');
-			expect(result.errors).toHaveLength(0);
-			expect(result.cst).toBeDefined();
-		});
-
-		it('PARSE-Q18: Let binding (CTE)', () => {
-			const query = `
-        let active_products = products | where active = true
-        active_products | select name, price
-      `;
-			const result = parseCst(query);
 			expect(result.errors).toHaveLength(0);
 			expect(result.cst).toBeDefined();
 		});

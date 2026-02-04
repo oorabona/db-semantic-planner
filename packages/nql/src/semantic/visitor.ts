@@ -20,7 +20,6 @@ import type {
 	NqlIsNullExpression,
 	NqlJoinParam,
 	NqlJoinSpec,
-	NqlLetBinding,
 	NqlLiteral,
 	NqlMutation,
 	NqlMutationClause,
@@ -114,14 +113,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	// ============================================================
 
 	program(ctx: CstContext): NqlProgram {
-		const bindings: NqlLetBinding[] = [];
 		const statements: NqlStatement[] = [];
-
-		if (ctx.letStatement) {
-			for (const letCtx of ctx.letStatement) {
-				bindings.push(this.visit(asCstNode(letCtx)));
-			}
-		}
 
 		if (ctx.statement) {
 			for (const stmtCtx of ctx.statement) {
@@ -129,16 +121,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			}
 		}
 
-		return { type: 'program', bindings, statements };
-	}
-
-	letStatement(ctx: CstContext): NqlLetBinding {
-		requireFields(ctx, ['identSegment', 'query'], 'Invalid let statement');
-		return {
-			type: 'let',
-			name: this.visit(asCstNode(ctx.identSegment[0]!)),
-			query: this.visit(asCstNode(ctx.query[0]!)),
-		};
+		return { type: 'program', statements };
 	}
 
 	statement(ctx: CstContext): NqlStatement {
@@ -182,6 +165,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		if (ctx.orderClause) return this.visit(asCstNode(ctx.orderClause[0]!));
 		if (ctx.limitClause) return this.visit(asCstNode(ctx.limitClause[0]!));
 		if (ctx.offsetClause) return this.visit(asCstNode(ctx.offsetClause[0]!));
+		if (ctx.bindClause) return this.visit(asCstNode(ctx.bindClause[0]!));
 		unreachable('Unknown query clause');
 	}
 
@@ -1265,6 +1249,8 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		if (ctx.insertStmt) return this.visit(asCstNode(ctx.insertStmt[0]!));
 		if (ctx.updateStmt) return this.visit(asCstNode(ctx.updateStmt[0]!));
 		if (ctx.deleteStmt) return this.visit(asCstNode(ctx.deleteStmt[0]!));
+		if (ctx.upsertFromStmt)
+			return this.visit(asCstNode(ctx.upsertFromStmt[0]!));
 		if (ctx.upsertStmt) return this.visit(asCstNode(ctx.upsertStmt[0]!));
 		unreachable('Unknown mutation type');
 	}
@@ -1357,6 +1343,53 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			assignments: this.visit(asCstNode(ctx.assignmentList[0]!)),
 			where: ctx.booleanExpr
 				? this.visit(asCstNode(ctx.booleanExpr[0]!))
+				: undefined,
+		};
+	}
+
+	upsertFromStmt(ctx: CstContext): NqlMutation {
+		// identSegment layout depends on conflict column syntax:
+		// - Parenthesized (identList): identSegment = [target, source]
+		// - Single column: identSegment = [target, conflictCol, source]
+		if (!ctx.identSegment || ctx.identSegment.length < 2) {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Upsert FROM missing target or source table',
+			);
+		}
+
+		const conflictColumns: string[] = [];
+		let sourceIndex: number;
+
+		if (ctx.identList) {
+			const cols = this.visit(asCstNode(ctx.identList[0]!)) as string[];
+			conflictColumns.push(...cols);
+			sourceIndex = 1;
+		} else if (ctx.identSegment.length >= 3) {
+			conflictColumns.push(this.visit(asCstNode(ctx.identSegment[1]!)));
+			sourceIndex = 2;
+		} else {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'Upsert FROM missing conflict columns or source table',
+			);
+		}
+
+		const target = this.visit(asCstNode(ctx.identSegment[0]!)) as string;
+		const source = this.visit(
+			asCstNode(ctx.identSegment[sourceIndex]!),
+		) as string;
+
+		return {
+			type: 'upsert_from',
+			table: target,
+			conflictColumns,
+			source,
+			where: ctx.booleanExpr
+				? this.visit(asCstNode(ctx.booleanExpr[0]!))
+				: undefined,
+			limit: ctx.NumberLiteral
+				? parseInt(getImage(ctx.NumberLiteral[0]!), 10)
 				: undefined,
 		};
 	}

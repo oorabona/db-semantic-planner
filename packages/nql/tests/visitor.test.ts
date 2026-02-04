@@ -402,21 +402,6 @@ describe('NQL Visitor - Mutations', () => {
 	});
 });
 
-describe('NQL Visitor - Let Bindings', () => {
-	it('parses let binding', () => {
-		// Grammar: let binding followed by statement (no semicolon separator)
-		const ast = parseToAst(
-			'let activeUsers = users | where active = true activeUsers | select *',
-		);
-
-		expect(ast.bindings).toHaveLength(1);
-		expect(ast.bindings[0]!.name).toBe('activeUsers');
-		expect(ast.bindings[0]!.query.type).toBe('query');
-
-		expect(ast.statements).toHaveLength(1);
-	});
-});
-
 describe('NQL Visitor - Multiple Statements', () => {
 	it('parses multiple statements', () => {
 		// Grammar: statements are separated implicitly (no semicolon needed)

@@ -31,6 +31,7 @@ import type {
 	UpdateIntent,
 	UpsertConflictAction,
 	UpsertConflictTarget,
+	UpsertFromIntent,
 	UpsertIntent,
 	WhereAndIntent,
 	WhereComparisonIntent,
@@ -60,6 +61,7 @@ import type {
 	NqlInsertFrom,
 	NqlIsNullExpression,
 	NqlLimitClause,
+	NqlMutation,
 	NqlMutationPipeline,
 	NqlNumberLiteral,
 	NqlOffsetClause,
@@ -73,10 +75,12 @@ import type {
 	NqlRelationFilterExpression,
 	NqlSelectClause,
 	NqlSelectItem,
+	NqlStatement,
 	NqlStringLiteral,
 	NqlUnaryExpression,
 	NqlUpdate,
 	NqlUpsert,
+	NqlUpsertFrom,
 	NqlWhereClause,
 	NqlWindowExpression,
 } from '../parser/ast.js';
@@ -104,6 +108,7 @@ export type {
 	UpdateIntent,
 	UpsertConflictAction,
 	UpsertConflictTarget,
+	UpsertFromIntent,
 	UpsertIntent,
 	WhereAndIntent,
 	WhereComparisonIntent,
@@ -122,6 +127,8 @@ export interface CompileResult {
 	readonly query?: QueryIntent;
 	readonly mutation?: MutationIntent;
 	readonly returning?: readonly string[];
+	/** Named bindings from `| bind X` clauses (CTE source queries) */
+	readonly bindings?: ReadonlyMap<string, QueryIntent>;
 }
 
 /**
@@ -309,22 +316,76 @@ export class NqlCompiler {
 
 	/**
 	 * Compile an NQL program to IntentAST
-	 * Returns the first statement's result (multiple statements = batch mode, TBD)
+	 *
+	 * Supports multi-statement programs with `| bind X` for CTE chaining:
+	 *   posts | select userId | bind subset
+	 *   insert into archive from subset
+	 *
+	 * Earlier statements with `| bind` are stored in a bindings map.
+	 * Later statements referencing a bound name (e.g. `insert from X`)
+	 * get the bound QueryIntent attached as `sourceQuery`.
 	 */
 	compile(program: NqlProgram): CompileResult {
 		if (program.statements.length === 0) {
 			return {};
 		}
 
-		const stmt = program.statements[0]!;
-
-		if (stmt.type === 'query') {
-			return { query: this.compileQuery(stmt) };
-		} else if (stmt.type === 'mutationPipeline') {
-			return this.compileMutationPipeline(stmt);
+		// Single statement fast path (no bind possible across statements)
+		if (program.statements.length === 1) {
+			return this.compileSingleStatement(program.statements[0]!);
 		}
 
+		// Multi-statement: build bindings map, resolve references
+		const bindings = new Map<string, QueryIntent>();
+		let lastResult: CompileResult = {};
+
+		for (const stmt of program.statements) {
+			lastResult = this.compileSingleStatement(stmt, bindings);
+
+			// Extract bind name from this statement's clauses
+			const bindName = this.extractBindName(stmt);
+			if (bindName && lastResult.query) {
+				bindings.set(bindName, lastResult.query);
+			}
+		}
+
+		// Return the last statement's result with accumulated bindings
+		if (bindings.size > 0) {
+			return { ...lastResult, bindings };
+		}
+		return lastResult;
+	}
+
+	/**
+	 * Compile a single statement, optionally resolving bound references.
+	 */
+	private compileSingleStatement(
+		stmt: NqlStatement,
+		bindings?: Map<string, QueryIntent>,
+	): CompileResult {
+		if (stmt.type === 'query') {
+			return { query: this.compileQuery(stmt) };
+		}
+		if (stmt.type === 'mutationPipeline') {
+			return this.compileMutationPipeline(stmt, bindings);
+		}
 		return {};
+	}
+
+	/**
+	 * Extract the bind name from a statement's clauses, if any.
+	 */
+	private extractBindName(stmt: NqlStatement): string | undefined {
+		if (stmt.type === 'query') {
+			for (const clause of stmt.clauses) {
+				if (clause.type === 'bind') return clause.name;
+			}
+		} else if (stmt.type === 'mutationPipeline') {
+			for (const clause of stmt.clauses) {
+				if (clause.type === 'bind') return clause.name;
+			}
+		}
+		return undefined;
 	}
 
 	private compileQuery(query: NqlQuery): QueryIntent {
@@ -415,6 +476,9 @@ export class NqlCompiler {
 				}
 				case 'offset':
 					offset = (clause as NqlOffsetClause).count;
+					break;
+				case 'bind':
+					// Bind is a metadata marker — extracted by extractBindName(), no compilation needed
 					break;
 			}
 		}
@@ -1179,11 +1243,12 @@ export class NqlCompiler {
 
 	private compileMutationPipeline(
 		pipeline: NqlMutationPipeline,
+		bindings?: Map<string, QueryIntent>,
 	): CompileResult {
 		// Set table context for mutation column validation
 		this.currentFromTable = pipeline.mutation.table;
 
-		const mutation = this.compileMutation(pipeline.mutation);
+		const mutation = this.compileMutation(pipeline.mutation, bindings);
 
 		// Extract RETURNING from select clauses
 		let returning: readonly string[] | undefined;
@@ -1204,19 +1269,22 @@ export class NqlCompiler {
 	}
 
 	private compileMutation(
-		mutation: NqlInsert | NqlInsertFrom | NqlUpdate | NqlDelete | NqlUpsert,
+		mutation: NqlMutation,
+		bindings?: Map<string, QueryIntent>,
 	): MutationIntent {
 		switch (mutation.type) {
 			case 'insert':
 				return this.compileInsert(mutation);
 			case 'insert_from':
-				return this.compileInsertFrom(mutation);
+				return this.compileInsertFrom(mutation, bindings);
 			case 'update':
 				return this.compileUpdate(mutation);
 			case 'delete':
 				return this.compileDelete(mutation);
 			case 'upsert':
 				return this.compileUpsert(mutation);
+			case 'upsert_from':
+				return this.compileUpsertFrom(mutation, bindings);
 		}
 	}
 
@@ -1235,11 +1303,20 @@ export class NqlCompiler {
 		};
 	}
 
-	private compileInsertFrom(insertFrom: NqlInsertFrom): InsertFromIntent {
+	private compileInsertFrom(
+		insertFrom: NqlInsertFrom,
+		bindings?: Map<string, QueryIntent>,
+	): InsertFromIntent {
+		// Check if source references a bound query
+		const sourceQuery = bindings?.get(insertFrom.source);
+		// WHERE applies to the source table, not target
+		this.currentFromTable = insertFrom.source;
+
 		return {
 			type: 'insert_from',
 			table: insertFrom.table,
 			source: insertFrom.source,
+			...(sourceQuery !== undefined && { sourceQuery }),
 			...(insertFrom.columns !== undefined && { columns: insertFrom.columns }),
 			...(insertFrom.where !== undefined && {
 				where: this.compileExpression(insertFrom.where),
@@ -1311,6 +1388,30 @@ export class NqlCompiler {
 			values: [values],
 			onConflict: { columns: upsert.conflictColumns },
 			action: { type: 'doUpdate', set: values },
+		};
+	}
+
+	private compileUpsertFrom(
+		upsertFrom: NqlUpsertFrom,
+		bindings?: Map<string, QueryIntent>,
+	): UpsertFromIntent {
+		const sourceQuery = bindings?.get(upsertFrom.source);
+		// WHERE applies to the source table, not target
+		this.currentFromTable = upsertFrom.source;
+
+		return {
+			type: 'upsert_from',
+			table: upsertFrom.table,
+			source: upsertFrom.source,
+			conflictColumns: upsertFrom.conflictColumns,
+			...(sourceQuery !== undefined && { sourceQuery }),
+			...(upsertFrom.columns !== undefined && {
+				columns: upsertFrom.columns,
+			}),
+			...(upsertFrom.where !== undefined && {
+				where: this.compileExpression(upsertFrom.where),
+			}),
+			...(upsertFrom.limit !== undefined && { limit: upsertFrom.limit }),
 		};
 	}
 

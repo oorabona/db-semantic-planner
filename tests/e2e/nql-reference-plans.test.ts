@@ -10,7 +10,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { InsertFromIntent } from '@dbsp/core';
+import type { InsertFromIntent, UpsertFromIntent } from '@dbsp/core';
 import {
 	isDeleteIntent,
 	isInsertIntent,
@@ -131,18 +131,8 @@ function extractNqlBlocks(markdown: string): NqlBlock[] {
 			inCodeBlock = false;
 			const content = codeBlockContent.join('\n').trim();
 
-			// Skip non-NQL blocks
-			if (
-				codeBlockLang === 'bash' ||
-				codeBlockLang === 'typescript' ||
-				codeBlockLang === 'ts' ||
-				codeBlockLang === 'sql' ||
-				codeBlockLang === 'json' ||
-				codeBlockLang === 'jsonc' ||
-				codeBlockLang === 'javascript' ||
-				codeBlockLang === 'js' ||
-				codeBlockLang === 'markdown'
-			) {
+			// Only process blocks explicitly tagged as NQL
+			if (codeBlockLang !== 'nql') {
 				continue;
 			}
 
@@ -329,6 +319,14 @@ function compileMutation(
 	if ((mutation as InsertFromIntent).type === 'insert_from') {
 		const result = adapter.compileInsertFrom(
 			mutation as InsertFromIntent,
+			options,
+		);
+		return { sql: result.sql, params: result.parameters };
+	}
+	// UpsertFromIntent
+	if ((mutation as { type: string }).type === 'upsert_from') {
+		const result = adapter.compileUpsertFrom(
+			mutation as UpsertFromIntent,
 			options,
 		);
 		return { sql: result.sql, params: result.parameters };

@@ -120,6 +120,23 @@ export interface InsertFromConfig {
 	returning?: string[];
 }
 
+export interface UpsertFromConfig {
+	/** Target table to upsert into */
+	targetTable: string;
+	/** Source table to select from */
+	sourceTable: string;
+	/** Conflict target columns for ON CONFLICT */
+	conflictColumns: string[];
+	/** Columns to insert (same names in target and source) */
+	columns?: string[];
+	/** WHERE conditions for source query */
+	where?: Decision[];
+	/** LIMIT for source query */
+	limit?: number;
+	/** Columns to return (RETURNING clause) */
+	returning?: string[];
+}
+
 // ============================================================================
 // Compilers
 // ============================================================================
@@ -377,6 +394,158 @@ export function compileInsertFrom(
 	if (returningList) options.returning = returningList;
 
 	return insertStmt(options);
+}
+
+/**
+ * Compile an UPSERT FROM statement (INSERT ... SELECT ... ON CONFLICT DO UPDATE).
+ *
+ * Produces: INSERT INTO target SELECT ... FROM source ON CONFLICT (cols) DO UPDATE SET col = EXCLUDED.col
+ */
+export function compileUpsertFrom(
+	config: UpsertFromConfig,
+	ctx: CompilerContext,
+	state: CompilerState,
+): Node {
+	const naming = ctx.naming;
+	const dbSourceTable = naming.toDatabase(config.sourceTable);
+	const sourceAlias = config.sourceTable;
+
+	// Build column list
+	const dbColumns = config.columns?.map((c) => naming.toDatabase(c));
+
+	// Build SELECT target list
+	let targetList: Node[];
+	if (config.columns && config.columns.length > 0) {
+		targetList = config.columns.map((col) =>
+			resTarget(
+				columnRef(col, sourceAlias, ctx.schema, naming),
+				naming.toDatabase(col),
+			),
+		);
+	} else {
+		// SELECT *
+		targetList = [
+			{
+				ResTarget: {
+					val: { ColumnRef: { fields: [{ A_Star: {} }] } },
+				},
+			},
+		];
+	}
+
+	// Build WHERE clause for source query if present
+	let whereClause: Node | undefined;
+	if (config.where && config.where.length > 0) {
+		const dispatch = createWhereDispatcher();
+		const subCtx = { ...ctx, currentAlias: sourceAlias };
+
+		if (config.where.length === 1) {
+			whereClause = dispatch(config.where[0]!, subCtx, state);
+		} else {
+			const conditions = config.where.map((cond) =>
+				dispatch(cond, subCtx, state),
+			);
+			whereClause = {
+				BoolExpr: {
+					boolop: 'AND_EXPR',
+					args: conditions,
+				},
+			};
+		}
+	}
+
+	// Build LIMIT clause if specified
+	let limitCount: Node | undefined;
+	if (config.limit !== undefined) {
+		limitCount = { A_Const: { ival: { ival: config.limit } } };
+	}
+
+	// Build the SELECT query
+	const sourceRelation: {
+		schemaname?: string;
+		relname: string;
+		inh: boolean;
+		relpersistence: string;
+		alias?: { aliasname: string };
+	} = {
+		relname: dbSourceTable,
+		inh: true,
+		relpersistence: 'p',
+	};
+	if (ctx.schema) {
+		sourceRelation.schemaname = naming.toDatabase(ctx.schema);
+	}
+
+	const selectQuery: Node = {
+		SelectStmt: {
+			targetList,
+			fromClause: [{ RangeVar: sourceRelation }],
+			...(whereClause && { whereClause }),
+			...(limitCount && { limitCount }),
+		},
+	};
+
+	// Build RETURNING clause
+	const returningList = buildReturningList(
+		config.returning,
+		config.targetTable,
+		ctx,
+	);
+
+	// Build ON CONFLICT clause: DO UPDATE SET col = EXCLUDED.col for non-conflict columns
+	const conflictInfer = {
+		indexElems: config.conflictColumns.map((col) => ({
+			IndexElem: {
+				name: naming.toDatabase(col),
+			},
+		})),
+	};
+
+	// Determine update columns: all source columns minus conflict columns
+	const updateColumns = config.columns
+		? config.columns.filter((c) => !config.conflictColumns.includes(c))
+		: [];
+
+	const onConflictTargetList: Node[] = updateColumns.map((col) => {
+		const dbCol = naming.toDatabase(col);
+		return {
+			ResTarget: {
+				name: dbCol,
+				val: {
+					ColumnRef: {
+						fields: [
+							{ String: { sval: 'excluded' } },
+							{ String: { sval: dbCol } },
+						],
+					},
+				},
+			},
+		};
+	});
+
+	// Build INSERT statement with SELECT query + ON CONFLICT
+	const options: InsertOptions = {
+		table: config.targetTable,
+		selectQuery,
+		naming,
+	};
+	if (dbColumns) options.columns = dbColumns;
+	if (ctx.schema) options.schema = ctx.schema;
+	if (returningList) options.returning = returningList;
+
+	// Get base InsertStmt and add onConflictClause manually
+	const node = insertStmt(options);
+	const insertNode = (node as { InsertStmt: Record<string, unknown> })
+		.InsertStmt;
+	insertNode.onConflictClause = {
+		action: 'ONCONFLICT_UPDATE',
+		infer: conflictInfer,
+		...(onConflictTargetList.length > 0 && {
+			targetList: onConflictTargetList,
+		}),
+	};
+
+	return node;
 }
 
 // ============================================================================

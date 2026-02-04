@@ -15,14 +15,7 @@
  */
 export interface NqlProgram {
 	type: 'program';
-	bindings: NqlLetBinding[];
 	statements: NqlStatement[];
-}
-
-export interface NqlLetBinding {
-	type: 'let';
-	name: string;
-	query: NqlQuery;
 }
 
 export type NqlStatement = NqlQuery | NqlMutationPipeline;
@@ -52,7 +45,8 @@ export type NqlMutation =
 	| NqlInsertFrom
 	| NqlUpdate
 	| NqlDelete
-	| NqlUpsert;
+	| NqlUpsert
+	| NqlUpsertFrom;
 
 export type NqlMutationClause = NqlSelectClause | NqlBindClause;
 
@@ -67,7 +61,8 @@ export type NqlClause =
 	| NqlGroupByClause
 	| NqlOrderByClause
 	| NqlLimitClause
-	| NqlOffsetClause;
+	| NqlOffsetClause
+	| NqlBindClause;
 
 /**
  * Where clause - position determines compilation:
@@ -435,6 +430,20 @@ export interface NqlUpsert {
 	where?: NqlExpression;
 }
 
+/**
+ * UPSERT INTO target ON conflictColumns FROM source [WHERE ...] [LIMIT ...]
+ * Bulk upsert by selecting from another table or bound CTE
+ */
+export interface NqlUpsertFrom {
+	type: 'upsert_from';
+	table: string;
+	conflictColumns: string[];
+	source: string;
+	columns?: string[] | undefined;
+	where?: NqlExpression | undefined;
+	limit?: number | undefined;
+}
+
 export interface NqlAssignment {
 	column: string;
 	value: NqlExpression;
@@ -457,7 +466,14 @@ export function isMutationPipeline(
 export function isMutation(node: unknown): node is NqlMutation {
 	if (typeof node !== 'object' || node === null) return false;
 	const type = (node as { type?: string }).type;
-	return ['insert', 'update', 'delete', 'upsert'].includes(type ?? '');
+	return [
+		'insert',
+		'insert_from',
+		'update',
+		'delete',
+		'upsert',
+		'upsert_from',
+	].includes(type ?? '');
 }
 
 export function isLiteral(expr: NqlExpression): expr is NqlLiteral {
