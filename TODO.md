@@ -66,4 +66,6 @@
 
 ## Completed
 
+- [x] ✅ [NQL] Column validation — compile-time column existence checking (2026-02-04)
+
 (Archived → docs/historic/done-2026-02.md)
