@@ -913,11 +913,8 @@ describe('NQL → SQL bind + CTE E2E', () => {
 			'posts | where published = false | select id | bind toDelete\ndelete from comments where postId in (toDelete)',
 			mutationSchema.model,
 		);
-		// Note: bound CTE ref in IN() is resolved as value, not inline subquery.
-		// Inline subquery expansion works for direct subqueries (see S1/S2).
-		// Bound CTE ref expansion is tracked separately.
 		expect(sql).toEqual(
-			'with "toDelete" as (select posts.id from posts where posts.published = $1) delete from comments where comments."postid" = any ($1)',
+			'with "toDelete" as (select posts.id from posts where posts.published = $1) delete from comments where comments."postid" = any (select "todelete_subq_0".id from "todelete" as "todelete_subq_0")',
 		);
 	});
 });

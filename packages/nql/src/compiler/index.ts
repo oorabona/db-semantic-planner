@@ -1278,9 +1278,9 @@ export class NqlCompiler {
 			case 'insert_from':
 				return this.compileInsertFrom(mutation, bindings);
 			case 'update':
-				return this.compileUpdate(mutation);
+				return this.compileUpdate(mutation, bindings);
 			case 'delete':
-				return this.compileDelete(mutation);
+				return this.compileDelete(mutation, bindings);
 			case 'upsert':
 				return this.compileUpsert(mutation);
 			case 'upsert_from':
@@ -1301,6 +1301,86 @@ export class NqlCompiler {
 			table: insert.table,
 			values: [values],
 		};
+	}
+
+	/**
+	 * Walk a WhereIntent tree and resolve any IN clause whose values contain
+	 * a $ref matching a bound CTE name → convert to subquery.
+	 */
+	private resolveBindingsInWhere(
+		where: WhereIntent,
+		bindings?: Map<string, QueryIntent>,
+	): WhereIntent {
+		if (!bindings || bindings.size === 0) return where;
+
+		if (where.kind === 'in') {
+			const inWhere = where as WhereInIntent;
+			if (inWhere.values && inWhere.values.length === 1) {
+				const val = inWhere.values[0];
+				if (
+					val &&
+					typeof val === 'object' &&
+					'$ref' in (val as Record<string, unknown>)
+				) {
+					const ref = (val as { $ref: string }).$ref;
+					if (bindings.has(ref)) {
+						// Reference CTE by name — extract select column from bound query
+						const boundQuery = bindings.get(ref)!;
+						const boundSelect = boundQuery.select;
+						// Derive the select column from the bound query's SELECT clause
+						const selectFields: readonly string[] | undefined =
+							boundSelect && 'fields' in boundSelect
+								? (boundSelect as SelectFieldsIntent).fields
+								: undefined;
+						const cteRef: QueryIntent = {
+							type: 'select',
+							from: ref,
+							...(selectFields && {
+								select: {
+									type: 'fields' as const,
+									fields: selectFields,
+								},
+							}),
+						};
+						return {
+							kind: 'in',
+							field: inWhere.field,
+							values: [],
+							subquery: cteRef,
+						} as WhereInIntent;
+					}
+				}
+			}
+			return where;
+		}
+
+		if (where.kind === 'not') {
+			const notWhere = where as {
+				kind: 'not';
+				condition: WhereIntent;
+			};
+			const resolved = this.resolveBindingsInWhere(
+				notWhere.condition,
+				bindings,
+			);
+			return resolved === notWhere.condition
+				? where
+				: { kind: 'not', condition: resolved };
+		}
+
+		if (where.kind === 'and' || where.kind === 'or') {
+			const compound = where as {
+				kind: 'and' | 'or';
+				conditions: WhereIntent[];
+			};
+			const resolved = compound.conditions.map((c) =>
+				this.resolveBindingsInWhere(c, bindings),
+			);
+			const changed = resolved.some((r, i) => r !== compound.conditions[i]);
+			return changed ? { kind: compound.kind, conditions: resolved } : where;
+		}
+
+		return where;
 	}
 
 	private compileInsertFrom(
@@ -1325,7 +1405,10 @@ export class NqlCompiler {
 		};
 	}
 
-	private compileUpdate(update: NqlUpdate): UpdateIntent {
+	private compileUpdate(
+		update: NqlUpdate,
+		bindings?: Map<string, QueryIntent>,
+	): UpdateIntent {
 		this.currentFromTable = update.table;
 		this.validateTable(update.table);
 		const set: Record<string, unknown> = {};
@@ -1339,7 +1422,10 @@ export class NqlCompiler {
 				type: 'update',
 				table: update.table,
 				set,
-				where: this.compileExpression(update.where),
+				where: this.resolveBindingsInWhere(
+					this.compileExpression(update.where),
+					bindings,
+				),
 			};
 		}
 
@@ -1351,14 +1437,20 @@ export class NqlCompiler {
 		};
 	}
 
-	private compileDelete(del: NqlDelete): DeleteIntent {
+	private compileDelete(
+		del: NqlDelete,
+		bindings?: Map<string, QueryIntent>,
+	): DeleteIntent {
 		this.currentFromTable = del.table;
 		this.validateTable(del.table);
 		if (del.where) {
 			return {
 				type: 'delete',
 				table: del.table,
-				where: this.compileExpression(del.where),
+				where: this.resolveBindingsInWhere(
+					this.compileExpression(del.where),
+					bindings,
+				),
 			};
 		}
 
