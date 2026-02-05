@@ -112,6 +112,15 @@ export {
 	type RelationTupleDef,
 	singularize,
 } from './lightweight-model.js';
+// E10: Injectable Logger
+export {
+	defaultLogger,
+	getLogger,
+	type Logger,
+	resetLogger,
+	setLogger,
+	silentLogger,
+} from './logger.js';
 // Mutation Builders (DX-010, DX-026)
 export {
 	DeleteBuilder,

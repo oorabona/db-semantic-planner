@@ -32,8 +32,8 @@
   - Ref: `packages/mcp-server/src/server.ts:55`
 - [ ] **E06b** [MCP] Implement v1 resources — `schema://manifest`, `schema://intent-schema`, `schema://cookbook`
   - Ref: `packages/mcp-server/src/server.ts:60`
-- [ ] **E06c** [MCP] Replace placeholder test with real coverage
-  - Ref: `packages/mcp-server/src/index.test.ts:2`
+- [x] ✅ **E06c** [MCP] Replace placeholder test with real coverage (2026-02-05)
+  - 25 tests: validatePath, loadSchema, createMcpServer
 
 (E08 archived → docs/historic/done-2026-02.md)
 
@@ -53,10 +53,11 @@
 
 ### Infrastructure
 
-- [ ] **E10** [Core] Injectable logger — replace `console.warn` in library code
+- [x] ✅ **E10** [Core] Injectable logger — replace `console.warn` in library code (2026-02-05)
+  - Logger interface + setLogger/getLogger API
+  - silentLogger for testing, defaultLogger uses console
 
 (E09, E09b archived → docs/historic/done-2026-02.md)
-  - Ref: `packages/core/src/dx/table-ref-factory.ts:68`, `handlers/expression/raw.ts:82`
 
 ---
 

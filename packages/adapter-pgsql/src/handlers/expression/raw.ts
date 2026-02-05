@@ -10,6 +10,7 @@
  * - Should be audited in code reviews
  */
 
+import { getLogger } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
 import type {
 	CompilerContext,
@@ -79,7 +80,7 @@ export const rawHandler: ExpressionHandler = {
 
 		// Log warning in development
 		if (process.env.NODE_ENV !== 'production') {
-			console.warn(
+			getLogger().warn(
 				`[adapter-pgsql] ⚠️ Raw SQL expression used: ${sql.slice(0, 50)}${sql.length > 50 ? '...' : ''}`,
 			);
 		}

@@ -9,6 +9,7 @@
  */
 
 import type { ModelIR } from '../model-ir.js';
+import { getLogger } from './logger.js';
 import {
 	BRAND,
 	COLUMN_META,
@@ -65,7 +66,7 @@ const JS_RESERVED_WORDS = new Set([
  * This is ERR-05 from the spec.
  */
 function warnReservedWord(tableName: string, columnName: string): void {
-	console.warn(
+	getLogger().warn(
 		`[dbsp] Warning: Column "${columnName}" in table "${tableName}" is a JavaScript reserved word. ` +
 			`Access it via bracket notation: table['${columnName}']`,
 	);
