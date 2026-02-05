@@ -16,32 +16,40 @@
 
 - [ ] **E01** [CLI] `generate` options ineffective — `--drop`, `--dialect`, `--casing` exposed but not applied
   - Ref: `packages/cli/src/commands/generate.ts:27-78`
+  - DoD: Each flag produces different output; test validates each option
 
 ### Adapter Correctness
 
 - [ ] **E02** [Adapter] `FetchDirection.last` cursor bug — maps to same code as `first`
   - Ref: `packages/adapter-pgsql/src/streaming/cursor.ts:288`
+  - DoD: `last` returns last N rows (not first); test shows `first` ≠ `last` results
 - [ ] **E02b** [Adapter] `via` hint ambiguity — when multiple paths exist
   - Ref: legacy TODO_ADAPTER_PGSQL.md:89
+  - DoD: `via` hint selects correct FK path; error if ambiguous without hint
 
 ### Core Correctness
 
 - [ ] **E03** [Core] `byId`/`byIds` hardcoded 'id' — PK non-`id` broken
   - Ref: `packages/core/src/dx/orm.ts:1120-1132`, `query-executor.ts:232`
+  - DoD: `byId()` uses schema PK name; test with PK named `uuid` passes
 - [ ] **E04** [Core] ORM vs QueryExecutor path divergence — duplicate logic, risk of drift
   - Ref: `packages/core/src/dx/orm.ts:1096`, `query-executor.ts:193`
+  - DoD: Single execution path; no duplicate query logic; existing tests pass
 
 ### Compiler Correctness
 
 - [ ] **E05** [Adapter] Subquery WHERE end-to-end — branch returns `null`
   - Ref: `packages/adapter-pgsql/src/intent-to-decisions.ts:596`
+  - DoD: Subquery WHERE compiles to valid SQL (not null); E2E test with nested filter
 
 ### Introspection
 
 - [ ] **E07** [Core] `getSchemaFromDb()` missing — referenced but not implemented
   - Ref: `packages/core/src/dx/orm.ts:264`, E2E tests skipped
+  - DoD: `getSchemaFromDb()` returns ModelIR from live DB; adapter implements introspection
 - [ ] **E07b** [E2E] Introspection tests skipped — blocked on `getSchemaFromDb()`
   - Ref: `tests/e2e/introspection.test.ts:30`
+  - DoD: Tests unskipped and green (depends on E07)
 
 ---
 
