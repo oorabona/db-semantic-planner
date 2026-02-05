@@ -14,9 +14,7 @@
 
 ### Core Correctness
 
-- [ ] **E04** [Core] ORM vs QueryExecutor path divergence — duplicate logic, risk of drift
-  - Ref: `packages/core/src/dx/orm.ts:1096`, `query-executor.ts:193`
-  - DoD: Single execution path; no duplicate query logic; existing tests pass
+(Archived → docs/historic/done-2026-02.md)
 
 ### Introspection
 

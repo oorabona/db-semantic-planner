@@ -1,7 +1,7 @@
 /**
  * Shared hydration utilities for json_agg include results.
  *
- * Extracted from ResultHydrator and QueryExecutor to avoid duplication (DRY).
+ * Extracted from ResultHydrator and QueryBuilderImpl to avoid duplication (DRY).
  */
 import type { PlanReport } from '../planner.js';
 
