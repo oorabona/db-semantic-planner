@@ -12,12 +12,6 @@
 
 > These are confirmed bugs that affect correctness. Fix before new features.
 
-### Adapter Correctness
-
-- [ ] **E02b** [Adapter] `via` hint ambiguity — when multiple paths exist
-  - Ref: legacy TODO_ADAPTER_PGSQL.md:89
-  - DoD: `via` hint selects correct FK path; error if ambiguous without hint
-
 ### Core Correctness
 
 - [ ] **E04** [Core] ORM vs QueryExecutor path divergence — duplicate logic, risk of drift
