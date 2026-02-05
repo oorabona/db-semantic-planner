@@ -1,6 +1,9 @@
 # Data Flow Analysis
 
 **Date:** 2026-02-01
+**Last updated:** 2026-02-05 (doc sync)
+
+> ⚠️ Unverified in this refresh: line-level LOC counts and several step references (only items explicitly cited in this update are verified).
 
 ---
 
@@ -49,15 +52,15 @@ sequenceDiagram
 
 | Step | File:Line | Input | Output | LOC |
 |------|-----------|-------|--------|-----|
-| 1. Template tag | `core/src/dx/nql.ts:90` | NQL string | `NqlBuilder<T>` | 206 |
-| 2a. Lexer | `nql/src/lexer/tokens.ts` | String | Token[] | 330 |
-| 2b. Parser | `nql/src/parser/grammar.ts` | Token[] | CST | 1,247 |
-| 2c. Visitor | `nql/src/semantic/visitor.ts:80` | CST | `NqlProgram` | 1,303 |
-| 2d. Compiler | `nql/src/compiler/index.ts:178` | `NqlProgram` | `QueryIntent` | 1,287 |
-| 3. Planner | `core/src/planner.ts` | Intent + Model | `PlanReport` | 1,544 |
-| 4. SQL Compiler | `adapter-pgsql/src/compiler.ts:125` | PlanReport | PostgreSQL AST | 1,250 |
-| 5. Deparser | `adapter-pgsql/src/deparse.ts` | AST | SQL string | 10 |
-| 6. Executor | `adapter-pgsql/src/pgsql-adapter.ts:1610` | SQL + params | `T[]` | - |
+| 1. Template tag | `core/src/dx/nql.ts` | NQL string | `NqlBuilder<T>` | ⚠️ Unverified |
+| 2a. Lexer | `nql/src/lexer/tokens.ts` | String | Token[] | ⚠️ Unverified |
+| 2b. Parser | `nql/src/parser/grammar.ts` | Token[] | CST | ⚠️ Unverified |
+| 2c. Visitor | [`packages/nql/src/semantic/visitor.ts:105`](packages/nql/src/semantic/visitor.ts:105) | CST | `NqlProgram` | Verified anchor |
+| 2d. Compiler | [`packages/nql/src/compiler/index.ts:241`](packages/nql/src/compiler/index.ts:241) | `NqlProgram` | `QueryIntent` | Verified anchor |
+| 3. Planner | `core/src/planner.ts` | Intent + Model | `PlanReport` | ⚠️ Unverified |
+| 4. SQL Compiler | `adapter-pgsql/src/compiler.ts` | PlanReport | PostgreSQL AST | ⚠️ Unverified |
+| 5. Deparser | `adapter-pgsql/src/deparse.ts` | AST | SQL string | ⚠️ Unverified |
+| 6. Executor | [`packages/adapter-pgsql/src/pgsql-adapter.ts:144`](packages/adapter-pgsql/src/pgsql-adapter.ts:144) | SQL + params | `T[]` | Verified adapter entry |
 
 **Total critical path LOC:** ~7,177
 
@@ -121,10 +124,10 @@ sequenceDiagram
 
 | Step | File:Line | Input | Output |
 |------|-----------|-------|--------|
-| 1. Schema DSL | `core/src/dx/schema.ts:250` | Schema definition | `Schema<DB>` |
-| 2. Relation inference | `core/src/dx/schema.ts:450` | `ref()` declarations | `RelationIR[]` |
-| 3. Model builder | `core/src/dx/schema.ts:700` | Tables + Relations | `ModelIR` |
-| 4. ORM creation | `core/src/dx/orm.ts:80` | Model + Adapter | `OrmInstance<DB>` |
+| 1. Schema DSL | `core/src/dx/schema.ts` | Schema definition | `Schema<DB>` (⚠️ Unverified line) |
+| 2. Relation inference | `core/src/dx/schema.ts` | `ref()` declarations | `RelationIR[]` (⚠️ Unverified line) |
+| 3. Model builder | `core/src/dx/schema.ts` | Tables + Relations | `ModelIR` (⚠️ Unverified line) |
+| 4. ORM creation | [`packages/core/src/dx/orm.ts:308`](packages/core/src/dx/orm.ts:308) | Model + Adapter | `OrmInstance<DB>` (Verified anchor) |
 
 ### Test Coverage
 
@@ -150,7 +153,7 @@ sequenceDiagram
     participant C as Compiler
     participant PG as PostgreSQL
 
-    U->>ORM: orm.withSchema('tenant_123')
+     U->>ORM: orm.withSchema('tenant_123')
     ORM->>V: validateIdentifier('tenant_123')
     V-->>ORM: OK (or throw InvalidIdentifierError)
     ORM->>A: adapter.withSchema('tenant_123')
@@ -166,10 +169,10 @@ sequenceDiagram
 
 | Control | Location | Description |
 |---------|----------|-------------|
-| Identifier validation | `validate.ts:156-213` | Regex `/^[a-zA-Z_][a-zA-Z0-9_$]*$/`, max 63 chars |
-| Immutable scoping | `orm.ts:348-356` | Clone pattern prevents mutation |
-| SQL quoting | `deparse.ts` | Double-quoted identifiers via deparser |
-| Injection test | `pgsql-adapter.test.ts:342` | Verifies `tenant"; DROP TABLE` throws |
+| Identifier validation | `validate.ts` | Regex `/^[a-zA-Z_][a-zA-Z0-9_$]*$/`, max 63 chars (⚠️ Unverified line) |
+| Immutable scoping | [`packages/core/src/dx/orm.ts:325`](packages/core/src/dx/orm.ts:325) | Clone pattern prevents mutation (Verified anchor) |
+| SQL quoting | `deparse.ts` | Double-quoted identifiers via deparser (⚠️ Unverified line) |
+| Injection test | `pgsql-adapter.test.ts` | Verifies `tenant"; DROP TABLE` throws (⚠️ Unverified line) |
 
 ### Test Coverage
 
@@ -226,11 +229,12 @@ interface Dump {
 
 | Point | File | What |
 |-------|------|------|
-| Filter strategy | `planner.ts` | WHERE vs EXISTS vs JOIN decision |
-| Include strategy | `planner.ts` | json_agg vs JOIN vs lateral vs CTE |
-| Ambiguity warnings | `planner.ts` | Ambiguous relation names |
-| Row explosion warnings | `planner.ts` | Potential cartesian product |
-| Schema context | `pgsql-adapter.ts:1595` | Multi-tenant schema name |
+| dump() entry point | [`packages/core/src/dx/orm.ts:1153`](packages/core/src/dx/orm.ts:1153) | Dump payload construction (Verified anchor) |
+| Filter strategy | `planner.ts` | WHERE vs EXISTS vs JOIN decision (⚠️ Unverified line) |
+| Include strategy | `planner.ts` | json_agg vs JOIN vs lateral vs CTE (⚠️ Unverified line) |
+| Ambiguity warnings | `planner.ts` | Ambiguous relation names (⚠️ Unverified line) |
+| Row explosion warnings | `planner.ts` | Potential cartesian product (⚠️ Unverified line) |
+| Schema context | `pgsql-adapter.ts` | Multi-tenant schema name (⚠️ Unverified line) |
 
 ### Test Coverage
 
@@ -269,13 +273,13 @@ sequenceDiagram
 
 ### RETURNING Clause Compilation
 
-The RETURNING clause is compiled in 3 locations (DRY violation -- see BACKLOG #8):
+The RETURNING clause compilation path is anchored at [`packages/adapter-pgsql/src/compiler.ts:974`](packages/adapter-pgsql/src/compiler.ts:974). Specific INSERT/UPDATE/DELETE line offsets were not revalidated in this refresh.
 
 | Mutation | Location | SQL Pattern |
 |----------|----------|-------------|
-| INSERT | `compiler.ts:610` | `INSERT INTO ... RETURNING ...` |
-| UPDATE | `compiler.ts:662` | `UPDATE ... SET ... RETURNING ...` |
-| DELETE | `compiler.ts:704` | `DELETE FROM ... RETURNING ...` |
+| INSERT | `compiler.ts` | `INSERT INTO ... RETURNING ...` (⚠️ Unverified line) |
+| UPDATE | `compiler.ts` | `UPDATE ... SET ... RETURNING ...` (⚠️ Unverified line) |
+| DELETE | `compiler.ts` | `DELETE FROM ... RETURNING ...` (⚠️ Unverified line) |
 
 ### Data Transformations
 
@@ -306,7 +310,7 @@ The RETURNING clause is compiled in 3 locations (DRY violation -- see BACKLOG #8
 
 ### Description
 
-Large result sets streamed via PostgreSQL cursors to avoid loading all rows into memory.
+Large result sets streamed via PostgreSQL cursors to avoid loading all rows into memory. The async iterator yields rows one at a time, with internal cursor fetches done in batches.
 
 ### Sequence Diagram
 
@@ -320,13 +324,13 @@ sequenceDiagram
     U->>QB: orm.select('events').stream({ batchSize: 100 })
     QB->>A: compile + stream request
     A->>PG: BEGIN
-    A->>PG: DECLARE cursor_xxx CURSOR FOR SELECT ...
-    loop For each batch
-        A->>PG: FETCH 100 FROM cursor_xxx
+    A->>PG: DECLARE cursor_<timestamp>_<uuid> CURSOR FOR SELECT ...
+    loop For each batch (default: 100 rows)
+        A->>PG: FETCH 100 FROM cursor_<timestamp>_<uuid>
         PG-->>A: Row[] (up to 100)
-        A-->>U: yield Row[] (async iterator)
+        A-->>U: yield Row (async iterator)
     end
-    A->>PG: CLOSE cursor_xxx
+    A->>PG: CLOSE cursor_<timestamp>_<uuid>
     A->>PG: COMMIT
 ```
 
@@ -334,16 +338,16 @@ sequenceDiagram
 
 | Aspect | Detail |
 |--------|--------|
-| Cursor naming | `cursor_${crypto.randomUUID()}` (SEC-002: **RESOLVED** 2026-02-01) |
-| Transaction | Implicit BEGIN/COMMIT wrapping |
-| Batch size | Configurable via `stream({ batchSize: N })` |
-| Cleanup | CLOSE + COMMIT on iterator completion or error |
-| Error handling | Rollback on error, cursor always closed |
+| Cursor naming | `cursor_<timestamp>_<uuid>` (timestamp + UUID) |
+| Transaction | Single transaction per stream (`BEGIN` → `COMMIT`) |
+| Batch size | Default 100; override via `stream({ batchSize })` |
+| Cleanup | `CLOSE` cursor then `COMMIT` on normal completion |
+| Error handling | Roll back on error/early stop, then attempt cursor close |
 
 ### Test Coverage
 
-- :green_circle: Unit: `adapter-pgsql/src/__tests__/streaming.test.ts`
-- :green_circle: E2E: `tests/e2e/pimdam.q5.streaming.test.ts`
+- :green_circle: Unit: [`packages/adapter-pgsql/src/__tests__/explain-streaming.test.ts:226`](packages/adapter-pgsql/src/__tests__/explain-streaming.test.ts:226)
+- :green_circle: E2E: [`tests/e2e/streaming.test.ts:1`](tests/e2e/streaming.test.ts:1)
 
 ---
 
@@ -356,4 +360,15 @@ sequenceDiagram
 | withSchema | 5 | ~500 | :green_circle: Injection-proof | :green_circle: Unit + E2E |
 | dump() | 6 | ~3,000 | N/A (read-only) | :green_circle: Full |
 | Mutations + RETURNING | 5 | ~1,500 | :green_circle: Parameterized | :green_circle: Unit + E2E |
-| Streaming (cursors) | 3 | ~400 | :green_circle: crypto.randomUUID | :green_circle: Unit + E2E |
+| Streaming (cursors) | 3 | ~400 | :green_circle: Cursor-managed | :green_circle: Unit + E2E |
+
+---
+
+## Deltas since last audit (2026-02-05 refresh)
+
+- Anchored NQL pipeline entry points to `NqlCstVisitor` and `NqlCompiler` ([`packages/nql/src/semantic/visitor.ts:105`](packages/nql/src/semantic/visitor.ts:105), [`packages/nql/src/compiler/index.ts:241`](packages/nql/src/compiler/index.ts:241)).
+- Anchored ModelIR creation to ORM entry in [`packages/core/src/dx/orm.ts:308`](packages/core/src/dx/orm.ts:308).
+- Anchored withSchema immutable scoping in [`packages/core/src/dx/orm.ts:325`](packages/core/src/dx/orm.ts:325).
+- Anchored dump() observability entry in [`packages/core/src/dx/orm.ts:1153`](packages/core/src/dx/orm.ts:1153).
+- Anchored mutation RETURNING compilation path in [`packages/adapter-pgsql/src/compiler.ts:974`](packages/adapter-pgsql/src/compiler.ts:974).
+- Validated streaming cursor flow (row-by-row yields, cursor naming, batch size, rollback/close behavior) and anchored tests ([`packages/adapter-pgsql/src/__tests__/explain-streaming.test.ts:226`](packages/adapter-pgsql/src/__tests__/explain-streaming.test.ts:226), [`tests/e2e/streaming.test.ts:1`](tests/e2e/streaming.test.ts:1)).

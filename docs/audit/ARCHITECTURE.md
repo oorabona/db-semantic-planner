@@ -1,5 +1,9 @@
 # Architecture Overview
 
+**Last updated:** 2026-02-05 (doc sync)
+
+> ⚠️ Unverified in this refresh: LOC counts and dependency graph were not recalculated.
+
 ## System Context Diagram
 
 ```mermaid
@@ -76,6 +80,12 @@ graph TB
     PgsqlAdapter --> Validate
 ```
 
+## Verified Entry Points (2026-02-05 refresh)
+
+- Core ORM entry: `QueryBuilderImpl` in [`packages/core/src/dx/orm.ts:660`](packages/core/src/dx/orm.ts:660).
+- Adapter entry: `PgsqlAdapter` in [`packages/adapter-pgsql/src/pgsql-adapter.ts:144`](packages/adapter-pgsql/src/pgsql-adapter.ts:144).
+- NQL pipeline: `NqlCstVisitor` and `NqlCompiler` in [`packages/nql/src/semantic/visitor.ts:105`](packages/nql/src/semantic/visitor.ts:105) and [`packages/nql/src/compiler/index.ts:241`](packages/nql/src/compiler/index.ts:241).
+
 ## Package Structure
 
 | Package | Purpose | LOC | Dependencies |
@@ -109,7 +119,7 @@ graph LR
     MCP --> Core
 ```
 
-**Architecture Compliance:** :green_circle: No violations detected. Core does not import adapter code.
+**Architecture Compliance:** :green_circle: Ports & Adapters alignment verified; dependency graph not re-audited. Entry points confirmed in [`packages/core/src/dx/orm.ts:660`](packages/core/src/dx/orm.ts:660) and [`packages/adapter-pgsql/src/pgsql-adapter.ts:144`](packages/adapter-pgsql/src/pgsql-adapter.ts:144).
 
 ## Architecture Patterns Used
 
@@ -149,3 +159,8 @@ sequenceDiagram
     A-->>ORM: T[] results
     ORM-->>U: typed results
 ```
+
+## Deltas since last audit (2026-02-05 refresh)
+
+- Verified primary entry points for Core, Adapter, and NQL pipeline ([`packages/core/src/dx/orm.ts:660`](packages/core/src/dx/orm.ts:660), [`packages/adapter-pgsql/src/pgsql-adapter.ts:144`](packages/adapter-pgsql/src/pgsql-adapter.ts:144), [`packages/nql/src/semantic/visitor.ts:105`](packages/nql/src/semantic/visitor.ts:105), [`packages/nql/src/compiler/index.ts:241`](packages/nql/src/compiler/index.ts:241)).
+- Marked LOC counts and dependency graph as unverified pending a fresh code scan.

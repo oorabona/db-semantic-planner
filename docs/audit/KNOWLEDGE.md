@@ -2,6 +2,9 @@
 
 **Date:** 2026-02-01
 **Project:** db-semantic-planner
+**Last updated:** 2026-02-05 (doc sync)
+
+> ⚠️ Unverified in this refresh: documentation counts and drift counts not re-audited.
 
 ---
 
@@ -27,9 +30,11 @@
 |----------|--------|--------|
 | `README.md` | :green_circle: FIXED | ~~References non-existent packages~~ — Corrected 2026-02-01 |
 | `CLAUDE.md` | :green_circle: FIXED | ~~Architecture references Kysely~~ — Corrected 2026-02-01 |
-| `DOCUMENTATION_INDEX.md` | :yellow_circle: PARTIAL | 4 Kysely references remaining (lines 51, 68, 100, 145) |
-| `docs/specs/ARCH-002-one-ring.md` | :yellow_circle: STALE | References `packages/schema` (merged into core) |
+| `DOCUMENTATION_INDEX.md` | :yellow_circle: PARTIAL | 4 Kysely references remaining (⚠️ unverified; see [`docs/DOCUMENTATION_INDEX.md:50`](docs/DOCUMENTATION_INDEX.md:50)) |
+| `docs/specs/ARCH-002-one-ring.md` | :yellow_circle: STALE | References `packages/schema` (⚠️ unverified; see [`docs/specs/ARCH-002-one-ring.md:7`](docs/specs/ARCH-002-one-ring.md:7)) |
 | `docs/specs/ARCH-006-simplified-orm-entry-point.md` | :green_circle: FIXED | Status updated to "Canonical" |
+| [`docs/PRODUCTION.md`](docs/PRODUCTION.md:32) | :red_circle: DRIFT | References Kysely adapter examples |
+| [`docs/CLI_USAGE.md`](docs/CLI_USAGE.md:47) | :red_circle: DRIFT | CLI generate targets still list `kysely` + `manifest` |
 | `TODO.md` | :green_circle: CURRENT | Epics accurately tracked |
 | `CHANGELOG.md` | :green_circle: CURRENT | Up to date |
 | `SECURITY.md` | :green_circle: CURRENT | Vulnerability policy in place |
@@ -71,22 +76,24 @@
 
 ## 3. Doc-Code Coherence Analysis
 
-### Critical Drifts (8 MAJOR)
+### Critical Drifts (10 MAJOR)
 
 | # | Document | Claim | Reality | Severity |
 |---|----------|-------|---------|----------|
 | 1 | ~~README.md~~ | ~~adapter-kysely~~ | **RESOLVED** 2026-02-01 | :green_circle: Fixed |
 | 2 | ~~README.md~~ | ~~@dbsp/schema~~ | **RESOLVED** 2026-02-01 | :green_circle: Fixed |
 | 3 | ~~CLAUDE.md~~ | ~~Kysely architecture~~ | **RESOLVED** 2026-02-01 | :green_circle: Fixed |
-| 4 | DOCUMENTATION_INDEX.md:51,68,100,145 | 4 Kysely references | Still present | **MAJOR** |
-| 5 | DOCUMENTATION_INDEX.md | Test counts | Needs update | **MINOR** |
-| 6 | ARCH-002 spec:25-26 | `packages/schema` path | Schema DSL in core | **MAJOR** |
+| 4 | DOCUMENTATION_INDEX.md:51,68,100,145 | 4 Kysely references | ⚠️ Unverified in this refresh | **MAJOR** |
+| 5 | DOCUMENTATION_INDEX.md | Test counts | ⚠️ Unverified in this refresh | **MINOR** |
+| 6 | ARCH-002 spec:25-26 | `packages/schema` path | ⚠️ Unverified in this refresh | **MAJOR** |
 | 7 | ~~ARCH-006 spec~~ | ~~Status: "Draft"~~ | **RESOLVED** → Canonical | :green_circle: Fixed |
 | 8 | ~~README code examples~~ | ~~createKyselyAdapter~~ | **RESOLVED** 2026-02-01 | :green_circle: Fixed |
+| 9 | [`docs/PRODUCTION.md:32`](docs/PRODUCTION.md:32) | Kysely adapter usage in production guide | **DRIFT** (adapter-pgsql only) | **MAJOR** |
+| 10 | [`docs/CLI_USAGE.md:47`](docs/CLI_USAGE.md:47) | `generate` targets list `kysely` + `manifest` | **DRIFT** (targets removed; CLI errors) | **MAJOR** |
 
 ### Root Cause
 
-The adapter-kysely sunset (2026-01-30, commit `2f9a603`) created significant documentation debt. User-facing docs were not updated when the architectural change occurred.
+The adapter-kysely sunset (2026-01-30, commit `2f9a603`) created significant documentation debt. User-facing docs were not updated when the architectural change occurred, and CLI documentation now conflicts with enforcement in [`packages/cli/src/commands/generate.ts:126`](packages/cli/src/commands/generate.ts:126).
 
 ### Drift Score
 
@@ -204,15 +211,15 @@ The adapter-kysely sunset (2026-01-30, commit `2f9a603`) created significant doc
 
 ### Immediate (P0)
 
-1. **Rewrite README.md** -- Remove all `@dbsp/adapter-kysely` and `@dbsp/schema` references
-2. **Update CLAUDE.md** -- Fix architecture diagram and API examples
-3. **Update DOCUMENTATION_INDEX.md** -- Fix package list, test counts, architecture diagram
+1. **Rewrite README.md** -- Remove all `@dbsp/adapter-kysely` and `@dbsp/schema` references (⚠️ out of audit scope for this update)
+2. **Update CLAUDE.md** -- Fix architecture diagram and API examples (⚠️ out of audit scope)
+3. **Update DOCUMENTATION_INDEX.md** -- Fix package list, test counts, architecture diagram (⚠️ out of audit scope)
 
 ### Short-term (P1)
 
 4. **Update ARCH-006 spec** -- Change status from "Draft" to "Canonical"
 5. **Update DX-040 status** -- Change from "draft" to "complete" in index
-6. **Update ARCH-002 spec** -- Replace `packages/schema` references with `packages/core/src/dx/schema.ts`
+6. **Update ARCH-002 spec** -- Replace `packages/schema` references with `packages/core/src/dx/schema.ts` (⚠️ out of audit scope)
 
 ### Medium-term (P2)
 
@@ -234,3 +241,9 @@ The adapter-kysely sunset (2026-01-30, commit `2f9a603`) created significant doc
 **Rationale:** Architecture is well-documented in specs/ADRs, but user-facing documentation (README, CLAUDE.md) is critically outdated due to the adapter-kysely sunset. New users following README instructions will encounter immediate failures.
 
 **Projected score after P0 fixes:** ~8/10
+
+---
+
+## Deltas since last audit (2026-02-05 refresh)
+
+- Confirmed ongoing drift references for documentation index and ARCH-002 spec are still flagged as **unverified** pending re-checks ([`docs/DOCUMENTATION_INDEX.md:50`](docs/DOCUMENTATION_INDEX.md:50), [`docs/specs/ARCH-002-one-ring.md:7`](docs/specs/ARCH-002-one-ring.md:7)).

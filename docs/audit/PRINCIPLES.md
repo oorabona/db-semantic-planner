@@ -2,6 +2,9 @@
 
 **Date:** 2026-02-01
 **Focus:** DRY compliance, execution path clarity, dead code
+**Last updated:** 2026-02-05 (doc sync)
+
+> ⚠️ Unverified in this refresh: DRY counts and line-level locations not explicitly cited below.
 
 ---
 
@@ -75,10 +78,10 @@
 
 | ID | Logic | Locations | Severity |
 |----|-------|-----------|----------|
-| DRY-N01 | **getColumnName()** — identical function extracting COLUMN_META symbol | `filters.ts:93`, `window-functions.ts:28`, `typed-query-builder.ts:49`, `functions.ts:87` (4×) | **HIGH** |
-| DRY-N02 | **buildColumnRef()** — identical WHERE handler helper | `comparison.ts:29`, `null.ts:20`, `in.ts:26`, `like.ts:21` (4×) | **HIGH** |
-| DRY-N03 | **Comparison filters** — eq/neq/gt/gte/lt/lte identical structure, only operator differs | `filters.ts:172-309` (6× ~20 LOC each = 120 LOC duplicated) | **HIGH** |
-| DRY-N04 | **buildParamRef()** — identical param binding helper | `comparison.ts:36`, `like.ts:29` (2×) | MEDIUM |
+| DRY-N01 | **getColumnName()** — identical function extracting COLUMN_META symbol | **Resolved:** centralized helper in [`packages/core/src/dx/column-utils.ts:8`](packages/core/src/dx/column-utils.ts:8) | **HIGH** |
+| DRY-N02 | **buildColumnRef()** — identical WHERE handler helper | **Resolved:** shared helper in [`packages/adapter-pgsql/src/handlers/where/utils.ts:15`](packages/adapter-pgsql/src/handlers/where/utils.ts:15) | **HIGH** |
+| DRY-N03 | **Comparison filters** — eq/neq/gt/gte/lt/lte boilerplate | **Partially addressed:** `createComparisonFilter()` exists in [`packages/core/src/dx/filters.ts:121`](packages/core/src/dx/filters.ts:121); adoption across all filters **unverified** | **HIGH** |
+| DRY-N04 | **buildParamRef()** — identical param binding helper | ⚠️ Unverified status (previously duplicated in handlers) | MEDIUM |
 | DRY-N05 | **Column target building** — join and lateral handlers duplicate ResTarget construction | `join.ts:47-79`, `lateral.ts:22-50` | MEDIUM |
 | DRY-N06 | **Mutation builder constructors** — 4 builders × 14 identical field assignments | `mutation-builders.ts` (56 duplicate lines) | MEDIUM |
 | DRY-N07 | **Mutation fluent methods** — `return new XBuilder({ table: this.table, ... })` repeated | `mutation-builders.ts` (all methods) | MEDIUM |
@@ -86,7 +89,7 @@
 | DRY-N09 | **Clone methods** — manual 15-field copying in 3 builder classes | `orm.ts:1719`, `typed-query-builder.ts:175`, `subquery-builder.ts:157` | MEDIUM |
 | DRY-N10 | **NQL context validation** — 61 identical `if (!ctx.X) throw ...` patterns | `visitor.ts` (61 occurrences) | MEDIUM |
 | DRY-N11 | **`currentAlias ?? rootTable`** — repeated across 4+ expression handlers | `aggregate.ts`, `column.ts`, `window.ts`, `coalesce.ts` | LOW |
-| DRY-N12 | **normalizeSQL()** — 3 different implementations | `ast-compare.ts:196`, `golden-sql.test.ts:49`, `assertion-functions.ts:23` | MEDIUM |
+| DRY-N12 | **normalizeSQL()** — 3 different implementations | **Canonical helper** in [`packages/adapter-pgsql/src/ast-helpers.ts:37`](packages/adapter-pgsql/src/ast-helpers.ts:37); CLI re-exports via [`packages/cli/src/repl/assertion-functions.ts:11`](packages/cli/src/repl/assertion-functions.ts:11). Full deduplication **unverified** | MEDIUM |
 
 ### Previously Known Violations (Status Update)
 
@@ -102,9 +105,9 @@
 
 | What | How | Impact |
 |------|-----|--------|
-| `compiler.ts` monolithic | Handler pattern: `handlers/where/`, `handlers/expression/`, `handlers/include/` | -44% LOC |
-| `orm.ts` mixed concerns | Extracted `ResultHydrator`, `QueryExecutor` | -23% LOC |
-| `PgsqlAdapter` bloat | Extracted `plan-decision-extractor.ts`, `compiler-conditions.ts` | -18% LOC |
+| `compiler.ts` monolithic | Handler pattern: `handlers/where/`, `handlers/expression/`, `handlers/include/` | -44% LOC (⚠️ Unverified this refresh) |
+| `orm.ts` mixed concerns | Extracted `ResultHydrator`, `QueryExecutor` | -23% LOC (⚠️ Unverified this refresh) |
+| `PgsqlAdapter` bloat | Extracted `plan-decision-extractor.ts`, `compiler-conditions.ts` | -18% LOC (⚠️ Unverified this refresh) |
 
 ---
 
@@ -127,8 +130,8 @@
 
 | Item | Location | Evidence | Severity |
 |------|----------|----------|----------|
-| `format()` function | `nql/src/index.ts:205` | Exported, never called, `_ast` param prefix | MEDIUM |
-| `validate()` stub | `nql/src/index.ts:151-157` | Just calls `parse()`, marked @deprecated | LOW |
+| `format()` function | [`packages/nql/src/index.ts:98`](packages/nql/src/index.ts:98) | Not exported from public API; no public surface exposure | LOW |
+| `validate()` stub | [`packages/nql/src/index.ts:98`](packages/nql/src/index.ts:98) | Not exported from public API; no public surface exposure | LOW |
 | `NqlLimitError` interface | `nql/src/errors/types.ts:42` | Defined, never used | LOW |
 | `NqlWarning` interface | `nql/src/errors/types.ts:49` | Defined, never used | LOW |
 | `_getRelationPath()` | `core/src/dx/filters.ts:80` | Private, not called | LOW |
@@ -162,7 +165,7 @@
 | Symbol | Location A | Location B | Purpose A | Purpose B |
 |--------|-----------|-----------|-----------|-----------|
 | `compile()` | `nql/compiler` | `adapter-pgsql/compiler` | NQL AST → IntentAST | PlanReport → PostgreSQL AST |
-| `validate()` | `nql/index.ts` | `adapter-pgsql/validate.ts` | NQL parse validation (stub) | Identifier validation (regex) |
+| `validate()` | `nql/index.ts` | `adapter-pgsql/validate.ts` | Not exported publicly in NQL (see [`packages/nql/src/index.ts:98`](packages/nql/src/index.ts:98)) | Identifier validation (regex) |
 | `normalizeSQL()` | `adapter-pgsql/ast-compare.ts` | `cli/assertion-functions.ts` | Test AST comparison | Assertion result comparison |
 | `getColumnName()` | `filters.ts` | `functions.ts` / `window-functions.ts` / `typed-query-builder.ts` | Same purpose — **should be deduplicated** |
 
@@ -189,3 +192,11 @@
 |------------|---------------|---------------------|
 | 2026-01-20 → 2026-01-31 | 18 items | compiler.ts -44%, orm.ts -23%, handler pattern |
 | 2026-01-31 → 2026-02-01 | 5 items | README/CLAUDE.md fixed, Math.random→crypto.randomUUID, ARCH-006→Canonical, PgsqlAdapter -18% |
+
+---
+
+## Deltas since last audit (2026-02-05 refresh)
+
+- DRY remediation confirmed for `getColumnName()` and `buildColumnRef()` using shared helpers ([`packages/core/src/dx/column-utils.ts:8`](packages/core/src/dx/column-utils.ts:8), [`packages/adapter-pgsql/src/handlers/where/utils.ts:15`](packages/adapter-pgsql/src/handlers/where/utils.ts:15)).
+- `createComparisonFilter()` now exists as a shared helper in [`packages/core/src/dx/filters.ts:121`](packages/core/src/dx/filters.ts:121) (usage adoption still unverified).
+- Canonical `normalizeSQL()` helper documented in [`packages/adapter-pgsql/src/ast-helpers.ts:37`](packages/adapter-pgsql/src/ast-helpers.ts:37) with CLI re-export in [`packages/cli/src/repl/assertion-functions.ts:11`](packages/cli/src/repl/assertion-functions.ts:11).

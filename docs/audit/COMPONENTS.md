@@ -2,6 +2,9 @@
 
 **Date:** 2026-02-01
 **Scope:** All 6 packages — focus DRY, execution paths, dead code
+**Last updated:** 2026-02-05 (doc sync)
+
+> ⚠️ Unverified in this refresh: LOC counts, test ratios, and most file line offsets.
 
 ---
 
@@ -48,7 +51,7 @@ DX Layer (dx/)
 
 | ID | Severity | Issue |
 |----|----------|-------|
-| CORE-001 | HIGH | `QueryBuilderImpl` god class (1,091 LOC, 15 fields, 20+ methods, 7 responsibilities) — reduced from 1,774 |
+| CORE-001 | HIGH | `QueryBuilderImpl` god class — entry point anchored at [`packages/core/src/dx/orm.ts:660`](packages/core/src/dx/orm.ts:660) (LOC figures unverified) |
 | CORE-002 | HIGH | 20+ identical `clone()` calls at start of every fluent method (DRY) |
 | CORE-003 | MEDIUM | `types.ts` has 26 exported types mixing query, orm, pagination, aggregation |
 | CORE-004 | MEDIUM | `filters.ts` has 57 functions + WindowBuilder class (SRP) |
@@ -57,8 +60,8 @@ DX Layer (dx/)
 | CORE-007 | MEDIUM | 7 `any` types in `result-hydrator.ts` with biome-ignore |
 | CORE-008 | LOW | 10+ type assertions in `intent-builder.ts` (exactOptionalPropertyTypes workaround) |
 | CORE-009 | LOW | 4 deprecated exports still present (nqlCompiler, NqlCompilerFn, namingConvention, validate()) |
-| CORE-010 | HIGH | **NEW:** `getColumnName()` duplicated 4× (filters, functions, window-functions, typed-query-builder) |
-| CORE-011 | HIGH | **NEW:** Comparison filters (eq/neq/gt/gte/lt/lte) — 120 LOC identical boilerplate |
+| CORE-010 | HIGH | **Resolved:** `getColumnName()` centralized in [`packages/core/src/dx/column-utils.ts:8`](packages/core/src/dx/column-utils.ts:8) |
+| CORE-011 | HIGH | **Partial:** comparison filter factory exists in [`packages/core/src/dx/filters.ts:121`](packages/core/src/dx/filters.ts:121); usage adoption unverified |
 | CORE-012 | MEDIUM | **NEW:** `isRecursiveIncludeOptions()` exported from both types.ts and intent-builder.ts |
 | CORE-013 | MEDIUM | **NEW:** Mutation builder constructors — 56 identical field assignments across 4 builders |
 | CORE-014 | MEDIUM | **NEW:** `_getRelationPath()` private function in filters.ts — never called |
@@ -113,14 +116,14 @@ streaming/ — Cursor-based streaming
 
 | ID | Severity | Issue |
 |----|----------|-------|
-| PGSQL-001 | HIGH | `PgsqlAdapter` god class (1,592 LOC, 21+ methods, 10 responsibilities) — reduced from 1,930 |
-| PGSQL-002 | HIGH | 15-case switch on `decision.type` in compiler (OCP violation) — reduced from 44 |
+| PGSQL-001 | HIGH | `PgsqlAdapter` god class — entry point anchored at [`packages/adapter-pgsql/src/pgsql-adapter.ts:144`](packages/adapter-pgsql/src/pgsql-adapter.ts:144) (LOC figures unverified) |
+| PGSQL-002 | HIGH | 15-case switch on `decision.type` in compiler (OCP violation) — anchor in [`packages/adapter-pgsql/src/compiler.ts:538`](packages/adapter-pgsql/src/compiler.ts:538) |
 | PGSQL-003 | MEDIUM | RETURNING clause compilation duplicated 3 times |
 | PGSQL-004 | MEDIUM | FK derivation logic duplicated in 3 locations |
-| PGSQL-005 | MEDIUM | `compileSubqueryIncludeManyToMany()` — 550+ LOC, deeply nested (was: dotted-field→EXISTS) |
+| PGSQL-005 | MEDIUM | `compileSubqueryIncludeManyToMany()` complexity hotspot — anchored in [`packages/adapter-pgsql/src/pgsql-adapter.ts:749`](packages/adapter-pgsql/src/pgsql-adapter.ts:749) |
 | PGSQL-006 | ~~LOW~~ | ~~`Math.random()` for cursor names~~ — **RESOLVED:** now uses `crypto.randomUUID()` |
 | PGSQL-007 | LOW | Silent error suppression in transaction rollback |
-| PGSQL-008 | HIGH | **NEW:** `buildColumnRef()` duplicated in 4 WHERE handlers |
+| PGSQL-008 | HIGH | **Resolved:** `buildColumnRef()` shared helper in [`packages/adapter-pgsql/src/handlers/where/utils.ts:15`](packages/adapter-pgsql/src/handlers/where/utils.ts:15) |
 | PGSQL-009 | MEDIUM | **NEW:** `buildParamRef()` duplicated in 2 handlers |
 | PGSQL-010 | MEDIUM | **NEW:** Column target building duplicated in join/lateral handlers |
 | PGSQL-011 | MEDIUM | **NEW:** JSON_AGG FK direction logic duplicated across compiler, json-agg, subquery |
@@ -160,17 +163,17 @@ semantic/visitor.ts (1,303 LOC) — CST → AST transformer
 compiler/index.ts (1,287 LOC) — AST → IntentAST compiler
 parser/ast.ts (471 LOC) — NQL AST type definitions
 errors/types.ts (142 LOC) — Error types
-index.ts (206 LOC) — Public API: parse(), validate(), compile()
+index.ts (206 LOC) — Public API: parse(), compile() (no `format()`/`validate()` exports)
 ```
 
 ### Findings
 
 | ID | Severity | Issue |
 |----|----------|-------|
-| NQL-001 | HIGH | `NqlCstVisitor` god class (1,303 LOC, 40+ methods) |
+| NQL-001 | HIGH | `NqlCstVisitor` god class — anchored at [`packages/nql/src/semantic/visitor.ts:105`](packages/nql/src/semantic/visitor.ts:105) |
 | NQL-002 | HIGH | 86 `throw new Error()` calls without structured types in visitor |
-| NQL-003 | MEDIUM | `compileQuery()` function handles 8 responsibilities (114 lines) |
-| NQL-004 | MEDIUM | `validate()` is a stub — just calls `parse()` |
+| NQL-003 | MEDIUM | `compileQuery()` function handles 8 responsibilities (line counts unverified) |
+| NQL-004 | MEDIUM | `validate()` is not exported from public API (confirmed in [`packages/nql/src/index.ts:98`](packages/nql/src/index.ts:98)) |
 | NQL-005 | LOW | No position tracking in most visitor errors |
 
 ### Strengths
@@ -265,7 +268,7 @@ index.ts (206 LOC) — Public API: parse(), validate(), compile()
 
 | ID | Severity | Issue |
 |----|----------|-------|
-| MCP-001 | HIGH | Only 1 placeholder test (`expect(true).toBe(true)`) |
+| MCP-001 | HIGH | Only 1 placeholder test (`expect(true).toBe(true)`) in [`packages/mcp-server/src/index.test.ts:8`](packages/mcp-server/src/index.test.ts:8) |
 | MCP-002 | MEDIUM | Implementation marked "Ready" but is skeletal |
 
 ### Strengths
