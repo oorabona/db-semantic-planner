@@ -15,6 +15,7 @@ import type {
 	ResolvedSchema,
 	SchemaConfigInput,
 	SchemaConventionsDefinition,
+	SchemaDefaultFilters,
 	SchemaHintsDefinition,
 	SchemaIndexesDefinition,
 	SchemaRelationsDefinition,
@@ -59,6 +60,7 @@ export function defineSchema<T extends SchemaTablesDefinition>(
 	const hints: SchemaHintsDefinition = config?.hints ?? {};
 	const conventions: SchemaConventionsDefinition = config?.conventions ?? {};
 	const indexes: SchemaIndexesDefinition = config?.indexes ?? {};
+	const defaultFilters: SchemaDefaultFilters = config?.defaultFilters ?? {};
 
 	// Merge user conventions with defaults
 	const resolvedConventions: Required<SchemaConventionsDefinition> = {
@@ -79,12 +81,16 @@ export function defineSchema<T extends SchemaTablesDefinition>(
 	// Validate hints reference existing relations
 	validateHints(allRelations, hints);
 
+	// Validate default filters reference existing tables
+	validateDefaultFilters(tables, defaultFilters);
+
 	return {
 		tables,
 		relations: allRelations,
 		hints,
 		conventions: resolvedConventions,
 		indexes,
+		defaultFilters,
 	};
 }
 
@@ -132,6 +138,25 @@ function validateHints(
 			throw new SchemaValidationError(
 				`Hint path '${path}' does not match any relation. ` +
 					`Available: ${Object.keys(relations).join(', ')}`,
+			);
+		}
+	}
+}
+
+/**
+ * Validate that default filters reference existing tables.
+ */
+function validateDefaultFilters(
+	tables: SchemaTablesDefinition,
+	defaultFilters: SchemaDefaultFilters,
+): void {
+	const tableNames = new Set(Object.keys(tables));
+
+	for (const tableName of Object.keys(defaultFilters)) {
+		if (!tableNames.has(tableName)) {
+			throw new SchemaValidationError(
+				`Default filter for non-existent table '${tableName}'. ` +
+					`Available: ${[...tableNames].join(', ')}`,
 			);
 		}
 	}

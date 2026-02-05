@@ -922,6 +922,26 @@ export interface QueryBuilder<TResult = unknown> {
 	withPlanOptions(options: PlanOptions): QueryBuilder<TResult>;
 
 	/**
+	 * Disable default filters (e.g., soft delete) for this query.
+	 * Use when you need to query deleted/inactive records.
+	 *
+	 * Default filters are defined at schema level using the `defaultFilters` option
+	 * in `schema()`. They are applied automatically to all queries unless disabled.
+	 *
+	 * @returns A new QueryBuilder with default filters disabled
+	 *
+	 * @example
+	 * ```typescript
+	 * // Query all products including soft-deleted ones
+	 * const allProducts = await orm
+	 *   .select('products')
+	 *   .withoutDefaultFilters()
+	 *   .all();
+	 * ```
+	 */
+	withoutDefaultFilters(): QueryBuilder<TResult>;
+
+	/**
 	 * Generate the execution plan for this query.
 	 *
 	 * In strict mode, throws `AmbiguousRelationError` if ambiguous relations are detected.

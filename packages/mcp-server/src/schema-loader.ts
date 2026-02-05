@@ -13,7 +13,7 @@
  */
 
 import { existsSync, realpathSync } from 'node:fs';
-import { isAbsolute, normalize, resolve } from 'node:path';
+import { isAbsolute, normalize, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ResolvedSchema } from '@dbsp/core';
 
@@ -106,7 +106,14 @@ export function validatePath(
 			const isWithinAllowedRoot = normalizedRoots.some((root) => {
 				// Resolve symlinks for root as well
 				const realRoot = existsSync(root) ? realpathSync(root) : root;
-				return realPath.startsWith(`${realRoot}/`) || realPath === realRoot;
+				// Use path.relative to check containment (secure against path traversal)
+				const relativePath = relative(realRoot, realPath);
+				// Path is within root if relative path doesn't start with '..' and isn't absolute
+				return (
+					relativePath !== '' &&
+					!relativePath.startsWith('..') &&
+					!isAbsolute(relativePath)
+				);
 			});
 
 			if (!isWithinAllowedRoot) {

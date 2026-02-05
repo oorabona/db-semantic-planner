@@ -1,6 +1,6 @@
 # Production Deployment Guide
 
-**Package:** `@dbsp/core`, `@dbsp/adapter-kysely`
+**Package:** `@dbsp/core`, `@dbsp/adapter-pgsql`
 **Status:** Production-ready
 
 This guide covers best practices for deploying db-semantic-planner in production environments.

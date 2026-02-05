@@ -15,6 +15,7 @@
  * ```
  */
 
+import type { WhereIntent } from '@dbsp/types';
 import type { DbCasing } from '../adapter.js';
 import { ModelIRImpl } from '../model-impl.js';
 import type {
@@ -173,6 +174,35 @@ export type SchemaConstraints = Record<string, SchemaTableOptions>;
 /**
  * Result of schema() function with strongly-typed table/column info.
  */
+/**
+ * Per-table default filters applied to all queries.
+ * Commonly used for soft delete filtering.
+ *
+ * @example
+ * ```typescript
+ * import { isNull } from '@dbsp/core';
+ *
+ * const db = schema(tables, undefined, {
+ *   defaultFilters: {
+ *     products: isNull('deletedAt'),
+ *     users: isNull('deletedAt'),
+ *   },
+ * });
+ * ```
+ */
+export type DefaultFilters = Record<string, WhereIntent>;
+
+/**
+ * Options for schema() function.
+ */
+export interface SchemaOptions {
+	/**
+	 * Default filters applied automatically to all queries per table.
+	 * Override with `.withoutDefaultFilters()` on the query builder.
+	 */
+	defaultFilters?: DefaultFilters;
+}
+
 export interface Schema<T extends SchemaDefinition> {
 	/** The raw schema definition */
 	readonly definition: T;
@@ -218,6 +248,11 @@ export interface Schema<T extends SchemaDefinition> {
 	 * Useful for detecting schema drift.
 	 */
 	readonly introspectedAt?: Date;
+	/**
+	 * Default filters per table (e.g., soft delete filtering).
+	 * Applied automatically to all queries unless `.withoutDefaultFilters()` is called.
+	 */
+	readonly defaultFilters?: DefaultFilters;
 }
 
 // ============================================================================
@@ -452,10 +487,25 @@ export function isRef(
 export function schema<T extends SchemaDefinition>(
 	definition: T,
 	constraints?: SchemaConstraints,
+	options?: SchemaOptions,
 ): Schema<T> {
 	// Validate and convert to ModelIR
 	const model = schemaToModelIR(definition, constraints);
 	const tableNames = Object.keys(definition) as (keyof T)[];
+
+	// Validate default filters reference existing tables
+	const defaultFilters = options?.defaultFilters;
+	if (defaultFilters) {
+		const tableNameSet = new Set(tableNames as string[]);
+		for (const tableName of Object.keys(defaultFilters)) {
+			if (!tableNameSet.has(tableName)) {
+				throw new SchemaValidationError(
+					`Default filter for non-existent table '${tableName}'. ` +
+						`Available: ${[...tableNameSet].join(', ')}`,
+				);
+			}
+		}
+	}
 
 	// Create type-safe tables proxy (DX-040)
 	const tables = createTablesProxy(
@@ -468,6 +518,7 @@ export function schema<T extends SchemaDefinition>(
 		model,
 		tableNames,
 		tables,
+		...(defaultFilters ? { defaultFilters } : {}),
 	};
 }
 

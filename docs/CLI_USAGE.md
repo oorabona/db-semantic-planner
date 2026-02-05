@@ -47,7 +47,6 @@ dbsp generate <target> [options]
 | Target | Output | Description |
 |--------|--------|-------------|
 | `manifest` | `schema.json` | ModelIR manifest (JSON-serializable) |
-| `kysely` | `types.ts` | Kysely database interface + types |
 | `ddl` | SQL | CREATE TABLE statements |
 
 ### Options
