@@ -956,6 +956,46 @@ export interface QueryBuilder<TResult = unknown> {
 	dump(): Dump;
 
 	/**
+	 * Check whether any matching rows exist.
+	 *
+	 * Compiles to `SELECT EXISTS(SELECT 1 FROM ... WHERE ...)`.
+	 * Strips `orderBy` and `include` (irrelevant for existence checks).
+	 * Preserves `groupBy`, `having`, and `offset` (they affect the result set).
+	 *
+	 * Requires `db` to be configured in createOrm() options.
+	 *
+	 * @returns Promise resolving to `true` if at least one row matches, `false` otherwise
+	 * @throws {ExecutionError} If db is not configured
+	 *
+	 * @example
+	 * ```typescript
+	 * const hasActive = await orm.select('users')
+	 *   .where(eq('active', true))
+	 *   .exists();
+	 * // → true | false
+	 * ```
+	 */
+	exists(): Promise<boolean>;
+
+	/**
+	 * Get the SQL dump for an existence check without executing.
+	 *
+	 * Same as exists() but returns the Dump instead of executing the query.
+	 *
+	 * @returns The complete dump with plan, sql, params, and meta
+	 * @throws {ExecutionError} If db is not configured
+	 *
+	 * @example
+	 * ```typescript
+	 * const dump = orm.select('users')
+	 *   .where(eq('active', true))
+	 *   .existsDump();
+	 * // dump.sql → 'SELECT EXISTS(SELECT 1 FROM "users" AS "t0" WHERE ...)'
+	 * ```
+	 */
+	existsDump(): Dump;
+
+	/**
 	 * Execute the query and return all matching rows.
 	 *
 	 * Semantic alias for all() - use for clearer intent in code.

@@ -2,6 +2,8 @@
 
 ## In Progress
 
+(None)
+
 ---
 
 ## Pending — HIGH
@@ -23,10 +25,8 @@
 
 ### DX Convenience (Category A)
 
-- [ ] [DX] `.exists()` query shortcut — Effort: S
 - [ ] [DX] Soft delete convention (built-in `deletedAt` filtering) — Effort: M
 - [ ] [DX] Query middleware/hooks system — Effort: L
-- [ ] [NQL] Multi-row INSERT syntax (`insert into X values (…), (…)`) — Effort: M
 
 ### SQL Features
 
@@ -82,7 +82,5 @@
 ---
 
 ## Completed
-
-- [x] ✅ [Adapter] Enhance `singularize()` for irregular plurals (2026-02-05)
 
 (Archived → docs/historic/done-2026-02.md)

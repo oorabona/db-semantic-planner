@@ -198,6 +198,8 @@ export interface SimplifiedPlanReport {
 	readonly rootTable: string;
 	readonly decisions: readonly PlanDecision[];
 	readonly schema?: string;
+	/** If true, wrap result in SELECT EXISTS(SELECT 1 ...) AS "exists" */
+	readonly existsWrap?: boolean;
 }
 
 /**
@@ -478,6 +480,10 @@ export class PlanCompiler {
 		switch (queryType) {
 			case 'select':
 				ast = this.compileSelect(plan);
+				// Handle existsWrap: SELECT EXISTS(SELECT 1 ...) AS "exists"
+				if (plan.existsWrap) {
+					ast = this.wrapSelectInExists(ast);
+				}
 				break;
 			case 'insert':
 				ast = this.compileInsert(plan);
@@ -916,6 +922,61 @@ export class PlanCompiler {
 		}
 
 		return selectStmt(options);
+	}
+
+	// --------------------------------------------------------------------------
+	// EXISTS Wrapping
+	// --------------------------------------------------------------------------
+
+	/**
+	 * Wrap a SELECT statement in SELECT EXISTS(SELECT 1 ...) AS "exists"
+	 *
+	 * This transforms the inner SELECT by:
+	 * 1. Replacing targetList with just `1` (constant)
+	 * 2. Wrapping in SubLink with EXISTS_SUBLINK
+	 * 3. Creating outer SELECT with EXISTS result aliased as "exists"
+	 */
+	private wrapSelectInExists(innerAst: Node): Node {
+		// Get the inner SelectStmt and modify its targetList to just `1`
+		const innerSelect = (innerAst as { SelectStmt?: unknown }).SelectStmt;
+		if (!innerSelect) {
+			throw new Error('existsWrap requires a SelectStmt');
+		}
+
+		// Create inner SELECT with just `1` as target
+		const modifiedInner: Node = {
+			SelectStmt: {
+				...innerSelect,
+				targetList: [
+					{
+						ResTarget: {
+							val: { A_Const: { ival: { ival: 1 } } },
+						},
+					},
+				],
+			},
+		};
+
+		// Wrap in EXISTS SubLink
+		const existsExpr: Node = {
+			SubLink: {
+				subLinkType: 'EXISTS_SUBLINK',
+				subselect: modifiedInner,
+			},
+		};
+
+		// Create outer SELECT with EXISTS result aliased as "exists"
+		return selectStmt({
+			targetList: [
+				{
+					ResTarget: {
+						val: existsExpr,
+						name: 'exists',
+					},
+				},
+			],
+			from: [],
+		});
 	}
 
 	// --------------------------------------------------------------------------

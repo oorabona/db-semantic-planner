@@ -3053,10 +3053,47 @@ INSERT INTO posts (
 
 
 
+### Multi-row INSERT
 
+NQL supports inserting multiple rows in a single statement using two syntaxes:
 
+#### SQL-style `values` syntax
 
+```nql
+# Insert multiple rows with values syntax
+insert into products values (sku = 'A', name = 'Product A'), (sku = 'B', name = 'Product B')
 
+# With RETURNING
+insert into products values (sku = 'A', name = 'Product A'), (sku = 'B', name = 'Product B') | select id
+```
+
+#### NQL-style pipe syntax
+
+```nql
+# Insert multiple rows with pipe-set syntax
+insert into products set sku = 'A', name = 'Product A' | set sku = 'B', name = 'Product B'
+```
+
+Both syntaxes compile to the same SQL:
+
+```sql
+INSERT INTO products (sku, name) VALUES ($1, $2), ($3, $4)
+```
+
+**Column normalization:** When rows have different columns, NQL normalizes by taking the union of all columns. Missing columns in a row become `NULL`:
+
+```nql
+# First row has name only, second row has name and email
+insert into authors values (name = 'Alice'), (name = 'Bob', email = 'bob@test.com')
+```
+
+**Compiled SQL:**
+```sql
+INSERT INTO authors (name, email) VALUES ($1, null), ($2, $3)
+-- Parameters: ['Alice', 'Bob', 'bob@test.com']
+```
+
+**Note:** Missing columns produce `NULL`, not database `DEFAULT` values. If you need database defaults, omit the column from ALL rows.
 
 ### INSERT FROM (Bulk Copy)
 

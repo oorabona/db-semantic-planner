@@ -110,6 +110,17 @@ export interface FromBuilder<
 	offset(n: number): FromBuilder<TTable, TResult>;
 
 	/**
+	 * Check whether any matching rows exist.
+	 * Compiles to SELECT EXISTS(SELECT 1 FROM ...).
+	 */
+	exists(): Promise<boolean>;
+
+	/**
+	 * Get the SQL dump for an existence check without executing.
+	 */
+	existsDump(): Dump;
+
+	/**
 	 * Get the query plan without executing.
 	 */
 	plan(): PlanReport;
@@ -213,6 +224,63 @@ class FromBuilderImpl<
 		const copy = this.clone();
 		copy.offsetValue = n;
 		return copy;
+	}
+
+	/**
+	 * Build an existence-check intent from current state.
+	 * Strips orderBy and include (irrelevant), preserves groupBy/having/offset.
+	 */
+	private buildExistsIntent(): QueryIntent {
+		const baseIntent = this.buildIntent();
+		// Destructure to strip orderBy and include (irrelevant for EXISTS)
+		const {
+			orderBy: _orderBy,
+			include: _include,
+			...rest
+		} = baseIntent as QueryIntent & {
+			orderBy?: unknown;
+			include?: unknown;
+		};
+		return {
+			...rest,
+			existsWrap: true,
+			limit: 1,
+		};
+	}
+
+	async exists(): Promise<boolean> {
+		if (!this.adapter) {
+			throw new Error(
+				'Cannot execute query without adapter. Create ORM with an adapter to use exists().',
+			);
+		}
+
+		const intent = this.buildExistsIntent();
+		const planReport = executePlan(intent, this.model);
+		const compiled = this.adapter.compile(planReport, {
+			model: this.model,
+			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
+		});
+		const rows = await this.adapter.execute(compiled);
+		return (
+			rows.length > 0 && (rows[0] as Record<string, unknown>).exists === true
+		);
+	}
+
+	existsDump(): Dump {
+		if (!this.adapter) {
+			throw new Error(
+				'Cannot dump query without adapter. Create ORM with an adapter to use existsDump().',
+			);
+		}
+
+		const intent = this.buildExistsIntent();
+		const planReport = executePlan(intent, this.model);
+		const compiled = this.adapter.compile(planReport, {
+			model: this.model,
+			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
+		});
+		return this.adapter.createDump(planReport, compiled);
 	}
 
 	/**

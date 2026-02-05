@@ -485,27 +485,21 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				}
 			}
 
-			simplifiedPlan = schemaName
-				? {
-						rootTable: plan.rootTable,
-						decisions: allDecisions,
-						schema: schemaName,
-					}
-				: { rootTable: plan.rootTable, decisions: allDecisions };
+			simplifiedPlan = {
+				rootTable: plan.rootTable,
+				decisions: allDecisions,
+				...(schemaName ? { schema: schemaName } : {}),
+				...(plan.intent?.existsWrap ? { existsWrap: true } : {}),
+			};
 		} else {
 			// Unit test with mock data: use decisions directly (legacy format)
-			simplifiedPlan = schemaName
-				? {
-						rootTable: plan.rootTable,
-						decisions:
-							plan.decisions as unknown as SimplifiedPlanReport['decisions'],
-						schema: schemaName,
-					}
-				: {
-						rootTable: plan.rootTable,
-						decisions:
-							plan.decisions as unknown as SimplifiedPlanReport['decisions'],
-					};
+			// Note: existsWrap requires intent, so not available in legacy format
+			simplifiedPlan = {
+				rootTable: plan.rootTable,
+				decisions:
+					plan.decisions as unknown as SimplifiedPlanReport['decisions'],
+				...(schemaName ? { schema: schemaName } : {}),
+			};
 		}
 
 		const result = compilePlan(simplifiedPlan, compilerOptions);

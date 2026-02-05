@@ -936,6 +936,12 @@ export interface QueryIntent {
 
 	/** Number of rows to skip */
 	readonly offset?: number;
+
+	/**
+	 * When true, the adapter wraps the query in SELECT EXISTS(...).
+	 * The inner SELECT list is replaced with `1` and the result is `{ exists: boolean }`.
+	 */
+	readonly existsWrap?: boolean;
 }
 
 // ============================================================================

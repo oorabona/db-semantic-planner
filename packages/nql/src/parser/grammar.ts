@@ -84,6 +84,7 @@ import {
 	True,
 	Update,
 	Upsert,
+	Values,
 	When,
 	Where,
 } from '../lexer/tokens.js';
@@ -1093,8 +1094,42 @@ export class NqlParser extends CstParser {
 		this.CONSUME(Insert);
 		this.CONSUME(Into);
 		this.SUBRULE(this.identSegment);
-		this.CONSUME(SetKeyword);
-		this.SUBRULE(this.assignmentList);
+		this.OR([
+			{
+				ALT: () => {
+					// NQL style: set a=1 | set b=2
+					this.CONSUME(SetKeyword);
+					this.SUBRULE(this.assignmentList);
+					// Additional rows via | set (requires GATE to disambiguate from mutation pipeline's | select/bind)
+					this.MANY({
+						GATE: () => {
+							// Look ahead: we need Pipe followed by SetKeyword
+							const tokens = this.LA(1);
+							const nextToken = this.LA(2);
+							return (
+								tokens.tokenType === Pipe && nextToken.tokenType === SetKeyword
+							);
+						},
+						DEF: () => {
+							this.CONSUME(Pipe);
+							this.CONSUME2(SetKeyword);
+							this.SUBRULE2(this.assignmentList);
+						},
+					});
+				},
+			},
+			{
+				ALT: () => {
+					// SQL style: values (a=1, b=2), (c=3, d=4)
+					this.CONSUME(Values);
+					this.SUBRULE(this.valuesTuple);
+					this.MANY2(() => {
+						this.CONSUME2(Comma);
+						this.SUBRULE2(this.valuesTuple);
+					});
+				},
+			},
+		]);
 	});
 
 	/**
@@ -1221,6 +1256,15 @@ export class NqlParser extends CstParser {
 			this.CONSUME(Comma);
 			this.SUBRULE2(this.assignment);
 		});
+	});
+
+	/**
+	 * SQL-style values tuple: (col1=val1, col2=val2)
+	 */
+	private valuesTuple = this.RULE('valuesTuple', () => {
+		this.CONSUME(LParen);
+		this.SUBRULE(this.assignmentList);
+		this.CONSUME(RParen);
 	});
 
 	/**

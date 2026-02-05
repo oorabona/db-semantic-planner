@@ -1256,15 +1256,36 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 
 	insertStmt(ctx: CstContext): NqlMutation {
-		requireFields(
-			ctx,
-			['identSegment', 'assignmentList'],
-			'Insert missing table or assignments',
-		);
+		requireFields(ctx, ['identSegment'], 'Insert missing table');
+		const table: string = this.visit(asCstNode(ctx.identSegment[0]!));
+		const rows: NqlAssignment[][] = [];
+
+		// NQL style: set a=1 | set b=2 (assignmentList array)
+		if (ctx.assignmentList) {
+			for (const assignListCtx of ctx.assignmentList) {
+				const assignments: NqlAssignment[] = this.visit(
+					asCstNode(assignListCtx),
+				);
+				rows.push(assignments);
+			}
+		}
+
+		// SQL style: values (a=1), (b=2) (valuesTuple array)
+		if (ctx.valuesTuple) {
+			for (const tupleCtx of ctx.valuesTuple) {
+				const assignments: NqlAssignment[] = this.visit(asCstNode(tupleCtx));
+				rows.push(assignments);
+			}
+		}
+
+		if (rows.length === 0) {
+			throw new Error('Insert statement must have at least one row');
+		}
+
 		return {
 			type: 'insert',
-			table: this.visit(asCstNode(ctx.identSegment[0]!)),
-			assignments: this.visit(asCstNode(ctx.assignmentList[0]!)),
+			table,
+			rows,
 		};
 	}
 
@@ -1402,6 +1423,15 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			}
 		}
 		return assignments;
+	}
+
+	/**
+	 * SQL-style values tuple: (col1=val1, col2=val2)
+	 * Returns the assignments inside the parentheses.
+	 */
+	valuesTuple(ctx: CstContext): NqlAssignment[] {
+		requireFields(ctx, ['assignmentList'], 'Values tuple missing assignments');
+		return this.visit(asCstNode(ctx.assignmentList[0]!));
 	}
 
 	assignment(ctx: CstContext): NqlAssignment {

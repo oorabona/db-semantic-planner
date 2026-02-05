@@ -388,7 +388,8 @@ export interface NqlRangeLiteral {
 export interface NqlInsert {
 	type: 'insert';
 	table: string;
-	assignments: NqlAssignment[];
+	/** Multi-row support: each element is a row's assignments */
+	rows: NqlAssignment[][];
 }
 
 /**

@@ -106,6 +106,7 @@ export const Delete = createToken({ name: 'Delete', pattern: /delete\b/i });
 export const From = createToken({ name: 'From', pattern: /from\b/i });
 export const SetKeyword = createToken({ name: 'Set', pattern: /set\b/i });
 export const Upsert = createToken({ name: 'Upsert', pattern: /upsert\b/i });
+export const Values = createToken({ name: 'Values', pattern: /values\b/i });
 
 // Literals
 export const True = createToken({ name: 'True', pattern: /true\b/i });
@@ -274,6 +275,7 @@ export const allTokens = [
 	From,
 	SetKeyword,
 	Upsert,
+	Values,
 	True,
 	False,
 	Null,
