@@ -475,4 +475,73 @@ describe('Complex WHERE Handlers (EXISTS)', () => {
 			expect(result.params).toEqual([true]);
 		});
 	});
+
+	describe('E05 Regression: Scalar Subquery', () => {
+		beforeEach(() => {
+			clearHandlers();
+			registerAllWhereHandlers();
+		});
+
+		it('compiles scalar subquery with aggregate (price > AVG)', () => {
+			const result = compileToSql({
+				type: 'where',
+				column: 'price',
+				operator: 'scalarSubquery',
+				targetTable: 'products',
+				selectColumn: 'price',
+				aggregate: 'avg',
+				subqueryOperator: '>',
+			});
+			// WHERE price > (SELECT avg(price) FROM products)
+			expect(result.sql).toContain('price');
+			expect(result.sql).toContain('>');
+			expect(result.sql).toContain('SELECT');
+			expect(result.sql).toContain('avg');
+			expect(result.sql).toContain('products');
+		});
+
+		it('compiles scalar subquery with equality (=)', () => {
+			const result = compileToSql({
+				type: 'where',
+				column: 'id',
+				operator: 'scalarSubquery',
+				targetTable: 'orders',
+				selectColumn: 'user_id',
+				subqueryOperator: '=',
+				conditions: [
+					{
+						type: 'comparison',
+						column: 'status',
+						operator: '=',
+						value: 'paid',
+					},
+				],
+			});
+			// WHERE id = (SELECT user_id FROM orders WHERE status = 'paid')
+			expect(result.sql).toContain('id');
+			expect(result.sql).toContain('=');
+			expect(result.sql).toContain('SELECT');
+			expect(result.sql).toContain('user_id');
+			expect(result.sql).toContain('orders');
+			expect(result.sql).toContain('status');
+			expect(result.params).toEqual(['paid']);
+		});
+
+		it('compiles scalar subquery with MAX aggregate', () => {
+			const result = compileToSql({
+				type: 'where',
+				column: 'created_at',
+				operator: 'scalarSubquery',
+				targetTable: 'posts',
+				selectColumn: 'created_at',
+				aggregate: 'max',
+				subqueryOperator: '=',
+			});
+			// WHERE created_at = (SELECT max(created_at) FROM posts)
+			expect(result.sql).toContain('created_at');
+			expect(result.sql).toContain('SELECT');
+			expect(result.sql).toContain('max');
+			expect(result.sql).toContain('posts');
+		});
+	});
 });
