@@ -47,7 +47,12 @@ import {
 	type WhereFilter,
 } from './object-filter.js';
 import { ResultHydrator } from './result-hydrator.js';
-import type { InferDB, Schema, SchemaDefinition } from './schema.js';
+import type {
+	DefaultFilters,
+	InferDB,
+	Schema,
+	SchemaDefinition,
+} from './schema.js';
 import {
 	type AggregateOptions,
 	type ColumnSpec,
@@ -236,11 +241,13 @@ export function createOrm<T extends SchemaDefinition>(
 	// Schema provides full type inference; model is simpler for introspection/tests
 	let model: ModelIR;
 	let schemaDefinition: unknown;
+	let defaultFilters: DefaultFilters | undefined;
 
 	if (schemaObj && 'model' in schemaObj) {
 		// Full schema object provided
 		model = schemaObj.model;
 		schemaDefinition = schemaObj.definition;
+		defaultFilters = schemaObj.defaultFilters;
 
 		// ARCH-006: Validate casing consistency
 		if (
@@ -258,6 +265,7 @@ export function createOrm<T extends SchemaDefinition>(
 		// ModelIR provided directly (simpler API for introspection/tests)
 		model = modelDirect;
 		schemaDefinition = undefined; // NQL will work without schema validation
+		defaultFilters = undefined;
 	} else {
 		throw new Error(
 			'Invalid options: must provide either schema (from schema() function) ' +
@@ -277,6 +285,7 @@ export function createOrm<T extends SchemaDefinition>(
 		adapter.dialectCapabilities,
 		schemaDefinition,
 		globalPlanOptions,
+		defaultFilters,
 	) as OrmInstance<InferDB<T>>;
 }
 
@@ -295,6 +304,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 	dialectCapabilities?: DialectCapabilities,
 	schemaDefinition?: unknown,
 	globalPlanOptions?: PlanOptions,
+	defaultFilters?: DefaultFilters,
 ): OrmInstance<DB> {
 	// Create NQL template tag (DX-040)
 	// NQL compiler is now integrated directly - @dbsp/nql is imported in nql.ts
@@ -320,6 +330,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				schemaName,
 				dialectCapabilities,
 				globalPlanOptions,
+				defaultFilters,
 			);
 		},
 		withSchema(schemaName: string): OrmInstance<DB> {
@@ -338,6 +349,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				dialectCapabilities,
 				schemaDefinition,
 				globalPlanOptions,
+				defaultFilters,
 			);
 		},
 
@@ -387,6 +399,8 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				adapter,
 				schemaName,
 				dialectCapabilities,
+				globalPlanOptions,
+				defaultFilters,
 			);
 
 			const result = await builder
@@ -447,6 +461,8 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				adapter,
 				schemaName,
 				dialectCapabilities,
+				globalPlanOptions,
+				defaultFilters,
 			);
 
 			const result = await builder
@@ -667,6 +683,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	private readonly adapter: Adapter | undefined;
 	private readonly schemaName: string | undefined;
 	private readonly dialectCapabilities: DialectCapabilities | undefined;
+	private readonly defaultFilters: DefaultFilters | undefined;
 	private planOptionsOverride: PlanOptions | undefined;
 	private selectIntent?: SelectIntent;
 	private whereIntents: WhereIntent[] = [];
@@ -678,6 +695,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	private offsetValue?: number;
 	private havingIntents: WhereIntent[] = [];
 	private isDistinctQuery = false;
+	private skipDefaultFilters = false;
 
 	constructor(
 		model: ModelIR,
@@ -688,6 +706,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		schemaName?: string,
 		dialectCapabilities?: DialectCapabilities,
 		globalPlanOptions?: PlanOptions,
+		defaultFilters?: DefaultFilters,
 	) {
 		this.model = model;
 		this.strictMode = strictMode;
@@ -697,6 +716,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		this.schemaName = schemaName;
 		this.dialectCapabilities = dialectCapabilities;
 		this.planOptionsOverride = globalPlanOptions;
+		this.defaultFilters = defaultFilters;
 	}
 
 	include(
@@ -1369,9 +1389,11 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 				this.schemaName,
 				this.dialectCapabilities,
 				this.planOptionsOverride,
+				this.defaultFilters,
 			);
 			// Copy where conditions but not limit/offset
 			countBuilder.whereIntents.push(...this.whereIntents);
+			countBuilder.skipDefaultFilters = this.skipDefaultFilters;
 			countBuilder.aggregates = [{ function: 'count', as: '_count' }];
 
 			const countResult = await countBuilder.all();
@@ -1688,14 +1710,29 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			(intent as { select: SelectIntent }).select = this.selectIntent;
 		}
 
-		// Combine multiple where conditions with AND
-		if (this.whereIntents.length === 1) {
-			const singleWhere = this.whereIntents[0];
+		// Combine default filter (soft delete) with user-provided where conditions
+		const allWhereIntents: WhereIntent[] = [];
+
+		// Prepend default filter for this table (if configured and not skipped)
+		const tableDefaultFilter =
+			!this.skipDefaultFilters && this.defaultFilters
+				? this.defaultFilters[this.from]
+				: undefined;
+		if (tableDefaultFilter) {
+			allWhereIntents.push(tableDefaultFilter);
+		}
+
+		// Add user-provided filters
+		allWhereIntents.push(...this.whereIntents);
+
+		// Combine with AND
+		if (allWhereIntents.length === 1) {
+			const singleWhere = allWhereIntents[0];
 			if (singleWhere !== undefined) {
 				(intent as { where: WhereIntent }).where = singleWhere;
 			}
-		} else if (this.whereIntents.length > 1) {
-			(intent as { where: WhereIntent }).where = and(...this.whereIntents);
+		} else if (allWhereIntents.length > 1) {
+			(intent as { where: WhereIntent }).where = and(...allWhereIntents);
 		}
 
 		// Combine multiple having conditions with AND (DX-034)
@@ -1821,6 +1858,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			this.schemaName,
 			this.dialectCapabilities,
 			this.planOptionsOverride,
+			this.defaultFilters,
 		);
 		builder.includes.push(...this.includes);
 		builder.recursiveIncludes.push(...this.recursiveIncludes);
@@ -1833,6 +1871,8 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		builder.havingIntents.push(...this.havingIntents);
 		// Clone isDistinctQuery (DX-034)
 		builder.isDistinctQuery = this.isDistinctQuery;
+		// Clone skipDefaultFilters flag
+		builder.skipDefaultFilters = this.skipDefaultFilters;
 		if (this.strictModeOverride !== undefined) {
 			builder.strictModeOverride = this.strictModeOverride;
 		}
@@ -1850,6 +1890,25 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		if (this.planOptionsOverride !== undefined) {
 			builder.planOptionsOverride = { ...this.planOptionsOverride };
 		}
+		return builder;
+	}
+
+	/**
+	 * Disable default filters (e.g., soft delete) for this query.
+	 * Use when you need to query deleted/inactive records.
+	 *
+	 * @example
+	 * ```typescript
+	 * // Query all products including soft-deleted ones
+	 * const allProducts = await orm
+	 *   .select('products')
+	 *   .withoutDefaultFilters()
+	 *   .all();
+	 * ```
+	 */
+	withoutDefaultFilters(): QueryBuilder<TResult> {
+		const builder = this.clone();
+		builder.skipDefaultFilters = true;
 		return builder;
 	}
 }

@@ -11,27 +11,7 @@ import {
 	generateSchemaFile,
 	type SchemaCodegenOptions,
 } from '../generators/schema-codegen.js';
-
-/**
- * Try to dynamically import pg.
- * pg is an optional peer dependency.
- */
-async function createDbConnection(connectionUrl: string) {
-	try {
-		const { default: pg } = await import('pg');
-
-		const pool = new pg.Pool({
-			connectionString: connectionUrl,
-		});
-
-		return { pool };
-	} catch (_error) {
-		throw new Error(
-			'pg is required for introspect command. ' +
-				'Install it with: pnpm add pg',
-		);
-	}
-}
+import { createDbConnection, redactDbUrl } from '../utils/db-utils.js';
 
 export const introspectCommand = new Command('introspect')
 	.description('Generate schema.ts from database introspection')
@@ -60,8 +40,7 @@ export const introspectCommand = new Command('introspect')
 			dbTypeComments: boolean;
 			dbCasing: 'snake_case' | 'camelCase' | 'preserve';
 		}) => {
-			// Redact password in URL for logging
-			const redactedUrl = options.db.replace(/:[^:@]+@/, ':***@');
+			const redactedUrl = redactDbUrl(options.db);
 
 			console.log(`🔍 Introspecting database: ${redactedUrl}`);
 			console.log(`   Schema: ${options.schemaName}`);

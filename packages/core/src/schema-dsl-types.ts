@@ -8,6 +8,8 @@
  * Migrated from @dbsp/schema/types.ts as part of ARCH-003.
  */
 
+import type { WhereIntent } from '@dbsp/types';
+
 // =============================================================================
 // Column Types (DSL - simpler than ColumnType in model-ir.ts)
 // =============================================================================
@@ -296,6 +298,14 @@ export interface SchemaDefinitionInput<
 }
 
 /**
+ * Per-table default filters applied to all queries.
+ * Commonly used for soft delete filtering.
+ */
+export type SchemaDefaultFilters = {
+	[tableName: string]: WhereIntent;
+};
+
+/**
  * Configuration options for defineSchema (new API).
  */
 export interface SchemaConfigInput {
@@ -307,6 +317,12 @@ export interface SchemaConfigInput {
 	conventions?: SchemaConventionsDefinition;
 	/** Table-level index definitions (composite indexes) */
 	indexes?: SchemaIndexesDefinition;
+	/**
+	 * Default filters applied automatically to all queries on each table.
+	 * Use for soft delete (`isNull('deletedAt')`), multi-tenant, or active filtering.
+	 * Override per-query with `.withoutDefaultFilters()`.
+	 */
+	defaultFilters?: SchemaDefaultFilters;
 }
 
 /**
@@ -326,6 +342,8 @@ export interface ResolvedSchema<
 	conventions: Required<SchemaConventionsDefinition>;
 	/** Table-level index definitions */
 	indexes: SchemaIndexesDefinition;
+	/** Default filters per table (e.g., soft delete) */
+	defaultFilters: SchemaDefaultFilters;
 }
 
 // =============================================================================

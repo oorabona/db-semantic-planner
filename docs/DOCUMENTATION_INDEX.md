@@ -34,7 +34,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | Project | [Main Backlog](../TODO.md) | active |
 | Project | [**Feature Comparison**](COMPARISON.md) | canonical |
 | Project | [MCP Server Brief](briefs/mcp-server.md) | ready |
-| Project | [MCP Server Backlog](../TODO_MCP.md) | ready |
+| Project | [MCP Server Backlog](../TODO.md) | ready |
 | CLI | [**CLI Usage Guide**](CLI_USAGE.md) | canonical |
 | Operations | [**Production Deployment**](PRODUCTION.md) | canonical |
 | API | [**API Reference**](api/index.html) | generated |
@@ -47,12 +47,12 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | Scope | Package | Overview | Backlog | Status |
 |-------|---------|----------|---------|--------|
 | types | `packages/types` | [ARCH-004](specs/TYPE-RATIONALIZATION-SPEC.md) | — | ✅ Complete |
-| core | `packages/core` | [Overview](plans/core-OVERVIEW.md) | [TODO](../TODO_CORE.md) | ✅ Complete |
+| core | `packages/core` | [Overview](plans/core-OVERVIEW.md) | [TODO](../TODO.md) | ✅ Complete |
 | adapter (legacy) | ~~`packages/adapter-kysely`~~ | — | — | ⛔ Removed (2026-01-30) |
 | adapter-pgsql | `packages/adapter-pgsql` | [Architecture](../packages/adapter-pgsql/ARCHITECTURE.md) | [Full Forward Spec](plans/ADAPTER-PGSQL-FULL-FORWARD.md) | ✅ Complete |
-| cli | `packages/cli` | [CLI Usage](CLI_USAGE.md) | [TODO](../TODO_CLI.md) | ✅ Complete |
-| mcp-server | `packages/mcp-server` | [Brief](briefs/mcp-server.md) | [TODO](../TODO_MCP.md) | 🟡 Ready |
-| nql | `packages/nql` | [Spec](plans/NQL-SPEC-2026-01.md) | [TODO](../TODO_NQL.md) | ✅ Complete |
+| cli | `packages/cli` | [CLI Usage](CLI_USAGE.md) | [TODO](../TODO.md) | ✅ Complete |
+| mcp-server | `packages/mcp-server` | [Brief](briefs/mcp-server.md) | [TODO](../TODO.md) | 🟡 Ready |
+| nql | `packages/nql` | [Spec](plans/NQL-SPEC-2026-01.md) | [TODO](../TODO.md) | ✅ Complete |
 
 **Note:** DX layer (ORM API, filters, query builders) is part of `packages/core/src/dx/` since ARCH-001.
 **Note:** Schema DSL (`defineSchema()`, conventions) is part of `packages/core` since ARCH-002 (merged from former `packages/schema`).

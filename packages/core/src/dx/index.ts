@@ -162,6 +162,8 @@ export {
 // ARCH-005: Unified Schema API
 export {
 	type ColumnDef,
+	// E17: Default filters (soft delete)
+	type DefaultFilters,
 	type GetSchemaFromDbOptions,
 	// ARCH-006: Database introspection → Schema
 	getSchemaFromDb,
@@ -181,6 +183,8 @@ export {
 	type Schema,
 	type SchemaColumnType,
 	type SchemaDefinition,
+	// E17: Schema options with default filters
+	type SchemaOptions,
 	SchemaValidationError as SchemaError,
 	type SelfRefRoles,
 	schema,

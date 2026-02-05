@@ -34,31 +34,28 @@
   - Ref: `packages/mcp-server/src/server.ts:60`
 - [ ] **E06c** [MCP] Replace placeholder test with real coverage
   - Ref: `packages/mcp-server/src/index.test.ts:2`
-- [ ] **E08** [MCP] Harden `allowedRoots` — replace `startsWith` with `path.relative` check
-  - Ref: `packages/mcp-server/src/schema-loader.ts:109`
+
+(E08 archived → docs/historic/done-2026-02.md)
 
 ### Documentation
 
 - [ ] **DOCS-002** [Docs] Migration guides (from-prisma, from-drizzle, from-kysely)
 - [ ] **DOCS-003** [Docs] Pattern guides (multi-tenant, recursive queries, window functions)
-- [ ] **E11** [Docs] Fix doc drift — CLI_USAGE.md (removed targets), PRODUCTION.md (Kysely refs)
-  - Ref: `docs/CLI_USAGE.md:49`, `docs/PRODUCTION.md:3`
-- [ ] **E11b** [Docs] Fix broken links in DOCUMENTATION_INDEX.md
-  - Ref: `docs/DOCUMENTATION_INDEX.md:37-55`
+
+(E11, E11b archived → docs/historic/done-2026-02.md)
 
 ### DX Convenience (Category A)
 
-- [ ] **E17** [DX] Soft delete convention — built-in `deletedAt` filtering — Effort: M
 - [ ] **E17b** [DX] Query middleware/hooks system — Effort: L
 - [ ] **E17c** [DX] `dbsp init` wizard (like Prisma) — Effort: M
 
+(E17 archived → docs/historic/done-2026-02.md)
+
 ### Infrastructure
 
-- [ ] **E09** [CLI] DRY `createDbConnection()` — duplicated in verify/introspect
-  - Ref: `packages/cli/src/commands/verify.ts:20`, `introspect.ts:19`
-- [ ] **E09b** [CLI] DRY URL redaction — duplicated 3× across CLI
-  - Ref: `verify.ts:123`, `introspect.ts:64`, `schema-codegen.ts:288`
 - [ ] **E10** [Core] Injectable logger — replace `console.warn` in library code
+
+(E09, E09b archived → docs/historic/done-2026-02.md)
   - Ref: `packages/core/src/dx/table-ref-factory.ts:68`, `handlers/expression/raw.ts:82`
 
 ---

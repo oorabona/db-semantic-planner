@@ -5,6 +5,7 @@
  */
 
 import { Command } from 'commander';
+import { createDbConnection, redactDbUrl } from '../utils/db-utils.js';
 import { loadSchema } from '../utils/schema-loader.js';
 import {
 	type DbColumnInfo,
@@ -12,26 +13,6 @@ import {
 	formatVerifyResult,
 	verify,
 } from '../verifier.js';
-
-/**
- * Try to dynamically import pg.
- * pg is an optional peer dependency.
- */
-async function createDbConnection(connectionUrl: string) {
-	try {
-		const { default: pg } = await import('pg');
-
-		const pool = new pg.Pool({
-			connectionString: connectionUrl,
-		});
-
-		return { pool };
-	} catch (_error) {
-		throw new Error(
-			'pg is required for verify command. ' + 'Install it with: pnpm add pg',
-		);
-	}
-}
 
 /**
  * Introspect database tables using pg information_schema queries.
@@ -119,8 +100,7 @@ export const verifyCommand = new Command('verify')
 		}) => {
 			const schemaPath = options.schema ?? 'dbsp.schema.ts';
 
-			// Redact password in URL for logging
-			const redactedUrl = options.db.replace(/:[^:@]+@/, ':***@');
+			const redactedUrl = redactDbUrl(options.db);
 
 			if (!options.json) {
 				console.log(`🔍 Verifying schema: ${schemaPath}`);
