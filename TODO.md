@@ -24,12 +24,6 @@
   - Ref: `packages/core/src/dx/orm.ts:1096`, `query-executor.ts:193`
   - DoD: Single execution path; no duplicate query logic; existing tests pass
 
-### Compiler Correctness
-
-- [x] ✅ **E05** [Adapter] Subquery WHERE end-to-end — branch returns `null` (2026-02-05)
-  - Ref: `packages/adapter-pgsql/src/intent-to-decisions.ts:596`
-  - DoD: Subquery WHERE compiles to valid SQL (not null); E2E test with nested filter
-
 ### Introspection
 
 - [ ] **E07** [Core] `getSchemaFromDb()` missing — referenced but not implemented
