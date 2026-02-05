@@ -864,6 +864,7 @@ console.log(params); // ['Alice', 'alice@example.com']
 | `byId(value)` | `Promise<T \| undefined>` | Find by primary key |
 | `byIdOrThrow(value)` | `Promise<T>` | Find by PK or throws `NotFoundError` |
 | `byIds(values)` | `Promise<T[]>` | Find multiple by PKs |
+| `exists()` | `Promise<boolean>` | Check if any rows match (optimized) |
 
 ```typescript
 // Standard execution
@@ -875,6 +876,40 @@ const user = await orm.select('users').where(eq('id', 1)).firstOrThrow();
 const user = await orm.select('users').byId(1);
 const user = await orm.select('users').byIdOrThrow(1);
 const users = await orm.select('users').byIds([1, 2, 3]);
+```
+
+### Existence Check
+
+The `exists()` method provides an optimized way to check if any rows match a query.
+Unlike `first() !== undefined`, it generates efficient `SELECT EXISTS(...)` SQL:
+
+```typescript
+// Check if any active users exist
+const hasActiveUsers = await orm.select('users').where(eq('active', true)).exists();
+
+// More efficient than:
+// const hasActiveUsers = (await orm.select('users').where(eq('active', true)).first()) !== undefined;
+```
+
+**Generated SQL:**
+```sql
+SELECT EXISTS(SELECT 1 FROM users WHERE users.active = $1) AS "exists"
+```
+
+**Key behaviors:**
+- Returns `true` if at least one row matches, `false` otherwise
+- Strips `orderBy` (irrelevant for existence)
+- Strips `include` (related data not needed)
+- Preserves `where`, `groupBy`, `having`, `offset`
+- Sets internal `limit: 1` for optimization
+
+**Debugging:** Use `existsDump()` to inspect the generated intent without executing:
+
+```typescript
+const dump = orm.select('users').where(eq('active', true)).existsDump();
+console.log(dump.sql);     // SELECT EXISTS(...) AS "exists"
+console.log(dump.params);  // [true]
+console.log(dump.plan);    // PlanReport with existsWrap: true
 ```
 
 ### Streaming

@@ -1290,16 +1290,38 @@ export class NqlCompiler {
 
 	private compileInsert(insert: NqlInsert): InsertIntent {
 		this.validateTable(insert.table);
-		const values: Record<string, unknown> = {};
-		for (const assignment of insert.assignments) {
-			this.validateColumn(insert.table, assignment.column);
-			values[assignment.column] = this.expressionToValue(assignment.value);
+
+		// Collect all unique columns across all rows (column normalization)
+		const allColumns = new Set<string>();
+		for (const row of insert.rows) {
+			for (const assignment of row) {
+				this.validateColumn(insert.table, assignment.column);
+				allColumns.add(assignment.column);
+			}
+		}
+
+		// Build values array with normalized columns (missing → undefined → NULL)
+		const values: Record<string, unknown>[] = [];
+		for (const row of insert.rows) {
+			const rowValues: Record<string, unknown> = {};
+			const rowColumns = new Set<string>();
+			for (const assignment of row) {
+				rowColumns.add(assignment.column);
+				rowValues[assignment.column] = this.expressionToValue(assignment.value);
+			}
+			// Add undefined for missing columns (will become NULL in SQL)
+			for (const col of allColumns) {
+				if (!rowColumns.has(col)) {
+					rowValues[col] = undefined;
+				}
+			}
+			values.push(rowValues);
 		}
 
 		return {
 			type: 'insert',
 			table: insert.table,
-			values: [values],
+			values,
 		};
 	}
 

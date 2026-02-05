@@ -198,6 +198,44 @@ describe('NqlParser', () => {
 			expect(result.errors).toHaveLength(0);
 			expect(result.cst).toBeDefined();
 		});
+
+		it('PARSE-M08: Multi-row INSERT with values (SQL style)', () => {
+			const result = parseCst(
+				"insert into users values (name = 'A'), (name = 'B')",
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('PARSE-M09: Multi-row INSERT with pipe-set (NQL style)', () => {
+			const result = parseCst(
+				"insert into users set name = 'A' | set name = 'B'",
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('PARSE-M10: Multi-row INSERT with 3+ rows', () => {
+			const result = parseCst(
+				"insert into users values (name = 'A'), (name = 'B'), (name = 'C')",
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('PARSE-M11: Multi-row INSERT with RETURNING', () => {
+			const result = parseCst(
+				"insert into users values (name = 'A'), (name = 'B') | select id",
+			);
+			expect(result.errors).toHaveLength(0);
+			expect(result.cst).toBeDefined();
+		});
+
+		it('PARSE-M12: Empty values tuple is error', () => {
+			const result = parseCst('insert into users values ()');
+			// Empty tuple should be parse error (no assignments inside)
+			expect(result.errors.length).toBeGreaterThan(0);
+		});
 	});
 
 	describe('Error Recovery', () => {

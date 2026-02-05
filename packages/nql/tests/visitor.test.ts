@@ -347,7 +347,8 @@ describe('NQL Visitor - Mutations', () => {
 		const insert = pipeline.mutation as NqlInsert;
 		expect(insert.type).toBe('insert');
 		expect(insert.table).toBe('users');
-		expect(insert.assignments).toHaveLength(2);
+		expect(insert.rows).toHaveLength(1);
+		expect(insert.rows[0]).toHaveLength(2);
 	});
 
 	it('parses UPDATE with WHERE', () => {
@@ -399,6 +400,65 @@ describe('NQL Visitor - Mutations', () => {
 
 		expect(pipeline.clauses).toHaveLength(1);
 		expect(pipeline.clauses[0]!.type).toBe('select');
+	});
+
+	it('B1: SQL-style multi-row INSERT produces correct AST', () => {
+		const ast = parseToAst(
+			"insert into users values (name = 'A'), (name = 'B')",
+		);
+		const pipeline = ast.statements[0] as NqlMutationPipeline;
+		const insert = pipeline.mutation as NqlInsert;
+
+		expect(insert.type).toBe('insert');
+		expect(insert.table).toBe('users');
+		expect(insert.rows).toHaveLength(2);
+		expect(insert.rows[0]).toHaveLength(1);
+		expect(insert.rows[0]![0]!.column).toBe('name');
+		expect(insert.rows[1]).toHaveLength(1);
+		expect(insert.rows[1]![0]!.column).toBe('name');
+	});
+
+	it('B2: NQL-style multi-row INSERT produces correct AST', () => {
+		const ast = parseToAst("insert into users set name = 'A' | set name = 'B'");
+		const pipeline = ast.statements[0] as NqlMutationPipeline;
+		const insert = pipeline.mutation as NqlInsert;
+
+		expect(insert.type).toBe('insert');
+		expect(insert.table).toBe('users');
+		expect(insert.rows).toHaveLength(2);
+		expect(insert.rows[0]).toHaveLength(1);
+		expect(insert.rows[1]).toHaveLength(1);
+	});
+
+	it('B4: Single row values syntax produces correct AST', () => {
+		const ast = parseToAst("insert into users values (name = 'A')");
+		const pipeline = ast.statements[0] as NqlMutationPipeline;
+		const insert = pipeline.mutation as NqlInsert;
+
+		expect(insert.rows).toHaveLength(1);
+		expect(insert.rows[0]).toHaveLength(1);
+	});
+
+	it('B6: Multi-row INSERT with RETURNING pipeline', () => {
+		const ast = parseToAst(
+			"insert into users values (name = 'A'), (name = 'B') | select id",
+		);
+		const pipeline = ast.statements[0] as NqlMutationPipeline;
+		const insert = pipeline.mutation as NqlInsert;
+
+		expect(insert.rows).toHaveLength(2);
+		expect(pipeline.clauses).toHaveLength(1);
+		expect(pipeline.clauses[0]!.type).toBe('select');
+	});
+
+	it('B10: 3+ rows produces correct AST', () => {
+		const ast = parseToAst(
+			"insert into users values (name = 'A'), (name = 'B'), (name = 'C')",
+		);
+		const pipeline = ast.statements[0] as NqlMutationPipeline;
+		const insert = pipeline.mutation as NqlInsert;
+
+		expect(insert.rows).toHaveLength(3);
 	});
 });
 

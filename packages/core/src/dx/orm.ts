@@ -1183,6 +1183,73 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		return dump;
 	}
 
+	async exists(): Promise<boolean> {
+		const adapter = this.getConfiguredAdapter();
+		const existsIntent = this.buildExistsIntent();
+		const intentWithHints = this.applyRelationHints(existsIntent);
+
+		const planOptions: PlanOptions = {
+			...(this.dialectCapabilities && {
+				dialectCapabilities: this.dialectCapabilities,
+			}),
+			...this.planOptionsOverride,
+		};
+
+		const planReport = plan(intentWithHints, this.model, planOptions);
+
+		const compileOptions: {
+			schemaName?: string;
+			model: ModelIR;
+		} = { model: this.model };
+		if (this.schemaName !== undefined) {
+			compileOptions.schemaName = this.schemaName;
+		}
+
+		const compiled = adapter.compile(planReport, compileOptions);
+		const rows = await adapter.execute(compiled);
+		return (
+			rows.length > 0 && (rows[0] as Record<string, unknown>).exists === true
+		);
+	}
+
+	existsDump(): Dump {
+		const adapter = this.getConfiguredAdapter();
+		const existsIntent = this.buildExistsIntent();
+		const intentWithHints = this.applyRelationHints(existsIntent);
+
+		const planOptions: PlanOptions = {
+			...(this.dialectCapabilities && {
+				dialectCapabilities: this.dialectCapabilities,
+			}),
+			...this.planOptionsOverride,
+		};
+
+		const planReport = plan(intentWithHints, this.model, planOptions);
+
+		const compileOptions: {
+			schemaName?: string;
+			model: ModelIR;
+		} = { model: this.model };
+		if (this.schemaName !== undefined) {
+			compileOptions.schemaName = this.schemaName;
+		}
+
+		const compiled = adapter.compile(planReport, compileOptions);
+		const dump = adapter.createDump(planReport, compiled);
+
+		if (dump.meta?.schema === undefined && this.schemaName !== undefined) {
+			return {
+				...dump,
+				meta: {
+					...dump.meta,
+					schema: this.schemaName,
+				},
+			};
+		}
+
+		return dump;
+	}
+
 	execute(): Promise<TResult[]> {
 		return this.all();
 	}
@@ -1651,6 +1718,27 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		}
 
 		return intent;
+	}
+
+	/**
+	 * Build an existence-check intent from current state.
+	 * Strips orderBy and include (irrelevant), preserves groupBy/having/offset.
+	 */
+	private buildExistsIntent(): QueryIntent {
+		const baseIntent = this.buildIntent();
+		const {
+			orderBy: _orderBy,
+			include: _include,
+			...rest
+		} = baseIntent as QueryIntent & {
+			orderBy?: unknown;
+			include?: unknown;
+		};
+		return {
+			...rest,
+			existsWrap: true,
+			limit: 1,
+		};
 	}
 
 	/**

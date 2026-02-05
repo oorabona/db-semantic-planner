@@ -52,6 +52,7 @@ import {
 	True,
 	Update,
 	Upsert,
+	Values,
 	Via,
 	When,
 	Where,
@@ -249,6 +250,7 @@ describe('NqlLexer', () => {
 				['from', From],
 				['set', SetKeyword],
 				['upsert', Upsert],
+				['values', Values],
 			] as const;
 
 			for (const [keyword, expectedToken] of keywords) {

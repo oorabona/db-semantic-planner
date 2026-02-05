@@ -820,6 +820,65 @@ describe('NQL → SQL mutation E2E', () => {
 });
 
 // ---------------------------------------------------------------------------
+// NQL → SQL multi-row INSERT E2E tests (DX-CATA-1 Block 3)
+// ---------------------------------------------------------------------------
+describe('NQL → SQL multi-row INSERT E2E', () => {
+	it('B8a: SQL-style values produces multi-row INSERT', () => {
+		const { sql, params } = mutationToSQL(
+			"insert into authors values (name = 'Alice'), (name = 'Bob')",
+		);
+		expect(sql).toEqual('insert into authors (name) values ($1), ($2)');
+		expect(params).toEqual(['Alice', 'Bob']);
+	});
+
+	it('B8b: NQL-style pipe-set produces multi-row INSERT', () => {
+		const { sql, params } = mutationToSQL(
+			"insert into authors set name = 'Alice' | set name = 'Bob'",
+		);
+		expect(sql).toEqual('insert into authors (name) values ($1), ($2)');
+		expect(params).toEqual(['Alice', 'Bob']);
+	});
+
+	it('B8c: Multi-row INSERT with mixed columns', () => {
+		const { sql, params } = mutationToSQL(
+			"insert into authors values (name = 'Alice'), (name = 'Bob', email = 'bob@test.com')",
+		);
+		// Column normalization: union of all columns, first row has literal NULL for email
+		expect(sql).toEqual(
+			'insert into authors (name, email) values ($1, null), ($2, $3)',
+		);
+		expect(params).toEqual(['Alice', 'Bob', 'bob@test.com']);
+	});
+
+	it('B8d: Multi-row INSERT with 3+ rows', () => {
+		const { sql, params } = mutationToSQL(
+			"insert into authors values (name = 'A'), (name = 'B'), (name = 'C')",
+		);
+		expect(sql).toEqual('insert into authors (name) values ($1), ($2), ($3)');
+		expect(params).toEqual(['A', 'B', 'C']);
+	});
+
+	it('B8e: Multi-row INSERT with RETURNING', () => {
+		const { sql, params } = mutationToSQL(
+			"insert into authors values (name = 'Alice'), (name = 'Bob') | select id, name",
+		);
+		expect(sql).toEqual(
+			'insert into authors (name) values ($1), ($2) returning authors.id as id, authors.name as name',
+		);
+		expect(params).toEqual(['Alice', 'Bob']);
+	});
+
+	it('B8f: Single row values backward compatible', () => {
+		const valuesResult = mutationToSQL(
+			"insert into authors values (name = 'Alice')",
+		);
+		const setResult = mutationToSQL("insert into authors set name = 'Alice'");
+		expect(valuesResult.sql).toEqual(setResult.sql);
+		expect(valuesResult.params).toEqual(setResult.params);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // NQL → SQL bind + CTE E2E tests (Block 3)
 // ---------------------------------------------------------------------------
 
@@ -956,5 +1015,78 @@ describe('NQL → SQL upsert-from E2E', () => {
 				' select active.id as id, active.name as name, active.email as email, active.active as active from active' +
 				' on conflict (id) do update set name = excluded.name, email = excluded.email, active = excluded.active',
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// DX-CATA-1: existsWrap → SELECT EXISTS(SELECT 1 ...)
+// ---------------------------------------------------------------------------
+describe('existsWrap → SELECT EXISTS SQL', () => {
+	it('A5: wraps basic SELECT in EXISTS with SELECT 1', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'employees',
+			existsWrap: true,
+			limit: 1,
+		};
+		const planReport = plan(intent, testSchema.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const result = adapter.compile(planReport, { model: testSchema.model });
+		const sql = normalizeSQL(result.sql);
+
+		expect(sql).toMatch(/select exists\s*\(/);
+		expect(sql).toContain('select 1 from');
+		expect(sql).toContain('as "exists"');
+	});
+
+	it('A5: wraps SELECT with WHERE in EXISTS', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'employees',
+			where: {
+				kind: 'comparison',
+				field: 'salary',
+				operator: 'gt',
+				value: 50000,
+			},
+			existsWrap: true,
+			limit: 1,
+		};
+		const planReport = plan(intent, testSchema.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const result = adapter.compile(planReport, { model: testSchema.model });
+		const sql = normalizeSQL(result.sql);
+
+		expect(sql).toMatch(/select exists\s*\(/);
+		expect(sql).toContain('select 1 from');
+		expect(sql).toContain('salary');
+		expect(sql).toContain('as "exists"');
+		expect(result.parameters).toEqual([50000]);
+	});
+
+	it('A4: schema-scoped EXISTS query', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'employees',
+			existsWrap: true,
+			limit: 1,
+		};
+		const planReport = plan(intent, testSchema.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const result = adapter.compile(planReport, {
+			model: testSchema.model,
+			schemaName: 'tenant_42',
+		});
+		const sql = normalizeSQL(result.sql);
+
+		expect(sql).toMatch(/select exists\s*\(/);
+		// Schema name present in the FROM clause
+		expect(sql).toContain('tenant_42.');
 	});
 });
