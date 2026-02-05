@@ -1084,3 +1084,174 @@ function buildRelations(
 
 	return relations;
 }
+
+// ============================================================================
+// Database Introspection → Schema
+// ============================================================================
+
+/**
+ * Options for getSchemaFromDb.
+ */
+export interface GetSchemaFromDbOptions {
+	/** Schema name to introspect (default: 'public' for PostgreSQL) */
+	readonly schema?: string;
+	/** Tables to include (default: all). */
+	readonly tables?: readonly string[];
+	/** Tables to exclude (glob patterns supported). */
+	readonly exclude?: readonly string[];
+}
+
+/**
+ * Map ColumnType from ModelIR to JS-friendly runtime type strings.
+ * Used by getSchemaFromDb to create user-friendly schema definitions.
+ *
+ * Tests expect: 'serial/integer' → 'number', 'varchar/text' → 'string'
+ */
+function columnTypeToJsType(type: ColumnType): SchemaColumnType {
+	switch (type) {
+		// Numeric types → 'number' (includes integer, bigint, decimal)
+		case 'integer':
+		case 'bigint':
+		case 'decimal':
+			return 'number';
+		// String types → 'string' (includes text, uuid)
+		case 'text':
+		case 'uuid':
+			return 'string';
+		// All other types pass through as-is (they're valid SchemaColumnType)
+		default:
+			return type;
+	}
+}
+
+/**
+ * Adapter interface for introspection.
+ * Must have introspect() method and optionally dbCasing.
+ */
+interface IntrospectableAdapter {
+	readonly dbCasing?: DbCasing;
+	introspect(options?: {
+		schema?: string;
+		include?: readonly string[];
+		exclude?: readonly string[];
+	}): Promise<ModelIR & { introspectedAt?: Date }>;
+}
+
+/**
+ * Create a Schema from database introspection.
+ *
+ * This function introspects the database schema and returns a Schema<T>
+ * that can be used with createOrm().
+ *
+ * @example
+ * ```typescript
+ * const adapter = createPgsqlAdapter(pool);
+ * const schema = await getSchemaFromDb(adapter, { schema: 'public' });
+ * const orm = createOrm({ schema, adapter });
+ * ```
+ *
+ * @param adapter - An adapter that implements introspect()
+ * @param options - Introspection options (schema name, table filters)
+ * @returns A Schema<T> with definition, model, and type-safe tables
+ */
+export async function getSchemaFromDb<
+	T extends SchemaDefinition = SchemaDefinition,
+>(
+	adapter: IntrospectableAdapter,
+	options?: GetSchemaFromDbOptions,
+): Promise<Schema<T>> {
+	// Build introspection options, only including defined values
+	const introspectOptions: {
+		schema?: string;
+		include?: readonly string[];
+		exclude?: readonly string[];
+	} = {};
+	if (options?.schema !== undefined) introspectOptions.schema = options.schema;
+	if (options?.tables !== undefined) introspectOptions.include = options.tables;
+	if (options?.exclude !== undefined)
+		introspectOptions.exclude = options.exclude;
+
+	// Call adapter introspection
+	const introspectionResult = await adapter.introspect(introspectOptions);
+
+	const model = introspectionResult;
+	const introspectedAt = introspectionResult.introspectedAt;
+
+	// Build FK lookup: column name → target table
+	// ForeignKeyIR uses columns[] array and references.table
+	const fkLookup = new Map<
+		string,
+		Map<string, { target: string; nullable: boolean; unique: boolean }>
+	>();
+	for (const table of model.tables.values()) {
+		const tableFks = new Map<
+			string,
+			{ target: string; nullable: boolean; unique: boolean }
+		>();
+		for (const fk of table.foreignKeys) {
+			// Only handle single-column FKs for now (composite FKs are rare in schema defs)
+			const fkColumn = fk.columns[0];
+			if (!fkColumn) continue;
+
+			// Find the column to check nullable/unique
+			const column = table.columns.find((c) => c.name === fkColumn);
+			tableFks.set(fkColumn, {
+				target: fk.references.table,
+				nullable: column?.nullable ?? true,
+				unique: column?.unique ?? false,
+			});
+		}
+		fkLookup.set(table.name, tableFks);
+	}
+
+	// Convert ModelIR to SchemaDefinition
+	const definition: Record<string, TableDef> = {};
+
+	for (const table of model.tables.values()) {
+		const tableDef: TableDef = {};
+		const tableFks = fkLookup.get(table.name) ?? new Map();
+
+		for (const column of table.columns) {
+			const fk = tableFks.get(column.name);
+
+			if (fk) {
+				// FK column → ref() definition
+				tableDef[column.name] = ref(fk.target, {
+					nullable: fk.nullable,
+					unique: fk.unique,
+				});
+			} else {
+				// Regular column → JS type
+				tableDef[column.name] = columnTypeToJsType(column.type);
+			}
+		}
+
+		definition[table.name] = tableDef;
+	}
+
+	const tableNames = Object.keys(definition) as (keyof T)[];
+
+	// Create type-safe tables proxy
+	const tables = createTablesProxy(
+		model,
+		tableNames as string[],
+	) as InferTables<T>;
+
+	// Build result with optional properties only if defined
+	const result: Schema<T> = {
+		definition: definition as T,
+		model,
+		tableNames,
+		tables,
+	};
+
+	// Add optional properties only if they have values
+	if (adapter.dbCasing !== undefined) {
+		(result as { dbCasing?: DbCasing }).dbCasing = adapter.dbCasing;
+	}
+	if (introspectedAt !== undefined) {
+		(result as { introspectedAt?: Date }).introspectedAt = introspectedAt;
+	}
+
+	return result;
+}
