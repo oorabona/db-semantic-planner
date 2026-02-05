@@ -1665,12 +1665,17 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Applies the naming plugin for identifier transformation.
 	 *
 	 * @param schema - The ModelIR schema to generate DDL from
+	 * @param overrideOptions - Optional overrides for DDL generation (e.g., includeDropStatements)
 	 * @returns Array of DDL statements in dependency order
 	 */
-	generateDDL(schema: ModelIR): string[] {
+	generateDDL(
+		schema: ModelIR,
+		overrideOptions?: Partial<GenerateDDLOptions>,
+	): string[] {
 		const options: GenerateDDLOptions = {
 			...(this.schemaName ? { schemaName: this.schemaName } : {}),
 			naming: this.naming,
+			...overrideOptions,
 		};
 		return generateDDLStatements(schema, options);
 	}

@@ -12,26 +12,14 @@
 
 > These are confirmed bugs that affect correctness. Fix before new features.
 
-### CLI Correctness
-
-- [ ] **E01** [CLI] `generate` options ineffective — `--drop`, `--dialect`, `--casing` exposed but not applied
-  - Ref: `packages/cli/src/commands/generate.ts:27-78`
-  - DoD: Each flag produces different output; test validates each option
-
 ### Adapter Correctness
 
-- [ ] **E02** [Adapter] `FetchDirection.last` cursor bug — maps to same code as `first`
-  - Ref: `packages/adapter-pgsql/src/streaming/cursor.ts:288`
-  - DoD: `last` returns last N rows (not first); test shows `first` ≠ `last` results
 - [ ] **E02b** [Adapter] `via` hint ambiguity — when multiple paths exist
   - Ref: legacy TODO_ADAPTER_PGSQL.md:89
   - DoD: `via` hint selects correct FK path; error if ambiguous without hint
 
 ### Core Correctness
 
-- [ ] **E03** [Core] `byId`/`byIds` hardcoded 'id' — PK non-`id` broken
-  - Ref: `packages/core/src/dx/orm.ts:1120-1132`, `query-executor.ts:232`
-  - DoD: `byId()` uses schema PK name; test with PK named `uuid` passes
 - [ ] **E04** [Core] ORM vs QueryExecutor path divergence — duplicate logic, risk of drift
   - Ref: `packages/core/src/dx/orm.ts:1096`, `query-executor.ts:193`
   - DoD: Single execution path; no duplicate query logic; existing tests pass

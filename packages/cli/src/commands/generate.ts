@@ -68,6 +68,14 @@ export const generateCommand = new Command('generate')
 
 				log(`📄 Loaded schema from: ${schemaPath}`);
 
+				// Validate dialect option
+				const dialect = options.dialect ?? 'postgresql';
+				if (dialect !== 'postgresql') {
+					console.error(
+						`⚠️  Warning: Only 'postgresql' dialect is currently supported. Using postgresql.`,
+					);
+				}
+
 				// Generate based on target
 				switch (target) {
 					case 'ddl': {
@@ -90,7 +98,11 @@ export const generateCommand = new Command('generate')
 
 						{
 							// ARCH-005: Use schema.model directly (already ModelIR)
-							const ddlStatements = adapter.generateDDL(schema.model);
+							const ddlStatements = adapter.generateDDL(schema.model, {
+								...(options.drop !== undefined && {
+									includeDropStatements: options.drop,
+								}),
+							});
 
 							const ddlContent = ddlStatements.join('\n\n');
 							const outputPath = options.out ?? options.output;

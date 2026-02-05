@@ -135,16 +135,40 @@ export function buildDeclareCursor(options: CursorOptions): Node {
  * ```
  */
 export function buildFetch(options: FetchOptions): Node {
-	const direction = mapFetchDirection(options.direction ?? 'next');
-	const howMany = options.count ?? 1;
+	const dir = options.direction ?? 'next';
+
+	// Calculate direction and howMany based on FetchDirection
+	// PostgreSQL handles "ALL" variants as FORWARD/BACKWARD with LONG_MAX (2147483647)
+	// FIRST/LAST are ABSOLUTE with howMany = 1/-1 respectively
+	let direction: string;
+	let howMany: bigint;
+
+	switch (dir) {
+		case 'first':
+			direction = 'FETCH_ABSOLUTE';
+			howMany = BigInt(1);
+			break;
+		case 'last':
+			direction = 'FETCH_ABSOLUTE';
+			howMany = BigInt(-1);
+			break;
+		case 'forward_all':
+			direction = 'FETCH_FORWARD';
+			howMany = BigInt(2147483647); // INT_MAX = "all"
+			break;
+		case 'backward_all':
+			direction = 'FETCH_BACKWARD';
+			howMany = BigInt(2147483647); // INT_MAX = "all"
+			break;
+		default:
+			direction = mapFetchDirection(dir);
+			howMany = BigInt(options.count ?? 1);
+	}
 
 	return {
 		FetchStmt: {
 			direction: direction as any, // PostgreSQL FetchDirection enum
-			howMany:
-				direction === 'FETCH_FORWARD_ALL' || direction === 'FETCH_BACKWARD_ALL'
-					? BigInt(0)
-					: BigInt(howMany),
+			howMany,
 			portalname: options.cursorName,
 			ismove: false,
 		},

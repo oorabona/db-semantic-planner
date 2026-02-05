@@ -1117,7 +1117,23 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		if (values.length === 0) {
 			return [];
 		}
-		return this.where(inArray('id', [...values])).all();
+		return this.where(inArray(this.getSimplePkColumn(), [...values])).all();
+	}
+
+	/**
+	 * Get the simple primary key column name for the current table.
+	 * Returns the first PK column if composite, falls back to 'id' if undefined.
+	 */
+	private getSimplePkColumn(): string {
+		const table = this.model.getTable(this.from);
+		const pk = table?.primaryKey;
+		if (typeof pk === 'string') {
+			return pk;
+		}
+		if (Array.isArray(pk) && pk.length > 0) {
+			return pk[0]!;
+		}
+		return 'id'; // fallback for legacy schemas without explicit PK
 	}
 
 	/**
@@ -1128,8 +1144,8 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		value: string | number | Record<string, unknown>,
 	): WhereIntent {
 		if (typeof value === 'string' || typeof value === 'number') {
-			// Simple PK
-			return eq('id', value);
+			// Simple PK - use schema-defined PK column
+			return eq(this.getSimplePkColumn(), value);
 		}
 		// Composite PK - build AND condition
 		const entries = Object.entries(value);

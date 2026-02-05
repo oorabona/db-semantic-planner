@@ -296,14 +296,15 @@ describe('Streaming (Cursor) Builder', () => {
 			expect(stmt.howMany).toBe(BigInt(100));
 		});
 
-		it('should build FETCH ALL with howMany=0', () => {
+		it('should build FETCH ALL with INT_MAX', () => {
 			const result = buildFetch({
 				cursorName: 'my_cursor',
 				direction: 'forward_all',
 			});
 
 			const stmt = (result as any).FetchStmt;
-			expect(stmt.howMany).toBe(BigInt(0));
+			// PostgreSQL represents FETCH ALL as FETCH FORWARD with INT_MAX
+			expect(stmt.howMany).toBe(BigInt(2147483647));
 		});
 	});
 
@@ -340,7 +341,8 @@ describe('Streaming (Cursor) Builder', () => {
 		it('buildFetchAll should fetch all rows', () => {
 			const result = buildFetchAll('cursor');
 			const stmt = (result as any).FetchStmt;
-			expect(stmt.howMany).toBe(BigInt(0));
+			// PostgreSQL represents FETCH ALL as FETCH FORWARD with INT_MAX
+			expect(stmt.howMany).toBe(BigInt(2147483647));
 		});
 
 		it('buildFetchFirst should fetch first row', () => {

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { Adapter, Dump } from '../adapter.js';
 import { and, eq, inArray } from './filters.js';
 import { createOrm } from './orm.js';
 import { ref, schema } from './schema.js';
@@ -230,6 +231,124 @@ describe('DX-008: API Shortcuts', () => {
 					include: [{ relation: 'author' }],
 				},
 			]);
+		});
+	});
+
+	describe('E03 Regression: byId/byIds with non-id PK', () => {
+		// Schema with 'uuid' as PK instead of 'id'
+		const uuidPkSchema = schema({
+			products: {
+				uuid: { type: 'uuid', primaryKey: true },
+				name: 'string',
+				price: 'decimal',
+			},
+		});
+
+		/**
+		 * Create a spy adapter that captures compile calls.
+		 */
+		function createSpyAdapter(executeResult: unknown[] = []) {
+			const base = createMockAdapter();
+			const compiledResult = {
+				sql: 'SELECT 1',
+				parameters: [] as readonly unknown[],
+			};
+			const compileSpy = vi.fn(
+				(_plan: unknown, _opts?: unknown) => compiledResult,
+			);
+			const compileWithIncludesSpy = vi.fn(
+				(_plan: unknown, _opts?: unknown) => ({
+					main: compiledResult,
+					subqueries: [],
+					subqueryIncludes: [],
+				}),
+			);
+			const executeSpy = vi.fn(() => Promise.resolve(executeResult));
+			const createDumpSpy = vi.fn(
+				(
+					_plan: unknown,
+					compiled: { sql: string; parameters: readonly unknown[] },
+				) =>
+					({
+						sql: compiled.sql,
+						params: compiled.parameters,
+						plan: {},
+					}) as unknown as Dump,
+			);
+
+			const adapter = {
+				...base,
+				compile: compileSpy,
+				compileWithIncludes: compileWithIncludesSpy,
+				execute: executeSpy,
+				createDump: createDumpSpy,
+				withSchema: (_schemaName: string) => adapter,
+				_spies: {
+					compile: compileSpy,
+					compileWithIncludes: compileWithIncludesSpy,
+					execute: executeSpy,
+					createDump: createDumpSpy,
+				},
+			} as unknown as Adapter & {
+				_spies: {
+					compile: typeof compileSpy;
+					compileWithIncludes: typeof compileWithIncludesSpy;
+					execute: typeof executeSpy;
+					createDump: typeof createDumpSpy;
+				};
+			};
+			return adapter;
+		}
+
+		it('byId() uses schema-defined PK column (not hardcoded id)', async () => {
+			const adapter = createSpyAdapter([{ uuid: 'abc-123', name: 'Test' }]);
+			const ormWithUuidPk = createOrm({ adapter, schema: uuidPkSchema });
+
+			await ormWithUuidPk.select('products').byId('abc-123');
+
+			// Verify compileWithIncludes was called with plan containing 'uuid' field
+			expect(adapter._spies.compileWithIncludes).toHaveBeenCalled();
+			const planArg = adapter._spies.compileWithIncludes.mock.calls[0]![0] as {
+				intent: { where?: { field?: string } };
+			};
+			expect(planArg.intent.where?.field).toBe('uuid');
+		});
+
+		it('byIds() uses schema-defined PK column (not hardcoded id)', async () => {
+			const adapter = createSpyAdapter([
+				{ uuid: 'abc-123', name: 'Test1' },
+				{ uuid: 'def-456', name: 'Test2' },
+			]);
+			const ormWithUuidPk = createOrm({ adapter, schema: uuidPkSchema });
+
+			await ormWithUuidPk.select('products').byIds(['abc-123', 'def-456']);
+
+			// Verify compileWithIncludes was called with plan containing 'uuid' field
+			expect(adapter._spies.compileWithIncludes).toHaveBeenCalled();
+			const planArg = adapter._spies.compileWithIncludes.mock.calls[0]![0] as {
+				intent: { where?: { field?: string } };
+			};
+			expect(planArg.intent.where?.field).toBe('uuid');
+		});
+
+		it('byId() falls back to id when PK not explicitly defined', async () => {
+			// Schema without explicit PK - should fallback to 'id'
+			const legacySchema = schema({
+				items: {
+					id: 'integer',
+					name: 'string',
+				},
+			});
+			const adapter = createSpyAdapter([{ id: 1, name: 'Test' }]);
+			const legacyOrm = createOrm({ adapter, schema: legacySchema });
+
+			await legacyOrm.select('items').byId(1);
+
+			expect(adapter._spies.compileWithIncludes).toHaveBeenCalled();
+			const planArg = adapter._spies.compileWithIncludes.mock.calls[0]![0] as {
+				intent: { where?: { field?: string } };
+			};
+			expect(planArg.intent.where?.field).toBe('id');
 		});
 	});
 });
