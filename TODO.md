@@ -14,12 +14,10 @@
 
 ### Documentation
 
-- [ ] [Docs] DOCS-001: Complete user documentation — Effort: L
-  - Getting Started guide (install → first query in 5 min)
-  - Document undocumented features: batch insert `.values([])`, `.count()`, `.first()`/`.firstOrThrow()`, transactions (nested), `AdapterLogger`, `onStart` streaming, `NamingPlugin`
-  - Type inference showcase (schema → typed results)
-  - `dump()` workflow guide (plan → SQL → params)
-  - E2E verification required for every documented feature
+- [x] ✅ [Docs] DOCS-001: Complete user documentation (2026-02-05)
+  - Quick Start guide (install → first query), type inference flow, compile-only mode
+  - Documented: transactions (nested), AdapterLogger, onStart streaming, NamingPlugin
+  - 8 E2E tests added (5 transactions, 3 adapter-logger)
 - [ ] [Docs] DOCS-002: Migration guides (from-prisma, from-drizzle, from-kysely)
 - [ ] [Docs] DOCS-003: Pattern guides (multi-tenant, recursive queries, window functions)
 

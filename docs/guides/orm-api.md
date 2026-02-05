@@ -6,6 +6,112 @@ Complete reference for the `@dbsp/core` TypeScript API. Progressive examples fro
 
 ---
 
+## Quick Start
+
+Go from zero to your first typed query in 3 steps.
+
+### Install
+
+```bash
+npm install @dbsp/core @dbsp/adapter-pgsql pg
+# or
+pnpm add @dbsp/core @dbsp/adapter-pgsql pg
+```
+
+### Define Your Schema
+
+```typescript
+import { schema, ref } from '@dbsp/core';
+
+const db = schema({
+  users: {
+    id: { type: 'uuid', primaryKey: true },
+    email: { type: 'text', unique: true },
+    name: 'string',
+    active: 'boolean',
+  },
+  posts: {
+    id: { type: 'uuid', primaryKey: true },
+    title: 'string',
+    content: { type: 'text', nullable: true },
+    published: 'boolean',
+    authorId: ref('users'),
+  },
+});
+```
+
+### Query with Full Type Safety
+
+```typescript
+import { createOrm, eq } from '@dbsp/core';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import pg from 'pg';
+
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = createPgsqlAdapter(pool, { dbCasing: 'snake_case' });
+const orm = createOrm({ schema: db, adapter });
+
+// Type-safe queries — table names and columns are autocompleted
+const activeUsers = await orm.select('users')
+  .where(eq('active', true))
+  .include('posts')
+  .all();
+// activeUsers: Array<{ id: string; email: string; name: string; active: boolean; posts: Array<...> }>
+
+// Inspect what the planner decided
+const dump = orm.select('users').include('posts').dump();
+console.log(dump.sql);       // Compiled SQL with $N parameters
+console.log(dump.params);    // Bound parameter values
+console.log(dump.plan);      // PlanReport: decisions, warnings, strategies
+```
+
+### Type Inference Flow
+
+Types flow automatically from your schema definition through the entire query pipeline:
+
+```
+schema({ users: { id: 'uuid', name: 'string' } })
+  │
+  ▼
+Schema<T>  →  createOrm({ schema })  →  OrmInstance<DB>
+                                            │
+                                            ▼
+                              orm.select('users')  →  QueryBuilder<{ id: string; name: string }>
+                                                          │
+                                                          ▼
+                                                .all()  →  Promise<Array<{ id: string; name: string }>>
+```
+
+Column types map to TypeScript types:
+
+| Schema Type | TypeScript Type | Notes |
+|-------------|----------------|-------|
+| `'string'`, `'text'`, `'uuid'` | `string` | |
+| `'number'`, `'integer'`, `'decimal'` | `number` | |
+| `'bigint'` | `bigint` | |
+| `'boolean'` | `boolean` | |
+| `'date'`, `'datetime'`, `'timestamp'` | `Date` | |
+| `'json'`, `'jsonb'` | `unknown` | |
+| `{ type: T, nullable: true }` | `T \| null` | |
+
+### Without a Database (Compile-Only)
+
+For testing, CLI tooling, or SQL preview — no `pg.Pool` needed:
+
+```typescript
+import { createOrm, eq } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const adapter = createPgsqlCompileOnlyAdapter();
+const orm = createOrm({ schema: db, adapter }); // db from schema() above
+
+const dump = orm.select('users').where(eq('active', true)).dump();
+console.log(dump.sql);    // SELECT "t0".* FROM "users" AS "t0" WHERE "t0"."active" = $1
+console.log(dump.params); // [true]
+```
+
+---
+
 ## 1. Schema Definition
 
 ### `schema()` — Define Your Database
