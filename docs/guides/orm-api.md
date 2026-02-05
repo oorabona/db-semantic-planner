@@ -252,6 +252,46 @@ const result = await orm.transaction(async (tx) => {
 // Auto-commit on success, auto-rollback on error
 ```
 
+The callback receives a transaction-scoped ORM instance (`tx`) with the full ORM API. The transaction result is the return value of your callback:
+
+```typescript
+// Typed return value
+const order = await orm.transaction(async (tx) => {
+  const [created] = await tx.insert('orders')
+    .values({ customerId: 1, total: 99 })
+    .returning(['id', 'total'])
+    .execute();
+  return created; // { id: 42, total: 99 }
+});
+console.log(order.id); // 42
+
+// Schema-scoped transactions (multi-tenant)
+await orm.withSchema('tenant_42').transaction(async (tx) => {
+  // tx is scoped to 'tenant_42' schema
+  await tx.insert('events').values({ type: 'signup' }).execute();
+});
+```
+
+**Nested transactions** reuse the outer transaction context — no savepoints, no additional BEGIN/COMMIT:
+
+```typescript
+await orm.transaction(async (outer) => {
+  await outer.insert('users').values({ name: 'Alice' }).execute();
+
+  await outer.transaction(async (inner) => {
+    // inner reuses the same connection and transaction
+    await inner.insert('logs').values({ action: 'user_created' }).execute();
+  });
+});
+```
+
+| Behavior | Detail |
+|----------|--------|
+| Success | `COMMIT` after callback returns |
+| Error thrown | `ROLLBACK`, error re-thrown |
+| Nested call | Reuses parent transaction (no savepoints) |
+| Connection | Dedicated client, released on completion |
+
 ---
 
 ## 3. Querying (QueryBuilder)
@@ -742,6 +782,30 @@ for await (const user of stream) {
 }
 ```
 
+#### Stream Options
+
+```typescript
+const stream = orm.select('users').stream({
+  chunkSize: 100,  // rows fetched per cursor batch (default: framework-defined)
+
+  onStart(dump) {
+    // Called once on first next() — lazy initialization
+    console.log('SQL:', dump.sql);
+    console.log('Params:', dump.params);
+    console.log('Plan:', dump.plan);
+  },
+});
+
+for await (const user of stream) {
+  process.stdout.write(`${user.name}\n`);
+}
+```
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `chunkSize` | `number` | Rows per cursor fetch batch |
+| `onStart` | `(dump: Dump) => void` | Callback invoked once before first row; receives full query dump (SQL, params, plan) |
+
 ### Pagination
 
 #### Offset-Based
@@ -924,6 +988,31 @@ const adapter = createPgsqlAdapter(pool, {
 | `defaultPkColumnName` | `string` | `'id'` | Convention fallback when schema metadata doesn't provide an explicit PK column |
 | `deriveFkColumnName` | `(table: string, pk: string) => string` | `singularize(table)_pk` | Derives FK column names from the referenced table and its PK |
 
+### NamingPlugin — Column Name Transformation
+
+When your database uses `snake_case` columns but your TypeScript models use `camelCase`, the `NamingPlugin` handles bidirectional transformation automatically:
+
+```typescript
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+
+// Built-in: CamelCaseNamingPlugin (camelCase ↔ snake_case)
+const adapter = createPgsqlAdapter(pool, {
+  dbCasing: 'snake_case',  // enables CamelCaseNamingPlugin
+});
+
+// Query results: snake_case DB columns → camelCase JS properties
+// Query compilation: camelCase JS properties → snake_case SQL columns
+```
+
+Two built-in plugins:
+
+| Plugin | `dbCasing` | Effect |
+|--------|-----------|--------|
+| `IdentityNamingPlugin` | `'preserve'` (default) | No transformation — columns pass through unchanged |
+| `CamelCaseNamingPlugin` | `'snake_case'` | `createdAt` ↔ `created_at`, `userProfileImage` ↔ `user_profile_image` |
+
+The `CamelCaseNamingPlugin` handles edge cases: acronyms (`parseJSON` → `parse_json`), numbers (`field1Name` → `field1_name`), leading underscores (`_privateField` → `_private_field`).
+
 ### `singularize()` and `pluralize()` — Importable Helpers
 
 These are optional utility functions, exported from `@dbsp/core`, useful for building custom FK derivation or other naming logic:
@@ -991,3 +1080,37 @@ const adapter = createPgsqlAdapter(pool, {
     `${singularize(tableName, myPlurals)}_${pkColumnName}`,
 });
 ```
+
+---
+
+## 10. Adapter Logging
+
+The adapter accepts an optional `AdapterLogger` for query observability. All methods are optional — implement only what you need:
+
+```typescript
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+
+const adapter = createPgsqlAdapter(pool, {
+  logger: {
+    debug(message, ...args) {
+      console.debug(`[dbsp] ${message}`, ...args);
+    },
+    warn(message, ...args) {
+      console.warn(`[dbsp] ${message}`, ...args);
+    },
+    error(message, ...args) {
+      console.error(`[dbsp] ${message}`, ...args);
+    },
+  },
+});
+```
+
+| Method | When called |
+|--------|-------------|
+| `debug?(message, ...args)` | Query compilation details, plan decisions |
+| `warn?(message, ...args)` | Potential performance issues, deprecations |
+| `error?(message, ...args)` | Query failures, connection errors |
+
+The `AdapterLogger` interface is exported from `@dbsp/core` — use any logger that matches the shape (Winston, Pino, console, custom).
+
+> **Note:** The PostgreSQL adapter currently logs sparingly (cleanup errors during streaming transactions). The interface is designed for future expansion — additional log points will be added as the adapter matures.
