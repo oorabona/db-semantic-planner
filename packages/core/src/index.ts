@@ -198,6 +198,9 @@ export {
 // ARCH-005: Unified Schema API
 export {
 	type ColumnDef,
+	type GetSchemaFromDbOptions,
+	// ARCH-006: Database introspection → Schema
+	getSchemaFromDb,
 	isRef,
 	type RefDefinition,
 	type RefOptions,

@@ -18,12 +18,7 @@
 
 ### Introspection
 
-- [ ] **E07** [Core] `getSchemaFromDb()` missing — referenced but not implemented
-  - Ref: `packages/core/src/dx/orm.ts:264`, E2E tests skipped
-  - DoD: `getSchemaFromDb()` returns ModelIR from live DB; adapter implements introspection
-- [ ] **E07b** [E2E] Introspection tests skipped — blocked on `getSchemaFromDb()`
-  - Ref: `tests/e2e/introspection.test.ts:30`
-  - DoD: Tests unskipped and green (depends on E07)
+(Archived → docs/historic/done-2026-02.md)
 
 ---
 

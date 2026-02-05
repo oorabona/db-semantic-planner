@@ -8,9 +8,7 @@
  * The old async path (createOrm({ adapter })) was removed in ARCH-006.
  */
 
-// TODO(Phase-4): Re-enable when adapter-pgsql implements getSchemaFromDb()
-// getSchemaFromDb() is not yet available in adapter-pgsql
-import { createOrm } from '@dbsp/core';
+import { createOrm, getSchemaFromDb } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
@@ -19,15 +17,9 @@ import {
 	dropBlogSchema,
 } from './testkit/index.js';
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const getSchemaFromDb = (..._args: any[]): any => {
-	throw new Error('Not implemented');
-};
-
 const SCHEMA = 'introspection_test';
 
-// TODO(Phase-4): adapter-pgsql needs getSchemaFromDb() to run this test
-describe.skip('Auto-Introspection [BLOCKED: adapter-pgsql Phase 4]', () => {
+describe('Auto-Introspection (ARCH-006)', () => {
 	beforeAll(async () => {
 		await dropBlogSchema(SCHEMA);
 		await createBlogSchema(SCHEMA);
@@ -123,8 +115,8 @@ describe.skip('Auto-Introspection [BLOCKED: adapter-pgsql Phase 4]', () => {
 			const posts = schema.definition.posts;
 			expect(posts).toBeDefined();
 
-			// author_id should be a ref definition
-			const authorIdDef = posts!.authorId;
+			// author_id should be a ref definition (using actual DB column name)
+			const authorIdDef = posts!.author_id;
 			expect(authorIdDef).toMatchObject({
 				__brand: 'ref',
 				target: 'authors',

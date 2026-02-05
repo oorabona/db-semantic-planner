@@ -162,6 +162,9 @@ export {
 // ARCH-005: Unified Schema API
 export {
 	type ColumnDef,
+	type GetSchemaFromDbOptions,
+	// ARCH-006: Database introspection → Schema
+	getSchemaFromDb,
 	// Type inference helpers (ARCH-006)
 	type InferColumn,
 	type InferColumnType,

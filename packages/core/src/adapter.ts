@@ -309,11 +309,36 @@ export interface StreamingAdapter extends BaseAdapter {
 }
 
 /**
+ * Options for database introspection.
+ */
+export interface IntrospectionOptions {
+	/** Schema name to introspect (default: 'public' for PostgreSQL) */
+	readonly schema?: string;
+	/** Tables to include (default: all). Applied before exclude. */
+	readonly include?: readonly string[];
+	/** Tables to exclude (glob patterns: * matches any chars) */
+	readonly exclude?: readonly string[];
+}
+
+/**
+ * Result of database introspection.
+ * Extends ModelIR with introspection-specific metadata.
+ */
+export interface IntrospectionResult extends ModelIR {
+	/** Timestamp when introspection was performed */
+	readonly introspectedAt: Date;
+	/** Warnings from introspection (e.g., unsupported types) */
+	readonly warnings?: readonly string[];
+}
+
+/**
  * Introspecting adapter - can introspect database schema.
  */
 export interface IntrospectingAdapter extends BaseAdapter {
+	/** Database column casing convention */
+	readonly dbCasing?: DbCasing;
 	/** Introspect the database schema and return a ModelIR. */
-	introspect(): Promise<ModelIR>;
+	introspect(options?: IntrospectionOptions): Promise<IntrospectionResult>;
 }
 
 /**
