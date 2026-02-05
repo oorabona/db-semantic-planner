@@ -358,9 +358,10 @@ export interface DDLGeneratingAdapter extends BaseAdapter {
 	 * Generate DDL statements from a schema.
 	 *
 	 * @param schema - The ModelIR schema to generate DDL from
+	 * @param options - Optional adapter-specific options (e.g., includeDropStatements)
 	 * @returns Array of DDL statements (CREATE TABLE, CREATE INDEX, etc.)
 	 */
-	generateDDL(schema: ModelIR): string[];
+	generateDDL(schema: ModelIR, options?: Record<string, unknown>): string[];
 }
 
 // ============================================================================

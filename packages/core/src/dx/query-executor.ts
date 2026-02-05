@@ -229,7 +229,7 @@ export class QueryExecutor<TResult = unknown> {
 		if (values.length === 0) {
 			return [];
 		}
-		const condition = inArray('id', [...values]);
+		const condition = inArray(this.getSimplePkColumn(), [...values]);
 		return addConditionAndExecuteAll(condition);
 	}
 
@@ -477,14 +477,30 @@ export class QueryExecutor<TResult = unknown> {
 	}
 
 	/**
+	 * Get the simple primary key column name for the current table.
+	 * Returns the first PK column if composite, falls back to 'id' if undefined.
+	 */
+	private getSimplePkColumn(): string {
+		const table = this.ctx.model.getTable(this.ctx.from);
+		const pk = table?.primaryKey;
+		if (typeof pk === 'string') {
+			return pk;
+		}
+		if (Array.isArray(pk) && pk.length > 0) {
+			return pk[0]!;
+		}
+		return 'id'; // fallback for legacy schemas without explicit PK
+	}
+
+	/**
 	 * Build primary key condition.
 	 */
 	private buildPkCondition(
 		value: string | number | Record<string, unknown>,
 	): WhereIntent {
 		if (typeof value === 'string' || typeof value === 'number') {
-			// Simple PK
-			return eq('id', value);
+			// Simple PK - use schema-defined PK column
+			return eq(this.getSimplePkColumn(), value);
 		}
 		// Composite PK - build AND condition
 		const entries = Object.entries(value);
