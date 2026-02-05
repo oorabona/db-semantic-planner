@@ -592,10 +592,71 @@ function convertWhereCondition(
 			return result;
 		}
 
-		// Subquery: { kind: 'subquery', ... }
-		// Requires WhereSubqueryExistsIntent (see TODO_NQL.md)
-		case 'subquery':
-			return null;
+		// Subquery scalar comparison: { kind: 'subquery', field, operator, subquery }
+		// WHERE field OP (SELECT ... FROM ...)
+		case 'subquery': {
+			const field = cond.field as string;
+			const operator = cond.operator as string; // eq, neq, gt, gte, lt, lte
+			const subquery = cond.subquery as QueryIntent | undefined;
+
+			if (!subquery || !field) {
+				return null;
+			}
+
+			// Extract subquery parts
+			const targetTable = subquery.from;
+			let selectColumn = '*';
+			let aggregate: string | undefined;
+
+			// Parse select to extract column and aggregate
+			const select = subquery.select as SelectIntent | undefined;
+			if (select) {
+				if ('type' in select && select.type === 'aggregate') {
+					// SelectAggregateIntent
+					const agg = select.aggregates?.[0];
+					if (agg) {
+						aggregate = agg.function;
+						selectColumn = agg.field ?? '*';
+					}
+				} else if ('fields' in select && select.fields?.length) {
+					// SelectFieldsIntent
+					selectColumn = select.fields[0]!;
+				}
+			}
+
+			// Convert inner WHERE if present
+			const subConditions: PlanDecision[] = [];
+			if (subquery.where) {
+				const innerWhere = convertWhereCondition(
+					subquery.where as WhereIntent,
+					targetTable,
+				);
+				if (innerWhere) {
+					subConditions.push(innerWhere);
+				}
+			}
+
+			// Map operator to SQL symbol for subqueryOperator
+			const opMap: Record<string, string> = {
+				eq: '=',
+				neq: '!=',
+				gt: '>',
+				gte: '>=',
+				lt: '<',
+				lte: '<=',
+			};
+
+			return {
+				type: 'where',
+				column: field,
+				operator: 'scalarSubquery',
+				targetTable,
+				selectColumn,
+				subqueryOperator: opMap[operator] ?? '=',
+				...(aggregate && { aggregate }),
+				...(subConditions.length > 0 && { conditions: subConditions }),
+			};
+		}
 
 		default:
 			// Unknown condition type

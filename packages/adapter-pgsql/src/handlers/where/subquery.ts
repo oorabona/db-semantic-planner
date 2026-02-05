@@ -6,7 +6,13 @@
  * - WHERE id IN (SELECT user_id FROM active_users)
  */
 
-import type { Node, SelectStmt, SubLink, SubLinkType } from '@pgsql/types';
+import type {
+	A_Expr,
+	A_Expr_Kind,
+	Node,
+	SelectStmt,
+	SubLink,
+} from '@pgsql/types';
 import { columnRef, integerNode, rangeVar, sortBy } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
@@ -15,20 +21,6 @@ import type {
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
-
-/**
- * Map decision operators to SubLinkType
- */
-const SUBLINK_TYPE_MAP: Record<string, SubLinkType> = {
-	in: 'ANY_SUBLINK',
-	notIn: 'ALL_SUBLINK',
-	'=': 'EXPR_SUBLINK',
-	'!=': 'EXPR_SUBLINK',
-	'<': 'EXPR_SUBLINK',
-	'<=': 'EXPR_SUBLINK',
-	'>': 'EXPR_SUBLINK',
-	'>=': 'EXPR_SUBLINK',
-};
 
 /**
  * Map comparison operators to their PostgreSQL equivalents
@@ -43,23 +35,32 @@ const PG_OPERATOR_MAP: Record<string, string> = {
 };
 
 /**
- * Create a SubLink node for scalar subquery comparison
+ * Create an A_Expr node for scalar subquery comparison.
+ * Uses A_Expr with AEXPR_OP instead of SubLink.testexpr because
+ * pgsql-deparser doesn't deparse EXPR_SUBLINK.testexpr/operName correctly.
+ *
+ * Result: lexpr OP (SELECT ... FROM ...)
  */
 function createScalarSubLink(
 	subquery: Node,
 	operator: string,
 	leftOperand: Node,
 ): Node {
-	const subLinkType = SUBLINK_TYPE_MAP[operator] ?? 'EXPR_SUBLINK';
-
+	// Wrap subquery in SubLink node for EXPR_SUBLINK
 	const subLink: SubLink = {
-		subLinkType,
+		subLinkType: 'EXPR_SUBLINK',
 		subselect: subquery,
-		testexpr: leftOperand,
-		operName: [{ String: { sval: PG_OPERATOR_MAP[operator] ?? operator } }],
 	};
 
-	return { SubLink: subLink };
+	// Build A_Expr: column OP (subquery)
+	const expr: A_Expr = {
+		kind: 'AEXPR_OP' as A_Expr_Kind,
+		name: [{ String: { sval: PG_OPERATOR_MAP[operator] ?? operator } }],
+		lexpr: leftOperand,
+		rexpr: { SubLink: subLink },
+	};
+
+	return { A_Expr: expr };
 }
 
 /**

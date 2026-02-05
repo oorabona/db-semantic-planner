@@ -26,7 +26,7 @@
 
 ### Compiler Correctness
 
-- [ ] **E05** [Adapter] Subquery WHERE end-to-end — branch returns `null`
+- [x] ✅ **E05** [Adapter] Subquery WHERE end-to-end — branch returns `null` (2026-02-05)
   - Ref: `packages/adapter-pgsql/src/intent-to-decisions.ts:596`
   - DoD: Subquery WHERE compiles to valid SQL (not null); E2E test with nested filter
 

@@ -189,6 +189,10 @@ export interface PlanDecision {
 	readonly maxDepth?: number;
 	readonly role?: string;
 	// Arithmetic expressions use args: [left, right] instead of dedicated fields
+	// Scalar subquery comparison properties
+	readonly selectColumn?: string;
+	readonly aggregate?: string;
+	readonly subqueryOperator?: string;
 }
 
 /**
