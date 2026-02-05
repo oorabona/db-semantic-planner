@@ -142,8 +142,6 @@ export {
 	// ARCH-006: Simplified ORM options (preferred)
 	type SimplifiedOrmOptions,
 } from './orm.js';
-// QueryExecutor - handles query execution via adapter
-export { type ExecutionContext, QueryExecutor } from './query-executor.js';
 // NOTE: RecursiveQueryBuilder is now internal-only (DX-022)
 // Use include({ recursive: true }) API instead
 // Type exports kept for edge-table support (internal use)
