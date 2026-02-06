@@ -122,11 +122,11 @@
 
 ### SRP / God Classes
 
-- [ ] **#16** [SRP] NqlCstVisitor (1,349 LOC) — L-size, dedicated story
-- [ ] **#17** [SRP] NQL compiler (1,142 LOC) — L-size, dedicated story
-- [ ] **#18** [SRP] PgsqlAdapter (1,592 LOC) — L-size, dedicated story
-- [ ] **#19** [SRP] QueryBuilderImpl extraction (1,091 LOC) — L
-- [ ] **#34** [SRP] intent-ast.ts (1,750 LOC) — L
+- [x] ✅ **#34** [SRP] intent-ast.ts → 10 focused modules + barrel (Phase 1, 275bc87) (2026-02-06)
+- [x] ✅ **#16** [SRP] NqlCstVisitor → 8 domain modules + coordinator (Phase 2, 32c829c) (2026-02-06)
+- [x] ✅ **#17** [SRP] NQL compiler → 9 domain modules + coordinator 196 LOC (Phase 3, 3528630) (2026-02-06)
+- [x] ✅ **#19** [SRP] orm.ts → 4 modules: orm.ts 257 LOC + orm-instance.ts + query-builder.ts + hierarchy-helpers.ts (Phase 4, ba0e61c) (2026-02-06)
+- [-] ⏭️ **#18** [SRP] PgsqlAdapter — DEFERRED: well-structured, low entropy, highest blast radius
 
 ### SOLID Violations
 

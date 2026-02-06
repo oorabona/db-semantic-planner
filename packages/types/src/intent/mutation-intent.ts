@@ -3,8 +3,8 @@
  * Mutation intent types for Insert, Update, Delete, Upsert (DX-010).
  */
 
-import type { WhereIntent } from './where-intent.js';
 import type { QueryIntent } from './query-intent.js';
+import type { WhereIntent } from './where-intent.js';
 
 // ============================================================================
 // Mutation Intents - Insert, Update, Delete (DX-010)

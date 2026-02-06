@@ -3,9 +3,9 @@
  * Expression intent types for computed/derived values in SELECT.
  */
 
+import type { QueryIntent } from './query-intent.js';
 import type { AggregateFunction } from './select-intent.js';
 import type { WhereIntent } from './where-intent.js';
-import type { QueryIntent } from './query-intent.js';
 
 // ============================================================================
 // Expression Intents - Computed/Derived Values

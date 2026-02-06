@@ -1179,7 +1179,6 @@ export class QueryBuilderImpl<TResult = unknown>
 
 			if (parts.length > 0) {
 				conditions.push(
-					// biome-ignore lint/style/noNonNullAssertion: length check guarantees first element
 					parts.length === 1 ? parts[0]! : { kind: 'and', conditions: parts },
 				);
 			}
