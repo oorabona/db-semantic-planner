@@ -7,7 +7,7 @@
  * @module ddl/type-mapping
  */
 
-import type { ColumnIR, ColumnType } from '@dbsp/core';
+import type { ColumnIR, ColumnType } from '@dbsp/types';
 
 /**
  * Map ColumnType to PostgreSQL data type string.

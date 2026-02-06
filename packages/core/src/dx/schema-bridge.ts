@@ -5,6 +5,7 @@
  * This enables sync createOrm usage with codegen-first schemas.
  */
 
+import type { Mutable } from '@dbsp/types';
 import * as v from 'valibot';
 import { ModelIRImpl } from '../model-impl.js';
 import {
@@ -18,7 +19,6 @@ import {
 	type IndexIR,
 	type JoinDefault,
 	type ModelIR,
-	type OnDeleteAction,
 	type Optionality,
 	type PseudoColumnMetadata,
 	type RelationIR,
@@ -309,17 +309,17 @@ function buildTableIRFromDefinition(
 
 	for (const [colName, colDef] of Object.entries(genTable)) {
 		// Column (with unique support)
-		const col: ColumnIR = {
+		const col: Mutable<ColumnIR> = {
 			name: colName,
 			type: generatedTypeToColumnType(colDef.type),
 			nullable: colDef.nullable ?? false,
 			default: colDef.default,
 		};
 		if (colDef.unique !== undefined) {
-			(col as { unique?: boolean }).unique = colDef.unique;
+			col.unique = colDef.unique;
 		}
 		if (colDef.autoIncrement !== undefined) {
-			(col as { autoIncrement?: boolean }).autoIncrement = colDef.autoIncrement;
+			col.autoIncrement = colDef.autoIncrement;
 		}
 		columns.push(col);
 
@@ -330,7 +330,7 @@ function buildTableIRFromDefinition(
 
 		// Foreign key (with onDelete support)
 		if (colDef.references) {
-			const fk: ForeignKeyIR = {
+			const fk: Mutable<ForeignKeyIR> = {
 				columns: [colName],
 				references: {
 					table: colDef.references.table,
@@ -338,8 +338,7 @@ function buildTableIRFromDefinition(
 				},
 			};
 			if (colDef.references.onDelete) {
-				(fk as { onDelete?: OnDeleteAction }).onDelete =
-					colDef.references.onDelete;
+				fk.onDelete = colDef.references.onDelete;
 			}
 			foreignKeys.push(fk);
 		}
@@ -977,23 +976,23 @@ function mapSchemaColumnType(
 function convertColumn(
 	col: v.InferOutput<typeof ColumnDefinitionSchema>,
 ): GeneratedColumn {
-	const result: GeneratedColumn = {
+	const result: Mutable<GeneratedColumn> = {
 		type: mapSchemaColumnType(col.type),
 	};
 	if (col.primaryKey !== undefined) {
-		(result as { primaryKey?: boolean }).primaryKey = col.primaryKey;
+		result.primaryKey = col.primaryKey;
 	}
 	if (col.nullable !== undefined) {
-		(result as { nullable?: boolean }).nullable = col.nullable;
+		result.nullable = col.nullable;
 	}
 	if (col.unique !== undefined) {
-		(result as { unique?: boolean }).unique = col.unique;
+		result.unique = col.unique;
 	}
 	if (col.autoIncrement !== undefined) {
-		(result as { autoIncrement?: boolean }).autoIncrement = col.autoIncrement;
+		result.autoIncrement = col.autoIncrement;
 	}
 	if (col.default !== undefined) {
-		(result as { default?: string | number | boolean }).default = col.default;
+		result.default = col.default as string;
 	}
 	if (col.references) {
 		const refs: { table: string; column?: string } = {
@@ -1002,10 +1001,9 @@ function convertColumn(
 		if (col.references.column !== undefined) {
 			refs.column = col.references.column;
 		}
-		(result as { references?: { table: string; column?: string } }).references =
-			refs;
+		result.references = refs;
 	}
-	return result;
+	return result as GeneratedColumn;
 }
 
 /**
@@ -1016,39 +1014,35 @@ function convertRelation(
 ): GeneratedRelation {
 	switch (rel.kind) {
 		case 'belongsTo': {
-			const result: GeneratedBelongsTo = {
+			const result: Mutable<GeneratedBelongsTo> = {
 				kind: 'belongsTo',
 				target: rel.target,
 				foreignKey: rel.foreignKey,
 			};
 			if (rel.targetKey !== undefined) {
-				(result as { targetKey?: string }).targetKey = rel.targetKey;
+				result.targetKey = rel.targetKey;
 			}
 			if (rel.includeStrategy !== undefined) {
-				(
-					result as { includeStrategy?: GeneratedIncludeStrategy }
-				).includeStrategy = rel.includeStrategy;
+				result.includeStrategy = rel.includeStrategy;
 			}
-			return result;
+			return result as GeneratedBelongsTo;
 		}
 		case 'hasMany': {
-			const result: GeneratedHasMany = {
+			const result: Mutable<GeneratedHasMany> = {
 				kind: 'hasMany',
 				target: rel.target,
 				foreignKey: rel.foreignKey,
 			};
 			if (rel.sourceKey !== undefined) {
-				(result as { sourceKey?: string }).sourceKey = rel.sourceKey;
+				result.sourceKey = rel.sourceKey;
 			}
 			if (rel.includeStrategy !== undefined) {
-				(
-					result as { includeStrategy?: GeneratedIncludeStrategy }
-				).includeStrategy = rel.includeStrategy;
+				result.includeStrategy = rel.includeStrategy;
 			}
-			return result;
+			return result as GeneratedHasMany;
 		}
 		case 'manyToMany': {
-			const result: GeneratedManyToMany = {
+			const result: Mutable<GeneratedManyToMany> = {
 				kind: 'manyToMany',
 				target: rel.target,
 				through: rel.through,
@@ -1056,11 +1050,9 @@ function convertRelation(
 				targetFk: rel.targetFk,
 			};
 			if (rel.includeStrategy !== undefined) {
-				(
-					result as { includeStrategy?: GeneratedIncludeStrategy }
-				).includeStrategy = rel.includeStrategy;
+				result.includeStrategy = rel.includeStrategy;
 			}
-			return result;
+			return result as GeneratedManyToMany;
 		}
 	}
 }
@@ -1071,15 +1063,14 @@ function convertRelation(
 function convertHint(
 	hint: v.InferOutput<typeof HintDefinitionSchema>,
 ): GeneratedHint {
-	const result: GeneratedHint = {};
+	const result: Mutable<GeneratedHint> = {};
 	if (hint.defaultStrategy !== undefined) {
-		(result as { defaultStrategy?: 'exists' | 'join' }).defaultStrategy =
-			hint.defaultStrategy;
+		result.defaultStrategy = hint.defaultStrategy;
 	}
 	if (hint.cardinality !== undefined) {
-		(result as { cardinality?: 'one' | 'many' }).cardinality = hint.cardinality;
+		result.cardinality = hint.cardinality;
 	}
-	return result;
+	return result as GeneratedHint;
 }
 
 /**
@@ -1140,9 +1131,10 @@ export function resolvedSchemaToGeneratedSchema(
 			'columns' in tableDef &&
 			typeof tableDef.columns === 'object';
 
+		const tableObj = tableDef as Record<string, unknown>;
 		const columns = isWithConfig
-			? (tableDef as { columns: Record<string, unknown> }).columns
-			: (tableDef as Record<string, unknown>);
+			? (tableObj.columns as Record<string, unknown>)
+			: tableObj;
 
 		for (const [colName, colDef] of Object.entries(columns)) {
 			convertedTable[colName] = convertColumn(

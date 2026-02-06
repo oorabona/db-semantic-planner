@@ -13,7 +13,7 @@ import type {
 	IndexIR,
 	ModelIR,
 	TableIR,
-} from '@dbsp/core';
+} from '@dbsp/types';
 import { identityNaming, type NamingPlugin } from '../naming-plugin.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 

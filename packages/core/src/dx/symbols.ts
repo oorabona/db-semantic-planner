@@ -115,3 +115,30 @@ export type ColumnMetaKey = typeof COLUMN_META;
 export type RelationMetaKey = typeof RELATION_META;
 export type BrandKey = typeof BRAND;
 export type RelationPathKey = typeof RELATION_PATH;
+
+// ============================================================================
+// Type Guards for Symbol-keyed Properties
+// ============================================================================
+
+/**
+ * Type-safe check for the presence of a symbol-keyed property on an unknown value.
+ *
+ * Replaces `SYMBOL in (value as unknown as object)` casts throughout the DX layer.
+ *
+ * @param value - The value to check (any type)
+ * @param sym - The symbol key to look for
+ * @returns `true` if `value` is a non-null object containing `sym`
+ *
+ * @example
+ * ```typescript
+ * if (hasSymbolMeta(value, COLUMN_META)) {
+ *   // value is narrowed to Record<typeof COLUMN_META, unknown>
+ * }
+ * ```
+ */
+export function hasSymbolMeta<S extends symbol>(
+	value: unknown,
+	sym: S,
+): value is Record<S, unknown> {
+	return typeof value === 'object' && value !== null && sym in value;
+}

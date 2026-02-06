@@ -6,11 +6,12 @@
  */
 
 import type {
+	Mutable,
 	OrderByIntent,
 	QueryIntent,
 	SelectIntent,
 	WhereIntent,
-} from '@dbsp/core';
+} from '@dbsp/types';
 import type { PlanDecision } from './compiler.js';
 
 // ============================================================================
@@ -118,21 +119,20 @@ function convertSelect(
 			const exprKind = expr.kind as string;
 
 			if (exprKind === 'column') {
-				const decision: PlanDecision = {
+				const decision: Mutable<PlanDecision> = {
 					type: 'select',
 					column: expr.column as string,
 					table: rootTable,
 				};
-				if (expr.as) (decision as { alias: string }).alias = expr.as as string;
+				if (expr.as) decision.alias = expr.as as string;
 				decisions.push(decision);
 			} else if (exprKind === 'columnAlias') {
-				const decision: PlanDecision = {
+				const decision: Mutable<PlanDecision> = {
 					type: 'select',
 					column: expr.column as string,
 					table: rootTable,
 				};
-				if (expr.alias)
-					(decision as { alias: string }).alias = expr.alias as string;
+				if (expr.alias) decision.alias = expr.alias as string;
 				decisions.push(decision);
 			} else if (exprKind === 'aggregate') {
 				// Aggregate expressions
@@ -142,52 +142,52 @@ function convertSelect(
 				const aggDistinct = expr.distinct as boolean | undefined;
 
 				if (aggFunc === 'count' && !aggField) {
-					const decision: PlanDecision = {
+					const decision: Mutable<PlanDecision> = {
 						type: 'selectFunction',
 						function: 'count',
 						column: '*',
 						table: rootTable,
 					};
-					if (aggAs) (decision as { alias: string }).alias = aggAs;
+					if (aggAs) decision.alias = aggAs;
 					decisions.push(decision);
 				} else if (aggFunc === 'count' && aggDistinct && aggField) {
-					const decision: PlanDecision = {
+					const decision: Mutable<PlanDecision> = {
 						type: 'selectFunction',
 						function: 'countDistinct',
 						column: aggField,
 						table: rootTable,
 					};
-					if (aggAs) (decision as { alias: string }).alias = aggAs;
+					if (aggAs) decision.alias = aggAs;
 					decisions.push(decision);
 				} else {
-					const decision: PlanDecision = {
+					const decision: Mutable<PlanDecision> = {
 						type: 'selectFunction',
 						function: aggFunc,
 						table: rootTable,
 					};
-					if (aggField) (decision as { column: string }).column = aggField;
-					if (aggAs) (decision as { alias: string }).alias = aggAs;
+					if (aggField) decision.column = aggField;
+					if (aggAs) decision.alias = aggAs;
 					decisions.push(decision);
 				}
 			} else if (exprKind === 'coalesce') {
 				// COALESCE expression - use first field as primary
-				const decision: PlanDecision = {
+				const decision: Mutable<PlanDecision> = {
 					type: 'selectFunction',
 					function: 'coalesce',
 					args: expr.fields as string[],
 					table: rootTable,
 				};
-				if (expr.as) (decision as { alias: string }).alias = expr.as as string;
+				if (expr.as) decision.alias = expr.as as string;
 				decisions.push(decision);
 			} else if (exprKind === 'raw') {
 				// Raw SQL expression
-				const decision: PlanDecision = {
+				const decision: Mutable<PlanDecision> = {
 					type: 'selectFunction',
 					function: 'raw',
 					args: [expr.sql as string],
 					table: rootTable,
 				};
-				if (expr.as) (decision as { alias: string }).alias = expr.as as string;
+				if (expr.as) decision.alias = expr.as as string;
 				decisions.push(decision);
 			} else if (exprKind === 'window') {
 				// Window function expression
@@ -199,24 +199,15 @@ function convertSelect(
 					orderBy?: readonly { field: string; direction?: 'asc' | 'desc' }[];
 				};
 
-				const decision: PlanDecision = {
+				const decision: Mutable<PlanDecision> = {
 					type: 'selectWindow',
 					function: windowFunc,
 					alias: windowAlias,
 					table: rootTable,
 				};
-				if (windowField)
-					(decision as unknown as { field: string }).field = windowField;
-				if (over.partitionBy)
-					(
-						decision as unknown as { partitionBy: readonly string[] }
-					).partitionBy = over.partitionBy;
-				if (over.orderBy)
-					(
-						decision as unknown as {
-							orderBy: readonly { field: string; direction?: 'asc' | 'desc' }[];
-						}
-					).orderBy = over.orderBy;
+				if (windowField) decision.field = windowField;
+				if (over.partitionBy) decision.partitionBy = over.partitionBy;
+				if (over.orderBy) decision.orderBy = over.orderBy;
 				decisions.push(decision);
 			} else if (exprKind === 'case') {
 				// CASE WHEN ... THEN ... ELSE ... END expression
@@ -230,29 +221,33 @@ function convertSelect(
 					then: extractExpressionValue(wc.result),
 				}));
 
-				const decision: PlanDecision = {
-					type: 'selectExpression' as string,
+				// CASE decisions carry { when, then } tuples in `conditions` —
+				// structurally different from PlanDecision[]. The compiler and
+				// case handler both expect this shape at runtime.
+				const decision: Mutable<PlanDecision> = {
+					type: 'selectExpression',
 					expressionType: 'case',
-					conditions,
 					table: rootTable,
-				} as unknown as PlanDecision;
+				};
+				// Assign conditions separately: the runtime type is { when, then }[]
+				// but PlanDecision declares conditions as PlanDecision[].
+				(decision as Record<string, unknown>).conditions = conditions;
 				if (expr.else) {
-					(decision as unknown as Record<string, unknown>).value =
-						extractExpressionValue(expr.else as Record<string, unknown>);
+					decision.value = extractExpressionValue(
+						expr.else as Record<string, unknown>,
+					);
 				}
-				if (expr.as)
-					(decision as unknown as Record<string, unknown>).alias =
-						expr.as as string;
+				if (expr.as) decision.alias = expr.as as string;
 				decisions.push(decision);
 			} else if (exprKind === 'relationColumn') {
 				// Relation column: SELECT relation.column AS alias
-				const decision: PlanDecision = {
+				const decision: Mutable<PlanDecision> = {
 					type: 'selectRelationColumn',
 					relation: expr.relation as string,
 					column: (expr.column ?? '*') as string,
 					table: rootTable,
 				};
-				if (expr.as) (decision as { alias: string }).alias = expr.as as string;
+				if (expr.as) decision.alias = expr.as as string;
 				decisions.push(decision);
 			} else if (exprKind === 'pseudoColumn') {
 				// Pseudo-column expressions (e.g. manager.name, ancestors.*) are hints
@@ -262,13 +257,13 @@ function convertSelect(
 				// selectPseudoColumn decisions created directly by user code.
 			} else if (exprKind === 'arithmetic') {
 				// Arithmetic expression: SELECT left op right AS alias
-				const decision: PlanDecision = {
+				const decision: Mutable<PlanDecision> = {
 					type: 'selectArithmetic',
 					operator: expr.operator as string,
 					args: [expr.left, expr.right],
 					table: rootTable,
 				};
-				if (expr.as) (decision as { alias: string }).alias = expr.as as string;
+				if (expr.as) decision.alias = expr.as as string;
 				decisions.push(decision);
 			}
 		}
@@ -289,7 +284,7 @@ function convertSelect(
 
 		// Add aggregates
 		for (const agg of select.aggregates) {
-			const aggDecision: PlanDecision = {
+			const aggDecision: Mutable<PlanDecision> = {
 				type: 'selectFunction',
 				function:
 					agg.function === 'count' && agg.field === '*'
@@ -299,7 +294,7 @@ function convertSelect(
 				table: rootTable,
 			};
 			if (agg.as) {
-				(aggDecision as { alias: string }).alias = agg.as;
+				aggDecision.alias = agg.as;
 			}
 			decisions.push(aggDecision);
 		}
@@ -328,12 +323,39 @@ function convertWhere(where: WhereIntent, rootTable: string): PlanDecision[] {
  * Convert a single WhereIntent condition to a PlanDecision.
  * Handles the kind-based discriminated union.
  */
+/**
+ * Flat view of all possible WhereIntent properties.
+ * WhereIntent is a discriminated union — each variant contributes a subset.
+ * This interface avoids double casts by exposing every variant's fields as optional.
+ */
+interface FlatWhereFields {
+	readonly kind: string;
+	readonly field?: string;
+	readonly operator?: string;
+	readonly value?: unknown;
+	readonly values?: readonly unknown[];
+	readonly pattern?: string;
+	readonly caseInsensitive?: boolean;
+	readonly not?: boolean;
+	readonly conditions?: readonly WhereIntent[];
+	readonly condition?: WhereIntent;
+	readonly relation?: string;
+	readonly where?: WhereIntent;
+	readonly mode?: string;
+	readonly subquery?: QueryIntent;
+	// Legacy numeric range bounds (not on WhereRangeIntent but produced by NQL)
+	readonly gte?: unknown;
+	readonly lte?: unknown;
+	readonly gt?: unknown;
+	readonly lt?: unknown;
+}
+
 function convertWhereCondition(
 	condition: WhereIntent,
 	rootTable: string,
 ): PlanDecision | null {
-	const cond = condition as unknown as Record<string, unknown>;
-	const kind = cond.kind as string;
+	const cond = condition as FlatWhereFields;
+	const kind = cond.kind;
 
 	switch (kind) {
 		// Comparison: { kind: 'comparison', field: 'name', operator: 'eq', value: 'John' }
@@ -358,10 +380,8 @@ function convertWhereCondition(
 
 		// IN: { kind: 'in', field: 'id', values: [1, 2, 3] } or { kind: 'in', field: 'id', subquery: {...} }
 		case 'in': {
-			const rawSubquery = (cond as Record<string, unknown>).subquery as
-				| Record<string, unknown>
-				| undefined;
-			const result: PlanDecision = {
+			const rawSubquery = cond.subquery;
+			const result: Mutable<PlanDecision> = {
 				type: 'where',
 				column: cond.field as string,
 				operator: cond.not ? 'notIn' : 'in',
@@ -370,18 +390,21 @@ function convertWhereCondition(
 			};
 			if (rawSubquery) {
 				// Convert subquery's inner where from WhereIntent → PlanDecision
-				const convertedSubquery = { ...rawSubquery };
+				const convertedSubquery: Record<string, unknown> = {
+					...rawSubquery,
+				};
 				if (rawSubquery.where) {
 					const innerWhere = convertWhereCondition(
-						rawSubquery.where as WhereIntent,
-						rawSubquery.from as string,
+						rawSubquery.where,
+						rawSubquery.from,
 					);
 					if (innerWhere) {
 						convertedSubquery.where = innerWhere;
 					}
 				}
-				(result as unknown as Record<string, unknown>).subquery =
-					convertedSubquery;
+				result.subquery = convertedSubquery as NonNullable<
+					PlanDecision['subquery']
+				>;
 			}
 			return result;
 		}

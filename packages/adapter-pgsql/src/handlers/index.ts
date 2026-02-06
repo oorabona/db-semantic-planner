@@ -167,6 +167,21 @@ function ensureHandlersRegistered(): void {
 }
 
 /**
+ * Superset of Decision that also accepts WhereIntent-shaped data.
+ * The normalizer inspects `kind`/`field` (WhereIntent) and converts to
+ * `type`/`column`/`operator` (Decision).
+ */
+interface RawDecisionInput extends Decision {
+	readonly kind?: string;
+	readonly field?: string;
+	readonly pattern?: unknown;
+	readonly not?: boolean;
+	readonly condition?: Decision;
+	readonly caseInsensitive?: boolean;
+	readonly subquery?: Record<string, unknown>;
+}
+
+/**
  * Normalize a WhereIntent (IntentAST format) into a Decision (handler format).
  * WhereIntent uses `kind` + `field`, Decision uses `type` + `column` + `operator`.
  */
@@ -174,7 +189,7 @@ function normalizeToDecision(input: Decision): Decision {
 	// If it already has `column`, it's already a Decision — pass through
 	if (input.column !== undefined) return input;
 
-	const raw = input as unknown as Record<string, unknown>;
+	const raw = input as RawDecisionInput;
 
 	// Handle PlanDecision compound types (from compiler.ts WHERE compilation)
 	// These have `type` but no `kind` and no `column`

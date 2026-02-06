@@ -15,7 +15,12 @@ import type {
 } from '../intent-ast.js';
 
 import { getColumnName } from './column-utils.js';
-import { COLUMN_META, type ColumnRef, type RelationRef } from './table-ref.js';
+import {
+	COLUMN_META,
+	type ColumnRef,
+	hasSymbolMeta,
+	type RelationRef,
+} from './table-ref.js';
 
 // ============================================================================
 // Expression Types (Branded for Type Safety)
@@ -172,7 +177,7 @@ export function count(
 	}
 
 	// Check if it's a ColumnRef
-	if (COLUMN_META in (columnOrRelation as unknown as object)) {
+	if (hasSymbolMeta(columnOrRelation, COLUMN_META)) {
 		const field = getColumnName(columnOrRelation as ColumnRef<any, any, any>);
 		return createAggregateExpr({
 			kind: 'aggregate',
@@ -315,11 +320,7 @@ export function coalesce<T>(
 	const fields: string[] = [];
 
 	for (const value of values) {
-		if (
-			typeof value === 'object' &&
-			value !== null &&
-			COLUMN_META in (value as unknown as object)
-		) {
+		if (hasSymbolMeta(value, COLUMN_META)) {
 			fields.push(getColumnName(value as ColumnRef<any, any, any>));
 		} else {
 			// Literal value - for now we'll represent as a field
@@ -386,11 +387,7 @@ export function concat(
 	const parts: string[] = [];
 
 	for (const value of values) {
-		if (
-			typeof value === 'object' &&
-			value !== null &&
-			COLUMN_META in (value as unknown as object)
-		) {
+		if (hasSymbolMeta(value, COLUMN_META)) {
 			parts.push(getColumnName(value as ColumnRef<any, any, any>));
 		} else {
 			// Literal string - quote it
@@ -469,11 +466,7 @@ class CaseBuilderImpl<T> implements CaseBuilder<T> {
 	}
 
 	private resultToString(result: T | ColumnRef<any, any, T>): string {
-		if (
-			typeof result === 'object' &&
-			result !== null &&
-			COLUMN_META in (result as unknown as object)
-		) {
+		if (hasSymbolMeta(result, COLUMN_META)) {
 			return getColumnName(result as ColumnRef<any, any, any>);
 		}
 		if (typeof result === 'string') {

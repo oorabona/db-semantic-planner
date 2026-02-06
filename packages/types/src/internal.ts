@@ -8,9 +8,7 @@
  * @internal
  */
 
+// Builder types (internal only — not part of public API)
+export type { IntentBuilder, Mutable } from './builders.js';
 // Re-export all public types for convenience
 export * from './index.js';
-
-// Note: Complex types that depend on @dbsp/core remain in their respective packages
-// to avoid circular dependencies. This file exists for future internal-only types
-// that don't have external dependencies.

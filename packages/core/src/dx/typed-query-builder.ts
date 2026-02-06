@@ -46,7 +46,7 @@ type InferPickedColumns<TCols extends readonly ColumnRef<any, any, any>[]> = {
  * Helper to extract table name from TableRef.
  */
 function getTableName(table: TableRef<any, any, any>): string {
-	const name = (table as unknown as Record<symbol, string>)[TABLE_META];
+	const name = table[TABLE_META];
 	if (name === undefined) {
 		throw new Error('Invalid TableRef: missing TABLE_META');
 	}
@@ -170,9 +170,11 @@ class FromBuilderImpl<
 
 	/**
 	 * Create a clone with modified state.
+	 * @typeParam R - Result type override (defaults to TResult). Allows callers
+	 * like `pick()` to re-type the clone without an unsafe double cast.
 	 */
-	private clone(): FromBuilderImpl<TTable, TResult> {
-		const copy = new FromBuilderImpl<TTable, TResult>(
+	private clone<R = TResult>(): FromBuilderImpl<TTable, R> {
+		const copy = new FromBuilderImpl<TTable, R>(
 			{ [TABLE_META]: this.tableName, [BRAND]: 'TableRef' } as TTable,
 			this.model,
 			this.adapter,
@@ -191,10 +193,7 @@ class FromBuilderImpl<
 	pick<TCols extends ColumnRef<ExtractTableName<TTable>, any, any>[]>(
 		...columns: TCols
 	): FromBuilder<TTable, InferPickedColumns<TCols>> {
-		const copy = this.clone() as unknown as FromBuilderImpl<
-			TTable,
-			InferPickedColumns<TCols>
-		>;
+		const copy = this.clone<InferPickedColumns<TCols>>();
 		copy.selectColumns = columns.map((col) => getColumnName(col));
 		return copy;
 	}

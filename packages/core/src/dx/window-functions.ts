@@ -16,6 +16,7 @@
  * ```
  */
 
+import type { Mutable } from '@dbsp/types';
 import type { WindowFunction, WindowIntent } from '../intent-ast.js';
 import { getColumnName } from './column-utils.js';
 import type { ColumnRef } from './table-ref.js';
@@ -174,17 +175,12 @@ export class WindowBuilder {
 				? this.fnKind.field
 				: undefined;
 
-		const over: WindowIntent['over'] = {};
+		const over: Mutable<WindowIntent['over']> = {};
 		if (this.partitions.length > 0) {
-			(over as { partitionBy: readonly string[] }).partitionBy =
-				this.partitions;
+			over.partitionBy = this.partitions;
 		}
 		if (this.orders.length > 0) {
-			(
-				over as {
-					orderBy: readonly { field: string; direction?: 'asc' | 'desc' }[];
-				}
-			).orderBy = this.orders;
+			over.orderBy = this.orders;
 		}
 
 		const intent: WindowIntent = {

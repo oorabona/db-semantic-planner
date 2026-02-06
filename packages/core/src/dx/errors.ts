@@ -802,8 +802,8 @@ export const Errors = {
 		return (
 			error instanceof Error &&
 			'code' in error &&
-			typeof (error as { code: unknown }).code === 'string' &&
-			(error as { code: string }).code.startsWith('DBSP_E')
+			typeof (error as Error & { code: unknown }).code === 'string' &&
+			(error as Error & { code: string }).code.startsWith('DBSP_E')
 		);
 	},
 } as const;

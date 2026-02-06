@@ -20,6 +20,7 @@
  * ```
  */
 
+import type { Mutable } from '@dbsp/types';
 import type { Adapter, CompiledQuery } from '../adapter.js';
 import type {
 	AdjacencyTraversal,
@@ -238,9 +239,8 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 			};
 			// Add optional edgeStorageHint only if defined (exactOptionalPropertyTypes compliance)
 			if (options.storageHint) {
-				(
-					edgeTable as { edgeStorageHint?: 'directed-only' | 'unknown' }
-				).edgeStorageHint = options.storageHint;
+				(edgeTable as Mutable<EdgeTableTraversal>).edgeStorageHint =
+					options.storageHint;
 			}
 			this.traversalConfig = edgeTable;
 		}
@@ -357,15 +357,12 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 		};
 
 		// Only add optional properties if they are defined
+		const mutableJoin = joinClause as Mutable<EmitJoinClause>;
 		if (options?.as) {
-			(joinClause as { as?: string }).as = options.as;
+			mutableJoin.as = options.as;
 		}
 		if (options?.select) {
-			(
-				joinClause as {
-					select?: readonly (string | { column: string; as: string })[];
-				}
-			).select = options.select;
+			mutableJoin.select = options.select;
 		}
 
 		this.emitJoins.push(joinClause);
@@ -501,7 +498,7 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 		}
 
 		// Build the intent - maxDepth is validated above so we know it's defined
-		const intent: RecursiveIntent = {
+		const intent: Mutable<RecursiveIntent> = {
 			type: 'recursive',
 			cteName: this.cteName,
 			start,
@@ -511,13 +508,13 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 
 		// Add optional properties only if defined
 		if (track) {
-			(intent as { track?: RecursiveTrackOptions }).track = track;
+			intent.track = track;
 		}
 		if (this.dedupe) {
-			(intent as { dedupe?: RecursiveDedupe }).dedupe = this.dedupe;
+			intent.dedupe = this.dedupe;
 		}
 		if (emit) {
-			(intent as { emit?: RecursiveEmitOptions }).emit = emit;
+			intent.emit = emit;
 		}
 
 		return intent;

@@ -63,8 +63,7 @@ function compileJsonAggRecursive(
 	);
 
 	// Merge pre-compiled filter conditions (from EXISTS propagation via bridge)
-	const compiledFilter = (decision as unknown as Record<string, unknown>)
-		._compiledFilterWhere as Node | undefined;
+	const compiledFilter = decision._compiledFilterWhere;
 	if (compiledFilter) {
 		whereExpr = andExpr(whereExpr, compiledFilter);
 	}

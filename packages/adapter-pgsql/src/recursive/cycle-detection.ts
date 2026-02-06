@@ -140,16 +140,9 @@ export function buildPg14CycleClause(
 	//
 	// The caller should fall back to __visited array approach if null.
 
-	// Attempt to build the structure if supported
-	// This is a placeholder - actual implementation depends on @pgsql/types version
-	try {
-		return {
-			// CTECycleClause is not standard in all @pgsql/types versions
-			// Return null to signal fallback to __visited approach
-		} as unknown as Node;
-	} catch {
-		return null;
-	}
+	// CTECycleClause is not standard in all @pgsql/types versions.
+	// Return null to signal fallback to __visited approach.
+	return null;
 }
 
 /**

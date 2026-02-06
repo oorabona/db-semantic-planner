@@ -107,7 +107,7 @@ function mapToHandlerDecision(
 		relationType: pd.relationType,
 		foreignKey: pd.foreignKey,
 		parentKey: pd.parentKey,
-		dataType: (pd as unknown as { dataType?: string }).dataType,
+		dataType: pd.dataType,
 		traversal: pd.traversal,
 		pkColumn: pd.pkColumn,
 		fkColumn: pd.fkColumn,
@@ -177,6 +177,8 @@ export interface PlanDecision {
 		readonly from: string;
 		readonly select: string;
 		readonly where?: PlanDecision;
+		readonly limit?: number;
+		readonly orderBy?: readonly { field: string; direction?: string }[];
 	};
 	// Expression type discriminator (e.g. 'case' for CASE WHEN)
 	readonly expressionType?: string;
@@ -338,12 +340,8 @@ export class PlanCompiler {
 						),
 					]
 				: [];
-			const rawLimit = (sub as unknown as { limit?: number }).limit;
-			const rawOrderBy = (
-				sub as unknown as {
-					orderBy?: readonly { field: string; direction?: string }[];
-				}
-			).orderBy;
+			const rawLimit = sub.limit;
+			const rawOrderBy = sub.orderBy;
 			const subDecision = {
 				...mapped,
 				operator: op,
@@ -422,8 +420,10 @@ export class PlanCompiler {
 			});
 			const combined =
 				condNodes.length === 1 ? condNodes[0]! : andExpr(...condNodes);
+			// Inject pre-compiled filter for the json_agg handler to read.
+			// Property is readonly on Decision; the compiler is the sole writer.
 			(
-				handlerDecision as unknown as Record<string, unknown>
+				handlerDecision as { _compiledFilterWhere?: Node }
 			)._compiledFilterWhere = combined;
 		}
 
@@ -992,9 +992,12 @@ export class PlanCompiler {
 	// --------------------------------------------------------------------------
 
 	private compileCaseExpression(decision: PlanDecision): Node {
-		const conditions = (decision as unknown as Record<string, unknown>)
-			.conditions as Array<{ when: PlanDecision; then: unknown }> | undefined;
-		const elseValue = (decision as unknown as Record<string, unknown>).value;
+		// CASE decisions carry { when, then } tuples in `conditions` —
+		// structurally different from the base PlanDecision[].
+		const conditions = decision.conditions as
+			| readonly { when: PlanDecision; then: unknown }[]
+			| undefined;
+		const elseValue = decision.value;
 
 		if (!conditions || conditions.length === 0) {
 			throw new Error('CASE requires at least one WHEN condition');

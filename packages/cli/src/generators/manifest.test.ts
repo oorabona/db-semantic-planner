@@ -40,6 +40,7 @@ describe('generateManifest', () => {
 			fkAutoIndex: true,
 		},
 		indexes: {},
+		defaultFilters: {},
 	};
 
 	it('generates valid JSON output', () => {
@@ -172,6 +173,7 @@ describe('generateManifest', () => {
 				fkAutoIndex: true,
 			},
 			indexes: {},
+			defaultFilters: {},
 		};
 
 		const result = generateManifest(schemaWithSpecialNames);
@@ -224,6 +226,7 @@ describe('generateManifest', () => {
 				fkAutoIndex: true,
 			},
 			indexes: {},
+			defaultFilters: {},
 		};
 
 		const result = generateManifest(emptySchema);
