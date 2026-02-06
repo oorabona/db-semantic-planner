@@ -16,6 +16,11 @@
 
 (Archived → docs/historic/done-2026-02.md)
 
+### E2E Regressions (discovered via globalSetup fix)
+
+- [ ] 🐛 **E2E-1** [Adapter] Schema-qualified columns in aggregate/window handlers — `ctx.schema` passed to `columnRef()` in expression handlers produces 3-part names; window-functions.test.ts (3 failures) rejects SQL, example-assertions expects 2-part names
+- [ ] 🐛 **E2E-2** [Adapter] COALESCE `.as()` alias not transformed by naming plugin — `displayName` in SQL instead of `display_name` (pimdam.q2 test)
+
 ### Introspection
 
 (Archived → docs/historic/done-2026-02.md)
@@ -104,16 +109,16 @@
 
 ### DRY Refactors (Category D)
 
-- [ ] **A-7** [DRY] Comparison filters (eq/neq/gt/gte/lt/lte) — 120 LOC boilerplate
-- [ ] **A-9** [DRY] `normalizeSQL()` duplicate in scripts/verify-nql-guide.ts
-- [ ] **A-12** [DRY] `buildParamRef()` duplicated in 2 handlers
-- [ ] **A-15** [DRY] Mutation builder — 56 identical field assignments
-- [ ] **A-16** [DRY] Column target building duplicated (join/lateral)
-- [ ] **A-17** [DRY] JSON_AGG correlation — FK direction duplicated
-- [ ] **A-24** [DRY] Clone methods — manual 15-field copying (3 classes)
-- [ ] **A-25** [DRY] NQL context validation — 61 identical patterns
-- [ ] **A-30** [DRY] `isRecursiveIncludeOptions()` exported from 2 files
-- [ ] **A-31** [DRY] CLI assertion functions — 24 functions, 80% boilerplate
+- [x] ✅ **A-7** [DRY] Comparison filters — false positive: factory `createComparisonFilter()` already exists (2026-02-06)
+- [x] ✅ **A-9** [DRY] `normalizeSQL()` → moved to `@dbsp/core/sql-utils.ts`, adapter re-exports (2026-02-06)
+- [x] ✅ **A-12** [DRY] `buildParamRef()` — already consolidated in handlers/where/utils.ts (2026-02-06)
+- [x] ✅ **A-15** [DRY] Mutation builder — false positive: 15 LOC marginal, unique per builder (2026-02-06)
+- [x] ✅ **A-16** [DRY] Column target building — already centralized via buildColumnRef() (2026-02-06)
+- [x] ✅ **A-17** [DRY] FK direction — compiler.ts now calls `deriveFkColumns()` from shared.ts; `FkColumnSource` interface (2026-02-06)
+- [ ] **A-24** [DRY] Clone methods — manual 15-field copying in QueryBuilderImpl (45 LOC)
+- [x] ✅ **A-25** [DRY] NQL context validation — false positive: 0 `this.validator` calls found (2026-02-06)
+- [x] ✅ **A-30** [DRY] `isRecursiveIncludeOptions()` — single def + re-export, correct (2026-02-06)
+- [x] ✅ **A-31** [DRY] CLI assertion functions — false positive: 3 factories exist, remaining 16 have unique logic (2026-02-06)
 
 ### SRP / God Classes
 
@@ -135,8 +140,8 @@
 
 ### API Surface
 
-- [ ] **A-13** [API] 50+ AST helpers exported but internal-only
-- [ ] **A-14** [API] Handler registry API (20+ exports) unused cross-package
+- [x] ✅ **A-13** [API] AST helpers — false positive: 44 exports are package-internal, not in public API, 0 cross-package (2026-02-06)
+- [x] ✅ **A-14** [API] Handler registry — false positive: 18 exports are package-internal, types exposed read-only (2026-02-06)
 
 ### Dead Code
 

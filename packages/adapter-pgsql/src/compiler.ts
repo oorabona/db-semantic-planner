@@ -36,6 +36,7 @@ import { deparseQuoted } from './deparse.js';
 import { resolveCaseValue as resolveCaseValueShared } from './handlers/expression/case-value.js';
 import { registerAllExpressionHandlers } from './handlers/expression/index.js';
 import { registerAllIncludeHandlers } from './handlers/include/index.js';
+import { deriveFkColumns } from './handlers/include/shared.js';
 import {
 	createWhereDispatcher,
 	getExpressionHandler,
@@ -81,15 +82,7 @@ function mapToHandlerDecision(
 		paramIndex: pd.paramIndex,
 		direction: pd.direction,
 		joinType: pd.joinType,
-		sourceColumn:
-			pd.relationType === 'belongsTo'
-				? (pd.foreignKey ??
-					(pd.targetTable ? deriveFk(pd.targetTable, defaultPk) : defaultPk))
-				: (pd.parentKey ?? defaultPk),
-		targetColumn:
-			pd.relationType === 'belongsTo'
-				? (pd.parentKey ?? defaultPk)
-				: (pd.foreignKey ?? deriveFk(rootTable, defaultPk)),
+		...deriveFkColumns(pd, rootTable, defaultPk, deriveFk),
 		targetTable: pd.targetTable,
 		function: pd.function,
 		args: pd.args,
