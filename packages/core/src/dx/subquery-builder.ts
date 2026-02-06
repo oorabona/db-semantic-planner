@@ -267,6 +267,6 @@ export function isSubqueryExpression(
 		typeof value === 'object' &&
 		value !== null &&
 		'_type' in value &&
-		(value as { _type: unknown })._type === 'subquery'
+		(value as Record<string, unknown>)._type === 'subquery'
 	);
 }

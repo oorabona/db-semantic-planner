@@ -89,12 +89,12 @@
 
 ## P2.5 — Type Rationalization (Refactoring)
 
-> Structural type health: 233→33 casts remaining, contracts centralized, god files split.
+> Structural type health: 233→0 production casts remaining, contracts centralized, god files split.
 
 (All R01 tasks archived → docs/historic/done-2026-02.md)
 
-- [ ] **R02** [Types] Eliminate remaining 33 `as {}` read-access casts (non-intent-construction) — Effort: M
-  - adapter-pgsql: 20 (compiler, handlers, mutations), core: 10 (schema, planner, dx), nql: 3
+- [x] ✅ **R02** [Types] Eliminate remaining 33 `as {}` read-access casts (non-intent-construction) (2026-02-06)
+  - 20 files, Mutable<T>, isRangeValue, isSelectWithFields type guards, named interfaces
 
 ---
 

@@ -110,7 +110,7 @@ export function isWhereIntent(value: unknown): value is WhereIntent {
 		typeof value === 'object' &&
 		value !== null &&
 		'kind' in value &&
-		typeof (value as { kind: unknown }).kind === 'string'
+		typeof (value as Record<string, unknown>).kind === 'string'
 	);
 }
 

@@ -1507,7 +1507,7 @@ export function isWindowIntent(intent: unknown): intent is WindowIntent {
 		typeof intent === 'object' &&
 		intent !== null &&
 		'kind' in intent &&
-		(intent as { kind: unknown }).kind === 'window'
+		(intent as Record<string, unknown>).kind === 'window'
 	);
 }
 
@@ -1558,7 +1558,7 @@ export function isSubqueryRef(value: unknown): value is SubqueryRefIntent {
 		typeof value === 'object' &&
 		value !== null &&
 		'kind' in value &&
-		(value as { kind: unknown }).kind === 'ref'
+		(value as Record<string, unknown>).kind === 'ref'
 	);
 }
 

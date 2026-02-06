@@ -12,6 +12,7 @@ import type {
 	Decision,
 	WhereHandler,
 } from '../types.js';
+import { isRangeValue } from '../types.js';
 import { buildColumnRef } from './utils.js';
 
 /** Map operator names to PostgreSQL range operators */
@@ -47,14 +48,9 @@ export const rangeHandler: WhereHandler = {
 
 		let paramValue: unknown;
 		let isScalar = false;
-		if (
-			value !== null &&
-			typeof value === 'object' &&
-			'lower' in (value as object)
-		) {
-			const range = value as { lower?: unknown; upper?: unknown };
-			const lower = range.lower ?? '';
-			const upper = range.upper ?? '';
+		if (isRangeValue(value)) {
+			const lower = value.lower ?? '';
+			const upper = value.upper ?? '';
 			paramValue = `[${lower},${upper})`;
 		} else if (typeof value === 'string' && /^\[.*,.*[)\]]$/.test(value)) {
 			paramValue = value;

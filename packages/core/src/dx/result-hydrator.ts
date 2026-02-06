@@ -7,6 +7,7 @@
  * @module result-hydrator
  */
 
+import type { Mutable } from '@dbsp/types';
 import type {
 	Adapter,
 	CompileOptions,
@@ -356,7 +357,7 @@ export class ResultHydrator<TResult = unknown> {
 		const traversal = this.buildTraversalConfig(source, fkColumn, direction);
 
 		// Build the intent
-		const intent: RecursiveIntent = {
+		const intent: Mutable<RecursiveIntent> = {
 			type: 'recursive',
 			cteName,
 			start: {
@@ -370,10 +371,10 @@ export class ResultHydrator<TResult = unknown> {
 
 		// Add depth tracking if requested
 		if (includeDepth) {
-			(intent as { track?: RecursiveIntent['track'] }).track = { depth: {} };
+			intent.track = { depth: {} };
 		}
 
-		return intent;
+		return intent as RecursiveIntent;
 	}
 
 	/**

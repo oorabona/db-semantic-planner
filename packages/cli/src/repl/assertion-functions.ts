@@ -323,6 +323,14 @@ export function assertParamsType(
 }
 
 /**
+ * Spec format for asserting parameter value by index
+ */
+interface ParamsValueSpec {
+	index: number;
+	value: unknown;
+}
+
+/**
  * Assert specific parameter value by index
  * Value format: { index: number, value: unknown }
  */
@@ -332,7 +340,7 @@ export function assertParamsValue(
 ): AssertionOutcome {
 	const { index, value } =
 		typeof spec === 'object' && spec !== null
-			? (spec as { index: number; value: unknown })
+			? (spec as ParamsValueSpec)
 			: { index: 0, value: spec };
 
 	if (index >= params.length) {
@@ -429,6 +437,15 @@ export function assertDbColumnExists(
 }
 
 /**
+ * Spec format for asserting cell value in result
+ */
+interface CellValueSpec {
+	row: number;
+	column: string;
+	value: unknown;
+}
+
+/**
  * Assert specific cell value in result
  * Value format: { row: number, column: string, value: unknown }
  */
@@ -438,7 +455,7 @@ export function assertDbValueEquals(
 ): AssertionOutcome {
 	const { row, column, value } =
 		typeof spec === 'object' && spec !== null
-			? (spec as { row: number; column: string; value: unknown })
+			? (spec as CellValueSpec)
 			: { row: 0, column: '', value: spec };
 
 	const rows = result.rows ?? [];

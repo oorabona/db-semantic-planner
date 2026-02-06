@@ -165,10 +165,16 @@ function buildScalarSubquery(
 
 	// Add LIMIT if present
 	if (decision.limit != null) {
-		const limitVal =
-			typeof decision.limit === 'number'
-				? decision.limit
-				: (decision.limit as { paramIndex: number }).paramIndex;
+		let limitVal: number;
+		if (typeof decision.limit === 'number') {
+			limitVal = decision.limit;
+		} else {
+			const limitObj = decision.limit as Record<string, unknown>;
+			if (typeof limitObj.paramIndex !== 'number') {
+				throw new Error('limit.paramIndex must be a number');
+			}
+			limitVal = limitObj.paramIndex;
+		}
 		stmt.limitCount = integerNode(limitVal);
 	}
 

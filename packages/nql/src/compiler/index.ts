@@ -1341,7 +1341,7 @@ export class NqlCompiler {
 					typeof val === 'object' &&
 					'$ref' in (val as Record<string, unknown>)
 				) {
-					const ref = (val as { $ref: string }).$ref;
+					const ref = (val as Record<string, unknown>).$ref as string;
 					if (bindings.has(ref)) {
 						// Reference CTE by name — extract select column from bound query
 						const boundQuery = bindings.get(ref)!;

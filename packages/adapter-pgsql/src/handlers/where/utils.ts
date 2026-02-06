@@ -8,6 +8,7 @@ import type { Node } from '@pgsql/types';
 import { columnRef, nullConstNode } from '../../ast-helpers.js';
 import { createParamRef } from '../../param-ref.js';
 import type { CompilerContext, CompilerState } from '../types.js';
+import { isParamRef } from '../types.js';
 
 /**
  * Build column reference from decision column, using current alias or root table.
@@ -24,15 +25,9 @@ export function buildColumnRef(column: string, ctx: CompilerContext): Node {
  * If value has a pre-assigned `paramIndex` (from PlanDecision), use it directly.
  */
 export function buildParamRef(value: unknown, state: CompilerState): Node {
-	if (
-		value !== null &&
-		value !== undefined &&
-		typeof value === 'object' &&
-		'paramIndex' in (value as object)
-	) {
-		const paramValue = value as { paramIndex: number; value?: unknown };
-		state.parameters.push(paramValue.value);
-		return createParamRef(paramValue.paramIndex);
+	if (isParamRef(value)) {
+		state.parameters.push(value.value);
+		return createParamRef(value.paramIndex);
 	}
 	state.paramIndex++;
 	state.parameters.push(value);
@@ -52,10 +47,9 @@ export function compileValue(
 		return nullConstNode();
 	}
 
-	if (typeof value === 'object' && 'paramIndex' in (value as object)) {
-		const paramValue = value as { paramIndex: number; value?: unknown };
-		state.parameters.push(paramValue.value);
-		return createParamRef(paramValue.paramIndex);
+	if (isParamRef(value)) {
+		state.parameters.push(value.value);
+		return createParamRef(value.paramIndex);
 	}
 
 	const idx = ++state.paramIndex;

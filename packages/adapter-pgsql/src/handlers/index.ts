@@ -15,6 +15,7 @@ import type {
 	WhereDispatcher,
 	WhereHandler,
 } from './types.js';
+import { isSelectWithFields } from './types.js';
 
 import { registerAllWhereHandlers } from './where/index.js';
 
@@ -262,11 +263,8 @@ function normalizeToDecision(input: Decision): Decision {
 				const selectColumn =
 					typeof rawSelect === 'string'
 						? rawSelect
-						: rawSelect &&
-								typeof rawSelect === 'object' &&
-								'fields' in (rawSelect as object)
-							? ((rawSelect as { fields?: readonly string[] }).fields?.[0] ??
-								'*')
+						: isSelectWithFields(rawSelect)
+							? (rawSelect.fields?.[0] ?? '*')
 							: '*';
 				const subConditions = sub.where
 					? [normalizeToDecision(sub.where as Decision)]
