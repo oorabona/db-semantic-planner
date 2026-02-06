@@ -8,61 +8,14 @@
  */
 
 import {
-	type DeleteIntent,
 	extractPseudoColumnKeywords,
-	type InsertIntent,
 	type ModelIR,
+	type MutationIntent,
 	type PlanReport,
 	plan,
 	type QueryIntent,
-	type UpdateIntent,
-	type UpsertIntent,
 } from '@dbsp/core';
-import {
-	type CompileResult,
-	compile as compileNql,
-	type MutationIntent as NqlMutationIntent,
-	type QueryIntent as NqlQueryIntent,
-} from '@dbsp/nql';
-
-// Type compatibility: NQL types are structurally compatible with core types
-// Cast functions to bridge the gap
-function asQueryIntent(intent: NqlQueryIntent): QueryIntent {
-	return intent as unknown as QueryIntent;
-}
-
-function asInsertIntent(intent: NqlMutationIntent): InsertIntent {
-	return intent as unknown as InsertIntent;
-}
-
-function asUpdateIntent(intent: NqlMutationIntent): UpdateIntent {
-	return intent as unknown as UpdateIntent;
-}
-
-function asDeleteIntent(intent: NqlMutationIntent): DeleteIntent {
-	return intent as unknown as DeleteIntent;
-}
-
-function asUpsertIntent(intent: NqlMutationIntent): UpsertIntent {
-	return intent as unknown as UpsertIntent;
-}
-
-// Type guard functions for NQL mutation types
-function isNqlInsertIntent(m: NqlMutationIntent): boolean {
-	return m.type === 'insert';
-}
-
-function isNqlUpdateIntent(m: NqlMutationIntent): boolean {
-	return m.type === 'update';
-}
-
-function isNqlDeleteIntent(m: NqlMutationIntent): boolean {
-	return m.type === 'delete';
-}
-
-function isNqlUpsertIntent(m: NqlMutationIntent): boolean {
-	return m.type === 'upsert';
-}
+import { type CompileResult, compile as compileNql } from '@dbsp/nql';
 
 /**
  * Extract IntentSummary from NQL compilation result
@@ -239,7 +192,7 @@ export async function compileNqlToSql(
 
 	// 2. Compile IntentAST to SQL using adapter
 	if (compiled.query) {
-		const queryIntent = asQueryIntent(compiled.query);
+		const queryIntent = compiled.query;
 		// Read capabilities from adapter (always available on BaseAdapter)
 		const planReport = plan(queryIntent, model, {
 			dialectCapabilities: adapter.dialectCapabilities,
@@ -258,53 +211,48 @@ export async function compileNqlToSql(
 	if (compiled.mutation) {
 		const mutation = compiled.mutation;
 
-		if (isNqlInsertIntent(mutation)) {
-			const intent = asInsertIntent(mutation);
-			const compiledQuery = adapter.compileInsert(intent);
-			return {
-				sql: compiledQuery.sql,
-				params: compiledQuery.parameters,
-				intentType: 'insert',
-				intent: extractIntentSummary(compiled, 'insert'),
-			};
+		switch (mutation.type) {
+			case 'insert': {
+				const compiledQuery = adapter.compileInsert(mutation);
+				return {
+					sql: compiledQuery.sql,
+					params: compiledQuery.parameters,
+					intentType: 'insert',
+					intent: extractIntentSummary(compiled, 'insert'),
+				};
+			}
+			case 'update': {
+				const compiledQuery = adapter.compileUpdate(mutation);
+				return {
+					sql: compiledQuery.sql,
+					params: compiledQuery.parameters,
+					intentType: 'update',
+					intent: extractIntentSummary(compiled, 'update'),
+				};
+			}
+			case 'delete': {
+				const compiledQuery = adapter.compileDelete(mutation);
+				return {
+					sql: compiledQuery.sql,
+					params: compiledQuery.parameters,
+					intentType: 'delete',
+					intent: extractIntentSummary(compiled, 'delete'),
+				};
+			}
+			case 'upsert': {
+				const compiledQuery = adapter.compileUpsert(mutation);
+				return {
+					sql: compiledQuery.sql,
+					params: compiledQuery.parameters,
+					intentType: 'upsert',
+					intent: extractIntentSummary(compiled, 'upsert'),
+				};
+			}
+			default:
+				throw new NqlCompileError(
+					`Unknown mutation type: ${JSON.stringify(mutation)}`,
+				);
 		}
-
-		if (isNqlUpdateIntent(mutation)) {
-			const intent = asUpdateIntent(mutation);
-			const compiledQuery = adapter.compileUpdate(intent);
-			return {
-				sql: compiledQuery.sql,
-				params: compiledQuery.parameters,
-				intentType: 'update',
-				intent: extractIntentSummary(compiled, 'update'),
-			};
-		}
-
-		if (isNqlDeleteIntent(mutation)) {
-			const intent = asDeleteIntent(mutation);
-			const compiledQuery = adapter.compileDelete(intent);
-			return {
-				sql: compiledQuery.sql,
-				params: compiledQuery.parameters,
-				intentType: 'delete',
-				intent: extractIntentSummary(compiled, 'delete'),
-			};
-		}
-
-		if (isNqlUpsertIntent(mutation)) {
-			const intent = asUpsertIntent(mutation);
-			const compiledQuery = adapter.compileUpsert(intent);
-			return {
-				sql: compiledQuery.sql,
-				params: compiledQuery.parameters,
-				intentType: 'upsert',
-				intent: extractIntentSummary(compiled, 'upsert'),
-			};
-		}
-
-		throw new NqlCompileError(
-			`Unknown mutation type: ${JSON.stringify(mutation)}`,
-		);
 	}
 
 	throw new NqlCompileError('NQL compiled to neither query nor mutation');
@@ -357,10 +305,10 @@ export function isNqlQuery(input: string): boolean {
 export function getNqlIntent(
 	nql: string,
 	model: ModelIR,
-): { query: QueryIntent | undefined; mutation: NqlMutationIntent | undefined } {
+): { query: QueryIntent | undefined; mutation: MutationIntent | undefined } {
 	const compiled = compileNqlToIntent(nql, model);
 	return {
-		query: compiled.query ? asQueryIntent(compiled.query) : undefined,
+		query: compiled.query ? compiled.query : undefined,
 		mutation: compiled.mutation,
 	};
 }

@@ -7,30 +7,32 @@
  * @module pgsql-adapter
  */
 
-import {
-	type Adapter,
-	type AdapterCapabilities,
-	type AdapterLogger,
-	type AdapterStreamOptions,
-	type CompiledQuery,
-	type CompileOptions,
-	type CompileResultWithIncludes,
-	type DbCasing,
-	type DeleteIntent,
-	type DialectCapabilities,
-	type Dump,
-	type DumpMeta,
-	type InsertFromIntent,
-	type InsertIntent,
-	type ModelIR,
-	type PlanReport,
-	POSTGRESQL_CAPABILITIES,
-	type RecursivePlanReport,
-	type SubqueryIncludeInfo,
-	type UpdateIntent,
-	type UpsertFromIntent,
-	type UpsertIntent,
-} from '@dbsp/core';
+import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import type {
+	Adapter,
+	AdapterCapabilities,
+	AdapterLogger,
+	AdapterStreamOptions,
+	CompiledQuery,
+	CompileOptions,
+	CompileResultWithIncludes,
+	DbCasing,
+	DeleteIntent,
+	DialectCapabilities,
+	Dump,
+	DumpMeta,
+	InsertFromIntent,
+	InsertIntent,
+	ModelIR,
+	Mutable,
+	PlanReport,
+	RecursivePlanReport,
+	SubqueryIncludeInfo,
+	UpdateIntent,
+	UpsertFromIntent,
+	UpsertIntent,
+	WhereIntent,
+} from '@dbsp/types';
 import type { Node, SelectStmt } from '@pgsql/types';
 import type { Pool, PoolClient } from 'pg';
 import {
@@ -393,7 +395,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						if (d.type === 'includeStrategy' && d.relationName) {
 							const cols = relationColumnsMap.get(d.relationName as string);
 							if (cols) {
-								(d as unknown as Record<string, unknown>).columns = cols;
+								(d as Mutable<PlanDecision>).columns = cols;
 							}
 						}
 					}
@@ -492,12 +494,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				...(plan.intent?.existsWrap ? { existsWrap: true } : {}),
 			};
 		} else {
-			// Unit test with mock data: use decisions directly (legacy format)
-			// Note: existsWrap requires intent, so not available in legacy format
+			// Unit test with mock data: use decisions directly (legacy format).
+			// Tests supply adapter-format PlanDecisions inside a core PlanReport,
+			// so the runtime data is already in the right shape — bridge the type gap.
 			simplifiedPlan = {
 				rootTable: plan.rootTable,
-				decisions:
-					plan.decisions as unknown as SimplifiedPlanReport['decisions'],
+				decisions: bridgeLegacyDecisions(plan.decisions),
 				...(schemaName ? { schema: schemaName } : {}),
 			};
 		}
@@ -560,7 +562,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				(i) => i.relation === relationName || i.relation === ctx.includeAlias,
 			);
 
-			const entry: SubqueryIncludeInfo = {
+			const entry: Mutable<SubqueryIncludeInfo> = {
 				relationName,
 				targetTable: ctx.target,
 				foreignKey: targetFk,
@@ -568,16 +570,17 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				sourceTable: ctx.sourceTable ?? plan.rootTable,
 			};
 			if (typeof ctx.relationType === 'string') {
-				(entry as unknown as Record<string, unknown>).relationType =
-					ctx.relationType;
+				entry.relationType = ctx.relationType;
 			}
 			if (includeIntent?.select != null) {
-				(entry as { select: SubqueryIncludeInfo['select'] }).select =
-					includeIntent.select as SubqueryIncludeInfo['select'];
+				entry.select = includeIntent.select as NonNullable<
+					SubqueryIncludeInfo['select']
+				>;
 			}
 			if (includeIntent?.where != null) {
-				(entry as { where: SubqueryIncludeInfo['where'] }).where =
-					includeIntent.where as SubqueryIncludeInfo['where'];
+				entry.where = includeIntent.where as NonNullable<
+					SubqueryIncludeInfo['where']
+				>;
 			}
 			subqueryIncludes.push(entry);
 		}
@@ -910,7 +913,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			targetTable: intent.table,
 			sourceTable: intent.source,
 			...(intent.columns && { columns: [...intent.columns] }),
-			...(intent.where && { where: [intent.where as unknown as Decision] }),
+			...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
 			...(intent.limit !== undefined && { limit: intent.limit }),
 			...(intent.returning && { returning: [...intent.returning] }),
 		};
@@ -949,7 +952,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				column,
 				value,
 			})),
-			...(intent.where && { where: [intent.where as any] }),
+			...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
 			...(intent.returning && { returning: [...intent.returning] }),
 			...(columnTypes && { columnTypes }),
 		};
@@ -981,7 +984,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		// Convert DeleteIntent to DeleteConfig
 		const config: DeleteConfig = {
 			table: intent.table,
-			...(intent.where && { where: [intent.where as any] }),
+			...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
 			...(intent.returning && { returning: [...intent.returning] }),
 		};
 
@@ -1113,7 +1116,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			sourceTable: intent.source,
 			conflictColumns: [...intent.conflictColumns],
 			...(columns && { columns }),
-			...(intent.where && { where: [intent.where as unknown as Decision] }),
+			...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
 			...(intent.limit !== undefined && { limit: intent.limit }),
 			...(intent.returning && { returning: [...intent.returning] }),
 		};
@@ -1233,8 +1236,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				ctx,
 			};
 		} else {
+			// Exhaustive check: only 'custom' remains, which is reserved for P2
+			const _exhaustive: 'custom' = traversal.kind;
 			throw new Error(
-				`PgsqlAdapter.compileRecursive: Unsupported traversal kind '${(traversal as any).kind}'`,
+				`PgsqlAdapter.compileRecursive: Unsupported traversal kind '${_exhaustive}'`,
 			);
 		}
 
@@ -1401,7 +1406,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 */
 	async execute<T>(query: CompiledQuery<T>): Promise<T[]> {
 		const executor = this.requireConnection();
-		const result = await executor.query(query.sql, query.parameters as any[]);
+		const result = await executor.query(query.sql, [...query.parameters]);
 		return this.transformResultRows(result.rows) as T[];
 	}
 
@@ -1650,7 +1655,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		parameters: readonly unknown[] = [],
 	): Promise<T[]> {
 		const executor = this.requireConnection();
-		const result = await executor.query(sql, parameters as any[]);
+		const result = await executor.query(sql, [...parameters]);
 		return result.rows as T[];
 	}
 
@@ -1692,6 +1697,32 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const identifierType = type as 'table' | 'column' | 'schema' | 'alias';
 		validateIdentifier(value, identifierType);
 	}
+}
+
+// ============================================================================
+// Internal helpers
+// ============================================================================
+
+/**
+ * Bridge core's PlanDecision[] (observability format) to adapter's PlanDecision[].
+ * Used only in the legacy/test path where mock plans carry adapter-format decisions
+ * inside a core PlanReport. At runtime the data is already in adapter format.
+ */
+function bridgeLegacyDecisions(
+	decisions: readonly unknown[],
+): SimplifiedPlanReport['decisions'] {
+	return decisions as SimplifiedPlanReport['decisions'];
+}
+
+/**
+ * Bridge a WhereIntent into a Decision for mutation config.
+ * The WHERE dispatcher's `normalizeToDecision` handles the actual
+ * `kind`/`field` → `type`/`column`/`operator` conversion at runtime.
+ * The two types share no structural overlap (WhereIntent uses `kind`,
+ * Decision uses `type`), hence the typed bridge function.
+ */
+function whereIntentAsDecision(where: WhereIntent): Decision {
+	return where as never as Decision;
 }
 
 // ============================================================================

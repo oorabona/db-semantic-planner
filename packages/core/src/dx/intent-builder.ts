@@ -7,8 +7,10 @@
  * @module intent-builder
  */
 
+import type { Mutable } from '@dbsp/types';
 import type {
 	AggregateIntent,
+	ColumnExpressionIntent,
 	ExpressionIntent,
 	IncludeIntent,
 	IncludeRecursiveOptions,
@@ -70,61 +72,60 @@ export function includeOptionsToIntent(
 		return { relation };
 	}
 
-	const intent: IncludeIntent = { relation };
+	const intent: Mutable<IncludeIntent> = { relation };
 
 	if (options.via !== undefined) {
-		(intent as { via: string }).via = options.via;
+		intent.via = options.via;
 	}
 	if (options.where !== undefined) {
-		(intent as { where: WhereIntent }).where = options.where;
+		intent.where = options.where;
 	}
 	if (options.select !== undefined) {
-		(intent as { select: SelectIntent }).select = options.select;
+		intent.select = options.select;
 	}
 	if (options.include !== undefined && options.include.length > 0) {
-		(intent as { include: readonly IncludeIntent[] }).include =
-			options.include.map((nested) => nestedIncludeToIntent(nested));
+		intent.include = options.include.map((nested) =>
+			nestedIncludeToIntent(nested),
+		);
 	}
 
 	// Handle recursive options (DX-017)
 	if (isRecursiveIncludeOptions(options)) {
-		const recursiveOpts: IncludeRecursiveOptions = {};
+		const recursiveOpts: Mutable<IncludeRecursiveOptions> = {};
 		// Only set maxDepth if defined
 		if (options.maxDepth !== undefined) {
-			(recursiveOpts as { maxDepth: number }).maxDepth = options.maxDepth;
+			recursiveOpts.maxDepth = options.maxDepth;
 		}
 		// Convert includeDepth to track.depth
 		if (options.includeDepth) {
-			(recursiveOpts as { track: { depth: boolean } }).track = { depth: true };
+			recursiveOpts.track = { depth: true };
 		}
-		(intent as { recursive: IncludeRecursiveOptions }).recursive =
-			recursiveOpts;
+		intent.recursive = recursiveOpts;
 	}
 
-	return intent;
+	return intent as IncludeIntent;
 }
 
 /**
  * Convert NestedInclude to IncludeIntent.
  */
 export function nestedIncludeToIntent(nested: NestedInclude): IncludeIntent {
-	const intent: IncludeIntent = { relation: nested.relation };
+	const intent: Mutable<IncludeIntent> = { relation: nested.relation };
 
 	if (nested.via !== undefined) {
-		(intent as { via: string }).via = nested.via;
+		intent.via = nested.via;
 	}
 	if (nested.where !== undefined) {
-		(intent as { where: WhereIntent }).where = nested.where;
+		intent.where = nested.where;
 	}
 	if (nested.select !== undefined) {
-		(intent as { select: SelectIntent }).select = nested.select;
+		intent.select = nested.select;
 	}
 	if (nested.include !== undefined && nested.include.length > 0) {
-		(intent as { include: readonly IncludeIntent[] }).include =
-			nested.include.map((n) => nestedIncludeToIntent(n));
+		intent.include = nested.include.map((n) => nestedIncludeToIntent(n));
 	}
 
-	return intent;
+	return intent as IncludeIntent;
 }
 
 /**
@@ -368,7 +369,7 @@ export class IntentBuilder<TResult = unknown> {
 		} else {
 			// Simple fields only - extract field names
 			const fields = expressionColumns.map(
-				(c) => (c as { column: string }).column,
+				(c) => (c as ColumnExpressionIntent).column,
 			);
 			this.state.selectIntent = { type: 'fields', fields };
 		}
@@ -394,20 +395,20 @@ export class IntentBuilder<TResult = unknown> {
 		field?: string,
 		options?: AggregateOptions & { distinct?: boolean },
 	): void {
-		const agg: AggregateIntent = { function: func };
+		const agg: Mutable<AggregateIntent> = { function: func };
 		if (field !== undefined) {
-			(agg as { field: string }).field = field;
+			agg.field = field;
 		} else if (options?.field !== undefined) {
-			(agg as { field: string }).field = options.field;
+			agg.field = options.field;
 		}
 		if (options?.as !== undefined) {
-			(agg as { as: string }).as = options.as;
+			agg.as = options.as;
 		}
 		// DX-034: Support distinct aggregates
 		if (options?.distinct) {
-			(agg as { distinct: boolean }).distinct = true;
+			agg.distinct = true;
 		}
-		this.state.aggregates.push(agg);
+		this.state.aggregates.push(agg as AggregateIntent);
 	}
 
 	/**
@@ -489,83 +490,72 @@ export class IntentBuilder<TResult = unknown> {
 	 * Handles exactOptionalPropertyTypes by only including defined properties.
 	 */
 	buildIntent(): QueryIntent {
-		const intent: QueryIntent = {
+		const intent: Mutable<QueryIntent> = {
 			type: 'select',
 			from: this.state.from,
 		};
 
 		// Handle aggregates - convert to SelectAggregateIntent
 		if (this.state.aggregates.length > 0) {
-			const aggregateSelect: SelectAggregateIntent = {
+			const aggregateSelect: Mutable<SelectAggregateIntent> = {
 				type: 'aggregate',
 				aggregates: [...this.state.aggregates],
 			};
 			// Add group by fields to the select for projection
 			if (this.state.groupByFields.length > 0) {
-				(aggregateSelect as { fields: readonly string[] }).fields = [
-					...this.state.groupByFields,
-				];
+				aggregateSelect.fields = [...this.state.groupByFields];
 			}
-			(intent as { select: SelectIntent }).select = aggregateSelect;
+			intent.select = aggregateSelect as SelectAggregateIntent;
 		} else if (this.state.selectIntent !== undefined) {
-			(intent as { select: SelectIntent }).select = this.state.selectIntent;
+			intent.select = this.state.selectIntent;
 		}
 
 		// Combine multiple where conditions with AND
 		if (this.state.whereIntents.length === 1) {
 			const singleWhere = this.state.whereIntents[0];
 			if (singleWhere !== undefined) {
-				(intent as { where: WhereIntent }).where = singleWhere;
+				intent.where = singleWhere;
 			}
 		} else if (this.state.whereIntents.length > 1) {
-			(intent as { where: WhereIntent }).where = and(
-				...this.state.whereIntents,
-			);
+			intent.where = and(...this.state.whereIntents);
 		}
 
 		if (this.state.includes.length > 0) {
-			(intent as { include: readonly IncludeIntent[] }).include =
-				this.state.includes;
+			intent.include = this.state.includes;
 		}
 
 		if (this.state.groupByFields.length > 0) {
-			(intent as { groupBy: readonly string[] }).groupBy = [
-				...this.state.groupByFields,
-			];
+			intent.groupBy = [...this.state.groupByFields];
 		}
 
 		// DX-034: HAVING clause for filtering on aggregates
 		if (this.state.havingIntents.length === 1) {
 			const singleHaving = this.state.havingIntents[0];
 			if (singleHaving !== undefined) {
-				(intent as { having: WhereIntent }).having = singleHaving;
+				intent.having = singleHaving;
 			}
 		} else if (this.state.havingIntents.length > 1) {
-			(intent as { having: WhereIntent }).having = and(
-				...this.state.havingIntents,
-			);
+			intent.having = and(...this.state.havingIntents);
 		}
 
 		// DX-034: SELECT DISTINCT
 		if (this.state.isDistinct) {
-			(intent as { distinct: boolean }).distinct = true;
+			intent.distinct = true;
 		}
 
 		if (this.state.orderByIntents.length > 0) {
-			(intent as { orderBy: readonly OrderByIntent[] }).orderBy = [
-				...this.state.orderByIntents,
-			];
+			intent.orderBy = [...this.state.orderByIntents];
 		}
 
 		if (this.state.limitValue !== undefined) {
-			(intent as { limit: number }).limit = this.state.limitValue;
+			intent.limit = this.state.limitValue;
 		}
 
 		if (this.state.offsetValue !== undefined) {
-			(intent as { offset: number }).offset = this.state.offsetValue;
+			intent.offset = this.state.offsetValue;
 		}
 
-		return intent;
+		return intent as QueryIntent;
 	}
 
 	/**

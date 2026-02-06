@@ -23,6 +23,7 @@
  * ```
  */
 
+import type { Mutable } from '@dbsp/types';
 import type {
 	ComparisonOperator,
 	RecursiveExistsOptions,
@@ -418,14 +419,12 @@ export function exists(
 	relation: string,
 	options?: { where?: WhereIntent; recursive?: RecursiveExistsOptions },
 ): WhereExistsIntent {
-	const intent: WhereExistsIntent = { kind: 'exists', relation };
-	const result: WhereExistsIntent = { ...intent };
+	const result: Mutable<WhereExistsIntent> = { kind: 'exists', relation };
 	if (options?.where !== undefined) {
-		(result as { where: WhereIntent }).where = options.where;
+		result.where = options.where;
 	}
 	if (options?.recursive !== undefined) {
-		(result as { recursive: RecursiveExistsOptions }).recursive =
-			options.recursive;
+		result.recursive = options.recursive;
 	}
 	return result;
 }
@@ -443,14 +442,15 @@ export function notExists(
 	relation: string,
 	options?: { where?: WhereIntent; recursive?: RecursiveExistsOptions },
 ): WhereNotExistsIntent {
-	const intent: WhereNotExistsIntent = { kind: 'notExists', relation };
-	const result: WhereNotExistsIntent = { ...intent };
+	const result: Mutable<WhereNotExistsIntent> = {
+		kind: 'notExists',
+		relation,
+	};
 	if (options?.where !== undefined) {
-		(result as { where: WhereIntent }).where = options.where;
+		result.where = options.where;
 	}
 	if (options?.recursive !== undefined) {
-		(result as { recursive: RecursiveExistsOptions }).recursive =
-			options.recursive;
+		result.recursive = options.recursive;
 	}
 	return result;
 }
@@ -466,9 +466,7 @@ export function notExists(
 function getRelationName(
 	rel: RelationRef<string, unknown, 'belongsTo' | 'hasMany' | 'hasOne'>,
 ): string {
-	const meta = (
-		rel as unknown as Record<symbol, { target: string } | undefined>
-	)[RELATION_META];
+	const meta = rel[RELATION_META];
 	if (!meta) {
 		throw new Error('Invalid RelationRef: missing RELATION_META');
 	}

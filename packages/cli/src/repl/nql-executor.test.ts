@@ -58,6 +58,7 @@ const testSchema: ResolvedSchema = {
 	},
 	hints: {},
 	indexes: {},
+	defaultFilters: {},
 	conventions: {
 		fkPattern: '{singular}_id',
 		pluralize: true,

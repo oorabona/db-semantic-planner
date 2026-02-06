@@ -11,6 +11,7 @@
  * @module introspection
  */
 
+import { ModelIRImpl } from '@dbsp/core';
 import type {
 	ColumnIR,
 	ColumnType,
@@ -20,8 +21,7 @@ import type {
 	RelationIR,
 	RelationType,
 	TableIR,
-} from '@dbsp/core';
-import { ModelIRImpl } from '@dbsp/core';
+} from '@dbsp/types';
 import type { Pool } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
 

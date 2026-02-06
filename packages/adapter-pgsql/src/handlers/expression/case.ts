@@ -40,8 +40,11 @@ export const caseHandler: ExpressionHandler = {
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
-		const conditions = decision.conditions as unknown as
-			| CaseCondition[]
+		// CASE decisions carry { when: Decision; then: unknown } tuples in `conditions`,
+		// which is structurally different from the base Decision[]. The planner
+		// guarantees this shape at runtime for expressionType === 'case'.
+		const conditions = decision.conditions as
+			| readonly CaseCondition[]
 			| undefined;
 		const elseValue = decision.value;
 
@@ -115,8 +118,9 @@ export const simpleCaseHandler: ExpressionHandler = {
 		state: CompilerState,
 	): Node {
 		const column = decision.column;
-		const conditions = decision.conditions as unknown as
-			| CaseCondition[]
+		// Same structural override as in caseHandler — see above.
+		const conditions = decision.conditions as
+			| readonly CaseCondition[]
 			| undefined;
 		const elseValue = decision.value;
 
@@ -132,11 +136,11 @@ export const simpleCaseHandler: ExpressionHandler = {
 		const testExpr = columnRef(column, tableAlias, ctx.schema, ctx.naming);
 
 		const args: Node[] = conditions.map((cond) => {
-			// Build the comparison value
+			// Build the comparison value — `when` may be a Decision with .value
+			// or a primitive; extract the raw value for parameterization.
 			const whenParamNumber = ++state.paramIndex;
-			state.parameters.push(
-				(cond.when as unknown as { value: unknown }).value ?? cond.when,
-			);
+			const whenDecision = cond.when as Decision & { value?: unknown };
+			state.parameters.push(whenDecision.value ?? cond.when);
 			const whenExpr = createParamRef(whenParamNumber);
 
 			// Build the THEN result

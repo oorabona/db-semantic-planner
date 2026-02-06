@@ -134,6 +134,8 @@ export interface Decision {
 	// Relation expansion specific
 	readonly expandRelation?: string;
 	readonly relationColumns?: readonly string[];
+	// Pre-compiled filter from EXISTS propagation (set by compiler, read by json_agg handler)
+	readonly _compiledFilterWhere?: import('@pgsql/types').Node;
 }
 
 // ============================================================================

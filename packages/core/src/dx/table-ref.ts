@@ -32,13 +32,21 @@
 import {
 	BRAND,
 	COLUMN_META,
+	hasSymbolMeta,
 	RELATION_META,
 	RELATION_PATH,
 	TABLE_META,
 } from './symbols.js';
 
 // Re-export symbols for convenience
-export { TABLE_META, COLUMN_META, RELATION_META, RELATION_PATH, BRAND };
+export {
+	TABLE_META,
+	COLUMN_META,
+	RELATION_META,
+	RELATION_PATH,
+	BRAND,
+	hasSymbolMeta,
+};
 
 /**
  * Relation types supported by the ORM.

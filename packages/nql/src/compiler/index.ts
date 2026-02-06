@@ -17,6 +17,7 @@ import type {
 	IncludeIntent,
 	InsertFromIntent,
 	InsertIntent,
+	Mutable,
 	MutationIntent,
 	NullOperator,
 	OrderByIntent,
@@ -433,14 +434,15 @@ export class NqlCompiler {
 						// For nested includes, attach to last include in the batch
 						const targetInclude =
 							currentIncludeBatch[currentIncludeBatch.length - 1]!;
+						const mutableInclude = targetInclude as Mutable<IncludeIntent>;
 						if (targetInclude.where) {
 							// Combine with existing where using AND
-							(targetInclude as { where: WhereIntent }).where = {
+							mutableInclude.where = {
 								kind: 'and',
 								conditions: [targetInclude.where, condition],
 							};
 						} else {
-							(targetInclude as { where: WhereIntent }).where = condition;
+							mutableInclude.where = condition;
 						}
 					} else {
 						whereConditions.push(condition);
@@ -1065,17 +1067,12 @@ export class NqlCompiler {
 				this.validateWhereField(field, aliasContext, rangeExpr.left);
 				// Handle both range literals and scalar values
 				let rangeValue: string | unknown;
-				// Type assertion needed: NqlRangeOpExpression now has optional 'scalar' field
-				const rangeWithScalar = rangeExpr as unknown as {
-					range?: NqlRangeLiteral;
-					scalar?: NqlExpression;
-				};
-				if (rangeWithScalar.range) {
-					rangeValue = this.expressionToRangeValue(rangeWithScalar.range);
-				} else if (rangeWithScalar.scalar) {
+				if (rangeExpr.range) {
+					rangeValue = this.expressionToRangeValue(rangeExpr.range);
+				} else if (rangeExpr.scalar) {
 					// Scalar value for "contains" operator (e.g., contains 25)
 					rangeValue = this.resolveFilterValue(
-						rangeWithScalar.scalar,
+						rangeExpr.scalar,
 						aliasContext,
 						outerAliases,
 					);
@@ -1377,10 +1374,7 @@ export class NqlCompiler {
 		}
 
 		if (where.kind === 'not') {
-			const notWhere = where as {
-				kind: 'not';
-				condition: WhereIntent;
-			};
+			const notWhere = where as WhereNotIntent;
 			const resolved = this.resolveBindingsInWhere(
 				notWhere.condition,
 				bindings,
@@ -1391,10 +1385,7 @@ export class NqlCompiler {
 		}
 
 		if (where.kind === 'and' || where.kind === 'or') {
-			const compound = where as {
-				kind: 'and' | 'or';
-				conditions: WhereIntent[];
-			};
+			const compound = where as WhereAndIntent | WhereOrIntent;
 			const resolved = compound.conditions.map((c) =>
 				this.resolveBindingsInWhere(c, bindings),
 			);

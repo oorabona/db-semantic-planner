@@ -300,8 +300,10 @@ export class ResultHydrator<TResult = unknown> {
 		);
 
 		// Execute
-		// biome-ignore lint/suspicious/noExplicitAny: Recursive result rows can have any shape
-		const recursiveRows = (await adapter.execute(compiledRecursive)) as any[];
+		const recursiveRows = (await adapter.execute(compiledRecursive)) as Record<
+			string,
+			unknown
+		>[];
 
 		// Merge results back into main results
 		this.mergeRecursiveResults(

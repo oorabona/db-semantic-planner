@@ -4,7 +4,7 @@
 
 ## In Progress
 
-(None)
+(None active)
 
 ---
 
@@ -87,6 +87,17 @@
 
 ---
 
+## P2.5 — Type Rationalization (Refactoring)
+
+> Structural type health: 233→33 casts remaining, contracts centralized, god files split.
+
+(All R01 tasks archived → docs/historic/done-2026-02.md)
+
+- [ ] **R02** [Types] Eliminate remaining 33 `as {}` read-access casts (non-intent-construction) — Effort: M
+  - adapter-pgsql: 20 (compiler, handlers, mutations), core: 10 (schema, planner, dx), nql: 3
+
+---
+
 ## P4 — Low (Code Health)
 
 > Tech debt to tackle when pain becomes real. No urgency.
@@ -117,12 +128,12 @@
 - [ ] **A-22** [OCP] 15-case switch on `decision.type`
 - [ ] **#20** [OCP] Extend handler pattern to remaining compiler switch cases — L
 - [ ] **#30** [ISP] QueryBuilder<T> interface 30+ methods
-- [ ] **#31** [SRP] types.ts 26 exports in one file — M
+- [x] ✅ **#31** [SRP] types.ts split: 1664→334 LOC + 3 focused files (R01e, 2026-02-06)
 
 ### Test Coverage
 
 - [ ] **#33** [Test] adapter-pgsql test ratio 0.36 (target 0.50) — L-size
-- [ ] **A-34** [Type] `any` types in result-hydrator.ts (7)
+- [x] ✅ **A-34** [Type] `any` types in result-hydrator.ts — 0 remaining (R01d, 2026-02-06)
 
 ### API Surface
 

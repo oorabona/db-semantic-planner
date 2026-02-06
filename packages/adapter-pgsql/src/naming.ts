@@ -7,7 +7,7 @@
  * This module bridges that gap.
  */
 
-import type { DbCasing, ModelIR } from '@dbsp/core';
+import type { DbCasing, ModelIR } from '@dbsp/types';
 import { getNamingPluginForDbCasing } from './naming-plugin.js';
 
 /**

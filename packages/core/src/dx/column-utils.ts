@@ -11,7 +11,7 @@ export function getColumnName(
 	if (typeof field === 'string') {
 		return field;
 	}
-	const colName = (field as unknown as Record<symbol, string>)[COLUMN_META];
+	const colName = field[COLUMN_META];
 	if (colName === undefined) {
 		throw new Error('Invalid ColumnRef: missing COLUMN_META');
 	}

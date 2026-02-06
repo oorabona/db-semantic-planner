@@ -8,7 +8,7 @@
  * All functions are stateless pure functions operating on PlanReport data.
  */
 
-import type { ModelIR, PlanReport } from '@dbsp/core';
+import type { ModelIR, PlanReport } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,

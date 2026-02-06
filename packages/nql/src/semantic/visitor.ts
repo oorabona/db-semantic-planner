@@ -25,6 +25,7 @@ import type {
 	NqlMutationClause,
 	NqlMutationPipeline,
 	NqlOrderItem,
+	NqlPathExpression,
 	NqlProgram,
 	NqlQuery,
 	NqlRangeLiteral,
@@ -664,10 +665,9 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 		// Get relation path
 		requireFirst(ctx, 'pathExpr', 'quantifiedRelationFilter missing pathExpr');
-		const pathExpr = this.visit(asCstNode(ctx.pathExpr[0]!)) as {
-			type: 'path';
-			segments: string[];
-		};
+		const pathExpr = this.visit(
+			asCstNode(ctx.pathExpr[0]!),
+		) as NqlPathExpression;
 		const relation = pathExpr.segments;
 
 		// Check which form: simple (.column = value) or aliased/direct condition
@@ -727,10 +727,9 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	allRelationFilter(ctx: CstContext): NqlRelationFilterExpression {
 		// Get full path (includes both relation and column)
 		requireFirst(ctx, 'pathExpr', 'allRelationFilter missing pathExpr');
-		const pathExpr = this.visit(asCstNode(ctx.pathExpr[0]!)) as {
-			type: 'path';
-			segments: string[];
-		};
+		const pathExpr = this.visit(
+			asCstNode(ctx.pathExpr[0]!),
+		) as NqlPathExpression;
 		const segments = pathExpr.segments;
 
 		if (segments.length < 2) {

@@ -1,7 +1,9 @@
+import type { Mutable } from '@dbsp/types';
 import type { Adapter, Dump } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type {
 	AggregateIntent,
+	ColumnExpressionIntent,
 	ExpressionIntent,
 	IncludeIntent,
 	OrderByIntent,
@@ -326,6 +328,23 @@ export function createOrm<T extends SchemaDefinition>(
 }
 
 /**
+ * Extract a named field from a recursive query result.
+ *
+ * Recursive includes (`ancestors` / `descendants`) add a dynamic property to each row.
+ * This helper safely extracts that property without `as any` casts.
+ *
+ * @internal
+ */
+function extractRecursiveField<T>(
+	result: T | null | undefined,
+	field: 'ancestors' | 'descendants',
+): T[] {
+	if (result == null) return [];
+	const row = result as Record<string, unknown>;
+	return (row[field] as T[]) ?? [];
+}
+
+/**
  * Internal factory for creating ORM instances.
  * Supports optional schema name for multi-tenant scenarios.
  *
@@ -461,10 +480,9 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				})
 				.first();
 
-			// Result shape: { id, ..., ancestors: [...] }
-			// Return the ancestors array or empty if no result
-			// biome-ignore lint/suspicious/noExplicitAny: Result shape depends on relation name
-			return (result as any)?.ancestors ?? [];
+			// Result shape from include({ recursive, direction: 'ancestors' }):
+			// { id, ..., ancestors: [...] }
+			return extractRecursiveField<TResult>(result, 'ancestors');
 		},
 
 		/**
@@ -525,10 +543,9 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				})
 				.first();
 
-			// Result shape: { id, ..., descendants: [...] }
-			// Return the descendants array or empty if no result
-			// biome-ignore lint/suspicious/noExplicitAny: Result shape depends on relation name
-			return (result as any)?.descendants ?? [];
+			// Result shape from include({ recursive, direction: 'descendants' }):
+			// { id, ..., descendants: [...] }
+			return extractRecursiveField<TResult>(result, 'descendants');
 		},
 
 		// =====================================================================
@@ -853,7 +870,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		} else {
 			// Simple fields only - extract field names
 			const fields = expressionColumns.map(
-				(c) => (c as { column: string }).column,
+				(c) => (c as ColumnExpressionIntent).column,
 			);
 			builder.selectIntent = { type: 'fields', fields };
 		}
@@ -870,7 +887,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		// Create CoalesceExpressionIntent
 		const coalesceIntent: ExpressionIntent = {
 			kind: 'coalesce',
-			fields: fields as unknown as readonly string[],
+			fields: fields as readonly string[],
 			as,
 		};
 
@@ -899,6 +916,10 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			};
 		}
 
+		// SAFETY: coalesce() adds a computed column to the result type.
+		// The runtime value is identical (same QueryBuilderImpl), only the
+		// phantom TResult type parameter changes — invariant in QueryBuilder,
+		// hence the double cast.
 		return builder as unknown as QueryBuilder<
 			TResult & { [P in Alias]: NonNullable<TResult[K]> }
 		>;
@@ -909,34 +930,34 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		as?: string,
 	): QueryBuilder<TResult> {
 		const builder = this.clone();
-		const agg: AggregateIntent = { function: 'count' };
+		const agg: Mutable<AggregateIntent> = { function: 'count' };
 
 		if (fieldOrOptions === undefined) {
 			// count() - COUNT(*)
 		} else if (typeof fieldOrOptions === 'string') {
 			// count('field', 'alias') - COUNT(field)
-			(agg as { field: string }).field = fieldOrOptions;
+			agg.field = fieldOrOptions;
 			if (as !== undefined) {
-				(agg as { as: string }).as = as;
+				agg.as = as;
 			}
 		} else if (isDistinctField(fieldOrOptions)) {
 			// count(distinct('field'), 'alias') - COUNT(DISTINCT field)
-			(agg as { field: string }).field = fieldOrOptions.field;
-			(agg as { distinct: boolean }).distinct = true;
+			agg.field = fieldOrOptions.field;
+			agg.distinct = true;
 			if (as !== undefined) {
-				(agg as { as: string }).as = as;
+				agg.as = as;
 			}
 		} else {
 			// count({ field, as }) - AggregateOptions
 			if (fieldOrOptions.field !== undefined) {
-				(agg as { field: string }).field = fieldOrOptions.field;
+				agg.field = fieldOrOptions.field;
 			}
 			if (fieldOrOptions.as !== undefined) {
-				(agg as { as: string }).as = fieldOrOptions.as;
+				agg.as = fieldOrOptions.as;
 			}
 		}
 
-		builder.aggregates.push(agg);
+		builder.aggregates.push(agg as AggregateIntent);
 		return builder;
 	}
 
@@ -944,14 +965,14 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		const builder = this.clone();
 		const isDistinct = isDistinctField(field);
 		const fieldName = isDistinct ? field.field : field;
-		const agg: AggregateIntent = { function: 'sum', field: fieldName };
+		const agg: Mutable<AggregateIntent> = { function: 'sum', field: fieldName };
 		if (isDistinct) {
-			(agg as { distinct: boolean }).distinct = true;
+			agg.distinct = true;
 		}
 		if (as !== undefined) {
-			(agg as { as: string }).as = as;
+			agg.as = as;
 		}
-		builder.aggregates.push(agg);
+		builder.aggregates.push(agg as AggregateIntent);
 		return builder;
 	}
 
@@ -959,34 +980,34 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		const builder = this.clone();
 		const isDistinct = isDistinctField(field);
 		const fieldName = isDistinct ? field.field : field;
-		const agg: AggregateIntent = { function: 'avg', field: fieldName };
+		const agg: Mutable<AggregateIntent> = { function: 'avg', field: fieldName };
 		if (isDistinct) {
-			(agg as { distinct: boolean }).distinct = true;
+			agg.distinct = true;
 		}
 		if (as !== undefined) {
-			(agg as { as: string }).as = as;
+			agg.as = as;
 		}
-		builder.aggregates.push(agg);
+		builder.aggregates.push(agg as AggregateIntent);
 		return builder;
 	}
 
 	min(field: string, as?: string): QueryBuilder<TResult> {
 		const builder = this.clone();
-		const agg: AggregateIntent = { function: 'min', field };
+		const agg: Mutable<AggregateIntent> = { function: 'min', field };
 		if (as !== undefined) {
-			(agg as { as: string }).as = as;
+			agg.as = as;
 		}
-		builder.aggregates.push(agg);
+		builder.aggregates.push(agg as AggregateIntent);
 		return builder;
 	}
 
 	max(field: string, as?: string): QueryBuilder<TResult> {
 		const builder = this.clone();
-		const agg: AggregateIntent = { function: 'max', field };
+		const agg: Mutable<AggregateIntent> = { function: 'max', field };
 		if (as !== undefined) {
-			(agg as { as: string }).as = as;
+			agg.as = as;
 		}
-		builder.aggregates.push(agg);
+		builder.aggregates.push(agg as AggregateIntent);
 		return builder;
 	}
 
@@ -1566,7 +1587,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 				if (adapterIterator?.return) {
 					return adapterIterator.return(value);
 				}
-				return { done: true, value: undefined as unknown as TResult };
+				return { done: true as const, value: undefined };
 			},
 			async throw(error?: unknown) {
 				// E17b: Fire onError for stream errors
@@ -1938,26 +1959,24 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	 * Handles exactOptionalPropertyTypes by only including defined properties.
 	 */
 	private buildIntent(applyDefaultFilters = true): QueryIntent {
-		const intent: QueryIntent = {
+		const intent: Mutable<QueryIntent> = {
 			type: 'select',
 			from: this.from,
 		};
 
 		// Handle aggregates - convert to SelectAggregateIntent
 		if (this.aggregates.length > 0) {
-			const aggregateSelect: SelectAggregateIntent = {
+			const aggregateSelect: Mutable<SelectAggregateIntent> = {
 				type: 'aggregate',
 				aggregates: [...this.aggregates],
 			};
 			// Add group by fields to the select for projection
 			if (this.groupByFields.length > 0) {
-				(aggregateSelect as { fields: readonly string[] }).fields = [
-					...this.groupByFields,
-				];
+				aggregateSelect.fields = [...this.groupByFields];
 			}
-			(intent as { select: SelectIntent }).select = aggregateSelect;
+			intent.select = aggregateSelect as SelectAggregateIntent;
 		} else if (this.selectIntent !== undefined) {
-			(intent as { select: SelectIntent }).select = this.selectIntent;
+			intent.select = this.selectIntent;
 		}
 
 		// Combine default filter (soft delete) with user-provided where conditions
@@ -1981,48 +2000,44 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		if (allWhereIntents.length === 1) {
 			const singleWhere = allWhereIntents[0];
 			if (singleWhere !== undefined) {
-				(intent as { where: WhereIntent }).where = singleWhere;
+				intent.where = singleWhere;
 			}
 		} else if (allWhereIntents.length > 1) {
-			(intent as { where: WhereIntent }).where = and(...allWhereIntents);
+			intent.where = and(...allWhereIntents);
 		}
 
 		// Combine multiple having conditions with AND (DX-034)
 		if (this.havingIntents.length === 1) {
 			const singleHaving = this.havingIntents[0];
 			if (singleHaving !== undefined) {
-				(intent as { having: WhereIntent }).having = singleHaving;
+				intent.having = singleHaving;
 			}
 		} else if (this.havingIntents.length > 1) {
-			(intent as { having: WhereIntent }).having = and(...this.havingIntents);
+			intent.having = and(...this.havingIntents);
 		}
 
 		// Add SELECT DISTINCT flag (DX-034)
 		if (this.isDistinctQuery) {
-			(intent as { distinct: boolean }).distinct = true;
+			intent.distinct = true;
 		}
 
 		if (this.includes.length > 0) {
-			(intent as { include: readonly IncludeIntent[] }).include = this.includes;
+			intent.include = this.includes;
 		}
 		if (this.groupByFields.length > 0) {
-			(intent as { groupBy: readonly string[] }).groupBy = [
-				...this.groupByFields,
-			];
+			intent.groupBy = [...this.groupByFields];
 		}
 		if (this.orderByIntents.length > 0) {
-			(intent as { orderBy: readonly OrderByIntent[] }).orderBy = [
-				...this.orderByIntents,
-			];
+			intent.orderBy = [...this.orderByIntents];
 		}
 		if (this.limitValue !== undefined) {
-			(intent as { limit: number }).limit = this.limitValue;
+			intent.limit = this.limitValue;
 		}
 		if (this.offsetValue !== undefined) {
-			(intent as { offset: number }).offset = this.offsetValue;
+			intent.offset = this.offsetValue;
 		}
 
-		return intent;
+		return intent as QueryIntent;
 	}
 
 	/**
@@ -2198,6 +2213,9 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 
 		// 9. Run afterQuery hooks (LIFO) — may transform results
 		try {
+			// SAFETY: R defaults to TResult[] from callers; afterQuery hooks may
+			// transform the shape, hence the generic.  The double cast bridges
+			// the gap between the concrete TResult[] and the generic R.
 			const finalResults = await runAfterQueryHooks(
 				store.afterQuery,
 				afterCtx,

@@ -12,6 +12,7 @@ import { normalizeSQL } from '@dbsp/adapter-pgsql';
 import type { AssertionType, TableAssertionData } from './assertion-parser.js';
 import type { AssertionOutcome } from './assertion-runner.js';
 import type { BatchResult } from './batch.js';
+import type { IntentSummary } from './nql-executor.js';
 
 // Re-export canonical normalizeSQL from adapter (DRY consolidation)
 export { normalizeSQL };
@@ -704,7 +705,7 @@ export function assertIntentWith(
  */
 function createIntentBooleanAssertion(
 	assertionType: AssertionType,
-	field: string,
+	field: keyof IntentSummary,
 ) {
 	return (result: BatchResult, expected: boolean): AssertionOutcome => {
 		if (!result.intent) {
@@ -717,10 +718,7 @@ function createIntentBooleanAssertion(
 			};
 		}
 
-		const actual =
-			((result.intent as unknown as Record<string, unknown>)[
-				field
-			] as boolean) ?? false;
+		const actual = (result.intent[field] as boolean) ?? false;
 		const passed = actual === expected;
 
 		return {
@@ -730,7 +728,7 @@ function createIntentBooleanAssertion(
 			passed,
 			message: passed
 				? undefined
-				: `Expected ${field}=${expected}, got ${actual}`,
+				: `Expected ${String(field)}=${expected}, got ${actual}`,
 		};
 	};
 }

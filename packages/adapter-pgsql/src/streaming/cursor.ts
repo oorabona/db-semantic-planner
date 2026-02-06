@@ -11,7 +11,7 @@
  * Actual cursor execution requires a transaction context.
  */
 
-import type { Node } from '@pgsql/types';
+import type { Node, FetchDirection as PgsqlFetchDirection } from '@pgsql/types';
 
 // ============================================================================
 // Types
@@ -167,7 +167,7 @@ export function buildFetch(options: FetchOptions): Node {
 
 	return {
 		FetchStmt: {
-			direction: direction as any, // PostgreSQL FetchDirection enum
+			direction: direction as PgsqlFetchDirection,
 			howMany,
 			portalname: options.cursorName,
 			ismove: false,
