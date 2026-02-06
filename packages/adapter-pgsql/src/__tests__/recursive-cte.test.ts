@@ -9,6 +9,7 @@ import {
 	buildCycleCheck,
 	buildCycleDetection,
 	buildCycleFilter,
+	buildPg14CycleClause,
 	isPg14CycleSupported,
 } from '../recursive/cycle-detection.js';
 import {
@@ -72,6 +73,52 @@ describe('Recursive CTE Compiler', () => {
 
 			// The CTE should have __path in target list
 			expect(cte).toHaveProperty('CommonTableExpr');
+		});
+
+		it('should attach PG14 CYCLE clause when usePg14Cycle is true', () => {
+			const config = { ...baseConfig, usePg14Cycle: true };
+			const { cte } = buildRecursiveCte(config);
+			const cteNode = (cte as any).CommonTableExpr;
+
+			// cycle_clause should be attached
+			expect(cteNode.cycle_clause).toBeDefined();
+			expect(cteNode.cycle_clause.cycle_mark_column).toBe('is_cycle');
+			expect(cteNode.cycle_clause.cycle_path_column).toBe('__cycle_path');
+			expect(cteNode.cycle_clause.cycle_col_list).toEqual([
+				{ String: { sval: 'id' } },
+			]);
+		});
+
+		it('should omit __visited column when usePg14Cycle is true', () => {
+			const config = { ...baseConfig, usePg14Cycle: true };
+			const { cte } = buildRecursiveCte(config);
+			const cteNode = (cte as any).CommonTableExpr;
+
+			// larg is a SelectStmt directly (not wrapped in { SelectStmt: ... })
+			const union = cteNode.ctequery.SelectStmt;
+			const anchorTargets = union.larg.targetList;
+
+			// Should NOT have __visited
+			const visitedTarget = anchorTargets.find(
+				(t: any) => t.ResTarget?.name === '__visited',
+			);
+			expect(visitedTarget).toBeUndefined();
+		});
+
+		it('should include __visited column when usePg14Cycle is false', () => {
+			const config = { ...baseConfig, usePg14Cycle: false };
+			const { cte } = buildRecursiveCte(config);
+			const cteNode = (cte as any).CommonTableExpr;
+
+			const union = cteNode.ctequery.SelectStmt;
+			const anchorTargets = union.larg.targetList;
+
+			// Should have __visited
+			const visitedTarget = anchorTargets.find(
+				(t: any) => t.ResTarget?.name === '__visited',
+			);
+			expect(visitedTarget).toBeDefined();
+			expect(cteNode.cycle_clause).toBeUndefined();
 		});
 	});
 
@@ -168,8 +215,31 @@ describe('Cycle Detection', () => {
 	});
 
 	describe('isPg14CycleSupported', () => {
-		it('should return false by default', () => {
-			expect(isPg14CycleSupported()).toBe(false);
+		it('should return true (CTECycleClause available in @pgsql/types)', () => {
+			expect(isPg14CycleSupported()).toBe(true);
+		});
+	});
+
+	describe('buildPg14CycleClause', () => {
+		it('should return CTECycleClause node', () => {
+			const result = buildPg14CycleClause('id') as any;
+
+			expect(result).toHaveProperty('CTECycleClause');
+			expect(result.CTECycleClause.cycle_col_list).toEqual([
+				{ String: { sval: 'id' } },
+			]);
+			expect(result.CTECycleClause.cycle_mark_column).toBe('is_cycle');
+			expect(result.CTECycleClause.cycle_path_column).toBe('__cycle_path');
+		});
+
+		it('should accept custom column names', () => {
+			const result = buildPg14CycleClause('pk', 'cycled', 'path') as any;
+
+			expect(result.CTECycleClause.cycle_col_list).toEqual([
+				{ String: { sval: 'pk' } },
+			]);
+			expect(result.CTECycleClause.cycle_mark_column).toBe('cycled');
+			expect(result.CTECycleClause.cycle_path_column).toBe('path');
 		});
 	});
 });

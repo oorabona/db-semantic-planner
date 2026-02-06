@@ -137,7 +137,7 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 		selectColumns,
 		innerAlias,
 		ctx,
-		{ isAnchor: true, trackPath, pkColumn: dbPk },
+		{ isAnchor: true, trackPath, pkColumn: dbPk, usePg14Cycle },
 	);
 
 	// Build anchor WHERE clause
@@ -171,7 +171,7 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 		selectColumns,
 		innerAlias,
 		ctx,
-		{ isAnchor: false, trackPath, pkColumn: dbPk, cteAlias },
+		{ isAnchor: false, trackPath, pkColumn: dbPk, cteAlias, usePg14Cycle },
 	);
 
 	// Build recursive WHERE clause (depth limit + cycle detection)
@@ -227,13 +227,11 @@ export function buildRecursiveCte(config: RecursiveCteConfig): {
 		cterecursive: true,
 	};
 
-	// Add PG14 CYCLE clause if enabled
+	// Attach PG14 CYCLE clause if enabled
 	if (usePg14Cycle) {
-		const cycleClause = buildPg14CycleClause(dbPk);
-		if (cycleClause) {
-			// Note: PG14 cycle clause is attached to the CTE
-			// This is a simplified representation
-			cte.ctename = cteAlias; // Already set, but emphasizing
+		const cycleNode = buildPg14CycleClause(dbPk);
+		if (cycleNode && 'CTECycleClause' in cycleNode) {
+			cte.cycle_clause = cycleNode.CTECycleClause;
 		}
 	}
 
@@ -259,6 +257,7 @@ function buildTargetList(
 		trackPath: boolean;
 		pkColumn: string;
 		cteAlias?: string;
+		usePg14Cycle?: boolean;
 	},
 ): Node[] {
 	const targets: Node[] = [];
@@ -306,15 +305,17 @@ function buildTargetList(
 		});
 	}
 
-	// Add __visited for cycle detection
-	targets.push(
-		buildCycleDetection(
-			alias,
-			options.pkColumn,
-			options.isAnchor,
-			options.cteAlias,
-		),
-	);
+	// Add __visited for cycle detection (skipped when using PG14 CYCLE clause)
+	if (!options.usePg14Cycle) {
+		targets.push(
+			buildCycleDetection(
+				alias,
+				options.pkColumn,
+				options.isAnchor,
+				options.cteAlias,
+			),
+		);
+	}
 
 	// Add __path if tracking
 	if (options.trackPath) {
@@ -601,7 +602,7 @@ function buildEdgeTableRecursiveCte(config: RecursiveCteConfig): {
 		selectColumns,
 		innerAlias,
 		ctx,
-		{ isAnchor: true, trackPath, pkColumn: dbPk },
+		{ isAnchor: true, trackPath, pkColumn: dbPk, usePg14Cycle },
 	);
 
 	// Anchor WHERE: use external filter (from intent.start.where compilation)
@@ -632,7 +633,7 @@ function buildEdgeTableRecursiveCte(config: RecursiveCteConfig): {
 		selectColumns,
 		innerAlias,
 		ctx,
-		{ isAnchor: false, trackPath, pkColumn: dbPk, cteAlias },
+		{ isAnchor: false, trackPath, pkColumn: dbPk, cteAlias, usePg14Cycle },
 	);
 
 	const recursiveWhere = buildRecursiveWhere(
@@ -747,8 +748,12 @@ function buildEdgeTableRecursiveCte(config: RecursiveCteConfig): {
 		cterecursive: true,
 	};
 
+	// Attach PG14 CYCLE clause if enabled
 	if (usePg14Cycle) {
-		buildPg14CycleClause(dbPk);
+		const cycleNode = buildPg14CycleClause(dbPk);
+		if (cycleNode && 'CTECycleClause' in cycleNode) {
+			cte.cycle_clause = cycleNode.CTECycleClause;
+		}
 	}
 
 	// ── Bidirectional __edges_bidir CTE ─────────────────────────────────────

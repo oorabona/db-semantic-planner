@@ -9,7 +9,7 @@
  * using the `<> ALL(array)` operator.
  */
 
-import type { Node } from '@pgsql/types';
+import type { CTECycleClause, Node } from '@pgsql/types';
 import { binaryExpr } from '../ast-helpers.js';
 
 /**
@@ -127,22 +127,19 @@ export function buildCycleCheck(
  * Currently returns null if not supported.
  */
 export function buildPg14CycleClause(
-	_pkColumn: string,
-	_cycleColumn = 'is_cycle',
-	_pathColumn = '__cycle_path',
+	pkColumn: string,
+	cycleColumn = 'is_cycle',
+	pathColumn = '__cycle_path',
 ): Node | null {
-	// The PG14 CYCLE clause is represented differently in the AST.
-	// @pgsql/types may not have direct support for it yet.
-	// For now, we document the intended SQL and return null.
-	//
-	// Intended SQL:
-	// CYCLE {pkColumn} SET {cycleColumn} USING {pathColumn}
-	//
-	// The caller should fall back to __visited array approach if null.
+	// CTECycleClause is available in @pgsql/types ≥ 17.x.
+	// Produces: CYCLE {pkColumn} SET {cycleColumn} USING {pathColumn}
+	const cycleClause: CTECycleClause = {
+		cycle_col_list: [{ String: { sval: pkColumn } }],
+		cycle_mark_column: cycleColumn,
+		cycle_path_column: pathColumn,
+	};
 
-	// CTECycleClause is not standard in all @pgsql/types versions.
-	// Return null to signal fallback to __visited approach.
-	return null;
+	return { CTECycleClause: cycleClause };
 }
 
 /**
@@ -151,9 +148,11 @@ export function buildPg14CycleClause(
  * This can be used to determine which cycle detection strategy to use.
  */
 export function isPg14CycleSupported(): boolean {
-	// For now, we default to false to use the __visited approach.
-	// In production, this could check the PostgreSQL server version.
-	return false;
+	// CTECycleClause is available in @pgsql/types ≥ 17.x, which we have.
+	// The CYCLE clause is supported by PostgreSQL ≥ 14.
+	// Callers should pass `usePg14Cycle: true` in RecursiveCteConfig
+	// when targeting PG14+ servers.
+	return true;
 }
 
 /**

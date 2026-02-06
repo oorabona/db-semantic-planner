@@ -514,7 +514,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	/**
 	 * Compile a plan with includes, returning subquery include metadata (DX-033).
-	 * @stub Phase 3 - Include support
 	 */
 	compileWithIncludes<T = unknown>(
 		plan: PlanReport,
