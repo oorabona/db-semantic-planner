@@ -16,14 +16,10 @@ import {
 } from './assert-field.js';
 import {
 	andExpr,
-	coalesceExpr,
 	columnRef,
 	columnTarget,
-	countDistinct,
-	countStar,
 	deleteStmt,
 	eqExpr,
-	funcCall,
 	innerJoin,
 	insertStmt,
 	integerNode,
@@ -35,7 +31,6 @@ import {
 	sortBy,
 	starTarget,
 	updateStmt,
-	windowFuncCall,
 } from './ast-helpers.js';
 import { deparseQuoted } from './deparse.js';
 import { resolveCaseValue as resolveCaseValueShared } from './handlers/expression/case-value.js';
@@ -50,9 +45,9 @@ import type {
 	CompilerContext as HandlerCompilerContext,
 	CompilerState as HandlerCompilerState,
 	Decision as HandlerDecision,
-	JoinExprNode,
-	SelectStmtNode,
 	SelectWithFields,
+	SelectStmtNode,
+	JoinExprNode,
 } from './handlers/types.js';
 import { isSelectWithFields } from './handlers/types.js';
 import { compileValue } from './handlers/where/utils.js';
@@ -80,7 +75,7 @@ function mapToHandlerDecision(
 	return {
 		type: pd.type,
 		table: pd.table,
-		column: pd.column,
+		column: pd.column ?? pd.field,
 		alias: pd.alias,
 		operator: pd.operator,
 		value: pd.value,
@@ -127,6 +122,7 @@ function mapToHandlerDecision(
 			column: o.field,
 			direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
 		})),
+		partition: pd.partitionBy,
 	} as HandlerDecision;
 }
 
@@ -331,7 +327,7 @@ export class PlanCompiler {
 				typeof rawSelect === 'string'
 					? rawSelect
 					: isSelectWithFields(rawSelect)
-						? (rawSelect.fields?.[0] ?? '*')
+					? (rawSelect.fields?.[0] ?? '*')
 						: '*';
 			const subConditions = sub.where
 				? [
@@ -565,58 +561,45 @@ export class PlanCompiler {
 					}
 					break;
 
-				case 'selectFunction':
-					if (decision.function === 'count' && decision.column === '*') {
-						targetList.push({
-							ResTarget: {
-								val: countStar(),
-								...(decision.alias ? { name: decision.alias } : {}),
-							},
-						});
-					} else if (decision.function === 'countDistinct' && decision.column) {
-						targetList.push({
-							ResTarget: {
-								val: countDistinct(
-									columnRef(
-										decision.column,
-										decision.table,
-										undefined,
-										this.naming,
-									),
-								),
-								...(decision.alias ? { name: decision.alias } : {}),
-							},
-						});
-					} else if (decision.function === 'coalesce' && decision.args) {
-						// COALESCE: args is array of column names
-						// COALESCE is a SQL keyword (not a function), so use CoalesceExpr
-						const coalesceArgs = (decision.args as string[]).map((col) =>
-							columnRef(col, decision.table, undefined, this.naming),
-						);
-						targetList.push({
-							ResTarget: {
-								val: coalesceExpr(coalesceArgs),
-								...(decision.alias
-									? { name: this.naming.toDatabase(decision.alias) }
-									: {}),
-							},
-						});
-					} else if (decision.function && decision.column) {
-						targetList.push({
-							ResTarget: {
-								val: funcCall(decision.function, [
-									columnRef(
-										decision.column,
-										decision.table,
-										undefined,
-										this.naming,
-									),
-								]),
-								...(decision.alias ? { name: decision.alias } : {}),
-							},
-						});
-					}
+				case 'selectFunction': {
+					ensureExpressionHandlersRegistered();
+					const funcType = decision.function;
+					if (!funcType) break;
+					const handler = getExpressionHandler(funcType);
+					const exprCtx = {
+						naming: this.naming,
+						rootTable: plan.rootTable,
+						currentAlias: decision.table ?? plan.rootTable,
+						maxRecursiveDepth: 100,
+						defaultPkColumnName: this.defaultPk,
+						deriveFkColumnName: this.deriveFk,
+						...((plan.schema ?? this.schema)
+							? { schema: plan.schema ?? this.schema }
+							: {}),
+					} as HandlerCompilerContext;
+					const exprState: HandlerCompilerState = {
+						parameters: this.state.parameters,
+						paramIndex: this.state.paramIndex,
+						ctes: new Map(),
+						aliases: new Map(),
+						joins: [],
+					};
+					const handlerDecision = mapToHandlerDecision(
+						decision,
+						plan.rootTable,
+						this.defaultPk,
+						this.deriveFk,
+					);
+					const node = handler.compile(handlerDecision, exprCtx, exprState);
+					this.state.paramIndex = exprState.paramIndex;
+					targetList.push({
+						ResTarget: {
+							val: node,
+							...(decision.alias ? { name: decision.alias } : {}),
+						},
+					});
 					break;
+				}
 
 				case 'selectExpression': {
 					if (decision.expressionType === 'case') {
@@ -679,31 +662,39 @@ export class PlanCompiler {
 				}
 
 				case 'selectWindow': {
-					// Window function: ROW_NUMBER() OVER (PARTITION BY x ORDER BY y) AS alias
-					const windowArgs: Node[] = [];
-					if (decision.field) {
-						windowArgs.push(
-							columnRef(decision.field, decision.table, undefined, this.naming),
-						);
-					}
-					// Build over clause conditionally to satisfy exactOptionalPropertyTypes
-					const overClause: {
-						partitionBy?: readonly string[];
-						orderBy?: readonly { field: string; direction?: 'asc' | 'desc' }[];
-					} = {};
-					if (decision.partitionBy)
-						overClause.partitionBy = decision.partitionBy;
-					if (decision.orderBy) overClause.orderBy = decision.orderBy;
-
+					ensureExpressionHandlersRegistered();
+					const winFuncName = decision.function;
+					if (!winFuncName) break;
+					const winHandler = getExpressionHandler(winFuncName);
+					const winCtx = {
+						naming: this.naming,
+						rootTable: plan.rootTable,
+						currentAlias: decision.table ?? plan.rootTable,
+						maxRecursiveDepth: 100,
+						defaultPkColumnName: this.defaultPk,
+						deriveFkColumnName: this.deriveFk,
+						...((plan.schema ?? this.schema)
+							? { schema: plan.schema ?? this.schema }
+							: {}),
+					} as HandlerCompilerContext;
+					const winState: HandlerCompilerState = {
+						parameters: this.state.parameters,
+						paramIndex: this.state.paramIndex,
+						ctes: new Map(),
+						aliases: new Map(),
+						joins: [],
+					};
+					const winDecision = mapToHandlerDecision(
+						decision,
+						plan.rootTable,
+						this.defaultPk,
+						this.deriveFk,
+					);
+					const winNode = winHandler.compile(winDecision, winCtx, winState);
+					this.state.paramIndex = winState.paramIndex;
 					targetList.push({
 						ResTarget: {
-							val: windowFuncCall(
-								decision.function!,
-								windowArgs,
-								overClause,
-								this.naming,
-								decision.table,
-							),
+							val: winNode,
 							...(decision.alias ? { name: decision.alias } : {}),
 						},
 					});
