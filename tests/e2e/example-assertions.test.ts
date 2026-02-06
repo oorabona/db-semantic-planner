@@ -4,8 +4,8 @@
  * Scans examples/ for triplets (*.schema.ts, *.dbsp, *.assert.dbsp)
  * and runs them programmatically via executeBatch from @dbsp/cli.
  *
- * When DATABASE_URL is available (testcontainers via globalSetup),
- * examples are executed with --db for full assertion coverage including db.* assertions.
+ * Database connection is provided by testcontainers (globalSetup) or an external DATABASE_URL.
+ * Examples are executed with --db for full assertion coverage including db.* assertions.
  * The .dbsp files handle schema setup via dot commands (.use, .import, etc.).
  */
 

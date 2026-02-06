@@ -208,20 +208,17 @@ describe('QUICKSTART Examples - Compile Only', () => {
 // NOTE: Assertion-based validation tests were removed (duplicate of example-assertions.test.ts
 // which uses the programmatic executeBatch() API instead of spawning CLI processes).
 
-// E2E tests with actual database execution
-// These tests are skipped when DATABASE_URL is not set
+// E2E tests with actual database execution (requires testcontainers or external DATABASE_URL)
 describe('QUICKSTART Examples - With Database', () => {
 	const SCHEMA = 'quickstart_e2e';
 
 	beforeAll(async () => {
-		// Skip setup if DATABASE_URL is not available
 		await dropBlogSchema(SCHEMA);
 		await createBlogSchema(SCHEMA);
 		await seedBlogData(SCHEMA);
 	});
 
 	afterAll(async () => {
-		// Skip teardown if DATABASE_URL is not available
 		await dropBlogSchema(SCHEMA);
 		await closeTestDb();
 	});

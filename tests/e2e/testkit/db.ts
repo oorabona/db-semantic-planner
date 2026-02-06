@@ -138,20 +138,3 @@ export async function execInSchema(
 // ============================================================================
 // Test Helpers
 // ============================================================================
-
-/**
- * Assert that E2E test infrastructure is available.
- * Throws if DATABASE_URL is not set — testcontainers globalSetup must run first.
- *
- * @deprecated No longer needed. Testcontainers always provides a database via globalSetup.
- * Existing callers should be removed. This function is kept temporarily for migration.
- */
-export function shouldSkipE2E(): false {
-	if (!process.env.DATABASE_URL) {
-		throw new Error(
-			'DATABASE_URL not set. Testcontainers globalSetup must run before E2E tests. ' +
-				'Run tests via: pnpm vitest --config tests/e2e/vitest.config.e2e.ts',
-		);
-	}
-	return false;
-}
