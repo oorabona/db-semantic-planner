@@ -45,9 +45,8 @@ import type {
 	CompilerContext as HandlerCompilerContext,
 	CompilerState as HandlerCompilerState,
 	Decision as HandlerDecision,
-	SelectWithFields,
-	SelectStmtNode,
 	JoinExprNode,
+	SelectStmtNode,
 } from './handlers/types.js';
 import { isSelectWithFields } from './handlers/types.js';
 import { compileValue } from './handlers/where/utils.js';
@@ -327,7 +326,7 @@ export class PlanCompiler {
 				typeof rawSelect === 'string'
 					? rawSelect
 					: isSelectWithFields(rawSelect)
-					? (rawSelect.fields?.[0] ?? '*')
+						? (rawSelect.fields?.[0] ?? '*')
 						: '*';
 			const subConditions = sub.where
 				? [
