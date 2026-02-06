@@ -466,7 +466,7 @@ export function isMutationPipeline(
 
 export function isMutation(node: unknown): node is NqlMutation {
 	if (typeof node !== 'object' || node === null) return false;
-	const type = (node as { type?: string }).type;
+	const type = (node as Record<string, unknown>).type;
 	return [
 		'insert',
 		'insert_from',
@@ -474,7 +474,7 @@ export function isMutation(node: unknown): node is NqlMutation {
 		'delete',
 		'upsert',
 		'upsert_from',
-	].includes(type ?? '');
+	].includes(type as string);
 }
 
 export function isLiteral(expr: NqlExpression): expr is NqlLiteral {

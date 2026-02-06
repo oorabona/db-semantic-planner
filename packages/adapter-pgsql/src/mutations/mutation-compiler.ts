@@ -26,6 +26,7 @@ import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
+	InsertStmtNode,
 } from '../handlers/types.js';
 import { createTypeCastParamRef } from '../param-ref.js';
 
@@ -535,8 +536,7 @@ export function compileUpsertFrom(
 
 	// Get base InsertStmt and add onConflictClause manually
 	const node = insertStmt(options);
-	const insertNode = (node as { InsertStmt: Record<string, unknown> })
-		.InsertStmt;
+	const insertNode = (node as InsertStmtNode).InsertStmt;
 	insertNode.onConflictClause = {
 		action: 'ONCONFLICT_UPDATE',
 		infer: conflictInfer,

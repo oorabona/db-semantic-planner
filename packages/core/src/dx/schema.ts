@@ -15,7 +15,7 @@
  * ```
  */
 
-import type { WhereIntent } from '@dbsp/types';
+import type { Mutable, WhereIntent } from '@dbsp/types';
 import type { DbCasing } from '../adapter.js';
 import { ModelIRImpl } from '../model-impl.js';
 import type {
@@ -835,17 +835,17 @@ function buildTables(
 				// FK column - type derived from target's PK
 				const targetPkType = getTargetPkType(columnDef.target);
 
-				const col: ColumnIR = {
+				const col: Mutable<ColumnIR> = {
 					name: columnName,
 					type: targetPkType,
 					nullable: columnDef.options.nullable ?? false,
 				};
 				if (columnDef.options.unique) {
-					(col as { unique?: boolean }).unique = true;
+					col.unique = true;
 				}
-				columns.push(col);
+				columns.push(col as ColumnIR);
 
-				const fk: ForeignKeyIR = {
+				const fk: Mutable<ForeignKeyIR> = {
 					columns: [columnName],
 					references: {
 						table: columnDef.target,
@@ -853,29 +853,27 @@ function buildTables(
 					},
 				};
 				if (columnDef.options.onDelete) {
-					(fk as { onDelete?: OnDeleteAction }).onDelete =
-						columnDef.options.onDelete;
+					fk.onDelete = columnDef.options.onDelete;
 				}
-				foreignKeys.push(fk);
+				foreignKeys.push(fk as ForeignKeyIR);
 			} else {
 				// Regular column
 				const def = normalizeColumnDef(columnDef);
-				const col: ColumnIR = {
+				const col: Mutable<ColumnIR> = {
 					name: columnName,
 					type: def.type,
 					nullable: def.nullable ?? false,
 				};
 				if (def.unique) {
-					(col as { unique?: boolean }).unique = def.unique;
+					col.unique = def.unique;
 				}
 				if (def.autoIncrement) {
-					(col as { autoIncrement?: boolean }).autoIncrement =
-						def.autoIncrement;
+					col.autoIncrement = def.autoIncrement;
 				}
 				if (def.default !== undefined) {
-					(col as { default?: unknown }).default = def.default;
+					col.default = def.default;
 				}
-				columns.push(col);
+				columns.push(col as ColumnIR);
 
 				if (def.primaryKey) {
 					primaryKey.push(columnName);
@@ -956,7 +954,7 @@ function buildTables(
 							tableName,
 						);
 					}
-					const fk: ForeignKeyIR = {
+					const fk: Mutable<ForeignKeyIR> = {
 						columns: [...fkRef.options.columns],
 						references: {
 							table: fkRef.target,
@@ -966,10 +964,9 @@ function buildTables(
 						},
 					};
 					if (fkRef.options.onDelete) {
-						(fk as { onDelete?: OnDeleteAction }).onDelete =
-							fkRef.options.onDelete;
+						fk.onDelete = fkRef.options.onDelete;
 					}
-					foreignKeys.push(fk);
+					foreignKeys.push(fk as ForeignKeyIR);
 				}
 			}
 		}
@@ -1289,7 +1286,7 @@ export async function getSchemaFromDb<
 	) as InferTables<T>;
 
 	// Build result with optional properties only if defined
-	const result: Schema<T> = {
+	const result: Mutable<Schema<T>> = {
 		definition: definition as T,
 		model,
 		tableNames,
@@ -1298,11 +1295,11 @@ export async function getSchemaFromDb<
 
 	// Add optional properties only if they have values
 	if (adapter.dbCasing !== undefined) {
-		(result as { dbCasing?: DbCasing }).dbCasing = adapter.dbCasing;
+		result.dbCasing = adapter.dbCasing;
 	}
 	if (introspectedAt !== undefined) {
-		(result as { introspectedAt?: Date }).introspectedAt = introspectedAt;
+		result.introspectedAt = introspectedAt;
 	}
 
-	return result;
+	return result as Schema<T>;
 }

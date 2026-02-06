@@ -299,3 +299,128 @@ export const ALL_OPERATORS = {
 	...COLLECTION_OPERATORS,
 	...LOGICAL_OPERATORS,
 } as const;
+
+// ============================================================================
+// Helper Types (eliminates unsafe `as {}` casts)
+// ============================================================================
+
+/**
+ * SQL expression object returned by SqlDefault utility.
+ */
+export interface SqlExpression {
+	readonly sql: string;
+}
+
+/**
+ * Range value for BETWEEN operations or range types.
+ */
+export interface RangeValue {
+	readonly lower?: unknown;
+	readonly upper?: unknown;
+}
+
+/**
+ * Parameter reference with pre-assigned index.
+ */
+export interface ParamRef {
+	readonly paramIndex: number;
+	readonly value?: unknown;
+}
+
+/**
+ * Window specification for window functions.
+ */
+export interface WindowOver {
+	readonly partitionBy?: readonly string[];
+	readonly orderBy?: readonly { field: string; direction?: 'asc' | 'desc' }[];
+}
+
+/**
+ * Select options with field specification.
+ */
+export interface SelectWithFields {
+	readonly fields?: readonly string[];
+}
+
+/**
+ * PostgreSQL AST ResTarget node shape.
+ */
+export interface ResTargetNode {
+	readonly ResTarget?: {
+		readonly val: Node;
+		readonly name?: string;
+	};
+}
+
+/**
+ * PostgreSQL AST SelectStmt node shape.
+ */
+export interface SelectStmtNode {
+	readonly SelectStmt?: Record<string, unknown>;
+}
+
+/**
+ * PostgreSQL AST JoinExpr node shape.
+ */
+export interface JoinExprNode {
+	readonly JoinExpr?: Record<string, unknown>;
+}
+
+/**
+ * PostgreSQL AST InsertStmt node shape.
+ */
+export interface InsertStmtNode {
+	readonly InsertStmt: Record<string, unknown>;
+}
+
+// ============================================================================
+// Type Guards
+// ============================================================================
+
+/**
+ * Type guard for SqlExpression.
+ */
+export function isSqlExpression(value: unknown): value is SqlExpression {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		'sql' in value &&
+		typeof (value as Record<string, unknown>).sql === 'string'
+	);
+}
+
+/**
+ * Type guard for RangeValue.
+ */
+export function isRangeValue(value: unknown): value is RangeValue {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		('lower' in value || 'upper' in value)
+	);
+}
+
+/**
+ * Type guard for ParamRef.
+ */
+export function isParamRef(value: unknown): value is ParamRef {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		'paramIndex' in value &&
+		typeof (value as Record<string, unknown>).paramIndex === 'number'
+	);
+}
+
+/**
+ * Type guard for SelectWithFields.
+ */
+export function isSelectWithFields(value: unknown): value is SelectWithFields {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		'fields' in value &&
+		(Array.isArray((value as Record<string, unknown>).fields) ||
+			(value as Record<string, unknown>).fields === undefined)
+	);
+}

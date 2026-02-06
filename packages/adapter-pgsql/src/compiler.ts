@@ -49,7 +49,10 @@ import type {
 	CompilerContext as HandlerCompilerContext,
 	CompilerState as HandlerCompilerState,
 	Decision as HandlerDecision,
+	JoinExprNode,
+	SelectStmtNode,
 } from './handlers/types.js';
+import { isSelectWithFields } from './handlers/types.js';
 import { compileValue } from './handlers/where/utils.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
@@ -325,10 +328,8 @@ export class PlanCompiler {
 			const selectColumn =
 				typeof rawSelect === 'string'
 					? rawSelect
-					: rawSelect &&
-							typeof rawSelect === 'object' &&
-							'fields' in (rawSelect as object)
-						? ((rawSelect as { fields?: readonly string[] }).fields?.[0] ?? '*')
+					: isSelectWithFields(rawSelect)
+						? (rawSelect.fields?.[0] ?? '*')
 						: '*';
 			const subConditions = sub.where
 				? [
@@ -423,7 +424,7 @@ export class PlanCompiler {
 			// Inject pre-compiled filter for the json_agg handler to read.
 			// Property is readonly on Decision; the compiler is the sole writer.
 			(
-				handlerDecision as { _compiledFilterWhere?: Node }
+				handlerDecision as HandlerDecision & { _compiledFilterWhere?: Node }
 			)._compiledFilterWhere = combined;
 		}
 
@@ -896,7 +897,7 @@ export class PlanCompiler {
 							this.naming,
 						);
 			// Raw joins are pre-built JoinExpr — inject base table as larg
-			const joinExpr = rawJoin as { JoinExpr?: Record<string, unknown> };
+			const joinExpr = rawJoin as JoinExprNode;
 			if (joinExpr.JoinExpr) {
 				joinExpr.JoinExpr.larg = base;
 				from[0] = rawJoin;
@@ -942,10 +943,11 @@ export class PlanCompiler {
 	 */
 	private wrapSelectInExists(innerAst: Node): Node {
 		// Get the inner SelectStmt and modify its targetList to just `1`
-		const innerSelect = (innerAst as { SelectStmt?: unknown }).SelectStmt;
-		if (!innerSelect) {
+		const innerSelectNode = innerAst as SelectStmtNode;
+		if (!innerSelectNode.SelectStmt) {
 			throw new Error('existsWrap requires a SelectStmt');
 		}
+		const innerSelect = innerSelectNode.SelectStmt;
 
 		// Create inner SELECT with just `1` as target
 		const modifiedInner: Node = {

@@ -30,7 +30,6 @@ import {
 	type WhereExistsIntent,
 	type WhereInIntent,
 	type WhereIntent,
-	type WhereNotExistsIntent,
 	type WhereNotIntent,
 	type WhereOrIntent,
 } from './intent-ast.js';
@@ -579,7 +578,7 @@ function optimizeInToExists(
 			// Extract the single column from the subquery's select
 			const subSelect = inWhere.subquery.select;
 			if (!subSelect || subSelect.type !== 'fields') return where;
-			const fields = (subSelect as { fields?: readonly string[] }).fields;
+			const fields = 'fields' in subSelect ? subSelect.fields : undefined;
 			if (!fields || fields.length !== 1) return where;
 			const subColumn = fields[0]!;
 
@@ -656,15 +655,10 @@ function optimizeInToExists(
 			if (optimized === notWhere.condition) return where;
 			// NOT(EXISTS) → notExists (direct, no wrapper)
 			if (optimized.kind === 'exists') {
-				const notExists: WhereNotExistsIntent = {
+				return {
+					...optimized,
 					kind: 'notExists',
-					relation: optimized.relation,
-					...(optimized.where !== undefined && { where: optimized.where }),
-					...(optimized.recursive !== undefined && {
-						recursive: optimized.recursive,
-					}),
-				};
-				return notExists;
+				} as unknown as WhereIntent;
 			}
 			return { kind: 'not', condition: optimized } as WhereNotIntent;
 		}

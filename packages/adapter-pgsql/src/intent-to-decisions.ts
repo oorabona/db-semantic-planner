@@ -13,6 +13,7 @@ import type {
 	WhereIntent,
 } from '@dbsp/types';
 import type { PlanDecision } from './compiler.js';
+import type { RangeValue, WindowOver } from './handlers/types.js';
 
 // ============================================================================
 // Main Converter
@@ -194,10 +195,7 @@ function convertSelect(
 				const windowFunc = expr.function as string;
 				const windowAlias = expr.alias as string;
 				const windowField = expr.field as string | undefined;
-				const over = expr.over as {
-					partitionBy?: readonly string[];
-					orderBy?: readonly { field: string; direction?: 'asc' | 'desc' }[];
-				};
+				const over = expr.over as WindowOver;
 
 				const decision: Mutable<PlanDecision> = {
 					type: 'selectWindow',
@@ -439,7 +437,7 @@ function convertWhereCondition(
 
 			// NQL BETWEEN produces { operator: 'between', value: { lower, upper } }
 			if (rangeOperator === 'between') {
-				const rangeVal = cond.value as { lower: unknown; upper: unknown };
+				const rangeVal = cond.value as RangeValue;
 				return {
 					type: 'where',
 					column: cond.field as string,

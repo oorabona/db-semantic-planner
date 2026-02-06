@@ -244,7 +244,7 @@ function generateColumnDef(col: ColumnIR, naming: NamingPlugin): string {
 function formatDefaultValue(value: unknown): string {
 	// Handle SqlDefault object: { sql: 'now()' }
 	if (typeof value === 'object' && value !== null && 'sql' in value) {
-		return (value as { sql: string }).sql;
+		return (value as Record<string, unknown>).sql as string;
 	}
 
 	// Handle function-like expressions (e.g., 'now()')

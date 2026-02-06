@@ -101,6 +101,14 @@ function unreachable(message: string): never {
 const BaseCstVisitor = nqlParser.getBaseCstVisitorConstructor();
 
 /**
+ * Window specification returned by windowClause visitor
+ */
+interface WindowSpec {
+	partitionBy: NqlExpression[];
+	orderBy: NqlOrderItem[];
+}
+
+/**
  * CST Visitor that transforms Chevrotain CST to NQL AST
  */
 export class NqlCstVisitor extends BaseCstVisitor {
@@ -1000,10 +1008,9 @@ export class NqlCstVisitor extends BaseCstVisitor {
 
 		// If there's a windowClause, return NqlWindowExpression
 		if (ctx.windowClause) {
-			const windowSpec = this.visit(asCstNode(ctx.windowClause[0]!)) as {
-				partitionBy: NqlExpression[];
-				orderBy: NqlOrderItem[];
-			};
+			const windowSpec = this.visit(
+				asCstNode(ctx.windowClause[0]!),
+			) as WindowSpec;
 			return {
 				type: 'window',
 				function: name,

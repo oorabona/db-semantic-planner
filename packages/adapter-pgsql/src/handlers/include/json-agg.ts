@@ -20,6 +20,7 @@ import type {
 	Decision,
 	IncludeHandler,
 	IncludeResult,
+	ResTargetNode,
 } from '../types.js';
 import { deriveFkColumns } from './shared.js';
 
@@ -83,7 +84,7 @@ function compileJsonAggRecursive(
 					_state,
 				);
 				// Extract the COALESCE node from the ResTarget wrapper
-				const resTarget = childResTarget as { ResTarget?: { val: Node } };
+				const resTarget = childResTarget as ResTargetNode;
 				if (resTarget.ResTarget?.val) {
 					childNodes.push({
 						key: childRelation,
