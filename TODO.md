@@ -62,7 +62,9 @@
 
 - [ ] **E13** [NQL] JSONB operators — `->`, `->>`, `@>`, `<@`, `?`, `#>`, `#>>` — Effort: M
 - [ ] **E13b** [NQL] Set operations (UNION, INTERSECT, EXCEPT) — partially deferred
-- [ ] **E13c** [NQL] CASE expression enhancements
+- [x] ✅ **E13c** [NQL] CASE expression enhancements (2026-02-06)
+- [ ] 🔧 [Adapter] DRY: extract shared `compileCaseValue`/`resolveCaseValue` helper — Priority: M
+- [ ] 💡 [NQL] Add CASE test coverage: BETWEEN/OR in WHEN, nested CASE, NULL literal THEN/ELSE — Priority: L
 - [ ] **E13d** [NQL] Window fn lag/lead offset/default — P3+
 - [ ] **E13e** [NQL] IN (dateRange) — requires semantic date expansion
 - [ ] **E13f** [NQL] Range literal in INSERT — parsing OK but not compiled

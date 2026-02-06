@@ -210,13 +210,13 @@ function convertSelect(
 			} else if (exprKind === 'case') {
 				// CASE WHEN ... THEN ... ELSE ... END expression
 				const whenClauses = expr.when as Array<{
-					condition: Record<string, unknown>;
+					condition: WhereIntent;
 					result: Record<string, unknown>;
 				}>;
 				const conditions = whenClauses.map((wc) => ({
-					when: convertCaseConditionToDecision(wc.condition, rootTable),
+					when: convertWhereCondition(wc.condition, rootTable),
 					// biome-ignore lint/suspicious/noThenProperty: intentional reserved word in decision object
-					then: extractExpressionValue(wc.result),
+					then: wc.result,
 				}));
 
 				// CASE decisions carry { when, then } tuples in `conditions` —
@@ -231,9 +231,7 @@ function convertSelect(
 				// but PlanDecision declares conditions as PlanDecision[].
 				(decision as Record<string, unknown>).conditions = conditions;
 				if (expr.else) {
-					decision.value = extractExpressionValue(
-						expr.else as Record<string, unknown>,
-					);
+					decision.value = expr.else;
 				}
 				if (expr.as) decision.alias = expr.as as string;
 				decisions.push(decision);
@@ -723,30 +721,3 @@ function convertOrderBy(order: OrderByIntent, rootTable: string): PlanDecision {
  * Convert a CASE WHEN condition (ExpressionIntent) to a PlanDecision
  * that compileCondition can handle.
  */
-function convertCaseConditionToDecision(
-	expr: Record<string, unknown>,
-	rootTable: string,
-): PlanDecision {
-	if (expr.kind === 'comparison') {
-		return {
-			type: 'where',
-			column: expr.column as string,
-			operator: expr.operator as string,
-			value: expr.value,
-			table: rootTable,
-		};
-	}
-	// Fallback: wrap unknown expressions
-	throw new Error(
-		`Unsupported CASE WHEN condition kind: ${expr.kind as string}`,
-	);
-}
-
-/**
- * Extract a scalar value from an ExpressionIntent.
- */
-function extractExpressionValue(expr: Record<string, unknown>): unknown {
-	if (expr.kind === 'literal') return expr.value;
-	if (expr.kind === 'column') return { $ref: expr.column };
-	return expr;
-}

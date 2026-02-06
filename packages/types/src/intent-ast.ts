@@ -349,7 +349,7 @@ export interface CaseExpressionIntent {
 	readonly kind: 'case';
 	/** Array of WHEN-THEN pairs */
 	readonly when: ReadonlyArray<{
-		readonly condition: ExpressionIntent;
+		readonly condition: WhereIntent;
 		readonly result: ExpressionIntent;
 	}>;
 	/** Optional ELSE clause */

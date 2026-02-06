@@ -7,7 +7,7 @@
  */
 
 import type { CaseExpr, CaseWhen, Node } from '@pgsql/types';
-import { columnRef } from '../../ast-helpers.js';
+import { columnRef, nullConstNode } from '../../ast-helpers.js';
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
@@ -32,6 +32,71 @@ interface CaseCondition {
  *      ELSE default
  * END
  */
+/**
+ * Resolve a CASE THEN/ELSE value to an AST node.
+ * Handles ExpressionIntent objects (column, literal, arithmetic, null)
+ * and plain scalars.
+ */
+function resolveCaseValue(
+	value: unknown,
+	ctx: CompilerContext,
+	state: CompilerState,
+): Node {
+	if (value === null || value === undefined) {
+		return nullConstNode();
+	}
+
+	if (typeof value === 'string') {
+		// String operand = column reference
+		const alias = ctx.currentAlias ?? ctx.rootTable;
+		return columnRef(value, alias, ctx.schema, ctx.naming);
+	}
+
+	if (typeof value !== 'object') {
+		// Numeric/boolean literal → parameterize
+		const idx = ++state.paramIndex;
+		state.parameters.push(value);
+		return createParamRef(idx);
+	}
+
+	const expr = value as Record<string, unknown>;
+	switch (expr.kind) {
+		case 'literal':
+			if (expr.value === null || expr.value === undefined)
+				return nullConstNode();
+			{
+				const idx = ++state.paramIndex;
+				state.parameters.push(expr.value);
+				return createParamRef(idx);
+			}
+
+		case 'column': {
+			const alias = ctx.currentAlias ?? ctx.rootTable;
+			return columnRef(expr.column as string, alias, ctx.schema, ctx.naming);
+		}
+
+		case 'arithmetic': {
+			const left = resolveCaseValue(expr.left, ctx, state);
+			const right = resolveCaseValue(expr.right, ctx, state);
+			return {
+				A_Expr: {
+					kind: 'AEXPR_OP',
+					name: [{ String: { sval: expr.operator as string } }],
+					lexpr: left,
+					rexpr: right,
+				},
+			};
+		}
+
+		default: {
+			// Unknown object → parameterize
+			const idx = ++state.paramIndex;
+			state.parameters.push(value);
+			return createParamRef(idx);
+		}
+	}
+}
+
 export const caseHandler: ExpressionHandler = {
 	types: ['case', 'CASE', 'caseWhen'],
 
@@ -61,23 +126,8 @@ export const caseHandler: ExpressionHandler = {
 			// Compile the WHEN condition
 			const whenExpr = dispatch(cond.when, ctx, state);
 
-			// Build the THEN result
-			let thenResult: Node;
-			if (
-				typeof cond.then === 'object' &&
-				cond.then !== null &&
-				'type' in cond.then
-			) {
-				// It's a decision, compile it recursively
-				// For now, just create a param ref
-				const paramNumber = ++state.paramIndex;
-				state.parameters.push(cond.then);
-				thenResult = createParamRef(paramNumber);
-			} else {
-				const paramNumber = ++state.paramIndex;
-				state.parameters.push(cond.then);
-				thenResult = createParamRef(paramNumber);
-			}
+			// Build the THEN result using expression-aware resolution
+			const thenResult = resolveCaseValue(cond.then, ctx, state);
 
 			const caseWhen: CaseWhen = {
 				expr: whenExpr,
@@ -90,9 +140,7 @@ export const caseHandler: ExpressionHandler = {
 		// Build ELSE clause if present
 		let defresult: Node | undefined;
 		if (elseValue !== undefined) {
-			const paramNumber = ++state.paramIndex;
-			state.parameters.push(elseValue);
-			defresult = createParamRef(paramNumber);
+			defresult = resolveCaseValue(elseValue, ctx, state);
 		}
 
 		const caseExpr: CaseExpr = {

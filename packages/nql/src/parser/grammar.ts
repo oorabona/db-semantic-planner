@@ -838,25 +838,55 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * case_expr = "CASE" when_clause { when_clause } [ else_clause ] "END" ;
-	 * when_clause = "WHEN" expression "THEN" expression ;
+	 * case_expr = "CASE" ( searched_case_body | simple_case_body ) [ else_clause ] "END" ;
+	 * searched_case_body = "WHEN" boolean_expr "THEN" expression { "WHEN" boolean_expr "THEN" expression } ;
+	 * simple_case_body = expression "WHEN" expression "THEN" expression { "WHEN" expression "THEN" expression } ;
 	 * else_clause = "ELSE" expression ;
 	 */
 	private caseExpr = this.RULE('caseExpr', () => {
 		this.CONSUME(Case);
-		// At least one WHEN clause required
-		this.AT_LEAST_ONE(() => {
-			this.CONSUME(When);
-			this.SUBRULE(this.booleanExpr); // Boolean expression for condition
-			this.CONSUME(Then);
-			this.SUBRULE(this.expression); // Result can be any expression
-		});
+		this.OR([
+			{
+				// Searched CASE: CASE WHEN bool_expr THEN expr ...
+				GATE: () => this.LA(1).tokenType === When,
+				ALT: () => this.SUBRULE(this.searchedCaseBody),
+			},
+			{
+				// Simple CASE: CASE expr WHEN val THEN result ...
+				ALT: () => this.SUBRULE(this.simpleCaseBody),
+			},
+		]);
 		// Optional ELSE clause
 		this.OPTION(() => {
 			this.CONSUME(Else);
-			this.SUBRULE2(this.expression);
+			this.SUBRULE(this.expression);
 		});
 		this.CONSUME(End);
+	});
+
+	/**
+	 * searched_case_body = "WHEN" boolean_expr "THEN" expression { ... } ;
+	 */
+	private searchedCaseBody = this.RULE('searchedCaseBody', () => {
+		this.AT_LEAST_ONE(() => {
+			this.CONSUME(When);
+			this.SUBRULE(this.booleanExpr);
+			this.CONSUME(Then);
+			this.SUBRULE(this.expression);
+		});
+	});
+
+	/**
+	 * simple_case_body = expression "WHEN" expression "THEN" expression { ... } ;
+	 */
+	private simpleCaseBody = this.RULE('simpleCaseBody', () => {
+		this.SUBRULE(this.expression); // Subject expression
+		this.AT_LEAST_ONE(() => {
+			this.CONSUME(When);
+			this.SUBRULE2(this.expression); // Value to compare against
+			this.CONSUME(Then);
+			this.SUBRULE3(this.expression); // Result expression
+		});
 	});
 
 	/**
