@@ -82,6 +82,22 @@ export {
 	wMin,
 	wSum,
 } from './filters.js';
+// E17b: Query/Mutation Hooks
+export {
+	type AfterMutationHook,
+	type AfterQueryHook,
+	type BeforeMutationHook,
+	type BeforeQueryHook,
+	createHookManager,
+	type ErrorHookContext,
+	type HookErrorHandler,
+	type HookManager,
+	type MutationHookContext,
+	type MutationOperation,
+	type OnErrorHook,
+	type QueryHookContext,
+	type QueryResultType,
+} from './hooks.js';
 // DX-103: Extracted components for SRP compliance
 // IntentBuilder - builds QueryIntent AST from builder state
 export {
