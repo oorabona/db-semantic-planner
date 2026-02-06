@@ -27,7 +27,7 @@ function buildValueNode(
 	// If it's a column reference
 	if (typeof value === 'string' && !value.includes(' ')) {
 		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		return columnRef(value, tableAlias, ctx.schema, ctx.naming);
+		return columnRef(value, tableAlias, undefined, ctx.naming);
 	}
 
 	// If it's a decision with type 'column'
@@ -35,7 +35,7 @@ function buildValueNode(
 		const decision = value as Decision;
 		if (decision.type === 'column' && decision.column) {
 			const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-			return columnRef(decision.column, tableAlias, ctx.schema, ctx.naming);
+			return columnRef(decision.column, tableAlias, undefined, ctx.naming);
 		}
 	}
 
@@ -69,7 +69,7 @@ export const coalesceHandler: ExpressionHandler = {
 		// If column is specified, add it first
 		if (column) {
 			const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-			argNodes.push(columnRef(column, tableAlias, ctx.schema, ctx.naming));
+			argNodes.push(columnRef(column, tableAlias, undefined, ctx.naming));
 		}
 
 		// Add args array if present
@@ -122,7 +122,7 @@ export const nullIfHandler: ExpressionHandler = {
 		}
 
 		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		const colRef = columnRef(column, tableAlias, ctx.schema, ctx.naming);
+		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
 
 		const paramNumber = ++state.paramIndex;
 		state.parameters.push(value);

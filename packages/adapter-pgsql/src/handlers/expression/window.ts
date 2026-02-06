@@ -25,7 +25,7 @@ function buildSortBy(
 	ctx: CompilerContext,
 ): Node {
 	const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-	const colRef = columnRef(column, tableAlias, ctx.schema, ctx.naming);
+	const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
 
 	const sortBy: SortBy = {
 		node: colRef,
@@ -51,7 +51,7 @@ function buildWindowDef(decision: Decision, ctx: CompilerContext): WindowDef {
 	// PARTITION BY
 	if (partition && partition.length > 0) {
 		windowDef.partitionClause = partition.map((col) =>
-			columnRef(col, tableAlias, ctx.schema, ctx.naming),
+			columnRef(col, tableAlias, undefined, ctx.naming),
 		);
 	}
 
@@ -177,7 +177,7 @@ export const lagHandler: ExpressionHandler = {
 		}
 
 		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		const colRef = columnRef(column, tableAlias, ctx.schema, ctx.naming);
+		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
 
 		const args: Node[] = [colRef];
 
@@ -215,7 +215,7 @@ export const leadHandler: ExpressionHandler = {
 		}
 
 		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		const colRef = columnRef(column, tableAlias, ctx.schema, ctx.naming);
+		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
 
 		const args: Node[] = [colRef];
 
@@ -253,7 +253,7 @@ export const firstValueHandler: ExpressionHandler = {
 		}
 
 		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		const colRef = columnRef(column, tableAlias, ctx.schema, ctx.naming);
+		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
 
 		return buildWindowFunction('first_value', [colRef], decision, ctx);
 	},
@@ -276,7 +276,7 @@ export const lastValueHandler: ExpressionHandler = {
 		}
 
 		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		const colRef = columnRef(column, tableAlias, ctx.schema, ctx.naming);
+		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
 
 		return buildWindowFunction('last_value', [colRef], decision, ctx);
 	},
@@ -320,7 +320,7 @@ export const genericWindowHandler: ExpressionHandler = {
 		// Add column if specified
 		if (decision.column) {
 			const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-			args.push(columnRef(decision.column, tableAlias, ctx.schema, ctx.naming));
+			args.push(columnRef(decision.column, tableAlias, undefined, ctx.naming));
 		}
 
 		// Add other args

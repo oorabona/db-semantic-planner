@@ -27,7 +27,7 @@ function resolveOperand(
 ): Node {
 	if (typeof operand === 'string') {
 		const alias = ctx.currentAlias ?? ctx.rootTable;
-		return columnRef(operand, alias, ctx.schema, ctx.naming);
+		return columnRef(operand, alias, undefined, ctx.naming);
 	}
 	// Numeric or other literal → parametrize
 	const idx = ++state.paramIndex;

@@ -776,14 +776,14 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	private readonly onHookError: HookErrorHandler | undefined;
 	private readonly inTransaction: boolean | undefined;
 	private planOptionsOverride: PlanOptions | undefined;
-	private selectIntent?: SelectIntent;
+	private selectIntent: SelectIntent | undefined = undefined;
 	private whereIntents: WhereIntent[] = [];
-	private strictModeOverride?: boolean;
+	private strictModeOverride: boolean | undefined = undefined;
 	private aggregates: AggregateIntent[] = [];
 	private groupByFields: string[] = [];
 	private orderByIntents: OrderByIntent[] = [];
-	private limitValue?: number;
-	private offsetValue?: number;
+	private limitValue: number | undefined = undefined;
+	private offsetValue: number | undefined = undefined;
 	private havingIntents: WhereIntent[] = [];
 	private isDistinctQuery = false;
 	private skipDefaultFilters = false;
@@ -2339,7 +2339,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			this.model,
 			this.strictMode,
 			this.from,
-			{ ...this.relationHints }, // Clone hints to allow per-query additions
+			{ ...this.relationHints },
 			this.adapter,
 			this.schemaName,
 			this.dialectCapabilities,
@@ -2349,36 +2349,24 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			this.onHookError,
 			this.inTransaction,
 		);
+		// Clone array state
 		builder.includes.push(...this.includes);
 		builder.recursiveIncludes.push(...this.recursiveIncludes);
-		if (this.selectIntent !== undefined) {
-			builder.selectIntent = this.selectIntent;
-		}
-		// Clone whereIntents array
 		builder.whereIntents.push(...this.whereIntents);
-		// Clone havingIntents array (DX-034)
 		builder.havingIntents.push(...this.havingIntents);
-		// Clone isDistinctQuery (DX-034)
-		builder.isDistinctQuery = this.isDistinctQuery;
-		// Clone skipDefaultFilters flag
-		builder.skipDefaultFilters = this.skipDefaultFilters;
-		if (this.strictModeOverride !== undefined) {
-			builder.strictModeOverride = this.strictModeOverride;
-		}
-		// Clone aggregates and groupBy
 		builder.aggregates.push(...this.aggregates);
 		builder.groupByFields.push(...this.groupByFields);
-		// Clone orderBy, limit, offset
 		builder.orderByIntents.push(...this.orderByIntents);
-		if (this.limitValue !== undefined) {
-			builder.limitValue = this.limitValue;
-		}
-		if (this.offsetValue !== undefined) {
-			builder.offsetValue = this.offsetValue;
-		}
-		if (this.planOptionsOverride !== undefined) {
-			builder.planOptionsOverride = { ...this.planOptionsOverride };
-		}
+		// Clone scalar state
+		builder.selectIntent = this.selectIntent;
+		builder.isDistinctQuery = this.isDistinctQuery;
+		builder.skipDefaultFilters = this.skipDefaultFilters;
+		builder.strictModeOverride = this.strictModeOverride;
+		builder.limitValue = this.limitValue;
+		builder.offsetValue = this.offsetValue;
+		builder.planOptionsOverride = this.planOptionsOverride
+			? { ...this.planOptionsOverride }
+			: undefined;
 		return builder;
 	}
 

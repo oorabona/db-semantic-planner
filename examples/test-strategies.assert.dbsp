@@ -230,7 +230,7 @@ db.rows.equals: 6
 # ─────────────────────────────────────────
 --- query: 21
 success: true
-sql.equals: SELECT assignments.project_id, count(*) AS "memberCount" FROM test_strategies.assignments GROUP BY assignments.project_id
+sql.equals: SELECT assignments.project_id, count(*) AS member_count FROM test_strategies.assignments GROUP BY assignments.project_id
 db.rows.equals: 2
 
 # ─────────────────────────────────────────
