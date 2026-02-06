@@ -161,8 +161,8 @@
 ### Dependency-Blocked
 
 - [-] ⏭️ [Adapter] Migration generation — depends on DDL generator maturity
-- [-] ⏭️ [Adapter] Cycle detection placeholder — depends on `@pgsql/types` version
-- [-] ⏭️ [Adapter] `compileWithIncludes()` Phase 3 — partially implemented
+- [x] ✅ [Adapter] Cycle detection PG14 CYCLE clause — implemented `buildPg14CycleClause()` with `CTECycleClause` from `@pgsql/types@17.6.2`; `usePg14Cycle` flag skips `__visited` array; `isPg14CycleSupported()` → true (2026-02-06)
+- [x] ✅ [Adapter] `compileWithIncludes()` Phase 3 — already complete: subquery extraction functional, stale `@stub` comment removed (2026-02-06)
 - [-] ⏭️ [Architecture] DX-032: Conformance Test Framework — depends on multi-adapter
 
 ### Multi-Adapter (Future)
