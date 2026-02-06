@@ -4,55 +4,55 @@
  */
 
 import type {
-	WindowIntent,
-	WindowFunction,
 	AggregateWindowFunction,
+	CoalesceExpressionIntent,
+	ColumnAliasIntent,
+	ExpressionIntent,
 	OffsetWindowFunction,
 	RankingWindowFunction,
-	ExpressionIntent,
-	CoalesceExpressionIntent,
 	RawExpressionIntent,
-	ColumnAliasIntent,
 	RelationColumnIntent,
+	WindowFunction,
+	WindowIntent,
 } from './expression-intent.js';
 import type {
-	WhereIntent,
-	WhereComparisonIntent,
-	WhereLikeIntent,
-	WhereSubqueryIntent,
-	SubqueryRefIntent,
-	WhereInIntent,
-	WhereNullIntent,
-	WhereRangeIntent,
-	WhereAndIntent,
-	WhereOrIntent,
-	WhereNotIntent,
-	WhereExistsIntent,
-	WhereNotExistsIntent,
-	WhereRelationFilterIntent,
-} from './where-intent.js';
+	DeleteIntent,
+	InsertIntent,
+	MutationIntent,
+	UpdateIntent,
+	UpsertIntent,
+} from './mutation-intent.js';
+import type { QueryIntent } from './query-intent.js';
 import type {
-	SelectIntent,
+	AdjacencyTraversal,
+	CustomTraversal,
+	EdgeTableTraversal,
+	RecursiveIntent,
+	RecursiveTraversal,
+} from './recursive-intent.js';
+import type {
+	SelectAggregateIntent,
 	SelectAllIntent,
 	SelectFieldsIntent,
-	SelectAggregateIntent,
+	SelectIntent,
 	SelectWithExpressionsIntent,
 } from './select-intent.js';
 import type {
-	RecursiveTraversal,
-	AdjacencyTraversal,
-	EdgeTableTraversal,
-	CustomTraversal,
-	RecursiveIntent,
-} from './recursive-intent.js';
-import type { QueryIntent } from './query-intent.js';
-import type {
-	MutationIntent,
-	InsertIntent,
-	UpdateIntent,
-	DeleteIntent,
-	UpsertIntent,
-} from './mutation-intent.js';
+	SubqueryRefIntent,
+	WhereAndIntent,
+	WhereComparisonIntent,
+	WhereExistsIntent,
+	WhereInIntent,
+	WhereIntent,
+	WhereLikeIntent,
+	WhereNotExistsIntent,
+	WhereNotIntent,
+	WhereNullIntent,
+	WhereOrIntent,
+	WhereRangeIntent,
+	WhereRelationFilterIntent,
+	WhereSubqueryIntent,
+} from './where-intent.js';
 
 // ============================================================================
 // Window Intent Type Guards

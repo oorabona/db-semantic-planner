@@ -3,8 +3,8 @@
  * Include intent types for relation loading and ordering.
  */
 
-import type { NullsPosition, SelectIntent } from './select-intent.js';
 import type { SortDirection } from '../shared/utils.js';
+import type { NullsPosition, SelectIntent } from './select-intent.js';
 import type { WhereIntent } from './where-intent.js';
 
 // ============================================================================

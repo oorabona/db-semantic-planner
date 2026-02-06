@@ -3,8 +3,8 @@
  * Recursive CTE intent types for hierarchical data traversal (RFC-001).
  */
 
-import type { WhereIntent } from './where-intent.js';
 import type { OrderByIntent } from './include-intent.js';
+import type { WhereIntent } from './where-intent.js';
 
 // ============================================================================
 // Recursive CTE Intent - Hierarchical Data Traversal (RFC-001)

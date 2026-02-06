@@ -11,6 +11,7 @@ import { NqlErrorCodes, NqlSemanticException } from '../errors/index.js';
 export type CstContext = Record<string, (CstNode | IToken)[] | undefined>;
 
 /** Visitor dispatch function — calls this.visit() on a CstNode */
+// biome-ignore lint/suspicious/noExplicitAny: Chevrotain BaseCstVisitor.visit() returns any
 export type VisitFn = (node: CstNode) => any;
 
 /** Type guard to check if value is a CstNode (has children property) */

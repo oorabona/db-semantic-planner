@@ -3,9 +3,9 @@
  * Query intent - complete query definition, main entry point for the intent AST.
  */
 
+import type { IncludeIntent, OrderByIntent } from './include-intent.js';
 import type { SelectIntent } from './select-intent.js';
 import type { WhereIntent } from './where-intent.js';
-import type { IncludeIntent, OrderByIntent } from './include-intent.js';
 
 // ============================================================================
 // Query Intent - Complete Query Definition
