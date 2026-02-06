@@ -28,7 +28,6 @@ export {
 	getPgsqlAdapter,
 	getTestAdapter,
 	getTestPool,
-	shouldSkipE2E,
 } from './db.js';
 // IAM/RBAC
 export { createIamSchema, dropIamSchema } from './iam.ddl.js';

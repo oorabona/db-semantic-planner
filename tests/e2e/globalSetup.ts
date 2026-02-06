@@ -11,18 +11,6 @@ import {
 } from '@testcontainers/postgresql';
 import { Wait } from 'testcontainers';
 
-// Testcontainers requires DOCKER_HOST to be set for Podman environments
-// Add to your ~/.bashrc: export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"
-if (!process.env.DOCKER_HOST) {
-	throw new Error(
-		'DOCKER_HOST is not set. For Podman, add to ~/.bashrc:\n' +
-			'  export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"',
-	);
-}
-
-// Use host networking for better Podman compatibility
-process.env.TESTCONTAINERS_HOST_OVERRIDE = 'localhost';
-
 // Store container reference for teardown
 let container: StartedPostgreSqlContainer | undefined;
 
@@ -42,10 +30,31 @@ async function isDockerAvailable(): Promise<boolean> {
 }
 
 export async function setup(): Promise<void> {
+	// If DATABASE_URL is already set externally, use it directly (no container needed)
+	if (process.env.DATABASE_URL) {
+		console.log(
+			`\n🐘 Using external DATABASE_URL: ${process.env.DATABASE_URL}\n`,
+		);
+		return;
+	}
+
+	// Testcontainers requires DOCKER_HOST for Podman environments
+	if (!process.env.DOCKER_HOST) {
+		console.error(
+			'\n❌ No DATABASE_URL and DOCKER_HOST is not set. For Podman, add to ~/.bashrc:\n' +
+				'  export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"\n',
+		);
+		process.env.SKIP_E2E_TESTS = 'true';
+		return;
+	}
+	process.env.TESTCONTAINERS_HOST_OVERRIDE = 'localhost';
+
 	// Check Docker availability
 	const dockerAvailable = await isDockerAvailable();
 	if (!dockerAvailable) {
-		console.warn('\n⚠️  Docker is not available. E2E tests will be skipped.\n');
+		console.error(
+			'\n❌ No DATABASE_URL set and Docker is not available. Cannot run E2E tests.\n',
+		);
 		process.env.SKIP_E2E_TESTS = 'true';
 		return;
 	}
@@ -80,7 +89,6 @@ export async function setup(): Promise<void> {
 		console.error('\n❌ Failed to start PostgreSQL container:', error);
 		console.warn('\n⚠️  E2E database tests will be skipped.\n');
 		process.env.SKIP_E2E_TESTS = 'true';
-		// Don't throw - allow compile-only tests to run
 	}
 }
 
