@@ -29,7 +29,6 @@ import {
 	integerNode,
 	leftJoin,
 	notExpr,
-	nullConstNode,
 	orExpr,
 	rangeVar,
 	selectStmt,
@@ -39,6 +38,7 @@ import {
 	windowFuncCall,
 } from './ast-helpers.js';
 import { deparseQuoted } from './deparse.js';
+import { resolveCaseValue as resolveCaseValueShared } from './handlers/expression/case-value.js';
 import { registerAllExpressionHandlers } from './handlers/expression/index.js';
 import { registerAllIncludeHandlers } from './handlers/include/index.js';
 import {
@@ -52,6 +52,7 @@ import type {
 	Decision as HandlerDecision,
 	JoinExprNode,
 	SelectStmtNode,
+	SelectWithFields,
 } from './handlers/types.js';
 import { isSelectWithFields } from './handlers/types.js';
 import { compileValue } from './handlers/where/utils.js';
@@ -1029,49 +1030,17 @@ export class PlanCompiler {
 
 	/**
 	 * Compile a CASE THEN/ELSE value based on its ExpressionIntent kind.
-	 * Handles: literal, column, arithmetic, null, nested case, and plain scalars.
+	 * Delegates to shared resolveCaseValue with nested CASE support.
 	 */
 	private compileCaseValue(value: unknown): Node {
-		if (value === null || value === undefined) return nullConstNode();
-
-		if (typeof value === 'string') {
-			// String operand in arithmetic = column reference
-			return columnRef(value, this.currentRootTable, undefined, this.naming);
-		}
-
-		if (typeof value !== 'object') {
-			// Numeric/boolean literal → parameterize
-			return compileValue(value, this.state);
-		}
-
-		const expr = value as Record<string, unknown>;
-		switch (expr.kind) {
-			case 'literal':
-				if (expr.value === null || expr.value === undefined)
-					return nullConstNode();
-				return compileValue(expr.value, this.state);
-
-			case 'column': {
-				const col = expr.column as string;
-				return columnRef(col, this.currentRootTable, undefined, this.naming);
-			}
-
-			case 'arithmetic': {
-				const left = this.compileCaseValue(expr.left);
-				const right = this.compileCaseValue(expr.right);
-				return {
-					A_Expr: {
-						kind: 'AEXPR_OP',
-						name: [{ String: { sval: expr.operator as string } }],
-						lexpr: left,
-						rexpr: right,
-					},
-				};
-			}
-
-			case 'case':
-				// Nested CASE — delegate to compileCaseExpression via a synthetic decision
-				return this.compileCaseExpression({
+		return resolveCaseValueShared(
+			value,
+			this.currentRootTable,
+			undefined,
+			this.naming,
+			this.state,
+			(expr) =>
+				this.compileCaseExpression({
 					type: 'selectExpression',
 					expressionType: 'case',
 					conditions: (
@@ -1083,12 +1052,8 @@ export class PlanCompiler {
 					})),
 					value: expr.else,
 					table: this.currentRootTable,
-				} as unknown as PlanDecision);
-
-			default:
-				// Safe fallback: parameterize unknown expression types
-				return compileValue(value, this.state);
-		}
+				} as unknown as PlanDecision),
+		);
 	}
 
 	// --------------------------------------------------------------------------

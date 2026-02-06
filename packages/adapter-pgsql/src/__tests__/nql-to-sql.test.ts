@@ -1211,4 +1211,42 @@ describe('CASE expression enhancements', () => {
 		// No ELSE in SQL
 		expect(sql).not.toContain('else');
 	});
+
+	it('compiles CASE with BETWEEN in WHEN condition', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			"employees | select case when salary between 50000 and 100000 then 'mid' else 'other' end as band",
+		);
+		expect(sql).toContain('case when');
+		expect(sql).toContain('between');
+		expect(params).toContain(50000);
+		expect(params).toContain(100000);
+		expect(params).toContain('mid');
+		expect(params).toContain('other');
+	});
+
+	it('compiles CASE with OR in WHEN condition', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			"employees | select case when salary > 100000 or name = 'CEO' then 'exec' else 'staff' end as role",
+		);
+		expect(sql).toContain('case when');
+		expect(sql).toContain('or');
+		expect(params).toContain(100000);
+		expect(params).toContain('CEO');
+		expect(params).toContain('exec');
+		expect(params).toContain('staff');
+	});
+
+	// Nested CASE requires WhereIntent→PlanDecision conversion for inner CASE conditions.
+	// Currently deferred: inner CASE WHEN conditions aren't properly routed through intent-to-decisions.
+	it.todo('compiles nested CASE (CASE inside CASE THEN)');
+
+	it('compiles CASE with NULL literal in THEN/ELSE', () => {
+		const { sql } = nqlToSQLWithParams(
+			'employees | select case when salary > 80000 then name else null end as maybe_name',
+		);
+		expect(sql).toContain('case when');
+		expect(sql).toContain('employees.name');
+		// NULL in ELSE should be SQL NULL, not a parameter
+		expect(sql).toMatch(/else\s+null/i);
+	});
 });
