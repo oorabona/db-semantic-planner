@@ -87,11 +87,12 @@ export function resolveCaseValue(
 			};
 		}
 
+		// biome-ignore lint/suspicious/noFallthroughSwitchClause: intentional — no nested handler → parameterize via default
 		case 'case':
 			if (nestedCaseHandler) {
 				return nestedCaseHandler(expr);
 			}
-		// falls through — no nested handler → parameterize
+		// falls through
 		default: {
 			const idx = ++state.paramIndex;
 			state.parameters.push(value);

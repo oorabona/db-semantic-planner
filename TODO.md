@@ -128,7 +128,7 @@
 ### SOLID Violations
 
 - [x] ✅ **A-22/#20** [OCP] Route selectFunction + selectWindow through handler registry (5/17 cases via handlers now; 12 remaining are 2-12 LOC assignments) (2026-02-06)
-- [-] ⏭️ **#30** [ISP] QueryBuilder<T> 33 methods — all consumers use full interface, splitting adds bureaucracy with no practical benefit (evaluated 2026-02-06)
+- [-] ⏭️ **#30** [ISP] QueryBuilder<T> 33 methods — WON'T FIX: all consumers use full interface, no subset usage found (2026-02-06)
 - [x] ✅ **#31** [SRP] types.ts split: 1664→334 LOC + 3 focused files (R01e, 2026-02-06)
 
 ### Test Coverage
