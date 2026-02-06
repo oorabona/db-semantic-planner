@@ -29,6 +29,19 @@ import {
 	isDistinctField,
 } from './filters.js';
 import {
+	getHookStore,
+	type HookErrorHandler,
+	type HookManager,
+	type HookStore,
+	hasHooks,
+	type QueryHookContext,
+	type QueryResultType,
+	runAfterQueryHooks,
+	runBeforeQueryHooks,
+	runOnErrorHooks,
+	withReentrancyGuard,
+} from './hooks.js';
+import {
 	includeOptionsToIntent,
 	isRecursiveIncludeOptions,
 	parseDotNotationInclude,
@@ -168,6 +181,20 @@ export interface SimplifiedOrmOptions<
 	 * ```
 	 */
 	readonly planOptions?: PlanOptions;
+
+	/**
+	 * Hook manager for query/mutation interception (E17b).
+	 * Created via `createHookManager()`.
+	 * Hooks are frozen on ORM creation — no hooks can be added after.
+	 */
+	readonly hooks?: HookManager;
+
+	/**
+	 * Error handler for hook failures (E17b).
+	 * Called when a hook throws. Returns 'continue' to skip the failed hook,
+	 * or 'abort' to propagate the error.
+	 */
+	readonly onHookError?: HookErrorHandler;
 }
 
 /**
@@ -235,6 +262,8 @@ export function createOrm<T extends SchemaDefinition>(
 		adapter,
 		strictMode = false,
 		planOptions: globalPlanOptions,
+		hooks: hookManager,
+		onHookError,
 	} = options;
 
 	// ARCH-006: Either schema or model is required
@@ -274,6 +303,11 @@ export function createOrm<T extends SchemaDefinition>(
 		);
 	}
 
+	// E17b: Freeze hook manager on ORM creation — no hooks can be added after
+	const frozenHookStore = hookManager
+		? getHookStore(hookManager.freeze())
+		: undefined;
+
 	// Create ORM instance with ModelIR
 	// Cast to InferDB<T> since createOrmInstance uses internal types
 	return createOrmInstance(
@@ -286,6 +320,8 @@ export function createOrm<T extends SchemaDefinition>(
 		schemaDefinition,
 		globalPlanOptions,
 		defaultFilters,
+		frozenHookStore,
+		onHookError,
 	) as OrmInstance<InferDB<T>>;
 }
 
@@ -305,6 +341,9 @@ function createOrmInstance<DB = Record<string, unknown>>(
 	schemaDefinition?: unknown,
 	globalPlanOptions?: PlanOptions,
 	defaultFilters?: DefaultFilters,
+	hookStore?: HookStore,
+	onHookError?: HookErrorHandler,
+	inTransaction?: boolean,
 ): OrmInstance<DB> {
 	// Create NQL template tag (DX-040)
 	// NQL compiler is now integrated directly - @dbsp/nql is imported in nql.ts
@@ -331,6 +370,9 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				dialectCapabilities,
 				globalPlanOptions,
 				defaultFilters,
+				hookStore,
+				onHookError,
+				inTransaction,
 			);
 		},
 		withSchema(schemaName: string): OrmInstance<DB> {
@@ -350,6 +392,9 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				schemaDefinition,
 				globalPlanOptions,
 				defaultFilters,
+				hookStore,
+				onHookError,
+				inTransaction,
 			);
 		},
 
@@ -401,6 +446,8 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				dialectCapabilities,
 				globalPlanOptions,
 				defaultFilters,
+				hookStore,
+				onHookError,
 			);
 
 			const result = await builder
@@ -463,6 +510,8 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				dialectCapabilities,
 				globalPlanOptions,
 				defaultFilters,
+				hookStore,
+				onHookError,
 			);
 
 			const result = await builder
@@ -492,6 +541,9 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				model,
 				adapter,
 				schemaName,
+				hookStore,
+				onHookError,
+				inTransaction,
 			});
 		},
 
@@ -501,6 +553,9 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				model,
 				adapter,
 				schemaName,
+				hookStore,
+				onHookError,
+				inTransaction,
 			});
 		},
 
@@ -510,6 +565,9 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				model,
 				adapter,
 				schemaName,
+				hookStore,
+				onHookError,
+				inTransaction,
 			});
 		},
 
@@ -520,6 +578,9 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				adapter,
 				schemaName,
 				allowAll: true,
+				hookStore,
+				onHookError,
+				inTransaction,
 			});
 		},
 
@@ -530,6 +591,9 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				adapter,
 				schemaName,
 				allowAll: true,
+				hookStore,
+				onHookError,
+				inTransaction,
 			});
 		},
 
@@ -540,6 +604,9 @@ function createOrmInstance<DB = Record<string, unknown>>(
 				model,
 				adapter,
 				schemaName,
+				hookStore,
+				onHookError,
+				inTransaction,
 			});
 		},
 
@@ -557,7 +624,7 @@ function createOrmInstance<DB = Record<string, unknown>>(
 
 			// Passthrough to adapter's transaction API
 			return adapter.transaction(async (txAdapter) => {
-				// Create a transaction-scoped ORM instance
+				// Create a transaction-scoped ORM instance with inTransaction=true
 				const txOrm = createOrmInstance<DB>(
 					model,
 					strictMode,
@@ -567,6 +634,10 @@ function createOrmInstance<DB = Record<string, unknown>>(
 					dialectCapabilities,
 					schemaDefinition,
 					globalPlanOptions,
+					defaultFilters,
+					hookStore,
+					onHookError,
+					true, // inTransaction
 				);
 				return fn(txOrm);
 			});
@@ -684,6 +755,9 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	private readonly schemaName: string | undefined;
 	private readonly dialectCapabilities: DialectCapabilities | undefined;
 	private readonly defaultFilters: DefaultFilters | undefined;
+	private readonly hookStore: HookStore | undefined;
+	private readonly onHookError: HookErrorHandler | undefined;
+	private readonly inTransaction: boolean | undefined;
 	private planOptionsOverride: PlanOptions | undefined;
 	private selectIntent?: SelectIntent;
 	private whereIntents: WhereIntent[] = [];
@@ -707,6 +781,9 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		dialectCapabilities?: DialectCapabilities,
 		globalPlanOptions?: PlanOptions,
 		defaultFilters?: DefaultFilters,
+		hookStore?: HookStore,
+		onHookError?: HookErrorHandler,
+		inTransaction?: boolean,
 	) {
 		this.model = model;
 		this.strictMode = strictMode;
@@ -717,6 +794,9 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		this.dialectCapabilities = dialectCapabilities;
 		this.planOptionsOverride = globalPlanOptions;
 		this.defaultFilters = defaultFilters;
+		this.hookStore = hookStore;
+		this.onHookError = onHookError;
+		this.inTransaction = inTransaction;
 	}
 
 	include(
@@ -1045,6 +1125,13 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 
 	async all(): Promise<TResult[]> {
 		const adapter = this.getConfiguredAdapter();
+
+		// E17b: Hook-aware execution path
+		if (this.hookStore && hasHooks(this.hookStore)) {
+			return this.executeWithHooks(adapter, 'all');
+		}
+
+		// Fast path: no hooks — existing behavior, zero overhead
 		const planReport = this.plan();
 
 		// Build compile options with exactOptionalPropertyTypes compliance
@@ -1101,6 +1188,12 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	}
 
 	async first(): Promise<TResult | undefined> {
+		// E17b: Hook-aware path — hooks see resultType='first'
+		if (this.hookStore && hasHooks(this.hookStore)) {
+			const adapter = this.getConfiguredAdapter();
+			const rows = await this.executeWithHooks<TResult[]>(adapter, 'first');
+			return rows[0];
+		}
 		const rows = await this.all();
 		return rows[0];
 	}
@@ -1221,6 +1314,16 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 
 	async exists(): Promise<boolean> {
 		const adapter = this.getConfiguredAdapter();
+
+		// E17b: Hook-aware path for exists()
+		if (this.hookStore && hasHooks(this.hookStore)) {
+			// INV-07: Re-entrancy guard
+			return withReentrancyGuard(this.hookStore, (s) =>
+				this.existsWithHooks(adapter, s),
+			);
+		}
+
+		// Fast path: no hooks
 		const existsIntent = this.buildExistsIntent();
 		const intentWithHints = this.applyRelationHints(existsIntent);
 
@@ -1246,6 +1349,102 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		return (
 			rows.length > 0 && (rows[0] as Record<string, unknown>).exists === true
 		);
+	}
+
+	private async existsWithHooks(
+		adapter: Adapter,
+		store: HookStore,
+	): Promise<boolean> {
+		const startTime = Date.now();
+
+		// Build raw intent (without defaultFilters) for hooks
+		const rawIntent = this.buildIntent(false);
+		const beforeCtx: QueryHookContext = {
+			table: this.from,
+			operation: 'select',
+			intent: rawIntent,
+			resultType: 'exists',
+			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
+			...(this.inTransaction && { inTransaction: true }),
+		};
+
+		// Run beforeQuery hooks
+		let intent: QueryIntent;
+		try {
+			const afterHookCtx = await runBeforeQueryHooks(
+				store.beforeQuery,
+				beforeCtx,
+				this.onHookError,
+			);
+			intent = afterHookCtx.intent;
+		} catch (error) {
+			if (store.onError.length > 0) {
+				throw await runOnErrorHooks(store.onError, {
+					table: this.from,
+					operation: 'select',
+					error: error as Error,
+					intent: rawIntent,
+					phase: 'beforeQuery',
+				});
+			}
+			throw error;
+		}
+
+		// Apply defaultFilters AFTER hooks (INV-01)
+		intent = this.applyDefaultFiltersToIntent(intent);
+
+		// Build exists-wrapped intent from the (potentially modified) intent
+		const existsIntent = this.buildExistsIntentFromIntent(intent);
+		const intentWithHints = this.applyRelationHints(existsIntent);
+		const planOptions: PlanOptions = {
+			...(this.dialectCapabilities && {
+				dialectCapabilities: this.dialectCapabilities,
+			}),
+			...this.planOptionsOverride,
+		};
+		const planReport = plan(intentWithHints, this.model, planOptions);
+		const compileOptions: { schemaName?: string; model: ModelIR } = {
+			model: this.model,
+		};
+		if (this.schemaName !== undefined) {
+			compileOptions.schemaName = this.schemaName;
+		}
+		const compiled = adapter.compile(planReport, compileOptions);
+		const rows = await adapter.execute(compiled);
+		const result =
+			rows.length > 0 && (rows[0] as Record<string, unknown>).exists === true;
+
+		// afterQuery with boolean result
+		const afterCtx: QueryHookContext = {
+			table: this.from,
+			operation: 'select',
+			intent,
+			resultType: 'exists',
+			sql: compiled.sql,
+			parameters: compiled.parameters,
+			duration: Date.now() - startTime,
+			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
+		};
+		try {
+			return await runAfterQueryHooks(
+				store.afterQuery,
+				afterCtx,
+				result,
+				this.onHookError,
+			);
+		} catch (error) {
+			if (store.onError.length > 0) {
+				throw await runOnErrorHooks(store.onError, {
+					table: this.from,
+					operation: 'select',
+					error: error as Error,
+					intent,
+					phase: 'afterQuery',
+					sql: compiled.sql,
+				});
+			}
+			throw error;
+		}
 	}
 
 	existsDump(): Dump {
@@ -1305,17 +1504,53 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 				? { chunkSize: options.chunkSize }
 				: undefined;
 
+		// E17b: Fire beforeQuery hook with isStreaming=true (afterQuery does NOT fire for streams)
+		const hookStore = this.hookStore;
+		const onHookError = this.onHookError;
+		const table = this.from;
+		const schemaName = this.schemaName;
+		const txFlag = this.inTransaction;
+		const rawIntent = this.buildIntent(false);
+
 		// Create a lazy wrapper that defers onStart until first next() call
 		const onStartCallback = options?.onStart;
 		const capturedDump = dumpResult;
 		let adapterIterator: AsyncIterableIterator<TResult> | null = null;
 		let onStartCalled = false;
+		let hooksFired = false;
 
 		const lazyIterator: AsyncIterableIterator<TResult> = {
 			[Symbol.asyncIterator]() {
 				return this;
 			},
 			async next() {
+				// E17b: Fire beforeQuery on first iteration (lazy)
+				if (!hooksFired && hookStore && hasHooks(hookStore)) {
+					hooksFired = true;
+					const ctx: QueryHookContext = {
+						table,
+						operation: 'select',
+						intent: rawIntent,
+						resultType: 'all',
+						isStreaming: true,
+						...(schemaName !== undefined && { schemaName }),
+						...(txFlag && { inTransaction: true }),
+					};
+					try {
+						await runBeforeQueryHooks(hookStore.beforeQuery, ctx, onHookError);
+					} catch (error) {
+						if (hookStore.onError.length > 0) {
+							throw await runOnErrorHooks(hookStore.onError, {
+								table,
+								operation: 'select',
+								error: error as Error,
+								intent: rawIntent,
+								phase: 'beforeQuery',
+							});
+						}
+						throw error;
+					}
+				}
 				// Initialize adapter iterator lazily on first next() call
 				if (!adapterIterator) {
 					adapterIterator = adapter.stream<TResult>(compiled, adapterOptions);
@@ -1334,6 +1569,21 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 				return { done: true, value: undefined as unknown as TResult };
 			},
 			async throw(error?: unknown) {
+				// E17b: Fire onError for stream errors
+				if (
+					hookStore &&
+					hookStore.onError.length > 0 &&
+					error instanceof Error
+				) {
+					const finalError = await runOnErrorHooks(hookStore.onError, {
+						table,
+						operation: 'select',
+						error,
+						intent: rawIntent,
+						phase: 'afterQuery',
+					});
+					throw finalError;
+				}
 				if (adapterIterator?.throw) {
 					return adapterIterator.throw(error);
 				}
@@ -1687,7 +1937,7 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	 * Build the QueryIntent from current state.
 	 * Handles exactOptionalPropertyTypes by only including defined properties.
 	 */
-	private buildIntent(): QueryIntent {
+	private buildIntent(applyDefaultFilters = true): QueryIntent {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: this.from,
@@ -1714,12 +1964,14 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 		const allWhereIntents: WhereIntent[] = [];
 
 		// Prepend default filter for this table (if configured and not skipped)
-		const tableDefaultFilter =
-			!this.skipDefaultFilters && this.defaultFilters
-				? this.defaultFilters[this.from]
-				: undefined;
-		if (tableDefaultFilter) {
-			allWhereIntents.push(tableDefaultFilter);
+		if (applyDefaultFilters) {
+			const tableDefaultFilter =
+				!this.skipDefaultFilters && this.defaultFilters
+					? this.defaultFilters[this.from]
+					: undefined;
+			if (tableDefaultFilter) {
+				allWhereIntents.push(tableDefaultFilter);
+			}
 		}
 
 		// Add user-provided filters
@@ -1774,11 +2026,227 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 	}
 
 	/**
+	 * Apply defaultFilters to an intent (E17b: applied AFTER hooks for INV-01).
+	 * @internal
+	 */
+	private applyDefaultFiltersToIntent(intent: QueryIntent): QueryIntent {
+		if (this.skipDefaultFilters || !this.defaultFilters) return intent;
+		const tableDefaultFilter = this.defaultFilters[this.from];
+		if (!tableDefaultFilter) return intent;
+
+		const existingWhere = intent.where;
+		const newWhere = existingWhere
+			? and(tableDefaultFilter, existingWhere)
+			: tableDefaultFilter;
+
+		return { ...intent, where: newWhere };
+	}
+
+	/**
+	 * Execute a query with hook interception (E17b).
+	 * Flow: buildIntent(raw) → beforeQuery → defaultFilters → plan → execute → hydrate → afterQuery
+	 * @internal
+	 */
+	private async executeWithHooks<R>(
+		adapter: Adapter,
+		resultType: QueryResultType,
+	): Promise<R> {
+		const store = this.hookStore;
+		if (!store) throw new Error('executeWithHooks called without hookStore');
+		// INV-07: Re-entrancy guard — prevent infinite loops from hooks issuing queries
+		return withReentrancyGuard(store, (s) =>
+			this.executeWithHooksInner<R>(adapter, resultType, s),
+		);
+	}
+
+	private async executeWithHooksInner<R>(
+		adapter: Adapter,
+		resultType: QueryResultType,
+		store: HookStore,
+	): Promise<R> {
+		const startTime = Date.now();
+
+		// 1. Build intent WITHOUT defaultFilters — hooks see raw intent
+		const rawIntent = this.buildIntent(false);
+
+		// 2. Build beforeQuery context
+		const beforeCtx: QueryHookContext = {
+			table: this.from,
+			operation: 'select',
+			intent: rawIntent,
+			resultType,
+			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
+			...(this.inTransaction && { inTransaction: true }),
+		};
+
+		// 3. Run beforeQuery hooks (FIFO) — may modify intent
+		let intent: QueryIntent;
+		try {
+			const afterHookCtx = await runBeforeQueryHooks(
+				store.beforeQuery,
+				beforeCtx,
+				this.onHookError,
+			);
+			intent = afterHookCtx.intent;
+		} catch (error) {
+			// Run onError hooks for beforeQuery failures
+			if (store.onError.length > 0) {
+				const finalError = await runOnErrorHooks(store.onError, {
+					table: this.from,
+					operation: 'select',
+					error: error as Error,
+					intent: rawIntent,
+					phase: 'beforeQuery',
+				});
+				throw finalError;
+			}
+			throw error;
+		}
+
+		// 4. Apply defaultFilters AFTER hooks (INV-01: cannot be bypassed)
+		intent = this.applyDefaultFiltersToIntent(intent);
+
+		// 5. Apply relation hints and plan
+		const intentWithHints = this.applyRelationHints(intent);
+		const planOptions: PlanOptions = {
+			...(this.dialectCapabilities && {
+				dialectCapabilities: this.dialectCapabilities,
+			}),
+			...this.planOptionsOverride,
+		};
+
+		let planReport: PlanReport;
+		try {
+			planReport = plan(intentWithHints, this.model, planOptions);
+		} catch (error) {
+			if (error instanceof AmbiguousPlanError) {
+				planReport = this.handleAmbiguity(error, intentWithHints, planOptions);
+			} else {
+				throw error;
+			}
+		}
+
+		// 6. Compile and execute
+		const compileOptions: { schemaName?: string; model: ModelIR } = {
+			model: this.model,
+		};
+		if (this.schemaName !== undefined) {
+			compileOptions.schemaName = this.schemaName;
+		}
+
+		const compiledWithIncludes = adapter.compileWithIncludes(
+			planReport,
+			compileOptions,
+		);
+
+		let mainResults: TResult[];
+		try {
+			mainResults = (await adapter.execute(
+				compiledWithIncludes.main,
+			)) as TResult[];
+		} catch (error) {
+			if (store.onError.length > 0) {
+				const finalError = await runOnErrorHooks(store.onError, {
+					table: this.from,
+					operation: 'select',
+					error: error as Error,
+					intent,
+					phase: 'afterQuery',
+					sql: compiledWithIncludes.main.sql,
+				});
+				throw finalError;
+			}
+			throw error;
+		}
+
+		// 7. Hydrate
+		const hydrator = new ResultHydrator<TResult>(
+			this.model,
+			this.from,
+			this.schemaName,
+		);
+		hydrator.hydrateJsonAggIncludes(mainResults, planReport);
+		hydrator.hydrateJoinIncludes(mainResults, planReport);
+		if (compiledWithIncludes.subqueryIncludes.length > 0) {
+			await hydrator.hydrateIncludes(
+				mainResults,
+				compiledWithIncludes.subqueryIncludes,
+				adapter,
+				compileOptions,
+			);
+		}
+		if (this.recursiveIncludes.length > 0) {
+			await hydrator.processRecursiveIncludes(
+				mainResults,
+				this.recursiveIncludes,
+				adapter,
+			);
+		}
+
+		// 8. Build afterQuery context with timing + SQL info
+		const duration = Date.now() - startTime;
+		const afterCtx: QueryHookContext = {
+			table: this.from,
+			operation: 'select',
+			intent,
+			resultType,
+			sql: compiledWithIncludes.main.sql,
+			parameters: compiledWithIncludes.main.parameters,
+			duration,
+			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
+		};
+
+		// 9. Run afterQuery hooks (LIFO) — may transform results
+		try {
+			const finalResults = await runAfterQueryHooks(
+				store.afterQuery,
+				afterCtx,
+				mainResults as unknown as R,
+				this.onHookError,
+			);
+			return finalResults;
+		} catch (error) {
+			if (store.onError.length > 0) {
+				const finalError = await runOnErrorHooks(store.onError, {
+					table: this.from,
+					operation: 'select',
+					error: error as Error,
+					intent,
+					phase: 'afterQuery',
+					sql: compiledWithIncludes.main.sql,
+				});
+				throw finalError;
+			}
+			throw error;
+		}
+	}
+
+	/**
 	 * Build an existence-check intent from current state.
 	 * Strips orderBy and include (irrelevant), preserves groupBy/having/offset.
 	 */
 	private buildExistsIntent(): QueryIntent {
 		const baseIntent = this.buildIntent();
+		const {
+			orderBy: _orderBy,
+			include: _include,
+			...rest
+		} = baseIntent as QueryIntent & {
+			orderBy?: unknown;
+			include?: unknown;
+		};
+		return {
+			...rest,
+			existsWrap: true,
+			limit: 1,
+		};
+	}
+
+	/**
+	 * Build exists-wrapped intent from a pre-built intent (E17b: for hook-aware path).
+	 * @internal
+	 */
+	private buildExistsIntentFromIntent(baseIntent: QueryIntent): QueryIntent {
 		const {
 			orderBy: _orderBy,
 			include: _include,
@@ -1859,6 +2327,9 @@ class QueryBuilderImpl<TResult = unknown> implements QueryBuilder<TResult> {
 			this.dialectCapabilities,
 			this.planOptionsOverride,
 			this.defaultFilters,
+			this.hookStore,
+			this.onHookError,
+			this.inTransaction,
 		);
 		builder.includes.push(...this.includes);
 		builder.recursiveIncludes.push(...this.recursiveIncludes);

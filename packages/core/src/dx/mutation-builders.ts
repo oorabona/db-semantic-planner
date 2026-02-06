@@ -20,6 +20,19 @@ import {
 	InvalidOperationError,
 	UnsafeOperationError,
 } from './errors.js';
+import type {
+	HookErrorHandler,
+	HookStore,
+	MutationHookContext,
+	MutationOperation,
+} from './hooks.js';
+import {
+	hasHooks,
+	runAfterMutationHooks,
+	runBeforeMutationHooks,
+	runOnErrorHooks,
+	withReentrancyGuard,
+} from './hooks.js';
 
 // ============================================================================
 // Types
@@ -49,6 +62,9 @@ type MutationBaseOpts = {
 	model: ModelIR;
 	adapter?: Adapter | undefined;
 	schemaName?: string | undefined;
+	hookStore?: HookStore | undefined;
+	onHookError?: HookErrorHandler | undefined;
+	inTransaction?: boolean | undefined;
 };
 
 // ============================================================================
@@ -73,6 +89,9 @@ abstract class MutationBuilderBase<
 	protected readonly adapter: Adapter | undefined;
 	protected readonly schemaName: string | undefined;
 	protected readonly returningColumns: readonly string[] | undefined;
+	protected readonly hookStore: HookStore | undefined;
+	protected readonly onHookError: HookErrorHandler | undefined;
+	protected readonly inTransaction: boolean | undefined;
 
 	protected constructor(
 		opts: MutationBaseOpts & {
@@ -84,6 +103,9 @@ abstract class MutationBuilderBase<
 		this.adapter = opts.adapter;
 		this.schemaName = opts.schemaName;
 		this.returningColumns = opts.returning;
+		this.hookStore = opts.hookStore;
+		this.onHookError = opts.onHookError;
+		this.inTransaction = opts.inTransaction;
 	}
 
 	/** Label used in ExecutionError messages (e.g. 'insert', 'update'). */
@@ -105,6 +127,9 @@ abstract class MutationBuilderBase<
 			model: this.model,
 			adapter: this.adapter,
 			schemaName: this.schemaName,
+			hookStore: this.hookStore,
+			onHookError: this.onHookError,
+			inTransaction: this.inTransaction,
 		};
 	}
 
@@ -145,6 +170,16 @@ abstract class MutationBuilderBase<
 
 	async execute(): Promise<T> {
 		const adapter = this.requireAdapter(this.operationName);
+
+		// Fast path: no hooks registered
+		if (!this.hookStore || !hasHooks(this.hookStore)) {
+			return this.executeWithoutHooks(adapter);
+		}
+
+		return this.executeWithHooks(adapter);
+	}
+
+	private async executeWithoutHooks(adapter: Adapter): Promise<T> {
 		const intent = this.buildIntent();
 		const compileOptions = this.schemaName
 			? { schemaName: this.schemaName }
@@ -157,6 +192,138 @@ abstract class MutationBuilderBase<
 		}
 		await adapter.execute(compiled);
 		return undefined as T;
+	}
+
+	private async executeWithHooks(adapter: Adapter): Promise<T> {
+		const store = this.hookStore;
+		if (!store) throw new Error('executeWithHooks called without hookStore');
+		// INV-07: Re-entrancy guard
+		return withReentrancyGuard(store, (s) =>
+			this.executeWithHooksInner(adapter, s),
+		);
+	}
+
+	private async executeWithHooksInner(
+		adapter: Adapter,
+		store: HookStore,
+	): Promise<T> {
+		const intent = this.buildIntent();
+		const operation = intent.type as MutationOperation;
+		const startTime = Date.now();
+
+		// Determine cardinality and data from intent
+		const { cardinality, data } = this.extractIntentData(intent);
+
+		// Build before-mutation context (no sql/duration yet)
+		let ctx: MutationHookContext = Object.freeze({
+			table: this.table,
+			operation,
+			intent,
+			cardinality,
+			data,
+			...(this.schemaName !== undefined ? { schemaName: this.schemaName } : {}),
+			...(this.inTransaction ? { inTransaction: true } : {}),
+		});
+
+		try {
+			// Run beforeMutation hooks (FIFO)
+			if (store.beforeMutation.length > 0) {
+				ctx = await runBeforeMutationHooks(
+					store.beforeMutation,
+					ctx,
+					this.onHookError,
+				);
+			}
+
+			// Compile and execute
+			const compileOptions = this.schemaName
+				? { schemaName: this.schemaName }
+				: undefined;
+			const compiled = this.compileIntent(adapter, intent, compileOptions);
+			const duration = Date.now() - startTime;
+
+			if (this.returningColumns && this.returningColumns.length > 0) {
+				const result = await adapter.execute(compiled);
+
+				// Build after-mutation context with sql/duration
+				const afterCtx: MutationHookContext = Object.freeze({
+					...ctx,
+					sql: compiled.sql,
+					parameters: compiled.parameters,
+					duration,
+				});
+
+				// Run afterMutation hooks (LIFO)
+				if (store.afterMutation.length > 0) {
+					const transformed = await runAfterMutationHooks(
+						store.afterMutation,
+						afterCtx,
+						result as unknown[],
+						this.onHookError,
+					);
+					return transformed as T;
+				}
+				return result as T;
+			}
+
+			await adapter.execute(compiled);
+
+			// Even without RETURNING, fire afterMutation with empty results
+			if (store.afterMutation.length > 0) {
+				const afterCtx: MutationHookContext = Object.freeze({
+					...ctx,
+					sql: compiled.sql,
+					parameters: compiled.parameters,
+					duration,
+				});
+				await runAfterMutationHooks(
+					store.afterMutation,
+					afterCtx,
+					[],
+					this.onHookError,
+				);
+			}
+
+			return undefined as T;
+		} catch (error) {
+			// Run onError hooks
+			if (store.onError.length > 0) {
+				const errorCtx = {
+					table: this.table,
+					operation,
+					error: error as Error,
+					intent,
+					phase: 'beforeMutation' as const,
+					...(this.schemaName !== undefined
+						? { schemaName: this.schemaName }
+						: {}),
+				};
+				const transformed = await runOnErrorHooks(store.onError, errorCtx);
+				throw transformed;
+			}
+			throw error;
+		}
+	}
+
+	/** Extract cardinality and data from mutation intent */
+	private extractIntentData(
+		intent: InsertIntent | UpdateIntent | DeleteIntent | UpsertIntent,
+	): { cardinality: 'single' | 'bulk'; data: unknown } {
+		if (intent.type === 'insert' || intent.type === 'upsert') {
+			const values = (intent as InsertIntent | UpsertIntent).values;
+			return {
+				cardinality: values.length > 1 ? 'bulk' : 'single',
+				data: values.length > 1 ? values : values[0],
+			};
+		}
+		if (intent.type === 'update') {
+			return {
+				cardinality: 'single',
+				data: (intent as UpdateIntent).set,
+			};
+		}
+		// delete — no data
+		return { cardinality: 'single', data: undefined };
 	}
 }
 
