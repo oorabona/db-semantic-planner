@@ -18,8 +18,7 @@
 
 ### E2E Regressions (discovered via globalSetup fix)
 
-- [x] ✅ **E2E-1** [Adapter] Schema-qualified columns in expression handlers — removed `ctx.schema` from `columnRef()` in 7 handlers (aggregate, window, column, coalesce, case, arithmetic, relation); also fixed window `selectWindow` dispatch to always use `genericWindowHandler` (2026-02-06)
-- [x] ✅ **E2E-2** [Adapter] Expression alias not transformed by naming plugin — added `this.naming.toDatabase()` to 4 alias sites in compiler.ts (selectFunction, selectExpression, selectArithmetic, selectWindow) (2026-02-06)
+(Archived → docs/historic/done-2026-02.md)
 
 ### Introspection
 
@@ -109,23 +108,11 @@
 
 ### DRY Refactors (Category D)
 
-- [x] ✅ **A-7** [DRY] Comparison filters — false positive: factory `createComparisonFilter()` already exists (2026-02-06)
-- [x] ✅ **A-9** [DRY] `normalizeSQL()` → moved to `@dbsp/core/sql-utils.ts`, adapter re-exports (2026-02-06)
-- [x] ✅ **A-12** [DRY] `buildParamRef()` — already consolidated in handlers/where/utils.ts (2026-02-06)
-- [x] ✅ **A-15** [DRY] Mutation builder — false positive: 15 LOC marginal, unique per builder (2026-02-06)
-- [x] ✅ **A-16** [DRY] Column target building — already centralized via buildColumnRef() (2026-02-06)
-- [x] ✅ **A-17** [DRY] FK direction — compiler.ts now calls `deriveFkColumns()` from shared.ts; `FkColumnSource` interface (2026-02-06)
-- [x] ✅ **A-24** [DRY] Clone methods — changed 4 optional fields from `?:` to `: X | undefined`, simplified clone() from 46→34 LOC (2026-02-06)
-- [x] ✅ **A-25** [DRY] NQL context validation — false positive: 0 `this.validator` calls found (2026-02-06)
-- [x] ✅ **A-30** [DRY] `isRecursiveIncludeOptions()` — single def + re-export, correct (2026-02-06)
-- [x] ✅ **A-31** [DRY] CLI assertion functions — false positive: 3 factories exist, remaining 16 have unique logic (2026-02-06)
+(All archived → docs/historic/done-2026-02.md)
 
 ### SRP / God Classes
 
-- [x] ✅ **#34** [SRP] intent-ast.ts → 10 focused modules + barrel (Phase 1, 275bc87) (2026-02-06)
-- [x] ✅ **#16** [SRP] NqlCstVisitor → 8 domain modules + coordinator (Phase 2, 32c829c) (2026-02-06)
-- [x] ✅ **#17** [SRP] NQL compiler → 9 domain modules + coordinator 196 LOC (Phase 3, 3528630) (2026-02-06)
-- [x] ✅ **#19** [SRP] orm.ts → 4 modules: orm.ts 257 LOC + orm-instance.ts + query-builder.ts + hierarchy-helpers.ts (Phase 4, ba0e61c) (2026-02-06)
+(#16, #17, #19, #34 archived → docs/historic/done-2026-02.md)
 - [-] ⏭️ **#18** [SRP] PgsqlAdapter — DEFERRED: well-structured, low entropy, highest blast radius
 
 ### SOLID Violations
@@ -140,8 +127,7 @@
 
 ### API Surface
 
-- [x] ✅ **A-13** [API] AST helpers — false positive: 44 exports are package-internal, not in public API, 0 cross-package (2026-02-06)
-- [x] ✅ **A-14** [API] Handler registry — false positive: 18 exports are package-internal, types exposed read-only (2026-02-06)
+(Archived → docs/historic/done-2026-02.md)
 
 ### Dead Code
 
@@ -161,8 +147,7 @@
 ### Dependency-Blocked
 
 - [-] ⏭️ [Adapter] Migration generation — depends on DDL generator maturity
-- [x] ✅ [Adapter] Cycle detection PG14 CYCLE clause — implemented `buildPg14CycleClause()` with `CTECycleClause` from `@pgsql/types@17.6.2`; `usePg14Cycle` flag skips `__visited` array; `isPg14CycleSupported()` → true (2026-02-06)
-- [x] ✅ [Adapter] `compileWithIncludes()` Phase 3 — already complete: subquery extraction functional, stale `@stub` comment removed (2026-02-06)
+(Cycle detection + compileWithIncludes archived → docs/historic/done-2026-02.md)
 - [-] ⏭️ [Architecture] DX-032: Conformance Test Framework — depends on multi-adapter
 
 ### Multi-Adapter (Future)
