@@ -1,0 +1,65 @@
+/**
+ * @module intent/query-intent
+ * Query intent - complete query definition, main entry point for the intent AST.
+ */
+
+import type { SelectIntent } from './select-intent.js';
+import type { WhereIntent } from './where-intent.js';
+import type { IncludeIntent, OrderByIntent } from './include-intent.js';
+
+// ============================================================================
+// Query Intent - Complete Query Definition
+// ============================================================================
+
+/**
+ * Query intent - complete query definition
+ * Main entry point for the intent AST
+ */
+export interface QueryIntent {
+	/** Query type - currently only 'select' supported */
+	readonly type: 'select';
+
+	/** Target table name */
+	readonly from: string;
+
+	/** Columns to retrieve */
+	readonly select?: SelectIntent;
+
+	/** Filter conditions */
+	readonly where?: WhereIntent;
+
+	/** Relations to include */
+	readonly include?: readonly IncludeIntent[];
+
+	/** Sort order */
+	readonly orderBy?: readonly OrderByIntent[];
+
+	/**
+	 * Fields to group by for aggregate queries.
+	 * When specified, SELECT must include only grouped fields and aggregates.
+	 */
+	readonly groupBy?: readonly string[];
+
+	/**
+	 * Filter on aggregate results (applied after GROUP BY).
+	 * Similar to WHERE but operates on aggregated values.
+	 */
+	readonly having?: WhereIntent;
+
+	/**
+	 * Whether to apply SELECT DISTINCT to deduplicate rows.
+	 */
+	readonly distinct?: boolean;
+
+	/** Maximum number of rows */
+	readonly limit?: number;
+
+	/** Number of rows to skip */
+	readonly offset?: number;
+
+	/**
+	 * When true, the adapter wraps the query in SELECT EXISTS(...).
+	 * The inner SELECT list is replaced with `1` and the result is `{ exists: boolean }`.
+	 */
+	readonly existsWrap?: boolean;
+}

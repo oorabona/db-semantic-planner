@@ -1,0 +1,273 @@
+/**
+ * @module intent/where-intent
+ * Where intent types for filter conditions.
+ */
+
+import type { RangeValue } from '../shared/utils.js';
+import type { ComparisonOperator, NullOperator } from './operators.js';
+import type { QueryIntent } from './query-intent.js';
+import type { RecursiveExistsOptions } from './recursive-types.js';
+
+export type { RangeValue };
+
+// ============================================================================
+// Where Intent - Filter Conditions
+// ============================================================================
+
+/**
+ * Typed field reference for cross-table column comparisons in relation filters.
+ *
+ * When using aliased relation filters like `some(orders as o, o.total > minOrder)`,
+ * the RHS `minOrder` is a reference to the parent table's column, not a literal value.
+ * FieldRef captures this distinction so the adapter can compile it as a column reference
+ * instead of a parameterized value.
+ *
+ * @example
+ * // some(rel as r, r.col > bareCol) → value: { kind: 'fieldRef', column: 'bareCol', scope: 'outer' }
+ * // some(rel as r, r.col > r.otherCol) → value: { kind: 'fieldRef', column: 'otherCol', scope: 'inner' }
+ * // some(a as x, some(b as y, y.f > x.g)) → value: { kind: 'fieldRef', column: 'g', scope: 'outer', alias: 'x' }
+ */
+export interface FieldRef {
+	readonly kind: 'fieldRef';
+	readonly column: string;
+	readonly scope: 'inner' | 'outer';
+	/** Named alias for outer scope (when referencing a specific outer alias in nested filters) */
+	readonly alias?: string;
+}
+
+/**
+ * Type guard for FieldRef values
+ */
+export function isFieldRef(value: unknown): value is FieldRef {
+	return (
+		value !== null &&
+		typeof value === 'object' &&
+		(value as Record<string, unknown>).kind === 'fieldRef'
+	);
+}
+
+export interface WhereComparisonIntent {
+	readonly kind: 'comparison';
+	readonly field: string;
+	readonly operator: ComparisonOperator;
+	readonly value: unknown;
+}
+
+/**
+ * String filter: field like pattern
+ */
+export interface WhereLikeIntent {
+	readonly kind: 'like';
+	readonly field: string;
+	readonly pattern: string;
+	/** Case-insensitive matching */
+	readonly caseInsensitive?: boolean;
+}
+
+/**
+ * Array filter: field in [values]
+ */
+export interface WhereInIntent {
+	readonly kind: 'in';
+	readonly field: string;
+	readonly values: readonly unknown[];
+	/** Optional subquery producing the value set (when present, values is empty) */
+	readonly subquery?: QueryIntent;
+}
+
+/**
+ * Range operator for PostgreSQL range types.
+ * - overlaps: && (ranges have common points)
+ * - contains: @> (range contains value or range)
+ * - containedBy: <@ (range is contained by another range)
+ */
+export type RangeOperator = 'overlaps' | 'contains' | 'containedBy' | 'between';
+
+/**
+ * Range filter: field overlaps/contains/containedBy range value
+ * PostgreSQL range types: daterange, tsrange, tstzrange, int4range, int8range, numrange
+ *
+ * @example
+ * // Check if booking dates overlap a period
+ * { kind: 'range', field: 'dates', operator: 'overlaps', value: { lower: '2025-01-15', upper: '2025-01-20' } }
+ *
+ * // Check if salary range contains a value
+ * { kind: 'range', field: 'salary_range', operator: 'contains', value: 50000 }
+ */
+export interface WhereRangeIntent {
+	readonly kind: 'range';
+	readonly field: string;
+	readonly operator: RangeOperator;
+	/** Can be a RangeValue (for range-to-range ops) or scalar (for contains/containedBy with point) */
+	readonly value: RangeValue | unknown;
+}
+
+/**
+ * Null filter: field is null / is not null
+ */
+export interface WhereNullIntent {
+	readonly kind: 'null';
+	readonly field: string;
+	readonly operator: NullOperator;
+}
+
+/**
+ * Logical AND: all conditions must match
+ */
+export interface WhereAndIntent {
+	readonly kind: 'and';
+	readonly conditions: readonly WhereIntent[];
+}
+
+/**
+ * Logical OR: at least one condition must match
+ */
+export interface WhereOrIntent {
+	readonly kind: 'or';
+	readonly conditions: readonly WhereIntent[];
+}
+
+/**
+ * Logical NOT: condition must not match
+ */
+export interface WhereNotIntent {
+	readonly kind: 'not';
+	readonly condition: WhereIntent;
+}
+
+/**
+ * Relation exists filter: filter by existence of related records
+ * Critical for Q1 golden test - enables EXISTS subquery strategy
+ *
+ * @example
+ * // Find users who have at least one published post
+ * { kind: 'exists', relation: 'posts', where: { kind: 'comparison', field: 'status', operator: 'eq', value: 'published' } }
+ */
+export interface WhereExistsIntent {
+	readonly kind: 'exists';
+	/** Relation name to check existence */
+	readonly relation: string;
+	/** Optional filter on related records */
+	readonly where?: WhereIntent;
+	/**
+	 * Recursive options for ancestor/descendant existence checks.
+	 * When present, generates a recursive CTE instead of simple EXISTS.
+	 */
+	readonly recursive?: RecursiveExistsOptions;
+}
+
+/**
+ * Relation not exists filter: filter by absence of related records
+ *
+ * @example
+ * // Find users who have no posts
+ * { kind: 'notExists', relation: 'posts' }
+ */
+export interface WhereNotExistsIntent {
+	readonly kind: 'notExists';
+	/** Relation name to check absence */
+	readonly relation: string;
+	/** Optional filter on related records */
+	readonly where?: WhereIntent;
+	/**
+	 * Recursive options for ancestor/descendant absence checks.
+	 * When present, generates a recursive CTE instead of simple NOT EXISTS.
+	 */
+	readonly recursive?: RecursiveExistsOptions;
+}
+
+/**
+ * Relation filter: filter parent by conditions on related records
+ * More flexible than exists - allows filtering by related record attributes
+ *
+ * @example
+ * // Find users whose latest post was created in 2024
+ * { kind: 'relationFilter', relation: 'posts', where: {...}, mode: 'some' }
+ */
+export interface WhereRelationFilterIntent {
+	readonly kind: 'relationFilter';
+	/**
+	 * Relation path for filtering.
+	 * - Single relation: 'posts' or ['posts']
+	 * - Multi-hop (SPEC-002): ['author', 'company'] for author.company traversal
+	 */
+	readonly relation: string | readonly string[];
+	/** Filter conditions on related records */
+	readonly where: WhereIntent;
+	/**
+	 * Match mode:
+	 * - 'some': At least one related record matches (default)
+	 * - 'every': All related records match
+	 * - 'none': No related records match
+	 */
+	readonly mode: 'some' | 'every' | 'none';
+	/** Optional alias for complex conditions (SPEC-002) */
+	readonly alias?: string | undefined;
+}
+
+// ============================================================================
+// Subquery Intent - Scalar Subquery in WHERE
+// ============================================================================
+
+/**
+ * Reference to a parent query column in a subquery.
+ * Used to create correlated subqueries.
+ *
+ * @example
+ * // Reference parent 'id' column in subquery WHERE
+ * { kind: 'ref', column: 'id' }
+ * { kind: 'ref', column: 't0.id' }  // with alias
+ */
+export interface SubqueryRefIntent {
+	readonly kind: 'ref';
+	/** Column name or aliased column (e.g., 'id' or 't0.id') */
+	readonly column: string;
+}
+
+/**
+ * Subquery intent for scalar subquery comparisons.
+ * Produces correlated subqueries in SQL.
+ *
+ * @example
+ * // Find products where price equals max price of category
+ * {
+ *   kind: 'subquery',
+ *   field: 'price',
+ *   operator: 'eq',
+ *   subquery: { from: 'products', select: { kind: 'aggregate', fn: 'max', field: 'price' } }
+ * }
+ */
+export interface WhereSubqueryIntent {
+	readonly kind: 'subquery';
+	/** Field to compare on the parent query */
+	readonly field: string;
+	/** Comparison operator */
+	readonly operator: ComparisonOperator;
+	/** Subquery producing scalar value */
+	readonly subquery: QueryIntent;
+}
+
+/**
+ * Scalar subquery intent - produces a single value.
+ * Simplified QueryIntent for subquery context.
+ */
+/** @deprecated Use QueryIntent instead — subqueries are full queries with contextual validation */
+export type ScalarSubqueryIntent = QueryIntent;
+
+/**
+ * Where intent - filter conditions union type
+ * Discriminated union using 'kind' field
+ */
+export type WhereIntent =
+	| WhereComparisonIntent
+	| WhereLikeIntent
+	| WhereInIntent
+	| WhereNullIntent
+	| WhereRangeIntent
+	| WhereAndIntent
+	| WhereOrIntent
+	| WhereNotIntent
+	| WhereExistsIntent
+	| WhereNotExistsIntent
+	| WhereRelationFilterIntent
+	| WhereSubqueryIntent;
