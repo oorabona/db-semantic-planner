@@ -35,6 +35,7 @@ import {
 import { deparseQuoted } from './deparse.js';
 import { resolveCaseValue as resolveCaseValueShared } from './handlers/expression/case-value.js';
 import { registerAllExpressionHandlers } from './handlers/expression/index.js';
+import { genericWindowHandler } from './handlers/expression/window.js';
 import { registerAllIncludeHandlers } from './handlers/include/index.js';
 import { deriveFkColumns } from './handlers/include/shared.js';
 import {
@@ -587,7 +588,9 @@ export class PlanCompiler {
 					targetList.push({
 						ResTarget: {
 							val: node,
-							...(decision.alias ? { name: decision.alias } : {}),
+							...(decision.alias
+								? { name: this.naming.toDatabase(decision.alias) }
+								: {}),
 						},
 					});
 					break;
@@ -600,7 +603,7 @@ export class PlanCompiler {
 						targetList.push({
 							ResTarget: {
 								val: caseNode,
-								...(alias ? { name: alias } : {}),
+								...(alias ? { name: this.naming.toDatabase(alias) } : {}),
 							},
 						});
 					}
@@ -647,17 +650,21 @@ export class PlanCompiler {
 					targetList.push({
 						ResTarget: {
 							val: node,
-							...(decision.alias ? { name: decision.alias } : {}),
+							...(decision.alias
+								? { name: this.naming.toDatabase(decision.alias) }
+								: {}),
 						},
 					});
 					break;
 				}
 
 				case 'selectWindow': {
-					ensureExpressionHandlersRegistered();
 					const winFuncName = decision.function;
 					if (!winFuncName) break;
-					const winHandler = getExpressionHandler(winFuncName);
+					// Always use genericWindowHandler — avoids aggregate handlers
+					// (sumHandler, avgHandler) being picked for names like 'sum', 'avg'
+					// which produce FuncCall WITHOUT OVER clause.
+					const winHandler = genericWindowHandler;
 					const winCtx = {
 						naming: this.naming,
 						rootTable: plan.rootTable,
@@ -687,7 +694,9 @@ export class PlanCompiler {
 					targetList.push({
 						ResTarget: {
 							val: winNode,
-							...(decision.alias ? { name: decision.alias } : {}),
+							...(decision.alias
+								? { name: this.naming.toDatabase(decision.alias) }
+								: {}),
 						},
 					});
 					break;

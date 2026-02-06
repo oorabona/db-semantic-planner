@@ -214,7 +214,7 @@ db.rows.equals: 1
 # ─────────────────────────────────────────
 --- query: 24
 success: true
-sql.equals: SELECT user_roles.role_id, count(*) AS "userCount" FROM iam_example.user_roles GROUP BY user_roles.role_id
+sql.equals: SELECT user_roles.role_id, count(*) AS user_count FROM iam_example.user_roles GROUP BY user_roles.role_id
 db.rows.equals: 8
 
 # ─────────────────────────────────────────
@@ -222,7 +222,7 @@ db.rows.equals: 8
 # ─────────────────────────────────────────
 --- query: 25
 success: true
-sql.equals: SELECT role_permissions.role_id, count(*) AS "permCount" FROM iam_example.role_permissions GROUP BY role_permissions.role_id
+sql.equals: SELECT role_permissions.role_id, count(*) AS perm_count FROM iam_example.role_permissions GROUP BY role_permissions.role_id
 db.rows.equals: 9
 
 # ─────────────────────────────────────────
@@ -230,7 +230,7 @@ db.rows.equals: 9
 # ─────────────────────────────────────────
 --- query: 26
 success: true
-sql.equals: SELECT role_edges.parent_role_id, count(*) AS "childCount" FROM iam_example.role_edges GROUP BY role_edges.parent_role_id
+sql.equals: SELECT role_edges.parent_role_id, count(*) AS child_count FROM iam_example.role_edges GROUP BY role_edges.parent_role_id
 db.rows.equals: 5
 
 # ─────────────────────────────────────────

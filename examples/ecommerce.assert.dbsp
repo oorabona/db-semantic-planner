@@ -233,9 +233,9 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 17
 success: true
-sql.equals: SELECT products.*, rank() OVER ( PARTITION BY products.category_id ORDER BY products.price DESC ) AS "priceRank" FROM ch5_ecommerce.products
+sql.equals: SELECT products.*, rank() OVER ( PARTITION BY products.category_id ORDER BY products.price DESC ) AS price_rank FROM ch5_ecommerce.products
 db.output:
-| id | sku           | name             | description                               | price   | stock | category_id | active | created_at               | priceRank |
+| id | sku           | name             | description                               | price   | stock | category_id | active | created_at               | price_rank |
 |----|---------------|------------------|-------------------------------------------|---------|-------|-------------|--------|--------------------------|-----------|
 | 1  | LAPTOP-001    | ProBook 15       | High-performance laptop for professionals | 1299.99 | 50    | 11          | true   | 2024-01-01T08:00:00.000Z | 1          |
 | 2  | LAPTOP-002    | UltraLight 13    | Lightweight laptop for travel             | 999.99  | 30    | 11          | true   | 2024-01-01T08:00:00.000Z | 2          |
@@ -258,9 +258,9 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 18
 success: true
-sql.equals: SELECT orders.order_number, orders.total, sum(orders.total) OVER (ORDER BY orders.created_at ASC) AS "runningTotal" FROM ch5_ecommerce.orders
+sql.equals: SELECT orders.order_number, orders.total, sum(orders.total) OVER (ORDER BY orders.created_at ASC) AS running_total FROM ch5_ecommerce.orders
 db.output:
-| order_number | total   | runningTotal |
+| order_number | total   | running_total |
 |--------------|---------|--------------|
 | ORD-2024-001 | 1499.98 | 1499.98       |
 | ORD-2024-005 | 179.97  | 1679.95       |

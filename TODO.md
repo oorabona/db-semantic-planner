@@ -18,8 +18,8 @@
 
 ### E2E Regressions (discovered via globalSetup fix)
 
-- [ ] 🐛 **E2E-1** [Adapter] Schema-qualified columns in aggregate/window handlers — `ctx.schema` passed to `columnRef()` in expression handlers produces 3-part names; window-functions.test.ts (3 failures) rejects SQL, example-assertions expects 2-part names
-- [ ] 🐛 **E2E-2** [Adapter] COALESCE `.as()` alias not transformed by naming plugin — `displayName` in SQL instead of `display_name` (pimdam.q2 test)
+- [x] ✅ **E2E-1** [Adapter] Schema-qualified columns in expression handlers — removed `ctx.schema` from `columnRef()` in 7 handlers (aggregate, window, column, coalesce, case, arithmetic, relation); also fixed window `selectWindow` dispatch to always use `genericWindowHandler` (2026-02-06)
+- [x] ✅ **E2E-2** [Adapter] Expression alias not transformed by naming plugin — added `this.naming.toDatabase()` to 4 alias sites in compiler.ts (selectFunction, selectExpression, selectArithmetic, selectWindow) (2026-02-06)
 
 ### Introspection
 
@@ -115,7 +115,7 @@
 - [x] ✅ **A-15** [DRY] Mutation builder — false positive: 15 LOC marginal, unique per builder (2026-02-06)
 - [x] ✅ **A-16** [DRY] Column target building — already centralized via buildColumnRef() (2026-02-06)
 - [x] ✅ **A-17** [DRY] FK direction — compiler.ts now calls `deriveFkColumns()` from shared.ts; `FkColumnSource` interface (2026-02-06)
-- [ ] **A-24** [DRY] Clone methods — manual 15-field copying in QueryBuilderImpl (45 LOC)
+- [x] ✅ **A-24** [DRY] Clone methods — changed 4 optional fields from `?:` to `: X | undefined`, simplified clone() from 46→34 LOC (2026-02-06)
 - [x] ✅ **A-25** [DRY] NQL context validation — false positive: 0 `this.validator` calls found (2026-02-06)
 - [x] ✅ **A-30** [DRY] `isRecursiveIncludeOptions()` — single def + re-export, correct (2026-02-06)
 - [x] ✅ **A-31** [DRY] CLI assertion functions — false positive: 3 factories exist, remaining 16 have unique logic (2026-02-06)

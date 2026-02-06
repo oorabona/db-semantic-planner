@@ -43,7 +43,7 @@ function buildAggregate(
 	}
 
 	const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-	const colRef = columnRef(column, tableAlias, ctx.schema, ctx.naming);
+	const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
 
 	return {
 		FuncCall: {

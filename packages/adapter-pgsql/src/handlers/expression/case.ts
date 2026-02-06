@@ -32,7 +32,7 @@ function resolveCaseValue(
 	state: CompilerState,
 ): Node {
 	const alias = ctx.currentAlias ?? ctx.rootTable;
-	return resolveCaseValueShared(value, alias, ctx.schema, ctx.naming, state);
+	return resolveCaseValueShared(value, alias, undefined, ctx.naming, state);
 }
 
 export const caseHandler: ExpressionHandler = {
@@ -119,7 +119,7 @@ export const simpleCaseHandler: ExpressionHandler = {
 		}
 
 		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		const testExpr = columnRef(column, tableAlias, ctx.schema, ctx.naming);
+		const testExpr = columnRef(column, tableAlias, undefined, ctx.naming);
 
 		const args: Node[] = conditions.map((cond) => {
 			// Build the comparison value — `when` may be a Decision with .value
