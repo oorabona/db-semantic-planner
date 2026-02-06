@@ -62,9 +62,8 @@
 
 - [ ] **E13** [NQL] JSONB operators — `->`, `->>`, `@>`, `<@`, `?`, `#>`, `#>>` — Effort: M
 - [ ] **E13b** [NQL] Set operations (UNION, INTERSECT, EXCEPT) — partially deferred
-- [x] ✅ **E13c** [NQL] CASE expression enhancements (2026-02-06)
-- [x] ✅ 🔧 [Adapter] DRY: extract shared `resolveCaseValue` helper in case-value.ts (2026-02-06)
-- [x] ✅ 💡 [NQL] CASE test coverage: BETWEEN, OR, NULL literal added; nested CASE deferred (todo) (2026-02-06)
+(E13c, DRY case-value, CASE tests archived → docs/historic/done-2026-02.md)
+
 - [ ] **E13d** [NQL] Window fn lag/lead offset/default — P3+
 - [ ] **E13e** [NQL] IN (dateRange) — requires semantic date expansion
 - [ ] **E13f** [NQL] Range literal in INSERT — parsing OK but not compiled
@@ -95,8 +94,7 @@
 
 (All R01 tasks archived → docs/historic/done-2026-02.md)
 
-- [x] ✅ **R02** [Types] Eliminate remaining 33 `as {}` read-access casts (non-intent-construction) (2026-02-06)
-  - 20 files, Mutable<T>, isRangeValue, isSelectWithFields type guards, named interfaces
+(R02 archived → docs/historic/done-2026-02.md)
 
 ---
 
@@ -127,14 +125,13 @@
 
 ### SOLID Violations
 
-- [x] ✅ **A-22/#20** [OCP] Route selectFunction + selectWindow through handler registry (5/17 cases via handlers now; 12 remaining are 2-12 LOC assignments) (2026-02-06)
 - [-] ⏭️ **#30** [ISP] QueryBuilder<T> 33 methods — WON'T FIX: all consumers use full interface, no subset usage found (2026-02-06)
-- [x] ✅ **#31** [SRP] types.ts split: 1664→334 LOC + 3 focused files (R01e, 2026-02-06)
+
+(A-22/#20, #31 archived → docs/historic/done-2026-02.md)
 
 ### Test Coverage
 
-- [x] ✅ **#33** [Test] adapter-pgsql test ratio measured at 0.68 — exceeds 0.50 target (2026-02-06)
-- [x] ✅ **A-34** [Type] `any` types in result-hydrator.ts — 0 remaining (R01d, 2026-02-06)
+(#33, A-34 archived → docs/historic/done-2026-02.md)
 
 ### API Surface
 
