@@ -68,6 +68,30 @@ function nqlToSQL(nql: string): string {
 	return normalizeSQL(result.sql);
 }
 
+/**
+ * NQL → { sql, params } — for assertions on both SQL shape and parameter values.
+ */
+function nqlToSQLWithParams(nql: string): {
+	sql: string;
+	params: readonly unknown[];
+} {
+	const compiled = compile(nql, testSchema.model);
+	if (!compiled.success || !compiled.ast?.query) {
+		throw new Error(
+			`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+
+	const planReport = plan(compiled.ast.query, testSchema.model, {
+		dialectCapabilities: POSTGRESQL_CAPABILITIES,
+	});
+
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const result = adapter.compile(planReport, { model: testSchema.model });
+
+	return { sql: normalizeSQL(result.sql), params: result.parameters };
+}
+
 // ---------------------------------------------------------------------------
 // Helper: NQL mutation → normalized SQL
 // ---------------------------------------------------------------------------
@@ -1088,5 +1112,103 @@ describe('existsWrap → SELECT EXISTS SQL', () => {
 		expect(sql).toMatch(/select exists\s*\(/);
 		// Schema name present in the FROM clause
 		expect(sql).toContain('tenant_42.');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// E13c: CASE Expression Enhancements
+// ---------------------------------------------------------------------------
+describe('CASE expression enhancements', () => {
+	it('compiles CASE with column refs in THEN/ELSE', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			'employees | select name, case when salary > 80000 then name else email end as contact',
+		);
+		// THEN and ELSE should be column refs, not parameters
+		expect(sql).toContain('case when');
+		expect(sql).toContain('employees.name');
+		expect(sql).toContain('employees.email');
+		// Only salary threshold should be a parameter
+		expect(params).toContain(80000);
+	});
+
+	it('compiles CASE with arithmetic in THEN', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			'employees | select case when salary > 50000 then salary * 1.1 else salary end as adjusted',
+		);
+		expect(sql).toContain('case when');
+		// salary should be a column ref in THEN and ELSE, with arithmetic
+		expect(sql).toMatch(/employees\.salary\s*\*/);
+		// 1.1 and 50000 should be parameters
+		expect(params).toContain(50000);
+		expect(params).toContain(1.1);
+	});
+
+	it('compiles CASE with AND in WHEN condition', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			"employees | select case when salary > 50000 and salary < 100000 then 'mid' else 'other' end as band",
+		);
+		expect(sql).toContain('case when');
+		expect(sql).toContain('and');
+		expect(params).toContain(50000);
+		expect(params).toContain(100000);
+		expect(params).toContain('mid');
+		expect(params).toContain('other');
+	});
+
+	it('compiles CASE with IN in WHEN condition', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			"employees | select case when name in ('Alice','Bob') then 'known' else 'unknown' end as familiarity",
+		);
+		expect(sql).toContain('case when');
+		// PostgreSQL uses = ANY($n) for IN lists
+		expect(sql).toMatch(/any|in/);
+		expect(params).toContain('known');
+		expect(params).toContain('unknown');
+	});
+
+	it('compiles CASE with IS NULL in WHEN condition', () => {
+		const { sql } = nqlToSQLWithParams(
+			"employees | select case when email is null then 'no-email' else email end as contact",
+		);
+		expect(sql).toContain('case when');
+		expect(sql).toContain('is null');
+		// ELSE should be a column ref (unquoted after normalizeSQL)
+		expect(sql).toContain('employees.email');
+	});
+
+	it('compiles CASE with literal THEN/ELSE (parameterized)', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			"employees | select case when salary > 80000 then 'high' else 'low' end as level",
+		);
+		expect(sql).toContain('case when');
+		expect(params).toContain(80000);
+		expect(params).toContain('high');
+		expect(params).toContain('low');
+	});
+
+	it('compiles simple CASE (CASE expr WHEN val THEN result)', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			"employees | select case name when 'Alice' then 'A' when 'Bob' then 'B' else 'other' end as initial",
+		);
+		// Normalized to searched CASE: CASE WHEN name = 'Alice' THEN 'A' ...
+		expect(sql).toContain('case when');
+		expect(sql).toContain('employees.name');
+		expect(params).toContain('Alice');
+		expect(params).toContain('A');
+		expect(params).toContain('Bob');
+		expect(params).toContain('B');
+		expect(params).toContain('other');
+	});
+
+	it('compiles simple CASE without ELSE', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			"employees | select case name when 'Alice' then 'found' end as matched",
+		);
+		expect(sql).toContain('case when');
+		expect(sql).toContain('employees.name');
+		expect(params).toContain('Alice');
+		expect(params).toContain('found');
+		// No ELSE in SQL
+		expect(sql).not.toContain('else');
 	});
 });

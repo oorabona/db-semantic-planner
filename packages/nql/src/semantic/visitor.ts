@@ -913,34 +913,68 @@ export class NqlCstVisitor extends BaseCstVisitor {
 			condition: NqlExpression;
 			result: NqlExpression;
 		}> = [];
+		let subject: NqlExpression | undefined;
 
-		// booleanExpr nodes are the conditions (one per WHEN)
-		// expression nodes are: [result1, result2, ..., elseResult?]
-		const conditions = ctx.booleanExpr ?? [];
-		const results = ctx.expression ?? [];
 		const hasElse = ctx.Else !== undefined;
-		const whenCount = ctx.When?.length ?? 0;
 
-		for (let i = 0; i < whenCount; i++) {
-			whenClauses.push({
-				condition: this.visit(asCstNode(conditions[i]!)),
-				result: this.visit(asCstNode(results[i]!)),
-			});
+		if (ctx.searchedCaseBody) {
+			// Searched CASE: CASE WHEN boolExpr THEN expr ...
+			const bodyCtx = asCstNode(ctx.searchedCaseBody[0]!).children;
+			const conditions = bodyCtx.booleanExpr ?? [];
+			const results = bodyCtx.expression ?? [];
+			const whenCount = bodyCtx.When?.length ?? 0;
+
+			for (let i = 0; i < whenCount; i++) {
+				whenClauses.push({
+					condition: this.visit(asCstNode(conditions[i]!)),
+					result: this.visit(asCstNode(results[i]!)),
+				});
+			}
+		} else if (ctx.simpleCaseBody) {
+			// Simple CASE: CASE expr WHEN val THEN result ...
+			const bodyCtx = asCstNode(ctx.simpleCaseBody[0]!).children;
+			const expressions = bodyCtx.expression ?? [];
+			const whenCount = bodyCtx.When?.length ?? 0;
+
+			// First expression is the subject
+			subject = this.visit(asCstNode(expressions[0]!));
+
+			// Remaining expressions alternate: value, result, value, result, ...
+			for (let i = 0; i < whenCount; i++) {
+				whenClauses.push({
+					condition: this.visit(asCstNode(expressions[1 + i * 2]!)),
+					result: this.visit(asCstNode(expressions[2 + i * 2]!)),
+				});
+			}
 		}
 
-		// Handle ELSE clause if present
-		if (hasElse && results.length > whenCount) {
+		// Handle ELSE clause — the expression in the parent caseExpr rule
+		const elseExpressions = ctx.expression ?? [];
+		if (hasElse && elseExpressions.length > 0) {
 			return {
 				type: 'case',
+				...(subject && { subject }),
 				whenClauses,
-				elseClause: this.visit(asCstNode(results[results.length - 1]!)),
+				elseClause: this.visit(
+					asCstNode(elseExpressions[elseExpressions.length - 1]!),
+				),
 			};
 		}
 
 		return {
 			type: 'case',
+			...(subject && { subject }),
 			whenClauses,
 		};
+	}
+
+	// Sub-rules of caseExpr — accessed via .children in caseExpr visitor
+	searchedCaseBody(_ctx: CstContext): void {
+		/* Handled by caseExpr */
+	}
+
+	simpleCaseBody(_ctx: CstContext): void {
+		/* Handled by caseExpr */
 	}
 
 	scalarSubquery(ctx: CstContext): NqlSubquery {

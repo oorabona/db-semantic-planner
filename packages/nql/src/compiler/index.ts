@@ -907,13 +907,40 @@ export class NqlCompiler {
 			);
 		}
 
-		// CASE expression (e.g., "case when price > 100 then 'high' else 'low' end")
+		// CASE expression
 		if (expr.type === 'case') {
 			const caseExpr = expr as NqlCaseExpression;
+
+			if (caseExpr.subject) {
+				// Simple CASE: normalize to searched CASE
+				// CASE subject WHEN val THEN result → CASE WHEN subject = val THEN result
+				const subjectField = this.expressionToField(caseExpr.subject);
+				if (!subjectField) {
+					throw new Error('Simple CASE subject must be a column reference');
+				}
+				return {
+					kind: 'case' as const,
+					when: caseExpr.whenClauses.map((wc) => ({
+						condition: {
+							kind: 'comparison' as const,
+							field: subjectField,
+							operator: 'eq',
+							value: this.expressionToValue(wc.condition),
+						},
+						result: this.compileExpressionToIntent(wc.result),
+					})),
+					...(caseExpr.elseClause && {
+						else: this.compileExpressionToIntent(caseExpr.elseClause),
+					}),
+					...(item.alias !== undefined && { as: item.alias }),
+				};
+			}
+
+			// Searched CASE: CASE WHEN boolExpr THEN expr ...
 			return {
 				kind: 'case' as const,
 				when: caseExpr.whenClauses.map((wc) => ({
-					condition: this.compileExpressionToIntent(wc.condition),
+					condition: this.compileExpression(wc.condition),
 					result: this.compileExpressionToIntent(wc.result),
 				})),
 				...(caseExpr.elseClause && {

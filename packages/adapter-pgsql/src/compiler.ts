@@ -29,6 +29,7 @@ import {
 	integerNode,
 	leftJoin,
 	notExpr,
+	nullConstNode,
 	orExpr,
 	rangeVar,
 	selectStmt,
@@ -424,7 +425,7 @@ export class PlanCompiler {
 			// Inject pre-compiled filter for the json_agg handler to read.
 			// Property is readonly on Decision; the compiler is the sole writer.
 			(
-				handlerDecision as HandlerDecision & { _compiledFilterWhere?: Node }
+				handlerDecision as { _compiledFilterWhere?: Node }
 			)._compiledFilterWhere = combined;
 		}
 
@@ -986,10 +987,6 @@ export class PlanCompiler {
 	}
 
 	// --------------------------------------------------------------------------
-	// INSERT Compilation
-	// --------------------------------------------------------------------------
-
-	// --------------------------------------------------------------------------
 	// CASE Expression Compilation
 	// --------------------------------------------------------------------------
 
@@ -1007,10 +1004,7 @@ export class PlanCompiler {
 
 		const args: Node[] = conditions.map((cond) => {
 			const whenExpr = this.dispatchWhere(cond.when);
-
-			const paramNumber = ++this.state.paramIndex;
-			this.state.parameters.push(cond.then);
-			const thenResult = createParamRef(paramNumber);
+			const thenResult = this.compileCaseValue(cond.then);
 
 			return {
 				CaseWhen: {
@@ -1022,9 +1016,7 @@ export class PlanCompiler {
 
 		let defresult: Node | undefined;
 		if (elseValue !== undefined) {
-			const paramNumber = ++this.state.paramIndex;
-			this.state.parameters.push(elseValue);
-			defresult = createParamRef(paramNumber);
+			defresult = this.compileCaseValue(elseValue);
 		}
 
 		return {
@@ -1033,6 +1025,70 @@ export class PlanCompiler {
 				...(defresult ? { defresult } : {}),
 			},
 		};
+	}
+
+	/**
+	 * Compile a CASE THEN/ELSE value based on its ExpressionIntent kind.
+	 * Handles: literal, column, arithmetic, null, nested case, and plain scalars.
+	 */
+	private compileCaseValue(value: unknown): Node {
+		if (value === null || value === undefined) return nullConstNode();
+
+		if (typeof value === 'string') {
+			// String operand in arithmetic = column reference
+			return columnRef(value, this.currentRootTable, undefined, this.naming);
+		}
+
+		if (typeof value !== 'object') {
+			// Numeric/boolean literal → parameterize
+			return compileValue(value, this.state);
+		}
+
+		const expr = value as Record<string, unknown>;
+		switch (expr.kind) {
+			case 'literal':
+				if (expr.value === null || expr.value === undefined)
+					return nullConstNode();
+				return compileValue(expr.value, this.state);
+
+			case 'column': {
+				const col = expr.column as string;
+				return columnRef(col, this.currentRootTable, undefined, this.naming);
+			}
+
+			case 'arithmetic': {
+				const left = this.compileCaseValue(expr.left);
+				const right = this.compileCaseValue(expr.right);
+				return {
+					A_Expr: {
+						kind: 'AEXPR_OP',
+						name: [{ String: { sval: expr.operator as string } }],
+						lexpr: left,
+						rexpr: right,
+					},
+				};
+			}
+
+			case 'case':
+				// Nested CASE — delegate to compileCaseExpression via a synthetic decision
+				return this.compileCaseExpression({
+					type: 'selectExpression',
+					expressionType: 'case',
+					conditions: (
+						expr.when as Array<{ condition: unknown; result: unknown }>
+					).map((wc) => ({
+						when: wc.condition as PlanDecision,
+						// biome-ignore lint/suspicious/noThenProperty: intentional
+						then: wc.result,
+					})),
+					value: expr.else,
+					table: this.currentRootTable,
+				} as unknown as PlanDecision);
+
+			default:
+				// Safe fallback: parameterize unknown expression types
+				return compileValue(value, this.state);
+		}
 	}
 
 	// --------------------------------------------------------------------------

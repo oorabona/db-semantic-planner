@@ -301,6 +301,8 @@ export interface NqlWindowExpression {
  */
 export interface NqlCaseExpression {
 	type: 'case';
+	/** Subject expression for simple CASE (CASE expr WHEN val ...) */
+	subject?: NqlExpression;
 	whenClauses: Array<{
 		condition: NqlExpression;
 		result: NqlExpression;
