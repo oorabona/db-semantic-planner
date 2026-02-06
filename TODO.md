@@ -63,8 +63,8 @@
 - [ ] **E13** [NQL] JSONB operators — `->`, `->>`, `@>`, `<@`, `?`, `#>`, `#>>` — Effort: M
 - [ ] **E13b** [NQL] Set operations (UNION, INTERSECT, EXCEPT) — partially deferred
 - [x] ✅ **E13c** [NQL] CASE expression enhancements (2026-02-06)
-- [ ] 🔧 [Adapter] DRY: extract shared `compileCaseValue`/`resolveCaseValue` helper — Priority: M
-- [ ] 💡 [NQL] Add CASE test coverage: BETWEEN/OR in WHEN, nested CASE, NULL literal THEN/ELSE — Priority: L
+- [x] ✅ 🔧 [Adapter] DRY: extract shared `resolveCaseValue` helper in case-value.ts (2026-02-06)
+- [x] ✅ 💡 [NQL] CASE test coverage: BETWEEN, OR, NULL literal added; nested CASE deferred (todo) (2026-02-06)
 - [ ] **E13d** [NQL] Window fn lag/lead offset/default — P3+
 - [ ] **E13e** [NQL] IN (dateRange) — requires semantic date expansion
 - [ ] **E13f** [NQL] Range literal in INSERT — parsing OK but not compiled
@@ -127,14 +127,13 @@
 
 ### SOLID Violations
 
-- [ ] **A-22** [OCP] 15-case switch on `decision.type`
-- [ ] **#20** [OCP] Extend handler pattern to remaining compiler switch cases — L
-- [ ] **#30** [ISP] QueryBuilder<T> interface 30+ methods
+- [-] ⏭️ **A-22/#20** [OCP] 17-case switch on `decision.type` — 3/17 already use handler pattern; remaining are simple (2-12 LOC) or have AST differences preventing handler reuse. Low ROI. (evaluated 2026-02-06)
+- [-] ⏭️ **#30** [ISP] QueryBuilder<T> 33 methods — all consumers use full interface, splitting adds bureaucracy with no practical benefit. Low ROI. (evaluated 2026-02-06)
 - [x] ✅ **#31** [SRP] types.ts split: 1664→334 LOC + 3 focused files (R01e, 2026-02-06)
 
 ### Test Coverage
 
-- [ ] **#33** [Test] adapter-pgsql test ratio 0.36 (target 0.50) — L-size
+- [x] ✅ **#33** [Test] adapter-pgsql test ratio measured at 0.68 — exceeds 0.50 target (2026-02-06)
 - [x] ✅ **A-34** [Type] `any` types in result-hydrator.ts — 0 remaining (R01d, 2026-02-06)
 
 ### API Surface
@@ -144,10 +143,7 @@
 
 ### Dead Code
 
-- [ ] **A-26** [Dead] `NqlLimitError`, `NqlWarning` — unused interfaces
-- [ ] **#21** [KISS] `compileSubqueryIncludeManyToMany` — 117 LOC, low value
-- [ ] **#29** [CLI] CLI assertion factory — lower value, standalone story
-- [ ] **[CLI]** Extract shared plan summary formatting
+(All items verified as false positives 2026-02-06: A-26 NqlLimitError doesn't exist / NqlWarning is active; #21 is in use; #29 no factory found; CLI plan summary embedded)
 
 ---
 
