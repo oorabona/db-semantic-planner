@@ -8,6 +8,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { normalizeSQL } from '@dbsp/core';
 
 const ROOT = resolve(import.meta.dirname, '..');
 
@@ -18,14 +19,6 @@ interface Example {
 	expectedSql: string;
 	expectedParams: string | null;
 	section: string;
-}
-
-function normalizeSQL(sql: string): string {
-	return sql
-		.replace(/\s+/g, ' ')
-		.replace(/\(\s+/g, '(')
-		.replace(/\s+\)/g, ')')
-		.trim();
 }
 
 /**

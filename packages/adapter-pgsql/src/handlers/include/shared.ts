@@ -9,7 +9,13 @@ import {
 	defaultFkDerivation,
 	type FkColumnDerivation,
 } from '../../assert-field.js';
-import type { Decision } from '../types.js';
+/** Minimal shape required by deriveFkColumns — works with both Decision and PlanDecision. */
+export interface FkColumnSource {
+	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
+	readonly foreignKey?: string;
+	readonly parentKey?: string;
+	readonly targetTable?: string;
+}
 
 /**
  * Derive the source (parent-side) and target (child-side) column names
@@ -21,7 +27,7 @@ import type { Decision } from '../types.js';
  *   → sourceColumn = parentKey (id), targetColumn = foreignKey (role_id)
  */
 export function deriveFkColumns(
-	decision: Decision,
+	decision: FkColumnSource,
 	parentTable: string,
 	defaultPk: string = DEFAULT_PK_COLUMN,
 	deriveFk: FkColumnDerivation = defaultFkDerivation,

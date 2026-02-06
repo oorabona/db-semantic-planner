@@ -8,13 +8,13 @@
  * Extracted from assertion-runner.ts for SRP (Phase 5.6).
  */
 
-import { normalizeSQL } from '@dbsp/adapter-pgsql';
+import { normalizeSQL } from '@dbsp/core';
 import type { AssertionType, TableAssertionData } from './assertion-parser.js';
 import type { AssertionOutcome } from './assertion-runner.js';
 import type { BatchResult } from './batch.js';
 import type { IntentSummary } from './nql-executor.js';
 
-// Re-export canonical normalizeSQL from adapter (DRY consolidation)
+// Re-export normalizeSQL from core (canonical location)
 export { normalizeSQL };
 
 // ============================================================

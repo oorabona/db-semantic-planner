@@ -30,20 +30,8 @@ import type {
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 
-/**
- * Normalize SQL for comparison: collapse whitespace, lowercase, trim.
- * Canonical implementation — imported by ast-compare.ts and external consumers.
- */
-export function normalizeSQL(sql: string): string {
-	return sql
-		.toLowerCase()
-		.replace(/\s+/g, ' ')
-		.replace(/\s*,\s*/g, ', ')
-		.replace(/\(\s+/g, '(')
-		.replace(/\s+\)/g, ')')
-		.replace(/;\s*$/, '')
-		.trim();
-}
+// Re-export normalizeSQL from core (canonical location since A-9 DRY refactor)
+export { normalizeSQL } from '@dbsp/core';
 
 // ============================================================================
 // Internal Helpers

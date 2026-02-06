@@ -401,3 +401,9 @@ export {
 	UnhandledTypeInDialect,
 	UnknownDialectError,
 } from './dialects/index.js';
+
+// ============================================================================
+// SQL Utilities
+// ============================================================================
+
+export { normalizeSQL } from './sql-utils.js';

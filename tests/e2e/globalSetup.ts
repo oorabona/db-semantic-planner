@@ -38,25 +38,21 @@ export async function setup(): Promise<void> {
 		return;
 	}
 
-	// Testcontainers requires DOCKER_HOST for Podman environments
-	if (!process.env.DOCKER_HOST) {
+	// Check Docker/Podman availability (works with or without DOCKER_HOST)
+	const dockerAvailable = await isDockerAvailable();
+	if (!dockerAvailable) {
 		console.error(
-			'\n❌ No DATABASE_URL and DOCKER_HOST is not set. For Podman, add to ~/.bashrc:\n' +
-				'  export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"\n',
+			'\n❌ No DATABASE_URL set and Docker/Podman is not available.\n' +
+				'  Either set DATABASE_URL or install Docker/Podman.\n' +
+				'  For Podman on WSL2, you may need: export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"\n',
 		);
 		process.env.SKIP_E2E_TESTS = 'true';
 		return;
 	}
-	process.env.TESTCONTAINERS_HOST_OVERRIDE = 'localhost';
 
-	// Check Docker availability
-	const dockerAvailable = await isDockerAvailable();
-	if (!dockerAvailable) {
-		console.error(
-			'\n❌ No DATABASE_URL set and Docker is not available. Cannot run E2E tests.\n',
-		);
-		process.env.SKIP_E2E_TESTS = 'true';
-		return;
+	// For Podman/WSL2 environments, ensure Testcontainers connects to localhost
+	if (process.env.DOCKER_HOST || !process.env.TESTCONTAINERS_HOST_OVERRIDE) {
+		process.env.TESTCONTAINERS_HOST_OVERRIDE = 'localhost';
 	}
 
 	// Allow custom PostgreSQL image via environment variable
