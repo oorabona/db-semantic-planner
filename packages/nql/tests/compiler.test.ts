@@ -4,7 +4,13 @@
  * Tests NQL AST → IntentAST transformation
  */
 
-import type { FieldRef } from '@dbsp/types';
+import type {
+	FieldRef,
+	SetOperationIntent,
+	WhereJsonContainsIntent,
+	WhereJsonExistsIntent,
+	WindowIntent,
+} from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import type {
 	DeleteIntent,
@@ -26,6 +32,7 @@ import type {
 	WhereRangeIntent,
 	WhereRelationFilterIntent,
 } from '../src/compiler/index.js';
+import type { NqlWarning } from '../src/errors/types.js';
 import { compile } from '../src/index.js';
 
 // Helper to compile NQL and return the result
@@ -614,6 +621,52 @@ describe('NQL Compiler - INSERT', () => {
 	});
 });
 
+describe('NQL Compiler - INSERT with range literal (E13f)', () => {
+	it('range literal value is converted to string in INSERT', () => {
+		// Arrange
+		const result = compileNql(
+			"insert into events set name = 'conf', period = [2024-01-01,2024-12-31)",
+		);
+
+		// Act
+		const insert = result.mutation as InsertIntent;
+
+		// Assert
+		expect(insert.type).toBe('insert');
+		expect(insert.table).toBe('events');
+		expect(insert.values[0]).toEqual({
+			name: 'conf',
+			period: '[2024-01-01,2024-12-31)',
+		});
+	});
+
+	it('inclusive range literal is preserved', () => {
+		// Arrange
+		const result = compileNql(
+			"insert into events set name = 'x', period = [2024-01-01,2024-12-31]",
+		);
+
+		// Act
+		const insert = result.mutation as InsertIntent;
+
+		// Assert
+		expect(insert.values[0]?.period).toBe('[2024-01-01,2024-12-31]');
+	});
+
+	it('mixed bounds range literal [lower,upper) is preserved', () => {
+		// Arrange: half-open range (typical PostgreSQL pattern)
+		const result = compileNql(
+			"insert into events set name = 'x', period = [100,200)",
+		);
+
+		// Act
+		const insert = result.mutation as InsertIntent;
+
+		// Assert: lower inclusive, upper exclusive
+		expect(insert.values[0]?.period).toBe('[100,200)');
+	});
+});
+
 describe('NQL Compiler - INSERT FROM (NQL-ALIGN Block 4)', () => {
 	it('compiles simple insert from', () => {
 		const result = compileNql('insert into archived_users from users');
@@ -1026,6 +1079,231 @@ describe('NQL Compiler - Range Operators', () => {
 		// Assert: mixed bounds are preserved
 		expect(where.kind).toBe('range');
 		expect(where.value).toBe('[0,100)');
+	});
+});
+
+describe('NQL Compiler - Window lag/lead offset/default (E13d)', () => {
+	it('lag with offset produces WindowIntent with offset', () => {
+		// Arrange
+		const result = compileNql(
+			'orders | select lag(amount, 2) over (order by date) as prev2',
+		);
+
+		// Act
+		const query = result.query!;
+		const select = query.select as SelectWithExpressionsIntent;
+		const expr = select.columns.find(
+			(e: ExpressionIntent) => e.kind === 'window' && e.alias === 'prev2',
+		) as WindowIntent;
+
+		// Assert
+		expect(expr).toBeDefined();
+		expect(expr.kind).toBe('window');
+		expect(expr.function).toBe('lag');
+		expect(expr.field).toBe('amount');
+		expect(expr.offset).toBe(2);
+	});
+
+	it('lead with offset and default produces WindowIntent with both', () => {
+		// Arrange
+		const result = compileNql(
+			'orders | select lead(amount, 1, 0) over (order by date) as next_amount',
+		);
+
+		// Act
+		const query = result.query!;
+		const select = query.select as SelectWithExpressionsIntent;
+		const expr = select.columns.find(
+			(e: ExpressionIntent) => e.kind === 'window' && e.alias === 'next_amount',
+		) as WindowIntent;
+
+		// Assert
+		expect(expr).toBeDefined();
+		expect(expr.function).toBe('lead');
+		expect(expr.offset).toBe(1);
+		expect(expr.defaultValue).toBe(0);
+	});
+
+	it('lag without offset produces no offset field', () => {
+		// Arrange
+		const result = compileNql(
+			'orders | select lag(amount) over (order by date) as prev',
+		);
+
+		// Act
+		const query = result.query!;
+		const select = query.select as SelectWithExpressionsIntent;
+		const expr = select.columns.find(
+			(e: ExpressionIntent) => e.kind === 'window' && e.alias === 'prev',
+		) as WindowIntent;
+
+		// Assert
+		expect(expr).toBeDefined();
+		expect(expr.function).toBe('lag');
+		expect(expr.offset).toBeUndefined();
+		expect(expr.defaultValue).toBeUndefined();
+	});
+});
+
+describe('NQL Compiler - IN dateRange expansion (E13e)', () => {
+	it('expands single date range (quarter) to half-open interval', () => {
+		// Arrange
+		const result = compileNql("orders | where date in '2024-Q1'");
+
+		// Act
+		const query = result.query!;
+		const where = query.where as WhereAndIntent;
+
+		// Assert: expanded to >= start AND < end
+		expect(where.kind).toBe('and');
+		expect(where.conditions).toHaveLength(2);
+		const [gte, lt] = where.conditions as [
+			WhereComparisonIntent,
+			WhereComparisonIntent,
+		];
+		expect(gte.operator).toBe('gte');
+		expect(gte.field).toBe('date');
+		expect(gte.value).toBe('2024-01-01');
+		expect(lt.operator).toBe('lt');
+		expect(lt.field).toBe('date');
+		expect(lt.value).toBe('2024-04-01');
+	});
+
+	it('expands full year to [Jan 1, next Jan 1)', () => {
+		// Arrange
+		const result = compileNql("orders | where created_at in '2024'");
+
+		// Act
+		const where = result.query!.where as WhereAndIntent;
+
+		// Assert
+		expect(where.kind).toBe('and');
+		const [gte, lt] = where.conditions as [
+			WhereComparisonIntent,
+			WhereComparisonIntent,
+		];
+		expect(gte.value).toBe('2024-01-01');
+		expect(lt.value).toBe('2025-01-01');
+	});
+
+	it('expands ISO week to 7-day interval', () => {
+		// Arrange
+		const result = compileNql("events | where date in '2024-W10'");
+
+		// Act
+		const where = result.query!.where as WhereAndIntent;
+
+		// Assert
+		const [gte, lt] = where.conditions as [
+			WhereComparisonIntent,
+			WhereComparisonIntent,
+		];
+		expect(gte.value).toBe('2024-03-04');
+		expect(lt.value).toBe('2024-03-11');
+	});
+
+	it('expands month to [first, next month first)', () => {
+		// Arrange
+		const result = compileNql("orders | where date in '2024-06'");
+
+		// Act
+		const where = result.query!.where as WhereAndIntent;
+
+		// Assert
+		const [gte, lt] = where.conditions as [
+			WhereComparisonIntent,
+			WhereComparisonIntent,
+		];
+		expect(gte.value).toBe('2024-06-01');
+		expect(lt.value).toBe('2024-07-01');
+	});
+
+	it('negated date range wraps in NOT', () => {
+		// Arrange
+		const result = compileNql("orders | where date not in '2024-Q2'");
+
+		// Act
+		const where = result.query!.where as WhereNotIntent;
+
+		// Assert
+		expect(where.kind).toBe('not');
+		const inner = where.condition as WhereAndIntent;
+		expect(inner.kind).toBe('and');
+		const [gte, lt] = inner.conditions as [
+			WhereComparisonIntent,
+			WhereComparisonIntent,
+		];
+		expect(gte.value).toBe('2024-04-01');
+		expect(lt.value).toBe('2024-07-01');
+	});
+
+	it('throws for invalid date range pattern (Q5)', () => {
+		// Arrange & Act & Assert
+		expect(() => compileNql("orders | where date in '2024-Q5'")).toThrow(
+			/Invalid date range/,
+		);
+	});
+
+	it('throws for invalid week (W54)', () => {
+		// Arrange & Act & Assert
+		expect(() => compileNql("orders | where date in '2024-W54'")).toThrow(
+			/Invalid week/,
+		);
+	});
+
+	// Amendment 11: multiple date ranges → OR expansion
+	it('expands multiple date ranges to OR of half-open intervals', () => {
+		// Arrange
+		const result = compileNql("orders | where date in ('2024-Q1', '2024-Q3')");
+
+		// Act
+		const where = result.query!.where as WhereOrIntent;
+
+		// Assert: OR of two AND conditions
+		expect(where.kind).toBe('or');
+		expect(where.conditions).toHaveLength(2);
+
+		const q1 = where.conditions[0] as WhereAndIntent;
+		const q3 = where.conditions[1] as WhereAndIntent;
+
+		expect(q1.kind).toBe('and');
+		expect((q1.conditions[0] as WhereComparisonIntent).value).toBe(
+			'2024-01-01',
+		);
+		expect((q1.conditions[1] as WhereComparisonIntent).value).toBe(
+			'2024-04-01',
+		);
+
+		expect(q3.kind).toBe('and');
+		expect((q3.conditions[0] as WhereComparisonIntent).value).toBe(
+			'2024-07-01',
+		);
+		expect((q3.conditions[1] as WhereComparisonIntent).value).toBe(
+			'2024-10-01',
+		);
+	});
+
+	it('negated multi-range wraps OR in NOT', () => {
+		// Arrange
+		const result = compileNql(
+			"orders | where date not in ('2024-Q1', '2024-Q3')",
+		);
+
+		// Act
+		const where = result.query!.where as WhereNotIntent;
+
+		// Assert
+		expect(where.kind).toBe('not');
+		const or = where.condition as WhereOrIntent;
+		expect(or.kind).toBe('or');
+		expect(or.conditions).toHaveLength(2);
+	});
+
+	it('throws for mixed date ranges and regular values', () => {
+		// Arrange & Act & Assert
+		expect(() =>
+			compileNql("orders | where date in ('2024-Q1', 'pending')"),
+		).toThrow(/Cannot mix date range patterns/);
 	});
 });
 
@@ -1635,5 +1913,422 @@ describe('NQL Compiler - SPEC-002: Cross-Table Relation Filters', () => {
 				scope: 'outer',
 			} satisfies FieldRef);
 		});
+	});
+});
+
+// ============================================================================
+// E13: JSONB Operators
+// ============================================================================
+
+describe('NQL Compiler - JSONB operators (E13)', () => {
+	describe('operator notation in WHERE', () => {
+		it('compiles data @> to jsonContains', () => {
+			const result = compileNql('users | where data @> \'{"active":true}\'');
+			const w = result.query!.where as WhereJsonContainsIntent;
+			expect(w.kind).toBe('jsonContains');
+			expect(w.field).toBe('data');
+			expect(w.value).toBe('{"active":true}');
+			expect(w.reversed).toBe(false);
+		});
+
+		it('compiles data <@ to jsonContains reversed', () => {
+			const result = compileNql('users | where data <@ \'{"a":1}\'');
+			const w = result.query!.where as WhereJsonContainsIntent;
+			expect(w.kind).toBe('jsonContains');
+			expect(w.field).toBe('data');
+			expect(w.reversed).toBe(true);
+		});
+
+		it("compiles data ? 'key' to jsonExists", () => {
+			const result = compileNql("users | where data ? 'email'");
+			const w = result.query!.where as WhereJsonExistsIntent;
+			expect(w.kind).toBe('jsonExists');
+			expect(w.field).toBe('data');
+			expect(w.key).toBe('email');
+		});
+
+		it("compiles data->'key' = 'val' to comparison with jsonPath", () => {
+			const result = compileNql("users | where data->'name' = 'Alice'");
+			const w = result.query!.where as WhereComparisonIntent;
+			expect(w.kind).toBe('comparison');
+			expect(w.field).toBe('data');
+			expect(w.jsonPath).toEqual(['name']);
+			expect(w.jsonMode).toBe('json');
+			expect(w.operator).toBe('eq');
+			expect(w.value).toBe('Alice');
+		});
+
+		it("compiles data->>'key' = 'val' with text mode", () => {
+			const result = compileNql(
+				"users | where data->>'email' = 'test@example.com'",
+			);
+			const w = result.query!.where as WhereComparisonIntent;
+			expect(w.kind).toBe('comparison');
+			expect(w.field).toBe('data');
+			expect(w.jsonPath).toEqual(['email']);
+			expect(w.jsonMode).toBe('text');
+		});
+
+		it("compiles chained data->'a'->'b'->>'c' = 'x'", () => {
+			const result = compileNql("users | where data->'a'->'b'->>'c' = 'x'");
+			const w = result.query!.where as WhereComparisonIntent;
+			expect(w.kind).toBe('comparison');
+			expect(w.field).toBe('data');
+			expect(w.jsonPath).toEqual(['a', 'b', 'c']);
+			expect(w.jsonMode).toBe('text'); // Last operator determines mode
+		});
+	});
+
+	describe('function notation in WHERE', () => {
+		it('compiles json_contains() to jsonContains', () => {
+			const result = compileNql(
+				'users | where json_contains(data, \'{"active":true}\')',
+			);
+			const w = result.query!.where as WhereJsonContainsIntent;
+			expect(w.kind).toBe('jsonContains');
+			expect(w.field).toBe('data');
+			expect(w.value).toBe('{"active":true}');
+			expect(w.reversed).toBe(false);
+		});
+
+		it('compiles json_contained_by() to jsonContains reversed', () => {
+			const result = compileNql(
+				'users | where json_contained_by(data, \'{"a":1}\')',
+			);
+			const w = result.query!.where as WhereJsonContainsIntent;
+			expect(w.kind).toBe('jsonContains');
+			expect(w.reversed).toBe(true);
+		});
+
+		it('compiles json_exists() to jsonExists', () => {
+			const result = compileNql("users | where json_exists(data, 'email')");
+			const w = result.query!.where as WhereJsonExistsIntent;
+			expect(w.kind).toBe('jsonExists');
+			expect(w.field).toBe('data');
+			expect(w.key).toBe('email');
+		});
+
+		it("compiles json_extract_text() = 'val' to comparison with jsonPath", () => {
+			const result = compileNql(
+				"users | where json_extract_text(data, 'name') = 'Alice'",
+			);
+			const w = result.query!.where as WhereComparisonIntent;
+			expect(w.kind).toBe('comparison');
+			expect(w.field).toBe('data');
+			expect(w.jsonPath).toEqual(['name']);
+			expect(w.jsonMode).toBe('text');
+			expect(w.value).toBe('Alice');
+		});
+	});
+
+	describe('operator notation in SELECT', () => {
+		it("compiles data->>'email' as email to jsonExtract", () => {
+			const result = compileNql("users | select data->>'email' as email");
+			const sel = result.query!.select as SelectWithExpressionsIntent;
+			expect(sel.type).toBe('expressions');
+			const col = sel.columns[0]!;
+			expect(col.kind).toBe('jsonExtract');
+			if (col.kind === 'jsonExtract') {
+				expect(col.field).toBe('data');
+				expect(col.path).toEqual(['email']);
+				expect(col.mode).toBe('text');
+				expect(col.as).toBe('email');
+			}
+		});
+
+		it("compiles chained data->'a'->>'b' as val to jsonExtract", () => {
+			const result = compileNql("users | select data->'a'->>'b' as val");
+			const sel = result.query!.select as SelectWithExpressionsIntent;
+			const col = sel.columns[0]!;
+			expect(col.kind).toBe('jsonExtract');
+			if (col.kind === 'jsonExtract') {
+				expect(col.field).toBe('data');
+				expect(col.path).toEqual(['a', 'b']);
+				expect(col.mode).toBe('text');
+				expect(col.as).toBe('val');
+			}
+		});
+	});
+
+	describe('function notation in SELECT', () => {
+		it('compiles json_extract_text(data, key) as alias', () => {
+			const result = compileNql(
+				"users | select json_extract_text(data, 'email') as email",
+			);
+			const sel = result.query!.select as SelectWithExpressionsIntent;
+			const col = sel.columns[0]!;
+			expect(col.kind).toBe('jsonExtract');
+			if (col.kind === 'jsonExtract') {
+				expect(col.field).toBe('data');
+				expect(col.path).toEqual(['email']);
+				expect(col.mode).toBe('text');
+				expect(col.as).toBe('email');
+			}
+		});
+
+		it('compiles json_path(data, path) as alias to jsonPathExtract', () => {
+			const result = compileNql(
+				"users | select json_path(data, '{a,b}') as nested",
+			);
+			const sel = result.query!.select as SelectWithExpressionsIntent;
+			const col = sel.columns[0]!;
+			expect(col.kind).toBe('jsonPathExtract');
+			if (col.kind === 'jsonPathExtract') {
+				expect(col.field).toBe('data');
+				expect(col.path).toBe('{a,b}');
+				expect(col.mode).toBe('json');
+				expect(col.as).toBe('nested');
+			}
+		});
+
+		it('both notations produce equivalent intents for extract', () => {
+			const resultOp = compileNql("users | select data->>'email' as email");
+			const resultFn = compileNql(
+				"users | select json_extract_text(data, 'email') as email",
+			);
+			const selOp = (resultOp.query!.select as SelectWithExpressionsIntent)
+				.columns[0]!;
+			const selFn = (resultFn.query!.select as SelectWithExpressionsIntent)
+				.columns[0]!;
+			expect(selOp).toEqual(selFn);
+		});
+	});
+});
+
+// ============================================================
+// Set Operations (E13b)
+// ============================================================
+
+describe('NQL Compiler - Set Operations (E13b)', () => {
+	describe('basic set operations', () => {
+		it('compiles UNION with inline query', () => {
+			const result = compileNql(
+				'users | select name | union (admins | select name)',
+			);
+			expect(result.setOperation).toBeDefined();
+			const setOp = result.setOperation!;
+			expect(setOp.kind).toBe('setOperation');
+			expect(setOp.op).toBe('union');
+			expect(setOp.all).toBe(false);
+			expect(setOp.left.from).toBe('users');
+			expect((setOp.right as { from: string }).from).toBe('admins');
+		});
+
+		it('compiles UNION ALL', () => {
+			const result = compileNql(
+				'users | select name | union all (admins | select name)',
+			);
+			const setOp = result.setOperation!;
+			expect(setOp.op).toBe('union');
+			expect(setOp.all).toBe(true);
+		});
+
+		it('compiles INTERSECT', () => {
+			const result = compileNql(
+				'users | select name | intersect (admins | select name)',
+			);
+			const setOp = result.setOperation!;
+			expect(setOp.op).toBe('intersect');
+			expect(setOp.all).toBe(false);
+		});
+
+		it('compiles EXCEPT', () => {
+			const result = compileNql(
+				'users | select name | except (admins | select name)',
+			);
+			const setOp = result.setOperation!;
+			expect(setOp.op).toBe('except');
+			expect(setOp.all).toBe(false);
+		});
+	});
+
+	describe('set operation with WHERE in sub-query', () => {
+		it('compiles UNION with WHERE on right side', () => {
+			const result = compileNql(
+				'users | select name | union (admins | where active = true | select name)',
+			);
+			const setOp = result.setOperation!;
+			const right = setOp.right as { from: string; where: unknown };
+			expect(right.from).toBe('admins');
+			expect(right.where).toBeDefined();
+		});
+	});
+
+	describe('recursive/nested set operations', () => {
+		it('compiles nested set operation (union of intersect)', () => {
+			const result = compileNql(
+				'users | select name | union (admins | select name | intersect (mods | select name))',
+			);
+			const setOp = result.setOperation!;
+			expect(setOp.op).toBe('union');
+			expect(setOp.left.from).toBe('users');
+			// Right side is itself a set operation
+			const rightSetOp = setOp.right as SetOperationIntent;
+			expect(rightSetOp.kind).toBe('setOperation');
+			expect(rightSetOp.op).toBe('intersect');
+		});
+	});
+
+	describe('set operation with bind', () => {
+		it('compiles set operation referencing bound name', () => {
+			const result = compileNql(
+				'admins | select name | bind a\nusers | select name | union a',
+			);
+			expect(result.setOperation).toBeDefined();
+			const setOp = result.setOperation!;
+			expect(setOp.op).toBe('union');
+			expect(setOp.left.from).toBe('users');
+			// Right side resolved from binding 'a' → admins query
+			expect((setOp.right as { from: string }).from).toBe('admins');
+		});
+	});
+
+	describe('set operation modifiers', () => {
+		it('compiles UNION ALL (preserves duplicates)', () => {
+			const result = compileNql(
+				'users | select name | union all (admins | select name)',
+			);
+			const setOp = result.setOperation!;
+			expect(setOp.op).toBe('union');
+			expect(setOp.all).toBe(true);
+		});
+
+		it('compiles INTERSECT ALL', () => {
+			const result = compileNql(
+				'users | select name | intersect all (admins | select name)',
+			);
+			const setOp = result.setOperation!;
+			expect(setOp.op).toBe('intersect');
+			expect(setOp.all).toBe(true);
+		});
+
+		it('compiles EXCEPT ALL', () => {
+			const result = compileNql(
+				'users | select name | except all (admins | select name)',
+			);
+			const setOp = result.setOperation!;
+			expect(setOp.op).toBe('except');
+			expect(setOp.all).toBe(true);
+		});
+
+		it('plain set ops have all=false', () => {
+			const result = compileNql(
+				'users | select name | union (admins | select name)',
+			);
+			expect(result.setOperation!.all).toBe(false);
+		});
+
+		it('preserves WHERE on left side of set operation', () => {
+			const result = compileNql(
+				'users | where active = true | select name | union (admins | select name)',
+			);
+			const setOp = result.setOperation!;
+			expect(setOp.left.where).toBeDefined();
+		});
+
+		it('preserves ORDER BY on right side of set operation', () => {
+			const result = compileNql(
+				'users | select name | union (admins | select name | order by name)',
+			);
+			const setOp = result.setOperation!;
+			const right = setOp.right as unknown as { orderBy: OrderByIntent[] };
+			expect(right.orderBy).toBeDefined();
+		});
+	});
+});
+
+// ============================================================================
+// F-007: Edge Case Tests for Review Findings
+// ============================================================================
+
+describe('NQL Compiler - JSON chain warnings (F-002)', () => {
+	it('emits WARN-JSON-001 when intermediate ->> is used', () => {
+		const result = compile("products | select data->>'a'->'b' as val", null);
+		expect(result.success).toBe(true);
+		expect(result.warnings).toHaveLength(1);
+		const w = result.warnings[0] as NqlWarning;
+		expect(w.code).toBe('WARN-JSON-001');
+		expect(w.suggestion).toContain('->');
+	});
+
+	it('no warning when all intermediate operators are ->', () => {
+		const result = compile(
+			"products | select data->'a'->'b'->>'c' as val",
+			null,
+		);
+		expect(result.success).toBe(true);
+		expect(result.warnings).toHaveLength(0);
+	});
+
+	it('no warning for single operator chain', () => {
+		const result = compile("products | select data->>'name' as val", null);
+		expect(result.success).toBe(true);
+		expect(result.warnings).toHaveLength(0);
+	});
+
+	it('no warning for single -> operator', () => {
+		const result = compile("products | select data->'meta' as val", null);
+		expect(result.success).toBe(true);
+		expect(result.warnings).toHaveLength(0);
+	});
+
+	it('warns only once even if multiple intermediate ->> exist', () => {
+		const result = compile(
+			"products | select data->>'a'->>'b'->>'c' as val",
+			null,
+		);
+		expect(result.success).toBe(true);
+		// Only one warning emitted (break after first detection)
+		expect(result.warnings).toHaveLength(1);
+		expect(result.warnings[0]?.code).toBe('WARN-JSON-001');
+	});
+});
+
+describe('NQL Compiler - Window edge cases (F-003)', () => {
+	it('lead with string default value', () => {
+		const result = compileNql(
+			"orders | select lead(status, 1, 'none') over (order by date) as next_status",
+		);
+		const query = result.query!;
+		const select = query.select as SelectWithExpressionsIntent;
+		const expr = select.columns.find(
+			(e: ExpressionIntent) => e.kind === 'window' && e.alias === 'next_status',
+		) as WindowIntent;
+
+		expect(expr).toBeDefined();
+		expect(expr.function).toBe('lead');
+		expect(expr.defaultValue).toBe('none');
+	});
+
+	it('lag with null default value', () => {
+		const result = compileNql(
+			'orders | select lag(amount, 1, null) over (order by date) as prev',
+		);
+		const query = result.query!;
+		const select = query.select as SelectWithExpressionsIntent;
+		const expr = select.columns.find(
+			(e: ExpressionIntent) => e.kind === 'window' && e.alias === 'prev',
+		) as WindowIntent;
+
+		expect(expr).toBeDefined();
+		expect(expr.function).toBe('lag');
+		expect(expr.defaultValue).toBeNull();
+	});
+
+	it('window with partition and order', () => {
+		const result = compileNql(
+			'orders | select sum(amount) over (partition by category order by date desc) as cat_total',
+		);
+		const query = result.query!;
+		const select = query.select as SelectWithExpressionsIntent;
+		const expr = select.columns.find(
+			(e: ExpressionIntent) => e.kind === 'window' && e.alias === 'cat_total',
+		) as WindowIntent;
+
+		expect(expr).toBeDefined();
+		expect(expr.function).toBe('sum');
+		expect(expr.field).toBe('amount');
+		expect(expr.over.partitionBy).toEqual(['category']);
+		expect(expr.over.orderBy).toEqual([{ field: 'date', direction: 'desc' }]);
 	});
 });

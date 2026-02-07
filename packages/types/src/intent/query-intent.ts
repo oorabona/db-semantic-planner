@@ -63,3 +63,30 @@ export interface QueryIntent {
 	 */
 	readonly existsWrap?: boolean;
 }
+
+// ============================================================================
+// Set Operation Intent - UNION / INTERSECT / EXCEPT
+// ============================================================================
+
+/**
+ * Set operation type: SQL standard set operations.
+ */
+export type SetOperationType = 'union' | 'intersect' | 'except';
+
+/**
+ * Set operation that combines two queries.
+ * The result is a tree: each side can itself be a SetOperationIntent.
+ *
+ * @example
+ * ```
+ * users | select name | union (admins | select name)
+ * → { op: 'union', all: false, left: QueryIntent, right: QueryIntent }
+ * ```
+ */
+export interface SetOperationIntent {
+	readonly kind: 'setOperation';
+	readonly op: SetOperationType;
+	readonly all: boolean;
+	readonly left: QueryIntent;
+	readonly right: QueryIntent | SetOperationIntent;
+}

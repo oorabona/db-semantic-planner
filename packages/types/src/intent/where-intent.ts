@@ -51,6 +51,10 @@ export interface WhereComparisonIntent {
 	readonly field: string;
 	readonly operator: ComparisonOperator;
 	readonly value: unknown;
+	/** JSON path extraction before comparison (e.g., data->'key' = 'val') */
+	readonly jsonPath?: readonly string[];
+	/** JSON extraction mode: 'json' = ->, 'text' = ->> */
+	readonly jsonMode?: 'json' | 'text';
 }
 
 /**
@@ -254,6 +258,34 @@ export interface WhereSubqueryIntent {
 /** @deprecated Use QueryIntent instead — subqueries are full queries with contextual validation */
 export type ScalarSubqueryIntent = QueryIntent;
 
+// ============================================================================
+// JSON/JSONB WHERE Intents (E13)
+// ============================================================================
+
+/**
+ * JSON containment filter: col @> value or col <@ value.
+ * @example { kind: 'jsonContains', field: 'data', value: '{"active":true}', reversed: false }
+ *          → WHERE "data" @> $1
+ */
+export interface WhereJsonContainsIntent {
+	readonly kind: 'jsonContains';
+	readonly field: string;
+	readonly value: unknown;
+	/** false = @> (field contains value), true = <@ (field contained by value) */
+	readonly reversed: boolean;
+}
+
+/**
+ * JSON key existence filter: col ? 'key'.
+ * @example { kind: 'jsonExists', field: 'data', key: 'email' }
+ *          → WHERE "data" ? $1
+ */
+export interface WhereJsonExistsIntent {
+	readonly kind: 'jsonExists';
+	readonly field: string;
+	readonly key: string;
+}
+
 /**
  * Where intent - filter conditions union type
  * Discriminated union using 'kind' field
@@ -270,4 +302,6 @@ export type WhereIntent =
 	| WhereExistsIntent
 	| WhereNotExistsIntent
 	| WhereRelationFilterIntent
-	| WhereSubqueryIntent;
+	| WhereSubqueryIntent
+	| WhereJsonContainsIntent
+	| WhereJsonExistsIntent;

@@ -30,6 +30,7 @@ import {
 	End,
 	Equals,
 	Every,
+	Except,
 	Exists,
 	False,
 	Flat,
@@ -40,8 +41,14 @@ import {
 	Identifier,
 	In,
 	Insert,
+	Intersect,
 	Into,
 	Is,
+	JsonArrow,
+	JsonArrowText,
+	JsonContainedByOp,
+	JsonContainsOp,
+	JsonExistsOp,
 	Lag,
 	LBracket,
 	Lead,
@@ -82,6 +89,7 @@ import {
 	StringLiteral,
 	Then,
 	True,
+	Union,
 	Update,
 	Upsert,
 	Values,
@@ -175,6 +183,7 @@ export class NqlParser extends CstParser {
 			{ ALT: () => this.SUBRULE(this.orderClause) },
 			{ ALT: () => this.SUBRULE(this.limitClause) },
 			{ ALT: () => this.SUBRULE(this.offsetClause) },
+			{ ALT: () => this.SUBRULE(this.setClause) },
 			{ ALT: () => this.SUBRULE(this.bindClause) },
 		]);
 	});
@@ -449,19 +458,23 @@ export class NqlParser extends CstParser {
 				ALT: () => {
 					// Parse the left expression first
 					this.SUBRULE(this.expression);
-					// Then check what follows
-					this.OR2([
-						// BETWEEN expr AND expr
-						{ ALT: () => this.SUBRULE(this.betweenSuffix) },
-						// [NOT] IN (...)
-						{ ALT: () => this.SUBRULE(this.inSuffix) },
-						// IS [NOT] NULL
-						{ ALT: () => this.SUBRULE(this.isNullSuffix) },
-						// Range operators (overlaps, contains, containedBy) with range literal
-						{ ALT: () => this.SUBRULE(this.rangeOpSuffix) },
-						// comparison (=, !=, <, >, <=, >=, like)
-						{ ALT: () => this.SUBRULE(this.comparisonSuffix) },
-					]);
+					// Then check what follows — OPTION allows bare predicates (json_contains, json_exists)
+					this.OPTION2(() => {
+						this.OR2([
+							// BETWEEN expr AND expr
+							{ ALT: () => this.SUBRULE(this.betweenSuffix) },
+							// [NOT] IN (...)
+							{ ALT: () => this.SUBRULE(this.inSuffix) },
+							// IS [NOT] NULL
+							{ ALT: () => this.SUBRULE(this.isNullSuffix) },
+							// Range operators (overlaps, contains, containedBy) with range literal
+							{ ALT: () => this.SUBRULE(this.rangeOpSuffix) },
+							// JSONB comparison operators (@>, <@, ?)
+							{ ALT: () => this.SUBRULE(this.jsonComparisonSuffix) },
+							// comparison (=, !=, <, >, <=, >=, like)
+							{ ALT: () => this.SUBRULE(this.comparisonSuffix) },
+						]);
+					});
 				},
 			},
 		]);
@@ -472,6 +485,19 @@ export class NqlParser extends CstParser {
 	 */
 	private comparisonSuffix = this.RULE('comparisonSuffix', () => {
 		this.SUBRULE(this.compOp);
+		this.SUBRULE(this.expression);
+	});
+
+	/**
+	 * json_comparison_suffix = ("@>" | "<@" | "?") expression ;
+	 * JSONB containment and key-existence operators.
+	 */
+	private jsonComparisonSuffix = this.RULE('jsonComparisonSuffix', () => {
+		this.OR([
+			{ ALT: () => this.CONSUME(JsonContainsOp) },
+			{ ALT: () => this.CONSUME(JsonContainedByOp) },
+			{ ALT: () => this.CONSUME(JsonExistsOp) },
+		]);
 		this.SUBRULE(this.expression);
 	});
 
@@ -743,11 +769,26 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * unary_expr = [ "-" ] primary_expr ;
+	 * unary_expr = [ "-" ] json_access_expr ;
 	 */
 	private unaryExpr = this.RULE('unaryExpr', () => {
 		this.OPTION(() => this.CONSUME(Minus));
+		this.SUBRULE(this.jsonAccessExpr);
+	});
+
+	/**
+	 * json_access_expr = primary_expr { ("->" | "->>") string_literal } ;
+	 * Chained JSON path access: col->'a'->'b'->>'c'
+	 */
+	private jsonAccessExpr = this.RULE('jsonAccessExpr', () => {
 		this.SUBRULE(this.primaryExpr);
+		this.MANY(() => {
+			this.OR([
+				{ ALT: () => this.CONSUME(JsonArrowText) },
+				{ ALT: () => this.CONSUME(JsonArrow) },
+			]);
+			this.SUBRULE(this.literal);
+		});
 	});
 
 	/**
@@ -755,6 +796,11 @@ export class NqlParser extends CstParser {
 	 */
 	private primaryExpr = this.RULE('primaryExpr', () => {
 		this.OR([
+			// Range literal in value context (unambiguous: starts with '[')
+			{
+				GATE: () => this.LA(1).tokenType === LBracket,
+				ALT: () => this.SUBRULE(this.rangeLiteral),
+			},
 			// Literal
 			{ ALT: () => this.SUBRULE(this.literal) },
 			// CASE expression: CASE WHEN ... THEN ... [ELSE ...] END
@@ -1091,6 +1137,35 @@ export class NqlParser extends CstParser {
 	private bindClause = this.RULE('bindClause', () => {
 		this.CONSUME(Bind);
 		this.SUBRULE(this.identSegment);
+	});
+
+	/**
+	 * set_clause = set_op [ "all" ] set_operand ;
+	 * set_op     = "union" | "intersect" | "except" ;
+	 * set_operand = "(" query ")" | ident_segment ;
+	 */
+	private setClause = this.RULE('setClause', () => {
+		// Set operation keyword
+		this.OR([
+			{ ALT: () => this.CONSUME(Union) },
+			{ ALT: () => this.CONSUME(Intersect) },
+			{ ALT: () => this.CONSUME(Except) },
+		]);
+		// Optional ALL
+		this.OPTION(() => {
+			this.CONSUME(All);
+		});
+		// Right operand: parenthesized query or bound name
+		this.OR2([
+			{
+				ALT: () => {
+					this.CONSUME(LParen);
+					this.SUBRULE(this.query);
+					this.CONSUME(RParen);
+				},
+			},
+			{ ALT: () => this.SUBRULE(this.identSegment) },
+		]);
 	});
 
 	/**

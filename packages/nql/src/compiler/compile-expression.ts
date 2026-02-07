@@ -4,7 +4,15 @@
  * Compiles NQL boolean expressions to WhereIntent (WHERE/HAVING clauses).
  */
 
-import type { WhereInIntent, WhereIntent, WhereRangeIntent } from '@dbsp/types';
+import type {
+	QueryIntent,
+	WhereComparisonIntent,
+	WhereInIntent,
+	WhereIntent,
+	WhereJsonContainsIntent,
+	WhereJsonExistsIntent,
+	WhereRangeIntent,
+} from '@dbsp/types';
 import type {
 	NqlBetweenExpression,
 	NqlBinaryExpression,
@@ -12,10 +20,13 @@ import type {
 	NqlExpression,
 	NqlInExpression,
 	NqlIsNullExpression,
+	NqlJsonAccessExpression,
+	NqlJsonComparisonExpression,
 	NqlRangeOpExpression,
 	NqlRelationFilterExpression,
 	NqlUnaryExpression,
 } from '../parser/ast.js';
+import { expandDateRange, isDateRangePattern } from './date-range-patterns.js';
 import {
 	expressionToField,
 	expressionToRangeValue,
@@ -105,6 +116,65 @@ export function compileExpression(
 
 		case 'comparison': {
 			const comp = expr as NqlComparisonExpression;
+
+			// JSON access on LHS: data->'key' = 'val'
+			if (comp.left.type === 'jsonAccess') {
+				const jsonLeft = comp.left as NqlJsonAccessExpression;
+				const baseField = expressionToField(jsonLeft.base, aliasContext);
+				if (!baseField) {
+					throw new Error('JSON access base must be a field reference');
+				}
+				const operator = mapComparisonOperator(comp.operator);
+				const value = resolveFilterValue(
+					comp.right,
+					ctx,
+					aliasContext,
+					outerAliases,
+				);
+				return {
+					kind: 'comparison',
+					field: baseField,
+					operator,
+					value,
+					jsonPath: jsonLeft.path,
+					jsonMode: jsonLeft.mode,
+				} satisfies WhereComparisonIntent;
+			}
+
+			// JSON function on LHS: json_extract_text(data, 'key') = 'val'
+			if (comp.left.type === 'function') {
+				const fn = comp.left.name.toLowerCase();
+				if (fn === 'json_extract' || fn === 'json_extract_text') {
+					if (comp.left.args.length < 2) {
+						throw new Error(`${fn}() requires at least 2 arguments`);
+					}
+					const baseField = expressionToField(comp.left.args[0]!, aliasContext);
+					if (!baseField) {
+						throw new Error(`${fn}() first argument must be a field reference`);
+					}
+					const keys = comp.left.args
+						.slice(1)
+						.map((a) =>
+							String(resolveFilterValue(a, ctx, aliasContext, outerAliases)),
+						);
+					const operator = mapComparisonOperator(comp.operator);
+					const value = resolveFilterValue(
+						comp.right,
+						ctx,
+						aliasContext,
+						outerAliases,
+					);
+					return {
+						kind: 'comparison',
+						field: baseField,
+						operator,
+						value,
+						jsonPath: keys,
+						jsonMode: fn === 'json_extract' ? 'json' : 'text',
+					} satisfies WhereComparisonIntent;
+				}
+			}
+
 			const field = expressionToField(comp.left, aliasContext);
 			if (!field) {
 				throw new Error('Left side of comparison must be a field reference');
@@ -190,9 +260,27 @@ export function compileExpression(
 				values = inExpr.values.map((v) =>
 					resolveFilterValue(v, ctx, aliasContext, outerAliases),
 				);
+
+				// Amendment 11: detect if ALL values are date range patterns → expand to OR of ANDs
+				const dateRangeValues = values.filter(
+					(v): v is string => typeof v === 'string' && isDateRangePattern(v),
+				);
+				if (dateRangeValues.length > 0) {
+					if (dateRangeValues.length !== values.length) {
+						throw new Error(
+							'Cannot mix date range patterns with regular values in IN list. ' +
+								'Use all date ranges or all literals.',
+						);
+					}
+					return expandDateRangeList(field, dateRangeValues, inExpr.negated);
+				}
 			} else if ('type' in inExpr.values && inExpr.values.type === 'subquery') {
 				// Subquery is a full QueryIntent — contextual validation at adapter level
-				const subquery = fns.compileQuery(inExpr.values.query, ctx);
+				// Subqueries in IN clauses are always simple queries, never set operations
+				const subquery = fns.compileQuery(
+					inExpr.values.query,
+					ctx,
+				) as QueryIntent;
 
 				const result: WhereInIntent = {
 					kind: 'in',
@@ -210,11 +298,11 @@ export function compileExpression(
 				'type' in inExpr.values &&
 				inExpr.values.type === 'dateRange'
 			) {
-				// Date range requires semantic date expansion (planned for future release)
-				throw new Error(
-					'Date range in IN clause is not yet supported. ' +
-						'Use explicit BETWEEN instead:\n' +
-						'  table | where date between "2024-01-01" and "2024-12-31"',
+				// Single date range: 'YYYY-Q1' → >= start AND < end (half-open)
+				return expandDateRangeList(
+					field,
+					[inExpr.values.value],
+					inExpr.negated,
 				);
 			} else {
 				values = [];
@@ -320,7 +408,139 @@ export function compileExpression(
 			};
 		}
 
+		case 'function': {
+			// JSON function notation in WHERE context
+			const fn = expr.name.toLowerCase();
+			if (fn === 'json_contains' || fn === 'json_contained_by') {
+				if (expr.args.length < 2) {
+					throw new Error(`${fn}() requires 2 arguments: field and value`);
+				}
+				const jsonField = expressionToField(expr.args[0]!, aliasContext);
+				if (!jsonField) {
+					throw new Error(`${fn}() first argument must be a field reference`);
+				}
+				const jsonValue = resolveFilterValue(
+					expr.args[1]!,
+					ctx,
+					aliasContext,
+					outerAliases,
+				);
+				return {
+					kind: 'jsonContains',
+					field: jsonField,
+					value: jsonValue,
+					reversed: fn === 'json_contained_by',
+				} satisfies WhereJsonContainsIntent;
+			}
+			if (fn === 'json_exists') {
+				if (expr.args.length < 2) {
+					throw new Error(`${fn}() requires 2 arguments: field and key`);
+				}
+				const jsonField = expressionToField(expr.args[0]!, aliasContext);
+				if (!jsonField) {
+					throw new Error(`${fn}() first argument must be a field reference`);
+				}
+				const key = resolveFilterValue(
+					expr.args[1]!,
+					ctx,
+					aliasContext,
+					outerAliases,
+				);
+				return {
+					kind: 'jsonExists',
+					field: jsonField,
+					key: String(key),
+				} satisfies WhereJsonExistsIntent;
+			}
+			throw new Error(`Unsupported function in WHERE context: ${fn}()`);
+		}
+
+		case 'jsonComparison': {
+			const jsonComp = expr as NqlJsonComparisonExpression;
+			const jsonField = expressionToField(jsonComp.left, aliasContext);
+			if (!jsonField) {
+				throw new Error(
+					'Left side of JSON comparison must be a field reference',
+				);
+			}
+
+			if (jsonComp.operator === '?') {
+				const key = resolveFilterValue(
+					jsonComp.right,
+					ctx,
+					aliasContext,
+					outerAliases,
+				);
+				return {
+					kind: 'jsonExists',
+					field: jsonField,
+					key: String(key),
+				} satisfies WhereJsonExistsIntent;
+			}
+
+			// @> or <@
+			const jsonValue = resolveFilterValue(
+				jsonComp.right,
+				ctx,
+				aliasContext,
+				outerAliases,
+			);
+			return {
+				kind: 'jsonContains',
+				field: jsonField,
+				value: jsonValue,
+				reversed: jsonComp.operator === '<@',
+			} satisfies WhereJsonContainsIntent;
+		}
+
 		default:
 			throw new Error(`Unsupported expression type in WHERE: ${expr.type}`);
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Date range helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Expand one or more date range patterns into a WhereIntent.
+ *
+ * - Single pattern → WhereAndIntent (gte + lt)
+ * - Multiple patterns → WhereOrIntent containing N WhereAndIntent children
+ * - Negated → wraps in WhereNotIntent
+ */
+function expandDateRangeList(
+	field: string,
+	patterns: string[],
+	negated: boolean,
+): WhereIntent {
+	const conditions = patterns.map((pattern) => {
+		const { start, end } = expandDateRange(pattern);
+		return {
+			kind: 'and',
+			conditions: [
+				{
+					kind: 'comparison',
+					field,
+					operator: 'gte',
+					value: start,
+				} satisfies WhereComparisonIntent,
+				{
+					kind: 'comparison',
+					field,
+					operator: 'lt',
+					value: end,
+				} satisfies WhereComparisonIntent,
+			],
+		} as WhereIntent;
+	});
+
+	const result: WhereIntent =
+		conditions.length === 1 ? conditions[0]! : { kind: 'or', conditions };
+
+	if (negated) {
+		return { kind: 'not', condition: result };
+	}
+
+	return result;
 }

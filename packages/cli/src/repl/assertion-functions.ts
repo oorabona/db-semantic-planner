@@ -562,11 +562,13 @@ export function assertDbOutput(
 
 	// Row-by-row, column-by-column comparison
 	for (let r = 0; r < expectedRows.length; r++) {
-		const expectedRow = expectedRows[r]!;
-		const actualRow = actualRows[r]!;
+		const expectedRow = expectedRows[r];
+		const actualRow = actualRows[r];
+		if (!expectedRow || !actualRow) continue;
 
 		for (let c = 0; c < columns.length; c++) {
-			const col = columns[c]!;
+			const col = columns[c];
+			if (!col) continue;
 			const expectedVal = expectedRow[c] ?? '';
 			const actualVal = actualRow[col];
 			const normalizedActual = normalize(actualVal);

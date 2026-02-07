@@ -116,6 +116,8 @@ function mapToHandlerDecision(
 			direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
 		})),
 		partition: pd.partitionBy,
+		jsonPath: pd.jsonPath,
+		jsonMode: pd.jsonMode,
 	} as HandlerDecision;
 }
 
@@ -184,6 +186,9 @@ export interface PlanDecision {
 	readonly fkColumn?: string;
 	readonly maxDepth?: number;
 	readonly role?: string;
+	// JSON extraction metadata
+	readonly jsonPath?: readonly string[];
+	readonly jsonMode?: 'json' | 'text';
 	// Arithmetic expressions use args: [left, right] instead of dedicated fields
 	// Scalar subquery comparison properties
 	readonly selectColumn?: string;

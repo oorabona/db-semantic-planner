@@ -123,12 +123,12 @@ export function parse(
 		if (!cstResult.cst) {
 			throw new Error('CST is undefined despite no parse errors');
 		}
-		const ast = cstToAst(cstResult.cst);
+		const { ast, warnings } = cstToAst(cstResult.cst);
 		return {
 			success: true,
 			ast,
 			errors: [],
-			warnings: [],
+			warnings,
 		};
 	} catch (err) {
 		return {
@@ -175,7 +175,7 @@ export function compile(
 			success: true,
 			ast: result,
 			errors: [],
-			warnings: [],
+			warnings: parseResult.warnings,
 		};
 	} catch (err) {
 		return {
