@@ -10,6 +10,8 @@ import type {
 	OrderByIntent,
 	QueryIntent,
 	SelectIntent,
+	SetOperationIntent,
+	SetOperationType,
 	WhereIntent,
 } from '@dbsp/types';
 import type {
@@ -20,6 +22,7 @@ import type {
 	NqlOrderItem,
 	NqlQuery,
 	NqlSelectClause,
+	NqlSetClause,
 	NqlWhereClause,
 } from '../parser/ast.js';
 import { expressionToField, expressionToSql } from './expression-utils.js';
@@ -27,13 +30,23 @@ import { applyIncludeLimit, buildNestedIncludes } from './include-builder.js';
 import type { CompilerContext, CompilerFns } from './types.js';
 
 /**
- * Compile a full NQL query to a QueryIntent.
+ * Compile a full NQL query to a QueryIntent or SetOperationIntent.
+ * When the query contains a set clause (UNION/INTERSECT/EXCEPT),
+ * the result is a SetOperationIntent wrapping the left and right queries.
  */
 export function compileQuery(
 	query: NqlQuery,
 	ctx: CompilerContext,
 	fns: CompilerFns,
-): QueryIntent {
+	bindings?: ReadonlyMap<string, QueryIntent>,
+): QueryIntent | SetOperationIntent {
+	// Check for set operation clause
+	const setClauseIndex = query.clauses.findIndex(
+		(c) => c.type === 'setOperation',
+	);
+	if (setClauseIndex >= 0) {
+		return compileSetOperation(query, setClauseIndex, ctx, fns, bindings);
+	}
 	ctx.currentFromTable = query.table;
 	ctx.validator?.validateTable(query.table);
 
@@ -199,6 +212,52 @@ export function compileQuery(
 		...(distinct !== undefined && { distinct }),
 		...(limit !== undefined && { limit }),
 		...(offset !== undefined && { offset }),
+	};
+}
+
+/**
+ * Compile a set operation (UNION/INTERSECT/EXCEPT).
+ * Splits clauses at the set clause: before = left query, set operand = right query.
+ */
+function compileSetOperation(
+	query: NqlQuery,
+	setClauseIndex: number,
+	ctx: CompilerContext,
+	fns: CompilerFns,
+	bindings?: ReadonlyMap<string, QueryIntent>,
+): SetOperationIntent {
+	const setClause = query.clauses[setClauseIndex] as NqlSetClause;
+
+	// Left side: all clauses before the set operation
+	const leftQuery: NqlQuery = {
+		type: 'query',
+		table: query.table,
+		clauses: query.clauses.slice(0, setClauseIndex),
+	};
+	const left = compileQuery(leftQuery, ctx, fns, bindings) as QueryIntent;
+
+	// Right side: inline sub-query or bound name reference
+	let right: QueryIntent | SetOperationIntent;
+	if (setClause.right) {
+		right = compileQuery(setClause.right, ctx, fns, bindings);
+	} else if (setClause.boundName) {
+		const bound = bindings?.get(setClause.boundName);
+		if (!bound) {
+			throw new Error(
+				`Set operation references unbound name '${setClause.boundName}'. Use | bind ${setClause.boundName} in a preceding statement.`,
+			);
+		}
+		right = bound;
+	} else {
+		throw new Error('Set operation missing right operand');
+	}
+
+	return {
+		kind: 'setOperation',
+		op: setClause.op as SetOperationType,
+		all: setClause.all,
+		left,
+		right,
 	};
 }
 

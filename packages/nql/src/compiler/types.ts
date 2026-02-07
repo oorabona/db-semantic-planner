@@ -3,7 +3,12 @@
  * Shared types, interfaces, and constants for the NQL compiler.
  */
 
-import type { MutationIntent, QueryIntent, WhereIntent } from '@dbsp/types';
+import type {
+	MutationIntent,
+	QueryIntent,
+	SetOperationIntent,
+	WhereIntent,
+} from '@dbsp/types';
 import type { NqlExpression } from '../parser/ast.js';
 import type { ColumnValidator } from './column-validator.js';
 
@@ -13,6 +18,8 @@ export interface CompileResult {
 	readonly returning?: readonly string[];
 	/** Named bindings from `| bind X` clauses (CTE source queries) */
 	readonly bindings?: ReadonlyMap<string, QueryIntent>;
+	/** Set operation (UNION/INTERSECT/EXCEPT) wrapping two queries */
+	readonly setOperation?: SetOperationIntent;
 }
 
 /**
@@ -63,7 +70,7 @@ export interface CompilerFns {
 	compileQuery: (
 		query: import('../parser/ast.js').NqlQuery,
 		ctx: CompilerContext,
-	) => QueryIntent;
+	) => QueryIntent | SetOperationIntent;
 	compileSelectClause: (
 		clause: import('../parser/ast.js').NqlSelectClause,
 		ctx: CompilerContext,

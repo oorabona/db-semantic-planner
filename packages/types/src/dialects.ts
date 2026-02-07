@@ -105,6 +105,9 @@ export interface DialectCapabilities {
 	/** Supports native JSON/JSONB types */
 	readonly supportsJsonType: boolean;
 
+	/** Supports JSON path/extract/contains operators (PG: ->, ->>, @>, <@, ?, #>, #>>) */
+	readonly supportsJsonOperators: boolean;
+
 	/** Supports schema prefixes (e.g., schema.table) */
 	readonly supportsSchemas: boolean;
 

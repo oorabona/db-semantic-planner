@@ -180,6 +180,11 @@ interface RawDecisionInput extends Decision {
 	readonly condition?: Decision;
 	readonly caseInsensitive?: boolean;
 	readonly subquery?: Record<string, unknown>;
+	// JSON-related fields
+	readonly jsonPath?: readonly string[];
+	readonly jsonMode?: 'json' | 'text';
+	readonly reversed?: boolean;
+	readonly key?: string;
 }
 
 /**
@@ -187,8 +192,23 @@ interface RawDecisionInput extends Decision {
  * WhereIntent uses `kind` + `field`, Decision uses `type` + `column` + `operator`.
  */
 function normalizeToDecision(input: Decision): Decision {
-	// If it already has `column`, it's already a Decision — pass through
-	if (input.column !== undefined) return input;
+	// If it already has `column`, it's already a Decision.
+	// BUT: if jsonPath is present, reroute to jsonComparison handler
+	// (mapToHandlerDecision sets column but keeps the original operator like 'eq')
+	if (input.column !== undefined) {
+		const raw = input as RawDecisionInput;
+		if (raw.jsonPath && raw.jsonPath.length > 0) {
+			return {
+				type: 'where',
+				column: input.column,
+				operator: 'jsonComparison',
+				value: input.value,
+				jsonPath: raw.jsonPath,
+				jsonMode: raw.jsonMode ?? 'text',
+			};
+		}
+		return input;
+	}
 
 	const raw = input as RawDecisionInput;
 
@@ -220,13 +240,25 @@ function normalizeToDecision(input: Decision): Decision {
 	if (!kind) return input;
 
 	switch (kind) {
-		case 'comparison':
+		case 'comparison': {
+			if (raw.jsonPath) {
+				// Route to jsonComparison handler when jsonPath is present
+				return {
+					type: 'where',
+					column: raw.field as string,
+					operator: 'jsonComparison',
+					value: raw.value,
+					jsonPath: raw.jsonPath as readonly string[],
+					jsonMode: (raw.jsonMode as 'json' | 'text') ?? 'text',
+				};
+			}
 			return {
 				type: 'where',
 				column: raw.field as string,
 				operator: raw.operator as string,
 				value: raw.value,
 			};
+		}
 		case 'and':
 			return {
 				type: 'and',
@@ -304,6 +336,20 @@ function normalizeToDecision(input: Decision): Decision {
 				column: raw.field as string,
 				operator: raw.caseInsensitive ? 'ilike' : 'like',
 				value: raw.pattern,
+			};
+		case 'jsonContains':
+			return {
+				type: 'where',
+				column: raw.field as string,
+				operator: raw.reversed ? 'jsonContainedBy' : 'jsonContains',
+				value: raw.value,
+			};
+		case 'jsonExists':
+			return {
+				type: 'where',
+				column: raw.field as string,
+				operator: 'jsonExists',
+				value: raw.key,
 			};
 		default:
 			// Pass through for types already in Decision format or unknown

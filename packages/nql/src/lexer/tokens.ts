@@ -137,6 +137,15 @@ export const Then = createToken({ name: 'Then', pattern: /then\b/i });
 export const Else = createToken({ name: 'Else', pattern: /else\b/i });
 export const End = createToken({ name: 'End', pattern: /end\b/i });
 
+// Set operations
+export const Union = createToken({ name: 'Union', pattern: /union\b/i });
+// Intersect must come before In/Into in allTokens since 'in' is prefix
+export const Intersect = createToken({
+	name: 'Intersect',
+	pattern: /intersect\b/i,
+});
+export const Except = createToken({ name: 'Except', pattern: /except\b/i });
+
 // ============================================================
 // PSEUDO-COLUMN KEYWORDS (Self-Referential Traversal)
 // ============================================================
@@ -216,6 +225,30 @@ export const Minus = createToken({ name: 'Minus', pattern: /-/ });
 export const Slash = createToken({ name: 'Slash', pattern: /\// });
 export const Percent = createToken({ name: 'Percent', pattern: /%/ });
 
+// JSONB operators (E13)
+export const JsonArrowText = createToken({
+	name: 'JsonArrowText',
+	pattern: /->>/,
+}); // ->> (extract text)
+export const JsonArrow = createToken({
+	name: 'JsonArrow',
+	pattern: /->(?!>)/,
+}); // -> (extract JSON, NOT ->>)
+export const JsonContainsOp = createToken({
+	name: 'JsonContainsOp',
+	pattern: /@>/,
+}); // @> (contains)
+export const JsonContainedByOp = createToken({
+	name: 'JsonContainedByOp',
+	pattern: /<@/,
+}); // <@ (contained by)
+export const JsonExistsOp = createToken({
+	name: 'JsonExistsOp',
+	pattern: /\?/,
+}); // ? (key exists)
+// Note: #> and #>> (JSON path extract) conflict with NQL's # line comments.
+// Use function notation instead: json_path(col, '{a,b}'), json_path_text(col, '{a,b}')
+
 // ============================================================
 // TOKEN ORDER (Important for Chevrotain!)
 // Keywords must come before Identifier
@@ -260,6 +293,7 @@ export const allTokens = [
 	Some,
 	None,
 	Every,
+	Intersect, // Must come before In/Into (in is prefix of intersect)
 	Insert, // Must come before In
 	Into, // Must come before In
 	In,
@@ -292,6 +326,9 @@ export const allTokens = [
 	Then,
 	Else,
 	End,
+	// Set operations
+	Union,
+	Except,
 
 	// Range values (date/time patterns - must come before NumberLiteral)
 	RangeValue,
@@ -302,7 +339,11 @@ export const allTokens = [
 	StringLiteral,
 	NumberLiteral,
 
-	// Multi-char operators (before single-char)
+	// Multi-char operators (before single-char — longest match first!)
+	JsonArrowText, // ->> before -> before -
+	JsonArrow, // -> before -
+	JsonContainsOp, // @> before >
+	JsonContainedByOp, // <@ before <
 	NotEquals,
 	LessThanOrEqual,
 	GreaterThanOrEqual,
@@ -324,6 +365,7 @@ export const allTokens = [
 	Minus,
 	Slash,
 	Percent,
+	JsonExistsOp, // ? (no conflict with other tokens)
 ];
 
 // Create the lexer instance

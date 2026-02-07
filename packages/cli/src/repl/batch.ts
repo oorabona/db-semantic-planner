@@ -306,7 +306,8 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 	// Output results in text format
 	if (format === 'text') {
 		for (let i = 0; i < results.length; i++) {
-			const result = results[i]!;
+			const result = results[i];
+			if (!result) continue;
 			console.log(`\n> ${queries[i]}`);
 			if (result.success) {
 				console.log(result.output);

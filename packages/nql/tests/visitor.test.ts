@@ -33,7 +33,7 @@ function parseToAst(input: string): NqlProgram {
 	if (result.errors.length > 0) {
 		throw new Error(`Parse error: ${result.errors[0]!.message}`);
 	}
-	return cstToAst(result.cst!);
+	return cstToAst(result.cst!).ast;
 }
 
 describe('NQL Visitor - Queries', () => {

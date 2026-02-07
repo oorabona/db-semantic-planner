@@ -323,13 +323,20 @@ export const genericWindowHandler: ExpressionHandler = {
 			args.push(columnRef(decision.column, tableAlias, undefined, ctx.naming));
 		}
 
-		// Add other args
+		// Add other args (e.g., offset for lag/lead)
 		if (decision.args && Array.isArray(decision.args)) {
 			for (const arg of decision.args) {
 				const paramNumber = ++state.paramIndex;
 				state.parameters.push(arg);
 				args.push(createParamRef(paramNumber));
 			}
+		}
+
+		// Add default value for lag/lead
+		if (decision.value !== undefined) {
+			const defaultParamNumber = ++state.paramIndex;
+			state.parameters.push(decision.value);
+			args.push(createParamRef(defaultParamNumber));
 		}
 
 		return buildWindowFunction(funcName, args, decision, ctx);

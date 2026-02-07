@@ -24,6 +24,7 @@ import {
 } from './coalesce.js';
 // Handler imports
 import { columnAliasHandler, columnHandler, starHandler } from './column.js';
+import { jsonExtractHandler, jsonPathExtractHandler } from './json.js';
 import {
 	chainedPseudoHandler,
 	pseudoColumnHandler,
@@ -68,6 +69,7 @@ export {
 } from './coalesce.js';
 // Re-exports
 export { columnAliasHandler, columnHandler, starHandler } from './column.js';
+export { jsonExtractHandler, jsonPathExtractHandler } from './json.js';
 export {
 	chainedPseudoHandler,
 	pseudoColumnHandler,
@@ -152,6 +154,14 @@ export const rawExpressionHandlers = [
 ];
 
 /**
+ * JSON expression handlers
+ */
+export const jsonExpressionHandlers = [
+	jsonExtractHandler,
+	jsonPathExtractHandler,
+];
+
+/**
  * Pseudo-column expression handlers (hierarchy traversal)
  */
 export const pseudoExpressionHandlers = [
@@ -182,6 +192,7 @@ export const allExpressionHandlers = [
 	...rawExpressionHandlers,
 	...pseudoExpressionHandlers,
 	...relationExpressionHandlers,
+	...jsonExpressionHandlers,
 	arithmeticHandler,
 ];
 
