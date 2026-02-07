@@ -27,6 +27,8 @@ export type {
 	SelectFieldsIntent,
 	SelectIntent,
 	SelectWithExpressionsIntent,
+	SetOperationIntent,
+	SetOperationType,
 	SortDirection,
 	UpdateIntent,
 	UpsertConflictAction,
@@ -47,7 +49,11 @@ export type {
 	WindowOrderBy,
 } from '@dbsp/types';
 
-import type { MutationIntent, QueryIntent } from '@dbsp/types';
+import type {
+	MutationIntent,
+	QueryIntent,
+	SetOperationIntent,
+} from '@dbsp/types';
 import type {
 	NqlMutationPipeline,
 	NqlProgram,
@@ -146,8 +152,11 @@ export class NqlCompiler {
 			lastResult = this.compileSingleStatement(stmt, bindings);
 
 			const bindName = extractBindName(stmt);
-			if (bindName && lastResult.query) {
-				bindings.set(bindName, lastResult.query);
+			if (bindName) {
+				if (lastResult.query) {
+					bindings.set(bindName, lastResult.query);
+				}
+				// Note: set operations cannot currently be bound as CTE sources
 			}
 		}
 
@@ -162,7 +171,11 @@ export class NqlCompiler {
 		bindings?: Map<string, QueryIntent>,
 	): CompileResult {
 		if (stmt.type === 'query') {
-			return { query: compileQuery(stmt, this.ctx, this.fns) };
+			const result = compileQuery(stmt, this.ctx, this.fns, bindings);
+			if ('kind' in result && result.kind === 'setOperation') {
+				return { setOperation: result as SetOperationIntent };
+			}
+			return { query: result as QueryIntent };
 		}
 		if (stmt.type === 'mutationPipeline') {
 			const result = compileMutationPipeline(

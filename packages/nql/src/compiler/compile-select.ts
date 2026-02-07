@@ -8,6 +8,7 @@ import type {
 	AggregateFunction,
 	ExpressionIntent,
 	PseudoColumnTraversal,
+	QueryIntent,
 	SelectIntent,
 	WindowFunction,
 } from '@dbsp/types';
@@ -151,6 +152,10 @@ export function compileSelectExpression(
 				...(extraArgs && { extraArgs }),
 			};
 		}
+		// JSON function notation → same intent as operator notation
+		const jsonIntent = compileJsonFunction(fn, expr.args, exprItem.alias);
+		if (jsonIntent) return jsonIntent;
+
 		// Non-aggregate function (e.g., now(), upper(), coalesce())
 		return {
 			kind: 'function',
@@ -170,6 +175,18 @@ export function compileSelectExpression(
 			field =
 				expressionToField(windowExpr.args[0]!) ??
 				expressionToSql(windowExpr.args[0]!);
+		}
+
+		// Extract offset and defaultValue for lag/lead (args[1] and args[2])
+		let offset: number | undefined;
+		let defaultValue: unknown;
+		if (fn === 'lag' || fn === 'lead') {
+			if (windowExpr.args.length > 1) {
+				offset = expressionToValue(windowExpr.args[1]!) as number;
+			}
+			if (windowExpr.args.length > 2) {
+				defaultValue = expressionToValue(windowExpr.args[2]!);
+			}
 		}
 
 		const partitionBy =
@@ -200,6 +217,8 @@ export function compileSelectExpression(
 			function: fn,
 			...(field !== undefined && { field }),
 			alias: exprItem.alias ?? fn,
+			...(offset !== undefined && { offset }),
+			...(defaultValue !== undefined && { defaultValue }),
 			over: {
 				...(partitionBy && { partitionBy }),
 				...(orderBy && { orderBy }),
@@ -211,7 +230,7 @@ export function compileSelectExpression(
 	if (expr.type === 'subquery') {
 		return {
 			kind: 'subquery',
-			query: fns.compileQuery(expr.query, ctx),
+			query: fns.compileQuery(expr.query, ctx) as QueryIntent,
 			...(exprItem.alias !== undefined && { as: exprItem.alias }),
 		};
 	}
@@ -268,6 +287,21 @@ export function compileSelectExpression(
 	// CASE expression
 	if (expr.type === 'case') {
 		return compileCaseExpression(expr as NqlCaseExpression, exprItem, ctx, fns);
+	}
+
+	// JSON access expression: data->'key'->>'nested' as alias
+	if (expr.type === 'jsonAccess') {
+		const baseField = expressionToField(expr.base);
+		if (!baseField) {
+			throw new Error('JSON access base must be a field reference');
+		}
+		return {
+			kind: 'jsonExtract',
+			field: baseField,
+			path: expr.path,
+			mode: expr.mode,
+			...(exprItem.alias !== undefined && { as: exprItem.alias }),
+		};
 	}
 
 	throw new Error(
@@ -464,4 +498,68 @@ export function compileExpressionToIntent(
 		expression: expr,
 	};
 	return compileSelectExpression(selectItem, ctx, fns);
+}
+
+// ============================================================================
+// JSON Function Notation → Same intents as operator notation
+// ============================================================================
+
+const JSON_FUNCTION_NAMES: ReadonlySet<string> = new Set([
+	'json_extract',
+	'json_extract_text',
+	'json_path',
+	'json_path_text',
+]);
+
+/**
+ * Compile JSON function notation to the same intent as operator notation.
+ * Returns null if the function is not a known JSON function.
+ */
+function compileJsonFunction(
+	fn: string,
+	args: NqlExpression[],
+	alias: string | undefined,
+): ExpressionIntent | null {
+	if (!JSON_FUNCTION_NAMES.has(fn)) return null;
+
+	if (args.length < 2) {
+		throw new Error(`${fn}() requires at least 2 arguments: field and key`);
+	}
+
+	const field = expressionToField(args[0]!);
+	if (!field) {
+		throw new Error(`${fn}() first argument must be a field reference`);
+	}
+
+	if (fn === 'json_extract' || fn === 'json_extract_text') {
+		// json_extract(col, 'key') → JsonExtractIntent
+		const keys = args.slice(1).map((a) => String(expressionToValue(a)));
+		return {
+			kind: 'jsonExtract',
+			field,
+			path: keys,
+			mode: fn === 'json_extract' ? 'json' : 'text',
+			...(alias !== undefined && { as: alias }),
+		};
+	}
+
+	if (fn === 'json_path' || fn === 'json_path_text') {
+		// json_path(col, 'a', 'b') → JsonPathExtractIntent with array literal '{a,b}'
+		// Also supports pre-built literal: json_path(col, '{a,b}')
+		const keys = args.slice(1).map((a) => String(expressionToValue(a)));
+		const first = keys[0];
+		const pathStr =
+			keys.length === 1 && first?.startsWith('{') && first.endsWith('}')
+				? first
+				: `{${keys.join(',')}}`;
+		return {
+			kind: 'jsonPathExtract',
+			field,
+			path: pathStr,
+			mode: fn === 'json_path' ? 'json' : 'text',
+			...(alias !== undefined && { as: alias }),
+		};
+	}
+
+	return null;
 }

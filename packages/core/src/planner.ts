@@ -580,7 +580,8 @@ function optimizeInToExists(
 			if (!subSelect || subSelect.type !== 'fields') return where;
 			const fields = 'fields' in subSelect ? subSelect.fields : undefined;
 			if (!fields || fields.length !== 1) return where;
-			const subColumn = fields[0]!;
+			const subColumn = fields[0];
+			if (!subColumn) return where;
 
 			// Look for a relation from sourceTable to subquery's table
 			// where the FK column matches the subquery's selected column

@@ -14,6 +14,7 @@ import type {
 	NqlProgram,
 	NqlQuery,
 	NqlSelectItem,
+	NqlSetClause,
 	NqlStatement,
 } from '../parser/ast.js';
 import type { CstContext, VisitFn } from './helpers.js';
@@ -66,6 +67,7 @@ export function visitQueryClause(ctx: CstContext, visit: VisitFn): NqlClause {
 	if (ctx.orderClause) return visit(asCstNode(ctx.orderClause[0]!));
 	if (ctx.limitClause) return visit(asCstNode(ctx.limitClause[0]!));
 	if (ctx.offsetClause) return visit(asCstNode(ctx.offsetClause[0]!));
+	if (ctx.setClause) return visit(asCstNode(ctx.setClause[0]!));
 	if (ctx.bindClause) return visit(asCstNode(ctx.bindClause[0]!));
 	unreachable('Unknown query clause');
 }
@@ -239,4 +241,26 @@ export function visitOrderItem(ctx: CstContext, visit: VisitFn): NqlOrderItem {
 	const expression = visit(asCstNode(ctx.expression[0]!));
 	const direction: 'asc' | 'desc' = ctx.Desc ? 'desc' : 'asc';
 	return { expression, direction };
+}
+
+export function visitSetClause(ctx: CstContext, visit: VisitFn): NqlSetClause {
+	// Determine set operation type from consumed token
+	let op: NqlSetClause['op'];
+	if (ctx.Union) op = 'union';
+	else if (ctx.Intersect) op = 'intersect';
+	else if (ctx.Except) op = 'except';
+	else unreachable('Set clause missing operation keyword');
+
+	const all = !!ctx.All;
+
+	// Right operand: parenthesized query or bound name
+	if (ctx.query) {
+		const right: NqlQuery = visit(asCstNode(ctx.query[0]!));
+		return { type: 'setOperation', op, all, right };
+	}
+	if (ctx.identSegment) {
+		const boundName: string = visit(asCstNode(ctx.identSegment[0]!));
+		return { type: 'setOperation', op, all, boundName };
+	}
+	unreachable('Set clause missing operand');
 }

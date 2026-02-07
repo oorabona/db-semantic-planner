@@ -9,6 +9,7 @@
  */
 
 import type { CstNode } from 'chevrotain';
+import type { NqlWarning } from '../errors/types.js';
 import type { NqlProgram } from '../parser/ast.js';
 import { nqlParser } from '../parser/grammar.js';
 import type { CstContext, VisitFn } from './helpers.js';
@@ -27,6 +28,8 @@ import {
 	visitExprList,
 	visitInSuffix,
 	visitIsNullSuffix,
+	visitJsonAccessExpr,
+	visitJsonComparisonSuffix,
 	visitMulExpr,
 	visitNotExpr,
 	visitOrExpr,
@@ -93,6 +96,7 @@ import {
 	visitSelectClause,
 	visitSelectItem,
 	visitSelectList,
+	visitSetClause,
 	visitStatement,
 	visitTableRef,
 	visitWhereClause,
@@ -106,11 +110,17 @@ const BaseCstVisitor = nqlParser.getBaseCstVisitorConstructor();
  */
 export class NqlCstVisitor extends BaseCstVisitor {
 	private readonly v: VisitFn;
+	readonly warnings: NqlWarning[] = [];
 
 	constructor() {
 		super();
 		this.v = (node: CstNode) => this.visit(node);
 		this.validateVisitor();
+	}
+
+	/** Clear warnings before each parse run (singleton reuse). */
+	resetWarnings(): void {
+		this.warnings.length = 0;
 	}
 
 	// -- Query structure --
@@ -200,6 +210,9 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	rangeOpSuffix(_ctx: CstContext) {
 		return visitRangeOpSuffix();
 	}
+	jsonComparisonSuffix(_ctx: CstContext) {
+		return visitJsonComparisonSuffix();
+	}
 	inSuffix(_ctx: CstContext) {
 		return visitInSuffix();
 	}
@@ -225,6 +238,9 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 	unaryExpr(ctx: CstContext) {
 		return visitUnaryExpr(ctx, this.v);
+	}
+	jsonAccessExpr(ctx: CstContext) {
+		return visitJsonAccessExpr(ctx, this.v, this.warnings);
 	}
 	primaryExpr(ctx: CstContext) {
 		return visitPrimaryExpr(ctx, this.v);
@@ -310,6 +326,9 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	bindClause(ctx: CstContext) {
 		return visitBindClause(ctx, this.v);
 	}
+	setClause(ctx: CstContext) {
+		return visitSetClause(ctx, this.v);
+	}
 	mutation(ctx: CstContext) {
 		return visitMutation(ctx, this.v);
 	}
@@ -346,8 +365,13 @@ export class NqlCstVisitor extends BaseCstVisitor {
 export const nqlVisitor = new NqlCstVisitor();
 
 /**
- * Transform CST to AST
+ * Transform CST to AST, collecting any warnings emitted during traversal.
  */
-export function cstToAst(cst: CstNode): NqlProgram {
-	return nqlVisitor.visit(cst);
+export function cstToAst(cst: CstNode): {
+	ast: NqlProgram;
+	warnings: NqlWarning[];
+} {
+	nqlVisitor.resetWarnings();
+	const ast: NqlProgram = nqlVisitor.visit(cst);
+	return { ast, warnings: [...nqlVisitor.warnings] };
 }

@@ -7,6 +7,7 @@
 
 import type { CstNode, IToken } from 'chevrotain';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/index.js';
+import type { NqlWarning } from '../errors/types.js';
 import type {
 	NqlBetweenExpression,
 	NqlCaseExpression,
@@ -14,6 +15,8 @@ import type {
 	NqlExpression,
 	NqlInExpression,
 	NqlIsNullExpression,
+	NqlJsonAccessExpression,
+	NqlJsonComparisonExpression,
 	NqlLiteral,
 	NqlPathExpression,
 	NqlRangeLiteral,
@@ -103,6 +106,13 @@ export function visitPrimaryCond(
 	}
 	if (ctx.rangeOpSuffix) {
 		return buildRangeOp(left, asCstNode(ctx.rangeOpSuffix[0]!), visit);
+	}
+	if (ctx.jsonComparisonSuffix) {
+		return buildJsonComparison(
+			left,
+			asCstNode(ctx.jsonComparisonSuffix[0]!),
+			visit,
+		);
 	}
 
 	return left;
@@ -237,6 +247,108 @@ function buildRangeOp(
 	);
 }
 
+function buildJsonComparison(
+	left: NqlExpression,
+	suffixNode: CstNode,
+	visit: VisitFn,
+): NqlJsonComparisonExpression {
+	const suffixCtx = suffixNode.children as CstContext;
+	let operator: '@>' | '<@' | '?';
+	if (suffixCtx.JsonContainsOp) operator = '@>';
+	else if (suffixCtx.JsonContainedByOp) operator = '<@';
+	else if (suffixCtx.JsonExistsOp) operator = '?';
+	else {
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			'JSON comparison suffix missing operator',
+		);
+	}
+	requireFirst(
+		suffixCtx,
+		'expression',
+		'JSON comparison missing right operand',
+	);
+	const right = visit(asCstNode(suffixCtx.expression[0]!));
+	return { type: 'jsonComparison', left, operator, right };
+}
+
+// ============================================================
+// JSON ACCESS EXPRESSION
+// ============================================================
+
+/**
+ * Visit json_access_expr: base { ("->" | "->>") key } ...
+ * Returns the base expression if no JSON operators, otherwise wraps in NqlJsonAccessExpression.
+ */
+export function visitJsonAccessExpr(
+	ctx: CstContext,
+	visit: VisitFn,
+	warnings?: NqlWarning[],
+): NqlExpression {
+	requireFirst(ctx, 'primaryExpr', 'jsonAccessExpr missing primaryExpr');
+	const base = visit(asCstNode(ctx.primaryExpr[0]!));
+
+	// Collect JSON access operators and keys
+	const hasArrow = ctx.JsonArrow as IToken[] | undefined;
+	const hasArrowText = ctx.JsonArrowText as IToken[] | undefined;
+
+	if (!hasArrow && !hasArrowText) {
+		return base; // No JSON access — pass through
+	}
+
+	// Gather all operators sorted by offset to determine order
+	const ops: Array<{ mode: 'json' | 'text'; offset: number }> = [];
+	if (hasArrow) {
+		for (const tok of hasArrow) {
+			ops.push({ mode: 'json', offset: tok.startOffset });
+		}
+	}
+	if (hasArrowText) {
+		for (const tok of hasArrowText) {
+			ops.push({ mode: 'text', offset: tok.startOffset });
+		}
+	}
+	ops.sort((a, b) => a.offset - b.offset);
+
+	// Keys: each operator is followed by a literal
+	const literals = ctx.literal as CstNode[];
+	const path: string[] = [];
+	for (let i = 0; i < literals.length; i++) {
+		const lit = visit(asCstNode(literals[i]!));
+		if (lit && typeof lit === 'object' && 'value' in lit) {
+			path.push(String(lit.value));
+		} else {
+			path.push(String(lit));
+		}
+	}
+
+	// Warn if intermediate ->> is used (only the last operator determines mode)
+	if (warnings && ops.length > 1) {
+		for (let i = 0; i < ops.length - 1; i++) {
+			if (ops[i]?.mode === 'text') {
+				warnings.push({
+					code: 'WARN-JSON-001',
+					message:
+						'Intermediate ->> operator has no effect; only the last operator determines json/text mode',
+					suggestion:
+						'Use -> for intermediate steps, ->> only for the final extraction',
+				});
+				break; // one warning per chain is enough
+			}
+		}
+	}
+
+	// Last operator determines mode
+	const lastMode = ops[ops.length - 1]!.mode;
+
+	return {
+		type: 'jsonAccess',
+		base,
+		path,
+		mode: lastMode,
+	} satisfies NqlJsonAccessExpression;
+}
+
 // ============================================================
 // STUB VISITORS (required by Chevrotain but handled elsewhere)
 // ============================================================
@@ -251,6 +363,10 @@ export function visitBetweenSuffix(): NqlExpression {
 
 export function visitRangeOpSuffix(): NqlExpression {
 	unreachable('rangeOpSuffix should not be visited directly');
+}
+
+export function visitJsonComparisonSuffix(): NqlExpression {
+	unreachable('jsonComparisonSuffix should not be visited directly');
 }
 
 export function visitInSuffix(): NqlExpression {
@@ -355,8 +471,8 @@ export function visitMulExpr(ctx: CstContext, visit: VisitFn): NqlExpression {
 }
 
 export function visitUnaryExpr(ctx: CstContext, visit: VisitFn): NqlExpression {
-	requireFirst(ctx, 'primaryExpr', 'UnaryExpr missing primaryExpr');
-	const expr = visit(asCstNode(ctx.primaryExpr[0]!));
+	requireFirst(ctx, 'jsonAccessExpr', 'UnaryExpr missing jsonAccessExpr');
+	const expr = visit(asCstNode(ctx.jsonAccessExpr[0]!));
 	if (ctx.Minus) {
 		return { type: 'unary', operator: '-', operand: expr };
 	}
@@ -367,6 +483,7 @@ export function visitPrimaryExpr(
 	ctx: CstContext,
 	visit: VisitFn,
 ): NqlExpression {
+	if (ctx.rangeLiteral) return visit(asCstNode(ctx.rangeLiteral[0]!));
 	if (ctx.literal) return visit(asCstNode(ctx.literal[0]!));
 	if (ctx.caseExpr) return visit(asCstNode(ctx.caseExpr[0]!));
 	if (ctx.funcCall) return visit(asCstNode(ctx.funcCall[0]!));

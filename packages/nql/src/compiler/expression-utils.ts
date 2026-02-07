@@ -85,6 +85,12 @@ export function expressionToValue(expr: NqlExpression): unknown {
 				`Unsupported unary operator in value context: ${unary.operator}`,
 			);
 		}
+		case 'rangeLiteral': {
+			const range = expr as NqlRangeLiteral;
+			const lb = range.lowerInclusive ? '[' : '(';
+			const ub = range.upperInclusive ? ']' : ')';
+			return `${lb}${range.lower},${range.upper}${ub}`;
+		}
 		default:
 			throw new Error(`Cannot convert ${expr.type} to value`);
 	}

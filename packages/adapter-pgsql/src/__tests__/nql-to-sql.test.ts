@@ -21,7 +21,11 @@ import {
 	schema,
 } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
-import type { InsertFromIntent, UpsertFromIntent } from '@dbsp/types';
+import type {
+	InsertFromIntent,
+	SetOperationIntent,
+	UpsertFromIntent,
+} from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -624,6 +628,41 @@ describe('Bug regressions', () => {
 		});
 	});
 
+	// -------------------------------------------------------------------------
+	// E13d: Window lag/lead with offset and default value
+	// -------------------------------------------------------------------------
+	describe('window lag/lead offset and default (E13d)', () => {
+		it('lag with offset compiles to LAG(col, offset)', () => {
+			const { sql, params } = nqlToSQLWithParams(
+				'employees | select lag(salary, 2) over (order by name) as prev2',
+			);
+			// LAG with column + offset (parameterized)
+			expect(sql).toContain('lag(');
+			expect(sql).toContain('salary');
+			expect(params).toContain(2);
+		});
+
+		it('lead with offset and default compiles to LEAD(col, offset, default)', () => {
+			const { sql, params } = nqlToSQLWithParams(
+				'employees | select lead(salary, 1, 0) over (order by name) as next_salary',
+			);
+			expect(sql).toContain('lead(');
+			expect(sql).toContain('salary');
+			expect(params).toContain(1);
+			expect(params).toContain(0);
+		});
+
+		it('lag without offset omits offset param (PG defaults to 1)', () => {
+			const { sql, params } = nqlToSQLWithParams(
+				'employees | select lag(salary) over (order by name) as prev',
+			);
+			expect(sql).toContain('lag(');
+			expect(sql).toContain('salary');
+			// No offset/default params — PostgreSQL defaults to offset=1
+			expect(params).toHaveLength(0);
+		});
+	});
+
 	describe('relation.* wildcard expansion', () => {
 		it('relation.* uses unquoted star (A_Star)', () => {
 			const { sql } = blogToSQL('authors | select *, posts.*');
@@ -734,6 +773,58 @@ describe('Bug regressions', () => {
 	});
 });
 
+// ---------------------------------------------------------------------------
+// E13e: IN dateRange expansion → NQL → SQL
+// ---------------------------------------------------------------------------
+describe('NQL → SQL dateRange expansion (E13e)', () => {
+	it('single quarter expands to >= AND < with params', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			"employees | where name in '2024-Q1'",
+		);
+		// Half-open interval: >= '2024-01-01' AND < '2024-04-01'
+		expect(sql).toContain('>= $1');
+		expect(sql).toContain('< $2');
+		expect(params).toEqual(['2024-01-01', '2024-04-01']);
+	});
+
+	it('full year expands to Jan-Jan boundaries', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			"employees | where name in '2024'",
+		);
+		expect(params).toEqual(['2024-01-01', '2025-01-01']);
+	});
+
+	it('ISO week expands to 7-day boundaries', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			"employees | where name in '2024-W10'",
+		);
+		// W10 2024: 2024-03-04 → 2024-03-11
+		expect(params).toEqual(['2024-03-04', '2024-03-11']);
+	});
+
+	it('multiple date ranges produce OR with params', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			"employees | where name in ('2024-Q1', '2024-Q3')",
+		);
+		// Two half-open intervals joined by OR
+		expect(sql).toContain('or');
+		expect(params).toEqual([
+			'2024-01-01',
+			'2024-04-01',
+			'2024-07-01',
+			'2024-10-01',
+		]);
+	});
+
+	it('negated date range wraps in NOT', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			"employees | where name not in '2024-Q2'",
+		);
+		expect(sql).toContain('not');
+		expect(params).toEqual(['2024-04-01', '2024-07-01']);
+	});
+});
+
 // ===========================================================================
 // Mutation NQL → SQL E2E tests
 // ===========================================================================
@@ -762,6 +853,11 @@ const mutationSchema = schema({
 		title: 'string',
 		published: 'boolean',
 		userId: { type: 'integer' },
+	},
+	events: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		period: { type: 'daterange' },
 	},
 });
 
@@ -899,6 +995,28 @@ describe('NQL → SQL multi-row INSERT E2E', () => {
 		const setResult = mutationToSQL("insert into authors set name = 'Alice'");
 		expect(valuesResult.sql).toEqual(setResult.sql);
 		expect(valuesResult.params).toEqual(setResult.params);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// E13f: Range literal in INSERT
+// ---------------------------------------------------------------------------
+describe('NQL → SQL range literal in INSERT (E13f)', () => {
+	it('INSERT with range literal produces parameterized range value', () => {
+		const { sql, params } = mutationToSQL(
+			"insert into events set name = 'conf', period = [2024-01-01,2024-12-31)",
+		);
+		expect(sql).toContain('insert into');
+		expect(sql).toContain('events');
+		expect(params).toContain('[2024-01-01,2024-12-31)');
+	});
+
+	it('INSERT with inclusive range literal', () => {
+		const { sql, params } = mutationToSQL(
+			"insert into events set name = 'meeting', period = [2024-06-01,2024-06-30]",
+		);
+		expect(sql).toContain('insert into');
+		expect(params).toContain('[2024-06-01,2024-06-30]');
 	});
 });
 
@@ -1248,5 +1366,333 @@ describe('CASE expression enhancements', () => {
 		expect(sql).toContain('employees.name');
 		// NULL in ELSE should be SQL NULL, not a parameter
 		expect(sql).toMatch(/else\s+null/i);
+	});
+});
+
+// ===========================================================================
+// JSONB Operators (E13)
+// ===========================================================================
+
+const jsonSchema = schema({
+	events: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		data: { type: 'jsonb', nullable: true },
+		metadata: { type: 'jsonb', nullable: true },
+	},
+});
+
+function jsonNqlToSQL(nql: string): string {
+	const compiled = compile(nql, jsonSchema.model);
+	if (!compiled.success || !compiled.ast?.query) {
+		throw new Error(
+			`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+	const planReport = plan(compiled.ast.query, jsonSchema.model, {
+		dialectCapabilities: POSTGRESQL_CAPABILITIES,
+	});
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const result = adapter.compile(planReport, { model: jsonSchema.model });
+	return normalizeSQL(result.sql);
+}
+
+function jsonNqlToSQLWithParams(nql: string): {
+	sql: string;
+	params: readonly unknown[];
+} {
+	const compiled = compile(nql, jsonSchema.model);
+	if (!compiled.success || !compiled.ast?.query) {
+		throw new Error(
+			`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+	const planReport = plan(compiled.ast.query, jsonSchema.model, {
+		dialectCapabilities: POSTGRESQL_CAPABILITIES,
+	});
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const result = adapter.compile(planReport, { model: jsonSchema.model });
+	return { sql: normalizeSQL(result.sql), params: result.parameters };
+}
+
+describe('JSONB operators (E13)', () => {
+	describe('WHERE — operator notation', () => {
+		it('compiles @> (contains)', () => {
+			const { sql, params } = jsonNqlToSQLWithParams(
+				'events | where data @> \'{"active":true}\'',
+			);
+			expect(sql).toContain('data @>');
+			expect(params).toContain('{"active":true}');
+		});
+
+		it('compiles <@ (contained by)', () => {
+			const { sql, params } = jsonNqlToSQLWithParams(
+				'events | where data <@ \'{"a":1}\'',
+			);
+			expect(sql).toContain('data <@');
+			expect(params).toContain('{"a":1}');
+		});
+
+		it('compiles ? (key exists)', () => {
+			const { sql, params } = jsonNqlToSQLWithParams(
+				"events | where data ? 'email'",
+			);
+			expect(sql).toContain('data ?');
+			expect(params).toContain('email');
+		});
+
+		it('compiles ->> comparison (extract text = value)', () => {
+			const { sql, params } = jsonNqlToSQLWithParams(
+				"events | where data->>'status' = 'active'",
+			);
+			expect(sql).toContain('data ->>');
+			expect(sql).toContain('=');
+			expect(params).toContain('status');
+			expect(params).toContain('active');
+		});
+
+		it('compiles -> comparison (extract json = value)', () => {
+			const { sql, params } = jsonNqlToSQLWithParams(
+				"events | where data->'config' = '{\"x\":1}'",
+			);
+			expect(sql).toContain('data ->');
+			expect(params).toContain('config');
+		});
+
+		it("compiles chained access ->'a'->>'b' = value", () => {
+			const { sql, params } = jsonNqlToSQLWithParams(
+				"events | where data->'address'->>'city' = 'Paris'",
+			);
+			// chained: (events.data -> $1) ->> $2 = $3
+			expect(sql).toContain('->');
+			expect(sql).toContain('->>');
+			expect(params).toContain('address');
+			expect(params).toContain('city');
+			expect(params).toContain('Paris');
+		});
+	});
+
+	describe('WHERE — function notation', () => {
+		it('compiles json_contains()', () => {
+			const { sql, params } = jsonNqlToSQLWithParams(
+				'events | where json_contains(data, \'{"ok":true}\')',
+			);
+			expect(sql).toContain('data @>');
+			expect(params).toContain('{"ok":true}');
+		});
+
+		it('compiles json_contained_by()', () => {
+			const { sql, params } = jsonNqlToSQLWithParams(
+				'events | where json_contained_by(data, \'{"a":1}\')',
+			);
+			expect(sql).toContain('data <@');
+			expect(params).toContain('{"a":1}');
+		});
+
+		it('compiles json_exists()', () => {
+			const { sql, params } = jsonNqlToSQLWithParams(
+				"events | where json_exists(data, 'email')",
+			);
+			expect(sql).toContain('data ?');
+			expect(params).toContain('email');
+		});
+
+		it('compiles json_extract_text() in WHERE comparison', () => {
+			const { sql, params } = jsonNqlToSQLWithParams(
+				"events | where json_extract_text(data, 'status') = 'active'",
+			);
+			expect(sql).toContain('data ->>');
+			expect(params).toContain('status');
+			expect(params).toContain('active');
+		});
+	});
+
+	describe('SELECT — operator notation', () => {
+		it('compiles ->> as select expression', () => {
+			const sql = jsonNqlToSQL("events | select data->>'email' as email");
+			expect(sql).toContain('->>');
+			expect(sql).toContain('as email');
+		});
+
+		it('compiles chained access in select', () => {
+			const sql = jsonNqlToSQL(
+				"events | select data->'address'->>'city' as city",
+			);
+			expect(sql).toContain('->');
+			expect(sql).toContain('->>');
+			expect(sql).toContain('as city');
+		});
+	});
+
+	describe('SELECT — function notation', () => {
+		it('compiles json_extract_text() in select', () => {
+			const sql = jsonNqlToSQL(
+				"events | select json_extract_text(data, 'name') as name",
+			);
+			expect(sql).toContain('->>');
+			expect(sql).toContain('as name');
+		});
+
+		it('compiles json_path() in select', () => {
+			const sql = jsonNqlToSQL(
+				"events | select json_path(data, 'a', 'b') as nested",
+			);
+			expect(sql).toContain('#>');
+			expect(sql).toContain('as nested');
+		});
+	});
+
+	describe('dual notation equivalence', () => {
+		it('operator and function produce same WHERE SQL for containment', () => {
+			const opSql = jsonNqlToSQL('events | where data @> \'{"active":true}\'');
+			const fnSql = jsonNqlToSQL(
+				'events | where json_contains(data, \'{"active":true}\')',
+			);
+			expect(opSql).toEqual(fnSql);
+		});
+
+		it('operator and function produce same WHERE SQL for exists', () => {
+			const opSql = jsonNqlToSQL("events | where data ? 'email'");
+			const fnSql = jsonNqlToSQL("events | where json_exists(data, 'email')");
+			expect(opSql).toEqual(fnSql);
+		});
+	});
+});
+
+// ============================================================
+// Set Operations (E13b)
+// ============================================================
+
+/**
+ * Recursively compile a SetOperationIntent or QueryIntent to SQL.
+ */
+function compileIntentToSQL(
+	intent: QueryIntent | SetOperationIntent,
+	model: typeof testSchema.model,
+): string {
+	if ('kind' in intent && intent.kind === 'setOperation') {
+		const setOp = intent as SetOperationIntent;
+		const leftSQL = compileIntentToSQL(setOp.left, model);
+		const rightSQL = compileIntentToSQL(setOp.right, model);
+		const opKeyword = setOp.op.toUpperCase() + (setOp.all ? ' ALL' : '');
+		return `(${leftSQL}) ${opKeyword} (${rightSQL})`;
+	}
+	// Regular QueryIntent — plan and compile
+	const planReport = plan(intent as QueryIntent, model, {
+		dialectCapabilities: POSTGRESQL_CAPABILITIES,
+	});
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const result = adapter.compile(planReport, { model });
+	return normalizeSQL(result.sql);
+}
+
+/**
+ * NQL → normalized SQL for set operations.
+ */
+function setOpNqlToSQL(nql: string): string {
+	const compiled = compile(nql, testSchema.model);
+	if (!compiled.success) {
+		throw new Error(
+			`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+
+	if (compiled.ast?.setOperation) {
+		return normalizeSQL(
+			compileIntentToSQL(compiled.ast.setOperation, testSchema.model),
+		);
+	}
+	if (compiled.ast?.query) {
+		return normalizeSQL(
+			compileIntentToSQL(compiled.ast.query, testSchema.model),
+		);
+	}
+	throw new Error('NQL compilation produced neither query nor set operation');
+}
+
+describe('Set operations (E13b)', () => {
+	describe('simple set operations', () => {
+		it('compiles UNION', () => {
+			const sql = setOpNqlToSQL(
+				'employees | select name | union (departments | select name)',
+			);
+			expect(sql).toBe(
+				normalizeSQL(
+					'(SELECT employees.name FROM employees) UNION (SELECT departments.name FROM departments)',
+				),
+			);
+		});
+
+		it('compiles UNION ALL', () => {
+			const sql = setOpNqlToSQL(
+				'employees | select name | union all (departments | select name)',
+			);
+			expect(sql).toBe(
+				normalizeSQL(
+					'(SELECT employees.name FROM employees) UNION ALL (SELECT departments.name FROM departments)',
+				),
+			);
+		});
+
+		it('compiles INTERSECT', () => {
+			const sql = setOpNqlToSQL(
+				'employees | select name | intersect (departments | select name)',
+			);
+			expect(sql).toBe(
+				normalizeSQL(
+					'(SELECT employees.name FROM employees) INTERSECT (SELECT departments.name FROM departments)',
+				),
+			);
+		});
+
+		it('compiles EXCEPT', () => {
+			const sql = setOpNqlToSQL(
+				'employees | select name | except (departments | select name)',
+			);
+			expect(sql).toBe(
+				normalizeSQL(
+					'(SELECT employees.name FROM employees) EXCEPT (SELECT departments.name FROM departments)',
+				),
+			);
+		});
+	});
+
+	describe('set operations with WHERE', () => {
+		it('compiles UNION with WHERE on right side', () => {
+			const sql = setOpNqlToSQL(
+				'employees | select name | union (employees | where salary > 100000 | select name)',
+			);
+			expect(sql).toBe(
+				normalizeSQL(
+					'(SELECT employees.name FROM employees) UNION (SELECT employees.name FROM employees WHERE employees.salary > $1)',
+				),
+			);
+		});
+	});
+
+	describe('nested set operations', () => {
+		it('compiles nested union of intersect', () => {
+			const sql = setOpNqlToSQL(
+				'employees | select name | union (departments | select name | intersect (departments | select name))',
+			);
+			expect(sql).toBe(
+				normalizeSQL(
+					'(SELECT employees.name FROM employees) UNION ((SELECT departments.name FROM departments) INTERSECT (SELECT departments.name FROM departments))',
+				),
+			);
+		});
+	});
+
+	describe('set operations via bind', () => {
+		it('compiles set operation with bound name reference', () => {
+			const sql = setOpNqlToSQL(
+				'departments | select name | bind d\nemployees | select name | union d',
+			);
+			expect(sql).toBe(
+				normalizeSQL(
+					'(SELECT employees.name FROM employees) UNION (SELECT departments.name FROM departments)',
+				),
+			);
+		});
 	});
 });

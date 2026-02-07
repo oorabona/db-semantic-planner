@@ -12,6 +12,11 @@ import { comparisonHandler } from './comparison.js';
 // Handler imports - complex (exists, subquery, relation)
 import { everyHandler, existsHandler, notExistsHandler } from './exists.js';
 import { inHandler } from './in.js';
+import {
+	jsonComparisonHandler,
+	jsonContainsHandler,
+	jsonExistsHandler,
+} from './json.js';
 import { likeHandler } from './like.js';
 import { andHandler, notHandler, orHandler } from './logical.js';
 import { nullHandler } from './null.js';
@@ -32,6 +37,11 @@ export { betweenHandler } from './between.js';
 export { comparisonHandler } from './comparison.js';
 export { everyHandler, existsHandler, notExistsHandler } from './exists.js';
 export { inHandler } from './in.js';
+export {
+	jsonComparisonHandler,
+	jsonContainsHandler,
+	jsonExistsHandler,
+} from './json.js';
 export { likeHandler } from './like.js';
 export { andHandler, notHandler, orHandler } from './logical.js';
 export { nullHandler } from './null.js';
@@ -60,6 +70,9 @@ export const simpleWhereHandlers = [
 	notHandler,
 	betweenHandler,
 	rangeHandler,
+	jsonContainsHandler,
+	jsonExistsHandler,
+	jsonComparisonHandler,
 ];
 
 /**

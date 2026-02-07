@@ -64,14 +64,7 @@
 
 ### NQL Language (Category B)
 
-- [ ] **E13** [NQL] JSONB operators — `->`, `->>`, `@>`, `<@`, `?`, `#>`, `#>>` — Effort: M
-- [ ] **E13b** [NQL] Set operations (UNION, INTERSECT, EXCEPT) — partially deferred
-(E13c, DRY case-value, CASE tests archived → docs/historic/done-2026-02.md)
-
-- [ ] **E13d** [NQL] Window fn lag/lead offset/default — P3+
-- [ ] **E13e** [NQL] IN (dateRange) — requires semantic date expansion
-- [ ] **E13f** [NQL] Range literal in INSERT — parsing OK but not compiled
-  - Ref: legacy TODO_NQL.md:201
+(E13, E13b, E13c, E13d, E13e, E13f archived → docs/historic/done-2026-02.md)
 
 ### Full-Text Search
 
@@ -128,6 +121,11 @@
 ### API Surface
 
 (Archived → docs/historic/done-2026-02.md)
+
+### E13-ALL Review Findings (2026-02-07)
+
+- [ ] 🔧 **F-001** [NQL] Set operations column count validation — planner should verify both sides of UNION/INTERSECT/EXCEPT have matching column counts — Priority: M
+(F-002, F-003, F-007 archived → docs/historic/done-2026-02.md)
 
 ### Dead Code
 

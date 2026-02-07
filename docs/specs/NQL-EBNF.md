@@ -2,7 +2,7 @@
 
 **Status:** Canonical
 **Created:** 2026-01-24
-**Version:** 5.0 (NQL-BIND: bind generalization, insert-from, upsert-from)
+**Version:** 6.0 (E13-ALL: JSONB operators, set operations, date range expansion, range INSERT, simple CASE, multi-row INSERT)
 **Scope:** nql, cli
 
 ## Overview
@@ -45,6 +45,7 @@ query_clause      = where_clause
                   | limit_clause
                   | offset_clause
                   | flat_clause
+                  | set_clause
                   | bind_clause ;
 
 (* Clauses *)
@@ -53,9 +54,15 @@ select_clause     = "select" [ "distinct" ] select_list ;
 group_clause      = "group" "by" expr_list ;
 having_clause     = "having" boolean_expr ;
 order_clause      = "order" "by" order_list ;
-limit_clause      = "limit" NUMBER ;
+limit_clause      = "limit" [ ident_segment ] NUMBER ;
+                    (* Without ident: top-level LIMIT; with ident: per-include limit *)
 offset_clause     = "offset" NUMBER ;
 flat_clause       = "flat" ;  (* Forces JOIN strategy instead of json_agg *)
+
+(* Set operations — TERMINAL in pipeline: no further clauses after set_clause *)
+set_clause        = set_op [ "all" ] set_operand ;
+set_op            = "union" | "intersect" | "except" ;
+set_operand       = "(" query ")" | ident_segment ;  (* inline sub-query or bound name *)
 ```
 
 ### 2.1 WHERE vs HAVING Semantics
@@ -173,6 +180,26 @@ literal_list      = literal { "," literal } ;
 is_null_check     = expr "is" [ "not" ] "null" ;
 
 (* ============================================================ *)
+(* JSON OPERATORS (v6.0)                                        *)
+(* ============================================================ *)
+
+(* JSON field access operators — PostgreSQL JSONB semantics *)
+json_extract      = expr "->" ( STRING | NUMBER ) ;     (* -> returns json *)
+json_extract_text = expr "->>" ( STRING | NUMBER ) ;    (* ->> returns text *)
+json_path_op      = expr "#>" STRING ;                  (* #> path returns json *)
+json_path_text_op = expr "#>>" STRING ;                 (* #>> path returns text *)
+json_contains     = expr "@>" expr ;                    (* containment: left @> right *)
+json_contained_by = expr "<@" expr ;                    (* contained by: left <@ right *)
+json_exists       = expr "?" STRING ;                   (* key existence *)
+(* NOTE: ?| (any key) and ?& (all keys) are deferred to v7.0 *)
+
+(* JSON functions — portable notation (alternative to operators) *)
+json_func         = ( "json_extract" | "json_extract_text"
+                    | "json_path" | "json_path_text"
+                    | "json_contains" | "json_contained_by"
+                    | "json_exists" ) "(" expr { "," expr } ")" ;
+
+(* ============================================================ *)
 (* ARITHMETIC EXPRESSIONS                                       *)
 (* Precedence: unary > * / % > + - ||                           *)
 (* ============================================================ *)
@@ -230,8 +257,14 @@ partition_clause  = "partition" "by" path_expr { "," path_expr } ;
 window_order_clause = "order" "by" order_list ;
 
 (* CASE expression - L1 FIX: requires at least one WHEN clause *)
-case_expr         = "case" when_clause { when_clause } [ else_clause ] "end" ;
-when_clause       = "when" boolean_expr "then" expr ;
+(* Searched CASE: CASE WHEN bool THEN expr ... END *)
+(* Simple CASE:   CASE expr WHEN val THEN expr ... END (normalized to searched) *)
+case_expr         = "case" ( searched_case_body | simple_case_body )
+                    [ else_clause ] "end" ;
+searched_case_body = searched_when { searched_when } ;
+searched_when     = "when" boolean_expr "then" expr ;
+simple_case_body  = expr simple_when { simple_when } ;
+simple_when       = "when" expr "then" expr ;
 else_clause       = "else" expr ;
 ```
 
@@ -488,7 +521,9 @@ bind_clause       = "bind" IDENT ;
 mutation          = insert_stmt | update_stmt | delete_stmt | upsert_stmt
                   | insert_from_stmt | upsert_from_stmt ;
 
-insert_stmt       = "insert" "into" ident_segment "set" assignment_list
+insert_stmt       = "insert" "into" ident_segment
+                    ( "set" assignment_list { "|" "set" assignment_list }
+                    | "values" "(" assignment_list ")" { "," "(" assignment_list ")" } )
                     [ from_clause ] [ "!" ] ;
 update_stmt       = "update" ident_segment "set" assignment_list
                     [ "where" boolean_expr ] [ "!" ] ;
@@ -511,7 +546,7 @@ from_clause       = "from" [ "each" ] ident_segment [ "as" ident_segment ]
 for_update_clause = "for" "update" [ "skip" "locked" ] ;
 
 assignment_list   = assignment { "," assignment } ;
-assignment        = ident_segment "=" ( expr | "default" | "null" ) ;
+assignment        = ident_segment "=" ( expr | "default" | "null" | range_literal ) ;
 ```
 
 ### 5.1 Trailing `!` (Force Execution)
@@ -532,9 +567,11 @@ ident_list        = ident_segment { "," ident_segment } ;
 order_list        = order_item { "," order_item } ;
 order_item        = expr [ "asc" | "desc" ] ;
 
-(* Date range literal for natural language dates *)
-date_range_literal = STRING ;  (* e.g., 'last 7 days', 'this month' *)
-                               (* Semantic layer validates format *)
+(* Date range literal — expanded at compile time to date comparisons *)
+(* Supported formats: 'YYYY', 'YYYY-QN', 'YYYY-MM', 'YYYY-WNN' *)
+(* Example: `where created_at in '2024-Q1'` expands to *)
+(*   WHERE created_at >= '2024-01-01' AND created_at < '2024-04-01' *)
+date_range_literal = STRING ;  (* Semantic layer validates format *)
 
 (* ============================================================ *)
 (* IDENTIFIERS & TOKENS                                         *)
@@ -645,6 +682,7 @@ This allows schemas with columns named `parent` while still supporting pseudo-ta
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 6.0 | 2026-02-07 | **E13-ALL:** Added set operations (`union`/`intersect`/`except` with `all`), JSONB operators (`->`/`->>`/`@>`/`<@`/`?`/`#>`/`#>>`), JSON functions (`json_extract`, `json_path`, etc.), `IN date_range_literal` expansion (`'2024-Q1'`→date range), range literals in INSERT assignments, multi-row INSERT (`values (...)` + pipe continuation `| set`), simple CASE expression, per-include `limit`, window `lag`/`lead` offset/default. Deferred: `?\|` and `?&` operators |
 | 5.0 | 2026-02-04 | **NQL-BIND:** Removed `let` keyword (dead code), generalized `bind` clause to queries (CTE capture), added `insert_from_stmt` and `upsert_from_stmt` for bulk insert/upsert from source table or bound CTE |
 | 4.0 | 2026-01-25 | **SPEC-002 Cross-Table Relations:** Added quantified relation checks (`NOT`/`ALL` prefixes), explicit quantifiers (`some()`/`none()`/`every()`), relation aliases, Section 5 for cross-table patterns |
 | 3.0 | 2026-01-24 | **NQL v2.1 Grammar Simplification:** Removed `with` keyword entirely (BREAKING), added `flat` clause for JOIN strategy, relations now via path expressions in select |

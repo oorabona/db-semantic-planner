@@ -230,6 +230,56 @@ export interface CaseExpressionIntent {
 	readonly as?: string | undefined;
 }
 
+// ============================================================================
+// JSON/JSONB Operators (E13)
+// ============================================================================
+
+/**
+ * JSON path extraction: col->'key' or col->>'key' (chained paths supported).
+ * Also used for function notation: json_extract(col, 'key'), json_extract_text(col, 'key').
+ */
+export interface JsonExtractIntent {
+	readonly kind: 'jsonExtract';
+	readonly field: string;
+	readonly path: readonly string[];
+	/** 'json' = returns JSON value (->), 'text' = returns text (->>) */
+	readonly mode: 'json' | 'text';
+	readonly as?: string | undefined;
+}
+
+/**
+ * JSON containment: col @> value (contains) or col <@ value (contained by).
+ */
+export interface JsonContainsIntent {
+	readonly kind: 'jsonContains';
+	readonly field: string;
+	readonly value: unknown;
+	/** true = <@ (contained by), false = @> (contains) */
+	readonly reversed: boolean;
+}
+
+/**
+ * JSON key existence: col ? 'key'.
+ */
+export interface JsonExistsIntent {
+	readonly kind: 'jsonExists';
+	readonly field: string;
+	readonly key: string;
+}
+
+/**
+ * JSON path extraction with array path: col #> '{a,b}' or col #>> '{a,b}'.
+ */
+export interface JsonPathExtractIntent {
+	readonly kind: 'jsonPathExtract';
+	readonly field: string;
+	/** PostgreSQL array literal path, e.g. '{a,b,c}' */
+	readonly path: string;
+	/** 'json' = returns JSON (#>), 'text' = returns text (#>>) */
+	readonly mode: 'json' | 'text';
+	readonly as?: string | undefined;
+}
+
 /**
  * Expression intent union type - computed/derived values in SELECT
  * Extensible for future expression types
@@ -248,7 +298,11 @@ export type ExpressionIntent =
 	| ArithmeticExpressionIntent
 	| LiteralExpressionIntent
 	| ComparisonExpressionIntent
-	| CaseExpressionIntent;
+	| CaseExpressionIntent
+	| JsonExtractIntent
+	| JsonContainsIntent
+	| JsonExistsIntent
+	| JsonPathExtractIntent;
 
 // ============================================================================
 // Window Functions (P3-A)
@@ -312,6 +366,12 @@ export interface WindowIntent {
 
 	/** Result column alias (required) */
 	readonly alias: string;
+
+	/** Offset for lag/lead (default: 1 in PostgreSQL) */
+	readonly offset?: number | undefined;
+
+	/** Default value for lag/lead when row doesn't exist */
+	readonly defaultValue?: unknown;
 
 	/** OVER clause specification */
 	readonly over: {

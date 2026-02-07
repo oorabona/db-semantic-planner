@@ -218,7 +218,8 @@ function ReplApp({ config }: ReplAppProps) {
 				const views: PanelView[] = ['sql', 'plan', 'results', 'params', 'dump'];
 				const currentIdx = views.indexOf(panelView);
 				const nextIdx = (currentIdx + 1) % views.length;
-				setPanelView(views[nextIdx]!);
+				const nextView = views[nextIdx];
+				if (nextView) setPanelView(nextView);
 				return;
 			}
 			if (completions.length > 0 && engineState.mode === 'natural') {
@@ -270,7 +271,8 @@ function ReplApp({ config }: ReplAppProps) {
 		isProcessingRef.current = true;
 
 		while (submitQueueRef.current.length > 0) {
-			const trimmed = submitQueueRef.current.shift()!;
+			const trimmed = submitQueueRef.current.shift();
+			if (trimmed === undefined) break;
 
 			// Save to command history (up/down navigation + .history)
 			history.add(trimmed);

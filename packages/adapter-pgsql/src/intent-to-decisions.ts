@@ -206,6 +206,10 @@ function convertSelect(
 				if (windowField) decision.field = windowField;
 				if (over.partitionBy) decision.partitionBy = over.partitionBy;
 				if (over.orderBy) decision.orderBy = over.orderBy;
+				const windowOffset = expr.offset as number | undefined;
+				const windowDefault = expr.defaultValue as unknown;
+				if (windowOffset !== undefined) decision.args = [windowOffset];
+				if (windowDefault !== undefined) decision.value = windowDefault;
 				decisions.push(decision);
 			} else if (exprKind === 'case') {
 				// CASE WHEN ... THEN ... ELSE ... END expression
@@ -259,6 +263,30 @@ function convertSelect(
 					args: [expr.left, expr.right],
 					table: rootTable,
 				};
+				if (expr.as) decision.alias = expr.as as string;
+				decisions.push(decision);
+			} else if (exprKind === 'jsonExtract') {
+				// JSON extraction: col->'key' or col->>'key'
+				const decision: Mutable<PlanDecision> = {
+					type: 'selectFunction',
+					function: 'jsonExtract',
+					column: expr.field as string,
+					args: expr.path as string[],
+					table: rootTable,
+				};
+				if (expr.mode) decision.jsonMode = expr.mode as 'json' | 'text';
+				if (expr.as) decision.alias = expr.as as string;
+				decisions.push(decision);
+			} else if (exprKind === 'jsonPathExtract') {
+				// JSON path extraction: col#>'{a,b}' or col#>>'{a,b}'
+				const decision: Mutable<PlanDecision> = {
+					type: 'selectFunction',
+					function: 'jsonPathExtract',
+					column: expr.field as string,
+					args: [expr.path as string],
+					table: rootTable,
+				};
+				if (expr.mode) decision.jsonMode = expr.mode as 'json' | 'text';
 				if (expr.as) decision.alias = expr.as as string;
 				decisions.push(decision);
 			}
@@ -344,6 +372,11 @@ interface FlatWhereFields {
 	readonly lte?: unknown;
 	readonly gt?: unknown;
 	readonly lt?: unknown;
+	// JSON-related fields
+	readonly jsonPath?: readonly string[];
+	readonly jsonMode?: string;
+	readonly reversed?: boolean;
+	readonly key?: string;
 }
 
 function convertWhereCondition(
@@ -355,14 +388,19 @@ function convertWhereCondition(
 
 	switch (kind) {
 		// Comparison: { kind: 'comparison', field: 'name', operator: 'eq', value: 'John' }
-		case 'comparison':
-			return {
+		case 'comparison': {
+			const result: Mutable<PlanDecision> = {
 				type: 'where',
 				column: cond.field as string,
 				operator: cond.operator as string,
 				value: cond.value,
 				table: rootTable,
 			};
+			// Propagate JSON access metadata
+			if (cond.jsonPath) result.jsonPath = cond.jsonPath;
+			if (cond.jsonMode) result.jsonMode = cond.jsonMode as 'json' | 'text';
+			return result;
+		}
 
 		// LIKE: { kind: 'like', field: 'name', pattern: '%john%' }
 		case 'like':
@@ -676,6 +714,26 @@ function convertWhereCondition(
 				...(subConditions.length > 0 && { conditions: subConditions }),
 			};
 		}
+
+		// JSON containment: col @> $1 or col <@ $1
+		case 'jsonContains':
+			return {
+				type: 'where',
+				column: cond.field as string,
+				operator: cond.reversed ? 'jsonContainedBy' : 'jsonContains',
+				value: cond.value,
+				table: rootTable,
+			};
+
+		// JSON key existence: col ? $1
+		case 'jsonExists':
+			return {
+				type: 'where',
+				column: cond.field as string,
+				operator: 'jsonExists',
+				value: cond.key,
+				table: rootTable,
+			};
 
 		default:
 			// Unknown condition type

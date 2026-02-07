@@ -41,6 +41,7 @@ export const POSTGRESQL_CAPABILITIES: DialectCapabilities = {
 	supportsArrayType: true,
 	supportsRangeTypes: true, // PostgreSQL has native range types (daterange, int4range, etc.)
 	supportsJsonType: true,
+	supportsJsonOperators: true, // PG: ->, ->>, @>, <@, ?, #>, #>>
 	supportsSchemas: true,
 
 	// Include Strategy Capabilities (CORE-006)
@@ -69,6 +70,7 @@ export const MYSQL_CAPABILITIES: DialectCapabilities = {
 	supportsArrayType: false,
 	supportsRangeTypes: false, // MySQL has no native range types
 	supportsJsonType: true,
+	supportsJsonOperators: false, // MySQL uses JSON_EXTRACT() functions, not operators
 	supportsSchemas: true, // MySQL uses database as schema
 
 	// Include Strategy Capabilities (CORE-006)
@@ -97,6 +99,7 @@ export const SQLITE_CAPABILITIES: DialectCapabilities = {
 	supportsArrayType: false,
 	supportsRangeTypes: false, // SQLite has no native range types
 	supportsJsonType: true, // SQLite 3.38+ (JSON1 extension)
+	supportsJsonOperators: false, // SQLite uses json_extract() functions
 	supportsSchemas: false, // SQLite uses ATTACH for multiple databases
 
 	// Include Strategy Capabilities (CORE-006)
@@ -126,6 +129,7 @@ export const DUCKDB_CAPABILITIES: DialectCapabilities = {
 	supportsArrayType: true, // DuckDB has LIST type
 	supportsRangeTypes: false, // DuckDB has no native range types like PostgreSQL
 	supportsJsonType: true,
+	supportsJsonOperators: false, // DuckDB uses json_extract() style
 	supportsSchemas: true,
 
 	// Include Strategy Capabilities (CORE-006)
@@ -154,6 +158,7 @@ export const MSSQL_CAPABILITIES: DialectCapabilities = {
 	supportsArrayType: false,
 	supportsRangeTypes: false, // MSSQL has no native range types
 	supportsJsonType: true, // SQL Server 2016+
+	supportsJsonOperators: false, // MSSQL uses JSON_VALUE/JSON_QUERY functions
 	supportsSchemas: true,
 
 	// Include Strategy Capabilities (CORE-006)

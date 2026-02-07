@@ -62,7 +62,8 @@ export type NqlClause =
 	| NqlOrderByClause
 	| NqlLimitClause
 	| NqlOffsetClause
-	| NqlBindClause;
+	| NqlBindClause
+	| NqlSetClause;
 
 /**
  * Where clause - position determines compilation:
@@ -115,6 +116,20 @@ export interface NqlOffsetClause {
 export interface NqlBindClause {
 	type: 'bind';
 	name: string;
+}
+
+/**
+ * Set operation clause: UNION, INTERSECT, EXCEPT
+ * The right operand is either an inline query or a bound name reference.
+ */
+export interface NqlSetClause {
+	type: 'setOperation';
+	op: 'union' | 'intersect' | 'except';
+	all: boolean;
+	/** Inline sub-query (parenthesized) */
+	right?: NqlQuery;
+	/** Bound name reference (via | bind) */
+	boundName?: string;
 }
 
 // ============================================================
@@ -184,6 +199,8 @@ export type NqlExpression =
 	| NqlWindowExpression
 	| NqlCaseExpression
 	| NqlPathExpression
+	| NqlJsonAccessExpression
+	| NqlJsonComparisonExpression
 	| NqlLiteral
 	| NqlSubquery
 	| NqlVariableRef;
@@ -308,6 +325,33 @@ export interface NqlCaseExpression {
 		result: NqlExpression;
 	}>;
 	elseClause?: NqlExpression;
+}
+
+/**
+ * JSON access expression: col->'a'->'b'->>'c'
+ * Chained path extraction with final mode determined by last operator.
+ */
+export interface NqlJsonAccessExpression {
+	type: 'jsonAccess';
+	/** Base expression (typically a path/column reference) */
+	base: NqlExpression;
+	/** Keys to extract in order */
+	path: string[];
+	/** 'json' = ->, 'text' = ->> (determined by LAST operator) */
+	mode: 'json' | 'text';
+}
+
+/**
+ * JSON comparison expression: col @> val, col <@ val, col ? key
+ */
+export interface NqlJsonComparisonExpression {
+	type: 'jsonComparison';
+	/** Left expression (column/field) */
+	left: NqlExpression;
+	/** Operator: @> (contains), <@ (containedBy), ? (exists) */
+	operator: '@>' | '<@' | '?';
+	/** Right expression (value/key) */
+	right: NqlExpression;
 }
 
 export interface NqlPathExpression {
