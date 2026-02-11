@@ -91,3 +91,39 @@ users | where active = true | select *, userRoles.roleId, userRoles.role.rolePer
 # Audit trail
 # =============================================================================
 auditLog | where action = 'login' | select userId, resource, timestamp
+
+# =============================================================================
+# JSONB operators (audit_log.details column)
+# =============================================================================
+
+# ->> text extraction: find logins from specific IP
+auditLog | where details ->> 'ip' = '10.0.0.1'
+
+# -> JSON field access: extract ip field as JSON
+auditLog | where action = 'login' | select id, action, details -> 'ip' as ipJson
+
+# @> containment: records where details contain a specific key-value
+auditLog | where details @> '{"ip": "10.0.0.1"}'
+
+# ? key exists: records that have an 'ip' key in details
+auditLog | where details ? 'ip'
+
+# =============================================================================
+# IN subquery
+# =============================================================================
+roles | where id in (userRoles | where userId = 1 | select roleId)
+
+# =============================================================================
+# Per-include LIMIT (LATERAL strategy)
+# =============================================================================
+users | select *, userRoles.* | limit userRoles 2
+
+# =============================================================================
+# Bind (Named CTE)
+# =============================================================================
+users | where active = true | select id | bind activeUsers
+
+# =============================================================================
+# Per-include LIMIT nested (dotted path — forces LATERAL on all ancestors)
+# =============================================================================
+users | select *, userRoles.* | limit userRoles.role 1

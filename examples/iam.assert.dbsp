@@ -263,3 +263,84 @@ success: true
 sql.equals: SELECT audit_log.user_id, audit_log.resource, audit_log."timestamp" FROM iam_example.audit_log WHERE audit_log.action = $1
 params.equals: ["login"]
 db.rows.equals: 4
+
+# ─────────────────────────────────────────
+# Query 30: auditLog | where details ->> 'ip' = '10.0.0.1'
+# ─────────────────────────────────────────
+--- query: 30
+success: true
+sql.equals: SELECT audit_log.* FROM iam_example.audit_log WHERE (audit_log.details ->> $1) = $2
+params.equals: ["ip","10.0.0.1"]
+db.rows.equals: 1
+
+# ─────────────────────────────────────────
+# Query 31: auditLog | where action = 'login' | select id, action, details -> 'ip' as ipJson
+# ─────────────────────────────────────────
+--- query: 31
+success: true
+sql.equals: SELECT audit_log.id, audit_log.action, audit_log.details -> $1 AS ip_json FROM iam_example.audit_log WHERE audit_log.action = $2
+params.equals: ["ip","login"]
+db.rows.equals: 4
+
+# ─────────────────────────────────────────
+# Query 32: auditLog | where details @> '{"ip": "10.0.0.1"}'
+# ─────────────────────────────────────────
+--- query: 32
+success: true
+sql.equals: SELECT audit_log.* FROM iam_example.audit_log WHERE audit_log.details @> $1
+params.equals: ["{\"ip\": \"10.0.0.1\"}"]
+db.rows.equals: 1
+
+# ─────────────────────────────────────────
+# Query 33: auditLog | where details ? 'ip'
+# ─────────────────────────────────────────
+--- query: 33
+success: true
+sql.equals: SELECT audit_log.* FROM iam_example.audit_log WHERE audit_log.details ? $1
+params.equals: ["ip"]
+db.rows.equals: 4
+
+# ─────────────────────────────────────────
+# Query 34: roles | where id in (userRoles | where userId = 1 | select roleId)
+# ─────────────────────────────────────────
+--- query: 34
+success: true
+sql.equals: SELECT roles.* FROM iam_example.roles WHERE roles.id = ANY (SELECT user_roles_subq_0.role_id FROM iam_example.user_roles AS user_roles_subq_0 WHERE user_roles_subq_0.user_id = $1) AND EXISTS (SELECT 1 FROM iam_example.user_roles AS user_roles_exists_1 WHERE roles.id = user_roles_exists_1.role_id)
+params.equals: [1]
+db.rows.equals: 1
+
+# ─────────────────────────────────────────
+# Query 35: users | select *, userRoles.* | limit userRoles 2
+# ─────────────────────────────────────────
+--- query: 35
+success: true
+sql.equals: SELECT users.*, user_roles_lat_0.* FROM iam_example.users LEFT JOIN LATERAL ( SELECT user_roles_inner_0.* FROM iam_example.user_roles AS user_roles_inner_0 WHERE user_roles_inner_0.user_id = users.id LIMIT 2 ) AS user_roles_lat_0 ON true
+params.equals: []
+db.rows.equals: 8
+
+# ─────────────────────────────────────────
+# Query 36: users | where active = true | select id | bind activeUsers
+# Bind (Named CTE) — captures result for reuse in subsequent queries
+# ─────────────────────────────────────────
+--- query: 36
+success: true
+sql.equals: SELECT users.id FROM iam_example.users WHERE users.active = $1
+params.equals: [true]
+db.output:
+| id |
+| --- |
+| 1 |
+| 2 |
+| 3 |
+| 4 |
+| 5 |
+
+# ─────────────────────────────────────────
+# Query 37: users | select *, userRoles.* | limit userRoles.role 1
+# Per-include LIMIT nested (dotted path)
+# ─────────────────────────────────────────
+--- query: 37
+success: true
+sql.equals: SELECT users.*, user_roles.* FROM iam_example.users LEFT JOIN iam_example.user_roles AS user_roles ON users.id = user_roles.user_id
+params.equals: []
+db.rows.equals: 8

@@ -81,3 +81,9 @@ delete from orders where status = 'cancelled'!
 
 # Upsert product - insert or update on SKU conflict
 upsert into products on sku set name = 'New Widget', sku = 'WIDGET-NEW', price = 19.99, categoryId = 1, active = true!
+
+# Multi-row INSERT (values syntax)
+insert into categories values (name = 'Toys', slug = 'toys'), (name = 'Sports', slug = 'sports')!
+
+# Multi-row INSERT (pipe continuation syntax)
+insert into categories set name = 'Toys', slug = 'toys' | set name = 'Sports', slug = 'sports'!

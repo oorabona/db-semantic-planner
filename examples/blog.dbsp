@@ -85,7 +85,7 @@ comments | group by postId | select count(*)
 # 2.9 DISTINCT
 # =============================================================================
 comments | where approved = true | select count(distinct authorName)
-posts | select distinct
+posts | select distinct *
 
 # =============================================================================
 # 2.10 Mutations (NQL v2: SQL-like syntax)

@@ -218,7 +218,15 @@ db.rows.equals: 6
 success: true
 sql.equals: SELECT employees.name, CASE WHEN employees.salary > $1 THEN $2 WHEN employees.salary > $3 THEN $4 ELSE $5 END AS level FROM test_strategies.employees
 params.equals: [80000,"senior",50000,"mid","junior"]
-db.rows.equals: 6
+db.output:
+| name | level |
+| --- | --- |
+| Alice | senior |
+| Bob | senior |
+| Carol | senior |
+| Dave | junior |
+| Eve | mid |
+| Frank | junior |
 
 # =============================================================================
 # NQL features: aggregates, order by, limit (queries 21–22)
@@ -320,3 +328,23 @@ params.equals: [true]
 success: true
 sql.equals: SELECT tasks.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM test_strategies.employees AS __t__ WHERE __t__.id = tasks.assignee_id), '[]'::json) AS assignee_json FROM test_strategies.tasks
 db.rows.equals: 5
+
+# ─────────────────────────────────────────
+# Query 31: employees | select name, case departmentId when 1 then 'Engineering' when 2 then 'Marketing' else 'Other' end as dept
+# Simple CASE (normalized to searched CASE during compilation)
+# NOTE: 7 rows because upsert(Q26) inserted Jane in dept 1
+# ─────────────────────────────────────────
+--- query: 31
+success: true
+sql.equals: SELECT employees.name, CASE WHEN employees.department_id = $1 THEN $2 WHEN employees.department_id = $3 THEN $4 ELSE $5 END AS dept FROM test_strategies.employees
+params.equals: [1, "Engineering", 2, "Marketing", "Other"]
+db.output:
+| name | dept |
+| --- | --- |
+| Alice | Engineering |
+| Bob | Engineering |
+| Carol | Marketing |
+| Dave | Marketing |
+| Eve | Other |
+| Frank | Other |
+| Jane | Engineering |
