@@ -71,8 +71,10 @@ export { processDotCommand } from './dot-commands.js';
  *   NQL error:    query-result (with .error)
  *   Raw SQL:      query-result → [execution-result]
  *   Dot command:  info | error [+ state-change]
+ *
+ * @internal Exported for unit testing — not part of the public API.
  */
-function mapEventsToBatchResult(
+export function mapEventsToBatchResult(
 	query: string,
 	events: EngineEvent[],
 	outputMode: 'json' | 'table' | 'csv',
