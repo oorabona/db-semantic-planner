@@ -132,3 +132,10 @@ departments | where employees.active = true
 
 # belongsTo include (single parent)
 tasks | select *, assignee.*
+
+# =============================================================================
+# NQL features: Simple CASE (normalized to searched CASE during compilation)
+# =============================================================================
+
+# Simple CASE: map departmentId values to labels
+employees | select name, case departmentId when 1 then 'Engineering' when 2 then 'Marketing' else 'Other' end as dept

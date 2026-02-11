@@ -484,7 +484,7 @@ Ready-to-use example schemas in the `examples/` directory:
 pnpm dbsp repl --schema ./examples/blog.schema.ts
 ```
 
-See [examples/QUICKSTART.md](examples/QUICKSTART.md) for detailed usage guide.
+See [NQL Reference](docs/guides/nql-reference.md) for detailed usage guide.
 
 ### Guides
 

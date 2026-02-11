@@ -27,6 +27,31 @@ const ROOT_DIR = resolve(import.meta.dirname, '../..');
 const DOC_PATH = resolve(ROOT_DIR, 'docs/guides/nql-reference.md');
 
 // ---------------------------------------------------------------------------
+// All schemas used in the reference document
+// ---------------------------------------------------------------------------
+
+type SchemaName =
+	| 'blog'
+	| 'blog-extended'
+	| 'ecommerce'
+	| 'hierarchy'
+	| 'iam'
+	| 'minimal'
+	| 'scheduling'
+	| 'test-strategies';
+
+const SCHEMA_NAMES: SchemaName[] = [
+	'blog',
+	'blog-extended',
+	'ecommerce',
+	'hierarchy',
+	'iam',
+	'minimal',
+	'scheduling',
+	'test-strategies',
+];
+
+// ---------------------------------------------------------------------------
 // Schema loading — dynamic import of example schemas
 // ---------------------------------------------------------------------------
 
@@ -41,14 +66,12 @@ async function loadExampleSchema(name: string) {
 // ---------------------------------------------------------------------------
 
 interface NqlBlock {
-	/** Section reference (e.g., "§2.1") */
-	section: string;
 	/** Section title for display */
-	title: string;
+	section: string;
 	/** The NQL query text */
 	nql: string;
 	/** Which schema to use */
-	schema: 'blog' | 'ecommerce' | 'hierarchy';
+	schema: SchemaName;
 	/** Query or mutation */
 	type: 'query' | 'mutation';
 	/** Line number in the markdown file */
@@ -56,40 +79,16 @@ interface NqlBlock {
 }
 
 /**
- * Determine which schema a section uses based on the section number.
- * See docs/guides/nql-reference.md structure.
- */
-function sectionToSchema(
-	sectionNum: number,
-	_subsection: number,
-	nql: string,
-): 'blog' | 'ecommerce' | 'hierarchy' {
-	// Hierarchy sections
-	if (sectionNum === 10) return 'hierarchy'; // §10: Hierarchy traversal
-
-	// Hierarchy table signals — must check before ecommerce (departments is hierarchy-only)
-	const hierarchyTablesRe = /\b(employees|departments|projects)\b/;
-	if (hierarchyTablesRe.test(nql)) return 'hierarchy';
-
-	// Ecommerce signals
-	const ecommerceTablesRe =
-		/\b(products|orders|orderItems|customers|addresses|variants|categories)\b/;
-	if (ecommerceTablesRe.test(nql)) return 'ecommerce';
-
-	// Default to blog for early sections
-	return 'blog';
-}
-
-/**
  * Parse the markdown document and extract compilable NQL blocks.
+ *
+ * Schema detection: uses `*Schema: X*` annotations that precede code blocks
+ * in the document. Falls back to table-name heuristics if no annotation found.
  */
 function extractNqlBlocks(markdown: string): NqlBlock[] {
 	const lines = markdown.split('\n');
 	const blocks: NqlBlock[] = [];
 	let currentSection = '';
-	let currentSectionTitle = '';
-	let currentSectionNum = 0;
-	let currentSubsection = 0;
+	let currentSchema: SchemaName = 'ecommerce';
 
 	let inCodeBlock = false;
 	let codeBlockLang = '';
@@ -99,22 +98,20 @@ function extractNqlBlocks(markdown: string): NqlBlock[] {
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i]!;
 
-		// Track section headers
-		const headerMatch = line.match(/^##\s+(\d+)\.?\s*(.*)/);
+		// Track section headers (## or ###)
+		const headerMatch = line.match(/^#{2,3}\s+(.*)/);
 		if (headerMatch) {
-			currentSectionNum = parseInt(headerMatch[1]!, 10);
-			currentSubsection = 0;
-			currentSection = `§${currentSectionNum}`;
-			currentSectionTitle = headerMatch[2]!.trim();
+			currentSection = headerMatch[1]!.trim();
 			continue;
 		}
 
-		const subHeaderMatch = line.match(/^###\s+(\d+)\.(\d+)\s*(.*)/);
-		if (subHeaderMatch) {
-			currentSectionNum = parseInt(subHeaderMatch[1]!, 10);
-			currentSubsection = parseInt(subHeaderMatch[2]!, 10);
-			currentSection = `§${currentSectionNum}.${currentSubsection}`;
-			currentSectionTitle = subHeaderMatch[3]!.trim();
+		// Track schema annotations: *Schema: X*
+		const schemaMatch = line.match(/^\*Schema:\s*(\S+)\*/);
+		if (schemaMatch) {
+			const name = schemaMatch[1]!.toLowerCase().replace(/[^a-z0-9-]/g, '');
+			if (SCHEMA_NAMES.includes(name as SchemaName)) {
+				currentSchema = name as SchemaName;
+			}
 			continue;
 		}
 
@@ -141,14 +138,12 @@ function extractNqlBlocks(markdown: string): NqlBlock[] {
 			for (const q of queries) {
 				if (!isCompilableNql(q)) continue;
 
-				const schema = sectionToSchema(currentSectionNum, currentSubsection, q);
 				const isMutation = /^\s*(insert|update|delete|upsert)\b/i.test(q);
 
 				blocks.push({
 					section: currentSection,
-					title: currentSectionTitle,
 					nql: q,
-					schema,
+					schema: currentSchema,
 					type: isMutation ? 'mutation' : 'query',
 					lineNumber: codeBlockStartLine,
 				});
@@ -167,36 +162,44 @@ function extractNqlBlocks(markdown: string): NqlBlock[] {
 /**
  * Split a code block with multiple NQL queries into individual queries.
  * Blank lines and comment-only lines separate queries.
+ * Handles `\` line continuation (joins lines ending with `\`).
  */
 function splitNqlQueries(content: string): string[] {
-	const lines = content.split('\n');
+	const rawLines = content.split('\n');
 	const queries: string[] = [];
-	let current: string[] = [];
 
+	// First pass: join lines with `\` continuation
+	const lines: string[] = [];
+	let pending = '';
+	for (const line of rawLines) {
+		const trimmed = line.trim();
+		if (trimmed.endsWith('\\')) {
+			pending += `${trimmed.slice(0, -1).trimEnd()} `;
+		} else {
+			lines.push(pending + trimmed);
+			pending = '';
+		}
+	}
+	if (pending) lines.push(pending.trimEnd());
+
+	// In NQL, each line (after \ continuation) is a separate query
 	for (const line of lines) {
 		const trimmed = line.trim();
 
-		// Skip empty lines (they separate queries)
-		if (!trimmed) {
-			if (current.length > 0) {
-				queries.push(current.join('\n'));
-				current = [];
-			}
-			continue;
-		}
-
-		// Skip comment-only lines
-		if (trimmed.startsWith('#')) {
-			continue;
-		}
+		// Skip empty and comment-only lines
+		if (!trimmed || trimmed.startsWith('#')) continue;
 
 		// Strip inline comments
-		const withoutComment = trimmed.replace(/\s+#\s.*$/, '');
-		current.push(withoutComment);
-	}
+		const withoutComment = trimmed.replace(/\s+--\s.*$/, '');
 
-	if (current.length > 0) {
-		queries.push(current.join('\n'));
+		// Strip REPL mutation terminator `!` at end of line
+		const withoutTerminator = withoutComment.endsWith('!')
+			? withoutComment.slice(0, -1)
+			: withoutComment;
+
+		if (withoutTerminator) {
+			queries.push(withoutTerminator);
+		}
 	}
 
 	return queries;
@@ -214,6 +217,8 @@ function isCompilableNql(nql: string): boolean {
 	if (trimmed.includes('<col>')) return false;
 	if (trimmed.includes('<val>')) return false;
 	if (trimmed.includes('<column>')) return false;
+	if (trimmed.includes('<relation>')) return false;
+	if (trimmed.includes('<condition>')) return false;
 	if (trimmed.startsWith('function()')) return false;
 
 	// Skip dot commands
@@ -222,26 +227,26 @@ function isCompilableNql(nql: string): boolean {
 	// Skip raw SQL escape hatches
 	if (trimmed.startsWith('!')) return false;
 
-	// Skip let bindings (not yet supported in compile-only mode)
-	if (trimmed.startsWith('let ')) return false;
-
-	// Skip bind (not implemented)
+	// Skip bind (multi-statement context, not supported in compile-only)
 	if (trimmed.includes('| bind ')) return false;
 
 	// Skip EXISTS subquery (not supported in NQL)
 	if (trimmed.includes('where exists (')) return false;
 
-	// Skip hypothetical tables not in any schema
-	if (trimmed.startsWith('companies')) return false;
-
 	// Skip insert from (different parse path, not fully supported in compile-only)
 	if (/^insert\s+into\s+\w+\s+from\b/i.test(trimmed)) return false;
+
+	// Skip upsert from
+	if (/^upsert\s+into\s+\w+\s+on\s+\w+\s+from\b/i.test(trimmed)) return false;
 
 	// Skip HAVING via "where count/sum/avg/min/max" after group by (not yet supported)
 	if (/\|\s*where\s+(count|sum|avg|min|max)\s*\(/i.test(trimmed)) return false;
 
 	// Skip quoted identifier examples
 	if (/^"[^"]*"$/.test(trimmed)) return false;
+
+	// Skip placeholder examples
+	if (/\.\.\./i.test(trimmed)) return false;
 
 	// Must start with a word (table name or mutation keyword)
 	if (!/^[a-zA-Z]/.test(trimmed)) return false;
@@ -344,99 +349,49 @@ function compileMutation(
 const markdown = readFileSync(DOC_PATH, 'utf-8');
 const allBlocks = extractNqlBlocks(markdown);
 
-// Group by schema for efficient loading
-const blogBlocks = allBlocks.filter((b) => b.schema === 'blog');
-const ecommerceBlocks = allBlocks.filter((b) => b.schema === 'ecommerce');
-const hierarchyBlocks = allBlocks.filter((b) => b.schema === 'hierarchy');
+// Group by schema
+const blocksBySchema = new Map<SchemaName, NqlBlock[]>();
+for (const block of allBlocks) {
+	const existing = blocksBySchema.get(block.schema) ?? [];
+	existing.push(block);
+	blocksBySchema.set(block.schema, existing);
+}
 
 describe('NQL Reference Guide — Plan Validation', () => {
-	describe('Blog schema queries', () => {
-		let schema: Awaited<ReturnType<typeof loadExampleSchema>>;
+	for (const schemaName of SCHEMA_NAMES) {
+		const schemaBlocks = blocksBySchema.get(schemaName) ?? [];
+		if (schemaBlocks.length === 0) continue;
 
-		it('loads blog schema', async () => {
-			schema = await loadExampleSchema('blog');
-			expect(schema).toBeDefined();
-			expect(schema.model).toBeDefined();
-		});
+		describe(`${schemaName} schema queries (${schemaBlocks.length})`, () => {
+			let schema: Awaited<ReturnType<typeof loadExampleSchema>>;
 
-		for (const block of blogBlocks) {
-			const label = `${block.section}: ${block.nql.slice(0, 60)}${block.nql.length > 60 ? '...' : ''}`;
-
-			it(label, () => {
+			it(`loads ${schemaName} schema`, async () => {
+				schema = await loadExampleSchema(schemaName);
 				expect(schema).toBeDefined();
-				const result =
-					block.type === 'mutation'
-						? compileMutation(block.nql, schema)
-						: compileQuery(block.nql, schema);
-
-				expect(result.sql).toBeTruthy();
-				expect(typeof result.sql).toBe('string');
-
-				if (result.planReport) {
-					expect(result.planReport.rootTable).toBeTruthy();
-					expect(Array.isArray(result.planReport.decisions)).toBe(true);
-				}
+				expect(schema.model).toBeDefined();
 			});
-		}
-	});
 
-	describe('Ecommerce schema queries', () => {
-		let schema: Awaited<ReturnType<typeof loadExampleSchema>>;
+			for (const block of schemaBlocks) {
+				const label = `${block.section}: ${block.nql.slice(0, 70)}${block.nql.length > 70 ? '...' : ''}`;
 
-		it('loads ecommerce schema', async () => {
-			schema = await loadExampleSchema('ecommerce');
-			expect(schema).toBeDefined();
-			expect(schema.model).toBeDefined();
+				it(label, () => {
+					expect(schema).toBeDefined();
+					const result =
+						block.type === 'mutation'
+							? compileMutation(block.nql, schema)
+							: compileQuery(block.nql, schema);
+
+					expect(result.sql).toBeTruthy();
+					expect(typeof result.sql).toBe('string');
+
+					if (result.planReport) {
+						expect(result.planReport.rootTable).toBeTruthy();
+						expect(Array.isArray(result.planReport.decisions)).toBe(true);
+					}
+				});
+			}
 		});
-
-		for (const block of ecommerceBlocks) {
-			const label = `${block.section}: ${block.nql.slice(0, 60)}${block.nql.length > 60 ? '...' : ''}`;
-
-			it(label, () => {
-				expect(schema).toBeDefined();
-				const result =
-					block.type === 'mutation'
-						? compileMutation(block.nql, schema)
-						: compileQuery(block.nql, schema);
-
-				expect(result.sql).toBeTruthy();
-				expect(typeof result.sql).toBe('string');
-
-				if (result.planReport) {
-					expect(result.planReport.rootTable).toBeTruthy();
-				}
-			});
-		}
-	});
-
-	describe('Hierarchy schema queries', () => {
-		let schema: Awaited<ReturnType<typeof loadExampleSchema>>;
-
-		it('loads hierarchy schema', async () => {
-			schema = await loadExampleSchema('hierarchy');
-			expect(schema).toBeDefined();
-			expect(schema.model).toBeDefined();
-		});
-
-		for (const block of hierarchyBlocks) {
-			const label = `${block.section}: ${block.nql.slice(0, 60)}${block.nql.length > 60 ? '...' : ''}`;
-
-			it(label, () => {
-				expect(schema).toBeDefined();
-				const result =
-					block.type === 'mutation'
-						? compileMutation(block.nql, schema)
-						: compileQuery(block.nql, schema);
-
-				expect(result.sql).toBeTruthy();
-				expect(typeof result.sql).toBe('string');
-
-				if (result.planReport) {
-					expect(result.planReport.rootTable).toBeTruthy();
-				}
-			});
-		}
-	});
+	}
 
 	it('extracted a reasonable number of queries', () => {
 		const total = allBlocks.length;

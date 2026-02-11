@@ -4,6 +4,15 @@
 # These queries demonstrate pseudo-column features for
 # self-referential traversal with custom roles.
 
+# =============================================================================
+# Setup: Create isolated schema and load data
+# =============================================================================
+!DROP SCHEMA IF EXISTS hierarchy CASCADE;
+!CREATE SCHEMA IF NOT EXISTS hierarchy;
+.use hierarchy
+.import examples/hierarchy.ddl.sql
+.import examples/hierarchy.seed.sql
+
 # ============================================================
 # 1. Single-hop traversal: who is each employee's manager?
 # ============================================================

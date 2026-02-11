@@ -1,3482 +1,1586 @@
 # NQL Reference
 
-Complete reference for the Natural Query Language — a pipe-based syntax for database queries.
+> **Natural Query Language** — A pipe-based query language that compiles to SQL.
+> Every example in this document is validated against a live PostgreSQL 17 database
+> using the schemas in `examples/`.
 
-**Related guides:** [ORM API](./orm-api.md) | [README](../../README.md) | [CLI Usage](../CLI_USAGE.md)
+## Table of Contents
 
----
-
-## 1. What is NQL?
-
-NQL (Natural Query Language) is a pipe-based query language that compiles to the same IntentAST as the ORM API. It's designed for:
-- **CLI/REPL** interactive exploration (`dbsp repl`)
-- **`.dbsp` files** for batch queries and test assertions
-- **Template literals** in TypeScript via `orm.nql`
-
-```nql
-table | operator | operator | ...
-```
-
-Every NQL query compiles through the same semantic planner as the ORM API, producing identical SQL output.
-
-### Setup
-
-Your schema file imports from `@dbsp/core`, so it must be resolvable from your project directory.
-
-**Option 1 — Install from registry (published package):**
-```bash
-mkdir my-project && cd my-project
-pnpm init
-pnpm add @dbsp/core @dbsp/adapter-pgsql
-pnpm add -D @dbsp/cli
-```
-
-**Option 2 — Link local packages (development):**
-```bash
-mkdir my-project && cd my-project
-pnpm init
-pnpm link /path/to/db-semantic-planner/packages/core
-pnpm link /path/to/db-semantic-planner/packages/cli
-```
-
-> Both options require the packages to be **built** (`pnpm build` in the monorepo root).
-
-### Using NQL
-
-**In the REPL** (load one schema at a time):
-```bash
-pnpm dbsp repl -s examples/blog.schema.ts
-> posts | where published = true | select title, author.name
-```
-
-**In `.dbsp` files:**
-```nql
-# comments start with #
-posts | where published = true | select title
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT posts.title
-
-  FROM posts
-
-  WHERE
-  posts.published = $1
-```
-
-**Parameters:** `[true]`
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-
-
-
-
-
-
-**In TypeScript:**
-```typescript
-const posts = await orm.nql<Post[]>`posts | where published = true`.all();
-```
-
-### Example Schemas
-
-Examples in this guide use three schemas shipped with the project. Each is a **separate file** — you load one at a time with `dbsp repl -s`. Every code block below is labeled with its schema so you can copy-paste directly.
-
-#### Blog — `examples/blog.schema.ts`
-
-```bash
-pnpm dbsp repl -s examples/blog.schema.ts
-```
-
-Tables: `authors`, `posts`, `comments`, `tags`, `postTags`
-
-```typescript
-schema({
-  authors:  { id, name, email, bio?, createdAt },
-  posts:    { id, title, slug, content?, published, authorId → authors, createdAt, updatedAt? },
-  comments: { id, postId → posts, authorName, authorEmail?, content, approved, createdAt },
-  tags:     { id, name, slug },
-  postTags: { postId → posts, tagId → tags },  // M:N junction
-});
-```
-
-#### Ecommerce — `examples/ecommerce.schema.ts`
-
-```bash
-pnpm dbsp repl -s examples/ecommerce.schema.ts
-```
-
-Tables: `categories`, `products`, `variants`, `customers`, `addresses`, `orders`, `orderItems`
-
-```typescript
-schema({
-  categories: { id, name, slug, parentId? → categories (self-ref: parent/children/ancestors/descendants), sortOrder },
-  products:   { id, sku, name, description?, price, stock, categoryId → categories, active, createdAt },
-  variants:   { id, productId → products, sku, name, priceModifier, stock },
-  customers:  { id, email, firstName, lastName, phone?, createdAt },
-  addresses:  { id, customerId → customers, type, street, city, postalCode, country, isDefault },
-  orders:     { id, orderNumber, customerId → customers, status, total, shippingAddressId → addresses,
-                billingAddressId → addresses, createdAt, updatedAt? },
-  orderItems: { id, orderId → orders, productId → products, variantId? → variants, quantity, unitPrice, totalPrice },
-});
-```
-
-#### Hierarchy — `examples/hierarchy.schema.ts`
-
-```bash
-pnpm dbsp repl -s examples/hierarchy.schema.ts
-```
-
-Tables: `departments`, `employees`, `projects`
-
-```typescript
-schema({
-  departments: { id, name, budget? },
-  employees:   { id, name, email, title, departmentId → departments, managerId? → employees
-                 (self-ref: manager/directReports/managementChain/allReports), hireDate, salary },
-  projects:    { id, name, leadId → employees, departmentId → departments, status },
-});
-```
+- [Getting Started](#getting-started)
+- [Basic Queries](#basic-queries)
+- [Filtering (WHERE)](#filtering-where)
+- [Sorting and Pagination](#sorting-and-pagination)
+- [Relations and Includes](#relations-and-includes)
+- [Aggregates](#aggregates)
+- [Window Functions](#window-functions)
+- [CASE Expressions](#case-expressions)
+- [JSONB Operators](#jsonb-operators)
+- [Subqueries](#subqueries)
+- [Hierarchy (Recursive CTE)](#hierarchy-recursive-cte)
+- [Range Types](#range-types)
+- [Mutations](#mutations)
+- [Advanced Features](#advanced-features)
+- [REPL Commands](#repl-commands)
+- [Quick Reference](#quick-reference)
 
 ---
 
-## 2. Basic Syntax
+## Getting Started
+
+### Prerequisites
+
+```bash
+# Start PostgreSQL container
+podman run -d --name pg-demo -p 5432:5432 -e POSTGRES_PASSWORD=demo postgres:17
+
+# Database URL used in all examples
+export DB_URL=postgresql://postgres:demo@localhost:5432/demo
+```
+
+### Running Examples
+
+NQL queries are executed via the REPL CLI:
+
+```bash
+# Interactive REPL
+pnpm dbsp repl --schema ./examples/ecommerce.schema.ts --db $DB_URL --exec --casing snake
+
+# Batch mode (execute .dbsp file)
+pnpm dbsp repl --schema ./examples/ecommerce.schema.ts --db $DB_URL \
+  --input ./examples/ecommerce.dbsp --exec --casing snake
+
+# Validate assertions
+pnpm dbsp repl --schema ./examples/ecommerce.schema.ts --db $DB_URL \
+  --input ./examples/ecommerce.dbsp --assert ./examples/ecommerce.assert.dbsp \
+  --exec --casing snake
+
+# Compile-only (no database needed)
+pnpm dbsp repl --schema ./examples/ecommerce.schema.ts \
+  --input ./examples/ecommerce.dbsp
+```
+
+### Pipe Syntax
+
+NQL uses pipes (`|`) to chain operators, left to right:
+
+```
+table | where condition | select columns | order by col | limit N
+```
+
+Each operator transforms the query progressively. The final result compiles to a single SQL statement.
+
+### Available Schemas
+
+| Schema | Tables | Key Features |
+|--------|--------|--------------|
+| `minimal` | users, posts | Simple 1:N, basics |
+| `blog` | authors, posts, tags, comments, postTags | M:N, aggregates |
+| `blog-extended` | authors, posts, categories, tags, postTags | Hierarchy, ORDER BY |
+| `ecommerce` | categories, products, variants, customers, addresses, orders, orderItems | Window functions, complex FKs |
+| `hierarchy` | employees | Self-ref, recursive CTE |
+| `scheduling` | rooms, events, roomBookings, priceTiers | PostgreSQL range types |
+| `pimdam` | categories, products, assets, productImages | Soft-delete, multi-locale |
+| `iam` | users, roles, permissions, userRoles, rolePermissions, roleEdges, sodRules, resources, auditLog | JSONB, junction tables, edge hierarchy |
+| `test-strategies` | departments, employees, projects, assignments, tasks | All include strategies |
+
+---
+
+## Basic Queries
+
+*Schema: ecommerce*
 
 ### Table Scan
 
-**blog:**
-```nql
-authors
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT authors.*
-
-  FROM authors
-```
-
-**Parameters:** _none_
-
-**Why NQL?** Even the simplest query benefits from the planner: table names are double-quoted (safe for reserved words), aliases are generated, and the result is a fully parameterized query ready for `pg.Pool.query()`.
-
-</details>
-
-
-
-
-
-
-
-
-**ecommerce:**
-```nql
-products
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT products.*
-
-  FROM products
-```
-
-**Parameters:** _none_
-
-**Why NQL?** Even the simplest query benefits from the planner: table names are double-quoted (safe for reserved words), aliases are generated, and the result is a fully parameterized query ready for `pg.Pool.query()`.
-
-</details>
-
-
-
-
-
-
-
-
-Returns all rows and columns from the table.
-
-### Pipe Operators
-
-Chain clauses with `|`:
-
-**ecommerce:**
-```nql
-products | where active = true | select id, name | order by name | limit 10
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT
-  products.id,
-  products.name
-
-  FROM products
-
-  WHERE
-  products.active = $1
-
-  ORDER BY
-  products.name ASC
-
-  LIMIT 10
-```
-
-**Parameters:** `[true]`
-
-**Why NQL?** NQL's pipe syntax reads like a sentence: "start from table, filter, sort, take N." The equivalent SQL requires WHERE, ORDER BY, and LIMIT clauses in specific positions. All values are automatically parameter-bound (`$1`, `$2`, ...) for safety.
-
-</details>
-
-
-
-
-
-
-
-
-**blog:**
-```nql
-posts | where published = true | select title, slug | order by createdAt desc | limit 10
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT
-  posts.title,
-  posts.slug
-
-  FROM posts
-
-  WHERE
-  posts.published = $1
-
-  ORDER BY
-  posts."createdAt" DESC
-
-  LIMIT 10
-```
-
-**Parameters:** `[true]`
-
-**Why NQL?** NQL's pipe syntax reads like a sentence: "start from table, filter, sort, take N." The equivalent SQL requires WHERE, ORDER BY, and LIMIT clauses in specific positions. All values are automatically parameter-bound (`$1`, `$2`, ...) for safety.
-
-</details>
-
-
-
-
-
-
-
-
-### Comments
-
-Comments start with `#` and extend to end of line:
+The simplest query: just name a table. NQL returns all columns and all rows — the equivalent of `SELECT * FROM table`.
 
 ```nql
-# Full-line comment (ignored by REPL and .dbsp files)
-products | where active = true   # Inline comment
+categories
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-SELECT products.*
-
-  FROM products
-
-  WHERE
-  products.active = $1
+SELECT categories.* FROM ch5_ecommerce.categories
 ```
-
-**Parameters:** `[true]`
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
 </details>
 
+| id | name            | slug            | parent_id | sort_order |
+|----|-----------------|-----------------|-----------|------------|
+| 1  | Electronics     | electronics     | NULL      | 1          |
+| 2  | Clothing        | clothing        | NULL      | 2          |
+| 3  | Books           | books           | NULL      | 3          |
+| 4  | Computers       | computers       | 1         | 1          |
+| 5  | Phones          | phones          | 1         | 2          |
+| ...| ...             | ...             | ...       | ...        |
 
+*(20 rows)*
 
+### Select Specific Columns
 
+Without a `| select` pipe, NQL defaults to `SELECT *`. Adding `| select` lets you cherry-pick the columns you need.
 
+```nql
+customers
+```
 
+<details><summary>SQL</summary>
 
+```sql
+SELECT customers.* FROM ch5_ecommerce.customers
+```
+</details>
+
+| id | email             | first_name | last_name | phone       | created_at               |
+|----|-------------------|------------|-----------|-------------|--------------------------|
+| 1  | alice@example.com | Alice      | Johnson   | +1-555-0101 | 2024-01-01T09:00:00.000Z |
+| 2  | bob@example.com   | Bob        | Smith     | +1-555-0102 | 2024-01-01T09:00:00.000Z |
+| 3  | carol@example.com | Carol      | Williams  | NULL        | 2024-01-02T10:00:00.000Z |
+| 4  | david@example.com | David      | Brown     | +1-555-0104 | 2024-01-03T11:00:00.000Z |
+| 5  | emma@example.com  | Emma       | Davis     | +1-555-0105 | 2024-01-04T12:00:00.000Z |
 
 ---
 
-## 3. WHERE (Filtering)
+## Filtering (WHERE)
+
+### Equality
+
+*Schema: ecommerce*
+
+Filter rows by exact match. Values are always parameterized (`$1`, `$2`, ...) — never interpolated into SQL.
+
+```nql
+products | where active = true | limit 5
+```
+
+<details><summary>SQL</summary>
+
+```sql
+SELECT products.*
+FROM ch5_ecommerce.products
+WHERE products.active = $1
+LIMIT 5
+-- params: [true]
+```
+</details>
+
+| id | sku           | name            | description                               | price   | stock | category_id | active | created_at               |
+|----|---------------|-----------------|-------------------------------------------|---------|-------|-------------|--------|--------------------------|
+| 1  | LAPTOP-001    | ProBook 15      | High-performance laptop for professionals | 1299.99 | 50    | 11          | true   | 2024-01-01T08:00:00.000Z |
+| 2  | LAPTOP-002    | UltraLight 13   | Lightweight laptop for travel             | 999.99  | 30    | 11          | true   | 2024-01-01T08:00:00.000Z |
+| 3  | PHONE-001     | SmartPhone X    | Latest flagship smartphone                | 899.99  | 100   | 13          | true   | 2024-01-01T08:00:00.000Z |
+| 4  | PHONE-002     | SmartPhone SE   | Budget-friendly smartphone                | 449.99  | 200   | 13          | true   | 2024-01-01T08:00:00.000Z |
+| 5  | HEADPHONE-001 | NoiseCancel Pro | Premium noise-canceling headphones        | 349.99  | 75    | 14          | true   | 2024-01-01T08:00:00.000Z |
+
+### NULL Checks
+
+*Schema: iam*
+
+In a resource tree, root entries have no parent. NQL uses `is null` / `is not null` — compiled to SQL's `IS NULL`, never `= NULL`.
+
+```nql
+resources | where parentId is null
+```
+
+<details><summary>SQL</summary>
+
+```sql
+SELECT resources.*
+FROM iam_example.resources
+WHERE resources.parent_id IS NULL
+```
+</details>
+
+| id | name | type   | parent_id |
+|----|------|--------|-----------|
+| 1  | Root | folder | NULL      |
+
+*(1 row)*
 
 ### Comparison Operators
 
-**blog:**
+*Schema: blog-extended*
+
+All standard comparison operators are supported: `>`, `<`, `>=`, `<=`, `!=`. NQL compiles them directly to their SQL equivalents.
+
 ```nql
-authors | where name = 'Alice'
-authors | where name != 'John'
-posts | where published = true
+posts | where viewCount > 1000
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
 SELECT posts.*
-
-  FROM posts
-
-  WHERE
-  posts.published = $1
+FROM ch3_blog_extended.posts
+WHERE posts.view_count > $1
+-- params: [1000]
 ```
-
-**Parameters:** `[true]`
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
 </details>
 
+| id | title                  | featured | view_count | published |
+|----|------------------------|----------|------------|-----------|
+| 1  | TypeScript Fundamentals| True     | 1500       | True      |
+| 3  | PostgreSQL Deep Dive   | True     | 2000       | True      |
 
+*(2 rows)*
 
+### AND / OR
 
+Combine multiple conditions with `and` / `or`. NQL preserves operator precedence and compiles to standard SQL boolean logic.
 
-
-
-
-**ecommerce:**
 ```nql
-products | where price > 100
-products | where price >= 100
-products | where stock < 50
-orders | where total <= 10
+posts | where featured = true and viewCount > 1500
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-SELECT orders.*
-
-  FROM orders
-
-  WHERE
-  orders.total <= $1
+SELECT posts.*
+FROM ch3_blog_extended.posts
+WHERE posts.featured = $1 AND posts.view_count > $2
+-- params: [true, 1500]
 ```
-
-**Parameters:** `[10]`
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
 </details>
 
+| id | title                | featured | view_count |
+|----|----------------------|----------|------------|
+| 3  | PostgreSQL Deep Dive | True     | 2000       |
 
-
-
-
-
-
-
-### Pattern Matching
-
-**blog:**
-```nql
-authors | where name like 'A%'
-authors | where email like '%@example.com'
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT authors.*
-
-  FROM authors
-
-  WHERE
-  authors.email LIKE $1
-```
-
-**Parameters:** `["%@example.com"]`
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-
-
-
-
-
-
-**ecommerce:**
-```nql
-products | where name like '%Phone%'
-customers | where email like '%@gmail.com'
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT customers.*
-
-  FROM customers
-
-  WHERE
-  customers.email LIKE $1
-```
-
-**Parameters:** `["%@gmail.com"]`
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-
-
-
-
-
+*(1 row)*
 
 ### BETWEEN
 
-**ecommerce:**
-```nql
-products | where price between 10 and 500
-```
+*Schema: test-strategies*
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+Range filtering made readable. `BETWEEN` is inclusive on both ends — equivalent to `>= AND <=`.
 
-**SQL:**
-```sql
-SELECT products.*
-
-  FROM products
-
-  WHERE
-  products.price BETWEEN $1 AND $2
-```
-
-**Parameters:** `[10, 500]`
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-
-
-
-
-
-
-**hierarchy:**
 ```nql
 employees | where salary between 50000 and 100000
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
 SELECT employees.*
-
-  FROM employees
-
-  WHERE
-  employees.salary BETWEEN $1 AND $2
+FROM test_strategies.employees
+WHERE employees.salary BETWEEN $1 AND $2
+-- params: [50000, 100000]
 ```
-
-**Parameters:** `[50000, 100000]`
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
 </details>
 
+| id | name  | salary | department_id | active |
+|----|-------|--------|---------------|--------|
+| 2  | Bob   | 85000  | 1             | True   |
+| 3  | Carol | 95000  | 2             | True   |
+| 5  | Eve   | 60000  | 3             | True   |
 
+*(3 rows)*
 
+### LIKE
 
+Pattern matching with `%` (any characters) and `_` (single character). The pattern is parameterized — no SQL injection risk.
 
+```nql
+employees | where name like 'A%'
+```
 
+<details><summary>SQL</summary>
 
+```sql
+SELECT employees.*
+FROM test_strategies.employees
+WHERE employees.name LIKE $1
+-- params: ["A%"]
+```
+</details>
+
+| id | name  | salary | department_id | active |
+|----|-------|--------|---------------|--------|
+| 1  | Alice | 120000 | 1             | True   |
+
+*(1 row)*
 
 ### IN (Value List)
 
-**ecommerce:**
+Check membership against a list of values. Each value becomes a separate parameter.
+
 ```nql
-orders | where status in ('pending', 'shipped', 'delivered')
-products | where id in (1, 2, 3)
+employees | where departmentId in (1, 2, 3)
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-SELECT products.*
-
-  FROM products
-
-  WHERE
-  products.id = ANY ($1)
+SELECT employees.*
+FROM test_strategies.employees
+WHERE employees.department_id IN ($1, $2, $3)
+-- params: [1, 2, 3]
 ```
-
-**Parameters:** `[[1,2,3]]`
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
 </details>
 
+| id | name  | salary | department_id | active |
+|----|-------|--------|---------------|--------|
+| 1  | Alice | 120000 | 1             | True   |
+| 2  | Bob   | 85000  | 1             | True   |
+| 3  | Carol | 95000  | 2             | True   |
+| 4  | Dave  | 45000  | 2             | True   |
+| 5  | Eve   | 60000  | 3             | True   |
+| 6  | Frank | 30000  | 3             | False  |
 
+*(6 rows)*
 
+### NOT IN
 
+Exclusion filter — returns rows whose value is not in the given list.
 
-
-
-
-### IN (Subquery)
-
-**ecommerce:**
 ```nql
-customers | where id in (orders | select customerId | where status = 'delivered')
-
-# With limit and order by inside the subquery
-customers | where id in (orders | select customerId | order by total desc | limit 10)
+employees | where departmentId not in (4, 5)
 ```
 
-<details>
-<summary>Compiled SQL & Plan — `customers | where id in (orders | select customerId | where …`</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-SELECT customers.*
-
-  FROM customers
-
-  WHERE
-  customers.id = ANY (SELECT orders_subq_0."customerId"
-
-  FROM orders AS orders_subq_0
-
-  WHERE
-  orders_subq_0.status = $1)
-  AND EXISTS (SELECT 1
-
-  FROM orders AS orders_exists_1
-
-  WHERE
-  customers.id = orders_exists_1."customerId")
+SELECT employees.*
+FROM test_strategies.employees
+WHERE employees.department_id NOT IN ($1, $2)
+-- params: [4, 5]
 ```
-
-**Parameters:** `["delivered"]`
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| filter-strategy | customers → orders | exists | Relation customers.orders has cardinality "many" - using EXISTS to avoid row explosion |
-
-**Why NQL?** Subqueries in NQL compose naturally — the inner query is just another NQL pipe expression inside parentheses. The planner compiles it as a correlated or uncorrelated subquery depending on context, handling aliasing and parameter numbering automatically.
-
 </details>
 
-
-<details>
-<summary>Compiled SQL & Plan — `customers | where id in (orders | select customerId | order …`</summary>
-
-**SQL:**
-```sql
-SELECT customers.*
-
-  FROM customers
-
-  WHERE
-  customers.id = ANY (SELECT orders_subq_0."customerId"
-
-  FROM orders AS orders_subq_0
-
-  ORDER BY
-  orders_subq_0.total DESC
-
-  LIMIT 10)
-  AND EXISTS (SELECT 1
-
-  FROM orders AS orders_exists_1
-
-  WHERE
-  customers.id = orders_exists_1."customerId")
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| filter-strategy | customers → orders | exists | Relation customers.orders has cardinality "many" - using EXISTS to avoid row explosion |
-
-**Why NQL?** Subqueries in NQL compose naturally — the inner query is just another NQL pipe expression inside parentheses. The planner compiles it as a correlated or uncorrelated subquery depending on context, handling aliasing and parameter numbering automatically.
-
-</details>
-
-
-
-
-
-
-
-
-
-> Subquery `limit` and `order by` are propagated to SQL. See
-> [Three Forms of LIMIT](#three-forms-of-limit) for the difference between
-> subquery limit, outer limit, and per-include limit.
-
-### NULL Checks
-
-**blog:**
-```nql
-authors | where bio is null
-posts | where updatedAt is not null
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT posts.*
-
-  FROM posts
-
-  WHERE
-  posts."updatedAt" IS NOT NULL
-```
-
-**Parameters:** _none_
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-
-
-
-
-
-
-**ecommerce:**
-```nql
-products | where description is null
-customers | where phone is not null
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT customers.*
-
-  FROM customers
-
-  WHERE
-  customers.phone IS NOT NULL
-```
-
-**Parameters:** _none_
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-
-
-
-
-
-
-### Logical Operators
-
-**ecommerce:**
-```nql
-# AND
-products | where active = true and price > 50
-
-# OR
-orders | where status = 'pending' or status = 'shipped'
-
-# Parentheses for grouping
-products | where (stock < 10 or stock > 1000) and active = true
-```
-
-<details>
-<summary>Compiled SQL & Plan — `products | where active = true and price > 50`</summary>
-
-**SQL:**
-```sql
-SELECT products.*
-
-  FROM products
-
-  WHERE
-  products.active = $1
-  AND products.price > $2
-```
-
-**Parameters:** `[true, 50]`
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `orders | where status = 'pending' or status = 'shipped'`</summary>
-
-**SQL:**
-```sql
-SELECT orders.*
-
-  FROM orders
-
-  WHERE
-  orders.status = $1
-  OR orders.status = $2
-```
-
-**Parameters:** `["pending", "shipped"]`
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `products | where (stock < 10 or stock > 1000) and active = t…`</summary>
-
-**SQL:**
-```sql
-SELECT products.*
-
-  FROM products
-
-  WHERE
-  (products.stock < $1
-  OR products.stock > $2)
-  AND products.active = $3
-```
-
-**Parameters:** `[10, 1000, true]`
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-
-
-
-
-
-
-
-
-**blog:**
-```nql
-# NOT
-comments | where not (approved = true)
-
-# Combined
-posts | where published = true and (title like '%Guide%' or title like '%Tutorial%')
-```
-
-<details>
-<summary>Compiled SQL & Plan — `comments | where not (approved = true)`</summary>
-
-**SQL:**
-```sql
-SELECT comments.*
-
-  FROM comments
-
-  WHERE
-  NOT (comments.approved = $1)
-```
-
-**Parameters:** `[true]`
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `posts | where published = true and (title like '%Guide%' or …`</summary>
-
-**SQL:**
-```sql
-SELECT posts.*
-
-  FROM posts
-
-  WHERE
-  posts.published = $1
-  AND (posts.title LIKE $2
-  OR posts.title LIKE $3)
-```
-
-**Parameters:** `[true, "%Guide%", "%Tutorial%"]`
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-
-
-
-
-
-
-
-### Relation Filters
-
-Filter by related records using quantifiers:
-
-**blog:**
-```nql
-# SOME — at least one related record matches
-authors | where some(posts).published = true
-
-# NONE — no related record matches
-authors | where none(posts).published = false
-
-# EVERY — all related records match
-authors | where every(posts).published = true
-
-# With aliases for complex conditions
-authors | where some(posts as p, p.published = true and p.title like '%Guide%')
-```
-
-<details>
-<summary>Compiled SQL & Plan — `authors | where some(posts).published = true`</summary>
-
-**SQL:**
-```sql
-SELECT authors.*
-
-  FROM authors
-
-  WHERE
-  EXISTS (SELECT 1
-
-  FROM posts AS posts_exists_0
-
-  WHERE
-  authors.id = posts_exists_0."authorId"
-  AND posts_exists_0.published = $1)
-```
-
-**Parameters:** `[true]`
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| filter-strategy | authors → posts | exists | Relation authors.posts has cardinality "many" (mode: some) - using EXISTS to avoid row explosion |
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `authors | where none(posts).published = false`</summary>
-
-**SQL:**
-```sql
-SELECT authors.*
-
-  FROM authors
-
-  WHERE
-  NOT (EXISTS (SELECT 1
-
-  FROM posts AS posts_exists_0
-
-  WHERE
-  authors.id = posts_exists_0."authorId"
-  AND posts_exists_0.published = $1))
-```
-
-**Parameters:** `[false]`
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| filter-strategy | authors → posts | exists | Relation authors.posts has cardinality "many" (mode: none) - using EXISTS to avoid row explosion |
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `authors | where every(posts).published = true`</summary>
-
-**SQL:**
-```sql
-SELECT authors.*
-
-  FROM authors
-
-  WHERE
-  NOT (EXISTS (SELECT 1
-
-  FROM posts AS posts_exists_0
-
-  WHERE
-  authors.id = posts_exists_0."authorId"
-  AND NOT (posts_exists_0.published = $1)))
-```
-
-**Parameters:** `[true]`
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| filter-strategy | authors → posts | exists | Relation authors.posts has cardinality "many" (mode: every) - using EXISTS to avoid row explosion |
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `authors | where some(posts as p, p.published = true and p.ti…`</summary>
-
-**SQL:**
-```sql
-SELECT authors.*
-
-  FROM authors
-
-  WHERE
-  EXISTS (SELECT 1
-
-  FROM posts AS posts_exists_0
-
-  WHERE
-  authors.id = posts_exists_0."authorId"
-  AND (posts_exists_0.published = $1
-  AND posts_exists_0.title LIKE $2))
-```
-
-**Parameters:** `[true, "%Guide%"]`
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| filter-strategy | authors → posts | exists | Relation authors.posts has cardinality "many" (mode: some) - using EXISTS to avoid row explosion |
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-
-
-
-
-
-
-
-
-
-**ecommerce:**
-```nql
-customers | where none(orders as o, o.status = 'cancelled' and o.total > 100)
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT customers.*
-
-  FROM customers
-
-  WHERE
-  NOT (EXISTS (SELECT 1
-
-  FROM orders AS orders_exists_0
-
-  WHERE
-  customers.id = orders_exists_0."customerId"
-  AND (orders_exists_0.status = $1
-  AND orders_exists_0.total > $2)))
-```
-
-**Parameters:** `["cancelled", 100]`
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| filter-strategy | customers → orders | exists | Relation customers.orders has cardinality "many" (mode: none) - using EXISTS to avoid row explosion |
-
-**Why NQL?** Filter values are automatically parameter-bound (`$1`, `$2`, ...) — never interpolated into the SQL string. The planner also qualifies column names with table aliases, so you never need to worry about ambiguous references.
-
-</details>
-
-
-
-
-
-
-
-
-### EXISTS Subquery
-
-**ecommerce:**
-```nql
-customers | where exists (orders | where customerId = customers.id)
-```
+| id | name  | salary | department_id | active |
+|----|-------|--------|---------------|--------|
+| 1  | Alice | 120000 | 1             | True   |
+| 2  | Bob   | 85000  | 1             | True   |
+| 3  | Carol | 95000  | 2             | True   |
+| 4  | Dave  | 45000  | 2             | True   |
+| 5  | Eve   | 60000  | 3             | True   |
+| 6  | Frank | 30000  | 3             | False  |
+
+*(6 rows)*
 
 ---
 
-## 4. SELECT (Projection)
+## Sorting and Pagination
 
-### All Columns
+*Schema: blog-extended*
 
-**blog:**
+### ORDER BY
+
+Sort results by any column. Defaults to `asc`; specify `desc` for descending order.
+
 ```nql
-authors | select *
-authors                    # implicit select *
+posts | order by viewCount desc
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-SELECT authors.*
-
-  FROM authors
+SELECT posts.*
+FROM ch3_blog_extended.posts
+ORDER BY posts.view_count DESC
 ```
-
-**Parameters:** _none_
-
-**Why NQL?** Even the simplest query benefits from the planner: table names are double-quoted (safe for reserved words), aliases are generated, and the result is a fully parameterized query ready for `pg.Pool.query()`.
-
 </details>
 
+| id | title                   | view_count | published |
+|----|-------------------------|------------|-----------|
+| 3  | PostgreSQL Deep Dive    | 2000       | True      |
+| 1  | TypeScript Fundamentals | 1500       | True      |
+| 2  | Advanced TypeScript     | 800        | True      |
+| 4  | MongoDB vs PostgreSQL   | 600        | True      |
+| 5  | Work-Life Balance       | 300        | True      |
+| 8  | Inactive Author Post    | 50         | True      |
+| 6  | Draft: React Patterns   | 0          | False     |
+| 7  | Draft: Redis Caching    | 0          | False     |
 
+*(8 rows)*
 
+### ORDER BY with LIMIT
 
+Combine sorting and pagination for "top-N" queries. Pipe chaining makes the intent clear: sort first, then take the top 3.
 
-
-
-
-### Specific Columns
-
-**blog:**
 ```nql
-authors | select id, name, email
+posts | order by viewCount desc | limit 3
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-SELECT
-  authors.id,
-  authors.name,
-  authors.email
-
-  FROM authors
+SELECT posts.*
+FROM ch3_blog_extended.posts
+ORDER BY posts.view_count DESC
+LIMIT 3
 ```
-
-**Parameters:** _none_
-
-**Why NQL?** This 32-character NQL expression compiles to 65 characters of SQL (2.0× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
 </details>
 
+| id | title                   | view_count |
+|----|-------------------------|------------|
+| 3  | PostgreSQL Deep Dive    | 2000       |
+| 1  | TypeScript Fundamentals | 1500       |
+| 2  | Advanced TypeScript     | 800        |
 
+*(3 rows)*
 
+### LIMIT and OFFSET
 
+*Schema: minimal*
 
+Standard pagination: `limit N` restricts the result set, `offset N` skips rows. Combine both for cursor-based paging.
 
-
-
-**ecommerce:**
 ```nql
-products | select sku, name, price
+posts | limit 10
+posts | limit 10 | offset 20
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-SELECT
-  products.sku,
-  products.name,
-  products.price
-
-  FROM products
+SELECT posts.* FROM posts LIMIT 10
+SELECT posts.* FROM posts LIMIT 10 OFFSET 20
 ```
-
-**Parameters:** _none_
-
-**Why NQL?** This 34-character NQL expression compiles to 70 characters of SQL (2.1× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
 </details>
-
-
-
-
-
-
-
-
-### Aliases
-
-**ecommerce:**
-```nql
-products | select name as productName, price as cost
-products | select price * 1.1 as priceWithTax
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT
-  products.price * $1 AS "priceWithTax"
-
-  FROM products
-```
-
-**Parameters:** `[1.1]`
-
-**Why NQL?** This 98-character NQL expression compiles to 60 characters of SQL (0.6× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-### DISTINCT
-
-**ecommerce:**
-```nql
-orders | select distinct status
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT DISTINCT orders.status
-
-  FROM orders
-```
-
-**Parameters:** _none_
-
-**Why NQL?** This 31-character NQL expression compiles to 41 characters of SQL (1.3× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-**blog:**
-```nql
-comments | select count(distinct authorName)
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT count(DISTINCT comments."authorName")
-
-  FROM comments
-```
-
-**Parameters:** _none_
-
-**Why NQL?** This 44-character NQL expression compiles to 58 characters of SQL (1.3× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-### Arithmetic Expressions
-
-**ecommerce:**
-```nql
-orderItems | select unitPrice + 5 as shippingTotal
-orderItems | select quantity * unitPrice as lineTotal
-products | select price - 10 as discountedPrice
-orderItems | select totalPrice / quantity as effectiveUnitPrice
-orderItems | select quantity % 3 as remainder
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT
-  "orderItems".quantity % $1 AS remainder
-
-  FROM "orderItems"
-```
-
-**Parameters:** `[3]`
-
-**Why NQL?** This 262-character NQL expression compiles to 66 characters of SQL (0.3× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-Standard operator precedence: `*`, `/`, `%` bind tighter than `+`, `-`.
 
 ---
 
-## 5. Includes (Relations)
+## Relations and Includes
 
-### Nested JSON (Default)
+NQL supports three include strategies, automatically chosen by the planner.
 
-Select columns from related tables to auto-include them. The planner uses
-`json_agg` to aggregate children into a single JSON array per parent row:
+### json_agg (Default — Nested JSON)
 
-**blog:**
+*Schema: ecommerce*
+
+Including related data is NQL's strongest feature. Just use dotted syntax: `relation.*`. The planner uses `json_agg` by default, embedding related rows as a JSON array — one parent row = one result row, no duplication.
+
+If you prefer flat, denormalized rows (one row per parent-child combination), append `| flat` to switch to a LEFT JOIN strategy instead. See the [flat (LEFT JOIN)](#flat-left-join) section below.
+
 ```nql
-# Include all post columns as nested JSON array
-authors | select *, posts.*
+customers | select *, orders.*
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-SELECT
-  authors.*,
+SELECT customers.*,
+  COALESCE(
+    (SELECT json_agg(to_jsonb(__t__))
+     FROM ch5_ecommerce.orders AS __t__
+     WHERE __t__.customer_id = customers.id),
+    '[]'::json
+  ) AS orders_json
+FROM ch5_ecommerce.customers
+```
+</details>
+
+Each customer row contains an `orders_json` array with all their orders as nested JSON.
+
+| id | email             | first_name | last_name | orders_json |
+|----|-------------------|------------|-----------|-------------|
+| 1  | alice@example.com | Alice      | Johnson   | [{"id":1,"total":1499.98,"status":"delivered",...},{"id":3,...}] |
+| 2  | bob@example.com   | Bob        | Smith     | [{"id":2,"total":349.99,"status":"shipped",...},{"id":7,...}] |
+| 3  | carol@example.com | Carol      | Williams  | [{"id":4,"total":999.99,"status":"pending",...}] |
+| 4  | david@example.com | David      | Brown     | [{"id":5,"total":179.97,"status":"delivered",...}] |
+| 5  | emma@example.com  | Emma       | Davis     | [{"id":6,"total":1099.98,"status":"shipped",...}] |
+
+### flat (LEFT JOIN)
+
+When you need denormalized rows (for CSV export, spreadsheets, or tools that don't handle nested JSON), append `| flat`. The planner switches from `json_agg` to a standard LEFT JOIN — one row per parent-child combination.
+
+```nql
+categories | select *, products.* | flat
+```
+
+<details><summary>SQL</summary>
+
+```sql
+SELECT categories.*, products.*
+FROM ch5_ecommerce.categories
+LEFT JOIN ch5_ecommerce.products AS products
+  ON categories.id = products.category_id
+```
+</details>
+
+| id | name          | slug          | parent_id | sku         | price   | category_id |
+|----|---------------|---------------|-----------|-------------|---------|-------------|
+| 11 | Laptops       | laptops       | 4         | LAPTOP-001  | 1299.99 | 11          |
+| 11 | Laptops       | laptops       | 4         | LAPTOP-002  | 999.99  | 11          |
+| 13 | Smartphones   | smartphones   | 5         | PHONE-001   | 899.99  | 13          |
+| 13 | Smartphones   | smartphones   | 5         | PHONE-002   | 449.99  | 13          |
+| ...| ...           | ...           | ...       | ...         | ...     | ...         |
+
+*(24 rows)*
+
+### Per-Include LIMIT (LATERAL)
+
+*Schema: iam*
+
+To limit the number of related rows *per parent*, use `| limit relation N`. This forces a LATERAL subquery — PostgreSQL's way of saying "for each parent row, run this subquery with a LIMIT".
+
+```nql
+users | select *, userRoles.* | limit userRoles 2
+```
+
+<details><summary>SQL</summary>
+
+```sql
+SELECT users.*, user_roles_lat_0.*
+FROM iam_example.users
+LEFT JOIN LATERAL (
+  SELECT user_roles_inner_0.*
+  FROM iam_example.user_roles AS user_roles_inner_0
+  WHERE user_roles_inner_0.user_id = users.id
+  LIMIT 2
+) AS user_roles_lat_0 ON true
+```
+</details>
+
+| id | username | email              | active | user_id | role_id | granted_at               |
+|----|----------|--------------------|--------|---------|---------|--------------------------|
+| 1  | alice    | alice@example.com  | True   | 1       | 1       | 2025-01-01T00:00:00.000Z |
+| 2  | bob      | bob@example.com    | True   | 2       | 2       | 2025-01-15T00:00:00.000Z |
+| 3  | carol    | carol@example.com  | True   | 3       | 3       | 2025-02-01T00:00:00.000Z |
+| 3  | carol    | carol@example.com  | True   | 3       | 6       | 2025-02-01T00:00:00.000Z |
+| 4  | dave     | dave@example.com   | True   | 4       | 4       | 2025-03-01T00:00:00.000Z |
+| 5  | eve      | eve@example.com    | True   | 5       | 5       | 2025-03-15T00:00:00.000Z |
+| 6  | frank    | frank@example.com  | False  | 6       | 8       | 2025-04-01T00:00:00.000Z |
+| 6  | frank    | frank@example.com  | False  | 6       | 9       | 2025-04-01T00:00:00.000Z |
+
+*(8 rows — each user has at most 2 role assignments)*
+
+### Deep Nesting (Multi-Level Traversal)
+
+*Schema: iam*
+
+Use dotted paths to traverse multiple levels of relations in a single query. The planner resolves the full chain and nests the results as JSON arrays.
+
+```nql
+users | where active = true \
+  | select *, userRoles.roleId, userRoles.role.rolePermissions.permission.*
+```
+
+<details><summary>SQL</summary>
+
+```sql
+SELECT users.*,
   COALESCE((SELECT json_agg(to_jsonb(__t__))
-  
-  FROM posts AS __t__
-  
-  WHERE
-    __t__."authorId" = authors.id), '[]'::json) AS posts_json
-
-  FROM authors
+    FROM iam_example.user_roles AS __t__
+    WHERE __t__.user_id = users.id), '[]'::json) AS user_roles_json
+FROM iam_example.users
+WHERE users.active = $1
+-- params: [true]
 ```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | authors → posts | json_agg | Relation authors.posts (hasMany, cardinality: many) - using JSON aggregation to avoid row explosion |
-
-**Why NQL?** Even the simplest query benefits from the planner: table names are double-quoted (safe for reserved words), aliases are generated, and the result is a fully parameterized query ready for `pg.Pool.query()`.
-
 </details>
 
+| id | username | email              | active | userRoles_json                                         |
+|----|----------|--------------------|--------|--------------------------------------------------------|
+| 1  | alice    | alice@example.com  | True   | [{"id":1,"role":[{"id":1,"name":"super_admin",...}]}]  |
+| 2  | bob      | bob@example.com    | True   | [{"id":2,"role":[{"id":2,"name":"admin",...}]}]        |
+| 3  | carol    | carol@example.com  | True   | [{"id":3,"role":[{"id":3,"name":"manager",...}]},...]  |
+| 4  | dave     | dave@example.com   | True   | [{"id":5,"role":[{"id":4,"name":"editor",...}]}]       |
+| 5  | eve      | eve@example.com    | True   | [{"id":6,"role":[{"id":5,"name":"viewer",...}]}]       |
 
+*(5 rows — the planner traverses: users → userRoles → roles → rolePermissions → permissions)*
 
+### M:N Relations (Junction Tables)
 
+*Schema: blog*
 
+Many-to-many relations work with the same `relation.*` syntax. The planner detects the junction table automatically and generates the correct JOIN path (posts → postTags → tags).
 
-
-
-```sql
--- Produced SQL (json_agg):
-SELECT authors.*, json_agg(posts.*) AS posts
-FROM authors LEFT JOIN posts ON authors.id = posts.author_id
-GROUP BY authors.id
-```
-
-Result shape (nested):
-```json
-[
-  { "id": 1, "name": "Alice", "posts": [{ "id": 1, "title": "..." }, ...] }
-]
-```
-
-**ecommerce:**
-```nql
-# Include specific columns from relation (column projection)
-orders | select id, customer.firstName, customer.email
-
-# Deep nesting
-orderItems | select id, product.name, product.category.name
-```
-
-<details>
-<summary>Compiled SQL & Plan — `orders | select id, customer.firstName, customer.email`</summary>
-
-**SQL:**
-```sql
-SELECT
-  orders.id,
-COALESCE((SELECT json_agg(jsonb_build_object('firstName', __t__."firstName", 'email', __t__.email))
-
-  FROM customers AS __t__
-
-  WHERE
-  __t__.id = orders."customerId"), '[]'::json) AS customer_json
-
-  FROM orders
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | orders → customers | json_agg | Relation orders.customer (belongsTo, cardinality: one) - using JSON aggregation to avoid row explosion |
-
-**Why NQL?** This 54-character NQL expression compiles to 225 characters of SQL (4.2× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `orderItems | select id, product.name, product.category.name`</summary>
-
-**SQL:**
-```sql
-SELECT
-  "orderItems".id,
-COALESCE((SELECT json_agg(jsonb_build_object('name', __t__.name) || jsonb_build_object('category', COALESCE((SELECT json_agg(to_jsonb(__t1__))
-
-  FROM categories AS __t1__
-
-  WHERE
-  __t1__.id = __t__."categoryId"), '[]'::json)))
-
-  FROM products AS __t__
-
-  WHERE
-  __t__.id = "orderItems"."productId"), '[]'::json) AS product_json
-
-  FROM "orderItems"
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | orderItems → products | json_agg | Relation orderItems.product (belongsTo, cardinality: one) - using JSON aggregation to avoid row explosion |
-| include-strategy | products → categories | json_agg | Relation products.category (belongsTo, cardinality: one) - using JSON aggregation to avoid row explosion |
-
-**Why NQL?** This 59-character NQL expression compiles to 364 characters of SQL (6.2× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-
-When you select specific relation columns (not `relation.*`), the planner
-projects only those columns inside the JSON aggregate:
-
-```sql
--- orders | select id, customer.firstName, customer.email
-SELECT orders.id,
-  COALESCE((SELECT json_agg(jsonb_build_object('first_name', __t__.first_name, 'email', __t__.email))
-    FROM customers AS __t__ WHERE __t__.id = orders.customer_id), '[]'::json) AS customer_json
-FROM orders
-```
-
-Compare with `relation.*` which uses the full row:
-
-```sql
--- orders | select id, customer.*
-SELECT orders.id,
-  COALESCE((SELECT json_agg(to_jsonb(__t__))
-    FROM customers AS __t__ WHERE __t__.id = orders.customer_id), '[]'::json) AS customer_json
-FROM orders
-```
-
-### Flat Mode
-
-Use `| flat` to get flat rows instead of nested JSON. The planner picks the
-best SQL strategy automatically:
-
-**LEFT JOIN** — default for `| flat` (simple, well-optimized by PostgreSQL):
-```nql
-# All columns → LEFT JOIN
-authors | select *, posts.* | flat
-
-# Specific columns → LEFT JOIN with column projection
-authors | select id, posts.title, posts.createdAt | flat
-```
-
-<details>
-<summary>Compiled SQL & Plan — `authors | select *, posts.* | flat`</summary>
-
-**SQL:**
-```sql
-SELECT
-  authors.*,
-  posts.*
-
-  FROM authors
-
-  LEFT JOIN posts AS posts ON authors.id = posts."authorId"
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | authors → posts | join | Relation authors.posts (hasMany, cardinality: many) - using JOIN for efficient single-query fetch |
-| join-type | authors → posts | left | Relation authors.posts is optional without filter - using LEFT JOIN to preserve parent rows without matches |
-
-**Why NQL?** This 34-character NQL expression compiles to 100 characters of SQL (2.9× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `authors | select id, posts.title, posts.createdAt | flat`</summary>
-
-**SQL:**
-```sql
-SELECT
-  authors.id,
-  posts.title AS "posts.title",
-  posts."createdAt" AS "posts.createdAt"
-
-  FROM authors
-
-  LEFT JOIN posts AS posts ON authors.id = posts."authorId"
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | authors → posts | join | Relation authors.posts (hasMany, cardinality: many) - using JOIN for efficient single-query fetch |
-| join-type | authors → posts | left | Relation authors.posts is optional without filter - using LEFT JOIN to preserve parent rows without matches |
-
-**Why NQL?** This 56-character NQL expression compiles to 164 characters of SQL (2.9× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-
-```sql
--- Produced SQL (LEFT JOIN):
-SELECT authors.*, posts."title", posts."createdAt"
-FROM authors LEFT JOIN posts ON authors.id = posts.author_id
-```
-
-**LATERAL JOIN** — used when a per-include LIMIT caps children per parent:
-```nql
-# Top 3 posts per author → LATERAL subquery
-authors | select *, posts.* | limit posts 3 | flat
-
-# Without explicit | flat — per-include limit implies flat automatically
-authors | select *, posts.* | limit posts 3
-```
-
-<details>
-<summary>Compiled SQL & Plan — `authors | select *, posts.* | limit posts 3 | flat`</summary>
-
-**SQL:**
-```sql
-SELECT
-  authors.*,
-  posts_lat_0.*
-
-  FROM authors
-
-  LEFT JOIN 
-  LATERAL ( SELECT posts_inner_0.*
-
-  FROM posts AS posts_inner_0
-
-  WHERE
-  posts_inner_0."authorId" = authors.id
-
-  LIMIT 3 ) AS posts_lat_0 ON true
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | authors → posts | lateral | Relation authors.posts (hasMany, cardinality: many) - using LATERAL JOIN for per-row correlated subquery (LIMIT per parent) |
-
-**Why NQL?** This 50-character NQL expression compiles to 198 characters of SQL (4.0× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `authors | select *, posts.* | limit posts 3`</summary>
-
-**SQL:**
-```sql
-SELECT
-  authors.*,
-  posts_lat_0.*
-
-  FROM authors
-
-  LEFT JOIN 
-  LATERAL ( SELECT posts_inner_0.*
-
-  FROM posts AS posts_inner_0
-
-  WHERE
-  posts_inner_0."authorId" = authors.id
-
-  LIMIT 3 ) AS posts_lat_0 ON true
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | authors → posts | lateral | Relation authors.posts (hasMany, cardinality: many) - using LATERAL JOIN for per-row correlated subquery (LIMIT per parent) |
-
-**Why NQL?** This 43-character NQL expression compiles to 198 characters of SQL (4.6× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-
-```sql
--- Produced SQL (LATERAL):
-SELECT authors.*, posts_lat_0.*
-FROM authors LEFT JOIN LATERAL (
-  SELECT * FROM posts WHERE author_id = authors.id LIMIT 3
-) AS posts_lat_0 ON true
-```
-
-> **When is LATERAL used?** Only when `| limit <relation> N` is set. Without a
-> per-include limit, a standard LEFT JOIN is simpler and faster. The planner
-> chooses automatically.
-
-Result shape (flat):
-```json
-[
-  { "id": 1, "name": "Alice", "posts_id": 1, "posts_title": "..." },
-  { "id": 1, "name": "Alice", "posts_id": 2, "posts_title": "..." }
-]
-```
-
-### Many-to-Many Relations
-
-**blog:**
 ```nql
 posts | select *, tags.*
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-SELECT
-  posts.*,
-  tags.* AS "tags.*"
-
-  FROM posts
+SELECT posts.*,
+  COALESCE(
+    (SELECT json_agg(to_jsonb(__t__))
+     FROM ch2_blog.tags AS __t__
+     INNER JOIN ch2_blog.post_tags ON __t__.id = post_tags.tag_id
+     WHERE post_tags.post_id = posts.id),
+    '[]'::json
+  ) AS tags_json
+FROM ch2_blog.posts
 ```
-
-**Parameters:** _none_
-
-**Why NQL?** Even the simplest query benefits from the planner: table names are double-quoted (safe for reserved words), aliases are generated, and the result is a fully parameterized query ready for `pg.Pool.query()`.
-
 </details>
 
+| id | title                           | published | tags_json                           |
+|----|---------------------------------|-----------|-------------------------------------|
+| 1  | Getting Started with PostgreSQL | True      | [{"id":1,"name":"postgresql"},...]  |
+| 2  | TypeScript Best Practices 2024  | True      | [{"id":2,"name":"typescript"},...]  |
+| 3  | Query Optimization Techniques   | True      | [{"id":1,"name":"postgresql"},...]  |
+| 4  | Introduction to Range Types     | True      | [{"id":1,"name":"postgresql"},...]  |
+| 5  | Draft: Advanced Indexing        | False     | [{"id":1,"name":"postgresql"},...]  |
+| 6  | Why Type Safety Matters         | True      | [{"id":2,"name":"typescript"},...]  |
 
+*(6 rows)*
 
+### Edge Tables (Dual-FK)
 
+*Schema: iam*
 
+When a table has two foreign keys pointing to the same target (like a role hierarchy edge table), the schema disambiguates via named references. NQL resolves each FK independently.
 
+```nql
+roleEdges | select *, parentRole.*, childRole.*
+```
 
+<details><summary>SQL</summary>
 
-The planner automatically resolves junction tables.
+```sql
+SELECT role_edges.*,
+  COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM iam_example.roles AS __t__
+    WHERE __t__.id = role_edges.parent_role_id), '[]'::json) AS parent_role_json,
+  COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM iam_example.roles AS __t__
+    WHERE __t__.id = role_edges.child_role_id), '[]'::json) AS child_role_json
+FROM iam_example.role_edges
+```
+</details>
 
-### Include Strategy Summary
+| id | parent_role_id | child_role_id | parentRole_json                  | childRole_json                  |
+|----|---------------|---------------|----------------------------------|---------------------------------|
+| 1  | 1             | 2             | [{"name":"super_admin",...}]     | [{"name":"admin",...}]          |
+| 2  | 2             | 3             | [{"name":"admin",...}]           | [{"name":"manager",...}]        |
+| 3  | 3             | 4             | [{"name":"manager",...}]         | [{"name":"editor",...}]         |
+| 4  | 4             | 5             | [{"name":"editor",...}]          | [{"name":"viewer",...}]         |
+| 5  | 2             | 6             | [{"name":"admin",...}]           | [{"name":"auditor",...}]        |
+| 6  | 1             | 7             | [{"name":"super_admin",...}]     | [{"name":"support_admin",...}]  |
+| 7  | 8             | 9             | [{"name":"approver",...}]        | [{"name":"requester",...}]      |
 
-| NQL | SQL Strategy | When |
-|-----|-------------|------|
-| `select *, relation.*` | `json_agg` | Default — nested JSON array, no row explosion |
-| `select *, relation.* \| flat` | `LEFT JOIN` | Flat rows, simple and fast |
-| `select *, relation.* \| limit relation N` | `LEFT JOIN LATERAL` | Flat rows with per-parent LIMIT (implicit flat) |
-| `select name, ancestors.*` | `CTE` | Recursive/hierarchical relations |
-
-The planner picks the optimal strategy automatically. You control the
-output shape (`| flat`) and per-include constraints (`| limit <relation> N`).
+*(7 rows)*
 
 ---
 
-## 6. Aggregates & GROUP BY
+## Aggregates
 
-### Aggregate Functions
+### GROUP BY with COUNT
 
-**blog:**
+*Schema: ecommerce*
+
+Aggregate functions combine with `group by` for per-group statistics. Here we count orders per customer.
+
 ```nql
-posts | select count(*)
+orders | group by customerId | select count(*)
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
 SELECT count(*)
-
-  FROM posts
+FROM ch5_ecommerce.orders
+GROUP BY orders.customer_id
 ```
-
-**Parameters:** _none_
-
-**Why NQL?** Even the simplest query benefits from the planner: table names are double-quoted (safe for reserved words), aliases are generated, and the result is a fully parameterized query ready for `pg.Pool.query()`.
-
 </details>
 
+| count |
+|-------|
+| 1     |
+| 2     |
+| 1     |
+| 2     |
+| 1     |
 
+### SUM
 
+Revenue breakdown by order status. All standard aggregate functions (`sum`, `avg`, `min`, `max`, `count`) work identically.
 
-
-
-
-
-**ecommerce:**
 ```nql
-orders | select sum(total)
+orders | group by status | select sum(total)
+```
+
+<details><summary>SQL</summary>
+
+```sql
+SELECT sum(orders.total)
+FROM ch5_ecommerce.orders
+GROUP BY orders.status
+```
+</details>
+
+| sum     |
+|---------|
+| 999.99  |
+| 1679.95 |
+| 449.99  |
+| 94.98   |
+| 1449.97 |
+
+### AVG
+
+Without `group by`, the aggregate runs over all rows — here, the average order total across the entire table.
+
+```nql
 orders | select avg(total)
-products | select min(price), max(price)
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-SELECT
-  min(products.price),
-  max(products.price)
-
-  FROM products
+SELECT avg(orders.total) FROM ch5_ecommerce.orders
 ```
-
-**Parameters:** _none_
-
-**Why NQL?** This 94-character NQL expression compiles to 65 characters of SQL (0.7× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
 </details>
 
+| avg                  |
+|----------------------|
+| 667.8400000000000000 |
 
+### Named Aggregate Columns
 
+*Schema: iam*
 
+Use `as alias` to name aggregate columns. NQL applies the project's naming convention (here, camelCase → snake_case) to the alias automatically.
 
-
-
-
-### COUNT DISTINCT
-
-**ecommerce:**
 ```nql
-orders | select count(distinct customerId) as uniqueCustomers
+userRoles | group by roleId | select roleId, count(*) as userCount
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-SELECT count(DISTINCT orders."customerId") AS "uniqueCustomers"
-
-  FROM orders
+SELECT user_roles.role_id, count(*) AS user_count
+FROM iam_example.user_roles
+GROUP BY user_roles.role_id
 ```
-
-**Parameters:** _none_
-
-**Why NQL?** This 61-character NQL expression compiles to 75 characters of SQL (1.2× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
 </details>
 
+| role_id | user_count |
+|---------|------------|
+| 1       | 1          |
+| 2       | 1          |
+| 3       | 1          |
+| 4       | 1          |
+| 5       | 1          |
+| 6       | 1          |
+| 8       | 1          |
+| 9       | 1          |
 
+*(8 rows)*
 
+### DISTINCT
 
+*Schema: blog*
 
+Deduplicate rows with `select distinct *`, or count unique values with `count(distinct col)`. Both compile to their SQL equivalents.
 
-
-
-### GROUP BY
-
-**ecommerce:**
 ```nql
-orders | group by status | select status, count(*) as total
+posts | select distinct *
+comments | where approved = true | select count(distinct authorName)
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-SELECT
-  orders.status,
-  count(*) AS total
-
-  FROM orders
-
-  GROUP BY
-  orders.status
+SELECT DISTINCT posts.* FROM ch2_blog.posts
+SELECT count(DISTINCT comments.author_name)
+  FROM ch2_blog.comments WHERE comments.approved = $1
 ```
-
-**Parameters:** _none_
-
-**Why NQL?** The planner automatically validates that all non-aggregate columns appear in the GROUP BY clause — a common SQL error. NQL's pipe syntax keeps the grouping, filtering, and aggregation steps visually separated, making the query intent clear at a glance.
-
 </details>
 
+`posts | select distinct *` returns all 6 posts (already unique by primary key).
 
+`count(distinct authorName)`:
 
+| count |
+|-------|
+| 6     |
 
-
-
-
-
-**blog:**
-```nql
-posts | group by authorId | select authorId, count(*)
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT
-  posts."authorId",
-  count(*)
-
-  FROM posts
-
-  GROUP BY
-  posts."authorId"
-```
-
-**Parameters:** _none_
-
-**Why NQL?** The planner automatically validates that all non-aggregate columns appear in the GROUP BY clause — a common SQL error. NQL's pipe syntax keeps the grouping, filtering, and aggregation steps visually separated, making the query intent clear at a glance.
-
-</details>
-
-
-
-
-
-
-
-
-### WHERE vs HAVING
-
-Position relative to `group by` determines behavior:
-
-**ecommerce:**
-```nql
-# WHERE — filters individual rows (before grouping)
-orders | where total > 100 | group by status | select status, count(*)
-
-# HAVING — filters aggregated groups (after grouping)
-orders | group by status | where count(*) > 10 | select status, count(*)
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT
-  orders.status,
-  count(*)
-
-  FROM orders
-
-  WHERE
-  orders.total > $1
-
-  GROUP BY
-  orders.status
-```
-
-**Parameters:** `[100]`
-
-**Why NQL?** The planner automatically validates that all non-aggregate columns appear in the GROUP BY clause — a common SQL error. NQL's pipe syntax keeps the grouping, filtering, and aggregation steps visually separated, making the query intent clear at a glance.
-
-</details>
-
-
-
-
-
-
-
+*(1 row)*
 
 ---
 
-## 7. ORDER BY, LIMIT, OFFSET
+## Window Functions
 
-### Sorting
+*Schema: ecommerce*
 
-**blog:**
-```nql
-authors | order by name
-posts | order by createdAt desc
-```
+### RANK with PARTITION BY
 
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT posts.*
-
-  FROM posts
-
-  ORDER BY
-  posts."createdAt" DESC
-```
-
-**Parameters:** _none_
-
-**Why NQL?** This 55-character NQL expression compiles to 59 characters of SQL (1.1× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-**ecommerce:**
-```nql
-customers | order by lastName asc, firstName asc
-products | order by price desc
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT products.*
-
-  FROM products
-
-  ORDER BY
-  products.price DESC
-```
-
-**Parameters:** _none_
-
-**Why NQL?** This 79-character NQL expression compiles to 62 characters of SQL (0.8× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-### Pagination
-
-**blog:**
-```nql
-posts | order by createdAt desc | limit 10
-posts | order by createdAt desc | limit 10 | offset 20
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT posts.*
-
-  FROM posts
-
-  ORDER BY
-  posts."createdAt" DESC
-
-  LIMIT 10
-OFFSET 20
-```
-
-**Parameters:** _none_
-
-**Why NQL?** This 97-character NQL expression compiles to 78 characters of SQL (0.8× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-### Three Forms of LIMIT
-
-NQL has three distinct uses of LIMIT. They look similar but have very different semantics:
-
-#### 1. Outer Limit — `| limit N`
-
-Caps the total number of rows returned by the query:
-
-**blog:**
-```nql
-# Return at most 10 posts
-posts | order by createdAt desc | limit 10
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT posts.*
-
-  FROM posts
-
-  ORDER BY
-  posts."createdAt" DESC
-
-  LIMIT 10
-```
-
-**Parameters:** _none_
-
-**Why NQL?** This 42-character NQL expression compiles to 68 characters of SQL (1.6× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-```sql
-SELECT * FROM posts ORDER BY created_at DESC LIMIT 10
-```
-
-#### 2. Per-Include Limit — `| limit <relation> N`
-
-Caps child rows **per parent** using a LATERAL JOIN:
-
-**blog:**
-```nql
-# Top 3 posts PER author
-authors | select id, name, posts.* | limit posts 3
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT
-  authors.id,
-  authors.name,
-  posts_lat_0.*
-
-  FROM authors
-
-  LEFT JOIN 
-  LATERAL ( SELECT posts_inner_0.*
-
-  FROM posts AS posts_inner_0
-
-  WHERE
-  posts_inner_0."authorId" = authors.id
-
-  LIMIT 3 ) AS posts_lat_0 ON true
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | authors → posts | lateral | Relation authors.posts (hasMany, cardinality: many) - using LATERAL JOIN for per-row correlated subquery (LIMIT per parent) |
-
-**Why NQL?** This 50-character NQL expression compiles to 215 characters of SQL (4.3× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-```sql
-SELECT authors.id, authors.name, posts_lat_0.*
-FROM authors LEFT JOIN LATERAL (
-  SELECT * FROM posts WHERE author_id = authors.id LIMIT 3
-) AS posts_lat_0 ON true
-```
-
-Every author gets at most 3 posts. If there are 100 authors, you get up to 300 rows.
-
-#### 3. Subquery Limit — `| limit N` inside `in (...)`
-
-Caps the total rows of the subquery used as a WHERE filter:
-
-**ecommerce:**
-```nql
-# Customers whose ID appears in the first 5 delivered orders
-customers | where id in (orders | select customerId | where status = 'delivered' | limit 5)
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT customers.*
-
-  FROM customers
-
-  WHERE
-  customers.id = ANY (SELECT orders_subq_0."customerId"
-
-  FROM orders AS orders_subq_0
-
-  WHERE
-  orders_subq_0.status = $1
-
-  LIMIT 5)
-  AND EXISTS (SELECT 1
-
-  FROM orders AS orders_exists_1
-
-  WHERE
-  customers.id = orders_exists_1."customerId")
-```
-
-**Parameters:** `["delivered"]`
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| filter-strategy | customers → orders | exists | Relation customers.orders has cardinality "many" - using EXISTS to avoid row explosion |
-
-**Why NQL?** Subqueries in NQL compose naturally — the inner query is just another NQL pipe expression inside parentheses. The planner compiles it as a correlated or uncorrelated subquery depending on context, handling aliasing and parameter numbering automatically.
-
-</details>
-
-
-
-
-
-
-
-
-```sql
-SELECT * FROM customers
-WHERE id IN (SELECT customer_id FROM orders WHERE status = $1 LIMIT 5)
-```
-
-This filters **which parents** are returned, not how many children each parent gets.
-
-#### Comparison
-
-Given 50 customers, each with 10 orders:
-
-| Form | NQL | Effect | Rows returned |
-|------|-----|--------|---------------|
-| Outer limit | `customers \| limit 5` | First 5 customers | 5 |
-| Per-include limit | `customers \| select *, orders.* \| limit orders 3` | All 50 customers × max 3 orders each | Up to 150 |
-| Subquery limit | `customers \| where id in (orders \| select customerId \| limit 5)` | Customers matching the first 5 order rows (1-5 customers) | 1–5 |
-| Combined | `customers \| select *, orders.* \| limit orders 3 \| limit 10` | First 10 customers × max 3 orders each | Up to 30 |
-
-#### Per-Include Limit — Additional Examples
-
-**ecommerce:**
-```nql
-# Top 5 order items per order
-orders | select id, orderNumber, orderItems.* | limit orderItems 5
-
-# Multiple per-include limits on different relations
-customers | select id, orders.*, addresses.* | limit orders 3 | limit addresses 2
-
-# Combined: 3 orders per customer, max 10 customers
-customers | select id, orders.* | limit orders 3 | limit 10
-```
-
-<details>
-<summary>Compiled SQL & Plan — `orders | select id, orderNumber, orderItems.* | limit orderI…`</summary>
-
-**SQL:**
-```sql
-SELECT
-  orders.id,
-  orders."orderNumber",
-  "orderItems".* AS "orderItems.*",
-  "orderItems_lat_0".*
-
-  FROM orders
-
-  LEFT JOIN 
-  LATERAL ( SELECT "orderItems_inner_0".*
-
-  FROM "orderItems" AS "orderItems_inner_0"
-
-  WHERE
-  "orderItems_inner_0"."orderId" = orders.id
-
-  LIMIT 5 ) AS "orderItems_lat_0" ON true
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | orders → orderItems | lateral | Relation orders.order_orderItems (hasMany, cardinality: many) - using LATERAL JOIN for per-row correlated subquery (LIMIT per parent) |
-
-**Why NQL?** This 66-character NQL expression compiles to 297 characters of SQL (4.5× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `customers | select id, orders.*, addresses.* | limit orders …`</summary>
-
-**SQL:**
-```sql
-SELECT
-  customers.id,
-  addresses.* AS "addresses.*",
-  orders_lat_0.*,
-  addresses_lat_0.*
-
-  FROM customers
-
-  LEFT JOIN 
-  LATERAL ( SELECT orders_inner_0.*
-
-  FROM orders AS orders_inner_0
-
-  WHERE
-  orders_inner_0."customerId" = customers.id
-
-  LIMIT 3 ) AS orders_lat_0 ON true
-
-  LEFT JOIN 
-  LATERAL ( SELECT addresses_inner_0.*
-
-  FROM addresses AS addresses_inner_0
-
-  WHERE
-  addresses_inner_0."customerId" = customers.id
-
-  LIMIT 2 ) AS addresses_lat_0 ON true
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | customers → orders | lateral | Relation customers.orders (hasMany, cardinality: many) - using LATERAL JOIN for per-row correlated subquery (LIMIT per parent) |
-| include-strategy | customers → addresses | lateral | Relation customers.customer_addresses (hasMany, cardinality: many) - using LATERAL JOIN for per-row correlated subquery (LIMIT per parent) |
-
-**Why NQL?** This 81-character NQL expression compiles to 440 characters of SQL (5.4× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `customers | select id, orders.* | limit orders 3 | limit 10`</summary>
-
-**SQL:**
-```sql
-SELECT
-  customers.id,
-  orders_lat_0.*
-
-  FROM customers
-
-  LEFT JOIN 
-  LATERAL ( SELECT orders_inner_0.*
-
-  FROM orders AS orders_inner_0
-
-  WHERE
-  orders_inner_0."customerId" = customers.id
-
-  LIMIT 3 ) AS orders_lat_0 ON true
-
-  LIMIT 10
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | customers → orders | lateral | Relation customers.orders (hasMany, cardinality: many) - using LATERAL JOIN for per-row correlated subquery (LIMIT per parent) |
-
-**Why NQL?** This 59-character NQL expression compiles to 222 characters of SQL (3.8× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-
-
-**hierarchy:**
-```nql
-# Top 2 employees per department
-departments | select id, name, employees.* | limit employees 2
-
-# Combined: 2 employees per department, max 5 departments
-departments | select id, name, employees.* | limit employees 2 | limit 5
-```
-
-<details>
-<summary>Compiled SQL & Plan — `departments | select id, name, employees.* | limit employees…`</summary>
-
-**SQL:**
-```sql
-SELECT
-  departments.id,
-  departments.name,
-  employees_lat_0.*
-
-  FROM departments
-
-  LEFT JOIN 
-  LATERAL ( SELECT employees_inner_0.*
-
-  FROM employees AS employees_inner_0
-
-  WHERE
-  employees_inner_0."departmentId" = departments.id
-
-  LIMIT 2 ) AS employees_lat_0 ON true
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | departments → employees | lateral | Relation departments.employees (hasMany, cardinality: many) - using LATERAL JOIN for per-row correlated subquery (LIMIT per parent) |
-
-**Why NQL?** This 62-character NQL expression compiles to 259 characters of SQL (4.2× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `departments | select id, name, employees.* | limit employees…`</summary>
-
-**SQL:**
-```sql
-SELECT
-  departments.id,
-  departments.name,
-  employees_lat_0.*
-
-  FROM departments
-
-  LEFT JOIN 
-  LATERAL ( SELECT employees_inner_0.*
-
-  FROM employees AS employees_inner_0
-
-  WHERE
-  employees_inner_0."departmentId" = departments.id
-
-  LIMIT 2 ) AS employees_lat_0 ON true
-
-  LIMIT 5
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | departments → employees | lateral | Relation departments.employees (hasMany, cardinality: many) - using LATERAL JOIN for per-row correlated subquery (LIMIT per parent) |
-
-**Why NQL?** This 72-character NQL expression compiles to 267 characters of SQL (3.7× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-
-**dotted-path (deep nesting):**
-```nql
-# Top 3 employees per department, across all companies
-companies | select id, departments.employees.* | limit departments.employees 3
-```
-
-> Dotted paths work for deep nesting: `limit departments.employees 3` applies the
-> limit to the `employees` level while forcing all ancestor includes (`departments`)
-> to use LATERAL cascade.
-
-> **How it works:** `| limit <relation> N` forces `strategy: 'flat'` on that
-> include (LATERAL JOIN required — `json_agg` cannot honor per-parent limits).
-> `| flat` is implicit and can be omitted.
-
----
-
-## 8. Window Functions
-
-### Syntax
+Rank products by price within each category. `PARTITION BY` creates independent ranking groups — NQL mirrors the SQL window function syntax exactly.
 
 ```nql
-function() over ([partition by expr] [order by expr [asc|desc]])
+products | select *, rank() over (partition by categoryId order by price desc) as priceRank
 ```
 
-### Row Numbering
+<details><summary>SQL</summary>
 
-**ecommerce:**
-```nql
-products | select name, row_number() over (order by price) as rn
-products | select name, rank() over (partition by categoryId order by price desc) as priceRank
-products | select name, dense_rank() over (order by price) as dr
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
 ```sql
-SELECT
-  products.name,
-  dense_rank() OVER (
-  ORDER BY products.price ASC) AS dr
-
-  FROM products
+SELECT products.*,
+  rank() OVER (PARTITION BY products.category_id ORDER BY products.price DESC) AS price_rank
+FROM ch5_ecommerce.products
 ```
-
-**Parameters:** _none_
-
-**Why NQL?** Window functions in raw SQL require the full `OVER (PARTITION BY ... ORDER BY ...)` clause on each expression. NQL's pipe syntax makes the window definition read naturally as part of the select list, and the planner validates partition/order columns exist.
-
 </details>
 
+| id | sku        | name          | price   | category_id | price_rank |
+|----|------------|---------------|---------|-------------|------------|
+| 1  | LAPTOP-001 | ProBook 15    | 1299.99 | 11          | 1          |
+| 2  | LAPTOP-002 | UltraLight 13 | 999.99  | 11          | 2          |
+| 13 | DESKTOP-001| PowerStation  | 2499.99 | 12          | 1          |
+| 14 | PHONE-003  | SmartPhone Max| 1099.99 | 13          | 1          |
+| 3  | PHONE-001  | SmartPhone X  | 899.99  | 13          | 2          |
+| ...| ...        | ...           | ...     | ...         | ...        |
 
+### Running Total (SUM OVER)
 
+A cumulative sum across ordered rows. The `OVER` clause without `PARTITION BY` treats the entire result set as one window, accumulating the total chronologically.
 
-
-
-
-
-### Lag / Lead (Previous / Next Row)
-
-**ecommerce:**
-```nql
-orders | select orderNumber, total, lag(total) over (order by createdAt) as prevTotal
-orders | select orderNumber, total, lead(total) over (order by createdAt) as nextTotal
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT
-  orders."orderNumber",
-  orders.total,
-  lead(orders.total) OVER (
-  ORDER BY orders."createdAt" ASC) AS "nextTotal"
-
-  FROM orders
-```
-
-**Parameters:** _none_
-
-**Why NQL?** This 172-character NQL expression compiles to 133 characters of SQL (0.8× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-### Aggregate Windows
-
-**ecommerce:**
 ```nql
 orders | select orderNumber, total, sum(total) over (order by createdAt) as runningTotal
-orderItems | select orderId, totalPrice, sum(totalPrice) over (partition by orderId) as orderTotal
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-SELECT
-  "orderItems"."orderId",
-  "orderItems"."totalPrice",
-  sum("orderItems"."totalPrice") OVER (PARTITION BY "orderItems"."orderId") AS "orderTotal"
-
-  FROM "orderItems"
+SELECT orders.order_number, orders.total,
+  sum(orders.total) OVER (ORDER BY orders.created_at) AS running_total
+FROM ch5_ecommerce.orders
 ```
-
-**Parameters:** _none_
-
-**Why NQL?** This 187-character NQL expression compiles to 171 characters of SQL (0.9× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
 </details>
 
+| order_number | total   | running_total |
+|--------------|---------|---------------|
+| ORD-2024-001 | 1499.98 | 1499.98       |
+| ORD-2024-005 | 179.97  | 1679.95       |
+| ORD-2024-002 | 349.99  | 2029.94       |
+| ORD-2024-003 | 94.98   | 2124.92       |
+| ORD-2024-004 | 999.99  | 3124.91       |
+| ORD-2024-006 | 1099.98 | 4224.89       |
+| ORD-2024-007 | 449.99  | 4674.88       |
 
+### Available Window Functions
 
-
-
-
-
-
-### Empty OVER
-
-**ecommerce:**
-```nql
-products | select name, count(*) over () as totalProducts
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT
-  products.name,
-  count(*) OVER () AS "totalProducts"
-
-  FROM products
-```
-
-**Parameters:** _none_
-
-**Why NQL?** This 57-character NQL expression compiles to 75 characters of SQL (1.3× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
+| Function | Description |
+|----------|-------------|
+| `rank()` | Rank with gaps for ties |
+| `dense_rank()` | Rank without gaps |
+| `row_number()` | Sequential numbering |
+| `lag(col [, offset [, default]])` | Previous row value |
+| `lead(col [, offset [, default]])` | Next row value |
+| `sum(col) over (...)` | Running sum |
+| `count(col) over (...)` | Running count |
+| `avg(col) over (...)` | Running average |
 
 ---
 
-## 9. CASE Expressions
+## CASE Expressions
 
-**ecommerce:**
+*Schema: test-strategies*
+
+### Searched CASE
+
+Classify employees by salary band. CASE WHEN evaluates conditions top-down and returns the first match — WHEN clauses support the full WHERE operator set (AND, OR, IN, BETWEEN, IS NULL...).
+
 ```nql
-# Simple
-products | select case when price > 100 then 'expensive' end
-
-# Multiple conditions with ELSE
-products | select case
-  when price > 100 then 'high'
-  when price > 50 then 'medium'
-  else 'low'
-end as tier
-
-# Mixed with other columns
-products | select name, price, case when price > 100 then 'high' else 'low' end as tier
+employees | select name, \
+  case when salary > 80000 then 'senior' \
+       when salary > 50000 then 'mid' \
+       else 'junior' end as level
 ```
 
-<details>
-<summary>Compiled SQL & Plan — `products | select case when price > 100 then 'expensive' end`</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-SELECT
-  CASE 
-    WHEN products.price > $1 THEN $2 
-  END
-
-  FROM products
-```
-
-**Parameters:** `[100, "expensive"]`
-
-**Why NQL?** CASE expressions in the SELECT list let you compute derived columns inline. The planner ensures the expression is well-formed and parameter binds any literal values, preventing SQL injection even in conditional logic.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `products | select case when price > 100 then 'high' when pri…`</summary>
-
-**SQL:**
-```sql
-SELECT
-  CASE 
-    WHEN products.price > $1 THEN $2 
-    WHEN products.price > $3 THEN $4 
-    ELSE $5 
-  END AS tier
-
-  FROM products
-```
-
-**Parameters:** `[100, "high", 50, "medium", "low"]`
-
-**Why NQL?** CASE expressions in the SELECT list let you compute derived columns inline. The planner ensures the expression is well-formed and parameter binds any literal values, preventing SQL injection even in conditional logic.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `products | select name, price, case when price > 100 then 'h…`</summary>
-
-**SQL:**
-```sql
-SELECT
-  products.name,
-  products.price,
-  CASE 
-    WHEN products.price > $1 THEN $2 
-    ELSE $3 
-  END AS tier
-
-  FROM products
-```
-
-**Parameters:** `[100, "high", "low"]`
-
-**Why NQL?** CASE expressions in the SELECT list let you compute derived columns inline. The planner ensures the expression is well-formed and parameter binds any literal values, preventing SQL injection even in conditional logic.
-
-</details>
-
-
-
-
-
-
-
-
-
-
-**hierarchy:**
-```nql
-employees | select name, case
-  when salary > 100000 then 'senior'
-  when salary > 60000 then 'mid'
-  else 'junior'
-end as level
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-SELECT
-  employees.name,
-  CASE 
-    WHEN employees.salary > $1 THEN $2 
-    WHEN employees.salary > $3 THEN $4 
-    ELSE $5 
+SELECT employees.name,
+  CASE WHEN employees.salary > $1 THEN $2
+       WHEN employees.salary > $3 THEN $4
+       ELSE $5
   END AS level
-
-  FROM employees
+FROM test_strategies.employees
+-- params: [80000, "senior", 50000, "mid", "junior"]
 ```
-
-**Parameters:** `[100000, "senior", 60000, "mid", "junior"]`
-
-**Why NQL?** CASE expressions in the SELECT list let you compute derived columns inline. The planner ensures the expression is well-formed and parameter binds any literal values, preventing SQL injection even in conditional logic.
-
 </details>
 
+| name  | level  |
+| ---   | ---    |
+| Alice | senior |
+| Bob   | senior |
+| Carol | senior |
+| Dave  | junior |
+| Eve   | mid    |
+| Frank | junior |
 
+### Simple CASE
 
+Map a column's values to labels. Simple CASE (`case col when val`) is a shorthand — NQL normalizes it to searched CASE during compilation.
 
+```nql
+employees | select name, \
+  case departmentId when 1 then 'Engineering' \
+                    when 2 then 'Marketing' \
+                    else 'Other' end as dept
+```
 
+Simple CASE is normalized to searched CASE during compilation.
 
+| name  | dept        |
+| ---   | ---         |
+| Alice | Engineering |
+| Bob   | Engineering |
+| Carol | Marketing   |
+| Dave  | Marketing   |
+| Eve   | Other       |
+| Frank | Other       |
+| Jane  | Engineering |
 
+> **Note:** 7 rows — Jane was inserted by a prior upsert in the test-strategies batch.
 
 ---
 
-## 10. Hierarchy / Recursive Traversal
+## JSONB Operators
 
-> Load: `pnpm dbsp repl -s examples/hierarchy.schema.ts`
+*Schema: iam* — The `audit_log.details` column is JSONB.
 
-Requires a schema with self-referential `ref()` and `roles` configured.
+### Text Extraction (`->>`)
 
-### Single-Hop Traversal
+Filter on a specific field inside a JSONB column. The `->>` operator extracts the value as text, so it can be compared with `=`.
 
-**hierarchy:**
 ```nql
-# Direct parent
-employees | select name, title, manager.name
+auditLog | where details ->> 'ip' = '10.0.0.1'
+```
 
-# Chained: grandparent
+<details><summary>SQL</summary>
+
+```sql
+SELECT audit_log.*
+FROM iam_example.audit_log
+WHERE (audit_log.details ->> $1) = $2
+-- params: ["ip", "10.0.0.1"]
+```
+</details>
+
+| id | user_id | action | resource | timestamp                | details            |
+|----|---------|--------|----------|--------------------------|--------------------|
+| 1  | 1       | login  | system   | 2025-06-01T08:00:00.000Z | {"ip": "10.0.0.1"} |
+
+*(1 row)*
+
+### JSON Field Access (`->`)
+
+Unlike `->>` which returns text, `->` preserves the JSON type — useful when the extracted value is itself an object or array, or when you need JSON-typed output.
+
+```nql
+auditLog | where action = 'login' | select id, action, details -> 'ip' as ipJson
+```
+
+<details><summary>SQL</summary>
+
+```sql
+SELECT audit_log.id, audit_log.action,
+  audit_log.details -> $1 AS ip_json
+FROM iam_example.audit_log
+WHERE audit_log.action = $2
+-- params: ["ip", "login"]
+```
+</details>
+
+| id | action | ip_json    |
+|----|--------|------------|
+| 1  | login  | "10.0.0.1" |
+| 2  | login  | "10.0.0.2" |
+| 5  | login  | "10.0.0.3" |
+| 8  | login  | "10.0.0.5" |
+
+### Containment (`@>`)
+
+Check if a JSONB column contains a given structure. This is GIN-index friendly and ideal for filtering on nested JSON without extracting individual fields.
+
+```nql
+auditLog | where details @> '{"ip": "10.0.0.1"}'
+```
+
+<details><summary>SQL</summary>
+
+```sql
+SELECT audit_log.*
+FROM iam_example.audit_log
+WHERE audit_log.details @> $1
+-- params: ["{\"ip\": \"10.0.0.1\"}"]
+```
+</details>
+
+| id | user_id | action | resource | timestamp                | details            |
+|----|---------|--------|----------|--------------------------|--------------------|
+| 1  | 1       | login  | system   | 2025-06-01T08:00:00.000Z | {"ip": "10.0.0.1"} |
+
+*(1 row)*
+
+### Key Existence (`?`)
+
+Check whether a key exists in the JSONB object — without caring about its value. Useful for schema-flexible columns where not all rows have the same keys.
+
+```nql
+auditLog | where details ? 'ip'
+```
+
+<details><summary>SQL</summary>
+
+```sql
+SELECT audit_log.*
+FROM iam_example.audit_log
+WHERE audit_log.details ? $1
+-- params: ["ip"]
+```
+</details>
+
+| id | user_id | action | resource | timestamp                | details            |
+|----|---------|--------|----------|--------------------------|--------------------|
+| 1  | 1       | login  | system   | 2025-06-01T08:00:00.000Z | {"ip": "10.0.0.1"} |
+| 2  | 2       | login  | system   | 2025-06-01T08:30:00.000Z | {"ip": "10.0.0.2"} |
+| 5  | 3       | login  | system   | 2025-06-01T10:00:00.000Z | {"ip": "10.0.0.3"} |
+| 8  | 5       | login  | system   | 2025-06-01T11:30:00.000Z | {"ip": "10.0.0.5"} |
+
+*(4 rows — only login entries have an `ip` key in their details)*
+
+### All JSONB Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `->` | Get JSON field (returns JSON) | `details -> 'key'` |
+| `->>` | Get JSON field (returns text) | `details ->> 'key'` |
+| `@>` | Contains | `details @> '{"k":"v"}'` |
+| `<@` | Contained by | `details <@ '{"k":"v"}'` |
+| `?` | Key exists | `details ? 'key'` |
+| `#>` | Path access (returns JSON) | `details #> '["a","b"]'` |
+| `#>>` | Path access (returns text) | `details #>> '["a","b"]'` |
+
+---
+
+## Subqueries
+
+### IN Subquery
+
+*Schema: iam*
+
+Use a subquery to filter dynamically. Here, we find roles assigned to user 1 by first selecting their role IDs from the junction table. NQL compiles the inner pipe to a subquery using `= ANY(...)`.
+
+```nql
+roles | where id in (userRoles | where userId = 1 | select roleId)
+```
+
+<details><summary>SQL</summary>
+
+```sql
+SELECT roles.*
+FROM iam_example.roles
+WHERE roles.id = ANY (
+  SELECT user_roles_subq_0.role_id
+  FROM iam_example.user_roles AS user_roles_subq_0
+  WHERE user_roles_subq_0.user_id = $1
+)
+-- params: [1]
+```
+</details>
+
+| id | name        | description                        | active |
+|----|-------------|------------------------------------|--------|
+| 1  | super_admin | Super administrator with all access| True   |
+
+*(1 row)*
+
+### Relation Filter (Implicit EXISTS)
+
+*Schema: test-strategies*
+
+Filter a parent table based on a condition on its children — NQL detects the cross-table reference and generates an `EXISTS` subquery automatically. No explicit subquery syntax needed.
+
+```nql
+departments | where employees.active = true
+```
+
+<details><summary>SQL</summary>
+
+```sql
+SELECT departments.*
+FROM test_strategies.departments
+WHERE EXISTS (
+  SELECT 1 FROM test_strategies.employees AS employees_exists_0
+  WHERE departments.id = employees_exists_0.department_id
+    AND employees_exists_0.active = $1
+)
+-- params: [true]
+```
+</details>
+
+| id | name     | org_id | budget |
+|----|----------|--------|--------|
+| 1  | Backend  | 2      | 500000 |
+| 2  | Frontend | 2      | 300000 |
+| 3  | Outbound | 3      | 200000 |
+
+*(3 rows — only departments that have at least one active employee)*
+
+---
+
+## Hierarchy (Recursive CTE)
+
+*Schema: hierarchy*
+
+The `employees` table has a self-referencing `managerId` column. The schema defines
+pseudo-columns for traversal: `manager` (parent), `managementChain` (ancestors),
+`allReports` (descendants).
+
+### Single-Level Traversal
+
+Navigate one level up the hierarchy with the `manager` pseudo-column.
+
+> **Known limitation:** Pseudo-column traversal (`manager.name`) is not yet compiled to SQL — only direct columns are returned. The LEFT JOIN self-join is planned but not yet implemented.
+
+```nql
+employees | select name, title, manager.name
+```
+
+<details><summary>SQL (current — traversal columns omitted)</summary>
+
+```sql
+SELECT employees.name, employees.title
+FROM hierarchy.employees
+```
+</details>
+
+| name  | title                |
+| ---   | ---                  |
+| Alice | CEO                  |
+| Bob   | VP Engineering       |
+| Carol | VP Product           |
+| Dave  | Engineering Director |
+| Eve   | Product Director     |
+| Frank | Senior Engineer      |
+| Grace | Engineer             |
+| Heidi | Designer             |
+
+### Multi-Level Traversal (Skip-Level)
+
+Chain the pseudo-column to jump multiple levels: `manager.manager` goes two levels up. The planner generates two sequential self-JOINs.
+
+```nql
 employees | select name, manager.name, manager.manager.name
 ```
 
-<details>
-<summary>Compiled SQL & Plan — `employees | select name, title, manager.name`</summary>
+### Recursive Ancestors (CTE)
 
-**SQL:**
-```sql
-SELECT
-  employees.name,
-  employees.title,
-COALESCE((SELECT json_agg(jsonb_build_object('name', __t__.name))
+The `managementChain` pseudo-column walks all the way up to the root. NQL compiles this to a `WITH RECURSIVE` CTE — no manual recursion needed.
 
-  FROM employees AS __t__
-
-  WHERE
-  __t__.id = employees."managerId"), '[]'::json) AS manager_json
-
-  FROM employees
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | employees → employees | json_agg | Relation employees.manager (belongsTo, cardinality: one) - using JSON aggregation to avoid row explosion |
-
-**Why NQL?** This 44-character NQL expression compiles to 219 characters of SQL (5.0× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `employees | select name, manager.name, manager.manager.name`</summary>
-
-**SQL:**
-```sql
-SELECT
-  employees.name,
-COALESCE((SELECT json_agg(jsonb_build_object('name', __t__.name))
-
-  FROM employees AS __t__
-
-  WHERE
-  __t__.id = employees."managerId"), '[]'::json) AS manager_json
-
-  FROM employees
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | employees → employees | json_agg | Relation employees.manager (belongsTo, cardinality: one) - using JSON aggregation to avoid row explosion |
-
-**Why NQL?** This 59-character NQL expression compiles to 200 characters of SQL (3.4× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-
-### Recursive Ancestors
-
-**hierarchy:**
 ```nql
-# Full ancestor chain as JSON array
 employees | select name, managementChain.*
-
-# Specific columns from ancestors
-employees | select name, managementChain.name, managementChain.title
 ```
 
-<details>
-<summary>Compiled SQL & Plan — `employees | select name, managementChain.*`</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-WITH
-   
-  managementChain_cte AS (SELECT employees_inner_0.*
-  
-  FROM employees AS employees_inner_0)
-SELECT employees.name
-
-  FROM employees
-
-  LEFT JOIN "managementChain_cte" AS "managementChain_ref_0" ON employees.id = "managementChain_ref_0"."managerId"
+WITH RECURSIVE management_chain_cte AS (
+  SELECT employees.id, employees.name, employees.title,
+    employees.manager_id, 1 AS depth
+  FROM hierarchy_example.employees
+  WHERE employees.id IN (SELECT manager_id FROM hierarchy_example.employees)
+  UNION ALL
+  SELECT e.id, e.name, e.title, e.manager_id, mc.depth + 1
+  FROM hierarchy_example.employees e
+  INNER JOIN management_chain_cte mc ON e.id = mc.manager_id
+)
+SELECT employees.name,
+  COALESCE(
+    (SELECT json_agg(to_jsonb(mc))
+     FROM management_chain_cte mc
+     WHERE mc.id = employees.manager_id),
+    '[]'::json
+  ) AS management_chain_json
+FROM hierarchy_example.employees
 ```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | employees → employees | cte | Recursive include on self-referential relation "managementChain" → forced CTE strategy |
-
-**Why NQL?** This 42-character NQL expression compiles to 247 characters of SQL (5.9× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
 </details>
 
+### Recursive Descendants (CTE)
 
-<details>
-<summary>Compiled SQL & Plan — `employees | select name, managementChain.name, managementCha…`</summary>
+The inverse of `managementChain`: `allReports` walks *down* the tree, collecting all direct and indirect reports via a recursive CTE.
 
-**SQL:**
-```sql
-WITH
-   
-  managementChain_cte AS (SELECT
-    employees_inner_0.name AS name,
-    employees_inner_0.title AS title
-  
-  FROM employees AS employees_inner_0)
-SELECT employees.name
-
-  FROM employees
-
-  LEFT JOIN "managementChain_cte" AS "managementChain_ref_0" ON employees.id = "managementChain_ref_0"."managerId"
-```
-
-**Parameters:** _none_
-
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | employees → employees | cte | Recursive include on self-referential relation "managementChain" → forced CTE strategy |
-
-**Why NQL?** This 68-character NQL expression compiles to 300 characters of SQL (4.4× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
-</details>
-
-
-
-
-
-
-
-
-
-### Recursive Descendants
-
-**hierarchy:**
 ```nql
-# Full descendant chain
 employees | select name, allReports.*
-
-# Specific columns
 employees | select name, allReports.name
 ```
 
-<details>
-<summary>Compiled SQL & Plan — `employees | select name, allReports.*`</summary>
+---
 
-**SQL:**
-```sql
-WITH
-   
-  allReports_cte AS (SELECT employees_inner_0.*
-  
-  FROM employees AS employees_inner_0)
-SELECT employees.name
+## Range Types
 
-  FROM employees
+*Schema: scheduling*
 
-  LEFT JOIN "allReports_cte" AS "allReports_ref_0" ON employees.id = "allReports_ref_0"."managerId"
+PostgreSQL range types (`daterange`, `tstzrange`, `int4range`) are supported natively. NQL uses readable operator names instead of PostgreSQL's symbolic operators.
+
+### Overlaps
+
+Find all room bookings whose period has any overlap with a given date window. NQL's `overlaps` compiles to PostgreSQL's `&&` (range overlap) operator.
+
+```nql
+roomBookings | where bookingPeriod overlaps [2024-01-16,2024-01-20)
 ```
 
-**Parameters:** _none_
+<details><summary>SQL</summary>
 
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | employees → employees | cte | Recursive include on self-referential relation "allReports" → forced CTE strategy |
-
-**Why NQL?** This 37-character NQL expression compiles to 227 characters of SQL (6.1× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
+```sql
+SELECT room_bookings.*
+FROM ch4_scheduling.room_bookings
+WHERE room_bookings.booking_period && CAST($1 AS daterange)
+-- params: ["[2024-01-16,2024-01-20)"]
+```
 </details>
 
+| id | room_id | booked_by     | booking_period          | purpose            |
+|----|---------|---------------|-------------------------|--------------------|
+| 1  | 1       | Alice Johnson | [2024-01-15,2024-01-17) | Product planning   |
+| 5  | 2       | Eve Davis     | [2024-01-18,2024-01-19) | Code review        |
+| 10 | 4       | Jack Taylor   | [2024-01-15,2024-01-20) | Technical training |
+| 12 | 7       | CEO Office    | [2024-01-01,2024-01-31) | Executive reserved |
 
-<details>
-<summary>Compiled SQL & Plan — `employees | select name, allReports.name`</summary>
+*(4 rows)*
 
-**SQL:**
-```sql
-WITH
-   
-  allReports_cte AS (SELECT employees_inner_0.name AS name
-  
-  FROM employees AS employees_inner_0)
-SELECT employees.name
+### Contained By
 
-  FROM employees
+Find bookings entirely within a month. `containedBy` compiles to `<@` — the booking's full range must fit inside the given bounds.
 
-  LEFT JOIN "allReports_cte" AS "allReports_ref_0" ON employees.id = "allReports_ref_0"."managerId"
+```nql
+roomBookings | where bookingPeriod containedBy [2024-01-01,2024-02-01)
 ```
 
-**Parameters:** _none_
+<details><summary>SQL</summary>
 
-**Planner decisions:**
-| Decision | Context | Choice | Reasoning |
-|----------|---------|--------|-----------|
-| include-strategy | employees → employees | cte | Recursive include on self-referential relation "allReports" → forced CTE strategy |
-
-**Why NQL?** This 40-character NQL expression compiles to 238 characters of SQL (6.0× expansion). The planner handles identifier quoting, table aliasing, parameter binding, and column qualification automatically.
-
+```sql
+SELECT room_bookings.*
+FROM ch4_scheduling.room_bookings
+WHERE room_bookings.booking_period <@ CAST($1 AS daterange)
+-- params: ["[2024-01-01,2024-02-01)"]
+```
 </details>
 
+| id | room_id | booked_by     | booking_period          | purpose               |
+|----|---------|---------------|-------------------------|-----------------------|
+| 1  | 1       | Alice Johnson | [2024-01-15,2024-01-17) | Product planning      |
+| 2  | 1       | Bob Smith     | [2024-01-20,2024-01-21) | Client meeting        |
+| 3  | 1       | Carol White   | [2024-01-25,2024-01-28) | Team workshop         |
+| 4  | 2       | David Brown   | [2024-01-10,2024-01-12) | Interview sessions    |
+| 5  | 2       | Eve Davis     | [2024-01-18,2024-01-19) | Code review           |
+| ...| ...     | ...           | ...                     | ...                   |
 
+*(12 rows)*
 
+### Contains
 
+Find which pricing tier applies to a given quantity. `contains` checks if the range includes a scalar value — compiles to `@>`.
 
+```nql
+priceTiers | where quantityRange contains 25
+```
 
+<details><summary>SQL</summary>
 
+```sql
+SELECT price_tiers.*
+FROM scheduling.price_tiers
+WHERE price_tiers.quantity_range @> $1
+-- params: [25]
+```
+</details>
 
+| id | product_name | quantity_range | unit_price |
+|----|-------------|----------------|------------|
+| 2  | Widget Pro   | [10,50)        | 89.99      |
+| 8  | Gadget Basic | [25,100)       | 19.99      |
+| 10 | API Calls    | [1,1000)       | 0.01       |
+| 16 | Team License | [20,100)       | 99.00      |
 
-> The role names (`manager`, `managementChain`, `allReports`) come from the schema's `roles` option on the self-referential `ref()`.
+*(4 rows)*
+
+### Range Literal Syntax
+
+| Syntax | Meaning |
+|--------|---------|
+| `[a,b]` | Inclusive both ends |
+| `[a,b)` | Inclusive start, exclusive end |
+| `(a,b]` | Exclusive start, inclusive end |
+| `(a,b)` | Exclusive both ends |
 
 ---
 
-## 11. Mutations
+## Mutations
 
 ### INSERT
 
-**ecommerce:**
+*Schema: ecommerce*
+
+Insert a row using `set col = val` syntax. All values are parameterized. The trailing `!` is a safety guard required for mutations without a WHERE clause — it prevents accidental execution.
+
 ```nql
-insert into products set sku = 'IPH-15', name = 'iPhone', price = 999, categoryId = 1
-
-# With RETURNING (pipe to select)
-insert into products set sku = 'IPH-15', name = 'iPhone', price = 999, categoryId = 1 | select id, name
+insert into categories set name = 'Accessories', slug = 'accessories'!
 ```
 
-<details>
-<summary>Compiled SQL & Plan — `insert into products set sku = 'IPH-15', name = 'iPhone', pr…`</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-INSERT INTO products (
-  sku,
-  name,
-  price,
-  "categoryId"
-) VALUES
-  (
-    $1,
-    $2,
-    $3,
-    $4
-  )
+INSERT INTO ch5_ecommerce.categories (name, slug)
+VALUES ($1, $2)
+-- params: ["Accessories", "accessories"]
 ```
-
-**Parameters:** `["IPH-15", "iPhone", 999, 1]`
-
-**Why NQL?** `INSERT` mutations are automatically parameterized — every value becomes a `$N` placeholder, preventing SQL injection. Column names are validated against the schema and double-quoted in the output SQL.
-
 </details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `insert into products set sku = 'IPH-15', name = 'iPhone', pr…`</summary>
-
-**SQL:**
-```sql
-INSERT INTO products (
-  sku,
-  name,
-  price,
-  "categoryId"
-) VALUES
-  (
-    $1,
-    $2,
-    $3,
-    $4
-  ) 
-  RETURNING products.id AS id, products.name AS name
-```
-
-**Parameters:** `["IPH-15", "iPhone", 999, 1]`
-
-**Why NQL?** `INSERT` mutations are automatically parameterized — every value becomes a `$N` placeholder, preventing SQL injection. Column names are validated against the schema and double-quoted in the output SQL.
-
-</details>
-
-
-
-
-
-
-
-
-
-**blog:**
-```nql
-insert into authors set name = 'Alice', email = 'alice@example.com'
-insert into posts set title = 'Hello', slug = 'hello', authorId = 1 | select id, title
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-INSERT INTO posts (
-  title,
-  slug,
-  "authorId"
-) VALUES
-  (
-    $1,
-    $2,
-    $3
-  ) 
-  RETURNING posts.id AS id, posts.title AS title
-```
-
-**Parameters:** `["Hello", "hello", 1]`
-
-**Why NQL?** `INSERT` mutations are automatically parameterized — every value becomes a `$N` placeholder, preventing SQL injection. Column names are validated against the schema and double-quoted in the output SQL.
-
-</details>
-
-
-
-### Multi-row INSERT
-
-NQL supports inserting multiple rows in a single statement using two syntaxes:
-
-#### SQL-style `values` syntax
-
-```nql
-# Insert multiple rows with values syntax
-insert into products values (sku = 'A', name = 'Product A'), (sku = 'B', name = 'Product B')
-
-# With RETURNING
-insert into products values (sku = 'A', name = 'Product A'), (sku = 'B', name = 'Product B') | select id
-```
-
-#### NQL-style pipe syntax
-
-```nql
-# Insert multiple rows with pipe-set syntax
-insert into products set sku = 'A', name = 'Product A' | set sku = 'B', name = 'Product B'
-```
-
-Both syntaxes compile to the same SQL:
-
-```sql
-INSERT INTO products (sku, name) VALUES ($1, $2), ($3, $4)
-```
-
-**Column normalization:** When rows have different columns, NQL normalizes by taking the union of all columns. Missing columns in a row become `NULL`:
-
-```nql
-# First row has name only, second row has name and email
-insert into authors values (name = 'Alice'), (name = 'Bob', email = 'bob@test.com')
-```
-
-**Compiled SQL:**
-```sql
-INSERT INTO authors (name, email) VALUES ($1, null), ($2, $3)
--- Parameters: ['Alice', 'Bob', 'bob@test.com']
-```
-
-**Note:** Missing columns produce `NULL`, not database `DEFAULT` values. If you need database defaults, omit the column from ALL rows.
-
-### INSERT FROM (Bulk Copy)
-
-**ecommerce:**
-```nql
-# Copy rows from a filtered query
-insert into orderItems from orderItems | where orderId = 1
-
-# With limit
-insert into orderItems from orderItems | where orderId = 1 | limit 10
-
-# With RETURNING
-insert into addresses from addresses | where customerId = 5 | select id
-```
 
 ### UPDATE
 
-**ecommerce:**
+Update rows matching a condition. The WHERE clause targets specific rows; `set` specifies the new values.
+
 ```nql
-update products set price = 899 where id = 1
-
-# With RETURNING
-update orders set status = 'shipped' where id = 1 | select id, status
+update products set price = 29.99 where sku = 'WIDGET-001'!
 ```
 
-<details>
-<summary>Compiled SQL & Plan — `update products set price = 899 where id = 1`</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-UPDATE products SET price = $1 
-  WHERE products.id = $2
+UPDATE ch5_ecommerce.products
+SET price = $1
+WHERE products.sku = $2
+-- params: [29.99, "WIDGET-001"]
 ```
-
-**Parameters:** `[899, 1]`
-
-**Why NQL?** `UPDATE` mutations are automatically parameterized — every value becomes a `$N` placeholder, preventing SQL injection. Column names are validated against the schema and double-quoted in the output SQL.
-
 </details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `update orders set status = 'shipped' where id = 1 | select i…`</summary>
-
-**SQL:**
-```sql
-UPDATE orders SET status = $1 
-  WHERE orders.id = $2 
-  RETURNING orders.id AS id, orders.status AS status
-```
-
-**Parameters:** `["shipped", 1]`
-
-**Why NQL?** `UPDATE` mutations are automatically parameterized — every value becomes a `$N` placeholder, preventing SQL injection. Column names are validated against the schema and double-quoted in the output SQL.
-
-</details>
-
-
-
-
-
-
-
-
-
-**blog:**
-```nql
-update posts set published = true where authorId = 1
-```
-
-<details>
-<summary>Compiled SQL & Plan</summary>
-
-**SQL:**
-```sql
-UPDATE posts SET published = $1 
-  WHERE posts."authorId" = $2
-```
-
-**Parameters:** `[true, 1]`
-
-**Why NQL?** `UPDATE` mutations are automatically parameterized — every value becomes a `$N` placeholder, preventing SQL injection. Column names are validated against the schema and double-quoted in the output SQL.
-
-</details>
-
-
-
-
-
-
-
 
 ### DELETE
 
-**ecommerce:**
+Remove rows matching a condition. Like all mutations, the `!` suffix is required as a confirmation guard.
+
 ```nql
-delete from products where id = 1
+delete from orders where status = 'cancelled'!
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-DELETE 
-  FROM products 
-  WHERE products.id = $1
+DELETE FROM ch5_ecommerce.orders
+WHERE orders.status = $1
+-- params: ["cancelled"]
 ```
-
-**Parameters:** `[1]`
-
-**Why NQL?** `DELETE` mutations are automatically parameterized — every value becomes a `$N` placeholder, preventing SQL injection. Column names are validated against the schema and double-quoted in the output SQL.
-
 </details>
 
+### UPSERT (INSERT ... ON CONFLICT)
 
+Insert or update based on a unique constraint. The `on sku` clause specifies the conflict column — if a row with that SKU already exists, it gets updated instead.
 
-
-
-
-
-
-**blog:**
 ```nql
-delete from comments where approved = false
+upsert into products on sku \
+  set name = 'New Widget', sku = 'WIDGET-NEW', price = 19.99, \
+      categoryId = 1, active = true!
 ```
 
-<details>
-<summary>Compiled SQL & Plan</summary>
+<details><summary>SQL</summary>
 
-**SQL:**
 ```sql
-DELETE 
-  FROM comments 
-  WHERE comments.approved = $1
-```
-
-**Parameters:** `[false]`
-
-**Why NQL?** `DELETE` mutations are automatically parameterized — every value becomes a `$N` placeholder, preventing SQL injection. Column names are validated against the schema and double-quoted in the output SQL.
-
-</details>
-
-
-
-
-
-
-
-
-### UPSERT (ON CONFLICT)
-
-Insert a row, or update it if a conflict occurs on the specified column(s).
-
-**Syntax:**
-```nql
-upsert into <table> on <column> set <col> = <val>, ...
-upsert into <table> on (<col1>, <col2>) set <col> = <val>, ...
-```
-
-**ecommerce:**
-```nql
-# Single conflict column
-upsert into customers on email set firstName = 'Alice', lastName = 'Smith', email = 'alice@example.com'
-
-# Multiple conflict columns
-upsert into orderItems on (orderId, productId) set quantity = 2, unitPrice = 29.99, totalPrice = 59.98
-```
-
-<details>
-<summary>Compiled SQL & Plan — `upsert into customers on email set firstName = 'Alice', last…`</summary>
-
-**SQL:**
-```sql
-INSERT INTO customers (
-  "firstName",
-  "lastName",
-  email
-) VALUES
-  (
-    $1,
-    $2,
-    $3
-  ) 
-  ON CONFLICT (email) DO UPDATE SET 
-  "firstName" = excluded."firstName",
-  "lastName" = excluded."lastName",
-  email = excluded.email
-```
-
-**Parameters:** `["Alice", "Smith", "alice@example.com"]`
-
-**Why NQL?** `UPSERT` compiles to `INSERT ... ON CONFLICT DO UPDATE` — PostgreSQL's atomic "insert-or-update" operation. NQL makes the conflict resolution readable in one line instead of the multi-clause SQL pattern.
-
-</details>
-
-
-<details>
-<summary>Compiled SQL & Plan — `upsert into orderItems on (orderId, productId) set quantity …`</summary>
-
-**SQL:**
-```sql
-INSERT INTO "orderItems" (
-  quantity,
-  "unitPrice",
-  "totalPrice"
-) VALUES
-  (
-    $1,
-    $2,
-    $3
-  ) 
-  ON CONFLICT ("orderId", "productId") DO UPDATE SET 
-  quantity = excluded.quantity,
-  "unitPrice" = excluded."unitPrice",
-  "totalPrice" = excluded."totalPrice"
-```
-
-**Parameters:** `[2, 29.99, 59.98]`
-
-**Why NQL?** `UPSERT` compiles to `INSERT ... ON CONFLICT DO UPDATE` — PostgreSQL's atomic "insert-or-update" operation. NQL makes the conflict resolution readable in one line instead of the multi-clause SQL pattern.
-
-</details>
-
-
-
-
-
-
-
-
-
-**Generated SQL (single conflict column):**
-```sql
-INSERT INTO customers (first_name, last_name, email)
-VALUES ($1, $2, $3)
-ON CONFLICT (email)
-DO UPDATE SET
-  first_name = EXCLUDED.first_name,
-  last_name  = EXCLUDED.last_name,
-  email      = EXCLUDED.email
-```
-
-**Generated SQL (composite conflict columns):**
-```sql
-INSERT INTO order_items (quantity, unit_price, total_price, order_id, product_id)
+INSERT INTO ch5_ecommerce.products (name, sku, price, category_id, active)
 VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (order_id, product_id)
-DO UPDATE SET
-  quantity    = EXCLUDED.quantity,
-  unit_price  = EXCLUDED.unit_price,
-  total_price = EXCLUDED.total_price
+ON CONFLICT (sku) DO UPDATE
+SET name = excluded.name, sku = excluded.sku,
+    price = excluded.price, category_id = excluded.category_id,
+    active = excluded.active
+-- params: ["New Widget", "WIDGET-NEW", 19.99, 1, true]
 ```
+</details>
 
-- The `on` clause specifies the unique constraint column(s) for conflict detection
-- `DO UPDATE SET` automatically uses `EXCLUDED.<column>` references to update with the new values
-- All values are parameterized (`$1`, `$2`, ...) — no SQL injection risk
+### Multi-Row INSERT
 
-### Mutation Chaining with BIND
+Insert multiple rows in a single statement. Two syntaxes are available:
 
-Chain mutations where the second uses results from the first:
+**Inline values syntax:**
 
-**ecommerce:**
 ```nql
-insert into orders set customerId = 1, orderNumber = 'ORD-100', total = 59.99, shippingAddressId = 1, billingAddressId = 1 | bind order
-insert into orderItems set orderId = order.id, productId = 5, quantity = 2, unitPrice = 29.99, totalPrice = 59.98
+insert into categories values \
+  (name = 'Toys', slug = 'toys'), \
+  (name = 'Sports', slug = 'sports')!
 ```
+
+**Pipe continuation syntax:**
+
+```nql
+insert into categories set name = 'Toys', slug = 'toys' \
+  | set name = 'Sports', slug = 'sports'!
+```
+
+Both produce a single `INSERT ... VALUES (...), (...)` statement. If rows have different columns, missing ones are normalized to NULL.
 
 ---
 
-## 12. Advanced Features
+## Advanced Features
 
-### Bind (CTEs)
+### Bind (Named CTE)
 
-Capture a query result as a named CTE for use in subsequent statements:
+*Schema: iam*
 
-**ecommerce:**
-```text
-products | where active = true | bind activeProducts
-insert into featuredProducts from activeProducts
+Capture a query result and name it for reuse in subsequent statements. This is NQL's equivalent of a CTE — the bound name can be referenced in later queries within the same `.dbsp` file.
+
+```nql
+users | where active = true | select id | bind activeUsers
 ```
 
-**blog:**
-```text
-posts | where published = true | order by createdAt desc | limit 10 | bind recentPosts
-insert into highlights from recentPosts
+<details><summary>SQL</summary>
+
+```sql
+SELECT users.id
+FROM iam_example.users
+WHERE users.active = $1
+-- params: [true]
+```
+</details>
+
+| id |
+|----|
+| 1  |
+| 2  |
+| 3  |
+| 4  |
+| 5  |
+
+*(5 rows — the bound result `activeUsers` can be used in subsequent queries, e.g. `where userId in activeUsers`)*
+
+### Per-Include LIMIT
+
+Limit the number of related rows *per parent row*. This forces the LATERAL strategy (see [Per-Include LIMIT (LATERAL)](#per-include-limit-lateral) above).
+
+```nql
+users | select *, userRoles.* | limit userRoles 2
+```
+
+Supports dotted paths for nested relations — all ancestors in the path are automatically switched to LATERAL:
+
+```nql
+users | select *, userRoles.* | limit userRoles.role 1
 ```
 
 ### Raw SQL Escape Hatch
 
-Prefix with `!` for raw SQL (works with any schema):
+For DDL or administrative commands not covered by NQL, prefix with `!` to pass raw SQL directly to the database:
 
 ```
-!CREATE SCHEMA IF NOT EXISTS tenant_123
-!SELECT pg_advisory_lock(12345)
+!CREATE INDEX idx_users_email ON users (email);
+!VACUUM ANALYZE users;
 ```
 
-### Literals
+### Multiline Queries
 
-| Type | Syntax | Example |
-|------|--------|---------|
-| String | Single quotes | `'hello'`, `'O''Brien'` |
-| Integer | Digits | `42` |
-| Decimal | Digits with dot | `3.14` |
-| Boolean | Keywords | `true`, `false` |
-| Null | Keyword | `null` |
-| Range | Brackets | `[2024-01-01,2024-12-31]` |
+*Schema: test-strategies*
 
-### Identifiers
+Long queries can be split across lines using `\` at the end of each continued line. The REPL joins them before parsing:
 
-```text
-authors            # unquoted (standard)
-"order"            # quoted (reserved keyword)
-"order-items"      # quoted (special characters)
-"Order Details"    # quoted (spaces)
-```
-
-
-
-
-
-### REPL Dot Commands
-
-In the interactive REPL, dot commands provide schema introspection:
-
-```
-.tables              # List all tables
-.schema authors      # Show table columns (blog)
-.schema products     # Show table columns (ecommerce)
-.relations posts     # Show table relations
-.use tenant_123      # Set schema context
-.import file.sql     # Execute SQL file
-.help                # Show all commands
+```nql
+employees | select name, salary, \
+  case when salary > 80000 then 'senior' \
+       when salary > 50000 then 'mid' \
+       else 'junior' end as level
 ```
 
 ---
 
-## 13. Quick Reference
+## REPL Commands
 
-### Operator Precedence
+Dot commands control the REPL environment (schema switching, file import, output format). They do not compile to SQL.
 
-| Priority | Operators |
-|----------|-----------|
-| Highest | `*`, `/`, `%` |
-| | `+`, `-` |
-| | `=`, `!=`, `<`, `>`, `<=`, `>=`, `like`, `in`, `between` |
-| | `not` |
-| | `and` |
-| Lowest | `or` |
+| Command | Description |
+|---------|-------------|
+| `.tables` | List all tables in the schema |
+| `.schema <table>` | Show columns for a table |
+| `.relations <table>` | Show relations for a table |
+| `.use <schema>` | Set PostgreSQL schema context |
+| `.import <file.sql>` | Execute a SQL file |
+| `.output json\|table\|csv` | Change output format |
+| `.help` | Show available commands |
 
-### Reserved Keywords
+### Schema Setup Pattern
 
-**Query:** `select`, `where`, `flat`, `via`, `bind`, `group`, `by`, `order`, `limit`, `offset`, `distinct`
+Every `.dbsp` file follows this pattern to create a clean, isolated database context before running queries:
 
-**Boolean:** `and`, `or`, `not`, `all`, `some`, `none`, `every`
+```
+# Drop and recreate schema for clean state
+!DROP SCHEMA IF EXISTS my_schema CASCADE;
+!CREATE SCHEMA IF NOT EXISTS my_schema;
 
-**Functions:** `case`, `when`, `then`, `else`, `end`, `over`, `partition`, `row_number`, `rank`, `dense_rank`, `lag`, `lead`
+# Set schema context
+.use my_schema
 
-**Mutations:** `insert`, `into`, `update`, `delete`, `from`, `set`, `upsert`, `on`
+# Import DDL and seed data
+.import examples/my.ddl.sql
+.import examples/my.seed.sql
+```
 
-**Comparisons:** `between`, `in`, `like`, `is`, `exists`, `overlaps`, `contains`, `containedBy`
+---
 
-**Literals:** `true`, `false`, `null`
+## Quick Reference
 
-### NQL vs ORM API
+### Query Operators
 
-**blog:**
+```
+table                              -- table scan
+  | where <condition>              -- filter rows
+  | select <columns>               -- project columns
+  | select *, relation.*           -- include related data
+  | flat                           -- force LEFT JOIN (no json_agg)
+  | group by <columns>             -- aggregate grouping
+  | order by <col> [asc|desc]      -- sort results
+  | limit N                        -- top-N rows
+  | offset N                       -- skip rows
+  | limit <relation> N             -- per-include limit (LATERAL)
+  | select distinct                -- deduplicate rows
+  | bind <name>                    -- capture result as CTE
+```
 
-| NQL | ORM API |
-|-----|---------|
-| `authors` | `orm.select('authors').all()` |
-| `authors \| select id, name` | `orm.select('authors').columns(['id', 'name'])` |
-| `authors \| select *, posts.*` | `orm.select('authors').include('posts')` |
-| `authors \| order by name desc` | `orm.select('authors').orderBy('name', 'desc')` |
-| `posts \| limit 10` | `orm.select('posts').limit(10)` |
-| `posts \| group by authorId \| select count(*)` | `orm.select('posts').groupBy(['authorId']).count()` |
-| `insert into authors set name = 'A', email = 'a@b.c'` | `orm.insert('authors').values({ name: 'A', email: 'a@b.c' }).execute()` |
-| `delete from comments where id = 1` | `orm.delete('comments').where(eq('id', 1)).execute()` |
+### WHERE Conditions
 
-**ecommerce:**
+| Condition | Example |
+|-----------|---------|
+| Equality | `where id = 1` |
+| Comparison | `where price > 100` |
+| NULL check | `where email is null` / `is not null` |
+| Boolean | `where active = true` |
+| AND / OR | `where a = 1 and b = 2` |
+| NOT | `where not active = true` |
+| BETWEEN | `where salary between 50000 and 100000` |
+| LIKE | `where name like 'A%'` |
+| IN (list) | `where id in (1, 2, 3)` |
+| IN (subquery) | `where id in (table \| select col)` |
+| NOT IN | `where id not in (4, 5)` |
+| Range overlaps | `where bookingPeriod overlaps [a,b)` |
+| Range contains | `where quantityRange contains 25` |
+| Range containedBy | `where bookingPeriod containedBy [a,b)` |
+| JSONB ->> | `where col ->> 'key' = 'val'` |
+| JSONB @> | `where col @> '{"k":"v"}'` |
+| JSONB ? | `where col ? 'key'` |
+| Relation filter | `where relation.col = val` (implicit EXISTS) |
 
-| NQL | ORM API |
-|-----|---------|
-| `products \| where active = true` | `orm.select('products').where(eq('active', true))` |
-| `orders \| select distinct status` | `orm.select('orders').columns(['status']).distinct()` |
-| `update orders set status = 'shipped' where id = 1` | `orm.update('orders').set({ status: 'shipped' }).where(eq('id', 1)).execute()` |
+### Aggregate Functions
+
+| Function | Example |
+|----------|---------|
+| `count(*)` | `select count(*)` |
+| `count(distinct col)` | `select count(distinct name)` |
+| `sum(col)` | `select sum(total)` |
+| `avg(col)` | `select avg(price)` |
+| `min(col)` | `select min(created_at)` |
+| `max(col)` | `select max(salary)` |
+
+### Mutations
+
+| Operation | Syntax |
+|-----------|--------|
+| INSERT | `insert into table set col = val!` |
+| Multi-row INSERT | `insert into table values (a=1), (b=2)!` |
+| UPDATE | `update table set col = val where condition!` |
+| DELETE | `delete from table where condition!` |
+| UPSERT | `upsert into table on conflictCol set col = val!` |
+
+### Include Strategies
+
+| Strategy | Trigger | SQL Pattern |
+|----------|---------|-------------|
+| json_agg | `select *, rel.*` (default) | Correlated subquery with `json_agg` |
+| flat | `\| flat` | LEFT JOIN |
+| LATERAL | `\| limit rel N` | LEFT JOIN LATERAL with LIMIT |
+| CTE | Recursive pseudo-columns | WITH RECURSIVE |
+
+### Hierarchy Pseudo-Columns
+
+Requires a self-referencing FK with roles defined in the schema:
+
+| Pseudo-Column | Description |
+|---------------|-------------|
+| `manager` | Direct parent (single level) |
+| `manager.manager` | Skip-level (2 levels up) |
+| `managementChain` | All ancestors (recursive CTE) |
+| `allReports` | All descendants (recursive CTE) |

@@ -280,10 +280,25 @@ export async function executeBatch(
 	}
 
 	// Run assertions if provided
+	// Assertion query indexes count only executable queries (skip comments and blank lines)
 	let assertionSummary: AssertionSummary | undefined;
 	if (assertionBlocks) {
 		const hasDb = !!databaseUrl;
-		assertionSummary = runAssertions(assertionBlocks, results, queries, hasDb);
+		const executableResults: BatchResult[] = [];
+		const executableQueries: string[] = [];
+		for (let i = 0; i < results.length; i++) {
+			const q = queries[i]?.trim() ?? '';
+			if (q.length > 0 && !q.startsWith('#')) {
+				executableResults.push(results[i]!);
+				executableQueries.push(queries[i]!);
+			}
+		}
+		assertionSummary = runAssertions(
+			assertionBlocks,
+			executableResults,
+			executableQueries,
+			hasDb,
+		);
 	}
 
 	return { results, assertionSummary };

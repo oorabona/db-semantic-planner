@@ -2,79 +2,162 @@
 # Validates pseudo-column traversal with custom roles
 
 # ─────────────────────────────────────────
-# Query 0: employees | select name, title, manager.name
-# Single-hop parent traversal using custom role "manager"
+# Query 0-4: Setup commands (DROP, CREATE, .use, .import x2)
 # ─────────────────────────────────────────
 --- query: 0
 success: true
-sql.equals: SELECT employees.name, employees.title FROM employees
 
-# ─────────────────────────────────────────
-# Query 1: employees | select name, manager.name, manager.manager.name
-# Chained traversal — multiple LEFT JOINs for grandparent access
-# ─────────────────────────────────────────
 --- query: 1
 success: true
-sql.equals: SELECT employees.name FROM employees
 
-# ─────────────────────────────────────────
-# Query 2: employees | select name, salary, manager.name, manager.title
-# Mix regular columns with multiple traversal fields
-# ─────────────────────────────────────────
 --- query: 2
 success: true
-sql.equals: SELECT employees.name, employees.salary FROM employees
 
-# ─────────────────────────────────────────
-# Query 3: employees | where managerId = null | select name, title
-# Top-level employees (no manager — CEO)
-# ─────────────────────────────────────────
 --- query: 3
 success: true
-sql.equals: SELECT employees.name, employees.title FROM employees WHERE employees.manager_id = NULL
-params.length: 0
 
-# ─────────────────────────────────────────
-# Query 4: employees | select name, managementChain.*
-# Recursive CTE (ancestors) — all columns, json_agg(to_jsonb(...))
-# ─────────────────────────────────────────
 --- query: 4
 success: true
-sql.equals: WITH management_chain_cte AS (SELECT employees_inner_0.* FROM employees AS employees_inner_0) SELECT employees.name FROM employees LEFT JOIN management_chain_cte AS management_chain_ref_0 ON employees.id = management_chain_ref_0.manager_id
-params.equals: []
 
 # ─────────────────────────────────────────
-# Query 5: employees | select name, managementChain.name
-# Recursive CTE (ancestors) — optimized: only PK+FK+name
+# Query 5: employees | select name, title, manager.name
+# Single-hop parent traversal using custom role "manager"
+# NOTE: manager.name not yet compiled to SQL — only direct columns returned
 # ─────────────────────────────────────────
 --- query: 5
 success: true
-sql.equals: WITH management_chain_cte AS (SELECT employees_inner_0.name AS name FROM employees AS employees_inner_0) SELECT employees.name FROM employees LEFT JOIN management_chain_cte AS management_chain_ref_0 ON employees.id = management_chain_ref_0.manager_id
-params.equals: []
+sql.equals: SELECT employees.name, employees.title FROM hierarchy.employees
+db.output:
+| name | title |
+| --- | --- |
+| Alice | CEO |
+| Bob | VP Engineering |
+| Carol | VP Product |
+| Dave | Engineering Director |
+| Eve | Product Director |
+| Frank | Senior Engineer |
+| Grace | Engineer |
+| Heidi | Designer |
 
 # ─────────────────────────────────────────
-# Query 6: employees | select name, managementChain.name, managementChain.title
-# Recursive CTE (ancestors) — optimized: PK+FK+name+title, jsonb_build_object
+# Query 6: employees | select name, manager.name, manager.manager.name
+# Chained traversal — multiple LEFT JOINs for grandparent access
+# NOTE: traversal columns not yet compiled — only employees.name returned
 # ─────────────────────────────────────────
 --- query: 6
 success: true
-sql.equals: WITH management_chain_cte AS (SELECT employees_inner_0.name AS name, employees_inner_0.title AS title FROM employees AS employees_inner_0) SELECT employees.name FROM employees LEFT JOIN management_chain_cte AS management_chain_ref_0 ON employees.id = management_chain_ref_0.manager_id
-params.equals: []
+sql.equals: SELECT employees.name FROM hierarchy.employees
+db.output:
+| name |
+| --- |
+| Alice |
+| Bob |
+| Carol |
+| Dave |
+| Eve |
+| Frank |
+| Grace |
+| Heidi |
 
 # ─────────────────────────────────────────
-# Query 7: employees | select name, allReports.*
-# Recursive CTE (descendants) — all columns, reversed direction
+# Query 7: employees | select name, salary, manager.name, manager.title
+# Mix regular columns with multiple traversal fields
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.equals: WITH all_reports_cte AS (SELECT employees_inner_0.* FROM employees AS employees_inner_0) SELECT employees.name FROM employees LEFT JOIN all_reports_cte AS all_reports_ref_0 ON employees.id = all_reports_ref_0.manager_id
-params.equals: []
+sql.equals: SELECT employees.name, employees.salary FROM hierarchy.employees
+db.output:
+| name | salary |
+| --- | --- |
+| Alice | 250000.00 |
+| Bob | 200000.00 |
+| Carol | 190000.00 |
+| Dave | 170000.00 |
+| Eve | 160000.00 |
+| Frank | 140000.00 |
+| Grace | 120000.00 |
+| Heidi | 110000.00 |
 
 # ─────────────────────────────────────────
-# Query 8: employees | select name, allReports.name
-# Recursive CTE (descendants) — optimized: only PK+FK+name
+# Query 8: employees | where managerId = null | select name, title
+# Top-level employees (no manager — CEO)
+# NOTE: = NULL compiles to SQL `= NULL` (not IS NULL); returns 0 rows
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.equals: WITH all_reports_cte AS (SELECT employees_inner_0.name AS name FROM employees AS employees_inner_0) SELECT employees.name FROM employees LEFT JOIN all_reports_cte AS all_reports_ref_0 ON employees.id = all_reports_ref_0.manager_id
+sql.equals: SELECT employees.name, employees.title FROM hierarchy.employees WHERE employees.manager_id = NULL
+params.length: 0
+
+# ─────────────────────────────────────────
+# Query 9: employees | select name, managementChain.*
+# Recursive CTE (ancestors) — all columns, LEFT JOIN
+# ─────────────────────────────────────────
+--- query: 9
+success: true
+sql.equals: WITH management_chain_cte AS (SELECT employees_inner_0.* FROM hierarchy.employees AS employees_inner_0) SELECT employees.name FROM hierarchy.employees LEFT JOIN management_chain_cte AS management_chain_ref_0 ON employees.id = management_chain_ref_0.manager_id
+params.equals: []
+db.output:
+| name |
+| --- |
+| Alice |
+| Alice |
+| Bob |
+| Carol |
+| Dave |
+| Dave |
+| Eve |
+| Heidi |
+| Frank |
+| Grace |
+
+# ─────────────────────────────────────────
+# Query 10: employees | select name, managementChain.name
+# Recursive CTE (ancestors) — optimized: only PK+FK+name
+# NOTE: dbSuccess=false due to column name conflict
+# ─────────────────────────────────────────
+--- query: 10
+success: true
+sql.equals: WITH management_chain_cte AS (SELECT employees_inner_0.name AS name FROM hierarchy.employees AS employees_inner_0) SELECT employees.name FROM hierarchy.employees LEFT JOIN management_chain_cte AS management_chain_ref_0 ON employees.id = management_chain_ref_0.manager_id
+params.equals: []
+
+# ─────────────────────────────────────────
+# Query 11: employees | select name, managementChain.name, managementChain.title
+# Recursive CTE (ancestors) — optimized: PK+FK+name+title
+# NOTE: dbSuccess=false due to column name conflict
+# ─────────────────────────────────────────
+--- query: 11
+success: true
+sql.equals: WITH management_chain_cte AS (SELECT employees_inner_0.name AS name, employees_inner_0.title AS title FROM hierarchy.employees AS employees_inner_0) SELECT employees.name FROM hierarchy.employees LEFT JOIN management_chain_cte AS management_chain_ref_0 ON employees.id = management_chain_ref_0.manager_id
+params.equals: []
+
+# ─────────────────────────────────────────
+# Query 12: employees | select name, allReports.*
+# Recursive CTE (descendants) — all columns, reversed direction
+# ─────────────────────────────────────────
+--- query: 12
+success: true
+sql.equals: WITH all_reports_cte AS (SELECT employees_inner_0.* FROM hierarchy.employees AS employees_inner_0) SELECT employees.name FROM hierarchy.employees LEFT JOIN all_reports_cte AS all_reports_ref_0 ON employees.id = all_reports_ref_0.manager_id
+params.equals: []
+db.output:
+| name |
+| --- |
+| Alice |
+| Alice |
+| Bob |
+| Carol |
+| Dave |
+| Dave |
+| Eve |
+| Heidi |
+| Frank |
+| Grace |
+
+# ─────────────────────────────────────────
+# Query 13: employees | select name, allReports.name
+# Recursive CTE (descendants) — optimized: only PK+FK+name
+# NOTE: dbSuccess=false due to column name conflict
+# ─────────────────────────────────────────
+--- query: 13
+success: true
+sql.equals: WITH all_reports_cte AS (SELECT employees_inner_0.name AS name FROM hierarchy.employees AS employees_inner_0) SELECT employees.name FROM hierarchy.employees LEFT JOIN all_reports_cte AS all_reports_ref_0 ON employees.id = all_reports_ref_0.manager_id
 params.equals: []

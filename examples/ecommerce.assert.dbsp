@@ -319,3 +319,23 @@ db.rows.equals: 1
 success: true
 sql.equals: INSERT INTO ch5_ecommerce.products ( name, sku, price, category_id, active ) VALUES ( $1, $2, $3, $4, $5 ) ON CONFLICT (sku) DO UPDATE SET name = excluded.name, sku = excluded.sku, price = excluded.price, category_id = excluded.category_id, active = excluded.active
 db.rows.equals: 1
+
+# ─────────────────────────────────────────
+# Query 25: insert into categories values (name = 'Toys', slug = 'toys'), (name = 'Sports', slug = 'sports')!
+# Multi-row INSERT (values syntax)
+# ─────────────────────────────────────────
+--- query: 25
+success: true
+sql.equals: INSERT INTO ch5_ecommerce.categories ( name, slug ) VALUES ( $1, $2 ), ( $3, $4 )
+params.equals: ["Toys", "toys", "Sports", "sports"]
+db.rows.equals: 2
+
+# ─────────────────────────────────────────
+# Query 26: insert into categories set name = 'Toys', slug = 'toys' | set name = 'Sports', slug = 'sports'!
+# Multi-row INSERT (pipe continuation syntax) — same SQL as values syntax
+# NOTE: db execution may fail if Q25 already inserted these rows (duplicate key)
+# ─────────────────────────────────────────
+--- query: 26
+success: true
+sql.equals: INSERT INTO ch5_ecommerce.categories ( name, slug ) VALUES ( $1, $2 ), ( $3, $4 )
+params.equals: ["Toys", "toys", "Sports", "sports"]
