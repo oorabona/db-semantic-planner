@@ -219,6 +219,34 @@ export function compileQuery(
  * Compile a set operation (UNION/INTERSECT/EXCEPT).
  * Splits clauses at the set clause: before = left query, set operand = right query.
  */
+
+/**
+ * Count the explicit output columns from a QueryIntent's select clause.
+ * Returns undefined when the count is indeterminate (SELECT * / no select).
+ */
+function getExplicitColumnCount(
+	intent: QueryIntent | SetOperationIntent,
+): number | undefined {
+	if ('kind' in intent && intent.kind === 'setOperation') {
+		// For nested set ops, the output width matches the left branch
+		return getExplicitColumnCount(intent.left);
+	}
+	const q = intent as QueryIntent;
+	if (!q.select) return undefined;
+	switch (q.select.type) {
+		case 'all':
+			return undefined;
+		case 'fields':
+			return q.select.fields.length;
+		case 'aggregate':
+			return (q.select.fields?.length ?? 0) + q.select.aggregates.length;
+		case 'expressions':
+			return q.select.columns.length;
+		default:
+			return undefined;
+	}
+}
+
 function compileSetOperation(
 	query: NqlQuery,
 	setClauseIndex: number,
@@ -250,6 +278,19 @@ function compileSetOperation(
 		right = bound;
 	} else {
 		throw new Error('Set operation missing right operand');
+	}
+
+	// Validate column count compatibility when both sides are explicit
+	const leftCount = getExplicitColumnCount(left);
+	const rightCount = getExplicitColumnCount(right);
+	if (
+		leftCount !== undefined &&
+		rightCount !== undefined &&
+		leftCount !== rightCount
+	) {
+		throw new Error(
+			`${setClause.op.toUpperCase()} requires both sides to have the same number of columns (left: ${leftCount}, right: ${rightCount})`,
+		);
 	}
 
 	return {

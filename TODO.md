@@ -124,7 +124,7 @@
 
 ### E13-ALL Review Findings (2026-02-07)
 
-- [ ] 🔧 **F-001** [NQL] Set operations column count validation — planner should verify both sides of UNION/INTERSECT/EXCEPT have matching column counts — Priority: M
+- [x] ✅ **F-001** [NQL] Set operations column count validation — compiler verifies both sides of UNION/INTERSECT/EXCEPT have matching column counts (2026-02-11)
 (F-002, F-003, F-007 archived → docs/historic/done-2026-02.md)
 
 ### Dead Code
