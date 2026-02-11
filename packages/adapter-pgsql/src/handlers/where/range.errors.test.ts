@@ -38,9 +38,9 @@ describe('rangeHandler errors', () => {
 			operator: 'contains',
 			value: '[1,10)',
 		} as Decision;
-		expect(() => rangeHandler.compile(decision, ctx, state, noopDispatch)).toThrow(
-			'Range handler requires a column',
-		);
+		expect(() =>
+			rangeHandler.compile(decision, ctx, state, noopDispatch),
+		).toThrow('Range handler requires a column');
 	});
 
 	it('throws when column is empty string (falsy)', () => {
@@ -51,9 +51,9 @@ describe('rangeHandler errors', () => {
 			operator: 'contains',
 			value: '[1,10)',
 		} as Decision;
-		expect(() => rangeHandler.compile(decision, ctx, state, noopDispatch)).toThrow(
-			'Range handler requires a column',
-		);
+		expect(() =>
+			rangeHandler.compile(decision, ctx, state, noopDispatch),
+		).toThrow('Range handler requires a column');
 	});
 });
 
