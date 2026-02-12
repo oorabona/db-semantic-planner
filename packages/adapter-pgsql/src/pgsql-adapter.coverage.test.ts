@@ -16,7 +16,10 @@
 import type { PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from './naming-plugin.js';
-import { createPgsqlCompileOnlyAdapter } from './pgsql-adapter.js';
+import {
+	createPgsqlCompileOnlyAdapter,
+	PgsqlAdapter,
+} from './pgsql-adapter.js';
 
 describe('PgsqlAdapter - Coverage Tests', () => {
 	describe('createPgsqlCompileOnlyAdapter', () => {
@@ -534,6 +537,1984 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			const result = adapter.compile(plan);
 
 			expect(result.sql).toContain('tenant_all');
+		});
+	});
+
+	// ==================================================================
+	// NEW COVERAGE TESTS — mutation compilation, recursive, lock modes,
+	// subquery includes, error paths, schema scoping edges
+	// ==================================================================
+
+	describe('compileInsert', () => {
+		it('compiles a basic INSERT with single row', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				values: [{ name: 'Alice', email: 'alice@ex.com' }],
+			};
+			const result = adapter.compileInsert(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('insert');
+			expect(sql).toContain('users');
+			expect(result.parameters).toEqual(['Alice', 'alice@ex.com']);
+		});
+
+		it('compiles INSERT with RETURNING', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				values: [{ name: 'Bob' }],
+				returning: ['id', 'name'],
+			};
+			const result = adapter.compileInsert(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('returning');
+		});
+
+		it('compiles INSERT with schema scoping', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({
+				schemaName: 'tenant_ins',
+			});
+			const intent = {
+				table: 'users',
+				values: [{ name: 'Charlie' }],
+			};
+			const result = adapter.compileInsert(intent as any);
+			expect(result.sql).toContain('tenant_ins');
+		});
+
+		it('compiles INSERT with schema from compile options', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				values: [{ name: 'Dave' }],
+			};
+			const result = adapter.compileInsert(intent as any, {
+				schemaName: 'opt_schema',
+			});
+			expect(result.sql).toContain('opt_schema');
+		});
+
+		it('compiles INSERT with multiple rows', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				values: [
+					{ name: 'A', email: 'a@a.com' },
+					{ name: 'B', email: 'b@b.com' },
+				],
+			};
+			const result = adapter.compileInsert(intent as any);
+			// Should have 4 params (2 rows × 2 columns)
+			expect(result.parameters).toHaveLength(4);
+		});
+
+		it('compiles INSERT with empty values array', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				values: [],
+			};
+			const result = adapter.compileInsert(intent as any);
+			expect(result.sql.toLowerCase()).toContain('insert');
+		});
+
+		it('compiles INSERT with undefined values', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+			};
+			const result = adapter.compileInsert(intent as any);
+			expect(result.sql.toLowerCase()).toContain('insert');
+		});
+	});
+
+	describe('compileUpdate', () => {
+		it('compiles a basic UPDATE', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				set: { name: 'Updated' },
+			};
+			const result = adapter.compileUpdate(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('update');
+			expect(sql).toContain('users');
+		});
+
+		it('compiles UPDATE with WHERE clause', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				set: { active: false },
+				where: { kind: 'comparison', field: 'id', operator: 'eq', value: 42 },
+			};
+			const result = adapter.compileUpdate(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('update');
+			expect(sql).toContain('where');
+		});
+
+		it('compiles UPDATE with RETURNING', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				set: { active: true },
+				returning: ['*'],
+			};
+			const result = adapter.compileUpdate(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('returning');
+		});
+
+		it('compiles UPDATE with schema scoping', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({
+				schemaName: 'tenant_upd',
+			});
+			const intent = {
+				table: 'users',
+				set: { name: 'X' },
+			};
+			const result = adapter.compileUpdate(intent as any);
+			expect(result.sql).toContain('tenant_upd');
+		});
+
+		it('compiles UPDATE with schema from compile options', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				set: { name: 'X' },
+			};
+			const result = adapter.compileUpdate(intent as any, {
+				schemaName: 'upd_schema',
+			});
+			expect(result.sql).toContain('upd_schema');
+		});
+	});
+
+	describe('compileDelete', () => {
+		it('compiles a basic DELETE', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = { table: 'users' };
+			const result = adapter.compileDelete(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('delete');
+			expect(sql).toContain('users');
+		});
+
+		it('compiles DELETE with WHERE clause', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				where: { kind: 'comparison', field: 'id', operator: 'eq', value: 99 },
+			};
+			const result = adapter.compileDelete(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('delete');
+			expect(sql).toContain('where');
+		});
+
+		it('compiles DELETE with RETURNING', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				where: { kind: 'comparison', field: 'id', operator: 'eq', value: 1 },
+				returning: ['id'],
+			};
+			const result = adapter.compileDelete(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('returning');
+		});
+
+		it('compiles DELETE with schema scoping', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({
+				schemaName: 'tenant_del',
+			});
+			const intent = { table: 'users' };
+			const result = adapter.compileDelete(intent as any);
+			expect(result.sql).toContain('tenant_del');
+		});
+
+		it('compiles DELETE with schema from compile options', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = { table: 'users' };
+			const result = adapter.compileDelete(intent as any, {
+				schemaName: 'del_schema',
+			});
+			expect(result.sql).toContain('del_schema');
+		});
+	});
+
+	describe('compileUpsert', () => {
+		it('compiles upsert with doNothing action', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				values: [{ id: 1, name: 'Alice' }],
+				onConflict: { columns: ['id'] },
+				action: { type: 'doNothing' },
+			};
+			const result = adapter.compileUpsert(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('insert');
+			expect(sql).toContain('on conflict');
+			expect(sql).toContain('do nothing');
+		});
+
+		it('compiles upsert with doUpdate action (implicit update columns)', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				values: [{ id: 1, name: 'Alice', email: 'alice@ex.com' }],
+				onConflict: { columns: ['id'] },
+				action: { type: 'doUpdate' },
+			};
+			const result = adapter.compileUpsert(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('on conflict');
+			expect(sql).toContain('do update');
+		});
+
+		it('compiles upsert with doUpdate and explicit set', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				values: [{ id: 1, name: 'Alice' }],
+				onConflict: { columns: ['id'] },
+				action: { type: 'doUpdate', set: { name: 'Bob' } },
+			};
+			const result = adapter.compileUpsert(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('do update');
+		});
+
+		it('compiles upsert with constraint-based conflict', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				values: [{ id: 1, name: 'Alice' }],
+				onConflict: { constraint: 'users_pkey' },
+				action: { type: 'doNothing' },
+			};
+			const result = adapter.compileUpsert(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('on conflict');
+		});
+
+		it('compiles upsert with RETURNING', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				values: [{ id: 1, name: 'Alice' }],
+				onConflict: { columns: ['id'] },
+				action: { type: 'doNothing' },
+				returning: ['id'],
+			};
+			const result = adapter.compileUpsert(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('returning');
+		});
+
+		it('compiles upsert with schema scoping', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({
+				schemaName: 'tenant_ups',
+			});
+			const intent = {
+				table: 'users',
+				values: [{ id: 1, name: 'A' }],
+				onConflict: { columns: ['id'] },
+				action: { type: 'doNothing' },
+			};
+			const result = adapter.compileUpsert(intent as any);
+			expect(result.sql).toContain('tenant_ups');
+		});
+	});
+
+	describe('compileInsertFrom', () => {
+		it('compiles INSERT FROM SELECT', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'archive_users',
+				source: 'users',
+				columns: ['name', 'email'],
+			};
+			const result = adapter.compileInsertFrom(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('insert');
+			expect(sql).toContain('select');
+		});
+
+		it('compiles INSERT FROM with WHERE', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'archive_users',
+				source: 'users',
+				columns: ['name'],
+				where: {
+					kind: 'comparison',
+					field: 'active',
+					operator: 'eq',
+					value: false,
+				},
+			};
+			const result = adapter.compileInsertFrom(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('where');
+		});
+
+		it('compiles INSERT FROM with LIMIT', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'archive_users',
+				source: 'users',
+				limit: 100,
+			};
+			const result = adapter.compileInsertFrom(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('limit');
+		});
+
+		it('compiles INSERT FROM with RETURNING', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'archive_users',
+				source: 'users',
+				returning: ['id'],
+			};
+			const result = adapter.compileInsertFrom(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('returning');
+		});
+
+		it('compiles INSERT FROM with schema scoping', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({
+				schemaName: 'tenant_if',
+			});
+			const intent = {
+				table: 'archive_users',
+				source: 'users',
+			};
+			const result = adapter.compileInsertFrom(intent as any);
+			expect(result.sql).toContain('tenant_if');
+		});
+	});
+
+	describe('compileUpsertFrom', () => {
+		it('compiles UPSERT FROM SELECT', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				source: 'staging_users',
+				conflictColumns: ['email'],
+				columns: ['name', 'email'],
+			};
+			const result = adapter.compileUpsertFrom(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('insert');
+			expect(sql).toContain('on conflict');
+		});
+
+		it('compiles UPSERT FROM with WHERE', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const intent = {
+				table: 'users',
+				source: 'staging',
+				conflictColumns: ['email'],
+				columns: ['name', 'email'],
+				where: {
+					kind: 'comparison',
+					field: 'active',
+					operator: 'eq',
+					value: true,
+				},
+			};
+			const result = adapter.compileUpsertFrom(intent as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('where');
+		});
+
+		it('compiles UPSERT FROM with schema', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({
+				schemaName: 'tenant_uf',
+			});
+			const intent = {
+				table: 'users',
+				source: 'staging',
+				conflictColumns: ['email'],
+				columns: ['name', 'email'],
+			};
+			const result = adapter.compileUpsertFrom(intent as any);
+			expect(result.sql).toContain('tenant_uf');
+		});
+	});
+
+	describe('compileRecursive', () => {
+		it('compiles adjacency-list descendant traversal', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const report = {
+				intent: {
+					cteName: 'tree_cte',
+					maxDepth: 10,
+					track: {},
+					start: {
+						select: ['name'],
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parent_id',
+						direction: 'descendants',
+					},
+				},
+			};
+			const model = {} as any;
+			const result = adapter.compileRecursive(report as any, model);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('with recursive');
+			expect(sql).toContain('categories');
+		});
+
+		it('compiles adjacency-list ancestor traversal', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const report = {
+				intent: {
+					cteName: 'anc_cte',
+					maxDepth: 5,
+					track: {},
+					start: {
+						select: ['name'],
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parent_id',
+						direction: 'ancestors',
+					},
+				},
+			};
+			const result = adapter.compileRecursive(report as any, {} as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('with recursive');
+		});
+
+		it('compiles edge-table traversal', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const report = {
+				intent: {
+					cteName: 'graph_cte',
+					maxDepth: 3,
+					track: {},
+					start: {
+						select: ['name'],
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'edge-table',
+						nodeTable: 'nodes',
+						nodeId: 'id',
+						edgeTable: 'edges',
+						edgeFrom: 'from_id',
+						edgeTo: 'to_id',
+						direction: 'out',
+					},
+				},
+			};
+			const result = adapter.compileRecursive(report as any, {} as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('with recursive');
+			expect(sql).toContain('edges');
+		});
+
+		it('compiles edge-table with bidirectional direction', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const report = {
+				intent: {
+					cteName: 'bidir_cte',
+					maxDepth: 5,
+					track: {},
+					start: {
+						select: [],
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'edge-table',
+						nodeTable: 'nodes',
+						nodeId: 'id',
+						edgeTable: 'edges',
+						edgeFrom: 'from_id',
+						edgeTo: 'to_id',
+						direction: 'both',
+						edgeStorageHint: 'directed-only',
+					},
+				},
+			};
+			const result = adapter.compileRecursive(report as any, {} as any);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('with recursive');
+		});
+
+		it('compiles recursive with track depth', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const report = {
+				intent: {
+					cteName: 'depth_cte',
+					maxDepth: 10,
+					track: { depth: { as: 'level' } },
+					start: {
+						select: ['name'],
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parent_id',
+						direction: 'descendants',
+					},
+				},
+			};
+			const result = adapter.compileRecursive(report as any, {} as any);
+			expect(result.sql).toContain('level');
+		});
+
+		it('compiles recursive with track path', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const report = {
+				intent: {
+					cteName: 'path_cte',
+					maxDepth: 10,
+					track: { path: { as: 'trail' } },
+					start: {
+						select: ['name'],
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parent_id',
+						direction: 'descendants',
+					},
+				},
+			};
+			const result = adapter.compileRecursive(report as any, {} as any);
+			expect(result.sql).toContain('trail');
+		});
+
+		it('compiles recursive with schema scoping', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({
+				schemaName: 'tenant_rec',
+			});
+			const report = {
+				intent: {
+					cteName: 'r_cte',
+					maxDepth: 5,
+					track: {},
+					start: {
+						select: [],
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'adjacency',
+						nodeTable: 'categories',
+						nodeId: 'id',
+						parentId: 'parent_id',
+						direction: 'descendants',
+					},
+				},
+			};
+			const result = adapter.compileRecursive(report as any, {} as any);
+			expect(result.sql).toContain('tenant_rec');
+		});
+
+		it('throws for unsupported traversal kind', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const report = {
+				intent: {
+					cteName: 'custom_cte',
+					maxDepth: 5,
+					track: {},
+					start: {
+						select: [],
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'custom',
+						nodeTable: 'nodes',
+						nodeId: 'id',
+					},
+				},
+			};
+			expect(() => adapter.compileRecursive(report as any, {} as any)).toThrow(
+				/Unsupported traversal kind/,
+			);
+		});
+
+		it('compiles edge-table with anchor WHERE', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const report = {
+				intent: {
+					cteName: 'anchor_cte',
+					maxDepth: 5,
+					track: {},
+					start: {
+						select: ['name'],
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						where: {
+							kind: 'comparison',
+							field: 'active',
+							operator: 'eq',
+							value: true,
+						},
+					},
+					traversal: {
+						kind: 'edge-table',
+						nodeTable: 'nodes',
+						nodeId: 'id',
+						edgeTable: 'edges',
+						edgeFrom: 'from_id',
+						edgeTo: 'to_id',
+						direction: 'out',
+					},
+				},
+			};
+			const result = adapter.compileRecursive(report as any, {} as any);
+			expect(result.sql).toBeDefined();
+		});
+
+		it('compiles edge-table with "in" direction (swaps edgeFrom/edgeTo)', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const report = {
+				intent: {
+					cteName: 'in_cte',
+					maxDepth: 5,
+					track: {},
+					start: {
+						select: [],
+						nodeIdExpr: { kind: 'column', name: 'id' },
+					},
+					traversal: {
+						kind: 'edge-table',
+						nodeTable: 'nodes',
+						nodeId: 'id',
+						edgeTable: 'edges',
+						edgeFrom: 'from_id',
+						edgeTo: 'to_id',
+						direction: 'in',
+					},
+				},
+			};
+			const result = adapter.compileRecursive(report as any, {} as any);
+			expect(result.sql).toBeDefined();
+		});
+	});
+
+	describe('buildRecursiveAnchorWhere - edge cases', () => {
+		it('handles AND condition with single item', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const report = {
+				intent: {
+					cteName: 'and_cte',
+					maxDepth: 5,
+					track: {},
+					start: {
+						select: [],
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						where: {
+							kind: 'and',
+							conditions: [
+								{ kind: 'comparison', field: 'x', operator: 'eq', value: 1 },
+							],
+						},
+					},
+					traversal: {
+						kind: 'edge-table',
+						nodeTable: 'nodes',
+						nodeId: 'id',
+						edgeTable: 'edges',
+						edgeFrom: 'from_id',
+						edgeTo: 'to_id',
+						direction: 'out',
+					},
+				},
+			};
+			const result = adapter.compileRecursive(report as any, {} as any);
+			expect(result.sql).toBeDefined();
+		});
+
+		it('handles OR condition with multiple items', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const report = {
+				intent: {
+					cteName: 'or_cte',
+					maxDepth: 5,
+					track: {},
+					start: {
+						select: [],
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						where: {
+							kind: 'or',
+							conditions: [
+								{ kind: 'comparison', field: 'x', operator: 'eq', value: 1 },
+								{ kind: 'comparison', field: 'y', operator: 'eq', value: 2 },
+							],
+						},
+					},
+					traversal: {
+						kind: 'edge-table',
+						nodeTable: 'nodes',
+						nodeId: 'id',
+						edgeTable: 'edges',
+						edgeFrom: 'from_id',
+						edgeTo: 'to_id',
+						direction: 'out',
+					},
+				},
+			};
+			const result = adapter.compileRecursive(report as any, {} as any);
+			expect(result.sql).toBeDefined();
+		});
+
+		it('handles unknown kind with fallback to TRUE', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const report = {
+				intent: {
+					cteName: 'unk_cte',
+					maxDepth: 5,
+					track: {},
+					start: {
+						select: [],
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						where: { kind: 'unknown_kind' },
+					},
+					traversal: {
+						kind: 'edge-table',
+						nodeTable: 'nodes',
+						nodeId: 'id',
+						edgeTable: 'edges',
+						edgeFrom: 'from_id',
+						edgeTo: 'to_id',
+						direction: 'out',
+					},
+				},
+			};
+			const result = adapter.compileRecursive(report as any, {} as any);
+			expect(result.sql).toBeDefined();
+		});
+
+		it('handles null/undefined where with fallback to TRUE', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const report = {
+				intent: {
+					cteName: 'null_cte',
+					maxDepth: 5,
+					track: {},
+					start: {
+						select: [],
+						nodeIdExpr: { kind: 'column', name: 'id' },
+						where: null,
+					},
+					traversal: {
+						kind: 'edge-table',
+						nodeTable: 'nodes',
+						nodeId: 'id',
+						edgeTable: 'edges',
+						edgeFrom: 'from_id',
+						edgeTo: 'to_id',
+						direction: 'out',
+					},
+				},
+			};
+			// null where means no anchorWhere → should still compile
+			const result = adapter.compileRecursive(report as any, {} as any);
+			expect(result.sql).toBeDefined();
+		});
+	});
+
+	describe('compileSubqueryInclude', () => {
+		it('compiles simple subquery include for single FK', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const info = {
+				relationName: 'posts',
+				targetTable: 'posts',
+				foreignKey: 'author_id',
+				sourceKey: 'id',
+				sourceTable: 'users',
+			};
+			const result = adapter.compileSubqueryInclude(info as any, [1, 2, 3]);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('select');
+			expect(sql).toContain('posts');
+			expect(sql).toContain('in');
+			expect(result.parameters).toEqual([1, 2, 3]);
+		});
+
+		it('returns WHERE FALSE for empty parentIds', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const info = {
+				relationName: 'posts',
+				targetTable: 'posts',
+				foreignKey: 'author_id',
+				sourceKey: 'id',
+				sourceTable: 'users',
+			};
+			const result = adapter.compileSubqueryInclude(info as any, []);
+			expect(result.sql).toContain('WHERE FALSE');
+			expect(result.parameters).toEqual([]);
+		});
+
+		it('returns WHERE FALSE with schema for empty parentIds', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({
+				schemaName: 'tenant_sq',
+			});
+			const info = {
+				relationName: 'posts',
+				targetTable: 'posts',
+				foreignKey: 'author_id',
+				sourceKey: 'id',
+				sourceTable: 'users',
+			};
+			const result = adapter.compileSubqueryInclude(info as any, []);
+			expect(result.sql).toContain('tenant_sq');
+			expect(result.sql).toContain('WHERE FALSE');
+		});
+
+		it('compiles composite FK with multiple parent IDs', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const info = {
+				relationName: 'items',
+				targetTable: 'items',
+				foreignKey: ['org_id', 'user_id'],
+				sourceKey: 'id',
+				sourceTable: 'users',
+			};
+			const result = adapter.compileSubqueryInclude(info as any, [
+				[1, 'a'],
+				[2, 'b'],
+			]);
+			expect(result.parameters).toHaveLength(4);
+		});
+
+		it('compiles composite FK with single parent ID', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const info = {
+				relationName: 'items',
+				targetTable: 'items',
+				foreignKey: ['org_id', 'user_id'],
+				sourceKey: 'id',
+				sourceTable: 'users',
+			};
+			const result = adapter.compileSubqueryInclude(info as any, [[1, 'a']]);
+			expect(result.parameters).toHaveLength(2);
+		});
+
+		it('compiles M:N subquery include via junction table', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const info = {
+				relationName: 'tags',
+				targetTable: 'tags',
+				foreignKey: 'tag_id',
+				sourceKey: 'id',
+				sourceTable: 'posts',
+				through: 'post_tags',
+				throughSourceKey: 'post_id',
+				throughTargetKey: 'tag_id',
+			};
+			const result = adapter.compileSubqueryInclude(info as any, [1, 2]);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('join');
+			expect(sql).toContain('post_tags');
+			expect(result.parameters).toEqual([1, 2]);
+		});
+
+		it('compiles subquery include with schema', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({
+				schemaName: 'tenant_sqi',
+			});
+			const info = {
+				relationName: 'posts',
+				targetTable: 'posts',
+				foreignKey: 'author_id',
+				sourceKey: 'id',
+				sourceTable: 'users',
+			};
+			const result = adapter.compileSubqueryInclude(info as any, [1]);
+			expect(result.sql).toContain('tenant_sqi');
+		});
+	});
+
+	describe('compileWithIncludes - subquery includes', () => {
+		it('extracts subquery include info from decisions', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'users',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{
+						type: 'include-strategy',
+						choice: 'subquery',
+						context: {
+							relation: 'posts',
+							target: 'posts',
+							relationType: 'hasMany',
+						},
+					},
+				],
+			} as any;
+			const result = adapter.compileWithIncludes(plan);
+			expect(result.subqueryIncludes).toHaveLength(1);
+			expect(result.subqueryIncludes[0].relationName).toBe('posts');
+			expect(result.subqueryIncludes[0].targetTable).toBe('posts');
+		});
+
+		it('skips include-strategy decisions that are not subquery', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'users',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{
+						type: 'include-strategy',
+						choice: 'json_agg',
+						context: {
+							relation: 'posts',
+							target: 'posts',
+						},
+					},
+				],
+			} as any;
+			const result = adapter.compileWithIncludes(plan);
+			expect(result.subqueryIncludes).toHaveLength(0);
+		});
+
+		it('skips subquery decisions with no target', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'users',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{
+						type: 'include-strategy',
+						choice: 'subquery',
+						context: { relation: 'posts' },
+					},
+				],
+			} as any;
+			const result = adapter.compileWithIncludes(plan);
+			expect(result.subqueryIncludes).toHaveLength(0);
+		});
+
+		it('uses includeAlias when available', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'users',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{
+						type: 'include-strategy',
+						choice: 'subquery',
+						context: {
+							relation: 'posts',
+							target: 'posts',
+							includeAlias: 'myPosts',
+							relationType: 'hasMany',
+						},
+					},
+				],
+			} as any;
+			const result = adapter.compileWithIncludes(plan);
+			expect(result.subqueryIncludes[0].relationName).toBe('myPosts');
+		});
+
+		it('handles belongsTo relation type (swaps sourceKey/foreignKey)', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'posts',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{
+						type: 'include-strategy',
+						choice: 'subquery',
+						context: {
+							relation: 'author',
+							target: 'users',
+							relationType: 'belongsTo',
+						},
+					},
+				],
+			} as any;
+			const result = adapter.compileWithIncludes(plan);
+			expect(result.subqueryIncludes[0].foreignKey).toBe('id');
+		});
+	});
+
+	describe('createDump', () => {
+		it('creates a dump with minimal meta', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = { rootTable: 'users', decisions: [] } as any;
+			const query = { sql: 'SELECT 1', parameters: [] };
+			const dump = adapter.createDump(plan, query);
+
+			expect(dump.sql).toBe('SELECT 1');
+			expect(dump.params).toEqual([]);
+			expect(dump.plan).toBe(plan);
+			expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
+		});
+
+		it('creates dump with schema in meta', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({
+				schemaName: 'tenant_dump',
+			});
+			const plan = { rootTable: 'users', decisions: [] } as any;
+			const query = { sql: 'SELECT 1', parameters: [] };
+			const dump = adapter.createDump(plan, query);
+
+			expect(dump.meta?.schema).toBe('tenant_dump');
+		});
+
+		it('creates dump with custom meta overrides', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = { rootTable: 'users', decisions: [] } as any;
+			const query = { sql: 'SELECT 1', parameters: [] };
+			const dump = adapter.createDump(plan, query, {
+				queryName: 'test-query',
+				correlationId: 'abc-123',
+			});
+
+			expect(dump.meta?.queryName).toBe('test-query');
+			expect(dump.meta?.correlationId).toBe('abc-123');
+		});
+	});
+
+	describe('error paths - compile-only adapter', () => {
+		it('throws on execute', async () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			await expect(
+				adapter.execute({ sql: 'SELECT 1', parameters: [] }),
+			).rejects.toThrow(/compile-only mode/);
+		});
+
+		it('throws on executeOne', async () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			await expect(
+				adapter.executeOne({ sql: 'SELECT 1', parameters: [] }),
+			).rejects.toThrow(/compile-only mode/);
+		});
+
+		it('throws on executeRaw', async () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			await expect(adapter.executeRaw('SELECT 1')).rejects.toThrow(
+				/compile-only mode/,
+			);
+		});
+
+		it('throws on getPoolInstance', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			expect(() => adapter.getPoolInstance()).toThrow(/compile-only mode/);
+		});
+
+		it('throws on introspect', async () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			await expect(adapter.introspect()).rejects.toThrow(/compile-only/);
+		});
+
+		it('throws on transaction', async () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			await expect(adapter.transaction(async () => 'x')).rejects.toThrow(
+				/compile-only mode/,
+			);
+		});
+
+		it('stream throws on compile-only adapter', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const iter = adapter.stream({ sql: 'SELECT 1', parameters: [] });
+			// The generator should throw when iterated
+			expect(iter.next()).rejects.toThrow(/compile-only mode/);
+		});
+	});
+
+	describe('validateIdentifier', () => {
+		it('accepts valid identifier', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			expect(() => adapter.validateIdentifier('users', 'table')).not.toThrow();
+		});
+
+		it('rejects SQL injection in identifier', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			expect(() =>
+				adapter.validateIdentifier('users"; DROP TABLE--', 'table'),
+			).toThrow();
+		});
+	});
+
+	describe('compile - lock mode variants', () => {
+		it('compiles FOR UPDATE via legacy plan', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'jobs',
+				intent: {
+					type: 'query',
+					table: 'jobs',
+					select: { type: 'all' },
+					lock: { strength: 'forUpdate', waitPolicy: 'block' },
+				},
+				decisions: [],
+			} as any;
+			const result = adapter.compile(plan);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('for update');
+		});
+
+		it('compiles FOR SHARE with skipLocked via intent', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'jobs',
+				intent: {
+					type: 'query',
+					table: 'jobs',
+					select: { type: 'all' },
+					lock: { strength: 'forShare', waitPolicy: 'skipLocked' },
+				},
+				decisions: [],
+			} as any;
+			const result = adapter.compile(plan);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('for share');
+			expect(sql).toContain('skip locked');
+		});
+
+		it('compiles FOR NO KEY UPDATE with noWait via intent', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'items',
+				intent: {
+					type: 'query',
+					table: 'items',
+					select: { type: 'all' },
+					lock: { strength: 'forNoKeyUpdate', waitPolicy: 'noWait' },
+				},
+				decisions: [],
+			} as any;
+			const result = adapter.compile(plan);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('for no key update');
+			expect(sql).toContain('nowait');
+		});
+
+		it('compiles FOR KEY SHARE via intent', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'posts',
+				intent: {
+					type: 'query',
+					table: 'posts',
+					select: { type: 'all' },
+					lock: { strength: 'forKeyShare', waitPolicy: 'block' },
+				},
+				decisions: [],
+			} as any;
+			const result = adapter.compile(plan);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('for key share');
+		});
+	});
+
+	describe('compile - existsWrap via intent', () => {
+		it('wraps select in EXISTS when intent has existsWrap', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'users',
+				intent: {
+					type: 'query',
+					table: 'users',
+					select: { type: 'all' },
+					existsWrap: true,
+				},
+				decisions: [],
+			} as any;
+			const result = adapter.compile(plan);
+			const sql = result.sql.toLowerCase();
+			expect(sql).toContain('exists');
+		});
+	});
+
+	describe('compile - dbCasing variants', () => {
+		it('compiles with snake_case naming', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({
+				dbCasing: 'snake_case',
+			});
+			const plan = {
+				rootTable: 'users',
+				decisions: [{ type: 'select', column: '*' }],
+			} as any;
+			const result = adapter.compile(plan);
+			expect(result.sql).toContain('SELECT');
+		});
+
+		it('compiles with camelCase naming', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({
+				dbCasing: 'camelCase',
+			});
+			const plan = {
+				rootTable: 'users',
+				decisions: [{ type: 'select', column: '*' }],
+			} as any;
+			const result = adapter.compile(plan);
+			expect(result.sql).toContain('SELECT');
+		});
+	});
+
+	describe('generateDDL', () => {
+		it('generates DDL from a simple model', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const model = {
+				tables: new Map([
+					[
+						'users',
+						{
+							name: 'users',
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								{ name: 'name', type: 'text', nullable: false },
+							],
+							primaryKey: { columns: ['id'] },
+							foreignKeys: [],
+							indexes: [],
+						},
+					],
+				]),
+				relations: new Map(),
+				getTable: function (n) {
+					return this.tables.get(n);
+				},
+				getRelation: () => undefined,
+			} as any;
+
+			const ddl = adapter.generateDDL(model);
+			expect(ddl.length).toBeGreaterThan(0);
+			expect(ddl.some((s) => s.toLowerCase().includes('create table'))).toBe(
+				true,
+			);
+		});
+
+		it('generates DDL with schema name', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({
+				schemaName: 'tenant_ddl',
+			});
+			const model = {
+				tables: new Map([
+					[
+						'users',
+						{
+							name: 'users',
+							columns: [{ name: 'id', type: 'integer', nullable: false }],
+							primaryKey: { columns: ['id'] },
+							foreignKeys: [],
+							indexes: [],
+						},
+					],
+				]),
+				relations: new Map(),
+				getTable: function (n) {
+					return this.tables.get(n);
+				},
+				getRelation: () => undefined,
+			} as any;
+
+			const ddl = adapter.generateDDL(model);
+			expect(ddl.some((s) => s.includes('tenant_ddl'))).toBe(true);
+		});
+	});
+
+	// ==========================================================================
+	// NEW COVERAGE: intent-based compile path branches
+	// ==========================================================================
+
+	describe('compile — intent path with model (column validation)', () => {
+		it('throws when include has invalid columns in target table', () => {
+			const model = {
+				tables: new Map([
+					[
+						'posts',
+						{
+							name: 'posts',
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								{ name: 'author_id', type: 'integer', nullable: false },
+							],
+							primaryKey: { columns: ['id'] },
+							foreignKeys: [],
+							indexes: [],
+						},
+					],
+					[
+						'users',
+						{
+							name: 'users',
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								{ name: 'name', type: 'text', nullable: false },
+							],
+							primaryKey: { columns: ['id'] },
+							foreignKeys: [],
+							indexes: [],
+						},
+					],
+				]),
+				relations: new Map(),
+				getTable: function (n) {
+					return this.tables.get(n);
+				},
+				getRelation: () => undefined,
+			} as any;
+
+			// Use intent path: plan.intent triggers intentToDecisions which produces
+			// selectRelationColumn decisions. plan.decisions contains planner output
+			// (include-strategy) consumed by extractAllIncludeDecisions.
+			const adapter = createPgsqlCompileOnlyAdapter({ model });
+			const plan = {
+				rootTable: 'posts',
+				// Planner decisions: include-strategy produces includeStrategy decisions
+				decisions: [
+					{
+						type: 'include-strategy',
+						choice: 'json_agg',
+						context: {
+							relation: 'author',
+							target: 'users',
+							relationType: 'belongsTo',
+							sourceTable: 'posts',
+						},
+					},
+				],
+				// Intent triggers intentToDecisions to produce selectRelationColumn
+				intent: {
+					type: 'query',
+					table: 'posts',
+					select: {
+						type: 'expressions',
+						columns: [
+							{ kind: 'column', column: 'id' },
+							{
+								kind: 'relationColumn',
+								relation: 'author',
+								column: 'name',
+							},
+							{
+								kind: 'relationColumn',
+								relation: 'author',
+								column: 'NONEXISTENT',
+							},
+						],
+					},
+				},
+			} as any;
+
+			expect(() => adapter.compile(plan, { model })).toThrow('Unknown column');
+		});
+
+		it('compiles with range type enrichment from model', () => {
+			const model = {
+				tables: new Map([
+					[
+						'events',
+						{
+							name: 'events',
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								{ name: 'period', type: 'daterange', nullable: true },
+							],
+							primaryKey: { columns: ['id'] },
+							foreignKeys: [],
+							indexes: [],
+						},
+					],
+				]),
+				relations: new Map(),
+				getTable: function (n) {
+					return this.tables.get(n);
+				},
+				getRelation: () => undefined,
+			} as any;
+
+			const adapter = createPgsqlCompileOnlyAdapter({ model });
+			const plan = {
+				rootTable: 'events',
+				decisions: [],
+				intent: {
+					type: 'query',
+					table: 'events',
+					select: { fields: ['id'] },
+					where: {
+						kind: 'range',
+						field: 'period',
+						operator: 'contains',
+						value: '2024-01-01',
+					},
+				},
+			} as any;
+
+			// Should not throw — enrichment adds dataType to the decision
+			const result = adapter.compile(plan, { model });
+			expect(result.sql).toContain('SELECT');
+		});
+	});
+
+	describe('compile — intent path with relationColumnsMap', () => {
+		it('deduplicates selectRelationColumn when covered by include', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'posts',
+				decisions: [
+					{
+						type: 'include-strategy',
+						choice: 'json_agg',
+						context: {
+							relation: 'author',
+							target: 'users',
+							relationType: 'belongsTo',
+							sourceTable: 'posts',
+						},
+					},
+				],
+				intent: {
+					type: 'query',
+					table: 'posts',
+					select: {
+						fields: [
+							'id',
+							{ kind: 'relationColumn', relation: 'author', column: 'name' },
+							{
+								kind: 'relationColumn',
+								relation: 'author',
+								column: 'email',
+							},
+						],
+					},
+					include: [{ relation: 'author' }],
+				},
+			} as any;
+
+			const result = adapter.compile(plan);
+			expect(result.sql).toContain('SELECT');
+		});
+
+		it('keeps selectRelationColumn when no include covers the relation', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'posts',
+				decisions: [],
+				intent: {
+					type: 'query',
+					table: 'posts',
+					select: {
+						fields: [
+							'id',
+							{ kind: 'relationColumn', relation: 'author', column: 'name' },
+						],
+					},
+				},
+			} as any;
+
+			const result = adapter.compile(plan);
+			expect(result.sql).toContain('SELECT');
+		});
+
+		it('handles wildcard column in selectRelationColumn dedup', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'posts',
+				decisions: [
+					{
+						type: 'include-strategy',
+						choice: 'json_agg',
+						context: {
+							relation: 'author',
+							target: 'users',
+							relationType: 'belongsTo',
+							sourceTable: 'posts',
+						},
+					},
+				],
+				intent: {
+					type: 'query',
+					table: 'posts',
+					select: {
+						fields: [
+							'id',
+							{ kind: 'relationColumn', relation: 'author', column: '*' },
+						],
+					},
+					include: [{ relation: 'author' }],
+				},
+			} as any;
+
+			const result = adapter.compile(plan);
+			expect(result.sql).toContain('SELECT');
+		});
+	});
+
+	describe('getColumnTypes — coverage', () => {
+		it('returns undefined when model is absent', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			// getColumnTypes is private, but exercised through compileInsert
+			const result = adapter.compileInsert({
+				type: 'insert',
+				table: 'users',
+				values: [{ name: 'alice' }],
+			} as any);
+			expect(result.sql).toContain('INSERT');
+		});
+
+		it('returns undefined when table not found in model', () => {
+			const model = {
+				tables: new Map(),
+				relations: new Map(),
+				getTable: () => undefined,
+				getRelation: () => undefined,
+			} as any;
+
+			const adapter = createPgsqlCompileOnlyAdapter({ model });
+			const result = adapter.compileInsert({
+				type: 'insert',
+				table: 'unknown_table',
+				values: [{ foo: 'bar' }],
+			} as any);
+			expect(result.sql).toContain('INSERT');
+		});
+
+		it('detects range type columns', () => {
+			const model = {
+				tables: new Map([
+					[
+						'events',
+						{
+							name: 'events',
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								{ name: 'period', type: 'daterange', nullable: true },
+								{ name: 'title', type: 'text', nullable: false },
+							],
+							primaryKey: { columns: ['id'] },
+							foreignKeys: [],
+							indexes: [],
+						},
+					],
+				]),
+				relations: new Map(),
+				getTable: function (n) {
+					return this.tables.get(n);
+				},
+				getRelation: () => undefined,
+			} as any;
+
+			const adapter = createPgsqlCompileOnlyAdapter({ model });
+			const result = adapter.compileInsert({
+				type: 'insert',
+				table: 'events',
+				values: [{ id: 1, period: '[2024-01-01,2024-12-31]', title: 'Test' }],
+			} as any);
+			expect(result.sql).toContain('INSERT');
+			// Range type should be cast
+			expect(result.sql).toContain('daterange');
+		});
+	});
+
+	describe('compileUpsertFrom — columns from model', () => {
+		it('derives columns from model when not specified', () => {
+			const model = {
+				tables: new Map([
+					[
+						'users',
+						{
+							name: 'users',
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								{ name: 'name', type: 'text', nullable: false },
+								{ name: 'email', type: 'text', nullable: true },
+							],
+							primaryKey: { columns: ['id'] },
+							foreignKeys: [],
+							indexes: [],
+						},
+					],
+				]),
+				relations: new Map(),
+				getTable: function (n) {
+					return this.tables.get(n);
+				},
+				getRelation: () => undefined,
+			} as any;
+
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const result = adapter.compileUpsertFrom(
+				{
+					type: 'upsertFrom',
+					table: 'users',
+					source: 'staging_users',
+					conflictColumns: ['id'],
+				} as any,
+				{ model },
+			);
+			expect(result.sql).toContain('INSERT');
+			expect(result.sql).toContain('ON CONFLICT');
+		});
+
+		it('uses explicit columns when provided', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const result = adapter.compileUpsertFrom({
+				type: 'upsertFrom',
+				table: 'users',
+				source: 'staging_users',
+				conflictColumns: ['id'],
+				columns: ['id', 'name'],
+			} as any);
+			expect(result.sql).toContain('INSERT');
+		});
+
+		it('compiles with where and limit', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const result = adapter.compileUpsertFrom({
+				type: 'upsertFrom',
+				table: 'users',
+				source: 'staging_users',
+				conflictColumns: ['id'],
+				columns: ['id', 'name'],
+				where: {
+					kind: 'comparison',
+					field: 'active',
+					operator: 'eq',
+					value: true,
+				},
+				limit: 100,
+				returning: ['id'],
+			} as any);
+			expect(result.sql).toContain('INSERT');
+			expect(result.sql).toContain('LIMIT');
+			expect(result.sql).toContain('RETURNING');
+		});
+	});
+
+	describe('compileWithIncludes — subquery include branches', () => {
+		it('includes relationType in entry', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'authors',
+				decisions: [
+					{
+						type: 'include-strategy',
+						choice: 'subquery',
+						context: {
+							relation: 'posts',
+							target: 'posts',
+							relationType: 'hasMany',
+							sourceTable: 'authors',
+						},
+					},
+				],
+				intent: {
+					type: 'query',
+					table: 'authors',
+					select: { fields: ['id'] },
+					include: [{ relation: 'posts' }],
+				},
+			} as any;
+
+			const result = adapter.compileWithIncludes(plan);
+			expect(result.subqueryIncludes.length).toBe(1);
+			expect(result.subqueryIncludes[0].relationType).toBe('hasMany');
+		});
+
+		it('passes through includeIntent.select', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'authors',
+				decisions: [
+					{
+						type: 'include-strategy',
+						choice: 'subquery',
+						context: {
+							relation: 'posts',
+							target: 'posts',
+							relationType: 'hasMany',
+							sourceTable: 'authors',
+						},
+					},
+				],
+				intent: {
+					type: 'query',
+					table: 'authors',
+					select: { fields: ['id'] },
+					include: [
+						{
+							relation: 'posts',
+							select: { fields: ['title', 'body'] },
+						},
+					],
+				},
+			} as any;
+
+			const result = adapter.compileWithIncludes(plan);
+			expect(result.subqueryIncludes[0].select).toEqual({
+				fields: ['title', 'body'],
+			});
+		});
+
+		it('passes through includeIntent.where', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'authors',
+				decisions: [
+					{
+						type: 'include-strategy',
+						choice: 'subquery',
+						context: {
+							relation: 'posts',
+							target: 'posts',
+							relationType: 'hasMany',
+							sourceTable: 'authors',
+						},
+					},
+				],
+				intent: {
+					type: 'query',
+					table: 'authors',
+					select: { fields: ['id'] },
+					include: [
+						{
+							relation: 'posts',
+							where: {
+								kind: 'comparison',
+								field: 'active',
+								operator: 'eq',
+								value: true,
+							},
+						},
+					],
+				},
+			} as any;
+
+			const result = adapter.compileWithIncludes(plan);
+			expect(result.subqueryIncludes[0].where).toBeDefined();
+		});
+
+		it('derives FK for belongsTo relation', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'posts',
+				decisions: [
+					{
+						type: 'include-strategy',
+						choice: 'subquery',
+						context: {
+							relation: 'author',
+							target: 'users',
+							relationType: 'belongsTo',
+							sourceTable: 'posts',
+						},
+					},
+				],
+				intent: {
+					type: 'query',
+					table: 'posts',
+					select: { fields: ['id'] },
+					include: [{ relation: 'author' }],
+				},
+			} as any;
+
+			const result = adapter.compileWithIncludes(plan);
+			expect(result.subqueryIncludes[0].sourceKey).not.toBe('id');
+			expect(result.subqueryIncludes[0].foreignKey).toBe('id');
+		});
+
+		it('uses includeAlias as relationName', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'posts',
+				decisions: [
+					{
+						type: 'include-strategy',
+						choice: 'subquery',
+						context: {
+							relation: 'author',
+							includeAlias: 'authorInfo',
+							target: 'users',
+							relationType: 'belongsTo',
+							sourceTable: 'posts',
+						},
+					},
+				],
+				intent: {
+					type: 'query',
+					table: 'posts',
+					select: { fields: ['id'] },
+					include: [{ relation: 'authorInfo' }],
+				},
+			} as any;
+
+			const result = adapter.compileWithIncludes(plan);
+			expect(result.subqueryIncludes[0].relationName).toBe('authorInfo');
+		});
+	});
+
+	describe('compileInsertFrom — coverage', () => {
+		it('compiles insert-from with columns, where, limit, returning', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const result = adapter.compileInsertFrom({
+				type: 'insertFrom',
+				table: 'archive',
+				source: 'posts',
+				columns: ['id', 'title'],
+				where: {
+					kind: 'comparison',
+					field: 'archived',
+					operator: 'eq',
+					value: true,
+				},
+				limit: 50,
+				returning: ['id'],
+			} as any);
+			expect(result.sql).toContain('INSERT');
+			expect(result.sql).toContain('LIMIT');
+			expect(result.sql).toContain('RETURNING');
+		});
+
+		it('compiles insert-from without optional fields', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const result = adapter.compileInsertFrom({
+				type: 'insertFrom',
+				table: 'archive',
+				source: 'posts',
+			} as any);
+			expect(result.sql).toContain('INSERT');
+		});
+	});
+
+	describe('compileUpdate — range type enrichment', () => {
+		it('detects range types in SET columns', () => {
+			const model = {
+				tables: new Map([
+					[
+						'events',
+						{
+							name: 'events',
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								{ name: 'period', type: 'tsrange', nullable: true },
+							],
+							primaryKey: { columns: ['id'] },
+							foreignKeys: [],
+							indexes: [],
+						},
+					],
+				]),
+				relations: new Map(),
+				getTable: function (n) {
+					return this.tables.get(n);
+				},
+				getRelation: () => undefined,
+			} as any;
+
+			const adapter = createPgsqlCompileOnlyAdapter({ model });
+			const result = adapter.compileUpdate({
+				type: 'update',
+				table: 'events',
+				set: { period: '[2024-01-01,2024-12-31)' },
+				where: {
+					kind: 'comparison',
+					field: 'id',
+					operator: 'eq',
+					value: 1,
+				},
+			} as any);
+			expect(result.sql).toContain('UPDATE');
+		});
+	});
+
+	describe('compile — existsWrap and lock via intent', () => {
+		it('propagates lock from intent', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'jobs',
+				decisions: [],
+				intent: {
+					type: 'query',
+					table: 'jobs',
+					select: { fields: ['id'] },
+					lock: { strength: 'forUpdate', waitPolicy: 'block' },
+				},
+			} as any;
+
+			const result = adapter.compile(plan);
+			expect(result.sql).toContain('FOR UPDATE');
+		});
+
+		it('propagates existsWrap from intent', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'users',
+				decisions: [],
+				intent: {
+					type: 'query',
+					table: 'users',
+					select: { fields: ['id'] },
+					existsWrap: true,
+					where: {
+						kind: 'comparison',
+						field: 'email',
+						operator: 'eq',
+						value: 'test@test.com',
+					},
+				},
+			} as any;
+
+			const result = adapter.compile(plan);
+			expect(result.sql.toLowerCase()).toContain('exists');
+		});
+	});
+
+	describe('compile — filter EXISTS decisions from intent', () => {
+		it('filters out broken exists decisions from intentToDecisions', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan = {
+				rootTable: 'posts',
+				decisions: [],
+				intent: {
+					type: 'query',
+					table: 'posts',
+					select: { fields: ['id'] },
+					where: {
+						kind: 'exists',
+						relation: 'author',
+						where: {
+							kind: 'comparison',
+							field: 'name',
+							operator: 'eq',
+							value: 'Alice',
+						},
+					},
+				},
+			} as any;
+
+			// Should not throw — exists decisions from intent are filtered
+			const result = adapter.compile(plan);
+			expect(result.sql).toContain('SELECT');
+		});
+	});
+
+	describe('constructor — PoolClient detection', () => {
+		it('detects PoolClient via release method', () => {
+			const fakeClient = {
+				release: () => {},
+				query: async () => ({ rows: [] }),
+			} as any;
+
+			const adapter = new PgsqlAdapter(fakeClient);
+			expect(adapter.capabilities.supportsStreaming).toBe(true);
 		});
 	});
 });

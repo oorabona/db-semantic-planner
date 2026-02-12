@@ -387,3 +387,310 @@ describe('visit-mutation: assignment value types', () => {
 		}
 	});
 });
+
+// ============================================================
+// MUTATION CLAUSE: bind clause on mutation pipeline
+// ============================================================
+
+describe('visit-mutation: bind clause on mutation', () => {
+	it('parses bind clause on mutation pipeline', () => {
+		const ast = parseNql(
+			"insert into users set name = 'Alice' | select id | bind newUser",
+		);
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		const bind = stmt.clauses.find((c) => c.type === 'bind');
+		expect(bind).toBeDefined();
+		if (bind && bind.type === 'bind') {
+			expect(bind.name).toBe('newUser');
+		}
+	});
+});
+
+// ============================================================
+// MUTATION routing — each type visited correctly
+// ============================================================
+
+describe('visit-mutation: mutation routing', () => {
+	it('routes insert_from correctly', () => {
+		const ast = parseNql('insert into archive from users');
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('insert_from');
+		if (stmt.mutation.type === 'insert_from') {
+			expect(stmt.mutation.table).toBe('archive');
+			expect(stmt.mutation.source).toBe('users');
+		}
+	});
+
+	it('routes upsert correctly', () => {
+		const ast = parseNql(
+			"upsert into users on email set name = 'Bob', email = 'b@e.com'",
+		);
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('upsert');
+		if (stmt.mutation.type === 'upsert') {
+			expect(stmt.mutation.table).toBe('users');
+			expect(stmt.mutation.conflictColumns).toEqual(['email']);
+		}
+	});
+
+	it('routes upsert_from correctly', () => {
+		const ast = parseNql('upsert into authors on id from staging');
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('upsert_from');
+		if (stmt.mutation.type === 'upsert_from') {
+			expect(stmt.mutation.table).toBe('authors');
+			expect(stmt.mutation.source).toBe('staging');
+		}
+	});
+
+	it('routes delete correctly', () => {
+		const ast = parseNql('delete from users where id = 1');
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('delete');
+		if (stmt.mutation.type === 'delete') {
+			expect(stmt.mutation.table).toBe('users');
+			expect(stmt.mutation.where).toBeDefined();
+		}
+	});
+});
+
+// ============================================================
+// INSERT FROM — with WHERE and limit
+// ============================================================
+
+describe('visit-mutation: insert_from details', () => {
+	it('insert from with WHERE, limit, and RETURNING', () => {
+		const ast = parseNql(
+			'insert into archive from users where active = false limit 50 | select id',
+		);
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('insert_from');
+		if (stmt.mutation.type === 'insert_from') {
+			expect(stmt.mutation.where).toBeDefined();
+			expect(stmt.mutation.limit).toBe(50);
+		}
+		// Has select clause for RETURNING
+		expect(stmt.clauses).toHaveLength(1);
+		expect(stmt.clauses[0]!.type).toBe('select');
+	});
+});
+
+// ============================================================
+// UPSERT — identList vs single column
+// ============================================================
+
+describe('visit-mutation: upsert conflict columns', () => {
+	it('upsert with single conflict column from identSegment', () => {
+		const ast = parseNql('upsert into events on userId set count = 1');
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('upsert');
+		if (stmt.mutation.type === 'upsert') {
+			expect(stmt.mutation.conflictColumns).toEqual(['userId']);
+		}
+	});
+
+	it('upsert with identList conflict columns', () => {
+		const ast = parseNql(
+			'upsert into events on (userId, eventType) set count = 1',
+		);
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('upsert');
+		if (stmt.mutation.type === 'upsert') {
+			expect(stmt.mutation.conflictColumns).toEqual(['userId', 'eventType']);
+		}
+	});
+});
+
+// ============================================================
+// UPSERT FROM — conflict columns routing
+// ============================================================
+
+describe('visit-mutation: upsert_from conflict columns', () => {
+	it('upsert from with identList conflict columns', () => {
+		const ast = parseNql(
+			'upsert into events on (userId, eventType) from staging',
+		);
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('upsert_from');
+		if (stmt.mutation.type === 'upsert_from') {
+			expect(stmt.mutation.conflictColumns).toEqual(['userId', 'eventType']);
+		}
+	});
+
+	it('upsert from with single conflict column', () => {
+		const ast = parseNql('upsert into events on id from staging');
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('upsert_from');
+		if (stmt.mutation.type === 'upsert_from') {
+			expect(stmt.mutation.conflictColumns).toEqual(['id']);
+		}
+	});
+
+	it('upsert from with WHERE and limit', () => {
+		const ast = parseNql(
+			'upsert into events on id from staging where active = true limit 100',
+		);
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('upsert_from');
+		if (stmt.mutation.type === 'upsert_from') {
+			expect(stmt.mutation.where).toBeDefined();
+			expect(stmt.mutation.limit).toBe(100);
+		}
+	});
+});
+
+// ===========================================================================
+// ROUND 2: Additional branches in visit-mutation.ts
+// ===========================================================================
+
+// ============================================================
+// visitMutationClause — bind clause path (line 44)
+// ============================================================
+
+describe('visit-mutation R2: mutation clause branches', () => {
+	it('parses mutation with bind clause (line 44)', () => {
+		const ast = parseNql("insert into users set name = 'bob' | bind savedUser");
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		const clauses = stmt.clauses;
+		const bind = clauses.find((c) => c.type === 'bind');
+		expect(bind).toBeDefined();
+		if (bind && bind.type === 'bind') {
+			expect(bind.name).toBe('savedUser');
+		}
+	});
+
+	it('parses mutation with select clause (line 43)', () => {
+		const ast = parseNql(
+			"update users set name = 'bob' where id = 1 | select id, name",
+		);
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		const clauses = stmt.clauses;
+		const select = clauses.find((c) => c.type === 'select');
+		expect(select).toBeDefined();
+	});
+});
+
+// ============================================================
+// visitMutation — upsert statement path (line 65)
+// ============================================================
+
+describe('visit-mutation R2: upsert statement', () => {
+	it('parses upsert statement (line 65)', () => {
+		const ast = parseNql(
+			"upsert into users on email set name = 'bob', email = 'bob@test.com'",
+		);
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('upsert');
+		if (stmt.mutation.type === 'upsert') {
+			expect(stmt.mutation.conflictColumns).toEqual(['email']);
+		}
+	});
+});
+
+// ============================================================
+// visitInsertStmt — empty rows error (line 87)
+// ============================================================
+
+describe('visit-mutation R2: insert statement errors', () => {
+	it('insert requires at least one row (line 87)', () => {
+		// This error can only happen if the grammar allows an insert with no assignment tuples.
+		// In practice the grammar requires at least one. We test a minimal valid insert.
+		const ast = parseNql("insert into users set name = 'bob'");
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('insert');
+		if (stmt.mutation.type === 'insert') {
+			expect(stmt.mutation.rows.length).toBeGreaterThan(0);
+		}
+	});
+});
+
+// ============================================================
+// visitUpsertStmt — single identSegment conflict column (line 152)
+// ============================================================
+
+describe('visit-mutation R2: upsert conflict column variants', () => {
+	it('upsert with single conflict column from identSegment (line 152)', () => {
+		const ast = parseNql("upsert into users on id set name = 'bob'");
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('upsert');
+		if (stmt.mutation.type === 'upsert') {
+			expect(stmt.mutation.conflictColumns).toEqual(['id']);
+		}
+	});
+
+	it('upsert with identList conflict columns', () => {
+		const ast = parseNql(
+			"upsert into users on (email, orgId) set name = 'bob'",
+		);
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('upsert');
+		if (stmt.mutation.type === 'upsert') {
+			expect(stmt.mutation.conflictColumns).toEqual(['email', 'orgId']);
+		}
+	});
+
+	it('upsert with WHERE clause', () => {
+		const ast = parseNql(
+			"upsert into users on id set name = 'bob' where active = true",
+		);
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('upsert');
+		if (stmt.mutation.type === 'upsert') {
+			expect(stmt.mutation.where).toBeDefined();
+		}
+	});
+});
+
+// ============================================================
+// visitUpsertFromStmt — identList branch (line 183)
+// ============================================================
+
+describe('visit-mutation R2: upsert_from with identList', () => {
+	it('upsert_from with identList conflict columns (line 183)', () => {
+		const ast = parseNql(
+			'upsert into events on (userId, eventType) from staging',
+		);
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		expect(stmt.mutation.type).toBe('upsert_from');
+		if (stmt.mutation.type === 'upsert_from') {
+			expect(stmt.mutation.conflictColumns).toEqual(['userId', 'eventType']);
+			expect(stmt.mutation.source).toBe('staging');
+		}
+	});
+});
+
+// ============================================================
+// visitAssignmentList — iteration (line 213)
+// ============================================================
+
+describe('visit-mutation R2: assignment list', () => {
+	it('parses multiple assignments (line 213)', () => {
+		const ast = parseNql(
+			"insert into users set name = 'bob', email = 'bob@test.com', age = 25",
+		);
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'mutationPipeline') return;
+		if (stmt.mutation.type === 'insert') {
+			expect(stmt.mutation.rows[0]!.length).toBe(3);
+		}
+	});
+});

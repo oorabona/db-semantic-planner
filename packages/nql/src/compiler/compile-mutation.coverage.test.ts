@@ -503,3 +503,309 @@ describe('compile-mutation: edge cases', () => {
 		expect(insert.values[0]!.amount).toBe(-100);
 	});
 });
+
+// ===========================================================================
+// resolveBindingsInWhere — NOT compound with binding ref
+// ===========================================================================
+describe('compile-mutation: resolveBindingsInWhere NOT compound', () => {
+	it('resolves NOT IN with bound ref through NOT wrapper', () => {
+		const result = compileNql(
+			'users | where active = false | select id | bind inactive\nupdate users set active = true where not (id in (inactive))',
+		);
+
+		const update = result.mutation as UpdateIntent;
+		expect(update.type).toBe('update');
+		// NOT wraps an IN with subquery
+		const where = update.where!;
+		expect(where.kind).toBe('not');
+	});
+
+	it('resolves AND compound with binding ref in one leg', () => {
+		const result = compileNql(
+			'users | where active = false | select id | bind inactive\nupdate users set active = true where id in (inactive) and role = 1',
+		);
+
+		const update = result.mutation as UpdateIntent;
+		const where = update.where! as WhereAndIntent;
+		expect(where.kind).toBe('and');
+		expect(where.conditions).toHaveLength(2);
+		// First condition is IN with subquery (resolved from binding)
+		const inWhere = where.conditions[0] as WhereInIntent;
+		expect(inWhere.kind).toBe('in');
+		expect(inWhere.subquery).toBeDefined();
+	});
+
+	it('resolves OR compound with binding ref in one leg', () => {
+		const result = compileNql(
+			'users | where active = false | select id | bind inactive\nupdate users set active = true where id in (inactive) or role = 1',
+		);
+
+		const update = result.mutation as UpdateIntent;
+		const where = update.where!;
+		expect(where.kind).toBe('or');
+	});
+});
+
+// ===========================================================================
+// RETURNING: non-field expression item returns alias
+// ===========================================================================
+describe('compile-mutation: RETURNING with alias', () => {
+	it('returning column with alias uses alias name', () => {
+		const result = compileNql(
+			"insert into users set name = 'Alice' | select id as user_id",
+		);
+
+		const insert = result.mutation as InsertIntent;
+		expect(insert.returning).toEqual(['user_id']);
+	});
+});
+
+// ===========================================================================
+// Insert from with optional fields
+// ===========================================================================
+describe('compile-mutation: insertFrom optional fields', () => {
+	it('insert from without WHERE or limit omits them', () => {
+		const result = compileNql('insert into archive from users');
+
+		const insertFrom = result.mutation as InsertFromIntent;
+		expect(insertFrom.type).toBe('insert_from');
+		expect(insertFrom.where).toBeUndefined();
+		expect(insertFrom.limit).toBeUndefined();
+	});
+});
+
+// ===========================================================================
+// Upsert from with optional fields
+// ===========================================================================
+describe('compile-mutation: upsertFrom optional fields', () => {
+	it('upsert from without WHERE or limit omits them', () => {
+		const result = compileNql('upsert into authors on id from activeAuthors');
+
+		const upsertFrom = result.mutation as UpsertFromIntent;
+		expect(upsertFrom.type).toBe('upsert_from');
+		expect(upsertFrom.where).toBeUndefined();
+		expect(upsertFrom.limit).toBeUndefined();
+	});
+
+	it('upsert from with multiple conflict columns in identList', () => {
+		const result = compileNql(
+			'upsert into events on (userId, eventType) from staging',
+		);
+
+		const upsertFrom = result.mutation as UpsertFromIntent;
+		expect(upsertFrom.type).toBe('upsert_from');
+		expect(upsertFrom.conflictColumns).toEqual(['userId', 'eventType']);
+		expect(upsertFrom.source).toBe('staging');
+	});
+
+	it('upsert from with limit', () => {
+		const result = compileNql(
+			'upsert into authors on id from staging limit 100',
+		);
+
+		const upsertFrom = result.mutation as UpsertFromIntent;
+		expect(upsertFrom.limit).toBe(100);
+	});
+
+	it('upsert from with WHERE', () => {
+		const result = compileNql(
+			'upsert into authors on id from staging where active = true',
+		);
+
+		const upsertFrom = result.mutation as UpsertFromIntent;
+		expect(upsertFrom.where).toBeDefined();
+	});
+});
+
+// ===========================================================================
+// ROUND 2: extractReturningColumns with expression items (lines 270-273)
+// ===========================================================================
+
+describe('RETURNING with expression items', () => {
+	it('RETURNING with aliased column returns alias', () => {
+		const result = compileNql(
+			"update users set name = 'bob' where id = 1 | select id, name as n",
+		);
+
+		expect(result.mutation).toBeDefined();
+		const returning = result.mutation?.returning;
+		expect(returning).toContain('n');
+	});
+
+	it('RETURNING * returns star', () => {
+		const result = compileNql(
+			"update users set name = 'bob' where id = 1 | select *",
+		);
+
+		expect(result.mutation).toBeDefined();
+		expect(result.mutation?.returning).toContain('*');
+	});
+});
+
+// ===========================================================================
+// ROUND 2: extractReturningColumns validator branch (line 273)
+// ===========================================================================
+
+const schema = {
+	getTable(name: string) {
+		const tables: Record<
+			string,
+			{ columns: { name: string }[]; pseudoColumns?: never[] }
+		> = {
+			users: {
+				columns: [
+					{ name: 'id' },
+					{ name: 'name' },
+					{ name: 'email' },
+					{ name: 'active' },
+				],
+			},
+			staging: {
+				columns: [{ name: 'id' }, { name: 'name' }, { name: 'email' }],
+			},
+		};
+		return tables[name];
+	},
+	getRelationsFrom() {
+		return [];
+	},
+	getRelationsTo() {
+		return [];
+	},
+};
+
+describe('RETURNING with schema validation', () => {
+	it('validates RETURNING columns with schema (line 273)', () => {
+		const result = compile(
+			"update users set name = 'bob' where id = 1 | select id, name",
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.mutation?.returning).toContain('id');
+		expect(result.ast?.mutation?.returning).toContain('name');
+	});
+});
+
+// ===========================================================================
+// ROUND 2: resolveBindingsInWhere with IN $ref binding (lines 296-308)
+// ===========================================================================
+
+describe('resolveBindingsInWhere with bound IN', () => {
+	it('IN with bound CTE ref resolves to subquery (line 296-326)', () => {
+		const result = compileNql(
+			'users | select id | bind activeIds\ndelete from users where id in (activeIds)',
+		);
+
+		expect(result.mutation).toBeDefined();
+		const where = result.mutation?.where;
+		expect(where).toBeDefined();
+		expect(where?.kind).toBe('in');
+		// The IN clause should have a subquery from the bound CTE
+		const inWhere = where as WhereInIntent;
+		expect(inWhere.subquery).toBeDefined();
+		expect(inWhere.subquery?.from).toBe('activeIds');
+	});
+
+	it('IN with bound ref in update resolves to subquery', () => {
+		const result = compileNql(
+			"users | where active = true | select id | bind validIds\nupdate users set status = 'archived' where id in (validIds)",
+		);
+
+		expect(result.mutation).toBeDefined();
+		const where = result.mutation?.where;
+		expect(where).toBeDefined();
+		expect(where?.kind).toBe('in');
+		const inWhere = where as WhereInIntent;
+		expect(inWhere.subquery).toBeDefined();
+	});
+
+	it('NOT wrapping around resolveBindingsInWhere (line 333-338)', () => {
+		const result = compileNql(
+			'users | select id | bind activeIds\ndelete from users where not id in (activeIds)',
+		);
+
+		expect(result.mutation).toBeDefined();
+		const where = result.mutation?.where;
+		expect(where).toBeDefined();
+		// NOT wraps the in clause
+		expect(where?.kind).toBe('not');
+	});
+
+	it('AND/OR pass through resolveBindingsInWhere unchanged (line 340-370)', () => {
+		const result = compileNql(
+			'users | select id | bind activeIds\ndelete from users where id in (activeIds) and active = true',
+		);
+
+		expect(result.mutation).toBeDefined();
+		const where = result.mutation?.where;
+		expect(where).toBeDefined();
+		expect(where?.kind).toBe('and');
+	});
+});
+
+// ===========================================================================
+// ROUND 2: resolveBindingsInWhere NOT unchanged path (line 336)
+// ===========================================================================
+
+describe('resolveBindingsInWhere NOT path', () => {
+	it('NOT wrapping non-IN condition passes through unchanged (line 336)', () => {
+		const result = compileNql(
+			"users | select id | bind ids\ndelete from users where not name = 'test'",
+		);
+
+		expect(result.mutation).toBeDefined();
+		const where = result.mutation?.where;
+		expect(where?.kind).toBe('not');
+	});
+});
+
+// ===========================================================================
+// ROUND 2: resolveBindingsInWhere AND/OR unchanged (line 347)
+// ===========================================================================
+
+describe('resolveBindingsInWhere AND/OR unchanged', () => {
+	it('AND with no bindings passes through unchanged (line 347)', () => {
+		const result = compileNql(
+			"users | select id | bind ids\ndelete from users where name = 'a' and email = 'b'",
+		);
+
+		expect(result.mutation).toBeDefined();
+		const where = result.mutation?.where;
+		expect(where?.kind).toBe('and');
+	});
+});
+
+// ===========================================================================
+// ROUND 2: insert_from with sourceQuery from bindings (line 143)
+// ===========================================================================
+
+describe('insert_from with bound source', () => {
+	it('insert from with preceding bind injects sourceQuery (line 143)', () => {
+		const result = compileNql(
+			'users | select id, name | bind source\ninsert into staging from source',
+		);
+
+		expect(result.mutation).toBeDefined();
+		expect(result.mutation?.type).toBe('insert_from');
+		const insertFrom = result.mutation as InsertFromIntent;
+		expect(insertFrom.sourceQuery).toBeDefined();
+	});
+});
+
+// ===========================================================================
+// ROUND 2: upsert_from with sourceQuery from bindings (line 247)
+// ===========================================================================
+
+describe('upsert_from with bound source', () => {
+	it('upsert from with preceding bind injects sourceQuery (line 247)', () => {
+		const result = compileNql(
+			'users | select id, name | bind source\nupsert into staging on id from source',
+		);
+
+		expect(result.mutation).toBeDefined();
+		expect(result.mutation?.type).toBe('upsert_from');
+		const upsertFrom = result.mutation as UpsertFromIntent;
+		expect(upsertFrom.sourceQuery).toBeDefined();
+	});
+});

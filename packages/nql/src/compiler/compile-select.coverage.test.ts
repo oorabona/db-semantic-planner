@@ -647,3 +647,416 @@ describe('compile-select: compileExpressionToIntent branches', () => {
 		}
 	});
 });
+
+// ===========================================================================
+// lag / lead window functions with offset and defaultValue
+// ===========================================================================
+describe('compile-select: lag/lead window functions', () => {
+	it('lag with offset and defaultValue', () => {
+		const cols = getSelectColumns(
+			compileNql(
+				'orders | select lag(amount, 1, 0) over (order by id) as prev_amt',
+			),
+		);
+
+		const win = cols[0] as WindowIntent;
+		expect(win.kind).toBe('window');
+		expect(win.function).toBe('lag');
+		expect(win.field).toBe('amount');
+		expect(win.offset).toBe(1);
+		expect(win.defaultValue).toBe(0);
+		expect(win.alias).toBe('prev_amt');
+	});
+
+	it('lead with offset only (no defaultValue)', () => {
+		const cols = getSelectColumns(
+			compileNql(
+				'orders | select lead(amount, 2) over (order by id) as next_amt',
+			),
+		);
+
+		const win = cols[0] as WindowIntent;
+		expect(win.kind).toBe('window');
+		expect(win.function).toBe('lead');
+		expect(win.field).toBe('amount');
+		expect(win.offset).toBe(2);
+		expect(win.defaultValue).toBeUndefined();
+	});
+
+	it('lag without offset (no extra args)', () => {
+		const cols = getSelectColumns(
+			compileNql(
+				'orders | select lag(price) over (order by created_at) as prev_price',
+			),
+		);
+
+		const win = cols[0] as WindowIntent;
+		expect(win.kind).toBe('window');
+		expect(win.function).toBe('lag');
+		expect(win.field).toBe('price');
+		expect(win.offset).toBeUndefined();
+		expect(win.defaultValue).toBeUndefined();
+	});
+});
+
+// ===========================================================================
+// CASE result wrapping — expression results via compileSelectExpression
+// ===========================================================================
+describe('compile-select: CASE result expression types', () => {
+	it('CASE result is a function call (non-literal)', () => {
+		const cols = getSelectColumns(
+			compileNql(
+				"products | select case when active = true then upper(name) else 'N/A' end as label",
+			),
+		);
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('case');
+		if (col.kind === 'case') {
+			// First result is a function call → wrapped via compileSelectExpression
+			expect(col.when[0]!.result.kind).toBe('function');
+			// Else is a string literal
+			expect(col.else?.kind).toBe('literal');
+		}
+	});
+
+	it('CASE result is arithmetic expression', () => {
+		const cols = getSelectColumns(
+			compileNql(
+				'products | select case when qty > 10 then price * 0.9 else price end as final_price',
+			),
+		);
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('case');
+		if (col.kind === 'case') {
+			// The result is an arithmetic expression
+			expect(col.when[0]!.result.kind).toBe('arithmetic');
+		}
+	});
+});
+
+// ===========================================================================
+// Aggregate: DISTINCT flag
+// ===========================================================================
+describe('compile-select: aggregate with distinct', () => {
+	it('count(distinct name) has distinct flag', () => {
+		const cols = getSelectColumns(
+			compileNql('users | select count(distinct name) as unique_names'),
+		);
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('aggregate');
+		if (col.kind === 'aggregate') {
+			expect(col.function).toBe('count');
+			expect(col.field).toBe('name');
+			expect(col.distinct).toBe(true);
+			expect(col.as).toBe('unique_names');
+		}
+	});
+});
+
+// ===========================================================================
+// json_extract_text in SELECT
+// ===========================================================================
+describe('compile-select: json_extract_text function', () => {
+	it('produces jsonExtract with text mode', () => {
+		const cols = getSelectColumns(
+			compileNql("users | select json_extract_text(data, 'email') as email"),
+		);
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('jsonExtract');
+		if (col.kind === 'jsonExtract') {
+			expect(col.field).toBe('data');
+			expect(col.path).toEqual(['email']);
+			expect(col.mode).toBe('text');
+			expect(col.as).toBe('email');
+		}
+	});
+});
+
+// ===========================================================================
+// JSON access (operator notation) in SELECT
+// ===========================================================================
+describe('compile-select: JSON access operator in SELECT', () => {
+	it('data->>key produces jsonExtract with text mode', () => {
+		const cols = getSelectColumns(
+			compileNql("users | select data->>'name' as name"),
+		);
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('jsonExtract');
+		if (col.kind === 'jsonExtract') {
+			expect(col.field).toBe('data');
+			expect(col.mode).toBe('text');
+		}
+	});
+
+	it('data->key produces jsonExtract with json mode', () => {
+		const cols = getSelectColumns(
+			compileNql("users | select data->'meta' as meta"),
+		);
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('jsonExtract');
+		if (col.kind === 'jsonExtract') {
+			expect(col.field).toBe('data');
+			expect(col.mode).toBe('json');
+		}
+	});
+});
+
+// ===========================================================================
+// Multi-segment path: relation.column in SELECT
+// ===========================================================================
+describe('compile-select: multi-segment path', () => {
+	it('produces relationColumn for two-segment path', () => {
+		const cols = getSelectColumns(compileNql('orders | select customer.name'));
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('relationColumn');
+		if (col.kind === 'relationColumn') {
+			expect(col.relation).toBe('customer');
+			expect(col.column).toBe('name');
+			expect(col.as).toBe('customer.name');
+		}
+	});
+
+	it('produces relationColumn for three-segment dotted path', () => {
+		const cols = getSelectColumns(
+			compileNql('orders | select customer.address.city'),
+		);
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('relationColumn');
+		if (col.kind === 'relationColumn') {
+			expect(col.relation).toBe('customer.address');
+			expect(col.column).toBe('city');
+		}
+	});
+});
+
+// ===========================================================================
+// Multiplication operator in SELECT
+// ===========================================================================
+describe('compile-select: multiplication in SELECT', () => {
+	it('multiplication produces arithmetic kind', () => {
+		const cols = getSelectColumns(
+			compileNql('orders | select price * quantity as total'),
+		);
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('arithmetic');
+		if (col.kind === 'arithmetic') {
+			expect(col.operator).toBe('*');
+			expect(col.as).toBe('total');
+		}
+	});
+});
+
+// ===========================================================================
+// Column alias in SELECT (columnAlias kind)
+// ===========================================================================
+describe('compile-select: column alias', () => {
+	it('simple field with alias produces columnAlias kind', () => {
+		const cols = getSelectColumns(
+			compileNql('users | select name as user_name'),
+		);
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('columnAlias');
+		if (col.kind === 'columnAlias') {
+			expect(col.column).toBe('name');
+			expect(col.alias).toBe('user_name');
+		}
+	});
+});
+
+// ===========================================================================
+// Aggregate without alias (no `as`)
+// ===========================================================================
+describe('compile-select: aggregate without alias', () => {
+	it('count without alias omits `as`', () => {
+		const cols = getSelectColumns(compileNql('users | select count()'));
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('aggregate');
+		if (col.kind === 'aggregate') {
+			expect(col.function).toBe('count');
+			expect(col.field).toBe('*');
+			expect(col.as).toBeUndefined();
+		}
+	});
+});
+
+// ===========================================================================
+// Non-aggregate function without alias
+// ===========================================================================
+describe('compile-select: function without alias', () => {
+	it('now() without alias omits `as`', () => {
+		const cols = getSelectColumns(compileNql('users | select now()'));
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('function');
+		if (col.kind === 'function') {
+			expect(col.name).toBe('now');
+			expect(col.as).toBeUndefined();
+		}
+	});
+});
+
+// ===========================================================================
+// ROUND 2: Validator branches — compile with schema to trigger validateColumn
+// ===========================================================================
+
+const schema = {
+	getTable(name: string) {
+		const tables: Record<
+			string,
+			{ columns: { name: string }[]; pseudoColumns?: never[] }
+		> = {
+			users: {
+				columns: [
+					{ name: 'id' },
+					{ name: 'name' },
+					{ name: 'email' },
+					{ name: 'salary' },
+					{ name: 'data' },
+					{ name: 'department' },
+				],
+			},
+			orders: {
+				columns: [
+					{ name: 'id' },
+					{ name: 'userId' },
+					{ name: 'total' },
+					{ name: 'status' },
+				],
+			},
+			posts: {
+				columns: [{ name: 'id' }, { name: 'title' }, { name: 'authorId' }],
+			},
+			categories: {
+				columns: [{ name: 'id' }, { name: 'name' }, { name: 'parentId' }],
+			},
+		};
+		return tables[name];
+	},
+	getRelationsFrom(sourceTable: string) {
+		const relations: Record<string, { name: string; target: string }[]> = {
+			users: [
+				{ name: 'orders', target: 'orders' },
+				{ name: 'posts', target: 'posts' },
+			],
+			orders: [],
+			posts: [],
+			categories: [{ name: 'parent', target: 'categories' }],
+		};
+		return relations[sourceTable] ?? [];
+	},
+	getRelationsTo() {
+		return [];
+	},
+};
+
+function compileWithSchema(input: string): CompileResult {
+	const result = compile(input, schema);
+	if (!result.success) {
+		throw new Error(`Compile error: ${result.errors[0]?.message}`);
+	}
+	return result.ast!;
+}
+
+describe('compile-select: validator branches with schema', () => {
+	it('validates simple field in SELECT (line 73)', () => {
+		const r = compileWithSchema('users | select name');
+		expect(r.query?.select?.type).toBe('fields');
+	});
+
+	it('validates aggregate field with schema (line 136)', () => {
+		const r = compileWithSchema('users | select sum(salary)');
+		const sel = r.query?.select as SelectWithExpressionsIntent;
+		expect(sel.columns[0]?.kind).toBe('aggregate');
+	});
+
+	it('validates window partitionBy field with schema (line 196)', () => {
+		const r = compileWithSchema(
+			'users | select row_number() over (partition by department order by salary)',
+		);
+		const sel = r.query?.select as SelectWithExpressionsIntent;
+		const win = sel.columns[0] as WindowIntent;
+		expect(win.kind).toBe('window');
+		expect(win.over.partitionBy).toContain('department');
+	});
+
+	it('validates window orderBy field with schema (line 208)', () => {
+		const r = compileWithSchema('users | select rank() over (order by salary)');
+		const sel = r.query?.select as SelectWithExpressionsIntent;
+		const win = sel.columns[0] as WindowIntent;
+		expect(win.kind).toBe('window');
+		expect(win.over.orderBy?.[0]?.field).toBe('salary');
+	});
+
+	it('validates single-segment path with schema (line 241)', () => {
+		const r = compileWithSchema('users | select name as username');
+		const sel = r.query?.select as SelectWithExpressionsIntent;
+		expect(sel.columns[0]?.kind).toBe('columnAlias');
+	});
+
+	it('validates relation column with resolveRelationTarget (line 392)', () => {
+		const r = compileWithSchema('users | select orders.total');
+		const sel = r.query?.select as SelectWithExpressionsIntent;
+		expect(sel.columns[0]?.kind).toBe('relationColumn');
+	});
+
+	it('validates pseudo-column target with schema (line 360)', () => {
+		const r = compileWithSchema('categories | select parent.name');
+		const sel = r.query?.select as SelectWithExpressionsIntent;
+		// parent is a pseudo-column keyword, so becomes pseudoColumn
+		expect(sel.columns[0]?.kind).toBe('pseudoColumn');
+	});
+});
+
+// ===========================================================================
+// ROUND 2: Error paths
+// ===========================================================================
+
+describe('compile-select: error paths', () => {
+	it('throws for non-count aggregate with 0 args (line 126)', () => {
+		// sum() with no args should throw
+		expect(() => compileNql('users | select sum()')).toThrow(
+			/requires at least one argument/,
+		);
+	});
+
+	it('throws for json_extract with < 2 args (line 525)', () => {
+		expect(() => compileNql('users | select json_extract(data)')).toThrow(
+			/requires at least 2 arguments/,
+		);
+	});
+
+	it('json_path function compiles correctly (line 546)', () => {
+		const r = compileNql("users | select json_path(data, 'a', 'b')");
+		const sel = r.query?.select as SelectWithExpressionsIntent;
+		expect(sel.columns[0]?.kind).toBe('jsonPathExtract');
+	});
+
+	it('json_path_text function compiles correctly (line 546)', () => {
+		const r = compileNql("users | select json_path_text(data, 'key')");
+		const sel = r.query?.select as SelectWithExpressionsIntent;
+		expect(sel.columns[0]?.kind).toBe('jsonPathExtract');
+	});
+});
+
+// ===========================================================================
+// ROUND 2: Arithmetic with non-field left operand (line 264)
+// ===========================================================================
+
+describe('compile-select: arithmetic with literal left', () => {
+	it('arithmetic with number literal left operand', () => {
+		const r = compileNql('users | select 2 * salary');
+		const sel = r.query?.select as SelectWithExpressionsIntent;
+		expect(sel.columns[0]?.kind).toBe('arithmetic');
+	});
+});

@@ -60,7 +60,9 @@ describe('intentToDecisions - coverage', () => {
 				from: 'users',
 				select: {
 					type: 'expressions' as const,
-					columns: [{ kind: 'columnAlias', column: 'name', alias: 'user_name' }],
+					columns: [
+						{ kind: 'columnAlias', column: 'name', alias: 'user_name' },
+					],
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
@@ -124,7 +126,12 @@ describe('intentToDecisions - coverage', () => {
 				select: {
 					type: 'expressions' as const,
 					columns: [
-						{ kind: 'aggregate', function: 'sum', field: 'total', as: 'total_sum' },
+						{
+							kind: 'aggregate',
+							function: 'sum',
+							field: 'total',
+							as: 'total_sum',
+						},
 					],
 				},
 			};
@@ -170,7 +177,11 @@ describe('intentToDecisions - coverage', () => {
 				select: {
 					type: 'expressions' as const,
 					columns: [
-						{ kind: 'raw', sql: "UPPER(name) || ' ' || LOWER(email)", as: 'full' },
+						{
+							kind: 'raw',
+							sql: "UPPER(name) || ' ' || LOWER(email)",
+							as: 'full',
+						},
 					],
 				},
 			};
@@ -309,7 +320,9 @@ describe('intentToDecisions - coverage', () => {
 				from: 'orders',
 				select: {
 					type: 'expressions' as const,
-					columns: [{ kind: 'relationColumn', relation: 'user', as: 'user_data' }],
+					columns: [
+						{ kind: 'relationColumn', relation: 'user', as: 'user_data' },
+					],
 				},
 			};
 			const decisions = intentToDecisions(intent, 'orders');
@@ -586,7 +599,11 @@ describe('intentToDecisions - coverage', () => {
 			const intent = {
 				type: 'select' as const,
 				from: 'users',
-				where: { kind: 'null' as const, field: 'deleted_at', operator: 'isNull' },
+				where: {
+					kind: 'null' as const,
+					field: 'deleted_at',
+					operator: 'isNull',
+				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
 			expect(decisions).toContainEqual({
@@ -787,7 +804,12 @@ describe('intentToDecisions - coverage', () => {
 				where: {
 					kind: 'and' as const,
 					conditions: [
-						{ kind: 'comparison' as const, field: 'age', operator: 'gte', value: 18 },
+						{
+							kind: 'comparison' as const,
+							field: 'age',
+							operator: 'gte',
+							value: 18,
+						},
 						{
 							kind: 'comparison' as const,
 							field: 'active',
@@ -809,8 +831,18 @@ describe('intentToDecisions - coverage', () => {
 				where: {
 					kind: 'or' as const,
 					conditions: [
-						{ kind: 'comparison' as const, field: 'role', operator: 'eq', value: 'admin' },
-						{ kind: 'comparison' as const, field: 'role', operator: 'eq', value: 'owner' },
+						{
+							kind: 'comparison' as const,
+							field: 'role',
+							operator: 'eq',
+							value: 'admin',
+						},
+						{
+							kind: 'comparison' as const,
+							field: 'role',
+							operator: 'eq',
+							value: 'owner',
+						},
 					],
 				},
 			};
@@ -877,7 +909,9 @@ describe('intentToDecisions - coverage', () => {
 				where: { kind: 'notExists' as const, relation: 'posts' },
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const notExistsDecision = decisions.find((d) => d.operator === 'notExists');
+			const notExistsDecision = decisions.find(
+				(d) => d.operator === 'notExists',
+			);
 			expect(notExistsDecision?.targetTable).toBe('posts');
 		});
 
@@ -897,7 +931,9 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const notExistsDecision = decisions.find((d) => d.operator === 'notExists');
+			const notExistsDecision = decisions.find(
+				(d) => d.operator === 'notExists',
+			);
 			expect(notExistsDecision?.conditions).toHaveLength(1);
 		});
 
@@ -989,7 +1025,11 @@ describe('intentToDecisions - coverage', () => {
 			const intent = {
 				type: 'select' as const,
 				from: 'users',
-				where: { kind: 'jsonExists' as const, field: 'metadata', key: 'profile' },
+				where: {
+					kind: 'jsonExists' as const,
+					field: 'metadata',
+					key: 'profile',
+				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
 			expect(decisions).toContainEqual({
@@ -1049,7 +1089,11 @@ describe('intentToDecisions - coverage', () => {
 				type: 'select' as const,
 				from: 'users',
 				orderBy: [
-					{ field: 'last_login', direction: 'desc' as const, nulls: 'first' as const },
+					{
+						field: 'last_login',
+						direction: 'desc' as const,
+						nulls: 'first' as const,
+					},
 				],
 			};
 			const decisions = intentToDecisions(intent, 'users');
@@ -1062,7 +1106,11 @@ describe('intentToDecisions - coverage', () => {
 				type: 'select' as const,
 				from: 'users',
 				orderBy: [
-					{ field: 'last_login', direction: 'asc' as const, nulls: 'last' as const },
+					{
+						field: 'last_login',
+						direction: 'asc' as const,
+						nulls: 'last' as const,
+					},
 				],
 			};
 			const decisions = intentToDecisions(intent, 'users');
@@ -1174,6 +1222,365 @@ describe('intentToDecisions - coverage', () => {
 			};
 			const decisions = intentToDecisions(intent, 'users');
 			expect(decisions.filter((d) => d.type === 'groupBy')).toHaveLength(0);
+		});
+	});
+
+	// ==================================================================
+	// NEW: additional branches for coverage
+	// ==================================================================
+
+	describe('subquery scalar comparison (kind: "subquery")', () => {
+		it('converts scalar subquery with aggregate select', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'users',
+				where: {
+					kind: 'subquery' as const,
+					field: 'salary',
+					operator: 'gt',
+					subquery: {
+						type: 'select' as const,
+						from: 'users',
+						select: {
+							type: 'aggregate' as const,
+							aggregates: [{ function: 'avg' as const, field: 'salary' }],
+						},
+					},
+				},
+			};
+			const decisions = intentToDecisions(intent, 'users');
+			const where = decisions.find((d) => d.type === 'where');
+			expect(where?.operator).toBe('scalarSubquery');
+			expect(where?.aggregate).toBe('avg');
+			expect(where?.selectColumn).toBe('salary');
+			expect(where?.subqueryOperator).toBe('>');
+		});
+
+		it('converts scalar subquery with fields select', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'orders',
+				where: {
+					kind: 'subquery' as const,
+					field: 'total',
+					operator: 'lte',
+					subquery: {
+						type: 'select' as const,
+						from: 'budgets',
+						select: {
+							type: 'fields' as const,
+							fields: ['max_budget'] as const,
+						},
+					},
+				},
+			};
+			const decisions = intentToDecisions(intent, 'orders');
+			const where = decisions.find((d) => d.type === 'where');
+			expect(where?.selectColumn).toBe('max_budget');
+			expect(where?.subqueryOperator).toBe('<=');
+		});
+
+		it('converts scalar subquery with inner WHERE', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'users',
+				where: {
+					kind: 'subquery' as const,
+					field: 'dept_id',
+					operator: 'eq',
+					subquery: {
+						type: 'select' as const,
+						from: 'departments',
+						select: { type: 'fields' as const, fields: ['id'] as const },
+						where: {
+							kind: 'comparison' as const,
+							field: 'name',
+							operator: 'eq',
+							value: 'Engineering',
+						},
+					},
+				},
+			};
+			const decisions = intentToDecisions(intent, 'users');
+			const where = decisions.find((d) => d.type === 'where');
+			expect(where?.conditions).toHaveLength(1);
+		});
+
+		it('returns null for scalar subquery without field', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'users',
+				where: {
+					kind: 'subquery' as const,
+					operator: 'eq',
+					subquery: {
+						type: 'select' as const,
+						from: 'x',
+					},
+				},
+			};
+			const decisions = intentToDecisions(intent, 'users');
+			expect(decisions.filter((d) => d.type === 'where')).toHaveLength(0);
+		});
+
+		it('returns null for scalar subquery without subquery', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'users',
+				where: {
+					kind: 'subquery' as const,
+					field: 'id',
+					operator: 'eq',
+				},
+			};
+			const decisions = intentToDecisions(intent, 'users');
+			expect(decisions.filter((d) => d.type === 'where')).toHaveLength(0);
+		});
+
+		it('maps unknown operator to = as default', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'users',
+				where: {
+					kind: 'subquery' as const,
+					field: 'x',
+					operator: 'unknownOp',
+					subquery: { type: 'select' as const, from: 't' },
+				},
+			};
+			const decisions = intentToDecisions(intent, 'users');
+			const where = decisions.find((d) => d.type === 'where');
+			expect(where?.subqueryOperator).toBe('=');
+		});
+
+		it('maps neq operator to !=', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'users',
+				where: {
+					kind: 'subquery' as const,
+					field: 'x',
+					operator: 'neq',
+					subquery: { type: 'select' as const, from: 't' },
+				},
+			};
+			const decisions = intentToDecisions(intent, 'users');
+			const where = decisions.find((d) => d.type === 'where');
+			expect(where?.subqueryOperator).toBe('!=');
+		});
+
+		it('converts scalar subquery with no select → defaults to *', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'users',
+				where: {
+					kind: 'subquery' as const,
+					field: 'x',
+					operator: 'lt',
+					subquery: { type: 'select' as const, from: 't' },
+				},
+			};
+			const decisions = intentToDecisions(intent, 'users');
+			const where = decisions.find((d) => d.type === 'where');
+			expect(where?.selectColumn).toBe('*');
+		});
+	});
+
+	describe('range with no bounds returns null', () => {
+		it('returns null for range with no gte/gt/lte/lt/operator', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'users',
+				where: { kind: 'range' as const, field: 'age' },
+			};
+			const decisions = intentToDecisions(intent, 'users');
+			expect(decisions.filter((d) => d.type === 'where')).toHaveLength(0);
+		});
+	});
+
+	describe('IN with subquery without inner WHERE', () => {
+		it('converts IN subquery without inner WHERE condition', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'users',
+				where: {
+					kind: 'in' as const,
+					field: 'id',
+					subquery: {
+						type: 'select' as const,
+						from: 'active_users',
+						select: { type: 'fields' as const, fields: ['user_id'] as const },
+					},
+				},
+			};
+			const decisions = intentToDecisions(intent, 'users');
+			const whereDecision = decisions.find((d) => d.type === 'where');
+			expect(whereDecision?.subquery).toBeDefined();
+			expect(whereDecision?.subquery?.where).toBeUndefined();
+		});
+	});
+
+	describe('relationFilter without where', () => {
+		it('converts relationFilter mode=some without where', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'users',
+				where: {
+					kind: 'relationFilter' as const,
+					relation: 'posts',
+					mode: 'some',
+				},
+			};
+			const decisions = intentToDecisions(intent, 'users');
+			const decision = decisions.find((d) => d.operator === 'exists');
+			expect(decision).toBeDefined();
+			expect(decision?.conditions).toBeUndefined();
+		});
+
+		it('converts relationFilter with default mode (some)', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'users',
+				where: {
+					kind: 'relationFilter' as const,
+					relation: 'posts',
+				},
+			};
+			const decisions = intentToDecisions(intent, 'users');
+			const decision = decisions.find((d) => d.operator === 'exists');
+			expect(decision).toBeDefined();
+		});
+	});
+
+	describe('column expression without alias', () => {
+		it('converts column expression without as → no alias property', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'users',
+				select: {
+					type: 'expressions' as const,
+					columns: [{ kind: 'column', column: 'email' }],
+				},
+			};
+			const decisions = intentToDecisions(intent, 'users');
+			const selectDecision = decisions.find(
+				(d) => d.type === 'select' && d.column === 'email',
+			);
+			expect(selectDecision).toBeDefined();
+			expect(selectDecision?.alias).toBeUndefined();
+		});
+	});
+
+	describe('aggregate count(*) with alias', () => {
+		it('converts COUNT(*) with as field', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'users',
+				select: {
+					type: 'expressions' as const,
+					columns: [{ kind: 'aggregate', function: 'count', as: 'total' }],
+				},
+			};
+			const decisions = intentToDecisions(intent, 'users');
+			expect(decisions).toContainEqual({
+				type: 'selectFunction',
+				function: 'count',
+				column: '*',
+				alias: 'total',
+				table: 'users',
+			});
+		});
+	});
+
+	describe('aggregate without field and without alias', () => {
+		it('converts generic aggregate (e.g. sum) without field', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'orders',
+				select: {
+					type: 'expressions' as const,
+					columns: [{ kind: 'aggregate', function: 'sum' }],
+				},
+			};
+			const decisions = intentToDecisions(intent, 'orders');
+			const d = decisions.find((d) => d.type === 'selectFunction');
+			expect(d?.function).toBe('sum');
+			expect(d?.column).toBeUndefined();
+		});
+	});
+
+	describe('SelectAggregateIntent count(*) special case', () => {
+		it('converts count(*) in aggregate intent', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'users',
+				select: {
+					type: 'aggregate' as const,
+					aggregates: [{ function: 'count' as const, field: '*', as: 'cnt' }],
+				},
+			};
+			const decisions = intentToDecisions(intent, 'users');
+			const d = decisions.find(
+				(d) => d.type === 'selectFunction' && d.function === 'count',
+			);
+			expect(d).toBeDefined();
+			expect(d?.alias).toBe('cnt');
+		});
+	});
+
+	describe('SelectAggregateIntent without fields', () => {
+		it('converts aggregate intent without non-aggregate fields', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'orders',
+				select: {
+					type: 'aggregate' as const,
+					aggregates: [{ function: 'max' as const, field: 'total' }],
+				},
+			};
+			const decisions = intentToDecisions(intent, 'orders');
+			expect(decisions.filter((d) => d.type === 'select')).toHaveLength(0);
+			expect(decisions).toContainEqual({
+				type: 'selectFunction',
+				function: 'max',
+				column: 'total',
+				table: 'orders',
+			});
+		});
+	});
+
+	describe('CASE expression without ELSE and without alias', () => {
+		it('converts CASE without else clause', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'users',
+				select: {
+					type: 'expressions' as const,
+					columns: [
+						{
+							kind: 'case',
+							when: [
+								{
+									condition: {
+										kind: 'comparison',
+										field: 'active',
+										operator: 'eq',
+										value: true,
+									},
+									result: { value: 'yes' },
+								},
+							],
+						},
+					],
+				},
+			};
+			const decisions = intentToDecisions(intent, 'users');
+			const caseDecision = decisions.find(
+				(d) => d.type === 'selectExpression' && d.expressionType === 'case',
+			);
+			expect(caseDecision).toBeDefined();
+			expect(caseDecision?.value).toBeUndefined();
+			expect(caseDecision?.alias).toBeUndefined();
 		});
 	});
 });
