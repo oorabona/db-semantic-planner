@@ -398,12 +398,12 @@ describe('introspect', () => {
 	});
 
 	it('should pass schema to queries', async () => {
-		const pool = createMockPool([[], [], []]);
+		const pool = createMockPool([[], [], [], []]);
 		await introspect(pool, { schema: 'tenant_1' });
 
 		const mockQuery = pool.query as ReturnType<typeof vi.fn>;
-		// All 3 queries should pass 'tenant_1' as parameter
-		expect(mockQuery).toHaveBeenCalledTimes(3);
+		// All 4 queries (columns, PKs, FKs, indexes) should pass 'tenant_1' as parameter
+		expect(mockQuery).toHaveBeenCalledTimes(4);
 		for (const call of mockQuery.mock.calls) {
 			expect(call[1]).toEqual(['tenant_1']);
 		}
@@ -477,5 +477,78 @@ describe('introspect', () => {
 		// No FKs on users table pointing to excluded tables
 		const users = result.tables.get('users')!;
 		expect(users.foreignKeys).toHaveLength(0);
+	});
+
+	it('should discover indexes on tables', async () => {
+		const indexes = [
+			{
+				index_name: 'idx_posts_title',
+				table_name: 'posts',
+				columns: ['title'],
+				is_unique: false,
+			},
+			{
+				index_name: 'idx_users_email',
+				table_name: 'users',
+				columns: ['email'],
+				is_unique: true,
+			},
+		];
+		const pool = createMockPool([
+			usersPostsColumns,
+			usersPostsPKs,
+			usersPostsFKs,
+			indexes,
+		]);
+		const result = await introspect(pool);
+
+		const posts = result.tables.get('posts')!;
+		expect(posts.indexes).toHaveLength(1);
+		expect(posts.indexes[0]!.name).toBe('idx_posts_title');
+		expect(posts.indexes[0]!.columns).toEqual(['title']);
+		expect(posts.indexes[0]!.unique).toBeUndefined();
+
+		const users = result.tables.get('users')!;
+		expect(users.indexes).toHaveLength(1);
+		expect(users.indexes[0]!.name).toBe('idx_users_email');
+		expect(users.indexes[0]!.columns).toEqual(['email']);
+		expect(users.indexes[0]!.unique).toBe(true);
+	});
+
+	it('should return empty indexes when none exist', async () => {
+		const pool = createMockPool([
+			usersPostsColumns,
+			usersPostsPKs,
+			usersPostsFKs,
+			[], // no indexes
+		]);
+		const result = await introspect(pool);
+
+		const users = result.tables.get('users')!;
+		expect(users.indexes).toHaveLength(0);
+		const posts = result.tables.get('posts')!;
+		expect(posts.indexes).toHaveLength(0);
+	});
+
+	it('should discover composite indexes', async () => {
+		const indexes = [
+			{
+				index_name: 'idx_posts_author_title',
+				table_name: 'posts',
+				columns: ['author_id', 'title'],
+				is_unique: false,
+			},
+		];
+		const pool = createMockPool([
+			usersPostsColumns,
+			usersPostsPKs,
+			usersPostsFKs,
+			indexes,
+		]);
+		const result = await introspect(pool);
+
+		const posts = result.tables.get('posts')!;
+		expect(posts.indexes).toHaveLength(1);
+		expect(posts.indexes[0]!.columns).toEqual(['author_id', 'title']);
 	});
 });

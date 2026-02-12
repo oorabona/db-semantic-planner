@@ -8,6 +8,8 @@
 import { Command } from 'commander';
 import { generateCommand } from './commands/generate.js';
 import { introspectCommand } from './commands/introspect.js';
+import { migrateCommand } from './commands/migrate.js';
+import { pushCommand } from './commands/push.js';
 import { replCommand } from './commands/repl.js';
 import { verifyCommand } from './commands/verify.js';
 
@@ -21,6 +23,8 @@ program
 // Register commands
 program.addCommand(generateCommand);
 program.addCommand(introspectCommand);
+program.addCommand(migrateCommand);
+program.addCommand(pushCommand);
 program.addCommand(replCommand);
 program.addCommand(verifyCommand);
 

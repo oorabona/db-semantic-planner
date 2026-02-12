@@ -16,6 +16,7 @@ import type {
 	ColumnIR,
 	ColumnType,
 	ForeignKeyIR,
+	IndexIR,
 	ModelIR,
 	OnDeleteAction,
 	RelationIR,
@@ -81,6 +82,13 @@ interface RawForeignKey {
 	target_table: string;
 	target_column: string;
 	delete_rule: string;
+}
+
+interface RawIndex {
+	index_name: string;
+	table_name: string;
+	columns: string[];
+	is_unique: boolean;
 }
 
 // ============================================================================
@@ -153,6 +161,42 @@ export async function introspect(
 		 ORDER BY tc.constraint_name, kcu.ordinal_position`,
 		[schema],
 	);
+
+	// Step 4: Fetch indexes (excluding PK-backing indexes)
+	const indexesResult = await pool.query<RawIndex>(
+		`SELECT
+		   i.relname AS index_name,
+		   t.relname AS table_name,
+		   array_agg(a.attname ORDER BY k.n) AS columns,
+		   ix.indisunique AS is_unique
+		 FROM pg_index ix
+		 JOIN pg_class i ON i.oid = ix.indexrelid
+		 JOIN pg_class t ON t.oid = ix.indrelid
+		 JOIN pg_namespace n ON n.oid = t.relnamespace
+		 CROSS JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, n)
+		 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+		 WHERE n.nspname = $1
+		   AND NOT ix.indisprimary
+		 GROUP BY i.relname, t.relname, ix.indisunique
+		 ORDER BY t.relname, i.relname`,
+		[schema],
+	);
+
+	// Group indexes by table
+	const tableIndexes = new Map<string, IndexIR[]>();
+	for (const idx of indexesResult.rows) {
+		const indexIR: IndexIR = {
+			name: idx.index_name,
+			columns: idx.columns,
+			...(idx.is_unique ? { unique: true } : {}),
+		};
+		const existing = tableIndexes.get(idx.table_name);
+		if (existing) {
+			existing.push(indexIR);
+		} else {
+			tableIndexes.set(idx.table_name, [indexIR]);
+		}
+	}
 
 	// Group columns by table
 	const tableColumns = new Map<string, RawColumn[]>();
@@ -245,7 +289,7 @@ export async function introspect(
 				? { primaryKey: pkCols.length === 1 ? pkCols[0]! : pkCols }
 				: {}),
 			foreignKeys,
-			indexes: [],
+			indexes: tableIndexes.get(tableName) ?? [],
 		};
 		tables.set(tableName, table);
 	}

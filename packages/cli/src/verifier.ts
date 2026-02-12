@@ -1,16 +1,38 @@
 /**
- * ARCH-002 Block 7: Schema Verifier
+ * Schema Verifier — Drift Detection via Comparison Engine
  *
- * Compares schema definition against real database for drift detection.
+ * Compares schema definition against real database using the
+ * adapter's compareSchemata engine for full drift detection.
+ *
+ * Detects: tables, columns, types, nullable, defaults, FKs, indexes, PKs.
  */
 
-import type { ResolvedSchema, Schema, SchemaDefinition } from '@dbsp/core';
+import type { ChangeKind, SchemaChange, SchemaDiff } from '@dbsp/adapter-pgsql';
 
 // ============================================================================
 // Types
 // ============================================================================
 
 export type DriftSeverity = 'error' | 'warning' | 'info';
+
+export type DriftType =
+	// Tables
+	| 'missing_table_in_db'
+	| 'missing_table_in_schema'
+	// Columns
+	| 'missing_column_in_db'
+	| 'missing_column_in_schema'
+	| 'type_mismatch'
+	| 'nullable_mismatch'
+	| 'default_mismatch'
+	// Constraints
+	| 'primary_key_mismatch'
+	| 'missing_fk_in_db'
+	| 'missing_fk_in_schema'
+	| 'fk_on_delete_mismatch'
+	// Indexes
+	| 'missing_index_in_db'
+	| 'missing_index_in_schema';
 
 export interface DriftIssue {
 	/** Issue severity */
@@ -25,15 +47,6 @@ export interface DriftIssue {
 	type: DriftType;
 }
 
-export type DriftType =
-	| 'missing_table_in_db'
-	| 'missing_table_in_schema'
-	| 'missing_column_in_db'
-	| 'missing_column_in_schema'
-	| 'type_mismatch'
-	| 'nullable_mismatch'
-	| 'primary_key_mismatch';
-
 export interface VerifyResult {
 	/** Whether the schema matches the database */
 	valid: boolean;
@@ -43,10 +56,13 @@ export interface VerifyResult {
 	schemaTables: string[];
 	/** Tables in database */
 	dbTables: string[];
+	/** Structured diff (for programmatic consumers) */
+	diff: SchemaDiff;
 }
 
 /**
- * Database table metadata from introspection.
+ * @deprecated Use DbTableInfo from introspection instead.
+ * Kept for backward compatibility with existing tests.
  */
 export interface DbTableInfo {
 	name: string;
@@ -54,7 +70,7 @@ export interface DbTableInfo {
 }
 
 /**
- * Database column metadata from introspection.
+ * @deprecated Use ColumnIR from introspection instead.
  */
 export interface DbColumnInfo {
 	name: string;
@@ -65,275 +81,86 @@ export interface DbColumnInfo {
 }
 
 // ============================================================================
-// Type Mapping
+// Change → Drift Mapping
 // ============================================================================
 
-/**
- * Map database type to schema column type.
- * This is database-specific (PostgreSQL).
- */
-function dbTypeToSchemaType(dbType: string): string {
-	const normalizedType = dbType.toLowerCase().replace(/\(.+\)/, '');
+const CHANGE_TO_DRIFT: Record<
+	ChangeKind,
+	{ type: DriftType; severity: DriftSeverity }
+> = {
+	create_table: { type: 'missing_table_in_db', severity: 'error' },
+	drop_table: { type: 'missing_table_in_schema', severity: 'warning' },
+	add_column: { type: 'missing_column_in_db', severity: 'error' },
+	drop_column: { type: 'missing_column_in_schema', severity: 'info' },
+	alter_column_type: { type: 'type_mismatch', severity: 'error' },
+	alter_column_nullable: { type: 'nullable_mismatch', severity: 'warning' },
+	alter_column_default: { type: 'default_mismatch', severity: 'warning' },
+	add_primary_key: { type: 'primary_key_mismatch', severity: 'error' },
+	drop_primary_key: { type: 'primary_key_mismatch', severity: 'error' },
+	add_foreign_key: { type: 'missing_fk_in_db', severity: 'error' },
+	drop_foreign_key: { type: 'missing_fk_in_schema', severity: 'warning' },
+	alter_foreign_key: { type: 'fk_on_delete_mismatch', severity: 'warning' },
+	create_index: { type: 'missing_index_in_db', severity: 'warning' },
+	drop_index: { type: 'missing_index_in_schema', severity: 'info' },
+};
 
-	const typeMap: Record<string, string> = {
-		// String types
-		'character varying': 'string',
-		varchar: 'string',
-		text: 'text',
-		char: 'string',
-		character: 'string',
-
-		// Number types
-		integer: 'integer',
-		int: 'integer',
-		int4: 'integer',
-		smallint: 'integer',
-		int2: 'integer',
-		bigint: 'bigint',
-		int8: 'bigint',
-		numeric: 'decimal',
-		decimal: 'decimal',
-		real: 'number',
-		float4: 'number',
-		'double precision': 'number',
-		float8: 'number',
-
-		// Boolean
-		boolean: 'boolean',
-		bool: 'boolean',
-
-		// Date/Time
-		date: 'date',
-		timestamp: 'timestamp',
-		'timestamp without time zone': 'timestamp',
-		'timestamp with time zone': 'timestamp',
-		timestamptz: 'timestamp',
-		time: 'timestamp',
-		'time without time zone': 'timestamp',
-		'time with time zone': 'timestamp',
-
-		// JSON
-		json: 'json',
-		jsonb: 'json',
-
-		// UUID
-		uuid: 'uuid',
+function changeToDriftIssue(change: SchemaChange): DriftIssue {
+	const mapping = CHANGE_TO_DRIFT[change.kind] ?? {
+		type: 'type_mismatch' as DriftType,
+		severity: 'warning' as DriftSeverity,
 	};
-
-	return typeMap[normalizedType] ?? normalizedType;
-}
-
-/**
- * Map schema column type to normalized type for comparison.
- */
-function schemaTypeToNormalized(schemaType: string): string {
-	// Schema types are already normalized
-	return schemaType;
-}
-
-/**
- * Check if two types are compatible.
- */
-function typesCompatible(schemaType: string, dbType: string): boolean {
-	const normalizedSchema = schemaTypeToNormalized(schemaType);
-	const normalizedDb = dbTypeToSchemaType(dbType);
-
-	// Direct match
-	if (normalizedSchema === normalizedDb) {
-		return true;
-	}
-
-	// String variants
-	if (normalizedSchema === 'string' && normalizedDb === 'text') return true;
-	if (normalizedSchema === 'text' && normalizedDb === 'string') return true;
-
-	// Number variants
-	if (
-		normalizedSchema === 'number' &&
-		['integer', 'decimal'].includes(normalizedDb)
-	)
-		return true;
-	if (normalizedSchema === 'integer' && normalizedDb === 'number') return true;
-	if (normalizedSchema === 'decimal' && normalizedDb === 'number') return true;
-
-	// Timestamp variants
-	if (normalizedSchema === 'timestamp' && normalizedDb === 'datetime')
-		return true;
-	if (normalizedSchema === 'datetime' && normalizedDb === 'timestamp')
-		return true;
-
-	return false;
+	return {
+		severity: mapping.severity,
+		type: mapping.type,
+		table: change.table,
+		...(change.column !== undefined ? { column: change.column } : {}),
+		message: change.details,
+	};
 }
 
 // ============================================================================
-// Verification Logic
+// Verification (from SchemaDiff)
 // ============================================================================
 
 /**
- * Schema input type for verify function.
- * Accepts either:
- * - ResolvedSchema from defineSchema() (legacy)
- * - Schema from schema() (new API)
- * - Raw SchemaDefinition
- */
-import type { LoadedSchema } from './utils/schema-loader.js';
-
-type VerifySchemaInput =
-	| ResolvedSchema
-	// biome-ignore lint/suspicious/noExplicitAny: Union type needs to accept Schema with any table types
-	| Schema<any>
-	| SchemaDefinition
-	| LoadedSchema;
-
-/**
- * Extract tables from various schema input types.
- */
-function extractTables(
-	input: VerifySchemaInput,
-): Record<string, Record<string, unknown>> {
-	// New Schema type has 'definition' property
-	if ('definition' in input && 'model' in input) {
-		return input.definition as Record<string, Record<string, unknown>>;
-	}
-	// Legacy ResolvedSchema has 'tables' property with 'relations' sibling
-	if ('tables' in input && 'relations' in input) {
-		return input.tables as Record<string, Record<string, unknown>>;
-	}
-	// Raw SchemaDefinition - tables are at top level
-	return input as Record<string, Record<string, unknown>>;
-}
-
-/**
- * Verify schema against database tables.
+ * Convert a SchemaDiff into a VerifyResult.
  *
- * @param schema - Schema from schema(), defineSchema(), or raw definition
- * @param dbTables - Tables from database introspection
- * @returns Verification result with issues
+ * @param diff - Structured diff from compareSchemata()
+ * @param schemaTables - Table names in schema (for backward compat)
+ * @param dbTables - Table names in database (for backward compat)
  */
-export function verify(
-	schema: VerifySchemaInput,
-	dbTables: DbTableInfo[],
+export function verifyFromDiff(
+	diff: SchemaDiff,
+	schemaTables: string[],
+	dbTables: string[],
 ): VerifyResult {
-	const issues: DriftIssue[] = [];
-	const tables = extractTables(schema);
-	const schemaTableNames = Object.keys(tables);
-	const dbTableNames = dbTables.map((t) => t.name);
-	const dbTableMap = new Map(dbTables.map((t) => [t.name, t]));
+	const issues = diff.changes.map(changeToDriftIssue);
 
-	// Check for tables in schema but not in DB
-	for (const tableName of schemaTableNames) {
-		if (!dbTableMap.has(tableName)) {
-			issues.push({
-				severity: 'error',
-				type: 'missing_table_in_db',
-				table: tableName,
-				message: `Table "${tableName}" exists in schema but not in database`,
-			});
-		}
-	}
+	// Sort by severity (error > warning > info)
+	const severityOrder: Record<DriftSeverity, number> = {
+		error: 0,
+		warning: 1,
+		info: 2,
+	};
+	issues.sort(
+		(a: DriftIssue, b: DriftIssue) =>
+			severityOrder[a.severity] - severityOrder[b.severity],
+	);
 
-	// Check for tables in DB but not in schema
-	for (const tableName of dbTableNames) {
-		if (!schemaTableNames.includes(tableName)) {
-			issues.push({
-				severity: 'warning',
-				type: 'missing_table_in_schema',
-				table: tableName,
-				message: `Table "${tableName}" exists in database but not in schema`,
-			});
-		}
-	}
-
-	// Check column-level drift for matching tables
-	for (const tableName of schemaTableNames) {
-		const dbTable = dbTableMap.get(tableName);
-		if (!dbTable) continue; // Already reported as missing
-
-		const schemaTable = tables[tableName];
-		// Safety check (should always exist since we're iterating schemaTableNames)
-		if (!schemaTable) continue;
-
-		const schemaColumnNames = Object.keys(schemaTable);
-		const dbColumnMap = new Map(dbTable.columns.map((c) => [c.name, c]));
-		const dbColumnNames = dbTable.columns.map((c) => c.name);
-
-		// Check for columns in schema but not in DB
-		for (const columnName of schemaColumnNames) {
-			const dbColumn = dbColumnMap.get(columnName);
-
-			if (!dbColumn) {
-				issues.push({
-					severity: 'error',
-					type: 'missing_column_in_db',
-					table: tableName,
-					column: columnName,
-					message: `Column "${tableName}.${columnName}" exists in schema but not in database`,
-				});
-				continue;
-			}
-
-			const schemaColumn = schemaTable[columnName] as
-				| { type: string; nullable?: boolean }
-				| undefined;
-			// Safety check (should always exist since we're iterating schemaColumnNames)
-			if (!schemaColumn || typeof schemaColumn !== 'object') continue;
-
-			// Check type compatibility
-			if (
-				'type' in schemaColumn &&
-				!typesCompatible(schemaColumn.type, dbColumn.dataType)
-			) {
-				issues.push({
-					severity: 'error',
-					type: 'type_mismatch',
-					table: tableName,
-					column: columnName,
-					message: `Column "${tableName}.${columnName}" type mismatch: schema="${schemaColumn.type}", database="${dbColumn.dataType}"`,
-				});
-			}
-
-			// Check nullable mismatch
-			const schemaNullable =
-				'nullable' in schemaColumn ? (schemaColumn.nullable ?? true) : true;
-			if (schemaNullable !== dbColumn.isNullable) {
-				issues.push({
-					severity: 'warning',
-					type: 'nullable_mismatch',
-					table: tableName,
-					column: columnName,
-					message: `Column "${tableName}.${columnName}" nullable mismatch: schema=${schemaNullable}, database=${dbColumn.isNullable}`,
-				});
-			}
-		}
-
-		// Check for columns in DB but not in schema
-		for (const columnName of dbColumnNames) {
-			if (!schemaColumnNames.includes(columnName)) {
-				issues.push({
-					severity: 'info',
-					type: 'missing_column_in_schema',
-					table: tableName,
-					column: columnName,
-					message: `Column "${tableName}.${columnName}" exists in database but not in schema`,
-				});
-			}
-		}
-	}
-
-	// Sort issues by severity (error > warning > info)
-	const severityOrder = { error: 0, warning: 1, info: 2 };
-	issues.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
-
-	// Valid if no errors
-	const hasErrors = issues.some((i) => i.severity === 'error');
+	const hasErrors = issues.some((i: DriftIssue) => i.severity === 'error');
 
 	return {
 		valid: !hasErrors,
 		issues,
-		schemaTables: schemaTableNames,
-		dbTables: dbTableNames,
+		schemaTables,
+		dbTables,
+		diff,
 	};
 }
+
+// ============================================================================
+// Format
+// ============================================================================
 
 /**
  * Format verification result for CLI output.
