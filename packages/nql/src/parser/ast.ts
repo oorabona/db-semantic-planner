@@ -511,36 +511,5 @@ export interface NqlAssignment {
 // HELPER FUNCTIONS
 // ============================================================
 
-export function isQuery(stmt: NqlStatement): stmt is NqlQuery {
-	return stmt.type === 'query';
-}
-
-export function isMutationPipeline(
-	stmt: NqlStatement,
-): stmt is NqlMutationPipeline {
-	return stmt.type === 'mutationPipeline';
-}
-
-export function isMutation(node: unknown): node is NqlMutation {
-	if (typeof node !== 'object' || node === null) return false;
-	const type = (node as Record<string, unknown>).type;
-	return [
-		'insert',
-		'insert_from',
-		'update',
-		'delete',
-		'upsert',
-		'upsert_from',
-	].includes(type as string);
-}
-
-export function isLiteral(expr: NqlExpression): expr is NqlLiteral {
-	return [
-		'string',
-		'number',
-		'boolean',
-		'null',
-		'dateRange',
-		'rangeLiteral',
-	].includes(expr.type);
-}
+// Dead type guards (isQuery, isMutationPipeline, isMutation, isLiteral) removed
+// — exported but never imported anywhere in the codebase (unreachable code).

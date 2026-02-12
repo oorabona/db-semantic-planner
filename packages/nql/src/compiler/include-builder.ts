@@ -76,6 +76,7 @@ export function applyIncludeLimit(
 	const segments = path.split('.');
 	const root = segments[0]!;
 	const idx = includes.findIndex((inc) => inc.relation === root);
+	/* v8 ignore next — defensive: callers always pass valid relation paths -- @preserve */
 	if (idx === -1) return;
 
 	if (segments.length === 1) {

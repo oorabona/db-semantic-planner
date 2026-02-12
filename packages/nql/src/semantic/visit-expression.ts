@@ -124,12 +124,14 @@ function buildComparison(
 	visit: VisitFn,
 ): NqlExpression {
 	const suffixCtx = suffixNode.children as CstContext;
+	/* v8 ignore start — defensive: parser guarantees compOp + expression in comparisonSuffix -- @preserve */
 	if (!suffixCtx.compOp || !suffixCtx.expression) {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			'Comparison suffix missing operator or expression',
 		);
 	}
+	/* v8 ignore stop -- @preserve */
 	const operator = visit(asCstNode(suffixCtx.compOp[0]!)) as
 		| '='
 		| '!='
@@ -148,12 +150,14 @@ function buildBetween(
 	visit: VisitFn,
 ): NqlBetweenExpression {
 	const suffixCtx = suffixNode.children as CstContext;
+	/* v8 ignore start — defensive: parser guarantees two expressions in betweenSuffix -- @preserve */
 	if (!suffixCtx.expression || suffixCtx.expression.length < 2) {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			'Between suffix missing expressions',
 		);
 	}
+	/* v8 ignore stop -- @preserve */
 	return {
 		type: 'between',
 		expression: left,
@@ -219,12 +223,14 @@ function buildRangeOp(
 	visit: VisitFn,
 ): NqlRangeOpExpression {
 	const suffixCtx = suffixNode.children as CstContext;
+	/* v8 ignore start — defensive: parser guarantees rangeOp in rangeOpSuffix -- @preserve */
 	if (!suffixCtx.rangeOp) {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			'Range op suffix missing operator',
 		);
 	}
+	/* v8 ignore stop -- @preserve */
 	const operator = visit(asCstNode(suffixCtx.rangeOp[0]!)) as
 		| 'overlaps'
 		| 'contains'
@@ -241,10 +247,12 @@ function buildRangeOp(
 		return { type: 'rangeOp', operator, left, scalar };
 	}
 
+	/* v8 ignore start — defensive: parser guarantees rangeLiteral or literal in rangeOpSuffix -- @preserve */
 	throw new NqlSemanticException(
 		NqlErrorCodes.SEM_INVALID_SYNTAX,
 		'Range op suffix missing range literal or scalar value',
 	);
+	/* v8 ignore stop -- @preserve */
 }
 
 function buildJsonComparison(
@@ -257,12 +265,13 @@ function buildJsonComparison(
 	if (suffixCtx.JsonContainsOp) operator = '@>';
 	else if (suffixCtx.JsonContainedByOp) operator = '<@';
 	else if (suffixCtx.JsonExistsOp) operator = '?';
-	else {
+	/* v8 ignore start — defensive: parser guarantees one of the three JSON ops -- @preserve */ else {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			'JSON comparison suffix missing operator',
 		);
 	}
+	/* v8 ignore stop -- @preserve */
 	requireFirst(
 		suffixCtx,
 		'expression',
@@ -429,6 +438,7 @@ export function visitAddExpr(ctx: CstContext, visit: VisitFn): NqlExpression {
 
 		for (let i = 1; i < ctx.mulExpr.length; i++) {
 			const right = visit(asCstNode(ctx.mulExpr[i]!));
+			/* v8 ignore next — defensive: ops always has i-1 entries for i-1 operators -- @preserve */
 			const op = ops[i - 1]?.op || '+';
 			left = { type: 'binary', operator: op, left, right };
 		}
@@ -462,6 +472,7 @@ export function visitMulExpr(ctx: CstContext, visit: VisitFn): NqlExpression {
 
 		for (let i = 1; i < ctx.unaryExpr.length; i++) {
 			const right = visit(asCstNode(ctx.unaryExpr[i]!));
+			/* v8 ignore next — defensive: ops always has i-1 entries for i-1 operators -- @preserve */
 			const op = ops[i - 1]?.op || '*';
 			left = { type: 'binary', operator: op, left, right };
 		}
@@ -492,10 +503,12 @@ export function visitPrimaryExpr(
 		return visit(asCstNode(ctx.expression[0]!));
 	}
 	if (ctx.scalarSubquery) return visit(asCstNode(ctx.scalarSubquery[0]!));
+	/* v8 ignore start — defensive: parser guarantees one of the primaryExpr alternatives -- @preserve */
 	throw new NqlSemanticException(
 		NqlErrorCodes.SEM_INVALID_SYNTAX,
 		'Invalid primary expression',
 	);
+	/* v8 ignore stop -- @preserve */
 }
 
 // ============================================================
@@ -515,9 +528,11 @@ export function visitCaseExpr(
 
 	if (ctx.searchedCaseBody) {
 		const bodyCtx = asCstNode(ctx.searchedCaseBody[0]!).children;
+		/* v8 ignore start — defensive: parser guarantees at least one WHEN clause in CASE body -- @preserve */
 		const conditions = bodyCtx.booleanExpr ?? [];
 		const results = bodyCtx.expression ?? [];
 		const whenCount = bodyCtx.When?.length ?? 0;
+		/* v8 ignore stop -- @preserve */
 		for (let i = 0; i < whenCount; i++) {
 			whenClauses.push({
 				condition: visit(asCstNode(conditions[i]!)),
@@ -526,6 +541,7 @@ export function visitCaseExpr(
 		}
 	} else if (ctx.simpleCaseBody) {
 		const bodyCtx = asCstNode(ctx.simpleCaseBody[0]!).children;
+		/* v8 ignore next — defensive: parser guarantees expressions and WHEN in simpleCaseBody -- @preserve */
 		const expressions = bodyCtx.expression ?? [];
 		const whenCount = bodyCtx.When?.length ?? 0;
 		subject = visit(asCstNode(expressions[0]!));
@@ -628,12 +644,13 @@ export function visitQuantifiedRelationFilter(
 	if (ctx.Some) mode = 'some';
 	else if (ctx.None) mode = 'none';
 	else if (ctx.Every) mode = 'every';
-	else {
+	/* v8 ignore start — defensive: parser guarantees Some/None/Every token -- @preserve */ else {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			'quantifiedRelationFilter missing quantifier',
 		);
 	}
+	/* v8 ignore stop -- @preserve */
 
 	requireFirst(ctx, 'pathExpr', 'quantifiedRelationFilter missing pathExpr');
 	const pathExpr = visit(asCstNode(ctx.pathExpr[0]!)) as NqlPathExpression;
@@ -676,12 +693,14 @@ export function visitAllRelationFilter(
 	const pathExpr = visit(asCstNode(ctx.pathExpr[0]!)) as NqlPathExpression;
 	const segments = pathExpr.segments;
 
+	/* v8 ignore start — defensive: grammar requires relation.column path (at least 2 segments) -- @preserve */
 	if (segments.length < 2) {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			`allRelationFilter requires at least relation.column (got: ${segments.join('.')})`,
 		);
 	}
+	/* v8 ignore stop -- @preserve */
 
 	const relation = segments.slice(0, -1);
 	const column = segments[segments.length - 1];
