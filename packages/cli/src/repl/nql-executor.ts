@@ -50,6 +50,19 @@ function extractIntentSummary(
 		};
 	}
 
+	if (compiled.setOperation) {
+		const setOp = compiled.setOperation;
+		return {
+			type: 'setOperation',
+			table: setOp.left.from,
+			with: [],
+			hasWhere: !!setOp.left.where,
+			hasGroupBy: false,
+			hasOrderBy: false,
+			ctes: [],
+		};
+	}
+
 	// Fallback for edge cases
 	return {
 		type: intentType,
@@ -106,7 +119,7 @@ export interface NqlExecutionResult {
  */
 export interface IntentSummary {
 	/** Intent type */
-	type: 'query' | 'insert' | 'update' | 'delete' | 'upsert';
+	type: 'query' | 'insert' | 'update' | 'delete' | 'upsert' | 'setOperation';
 	/** Main table name */
 	table: string;
 	/** Relations joined via `with` keyword */
@@ -130,7 +143,13 @@ export interface NqlCompileOnlyResult {
 	/** Query parameters */
 	params: readonly unknown[];
 	/** Intent type */
-	intentType: 'query' | 'insert' | 'update' | 'delete' | 'upsert';
+	intentType:
+		| 'query'
+		| 'insert'
+		| 'update'
+		| 'delete'
+		| 'upsert'
+		| 'setOperation';
 	/** Intent summary for assertions */
 	intent: IntentSummary;
 	/** Full plan report (only for queries — mutations don't have one) */
@@ -175,7 +194,11 @@ export async function compileNqlToSql(
 	// Lazy-load adapter to avoid loading pgsql-parser at module init time
 	// pgsql-parser has issues with ESM dynamic requires, so we defer its import
 	// until it's actually needed (CLI-PGSQL-LAZY-LOAD)
-	const { createPgsqlCompileOnlyAdapter } = await import('@dbsp/adapter-pgsql');
+	const {
+		createPgsqlCompileOnlyAdapter,
+		compileSetOperation,
+		createLeafCompileFn,
+	} = await import('@dbsp/adapter-pgsql');
 
 	// Create compile-only adapter for SQL generation (no DB connection needed)
 	const adapter = createPgsqlCompileOnlyAdapter({
@@ -205,6 +228,18 @@ export async function compileNqlToSql(
 			intentType: 'query',
 			intent: extractIntentSummary(compiled, 'query'),
 			planReport,
+		};
+	}
+
+	if (compiled.setOperation) {
+		const compileFn = createLeafCompileFn(adapter, model, plan);
+		const result = compileSetOperation(compiled.setOperation, compileFn);
+
+		return {
+			sql: result.sql,
+			params: result.parameters,
+			intentType: 'setOperation',
+			intent: extractIntentSummary(compiled, 'setOperation'),
 		};
 	}
 
@@ -255,7 +290,9 @@ export async function compileNqlToSql(
 		}
 	}
 
-	throw new NqlCompileError('NQL compiled to neither query nor mutation');
+	throw new NqlCompileError(
+		'NQL compiled to neither query, mutation, nor set operation',
+	);
 }
 
 /**

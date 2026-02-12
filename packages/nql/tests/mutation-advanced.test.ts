@@ -435,3 +435,179 @@ describe('NQL Mutation - Multi-row INSERT', () => {
 		expect(insert.values[2]).toEqual({ name: 'C' });
 	});
 });
+
+// ===========================================================================
+// F16: Mutation | bind (E16f — mutation RETURNING reused in subsequent stmts)
+// ===========================================================================
+describe('F16: Mutation bind with RETURNING', () => {
+	it('F16a: insert with RETURNING + bind populates both bindings and mutationBindings', () => {
+		const result = compileNql(
+			"insert into users set name = 'Alice' | select id | bind newUser\nusers | where id in (newUser)",
+		);
+
+		// Final statement is the query
+		expect(result.query).toBeDefined();
+		expect(result.query!.from).toBe('users');
+
+		// bindings should contain a synthetic QueryIntent
+		expect(result.bindings).toBeDefined();
+		expect(result.bindings!.size).toBe(1);
+		expect(result.bindings!.has('newUser')).toBe(true);
+		const syntheticQuery = result.bindings!.get('newUser')!;
+		expect(syntheticQuery.type).toBe('select');
+		expect(syntheticQuery.from).toBe('users');
+		expect(syntheticQuery.select).toEqual({
+			type: 'fields',
+			fields: ['id'],
+		});
+
+		// mutationBindings should contain the original InsertIntent with RETURNING
+		expect(result.mutationBindings).toBeDefined();
+		expect(result.mutationBindings!.size).toBe(1);
+		expect(result.mutationBindings!.has('newUser')).toBe(true);
+		const mutationBinding = result.mutationBindings!.get(
+			'newUser',
+		)! as InsertIntent;
+		expect(mutationBinding.type).toBe('insert');
+		expect(mutationBinding.table).toBe('users');
+		expect(mutationBinding.returning).toEqual(['id']);
+	});
+
+	it('F16b: update with RETURNING + bind populates bindings', () => {
+		const result = compileNql(
+			"update users set active = false where role = 'banned' | select id | bind deactivated\ndelete from sessions where userId in (deactivated)",
+		);
+
+		// Final statement is the delete
+		expect(result.mutation).toBeDefined();
+		expect((result.mutation as DeleteIntent).type).toBe('delete');
+
+		// bindings should contain the synthetic QueryIntent
+		expect(result.bindings).toBeDefined();
+		expect(result.bindings!.has('deactivated')).toBe(true);
+		const syntheticQuery = result.bindings!.get('deactivated')!;
+		expect(syntheticQuery.type).toBe('select');
+		expect(syntheticQuery.from).toBe('users');
+		expect(syntheticQuery.select).toEqual({
+			type: 'fields',
+			fields: ['id'],
+		});
+
+		// mutationBindings should contain the UpdateIntent
+		expect(result.mutationBindings).toBeDefined();
+		const mutationBinding = result.mutationBindings!.get(
+			'deactivated',
+		)! as UpdateIntent;
+		expect(mutationBinding.type).toBe('update');
+		expect(mutationBinding.table).toBe('users');
+		expect(mutationBinding.returning).toEqual(['id']);
+	});
+
+	it('F16c: delete with RETURNING + bind populates bindings', () => {
+		const result = compileNql(
+			'delete from users where active = false | select id, email | bind removed\nusers | where id in (removed)',
+		);
+
+		// bindings should contain synthetic QueryIntent with both columns
+		expect(result.bindings).toBeDefined();
+		expect(result.bindings!.has('removed')).toBe(true);
+		const syntheticQuery = result.bindings!.get('removed')!;
+		expect(syntheticQuery.select).toEqual({
+			type: 'fields',
+			fields: ['id', 'email'],
+		});
+
+		// mutationBindings should contain the DeleteIntent
+		expect(result.mutationBindings).toBeDefined();
+		const mutationBinding = result.mutationBindings!.get(
+			'removed',
+		)! as DeleteIntent;
+		expect(mutationBinding.type).toBe('delete');
+		expect(mutationBinding.returning).toEqual(['id', 'email']);
+	});
+
+	it('F16d: mutation without RETURNING + bind does NOT populate bindings', () => {
+		const result = compileNql(
+			"insert into users set name = 'Alice' | bind newUser\nusers | select id",
+		);
+
+		// No RETURNING → bind is silently ignored (nothing to reference)
+		// The final statement is the query
+		expect(result.query).toBeDefined();
+
+		// No bindings should be created for a mutation without RETURNING
+		expect(result.bindings).toBeUndefined();
+		expect(result.mutationBindings).toBeUndefined();
+	});
+
+	it('F16e: mutation bind resolves in subsequent mutation WHERE subquery', () => {
+		const result = compileNql(
+			"insert into users set name = 'Alice' | select id | bind newIds\ndelete from temp where userId in (newIds)",
+		);
+
+		// Final statement is a delete mutation
+		expect(result.mutation).toBeDefined();
+		const del = result.mutation as DeleteIntent;
+		expect(del.type).toBe('delete');
+		expect(del.table).toBe('temp');
+
+		// The WHERE should have the binding resolved to a subquery
+		const where = del.where as WhereInIntent;
+		expect(where.kind).toBe('in');
+		expect(where.field).toBe('userId');
+		expect(where.subquery).toBeDefined();
+		expect(where.subquery!.from).toBe('newIds');
+		expect(where.subquery!.select).toEqual({
+			type: 'fields',
+			fields: ['id'],
+		});
+	});
+
+	it('F16f: multiple mutation binds in sequence', () => {
+		const result = compileNql(
+			"insert into users set name = 'Alice' | select id | bind user1\ninsert into users set name = 'Bob' | select id | bind user2\nusers | where id in (user1)",
+		);
+
+		// Both mutation bindings should be populated
+		expect(result.bindings).toBeDefined();
+		expect(result.bindings!.size).toBe(2);
+		expect(result.bindings!.has('user1')).toBe(true);
+		expect(result.bindings!.has('user2')).toBe(true);
+
+		expect(result.mutationBindings).toBeDefined();
+		expect(result.mutationBindings!.size).toBe(2);
+	});
+
+	it('F16g: mixed query bind + mutation bind', () => {
+		const result = compileNql(
+			'users | where active = true | select id | bind activeIds\ninsert into logs set userId = 1 | select id | bind logIds\nusers | where id in (activeIds)',
+		);
+
+		expect(result.bindings).toBeDefined();
+		expect(result.bindings!.size).toBe(2);
+
+		// activeIds should be a regular query binding (no mutationBindings entry)
+		expect(result.bindings!.has('activeIds')).toBe(true);
+		expect(result.bindings!.get('activeIds')!.from).toBe('users');
+
+		// logIds should be a mutation binding
+		expect(result.bindings!.has('logIds')).toBe(true);
+		expect(result.mutationBindings).toBeDefined();
+		expect(result.mutationBindings!.size).toBe(1);
+		expect(result.mutationBindings!.has('logIds')).toBe(true);
+	});
+
+	it('F16h: RETURNING * on mutation bind produces fields: [*]', () => {
+		const result = compileNql(
+			"insert into users set name = 'Alice' | select * | bind allCols\nusers | select id",
+		);
+
+		expect(result.bindings).toBeDefined();
+		expect(result.bindings!.has('allCols')).toBe(true);
+		const syntheticQuery = result.bindings!.get('allCols')!;
+		expect(syntheticQuery.select).toEqual({
+			type: 'fields',
+			fields: ['*'],
+		});
+	});
+});

@@ -18,6 +18,13 @@ export interface CompileResult {
 	readonly returning?: readonly string[];
 	/** Named bindings from `| bind X` clauses (CTE source queries) */
 	readonly bindings?: ReadonlyMap<string, QueryIntent>;
+	/**
+	 * Named mutation bindings from `mutation | select cols | bind X` clauses.
+	 * When a mutation has RETURNING and is bound, the original MutationIntent is stored here
+	 * so the adapter can compile it as a CTE: `WITH X AS (INSERT ... RETURNING cols) ...`
+	 * The corresponding synthetic QueryIntent is also stored in `bindings` for reference resolution.
+	 */
+	readonly mutationBindings?: ReadonlyMap<string, MutationIntent>;
 	/** Set operation (UNION/INTERSECT/EXCEPT) wrapping two queries */
 	readonly setOperation?: SetOperationIntent;
 }
