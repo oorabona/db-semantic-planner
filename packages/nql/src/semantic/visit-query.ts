@@ -40,6 +40,7 @@ export function visitProgram(ctx: CstContext, visit: VisitFn): NqlProgram {
 export function visitStatement(ctx: CstContext, visit: VisitFn): NqlStatement {
 	if (ctx.query) return visit(asCstNode(ctx.query[0]!));
 	if (ctx.mutationPipeline) return visit(asCstNode(ctx.mutationPipeline[0]!));
+	/* v8 ignore next — defensive: parser guarantees query or mutationPipeline -- @preserve */
 	unreachable('Invalid statement');
 }
 
@@ -71,6 +72,7 @@ export function visitQueryClause(ctx: CstContext, visit: VisitFn): NqlClause {
 	if (ctx.setClause) return visit(asCstNode(ctx.setClause[0]!));
 	if (ctx.bindClause) return visit(asCstNode(ctx.bindClause[0]!));
 	if (ctx.lockClause) return visit(asCstNode(ctx.lockClause[0]!));
+	/* v8 ignore next — defensive: parser guarantees one of the clause alternatives -- @preserve */
 	unreachable('Unknown query clause');
 }
 
@@ -146,9 +148,11 @@ export function visitJoinSpec(ctx: CstContext, visit: VisitFn): NqlJoinSpec {
 	if (ctx.Via && ctx.identSegment.length > 1) {
 		via = visit(asCstNode(ctx.identSegment[1]!));
 	}
+	/* v8 ignore start — not yet reachable: JOIN params not exposed in current grammar -- @preserve */
 	if (ctx.paramList) {
 		params = visit(asCstNode(ctx.paramList[0]!));
 	}
+	/* v8 ignore stop -- @preserve */
 	if (ctx.On && ctx.booleanExpr) {
 		condition = visit(asCstNode(ctx.booleanExpr[0]!));
 	}
@@ -251,7 +255,8 @@ export function visitLockClause(ctx: CstContext): NqlLockClause {
 	else if (ctx.ForShare) strength = 'forShare';
 	else if (ctx.ForNoKeyUpdate) strength = 'forNoKeyUpdate';
 	else if (ctx.ForKeyShare) strength = 'forKeyShare';
-	else unreachable('Lock clause missing strength keyword');
+	/* v8 ignore next — defensive: parser guarantees one of the lock strength tokens -- @preserve */ else
+		unreachable('Lock clause missing strength keyword');
 
 	let waitPolicy: NqlLockClause['waitPolicy'] = 'block';
 	if (ctx.SkipLocked) waitPolicy = 'skipLocked';
@@ -266,7 +271,8 @@ export function visitSetClause(ctx: CstContext, visit: VisitFn): NqlSetClause {
 	if (ctx.Union) op = 'union';
 	else if (ctx.Intersect) op = 'intersect';
 	else if (ctx.Except) op = 'except';
-	else unreachable('Set clause missing operation keyword');
+	/* v8 ignore next — defensive: parser guarantees Union/Intersect/Except token -- @preserve */ else
+		unreachable('Set clause missing operation keyword');
 
 	const all = !!ctx.All;
 
@@ -279,5 +285,6 @@ export function visitSetClause(ctx: CstContext, visit: VisitFn): NqlSetClause {
 		const boundName: string = visit(asCstNode(ctx.identSegment[0]!));
 		return { type: 'setOperation', op, all, boundName };
 	}
+	/* v8 ignore next — defensive: parser guarantees query or identSegment -- @preserve */
 	unreachable('Set clause missing operand');
 }

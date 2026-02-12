@@ -213,6 +213,7 @@ export class NqlCompiler {
 			}
 			return { mutation: result.mutation };
 		}
+		/* v8 ignore next — defensive: parser only produces query or mutationPipeline -- @preserve */
 		return {};
 	}
 }

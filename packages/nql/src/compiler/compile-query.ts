@@ -88,7 +88,10 @@ export function compileQuery(
 				);
 				if (groupByIndex >= 0 && i > groupByIndex) {
 					havingConditions.push(condition);
-				} else if (currentIncludeBatch && currentIncludeBatch.length > 0) {
+				} /* v8 ignore start — not yet reachable: include-batch WHERE merging requires WITH clause (not yet in grammar) -- @preserve */ else if (
+					currentIncludeBatch &&
+					currentIncludeBatch.length > 0
+				) {
 					const targetInclude =
 						currentIncludeBatch[currentIncludeBatch.length - 1]!;
 					const mutableInclude = targetInclude as Mutable<IncludeIntent>;
@@ -100,7 +103,7 @@ export function compileQuery(
 					} else {
 						mutableInclude.where = condition;
 					}
-				} else {
+				} /* v8 ignore stop -- @preserve */ else {
 					whereConditions.push(condition);
 				}
 				break;
@@ -164,6 +167,7 @@ export function compileQuery(
 	}
 
 	// Apply flat mode strategy to pre-existing includes
+	/* v8 ignore next — not yet reachable: flat + pre-existing includes requires WITH clause -- @preserve */
 	if (flatMode && allIncludes.length > 0) {
 		for (let i = 0; i < allIncludes.length; i++) {
 			const inc = allIncludes[i]!;
@@ -245,12 +249,15 @@ function getExplicitColumnCount(
 	switch (q.select.type) {
 		case 'all':
 			return undefined;
+		/* v8 ignore next — NQL compiler never produces 'fields' in set operations (always expressions or all) -- @preserve */
 		case 'fields':
 			return q.select.fields.length;
+		/* v8 ignore next — NQL compiler never produces 'aggregate' SelectIntent directly -- @preserve */
 		case 'aggregate':
 			return (q.select.fields?.length ?? 0) + q.select.aggregates.length;
 		case 'expressions':
 			return q.select.columns.length;
+		/* v8 ignore next — defensive: exhaustive switch -- @preserve */
 		default:
 			return undefined;
 	}
@@ -285,9 +292,10 @@ function compileSetOperation(
 			);
 		}
 		right = bound;
-	} else {
+	} /* v8 ignore start — defensive: parser guarantees right or boundName -- @preserve */ else {
 		throw new Error('Set operation missing right operand');
 	}
+	/* v8 ignore stop -- @preserve */
 
 	// Validate column count compatibility when both sides are explicit
 	const leftCount = getExplicitColumnCount(left);

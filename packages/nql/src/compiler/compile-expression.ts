@@ -91,10 +91,12 @@ export function compileExpression(
 					],
 				};
 			}
+			/* v8 ignore start — defensive: only and/or reach here; arithmetic is in SELECT context -- @preserve */
 			// Arithmetic binary → comparison context shouldn't reach here
 			throw new Error(
 				`Unsupported binary operator in WHERE: ${binary.operator}`,
 			);
+			/* v8 ignore stop -- @preserve */
 		}
 
 		case 'unary': {
@@ -111,6 +113,7 @@ export function compileExpression(
 					),
 				};
 			}
+			/* v8 ignore next — defensive: only 'not' unary reaches WHERE context -- @preserve */
 			throw new Error(`Unsupported unary operator: ${unary.operator}`);
 		}
 
@@ -121,9 +124,11 @@ export function compileExpression(
 			if (comp.left.type === 'jsonAccess') {
 				const jsonLeft = comp.left as NqlJsonAccessExpression;
 				const baseField = expressionToField(jsonLeft.base, aliasContext);
+				/* v8 ignore start — defensive: jsonAccess base is always a path expression -- @preserve */
 				if (!baseField) {
 					throw new Error('JSON access base must be a field reference');
 				}
+				/* v8 ignore stop -- @preserve */
 				const operator = mapComparisonOperator(comp.operator);
 				const value = resolveFilterValue(
 					comp.right,
@@ -145,13 +150,17 @@ export function compileExpression(
 			if (comp.left.type === 'function') {
 				const fn = comp.left.name.toLowerCase();
 				if (fn === 'json_extract' || fn === 'json_extract_text') {
+					/* v8 ignore start — defensive: parser guarantees at least 2 args for json_extract -- @preserve */
 					if (comp.left.args.length < 2) {
 						throw new Error(`${fn}() requires at least 2 arguments`);
 					}
+					/* v8 ignore stop -- @preserve */
 					const baseField = expressionToField(comp.left.args[0]!, aliasContext);
+					/* v8 ignore start — defensive: first arg is always a field reference -- @preserve */
 					if (!baseField) {
 						throw new Error(`${fn}() first argument must be a field reference`);
 					}
+					/* v8 ignore stop -- @preserve */
 					const keys = comp.left.args
 						.slice(1)
 						.map((a) =>
@@ -176,9 +185,11 @@ export function compileExpression(
 			}
 
 			const field = expressionToField(comp.left, aliasContext);
+			/* v8 ignore start — defensive: parser guarantees LHS is a path expression -- @preserve */
 			if (!field) {
 				throw new Error('Left side of comparison must be a field reference');
 			}
+			/* v8 ignore stop -- @preserve */
 			// Validate WHERE column on current table context
 			validateWhereField(ctx, field, aliasContext, comp.left);
 
@@ -216,11 +227,13 @@ export function compileExpression(
 		case 'rangeOp': {
 			const rangeExpr = expr as NqlRangeOpExpression;
 			const field = expressionToField(rangeExpr.left, aliasContext);
+			/* v8 ignore start — defensive: parser guarantees LHS is a path expression -- @preserve */
 			if (!field) {
 				throw new Error(
 					'Left side of range operator must be a field reference',
 				);
 			}
+			/* v8 ignore stop -- @preserve */
 			validateWhereField(ctx, field, aliasContext, rangeExpr.left);
 			// Handle both range literals and scalar values
 			let rangeValue: string | unknown;
@@ -234,11 +247,12 @@ export function compileExpression(
 					aliasContext,
 					outerAliases,
 				);
-			} else {
+			} /* v8 ignore start — defensive: parser guarantees range or scalar -- @preserve */ else {
 				throw new Error(
 					'Range operator requires either a range literal or scalar value',
 				);
 			}
+			/* v8 ignore stop -- @preserve */
 			return {
 				kind: 'range',
 				field,
@@ -250,9 +264,11 @@ export function compileExpression(
 		case 'in': {
 			const inExpr = expr as NqlInExpression;
 			const field = expressionToField(inExpr.expression, aliasContext);
+			/* v8 ignore start — defensive: parser guarantees IN LHS is a path expression -- @preserve */
 			if (!field) {
 				throw new Error('IN expression must reference a field');
 			}
+			/* v8 ignore stop -- @preserve */
 			validateWhereField(ctx, field, aliasContext, inExpr.expression);
 
 			let values: unknown[];
@@ -324,9 +340,11 @@ export function compileExpression(
 		case 'between': {
 			const between = expr as NqlBetweenExpression;
 			const field = expressionToField(between.expression, aliasContext);
+			/* v8 ignore start — defensive: parser guarantees BETWEEN LHS is a path -- @preserve */
 			if (!field) {
 				throw new Error('BETWEEN expression must reference a field');
 			}
+			/* v8 ignore stop -- @preserve */
 			validateWhereField(ctx, field, aliasContext, between.expression);
 
 			return {
@@ -353,9 +371,11 @@ export function compileExpression(
 		case 'isNull': {
 			const isNull = expr as NqlIsNullExpression;
 			const field = expressionToField(isNull.expression, aliasContext);
+			/* v8 ignore start — defensive: parser guarantees IS NULL LHS is a path -- @preserve */
 			if (!field) {
 				throw new Error('IS NULL expression must reference a field');
 			}
+			/* v8 ignore stop -- @preserve */
 			validateWhereField(ctx, field, aliasContext, isNull.expression);
 
 			return {
@@ -412,13 +432,17 @@ export function compileExpression(
 			// JSON function notation in WHERE context
 			const fn = expr.name.toLowerCase();
 			if (fn === 'json_contains' || fn === 'json_contained_by') {
+				/* v8 ignore start — defensive: parser guarantees at least 2 args -- @preserve */
 				if (expr.args.length < 2) {
 					throw new Error(`${fn}() requires 2 arguments: field and value`);
 				}
+				/* v8 ignore stop -- @preserve */
 				const jsonField = expressionToField(expr.args[0]!, aliasContext);
+				/* v8 ignore start — defensive: first arg is always a field reference -- @preserve */
 				if (!jsonField) {
 					throw new Error(`${fn}() first argument must be a field reference`);
 				}
+				/* v8 ignore stop -- @preserve */
 				const jsonValue = resolveFilterValue(
 					expr.args[1]!,
 					ctx,
@@ -433,13 +457,17 @@ export function compileExpression(
 				} satisfies WhereJsonContainsIntent;
 			}
 			if (fn === 'json_exists') {
+				/* v8 ignore start — defensive: parser guarantees at least 2 args -- @preserve */
 				if (expr.args.length < 2) {
 					throw new Error(`${fn}() requires 2 arguments: field and key`);
 				}
+				/* v8 ignore stop -- @preserve */
 				const jsonField = expressionToField(expr.args[0]!, aliasContext);
+				/* v8 ignore start — defensive: first arg is always a field reference -- @preserve */
 				if (!jsonField) {
 					throw new Error(`${fn}() first argument must be a field reference`);
 				}
+				/* v8 ignore stop -- @preserve */
 				const key = resolveFilterValue(
 					expr.args[1]!,
 					ctx,
@@ -452,17 +480,20 @@ export function compileExpression(
 					key: String(key),
 				} satisfies WhereJsonExistsIntent;
 			}
+			/* v8 ignore next — defensive: only json_* functions reach WHERE context -- @preserve */
 			throw new Error(`Unsupported function in WHERE context: ${fn}()`);
 		}
 
 		case 'jsonComparison': {
 			const jsonComp = expr as NqlJsonComparisonExpression;
 			const jsonField = expressionToField(jsonComp.left, aliasContext);
+			/* v8 ignore start — defensive: parser guarantees LHS is a path expression -- @preserve */
 			if (!jsonField) {
 				throw new Error(
 					'Left side of JSON comparison must be a field reference',
 				);
 			}
+			/* v8 ignore stop -- @preserve */
 
 			if (jsonComp.operator === '?') {
 				const key = resolveFilterValue(
@@ -493,6 +524,7 @@ export function compileExpression(
 			} satisfies WhereJsonContainsIntent;
 		}
 
+		/* v8 ignore next — defensive: all parser-produced expression types are handled above -- @preserve */
 		default:
 			throw new Error(`Unsupported expression type in WHERE: ${expr.type}`);
 	}

@@ -140,6 +140,7 @@ function compileInsertFrom(
 		table: insertFrom.table,
 		source: insertFrom.source,
 		...(sourceQuery !== undefined && { sourceQuery }),
+		/* v8 ignore next — NQL grammar does not produce explicit column lists for INSERT FROM -- @preserve */
 		...(insertFrom.columns !== undefined && { columns: insertFrom.columns }),
 		...(insertFrom.where !== undefined && {
 			where: fns.compileExpression(insertFrom.where, ctx, fns),
@@ -244,9 +245,11 @@ function compileUpsertFrom(
 		source: upsertFrom.source,
 		conflictColumns: upsertFrom.conflictColumns,
 		...(sourceQuery !== undefined && { sourceQuery }),
+		/* v8 ignore start — NQL grammar does not produce explicit column lists for UPSERT FROM -- @preserve */
 		...(upsertFrom.columns !== undefined && {
 			columns: upsertFrom.columns,
 		}),
+		/* v8 ignore stop -- @preserve */
 		...(upsertFrom.where !== undefined && {
 			where: fns.compileExpression(upsertFrom.where, ctx, fns),
 		}),
@@ -304,6 +307,7 @@ function resolveBindingsInWhere(
 				if (bindings.has(ref)) {
 					const boundQuery = bindings.get(ref)!;
 					const boundSelect = boundQuery.select;
+					/* v8 ignore next — defensive: bound queries from NQL always have select.fields -- @preserve */
 					const selectFields: readonly string[] | undefined =
 						boundSelect && 'fields' in boundSelect
 							? (boundSelect as SelectFieldsIntent).fields

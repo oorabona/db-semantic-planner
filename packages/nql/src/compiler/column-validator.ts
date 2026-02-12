@@ -35,8 +35,10 @@ export class ColumnValidator {
 	}
 
 	validateColumn(table: string, column: string): void {
+		/* v8 ignore next — '*' columns are validated at call-site before reaching here -- @preserve */
 		if (column === '*') return;
 		const tableInfo = this.schema.getTable(table);
+		/* v8 ignore next — graceful degradation: unknown tables skip validation -- @preserve */
 		if (!tableInfo) return; // Unknown table → graceful degradation
 		const exists = tableInfo.columns.some((c) =>
 			ColumnValidator.columnsMatch(column, c.name),

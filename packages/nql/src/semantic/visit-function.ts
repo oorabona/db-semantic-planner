@@ -26,12 +26,13 @@ export function visitFuncCall(
 	else if (ctx.Lag) name = 'lag';
 	else if (ctx.Lead) name = 'lead';
 	else if (ctx.identSegment) name = visit(asCstNode(ctx.identSegment[0]!));
-	else {
+	/* v8 ignore start — defensive: parser guarantees a function name token -- @preserve */ else {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			'Function call missing name',
 		);
 	}
+	/* v8 ignore stop -- @preserve */
 
 	const args: NqlExpression[] = [];
 	let distinct = false;

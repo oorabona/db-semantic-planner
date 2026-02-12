@@ -21,20 +21,24 @@ export function isCstNode(value: CstNode | IToken): value is CstNode {
 
 /** Safely extract CstNode from context array */
 export function asCstNode(value: CstNode | IToken): CstNode {
+	/* v8 ignore start — defensive: Chevrotain parser guarantees CstNode at call sites -- @preserve */
 	if (!isCstNode(value)) {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_UNREACHABLE,
 			`Expected CstNode but got IToken: ${(value as IToken).image}`,
 		);
 	}
+	/* v8 ignore stop -- @preserve */
 	return value;
 }
 
 /** Get token image */
 export function getImage(value: CstNode | IToken): string {
+	/* v8 ignore start — defensive: callers always pass IToken -- @preserve */
 	if (isCstNode(value)) {
 		unreachable('Expected IToken but got CstNode');
 	}
+	/* v8 ignore stop -- @preserve */
 	return (value as IToken).image;
 }
 

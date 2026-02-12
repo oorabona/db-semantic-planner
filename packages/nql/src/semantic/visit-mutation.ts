@@ -42,6 +42,7 @@ export function visitMutationClause(
 ): NqlMutationClause {
 	if (ctx.selectClause) return visit(asCstNode(ctx.selectClause[0]!));
 	if (ctx.bindClause) return visit(asCstNode(ctx.bindClause[0]!));
+	/* v8 ignore next — defensive: parser guarantees selectClause or bindClause -- @preserve */
 	unreachable('Unknown mutation clause');
 }
 
@@ -63,6 +64,7 @@ export function visitMutation(ctx: CstContext, visit: VisitFn): NqlMutation {
 	if (ctx.deleteStmt) return visit(asCstNode(ctx.deleteStmt[0]!));
 	if (ctx.upsertFromStmt) return visit(asCstNode(ctx.upsertFromStmt[0]!));
 	if (ctx.upsertStmt) return visit(asCstNode(ctx.upsertStmt[0]!));
+	/* v8 ignore next — defensive: parser guarantees one of the mutation alternatives -- @preserve */
 	unreachable('Unknown mutation type');
 }
 
@@ -84,9 +86,11 @@ export function visitInsertStmt(ctx: CstContext, visit: VisitFn): NqlMutation {
 		}
 	}
 
+	/* v8 ignore start — defensive: parser guarantees at least one assignmentList or valuesTuple -- @preserve */
 	if (rows.length === 0) {
 		throw new Error('Insert statement must have at least one row');
 	}
+	/* v8 ignore stop -- @preserve */
 
 	return { type: 'insert', table, rows };
 }
@@ -95,12 +99,14 @@ export function visitInsertFromStmt(
 	ctx: CstContext,
 	visit: VisitFn,
 ): NqlMutation {
+	/* v8 ignore start — defensive: parser guarantees target and source identifiers -- @preserve */
 	if (!ctx.identSegment || ctx.identSegment.length < 2) {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			'Insert FROM missing target or source table',
 		);
 	}
+	/* v8 ignore stop -- @preserve */
 	const target = visit(asCstNode(ctx.identSegment[0]!)) as string;
 	const source = visit(asCstNode(ctx.identSegment[1]!)) as string;
 
@@ -166,12 +172,14 @@ export function visitUpsertFromStmt(
 	ctx: CstContext,
 	visit: VisitFn,
 ): NqlMutation {
+	/* v8 ignore start — defensive: parser guarantees target and source identifiers -- @preserve */
 	if (!ctx.identSegment || ctx.identSegment.length < 2) {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			'Upsert FROM missing target or source table',
 		);
 	}
+	/* v8 ignore stop -- @preserve */
 
 	const conflictColumns: string[] = [];
 	let sourceIndex: number;
@@ -183,12 +191,13 @@ export function visitUpsertFromStmt(
 	} else if (ctx.identSegment.length >= 3) {
 		conflictColumns.push(visit(asCstNode(ctx.identSegment[1]!)));
 		sourceIndex = 2;
-	} else {
+	} /* v8 ignore start — defensive: parser guarantees identList or >= 3 identSegments -- @preserve */ else {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			'Upsert FROM missing conflict columns or source table',
 		);
 	}
+	/* v8 ignore stop -- @preserve */
 
 	const target = visit(asCstNode(ctx.identSegment[0]!)) as string;
 	const source = visit(asCstNode(ctx.identSegment[sourceIndex]!)) as string;

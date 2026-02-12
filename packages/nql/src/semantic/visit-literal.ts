@@ -33,6 +33,7 @@ export function visitLiteral(ctx: CstContext, visit: VisitFn): NqlLiteral {
 	if (ctx.rangeLiteral) {
 		return visit(asCstNode(ctx.rangeLiteral[0]!)) as NqlRangeLiteral;
 	}
+	/* v8 ignore next — defensive: parser guarantees one of the literal alternatives -- @preserve */
 	unreachable('Invalid literal');
 }
 
@@ -70,12 +71,14 @@ export function visitRangeValue(ctx: CstContext): string {
 		return getImage(ctx.RangeValue[0]!);
 	}
 	const numToken = ctx.NumberLiteral;
+	/* v8 ignore start — defensive: parser guarantees RangeValue or NumberLiteral -- @preserve */
 	if (!numToken) {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			'Range value must contain RangeValue or NumberLiteral',
 		);
 	}
+	/* v8 ignore stop -- @preserve */
 	const minus = ctx.Minus ? '-' : '';
 	const num = getImage(numToken[0]!);
 	return `${minus}${num}`;
@@ -93,10 +96,12 @@ export function visitIdentSegment(ctx: CstContext): string {
 	if (ctx.Child) return getImage(ctx.Child[0]!);
 	if (ctx.Ascendant) return getImage(ctx.Ascendant[0]!);
 	if (ctx.Descendant) return getImage(ctx.Descendant[0]!);
+	/* v8 ignore start — defensive: parser guarantees one of the identifier alternatives -- @preserve */
 	throw new NqlSemanticException(
 		NqlErrorCodes.SEM_INVALID_SYNTAX,
 		'Invalid identifier',
 	);
+	/* v8 ignore stop -- @preserve */
 }
 
 export function visitIdentList(ctx: CstContext, visit: VisitFn): string[] {
