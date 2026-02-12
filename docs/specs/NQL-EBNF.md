@@ -46,7 +46,8 @@ query_clause      = where_clause
                   | offset_clause
                   | flat_clause
                   | set_clause
-                  | bind_clause ;
+                  | bind_clause
+                  | lock_clause ;
 
 (* Clauses *)
 where_clause      = "where" boolean_expr ;
@@ -58,6 +59,15 @@ limit_clause      = "limit" [ ident_segment ] NUMBER ;
                     (* Without ident: top-level LIMIT; with ident: per-include limit *)
 offset_clause     = "offset" NUMBER ;
 flat_clause       = "flat" ;  (* Forces JOIN strategy instead of json_agg *)
+
+(* Row-level locking — E15 *)
+lock_clause       = lock_strength [ lock_wait_policy ] ;
+lock_strength     = "for" "update"
+                  | "for" "share"
+                  | "for" "no" "key" "update"
+                  | "for" "key" "share" ;
+lock_wait_policy  = "skip" "locked"
+                  | "nowait" ;
 
 (* Set operations — TERMINAL in pipeline: no further clauses after set_clause *)
 set_clause        = set_op [ "all" ] set_operand ;
@@ -542,8 +552,8 @@ upsert_from_stmt  = "upsert" "into" ident_segment "on" ident_list
 
 (* INSERT FROM clause for FK lookup and bulk inserts *)
 from_clause       = "from" [ "each" ] ident_segment [ "as" ident_segment ]
-                    [ where_clause ] [ for_update_clause ] ;
-for_update_clause = "for" "update" [ "skip" "locked" ] ;
+                    [ where_clause ] [ lock_clause ] ;
+                    (* lock_clause defined in § Query clauses above *)
 
 assignment_list   = assignment { "," assignment } ;
 assignment        = ident_segment "=" ( expr | "default" | "null" | range_literal ) ;

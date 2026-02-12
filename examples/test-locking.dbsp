@@ -1,0 +1,67 @@
+# E15 — Row-Level Locking Queries
+# Tests FOR UPDATE / FOR SHARE with all strengths and wait policies
+# NQL v2.1 Syntax
+
+# =============================================================================
+# Setup: Create isolated schema and load data
+# =============================================================================
+
+# Drop existing schema
+!DROP SCHEMA IF EXISTS test_locking CASCADE;
+
+# Create fresh schema
+!CREATE SCHEMA IF NOT EXISTS test_locking;
+
+# Set schema context
+.use test_locking
+
+# Import DDL and seed data
+.import examples/test-locking.ddl.sql
+.import examples/test-locking.seed.sql
+
+# =============================================================================
+# Explore
+# =============================================================================
+.tables
+
+# =============================================================================
+# Lock strengths (queries 6–9)
+# =============================================================================
+
+# FOR UPDATE — exclusive row lock
+jobs | for update
+
+# FOR SHARE — shared row lock
+jobs | for share
+
+# FOR NO KEY UPDATE — exclusive but allows key-share
+jobs | for no key update
+
+# FOR KEY SHARE — shared key lock
+jobs | for key share
+
+# =============================================================================
+# Wait policies (queries 10–12)
+# =============================================================================
+
+# FOR UPDATE SKIP LOCKED — skip already-locked rows (job queue pattern)
+jobs | for update skip locked
+
+# FOR UPDATE NOWAIT — fail immediately if locked
+jobs | for update nowait
+
+# FOR SHARE SKIP LOCKED
+jobs | for share skip locked
+
+# =============================================================================
+# Job queue pattern (query 13)
+# =============================================================================
+
+# Claim next pending job: filter + order + limit + lock
+jobs | where status = 'pending' | order by priority desc | limit 1 | for update skip locked
+
+# =============================================================================
+# No lock (query 14) — baseline
+# =============================================================================
+
+jobs

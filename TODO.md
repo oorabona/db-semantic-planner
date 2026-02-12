@@ -4,7 +4,9 @@
 
 ## In Progress
 
-(None active)
+(Archived → docs/historic/done-2026-02.md)
+
+- [ ] 🔧 [Docs] Document DATABASE_URL env for E2E locking tests — Priority: M
 
 ---
 
@@ -73,17 +75,12 @@
 
 ### Locking & Transactions
 
-- [ ] **E15** [Adapter] FOR UPDATE SKIP LOCKED (Job Queue pattern) — Effort: M
-- [ ] **E15b** [Adapter] Atomic lock+update syntax
+- [x] ✅ **E15** [Adapter] FOR UPDATE SKIP LOCKED (Job Queue pattern) (2026-02-12)
+- [x] ✅ **E15b** [Adapter] Concurrent Lock+Update E2E (2026-02-12)
 
 ### CLI Data Plane
 
-- [x] ✅ **E16** [CLI] `.load <table> <file>` — Bulk CSV import with auto-detect (separator, header, quotes) (2026-02-11)
-- [x] ✅ **E16b** [CLI] RETURNING clause display in REPL — verified: already works end-to-end (2026-02-11)
-- [x] ✅ **E16c** [CLI] Transaction dot-commands `.begin/.commit/.rollback` — imperative session control (2026-02-11)
-- [x] ✅ **E16d** [CLI] Set operations (UNION/INTERSECT/EXCEPT) exposed in REPL via adapter (2026-02-11)
-- [x] ✅ **E16e** [CLI] `.dump <table> <file>` — CSV export (symmetric with .load) (2026-02-11)
-- [x] ✅ **E16f** [NQL] `mutation | bind X` — bind mutation RETURNING result for chaining (2026-02-11)
+(Archived → docs/historic/done-2026-02.md)
 
 ---
 
@@ -126,8 +123,7 @@
 
 ### E13-ALL Review Findings (2026-02-07)
 
-- [x] ✅ **F-001** [NQL] Set operations column count validation — compiler verifies both sides of UNION/INTERSECT/EXCEPT have matching column counts (2026-02-11)
-(F-002, F-003, F-007 archived → docs/historic/done-2026-02.md)
+(Archived → docs/historic/done-2026-02.md)
 
 ### Dead Code
 

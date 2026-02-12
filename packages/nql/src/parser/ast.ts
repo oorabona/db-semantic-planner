@@ -63,7 +63,8 @@ export type NqlClause =
 	| NqlLimitClause
 	| NqlOffsetClause
 	| NqlBindClause
-	| NqlSetClause;
+	| NqlSetClause
+	| NqlLockClause;
 
 /**
  * Where clause - position determines compilation:
@@ -130,6 +131,16 @@ export interface NqlSetClause {
 	right?: NqlQuery;
 	/** Bound name reference (via | bind) */
 	boundName?: string;
+}
+
+/**
+ * Lock clause (E15): FOR UPDATE | FOR SHARE | FOR NO KEY UPDATE | FOR KEY SHARE
+ * with optional wait policy: SKIP LOCKED | NOWAIT
+ */
+export interface NqlLockClause {
+	type: 'lock';
+	strength: 'forUpdate' | 'forShare' | 'forNoKeyUpdate' | 'forKeyShare';
+	waitPolicy: 'block' | 'skipLocked' | 'noWait';
 }
 
 // ============================================================

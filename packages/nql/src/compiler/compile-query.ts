@@ -6,6 +6,7 @@
 
 import type {
 	IncludeIntent,
+	LockIntent,
 	Mutable,
 	OrderByIntent,
 	QueryIntent,
@@ -17,6 +18,7 @@ import type {
 import type {
 	NqlGroupByClause,
 	NqlLimitClause,
+	NqlLockClause,
 	NqlOffsetClause,
 	NqlOrderByClause,
 	NqlOrderItem,
@@ -71,6 +73,7 @@ export function compileQuery(
 	let limit: number | undefined;
 	let offset: number | undefined;
 	let flatMode = false;
+	let lock: LockIntent | undefined;
 	const includeLimits = new Map<string, number>();
 
 	for (let i = 0; i < query.clauses.length; i++) {
@@ -128,6 +131,11 @@ export function compileQuery(
 			case 'offset':
 				offset = (clause as NqlOffsetClause).count;
 				break;
+			case 'lock': {
+				const lc = clause as NqlLockClause;
+				lock = { strength: lc.strength, waitPolicy: lc.waitPolicy };
+				break;
+			}
 			case 'bind':
 				// Bind is a metadata marker — extracted by extractBindName(), no compilation needed
 				break;
@@ -212,6 +220,7 @@ export function compileQuery(
 		...(distinct !== undefined && { distinct }),
 		...(limit !== undefined && { limit }),
 		...(offset !== undefined && { offset }),
+		...(lock !== undefined && { lock }),
 	};
 }
 
