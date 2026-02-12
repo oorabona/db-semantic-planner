@@ -78,10 +78,12 @@
 
 ### CLI Data Plane
 
-- [ ] **E16** [CLI] `.load <table> <file>` — Bulk CSV/JSON import
-- [ ] **E16b** [CLI] RETURNING clause support in REPL
-- [ ] **E16c** [CLI] Transaction support (BEGIN/COMMIT/ROLLBACK)
-- [ ] **E16d** [CLI] Set operations exposed in REPL
+- [ ] **E16** [CLI] `.load <table> <file>` — Bulk CSV import with auto-detect (separator, header, quotes)
+- [ ] **E16b** [CLI] RETURNING clause display in REPL — verify + document
+- [ ] **E16c** [CLI] Transaction dot-commands `.begin/.commit/.rollback` — imperative session control
+- [ ] **E16d** [CLI] Set operations (UNION/INTERSECT/EXCEPT) exposed in REPL via adapter
+- [ ] **E16e** [CLI] `.dump <table> <file>` — CSV export (symmetric with .load)
+- [ ] **E16f** [NQL] `mutation | bind X` — bind mutation RETURNING result for chaining
 
 ---
 

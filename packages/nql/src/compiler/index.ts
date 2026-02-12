@@ -146,6 +146,7 @@ export class NqlCompiler {
 
 		// Multi-statement: build bindings map, resolve references
 		const bindings = new Map<string, QueryIntent>();
+		const mutationBindings = new Map<string, MutationIntent>();
 		let lastResult: CompileResult = {};
 
 		for (const stmt of program.statements) {
@@ -155,13 +156,31 @@ export class NqlCompiler {
 			if (bindName) {
 				if (lastResult.query) {
 					bindings.set(bindName, lastResult.query);
+				} else if (lastResult.mutation?.returning?.length) {
+					// Mutation with RETURNING: store the original mutation for CTE compilation
+					// and a synthetic QueryIntent for reference resolution in WHERE clauses
+					mutationBindings.set(bindName, lastResult.mutation);
+					bindings.set(bindName, {
+						type: 'select',
+						from: lastResult.mutation.table,
+						select: {
+							type: 'fields',
+							fields: [...lastResult.mutation.returning],
+						},
+					});
 				}
 				// Note: set operations cannot currently be bound as CTE sources
+				// Note: mutations without RETURNING cannot be bound (no output to reference)
 			}
 		}
 
+		const hasMutationBindings = mutationBindings.size > 0;
 		if (bindings.size > 0) {
-			return { ...lastResult, bindings };
+			return {
+				...lastResult,
+				bindings,
+				...(hasMutationBindings && { mutationBindings }),
+			};
 		}
 		return lastResult;
 	}
