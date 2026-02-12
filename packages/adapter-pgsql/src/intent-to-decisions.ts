@@ -6,12 +6,12 @@
  */
 
 import type {
-	Mutable,
 	OrderByIntent,
 	QueryIntent,
 	SelectIntent,
 	WhereIntent,
 } from '@dbsp/types';
+import type { Mutable } from '@dbsp/types/internal';
 import type { PlanDecision } from './compiler.js';
 import type { RangeValue, WindowOver } from './handlers/types.js';
 

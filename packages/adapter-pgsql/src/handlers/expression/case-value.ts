@@ -16,7 +16,7 @@ import type { CompilerState } from '../types.js';
  * The compiler provides this to delegate back to compileCaseExpression;
  * the DX handler omits it (nested CASE falls through to default parameterization).
  */
-export type NestedCaseHandler = (expr: Record<string, unknown>) => Node;
+type NestedCaseHandler = (expr: Record<string, unknown>) => Node;
 
 /**
  * Resolve a CASE THEN/ELSE value to an AST node.

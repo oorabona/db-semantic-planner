@@ -13,4 +13,4 @@ export {
 	PlanOutput,
 	SqlOutput,
 } from './OutputDisplay.js';
-export { SchemaSidebar, SplitView } from './SplitView.js';
+

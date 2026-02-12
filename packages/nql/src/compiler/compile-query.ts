@@ -7,7 +7,6 @@
 import type {
 	IncludeIntent,
 	LockIntent,
-	Mutable,
 	OrderByIntent,
 	QueryIntent,
 	SelectIntent,
@@ -15,6 +14,7 @@ import type {
 	SetOperationType,
 	WhereIntent,
 } from '@dbsp/types';
+import type { Mutable } from '@dbsp/types/internal';
 import type {
 	NqlGroupByClause,
 	NqlLimitClause,

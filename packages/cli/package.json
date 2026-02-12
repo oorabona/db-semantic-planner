@@ -38,11 +38,9 @@
 		"@dbsp/adapter-pgsql": "workspace:*",
 		"@dbsp/core": "workspace:*",
 		"@dbsp/nql": "workspace:*",
-		"@inkjs/ui": "catalog:",
 		"@oclif/table": "^0.5.1",
 		"commander": "catalog:",
 		"ink": "catalog:",
-		"ink-table": "catalog:",
 		"react": "catalog:"
 	},
 	"peerDependencies": {

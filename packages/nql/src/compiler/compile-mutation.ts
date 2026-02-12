@@ -68,7 +68,7 @@ export function compileMutationPipeline(
 /**
  * Compile a single mutation to MutationIntent.
  */
-export function compileMutation(
+function compileMutation(
 	mutation: NqlMutation,
 	ctx: CompilerContext,
 	fns: CompilerFns,

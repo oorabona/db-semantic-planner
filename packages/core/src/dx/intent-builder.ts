@@ -7,7 +7,7 @@
  * @module intent-builder
  */
 
-import type { Mutable } from '@dbsp/types';
+import type { Mutable } from '@dbsp/types/internal';
 import type {
 	AggregateIntent,
 	ColumnExpressionIntent,

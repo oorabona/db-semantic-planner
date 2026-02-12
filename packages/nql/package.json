@@ -29,7 +29,6 @@
 		"chevrotain": "catalog:"
 	},
 	"devDependencies": {
-		"@dbsp/core": "workspace:*",
 		"tsup": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"

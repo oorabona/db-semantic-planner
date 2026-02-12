@@ -8,7 +8,7 @@
 import type { ParseResult } from '@pgsql/types';
 import { deparseSync, parseSync } from 'pgsql-parser';
 
-export interface CompareResult {
+interface CompareResult {
 	readonly equal: boolean;
 	readonly differences: readonly string[];
 }

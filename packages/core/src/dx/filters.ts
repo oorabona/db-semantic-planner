@@ -23,7 +23,7 @@
  * ```
  */
 
-import type { Mutable } from '@dbsp/types';
+import type { Mutable } from '@dbsp/types/internal';
 import type {
 	ComparisonOperator,
 	RecursiveExistsOptions,

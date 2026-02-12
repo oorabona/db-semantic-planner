@@ -411,22 +411,4 @@ export function createTypedOrm(
 }
 
 // ============================================================================
-// Integration with existing ORM
-// ============================================================================
 
-/**
- * Add typed query methods to an existing ORM instance.
- * This allows gradual migration from string-based to type-safe queries.
- *
- * @param model - The ModelIR
- * @param adapter - Optional adapter
- * @param schemaName - Optional schema name
- * @returns Object with from() method
- */
-export function createTypedQueryExtension(
-	model: ModelIR,
-	adapter?: Adapter<unknown>,
-	schemaName?: string,
-): TypedOrm {
-	return createTypedOrm(model, adapter, schemaName);
-}

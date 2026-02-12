@@ -6,10 +6,10 @@
  * Expansion: always half-open intervals [start, end) — >= start AND < end.
  */
 
-export const DATE_RANGE_YEAR = /^(\d{4})$/;
-export const DATE_RANGE_QUARTER = /^(\d{4})-Q([1-4])$/;
-export const DATE_RANGE_MONTH = /^(\d{4})-(\d{2})$/;
-export const DATE_RANGE_WEEK = /^(\d{4})-W(\d{2})$/;
+const DATE_RANGE_YEAR = /^(\d{4})$/;
+const DATE_RANGE_QUARTER = /^(\d{4})-Q([1-4])$/;
+const DATE_RANGE_MONTH = /^(\d{4})-(\d{2})$/;
+const DATE_RANGE_WEEK = /^(\d{4})-W(\d{2})$/;
 
 /**
  * Check if a string matches any date range pattern (YYYY, YYYY-QN, YYYY-MM, YYYY-WNN).

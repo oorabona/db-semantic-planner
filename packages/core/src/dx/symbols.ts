@@ -114,7 +114,6 @@ export type TableMetaKey = typeof TABLE_META;
 export type ColumnMetaKey = typeof COLUMN_META;
 export type RelationMetaKey = typeof RELATION_META;
 export type BrandKey = typeof BRAND;
-export type RelationPathKey = typeof RELATION_PATH;
 
 // ============================================================================
 // Type Guards for Symbol-keyed Properties

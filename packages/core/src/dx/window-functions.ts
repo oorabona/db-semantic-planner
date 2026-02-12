@@ -16,7 +16,7 @@
  * ```
  */
 
-import type { Mutable } from '@dbsp/types';
+import type { Mutable } from '@dbsp/types/internal';
 import type { WindowFunction, WindowIntent } from '../intent-ast.js';
 import { getColumnName } from './column-utils.js';
 import type { ColumnRef } from './table-ref.js';

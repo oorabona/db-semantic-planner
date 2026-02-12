@@ -20,7 +20,7 @@ export interface NqlError {
 }
 
 /** Lexer errors (tokenization failures) */
-export interface NqlLexerError extends NqlError {
+interface NqlLexerError extends NqlError {
 	code: `ERR-LEX-${string}`;
 	unexpectedChar?: string | undefined;
 }

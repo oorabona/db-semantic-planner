@@ -529,7 +529,7 @@ export function leftJoin(
 // SELECT Statement
 // ============================================================================
 
-export interface SelectOptions {
+interface SelectOptions {
 	targetList: Node[];
 	from?: Node[];
 	where?: Node;

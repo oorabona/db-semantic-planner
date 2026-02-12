@@ -15,7 +15,7 @@ export type CstContext = Record<string, (CstNode | IToken)[] | undefined>;
 export type VisitFn = (node: CstNode) => any;
 
 /** Type guard to check if value is a CstNode (has children property) */
-export function isCstNode(value: CstNode | IToken): value is CstNode {
+function isCstNode(value: CstNode | IToken): value is CstNode {
 	return 'children' in value;
 }
 
