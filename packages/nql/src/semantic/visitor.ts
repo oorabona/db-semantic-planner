@@ -83,6 +83,7 @@ import {
 	visitGroupClause,
 	visitJoinSpec,
 	visitLimitClause,
+	visitLockClause,
 	visitOffsetClause,
 	visitOrderClause,
 	visitOrderItem,
@@ -183,6 +184,9 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 	orderItem(ctx: CstContext) {
 		return visitOrderItem(ctx, this.v);
+	}
+	lockClause(ctx: CstContext) {
+		return visitLockClause(ctx);
 	}
 
 	// -- Boolean + comparison --

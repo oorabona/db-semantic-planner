@@ -146,6 +146,30 @@ export const Intersect = createToken({
 });
 export const Except = createToken({ name: 'Except', pattern: /except\b/i });
 
+// Lock clause keywords (E15)
+// Multi-word tokens — must come before single-word keywords in allTokens
+export const ForNoKeyUpdate = createToken({
+	name: 'ForNoKeyUpdate',
+	pattern: /for\s+no\s+key\s+update\b/i,
+});
+export const ForKeyShare = createToken({
+	name: 'ForKeyShare',
+	pattern: /for\s+key\s+share\b/i,
+});
+export const ForUpdate = createToken({
+	name: 'ForUpdate',
+	pattern: /for\s+update\b/i,
+});
+export const ForShare = createToken({
+	name: 'ForShare',
+	pattern: /for\s+share\b/i,
+});
+export const SkipLocked = createToken({
+	name: 'SkipLocked',
+	pattern: /skip\s+locked\b/i,
+});
+export const NoWait = createToken({ name: 'NoWait', pattern: /nowait\b/i });
+
 // ============================================================
 // PSEUDO-COLUMN KEYWORDS (Self-Referential Traversal)
 // ============================================================
@@ -263,6 +287,12 @@ export const allTokens = [
 	GroupBy,
 	OrderBy,
 	PartitionBy,
+	// Lock clause multi-word tokens (E15)
+	ForNoKeyUpdate, // Must come before ForUpdate (longer match)
+	ForKeyShare, // Must come before ForShare (longer match)
+	ForUpdate,
+	ForShare,
+	SkipLocked,
 
 	// Keywords (before Identifier!)
 	// IMPORTANT: Order matters for prefix conflicts!
@@ -292,6 +322,7 @@ export const allTokens = [
 	All,
 	Some,
 	None,
+	NoWait, // Lock wait policy (E15) — single word, no prefix conflict
 	Every,
 	Intersect, // Must come before In/Into (in is prefix of intersect)
 	Insert, // Must come before In

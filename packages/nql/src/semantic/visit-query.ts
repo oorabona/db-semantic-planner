@@ -10,6 +10,7 @@ import type {
 	NqlExpression,
 	NqlJoinParam,
 	NqlJoinSpec,
+	NqlLockClause,
 	NqlOrderItem,
 	NqlProgram,
 	NqlQuery,
@@ -69,6 +70,7 @@ export function visitQueryClause(ctx: CstContext, visit: VisitFn): NqlClause {
 	if (ctx.offsetClause) return visit(asCstNode(ctx.offsetClause[0]!));
 	if (ctx.setClause) return visit(asCstNode(ctx.setClause[0]!));
 	if (ctx.bindClause) return visit(asCstNode(ctx.bindClause[0]!));
+	if (ctx.lockClause) return visit(asCstNode(ctx.lockClause[0]!));
 	unreachable('Unknown query clause');
 }
 
@@ -241,6 +243,21 @@ export function visitOrderItem(ctx: CstContext, visit: VisitFn): NqlOrderItem {
 	const expression = visit(asCstNode(ctx.expression[0]!));
 	const direction: 'asc' | 'desc' = ctx.Desc ? 'desc' : 'asc';
 	return { expression, direction };
+}
+
+export function visitLockClause(ctx: CstContext): NqlLockClause {
+	let strength: NqlLockClause['strength'];
+	if (ctx.ForUpdate) strength = 'forUpdate';
+	else if (ctx.ForShare) strength = 'forShare';
+	else if (ctx.ForNoKeyUpdate) strength = 'forNoKeyUpdate';
+	else if (ctx.ForKeyShare) strength = 'forKeyShare';
+	else unreachable('Lock clause missing strength keyword');
+
+	let waitPolicy: NqlLockClause['waitPolicy'] = 'block';
+	if (ctx.SkipLocked) waitPolicy = 'skipLocked';
+	else if (ctx.NoWait) waitPolicy = 'noWait';
+
+	return { type: 'lock', strength, waitPolicy };
 }
 
 export function visitSetClause(ctx: CstContext, visit: VisitFn): NqlSetClause {

@@ -1445,6 +1445,37 @@ Supports dotted paths for nested relations — all ancestors in the path are aut
 users | select *, userRoles.* | limit userRoles.role 1
 ```
 
+### Row-Level Locking (FOR UPDATE / FOR SHARE)
+
+Row-level locks are used in transaction contexts to prevent concurrent modifications. The classic use case is the **job queue pattern**: claim a pending row atomically.
+
+**Lock strengths:**
+
+```nql
+jobs | for update                 # Exclusive lock
+jobs | for share                  # Shared lock
+jobs | for no key update          # Exclusive (non-key columns only)
+jobs | for key share              # Shared (key columns only)
+```
+
+**Wait policies:**
+
+```nql
+jobs | for update skip locked     # Skip already-locked rows
+jobs | for update nowait          # Error immediately if locked
+```
+
+**Job queue pattern** — select + lock + skip in one query:
+
+```nql
+jobs | where status = 'pending' | order by created_at asc | limit 1 | for update skip locked
+```
+
+**Notes:**
+- Lock clauses are only effective within a transaction — a warning is emitted if used outside one
+- `FOR UPDATE/SHARE` is incompatible with `GROUP BY` (SQL standard restriction)
+- When the query includes JOINs, the lock is automatically scoped to the root table via `FOR UPDATE OF`
+
 ### Raw SQL Escape Hatch
 
 For DDL or administrative commands not covered by NQL, prefix with `!` to pass raw SQL directly to the database:
@@ -1519,6 +1550,10 @@ table                              -- table scan
   | limit <relation> N             -- per-include limit (LATERAL)
   | select distinct                -- deduplicate rows
   | bind <name>                    -- capture result as CTE
+  | for update [skip locked|nowait] -- row-level lock (E15)
+  | for share [skip locked|nowait]  -- shared row lock
+  | for no key update               -- non-key exclusive lock
+  | for key share                   -- key-only shared lock
 ```
 
 ### WHERE Conditions

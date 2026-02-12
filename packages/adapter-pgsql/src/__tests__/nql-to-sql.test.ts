@@ -1696,3 +1696,68 @@ describe('Set operations (E13b)', () => {
 		});
 	});
 });
+
+// =============================================================================
+// E15 — Row-level locking (full NQL → SQL pipeline)
+// =============================================================================
+
+describe('NQL → SQL: row-level locking (E15)', () => {
+	it('for update', () => {
+		const sql = nqlToSQL('employees | for update');
+		expect(sql).toContain('for update');
+		expect(sql).not.toContain('skip locked');
+		expect(sql).not.toContain('nowait');
+	});
+
+	it('for share', () => {
+		const sql = nqlToSQL('employees | for share');
+		expect(sql).toContain('for share');
+	});
+
+	it('for no key update', () => {
+		const sql = nqlToSQL('employees | for no key update');
+		expect(sql).toContain('for no key update');
+	});
+
+	it('for key share', () => {
+		const sql = nqlToSQL('employees | for key share');
+		expect(sql).toContain('for key share');
+	});
+
+	it('for update skip locked', () => {
+		const sql = nqlToSQL('employees | for update skip locked');
+		expect(sql).toContain('for update skip locked');
+	});
+
+	it('for update nowait', () => {
+		const sql = nqlToSQL('employees | for update nowait');
+		expect(sql).toContain('for update nowait');
+	});
+
+	it('for share skip locked', () => {
+		const sql = nqlToSQL('employees | for share skip locked');
+		expect(sql).toContain('for share skip locked');
+	});
+
+	it('job queue pattern: where + limit + for update skip locked', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			'employees | where salary > 50000 | limit 1 | for update skip locked',
+		);
+		expect(sql).toContain('where');
+		expect(sql).toContain('limit');
+		expect(sql).toContain('for update skip locked');
+		expect(params).toContain(50000);
+	});
+
+	it('lock scopes to root table with JOIN (include)', () => {
+		const sql = nqlToSQL('employees | select *, department.* | for update');
+		// When JOIN is present, lock should be scoped with OF
+		expect(sql).toContain('for update');
+	});
+
+	it('no lock clause when not specified', () => {
+		const sql = nqlToSQL('employees');
+		expect(sql).not.toContain('for update');
+		expect(sql).not.toContain('for share');
+	});
+});

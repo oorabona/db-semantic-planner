@@ -8,6 +8,7 @@
 
 export * from './intent/expression-intent.js';
 export * from './intent/include-intent.js';
+export * from './intent/lock-intent.js';
 export * from './intent/mutation-intent.js';
 export * from './intent/operators.js';
 export * from './intent/query-intent.js';
