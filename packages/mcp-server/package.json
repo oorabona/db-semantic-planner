@@ -25,10 +25,8 @@
 		"dev": "tsx src/index.ts"
 	},
 	"dependencies": {
-		"@dbsp/adapter-pgsql": "workspace:*",
 		"@dbsp/core": "workspace:*",
-		"@modelcontextprotocol/sdk": "catalog:",
-		"hono": "catalog:"
+		"@modelcontextprotocol/sdk": "catalog:"
 	},
 	"peerDependencies": {
 		"tsx": "^4.0.0"

@@ -21,14 +21,14 @@ import type { PlanDecision, SimplifiedPlanReport } from './compiler.js';
 // Types
 // ============================================================================
 
-export type ExistsIntent = {
+type ExistsIntent = {
 	kind: 'exists' | 'notExists' | 'relationFilter';
 	relation: string | readonly string[];
 	where?: unknown;
 	mode?: 'some' | 'none' | 'every';
 };
 
-export type ResolvedRelation = {
+type ResolvedRelation = {
 	target: string;
 	foreignKey: string | undefined;
 	relationType: 'belongsTo' | 'hasMany' | 'hasOne' | undefined;

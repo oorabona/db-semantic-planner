@@ -9,8 +9,6 @@
 
 // Adapter types (interfaces, options, dump)
 export * from './adapter.js';
-// Builder types (for internal use across packages)
-export type { IntentBuilder, Mutable } from './builders.js';
 // Dialect types (capabilities, column type unions)
 export * from './dialects.js';
 // IntentAST types (shared between core and nql)

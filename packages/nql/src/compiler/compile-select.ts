@@ -94,7 +94,7 @@ export function compileSelectClause(
 /**
  * Compile a single SELECT item to an ExpressionIntent.
  */
-export function compileSelectExpression(
+function compileSelectExpression(
 	item: NqlSelectItem,
 	ctx: CompilerContext,
 	fns: CompilerFns,
@@ -464,7 +464,7 @@ function compileCaseExpression(
 /**
  * Compile an NqlExpression to ExpressionIntent for use in CASE results.
  */
-export function compileExpressionToIntent(
+function compileExpressionToIntent(
 	expr: NqlExpression,
 	ctx: CompilerContext,
 	fns: CompilerFns,

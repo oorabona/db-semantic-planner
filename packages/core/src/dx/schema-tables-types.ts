@@ -322,11 +322,3 @@ export type InferTables<TSchema extends SchemaDefinition> = {
 		: never;
 };
 
-/**
- * Extract the inferred column types for a table (for AllColumns).
- */
-export type InferTableColumnTypes<TTable extends TableDef> = {
-	[K in keyof ExtractColumns<TTable> as K extends string
-		? K
-		: never]: InferColumnTSType<TTable[K]>;
-};

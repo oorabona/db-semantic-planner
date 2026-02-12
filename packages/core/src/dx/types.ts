@@ -37,10 +37,7 @@ export type {
 	PaginateOptions,
 	StreamOptions,
 } from './pagination-types.js';
-export type {
-	QueryBuilder,
-	SelectFields,
-} from './query-builder-types.js';
+export type { QueryBuilder } from './query-builder-types.js';
 
 // ============================================================================
 // Expression & Column Types

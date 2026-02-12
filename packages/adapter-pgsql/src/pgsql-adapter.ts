@@ -24,7 +24,6 @@ import type {
 	InsertFromIntent,
 	InsertIntent,
 	ModelIR,
-	Mutable,
 	PlanReport,
 	RecursivePlanReport,
 	SubqueryIncludeInfo,
@@ -33,6 +32,7 @@ import type {
 	UpsertIntent,
 	WhereIntent,
 } from '@dbsp/types';
+import type { Mutable } from '@dbsp/types/internal';
 import type { Node, SelectStmt } from '@pgsql/types';
 import type { Pool, PoolClient } from 'pg';
 import {

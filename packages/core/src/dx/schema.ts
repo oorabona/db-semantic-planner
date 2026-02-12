@@ -15,7 +15,8 @@
  * ```
  */
 
-import type { Mutable, WhereIntent } from '@dbsp/types';
+import type { WhereIntent } from '@dbsp/types';
+import type { Mutable } from '@dbsp/types/internal';
 import type { DbCasing } from '../adapter.js';
 import { ModelIRImpl } from '../model-impl.js';
 import type {

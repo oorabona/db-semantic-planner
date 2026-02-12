@@ -7,7 +7,7 @@
  * @module result-hydrator
  */
 
-import type { Mutable } from '@dbsp/types';
+import type { Mutable } from '@dbsp/types/internal';
 import type {
 	Adapter,
 	CompileOptions,

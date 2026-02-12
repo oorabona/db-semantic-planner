@@ -5,7 +5,7 @@
  * This enables sync createOrm usage with codegen-first schemas.
  */
 
-import type { Mutable } from '@dbsp/types';
+import type { Mutable } from '@dbsp/types/internal';
 import * as v from 'valibot';
 import { ModelIRImpl } from '../model-impl.js';
 import {
@@ -87,7 +87,7 @@ export type GeneratedRelationKind = 'belongsTo' | 'hasMany' | 'manyToMany';
 /**
  * Include strategy for relations.
  */
-export type GeneratedIncludeStrategy =
+type GeneratedIncludeStrategy =
 	| 'join'
 	| 'subquery'
 	| 'cte'

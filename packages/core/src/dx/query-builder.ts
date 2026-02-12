@@ -1,5 +1,5 @@
 /* biome-ignore-all lint/style/noNonNullAssertion: Builder internals use non-null assertions on validated state */
-import type { Mutable } from '@dbsp/types';
+import type { Mutable } from '@dbsp/types/internal';
 import type { Adapter, Dump } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type {
@@ -45,6 +45,7 @@ import {
 	includeOptionsToIntent,
 	isRecursiveIncludeOptions,
 	parseDotNotationInclude,
+	type RecursiveIncludeConfig,
 	validateRecursiveInclude,
 } from './intent-builder.js';
 import {
@@ -71,15 +72,6 @@ import {
 	type SortDirection,
 	type StreamOptions,
 } from './types.js';
-
-/**
- * Configuration for a recursive include.
- * Stores the relation name and recursive options for later processing.
- */
-export interface RecursiveIncludeConfig {
-	readonly relation: string;
-	readonly options: RecursiveIncludeOptions;
-}
 
 /**
  * Internal query builder implementation.

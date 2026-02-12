@@ -175,7 +175,7 @@ export function getSelfRefInverseName(belongsToName: string): string {
  * Pseudo-column metadata for a self-referential FK.
  * Exported for use by schema builder.
  */
-export interface SelfRefPseudoColumn {
+interface SelfRefPseudoColumn {
 	/** FK column name (e.g., 'parentId', 'managerId') */
 	foreignKeyColumn: string;
 	/** Target column (usually 'id') */
