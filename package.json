@@ -30,6 +30,7 @@
 		"@testcontainers/postgresql": "catalog:",
 		"@types/node": "catalog:",
 		"@types/pg": "catalog:",
+		"@vitest/coverage-v8": "^4.0.18",
 		"pg": "catalog:",
 		"testcontainers": "^11.11.0",
 		"tsx": "catalog:",
