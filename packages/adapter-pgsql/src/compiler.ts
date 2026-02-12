@@ -24,6 +24,7 @@ import {
 	insertStmt,
 	integerNode,
 	leftJoin,
+	mapLockToAst,
 	notExpr,
 	orExpr,
 	rangeVar,
@@ -205,6 +206,8 @@ export interface SimplifiedPlanReport {
 	readonly schema?: string;
 	/** If true, wrap result in SELECT EXISTS(SELECT 1 ...) AS "exists" */
 	readonly existsWrap?: boolean;
+	/** Row-level lock (FOR UPDATE/SHARE/etc.) */
+	readonly lock?: import('@dbsp/types').LockIntent;
 }
 
 /**
@@ -923,6 +926,29 @@ export class PlanCompiler {
 		if (distinct) options.distinct = distinct;
 		if (this.pendingCtes.length > 0) {
 			options.withClause = { ctes: this.pendingCtes, recursive: false };
+		}
+
+		// Row-level locking (E15: FOR UPDATE/SHARE/etc.)
+		if (plan.lock) {
+			const mapped = mapLockToAst(plan.lock);
+			// INV-E15-05: When query has JOINs (includes), scope lock to root table
+			// to prevent lock amplification on joined tables.
+			const hasJoins = this.rawJoins.length > 0;
+			options.lockingClause = {
+				...mapped,
+				...(hasJoins
+					? {
+							lockedRels: [
+								rangeVar(
+									plan.rootTable,
+									undefined,
+									plan.schema ?? this.schema,
+									this.naming,
+								),
+							],
+						}
+					: {}),
+			};
 		}
 
 		return selectStmt(options);

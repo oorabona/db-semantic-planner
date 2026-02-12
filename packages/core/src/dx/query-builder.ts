@@ -112,6 +112,7 @@ export class QueryBuilderImpl<TResult = unknown>
 	private havingIntents: WhereIntent[] = [];
 	private isDistinctQuery = false;
 	private skipDefaultFilters = false;
+	private lockIntent: import('@dbsp/types').LockIntent | undefined = undefined;
 
 	constructor(
 		model: ModelIR,
@@ -354,6 +355,77 @@ export class QueryBuilderImpl<TResult = unknown>
 		return builder;
 	}
 
+	// --------------------------------------------------------------------------
+	// Row-level locking (E15)
+	// --------------------------------------------------------------------------
+
+	forUpdate(): QueryBuilder<TResult> {
+		const builder = this.clone();
+		builder.lockIntent = {
+			strength: 'forUpdate',
+			waitPolicy: builder.lockIntent?.waitPolicy ?? 'block',
+		};
+		return builder;
+	}
+
+	forShare(): QueryBuilder<TResult> {
+		const builder = this.clone();
+		builder.lockIntent = {
+			strength: 'forShare',
+			waitPolicy: builder.lockIntent?.waitPolicy ?? 'block',
+		};
+		return builder;
+	}
+
+	forNoKeyUpdate(): QueryBuilder<TResult> {
+		const builder = this.clone();
+		builder.lockIntent = {
+			strength: 'forNoKeyUpdate',
+			waitPolicy: builder.lockIntent?.waitPolicy ?? 'block',
+		};
+		return builder;
+	}
+
+	forKeyShare(): QueryBuilder<TResult> {
+		const builder = this.clone();
+		builder.lockIntent = {
+			strength: 'forKeyShare',
+			waitPolicy: builder.lockIntent?.waitPolicy ?? 'block',
+		};
+		return builder;
+	}
+
+	lock(
+		strength: import('@dbsp/types').LockStrength,
+		waitPolicy?: import('@dbsp/types').LockWaitPolicy,
+	): QueryBuilder<TResult> {
+		const builder = this.clone();
+		builder.lockIntent = { strength, waitPolicy: waitPolicy ?? 'block' };
+		return builder;
+	}
+
+	skipLocked(): QueryBuilder<TResult> {
+		if (!this.lockIntent) {
+			throw new Error(
+				'skipLocked() requires a preceding lock method (forUpdate, forShare, etc.)',
+			);
+		}
+		const builder = this.clone();
+		builder.lockIntent = { ...this.lockIntent, waitPolicy: 'skipLocked' };
+		return builder;
+	}
+
+	noWait(): QueryBuilder<TResult> {
+		if (!this.lockIntent) {
+			throw new Error(
+				'noWait() requires a preceding lock method (forUpdate, forShare, etc.)',
+			);
+		}
+		const builder = this.clone();
+		builder.lockIntent = { ...this.lockIntent, waitPolicy: 'noWait' };
+		return builder;
+	}
+
 	orderBy(
 		fieldOrRecordOrSpecs: string | OrderByRecord | readonly OrderBySpec[],
 		direction?: SortDirection,
@@ -446,6 +518,14 @@ export class QueryBuilderImpl<TResult = unknown>
 
 	plan(): PlanReport {
 		const intent = this.buildIntent();
+
+		// E15: Warn when lock is used outside a transaction context
+		if (intent.lock && !this.inTransaction) {
+			console.warn(
+				'[dbsp] Row-level lock (FOR UPDATE/SHARE) used outside a transaction. ' +
+					'Locks are only effective within a transaction.',
+			);
+		}
 
 		// Apply relation hints to includes before planning
 		const intentWithHints = this.applyRelationHints(intent);
@@ -1361,6 +1441,17 @@ export class QueryBuilderImpl<TResult = unknown>
 			intent.offset = this.offsetValue;
 		}
 
+		// Lock clause (E15)
+		if (this.lockIntent) {
+			if (this.groupByFields.length > 0) {
+				throw new InvalidOperationError(
+					'lock',
+					'FOR UPDATE/SHARE is incompatible with GROUP BY',
+				);
+			}
+			intent.lock = this.lockIntent;
+		}
+
 		return intent as QueryIntent;
 	}
 
@@ -1691,6 +1782,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		builder.planOptionsOverride = this.planOptionsOverride
 			? { ...this.planOptionsOverride }
 			: undefined;
+		builder.lockIntent = this.lockIntent;
 		return builder;
 	}
 

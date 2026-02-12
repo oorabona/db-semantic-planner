@@ -1,0 +1,140 @@
+# Assertions for test-locking.dbsp
+# Validates row-level locking SQL compilation and execution (E15)
+
+# =============================================================================
+# Setup (queries 0–4)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 0: !DROP SCHEMA IF EXISTS test_locking CASCADE;
+# ─────────────────────────────────────────
+--- query: 0
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 1: !CREATE SCHEMA IF NOT EXISTS test_locking;
+# ─────────────────────────────────────────
+--- query: 1
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 2: .use test_locking
+# ─────────────────────────────────────────
+--- query: 2
+success: true
+output.contains: Using schema: test_locking
+
+# ─────────────────────────────────────────
+# Query 3: .import examples/test-locking.ddl.sql
+# ─────────────────────────────────────────
+--- query: 3
+db.success: true
+db.output.contains: Imported
+
+# ─────────────────────────────────────────
+# Query 4: .import examples/test-locking.seed.sql
+# ─────────────────────────────────────────
+--- query: 4
+db.success: true
+db.output.contains: Imported
+
+# =============================================================================
+# Explore (query 5)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 5: .tables
+# ─────────────────────────────────────────
+--- query: 5
+success: true
+output.contains: Tables (1)
+output.contains: jobs
+
+# =============================================================================
+# Lock strengths (queries 6–9)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 6: jobs | for update
+# ─────────────────────────────────────────
+--- query: 6
+success: true
+sql.equals: SELECT jobs.* FROM test_locking.jobs FOR UPDATE
+db.rows.equals: 5
+
+# ─────────────────────────────────────────
+# Query 7: jobs | for share
+# ─────────────────────────────────────────
+--- query: 7
+success: true
+sql.equals: SELECT jobs.* FROM test_locking.jobs FOR SHARE
+db.rows.equals: 5
+
+# ─────────────────────────────────────────
+# Query 8: jobs | for no key update
+# ─────────────────────────────────────────
+--- query: 8
+success: true
+sql.equals: SELECT jobs.* FROM test_locking.jobs FOR NO KEY UPDATE
+db.rows.equals: 5
+
+# ─────────────────────────────────────────
+# Query 9: jobs | for key share
+# ─────────────────────────────────────────
+--- query: 9
+success: true
+sql.equals: SELECT jobs.* FROM test_locking.jobs FOR KEY SHARE
+db.rows.equals: 5
+
+# =============================================================================
+# Wait policies (queries 10–12)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 10: jobs | for update skip locked
+# ─────────────────────────────────────────
+--- query: 10
+success: true
+sql.equals: SELECT jobs.* FROM test_locking.jobs FOR UPDATE SKIP LOCKED
+db.rows.equals: 5
+
+# ─────────────────────────────────────────
+# Query 11: jobs | for update nowait
+# ─────────────────────────────────────────
+--- query: 11
+success: true
+sql.equals: SELECT jobs.* FROM test_locking.jobs FOR UPDATE NOWAIT
+db.rows.equals: 5
+
+# ─────────────────────────────────────────
+# Query 12: jobs | for share skip locked
+# ─────────────────────────────────────────
+--- query: 12
+success: true
+sql.equals: SELECT jobs.* FROM test_locking.jobs FOR SHARE SKIP LOCKED
+db.rows.equals: 5
+
+# =============================================================================
+# Job queue pattern (query 13)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 13: jobs | where status = 'pending' | order by priority desc | limit 1 | for update skip locked
+# ─────────────────────────────────────────
+--- query: 13
+success: true
+sql.equals: SELECT jobs.* FROM test_locking.jobs WHERE jobs.status = $1 ORDER BY jobs.priority DESC LIMIT 1 FOR UPDATE SKIP LOCKED
+params.equals: ["pending"]
+db.rows.equals: 1
+
+# =============================================================================
+# No lock (query 14) — baseline
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 14: jobs (no lock)
+# ─────────────────────────────────────────
+--- query: 14
+success: true
+sql.equals: SELECT jobs.* FROM test_locking.jobs
+db.rows.equals: 5

@@ -7,6 +7,8 @@
  * - Handle optional properties with exactOptionalPropertyTypes
  * - Support the NamingPlugin for identifier transformation
  */
+
+import type { LockIntent, LockStrength, LockWaitPolicy } from '@dbsp/types';
 import type {
 	A_Expr,
 	A_Expr_Kind,
@@ -17,7 +19,9 @@ import type {
 	InsertStmt,
 	JoinExpr,
 	JoinType,
+	LockClauseStrength,
 	Node,
+	LockWaitPolicy as PgLockWaitPolicy,
 	RangeVar,
 	ResTarget,
 	SelectStmt,
@@ -537,6 +541,13 @@ export interface SelectOptions {
 	distinct?: boolean | Node[];
 	/** WITH clause (e.g., CTEs) — { ctes: Node[], recursive?: boolean } */
 	withClause?: { ctes: Node[]; recursive?: boolean };
+	/** Row-level locking clause (FOR UPDATE/SHARE/etc.) */
+	lockingClause?: {
+		strength: LockClauseStrength;
+		waitPolicy?: PgLockWaitPolicy;
+		/** Tables to lock (FOR UPDATE OF ...). If omitted, locks all tables. */
+		lockedRels?: Node[];
+	};
 }
 
 /**
@@ -588,7 +599,52 @@ export function selectStmt(options: SelectOptions): Node {
 		};
 	}
 
+	if (options.lockingClause) {
+		const clause: Record<string, unknown> = {
+			strength: options.lockingClause.strength,
+			waitPolicy: options.lockingClause.waitPolicy ?? 'LockWaitBlock',
+		};
+		if (
+			options.lockingClause.lockedRels &&
+			options.lockingClause.lockedRels.length > 0
+		) {
+			clause.lockedRels = options.lockingClause.lockedRels;
+		}
+		stmt.lockingClause = [{ LockingClause: clause }] as Node[];
+	}
+
 	return { SelectStmt: stmt };
+}
+
+// ============================================================================
+// Lock Helpers
+// ============================================================================
+
+const STRENGTH_MAP: Record<LockStrength, LockClauseStrength> = {
+	forUpdate: 'LCS_FORUPDATE',
+	forNoKeyUpdate: 'LCS_FORNOKEYUPDATE',
+	forShare: 'LCS_FORSHARE',
+	forKeyShare: 'LCS_FORKEYSHARE',
+};
+
+const POLICY_MAP: Record<LockWaitPolicy, PgLockWaitPolicy> = {
+	block: 'LockWaitBlock',
+	skipLocked: 'LockWaitSkip',
+	noWait: 'LockWaitError',
+};
+
+/**
+ * Map a LockIntent (domain type) to AST-level locking parameters.
+ * Used by the compiler to translate intent-level lock to SelectOptions.lockingClause.
+ */
+export function mapLockToAst(lock: LockIntent): {
+	strength: LockClauseStrength;
+	waitPolicy: PgLockWaitPolicy;
+} {
+	return {
+		strength: STRENGTH_MAP[lock.strength],
+		waitPolicy: POLICY_MAP[lock.waitPolicy],
+	};
 }
 
 // ============================================================================

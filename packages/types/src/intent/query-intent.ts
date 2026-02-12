@@ -4,6 +4,7 @@
  */
 
 import type { IncludeIntent, OrderByIntent } from './include-intent.js';
+import type { LockIntent } from './lock-intent.js';
 import type { SelectIntent } from './select-intent.js';
 import type { WhereIntent } from './where-intent.js';
 
@@ -62,6 +63,12 @@ export interface QueryIntent {
 	 * The inner SELECT list is replaced with `1` and the result is `{ exists: boolean }`.
 	 */
 	readonly existsWrap?: boolean;
+
+	/**
+	 * Row-level lock for SELECT queries (e.g., FOR UPDATE SKIP LOCKED).
+	 * Only valid in SELECT context — incompatible with GROUP BY, set operations.
+	 */
+	readonly lock?: LockIntent;
 }
 
 // ============================================================================

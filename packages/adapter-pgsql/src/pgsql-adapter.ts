@@ -492,6 +492,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				decisions: allDecisions,
 				...(schemaName ? { schema: schemaName } : {}),
 				...(plan.intent?.existsWrap ? { existsWrap: true } : {}),
+				...(plan.intent?.lock ? { lock: plan.intent.lock } : {}),
 			};
 		} else {
 			// Unit test with mock data: use decisions directly (legacy format).

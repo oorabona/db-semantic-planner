@@ -34,6 +34,10 @@ import {
 	Exists,
 	False,
 	Flat,
+	ForKeyShare,
+	ForNoKeyUpdate,
+	ForShare,
+	ForUpdate,
 	From,
 	GreaterThan,
 	GreaterThanOrEqual,
@@ -61,6 +65,7 @@ import {
 	None,
 	Not,
 	NotEquals,
+	NoWait,
 	NqlLexer,
 	Null,
 	NumberLiteral,
@@ -83,6 +88,7 @@ import {
 	RParen,
 	Select,
 	SetKeyword,
+	SkipLocked,
 	Slash,
 	Some,
 	Star,
@@ -185,6 +191,7 @@ export class NqlParser extends CstParser {
 			{ ALT: () => this.SUBRULE(this.offsetClause) },
 			{ ALT: () => this.SUBRULE(this.setClause) },
 			{ ALT: () => this.SUBRULE(this.bindClause) },
+			{ ALT: () => this.SUBRULE(this.lockClause) },
 		]);
 	});
 
@@ -257,6 +264,26 @@ export class NqlParser extends CstParser {
 	private offsetClause = this.RULE('offsetClause', () => {
 		this.CONSUME(Offset);
 		this.CONSUME(NumberLiteral);
+	});
+
+	/**
+	 * lock_clause = lock_strength [ lock_wait_policy ] ;
+	 * lock_strength = "for update" | "for share" | "for no key update" | "for key share" ;
+	 * lock_wait_policy = "skip locked" | "nowait" ;
+	 */
+	private lockClause = this.RULE('lockClause', () => {
+		this.OR([
+			{ ALT: () => this.CONSUME(ForNoKeyUpdate) },
+			{ ALT: () => this.CONSUME(ForKeyShare) },
+			{ ALT: () => this.CONSUME(ForUpdate) },
+			{ ALT: () => this.CONSUME(ForShare) },
+		]);
+		this.OPTION(() => {
+			this.OR2([
+				{ ALT: () => this.CONSUME(SkipLocked) },
+				{ ALT: () => this.CONSUME(NoWait) },
+			]);
+		});
 	});
 
 	// ============================================================

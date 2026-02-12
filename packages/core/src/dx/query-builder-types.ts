@@ -10,7 +10,11 @@
  */
 
 import type { Dump } from '../adapter.js';
-import type { WhereIntent } from '../intent-ast.js';
+import type {
+	LockStrength,
+	LockWaitPolicy,
+	WhereIntent,
+} from '../intent-ast.js';
 import type { PlanOptions, PlanReport } from '../planner.js';
 import type { DistinctField } from './filters.js';
 import type { WhereFilter } from './object-filter.js';
@@ -305,6 +309,61 @@ export interface QueryBuilder<TResult = unknown> {
 	 * ```
 	 */
 	distinct(): QueryBuilder<TResult>;
+
+	/**
+	 * Acquire a FOR UPDATE lock on selected rows.
+	 * Default wait policy is 'block' (wait for the lock).
+	 *
+	 * @example
+	 * ```typescript
+	 * // Job queue pattern: claim next pending job
+	 * const job = await orm.select('jobs')
+	 *   .where(eq('status', 'pending'))
+	 *   .limit(1)
+	 *   .forUpdate()
+	 *   .skipLocked()
+	 *   .first();
+	 * ```
+	 */
+	forUpdate(): QueryBuilder<TResult>;
+
+	/** Acquire a FOR SHARE lock on selected rows. */
+	forShare(): QueryBuilder<TResult>;
+
+	/** Acquire a FOR NO KEY UPDATE lock on selected rows. */
+	forNoKeyUpdate(): QueryBuilder<TResult>;
+
+	/** Acquire a FOR KEY SHARE lock on selected rows. */
+	forKeyShare(): QueryBuilder<TResult>;
+
+	/**
+	 * Acquire a row-level lock with explicit strength and optional wait policy.
+	 *
+	 * @param strength - The lock strength
+	 * @param waitPolicy - The wait policy (default: 'block')
+	 */
+	lock(
+		strength: LockStrength,
+		waitPolicy?: LockWaitPolicy,
+	): QueryBuilder<TResult>;
+
+	/**
+	 * Set the wait policy to SKIP LOCKED.
+	 * Must be called after a lock method (forUpdate, forShare, etc.).
+	 *
+	 * Rows that are already locked by other transactions are skipped
+	 * instead of waiting. Essential for job queue patterns.
+	 */
+	skipLocked(): QueryBuilder<TResult>;
+
+	/**
+	 * Set the wait policy to NOWAIT.
+	 * Must be called after a lock method (forUpdate, forShare, etc.).
+	 *
+	 * Throws an error immediately if any selected row is already locked
+	 * by another transaction.
+	 */
+	noWait(): QueryBuilder<TResult>;
 
 	/**
 	 * Sort results by one or more fields.
