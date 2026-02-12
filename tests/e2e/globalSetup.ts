@@ -46,7 +46,6 @@ export async function setup(): Promise<void> {
 				'  Either set DATABASE_URL or install Docker/Podman.\n' +
 				'  For Podman on WSL2, you may need: export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/podman/podman.sock"\n',
 		);
-		process.env.SKIP_E2E_TESTS = 'true';
 		return;
 	}
 
@@ -84,7 +83,7 @@ export async function setup(): Promise<void> {
 	} catch (error) {
 		console.error('\n❌ Failed to start PostgreSQL container:', error);
 		console.warn('\n⚠️  E2E database tests will be skipped.\n');
-		process.env.SKIP_E2E_TESTS = 'true';
+		return;
 	}
 }
 

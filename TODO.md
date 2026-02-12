@@ -6,7 +6,7 @@
 
 (Archived → docs/historic/done-2026-02.md)
 
-- [ ] 🔧 [Docs] Document DATABASE_URL env for E2E locking tests — Priority: M
+- [x] ✅ [Docs] Document DATABASE_URL env for E2E locking tests — verified: both modes work (2026-02-11)
 
 ---
 
@@ -75,8 +75,7 @@
 
 ### Locking & Transactions
 
-- [x] ✅ **E15** [Adapter] FOR UPDATE SKIP LOCKED (Job Queue pattern) (2026-02-12)
-- [x] ✅ **E15b** [Adapter] Concurrent Lock+Update E2E (2026-02-12)
+(E15, E15b archived → docs/historic/done-2026-02.md)
 
 ### CLI Data Plane
 
