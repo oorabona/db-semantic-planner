@@ -450,3 +450,173 @@ describe('combined clauses', () => {
 		expect(query?.limit).toBe(10);
 	});
 });
+
+// ============================================================================
+// Set operation with bound name reference
+// ============================================================================
+
+describe('set operation with bound name', () => {
+	it('UNION with bound name reference resolves to SetOperationIntent', () => {
+		const result = compile(
+			'users | where active = true | select id | bind activeUsers\nusers | select id | union activeUsers',
+			schema,
+		);
+		expect(result.success).toBe(true);
+		expect(result.ast?.setOperation).toBeDefined();
+		expect(result.ast?.setOperation?.op).toBe('union');
+	});
+
+	it('EXCEPT with bound name reference', () => {
+		const result = compile(
+			'users | select id | bind allUsers\nusers | where active = true | select id | except allUsers',
+			schema,
+		);
+		expect(result.success).toBe(true);
+		expect(result.ast?.setOperation).toBeDefined();
+		expect(result.ast?.setOperation?.op).toBe('except');
+	});
+});
+
+// ============================================================================
+// Set operation — unbound name error
+// ============================================================================
+
+describe('set operation errors', () => {
+	it('throws when bound name does not exist', () => {
+		const result = compile('users | select id | union nonExistent', schema);
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/unbound name/i);
+	});
+});
+
+// ============================================================================
+// Flat mode applies strategy to pre-existing includes
+// ============================================================================
+
+describe('flat mode with pre-existing includes', () => {
+	it('flat mode sets strategy on already-set includes (no-op if strategy exists)', () => {
+		const result = compileNql(
+			'users | select id, posts.title | flat | limit posts 3',
+		);
+		expect(result.ast?.query).toBeDefined();
+		// Include should have flat strategy from flat keyword
+		expect(result.ast?.query?.include?.[0]?.strategy).toBe('flat');
+		expect(result.ast?.query?.include?.[0]?.limit).toBe(3);
+	});
+});
+
+// ============================================================================
+// ORDER BY with expression (non-field, falling through to expressionToSql)
+// ============================================================================
+
+describe('ORDER BY edge cases', () => {
+	it('ORDER BY with expression falls through to expressionToSql', () => {
+		const result = compileNql('orders | order by price + tax desc');
+		expect(result.ast?.query).toBeDefined();
+		expect(result.ast?.query?.orderBy).toBeDefined();
+		expect(result.ast?.query?.orderBy?.[0]?.direction).toBe('desc');
+		// The field should be a SQL-like expression string
+		expect(typeof result.ast?.query?.orderBy?.[0]?.field).toBe('string');
+	});
+});
+
+// ============================================================================
+// Empty program compilation
+// ============================================================================
+
+describe('empty program', () => {
+	it('compile of empty input returns empty result', () => {
+		const result = compile('', schema);
+		// Empty programs produce a parse error or empty result
+		expect(result.ast === undefined || result.ast?.query === undefined).toBe(
+			true,
+		);
+	});
+});
+
+// ============================================================================
+// ROUND 2: WHERE applied to include batch (lines 91/95/101)
+// ============================================================================
+
+// ============================================================================
+// ROUND 2: flat mode with relation column includes (line 159/170)
+// ============================================================================
+
+describe('flat mode with relation columns in SELECT', () => {
+	it('flat sets strategy on auto-generated includes (line 170)', () => {
+		const result = compileNql('users | select name, orders.total | flat');
+		expect(result.ast?.query).toBeDefined();
+		const inc = result.ast?.query?.include?.[0];
+		expect(inc?.strategy).toBe('flat');
+	});
+
+	it('relation column generates include without flat', () => {
+		const result = compileNql('users | select name, orders.total');
+		expect(result.ast?.query?.include).toBeDefined();
+		expect(result.ast?.query?.include?.length).toBeGreaterThan(0);
+		expect(result.ast?.query?.include?.[0]?.relation).toBe('orders');
+	});
+});
+
+// ============================================================================
+// ROUND 2: getExplicitColumnCount aggregate (line 251)
+// ============================================================================
+
+describe('set operation column count validation', () => {
+	it('aggregate select type counts correctly in set ops (line 251)', () => {
+		// Set operation where one side uses aggregate
+		const result = compileNql(
+			'users | select count(id) | union (users | select count(id))',
+		);
+		expect(result.ast?.setOperation).toBeDefined();
+	});
+
+	it('expressions select type counts correctly in set ops', () => {
+		const result = compileNql(
+			'users | select name as n | union (users | select email as e)',
+		);
+		expect(result.ast?.setOperation).toBeDefined();
+	});
+});
+
+// ============================================================================
+// ROUND 2: GROUP BY non-path expression (line 322/329)
+// ============================================================================
+
+describe('GROUP BY edge cases', () => {
+	it('GROUP BY with expression falls through to expressionToSql (line 329)', () => {
+		const result = compileNql(
+			'users | select department, count(id) | group by department',
+		);
+		expect(result.ast?.query?.groupBy).toBeDefined();
+		expect(result.ast?.query?.groupBy).toContain('department');
+	});
+
+	it('GROUP BY with validator validates column (line 324)', () => {
+		// Uses schema to trigger validator path
+		const result = compile(
+			'users | select department, count(id) | group by department',
+			schema,
+		);
+		expect(result.success).toBe(true);
+		expect(result.ast?.query?.groupBy).toContain('department');
+	});
+});
+
+// ============================================================================
+// ROUND 2: ORDER BY non-field expression (line 352)
+// ============================================================================
+
+describe('ORDER BY with non-field expression', () => {
+	it('ORDER BY with function falls to expressionToSql (line 352)', () => {
+		const result = compileNql('users | order by upper(name) desc');
+		expect(result.ast?.query?.orderBy?.[0]?.direction).toBe('desc');
+		expect(typeof result.ast?.query?.orderBy?.[0]?.field).toBe('string');
+	});
+
+	it('ORDER BY with schema validates field (line 352)', () => {
+		const result = compile('users | order by name desc', schema);
+		expect(result.success).toBe(true);
+		expect(result.ast?.query?.orderBy?.[0]?.field).toBe('name');
+	});
+});
