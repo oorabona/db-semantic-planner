@@ -1,0 +1,83 @@
+# E16 CLI Data Plane: End-to-end test of set operations, transactions,
+# CSV import/export, RETURNING display, and mutation bind.
+#
+# Exercises: E16b, E16c, E16d, E16e, E16, E16f
+#
+# Usage:
+#   pnpm dbsp repl --schema ./examples/minimal.schema.ts \
+#     --db postgresql://postgres:demo@localhost:5432/demo \
+#     --input ./examples/test-cli-data-plane.dbsp \
+#     --assert ./examples/test-cli-data-plane.assert.dbsp
+
+# =============================================================================
+# Setup: Create isolated schema and load data
+# =============================================================================
+
+!DROP SCHEMA IF EXISTS ch_e16 CASCADE;
+!CREATE SCHEMA IF NOT EXISTS ch_e16;
+.use ch_e16
+.import examples/minimal.ddl.sql
+.import examples/minimal.seed.sql
+
+# =============================================================================
+# E16d: Set Operations (UNION / INTERSECT / EXCEPT)
+# Single-line because batch mode treats each line as a separate query
+# =============================================================================
+
+# UNION: Alice ∪ Bob (pipe syntax with parenthesized right operand)
+users | where name = 'Alice' | select name, email | union (users | where name = 'Bob' | select name, email)
+
+# INTERSECT: users named Alice ∩ all users with email containing 'alice'
+users | where name = 'Alice' | select name | intersect (users | where email like '%alice%' | select name)
+
+# =============================================================================
+# E16b: RETURNING display — mutation compile check (dry-run)
+# =============================================================================
+
+# Insert with RETURNING — NQL dry-run shows compiled SQL with RETURNING clause
+insert into users set name = 'Diana', email = 'diana@example.com' | select name, email
+
+# =============================================================================
+# E16c: Transaction dot-commands
+# =============================================================================
+
+# Begin transaction, insert via raw SQL, then rollback
+.begin
+!INSERT INTO users (name, email) VALUES ('Ephemeral', 'ephemeral@example.com');
+.rollback
+
+# Verify the rollback: Ephemeral should not exist
+users | where name = 'Ephemeral'
+
+# Begin transaction, insert via raw SQL, then commit
+.begin
+!INSERT INTO users (name, email) VALUES ('Frank', 'frank@example.com');
+.commit
+
+# Verify the commit: Frank should exist
+users | where name = 'Frank' | select name, email
+
+# =============================================================================
+# E16e: .dump — Export users to CSV
+# =============================================================================
+
+.dump users /tmp/test-e16-users.csv
+
+# =============================================================================
+# E16: .load — Import CSV into a dynamically created copy table
+# =============================================================================
+
+# Create a mirror table (not in schema definition — tests dynamic table support)
+!CREATE TABLE users_copy (id integer, name varchar(255) NOT NULL, email varchar(255) NOT NULL);
+
+# Load the dumped CSV
+.load users_copy /tmp/test-e16-users.csv
+
+# Compare row counts between original and copy
+!SELECT (SELECT count(*) FROM users) AS original, (SELECT count(*) FROM users_copy) AS copy, (SELECT count(*) FROM users) = (SELECT count(*) FROM users_copy) AS match;
+
+# =============================================================================
+# Cleanup
+# =============================================================================
+
+!DROP SCHEMA ch_e16 CASCADE;

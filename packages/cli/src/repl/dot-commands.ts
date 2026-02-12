@@ -412,11 +412,11 @@ export async function processDotCommand(
 				return { output: '❌ .load requires database connection (--db)' };
 			}
 
-			// Verify table exists in schema
+			// Check schema for column hints (optional — table may exist only in DB)
 			const loadTable = schema.model.tables.get(tableName);
-			if (!loadTable) {
-				return { output: `❌ Table not found: ${tableName}` };
-			}
+			const schemaColumns = loadTable
+				? loadTable.columns.map((c) => c.name)
+				: undefined;
 
 			const loadFilePath = resolve(process.cwd(), filePath);
 			if (!existsSync(loadFilePath)) {
@@ -424,22 +424,20 @@ export async function processDotCommand(
 			}
 
 			try {
-				const schemaColumns = loadTable.columns.map((c) => c.name);
 				const csvData = await parseCsvFile(loadFilePath, schemaColumns);
 
 				if (csvData.rows.length === 0) {
 					return { output: '⚠️ CSV file is empty — no rows to import' };
 				}
 
-				// Build multi-row INSERT using CSV columns
+				// Use CSV columns, optionally filtered to schema columns
 				const csvColumns = [...csvData.format.columns];
-				// Filter to columns that exist in the table
-				const validColumns = csvColumns.filter((c) =>
-					schemaColumns.includes(c),
-				);
+				const validColumns = schemaColumns
+					? csvColumns.filter((c) => schemaColumns.includes(c))
+					: csvColumns;
 				if (validColumns.length === 0) {
 					return {
-						output: `❌ No matching columns found between CSV (${csvColumns.join(', ')}) and table ${tableName} (${schemaColumns.join(', ')})`,
+						output: `❌ No matching columns found in CSV: ${csvColumns.join(', ')}`,
 					};
 				}
 

@@ -101,7 +101,11 @@ export function mapEventsToBatchResult(
 
 		// Determine type from intent
 		const resultType: 'query' | 'mutation' =
-			qr.intent && qr.intent.type !== 'query' ? 'mutation' : 'query';
+			qr.intent &&
+			qr.intent.type !== 'query' &&
+			qr.intent.type !== 'setOperation'
+				? 'mutation'
+				: 'query';
 
 		// Build output text (compile-only display)
 		const opLabel = qr.plan?.strategy ?? 'QUERY';

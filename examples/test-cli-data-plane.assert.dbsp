@@ -1,0 +1,150 @@
+# Assertions for test-cli-data-plane.dbsp
+# Validates E16 CLI Data Plane features: set ops, transactions, CSV load/dump
+
+# ─────────────────────────────────────────
+# Query 0: !DROP SCHEMA IF EXISTS ch_e16 CASCADE;
+# ─────────────────────────────────────────
+--- query: 0
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 1: !CREATE SCHEMA IF NOT EXISTS ch_e16;
+# ─────────────────────────────────────────
+--- query: 1
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 2: .use ch_e16
+# ─────────────────────────────────────────
+--- query: 2
+success: true
+output.contains: Using schema: ch_e16
+
+# ─────────────────────────────────────────
+# Query 3: .import examples/minimal.ddl.sql
+# ─────────────────────────────────────────
+--- query: 3
+db.success: true
+db.output.contains: Imported
+
+# ─────────────────────────────────────────
+# Query 4: .import examples/minimal.seed.sql
+# ─────────────────────────────────────────
+--- query: 4
+db.success: true
+db.output.contains: Imported
+
+# ─────────────────────────────────────────
+# Query 5: E16d — UNION (Alice ∪ Bob)
+# ─────────────────────────────────────────
+--- query: 5
+success: true
+db.rows.equals: 2
+
+# ─────────────────────────────────────────
+# Query 6: E16d — INTERSECT (Alice ∩ alice emails)
+# ─────────────────────────────────────────
+--- query: 6
+success: true
+db.rows.equals: 1
+
+# ─────────────────────────────────────────
+# Query 7: E16b — INSERT with RETURNING (dry-run)
+# ─────────────────────────────────────────
+--- query: 7
+success: true
+sql.matches: RETURNING
+
+# ─────────────────────────────────────────
+# Query 8: E16c — .begin
+# ─────────────────────────────────────────
+--- query: 8
+success: true
+output.contains: Transaction started
+
+# ─────────────────────────────────────────
+# Query 9: !INSERT Ephemeral (inside transaction)
+# ─────────────────────────────────────────
+--- query: 9
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 10: E16c — .rollback
+# ─────────────────────────────────────────
+--- query: 10
+success: true
+output.contains: Transaction rolled back
+
+# ─────────────────────────────────────────
+# Query 11: Verify rollback — Ephemeral NOT in DB
+# ─────────────────────────────────────────
+--- query: 11
+success: true
+db.rows.equals: 0
+
+# ─────────────────────────────────────────
+# Query 12: E16c — .begin
+# ─────────────────────────────────────────
+--- query: 12
+success: true
+output.contains: Transaction started
+
+# ─────────────────────────────────────────
+# Query 13: !INSERT Frank (inside transaction)
+# ─────────────────────────────────────────
+--- query: 13
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 14: E16c — .commit
+# ─────────────────────────────────────────
+--- query: 14
+success: true
+output.contains: Transaction committed
+
+# ─────────────────────────────────────────
+# Query 15: Verify commit — Frank exists
+# ─────────────────────────────────────────
+--- query: 15
+success: true
+db.rows.equals: 1
+db.output:
+| name | email |
+| --- | --- |
+| Frank | frank@example.com |
+
+# ─────────────────────────────────────────
+# Query 16: E16e — .dump users to CSV
+# ─────────────────────────────────────────
+--- query: 16
+success: true
+output.contains: Dumped
+
+# ─────────────────────────────────────────
+# Query 17: !CREATE TABLE users_copy
+# ─────────────────────────────────────────
+--- query: 17
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 18: E16 — .load users_copy from CSV
+# ─────────────────────────────────────────
+--- query: 18
+success: true
+output.contains: Loaded
+
+# ─────────────────────────────────────────
+# Query 19: Compare row counts (original vs copy)
+# ─────────────────────────────────────────
+--- query: 19
+db.success: true
+db.output:
+| original | copy | match |
+| --- | --- | --- |
+| 4 | 4 | true |
+
+# ─────────────────────────────────────────
+# Query 20: Cleanup — DROP SCHEMA
+# ─────────────────────────────────────────
+--- query: 20
+db.success: true
