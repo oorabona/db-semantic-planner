@@ -1,86 +1,15 @@
 /**
- * ARCH-002 Block 7: Verify Command
+ * Verify Command — Schema Drift Detection
  *
- * dbsp verify - Compare schema vs real database for drift detection.
+ * dbsp verify - Compare schema vs real database using the comparison engine.
+ * Detects drift in tables, columns, types, nullable, defaults, FKs, indexes.
  */
 
+import { compareSchemata, introspect } from '@dbsp/adapter-pgsql';
 import { Command } from 'commander';
 import { createDbConnection, redactDbUrl } from '../utils/db-utils.js';
 import { loadSchema } from '../utils/schema-loader.js';
-import {
-	type DbColumnInfo,
-	type DbTableInfo,
-	formatVerifyResult,
-	verify,
-} from '../verifier.js';
-
-/**
- * Introspect database tables using pg information_schema queries.
- */
-async function introspectDatabase(
-	pool: import('pg').Pool,
-	schemaName?: string,
-): Promise<DbTableInfo[]> {
-	const targetSchema = schemaName ?? 'public';
-
-	// Get tables in the target schema
-	const tablesResult = await pool.query(
-		`SELECT table_name FROM information_schema.tables
-		 WHERE table_schema = $1 AND table_type = 'BASE TABLE'
-		 ORDER BY table_name`,
-		[targetSchema],
-	);
-
-	const result: DbTableInfo[] = [];
-
-	for (const tableRow of tablesResult.rows) {
-		const tableName = tableRow.table_name as string;
-
-		// Get columns for this table
-		const columnsResult = await pool.query(
-			`SELECT
-				column_name,
-				data_type,
-				is_nullable,
-				column_default
-			 FROM information_schema.columns
-			 WHERE table_schema = $1 AND table_name = $2
-			 ORDER BY ordinal_position`,
-			[targetSchema, tableName],
-		);
-
-		// Get primary key columns
-		const pkResult = await pool.query(
-			`SELECT kcu.column_name
-			 FROM information_schema.table_constraints tc
-			 JOIN information_schema.key_column_usage kcu
-			   ON tc.constraint_name = kcu.constraint_name
-			   AND tc.table_schema = kcu.table_schema
-			 WHERE tc.table_schema = $1
-			   AND tc.table_name = $2
-			   AND tc.constraint_type = 'PRIMARY KEY'`,
-			[targetSchema, tableName],
-		);
-		const pkColumns = new Set(
-			pkResult.rows.map((r) => r.column_name as string),
-		);
-
-		const columns: DbColumnInfo[] = columnsResult.rows.map((col) => ({
-			name: col.column_name as string,
-			dataType: col.data_type as string,
-			isNullable: (col.is_nullable as string) === 'YES',
-			isPrimaryKey: pkColumns.has(col.column_name as string),
-			hasDefault: col.column_default != null,
-		}));
-
-		result.push({
-			name: tableName,
-			columns,
-		});
-	}
-
-	return result;
-}
+import { formatVerifyResult, verifyFromDiff } from '../verifier.js';
 
 export const verifyCommand = new Command('verify')
 	.description('Compare schema vs real database (drift detection)')
@@ -112,22 +41,42 @@ export const verifyCommand = new Command('verify')
 			}
 
 			try {
-				// Load schema from file
-				const schema = await loadSchema(schemaPath);
+				// Load schema from file → ModelIR
+				const loaded = await loadSchema(schemaPath);
+				const schemaModel = loaded.model;
 
 				// Connect to database
 				const { pool } = await createDbConnection(options.db);
 
 				try {
-					// Introspect database
-					const dbTables = await introspectDatabase(pool, options.schemaName);
+					// Introspect database → ModelIR
+					const dbModel = await introspect(pool, {
+						...(options.schemaName ? { schema: options.schemaName } : {}),
+					});
 
-					// Verify
-					const result = verify(schema, dbTables);
+					// Compare using the comparison engine
+					const diff = compareSchemata(schemaModel, dbModel);
+
+					// Convert to verify result
+					const schemaTables = Array.from(schemaModel.tables.keys());
+					const dbTables = Array.from(dbModel.tables.keys());
+					const result = verifyFromDiff(diff, schemaTables, dbTables);
 
 					// Output
 					if (options.json) {
-						console.log(JSON.stringify(result, null, 2));
+						// Exclude the full diff meta from JSON output (too verbose)
+						const { diff: _diff, ...jsonResult } = result;
+						console.log(
+							JSON.stringify(
+								{
+									...jsonResult,
+									summary: diff.summary,
+									hasDestructive: diff.hasDestructive,
+								},
+								null,
+								2,
+							),
+						);
 					} else {
 						console.log(formatVerifyResult(result));
 					}

@@ -24,10 +24,24 @@ export {
 } from './compiler.js';
 // DDL Generation
 export {
+	acquireMigrationLock,
+	type ChangeKind,
+	compareSchemata,
+	type DiffSummary,
+	ensureMigrationsTable,
 	type GenerateDDLOptions,
 	generateDDL,
+	generateMigrationSQL,
+	getAppliedMigrations,
+	isMigrationApplied,
+	type MigrationRecord,
+	type MigrationSQLOptions,
 	mapColumnType,
 	mapOnDeleteAction,
+	recordMigration,
+	releaseMigrationLock,
+	type SchemaChange,
+	type SchemaDiff,
 } from './ddl/index.js';
 // EXPLAIN support
 export {

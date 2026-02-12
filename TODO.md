@@ -6,7 +6,7 @@
 
 (Archived → docs/historic/done-2026-02.md)
 
-- [x] ✅ [Docs] Document DATABASE_URL env for E2E locking tests — verified: both modes work (2026-02-11)
+(Archived → docs/historic/done-2026-02.md)
 
 ---
 
@@ -32,13 +32,9 @@
 
 > MCP operability, key DX features, documentation.
 
-### MCP Server (Category C)
+### MCP Server (Category C) — Deprioritized to P4 (2026-02-12)
 
-- [ ] **E06** [MCP] Implement v1 tools — `schema_list_tables`, `schema_get_relations`, `query_plan`, `intent_validate`
-  - Ref: `packages/mcp-server/src/server.ts:55`
-- [ ] **E06b** [MCP] Implement v1 resources — `schema://manifest`, `schema://intent-schema`, `schema://cookbook`
-  - Ref: `packages/mcp-server/src/server.ts:60`
-
+(E06, E06b moved to P4 — CLI binary accessible to AI agents, MCP redundant for shell contexts)
 (E06c, E08 archived → docs/historic/done-2026-02.md)
 
 ### Documentation
@@ -124,6 +120,11 @@
 
 (Archived → docs/historic/done-2026-02.md)
 
+### MCP Server (moved from P2, 2026-02-12)
+
+- [-] ⏭️ **E06** [MCP] Implement v1 tools — deferred: CLI binary accessible, MCP redundant for shell contexts
+- [-] ⏭️ **E06b** [MCP] Implement v1 resources — deferred: same rationale
+
 ### Dead Code
 
 (All items verified as false positives 2026-02-06: A-26 NqlLimitError doesn't exist / NqlWarning is active; #21 is in use; #29 no factory found; CLI plan summary embedded)
@@ -141,8 +142,7 @@
 
 ### Dependency-Blocked
 
-- [-] ⏭️ [Adapter] Migration generation — depends on DDL generator maturity
-(Cycle detection + compileWithIncludes archived → docs/historic/done-2026-02.md)
+(Migration generation + Cycle detection + compileWithIncludes archived → docs/historic/done-2026-02.md)
 - [-] ⏭️ [Architecture] DX-032: Conformance Test Framework — depends on multi-adapter
 
 ### Multi-Adapter (Future)

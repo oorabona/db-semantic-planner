@@ -1,36 +1,86 @@
 /**
- * Tests for ARCH-002 Block 7: Schema Verifier
+ * Tests for Schema Verifier — Drift Detection via Comparison Engine
  */
 
-import { schema } from '@dbsp/core';
+import type { ModelIR, TableIR } from '@dbsp/types';
+import { compareSchemata } from '@dbsp/adapter-pgsql';
 import { describe, expect, it } from 'vitest';
-import { type DbTableInfo, formatVerifyResult, verify } from './verifier.js';
+import { formatVerifyResult, verifyFromDiff } from './verifier.js';
 
-describe('verify', () => {
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function makeModel(tables: [string, TableIR][]): ModelIR {
+	return {
+		tables: new Map(tables),
+		relations: new Map(),
+	};
+}
+
+function makeTable(overrides: Partial<TableIR> & { name: string }): TableIR {
+	return {
+		columns: [],
+		foreignKeys: [],
+		indexes: [],
+		...overrides,
+	};
+}
+
+function verify(schemaModel: ModelIR, dbModel: ModelIR) {
+	const diff = compareSchemata(schemaModel, dbModel);
+	const schemaTables = Array.from(schemaModel.tables.keys());
+	const dbTables = Array.from(dbModel.tables.keys());
+	return verifyFromDiff(diff, schemaTables, dbTables);
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+describe('verify (via compareSchemata)', () => {
 	describe('table-level drift', () => {
 		it('should detect missing table in database', () => {
-			const s = schema({
-				users: {
-					id: { type: 'uuid', primaryKey: true },
-					name: { type: 'string' },
-				},
-				posts: {
-					id: { type: 'uuid', primaryKey: true },
-					title: { type: 'string' },
-				},
-			});
+			const schemaModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'name', type: 'string', nullable: true },
+						],
+						primaryKey: 'id',
+					}),
+				],
+				[
+					'posts',
+					makeTable({
+						name: 'posts',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'title', type: 'string', nullable: true },
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
 
-			const dbTables: DbTableInfo[] = [
-				{
-					name: 'users',
-					columns: [
-						{ name: 'id', dataType: 'uuid', isNullable: false },
-						{ name: 'name', dataType: 'character varying', isNullable: true },
-					],
-				},
-			];
+			const dbModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'name', type: 'string', nullable: true },
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
 
-			const result = verify(s, dbTables);
+			const result = verify(schemaModel, dbModel);
 
 			expect(result.valid).toBe(false);
 			expect(result.issues).toContainEqual(
@@ -43,24 +93,42 @@ describe('verify', () => {
 		});
 
 		it('should detect extra table in database', () => {
-			const s = schema({
-				users: {
-					id: { type: 'uuid', primaryKey: true },
-				},
-			});
+			const schemaModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
 
-			const dbTables: DbTableInfo[] = [
-				{
-					name: 'users',
-					columns: [{ name: 'id', dataType: 'uuid', isNullable: false }],
-				},
-				{
-					name: 'legacy_table',
-					columns: [{ name: 'id', dataType: 'integer', isNullable: false }],
-				},
-			];
+			const dbModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+						],
+						primaryKey: 'id',
+					}),
+				],
+				[
+					'legacy_table',
+					makeTable({
+						name: 'legacy_table',
+						columns: [
+							{ name: 'id', type: 'integer', nullable: false },
+						],
+					}),
+				],
+			]);
 
-			const result = verify(s, dbTables);
+			const result = verify(schemaModel, dbModel);
 
 			// Extra tables are warnings, not errors
 			expect(result.valid).toBe(true);
@@ -73,25 +141,22 @@ describe('verify', () => {
 			);
 		});
 
-		it('should return valid when tables match', () => {
-			const s = schema({
-				users: {
-					id: { type: 'uuid', primaryKey: true },
-					name: { type: 'string' },
-				},
-			});
+		it('should return valid when schemas match', () => {
+			const model = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'name', type: 'string', nullable: true },
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
 
-			const dbTables: DbTableInfo[] = [
-				{
-					name: 'users',
-					columns: [
-						{ name: 'id', dataType: 'uuid', isNullable: false },
-						{ name: 'name', dataType: 'character varying', isNullable: true },
-					],
-				},
-			];
-
-			const result = verify(s, dbTables);
+			const result = verify(model, model);
 
 			expect(result.valid).toBe(true);
 			expect(result.issues.filter((i) => i.severity === 'error')).toHaveLength(
@@ -102,26 +167,36 @@ describe('verify', () => {
 
 	describe('column-level drift', () => {
 		it('should detect missing column in database', () => {
-			const s = schema({
-				users: {
-					id: { type: 'uuid', primaryKey: true },
-					name: { type: 'string' },
-					email: { type: 'string' },
-				},
-			});
+			const schemaModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'name', type: 'string', nullable: true },
+							{ name: 'email', type: 'string', nullable: true },
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
 
-			const dbTables: DbTableInfo[] = [
-				{
-					name: 'users',
-					columns: [
-						{ name: 'id', dataType: 'uuid', isNullable: false },
-						{ name: 'name', dataType: 'character varying', isNullable: true },
-						// email column missing
-					],
-				},
-			];
+			const dbModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'name', type: 'string', nullable: true },
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
 
-			const result = verify(s, dbTables);
+			const result = verify(schemaModel, dbModel);
 
 			expect(result.valid).toBe(false);
 			expect(result.issues).toContainEqual(
@@ -135,25 +210,36 @@ describe('verify', () => {
 		});
 
 		it('should detect extra column in database', () => {
-			const s = schema({
-				users: {
-					id: { type: 'uuid', primaryKey: true },
-					name: { type: 'string' },
-				},
-			});
+			const schemaModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'name', type: 'string', nullable: true },
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
 
-			const dbTables: DbTableInfo[] = [
-				{
-					name: 'users',
-					columns: [
-						{ name: 'id', dataType: 'uuid', isNullable: false },
-						{ name: 'name', dataType: 'character varying', isNullable: true },
-						{ name: 'avatar', dataType: 'text', isNullable: true },
-					],
-				},
-			];
+			const dbModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'name', type: 'string', nullable: true },
+							{ name: 'avatar', type: 'text', nullable: true },
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
 
-			const result = verify(s, dbTables);
+			const result = verify(schemaModel, dbModel);
 
 			// Extra columns are info, not errors
 			expect(result.valid).toBe(true);
@@ -168,24 +254,35 @@ describe('verify', () => {
 		});
 
 		it('should detect type mismatch', () => {
-			const s = schema({
-				users: {
-					id: { type: 'uuid', primaryKey: true },
-					age: { type: 'integer' },
-				},
-			});
+			const schemaModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'age', type: 'integer', nullable: true },
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
 
-			const dbTables: DbTableInfo[] = [
-				{
-					name: 'users',
-					columns: [
-						{ name: 'id', dataType: 'uuid', isNullable: false },
-						{ name: 'age', dataType: 'text', isNullable: true }, // Wrong type
-					],
-				},
-			];
+			const dbModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'age', type: 'text', nullable: true },
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
 
-			const result = verify(s, dbTables);
+			const result = verify(schemaModel, dbModel);
 
 			expect(result.valid).toBe(false);
 			expect(result.issues).toContainEqual(
@@ -199,24 +296,35 @@ describe('verify', () => {
 		});
 
 		it('should detect nullable mismatch', () => {
-			const s = schema({
-				users: {
-					id: { type: 'uuid', primaryKey: true },
-					email: { type: 'string', nullable: false },
-				},
-			});
+			const schemaModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'email', type: 'string', nullable: false },
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
 
-			const dbTables: DbTableInfo[] = [
-				{
-					name: 'users',
-					columns: [
-						{ name: 'id', dataType: 'uuid', isNullable: false },
-						{ name: 'email', dataType: 'character varying', isNullable: true }, // Mismatch
-					],
-				},
-			];
+			const dbModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'email', type: 'string', nullable: true },
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
 
-			const result = verify(s, dbTables);
+			const result = verify(schemaModel, dbModel);
 
 			expect(result.issues).toContainEqual(
 				expect.objectContaining({
@@ -229,116 +337,330 @@ describe('verify', () => {
 		});
 	});
 
-	describe('type compatibility', () => {
-		it('should accept varchar as string', () => {
-			const s = schema({
-				users: {
-					id: { type: 'uuid', primaryKey: true },
-					name: { type: 'string' },
-				},
-			});
+	describe('foreign key drift', () => {
+		it('should detect missing FK in database', () => {
+			const schemaModel = makeModel([
+				[
+					'posts',
+					makeTable({
+						name: 'posts',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'user_id', type: 'uuid', nullable: false },
+						],
+						primaryKey: 'id',
+						foreignKeys: [
+							{
+								columns: ['user_id'],
+								references: { table: 'users', columns: ['id'] },
+								onDelete: 'CASCADE',
+							},
+						],
+					}),
+				],
+			]);
 
-			const dbTables: DbTableInfo[] = [
-				{
-					name: 'users',
-					columns: [
-						{ name: 'id', dataType: 'uuid', isNullable: false },
-						{ name: 'name', dataType: 'character varying', isNullable: true },
-					],
-				},
-			];
+			const dbModel = makeModel([
+				[
+					'posts',
+					makeTable({
+						name: 'posts',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'user_id', type: 'uuid', nullable: false },
+						],
+						primaryKey: 'id',
+						foreignKeys: [],
+					}),
+				],
+			]);
 
-			const result = verify(s, dbTables);
+			const result = verify(schemaModel, dbModel);
 
-			expect(result.valid).toBe(true);
-			expect(
-				result.issues.filter((i) => i.type === 'type_mismatch'),
-			).toHaveLength(0);
+			expect(result.valid).toBe(false);
+			expect(result.issues).toContainEqual(
+				expect.objectContaining({
+					severity: 'error',
+					type: 'missing_fk_in_db',
+					table: 'posts',
+				}),
+			);
 		});
 
-		it('should accept int4 as integer', () => {
-			const s = schema({
-				users: {
-					id: { type: 'uuid', primaryKey: true },
-					age: { type: 'integer' },
-				},
-			});
+		it('should detect FK onDelete mismatch', () => {
+			const fkBase = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
 
-			const dbTables: DbTableInfo[] = [
-				{
-					name: 'users',
-					columns: [
-						{ name: 'id', dataType: 'uuid', isNullable: false },
-						{ name: 'age', dataType: 'int4', isNullable: true },
-					],
-				},
-			];
+			const schemaModel = makeModel([
+				[
+					'posts',
+					makeTable({
+						name: 'posts',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'user_id', type: 'uuid', nullable: false },
+						],
+						primaryKey: 'id',
+						foreignKeys: [{ ...fkBase, onDelete: 'CASCADE' }],
+					}),
+				],
+			]);
 
-			const result = verify(s, dbTables);
+			const dbModel = makeModel([
+				[
+					'posts',
+					makeTable({
+						name: 'posts',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'user_id', type: 'uuid', nullable: false },
+						],
+						primaryKey: 'id',
+						foreignKeys: [{ ...fkBase, onDelete: 'NO ACTION' }],
+					}),
+				],
+			]);
 
-			expect(result.valid).toBe(true);
+			const result = verify(schemaModel, dbModel);
+
+			expect(result.issues).toContainEqual(
+				expect.objectContaining({
+					type: 'fk_on_delete_mismatch',
+					table: 'posts',
+				}),
+			);
+		});
+	});
+
+	describe('index drift', () => {
+		it('should detect missing index in database', () => {
+			const schemaModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'email', type: 'string', nullable: false },
+						],
+						primaryKey: 'id',
+						indexes: [
+							{ name: 'idx_users_email', columns: ['email'], unique: true },
+						],
+					}),
+				],
+			]);
+
+			const dbModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'email', type: 'string', nullable: false },
+						],
+						primaryKey: 'id',
+						indexes: [],
+					}),
+				],
+			]);
+
+			const result = verify(schemaModel, dbModel);
+
+			expect(result.issues).toContainEqual(
+				expect.objectContaining({
+					type: 'missing_index_in_db',
+					table: 'users',
+				}),
+			);
 		});
 
-		it('should accept timestamptz as timestamp', () => {
-			const s = schema({
-				users: {
-					id: { type: 'uuid', primaryKey: true },
-					createdAt: { type: 'timestamp' },
-				},
-			});
+		it('should detect extra index in database', () => {
+			const schemaModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+						],
+						primaryKey: 'id',
+						indexes: [],
+					}),
+				],
+			]);
 
-			const dbTables: DbTableInfo[] = [
-				{
-					name: 'users',
-					columns: [
-						{ name: 'id', dataType: 'uuid', isNullable: false },
-						{
-							name: 'createdAt',
-							dataType: 'timestamp with time zone',
-							isNullable: true,
-						},
-					],
-				},
-			];
+			const dbModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+						],
+						primaryKey: 'id',
+						indexes: [
+							{ name: 'idx_old', columns: ['id'], unique: false },
+						],
+					}),
+				],
+			]);
 
-			const result = verify(s, dbTables);
+			const result = verify(schemaModel, dbModel);
 
-			expect(result.valid).toBe(true);
+			expect(result.issues).toContainEqual(
+				expect.objectContaining({
+					severity: 'info',
+					type: 'missing_index_in_schema',
+					table: 'users',
+				}),
+			);
+		});
+	});
+
+	describe('default drift', () => {
+		it('should detect default value mismatch', () => {
+			const schemaModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{
+								name: 'role',
+								type: 'string',
+								nullable: false,
+								default: 'user',
+							},
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
+
+			const dbModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{
+								name: 'role',
+								type: 'string',
+								nullable: false,
+								default: 'admin',
+							},
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
+
+			const result = verify(schemaModel, dbModel);
+
+			expect(result.issues).toContainEqual(
+				expect.objectContaining({
+					severity: 'warning',
+					type: 'default_mismatch',
+					table: 'users',
+					column: 'role',
+				}),
+			);
+		});
+	});
+
+	describe('primary key drift', () => {
+		it('should detect PK change', () => {
+			const schemaModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'email', type: 'string', nullable: false },
+						],
+						primaryKey: ['id', 'email'],
+					}),
+				],
+			]);
+
+			const dbModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'email', type: 'string', nullable: false },
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
+
+			const result = verify(schemaModel, dbModel);
+
+			expect(result.valid).toBe(false);
+			expect(result.issues).toContainEqual(
+				expect.objectContaining({
+					type: 'primary_key_mismatch',
+				}),
+			);
+		});
+	});
+
+	describe('result metadata', () => {
+		it('should include diff in result', () => {
+			const model = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [{ name: 'id', type: 'uuid', nullable: false }],
+						primaryKey: 'id',
+					}),
+				],
+			]);
+
+			const result = verify(model, model);
+
+			expect(result.diff).toBeDefined();
+			expect(result.diff.changes).toEqual([]);
+			expect(result.diff.hasDestructive).toBe(false);
 		});
 
-		it('should accept jsonb as json', () => {
-			const s = schema({
-				users: {
-					id: { type: 'uuid', primaryKey: true },
-					metadata: { type: 'json' },
-				},
-			});
+		it('should populate schemaTables and dbTables', () => {
+			const schemaModel = makeModel([
+				['users', makeTable({ name: 'users' })],
+				['posts', makeTable({ name: 'posts' })],
+			]);
 
-			const dbTables: DbTableInfo[] = [
-				{
-					name: 'users',
-					columns: [
-						{ name: 'id', dataType: 'uuid', isNullable: false },
-						{ name: 'metadata', dataType: 'jsonb', isNullable: true },
-					],
-				},
-			];
+			const dbModel = makeModel([
+				['users', makeTable({ name: 'users' })],
+				['comments', makeTable({ name: 'comments' })],
+			]);
 
-			const result = verify(s, dbTables);
+			const result = verify(schemaModel, dbModel);
 
-			expect(result.valid).toBe(true);
+			expect(result.schemaTables).toEqual(['users', 'posts']);
+			expect(result.dbTables).toEqual(['users', 'comments']);
 		});
 	});
 });
 
 describe('formatVerifyResult', () => {
 	it('should format valid result', () => {
-		const result = {
-			valid: true,
-			issues: [],
-			schemaTables: ['users', 'posts'],
-			dbTables: ['users', 'posts'],
-		};
+		const result = verifyFromDiff(
+			{ changes: [], hasDestructive: false, summary: { tables: { added: 0, dropped: 0 }, columns: { added: 0, dropped: 0, altered: 0 }, indexes: { added: 0, dropped: 0 }, constraints: { added: 0, dropped: 0, altered: 0 } } },
+			['users', 'posts'],
+			['users', 'posts'],
+		);
 
 		const output = formatVerifyResult(result);
 
@@ -348,43 +670,34 @@ describe('formatVerifyResult', () => {
 	});
 
 	it('should format result with errors', () => {
-		const result = {
-			valid: false,
-			issues: [
-				{
-					severity: 'error' as const,
-					type: 'missing_table_in_db' as const,
-					table: 'posts',
-					message: 'Table "posts" exists in schema but not in database',
-				},
-			],
-			schemaTables: ['users', 'posts'],
-			dbTables: ['users'],
-		};
+		const diff = compareSchemata(
+			makeModel([
+				['users', makeTable({ name: 'users' })],
+				['posts', makeTable({ name: 'posts' })],
+			]),
+			makeModel([
+				['users', makeTable({ name: 'users' })],
+			]),
+		);
+		const result = verifyFromDiff(diff, ['users', 'posts'], ['users']);
 
 		const output = formatVerifyResult(result);
 
 		expect(output).toContain('❌ Schema drift detected');
 		expect(output).toContain('1 error(s)');
-		expect(output).toContain(
-			'Table "posts" exists in schema but not in database',
-		);
 	});
 
 	it('should format result with warnings', () => {
-		const result = {
-			valid: true,
-			issues: [
-				{
-					severity: 'warning' as const,
-					type: 'missing_table_in_schema' as const,
-					table: 'legacy',
-					message: 'Table "legacy" exists in database but not in schema',
-				},
-			],
-			schemaTables: ['users'],
-			dbTables: ['users', 'legacy'],
-		};
+		const diff = compareSchemata(
+			makeModel([
+				['users', makeTable({ name: 'users' })],
+			]),
+			makeModel([
+				['users', makeTable({ name: 'users' })],
+				['legacy', makeTable({ name: 'legacy' })],
+			]),
+		);
+		const result = verifyFromDiff(diff, ['users'], ['users', 'legacy']);
 
 		const output = formatVerifyResult(result);
 
