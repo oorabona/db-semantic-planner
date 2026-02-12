@@ -78,12 +78,12 @@
 
 ### CLI Data Plane
 
-- [ ] **E16** [CLI] `.load <table> <file>` — Bulk CSV import with auto-detect (separator, header, quotes)
-- [ ] **E16b** [CLI] RETURNING clause display in REPL — verify + document
-- [ ] **E16c** [CLI] Transaction dot-commands `.begin/.commit/.rollback` — imperative session control
-- [ ] **E16d** [CLI] Set operations (UNION/INTERSECT/EXCEPT) exposed in REPL via adapter
-- [ ] **E16e** [CLI] `.dump <table> <file>` — CSV export (symmetric with .load)
-- [ ] **E16f** [NQL] `mutation | bind X` — bind mutation RETURNING result for chaining
+- [x] ✅ **E16** [CLI] `.load <table> <file>` — Bulk CSV import with auto-detect (separator, header, quotes) (2026-02-11)
+- [x] ✅ **E16b** [CLI] RETURNING clause display in REPL — verified: already works end-to-end (2026-02-11)
+- [x] ✅ **E16c** [CLI] Transaction dot-commands `.begin/.commit/.rollback` — imperative session control (2026-02-11)
+- [x] ✅ **E16d** [CLI] Set operations (UNION/INTERSECT/EXCEPT) exposed in REPL via adapter (2026-02-11)
+- [x] ✅ **E16e** [CLI] `.dump <table> <file>` — CSV export (symmetric with .load) (2026-02-11)
+- [x] ✅ **E16f** [NQL] `mutation | bind X` — bind mutation RETURNING result for chaining (2026-02-11)
 
 ---
 
