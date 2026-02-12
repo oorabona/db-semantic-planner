@@ -677,7 +677,8 @@ export class ReplEngine {
 				...(this.state.dbCasing ? { dbCasing: this.state.dbCasing } : {}),
 			});
 
-			const isMutation = result.intentType !== 'query';
+			const isMutation =
+				result.intentType !== 'query' && result.intentType !== 'setOperation';
 			const isDryRun = isMutation && !hasBangSuffix;
 
 			// Apply EXPLAIN prefix if explainMode is on (queries only)
