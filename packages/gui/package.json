@@ -1,0 +1,37 @@
+{
+	"name": "@dbsp/gui",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "tsc -b && vite build",
+		"preview": "vite preview",
+		"test": "vitest run --config vitest.config.ts",
+		"tauri": "tauri"
+	},
+	"dependencies": {
+		"@tauri-apps/api": "^2.5.0",
+		"@tauri-apps/plugin-shell": "^2.2.0",
+		"class-variance-authority": "^0.7.1",
+		"clsx": "^2.1.1",
+		"lucide-react": "^0.511.0",
+		"radix-ui": "^1.4.3",
+		"react": "catalog:",
+		"react-dom": "^19.1.0",
+		"react-resizable-panels": "^2.1.7",
+		"tailwind-merge": "^3.3.0",
+		"zustand": "^5.0.5"
+	},
+	"devDependencies": {
+		"@tailwindcss/vite": "^4.1.7",
+		"@tauri-apps/cli": "^2.5.0",
+		"@types/react": "catalog:",
+		"@types/react-dom": "^19.1.6",
+		"@vitejs/plugin-react": "^4.5.2",
+		"tailwindcss": "^4.1.7",
+		"typescript": "catalog:",
+		"vite": "^6.3.5",
+		"vitest": "catalog:"
+	}
+}
