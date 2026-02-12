@@ -9,7 +9,7 @@ import type { ModelIR, RelationIR, TableIR } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { LoadedSchema } from '../utils/schema-loader.js';
 import { type BatchState, processDotCommand } from './batch.js';
-import type { DbConnection, ExecutionResult } from './db-connection.js';
+import type { DbConnection } from './db-connection.js';
 
 // ARCH-005: Minimal mock schema matching LoadedSchema interface
 const mockTables = new Map<string, TableIR>([
@@ -48,12 +48,7 @@ const mockSchema: LoadedSchema = {
 
 // Mock database connection factory
 function createMockDbConnection(
-	overrides?: Partial<{
-		executeRaw: (
-			query: string,
-			params?: readonly unknown[],
-		) => Promise<ExecutionResult>;
-	}>,
+	overrides?: Partial<DbConnection>,
 ): DbConnection {
 	return {
 		executeRaw: vi.fn().mockResolvedValue({
@@ -65,6 +60,10 @@ function createMockDbConnection(
 		ping: vi.fn().mockResolvedValue(true),
 		close: vi.fn().mockResolvedValue(undefined),
 		getPool: vi.fn() as unknown as DbConnection['getPool'],
+		beginTransaction: vi.fn().mockResolvedValue(undefined),
+		commitTransaction: vi.fn().mockResolvedValue(undefined),
+		rollbackTransaction: vi.fn().mockResolvedValue(undefined),
+		inTransaction: false,
 		...overrides,
 	};
 }
@@ -80,6 +79,7 @@ function createBatchState(overrides?: Partial<BatchState>): BatchState {
 		parseMode: false,
 		model: undefined,
 		outputMode: 'json',
+		inTransaction: false,
 		...overrides,
 	};
 }
@@ -439,6 +439,97 @@ describe('processDotCommand', () => {
 			// Assert
 			expect(result.output).toContain('.output');
 			expect(result.output).toContain('json|table|csv');
+		});
+	});
+
+	/**
+	 * E16c: Transaction dot-commands (.begin, .commit, .rollback)
+	 */
+	describe('.begin / .commit / .rollback commands', () => {
+		it('.begin should require database connection', async () => {
+			const state = createBatchState({ dbConnection: undefined });
+			const result = await processDotCommand('.begin', mockSchema, state);
+			expect(result.output).toContain('No database connection');
+		});
+
+		it('.begin should start a transaction', async () => {
+			const db = createMockDbConnection();
+			const state = createBatchState({ dbConnection: db });
+			const result = await processDotCommand('.begin', mockSchema, state);
+			expect(result.output).toContain('Transaction started');
+			expect(result.stateChange?.inTransaction).toBe(true);
+			expect(db.beginTransaction).toHaveBeenCalled();
+		});
+
+		it('.begin should reject if already in transaction', async () => {
+			const db = createMockDbConnection({ inTransaction: true });
+			const state = createBatchState({ dbConnection: db, inTransaction: true });
+			const result = await processDotCommand('.begin', mockSchema, state);
+			expect(result.output).toContain('Transaction already active');
+		});
+
+		it('.commit should require database connection', async () => {
+			const state = createBatchState({ dbConnection: undefined });
+			const result = await processDotCommand('.commit', mockSchema, state);
+			expect(result.output).toContain('No database connection');
+		});
+
+		it('.commit should require active transaction', async () => {
+			const db = createMockDbConnection();
+			const state = createBatchState({ dbConnection: db });
+			const result = await processDotCommand('.commit', mockSchema, state);
+			expect(result.output).toContain('No active transaction');
+		});
+
+		it('.commit should commit the transaction', async () => {
+			const db = createMockDbConnection({ inTransaction: true });
+			const state = createBatchState({ dbConnection: db, inTransaction: true });
+			const result = await processDotCommand('.commit', mockSchema, state);
+			expect(result.output).toContain('Transaction committed');
+			expect(result.stateChange?.inTransaction).toBe(false);
+			expect(db.commitTransaction).toHaveBeenCalled();
+		});
+
+		it('.rollback should require database connection', async () => {
+			const state = createBatchState({ dbConnection: undefined });
+			const result = await processDotCommand('.rollback', mockSchema, state);
+			expect(result.output).toContain('No database connection');
+		});
+
+		it('.rollback should require active transaction', async () => {
+			const db = createMockDbConnection();
+			const state = createBatchState({ dbConnection: db });
+			const result = await processDotCommand('.rollback', mockSchema, state);
+			expect(result.output).toContain('No active transaction');
+		});
+
+		it('.rollback should rollback the transaction', async () => {
+			const db = createMockDbConnection({ inTransaction: true });
+			const state = createBatchState({ dbConnection: db, inTransaction: true });
+			const result = await processDotCommand('.rollback', mockSchema, state);
+			expect(result.output).toContain('Transaction rolled back');
+			expect(result.stateChange?.inTransaction).toBe(false);
+			expect(db.rollbackTransaction).toHaveBeenCalled();
+		});
+
+		it('.begin should handle beginTransaction failure', async () => {
+			const db = createMockDbConnection({
+				beginTransaction: vi
+					.fn()
+					.mockRejectedValue(new Error('pool exhausted')),
+			});
+			const state = createBatchState({ dbConnection: db });
+			const result = await processDotCommand('.begin', mockSchema, state);
+			expect(result.output).toContain('Failed to begin transaction');
+			expect(result.output).toContain('pool exhausted');
+		});
+
+		it('.help should include transaction commands', async () => {
+			const state = createBatchState();
+			const result = await processDotCommand('.help', mockSchema, state);
+			expect(result.output).toContain('.begin');
+			expect(result.output).toContain('.commit');
+			expect(result.output).toContain('.rollback');
 		});
 	});
 });

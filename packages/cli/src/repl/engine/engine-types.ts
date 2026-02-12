@@ -68,6 +68,8 @@ export interface EngineState {
 	outputMode: 'json' | 'table' | 'csv';
 	outputLayout: OutputLayout;
 	planVerbosity: PlanVerbosity;
+	/** E16c: Whether a transaction is currently active */
+	inTransaction: boolean;
 }
 
 /**

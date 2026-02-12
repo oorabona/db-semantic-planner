@@ -23,6 +23,14 @@ export interface DbConnection {
 	close(): Promise<void>;
 	/** Get the underlying pg Pool */
 	getPool(): pg.Pool;
+	/** Start a transaction (acquires dedicated client, sends BEGIN) */
+	beginTransaction(): Promise<void>;
+	/** Commit the active transaction and release the client */
+	commitTransaction(): Promise<void>;
+	/** Rollback the active transaction and release the client */
+	rollbackTransaction(): Promise<void>;
+	/** Whether a transaction is currently active */
+	readonly inTransaction: boolean;
 }
 
 export interface ExecutionResult {
@@ -71,47 +79,54 @@ export async function createDbConnection(
 		throw new Error(`Failed to connect to database: ${message}`);
 	}
 
+	// Transaction state: dedicated client held for the duration of .begin → .commit/.rollback
+	let txClient: pg.PoolClient | null = null;
+
+	/**
+	 * Execute a query on the active target (transaction client or pool).
+	 */
+	async function executeRaw(
+		query: string,
+		params: readonly unknown[] = [],
+	): Promise<ExecutionResult> {
+		const startTime = performance.now();
+		const target = txClient ?? pool;
+
+		try {
+			const poolResult = await target.query(query, [...params]);
+			const endTime = performance.now();
+			const executionTimeMs = Math.round(endTime - startTime);
+
+			const rows = (poolResult.rows ?? []) as Record<string, unknown>[];
+			const columns = poolResult.fields?.map((f) => f.name) ?? [];
+			const rowCount = poolResult.rowCount ?? rows?.length ?? 0;
+			const truncated = rows.length > MAX_ROWS;
+			const limitedRows = truncated ? rows.slice(0, MAX_ROWS) : rows;
+
+			return {
+				rows: limitedRows,
+				columns,
+				rowCount,
+				executionTimeMs,
+				truncated,
+			};
+		} catch (error) {
+			const endTime = performance.now();
+			const executionTimeMs = Math.round(endTime - startTime);
+			const message = error instanceof Error ? error.message : String(error);
+
+			return {
+				rows: [],
+				columns: [],
+				rowCount: 0,
+				executionTimeMs,
+				error: message,
+			};
+		}
+	}
+
 	return {
-		async executeRaw(
-			query: string,
-			params: readonly unknown[] = [],
-		): Promise<ExecutionResult> {
-			const startTime = performance.now();
-
-			try {
-				// Always use pool.query() for consistent physical column names.
-				// The pg driver returns snake_case column names as stored in the DB.
-				const poolResult = await pool.query(query, [...params]);
-				const endTime = performance.now();
-				const executionTimeMs = Math.round(endTime - startTime);
-
-				const rows = (poolResult.rows ?? []) as Record<string, unknown>[];
-				const columns = poolResult.fields?.map((f) => f.name) ?? [];
-				const rowCount = poolResult.rowCount ?? rows?.length ?? 0;
-				const truncated = rows.length > MAX_ROWS;
-				const limitedRows = truncated ? rows.slice(0, MAX_ROWS) : rows;
-
-				return {
-					rows: limitedRows,
-					columns,
-					rowCount,
-					executionTimeMs,
-					truncated,
-				};
-			} catch (error) {
-				const endTime = performance.now();
-				const executionTimeMs = Math.round(endTime - startTime);
-				const message = error instanceof Error ? error.message : String(error);
-
-				return {
-					rows: [],
-					columns: [],
-					rowCount: 0,
-					executionTimeMs,
-					error: message,
-				};
-			}
-		},
+		executeRaw,
 
 		async ping(): Promise<boolean> {
 			try {
@@ -123,11 +138,58 @@ export async function createDbConnection(
 		},
 
 		async close(): Promise<void> {
+			if (txClient) {
+				try {
+					await txClient.query('ROLLBACK');
+				} catch {
+					// Best-effort rollback on close
+				}
+				txClient.release();
+				txClient = null;
+			}
 			await pool.end();
 		},
 
 		getPool(): pg.Pool {
 			return pool;
+		},
+
+		async beginTransaction(): Promise<void> {
+			if (txClient) {
+				throw new Error(
+					'Transaction already active. Use .commit or .rollback first.',
+				);
+			}
+			txClient = await pool.connect();
+			await txClient.query('BEGIN');
+		},
+
+		async commitTransaction(): Promise<void> {
+			if (!txClient) {
+				throw new Error('No active transaction. Use .begin first.');
+			}
+			try {
+				await txClient.query('COMMIT');
+			} finally {
+				txClient.release();
+				txClient = null;
+			}
+		},
+
+		async rollbackTransaction(): Promise<void> {
+			if (!txClient) {
+				throw new Error('No active transaction. Use .begin first.');
+			}
+			try {
+				await txClient.query('ROLLBACK');
+			} finally {
+				txClient.release();
+				txClient = null;
+			}
+		},
+
+		get inTransaction(): boolean {
+			return txClient !== null;
 		},
 	};
 }

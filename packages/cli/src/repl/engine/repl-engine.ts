@@ -23,7 +23,7 @@ import {
 	type DbConnection,
 	getDatabaseName,
 } from '../db-connection.js';
-import { processDotCommand } from '../dot-commands.js';
+import { type BatchState, processDotCommand } from '../dot-commands.js';
 import { getModeWarning, parseInputMode } from '../mode-escape.js';
 import { compileNqlToSql } from '../nql-executor.js';
 import type { QueryResult } from '../types.js';
@@ -101,6 +101,7 @@ export class ReplEngine {
 			outputMode: 'json',
 			outputLayout: 'full',
 			planVerbosity: 'normal',
+			inTransaction: false,
 		};
 	}
 
@@ -450,7 +451,7 @@ export class ReplEngine {
 
 		// Delegate to shared dot-command processor (used by batch mode too)
 		// Build a BatchState-compatible object for the processor
-		const batchState = {
+		const batchState: BatchState = {
 			mode: this.state.mode,
 			execEnabled: this.state.execMode,
 			schemaName: this.state.schemaName as string | undefined,
@@ -459,6 +460,7 @@ export class ReplEngine {
 			parseMode: this.state.parseMode,
 			model: this.model,
 			outputMode: this.state.outputMode,
+			inTransaction: this.state.inTransaction,
 			...(this.state.dbCasing !== undefined && {
 				dbCasing: this.state.dbCasing,
 			}),
@@ -489,6 +491,9 @@ export class ReplEngine {
 			}
 			if (result.stateChange.outputMode !== undefined) {
 				this.state.outputMode = result.stateChange.outputMode;
+			}
+			if (result.stateChange.inTransaction !== undefined) {
+				this.state.inTransaction = result.stateChange.inTransaction;
 			}
 			this.emitStateChange();
 		}
