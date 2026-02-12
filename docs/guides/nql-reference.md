@@ -16,6 +16,7 @@
 - [CASE Expressions](#case-expressions)
 - [JSONB Operators](#jsonb-operators)
 - [Subqueries](#subqueries)
+- [Set Operations](#set-operations)
 - [Hierarchy (Recursive CTE)](#hierarchy-recursive-cte)
 - [Range Types](#range-types)
 - [Mutations](#mutations)
@@ -1109,6 +1110,148 @@ WHERE EXISTS (
 
 ---
 
+## Set Operations
+
+*Schema: iam*
+
+Combine the results of two queries with `union`, `intersect`, `except`, or `union all`. Both sides must select the same columns. The right-hand query is wrapped in parentheses.
+
+### UNION (Deduplicated)
+
+Merge two result sets, removing duplicates:
+
+```nql
+users | where active = true | select id, username \
+  | union (users | where active = false | select id, username)
+```
+
+<details><summary>SQL</summary>
+
+```sql
+(SELECT users.id, users.username
+ FROM iam_example.users
+ WHERE users.active = $1)
+UNION
+(SELECT users.id, users.username
+ FROM iam_example.users
+ WHERE users.active = $2)
+-- params: [true, false]
+```
+</details>
+
+| id | username |
+|----|----------|
+| 1  | alice    |
+| 2  | bob      |
+| 3  | carol    |
+| 4  | dave     |
+| 5  | eve      |
+| 6  | frank    |
+
+*(6 rows — all users from both sets, duplicates removed)*
+
+### INTERSECT
+
+Keep only rows that appear in *both* result sets:
+
+```nql
+users | where active = true | select id, username \
+  | intersect (users | select id, username)
+```
+
+<details><summary>SQL</summary>
+
+```sql
+(SELECT users.id, users.username
+ FROM iam_example.users
+ WHERE users.active = $1)
+INTERSECT
+(SELECT users.id, users.username
+ FROM iam_example.users)
+-- params: [true]
+```
+</details>
+
+| id | username |
+|----|----------|
+| 1  | alice    |
+| 2  | bob      |
+| 3  | carol    |
+| 4  | dave     |
+| 5  | eve      |
+
+*(5 rows — active users that exist in the full users table)*
+
+### EXCEPT
+
+Rows from the left set that do *not* appear in the right set:
+
+```nql
+users | where active = true | select id, username \
+  | except (users | where active = false | select id, username)
+```
+
+<details><summary>SQL</summary>
+
+```sql
+(SELECT users.id, users.username
+ FROM iam_example.users
+ WHERE users.active = $1)
+EXCEPT
+(SELECT users.id, users.username
+ FROM iam_example.users
+ WHERE users.active = $2)
+-- params: [true, false]
+```
+</details>
+
+| id | username |
+|----|----------|
+| 1  | alice    |
+| 2  | bob      |
+| 3  | carol    |
+| 4  | dave     |
+| 5  | eve      |
+
+*(5 rows — active users minus inactive users)*
+
+### UNION ALL (Preserve Duplicates)
+
+Like `UNION` but keeps duplicate rows:
+
+```nql
+userRoles | where roleId = 1 | select userId, roleId \
+  | union all (userRoles | where roleId = 2 | select userId, roleId)
+```
+
+<details><summary>SQL</summary>
+
+```sql
+(SELECT user_roles.user_id, user_roles.role_id
+ FROM iam_example.user_roles
+ WHERE user_roles.role_id = $1)
+UNION ALL
+(SELECT user_roles.user_id, user_roles.role_id
+ FROM iam_example.user_roles
+ WHERE user_roles.role_id = $2)
+-- params: [1, 2]
+```
+</details>
+
+| user_id | role_id |
+|---------|---------|
+| 1       | 1       |
+| 2       | 2       |
+
+*(2 rows — all assignments for roles 1 and 2, duplicates preserved)*
+
+**Notes:**
+- Both sides must `select` the same number of columns with compatible types
+- Set operations can be chained: `a | union (b) | except (c)`
+- `UNION` deduplicates; `UNION ALL` keeps all rows (faster for large result sets)
+
+---
+
 ## Hierarchy (Recursive CTE)
 
 *Schema: hierarchy*
@@ -1431,6 +1574,37 @@ WHERE users.active = $1
 
 *(5 rows — the bound result `activeUsers` can be used in subsequent queries, e.g. `where userId in activeUsers`)*
 
+**Follow-up usage** — reference the bound name in a later query:
+
+```nql
+roles | where id in (userRoles | where userId = 1 | select roleId)
+```
+
+<details><summary>SQL</summary>
+
+```sql
+SELECT roles.*
+FROM iam_example.roles
+WHERE roles.id = ANY (
+  SELECT user_roles_subq_0.role_id
+  FROM iam_example.user_roles AS user_roles_subq_0
+  WHERE user_roles_subq_0.user_id = $1
+)
+AND EXISTS (
+  SELECT 1
+  FROM iam_example.user_roles AS user_roles_exists_1
+  WHERE roles.id = user_roles_exists_1.role_id
+)
+-- params: [1]
+```
+</details>
+
+| id | name        | description                         | active |
+|----|-------------|-------------------------------------|--------|
+| 1  | super_admin | Super administrator with all access | True   |
+
+*(1 row — roles assigned to user 1 via the junction table)*
+
 ### Per-Include LIMIT
 
 Limit the number of related rows *per parent row*. This forces the LATERAL strategy (see [Per-Include LIMIT (LATERAL)](#per-include-limit-lateral) above).
@@ -1439,11 +1613,27 @@ Limit the number of related rows *per parent row*. This forces the LATERAL strat
 users | select *, userRoles.* | limit userRoles 2
 ```
 
+<details><summary>SQL</summary>
+
+```sql
+SELECT users.*, user_roles_lat_0.*
+FROM iam_example.users
+LEFT JOIN LATERAL (
+  SELECT user_roles_inner_0.*
+  FROM iam_example.user_roles AS user_roles_inner_0
+  WHERE user_roles_inner_0.user_id = users.id
+  LIMIT 2
+) AS user_roles_lat_0 ON true
+```
+</details>
+
 Supports dotted paths for nested relations — all ancestors in the path are automatically switched to LATERAL:
 
 ```nql
 users | select *, userRoles.* | limit userRoles.role 1
 ```
+
+*Schema: test-locking*
 
 ### Row-Level Locking (FOR UPDATE / FOR SHARE)
 
@@ -1468,8 +1658,21 @@ jobs | for update nowait          # Error immediately if locked
 **Job queue pattern** — select + lock + skip in one query:
 
 ```nql
-jobs | where status = 'pending' | order by created_at asc | limit 1 | for update skip locked
+jobs | where status = 'pending' | order by priority desc | limit 1 | for update skip locked
 ```
+
+<details><summary>SQL</summary>
+
+```sql
+SELECT jobs.*
+FROM test_locking.jobs
+WHERE jobs.status = $1
+ORDER BY jobs.priority DESC
+LIMIT 1
+FOR UPDATE SKIP LOCKED
+-- params: ["pending"]
+```
+</details>
 
 **Notes:**
 - Lock clauses are only effective within a transaction — a warning is emitted if used outside one
@@ -1554,6 +1757,10 @@ table                              -- table scan
   | for share [skip locked|nowait]  -- shared row lock
   | for no key update               -- non-key exclusive lock
   | for key share                   -- key-only shared lock
+  | union (right_query)             -- deduplicated union
+  | union all (right_query)         -- union with duplicates
+  | intersect (right_query)         -- rows in both sets
+  | except (right_query)            -- rows in left but not right
 ```
 
 ### WHERE Conditions

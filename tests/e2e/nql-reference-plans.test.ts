@@ -22,6 +22,10 @@ import {
 import { compile } from '@dbsp/nql';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../../packages/adapter-pgsql/src/pgsql-adapter.js';
+import {
+	compileSetOperation,
+	createLeafCompileFn,
+} from '../../packages/adapter-pgsql/src/set-operation.js';
 
 const ROOT_DIR = resolve(import.meta.dirname, '../..');
 const DOC_PATH = resolve(ROOT_DIR, 'docs/guides/nql-reference.md');
@@ -38,6 +42,7 @@ type SchemaName =
 	| 'iam'
 	| 'minimal'
 	| 'scheduling'
+	| 'test-locking'
 	| 'test-strategies';
 
 const SCHEMA_NAMES: SchemaName[] = [
@@ -48,6 +53,7 @@ const SCHEMA_NAMES: SchemaName[] = [
 	'iam',
 	'minimal',
 	'scheduling',
+	'test-locking',
 	'test-strategies',
 ];
 
@@ -189,8 +195,10 @@ function splitNqlQueries(content: string): string[] {
 		// Skip empty and comment-only lines
 		if (!trimmed || trimmed.startsWith('#')) continue;
 
-		// Strip inline comments
-		const withoutComment = trimmed.replace(/\s+--\s.*$/, '');
+		// Strip inline comments (SQL-style `-- ...` and NQL-style `# ...`)
+		const withoutComment = trimmed
+			.replace(/\s+--\s.*$/, '')
+			.replace(/\s+#\s.*$/, '');
 
 		// Strip REPL mutation terminator `!` at end of line
 		const withoutTerminator = withoutComment.endsWith('!')
@@ -269,7 +277,24 @@ function compileQuery(
 	schemaObj: ReturnType<Awaited<ReturnType<typeof loadExampleSchema>>>,
 ): CompileResult {
 	const compiled = compile(nql, schemaObj.model);
-	if (!compiled.success || !compiled.ast?.query) {
+	if (!compiled.success) {
+		throw new Error(
+			`NQL parse failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+
+	// Set operations produce ast.setOperation instead of ast.query
+	if (compiled.ast?.setOperation) {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const leafCompileFn = createLeafCompileFn(adapter, schemaObj.model, plan);
+		const result = compileSetOperation(
+			compiled.ast.setOperation,
+			leafCompileFn,
+		);
+		return { sql: result.sql, params: result.parameters };
+	}
+
+	if (!compiled.ast?.query) {
 		throw new Error(
 			`NQL parse failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
 		);

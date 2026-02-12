@@ -1,0 +1,88 @@
+# Advanced NQL Patterns
+# Demonstrates: set operations, bind chains, window+CASE combos,
+# aggregation dashboards, deep traversal, per-include LIMIT
+#
+# Usage:
+#   pnpm dbsp repl --schema ./examples/iam.schema.ts \
+#     --db postgresql://postgres:demo@localhost:5432/demo \
+#     --input ./examples/advanced-patterns.dbsp --casing snake
+#
+# NQL v2.1 Syntax
+
+# =============================================================================
+# Setup: IAM schema (supports bind, deep traversal, LATERAL, set ops)
+# =============================================================================
+
+!DROP SCHEMA IF EXISTS advanced_patterns CASCADE;
+!CREATE SCHEMA IF NOT EXISTS advanced_patterns;
+.use advanced_patterns
+.import examples/iam.ddl.sql
+.import examples/iam.seed.sql
+
+# =============================================================================
+# Explore
+# =============================================================================
+.tables
+
+# =============================================================================
+# Set Operations (UNION / INTERSECT / EXCEPT)
+# =============================================================================
+
+# UNION: active users + inactive users (deduplicated)
+users | where active = true | select id, username | union (users | where active = false | select id, username)
+
+# INTERSECT: users whose username appears in both active and all users
+users | where active = true | select id, username | intersect (users | select id, username)
+
+# EXCEPT: active users minus ALL users (= empty set, demonstrates syntax)
+users | where active = true | select id, username | except (users | where active = false | select id, username)
+
+# UNION ALL: role assignments for roleId 1 and 2 (duplicates preserved)
+userRoles | where roleId = 1 | select userId, roleId | union all (userRoles | where roleId = 2 | select userId, roleId)
+
+# =============================================================================
+# Bind + IN Subquery Chain (CTE pipeline)
+# =============================================================================
+
+# Step 1: Bind active user IDs
+users | where active = true | select id | bind activeUsers
+
+# Step 2: Find roles assigned to user 1 via IN subquery
+roles | where id in (userRoles | where userId = 1 | select roleId)
+
+# =============================================================================
+# Per-Include LIMIT (LATERAL strategy)
+# =============================================================================
+
+# Top 2 roles per user (forces LEFT JOIN LATERAL with LIMIT 2)
+users | select *, userRoles.* | limit userRoles 2
+
+# =============================================================================
+# Deep Traversal (4-level nested json_agg)
+# =============================================================================
+
+# Full permission chain: users → userRoles → role → rolePermissions → permission
+users | where active = true | select username, userRoles.role.rolePermissions.permission.*
+
+# =============================================================================
+# Aggregation Patterns
+# =============================================================================
+
+# Role assignment counts (GROUP BY + COUNT)
+userRoles | group by roleId | select roleId, count(*) as userCount
+
+# Permission distribution per role
+rolePermissions | group by roleId | select roleId, count(*) as permCount
+
+# =============================================================================
+# JSONB Operators (audit trail analysis)
+# =============================================================================
+
+# Text extraction: find logins from specific IP
+auditLog | where details ->> 'ip' = '10.0.0.1'
+
+# Containment: records matching a JSON pattern
+auditLog | where details @> '{"ip": "10.0.0.1"}'
+
+# Key existence: records that have a 'browser' key
+auditLog | where details ? 'browser'

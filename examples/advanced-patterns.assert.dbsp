@@ -1,0 +1,184 @@
+# Assertions for advanced-patterns.dbsp
+# Validates advanced NQL patterns: set ops, bind, LATERAL, deep traversal, JSONB
+# Run with: --casing snake
+
+# =============================================================================
+# Setup (queries 0–4)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 0: !DROP SCHEMA
+# ─────────────────────────────────────────
+--- query: 0
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 1: !CREATE SCHEMA
+# ─────────────────────────────────────────
+--- query: 1
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 2: .use advanced_patterns
+# ─────────────────────────────────────────
+--- query: 2
+success: true
+output.contains: Using schema: advanced_patterns
+
+# ─────────────────────────────────────────
+# Query 3: .import iam.ddl.sql
+# ─────────────────────────────────────────
+--- query: 3
+db.success: true
+db.output.contains: Imported
+
+# ─────────────────────────────────────────
+# Query 4: .import iam.seed.sql
+# ─────────────────────────────────────────
+--- query: 4
+db.success: true
+db.output.contains: Imported
+
+# ─────────────────────────────────────────
+# Query 5: .tables
+# ─────────────────────────────────────────
+--- query: 5
+success: true
+output.contains: Tables
+
+# =============================================================================
+# Set Operations (queries 6–9)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 6: UNION — active ∪ inactive users
+# ─────────────────────────────────────────
+--- query: 6
+success: true
+sql.equals: (SELECT users.id, users.username FROM advanced_patterns.users WHERE users.active = $1) UNION (SELECT users.id, users.username FROM advanced_patterns.users WHERE users.active = $2)
+params.equals: [true, false]
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 7: INTERSECT — active ∩ all
+# ─────────────────────────────────────────
+--- query: 7
+success: true
+sql.equals: (SELECT users.id, users.username FROM advanced_patterns.users WHERE users.active = $1) INTERSECT (SELECT users.id, users.username FROM advanced_patterns.users)
+params.equals: [true]
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 8: EXCEPT — active minus inactive
+# ─────────────────────────────────────────
+--- query: 8
+success: true
+sql.equals: (SELECT users.id, users.username FROM advanced_patterns.users WHERE users.active = $1) EXCEPT (SELECT users.id, users.username FROM advanced_patterns.users WHERE users.active = $2)
+params.equals: [true, false]
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 9: UNION ALL — roleId 1 ∪ roleId 2 (dupes)
+# ─────────────────────────────────────────
+--- query: 9
+success: true
+sql.equals: (SELECT user_roles.user_id, user_roles.role_id FROM advanced_patterns.user_roles WHERE user_roles.role_id = $1) UNION ALL (SELECT user_roles.user_id, user_roles.role_id FROM advanced_patterns.user_roles WHERE user_roles.role_id = $2)
+params.equals: [1, 2]
+db.success: true
+
+# =============================================================================
+# Bind + IN Subquery (queries 10–11)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 10: bind activeUsers
+# ─────────────────────────────────────────
+--- query: 10
+success: true
+sql.equals: SELECT users.id FROM advanced_patterns.users WHERE users.active = $1
+params.equals: [true]
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 11: roles IN subquery
+# ─────────────────────────────────────────
+--- query: 11
+success: true
+sql.equals: SELECT roles.* FROM advanced_patterns.roles WHERE roles.id = ANY (SELECT user_roles_subq_0.role_id FROM advanced_patterns.user_roles AS user_roles_subq_0 WHERE user_roles_subq_0.user_id = $1) AND EXISTS (SELECT 1 FROM advanced_patterns.user_roles AS user_roles_exists_1 WHERE roles.id = user_roles_exists_1.role_id)
+params.equals: [1]
+db.success: true
+
+# =============================================================================
+# Per-Include LIMIT / LATERAL (query 12)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 12: limit userRoles 2 (LATERAL)
+# ─────────────────────────────────────────
+--- query: 12
+success: true
+sql.equals: SELECT users.*, user_roles_lat_0.* FROM advanced_patterns.users LEFT JOIN LATERAL ( SELECT user_roles_inner_0.* FROM advanced_patterns.user_roles AS user_roles_inner_0 WHERE user_roles_inner_0.user_id = users.id LIMIT 2 ) AS user_roles_lat_0 ON true
+db.success: true
+
+# =============================================================================
+# Deep Traversal (query 13)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 13: full permission chain (4 levels)
+# ─────────────────────────────────────────
+--- query: 13
+success: true
+sql.equals: SELECT users.username, COALESCE((SELECT json_agg(to_jsonb(__t__) || jsonb_build_object('role', COALESCE((SELECT json_agg(to_jsonb(__t1__) || jsonb_build_object('rolePermissions', COALESCE((SELECT json_agg(to_jsonb(__t2__) || jsonb_build_object('permission', COALESCE((SELECT json_agg(to_jsonb(__t3__)) FROM advanced_patterns.permissions AS __t3__ WHERE __t3__.id = __t2__.permission_id), '[]'::json))) FROM advanced_patterns.role_permissions AS __t2__ WHERE __t2__.role_id = __t1__.id), '[]'::json))) FROM advanced_patterns.roles AS __t1__ WHERE __t1__.id = __t__.role_id), '[]'::json))) FROM advanced_patterns.user_roles AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS "userRoles_json" FROM advanced_patterns.users WHERE users.active = $1
+params.equals: [true]
+db.success: true
+
+# =============================================================================
+# Aggregation (queries 14–15)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 14: role assignment counts
+# ─────────────────────────────────────────
+--- query: 14
+success: true
+sql.equals: SELECT user_roles.role_id, count(*) AS user_count FROM advanced_patterns.user_roles GROUP BY user_roles.role_id
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 15: permission distribution per role
+# ─────────────────────────────────────────
+--- query: 15
+success: true
+sql.equals: SELECT role_permissions.role_id, count(*) AS perm_count FROM advanced_patterns.role_permissions GROUP BY role_permissions.role_id
+db.success: true
+
+# =============================================================================
+# JSONB Operators (queries 16–18)
+# =============================================================================
+
+# ─────────────────────────────────────────
+# Query 16: JSONB ->> text extraction
+# ─────────────────────────────────────────
+--- query: 16
+success: true
+sql.equals: SELECT audit_log.* FROM advanced_patterns.audit_log WHERE (audit_log.details ->> $1) = $2
+params.equals: ["ip", "10.0.0.1"]
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 17: JSONB @> containment
+# ─────────────────────────────────────────
+--- query: 17
+success: true
+sql.equals: SELECT audit_log.* FROM advanced_patterns.audit_log WHERE audit_log.details @> $1
+db.success: true
+
+# ─────────────────────────────────────────
+# Query 18: JSONB ? key existence
+# ─────────────────────────────────────────
+--- query: 18
+success: true
+sql.equals: SELECT audit_log.* FROM advanced_patterns.audit_log WHERE audit_log.details ? $1
+params.equals: ["browser"]
+db.success: true
