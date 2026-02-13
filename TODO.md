@@ -64,8 +64,7 @@
 
 (GUI-001 to GUI-009, GUI-MW archived → docs/historic/done-2026-02.md)
 
-- [ ] 🔧 **GUI-F002** [GUI] Missing test coverage: hooks (useConnection, useSchema, useMonacoSetup), ipc.ts, sql-completions.ts, sidecar/index.ts — Priority: M
-- [ ] 🔧 **GUI-F003** [GUI] Fix 31 pre-existing TS errors in test files (useConnection, useMonacoSetup, useSchema, sql-completions, ipc) — Priority: M
+(GUI-F002, GUI-F003 archived → docs/historic/done-2026-02.md)
 
 ### Later
 
@@ -76,10 +75,9 @@
 - [ ] 💡 **GUI-014** [GUI] Welcome screen with quick connect + sample queries
 - [ ] 💡 **GUI-015** [GUI] Web version (@dbsp/web — same React frontend, HTTP/WS transport, phpMyAdmin-like)
 - [ ] 💡 **GUI-016** [GUI] Status bar "+" → loupe icon, ouvre un panneau de logs applicatifs (sidecar stdout/stderr, IPC messages, query timing). Format: drawer coulissant depuis la barre de statut (style VS Code Output panel) ou onglet "Logs" dans le panneau results
-- [ ] 💡 **GUI-MW-D01** [GUI] store:// backend — verify Tauri store plugin uses OS keychain vs plaintext file — Priority: M
+(GUI-MW-D01, GUI-MW-D04 archived → docs/historic/done-2026-02.md)
 - [ ] 💡 **GUI-MW-D02** [GUI] Concurrent settings edit — lock Preferences UI if dbsp.settings.json open as dirty buffer — Priority: L
 - [ ] 💡 **GUI-MW-D03** [GUI] Per-connection SSL/params overrides in dbsp.settings.json — Priority: L
-- [ ] 💡 **GUI-MW-D04** [GUI] Settings precedence rules — document merge: project vs user vs defaults — Priority: M
 - [ ] 💡 **GUI-MW-D05** [GUI] File rename detection — detect OS rename of open file, update tab path — Priority: L
 - [ ] 💡 **GUI-MW-D06** [GUI] env:// security — consider restricting readable env vars (allowlist) — Priority: L
 

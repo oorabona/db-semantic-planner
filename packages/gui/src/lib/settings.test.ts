@@ -19,16 +19,17 @@ vi.mock('@tauri-apps/api/path', () => ({
 }));
 
 import {
+	type DbspSettings,
 	DEFAULT_EDITOR,
 	DEFAULT_EXCLUDE,
 	DEFAULT_INCLUDE,
+	readSettings,
+	resolveProjectSettings,
+	resolveSchemaPath,
 	SCHEMA_SEARCH_PATHS,
 	SETTINGS_FILENAME,
 	SettingsParseError,
 	SettingsValidationError,
-	type DbspSettings,
-	readSettings,
-	resolveSchemaPath,
 	validateSettings,
 	writeSettings,
 } from './settings';
@@ -360,9 +361,9 @@ describe('writeSettings', () => {
 		mockWriteTextFile.mockRejectedValue(new Error('Permission denied'));
 
 		// Act & Assert
-		await expect(
-			writeSettings('/readonly', { version: 1 }),
-		).rejects.toThrow('Permission denied');
+		await expect(writeSettings('/readonly', { version: 1 })).rejects.toThrow(
+			'Permission denied',
+		);
 	});
 });
 
@@ -433,5 +434,93 @@ describe('resolveSchemaPath', () => {
 		// Assert
 		expect(result).toBe('src/schema.ts');
 		expect(mockExists).toHaveBeenCalledTimes(1); // stops at first match
+	});
+});
+
+// ── resolveProjectSettings (GUI-MW-D04) ─────────────────────────
+
+describe('resolveProjectSettings', () => {
+	it('returns all defaults when settings is null', () => {
+		const result = resolveProjectSettings(null);
+
+		expect(result.include).toEqual([...DEFAULT_INCLUDE]);
+		expect(result.exclude).toEqual([...DEFAULT_EXCLUDE]);
+		expect(result.editor).toEqual(DEFAULT_EDITOR);
+	});
+
+	it('returns all defaults when settings has no overrides', () => {
+		const settings: DbspSettings = { version: 1 };
+		const result = resolveProjectSettings(settings);
+
+		expect(result.include).toEqual([...DEFAULT_INCLUDE]);
+		expect(result.exclude).toEqual([...DEFAULT_EXCLUDE]);
+		expect(result.editor).toEqual(DEFAULT_EDITOR);
+	});
+
+	it('project.include fully replaces default include', () => {
+		const settings: DbspSettings = {
+			version: 1,
+			project: { include: ['*.sql'] },
+		};
+		const result = resolveProjectSettings(settings);
+
+		expect(result.include).toEqual(['*.sql']);
+		expect(result.exclude).toEqual([...DEFAULT_EXCLUDE]); // untouched
+	});
+
+	it('project.exclude fully replaces default exclude', () => {
+		const settings: DbspSettings = {
+			version: 1,
+			project: { exclude: ['vendor', 'tmp'] },
+		};
+		const result = resolveProjectSettings(settings);
+
+		expect(result.exclude).toEqual(['vendor', 'tmp']);
+		expect(result.include).toEqual([...DEFAULT_INCLUDE]); // untouched
+	});
+
+	it('editor settings merge with defaults (partial override)', () => {
+		const settings: DbspSettings = {
+			version: 1,
+			editor: { tabSize: 4 },
+		};
+		const result = resolveProjectSettings(settings);
+
+		expect(result.editor).toEqual({
+			tabSize: 4,
+			formatOnSave: false, // from default
+			maxResults: 1000, // from default
+		});
+	});
+
+	it('editor settings fully override when all fields provided', () => {
+		const settings: DbspSettings = {
+			version: 1,
+			editor: { tabSize: 4, formatOnSave: true, maxResults: 500 },
+		};
+		const result = resolveProjectSettings(settings);
+
+		expect(result.editor).toEqual({
+			tabSize: 4,
+			formatOnSave: true,
+			maxResults: 500,
+		});
+	});
+
+	it('combines project and editor overrides', () => {
+		const settings: DbspSettings = {
+			version: 1,
+			project: { include: ['*.nql'], exclude: ['build'] },
+			editor: { maxResults: 200 },
+		};
+		const result = resolveProjectSettings(settings);
+
+		expect(result.include).toEqual(['*.nql']);
+		expect(result.exclude).toEqual(['build']);
+		expect(result.editor).toEqual({
+			tabSize: 2,
+			formatOnSave: false,
+			maxResults: 200,
+		});
 	});
 });

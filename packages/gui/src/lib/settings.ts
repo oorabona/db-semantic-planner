@@ -1,5 +1,5 @@
-import { exists, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
 import { join } from '@tauri-apps/api/path';
+import { exists, readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -52,6 +52,50 @@ export const SCHEMA_SEARCH_PATHS = [
 	'db/schema.ts',
 ] as const;
 
+// ── Precedence Merge ─────────────────────────────────────────────
+
+/**
+ * Resolved project settings with all defaults applied.
+ *
+ * **Settings Precedence (GUI-MW-D04):**
+ * Two-layer merge — hardcoded defaults → project file (`dbsp.settings.json`).
+ *
+ * ```
+ * Layer 1 (lowest)  : DEFAULT_INCLUDE, DEFAULT_EXCLUDE, DEFAULT_EDITOR
+ * Layer 2 (highest) : dbsp.settings.json → project.include, project.exclude, editor.*
+ * ```
+ *
+ * Project-level values fully replace the corresponding default array/object —
+ * they are NOT merged element-by-element. For example, setting
+ * `project.include: ["*.sql"]` replaces the default `["**\/*.dbsp", "**\/*.assert.dbsp"]`
+ * entirely.
+ *
+ * There is no user-level config (`~/.config/dbsp/` etc.) at this time.
+ * If one is added later, it slots in as Layer 1.5 (between defaults and project).
+ */
+export interface ResolvedProjectSettings {
+	readonly include: readonly string[];
+	readonly exclude: readonly string[];
+	readonly editor: Required<DbspEditorSettings>;
+}
+
+/**
+ * Merge project settings with hardcoded defaults.
+ * Returns fully-resolved settings with no optional fields.
+ */
+export function resolveProjectSettings(
+	settings: DbspSettings | null,
+): ResolvedProjectSettings {
+	return {
+		include: settings?.project?.include ?? [...DEFAULT_INCLUDE],
+		exclude: settings?.project?.exclude ?? [...DEFAULT_EXCLUDE],
+		editor: {
+			...DEFAULT_EDITOR,
+			...settings?.editor,
+		},
+	};
+}
+
 // ── Validation ───────────────────────────────────────────────────
 
 export interface SettingsError {
@@ -61,9 +105,14 @@ export interface SettingsError {
 
 export function validateSettings(
 	raw: unknown,
-): { ok: true; settings: DbspSettings } | { ok: false; errors: SettingsError[] } {
+):
+	| { ok: true; settings: DbspSettings }
+	| { ok: false; errors: SettingsError[] } {
 	if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-		return { ok: false, errors: [{ path: '', message: 'Settings must be a JSON object' }] };
+		return {
+			ok: false,
+			errors: [{ path: '', message: 'Settings must be a JSON object' }],
+		};
 	}
 
 	const obj = raw as Record<string, unknown>;
@@ -77,51 +126,97 @@ export function validateSettings(
 	// connections (optional array)
 	if (obj.connections !== undefined) {
 		if (!Array.isArray(obj.connections)) {
-			errors.push({ path: 'connections', message: 'connections must be an array' });
+			errors.push({
+				path: 'connections',
+				message: 'connections must be an array',
+			});
 		} else {
 			for (let i = 0; i < obj.connections.length; i++) {
 				const conn = obj.connections[i] as Record<string, unknown>;
 				if (!conn || typeof conn !== 'object') {
-					errors.push({ path: `connections[${i}]`, message: 'must be an object' });
+					errors.push({
+						path: `connections[${i}]`,
+						message: 'must be an object',
+					});
 					continue;
 				}
 				if (typeof conn.name !== 'string' || conn.name.length === 0) {
-					errors.push({ path: `connections[${i}].name`, message: 'name is required and must be a non-empty string' });
+					errors.push({
+						path: `connections[${i}].name`,
+						message: 'name is required and must be a non-empty string',
+					});
 				}
 				if (typeof conn.profile !== 'string' || conn.profile.length === 0) {
-					errors.push({ path: `connections[${i}].profile`, message: 'profile URI is required and must be a non-empty string' });
+					errors.push({
+						path: `connections[${i}].profile`,
+						message: 'profile URI is required and must be a non-empty string',
+					});
 				} else if (!/^(file|env|store):\/\//.test(conn.profile as string)) {
-					errors.push({ path: `connections[${i}].profile`, message: 'profile must use file://, env://, or store:// scheme' });
+					errors.push({
+						path: `connections[${i}].profile`,
+						message: 'profile must use file://, env://, or store:// scheme',
+					});
 				}
 				if (conn.readOnly !== undefined && typeof conn.readOnly !== 'boolean') {
-					errors.push({ path: `connections[${i}].readOnly`, message: 'readOnly must be a boolean' });
+					errors.push({
+						path: `connections[${i}].readOnly`,
+						message: 'readOnly must be a boolean',
+					});
 				}
 			}
 		}
 	}
 
 	// defaultConnection (optional string)
-	if (obj.defaultConnection !== undefined && typeof obj.defaultConnection !== 'string') {
-		errors.push({ path: 'defaultConnection', message: 'defaultConnection must be a string' });
+	if (
+		obj.defaultConnection !== undefined &&
+		typeof obj.defaultConnection !== 'string'
+	) {
+		errors.push({
+			path: 'defaultConnection',
+			message: 'defaultConnection must be a string',
+		});
 	}
 
 	// project (optional object)
 	if (obj.project !== undefined) {
-		if (typeof obj.project !== 'object' || obj.project === null || Array.isArray(obj.project)) {
+		if (
+			typeof obj.project !== 'object' ||
+			obj.project === null ||
+			Array.isArray(obj.project)
+		) {
 			errors.push({ path: 'project', message: 'project must be an object' });
 		} else {
 			const proj = obj.project as Record<string, unknown>;
-			if (proj.schemaPath !== undefined && typeof proj.schemaPath !== 'string') {
-				errors.push({ path: 'project.schemaPath', message: 'schemaPath must be a string or "auto"' });
+			if (
+				proj.schemaPath !== undefined &&
+				typeof proj.schemaPath !== 'string'
+			) {
+				errors.push({
+					path: 'project.schemaPath',
+					message: 'schemaPath must be a string or "auto"',
+				});
 			}
 			if (proj.include !== undefined) {
-				if (!Array.isArray(proj.include) || !proj.include.every((v: unknown) => typeof v === 'string')) {
-					errors.push({ path: 'project.include', message: 'include must be an array of strings' });
+				if (
+					!Array.isArray(proj.include) ||
+					!proj.include.every((v: unknown) => typeof v === 'string')
+				) {
+					errors.push({
+						path: 'project.include',
+						message: 'include must be an array of strings',
+					});
 				}
 			}
 			if (proj.exclude !== undefined) {
-				if (!Array.isArray(proj.exclude) || !proj.exclude.every((v: unknown) => typeof v === 'string')) {
-					errors.push({ path: 'project.exclude', message: 'exclude must be an array of strings' });
+				if (
+					!Array.isArray(proj.exclude) ||
+					!proj.exclude.every((v: unknown) => typeof v === 'string')
+				) {
+					errors.push({
+						path: 'project.exclude',
+						message: 'exclude must be an array of strings',
+					});
 				}
 			}
 		}
@@ -129,18 +224,40 @@ export function validateSettings(
 
 	// editor (optional object)
 	if (obj.editor !== undefined) {
-		if (typeof obj.editor !== 'object' || obj.editor === null || Array.isArray(obj.editor)) {
+		if (
+			typeof obj.editor !== 'object' ||
+			obj.editor === null ||
+			Array.isArray(obj.editor)
+		) {
 			errors.push({ path: 'editor', message: 'editor must be an object' });
 		} else {
 			const ed = obj.editor as Record<string, unknown>;
-			if (ed.tabSize !== undefined && (typeof ed.tabSize !== 'number' || ed.tabSize < 1)) {
-				errors.push({ path: 'editor.tabSize', message: 'tabSize must be a positive number' });
+			if (
+				ed.tabSize !== undefined &&
+				(typeof ed.tabSize !== 'number' || ed.tabSize < 1)
+			) {
+				errors.push({
+					path: 'editor.tabSize',
+					message: 'tabSize must be a positive number',
+				});
 			}
-			if (ed.formatOnSave !== undefined && typeof ed.formatOnSave !== 'boolean') {
-				errors.push({ path: 'editor.formatOnSave', message: 'formatOnSave must be a boolean' });
+			if (
+				ed.formatOnSave !== undefined &&
+				typeof ed.formatOnSave !== 'boolean'
+			) {
+				errors.push({
+					path: 'editor.formatOnSave',
+					message: 'formatOnSave must be a boolean',
+				});
 			}
-			if (ed.maxResults !== undefined && (typeof ed.maxResults !== 'number' || ed.maxResults < 1)) {
-				errors.push({ path: 'editor.maxResults', message: 'maxResults must be a positive number' });
+			if (
+				ed.maxResults !== undefined &&
+				(typeof ed.maxResults !== 'number' || ed.maxResults < 1)
+			) {
+				errors.push({
+					path: 'editor.maxResults',
+					message: 'maxResults must be a positive number',
+				});
 			}
 		}
 	}
@@ -243,7 +360,9 @@ export class SettingsValidationError extends Error {
 		public readonly filePath: string,
 		public readonly errors: readonly SettingsError[],
 	) {
-		super(`Invalid ${SETTINGS_FILENAME}: ${errors.map((e) => `${e.path}: ${e.message}`).join('; ')}`);
+		super(
+			`Invalid ${SETTINGS_FILENAME}: ${errors.map((e) => `${e.path}: ${e.message}`).join('; ')}`,
+		);
 		this.name = 'SettingsValidationError';
 	}
 }

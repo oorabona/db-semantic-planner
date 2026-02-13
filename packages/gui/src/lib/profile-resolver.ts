@@ -2,7 +2,7 @@
  * Profile URI resolver — dispatches file://, env://, store:// schemes.
  *
  * - file:// and env:// → delegated to sidecar (Node.js has fs + env access)
- * - store:// → resolved in frontend via Tauri secure store
+ * - store:// → resolved in frontend via Tauri plugin-store (plaintext JSON, NOT keychain)
  */
 import { load } from '@tauri-apps/plugin-store';
 import type { ConnectParams } from './ipc';
@@ -55,7 +55,23 @@ export async function resolveProfile(
 	}
 }
 
-/** Read connection params from Tauri secure store. */
+/**
+ * Read connection params from Tauri store.
+ *
+ * **Security note (GUI-MW-D01):**
+ * `@tauri-apps/plugin-store` persists data as **plaintext JSON** in the OS
+ * app-data directory (e.g. `~/.local/share/com.dbsp.gui/credentials.json`).
+ * It does NOT use the OS keychain (macOS Keychain / Windows Credential Manager
+ * / Linux Secret Service). Passwords stored via `store://` are readable by any
+ * process running as the same OS user.
+ *
+ * Acceptable for local-dev desktop use. For production credentials, prefer
+ * `env://` (reads process env, no disk persistence) or `file://` pointing to
+ * a file with restricted permissions.
+ *
+ * Future: migrate to `tauri-plugin-stronghold` (IOTA Stronghold — encrypted
+ * vault with runtime-only decryption) when available and stable for v2.
+ */
 async function resolveStoreProfile(key: string): Promise<ConnectParams> {
 	const store = await load('credentials.json');
 	const data = await store.get<ConnectParams>(`profile:${key}`);

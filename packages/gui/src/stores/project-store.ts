@@ -6,6 +6,7 @@ import {
 	DEFAULT_EXCLUDE,
 	DEFAULT_INCLUDE,
 	readSettings,
+	resolveProjectSettings,
 } from '@/lib/settings';
 
 // ── Types ────────────────────────────────────────────────────────
@@ -154,11 +155,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 			const settings = await readSettings(folderPath);
 
 			if (settings) {
-				// Project mode: settings found
-				const include = settings.project?.include ?? [...DEFAULT_INCLUDE];
-				const exclude = settings.project?.exclude ?? [...DEFAULT_EXCLUDE];
-
-				const files = await discoverFiles(folderPath, include, exclude);
+				// Project mode: settings found (precedence: defaults → project)
+				const resolved = resolveProjectSettings(settings);
+				const files = await discoverFiles(
+					folderPath,
+					resolved.include,
+					resolved.exclude,
+				);
 				set({
 					mode: 'project',
 					settings,
@@ -196,11 +199,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 		const { folderPath, settings } = get();
 		if (!folderPath || !settings) return;
 
-		const include = settings.project?.include ?? [...DEFAULT_INCLUDE];
-		const exclude = settings.project?.exclude ?? [...DEFAULT_EXCLUDE];
+		const resolved = resolveProjectSettings(settings);
 
 		try {
-			const files = await discoverFiles(folderPath, include, exclude);
+			const files = await discoverFiles(
+				folderPath,
+				resolved.include,
+				resolved.exclude,
+			);
 			set({ files });
 		} catch (err) {
 			set({
