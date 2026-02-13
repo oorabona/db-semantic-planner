@@ -1,22 +1,28 @@
-import { Code } from "lucide-react";
+import { useEffect } from "react";
+import { useEditorStore } from "@/stores/editor-store";
+import { EditorTabs } from "@/components/editor/EditorTabs";
+import { SqlEditor } from "@/components/editor/SqlEditor";
 
-export function EditorPanel() {
+interface EditorPanelProps {
+	onQueryResult?: (result: unknown) => void;
+	onError?: (error: string) => void;
+}
+
+export function EditorPanel({ onQueryResult, onError }: EditorPanelProps) {
+	const tabs = useEditorStore((s) => s.tabs);
+	const addTab = useEditorStore((s) => s.addTab);
+
+	// Auto-create first tab if none exist
+	useEffect(() => {
+		if (tabs.length === 0) {
+			addTab("sql");
+		}
+	}, [tabs.length, addTab]);
+
 	return (
-		<div className="flex h-full flex-col bg-[var(--background)]">
-			{/* Tab bar placeholder */}
-			<div className="flex items-center gap-1 border-b border-[var(--border)] px-2">
-				<div className="flex items-center gap-1.5 border-b-2 border-[var(--primary)] px-3 py-1.5">
-					<Code className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
-					<span className="text-xs font-medium">Untitled.sql</span>
-				</div>
-			</div>
-
-			{/* Editor placeholder */}
-			<div className="flex flex-1 items-center justify-center">
-				<p className="text-sm text-[var(--muted-foreground)]">
-					Editor will appear here
-				</p>
-			</div>
+		<div className="flex h-full flex-col bg-background">
+			<EditorTabs />
+			<SqlEditor onQueryResult={onQueryResult} onError={onError} />
 		</div>
 	);
 }
