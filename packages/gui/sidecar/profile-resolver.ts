@@ -79,7 +79,29 @@ async function resolveFileProfile(
 
 // ── env:// scheme ────────────────────────────────────────────────
 
+/**
+ * Allowed env var patterns for env:// resolution.
+ * SEC-04: Restricts readable variables to database-related names only.
+ * Prevents accidental leakage of secrets like API_KEY, AWS_SECRET, etc.
+ */
+export const ENV_VAR_ALLOWLIST: readonly RegExp[] = [
+	/^DATABASE_URL(_\w+)?$/, // DATABASE_URL, DATABASE_URL_DEV, etc.
+	/^DBSP_\w+$/, // All DBSP-prefixed vars
+	/^PG(HOST|PORT|DATABASE|USER|PASSWORD|SSL\w*)$/, // Standard libpq vars (incl. SSLMODE, SSLCERT, SSLKEY, SSLROOTCERT)
+];
+
+export function isAllowedEnvVar(name: string): boolean {
+	return ENV_VAR_ALLOWLIST.some((pattern) => pattern.test(name));
+}
+
 function resolveEnvProfile(varName: string): ConnectionParams {
+	if (!isAllowedEnvVar(varName)) {
+		throw new Error(
+			`Environment variable "${varName}" is not in the allowlist. ` +
+				`Allowed patterns: DATABASE_URL[_*], DBSP_*, PG{HOST,PORT,DATABASE,USER,PASSWORD,SSL*}`,
+		);
+	}
+
 	const value = process.env[varName];
 	if (!value) {
 		throw new Error(`Environment variable ${varName} is not set`);
@@ -151,8 +173,7 @@ export function parsePostgresUrl(url: string): ConnectionParams {
 
 	// Query params
 	const schema =
-		parsed.searchParams.get('schema') ??
-		parsed.searchParams.get('search_path');
+		parsed.searchParams.get('schema') ?? parsed.searchParams.get('search_path');
 	if (schema) params.schema = schema;
 
 	const sslMode = parsed.searchParams.get('sslmode');

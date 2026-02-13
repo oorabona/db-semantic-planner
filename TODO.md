@@ -75,11 +75,8 @@
 - [ ] 💡 **GUI-014** [GUI] Welcome screen with quick connect + sample queries
 - [ ] 💡 **GUI-015** [GUI] Web version (@dbsp/web — same React frontend, HTTP/WS transport, phpMyAdmin-like)
 - [ ] 💡 **GUI-016** [GUI] Status bar "+" → loupe icon, ouvre un panneau de logs applicatifs (sidecar stdout/stderr, IPC messages, query timing). Format: drawer coulissant depuis la barre de statut (style VS Code Output panel) ou onglet "Logs" dans le panneau results
-(GUI-MW-D01, GUI-MW-D04 archived → docs/historic/done-2026-02.md)
-- [ ] 💡 **GUI-MW-D02** [GUI] Concurrent settings edit — lock Preferences UI if dbsp.settings.json open as dirty buffer — Priority: L
+(GUI-MW-D01, GUI-MW-D02, GUI-MW-D04, GUI-MW-D05, GUI-MW-D06 archived → docs/historic/done-2026-02.md)
 - [ ] 💡 **GUI-MW-D03** [GUI] Per-connection SSL/params overrides in dbsp.settings.json — Priority: L
-- [ ] 💡 **GUI-MW-D05** [GUI] File rename detection — detect OS rename of open file, update tab path — Priority: L
-- [ ] 💡 **GUI-MW-D06** [GUI] env:// security — consider restricting readable env vars (allowlist) — Priority: L
 
 ---
 

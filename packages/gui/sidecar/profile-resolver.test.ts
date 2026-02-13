@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+	ENV_VAR_ALLOWLIST,
+	isAllowedEnvVar,
 	parseEnvFile,
 	parsePostgresUrl,
 	resolveProfileUri,
@@ -154,13 +156,64 @@ describe('resolveProfileUri', () => {
 		});
 
 		it('throws when env var is not set', async () => {
-			// Arrange — ensure the var doesn't exist
-			delete process.env.NONEXISTENT_VAR;
+			// Arrange — use an allowed var name that is not set
+			delete process.env.DATABASE_URL_MISSING;
 
 			// Act & Assert
-			await expect(resolveProfileUri('env://NONEXISTENT_VAR')).rejects.toThrow(
-				'Environment variable NONEXISTENT_VAR is not set',
+			await expect(
+				resolveProfileUri('env://DATABASE_URL_MISSING'),
+			).rejects.toThrow('Environment variable DATABASE_URL_MISSING is not set');
+		});
+
+		it('rejects env vars not in the allowlist (SEC-04)', async () => {
+			// Arrange
+			vi.stubEnv('AWS_SECRET_KEY', 'super-secret');
+
+			// Act & Assert
+			await expect(resolveProfileUri('env://AWS_SECRET_KEY')).rejects.toThrow(
+				'not in the allowlist',
 			);
+		});
+	});
+
+	// ── isAllowedEnvVar (SEC-04) ────────────────────────────────────
+
+	describe('isAllowedEnvVar', () => {
+		it.each([
+			'DATABASE_URL',
+			'DATABASE_URL_DEV',
+			'DATABASE_URL_TEST',
+			'DBSP_CONNECTION',
+			'DBSP_SCHEMA',
+			'PGHOST',
+			'PGPORT',
+			'PGDATABASE',
+			'PGUSER',
+			'PGPASSWORD',
+			'PGSSLMODE',
+			'PGSSLCERT',
+			'PGSSLKEY',
+			'PGSSLROOTCERT',
+		])('allows %s', (name) => {
+			expect(isAllowedEnvVar(name)).toBe(true);
+		});
+
+		it.each([
+			'AWS_SECRET_KEY',
+			'API_KEY',
+			'GITHUB_TOKEN',
+			'HOME',
+			'PATH',
+			'SHELL',
+			'SSH_KEY',
+			'password',
+			'DATABASE_URL_', // trailing underscore with nothing after
+		])('rejects %s', (name) => {
+			expect(isAllowedEnvVar(name)).toBe(false);
+		});
+
+		it('has at least 3 patterns in the allowlist', () => {
+			expect(ENV_VAR_ALLOWLIST.length).toBeGreaterThanOrEqual(3);
 		});
 	});
 

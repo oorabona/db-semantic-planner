@@ -1,7 +1,16 @@
-import { Globe, Monitor, Palette, Settings, X } from 'lucide-react';
+import {
+	AlertTriangle,
+	Globe,
+	Monitor,
+	Palette,
+	Settings,
+	X,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SETTINGS_FILENAME } from '@/lib/settings';
+import { useEditorStore } from '@/stores/editor-store';
 import {
 	type PreferencesSection,
 	useUserSettingsStore,
@@ -184,6 +193,39 @@ function SectionContent({ section }: { section: PreferencesSection }) {
 
 // ── Preferences Dialog ──────────────────────────────────────────
 
+// ── Concurrent-edit warning (D02) ──────────────────────────────
+
+/**
+ * Returns true when the user has dbsp.settings.json open as a dirty
+ * (unsaved) editor tab — meaning a concurrent edit could overwrite
+ * programmatic changes from the Preferences dialog.
+ */
+function useSettingsFileDirty(): boolean {
+	return useEditorStore((s) =>
+		s.tabs.some((t) => t.dirty && t.filePath?.endsWith(SETTINGS_FILENAME)),
+	);
+}
+
+function ConcurrentEditBanner() {
+	const dirty = useSettingsFileDirty();
+	if (!dirty) return null;
+
+	return (
+		<div
+			role="alert"
+			className="mb-3 flex items-start gap-2 rounded border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-xs text-[var(--foreground)]"
+		>
+			<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
+			<span>
+				<strong>{SETTINGS_FILENAME}</strong> is open with unsaved changes in the
+				editor. Saving from the editor will overwrite any changes made here.
+			</span>
+		</div>
+	);
+}
+
+// ── Preferences Dialog ──────────────────────────────────────────
+
 export function PreferencesDialog() {
 	const { dialogOpen, activeSection, closePreferences, setActiveSection } =
 		useUserSettingsStore();
@@ -234,6 +276,7 @@ export function PreferencesDialog() {
 
 				{/* Content */}
 				<div className="flex-1 overflow-auto p-4">
+					<ConcurrentEditBanner />
 					<SectionContent section={activeSection} />
 				</div>
 			</div>

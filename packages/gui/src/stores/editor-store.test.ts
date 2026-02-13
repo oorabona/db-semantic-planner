@@ -155,6 +155,30 @@ describe('useEditorStore', () => {
 			expect(dirty[0]!.id).toBe(id1);
 		});
 	});
+
+	describe('markFileDeleted', () => {
+		it('sets deleted flag and appends (deleted) to title', () => {
+			const id = useEditorStore.getState().addTab('sql', '', '/path/query.sql');
+			useEditorStore.getState().markFileDeleted(id);
+			const tab = useEditorStore.getState().tabs[0]!;
+			expect(tab.deleted).toBe(true);
+			expect(tab.title).toBe('query.sql (deleted)');
+		});
+
+		it('does not double-mark already deleted tab', () => {
+			const id = useEditorStore.getState().addTab('sql', '', '/path/query.sql');
+			useEditorStore.getState().markFileDeleted(id);
+			useEditorStore.getState().markFileDeleted(id);
+			const tab = useEditorStore.getState().tabs[0]!;
+			expect(tab.title).toBe('query.sql (deleted)');
+		});
+
+		it('does nothing for non-existent id', () => {
+			useEditorStore.getState().addTab();
+			useEditorStore.getState().markFileDeleted('non-existent');
+			expect(useEditorStore.getState().tabs[0]!.deleted).toBeUndefined();
+		});
+	});
 });
 
 describe('getActiveTab', () => {

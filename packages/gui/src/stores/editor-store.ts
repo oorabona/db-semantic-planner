@@ -14,6 +14,8 @@ export interface EditorTab {
 	dirty: boolean;
 	/** File path if opened from filesystem */
 	filePath?: string | undefined;
+	/** Whether the underlying file has been deleted from disk */
+	deleted?: boolean | undefined;
 }
 
 // ── Store ───────────────────────────────────────────────────────────
@@ -41,6 +43,8 @@ interface EditorState {
 	hasDirtyTabs: () => boolean;
 	/** Get all tabs with unsaved changes */
 	getDirtyTabs: () => EditorTab[];
+	/** Mark a tab's backing file as deleted from disk (D05) */
+	markFileDeleted: (id: string) => void;
 }
 
 let nextTabCounter = 1;
@@ -137,6 +141,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 	hasDirtyTabs: () => get().tabs.some((t) => t.dirty),
 
 	getDirtyTabs: () => get().tabs.filter((t) => t.dirty),
+
+	markFileDeleted: (id) =>
+		set((state) => ({
+			tabs: state.tabs.map((t) =>
+				t.id === id && !t.deleted
+					? { ...t, deleted: true, title: `${t.title} (deleted)` }
+					: t,
+			),
+		})),
 }));
 
 // ── Derived helpers ─────────────────────────────────────────────────
