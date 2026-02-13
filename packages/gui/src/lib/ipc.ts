@@ -93,10 +93,7 @@ export function createSidecarApi(client: IpcClient) {
 		},
 
 		connect(params: ConnectParams) {
-			return client.call<ConnectResult>(
-				'connect',
-				params as unknown as Record<string, unknown>,
-			);
+			return client.call<ConnectResult>('connect', params);
 		},
 
 		disconnect(params: { connectionId: string }) {
@@ -108,31 +105,19 @@ export function createSidecarApi(client: IpcClient) {
 		},
 
 		executeSQL(params: ExecuteSqlParams) {
-			return client.call<QueryResult>(
-				'executeSQL',
-				params as unknown as Record<string, unknown>,
-			);
+			return client.call<QueryResult>('executeSQL', params);
 		},
 
 		compileNQL(params: CompileNqlParams) {
-			return client.call<CompileNqlResult>(
-				'compileNQL',
-				params as unknown as Record<string, unknown>,
-			);
+			return client.call<CompileNqlResult>('compileNQL', params);
 		},
 
 		executeNQL(params: ExecuteNqlParams) {
-			return client.call<ExecuteNqlResult>(
-				'executeNQL',
-				params as unknown as Record<string, unknown>,
-			);
+			return client.call<ExecuteNqlResult>('executeNQL', params);
 		},
 
 		fetchMore(params: FetchMoreParams) {
-			return client.call<QueryResult>(
-				'fetchMore',
-				params as unknown as Record<string, unknown>,
-			);
+			return client.call<QueryResult>('fetchMore', params);
 		},
 
 		cancel(requestId: string | number) {

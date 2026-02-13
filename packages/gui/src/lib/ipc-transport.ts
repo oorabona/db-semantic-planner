@@ -6,11 +6,11 @@
 // ── Types ────────────────────────────────────────────────────────
 
 export type SidecarStatus =
-	| "stopped"
-	| "spawning"
-	| "handshaking"
-	| "ready"
-	| "restarting";
+	| 'stopped'
+	| 'spawning'
+	| 'handshaking'
+	| 'ready'
+	| 'restarting';
 
 export interface IpcTransport {
 	/** Send a JSON-RPC request string to the sidecar. */
@@ -29,7 +29,7 @@ export interface IpcTransport {
 // ── JSON-RPC client types ────────────────────────────────────────
 
 export interface JsonRpcClientResponse {
-	readonly jsonrpc: "2.0";
+	readonly jsonrpc: '2.0';
 	readonly id: string | number | null;
 	readonly result?: unknown;
 	readonly error?: {
@@ -40,7 +40,7 @@ export interface JsonRpcClientResponse {
 }
 
 export interface JsonRpcClientNotification {
-	readonly jsonrpc: "2.0";
+	readonly jsonrpc: '2.0';
 	readonly method: string;
 	readonly params?: Record<string, unknown>;
 }
@@ -58,11 +58,19 @@ interface PendingRequest {
 export class IpcClient {
 	private nextId = 1;
 	private readonly pending = new Map<string | number, PendingRequest>();
-	private readonly notificationHandlers = new Map<string, (params?: Record<string, unknown>) => void>();
+	private readonly notificationHandlers = new Map<
+		string,
+		(params?: Record<string, unknown>) => void
+	>();
 	private transport: IpcTransport | null = null;
-	private _status: SidecarStatus = "stopped";
+	private _status: SidecarStatus = 'stopped';
 	private readonly statusListeners = new Set<(status: SidecarStatus) => void>();
-	private requestQueue: Array<{ message: string; id: number; resolve: (v: unknown) => void; reject: (e: Error) => void }> = [];
+	private requestQueue: Array<{
+		message: string;
+		id: number;
+		resolve: (v: unknown) => void;
+		reject: (e: Error) => void;
+	}> = [];
 
 	get status(): SidecarStatus {
 		return this._status;
@@ -75,23 +83,32 @@ export class IpcClient {
 	}
 
 	/** Register a handler for notifications (e.g., heartbeat). */
-	onNotification(method: string, handler: (params?: Record<string, unknown>) => void): () => void {
+	onNotification(
+		method: string,
+		handler: (params?: Record<string, unknown>) => void,
+	): () => void {
 		this.notificationHandlers.set(method, handler);
 		return () => this.notificationHandlers.delete(method);
 	}
 
 	/** Connect to a transport and perform handshake. */
-	async connect(transport: IpcTransport, version: string): Promise<{ version: string; capabilities: string[] }> {
+	async connect(
+		transport: IpcTransport,
+		version: string,
+	): Promise<{ version: string; capabilities: string[] }> {
 		this.transport = transport;
-		this.setStatus("spawning");
+		this.setStatus('spawning');
 
 		transport.onMessage((raw) => this.handleMessage(raw));
 		transport.onClose((code) => this.handleClose(code));
 
-		this.setStatus("handshaking");
+		this.setStatus('handshaking');
 
-		const result = await this.call<{ version: string; capabilities: string[] }>("handshake", { version });
-		this.setStatus("ready");
+		const result = await this.call<{ version: string; capabilities: string[] }>(
+			'handshake',
+			{ version },
+		);
+		this.setStatus('ready');
 
 		// Flush queued requests
 		this.flushQueue();
@@ -100,14 +117,27 @@ export class IpcClient {
 	}
 
 	/** Send a JSON-RPC request and return the result. */
-	async call<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T> {
+	async call<T = unknown>(
+		method: string,
+		params?: Record<string, unknown> | object,
+	): Promise<T> {
 		const id = this.nextId++;
 
 		// Queue if not ready (unless it's the handshake itself)
-		if (this._status !== "ready" && this._status !== "handshaking" && method !== "handshake") {
+		if (
+			this._status !== 'ready' &&
+			this._status !== 'handshaking' &&
+			method !== 'handshake'
+		) {
 			return new Promise<T>((resolve, reject) => {
-				const message = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
-				this.requestQueue.push({ message, id, resolve: resolve as (v: unknown) => void, reject });
+				const message =
+					JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n';
+				this.requestQueue.push({
+					message,
+					id,
+					resolve: resolve as (v: unknown) => void,
+					reject,
+				});
 			});
 		}
 
@@ -116,20 +146,25 @@ export class IpcClient {
 
 	/** Disconnect and clean up. */
 	disconnect(): void {
-		this.rejectAllPending(new Error("Disconnected"));
+		this.rejectAllPending(new Error('Disconnected'));
 		this.transport?.close();
 		this.transport = null;
-		this.setStatus("stopped");
+		this.setStatus('stopped');
 	}
 
 	// ── Private ──────────────────────────────────────────────────
 
-	private sendRequest<T>(id: number, method: string, params?: Record<string, unknown>): Promise<T> {
+	private sendRequest<T>(
+		id: number,
+		method: string,
+		params?: Record<string, unknown> | object,
+	): Promise<T> {
 		if (!this.transport) {
-			return Promise.reject(new Error("No transport connected"));
+			return Promise.reject(new Error('No transport connected'));
 		}
 
-		const message = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
+		const message =
+			JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n';
 		return new Promise<T>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
@@ -147,7 +182,7 @@ export class IpcClient {
 	}
 
 	private handleMessage(raw: string): void {
-		const lines = raw.replace(/\r\n/g, "\n").split("\n");
+		const lines = raw.replace(/\r\n/g, '\n').split('\n');
 		for (const line of lines) {
 			if (line.trim().length === 0) continue;
 
@@ -155,14 +190,14 @@ export class IpcClient {
 			try {
 				parsed = JSON.parse(line);
 			} catch {
-				console.warn("[IPC] Failed to parse message:", line);
+				console.warn('[IPC] Failed to parse message:', line);
 				continue;
 			}
 
 			const msg = parsed as Record<string, unknown>;
 
 			// Notification (no id)
-			if (!("id" in msg) && typeof msg.method === "string") {
+			if (!('id' in msg) && typeof msg.method === 'string') {
 				const handler = this.notificationHandlers.get(msg.method);
 				handler?.(msg.params as Record<string, unknown> | undefined);
 				continue;
@@ -178,7 +213,7 @@ export class IpcClient {
 			clearTimeout(pending.timer);
 			this.pending.delete(id);
 
-			if ("error" in msg && msg.error) {
+			if ('error' in msg && msg.error) {
 				const err = msg.error as { code: number; message: string };
 				const error = new Error(err.message);
 				(error as Error & { code: number }).code = err.code;
@@ -190,13 +225,13 @@ export class IpcClient {
 	}
 
 	private handleClose(code: number | null): void {
-		if (this._status === "ready") {
+		if (this._status === 'ready') {
 			// Unexpected close — restart
-			this.setStatus("restarting");
-			this.rejectAllPending(new Error("Engine restarting"));
+			this.setStatus('restarting');
+			this.rejectAllPending(new Error('Engine restarting'));
 		} else {
-			this.setStatus("stopped");
-			this.rejectAllPending(new Error("Sidecar stopped"));
+			this.setStatus('stopped');
+			this.rejectAllPending(new Error('Sidecar stopped'));
 		}
 	}
 
