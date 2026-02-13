@@ -46,13 +46,41 @@
 
 ### DX Convenience (Category A)
 
-- [ ] **E17c** [DX] `dbsp init` wizard (like Prisma) — Effort: M
-
+(E17c moved to P4 — GUI explorer prioritized over CLI wizard)
 (E17, E17b archived → docs/historic/done-2026-02.md)
 
 ### Infrastructure
 
 (E09, E09b, E10 archived → docs/historic/done-2026-02.md)
+
+---
+
+## P2 — GUI Desktop Explorer (New Product)
+
+> Tauri v2 desktop app — visual schema exploration, SQL/NQL editing, plan inspection.
+> Brief: docs/briefs/gui-explorer.md | Overview: docs/plans/gui-overview.md
+
+### MVP
+
+- [x] ✅ **GUI-001** [GUI] Scaffold packages/gui (Tauri v2 + React + ShadCN/UI + Vite) (2026-02-12)
+- [x] ✅ **GUI-002** [GUI] Node.js SEA sidecar (bundle dbsp engine, JSON-RPC IPC) (2026-02-12)
+- [x] ✅ **GUI-003** [GUI] Connection Manager (PostgreSQL connect, save/switch profiles) (2026-02-12)
+- [x] ✅ **GUI-004** [GUI] Schema Treeview (introspect DB, tables/columns/indexes/FKs) (2026-02-12)
+- [x] ✅ **GUI-005** [GUI] Monaco SQL Editor (syntax highlight, table/column autocomplete) (2026-02-12)
+- [x] ✅ **GUI-006** [GUI] Monaco NQL Editor (TextMate grammar from Chevrotain, .dbsp support) (2026-02-12)
+- [x] ✅ **GUI-007** [GUI] Results Table (TanStack virtual scroll, sort, type-aware display) (2026-02-13)
+- [x] ✅ **GUI-008** [GUI] Plan Inspector (visual dump: decisions, warnings, CTEs, timing) (2026-02-13)
+- [x] ✅ **GUI-009** [GUI] Distribution (Tauri bundle: .msi/.dmg/.deb, auto-updater, CI) (2026-02-13)
+- [ ] 🔧 **GUI-F002** [GUI] Missing test coverage: hooks (useConnection, useSchema, useMonacoSetup), ipc.ts, sql-completions.ts, sidecar/index.ts — Priority: M
+
+### Later
+
+- [ ] 💡 **GUI-010** [GUI] .assert.dbsp runner with inline pass/fail
+- [ ] 💡 **GUI-011** [GUI] Schema diff (live DB vs schema.ts via compareSchemata)
+- [ ] 💡 **GUI-012** [GUI] Query history with search and re-run
+- [ ] 💡 **GUI-013** [GUI] Theme system (dark/light + custom accent colors)
+- [ ] 💡 **GUI-014** [GUI] Welcome screen with quick connect + sample queries
+- [ ] 💡 **GUI-015** [GUI] Web version (@dbsp/web — same React frontend, HTTP/WS transport, phpMyAdmin-like)
 
 ---
 
@@ -119,6 +147,10 @@
 ### E13-ALL Review Findings (2026-02-07)
 
 (Archived → docs/historic/done-2026-02.md)
+
+### DX Convenience (moved from P2, 2026-02-12)
+
+- [-] ⏭️ **E17c** [DX] `dbsp init` wizard — deferred: GUI explorer prioritized over CLI wizard
 
 ### MCP Server (moved from P2, 2026-02-12)
 
