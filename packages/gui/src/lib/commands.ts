@@ -53,12 +53,21 @@ class CommandRegistryImpl {
 	}
 
 	execute(id: string): boolean {
-		const cmd = this.commands.get(id);
+		let cmd = this.commands.get(id);
+		// Fallback: find command by menuId (for native menu event forwarding)
+		if (!cmd) {
+			for (const c of this.commands.values()) {
+				if (c.menuId === id) {
+					cmd = c;
+					break;
+				}
+			}
+		}
 		if (!cmd) return false;
 		if (cmd.when && !cmd.when()) return false;
 		cmd.handler();
 		for (const listener of this.listeners) {
-			listener(id);
+			listener(cmd.id);
 		}
 		return true;
 	}

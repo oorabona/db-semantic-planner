@@ -69,9 +69,7 @@ function GeneralSection() {
 					type="checkbox"
 					id="pref-auto-updates"
 					checked={autoUpdates}
-					onChange={(e) =>
-						updateSetting('autoUpdates', e.target.checked)
-					}
+					onChange={(e) => updateSetting('autoUpdates', e.target.checked)}
 				/>
 				<Label htmlFor="pref-auto-updates">
 					Automatically check for updates
@@ -110,9 +108,7 @@ function EditorSection() {
 					type="checkbox"
 					id="pref-format-on-save"
 					checked={formatOnSave}
-					onChange={(e) =>
-						updateSetting('formatOnSave', e.target.checked)
-					}
+					onChange={(e) => updateSetting('formatOnSave', e.target.checked)}
 				/>
 				<Label htmlFor="pref-format-on-save">Format on save</Label>
 			</div>
@@ -126,10 +122,7 @@ function EditorSection() {
 					max={100000}
 					value={maxResults}
 					onChange={(e) =>
-						updateSetting(
-							'maxResults',
-							Number(e.target.value) || 1000,
-						)
+						updateSetting('maxResults', Number(e.target.value) || 1000)
 					}
 				/>
 			</div>
@@ -149,8 +142,8 @@ function DatabasesSection() {
 			</p>
 			<p className="text-xs text-[var(--muted-foreground)]">
 				Use File &gt; New Connection (⌘N) to add profiles, or edit
-				dbsp.settings.json directly for URI-based profiles (file://,
-				env://, store://).
+				dbsp.settings.json directly for URI-based profiles (file://, env://,
+				store://).
 			</p>
 		</div>
 	);

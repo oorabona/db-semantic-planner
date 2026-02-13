@@ -1,26 +1,28 @@
 /* Command Palette — cmdk overlay styling */
 
-.dbsp-command-palette [cmdk-dialog] {
+/* Radix Dialog overlay — dark backdrop */
+.dbsp-palette-overlay {
 	position: fixed;
 	inset: 0;
-	z-index: 50;
-	display: flex;
-	align-items: flex-start;
-	justify-content: center;
-	padding-top: 20vh;
-}
-
-.dbsp-command-palette [cmdk-overlay] {
-	position: fixed;
-	inset: 0;
+	z-index: 49;
 	background: rgba(0, 0, 0, 0.5);
 }
 
-.dbsp-command-palette [cmdk-root] {
+/* Radix Dialog content — centered top modal (VS Code-style) */
+.dbsp-palette-content {
+	position: fixed;
+	top: 20vh;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 50;
 	width: 100%;
 	max-width: 560px;
-	background: hsl(var(--background));
-	border: 1px solid hsl(var(--border));
+}
+
+/* cmdk root — card styling */
+.dbsp-command-palette {
+	background: var(--background);
+	border: 1px solid var(--border);
 	border-radius: 12px;
 	box-shadow: 0 16px 70px rgba(0, 0, 0, 0.2);
 	overflow: hidden;
@@ -31,14 +33,14 @@
 	padding: 12px 16px;
 	font-size: 15px;
 	border: none;
-	border-bottom: 1px solid hsl(var(--border));
+	border-bottom: 1px solid var(--border);
 	background: transparent;
-	color: hsl(var(--foreground));
+	color: var(--foreground);
 	outline: none;
 }
 
 .dbsp-command-palette [cmdk-input]::placeholder {
-	color: hsl(var(--muted-foreground));
+	color: var(--muted-foreground);
 }
 
 .dbsp-command-palette [cmdk-list] {
@@ -50,7 +52,7 @@
 .dbsp-command-palette [cmdk-empty] {
 	padding: 24px;
 	text-align: center;
-	color: hsl(var(--muted-foreground));
+	color: var(--muted-foreground);
 	font-size: 14px;
 }
 
@@ -60,7 +62,7 @@
 	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
-	color: hsl(var(--muted-foreground));
+	color: var(--muted-foreground);
 }
 
 .dbsp-command-palette [cmdk-item] {
@@ -72,17 +74,17 @@
 	border-radius: 6px;
 	cursor: pointer;
 	font-size: 14px;
-	color: hsl(var(--foreground));
+	color: var(--foreground);
 	transition: background 0.1s;
 }
 
 .dbsp-command-palette [cmdk-item][data-selected='true'] {
-	background: hsl(var(--accent));
+	background: var(--accent);
 }
 
 .dbsp-command-palette .dbsp-palette-shortcut {
 	font-size: 12px;
-	color: hsl(var(--muted-foreground));
+	color: var(--muted-foreground);
 	font-family: var(--font-mono, monospace);
 }
 
@@ -92,6 +94,6 @@
 
 .dbsp-command-palette .dbsp-palette-file-path {
 	font-size: 12px;
-	color: hsl(var(--muted-foreground));
+	color: var(--muted-foreground);
 	margin-left: auto;
 }

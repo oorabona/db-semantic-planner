@@ -32,24 +32,12 @@ export function CommandPalette({
 	const isCommandMode = search.startsWith('>');
 	const commandSearch = isCommandMode ? search.slice(1).trim() : '';
 
-	// Listen for Cmd+K / Ctrl+K
-	useEffect(() => {
-		const handleKeyDown = (e: KeyboardEvent) => {
-			if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
-				e.preventDefault();
-				setOpen((prev) => !prev);
-			}
-		};
-		document.addEventListener('keydown', handleKeyDown);
-		return () => document.removeEventListener('keydown', handleKeyDown);
-	}, []);
-
 	// Reset search when palette opens
 	useEffect(() => {
 		if (open) setSearch('');
 	}, [open]);
 
-	// Also listen for view.command_palette menu event via registry
+	// Register command palette toggle — Ctrl+K handled via Tauri accelerator → menu event → command registry
 	useEffect(() => {
 		const cmd = commandRegistry.get('view.command_palette');
 		if (!cmd) {
@@ -58,7 +46,7 @@ export function CommandPalette({
 				label: 'Command Palette',
 				shortcut: '⌘K',
 				category: 'view',
-				handler: () => setOpen(true),
+				handler: () => setOpen((prev) => !prev),
 			});
 		}
 	}, []);
@@ -94,6 +82,8 @@ export function CommandPalette({
 			onOpenChange={setOpen}
 			label="Command Palette"
 			className="dbsp-command-palette"
+			overlayClassName="dbsp-palette-overlay"
+			contentClassName="dbsp-palette-content"
 			filter={(value, search) => {
 				// Strip ">" prefix so command mode search works
 				const q = search.startsWith('>') ? search.slice(1).trim() : search;
