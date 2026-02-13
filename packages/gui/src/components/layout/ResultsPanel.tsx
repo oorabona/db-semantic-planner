@@ -4,6 +4,7 @@
 
 import { DataTable } from '@/components/results/DataTable';
 import { EmptyState } from '@/components/results/EmptyState';
+import { PlanInspector } from '@/components/results/PlanInspector';
 import { ResultsTabs } from '@/components/results/ResultsTabs';
 import { StatusBar } from '@/components/results/StatusBar';
 import { useResultsStore } from '@/stores/results-store';
@@ -44,9 +45,7 @@ export function ResultsPanel() {
 
 				{activeTab === 'plan' && result?.plan != null && (
 					<div className="flex-1 overflow-auto p-3">
-						<pre className="whitespace-pre-wrap font-mono text-xs">
-							{JSON.stringify(result.plan, null, 2)}
-						</pre>
+						<PlanInspector plan={result.plan} />
 					</div>
 				)}
 
