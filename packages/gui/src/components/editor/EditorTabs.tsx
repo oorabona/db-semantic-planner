@@ -1,5 +1,5 @@
-import { Plus, X, Code, FileText } from "lucide-react";
-import { useEditorStore, type EditorTab } from "@/stores/editor-store";
+import { Code, FileText, Plus, X } from 'lucide-react';
+import { type EditorTab, useEditorStore } from '@/stores/editor-store';
 
 export function EditorTabs() {
 	const tabs = useEditorStore((s) => s.tabs);
@@ -23,14 +23,22 @@ export function EditorTabs() {
 				))}
 			</div>
 
-			{/* Add tab button */}
+			{/* Add tab buttons */}
 			<button
 				type="button"
 				className="shrink-0 px-2 py-1.5 text-muted-foreground hover:text-foreground"
-				onClick={() => addTab("sql")}
+				onClick={() => addTab('sql')}
 				title="New SQL tab"
 			>
 				<Plus className="h-3.5 w-3.5" />
+			</button>
+			<button
+				type="button"
+				className="shrink-0 px-1 py-1.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
+				onClick={() => addTab('nql')}
+				title="New NQL tab (.dbsp)"
+			>
+				<FileText className="h-3.5 w-3.5" />
 			</button>
 		</div>
 	);
@@ -47,7 +55,7 @@ function TabItem({
 	onSelect: () => void;
 	onClose: () => void;
 }) {
-	const Icon = tab.language === "sql" ? Code : FileText;
+	const Icon = tab.language === 'sql' ? Code : FileText;
 
 	return (
 		<div
@@ -55,12 +63,12 @@ function TabItem({
 			aria-selected={active}
 			className={`group flex cursor-pointer items-center gap-1.5 border-r px-3 py-1.5 text-xs ${
 				active
-					? "border-b-2 border-b-primary bg-background"
-					: "text-muted-foreground hover:bg-accent/50"
+					? 'border-b-2 border-b-primary bg-background'
+					: 'text-muted-foreground hover:bg-accent/50'
 			}`}
 			onClick={onSelect}
 			onKeyDown={(e) => {
-				if (e.key === "Enter" || e.key === " ") onSelect();
+				if (e.key === 'Enter' || e.key === ' ') onSelect();
 			}}
 		>
 			<Icon className="h-3 w-3 shrink-0" />

@@ -1,6 +1,7 @@
-import { useRef, useEffect, useCallback } from "react";
-import Editor, { type OnMount } from "@monaco-editor/react";
-import type { editor as MonacoEditor } from "monaco-editor";
+import Editor, { type OnMount } from '@monaco-editor/react';
+import type { editor as MonacoEditor } from 'monaco-editor';
+import { useCallback, useEffect, useRef } from 'react';
+import { NQL_LANGUAGE_ID } from '@/lib/nql-monarch';
 
 interface MonacoWrapperProps {
 	value: string;
@@ -23,11 +24,9 @@ export function MonacoWrapper({
 
 			// Add Cmd/Ctrl+Enter keybinding for Run
 			editor.addAction({
-				id: "run-query",
-				label: "Run Query",
-				keybindings: [
-					monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
-				],
+				id: 'run-query',
+				label: 'Run Query',
+				keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
 				run: () => onRun(),
 			});
 
@@ -47,17 +46,17 @@ export function MonacoWrapper({
 		<div className="flex-1 overflow-hidden">
 			<Editor
 				height="100%"
-				language={language === "nql" ? "sql" : language}
+				language={language === 'nql' ? NQL_LANGUAGE_ID : language}
 				value={value}
-				onChange={(v) => onChange(v ?? "")}
+				onChange={(v) => onChange(v ?? '')}
 				onMount={handleMount}
 				theme="vs-dark"
 				options={{
 					minimap: { enabled: false },
 					fontSize: 13,
-					lineNumbers: "on",
+					lineNumbers: 'on',
 					scrollBeyondLastLine: false,
-					wordWrap: "on",
+					wordWrap: 'on',
 					tabSize: 2,
 					automaticLayout: true,
 					suggestOnTriggerCharacters: true,

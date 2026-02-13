@@ -1,20 +1,21 @@
-import { useState } from "react";
+import { Plus } from 'lucide-react';
+import { useState } from 'react';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import {
-	Panel,
-	PanelGroup,
-	PanelResizeHandle,
-} from "react-resizable-panels";
-import { Plus } from "lucide-react";
-import { Sidebar } from "@/components/layout/Sidebar";
-import { EditorPanel } from "@/components/layout/EditorPanel";
-import { ResultsPanel } from "@/components/layout/ResultsPanel";
-import { ConnectionDialog, type ConnectionFormData } from "@/components/connection/ConnectionDialog";
-import { ConnectionStatus } from "@/components/connection/ConnectionStatus";
-import { useConnectionStore } from "@/stores/connection-store";
-import { useConnection } from "@/hooks/useConnection";
-import { Button } from "@/components/ui/button";
+	ConnectionDialog,
+	type ConnectionFormData,
+} from '@/components/connection/ConnectionDialog';
+import { ConnectionStatus } from '@/components/connection/ConnectionStatus';
+import { EditorPanel } from '@/components/layout/EditorPanel';
+import { ResultsPanel } from '@/components/layout/ResultsPanel';
+import { Sidebar } from '@/components/layout/Sidebar';
+import { Button } from '@/components/ui/button';
+import { useConnection } from '@/hooks/useConnection';
+import { useMonacoSetup } from '@/hooks/useMonacoSetup';
+import { useConnectionStore } from '@/stores/connection-store';
 
 export default function App() {
+	useMonacoSetup();
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const { status, active, error } = useConnectionStore();
 	const { connect, testConnection, testResult, disconnect } = useConnection();
@@ -60,10 +61,7 @@ export default function App() {
 		<div className="flex h-screen w-screen flex-col">
 			{/* Main layout */}
 			<div className="flex-1 overflow-hidden">
-				<PanelGroup
-					autoSaveId="dbsp-main-layout"
-					direction="horizontal"
-				>
+				<PanelGroup autoSaveId="dbsp-main-layout" direction="horizontal">
 					{/* Left: Schema sidebar */}
 					<Panel defaultSize={20} minSize={15} maxSize={40}>
 						<Sidebar />
@@ -73,10 +71,7 @@ export default function App() {
 
 					{/* Right: Editor + Results (vertical split) */}
 					<Panel defaultSize={80} minSize={40}>
-						<PanelGroup
-							autoSaveId="dbsp-right-layout"
-							direction="vertical"
-						>
+						<PanelGroup autoSaveId="dbsp-right-layout" direction="vertical">
 							{/* Top-right: Editor */}
 							<Panel defaultSize={55} minSize={20}>
 								<EditorPanel />
@@ -107,9 +102,9 @@ export default function App() {
 					size="icon"
 					className="h-5 w-5"
 					onClick={() =>
-						status === "connected" ? disconnect() : setDialogOpen(true)
+						status === 'connected' ? disconnect() : setDialogOpen(true)
 					}
-					title={status === "connected" ? "Disconnect" : "New connection"}
+					title={status === 'connected' ? 'Disconnect' : 'New connection'}
 				>
 					<Plus className="h-3.5 w-3.5" />
 				</Button>
