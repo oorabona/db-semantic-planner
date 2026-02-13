@@ -60,8 +60,28 @@ router.setHandler('disconnect', async (params) => {
 });
 
 router.setHandler('introspect', async (params) => {
-	const { connectionId } = params as { connectionId: string };
-	return introspectConnection(connectionId);
+	const { connectionId, schema } = params as {
+		connectionId: string;
+		schema?: string;
+	};
+	const model = await introspectConnection(connectionId, schema);
+
+	// Convert ReadonlyMap to plain arrays for JSON serialization
+	const tables = [...model.tables.values()].map((t) => ({
+		...t,
+		foreignKeys: [...t.foreignKeys],
+		indexes: [...t.indexes],
+		columns: [...t.columns],
+	}));
+	const relations = [...model.relations.values()];
+
+	return {
+		tables,
+		relations,
+		hierarchies: [...model.hierarchies],
+		warnings: [...model.warnings],
+		introspectedAt: model.introspectedAt.toISOString(),
+	};
 });
 
 // ── Step 3: Write to stdout (protocol output) ────────────────────

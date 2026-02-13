@@ -1,9 +1,14 @@
-import { randomUUID } from "node:crypto";
-import { Pool } from "pg";
-import { introspect } from "@dbsp/adapter-pgsql";
-import type { IntrospectedModelIR } from "@dbsp/adapter-pgsql";
+import { randomUUID } from 'node:crypto';
+import type { IntrospectedModelIR } from '@dbsp/adapter-pgsql';
+import { introspect } from '@dbsp/adapter-pgsql';
+import { Pool } from 'pg';
 
-export type SslMode = "disable" | "allow" | "prefer" | "require" | "verify-full";
+export type SslMode =
+	| 'disable'
+	| 'allow'
+	| 'prefer'
+	| 'require'
+	| 'verify-full';
 
 export interface ConnectParams {
 	host: string;
@@ -28,14 +33,14 @@ const connections = new Map<string, ManagedConnection>();
 
 function sslConfig(mode: SslMode): boolean | { rejectUnauthorized: boolean } {
 	switch (mode) {
-		case "disable":
+		case 'disable':
 			return false;
-		case "allow":
-		case "prefer":
+		case 'allow':
+		case 'prefer':
 			return { rejectUnauthorized: false };
-		case "require":
+		case 'require':
 			return { rejectUnauthorized: false };
-		case "verify-full":
+		case 'verify-full':
 			return { rejectUnauthorized: true };
 	}
 }
@@ -45,8 +50,8 @@ export async function connect(params: ConnectParams): Promise<{
 	database: string;
 	schema: string;
 }> {
-	const schema = params.schema ?? "public";
-	const ssl = sslConfig(params.sslMode ?? "prefer");
+	const schema = params.schema ?? 'public';
+	const ssl = sslConfig(params.sslMode ?? 'prefer');
 
 	const pool = new Pool({
 		host: params.host,
@@ -62,7 +67,7 @@ export async function connect(params: ConnectParams): Promise<{
 	// Test the connection
 	const client = await pool.connect();
 	try {
-		await client.query("SELECT 1");
+		await client.query('SELECT 1');
 	} finally {
 		client.release();
 	}
@@ -89,15 +94,16 @@ export async function disconnect(connectionId: string): Promise<void> {
 
 export async function introspectConnection(
 	connectionId: string,
+	schema?: string,
 ): Promise<IntrospectedModelIR> {
 	const conn = connections.get(connectionId);
-	if (!conn) throw new Error("Not connected");
-	return introspect(conn.pool, { schema: conn.schema });
+	if (!conn) throw new Error('Not connected');
+	return introspect(conn.pool, { schema: schema ?? conn.schema });
 }
 
 export function getPool(connectionId: string): Pool {
 	const conn = connections.get(connectionId);
-	if (!conn) throw new Error("Not connected");
+	if (!conn) throw new Error('Not connected');
 	return conn.pool;
 }
 

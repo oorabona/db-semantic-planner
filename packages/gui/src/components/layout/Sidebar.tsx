@@ -1,4 +1,5 @@
 import { Database } from "lucide-react";
+import { SchemaTree } from "@/components/schema/SchemaTree";
 
 export function Sidebar() {
 	return (
@@ -9,12 +10,8 @@ export function Sidebar() {
 				<span className="text-sm font-medium">Schema</span>
 			</div>
 
-			{/* Placeholder content */}
-			<div className="flex flex-1 items-center justify-center p-4">
-				<p className="text-center text-sm text-[var(--muted-foreground)]">
-					Connect to a database to explore its schema
-				</p>
-			</div>
+			{/* Schema tree */}
+			<SchemaTree />
 		</div>
 	);
 }
