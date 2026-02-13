@@ -31,7 +31,9 @@ vi.mock('@monaco-editor/react', () => ({
 }));
 
 vi.mock('@/lib/nql-completions.js', () => ({
-	createNqlCompletionProvider: vi.fn(() => ({ provideCompletionItems: vi.fn() })),
+	createNqlCompletionProvider: vi.fn(() => ({
+		provideCompletionItems: vi.fn(),
+	})),
 }));
 
 vi.mock('@/lib/nql-monarch.js', () => ({
@@ -41,7 +43,9 @@ vi.mock('@/lib/nql-monarch.js', () => ({
 }));
 
 vi.mock('@/lib/sql-completions.js', () => ({
-	createSqlCompletionProvider: vi.fn(() => ({ provideCompletionItems: vi.fn() })),
+	createSqlCompletionProvider: vi.fn(() => ({
+		provideCompletionItems: vi.fn(),
+	})),
 }));
 
 // ── Import AFTER mocks ─────────────────────────────────────────
@@ -53,7 +57,7 @@ describe('useMonacoSetup', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		// Reset the init mock to return our mock monaco
-		vi.mocked(loader.init).mockReturnValue(Promise.resolve(mockMonaco as never));
+		vi.mocked(loader.init).mockReturnValue(Promise.resolve(mockMonaco) as any);
 	});
 
 	it('calls loader.init() on first render', async () => {
@@ -121,7 +125,9 @@ describe('useMonacoSetup', () => {
 		await vi.waitFor(() => {
 			expect(mockRegisterCompletionItemProvider).toHaveBeenCalledWith(
 				'sql',
-				expect.objectContaining({ provideCompletionItems: expect.any(Function) }),
+				expect.objectContaining({
+					provideCompletionItems: expect.any(Function),
+				}),
 			);
 		});
 	});
@@ -132,7 +138,9 @@ describe('useMonacoSetup', () => {
 		await vi.waitFor(() => {
 			expect(mockRegisterCompletionItemProvider).toHaveBeenCalledWith(
 				'nql',
-				expect.objectContaining({ provideCompletionItems: expect.any(Function) }),
+				expect.objectContaining({
+					provideCompletionItems: expect.any(Function),
+				}),
 			);
 		});
 	});

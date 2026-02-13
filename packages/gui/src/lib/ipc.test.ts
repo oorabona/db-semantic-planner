@@ -1,17 +1,17 @@
 /**
  * Tests for typed JSON-RPC method wrappers (ipc.ts)
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-	createSidecarApi,
-	type ConnectParams,
-	type ExecuteSqlParams,
 	type CompileNqlParams,
-	type ExecuteNqlParams,
-	type FetchMoreParams,
+	type ConnectParams,
+	createSidecarApi,
 	type DiscoverParams,
-	type ListSchemasParams,
+	type ExecuteNqlParams,
+	type ExecuteSqlParams,
+	type FetchMoreParams,
 	ipcClient,
+	type ListSchemasParams,
 	sidecarApi,
 } from './ipc.js';
 
@@ -396,7 +396,7 @@ describe('createSidecarApi', () => {
 			const result = await api.getCompletions('conn-123', 'u', 1, 'nql');
 
 			expect(result.items[0]).toHaveProperty('insertText');
-			expect(result.items[0].insertText).toBe('users');
+			expect(result.items[0]!.insertText).toBe('users');
 		});
 	});
 

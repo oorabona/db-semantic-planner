@@ -356,6 +356,7 @@ describe('useConnection', () => {
 					{
 						id: 'profile-1',
 						name: 'Test Profile',
+						type: 'postgresql' as const,
 						host: 'localhost',
 						port: 5432,
 						database: 'testdb',

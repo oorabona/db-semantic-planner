@@ -2,7 +2,13 @@
  * Tests for SQL completion provider
  */
 
-import type { editor, IRange, languages, Position } from 'monaco-editor';
+import type {
+	CancellationToken,
+	editor,
+	IRange,
+	languages,
+	Position,
+} from 'monaco-editor';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSchemaStore } from '@/stores/schema-store';
 import { createSqlCompletionProvider } from './sql-completions';
@@ -44,7 +50,7 @@ describe('createSqlCompletionProvider', () => {
 		// Default empty schema
 		vi.mocked(useSchemaStore.getState).mockReturnValue({
 			schema: null,
-		});
+		} as any);
 	});
 
 	afterEach(() => {
@@ -70,7 +76,7 @@ describe('createSqlCompletionProvider', () => {
 				mockModel,
 				mockPosition,
 				{} as languages.CompletionContext,
-				{} as languages.CancellationToken,
+				{} as CancellationToken,
 			);
 
 			expect(result).toBeDefined();
@@ -96,7 +102,7 @@ describe('createSqlCompletionProvider', () => {
 				mockModel,
 				mockPosition,
 				{} as languages.CompletionContext,
-				{} as languages.CancellationToken,
+				{} as CancellationToken,
 			);
 
 			const suggestions = (result as languages.CompletionList).suggestions;
@@ -113,7 +119,7 @@ describe('createSqlCompletionProvider', () => {
 				mockModel,
 				mockPosition,
 				{} as languages.CompletionContext,
-				{} as languages.CancellationToken,
+				{} as CancellationToken,
 			);
 
 			const suggestions = (result as languages.CompletionList).suggestions;
@@ -132,7 +138,7 @@ describe('createSqlCompletionProvider', () => {
 				mockModel,
 				mockPosition,
 				{} as languages.CompletionContext,
-				{} as languages.CancellationToken,
+				{} as CancellationToken,
 			);
 
 			const suggestions = (result as languages.CompletionList).suggestions;
@@ -151,7 +157,7 @@ describe('createSqlCompletionProvider', () => {
 				mockModel,
 				mockPosition,
 				{} as languages.CompletionContext,
-				{} as languages.CancellationToken,
+				{} as CancellationToken,
 			);
 
 			const suggestions = (result as languages.CompletionList).suggestions;
@@ -169,31 +175,54 @@ describe('createSqlCompletionProvider', () => {
 		it('should suggest table names from schema', () => {
 			vi.mocked(useSchemaStore.getState).mockReturnValue({
 				schema: {
-					schemaName: 'public',
 					tables: [
 						{
 							name: 'users',
 							columns: [
-								{ name: 'id', type: 'uuid', originalDbType: 'uuid' },
-								{ name: 'name', type: 'string', originalDbType: 'text' },
+								{
+									name: 'id',
+									type: 'uuid',
+									nullable: false,
+									originalDbType: 'uuid',
+								},
+								{
+									name: 'name',
+									type: 'string',
+									nullable: false,
+									originalDbType: 'text',
+								},
 							],
 						},
 						{
 							name: 'posts',
 							columns: [
-								{ name: 'id', type: 'uuid', originalDbType: 'uuid' },
-								{ name: 'title', type: 'string', originalDbType: 'text' },
+								{
+									name: 'id',
+									type: 'uuid',
+									nullable: false,
+									originalDbType: 'uuid',
+								},
+								{
+									name: 'title',
+									type: 'string',
+									nullable: false,
+									originalDbType: 'text',
+								},
 							],
 						},
 					],
+					relations: [],
+					hierarchies: [],
+					warnings: [],
+					introspectedAt: '2026-01-01T00:00:00Z',
 				},
-			});
+			} as any);
 
 			const result = provider.provideCompletionItems!(
 				mockModel,
 				mockPosition,
 				{} as languages.CompletionContext,
-				{} as languages.CancellationToken,
+				{} as CancellationToken,
 			);
 
 			const suggestions = (result as languages.CompletionList).suggestions;
@@ -207,25 +236,43 @@ describe('createSqlCompletionProvider', () => {
 		it('should provide table suggestions with column count detail', () => {
 			vi.mocked(useSchemaStore.getState).mockReturnValue({
 				schema: {
-					schemaName: 'public',
 					tables: [
 						{
 							name: 'users',
 							columns: [
-								{ name: 'id', type: 'uuid', originalDbType: 'uuid' },
-								{ name: 'name', type: 'string', originalDbType: 'text' },
-								{ name: 'email', type: 'string', originalDbType: 'text' },
+								{
+									name: 'id',
+									type: 'uuid',
+									nullable: false,
+									originalDbType: 'uuid',
+								},
+								{
+									name: 'name',
+									type: 'string',
+									nullable: false,
+									originalDbType: 'text',
+								},
+								{
+									name: 'email',
+									type: 'string',
+									nullable: false,
+									originalDbType: 'text',
+								},
 							],
 						},
 					],
+					relations: [],
+					hierarchies: [],
+					warnings: [],
+					introspectedAt: '2026-01-01T00:00:00Z',
 				},
-			});
+			} as any);
 
 			const result = provider.provideCompletionItems!(
 				mockModel,
 				mockPosition,
 				{} as languages.CompletionContext,
-				{} as languages.CancellationToken,
+				{} as CancellationToken,
 			);
 
 			const suggestions = (result as languages.CompletionList).suggestions;
@@ -239,16 +286,19 @@ describe('createSqlCompletionProvider', () => {
 		it('should handle empty schema gracefully', () => {
 			vi.mocked(useSchemaStore.getState).mockReturnValue({
 				schema: {
-					schemaName: 'public',
 					tables: [],
+					relations: [],
+					hierarchies: [],
+					warnings: [],
+					introspectedAt: '2026-01-01T00:00:00Z',
 				},
-			});
+			} as any);
 
 			const result = provider.provideCompletionItems!(
 				mockModel,
 				mockPosition,
 				{} as languages.CompletionContext,
-				{} as languages.CancellationToken,
+				{} as CancellationToken,
 			);
 
 			const suggestions = (result as languages.CompletionList).suggestions;
@@ -264,19 +314,37 @@ describe('createSqlCompletionProvider', () => {
 		beforeEach(() => {
 			vi.mocked(useSchemaStore.getState).mockReturnValue({
 				schema: {
-					schemaName: 'public',
 					tables: [
 						{
 							name: 'users',
 							columns: [
-								{ name: 'id', type: 'uuid', originalDbType: 'uuid' },
-								{ name: 'name', type: 'string', originalDbType: 'text' },
-								{ name: 'email', type: 'string', originalDbType: 'varchar' },
+								{
+									name: 'id',
+									type: 'uuid',
+									nullable: false,
+									originalDbType: 'uuid',
+								},
+								{
+									name: 'name',
+									type: 'string',
+									nullable: false,
+									originalDbType: 'text',
+								},
+								{
+									name: 'email',
+									type: 'string',
+									nullable: true,
+									originalDbType: 'varchar',
+								},
 							],
 						},
 					],
+					relations: [],
+					hierarchies: [],
+					warnings: [],
+					introspectedAt: '2026-01-01T00:00:00Z',
 				},
-			});
+			} as any);
 		});
 
 		it('should suggest columns when typing after table name and dot', () => {
@@ -287,7 +355,7 @@ describe('createSqlCompletionProvider', () => {
 				mockModel,
 				mockPosition,
 				{} as languages.CompletionContext,
-				{} as languages.CancellationToken,
+				{} as CancellationToken,
 			);
 
 			const suggestions = (result as languages.CompletionList).suggestions;
@@ -307,7 +375,7 @@ describe('createSqlCompletionProvider', () => {
 				mockModel,
 				mockPosition,
 				{} as languages.CompletionContext,
-				{} as languages.CancellationToken,
+				{} as CancellationToken,
 			);
 
 			const suggestions = (result as languages.CompletionList).suggestions;
@@ -322,17 +390,25 @@ describe('createSqlCompletionProvider', () => {
 		it('should fallback to type if originalDbType is missing', () => {
 			vi.mocked(useSchemaStore.getState).mockReturnValue({
 				schema: {
-					schemaName: 'public',
 					tables: [
 						{
 							name: 'products',
 							columns: [
-								{ name: 'price', type: 'number', originalDbType: null },
+								{
+									name: 'price',
+									type: 'number',
+									nullable: false,
+									originalDbType: undefined,
+								},
 							],
 						},
 					],
+					relations: [],
+					hierarchies: [],
+					warnings: [],
+					introspectedAt: '2026-01-01T00:00:00Z',
 				},
-			});
+			} as any);
 
 			mockModel.getLineContent = vi.fn().mockReturnValue('SELECT products.');
 			mockPosition = { lineNumber: 1, column: 17 } as Position;
@@ -341,7 +417,7 @@ describe('createSqlCompletionProvider', () => {
 				mockModel,
 				mockPosition,
 				{} as languages.CompletionContext,
-				{} as languages.CancellationToken,
+				{} as CancellationToken,
 			);
 
 			const suggestions = (result as languages.CompletionList).suggestions;
@@ -359,7 +435,7 @@ describe('createSqlCompletionProvider', () => {
 				mockModel,
 				mockPosition,
 				{} as languages.CompletionContext,
-				{} as languages.CancellationToken,
+				{} as CancellationToken,
 			);
 
 			const suggestions = (result as languages.CompletionList).suggestions;
@@ -376,7 +452,7 @@ describe('createSqlCompletionProvider', () => {
 				mockModel,
 				mockPosition,
 				{} as languages.CompletionContext,
-				{} as languages.CancellationToken,
+				{} as CancellationToken,
 			);
 
 			const suggestions = (result as languages.CompletionList).suggestions;
@@ -391,7 +467,7 @@ describe('createSqlCompletionProvider', () => {
 				mockModel,
 				mockPosition,
 				{} as languages.CompletionContext,
-				{} as languages.CancellationToken,
+				{} as CancellationToken,
 			);
 
 			const suggestions = (result as languages.CompletionList).suggestions;
@@ -414,7 +490,7 @@ describe('createSqlCompletionProvider', () => {
 				mockModel,
 				mockPosition,
 				{} as languages.CompletionContext,
-				{} as languages.CancellationToken,
+				{} as CancellationToken,
 			);
 
 			const suggestions = (result as languages.CompletionList).suggestions;
