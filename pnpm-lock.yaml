@@ -218,6 +218,18 @@ importers:
 
   packages/gui:
     dependencies:
+      '@dbsp/adapter-pgsql':
+        specifier: 'workspace:'
+        version: link:../adapter-pgsql
+      '@dbsp/core':
+        specifier: 'workspace:'
+        version: link:../core
+      '@dbsp/nql':
+        specifier: 'workspace:'
+        version: link:../nql
+      '@dbsp/types':
+        specifier: 'workspace:'
+        version: link:../types
       '@tauri-apps/api':
         specifier: ^2.5.0
         version: 2.10.1
@@ -233,6 +245,9 @@ importers:
       lucide-react:
         specifier: ^0.511.0
         version: 0.511.0(react@19.2.3)
+      pg:
+        specifier: 'catalog:'
+        version: 8.16.3
       radix-ui:
         specifier: ^1.4.3
         version: 1.4.3(@types/react-dom@19.2.3(@types/react@19.2.8))(@types/react@19.2.8)(react-dom@19.2.4(react@19.2.3))(react@19.2.3)
@@ -261,6 +276,9 @@ importers:
       '@tauri-apps/cli':
         specifier: ^2.5.0
         version: 2.10.0
+      '@types/pg':
+        specifier: 'catalog:'
+        version: 8.16.0
       '@types/react':
         specifier: 'catalog:'
         version: 19.2.8
