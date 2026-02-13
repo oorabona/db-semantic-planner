@@ -39,7 +39,11 @@ export interface ResultsState {
 
 	// Actions
 	setResult: (result: QueryResult) => void;
-	appendRows: (rows: ReadonlyArray<Record<string, unknown>>, totalRows?: number, cursorId?: string) => void;
+	appendRows: (
+		rows: ReadonlyArray<Record<string, unknown>>,
+		totalRows?: number,
+		cursorId?: string,
+	) => void;
 	setActiveTab: (tab: ResultsTab) => void;
 	setExecuting: (executing: boolean) => void;
 	setError: (error: string | null) => void;
@@ -71,5 +75,6 @@ export const useResultsStore = create<ResultsState>((set) => ({
 	setActiveTab: (activeTab) => set({ activeTab }),
 	setExecuting: (executing) => set({ executing, error: null }),
 	setError: (error) => set({ error, executing: false }),
-	clear: () => set({ result: null, error: null, executing: false, activeTab: 'results' }),
+	clear: () =>
+		set({ result: null, error: null, executing: false, activeTab: 'results' }),
 }));

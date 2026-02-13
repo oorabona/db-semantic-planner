@@ -1,8 +1,8 @@
 /**
  * Tab bar for Results panel: Results | SQL | Plan | Params
  */
-import { Table, Code, Map, Settings2 } from 'lucide-react';
-import { useResultsStore, type ResultsTab } from '@/stores/results-store';
+import { Code, Map, Settings2, Table } from 'lucide-react';
+import { type ResultsTab, useResultsStore } from '@/stores/results-store';
 
 const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof Table }> = [
 	{ id: 'results', label: 'Results', Icon: Table },

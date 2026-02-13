@@ -130,8 +130,7 @@ export class IpcClient {
 			method !== 'handshake'
 		) {
 			return new Promise<T>((resolve, reject) => {
-				const message =
-					JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n';
+				const message = `${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`;
 				this.requestQueue.push({
 					message,
 					id,
@@ -163,8 +162,7 @@ export class IpcClient {
 			return Promise.reject(new Error('No transport connected'));
 		}
 
-		const message =
-			JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n';
+		const message = `${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`;
 		return new Promise<T>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				this.pending.delete(id);
@@ -177,7 +175,7 @@ export class IpcClient {
 				timer,
 			});
 
-			this.transport!.send(message);
+			this.transport?.send(message);
 		});
 	}
 
@@ -224,7 +222,7 @@ export class IpcClient {
 		}
 	}
 
-	private handleClose(code: number | null): void {
+	private handleClose(_code: number | null): void {
 		if (this._status === 'ready') {
 			// Unexpected close — restart
 			this.setStatus('restarting');

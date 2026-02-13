@@ -3,10 +3,13 @@ import { toCsv } from './csv-export.js';
 
 describe('toCsv', () => {
 	it('produces header + rows', () => {
-		const csv = toCsv(['id', 'name'], [
-			{ id: 1, name: 'Alice' },
-			{ id: 2, name: 'Bob' },
-		]);
+		const csv = toCsv(
+			['id', 'name'],
+			[
+				{ id: 1, name: 'Alice' },
+				{ id: 2, name: 'Bob' },
+			],
+		);
 		expect(csv).toBe('id,name\n1,Alice\n2,Bob');
 	});
 

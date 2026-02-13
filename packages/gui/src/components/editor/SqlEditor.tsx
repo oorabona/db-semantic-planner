@@ -1,10 +1,10 @@
 import { useCallback } from 'react';
-import { getActiveTab, useEditorStore } from '@/stores/editor-store';
-import { useConnectionStore } from '@/stores/connection-store';
-import { useResultsStore, type QueryResult } from '@/stores/results-store';
 import { sidecarApi } from '@/lib/ipc';
-import { MonacoWrapper } from './MonacoWrapper';
+import { useConnectionStore } from '@/stores/connection-store';
+import { getActiveTab, useEditorStore } from '@/stores/editor-store';
+import { type QueryResult, useResultsStore } from '@/stores/results-store';
 import { EditorToolbar } from './EditorToolbar';
+import { MonacoWrapper } from './MonacoWrapper';
 
 export function SqlEditor() {
 	const activeTab = useEditorStore(getActiveTab);
@@ -37,7 +37,9 @@ export function SqlEditor() {
 			const response = raw as Record<string, unknown>;
 			const rows = (response.rows ?? []) as Record<string, unknown>[];
 			const columns =
-				rows.length > 0 ? Object.keys(rows[0]!) : ((response.columns ?? []) as string[]);
+				rows.length > 0
+					? Object.keys(rows[0]!)
+					: ((response.columns ?? []) as string[]);
 
 			const result: QueryResult = {
 				columns,
@@ -76,7 +78,11 @@ export function SqlEditor() {
 
 	return (
 		<div className="flex flex-1 flex-col overflow-hidden">
-			<EditorToolbar onRun={handleRun} running={false} language={activeTab.language} />
+			<EditorToolbar
+				onRun={handleRun}
+				running={false}
+				language={activeTab.language}
+			/>
 			<MonacoWrapper
 				value={activeTab.content}
 				language={activeTab.language}

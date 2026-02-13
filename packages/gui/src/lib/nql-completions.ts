@@ -2,31 +2,72 @@
  * Monaco completion provider for NQL using schema store data.
  * Provides keyword, table, column, and pipe-stage completions.
  */
-import type { languages, Position, editor, IRange } from "monaco-editor";
-import { useSchemaStore } from "@/stores/schema-store";
+import type { editor, IRange, languages, Position } from 'monaco-editor';
+import { useSchemaStore } from '@/stores/schema-store';
 
 // NQL pipe stages (after |)
 const PIPE_STAGES = [
-	{ label: "where", detail: "Filter rows" },
-	{ label: "select", detail: "Choose columns" },
-	{ label: "limit", detail: "Limit result count" },
-	{ label: "offset", detail: "Skip rows" },
-	{ label: "order by", detail: "Sort results" },
-	{ label: "group by", detail: "Group rows" },
-	{ label: "having", detail: "Filter groups" },
-	{ label: "include", detail: "Include related data" },
-	{ label: "distinct", detail: "Remove duplicates" },
-	{ label: "join", detail: "Join related table" },
+	{ label: 'where', detail: 'Filter rows' },
+	{ label: 'select', detail: 'Choose columns' },
+	{ label: 'limit', detail: 'Limit result count' },
+	{ label: 'offset', detail: 'Skip rows' },
+	{ label: 'order by', detail: 'Sort results' },
+	{ label: 'group by', detail: 'Group rows' },
+	{ label: 'having', detail: 'Filter groups' },
+	{ label: 'include', detail: 'Include related data' },
+	{ label: 'distinct', detail: 'Remove duplicates' },
+	{ label: 'join', detail: 'Join related table' },
 ];
 
 const NQL_KEYWORDS = [
-	"where", "select", "limit", "offset", "order", "by", "group",
-	"having", "include", "distinct", "join", "and", "or", "not",
-	"in", "between", "like", "ilike", "is", "null", "true", "false",
-	"asc", "desc", "as", "case", "when", "then", "else", "end",
-	"insert", "into", "values", "set", "update", "delete", "upsert",
-	"bind", "returning", "with", "strategy", "flat", "exists",
-	"count", "sum", "avg", "min", "max",
+	'where',
+	'select',
+	'limit',
+	'offset',
+	'order',
+	'by',
+	'group',
+	'having',
+	'include',
+	'distinct',
+	'join',
+	'and',
+	'or',
+	'not',
+	'in',
+	'between',
+	'like',
+	'ilike',
+	'is',
+	'null',
+	'true',
+	'false',
+	'asc',
+	'desc',
+	'as',
+	'case',
+	'when',
+	'then',
+	'else',
+	'end',
+	'insert',
+	'into',
+	'values',
+	'set',
+	'update',
+	'delete',
+	'upsert',
+	'bind',
+	'returning',
+	'with',
+	'strategy',
+	'flat',
+	'exists',
+	'count',
+	'sum',
+	'avg',
+	'min',
+	'max',
 ];
 
 function getWordRange(model: editor.ITextModel, position: Position): IRange {
@@ -41,7 +82,7 @@ function getWordRange(model: editor.ITextModel, position: Position): IRange {
 
 export function createNqlCompletionProvider(): languages.CompletionItemProvider {
 	return {
-		triggerCharacters: ["|", ".", " "],
+		triggerCharacters: ['|', '.', ' '],
 
 		provideCompletionItems(model, position) {
 			const range = getWordRange(model, position);

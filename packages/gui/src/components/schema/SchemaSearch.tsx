@@ -1,5 +1,5 @@
-import { Search, X } from "lucide-react";
-import { useSchemaStore } from "@/stores/schema-store";
+import { Search, X } from 'lucide-react';
+import { useSchemaStore } from '@/stores/schema-store';
 
 export function SchemaSearch() {
 	const searchFilter = useSchemaStore((s) => s.searchFilter);
@@ -18,7 +18,7 @@ export function SchemaSearch() {
 			{searchFilter && (
 				<button
 					type="button"
-					onClick={() => setSearchFilter("")}
+					onClick={() => setSearchFilter('')}
 					className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
 				>
 					<X className="h-3.5 w-3.5" />

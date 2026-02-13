@@ -1,13 +1,17 @@
-import { Play, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Loader2, Play } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 interface EditorToolbarProps {
 	onRun: () => void;
 	running: boolean;
-	language: "sql" | "nql";
+	language: 'sql' | 'nql';
 }
 
-export function EditorToolbar({ onRun, running, language }: EditorToolbarProps) {
+export function EditorToolbar({
+	onRun,
+	running,
+	language,
+}: EditorToolbarProps) {
 	return (
 		<div className="flex items-center gap-2 border-b px-2 py-1">
 			<Button
@@ -26,7 +30,7 @@ export function EditorToolbar({ onRun, running, language }: EditorToolbarProps) 
 				Run
 			</Button>
 			<span className="text-xs text-muted-foreground">
-				{language === "sql" ? "SQL" : "NQL"} · Cmd+Enter
+				{language === 'sql' ? 'SQL' : 'NQL'} · Cmd+Enter
 			</span>
 		</div>
 	);

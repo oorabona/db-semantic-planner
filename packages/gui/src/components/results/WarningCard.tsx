@@ -16,9 +16,7 @@ export function WarningCard({ code, message, suggestion }: WarningCardProps) {
 				<AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-yellow-600 dark:text-yellow-400" />
 				<div className="min-w-0 flex-1">
 					<p className="text-xs font-medium">
-						<span className="text-yellow-700 dark:text-yellow-400">
-							{code}
-						</span>{' '}
+						<span className="text-yellow-700 dark:text-yellow-400">{code}</span>{' '}
 						— {message}
 					</p>
 					{suggestion && (

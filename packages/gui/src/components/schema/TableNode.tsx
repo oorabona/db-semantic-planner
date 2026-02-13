@@ -1,7 +1,7 @@
-import { ChevronRight, Table2 } from "lucide-react";
-import { useSchemaStore, type SchemaTable } from "@/stores/schema-store";
-import { ColumnNode } from "./ColumnNode";
-import { IndexNode } from "./IndexNode";
+import { ChevronRight, Table2 } from 'lucide-react';
+import { type SchemaTable, useSchemaStore } from '@/stores/schema-store';
+import { ColumnNode } from './ColumnNode';
+import { IndexNode } from './IndexNode';
 
 interface TableNodeProps {
 	table: SchemaTable;
@@ -29,7 +29,7 @@ export function TableNode({ table }: TableNodeProps) {
 			>
 				<ChevronRight
 					className={`h-3.5 w-3.5 shrink-0 transition-transform ${
-						isTableExpanded ? "rotate-90" : ""
+						isTableExpanded ? 'rotate-90' : ''
 					}`}
 				/>
 				<Table2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -50,7 +50,7 @@ export function TableNode({ table }: TableNodeProps) {
 					>
 						<ChevronRight
 							className={`h-3 w-3 shrink-0 transition-transform ${
-								isColumnsExpanded ? "rotate-90" : ""
+								isColumnsExpanded ? 'rotate-90' : ''
 							}`}
 						/>
 						<span>Columns ({table.columns.length})</span>
@@ -71,7 +71,7 @@ export function TableNode({ table }: TableNodeProps) {
 							>
 								<ChevronRight
 									className={`h-3 w-3 shrink-0 transition-transform ${
-										isIndexesExpanded ? "rotate-90" : ""
+										isIndexesExpanded ? 'rotate-90' : ''
 									}`}
 								/>
 								<span>Indexes ({table.indexes.length})</span>
@@ -80,7 +80,7 @@ export function TableNode({ table }: TableNodeProps) {
 							{isIndexesExpanded &&
 								table.indexes.map((idx) => (
 									<IndexNode
-										key={idx.name ?? idx.columns.join(",")}
+										key={idx.name ?? idx.columns.join(',')}
 										index={idx}
 									/>
 								))}

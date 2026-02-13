@@ -37,11 +37,13 @@ interface PlanData {
 	decisions?: readonly PlanDecision[] | undefined;
 	warnings?: readonly PlanWarning[] | undefined;
 	ctes?: readonly CteItem[] | undefined;
-	metadata?: {
-		planningTimeMs?: number | undefined;
-		relationsAnalyzed?: number | undefined;
-		isAmbiguous?: boolean | undefined;
-	} | undefined;
+	metadata?:
+		| {
+				planningTimeMs?: number | undefined;
+				relationsAnalyzed?: number | undefined;
+				isAmbiguous?: boolean | undefined;
+		  }
+		| undefined;
 }
 
 interface PlanInspectorProps {

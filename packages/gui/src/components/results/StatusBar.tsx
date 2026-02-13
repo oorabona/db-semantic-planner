@@ -1,9 +1,9 @@
 /**
  * Results status bar: row count, timing, truncation, CSV export.
  */
-import { Download, ChevronDown } from 'lucide-react';
+import { ChevronDown, Download } from 'lucide-react';
+import { downloadCsv, toCsv } from '@/lib/csv-export';
 import { useResultsStore } from '@/stores/results-store';
-import { toCsv, downloadCsv } from '@/lib/csv-export';
 
 export function StatusBar() {
 	const result = useResultsStore((s) => s.result);
@@ -35,9 +35,10 @@ export function StatusBar() {
 	}
 
 	const rowCount = result.rows.length;
-	const timing = result.durationMs < 1000
-		? `${result.durationMs.toFixed(1)}ms`
-		: `${(result.durationMs / 1000).toFixed(2)}s`;
+	const timing =
+		result.durationMs < 1000
+			? `${result.durationMs.toFixed(1)}ms`
+			: `${(result.durationMs / 1000).toFixed(2)}s`;
 
 	const truncationText = result.truncated
 		? ` of ${result.totalRows?.toLocaleString() ?? '?'}+ rows (truncated)`

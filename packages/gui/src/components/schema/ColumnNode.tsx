@@ -1,6 +1,6 @@
-import { PkIcon, FkIcon, TypeIcon } from "./icons";
-import type { SchemaColumn, SchemaTable } from "@/stores/schema-store";
-import { isPrimaryKey, isForeignKey, getFkTarget } from "@/stores/schema-store";
+import type { SchemaColumn, SchemaTable } from '@/stores/schema-store';
+import { getFkTarget, isForeignKey, isPrimaryKey } from '@/stores/schema-store';
+import { FkIcon, PkIcon, TypeIcon } from './icons';
 
 interface ColumnNodeProps {
 	column: SchemaColumn;
@@ -20,11 +20,14 @@ export function ColumnNode({ column, table }: ColumnNodeProps) {
 			) : fk ? (
 				<FkIcon className="h-3 w-3 shrink-0" />
 			) : (
-				<TypeIcon type={column.type} className="h-3 w-3 shrink-0 text-muted-foreground" />
+				<TypeIcon
+					type={column.type}
+					className="h-3 w-3 shrink-0 text-muted-foreground"
+				/>
 			)}
 
 			{/* Column name */}
-			<span className={pk ? "font-medium" : ""}>{column.name}</span>
+			<span className={pk ? 'font-medium' : ''}>{column.name}</span>
 
 			{/* Type badge */}
 			<span className="ml-auto shrink-0 text-muted-foreground">

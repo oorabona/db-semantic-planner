@@ -1,4 +1,4 @@
-import { create } from "zustand";
+import { create } from 'zustand';
 
 // ── Serializable schema types (from sidecar introspect response) ────
 
@@ -88,7 +88,7 @@ export const useSchemaStore = create<SchemaState>((set) => ({
 	loading: false,
 	error: null,
 	expanded: new Set<string>(),
-	searchFilter: "",
+	searchFilter: '',
 
 	setSchema: (schema) => set({ schema, error: null }),
 	clearSchema: () => set({ schema: null, error: null, expanded: new Set() }),
@@ -136,20 +136,15 @@ export function getFilteredTables(
 }
 
 /** Check if a column is part of the primary key */
-export function isPrimaryKey(
-	table: SchemaTable,
-	columnName: string,
-): boolean {
+export function isPrimaryKey(table: SchemaTable, columnName: string): boolean {
 	if (!table.primaryKey) return false;
-	if (typeof table.primaryKey === "string") return table.primaryKey === columnName;
+	if (typeof table.primaryKey === 'string')
+		return table.primaryKey === columnName;
 	return table.primaryKey.includes(columnName);
 }
 
 /** Check if a column is a foreign key */
-export function isForeignKey(
-	table: SchemaTable,
-	columnName: string,
-): boolean {
+export function isForeignKey(table: SchemaTable, columnName: string): boolean {
 	return table.foreignKeys.some((fk) => fk.columns.includes(columnName));
 }
 

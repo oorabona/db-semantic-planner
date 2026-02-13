@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { commandRegistry, type Command } from './commands';
+import { type Command, commandRegistry } from './commands';
 import { MENU_IDS } from './menu';
 
 // Mock Tauri APIs (needed by menu.ts -> setMenuItemEnabled)
@@ -83,9 +83,7 @@ describe('CommandRegistry', () => {
 		it('should call handler when command exists and is enabled', () => {
 			// Arrange
 			const handler = vi.fn();
-			commandRegistry.register(
-				makeCommand({ id: 'exec.ok', handler }),
-			);
+			commandRegistry.register(makeCommand({ id: 'exec.ok', handler }));
 
 			// Act
 			const result = commandRegistry.execute('exec.ok');
@@ -170,9 +168,7 @@ describe('CommandRegistry', () => {
 		});
 
 		it('should treat commands without when as always enabled', () => {
-			commandRegistry.register(
-				makeCommand({ id: 'no.when' }),
-			);
+			commandRegistry.register(makeCommand({ id: 'no.when' }));
 
 			expect(commandRegistry.isEnabled('no.when')).toBe(true);
 		});

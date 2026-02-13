@@ -6,7 +6,12 @@
 function escapeField(value: unknown): string {
 	if (value == null) return '';
 	const str = String(value);
-	if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+	if (
+		str.includes(',') ||
+		str.includes('"') ||
+		str.includes('\n') ||
+		str.includes('\r')
+	) {
 		return `"${str.replace(/"/g, '""')}"`;
 	}
 	return str;
@@ -17,7 +22,9 @@ export function toCsv(
 	rows: ReadonlyArray<Record<string, unknown>>,
 ): string {
 	const header = columns.map(escapeField).join(',');
-	const body = rows.map((row) => columns.map((col) => escapeField(row[col])).join(','));
+	const body = rows.map((row) =>
+		columns.map((col) => escapeField(row[col])).join(','),
+	);
 	return [header, ...body].join('\n');
 }
 

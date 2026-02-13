@@ -1,6 +1,10 @@
-import { useCallback, useState } from "react";
-import { useConnectionStore, type ConnectionProfile, type SslMode } from "@/stores/connection-store";
-import { sidecarApi } from "@/lib/ipc";
+import { useCallback, useState } from 'react';
+import { sidecarApi } from '@/lib/ipc';
+import {
+	type ConnectionProfile,
+	type SslMode,
+	useConnectionStore,
+} from '@/stores/connection-store';
 
 interface ConnectParams {
 	host: string;
@@ -22,21 +26,21 @@ export function useConnection() {
 
 	const connect = useCallback(
 		async (params: ConnectParams, profileId?: string) => {
-			setStatus("connecting");
+			setStatus('connecting');
 			setTestResult(null);
 			try {
 				const result = await sidecarApi.connect(params);
 				setActive({
 					connectionId: result.connectionId,
-					profileId: profileId ?? "",
+					profileId: profileId ?? '',
 					database: result.database,
 					schema: result.schema,
 				});
 				return result;
 			} catch (err) {
 				const message =
-					err instanceof Error ? err.message : "Connection failed";
-				setStatus("error", message);
+					err instanceof Error ? err.message : 'Connection failed';
+				setStatus('error', message);
 				throw err;
 			}
 		},
@@ -55,24 +59,20 @@ export function useConnection() {
 		clearActive();
 	}, [clearActive]);
 
-	const testConnection = useCallback(
-		async (params: ConnectParams) => {
-			setTestResult(null);
-			try {
-				const result = await sidecarApi.connect(params);
-				// Immediately disconnect the test connection
-				await sidecarApi.disconnect({
-					connectionId: result.connectionId,
-				});
-				setTestResult({ ok: true, message: "Connection successful!" });
-			} catch (err) {
-				const message =
-					err instanceof Error ? err.message : "Connection failed";
-				setTestResult({ ok: false, message });
-			}
-		},
-		[],
-	);
+	const testConnection = useCallback(async (params: ConnectParams) => {
+		setTestResult(null);
+		try {
+			const result = await sidecarApi.connect(params);
+			// Immediately disconnect the test connection
+			await sidecarApi.disconnect({
+				connectionId: result.connectionId,
+			});
+			setTestResult({ ok: true, message: 'Connection successful!' });
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Connection failed';
+			setTestResult({ ok: false, message });
+		}
+	}, []);
 
 	const saveProfile = useCallback(
 		(profile: ConnectionProfile) => {

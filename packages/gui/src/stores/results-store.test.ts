@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { useResultsStore, type QueryResult } from './results-store.js';
+import { type QueryResult, useResultsStore } from './results-store.js';
 
 const SAMPLE_RESULT: QueryResult = {
 	columns: ['id', 'name', 'active'],
@@ -36,15 +36,21 @@ describe('useResultsStore', () => {
 	describe('appendRows', () => {
 		it('appends rows to existing result', () => {
 			useResultsStore.getState().setResult(SAMPLE_RESULT);
-			useResultsStore.getState().appendRows(
-				[{ id: 3, name: 'Charlie', active: true }],
-				100,
-				'cursor-123',
-			);
+			useResultsStore
+				.getState()
+				.appendRows(
+					[{ id: 3, name: 'Charlie', active: true }],
+					100,
+					'cursor-123',
+				);
 
 			const state = useResultsStore.getState();
 			expect(state.result!.rows).toHaveLength(3);
-			expect(state.result!.rows[2]).toEqual({ id: 3, name: 'Charlie', active: true });
+			expect(state.result!.rows[2]).toEqual({
+				id: 3,
+				name: 'Charlie',
+				active: true,
+			});
 			expect(state.result!.totalRows).toBe(100);
 			expect(state.result!.cursorId).toBe('cursor-123');
 			expect(state.result!.truncated).toBe(true);
@@ -61,11 +67,9 @@ describe('useResultsStore', () => {
 				truncated: true,
 				cursorId: 'old',
 			});
-			useResultsStore.getState().appendRows(
-				[{ id: 3, name: 'Charlie', active: true }],
-				3,
-				undefined,
-			);
+			useResultsStore
+				.getState()
+				.appendRows([{ id: 3, name: 'Charlie', active: true }], 3, undefined);
 			expect(useResultsStore.getState().result!.truncated).toBe(false);
 		});
 	});

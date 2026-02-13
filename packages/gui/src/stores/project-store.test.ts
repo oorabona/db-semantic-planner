@@ -55,9 +55,7 @@ describe('matchesGlob', () => {
 	});
 
 	it('matches **/*.assert.dbsp', () => {
-		expect(matchesGlob('src/users.assert.dbsp', '**/*.assert.dbsp')).toBe(
-			true,
-		);
+		expect(matchesGlob('src/users.assert.dbsp', '**/*.assert.dbsp')).toBe(true);
 	});
 
 	it('rejects non-matching extension', () => {
@@ -88,27 +86,23 @@ describe('shouldIncludeFile', () => {
 	const exclude = ['node_modules', 'dist', '.git'];
 
 	it('includes .dbsp files', () => {
-		expect(shouldIncludeFile('src/users.dbsp', include, exclude)).toBe(
+		expect(shouldIncludeFile('src/users.dbsp', include, exclude)).toBe(true);
+	});
+
+	it('includes .assert.dbsp files', () => {
+		expect(shouldIncludeFile('src/users.assert.dbsp', include, exclude)).toBe(
 			true,
 		);
 	});
 
-	it('includes .assert.dbsp files', () => {
-		expect(
-			shouldIncludeFile('src/users.assert.dbsp', include, exclude),
-		).toBe(true);
-	});
-
 	it('excludes node_modules paths', () => {
-		expect(
-			shouldIncludeFile('node_modules/foo.dbsp', include, exclude),
-		).toBe(false);
+		expect(shouldIncludeFile('node_modules/foo.dbsp', include, exclude)).toBe(
+			false,
+		);
 	});
 
 	it('excludes non-matching files', () => {
-		expect(shouldIncludeFile('src/readme.md', include, exclude)).toBe(
-			false,
-		);
+		expect(shouldIncludeFile('src/readme.md', include, exclude)).toBe(false);
 	});
 });
 

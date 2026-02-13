@@ -1,4 +1,10 @@
-import { ChevronDown, ChevronRight, File, FileCode, Folder } from 'lucide-react';
+import {
+	ChevronDown,
+	ChevronRight,
+	File,
+	FileCode,
+	Folder,
+} from 'lucide-react';
 import { useState } from 'react';
 import type { ProjectFile } from '@/stores/project-store';
 

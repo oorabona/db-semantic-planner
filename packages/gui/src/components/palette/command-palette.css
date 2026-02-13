@@ -78,7 +78,7 @@
 	transition: background 0.1s;
 }
 
-.dbsp-command-palette [cmdk-item][data-selected='true'] {
+.dbsp-command-palette [cmdk-item][data-selected="true"] {
 	background: var(--accent);
 }
 

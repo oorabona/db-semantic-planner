@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockStoreLoad, mockStoreGet, mockResolveProfile } = vi.hoisted(
-	() => ({
-		mockStoreLoad: vi.fn(),
-		mockStoreGet: vi.fn(),
-		mockResolveProfile: vi.fn(),
-	}),
-);
+const { mockStoreLoad, mockStoreGet, mockResolveProfile } = vi.hoisted(() => ({
+	mockStoreLoad: vi.fn(),
+	mockStoreGet: vi.fn(),
+	mockResolveProfile: vi.fn(),
+}));
 
 vi.mock('@tauri-apps/plugin-store', () => ({
 	load: mockStoreLoad,
@@ -84,10 +82,7 @@ describe('resolveProfile', () => {
 			mockResolveProfile.mockResolvedValue(expected);
 
 			// Act
-			const result = await resolveProfile(
-				'file://.env.local',
-				'/my/project',
-			);
+			const result = await resolveProfile('file://.env.local', '/my/project');
 
 			// Assert
 			expect(result).toEqual(expected);
@@ -162,9 +157,7 @@ describe('resolveProfile', () => {
 				await resolveProfile('store://missing-key');
 			} catch (e) {
 				expect(e).toBeInstanceOf(ProfileResolutionError);
-				expect((e as ProfileResolutionError).uri).toBe(
-					'store://missing-key',
-				);
+				expect((e as ProfileResolutionError).uri).toBe('store://missing-key');
 				expect((e as ProfileResolutionError).reason).toContain(
 					'profile:missing-key',
 				);

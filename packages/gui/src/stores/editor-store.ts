@@ -94,7 +94,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 			// Activate neighbor tab
 			if (remaining.length > 0) {
 				const neighborIdx = Math.min(idx, remaining.length - 1);
-				nextActive = remaining[neighborIdx]!.id;
+				nextActive = remaining[neighborIdx]?.id;
 			} else {
 				nextActive = null;
 			}

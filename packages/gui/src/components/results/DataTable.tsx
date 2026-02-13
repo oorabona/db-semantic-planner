@@ -1,18 +1,18 @@
 /**
  * TanStack Table wrapper with virtual scrolling for query results.
  */
-import { useRef, useMemo } from 'react';
+
 import {
-	useReactTable,
+	type ColumnDef,
+	flexRender,
 	getCoreRowModel,
 	getSortedRowModel,
-	flexRender,
 	type SortingState,
-	type ColumnDef,
+	useReactTable,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useState } from 'react';
-import { ArrowUp, ArrowDown } from 'lucide-react';
+import { ArrowDown, ArrowUp } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
 import { CellRenderer } from './CellRenderer';
 
 interface DataTableProps {
@@ -110,10 +110,7 @@ export function DataTable({ columns, rows }: DataTableProps) {
 										className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-1"
 										style={{ maxWidth: cell.column.getSize() }}
 									>
-										{flexRender(
-											cell.column.columnDef.cell,
-											cell.getContext(),
-										)}
+										{flexRender(cell.column.columnDef.cell, cell.getContext())}
 									</td>
 								))}
 							</tr>

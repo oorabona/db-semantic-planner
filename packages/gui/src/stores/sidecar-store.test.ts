@@ -2,8 +2,8 @@
  * Tests for sidecar-store.ts — Zustand store for sidecar lifecycle state.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useSidecarStore } from './sidecar-store';
 import type { SidecarStatus } from '@/lib/ipc-transport';
+import { useSidecarStore } from './sidecar-store';
 
 describe('useSidecarStore', () => {
 	beforeEach(() => {

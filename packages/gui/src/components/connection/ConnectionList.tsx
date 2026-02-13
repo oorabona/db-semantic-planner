@@ -1,6 +1,6 @@
-import { Database, Trash2, Plug } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import type { ConnectionProfile } from "@/stores/connection-store";
+import { Database, Plug, Trash2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import type { ConnectionProfile } from '@/stores/connection-store';
 
 interface ConnectionListProps {
 	profiles: readonly ConnectionProfile[];
@@ -30,11 +30,11 @@ export function ConnectionList({
 					key={profile.id}
 					className={`group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent cursor-pointer ${
 						profile.id === activeProfileId
-							? "bg-accent text-accent-foreground"
-							: ""
+							? 'bg-accent text-accent-foreground'
+							: ''
 					}`}
 					onClick={() => onSelect(profile)}
-					onKeyDown={(e) => e.key === "Enter" && onSelect(profile)}
+					onKeyDown={(e) => e.key === 'Enter' && onSelect(profile)}
 				>
 					<Database className="h-4 w-4 shrink-0 text-muted-foreground" />
 					<div className="flex-1 truncate">

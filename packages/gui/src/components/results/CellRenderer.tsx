@@ -2,7 +2,7 @@
  * Type-aware cell renderer for query result data.
  * All content rendered via React text nodes (XSS-safe).
  */
-import { Check, X, Copy } from 'lucide-react';
+import { Check, Copy, X } from 'lucide-react';
 
 interface CellRendererProps {
 	value: unknown;
@@ -37,7 +37,9 @@ export function CellRenderer({ value, columnType }: CellRendererProps) {
 	// UUID
 	if (
 		typeof value === 'string' &&
-		/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+		/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+			value,
+		)
 	) {
 		return (
 			<span className="font-mono text-xs" title={value}>
