@@ -1,3 +1,7 @@
+mod sidecar;
+
+use sidecar::{sidecar_kill, sidecar_send, sidecar_spawn, SidecarState};
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}!", name)
@@ -6,7 +10,13 @@ fn greet(name: &str) -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![greet])
+        .manage(SidecarState::new())
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            sidecar_spawn,
+            sidecar_send,
+            sidecar_kill,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
