@@ -12,6 +12,7 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { Button } from '@/components/ui/button';
 import { useConnection } from '@/hooks/useConnection';
 import { useMonacoSetup } from '@/hooks/useMonacoSetup';
+import { sidecarApi } from '@/lib/ipc';
 import { useConnectionStore } from '@/stores/connection-store';
 
 export default function App() {
@@ -48,6 +49,7 @@ export default function App() {
 		addProfile({
 			id: crypto.randomUUID(),
 			name: data.name || `${data.database}@${data.host}`,
+			type: data.type,
 			host: data.host,
 			port: data.port,
 			database: data.database,
@@ -64,7 +66,7 @@ export default function App() {
 				<PanelGroup autoSaveId="dbsp-main-layout" direction="horizontal">
 					{/* Left: Schema sidebar */}
 					<Panel defaultSize={20} minSize={15} maxSize={40}>
-						<Sidebar />
+						<Sidebar onConnect={() => setDialogOpen(true)} />
 					</Panel>
 
 					<PanelResizeHandle />
@@ -117,6 +119,8 @@ export default function App() {
 				onConnect={handleConnect}
 				onTest={handleTest}
 				onSave={handleSave}
+				onDiscover={(params) => sidecarApi.listDatabases(params)}
+				onListSchemas={(params) => sidecarApi.listSchemas(params)}
 				testing={testing}
 				connecting={connecting}
 				testResult={testResult}

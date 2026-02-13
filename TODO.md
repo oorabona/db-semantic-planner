@@ -81,6 +81,7 @@
 - [ ] 💡 **GUI-013** [GUI] Theme system (dark/light + custom accent colors)
 - [ ] 💡 **GUI-014** [GUI] Welcome screen with quick connect + sample queries
 - [ ] 💡 **GUI-015** [GUI] Web version (@dbsp/web — same React frontend, HTTP/WS transport, phpMyAdmin-like)
+- [ ] 💡 **GUI-016** [GUI] Status bar "+" → loupe icon, ouvre un panneau de logs applicatifs (sidecar stdout/stderr, IPC messages, query timing). Format: drawer coulissant depuis la barre de statut (style VS Code Output panel) ou onglet "Logs" dans le panneau results
 
 ---
 

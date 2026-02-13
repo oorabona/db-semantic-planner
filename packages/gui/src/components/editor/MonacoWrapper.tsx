@@ -50,7 +50,7 @@ export function MonacoWrapper({
 				value={value}
 				onChange={(v) => onChange(v ?? '')}
 				onMount={handleMount}
-				theme="vs-dark"
+				theme="dbsp-light"
 				options={{
 					minimap: { enabled: false },
 					fontSize: 13,

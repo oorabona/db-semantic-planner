@@ -81,6 +81,18 @@ export interface CompletionItem {
 	insertText?: string;
 }
 
+export interface DiscoverParams {
+	host: string;
+	port: number;
+	user: string;
+	password: string;
+	sslMode?: SslMode;
+}
+
+export interface ListSchemasParams extends DiscoverParams {
+	database: string;
+}
+
 // ── Typed API ────────────────────────────────────────────────────
 
 export function createSidecarApi(client: IpcClient) {
@@ -136,6 +148,14 @@ export function createSidecarApi(client: IpcClient) {
 				position,
 				language,
 			});
+		},
+
+		listDatabases(params: DiscoverParams) {
+			return client.call<{ databases: string[] }>('listDatabases', params);
+		},
+
+		listSchemas(params: ListSchemasParams) {
+			return client.call<{ schemas: string[] }>('listSchemas', params);
 		},
 	};
 }

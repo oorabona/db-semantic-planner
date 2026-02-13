@@ -1,7 +1,11 @@
-import { Database } from "lucide-react";
-import { SchemaTree } from "@/components/schema/SchemaTree";
+import { Database } from 'lucide-react';
+import { SchemaTree } from '@/components/schema/SchemaTree';
 
-export function Sidebar() {
+interface SidebarProps {
+	onConnect: () => void;
+}
+
+export function Sidebar({ onConnect }: SidebarProps) {
 	return (
 		<div className="flex h-full flex-col bg-[var(--sidebar)] text-[var(--sidebar-foreground)]">
 			{/* Header */}
@@ -11,7 +15,7 @@ export function Sidebar() {
 			</div>
 
 			{/* Schema tree */}
-			<SchemaTree />
+			<SchemaTree onConnect={onConnect} />
 		</div>
 	);
 }

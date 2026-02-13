@@ -1,12 +1,12 @@
-import { useEffect, useRef } from "react";
-import { loader } from "@monaco-editor/react";
+import { loader } from '@monaco-editor/react';
+import { useEffect, useRef } from 'react';
+import { createNqlCompletionProvider } from '@/lib/nql-completions';
 import {
 	NQL_LANGUAGE_ID,
-	nqlMonarchTokensProvider,
 	nqlLanguageConfiguration,
-} from "@/lib/nql-monarch";
-import { createSqlCompletionProvider } from "@/lib/sql-completions";
-import { createNqlCompletionProvider } from "@/lib/nql-completions";
+	nqlMonarchTokensProvider,
+} from '@/lib/nql-monarch';
+import { createSqlCompletionProvider } from '@/lib/sql-completions';
 
 /**
  * One-time Monaco editor setup:
@@ -21,8 +21,24 @@ export function useMonacoSetup() {
 		initialized.current = true;
 
 		loader.init().then((monaco) => {
+			// Define a light theme that matches the app's design
+			monaco.editor.defineTheme('dbsp-light', {
+				base: 'vs',
+				inherit: true,
+				rules: [],
+				colors: {
+					'editor.background': '#fafafa',
+					'editor.foreground': '#1a1a1a',
+					'editorLineNumber.foreground': '#999999',
+					'editorLineNumber.activeForeground': '#444444',
+					'editor.lineHighlightBackground': '#f0f0f0',
+					'editor.selectionBackground': '#d0d0d0',
+					'editorCursor.foreground': '#1a1a1a',
+				},
+			});
+
 			// Register NQL language
-			monaco.languages.register({ id: NQL_LANGUAGE_ID, extensions: [".dbsp"] });
+			monaco.languages.register({ id: NQL_LANGUAGE_ID, extensions: ['.dbsp'] });
 			monaco.languages.setMonarchTokensProvider(
 				NQL_LANGUAGE_ID,
 				nqlMonarchTokensProvider,
@@ -34,7 +50,7 @@ export function useMonacoSetup() {
 
 			// Register completion providers
 			monaco.languages.registerCompletionItemProvider(
-				"sql",
+				'sql',
 				createSqlCompletionProvider(),
 			);
 			monaco.languages.registerCompletionItemProvider(

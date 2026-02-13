@@ -1,10 +1,15 @@
-import { RefreshCw, Loader2, AlertTriangle } from "lucide-react";
-import { useSchema } from "@/hooks/useSchema";
-import { useSchemaStore, getFilteredTables } from "@/stores/schema-store";
-import { SchemaSearch } from "./SchemaSearch";
-import { TableNode } from "./TableNode";
+import { AlertTriangle, Loader2, PlugZap, RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useSchema } from '@/hooks/useSchema';
+import { getFilteredTables, useSchemaStore } from '@/stores/schema-store';
+import { SchemaSearch } from './SchemaSearch';
+import { TableNode } from './TableNode';
 
-export function SchemaTree() {
+interface SchemaTreeProps {
+	onConnect: () => void;
+}
+
+export function SchemaTree({ onConnect }: SchemaTreeProps) {
 	const { schema, loading, error, refresh } = useSchema();
 	const searchFilter = useSchemaStore((s) => s.searchFilter);
 	const filteredTables = getFilteredTables(schema, searchFilter);
@@ -14,9 +19,7 @@ export function SchemaTree() {
 		return (
 			<div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
 				<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-				<span className="text-xs text-muted-foreground">
-					Loading schema...
-				</span>
+				<span className="text-xs text-muted-foreground">Loading schema...</span>
 			</div>
 		);
 	}
@@ -41,10 +44,14 @@ export function SchemaTree() {
 	// No schema loaded (disconnected)
 	if (!schema) {
 		return (
-			<div className="flex flex-1 items-center justify-center p-4">
+			<div className="flex flex-1 flex-col items-center justify-center gap-3 p-6">
+				<PlugZap className="h-8 w-8 text-muted-foreground/50" />
 				<p className="text-center text-sm text-muted-foreground">
 					Connect to a database to explore its schema
 				</p>
+				<Button size="sm" onClick={onConnect}>
+					Connect
+				</Button>
 			</div>
 		);
 	}
@@ -55,7 +62,8 @@ export function SchemaTree() {
 			<div className="border-b">
 				<div className="flex items-center justify-between px-2 py-1">
 					<span className="text-xs text-muted-foreground">
-						{filteredTables.length} table{filteredTables.length !== 1 ? "s" : ""}
+						{filteredTables.length} table
+						{filteredTables.length !== 1 ? 's' : ''}
 					</span>
 					<button
 						type="button"
@@ -73,7 +81,7 @@ export function SchemaTree() {
 			<div className="flex-1 overflow-y-auto">
 				{filteredTables.length === 0 ? (
 					<div className="p-4 text-center text-xs text-muted-foreground">
-						{searchFilter ? "No tables match filter" : "No tables found"}
+						{searchFilter ? 'No tables match filter' : 'No tables found'}
 					</div>
 				) : (
 					filteredTables.map((table) => (
