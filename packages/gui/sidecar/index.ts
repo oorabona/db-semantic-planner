@@ -11,6 +11,7 @@ import {
 	disconnectAll,
 	introspectConnection,
 } from './connection-manager.js';
+import { resolveProfileUri } from './profile-resolver.js';
 import {
 	decode,
 	ErrorCode,
@@ -82,6 +83,14 @@ router.setHandler('introspect', async (params) => {
 		warnings: [...model.warnings],
 		introspectedAt: model.introspectedAt.toISOString(),
 	};
+});
+
+router.setHandler('resolveProfile', async (params) => {
+	const { uri, projectPath } = params as {
+		uri: string;
+		projectPath?: string;
+	};
+	return resolveProfileUri(uri, projectPath);
 });
 
 // ── Step 3: Write to stdout (protocol output) ────────────────────

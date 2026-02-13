@@ -62,16 +62,10 @@
 
 ### MVP
 
-- [x] ✅ **GUI-001** [GUI] Scaffold packages/gui (Tauri v2 + React + ShadCN/UI + Vite) (2026-02-12)
-- [x] ✅ **GUI-002** [GUI] Node.js SEA sidecar (bundle dbsp engine, JSON-RPC IPC) (2026-02-12)
-- [x] ✅ **GUI-003** [GUI] Connection Manager (PostgreSQL connect, save/switch profiles) (2026-02-12)
-- [x] ✅ **GUI-004** [GUI] Schema Treeview (introspect DB, tables/columns/indexes/FKs) (2026-02-12)
-- [x] ✅ **GUI-005** [GUI] Monaco SQL Editor (syntax highlight, table/column autocomplete) (2026-02-12)
-- [x] ✅ **GUI-006** [GUI] Monaco NQL Editor (TextMate grammar from Chevrotain, .dbsp support) (2026-02-12)
-- [x] ✅ **GUI-007** [GUI] Results Table (TanStack virtual scroll, sort, type-aware display) (2026-02-13)
-- [x] ✅ **GUI-008** [GUI] Plan Inspector (visual dump: decisions, warnings, CTEs, timing) (2026-02-13)
-- [x] ✅ **GUI-009** [GUI] Distribution (Tauri bundle: .msi/.dmg/.deb, auto-updater, CI) (2026-02-13)
+(GUI-001 to GUI-009, GUI-MW archived → docs/historic/done-2026-02.md)
+
 - [ ] 🔧 **GUI-F002** [GUI] Missing test coverage: hooks (useConnection, useSchema, useMonacoSetup), ipc.ts, sql-completions.ts, sidecar/index.ts — Priority: M
+- [ ] 🔧 **GUI-F003** [GUI] Fix 31 pre-existing TS errors in test files (useConnection, useMonacoSetup, useSchema, sql-completions, ipc) — Priority: M
 
 ### Later
 
@@ -82,8 +76,12 @@
 - [ ] 💡 **GUI-014** [GUI] Welcome screen with quick connect + sample queries
 - [ ] 💡 **GUI-015** [GUI] Web version (@dbsp/web — same React frontend, HTTP/WS transport, phpMyAdmin-like)
 - [ ] 💡 **GUI-016** [GUI] Status bar "+" → loupe icon, ouvre un panneau de logs applicatifs (sidecar stdout/stderr, IPC messages, query timing). Format: drawer coulissant depuis la barre de statut (style VS Code Output panel) ou onglet "Logs" dans le panneau results
-- [ ] 💡 **GUI-017** [GUI] Native menu bar (Tauri): File (new tab, open .dbsp, save), Edit (undo, redo, find), View (toggle sidebar, toggle results), Connection (connect, disconnect, manage profiles), Help
-- [ ] 💡 **GUI-018** [GUI] Workspace/Project concept — ouvrir un dossier contenant schema.ts + *.dbsp + *.assert.dbsp + dbsp.settings.json. Partage le format de config avec CLI (`dbsp init` E17c). Permet: schema-aware autocomplete, batch assert, project-scoped settings
+- [ ] 💡 **GUI-MW-D01** [GUI] store:// backend — verify Tauri store plugin uses OS keychain vs plaintext file — Priority: M
+- [ ] 💡 **GUI-MW-D02** [GUI] Concurrent settings edit — lock Preferences UI if dbsp.settings.json open as dirty buffer — Priority: L
+- [ ] 💡 **GUI-MW-D03** [GUI] Per-connection SSL/params overrides in dbsp.settings.json — Priority: L
+- [ ] 💡 **GUI-MW-D04** [GUI] Settings precedence rules — document merge: project vs user vs defaults — Priority: M
+- [ ] 💡 **GUI-MW-D05** [GUI] File rename detection — detect OS rename of open file, update tab path — Priority: L
+- [ ] 💡 **GUI-MW-D06** [GUI] env:// security — consider restricting readable env vars (allowlist) — Priority: L
 
 ---
 

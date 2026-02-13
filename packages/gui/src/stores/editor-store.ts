@@ -33,6 +33,14 @@ interface EditorState {
 	updateContent: (id: string, content: string) => void;
 	renameTab: (id: string, title: string) => void;
 	markSaved: (id: string) => void;
+	/** Update filePath + title after Save As */
+	setFilePath: (id: string, filePath: string) => void;
+	/** Find a tab by its filePath (for dedup on re-open) */
+	findTabByFilePath: (filePath: string) => EditorTab | undefined;
+	/** Check whether any tab has unsaved changes */
+	hasDirtyTabs: () => boolean;
+	/** Get all tabs with unsaved changes */
+	getDirtyTabs: () => EditorTab[];
 }
 
 let nextTabCounter = 1;
@@ -109,6 +117,26 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 		set((state) => ({
 			tabs: state.tabs.map((t) => (t.id === id ? { ...t, dirty: false } : t)),
 		})),
+
+	setFilePath: (id, filePath) =>
+		set((state) => ({
+			tabs: state.tabs.map((t) =>
+				t.id === id
+					? {
+							...t,
+							filePath,
+							title: filePath.split(/[/\\]/).pop() ?? t.title,
+						}
+					: t,
+			),
+		})),
+
+	findTabByFilePath: (filePath) =>
+		get().tabs.find((t) => t.filePath === filePath),
+
+	hasDirtyTabs: () => get().tabs.some((t) => t.dirty),
+
+	getDirtyTabs: () => get().tabs.filter((t) => t.dirty),
 }));
 
 // ── Derived helpers ─────────────────────────────────────────────────

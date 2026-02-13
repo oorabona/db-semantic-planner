@@ -81,6 +81,11 @@ export interface CompletionItem {
 	insertText?: string;
 }
 
+export interface ResolveProfileParams {
+	uri: string;
+	projectPath?: string;
+}
+
 export interface DiscoverParams {
 	host: string;
 	port: number;
@@ -148,6 +153,10 @@ export function createSidecarApi(client: IpcClient) {
 				position,
 				language,
 			});
+		},
+
+		resolveProfile(params: ResolveProfileParams) {
+			return client.call<ConnectParams>('resolveProfile', params);
 		},
 
 		listDatabases(params: DiscoverParams) {
