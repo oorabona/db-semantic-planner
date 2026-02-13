@@ -9,7 +9,11 @@ export default defineConfig({
 	},
 	test: {
 		environment: 'node',
-		include: ['src/**/*.test.{ts,tsx}', 'sidecar/**/*.test.ts'],
+		include: [
+			'src/**/*.test.{ts,tsx}',
+			'sidecar/**/*.test.ts',
+			'scripts/**/*.test.ts',
+		],
 		passWithNoTests: true,
 	},
 });

@@ -32,6 +32,36 @@
 			"icons/128x128@2x.png",
 			"icons/icon.icns",
 			"icons/icon.ico"
-		]
+		],
+		"externalBin": [
+			"binaries/dbsp-sidecar"
+		],
+		"resources": [],
+		"windows": {
+			"nsis": {
+				"installMode": "currentUser"
+			}
+		},
+		"macOS": {
+			"minimumSystemVersion": "10.15"
+		},
+		"linux": {
+			"deb": {
+				"depends": ["libwebkit2gtk-4.1-0", "libappindicator3-1"]
+			},
+			"appimage": {
+				"bundleMediaFramework": false
+			}
+		}
+	},
+	"plugins": {
+		"updater": {
+			"active": true,
+			"dialog": true,
+			"pubkey": "",
+			"endpoints": [
+				"https://github.com/nicobrinkkemper/db-semantic-planner/releases/latest/download/latest.json"
+			]
+		}
 	}
 }
