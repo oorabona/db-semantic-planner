@@ -1,20 +1,16 @@
-import { useCallback, useState } from "react";
-import { useEditorStore, getActiveTab } from "@/stores/editor-store";
-import { useConnectionStore } from "@/stores/connection-store";
-import { sidecarApi } from "@/lib/ipc";
-import { MonacoWrapper } from "./MonacoWrapper";
-import { EditorToolbar } from "./EditorToolbar";
+import { useCallback } from 'react';
+import { getActiveTab, useEditorStore } from '@/stores/editor-store';
+import { useConnectionStore } from '@/stores/connection-store';
+import { useResultsStore, type QueryResult } from '@/stores/results-store';
+import { sidecarApi } from '@/lib/ipc';
+import { MonacoWrapper } from './MonacoWrapper';
+import { EditorToolbar } from './EditorToolbar';
 
-interface SqlEditorProps {
-	onQueryResult?: (result: unknown) => void;
-	onError?: (error: string) => void;
-}
-
-export function SqlEditor({ onQueryResult, onError }: SqlEditorProps) {
+export function SqlEditor() {
 	const activeTab = useEditorStore(getActiveTab);
 	const updateContent = useEditorStore((s) => s.updateContent);
 	const active = useConnectionStore((s) => s.active);
-	const [running, setRunning] = useState(false);
+	const { setResult, setExecuting, setError } = useResultsStore.getState();
 
 	const handleRun = useCallback(async () => {
 		if (!activeTab || !active) return;
@@ -22,28 +18,44 @@ export function SqlEditor({ onQueryResult, onError }: SqlEditorProps) {
 		const content = activeTab.content.trim();
 		if (!content) return;
 
-		setRunning(true);
+		setExecuting(true);
 		try {
-			if (activeTab.language === "nql") {
-				const result = await sidecarApi.executeNQL({
+			let raw: unknown;
+			if (activeTab.language === 'nql') {
+				raw = await sidecarApi.executeNQL({
 					connectionId: active.connectionId,
 					nql: content,
 				});
-				onQueryResult?.(result);
 			} else {
-				const result = await sidecarApi.executeSQL({
+				raw = await sidecarApi.executeSQL({
 					connectionId: active.connectionId,
 					sql: content,
 				});
-				onQueryResult?.(result);
 			}
+
+			// Normalize sidecar response to QueryResult
+			const response = raw as Record<string, unknown>;
+			const rows = (response.rows ?? []) as Record<string, unknown>[];
+			const columns =
+				rows.length > 0 ? Object.keys(rows[0]!) : ((response.columns ?? []) as string[]);
+
+			const result: QueryResult = {
+				columns,
+				rows,
+				durationMs: (response.durationMs as number) ?? 0,
+				totalRows: response.totalRows as number | undefined,
+				truncated: response.truncated as boolean | undefined,
+				cursorId: response.cursorId as string | undefined,
+				sql: response.sql as string | undefined,
+				params: response.params as unknown[] | undefined,
+				plan: response.plan,
+			};
+			setResult(result);
 		} catch (err) {
-			const message = err instanceof Error ? err.message : "Query failed";
-			onError?.(message);
-		} finally {
-			setRunning(false);
+			const message = err instanceof Error ? err.message : 'Query failed';
+			setError(message);
 		}
-	}, [activeTab, active, onQueryResult, onError]);
+	}, [activeTab, active, setResult, setExecuting, setError]);
 
 	const handleChange = useCallback(
 		(value: string) => {
@@ -64,11 +76,7 @@ export function SqlEditor({ onQueryResult, onError }: SqlEditorProps) {
 
 	return (
 		<div className="flex flex-1 flex-col overflow-hidden">
-			<EditorToolbar
-				onRun={handleRun}
-				running={running}
-				language={activeTab.language}
-			/>
+			<EditorToolbar onRun={handleRun} running={false} language={activeTab.language} />
 			<MonacoWrapper
 				value={activeTab.content}
 				language={activeTab.language}

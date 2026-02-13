@@ -1,28 +1,23 @@
-import { useEffect } from "react";
-import { useEditorStore } from "@/stores/editor-store";
-import { EditorTabs } from "@/components/editor/EditorTabs";
-import { SqlEditor } from "@/components/editor/SqlEditor";
+import { useEffect } from 'react';
+import { useEditorStore } from '@/stores/editor-store';
+import { EditorTabs } from '@/components/editor/EditorTabs';
+import { SqlEditor } from '@/components/editor/SqlEditor';
 
-interface EditorPanelProps {
-	onQueryResult?: (result: unknown) => void;
-	onError?: (error: string) => void;
-}
-
-export function EditorPanel({ onQueryResult, onError }: EditorPanelProps) {
+export function EditorPanel() {
 	const tabs = useEditorStore((s) => s.tabs);
 	const addTab = useEditorStore((s) => s.addTab);
 
 	// Auto-create first tab if none exist
 	useEffect(() => {
 		if (tabs.length === 0) {
-			addTab("sql");
+			addTab('sql');
 		}
 	}, [tabs.length, addTab]);
 
 	return (
 		<div className="flex h-full flex-col bg-background">
 			<EditorTabs />
-			<SqlEditor onQueryResult={onQueryResult} onError={onError} />
+			<SqlEditor />
 		</div>
 	);
 }
