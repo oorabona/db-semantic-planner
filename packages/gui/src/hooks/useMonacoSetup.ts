@@ -37,6 +37,21 @@ export function useMonacoSetup() {
 				},
 			});
 
+			monaco.editor.defineTheme('dbsp-dark', {
+				base: 'vs-dark',
+				inherit: true,
+				rules: [],
+				colors: {
+					'editor.background': '#1a1a1a',
+					'editor.foreground': '#fafafa',
+					'editorLineNumber.foreground': '#666666',
+					'editorLineNumber.activeForeground': '#bbbbbb',
+					'editor.lineHighlightBackground': '#2a2a2a',
+					'editor.selectionBackground': '#444444',
+					'editorCursor.foreground': '#fafafa',
+				},
+			});
+
 			// Register NQL language
 			monaco.languages.register({ id: NQL_LANGUAGE_ID, extensions: ['.dbsp'] });
 			monaco.languages.setMonarchTokensProvider(

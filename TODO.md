@@ -71,8 +71,7 @@
 - [ ] 💡 **GUI-010** [GUI] .assert.dbsp runner with inline pass/fail
 - [ ] 💡 **GUI-011** [GUI] Schema diff (live DB vs schema.ts via compareSchemata)
 - [ ] 💡 **GUI-012** [GUI] Query history with search and re-run
-- [ ] 💡 **GUI-013** [GUI] Theme system (dark/light + custom accent colors)
-- [ ] 💡 **GUI-014** [GUI] Welcome screen with quick connect + sample queries
+(GUI-013, GUI-014 archived → docs/historic/done-2026-02.md)
 - [ ] 💡 **GUI-015** [GUI] Web version (@dbsp/web — same React frontend, HTTP/WS transport, phpMyAdmin-like)
 - [ ] 💡 **GUI-016** [GUI] Status bar "+" → loupe icon, ouvre un panneau de logs applicatifs (sidecar stdout/stderr, IPC messages, query timing). Format: drawer coulissant depuis la barre de statut (style VS Code Output panel) ou onglet "Logs" dans le panneau results
 (GUI-MW-D01, GUI-MW-D02, GUI-MW-D04, GUI-MW-D05, GUI-MW-D06 archived → docs/historic/done-2026-02.md)

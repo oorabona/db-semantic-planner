@@ -1,18 +1,18 @@
-import { useEffect } from 'react';
-import { useEditorStore } from '@/stores/editor-store';
 import { EditorTabs } from '@/components/editor/EditorTabs';
 import { SqlEditor } from '@/components/editor/SqlEditor';
+import { WelcomeScreen } from '@/components/layout/WelcomeScreen';
+import { useEditorStore } from '@/stores/editor-store';
 
-export function EditorPanel() {
-	const tabs = useEditorStore((s) => s.tabs);
-	const addTab = useEditorStore((s) => s.addTab);
+interface EditorPanelProps {
+	onConnect: () => void;
+}
 
-	// Auto-create first tab if none exist
-	useEffect(() => {
-		if (tabs.length === 0) {
-			addTab('sql');
-		}
-	}, [tabs.length, addTab]);
+export function EditorPanel({ onConnect }: EditorPanelProps) {
+	const hasTabs = useEditorStore((s) => s.tabs.length > 0);
+
+	if (!hasTabs) {
+		return <WelcomeScreen onConnect={onConnect} />;
+	}
 
 	return (
 		<div className="flex h-full flex-col bg-background">

@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button';
 import { useConnection } from '@/hooks/useConnection';
 import { useMonacoSetup } from '@/hooks/useMonacoSetup';
 import { useSettingsWatcher } from '@/hooks/useSettingsWatcher';
+import { useThemeEffect } from '@/hooks/useThemeEffect';
 import { commandRegistry } from '@/lib/commands';
 import {
 	languageFromPath,
@@ -35,6 +36,7 @@ import { useUserSettingsStore } from '@/stores/user-settings-store';
 export default function App() {
 	useMonacoSetup();
 	useSettingsWatcher();
+	useThemeEffect();
 
 	// Forward native menu events to the command registry
 	useEffect(() => {
@@ -209,7 +211,7 @@ export default function App() {
 						<PanelGroup autoSaveId="dbsp-right-layout" direction="vertical">
 							{/* Top-right: Editor */}
 							<Panel defaultSize={55} minSize={20}>
-								<EditorPanel />
+								<EditorPanel onConnect={() => setDialogOpen(true)} />
 							</Panel>
 
 							<PanelResizeHandle />

@@ -1,6 +1,7 @@
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type { editor as MonacoEditor } from 'monaco-editor';
 import { useCallback, useEffect, useRef } from 'react';
+import { useMonacoTheme } from '@/hooks/useEffectiveTheme';
 import { NQL_LANGUAGE_ID } from '@/lib/nql-monarch';
 
 interface MonacoWrapperProps {
@@ -16,6 +17,7 @@ export function MonacoWrapper({
 	onChange,
 	onRun,
 }: MonacoWrapperProps) {
+	const monacoTheme = useMonacoTheme();
 	const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
 
 	const handleMount: OnMount = useCallback(
@@ -50,7 +52,7 @@ export function MonacoWrapper({
 				value={value}
 				onChange={(v) => onChange(v ?? '')}
 				onMount={handleMount}
-				theme="dbsp-light"
+				theme={monacoTheme}
 				options={{
 					minimap: { enabled: false },
 					fontSize: 13,
