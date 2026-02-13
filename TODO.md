@@ -82,6 +82,8 @@
 - [ ] 💡 **GUI-014** [GUI] Welcome screen with quick connect + sample queries
 - [ ] 💡 **GUI-015** [GUI] Web version (@dbsp/web — same React frontend, HTTP/WS transport, phpMyAdmin-like)
 - [ ] 💡 **GUI-016** [GUI] Status bar "+" → loupe icon, ouvre un panneau de logs applicatifs (sidecar stdout/stderr, IPC messages, query timing). Format: drawer coulissant depuis la barre de statut (style VS Code Output panel) ou onglet "Logs" dans le panneau results
+- [ ] 💡 **GUI-017** [GUI] Native menu bar (Tauri): File (new tab, open .dbsp, save), Edit (undo, redo, find), View (toggle sidebar, toggle results), Connection (connect, disconnect, manage profiles), Help
+- [ ] 💡 **GUI-018** [GUI] Workspace/Project concept — ouvrir un dossier contenant schema.ts + *.dbsp + *.assert.dbsp + dbsp.settings.json. Partage le format de config avec CLI (`dbsp init` E17c). Permet: schema-aware autocomplete, batch assert, project-scoped settings
 
 ---
 
