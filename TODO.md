@@ -72,7 +72,7 @@
 
 (GUI-010 archived → docs/historic/done-2026-02.md)
 - [x] ✅ **GUI-011** [GUI] Schema diff (live DB vs schema.ts via compareSchemata) (2026-02-14)
-- [ ] 💡 **GUI-012** [GUI] Query history with search and re-run
+- [x] ✅ **GUI-012** [GUI] Query history with search and re-run (2026-02-14)
 (GUI-013, GUI-014 archived → docs/historic/done-2026-02.md)
 - [ ] 💡 **GUI-015** [GUI] Web version (@dbsp/web — same React frontend, HTTP/WS transport, phpMyAdmin-like)
 - [ ] 💡 **GUI-016** [GUI] Status bar "+" → loupe icon, ouvre un panneau de logs applicatifs (sidecar stdout/stderr, IPC messages, query timing). Format: drawer coulissant depuis la barre de statut (style VS Code Output panel) ou onglet "Logs" dans le panneau results
@@ -83,9 +83,9 @@
 - [ ] 💡 **GUI-018** [GUI] Auto-discovery of .assert.dbsp files from project tree (scan + run all) — Priority: L
 - [ ] 💡 **GUI-019** [GUI] Live assertion re-run on file change (watch mode) — Priority: L
 - [ ] 💡 **GUI-020** [GUI] Assertion coverage reporting (queries with/without assertions) — Priority: L
-- [ ] 🔧 **GUI-F005** [GUI] Assertion resource limits — max file size, max assertion count per file — Priority: M (from /review F-002)
-- [ ] 🔧 **GUI-F006** [GUI] Query execution timeout for assertion runner — Priority: M (from /review F-003)
-- [ ] 🔧 **GUI-F007** [GUI] Edge case test coverage — empty .assert.dbsp, DB timeout, mid-run disconnect — Priority: M (from /review F-005)
+- [x] ✅ **GUI-F005** [GUI] Assertion resource limits — max file size, max assertion count per file (2026-02-14)
+- [x] ✅ **GUI-F006** [GUI] Query execution timeout for assertion runner (2026-02-14)
+- [x] ✅ **GUI-F007** [GUI] Edge case test coverage — empty .assert.dbsp, DB timeout, mid-run disconnect (2026-02-14)
 
 ---
 
