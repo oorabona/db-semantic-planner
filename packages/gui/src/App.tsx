@@ -1,6 +1,11 @@
+import { invoke } from '@tauri-apps/api/core';
 import { join } from '@tauri-apps/api/path';
-import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import {
+	open as openDialog,
+	message as showMessage,
+} from '@tauri-apps/plugin-dialog';
 import { readTextFile } from '@tauri-apps/plugin-fs';
+import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { Plus } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
@@ -18,8 +23,10 @@ import { Button } from '@/components/ui/button';
 import { useConnection } from '@/hooks/useConnection';
 import { useMonacoSetup } from '@/hooks/useMonacoSetup';
 import { useSettingsWatcher } from '@/hooks/useSettingsWatcher';
+import { useSidecarInit } from '@/hooks/useSidecarInit';
 import { useThemeEffect } from '@/hooks/useThemeEffect';
 import { commandRegistry } from '@/lib/commands';
+import { downloadCsv, toCsv } from '@/lib/csv-export';
 import {
 	languageFromPath,
 	openFile,
@@ -31,12 +38,24 @@ import { MENU_IDS, onMenuEvent } from '@/lib/menu';
 import { useConnectionStore } from '@/stores/connection-store';
 import { getActiveTab, useEditorStore } from '@/stores/editor-store';
 import { useProjectStore } from '@/stores/project-store';
+import { useResultsStore } from '@/stores/results-store';
 import { useUserSettingsStore } from '@/stores/user-settings-store';
 
 export default function App() {
 	useMonacoSetup();
 	useSettingsWatcher();
+	useSidecarInit();
 	useThemeEffect();
+
+	// ── State declarations (must come before effects that reference them) ──
+	const [dialogOpen, setDialogOpen] = useState(false);
+	const [sidebarVisible, setSidebarVisible] = useState(true);
+	const [resultsVisible, setResultsVisible] = useState(true);
+	const [connecting, setConnecting] = useState(false);
+	const [testing, setTesting] = useState(false);
+
+	const { status, active, error } = useConnectionStore();
+	const { connect, testConnection, testResult, disconnect } = useConnection();
 
 	// Forward native menu events to the command registry
 	useEffect(() => {
@@ -129,6 +148,255 @@ export default function App() {
 		});
 	}, []);
 
+	// Register new query + close tab + export CSV commands
+	useEffect(() => {
+		commandRegistry.register({
+			id: 'file.new_query',
+			label: 'New Query',
+			shortcut: '⌘N',
+			category: 'file',
+			menuId: MENU_IDS.FILE_NEW_QUERY,
+			handler: () => {
+				useEditorStore.getState().addTab('sql');
+			},
+		});
+		commandRegistry.register({
+			id: 'file.close_tab',
+			label: 'Close Tab',
+			shortcut: '⌘W',
+			category: 'file',
+			menuId: MENU_IDS.FILE_CLOSE_TAB,
+			when: () => !!useEditorStore.getState().activeTabId,
+			handler: () => {
+				const { activeTabId, closeTab } = useEditorStore.getState();
+				if (activeTabId) closeTab(activeTabId);
+			},
+		});
+		commandRegistry.register({
+			id: 'file.export_csv',
+			label: 'Export Results (CSV)',
+			shortcut: '⌘E',
+			category: 'file',
+			menuId: MENU_IDS.FILE_EXPORT_CSV,
+			when: () => !!useResultsStore.getState().result,
+			handler: () => {
+				const { result } = useResultsStore.getState();
+				if (!result) return;
+				const csv = toCsv(result.columns, result.rows);
+				downloadCsv(csv, `results-${Date.now()}.csv`);
+			},
+		});
+	}, []);
+
+	// Register edit commands (find, replace, format → Monaco editor actions)
+	useEffect(() => {
+		commandRegistry.register({
+			id: 'edit.find',
+			label: 'Find',
+			shortcut: '⌘F',
+			category: 'edit',
+			menuId: MENU_IDS.EDIT_FIND,
+			handler: () => {
+				// Trigger Monaco's built-in find action
+				const editor = (window as unknown as Record<string, unknown>)
+					.__monacoEditor as
+					| { trigger: (source: string, action: string) => void }
+					| undefined;
+				editor?.trigger('menu', 'actions.find');
+			},
+		});
+		commandRegistry.register({
+			id: 'edit.replace',
+			label: 'Replace',
+			shortcut: '⌘H',
+			category: 'edit',
+			menuId: MENU_IDS.EDIT_REPLACE,
+			handler: () => {
+				const editor = (window as unknown as Record<string, unknown>)
+					.__monacoEditor as
+					| { trigger: (source: string, action: string) => void }
+					| undefined;
+				editor?.trigger('menu', 'editor.action.startFindReplaceAction');
+			},
+		});
+		commandRegistry.register({
+			id: 'edit.format',
+			label: 'Format Document',
+			shortcut: '⇧⌘F',
+			category: 'edit',
+			menuId: MENU_IDS.EDIT_FORMAT,
+			handler: () => {
+				const editor = (window as unknown as Record<string, unknown>)
+					.__monacoEditor as
+					| { trigger: (source: string, action: string) => void }
+					| undefined;
+				editor?.trigger('menu', 'editor.action.formatDocument');
+			},
+		});
+	}, []);
+
+	// Register view commands (toggle sidebar, toggle results, zoom)
+	useEffect(() => {
+		commandRegistry.register({
+			id: 'view.toggle_sidebar',
+			label: 'Toggle Sidebar',
+			shortcut: '⌘B',
+			category: 'view',
+			menuId: MENU_IDS.VIEW_TOGGLE_SIDEBAR,
+			handler: () => {
+				setSidebarVisible((prev) => !prev);
+			},
+		});
+		commandRegistry.register({
+			id: 'view.toggle_results',
+			label: 'Toggle Results Panel',
+			shortcut: '⌘J',
+			category: 'view',
+			menuId: MENU_IDS.VIEW_TOGGLE_RESULTS,
+			handler: () => {
+				setResultsVisible((prev) => !prev);
+			},
+		});
+		commandRegistry.register({
+			id: 'view.zoom_in',
+			label: 'Zoom In',
+			shortcut: '⌘=',
+			category: 'view',
+			menuId: MENU_IDS.VIEW_ZOOM_IN,
+			handler: () => {
+				document.documentElement.style.fontSize = `${Math.min(
+					Number.parseFloat(
+						getComputedStyle(document.documentElement).fontSize,
+					) + 1,
+					24,
+				)}px`;
+			},
+		});
+		commandRegistry.register({
+			id: 'view.zoom_out',
+			label: 'Zoom Out',
+			shortcut: '⌘-',
+			category: 'view',
+			menuId: MENU_IDS.VIEW_ZOOM_OUT,
+			handler: () => {
+				document.documentElement.style.fontSize = `${Math.max(
+					Number.parseFloat(
+						getComputedStyle(document.documentElement).fontSize,
+					) - 1,
+					10,
+				)}px`;
+			},
+		});
+		commandRegistry.register({
+			id: 'view.zoom_reset',
+			label: 'Reset Zoom',
+			shortcut: '⌘0',
+			category: 'view',
+			menuId: MENU_IDS.VIEW_ZOOM_RESET,
+			handler: () => {
+				document.documentElement.style.fontSize = '';
+			},
+		});
+	}, []);
+
+	// Register connection commands
+	useEffect(() => {
+		commandRegistry.register({
+			id: 'connection.new',
+			label: 'New Connection...',
+			category: 'connection',
+			menuId: MENU_IDS.CONNECTION_NEW,
+			handler: () => {
+				setDialogOpen(true);
+			},
+		});
+		commandRegistry.register({
+			id: 'connection.disconnect',
+			label: 'Disconnect',
+			category: 'connection',
+			menuId: MENU_IDS.CONNECTION_DISCONNECT,
+			when: () => useConnectionStore.getState().status === 'connected',
+			handler: () => {
+				disconnect();
+			},
+		});
+		commandRegistry.register({
+			id: 'connection.manage',
+			label: 'Manage Profiles...',
+			category: 'connection',
+			menuId: MENU_IDS.CONNECTION_MANAGE,
+			handler: () => {
+				useUserSettingsStore.getState().openPreferences('databases');
+			},
+		});
+	}, [disconnect]);
+
+	// Register help commands
+	useEffect(() => {
+		commandRegistry.register({
+			id: 'help.shortcuts',
+			label: 'Keyboard Shortcuts',
+			shortcut: '⌘?',
+			category: 'help',
+			menuId: MENU_IDS.HELP_SHORTCUTS,
+			handler: async () => {
+				await showMessage(
+					'Keyboard Shortcuts\n\n' +
+						'⌘N  New Query\n' +
+						'⌘O  Open File\n' +
+						'⌘S  Save\n' +
+						'⌘W  Close Tab\n' +
+						'⌘K  Command Palette\n' +
+						'⌘B  Toggle Sidebar\n' +
+						'⌘J  Toggle Results\n' +
+						'⌘E  Export CSV\n' +
+						'⌘F  Find\n' +
+						'⌘H  Replace',
+					{ title: 'DBSP Explorer' },
+				);
+			},
+		});
+		commandRegistry.register({
+			id: 'help.docs',
+			label: 'Documentation',
+			category: 'help',
+			menuId: MENU_IDS.HELP_DOCS,
+			handler: async () => {
+				await openExternal(
+					'https://github.com/nicosql/db-semantic-planner#readme',
+				);
+			},
+		});
+		commandRegistry.register({
+			id: 'help.about',
+			label: 'About DBSP Explorer',
+			category: 'help',
+			menuId: MENU_IDS.HELP_ABOUT,
+			handler: async () => {
+				const version = await invoke<string>('plugin:app|version').catch(
+					() => '0.1.0',
+				);
+				await showMessage(
+					`DBSP Explorer v${version}\n\nSemantic database exploration tool.`,
+					{
+						title: 'About',
+					},
+				);
+			},
+		});
+		commandRegistry.register({
+			id: 'help.updates',
+			label: 'Check for Updates',
+			category: 'help',
+			menuId: MENU_IDS.HELP_UPDATES,
+			handler: async () => {
+				await showMessage('You are running the latest version.', {
+					title: 'Updates',
+				});
+			},
+		});
+	}, []);
+
 	// ── File select from project tree (SC-26: dedup) ─────────────
 	const handleFileSelect = useCallback(async (relativePath: string) => {
 		const { folderPath } = useProjectStore.getState();
@@ -148,12 +416,6 @@ export default function App() {
 		const content = await readTextFile(fullPath);
 		addTab(languageFromPath(fullPath), content, fullPath);
 	}, []);
-
-	const [dialogOpen, setDialogOpen] = useState(false);
-	const { status, active, error } = useConnectionStore();
-	const { connect, testConnection, testResult, disconnect } = useConnection();
-	const [connecting, setConnecting] = useState(false);
-	const [testing, setTesting] = useState(false);
 
 	const handleConnect = async (data: ConnectionFormData) => {
 		setConnecting(true);
@@ -196,30 +458,36 @@ export default function App() {
 			{/* Main layout */}
 			<div className="flex-1 overflow-hidden">
 				<PanelGroup autoSaveId="dbsp-main-layout" direction="horizontal">
-					{/* Left: Schema sidebar */}
-					<Panel defaultSize={20} minSize={15} maxSize={40}>
-						<Sidebar
-							onConnect={() => setDialogOpen(true)}
-							onFileSelect={handleFileSelect}
-						/>
-					</Panel>
-
-					<PanelResizeHandle />
+					{/* Left: Schema sidebar (toggleable via Cmd+B) */}
+					{sidebarVisible && (
+						<>
+							<Panel defaultSize={20} minSize={15} maxSize={40} order={1}>
+								<Sidebar
+									onConnect={() => setDialogOpen(true)}
+									onFileSelect={handleFileSelect}
+								/>
+							</Panel>
+							<PanelResizeHandle />
+						</>
+					)}
 
 					{/* Right: Editor + Results (vertical split) */}
-					<Panel defaultSize={80} minSize={40}>
+					<Panel defaultSize={80} minSize={40} order={2}>
 						<PanelGroup autoSaveId="dbsp-right-layout" direction="vertical">
 							{/* Top-right: Editor */}
-							<Panel defaultSize={55} minSize={20}>
+							<Panel defaultSize={55} minSize={20} order={1}>
 								<EditorPanel onConnect={() => setDialogOpen(true)} />
 							</Panel>
 
-							<PanelResizeHandle />
-
-							{/* Bottom-right: Results */}
-							<Panel defaultSize={45} minSize={15}>
-								<ResultsPanel />
-							</Panel>
+							{/* Bottom-right: Results (toggleable via Cmd+J) */}
+							{resultsVisible && (
+								<>
+									<PanelResizeHandle />
+									<Panel defaultSize={45} minSize={15} order={2}>
+										<ResultsPanel />
+									</Panel>
+								</>
+							)}
 						</PanelGroup>
 					</Panel>
 				</PanelGroup>

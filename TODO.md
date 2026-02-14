@@ -66,6 +66,8 @@
 
 (GUI-F002, GUI-F003 archived → docs/historic/done-2026-02.md)
 
+- [x] ✅ **GUI-BRIDGE** [GUI] TauriTransport + useSidecarInit + menu wiring — connect frontend to sidecar (2026-02-14)
+
 ### Later
 
 - [ ] 💡 **GUI-010** [GUI] .assert.dbsp runner with inline pass/fail
