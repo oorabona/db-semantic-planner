@@ -1,20 +1,29 @@
 /**
- * Tab bar for Results panel: Results | SQL | Plan | Params
+ * Tab bar for Results panel: Results | SQL | Plan | Params | Assertions
  */
-import { Code, Map, Settings2, Table } from 'lucide-react';
+import {
+	CheckCircle,
+	Code,
+	Map as MapIcon,
+	Settings2,
+	Table,
+} from 'lucide-react';
+import { useAssertionStore } from '@/stores/assertion-store';
 import { type ResultsTab, useResultsStore } from '@/stores/results-store';
 
 const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof Table }> = [
 	{ id: 'results', label: 'Results', Icon: Table },
 	{ id: 'sql', label: 'SQL', Icon: Code },
-	{ id: 'plan', label: 'Plan', Icon: Map },
+	{ id: 'plan', label: 'Plan', Icon: MapIcon },
 	{ id: 'params', label: 'Params', Icon: Settings2 },
+	{ id: 'assertions', label: 'Assertions', Icon: CheckCircle },
 ];
 
 export function ResultsTabs() {
 	const activeTab = useResultsStore((s) => s.activeTab);
 	const setActiveTab = useResultsStore((s) => s.setActiveTab);
 	const result = useResultsStore((s) => s.result);
+	const assertionResult = useAssertionStore((s) => s.result);
 
 	return (
 		<div className="flex items-center gap-1 border-b px-2">
@@ -23,7 +32,8 @@ export function ResultsTabs() {
 				const isDisabled =
 					(id === 'sql' && !result?.sql) ||
 					(id === 'plan' && !result?.plan) ||
-					(id === 'params' && !result?.params?.length);
+					(id === 'params' && !result?.params?.length) ||
+					(id === 'assertions' && !assertionResult);
 
 				return (
 					<button

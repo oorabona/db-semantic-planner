@@ -10,8 +10,8 @@ const DIALOG_FILTERS = [
 
 /** Determine the tab language from a file path */
 export function languageFromPath(filePath: string): TabLanguage {
-	if (filePath.endsWith('.assert.dbsp') || filePath.endsWith('.dbsp'))
-		return 'nql';
+	if (filePath.endsWith('.assert.dbsp')) return 'assert';
+	if (filePath.endsWith('.dbsp')) return 'nql';
 	if (filePath.endsWith('.sql')) return 'sql';
 	return 'sql';
 }

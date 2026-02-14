@@ -38,8 +38,8 @@ describe('languageFromPath', () => {
 		expect(languageFromPath('queries/users.dbsp')).toBe('nql');
 	});
 
-	it('returns nql for .assert.dbsp files', () => {
-		expect(languageFromPath('tests/users.assert.dbsp')).toBe('nql');
+	it('returns assert for .assert.dbsp files', () => {
+		expect(languageFromPath('tests/users.assert.dbsp')).toBe('assert');
 	});
 
 	it('returns sql for .sql files', () => {

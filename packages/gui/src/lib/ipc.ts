@@ -86,6 +86,54 @@ export interface ResolveProfileParams {
 	projectPath?: string;
 }
 
+export interface RunAssertionsParams {
+	connectionId: string;
+	dbspContent: string;
+	assertContent: string;
+	execute?: boolean;
+}
+
+export interface AssertionOutcome {
+	readonly type: string;
+	readonly expected: unknown;
+	readonly actual: unknown;
+	readonly passed: boolean;
+	readonly message: string | undefined;
+	readonly skipped?: boolean;
+	readonly skipReason?: string;
+}
+
+export interface QueryAssertionResult {
+	readonly queryIndex: number;
+	readonly query: string;
+	readonly querySuccess: boolean;
+	readonly assertions: readonly AssertionOutcome[];
+	readonly passed: boolean;
+}
+
+export interface RunAssertionsSummary {
+	readonly total: number;
+	readonly passed: number;
+	readonly failed: number;
+	readonly skipped: number;
+	readonly results: readonly QueryAssertionResult[];
+}
+
+export interface RunAssertionsQueryResult {
+	readonly query: string;
+	readonly success: boolean;
+	readonly dbSuccess?: boolean;
+	readonly sql?: string;
+	readonly error?: string;
+	readonly rowCount?: number;
+}
+
+export interface RunAssertionsResult {
+	readonly summary: RunAssertionsSummary;
+	readonly queryResults: readonly RunAssertionsQueryResult[];
+	readonly parseErrors: ReadonlyArray<{ line: number; message: string }>;
+}
+
 export interface DiscoverParams {
 	host: string;
 	port: number;
@@ -157,6 +205,10 @@ export function createSidecarApi(client: IpcClient) {
 
 		resolveProfile(params: ResolveProfileParams) {
 			return client.call<ConnectParams>('resolveProfile', params);
+		},
+
+		runAssertions(params: RunAssertionsParams) {
+			return client.call<RunAssertionsResult>('runAssertions', params);
 		},
 
 		listDatabases(params: DiscoverParams) {

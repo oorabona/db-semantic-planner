@@ -28,6 +28,9 @@ export function ConnectionList({
 			{profiles.map((profile) => (
 				<div
 					key={profile.id}
+					role="option"
+					tabIndex={0}
+					aria-selected={profile.id === activeProfileId}
 					className={`group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent cursor-pointer ${
 						profile.id === activeProfileId
 							? 'bg-accent text-accent-foreground'

@@ -48,7 +48,11 @@ export function MonacoWrapper({
 		<div className="flex-1 overflow-hidden">
 			<Editor
 				height="100%"
-				language={language === 'nql' ? NQL_LANGUAGE_ID : language}
+				language={
+					language === 'nql' || language === 'assert'
+						? NQL_LANGUAGE_ID
+						: language
+				}
 				value={value}
 				onChange={(v) => onChange(v ?? '')}
 				onMount={handleMount}

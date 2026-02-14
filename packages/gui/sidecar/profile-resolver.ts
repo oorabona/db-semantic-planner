@@ -30,7 +30,7 @@ export async function resolveProfileUri(
 	}
 
 	const scheme = match[1];
-	const value = match[2]!;
+	const value = match[2] ?? '';
 
 	switch (scheme) {
 		case 'file':

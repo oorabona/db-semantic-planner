@@ -4,7 +4,7 @@
  */
 import { create } from 'zustand';
 
-export type ResultsTab = 'results' | 'sql' | 'plan' | 'params';
+export type ResultsTab = 'results' | 'sql' | 'plan' | 'params' | 'assertions';
 
 export interface QueryResult {
 	/** Column names from the result set */

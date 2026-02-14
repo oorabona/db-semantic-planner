@@ -235,7 +235,9 @@ export function PreferencesDialog() {
 	return (
 		<div className="fixed inset-0 z-50 flex items-center justify-center">
 			{/* Backdrop */}
+			{/* biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop click-to-dismiss is standard UX */}
 			<div
+				role="presentation"
 				className="absolute inset-0 bg-black/50"
 				onClick={closePreferences}
 				onKeyDown={(e) => e.key === 'Escape' && closePreferences()}

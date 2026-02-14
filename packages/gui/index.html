@@ -12,7 +12,7 @@
 		<script type="module" src="/src/main.tsx"></script>
 		<script>
 			// Remove boot check once React mounts (or after 5s timeout)
-			setTimeout(function() {
+			setTimeout(() => {
 				var el = document.getElementById('boot-check');
 				if (el && !document.querySelector('[data-dbsp-mounted]')) {
 					el.textContent = 'DBSP Boot: React did NOT mount after 5s — check console';

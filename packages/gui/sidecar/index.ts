@@ -6,9 +6,14 @@
  */
 import { createInterface } from 'node:readline';
 import {
+	handleRunAssertions,
+	type RunAssertionsParams,
+} from './assertion-handler.js';
+import {
 	connect,
 	disconnect,
 	disconnectAll,
+	getPool,
 	introspectConnection,
 } from './connection-manager.js';
 import { resolveProfileUri } from './profile-resolver.js';
@@ -91,6 +96,18 @@ router.setHandler('resolveProfile', async (params) => {
 		projectPath?: string;
 	};
 	return resolveProfileUri(uri, projectPath);
+});
+
+router.setHandler('runAssertions', async (params) => {
+	const p = params as RunAssertionsParams;
+	return handleRunAssertions(
+		p,
+		async (connectionId) => {
+			const model = await introspectConnection(connectionId);
+			return model;
+		},
+		(connectionId) => getPool(connectionId),
+	);
 });
 
 // ── Step 3: Write to stdout (protocol output) ────────────────────

@@ -1,10 +1,11 @@
 import { Loader2, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import type { TabLanguage } from '@/stores/editor-store';
 
 interface EditorToolbarProps {
 	onRun: () => void;
 	running: boolean;
-	language: 'sql' | 'nql';
+	language: TabLanguage;
 }
 
 export function EditorToolbar({
@@ -30,7 +31,8 @@ export function EditorToolbar({
 				Run
 			</Button>
 			<span className="text-xs text-muted-foreground">
-				{language === 'sql' ? 'SQL' : 'NQL'} · Cmd+Enter
+				{language === 'sql' ? 'SQL' : language === 'assert' ? 'Assert' : 'NQL'}{' '}
+				· Cmd+Enter
 			</span>
 		</div>
 	);

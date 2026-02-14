@@ -38,7 +38,7 @@ export function SqlEditor() {
 			const rows = (response.rows ?? []) as Record<string, unknown>[];
 			const columns =
 				rows.length > 0
-					? Object.keys(rows[0]!)
+					? Object.keys(rows[0] ?? {})
 					: ((response.columns ?? []) as string[]);
 
 			const result: QueryResult = {

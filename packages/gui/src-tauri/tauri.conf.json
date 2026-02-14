@@ -33,9 +33,7 @@
 			"icons/icon.icns",
 			"icons/icon.ico"
 		],
-		"externalBin": [
-			"binaries/dbsp-sidecar"
-		],
+		"externalBin": ["binaries/dbsp-sidecar"],
 		"resources": [],
 		"windows": {
 			"nsis": {
