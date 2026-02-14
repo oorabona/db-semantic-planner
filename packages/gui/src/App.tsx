@@ -25,6 +25,12 @@ import { useMonacoSetup } from '@/hooks/useMonacoSetup';
 import { useSettingsWatcher } from '@/hooks/useSettingsWatcher';
 import { useSidecarInit } from '@/hooks/useSidecarInit';
 import { useThemeEffect } from '@/hooks/useThemeEffect';
+import {
+	ASSERTION_TIMEOUT_MS,
+	validateAssertionContent,
+	validateDbspContent,
+	withTimeout,
+} from '@/lib/assertion-limits';
 import { commandRegistry } from '@/lib/commands';
 import { downloadCsv, toCsv } from '@/lib/csv-export';
 import {
@@ -272,8 +278,18 @@ export default function App() {
 				const activeConn = useConnectionStore.getState().active;
 				if (!activeConn) return;
 
-				// Derive paired .dbsp file path from .assert.dbsp path
+				const { setRunning, setResult, setError } =
+					useAssertionStore.getState();
+
+				// Validate assertion content (F005: resource limits)
 				const assertContent = tab.content;
+				const assertValidation = validateAssertionContent(assertContent);
+				if (assertValidation) {
+					setError(assertValidation.message);
+					return;
+				}
+
+				// Derive paired .dbsp file path from .assert.dbsp path
 				let dbspContent = '';
 				if (tab.filePath) {
 					const dbspPath = tab.filePath.replace('.assert.dbsp', '.dbsp');
@@ -286,27 +302,35 @@ export default function App() {
 						try {
 							dbspContent = await readTextFile(dbspPath);
 						} catch {
-							useAssertionStore
-								.getState()
-								.setError(
-									`No query file found: expected ${dbspPath.split('/').pop()}`,
-								);
+							setError(
+								`No query file found: expected ${dbspPath.split('/').pop()}`,
+							);
 							return;
 						}
 					}
 				}
 
-				const { setRunning, setResult, setError } =
-					useAssertionStore.getState();
+				// Validate .dbsp content (F005: resource limits)
+				const dbspValidation = validateDbspContent(dbspContent);
+				if (dbspValidation) {
+					setError(dbspValidation.message);
+					return;
+				}
+
 				setRunning(tab.id, tab.id);
 				useResultsStore.getState().setActiveTab('assertions');
 
 				try {
-					const result = await sidecarApi.runAssertions({
-						connectionId: activeConn.connectionId,
-						dbspContent,
-						assertContent,
-					});
+					// F006: query execution timeout
+					const result = await withTimeout(
+						sidecarApi.runAssertions({
+							connectionId: activeConn.connectionId,
+							dbspContent,
+							assertContent,
+						}),
+						ASSERTION_TIMEOUT_MS,
+						'Assertion run',
+					);
 					setResult(result);
 				} catch (err) {
 					const message =

@@ -8,6 +8,12 @@
  *   - results-store (active tab switching)
  */
 import { beforeEach, describe, expect, it } from 'vitest';
+import {
+	MAX_ASSERTION_COUNT,
+	validateAssertionContent,
+	validateDbspContent,
+	withTimeout,
+} from '@/lib/assertion-limits';
 import type { RunAssertionsResult } from '@/lib/ipc';
 import { useAssertionStore } from './assertion-store';
 import { useEditorStore } from './editor-store';
@@ -332,5 +338,110 @@ describe('cross-store consistency', () => {
 		expect(useEditorStore.getState().tabs).toHaveLength(1);
 		expect(useResultsStore.getState().activeTab).toBe('assertions');
 		expect(useAssertionStore.getState().result).toBeNull();
+	});
+});
+
+// ── Edge cases: resource limits & timeouts (F005, F006, F007) ────
+
+describe('edge cases: empty and oversized files', () => {
+	it('empty .assert.dbsp content is rejected by validation', () => {
+		const result = validateAssertionContent('');
+		expect(result).not.toBeNull();
+		expect(result!.message).toBe('Assertion file is empty.');
+	});
+
+	it('whitespace-only .assert.dbsp content is rejected', () => {
+		const result = validateAssertionContent('   \n  \t  ');
+		expect(result).not.toBeNull();
+		expect(result!.message).toBe('Assertion file is empty.');
+	});
+
+	it('empty .dbsp content is rejected by validation', () => {
+		const result = validateDbspContent('');
+		expect(result).not.toBeNull();
+		expect(result!.message).toBe('Query file is empty.');
+	});
+
+	it('file with too many assertion blocks is rejected', () => {
+		const blocks = Array.from(
+			{ length: MAX_ASSERTION_COUNT + 1 },
+			(_, i) => `--- query: ${i + 1}\nsql.equals: SELECT ${i + 1}`,
+		).join('\n');
+		const result = validateAssertionContent(blocks);
+		expect(result).not.toBeNull();
+		expect(result!.message).toContain('Too many assertion blocks');
+	});
+
+	it('valid content passes validation', () => {
+		expect(validateAssertionContent(mockAssertContent)).toBeNull();
+		expect(validateDbspContent(mockDbspContent)).toBeNull();
+	});
+});
+
+describe('edge cases: timeout handling (F006)', () => {
+	it('withTimeout resolves for fast operations', async () => {
+		const result = await withTimeout(Promise.resolve('ok'), 1000, 'test');
+		expect(result).toBe('ok');
+	});
+
+	it('withTimeout rejects for slow operations', async () => {
+		const slow = new Promise<string>(() => {});
+		await expect(withTimeout(slow, 10, 'assertion run')).rejects.toThrow(
+			'assertion run timed out after 0.01s',
+		);
+	});
+
+	it('withTimeout propagates original error', async () => {
+		const failing = Promise.reject(new Error('DB connection lost'));
+		await expect(withTimeout(failing, 1000, 'test')).rejects.toThrow(
+			'DB connection lost',
+		);
+	});
+});
+
+describe('edge cases: mid-run disconnect (F007)', () => {
+	it('error during assertion run transitions to error state', () => {
+		const { addTab } = useEditorStore.getState();
+		const id = addTab('assert', mockAssertContent, '/project/test.assert.dbsp');
+
+		// Start running
+		useAssertionStore.getState().setRunning(id, id);
+		expect(useAssertionStore.getState().running).toBe(true);
+
+		// Simulate mid-run disconnect / sidecar crash
+		useAssertionStore.getState().setError('Engine restarting');
+
+		const state = useAssertionStore.getState();
+		expect(state.running).toBe(false);
+		expect(state.error).toBe('Engine restarting');
+		expect(state.result).toBeNull();
+	});
+
+	it('results tab remains on assertions after error', () => {
+		useResultsStore.getState().setActiveTab('assertions');
+		useAssertionStore.getState().setError('Connection timeout');
+
+		// Tab stays on assertions so user sees the error
+		expect(useResultsStore.getState().activeTab).toBe('assertions');
+	});
+
+	it('new run after error replaces error state', () => {
+		const { addTab } = useEditorStore.getState();
+		const id = addTab('assert', mockAssertContent, '/project/test.assert.dbsp');
+
+		// Error state
+		useAssertionStore.getState().setRunning(id, id);
+		useAssertionStore.getState().setError('Timeout');
+		expect(useAssertionStore.getState().error).toBe('Timeout');
+
+		// Re-run clears error
+		useAssertionStore.getState().setRunning(id, id);
+		expect(useAssertionStore.getState().running).toBe(true);
+		expect(useAssertionStore.getState().error).toBeNull();
+
+		// Success
+		useAssertionStore.getState().setResult(mockResult);
+		expect(useAssertionStore.getState().result).toBe(mockResult);
+		expect(useAssertionStore.getState().error).toBeNull();
 	});
 });
