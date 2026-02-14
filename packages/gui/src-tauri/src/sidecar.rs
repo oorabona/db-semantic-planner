@@ -1,62 +1,137 @@
+use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
+use std::thread;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_shell::{process::CommandChild, ShellExt};
 
 /// Sidecar state managed by Tauri.
+/// The Node.js sidecar is spawned directly via std::process::Command —
+/// no platform-specific shell scripts or externalBin required.
 pub struct SidecarState {
-    child: Mutex<Option<CommandChild>>,
+    inner: Mutex<Option<SidecarInner>>,
+}
+
+struct SidecarInner {
+    stdin: std::process::ChildStdin,
+    pid: u32,
 }
 
 impl SidecarState {
     pub fn new() -> Self {
         Self {
-            child: Mutex::new(None),
+            inner: Mutex::new(None),
         }
     }
 }
 
-/// Spawn the sidecar process and return its PID.
+/// Resolve tsx binary and sidecar script paths.
+///
+/// Walks up from CWD to find the gui package root (directory containing both
+/// `sidecar/index.ts` and `node_modules/.bin/tsx`). Works regardless of whether
+/// CWD is the gui package root, src-tauri/, or target/debug/.
+fn resolve_sidecar_paths() -> Result<(PathBuf, PathBuf), String> {
+    let cwd = std::env::current_dir().map_err(|e| format!("Cannot get CWD: {e}"))?;
+
+    let mut dir = cwd.as_path();
+    loop {
+        let tsx = dir.join("node_modules/.bin/tsx");
+        let script = dir.join("sidecar/index.ts");
+        if script.exists() && tsx.exists() {
+            return Ok((tsx, script));
+        }
+        dir = dir.parent().ok_or_else(|| {
+            format!(
+                "Cannot find gui package root from {}: need sidecar/index.ts + node_modules/.bin/tsx",
+                cwd.display()
+            )
+        })?;
+    }
+}
+
+/// Kill a process by PID (cross-platform).
+fn kill_pid(pid: u32) {
+    #[cfg(unix)]
+    {
+        let _ = Command::new("kill").arg(pid.to_string()).status();
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/F", "/PID", &pid.to_string()])
+            .status();
+    }
+}
+
+/// Spawn the sidecar process (tsx sidecar/index.ts) and return its PID.
 #[tauri::command]
 pub async fn sidecar_spawn(app: AppHandle) -> Result<u32, String> {
     let state = app.state::<SidecarState>();
-    let mut child_guard = state.child.lock().map_err(|e| e.to_string())?;
+    let mut guard = state.inner.lock().map_err(|e| e.to_string())?;
 
     // Kill existing sidecar if any
-    if let Some(existing) = child_guard.take() {
-        let _ = existing.kill();
+    if let Some(existing) = guard.take() {
+        kill_pid(existing.pid);
+        drop(existing.stdin);
     }
 
-    let (mut rx, child) = app
-        .shell()
-        .sidecar("dbsp-sidecar")
-        .map_err(|e| format!("Failed to create sidecar command: {e}"))?
+    let (tsx, script) = resolve_sidecar_paths()?;
+
+    let mut child = Command::new(&tsx)
+        .arg(&script)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to spawn sidecar: {e}"))?;
+        .map_err(|e| {
+            format!(
+                "Failed to spawn sidecar ({} {}): {e}",
+                tsx.display(),
+                script.display()
+            )
+        })?;
 
-    let pid = child.pid();
+    let pid = child.id();
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or("Failed to capture sidecar stdin")?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("Failed to capture sidecar stdout")?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or("Failed to capture sidecar stderr")?;
 
-    // Forward sidecar events to the frontend
-    let app_handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        use tauri_plugin_shell::process::CommandEvent;
-        while let Some(event) = rx.recv().await {
-            match event {
-                CommandEvent::Stdout(line) => {
-                    let _ = app_handle.emit("sidecar-stdout", String::from_utf8_lossy(&line).to_string());
-                }
-                CommandEvent::Stderr(line) => {
-                    let _ = app_handle.emit("sidecar-stderr", String::from_utf8_lossy(&line).to_string());
-                }
-                CommandEvent::Terminated(status) => {
-                    let _ = app_handle.emit("sidecar-exit", status.code);
-                    break;
-                }
-                _ => {}
-            }
+    // Forward stdout line by line to frontend
+    let app_stdout = app.clone();
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            let _ = app_stdout.emit("sidecar-stdout", &line);
         }
     });
 
-    *child_guard = Some(child);
+    // Forward stderr line by line to frontend
+    let app_stderr = app.clone();
+    thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines().map_while(Result::ok) {
+            let _ = app_stderr.emit("sidecar-stderr", &line);
+        }
+    });
+
+    // Monitor thread: wait for child to exit, then emit exit event
+    let app_exit = app.clone();
+    thread::spawn(move || {
+        let status = child.wait();
+        let code = status.ok().and_then(|s| s.code());
+        let _ = app_exit.emit("sidecar-exit", code);
+    });
+
+    *guard = Some(SidecarInner { stdin, pid });
     Ok(pid)
 }
 
@@ -64,12 +139,19 @@ pub async fn sidecar_spawn(app: AppHandle) -> Result<u32, String> {
 #[tauri::command]
 pub async fn sidecar_send(app: AppHandle, message: String) -> Result<(), String> {
     let state = app.state::<SidecarState>();
-    let mut child_guard = state.child.lock().map_err(|e| e.to_string())?;
+    let mut guard = state.inner.lock().map_err(|e| e.to_string())?;
 
-    match child_guard.as_mut() {
-        Some(child) => child
-            .write(message.as_bytes())
-            .map_err(|e| format!("Failed to write to sidecar: {e}")),
+    match guard.as_mut() {
+        Some(inner) => {
+            inner
+                .stdin
+                .write_all(message.as_bytes())
+                .map_err(|e| format!("Failed to write to sidecar: {e}"))?;
+            inner
+                .stdin
+                .flush()
+                .map_err(|e| format!("Failed to flush sidecar stdin: {e}"))
+        }
         None => Err("Sidecar is not running".into()),
     }
 }
@@ -78,10 +160,11 @@ pub async fn sidecar_send(app: AppHandle, message: String) -> Result<(), String>
 #[tauri::command]
 pub async fn sidecar_kill(app: AppHandle) -> Result<(), String> {
     let state = app.state::<SidecarState>();
-    let mut child_guard = state.child.lock().map_err(|e| e.to_string())?;
+    let mut guard = state.inner.lock().map_err(|e| e.to_string())?;
 
-    if let Some(child) = child_guard.take() {
-        child.kill().map_err(|e| format!("Failed to kill sidecar: {e}"))?;
+    if let Some(existing) = guard.take() {
+        kill_pid(existing.pid);
+        drop(existing.stdin);
     }
 
     Ok(())
