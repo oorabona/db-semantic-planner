@@ -134,11 +134,15 @@ describe('IpcClient', () => {
 	});
 
 	describe('queuing', () => {
-		it('queues calls when not ready and flushes after connect', async () => {
-			// Call before connect
-			const callPromise = client.call('introspect', { connectionId: 'abc' });
+		it('rejects immediately when sidecar is stopped', async () => {
+			// Client starts as stopped — calls should reject, not queue forever
+			await expect(
+				client.call('introspect', { connectionId: 'abc' }),
+			).rejects.toThrow('Sidecar is not running');
+		});
 
-			// Now connect
+		it('queues calls during restart and flushes after reconnect', async () => {
+			// Connect first
 			const connectPromise = client.connect(transport, '1.0.0');
 			const handshakeReq = JSON.parse(transport.sent[0]!);
 			transport.simulateMessage(
@@ -150,13 +154,32 @@ describe('IpcClient', () => {
 			);
 			await connectPromise;
 
+			// Simulate crash → status becomes 'restarting'
+			transport.simulateClose(1);
+			expect(client.status).toBe('restarting');
+
+			// Call while restarting — should be queued (not rejected)
+			const transport2 = createMockTransport();
+			const callPromise = client.call('introspect', { connectionId: 'abc' });
+
+			// Reconnect
+			const reconnectPromise = client.connect(transport2, '1.0.0');
+			const handshakeReq2 = JSON.parse(transport2.sent[0]!);
+			transport2.simulateMessage(
+				JSON.stringify({
+					jsonrpc: '2.0',
+					id: handshakeReq2.id,
+					result: { version: '1.0.0', capabilities: [] },
+				}),
+			);
+			await reconnectPromise;
+
 			// The queued call should now be sent
-			expect(transport.sent.length).toBe(2);
-			const req = JSON.parse(transport.sent[1]!);
+			const req = JSON.parse(transport2.sent[1]!);
 			expect(req.method).toBe('introspect');
 
-			// Respond to flush
-			transport.simulateMessage(
+			// Respond
+			transport2.simulateMessage(
 				JSON.stringify({ jsonrpc: '2.0', id: req.id, result: { tables: [] } }),
 			);
 

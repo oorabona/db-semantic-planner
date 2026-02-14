@@ -123,6 +123,13 @@ export class IpcClient {
 	): Promise<T> {
 		const id = this.nextId++;
 
+		// Reject immediately if sidecar is stopped
+		if (this._status === 'stopped' && method !== 'handshake') {
+			return Promise.reject(
+				new Error('Sidecar is not running. Please restart the application.'),
+			);
+		}
+
 		// Queue if not ready (unless it's the handshake itself)
 		if (
 			this._status !== 'ready' &&
@@ -131,11 +138,26 @@ export class IpcClient {
 		) {
 			return new Promise<T>((resolve, reject) => {
 				const message = `${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`;
+				const timer = setTimeout(() => {
+					// Remove from queue and reject
+					this.requestQueue = this.requestQueue.filter((q) => q.id !== id);
+					reject(
+						new Error(
+							`Request ${id} (${method}) timed out waiting for sidecar (status: ${this._status})`,
+						),
+					);
+				}, 15_000);
 				this.requestQueue.push({
 					message,
 					id,
-					resolve: resolve as (v: unknown) => void,
-					reject,
+					resolve: ((v: unknown) => {
+						clearTimeout(timer);
+						(resolve as (v: unknown) => void)(v);
+					}) as (v: unknown) => void,
+					reject: (e: Error) => {
+						clearTimeout(timer);
+						reject(e);
+					},
 				});
 			});
 		}
