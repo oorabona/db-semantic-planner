@@ -230,6 +230,28 @@ describe('IpcClient', () => {
 			await expect(callPromise).rejects.toThrow('Engine restarting');
 			expect(client.status).toBe('restarting');
 		});
+
+		it('ignores stale exit event during handshake (reload scenario)', async () => {
+			const connectPromise = client.connect(transport, '1.0.0');
+
+			// Simulate a stale sidecar-exit from the old process killed by sidecar_spawn
+			// This arrives while status is 'handshaking' — must be ignored
+			transport.simulateClose(null);
+
+			// Complete the handshake normally
+			const handshakeReq = JSON.parse(transport.sent[0]!);
+			transport.simulateMessage(
+				JSON.stringify({
+					jsonrpc: '2.0',
+					id: handshakeReq.id,
+					result: { version: '1.0.0', capabilities: [] },
+				}),
+			);
+			await connectPromise;
+
+			// Should reach ready state despite the stale exit event
+			expect(client.status).toBe('ready');
+		});
 	});
 
 	describe('disconnect', () => {

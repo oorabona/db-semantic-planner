@@ -249,6 +249,14 @@ export class IpcClient {
 			// Unexpected close — restart
 			this.setStatus('restarting');
 			this.rejectAllPending(new Error('Engine restarting'));
+		} else if (this._status === 'spawning' || this._status === 'handshaking') {
+			// During boot, an exit event is likely a stale event from the
+			// previous sidecar killed by sidecar_spawn. Ignore it — if the
+			// new sidecar actually crashed, the handshake timeout (30s) will
+			// catch it.
+			console.warn(
+				'[IPC] Ignoring sidecar-exit during boot (stale event from old process)',
+			);
 		} else {
 			this.setStatus('stopped');
 			this.rejectAllPending(new Error('Sidecar stopped'));
