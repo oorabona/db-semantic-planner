@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
 	ASSERTION_TIMEOUT_MS,
+	countAssertionBlocks,
 	MAX_ASSERT_FILE_SIZE,
 	MAX_ASSERTION_COUNT,
 	MAX_DBSP_FILE_SIZE,
-	countAssertionBlocks,
 	validateAssertionContent,
 	validateDbspContent,
 	withTimeout,
@@ -42,6 +42,19 @@ describe('validateAssertionContent', () => {
 	it('accepts content at exactly the max file size', () => {
 		const content = 'x'.repeat(MAX_ASSERT_FILE_SIZE);
 		expect(validateAssertionContent(content)).toBeNull();
+	});
+
+	it('measures size in bytes, not characters (multi-byte)', () => {
+		// Each emoji is 4 bytes in UTF-8
+		const emoji = '😀';
+		const charCount = Math.floor(MAX_ASSERT_FILE_SIZE / 4);
+		const atLimit = emoji.repeat(charCount);
+		expect(validateAssertionContent(atLimit)).toBeNull();
+
+		const overLimit = emoji.repeat(charCount + 1);
+		const result = validateAssertionContent(overLimit);
+		expect(result).not.toBeNull();
+		expect(result!.message).toContain('too large');
 	});
 
 	it('rejects content with too many assertion blocks', () => {
@@ -110,6 +123,15 @@ describe('countAssertionBlocks', () => {
 
 	it('handles leading whitespace before ---', () => {
 		expect(countAssertionBlocks('  --- query: 1')).toBe(1);
+	});
+
+	it('counts lines with extra dashes (---- still starts with ---)', () => {
+		expect(countAssertionBlocks('---- query: 1')).toBe(1);
+	});
+
+	it('does not count lines that do not start with ---', () => {
+		expect(countAssertionBlocks('-- not a block')).toBe(0);
+		expect(countAssertionBlocks('text --- inline')).toBe(0);
 	});
 });
 
