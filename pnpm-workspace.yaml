@@ -7,8 +7,10 @@ catalog:
   ink: ^6.6.0
   ink-table: ^3.1.0
   commander: ^14.0.2
-  react: ^19.2.3
+  react: ^19.2.4
+  react-dom: ^19.2.4
   '@types/react': ^19.2.8
+  '@types/react-dom': ^19.2.3
 
   # Database
   pg: ^8.16.3
@@ -24,7 +26,7 @@ catalog:
   typescript: ^5.9.3
   tsup: ^8.5.1
   tsx: ^4.21.0
-  vitest: ^4.0.16
+  vitest: ^4.0.18
   '@types/node': ^22.15.29
 
   # Testing

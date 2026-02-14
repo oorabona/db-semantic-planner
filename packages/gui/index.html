@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>DBSP — Database Explorer</title>
+	</head>
+	<body>
+		<noscript><h1 style="color:red;padding:20px">JavaScript is disabled in this WebView</h1></noscript>
+		<div id="boot-check" style="position:fixed;top:0;left:0;right:0;background:#1e40af;color:white;padding:8px 16px;font-family:monospace;z-index:99999">DBSP Boot: HTML loaded, waiting for React...</div>
+		<div id="root"></div>
+		<script type="module" src="/src/main.tsx"></script>
+		<script>
+			// Remove boot check once React mounts (or after 5s timeout)
+			setTimeout(function() {
+				var el = document.getElementById('boot-check');
+				if (el && !document.querySelector('[data-dbsp-mounted]')) {
+					el.textContent = 'DBSP Boot: React did NOT mount after 5s — check console';
+					el.style.background = '#dc2626';
+				}
+			}, 5000);
+		</script>
+	</body>
+</html>

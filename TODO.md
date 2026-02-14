@@ -46,13 +46,38 @@
 
 ### DX Convenience (Category A)
 
-- [ ] **E17c** [DX] `dbsp init` wizard (like Prisma) — Effort: M
-
+(E17c moved to P4 — GUI explorer prioritized over CLI wizard)
 (E17, E17b archived → docs/historic/done-2026-02.md)
 
 ### Infrastructure
 
 (E09, E09b, E10 archived → docs/historic/done-2026-02.md)
+
+---
+
+## P2 — GUI Desktop Explorer (New Product)
+
+> Tauri v2 desktop app — visual schema exploration, SQL/NQL editing, plan inspection.
+> Brief: docs/briefs/gui-explorer.md | Overview: docs/plans/gui-overview.md
+
+### MVP
+
+(GUI-001 to GUI-009, GUI-MW archived → docs/historic/done-2026-02.md)
+
+(GUI-F002, GUI-F003 archived → docs/historic/done-2026-02.md)
+
+- [x] ✅ **GUI-BRIDGE** [GUI] TauriTransport + useSidecarInit + menu wiring — connect frontend to sidecar (2026-02-14)
+
+### Later
+
+- [ ] 💡 **GUI-010** [GUI] .assert.dbsp runner with inline pass/fail
+- [ ] 💡 **GUI-011** [GUI] Schema diff (live DB vs schema.ts via compareSchemata)
+- [ ] 💡 **GUI-012** [GUI] Query history with search and re-run
+(GUI-013, GUI-014 archived → docs/historic/done-2026-02.md)
+- [ ] 💡 **GUI-015** [GUI] Web version (@dbsp/web — same React frontend, HTTP/WS transport, phpMyAdmin-like)
+- [ ] 💡 **GUI-016** [GUI] Status bar "+" → loupe icon, ouvre un panneau de logs applicatifs (sidecar stdout/stderr, IPC messages, query timing). Format: drawer coulissant depuis la barre de statut (style VS Code Output panel) ou onglet "Logs" dans le panneau results
+(GUI-MW-D01, GUI-MW-D02, GUI-MW-D04, GUI-MW-D05, GUI-MW-D06 archived → docs/historic/done-2026-02.md)
+- [ ] 💡 **GUI-MW-D03** [GUI] Per-connection SSL/params overrides in dbsp.settings.json — Priority: L
 
 ---
 
@@ -119,6 +144,10 @@
 ### E13-ALL Review Findings (2026-02-07)
 
 (Archived → docs/historic/done-2026-02.md)
+
+### DX Convenience (moved from P2, 2026-02-12)
+
+- [-] ⏭️ **E17c** [DX] `dbsp init` wizard — deferred: GUI explorer prioritized over CLI wizard
 
 ### MCP Server (moved from P2, 2026-02-12)
 

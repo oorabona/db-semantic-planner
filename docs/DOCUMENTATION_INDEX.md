@@ -4,7 +4,7 @@ doc-meta:
   scope: project
   type: reference
   created: 2026-01-06
-  updated: 2026-01-29
+  updated: 2026-02-12
 ---
 
 # Documentation Index
@@ -24,6 +24,7 @@ packages/adapter-pgsql  → PostgreSQL Native Adapter (Plan → PG AST → SQL v
 packages/nql            → Natural Query Language parser (@dbsp/nql)
 packages/cli            → dbsp CLI (generate, verify, repl commands)
 packages/mcp-server     → MCP Server for AI assistants (depends on core + adapter)
+packages/gui            → Desktop Database Explorer (Tauri v2 + React + ShadCN/UI)
 ```
 
 ## Quick Links
@@ -34,7 +35,8 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | Project | [Main Backlog](../TODO.md) | active |
 | Project | [**Feature Comparison**](COMPARISON.md) | canonical |
 | Project | [MCP Server Brief](briefs/mcp-server.md) | ready |
-| Project | [MCP Server Backlog](../TODO.md) | ready |
+| GUI | [**GUI Explorer Brief**](briefs/gui-explorer.md) | canonical |
+| GUI | [**GUI Overview**](plans/gui-overview.md) | draft |
 | CLI | [**CLI Usage Guide**](CLI_USAGE.md) | canonical |
 | Operations | [**Production Deployment**](PRODUCTION.md) | canonical |
 | API | [**API Reference**](api/index.html) | generated |
@@ -53,6 +55,7 @@ packages/mcp-server     → MCP Server for AI assistants (depends on core + adap
 | cli | `packages/cli` | [CLI Usage](CLI_USAGE.md) | [TODO](../TODO.md) | ✅ Complete |
 | mcp-server | `packages/mcp-server` | [Brief](briefs/mcp-server.md) | [TODO](../TODO.md) | 🟡 Ready |
 | nql | `packages/nql` | [Spec](plans/NQL-SPEC-2026-01.md) | [TODO](../TODO.md) | ✅ Complete |
+| gui | `packages/gui` | [Overview](plans/gui-overview.md) | [TODO](../TODO.md) `[GUI]` | 🟡 New |
 
 **Note:** DX layer (ORM API, filters, query builders) is part of `packages/core/src/dx/` since ARCH-001.
 **Note:** Schema DSL (`defineSchema()`, conventions) is part of `packages/core` since ARCH-002 (merged from former `packages/schema`).
