@@ -20,29 +20,26 @@ export function MonacoWrapper({
 	const monacoTheme = useMonacoTheme();
 	const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
 
-	const handleMount: OnMount = useCallback(
-		(editor, monaco) => {
-			editorRef.current = editor;
-
-			// Add Cmd/Ctrl+Enter keybinding for Run
-			editor.addAction({
-				id: 'run-query',
-				label: 'Run Query',
-				keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
-				run: () => onRun(),
-			});
-
-			// Focus editor on mount
-			editor.focus();
-		},
-		[onRun],
-	);
-
-	// Update onRun ref when it changes (without re-creating the action)
+	// Stable ref so the Monaco action always calls the latest onRun
 	const onRunRef = useRef(onRun);
 	useEffect(() => {
 		onRunRef.current = onRun;
 	}, [onRun]);
+
+	const handleMount: OnMount = useCallback((editor, monaco) => {
+		editorRef.current = editor;
+
+		// Add Cmd/Ctrl+Enter keybinding for Run
+		editor.addAction({
+			id: 'run-query',
+			label: 'Run Query',
+			keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+			run: () => onRunRef.current(),
+		});
+
+		// Focus editor on mount
+		editor.focus();
+	}, []);
 
 	return (
 		<div className="flex-1 overflow-hidden">
