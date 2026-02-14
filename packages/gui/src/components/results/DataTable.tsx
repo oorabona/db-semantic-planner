@@ -55,6 +55,16 @@ export function DataTable({ columns, rows }: DataTableProps) {
 		overscan: 20,
 	});
 
+	const virtualRows = virtualizer.getVirtualItems();
+	const totalSize = virtualizer.getTotalSize();
+
+	// Padding-spacer approach: compatible with <table> layout (no absolute positioning)
+	const paddingTop = virtualRows.length > 0 ? (virtualRows[0]?.start ?? 0) : 0;
+	const paddingBottom =
+		virtualRows.length > 0
+			? totalSize - (virtualRows[virtualRows.length - 1]?.end ?? 0)
+			: 0;
+
 	return (
 		<div ref={parentRef} className="flex-1 overflow-auto">
 			<table className="w-full border-collapse text-xs">
@@ -83,27 +93,23 @@ export function DataTable({ columns, rows }: DataTableProps) {
 						</tr>
 					))}
 				</thead>
-				<tbody
-					style={{
-						height: `${virtualizer.getTotalSize()}px`,
-						position: 'relative',
-					}}
-				>
-					{virtualizer.getVirtualItems().map((virtualRow) => {
+				<tbody>
+					{paddingTop > 0 && (
+						<tr>
+							<td
+								colSpan={columns.length}
+								style={{ height: `${paddingTop}px` }}
+							/>
+						</tr>
+					)}
+					{virtualRows.map((virtualRow) => {
 						const row = tableRows[virtualRow.index];
 						if (!row) return null;
 						return (
 							<tr
 								key={row.id}
 								className="border-b hover:bg-accent/30"
-								style={{
-									height: `${ROW_HEIGHT}px`,
-									position: 'absolute',
-									top: 0,
-									transform: `translateY(${virtualRow.start}px)`,
-									width: '100%',
-									display: 'table-row',
-								}}
+								style={{ height: `${ROW_HEIGHT}px` }}
 							>
 								{row.getVisibleCells().map((cell) => (
 									<td
@@ -117,6 +123,14 @@ export function DataTable({ columns, rows }: DataTableProps) {
 							</tr>
 						);
 					})}
+					{paddingBottom > 0 && (
+						<tr>
+							<td
+								colSpan={columns.length}
+								style={{ height: `${paddingBottom}px` }}
+							/>
+						</tr>
+					)}
 				</tbody>
 			</table>
 		</div>
