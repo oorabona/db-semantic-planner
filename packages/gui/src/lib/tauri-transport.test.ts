@@ -76,7 +76,6 @@ describe('createTauriTransport', () => {
 		});
 
 		it('forwards event payload to callback', () => {
-			// biome-ignore lint/suspicious/noExplicitAny: test mock
 			let capturedHandler: any = null;
 			mockListen.mockImplementation((_event: string, handler: unknown) => {
 				capturedHandler = handler;
@@ -108,7 +107,6 @@ describe('createTauriTransport', () => {
 		});
 
 		it('forwards exit code to callback', () => {
-			// biome-ignore lint/suspicious/noExplicitAny: test mock
 			let capturedHandler: any = null;
 			mockListen.mockImplementation((_event: string, handler: unknown) => {
 				capturedHandler = handler;

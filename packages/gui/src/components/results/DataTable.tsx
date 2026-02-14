@@ -90,7 +90,8 @@ export function DataTable({ columns, rows }: DataTableProps) {
 					}}
 				>
 					{virtualizer.getVirtualItems().map((virtualRow) => {
-						const row = tableRows[virtualRow.index]!;
+						const row = tableRows[virtualRow.index];
+						if (!row) return null;
 						return (
 							<tr
 								key={row.id}

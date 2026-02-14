@@ -158,7 +158,7 @@ export function getFkTarget(
 		if (idx >= 0) {
 			return {
 				table: fk.references.table,
-				column: fk.references.columns[idx] ?? fk.references.columns[0]!,
+				column: fk.references.columns[idx] ?? fk.references.columns[0] ?? '',
 			};
 		}
 	}

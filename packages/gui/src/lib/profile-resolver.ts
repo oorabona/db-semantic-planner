@@ -27,7 +27,7 @@ export function parseProfileUri(uri: string): ParsedProfileUri {
 			`Invalid profile URI. Must use file://, env://, or store:// scheme.`,
 		);
 	}
-	return { scheme: match[1] as ProfileScheme, value: match[2]! };
+	return { scheme: match[1] as ProfileScheme, value: match[2] ?? '' };
 }
 
 // ── Resolution ───────────────────────────────────────────────────

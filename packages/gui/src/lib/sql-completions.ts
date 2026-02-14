@@ -123,7 +123,7 @@ export function createSqlCompletionProvider(): languages.CompletionItemProvider 
 
 			if (dotMatch && schema) {
 				// Table.column completion
-				const tableName = dotMatch[1]!;
+				const tableName = dotMatch[1] ?? '';
 				const table = schema.tables.find(
 					(t) => t.name.toLowerCase() === tableName.toLowerCase(),
 				);

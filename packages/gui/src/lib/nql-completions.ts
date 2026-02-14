@@ -109,7 +109,7 @@ export function createNqlCompletionProvider(): languages.CompletionItemProvider 
 			// After dot: column completion
 			const dotMatch = textBefore.match(/(\w+)\.\s*$/);
 			if (dotMatch && schema) {
-				const tableName = dotMatch[1]!;
+				const tableName = dotMatch[1] ?? '';
 				const table = schema.tables.find(
 					(t) => t.name.toLowerCase() === tableName.toLowerCase(),
 				);

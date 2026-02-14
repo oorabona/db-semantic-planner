@@ -6,10 +6,7 @@ import { describe, expect, it } from 'vitest';
  */
 
 /** Mirrors the target triple detection from build-sidecar.sh */
-function detectTargetTriple(
-	os: string,
-	arch: string,
-): string | null {
+function detectTargetTriple(os: string, arch: string): string | null {
 	let osPart: string;
 	switch (os) {
 		case 'Linux':
@@ -56,9 +53,7 @@ describe('target triple detection', () => {
 	});
 
 	it('detects macOS arm64', () => {
-		expect(detectTargetTriple('Darwin', 'arm64')).toBe(
-			'aarch64-apple-darwin',
-		);
+		expect(detectTargetTriple('Darwin', 'arm64')).toBe('aarch64-apple-darwin');
 	});
 
 	it('detects macOS aarch64', () => {

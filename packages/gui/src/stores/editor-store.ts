@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 // ── Tab types ───────────────────────────────────────────────────────
 
-export type TabLanguage = 'sql' | 'nql';
+export type TabLanguage = 'sql' | 'nql' | 'assert';
 
 export interface EditorTab {
 	readonly id: string;
@@ -54,7 +54,9 @@ function makeTabId(): string {
 }
 
 function defaultTitle(language: TabLanguage, counter: number): string {
-	return language === 'sql' ? `Query ${counter}.sql` : `Query ${counter}.dbsp`;
+	if (language === 'sql') return `Query ${counter}.sql`;
+	if (language === 'assert') return `Test ${counter}.assert.dbsp`;
+	return `Query ${counter}.dbsp`;
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({

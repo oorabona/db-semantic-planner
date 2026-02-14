@@ -187,7 +187,6 @@ describe('useSidecarInit', () => {
 
 	describe('reconnection on unexpected exit', () => {
 		it('attempts reconnection when sidecar exits unexpectedly while ready', async () => {
-			// biome-ignore lint/suspicious/noExplicitAny: test mock
 			let exitHandler: any = null;
 			mockListen.mockImplementation((eventName: string, handler: unknown) => {
 				if (eventName === 'sidecar-exit') {
@@ -231,7 +230,6 @@ describe('useSidecarInit', () => {
 		});
 
 		it('does not reconnect on clean exit (code 0)', async () => {
-			// biome-ignore lint/suspicious/noExplicitAny: test mock
 			let exitHandler: any = null;
 			mockListen.mockImplementation((eventName: string, handler: unknown) => {
 				if (eventName === 'sidecar-exit') {

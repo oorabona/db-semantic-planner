@@ -1,33 +1,33 @@
-import { describe, expect, it } from "vitest";
-import { Router } from "./router";
-import { ErrorCode } from "./protocol";
+import { describe, expect, it } from 'vitest';
+import { ErrorCode } from './protocol';
+import { Router } from './router';
 
-describe("Router", () => {
-	it("dispatches handshake and returns capabilities", async () => {
+describe('Router', () => {
+	it('dispatches handshake and returns capabilities', async () => {
 		const router = new Router();
 		const response = await router.dispatch({
-			jsonrpc: "2.0",
+			jsonrpc: '2.0',
 			id: 0,
-			method: "handshake",
-			params: { version: "1.0.0" },
+			method: 'handshake',
+			params: { version: '1.0.0' },
 		});
 
 		expect(response).toMatchObject({
-			jsonrpc: "2.0",
+			jsonrpc: '2.0',
 			id: 0,
 			result: {
-				version: "1.0.0",
-				capabilities: expect.arrayContaining(["sql", "nql"]),
+				version: '1.0.0',
+				capabilities: expect.arrayContaining(['sql', 'nql']),
 			},
 		});
 	});
 
-	it("returns MethodNotFound for unknown methods", async () => {
+	it('returns MethodNotFound for unknown methods', async () => {
 		const router = new Router();
 		const response = await router.dispatch({
-			jsonrpc: "2.0",
+			jsonrpc: '2.0',
 			id: 1,
-			method: "unknownMethod",
+			method: 'unknownMethod',
 		});
 
 		expect(response).toMatchObject({
@@ -36,12 +36,12 @@ describe("Router", () => {
 		});
 	});
 
-	it("returns InvalidParams for bad handshake params", async () => {
+	it('returns InvalidParams for bad handshake params', async () => {
 		const router = new Router();
 		const response = await router.dispatch({
-			jsonrpc: "2.0",
+			jsonrpc: '2.0',
 			id: 1,
-			method: "handshake",
+			method: 'handshake',
 			params: { version: 123 }, // should be string
 		});
 
@@ -51,13 +51,13 @@ describe("Router", () => {
 		});
 	});
 
-	it("returns NotConnected for stub methods", async () => {
+	it('returns NotConnected for stub methods', async () => {
 		const router = new Router();
 		const response = await router.dispatch({
-			jsonrpc: "2.0",
+			jsonrpc: '2.0',
 			id: 1,
-			method: "executeSQL",
-			params: { connectionId: "test", sql: "SELECT 1" },
+			method: 'executeSQL',
+			params: { connectionId: 'test', sql: 'SELECT 1' },
 		});
 
 		expect(response).toMatchObject({
@@ -66,18 +66,18 @@ describe("Router", () => {
 		});
 	});
 
-	it("validates connect params (invalid port)", async () => {
+	it('validates connect params (invalid port)', async () => {
 		const router = new Router();
 		const response = await router.dispatch({
-			jsonrpc: "2.0",
+			jsonrpc: '2.0',
 			id: 1,
-			method: "connect",
+			method: 'connect',
 			params: {
-				host: "localhost",
+				host: 'localhost',
 				port: -1,
-				database: "test",
-				user: "user",
-				password: "pass",
+				database: 'test',
+				user: 'user',
+				password: 'pass',
 			},
 		});
 
@@ -87,55 +87,55 @@ describe("Router", () => {
 		});
 	});
 
-	it("allows replacing stub handlers", async () => {
+	it('allows replacing stub handlers', async () => {
 		const router = new Router();
-		router.setHandler("connect", () => ({
+		router.setHandler('connect', () => ({
 			ok: true,
-			connectionId: "abc-123",
+			connectionId: 'abc-123',
 			tables: 5,
 		}));
 
 		const response = await router.dispatch({
-			jsonrpc: "2.0",
+			jsonrpc: '2.0',
 			id: 1,
-			method: "connect",
+			method: 'connect',
 			params: {
-				host: "localhost",
+				host: 'localhost',
 				port: 5432,
-				database: "test",
-				user: "user",
-				password: "pass",
+				database: 'test',
+				user: 'user',
+				password: 'pass',
 			},
 		});
 
 		expect(response).toMatchObject({
 			id: 1,
-			result: { ok: true, connectionId: "abc-123", tables: 5 },
+			result: { ok: true, connectionId: 'abc-123', tables: 5 },
 		});
 	});
 
-	it("catches handler errors and returns InternalError", async () => {
+	it('catches handler errors and returns InternalError', async () => {
 		const router = new Router();
-		router.setHandler("connect", () => {
-			throw new Error("Boom!");
+		router.setHandler('connect', () => {
+			throw new Error('Boom!');
 		});
 
 		const response = await router.dispatch({
-			jsonrpc: "2.0",
+			jsonrpc: '2.0',
 			id: 1,
-			method: "connect",
+			method: 'connect',
 			params: {
-				host: "localhost",
+				host: 'localhost',
 				port: 5432,
-				database: "test",
-				user: "user",
-				password: "pass",
+				database: 'test',
+				user: 'user',
+				password: 'pass',
 			},
 		});
 
 		expect(response).toMatchObject({
 			id: 1,
-			error: { code: ErrorCode.InternalError, message: "Boom!" },
+			error: { code: ErrorCode.InternalError, message: 'Boom!' },
 		});
 	});
 });

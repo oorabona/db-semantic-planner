@@ -6,6 +6,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import type { IntentSummary } from '@dbsp/core';
 import {
 	parseAssertionFile,
 	validateAssertionBlocks,
@@ -13,7 +14,6 @@ import {
 import { type AssertionSummary, runAssertions } from './assertion-runner.js';
 import type { EngineEvent } from './engine/engine-types.js';
 import { ReplEngine } from './engine/repl-engine.js';
-import type { IntentSummary } from './nql-executor.js';
 import { formatOutput } from './output-formatter.js';
 
 export interface BatchModeOptions {

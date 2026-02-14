@@ -35,6 +35,7 @@ import {
 } from '@/lib/file-io';
 import { sidecarApi } from '@/lib/ipc';
 import { MENU_IDS, onMenuEvent } from '@/lib/menu';
+import { useAssertionStore } from '@/stores/assertion-store';
 import { useConnectionStore } from '@/stores/connection-store';
 import { getActiveTab, useEditorStore } from '@/stores/editor-store';
 import { useProjectStore } from '@/stores/project-store';
@@ -87,6 +88,24 @@ export default function App() {
 					return;
 				}
 				addTab(result.language, result.content, result.filePath);
+
+				// Auto-load paired .dbsp file when opening .assert.dbsp
+				if (result.language === 'assert' && result.filePath) {
+					const dbspPath = result.filePath.replace('.assert.dbsp', '.dbsp');
+					if (!findTabByFilePath(dbspPath)) {
+						try {
+							const dbspContent = await readTextFile(dbspPath);
+							addTab(languageFromPath(dbspPath), dbspContent, dbspPath);
+						} catch (err) {
+							// File-not-found is expected (user may create it later).
+							// Warn on unexpected errors (permission denied, disk full).
+							const msg = err instanceof Error ? err.message : String(err);
+							if (!msg.includes('not found') && !msg.includes('No such file')) {
+								console.warn(`Failed to load paired file ${dbspPath}: ${msg}`);
+							}
+						}
+					}
+				}
 			},
 		});
 		commandRegistry.register({
@@ -231,6 +250,68 @@ export default function App() {
 					| { trigger: (source: string, action: string) => void }
 					| undefined;
 				editor?.trigger('menu', 'editor.action.formatDocument');
+			},
+		});
+	}, []);
+
+	// Register assertion command
+	useEffect(() => {
+		commandRegistry.register({
+			id: 'editor.runAssertions',
+			label: 'Run Assertions',
+			shortcut: '⇧⌘T',
+			category: 'edit',
+			when: () => {
+				const tab = getActiveTab(useEditorStore.getState());
+				return tab?.language === 'assert';
+			},
+			handler: async () => {
+				const tab = getActiveTab(useEditorStore.getState());
+				if (!tab || tab.language !== 'assert') return;
+				const activeConn = useConnectionStore.getState().active;
+				if (!activeConn) return;
+
+				// Derive paired .dbsp file path from .assert.dbsp path
+				const assertContent = tab.content;
+				let dbspContent = '';
+				if (tab.filePath) {
+					const dbspPath = tab.filePath.replace('.assert.dbsp', '.dbsp');
+					const pairedTab = useEditorStore
+						.getState()
+						.findTabByFilePath(dbspPath);
+					if (pairedTab) {
+						dbspContent = pairedTab.content;
+					} else {
+						try {
+							dbspContent = await readTextFile(dbspPath);
+						} catch {
+							useAssertionStore
+								.getState()
+								.setError(
+									`No query file found: expected ${dbspPath.split('/').pop()}`,
+								);
+							return;
+						}
+					}
+				}
+
+				const { setRunning, setResult, setError } =
+					useAssertionStore.getState();
+				setRunning(tab.id, tab.id);
+				useResultsStore.getState().setActiveTab('assertions');
+
+				try {
+					const result = await sidecarApi.runAssertions({
+						connectionId: activeConn.connectionId,
+						dbspContent,
+						assertContent,
+					});
+					setResult(result);
+				} catch (err) {
+					const message =
+						err instanceof Error ? err.message : 'Assertion run failed';
+					setError(message);
+				}
 			},
 		});
 	}, []);

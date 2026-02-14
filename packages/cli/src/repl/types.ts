@@ -3,8 +3,8 @@ import type React from 'react';
  * DX-030: REPL Types
  */
 
+import type { IntentSummary } from '@dbsp/core';
 import type { LoadedSchema } from '../utils/schema-loader.js';
-import type { IntentSummary } from './nql-executor.js';
 
 /**
  * REPL Configuration passed from CLI command

@@ -60,6 +60,7 @@ function TabItem({
 	return (
 		<div
 			role="tab"
+			tabIndex={0}
 			aria-selected={active}
 			className={`group flex cursor-pointer items-center gap-1.5 border-r px-3 py-1.5 text-xs ${
 				active

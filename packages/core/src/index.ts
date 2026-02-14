@@ -407,3 +407,56 @@ export {
 // ============================================================================
 
 export { normalizeSQL } from './sql-utils.js';
+
+// ============================================================================
+// Assertion System (.assert.dbsp)
+// ============================================================================
+
+export type {
+	Assertion,
+	AssertionBlock,
+	AssertionOutcome,
+	AssertionQueryResult,
+	AssertionSummary,
+	AssertionType,
+	IntentSummary,
+	ParseError,
+	ParseResult,
+	QueryAssertionResult,
+	TableAssertionData,
+} from './assert/index.js';
+export {
+	// Parser
+	ASSERTION_TYPES,
+	// Individual assertion functions
+	assertContains,
+	assertDbColumnExists,
+	assertDbOutput,
+	assertDbRowsEquals,
+	assertDbRowsMax,
+	assertDbRowsMin,
+	assertDbValueEquals,
+	assertEquals,
+	assertIntentHasGroupBy,
+	assertIntentHasOrderBy,
+	assertIntentHasWhere,
+	assertIntentTable,
+	assertIntentType,
+	assertIntentWith,
+	assertMatches,
+	assertParamsEquals,
+	assertParamsLength,
+	assertParamsType,
+	assertParamsValue,
+	assertSQLColumn,
+	assertSQLEquals,
+	assertSQLJoin,
+	assertSQLTable,
+	assertSuccess,
+	parseAssertionFile,
+	requiresDatabase,
+	resolveQueryIndex,
+	// Runner
+	runAssertions,
+	validateAssertionBlocks,
+} from './assert/index.js';

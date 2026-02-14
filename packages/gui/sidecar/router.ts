@@ -94,6 +94,13 @@ const GetCompletionsParams = v.object({
 	connectionId: v.string(),
 });
 
+const RunAssertionsParams = v.object({
+	connectionId: v.string(),
+	dbspContent: v.string(),
+	assertContent: v.string(),
+	execute: v.optional(v.boolean()),
+});
+
 // ── Router ───────────────────────────────────────────────────────
 
 export class Router {
@@ -125,6 +132,7 @@ export class Router {
 		this.registerStub('cancel', CancelParams);
 		this.registerStub('getCompletions', GetCompletionsParams);
 		this.registerStub('resolveProfile', ResolveProfileParams);
+		this.registerStub('runAssertions', RunAssertionsParams);
 	}
 
 	/** Register a method with validation schema and handler. */

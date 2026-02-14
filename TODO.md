@@ -66,11 +66,11 @@
 
 (GUI-F002, GUI-F003 archived → docs/historic/done-2026-02.md)
 
-- [x] ✅ **GUI-BRIDGE** [GUI] TauriTransport + useSidecarInit + menu wiring — connect frontend to sidecar (2026-02-14)
+(GUI-BRIDGE archived → docs/historic/done-2026-02.md)
 
 ### Later
 
-- [ ] 💡 **GUI-010** [GUI] .assert.dbsp runner with inline pass/fail
+(GUI-010 archived → docs/historic/done-2026-02.md)
 - [ ] 💡 **GUI-011** [GUI] Schema diff (live DB vs schema.ts via compareSchemata)
 - [ ] 💡 **GUI-012** [GUI] Query history with search and re-run
 (GUI-013, GUI-014 archived → docs/historic/done-2026-02.md)
@@ -78,6 +78,14 @@
 - [ ] 💡 **GUI-016** [GUI] Status bar "+" → loupe icon, ouvre un panneau de logs applicatifs (sidecar stdout/stderr, IPC messages, query timing). Format: drawer coulissant depuis la barre de statut (style VS Code Output panel) ou onglet "Logs" dans le panneau results
 (GUI-MW-D01, GUI-MW-D02, GUI-MW-D04, GUI-MW-D05, GUI-MW-D06 archived → docs/historic/done-2026-02.md)
 - [ ] 💡 **GUI-MW-D03** [GUI] Per-connection SSL/params overrides in dbsp.settings.json — Priority: L
+- [ ] 🔧 **GUI-F004** [GUI] TauriTransport edge case tests — race condition (close during pending listen), listen() rejection, reconnect timer cleanup, double reconnect — Priority: L
+- [ ] 💡 **GUI-017** [GUI] Assertion file editing with syntax highlighting (write/edit .assert.dbsp, not just run) — Priority: L
+- [ ] 💡 **GUI-018** [GUI] Auto-discovery of .assert.dbsp files from project tree (scan + run all) — Priority: L
+- [ ] 💡 **GUI-019** [GUI] Live assertion re-run on file change (watch mode) — Priority: L
+- [ ] 💡 **GUI-020** [GUI] Assertion coverage reporting (queries with/without assertions) — Priority: L
+- [ ] 🔧 **GUI-F005** [GUI] Assertion resource limits — max file size, max assertion count per file — Priority: M (from /review F-002)
+- [ ] 🔧 **GUI-F006** [GUI] Query execution timeout for assertion runner — Priority: M (from /review F-003)
+- [ ] 🔧 **GUI-F007** [GUI] Edge case test coverage — empty .assert.dbsp, DB timeout, mid-run disconnect — Priority: M (from /review F-005)
 
 ---
 

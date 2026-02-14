@@ -21,7 +21,6 @@ const {
 	mockIntrospect,
 	mockStdinEmitter,
 } = vi.hoisted(() => {
-	// biome-ignore lint/style/noCommaOperator: require available at hoist
 	const { EventEmitter } =
 		require('node:events') as typeof import('node:events');
 	const emitter = new EventEmitter();
