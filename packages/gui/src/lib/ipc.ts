@@ -146,6 +146,35 @@ export interface ListSchemasParams extends DiscoverParams {
 	database: string;
 }
 
+export interface SchemaDiffChange {
+	readonly kind: string;
+	readonly table: string;
+	readonly column?: string;
+	readonly destructive: boolean;
+	readonly details: string;
+}
+
+export interface DiffSummary {
+	readonly tables: { readonly added: number; readonly dropped: number };
+	readonly columns: {
+		readonly added: number;
+		readonly dropped: number;
+		readonly altered: number;
+	};
+	readonly indexes: { readonly added: number; readonly dropped: number };
+	readonly constraints: {
+		readonly added: number;
+		readonly dropped: number;
+		readonly altered: number;
+	};
+}
+
+export interface SchemaDiffResult {
+	readonly changes: readonly SchemaDiffChange[];
+	readonly hasDestructive: boolean;
+	readonly summary: DiffSummary;
+}
+
 // ── Typed API ────────────────────────────────────────────────────
 
 export function createSidecarApi(client: IpcClient) {
@@ -217,6 +246,13 @@ export function createSidecarApi(client: IpcClient) {
 
 		listSchemas(params: ListSchemasParams) {
 			return client.call<{ schemas: string[] }>('listSchemas', params);
+		},
+
+		schemaDiff(connectionId: string, schemaPath?: string) {
+			return client.call<SchemaDiffResult>('schemaDiff', {
+				connectionId,
+				schemaPath,
+			});
 		},
 	};
 }

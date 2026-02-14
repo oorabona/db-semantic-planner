@@ -4,7 +4,13 @@
  */
 import { create } from 'zustand';
 
-export type ResultsTab = 'results' | 'sql' | 'plan' | 'params' | 'assertions';
+export type ResultsTab =
+	| 'results'
+	| 'sql'
+	| 'plan'
+	| 'params'
+	| 'assertions'
+	| 'schema-diff';
 
 export interface QueryResult {
 	/** Column names from the result set */

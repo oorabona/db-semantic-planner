@@ -4,12 +4,14 @@
 import {
 	CheckCircle,
 	Code,
+	GitCompareArrows,
 	Map as MapIcon,
 	Settings2,
 	Table,
 } from 'lucide-react';
 import { useAssertionStore } from '@/stores/assertion-store';
 import { type ResultsTab, useResultsStore } from '@/stores/results-store';
+import { useSchemaDiffStore } from '@/stores/schema-diff-store';
 
 const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof Table }> = [
 	{ id: 'results', label: 'Results', Icon: Table },
@@ -17,6 +19,7 @@ const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof Table }> = [
 	{ id: 'plan', label: 'Plan', Icon: MapIcon },
 	{ id: 'params', label: 'Params', Icon: Settings2 },
 	{ id: 'assertions', label: 'Assertions', Icon: CheckCircle },
+	{ id: 'schema-diff', label: 'Schema Diff', Icon: GitCompareArrows },
 ];
 
 export function ResultsTabs() {
@@ -24,6 +27,7 @@ export function ResultsTabs() {
 	const setActiveTab = useResultsStore((s) => s.setActiveTab);
 	const result = useResultsStore((s) => s.result);
 	const assertionResult = useAssertionStore((s) => s.result);
+	const schemaDiff = useSchemaDiffStore((s) => s.diff);
 
 	return (
 		<div className="flex items-center gap-1 border-b px-2">
@@ -33,7 +37,8 @@ export function ResultsTabs() {
 					(id === 'sql' && !result?.sql) ||
 					(id === 'plan' && !result?.plan) ||
 					(id === 'params' && !result?.params?.length) ||
-					(id === 'assertions' && !assertionResult);
+					(id === 'assertions' && !assertionResult) ||
+					(id === 'schema-diff' && !schemaDiff);
 
 				return (
 					<button

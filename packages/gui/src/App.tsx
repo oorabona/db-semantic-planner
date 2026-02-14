@@ -40,6 +40,7 @@ import { useConnectionStore } from '@/stores/connection-store';
 import { getActiveTab, useEditorStore } from '@/stores/editor-store';
 import { useProjectStore } from '@/stores/project-store';
 import { useResultsStore } from '@/stores/results-store';
+import { useSchemaDiffStore } from '@/stores/schema-diff-store';
 import { useUserSettingsStore } from '@/stores/user-settings-store';
 
 export default function App() {
@@ -310,6 +311,54 @@ export default function App() {
 				} catch (err) {
 					const message =
 						err instanceof Error ? err.message : 'Assertion run failed';
+					setError(message);
+				}
+			},
+		});
+	}, []);
+
+	// Register schema diff command
+	useEffect(() => {
+		commandRegistry.register({
+			id: 'schema.diff',
+			label: 'Compare Schema with Database',
+			category: 'view',
+			when: () => {
+				const conn = useConnectionStore.getState().active;
+				const folder = useProjectStore.getState().folderPath;
+				return conn !== null && folder !== null;
+			},
+			handler: async () => {
+				const conn = useConnectionStore.getState().active;
+				if (!conn) {
+					await showMessage('Connect to a database first', {
+						kind: 'warning',
+					});
+					return;
+				}
+
+				const folderPath = useProjectStore.getState().folderPath;
+				if (!folderPath) {
+					await showMessage(
+						'Open a project folder to compare schema (File > Open Folder)',
+						{ kind: 'warning' },
+					);
+					return;
+				}
+
+				const { setLoading, setDiff, setError } = useSchemaDiffStore.getState();
+				setLoading();
+				useResultsStore.getState().setActiveTab('schema-diff');
+
+				try {
+					const result = await sidecarApi.schemaDiff(
+						conn.connectionId,
+						folderPath,
+					);
+					setDiff(result);
+				} catch (err) {
+					const message =
+						err instanceof Error ? err.message : 'Schema diff failed';
 					setError(message);
 				}
 			},

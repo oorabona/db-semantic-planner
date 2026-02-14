@@ -101,6 +101,11 @@ const RunAssertionsParams = v.object({
 	execute: v.optional(v.boolean()),
 });
 
+const SchemaDiffParams = v.object({
+	connectionId: v.string(),
+	schemaPath: v.optional(v.string()),
+});
+
 // ── Router ───────────────────────────────────────────────────────
 
 export class Router {
@@ -133,6 +138,7 @@ export class Router {
 		this.registerStub('getCompletions', GetCompletionsParams);
 		this.registerStub('resolveProfile', ResolveProfileParams);
 		this.registerStub('runAssertions', RunAssertionsParams);
+		this.registerStub('schemaDiff', SchemaDiffParams);
 	}
 
 	/** Register a method with validation schema and handler. */

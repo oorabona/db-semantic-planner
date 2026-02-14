@@ -7,6 +7,7 @@ import { DataTable } from '@/components/results/DataTable';
 import { EmptyState } from '@/components/results/EmptyState';
 import { PlanInspector } from '@/components/results/PlanInspector';
 import { ResultsTabs } from '@/components/results/ResultsTabs';
+import { SchemaDiffView } from '@/components/results/SchemaDiffView';
 import { StatusBar } from '@/components/results/StatusBar';
 import { useAssertionStore } from '@/stores/assertion-store';
 import { useResultsStore } from '@/stores/results-store';
@@ -86,6 +87,12 @@ export function ResultsPanel() {
 								</span>
 							</div>
 						)}
+					</div>
+				)}
+
+				{activeTab === 'schema-diff' && (
+					<div className="flex-1 overflow-auto">
+						<SchemaDiffView />
 					</div>
 				)}
 			</div>
