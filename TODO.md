@@ -71,7 +71,7 @@
 ### Later
 
 (GUI-010 archived → docs/historic/done-2026-02.md)
-- [ ] 💡 **GUI-011** [GUI] Schema diff (live DB vs schema.ts via compareSchemata)
+- [x] ✅ **GUI-011** [GUI] Schema diff (live DB vs schema.ts via compareSchemata) (2026-02-14)
 - [ ] 💡 **GUI-012** [GUI] Query history with search and re-run
 (GUI-013, GUI-014 archived → docs/historic/done-2026-02.md)
 - [ ] 💡 **GUI-015** [GUI] Web version (@dbsp/web — same React frontend, HTTP/WS transport, phpMyAdmin-like)

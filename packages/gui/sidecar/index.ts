@@ -26,6 +26,10 @@ import {
 	notification,
 } from './protocol.js';
 import { Router } from './router.js';
+import {
+	handleSchemaDiff,
+	type SchemaDiffParams,
+} from './schema-diff-handler.js';
 
 // ── Step 1: Monkey-patch console to stderr (MUST be first) ───────
 
@@ -108,6 +112,11 @@ router.setHandler('runAssertions', async (params) => {
 		},
 		(connectionId) => getPool(connectionId),
 	);
+});
+
+router.setHandler('schemaDiff', async (params) => {
+	const p = params as SchemaDiffParams;
+	return handleSchemaDiff(p);
 });
 
 // ── Step 3: Write to stdout (protocol output) ────────────────────
