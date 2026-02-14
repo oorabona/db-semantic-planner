@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { sidecarApi } from '@/lib/ipc';
 import { useConnectionStore } from '@/stores/connection-store';
 import { getActiveTab, useEditorStore } from '@/stores/editor-store';
+import { useHistoryStore } from '@/stores/history-store';
 import { type QueryResult, useResultsStore } from '@/stores/results-store';
 import { EditorToolbar } from './EditorToolbar';
 import { MonacoWrapper } from './MonacoWrapper';
@@ -18,6 +19,7 @@ export function SqlEditor() {
 		const content = activeTab.content.trim();
 		if (!content) return;
 
+		const startTime = Date.now();
 		setExecuting(true);
 		try {
 			let raw: unknown;
@@ -41,10 +43,11 @@ export function SqlEditor() {
 					? Object.keys(rows[0] ?? {})
 					: ((response.columns ?? []) as string[]);
 
+			const durationMs = (response.durationMs as number) ?? 0;
 			const result: QueryResult = {
 				columns,
 				rows,
-				durationMs: (response.durationMs as number) ?? 0,
+				durationMs,
 				totalRows: response.totalRows as number | undefined,
 				truncated: response.truncated as boolean | undefined,
 				cursorId: response.cursorId as string | undefined,
@@ -53,9 +56,30 @@ export function SqlEditor() {
 				plan: response.plan,
 			};
 			setResult(result);
+
+			useHistoryStore.getState().addEntry({
+				query: content,
+				language: activeTab.language === 'nql' ? 'nql' : 'sql',
+				database: active.database,
+				timestamp: startTime,
+				durationMs,
+				rowCount: rows.length,
+				success: true,
+			});
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'Query failed';
 			setError(message);
+
+			useHistoryStore.getState().addEntry({
+				query: content,
+				language: activeTab.language === 'nql' ? 'nql' : 'sql',
+				database: active.database,
+				timestamp: startTime,
+				durationMs: Date.now() - startTime,
+				rowCount: null,
+				success: false,
+				error: message,
+			});
 		}
 	}, [activeTab, active, setResult, setExecuting, setError]);
 

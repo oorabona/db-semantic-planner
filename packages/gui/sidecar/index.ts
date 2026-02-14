@@ -11,10 +11,14 @@ import {
 } from './assertion-handler.js';
 import {
 	connect,
+	type DiscoverParams,
 	disconnect,
 	disconnectAll,
 	getPool,
 	introspectConnection,
+	type ListSchemasParams,
+	listDatabases,
+	listSchemas,
 } from './connection-manager.js';
 import { resolveProfileUri } from './profile-resolver.js';
 import {
@@ -25,6 +29,12 @@ import {
 	type JsonRpcResponse,
 	notification,
 } from './protocol.js';
+import {
+	type ExecuteNqlParams,
+	type ExecuteSqlParams,
+	handleExecuteNQL,
+	handleExecuteSQL,
+} from './query-executor.js';
 import { Router } from './router.js';
 import {
 	handleSchemaDiff,
@@ -119,6 +129,26 @@ router.setHandler('schemaDiff', async (params) => {
 	return handleSchemaDiff(p);
 });
 
+router.setHandler('executeSQL', async (params) => {
+	return handleExecuteSQL(params as ExecuteSqlParams, getPool);
+});
+
+router.setHandler('executeNQL', async (params) => {
+	return handleExecuteNQL(
+		params as ExecuteNqlParams,
+		getPool,
+		introspectConnection,
+	);
+});
+
+router.setHandler('listDatabases', async (params) => {
+	return listDatabases(params as DiscoverParams);
+});
+
+router.setHandler('listSchemas', async (params) => {
+	return listSchemas(params as ListSchemasParams);
+});
+
 // ── Step 3: Write to stdout (protocol output) ────────────────────
 
 function send(
@@ -144,30 +174,40 @@ const rl = createInterface({
 	crlfDelay: Number.POSITIVE_INFINITY, // Treat \r\n as single newline
 });
 
-rl.on('line', async (line: string) => {
+/** Track in-flight async handlers so shutdown waits for them. */
+const inflight = new Set<Promise<void>>();
+
+rl.on('line', (line: string) => {
 	// Skip empty lines
 	if (line.trim().length === 0) return;
 
-	let response: JsonRpcResponse;
-	try {
-		const request = decode(line);
-		response = await router.dispatch(request);
-	} catch (err) {
-		// Protocol-level parse error
-		const message = err instanceof Error ? err.message : 'Unknown parse error';
-		const code =
-			'code' in (err as object)
-				? (err as { code: number }).code
-				: ErrorCode.ParseError;
-		response = error(null, code, message);
-	}
+	const task = (async () => {
+		let response: JsonRpcResponse;
+		try {
+			const request = decode(line);
+			response = await router.dispatch(request);
+		} catch (err) {
+			// Protocol-level parse error
+			const message =
+				err instanceof Error ? err.message : 'Unknown parse error';
+			const code =
+				'code' in (err as object)
+					? (err as { code: number }).code
+					: ErrorCode.ParseError;
+			response = error(null, code, message);
+		}
+		send(response);
+	})();
 
-	send(response);
+	inflight.add(task);
+	task.finally(() => inflight.delete(task));
 });
 
 // ── Step 6: Graceful shutdown ────────────────────────────────────
 
 rl.on('close', async () => {
+	// Wait for all in-flight requests to complete before exiting
+	await Promise.all(inflight);
 	clearInterval(heartbeatTimer);
 	await disconnectAll();
 	console.log('Sidecar: stdin closed, shutting down');

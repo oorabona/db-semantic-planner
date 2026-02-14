@@ -10,7 +10,8 @@ export type ResultsTab =
 	| 'plan'
 	| 'params'
 	| 'assertions'
-	| 'schema-diff';
+	| 'schema-diff'
+	| 'history';
 
 export interface QueryResult {
 	/** Column names from the result set */

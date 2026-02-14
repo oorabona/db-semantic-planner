@@ -62,6 +62,10 @@ export async function connect(params: ConnectParams): Promise<{
 		ssl,
 		max: 5,
 		connectionTimeoutMillis: 10_000,
+		// Set search_path at connection level so all clients in the pool use it
+		...(schema !== 'public' && {
+			options: `-c search_path="${schema}",public`,
+		}),
 	});
 
 	// Test the connection
@@ -127,6 +131,74 @@ export function getConnectionInfo(connectionId: string): {
 
 export function isConnected(connectionId: string): boolean {
 	return connections.has(connectionId);
+}
+
+export interface DiscoverParams {
+	host: string;
+	port: number;
+	user: string;
+	password: string;
+	sslMode?: SslMode;
+}
+
+export interface ListSchemasParams extends DiscoverParams {
+	database: string;
+}
+
+/**
+ * Discover all non-template databases on the server.
+ * Uses a temporary connection to the `postgres` maintenance database.
+ */
+export async function listDatabases(
+	params: DiscoverParams,
+): Promise<{ databases: string[] }> {
+	const ssl = sslConfig(params.sslMode ?? 'prefer');
+	const pool = new Pool({
+		host: params.host,
+		port: params.port,
+		database: 'postgres',
+		user: params.user,
+		password: params.password,
+		ssl,
+		max: 1,
+		connectionTimeoutMillis: 10_000,
+	});
+	try {
+		const { rows } = await pool.query<{ datname: string }>(
+			'SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname',
+		);
+		return { databases: rows.map((r) => r.datname) };
+	} finally {
+		await pool.end();
+	}
+}
+
+/**
+ * List non-system schemas in a specific database.
+ * Uses a temporary connection.
+ */
+export async function listSchemas(
+	params: ListSchemasParams,
+): Promise<{ schemas: string[] }> {
+	const ssl = sslConfig(params.sslMode ?? 'prefer');
+	const pool = new Pool({
+		host: params.host,
+		port: params.port,
+		database: params.database,
+		user: params.user,
+		password: params.password,
+		ssl,
+		max: 1,
+		connectionTimeoutMillis: 10_000,
+	});
+	try {
+		const { rows } = await pool.query<{ schema_name: string }>(
+			"SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast') ORDER BY schema_name",
+		);
+		return { schemas: rows.map((r) => r.schema_name) };
+	} finally {
+		await pool.end();
+	}
 }
 
 export async function disconnectAll(): Promise<void> {

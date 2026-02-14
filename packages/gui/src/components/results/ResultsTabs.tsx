@@ -5,6 +5,7 @@ import {
 	CheckCircle,
 	Code,
 	GitCompareArrows,
+	History,
 	Map as MapIcon,
 	Settings2,
 	Table,
@@ -20,6 +21,7 @@ const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof Table }> = [
 	{ id: 'params', label: 'Params', Icon: Settings2 },
 	{ id: 'assertions', label: 'Assertions', Icon: CheckCircle },
 	{ id: 'schema-diff', label: 'Schema Diff', Icon: GitCompareArrows },
+	{ id: 'history', label: 'History', Icon: History },
 ];
 
 export function ResultsTabs() {
