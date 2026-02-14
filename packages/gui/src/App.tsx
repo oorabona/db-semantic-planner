@@ -6,7 +6,7 @@ import {
 } from '@tauri-apps/plugin-dialog';
 import { readTextFile } from '@tauri-apps/plugin-fs';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
-import { Plus } from 'lucide-react';
+import { History, Plus } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import {
@@ -385,6 +385,15 @@ export default function App() {
 			menuId: MENU_IDS.VIEW_TOGGLE_RESULTS,
 			handler: () => {
 				setResultsVisible((prev) => !prev);
+			},
+		});
+		commandRegistry.register({
+			id: 'view.history',
+			label: 'Show Query History',
+			category: 'view',
+			icon: History,
+			handler: () => {
+				useResultsStore.getState().setActiveTab('history');
 			},
 		});
 		commandRegistry.register({

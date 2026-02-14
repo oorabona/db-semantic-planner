@@ -5,6 +5,7 @@
 import { AssertionResults } from '@/components/results/AssertionResults';
 import { DataTable } from '@/components/results/DataTable';
 import { EmptyState } from '@/components/results/EmptyState';
+import { HistoryPanel } from '@/components/results/HistoryPanel';
 import { PlanInspector } from '@/components/results/PlanInspector';
 import { ResultsTabs } from '@/components/results/ResultsTabs';
 import { SchemaDiffView } from '@/components/results/SchemaDiffView';
@@ -93,6 +94,12 @@ export function ResultsPanel() {
 				{activeTab === 'schema-diff' && (
 					<div className="flex-1 overflow-auto">
 						<SchemaDiffView />
+					</div>
+				)}
+
+				{activeTab === 'history' && (
+					<div className="flex-1 overflow-auto">
+						<HistoryPanel />
 					</div>
 				)}
 			</div>

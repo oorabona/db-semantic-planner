@@ -106,6 +106,27 @@ const SchemaDiffParams = v.object({
 	schemaPath: v.optional(v.string()),
 });
 
+const ListDatabasesParams = v.object({
+	host: v.string(),
+	port: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(65535)),
+	user: v.string(),
+	password: v.string(),
+	sslMode: v.optional(
+		v.picklist(['disable', 'allow', 'prefer', 'require', 'verify-full']),
+	),
+});
+
+const ListSchemasParams = v.object({
+	host: v.string(),
+	port: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(65535)),
+	user: v.string(),
+	password: v.string(),
+	sslMode: v.optional(
+		v.picklist(['disable', 'allow', 'prefer', 'require', 'verify-full']),
+	),
+	database: v.string(),
+});
+
 // ── Router ───────────────────────────────────────────────────────
 
 export class Router {
@@ -139,6 +160,8 @@ export class Router {
 		this.registerStub('resolveProfile', ResolveProfileParams);
 		this.registerStub('runAssertions', RunAssertionsParams);
 		this.registerStub('schemaDiff', SchemaDiffParams);
+		this.registerStub('listDatabases', ListDatabasesParams);
+		this.registerStub('listSchemas', ListSchemasParams);
 	}
 
 	/** Register a method with validation schema and handler. */
