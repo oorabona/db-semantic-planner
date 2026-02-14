@@ -1,0 +1,152 @@
+name: GUI Release
+
+on:
+  push:
+    tags:
+      - 'gui-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '22'
+  PNPM_VERSION: '9'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            label: linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: windows-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            label: macos-aarch64
+
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.label }})
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: packages/gui/src-tauri
+
+      # Linux system deps for Tauri
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Build monorepo packages needed by sidecar
+      - name: Build core packages
+        run: |
+          pnpm -C packages/types build
+          pnpm -C packages/core build
+          pnpm -C packages/nql build
+          pnpm -C packages/adapter-pgsql build
+
+      # Build sidecar (Node.js SEA) — platform-specific
+      - name: Build sidecar (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: bash packages/gui/scripts/build-sidecar.sh
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
+
+      - name: Build sidecar (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: bash packages/gui/scripts/build-sidecar.sh
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
+
+      # macOS code signing for sidecar
+      - name: Sign sidecar (macOS)
+        if: matrix.os == 'macos-latest' && env.APPLE_SIGNING_IDENTITY != ''
+        run: |
+          codesign --sign "${APPLE_SIGNING_IDENTITY}" \
+            --options runtime \
+            --entitlements packages/gui/src-tauri/entitlements.plist \
+            packages/gui/src-tauri/binaries/dbsp-sidecar-aarch64-apple-darwin
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+
+      # Build Tauri app
+      - name: Build Tauri
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: packages/gui
+          tagName: gui-v__VERSION__
+          releaseName: 'DBSP GUI v__VERSION__'
+          releaseBody: 'Desktop database explorer for db-semantic-planner.'
+          releaseDraft: true
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+  # Run tests before building (separate job for speed)
+  test:
+    runs-on: ubuntu-latest
+    name: Test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run GUI tests
+        run: pnpm -C packages/gui test
+
+      - name: TypeScript check
+        working-directory: packages/gui
+        run: npx tsc --noEmit
