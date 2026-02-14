@@ -57,9 +57,11 @@ export function createTauriTransport(): IpcTransport {
 				unlisteners.length = 0;
 			});
 			pending.length = 0;
-			invoke('sidecar_kill').catch(() => {
-				// Ignore kill errors on close
-			});
+			// NOTE: Don't call sidecar_kill here. On webview reload, the cleanup's
+			// fire-and-forget kill races with the new mount's sidecar_spawn, often
+			// killing the freshly spawned sidecar. sidecar_spawn already handles
+			// killing the old process atomically within its mutex lock.
+			// On app exit, the sidecar detects stdin EOF and exits cleanly.
 		},
 	};
 }

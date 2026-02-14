@@ -126,7 +126,7 @@ describe('createTauriTransport', () => {
 	});
 
 	describe('close', () => {
-		it('calls all unlisteners and invokes sidecar_kill', async () => {
+		it('calls all unlisteners but does not kill sidecar (spawn handles it)', async () => {
 			const unlisten1 = vi.fn();
 			const unlisten2 = vi.fn();
 			let listenCount = 0;
@@ -149,16 +149,9 @@ describe('createTauriTransport', () => {
 
 			expect(unlisten1).toHaveBeenCalled();
 			expect(unlisten2).toHaveBeenCalled();
-			expect(mockInvoke).toHaveBeenCalledWith('sidecar_kill');
-		});
-
-		it('ignores sidecar_kill errors', () => {
-			mockListen.mockResolvedValue(vi.fn());
-			mockInvoke.mockRejectedValue(new Error('already dead'));
-
-			const transport = createTauriTransport();
-			// Should not throw
-			transport.close();
+			// sidecar_kill is NOT called — sidecar_spawn handles kill atomically,
+			// and calling kill here races with the new mount's spawn on reload
+			expect(mockInvoke).not.toHaveBeenCalledWith('sidecar_kill');
 		});
 
 		it('clears unlisteners array on close (no double-unlisten)', async () => {
