@@ -6,6 +6,13 @@
 
 export { type GenerateDDLOptions, generateDDL } from './ddl-generator.js';
 export {
+	generateMigrationFile,
+	isDestructiveDown,
+	type ParsedMigrationFile,
+	parseMigrationFile,
+} from './migration-file.js';
+export {
+	generateDownSQL,
 	generateMigrationSQL,
 	type MigrationSQLOptions,
 } from './migration-sql.js';
@@ -13,10 +20,13 @@ export {
 	acquireMigrationLock,
 	ensureMigrationsTable,
 	getAppliedMigrations,
+	getNextSchemaVersion,
 	isMigrationApplied,
 	type MigrationRecord,
 	recordMigration,
 	releaseMigrationLock,
+	removeMigrationRecord,
+	withMigrationLock,
 } from './migration-tracker.js';
 export {
 	type ChangeKind,

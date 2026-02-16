@@ -1,23 +1,66 @@
 /**
- * Schema diff view — groups changes by category with expand/collapse.
- * Shows summary bar at top, change groups below.
+ * Schema diff view — groups changes by table with expand/collapse.
+ * Shows summary bar at top, change groups, SQL preview toggle, and Apply button.
  */
 import {
 	ChevronDown,
 	ChevronRight,
+	Code,
+	Columns,
 	Minus,
+	Play,
 	Plus,
 	RefreshCw,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { SchemaDiffChange } from '@/lib/ipc';
+import { sidecarApi } from '@/lib/ipc';
 import { useSchemaDiffStore } from '@/stores/schema-diff-store';
+import { ApplyConfirmDialog } from './ApplyConfirmDialog';
 import { SchemaDiffSummary } from './SchemaDiffSummary';
+import { SideBySideChange } from './SideBySideChange';
+import { SqlPreviewPanel } from './SqlPreviewPanel';
 
 export function SchemaDiffView() {
 	const diff = useSchemaDiffStore((s) => s.diff);
 	const loading = useSchemaDiffStore((s) => s.loading);
 	const error = useSchemaDiffStore((s) => s.error);
+	const applying = useSchemaDiffStore((s) => s.applying);
+	const applyError = useSchemaDiffStore((s) => s.applyError);
+	const setApplying = useSchemaDiffStore((s) => s.setApplying);
+	const setApplyDone = useSchemaDiffStore((s) => s.setApplyDone);
+	const setApplyError = useSchemaDiffStore((s) => s.setApplyError);
+
+	const [showSql, setShowSql] = useState(false);
+	const [showConfirm, setShowConfirm] = useState(false);
+	const [showSideBySide, setShowSideBySide] = useState(false);
+
+	const handleApply = useCallback(async () => {
+		if (!diff || diff.upSQL.length === 0) return;
+		setApplying();
+		try {
+			const connectionId = (window as unknown as Record<string, unknown>)
+				.__dbsp_connectionId as string;
+			if (!connectionId) {
+				setApplyError('No active connection');
+				setShowConfirm(false);
+				return;
+			}
+			const result = await sidecarApi.schemaApply(connectionId, [
+				...diff.upSQL,
+			]);
+			if (result.success) {
+				setApplyDone(result.applied);
+				setShowConfirm(false);
+			} else {
+				setApplyError(result.error ?? 'Apply failed');
+				setShowConfirm(false);
+			}
+		} catch (err) {
+			setApplyError(err instanceof Error ? err.message : String(err));
+			setShowConfirm(false);
+		}
+	}, [diff, setApplying, setApplyDone, setApplyError]);
 
 	if (loading) {
 		return (
@@ -48,7 +91,8 @@ export function SchemaDiffView() {
 		);
 	}
 
-	const groups = groupChanges(diff.changes);
+	const groups = groupChangesByTable(diff.changes);
+	const hasChanges = diff.changes.length > 0;
 
 	return (
 		<div className="flex h-full flex-col overflow-hidden">
@@ -57,11 +101,86 @@ export function SchemaDiffView() {
 				hasDestructive={diff.hasDestructive}
 				totalChanges={diff.changes.length}
 			/>
+
+			{/* Toolbar: SQL preview toggle + Side-by-side toggle + Apply button */}
+			{hasChanges && (
+				<div
+					className="flex items-center gap-2 border-b border-border px-3 py-1.5"
+					data-testid="diff-toolbar"
+				>
+					<button
+						type="button"
+						className={`flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+							showSql
+								? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+								: 'text-muted-foreground hover:text-foreground hover:bg-muted'
+						}`}
+						onClick={() => setShowSql(!showSql)}
+						data-testid="toggle-sql-preview"
+					>
+						<Code className="h-3 w-3" />
+						SQL
+					</button>
+					<button
+						type="button"
+						className={`flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+							showSideBySide
+								? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+								: 'text-muted-foreground hover:text-foreground hover:bg-muted'
+						}`}
+						onClick={() => setShowSideBySide(!showSideBySide)}
+						data-testid="toggle-side-by-side"
+					>
+						<Columns className="h-3 w-3" />
+						Diff
+					</button>
+					<div className="flex-1" />
+					<button
+						type="button"
+						className="flex items-center gap-1 rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+						onClick={() => setShowConfirm(true)}
+						disabled={applying}
+						data-testid="apply-btn"
+					>
+						<Play className="h-3 w-3" />
+						{applying ? 'Applying...' : 'Apply'}
+					</button>
+				</div>
+			)}
+
+			{/* Apply error */}
+			{applyError && (
+				<div
+					className="border-b border-border bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-950/20 dark:text-red-400"
+					data-testid="apply-error"
+				>
+					Apply failed: {applyError}
+				</div>
+			)}
+
+			{/* SQL Preview */}
+			{showSql && <SqlPreviewPanel upSQL={diff.upSQL} downSQL={diff.downSQL} />}
+
+			{/* Change list grouped by table */}
 			<div className="flex-1 overflow-auto">
 				{groups.map((group) => (
-					<ChangeGroup key={group.label} group={group} />
+					<ChangeGroup
+						key={group.label}
+						group={group}
+						showSideBySide={showSideBySide}
+					/>
 				))}
 			</div>
+
+			{/* Apply confirmation dialog */}
+			<ApplyConfirmDialog
+				open={showConfirm}
+				onConfirm={handleApply}
+				onCancel={() => setShowConfirm(false)}
+				statements={diff.upSQL}
+				hasDestructive={diff.hasDestructive}
+				applying={applying}
+			/>
 		</div>
 	);
 }
@@ -73,7 +192,13 @@ interface ChangeGroupData {
 	changes: readonly SchemaDiffChange[];
 }
 
-function ChangeGroup({ group }: { group: ChangeGroupData }) {
+function ChangeGroup({
+	group,
+	showSideBySide,
+}: {
+	group: ChangeGroupData;
+	showSideBySide: boolean;
+}) {
 	const [expanded, setExpanded] = useState(true);
 
 	return (
@@ -101,6 +226,7 @@ function ChangeGroup({ group }: { group: ChangeGroupData }) {
 						<ChangeRow
 							key={`${change.kind}-${change.table}-${change.column ?? ''}-${i}`}
 							change={change}
+							showSideBySide={showSideBySide}
 						/>
 					))}
 				</div>
@@ -111,26 +237,36 @@ function ChangeGroup({ group }: { group: ChangeGroupData }) {
 
 // ── Change Row ──────────────────────────────────────────────────
 
-function ChangeRow({ change }: { change: SchemaDiffChange }) {
+function ChangeRow({
+	change,
+	showSideBySide,
+}: {
+	change: SchemaDiffChange;
+	showSideBySide: boolean;
+}) {
 	const changeType = getChangeType(change.kind);
 	const entityName = change.column
 		? `${change.table}.${change.column}`
 		: change.table;
+	const isAlter = change.kind.startsWith('alter_');
 
 	return (
-		<div className="flex items-start gap-2 py-0.5 text-xs">
-			<ChangeIcon type={changeType} />
-			<div className="min-w-0">
-				<span className={`font-mono ${changeTypeColor(changeType)}`}>
-					{entityName}
-				</span>
-				<p className="text-muted-foreground">{change.details}</p>
-				{change.destructive && (
-					<span className="text-[11px] font-medium text-red-600 dark:text-red-400">
-						destructive
+		<div className="py-0.5 text-xs">
+			<div className="flex items-start gap-2">
+				<ChangeIcon type={changeType} />
+				<div className="min-w-0">
+					<span className={`font-mono ${changeTypeColor(changeType)}`}>
+						{entityName}
 					</span>
-				)}
+					<p className="text-muted-foreground">{change.details}</p>
+					{change.destructive && (
+						<span className="text-[11px] font-medium text-red-600 dark:text-red-400">
+							destructive
+						</span>
+					)}
+				</div>
 			</div>
+			{showSideBySide && isAlter && <SideBySideChange change={change} />}
 		</div>
 	);
 }
@@ -175,33 +311,23 @@ function getChangeType(kind: string): ChangeType {
 	return 'alteration';
 }
 
-function getGroupLabel(kind: string): string {
-	if (kind === 'create_table' || kind === 'drop_table') return 'Tables';
-	if (kind.includes('column')) return 'Columns';
-	if (kind.includes('index')) return 'Indexes';
-	if (kind.includes('primary_key') || kind.includes('foreign_key'))
-		return 'Constraints';
-	return 'Other';
-}
-
-function groupChanges(changes: readonly SchemaDiffChange[]): ChangeGroupData[] {
-	const groupOrder = ['Tables', 'Columns', 'Indexes', 'Constraints', 'Other'];
+/** Groups changes by table name, maintaining insertion order. */
+function groupChangesByTable(
+	changes: readonly SchemaDiffChange[],
+): ChangeGroupData[] {
 	const map = new Map<string, SchemaDiffChange[]>();
 
 	for (const change of changes) {
-		const label = getGroupLabel(change.kind);
-		const list = map.get(label);
+		const list = map.get(change.table);
 		if (list) {
 			list.push(change);
 		} else {
-			map.set(label, [change]);
+			map.set(change.table, [change]);
 		}
 	}
 
-	return groupOrder
-		.filter((label) => map.has(label))
-		.map((label) => ({
-			label,
-			changes: map.get(label) ?? [],
-		}));
+	return Array.from(map.entries()).map(([table, tableChanges]) => ({
+		label: table,
+		changes: tableChanges,
+	}));
 }

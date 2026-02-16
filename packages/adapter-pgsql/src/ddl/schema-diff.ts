@@ -198,7 +198,7 @@ function compareColumnDetails(
 			column: schema.name,
 			destructive: false,
 			details: `Change nullable of "${schema.name}" from ${db.nullable} to ${schema.nullable}`,
-			meta: { nullable: schema.nullable },
+			meta: { nullable: schema.nullable, oldNullable: db.nullable },
 		});
 	}
 
@@ -212,7 +212,7 @@ function compareColumnDetails(
 			column: schema.name,
 			destructive: false,
 			details: `Change default of "${schema.name}" from ${dbDefault ?? 'none'} to ${schemaDefault ?? 'none'}`,
-			meta: { default: schema.default },
+			meta: { default: schema.default, oldDefault: db.default },
 		});
 	}
 }
@@ -329,7 +329,7 @@ function compareForeignKeys(
 					table: schema.name,
 					destructive: false,
 					details: `Change onDelete of FK (${fk.columns.join(', ')}) from ${dbOnDelete} to ${schemaOnDelete}`,
-					meta: { fk, previousOnDelete: dbOnDelete },
+					meta: { fk, previousOnDelete: dbOnDelete, oldFk: dbFK },
 				});
 			}
 		}

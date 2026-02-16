@@ -9,6 +9,8 @@ import {
 	type ChangeKind,
 	compareSchemata,
 	type DiffSummary,
+	generateDownSQL,
+	generateMigrationSQL,
 	type SchemaDiff,
 } from '@dbsp/adapter-pgsql';
 import { introspectConnection } from './connection-manager.js';
@@ -31,12 +33,15 @@ export interface SchemaDiffChange {
 	readonly column?: string;
 	readonly destructive: boolean;
 	readonly details: string;
+	readonly meta?: Readonly<Record<string, unknown>>;
 }
 
 export interface SchemaDiffResult {
 	readonly changes: readonly SchemaDiffChange[];
 	readonly hasDestructive: boolean;
 	readonly summary: DiffSummary;
+	readonly upSQL: readonly string[];
+	readonly downSQL: readonly string[];
 }
 
 // ── Handler ─────────────────────────────────────────────────────
@@ -78,7 +83,11 @@ export async function handleSchemaDiff(
 	// 4. Compare
 	const diff: SchemaDiff = compareSchemata(loaded.model, db);
 
-	// 5. Serialize (strip meta from changes for JSON transport)
+	// 5. Generate UP and DOWN SQL
+	const upSQL = diff.changes.length > 0 ? generateMigrationSQL(diff) : [];
+	const downSQL = diff.changes.length > 0 ? generateDownSQL(diff) : [];
+
+	// 6. Serialize for JSON transport
 	return {
 		changes: diff.changes.map((c) => ({
 			kind: c.kind,
@@ -86,8 +95,11 @@ export async function handleSchemaDiff(
 			column: c.column,
 			destructive: c.destructive,
 			details: c.details,
+			meta: c.meta,
 		})),
 		hasDestructive: diff.hasDestructive,
 		summary: diff.summary,
+		upSQL,
+		downSQL,
 	};
 }

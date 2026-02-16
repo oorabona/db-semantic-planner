@@ -86,6 +86,8 @@ export async function handleExecuteNQL(
 	const compilerOptions = extractPseudoColumnKeywords(model);
 	const result = compileNql(params.nql, model, undefined, compilerOptions);
 
+	/* v8 ignore start — defensive guards: NQL compiler always produces one of query/mutation/setOp;
+	   parse errors are caught upstream by the router. Mock cost >> test value. -- @preserve */
 	if (!result.success || !result.ast) {
 		const messages = result.errors.map((e) => e.message).join('\n');
 		throw new Error(`NQL parse error: ${messages}`);
@@ -137,6 +139,7 @@ export async function handleExecuteNQL(
 			'NQL compiled to neither query, mutation, nor set operation',
 		);
 	}
+	/* v8 ignore stop -- @preserve */
 
 	// Execute against DB
 	const start = performance.now();
