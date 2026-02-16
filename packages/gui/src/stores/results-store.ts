@@ -11,7 +11,8 @@ export type ResultsTab =
 	| 'params'
 	| 'assertions'
 	| 'schema-diff'
-	| 'history';
+	| 'history'
+	| 'logs';
 
 export interface QueryResult {
 	/** Column names from the result set */

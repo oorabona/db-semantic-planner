@@ -6,6 +6,7 @@ import { AssertionResults } from '@/components/results/AssertionResults';
 import { DataTable } from '@/components/results/DataTable';
 import { EmptyState } from '@/components/results/EmptyState';
 import { HistoryPanel } from '@/components/results/HistoryPanel';
+import { LogPanel } from '@/components/results/LogPanel';
 import { PlanInspector } from '@/components/results/PlanInspector';
 import { ResultsTabs } from '@/components/results/ResultsTabs';
 import { SchemaDiffView } from '@/components/results/SchemaDiffView';
@@ -100,6 +101,12 @@ export function ResultsPanel() {
 				{activeTab === 'history' && (
 					<div className="flex-1 overflow-auto">
 						<HistoryPanel />
+					</div>
+				)}
+
+				{activeTab === 'logs' && (
+					<div className="flex-1 overflow-auto">
+						<LogPanel />
 					</div>
 				)}
 			</div>
