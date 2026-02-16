@@ -7,6 +7,7 @@ import {
 	GitCompareArrows,
 	History,
 	Map as MapIcon,
+	ScrollText,
 	Settings2,
 	Table,
 } from 'lucide-react';
@@ -22,6 +23,7 @@ const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof Table }> = [
 	{ id: 'assertions', label: 'Assertions', Icon: CheckCircle },
 	{ id: 'schema-diff', label: 'Schema Diff', Icon: GitCompareArrows },
 	{ id: 'history', label: 'History', Icon: History },
+	{ id: 'logs', label: 'Logs', Icon: ScrollText },
 ];
 
 export function ResultsTabs() {

@@ -8,6 +8,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useEffect, useRef } from 'react';
 import { ipcClient } from '@/lib/ipc';
 import { createTauriTransport } from '@/lib/tauri-transport';
+import { useLogStore } from '@/stores/log-store';
 import { useSidecarStore } from '@/stores/sidecar-store';
 
 /** Version sent during handshake — must match sidecar expectations */
@@ -66,10 +67,19 @@ export function useSidecarInit(): void {
 			}
 		});
 
-		// Listen for sidecar stderr (log to console)
+		// Listen for sidecar stderr (log to console + store)
 		let unlistenStderr: (() => void) | null = null;
 		listen<string>('sidecar-stderr', (event) => {
 			console.warn('[sidecar]', event.payload);
+			const msg = event.payload;
+			const level = msg.startsWith('[ERROR]')
+				? 'error'
+				: msg.startsWith('[WARN]')
+					? 'warn'
+					: msg.startsWith('[DEBUG]')
+						? 'debug'
+						: 'info';
+			useLogStore.getState().addEntry(level, 'sidecar', msg);
 		}).then((unlisten) => {
 			unlistenStderr = unlisten;
 		});
