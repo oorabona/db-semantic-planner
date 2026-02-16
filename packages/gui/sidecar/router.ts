@@ -106,6 +106,11 @@ const SchemaDiffParams = v.object({
 	schemaPath: v.optional(v.string()),
 });
 
+const SchemaApplyParams = v.object({
+	connectionId: v.string(),
+	statements: v.array(v.string()),
+});
+
 const ListDatabasesParams = v.object({
 	host: v.string(),
 	port: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(65535)),
@@ -160,6 +165,7 @@ export class Router {
 		this.registerStub('resolveProfile', ResolveProfileParams);
 		this.registerStub('runAssertions', RunAssertionsParams);
 		this.registerStub('schemaDiff', SchemaDiffParams);
+		this.registerStub('schemaApply', SchemaApplyParams);
 		this.registerStub('listDatabases', ListDatabasesParams);
 		this.registerStub('listSchemas', ListSchemasParams);
 	}

@@ -64,99 +64,107 @@ const router = new Router();
 
 // ── Step 2b: Wire connection handlers ─────────────────────────────
 
-router.setHandler('connect', async (params) => {
-	const p = params as {
-		host: string;
-		port: number;
-		database: string;
-		user: string;
-		password: string;
-		schema?: string;
-		sslMode?: 'disable' | 'allow' | 'prefer' | 'require' | 'verify-full';
-	};
-	return connect(p);
-});
+try {
+	router.setHandler('connect', async (params) => {
+		const p = params as {
+			host: string;
+			port: number;
+			database: string;
+			user: string;
+			password: string;
+			schema?: string;
+			sslMode?: 'disable' | 'allow' | 'prefer' | 'require' | 'verify-full';
+		};
+		return connect(p);
+	});
 
-router.setHandler('disconnect', async (params) => {
-	const { connectionId } = params as { connectionId: string };
-	await disconnect(connectionId);
-	return { ok: true };
-});
+	router.setHandler('disconnect', async (params) => {
+		const { connectionId } = params as { connectionId: string };
+		await disconnect(connectionId);
+		return { ok: true };
+	});
 
-router.setHandler('introspect', async (params) => {
-	const { connectionId, schema } = params as {
-		connectionId: string;
-		schema?: string;
-	};
-	const model = await introspectConnection(connectionId, schema);
+	router.setHandler('introspect', async (params) => {
+		const { connectionId, schema } = params as {
+			connectionId: string;
+			schema?: string;
+		};
+		const model = await introspectConnection(connectionId, schema);
 
-	// Convert ReadonlyMap to plain arrays for JSON serialization
-	const tables = [...model.tables.values()].map((t) => ({
-		...t,
-		foreignKeys: [...t.foreignKeys],
-		indexes: [...t.indexes],
-		columns: [...t.columns],
-	}));
-	const relations = [...model.relations.values()];
+		// Convert ReadonlyMap to plain arrays for JSON serialization
+		const tables = [...model.tables.values()].map((t) => ({
+			...t,
+			foreignKeys: [...t.foreignKeys],
+			indexes: [...t.indexes],
+			columns: [...t.columns],
+		}));
+		const relations = [...model.relations.values()];
 
-	return {
-		tables,
-		relations,
-		hierarchies: [...model.hierarchies],
-		warnings: [...model.warnings],
-		introspectedAt: model.introspectedAt.toISOString(),
-	};
-});
+		return {
+			tables,
+			relations,
+			hierarchies: [...model.hierarchies],
+			warnings: [...model.warnings],
+			introspectedAt: model.introspectedAt.toISOString(),
+		};
+	});
 
-router.setHandler('resolveProfile', async (params) => {
-	const { uri, projectPath } = params as {
-		uri: string;
-		projectPath?: string;
-	};
-	return resolveProfileUri(uri, projectPath);
-});
+	router.setHandler('resolveProfile', async (params) => {
+		const { uri, projectPath } = params as {
+			uri: string;
+			projectPath?: string;
+		};
+		return resolveProfileUri(uri, projectPath);
+	});
 
-router.setHandler('runAssertions', async (params) => {
-	const p = params as RunAssertionsParams;
-	return handleRunAssertions(
-		p,
-		async (connectionId) => {
-			const model = await introspectConnection(connectionId);
-			return model;
-		},
-		(connectionId) => getPool(connectionId),
+	router.setHandler('runAssertions', async (params) => {
+		const p = params as RunAssertionsParams;
+		return handleRunAssertions(
+			p,
+			async (connectionId) => {
+				const model = await introspectConnection(connectionId);
+				return model;
+			},
+			(connectionId) => getPool(connectionId),
+		);
+	});
+
+	router.setHandler('schemaDiff', async (params) => {
+		const p = params as SchemaDiffParams;
+		return handleSchemaDiff(p);
+	});
+
+	router.setHandler('schemaApply', async (params) => {
+		const p = params as SchemaApplyParams;
+		return handleSchemaApply(p);
+	});
+
+	router.setHandler('executeSQL', async (params) => {
+		return handleExecuteSQL(params as ExecuteSqlParams, getPool);
+	});
+
+	router.setHandler('executeNQL', async (params) => {
+		return handleExecuteNQL(
+			params as ExecuteNqlParams,
+			getPool,
+			introspectConnection,
+		);
+	});
+
+	router.setHandler('listDatabases', async (params) => {
+		return listDatabases(params as DiscoverParams);
+	});
+
+	router.setHandler('listSchemas', async (params) => {
+		return listSchemas(params as ListSchemasParams);
+	});
+} catch (err) {
+	console.error(
+		'Fatal: handler wiring failed:',
+		err instanceof Error ? err.message : err,
 	);
-});
-
-router.setHandler('schemaDiff', async (params) => {
-	const p = params as SchemaDiffParams;
-	return handleSchemaDiff(p);
-});
-
-router.setHandler('schemaApply', async (params) => {
-	const p = params as SchemaApplyParams;
-	return handleSchemaApply(p);
-});
-
-router.setHandler('executeSQL', async (params) => {
-	return handleExecuteSQL(params as ExecuteSqlParams, getPool);
-});
-
-router.setHandler('executeNQL', async (params) => {
-	return handleExecuteNQL(
-		params as ExecuteNqlParams,
-		getPool,
-		introspectConnection,
-	);
-});
-
-router.setHandler('listDatabases', async (params) => {
-	return listDatabases(params as DiscoverParams);
-});
-
-router.setHandler('listSchemas', async (params) => {
-	return listSchemas(params as ListSchemasParams);
-});
+	process.exit(1);
+}
 
 // ── Step 3: Write to stdout (protocol output) ────────────────────
 
