@@ -12,6 +12,7 @@ export interface LogEntry {
 	readonly level: LogLevel;
 	readonly source: 'sidecar' | 'ipc' | 'app';
 	readonly message: string;
+	readonly durationMs?: number;
 }
 
 const MAX_ENTRIES = 500;
@@ -25,6 +26,7 @@ export interface LogState {
 		level: LogLevel,
 		source: LogEntry['source'],
 		message: string,
+		durationMs?: number,
 	) => void;
 	clear: () => void;
 }
@@ -32,7 +34,7 @@ export interface LogState {
 export const useLogStore = create<LogState>((set) => ({
 	entries: [],
 
-	addEntry: (level, source, message) =>
+	addEntry: (level, source, message, durationMs) =>
 		set((state) => {
 			const entry: LogEntry = {
 				id: nextId++,
@@ -40,6 +42,7 @@ export const useLogStore = create<LogState>((set) => ({
 				level,
 				source,
 				message,
+				...(durationMs != null ? { durationMs } : {}),
 			};
 			const next = [...state.entries, entry];
 			// Ring buffer: evict oldest when over limit

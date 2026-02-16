@@ -27,6 +27,12 @@ function formatTime(ts: number): string {
 	});
 }
 
+function durationColor(ms: number): string {
+	if (ms < 100) return 'text-green-600 dark:text-green-400';
+	if (ms < 1000) return 'text-yellow-600 dark:text-yellow-400';
+	return 'text-red-600 dark:text-red-400';
+}
+
 export function LogPanel() {
 	const entries = useLogStore((s) => s.entries);
 	const clear = useLogStore((s) => s.clear);
@@ -81,6 +87,13 @@ export function LogPanel() {
 						<span className="whitespace-pre-wrap break-all">
 							{entry.message}
 						</span>
+						{entry.durationMs != null && (
+							<span
+								className={`shrink-0 tabular-nums ${durationColor(entry.durationMs)}`}
+							>
+								{entry.durationMs}ms
+							</span>
+						)}
 					</div>
 				))}
 				<div ref={bottomRef} />

@@ -74,7 +74,7 @@
 (GUI-011, GUI-012 archived → docs/historic/done-2026-02.md)
 (GUI-013, GUI-014 archived → docs/historic/done-2026-02.md)
 - [ ] 💡 **GUI-015** [GUI] Web version (@dbsp/web — same React frontend, HTTP/WS transport, phpMyAdmin-like)
-- [x] ✅ **GUI-016** [GUI] Application log panel — Logs tab in results panel with sidecar stderr persistence, level detection, ring buffer (2026-02-16)
+(GUI-016, GUI-016b archived → docs/historic/done-2026-02.md)
 (GUI-MW-D01, GUI-MW-D02, GUI-MW-D04, GUI-MW-D05, GUI-MW-D06 archived → docs/historic/done-2026-02.md)
 - [ ] 💡 **GUI-MW-D03** [GUI] Per-connection SSL/params overrides in dbsp.settings.json — Priority: L
 - [ ] 🔧 **GUI-F004** [GUI] TauriTransport edge case tests — race condition (close during pending listen), listen() rejection, reconnect timer cleanup, double reconnect — Priority: L
@@ -83,7 +83,7 @@
 - [ ] 💡 **GUI-019** [GUI] Live assertion re-run on file change (watch mode) — Priority: L
 - [ ] 💡 **GUI-020** [GUI] Assertion coverage reporting (queries with/without assertions) — Priority: L
 - [ ] 💡 **GUI-016a** [GUI] Log panel: level/source filter dropdowns — Priority: L (out-of-scope GUI-016)
-- [ ] 💡 **GUI-016b** [GUI] Log panel: IPC request/response logging + query timing entries — Priority: M (out-of-scope GUI-016)
+
 - [ ] 💡 **GUI-016c** [GUI] Log panel: export logs to file + persist across sessions — Priority: L (out-of-scope GUI-016)
 - [ ] 🔧 **GUI-021** [GUI] Authorization check on schema.apply sidecar endpoint (desktop-only, lower risk) — Priority: M (from /review F-007)
 - [ ] 🔧 **CLI-001** [CLI] Integration test for rollback flow with real DB (SC-16) — Priority: M (from /review F-002)
@@ -210,6 +210,5 @@
 
 ## Completed
 
-- [x] ✅ [GUI-016] Application log panel — Logs tab, sidecar stderr persistence, ring buffer store (2026-02-16)
-- [x] ✅ [SCHEMA-EVO] DOWN migrations + schema versioning + GUI schema diff — all 6 blocks (2026-02-16)
+(GUI-016, GUI-016b, SCHEMA-EVO archived → docs/historic/done-2026-02.md)
 (Archived → docs/historic/done-2026-02.md)

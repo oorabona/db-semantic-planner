@@ -53,6 +53,14 @@ interface PendingRequest {
 	readonly timer: ReturnType<typeof setTimeout>;
 }
 
+/** Logger callback for IPC request/response instrumentation. */
+export type IpcLogger = (
+	type: 'request' | 'response' | 'error',
+	method: string,
+	durationMs?: number,
+	error?: Error,
+) => void;
+
 // ── IPC Client ───────────────────────────────────────────────────
 
 export class IpcClient {
@@ -71,6 +79,12 @@ export class IpcClient {
 		resolve: (v: unknown) => void;
 		reject: (e: Error) => void;
 	}> = [];
+	private callLogger: IpcLogger | null = null;
+
+	/** Register a logger for IPC call instrumentation. */
+	setLogger(logger: IpcLogger | null): void {
+		this.callLogger = logger;
+	}
 
 	get status(): SidecarStatus {
 		return this._status;
@@ -118,6 +132,30 @@ export class IpcClient {
 
 	/** Send a JSON-RPC request and return the result. */
 	async call<T = unknown>(
+		method: string,
+		params?: Record<string, unknown> | object,
+	): Promise<T> {
+		const start = performance.now();
+		this.callLogger?.('request', method);
+		try {
+			const result = await this.callCore<T>(method, params);
+			const durationMs = Math.round(performance.now() - start);
+			this.callLogger?.('response', method, durationMs);
+			return result;
+		} catch (err) {
+			const durationMs = Math.round(performance.now() - start);
+			this.callLogger?.(
+				'error',
+				method,
+				durationMs,
+				err instanceof Error ? err : new Error(String(err)),
+			);
+			throw err;
+		}
+	}
+
+	/** Core call logic: queue, reject, or send directly. */
+	private callCore<T = unknown>(
 		method: string,
 		params?: Record<string, unknown> | object,
 	): Promise<T> {
