@@ -82,6 +82,8 @@
 - [ ] 💡 **GUI-018** [GUI] Auto-discovery of .assert.dbsp files from project tree (scan + run all) — Priority: L
 - [ ] 💡 **GUI-019** [GUI] Live assertion re-run on file change (watch mode) — Priority: L
 - [ ] 💡 **GUI-020** [GUI] Assertion coverage reporting (queries with/without assertions) — Priority: L
+- [ ] 🔧 **GUI-021** [GUI] Authorization check on schema.apply sidecar endpoint (desktop-only, lower risk) — Priority: M (from /review F-007)
+- [ ] 🔧 **CLI-001** [CLI] Integration test for rollback flow with real DB (SC-16) — Priority: M (from /review F-002)
 (GUI-F005, GUI-F006, GUI-F007 archived → docs/historic/done-2026-02.md)
 
 ---
@@ -197,9 +199,13 @@
 - [-] ⏭️ [DDL-005] Column comments (`COMMENT ON COLUMN`) — documentation feature
 - [-] ⏭️ [DDL-006] `onUpdate` action for FKs — uncommon in practice
 - [-] ⏭️ [DDL-007] Composite indexes — needs table-level syntax design
+- [ ] 💡 [DDL] Migration squash/rebase — consolidate migration files — Priority: L (from /clarify SCHEMA-EVO)
+- [ ] 💡 [GUI] ER diagram visualization in schema diff — Priority: L (from /clarify SCHEMA-EVO)
+- [ ] 💡 [GUI] Interactive migration editing in GUI — Priority: L (from /clarify SCHEMA-EVO)
 
 ---
 
 ## Completed
 
+- [x] ✅ [SCHEMA-EVO] DOWN migrations + schema versioning + GUI schema diff — all 6 blocks (2026-02-16)
 (Archived → docs/historic/done-2026-02.md)

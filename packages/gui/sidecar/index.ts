@@ -37,6 +37,10 @@ import {
 } from './query-executor.js';
 import { Router } from './router.js';
 import {
+	handleSchemaApply,
+	type SchemaApplyParams,
+} from './schema-apply-handler.js';
+import {
 	handleSchemaDiff,
 	type SchemaDiffParams,
 } from './schema-diff-handler.js';
@@ -127,6 +131,11 @@ router.setHandler('runAssertions', async (params) => {
 router.setHandler('schemaDiff', async (params) => {
 	const p = params as SchemaDiffParams;
 	return handleSchemaDiff(p);
+});
+
+router.setHandler('schemaApply', async (params) => {
+	const p = params as SchemaApplyParams;
+	return handleSchemaApply(p);
 });
 
 router.setHandler('executeSQL', async (params) => {

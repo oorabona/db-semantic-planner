@@ -152,6 +152,7 @@ export interface SchemaDiffChange {
 	readonly column?: string;
 	readonly destructive: boolean;
 	readonly details: string;
+	readonly meta?: Readonly<Record<string, unknown>>;
 }
 
 export interface DiffSummary {
@@ -173,6 +174,19 @@ export interface SchemaDiffResult {
 	readonly changes: readonly SchemaDiffChange[];
 	readonly hasDestructive: boolean;
 	readonly summary: DiffSummary;
+	readonly upSQL: readonly string[];
+	readonly downSQL: readonly string[];
+}
+
+export interface SchemaApplyParams {
+	connectionId: string;
+	statements: readonly string[];
+}
+
+export interface SchemaApplyResult {
+	readonly applied: number;
+	readonly success: boolean;
+	readonly error?: string;
 }
 
 // ── Typed API ────────────────────────────────────────────────────
@@ -252,6 +266,13 @@ export function createSidecarApi(client: IpcClient) {
 			return client.call<SchemaDiffResult>('schemaDiff', {
 				connectionId,
 				schemaPath,
+			});
+		},
+
+		schemaApply(connectionId: string, statements: readonly string[]) {
+			return client.call<SchemaApplyResult>('schemaApply', {
+				connectionId,
+				statements,
 			});
 		},
 	};

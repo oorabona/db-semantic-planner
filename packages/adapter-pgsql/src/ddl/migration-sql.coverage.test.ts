@@ -15,7 +15,7 @@
  * - Missing meta returns undefined for various change kinds
  */
 
-import type { ColumnIR, ForeignKeyIR, IndexIR, TableIR } from '@dbsp/types';
+import type { ForeignKeyIR, IndexIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { generateMigrationSQL } from './migration-sql.js';
 import type { SchemaChange, SchemaDiff } from './schema-diff.js';
@@ -37,8 +37,19 @@ describe('migration-sql coverage', () => {
 	describe('includeDestructive=false', () => {
 		it('filters out destructive changes', () => {
 			const diff = makeDiff([
-				{ kind: 'drop_table', table: 'old', destructive: true, details: 'drop' },
-				{ kind: 'add_column', table: 'users', destructive: false, details: 'add col', meta: { column: { name: 'x', type: 'string', nullable: false } } },
+				{
+					kind: 'drop_table',
+					table: 'old',
+					destructive: true,
+					details: 'drop',
+				},
+				{
+					kind: 'add_column',
+					table: 'users',
+					destructive: false,
+					details: 'add col',
+					meta: { column: { name: 'x', type: 'string', nullable: false } },
+				},
 			]);
 			const sql = generateMigrationSQL(diff, { includeDestructive: false });
 			expect(sql).toHaveLength(1);
@@ -54,7 +65,13 @@ describe('migration-sql coverage', () => {
 				onDelete: 'CASCADE',
 			};
 			const diff = makeDiff([
-				{ kind: 'alter_foreign_key', table: 'posts', destructive: false, details: 'alter fk', meta: { fk } },
+				{
+					kind: 'alter_foreign_key',
+					table: 'posts',
+					destructive: false,
+					details: 'alter fk',
+					meta: { fk },
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql).toHaveLength(1);
@@ -65,7 +82,13 @@ describe('migration-sql coverage', () => {
 
 		it('returns undefined when meta.fk is missing', () => {
 			const diff = makeDiff([
-				{ kind: 'alter_foreign_key', table: 'posts', destructive: false, details: 'alter fk', meta: {} },
+				{
+					kind: 'alter_foreign_key',
+					table: 'posts',
+					destructive: false,
+					details: 'alter fk',
+					meta: {},
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql).toHaveLength(0);
@@ -76,8 +99,12 @@ describe('migration-sql coverage', () => {
 		it('handles sql object { sql: "now()" }', () => {
 			const diff = makeDiff([
 				{
-					kind: 'alter_column_default', table: 't', column: 'c', destructive: false,
-					details: 'set default', meta: { default: { sql: 'now()' } },
+					kind: 'alter_column_default',
+					table: 't',
+					column: 'c',
+					destructive: false,
+					details: 'set default',
+					meta: { default: { sql: 'now()' } },
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -87,8 +114,18 @@ describe('migration-sql coverage', () => {
 		it('handles boolean true default', () => {
 			const diff = makeDiff([
 				{
-					kind: 'add_column', table: 't', destructive: false, details: 'add col',
-					meta: { column: { name: 'active', type: 'boolean', nullable: false, default: true } },
+					kind: 'add_column',
+					table: 't',
+					destructive: false,
+					details: 'add col',
+					meta: {
+						column: {
+							name: 'active',
+							type: 'boolean',
+							nullable: false,
+							default: true,
+						},
+					},
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -98,8 +135,18 @@ describe('migration-sql coverage', () => {
 		it('handles boolean false default', () => {
 			const diff = makeDiff([
 				{
-					kind: 'add_column', table: 't', destructive: false, details: 'add col',
-					meta: { column: { name: 'active', type: 'boolean', nullable: false, default: false } },
+					kind: 'add_column',
+					table: 't',
+					destructive: false,
+					details: 'add col',
+					meta: {
+						column: {
+							name: 'active',
+							type: 'boolean',
+							nullable: false,
+							default: false,
+						},
+					},
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -109,8 +156,18 @@ describe('migration-sql coverage', () => {
 		it('handles number default', () => {
 			const diff = makeDiff([
 				{
-					kind: 'add_column', table: 't', destructive: false, details: 'add col',
-					meta: { column: { name: 'count', type: 'integer', nullable: false, default: 42 } },
+					kind: 'add_column',
+					table: 't',
+					destructive: false,
+					details: 'add col',
+					meta: {
+						column: {
+							name: 'count',
+							type: 'integer',
+							nullable: false,
+							default: 42,
+						},
+					},
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -120,8 +177,12 @@ describe('migration-sql coverage', () => {
 		it('handles null default', () => {
 			const diff = makeDiff([
 				{
-					kind: 'alter_column_default', table: 't', column: 'c', destructive: false,
-					details: 'set default', meta: { default: null },
+					kind: 'alter_column_default',
+					table: 't',
+					column: 'c',
+					destructive: false,
+					details: 'set default',
+					meta: { default: null },
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -131,8 +192,12 @@ describe('migration-sql coverage', () => {
 		it('handles undefined default (drop)', () => {
 			const diff = makeDiff([
 				{
-					kind: 'alter_column_default', table: 't', column: 'c', destructive: false,
-					details: 'drop default', meta: { default: undefined },
+					kind: 'alter_column_default',
+					table: 't',
+					column: 'c',
+					destructive: false,
+					details: 'drop default',
+					meta: { default: undefined },
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -142,8 +207,18 @@ describe('migration-sql coverage', () => {
 		it('handles string ending with () as function call', () => {
 			const diff = makeDiff([
 				{
-					kind: 'add_column', table: 't', destructive: false, details: 'add col',
-					meta: { column: { name: 'ts', type: 'datetime', nullable: false, default: 'now()' } },
+					kind: 'add_column',
+					table: 't',
+					destructive: false,
+					details: 'add col',
+					meta: {
+						column: {
+							name: 'ts',
+							type: 'datetime',
+							nullable: false,
+							default: 'now()',
+						},
+					},
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -153,8 +228,18 @@ describe('migration-sql coverage', () => {
 		it('handles regular string default with single quotes', () => {
 			const diff = makeDiff([
 				{
-					kind: 'add_column', table: 't', destructive: false, details: 'add col',
-					meta: { column: { name: 'status', type: 'string', nullable: false, default: 'active' } },
+					kind: 'add_column',
+					table: 't',
+					destructive: false,
+					details: 'add col',
+					meta: {
+						column: {
+							name: 'status',
+							type: 'string',
+							nullable: false,
+							default: 'active',
+						},
+					},
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -164,8 +249,18 @@ describe('migration-sql coverage', () => {
 		it('escapes single quotes in string defaults', () => {
 			const diff = makeDiff([
 				{
-					kind: 'add_column', table: 't', destructive: false, details: 'add col',
-					meta: { column: { name: 's', type: 'string', nullable: false, default: "it's" } },
+					kind: 'add_column',
+					table: 't',
+					destructive: false,
+					details: 'add col',
+					meta: {
+						column: {
+							name: 's',
+							type: 'string',
+							nullable: false,
+							default: "it's",
+						},
+					},
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -175,8 +270,12 @@ describe('migration-sql coverage', () => {
 		it('handles set default with concrete value', () => {
 			const diff = makeDiff([
 				{
-					kind: 'alter_column_default', table: 't', column: 'c', destructive: false,
-					details: 'set default', meta: { default: 'hello' },
+					kind: 'alter_column_default',
+					table: 't',
+					column: 'c',
+					destructive: false,
+					details: 'set default',
+					meta: { default: 'hello' },
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -187,7 +286,13 @@ describe('migration-sql coverage', () => {
 	describe('create_table edge cases', () => {
 		it('returns undefined when meta.table is missing', () => {
 			const diff = makeDiff([
-				{ kind: 'create_table', table: 't', destructive: false, details: 'create', meta: {} },
+				{
+					kind: 'create_table',
+					table: 't',
+					destructive: false,
+					details: 'create',
+					meta: {},
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql).toHaveLength(0);
@@ -205,7 +310,13 @@ describe('migration-sql coverage', () => {
 				indexes: [],
 			};
 			const diff = makeDiff([
-				{ kind: 'create_table', table: 't', destructive: false, details: 'create', meta: { table } },
+				{
+					kind: 'create_table',
+					table: 't',
+					destructive: false,
+					details: 'create',
+					meta: { table },
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql[0]).toContain('"a", "b"');
@@ -224,7 +335,13 @@ describe('migration-sql coverage', () => {
 				indexes: [],
 			};
 			const diff = makeDiff([
-				{ kind: 'create_table', table: 't', destructive: false, details: 'create', meta: { table } },
+				{
+					kind: 'create_table',
+					table: 't',
+					destructive: false,
+					details: 'create',
+					meta: { table },
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql[0]).toContain('UNIQUE');
@@ -241,7 +358,13 @@ describe('migration-sql coverage', () => {
 				indexes: [],
 			};
 			const diff = makeDiff([
-				{ kind: 'create_table', table: 't', destructive: false, details: 'create', meta: { table } },
+				{
+					kind: 'create_table',
+					table: 't',
+					destructive: false,
+					details: 'create',
+					meta: { table },
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			// autoIncrement skips NOT NULL
@@ -258,7 +381,13 @@ describe('migration-sql coverage', () => {
 				indexes: [],
 			};
 			const diff = makeDiff([
-				{ kind: 'create_table', table: 't', destructive: false, details: 'create', meta: { table } },
+				{
+					kind: 'create_table',
+					table: 't',
+					destructive: false,
+					details: 'create',
+					meta: { table },
+				},
 			]);
 			const sql = generateMigrationSQL(diff, { schemaName: 'myschema' });
 			expect(sql[0]).toContain('"myschema"."t"');
@@ -272,7 +401,13 @@ describe('migration-sql coverage', () => {
 				indexes: [],
 			};
 			const diff = makeDiff([
-				{ kind: 'create_table', table: 't', destructive: false, details: 'create', meta: { table } },
+				{
+					kind: 'create_table',
+					table: 't',
+					destructive: false,
+					details: 'create',
+					meta: { table },
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql[0]).not.toContain('PRIMARY KEY');
@@ -282,7 +417,13 @@ describe('migration-sql coverage', () => {
 	describe('add_column edge cases', () => {
 		it('returns undefined when meta.column is missing', () => {
 			const diff = makeDiff([
-				{ kind: 'add_column', table: 't', destructive: false, details: 'add col', meta: {} },
+				{
+					kind: 'add_column',
+					table: 't',
+					destructive: false,
+					details: 'add col',
+					meta: {},
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql).toHaveLength(0);
@@ -291,8 +432,18 @@ describe('migration-sql coverage', () => {
 		it('adds column with UNIQUE constraint', () => {
 			const diff = makeDiff([
 				{
-					kind: 'add_column', table: 't', destructive: false, details: 'add col',
-					meta: { column: { name: 'email', type: 'string', nullable: false, unique: true } },
+					kind: 'add_column',
+					table: 't',
+					destructive: false,
+					details: 'add col',
+					meta: {
+						column: {
+							name: 'email',
+							type: 'string',
+							nullable: false,
+							unique: true,
+						},
+					},
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -302,8 +453,18 @@ describe('migration-sql coverage', () => {
 		it('adds autoIncrement column (skips NOT NULL)', () => {
 			const diff = makeDiff([
 				{
-					kind: 'add_column', table: 't', destructive: false, details: 'add col',
-					meta: { column: { name: 'id', type: 'integer', nullable: false, autoIncrement: true } },
+					kind: 'add_column',
+					table: 't',
+					destructive: false,
+					details: 'add col',
+					meta: {
+						column: {
+							name: 'id',
+							type: 'integer',
+							nullable: false,
+							autoIncrement: true,
+						},
+					},
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -315,8 +476,12 @@ describe('migration-sql coverage', () => {
 		it('uses mapColumnType when column meta is present', () => {
 			const diff = makeDiff([
 				{
-					kind: 'alter_column_type', table: 't', column: 'c', destructive: false,
-					details: 'alter type', meta: { column: { name: 'c', type: 'bigint', nullable: false } },
+					kind: 'alter_column_type',
+					table: 't',
+					column: 'c',
+					destructive: false,
+					details: 'alter type',
+					meta: { column: { name: 'c', type: 'bigint', nullable: false } },
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -326,8 +491,12 @@ describe('migration-sql coverage', () => {
 		it('uses meta.toType when column meta is absent', () => {
 			const diff = makeDiff([
 				{
-					kind: 'alter_column_type', table: 't', column: 'c', destructive: false,
-					details: 'alter type', meta: { toType: 'TEXT' },
+					kind: 'alter_column_type',
+					table: 't',
+					column: 'c',
+					destructive: false,
+					details: 'alter type',
+					meta: { toType: 'TEXT' },
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -339,8 +508,12 @@ describe('migration-sql coverage', () => {
 		it('generates DROP NOT NULL for nullable=true', () => {
 			const diff = makeDiff([
 				{
-					kind: 'alter_column_nullable', table: 't', column: 'c', destructive: false,
-					details: 'set nullable', meta: { nullable: true },
+					kind: 'alter_column_nullable',
+					table: 't',
+					column: 'c',
+					destructive: false,
+					details: 'set nullable',
+					meta: { nullable: true },
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -350,8 +523,12 @@ describe('migration-sql coverage', () => {
 		it('generates SET NOT NULL for nullable=false', () => {
 			const diff = makeDiff([
 				{
-					kind: 'alter_column_nullable', table: 't', column: 'c', destructive: false,
-					details: 'set not null', meta: { nullable: false },
+					kind: 'alter_column_nullable',
+					table: 't',
+					column: 'c',
+					destructive: false,
+					details: 'set not null',
+					meta: { nullable: false },
 				},
 			]);
 			const sql = generateMigrationSQL(diff);
@@ -362,7 +539,13 @@ describe('migration-sql coverage', () => {
 	describe('add_foreign_key', () => {
 		it('returns undefined when meta.fk is missing', () => {
 			const diff = makeDiff([
-				{ kind: 'add_foreign_key', table: 't', destructive: false, details: 'add fk', meta: {} },
+				{
+					kind: 'add_foreign_key',
+					table: 't',
+					destructive: false,
+					details: 'add fk',
+					meta: {},
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql).toHaveLength(0);
@@ -374,7 +557,13 @@ describe('migration-sql coverage', () => {
 				references: { table: 'users', columns: ['id'] },
 			};
 			const diff = makeDiff([
-				{ kind: 'add_foreign_key', table: 'posts', destructive: false, details: 'add fk', meta: { fk } },
+				{
+					kind: 'add_foreign_key',
+					table: 'posts',
+					destructive: false,
+					details: 'add fk',
+					meta: { fk },
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql[0]).not.toContain('ON DELETE');
@@ -387,7 +576,13 @@ describe('migration-sql coverage', () => {
 				onDelete: 'SET NULL',
 			};
 			const diff = makeDiff([
-				{ kind: 'add_foreign_key', table: 'posts', destructive: false, details: 'add fk', meta: { fk } },
+				{
+					kind: 'add_foreign_key',
+					table: 'posts',
+					destructive: false,
+					details: 'add fk',
+					meta: { fk },
+				},
 			]);
 			const sql = generateMigrationSQL(diff, { schemaName: 'app' });
 			expect(sql[0]).toContain('"app"."posts"');
@@ -398,7 +593,13 @@ describe('migration-sql coverage', () => {
 	describe('drop_foreign_key', () => {
 		it('returns undefined when meta.fk is missing', () => {
 			const diff = makeDiff([
-				{ kind: 'drop_foreign_key', table: 't', destructive: true, details: 'drop fk', meta: {} },
+				{
+					kind: 'drop_foreign_key',
+					table: 't',
+					destructive: true,
+					details: 'drop fk',
+					meta: {},
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql).toHaveLength(0);
@@ -408,7 +609,13 @@ describe('migration-sql coverage', () => {
 	describe('create_index', () => {
 		it('returns undefined when meta.index is missing', () => {
 			const diff = makeDiff([
-				{ kind: 'create_index', table: 't', destructive: false, details: 'create idx', meta: {} },
+				{
+					kind: 'create_index',
+					table: 't',
+					destructive: false,
+					details: 'create idx',
+					meta: {},
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql).toHaveLength(0);
@@ -417,16 +624,32 @@ describe('migration-sql coverage', () => {
 		it('generates auto-named index when idx.name is undefined', () => {
 			const idx: IndexIR = { columns: ['email'], name: undefined };
 			const diff = makeDiff([
-				{ kind: 'create_index', table: 'users', destructive: false, details: 'create idx', meta: { index: idx } },
+				{
+					kind: 'create_index',
+					table: 'users',
+					destructive: false,
+					details: 'create idx',
+					meta: { index: idx },
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql[0]).toContain('"idx_users_email"');
 		});
 
 		it('generates UNIQUE index', () => {
-			const idx: IndexIR = { columns: ['email'], unique: true, name: 'ux_email' };
+			const idx: IndexIR = {
+				columns: ['email'],
+				unique: true,
+				name: 'ux_email',
+			};
 			const diff = makeDiff([
-				{ kind: 'create_index', table: 'users', destructive: false, details: 'create idx', meta: { index: idx } },
+				{
+					kind: 'create_index',
+					table: 'users',
+					destructive: false,
+					details: 'create idx',
+					meta: { index: idx },
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql[0]).toContain('UNIQUE INDEX');
@@ -436,7 +659,13 @@ describe('migration-sql coverage', () => {
 	describe('drop_index', () => {
 		it('returns undefined when meta.index is missing', () => {
 			const diff = makeDiff([
-				{ kind: 'drop_index', table: 't', destructive: true, details: 'drop idx', meta: {} },
+				{
+					kind: 'drop_index',
+					table: 't',
+					destructive: true,
+					details: 'drop idx',
+					meta: {},
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql).toHaveLength(0);
@@ -445,7 +674,13 @@ describe('migration-sql coverage', () => {
 		it('generates schema-qualified drop when schemaName provided', () => {
 			const idx: IndexIR = { columns: ['email'], name: 'idx_email' };
 			const diff = makeDiff([
-				{ kind: 'drop_index', table: 'users', destructive: true, details: 'drop idx', meta: { index: idx } },
+				{
+					kind: 'drop_index',
+					table: 'users',
+					destructive: true,
+					details: 'drop idx',
+					meta: { index: idx },
+				},
 			]);
 			const sql = generateMigrationSQL(diff, { schemaName: 'app' });
 			expect(sql[0]).toContain('"app"."idx_email"');
@@ -454,7 +689,13 @@ describe('migration-sql coverage', () => {
 		it('generates unqualified drop when no schemaName', () => {
 			const idx: IndexIR = { columns: ['email'], name: 'idx_email' };
 			const diff = makeDiff([
-				{ kind: 'drop_index', table: 'users', destructive: true, details: 'drop idx', meta: { index: idx } },
+				{
+					kind: 'drop_index',
+					table: 'users',
+					destructive: true,
+					details: 'drop idx',
+					meta: { index: idx },
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql[0]).toContain('"idx_email"');
@@ -464,7 +705,13 @@ describe('migration-sql coverage', () => {
 		it('generates auto-named index for drop when name is undefined', () => {
 			const idx: IndexIR = { columns: ['email'], name: undefined };
 			const diff = makeDiff([
-				{ kind: 'drop_index', table: 'users', destructive: true, details: 'drop idx', meta: { index: idx } },
+				{
+					kind: 'drop_index',
+					table: 'users',
+					destructive: true,
+					details: 'drop idx',
+					meta: { index: idx },
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			expect(sql[0]).toContain('"idx_users_email"');
@@ -474,13 +721,27 @@ describe('migration-sql coverage', () => {
 	describe('topological ordering', () => {
 		it('orders drops before creates', () => {
 			const diff = makeDiff([
-				{ kind: 'create_index', table: 't', destructive: false, details: 'create', meta: { index: { columns: ['x'], name: 'idx_new' } } },
-				{ kind: 'drop_foreign_key', table: 't', destructive: true, details: 'drop fk', meta: { fk: { columns: ['y'], references: { table: 'z', columns: ['id'] } } } },
+				{
+					kind: 'create_index',
+					table: 't',
+					destructive: false,
+					details: 'create',
+					meta: { index: { columns: ['x'], name: 'idx_new' } },
+				},
+				{
+					kind: 'drop_foreign_key',
+					table: 't',
+					destructive: true,
+					details: 'drop fk',
+					meta: {
+						fk: { columns: ['y'], references: { table: 'z', columns: ['id'] } },
+					},
+				},
 			]);
 			const sql = generateMigrationSQL(diff);
 			// drop_foreign_key (phase 0) should come before create_index (phase 11)
-			const dropIdx = sql.findIndex(s => s.includes('DROP CONSTRAINT'));
-			const createIdx = sql.findIndex(s => s.includes('CREATE'));
+			const dropIdx = sql.findIndex((s) => s.includes('DROP CONSTRAINT'));
+			const createIdx = sql.findIndex((s) => s.includes('CREATE'));
 			expect(dropIdx).toBeLessThan(createIdx);
 		});
 	});

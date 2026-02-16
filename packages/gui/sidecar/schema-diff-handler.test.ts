@@ -6,6 +6,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@dbsp/adapter-pgsql', () => ({
 	compareSchemata: vi.fn(),
+	generateMigrationSQL: vi.fn(),
+	generateDownSQL: vi.fn(),
 }));
 
 vi.mock('./connection-manager.js', () => ({
@@ -24,7 +26,9 @@ vi.mock('./schema-loader.js', () => ({
 }));
 
 // Import after mocks are set up
-const { compareSchemata } = await import('@dbsp/adapter-pgsql');
+const { compareSchemata, generateMigrationSQL, generateDownSQL } = await import(
+	'@dbsp/adapter-pgsql'
+);
 const { introspectConnection } = await import('./connection-manager.js');
 const { findSchemaFile, loadSchema, SchemaLoadError } = await import(
 	'./schema-loader.js'
@@ -123,6 +127,8 @@ describe('handleSchemaDiff', () => {
 			expect(result.changes).toEqual([]);
 			expect(result.hasDestructive).toBe(false);
 			expect(result.summary.tables.added).toBe(0);
+			expect(result.upSQL).toEqual([]);
+			expect(result.downSQL).toEqual([]);
 			expect(compareSchemata).toHaveBeenCalledWith(
 				minimalModel,
 				introspectedModel,
@@ -138,6 +144,12 @@ describe('handleSchemaDiff', () => {
 			});
 			vi.mocked(introspectConnection).mockResolvedValue(introspectedModel);
 			vi.mocked(compareSchemata).mockReturnValue(diffWithChanges);
+			vi.mocked(generateMigrationSQL).mockReturnValue([
+				'ALTER TABLE "users" ADD COLUMN "email" text;',
+			]);
+			vi.mocked(generateDownSQL).mockReturnValue([
+				'ALTER TABLE "users" DROP COLUMN "email";',
+			]);
 
 			const result = await handleSchemaDiff({
 				connectionId: 'test-conn',
@@ -152,6 +164,7 @@ describe('handleSchemaDiff', () => {
 				column: 'email',
 				destructive: false,
 				details: 'Add column "email" (text, nullable)',
+				meta: { someInternalData: true },
 			});
 			expect(result.changes[1]).toEqual({
 				kind: 'drop_column',
@@ -159,10 +172,11 @@ describe('handleSchemaDiff', () => {
 				column: 'legacy',
 				destructive: true,
 				details: 'Drop column "legacy"',
+				meta: { anotherMeta: 42 },
 			});
 		});
 
-		it('strips meta from changes for JSON transport', async () => {
+		it('passes meta through in changes for side-by-side diff', async () => {
 			vi.mocked(findSchemaFile).mockReturnValue('/project/dbsp.schema.ts');
 			vi.mocked(loadSchema).mockResolvedValue({
 				definition: {},
@@ -171,16 +185,17 @@ describe('handleSchemaDiff', () => {
 			});
 			vi.mocked(introspectConnection).mockResolvedValue(introspectedModel);
 			vi.mocked(compareSchemata).mockReturnValue(diffWithChanges);
+			vi.mocked(generateMigrationSQL).mockReturnValue([]);
+			vi.mocked(generateDownSQL).mockReturnValue([]);
 
 			const result = await handleSchemaDiff({
 				connectionId: 'test-conn',
 				schemaPath: '/project',
 			});
 
-			// meta should NOT appear in serialized output
-			for (const change of result.changes) {
-				expect(change).not.toHaveProperty('meta');
-			}
+			expect(result.changes[0]).toHaveProperty('meta');
+			expect(result.changes[0].meta).toEqual({ someInternalData: true });
+			expect(result.changes[1].meta).toEqual({ anotherMeta: 42 });
 		});
 	});
 
@@ -258,6 +273,64 @@ describe('handleSchemaDiff', () => {
 
 			expect(customGetModel).toHaveBeenCalledWith('test-conn');
 			expect(introspectConnection).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('SQL preview', () => {
+		it('includes upSQL and downSQL in result', async () => {
+			vi.mocked(findSchemaFile).mockReturnValue('/project/dbsp.schema.ts');
+			vi.mocked(loadSchema).mockResolvedValue({
+				definition: {},
+				model: minimalModel,
+				tableNames: ['users'],
+			});
+			vi.mocked(introspectConnection).mockResolvedValue(introspectedModel);
+			vi.mocked(compareSchemata).mockReturnValue(diffWithChanges);
+			vi.mocked(generateMigrationSQL).mockReturnValue([
+				'ALTER TABLE "users" ADD COLUMN "email" text;',
+				'ALTER TABLE "users" DROP COLUMN "legacy";',
+			]);
+			vi.mocked(generateDownSQL).mockReturnValue([
+				'ALTER TABLE "users" ADD COLUMN "legacy" text;',
+				'ALTER TABLE "users" DROP COLUMN "email";',
+			]);
+
+			const result = await handleSchemaDiff({
+				connectionId: 'test-conn',
+				schemaPath: '/project',
+			});
+
+			expect(result.upSQL).toEqual([
+				'ALTER TABLE "users" ADD COLUMN "email" text;',
+				'ALTER TABLE "users" DROP COLUMN "legacy";',
+			]);
+			expect(result.downSQL).toEqual([
+				'ALTER TABLE "users" ADD COLUMN "legacy" text;',
+				'ALTER TABLE "users" DROP COLUMN "email";',
+			]);
+			expect(generateMigrationSQL).toHaveBeenCalledWith(diffWithChanges);
+			expect(generateDownSQL).toHaveBeenCalledWith(diffWithChanges);
+		});
+
+		it('returns empty SQL arrays for empty diff', async () => {
+			vi.mocked(findSchemaFile).mockReturnValue('/project/dbsp.schema.ts');
+			vi.mocked(loadSchema).mockResolvedValue({
+				definition: {},
+				model: minimalModel,
+				tableNames: ['users'],
+			});
+			vi.mocked(introspectConnection).mockResolvedValue(introspectedModel);
+			vi.mocked(compareSchemata).mockReturnValue(emptyDiff);
+
+			const result = await handleSchemaDiff({
+				connectionId: 'test-conn',
+				schemaPath: '/project',
+			});
+
+			expect(result.upSQL).toEqual([]);
+			expect(result.downSQL).toEqual([]);
+			expect(generateMigrationSQL).not.toHaveBeenCalled();
+			expect(generateDownSQL).not.toHaveBeenCalled();
 		});
 	});
 });

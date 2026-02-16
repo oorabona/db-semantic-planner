@@ -589,4 +589,140 @@ describe('compareSchemata', () => {
 			expect(compareSchemata(schema2, db2).hasDestructive).toBe(true);
 		});
 	});
+
+	describe('meta enrichment for DOWN SQL', () => {
+		it('should include oldNullable in alter_column_nullable meta', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'name', type: 'string', nullable: false }),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'name', type: 'string', nullable: true }),
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			const change = diff.changes.find(
+				(c) => c.kind === 'alter_column_nullable',
+			);
+			expect(change).toBeDefined();
+			expect(change!.meta?.nullable).toBe(false);
+			expect(change!.meta?.oldNullable).toBe(true);
+		});
+
+		it('should include oldDefault in alter_column_default meta', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'status', type: 'string', default: 'active' }),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'status', type: 'string', default: 'pending' }),
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			const change = diff.changes.find(
+				(c) => c.kind === 'alter_column_default',
+			);
+			expect(change).toBeDefined();
+			expect(change!.meta?.default).toBe('active');
+			expect(change!.meta?.oldDefault).toBe('pending');
+		});
+
+		it('should include oldDefault as undefined when DB had no default', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'status', type: 'string', default: 'active' }),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'status', type: 'string' }),
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			const change = diff.changes.find(
+				(c) => c.kind === 'alter_column_default',
+			);
+			expect(change).toBeDefined();
+			expect(change!.meta?.default).toBe('active');
+			expect(change!.meta?.oldDefault).toBeUndefined();
+		});
+
+		it('should include oldFk in alter_foreign_key meta', () => {
+			const schemaFk: ForeignKeyIR = {
+				columns: ['author_id'],
+				references: { table: 'users', columns: ['id'] },
+				onDelete: 'CASCADE',
+			};
+			const dbFk: ForeignKeyIR = {
+				columns: ['author_id'],
+				references: { table: 'users', columns: ['id'] },
+				onDelete: 'SET NULL',
+			};
+
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'author_id', type: 'integer' })],
+					foreignKeys: [schemaFk],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'author_id', type: 'integer' })],
+					foreignKeys: [dbFk],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			const change = diff.changes.find((c) => c.kind === 'alter_foreign_key');
+			expect(change).toBeDefined();
+			expect(change!.meta?.fk).toEqual(schemaFk);
+			expect(change!.meta?.oldFk).toEqual(dbFk);
+			expect(change!.meta?.previousOnDelete).toBe('SET NULL');
+		});
+	});
 });

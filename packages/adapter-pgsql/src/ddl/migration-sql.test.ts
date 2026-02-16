@@ -10,7 +10,7 @@
 
 import type { ColumnIR, ForeignKeyIR, IndexIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { generateMigrationSQL } from './migration-sql.js';
+import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
 import type { SchemaChange, SchemaDiff } from './schema-diff.js';
 
 // ============================================================================
@@ -675,6 +675,605 @@ describe('generateMigrationSQL', () => {
 	describe('empty diff', () => {
 		it('should return empty array for no changes', () => {
 			const sql = generateMigrationSQL(makeDiff([]));
+			expect(sql).toEqual([]);
+		});
+	});
+});
+
+// ============================================================================
+// generateDownSQL
+// ============================================================================
+
+describe('generateDownSQL', () => {
+	describe('reversible changes', () => {
+		it('SC-01: create_table → DROP TABLE', () => {
+			const table = makeTable('users', [
+				makeCol({ name: 'id', type: 'integer' }),
+			]);
+
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'create_table',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: { table },
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toBe('DROP TABLE IF EXISTS "users" CASCADE;');
+		});
+
+		it('SC-01: create_table → DROP TABLE with schema', () => {
+			const table = makeTable('users', [
+				makeCol({ name: 'id', type: 'integer' }),
+			]);
+
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'create_table',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: { table },
+					},
+				]),
+				{ schemaName: 'tenant_1' },
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toBe('DROP TABLE IF EXISTS "tenant_1"."users" CASCADE;');
+		});
+
+		it('SC-02: add_column → DROP COLUMN', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'add_column',
+						table: 'users',
+						column: 'email',
+						destructive: false,
+						details: '',
+						meta: {
+							column: makeCol({
+								name: 'email',
+								type: 'string',
+							}),
+						},
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toBe('ALTER TABLE "users" DROP COLUMN "email" CASCADE;');
+		});
+
+		it('SC-03: alter_column_type with fromType → ALTER TYPE back', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'alter_column_type',
+						table: 'users',
+						column: 'age',
+						destructive: true,
+						details: '',
+						meta: {
+							fromType: 'integer',
+							toType: 'bigint',
+							column: makeCol({
+								name: 'age',
+								type: 'bigint',
+							}),
+						},
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toBe(
+				'ALTER TABLE "users" ALTER COLUMN "age" TYPE integer;',
+			);
+		});
+
+		it('SC-05: alter_column_nullable SET NOT NULL → DOWN DROP NOT NULL', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'alter_column_nullable',
+						table: 'users',
+						column: 'name',
+						destructive: false,
+						details: '',
+						meta: { nullable: false, oldNullable: true },
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toBe(
+				'ALTER TABLE "users" ALTER COLUMN "name" DROP NOT NULL;',
+			);
+		});
+
+		it('SC-05: alter_column_nullable DROP NOT NULL → DOWN SET NOT NULL', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'alter_column_nullable',
+						table: 'users',
+						column: 'name',
+						destructive: false,
+						details: '',
+						meta: { nullable: true, oldNullable: false },
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toBe(
+				'ALTER TABLE "users" ALTER COLUMN "name" SET NOT NULL;',
+			);
+		});
+
+		it('alter_column_default with oldDefault → SET DEFAULT back', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'alter_column_default',
+						table: 'users',
+						column: 'status',
+						destructive: false,
+						details: '',
+						meta: { default: 'active', oldDefault: 'pending' },
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toBe(
+				`ALTER TABLE "users" ALTER COLUMN "status" SET DEFAULT 'pending';`,
+			);
+		});
+
+		it('alter_column_default with null oldDefault → DROP DEFAULT', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'alter_column_default',
+						table: 'users',
+						column: 'status',
+						destructive: false,
+						details: '',
+						meta: { default: 'active', oldDefault: null },
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toBe(
+				'ALTER TABLE "users" ALTER COLUMN "status" DROP DEFAULT;',
+			);
+		});
+
+		it('add_primary_key → DROP CONSTRAINT', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'add_primary_key',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: { columns: ['id'] },
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toBe(
+				'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "pk_users" CASCADE;',
+			);
+		});
+
+		it('SC-06: add_foreign_key → DROP CONSTRAINT', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+				onDelete: 'CASCADE',
+			};
+
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'add_foreign_key',
+						table: 'orders',
+						destructive: false,
+						details: '',
+						meta: { fk },
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toBe(
+				'ALTER TABLE "orders" DROP CONSTRAINT IF EXISTS "fk_orders_user_id" CASCADE;',
+			);
+		});
+
+		it('SC-06: create_index → DROP INDEX', () => {
+			const idx: IndexIR = {
+				name: 'idx_users_email',
+				columns: ['email'],
+				unique: true,
+			};
+
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'create_index',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: { index: idx },
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toBe('DROP INDEX IF EXISTS "idx_users_email";');
+		});
+
+		it('SC-06: create_index with schema → DROP INDEX schema-qualified', () => {
+			const idx: IndexIR = {
+				name: 'idx_users_email',
+				columns: ['email'],
+				unique: true,
+			};
+
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'create_index',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: { index: idx },
+					},
+				]),
+				{ schemaName: 'tenant_1' },
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toBe('DROP INDEX IF EXISTS "tenant_1"."idx_users_email";');
+		});
+
+		it('SC-07: alter_foreign_key with oldFk → DROP + re-add old', () => {
+			const newFk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+				onDelete: 'CASCADE',
+			};
+			const oldFk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+				onDelete: 'SET NULL',
+			};
+
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'alter_foreign_key',
+						table: 'orders',
+						destructive: false,
+						details: '',
+						meta: {
+							fk: newFk,
+							previousOnDelete: 'SET NULL',
+							oldFk,
+						},
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toContain('DROP CONSTRAINT IF EXISTS "fk_orders_user_id"');
+			expect(sql[0]).toContain('ON DELETE SET NULL');
+		});
+	});
+
+	describe('irreversible changes (warnings)', () => {
+		it('SC-04: drop_table → WARNING comment', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'drop_table',
+						table: 'old_table',
+						destructive: true,
+						details: '',
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toContain('-- WARNING');
+			expect(sql[0]).toContain('drop_table');
+			expect(sql[0]).toContain('"old_table"');
+		});
+
+		it('drop_column → WARNING comment', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'drop_column',
+						table: 'users',
+						column: 'legacy',
+						destructive: true,
+						details: '',
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toContain('-- WARNING');
+			expect(sql[0]).toContain('drop_column');
+		});
+
+		it('drop_primary_key → WARNING comment', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'drop_primary_key',
+						table: 'users',
+						destructive: true,
+						details: '',
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toContain('-- WARNING');
+			expect(sql[0]).toContain('drop_primary_key');
+		});
+
+		it('drop_foreign_key → WARNING comment', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'drop_foreign_key',
+						table: 'orders',
+						destructive: true,
+						details: '',
+						meta: {
+							fk: {
+								columns: ['user_id'],
+								references: { table: 'users', columns: ['id'] },
+							},
+						},
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toContain('-- WARNING');
+			expect(sql[0]).toContain('drop_foreign_key');
+		});
+
+		it('drop_index → WARNING comment', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'drop_index',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: {
+							index: {
+								name: 'idx_users_email',
+								columns: ['email'],
+								unique: false,
+							},
+						},
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toContain('-- WARNING');
+			expect(sql[0]).toContain('drop_index');
+		});
+	});
+
+	describe('missing meta → warnings', () => {
+		it('alter_column_type without fromType → WARNING', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'alter_column_type',
+						table: 'users',
+						column: 'age',
+						destructive: true,
+						details: '',
+						meta: { toType: 'bigint' },
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toContain('-- WARNING');
+			expect(sql[0]).toContain('missing migration metadata');
+		});
+
+		it('alter_column_nullable without oldNullable → WARNING', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'alter_column_nullable',
+						table: 'users',
+						column: 'name',
+						destructive: false,
+						details: '',
+						meta: { nullable: false },
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toContain('-- WARNING');
+			expect(sql[0]).toContain('missing migration metadata');
+		});
+
+		it('alter_column_default without oldDefault → WARNING', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'alter_column_default',
+						table: 'users',
+						column: 'status',
+						destructive: false,
+						details: '',
+						meta: { default: 'active' },
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toContain('-- WARNING');
+			expect(sql[0]).toContain('missing migration metadata');
+		});
+
+		it('alter_foreign_key without oldFk → WARNING', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+				onDelete: 'CASCADE',
+			};
+
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'alter_foreign_key',
+						table: 'orders',
+						destructive: false,
+						details: '',
+						meta: { fk, previousOnDelete: 'SET NULL' },
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toContain('-- WARNING');
+			expect(sql[0]).toContain('missing migration metadata');
+		});
+	});
+
+	describe('topological order', () => {
+		it('SC-08: should reverse phase order (index first, then FK, then table)', () => {
+			const table = makeTable('users', [
+				makeCol({ name: 'id', type: 'integer' }),
+			]);
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+				onDelete: 'CASCADE',
+			};
+			const idx: IndexIR = {
+				name: 'idx_orders_user_id',
+				columns: ['user_id'],
+				unique: false,
+			};
+
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'create_table',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: { table },
+					},
+					{
+						kind: 'add_column',
+						table: 'orders',
+						column: 'notes',
+						destructive: false,
+						details: '',
+						meta: {
+							column: makeCol({ name: 'notes', type: 'text' }),
+						},
+					},
+					{
+						kind: 'add_primary_key',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: { columns: ['id'] },
+					},
+					{
+						kind: 'add_foreign_key',
+						table: 'orders',
+						destructive: false,
+						details: '',
+						meta: { fk },
+					},
+					{
+						kind: 'create_index',
+						table: 'orders',
+						destructive: false,
+						details: '',
+						meta: { index: idx },
+					},
+				]),
+			);
+
+			// Reversed order: index(11) → FK(9) → PK(8) → alter(7) → column(6) → table(5)
+			expect(sql.length).toBe(5);
+			// Index DROP first
+			expect(sql[0]).toContain('DROP INDEX');
+			// FK DROP second
+			expect(sql[1]).toContain('DROP CONSTRAINT IF EXISTS "fk_orders_user_id"');
+			// PK DROP third
+			expect(sql[2]).toContain('DROP CONSTRAINT IF EXISTS "pk_users"');
+			// Column DROP fourth
+			expect(sql[3]).toContain('DROP COLUMN "notes"');
+			// Table DROP last
+			expect(sql[4]).toContain('DROP TABLE IF EXISTS "users"');
+		});
+	});
+
+	describe('options', () => {
+		it('should filter out destructive changes when includeDestructive is false', () => {
+			const table = makeTable('users', [
+				makeCol({ name: 'id', type: 'integer' }),
+			]);
+
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'create_table',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: { table },
+					},
+					{
+						kind: 'drop_table',
+						table: 'old_table',
+						destructive: true,
+						details: '',
+					},
+				]),
+				{ includeDestructive: false },
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toContain('DROP TABLE IF EXISTS "users"');
+		});
+
+		it('should return empty array for no changes', () => {
+			const sql = generateDownSQL(makeDiff([]));
 			expect(sql).toEqual([]);
 		});
 	});

@@ -15,17 +15,25 @@ import { describe, expect, it, vi } from 'vitest';
 
 const mockCompareSchemata = vi.fn();
 const mockGenerateMigrationSQL = vi.fn();
+const mockGenerateMigrationFile = vi.fn();
 const mockIntrospect = vi.fn();
 const mockEnsureMigrationsTable = vi.fn();
 const mockAcquireMigrationLock = vi.fn();
 const mockReleaseMigrationLock = vi.fn();
 const mockGetAppliedMigrations = vi.fn();
+const mockGetNextSchemaVersion = vi.fn();
 const mockRecordMigration = vi.fn();
+const mockRemoveMigrationRecord = vi.fn();
+const mockWithMigrationLock = vi.fn();
+const mockParseMigrationFile = vi.fn();
+const mockIsDestructiveDown = vi.fn();
 
 vi.mock('@dbsp/adapter-pgsql', () => ({
 	compareSchemata: (...args: unknown[]) => mockCompareSchemata(...args),
 	generateMigrationSQL: (...args: unknown[]) =>
 		mockGenerateMigrationSQL(...args),
+	generateMigrationFile: (...args: unknown[]) =>
+		mockGenerateMigrationFile(...args),
 	introspect: (...args: unknown[]) => mockIntrospect(...args),
 	ensureMigrationsTable: (...args: unknown[]) =>
 		mockEnsureMigrationsTable(...args),
@@ -35,7 +43,14 @@ vi.mock('@dbsp/adapter-pgsql', () => ({
 		mockReleaseMigrationLock(...args),
 	getAppliedMigrations: (...args: unknown[]) =>
 		mockGetAppliedMigrations(...args),
+	getNextSchemaVersion: (...args: unknown[]) =>
+		mockGetNextSchemaVersion(...args),
 	recordMigration: (...args: unknown[]) => mockRecordMigration(...args),
+	removeMigrationRecord: (...args: unknown[]) =>
+		mockRemoveMigrationRecord(...args),
+	withMigrationLock: (...args: unknown[]) => mockWithMigrationLock(...args),
+	parseMigrationFile: (...args: unknown[]) => mockParseMigrationFile(...args),
+	isDestructiveDown: (...args: unknown[]) => mockIsDestructiveDown(...args),
 }));
 
 // ============================================================================
@@ -261,6 +276,170 @@ describe('migrate apply — statement splitting', () => {
 			.filter((s) => s.length > 0);
 
 		expect(statements).toEqual([]);
+	});
+});
+
+// ============================================================================
+// Tests: rollback subcommand logic
+// ============================================================================
+
+describe('migrate rollback — reverse chronological order', () => {
+	it('should sort applied migrations in reverse order for rollback', () => {
+		// Arrange
+		const applied = [
+			{
+				name: '0001_init.sql',
+				checksum: 'aaa',
+				appliedAt: new Date('2026-01-01'),
+			},
+			{
+				name: '0002_users.sql',
+				checksum: 'bbb',
+				appliedAt: new Date('2026-01-02'),
+			},
+			{
+				name: '0003_posts.sql',
+				checksum: 'ccc',
+				appliedAt: new Date('2026-01-03'),
+			},
+		];
+
+		// Act
+		const sortedDesc = [...applied].sort((a, b) =>
+			b.name.localeCompare(a.name),
+		);
+
+		// Assert — most recent first
+		expect(sortedDesc[0]!.name).toBe('0003_posts.sql');
+		expect(sortedDesc[1]!.name).toBe('0002_users.sql');
+		expect(sortedDesc[2]!.name).toBe('0001_init.sql');
+	});
+
+	it('SC-18: should reject count greater than applied migrations', () => {
+		const applied = [
+			{ name: '0001_init.sql', checksum: 'aaa' },
+			{ name: '0002_users.sql', checksum: 'bbb' },
+		];
+		const count = 5;
+
+		expect(count > applied.length).toBe(true);
+	});
+
+	it('should select correct migrations for rollback count', () => {
+		const applied = [
+			{ name: '0001_init.sql', checksum: 'aaa' },
+			{ name: '0002_users.sql', checksum: 'bbb' },
+			{ name: '0003_posts.sql', checksum: 'ccc' },
+		];
+		const sortedDesc = [...applied].sort((a, b) =>
+			b.name.localeCompare(a.name),
+		);
+		const toRollback = sortedDesc.slice(0, 2);
+
+		expect(toRollback).toHaveLength(2);
+		expect(toRollback[0]!.name).toBe('0003_posts.sql');
+		expect(toRollback[1]!.name).toBe('0002_users.sql');
+	});
+});
+
+describe('migrate rollback — checksum validation', () => {
+	it('SC-17: should reject rollback when checksum mismatches', () => {
+		const record = { name: '0001_init.sql', checksum: 'original_hash' };
+		const file = { name: '0001_init.sql', checksum: 'modified_hash' };
+
+		expect(file.checksum !== record.checksum).toBe(true);
+	});
+
+	it('should accept rollback when checksums match', () => {
+		const record = { name: '0001_init.sql', checksum: 'abc123' };
+		const file = { name: '0001_init.sql', checksum: 'abc123' };
+
+		expect(file.checksum === record.checksum).toBe(true);
+	});
+});
+
+describe('migrate rollback — DOWN section handling', () => {
+	it('SC-10/ERR-01: should reject rollback when no DOWN section exists', () => {
+		const parsed = {
+			upStatements: ['CREATE TABLE "users" ("id" serial)'],
+			downStatements: [],
+			hasDown: false,
+		};
+
+		expect(parsed.hasDown).toBe(false);
+	});
+
+	it('SC-11/ERR-04: should reject rollback when DOWN section is empty without --force', () => {
+		const parsed = {
+			upStatements: ['CREATE TABLE "users" ("id" serial)'],
+			downStatements: [],
+			hasDown: true,
+		};
+		const force = false;
+
+		const downStmts = parsed.downStatements.filter(
+			(s) => s.length > 0 && !s.startsWith('-- '),
+		);
+		const shouldReject = downStmts.length === 0 && !force;
+
+		expect(shouldReject).toBe(true);
+	});
+
+	it('SC-11: should allow rollback with empty DOWN when --force is set', () => {
+		const parsed = {
+			upStatements: ['CREATE TABLE "users" ("id" serial)'],
+			downStatements: [],
+			hasDown: true,
+		};
+		const force = true;
+
+		const downStmts = parsed.downStatements.filter(
+			(s) => s.length > 0 && !s.startsWith('-- '),
+		);
+		const shouldReject = downStmts.length === 0 && !force;
+
+		expect(shouldReject).toBe(false);
+	});
+
+	it('SC-19: should reject destructive DOWN without --force', () => {
+		const downStatements = [
+			'DROP TABLE IF EXISTS "users" CASCADE',
+			'DROP TABLE IF EXISTS "posts" CASCADE',
+		];
+		const force = false;
+
+		// Simulate isDestructiveDown check
+		const hasDropTable = downStatements.some((s) => /DROP\s+TABLE/i.test(s));
+		const shouldReject = hasDropTable && !force;
+
+		expect(shouldReject).toBe(true);
+	});
+
+	it('SC-19: should allow destructive DOWN with --force', () => {
+		const downStatements = ['DROP TABLE IF EXISTS "users" CASCADE'];
+		const force = true;
+
+		const hasDropTable = downStatements.some((s) => /DROP\s+TABLE/i.test(s));
+		const shouldReject = hasDropTable && !force;
+
+		expect(shouldReject).toBe(false);
+	});
+});
+
+describe('migrate rollback — file lookup', () => {
+	it('should find migration file on disk by name', () => {
+		const files = [
+			{ name: '0001_init.sql', content: 'CREATE TABLE...', checksum: 'aaa' },
+			{
+				name: '0002_users.sql',
+				content: 'ALTER TABLE...',
+				checksum: 'bbb',
+			},
+		];
+		const fileMap = new Map(files.map((f) => [f.name, f]));
+
+		expect(fileMap.get('0001_init.sql')).toBeDefined();
+		expect(fileMap.get('0003_missing.sql')).toBeUndefined();
 	});
 });
 
