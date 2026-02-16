@@ -278,6 +278,105 @@ describe('IpcClient', () => {
 		});
 	});
 
+	describe('setLogger', () => {
+		async function connectClient() {
+			const connectPromise = client.connect(transport, '1.0.0');
+			const req = JSON.parse(transport.sent[0]!);
+			transport.simulateMessage(
+				JSON.stringify({
+					jsonrpc: '2.0',
+					id: req.id,
+					result: { version: '1.0.0', capabilities: [] },
+				}),
+			);
+			await connectPromise;
+		}
+
+		it('logs request and response with duration', async () => {
+			const logs: Array<{ type: string; method: string; durationMs?: number }> =
+				[];
+			client.setLogger((type, method, durationMs) => {
+				logs.push({ type, method, durationMs });
+			});
+
+			await connectClient();
+
+			// handshake produced request + response
+			expect(logs).toHaveLength(2);
+			expect(logs[0]).toMatchObject({ type: 'request', method: 'handshake' });
+			expect(logs[1]).toMatchObject({ type: 'response', method: 'handshake' });
+			expect(logs[1]!.durationMs).toBeGreaterThanOrEqual(0);
+		});
+
+		it('logs error with duration on rejection', async () => {
+			const logs: Array<{
+				type: string;
+				method: string;
+				durationMs?: number;
+				error?: Error;
+			}> = [];
+			client.setLogger((type, method, durationMs, error) => {
+				logs.push({ type, method, durationMs, error });
+			});
+
+			// Call without connect → stopped → rejects
+			await expect(client.call('foo')).rejects.toThrow('not running');
+
+			expect(logs).toHaveLength(2);
+			expect(logs[0]).toMatchObject({ type: 'request', method: 'foo' });
+			expect(logs[1]).toMatchObject({ type: 'error', method: 'foo' });
+			expect(logs[1]!.durationMs).toBeGreaterThanOrEqual(0);
+			expect(logs[1]!.error).toBeInstanceOf(Error);
+		});
+
+		it('logs response for successful call after connect', async () => {
+			const logs: Array<{ type: string; method: string; durationMs?: number }> =
+				[];
+			client.setLogger((type, method, durationMs) => {
+				logs.push({ type, method, durationMs });
+			});
+
+			await connectClient();
+			logs.length = 0; // Clear handshake logs
+
+			const callPromise = client.call('executeNQL', { nql: 'select from users' });
+			const req = JSON.parse(transport.sent[1]!);
+			transport.simulateMessage(
+				JSON.stringify({
+					jsonrpc: '2.0',
+					id: req.id,
+					result: { rows: [], columns: [] },
+				}),
+			);
+			await callPromise;
+
+			expect(logs).toHaveLength(2);
+			expect(logs[0]).toMatchObject({ type: 'request', method: 'executeNQL' });
+			expect(logs[1]).toMatchObject({ type: 'response', method: 'executeNQL' });
+			expect(logs[1]!.durationMs).toBeGreaterThanOrEqual(0);
+		});
+
+		it('can be cleared by passing null', async () => {
+			const logs: string[] = [];
+			client.setLogger((type) => logs.push(type));
+
+			await connectClient();
+			expect(logs.length).toBeGreaterThan(0);
+
+			client.setLogger(null);
+			logs.length = 0;
+
+			const callPromise = client.call('test');
+			const req = JSON.parse(transport.sent[1]!);
+			transport.simulateMessage(
+				JSON.stringify({ jsonrpc: '2.0', id: req.id, result: 'ok' }),
+			);
+			await callPromise;
+
+			expect(logs).toHaveLength(0);
+		});
+	});
+
 	describe('CRLF handling', () => {
 		it('handles CRLF in response messages', async () => {
 			const connectPromise = client.connect(transport, '1.0.0');

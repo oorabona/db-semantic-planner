@@ -50,6 +50,19 @@ describe('useLogStore', () => {
 		expect(entries[499]!.message).toBe('msg-509');
 	});
 
+	it('should store durationMs when provided', () => {
+		useLogStore.getState().addEntry('info', 'ipc', '← executeNQL', 142);
+		const entry = useLogStore.getState().entries[0]!;
+		expect(entry.durationMs).toBe(142);
+		expect(entry.source).toBe('ipc');
+	});
+
+	it('should omit durationMs when not provided', () => {
+		useLogStore.getState().addEntry('info', 'sidecar', 'hello');
+		const entry = useLogStore.getState().entries[0]!;
+		expect(entry).not.toHaveProperty('durationMs');
+	});
+
 	it('should clear all entries', () => {
 		useLogStore.getState().addEntry('info', 'sidecar', 'hello');
 		expect(useLogStore.getState().entries).toHaveLength(1);

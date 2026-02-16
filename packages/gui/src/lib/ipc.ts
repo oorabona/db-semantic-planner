@@ -2,6 +2,7 @@
  * Typed JSON-RPC method wrappers for the sidecar.
  * Uses IpcClient from ipc-transport.ts.
  */
+import { useLogStore } from '@/stores/log-store';
 import { IpcClient } from './ipc-transport.js';
 
 // ── Sidecar method types ─────────────────────────────────────────
@@ -284,3 +285,25 @@ export type SidecarApi = ReturnType<typeof createSidecarApi>;
 
 export const ipcClient = new IpcClient();
 export const sidecarApi = createSidecarApi(ipcClient);
+
+// ── IPC logging → application log store ─────────────────────────
+
+ipcClient.setLogger((type, method, durationMs, error) => {
+	const { addEntry } = useLogStore.getState();
+	switch (type) {
+		case 'request':
+			addEntry('debug', 'ipc', `→ ${method}`);
+			break;
+		case 'response':
+			addEntry('info', 'ipc', `← ${method}`, durationMs);
+			break;
+		case 'error':
+			addEntry(
+				'error',
+				'ipc',
+				`← ${method} ERROR: ${error?.message ?? 'unknown'}`,
+				durationMs,
+			);
+			break;
+	}
+});
