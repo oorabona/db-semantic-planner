@@ -339,7 +339,9 @@ describe('IpcClient', () => {
 			await connectClient();
 			logs.length = 0; // Clear handshake logs
 
-			const callPromise = client.call('executeNQL', { nql: 'select from users' });
+			const callPromise = client.call('executeNQL', {
+				nql: 'select from users',
+			});
 			const req = JSON.parse(transport.sent[1]!);
 			transport.simulateMessage(
 				JSON.stringify({

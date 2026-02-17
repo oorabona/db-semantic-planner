@@ -42,6 +42,19 @@ vi.mock('@/lib/tauri-transport.js', () => ({
 	createTauriTransport: () => mockTransport,
 }));
 
+// Mock log-db to prevent tauri-plugin-sql import
+vi.mock('@/lib/log-db', () => ({
+	initLogDb: vi.fn(async () => {}),
+	closeLogDb: vi.fn(async () => {}),
+	insertLog: vi.fn(async () => {}),
+	queryLogs: vi.fn(async () => []),
+	getLogStats: vi.fn(async () => ({ total: 0, byLevel: {} })),
+	clearLogs: vi.fn(async () => {}),
+	rotateOldLogs: vi.fn(async () => 0),
+	exportLogs: vi.fn(async () => []),
+	rowToEntry: vi.fn((r: unknown) => r),
+}));
+
 import { useSidecarInit } from './useSidecarInit.js';
 
 describe('useSidecarInit', () => {

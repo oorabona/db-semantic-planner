@@ -25,6 +25,9 @@ export function useSidecarInit(): void {
 		mounted.current = true;
 		const { setStatus, setError, setHeartbeat } = useSidecarStore.getState();
 
+		// Initialize log database (concurrent with sidecar boot)
+		useLogStore.getState().initDb();
+
 		async function boot(): Promise<void> {
 			try {
 				setStatus('spawning');
@@ -121,6 +124,7 @@ export function useSidecarInit(): void {
 				clearTimeout(reconnectTimer.current);
 			}
 			ipcClient.disconnect();
+			useLogStore.getState().closeDb();
 		};
 	}, []);
 }
