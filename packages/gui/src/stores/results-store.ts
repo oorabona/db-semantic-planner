@@ -2,7 +2,9 @@
  * Zustand store for query results management.
  * Tracks results, compiled SQL, plan, params, and active results tab.
  */
+
 import { create } from 'zustand';
+import { sidecarApi } from '@/lib/ipc';
 
 export type ResultsTab =
 	| 'results'
@@ -98,3 +100,27 @@ export const useResultsStore = create<ResultsState>((set) => ({
 			activeTab: 'results',
 		}),
 }));
+
+/**
+ * Shared fetchMore logic — used by both StatusBar (button) and DataTable (infinite scroll).
+ * Returns early if no cursor or already fetching.
+ */
+export async function triggerFetchMore(): Promise<void> {
+	const { result, fetchingMore, appendRows, setFetchingMore, setError } =
+		useResultsStore.getState();
+	if (!result?.cursorId || fetchingMore) return;
+	setFetchingMore(true);
+	try {
+		const raw = (await sidecarApi.fetchMore({
+			cursorId: result.cursorId,
+		})) as unknown as Record<string, unknown>;
+		const rows = (raw.rows ?? []) as Record<string, unknown>[];
+		appendRows(
+			rows,
+			raw.truncated as boolean | undefined,
+			raw.cursorId as string | undefined,
+		);
+	} catch (err) {
+		setError(err instanceof Error ? err.message : 'Failed to fetch more rows');
+	}
+}

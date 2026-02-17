@@ -57,16 +57,87 @@ interface PageState {
 	readonly maxRows: number;
 	currentOffset: number;
 	readonly columns: string[];
+	readonly createdAt: number;
+	/** Column name used for keyset pagination (null = use OFFSET). */
+	readonly keysetColumn: string | null;
+	/** Last seen value of keysetColumn for keyset pagination. */
+	lastKeysetValue: unknown;
 }
+
+/** Maximum number of cursors kept in memory. Oldest evicted first. */
+const MAX_CURSORS = 50;
+/** Cursor TTL in milliseconds (10 minutes). */
+const CURSOR_TTL_MS = 10 * 60 * 1000;
 
 const pageStore = new Map<string, PageState>();
 let cursorCounter = 0;
+
+/** Evict expired cursors and trim to MAX_CURSORS (oldest first). */
+function cleanupPageStore(): void {
+	const now = Date.now();
+	for (const [id, state] of pageStore) {
+		if (now - state.createdAt > CURSOR_TTL_MS) {
+			pageStore.delete(id);
+		}
+	}
+	if (pageStore.size > MAX_CURSORS) {
+		const entries = [...pageStore.entries()].sort(
+			(a, b) => a[1].createdAt - b[1].createdAt,
+		);
+		const excess = pageStore.size - MAX_CURSORS;
+		for (let i = 0; i < excess; i++) {
+			const entry = entries[i];
+			if (entry) pageStore.delete(entry[0]);
+		}
+	}
+}
 
 function generateCursorId(): string {
 	return `cur_${++cursorCounter}_${Date.now()}`;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
+
+/** Offset threshold above which keyset pagination is preferred. */
+const KEYSET_OFFSET_THRESHOLD = 5000;
+/** Column names eligible as keyset cursor (checked in order). */
+const KEYSET_CANDIDATE_COLUMNS = ['id', 'ID', 'Id'];
+
+/**
+ * Detect a column suitable for keyset pagination from the result set.
+ * Returns the column name or null if none found.
+ *
+ * **Assumption:** The matched column must contain monotonically increasing values
+ * (e.g. auto-increment integer PKs). UUID or non-sequential PKs will produce
+ * incorrect pagination order — in those cases keyset is not activated.
+ */
+function detectKeysetColumn(columns: string[]): string | null {
+	for (const candidate of KEYSET_CANDIDATE_COLUMNS) {
+		if (columns.includes(candidate)) return candidate;
+	}
+	return null;
+}
+
+/**
+ * Wrap SQL with keyset-based pagination:
+ * SELECT * FROM (user_sql) AS _q WHERE "keysetCol" > $N ORDER BY "keysetCol" LIMIT N
+ *
+ * **Note:** The outer ORDER BY "keysetCol" overrides any ORDER BY in the user's
+ * original query. This is intentional for keyset correctness — rows must be
+ * ordered by the keyset column to guarantee no gaps. If the original query has
+ * a different ORDER BY, the result order will change at the keyset threshold.
+ */
+function wrapWithKeyset(
+	sql: string,
+	limit: number,
+	keysetColumn: string,
+	lastValue: unknown,
+	existingParams: readonly unknown[],
+): { sql: string; params: readonly unknown[] } {
+	const paramIdx = existingParams.length + 1;
+	const wrappedSql = `SELECT * FROM (${sql}) AS _q WHERE "${keysetColumn}" > $${paramIdx} ORDER BY "${keysetColumn}" LIMIT ${limit}`;
+	return { sql: wrappedSql, params: [...existingParams, lastValue] };
+}
 
 /** Detect SELECT-type statements that should be wrapped with LIMIT. */
 function isSelectStatement(sql: string): boolean {
@@ -137,7 +208,9 @@ export async function handleExecuteSQL(
 
 		let cursorId: string | undefined;
 		if (hasMore) {
+			cleanupPageStore();
 			cursorId = generateCursorId();
+			const keysetCol = detectKeysetColumn(columns);
 			pageStore.set(cursorId, {
 				sql: params.sql,
 				sqlParams: params.params ?? [],
@@ -145,6 +218,11 @@ export async function handleExecuteSQL(
 				maxRows,
 				currentOffset: maxRows,
 				columns,
+				createdAt: Date.now(),
+				keysetColumn: keysetCol,
+				lastKeysetValue: keysetCol
+					? rows[rows.length - 1]?.[keysetCol]
+					: undefined,
 			});
 		}
 
@@ -255,7 +333,9 @@ export async function handleExecuteNQL(
 
 		let cursorId: string | undefined;
 		if (hasMore) {
+			cleanupPageStore();
 			cursorId = generateCursorId();
+			const keysetCol = detectKeysetColumn(columns);
 			pageStore.set(cursorId, {
 				sql,
 				sqlParams,
@@ -263,6 +343,11 @@ export async function handleExecuteNQL(
 				maxRows,
 				currentOffset: maxRows,
 				columns,
+				createdAt: Date.now(),
+				keysetColumn: keysetCol,
+				lastKeysetValue: keysetCol
+					? rows[rows.length - 1]?.[keysetCol]
+					: undefined,
 			});
 		}
 
@@ -303,6 +388,7 @@ export async function handleFetchMore(
 	params: FetchMoreParams,
 	getPool: (connectionId: string) => Pool,
 ): Promise<QueryResponse> {
+	cleanupPageStore();
 	const state = pageStore.get(params.cursorId);
 	if (!state) {
 		throw new Error(`Unknown or expired cursor: ${params.cursorId}`);
@@ -311,16 +397,52 @@ export async function handleFetchMore(
 	const pool = getPool(state.connectionId);
 	const maxRows = params.maxRows ?? state.maxRows;
 
-	const { rows, columns, durationMs, hasMore } = await executePaginated(
-		pool,
-		state.sql,
-		state.sqlParams,
-		maxRows,
-		state.currentOffset,
-	);
+	// Use keyset pagination when offset is large and a keyset column is available
+	const useKeyset =
+		state.keysetColumn != null &&
+		state.lastKeysetValue != null &&
+		state.currentOffset >= KEYSET_OFFSET_THRESHOLD;
+
+	let rows: Record<string, unknown>[];
+	let columns: string[];
+	let durationMs: number;
+	let hasMore: boolean;
+
+	if (useKeyset) {
+		// biome-ignore lint/style/noNonNullAssertion: guarded by useKeyset check above (keysetColumn != null)
+		const keysetCol = state.keysetColumn!;
+		const keyed = wrapWithKeyset(
+			state.sql,
+			maxRows + 1,
+			keysetCol,
+			state.lastKeysetValue,
+			state.sqlParams,
+		);
+		const start = performance.now();
+		const result = await pool.query(
+			keyed.sql,
+			keyed.params.length > 0 ? [...keyed.params] : undefined,
+		);
+		durationMs = Math.round(performance.now() - start);
+		const allRows = (result.rows ?? []) as Record<string, unknown>[];
+		columns = result.fields?.map((f) => f.name) ?? [];
+		hasMore = allRows.length > maxRows;
+		rows = hasMore ? allRows.slice(0, maxRows) : allRows;
+	} else {
+		({ rows, columns, durationMs, hasMore } = await executePaginated(
+			pool,
+			state.sql,
+			state.sqlParams,
+			maxRows,
+			state.currentOffset,
+		));
+	}
 
 	if (hasMore) {
 		state.currentOffset += maxRows;
+		if (state.keysetColumn && rows.length > 0) {
+			state.lastKeysetValue = rows[rows.length - 1]?.[state.keysetColumn];
+		}
 	} else {
 		pageStore.delete(params.cursorId);
 	}

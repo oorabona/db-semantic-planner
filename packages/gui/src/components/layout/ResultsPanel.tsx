@@ -13,7 +13,7 @@ import { SchemaDiffView } from '@/components/results/SchemaDiffView';
 import { StatusBar } from '@/components/results/StatusBar';
 import { useAssertionStore } from '@/stores/assertion-store';
 import { useConnectionStore } from '@/stores/connection-store';
-import { useResultsStore } from '@/stores/results-store';
+import { triggerFetchMore, useResultsStore } from '@/stores/results-store';
 
 export function ResultsPanel() {
 	const result = useResultsStore((s) => s.result);
@@ -47,7 +47,15 @@ export function ResultsPanel() {
 						)}
 						{!executing && !result && !isConnected && <EmptyState />}
 						{!executing && result && (
-							<DataTable columns={result.columns} rows={result.rows} />
+							<DataTable
+								columns={result.columns}
+								rows={result.rows}
+								onScrollNearEnd={
+									result.truncated && result.cursorId
+										? triggerFetchMore
+										: undefined
+								}
+							/>
 						)}
 					</>
 				)}
