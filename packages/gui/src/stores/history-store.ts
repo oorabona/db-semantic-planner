@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { Database } from '@/lib/db-shared';
+import { uuidv7 } from '@/lib/uuid';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -77,6 +78,16 @@ export const useHistoryStore = create<HistoryState>()((set, get) => ({
 		const db = getDb?.();
 		if (!db) return;
 
+		// Rotate old entries before loading (mirrors log rotation pattern)
+		try {
+			const { rotateOldHistory } = await import('@/lib/project-db');
+			const { useUserSettingsStore } = await import('./user-settings-store');
+			const days = useUserSettingsStore.getState().historyRetentionDays;
+			await rotateOldHistory(days);
+		} catch (e) {
+			console.warn('[history] rotateOldHistory failed:', e);
+		}
+
 		const rows = await db.select<Array<Record<string, unknown>>>(
 			'SELECT id, query, language, database, timestamp, duration_ms, row_count, success, error FROM query_history ORDER BY timestamp DESC LIMIT $1',
 			[MAX_ENTRIES],
@@ -87,7 +98,7 @@ export const useHistoryStore = create<HistoryState>()((set, get) => ({
 	addEntry: (entry) => {
 		const newEntry: HistoryEntry = {
 			...entry,
-			id: crypto.randomUUID(),
+			id: uuidv7(),
 		};
 
 		set((state) => {

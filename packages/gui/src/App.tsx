@@ -6,7 +6,7 @@ import {
 } from '@tauri-apps/plugin-dialog';
 import { exists, readTextFile } from '@tauri-apps/plugin-fs';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
-import { FolderOpen, History, Plus } from 'lucide-react';
+import { FolderOpen, History, Info, Plus } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Toaster, toast } from 'sonner';
@@ -87,6 +87,7 @@ export default function App() {
 
 	const { status, active, error } = useConnectionStore();
 	const projectMode = useProjectStore((s) => s.mode);
+	const projectFolderPath = useProjectStore((s) => s.folderPath);
 	const projectSettings = useProjectStore((s) => s.settings);
 	const { connect, testConnection, testResult, disconnect } = useConnection();
 
@@ -764,6 +765,26 @@ export default function App() {
 
 	return (
 		<div className="flex h-screen w-screen flex-col">
+			{/* F004: Context-aware banner for non-project folders */}
+			{projectMode === 'standalone' && projectFolderPath && (
+				<div className="flex items-center gap-2 border-b bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
+					<Info className="h-3.5 w-3.5 shrink-0" />
+					<span>
+						This folder has no{' '}
+						<code className="rounded bg-muted px-1 font-mono">
+							dbsp.settings.json
+						</code>
+						. Features like schema diff and project history are unavailable.
+					</span>
+					<button
+						type="button"
+						className="ml-auto shrink-0 text-primary hover:underline"
+						onClick={() => setWizardOpen(true)}
+					>
+						Convert to project
+					</button>
+				</div>
+			)}
 			{/* Main layout */}
 			<div className="flex-1 overflow-hidden">
 				<PanelGroup autoSaveId="dbsp-main-layout" direction="horizontal">

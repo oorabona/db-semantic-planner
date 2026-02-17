@@ -24,6 +24,8 @@ export interface UserSettings {
 	maxResults: number;
 	/** Log retention in days (logs older than this are deleted on startup) */
 	logRetentionDays: number;
+	/** Query history retention in days (entries older than this are deleted on load) */
+	historyRetentionDays: number;
 }
 
 // ── Defaults ─────────────────────────────────────────────────────
@@ -36,6 +38,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
 	formatOnSave: false,
 	maxResults: 1000,
 	logRetentionDays: 30,
+	historyRetentionDays: 90,
 };
 
 // ── Store ────────────────────────────────────────────────────────
@@ -97,6 +100,7 @@ export const useUserSettingsStore = create<UserSettingsState>()(
 				formatOnSave: state.formatOnSave,
 				maxResults: state.maxResults,
 				logRetentionDays: state.logRetentionDays,
+				historyRetentionDays: state.historyRetentionDays,
 			}),
 		},
 	),

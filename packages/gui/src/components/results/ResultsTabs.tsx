@@ -12,6 +12,7 @@ import {
 	Table,
 } from 'lucide-react';
 import { useAssertionStore } from '@/stores/assertion-store';
+import { useConnectionStore } from '@/stores/connection-store';
 import { type ResultsTab, useResultsStore } from '@/stores/results-store';
 import { useSchemaDiffStore } from '@/stores/schema-diff-store';
 
@@ -32,22 +33,30 @@ export function ResultsTabs() {
 	const result = useResultsStore((s) => s.result);
 	const assertionResult = useAssertionStore((s) => s.result);
 	const schemaDiff = useSchemaDiffStore((s) => s.diff);
+	const hasProfiles = useConnectionStore((s) => s.profiles.length > 0);
 
 	return (
 		<div className="flex items-center gap-1 border-b px-2">
 			{TABS.map(({ id, label, Icon }) => {
 				const isActive = activeTab === id;
 				const isDisabled =
+					(id === 'results' && !hasProfiles && !result) ||
 					(id === 'sql' && !result?.sql) ||
 					(id === 'plan' && !result?.plan) ||
 					(id === 'params' && !result?.params?.length) ||
 					(id === 'assertions' && !assertionResult) ||
 					(id === 'schema-diff' && !schemaDiff);
 
+				const tooltip =
+					id === 'results' && !hasProfiles && !result
+						? 'No connection — plan-only mode'
+						: undefined;
+
 				return (
 					<button
 						key={id}
 						type="button"
+						title={tooltip}
 						className={`flex items-center gap-1.5 px-3 py-1.5 text-xs transition-colors ${
 							isActive
 								? 'border-b-2 border-primary font-medium'

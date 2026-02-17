@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { toast } from 'sonner';
 import { sidecarApi } from '@/lib/ipc';
 import { useConnectionStore } from '@/stores/connection-store';
 import { getActiveTab, useEditorStore } from '@/stores/editor-store';
@@ -14,7 +15,13 @@ export function SqlEditor() {
 	const { setResult, setExecuting, setError } = useResultsStore.getState();
 
 	const handleRun = useCallback(async () => {
-		if (!activeTab || !active) return;
+		if (!activeTab) return;
+		if (!active) {
+			toast.warning(
+				'No connection — plan-only mode. Connect to a database to execute queries.',
+			);
+			return;
+		}
 
 		const content = activeTab.content.trim();
 		if (!content) return;
