@@ -2,6 +2,16 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@tauri-apps/api/path', () => ({
+	appConfigDir: vi.fn().mockResolvedValue('/mock/config'),
+	join: vi.fn((...parts: string[]) => Promise.resolve(parts.join('/'))),
+}));
+
+vi.mock('@tauri-apps/plugin-fs', () => ({
+	mkdir: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { setDatabaseFactory } from './db-shared';
 import {
 	closeProjectDb,

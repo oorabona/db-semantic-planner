@@ -282,6 +282,23 @@ describe('discoverFiles', () => {
 		expect(files).toHaveLength(0);
 	});
 
+	it('skips directories that throw on readDir (permission errors)', async () => {
+		// Arrange: root has a forbidden dir and a readable file
+		mockReadDir
+			.mockResolvedValueOnce([
+				{ name: 'secret-folder', isDirectory: true, isFile: false },
+				{ name: 'query.dbsp', isDirectory: false, isFile: true },
+			])
+			.mockRejectedValueOnce('forbidden path: /project/secret-folder'); // Tauri scope error
+
+		// Act
+		const files = await discoverFiles('/project');
+
+		// Assert: forbidden dir skipped, file still included
+		expect(files).toHaveLength(1);
+		expect(files[0]!.name).toBe('query.dbsp');
+	});
+
 	it('sorts directories before files', async () => {
 		// Arrange
 		mockReadDir
@@ -355,7 +372,7 @@ describe('useProjectStore', () => {
 
 			// Assert
 			const state = useProjectStore.getState();
-			expect(state.error).toBe('Permission denied');
+			expect(state.error).toBe('Read settings: Permission denied');
 			expect(state.loading).toBe(false);
 		});
 

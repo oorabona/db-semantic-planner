@@ -70,6 +70,12 @@ describe('useConnection', () => {
 				profileId: 'profile-1',
 				database: 'testdb',
 				schema: 'public',
+				connectParams: {
+					host: 'localhost',
+					port: 5432,
+					user: 'testuser',
+					sslMode: 'disable',
+				},
 			});
 		});
 

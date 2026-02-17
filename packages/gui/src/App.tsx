@@ -819,18 +819,32 @@ export default function App() {
 		const { active: conn, profiles } = useConnectionStore.getState();
 		if (!conn) return undefined;
 		const profile = profiles.find((p) => p.id === conn.profileId);
-		if (!profile) return undefined;
-		const cfg = profile.config as Record<string, unknown>;
+		if (profile) {
+			const cfg = profile.config as Record<string, unknown>;
+			return {
+				name: profile.name,
+				type: profile.type,
+				host: (cfg.host as string) ?? 'localhost',
+				port: (cfg.port as number) ?? 5432,
+				database: conn.database,
+				user: (cfg.user as string) ?? '',
+				password: '',
+				schema: conn.schema,
+				sslMode: (cfg.sslMode as ConnectionFormData['sslMode']) ?? 'disable',
+			};
+		}
+		// No saved profile (standalone connect) — build from stored connect params
+		if (!conn.connectParams) return undefined;
 		return {
-			name: profile.name,
-			type: profile.type,
-			host: (cfg.host as string) ?? 'localhost',
-			port: (cfg.port as number) ?? 5432,
+			name: '',
+			type: 'postgresql',
+			host: conn.connectParams.host,
+			port: conn.connectParams.port,
 			database: conn.database,
-			user: (cfg.user as string) ?? '',
-			password: '', // Not stored in profile — user re-enters if needed
+			user: conn.connectParams.user,
+			password: '',
 			schema: conn.schema,
-			sslMode: (cfg.sslMode as ConnectionFormData['sslMode']) ?? 'disable',
+			sslMode: conn.connectParams.sslMode,
 		};
 	};
 
@@ -848,9 +862,13 @@ export default function App() {
 			});
 			setWizardOpen(false);
 		} catch (err) {
-			toast.error(
-				err instanceof Error ? err.message : 'Failed to create project',
-			);
+			const msg =
+				err instanceof Error
+					? err.message
+					: typeof err === 'string'
+						? err
+						: 'Failed to create project';
+			toast.error(msg);
 		} finally {
 			setWizardCreating(false);
 		}
@@ -1014,19 +1032,21 @@ export default function App() {
 				onRemove={handleRemoveRecent}
 			/>
 
-			{/* New Project Wizard */}
-			<NewProjectWizard
-				open={wizardOpen}
-				onClose={() => setWizardOpen(false)}
-				onCreate={handleCreateProject}
-				initialConnection={wizardOpen ? getInitialConnection() : undefined}
-				onDiscover={(params) => sidecarApi.listDatabases(params)}
-				onListSchemas={(params) => sidecarApi.listSchemas(params)}
-				onTestConnection={handleTest}
-				testing={testing}
-				testResult={testResult}
-				creating={wizardCreating}
-			/>
+			{/* New Project Wizard — conditional render so useState initializer runs fresh */}
+			{wizardOpen && (
+				<NewProjectWizard
+					open
+					onClose={() => setWizardOpen(false)}
+					onCreate={handleCreateProject}
+					initialConnection={getInitialConnection()}
+					onDiscover={(params) => sidecarApi.listDatabases(params)}
+					onListSchemas={(params) => sidecarApi.listSchemas(params)}
+					onTestConnection={handleTest}
+					testing={testing}
+					testResult={testResult}
+					creating={wizardCreating}
+				/>
+			)}
 		</div>
 	);
 }
