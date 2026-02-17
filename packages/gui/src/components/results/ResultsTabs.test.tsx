@@ -17,6 +17,7 @@ vi.mock('@/stores/results-store', () => ({
 
 const mockConnectionState = {
 	profiles: [] as Array<{ id: string }>,
+	status: 'disconnected' as string,
 };
 
 vi.mock('@/stores/connection-store', () => ({
@@ -41,14 +42,16 @@ afterEach(() => {
 	mockResultsState.activeTab = 'sql';
 	mockResultsState.result = null;
 	mockConnectionState.profiles = [];
+	mockConnectionState.status = 'disconnected';
 	mockResultsState.setActiveTab.mockClear();
 });
 
 // ── F007: Plan-only mode (Results tab disabled) ────────────────
 
 describe('ResultsTabs — F007 plan-only mode', () => {
-	it('disables Results tab when no profiles and no result', () => {
+	it('disables Results tab when disconnected, no profiles, and no result', () => {
 		mockConnectionState.profiles = [];
+		mockConnectionState.status = 'disconnected';
 		mockResultsState.result = null;
 
 		render(<ResultsTabs />);
@@ -66,6 +69,16 @@ describe('ResultsTabs — F007 plan-only mode', () => {
 		expect(resultsBtn.disabled).toBe(false);
 	});
 
+	it('enables Results tab when connected even without profiles or result', () => {
+		mockConnectionState.profiles = [];
+		mockConnectionState.status = 'connected';
+		mockResultsState.result = null;
+
+		render(<ResultsTabs />);
+		const resultsBtn = screen.getByText('Results').closest('button')!;
+		expect(resultsBtn.disabled).toBe(false);
+	});
+
 	it('enables Results tab when result exists even without profiles', () => {
 		mockConnectionState.profiles = [];
 		mockResultsState.result = { sql: 'SELECT 1' };
@@ -75,8 +88,8 @@ describe('ResultsTabs — F007 plan-only mode', () => {
 		expect(resultsBtn.disabled).toBe(false);
 	});
 
-	it('does not show plan-only tooltip when profiles exist', () => {
-		mockConnectionState.profiles = [{ id: 'p1' }];
+	it('does not show plan-only tooltip when connected', () => {
+		mockConnectionState.status = 'connected';
 
 		render(<ResultsTabs />);
 		const resultsBtn = screen.getByText('Results').closest('button')!;
