@@ -24,6 +24,10 @@
 			"identifier": "fs:allow-read-dir",
 			"allow": [{ "path": "$HOME/**" }]
 		},
+		{
+			"identifier": "fs:allow-mkdir",
+			"allow": [{ "path": "$APPCONFIG/**" }]
+		},
 		"store:default",
 		"sql:default",
 		"sql:allow-execute"
