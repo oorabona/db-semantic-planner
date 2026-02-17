@@ -13,15 +13,19 @@ import {
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowUp } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CellRenderer } from './CellRenderer';
 
 interface DataTableProps {
 	columns: string[];
 	rows: ReadonlyArray<Record<string, unknown>>;
+	/** Called when user scrolls within threshold of the bottom. */
+	onScrollNearEnd?: () => void;
 }
 
 const ROW_HEIGHT = 32;
+/** Distance from bottom (px) at which infinite scroll triggers */
+const SCROLL_THRESHOLD = 200;
 /** Minimum column width in pixels */
 const MIN_COL_WIDTH = 60;
 /** Maximum column width in pixels */
@@ -64,9 +68,29 @@ function estimateColumnWidth(
 
 // ── Component ────────────────────────────────────────────────────
 
-export function DataTable({ columns, rows }: DataTableProps) {
+export function DataTable({ columns, rows, onScrollNearEnd }: DataTableProps) {
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const parentRef = useRef<HTMLDivElement>(null);
+
+	// ── Infinite scroll: detect scroll near bottom ─────────────
+	const onScrollNearEndRef = useRef(onScrollNearEnd);
+	onScrollNearEndRef.current = onScrollNearEnd;
+
+	const handleScroll = useCallback(() => {
+		const el = parentRef.current;
+		if (!el || !onScrollNearEndRef.current) return;
+		const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+		if (distFromBottom < SCROLL_THRESHOLD) {
+			onScrollNearEndRef.current();
+		}
+	}, []);
+
+	useEffect(() => {
+		const el = parentRef.current;
+		if (!el || !onScrollNearEnd) return;
+		el.addEventListener('scroll', handleScroll, { passive: true });
+		return () => el.removeEventListener('scroll', handleScroll);
+	}, [onScrollNearEnd, handleScroll]);
 
 	const useColumnVirtualization = columns.length > COL_VIRTUALIZE_THRESHOLD;
 

@@ -3,10 +3,8 @@
  */
 
 import { ChevronDown, Download, Loader2 } from 'lucide-react';
-import { useCallback } from 'react';
 import { downloadCsv, toCsv } from '@/lib/csv-export';
-import { sidecarApi } from '@/lib/ipc';
-import { useResultsStore } from '@/stores/results-store';
+import { triggerFetchMore, useResultsStore } from '@/stores/results-store';
 
 // ── StatusBar ────────────────────────────────────────────────────
 
@@ -45,28 +43,6 @@ export function StatusBar() {
 		);
 	})();
 
-	const handleFetchMore = useCallback(async () => {
-		if (!result?.cursorId || fetchingMore) return;
-		const { appendRows, setFetchingMore, setError } =
-			useResultsStore.getState();
-		setFetchingMore(true);
-		try {
-			const raw = (await sidecarApi.fetchMore({
-				cursorId: result.cursorId,
-			})) as unknown as Record<string, unknown>;
-			const rows = (raw.rows ?? []) as Record<string, unknown>[];
-			appendRows(
-				rows,
-				raw.truncated as boolean | undefined,
-				raw.cursorId as string | undefined,
-			);
-		} catch (err) {
-			setError(
-				err instanceof Error ? err.message : 'Failed to fetch more rows',
-			);
-		}
-	}, [result?.cursorId, fetchingMore]);
-
 	const handleExport = () => {
 		if (!result) return;
 		const csv = toCsv(result.columns, result.rows);
@@ -81,7 +57,7 @@ export function StatusBar() {
 					<button
 						type="button"
 						className="flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50"
-						onClick={handleFetchMore}
+						onClick={triggerFetchMore}
 						disabled={fetchingMore}
 					>
 						{fetchingMore ? (
