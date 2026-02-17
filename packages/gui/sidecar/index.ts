@@ -32,8 +32,10 @@ import {
 import {
 	type ExecuteNqlParams,
 	type ExecuteSqlParams,
+	type FetchMoreParams,
 	handleExecuteNQL,
 	handleExecuteSQL,
+	handleFetchMore,
 } from './query-executor.js';
 import { Router } from './router.js';
 import {
@@ -150,6 +152,10 @@ try {
 			getPool,
 			introspectConnection,
 		);
+	});
+
+	router.setHandler('fetchMore', async (params) => {
+		return handleFetchMore(params as FetchMoreParams, getPool);
 	});
 
 	router.setHandler('schemaReload', async (params) => {

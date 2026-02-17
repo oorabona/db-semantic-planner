@@ -16,6 +16,7 @@ describe('useResultsStore', () => {
 			result: null,
 			activeTab: 'results',
 			executing: false,
+			fetchingMore: false,
 			error: null,
 		});
 	});
@@ -40,7 +41,7 @@ describe('useResultsStore', () => {
 				.getState()
 				.appendRows(
 					[{ id: 3, name: 'Charlie', active: true }],
-					100,
+					true,
 					'cursor-123',
 				);
 
@@ -51,7 +52,6 @@ describe('useResultsStore', () => {
 				name: 'Charlie',
 				active: true,
 			});
-			expect(state.result!.totalRows).toBe(100);
 			expect(state.result!.cursorId).toBe('cursor-123');
 			expect(state.result!.truncated).toBe(true);
 		});
@@ -69,7 +69,11 @@ describe('useResultsStore', () => {
 			});
 			useResultsStore
 				.getState()
-				.appendRows([{ id: 3, name: 'Charlie', active: true }], 3, undefined);
+				.appendRows(
+					[{ id: 3, name: 'Charlie', active: true }],
+					false,
+					undefined,
+				);
 			expect(useResultsStore.getState().result!.truncated).toBe(false);
 		});
 	});

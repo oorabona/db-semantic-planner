@@ -5,6 +5,7 @@ import { useConnectionStore } from '@/stores/connection-store';
 import { getActiveTab, useEditorStore } from '@/stores/editor-store';
 import { useHistoryStore } from '@/stores/history-store';
 import { type QueryResult, useResultsStore } from '@/stores/results-store';
+import { useUserSettingsStore } from '@/stores/user-settings-store';
 import { EditorToolbar } from './EditorToolbar';
 import { MonacoWrapper } from './MonacoWrapper';
 
@@ -26,6 +27,7 @@ export function SqlEditor() {
 		const content = activeTab.content.trim();
 		if (!content) return;
 
+		const maxRows = useUserSettingsStore.getState().maxResults;
 		const startTime = Date.now();
 		setExecuting(true);
 		try {
@@ -34,11 +36,13 @@ export function SqlEditor() {
 				raw = await sidecarApi.executeNQL({
 					connectionId: active.connectionId,
 					nql: content,
+					maxRows,
 				});
 			} else {
 				raw = await sidecarApi.executeSQL({
 					connectionId: active.connectionId,
 					sql: content,
+					maxRows,
 				});
 			}
 

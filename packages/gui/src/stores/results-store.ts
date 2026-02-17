@@ -42,6 +42,8 @@ export interface ResultsState {
 	activeTab: ResultsTab;
 	/** Whether a query is currently executing */
 	executing: boolean;
+	/** Whether a fetchMore is in progress */
+	fetchingMore: boolean;
 	/** Error message from last execution */
 	error: string | null;
 
@@ -49,11 +51,12 @@ export interface ResultsState {
 	setResult: (result: QueryResult) => void;
 	appendRows: (
 		rows: ReadonlyArray<Record<string, unknown>>,
-		totalRows?: number,
+		truncated?: boolean,
 		cursorId?: string,
 	) => void;
 	setActiveTab: (tab: ResultsTab) => void;
 	setExecuting: (executing: boolean) => void;
+	setFetchingMore: (fetchingMore: boolean) => void;
 	setError: (error: string | null) => void;
 	clear: () => void;
 }
@@ -62,27 +65,36 @@ export const useResultsStore = create<ResultsState>((set) => ({
 	result: null,
 	activeTab: 'results',
 	executing: false,
+	fetchingMore: false,
 	error: null,
 
-	setResult: (result) => set({ result, error: null, executing: false }),
+	setResult: (result) =>
+		set({ result, error: null, executing: false, fetchingMore: false }),
 
-	appendRows: (rows, totalRows, cursorId) =>
+	appendRows: (rows, truncated, cursorId) =>
 		set((state) => {
 			if (!state.result) return state;
 			return {
 				result: {
 					...state.result,
 					rows: [...state.result.rows, ...rows],
-					totalRows: totalRows ?? state.result.totalRows,
 					cursorId,
-					truncated: cursorId != null,
+					truncated: truncated ?? false,
 				},
+				fetchingMore: false,
 			};
 		}),
 
 	setActiveTab: (activeTab) => set({ activeTab }),
 	setExecuting: (executing) => set({ executing, error: null }),
-	setError: (error) => set({ error, executing: false }),
+	setFetchingMore: (fetchingMore) => set({ fetchingMore }),
+	setError: (error) => set({ error, executing: false, fetchingMore: false }),
 	clear: () =>
-		set({ result: null, error: null, executing: false, activeTab: 'results' }),
+		set({
+			result: null,
+			error: null,
+			executing: false,
+			fetchingMore: false,
+			activeTab: 'results',
+		}),
 }));
