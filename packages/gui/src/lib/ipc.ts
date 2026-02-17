@@ -190,6 +190,13 @@ export interface SchemaApplyResult {
 	readonly error?: string;
 }
 
+export interface SchemaReloadResult {
+	readonly tableNames: readonly string[];
+	readonly tableCount: number;
+	readonly relationCount: number;
+	readonly schemaPath: string;
+}
+
 // ── Typed API ────────────────────────────────────────────────────
 
 export function createSidecarApi(client: IpcClient) {
@@ -274,6 +281,12 @@ export function createSidecarApi(client: IpcClient) {
 			return client.call<SchemaApplyResult>('schemaApply', {
 				connectionId,
 				statements,
+			});
+		},
+
+		schemaReload(folderPath: string) {
+			return client.call<SchemaReloadResult>('schemaReload', {
+				folderPath,
 			});
 		},
 	};

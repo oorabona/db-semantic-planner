@@ -12,6 +12,14 @@ vi.mock('@/lib/ipc.js', () => ({
 	},
 }));
 
+// Mock project-db (imported by connection-store)
+vi.mock('@/lib/project-db.js', () => ({
+	upsertConnectionProfile: vi.fn().mockResolvedValue(undefined),
+	listConnectionProfiles: vi.fn().mockResolvedValue([]),
+	deleteConnectionProfile: vi.fn().mockResolvedValue(undefined),
+	touchConnectionProfile: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Import after mock to get the mocked version
 import { sidecarApi } from '@/lib/ipc.js';
 
@@ -330,12 +338,17 @@ describe('useConnection', () => {
 				id: 'profile-1',
 				name: 'Test Profile',
 				type: 'postgresql' as const,
-				host: 'localhost',
-				port: 5432,
-				database: 'testdb',
-				user: 'testuser',
-				schema: 'public',
-				sslMode: 'prefer' as const,
+				config: {
+					host: 'localhost',
+					port: 5432,
+					database: 'testdb',
+					user: 'testuser',
+					schema: 'public',
+					sslMode: 'prefer',
+				},
+				environment: null,
+				createdAt: Date.now(),
+				lastUsedAt: null,
 			};
 
 			result.current.saveProfile(profile);
@@ -357,12 +370,17 @@ describe('useConnection', () => {
 						id: 'profile-1',
 						name: 'Test Profile',
 						type: 'postgresql' as const,
-						host: 'localhost',
-						port: 5432,
-						database: 'testdb',
-						user: 'testuser',
-						schema: 'public',
-						sslMode: 'prefer',
+						config: {
+							host: 'localhost',
+							port: 5432,
+							database: 'testdb',
+							user: 'testuser',
+							schema: 'public',
+							sslMode: 'prefer',
+						},
+						environment: null,
+						createdAt: Date.now(),
+						lastUsedAt: null,
 					},
 				],
 			});
@@ -391,12 +409,17 @@ describe('useConnection', () => {
 				id: 'profile-1',
 				name: 'Test Profile',
 				type: 'postgresql' as const,
-				host: 'localhost',
-				port: 5432,
-				database: 'testdb',
-				user: 'testuser',
-				schema: 'public',
-				sslMode: 'prefer' as const,
+				config: {
+					host: 'localhost',
+					port: 5432,
+					database: 'testdb',
+					user: 'testuser',
+					schema: 'public',
+					sslMode: 'prefer',
+				},
+				environment: null,
+				createdAt: Date.now(),
+				lastUsedAt: null,
 			};
 
 			const returnValue = await result.current.connectFromProfile(

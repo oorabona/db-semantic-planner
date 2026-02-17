@@ -12,11 +12,29 @@ vi.mock('@/components/editor/SqlEditor', () => ({
 	SqlEditor: () => <div data-testid="sql-editor">SqlEditor</div>,
 }));
 vi.mock('@/components/layout/WelcomeScreen', () => ({
-	WelcomeScreen: ({ onConnect }: { onConnect: () => void }) => (
+	WelcomeScreen: ({
+		onConnect,
+		onNewProject,
+		onOpenProject,
+	}: {
+		onConnect: () => void;
+		onNewProject?: () => void;
+		onOpenProject?: () => void;
+	}) => (
 		<div data-testid="welcome-screen">
 			<button type="button" onClick={onConnect}>
 				mock-connect
 			</button>
+			{onNewProject && (
+				<button type="button" onClick={onNewProject}>
+					mock-new-project
+				</button>
+			)}
+			{onOpenProject && (
+				<button type="button" onClick={onOpenProject}>
+					mock-open-project
+				</button>
+			)}
 		</div>
 	),
 }));
@@ -50,5 +68,19 @@ describe('EditorPanel', () => {
 		render(<EditorPanel onConnect={onConnect} />);
 		screen.getByText('mock-connect').click();
 		expect(onConnect).toHaveBeenCalledOnce();
+	});
+
+	it('passes onNewProject to WelcomeScreen', () => {
+		const onNewProject = vi.fn();
+		render(<EditorPanel onConnect={onConnect} onNewProject={onNewProject} />);
+		screen.getByText('mock-new-project').click();
+		expect(onNewProject).toHaveBeenCalledOnce();
+	});
+
+	it('passes onOpenProject to WelcomeScreen', () => {
+		const onOpenProject = vi.fn();
+		render(<EditorPanel onConnect={onConnect} onOpenProject={onOpenProject} />);
+		screen.getByText('mock-open-project').click();
+		expect(onOpenProject).toHaveBeenCalledOnce();
 	});
 });

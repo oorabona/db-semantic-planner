@@ -15,7 +15,7 @@ describe('MENU_IDS', () => {
 		const fileIds = Object.keys(MENU_IDS).filter((k) => k.startsWith('FILE_'));
 
 		// Assert
-		expect(fileIds).toHaveLength(8);
+		expect(fileIds).toHaveLength(10);
 		expect(MENU_IDS.FILE_NEW_QUERY).toBe('file.new_query');
 		expect(MENU_IDS.FILE_SAVE).toBe('file.save');
 		expect(MENU_IDS.FILE_PREFERENCES).toBe('file.preferences');

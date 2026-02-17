@@ -4,9 +4,11 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 /** Menu item IDs matching the Rust-side menu builder in lib.rs */
 export const MENU_IDS = {
 	// File
+	FILE_NEW_PROJECT: 'file.new_project',
 	FILE_NEW_QUERY: 'file.new_query',
 	FILE_OPEN_FILE: 'file.open_file',
 	FILE_OPEN_FOLDER: 'file.open_folder',
+	FILE_RECENT_PROJECTS: 'file.recent_projects',
 	FILE_SAVE: 'file.save',
 	FILE_SAVE_AS: 'file.save_as',
 	FILE_EXPORT_CSV: 'file.export_csv',

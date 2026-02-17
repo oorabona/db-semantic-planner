@@ -80,4 +80,54 @@ describe('WelcomeScreen', () => {
 		expect(screen.getByText('⌘K')).toBeDefined();
 		expect(screen.getByText('⌘O')).toBeDefined();
 	});
+
+	describe('project mode CTAs', () => {
+		it('does not show project buttons when callbacks not provided', () => {
+			render(<WelcomeScreen onConnect={onConnect} />);
+			expect(screen.queryByTestId('welcome-new-project')).toBeNull();
+			expect(screen.queryByTestId('welcome-open-project')).toBeNull();
+		});
+
+		it('shows New Project button when onNewProject provided', () => {
+			render(<WelcomeScreen onConnect={onConnect} onNewProject={vi.fn()} />);
+			expect(screen.getByTestId('welcome-new-project')).toBeDefined();
+			expect(screen.getByText('New Project')).toBeDefined();
+		});
+
+		it('shows Open Project button when onOpenProject provided', () => {
+			render(<WelcomeScreen onConnect={onConnect} onOpenProject={vi.fn()} />);
+			expect(screen.getByTestId('welcome-open-project')).toBeDefined();
+			expect(screen.getByText('Open Project')).toBeDefined();
+		});
+
+		it('shows both buttons when both callbacks provided', () => {
+			render(
+				<WelcomeScreen
+					onConnect={onConnect}
+					onNewProject={vi.fn()}
+					onOpenProject={vi.fn()}
+				/>,
+			);
+			expect(screen.getByTestId('welcome-new-project')).toBeDefined();
+			expect(screen.getByTestId('welcome-open-project')).toBeDefined();
+		});
+
+		it('calls onNewProject when New Project clicked', () => {
+			const onNewProject = vi.fn();
+			render(
+				<WelcomeScreen onConnect={onConnect} onNewProject={onNewProject} />,
+			);
+			fireEvent.click(screen.getByTestId('welcome-new-project'));
+			expect(onNewProject).toHaveBeenCalledOnce();
+		});
+
+		it('calls onOpenProject when Open Project clicked', () => {
+			const onOpenProject = vi.fn();
+			render(
+				<WelcomeScreen onConnect={onConnect} onOpenProject={onOpenProject} />,
+			);
+			fireEvent.click(screen.getByTestId('welcome-open-project'));
+			expect(onOpenProject).toHaveBeenCalledOnce();
+		});
+	});
 });

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 // ── Tab types ───────────────────────────────────────────────────────
 
-export type TabLanguage = 'sql' | 'nql' | 'assert';
+export type TabLanguage = 'sql' | 'nql' | 'assert' | 'typescript';
 
 export interface EditorTab {
 	readonly id: string;
@@ -56,6 +56,7 @@ function makeTabId(): string {
 function defaultTitle(language: TabLanguage, counter: number): string {
 	if (language === 'sql') return `Query ${counter}.sql`;
 	if (language === 'assert') return `Test ${counter}.assert.dbsp`;
+	if (language === 'typescript') return `Schema ${counter}.ts`;
 	return `Query ${counter}.dbsp`;
 }
 

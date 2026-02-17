@@ -6,9 +6,16 @@ import { useProjectStore } from '@/stores/project-store';
 interface SidebarProps {
 	onConnect: () => void;
 	onFileSelect: (filePath: string) => void;
+	schemaEditable?: boolean;
+	onEditSchema?: () => void;
 }
 
-export function Sidebar({ onConnect, onFileSelect }: SidebarProps) {
+export function Sidebar({
+	onConnect,
+	onFileSelect,
+	schemaEditable,
+	onEditSchema,
+}: SidebarProps) {
 	const { mode, files } = useProjectStore();
 
 	return (
@@ -32,7 +39,11 @@ export function Sidebar({ onConnect, onFileSelect }: SidebarProps) {
 				<span className="text-sm font-medium">Schema</span>
 			</div>
 			<div className="flex-1 overflow-auto">
-				<SchemaTree onConnect={onConnect} />
+				<SchemaTree
+					onConnect={onConnect}
+					schemaEditable={schemaEditable}
+					onEditSchema={onEditSchema}
+				/>
 			</div>
 		</div>
 	);

@@ -4,11 +4,12 @@ import {
 	open as openDialog,
 	message as showMessage,
 } from '@tauri-apps/plugin-dialog';
-import { readTextFile } from '@tauri-apps/plugin-fs';
+import { exists, readTextFile } from '@tauri-apps/plugin-fs';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
-import { History, Plus } from 'lucide-react';
+import { FolderOpen, History, Plus } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { Toaster, toast } from 'sonner';
 import {
 	ConnectionDialog,
 	type ConnectionFormData,
@@ -19,13 +20,21 @@ import { ResultsPanel } from '@/components/layout/ResultsPanel';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { PreferencesDialog } from '@/components/preferences/PreferencesDialog';
-import { Toaster } from 'sonner';
+import { NewProjectWizard } from '@/components/project/NewProjectWizard';
+import { RecentProjectsDialog } from '@/components/project/RecentProjectsDialog';
+import type { WizardData } from '@/components/project/wizard-types';
 import { Button } from '@/components/ui/button';
 import { useConnection } from '@/hooks/useConnection';
 import { useMonacoSetup } from '@/hooks/useMonacoSetup';
+import { useSchemaWatcher } from '@/hooks/useSchemaWatcher';
 import { useSettingsWatcher } from '@/hooks/useSettingsWatcher';
 import { useSidecarInit } from '@/hooks/useSidecarInit';
 import { useThemeEffect } from '@/hooks/useThemeEffect';
+import {
+	listRecentProjects,
+	type RecentProject,
+	removeRecentProject,
+} from '@/lib/app-db';
 import {
 	ASSERTION_TIMEOUT_MS,
 	validateAssertionContent,
@@ -42,6 +51,7 @@ import {
 } from '@/lib/file-io';
 import { sidecarApi } from '@/lib/ipc';
 import { MENU_IDS, onMenuEvent } from '@/lib/menu';
+import { resolveSchemaPath } from '@/lib/settings';
 import { useAssertionStore } from '@/stores/assertion-store';
 import { useConnectionStore } from '@/stores/connection-store';
 import { getActiveTab, useEditorStore } from '@/stores/editor-store';
@@ -55,6 +65,14 @@ export default function App() {
 	useSettingsWatcher();
 	useSidecarInit();
 	useThemeEffect();
+	useSchemaWatcher({
+		onReload: () => {
+			toast.success('Schema reloaded');
+		},
+		onError: (msg) => {
+			toast.error('Schema reload failed', { description: msg });
+		},
+	});
 
 	// ── State declarations (must come before effects that reference them) ──
 	const [dialogOpen, setDialogOpen] = useState(false);
@@ -62,9 +80,44 @@ export default function App() {
 	const [resultsVisible, setResultsVisible] = useState(true);
 	const [connecting, setConnecting] = useState(false);
 	const [testing, setTesting] = useState(false);
+	const [wizardOpen, setWizardOpen] = useState(false);
+	const [wizardCreating, setWizardCreating] = useState(false);
+	const [recentOpen, setRecentOpen] = useState(false);
+	const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
 
 	const { status, active, error } = useConnectionStore();
+	const projectMode = useProjectStore((s) => s.mode);
+	const projectSettings = useProjectStore((s) => s.settings);
 	const { connect, testConnection, testResult, disconnect } = useConnection();
+
+	const schemaEditable =
+		projectMode === 'project' && !!projectSettings?.project?.schemaPath;
+
+	// Recent projects handlers
+	const openRecentProjects = useCallback(async () => {
+		const projects = await listRecentProjects(10);
+		setRecentProjects(projects);
+		setRecentOpen(true);
+	}, []);
+
+	const handleOpenRecent = useCallback(async (path: string) => {
+		const pathExists = await exists(path);
+		if (!pathExists) {
+			toast.error('Project folder not found', {
+				description: path,
+			});
+			await removeRecentProject(path);
+			setRecentProjects((prev) => prev.filter((p) => p.path !== path));
+			return;
+		}
+		setRecentOpen(false);
+		await useProjectStore.getState().openFolder(path);
+	}, []);
+
+	const handleRemoveRecent = useCallback(async (path: string) => {
+		await removeRecentProject(path);
+		setRecentProjects((prev) => prev.filter((p) => p.path !== path));
+	}, []);
 
 	// Forward native menu events to the command registry
 	useEffect(() => {
@@ -150,8 +203,24 @@ export default function App() {
 			},
 		});
 		commandRegistry.register({
+			id: 'file.new_project',
+			label: 'New Project',
+			category: 'file',
+			menuId: MENU_IDS.FILE_NEW_PROJECT,
+			handler: () => {
+				setWizardOpen(true);
+			},
+		});
+		commandRegistry.register({
+			id: 'file.recent_projects',
+			label: 'Recent Projects',
+			category: 'file',
+			menuId: MENU_IDS.FILE_RECENT_PROJECTS,
+			handler: openRecentProjects,
+		});
+		commandRegistry.register({
 			id: 'file.open_folder',
-			label: 'Open Folder',
+			label: 'Open Project',
 			category: 'file',
 			menuId: MENU_IDS.FILE_OPEN_FOLDER,
 			handler: async () => {
@@ -581,6 +650,35 @@ export default function App() {
 		addTab(languageFromPath(fullPath), content, fullPath);
 	}, []);
 
+	// ── Open schema.ts in editor (Block 9: Schema Editor) ─────────
+	const handleEditSchema = useCallback(async () => {
+		const { folderPath, settings } = useProjectStore.getState();
+		if (!folderPath || !settings?.project?.schemaPath) return;
+
+		const schemaRelPath = await resolveSchemaPath(
+			folderPath,
+			settings.project.schemaPath,
+		);
+		if (!schemaRelPath) {
+			toast.error('Schema file not found');
+			return;
+		}
+
+		const fullPath = await join(folderPath, schemaRelPath);
+		const { addTab, findTabByFilePath, setActiveTab } =
+			useEditorStore.getState();
+
+		// Dedup: focus existing tab if already open
+		const existing = findTabByFilePath(fullPath);
+		if (existing) {
+			setActiveTab(existing.id);
+			return;
+		}
+
+		const content = await readTextFile(fullPath);
+		addTab('typescript', content, fullPath);
+	}, []);
+
 	const handleConnect = async (data: ConnectionFormData) => {
 		setConnecting(true);
 		try {
@@ -608,13 +706,60 @@ export default function App() {
 			id: crypto.randomUUID(),
 			name: data.name || `${data.database}@${data.host}`,
 			type: data.type,
-			host: data.host,
-			port: data.port,
-			database: data.database,
-			user: data.user,
-			schema: data.schema,
-			sslMode: data.sslMode,
+			config: {
+				host: data.host,
+				port: data.port,
+				database: data.database,
+				user: data.user,
+				schema: data.schema,
+				sslMode: data.sslMode,
+			},
+			environment: null,
+			createdAt: Date.now(),
+			lastUsedAt: null,
 		});
+	};
+
+	/** Extract current active connection as ConnectionFormData for wizard pre-population. */
+	const getInitialConnection = (): ConnectionFormData | undefined => {
+		const { active: conn, profiles } = useConnectionStore.getState();
+		if (!conn) return undefined;
+		const profile = profiles.find((p) => p.id === conn.profileId);
+		if (!profile) return undefined;
+		const cfg = profile.config as Record<string, unknown>;
+		return {
+			name: profile.name,
+			type: profile.type,
+			host: (cfg.host as string) ?? 'localhost',
+			port: (cfg.port as number) ?? 5432,
+			database: conn.database,
+			user: (cfg.user as string) ?? '',
+			password: '', // Not stored in profile — user re-enters if needed
+			schema: conn.schema,
+			sslMode: (cfg.sslMode as ConnectionFormData['sslMode']) ?? 'disable',
+		};
+	};
+
+	const handleCreateProject = async (data: WizardData) => {
+		setWizardCreating(true);
+		try {
+			await useProjectStore.getState().createProject({
+				name: data.name,
+				folderPath: data.folderPath,
+				connections: data.connections.map((c) => ({
+					formData: c.formData,
+					environment: c.environment,
+				})),
+				generateSchema: data.generateSchema,
+			});
+			setWizardOpen(false);
+		} catch (err) {
+			toast.error(
+				err instanceof Error ? err.message : 'Failed to create project',
+			);
+		} finally {
+			setWizardCreating(false);
+		}
 	};
 
 	return (
@@ -629,6 +774,8 @@ export default function App() {
 								<Sidebar
 									onConnect={() => setDialogOpen(true)}
 									onFileSelect={handleFileSelect}
+									schemaEditable={schemaEditable}
+									onEditSchema={handleEditSchema}
 								/>
 							</Panel>
 							<PanelResizeHandle />
@@ -640,7 +787,13 @@ export default function App() {
 						<PanelGroup autoSaveId="dbsp-right-layout" direction="vertical">
 							{/* Top-right: Editor */}
 							<Panel defaultSize={55} minSize={20} order={1}>
-								<EditorPanel onConnect={() => setDialogOpen(true)} />
+								<EditorPanel
+									onConnect={() => setDialogOpen(true)}
+									onNewProject={() => setWizardOpen(true)}
+									onOpenProject={() =>
+										commandRegistry.execute('file.open_folder')
+									}
+								/>
 							</Panel>
 
 							{/* Bottom-right: Results (toggleable via Cmd+J) */}
@@ -666,17 +819,33 @@ export default function App() {
 					error={error}
 					onReconnect={() => setDialogOpen(true)}
 				/>
-				<Button
-					variant="ghost"
-					size="icon"
-					className="h-5 w-5"
-					onClick={() =>
-						status === 'connected' ? disconnect() : setDialogOpen(true)
-					}
-					title={status === 'connected' ? 'Disconnect' : 'New connection'}
-				>
-					<Plus className="h-3.5 w-3.5" />
-				</Button>
+				<div className="flex items-center gap-1">
+					{/* Save as Project — visible in standalone mode when connected */}
+					{projectMode === 'standalone' && status === 'connected' && (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="h-5 gap-1 px-2 text-xs"
+							onClick={() => setWizardOpen(true)}
+							title="Save current session as a project"
+							data-testid="save-as-project"
+						>
+							<FolderOpen className="h-3 w-3" />
+							Save as Project
+						</Button>
+					)}
+					<Button
+						variant="ghost"
+						size="icon"
+						className="h-5 w-5"
+						onClick={() =>
+							status === 'connected' ? disconnect() : setDialogOpen(true)
+						}
+						title={status === 'connected' ? 'Disconnect' : 'New connection'}
+					>
+						<Plus className="h-3.5 w-3.5" />
+					</Button>
+				</div>
 			</div>
 
 			{/* Toast notifications */}
@@ -700,6 +869,29 @@ export default function App() {
 				testing={testing}
 				connecting={connecting}
 				testResult={testResult}
+			/>
+
+			{/* Recent Projects dialog */}
+			<RecentProjectsDialog
+				open={recentOpen}
+				onClose={() => setRecentOpen(false)}
+				projects={recentProjects}
+				onOpen={handleOpenRecent}
+				onRemove={handleRemoveRecent}
+			/>
+
+			{/* New Project Wizard */}
+			<NewProjectWizard
+				open={wizardOpen}
+				onClose={() => setWizardOpen(false)}
+				onCreate={handleCreateProject}
+				initialConnection={wizardOpen ? getInitialConnection() : undefined}
+				onDiscover={(params) => sidecarApi.listDatabases(params)}
+				onListSchemas={(params) => sidecarApi.listSchemas(params)}
+				onTestConnection={handleTest}
+				testing={testing}
+				testResult={testResult}
+				creating={wizardCreating}
 			/>
 		</div>
 	);

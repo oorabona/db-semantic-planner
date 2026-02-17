@@ -1,4 +1,4 @@
-import { Database, FileCode2, Plus, Terminal } from 'lucide-react';
+import { Database, FileCode2, FolderOpen, Plus, Terminal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useConnectionStore } from '@/stores/connection-store';
 import { useEditorStore } from '@/stores/editor-store';
@@ -27,9 +27,15 @@ ORDER BY o.total DESC;`,
 
 interface WelcomeScreenProps {
 	onConnect: () => void;
+	onNewProject?: () => void;
+	onOpenProject?: () => void;
 }
 
-export function WelcomeScreen({ onConnect }: WelcomeScreenProps) {
+export function WelcomeScreen({
+	onConnect,
+	onNewProject,
+	onOpenProject,
+}: WelcomeScreenProps) {
 	const status = useConnectionStore((s) => s.status);
 	const addTab = useEditorStore((s) => s.addTab);
 
@@ -67,6 +73,32 @@ export function WelcomeScreen({ onConnect }: WelcomeScreenProps) {
 						New NQL Query
 					</Button>
 				</div>
+
+				{/* Project actions */}
+				{(onNewProject || onOpenProject) && (
+					<div className="flex gap-3">
+						{onNewProject && (
+							<Button
+								onClick={onNewProject}
+								variant="outline"
+								data-testid="welcome-new-project"
+							>
+								<Plus className="mr-2 h-4 w-4" />
+								New Project
+							</Button>
+						)}
+						{onOpenProject && (
+							<Button
+								onClick={onOpenProject}
+								variant="outline"
+								data-testid="welcome-open-project"
+							>
+								<FolderOpen className="mr-2 h-4 w-4" />
+								Open Project
+							</Button>
+						)}
+					</div>
+				)}
 
 				{/* Sample queries */}
 				<div className="w-full pt-4">
