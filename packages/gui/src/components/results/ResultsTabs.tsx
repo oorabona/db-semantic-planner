@@ -34,13 +34,14 @@ export function ResultsTabs() {
 	const assertionResult = useAssertionStore((s) => s.result);
 	const schemaDiff = useSchemaDiffStore((s) => s.diff);
 	const hasProfiles = useConnectionStore((s) => s.profiles.length > 0);
+	const isConnected = useConnectionStore((s) => s.status === 'connected');
 
 	return (
 		<div className="flex items-center gap-1 border-b px-2">
 			{TABS.map(({ id, label, Icon }) => {
 				const isActive = activeTab === id;
 				const isDisabled =
-					(id === 'results' && !hasProfiles && !result) ||
+					(id === 'results' && !hasProfiles && !isConnected && !result) ||
 					(id === 'sql' && !result?.sql) ||
 					(id === 'plan' && !result?.plan) ||
 					(id === 'params' && !result?.params?.length) ||
@@ -48,7 +49,7 @@ export function ResultsTabs() {
 					(id === 'schema-diff' && !schemaDiff);
 
 				const tooltip =
-					id === 'results' && !hasProfiles && !result
+					id === 'results' && !hasProfiles && !isConnected && !result
 						? 'No connection — plan-only mode'
 						: undefined;
 

@@ -12,6 +12,7 @@ import { ResultsTabs } from '@/components/results/ResultsTabs';
 import { SchemaDiffView } from '@/components/results/SchemaDiffView';
 import { StatusBar } from '@/components/results/StatusBar';
 import { useAssertionStore } from '@/stores/assertion-store';
+import { useConnectionStore } from '@/stores/connection-store';
 import { useResultsStore } from '@/stores/results-store';
 
 export function ResultsPanel() {
@@ -21,6 +22,7 @@ export function ResultsPanel() {
 	const assertionResult = useAssertionStore((s) => s.result);
 	const assertionRunning = useAssertionStore((s) => s.running);
 	const assertionError = useAssertionStore((s) => s.error);
+	const isConnected = useConnectionStore((s) => s.status === 'connected');
 
 	return (
 		<div className="flex h-full flex-col bg-background">
@@ -36,7 +38,14 @@ export function ResultsPanel() {
 								</span>
 							</div>
 						)}
-						{!executing && !result && <EmptyState />}
+						{!executing && !result && isConnected && (
+							<div className="flex flex-1 items-center justify-center">
+								<span className="text-sm text-muted-foreground">
+									Connected — run a query to see results here
+								</span>
+							</div>
+						)}
+						{!executing && !result && !isConnected && <EmptyState />}
 						{!executing && result && (
 							<DataTable columns={result.columns} rows={result.rows} />
 						)}
