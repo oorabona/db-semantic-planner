@@ -2,6 +2,7 @@ import { AlertTriangle, Loader2, PlugZap, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useSchema } from '@/hooks/useSchema';
 import { getFilteredTables, useSchemaStore } from '@/stores/schema-store';
+import { useSidecarStore } from '@/stores/sidecar-store';
 import { SchemaSearch } from './SchemaSearch';
 import { TableNode } from './TableNode';
 
@@ -13,6 +14,42 @@ export function SchemaTree({ onConnect }: SchemaTreeProps) {
 	const { schema, loading, error, refresh } = useSchema();
 	const searchFilter = useSchemaStore((s) => s.searchFilter);
 	const filteredTables = getFilteredTables(schema, searchFilter);
+	const sidecarStatus = useSidecarStore((s) => s.status);
+	const sidecarError = useSidecarStore((s) => s.error);
+
+	// Sidecar not running — show specific error with restart hint
+	if (sidecarStatus === 'stopped' && sidecarError) {
+		return (
+			<div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
+				<AlertTriangle className="h-5 w-5 text-red-500" />
+				<span className="text-center text-xs font-medium text-red-500">
+					Sidecar failed to start
+				</span>
+				<span className="text-center text-[10px] text-muted-foreground">
+					{sidecarError}
+				</span>
+				<span className="text-center text-[10px] text-muted-foreground">
+					Check the console (F12) for details, then restart the app.
+				</span>
+			</div>
+		);
+	}
+
+	// Sidecar booting
+	if (
+		sidecarStatus === 'spawning' ||
+		sidecarStatus === 'handshaking' ||
+		sidecarStatus === 'restarting'
+	) {
+		return (
+			<div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
+				<Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+				<span className="text-xs text-muted-foreground">
+					Starting sidecar...
+				</span>
+			</div>
+		);
+	}
 
 	// Loading state
 	if (loading) {
@@ -24,7 +61,7 @@ export function SchemaTree({ onConnect }: SchemaTreeProps) {
 		);
 	}
 
-	// Error state
+	// Error state (schema-level, sidecar is running)
 	if (error) {
 		return (
 			<div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
