@@ -72,6 +72,13 @@ interface ActiveConnection {
 	readonly profileId: string;
 	readonly database: string;
 	readonly schema: string;
+	/** Original connect params — used to pre-populate wizard when no saved profile. */
+	readonly connectParams?: {
+		readonly host: string;
+		readonly port: number;
+		readonly user: string;
+		readonly sslMode: SslMode;
+	};
 }
 
 // ── Row ↔ Profile converters ─────────────────────────────────────

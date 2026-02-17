@@ -38,6 +38,20 @@ async function resetToStandalone(): Promise<void> {
 	useHistoryStore.setState({ entries: [], loaded: false });
 }
 
+/**
+ * Extract a human-readable message from any thrown value.
+ * Tauri plugin errors are often plain strings or objects, not Error instances.
+ */
+function errorMessage(err: unknown): string {
+	if (err instanceof Error) return err.message;
+	if (typeof err === 'string') return err;
+	try {
+		return JSON.stringify(err);
+	} catch {
+		return String(err);
+	}
+}
+
 // ── Types ────────────────────────────────────────────────────────
 
 export type ProjectMode = 'standalone' | 'project';
@@ -145,12 +159,18 @@ export async function discoverFiles(
 			if (exclude.some((p) => entry.name === p)) continue;
 
 			const childPath = await join(basePath, entry.name);
-			const children = await discoverFiles(
-				childPath,
-				include,
-				exclude,
-				relativePath,
-			);
+			let children: ProjectFile[];
+			try {
+				children = await discoverFiles(
+					childPath,
+					include,
+					exclude,
+					relativePath,
+				);
+			} catch {
+				// Skip directories we can't read (Tauri scope restrictions, permissions, etc.)
+				continue;
+			}
 			// Only include directories that have matching files
 			if (children.length > 0) {
 				result.push({
@@ -193,30 +213,46 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 		set({ loading: true, error: null, folderPath });
 
 		try {
-			// Try to read dbsp.settings.json
-			const settings = await readSettings(folderPath);
+			// Step 1: Try to read dbsp.settings.json
+			let settings: DbspSettings | null;
+			try {
+				settings = await readSettings(folderPath);
+			} catch (err) {
+				throw new Error(`Read settings: ${errorMessage(err)}`);
+			}
 
 			if (settings) {
 				// Project mode: settings found (precedence: defaults → project)
 				const resolved = resolveProjectSettings(settings);
-				const files = await discoverFiles(
-					folderPath,
-					resolved.include,
-					resolved.exclude,
-				);
+
+				// Step 2: Discover project files
+				let files: ProjectFile[];
+				try {
+					files = await discoverFiles(
+						folderPath,
+						resolved.include,
+						resolved.exclude,
+					);
+				} catch (err) {
+					throw new Error(`Discover files: ${errorMessage(err)}`);
+				}
 
 				// Derive folder name from project name (preferred) or path basename
 				const rawName =
 					settings.project?.name ?? folderPath.split('/').pop() ?? 'project';
 				const folderName = sanitizeFolderName(rawName);
 
-				// Open project-specific SQLite database
+				// Step 3: Open project-specific SQLite database
 				await closeProjectDb();
-				await openProjectDb(folderName, (uri) => {
-					toast.warning(
-						`Database appears corrupted (${uri}). A fresh database was created.`,
-					);
-				});
+				try {
+					await openProjectDb(folderName, (uri) => {
+						toast.warning(
+							`Database appears corrupted (${uri}). A fresh database was created.`,
+						);
+					});
+				} catch (err) {
+					throw new Error(`Open project DB: ${errorMessage(err)}`);
+				}
 
 				// Wire history store to project DB
 				setHistoryDbAccessor(getProjectDb);
@@ -229,9 +265,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 					);
 				}
 
-				// Load persisted data from project DB
-				await useConnectionStore.getState().loadProfiles();
-				await useHistoryStore.getState().loadHistory();
+				// Step 4: Load persisted data from project DB
+				try {
+					await useConnectionStore.getState().loadProfiles();
+					await useHistoryStore.getState().loadHistory();
+				} catch (err) {
+					throw new Error(`Load profiles/history: ${errorMessage(err)}`);
+				}
 
 				// Track as recent project in app.sqlite
 				addRecentProject(folderPath, rawName, folderName).catch(() => {});
@@ -254,10 +294,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 				});
 			}
 		} catch (err) {
-			set({
-				error: err instanceof Error ? err.message : 'Failed to open folder',
-				loading: false,
-			});
+			const msg = errorMessage(err);
+			console.error('[project-store] openFolder failed:', msg, err);
+			set({ error: msg, loading: false });
 		}
 	},
 
@@ -287,9 +326,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 			);
 			set({ files });
 		} catch (err) {
-			set({
-				error: err instanceof Error ? err.message : 'Failed to refresh files',
-			});
+			set({ error: `Refresh files: ${errorMessage(err)}` });
 		}
 	},
 
@@ -326,6 +363,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 			// 2. Open the folder (transitions to project mode, inits DB)
 			await get().openFolder(data.folderPath);
 
+			// Check openFolder succeeded (it catches errors internally)
+			const state = get();
+			if (state.error) {
+				throw new Error(state.error);
+			}
+			if (state.mode !== 'project') {
+				throw new Error('Failed to initialize project database');
+			}
+
 			// 3. Save wizard connections as connection profiles
 			const store = useConnectionStore.getState();
 			for (const conn of data.connections) {
@@ -348,10 +394,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 				});
 			}
 		} catch (err) {
-			set({
-				error: err instanceof Error ? err.message : 'Failed to create project',
-				loading: false,
-			});
+			const msg = errorMessage(err);
+			console.error('[project-store] createProject failed:', msg, err);
+			set({ error: msg, loading: false });
 			throw err;
 		}
 	},

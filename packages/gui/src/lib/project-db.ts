@@ -2,6 +2,8 @@
 // Manages per-project data.sqlite: query history, IPC logs, connections, meta.
 // Also handles the "default" standalone database at $APPCONFIG/default/data.sqlite.
 
+import { appConfigDir, join } from '@tauri-apps/api/path';
+import { mkdir } from '@tauri-apps/plugin-fs';
 import type { Database } from './db-shared';
 import { openDatabaseSafe } from './db-shared';
 
@@ -123,12 +125,16 @@ async function openAndInit(
 
 /**
  * Open a project-specific database.
- * Creates `$APPCONFIG/projects/<folderName>/data.sqlite` if missing.
+ * Ensures `$APPCONFIG/projects/<folderName>/` directory exists, then opens
+ * (or creates) `data.sqlite` inside it.
  */
 export async function openProjectDb(
 	folderName: string,
 	onCorrupt?: (uri: string) => void,
 ): Promise<void> {
+	const configDir = await appConfigDir();
+	const dbDir = await join(configDir, 'projects', folderName);
+	await mkdir(dbDir, { recursive: true });
 	await openAndInit(`sqlite:projects/${folderName}/data.sqlite`, onCorrupt);
 }
 
@@ -136,6 +142,9 @@ export async function openProjectDb(
 export async function openDefaultDb(
 	onCorrupt?: (uri: string) => void,
 ): Promise<void> {
+	const configDir = await appConfigDir();
+	const dbDir = await join(configDir, 'default');
+	await mkdir(dbDir, { recursive: true });
 	await openAndInit('sqlite:default/data.sqlite', onCorrupt);
 }
 

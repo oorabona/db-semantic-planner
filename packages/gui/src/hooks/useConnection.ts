@@ -36,6 +36,12 @@ export function useConnection() {
 					profileId: profileId ?? '',
 					database: result.database,
 					schema: result.schema,
+					connectParams: {
+						host: params.host,
+						port: params.port,
+						user: params.user,
+						sslMode: params.sslMode ?? 'disable',
+					},
 				});
 				return result;
 			} catch (err) {
