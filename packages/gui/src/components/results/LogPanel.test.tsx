@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { LogFilter, LogStats } from '@/lib/log-db';
-import type { LogEntry } from '@/stores/log-store';
+import type { LogEntry, LogFilter, LogStats } from '@/stores/log-store';
 
 // ── Mock Tauri plugins ───────────────────────────────────────
 

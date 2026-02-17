@@ -13,6 +13,7 @@ export function languageFromPath(filePath: string): TabLanguage {
 	if (filePath.endsWith('.assert.dbsp')) return 'assert';
 	if (filePath.endsWith('.dbsp')) return 'nql';
 	if (filePath.endsWith('.sql')) return 'sql';
+	if (filePath.endsWith('.ts') || filePath.endsWith('.js')) return 'typescript';
 	return 'sql';
 }
 

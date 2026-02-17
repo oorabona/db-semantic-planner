@@ -11,6 +11,7 @@ export interface DbspConnectionRef {
 }
 
 export interface DbspProjectSettings {
+	readonly name?: string;
 	readonly schemaPath?: string | 'auto';
 	readonly include?: readonly string[];
 	readonly exclude?: readonly string[];

@@ -1,13 +1,26 @@
 import { join } from '@tauri-apps/api/path';
 import { readDir } from '@tauri-apps/plugin-fs';
+import { toast } from 'sonner';
 import { create } from 'zustand';
+import { addRecentProject } from '@/lib/app-db';
+import { migrateFromLocalStorage } from '@/lib/migration';
+import {
+	closeProjectDb,
+	getProjectDb,
+	openDefaultDb,
+	openProjectDb,
+} from '@/lib/project-db';
+import { sanitizeFolderName } from '@/lib/project-id';
 import {
 	type DbspSettings,
 	DEFAULT_EXCLUDE,
 	DEFAULT_INCLUDE,
 	readSettings,
 	resolveProjectSettings,
+	writeSettings,
 } from '@/lib/settings';
+import { useConnectionStore } from './connection-store';
+import { setHistoryDbAccessor, useHistoryStore } from './history-store';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -25,6 +38,8 @@ export interface ProjectFile {
 interface ProjectState {
 	mode: ProjectMode;
 	folderPath: string | null;
+	/** Sanitized folder name used for project DB storage path */
+	folderName: string | null;
 	settings: DbspSettings | null;
 	files: ProjectFile[];
 	loading: boolean;
@@ -32,10 +47,20 @@ interface ProjectState {
 
 	// ── Actions ──
 	openFolder: (folderPath: string) => Promise<void>;
-	closeFolder: () => void;
+	closeFolder: () => Promise<void>;
 	refreshFiles: () => Promise<void>;
 	/** Called when external file watcher detects settings change */
 	onSettingsChanged: (exists: boolean) => Promise<void>;
+	/** Create a new project: write settings, open folder, save connections */
+	createProject: (data: {
+		name: string;
+		folderPath: string;
+		connections: ReadonlyArray<{
+			formData: import('@/components/connection/ConnectionDialog').ConnectionFormData;
+			environment: string;
+		}>;
+		generateSchema: boolean;
+	}) => Promise<void>;
 }
 
 /**
@@ -142,6 +167,7 @@ export async function discoverFiles(
 export const useProjectStore = create<ProjectState>((set, get) => ({
 	mode: 'standalone',
 	folderPath: null,
+	folderName: null,
 	settings: null,
 	files: [],
 	loading: false,
@@ -162,8 +188,41 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 					resolved.include,
 					resolved.exclude,
 				);
+
+				// Derive folder name from project name (preferred) or path basename
+				const rawName =
+					settings.project?.name ?? folderPath.split('/').pop() ?? 'project';
+				const folderName = sanitizeFolderName(rawName);
+
+				// Open project-specific SQLite database
+				await closeProjectDb();
+				await openProjectDb(folderName, (uri) => {
+					toast.warning(
+						`Database appears corrupted (${uri}). A fresh database was created.`,
+					);
+				});
+
+				// Wire history store to project DB
+				setHistoryDbAccessor(getProjectDb);
+
+				// Migrate localStorage data to SQLite (idempotent, first-open only)
+				const db = getProjectDb();
+				if (db) {
+					await migrateFromLocalStorage(db).catch((err) =>
+						console.warn('[migration]', err),
+					);
+				}
+
+				// Load persisted data from project DB
+				await useConnectionStore.getState().loadProfiles();
+				await useHistoryStore.getState().loadHistory();
+
+				// Track as recent project in app.sqlite
+				addRecentProject(folderPath, rawName, folderName).catch(() => {});
+
 				set({
 					mode: 'project',
+					folderName,
 					settings,
 					files,
 					loading: false,
@@ -172,6 +231,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 				// Standalone mode: no settings file
 				set({
 					mode: 'standalone',
+					folderName: null,
 					settings: null,
 					files: [],
 					loading: false,
@@ -185,10 +245,28 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 		}
 	},
 
-	closeFolder: () => {
+	closeFolder: async () => {
+		// Close project DB and revert to default
+		await closeProjectDb();
+		await openDefaultDb((uri) => {
+			toast.warning(
+				`Database appears corrupted (${uri}). A fresh database was created.`,
+			);
+		});
+
+		// Re-wire history store to default DB
+		setHistoryDbAccessor(getProjectDb);
+
+		// Reset connection profiles (they belong to the project)
+		useConnectionStore.setState({ profiles: [] });
+
+		// Reset history (will be reloaded from default DB)
+		useHistoryStore.setState({ entries: [], loaded: false });
+
 		set({
 			mode: 'standalone',
 			folderPath: null,
+			folderName: null,
 			settings: null,
 			files: [],
 			error: null,
@@ -224,11 +302,67 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 			await get().openFolder(folderPath);
 		} else if (!exists && mode === 'project') {
 			// SC-28: Settings file deleted → transition to standalone
+			// Close project DB, revert to default
+			await closeProjectDb();
+			await openDefaultDb((uri) => {
+				toast.warning(
+					`Database appears corrupted (${uri}). A fresh database was created.`,
+				);
+			});
+			setHistoryDbAccessor(getProjectDb);
+			useConnectionStore.setState({ profiles: [] });
+			useHistoryStore.setState({ entries: [], loaded: false });
+
 			set({
 				mode: 'standalone',
+				folderName: null,
 				settings: null,
 				files: [],
 			});
+		}
+	},
+
+	createProject: async (data) => {
+		set({ loading: true, error: null });
+
+		try {
+			// 1. Write dbsp.settings.json to the chosen folder
+			const settings: DbspSettings = {
+				version: 1,
+				project: { name: data.name },
+			};
+			await writeSettings(data.folderPath, settings);
+
+			// 2. Open the folder (transitions to project mode, inits DB)
+			await get().openFolder(data.folderPath);
+
+			// 3. Save wizard connections as connection profiles
+			const store = useConnectionStore.getState();
+			for (const conn of data.connections) {
+				const { formData, environment } = conn;
+				store.addProfile({
+					id: crypto.randomUUID(),
+					name: formData.name || `${formData.database}@${formData.host}`,
+					type: formData.type,
+					config: {
+						host: formData.host,
+						port: formData.port,
+						database: formData.database,
+						user: formData.user,
+						schema: formData.schema,
+						sslMode: formData.sslMode,
+					},
+					environment,
+					createdAt: Date.now(),
+					lastUsedAt: null,
+				});
+			}
+		} catch (err) {
+			set({
+				error: err instanceof Error ? err.message : 'Failed to create project',
+				loading: false,
+			});
+			throw err;
 		}
 	},
 }));

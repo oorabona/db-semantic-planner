@@ -5,13 +5,25 @@ import { useEditorStore } from '@/stores/editor-store';
 
 interface EditorPanelProps {
 	onConnect: () => void;
+	onNewProject?: () => void;
+	onOpenProject?: () => void;
 }
 
-export function EditorPanel({ onConnect }: EditorPanelProps) {
+export function EditorPanel({
+	onConnect,
+	onNewProject,
+	onOpenProject,
+}: EditorPanelProps) {
 	const hasTabs = useEditorStore((s) => s.tabs.length > 0);
 
 	if (!hasTabs) {
-		return <WelcomeScreen onConnect={onConnect} />;
+		return (
+			<WelcomeScreen
+				onConnect={onConnect}
+				onNewProject={onNewProject}
+				onOpenProject={onOpenProject}
+			/>
+		);
 	}
 
 	return (

@@ -111,6 +111,11 @@ const SchemaApplyParams = v.object({
 	statements: v.array(v.string()),
 });
 
+const SchemaReloadParams = v.object({
+	/** Absolute path to the project folder (used to find schema file) */
+	folderPath: v.string(),
+});
+
 const ListDatabasesParams = v.object({
 	host: v.string(),
 	port: v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(65535)),
@@ -168,6 +173,7 @@ export class Router {
 		this.registerStub('schemaApply', SchemaApplyParams);
 		this.registerStub('listDatabases', ListDatabasesParams);
 		this.registerStub('listSchemas', ListSchemasParams);
+		this.registerStub('schemaReload', SchemaReloadParams);
 	}
 
 	/** Register a method with validation schema and handler. */

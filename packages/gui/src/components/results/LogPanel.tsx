@@ -3,10 +3,11 @@
  * Features: level/source filters, text search, export, timestamps.
  * Auto-scrolls to bottom on new entries.
  */
+
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { Download, Search, Trash2, X } from 'lucide-react';
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LogEntry, LogLevel, LogState } from '@/stores/log-store';
 import { useLogStore } from '@/stores/log-store';

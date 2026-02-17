@@ -6,6 +6,8 @@
  * Schema: logs(id, timestamp, level, source, message, duration_ms)
  */
 import type { LogEntry, LogLevel } from '@/stores/log-store';
+import type { Database } from './db-shared';
+import { openDatabase, setDatabaseFactory } from './db-shared';
 
 /** Raw row shape from SQLite (snake_case columns). */
 export interface LogRow {
@@ -32,54 +34,37 @@ export interface LogStats {
 	byLevel: Partial<Record<LogLevel, number>>;
 }
 
-// Dynamic import to avoid breaking unit tests (no Tauri runtime in jsdom).
-// Resolved lazily on first initLogDb() call.
-type Database = {
-	execute: (
-		sql: string,
-		params?: unknown[],
-	) => Promise<{ lastInsertId: number; rowsAffected: number }>;
-	select: <T>(sql: string, params?: unknown[]) => Promise<T>;
-	close: () => Promise<void>;
-};
-
 let db: Database | null = null;
-let loadDatabase:
-	| (() => Promise<{ load: (uri: string) => Promise<Database> }>)
-	| null = null;
 
 /**
  * Allow injection of the Database loader for testing.
- * In production, this is set to dynamic import('@tauri-apps/plugin-sql').
+ * @deprecated Use `setDatabaseFactory` from `db-shared.ts` instead.
  */
 export function setDatabaseLoader(
 	loader: (() => Promise<{ load: (uri: string) => Promise<Database> }>) | null,
 ): void {
-	loadDatabase = loader;
-}
-
-// Default loader (production): dynamic import
-if (typeof loadDatabase !== 'function') {
-	loadDatabase = () =>
-		import('@tauri-apps/plugin-sql') as unknown as Promise<{
-			load: (uri: string) => Promise<Database>;
-		}>;
+	if (!loader) {
+		setDatabaseFactory(null);
+		return;
+	}
+	// Adapter: convert legacy loader into a DatabaseFactory
+	setDatabaseFactory(async (uri: string) => {
+		const mod = await loader();
+		const Db =
+			(
+				mod as unknown as {
+					default: { load: (uri: string) => Promise<Database> };
+				}
+			).default ?? mod;
+		return Db.load(uri);
+	});
 }
 
 /** Initialize the log database (create table + indexes if missing). */
 export async function initLogDb(): Promise<void> {
 	if (db) return;
-	if (!loadDatabase) throw new Error('No database loader configured');
 
-	const mod = await loadDatabase();
-	// The module default export IS the Database class with a static .load()
-	const Database =
-		(
-			mod as unknown as {
-				default: { load: (uri: string) => Promise<Database> };
-			}
-		).default ?? mod;
-	db = await Database.load('sqlite:logs.db');
+	db = await openDatabase('sqlite:logs.db');
 
 	await db.execute(`
 		CREATE TABLE IF NOT EXISTS logs (

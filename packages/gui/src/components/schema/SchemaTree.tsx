@@ -1,4 +1,10 @@
-import { AlertTriangle, Loader2, PlugZap, RefreshCw } from 'lucide-react';
+import {
+	AlertTriangle,
+	FileCode,
+	Loader2,
+	PlugZap,
+	RefreshCw,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useSchema } from '@/hooks/useSchema';
 import { getFilteredTables, useSchemaStore } from '@/stores/schema-store';
@@ -8,9 +14,16 @@ import { TableNode } from './TableNode';
 
 interface SchemaTreeProps {
 	onConnect: () => void;
+	/** Show "Edit Schema" button (project mode with schemaPath) */
+	schemaEditable?: boolean;
+	onEditSchema?: () => void;
 }
 
-export function SchemaTree({ onConnect }: SchemaTreeProps) {
+export function SchemaTree({
+	onConnect,
+	schemaEditable,
+	onEditSchema,
+}: SchemaTreeProps) {
 	const { schema, loading, error, refresh } = useSchema();
 	const searchFilter = useSchemaStore((s) => s.searchFilter);
 	const filteredTables = getFilteredTables(schema, searchFilter);
@@ -102,14 +115,27 @@ export function SchemaTree({ onConnect }: SchemaTreeProps) {
 						{filteredTables.length} table
 						{filteredTables.length !== 1 ? 's' : ''}
 					</span>
-					<button
-						type="button"
-						onClick={refresh}
-						className="rounded p-0.5 hover:bg-accent"
-						title="Refresh schema"
-					>
-						<RefreshCw className="h-3 w-3 text-muted-foreground" />
-					</button>
+					<div className="flex items-center gap-0.5">
+						{schemaEditable && (
+							<button
+								type="button"
+								onClick={onEditSchema}
+								className="rounded p-0.5 hover:bg-accent"
+								title="Edit Schema"
+								data-testid="edit-schema-btn"
+							>
+								<FileCode className="h-3 w-3 text-muted-foreground" />
+							</button>
+						)}
+						<button
+							type="button"
+							onClick={refresh}
+							className="rounded p-0.5 hover:bg-accent"
+							title="Refresh schema"
+						>
+							<RefreshCw className="h-3 w-3 text-muted-foreground" />
+						</button>
+					</div>
 				</div>
 				<SchemaSearch />
 			</div>

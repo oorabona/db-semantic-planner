@@ -1,6 +1,6 @@
 import { Database, Plug, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import type { ConnectionProfile } from '@/stores/connection-store';
+import { type ConnectionProfile, pgConfig } from '@/stores/connection-store';
 
 interface ConnectionListProps {
 	profiles: readonly ConnectionProfile[];
@@ -43,7 +43,10 @@ export function ConnectionList({
 					<div className="flex-1 truncate">
 						<div className="font-medium">{profile.name}</div>
 						<div className="text-xs text-muted-foreground">
-							{profile.user}@{profile.host}:{profile.port}/{profile.database}
+							{(() => {
+								const pg = pgConfig(profile);
+								return `${pg.user}@${pg.host}:${pg.port}/${pg.database}`;
+							})()}
 						</div>
 					</div>
 					{profile.id === activeProfileId && (

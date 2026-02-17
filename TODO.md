@@ -83,8 +83,14 @@
 - [ ] 💡 **GUI-019** [GUI] Live assertion re-run on file change (watch mode) — Priority: L
 - [ ] 💡 **GUI-020** [GUI] Assertion coverage reporting (queries with/without assertions) — Priority: L
 (Log rotation configurable, toast notifications, LogPanel virtualized list archived → docs/historic/done-2026-02.md)
-- [ ] 💡 **GUI-022** [GUI] Project mode — multi-connection management, load schema.ts, scope history/logs per project — Priority: M
-- [ ] 💡 **GUI-023** [GUI] Migrate query history from localStorage to SQLite (per-project scoping, longer retention) — Priority: L (depends on GUI-022)
+(GUI-022, GUI-023 archived → docs/historic/done-2026-02.md)
+- [ ] 💡 **GUI-022-F002** [GUI] `generateSchema` wizard option not wired (reverse-engineer endpoint needed) — Priority: L (from /review F-002)
+- [ ] 💡 **GUI-022-F003** [GUI] NQL file menu item needs Rust-side Tauri menu + `fs.write` — Priority: L (from /review F-003)
+- [ ] 🔧 **GUI-022-F004** [GUI] Context-aware banner when non-project folder opened in standalone mode — Priority: M (from /review F-004)
+- [ ] 🔧 **GUI-022-F007** [GUI] Plan-only mode with 0 connections (SC-24: disable Results, toast on SQL exec) — Priority: M (from /review F-007)
+- [ ] 🔧 **GUI-022-F009** [GUI] DRY: extract shared DB-reset logic from closeFolder/onSettingsChanged — Priority: M (from /review F-009)
+- [ ] 🔧 **GUI-022-F011** [GUI] Time-based retention for query history (e.g. 90-day max) — Priority: M (from /review F-011)
+- [ ] 🔧 **GUI-022-F014** [GUI] UUIDv7 baseline for ordered IDs (or add timestamp index) — Priority: M (from /review F-014)
 - [ ] 🔧 **GUI-021** [GUI] Authorization check on schema.apply sidecar endpoint (desktop-only, lower risk) — Priority: M (from /review F-007)
 - [ ] 🔧 **CLI-001** [CLI] Integration test for rollback flow with real DB (SC-16) — Priority: M (from /review F-002)
 (GUI-F005, GUI-F006, GUI-F007 archived → docs/historic/done-2026-02.md)

@@ -44,6 +44,7 @@ import {
 	handleSchemaDiff,
 	type SchemaDiffParams,
 } from './schema-diff-handler.js';
+import { findSchemaFile, loadSchema } from './schema-loader.js';
 
 // ── Step 1: Monkey-patch console to stderr (MUST be first) ───────
 
@@ -149,6 +150,23 @@ try {
 			getPool,
 			introspectConnection,
 		);
+	});
+
+	router.setHandler('schemaReload', async (params) => {
+		const { folderPath } = params as { folderPath: string };
+		const schemaPath = findSchemaFile(folderPath);
+		if (!schemaPath) {
+			throw new Error(
+				`No schema file found in ${folderPath}. Expected dbsp.schema.ts, schema.ts, or similar.`,
+			);
+		}
+		const schema = await loadSchema(schemaPath);
+		return {
+			tableNames: schema.tableNames,
+			tableCount: schema.model.tables.size,
+			relationCount: schema.model.relations.size,
+			schemaPath,
+		};
 	});
 
 	router.setHandler('listDatabases', async (params) => {

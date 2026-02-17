@@ -1,5 +1,18 @@
+/**
+ * Zustand store for connection profiles — SQLite-backed via project-db.
+ *
+ * Profiles are persisted in data.sqlite/connection_profiles with a
+ * generic `type + config (JSON blob)` schema. Active connection state
+ * is in-memory only (not persisted).
+ */
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import type { ConnectionProfileRow } from '@/lib/project-db';
+import {
+	deleteConnectionProfile,
+	listConnectionProfiles,
+	touchConnectionProfile,
+	upsertConnectionProfile,
+} from '@/lib/project-db';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -16,13 +29,36 @@ export interface ConnectionProfile {
 	readonly id: string;
 	readonly name: string;
 	readonly type: DatabaseType;
-	readonly host: string;
-	readonly port: number;
-	readonly database: string;
-	readonly user: string;
-	readonly schema: string;
-	readonly sslMode: SslMode;
+	/** Engine-specific connection params (host, port, etc.) as JSON blob. */
+	readonly config: Record<string, unknown>;
+	/** Environment label: dev, staging, prod, or custom string. */
+	readonly environment: string | null;
 	readonly color?: string;
+	readonly createdAt: number;
+	readonly lastUsedAt: number | null;
+}
+
+/** PostgreSQL-specific connection config fields. */
+export interface PostgresConfig {
+	host: string;
+	port: number;
+	database: string;
+	user: string;
+	schema: string;
+	sslMode: SslMode;
+}
+
+/** Extract PostgreSQL-specific config from a profile's config blob. */
+export function pgConfig(profile: ConnectionProfile): PostgresConfig {
+	const c = profile.config;
+	return {
+		host: (c.host as string) ?? 'localhost',
+		port: (c.port as number) ?? 5432,
+		database: (c.database as string) ?? '',
+		user: (c.user as string) ?? 'postgres',
+		schema: (c.schema as string) ?? 'public',
+		sslMode: (c.sslMode as SslMode) ?? 'prefer',
+	};
 }
 
 export type ConnectionStatus =
@@ -38,6 +74,34 @@ interface ActiveConnection {
 	readonly schema: string;
 }
 
+// ── Row ↔ Profile converters ─────────────────────────────────────
+
+function rowToProfile(row: ConnectionProfileRow): ConnectionProfile {
+	return {
+		id: row.id,
+		name: row.name,
+		type: row.type as DatabaseType,
+		config: JSON.parse(row.config),
+		environment: row.environment,
+		...(row.color != null ? { color: row.color } : {}),
+		createdAt: row.created_at,
+		lastUsedAt: row.last_used_at,
+	};
+}
+
+function profileToRow(profile: ConnectionProfile): ConnectionProfileRow {
+	return {
+		id: profile.id,
+		name: profile.name,
+		type: profile.type,
+		config: JSON.stringify(profile.config),
+		environment: profile.environment,
+		color: profile.color ?? null,
+		created_at: profile.createdAt,
+		last_used_at: profile.lastUsedAt,
+	};
+}
+
 // ── Store ────────────────────────────────────────────────────────
 
 interface ConnectionState {
@@ -46,55 +110,123 @@ interface ConnectionState {
 	readonly status: ConnectionStatus;
 	readonly error: string | null;
 
-	// Actions
+	/** Load profiles from project-db. */
+	loadProfiles: () => Promise<void>;
+	/** Migrate legacy localStorage profiles to SQLite (one-time). */
+	migrateFromLocalStorage: () => Promise<void>;
+
+	// CRUD — optimistic in-memory + fire-and-forget SQLite write
 	addProfile: (profile: ConnectionProfile) => void;
 	updateProfile: (
 		id: string,
 		updates: Partial<Omit<ConnectionProfile, 'id'>>,
 	) => void;
 	removeProfile: (id: string) => void;
+	touchProfile: (id: string) => void;
+
+	// Runtime — in-memory only
 	setActive: (connection: ActiveConnection) => void;
 	setStatus: (status: ConnectionStatus, error?: string) => void;
 	clearActive: () => void;
 }
 
-export const useConnectionStore = create<ConnectionState>()(
-	persist(
-		(set) => ({
-			profiles: [],
-			active: null,
-			status: 'disconnected',
-			error: null,
+export const useConnectionStore = create<ConnectionState>((set, get) => ({
+	profiles: [],
+	active: null,
+	status: 'disconnected',
+	error: null,
 
-			addProfile: (profile) =>
-				set((state) => ({
-					profiles: [...state.profiles, profile],
-				})),
+	loadProfiles: async () => {
+		const rows = await listConnectionProfiles();
+		set({ profiles: rows.map(rowToProfile) });
+	},
 
-			updateProfile: (id, updates) =>
-				set((state) => ({
-					profiles: state.profiles.map((p) =>
-						p.id === id ? { ...p, ...updates } : p,
-					),
-				})),
+	migrateFromLocalStorage: async () => {
+		const raw = localStorage.getItem('dbsp-connections');
+		if (!raw) return;
 
-			removeProfile: (id) =>
-				set((state) => ({
-					profiles: state.profiles.filter((p) => p.id !== id),
-				})),
+		try {
+			const stored = JSON.parse(raw);
+			const oldProfiles: Array<Record<string, unknown>> =
+				stored?.state?.profiles ?? [];
+			if (oldProfiles.length === 0) return;
 
-			setActive: (connection) =>
-				set({ active: connection, status: 'connected', error: null }),
+			for (const old of oldProfiles) {
+				const profile: ConnectionProfile = {
+					id: (old.id as string) ?? crypto.randomUUID(),
+					name: (old.name as string) ?? 'Migrated',
+					type: ((old.type as string) ?? 'postgresql') as DatabaseType,
+					config: {
+						host: old.host ?? 'localhost',
+						port: old.port ?? 5432,
+						database: old.database ?? '',
+						user: old.user ?? 'postgres',
+						schema: old.schema ?? 'public',
+						sslMode: old.sslMode ?? 'prefer',
+					},
+					environment: null,
+					createdAt: Date.now(),
+					lastUsedAt: null,
+				};
+				await upsertConnectionProfile(profileToRow(profile));
+			}
 
-			setStatus: (status, error) => set({ status, error: error ?? null }),
+			// Clear localStorage after successful migration
+			localStorage.removeItem('dbsp-connections');
 
-			clearActive: () =>
-				set({ active: null, status: 'disconnected', error: null }),
-		}),
-		{
-			name: 'dbsp-connections',
-			// Only persist profiles, not runtime state
-			partialize: (state) => ({ profiles: state.profiles }),
-		},
-	),
-);
+			// Reload from DB
+			await get().loadProfiles();
+		} catch {
+			console.error('[connection-store] Migration from localStorage failed');
+		}
+	},
+
+	addProfile: (profile) => {
+		set((state) => ({ profiles: [...state.profiles, profile] }));
+		upsertConnectionProfile(profileToRow(profile)).catch((err: unknown) =>
+			console.error('[connection-store] Failed to persist profile:', err),
+		);
+	},
+
+	updateProfile: (id, updates) => {
+		set((state) => ({
+			profiles: state.profiles.map((p) =>
+				p.id === id ? { ...p, ...updates } : p,
+			),
+		}));
+		const updated = get().profiles.find((p) => p.id === id);
+		if (updated) {
+			upsertConnectionProfile(profileToRow(updated)).catch((err: unknown) =>
+				console.error('[connection-store] Failed to update profile:', err),
+			);
+		}
+	},
+
+	removeProfile: (id) => {
+		set((state) => ({
+			profiles: state.profiles.filter((p) => p.id !== id),
+		}));
+		deleteConnectionProfile(id).catch((err: unknown) =>
+			console.error('[connection-store] Failed to delete profile:', err),
+		);
+	},
+
+	touchProfile: (id) => {
+		const now = Date.now();
+		set((state) => ({
+			profiles: state.profiles.map((p) =>
+				p.id === id ? { ...p, lastUsedAt: now } : p,
+			),
+		}));
+		touchConnectionProfile(id).catch((err: unknown) =>
+			console.error('[connection-store] Failed to touch profile:', err),
+		);
+	},
+
+	setActive: (connection) =>
+		set({ active: connection, status: 'connected', error: null }),
+
+	setStatus: (status, error) => set({ status, error: error ?? null }),
+
+	clearActive: () => set({ active: null, status: 'disconnected', error: null }),
+}));

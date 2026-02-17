@@ -5,8 +5,24 @@ import React, {
 	StrictMode,
 } from 'react';
 import { createRoot } from 'react-dom/client';
+import { setDatabaseFactory } from '@/lib/db-shared';
 import App from './App';
 import './App.css';
+
+// ── Configure SQLite database factory ────────────────────────────
+// Must be called before any DB operations (app-db, project-db, log-db).
+setDatabaseFactory(async (uri: string) => {
+	const mod = await import('@tauri-apps/plugin-sql');
+	const Database =
+		(
+			mod as unknown as {
+				default: {
+					load: (uri: string) => Promise<import('@/lib/db-shared').Database>;
+				};
+			}
+		).default ?? mod;
+	return Database.load(uri);
+});
 
 class ErrorBoundary extends Component<
 	{ children: ReactNode },

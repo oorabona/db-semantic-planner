@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { sidecarApi } from '@/lib/ipc';
 import {
 	type ConnectionProfile,
+	pgConfig,
 	type SslMode,
 	useConnectionStore,
 } from '@/stores/connection-store';
@@ -90,15 +91,16 @@ export function useConnection() {
 
 	const connectFromProfile = useCallback(
 		async (profile: ConnectionProfile, password: string) => {
+			const pg = pgConfig(profile);
 			return connect(
 				{
-					host: profile.host,
-					port: profile.port,
-					database: profile.database,
-					user: profile.user,
+					host: pg.host,
+					port: pg.port,
+					database: pg.database,
+					user: pg.user,
 					password,
-					schema: profile.schema,
-					sslMode: profile.sslMode,
+					schema: pg.schema,
+					sslMode: pg.sslMode,
 				},
 				profile.id,
 			);

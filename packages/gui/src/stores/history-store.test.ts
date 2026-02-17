@@ -1,5 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { type HistoryEntry, useHistoryStore } from './history-store.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+	type HistoryEntry,
+	setHistoryDbAccessor,
+	useHistoryStore,
+} from './history-store.js';
 
 const ENTRY: Omit<HistoryEntry, 'id'> = {
 	query: 'SELECT * FROM users',
@@ -17,11 +21,29 @@ function makeEntry(
 	return { ...ENTRY, ...overrides };
 }
 
-describe('useHistoryStore', () => {
-	beforeEach(() => {
-		useHistoryStore.setState({ entries: [], search: '' });
-	});
+// ── Mock DB ──────────────────────────────────────────────────────
 
+function createMockDb() {
+	return {
+		execute: vi.fn().mockResolvedValue({ lastInsertId: 0, rowsAffected: 0 }),
+		select: vi.fn().mockResolvedValue([]),
+		close: vi.fn().mockResolvedValue(undefined),
+	};
+}
+
+let mockDb: ReturnType<typeof createMockDb>;
+
+beforeEach(() => {
+	mockDb = createMockDb();
+	setHistoryDbAccessor(() => mockDb);
+	useHistoryStore.setState({ entries: [], search: '', loaded: false });
+});
+
+afterEach(() => {
+	setHistoryDbAccessor(null);
+});
+
+describe('useHistoryStore', () => {
 	describe('addEntry', () => {
 		it('adds an entry with generated id', () => {
 			useHistoryStore.getState().addEntry(ENTRY);
@@ -51,11 +73,18 @@ describe('useHistoryStore', () => {
 			expect(entry.success).toBe(false);
 			expect(entry.error).toBe('relation "foo" does not exist');
 		});
+
+		it('persists to SQLite', () => {
+			useHistoryStore.getState().addEntry(ENTRY);
+			expect(mockDb.execute).toHaveBeenCalledWith(
+				expect.stringContaining('INSERT OR REPLACE INTO query_history'),
+				expect.arrayContaining(['SELECT * FROM users']),
+			);
+		});
 	});
 
 	describe('FIFO pruning', () => {
 		it('caps entries at 500, dropping oldest', () => {
-			// Pre-fill with 500 entries
 			const bulk: HistoryEntry[] = Array.from({ length: 500 }, (_, i) => ({
 				...ENTRY,
 				id: `old-${i}`,
@@ -63,22 +92,21 @@ describe('useHistoryStore', () => {
 			}));
 			useHistoryStore.setState({ entries: bulk });
 
-			// Add one more — should evict the oldest
 			useHistoryStore.getState().addEntry(makeEntry({ query: 'newest' }));
 			const { entries } = useHistoryStore.getState();
 			expect(entries).toHaveLength(500);
 			expect(entries[0]!.query).toBe('newest');
-			// The very last old entry (index 499) should be gone
 			expect(entries.some((e) => e.id === 'old-499')).toBe(false);
 		});
 	});
 
 	describe('clearHistory', () => {
-		it('removes all entries', () => {
+		it('removes all entries and clears SQLite', () => {
 			useHistoryStore.getState().addEntry(ENTRY);
 			useHistoryStore.getState().addEntry(ENTRY);
 			useHistoryStore.getState().clearHistory();
 			expect(useHistoryStore.getState().entries).toHaveLength(0);
+			expect(mockDb.execute).toHaveBeenCalledWith('DELETE FROM query_history');
 		});
 	});
 
@@ -91,6 +119,16 @@ describe('useHistoryStore', () => {
 			const { entries } = useHistoryStore.getState();
 			expect(entries).toHaveLength(1);
 			expect(entries[0]!.query).toBe('keep');
+		});
+
+		it('deletes from SQLite', () => {
+			useHistoryStore.getState().addEntry(ENTRY);
+			const id = useHistoryStore.getState().entries[0]!.id;
+			useHistoryStore.getState().removeEntry(id);
+			expect(mockDb.execute).toHaveBeenCalledWith(
+				'DELETE FROM query_history WHERE id = $1',
+				[id],
+			);
 		});
 
 		it('is a no-op for non-existent id', () => {
@@ -131,11 +169,42 @@ describe('useHistoryStore', () => {
 		});
 	});
 
+	describe('loadHistory', () => {
+		it('loads entries from SQLite', async () => {
+			mockDb.select.mockResolvedValueOnce([
+				{
+					id: 'abc',
+					query: 'SELECT 1',
+					language: 'sql',
+					database: 'testdb',
+					timestamp: 1700000000000,
+					duration_ms: 10,
+					row_count: 1,
+					success: 1,
+					error: null,
+				},
+			]);
+
+			await useHistoryStore.getState().loadHistory();
+			const { entries, loaded } = useHistoryStore.getState();
+			expect(entries).toHaveLength(1);
+			expect(entries[0]!.id).toBe('abc');
+			expect(entries[0]!.durationMs).toBe(10);
+			expect(entries[0]!.success).toBe(true);
+			expect(loaded).toBe(true);
+		});
+
+		it('handles empty database', async () => {
+			await useHistoryStore.getState().loadHistory();
+			expect(useHistoryStore.getState().entries).toHaveLength(0);
+			expect(useHistoryStore.getState().loaded).toBe(true);
+		});
+	});
+
 	describe('search state is transient', () => {
 		it('does not affect entries when set', () => {
 			useHistoryStore.getState().addEntry(ENTRY);
 			useHistoryStore.getState().setSearch('test');
-			// Search is runtime-only, entries remain unchanged
 			expect(useHistoryStore.getState().entries).toHaveLength(1);
 			expect(useHistoryStore.getState().search).toBe('test');
 		});
