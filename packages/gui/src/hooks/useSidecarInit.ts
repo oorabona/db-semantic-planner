@@ -26,7 +26,12 @@ export function useSidecarInit(): void {
 		const { setStatus, setError, setHeartbeat } = useSidecarStore.getState();
 
 		// Initialize log database (concurrent with sidecar boot)
-		useLogStore.getState().initDb();
+		useLogStore
+			.getState()
+			.initDb()
+			.catch((err) => {
+				console.error('[log-db] Failed to initialize:', err);
+			});
 
 		async function boot(): Promise<void> {
 			try {
@@ -51,6 +56,7 @@ export function useSidecarInit(): void {
 				if (!mounted.current) return;
 				const message =
 					err instanceof Error ? err.message : 'Sidecar init failed';
+				console.error('[sidecar] Boot failed:', message, err);
 				setStatus('stopped');
 				setError(message);
 			}
