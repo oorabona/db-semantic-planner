@@ -87,7 +87,7 @@
 - [ ] 💡 **GUI-022-F002** [GUI] `generateSchema` wizard option not wired (reverse-engineer endpoint needed) — Priority: L (from /review F-002)
 - [ ] 💡 **GUI-022-F003** [GUI] NQL file menu item needs Rust-side Tauri menu + `fs.write` — Priority: L (from /review F-003)
 (GUI-022-F004, F007, F009, F011, F014 archived → docs/historic/done-2026-02.md)
-- [ ] 💡 **GUI-024** [GUI] App logs: upgrade popover to modal with filter/search (like Logs tab) — Priority: L (user request)
+- [ ] 🔧 **GUI-024-F009** [GUI] Extract AppLogPopover to own file + test AC-1/AC-2 (expand icon, popover→modal wiring) — Priority: M (from /review F-009)
 - [ ] 🔧 **GUI-021** [GUI] Authorization check on schema.apply sidecar endpoint (desktop-only, lower risk) — Priority: M (from /review F-007)
 - [ ] 🔧 **CLI-001** [CLI] Integration test for rollback flow with real DB (SC-16) — Priority: M (from /review F-002)
 (GUI-F005, GUI-F006, GUI-F007 archived → docs/historic/done-2026-02.md)

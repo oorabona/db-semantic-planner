@@ -9,6 +9,7 @@ import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { Download, Search, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { formatLogTime, LEVEL_COLORS } from '@/lib/log-utils';
 import type { LogEntry, LogLevel, LogState } from '@/stores/log-store';
 import { useLogStore } from '@/stores/log-store';
 
@@ -17,13 +18,6 @@ import { useLogStore } from '@/stores/log-store';
 const ALL_LEVELS: LogLevel[] = ['debug', 'info', 'warn', 'error'];
 const ALL_SOURCES: LogEntry['source'][] = ['sidecar', 'ipc', 'app'];
 
-const LEVEL_COLORS: Record<LogLevel, string> = {
-	info: 'text-blue-500',
-	warn: 'text-yellow-500',
-	error: 'text-red-500',
-	debug: 'text-muted-foreground',
-};
-
 const SOURCE_LABELS: Record<LogEntry['source'], string> = {
 	sidecar: 'sidecar',
 	ipc: 'ipc',
@@ -31,14 +25,6 @@ const SOURCE_LABELS: Record<LogEntry['source'], string> = {
 };
 
 // ── Helpers ───────────────────────────────────────────────────
-
-function formatTime(ts: number): string {
-	const d = new Date(ts);
-	const h = String(d.getHours()).padStart(2, '0');
-	const m = String(d.getMinutes()).padStart(2, '0');
-	const s = String(d.getSeconds()).padStart(2, '0');
-	return `${h}:${m}:${s}`;
-}
 
 function durationColor(ms: number): string {
 	if (ms < 100) return 'text-green-600 dark:text-green-400';
@@ -278,7 +264,7 @@ export function LogPanel() {
 									}}
 								>
 									<span className="shrink-0 text-muted-foreground">
-										{formatTime(entry.timestamp)}
+										{formatLogTime(entry.timestamp)}
 									</span>
 									<span
 										className={`shrink-0 w-12 ${LEVEL_COLORS[entry.level]}`}

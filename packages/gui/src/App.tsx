@@ -6,10 +6,18 @@ import {
 } from '@tauri-apps/plugin-dialog';
 import { exists, readTextFile } from '@tauri-apps/plugin-fs';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
-import { FolderOpen, History, Info, ScrollText, X } from 'lucide-react';
+import {
+	FolderOpen,
+	History,
+	Info,
+	Maximize2,
+	ScrollText,
+	X,
+} from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Toaster, toast } from 'sonner';
+import { AppLogModal } from '@/components/AppLogModal';
 import {
 	ConnectionDialog,
 	type ConnectionFormData,
@@ -50,12 +58,13 @@ import {
 	saveFileAs,
 } from '@/lib/file-io';
 import { sidecarApi } from '@/lib/ipc';
+import { formatLogTime, LEVEL_COLORS } from '@/lib/log-utils';
 import { MENU_IDS, onMenuEvent } from '@/lib/menu';
 import { resolveSchemaPath } from '@/lib/settings';
 import { useAssertionStore } from '@/stores/assertion-store';
 import { useConnectionStore } from '@/stores/connection-store';
 import { getActiveTab, useEditorStore } from '@/stores/editor-store';
-import type { LogEntry, LogLevel } from '@/stores/log-store';
+import type { LogEntry } from '@/stores/log-store';
 import { useLogStore } from '@/stores/log-store';
 import { useProjectStore } from '@/stores/project-store';
 import { useResultsStore } from '@/stores/results-store';
@@ -64,24 +73,14 @@ import { useUserSettingsStore } from '@/stores/user-settings-store';
 
 // ── App Log Popover ──────────────────────────────────────────────
 
-const LEVEL_COLORS: Record<LogLevel, string> = {
-	info: 'text-blue-500',
-	warn: 'text-yellow-500',
-	error: 'text-red-500',
-	debug: 'text-muted-foreground',
-};
-
-function formatLogTime(ts: number): string {
-	const d = new Date(ts);
-	return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
-}
-
 function AppLogPopover({
 	entries,
 	onClose,
+	onExpand,
 }: {
 	entries: readonly LogEntry[];
 	onClose: () => void;
+	onExpand: () => void;
 }) {
 	const ref = useRef<HTMLDivElement>(null);
 
@@ -102,13 +101,24 @@ function AppLogPopover({
 		>
 			<div className="flex items-center justify-between border-b px-3 py-1.5">
 				<span className="text-xs font-medium">App Logs</span>
-				<button
-					type="button"
-					onClick={onClose}
-					className="text-muted-foreground hover:text-foreground"
-				>
-					<X className="h-3 w-3" />
-				</button>
+				<div className="flex items-center gap-1">
+					<button
+						type="button"
+						onClick={onExpand}
+						className="text-muted-foreground hover:text-foreground"
+						title="Open in modal"
+					>
+						<Maximize2 className="h-3 w-3" />
+					</button>
+					<button
+						type="button"
+						onClick={onClose}
+						className="text-muted-foreground hover:text-foreground"
+						title="Close"
+					>
+						<X className="h-3 w-3" />
+					</button>
+				</div>
 			</div>
 			{entries.length === 0 ? (
 				<div className="px-3 py-4 text-center text-xs text-muted-foreground">
@@ -162,6 +172,7 @@ export default function App() {
 	const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
 
 	const [showAppLogs, setShowAppLogs] = useState(false);
+	const [showAppLogModal, setShowAppLogModal] = useState(false);
 
 	const { status, active, error } = useConnectionStore();
 	const projectMode = useProjectStore((s) => s.mode);
@@ -955,9 +966,21 @@ export default function App() {
 					<AppLogPopover
 						entries={appEntries}
 						onClose={() => setShowAppLogs(false)}
+						onExpand={() => {
+							setShowAppLogs(false);
+							setShowAppLogModal(true);
+						}}
 					/>
 				)}
 			</div>
+
+			{/* App log modal */}
+			{showAppLogModal && (
+				<AppLogModal
+					entries={appEntries}
+					onClose={() => setShowAppLogModal(false)}
+				/>
+			)}
 
 			{/* Toast notifications */}
 			<Toaster position="bottom-right" richColors closeButton />
