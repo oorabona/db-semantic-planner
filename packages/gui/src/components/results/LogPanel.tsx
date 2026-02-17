@@ -6,6 +6,7 @@
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
 import { Download, Search, Trash2, X } from 'lucide-react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { LogEntry, LogLevel, LogState } from '@/stores/log-store';
 import { useLogStore } from '@/stores/log-store';
@@ -185,14 +186,23 @@ export function LogPanel() {
 	const stats = useLogStore((s) => s.stats);
 	const clear = useLogStore((s) => s.clear);
 	const exportLogsFn = useLogStore((s) => s.exportLogs);
-	const bottomRef = useRef<HTMLDivElement>(null);
+	const parentRef = useRef<HTMLDivElement>(null);
+	const prevCountRef = useRef(0);
 
-	// Auto-scroll to bottom on new entries
+	const virtualizer = useVirtualizer({
+		count: entries.length,
+		getScrollElement: () => parentRef.current,
+		estimateSize: () => 24,
+		overscan: 20,
+	});
+
+	// Auto-scroll to bottom when new entries arrive
 	useEffect(() => {
-		if (typeof bottomRef.current?.scrollIntoView === 'function') {
-			bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+		if (entries.length > prevCountRef.current && entries.length > 0) {
+			virtualizer.scrollToIndex(entries.length - 1, { align: 'end' });
 		}
-	}, [entries.length]);
+		prevCountRef.current = entries.length;
+	}, [entries.length, virtualizer]);
 
 	const filteredCount = entries.length;
 	const totalCount = stats.total;
@@ -231,42 +241,67 @@ export function LogPanel() {
 				</div>
 			</div>
 
-			{/* Log entries */}
-			<div className="flex-1 overflow-auto p-1 font-mono text-xs">
-				{entries.length === 0 && (
+			{/* Log entries (virtualized) */}
+			<div
+				ref={parentRef}
+				className="flex-1 overflow-auto p-1 font-mono text-xs"
+			>
+				{entries.length === 0 ? (
 					<div className="flex h-full items-center justify-center">
 						<span className="text-sm text-muted-foreground">
 							No log entries yet
 						</span>
 					</div>
-				)}
-				{entries.map((entry) => (
+				) : (
 					<div
-						key={entry.id}
-						className="flex gap-2 px-2 py-0.5 hover:bg-muted/50"
+						style={{
+							height: `${virtualizer.getTotalSize()}px`,
+							width: '100%',
+							position: 'relative',
+						}}
 					>
-						<span className="shrink-0 text-muted-foreground">
-							{formatTime(entry.timestamp)}
-						</span>
-						<span className={`shrink-0 w-12 ${LEVEL_COLORS[entry.level]}`}>
-							[{entry.level}]
-						</span>
-						<span className="shrink-0 w-16 text-muted-foreground">
-							{SOURCE_LABELS[entry.source]}
-						</span>
-						<span className="whitespace-pre-wrap break-all">
-							{entry.message}
-						</span>
-						{entry.durationMs != null && (
-							<span
-								className={`shrink-0 tabular-nums ${durationColor(entry.durationMs)}`}
-							>
-								{entry.durationMs}ms
-							</span>
-						)}
+						{virtualizer.getVirtualItems().map((virtualRow) => {
+							const entry = entries[virtualRow.index];
+							if (!entry) return null;
+							return (
+								<div
+									key={entry.id}
+									className="flex gap-2 px-2 py-0.5 hover:bg-muted/50"
+									style={{
+										position: 'absolute',
+										top: 0,
+										left: 0,
+										width: '100%',
+										height: `${virtualRow.size}px`,
+										transform: `translateY(${virtualRow.start}px)`,
+									}}
+								>
+									<span className="shrink-0 text-muted-foreground">
+										{formatTime(entry.timestamp)}
+									</span>
+									<span
+										className={`shrink-0 w-12 ${LEVEL_COLORS[entry.level]}`}
+									>
+										[{entry.level}]
+									</span>
+									<span className="shrink-0 w-16 text-muted-foreground">
+										{SOURCE_LABELS[entry.source]}
+									</span>
+									<span className="whitespace-pre-wrap break-all">
+										{entry.message}
+									</span>
+									{entry.durationMs != null && (
+										<span
+											className={`shrink-0 tabular-nums ${durationColor(entry.durationMs)}`}
+										>
+											{entry.durationMs}ms
+										</span>
+									)}
+								</div>
+							);
+						})}
 					</div>
-				))}
-				<div ref={bottomRef} />
+				)}
 			</div>
 		</div>
 	);

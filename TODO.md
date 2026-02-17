@@ -82,9 +82,9 @@
 - [ ] 💡 **GUI-018** [GUI] Auto-discovery of .assert.dbsp files from project tree (scan + run all) — Priority: L
 - [ ] 💡 **GUI-019** [GUI] Live assertion re-run on file change (watch mode) — Priority: L
 - [ ] 💡 **GUI-020** [GUI] Assertion coverage reporting (queries with/without assertions) — Priority: L
-- [ ] 🔧 [GUI] Log rotation: add configurable retention days (currently hardcoded 30) — Priority: L (from /review GUI-016a+c)
-- [ ] 🔧 [GUI] Log export: surface write errors to user (toast/notification) — Priority: L (from /review GUI-016a+c)
-- [ ] 🔧 [GUI] LogPanel: virtualized list for large log volumes (>10k entries) — Priority: L (from /review GUI-016a+c)
+(Log rotation configurable, toast notifications, LogPanel virtualized list archived → docs/historic/done-2026-02.md)
+- [ ] 💡 **GUI-022** [GUI] Project mode — multi-connection management, load schema.ts, scope history/logs per project — Priority: M
+- [ ] 💡 **GUI-023** [GUI] Migrate query history from localStorage to SQLite (per-project scoping, longer retention) — Priority: L (depends on GUI-022)
 - [ ] 🔧 **GUI-021** [GUI] Authorization check on schema.apply sidecar endpoint (desktop-only, lower risk) — Priority: M (from /review F-007)
 - [ ] 🔧 **CLI-001** [CLI] Integration test for rollback flow with real DB (SC-16) — Priority: M (from /review F-002)
 (GUI-F005, GUI-F006, GUI-F007 archived → docs/historic/done-2026-02.md)

@@ -9,6 +9,7 @@
 		"dialog:default",
 		"fs:default",
 		"store:default",
-		"sql:default"
+		"sql:default",
+		"sql:allow-execute"
 	]
 }

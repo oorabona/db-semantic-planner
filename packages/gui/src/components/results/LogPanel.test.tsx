@@ -13,6 +13,21 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
 	writeTextFile: vi.fn(async () => {}),
 }));
 
+// Virtualizer needs real DOM measurements — mock it for jsdom
+vi.mock('@tanstack/react-virtual', () => ({
+	useVirtualizer: (opts: { count: number }) => ({
+		getVirtualItems: () =>
+			Array.from({ length: opts.count }, (_, i) => ({
+				index: i,
+				start: i * 24,
+				size: 24,
+				key: i,
+			})),
+		getTotalSize: () => opts.count * 24,
+		scrollToIndex: vi.fn(),
+	}),
+}));
+
 // ── Mock log store ───────────────────────────────────────────
 
 const EMPTY_STATS: LogStats = { total: 0, byLevel: {} };

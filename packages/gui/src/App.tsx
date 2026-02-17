@@ -19,6 +19,7 @@ import { ResultsPanel } from '@/components/layout/ResultsPanel';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { CommandPalette } from '@/components/palette/CommandPalette';
 import { PreferencesDialog } from '@/components/preferences/PreferencesDialog';
+import { Toaster } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useConnection } from '@/hooks/useConnection';
 import { useMonacoSetup } from '@/hooks/useMonacoSetup';
@@ -677,6 +678,9 @@ export default function App() {
 					<Plus className="h-3.5 w-3.5" />
 				</Button>
 			</div>
+
+			{/* Toast notifications */}
+			<Toaster position="bottom-right" richColors closeButton />
 
 			{/* Command palette */}
 			<CommandPalette />
