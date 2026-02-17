@@ -6,6 +6,7 @@
  * Callers write via addEntry(); the store persists to SQLite
  * and refreshes the display cache.
  */
+import { toast } from 'sonner';
 import { create } from 'zustand';
 import type { LogFilter, LogStats } from '@/lib/log-db';
 import {
@@ -72,8 +73,10 @@ export const useLogStore = create<LogState>((set, get) => ({
 
 	initDb: async () => {
 		await initLogDb();
-		// Rotate logs older than 30 days on startup
-		await rotateOldLogs(30);
+		// Rotate old logs on startup (retention from user settings)
+		const { useUserSettingsStore } = await import('./user-settings-store');
+		const days = useUserSettingsStore.getState().logRetentionDays;
+		await rotateOldLogs(days);
 		set({ dbReady: true });
 		await get().refresh();
 	},
@@ -84,6 +87,10 @@ export const useLogStore = create<LogState>((set, get) => ({
 	},
 
 	addEntry: (level, source, message, durationMs) => {
+		// Surface warnings/errors as toast notifications
+		if (level === 'error') toast.error(message, { duration: 6000 });
+		else if (level === 'warn') toast.warning(message, { duration: 4000 });
+
 		// Fire-and-forget write to SQLite
 		insertLog(level, source, message, durationMs)
 			.then(() => {

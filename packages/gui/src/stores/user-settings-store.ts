@@ -22,6 +22,8 @@ export interface UserSettings {
 	formatOnSave: boolean;
 	/** Maximum result rows (project settings override this) */
 	maxResults: number;
+	/** Log retention in days (logs older than this are deleted on startup) */
+	logRetentionDays: number;
 }
 
 // ── Defaults ─────────────────────────────────────────────────────
@@ -33,6 +35,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
 	tabSize: 2,
 	formatOnSave: false,
 	maxResults: 1000,
+	logRetentionDays: 30,
 };
 
 // ── Store ────────────────────────────────────────────────────────
@@ -93,6 +96,7 @@ export const useUserSettingsStore = create<UserSettingsState>()(
 				tabSize: state.tabSize,
 				formatOnSave: state.formatOnSave,
 				maxResults: state.maxResults,
+				logRetentionDays: state.logRetentionDays,
 			}),
 		},
 	),

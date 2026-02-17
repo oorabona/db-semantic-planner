@@ -162,13 +162,40 @@ function DatabasesSection() {
 
 function AdvancedSection() {
 	const resetToDefaults = useUserSettingsStore((s) => s.resetToDefaults);
+	const logRetentionDays = useUserSettingsStore((s) => s.logRetentionDays);
+	const updateSetting = useUserSettingsStore((s) => s.updateSetting);
 
 	return (
 		<div className="space-y-4">
 			<h3 className="text-sm font-medium">Advanced</h3>
-			<p className="text-xs text-[var(--muted-foreground)]">
-				Advanced settings will be available in future releases.
-			</p>
+
+			{/* Log retention */}
+			<div className="space-y-1">
+				<label
+					htmlFor="log-retention"
+					className="text-xs font-medium text-[var(--foreground)]"
+				>
+					Log retention (days)
+				</label>
+				<p className="text-xs text-[var(--muted-foreground)]">
+					Logs older than this are deleted on startup.
+				</p>
+				<input
+					id="log-retention"
+					type="number"
+					min={1}
+					max={365}
+					value={logRetentionDays}
+					onChange={(e) => {
+						const val = Number.parseInt(e.target.value, 10);
+						if (val >= 1 && val <= 365) {
+							updateSetting('logRetentionDays', val);
+						}
+					}}
+					className="w-20 rounded border bg-transparent px-2 py-1 text-xs"
+				/>
+			</div>
+
 			<Button variant="outline" size="sm" onClick={resetToDefaults}>
 				Reset All to Defaults
 			</Button>
