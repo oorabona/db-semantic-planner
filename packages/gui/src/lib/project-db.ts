@@ -284,6 +284,17 @@ export async function rotateIpcLogs(maxAgeDays = 7): Promise<number> {
 	return result.rowsAffected;
 }
 
+/** Rotate query history entries older than maxAgeDays. */
+export async function rotateOldHistory(maxAgeDays = 90): Promise<number> {
+	if (!db) return 0;
+	const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+	const result = await db.execute(
+		'DELETE FROM query_history WHERE timestamp < $1',
+		[cutoff],
+	);
+	return result.rowsAffected;
+}
+
 // ── Connection Profiles ──────────────────────────────────────────
 
 /** Insert or replace a connection profile. */

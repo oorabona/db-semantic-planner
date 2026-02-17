@@ -10,6 +10,7 @@ import {
 	getProjectMeta,
 	openDefaultDb,
 	openProjectDb,
+	rotateOldHistory,
 	setProjectMeta,
 } from './project-db';
 
@@ -195,5 +196,37 @@ describe('closeProjectDb', () => {
 		expect(mock.db.close).toHaveBeenCalled();
 		expect(getProjectDb()).toBeNull();
 		expect(getProjectDbUri()).toBeNull();
+	});
+});
+
+describe('rotateOldHistory', () => {
+	it('should delete history entries older than maxAgeDays', async () => {
+		await openProjectDb('my-app');
+
+		const now = 1700000000000;
+		vi.spyOn(Date, 'now').mockReturnValue(now);
+
+		const deleted = await rotateOldHistory(90);
+		expect(deleted).toBe(0); // mock returns 0 rowsAffected
+
+		const call = mock.db.execute.mock.calls.find(
+			([sql]) =>
+				typeof sql === 'string' &&
+				sql.includes('DELETE') &&
+				sql.includes('query_history'),
+		);
+		expect(call).toBeDefined();
+		expect(call![0]).toContain(
+			'DELETE FROM query_history WHERE timestamp < $1',
+		);
+		// cutoff = now - 90 * 24 * 60 * 60 * 1000
+		expect(call![1]).toEqual([now - 90 * 24 * 60 * 60 * 1000]);
+
+		vi.restoreAllMocks();
+	});
+
+	it('should return 0 when no DB is open', async () => {
+		const deleted = await rotateOldHistory(30);
+		expect(deleted).toBe(0);
 	});
 });

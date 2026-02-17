@@ -22,6 +22,22 @@ import {
 import { useConnectionStore } from './connection-store';
 import { setHistoryDbAccessor, useHistoryStore } from './history-store';
 
+/**
+ * Shared DB-reset logic for transitioning back to standalone mode.
+ * Used by closeFolder() and onSettingsChanged() (F009 DRY extraction).
+ */
+async function resetToStandalone(): Promise<void> {
+	await closeProjectDb();
+	await openDefaultDb((uri) => {
+		toast.warning(
+			`Database appears corrupted (${uri}). A fresh database was created.`,
+		);
+	});
+	setHistoryDbAccessor(getProjectDb);
+	useConnectionStore.setState({ profiles: [] });
+	useHistoryStore.setState({ entries: [], loaded: false });
+}
+
 // ── Types ────────────────────────────────────────────────────────
 
 export type ProjectMode = 'standalone' | 'project';
@@ -246,23 +262,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 	},
 
 	closeFolder: async () => {
-		// Close project DB and revert to default
-		await closeProjectDb();
-		await openDefaultDb((uri) => {
-			toast.warning(
-				`Database appears corrupted (${uri}). A fresh database was created.`,
-			);
-		});
-
-		// Re-wire history store to default DB
-		setHistoryDbAccessor(getProjectDb);
-
-		// Reset connection profiles (they belong to the project)
-		useConnectionStore.setState({ profiles: [] });
-
-		// Reset history (will be reloaded from default DB)
-		useHistoryStore.setState({ entries: [], loaded: false });
-
+		await resetToStandalone();
 		set({
 			mode: 'standalone',
 			folderPath: null,
@@ -302,17 +302,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 			await get().openFolder(folderPath);
 		} else if (!exists && mode === 'project') {
 			// SC-28: Settings file deleted → transition to standalone
-			// Close project DB, revert to default
-			await closeProjectDb();
-			await openDefaultDb((uri) => {
-				toast.warning(
-					`Database appears corrupted (${uri}). A fresh database was created.`,
-				);
-			});
-			setHistoryDbAccessor(getProjectDb);
-			useConnectionStore.setState({ profiles: [] });
-			useHistoryStore.setState({ entries: [], loaded: false });
-
+			await resetToStandalone();
 			set({
 				mode: 'standalone',
 				folderName: null,

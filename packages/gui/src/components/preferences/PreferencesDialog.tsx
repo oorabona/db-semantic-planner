@@ -163,6 +163,9 @@ function DatabasesSection() {
 function AdvancedSection() {
 	const resetToDefaults = useUserSettingsStore((s) => s.resetToDefaults);
 	const logRetentionDays = useUserSettingsStore((s) => s.logRetentionDays);
+	const historyRetentionDays = useUserSettingsStore(
+		(s) => s.historyRetentionDays,
+	);
 	const updateSetting = useUserSettingsStore((s) => s.updateSetting);
 
 	return (
@@ -190,6 +193,33 @@ function AdvancedSection() {
 						const val = Number.parseInt(e.target.value, 10);
 						if (val >= 1 && val <= 365) {
 							updateSetting('logRetentionDays', val);
+						}
+					}}
+					className="w-20 rounded border bg-transparent px-2 py-1 text-xs"
+				/>
+			</div>
+
+			{/* History retention */}
+			<div className="space-y-1">
+				<label
+					htmlFor="history-retention"
+					className="text-xs font-medium text-[var(--foreground)]"
+				>
+					Query history retention (days)
+				</label>
+				<p className="text-xs text-[var(--muted-foreground)]">
+					History entries older than this are deleted when loading.
+				</p>
+				<input
+					id="history-retention"
+					type="number"
+					min={1}
+					max={365}
+					value={historyRetentionDays}
+					onChange={(e) => {
+						const val = Number.parseInt(e.target.value, 10);
+						if (val >= 1 && val <= 365) {
+							updateSetting('historyRetentionDays', val);
 						}
 					}}
 					className="w-20 rounded border bg-transparent px-2 py-1 text-xs"
