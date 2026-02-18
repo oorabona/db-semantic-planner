@@ -45,24 +45,26 @@
 - Remove `include`, `exclude` fields from `DbspProjectSettings`
 - Remove `DEFAULT_INCLUDE`, `DEFAULT_EXCLUDE`, `discoverFiles`, `shouldIncludeFile`
 
-### F2: Sidebar tabs — "Database" | "Project"
+### F2: Collapsible sidebar sections
 
-Current sidebar layout is stacked (files above, schema below). Replace with tabs:
+Keep current stacked layout (files above, schema below). Add collapse/expand to each section:
 
 ```
 ┌─────────────────────────┐
-│ [Database] [Project]    │  ← tabs (project tab only in project mode)
+│ ▼ Project Files    [+]  │  ← collapsible header + "Add" button
+│   queries/users.dbsp    │
+│   queries/orders.dbsp   │
 ├─────────────────────────┤
-│                         │
-│  (active tab content)   │
-│                         │
+│ ▼ Database Schema       │  ← collapsible header
+│   users (5 columns)     │
+│   orders (8 columns)    │
 └─────────────────────────┘
 ```
 
-- **Database tab:** Current `SchemaTree` (tables, columns, relations)
-- **Project tab:** Enhanced `FileTree` showing `project.files[]` as tree + schema.ts pinned at bottom
-- **Standalone mode:** Only "Database" tab visible (no tab switcher needed)
-- **Project mode:** Both tabs, "Project" selected by default
+- **Collapse/expand:** Click section header to toggle, chevron indicates state
+- **Standalone mode:** Only "Database Schema" section visible
+- **Project mode:** Both sections visible, "Project Files" expanded by default
+- **Resize benefit:** Collapsing one section gives full height to the other
 
 ### F3: Project files tree view (enhanced FileTree)
 
@@ -130,7 +132,7 @@ New wizard: 5 steps (Intro → Name & Location → Connections → **Files & Sch
 
 **Components to modify:**
 - `DbspProjectSettings` — add `files`, remove `include`/`exclude`
-- `Sidebar` — stacked layout → tabbed layout
+- `Sidebar` — add collapsible section headers with chevron toggle
 - `FileTree` — add header with "Add" button, context menu, drag & drop
 - `NewProjectWizard` — 4 steps → 5 steps (insert Files & Schema step)
 - `WizardOptionsStep` — becomes Review step (summary only)
@@ -140,7 +142,7 @@ New wizard: 5 steps (Intro → Name & Location → Connections → **Files & Sch
 
 **Components to create:**
 - `WizardFilesStep.tsx` — step 4: file scan + schema.ts radio
-- Tab switcher UI in Sidebar (lightweight, not a full tab library)
+- `CollapsibleSection` component (generic, reusable in Sidebar)
 
 **Constraints:**
 - Must integrate with existing Tauri v2 plugin-fs and plugin-dialog
