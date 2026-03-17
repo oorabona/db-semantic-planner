@@ -141,22 +141,7 @@ function EditorSection() {
 
 // ── Databases Section ───────────────────────────────────────────
 
-function DatabasesSection() {
-	return (
-		<div className="space-y-4">
-			<h3 className="text-sm font-medium">Databases</h3>
-			<p className="text-xs text-[var(--muted-foreground)]">
-				Connection profiles are managed via the Connection dialog or
-				dbsp.settings.json.
-			</p>
-			<p className="text-xs text-[var(--muted-foreground)]">
-				Use File &gt; New Connection (⌘N) to add profiles, or edit
-				dbsp.settings.json directly for URI-based profiles (file://, env://,
-				store://).
-			</p>
-		</div>
-	);
-}
+import { ProfileManager } from './ProfileManager';
 
 // ── Advanced Section ────────────────────────────────────────────
 
@@ -242,7 +227,7 @@ function SectionContent({ section }: { section: PreferencesSection }) {
 		case 'editor':
 			return <EditorSection />;
 		case 'databases':
-			return <DatabasesSection />;
+			return <ProfileManager />;
 		case 'advanced':
 			return <AdvancedSection />;
 	}

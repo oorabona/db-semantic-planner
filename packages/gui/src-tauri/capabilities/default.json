@@ -10,23 +10,31 @@
 		"fs:default",
 		{
 			"identifier": "fs:allow-write-text-file",
-			"allow": [{ "path": "$HOME/**" }]
+			"allow": [{ "path": "$HOME/**" }, { "path": "/mnt/**" }]
 		},
 		{
 			"identifier": "fs:allow-read-text-file",
-			"allow": [{ "path": "$HOME/**" }]
+			"allow": [{ "path": "$HOME/**" }, { "path": "/mnt/**" }]
 		},
 		{
 			"identifier": "fs:allow-exists",
-			"allow": [{ "path": "$HOME/**" }]
+			"allow": [{ "path": "$HOME/**" }, { "path": "/mnt/**" }]
 		},
 		{
 			"identifier": "fs:allow-read-dir",
-			"allow": [{ "path": "$HOME/**" }]
+			"allow": [{ "path": "$HOME/**" }, { "path": "/mnt/**" }]
 		},
 		{
 			"identifier": "fs:allow-mkdir",
-			"allow": [{ "path": "$APPCONFIG/**" }]
+			"allow": [{ "path": "$APPCONFIG/**" }, { "path": "$HOME/**" }, { "path": "/mnt/**" }]
+		},
+		{
+			"identifier": "fs:allow-rename",
+			"allow": [{ "path": "$HOME/**" }, { "path": "/mnt/**" }]
+		},
+		{
+			"identifier": "fs:allow-remove",
+			"allow": [{ "path": "$HOME/**" }, { "path": "/mnt/**" }]
 		},
 		"store:default",
 		"sql:default",

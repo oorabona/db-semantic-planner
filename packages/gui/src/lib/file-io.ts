@@ -1,6 +1,6 @@
 import { ask, open as openDialog, save } from '@tauri-apps/plugin-dialog';
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
-import type { TabLanguage } from '@/stores/editor-store';
+import type { EditorTab, TabLanguage } from '@/stores/editor-store';
 
 const DIALOG_FILTERS = [
 	{ name: 'DBSP files', extensions: ['dbsp'] },
@@ -91,4 +91,42 @@ export async function confirmUnsavedChanges(
 	if (result === true) return 'save';
 	if (result === false) return 'discard';
 	return 'cancel';
+}
+
+/**
+ * Close a tab with unsaved-changes confirmation.
+ * If the tab is dirty, prompts the user. On "save", saves to disk (or Save As for new tabs).
+ * Returns true if the tab was closed, false if user cancelled.
+ */
+export async function closeTabWithConfirm(
+	tab: EditorTab,
+	actions: {
+		closeTab: (id: string) => void;
+		markSaved: (id: string) => void;
+		setFilePath: (id: string, filePath: string) => void;
+	},
+): Promise<boolean> {
+	if (!tab.dirty) {
+		actions.closeTab(tab.id);
+		return true;
+	}
+
+	const choice = await confirmUnsavedChanges(tab.title);
+
+	if (choice === 'cancel') return false;
+
+	if (choice === 'save') {
+		if (tab.filePath) {
+			await saveFile(tab.filePath, tab.content);
+			actions.markSaved(tab.id);
+		} else {
+			const path = await saveFileAs(tab.content, tab.title);
+			if (!path) return false; // user cancelled Save As
+			actions.setFilePath(tab.id, path);
+			actions.markSaved(tab.id);
+		}
+	}
+
+	actions.closeTab(tab.id);
+	return true;
 }

@@ -154,6 +154,7 @@
 - [ ] 🔧 **GUI-021** [GUI] Authorization check on schema.apply sidecar endpoint (desktop-only, lower risk) — Priority: M (from /review F-007)
 - [ ] 🔧 **CLI-001** [CLI] Integration test for rollback flow with real DB (SC-16) — Priority: M (from /review F-002)
 (GUI-027 archived → docs/historic/done-2026-02.md)
+(GUI-027-UX archived → docs/historic/done-2026-03.md)
   - [-] ⏭️ GUI-027-v2: Multi-connection per tab routing — deferred to v2
 - [ ] 💡 **GUI-028** [GUI] Keychain integration (store:// URI) — activate Tauri plugin-store for secure password storage, opt-in vs default — Priority: L (needs /ideate on GUI-027 first)
 (GUI-F005, GUI-F006, GUI-F007 archived → docs/historic/done-2026-02.md)
@@ -265,9 +266,7 @@
 
 ### Schema Diff (from khi dashboard integration)
 
-- [x] ✅ [DDL] compareSchemata dbCasing support — added `CompareSchemataOptions.dbCasing`, normalizes schema names to DB format before comparison (2026-02-26)
-- [x] ✅ [DDL] compareSchemata type equivalence — `timestamp`≡`datetime` (both TIMESTAMPTZ), strip PG type casts from defaults (2026-02-26)
-- [x] ✅ [DDL] Fix introspection pg array parsing — `idx.columns` returned as PG string `"{col}"` instead of JS array (2026-02-26)
+(DDL compareSchemata fixes archived → docs/historic/done-2026-03.md)
 - [ ] 🔧 [DDL] compareSchemata index awareness — schema `unique: true` and `ref()` generate implicit indexes, but ModelIR doesn't include them → 24 false `drop_index` on diff — Priority: M
 - [ ] 💡 [DDL] Expose migration CLI utilities as public API — `scanMigrations()`, file I/O from @dbsp/cli currently not exportable — Priority: L
 

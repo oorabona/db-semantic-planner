@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
-	mockReadDir,
 	mockJoin,
+	mockRemove,
 	mockReadSettings,
 	mockOpenProjectDb,
 	mockCloseProjectDb,
@@ -16,9 +16,11 @@ const {
 	mockWriteSettings,
 	mockAddProfile,
 	mockMigrateFromLocalStorage,
+	mockNeedsMigration,
+	mockMigrateSettings,
 } = vi.hoisted(() => ({
-	mockReadDir: vi.fn(),
 	mockJoin: vi.fn(),
+	mockRemove: vi.fn().mockResolvedValue(undefined),
 	mockReadSettings: vi.fn(),
 	mockOpenProjectDb: vi.fn().mockResolvedValue(undefined),
 	mockCloseProjectDb: vi.fn().mockResolvedValue(undefined),
@@ -38,6 +40,8 @@ const {
 		connectionsSkipped: 0,
 		alreadyDone: true,
 	}),
+	mockNeedsMigration: vi.fn().mockReturnValue(false),
+	mockMigrateSettings: vi.fn(),
 }));
 
 vi.mock('@/lib/migration', () => ({
@@ -45,7 +49,12 @@ vi.mock('@/lib/migration', () => ({
 }));
 
 vi.mock('@tauri-apps/plugin-fs', () => ({
-	readDir: mockReadDir,
+	remove: mockRemove,
+}));
+
+vi.mock('@/lib/settings-migration', () => ({
+	needsMigration: mockNeedsMigration,
+	migrateSettings: mockMigrateSettings,
 }));
 
 vi.mock('@tauri-apps/api/path', () => ({
@@ -107,12 +116,7 @@ vi.mock('./history-store', () => ({
 	}),
 }));
 
-import {
-	discoverFiles,
-	matchesGlob,
-	shouldIncludeFile,
-	useProjectStore,
-} from './project-store';
+import { useProjectStore } from './project-store';
 
 // ── Reset store between tests ───────────────────────────────────
 
@@ -124,6 +128,9 @@ beforeEach(() => {
 	mockSanitizeFolderName.mockImplementation((name: string) =>
 		name.toLowerCase(),
 	);
+	// Reset migration mocks to defaults (clearAllMocks doesn't reset return values)
+	mockNeedsMigration.mockReturnValue(false);
+	mockMigrateSettings.mockReset();
 	// Reset store state
 	useProjectStore.setState({
 		mode: 'standalone',
@@ -147,192 +154,17 @@ beforeEach(() => {
 	});
 });
 
-// ── matchesGlob ─────────────────────────────────────────────────
-
-describe('matchesGlob', () => {
-	it('matches **/*.dbsp', () => {
-		expect(matchesGlob('src/users.dbsp', '**/*.dbsp')).toBe(true);
-	});
-
-	it('matches **/*.assert.dbsp', () => {
-		expect(matchesGlob('src/users.assert.dbsp', '**/*.assert.dbsp')).toBe(true);
-	});
-
-	it('rejects non-matching extension', () => {
-		expect(matchesGlob('src/readme.md', '**/*.dbsp')).toBe(false);
-	});
-
-	it('matches *.ext against filename', () => {
-		expect(matchesGlob('users.dbsp', '*.dbsp')).toBe(true);
-	});
-
-	it('matches exact directory name (exclude)', () => {
-		expect(matchesGlob('node_modules', 'node_modules')).toBe(true);
-	});
-
-	it('matches directory in path', () => {
-		expect(matchesGlob('foo/node_modules/bar', 'node_modules')).toBe(true);
-	});
-
-	it('rejects non-matching exact', () => {
-		expect(matchesGlob('src/utils.ts', 'node_modules')).toBe(false);
-	});
-});
-
-// ── shouldIncludeFile ───────────────────────────────────────────
-
-describe('shouldIncludeFile', () => {
-	const include = ['**/*.dbsp', '**/*.assert.dbsp'];
-	const exclude = ['node_modules', 'dist', '.git'];
-
-	it('includes .dbsp files', () => {
-		expect(shouldIncludeFile('src/users.dbsp', include, exclude)).toBe(true);
-	});
-
-	it('includes .assert.dbsp files', () => {
-		expect(shouldIncludeFile('src/users.assert.dbsp', include, exclude)).toBe(
-			true,
-		);
-	});
-
-	it('excludes node_modules paths', () => {
-		expect(shouldIncludeFile('node_modules/foo.dbsp', include, exclude)).toBe(
-			false,
-		);
-	});
-
-	it('excludes non-matching files', () => {
-		expect(shouldIncludeFile('src/readme.md', include, exclude)).toBe(false);
-	});
-});
-
-// ── discoverFiles ───────────────────────────────────────────────
-
-describe('discoverFiles', () => {
-	it('discovers .dbsp files in flat directory', async () => {
-		// Arrange
-		mockReadDir.mockResolvedValue([
-			{ name: 'users.dbsp', isDirectory: false, isFile: true },
-			{ name: 'orders.dbsp', isDirectory: false, isFile: true },
-			{ name: 'readme.md', isDirectory: false, isFile: true },
-		]);
-
-		// Act
-		const files = await discoverFiles('/project');
-
-		// Assert
-		expect(files).toHaveLength(2);
-		expect(files[0]!.name).toBe('orders.dbsp');
-		expect(files[1]!.name).toBe('users.dbsp');
-	});
-
-	it('discovers files in subdirectories', async () => {
-		// Arrange
-		mockReadDir
-			.mockResolvedValueOnce([
-				{ name: 'src', isDirectory: true, isFile: false },
-				{ name: 'readme.md', isDirectory: false, isFile: true },
-			])
-			.mockResolvedValueOnce([
-				{ name: 'users.dbsp', isDirectory: false, isFile: true },
-				{
-					name: 'users.assert.dbsp',
-					isDirectory: false,
-					isFile: true,
-				},
-			]);
-
-		// Act
-		const files = await discoverFiles('/project');
-
-		// Assert
-		expect(files).toHaveLength(1); // src directory
-		expect(files[0]!.isDirectory).toBe(true);
-		expect(files[0]!.children).toHaveLength(2);
-	});
-
-	it('skips excluded directories', async () => {
-		// Arrange
-		mockReadDir.mockResolvedValue([
-			{ name: 'node_modules', isDirectory: true, isFile: false },
-			{ name: 'users.dbsp', isDirectory: false, isFile: true },
-		]);
-
-		// Act
-		const files = await discoverFiles('/project');
-
-		// Assert
-		expect(files).toHaveLength(1);
-		expect(files[0]!.name).toBe('users.dbsp');
-		expect(mockReadDir).toHaveBeenCalledTimes(1); // no recurse into node_modules
-	});
-
-	it('omits empty directories', async () => {
-		// Arrange
-		mockReadDir
-			.mockResolvedValueOnce([
-				{ name: 'empty', isDirectory: true, isFile: false },
-			])
-			.mockResolvedValueOnce([]); // empty directory
-
-		// Act
-		const files = await discoverFiles('/project');
-
-		// Assert
-		expect(files).toHaveLength(0);
-	});
-
-	it('skips directories that throw on readDir (permission errors)', async () => {
-		// Arrange: root has a forbidden dir and a readable file
-		mockReadDir
-			.mockResolvedValueOnce([
-				{ name: 'secret-folder', isDirectory: true, isFile: false },
-				{ name: 'query.dbsp', isDirectory: false, isFile: true },
-			])
-			.mockRejectedValueOnce('forbidden path: /project/secret-folder'); // Tauri scope error
-
-		// Act
-		const files = await discoverFiles('/project');
-
-		// Assert: forbidden dir skipped, file still included
-		expect(files).toHaveLength(1);
-		expect(files[0]!.name).toBe('query.dbsp');
-	});
-
-	it('sorts directories before files', async () => {
-		// Arrange
-		mockReadDir
-			.mockResolvedValueOnce([
-				{ name: 'b.dbsp', isDirectory: false, isFile: true },
-				{ name: 'a-dir', isDirectory: true, isFile: false },
-			])
-			.mockResolvedValueOnce([
-				{ name: 'z.dbsp', isDirectory: false, isFile: true },
-			]);
-
-		// Act
-		const files = await discoverFiles('/project');
-
-		// Assert
-		expect(files[0]!.isDirectory).toBe(true);
-		expect(files[0]!.name).toBe('a-dir');
-		expect(files[1]!.name).toBe('b.dbsp');
-	});
-});
-
 // ── useProjectStore ─────────────────────────────────────────────
 
 describe('useProjectStore', () => {
 	describe('openFolder', () => {
-		it('enters project mode when settings exist', async () => {
+		it('enters project mode when settings exist with files[]', async () => {
 			// Arrange
 			mockReadSettings.mockResolvedValue({
 				version: 1,
+				project: { files: ['users.dbsp'] },
 				connections: [],
 			});
-			mockReadDir.mockResolvedValue([
-				{ name: 'users.dbsp', isDirectory: false, isFile: true },
-			]);
 
 			// Act
 			await useProjectStore.getState().openFolder('/my/project');
@@ -342,8 +174,8 @@ describe('useProjectStore', () => {
 			expect(state.mode).toBe('project');
 			expect(state.folderPath).toBe('/my/project');
 			expect(state.folderName).toBe('project');
-			expect(state.settings).toEqual({ version: 1, connections: [] });
 			expect(state.files).toHaveLength(1);
+			expect(state.files[0]).toHaveProperty('name', 'users.dbsp');
 			expect(state.loading).toBe(false);
 		});
 
@@ -376,33 +208,60 @@ describe('useProjectStore', () => {
 			expect(state.loading).toBe(false);
 		});
 
-		it('uses include/exclude from settings', async () => {
+		it('uses explicit files[] from settings', async () => {
 			// Arrange
 			mockReadSettings.mockResolvedValue({
 				version: 1,
 				project: {
-					include: ['**/*.sql'],
-					exclude: ['backup'],
+					files: ['src/query.dbsp', 'src/users.dbsp'],
 				},
 			});
-			mockReadDir.mockResolvedValue([
-				{ name: 'query.sql', isDirectory: false, isFile: true },
-				{ name: 'users.dbsp', isDirectory: false, isFile: true },
-			]);
+
+			// Act
+			await useProjectStore.getState().openFolder('/project');
+
+			// Assert — buildPairedTree produces dir nodes with type='dir'
+			const state = useProjectStore.getState();
+			expect(state.files).toHaveLength(1); // 1 directory node (src)
+			const dir = state.files[0]!;
+			expect(dir).toHaveProperty('type', 'dir');
+			expect(dir).toHaveProperty('children');
+			if ('children' in dir) {
+				expect(dir.children).toHaveLength(2);
+			}
+		});
+
+		it('triggers migration when legacy settings detected', async () => {
+			// Arrange
+			const legacySettings = { version: 1 as const, project: { name: 'old' } };
+			const migratedSettings = {
+				version: 1 as const,
+				project: { name: 'old', files: ['main.dbsp'] },
+			};
+			mockReadSettings.mockResolvedValue(legacySettings);
+			mockNeedsMigration.mockReturnValue(true);
+			mockMigrateSettings.mockResolvedValue(migratedSettings);
 
 			// Act
 			await useProjectStore.getState().openFolder('/project');
 
 			// Assert
+			expect(mockNeedsMigration).toHaveBeenCalledWith(legacySettings);
+			expect(mockMigrateSettings).toHaveBeenCalledWith(
+				legacySettings,
+				'/project',
+			);
 			const state = useProjectStore.getState();
 			expect(state.files).toHaveLength(1);
-			expect(state.files[0]!.name).toBe('query.sql');
+			expect(state.files[0]).toHaveProperty('name', 'main.dbsp');
 		});
 
 		it('opens project DB and wires history on project mode', async () => {
 			// Arrange
-			mockReadSettings.mockResolvedValue({ version: 1 });
-			mockReadDir.mockResolvedValue([]);
+			mockReadSettings.mockResolvedValue({
+				version: 1,
+				project: { files: [] },
+			});
 
 			// Act
 			await useProjectStore.getState().openFolder('/my/project');
@@ -421,8 +280,10 @@ describe('useProjectStore', () => {
 		it('runs localStorage migration when project DB is available', async () => {
 			// Arrange
 			const fakeDb = { execute: vi.fn(), select: vi.fn() };
-			mockReadSettings.mockResolvedValue({ version: 1 });
-			mockReadDir.mockResolvedValue([]);
+			mockReadSettings.mockResolvedValue({
+				version: 1,
+				project: { files: [] },
+			});
 			mockGetProjectDb.mockReturnValue(fakeDb);
 
 			// Act
@@ -437,8 +298,10 @@ describe('useProjectStore', () => {
 
 		it('tracks as recent project in app.sqlite', async () => {
 			// Arrange
-			mockReadSettings.mockResolvedValue({ version: 1 });
-			mockReadDir.mockResolvedValue([]);
+			mockReadSettings.mockResolvedValue({
+				version: 1,
+				project: { files: [] },
+			});
 
 			// Act
 			await useProjectStore.getState().openFolder('/my/project');
@@ -453,8 +316,10 @@ describe('useProjectStore', () => {
 
 		it('derives folderName via sanitizeFolderName', async () => {
 			// Arrange
-			mockReadSettings.mockResolvedValue({ version: 1 });
-			mockReadDir.mockResolvedValue([]);
+			mockReadSettings.mockResolvedValue({
+				version: 1,
+				project: { files: [] },
+			});
 			mockSanitizeFolderName.mockReturnValue('my-fancy-project');
 
 			// Act
@@ -493,7 +358,9 @@ describe('useProjectStore', () => {
 				folderPath: '/project',
 				folderName: 'project',
 				settings: { version: 1 },
-				files: [{ path: 'a.dbsp', name: 'a.dbsp', isDirectory: false }],
+				files: [
+					{ type: 'file', path: 'a.dbsp', name: 'a.dbsp', language: 'dbsp' },
+				],
 			});
 
 			// Act
@@ -529,32 +396,32 @@ describe('useProjectStore', () => {
 	});
 
 	describe('refreshFiles', () => {
-		it('re-discovers files with current settings', async () => {
+		it('rebuilds file tree from settings.project.files', async () => {
 			// Arrange
 			useProjectStore.setState({
 				mode: 'project',
 				folderPath: '/project',
-				settings: { version: 1 },
+				settings: {
+					version: 1,
+					project: { files: ['new.dbsp', 'src/query.dbsp'] },
+				},
 				files: [],
 			});
-			mockReadDir.mockResolvedValue([
-				{ name: 'new.dbsp', isDirectory: false, isFile: true },
-			]);
 
 			// Act
 			await useProjectStore.getState().refreshFiles();
 
 			// Assert
-			expect(useProjectStore.getState().files).toHaveLength(1);
-			expect(useProjectStore.getState().files[0]!.name).toBe('new.dbsp');
+			const files = useProjectStore.getState().files;
+			expect(files).toHaveLength(2); // src dir + new.dbsp
 		});
 
 		it('does nothing without folder', async () => {
 			// Act
 			await useProjectStore.getState().refreshFiles();
 
-			// Assert
-			expect(mockReadDir).not.toHaveBeenCalled();
+			// Assert — no crash, no state change
+			expect(useProjectStore.getState().files).toHaveLength(0);
 		});
 	});
 
@@ -565,10 +432,10 @@ describe('useProjectStore', () => {
 				mode: 'standalone',
 				folderPath: '/project',
 			});
-			mockReadSettings.mockResolvedValue({ version: 1 });
-			mockReadDir.mockResolvedValue([
-				{ name: 'x.dbsp', isDirectory: false, isFile: true },
-			]);
+			mockReadSettings.mockResolvedValue({
+				version: 1,
+				project: { files: ['x.dbsp'] },
+			});
 
 			// Act
 			await useProjectStore.getState().onSettingsChanged(true);
@@ -584,7 +451,9 @@ describe('useProjectStore', () => {
 				folderPath: '/project',
 				folderName: 'project',
 				settings: { version: 1 },
-				files: [{ path: 'a.dbsp', name: 'a.dbsp', isDirectory: false }],
+				files: [
+					{ type: 'file', path: 'a.dbsp', name: 'a.dbsp', language: 'dbsp' },
+				],
 			});
 
 			// Act
@@ -633,9 +502,8 @@ describe('useProjectStore', () => {
 			// Arrange — openFolder will read back the settings we wrote
 			mockReadSettings.mockResolvedValue({
 				version: 1,
-				project: { name: 'demo' },
+				project: { name: 'demo', files: [] },
 			});
-			mockReadDir.mockResolvedValue([]);
 
 			// Act
 			await useProjectStore.getState().createProject({
@@ -656,9 +524,8 @@ describe('useProjectStore', () => {
 			// Arrange
 			mockReadSettings.mockResolvedValue({
 				version: 1,
-				project: { name: 'demo' },
+				project: { name: 'demo', files: [] },
 			});
-			mockReadDir.mockResolvedValue([]);
 
 			// Act
 			await useProjectStore.getState().createProject({
@@ -675,8 +542,10 @@ describe('useProjectStore', () => {
 
 		it('saves wizard connections as profiles', async () => {
 			// Arrange
-			mockReadSettings.mockResolvedValue({ version: 1 });
-			mockReadDir.mockResolvedValue([]);
+			mockReadSettings.mockResolvedValue({
+				version: 1,
+				project: { files: [] },
+			});
 
 			const connections = [
 				{
@@ -721,8 +590,10 @@ describe('useProjectStore', () => {
 
 		it('uses database@host as profile name when name is empty', async () => {
 			// Arrange
-			mockReadSettings.mockResolvedValue({ version: 1 });
-			mockReadDir.mockResolvedValue([]);
+			mockReadSettings.mockResolvedValue({
+				version: 1,
+				project: { files: [] },
+			});
 
 			const connections = [
 				{

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 // ── Tab types ───────────────────────────────────────────────────────
 
@@ -16,6 +17,8 @@ export interface EditorTab {
 	filePath?: string | undefined;
 	/** Whether the underlying file has been deleted from disk */
 	deleted?: boolean | undefined;
+	/** Whether the file is outside all project roots (SC-17) */
+	outOfRoot?: boolean | undefined;
 }
 
 // ── Store ───────────────────────────────────────────────────────────
@@ -45,6 +48,10 @@ interface EditorState {
 	getDirtyTabs: () => EditorTab[];
 	/** Mark a tab's backing file as deleted from disk (D05) */
 	markFileDeleted: (id: string) => void;
+	/** Set or clear out-of-root warning on a tab (SC-17) */
+	setOutOfRoot: (id: string, outOfRoot: boolean) => void;
+	/** Update filePath + title for a tab when its backing file is renamed/moved */
+	updateTabPath: (oldPath: string, newPath: string) => void;
 }
 
 let nextTabCounter = 1;
@@ -60,100 +67,132 @@ function defaultTitle(language: TabLanguage, counter: number): string {
 	return `Query ${counter}.dbsp`;
 }
 
-export const useEditorStore = create<EditorState>((set, get) => ({
-	tabs: [],
-	activeTabId: null,
+export const useEditorStore = create<EditorState>()(
+	persist(
+		(set, get) => ({
+			tabs: [],
+			activeTabId: null,
 
-	addTab: (language = 'sql', content = '', filePath) => {
-		const id = makeTabId();
-		const title = filePath
-			? (filePath.split('/').pop() ??
-				`Untitled.${language === 'sql' ? 'sql' : 'dbsp'}`)
-			: defaultTitle(language, nextTabCounter - 1);
-		const tab: EditorTab = {
-			id,
-			title,
-			language,
-			content,
-			dirty: false,
-			filePath,
-		};
-		set((state) => ({
-			tabs: [...state.tabs, tab],
-			activeTabId: id,
-		}));
-		return id;
-	},
+			addTab: (language = 'sql', content = '', filePath) => {
+				const id = makeTabId();
+				const title = filePath
+					? (filePath.split('/').pop() ??
+						`Untitled.${language === 'sql' ? 'sql' : 'dbsp'}`)
+					: defaultTitle(language, nextTabCounter - 1);
+				const tab: EditorTab = {
+					id,
+					title,
+					language,
+					content,
+					dirty: false,
+					filePath,
+				};
+				set((state) => ({
+					tabs: [...state.tabs, tab],
+					activeTabId: id,
+				}));
+				return id;
+			},
 
-	closeTab: (id) => {
-		const state = get();
-		const idx = state.tabs.findIndex((t) => t.id === id);
-		if (idx < 0) return;
+			closeTab: (id) => {
+				const state = get();
+				const idx = state.tabs.findIndex((t) => t.id === id);
+				if (idx < 0) return;
 
-		const remaining = state.tabs.filter((t) => t.id !== id);
-		let nextActive = state.activeTabId;
+				const remaining = state.tabs.filter((t) => t.id !== id);
+				let nextActive = state.activeTabId;
 
-		if (state.activeTabId === id) {
-			// Activate neighbor tab
-			if (remaining.length > 0) {
-				const neighborIdx = Math.min(idx, remaining.length - 1);
-				nextActive = remaining[neighborIdx]?.id ?? null;
-			} else {
-				nextActive = null;
-			}
-		}
+				if (state.activeTabId === id) {
+					// Activate neighbor tab
+					if (remaining.length > 0) {
+						const neighborIdx = Math.min(idx, remaining.length - 1);
+						nextActive = remaining[neighborIdx]?.id ?? null;
+					} else {
+						nextActive = null;
+					}
+				}
 
-		set({ tabs: remaining, activeTabId: nextActive });
-	},
+				set({ tabs: remaining, activeTabId: nextActive });
+			},
 
-	setActiveTab: (id) => set({ activeTabId: id }),
+			setActiveTab: (id) => set({ activeTabId: id }),
 
-	updateContent: (id, content) =>
-		set((state) => ({
-			tabs: state.tabs.map((t) =>
-				t.id === id ? { ...t, content, dirty: true } : t,
-			),
-		})),
+			updateContent: (id, content) =>
+				set((state) => ({
+					tabs: state.tabs.map((t) =>
+						t.id === id ? { ...t, content, dirty: true } : t,
+					),
+				})),
 
-	renameTab: (id, title) =>
-		set((state) => ({
-			tabs: state.tabs.map((t) => (t.id === id ? { ...t, title } : t)),
-		})),
+			renameTab: (id, title) =>
+				set((state) => ({
+					tabs: state.tabs.map((t) => (t.id === id ? { ...t, title } : t)),
+				})),
 
-	markSaved: (id) =>
-		set((state) => ({
-			tabs: state.tabs.map((t) => (t.id === id ? { ...t, dirty: false } : t)),
-		})),
+			markSaved: (id) =>
+				set((state) => ({
+					tabs: state.tabs.map((t) =>
+						t.id === id ? { ...t, dirty: false } : t,
+					),
+				})),
 
-	setFilePath: (id, filePath) =>
-		set((state) => ({
-			tabs: state.tabs.map((t) =>
-				t.id === id
-					? {
-							...t,
-							filePath,
-							title: filePath.split(/[/\\]/).pop() ?? t.title,
-						}
-					: t,
-			),
-		})),
+			setFilePath: (id, filePath) =>
+				set((state) => ({
+					tabs: state.tabs.map((t) =>
+						t.id === id
+							? {
+									...t,
+									filePath,
+									title: filePath.split(/[/\\]/).pop() ?? t.title,
+								}
+							: t,
+					),
+				})),
 
-	findTabByFilePath: (filePath) =>
-		get().tabs.find((t) => t.filePath === filePath),
+			findTabByFilePath: (filePath) =>
+				get().tabs.find((t) => t.filePath === filePath),
 
-	hasDirtyTabs: () => get().tabs.some((t) => t.dirty),
+			hasDirtyTabs: () => get().tabs.some((t) => t.dirty),
 
-	getDirtyTabs: () => get().tabs.filter((t) => t.dirty),
+			getDirtyTabs: () => get().tabs.filter((t) => t.dirty),
 
-	markFileDeleted: (id) =>
-		set((state) => ({
-			tabs: state.tabs.map((t) =>
-				t.id === id && !t.deleted
-					? { ...t, deleted: true, title: `${t.title} (deleted)` }
-					: t,
-			),
-		})),
-}));
+			markFileDeleted: (id) =>
+				set((state) => ({
+					tabs: state.tabs.map((t) =>
+						t.id === id && !t.deleted
+							? { ...t, deleted: true, title: `${t.title} (deleted)` }
+							: t,
+					),
+				})),
+
+			setOutOfRoot: (id, outOfRoot) =>
+				set((state) => ({
+					tabs: state.tabs.map((t) => (t.id === id ? { ...t, outOfRoot } : t)),
+				})),
+
+			updateTabPath: (oldPath, newPath) =>
+				set((state) => ({
+					tabs: state.tabs.map((t) => {
+						if (t.filePath !== oldPath) return t;
+						const title = newPath.split(/[/\\]/).pop() ?? newPath;
+						return { ...t, filePath: newPath, title };
+					}),
+				})),
+		}),
+		{
+			name: 'dbsp-editor-tabs',
+			partialize: (state) => ({
+				tabs: state.tabs.map((t) => ({
+					...t,
+					// Reset transient flags on persist — content is the last-known state
+					dirty: false,
+					deleted: undefined,
+				})),
+				activeTabId: state.activeTabId,
+			}),
+		},
+	),
+);
 
 // ── Derived helpers ─────────────────────────────────────────────────
 

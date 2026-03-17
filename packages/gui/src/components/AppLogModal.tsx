@@ -4,7 +4,7 @@
  */
 
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Search, X } from 'lucide-react';
+import { Search, Trash2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatLogTime, LEVEL_COLORS } from '@/lib/log-utils';
 import type { LogEntry, LogLevel } from '@/stores/log-store';
@@ -18,9 +18,11 @@ const ALL_LEVELS: LogLevel[] = ['debug', 'info', 'warn', 'error'];
 export function AppLogModal({
 	entries,
 	onClose,
+	onClear,
 }: {
 	entries: readonly LogEntry[];
 	onClose: () => void;
+	onClear?: () => void;
 }) {
 	const [levelFilter, setLevelFilter] = useState<LogLevel | ''>('');
 	const [searchInput, setSearchInput] = useState('');
@@ -115,6 +117,16 @@ export function AppLogModal({
 								? `${entries.length} entries`
 								: `${filtered.length} / ${entries.length} entries`}
 						</span>
+						{onClear && (
+							<button
+								type="button"
+								onClick={onClear}
+								className="text-muted-foreground hover:text-foreground"
+								title="Clear all app logs"
+							>
+								<Trash2 className="h-4 w-4" />
+							</button>
+						)}
 						<button
 							type="button"
 							onClick={onClose}

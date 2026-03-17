@@ -1,7 +1,11 @@
-import { Database, FolderOpen } from 'lucide-react';
+import { open } from '@tauri-apps/plugin-dialog';
+import { Database, FolderOpen, PlugZap, Plus } from 'lucide-react';
+import { SidebarConnectionPanel } from '@/components/connection/SidebarConnectionPanel';
+import { FileSearch } from '@/components/schema/FileSearch';
 import { FileTree } from '@/components/schema/FileTree';
 import { SchemaTree } from '@/components/schema/SchemaTree';
 import { useProjectStore } from '@/stores/project-store';
+import { CollapsibleSection } from './CollapsibleSection';
 
 interface SidebarProps {
 	onConnect: () => void;
@@ -16,35 +20,67 @@ export function Sidebar({
 	schemaEditable,
 	onEditSchema,
 }: SidebarProps) {
-	const { mode, files } = useProjectStore();
+	const {
+		mode,
+		files,
+		addFile,
+		removeFile,
+		deleteFile,
+		renameFile,
+		fileSearchFilter,
+	} = useProjectStore();
+
+	const handleAddFile = async () => {
+		const selected = await open({
+			multiple: true,
+			filters: [{ name: 'DBSP Files', extensions: ['dbsp', 'sql'] }],
+		});
+		if (selected) {
+			for (const path of selected) {
+				await addFile(path);
+			}
+		}
+	};
 
 	return (
 		<div className="flex h-full flex-col bg-[var(--sidebar)] text-[var(--sidebar-foreground)]">
-			{/* Project files section (project mode only) */}
 			{mode === 'project' && (
-				<>
-					<div className="flex items-center gap-2 border-b border-[var(--sidebar-border)] px-3 py-2">
-						<FolderOpen className="h-4 w-4 text-[var(--muted-foreground)]" />
-						<span className="text-sm font-medium">Files</span>
-					</div>
-					<div className="flex-1 overflow-auto border-b border-[var(--sidebar-border)]">
-						<FileTree files={files} onFileSelect={onFileSelect} />
-					</div>
-				</>
+				<CollapsibleSection
+					title="Files"
+					icon={FolderOpen}
+					action={
+						<button
+							type="button"
+							className="rounded p-0.5 hover:bg-[var(--accent)]"
+							onClick={handleAddFile}
+							title="Add file to project"
+						>
+							<Plus className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+						</button>
+					}
+				>
+					<FileSearch />
+					<FileTree
+						files={files}
+						onFileSelect={onFileSelect}
+						onRenameFile={renameFile}
+						onRemoveFile={removeFile}
+						onDeleteFile={deleteFile}
+						searchFilter={fileSearchFilter}
+					/>
+				</CollapsibleSection>
 			)}
 
-			{/* Schema tree section */}
-			<div className="flex items-center gap-2 border-b border-[var(--sidebar-border)] px-3 py-2">
-				<Database className="h-4 w-4 text-[var(--muted-foreground)]" />
-				<span className="text-sm font-medium">Schema</span>
-			</div>
-			<div className="flex-1 overflow-auto">
+			<CollapsibleSection title="Connections" icon={PlugZap}>
+				<SidebarConnectionPanel onNewConnection={onConnect} />
+			</CollapsibleSection>
+
+			<CollapsibleSection title="Schema" icon={Database}>
 				<SchemaTree
-					onConnect={onConnect}
 					schemaEditable={schemaEditable}
 					onEditSchema={onEditSchema}
 				/>
-			</div>
+			</CollapsibleSection>
 		</div>
 	);
 }

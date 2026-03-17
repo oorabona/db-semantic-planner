@@ -13,8 +13,8 @@ export interface DbspConnectionRef {
 export interface DbspProjectSettings {
 	readonly name?: string;
 	readonly schemaPath?: string | 'auto';
-	readonly include?: readonly string[];
-	readonly exclude?: readonly string[];
+	readonly files?: readonly string[];
+	readonly roots?: readonly string[];
 }
 
 export interface DbspEditorSettings {
@@ -35,9 +35,6 @@ export interface DbspSettings {
 // ── Defaults ─────────────────────────────────────────────────────
 
 export const SETTINGS_FILENAME = 'dbsp.settings.json';
-
-export const DEFAULT_INCLUDE = ['**/*.dbsp', '**/*.assert.dbsp'] as const;
-export const DEFAULT_EXCLUDE = ['node_modules', 'dist', '.git'] as const;
 
 export const DEFAULT_EDITOR: Required<DbspEditorSettings> = {
 	tabSize: 2,
@@ -62,21 +59,17 @@ export const SCHEMA_SEARCH_PATHS = [
  * Two-layer merge — hardcoded defaults → project file (`dbsp.settings.json`).
  *
  * ```
- * Layer 1 (lowest)  : DEFAULT_INCLUDE, DEFAULT_EXCLUDE, DEFAULT_EDITOR
- * Layer 2 (highest) : dbsp.settings.json → project.include, project.exclude, editor.*
+ * Layer 1 (lowest)  : DEFAULT_EDITOR (files/roots have no defaults — explicit only)
+ * Layer 2 (highest) : dbsp.settings.json → project.files, project.roots, editor.*
  * ```
  *
- * Project-level values fully replace the corresponding default array/object —
- * they are NOT merged element-by-element. For example, setting
- * `project.include: ["*.sql"]` replaces the default `["**\/*.dbsp", "**\/*.assert.dbsp"]`
- * entirely.
- *
- * There is no user-level config (`~/.config/dbsp/` etc.) at this time.
- * If one is added later, it slots in as Layer 1.5 (between defaults and project).
+ * `project.files[]` is the explicit list of project files (relative paths).
+ * `project.roots[]` is the list of root directories for multi-root workspaces.
+ * Both default to empty arrays when absent.
  */
 export interface ResolvedProjectSettings {
-	readonly include: readonly string[];
-	readonly exclude: readonly string[];
+	readonly files: readonly string[];
+	readonly roots: readonly string[];
 	readonly editor: Required<DbspEditorSettings>;
 }
 
@@ -88,8 +81,8 @@ export function resolveProjectSettings(
 	settings: DbspSettings | null,
 ): ResolvedProjectSettings {
 	return {
-		include: settings?.project?.include ?? [...DEFAULT_INCLUDE],
-		exclude: settings?.project?.exclude ?? [...DEFAULT_EXCLUDE],
+		files: settings?.project?.files ? [...settings.project.files] : [],
+		roots: settings?.project?.roots ? [...settings.project.roots] : [],
 		editor: {
 			...DEFAULT_EDITOR,
 			...settings?.editor,
@@ -198,25 +191,25 @@ export function validateSettings(
 					message: 'schemaPath must be a string or "auto"',
 				});
 			}
-			if (proj.include !== undefined) {
+			if (proj.files !== undefined) {
 				if (
-					!Array.isArray(proj.include) ||
-					!proj.include.every((v: unknown) => typeof v === 'string')
+					!Array.isArray(proj.files) ||
+					!proj.files.every((v: unknown) => typeof v === 'string')
 				) {
 					errors.push({
-						path: 'project.include',
-						message: 'include must be an array of strings',
+						path: 'project.files',
+						message: 'files must be an array of strings',
 					});
 				}
 			}
-			if (proj.exclude !== undefined) {
+			if (proj.roots !== undefined) {
 				if (
-					!Array.isArray(proj.exclude) ||
-					!proj.exclude.every((v: unknown) => typeof v === 'string')
+					!Array.isArray(proj.roots) ||
+					!proj.roots.every((v: unknown) => typeof v === 'string')
 				) {
 					errors.push({
-						path: 'project.exclude',
-						message: 'exclude must be an array of strings',
+						path: 'project.roots',
+						message: 'roots must be an array of strings',
 					});
 				}
 			}

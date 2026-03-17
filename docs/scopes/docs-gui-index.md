@@ -19,6 +19,7 @@ Desktop database explorer for db-semantic-planner. Tauri v2 application with Rea
 |----------|------|--------|-------------|
 | [Ideation Brief](../briefs/gui-explorer.md) | design | canonical | Problem analysis, solution selection, feature prioritization |
 | [Overview](../plans/gui-overview.md) | design | draft | Architecture, stack, layout, MVP scope |
+| [Persistence Architecture](../plans/gui-persistence.md) | architecture | canonical | All storage layers: settings JSON, SQLite DBs, localStorage |
 
 ## Related Specifications
 

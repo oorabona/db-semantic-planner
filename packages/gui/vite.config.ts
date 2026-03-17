@@ -16,10 +16,10 @@ export default defineConfig({
 	// Tauri dev server config
 	clearScreen: false,
 	server: {
-		port: 5173,
+		port: 1420,
 		strictPort: true,
 		host: host || false,
-		...(host ? { hmr: { protocol: 'ws' as const, host, port: 5174 } } : {}),
+		...(host ? { hmr: { protocol: 'ws' as const, host, port: 1421 } } : {}),
 		watch: {
 			ignored: ['**/src-tauri/**'],
 		},
