@@ -1,7 +1,7 @@
 /**
- * New Project Wizard — 4-step sidebar dialog.
+ * New Project Wizard — 6-step sidebar dialog.
  *
- * Steps: Introduction → Name & Location → Connections → Options
+ * Steps: Introduction → Name & Location → Connections → Files & Schema → Options → Review
  *
  * On completion: creates dbsp.settings.json, saves connections to project DB,
  * optionally generates schema.ts via sidecar introspection, and opens the project.
@@ -13,9 +13,11 @@ import { Button } from '@/components/ui/button';
 import type { SslMode } from '@/stores/connection-store';
 import { useWizardState } from './useWizardState';
 import { WizardConnectionsStep } from './WizardConnectionsStep';
+import { WizardFilesStep } from './WizardFilesStep';
 import { WizardIntroStep } from './WizardIntroStep';
 import { WizardNameStep } from './WizardNameStep';
 import { WizardOptionsStep } from './WizardOptionsStep';
+import { WizardReviewStep } from './WizardReviewStep';
 import type { WizardData, WizardStep } from './wizard-types';
 import { WIZARD_STEPS } from './wizard-types';
 
@@ -74,10 +76,12 @@ export function NewProjectWizard({
 			folderPath: wizard.folderPath,
 			connections: wizard.connections,
 			generateSchema: wizard.generateSchema,
+			files: wizard.files,
+			schemaSelection: wizard.schemaSelection,
 		});
 	};
 
-	const isLastStep = wizard.step === 3;
+	const isLastStep = wizard.step === 5;
 
 	return (
 		<div
@@ -278,12 +282,34 @@ function StepContent({
 			);
 		case 3:
 			return (
+				<WizardFilesStep
+					folderPath={wizard.folderPath}
+					files={wizard.files}
+					schemaSelection={wizard.schemaSelection}
+					onToggleFile={wizard.toggleFile}
+					onSetFiles={wizard.setFilesAll}
+					onSchemaSelectionChange={wizard.setSchemaSelection}
+				/>
+			);
+		case 4:
+			return (
 				<WizardOptionsStep
 					name={wizard.name}
 					folderPath={wizard.folderPath}
 					connectionCount={wizard.connections.length}
 					generateSchema={wizard.generateSchema}
 					onGenerateSchemaChange={wizard.setGenerateSchema}
+				/>
+			);
+		case 5:
+			return (
+				<WizardReviewStep
+					name={wizard.name}
+					folderPath={wizard.folderPath}
+					connectionCount={wizard.connections.length}
+					files={wizard.files}
+					schemaSelection={wizard.schemaSelection}
+					generateSchema={wizard.generateSchema}
 				/>
 			);
 	}

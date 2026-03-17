@@ -187,7 +187,9 @@ export async function introspect(
 	for (const idx of indexesResult.rows) {
 		const indexIR: IndexIR = {
 			name: idx.index_name,
-			columns: idx.columns,
+			columns: Array.isArray(idx.columns)
+				? idx.columns
+				: String(idx.columns).replace(/^\{|}$/g, '').split(',').filter(Boolean),
 			...(idx.is_unique ? { unique: true } : {}),
 		};
 		const existing = tableIndexes.get(idx.table_name);

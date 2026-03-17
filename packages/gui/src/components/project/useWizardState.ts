@@ -1,6 +1,10 @@
 import { useCallback, useState } from 'react';
 import type { ConnectionFormData } from '@/components/connection/ConnectionDialog';
-import type { WizardConnection, WizardStep } from './wizard-types';
+import type {
+	SchemaSelection,
+	WizardConnection,
+	WizardStep,
+} from './wizard-types';
 
 // ── Wizard State Hook ────────────────────────────────────────────
 
@@ -29,6 +33,9 @@ export function useWizardState(options: UseWizardStateOptions = {}) {
 		];
 	});
 	const [generateSchema, setGenerateSchema] = useState(false);
+	const [files, setFiles] = useState<string[]>([]);
+	const [schemaSelection, setSchemaSelection] =
+		useState<SchemaSelection>('skip');
 
 	// ── Navigation ──
 
@@ -41,12 +48,16 @@ export function useWizardState(options: UseWizardStateOptions = {}) {
 			case 2:
 				return true; // 0..N connections allowed
 			case 3:
+				return true; // files are optional
+			case 4:
+				return true;
+			case 5:
 				return true;
 		}
 	}, [step, name, folderPath]);
 
 	const goNext = useCallback(() => {
-		if (step < 3 && canGoNext()) {
+		if (step < 5 && canGoNext()) {
 			setStep((s) => (s + 1) as WizardStep);
 		}
 	}, [step, canGoNext]);
@@ -97,6 +108,18 @@ export function useWizardState(options: UseWizardStateOptions = {}) {
 		);
 	}, []);
 
+	// ── Files ──
+
+	const toggleFile = useCallback((path: string) => {
+		setFiles((prev) =>
+			prev.includes(path) ? prev.filter((f) => f !== path) : [...prev, path],
+		);
+	}, []);
+
+	const setFilesAll = useCallback((paths: string[]) => {
+		setFiles(paths);
+	}, []);
+
 	return {
 		// State
 		step,
@@ -104,11 +127,14 @@ export function useWizardState(options: UseWizardStateOptions = {}) {
 		folderPath,
 		connections,
 		generateSchema,
+		files,
+		schemaSelection,
 
 		// Setters
 		setName,
 		setFolderPath,
 		setGenerateSchema,
+		setSchemaSelection,
 
 		// Navigation
 		canGoNext,
@@ -120,6 +146,10 @@ export function useWizardState(options: UseWizardStateOptions = {}) {
 		addConnection,
 		removeConnection,
 		updateEnvironment,
+
+		// Files
+		toggleFile,
+		setFilesAll,
 	};
 }
 

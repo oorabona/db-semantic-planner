@@ -156,7 +156,14 @@ describe('Project Lifecycle Integration', () => {
 				folderPath: '/my/project',
 				folderName: 'my-project',
 				settings: { project: { schemaPath: 'auto' } } as any,
-				files: [{ path: 'schema.ts', name: 'schema.ts', isDirectory: false }],
+				files: [
+					{
+						type: 'file' as const,
+						path: 'schema.ts',
+						name: 'schema.ts',
+						language: 'other' as const,
+					},
+				],
 			});
 
 			expect(useProjectStore.getState().mode).toBe('project');

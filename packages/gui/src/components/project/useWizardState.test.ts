@@ -103,9 +103,9 @@ describe('useWizardState', () => {
 		expect(result.current.step).toBe(0);
 	});
 
-	it('goNext does nothing at step 3 (last)', () => {
+	it('goNext does nothing at step 5 (last)', () => {
 		const { result } = renderHook(() => useWizardState());
-		// Navigate to step 3
+		// Navigate to step 5
 		act(() => result.current.goNext()); // 0→1
 		act(() => {
 			result.current.setName('proj');
@@ -113,9 +113,11 @@ describe('useWizardState', () => {
 		});
 		act(() => result.current.goNext()); // 1→2
 		act(() => result.current.goNext()); // 2→3
-		expect(result.current.step).toBe(3);
-		act(() => result.current.goNext()); // still 3
-		expect(result.current.step).toBe(3);
+		act(() => result.current.goNext()); // 3→4
+		act(() => result.current.goNext()); // 4→5
+		expect(result.current.step).toBe(5);
+		act(() => result.current.goNext()); // still 5
+		expect(result.current.step).toBe(5);
 	});
 
 	it('goToStep navigates back to completed steps', () => {
@@ -199,5 +201,43 @@ describe('useWizardState', () => {
 		expect(result.current.generateSchema).toBe(true);
 		act(() => result.current.setGenerateSchema(false));
 		expect(result.current.generateSchema).toBe(false);
+	});
+
+	// ── Files ──
+
+	it('starts with empty files list', () => {
+		const { result } = renderHook(() => useWizardState());
+		expect(result.current.files).toEqual([]);
+	});
+
+	it('toggleFile adds and removes files', () => {
+		const { result } = renderHook(() => useWizardState());
+		act(() => result.current.toggleFile('src/main.dbsp'));
+		expect(result.current.files).toEqual(['src/main.dbsp']);
+		act(() => result.current.toggleFile('src/main.dbsp'));
+		expect(result.current.files).toEqual([]);
+	});
+
+	it('setFilesAll replaces entire file list', () => {
+		const { result } = renderHook(() => useWizardState());
+		act(() => result.current.setFilesAll(['a.dbsp', 'b.sql']));
+		expect(result.current.files).toEqual(['a.dbsp', 'b.sql']);
+		act(() => result.current.setFilesAll(['c.dbsp']));
+		expect(result.current.files).toEqual(['c.dbsp']);
+	});
+
+	// ── Schema selection ──
+
+	it('starts with schema selection "skip"', () => {
+		const { result } = renderHook(() => useWizardState());
+		expect(result.current.schemaSelection).toBe('skip');
+	});
+
+	it('setSchemaSelection changes selection', () => {
+		const { result } = renderHook(() => useWizardState());
+		act(() => result.current.setSchemaSelection('generate'));
+		expect(result.current.schemaSelection).toBe('generate');
+		act(() => result.current.setSchemaSelection('auto'));
+		expect(result.current.schemaSelection).toBe('auto');
 	});
 });

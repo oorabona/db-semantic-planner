@@ -2,13 +2,17 @@ import type { ConnectionFormData } from '@/components/connection/ConnectionDialo
 
 // ── Wizard Types ─────────────────────────────────────────────────
 
-export type WizardStep = 0 | 1 | 2 | 3;
+export type WizardStep = 0 | 1 | 2 | 3 | 4 | 5;
+
+export type SchemaSelection = 'generate' | 'skip' | string;
 
 export const WIZARD_STEPS = [
 	{ label: 'Introduction', description: 'What is project mode?' },
 	{ label: 'Name & Location', description: 'Choose a name and folder' },
 	{ label: 'Connections', description: 'Configure database connections' },
+	{ label: 'Files & Schema', description: 'Select project files' },
 	{ label: 'Options', description: 'Schema and project options' },
+	{ label: 'Review', description: 'Review and create' },
 ] as const;
 
 export interface WizardConnection {
@@ -22,4 +26,6 @@ export interface WizardData {
 	readonly folderPath: string;
 	readonly connections: readonly WizardConnection[];
 	readonly generateSchema: boolean;
+	readonly files: readonly string[];
+	readonly schemaSelection: SchemaSelection;
 }

@@ -1,7 +1,11 @@
 import { ModelIRImpl } from '@dbsp/core';
 import type { ColumnIR, ForeignKeyIR, IndexIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { compareSchemata, type SchemaChange } from './schema-diff.js';
+import {
+	compareSchemata,
+	type CompareSchemataOptions,
+	type SchemaChange,
+} from './schema-diff.js';
 
 // ============================================================================
 // Helpers
@@ -723,6 +727,381 @@ describe('compareSchemata', () => {
 			expect(change!.meta?.fk).toEqual(schemaFk);
 			expect(change!.meta?.oldFk).toEqual(dbFk);
 			expect(change!.meta?.previousOnDelete).toBe('SET NULL');
+		});
+	});
+
+	describe('type equivalence', () => {
+		it('should not flag timestamp vs datetime as a type change', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'events',
+					columns: [
+						makeCol({ name: 'created_at', type: 'timestamp' }),
+						makeCol({ name: 'updated_at', type: 'timestamp' }),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'events',
+					columns: [
+						makeCol({ name: 'created_at', type: 'datetime' }),
+						makeCol({ name: 'updated_at', type: 'datetime' }),
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('should flag number vs integer as a type change (number can be NUMERIC)', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'counters',
+					columns: [makeCol({ name: 'count', type: 'number' })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'counters',
+					columns: [makeCol({ name: 'count', type: 'integer' })],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(1);
+			expect(diff.changes[0]!.kind).toBe('alter_column_type');
+		});
+
+		it('should still flag genuinely different types', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'data', type: 'jsonb' })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'data', type: 'string' })],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(1);
+			expect(diff.changes[0]!.kind).toBe('alter_column_type');
+		});
+	});
+
+	describe('default normalization', () => {
+		it('should strip PostgreSQL type casts from string defaults', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'tasks',
+					columns: [
+						makeCol({ name: 'status', type: 'string', default: 'pending' }),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'tasks',
+					columns: [
+						makeCol({
+							name: 'status',
+							type: 'string',
+							default: "'pending'::character varying",
+						}),
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('should strip type casts from empty string defaults', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'items',
+					columns: [
+						makeCol({ name: 'description', type: 'text', default: '' }),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'items',
+					columns: [
+						makeCol({
+							name: 'description',
+							type: 'text',
+							default: "''::text",
+						}),
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('should not strip casts from function calls', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'items',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'uuid',
+							default: 'gen_random_uuid()',
+						}),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'items',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'uuid',
+							default: 'gen_random_uuid()',
+						}),
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('should still flag genuinely different defaults', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'tasks',
+					columns: [
+						makeCol({ name: 'status', type: 'string', default: 'active' }),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'tasks',
+					columns: [
+						makeCol({
+							name: 'status',
+							type: 'string',
+							default: "'pending'::character varying",
+						}),
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(1);
+			expect(diff.changes[0]!.kind).toBe('alter_column_default');
+		});
+	});
+
+	describe('dbCasing: snake_case', () => {
+		const snakeCaseOpts: CompareSchemataOptions = {
+			dbCasing: 'snake_case',
+		};
+
+		it('should match camelCase schema columns to snake_case DB columns', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'uuid' }),
+						makeCol({ name: 'createdAt', type: 'timestamp' }),
+						makeCol({ name: 'emailVerified', type: 'boolean' }),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'uuid' }),
+						makeCol({ name: 'created_at', type: 'timestamp' }),
+						makeCol({ name: 'email_verified', type: 'boolean' }),
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db, snakeCaseOpts);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('should match camelCase table names to snake_case DB table names', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'envVariables',
+					columns: [makeCol({ name: 'id', type: 'uuid' })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'env_variables',
+					columns: [makeCol({ name: 'id', type: 'uuid' })],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db, snakeCaseOpts);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('should match camelCase PK columns to snake_case DB PK', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'orderItems',
+					columns: [
+						makeCol({ name: 'orderId', type: 'integer' }),
+						makeCol({ name: 'productId', type: 'integer' }),
+					],
+					primaryKey: ['orderId', 'productId'],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'order_items',
+					columns: [
+						makeCol({ name: 'order_id', type: 'integer' }),
+						makeCol({ name: 'product_id', type: 'integer' }),
+					],
+					primaryKey: ['order_id', 'product_id'],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db, snakeCaseOpts);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('should match camelCase FK columns and referenced table to snake_case DB', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'uuid' })],
+				}),
+				makeTable({
+					name: 'apiTokens',
+					columns: [makeCol({ name: 'userId', type: 'uuid' })],
+					foreignKeys: [
+						{
+							columns: ['userId'],
+							references: { table: 'users', columns: ['id'] },
+							onDelete: 'CASCADE',
+						},
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'uuid' })],
+				}),
+				makeTable({
+					name: 'api_tokens',
+					columns: [makeCol({ name: 'user_id', type: 'uuid' })],
+					foreignKeys: [
+						{
+							columns: ['user_id'],
+							references: { table: 'users', columns: ['id'] },
+							onDelete: 'CASCADE',
+						},
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db, snakeCaseOpts);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('should match camelCase index columns to snake_case DB', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'apiTokens',
+					columns: [makeCol({ name: 'tokenHash', type: 'string' })],
+					indexes: [
+						{ columns: ['tokenHash'], unique: true },
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'api_tokens',
+					columns: [makeCol({ name: 'token_hash', type: 'string' })],
+					indexes: [
+						{ columns: ['token_hash'], unique: true },
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db, snakeCaseOpts);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('should still detect real differences with casing normalization', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'uuid' }),
+						makeCol({ name: 'createdAt', type: 'timestamp' }),
+						makeCol({ name: 'newColumn', type: 'string' }),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'uuid' }),
+						makeCol({ name: 'created_at', type: 'timestamp' }),
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db, snakeCaseOpts);
+
+			expect(diff.changes).toHaveLength(1);
+			expect(diff.changes[0]!.kind).toBe('add_column');
+			expect(diff.changes[0]!.column).toBe('new_column');
+		});
+
+		it('should produce no changes without dbCasing for same-casing schemas', () => {
+			// Verify backward compatibility: no options = no normalization
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'created_at', type: 'timestamp' })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'created_at', type: 'timestamp' })],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(0);
 		});
 	});
 });

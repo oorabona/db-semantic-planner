@@ -197,3 +197,58 @@ describe('getActiveTab', () => {
 		expect(tab!.content).toBe('SELECT 1');
 	});
 });
+
+describe('setOutOfRoot', () => {
+	beforeEach(() => {
+		useEditorStore.setState({ tabs: [], activeTabId: null });
+	});
+
+	it('marks a tab as out of root (SC-17)', () => {
+		const id = useEditorStore.getState().addTab('sql', '', '/outside/file.sql');
+		useEditorStore.getState().setOutOfRoot(id, true);
+		const tab = useEditorStore.getState().tabs.find((t) => t.id === id);
+		expect(tab?.outOfRoot).toBe(true);
+	});
+
+	it('clears out-of-root flag', () => {
+		const id = useEditorStore.getState().addTab('sql', '', '/file.sql');
+		useEditorStore.getState().setOutOfRoot(id, true);
+		useEditorStore.getState().setOutOfRoot(id, false);
+		const tab = useEditorStore.getState().tabs.find((t) => t.id === id);
+		expect(tab?.outOfRoot).toBe(false);
+	});
+});
+
+describe('updateTabPath', () => {
+	beforeEach(() => {
+		useEditorStore.setState({ tabs: [], activeTabId: null });
+	});
+
+	it('updates filePath and title for matching tab (SC-22)', () => {
+		useEditorStore.getState().addTab('nql', '', '/project/old.dbsp');
+		useEditorStore
+			.getState()
+			.updateTabPath('/project/old.dbsp', '/project/new.dbsp');
+		const tab = useEditorStore.getState().tabs[0]!;
+		expect(tab.filePath).toBe('/project/new.dbsp');
+		expect(tab.title).toBe('new.dbsp');
+	});
+
+	it('does not affect tabs with different filePath', () => {
+		useEditorStore.getState().addTab('sql', '', '/project/keep.sql');
+		useEditorStore
+			.getState()
+			.updateTabPath('/project/other.sql', '/project/renamed.sql');
+		const tab = useEditorStore.getState().tabs[0]!;
+		expect(tab.filePath).toBe('/project/keep.sql');
+	});
+
+	it('handles path with nested directories', () => {
+		useEditorStore.getState().addTab('nql', '', '/a/b/c/file.dbsp');
+		useEditorStore
+			.getState()
+			.updateTabPath('/a/b/c/file.dbsp', '/a/b/c/renamed.dbsp');
+		const tab = useEditorStore.getState().tabs[0]!;
+		expect(tab.title).toBe('renamed.dbsp');
+	});
+});

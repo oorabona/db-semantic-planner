@@ -5,7 +5,6 @@ import {
 	PlugZap,
 	RefreshCw,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { useSchema } from '@/hooks/useSchema';
 import { getFilteredTables, useSchemaStore } from '@/stores/schema-store';
 import { useSidecarStore } from '@/stores/sidecar-store';
@@ -13,17 +12,12 @@ import { SchemaSearch } from './SchemaSearch';
 import { TableNode } from './TableNode';
 
 interface SchemaTreeProps {
-	onConnect: () => void;
 	/** Show "Edit Schema" button (project mode with schemaPath) */
 	schemaEditable?: boolean;
 	onEditSchema?: () => void;
 }
 
-export function SchemaTree({
-	onConnect,
-	schemaEditable,
-	onEditSchema,
-}: SchemaTreeProps) {
+export function SchemaTree({ schemaEditable, onEditSchema }: SchemaTreeProps) {
 	const { schema, loading, error, refresh } = useSchema();
 	const searchFilter = useSchemaStore((s) => s.searchFilter);
 	const filteredTables = getFilteredTables(schema, searchFilter);
@@ -99,9 +93,6 @@ export function SchemaTree({
 				<p className="text-center text-sm text-muted-foreground">
 					Connect to a database to explore its schema
 				</p>
-				<Button size="sm" onClick={onConnect}>
-					Connect
-				</Button>
 			</div>
 		);
 	}

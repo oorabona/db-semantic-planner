@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { create } from 'zustand';
 import type { AppLogRow } from '@/lib/app-db';
 import {
+	clearAppLogs,
 	closeAppDb,
 	initAppDb,
 	insertAppLog,
@@ -88,6 +89,8 @@ export interface LogState {
 	refreshAppLogs: () => Promise<void>;
 	/** Clear all IPC logs (project-db). */
 	clear: () => Promise<void>;
+	/** Clear all app-level logs (app-db). */
+	clearApp: () => Promise<void>;
 	/** Export IPC logs as array (for save-to-file). */
 	exportLogs: (filter?: LogFilter) => Promise<LogEntry[]>;
 }
@@ -223,6 +226,11 @@ export const useLogStore = create<LogState>((set, get) => ({
 	clear: async () => {
 		await clearIpcLogs();
 		set({ entries: [], stats: EMPTY_STATS });
+	},
+
+	clearApp: async () => {
+		await clearAppLogs();
+		set({ appEntries: [] });
 	},
 
 	exportLogs: async (filter) => {
