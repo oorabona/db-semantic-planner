@@ -779,6 +779,37 @@ describe('generateDownSQL', () => {
 			);
 		});
 
+		it('SC-03b: uses originalDbType in ALTER COLUMN TYPE rollback (vector precision)', () => {
+			// Simulates: schema has vector(1024), DB has vector(768).
+			// compareColumnDetails() sets meta.fromType = db.originalDbType = 'vector(768)'.
+			// DOWN SQL must revert to the original DB type, not the base type.
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'alter_column_type',
+						table: 'embeddings',
+						column: 'embedding',
+						destructive: true,
+						details: '',
+						meta: {
+							fromType: 'vector(768)',
+							toType: 'vector(1024)',
+							column: makeCol({
+								name: 'embedding',
+								type: 'string',
+								originalDbType: 'vector(1024)',
+							}),
+						},
+					},
+				]),
+			);
+
+			expect(sql).toHaveLength(1);
+			expect(sql[0]).toBe(
+				'ALTER TABLE "embeddings" ALTER COLUMN "embedding" TYPE vector(768);',
+			);
+		});
+
 		it('SC-05: alter_column_nullable SET NOT NULL → DOWN DROP NOT NULL', () => {
 			const sql = generateDownSQL(
 				makeDiff([

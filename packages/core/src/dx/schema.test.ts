@@ -1627,4 +1627,89 @@ describe('schema.tables runtime metadata (DX-040)', () => {
 			expect(compositeIdx!.unique).toBe(true);
 		});
 	});
+
+	describe('dbType escape hatch', () => {
+		it('propagates dbType to originalDbType in ColumnIR', () => {
+			const db = schema({
+				embeddings: {
+					id: { type: 'integer', autoIncrement: true, primaryKey: true },
+					vector: { type: 'text', dbType: 'vector(768)' },
+				},
+			});
+			const table = db.model.getTable('embeddings')!;
+			const vectorCol = table.columns.find((c) => c.name === 'vector')!;
+			expect(vectorCol.originalDbType).toBe('vector(768)');
+			expect(vectorCol.type).toBe('text');
+		});
+
+		it('does not set originalDbType when dbType is absent', () => {
+			const db = schema({
+				users: {
+					id: { type: 'integer', autoIncrement: true, primaryKey: true },
+					name: 'text',
+				},
+			});
+			const table = db.model.getTable('users')!;
+			const nameCol = table.columns.find((c) => c.name === 'name')!;
+			expect(nameCol.originalDbType).toBeUndefined();
+		});
+
+		it('preserves dbType alongside other column options', () => {
+			const db = schema({
+				data: {
+					id: { type: 'integer', autoIncrement: true, primaryKey: true },
+					value: {
+						type: 'decimal',
+						dbType: 'numeric(10,2)',
+						nullable: true,
+						default: 0,
+					},
+				},
+			});
+			const table = db.model.getTable('data')!;
+			const valueCol = table.columns.find((c) => c.name === 'value')!;
+			expect(valueCol.originalDbType).toBe('numeric(10,2)');
+			expect(valueCol.nullable).toBe(true);
+			expect(valueCol.default).toBe(0);
+		});
+
+		it('ignores empty string dbType', () => {
+			const db = schema({
+				data: {
+					id: { type: 'integer', autoIncrement: true, primaryKey: true },
+					value: { type: 'text', dbType: '' },
+				},
+			});
+			const col = db.model
+				.getTable('data')!
+				.columns.find((c) => c.name === 'value')!;
+			expect(col.originalDbType).toBeUndefined();
+		});
+
+		it('ignores whitespace-only dbType', () => {
+			const db = schema({
+				data: {
+					id: { type: 'integer', autoIncrement: true, primaryKey: true },
+					value: { type: 'text', dbType: '   ' },
+				},
+			});
+			const col = db.model
+				.getTable('data')!
+				.columns.find((c) => c.name === 'value')!;
+			expect(col.originalDbType).toBeUndefined();
+		});
+
+		it('trims whitespace from dbType', () => {
+			const db = schema({
+				data: {
+					id: { type: 'integer', autoIncrement: true, primaryKey: true },
+					value: { type: 'decimal', dbType: ' numeric(10,2) ' },
+				},
+			});
+			const col = db.model
+				.getTable('data')!
+				.columns.find((c) => c.name === 'value')!;
+			expect(col.originalDbType).toBe('numeric(10,2)');
+		});
+	});
 });

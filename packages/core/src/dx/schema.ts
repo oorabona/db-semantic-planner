@@ -52,6 +52,7 @@ export type ColumnDef =
 	| SchemaColumnType
 	| {
 			type: SchemaColumnType;
+			dbType?: string;
 			nullable?: boolean;
 			unique?: boolean;
 			primaryKey?: boolean;
@@ -865,6 +866,7 @@ function buildTables(
 					type: def.type,
 					nullable: def.nullable ?? false,
 				};
+				if (def.dbType?.trim()) { col.originalDbType = def.dbType.trim(); }
 				if (def.unique) {
 					col.unique = def.unique;
 				}
@@ -991,6 +993,7 @@ function buildTables(
  */
 function normalizeColumnDef(def: ColumnDef): {
 	type: SchemaColumnType;
+	dbType?: string;
 	nullable?: boolean;
 	unique?: boolean;
 	primaryKey?: boolean;
