@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionFormData } from '@/components/connection/ConnectionDialog';
 import { NewProjectWizard } from './NewProjectWizard';
@@ -7,6 +13,16 @@ import { NewProjectWizard } from './NewProjectWizard';
 // Mock Tauri dialog (used by WizardNameStep)
 vi.mock('@tauri-apps/plugin-dialog', () => ({
 	open: vi.fn(),
+}));
+
+// Mock Tauri fs (used by WizardFilesStep scanner)
+vi.mock('@tauri-apps/plugin-fs', () => ({
+	readDir: vi.fn().mockResolvedValue([]),
+}));
+
+// Mock Tauri path (used by WizardFilesStep scanner)
+vi.mock('@tauri-apps/api/path', () => ({
+	join: vi.fn((...args: string[]) => Promise.resolve(args.join('/'))),
 }));
 
 // Mock ConnectionDialog to avoid deep dependency tree
@@ -29,6 +45,40 @@ afterEach(() => {
 	vi.clearAllMocks();
 });
 
+/** Fill step 1 (Name & Location) fields */
+function fillStep1(name = 'x', folder = '/x') {
+	fireEvent.change(screen.getByPlaceholderText('my-project'), {
+		target: { value: name },
+	});
+	fireEvent.change(screen.getByPlaceholderText('/path/to/project'), {
+		target: { value: folder },
+	});
+}
+
+/** Navigate to a target step (0-5) with step 1 pre-filled */
+async function navigateTo(step: number) {
+	if (step >= 1) {
+		fireEvent.click(screen.getByTestId('wizard-next')); // 0→1
+		fillStep1();
+	}
+	if (step >= 2) {
+		fireEvent.click(screen.getByTestId('wizard-next')); // 1→2
+	}
+	if (step >= 3) {
+		fireEvent.click(screen.getByTestId('wizard-next')); // 2→3 (Files & Schema)
+		// Wait for async scanner to complete
+		await waitFor(() => {
+			expect(screen.getByText(/No .dbsp or .sql files found/)).toBeDefined();
+		});
+	}
+	if (step >= 4) {
+		fireEvent.click(screen.getByTestId('wizard-next')); // 3→4 (Options)
+	}
+	if (step >= 5) {
+		fireEvent.click(screen.getByTestId('wizard-next')); // 4→5 (Review)
+	}
+}
+
 describe('NewProjectWizard', () => {
 	// ── Visibility ──
 
@@ -44,12 +94,11 @@ describe('NewProjectWizard', () => {
 
 	// ── Step indicators ──
 
-	it('shows all 4 step indicators in sidebar', () => {
+	it('shows all 6 step indicators in sidebar', () => {
 		render(<NewProjectWizard {...defaultProps} />);
-		expect(screen.getByTestId('step-indicator-0')).toBeDefined();
-		expect(screen.getByTestId('step-indicator-1')).toBeDefined();
-		expect(screen.getByTestId('step-indicator-2')).toBeDefined();
-		expect(screen.getByTestId('step-indicator-3')).toBeDefined();
+		for (let i = 0; i < 6; i++) {
+			expect(screen.getByTestId(`step-indicator-${i}`)).toBeDefined();
+		}
 	});
 
 	// ── Introduction step (step 0) ──
@@ -96,46 +145,52 @@ describe('NewProjectWizard', () => {
 		render(<NewProjectWizard {...defaultProps} />);
 		fireEvent.click(screen.getByTestId('wizard-next')); // → step 1
 
-		const nameInput = screen.getByPlaceholderText('my-project');
-		const folderInput = screen.getByPlaceholderText('/path/to/project');
-
-		fireEvent.change(nameInput, { target: { value: 'test-project' } });
-		fireEvent.change(folderInput, { target: { value: '/home/user/proj' } });
+		fillStep1('test-project', '/home/user/proj');
 
 		const nextBtn = screen.getByTestId('wizard-next');
 		expect(nextBtn.hasAttribute('disabled')).toBe(false);
 	});
 
-	// ── Full wizard flow ──
+	// ── Full wizard flow (6 steps) ──
 
-	it('completes full wizard flow to Create Project', () => {
+	it('completes full wizard flow to Create Project', async () => {
 		render(<NewProjectWizard {...defaultProps} />);
 
 		// Step 0 → 1
 		fireEvent.click(screen.getByTestId('wizard-next'));
 
 		// Fill step 1
-		fireEvent.change(screen.getByPlaceholderText('my-project'), {
-			target: { value: 'demo-project' },
-		});
-		fireEvent.change(screen.getByPlaceholderText('/path/to/project'), {
-			target: { value: '/home/user/demo' },
-		});
+		fillStep1('demo-project', '/home/user/demo');
 
 		// Step 1 → 2
 		fireEvent.click(screen.getByTestId('wizard-next'));
 		expect(screen.getByRole('heading', { name: 'Connections' })).toBeDefined();
 
-		// Step 2 → 3 (skip adding connections)
+		// Step 2 → 3 (Files & Schema)
+		fireEvent.click(screen.getByTestId('wizard-next'));
+		expect(
+			screen.getByRole('heading', { name: 'Files & Schema' }),
+		).toBeDefined();
+
+		// Wait for async scanner to complete
+		await waitFor(() => {
+			expect(screen.getByText(/No .dbsp or .sql files found/)).toBeDefined();
+		});
+
+		// Step 3 → 4 (Options)
 		fireEvent.click(screen.getByTestId('wizard-next'));
 		expect(screen.getByRole('heading', { name: 'Options' })).toBeDefined();
 
-		// Verify summary on step 3
+		// Verify summary on step 4
 		expect(screen.getByTestId('summary-name').textContent).toBe('demo-project');
 		expect(screen.getByTestId('summary-folder').textContent).toBe(
 			'/home/user/demo',
 		);
 		expect(screen.getByTestId('summary-connections').textContent).toBe('0');
+
+		// Step 4 → 5 (Review)
+		fireEvent.click(screen.getByTestId('wizard-next'));
+		expect(screen.getByTestId('wizard-review')).toBeDefined();
 
 		// Create Project button visible
 		const createBtn = screen.getByTestId('wizard-create');
@@ -148,6 +203,8 @@ describe('NewProjectWizard', () => {
 			folderPath: '/home/user/demo',
 			connections: [],
 			generateSchema: false,
+			files: [],
+			schemaSelection: 'skip',
 		});
 	});
 
@@ -161,19 +218,11 @@ describe('NewProjectWizard', () => {
 
 	// ── Creating state ──
 
-	it('disables buttons when creating', () => {
+	it('disables buttons when creating', async () => {
 		render(<NewProjectWizard {...defaultProps} creating={true} />);
 
-		// Navigate to last step first
-		fireEvent.click(screen.getByTestId('wizard-next')); // → 1
-		fireEvent.change(screen.getByPlaceholderText('my-project'), {
-			target: { value: 'x' },
-		});
-		fireEvent.change(screen.getByPlaceholderText('/path/to/project'), {
-			target: { value: '/x' },
-		});
-		fireEvent.click(screen.getByTestId('wizard-next')); // → 2
-		fireEvent.click(screen.getByTestId('wizard-next')); // → 3
+		// Navigate to last step (step 5 = Review)
+		await navigateTo(5);
 
 		const createBtn = screen.getByTestId('wizard-create');
 		expect(createBtn.hasAttribute('disabled')).toBe(true);
@@ -185,12 +234,7 @@ describe('NewProjectWizard', () => {
 	it('shows zero connections warning on step 2', () => {
 		render(<NewProjectWizard {...defaultProps} />);
 		fireEvent.click(screen.getByTestId('wizard-next')); // → 1
-		fireEvent.change(screen.getByPlaceholderText('my-project'), {
-			target: { value: 'x' },
-		});
-		fireEvent.change(screen.getByPlaceholderText('/path/to/project'), {
-			target: { value: '/x' },
-		});
+		fillStep1();
 		fireEvent.click(screen.getByTestId('wizard-next')); // → 2
 
 		expect(screen.getByTestId('zero-connections-warning')).toBeDefined();
@@ -199,34 +243,39 @@ describe('NewProjectWizard', () => {
 	it('shows Add Connection button on step 2', () => {
 		render(<NewProjectWizard {...defaultProps} />);
 		fireEvent.click(screen.getByTestId('wizard-next')); // → 1
-		fireEvent.change(screen.getByPlaceholderText('my-project'), {
-			target: { value: 'x' },
-		});
-		fireEvent.change(screen.getByPlaceholderText('/path/to/project'), {
-			target: { value: '/x' },
-		});
+		fillStep1();
 		fireEvent.click(screen.getByTestId('wizard-next')); // → 2
 
 		expect(screen.getByTestId('add-connection')).toBeDefined();
 	});
 
+	// ── Files & Schema step ──
+
+	it('shows Files & Schema step at step 3', async () => {
+		render(<NewProjectWizard {...defaultProps} />);
+		await navigateTo(3);
+		expect(
+			screen.getByRole('heading', { name: 'Files & Schema' }),
+		).toBeDefined();
+	});
+
 	// ── Options step ──
 
-	it('disables schema generation checkbox when no connections', () => {
+	it('disables schema generation checkbox when no connections', async () => {
 		render(<NewProjectWizard {...defaultProps} />);
-		// Navigate to step 3
-		fireEvent.click(screen.getByTestId('wizard-next')); // → 1
-		fireEvent.change(screen.getByPlaceholderText('my-project'), {
-			target: { value: 'x' },
-		});
-		fireEvent.change(screen.getByPlaceholderText('/path/to/project'), {
-			target: { value: '/x' },
-		});
-		fireEvent.click(screen.getByTestId('wizard-next')); // → 2
-		fireEvent.click(screen.getByTestId('wizard-next')); // → 3
+		// Navigate to step 4 (Options)
+		await navigateTo(4);
 
 		const checkbox = screen.getByTestId('generate-schema-checkbox');
 		expect(checkbox.hasAttribute('disabled')).toBe(true);
+	});
+
+	// ── Review step ──
+
+	it('shows review step at step 5', async () => {
+		render(<NewProjectWizard {...defaultProps} />);
+		await navigateTo(5);
+		expect(screen.getByTestId('wizard-review')).toBeDefined();
 	});
 
 	// ── Initial connection (Convert to Project flow) ──
@@ -248,12 +297,7 @@ describe('NewProjectWizard', () => {
 
 		// Navigate to step 2 (connections)
 		fireEvent.click(screen.getByTestId('wizard-next')); // → 1
-		fireEvent.change(screen.getByPlaceholderText('my-project'), {
-			target: { value: 'x' },
-		});
-		fireEvent.change(screen.getByPlaceholderText('/path/to/project'), {
-			target: { value: '/x' },
-		});
+		fillStep1();
 		fireEvent.click(screen.getByTestId('wizard-next')); // → 2
 
 		// Should NOT see zero connections warning

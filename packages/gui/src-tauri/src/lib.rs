@@ -26,9 +26,14 @@ fn update_menu_item(app: tauri::AppHandle, id: String, enabled: bool) -> Result<
 }
 
 fn build_file_submenu(app: &tauri::App) -> tauri::Result<tauri::menu::Submenu<tauri::Wry>> {
+    let new_query_sub = SubmenuBuilder::new(app, "New Query")
+        .item(&MenuItemBuilder::with_id("file.new_query_sql", "SQL").accelerator("CmdOrCtrl+N").build(app)?)
+        .item(&MenuItemBuilder::with_id("file.new_query_nql", "NQL / DBSP").accelerator("CmdOrCtrl+Shift+N").build(app)?)
+        .build()?;
+
     SubmenuBuilder::new(app, "File")
         .item(&MenuItemBuilder::with_id("file.new_project", "New Project...").build(app)?)
-        .item(&MenuItemBuilder::with_id("file.new_query", "New Query").accelerator("CmdOrCtrl+N").build(app)?)
+        .item(&new_query_sub)
         .separator()
         .item(&MenuItemBuilder::with_id("file.open_file", "Open File...").accelerator("CmdOrCtrl+O").build(app)?)
         .item(&MenuItemBuilder::with_id("file.open_folder", "Open Project...").accelerator("CmdOrCtrl+Shift+O").build(app)?)

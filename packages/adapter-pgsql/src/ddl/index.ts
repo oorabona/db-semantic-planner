@@ -31,6 +31,7 @@ export {
 export {
 	type ChangeKind,
 	compareSchemata,
+	type CompareSchemataOptions,
 	type DiffSummary,
 	type SchemaChange,
 	type SchemaDiff,

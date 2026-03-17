@@ -5,7 +5,8 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 export const MENU_IDS = {
 	// File
 	FILE_NEW_PROJECT: 'file.new_project',
-	FILE_NEW_QUERY: 'file.new_query',
+	FILE_NEW_QUERY_SQL: 'file.new_query_sql',
+	FILE_NEW_QUERY_NQL: 'file.new_query_nql',
 	FILE_OPEN_FILE: 'file.open_file',
 	FILE_OPEN_FOLDER: 'file.open_folder',
 	FILE_RECENT_PROJECTS: 'file.recent_projects',

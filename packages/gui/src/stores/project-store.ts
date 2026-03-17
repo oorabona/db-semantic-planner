@@ -1,9 +1,10 @@
 import { join } from '@tauri-apps/api/path';
-import { readDir } from '@tauri-apps/plugin-fs';
+import { remove, rename } from '@tauri-apps/plugin-fs';
 import { toast } from 'sonner';
 import { create } from 'zustand';
 import { addRecentProject } from '@/lib/app-db';
 import { migrateFromLocalStorage } from '@/lib/migration';
+import { buildPairedTree, type PairedTreeNode } from '@/lib/paired-tree';
 import {
 	closeProjectDb,
 	getProjectDb,
@@ -13,13 +14,13 @@ import {
 import { sanitizeFolderName } from '@/lib/project-id';
 import {
 	type DbspSettings,
-	DEFAULT_EXCLUDE,
-	DEFAULT_INCLUDE,
 	readSettings,
 	resolveProjectSettings,
 	writeSettings,
 } from '@/lib/settings';
+import { migrateSettings, needsMigration } from '@/lib/settings-migration';
 import { useConnectionStore } from './connection-store';
+import { useEditorStore } from './editor-store';
 import { setHistoryDbAccessor, useHistoryStore } from './history-store';
 
 /**
@@ -56,13 +57,6 @@ function errorMessage(err: unknown): string {
 
 export type ProjectMode = 'standalone' | 'project';
 
-export interface ProjectFile {
-	readonly path: string;
-	readonly name: string;
-	readonly isDirectory: boolean;
-	readonly children?: readonly ProjectFile[];
-}
-
 // ── Store ────────────────────────────────────────────────────────
 
 interface ProjectState {
@@ -71,7 +65,7 @@ interface ProjectState {
 	/** Sanitized folder name used for project DB storage path */
 	folderName: string | null;
 	settings: DbspSettings | null;
-	files: ProjectFile[];
+	files: PairedTreeNode[];
 	loading: boolean;
 	error: string | null;
 
@@ -89,113 +83,23 @@ interface ProjectState {
 			formData: import('@/components/connection/ConnectionDialog').ConnectionFormData;
 			environment: string;
 		}>;
+		files?: readonly string[];
 		generateSchema: boolean;
 	}) => Promise<void>;
-}
-
-/**
- * Match a file path against include/exclude glob patterns (simplified).
- * Supports `** /x` and `*.ext` patterns.
- */
-export function matchesGlob(filePath: string, pattern: string): boolean {
-	// **/*.ext → match any file ending in .ext
-	if (pattern.startsWith('**/')) {
-		const suffix = pattern.slice(3); // e.g., "*.dbsp"
-		const fileName = filePath.split('/').pop() ?? filePath;
-		return matchesGlob(fileName, suffix);
-	}
-	// *.ext → match filename
-	if (pattern.startsWith('*.')) {
-		return filePath.endsWith(pattern.slice(1));
-	}
-	// Exact match (for excludes like "node_modules")
-	return (
-		filePath === pattern ||
-		filePath.includes(`/${pattern}/`) ||
-		filePath.startsWith(`${pattern}/`)
-	);
-}
-
-/**
- * Filter file path against include and exclude globs.
- * Returns true if the file should be included.
- */
-export function shouldIncludeFile(
-	relativePath: string,
-	include: readonly string[],
-	exclude: readonly string[],
-): boolean {
-	// Check excludes first
-	for (const pattern of exclude) {
-		if (matchesGlob(relativePath, pattern)) return false;
-	}
-	// Check includes
-	for (const pattern of include) {
-		if (matchesGlob(relativePath, pattern)) return true;
-	}
-	return false;
-}
-
-/**
- * Recursively discover .dbsp/.assert.dbsp files under a directory.
- * Uses Tauri readDir for filesystem access.
- */
-export async function discoverFiles(
-	basePath: string,
-	include: readonly string[] = DEFAULT_INCLUDE,
-	exclude: readonly string[] = DEFAULT_EXCLUDE,
-	relativeTo = '',
-): Promise<ProjectFile[]> {
-	const entries = await readDir(basePath);
-	const result: ProjectFile[] = [];
-
-	for (const entry of entries) {
-		const relativePath = relativeTo
-			? `${relativeTo}/${entry.name}`
-			: entry.name;
-
-		if (entry.isDirectory) {
-			// Skip excluded directories
-			if (exclude.some((p) => entry.name === p)) continue;
-
-			const childPath = await join(basePath, entry.name);
-			let children: ProjectFile[];
-			try {
-				children = await discoverFiles(
-					childPath,
-					include,
-					exclude,
-					relativePath,
-				);
-			} catch {
-				// Skip directories we can't read (Tauri scope restrictions, permissions, etc.)
-				continue;
-			}
-			// Only include directories that have matching files
-			if (children.length > 0) {
-				result.push({
-					path: relativePath,
-					name: entry.name,
-					isDirectory: true,
-					children,
-				});
-			}
-		} else {
-			if (shouldIncludeFile(relativePath, include, exclude)) {
-				result.push({
-					path: relativePath,
-					name: entry.name,
-					isDirectory: false,
-				});
-			}
-		}
-	}
-
-	// Sort: directories first, then alphabetical
-	return result.sort((a, b) => {
-		if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-		return a.name.localeCompare(b.name);
-	});
+	/** Add a file path to the project's explicit files[] list */
+	addFile: (relativePath: string) => Promise<void>;
+	/** Remove a file path from the project's files[] list (does NOT delete from disk) */
+	removeFile: (relativePath: string) => Promise<void>;
+	/** Remove from files[] AND delete from disk */
+	deleteFile: (relativePath: string) => Promise<void>;
+	/** Rename a file on disk and update files[] */
+	renameFile: (
+		oldRelativePath: string,
+		newRelativePath: string,
+	) => Promise<void>;
+	/** File search filter for the file tree */
+	fileSearchFilter: string;
+	setFileSearchFilter: (filter: string) => void;
 }
 
 // ── Store implementation ─────────────────────────────────────────
@@ -208,6 +112,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 	files: [],
 	loading: false,
 	error: null,
+	fileSearchFilter: '',
+	setFileSearchFilter: (filter: string) => set({ fileSearchFilter: filter }),
 
 	openFolder: async (folderPath: string) => {
 		set({ loading: true, error: null, folderPath });
@@ -222,20 +128,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 			}
 
 			if (settings) {
-				// Project mode: settings found (precedence: defaults → project)
-				const resolved = resolveProjectSettings(settings);
-
-				// Step 2: Discover project files
-				let files: ProjectFile[];
-				try {
-					files = await discoverFiles(
-						folderPath,
-						resolved.include,
-						resolved.exclude,
-					);
-				} catch (err) {
-					throw new Error(`Discover files: ${errorMessage(err)}`);
+				// Migrate legacy include/exclude → explicit files[] (one-time)
+				if (needsMigration(settings)) {
+					try {
+						settings = await migrateSettings(settings, folderPath);
+					} catch (err) {
+						throw new Error(`Migrate settings: ${errorMessage(err)}`);
+					}
 				}
+
+				// Project mode: build file tree from explicit files[]
+				const resolved = resolveProjectSettings(settings);
+				const files = buildPairedTree(resolved.files, resolved.roots);
 
 				// Derive folder name from project name (preferred) or path basename
 				const rawName =
@@ -317,17 +221,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 		if (!folderPath || !settings) return;
 
 		const resolved = resolveProjectSettings(settings);
-
-		try {
-			const files = await discoverFiles(
-				folderPath,
-				resolved.include,
-				resolved.exclude,
-			);
-			set({ files });
-		} catch (err) {
-			set({ error: `Refresh files: ${errorMessage(err)}` });
-		}
+		set({ files: buildPairedTree(resolved.files, resolved.roots) });
 	},
 
 	onSettingsChanged: async (exists: boolean) => {
@@ -356,7 +250,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 			// 1. Write dbsp.settings.json to the chosen folder
 			const settings: DbspSettings = {
 				version: 1,
-				project: { name: data.name },
+				project: {
+					name: data.name,
+					...(data.files && data.files.length > 0
+						? { files: [...data.files].sort((a, b) => a.localeCompare(b)) }
+						: {}),
+				},
 			};
 			await writeSettings(data.folderPath, settings);
 
@@ -398,6 +297,126 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 			console.error('[project-store] createProject failed:', msg, err);
 			set({ error: msg, loading: false });
 			throw err;
+		}
+	},
+
+	addFile: async (relativePath: string) => {
+		const { folderPath, settings } = get();
+		if (!folderPath || !settings) return;
+
+		// Normalize: convert absolute path to relative if needed
+		const prefix = folderPath.endsWith('/') ? folderPath : `${folderPath}/`;
+		let normalized: string;
+		if (relativePath.startsWith(prefix)) {
+			normalized = relativePath.slice(prefix.length);
+		} else if (relativePath.startsWith('/')) {
+			// Absolute path outside project root → reject (ERR-01)
+			toast.error('File is outside project roots');
+			return;
+		} else {
+			normalized = relativePath;
+		}
+
+		const currentFiles = settings.project?.files ?? [];
+		if (currentFiles.includes(normalized)) return; // already tracked
+
+		const updatedSettings: DbspSettings = {
+			...settings,
+			project: {
+				...settings.project,
+				files: [...currentFiles, normalized].sort((a, b) => a.localeCompare(b)),
+			},
+		};
+
+		await writeSettings(folderPath, updatedSettings);
+		const resolved = resolveProjectSettings(updatedSettings);
+		set({
+			settings: updatedSettings,
+			files: buildPairedTree(resolved.files, resolved.roots),
+		});
+	},
+
+	removeFile: async (relativePath: string) => {
+		const { folderPath, settings } = get();
+		if (!folderPath || !settings) return;
+
+		const currentFiles = settings.project?.files ?? [];
+		const updatedSettings: DbspSettings = {
+			...settings,
+			project: {
+				...settings.project,
+				files: currentFiles.filter((f) => f !== relativePath),
+			},
+		};
+
+		await writeSettings(folderPath, updatedSettings);
+		const resolved = resolveProjectSettings(updatedSettings);
+		set({
+			settings: updatedSettings,
+			files: buildPairedTree(resolved.files, resolved.roots),
+		});
+	},
+
+	deleteFile: async (relativePath: string) => {
+		const { folderPath, settings } = get();
+		if (!folderPath || !settings) return;
+
+		// Remove from files[] and save settings
+		const currentFiles = settings.project?.files ?? [];
+		const updatedSettings: DbspSettings = {
+			...settings,
+			project: {
+				...settings.project,
+				files: currentFiles.filter((f) => f !== relativePath),
+			},
+		};
+
+		// Delete from disk
+		const fullPath = await join(folderPath, relativePath);
+		try {
+			await remove(fullPath);
+		} catch {
+			// File may already be gone — continue with settings update
+		}
+
+		await writeSettings(folderPath, updatedSettings);
+		const resolved = resolveProjectSettings(updatedSettings);
+		set({
+			settings: updatedSettings,
+			files: buildPairedTree(resolved.files, resolved.roots),
+		});
+	},
+
+	renameFile: async (oldRelativePath: string, newRelativePath: string) => {
+		const { folderPath, settings } = get();
+		if (!folderPath || !settings) return;
+
+		try {
+			const oldFull = await join(folderPath, oldRelativePath);
+			const newFull = await join(folderPath, newRelativePath);
+			await rename(oldFull, newFull);
+
+			// Update any open tab that references the old path
+			useEditorStore.getState().updateTabPath(oldRelativePath, newRelativePath);
+
+			const currentFiles = settings.project?.files ?? [];
+			const updatedSettings: DbspSettings = {
+				...settings,
+				project: {
+					...settings.project,
+					files: currentFiles
+						.map((f) => (f === oldRelativePath ? newRelativePath : f))
+						.sort((a, b) => a.localeCompare(b)),
+				},
+			};
+			await writeSettings(folderPath, updatedSettings);
+			const resolved = resolveProjectSettings(updatedSettings);
+			set({
+				settings: updatedSettings,
+				files: buildPairedTree(resolved.files, resolved.roots),
+			});
+		} catch (err) {
+			toast.error(`Rename failed: ${errorMessage(err)}`);
 		}
 	},
 }));

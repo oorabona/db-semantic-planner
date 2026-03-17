@@ -189,3 +189,9 @@ export async function queryAppLogs(opts?: {
 		[...params, limit],
 	);
 }
+
+/** Delete all app-level log entries. */
+export async function clearAppLogs(): Promise<void> {
+	if (!db) return;
+	await db.execute('DELETE FROM app_logs');
+}

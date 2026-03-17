@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { join } from '@tauri-apps/api/path';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
 	open as openDialog,
 	message as showMessage,
@@ -12,9 +14,10 @@ import {
 	Info,
 	Maximize2,
 	ScrollText,
+	Trash2,
 	X,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { Toaster, toast } from 'sonner';
 import { AppLogModal } from '@/components/AppLogModal';
@@ -22,7 +25,8 @@ import {
 	ConnectionDialog,
 	type ConnectionFormData,
 } from '@/components/connection/ConnectionDialog';
-import { ConnectionStatus } from '@/components/connection/ConnectionStatus';
+import { ConnectionQuickPick } from '@/components/connection/ConnectionQuickPick';
+import { PasswordPrompt } from '@/components/connection/PasswordPrompt';
 import { EditorPanel } from '@/components/layout/EditorPanel';
 import { ResultsPanel } from '@/components/layout/ResultsPanel';
 import { Sidebar } from '@/components/layout/Sidebar';
@@ -32,7 +36,9 @@ import { NewProjectWizard } from '@/components/project/NewProjectWizard';
 import { RecentProjectsDialog } from '@/components/project/RecentProjectsDialog';
 import type { WizardData } from '@/components/project/wizard-types';
 import { Button } from '@/components/ui/button';
+import { useAutoConnect } from '@/hooks/useAutoConnect';
 import { useConnection } from '@/hooks/useConnection';
+import { useFileWatcher } from '@/hooks/useFileWatcher';
 import { useMonacoSetup } from '@/hooks/useMonacoSetup';
 import { useSchemaWatcher } from '@/hooks/useSchemaWatcher';
 import { useSettingsWatcher } from '@/hooks/useSettingsWatcher';
@@ -51,12 +57,15 @@ import {
 } from '@/lib/assertion-limits';
 import { commandRegistry } from '@/lib/commands';
 import { downloadCsv, toCsv } from '@/lib/csv-export';
+import { findContainingRoot, validateDroppedFiles } from '@/lib/drag-drop';
 import {
+	closeTabWithConfirm,
 	languageFromPath,
 	openFile,
 	saveFile,
 	saveFileAs,
 } from '@/lib/file-io';
+import { TauriFileWatcher } from '@/lib/file-watcher';
 import { sidecarApi } from '@/lib/ipc';
 import { formatLogTime, LEVEL_COLORS } from '@/lib/log-utils';
 import { MENU_IDS, onMenuEvent } from '@/lib/menu';
@@ -77,10 +86,12 @@ function AppLogPopover({
 	entries,
 	onClose,
 	onExpand,
+	onClear,
 }: {
 	entries: readonly LogEntry[];
 	onClose: () => void;
 	onExpand: () => void;
+	onClear: () => void;
 }) {
 	const ref = useRef<HTMLDivElement>(null);
 
@@ -102,6 +113,14 @@ function AppLogPopover({
 			<div className="flex items-center justify-between border-b px-3 py-1.5">
 				<span className="text-xs font-medium">App Logs</span>
 				<div className="flex items-center gap-1">
+					<button
+						type="button"
+						onClick={onClear}
+						className="text-muted-foreground hover:text-foreground"
+						title="Clear all app logs"
+					>
+						<Trash2 className="h-3 w-3" />
+					</button>
 					<button
 						type="button"
 						onClick={onExpand}
@@ -151,6 +170,7 @@ export default function App() {
 	useSettingsWatcher();
 	useSidecarInit();
 	useThemeEffect();
+	const autoConnect = useAutoConnect();
 	useSchemaWatcher({
 		onReload: () => {
 			toast.success('Schema reloaded');
@@ -159,6 +179,8 @@ export default function App() {
 			toast.error('Schema reload failed', { description: msg });
 		},
 	});
+	const fileWatcher = useMemo(() => new TauriFileWatcher(), []);
+	const selfWriteFilter = useFileWatcher(fileWatcher);
 
 	// ── State declarations (must come before effects that reference them) ──
 	const [dialogOpen, setDialogOpen] = useState(false);
@@ -174,7 +196,7 @@ export default function App() {
 	const [showAppLogs, setShowAppLogs] = useState(false);
 	const [showAppLogModal, setShowAppLogModal] = useState(false);
 
-	const { status, active, error } = useConnectionStore();
+	const status = useConnectionStore((s) => s.status);
 	const projectMode = useProjectStore((s) => s.mode);
 	const appEntries = useLogStore((s) => s.appEntries);
 	const appLogErrorCount = appEntries.filter(
@@ -186,6 +208,45 @@ export default function App() {
 
 	const schemaEditable =
 		projectMode === 'project' && !!projectSettings?.project?.schemaPath;
+
+	// ── File drag & drop from OS ──────────────────────────────────
+	useEffect(() => {
+		if (projectMode !== 'project') return;
+
+		let unlisten: (() => void) | undefined;
+
+		listen<{ paths: string[] }>('tauri://drag-drop', async (event) => {
+			const store = useProjectStore.getState();
+			const roots = store.settings?.project?.roots ?? [];
+			const allRoots =
+				roots.length > 0
+					? [...roots]
+					: store.folderPath
+						? [store.folderPath]
+						: [];
+			const existingFiles = store.settings?.project?.files ?? [];
+
+			const result = validateDroppedFiles(
+				event.payload.paths,
+				allRoots,
+				existingFiles,
+			);
+
+			for (const absPath of result.accepted) {
+				await store.addFile(absPath);
+			}
+
+			if (result.outsideRoots.length > 0) {
+				toast.error('File is outside project roots');
+			}
+		}).then((fn) => {
+			unlisten = fn;
+		});
+
+		return () => {
+			unlisten?.();
+		};
+	}, [projectMode]);
 
 	// Recent projects handlers
 	const openRecentProjects = useCallback(async () => {
@@ -211,6 +272,28 @@ export default function App() {
 	const handleRemoveRecent = useCallback(async (path: string) => {
 		await removeRecentProject(path);
 		setRecentProjects((prev) => prev.filter((p) => p.path !== path));
+	}, []);
+
+	// Guard: confirm unsaved changes before closing the window
+	useEffect(() => {
+		const unlisten = getCurrentWindow().onCloseRequested(async (event) => {
+			const dirtyTabs = useEditorStore.getState().getDirtyTabs();
+			if (dirtyTabs.length === 0) return;
+
+			// Prevent the window from closing immediately
+			event.preventDefault();
+
+			const actions = useEditorStore.getState();
+			for (const tab of dirtyTabs) {
+				const closed = await closeTabWithConfirm(tab, actions);
+				if (!closed) return; // user cancelled — abort close
+			}
+			// All dirty tabs handled — close the window
+			await getCurrentWindow().destroy();
+		});
+		return () => {
+			unlisten.then((fn) => fn());
+		};
 	}, []);
 
 	// Forward native menu events to the command registry
@@ -277,6 +360,7 @@ export default function App() {
 				const tab = getActiveTab(useEditorStore.getState());
 				if (!tab?.filePath) return;
 				await saveFile(tab.filePath, tab.content);
+				selfWriteFilter.markWritten(tab.filePath);
 				useEditorStore.getState().markSaved(tab.id);
 			},
 		});
@@ -291,9 +375,30 @@ export default function App() {
 				if (!tab) return;
 				const path = await saveFileAs(tab.content, tab.title);
 				if (!path) return;
-				const { setFilePath, markSaved } = useEditorStore.getState();
+				selfWriteFilter.markWritten(path);
+				const { setFilePath, markSaved, setOutOfRoot } =
+					useEditorStore.getState();
 				setFilePath(tab.id, path);
 				markSaved(tab.id);
+
+				// SC-16/SC-17: auto-add to project or warn if outside roots
+				const store = useProjectStore.getState();
+				if (store.mode === 'project') {
+					const roots = store.settings?.project?.roots ?? [];
+					const allRoots =
+						roots.length > 0
+							? [...roots]
+							: store.folderPath
+								? [store.folderPath]
+								: [];
+					const root = findContainingRoot(path, allRoots);
+					if (root) {
+						await store.addFile(path);
+						setOutOfRoot(tab.id, false);
+					} else {
+						setOutOfRoot(tab.id, true);
+					}
+				}
 			},
 		});
 		commandRegistry.register({
@@ -341,13 +446,23 @@ export default function App() {
 	// Register new query + close tab + export CSV commands
 	useEffect(() => {
 		commandRegistry.register({
-			id: 'file.new_query',
-			label: 'New Query',
+			id: 'file.new_query_sql',
+			label: 'New SQL Query',
 			shortcut: '⌘N',
 			category: 'file',
-			menuId: MENU_IDS.FILE_NEW_QUERY,
+			menuId: MENU_IDS.FILE_NEW_QUERY_SQL,
 			handler: () => {
 				useEditorStore.getState().addTab('sql');
+			},
+		});
+		commandRegistry.register({
+			id: 'file.new_query_nql',
+			label: 'New NQL Query',
+			shortcut: '⇧⌘N',
+			category: 'file',
+			menuId: MENU_IDS.FILE_NEW_QUERY_NQL,
+			handler: () => {
+				useEditorStore.getState().addTab('nql');
 			},
 		});
 		commandRegistry.register({
@@ -357,9 +472,11 @@ export default function App() {
 			category: 'file',
 			menuId: MENU_IDS.FILE_CLOSE_TAB,
 			when: () => !!useEditorStore.getState().activeTabId,
-			handler: () => {
-				const { activeTabId, closeTab } = useEditorStore.getState();
-				if (activeTabId) closeTab(activeTabId);
+			handler: async () => {
+				const state = useEditorStore.getState();
+				const tab = getActiveTab(state);
+				if (!tab) return;
+				await closeTabWithConfirm(tab, state);
 			},
 		});
 		commandRegistry.register({
@@ -777,6 +894,27 @@ export default function App() {
 		setConnecting(true);
 		try {
 			await connect(data);
+			// Auto-save profile on successful connect so it appears in the connection list
+			const { profiles, addProfile } = useConnectionStore.getState();
+			const exists = profiles.some((p) => p.name === data.name);
+			if (!exists && data.name.trim()) {
+				addProfile({
+					id: crypto.randomUUID(),
+					name: data.name,
+					type: data.type,
+					config: {
+						host: data.host,
+						port: data.port,
+						database: data.database,
+						user: data.user,
+						schema: data.schema,
+						sslMode: data.sslMode,
+					},
+					environment: null,
+					createdAt: Date.now(),
+					lastUsedAt: Date.now(),
+				});
+			}
 			setDialogOpen(false);
 		} catch {
 			// error handled by store
@@ -858,8 +996,35 @@ export default function App() {
 					formData: c.formData,
 					environment: c.environment,
 				})),
+				files: data.files,
 				generateSchema: data.generateSchema,
 			});
+
+			// Auto-connect to the first database after project creation
+			const firstConn = data.connections[0];
+			if (firstConn) {
+				const fd = firstConn.formData;
+				const profiles = useConnectionStore.getState().profiles;
+				const profileId = profiles[0]?.id;
+				try {
+					await connect(
+						{
+							host: fd.host,
+							port: fd.port,
+							database: fd.database,
+							user: fd.user,
+							password: fd.password,
+							schema: fd.schema || undefined,
+							sslMode: fd.sslMode,
+						},
+						profileId,
+					);
+				} catch {
+					// Connection failure is non-fatal — project is created, user can reconnect
+					toast.error('Project created but could not connect to database');
+				}
+			}
+
 			setWizardOpen(false);
 		} catch (err) {
 			const msg =
@@ -944,13 +1109,7 @@ export default function App() {
 
 			{/* Status bar */}
 			<div className="relative flex h-6 items-center justify-between border-t bg-background px-2">
-				<ConnectionStatus
-					status={status}
-					database={active?.database}
-					schema={active?.schema}
-					error={error}
-					onReconnect={() => setDialogOpen(true)}
-				/>
+				<ConnectionQuickPick onNewConnection={() => setDialogOpen(true)} />
 				<div className="flex items-center gap-1">
 					{/* Save as Project — visible in standalone mode when connected */}
 					{projectMode === 'standalone' && status === 'connected' && (
@@ -988,6 +1147,7 @@ export default function App() {
 							setShowAppLogs(false);
 							setShowAppLogModal(true);
 						}}
+						onClear={() => useLogStore.getState().clearApp()}
 					/>
 				)}
 			</div>
@@ -997,8 +1157,19 @@ export default function App() {
 				<AppLogModal
 					entries={appEntries}
 					onClose={() => setShowAppLogModal(false)}
+					onClear={() => useLogStore.getState().clearApp()}
 				/>
 			)}
+
+			{/* Auto-connect password prompt (fired on project open) */}
+			<PasswordPrompt
+				open={autoConnect.promptOpen}
+				profileName={autoConnect.promptProfile?.name ?? ''}
+				onSubmit={autoConnect.submitPassword}
+				onCancel={autoConnect.cancelPassword}
+				error={autoConnect.promptError}
+				connecting={autoConnect.connecting}
+			/>
 
 			{/* Toast notifications */}
 			<Toaster position="bottom-right" richColors closeButton />

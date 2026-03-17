@@ -59,46 +59,34 @@ describe('SchemaTree', () => {
 	});
 
 	it('renders table count when schema is loaded', () => {
-		render(<SchemaTree onConnect={vi.fn()} />);
+		render(<SchemaTree />);
 		expect(screen.getByText('1 table')).toBeDefined();
 	});
 
 	it('does not show Edit Schema button when schemaEditable is false', () => {
-		render(<SchemaTree onConnect={vi.fn()} schemaEditable={false} />);
+		render(<SchemaTree schemaEditable={false} />);
 		expect(screen.queryByTestId('edit-schema-btn')).toBeNull();
 	});
 
 	it('does not show Edit Schema button when schemaEditable is undefined', () => {
-		render(<SchemaTree onConnect={vi.fn()} />);
+		render(<SchemaTree />);
 		expect(screen.queryByTestId('edit-schema-btn')).toBeNull();
 	});
 
 	it('shows Edit Schema button when schemaEditable is true', () => {
-		render(
-			<SchemaTree
-				onConnect={vi.fn()}
-				schemaEditable={true}
-				onEditSchema={vi.fn()}
-			/>,
-		);
+		render(<SchemaTree schemaEditable={true} onEditSchema={vi.fn()} />);
 		expect(screen.getByTestId('edit-schema-btn')).toBeDefined();
 	});
 
 	it('calls onEditSchema when Edit Schema button is clicked', () => {
 		const onEditSchema = vi.fn();
-		render(
-			<SchemaTree
-				onConnect={vi.fn()}
-				schemaEditable={true}
-				onEditSchema={onEditSchema}
-			/>,
-		);
+		render(<SchemaTree schemaEditable={true} onEditSchema={onEditSchema} />);
 
 		fireEvent.click(screen.getByTestId('edit-schema-btn'));
 		expect(onEditSchema).toHaveBeenCalledOnce();
 	});
 
-	it('shows Connect button when no schema is loaded', () => {
+	it('shows placeholder message when no schema is loaded', () => {
 		vi.mocked(useSchema).mockReturnValue({
 			schema: null,
 			loading: false,
@@ -106,8 +94,10 @@ describe('SchemaTree', () => {
 			refresh: vi.fn(),
 		});
 
-		render(<SchemaTree onConnect={vi.fn()} />);
-		expect(screen.getByText('Connect')).toBeDefined();
+		render(<SchemaTree />);
+		expect(
+			screen.getByText('Connect to a database to explore its schema'),
+		).toBeDefined();
 	});
 
 	it('shows loading spinner when loading', () => {
@@ -118,7 +108,7 @@ describe('SchemaTree', () => {
 			refresh: vi.fn(),
 		});
 
-		render(<SchemaTree onConnect={vi.fn()} />);
+		render(<SchemaTree />);
 		expect(screen.getByText('Loading schema...')).toBeDefined();
 	});
 
@@ -128,7 +118,7 @@ describe('SchemaTree', () => {
 			return selector(state);
 		});
 
-		render(<SchemaTree onConnect={vi.fn()} />);
+		render(<SchemaTree />);
 		expect(screen.getByText('Sidecar failed to start')).toBeDefined();
 	});
 
@@ -138,7 +128,7 @@ describe('SchemaTree', () => {
 			return selector(state);
 		});
 
-		render(<SchemaTree onConnect={vi.fn()} />);
+		render(<SchemaTree />);
 		expect(screen.getByText('Starting sidecar...')).toBeDefined();
 	});
 });

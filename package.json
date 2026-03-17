@@ -15,7 +15,8 @@
 		"lint:fix": "pnpm biome check --write .",
 		"typecheck": "pnpm -r typecheck",
 		"dbsp": "pnpm tsx packages/cli/src/index.ts",
-		"docs:api": "typedoc"
+		"docs:api": "typedoc",
+		"gui:dev": "pnpm -C packages/gui tauri dev"
 	},
 	"pnpm": {
 		"overrides": {

@@ -26,6 +26,8 @@ export interface UserSettings {
 	logRetentionDays: number;
 	/** Query history retention in days (entries older than this are deleted on load) */
 	historyRetentionDays: number;
+	/** File watcher behavior: auto-reload open files or prompt user */
+	fileWatcherMode: 'auto' | 'prompt';
 }
 
 // ── Defaults ─────────────────────────────────────────────────────
@@ -39,6 +41,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
 	maxResults: 1000,
 	logRetentionDays: 30,
 	historyRetentionDays: 90,
+	fileWatcherMode: 'auto',
 };
 
 // ── Store ────────────────────────────────────────────────────────
@@ -101,6 +104,7 @@ export const useUserSettingsStore = create<UserSettingsState>()(
 				maxResults: state.maxResults,
 				logRetentionDays: state.logRetentionDays,
 				historyRetentionDays: state.historyRetentionDays,
+				fileWatcherMode: state.fileWatcherMode,
 			}),
 		},
 	),

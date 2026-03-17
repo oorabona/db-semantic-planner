@@ -18,11 +18,10 @@ vi.mock('@tauri-apps/api/path', () => ({
 	join: mockJoin,
 }));
 
+import * as settings from './settings';
 import {
 	type DbspSettings,
 	DEFAULT_EDITOR,
-	DEFAULT_EXCLUDE,
-	DEFAULT_INCLUDE,
 	readSettings,
 	resolveProjectSettings,
 	resolveSchemaPath,
@@ -49,12 +48,14 @@ describe('constants', () => {
 		expect(SETTINGS_FILENAME).toBe('dbsp.settings.json');
 	});
 
-	it('has default include globs', () => {
-		expect(DEFAULT_INCLUDE).toEqual(['**/*.dbsp', '**/*.assert.dbsp']);
+	it('no longer exports DEFAULT_INCLUDE (replaced by explicit files[])', () => {
+		// DEFAULT_INCLUDE removed in GUI-025 — files are now explicit
+		expect('DEFAULT_INCLUDE' in settings).toBe(false);
 	});
 
-	it('has default exclude globs', () => {
-		expect(DEFAULT_EXCLUDE).toEqual(['node_modules', 'dist', '.git']);
+	it('no longer exports DEFAULT_EXCLUDE (replaced by explicit files[])', () => {
+		// DEFAULT_EXCLUDE removed in GUI-025 — files are now explicit
+		expect('DEFAULT_EXCLUDE' in settings).toBe(false);
 	});
 
 	it('has default editor settings', () => {
@@ -109,8 +110,8 @@ describe('validateSettings', () => {
 				defaultConnection: 'dev',
 				project: {
 					schemaPath: 'auto',
-					include: ['**/*.dbsp'],
-					exclude: ['node_modules'],
+					files: ['src/main.dbsp'],
+					roots: ['/workspace'],
 				},
 				editor: {
 					tabSize: 4,
@@ -223,14 +224,14 @@ describe('validateSettings', () => {
 			}
 		});
 
-		it('rejects invalid project.include type', () => {
+		it('rejects invalid project.files type', () => {
 			const result = validateSettings({
 				version: 1,
-				project: { include: 'not-array' },
+				project: { files: 'not-array' },
 			});
 			expect(result.ok).toBe(false);
 			if (!result.ok) {
-				expect(result.errors[0]?.path).toBe('project.include');
+				expect(result.errors[0]?.path).toBe('project.files');
 			}
 		});
 
@@ -440,43 +441,43 @@ describe('resolveSchemaPath', () => {
 // ── resolveProjectSettings (GUI-MW-D04) ─────────────────────────
 
 describe('resolveProjectSettings', () => {
-	it('returns all defaults when settings is null', () => {
+	it('returns empty files/roots and default editor when settings is null', () => {
 		const result = resolveProjectSettings(null);
 
-		expect(result.include).toEqual([...DEFAULT_INCLUDE]);
-		expect(result.exclude).toEqual([...DEFAULT_EXCLUDE]);
+		expect(result.files).toEqual([]);
+		expect(result.roots).toEqual([]);
 		expect(result.editor).toEqual(DEFAULT_EDITOR);
 	});
 
-	it('returns all defaults when settings has no overrides', () => {
+	it('returns empty files/roots when settings has no project', () => {
 		const settings: DbspSettings = { version: 1 };
 		const result = resolveProjectSettings(settings);
 
-		expect(result.include).toEqual([...DEFAULT_INCLUDE]);
-		expect(result.exclude).toEqual([...DEFAULT_EXCLUDE]);
+		expect(result.files).toEqual([]);
+		expect(result.roots).toEqual([]);
 		expect(result.editor).toEqual(DEFAULT_EDITOR);
 	});
 
-	it('project.include fully replaces default include', () => {
+	it('returns explicit files from project settings', () => {
 		const settings: DbspSettings = {
 			version: 1,
-			project: { include: ['*.sql'] },
+			project: { files: ['src/main.dbsp', 'src/test.assert.dbsp'] },
 		};
 		const result = resolveProjectSettings(settings);
 
-		expect(result.include).toEqual(['*.sql']);
-		expect(result.exclude).toEqual([...DEFAULT_EXCLUDE]); // untouched
+		expect(result.files).toEqual(['src/main.dbsp', 'src/test.assert.dbsp']);
+		expect(result.roots).toEqual([]);
 	});
 
-	it('project.exclude fully replaces default exclude', () => {
+	it('returns explicit roots from project settings', () => {
 		const settings: DbspSettings = {
 			version: 1,
-			project: { exclude: ['vendor', 'tmp'] },
+			project: { roots: ['/projects/a', '/projects/b'] },
 		};
 		const result = resolveProjectSettings(settings);
 
-		expect(result.exclude).toEqual(['vendor', 'tmp']);
-		expect(result.include).toEqual([...DEFAULT_INCLUDE]); // untouched
+		expect(result.roots).toEqual(['/projects/a', '/projects/b']);
+		expect(result.files).toEqual([]);
 	});
 
 	it('editor settings merge with defaults (partial override)', () => {
@@ -507,16 +508,16 @@ describe('resolveProjectSettings', () => {
 		});
 	});
 
-	it('combines project and editor overrides', () => {
+	it('combines project files and editor overrides', () => {
 		const settings: DbspSettings = {
 			version: 1,
-			project: { include: ['*.nql'], exclude: ['build'] },
+			project: { files: ['src/query.dbsp'], roots: ['/workspace'] },
 			editor: { maxResults: 200 },
 		};
 		const result = resolveProjectSettings(settings);
 
-		expect(result.include).toEqual(['*.nql']);
-		expect(result.exclude).toEqual(['build']);
+		expect(result.files).toEqual(['src/query.dbsp']);
+		expect(result.roots).toEqual(['/workspace']);
 		expect(result.editor).toEqual({
 			tabSize: 2,
 			formatOnSave: false,

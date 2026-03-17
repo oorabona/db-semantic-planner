@@ -9,11 +9,16 @@
 
 import type {
 	ColumnIR,
+	DbCasing,
 	ForeignKeyIR,
 	IndexIR,
 	ModelIR,
 	TableIR,
 } from '@dbsp/types';
+import {
+	type NamingPlugin,
+	getNamingPluginForDbCasing,
+} from '../naming-plugin.js';
 
 // ============================================================================
 // Types
@@ -71,6 +76,19 @@ export interface SchemaDiff {
 }
 
 // ============================================================================
+// Options
+// ============================================================================
+
+export interface CompareSchemataOptions {
+	/**
+	 * Database naming convention.
+	 * When set, schema model names (camelCase) are converted to DB format
+	 * (e.g. snake_case) before comparison with the introspected model.
+	 */
+	dbCasing?: DbCasing;
+}
+
+// ============================================================================
 // Comparison Engine
 // ============================================================================
 
@@ -79,12 +97,23 @@ export interface SchemaDiff {
  *
  * @param schema - The desired schema (from definition)
  * @param db - The current database state (from introspection)
+ * @param options - Optional comparison settings (e.g. dbCasing)
  * @returns SchemaDiff with all changes needed to bring DB in sync with schema
  */
-export function compareSchemata(schema: ModelIR, db: ModelIR): SchemaDiff {
+export function compareSchemata(
+	schema: ModelIR,
+	db: ModelIR,
+	options?: CompareSchemataOptions,
+): SchemaDiff {
 	const changes: SchemaChange[] = [];
 
-	const schemaTables = new Map(schema.tables);
+	const plugin =
+		options?.dbCasing !== undefined
+			? getNamingPluginForDbCasing(options.dbCasing)
+			: undefined;
+	const schemaTables = plugin
+		? normalizeTableMap(schema.tables, plugin)
+		: new Map(schema.tables);
 	const dbTables = new Map(db.tables);
 
 	// 1. Tables that exist in schema but not in DB → create_table
@@ -124,6 +153,58 @@ export function compareSchemata(schema: ModelIR, db: ModelIR): SchemaDiff {
 		changes,
 		hasDestructive: changes.some((c) => c.destructive),
 		summary: buildSummary(changes),
+	};
+}
+
+// ============================================================================
+// Name Normalization (camelCase → DB format)
+// ============================================================================
+
+/**
+ * Convert all identifiers in a table map from model format to database format.
+ * This allows comparing a schema definition (camelCase) against an introspected
+ * database (snake_case) without false positives.
+ */
+function normalizeTableMap(
+	tables: ReadonlyMap<string, TableIR>,
+	plugin: NamingPlugin,
+): Map<string, TableIR> {
+	const result = new Map<string, TableIR>();
+	for (const [_key, table] of tables) {
+		const dbName = plugin.toDatabase(table.name);
+		result.set(dbName, normalizeTable(table, plugin));
+	}
+	return result;
+}
+
+function normalizeTable(table: TableIR, plugin: NamingPlugin): TableIR {
+	const dbName = plugin.toDatabase(table.name);
+	const toDb = (name: string) => plugin.toDatabase(name);
+
+	return {
+		name: dbName,
+		columns: table.columns.map((col) => ({
+			...col,
+			name: toDb(col.name),
+		})),
+		...(table.primaryKey !== undefined && {
+			primaryKey:
+				typeof table.primaryKey === 'string'
+					? toDb(table.primaryKey)
+					: table.primaryKey.map(toDb),
+		}),
+		foreignKeys: table.foreignKeys.map((fk) => ({
+			...fk,
+			columns: fk.columns.map(toDb),
+			references: {
+				table: toDb(fk.references.table),
+				columns: fk.references.columns.map(toDb),
+			},
+		})),
+		indexes: table.indexes.map((idx) => ({
+			...idx,
+			columns: idx.columns.map(toDb),
+		})),
 	};
 }
 
@@ -178,8 +259,22 @@ function compareColumnDetails(
 	db: ColumnIR,
 	changes: SchemaChange[],
 ): void {
-	// Type change
-	if (schema.type !== db.type) {
+	// Type change — prefer originalDbType when both sides carry it (e.g. vector(768) → vector(1024))
+	const schemaDbType = schema.originalDbType?.toLowerCase();
+	const dbDbType = db.originalDbType?.toLowerCase();
+
+	if (schemaDbType && dbDbType && schemaDbType !== dbDbType) {
+		// Both have originalDbType and they differ → precision/type change
+		changes.push({
+			kind: 'alter_column_type',
+			table: tableName,
+			column: schema.name,
+			destructive: true,
+			details: `Change type of "${schema.name}" from ${db.originalDbType} to ${schema.originalDbType}`,
+			meta: { fromType: db.originalDbType, toType: schema.originalDbType, column: schema },
+		});
+	} else if (!areTypesEquivalent(schema.type, db.type)) {
+		// Fall back to base type comparison (original behavior)
 		changes.push({
 			kind: 'alter_column_type',
 			table: tableName,
@@ -217,16 +312,66 @@ function compareColumnDetails(
 	}
 }
 
+// ============================================================================
+// Type Equivalence
+// ============================================================================
+
+/**
+ * Type equivalence classes — groups of ColumnTypes that map to the same
+ * PostgreSQL data type and should not trigger alter_column_type.
+ *
+ * - timestamp/datetime → both are TIMESTAMPTZ
+ *
+ * Note: number/integer are NOT equivalent because `number` can represent
+ * NUMERIC(precision,scale) via originalDbType, which differs from INTEGER.
+ */
+const TYPE_EQUIVALENCE: ReadonlyMap<string, string> = new Map([
+	['timestamp', 'timestamptz'],
+	['datetime', 'timestamptz'],
+]);
+
+function areTypesEquivalent(a: string, b: string): boolean {
+	if (a === b) return true;
+	const canonA = TYPE_EQUIVALENCE.get(a);
+	const canonB = TYPE_EQUIVALENCE.get(b);
+	return canonA !== undefined && canonA === canonB;
+}
+
+// ============================================================================
+// Default Normalization
+// ============================================================================
+
 /**
  * Normalize default values for comparison.
- * PostgreSQL introspection returns defaults with type casts, parentheses, etc.
+ *
+ * PostgreSQL introspection returns defaults with type casts and quoting:
+ *   'deploy'::character varying  →  deploy
+ *   ''::text                     →  (empty string)
+ *   42::integer                  →  42
+ *   gen_random_uuid()            →  gen_random_uuid()
+ *   now()                        →  now()
  */
 function normalizeDefault(value: unknown): string | undefined {
 	if (value === undefined || value === null) return undefined;
+
+	let str: string;
 	if (typeof value === 'object' && value !== null && 'sql' in value) {
-		return String((value as Record<string, unknown>).sql);
+		str = String((value as Record<string, unknown>).sql);
+	} else {
+		str = String(value);
 	}
-	return String(value);
+
+	// Strip PostgreSQL type casts: 'value'::type → value
+	// Handles: 'deploy'::character varying, ''::text, '{}'::text[]
+	str = str.replace(/^'(.*)'::[\w\s[\]]+$/, '$1');
+
+	// Also strip unquoted casts: 42::integer → 42
+	// But NOT function calls like gen_random_uuid()
+	if (!str.includes('(')) {
+		str = str.replace(/^(.+?)::[\w\s[\]]+$/, '$1');
+	}
+
+	return str;
 }
 
 // ============================================================================
