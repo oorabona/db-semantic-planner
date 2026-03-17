@@ -20,7 +20,7 @@
 > Blockers identified from astix ORM migration re-assessment (72 `executeRaw` calls, 12 files).
 > Spec: `astix/docs/plans/migrate-raw-sql-to-dbsp.md § Re-Assessment (2026-03-15)`
 
-- [ ] 🔧 **DX-050** [Core] `dbType?` — schema DSL support for optional/nullable types in `schema()` definition. Blocks all 49 CRUD/join migrations. — Priority: P0 (from astix ORM migration assessment 2026-03-15)
+(DX-050 archived → docs/historic/done-2026-03.md)
 - [ ] 🔧 **CTE-001** [Adapter] WITH RECURSIVE implementation — `compileRecursive()` in PgsqlAdapter. RFC-001 stub exists but Phase 2 not implemented. Blocks 10 CTE/recursive query migrations. — Priority: P0 (from astix ORM migration assessment 2026-03-15)
 - [ ] 🔧 **BATCH-001** [Adapter] Batch unnest API — `INSERT ... SELECT unnest($1::type[])` and `UPDATE ... FROM unnest()` patterns. Not yet designed. Blocks 8 batch/unnest query migrations. — Priority: P0 (from astix ORM migration assessment 2026-03-15)
 - [ ] 💡 **EXT-001** [Extensions] `@dbsp/pgvector` package — vector type, distance operators (`<=>`, `<->`), HNSW/IVFFlat index DDL. Blocks 2 cosine-distance queries + 3 vector search queries. — Priority: P1 (from astix ORM migration assessment 2026-03-15)

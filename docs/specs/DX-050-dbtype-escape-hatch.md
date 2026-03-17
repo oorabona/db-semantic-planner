@@ -1,6 +1,6 @@
 ---
 doc-meta:
-  status: ready
+  status: canonical
   scope: core + adapter-pgsql
   type: specification
   created: 2026-02-26

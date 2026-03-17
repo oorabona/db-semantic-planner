@@ -1104,4 +1104,127 @@ describe('compareSchemata', () => {
 			expect(diff.changes).toHaveLength(0);
 		});
 	});
+
+	// ==========================================================================
+	describe('originalDbType comparison', () => {
+		it('detects vector dimension change via originalDbType', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'items',
+					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'vector(1024)' })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'items',
+					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'vector(768)' })],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(1);
+			expect(diff.changes[0]!.kind).toBe('alter_column_type');
+			expect(diff.changes[0]!.meta).toMatchObject({ fromType: 'vector(768)', toType: 'vector(1024)' });
+		});
+
+		it('detects precision change via originalDbType', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'orders',
+					columns: [makeCol({ name: 'price', type: 'decimal', originalDbType: 'numeric(12,4)' })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'orders',
+					columns: [makeCol({ name: 'price', type: 'decimal', originalDbType: 'numeric(10,2)' })],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(1);
+			expect(diff.changes[0]!.kind).toBe('alter_column_type');
+		});
+
+		it('ignores matching originalDbType', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'items',
+					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'vector(768)' })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'items',
+					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'vector(768)' })],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('falls back to base type when no originalDbType', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'bio', type: 'text' })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'bio', type: 'string' })],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(1);
+			expect(diff.changes[0]!.kind).toBe('alter_column_type');
+		});
+
+		it('does not detect change when only schema has originalDbType', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'orders',
+					columns: [makeCol({ name: 'price', type: 'decimal', originalDbType: 'real' })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'orders',
+					columns: [makeCol({ name: 'price', type: 'decimal' })],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			// Only one side has originalDbType → falls back to base type comparison
+			// Both base types are 'decimal' → no change detected
+			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('case-insensitive originalDbType comparison', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'items',
+					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'vector(768)' })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'items',
+					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'VECTOR(768)' })],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+	});
 });

@@ -259,8 +259,22 @@ function compareColumnDetails(
 	db: ColumnIR,
 	changes: SchemaChange[],
 ): void {
-	// Type change (using equivalence classes for types that map to the same PG type)
-	if (!areTypesEquivalent(schema.type, db.type)) {
+	// Type change — prefer originalDbType when both sides carry it (e.g. vector(768) → vector(1024))
+	const schemaDbType = schema.originalDbType?.toLowerCase();
+	const dbDbType = db.originalDbType?.toLowerCase();
+
+	if (schemaDbType && dbDbType && schemaDbType !== dbDbType) {
+		// Both have originalDbType and they differ → precision/type change
+		changes.push({
+			kind: 'alter_column_type',
+			table: tableName,
+			column: schema.name,
+			destructive: true,
+			details: `Change type of "${schema.name}" from ${db.originalDbType} to ${schema.originalDbType}`,
+			meta: { fromType: db.originalDbType, toType: schema.originalDbType, column: schema },
+		});
+	} else if (!areTypesEquivalent(schema.type, db.type)) {
+		// Fall back to base type comparison (original behavior)
 		changes.push({
 			kind: 'alter_column_type',
 			table: tableName,
