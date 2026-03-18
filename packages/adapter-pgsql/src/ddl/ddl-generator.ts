@@ -68,6 +68,35 @@ export function generateDDL(
 	const tables = Array.from(schema.tables.values());
 
 	// ========================================================================
+	// PASS -1: CREATE EXTENSION (before everything)
+	// ========================================================================
+	if (schema.extensions) {
+		for (const ext of schema.extensions) {
+			statements.push(`CREATE EXTENSION IF NOT EXISTS "${ext}";`);
+		}
+	}
+
+	// ========================================================================
+	// PASS -0.5: CREATE SEQUENCE (before tables)
+	// ========================================================================
+	if (schema.sequences) {
+		for (const [, seq] of schema.sequences) {
+			const seqName = schemaName
+				? `${quoteIdentifier(naming.toDatabase(schemaName))}.${quoteIdentifier(seq.name)}`
+				: quoteIdentifier(seq.name);
+			const parts: string[] = [`CREATE SEQUENCE ${seqName}`];
+			if (seq.startWith !== undefined)
+				parts.push(`START WITH ${seq.startWith}`);
+			if (seq.incrementBy !== undefined)
+				parts.push(`INCREMENT BY ${seq.incrementBy}`);
+			if (seq.minValue !== undefined) parts.push(`MINVALUE ${seq.minValue}`);
+			if (seq.maxValue !== undefined) parts.push(`MAXVALUE ${seq.maxValue}`);
+			if (seq.cycle) parts.push('CYCLE');
+			statements.push(`${parts.join(' ')};`);
+		}
+	}
+
+	// ========================================================================
 	// PASS 0: DROP statements (if requested)
 	// ========================================================================
 	if (includeDropStatements) {
@@ -86,7 +115,9 @@ export function generateDDL(
 			const enumName = schemaName
 				? `${quoteIdentifier(naming.toDatabase(schemaName))}.${quoteIdentifier(enumDef.name)}`
 				: quoteIdentifier(enumDef.name);
-			const values = enumDef.values.map((v) => `'${v.replace(/'/g, "''")}'`).join(', ');
+			const values = enumDef.values
+				.map((v) => `'${v.replace(/'/g, "''")}'`)
+				.join(', ');
 			statements.push(`CREATE TYPE ${enumName} AS ENUM (${values});`);
 		}
 	}

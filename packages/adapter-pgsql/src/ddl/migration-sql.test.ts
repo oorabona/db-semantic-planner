@@ -9,7 +9,13 @@
  */
 
 import { ModelIRImpl } from '@dbsp/core';
-import type { ColumnIR, ForeignKeyIR, IndexIR, TableIR } from '@dbsp/types';
+import type {
+	ColumnIR,
+	ForeignKeyIR,
+	IndexIR,
+	SequenceIR,
+	TableIR,
+} from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
 import {
@@ -1768,80 +1774,107 @@ describe('CHECK constraints migration SQL', () => {
 	});
 });
 
-
 // ============================================================================
 // ENUM types
 // ============================================================================
 
 describe('ENUM types', () => {
 	it('should generate CREATE TYPE for new enum', () => {
-		const diff = makeDiff([{
-			kind: 'create_enum',
-			table: '',
-			destructive: false,
-			details: 'Create enum',
-			meta: { enum: { name: 'status', values: ['active', 'inactive'] } },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'create_enum',
+				table: '',
+				destructive: false,
+				details: 'Create enum',
+				meta: { enum: { name: 'status', values: ['active', 'inactive'] } },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
-		expect(sql[0]).toBe("CREATE TYPE \"status\" AS ENUM ('active', 'inactive');");
+		expect(sql[0]).toBe(
+			"CREATE TYPE \"status\" AS ENUM ('active', 'inactive');",
+		);
 	});
 
 	it('should generate CREATE TYPE with schema prefix', () => {
-		const diff = makeDiff([{
-			kind: 'create_enum',
-			table: '',
-			destructive: false,
-			details: 'Create enum',
-			meta: { enum: { name: 'status', values: ['active', 'inactive'] } },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'create_enum',
+				table: '',
+				destructive: false,
+				details: 'Create enum',
+				meta: { enum: { name: 'status', values: ['active', 'inactive'] } },
+			},
+		]);
 		const sql = generateMigrationSQL(diff, { schemaName: 'myschema' });
-		expect(sql[0]).toBe("CREATE TYPE \"myschema\".\"status\" AS ENUM ('active', 'inactive');");
+		expect(sql[0]).toBe(
+			'CREATE TYPE "myschema"."status" AS ENUM (\'active\', \'inactive\');',
+		);
 	});
 
 	it('should escape single quotes in enum values', () => {
-		const diff = makeDiff([{
-			kind: 'create_enum',
-			table: '',
-			destructive: false,
-			details: 'Create enum',
-			meta: { enum: { name: 'mood', values: ["it's fine", 'bad'] } },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'create_enum',
+				table: '',
+				destructive: false,
+				details: 'Create enum',
+				meta: { enum: { name: 'mood', values: ["it's fine", 'bad'] } },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql[0]).toBe("CREATE TYPE \"mood\" AS ENUM ('it''s fine', 'bad');");
 	});
 
 	it('should generate ALTER TYPE ADD VALUE with position', () => {
-		const diff = makeDiff([{
-			kind: 'alter_enum_add_value',
-			table: '',
-			destructive: false,
-			details: 'Add value',
-			meta: { enum: { name: 'status', values: ['active', 'inactive', 'pending'] }, value: 'pending', after: 'inactive' },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'alter_enum_add_value',
+				table: '',
+				destructive: false,
+				details: 'Add value',
+				meta: {
+					enum: { name: 'status', values: ['active', 'inactive', 'pending'] },
+					value: 'pending',
+					after: 'inactive',
+				},
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
-		expect(sql[0]).toBe("ALTER TYPE \"status\" ADD VALUE IF NOT EXISTS 'pending' AFTER 'inactive';");
+		expect(sql[0]).toBe(
+			"ALTER TYPE \"status\" ADD VALUE IF NOT EXISTS 'pending' AFTER 'inactive';",
+		);
 	});
 
 	it('should generate ALTER TYPE ADD VALUE without position', () => {
-		const diff = makeDiff([{
-			kind: 'alter_enum_add_value',
-			table: '',
-			destructive: false,
-			details: 'Add value',
-			meta: { enum: { name: 'status', values: ['active', 'pending'] }, value: 'pending', after: undefined },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'alter_enum_add_value',
+				table: '',
+				destructive: false,
+				details: 'Add value',
+				meta: {
+					enum: { name: 'status', values: ['active', 'pending'] },
+					value: 'pending',
+					after: undefined,
+				},
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
-		expect(sql[0]).toBe("ALTER TYPE \"status\" ADD VALUE IF NOT EXISTS 'pending';");
+		expect(sql[0]).toBe(
+			'ALTER TYPE "status" ADD VALUE IF NOT EXISTS \'pending\';',
+		);
 	});
 
 	it('should generate DROP TYPE for removed enum', () => {
-		const diff = makeDiff([{
-			kind: 'drop_enum',
-			table: '',
-			destructive: true,
-			details: 'Drop enum',
-			meta: { enum: { name: 'status', values: ['active', 'inactive'] } },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: 'Drop enum',
+				meta: { enum: { name: 'status', values: ['active', 'inactive'] } },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql[0]).toBe('DROP TYPE IF EXISTS "status" CASCADE;');
 	});
@@ -1879,14 +1912,20 @@ describe('ENUM types', () => {
 				table: '',
 				destructive: false,
 				details: '',
-				meta: { enum: { name: 'status', values: ['a', 'b'] }, value: 'b', after: 'a' },
+				meta: {
+					enum: { name: 'status', values: ['a', 'b'] },
+					value: 'b',
+					after: 'a',
+				},
 			},
 			{
 				kind: 'create_index',
 				table: 'users',
 				destructive: false,
 				details: '',
-				meta: { index: { name: 'idx_users_name', columns: ['name'], unique: false } },
+				meta: {
+					index: { name: 'idx_users_name', columns: ['name'], unique: false },
+				},
 			},
 		]);
 		const sql = generateMigrationSQL(diff);
@@ -1922,43 +1961,54 @@ describe('ENUM types', () => {
 
 	describe('DOWN SQL for ENUM types', () => {
 		it('create_enum DOWN should DROP the type', () => {
-			const diff = makeDiff([{
-				kind: 'create_enum',
-				table: '',
-				destructive: false,
-				details: '',
-				meta: { enum: { name: 'status', values: ['a', 'b'] } },
-			}]);
+			const diff = makeDiff([
+				{
+					kind: 'create_enum',
+					table: '',
+					destructive: false,
+					details: '',
+					meta: { enum: { name: 'status', values: ['a', 'b'] } },
+				},
+			]);
 			const sql = generateDownSQL(diff);
 			expect(sql[0]).toBe('DROP TYPE IF EXISTS "status" CASCADE;');
 		});
 
 		it('drop_enum DOWN should recreate the type', () => {
-			const diff = makeDiff([{
-				kind: 'drop_enum',
-				table: '',
-				destructive: true,
-				details: '',
-				meta: { enum: { name: 'status', values: ['active', 'inactive'] } },
-			}]);
+			const diff = makeDiff([
+				{
+					kind: 'drop_enum',
+					table: '',
+					destructive: true,
+					details: '',
+					meta: { enum: { name: 'status', values: ['active', 'inactive'] } },
+				},
+			]);
 			const sql = generateDownSQL(diff);
-			expect(sql[0]).toBe("CREATE TYPE \"status\" AS ENUM ('active', 'inactive');");
+			expect(sql[0]).toBe(
+				"CREATE TYPE \"status\" AS ENUM ('active', 'inactive');",
+			);
 		});
 
 		it('alter_enum_add_value DOWN should emit a comment', () => {
-			const diff = makeDiff([{
-				kind: 'alter_enum_add_value',
-				table: '',
-				destructive: false,
-				details: '',
-				meta: { enum: { name: 'status', values: ['a', 'b'] }, value: 'b', after: 'a' },
-			}]);
+			const diff = makeDiff([
+				{
+					kind: 'alter_enum_add_value',
+					table: '',
+					destructive: false,
+					details: '',
+					meta: {
+						enum: { name: 'status', values: ['a', 'b'] },
+						value: 'b',
+						after: 'a',
+					},
+				},
+			]);
 			const sql = generateDownSQL(diff);
 			expect(sql[0]).toContain('cannot be reversed');
 		});
 	});
 });
-
 
 // ============================================================================
 // FK Enhancements: onUpdate + deferred + auto-index
@@ -1971,37 +2021,50 @@ describe('FK enhancements — migration SQL', () => {
 	};
 
 	it('should generate ON UPDATE CASCADE', () => {
-		const diff = makeDiff([{
-			kind: 'add_foreign_key',
-			table: 'orders',
-			destructive: false,
-			details: '',
-			meta: { fk: { ...baseFk, onUpdate: 'CASCADE' } },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'add_foreign_key',
+				table: 'orders',
+				destructive: false,
+				details: '',
+				meta: { fk: { ...baseFk, onUpdate: 'CASCADE' } },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql[0]).toContain('ON UPDATE CASCADE');
 	});
 
 	it('should generate DEFERRABLE INITIALLY DEFERRED', () => {
-		const diff = makeDiff([{
-			kind: 'add_foreign_key',
-			table: 'orders',
-			destructive: false,
-			details: '',
-			meta: { fk: { ...baseFk, deferred: true } },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'add_foreign_key',
+				table: 'orders',
+				destructive: false,
+				details: '',
+				meta: { fk: { ...baseFk, deferred: true } },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql[0]).toContain('DEFERRABLE INITIALLY DEFERRED');
 	});
 
 	it('should generate combined ON DELETE + ON UPDATE + DEFERRABLE', () => {
-		const diff = makeDiff([{
-			kind: 'add_foreign_key',
-			table: 'orders',
-			destructive: false,
-			details: '',
-			meta: { fk: { ...baseFk, onDelete: 'CASCADE', onUpdate: 'SET NULL', deferred: true } },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'add_foreign_key',
+				table: 'orders',
+				destructive: false,
+				details: '',
+				meta: {
+					fk: {
+						...baseFk,
+						onDelete: 'CASCADE',
+						onUpdate: 'SET NULL',
+						deferred: true,
+					},
+				},
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql[0]).toContain('ON DELETE CASCADE');
 		expect(sql[0]).toContain('ON UPDATE SET NULL');
@@ -2009,13 +2072,15 @@ describe('FK enhancements — migration SQL', () => {
 	});
 
 	it('should NOT emit ON UPDATE when onUpdate is absent', () => {
-		const diff = makeDiff([{
-			kind: 'add_foreign_key',
-			table: 'orders',
-			destructive: false,
-			details: '',
-			meta: { fk: baseFk },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'add_foreign_key',
+				table: 'orders',
+				destructive: false,
+				details: '',
+				meta: { fk: baseFk },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql[0]).not.toContain('ON UPDATE');
 		expect(sql[0]).not.toContain('DEFERRABLE');
@@ -2029,15 +2094,19 @@ describe('FK enhancements — migration SQL', () => {
 			...table,
 			foreignKeys: [baseFk],
 		};
-		const diff = makeDiff([{
-			kind: 'create_table',
-			table: 'orders',
-			destructive: false,
-			details: '',
-			meta: { table: tableWithFk },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'orders',
+				destructive: false,
+				details: '',
+				meta: { table: tableWithFk },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
-		expect(sql.some((s) => s.includes('CREATE INDEX') && s.includes('"user_id"'))).toBe(true);
+		expect(
+			sql.some((s) => s.includes('CREATE INDEX') && s.includes('"user_id"')),
+		).toBe(true);
 	});
 
 	it('should NOT generate FK auto-index when fkAutoIndex=false', () => {
@@ -2048,15 +2117,19 @@ describe('FK enhancements — migration SQL', () => {
 			...table,
 			foreignKeys: [baseFk],
 		};
-		const diff = makeDiff([{
-			kind: 'create_table',
-			table: 'orders',
-			destructive: false,
-			details: '',
-			meta: { table: tableWithFk },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'orders',
+				destructive: false,
+				details: '',
+				meta: { table: tableWithFk },
+			},
+		]);
 		const sql = generateMigrationSQL(diff, { fkAutoIndex: false });
-		expect(sql.some((s) => s.includes('CREATE INDEX') && s.includes('"user_id"'))).toBe(false);
+		expect(
+			sql.some((s) => s.includes('CREATE INDEX') && s.includes('"user_id"')),
+		).toBe(false);
 	});
 
 	it('should NOT generate FK auto-index when explicit index covers the FK column', () => {
@@ -2068,16 +2141,18 @@ describe('FK enhancements — migration SQL', () => {
 			foreignKeys: [baseFk],
 			indexes: [{ name: 'idx_orders_user_id', columns: ['user_id'] }],
 		};
-		const diff = makeDiff([{
-			kind: 'create_table',
-			table: 'orders',
-			destructive: false,
-			details: '',
-			meta: { table: tableWithFk },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'orders',
+				destructive: false,
+				details: '',
+				meta: { table: tableWithFk },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
-		const autoIndexCount = sql.filter((s) =>
-			s.includes('CREATE INDEX') && s.includes('"user_id"'),
+		const autoIndexCount = sql.filter(
+			(s) => s.includes('CREATE INDEX') && s.includes('"user_id"'),
 		).length;
 		// Only the explicit index from create_index phase (none here), no duplicates
 		expect(autoIndexCount).toBe(0);
@@ -2091,14 +2166,16 @@ describe('FK enhancements — migration SQL', () => {
 describe('Column enhancements — migration SQL', () => {
 	it('should generate ALTER COLUMN TYPE with COLLATE', () => {
 		const col = makeCol({ name: 'name', type: 'string', collation: 'en_US' });
-		const diff = makeDiff([{
-			kind: 'alter_column_collation',
-			table: 'users',
-			column: 'name',
-			destructive: false,
-			details: '',
-			meta: { column: col },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'alter_column_collation',
+				table: 'users',
+				column: 'name',
+				destructive: false,
+				details: '',
+				meta: { column: col },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql).toHaveLength(1);
 		expect(sql[0]).toContain('ALTER COLUMN "name" TYPE');
@@ -2107,14 +2184,16 @@ describe('Column enhancements — migration SQL', () => {
 
 	it('should generate ADD GENERATED ALWAYS AS IDENTITY', () => {
 		const col = makeCol({ name: 'id', type: 'integer', identity: 'always' });
-		const diff = makeDiff([{
-			kind: 'alter_column_identity',
-			table: 'users',
-			column: 'id',
-			destructive: false,
-			details: '',
-			meta: { column: col, previousIdentity: undefined },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'alter_column_identity',
+				table: 'users',
+				column: 'id',
+				destructive: false,
+				details: '',
+				meta: { column: col, previousIdentity: undefined },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql).toHaveLength(1);
 		expect(sql[0]).toContain('ADD GENERATED ALWAYS AS IDENTITY');
@@ -2122,14 +2201,16 @@ describe('Column enhancements — migration SQL', () => {
 
 	it('should generate DROP IDENTITY IF EXISTS', () => {
 		const col = makeCol({ name: 'id', type: 'integer' });
-		const diff = makeDiff([{
-			kind: 'alter_column_identity',
-			table: 'users',
-			column: 'id',
-			destructive: false,
-			details: '',
-			meta: { column: col, previousIdentity: 'always' },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'alter_column_identity',
+				table: 'users',
+				column: 'id',
+				destructive: false,
+				details: '',
+				meta: { column: col, previousIdentity: 'always' },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql).toHaveLength(1);
 		expect(sql[0]).toContain('DROP IDENTITY IF EXISTS');
@@ -2137,68 +2218,80 @@ describe('Column enhancements — migration SQL', () => {
 
 	it('should generate SET GENERATED BY DEFAULT for identity type change', () => {
 		const col = makeCol({ name: 'id', type: 'integer', identity: 'byDefault' });
-		const diff = makeDiff([{
-			kind: 'alter_column_identity',
-			table: 'users',
-			column: 'id',
-			destructive: false,
-			details: '',
-			meta: { column: col, previousIdentity: 'always' },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'alter_column_identity',
+				table: 'users',
+				column: 'id',
+				destructive: false,
+				details: '',
+				meta: { column: col, previousIdentity: 'always' },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql).toHaveLength(1);
 		expect(sql[0]).toContain('SET GENERATED BY DEFAULT');
 	});
 
 	it('should generate COMMENT ON TABLE', () => {
-		const diff = makeDiff([{
-			kind: 'add_comment',
-			table: 'users',
-			destructive: false,
-			details: '',
-			meta: { comment: 'User accounts', target: 'table' },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'add_comment',
+				table: 'users',
+				destructive: false,
+				details: '',
+				meta: { comment: 'User accounts', target: 'table' },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql).toHaveLength(1);
 		expect(sql[0]).toMatch(/COMMENT ON TABLE "users" IS 'User accounts'/);
 	});
 
 	it('should generate COMMENT ON COLUMN', () => {
-		const diff = makeDiff([{
-			kind: 'add_comment',
-			table: 'users',
-			column: 'email',
-			destructive: false,
-			details: '',
-			meta: { comment: 'Primary email', target: 'column' },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'add_comment',
+				table: 'users',
+				column: 'email',
+				destructive: false,
+				details: '',
+				meta: { comment: 'Primary email', target: 'column' },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql).toHaveLength(1);
-		expect(sql[0]).toMatch(/COMMENT ON COLUMN "users"\."email" IS 'Primary email'/);
+		expect(sql[0]).toMatch(
+			/COMMENT ON COLUMN "users"\."email" IS 'Primary email'/,
+		);
 	});
 
 	it('should generate COMMENT IS NULL for drop_comment on table', () => {
-		const diff = makeDiff([{
-			kind: 'drop_comment',
-			table: 'users',
-			destructive: false,
-			details: '',
-			meta: { target: 'table' },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'drop_comment',
+				table: 'users',
+				destructive: false,
+				details: '',
+				meta: { target: 'table' },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql).toHaveLength(1);
 		expect(sql[0]).toMatch(/COMMENT ON TABLE "users" IS NULL/);
 	});
 
 	it('should generate COMMENT IS NULL for drop_comment on column', () => {
-		const diff = makeDiff([{
-			kind: 'drop_comment',
-			table: 'users',
-			column: 'email',
-			destructive: false,
-			details: '',
-			meta: { target: 'column' },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'drop_comment',
+				table: 'users',
+				column: 'email',
+				destructive: false,
+				details: '',
+				meta: { target: 'column' },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql).toHaveLength(1);
 		expect(sql[0]).toMatch(/COMMENT ON COLUMN "users"\."email" IS NULL/);
@@ -2230,26 +2323,313 @@ describe('Column enhancements — migration SQL', () => {
 	});
 
 	it('should escape single quotes in comments', () => {
-		const diff = makeDiff([{
-			kind: 'add_comment',
-			table: 'users',
-			destructive: false,
-			details: '',
-			meta: { comment: "O'Brien's table", target: 'table' },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'add_comment',
+				table: 'users',
+				destructive: false,
+				details: '',
+				meta: { comment: "O'Brien's table", target: 'table' },
+			},
+		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql[0]).toContain("O''Brien''s table");
 	});
 
 	it('should apply schema prefix to comment statements', () => {
-		const diff = makeDiff([{
-			kind: 'add_comment',
-			table: 'users',
-			destructive: false,
-			details: '',
-			meta: { comment: 'Scoped table', target: 'table' },
-		}]);
+		const diff = makeDiff([
+			{
+				kind: 'add_comment',
+				table: 'users',
+				destructive: false,
+				details: '',
+				meta: { comment: 'Scoped table', target: 'table' },
+			},
+		]);
 		const sql = generateMigrationSQL(diff, { schemaName: 'myschema' });
 		expect(sql[0]).toContain('"myschema"."users"');
+	});
+});
+
+// ============================================================================
+// Extensions
+// ============================================================================
+
+describe('Extensions — migration SQL', () => {
+	it('should generate CREATE EXTENSION IF NOT EXISTS', () => {
+		const diff = makeDiff([
+			{
+				kind: 'create_extension',
+				table: '',
+				destructive: false,
+				details: 'Create extension "uuid-ossp"',
+				meta: { extension: 'uuid-ossp' },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql).toHaveLength(1);
+		expect(sql[0]).toBe('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";');
+	});
+
+	it('should generate DROP EXTENSION IF EXISTS CASCADE', () => {
+		const diff = makeDiff([
+			{
+				kind: 'drop_extension',
+				table: '',
+				destructive: true,
+				details: 'Drop extension "uuid-ossp"',
+				meta: { extension: 'uuid-ossp' },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql).toHaveLength(1);
+		expect(sql[0]).toBe('DROP EXTENSION IF EXISTS "uuid-ossp" CASCADE;');
+	});
+
+	it('should order create_extension before create_table (phase 5 vs 6)', () => {
+		const tableIR: TableIR = {
+			name: 'users',
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+		};
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'users',
+				destructive: false,
+				details: 'Create table',
+				meta: { table: tableIR },
+			},
+			{
+				kind: 'create_extension',
+				table: '',
+				destructive: false,
+				details: 'Create extension',
+				meta: { extension: 'pgcrypto' },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		const extIdx = sql.findIndex((s) => s.includes('CREATE EXTENSION'));
+		const tableIdx = sql.findIndex((s) => s.includes('CREATE TABLE'));
+		expect(extIdx).toBeLessThan(tableIdx);
+	});
+
+	it('should generate DOWN SQL: create_extension reverses to DROP EXTENSION', () => {
+		const diff = makeDiff([
+			{
+				kind: 'create_extension',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { extension: 'uuid-ossp' },
+			},
+		]);
+		const sql = generateDownSQL(diff);
+		expect(sql[0]).toBe('DROP EXTENSION IF EXISTS "uuid-ossp" CASCADE;');
+	});
+
+	it('should generate DOWN SQL: drop_extension reverses to CREATE EXTENSION', () => {
+		const diff = makeDiff([
+			{
+				kind: 'drop_extension',
+				table: '',
+				destructive: true,
+				details: '',
+				meta: { extension: 'uuid-ossp' },
+			},
+		]);
+		const sql = generateDownSQL(diff);
+		expect(sql[0]).toBe('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";');
+	});
+});
+
+// ============================================================================
+// Sequences
+// ============================================================================
+
+describe('Sequences — migration SQL', () => {
+	it('should generate CREATE SEQUENCE with all options', () => {
+		const seq: SequenceIR = {
+			name: 'order_seq',
+			startWith: 100,
+			incrementBy: 5,
+			minValue: 1,
+			maxValue: 9999,
+			cycle: true,
+		};
+		const diff = makeDiff([
+			{
+				kind: 'create_sequence',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { sequence: seq },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toBe(
+			'CREATE SEQUENCE "order_seq" START WITH 100 INCREMENT BY 5 MINVALUE 1 MAXVALUE 9999 CYCLE;',
+		);
+	});
+
+	it('should generate CREATE SEQUENCE without options', () => {
+		const seq: SequenceIR = { name: 'simple_seq' };
+		const diff = makeDiff([
+			{
+				kind: 'create_sequence',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { sequence: seq },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toBe('CREATE SEQUENCE "simple_seq";');
+	});
+
+	it('should generate CREATE SEQUENCE with schema prefix', () => {
+		const seq: SequenceIR = { name: 'order_seq', startWith: 1 };
+		const diff = makeDiff([
+			{
+				kind: 'create_sequence',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { sequence: seq },
+			},
+		]);
+		const sql = generateMigrationSQL(diff, { schemaName: 'myschema' });
+		expect(sql[0]).toBe('CREATE SEQUENCE "myschema"."order_seq" START WITH 1;');
+	});
+
+	it('should generate ALTER SEQUENCE', () => {
+		const seq: SequenceIR = {
+			name: 'order_seq',
+			incrementBy: 10,
+			cycle: false,
+		};
+		const diff = makeDiff([
+			{
+				kind: 'alter_sequence',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { sequence: seq },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toBe('ALTER SEQUENCE "order_seq" INCREMENT BY 10 NO CYCLE;');
+	});
+
+	it('should generate ALTER SEQUENCE with CYCLE', () => {
+		const seq: SequenceIR = { name: 'order_seq', cycle: true };
+		const diff = makeDiff([
+			{
+				kind: 'alter_sequence',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { sequence: seq },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toBe('ALTER SEQUENCE "order_seq" CYCLE;');
+	});
+
+	it('should generate DROP SEQUENCE IF EXISTS CASCADE', () => {
+		const seq: SequenceIR = { name: 'order_seq' };
+		const diff = makeDiff([
+			{
+				kind: 'drop_sequence',
+				table: '',
+				destructive: true,
+				details: '',
+				meta: { sequence: seq },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toBe('DROP SEQUENCE IF EXISTS "order_seq" CASCADE;');
+	});
+
+	it('should order create_sequence before create_table (phase 5 vs 6)', () => {
+		const tableIR: TableIR = {
+			name: 'users',
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+		};
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'users',
+				destructive: false,
+				details: 'Create table',
+				meta: { table: tableIR },
+			},
+			{
+				kind: 'create_sequence',
+				table: '',
+				destructive: false,
+				details: 'Create sequence',
+				meta: { sequence: { name: 'order_seq' } },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		const seqIdx = sql.findIndex((s) => s.includes('CREATE SEQUENCE'));
+		const tableIdx = sql.findIndex((s) => s.includes('CREATE TABLE'));
+		expect(seqIdx).toBeLessThan(tableIdx);
+	});
+
+	it('should generate DOWN SQL: create_sequence reverses to DROP SEQUENCE', () => {
+		const seq: SequenceIR = { name: 'order_seq' };
+		const diff = makeDiff([
+			{
+				kind: 'create_sequence',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { sequence: seq },
+			},
+		]);
+		const sql = generateDownSQL(diff);
+		expect(sql[0]).toBe('DROP SEQUENCE IF EXISTS "order_seq" CASCADE;');
+	});
+
+	it('should generate DOWN SQL: drop_sequence reverses to CREATE SEQUENCE', () => {
+		const seq: SequenceIR = { name: 'order_seq', startWith: 1, incrementBy: 5 };
+		const diff = makeDiff([
+			{
+				kind: 'drop_sequence',
+				table: '',
+				destructive: true,
+				details: '',
+				meta: { sequence: seq },
+			},
+		]);
+		const sql = generateDownSQL(diff);
+		expect(sql[0]).toBe(
+			'CREATE SEQUENCE "order_seq" START WITH 1 INCREMENT BY 5;',
+		);
+	});
+
+	it('should generate DOWN SQL: alter_sequence reverses to previous state', () => {
+		const prevSeq: SequenceIR = { name: 'order_seq', incrementBy: 1 };
+		const diff = makeDiff([
+			{
+				kind: 'alter_sequence',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: {
+					sequence: { name: 'order_seq', incrementBy: 10 },
+					previousSequence: prevSeq,
+				},
+			},
+		]);
+		const sql = generateDownSQL(diff);
+		expect(sql[0]).toBe('ALTER SEQUENCE "order_seq" INCREMENT BY 1;');
 	});
 });

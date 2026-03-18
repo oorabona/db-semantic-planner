@@ -15,6 +15,7 @@ import type {
 	ForeignKeyIR,
 	IndexIR,
 	ModelIR,
+	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
 import {
@@ -57,7 +58,14 @@ export type ChangeKind =
 	| 'alter_column_identity'
 	// Comments
 	| 'add_comment'
-	| 'drop_comment';
+	| 'drop_comment'
+	// Extensions
+	| 'create_extension'
+	| 'drop_extension'
+	// Sequences
+	| 'create_sequence'
+	| 'alter_sequence'
+	| 'drop_sequence';
 
 export interface SchemaChange {
 	readonly kind: ChangeKind;
@@ -133,6 +141,12 @@ export function compareSchemata(
 
 	// 0. Compare ENUM types (schema-level, before tables)
 	compareEnums(schema, db, changes);
+
+	// 0a. Compare extensions (schema-level)
+	compareExtensions(schema, db, changes);
+
+	// 0b. Compare sequences (schema-level, before tables)
+	compareSequences(schema, db, changes);
 
 	// 1. Tables that exist in schema but not in DB → create_table
 	for (const [name, schemaTable] of schemaTables) {
@@ -836,6 +850,100 @@ function compareEnums(
 				destructive: true,
 				details: `Drop enum "${name}"`,
 				meta: { enum: enumDef },
+			});
+		}
+	}
+}
+
+// ============================================================================
+// Extension Diff
+// ============================================================================
+
+function compareExtensions(
+	schema: ModelIR,
+	db: ModelIR,
+	changes: SchemaChange[],
+): void {
+	const schemaExts = new Set(schema.extensions ?? []);
+	const dbExts = new Set(db.extensions ?? []);
+
+	for (const ext of schemaExts) {
+		if (!dbExts.has(ext)) {
+			changes.push({
+				kind: 'create_extension',
+				table: '',
+				destructive: false,
+				details: `Create extension "${ext}"`,
+				meta: { extension: ext },
+			});
+		}
+	}
+
+	for (const ext of dbExts) {
+		if (!schemaExts.has(ext)) {
+			changes.push({
+				kind: 'drop_extension',
+				table: '',
+				destructive: true,
+				details: `Drop extension "${ext}"`,
+				meta: { extension: ext },
+			});
+		}
+	}
+}
+
+// ============================================================================
+// Sequence Diff
+// ============================================================================
+
+function compareSequences(
+	schema: ModelIR,
+	db: ModelIR,
+	changes: SchemaChange[],
+): void {
+	const schemaSeqs = schema.sequences ?? new Map<string, SequenceIR>();
+	const dbSeqs = db.sequences ?? new Map<string, SequenceIR>();
+
+	// Sequences in schema but not in DB → create
+	for (const [name, seq] of schemaSeqs) {
+		if (!dbSeqs.has(name)) {
+			changes.push({
+				kind: 'create_sequence',
+				table: '',
+				destructive: false,
+				details: `Create sequence "${name}"`,
+				meta: { sequence: seq },
+			});
+		} else {
+			const dbSeq = dbSeqs.get(name)!;
+			// Compare relevant properties
+			if (
+				seq.startWith !== dbSeq.startWith ||
+				seq.incrementBy !== dbSeq.incrementBy ||
+				seq.minValue !== dbSeq.minValue ||
+				seq.maxValue !== dbSeq.maxValue ||
+				seq.cycle !== dbSeq.cycle
+			) {
+				changes.push({
+					kind: 'alter_sequence',
+					table: '',
+					destructive: false,
+					details: `Alter sequence "${name}"`,
+					meta: { sequence: seq, previousSequence: dbSeq },
+				});
+			}
+		}
+	}
+
+	// Sequences in DB but not in schema → drop
+	for (const [name, seq] of dbSeqs) {
+		if (!schemaSeqs.has(name)) {
+			changes.push({
+				kind: 'drop_sequence',
+				table: '',
+				destructive: true,
+				details: `Drop sequence "${name}"`,
+				meta: { sequence: seq },
 			});
 		}
 	}
