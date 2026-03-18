@@ -343,6 +343,129 @@ export function compileUpdate(
 /**
  * Compile a DELETE statement from configuration.
  */
+
+/**
+ * Configuration for batch UPDATE via unnest (BATCH-001).
+ */
+export interface BatchUpdateConfig {
+	/** Target table name */
+	table: string;
+	/** Column(s) used to join for WHERE clause */
+	matchColumns: string[];
+	/** All columns (match + update), extracted from updates[0] */
+	allColumns: string[];
+	/** Column-major arrays: [[match_vals...], [update_vals...], ...] */
+	columnArrays: unknown[][];
+	/** Optional scalar SET assignments applied to all rows */
+	scalarSet?: { column: string; value: unknown }[];
+	/** Columns to return (RETURNING clause) */
+	returning?: string[];
+	/** Column database types for type-cast emission */
+	columnTypes?: Record<string, string>;
+}
+
+/**
+ * Compile a batch UPDATE statement using the unnest FROM strategy (BATCH-001).
+ *
+ * Generates:
+ *   UPDATE "table" SET "update_col" = t."update_col" [, "scalar_col" = $N]
+ *   FROM unnest(CAST($1 AS type[]), CAST($2 AS type[])) AS t("match_col", "update_col")
+ *   WHERE "table"."match_col" = t."match_col"
+ *   [RETURNING ...]
+ */
+export function compileUnnestUpdate(
+	config: BatchUpdateConfig,
+	ctx: CompilerContext,
+	state: CompilerState,
+): Node {
+	const naming = ctx.naming;
+	const { table, matchColumns, allColumns, columnArrays, columnTypes } = config;
+	const dbTable = naming.toDatabase(table);
+	const updateColumns = allColumns.filter((c) => !matchColumns.includes(c));
+
+	// Build unnest arguments: CAST($N AS type[]) for each column
+	const unnestArgs: Node[] = allColumns.map((col, i) => {
+		const colArray: unknown[] = columnArrays[i] ?? [];
+		const sampleValue = colArray.find((v) => v !== null && v !== undefined);
+		const pgArrayType = inferPgArrayType(col, columnTypes, sampleValue);
+		// pgArrayType is already "type[]"; strip [] to get base type for createTypeCastParamRef
+		const pgBaseType = pgArrayType.endsWith('[]')
+			? pgArrayType.slice(0, -2)
+			: pgArrayType;
+
+		state.parameters.push(colArray);
+		state.paramIndex++;
+		const paramIdx = state.paramIndex;
+
+		return createTypeCastParamRef(paramIdx, pgBaseType, true);
+	});
+
+	// Build: FROM unnest(CAST($1 AS int4[]), ...) AS t("col1", "col2", ...)
+	const unnestCall = funcCall('unnest', unnestArgs);
+	const rangeFunction: Node = {
+		RangeFunction: {
+			functions: [{ List: { items: [unnestCall] } }],
+			alias: {
+				aliasname: 't',
+				colnames: allColumns.map((c) => ({
+					String: { sval: naming.toDatabase(c) },
+				})),
+			},
+		},
+	};
+
+	// Build SET clause: update cols = t."col", scalar cols = $N
+	const setClause: Array<{ column: string; value: Node }> = [
+		// Array-sourced update columns: "col" = t."col"
+		...updateColumns.map((col) => ({
+			column: naming.toDatabase(col),
+			value: columnRef(col, 't', undefined, naming),
+		})),
+		// Scalar SET from scalarSet (e.g. .set({ confidence: 0.85 }))
+		...(config.scalarSet ?? []).map(({ column, value }) => ({
+			column: naming.toDatabase(column),
+			value: valueToNode(value, state, columnTypes?.[column]),
+		})),
+	];
+
+	// Build WHERE: "table"."match_col" = t."match_col" [AND ...]
+	const matchConditions: Node[] = matchColumns.map((col) => ({
+		A_Expr: {
+			kind: 'AEXPR_OP',
+			name: [{ String: { sval: '=' } }],
+			lexpr: columnRef(col, dbTable, undefined, naming),
+			rexpr: columnRef(col, 't', undefined, naming),
+		},
+	}));
+
+	const whereClause: Node =
+		matchConditions.length === 1
+			? matchConditions[0]!
+			: {
+					BoolExpr: {
+						boolop: 'AND_EXPR',
+						args: matchConditions,
+					},
+				};
+
+	// Build RETURNING clause if specified
+	const returningList = buildReturningList(config.returning, dbTable, ctx);
+
+	// Build UPDATE statement
+	const options: UpdateOptions = {
+		table,
+		set: setClause,
+		naming,
+		from: [rangeFunction],
+		where: whereClause,
+	};
+	if (ctx.schema) options.schema = ctx.schema;
+	if (returningList) options.returning = returningList;
+
+	return updateStmt(options);
+}
+
+
 export function compileDelete(
 	config: DeleteConfig,
 	ctx: CompilerContext,

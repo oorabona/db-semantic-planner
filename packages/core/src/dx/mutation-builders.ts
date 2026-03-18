@@ -6,6 +6,7 @@
 
 import type { Adapter, CompiledQuery, CompileOptions } from '../adapter.js';
 import type {
+	BatchUpdateIntent,
 	DeleteIntent,
 	InsertIntent,
 	UpdateIntent,
@@ -14,6 +15,7 @@ import type {
 	UpsertIntent,
 	WhereIntent,
 } from '../intent-ast.js';
+import type { MutationIntent } from './hooks.js';
 import type { ModelIR } from '../model-ir.js';
 import {
 	ExecutionError,
@@ -48,7 +50,12 @@ export interface MutationDump {
 	/** Bound parameter values */
 	readonly parameters: readonly unknown[];
 	/** The mutation intent */
-	readonly intent: InsertIntent | UpdateIntent | DeleteIntent | UpsertIntent;
+	readonly intent:
+		| InsertIntent
+		| UpdateIntent
+		| BatchUpdateIntent
+		| DeleteIntent
+		| UpsertIntent;
 	/** Optional metadata */
 	readonly meta?: {
 		readonly schema?: string;
@@ -82,7 +89,12 @@ type MutationBaseOpts = {
  */
 abstract class MutationBuilderBase<
 	T,
-	TIntent extends InsertIntent | UpdateIntent | DeleteIntent | UpsertIntent,
+	TIntent extends
+		| InsertIntent
+		| UpdateIntent
+		| BatchUpdateIntent
+		| DeleteIntent
+		| UpsertIntent,
 > {
 	protected readonly table: string;
 	protected readonly model: ModelIR;
@@ -312,7 +324,7 @@ abstract class MutationBuilderBase<
 
 	/** Extract cardinality and data from mutation intent */
 	private extractIntentData(
-		intent: InsertIntent | UpdateIntent | DeleteIntent | UpsertIntent,
+		intent: TIntent,
 	): { cardinality: 'single' | 'bulk'; data: unknown } {
 		if (intent.type === 'insert' || intent.type === 'upsert') {
 			const values = (intent as InsertIntent | UpsertIntent).values;
@@ -325,6 +337,13 @@ abstract class MutationBuilderBase<
 			return {
 				cardinality: 'single',
 				data: (intent as UpdateIntent).set,
+			};
+		}
+		if (intent.type === 'batchUpdate') {
+			const updates = (intent as BatchUpdateIntent).updates;
+			return {
+				cardinality: 'bulk',
+				data: updates,
 			};
 		}
 		// delete — no data
@@ -436,11 +455,13 @@ export class InsertBuilder<T = void> extends MutationBuilderBase<
  */
 export class UpdateBuilder<T = void> extends MutationBuilderBase<
 	T,
-	UpdateIntent
+	UpdateIntent | BatchUpdateIntent
 > {
 	private readonly setData: Record<string, unknown>;
 	private readonly whereIntent: WhereIntent | undefined;
 	private readonly allowAllFlag: boolean;
+	private readonly batchMatchColumns: readonly string[] | undefined;
+	private readonly batchData: readonly Record<string, unknown>[] | undefined;
 
 	protected readonly operationName = 'update';
 
@@ -450,17 +471,22 @@ export class UpdateBuilder<T = void> extends MutationBuilderBase<
 			where?: WhereIntent | undefined;
 			allowAll?: boolean | undefined;
 			returning?: readonly string[] | undefined;
+			batchMatchColumns?: readonly string[] | undefined;
+			batchData?: readonly Record<string, unknown>[] | undefined;
 		},
 	) {
 		super(opts);
 		this.setData = opts.set ?? {};
 		this.whereIntent = opts.where;
 		this.allowAllFlag = opts.allowAll ?? false;
+		this.batchMatchColumns = opts.batchMatchColumns;
+		this.batchData = opts.batchData;
 	}
 
 	/**
 	 * Set fields to update.
 	 * Multiple calls merge fields (last value wins).
+	 * When combined with batchSet(), these become scalar SET assignments applied to all rows.
 	 */
 	set(data: Record<string, unknown>): UpdateBuilder<T> {
 		return new UpdateBuilder({
@@ -469,6 +495,8 @@ export class UpdateBuilder<T = void> extends MutationBuilderBase<
 			where: this.whereIntent,
 			allowAll: this.allowAllFlag,
 			returning: this.returningColumns,
+			batchMatchColumns: this.batchMatchColumns,
+			batchData: this.batchData,
 		});
 	}
 
@@ -482,6 +510,8 @@ export class UpdateBuilder<T = void> extends MutationBuilderBase<
 			where: condition,
 			allowAll: this.allowAllFlag,
 			returning: this.returningColumns,
+			batchMatchColumns: this.batchMatchColumns,
+			batchData: this.batchData,
 		});
 	}
 
@@ -507,10 +537,77 @@ export class UpdateBuilder<T = void> extends MutationBuilderBase<
 			where: this.whereIntent,
 			allowAll: this.allowAllFlag,
 			returning: columns,
+			batchMatchColumns: this.batchMatchColumns,
+			batchData: this.batchData,
 		});
 	}
 
-	protected buildIntent(): UpdateIntent {
+	/**
+	 * Batch update multiple rows using unnest FROM strategy (BATCH-001).
+	 *
+	 * Generates:
+	 *   UPDATE "table" SET "col" = t."col"
+	 *   FROM unnest(CAST($1 AS type[]), CAST($2 AS type[])) AS t("match_col", "col")
+	 *   WHERE "table"."match_col" = t."match_col"
+	 *
+	 * Can be chained with .set() for scalar values applied to all rows.
+	 *
+	 * @param matchColumn - Column(s) used to identify rows to update
+	 * @param data - Array of row objects containing match + update column values
+	 *
+	 * @example
+	 * ```typescript
+	 * await orm.update('calls')
+	 *   .batchSet('id', [{ id: 10, callee_id: 42 }, { id: 20, callee_id: 43 }])
+	 *   .execute();
+	 * ```
+	 */
+	batchSet(
+		matchColumn: string | string[],
+		data: Record<string, unknown>[],
+	): UpdateBuilder<T> {
+		const matchColumns = Array.isArray(matchColumn)
+			? matchColumn
+			: [matchColumn];
+		return new UpdateBuilder({
+			...this.baseOpts,
+			set: this.setData,
+			where: this.whereIntent,
+			allowAll: this.allowAllFlag,
+			returning: this.returningColumns,
+			batchMatchColumns: matchColumns,
+			batchData: data,
+		});
+	}
+
+	protected buildIntent(): UpdateIntent | BatchUpdateIntent {
+		// Batch path
+		if (this.batchMatchColumns && this.batchData) {
+			if (this.batchData.length === 0) {
+				throw new InvalidOperationError(
+					'update',
+					'batchSet requires at least one row',
+				);
+			}
+
+			const intent: BatchUpdateIntent = {
+				type: 'batchUpdate',
+				table: this.table,
+				matchColumns: this.batchMatchColumns,
+				updates: this.batchData,
+			};
+
+			if (Object.keys(this.setData).length > 0) {
+				Object.assign(intent, { scalarSet: this.setData });
+			}
+			if (this.returningColumns && this.returningColumns.length > 0) {
+				Object.assign(intent, { returning: this.returningColumns });
+			}
+
+			return intent;
+		}
+
+		// Regular update path
 		if (Object.keys(this.setData).length === 0) {
 			throw new InvalidOperationError('update', 'No fields to update');
 		}
@@ -543,9 +640,12 @@ export class UpdateBuilder<T = void> extends MutationBuilderBase<
 
 	protected compileIntent(
 		adapter: Adapter,
-		intent: UpdateIntent,
+		intent: UpdateIntent | BatchUpdateIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
+		if (intent.type === 'batchUpdate') {
+			return adapter.compileBatchUpdate(intent, options);
+		}
 		return adapter.compileUpdate(intent, options);
 	}
 }

@@ -10,12 +10,18 @@
  */
 
 import type { InferClause, Node, OnConflictClause } from '@pgsql/types';
-import { columnRef } from '../ast-helpers.js';
+import { columnRef, funcCall } from '../ast-helpers.js';
+import {
+	inferPgArrayType,
+	transposeToColumnArrays,
+	validateBatchCardinality,
+} from '../compiler-utils.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
 } from '../handlers/types.js';
+import { createTypeCastParamRef } from '../param-ref.js';
 import { buildReturningList } from './mutation-compiler.js';
 
 // ============================================================================
@@ -59,6 +65,8 @@ export interface UpsertConfig {
 	useExcluded?: boolean;
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
+	/** Optional column type hints for unnest casting (schema-driven) */
+	columnTypes?: Record<string, string>;
 }
 
 // ============================================================================
@@ -186,6 +194,99 @@ export function compileUpsert(
 		},
 	};
 }
+
+
+/**
+ * Compile a UPSERT statement using the unnest strategy for large batches.
+ *
+ * Generates:
+ *   INSERT INTO "table" ("col1", "col2")
+ *   SELECT unnest($1::type[]), unnest($2::type[])
+ *   ON CONFLICT ("conflict_col") DO UPDATE SET "col2" = EXCLUDED."col2"
+ *   [RETURNING ...]
+ *
+ * This avoids the PostgreSQL 65535 parameter limit. Uses N parameters
+ * (one per column) regardless of row count.
+ */
+export function compileUnnestUpsert(
+	config: UpsertConfig,
+	ctx: CompilerContext,
+	state: CompilerState,
+): Node {
+	const naming = ctx.naming;
+	const dbTable = naming.toDatabase(config.table);
+	const { columns, values, columnTypes } = config;
+
+	// Validate cardinality before any SQL generation (INV-02)
+	validateBatchCardinality(columns, values);
+
+	// Transpose row-major → column-major
+	const columnArrays = transposeToColumnArrays(columns, values);
+
+	// Build SELECT target list: unnest($N::type[]) AS "col"
+	const targetList: Node[] = columns.map((col, i) => {
+		const colArray: unknown[] = columnArrays[i] ?? [];
+
+		// Find a non-null sample value for runtime type fallback
+		const sampleValue = colArray.find((v) => v !== null && v !== undefined);
+
+		// Strip trailing [] to get base type
+		const pgArrayType = inferPgArrayType(col, columnTypes, sampleValue);
+		const pgBaseType = pgArrayType.endsWith('[]')
+			? pgArrayType.slice(0, -2)
+			: pgArrayType;
+
+		// Add array parameter and get its 1-based index
+		state.parameters.push(colArray);
+		state.paramIndex++;
+		const paramIdx = state.paramIndex;
+
+		// Build: unnest($N::base_type[])
+		const typeCasted = createTypeCastParamRef(paramIdx, pgBaseType, true);
+		const unnestCall = funcCall('unnest', [typeCasted]);
+
+		// ResTarget with column alias: unnest(...) AS "colname"
+		return {
+			ResTarget: {
+				name: naming.toDatabase(col),
+				val: unnestCall,
+			},
+		};
+	});
+
+	// Build the SELECT statement for INSERT ... SELECT
+	const selectQuery: Node = {
+		SelectStmt: {
+			targetList,
+		},
+	};
+
+	// Build ON CONFLICT clause (same as VALUES path)
+	const onConflict = buildOnConflictClause(config, ctx, state);
+
+	// Build RETURNING clause if specified
+	const returningList = buildReturningList(config.returning, dbTable, ctx);
+
+	// Build INSERT INTO "table" ("col1", "col2") <selectQuery> ON CONFLICT ...
+	return {
+		InsertStmt: {
+			relation: {
+				relname: dbTable,
+				...(ctx.schema && { schemaname: ctx.schema }),
+				inh: true,
+				relpersistence: 'p',
+			},
+			cols: columns.map((c) => ({
+				ResTarget: { name: naming.toDatabase(c) },
+			})),
+			selectStmt: selectQuery,
+			onConflictClause: onConflict,
+			...(returningList && { returningList }),
+			override: 'OVERRIDING_NOT_SET',
+		},
+	};
+}
+
 
 // ============================================================================
 // Helpers

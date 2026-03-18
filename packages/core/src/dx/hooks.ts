@@ -23,6 +23,7 @@
  */
 
 import type {
+	BatchUpdateIntent,
 	DeleteIntent,
 	InsertIntent,
 	QueryIntent,
@@ -63,14 +64,21 @@ export type QueryHookContext = {
 };
 
 /** Union of all mutation intent types */
+/** Union of all mutation intent types */
 export type MutationIntent =
 	| InsertIntent
 	| UpdateIntent
+	| BatchUpdateIntent
 	| DeleteIntent
 	| UpsertIntent;
 
 /** Mutation operation types */
-export type MutationOperation = 'insert' | 'update' | 'delete' | 'upsert';
+export type MutationOperation =
+	| 'insert'
+	| 'update'
+	| 'batchUpdate'
+	| 'delete'
+	| 'upsert';
 
 /**
  * Context passed to mutation hooks (beforeMutation/afterMutation).

@@ -13,6 +13,7 @@ import type {
 	AdapterCapabilities,
 	AdapterLogger,
 	AdapterStreamOptions,
+	BatchUpdateIntent,
 	CompiledQuery,
 	CompileOptions,
 	CompileResultWithIncludes,
@@ -64,10 +65,13 @@ import {
 	introspect as introspectDb,
 } from './introspection.js';
 import {
+	type BatchUpdateConfig,
 	compileDelete as compileDeleteMutation,
 	compileInsertFrom as compileInsertFromMutation,
 	compileInsert as compileInsertMutation,
 	compileUnnestInsert as compileUnnestInsertMutation,
+	compileUnnestUpdate as compileUnnestUpdateMutation,
+	compileUnnestUpsert as compileUnnestUpsertMutation,
 	compileUpdate as compileUpdateMutation,
 	compileUpsertFrom as compileUpsertFromMutation,
 	compileUpsert as compileUpsertMutation,
@@ -79,7 +83,10 @@ import {
 	type UpsertConfig,
 	type UpsertFromConfig,
 } from './mutations/index.js';
-import { validateBatchCardinality } from './compiler-utils.js';
+import {
+	transposeToColumnArrays,
+	validateBatchCardinality,
+} from './compiler-utils.js';
 import {
 	getNamingPluginForDbCasing,
 	type NamingPlugin,
@@ -992,6 +999,91 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		};
 	}
 
+
+	/**
+	 * Compile a batch update intent to executable SQL using unnest FROM strategy (BATCH-001).
+	 *
+	 * Generates:
+	 *   UPDATE "table" SET "update_col" = t."update_col" [, "scalar_col" = $N]
+	 *   FROM unnest(CAST($1 AS type[]), CAST($2 AS type[])) AS t("match_col", "update_col")
+	 *   WHERE "table"."match_col" = t."match_col"
+	 *   [RETURNING ...]
+	 */
+	compileBatchUpdate(
+		intent: BatchUpdateIntent,
+		options?: CompileOptions,
+	): CompiledQuery {
+		const schemaName = this.schemaName ?? options?.schemaName;
+
+		const ctx: CompilerContext = {
+			naming: this.naming,
+			rootTable: intent.table,
+			...(schemaName !== undefined && { schema: schemaName }),
+			maxRecursiveDepth: 100,
+		};
+		const state = createCompilerState();
+
+		if (intent.updates.length === 0) {
+			throw new InvalidOperationError(
+				'update',
+				'batchSet requires at least one row',
+			);
+		}
+
+		// Extract all columns from the first row
+		const allColumns = Object.keys(intent.updates[0]!);
+		const matchColumns = [...intent.matchColumns];
+
+		// Validate that all match columns appear in the data
+		for (const mc of matchColumns) {
+			if (!allColumns.includes(mc)) {
+				throw new InvalidOperationError(
+					'update',
+					`Match column "${mc}" not found in update data. Each row must include the match column(s).`,
+				);
+			}
+		}
+
+		// Build row-major values matrix and validate cardinality
+		const values = intent.updates.map((row) =>
+			allColumns.map((col) => row[col]),
+		);
+		validateBatchCardinality(allColumns, values);
+
+		// Transpose to column-major arrays
+		const columnArrays = transposeToColumnArrays(allColumns, values);
+
+		// Get column types for type inference
+		const columnTypes = this.getColumnTypes(intent.table, allColumns);
+
+		// Build scalar SET entries from scalarSet
+		const scalarSet = intent.scalarSet
+			? Object.entries(intent.scalarSet).map(([column, value]) => ({
+					column,
+					value,
+				}))
+			: undefined;
+
+		const config: BatchUpdateConfig = {
+			table: intent.table,
+			matchColumns,
+			allColumns,
+			columnArrays,
+			...(scalarSet && { scalarSet }),
+			...(intent.returning && { returning: [...intent.returning] }),
+			...(columnTypes && { columnTypes }),
+		};
+
+		const ast = compileUnnestUpdateMutation(config, ctx, state);
+		const sql = deparseQuoted(ast);
+
+		return {
+			sql,
+			parameters: state.parameters,
+		};
+	}
+
+
 	/**
 	 * Compile a delete intent to executable SQL.
 	 */
@@ -1089,6 +1181,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			}
 		}
 
+		const columnTypes = this.getColumnTypes(intent.table, columns);
+
 		const config: UpsertConfig = {
 			table: intent.table,
 			columns,
@@ -1097,9 +1191,27 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			conflictAction,
 			...(updateColumns && { updateColumns }),
 			...(intent.returning && { returning: [...intent.returning] }),
+			...(columnTypes && { columnTypes }),
 		};
 
-		const ast = compileUpsertMutation(config, ctx, state);
+		// maxBatchSize guard (INV-07)
+		const maxBatchSize = options?.maxBatchSize;
+		if (maxBatchSize !== undefined && values.length > maxBatchSize) {
+			throw new InvalidOperationError(
+				'upsert',
+				`Batch size ${values.length} exceeds maxBatchSize ${maxBatchSize}`,
+			);
+		}
+
+		// Strategy switch: unnest for large batches, VALUES for small (INV-03)
+		const batchThreshold = options?.batchThreshold ?? 50;
+		const useUnnest =
+			values.length > 0 &&
+			(batchThreshold === 0 || values.length > batchThreshold);
+
+		const ast = useUnnest
+			? compileUnnestUpsertMutation(config, ctx, state)
+			: compileUpsertMutation(config, ctx, state);
 		const sql = deparseQuoted(ast);
 
 		return {
