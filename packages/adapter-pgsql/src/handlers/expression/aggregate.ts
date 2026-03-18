@@ -7,7 +7,7 @@
  */
 
 import type { Node } from '@pgsql/types';
-import { columnRef } from '../../ast-helpers.js';
+import { columnRef, funcCall } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -25,17 +25,15 @@ function buildAggregate(
 	column: string | undefined,
 	distinct: boolean,
 	ctx: CompilerContext,
+	filterNode?: Node,
 ): Node {
 	const isCountStar = funcName === 'count' && (!column || column === '*');
 
 	if (isCountStar) {
-		// COUNT(*)
-		return {
-			FuncCall: {
-				funcname: [{ String: { sval: 'count' } }],
-				agg_star: true,
-			},
-		};
+		return funcCall(funcName, [], {
+			star: true,
+			...(filterNode && { filter: filterNode }),
+		});
 	}
 
 	if (!column) {
@@ -45,13 +43,10 @@ function buildAggregate(
 	const tableAlias = ctx.currentAlias ?? ctx.rootTable;
 	const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
 
-	return {
-		FuncCall: {
-			funcname: [{ String: { sval: funcName.toLowerCase() } }],
-			args: [colRef],
-			...(distinct && { agg_distinct: true }),
-		},
-	};
+	return funcCall(funcName, [colRef], {
+		distinct,
+		...(filterNode && { filter: filterNode }),
+	});
 }
 
 /**
@@ -70,7 +65,7 @@ export const countHandler: ExpressionHandler = {
 		const column = decision.column;
 		const distinct =
 			decision.operator === 'countDistinct' || Boolean(decision.args?.[0]);
-		return buildAggregate('count', column, distinct, ctx);
+		return buildAggregate('count', column, distinct, ctx, decision.filterWhere);
 	},
 };
 
@@ -89,7 +84,7 @@ export const countDistinctHandler: ExpressionHandler = {
 		if (!column) {
 			throw new Error('COUNT DISTINCT requires a column');
 		}
-		return buildAggregate('count', column, true, ctx);
+		return buildAggregate('count', column, true, ctx, decision.filterWhere);
 	},
 };
 
@@ -104,7 +99,7 @@ export const sumHandler: ExpressionHandler = {
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
-		return buildAggregate('sum', decision.column, false, ctx);
+		return buildAggregate('sum', decision.column, false, ctx, decision.filterWhere);
 	},
 };
 
@@ -119,7 +114,7 @@ export const avgHandler: ExpressionHandler = {
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
-		return buildAggregate('avg', decision.column, false, ctx);
+		return buildAggregate('avg', decision.column, false, ctx, decision.filterWhere);
 	},
 };
 
@@ -134,7 +129,7 @@ export const minHandler: ExpressionHandler = {
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
-		return buildAggregate('min', decision.column, false, ctx);
+		return buildAggregate('min', decision.column, false, ctx, decision.filterWhere);
 	},
 };
 
@@ -149,7 +144,7 @@ export const maxHandler: ExpressionHandler = {
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
-		return buildAggregate('max', decision.column, false, ctx);
+		return buildAggregate('max', decision.column, false, ctx, decision.filterWhere);
 	},
 };
 
@@ -168,6 +163,6 @@ export const genericAggregateHandler: ExpressionHandler = {
 		if (!funcName) {
 			throw new Error('Generic aggregate requires function name');
 		}
-		return buildAggregate(funcName, decision.column, false, ctx);
+		return buildAggregate(funcName, decision.column, false, ctx, decision.filterWhere);
 	},
 };
