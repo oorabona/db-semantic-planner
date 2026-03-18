@@ -13,6 +13,7 @@
 
 import { ModelIRImpl } from '@dbsp/core';
 import type {
+	CheckConstraintIR,
 	ColumnIR,
 	ColumnType,
 	ForeignKeyIR,
@@ -182,6 +183,39 @@ export async function introspect(
 		[schema],
 	);
 
+	// Step 5: Fetch CHECK constraints
+	const checksResult = await pool.query<{
+		name: string;
+		expression: string;
+		raw_table: string;
+	}>(
+		`SELECT
+		   c.conname AS name,
+		   pg_get_constraintdef(c.oid, false) AS expression,
+		   c.conrelid::regclass::text AS raw_table
+		 FROM pg_constraint c
+		 JOIN pg_namespace n ON n.oid = c.connamespace
+		 WHERE c.contype = 'c'
+		   AND n.nspname = $1`,
+		[schema],
+	);
+
+	// Group CHECK constraints by table (strip schema prefix if present)
+	const tableChecks = new Map<string, CheckConstraintIR[]>();
+	for (const ck of checksResult.rows) {
+		const tableName = ck.raw_table.replace(/^".*"\.|^.*\./u, '');
+		const checkIR: CheckConstraintIR = {
+			name: ck.name,
+			expression: ck.expression,
+		};
+		const existing = tableChecks.get(tableName);
+		if (existing) {
+			existing.push(checkIR);
+		} else {
+			tableChecks.set(tableName, [checkIR]);
+		}
+	}
+
 	// Group indexes by table
 	const tableIndexes = new Map<string, IndexIR[]>();
 	for (const idx of indexesResult.rows) {
@@ -189,7 +223,10 @@ export async function introspect(
 			name: idx.index_name,
 			columns: Array.isArray(idx.columns)
 				? idx.columns
-				: String(idx.columns).replace(/^\{|}$/g, '').split(',').filter(Boolean),
+				: String(idx.columns)
+						.replace(/^\{|}$/g, '')
+						.split(',')
+						.filter(Boolean),
 			...(idx.is_unique ? { unique: true } : {}),
 		};
 		const existing = tableIndexes.get(idx.table_name);
@@ -284,6 +321,7 @@ export async function introspect(
 			warnings.push(`Table "${tableName}" has no primary key`);
 		}
 
+		const checks = tableChecks.get(tableName);
 		const table: TableIR = {
 			name: tableName,
 			columns,
@@ -292,6 +330,7 @@ export async function introspect(
 				: {}),
 			foreignKeys,
 			indexes: tableIndexes.get(tableName) ?? [],
+			...(checks && checks.length > 0 ? { checkConstraints: checks } : {}),
 		};
 		tables.set(tableName, table);
 	}

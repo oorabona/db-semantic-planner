@@ -97,6 +97,19 @@ export function generateDDL(
 	}
 
 	// ========================================================================
+	// PASS 2.5: ALTER TABLE ADD CHECK CONSTRAINT
+	// ========================================================================
+	for (const table of tables) {
+		for (const check of table.checkConstraints ?? []) {
+			const qualifiedTable = qualifyTable(table.name, schemaName, naming);
+			const constraintName = quoteIdentifier(check.name);
+			statements.push(
+				`ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} ${check.expression};`,
+			);
+		}
+	}
+
+	// ========================================================================
 	// PASS 3: CREATE INDEX statements
 	// ========================================================================
 	for (const table of tables) {

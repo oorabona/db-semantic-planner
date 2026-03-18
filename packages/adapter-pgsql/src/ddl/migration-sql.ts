@@ -7,7 +7,13 @@
  * @module migration-sql
  */
 
-import type { ColumnIR, ForeignKeyIR, IndexIR, TableIR } from '@dbsp/types';
+import type {
+	CheckConstraintIR,
+	ColumnIR,
+	ForeignKeyIR,
+	IndexIR,
+	TableIR,
+} from '@dbsp/types';
 import type { SchemaChange, SchemaDiff } from './schema-diff.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
@@ -87,7 +93,7 @@ export function generateMigrationSQL(
 
 	// Group changes by phase for topological ordering
 	const phases: SchemaChange[][] = [
-		[], // 0: drop FK
+		[], // 0: drop FK, drop CHECK
 		[], // 1: drop index
 		[], // 2: drop column
 		[], // 3: drop PK
@@ -99,6 +105,7 @@ export function generateMigrationSQL(
 		[], // 9: add FK
 		[], // 10: alter FK (drop + re-add)
 		[], // 11: create index
+		[], // 12: add CHECK constraint
 	];
 
 	for (const change of changes) {
@@ -125,6 +132,7 @@ export function generateMigrationSQL(
 function getPhase(kind: SchemaChange['kind']): number {
 	switch (kind) {
 		case 'drop_foreign_key':
+		case 'drop_check_constraint':
 			return 0;
 		case 'drop_index':
 			return 1;
@@ -150,6 +158,8 @@ function getPhase(kind: SchemaChange['kind']): number {
 			return 10;
 		case 'create_index':
 			return 11;
+		case 'add_check_constraint':
+			return 12;
 	}
 }
 
@@ -256,6 +266,27 @@ function changeToUpSQL(
 			const schemaPrefix = schemaName ? `${q(schemaName)}.` : '';
 			return `DROP INDEX IF EXISTS ${schemaPrefix}${indexName};`;
 		}
+
+		case 'add_check_constraint': {
+			const check = change.meta?.check as CheckConstraintIR;
+			if (!check) return undefined;
+			const constraintName = q(check.name);
+			return (
+				'DO $$ BEGIN ALTER TABLE ' +
+				qualifyTable(change.table, schemaName) +
+				' ADD CONSTRAINT ' +
+				constraintName +
+				' ' +
+				check.expression +
+				'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;'
+			);
+		}
+
+		case 'drop_check_constraint': {
+			const check = change.meta?.check as CheckConstraintIR;
+			if (!check) return undefined;
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${q(check.name)};`;
+		}
 	}
 }
 
@@ -348,6 +379,26 @@ function changeToDownSQL(
 
 		case 'drop_index':
 			return `-- WARNING: Cannot reverse drop_index "${change.table}" -- index definition was lost`;
+
+		case 'add_check_constraint': {
+			const check = change.meta?.check as CheckConstraintIR | undefined;
+			if (!check) return undefined;
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${q(check.name)};`;
+		}
+
+		case 'drop_check_constraint': {
+			const check = change.meta?.check as CheckConstraintIR | undefined;
+			if (!check) return undefined;
+			return (
+				'DO $$ BEGIN ALTER TABLE ' +
+				qualifyTable(change.table, schemaName) +
+				' ADD CONSTRAINT ' +
+				q(check.name) +
+				' ' +
+				check.expression +
+				'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;'
+			);
+		}
 	}
 }
 

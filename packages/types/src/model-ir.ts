@@ -210,6 +210,17 @@ export interface ForeignKeyIR {
 }
 
 /**
+ * CHECK constraint definition
+ */
+export interface CheckConstraintIR {
+	/** Constraint name in database */
+	readonly name: string;
+
+	/** CHECK expression in canonical form (from pg_get_constraintdef) */
+	readonly expression: string;
+}
+
+/**
  * Index definition (single or composite)
  */
 export interface IndexIR {
@@ -241,6 +252,9 @@ export interface TableIR {
 
 	/** Index definitions */
 	readonly indexes: readonly IndexIR[];
+
+	/** CHECK constraints */
+	readonly checkConstraints?: readonly CheckConstraintIR[];
 
 	/**
 	 * Auto-generated pseudo-columns from self-referential FKs.

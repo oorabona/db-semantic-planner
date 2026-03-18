@@ -32,6 +32,7 @@ function createMockPool(
 	pks: QueryResult<any>,
 	fks: QueryResult<any>,
 	indexes: QueryResult<any>,
+	checks: QueryResult<any> = { rows: [] },
 ) {
 	return {
 		query: vi
@@ -39,7 +40,8 @@ function createMockPool(
 			.mockResolvedValueOnce(columns) // columns
 			.mockResolvedValueOnce(pks) // PKs
 			.mockResolvedValueOnce(fks) // FKs
-			.mockResolvedValueOnce(indexes), // indexes
+			.mockResolvedValueOnce(indexes) // indexes
+			.mockResolvedValueOnce(checks), // CHECK constraints
 	} as any;
 }
 
@@ -1933,7 +1935,7 @@ describe('introspection — hierarchy detection', () => {
 		);
 		expect(model.introspectedAt.getTime()).toBeLessThanOrEqual(after.getTime());
 		// Default schema = 'public' (passed to queries)
-		expect(pool.query).toHaveBeenCalledTimes(4);
+		expect(pool.query).toHaveBeenCalledTimes(5);
 		expect(pool.query.mock.calls[0][1]).toEqual(['public']);
 	});
 

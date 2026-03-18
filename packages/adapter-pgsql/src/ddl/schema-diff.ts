@@ -8,6 +8,7 @@
  */
 
 import type {
+	CheckConstraintIR,
 	ColumnIR,
 	DbCasing,
 	ForeignKeyIR,
@@ -16,8 +17,8 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import {
-	type NamingPlugin,
 	getNamingPluginForDbCasing,
+	type NamingPlugin,
 } from '../naming-plugin.js';
 
 // ============================================================================
@@ -42,7 +43,10 @@ export type ChangeKind =
 	| 'alter_foreign_key'
 	// Indexes
 	| 'create_index'
-	| 'drop_index';
+	| 'drop_index'
+	// CHECK constraints
+	| 'add_check_constraint'
+	| 'drop_check_constraint';
 
 export interface SchemaChange {
 	readonly kind: ChangeKind;
@@ -146,6 +150,16 @@ export function compareSchemata(
 					meta: { index: idx },
 				});
 			}
+			// Emit CHECK constraints for new table (phase 12, after indexes)
+			for (const check of schemaTable.checkConstraints ?? []) {
+				changes.push({
+					kind: 'add_check_constraint',
+					table: name,
+					destructive: false,
+					details: `Add CHECK constraint "${check.name}" ${check.expression}`,
+					meta: { check },
+				});
+			}
 			continue;
 		}
 
@@ -155,6 +169,7 @@ export function compareSchemata(
 		comparePrimaryKeys(schemaTable, dbTable, changes);
 		compareForeignKeys(schemaTable, dbTable, changes);
 		compareIndexes(schemaTable, dbTable, changes);
+		compareCheckConstraints(schemaTable, dbTable, changes);
 	}
 
 	// 2. Tables that exist in DB but not in schema → drop_table
@@ -291,7 +306,11 @@ function compareColumnDetails(
 			column: schema.name,
 			destructive: true,
 			details: `Change type of "${schema.name}" from ${db.originalDbType} to ${schema.originalDbType}`,
-			meta: { fromType: db.originalDbType, toType: schema.originalDbType, column: schema },
+			meta: {
+				fromType: db.originalDbType,
+				toType: schema.originalDbType,
+				column: schema,
+			},
 		});
 	} else if (!areTypesEquivalent(schema.type, db.type)) {
 		// Fall back to base type comparison (original behavior)
@@ -568,6 +587,68 @@ function indexKey(idx: IndexIR): string {
 // Summary Builder
 // ============================================================================
 
+// ============================================================================
+// compareCheckConstraints
+// ============================================================================
+function compareCheckConstraints(
+	schema: TableIR,
+	db: TableIR,
+	changes: SchemaChange[],
+): void {
+	const schemaChecks = schema.checkConstraints ?? [];
+	const dbChecks = db.checkConstraints ?? [];
+
+	// Build map by constraint name
+	const schemaMap = new Map(schemaChecks.map((c) => [c.name, c]));
+	const dbMap = new Map(dbChecks.map((c) => [c.name, c]));
+
+	// In schema but not in DB → add
+	for (const [name, check] of schemaMap) {
+		if (!dbMap.has(name)) {
+			changes.push({
+				kind: 'add_check_constraint',
+				table: schema.name,
+				destructive: false,
+				details: `Add CHECK constraint "${name}" ${check.expression}`,
+				meta: { check },
+			});
+		} else {
+			// Both have it — compare expression
+			const dbCheck = dbMap.get(name)!;
+			if (check.expression !== dbCheck.expression) {
+				// Expression changed → drop + re-add
+				changes.push({
+					kind: 'drop_check_constraint',
+					table: schema.name,
+					destructive: true,
+					details: `Drop CHECK constraint "${name}" (expression changed)`,
+					meta: { check: dbCheck },
+				});
+				changes.push({
+					kind: 'add_check_constraint',
+					table: schema.name,
+					destructive: false,
+					details: `Add CHECK constraint "${name}" ${check.expression}`,
+					meta: { check },
+				});
+			}
+		}
+	}
+
+	// In DB but not in schema → drop
+	for (const [name, check] of dbMap) {
+		if (!schemaMap.has(name)) {
+			changes.push({
+				kind: 'drop_check_constraint',
+				table: schema.name,
+				destructive: true,
+				details: `Drop CHECK constraint "${name}"`,
+				meta: { check },
+			});
+		}
+	}
+}
+
 function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 	const tables = { added: 0, dropped: 0 };
 	const columns = { added: 0, dropped: 0, altered: 0 };
@@ -595,10 +676,12 @@ function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 				break;
 			case 'add_primary_key':
 			case 'add_foreign_key':
+			case 'add_check_constraint':
 				constraints.added++;
 				break;
 			case 'drop_primary_key':
 			case 'drop_foreign_key':
+			case 'drop_check_constraint':
 				constraints.dropped++;
 				break;
 			case 'alter_foreign_key':
