@@ -403,7 +403,7 @@ describe('introspect', () => {
 
 		const mockQuery = pool.query as ReturnType<typeof vi.fn>;
 		// All 4 queries (columns, PKs, FKs, indexes) should pass 'tenant_1' as parameter
-		expect(mockQuery).toHaveBeenCalledTimes(4);
+		expect(mockQuery).toHaveBeenCalledTimes(5);
 		for (const call of mockQuery.mock.calls) {
 			expect(call[1]).toEqual(['tenant_1']);
 		}

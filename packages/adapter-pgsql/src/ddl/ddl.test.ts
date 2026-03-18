@@ -730,3 +730,150 @@ describe('DDL Generator', () => {
 		});
 	});
 });
+
+describe('CHECK constraints in DDL', () => {
+	it('should emit CHECK constraints after table creation', () => {
+		const schema = {
+			tables: new Map([
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								autoIncrement: true,
+							},
+							{ name: 'age', type: 'integer', nullable: false },
+						],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [
+							{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+						],
+					} satisfies TableIR,
+				],
+			]),
+			relations: new Map(),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema);
+		// CREATE TABLE comes first
+		expect(stmts[0]).toContain('CREATE TABLE');
+		// CHECK constraint statement comes after
+		const checkStmt = stmts.find((s) => s.includes('CHECK'));
+		expect(checkStmt).toBe(
+			'ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0));',
+		);
+	});
+
+	it('should emit no CHECK statements when table has no checkConstraints', () => {
+		const schema = {
+			tables: new Map([
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								autoIncrement: true,
+							},
+						],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+					} satisfies TableIR,
+				],
+			]),
+			relations: new Map(),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema);
+		const checkStmt = stmts.find((s) => s.includes('CHECK'));
+		expect(checkStmt).toBeUndefined();
+	});
+
+	it('should emit CHECK constraints after FK constraints and before indexes', () => {
+		const schema = {
+			tables: new Map([
+				[
+					'orders',
+					{
+						name: 'orders',
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								autoIncrement: true,
+							},
+							{ name: 'amount', type: 'decimal', nullable: false },
+							{ name: 'user_id', type: 'integer', nullable: false },
+						],
+						primaryKey: 'id',
+						foreignKeys: [
+							{
+								columns: ['user_id'],
+								references: { table: 'users', columns: ['id'] },
+							} satisfies ForeignKeyIR,
+						],
+						indexes: [
+							{
+								name: 'idx_orders_amount',
+								columns: ['amount'],
+								unique: false,
+							} satisfies IndexIR,
+						],
+						checkConstraints: [
+							{
+								name: 'orders_amount_check',
+								expression: 'CHECK ((amount > 0))',
+							},
+						],
+					} satisfies TableIR,
+				],
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								autoIncrement: true,
+							},
+						],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+					} satisfies TableIR,
+				],
+			]),
+			relations: new Map(),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema);
+		const createIdx = stmts.findIndex((s) =>
+			s.includes('CREATE TABLE "orders"'),
+		);
+		const fkIdx = stmts.findIndex(
+			(s) => s.includes('ADD CONSTRAINT') && s.includes('FOREIGN KEY'),
+		);
+		const checkIdx = stmts.findIndex((s) => s.includes('orders_amount_check'));
+		const indexIdx = stmts.findIndex(
+			(s) => s.includes('CREATE') && s.includes('INDEX'),
+		);
+
+		expect(createIdx).toBeGreaterThanOrEqual(0);
+		expect(fkIdx).toBeGreaterThan(createIdx);
+		expect(checkIdx).toBeGreaterThan(fkIdx);
+		expect(indexIdx).toBeGreaterThan(fkIdx);
+	});
+});

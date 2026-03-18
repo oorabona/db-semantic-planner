@@ -2,8 +2,8 @@ import { ModelIRImpl } from '@dbsp/core';
 import type { ColumnIR, ForeignKeyIR, IndexIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
-	compareSchemata,
 	type CompareSchemataOptions,
+	compareSchemata,
 	type SchemaChange,
 } from './schema-diff.js';
 
@@ -1036,18 +1036,14 @@ describe('compareSchemata', () => {
 				makeTable({
 					name: 'apiTokens',
 					columns: [makeCol({ name: 'tokenHash', type: 'string' })],
-					indexes: [
-						{ columns: ['tokenHash'], unique: true },
-					],
+					indexes: [{ columns: ['tokenHash'], unique: true }],
 				}),
 			]);
 			const db = makeModel([
 				makeTable({
 					name: 'api_tokens',
 					columns: [makeCol({ name: 'token_hash', type: 'string' })],
-					indexes: [
-						{ columns: ['token_hash'], unique: true },
-					],
+					indexes: [{ columns: ['token_hash'], unique: true }],
 				}),
 			]);
 
@@ -1111,13 +1107,25 @@ describe('compareSchemata', () => {
 			const schema = makeModel([
 				makeTable({
 					name: 'items',
-					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'vector(1024)' })],
+					columns: [
+						makeCol({
+							name: 'embedding',
+							type: 'text',
+							originalDbType: 'vector(1024)',
+						}),
+					],
 				}),
 			]);
 			const db = makeModel([
 				makeTable({
 					name: 'items',
-					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'vector(768)' })],
+					columns: [
+						makeCol({
+							name: 'embedding',
+							type: 'text',
+							originalDbType: 'vector(768)',
+						}),
+					],
 				}),
 			]);
 
@@ -1125,20 +1133,35 @@ describe('compareSchemata', () => {
 
 			expect(diff.changes).toHaveLength(1);
 			expect(diff.changes[0]!.kind).toBe('alter_column_type');
-			expect(diff.changes[0]!.meta).toMatchObject({ fromType: 'vector(768)', toType: 'vector(1024)' });
+			expect(diff.changes[0]!.meta).toMatchObject({
+				fromType: 'vector(768)',
+				toType: 'vector(1024)',
+			});
 		});
 
 		it('detects precision change via originalDbType', () => {
 			const schema = makeModel([
 				makeTable({
 					name: 'orders',
-					columns: [makeCol({ name: 'price', type: 'decimal', originalDbType: 'numeric(12,4)' })],
+					columns: [
+						makeCol({
+							name: 'price',
+							type: 'decimal',
+							originalDbType: 'numeric(12,4)',
+						}),
+					],
 				}),
 			]);
 			const db = makeModel([
 				makeTable({
 					name: 'orders',
-					columns: [makeCol({ name: 'price', type: 'decimal', originalDbType: 'numeric(10,2)' })],
+					columns: [
+						makeCol({
+							name: 'price',
+							type: 'decimal',
+							originalDbType: 'numeric(10,2)',
+						}),
+					],
 				}),
 			]);
 
@@ -1152,13 +1175,25 @@ describe('compareSchemata', () => {
 			const schema = makeModel([
 				makeTable({
 					name: 'items',
-					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'vector(768)' })],
+					columns: [
+						makeCol({
+							name: 'embedding',
+							type: 'text',
+							originalDbType: 'vector(768)',
+						}),
+					],
 				}),
 			]);
 			const db = makeModel([
 				makeTable({
 					name: 'items',
-					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'vector(768)' })],
+					columns: [
+						makeCol({
+							name: 'embedding',
+							type: 'text',
+							originalDbType: 'vector(768)',
+						}),
+					],
 				}),
 			]);
 
@@ -1191,7 +1226,9 @@ describe('compareSchemata', () => {
 			const schema = makeModel([
 				makeTable({
 					name: 'orders',
-					columns: [makeCol({ name: 'price', type: 'decimal', originalDbType: 'real' })],
+					columns: [
+						makeCol({ name: 'price', type: 'decimal', originalDbType: 'real' }),
+					],
 				}),
 			]);
 			const db = makeModel([
@@ -1212,13 +1249,25 @@ describe('compareSchemata', () => {
 			const schema = makeModel([
 				makeTable({
 					name: 'items',
-					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'vector(768)' })],
+					columns: [
+						makeCol({
+							name: 'embedding',
+							type: 'text',
+							originalDbType: 'vector(768)',
+						}),
+					],
 				}),
 			]);
 			const db = makeModel([
 				makeTable({
 					name: 'items',
-					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'VECTOR(768)' })],
+					columns: [
+						makeCol({
+							name: 'embedding',
+							type: 'text',
+							originalDbType: 'VECTOR(768)',
+						}),
+					],
 				}),
 			]);
 
@@ -1226,5 +1275,113 @@ describe('compareSchemata', () => {
 
 			expect(diff.changes).toHaveLength(0);
 		});
+	});
+});
+
+describe('CHECK constraints', () => {
+	it('should detect added CHECK constraint', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toEqual(['add_check_constraint']);
+	});
+
+	it('should detect dropped CHECK constraint', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toEqual(['drop_check_constraint']);
+	});
+
+	it('should detect changed CHECK expression', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age >= 0))' },
+				],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toEqual([
+			'drop_check_constraint',
+			'add_check_constraint',
+		]);
+	});
+
+	it('should emit no changes for identical CHECK constraints', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.changes).toEqual([]);
+	});
+
+	it('should emit CHECK constraints for new tables', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'products',
+				columns: [makeCol({ name: 'price', type: 'number' })],
+				checkConstraints: [
+					{ name: 'products_price_check', expression: 'CHECK ((price > 0))' },
+				],
+			}),
+		]);
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db);
+		const kinds = changeKinds(diff.changes);
+		expect(kinds).toContain('create_table');
+		expect(kinds).toContain('add_check_constraint');
 	});
 });

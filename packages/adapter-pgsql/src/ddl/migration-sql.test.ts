@@ -12,7 +12,11 @@ import { ModelIRImpl } from '@dbsp/core';
 import type { ColumnIR, ForeignKeyIR, IndexIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
-import { compareSchemata, type SchemaChange, type SchemaDiff } from './schema-diff.js';
+import {
+	compareSchemata,
+	type SchemaChange,
+	type SchemaDiff,
+} from './schema-diff.js';
 
 // ============================================================================
 // Test helpers
@@ -1334,7 +1338,9 @@ describe('generateDownSQL', () => {
 			const sql = generateMigrationSQL(diff);
 
 			// Must have CREATE TABLE and ADD CONSTRAINT ... FOREIGN KEY
-			const createIdx = sql.findIndex((s) => s.startsWith('CREATE TABLE "orders"'));
+			const createIdx = sql.findIndex((s) =>
+				s.startsWith('CREATE TABLE "orders"'),
+			);
 			const fkIdx = sql.findIndex((s) => s.includes('FOREIGN KEY'));
 
 			expect(createIdx).toBeGreaterThanOrEqual(0);
@@ -1368,7 +1374,9 @@ describe('generateDownSQL', () => {
 			const diff = compareSchemata(schema, db);
 			const sql = generateMigrationSQL(diff);
 
-			const createIdx = sql.findIndex((s) => s.startsWith('CREATE TABLE "users"'));
+			const createIdx = sql.findIndex((s) =>
+				s.startsWith('CREATE TABLE "users"'),
+			);
 			const idxIdx = sql.findIndex((s) => s.includes('CREATE UNIQUE INDEX'));
 
 			expect(createIdx).toBeGreaterThanOrEqual(0);
@@ -1403,9 +1411,7 @@ describe('generateDownSQL', () => {
 								references: { table: 'users', columns: ['id'] },
 							},
 						],
-						indexes: [
-							{ columns: ['sku'], unique: false },
-						],
+						indexes: [{ columns: ['sku'], unique: false }],
 					},
 				),
 			]);
@@ -1414,7 +1420,9 @@ describe('generateDownSQL', () => {
 			const diff = compareSchemata(schema, db);
 			const sql = generateMigrationSQL(diff);
 
-			const createIdx = sql.findIndex((s) => s.startsWith('CREATE TABLE "orders"'));
+			const createIdx = sql.findIndex((s) =>
+				s.startsWith('CREATE TABLE "orders"'),
+			);
 			const fkIdx = sql.findIndex((s) => s.includes('FOREIGN KEY'));
 			const idxIdx = sql.findIndex((s) => s.includes('CREATE INDEX'));
 
@@ -1519,5 +1527,82 @@ describe('generateDownSQL', () => {
 			const sql = generateDownSQL(makeDiff([]));
 			expect(sql).toEqual([]);
 		});
+	});
+});
+
+describe('CHECK constraints migration SQL', () => {
+	it('should generate idempotent ADD CHECK CONSTRAINT', () => {
+		const diff = makeDiff([
+			{
+				kind: 'add_check_constraint',
+				table: 'users',
+				destructive: false,
+				details: 'Add CHECK',
+				meta: {
+					check: { name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				},
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toBe(
+			'DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0)); EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
+		);
+	});
+
+	it('should generate DROP CHECK CONSTRAINT IF EXISTS', () => {
+		const diff = makeDiff([
+			{
+				kind: 'drop_check_constraint',
+				table: 'users',
+				destructive: true,
+				details: 'Drop CHECK',
+				meta: {
+					check: { name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				},
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toBe(
+			'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_age_check";',
+		);
+	});
+
+	it('should order CHECK drops before column drops and CHECK adds after indexes', () => {
+		const diff = makeDiff([
+			{
+				kind: 'add_check_constraint',
+				table: 'users',
+				destructive: false,
+				details: '',
+				meta: { check: { name: 'ck1', expression: 'CHECK (true)' } },
+			},
+			{
+				kind: 'create_index',
+				table: 'users',
+				destructive: false,
+				details: '',
+				meta: { index: { name: 'idx_users_a', columns: ['a'], unique: false } },
+			},
+			{
+				kind: 'drop_check_constraint',
+				table: 'users',
+				destructive: true,
+				details: '',
+				meta: { check: { name: 'ck2', expression: 'CHECK (true)' } },
+			},
+			{
+				kind: 'drop_column',
+				table: 'users',
+				destructive: true,
+				details: '',
+				column: 'old_col',
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		// drop_check (phase 0) → drop_column (phase 2) → create_index (phase 11) → add_check (phase 12)
+		expect(sql[0]).toContain('DROP CONSTRAINT');
+		expect(sql[1]).toContain('DROP COLUMN');
+		expect(sql[2]).toContain('CREATE');
+		expect(sql[3]).toContain('DO $$');
 	});
 });
