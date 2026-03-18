@@ -287,6 +287,13 @@ function normalizeToDecision(input: Decision): Decision {
 				column: raw.field as string,
 				operator: raw.operator as string,
 			};
+		case 'any':
+			return {
+				type: 'where',
+				column: raw.field as string,
+				operator: 'any',
+				values: raw.values as readonly unknown[],
+			};
 		case 'in': {
 			const sub = raw.subquery as Record<string, unknown> | undefined;
 			if (sub) {

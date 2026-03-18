@@ -6,6 +6,7 @@
 
 import type {
 	QueryIntent,
+	WhereAnyIntent,
 	WhereComparisonIntent,
 	WhereInIntent,
 	WhereIntent,
@@ -14,6 +15,7 @@ import type {
 	WhereRangeIntent,
 } from '@dbsp/types';
 import type {
+	NqlAnyExpression,
 	NqlBetweenExpression,
 	NqlBinaryExpression,
 	NqlComparisonExpression,
@@ -522,6 +524,22 @@ export function compileExpression(
 				value: jsonValue,
 				reversed: jsonComp.operator === '<@',
 			} satisfies WhereJsonContainsIntent;
+		}
+
+		case 'any': {
+			const anyExpr = expr as NqlAnyExpression;
+			const field = expressionToField(anyExpr.column, aliasContext);
+			/* v8 ignore start — defensive: parser guarantees ANY LHS is a path expression -- @preserve */
+			if (!field) {
+				throw new Error('ANY expression must reference a field');
+			}
+			/* v8 ignore stop -- @preserve */
+			validateWhereField(ctx, field, aliasContext, anyExpr.column);
+			const rawValues = ctx.params[anyExpr.paramName];
+			const values: readonly unknown[] = Array.isArray(rawValues)
+				? rawValues
+				: [];
+			return { kind: 'any', field, values } satisfies WhereAnyIntent;
 		}
 
 		/* v8 ignore next — defensive: all parser-produced expression types are handled above -- @preserve */

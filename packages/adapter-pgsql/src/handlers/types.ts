@@ -283,6 +283,7 @@ export const NULL_OPERATORS = {
 export const COLLECTION_OPERATORS = {
 	IN: 'in',
 	NOT_IN: 'notIn',
+	ANY: 'any',
 } as const;
 
 /**

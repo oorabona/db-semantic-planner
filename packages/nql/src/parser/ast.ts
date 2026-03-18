@@ -202,6 +202,7 @@ export type NqlExpression =
 	| NqlComparisonExpression
 	| NqlRangeOpExpression
 	| NqlInExpression
+	| NqlAnyExpression
 	| NqlBetweenExpression
 	| NqlIsNullExpression
 	| NqlExistsExpression
@@ -253,6 +254,17 @@ export interface NqlInExpression {
 	negated: boolean;
 	expression: NqlExpression;
 	values: NqlExpression[] | NqlSubquery | NqlDateRangeLiteral;
+}
+
+
+/**
+ * BATCH-001: ANY expression — col = ANY(:paramName)
+ * Compiles to WhereAnyIntent with values resolved from named parameters.
+ */
+export interface NqlAnyExpression {
+	type: 'any';
+	column: NqlExpression;
+	paramName: string;
 }
 
 /**

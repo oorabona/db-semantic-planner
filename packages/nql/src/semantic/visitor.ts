@@ -220,6 +220,12 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	inSuffix(_ctx: CstContext) {
 		return visitInSuffix();
 	}
+
+
+	// BATCH-001: stub — anySuffix is handled by visitPrimaryCond directly
+	anySuffix(_ctx: CstContext) {
+		return undefined;
+	}
 	isNullSuffix(_ctx: CstContext) {
 		return visitIsNullSuffix();
 	}

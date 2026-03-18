@@ -747,6 +747,17 @@ function convertWhereCondition(
 				table: rootTable,
 			};
 
+		// ANY: { kind: 'any', field: 'id', values: [1, 2, 3] }
+		// Compiles to: "col" = ANY($1::type[])
+		case 'any':
+			return {
+				type: 'where',
+				column: cond.field as string,
+				operator: 'any',
+				values: cond.values as readonly unknown[],
+				table: rootTable,
+			};
+
 		// JSON key existence: col ? $1
 		case 'jsonExists':
 			return {

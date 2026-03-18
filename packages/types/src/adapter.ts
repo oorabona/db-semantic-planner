@@ -86,6 +86,22 @@ export interface CompileOptionsBase {
 
 	/** Correlation ID for distributed tracing */
 	readonly correlationId?: string;
+
+	/**
+	 * Row count threshold for switching INSERT compilation from VALUES to unnest strategy.
+	 * Rows <= threshold use VALUES ($1,$2),... Rows > threshold use SELECT unnest($1::type[]),...
+	 * Set to 0 to force unnest for all batch sizes.
+	 * @default 50
+	 */
+	readonly batchThreshold?: number;
+
+	/**
+	 * Maximum allowed batch size for INSERT operations.
+	 * If set and the number of rows exceeds this limit, an InvalidOperationError is thrown.
+	 * Useful to prevent accidental unbounded inserts.
+	 * @default undefined (no limit)
+	 */
+	readonly maxBatchSize?: number;
 }
 
 /**

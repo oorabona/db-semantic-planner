@@ -145,13 +145,18 @@ abstract class MutationBuilderBase<
 		return this.adapter;
 	}
 
-	dump(): MutationDump {
+	dump(extraOptions?: CompileOptions): MutationDump {
 		const adapter = this.requireAdapter('dump');
 		const intent = this.buildIntent();
-		const compileOptions = this.schemaName
-			? { schemaName: this.schemaName }
-			: undefined;
-		const compiled = this.compileIntent(adapter, intent, compileOptions);
+		const compileOptions: CompileOptions = {
+			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
+			...extraOptions,
+		};
+		const compiled = this.compileIntent(
+			adapter,
+			intent,
+			Object.keys(compileOptions).length > 0 ? compileOptions : undefined,
+		);
 
 		const meta: { compiledAt: Date; schema?: string } = {
 			compiledAt: new Date(),

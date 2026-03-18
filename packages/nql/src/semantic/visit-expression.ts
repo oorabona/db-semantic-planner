@@ -13,6 +13,7 @@ import type {
 	NqlCaseExpression,
 	NqlExistsExpression,
 	NqlExpression,
+	NqlAnyExpression,
 	NqlInExpression,
 	NqlIsNullExpression,
 	NqlJsonAccessExpression,
@@ -97,6 +98,9 @@ export function visitPrimaryCond(
 	}
 	if (ctx.betweenSuffix) {
 		return buildBetween(left, asCstNode(ctx.betweenSuffix[0]!), visit);
+	}
+	if (ctx.anySuffix) {
+		return buildAny(left, asCstNode(ctx.anySuffix[0]!));
 	}
 	if (ctx.inSuffix) {
 		return buildIn(left, asCstNode(ctx.inSuffix[0]!), visit);
@@ -203,6 +207,27 @@ function buildIn(
 	}
 
 	return { type: 'in', negated, expression: left, values };
+}
+
+
+/**
+ * BATCH-001: Build NqlAnyExpression from an anySuffix CST node.
+ * Handles: left = ANY(:paramName)
+ */
+function buildAny(
+	left: NqlExpression,
+	suffixNode: CstNode,
+): NqlAnyExpression {
+	const suffixCtx = suffixNode.children as CstContext;
+	// NamedParam token image is ':paramName' — strip the leading ':'
+	const paramToken = suffixCtx.NamedParam?.[0];
+	const raw = paramToken ? getImage(paramToken) : ':unknown';
+	const paramName = raw.slice(1); // remove leading ':'
+	return {
+		type: 'any',
+		column: left,
+		paramName,
+	};
 }
 
 function buildIsNull(

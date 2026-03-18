@@ -7,7 +7,7 @@
  * @module pgsql-adapter
  */
 
-import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import { InvalidOperationError, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import type {
 	Adapter,
 	AdapterCapabilities,
@@ -67,6 +67,7 @@ import {
 	compileDelete as compileDeleteMutation,
 	compileInsertFrom as compileInsertFromMutation,
 	compileInsert as compileInsertMutation,
+	compileUnnestInsert as compileUnnestInsertMutation,
 	compileUpdate as compileUpdateMutation,
 	compileUpsertFrom as compileUpsertFromMutation,
 	compileUpsert as compileUpsertMutation,
@@ -78,6 +79,7 @@ import {
 	type UpsertConfig,
 	type UpsertFromConfig,
 } from './mutations/index.js';
+import { validateBatchCardinality } from './compiler-utils.js';
 import {
 	getNamingPluginForDbCasing,
 	type NamingPlugin,
@@ -850,6 +852,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	/**
 	 * Compile an insert intent to executable SQL.
 	 */
+	/**
+	 * Compile an insert intent to executable SQL.
+	 *
+	 * Strategy switch (per CompileOptions):
+	 * - rows <= batchThreshold (default 50): VALUES ($1,$2),($3,$4),...
+	 * - rows > batchThreshold OR batchThreshold === 0: SELECT unnest($1::type[]),...
+	 */
 	compileInsert(intent: InsertIntent, options?: CompileOptions): CompiledQuery {
 		const schemaName = this.schemaName ?? options?.schemaName;
 
@@ -880,7 +889,24 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...(columnTypes && { columnTypes }),
 		};
 
-		const ast = compileInsertMutation(config, ctx, state);
+		// maxBatchSize guard (INV-07)
+		const maxBatchSize = options?.maxBatchSize;
+		if (maxBatchSize !== undefined && values.length > maxBatchSize) {
+			throw new InvalidOperationError(
+				'insert',
+				`Batch size ${values.length} exceeds maxBatchSize ${maxBatchSize}`,
+			);
+		}
+
+		// Strategy switch: unnest for large batches, VALUES for small (INV-03)
+		const batchThreshold = options?.batchThreshold ?? 50;
+		const useUnnest =
+			values.length > 0 &&
+			(batchThreshold === 0 || values.length > batchThreshold);
+
+		const ast = useUnnest
+			? compileUnnestInsertMutation(config, ctx, state)
+			: compileInsertMutation(config, ctx, state);
 		const sql = deparseQuoted(ast);
 
 		return {

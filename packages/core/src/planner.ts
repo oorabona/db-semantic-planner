@@ -755,6 +755,7 @@ function processWhere(
 		case 'comparison':
 		case 'like':
 		case 'in':
+		case 'any':
 		case 'null':
 			// No relation analysis needed
 			break;
