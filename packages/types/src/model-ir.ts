@@ -231,6 +231,27 @@ export interface ForeignKeyIR {
 /**
  * PostgreSQL ENUM type definition
  */
+
+/**
+ * PostgreSQL sequence definition
+ */
+export interface SequenceIR {
+	/** Sequence name */
+	readonly name: string;
+	/** Start value */
+	readonly startWith?: number;
+	/** Increment step */
+	readonly incrementBy?: number;
+	/** Minimum value */
+	readonly minValue?: number;
+	/** Maximum value */
+	readonly maxValue?: number;
+	/** Whether to cycle */
+	readonly cycle?: boolean;
+	/** Schema name (if not default) */
+	readonly schema?: string;
+}
+
 export interface EnumIR {
 	/** Enum type name */
 	readonly name: string;
@@ -419,6 +440,12 @@ export interface ModelIR {
 
 	/** ENUM type definitions indexed by name */
 	readonly enums?: ReadonlyMap<string, EnumIR>;
+
+	/** Extension names to ensure (CREATE EXTENSION IF NOT EXISTS) */
+	readonly extensions?: readonly string[];
+
+	/** Sequence definitions */
+	readonly sequences?: ReadonlyMap<string, SequenceIR>;
 
 	// --- Helper Methods ---
 

@@ -1,5 +1,12 @@
 import { ModelIRImpl } from '@dbsp/core';
-import type { ColumnIR, EnumIR, ForeignKeyIR, IndexIR, TableIR } from '@dbsp/types';
+import type {
+	ColumnIR,
+	EnumIR,
+	ForeignKeyIR,
+	IndexIR,
+	SequenceIR,
+	TableIR,
+} from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
 	type CompareSchemataOptions,
@@ -529,10 +536,18 @@ describe('compareSchemata', () => {
 				};
 
 				const schema = makeModel([
-					makeTable({ name: 'posts', columns: [makeCol({ name: 'body', type: 'string' })], indexes: [schemaIdx] }),
+					makeTable({
+						name: 'posts',
+						columns: [makeCol({ name: 'body', type: 'string' })],
+						indexes: [schemaIdx],
+					}),
 				]);
 				const db = makeModel([
-					makeTable({ name: 'posts', columns: [makeCol({ name: 'body', type: 'string' })], indexes: [dbIdx] }),
+					makeTable({
+						name: 'posts',
+						columns: [makeCol({ name: 'body', type: 'string' })],
+						indexes: [dbIdx],
+					}),
 				]);
 
 				const diff = compareSchemata(schema, db);
@@ -554,10 +569,18 @@ describe('compareSchemata', () => {
 				};
 
 				const schema = makeModel([
-					makeTable({ name: 'users', columns: [makeCol({ name: 'email', type: 'string' })], indexes: [schemaIdx] }),
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+						indexes: [schemaIdx],
+					}),
 				]);
 				const db = makeModel([
-					makeTable({ name: 'users', columns: [makeCol({ name: 'email', type: 'string' })], indexes: [dbIdx] }),
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+						indexes: [dbIdx],
+					}),
 				]);
 
 				const diff = compareSchemata(schema, db);
@@ -581,10 +604,18 @@ describe('compareSchemata', () => {
 				};
 
 				const schema = makeModel([
-					makeTable({ name: 'posts', columns: [makeCol({ name: 'title', type: 'string' })], indexes: [schemaIdx] }),
+					makeTable({
+						name: 'posts',
+						columns: [makeCol({ name: 'title', type: 'string' })],
+						indexes: [schemaIdx],
+					}),
 				]);
 				const db = makeModel([
-					makeTable({ name: 'posts', columns: [makeCol({ name: 'title', type: 'string' })], indexes: [dbIdx] }),
+					makeTable({
+						name: 'posts',
+						columns: [makeCol({ name: 'title', type: 'string' })],
+						indexes: [dbIdx],
+					}),
 				]);
 
 				const diff = compareSchemata(schema, db);
@@ -608,10 +639,18 @@ describe('compareSchemata', () => {
 				};
 
 				const schema = makeModel([
-					makeTable({ name: 'embeddings', columns: [makeCol({ name: 'vec', type: 'string' })], indexes: [schemaIdx] }),
+					makeTable({
+						name: 'embeddings',
+						columns: [makeCol({ name: 'vec', type: 'string' })],
+						indexes: [schemaIdx],
+					}),
 				]);
 				const db = makeModel([
-					makeTable({ name: 'embeddings', columns: [makeCol({ name: 'vec', type: 'string' })], indexes: [dbIdx] }),
+					makeTable({
+						name: 'embeddings',
+						columns: [makeCol({ name: 'vec', type: 'string' })],
+						indexes: [dbIdx],
+					}),
 				]);
 
 				const diff = compareSchemata(schema, db);
@@ -631,10 +670,18 @@ describe('compareSchemata', () => {
 				};
 
 				const schema = makeModel([
-					makeTable({ name: 'posts', columns: [makeCol({ name: 'title', type: 'string' })], indexes: [idx] }),
+					makeTable({
+						name: 'posts',
+						columns: [makeCol({ name: 'title', type: 'string' })],
+						indexes: [idx],
+					}),
 				]);
 				const db = makeModel([
-					makeTable({ name: 'posts', columns: [makeCol({ name: 'title', type: 'string' })], indexes: [idx] }),
+					makeTable({
+						name: 'posts',
+						columns: [makeCol({ name: 'title', type: 'string' })],
+						indexes: [idx],
+					}),
 				]);
 
 				const diff = compareSchemata(schema, db);
@@ -1513,19 +1560,24 @@ describe('CHECK constraints', () => {
 	});
 });
 
-
 // ============================================================================
 // ENUM Types
 // ============================================================================
 
-function makeModelWithEnums(tables: TableIR[], enums: Map<string, { name: string; values: string[] }>) {
+function makeModelWithEnums(
+	tables: TableIR[],
+	enums: Map<string, { name: string; values: string[] }>,
+) {
 	const tableMap = new Map(tables.map((t) => [t.name, t]));
 	return new ModelIRImpl(tableMap, new Map(), enums as Map<string, EnumIR>);
 }
 
 describe('ENUM types', () => {
 	it('should detect new enum type', () => {
-		const schema = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]));
+		const schema = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
 		const db = makeModel([]);
 		const diff = compareSchemata(schema, db);
 		expect(changeKinds(diff.changes)).toEqual(['create_enum']);
@@ -1533,35 +1585,72 @@ describe('ENUM types', () => {
 
 	it('should detect dropped enum type', () => {
 		const schema = makeModel([]);
-		const db = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]));
+		const db = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
 		const diff = compareSchemata(schema, db);
 		expect(changeKinds(diff.changes)).toEqual(['drop_enum']);
 	});
 
 	it('should detect new enum value', () => {
-		const schema = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive', 'pending'] }]]));
-		const db = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]));
+		const schema = makeModelWithEnums(
+			[],
+			new Map([
+				[
+					'status',
+					{ name: 'status', values: ['active', 'inactive', 'pending'] },
+				],
+			]),
+		);
+		const db = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
 		const diff = compareSchemata(schema, db);
 		expect(changeKinds(diff.changes)).toEqual(['alter_enum_add_value']);
 	});
 
 	it('should flag removed enum value as destructive', () => {
-		const schema = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active'] }]]));
-		const db = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]));
+		const schema = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active'] }]]),
+		);
+		const db = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
 		const diff = compareSchemata(schema, db);
 		expect(diff.changes.some((c) => c.destructive)).toBe(true);
 	});
 
 	it('should detect no changes for identical enums', () => {
-		const schema = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]));
-		const db = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]));
+		const schema = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
+		const db = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
 		const diff = compareSchemata(schema, db);
 		expect(diff.changes).toEqual([]);
 	});
 
 	it('should emit alter_enum_add_value with correct position metadata', () => {
-		const schema = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive', 'pending'] }]]));
-		const db = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]));
+		const schema = makeModelWithEnums(
+			[],
+			new Map([
+				[
+					'status',
+					{ name: 'status', values: ['active', 'inactive', 'pending'] },
+				],
+			]),
+		);
+		const db = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
 		const diff = compareSchemata(schema, db);
 		const change = diff.changes.find((c) => c.kind === 'alter_enum_add_value');
 		expect(change?.meta?.value).toBe('pending');
@@ -1570,12 +1659,14 @@ describe('ENUM types', () => {
 
 	it('should mark drop_enum as destructive', () => {
 		const schema = makeModel([]);
-		const db = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active'] }]]));
+		const db = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active'] }]]),
+		);
 		const diff = compareSchemata(schema, db);
 		expect(diff.hasDestructive).toBe(true);
 	});
 });
-
 
 // ============================================================================
 // FK Enhancements: onUpdate + deferred
@@ -1600,7 +1691,10 @@ describe('FK enhancements — compareForeignKeys', () => {
 			name: 'orders',
 			foreignKeys: [baseFk],
 		});
-		const diff = compareSchemata(makeModel([usersTable, schema]), makeModel([usersTable, db]));
+		const diff = compareSchemata(
+			makeModel([usersTable, schema]),
+			makeModel([usersTable, db]),
+		);
 		const change = diff.changes.find((c) => c.kind === 'alter_foreign_key');
 		expect(change).toBeDefined();
 		expect(change?.details).toContain('onDelete/onUpdate/deferred');
@@ -1615,7 +1709,10 @@ describe('FK enhancements — compareForeignKeys', () => {
 			name: 'orders',
 			foreignKeys: [baseFk],
 		});
-		const diff = compareSchemata(makeModel([usersTable, schema]), makeModel([usersTable, db]));
+		const diff = compareSchemata(
+			makeModel([usersTable, schema]),
+			makeModel([usersTable, db]),
+		);
 		const change = diff.changes.find((c) => c.kind === 'alter_foreign_key');
 		expect(change).toBeDefined();
 		expect(change?.details).toContain('onDelete/onUpdate/deferred');
@@ -1624,13 +1721,23 @@ describe('FK enhancements — compareForeignKeys', () => {
 	it('should detect combined onDelete+onUpdate+deferred change', () => {
 		const schema = makeTable({
 			name: 'orders',
-			foreignKeys: [{ ...baseFk, onDelete: 'CASCADE', onUpdate: 'SET NULL', deferred: true }],
+			foreignKeys: [
+				{
+					...baseFk,
+					onDelete: 'CASCADE',
+					onUpdate: 'SET NULL',
+					deferred: true,
+				},
+			],
 		});
 		const db = makeTable({
 			name: 'orders',
 			foreignKeys: [{ ...baseFk, onDelete: 'RESTRICT' }],
 		});
-		const diff = compareSchemata(makeModel([usersTable, schema]), makeModel([usersTable, db]));
+		const diff = compareSchemata(
+			makeModel([usersTable, schema]),
+			makeModel([usersTable, db]),
+		);
 		const change = diff.changes.find((c) => c.kind === 'alter_foreign_key');
 		expect(change).toBeDefined();
 		expect(change?.meta?.oldFk).toBeDefined();
@@ -1640,8 +1747,13 @@ describe('FK enhancements — compareForeignKeys', () => {
 		const fk: ForeignKeyIR = { ...baseFk, onUpdate: 'CASCADE', deferred: true };
 		const schema = makeTable({ name: 'orders', foreignKeys: [fk] });
 		const db = makeTable({ name: 'orders', foreignKeys: [fk] });
-		const diff = compareSchemata(makeModel([usersTable, schema]), makeModel([usersTable, db]));
-		expect(diff.changes.filter((c) => c.kind === 'alter_foreign_key')).toHaveLength(0);
+		const diff = compareSchemata(
+			makeModel([usersTable, schema]),
+			makeModel([usersTable, db]),
+		);
+		expect(
+			diff.changes.filter((c) => c.kind === 'alter_foreign_key'),
+		).toHaveLength(0);
 	});
 });
 
@@ -1652,13 +1764,18 @@ describe('FK enhancements — compareForeignKeys', () => {
 describe('Column enhancements', () => {
 	it('should detect collation change', () => {
 		const schema = makeModel([
-			makeTable({ name: 'users', columns: [makeCol({ name: 'name', collation: 'en_US' })] }),
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'name', collation: 'en_US' })],
+			}),
 		]);
 		const db = makeModel([
 			makeTable({ name: 'users', columns: [makeCol({ name: 'name' })] }),
 		]);
 		const diff = compareSchemata(schema, db);
-		const change = diff.changes.find((c) => c.kind === 'alter_column_collation');
+		const change = diff.changes.find(
+			(c) => c.kind === 'alter_column_collation',
+		);
 		expect(change).toBeDefined();
 		expect(change?.column).toBe('name');
 		expect(change?.destructive).toBe(false);
@@ -1666,7 +1783,10 @@ describe('Column enhancements', () => {
 
 	it('should detect identity added', () => {
 		const schema = makeModel([
-			makeTable({ name: 'users', columns: [makeCol({ name: 'id', identity: 'always' })] }),
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', identity: 'always' })],
+			}),
 		]);
 		const db = makeModel([
 			makeTable({ name: 'users', columns: [makeCol({ name: 'id' })] }),
@@ -1684,7 +1804,10 @@ describe('Column enhancements', () => {
 			makeTable({ name: 'users', columns: [makeCol({ name: 'id' })] }),
 		]);
 		const db = makeModel([
-			makeTable({ name: 'users', columns: [makeCol({ name: 'id', identity: 'byDefault' })] }),
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', identity: 'byDefault' })],
+			}),
 		]);
 		const diff = compareSchemata(schema, db);
 		const change = diff.changes.find((c) => c.kind === 'alter_column_identity');
@@ -1694,10 +1817,16 @@ describe('Column enhancements', () => {
 
 	it('should detect identity type change (always → byDefault)', () => {
 		const schema = makeModel([
-			makeTable({ name: 'users', columns: [makeCol({ name: 'id', identity: 'byDefault' })] }),
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', identity: 'byDefault' })],
+			}),
 		]);
 		const db = makeModel([
-			makeTable({ name: 'users', columns: [makeCol({ name: 'id', identity: 'always' })] }),
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', identity: 'always' })],
+			}),
 		]);
 		const diff = compareSchemata(schema, db);
 		const change = diff.changes.find((c) => c.kind === 'alter_column_identity');
@@ -1710,9 +1839,7 @@ describe('Column enhancements', () => {
 		const schema = makeModel([
 			makeTable({ name: 'users', columns: [], comment: 'User accounts' }),
 		]);
-		const db = makeModel([
-			makeTable({ name: 'users', columns: [] }),
-		]);
+		const db = makeModel([makeTable({ name: 'users', columns: [] })]);
 		const diff = compareSchemata(schema, db);
 		const change = diff.changes.find((c) => c.kind === 'add_comment');
 		expect(change).toBeDefined();
@@ -1724,7 +1851,10 @@ describe('Column enhancements', () => {
 
 	it('should detect column comment added', () => {
 		const schema = makeModel([
-			makeTable({ name: 'users', columns: [makeCol({ name: 'email', comment: 'Primary email' })] }),
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'email', comment: 'Primary email' })],
+			}),
 		]);
 		const db = makeModel([
 			makeTable({ name: 'users', columns: [makeCol({ name: 'email' })] }),
@@ -1742,7 +1872,10 @@ describe('Column enhancements', () => {
 			makeTable({ name: 'users', columns: [makeCol({ name: 'email' })] }),
 		]);
 		const db = makeModel([
-			makeTable({ name: 'users', columns: [makeCol({ name: 'email', comment: 'Old comment' })] }),
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'email', comment: 'Old comment' })],
+			}),
 		]);
 		const diff = compareSchemata(schema, db);
 		const change = diff.changes.find((c) => c.kind === 'drop_comment');
@@ -1756,7 +1889,9 @@ describe('Column enhancements', () => {
 		const schema = makeModel([makeTable({ name: 'users', columns: [col] })]);
 		const db = makeModel([makeTable({ name: 'users', columns: [col] })]);
 		const diff = compareSchemata(schema, db);
-		expect(diff.changes.filter((c) => c.kind === 'alter_column_collation')).toHaveLength(0);
+		expect(
+			diff.changes.filter((c) => c.kind === 'alter_column_collation'),
+		).toHaveLength(0);
 	});
 
 	it('should ignore identical identity', () => {
@@ -1764,14 +1899,165 @@ describe('Column enhancements', () => {
 		const schema = makeModel([makeTable({ name: 'users', columns: [col] })]);
 		const db = makeModel([makeTable({ name: 'users', columns: [col] })]);
 		const diff = compareSchemata(schema, db);
-		expect(diff.changes.filter((c) => c.kind === 'alter_column_identity')).toHaveLength(0);
+		expect(
+			diff.changes.filter((c) => c.kind === 'alter_column_identity'),
+		).toHaveLength(0);
 	});
 
 	it('should ignore identical comment', () => {
-		const table = makeTable({ name: 'users', columns: [], comment: 'Same comment' });
+		const table = makeTable({
+			name: 'users',
+			columns: [],
+			comment: 'Same comment',
+		});
 		const schema = makeModel([table]);
 		const db = makeModel([table]);
 		const diff = compareSchemata(schema, db);
-		expect(diff.changes.filter((c) => c.kind === 'add_comment' || c.kind === 'drop_comment')).toHaveLength(0);
+		expect(
+			diff.changes.filter(
+				(c) => c.kind === 'add_comment' || c.kind === 'drop_comment',
+			),
+		).toHaveLength(0);
+	});
+});
+
+// ============================================================================
+// Extensions
+// ============================================================================
+
+function makeModelWithExtensions(extensions: string[]) {
+	return new ModelIRImpl(new Map(), new Map(), undefined, extensions);
+}
+
+describe('Extensions', () => {
+	it('should detect new extension', () => {
+		const schema = makeModelWithExtensions(['uuid-ossp']);
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toContain('create_extension');
+		const change = diff.changes.find((c) => c.kind === 'create_extension');
+		expect(change?.meta?.extension).toBe('uuid-ossp');
+		expect(change?.destructive).toBe(false);
+	});
+
+	it('should detect dropped extension', () => {
+		const schema = makeModel([]);
+		const db = makeModelWithExtensions(['uuid-ossp']);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toContain('drop_extension');
+		const change = diff.changes.find((c) => c.kind === 'drop_extension');
+		expect(change?.meta?.extension).toBe('uuid-ossp');
+		expect(change?.destructive).toBe(true);
+	});
+
+	it('should detect no changes for identical extensions', () => {
+		const schema = makeModelWithExtensions(['uuid-ossp', 'pgcrypto']);
+		const db = makeModelWithExtensions(['uuid-ossp', 'pgcrypto']);
+		const diff = compareSchemata(schema, db);
+		const extChanges = diff.changes.filter(
+			(c) => c.kind === 'create_extension' || c.kind === 'drop_extension',
+		);
+		expect(extChanges).toHaveLength(0);
+	});
+
+	it('should detect multiple extension changes at once', () => {
+		const schema = makeModelWithExtensions(['uuid-ossp', 'pgcrypto']);
+		const db = makeModelWithExtensions(['pgcrypto', 'hstore']);
+		const diff = compareSchemata(schema, db);
+		const kinds = changeKinds(diff.changes);
+		expect(kinds).toContain('create_extension'); // uuid-ossp to add
+		expect(kinds).toContain('drop_extension'); // hstore to drop
+	});
+});
+
+// ============================================================================
+// Sequences
+// ============================================================================
+
+function makeModelWithSequences(sequences: SequenceIR[]) {
+	const seqMap = new Map(sequences.map((s) => [s.name, s]));
+	return new ModelIRImpl(new Map(), new Map(), undefined, undefined, seqMap);
+}
+
+describe('Sequences', () => {
+	it('should detect new sequence', () => {
+		const seq: SequenceIR = { name: 'order_seq', startWith: 1, incrementBy: 1 };
+		const schema = makeModelWithSequences([seq]);
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toContain('create_sequence');
+		const change = diff.changes.find((c) => c.kind === 'create_sequence');
+		expect((change?.meta?.sequence as SequenceIR).name).toBe('order_seq');
+		expect(change?.destructive).toBe(false);
+	});
+
+	it('should detect dropped sequence', () => {
+		const seq: SequenceIR = { name: 'order_seq', startWith: 1 };
+		const schema = makeModel([]);
+		const db = makeModelWithSequences([seq]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toContain('drop_sequence');
+		const change = diff.changes.find((c) => c.kind === 'drop_sequence');
+		expect(change?.destructive).toBe(true);
+	});
+
+	it('should detect altered sequence (incrementBy changed)', () => {
+		const schema = makeModelWithSequences([
+			{ name: 'order_seq', startWith: 1, incrementBy: 5 },
+		]);
+		const db = makeModelWithSequences([
+			{ name: 'order_seq', startWith: 1, incrementBy: 1 },
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toContain('alter_sequence');
+		const change = diff.changes.find((c) => c.kind === 'alter_sequence');
+		expect(change?.destructive).toBe(false);
+	});
+
+	it('should detect altered sequence (cycle changed)', () => {
+		const schema = makeModelWithSequences([{ name: 'order_seq', cycle: true }]);
+		const db = makeModelWithSequences([{ name: 'order_seq', cycle: false }]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toContain('alter_sequence');
+	});
+
+	it('should detect altered sequence (minValue/maxValue changed)', () => {
+		const schema = makeModelWithSequences([
+			{ name: 'order_seq', minValue: 10, maxValue: 1000 },
+		]);
+		const db = makeModelWithSequences([
+			{ name: 'order_seq', minValue: 1, maxValue: 9999 },
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toContain('alter_sequence');
+	});
+
+	it('should detect no changes for identical sequences', () => {
+		const seq: SequenceIR = {
+			name: 'order_seq',
+			startWith: 1,
+			incrementBy: 1,
+			cycle: false,
+		};
+		const schema = makeModelWithSequences([seq]);
+		const db = makeModelWithSequences([seq]);
+		const diff = compareSchemata(schema, db);
+		const seqChanges = diff.changes.filter(
+			(c) =>
+				c.kind === 'create_sequence' ||
+				c.kind === 'alter_sequence' ||
+				c.kind === 'drop_sequence',
+		);
+		expect(seqChanges).toHaveLength(0);
+	});
+
+	it('should store previousSequence in alter_sequence meta', () => {
+		const schema = makeModelWithSequences([
+			{ name: 'order_seq', incrementBy: 5 },
+		]);
+		const db = makeModelWithSequences([{ name: 'order_seq', incrementBy: 1 }]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'alter_sequence');
+		expect((change?.meta?.previousSequence as SequenceIR).incrementBy).toBe(1);
 	});
 });

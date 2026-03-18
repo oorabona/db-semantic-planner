@@ -8,6 +8,7 @@ import type {
 	EnumIR,
 	ModelIR,
 	RelationIR,
+	SequenceIR,
 	TableIR,
 } from './model-ir.js';
 
@@ -18,6 +19,8 @@ export class ModelIRImpl implements ModelIR {
 	readonly tables: ReadonlyMap<string, TableIR>;
 	readonly relations: ReadonlyMap<string, RelationIR>;
 	readonly enums?: ReadonlyMap<string, EnumIR>;
+	readonly extensions?: readonly string[];
+	readonly sequences?: ReadonlyMap<string, SequenceIR>;
 
 	// Pre-computed indexes for efficient lookups
 	private readonly relationsBySource: ReadonlyMap<
@@ -33,6 +36,8 @@ export class ModelIRImpl implements ModelIR {
 		tables: Map<string, TableIR>,
 		relations: Map<string, RelationIR>,
 		enums?: Map<string, EnumIR>,
+		extensions?: readonly string[],
+		sequences?: Map<string, SequenceIR>,
 	) {
 		// Freeze the maps to ensure immutability
 		this.tables = Object.freeze(new Map(tables)) as ReadonlyMap<
@@ -44,9 +49,15 @@ export class ModelIRImpl implements ModelIR {
 			RelationIR
 		>;
 		if (enums) {
-			this.enums = Object.freeze(new Map(enums)) as ReadonlyMap<
+			this.enums = Object.freeze(new Map(enums)) as ReadonlyMap<string, EnumIR>;
+		}
+		if (extensions && extensions.length > 0) {
+			this.extensions = Object.freeze([...extensions]) as readonly string[];
+		}
+		if (sequences) {
+			this.sequences = Object.freeze(new Map(sequences)) as ReadonlyMap<
 				string,
-				EnumIR
+				SequenceIR
 			>;
 		}
 

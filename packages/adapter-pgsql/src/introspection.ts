@@ -23,6 +23,7 @@ import type {
 	OnDeleteAction,
 	RelationIR,
 	RelationType,
+	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
 import type { Pool } from 'pg';
@@ -380,8 +381,7 @@ export async function introspect(
 				refs: [fk.target_column],
 				deleteRule: fk.delete_rule,
 				updateRule: fk.update_rule,
-				deferred:
-					fk.is_deferrable === 'YES' && fk.initially_deferred === 'YES',
+				deferred: fk.is_deferrable === 'YES' && fk.initially_deferred === 'YES',
 			});
 		}
 	}
@@ -469,8 +469,52 @@ export async function introspect(
 	// Block 3: Detect hierarchies
 	const hierarchies = detectHierarchies(tables, fksByConstraint, tableNames);
 
+	// Step 8: Fetch installed extensions (skip plpgsql — always present)
+	const extensionsResult = await pool.query<{ name: string }>(
+		`SELECT extname AS name
+		 FROM pg_extension
+		 WHERE extname != 'plpgsql'`,
+	);
+	const extensions: string[] = extensionsResult.rows.map((r) => r.name);
+
+	// Step 9: Fetch sequences not backed by SERIAL (exclude auto-generated dependencies)
+	const sequencesResult = await pool.query<{
+		name: string;
+		start_value: string;
+		increment_by: string;
+		min_value: string;
+		max_value: string;
+		cycle: boolean;
+	}>(
+		`SELECT s.sequencename AS name, s.start_value, s.increment_by, s.min_value, s.max_value, s.cycle
+		 FROM pg_sequences s
+		 LEFT JOIN pg_class c ON c.relname = s.sequencename AND c.relkind = 'S'
+		   AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname)
+		 LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'a'
+		 WHERE s.schemaname = $1
+		   AND d.objid IS NULL`,
+		[schema],
+	);
+	const sequenceMap = new Map<string, SequenceIR>();
+	for (const row of sequencesResult.rows) {
+		sequenceMap.set(row.name, {
+			name: row.name,
+			startWith: Number(row.start_value),
+			incrementBy: Number(row.increment_by),
+			minValue: Number(row.min_value),
+			maxValue: Number(row.max_value),
+			cycle: row.cycle,
+		});
+	}
+
 	// Build ModelIR
-	const modelIR = new ModelIRImpl(tables, relations, enumMap);
+	const modelIR = new ModelIRImpl(
+		tables,
+		relations,
+		enumMap,
+		extensions,
+		sequenceMap,
+	);
 
 	return Object.assign(modelIR, {
 		hierarchies,

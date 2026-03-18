@@ -28,6 +28,7 @@ export type {
 	RelationIR,
 	RelationKind,
 	RelationType,
+	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
 

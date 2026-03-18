@@ -13,6 +13,7 @@ import type {
 	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
+	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
 import type { SchemaChange, SchemaDiff } from './schema-diff.js';
@@ -181,9 +182,15 @@ function getPhase(kind: SchemaChange['kind']): number {
 			return 3;
 		case 'drop_table':
 		case 'drop_enum':
+		case 'drop_extension':
+		case 'drop_sequence':
 			return 4;
 		case 'create_enum':
+		case 'create_extension':
+		case 'create_sequence':
 			return 5;
+		case 'alter_sequence':
+			return 8;
 		case 'create_table':
 			return 6;
 		case 'add_column':
@@ -366,8 +373,12 @@ function changeToUpSQL(
 		case 'create_enum': {
 			const enumDef = change.meta?.enum as EnumIR;
 			if (!enumDef) return undefined;
-			const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
-			const values = enumDef.values.map((v) => `'${v.replace(/'/g, "''")}'`).join(', ');
+			const enumName = schemaName
+				? `${q(schemaName)}.${q(enumDef.name)}`
+				: q(enumDef.name);
+			const values = enumDef.values
+				.map((v) => `'${v.replace(/'/g, "''")}'`)
+				.join(', ');
 			return `CREATE TYPE ${enumName} AS ENUM (${values});`;
 		}
 
@@ -376,7 +387,9 @@ function changeToUpSQL(
 			const value = change.meta?.value as string;
 			const after = change.meta?.after as string | undefined;
 			if (!enumDef || !value) return undefined;
-			const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
+			const enumName = schemaName
+				? `${q(schemaName)}.${q(enumDef.name)}`
+				: q(enumDef.name);
 			const escaped = value.replace(/'/g, "''");
 			const position = after ? ` AFTER '${after.replace(/'/g, "''")}'` : '';
 			return `ALTER TYPE ${enumName} ADD VALUE IF NOT EXISTS '${escaped}'${position};`;
@@ -385,7 +398,9 @@ function changeToUpSQL(
 		case 'drop_enum': {
 			const enumDef = change.meta?.enum as EnumIR;
 			if (!enumDef) return undefined;
-			const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
+			const enumName = schemaName
+				? `${q(schemaName)}.${q(enumDef.name)}`
+				: q(enumDef.name);
 			return `DROP TYPE IF EXISTS ${enumName} CASCADE;`;
 		}
 
@@ -430,6 +445,61 @@ function changeToUpSQL(
 				return `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS NULL;`;
 			}
 			return `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${q(change.column!)} IS NULL;`;
+		}
+
+		case 'create_extension': {
+			const ext = change.meta?.extension as string;
+			if (!ext) return undefined;
+			return `CREATE EXTENSION IF NOT EXISTS "${ext}";`;
+		}
+
+		case 'drop_extension': {
+			const ext = change.meta?.extension as string;
+			if (!ext) return undefined;
+			return `DROP EXTENSION IF EXISTS "${ext}" CASCADE;`;
+		}
+
+		case 'create_sequence': {
+			const seq = change.meta?.sequence as SequenceIR;
+			if (!seq) return undefined;
+			const seqName = schemaName
+				? `${q(schemaName)}.${q(seq.name)}`
+				: q(seq.name);
+			const parts: string[] = [`CREATE SEQUENCE ${seqName}`];
+			if (seq.startWith !== undefined)
+				parts.push(`START WITH ${seq.startWith}`);
+			if (seq.incrementBy !== undefined)
+				parts.push(`INCREMENT BY ${seq.incrementBy}`);
+			if (seq.minValue !== undefined) parts.push(`MINVALUE ${seq.minValue}`);
+			if (seq.maxValue !== undefined) parts.push(`MAXVALUE ${seq.maxValue}`);
+			if (seq.cycle) parts.push('CYCLE');
+			return `${parts.join(' ')};`;
+		}
+
+		case 'alter_sequence': {
+			const seq = change.meta?.sequence as SequenceIR;
+			if (!seq) return undefined;
+			const seqName = schemaName
+				? `${q(schemaName)}.${q(seq.name)}`
+				: q(seq.name);
+			const parts: string[] = [`ALTER SEQUENCE ${seqName}`];
+			if (seq.startWith !== undefined)
+				parts.push(`START WITH ${seq.startWith}`);
+			if (seq.incrementBy !== undefined)
+				parts.push(`INCREMENT BY ${seq.incrementBy}`);
+			if (seq.minValue !== undefined) parts.push(`MINVALUE ${seq.minValue}`);
+			if (seq.maxValue !== undefined) parts.push(`MAXVALUE ${seq.maxValue}`);
+			if (seq.cycle !== undefined) parts.push(seq.cycle ? 'CYCLE' : 'NO CYCLE');
+			return `${parts.join(' ')};`;
+		}
+
+		case 'drop_sequence': {
+			const seq = change.meta?.sequence as SequenceIR;
+			if (!seq) return undefined;
+			const seqName = schemaName
+				? `${q(schemaName)}.${q(seq.name)}`
+				: q(seq.name);
+			return `DROP SEQUENCE IF EXISTS ${seqName} CASCADE;`;
 		}
 	}
 }
@@ -548,7 +618,9 @@ function changeToDownSQL(
 			// DOWN: drop the type that was created
 			const enumDef = change.meta?.enum as EnumIR | undefined;
 			if (!enumDef) return undefined;
-			const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
+			const enumName = schemaName
+				? `${q(schemaName)}.${q(enumDef.name)}`
+				: q(enumDef.name);
 			return `DROP TYPE IF EXISTS ${enumName} CASCADE;`;
 		}
 
@@ -556,8 +628,12 @@ function changeToDownSQL(
 			// DOWN: recreate the type that was dropped
 			const enumDef = change.meta?.enum as EnumIR | undefined;
 			if (!enumDef) return undefined;
-			const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
-			const values = enumDef.values.map((v) => `'${v.replace(/'/g, "''")}'`).join(', ');
+			const enumName = schemaName
+				? `${q(schemaName)}.${q(enumDef.name)}`
+				: q(enumDef.name);
+			const values = enumDef.values
+				.map((v) => `'${v.replace(/'/g, "''")}'`)
+				.join(', ');
 			return `CREATE TYPE ${enumName} AS ENUM (${values});`;
 		}
 
@@ -603,6 +679,71 @@ function changeToDownSQL(
 		case 'drop_comment': {
 			// DOWN: cannot restore comment — value was lost
 			return `-- WARNING: Cannot reverse drop_comment "${change.table}"${change.column ? `."${change.column}"` : ''} -- comment text was lost`;
+		}
+
+		case 'create_extension': {
+			// DOWN: drop the extension that was created
+			const ext = change.meta?.extension as string;
+			if (!ext) return undefined;
+			return `DROP EXTENSION IF EXISTS "${ext}" CASCADE;`;
+		}
+
+		case 'drop_extension': {
+			// DOWN: recreate the extension that was dropped
+			const ext = change.meta?.extension as string;
+			if (!ext) return undefined;
+			return `CREATE EXTENSION IF NOT EXISTS "${ext}";`;
+		}
+
+		case 'create_sequence': {
+			// DOWN: drop the sequence that was created
+			const seq = change.meta?.sequence as SequenceIR;
+			if (!seq) return undefined;
+			const seqName = schemaName
+				? `${q(schemaName)}.${q(seq.name)}`
+				: q(seq.name);
+			return `DROP SEQUENCE IF EXISTS ${seqName} CASCADE;`;
+		}
+
+		case 'alter_sequence': {
+			// DOWN: restore previous sequence state
+			const prevSeq = change.meta?.previousSequence as SequenceIR | undefined;
+			if (!prevSeq) {
+				return `-- WARNING: Cannot reverse alter_sequence "${change.table}" -- missing migration metadata`;
+			}
+			const seqName = schemaName
+				? `${q(schemaName)}.${q(prevSeq.name)}`
+				: q(prevSeq.name);
+			const parts: string[] = [`ALTER SEQUENCE ${seqName}`];
+			if (prevSeq.startWith !== undefined)
+				parts.push(`START WITH ${prevSeq.startWith}`);
+			if (prevSeq.incrementBy !== undefined)
+				parts.push(`INCREMENT BY ${prevSeq.incrementBy}`);
+			if (prevSeq.minValue !== undefined)
+				parts.push(`MINVALUE ${prevSeq.minValue}`);
+			if (prevSeq.maxValue !== undefined)
+				parts.push(`MAXVALUE ${prevSeq.maxValue}`);
+			if (prevSeq.cycle !== undefined)
+				parts.push(prevSeq.cycle ? 'CYCLE' : 'NO CYCLE');
+			return `${parts.join(' ')};`;
+		}
+
+		case 'drop_sequence': {
+			// DOWN: recreate the sequence that was dropped
+			const seq = change.meta?.sequence as SequenceIR;
+			if (!seq) return undefined;
+			const seqName = schemaName
+				? `${q(schemaName)}.${q(seq.name)}`
+				: q(seq.name);
+			const parts: string[] = [`CREATE SEQUENCE ${seqName}`];
+			if (seq.startWith !== undefined)
+				parts.push(`START WITH ${seq.startWith}`);
+			if (seq.incrementBy !== undefined)
+				parts.push(`INCREMENT BY ${seq.incrementBy}`);
+			if (seq.minValue !== undefined) parts.push(`MINVALUE ${seq.minValue}`);
+			if (seq.maxValue !== undefined) parts.push(`MAXVALUE ${seq.maxValue}`);
+			if (seq.cycle) parts.push('CYCLE');
+			return `${parts.join(' ')};`;
 		}
 	}
 }
