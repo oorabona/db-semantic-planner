@@ -161,6 +161,26 @@ export function generateDDL(
 		}
 	}
 
+	// ========================================================================
+	// PASS 4: COMMENT ON TABLE / COLUMN
+	// ========================================================================
+	for (const table of tables) {
+		if (table.comment) {
+			const qualifiedTable = qualifyTable(table.name, schemaName, naming);
+			statements.push(
+				`COMMENT ON TABLE ${qualifiedTable} IS '${table.comment.replace(/'/g, "''")}';`,
+			);
+		}
+		for (const col of table.columns) {
+			if (col.comment) {
+				const qualifiedTable = qualifyTable(table.name, schemaName, naming);
+				statements.push(
+					`COMMENT ON COLUMN ${qualifiedTable}.${quoteIdentifier(naming.toDatabase(col.name))} IS '${col.comment.replace(/'/g, "''")}';`,
+				);
+			}
+		}
+	}
+
 	return statements;
 }
 
@@ -259,6 +279,17 @@ function generateColumnDef(col: ColumnIR, naming: NamingPlugin): string {
 	// UNIQUE constraint
 	if (col.unique) {
 		parts.push('UNIQUE');
+	}
+
+	// COLLATE (must come after type)
+	if (col.collation) {
+		parts.push(`COLLATE "${col.collation}"`);
+	}
+
+	// GENERATED AS IDENTITY
+	if (col.identity) {
+		const gen = col.identity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
+		parts.push(`GENERATED ${gen} AS IDENTITY`);
 	}
 
 	return parts.join(' ');

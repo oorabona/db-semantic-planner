@@ -51,7 +51,13 @@ export type ChangeKind =
 	// ENUM types
 	| 'create_enum'
 	| 'alter_enum_add_value'
-	| 'drop_enum';
+	| 'drop_enum'
+	// Column enhancements
+	| 'alter_column_collation'
+	| 'alter_column_identity'
+	// Comments
+	| 'add_comment'
+	| 'drop_comment';
 
 export interface SchemaChange {
 	readonly kind: ChangeKind;
@@ -178,6 +184,7 @@ export function compareSchemata(
 		compareForeignKeys(schemaTable, dbTable, changes);
 		compareIndexes(schemaTable, dbTable, changes);
 		compareCheckConstraints(schemaTable, dbTable, changes);
+		compareComments(schemaTable, dbTable, changes);
 	}
 
 	// 2. Tables that exist in DB but not in schema → drop_table
@@ -355,6 +362,30 @@ function compareColumnDetails(
 			destructive: false,
 			details: `Change default of "${schema.name}" from ${dbDefault ?? 'none'} to ${schemaDefault ?? 'none'}`,
 			meta: { default: schema.default, oldDefault: db.default },
+		});
+	}
+
+	// Collation change
+	if ((schema.collation ?? null) !== (db.collation ?? null)) {
+		changes.push({
+			kind: 'alter_column_collation',
+			table: tableName,
+			column: schema.name,
+			destructive: false,
+			details: `Change collation of "${schema.name}" to ${schema.collation ?? 'default'}`,
+			meta: { column: schema },
+		});
+	}
+
+	// Identity change
+	if ((schema.identity ?? null) !== (db.identity ?? null)) {
+		changes.push({
+			kind: 'alter_column_identity',
+			table: tableName,
+			column: schema.name,
+			destructive: false,
+			details: `Change identity of "${schema.name}" to ${schema.identity ?? 'none'}`,
+			meta: { column: schema, previousIdentity: db.identity },
 		});
 	}
 }
@@ -625,6 +656,64 @@ function indexKey(idx: IndexIR): string {
 // ============================================================================
 // compareCheckConstraints
 // ============================================================================
+// ============================================================================
+// Comments
+// ============================================================================
+
+function compareComments(
+	schema: TableIR,
+	db: TableIR,
+	changes: SchemaChange[],
+): void {
+	// Table-level comment
+	if ((schema.comment ?? null) !== (db.comment ?? null)) {
+		if (schema.comment) {
+			changes.push({
+				kind: 'add_comment',
+				table: schema.name,
+				destructive: false,
+				details: `Set comment on table "${schema.name}"`,
+				meta: { comment: schema.comment, target: 'table' },
+			});
+		} else {
+			changes.push({
+				kind: 'drop_comment',
+				table: schema.name,
+				destructive: false,
+				details: `Remove comment from table "${schema.name}"`,
+				meta: { target: 'table' },
+			});
+		}
+	}
+
+	// Column-level comments
+	for (const schemaCol of schema.columns) {
+		const dbCol = db.columns.find((c) => c.name === schemaCol.name);
+		if (!dbCol) continue;
+		if ((schemaCol.comment ?? null) !== (dbCol.comment ?? null)) {
+			if (schemaCol.comment) {
+				changes.push({
+					kind: 'add_comment',
+					table: schema.name,
+					column: schemaCol.name,
+					destructive: false,
+					details: `Set comment on "${schema.name}"."${schemaCol.name}"`,
+					meta: { comment: schemaCol.comment, target: 'column' },
+				});
+			} else {
+				changes.push({
+					kind: 'drop_comment',
+					table: schema.name,
+					column: schemaCol.name,
+					destructive: false,
+					details: `Remove comment from "${schema.name}"."${schemaCol.name}"`,
+					meta: { target: 'column' },
+				});
+			}
+		}
+	}
+}
+
 function compareCheckConstraints(
 	schema: TableIR,
 	db: TableIR,
