@@ -2180,3 +2180,111 @@ describe('Partitioning', () => {
 		);
 	});
 });
+
+// ============================================================================
+// Regression: F-006 — buildSummary missing ChangeKind cases
+// ============================================================================
+
+describe('buildSummary — missing ChangeKind cases (F-006 regression)', () => {
+	it('F-006: alter_column_collation counts as columns.altered', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'name', collation: 'en_US' })],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'name' })] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.summary.columns.altered).toBeGreaterThanOrEqual(1);
+	});
+
+	it('F-006: alter_column_identity counts as columns.altered', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', identity: 'always' })],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'id' })] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.summary.columns.altered).toBeGreaterThanOrEqual(1);
+	});
+
+	it('F-006: create_extension does not throw and does not count in tables/columns/indexes/constraints', () => {
+		const schema = makeModelWithExtensions(['uuid-ossp']);
+		const db = makeModel([]);
+		// Must not throw (was hitting unhandled default in switch before fix)
+		expect(() => compareSchemata(schema, db)).not.toThrow();
+		const diff = compareSchemata(schema, db);
+		expect(diff.summary.tables.added).toBe(0);
+		expect(diff.summary.columns.added).toBe(0);
+		expect(diff.summary.indexes.added).toBe(0);
+		expect(diff.summary.constraints.added).toBe(0);
+	});
+
+	it('F-006: drop_extension does not count in summary', () => {
+		const schema = makeModel([]);
+		const db = makeModelWithExtensions(['pgcrypto']);
+		const diff = compareSchemata(schema, db);
+		expect(diff.summary.tables.dropped).toBe(0);
+		expect(diff.summary.constraints.dropped).toBe(0);
+	});
+
+	it('F-006: create_sequence does not count in summary', () => {
+		const seq: SequenceIR = { name: 'order_seq', startWith: 1, incrementBy: 1 };
+		const schema = makeModelWithSequences([seq]);
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.summary.tables.added).toBe(0);
+		expect(diff.summary.columns.added).toBe(0);
+	});
+
+	it('F-006: alter_sequence does not count in summary', () => {
+		const seq1: SequenceIR = {
+			name: 'order_seq',
+			startWith: 1,
+			incrementBy: 1,
+		};
+		const seq2: SequenceIR = {
+			name: 'order_seq',
+			startWith: 100,
+			incrementBy: 1,
+		};
+		const schema = makeModelWithSequences([seq1]);
+		const db = makeModelWithSequences([seq2]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.summary.tables.altered ?? 0).toBe(0);
+		expect(diff.summary.columns.altered).toBe(0);
+	});
+
+	it('F-006: drop_sequence does not count in summary', () => {
+		const seq: SequenceIR = { name: 'order_seq', startWith: 1 };
+		const schema = makeModel([]);
+		const db = makeModelWithSequences([seq]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.summary.tables.dropped).toBe(0);
+		expect(diff.summary.indexes.dropped).toBe(0);
+	});
+
+	it('F-006: add_comment does not count in summary', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id' })],
+				comment: 'User accounts',
+			}),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'id' })] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		// add_comment should not inflate any summary bucket
+		expect(diff.summary.tables.added).toBe(0);
+		expect(diff.summary.columns.added).toBe(0);
+		expect(diff.summary.constraints.added).toBe(0);
+	});
+});

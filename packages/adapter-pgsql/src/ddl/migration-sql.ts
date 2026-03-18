@@ -604,13 +604,13 @@ function changeToDownSQL(
 			const check = change.meta?.check as CheckConstraintIR | undefined;
 			if (!check) return undefined;
 			return (
-				'DO $ BEGIN ALTER TABLE ' +
+				'DO $$ BEGIN ALTER TABLE ' +
 				qualifyTable(change.table, schemaName) +
 				' ADD CONSTRAINT ' +
 				q(check.name) +
 				' ' +
 				check.expression +
-				'; EXCEPTION WHEN duplicate_object THEN NULL; END $;'
+				'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;'
 			);
 		}
 
@@ -789,6 +789,7 @@ export function generateDownSQL(
 		[], // 12: create index
 		[], // 13: add CHECK constraint
 		[], // 14: alter ENUM add value
+		[], // 15: comments
 	];
 
 	for (const change of changes) {
@@ -824,6 +825,11 @@ function generateCreateTableSQL(table: TableIR, schemaName?: string): string {
 		if (col.default !== undefined)
 			parts.push(`DEFAULT ${formatDefault(col.default)}`);
 		if (col.unique) parts.push('UNIQUE');
+		if (col.collation) parts.push(`COLLATE "${col.collation}"`);
+		if (col.identity) {
+			const gen = col.identity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
+			parts.push(`GENERATED ${gen} AS IDENTITY`);
+		}
 		elements.push(parts.join(' '));
 	}
 
