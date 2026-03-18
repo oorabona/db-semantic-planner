@@ -22,8 +22,14 @@
 
 (DX-050 archived → docs/historic/done-2026-03.md)
 (CTE-001 archived → docs/historic/done-2026-03.md)
-- [ ] 🔧 **BATCH-001** [Adapter] Batch unnest API — `INSERT ... SELECT unnest($1::type[])` and `UPDATE ... FROM unnest()` patterns. Not yet designed. Blocks 8 batch/unnest query migrations. — Priority: P0 (from astix ORM migration assessment 2026-03-15)
+(BATCH-001 archived → docs/historic/done-2026-03.md)
 (AGG-001 archived → docs/historic/done-2026-03.md)
+- [ ] 🐛 **DDL-FK-IDX** [Adapter] `generateMigrationSQL` for `create_table` changes must emit FK constraints + indexes + composite UNIQUE. Currently only emits bare CREATE TABLE — FK/indexes stored in TableIR metadata but not rendered. They only appear in subsequent ALTER diffs. Blocks astix ORM migration "from scratch" scenario (v2 creates 7 tables + FK + indexes in one migration). — Priority: P0 (from astix PoC 2026-03-18)
+- [ ] 💡 **NQL-WITH** [NQL] WITH ... AS (...) non-recursive CTE syntax in NQL parser — deferred from BATCH-001. — Priority: P1 (from /adversarial 2026-03-18)
+- [ ] 🔧 **BATCH-DRY-001** [Adapter] Extract shared `mapModelIRTypeToPgBase()` — duplicated in any.ts + compiler-utils.ts. — Priority: M (from /review F-001)
+- [ ] 🔧 **BATCH-DRY-002** [Adapter] Extract `stripArraySuffix()` helper — repeated 5× across files. — Priority: S (from /review F-002)
+- [ ] 🐛 **BATCH-FIX-001** [Adapter] Add `bigint` to `inferPgArrayType` runtime fallback. — Priority: S (from /review F-003)
+- [ ] 🔧 **BATCH-FIX-002** [Adapter] Map timestamp/date to native PG types in `mapModelTypeToPg`. — Priority: S (from /review F-004)
 - [ ] 💡 **EXT-001** [Extensions] `@dbsp/pgvector` package — vector type, distance operators (`<=>`, `<->`), HNSW/IVFFlat index DDL. Blocks 2 cosine-distance queries + 3 vector search queries. — Priority: P1 (from astix ORM migration assessment 2026-03-15)
 - [ ] 💡 **EXT-002** [Extensions] `@dbsp/paradedb` package — BM25 `@@@` operator, `paradedb.score()`, index management. Blocks 3 full-text/BM25 search queries. — Priority: P2 (from astix ORM migration assessment 2026-03-15)
 
