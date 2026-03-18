@@ -32,7 +32,23 @@ export type DriftType =
 	| 'fk_on_delete_mismatch'
 	// Indexes
 	| 'missing_index_in_db'
-	| 'missing_index_in_schema';
+	| 'missing_index_in_schema'
+	// CHECK constraints
+	| 'missing_check_in_db'
+	| 'missing_check_in_schema'
+	// ENUM types
+	| 'missing_enum_in_db'
+	| 'missing_enum_in_schema'
+	| 'enum_value_mismatch'
+	// Column enhancements
+	| 'collation_mismatch'
+	| 'identity_mismatch'
+	// Comments
+	| 'comment_mismatch'
+	// Extensions & Sequences
+	| 'missing_extension'
+	| 'missing_sequence'
+	| 'sequence_mismatch';
 
 export interface DriftIssue {
 	/** Issue severity */
@@ -102,6 +118,25 @@ const CHANGE_TO_DRIFT: Record<
 	alter_foreign_key: { type: 'fk_on_delete_mismatch', severity: 'warning' },
 	create_index: { type: 'missing_index_in_db', severity: 'warning' },
 	drop_index: { type: 'missing_index_in_schema', severity: 'info' },
+	// CHECK constraints
+	add_check_constraint: { type: 'missing_check_in_db', severity: 'warning' },
+	drop_check_constraint: { type: 'missing_check_in_schema', severity: 'info' },
+	// ENUM types
+	create_enum: { type: 'missing_enum_in_db', severity: 'error' },
+	alter_enum_add_value: { type: 'enum_value_mismatch', severity: 'warning' },
+	drop_enum: { type: 'missing_enum_in_schema', severity: 'warning' },
+	// Column enhancements
+	alter_column_collation: { type: 'collation_mismatch', severity: 'warning' },
+	alter_column_identity: { type: 'identity_mismatch', severity: 'warning' },
+	// Comments
+	add_comment: { type: 'comment_mismatch', severity: 'info' },
+	drop_comment: { type: 'comment_mismatch', severity: 'info' },
+	// Extensions & Sequences
+	create_extension: { type: 'missing_extension', severity: 'error' },
+	drop_extension: { type: 'missing_extension', severity: 'info' },
+	create_sequence: { type: 'missing_sequence', severity: 'warning' },
+	alter_sequence: { type: 'sequence_mismatch', severity: 'warning' },
+	drop_sequence: { type: 'missing_sequence', severity: 'info' },
 };
 
 function changeToDriftIssue(change: SchemaChange): DriftIssue {
