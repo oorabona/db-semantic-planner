@@ -23,6 +23,7 @@ export type {
 	ModelIR,
 	OnDeleteAction,
 	Optionality,
+	PartitionIR,
 	PseudoColumnMetadata,
 	RecursiveMetadata,
 	RelationIR,

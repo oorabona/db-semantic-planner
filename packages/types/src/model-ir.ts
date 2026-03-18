@@ -271,6 +271,18 @@ export interface CheckConstraintIR {
 }
 
 /**
+ * Table partition configuration (parent table only).
+ * Child partition management is out of scope (DDL-PARTITION-MGMT).
+ */
+export interface PartitionIR {
+	/** Partition strategy */
+	readonly strategy: 'RANGE' | 'LIST' | 'HASH';
+
+	/** Partition key columns */
+	readonly columns: readonly string[];
+}
+
+/**
  * Index definition (single or composite)
  */
 export interface IndexIR {
@@ -333,6 +345,9 @@ export interface TableIR {
 
 	/** Table-level comment (COMMENT ON TABLE) */
 	readonly comment?: string;
+
+	/** Partition configuration (parent table). Child management deferred to DDL-PARTITION-MGMT. */
+	readonly partition?: PartitionIR;
 }
 
 /**

@@ -402,9 +402,9 @@ describe('introspect', () => {
 		await introspect(pool, { schema: 'tenant_1' });
 
 		const mockQuery = pool.query as ReturnType<typeof vi.fn>;
-		// 9 queries total: columns, PKs, FKs, indexes, enums, comments, checks, extensions, sequences
+		// 10 queries total: columns, PKs, FKs, indexes, enums, comments, checks, partitions, extensions, sequences
 		// Note: extensions query has no schema param (queries all extensions globally)
-		expect(mockQuery).toHaveBeenCalledTimes(9);
+		expect(mockQuery).toHaveBeenCalledTimes(10);
 		// All parameterized queries (those with a second arg) should pass 'tenant_1'
 		for (const call of mockQuery.mock.calls) {
 			if (call[1] !== undefined) {

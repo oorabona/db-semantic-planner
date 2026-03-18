@@ -6,6 +6,7 @@ import type {
 	ForeignKeyIR,
 	IndexIR,
 	ModelIR,
+	PartitionIR,
 	SequenceIR,
 	TableIR,
 } from '@dbsp/core';
@@ -1392,5 +1393,84 @@ describe('Extensions and sequences in DDL', () => {
 		const stmts = generateDDL(model);
 		expect(stmts.some((s) => s.includes('CREATE EXTENSION'))).toBe(false);
 		expect(stmts.some((s) => s.includes('CREATE SEQUENCE'))).toBe(false);
+	});
+});
+
+// ============================================================================
+// Partitioning DDL Tests
+// ============================================================================
+
+describe('Partitioning in DDL', () => {
+	function makePartitionedModel(
+		tableName: string,
+		partition: PartitionIR,
+	): ModelIR {
+		const table: TableIR = {
+			name: tableName,
+			columns: [
+				{ name: 'id', type: 'integer', nullable: false },
+				{ name: 'created_at', type: 'timestamp', nullable: false },
+			],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+			partition,
+		};
+		return new ModelIRImpl(new Map([[tableName, table]]), new Map());
+	}
+
+	it('should emit PARTITION BY RANGE in CREATE TABLE', () => {
+		const model = makePartitionedModel('events', {
+			strategy: 'RANGE',
+			columns: ['created_at'],
+		});
+		const stmts = generateDDL(model);
+		const createSql = stmts.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toBeDefined();
+		expect(createSql).toContain('PARTITION BY RANGE ("created_at")');
+		expect(createSql).toMatch(/\)\s+PARTITION BY RANGE/);
+	});
+
+	it('should emit PARTITION BY LIST in CREATE TABLE', () => {
+		const model = makePartitionedModel('orders', {
+			strategy: 'LIST',
+			columns: ['region'],
+		});
+		const stmts = generateDDL(model);
+		const createSql = stmts.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toContain('PARTITION BY LIST ("region")');
+	});
+
+	it('should emit PARTITION BY HASH in CREATE TABLE', () => {
+		const model = makePartitionedModel('logs', {
+			strategy: 'HASH',
+			columns: ['id'],
+		});
+		const stmts = generateDDL(model);
+		const createSql = stmts.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toContain('PARTITION BY HASH ("id")');
+	});
+
+	it('should not emit PARTITION BY for non-partitioned tables', () => {
+		const table: TableIR = {
+			name: 'users',
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+			foreignKeys: [],
+			indexes: [],
+		};
+		const model = new ModelIRImpl(new Map([['users', table]]), new Map());
+		const stmts = generateDDL(model);
+		const createSql = stmts.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).not.toContain('PARTITION BY');
+	});
+
+	it('should support multi-column partition keys', () => {
+		const model = makePartitionedModel('sales', {
+			strategy: 'RANGE',
+			columns: ['year', 'month'],
+		});
+		const stmts = generateDDL(model);
+		const createSql = stmts.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toContain('PARTITION BY RANGE ("year", "month")');
 	});
 });

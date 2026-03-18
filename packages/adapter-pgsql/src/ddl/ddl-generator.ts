@@ -284,7 +284,15 @@ function generateCreateTable(
 	}
 
 	const elementsStr = elements.map((el) => `  ${el}`).join(',\n');
-	return `CREATE TABLE ${qualifiedTable} (\n${elementsStr}\n);`;
+	let sql = `CREATE TABLE ${qualifiedTable} (\n${elementsStr}\n)`;
+	if (table.partition) {
+		const partCols = table.partition.columns
+			.map((col) => quoteIdentifier(naming.toDatabase(col)))
+			.join(', ');
+		sql += ` PARTITION BY ${table.partition.strategy} (${partCols})`;
+	}
+	sql += ';';
+	return sql;
 }
 
 /**
