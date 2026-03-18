@@ -514,6 +514,133 @@ describe('compareSchemata', () => {
 			const diff = compareSchemata(schema, db);
 			expect(diff.changes).toHaveLength(0);
 		});
+
+		describe('Index enhancements', () => {
+			it('should detect index method change as drop+create', () => {
+				const schemaIdx: IndexIR = {
+					name: 'idx_posts_body',
+					columns: ['body'],
+					method: 'gin',
+				};
+				const dbIdx: IndexIR = {
+					name: 'idx_posts_body',
+					columns: ['body'],
+					// no method → btree (default)
+				};
+
+				const schema = makeModel([
+					makeTable({ name: 'posts', columns: [makeCol({ name: 'body', type: 'string' })], indexes: [schemaIdx] }),
+				]);
+				const db = makeModel([
+					makeTable({ name: 'posts', columns: [makeCol({ name: 'body', type: 'string' })], indexes: [dbIdx] }),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				const kinds = changeKinds(diff.changes);
+				expect(kinds).toContain('create_index');
+				expect(kinds).toContain('drop_index');
+			});
+
+			it('should detect partial index WHERE change', () => {
+				const schemaIdx: IndexIR = {
+					name: 'idx_users_active_email',
+					columns: ['email'],
+					where: 'active = true',
+				};
+				const dbIdx: IndexIR = {
+					name: 'idx_users_active_email',
+					columns: ['email'],
+					// no WHERE
+				};
+
+				const schema = makeModel([
+					makeTable({ name: 'users', columns: [makeCol({ name: 'email', type: 'string' })], indexes: [schemaIdx] }),
+				]);
+				const db = makeModel([
+					makeTable({ name: 'users', columns: [makeCol({ name: 'email', type: 'string' })], indexes: [dbIdx] }),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				const kinds = changeKinds(diff.changes);
+				expect(kinds).toContain('create_index');
+				expect(kinds).toContain('drop_index');
+			});
+
+			it('should detect opclass change', () => {
+				const schemaIdx: IndexIR = {
+					name: 'idx_posts_title',
+					columns: ['title'],
+					method: 'gin',
+					opclass: { title: 'gin_trgm_ops' },
+				};
+				const dbIdx: IndexIR = {
+					name: 'idx_posts_title',
+					columns: ['title'],
+					method: 'gin',
+					// no opclass → default
+				};
+
+				const schema = makeModel([
+					makeTable({ name: 'posts', columns: [makeCol({ name: 'title', type: 'string' })], indexes: [schemaIdx] }),
+				]);
+				const db = makeModel([
+					makeTable({ name: 'posts', columns: [makeCol({ name: 'title', type: 'string' })], indexes: [dbIdx] }),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				const kinds = changeKinds(diff.changes);
+				expect(kinds).toContain('create_index');
+				expect(kinds).toContain('drop_index');
+			});
+
+			it('should detect WITH params change', () => {
+				const schemaIdx: IndexIR = {
+					name: 'idx_embeddings',
+					columns: ['vec'],
+					method: 'hnsw',
+					with: { m: '16' },
+				};
+				const dbIdx: IndexIR = {
+					name: 'idx_embeddings',
+					columns: ['vec'],
+					method: 'hnsw',
+					// no WITH params
+				};
+
+				const schema = makeModel([
+					makeTable({ name: 'embeddings', columns: [makeCol({ name: 'vec', type: 'string' })], indexes: [schemaIdx] }),
+				]);
+				const db = makeModel([
+					makeTable({ name: 'embeddings', columns: [makeCol({ name: 'vec', type: 'string' })], indexes: [dbIdx] }),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				const kinds = changeKinds(diff.changes);
+				expect(kinds).toContain('create_index');
+				expect(kinds).toContain('drop_index');
+			});
+
+			it('should ignore identical enhanced indexes', () => {
+				const idx: IndexIR = {
+					name: 'idx_posts_title_trgm',
+					columns: ['title'],
+					method: 'gin',
+					opclass: { title: 'gin_trgm_ops' },
+					where: 'published = true',
+					with: { fastupdate: 'on' },
+				};
+
+				const schema = makeModel([
+					makeTable({ name: 'posts', columns: [makeCol({ name: 'title', type: 'string' })], indexes: [idx] }),
+				]);
+				const db = makeModel([
+					makeTable({ name: 'posts', columns: [makeCol({ name: 'title', type: 'string' })], indexes: [idx] }),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				expect(diff.changes).toHaveLength(0);
+			});
+		});
 	});
 
 	describe('complex scenarios', () => {

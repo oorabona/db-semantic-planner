@@ -526,6 +526,167 @@ describe('generateMigrationSQL', () => {
 
 			expect(sql[0]).toBe('DROP INDEX IF EXISTS "tenant_1"."idx_old";');
 		});
+
+		describe('Index enhancements', () => {
+			it('should generate CREATE INDEX USING gin', () => {
+				const idx: IndexIR = {
+					name: 'idx_posts_body_gin',
+					columns: ['body'],
+					method: 'gin',
+				};
+				const sql = generateMigrationSQL(
+					makeDiff([
+						{
+							kind: 'create_index',
+							table: 'posts',
+							destructive: false,
+							details: '',
+							meta: { index: idx },
+						},
+					]),
+				);
+				expect(sql[0]).toBe(
+					'CREATE INDEX IF NOT EXISTS "idx_posts_body_gin" ON "posts" USING gin ("body");',
+				);
+			});
+
+			it('should generate CREATE INDEX with WHERE (partial index)', () => {
+				const idx: IndexIR = {
+					name: 'idx_users_active',
+					columns: ['email'],
+					where: 'active = true',
+				};
+				const sql = generateMigrationSQL(
+					makeDiff([
+						{
+							kind: 'create_index',
+							table: 'users',
+							destructive: false,
+							details: '',
+							meta: { index: idx },
+						},
+					]),
+				);
+				expect(sql[0]).toBe(
+					'CREATE INDEX IF NOT EXISTS "idx_users_active" ON "users" ("email") WHERE active = true;',
+				);
+			});
+
+			it('should generate CREATE INDEX with opclass', () => {
+				const idx: IndexIR = {
+					name: 'idx_posts_title_trgm',
+					columns: ['title'],
+					method: 'gin',
+					opclass: { title: 'gin_trgm_ops' },
+				};
+				const sql = generateMigrationSQL(
+					makeDiff([
+						{
+							kind: 'create_index',
+							table: 'posts',
+							destructive: false,
+							details: '',
+							meta: { index: idx },
+						},
+					]),
+				);
+				expect(sql[0]).toBe(
+					'CREATE INDEX IF NOT EXISTS "idx_posts_title_trgm" ON "posts" USING gin ("title" gin_trgm_ops);',
+				);
+			});
+
+			it('should generate CREATE INDEX with WITH params', () => {
+				const idx: IndexIR = {
+					name: 'idx_embeddings_hnsw',
+					columns: ['embedding'],
+					method: 'hnsw',
+					with: { m: '16', ef_construction: '200' },
+				};
+				const sql = generateMigrationSQL(
+					makeDiff([
+						{
+							kind: 'create_index',
+							table: 'embeddings',
+							destructive: false,
+							details: '',
+							meta: { index: idx },
+						},
+					]),
+				);
+				expect(sql[0]).toBe(
+					'CREATE INDEX IF NOT EXISTS "idx_embeddings_hnsw" ON "embeddings" USING hnsw ("embedding") WITH (m = 16, ef_construction = 200);',
+				);
+			});
+
+			it('should generate CREATE INDEX with INCLUDE columns', () => {
+				const idx: IndexIR = {
+					name: 'idx_users_email_include',
+					columns: ['email'],
+					include: ['id', 'name'],
+				};
+				const sql = generateMigrationSQL(
+					makeDiff([
+						{
+							kind: 'create_index',
+							table: 'users',
+							destructive: false,
+							details: '',
+							meta: { index: idx },
+						},
+					]),
+				);
+				expect(sql[0]).toBe(
+					'CREATE INDEX IF NOT EXISTS "idx_users_email_include" ON "users" ("email") INCLUDE ("id", "name");',
+				);
+			});
+
+			it('should generate expression index', () => {
+				const idx: IndexIR = {
+					name: 'idx_users_lower_email',
+					columns: [],
+					expressions: ['lower("email")'],
+				};
+				const sql = generateMigrationSQL(
+					makeDiff([
+						{
+							kind: 'create_index',
+							table: 'users',
+							destructive: false,
+							details: '',
+							meta: { index: idx },
+						},
+					]),
+				);
+				expect(sql[0]).toBe(
+					'CREATE INDEX IF NOT EXISTS "idx_users_lower_email" ON "users" (lower("email"));',
+				);
+			});
+
+			it('should generate combined: method + opclass + where + with', () => {
+				const idx: IndexIR = {
+					name: 'idx_docs_content_trgm',
+					columns: ['content'],
+					method: 'gin',
+					opclass: { content: 'gin_trgm_ops' },
+					where: 'published = true',
+					with: { fastupdate: 'on' },
+				};
+				const sql = generateMigrationSQL(
+					makeDiff([
+						{
+							kind: 'create_index',
+							table: 'docs',
+							destructive: false,
+							details: '',
+							meta: { index: idx },
+						},
+					]),
+				);
+				expect(sql[0]).toBe(
+					'CREATE INDEX IF NOT EXISTS "idx_docs_content_trgm" ON "docs" USING gin ("content" gin_trgm_ops) WITH (fastupdate = on) WHERE published = true;',
+				);
+			});
+		});
 	});
 
 	describe('topological ordering', () => {

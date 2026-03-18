@@ -588,7 +588,26 @@ function compareIndexes(
 }
 
 function indexKey(idx: IndexIR): string {
-	return `${idx.columns.join(',')}:${idx.unique ? 'unique' : 'nonunique'}`;
+	const parts = [
+		idx.columns.join(','),
+		idx.unique ? 'unique' : 'nonunique',
+		idx.method ?? 'btree',
+		idx.where ?? '',
+		(idx.expressions ?? []).join(','),
+		idx.opclass
+			? Object.entries(idx.opclass)
+					.sort()
+					.map(([k, v]) => `${k}=${v}`)
+					.join(',')
+			: '',
+		idx.with
+			? Object.entries(idx.with)
+					.sort()
+					.map(([k, v]) => `${k}=${v}`)
+					.join(',')
+			: '',
+	];
+	return parts.join(':');
 }
 
 // ============================================================================

@@ -349,14 +349,35 @@ function generateCreateIndex(
 		idx.name ?? `idx_${tableName}_${idx.columns.join('_')}`,
 	);
 	const qualifiedTable = qualifyTable(tableName, schemaName, naming);
-
-	// Index columns
-	const cols = idx.columns
-		.map((col) => quoteIdentifier(naming.toDatabase(col)))
-		.join(', ');
-
-	// UNIQUE keyword
 	const unique = idx.unique ? 'UNIQUE ' : '';
+	const method = idx.method ? ` USING ${idx.method}` : '';
 
-	return `CREATE ${unique}INDEX ${indexName} ON ${qualifiedTable} (${cols});`;
+	// Build column list: expressions first (unquoted), then named columns with optional opclass
+	const colParts: string[] = [];
+	if (idx.expressions && idx.expressions.length > 0) {
+		for (const expr of idx.expressions) {
+			colParts.push(expr);
+		}
+	}
+	for (const col of idx.columns) {
+		const opclass = idx.opclass?.[col] ?? '';
+		colParts.push(
+			`${quoteIdentifier(naming.toDatabase(col))}${opclass ? ` ${opclass}` : ''}`,
+		);
+	}
+	const cols = colParts.join(', ');
+
+	const include =
+		idx.include && idx.include.length > 0
+			? ` INCLUDE (${idx.include.map((c) => quoteIdentifier(naming.toDatabase(c))).join(', ')})`
+			: '';
+	const withParams =
+		idx.with && Object.keys(idx.with).length > 0
+			? ` WITH (${Object.entries(idx.with)
+					.map(([k, v]) => `${k} = ${v}`)
+					.join(', ')})`
+			: '';
+	const where = idx.where ? ` WHERE ${idx.where}` : '';
+
+	return `CREATE ${unique}INDEX ${indexName} ON ${qualifiedTable}${method} (${cols})${include}${withParams}${where};`;
 }
