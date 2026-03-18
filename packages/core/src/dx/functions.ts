@@ -12,6 +12,7 @@ import type {
 	AggregateExpressionIntent,
 	CoalesceExpressionIntent,
 	RawExpressionIntent,
+	WhereIntent,
 } from '../intent-ast.js';
 
 import { getColumnName } from './column-utils.js';
@@ -53,6 +54,8 @@ export interface AggregateExpr<T> {
 	readonly _intent: AggregateExpressionIntent;
 	/** Add an alias to the expression */
 	as(alias: string): AggregateExpr<T>;
+	/** Add a FILTER (WHERE ...) clause to the aggregate */
+	filter(condition: WhereIntent): AggregateExpr<T>;
 }
 
 /**
@@ -111,6 +114,9 @@ function createAggregateExpr<T>(
 		as(alias: string): AggregateExpr<T> {
 			validateAlias(alias);
 			return createAggregateExpr({ ...intent, as: alias });
+		},
+		filter(condition: WhereIntent): AggregateExpr<T> {
+			return createAggregateExpr({ ...intent, filter: condition });
 		},
 	};
 	return expr;

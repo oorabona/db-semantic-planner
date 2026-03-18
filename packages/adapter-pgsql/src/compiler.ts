@@ -122,6 +122,26 @@ function mapToHandlerDecision(
 	} as HandlerDecision;
 }
 
+/**
+ * Compile an optional filterCondition (PlanDecision) to an AST Node.
+ * Used to hydrate filterWhere on aggregate handler decisions.
+ */
+function compileFilterCondition(
+	filterCondition: PlanDecision | undefined,
+	dispatcher: ReturnType<typeof createWhereDispatcher>,
+	ctx: HandlerCompilerContext,
+	state: HandlerCompilerState,
+): import('@pgsql/types').Node | undefined {
+	if (!filterCondition) return undefined;
+	const mapped = mapToHandlerDecision(
+		filterCondition,
+		ctx.rootTable,
+		ctx.defaultPkColumnName ?? 'id',
+		ctx.deriveFkColumnName ?? defaultFkDerivation,
+	);
+	return dispatcher(mapped, ctx, state);
+}
+
 // ============================================================================
 // Types (simplified for spike - would import from @dbsp/core)
 // ============================================================================
@@ -195,6 +215,8 @@ export interface PlanDecision {
 	readonly selectColumn?: string;
 	readonly aggregate?: string;
 	readonly subqueryOperator?: string;
+	// FILTER (WHERE ...) condition for aggregate expressions (WhereIntent serialized as PlanDecision)
+	readonly filterCondition?: PlanDecision;
 }
 
 /**
@@ -591,7 +613,17 @@ export class PlanCompiler {
 						this.defaultPk,
 						this.deriveFk,
 					);
-					const node = handler.compile(handlerDecision, exprCtx, exprState);
+					// Compile FILTER (WHERE ...) clause if present
+					const filterNode = compileFilterCondition(
+						decision.filterCondition,
+						createWhereDispatcher(),
+						exprCtx,
+						exprState,
+					);
+					const hydratedDecision = filterNode
+						? { ...handlerDecision, filterWhere: filterNode }
+						: handlerDecision;
+					const node = handler.compile(hydratedDecision, exprCtx, exprState);
 					this.state.paramIndex = exprState.paramIndex;
 					targetList.push({
 						ResTarget: {

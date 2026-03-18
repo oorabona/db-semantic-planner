@@ -54,6 +54,8 @@ export interface AggregateIntent {
 	readonly as?: string;
 	/** Whether to apply DISTINCT to the aggregate (e.g., COUNT(DISTINCT field)) */
 	readonly distinct?: boolean;
+	/** FILTER (WHERE ...) clause for conditional aggregation */
+	readonly filter?: import('./where-intent.js').WhereIntent;
 }
 
 /**

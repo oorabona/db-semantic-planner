@@ -89,6 +89,23 @@ export function intentToDecisions(
 // SELECT Conversion
 // ============================================================================
 
+
+
+/**
+ * Apply a filter condition to a decision if a filter intent is present.
+ */
+function applyFilterCondition(
+	decision: Mutable<PlanDecision>,
+	filter: WhereIntent | undefined,
+	rootTable: string,
+): void {
+	if (filter) {
+		const filterDecision = convertWhereCondition(filter, rootTable);
+		if (filterDecision) decision.filterCondition = filterDecision;
+	}
+}
+
+
 function convertSelect(
 	select: SelectIntent,
 	rootTable: string,
@@ -141,6 +158,7 @@ function convertSelect(
 				const aggField = expr.field as string | undefined;
 				const aggAs = expr.as as string | undefined;
 				const aggDistinct = expr.distinct as boolean | undefined;
+				const aggFilter = expr.filter as WhereIntent | undefined;
 
 				if (aggFunc === 'count' && !aggField) {
 					const decision: Mutable<PlanDecision> = {
@@ -150,6 +168,7 @@ function convertSelect(
 						table: rootTable,
 					};
 					if (aggAs) decision.alias = aggAs;
+					applyFilterCondition(decision, aggFilter, rootTable);
 					decisions.push(decision);
 				} else if (aggFunc === 'count' && aggDistinct && aggField) {
 					const decision: Mutable<PlanDecision> = {
@@ -159,6 +178,7 @@ function convertSelect(
 						table: rootTable,
 					};
 					if (aggAs) decision.alias = aggAs;
+					applyFilterCondition(decision, aggFilter, rootTable);
 					decisions.push(decision);
 				} else {
 					const decision: Mutable<PlanDecision> = {
@@ -168,6 +188,7 @@ function convertSelect(
 					};
 					if (aggField) decision.column = aggField;
 					if (aggAs) decision.alias = aggAs;
+					applyFilterCondition(decision, aggFilter, rootTable);
 					decisions.push(decision);
 				}
 			} else if (exprKind === 'coalesce') {
@@ -320,6 +341,7 @@ function convertSelect(
 			if (agg.as) {
 				aggDecision.alias = agg.as;
 			}
+			applyFilterCondition(aggDecision, agg.filter, rootTable);
 			decisions.push(aggDecision);
 		}
 
