@@ -18,6 +18,7 @@ import type {
 	UpdateBuilder,
 	UpsertBuilder,
 } from './mutation-builders.js';
+import type { CteBuilder } from './cte-builder.js';
 import type { NqlTag } from './nql.js';
 import type { QueryBuilder } from './query-builder-types.js';
 import type { GeneratedSchema, InferDBFromSchema } from './schema-bridge.js';
@@ -536,4 +537,23 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * ```
 	 */
 	raw<T = unknown>(sql: string, parameters?: readonly unknown[]): Promise<T[]>;
+	/**
+	 * Create a CTE (Common Table Expression) backed by unnest() arrays.
+	 * Use .fromUnnest() to provide column data, .withIndex() to add an ordinality index,
+	 * then .query() to attach an outer SELECT.
+	 *
+	 * @param name - The CTE name
+	 * @returns A CteBuilder for constructing the CTE
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await orm.withCte('lookups')
+	 *   .fromUnnest({ id: [1, 2, 3], name: ['a', 'b', 'c'] })
+	 *   .withIndex('idx')
+	 *   .query(orm.select('symbols'))
+	 *   .all();
+	 * ```
+	 */
+	withCte(name: string): CteBuilder;
 }
+

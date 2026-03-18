@@ -1354,7 +1354,8 @@ export class QueryBuilderImpl<TResult = unknown>
 	 * Build the QueryIntent from current state.
 	 * Handles exactOptionalPropertyTypes by only including defined properties.
 	 */
-	private buildIntent(applyDefaultFilters = true): QueryIntent {
+	/** @internal Used by CteQueryBuilder to access query intent without executing. */
+	buildIntent(applyDefaultFilters = true): QueryIntent {
 		const intent: Mutable<QueryIntent> = {
 			type: 'select',
 			from: this.from,

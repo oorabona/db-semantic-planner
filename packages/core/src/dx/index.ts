@@ -138,6 +138,12 @@ export {
 	setLogger,
 	silentLogger,
 } from './logger.js';
+// CTE Builder (BATCH-001 Block 5)
+export {
+	CteBuilder,
+	CteQueryBuilder,
+	type CteDump,
+} from './cte-builder.js';
 // Mutation Builders (DX-010, DX-026)
 export {
 	DeleteBuilder,

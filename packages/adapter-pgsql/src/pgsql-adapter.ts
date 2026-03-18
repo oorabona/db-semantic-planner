@@ -17,6 +17,7 @@ import type {
 	CompiledQuery,
 	CompileOptions,
 	CompileResultWithIncludes,
+	CteQueryIntent,
 	DbCasing,
 	DeleteIntent,
 	DialectCapabilities,
@@ -41,7 +42,7 @@ import {
 	defaultFkDerivation,
 	type FkColumnDerivation,
 } from './assert-field.js';
-import { innerJoin, rangeVar } from './ast-helpers.js';
+import { binaryExpr, columnRef, funcCall, innerJoin, integerNode, rangeVar, stringNode } from './ast-helpers.js';
 import {
 	type CompilerOptions,
 	compilePlan,
@@ -84,6 +85,7 @@ import {
 	type UpsertFromConfig,
 } from './mutations/index.js';
 import {
+	inferPgArrayType,
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from './compiler-utils.js';
@@ -104,6 +106,7 @@ import {
 	type RecursiveCteConfig,
 } from './recursive/index.js';
 import { generateCursorName } from './streaming/cursor.js';
+import { createTypeCastParamRef } from './param-ref.js';
 import { validateIdentifier } from './validate.js';
 
 // ============================================================================
@@ -1464,6 +1467,150 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		return {
 			sql,
 			parameters: [],
+		};
+	}
+
+	/**
+	 * Compile a CTE query backed by unnest() arrays (BATCH-001 Block 5).
+	 *
+	 * Strategy: compile CTE nodes to SQL fragments, compile outer query
+	 * independently (parameters starting at $1), then renumber outer params
+	 * to start after CTE params and prepend WITH clause.
+	 */
+	compileCteQuery(
+		intent: CteQueryIntent,
+		options?: CompileOptions,
+	): CompiledQuery {
+		const schemaName = this.schemaName ?? options?.schemaName;
+		const state = createCompilerState();
+
+		// 1. Build CTE nodes and accumulate CTE parameters
+		const cteNodes: Node[] = intent.ctes.map((cte) => {
+			if (cte.kind !== 'unnestCte') {
+				const kind = (cte as { kind: string }).kind;
+				throw new Error(
+					`PgsqlAdapter.compileCteQuery: Unsupported CTE kind '${kind}'`,
+				);
+			}
+			return this.buildUnnestCte(cte, state);
+		});
+
+		// 2. Compile outer query independently ($1, $2, ... relative to outer)
+		const outerCompileOptions: CompileOptions =
+			schemaName !== undefined ? { schemaName } : {};
+		const outerPlanReport: import('@dbsp/types').PlanReport = {
+			rootTable: intent.query.from,
+			decisions: [],
+			warnings: [],
+			ctes: [],
+			intent: intent.query,
+			metadata: {
+				planningTimeMs: 0,
+				relationsAnalyzed: 0,
+				isAmbiguous: false,
+			},
+		};
+		const outerCompiled = this.compile(outerPlanReport, outerCompileOptions);
+
+		// 3. Renumber outer SQL parameters to follow CTE parameters
+		const cteParamCount = state.parameters.length;
+		const renumberedOuterSql =
+			cteParamCount > 0
+				? outerCompiled.sql.replace(
+						/\$([0-9]+)/g,
+						(_: string, n: string) => '$' + (parseInt(n) + cteParamCount),
+					)
+				: outerCompiled.sql;
+
+		// 4. Deparse CTE nodes to SQL fragments
+		const cteSqlParts = cteNodes.map((n) => deparseQuoted(n));
+		const withClause = cteSqlParts.join(', ');
+
+		const sql =
+			withClause.length > 0
+				? `WITH ${withClause} ${renumberedOuterSql}`
+				: renumberedOuterSql;
+
+		return {
+			sql,
+			parameters: [...state.parameters, ...outerCompiled.parameters],
+		};
+	}
+
+	/**
+	 * Build a CommonTableExpr AST node for an unnest-backed CTE.
+	 * Produces: CommonTableExpr { ctename: 'name', ctequery: SelectStmt {...} }
+	 */
+	private buildUnnestCte(
+		cte: import('@dbsp/types').UnnestCteIntent,
+		state: ReturnType<typeof createCompilerState>,
+	): Node {
+		const columns = Object.keys(cte.columns);
+		const hasIndex = cte.indexColumn !== undefined;
+		const indexCol = cte.indexColumn ?? 'ordinality';
+
+		// Build unnest arguments: CAST($N AS type[]) for each column
+		const unnestArgs: Node[] = columns.map((col) => {
+			const colArray = cte.columns[col] as unknown[];
+			const sampleValue = colArray.find((v) => v !== null && v !== undefined);
+			const pgArrayType = inferPgArrayType(col, undefined, sampleValue);
+			const pgBaseType = pgArrayType.endsWith('[]')
+				? pgArrayType.slice(0, -2)
+				: pgArrayType;
+
+			state.parameters.push(colArray);
+			state.paramIndex++;
+			return createTypeCastParamRef(state.paramIndex, pgBaseType, true);
+		});
+
+		// All column alias names: col1, col2, ...[, ordinality]
+		const allAliasNames = [
+			...columns.map((c) => this.naming.toDatabase(c)),
+			...(hasIndex ? ['ordinality'] : []),
+		];
+
+		// FROM unnest(args...) [WITH ORDINALITY] AS t("col1", "col2"[, ordinality])
+		const rangeFunc: Node = {
+			RangeFunction: {
+				ordinality: hasIndex,
+				functions: [{ List: { items: [funcCall('unnest', unnestArgs)] } }],
+				alias: {
+					aliasname: 't',
+					colnames: allAliasNames.map((n) => stringNode(n)),
+				},
+			},
+		};
+
+		// SELECT targets: t."col1", t."col2"[, (t.ordinality - 1) AS "idx"]
+		const targets: Node[] = columns.map((col) => ({
+			ResTarget: {
+				val: columnRef(col, 't', undefined, this.naming),
+				name: this.naming.toDatabase(col),
+			},
+		}));
+		if (hasIndex) {
+			targets.push({
+				ResTarget: {
+					val: binaryExpr(
+						'-',
+						columnRef('ordinality', 't'),
+						integerNode(1),
+					),
+					name: indexCol,
+				},
+			});
+		}
+
+		const cteSelectStmt: SelectStmt = {
+			targetList: targets,
+			fromClause: [rangeFunc],
+		};
+
+		return {
+			CommonTableExpr: {
+				ctename: cte.name,
+				ctequery: { SelectStmt: cteSelectStmt },
+			},
 		};
 	}
 

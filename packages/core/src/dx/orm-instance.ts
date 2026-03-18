@@ -16,6 +16,7 @@ import {
 	UpdateBuilder,
 	UpsertBuilder,
 } from './mutation-builders.js';
+import { CteBuilder } from './cte-builder.js';
 import { createNqlTag, type NqlTag } from './nql.js';
 import { QueryBuilderImpl } from './query-builder.js';
 import type { DefaultFilters } from './schema.js';
@@ -384,6 +385,10 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 
 			// Passthrough to adapter's executeRaw API
 			return adapter.executeRaw<T>(sqlString, parameters);
+		},
+
+		withCte(name: string): CteBuilder {
+			return new CteBuilder(name, adapter, schemaName);
 		},
 	};
 }

@@ -83,6 +83,7 @@ export function createMockAdapter(options?: MockAdapterOptions): Adapter {
 		compileUpsert: notImplemented,
 		compileUpsertFrom: notImplemented,
 		compileRecursive: notImplemented,
+		compileCteQuery: notImplemented,
 		createDump: notImplemented,
 		execute: notImplemented,
 		executeOne: notImplemented,
