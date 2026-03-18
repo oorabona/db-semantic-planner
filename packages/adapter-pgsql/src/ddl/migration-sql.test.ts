@@ -2754,3 +2754,213 @@ describe('Partitioning', () => {
 		expect(createSql).toContain('PARTITION BY RANGE ("year", "month")');
 	});
 });
+
+// ============================================================================
+// Regression: F-001 — generateDownSQL phases array missing index 15 (comments)
+// ============================================================================
+
+describe('generateDownSQL — comment changes (F-001 regression)', () => {
+	it('F-001: add_comment in DOWN SQL does not crash (phase 15 present)', () => {
+		const diff = makeDiff([
+			{
+				kind: 'add_comment',
+				table: 'users',
+				destructive: false,
+				details: '',
+				meta: { comment: 'A table', target: 'table' },
+			},
+		]);
+		// Must not throw (was crashing with phases[15] = undefined)
+		expect(() => generateDownSQL(diff)).not.toThrow();
+		const sql = generateDownSQL(diff);
+		expect(sql).toHaveLength(1);
+		expect(sql[0]).toContain('COMMENT ON TABLE "users" IS NULL');
+	});
+
+	it('F-001: drop_comment in DOWN SQL does not crash (phase 15 present)', () => {
+		const diff = makeDiff([
+			{
+				kind: 'drop_comment',
+				table: 'orders',
+				column: 'total',
+				destructive: false,
+				details: '',
+				meta: { target: 'column' },
+			},
+		]);
+		expect(() => generateDownSQL(diff)).not.toThrow();
+		const sql = generateDownSQL(diff);
+		expect(sql).toHaveLength(1);
+		expect(sql[0]).toContain('WARNING');
+	});
+
+	it('F-001: mixed add_comment + create_table DOWN SQL preserves ordering', () => {
+		const table = makeTable('users', [
+			makeCol({ name: 'id', type: 'integer' }),
+		]);
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'users',
+				destructive: false,
+				details: '',
+				meta: { table },
+			},
+			{
+				kind: 'add_comment',
+				table: 'users',
+				destructive: false,
+				details: '',
+				meta: { comment: 'User accounts', target: 'table' },
+			},
+		]);
+		expect(() => generateDownSQL(diff)).not.toThrow();
+		const sql = generateDownSQL(diff);
+		// DOWN: comments reversed first (higher phase), then DROP TABLE
+		const commentIdx = sql.findIndex((s) => s.includes('COMMENT ON TABLE'));
+		const dropIdx = sql.findIndex((s) => s.includes('DROP TABLE'));
+		expect(commentIdx).toBeLessThan(dropIdx);
+	});
+});
+
+// ============================================================================
+// Regression: F-002 — drop_check_constraint DOWN SQL must use $$ not $
+// ============================================================================
+
+describe('generateDownSQL — drop_check_constraint dollar-quoting (F-002 regression)', () => {
+	it('F-002: DOWN SQL for drop_check_constraint uses $$ not $', () => {
+		const diff = makeDiff([
+			{
+				kind: 'drop_check_constraint',
+				table: 'users',
+				destructive: true,
+				details: '',
+				meta: {
+					check: { name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				},
+			},
+		]);
+		const sql = generateDownSQL(diff);
+		expect(sql).toHaveLength(1);
+		// Must use $$ (double dollar), not $ (single dollar) — invalid PostgreSQL
+		expect(sql[0]).toContain('DO $$ BEGIN');
+		expect(sql[0]).toContain('END $$;');
+		expect(sql[0]).not.toMatch(/DO \$ BEGIN/);
+		expect(sql[0]).not.toMatch(/END \$;/);
+		expect(sql[0]).toBe(
+			'DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0)); EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
+		);
+	});
+
+	it('F-002: DOWN SQL for drop_check_constraint with schema uses $$', () => {
+		const diff = makeDiff([
+			{
+				kind: 'drop_check_constraint',
+				table: 'products',
+				destructive: true,
+				details: '',
+				meta: {
+					check: {
+						name: 'products_price_check',
+						expression: 'CHECK ((price >= 0))',
+					},
+				},
+			},
+		]);
+		const sql = generateDownSQL(diff, { schemaName: 'catalog' });
+		expect(sql).toHaveLength(1);
+		expect(sql[0]).toContain('DO $$ BEGIN');
+		expect(sql[0]).toContain('END $$;');
+		expect(sql[0]).toContain('"catalog"."products"');
+	});
+});
+
+// ============================================================================
+// Regression: F-003 — generateCreateTableSQL missing COLLATE and IDENTITY
+// ============================================================================
+
+describe('generateCreateTableSQL — collation and identity (F-003 regression)', () => {
+	it('F-003: CREATE TABLE includes COLLATE for columns with collation', () => {
+		const table = makeTable('users', [
+			makeCol({ name: 'id', type: 'integer' }),
+			makeCol({ name: 'name', type: 'string', collation: 'en_US' }),
+		]);
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'users',
+				destructive: false,
+				details: '',
+				meta: { table },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		const createSql = sql.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toBeDefined();
+		expect(createSql).toContain('COLLATE "en_US"');
+	});
+
+	it('F-003: CREATE TABLE includes GENERATED ALWAYS AS IDENTITY', () => {
+		const table = makeTable('orders', [
+			makeCol({ name: 'id', type: 'integer', identity: 'always' }),
+			makeCol({ name: 'name', type: 'string' }),
+		]);
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'orders',
+				destructive: false,
+				details: '',
+				meta: { table },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		const createSql = sql.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toBeDefined();
+		expect(createSql).toContain('GENERATED ALWAYS AS IDENTITY');
+	});
+
+	it('F-003: CREATE TABLE includes GENERATED BY DEFAULT AS IDENTITY', () => {
+		const table = makeTable('events', [
+			makeCol({ name: 'id', type: 'integer', identity: 'byDefault' }),
+		]);
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'events',
+				destructive: false,
+				details: '',
+				meta: { table },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		const createSql = sql.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toBeDefined();
+		expect(createSql).toContain('GENERATED BY DEFAULT AS IDENTITY');
+	});
+
+	it('F-003: CREATE TABLE includes both COLLATE and IDENTITY on same column', () => {
+		const table = makeTable('items', [
+			makeCol({
+				name: 'code',
+				type: 'string',
+				collation: 'C',
+				identity: 'always',
+			}),
+		]);
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'items',
+				destructive: false,
+				details: '',
+				meta: { table },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		const createSql = sql.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toBeDefined();
+		expect(createSql).toContain('COLLATE "C"');
+		expect(createSql).toContain('GENERATED ALWAYS AS IDENTITY');
+	});
+});

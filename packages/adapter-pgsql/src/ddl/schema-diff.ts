@@ -1088,6 +1088,19 @@ function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 			case 'drop_enum':
 				// ENUM changes are schema-level; not counted in table/column/index summaries
 				break;
+			case 'alter_column_collation':
+			case 'alter_column_identity':
+				columns.altered++;
+				break;
+			case 'add_comment':
+			case 'drop_comment':
+			case 'create_extension':
+			case 'drop_extension':
+			case 'create_sequence':
+			case 'alter_sequence':
+			case 'drop_sequence':
+				// Schema-level or metadata changes; not counted in table/column/index/constraint summaries
+				break;
 		}
 	}
 
