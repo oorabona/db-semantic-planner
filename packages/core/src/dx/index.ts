@@ -214,9 +214,13 @@ export {
 	ref,
 	type Schema,
 	type SchemaColumnType,
+	type SchemaConstraints,
 	type SchemaDefinition,
+	type SchemaExtras,
+	type SchemaIndexOptions,
 	// E17: Schema options with default filters
 	type SchemaOptions,
+	type SchemaTableOptions,
 	SchemaValidationError as SchemaError,
 	type SelfRefRoles,
 	schema,

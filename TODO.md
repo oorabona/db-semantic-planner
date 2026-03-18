@@ -25,6 +25,7 @@
 (BATCH-001 archived → docs/historic/done-2026-03.md)
 (AGG-001 archived → docs/historic/done-2026-03.md)
 (DDL-FK-IDX archived → docs/historic/done-2026-03.md)
+- [x] ✅ **SCHEMA-DSL-EXT** [Core] Extend schema() DSL — method, opclass, with, where on indexes + checkConstraints + sequences + extensions. Used by astix to eliminate 37 rawIndexes. (2026-03-18, from astix ORM migration)
 - [ ] 💡 **NQL-WITH** [NQL] WITH ... AS (...) non-recursive CTE syntax in NQL parser — deferred from BATCH-001. — Priority: P1 (from /adversarial 2026-03-18)
 - [ ] 🔧 **BATCH-DRY-001** [Adapter] Extract shared `mapModelIRTypeToPgBase()` — duplicated in any.ts + compiler-utils.ts. — Priority: M (from /review F-001)
 - [ ] 🔧 **BATCH-DRY-002** [Adapter] Extract `stripArraySuffix()` helper — repeated 5× across files. — Priority: S (from /review F-002)
