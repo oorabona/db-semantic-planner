@@ -7,7 +7,15 @@
  * @module migration-sql
  */
 
-import type { ColumnIR, ForeignKeyIR, IndexIR, TableIR } from '@dbsp/types';
+import type {
+	CheckConstraintIR,
+	ColumnIR,
+	EnumIR,
+	ForeignKeyIR,
+	IndexIR,
+	SequenceIR,
+	TableIR,
+} from '@dbsp/types';
 import type { SchemaChange, SchemaDiff } from './schema-diff.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
@@ -51,6 +59,8 @@ export interface MigrationSQLOptions {
 	readonly schemaName?: string;
 	/** Whether to include destructive changes (drops) */
 	readonly includeDestructive?: boolean;
+	/** Automatically create indexes on FK columns for new tables (default: true) */
+	readonly fkAutoIndex?: boolean;
 }
 
 // ============================================================================
@@ -61,17 +71,22 @@ export interface MigrationSQLOptions {
  * Generate ordered SQL statements from a SchemaDiff.
  *
  * Topological order:
- * 1. DROP FK constraints (must drop before referenced tables)
- * 2. DROP indexes
- * 3. DROP columns
- * 4. DROP primary keys
- * 5. DROP tables
- * 6. CREATE tables
- * 7. ADD columns
- * 8. ALTER columns (type, nullable, default)
- * 9. ADD primary keys
+ * 0.  DROP FK/CHECK constraints (must drop before referenced tables)
+ * 1.  DROP indexes
+ * 2.  DROP columns
+ * 3.  DROP primary keys
+ * 4.  DROP tables, DROP ENUMs
+ * 5.  CREATE ENUMs (must exist before tables that use them)
+ * 6.  CREATE tables
+ * 7.  ADD columns
+ * 8.  ALTER columns (type, nullable, default)
+ * 9.  ADD primary keys
  * 10. ADD FK constraints (must add after referenced tables exist)
- * 11. CREATE indexes
+ * 11. ALTER FK (drop + re-add)
+ * 12. CREATE indexes
+ * 13. ADD CHECK constraints
+ * 14. ALTER ENUM ADD VALUE (must be last — has transaction visibility caveats in PG)
+ * 15. COMMENT ON TABLE / COLUMN (very last)
  */
 export function generateMigrationSQL(
 	diff: SchemaDiff,
@@ -87,18 +102,22 @@ export function generateMigrationSQL(
 
 	// Group changes by phase for topological ordering
 	const phases: SchemaChange[][] = [
-		[], // 0: drop FK
+		[], // 0: drop FK, drop CHECK
 		[], // 1: drop index
 		[], // 2: drop column
 		[], // 3: drop PK
-		[], // 4: drop table
-		[], // 5: create table
-		[], // 6: add column
-		[], // 7: alter column
-		[], // 8: add PK
-		[], // 9: add FK
-		[], // 10: alter FK (drop + re-add)
-		[], // 11: create index
+		[], // 4: drop table, drop ENUM
+		[], // 5: create ENUM
+		[], // 6: create table
+		[], // 7: add column
+		[], // 8: alter column
+		[], // 9: add PK
+		[], // 10: add FK
+		[], // 11: alter FK (drop + re-add)
+		[], // 12: create index
+		[], // 13: add CHECK constraint
+		[], // 14: alter ENUM add value (must be after CREATE TABLE, outside transaction)
+		[], // 15: COMMENT ON TABLE / COLUMN (very last)
 	];
 
 	for (const change of changes) {
@@ -115,6 +134,34 @@ export function generateMigrationSQL(
 		}
 	}
 
+	// FK auto-indexes for new tables (single-column FKs without explicit index)
+	if (options?.fkAutoIndex !== false) {
+		for (const change of changes) {
+			if (change.kind === 'create_table') {
+				const table = change.meta?.table as TableIR | undefined;
+				if (!table) continue;
+				const explicitIndexColumns = new Set(
+					table.indexes.flatMap((idx) =>
+						idx.columns.length === 1 ? idx.columns : [],
+					),
+				);
+				for (const fk of table.foreignKeys) {
+					const fkCol = fk.columns[0];
+					if (
+						fk.columns.length === 1 &&
+						fkCol &&
+						!explicitIndexColumns.has(fkCol)
+					) {
+						const indexName = q(idxName(table.name, [fkCol]));
+						statements.push(
+							`CREATE INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(table.name, schemaName)} (${q(fkCol)});`,
+						);
+					}
+				}
+			}
+		}
+	}
+
 	return statements;
 }
 
@@ -125,6 +172,7 @@ export function generateMigrationSQL(
 function getPhase(kind: SchemaChange['kind']): number {
 	switch (kind) {
 		case 'drop_foreign_key':
+		case 'drop_check_constraint':
 			return 0;
 		case 'drop_index':
 			return 1;
@@ -133,23 +181,41 @@ function getPhase(kind: SchemaChange['kind']): number {
 		case 'drop_primary_key':
 			return 3;
 		case 'drop_table':
+		case 'drop_enum':
+		case 'drop_extension':
+		case 'drop_sequence':
 			return 4;
-		case 'create_table':
+		case 'create_enum':
+		case 'create_extension':
+		case 'create_sequence':
 			return 5;
-		case 'add_column':
+		case 'alter_sequence':
+			return 8;
+		case 'create_table':
 			return 6;
+		case 'add_column':
+			return 7;
 		case 'alter_column_type':
 		case 'alter_column_nullable':
 		case 'alter_column_default':
-			return 7;
-		case 'add_primary_key':
+		case 'alter_column_collation':
+		case 'alter_column_identity':
 			return 8;
-		case 'add_foreign_key':
+		case 'add_primary_key':
 			return 9;
-		case 'alter_foreign_key':
+		case 'add_foreign_key':
 			return 10;
-		case 'create_index':
+		case 'alter_foreign_key':
 			return 11;
+		case 'create_index':
+			return 12;
+		case 'add_check_constraint':
+			return 13;
+		case 'alter_enum_add_value':
+			return 14;
+		case 'add_comment':
+		case 'drop_comment':
+			return 15;
 	}
 }
 
@@ -245,8 +311,34 @@ function changeToUpSQL(
 			if (!idx) return undefined;
 			const indexName = q(idxName(change.table, idx.columns, idx.name));
 			const unique = idx.unique ? 'UNIQUE ' : '';
-			const cols = idx.columns.map(q).join(', ');
-			return `CREATE ${unique}INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(change.table, schemaName)} (${cols});`;
+			const method = idx.method ? ` USING ${idx.method}` : '';
+
+			// Build column list: expressions first (unquoted), then named columns with optional opclass
+			const colParts: string[] = [];
+			if (idx.expressions && idx.expressions.length > 0) {
+				for (const expr of idx.expressions) {
+					colParts.push(expr);
+				}
+			}
+			for (const col of idx.columns) {
+				const opclass = idx.opclass?.[col] ?? '';
+				colParts.push(`${q(col)}${opclass ? ` ${opclass}` : ''}`);
+			}
+			const cols = colParts.join(', ');
+
+			const include =
+				idx.include && idx.include.length > 0
+					? ` INCLUDE (${idx.include.map(q).join(', ')})`
+					: '';
+			const withParams =
+				idx.with && Object.keys(idx.with).length > 0
+					? ` WITH (${Object.entries(idx.with)
+							.map(([k, v]) => `${k} = ${v}`)
+							.join(', ')})`
+					: '';
+			const where = idx.where ? ` WHERE ${idx.where}` : '';
+
+			return `CREATE ${unique}INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(change.table, schemaName)}${method} (${cols})${include}${withParams}${where};`;
 		}
 
 		case 'drop_index': {
@@ -255,6 +347,159 @@ function changeToUpSQL(
 			const indexName = q(idxName(change.table, idx.columns, idx.name));
 			const schemaPrefix = schemaName ? `${q(schemaName)}.` : '';
 			return `DROP INDEX IF EXISTS ${schemaPrefix}${indexName};`;
+		}
+
+		case 'add_check_constraint': {
+			const check = change.meta?.check as CheckConstraintIR;
+			if (!check) return undefined;
+			const constraintName = q(check.name);
+			return (
+				'DO $$ BEGIN ALTER TABLE ' +
+				qualifyTable(change.table, schemaName) +
+				' ADD CONSTRAINT ' +
+				constraintName +
+				' ' +
+				check.expression +
+				'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;'
+			);
+		}
+
+		case 'drop_check_constraint': {
+			const check = change.meta?.check as CheckConstraintIR;
+			if (!check) return undefined;
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${q(check.name)};`;
+		}
+
+		case 'create_enum': {
+			const enumDef = change.meta?.enum as EnumIR;
+			if (!enumDef) return undefined;
+			const enumName = schemaName
+				? `${q(schemaName)}.${q(enumDef.name)}`
+				: q(enumDef.name);
+			const values = enumDef.values
+				.map((v) => `'${v.replace(/'/g, "''")}'`)
+				.join(', ');
+			return `CREATE TYPE ${enumName} AS ENUM (${values});`;
+		}
+
+		case 'alter_enum_add_value': {
+			const enumDef = change.meta?.enum as EnumIR;
+			const value = change.meta?.value as string;
+			const after = change.meta?.after as string | undefined;
+			if (!enumDef || !value) return undefined;
+			const enumName = schemaName
+				? `${q(schemaName)}.${q(enumDef.name)}`
+				: q(enumDef.name);
+			const escaped = value.replace(/'/g, "''");
+			const position = after ? ` AFTER '${after.replace(/'/g, "''")}'` : '';
+			return `ALTER TYPE ${enumName} ADD VALUE IF NOT EXISTS '${escaped}'${position};`;
+		}
+
+		case 'drop_enum': {
+			const enumDef = change.meta?.enum as EnumIR;
+			if (!enumDef) return undefined;
+			const enumName = schemaName
+				? `${q(schemaName)}.${q(enumDef.name)}`
+				: q(enumDef.name);
+			return `DROP TYPE IF EXISTS ${enumName} CASCADE;`;
+		}
+
+		case 'alter_column_collation': {
+			const col = change.meta?.column as ColumnIR;
+			if (!col) return undefined;
+			const collation = col.collation ? ` COLLATE "${col.collation}"` : '';
+			const typeName = mapColumnType(col);
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${q(change.column!)} TYPE ${typeName}${collation};`;
+		}
+
+		case 'alter_column_identity': {
+			const col = change.meta?.column as ColumnIR;
+			const prevIdentity = change.meta?.previousIdentity as string | undefined;
+			if (!col) return undefined;
+			const table = qualifyTable(change.table, schemaName);
+			const column = q(change.column!);
+			if (!col.identity && prevIdentity) {
+				return `ALTER TABLE ${table} ALTER COLUMN ${column} DROP IDENTITY IF EXISTS;`;
+			}
+			if (col.identity && !prevIdentity) {
+				const gen = col.identity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
+				return `ALTER TABLE ${table} ALTER COLUMN ${column} ADD GENERATED ${gen} AS IDENTITY;`;
+			}
+			// Change from one type to another
+			const gen = col.identity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
+			return `ALTER TABLE ${table} ALTER COLUMN ${column} SET GENERATED ${gen};`;
+		}
+
+		case 'add_comment': {
+			const comment = change.meta?.comment as string;
+			const target = change.meta?.target as string;
+			if (target === 'table') {
+				return `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS '${comment.replace(/'/g, "''")}';`;
+			}
+			return `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${q(change.column!)} IS '${comment.replace(/'/g, "''")}';`;
+		}
+
+		case 'drop_comment': {
+			const target = change.meta?.target as string;
+			if (target === 'table') {
+				return `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS NULL;`;
+			}
+			return `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${q(change.column!)} IS NULL;`;
+		}
+
+		case 'create_extension': {
+			const ext = change.meta?.extension as string;
+			if (!ext) return undefined;
+			return `CREATE EXTENSION IF NOT EXISTS "${ext}";`;
+		}
+
+		case 'drop_extension': {
+			const ext = change.meta?.extension as string;
+			if (!ext) return undefined;
+			return `DROP EXTENSION IF EXISTS "${ext}" CASCADE;`;
+		}
+
+		case 'create_sequence': {
+			const seq = change.meta?.sequence as SequenceIR;
+			if (!seq) return undefined;
+			const seqName = schemaName
+				? `${q(schemaName)}.${q(seq.name)}`
+				: q(seq.name);
+			const parts: string[] = [`CREATE SEQUENCE ${seqName}`];
+			if (seq.startWith !== undefined)
+				parts.push(`START WITH ${seq.startWith}`);
+			if (seq.incrementBy !== undefined)
+				parts.push(`INCREMENT BY ${seq.incrementBy}`);
+			if (seq.minValue !== undefined) parts.push(`MINVALUE ${seq.minValue}`);
+			if (seq.maxValue !== undefined) parts.push(`MAXVALUE ${seq.maxValue}`);
+			if (seq.cycle) parts.push('CYCLE');
+			return `${parts.join(' ')};`;
+		}
+
+		case 'alter_sequence': {
+			const seq = change.meta?.sequence as SequenceIR;
+			if (!seq) return undefined;
+			const seqName = schemaName
+				? `${q(schemaName)}.${q(seq.name)}`
+				: q(seq.name);
+			const parts: string[] = [`ALTER SEQUENCE ${seqName}`];
+			if (seq.startWith !== undefined)
+				parts.push(`START WITH ${seq.startWith}`);
+			if (seq.incrementBy !== undefined)
+				parts.push(`INCREMENT BY ${seq.incrementBy}`);
+			if (seq.minValue !== undefined) parts.push(`MINVALUE ${seq.minValue}`);
+			if (seq.maxValue !== undefined) parts.push(`MAXVALUE ${seq.maxValue}`);
+			if (seq.cycle !== undefined) parts.push(seq.cycle ? 'CYCLE' : 'NO CYCLE');
+			return `${parts.join(' ')};`;
+		}
+
+		case 'drop_sequence': {
+			const seq = change.meta?.sequence as SequenceIR;
+			if (!seq) return undefined;
+			const seqName = schemaName
+				? `${q(schemaName)}.${q(seq.name)}`
+				: q(seq.name);
+			return `DROP SEQUENCE IF EXISTS ${seqName} CASCADE;`;
 		}
 	}
 }
@@ -348,6 +593,158 @@ function changeToDownSQL(
 
 		case 'drop_index':
 			return `-- WARNING: Cannot reverse drop_index "${change.table}" -- index definition was lost`;
+
+		case 'add_check_constraint': {
+			const check = change.meta?.check as CheckConstraintIR | undefined;
+			if (!check) return undefined;
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${q(check.name)};`;
+		}
+
+		case 'drop_check_constraint': {
+			const check = change.meta?.check as CheckConstraintIR | undefined;
+			if (!check) return undefined;
+			return (
+				'DO $$ BEGIN ALTER TABLE ' +
+				qualifyTable(change.table, schemaName) +
+				' ADD CONSTRAINT ' +
+				q(check.name) +
+				' ' +
+				check.expression +
+				'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;'
+			);
+		}
+
+		case 'create_enum': {
+			// DOWN: drop the type that was created
+			const enumDef = change.meta?.enum as EnumIR | undefined;
+			if (!enumDef) return undefined;
+			const enumName = schemaName
+				? `${q(schemaName)}.${q(enumDef.name)}`
+				: q(enumDef.name);
+			return `DROP TYPE IF EXISTS ${enumName} CASCADE;`;
+		}
+
+		case 'drop_enum': {
+			// DOWN: recreate the type that was dropped
+			const enumDef = change.meta?.enum as EnumIR | undefined;
+			if (!enumDef) return undefined;
+			const enumName = schemaName
+				? `${q(schemaName)}.${q(enumDef.name)}`
+				: q(enumDef.name);
+			const values = enumDef.values
+				.map((v) => `'${v.replace(/'/g, "''")}'`)
+				.join(', ');
+			return `CREATE TYPE ${enumName} AS ENUM (${values});`;
+		}
+
+		case 'alter_enum_add_value':
+			// DOWN: ALTER TYPE ADD VALUE cannot be reversed in PostgreSQL
+			return `-- ALTER TYPE ADD VALUE cannot be reversed in PostgreSQL`;
+
+		case 'alter_column_collation': {
+			// DOWN: restore previous collation — stored in db state, not in meta; emit warning
+			return `-- WARNING: Cannot reverse alter_column_collation "${change.table}"."${change.column}" -- previous collation unknown`;
+		}
+
+		case 'alter_column_identity': {
+			const col = change.meta?.column as ColumnIR | undefined;
+			const prevIdentity = change.meta?.previousIdentity as string | undefined;
+			if (!col) return undefined;
+			const table = qualifyTable(change.table, schemaName);
+			const column = q(change.column!);
+			// Reverse: restore previous identity state
+			if (prevIdentity && !col.identity) {
+				// Was identity, now not → re-add identity
+				const gen = prevIdentity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
+				return `ALTER TABLE ${table} ALTER COLUMN ${column} ADD GENERATED ${gen} AS IDENTITY;`;
+			}
+			if (!prevIdentity && col.identity) {
+				// Was not identity, now is → drop identity
+				return `ALTER TABLE ${table} ALTER COLUMN ${column} DROP IDENTITY IF EXISTS;`;
+			}
+			// Change between types → restore previous
+			const gen = prevIdentity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
+			return `ALTER TABLE ${table} ALTER COLUMN ${column} SET GENERATED ${gen};`;
+		}
+
+		case 'add_comment': {
+			// DOWN: remove the comment that was added
+			const target = change.meta?.target as string;
+			if (target === 'table') {
+				return `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS NULL;`;
+			}
+			return `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${q(change.column!)} IS NULL;`;
+		}
+
+		case 'drop_comment': {
+			// DOWN: cannot restore comment — value was lost
+			return `-- WARNING: Cannot reverse drop_comment "${change.table}"${change.column ? `."${change.column}"` : ''} -- comment text was lost`;
+		}
+
+		case 'create_extension': {
+			// DOWN: drop the extension that was created
+			const ext = change.meta?.extension as string;
+			if (!ext) return undefined;
+			return `DROP EXTENSION IF EXISTS "${ext}" CASCADE;`;
+		}
+
+		case 'drop_extension': {
+			// DOWN: recreate the extension that was dropped
+			const ext = change.meta?.extension as string;
+			if (!ext) return undefined;
+			return `CREATE EXTENSION IF NOT EXISTS "${ext}";`;
+		}
+
+		case 'create_sequence': {
+			// DOWN: drop the sequence that was created
+			const seq = change.meta?.sequence as SequenceIR;
+			if (!seq) return undefined;
+			const seqName = schemaName
+				? `${q(schemaName)}.${q(seq.name)}`
+				: q(seq.name);
+			return `DROP SEQUENCE IF EXISTS ${seqName} CASCADE;`;
+		}
+
+		case 'alter_sequence': {
+			// DOWN: restore previous sequence state
+			const prevSeq = change.meta?.previousSequence as SequenceIR | undefined;
+			if (!prevSeq) {
+				return `-- WARNING: Cannot reverse alter_sequence "${change.table}" -- missing migration metadata`;
+			}
+			const seqName = schemaName
+				? `${q(schemaName)}.${q(prevSeq.name)}`
+				: q(prevSeq.name);
+			const parts: string[] = [`ALTER SEQUENCE ${seqName}`];
+			if (prevSeq.startWith !== undefined)
+				parts.push(`START WITH ${prevSeq.startWith}`);
+			if (prevSeq.incrementBy !== undefined)
+				parts.push(`INCREMENT BY ${prevSeq.incrementBy}`);
+			if (prevSeq.minValue !== undefined)
+				parts.push(`MINVALUE ${prevSeq.minValue}`);
+			if (prevSeq.maxValue !== undefined)
+				parts.push(`MAXVALUE ${prevSeq.maxValue}`);
+			if (prevSeq.cycle !== undefined)
+				parts.push(prevSeq.cycle ? 'CYCLE' : 'NO CYCLE');
+			return `${parts.join(' ')};`;
+		}
+
+		case 'drop_sequence': {
+			// DOWN: recreate the sequence that was dropped
+			const seq = change.meta?.sequence as SequenceIR;
+			if (!seq) return undefined;
+			const seqName = schemaName
+				? `${q(schemaName)}.${q(seq.name)}`
+				: q(seq.name);
+			const parts: string[] = [`CREATE SEQUENCE ${seqName}`];
+			if (seq.startWith !== undefined)
+				parts.push(`START WITH ${seq.startWith}`);
+			if (seq.incrementBy !== undefined)
+				parts.push(`INCREMENT BY ${seq.incrementBy}`);
+			if (seq.minValue !== undefined) parts.push(`MINVALUE ${seq.minValue}`);
+			if (seq.maxValue !== undefined) parts.push(`MAXVALUE ${seq.maxValue}`);
+			if (seq.cycle) parts.push('CYCLE');
+			return `${parts.join(' ')};`;
+		}
 	}
 }
 
@@ -377,18 +774,22 @@ export function generateDownSQL(
 
 	// Group changes by phase for topological ordering
 	const phases: SchemaChange[][] = [
-		[], // 0: drop FK
+		[], // 0: drop FK, drop CHECK
 		[], // 1: drop index
 		[], // 2: drop column
 		[], // 3: drop PK
-		[], // 4: drop table
-		[], // 5: create table
-		[], // 6: add column
-		[], // 7: alter column
-		[], // 8: add PK
-		[], // 9: add FK
-		[], // 10: alter FK (drop + re-add)
-		[], // 11: create index
+		[], // 4: drop table, drop ENUM
+		[], // 5: create ENUM
+		[], // 6: create table
+		[], // 7: add column
+		[], // 8: alter column
+		[], // 9: add PK
+		[], // 10: add FK
+		[], // 11: alter FK (drop + re-add)
+		[], // 12: create index
+		[], // 13: add CHECK constraint
+		[], // 14: alter ENUM add value
+		[], // 15: comments
 	];
 
 	for (const change of changes) {
@@ -424,6 +825,11 @@ function generateCreateTableSQL(table: TableIR, schemaName?: string): string {
 		if (col.default !== undefined)
 			parts.push(`DEFAULT ${formatDefault(col.default)}`);
 		if (col.unique) parts.push('UNIQUE');
+		if (col.collation) parts.push(`COLLATE "${col.collation}"`);
+		if (col.identity) {
+			const gen = col.identity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
+			parts.push(`GENERATED ${gen} AS IDENTITY`);
+		}
 		elements.push(parts.join(' '));
 	}
 
@@ -440,7 +846,13 @@ function generateCreateTableSQL(table: TableIR, schemaName?: string): string {
 	}
 
 	const body = elements.map((el) => `  ${el}`).join(',\n');
-	return `CREATE TABLE ${qualTable} (\n${body}\n);`;
+	let sql = `CREATE TABLE ${qualTable} (\n${body}\n)`;
+	if (table.partition) {
+		const partCols = table.partition.columns.map(q).join(', ');
+		sql += ` PARTITION BY ${table.partition.strategy} (${partCols})`;
+	}
+	sql += ';';
+	return sql;
 }
 
 function generateAddFKSQL(
@@ -451,12 +863,17 @@ function generateAddFKSQL(
 	const qualTable = qualifyTable(tableName, schemaName);
 	const constraintName = q(fkName(tableName, fk.columns));
 	const fkCols = fk.columns.map(q).join(', ');
-	const refTable = q(fk.references.table);
+	// Referenced table must also be schema-qualified to resolve within the same schema
+	const refTable = qualifyTable(fk.references.table, schemaName);
 	const refCols = fk.references.columns.map(q).join(', ');
 	const onDelete = fk.onDelete
 		? ` ON DELETE ${mapOnDeleteAction(fk.onDelete)}`
 		: '';
-	return `ALTER TABLE ${qualTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete};`;
+	const onUpdate = fk.onUpdate
+		? ` ON UPDATE ${mapOnDeleteAction(fk.onUpdate)}`
+		: '';
+	const deferred = fk.deferred ? ' DEFERRABLE INITIALLY DEFERRED' : '';
+	return `ALTER TABLE ${qualTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete}${onUpdate}${deferred};`;
 }
 
 function formatDefault(value: unknown): string {

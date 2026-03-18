@@ -32,6 +32,12 @@ function createMockPool(
 	pks: QueryResult<any>,
 	fks: QueryResult<any>,
 	indexes: QueryResult<any>,
+	enums: QueryResult<any> = { rows: [] },
+	comments: QueryResult<any> = { rows: [] },
+	checks: QueryResult<any> = { rows: [] },
+	extensions: QueryResult<any> = { rows: [] },
+	sequences: QueryResult<any> = { rows: [] },
+	partitions: QueryResult<any> = { rows: [] },
 ) {
 	return {
 		query: vi
@@ -39,7 +45,13 @@ function createMockPool(
 			.mockResolvedValueOnce(columns) // columns
 			.mockResolvedValueOnce(pks) // PKs
 			.mockResolvedValueOnce(fks) // FKs
-			.mockResolvedValueOnce(indexes), // indexes
+			.mockResolvedValueOnce(indexes) // indexes
+			.mockResolvedValueOnce(enums) // ENUM types
+			.mockResolvedValueOnce(comments) // comments (pg_description)
+			.mockResolvedValueOnce(checks) // CHECK constraints
+			.mockResolvedValueOnce(partitions) // partition configs (pg_partitioned_table)
+			.mockResolvedValueOnce(extensions) // extensions (pg_extension)
+			.mockResolvedValueOnce(sequences), // sequences (pg_sequences)
 	} as any;
 }
 
@@ -1060,7 +1072,8 @@ describe('introspection — FK handling and delete rules', () => {
 			{ rows: [] },
 		);
 		const model = await introspect(pool);
-		expect(model.getTable('b')?.foreignKeys[0]?.onDelete).toBe('NO ACTION');
+		// NO ACTION is the default — omitted from ForeignKeyIR when it's the default
+		expect(model.getTable('b')?.foreignKeys[0]?.onDelete).toBeUndefined();
 	});
 
 	it('handles composite FK (multi-column)', async () => {
@@ -1932,8 +1945,8 @@ describe('introspection — hierarchy detection', () => {
 			before.getTime(),
 		);
 		expect(model.introspectedAt.getTime()).toBeLessThanOrEqual(after.getTime());
-		// Default schema = 'public' (passed to queries)
-		expect(pool.query).toHaveBeenCalledTimes(4);
+		// Default schema = 'public' (passed to queries); 10 queries: columns, PKs, FKs, indexes, enums, comments, checks, partitions, extensions, sequences
+		expect(pool.query).toHaveBeenCalledTimes(10);
 		expect(pool.query.mock.calls[0][1]).toEqual(['public']);
 	});
 

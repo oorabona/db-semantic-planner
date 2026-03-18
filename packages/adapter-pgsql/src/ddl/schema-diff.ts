@@ -8,16 +8,20 @@
  */
 
 import type {
+	CheckConstraintIR,
 	ColumnIR,
 	DbCasing,
+	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
 	ModelIR,
+	PartitionIR,
+	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
 import {
-	type NamingPlugin,
 	getNamingPluginForDbCasing,
+	type NamingPlugin,
 } from '../naming-plugin.js';
 
 // ============================================================================
@@ -42,7 +46,27 @@ export type ChangeKind =
 	| 'alter_foreign_key'
 	// Indexes
 	| 'create_index'
-	| 'drop_index';
+	| 'drop_index'
+	// CHECK constraints
+	| 'add_check_constraint'
+	| 'drop_check_constraint'
+	// ENUM types
+	| 'create_enum'
+	| 'alter_enum_add_value'
+	| 'drop_enum'
+	// Column enhancements
+	| 'alter_column_collation'
+	| 'alter_column_identity'
+	// Comments
+	| 'add_comment'
+	| 'drop_comment'
+	// Extensions
+	| 'create_extension'
+	| 'drop_extension'
+	// Sequences
+	| 'create_sequence'
+	| 'alter_sequence'
+	| 'drop_sequence';
 
 export interface SchemaChange {
 	readonly kind: ChangeKind;
@@ -116,6 +140,15 @@ export function compareSchemata(
 		: new Map(schema.tables);
 	const dbTables = new Map(db.tables);
 
+	// 0. Compare ENUM types (schema-level, before tables)
+	compareEnums(schema, db, changes);
+
+	// 0a. Compare extensions (schema-level)
+	compareExtensions(schema, db, changes);
+
+	// 0b. Compare sequences (schema-level, before tables)
+	compareSequences(schema, db, changes);
+
 	// 1. Tables that exist in schema but not in DB → create_table
 	for (const [name, schemaTable] of schemaTables) {
 		if (!dbTables.has(name)) {
@@ -146,6 +179,16 @@ export function compareSchemata(
 					meta: { index: idx },
 				});
 			}
+			// Emit CHECK constraints for new table (phase 12, after indexes)
+			for (const check of schemaTable.checkConstraints ?? []) {
+				changes.push({
+					kind: 'add_check_constraint',
+					table: name,
+					destructive: false,
+					details: `Add CHECK constraint "${check.name}" ${check.expression}`,
+					meta: { check },
+				});
+			}
 			continue;
 		}
 
@@ -155,6 +198,9 @@ export function compareSchemata(
 		comparePrimaryKeys(schemaTable, dbTable, changes);
 		compareForeignKeys(schemaTable, dbTable, changes);
 		compareIndexes(schemaTable, dbTable, changes);
+		compareCheckConstraints(schemaTable, dbTable, changes);
+		compareComments(schemaTable, dbTable, changes);
+		comparePartitions(schemaTable, dbTable, changes);
 	}
 
 	// 2. Tables that exist in DB but not in schema → drop_table
@@ -225,6 +271,14 @@ function normalizeTable(table: TableIR, plugin: NamingPlugin): TableIR {
 			...idx,
 			columns: idx.columns.map(toDb),
 		})),
+		...(table.partition
+			? {
+					partition: {
+						strategy: table.partition.strategy,
+						columns: table.partition.columns.map(toDb),
+					},
+				}
+			: {}),
 	};
 }
 
@@ -291,7 +345,11 @@ function compareColumnDetails(
 			column: schema.name,
 			destructive: true,
 			details: `Change type of "${schema.name}" from ${db.originalDbType} to ${schema.originalDbType}`,
-			meta: { fromType: db.originalDbType, toType: schema.originalDbType, column: schema },
+			meta: {
+				fromType: db.originalDbType,
+				toType: schema.originalDbType,
+				column: schema,
+			},
 		});
 	} else if (!areTypesEquivalent(schema.type, db.type)) {
 		// Fall back to base type comparison (original behavior)
@@ -328,6 +386,30 @@ function compareColumnDetails(
 			destructive: false,
 			details: `Change default of "${schema.name}" from ${dbDefault ?? 'none'} to ${schemaDefault ?? 'none'}`,
 			meta: { default: schema.default, oldDefault: db.default },
+		});
+	}
+
+	// Collation change
+	if ((schema.collation ?? null) !== (db.collation ?? null)) {
+		changes.push({
+			kind: 'alter_column_collation',
+			table: tableName,
+			column: schema.name,
+			destructive: false,
+			details: `Change collation of "${schema.name}" to ${schema.collation ?? 'default'}`,
+			meta: { column: schema },
+		});
+	}
+
+	// Identity change
+	if ((schema.identity ?? null) !== (db.identity ?? null)) {
+		changes.push({
+			kind: 'alter_column_identity',
+			table: tableName,
+			column: schema.name,
+			destructive: false,
+			details: `Change identity of "${schema.name}" to ${schema.identity ?? 'none'}`,
+			meta: { column: schema, previousIdentity: db.identity },
 		});
 	}
 }
@@ -484,16 +566,24 @@ function compareForeignKeys(
 				meta: { fk },
 			});
 		} else {
-			// FK exists in both — check onDelete action
+			// FK exists in both — check onDelete, onUpdate, and deferred
 			const dbFK = dbFKMap.get(key)!;
 			const schemaOnDelete = fk.onDelete ?? 'NO ACTION';
 			const dbOnDelete = dbFK.onDelete ?? 'NO ACTION';
-			if (schemaOnDelete !== dbOnDelete) {
+			const schemaOnUpdate = fk.onUpdate ?? 'NO ACTION';
+			const dbOnUpdate = dbFK.onUpdate ?? 'NO ACTION';
+			const schemaDeferred = fk.deferred ?? false;
+			const dbDeferred = dbFK.deferred ?? false;
+			if (
+				schemaOnDelete !== dbOnDelete ||
+				schemaOnUpdate !== dbOnUpdate ||
+				schemaDeferred !== dbDeferred
+			) {
 				changes.push({
 					kind: 'alter_foreign_key',
 					table: schema.name,
 					destructive: false,
-					details: `Change onDelete of FK (${fk.columns.join(', ')}) from ${dbOnDelete} to ${schemaOnDelete}`,
+					details: `Alter FK (${fk.columns.join(', ')}) — onDelete/onUpdate/deferred changed`,
 					meta: { fk, previousOnDelete: dbOnDelete, oldFk: dbFK },
 				});
 			}
@@ -527,13 +617,38 @@ function compareIndexes(
 	db: TableIR,
 	changes: SchemaChange[],
 ): void {
+	// Build the set of FK auto-index keys.
+	// generateDDL (fkAutoIndex=true default) creates an index for every single-column FK that
+	// does not already have an explicit index.  These indexes are managed automatically — they
+	// should never trigger create_index or drop_index diffs.
+	const explicitIndexCols = new Set(
+		schema.indexes.flatMap((idx) =>
+			idx.columns.length === 1 ? idx.columns : [],
+		),
+	);
+	const autoFkIndexKeys = new Set(
+		schema.foreignKeys
+			.filter(
+				(fk) =>
+					fk.columns.length === 1 &&
+					fk.columns[0] !== undefined &&
+					!explicitIndexCols.has(fk.columns[0]),
+			)
+			.map((fk) =>
+				indexKey({
+					columns: fk.columns,
+					unique: false,
+				}),
+			),
+	);
+
 	// Index identity: columns + unique flag (name is cosmetic)
 	const schemaIdxMap = new Map(
 		schema.indexes.map((idx) => [indexKey(idx), idx]),
 	);
 	const dbIdxMap = new Map(db.indexes.map((idx) => [indexKey(idx), idx]));
 
-	// Indexes in schema but not in DB → create
+	// Explicit indexes in schema but not in DB → create
 	for (const [key, idx] of schemaIdxMap) {
 		if (!dbIdxMap.has(key)) {
 			changes.push({
@@ -546,9 +661,9 @@ function compareIndexes(
 		}
 	}
 
-	// Indexes in DB but not in schema → drop
+	// Indexes in DB but not in schema → drop (skip auto-FK indexes — they are auto-managed)
 	for (const [key, idx] of dbIdxMap) {
-		if (!schemaIdxMap.has(key)) {
+		if (!schemaIdxMap.has(key) && !autoFkIndexKeys.has(key)) {
 			changes.push({
 				kind: 'drop_index',
 				table: schema.name,
@@ -561,12 +676,368 @@ function compareIndexes(
 }
 
 function indexKey(idx: IndexIR): string {
-	return `${idx.columns.join(',')}:${idx.unique ? 'unique' : 'nonunique'}`;
+	const parts = [
+		idx.columns.join(','),
+		idx.unique ? 'unique' : 'nonunique',
+		idx.method ?? 'btree',
+		idx.where ?? '',
+		(idx.expressions ?? []).join(','),
+		idx.opclass
+			? Object.entries(idx.opclass)
+					.sort()
+					.map(([k, v]) => `${k}=${v}`)
+					.join(',')
+			: '',
+		idx.with
+			? Object.entries(idx.with)
+					.sort()
+					.map(([k, v]) => `${k}=${v}`)
+					.join(',')
+			: '',
+	];
+	return parts.join(':');
 }
 
 // ============================================================================
 // Summary Builder
 // ============================================================================
+
+// ============================================================================
+// compareCheckConstraints
+// ============================================================================
+// ============================================================================
+// Comments
+// ============================================================================
+
+function compareComments(
+	schema: TableIR,
+	db: TableIR,
+	changes: SchemaChange[],
+): void {
+	// Table-level comment
+	if ((schema.comment ?? null) !== (db.comment ?? null)) {
+		if (schema.comment) {
+			changes.push({
+				kind: 'add_comment',
+				table: schema.name,
+				destructive: false,
+				details: `Set comment on table "${schema.name}"`,
+				meta: { comment: schema.comment, target: 'table' },
+			});
+		} else {
+			changes.push({
+				kind: 'drop_comment',
+				table: schema.name,
+				destructive: false,
+				details: `Remove comment from table "${schema.name}"`,
+				meta: { target: 'table' },
+			});
+		}
+	}
+
+	// Column-level comments
+	for (const schemaCol of schema.columns) {
+		const dbCol = db.columns.find((c) => c.name === schemaCol.name);
+		if (!dbCol) continue;
+		if ((schemaCol.comment ?? null) !== (dbCol.comment ?? null)) {
+			if (schemaCol.comment) {
+				changes.push({
+					kind: 'add_comment',
+					table: schema.name,
+					column: schemaCol.name,
+					destructive: false,
+					details: `Set comment on "${schema.name}"."${schemaCol.name}"`,
+					meta: { comment: schemaCol.comment, target: 'column' },
+				});
+			} else {
+				changes.push({
+					kind: 'drop_comment',
+					table: schema.name,
+					column: schemaCol.name,
+					destructive: false,
+					details: `Remove comment from "${schema.name}"."${schemaCol.name}"`,
+					meta: { target: 'column' },
+				});
+			}
+		}
+	}
+}
+
+// ============================================================================
+// Partition Diff
+// ============================================================================
+
+/**
+ * Compare partition configs between schema and DB.
+ * PostgreSQL does not support ALTER TABLE ... SET PARTITION STRATEGY.
+ * Any mismatch (add, remove, or change) requires DROP + CREATE.
+ * We emit a destructive drop_table change with isPartitionChange=true as a marker.
+ */
+function comparePartitions(
+	schema: TableIR,
+	db: TableIR,
+	changes: SchemaChange[],
+): void {
+	const sp = schema.partition as PartitionIR | undefined;
+	const dp = db.partition as PartitionIR | undefined;
+
+	if (!sp && !dp) return; // Neither has partition — nothing to do
+
+	if (sp && dp) {
+		// Both have partition — check if config matches
+		const sameStrategy = sp.strategy === dp.strategy;
+		const sameCols = sp.columns.join(',') === dp.columns.join(',');
+		if (!sameStrategy || !sameCols) {
+			changes.push({
+				kind: 'drop_table',
+				table: schema.name,
+				destructive: true,
+				details: `Cannot alter partition strategy of "${schema.name}" (${dp.strategy} → ${sp.strategy}). Requires DROP + CREATE (data migration needed).`,
+				meta: { isPartitionChange: true },
+			});
+		}
+		// Same config → no change needed
+	} else if (sp && !dp) {
+		// Adding partition to non-partitioned table
+		changes.push({
+			kind: 'drop_table',
+			table: schema.name,
+			destructive: true,
+			details: `Cannot add partition to existing table "${schema.name}". Requires DROP + CREATE (data migration needed).`,
+			meta: { isPartitionChange: true },
+		});
+	} else {
+		// Removing partition from partitioned table
+		changes.push({
+			kind: 'drop_table',
+			table: schema.name,
+			destructive: true,
+			details: `Cannot remove partition from existing table "${schema.name}". Requires DROP + CREATE (data migration needed).`,
+			meta: { isPartitionChange: true },
+		});
+	}
+}
+
+function compareCheckConstraints(
+	schema: TableIR,
+	db: TableIR,
+	changes: SchemaChange[],
+): void {
+	const schemaChecks = schema.checkConstraints ?? [];
+	const dbChecks = db.checkConstraints ?? [];
+
+	// Build map by constraint name
+	const schemaMap = new Map(schemaChecks.map((c) => [c.name, c]));
+	const dbMap = new Map(dbChecks.map((c) => [c.name, c]));
+
+	// In schema but not in DB → add
+	for (const [name, check] of schemaMap) {
+		if (!dbMap.has(name)) {
+			changes.push({
+				kind: 'add_check_constraint',
+				table: schema.name,
+				destructive: false,
+				details: `Add CHECK constraint "${name}" ${check.expression}`,
+				meta: { check },
+			});
+		} else {
+			// Both have it — compare expression
+			const dbCheck = dbMap.get(name)!;
+			if (check.expression !== dbCheck.expression) {
+				// Expression changed → drop + re-add
+				changes.push({
+					kind: 'drop_check_constraint',
+					table: schema.name,
+					destructive: true,
+					details: `Drop CHECK constraint "${name}" (expression changed)`,
+					meta: { check: dbCheck },
+				});
+				changes.push({
+					kind: 'add_check_constraint',
+					table: schema.name,
+					destructive: false,
+					details: `Add CHECK constraint "${name}" ${check.expression}`,
+					meta: { check },
+				});
+			}
+		}
+	}
+
+	// In DB but not in schema → drop
+	for (const [name, check] of dbMap) {
+		if (!schemaMap.has(name)) {
+			changes.push({
+				kind: 'drop_check_constraint',
+				table: schema.name,
+				destructive: true,
+				details: `Drop CHECK constraint "${name}"`,
+				meta: { check },
+			});
+		}
+	}
+}
+
+// ============================================================================
+// ENUM comparison (schema-level, not table-level)
+// ============================================================================
+
+function compareEnums(
+	schema: ModelIR,
+	db: ModelIR,
+	changes: SchemaChange[],
+): void {
+	const schemaEnums = schema.enums ?? new Map<string, EnumIR>();
+	const dbEnums = db.enums ?? new Map<string, EnumIR>();
+
+	// Enums in schema but not in DB → create
+	for (const [name, enumDef] of schemaEnums) {
+		if (!dbEnums.has(name)) {
+			changes.push({
+				kind: 'create_enum',
+				table: '',
+				destructive: false,
+				details: `Create enum "${name}" with values (${enumDef.values.join(', ')})`,
+				meta: { enum: enumDef },
+			});
+		} else {
+			// Exists in both → check for new values
+			const dbEnum = dbEnums.get(name)!;
+			// Find values in schema that are not in DB → add
+			for (let i = 0; i < enumDef.values.length; i++) {
+				const val = enumDef.values[i]!;
+				if (!dbEnum.values.includes(val)) {
+					const prevVal = i > 0 ? enumDef.values[i - 1] : undefined;
+					changes.push({
+						kind: 'alter_enum_add_value',
+						table: '',
+						destructive: false,
+						details: `Add value '${val}' to enum "${name}"${prevVal ? ` after '${prevVal}'` : ''}`,
+						meta: { enum: enumDef, value: val, after: prevVal },
+					});
+				}
+			}
+			// Values in DB but not in schema → PG limitation, flag as error
+			for (const val of dbEnum.values) {
+				if (!enumDef.values.includes(val)) {
+					changes.push({
+						kind: 'drop_enum',
+						table: '',
+						destructive: true,
+						details: `Cannot remove value '${val}' from enum "${name}" — PostgreSQL limitation. Requires DROP TYPE + CREATE TYPE (data migration needed).`,
+						meta: { enum: dbEnum, removedValue: val, isValueRemoval: true },
+					});
+				}
+			}
+		}
+	}
+
+	// Enums in DB but not in schema → drop
+	for (const [name, enumDef] of dbEnums) {
+		if (!schemaEnums.has(name)) {
+			changes.push({
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: `Drop enum "${name}"`,
+				meta: { enum: enumDef },
+			});
+		}
+	}
+}
+
+// ============================================================================
+// Extension Diff
+// ============================================================================
+
+function compareExtensions(
+	schema: ModelIR,
+	db: ModelIR,
+	changes: SchemaChange[],
+): void {
+	const schemaExts = new Set(schema.extensions ?? []);
+	const dbExts = new Set(db.extensions ?? []);
+
+	for (const ext of schemaExts) {
+		if (!dbExts.has(ext)) {
+			changes.push({
+				kind: 'create_extension',
+				table: '',
+				destructive: false,
+				details: `Create extension "${ext}"`,
+				meta: { extension: ext },
+			});
+		}
+	}
+
+	for (const ext of dbExts) {
+		if (!schemaExts.has(ext)) {
+			changes.push({
+				kind: 'drop_extension',
+				table: '',
+				destructive: true,
+				details: `Drop extension "${ext}"`,
+				meta: { extension: ext },
+			});
+		}
+	}
+}
+
+// ============================================================================
+// Sequence Diff
+// ============================================================================
+
+function compareSequences(
+	schema: ModelIR,
+	db: ModelIR,
+	changes: SchemaChange[],
+): void {
+	const schemaSeqs = schema.sequences ?? new Map<string, SequenceIR>();
+	const dbSeqs = db.sequences ?? new Map<string, SequenceIR>();
+
+	// Sequences in schema but not in DB → create
+	for (const [name, seq] of schemaSeqs) {
+		if (!dbSeqs.has(name)) {
+			changes.push({
+				kind: 'create_sequence',
+				table: '',
+				destructive: false,
+				details: `Create sequence "${name}"`,
+				meta: { sequence: seq },
+			});
+		} else {
+			const dbSeq = dbSeqs.get(name)!;
+			// Compare relevant properties
+			if (
+				seq.startWith !== dbSeq.startWith ||
+				seq.incrementBy !== dbSeq.incrementBy ||
+				seq.minValue !== dbSeq.minValue ||
+				seq.maxValue !== dbSeq.maxValue ||
+				seq.cycle !== dbSeq.cycle
+			) {
+				changes.push({
+					kind: 'alter_sequence',
+					table: '',
+					destructive: false,
+					details: `Alter sequence "${name}"`,
+					meta: { sequence: seq, previousSequence: dbSeq },
+				});
+			}
+		}
+	}
+
+	// Sequences in DB but not in schema → drop
+	for (const [name, seq] of dbSeqs) {
+		if (!schemaSeqs.has(name)) {
+			changes.push({
+				kind: 'drop_sequence',
+				table: '',
+				destructive: true,
+				details: `Drop sequence "${name}"`,
+				meta: { sequence: seq },
+			});
+		}
+	}
+}
 
 function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 	const tables = { added: 0, dropped: 0 };
@@ -595,10 +1066,12 @@ function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 				break;
 			case 'add_primary_key':
 			case 'add_foreign_key':
+			case 'add_check_constraint':
 				constraints.added++;
 				break;
 			case 'drop_primary_key':
 			case 'drop_foreign_key':
+			case 'drop_check_constraint':
 				constraints.dropped++;
 				break;
 			case 'alter_foreign_key':
@@ -609,6 +1082,24 @@ function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 				break;
 			case 'drop_index':
 				indexes.dropped++;
+				break;
+			case 'create_enum':
+			case 'alter_enum_add_value':
+			case 'drop_enum':
+				// ENUM changes are schema-level; not counted in table/column/index summaries
+				break;
+			case 'alter_column_collation':
+			case 'alter_column_identity':
+				columns.altered++;
+				break;
+			case 'add_comment':
+			case 'drop_comment':
+			case 'create_extension':
+			case 'drop_extension':
+			case 'create_sequence':
+			case 'alter_sequence':
+			case 'drop_sequence':
+				// Schema-level or metadata changes; not counted in table/column/index/constraint summaries
 				break;
 		}
 	}

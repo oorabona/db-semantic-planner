@@ -13,14 +13,18 @@
 
 import { ModelIRImpl } from '@dbsp/core';
 import type {
+	CheckConstraintIR,
 	ColumnIR,
 	ColumnType,
+	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
 	ModelIR,
 	OnDeleteAction,
+	PartitionIR,
 	RelationIR,
 	RelationType,
+	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
 import type { Pool } from 'pg';
@@ -68,6 +72,9 @@ interface RawColumn {
 	udt_name: string;
 	is_nullable: string;
 	column_default: string | null;
+	collation_name: string | null;
+	is_identity: string;
+	identity_generation: string | null;
 }
 
 interface RawPrimaryKey {
@@ -82,6 +89,9 @@ interface RawForeignKey {
 	target_table: string;
 	target_column: string;
 	delete_rule: string;
+	update_rule: string;
+	is_deferrable: string;
+	initially_deferred: string;
 }
 
 interface RawIndex {
@@ -89,6 +99,15 @@ interface RawIndex {
 	table_name: string;
 	columns: string[];
 	is_unique: boolean;
+	method: string;
+	predicate: string | null;
+	reloptions: string[] | null;
+}
+
+interface RawPartition {
+	table_name: string;
+	strategy: string;
+	columns: string[];
 }
 
 // ============================================================================
@@ -115,82 +134,255 @@ export async function introspect(
 	const schema = options?.schema ?? 'public';
 	const warnings: string[] = [];
 
-	// Step 1: Fetch columns
-	const columnsResult = await pool.query<RawColumn>(
-		`SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default
-		 FROM information_schema.columns
-		 WHERE table_schema = $1
-		 ORDER BY table_name, ordinal_position`,
-		[schema],
-	);
+	// All catalog queries are independent — run in parallel for performance.
+	// Order matches the coverage test mock sequence: columns, pks, fks, indexes,
+	// enums, comments, checks, partitions, extensions (no schema param), sequences.
+	const [
+		columnsResult,
+		pksResult,
+		fksResult,
+		indexesResult,
+		enumsResult,
+		commentsResult,
+		checksResult,
+		partitionsResult,
+		extensionsResult,
+		sequencesResult,
+	] = await Promise.all([
+		// 1. Columns (including identity and collation)
+		pool.query<RawColumn>(
+			`SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default,
+			        collation_name, is_identity, identity_generation
+			 FROM information_schema.columns
+			 WHERE table_schema = $1
+			 ORDER BY table_name, ordinal_position`,
+			[schema],
+		),
+		// 2. Primary keys
+		pool.query<RawPrimaryKey>(
+			`SELECT tc.table_name, kcu.column_name
+			 FROM information_schema.table_constraints tc
+			 JOIN information_schema.key_column_usage kcu
+			   ON tc.constraint_name = kcu.constraint_name
+			   AND tc.table_schema = kcu.table_schema
+			 WHERE tc.constraint_type = 'PRIMARY KEY'
+			   AND tc.table_schema = $1
+			 ORDER BY tc.table_name, kcu.ordinal_position`,
+			[schema],
+		),
+		// 3. Foreign keys
+		pool.query<RawForeignKey>(
+			`SELECT
+			   tc.constraint_name,
+			   kcu.table_name AS source_table,
+			   kcu.column_name AS source_column,
+			   ccu.table_name AS target_table,
+			   ccu.column_name AS target_column,
+			   rc.delete_rule,
+			   rc.update_rule,
+			   tc.is_deferrable,
+			   tc.initially_deferred
+			 FROM information_schema.table_constraints tc
+			 JOIN information_schema.key_column_usage kcu
+			   ON tc.constraint_name = kcu.constraint_name
+			   AND tc.table_schema = kcu.table_schema
+			 JOIN information_schema.constraint_column_usage ccu
+			   ON ccu.constraint_name = tc.constraint_name
+			   AND ccu.table_schema = tc.table_schema
+			 JOIN information_schema.referential_constraints rc
+			   ON rc.constraint_name = tc.constraint_name
+			   AND rc.constraint_schema = tc.table_schema
+			 WHERE tc.constraint_type = 'FOREIGN KEY'
+			   AND tc.table_schema = $1
+			 ORDER BY tc.constraint_name, kcu.ordinal_position`,
+			[schema],
+		),
+		// 4. Indexes (excluding PK-backing indexes and unique-constraint-backing indexes).
+		// Unique constraints created via col.unique / UNIQUE keyword in DDL produce an implicit
+		// backing index that is NOT a user-defined index — it is tracked via col.unique on the
+		// ColumnIR instead. Including it here would cause spurious drop_index diffs on roundtrip.
+		pool.query<RawIndex>(
+			`SELECT
+			   i.relname AS index_name,
+			   t.relname AS table_name,
+			   array_agg(a.attname ORDER BY k.n) AS columns,
+			   ix.indisunique AS is_unique,
+			   am.amname AS method,
+			   pg_get_expr(ix.indpred, ix.indrelid, false) AS predicate,
+			   i.reloptions AS reloptions
+			 FROM pg_index ix
+			 JOIN pg_class i ON i.oid = ix.indexrelid
+			 JOIN pg_class t ON t.oid = ix.indrelid
+			 JOIN pg_namespace n ON n.oid = t.relnamespace
+			 JOIN pg_am am ON am.oid = i.relam
+			 CROSS JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, n)
+			 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+			 WHERE n.nspname = $1
+			   AND NOT ix.indisprimary
+			   AND NOT EXISTS (
+			     SELECT 1 FROM pg_constraint c
+			     WHERE c.conindid = i.oid
+			       AND c.contype = 'u'
+			   )
+			 GROUP BY i.relname, t.relname, ix.indisunique, am.amname, ix.indpred, ix.indrelid, i.reloptions
+			 ORDER BY t.relname, i.relname`,
+			[schema],
+		),
+		// 5. ENUM types
+		pool.query<{ name: string; values: string[] }>(
+			`SELECT
+			   t.typname AS name,
+			   array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values
+			 FROM pg_type t
+			 JOIN pg_enum e ON e.enumtypid = t.oid
+			 JOIN pg_namespace n ON n.oid = t.typnamespace
+			 WHERE t.typtype = 'e'
+			   AND n.nspname = $1
+			 GROUP BY t.typname`,
+			[schema],
+		),
+		// 6. Comments (table and column level) from pg_description
+		pool.query<{
+			table_name: string;
+			column_name: string | null;
+			comment: string;
+		}>(
+			`SELECT
+			   c.relname AS table_name,
+			   a.attname AS column_name,
+			   d.description AS comment
+			 FROM pg_description d
+			 JOIN pg_class c ON c.oid = d.objoid
+			 JOIN pg_namespace n ON n.oid = c.relnamespace
+			 LEFT JOIN pg_attribute a ON a.attrelid = d.objoid AND a.attnum = d.objsubid
+			 WHERE n.nspname = $1
+			   AND d.objsubid >= 0`,
+			[schema],
+		),
+		// 7. CHECK constraints
+		pool.query<{
+			name: string;
+			expression: string;
+			raw_table: string;
+		}>(
+			`SELECT
+			   c.conname AS name,
+			   pg_get_constraintdef(c.oid, false) AS expression,
+			   c.conrelid::regclass::text AS raw_table
+			 FROM pg_constraint c
+			 JOIN pg_namespace n ON n.oid = c.connamespace
+			 WHERE c.contype = 'c'
+			   AND n.nspname = $1`,
+			[schema],
+		),
+		// 8. Partition configurations
+		pool.query<RawPartition>(
+			`SELECT
+			   c.relname AS table_name,
+			   p.partstrat AS strategy,
+			   array_agg(a.attname ORDER BY pk.n) AS columns
+			 FROM pg_partitioned_table p
+			 JOIN pg_class c ON c.oid = p.partrelid
+			 JOIN pg_namespace n ON n.oid = c.relnamespace
+			 JOIN LATERAL unnest(p.partattrs) WITH ORDINALITY AS pk(attnum, n) ON true
+			 JOIN pg_attribute a ON a.attrelid = p.partrelid AND a.attnum = pk.attnum
+			 WHERE n.nspname = $1
+			 GROUP BY c.relname, p.partstrat`,
+			[schema],
+		),
+		// 9. Installed extensions (no schema param — queries globally; skip plpgsql)
+		pool.query<{ name: string }>(
+			`SELECT extname AS name
+			 FROM pg_extension
+			 WHERE extname != 'plpgsql'`,
+		),
+		// 10. Sequences not backed by SERIAL
+		pool.query<{
+			name: string;
+			start_value: string;
+			increment_by: string;
+			min_value: string;
+			max_value: string;
+			cycle: boolean;
+		}>(
+			`SELECT s.sequencename AS name, s.start_value, s.increment_by, s.min_value, s.max_value, s.cycle
+			 FROM pg_sequences s
+			 LEFT JOIN pg_class c ON c.relname = s.sequencename AND c.relkind = 'S'
+			   AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname)
+			 LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'a'
+			 WHERE s.schemaname = $1
+			   AND d.objid IS NULL`,
+			[schema],
+		),
+	]);
 
-	// Step 2: Fetch primary keys
-	const pksResult = await pool.query<RawPrimaryKey>(
-		`SELECT tc.table_name, kcu.column_name
-		 FROM information_schema.table_constraints tc
-		 JOIN information_schema.key_column_usage kcu
-		   ON tc.constraint_name = kcu.constraint_name
-		   AND tc.table_schema = kcu.table_schema
-		 WHERE tc.constraint_type = 'PRIMARY KEY'
-		   AND tc.table_schema = $1
-		 ORDER BY tc.table_name, kcu.ordinal_position`,
-		[schema],
-	);
+	// Build partition map by table name
+	const tablePartitions = new Map<string, PartitionIR>();
+	for (const row of partitionsResult.rows) {
+		const strategyMap: Record<string, 'RANGE' | 'LIST' | 'HASH'> = {
+			r: 'RANGE',
+			l: 'LIST',
+			h: 'HASH',
+		};
+		const strategy = strategyMap[row.strategy];
+		if (!strategy) continue; // Unknown strategy — skip
+		const columns: string[] = Array.isArray(row.columns)
+			? row.columns
+			: String(row.columns)
+					.replace(/^\{|}$/g, '')
+					.split(',')
+					.filter(Boolean);
+		tablePartitions.set(row.table_name, { strategy, columns });
+	}
 
-	// Step 3: Fetch foreign keys
-	const fksResult = await pool.query<RawForeignKey>(
-		`SELECT
-		   tc.constraint_name,
-		   kcu.table_name AS source_table,
-		   kcu.column_name AS source_column,
-		   ccu.table_name AS target_table,
-		   ccu.column_name AS target_column,
-		   rc.delete_rule
-		 FROM information_schema.table_constraints tc
-		 JOIN information_schema.key_column_usage kcu
-		   ON tc.constraint_name = kcu.constraint_name
-		   AND tc.table_schema = kcu.table_schema
-		 JOIN information_schema.constraint_column_usage ccu
-		   ON ccu.constraint_name = tc.constraint_name
-		   AND ccu.table_schema = tc.table_schema
-		 JOIN information_schema.referential_constraints rc
-		   ON rc.constraint_name = tc.constraint_name
-		   AND rc.constraint_schema = tc.table_schema
-		 WHERE tc.constraint_type = 'FOREIGN KEY'
-		   AND tc.table_schema = $1
-		 ORDER BY tc.constraint_name, kcu.ordinal_position`,
-		[schema],
-	);
-
-	// Step 4: Fetch indexes (excluding PK-backing indexes)
-	const indexesResult = await pool.query<RawIndex>(
-		`SELECT
-		   i.relname AS index_name,
-		   t.relname AS table_name,
-		   array_agg(a.attname ORDER BY k.n) AS columns,
-		   ix.indisunique AS is_unique
-		 FROM pg_index ix
-		 JOIN pg_class i ON i.oid = ix.indexrelid
-		 JOIN pg_class t ON t.oid = ix.indrelid
-		 JOIN pg_namespace n ON n.oid = t.relnamespace
-		 CROSS JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, n)
-		 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
-		 WHERE n.nspname = $1
-		   AND NOT ix.indisprimary
-		 GROUP BY i.relname, t.relname, ix.indisunique
-		 ORDER BY t.relname, i.relname`,
-		[schema],
-	);
+	// Group CHECK constraints by table (strip schema prefix if present)
+	const tableChecks = new Map<string, CheckConstraintIR[]>();
+	for (const ck of checksResult.rows) {
+		const tableName = ck.raw_table.replace(/^".*"\.|^.*\./u, '');
+		const checkIR: CheckConstraintIR = {
+			name: ck.name,
+			expression: ck.expression,
+		};
+		const existing = tableChecks.get(tableName);
+		if (existing) {
+			existing.push(checkIR);
+		} else {
+			tableChecks.set(tableName, [checkIR]);
+		}
+	}
 
 	// Group indexes by table
 	const tableIndexes = new Map<string, IndexIR[]>();
 	for (const idx of indexesResult.rows) {
+		const columns: string[] = Array.isArray(idx.columns)
+			? idx.columns
+			: String(idx.columns)
+					.replace(/^\{|}$/g, '')
+					.split(',')
+					.filter(Boolean);
+
+		// Parse reloptions array (e.g. ['m=16', 'ef_construction=200']) into a Record
+		let withParams: Record<string, string> | undefined;
+		if (Array.isArray(idx.reloptions) && idx.reloptions.length > 0) {
+			withParams = {};
+			for (const opt of idx.reloptions) {
+				const eqIdx = opt.indexOf('=');
+				if (eqIdx !== -1) {
+					withParams[opt.slice(0, eqIdx)] = opt.slice(eqIdx + 1);
+				}
+			}
+		}
+
 		const indexIR: IndexIR = {
 			name: idx.index_name,
-			columns: Array.isArray(idx.columns)
-				? idx.columns
-				: String(idx.columns).replace(/^\{|}$/g, '').split(',').filter(Boolean),
+			columns,
 			...(idx.is_unique ? { unique: true } : {}),
+			// Only store method when it's not the default 'btree'
+			...(idx.method && idx.method !== 'btree' ? { method: idx.method } : {}),
+			...(idx.predicate ? { where: idx.predicate } : {}),
+			...(withParams && Object.keys(withParams).length > 0
+				? { with: withParams }
+				: {}),
 		};
 		const existing = tableIndexes.get(idx.table_name);
 		if (existing) {
@@ -231,6 +423,8 @@ export async function introspect(
 			cols: string[];
 			refs: string[];
 			deleteRule: string;
+			updateRule: string;
+			deferred: boolean;
 		}
 	>();
 	for (const fk of fksResult.rows) {
@@ -245,7 +439,33 @@ export async function introspect(
 				cols: [fk.source_column],
 				refs: [fk.target_column],
 				deleteRule: fk.delete_rule,
+				updateRule: fk.update_rule,
+				deferred: fk.is_deferrable === 'YES' && fk.initially_deferred === 'YES',
 			});
+		}
+	}
+
+	// Build enum map
+	const enumMap = new Map<string, EnumIR>();
+	for (const row of enumsResult.rows) {
+		const values: string[] = Array.isArray(row.values)
+			? row.values
+			: String(row.values)
+					.replace(/^\{|}$/g, '')
+					.split(',')
+					.filter(Boolean);
+		enumMap.set(row.name, { name: row.name, values });
+	}
+
+	// Build comment maps: table comments (objsubid=0) and column comments (objsubid>0)
+	const tableComments = new Map<string, string>();
+	const columnComments = new Map<string, string>(); // key: "table.column"
+	for (const row of commentsResult.rows) {
+		if (row.column_name === null) {
+			// objsubid = 0 → table comment
+			tableComments.set(row.table_name, row.comment);
+		} else {
+			columnComments.set(`${row.table_name}.${row.column_name}`, row.comment);
 		}
 	}
 
@@ -259,13 +479,35 @@ export async function introspect(
 		const rawCols = tableColumns.get(tableName) ?? [];
 		const pkCols = tablePKs.get(tableName);
 
-		const columns: ColumnIR[] = rawCols.map((col) => ({
-			name: col.column_name,
-			type: mapPgType(col.data_type, col.udt_name),
-			nullable: col.is_nullable === 'YES',
-			...(col.column_default != null ? { default: col.column_default } : {}),
-			dbType: col.udt_name,
-		}));
+		const columns: ColumnIR[] = rawCols.map((col) => {
+			// Map identity_generation: 'ALWAYS' → 'always', 'BY DEFAULT' → 'byDefault'
+			const identity =
+				col.is_identity === 'YES' && col.identity_generation
+					? col.identity_generation === 'ALWAYS'
+						? ('always' as const)
+						: ('byDefault' as const)
+					: undefined;
+
+			// Collation: skip null and the PostgreSQL default collation name
+			const collation =
+				col.collation_name && col.collation_name !== 'default'
+					? col.collation_name
+					: undefined;
+
+			const colComment =
+				columnComments.get(`${tableName}.${col.column_name}`) ?? undefined;
+
+			return {
+				name: col.column_name,
+				type: mapPgType(col.data_type, col.udt_name),
+				nullable: col.is_nullable === 'YES',
+				...(col.column_default != null ? { default: col.column_default } : {}),
+				dbType: col.udt_name,
+				...(collation ? { collation } : {}),
+				...(identity ? { identity } : {}),
+				...(colComment ? { comment: colComment } : {}),
+			};
+		});
 
 		// Build FK list for this table
 		const foreignKeys: ForeignKeyIR[] = [];
@@ -273,10 +515,14 @@ export async function introspect(
 			if (fk.source !== tableName) continue;
 			// Only include FK if target table is in our filtered set
 			if (!tableNames.includes(fk.target)) continue;
+			const onDelete = mapDeleteRule(fk.deleteRule);
+			const onUpdate = mapDeleteRule(fk.updateRule);
 			foreignKeys.push({
 				columns: fk.cols,
 				references: { table: fk.target, columns: fk.refs },
-				onDelete: mapDeleteRule(fk.deleteRule),
+				...(onDelete !== 'NO ACTION' ? { onDelete } : {}),
+				...(onUpdate !== 'NO ACTION' ? { onUpdate } : {}),
+				...(fk.deferred ? { deferred: true } : {}),
 			});
 		}
 
@@ -284,6 +530,9 @@ export async function introspect(
 			warnings.push(`Table "${tableName}" has no primary key`);
 		}
 
+		const checks = tableChecks.get(tableName);
+		const tableComment = tableComments.get(tableName);
+		const partitionConfig = tablePartitions.get(tableName);
 		const table: TableIR = {
 			name: tableName,
 			columns,
@@ -292,18 +541,42 @@ export async function introspect(
 				: {}),
 			foreignKeys,
 			indexes: tableIndexes.get(tableName) ?? [],
+			...(checks && checks.length > 0 ? { checkConstraints: checks } : {}),
+			...(tableComment ? { comment: tableComment } : {}),
+			...(partitionConfig ? { partition: partitionConfig } : {}),
 		};
 		tables.set(tableName, table);
 	}
 
-	// Block 2: Infer relations from foreign keys
+	// Process extensions and sequences results (fetched in parallel above)
+	const extensions: string[] = extensionsResult.rows.map((r) => r.name);
+
+	const sequenceMap = new Map<string, SequenceIR>();
+	for (const row of sequencesResult.rows) {
+		sequenceMap.set(row.name, {
+			name: row.name,
+			startWith: Number(row.start_value),
+			incrementBy: Number(row.increment_by),
+			minValue: Number(row.min_value),
+			maxValue: Number(row.max_value),
+			cycle: row.cycle,
+		});
+	}
+
+	// Infer relations from foreign keys
 	const relations = inferRelations(fksByConstraint, tableNames);
 
-	// Block 3: Detect hierarchies
+	// Detect hierarchies
 	const hierarchies = detectHierarchies(tables, fksByConstraint, tableNames);
 
 	// Build ModelIR
-	const modelIR = new ModelIRImpl(tables, relations);
+	const modelIR = new ModelIRImpl(
+		tables,
+		relations,
+		enumMap,
+		extensions,
+		sequenceMap,
+	);
 
 	return Object.assign(modelIR, {
 		hierarchies,

@@ -1,0 +1,123 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildPairedTree > snapshot: flat project with all file types 1`] = `
+[
+  {
+    "assert": {
+      "language": "assert",
+      "name": "main.assert.dbsp",
+      "path": "main.assert.dbsp",
+      "type": "file",
+    },
+    "baseName": "main",
+    "dbsp": {
+      "language": "dbsp",
+      "name": "main.dbsp",
+      "path": "main.dbsp",
+      "type": "file",
+    },
+    "type": "pair",
+  },
+  {
+    "language": "dbsp",
+    "name": "standalone.dbsp",
+    "path": "standalone.dbsp",
+    "type": "file",
+  },
+  {
+    "language": "assert",
+    "name": "orphan.assert.dbsp",
+    "path": "orphan.assert.dbsp",
+    "type": "file",
+  },
+  {
+    "language": "sql",
+    "name": "setup.sql",
+    "path": "setup.sql",
+    "type": "file",
+  },
+]
+`;
+
+exports[`buildPairedTree > snapshot: typical project structure 1`] = `
+[
+  {
+    "children": [
+      {
+        "language": "sql",
+        "name": "001.sql",
+        "path": "migrations/001.sql",
+        "type": "file",
+      },
+    ],
+    "name": "migrations",
+    "path": "migrations",
+    "type": "dir",
+  },
+  {
+    "children": [
+      {
+        "children": [
+          {
+            "assert": {
+              "language": "assert",
+              "name": "users.assert.dbsp",
+              "path": "src/models/users.assert.dbsp",
+              "type": "file",
+            },
+            "baseName": "users",
+            "dbsp": {
+              "language": "dbsp",
+              "name": "users.dbsp",
+              "path": "src/models/users.dbsp",
+              "type": "file",
+            },
+            "type": "pair",
+          },
+          {
+            "language": "dbsp",
+            "name": "orders.dbsp",
+            "path": "src/models/orders.dbsp",
+            "type": "file",
+          },
+        ],
+        "name": "models",
+        "path": "src/models",
+        "type": "dir",
+      },
+      {
+        "children": [
+          {
+            "assert": {
+              "language": "assert",
+              "name": "search.assert.dbsp",
+              "path": "src/queries/search.assert.dbsp",
+              "type": "file",
+            },
+            "baseName": "search",
+            "dbsp": {
+              "language": "dbsp",
+              "name": "search.dbsp",
+              "path": "src/queries/search.dbsp",
+              "type": "file",
+            },
+            "type": "pair",
+          },
+        ],
+        "name": "queries",
+        "path": "src/queries",
+        "type": "dir",
+      },
+    ],
+    "name": "src",
+    "path": "src",
+    "type": "dir",
+  },
+  {
+    "language": "dbsp",
+    "name": "schema.dbsp",
+    "path": "schema.dbsp",
+    "type": "file",
+  },
+]
+`;

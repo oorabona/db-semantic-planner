@@ -4,6 +4,27 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## DDL-COMPLETE — Complete DDL migration system (2026-03-18)
+
+- Single monolithic story (not split into multiple)
+- VIEWs and TRIGGERs deferred to future story
+- FK auto-index added to migrate path for consistency with generateDDL (single-column only)
+- 16-phase topological ordering (up from 12) for extensions, enums, sequences, check constraints, comments
+- All new IR fields optional on existing interfaces (backward compat)
+- CHECK expression: use pg_get_constraintdef(oid, false) for server-side canonical form
+- Index introspection: use pg_index + pg_am + pg_opclass + pg_get_expr, NOT pg_indexes.indexdef regex
+- Index opclass: per-column via pg_opclass join, non-default only (opcdefault=false)
+- Index WITH params: from pg_class.reloptions
+- Idempotent DDL: CREATE INDEX IF NOT EXISTS + DO $$ EXCEPTION WHEN duplicate_object for constraints
+- ENUM ALTER TYPE ADD VALUE has transaction visibility caveats — emit outside transaction or document limitation
+- ENUM value insertion position matters — track BEFORE/AFTER for ordered enums
+- Identity vs SERIAL coexist — never auto-convert, explicit opt-in only
+- Partition strategy change = error, child management deferred to DDL-PARTITION-MGMT
+- ENUM value removal = destructive flag (PG limitation)
+- Introspection parallelized: 10 queries via Promise.all
+
+---
+
 ## DDL-FK-IDX — emit FK + indexes for new tables in migration SQL (2026-03-18)
 
 - Fix in compareSchemata: emit add_foreign_key + create_index changes for new tables before the continue statement

@@ -776,7 +776,8 @@ describe('generateMigrationSQL — error paths & edge cases', () => {
 			);
 
 			expect(sql[0]).toContain('ALTER TABLE "tenant_1"."posts"');
-			expect(sql[0]).toContain('REFERENCES "users"');
+			// REFERENCES must also be schema-qualified so PostgreSQL resolves within the same schema
+			expect(sql[0]).toContain('REFERENCES "tenant_1"."users"');
 		});
 
 		it('should handle composite FK columns', () => {

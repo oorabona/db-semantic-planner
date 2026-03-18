@@ -11,8 +11,10 @@
 export type {
 	AmbiguityCheckResult,
 	Cardinality,
+	CheckConstraintIR,
 	ColumnIR,
 	ColumnType,
+	EnumIR,
 	FilterStrategy,
 	ForeignKeyIR,
 	IncludeStrategy,
@@ -21,11 +23,13 @@ export type {
 	ModelIR,
 	OnDeleteAction,
 	Optionality,
+	PartitionIR,
 	PseudoColumnMetadata,
 	RecursiveMetadata,
 	RelationIR,
 	RelationKind,
 	RelationType,
+	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
 

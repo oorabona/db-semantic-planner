@@ -68,6 +68,35 @@ export function generateDDL(
 	const tables = Array.from(schema.tables.values());
 
 	// ========================================================================
+	// PASS -1: CREATE EXTENSION (before everything)
+	// ========================================================================
+	if (schema.extensions) {
+		for (const ext of schema.extensions) {
+			statements.push(`CREATE EXTENSION IF NOT EXISTS "${ext}";`);
+		}
+	}
+
+	// ========================================================================
+	// PASS -0.5: CREATE SEQUENCE (before tables)
+	// ========================================================================
+	if (schema.sequences) {
+		for (const [, seq] of schema.sequences) {
+			const seqName = schemaName
+				? `${quoteIdentifier(naming.toDatabase(schemaName))}.${quoteIdentifier(seq.name)}`
+				: quoteIdentifier(seq.name);
+			const parts: string[] = [`CREATE SEQUENCE ${seqName}`];
+			if (seq.startWith !== undefined)
+				parts.push(`START WITH ${seq.startWith}`);
+			if (seq.incrementBy !== undefined)
+				parts.push(`INCREMENT BY ${seq.incrementBy}`);
+			if (seq.minValue !== undefined) parts.push(`MINVALUE ${seq.minValue}`);
+			if (seq.maxValue !== undefined) parts.push(`MAXVALUE ${seq.maxValue}`);
+			if (seq.cycle) parts.push('CYCLE');
+			statements.push(`${parts.join(' ')};`);
+		}
+	}
+
+	// ========================================================================
 	// PASS 0: DROP statements (if requested)
 	// ========================================================================
 	if (includeDropStatements) {
@@ -76,6 +105,21 @@ export function generateDDL(
 			statements.push(generateDropTable(table.name, schemaName, naming));
 		}
 		statements.push(''); // Empty line separator
+	}
+
+	// ========================================================================
+	// PASS 0.5: CREATE TYPE for ENUM types (must be before CREATE TABLE)
+	// ========================================================================
+	if (schema.enums) {
+		for (const [, enumDef] of schema.enums) {
+			const enumName = schemaName
+				? `${quoteIdentifier(naming.toDatabase(schemaName))}.${quoteIdentifier(enumDef.name)}`
+				: quoteIdentifier(enumDef.name);
+			const values = enumDef.values
+				.map((v) => `'${v.replace(/'/g, "''")}'`)
+				.join(', ');
+			statements.push(`CREATE TYPE ${enumName} AS ENUM (${values});`);
+		}
 	}
 
 	// ========================================================================
@@ -92,6 +136,19 @@ export function generateDDL(
 		for (const fk of table.foreignKeys) {
 			statements.push(
 				generateAlterTableAddFK(table.name, fk, schemaName, naming),
+			);
+		}
+	}
+
+	// ========================================================================
+	// PASS 2.5: ALTER TABLE ADD CHECK CONSTRAINT
+	// ========================================================================
+	for (const table of tables) {
+		for (const check of table.checkConstraints ?? []) {
+			const qualifiedTable = qualifyTable(table.name, schemaName, naming);
+			const constraintName = quoteIdentifier(check.name);
+			statements.push(
+				`ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} ${check.expression};`,
 			);
 		}
 	}
@@ -131,6 +188,26 @@ export function generateDDL(
 						generateCreateIndex(table.name, autoIdx, schemaName, naming),
 					);
 				}
+			}
+		}
+	}
+
+	// ========================================================================
+	// PASS 4: COMMENT ON TABLE / COLUMN
+	// ========================================================================
+	for (const table of tables) {
+		if (table.comment) {
+			const qualifiedTable = qualifyTable(table.name, schemaName, naming);
+			statements.push(
+				`COMMENT ON TABLE ${qualifiedTable} IS '${table.comment.replace(/'/g, "''")}';`,
+			);
+		}
+		for (const col of table.columns) {
+			if (col.comment) {
+				const qualifiedTable = qualifyTable(table.name, schemaName, naming);
+				statements.push(
+					`COMMENT ON COLUMN ${qualifiedTable}.${quoteIdentifier(naming.toDatabase(col.name))} IS '${col.comment.replace(/'/g, "''")}';`,
+				);
 			}
 		}
 	}
@@ -207,7 +284,15 @@ function generateCreateTable(
 	}
 
 	const elementsStr = elements.map((el) => `  ${el}`).join(',\n');
-	return `CREATE TABLE ${qualifiedTable} (\n${elementsStr}\n);`;
+	let sql = `CREATE TABLE ${qualifiedTable} (\n${elementsStr}\n)`;
+	if (table.partition) {
+		const partCols = table.partition.columns
+			.map((col) => quoteIdentifier(naming.toDatabase(col)))
+			.join(', ');
+		sql += ` PARTITION BY ${table.partition.strategy} (${partCols})`;
+	}
+	sql += ';';
+	return sql;
 }
 
 /**
@@ -233,6 +318,17 @@ function generateColumnDef(col: ColumnIR, naming: NamingPlugin): string {
 	// UNIQUE constraint
 	if (col.unique) {
 		parts.push('UNIQUE');
+	}
+
+	// COLLATE (must come after type)
+	if (col.collation) {
+		parts.push(`COLLATE "${col.collation}"`);
+	}
+
+	// GENERATED AS IDENTITY
+	if (col.identity) {
+		const gen = col.identity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
+		parts.push(`GENERATED ${gen} AS IDENTITY`);
 	}
 
 	return parts.join(' ');
@@ -295,18 +391,22 @@ function generateAlterTableAddFK(
 		.map((col) => quoteIdentifier(naming.toDatabase(col)))
 		.join(', ');
 
-	// Referenced table and columns
-	const refTable = quoteIdentifier(naming.toDatabase(fk.references.table));
+	// Referenced table and columns (must also be schema-qualified to match the target table's schema)
+	const refTable = qualifyTable(fk.references.table, schemaName, naming);
 	const refCols = fk.references.columns
 		.map((col) => quoteIdentifier(naming.toDatabase(col)))
 		.join(', ');
 
-	// ON DELETE action
+	// ON DELETE / ON UPDATE / DEFERRABLE actions
 	const onDelete = fk.onDelete
 		? ` ON DELETE ${mapOnDeleteAction(fk.onDelete)}`
 		: '';
+	const onUpdate = fk.onUpdate
+		? ` ON UPDATE ${mapOnDeleteAction(fk.onUpdate)}`
+		: '';
+	const deferred = fk.deferred ? ' DEFERRABLE INITIALLY DEFERRED' : '';
 
-	return `ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete};`;
+	return `ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete}${onUpdate}${deferred};`;
 }
 
 // ============================================================================
@@ -323,14 +423,35 @@ function generateCreateIndex(
 		idx.name ?? `idx_${tableName}_${idx.columns.join('_')}`,
 	);
 	const qualifiedTable = qualifyTable(tableName, schemaName, naming);
-
-	// Index columns
-	const cols = idx.columns
-		.map((col) => quoteIdentifier(naming.toDatabase(col)))
-		.join(', ');
-
-	// UNIQUE keyword
 	const unique = idx.unique ? 'UNIQUE ' : '';
+	const method = idx.method ? ` USING ${idx.method}` : '';
 
-	return `CREATE ${unique}INDEX ${indexName} ON ${qualifiedTable} (${cols});`;
+	// Build column list: expressions first (unquoted), then named columns with optional opclass
+	const colParts: string[] = [];
+	if (idx.expressions && idx.expressions.length > 0) {
+		for (const expr of idx.expressions) {
+			colParts.push(expr);
+		}
+	}
+	for (const col of idx.columns) {
+		const opclass = idx.opclass?.[col] ?? '';
+		colParts.push(
+			`${quoteIdentifier(naming.toDatabase(col))}${opclass ? ` ${opclass}` : ''}`,
+		);
+	}
+	const cols = colParts.join(', ');
+
+	const include =
+		idx.include && idx.include.length > 0
+			? ` INCLUDE (${idx.include.map((c) => quoteIdentifier(naming.toDatabase(c))).join(', ')})`
+			: '';
+	const withParams =
+		idx.with && Object.keys(idx.with).length > 0
+			? ` WITH (${Object.entries(idx.with)
+					.map(([k, v]) => `${k} = ${v}`)
+					.join(', ')})`
+			: '';
+	const where = idx.where ? ` WHERE ${idx.where}` : '';
+
+	return `CREATE ${unique}INDEX ${indexName} ON ${qualifiedTable}${method} (${cols})${include}${withParams}${where};`;
 }

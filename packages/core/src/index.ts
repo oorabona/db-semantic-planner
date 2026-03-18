@@ -24,6 +24,8 @@ export type {
 	ModelIR,
 	OnDeleteAction,
 	Optionality,
+	// Partition configuration (parent table only)
+	PartitionIR,
 	// CLI-NQL: Pseudo-columns for self-referential FKs
 	PseudoColumnMetadata,
 	// CLI-NQL: Recursive relation metadata
@@ -124,9 +126,9 @@ export type {
 	UpsertIntent,
 	// Where (filters)
 	WhereAndIntent,
+	WhereAnyIntent,
 	WhereComparisonIntent,
 	WhereExistsIntent,
-	WhereAnyIntent,
 	WhereInIntent,
 	WhereIntent,
 	WhereLikeIntent,
@@ -173,9 +175,9 @@ export {
 	// Upsert type guard (DX-026)
 	isUpsertIntent,
 	isWhereAnd,
+	isWhereAny,
 	isWhereComparison,
 	isWhereExists,
-	isWhereAny,
 	isWhereIn,
 	isWhereLike,
 	isWhereLogical,

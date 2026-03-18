@@ -1,9 +1,17 @@
 import { ModelIRImpl } from '@dbsp/core';
-import type { ColumnIR, ForeignKeyIR, IndexIR, TableIR } from '@dbsp/types';
+import type {
+	ColumnIR,
+	EnumIR,
+	ForeignKeyIR,
+	IndexIR,
+	PartitionIR,
+	SequenceIR,
+	TableIR,
+} from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
-	compareSchemata,
 	type CompareSchemataOptions,
+	compareSchemata,
 	type SchemaChange,
 } from './schema-diff.js';
 
@@ -513,6 +521,173 @@ describe('compareSchemata', () => {
 			// Same columns, same unique → no change (names differ but that's cosmetic)
 			const diff = compareSchemata(schema, db);
 			expect(diff.changes).toHaveLength(0);
+		});
+
+		describe('Index enhancements', () => {
+			it('should detect index method change as drop+create', () => {
+				const schemaIdx: IndexIR = {
+					name: 'idx_posts_body',
+					columns: ['body'],
+					method: 'gin',
+				};
+				const dbIdx: IndexIR = {
+					name: 'idx_posts_body',
+					columns: ['body'],
+					// no method → btree (default)
+				};
+
+				const schema = makeModel([
+					makeTable({
+						name: 'posts',
+						columns: [makeCol({ name: 'body', type: 'string' })],
+						indexes: [schemaIdx],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'posts',
+						columns: [makeCol({ name: 'body', type: 'string' })],
+						indexes: [dbIdx],
+					}),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				const kinds = changeKinds(diff.changes);
+				expect(kinds).toContain('create_index');
+				expect(kinds).toContain('drop_index');
+			});
+
+			it('should detect partial index WHERE change', () => {
+				const schemaIdx: IndexIR = {
+					name: 'idx_users_active_email',
+					columns: ['email'],
+					where: 'active = true',
+				};
+				const dbIdx: IndexIR = {
+					name: 'idx_users_active_email',
+					columns: ['email'],
+					// no WHERE
+				};
+
+				const schema = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+						indexes: [schemaIdx],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+						indexes: [dbIdx],
+					}),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				const kinds = changeKinds(diff.changes);
+				expect(kinds).toContain('create_index');
+				expect(kinds).toContain('drop_index');
+			});
+
+			it('should detect opclass change', () => {
+				const schemaIdx: IndexIR = {
+					name: 'idx_posts_title',
+					columns: ['title'],
+					method: 'gin',
+					opclass: { title: 'gin_trgm_ops' },
+				};
+				const dbIdx: IndexIR = {
+					name: 'idx_posts_title',
+					columns: ['title'],
+					method: 'gin',
+					// no opclass → default
+				};
+
+				const schema = makeModel([
+					makeTable({
+						name: 'posts',
+						columns: [makeCol({ name: 'title', type: 'string' })],
+						indexes: [schemaIdx],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'posts',
+						columns: [makeCol({ name: 'title', type: 'string' })],
+						indexes: [dbIdx],
+					}),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				const kinds = changeKinds(diff.changes);
+				expect(kinds).toContain('create_index');
+				expect(kinds).toContain('drop_index');
+			});
+
+			it('should detect WITH params change', () => {
+				const schemaIdx: IndexIR = {
+					name: 'idx_embeddings',
+					columns: ['vec'],
+					method: 'hnsw',
+					with: { m: '16' },
+				};
+				const dbIdx: IndexIR = {
+					name: 'idx_embeddings',
+					columns: ['vec'],
+					method: 'hnsw',
+					// no WITH params
+				};
+
+				const schema = makeModel([
+					makeTable({
+						name: 'embeddings',
+						columns: [makeCol({ name: 'vec', type: 'string' })],
+						indexes: [schemaIdx],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'embeddings',
+						columns: [makeCol({ name: 'vec', type: 'string' })],
+						indexes: [dbIdx],
+					}),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				const kinds = changeKinds(diff.changes);
+				expect(kinds).toContain('create_index');
+				expect(kinds).toContain('drop_index');
+			});
+
+			it('should ignore identical enhanced indexes', () => {
+				const idx: IndexIR = {
+					name: 'idx_posts_title_trgm',
+					columns: ['title'],
+					method: 'gin',
+					opclass: { title: 'gin_trgm_ops' },
+					where: 'published = true',
+					with: { fastupdate: 'on' },
+				};
+
+				const schema = makeModel([
+					makeTable({
+						name: 'posts',
+						columns: [makeCol({ name: 'title', type: 'string' })],
+						indexes: [idx],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'posts',
+						columns: [makeCol({ name: 'title', type: 'string' })],
+						indexes: [idx],
+					}),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				expect(diff.changes).toHaveLength(0);
+			});
 		});
 	});
 
@@ -1036,18 +1211,14 @@ describe('compareSchemata', () => {
 				makeTable({
 					name: 'apiTokens',
 					columns: [makeCol({ name: 'tokenHash', type: 'string' })],
-					indexes: [
-						{ columns: ['tokenHash'], unique: true },
-					],
+					indexes: [{ columns: ['tokenHash'], unique: true }],
 				}),
 			]);
 			const db = makeModel([
 				makeTable({
 					name: 'api_tokens',
 					columns: [makeCol({ name: 'token_hash', type: 'string' })],
-					indexes: [
-						{ columns: ['token_hash'], unique: true },
-					],
+					indexes: [{ columns: ['token_hash'], unique: true }],
 				}),
 			]);
 
@@ -1111,13 +1282,25 @@ describe('compareSchemata', () => {
 			const schema = makeModel([
 				makeTable({
 					name: 'items',
-					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'vector(1024)' })],
+					columns: [
+						makeCol({
+							name: 'embedding',
+							type: 'text',
+							originalDbType: 'vector(1024)',
+						}),
+					],
 				}),
 			]);
 			const db = makeModel([
 				makeTable({
 					name: 'items',
-					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'vector(768)' })],
+					columns: [
+						makeCol({
+							name: 'embedding',
+							type: 'text',
+							originalDbType: 'vector(768)',
+						}),
+					],
 				}),
 			]);
 
@@ -1125,20 +1308,35 @@ describe('compareSchemata', () => {
 
 			expect(diff.changes).toHaveLength(1);
 			expect(diff.changes[0]!.kind).toBe('alter_column_type');
-			expect(diff.changes[0]!.meta).toMatchObject({ fromType: 'vector(768)', toType: 'vector(1024)' });
+			expect(diff.changes[0]!.meta).toMatchObject({
+				fromType: 'vector(768)',
+				toType: 'vector(1024)',
+			});
 		});
 
 		it('detects precision change via originalDbType', () => {
 			const schema = makeModel([
 				makeTable({
 					name: 'orders',
-					columns: [makeCol({ name: 'price', type: 'decimal', originalDbType: 'numeric(12,4)' })],
+					columns: [
+						makeCol({
+							name: 'price',
+							type: 'decimal',
+							originalDbType: 'numeric(12,4)',
+						}),
+					],
 				}),
 			]);
 			const db = makeModel([
 				makeTable({
 					name: 'orders',
-					columns: [makeCol({ name: 'price', type: 'decimal', originalDbType: 'numeric(10,2)' })],
+					columns: [
+						makeCol({
+							name: 'price',
+							type: 'decimal',
+							originalDbType: 'numeric(10,2)',
+						}),
+					],
 				}),
 			]);
 
@@ -1152,13 +1350,25 @@ describe('compareSchemata', () => {
 			const schema = makeModel([
 				makeTable({
 					name: 'items',
-					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'vector(768)' })],
+					columns: [
+						makeCol({
+							name: 'embedding',
+							type: 'text',
+							originalDbType: 'vector(768)',
+						}),
+					],
 				}),
 			]);
 			const db = makeModel([
 				makeTable({
 					name: 'items',
-					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'vector(768)' })],
+					columns: [
+						makeCol({
+							name: 'embedding',
+							type: 'text',
+							originalDbType: 'vector(768)',
+						}),
+					],
 				}),
 			]);
 
@@ -1191,7 +1401,9 @@ describe('compareSchemata', () => {
 			const schema = makeModel([
 				makeTable({
 					name: 'orders',
-					columns: [makeCol({ name: 'price', type: 'decimal', originalDbType: 'real' })],
+					columns: [
+						makeCol({ name: 'price', type: 'decimal', originalDbType: 'real' }),
+					],
 				}),
 			]);
 			const db = makeModel([
@@ -1212,13 +1424,25 @@ describe('compareSchemata', () => {
 			const schema = makeModel([
 				makeTable({
 					name: 'items',
-					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'vector(768)' })],
+					columns: [
+						makeCol({
+							name: 'embedding',
+							type: 'text',
+							originalDbType: 'vector(768)',
+						}),
+					],
 				}),
 			]);
 			const db = makeModel([
 				makeTable({
 					name: 'items',
-					columns: [makeCol({ name: 'embedding', type: 'text', originalDbType: 'VECTOR(768)' })],
+					columns: [
+						makeCol({
+							name: 'embedding',
+							type: 'text',
+							originalDbType: 'VECTOR(768)',
+						}),
+					],
 				}),
 			]);
 
@@ -1226,5 +1450,841 @@ describe('compareSchemata', () => {
 
 			expect(diff.changes).toHaveLength(0);
 		});
+	});
+});
+
+describe('CHECK constraints', () => {
+	it('should detect added CHECK constraint', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toEqual(['add_check_constraint']);
+	});
+
+	it('should detect dropped CHECK constraint', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toEqual(['drop_check_constraint']);
+	});
+
+	it('should detect changed CHECK expression', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age >= 0))' },
+				],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toEqual([
+			'drop_check_constraint',
+			'add_check_constraint',
+		]);
+	});
+
+	it('should emit no changes for identical CHECK constraints', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.changes).toEqual([]);
+	});
+
+	it('should emit CHECK constraints for new tables', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'products',
+				columns: [makeCol({ name: 'price', type: 'number' })],
+				checkConstraints: [
+					{ name: 'products_price_check', expression: 'CHECK ((price > 0))' },
+				],
+			}),
+		]);
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db);
+		const kinds = changeKinds(diff.changes);
+		expect(kinds).toContain('create_table');
+		expect(kinds).toContain('add_check_constraint');
+	});
+});
+
+// ============================================================================
+// ENUM Types
+// ============================================================================
+
+function makeModelWithEnums(
+	tables: TableIR[],
+	enums: Map<string, { name: string; values: string[] }>,
+) {
+	const tableMap = new Map(tables.map((t) => [t.name, t]));
+	return new ModelIRImpl(tableMap, new Map(), enums as Map<string, EnumIR>);
+}
+
+describe('ENUM types', () => {
+	it('should detect new enum type', () => {
+		const schema = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toEqual(['create_enum']);
+	});
+
+	it('should detect dropped enum type', () => {
+		const schema = makeModel([]);
+		const db = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toEqual(['drop_enum']);
+	});
+
+	it('should detect new enum value', () => {
+		const schema = makeModelWithEnums(
+			[],
+			new Map([
+				[
+					'status',
+					{ name: 'status', values: ['active', 'inactive', 'pending'] },
+				],
+			]),
+		);
+		const db = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toEqual(['alter_enum_add_value']);
+	});
+
+	it('should flag removed enum value as destructive', () => {
+		const schema = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active'] }]]),
+		);
+		const db = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
+		const diff = compareSchemata(schema, db);
+		expect(diff.changes.some((c) => c.destructive)).toBe(true);
+	});
+
+	it('should detect no changes for identical enums', () => {
+		const schema = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
+		const db = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
+		const diff = compareSchemata(schema, db);
+		expect(diff.changes).toEqual([]);
+	});
+
+	it('should emit alter_enum_add_value with correct position metadata', () => {
+		const schema = makeModelWithEnums(
+			[],
+			new Map([
+				[
+					'status',
+					{ name: 'status', values: ['active', 'inactive', 'pending'] },
+				],
+			]),
+		);
+		const db = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'alter_enum_add_value');
+		expect(change?.meta?.value).toBe('pending');
+		expect(change?.meta?.after).toBe('inactive');
+	});
+
+	it('should mark drop_enum as destructive', () => {
+		const schema = makeModel([]);
+		const db = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active'] }]]),
+		);
+		const diff = compareSchemata(schema, db);
+		expect(diff.hasDestructive).toBe(true);
+	});
+});
+
+// ============================================================================
+// FK Enhancements: onUpdate + deferred
+// ============================================================================
+
+describe('FK enhancements — compareForeignKeys', () => {
+	const baseFk: ForeignKeyIR = {
+		columns: ['user_id'],
+		references: { table: 'users', columns: ['id'] },
+	};
+	const usersTable = makeTable({
+		name: 'users',
+		columns: [makeCol({ name: 'id', type: 'integer' })],
+	});
+
+	it('should detect onUpdate change', () => {
+		const schema = makeTable({
+			name: 'orders',
+			foreignKeys: [{ ...baseFk, onUpdate: 'CASCADE' }],
+		});
+		const db = makeTable({
+			name: 'orders',
+			foreignKeys: [baseFk],
+		});
+		const diff = compareSchemata(
+			makeModel([usersTable, schema]),
+			makeModel([usersTable, db]),
+		);
+		const change = diff.changes.find((c) => c.kind === 'alter_foreign_key');
+		expect(change).toBeDefined();
+		expect(change?.details).toContain('onDelete/onUpdate/deferred');
+	});
+
+	it('should detect deferred change', () => {
+		const schema = makeTable({
+			name: 'orders',
+			foreignKeys: [{ ...baseFk, deferred: true }],
+		});
+		const db = makeTable({
+			name: 'orders',
+			foreignKeys: [baseFk],
+		});
+		const diff = compareSchemata(
+			makeModel([usersTable, schema]),
+			makeModel([usersTable, db]),
+		);
+		const change = diff.changes.find((c) => c.kind === 'alter_foreign_key');
+		expect(change).toBeDefined();
+		expect(change?.details).toContain('onDelete/onUpdate/deferred');
+	});
+
+	it('should detect combined onDelete+onUpdate+deferred change', () => {
+		const schema = makeTable({
+			name: 'orders',
+			foreignKeys: [
+				{
+					...baseFk,
+					onDelete: 'CASCADE',
+					onUpdate: 'SET NULL',
+					deferred: true,
+				},
+			],
+		});
+		const db = makeTable({
+			name: 'orders',
+			foreignKeys: [{ ...baseFk, onDelete: 'RESTRICT' }],
+		});
+		const diff = compareSchemata(
+			makeModel([usersTable, schema]),
+			makeModel([usersTable, db]),
+		);
+		const change = diff.changes.find((c) => c.kind === 'alter_foreign_key');
+		expect(change).toBeDefined();
+		expect(change?.meta?.oldFk).toBeDefined();
+	});
+
+	it('should ignore identical FK with onUpdate and deferred', () => {
+		const fk: ForeignKeyIR = { ...baseFk, onUpdate: 'CASCADE', deferred: true };
+		const schema = makeTable({ name: 'orders', foreignKeys: [fk] });
+		const db = makeTable({ name: 'orders', foreignKeys: [fk] });
+		const diff = compareSchemata(
+			makeModel([usersTable, schema]),
+			makeModel([usersTable, db]),
+		);
+		expect(
+			diff.changes.filter((c) => c.kind === 'alter_foreign_key'),
+		).toHaveLength(0);
+	});
+});
+
+// ============================================================================
+// Block 5: Column Enhancements — collation, identity, comments
+// ============================================================================
+
+describe('Column enhancements', () => {
+	it('should detect collation change', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'name', collation: 'en_US' })],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'name' })] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find(
+			(c) => c.kind === 'alter_column_collation',
+		);
+		expect(change).toBeDefined();
+		expect(change?.column).toBe('name');
+		expect(change?.destructive).toBe(false);
+	});
+
+	it('should detect identity added', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', identity: 'always' })],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'id' })] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'alter_column_identity');
+		expect(change).toBeDefined();
+		expect(change?.column).toBe('id');
+		expect(change?.meta?.column).toMatchObject({ identity: 'always' });
+		expect(change?.meta?.previousIdentity).toBeUndefined();
+	});
+
+	it('should detect identity removed', () => {
+		const schema = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'id' })] }),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', identity: 'byDefault' })],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'alter_column_identity');
+		expect(change).toBeDefined();
+		expect(change?.meta?.previousIdentity).toBe('byDefault');
+	});
+
+	it('should detect identity type change (always → byDefault)', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', identity: 'byDefault' })],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', identity: 'always' })],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'alter_column_identity');
+		expect(change).toBeDefined();
+		expect(change?.meta?.column).toMatchObject({ identity: 'byDefault' });
+		expect(change?.meta?.previousIdentity).toBe('always');
+	});
+
+	it('should detect table comment added', () => {
+		const schema = makeModel([
+			makeTable({ name: 'users', columns: [], comment: 'User accounts' }),
+		]);
+		const db = makeModel([makeTable({ name: 'users', columns: [] })]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'add_comment');
+		expect(change).toBeDefined();
+		expect(change?.table).toBe('users');
+		expect(change?.column).toBeUndefined();
+		expect(change?.meta?.target).toBe('table');
+		expect(change?.meta?.comment).toBe('User accounts');
+	});
+
+	it('should detect column comment added', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'email', comment: 'Primary email' })],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'email' })] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'add_comment');
+		expect(change).toBeDefined();
+		expect(change?.column).toBe('email');
+		expect(change?.meta?.target).toBe('column');
+		expect(change?.meta?.comment).toBe('Primary email');
+	});
+
+	it('should detect comment removed (→ drop_comment)', () => {
+		const schema = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'email' })] }),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'email', comment: 'Old comment' })],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'drop_comment');
+		expect(change).toBeDefined();
+		expect(change?.column).toBe('email');
+		expect(change?.meta?.target).toBe('column');
+	});
+
+	it('should ignore identical collation', () => {
+		const col = makeCol({ name: 'name', collation: 'en_US' });
+		const schema = makeModel([makeTable({ name: 'users', columns: [col] })]);
+		const db = makeModel([makeTable({ name: 'users', columns: [col] })]);
+		const diff = compareSchemata(schema, db);
+		expect(
+			diff.changes.filter((c) => c.kind === 'alter_column_collation'),
+		).toHaveLength(0);
+	});
+
+	it('should ignore identical identity', () => {
+		const col = makeCol({ name: 'id', identity: 'always' });
+		const schema = makeModel([makeTable({ name: 'users', columns: [col] })]);
+		const db = makeModel([makeTable({ name: 'users', columns: [col] })]);
+		const diff = compareSchemata(schema, db);
+		expect(
+			diff.changes.filter((c) => c.kind === 'alter_column_identity'),
+		).toHaveLength(0);
+	});
+
+	it('should ignore identical comment', () => {
+		const table = makeTable({
+			name: 'users',
+			columns: [],
+			comment: 'Same comment',
+		});
+		const schema = makeModel([table]);
+		const db = makeModel([table]);
+		const diff = compareSchemata(schema, db);
+		expect(
+			diff.changes.filter(
+				(c) => c.kind === 'add_comment' || c.kind === 'drop_comment',
+			),
+		).toHaveLength(0);
+	});
+});
+
+// ============================================================================
+// Extensions
+// ============================================================================
+
+function makeModelWithExtensions(extensions: string[]) {
+	return new ModelIRImpl(new Map(), new Map(), undefined, extensions);
+}
+
+describe('Extensions', () => {
+	it('should detect new extension', () => {
+		const schema = makeModelWithExtensions(['uuid-ossp']);
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toContain('create_extension');
+		const change = diff.changes.find((c) => c.kind === 'create_extension');
+		expect(change?.meta?.extension).toBe('uuid-ossp');
+		expect(change?.destructive).toBe(false);
+	});
+
+	it('should detect dropped extension', () => {
+		const schema = makeModel([]);
+		const db = makeModelWithExtensions(['uuid-ossp']);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toContain('drop_extension');
+		const change = diff.changes.find((c) => c.kind === 'drop_extension');
+		expect(change?.meta?.extension).toBe('uuid-ossp');
+		expect(change?.destructive).toBe(true);
+	});
+
+	it('should detect no changes for identical extensions', () => {
+		const schema = makeModelWithExtensions(['uuid-ossp', 'pgcrypto']);
+		const db = makeModelWithExtensions(['uuid-ossp', 'pgcrypto']);
+		const diff = compareSchemata(schema, db);
+		const extChanges = diff.changes.filter(
+			(c) => c.kind === 'create_extension' || c.kind === 'drop_extension',
+		);
+		expect(extChanges).toHaveLength(0);
+	});
+
+	it('should detect multiple extension changes at once', () => {
+		const schema = makeModelWithExtensions(['uuid-ossp', 'pgcrypto']);
+		const db = makeModelWithExtensions(['pgcrypto', 'hstore']);
+		const diff = compareSchemata(schema, db);
+		const kinds = changeKinds(diff.changes);
+		expect(kinds).toContain('create_extension'); // uuid-ossp to add
+		expect(kinds).toContain('drop_extension'); // hstore to drop
+	});
+});
+
+// ============================================================================
+// Sequences
+// ============================================================================
+
+function makeModelWithSequences(sequences: SequenceIR[]) {
+	const seqMap = new Map(sequences.map((s) => [s.name, s]));
+	return new ModelIRImpl(new Map(), new Map(), undefined, undefined, seqMap);
+}
+
+describe('Sequences', () => {
+	it('should detect new sequence', () => {
+		const seq: SequenceIR = { name: 'order_seq', startWith: 1, incrementBy: 1 };
+		const schema = makeModelWithSequences([seq]);
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toContain('create_sequence');
+		const change = diff.changes.find((c) => c.kind === 'create_sequence');
+		expect((change?.meta?.sequence as SequenceIR).name).toBe('order_seq');
+		expect(change?.destructive).toBe(false);
+	});
+
+	it('should detect dropped sequence', () => {
+		const seq: SequenceIR = { name: 'order_seq', startWith: 1 };
+		const schema = makeModel([]);
+		const db = makeModelWithSequences([seq]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toContain('drop_sequence');
+		const change = diff.changes.find((c) => c.kind === 'drop_sequence');
+		expect(change?.destructive).toBe(true);
+	});
+
+	it('should detect altered sequence (incrementBy changed)', () => {
+		const schema = makeModelWithSequences([
+			{ name: 'order_seq', startWith: 1, incrementBy: 5 },
+		]);
+		const db = makeModelWithSequences([
+			{ name: 'order_seq', startWith: 1, incrementBy: 1 },
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toContain('alter_sequence');
+		const change = diff.changes.find((c) => c.kind === 'alter_sequence');
+		expect(change?.destructive).toBe(false);
+	});
+
+	it('should detect altered sequence (cycle changed)', () => {
+		const schema = makeModelWithSequences([{ name: 'order_seq', cycle: true }]);
+		const db = makeModelWithSequences([{ name: 'order_seq', cycle: false }]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toContain('alter_sequence');
+	});
+
+	it('should detect altered sequence (minValue/maxValue changed)', () => {
+		const schema = makeModelWithSequences([
+			{ name: 'order_seq', minValue: 10, maxValue: 1000 },
+		]);
+		const db = makeModelWithSequences([
+			{ name: 'order_seq', minValue: 1, maxValue: 9999 },
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toContain('alter_sequence');
+	});
+
+	it('should detect no changes for identical sequences', () => {
+		const seq: SequenceIR = {
+			name: 'order_seq',
+			startWith: 1,
+			incrementBy: 1,
+			cycle: false,
+		};
+		const schema = makeModelWithSequences([seq]);
+		const db = makeModelWithSequences([seq]);
+		const diff = compareSchemata(schema, db);
+		const seqChanges = diff.changes.filter(
+			(c) =>
+				c.kind === 'create_sequence' ||
+				c.kind === 'alter_sequence' ||
+				c.kind === 'drop_sequence',
+		);
+		expect(seqChanges).toHaveLength(0);
+	});
+
+	it('should store previousSequence in alter_sequence meta', () => {
+		const schema = makeModelWithSequences([
+			{ name: 'order_seq', incrementBy: 5 },
+		]);
+		const db = makeModelWithSequences([{ name: 'order_seq', incrementBy: 1 }]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'alter_sequence');
+		expect((change?.meta?.previousSequence as SequenceIR).incrementBy).toBe(1);
+	});
+});
+
+// ============================================================================
+// Partitioning Tests
+// ============================================================================
+
+describe('Partitioning', () => {
+	function makePartitionedTable(
+		name: string,
+		partition?: PartitionIR,
+	): TableIR {
+		return {
+			name,
+			columns: [{ name: 'created_at', type: 'timestamp', nullable: false }],
+			foreignKeys: [],
+			indexes: [],
+			...(partition ? { partition } : {}),
+		};
+	}
+
+	it('should not flag identical partition config', () => {
+		const partition: PartitionIR = {
+			strategy: 'RANGE',
+			columns: ['created_at'],
+		};
+		const schema = makeModel([makePartitionedTable('events', partition)]);
+		const db = makeModel([makePartitionedTable('events', partition)]);
+		const diff = compareSchemata(schema, db);
+		const partitionChanges = diff.changes.filter(
+			(c) => c.meta?.isPartitionChange === true,
+		);
+		expect(partitionChanges).toHaveLength(0);
+	});
+
+	it('should flag strategy change as destructive', () => {
+		const schema = makeModel([
+			makePartitionedTable('events', {
+				strategy: 'RANGE',
+				columns: ['created_at'],
+			}),
+		]);
+		const db = makeModel([
+			makePartitionedTable('events', {
+				strategy: 'LIST',
+				columns: ['created_at'],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		const partitionChange = diff.changes.find(
+			(c) => c.meta?.isPartitionChange === true,
+		);
+		expect(partitionChange).toBeDefined();
+		expect(partitionChange?.kind).toBe('drop_table');
+		expect(partitionChange?.destructive).toBe(true);
+		expect(partitionChange?.details).toContain('LIST');
+		expect(partitionChange?.details).toContain('RANGE');
+	});
+
+	it('should flag column change as destructive', () => {
+		const schema = makeModel([
+			makePartitionedTable('events', {
+				strategy: 'RANGE',
+				columns: ['updated_at'],
+			}),
+		]);
+		const db = makeModel([
+			makePartitionedTable('events', {
+				strategy: 'RANGE',
+				columns: ['created_at'],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		const partitionChange = diff.changes.find(
+			(c) => c.meta?.isPartitionChange === true,
+		);
+		expect(partitionChange).toBeDefined();
+		expect(partitionChange?.destructive).toBe(true);
+	});
+
+	it('should flag adding partition to existing non-partitioned table as destructive', () => {
+		const schema = makeModel([
+			makePartitionedTable('events', {
+				strategy: 'RANGE',
+				columns: ['created_at'],
+			}),
+		]);
+		const db = makeModel([makePartitionedTable('events')]);
+		const diff = compareSchemata(schema, db);
+		const partitionChange = diff.changes.find(
+			(c) => c.meta?.isPartitionChange === true,
+		);
+		expect(partitionChange).toBeDefined();
+		expect(partitionChange?.kind).toBe('drop_table');
+		expect(partitionChange?.destructive).toBe(true);
+		expect(partitionChange?.details).toContain(
+			'Cannot add partition to existing table',
+		);
+	});
+
+	it('should flag removing partition as destructive', () => {
+		const schema = makeModel([makePartitionedTable('events')]);
+		const db = makeModel([
+			makePartitionedTable('events', {
+				strategy: 'HASH',
+				columns: ['id'],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		const partitionChange = diff.changes.find(
+			(c) => c.meta?.isPartitionChange === true,
+		);
+		expect(partitionChange).toBeDefined();
+		expect(partitionChange?.kind).toBe('drop_table');
+		expect(partitionChange?.destructive).toBe(true);
+		expect(partitionChange?.details).toContain(
+			'Cannot remove partition from existing table',
+		);
+	});
+});
+
+// ============================================================================
+// Regression: F-006 — buildSummary missing ChangeKind cases
+// ============================================================================
+
+describe('buildSummary — missing ChangeKind cases (F-006 regression)', () => {
+	it('F-006: alter_column_collation counts as columns.altered', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'name', collation: 'en_US' })],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'name' })] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.summary.columns.altered).toBeGreaterThanOrEqual(1);
+	});
+
+	it('F-006: alter_column_identity counts as columns.altered', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', identity: 'always' })],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'id' })] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.summary.columns.altered).toBeGreaterThanOrEqual(1);
+	});
+
+	it('F-006: create_extension does not throw and does not count in tables/columns/indexes/constraints', () => {
+		const schema = makeModelWithExtensions(['uuid-ossp']);
+		const db = makeModel([]);
+		// Must not throw (was hitting unhandled default in switch before fix)
+		expect(() => compareSchemata(schema, db)).not.toThrow();
+		const diff = compareSchemata(schema, db);
+		expect(diff.summary.tables.added).toBe(0);
+		expect(diff.summary.columns.added).toBe(0);
+		expect(diff.summary.indexes.added).toBe(0);
+		expect(diff.summary.constraints.added).toBe(0);
+	});
+
+	it('F-006: drop_extension does not count in summary', () => {
+		const schema = makeModel([]);
+		const db = makeModelWithExtensions(['pgcrypto']);
+		const diff = compareSchemata(schema, db);
+		expect(diff.summary.tables.dropped).toBe(0);
+		expect(diff.summary.constraints.dropped).toBe(0);
+	});
+
+	it('F-006: create_sequence does not count in summary', () => {
+		const seq: SequenceIR = { name: 'order_seq', startWith: 1, incrementBy: 1 };
+		const schema = makeModelWithSequences([seq]);
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.summary.tables.added).toBe(0);
+		expect(diff.summary.columns.added).toBe(0);
+	});
+
+	it('F-006: alter_sequence does not count in summary', () => {
+		const seq1: SequenceIR = {
+			name: 'order_seq',
+			startWith: 1,
+			incrementBy: 1,
+		};
+		const seq2: SequenceIR = {
+			name: 'order_seq',
+			startWith: 100,
+			incrementBy: 1,
+		};
+		const schema = makeModelWithSequences([seq1]);
+		const db = makeModelWithSequences([seq2]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.summary.tables.altered ?? 0).toBe(0);
+		expect(diff.summary.columns.altered).toBe(0);
+	});
+
+	it('F-006: drop_sequence does not count in summary', () => {
+		const seq: SequenceIR = { name: 'order_seq', startWith: 1 };
+		const schema = makeModel([]);
+		const db = makeModelWithSequences([seq]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.summary.tables.dropped).toBe(0);
+		expect(diff.summary.indexes.dropped).toBe(0);
+	});
+
+	it('F-006: add_comment does not count in summary', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id' })],
+				comment: 'User accounts',
+			}),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'id' })] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		// add_comment should not inflate any summary bucket
+		expect(diff.summary.tables.added).toBe(0);
+		expect(diff.summary.columns.added).toBe(0);
+		expect(diff.summary.constraints.added).toBe(0);
 	});
 });

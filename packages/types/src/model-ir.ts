@@ -190,6 +190,15 @@ export interface ColumnIR {
 
 	/** Whether column auto-increments (SERIAL, IDENTITY, AUTOINCREMENT) */
 	readonly autoIncrement?: boolean;
+
+	/** Collation name for string columns */
+	readonly collation?: string;
+
+	/** Column comment (COMMENT ON COLUMN) */
+	readonly comment?: string;
+
+	/** Identity column generation strategy (GENERATED {ALWAYS|BY DEFAULT} AS IDENTITY) */
+	readonly identity?: 'always' | 'byDefault';
 }
 
 /**
@@ -207,6 +216,70 @@ export interface ForeignKeyIR {
 
 	/** Delete behavior */
 	readonly onDelete?: OnDeleteAction;
+
+	/** Update behavior */
+	readonly onUpdate?: OnDeleteAction;
+
+	/** Whether this FK constraint is deferrable (DEFERRABLE INITIALLY DEFERRED) */
+	readonly deferred?: boolean;
+}
+
+/**
+ * CHECK constraint definition
+ */
+
+/**
+ * PostgreSQL ENUM type definition
+ */
+
+/**
+ * PostgreSQL sequence definition
+ */
+export interface SequenceIR {
+	/** Sequence name */
+	readonly name: string;
+	/** Start value */
+	readonly startWith?: number;
+	/** Increment step */
+	readonly incrementBy?: number;
+	/** Minimum value */
+	readonly minValue?: number;
+	/** Maximum value */
+	readonly maxValue?: number;
+	/** Whether to cycle */
+	readonly cycle?: boolean;
+	/** Schema name (if not default) */
+	readonly schema?: string;
+}
+
+export interface EnumIR {
+	/** Enum type name */
+	readonly name: string;
+
+	/** Ordered list of enum values */
+	readonly values: readonly string[];
+
+	/** Schema name (if not in default schema) */
+	readonly schema?: string;
+}
+export interface CheckConstraintIR {
+	/** Constraint name in database */
+	readonly name: string;
+
+	/** CHECK expression in canonical form (from pg_get_constraintdef) */
+	readonly expression: string;
+}
+
+/**
+ * Table partition configuration (parent table only).
+ * Child partition management is out of scope (DDL-PARTITION-MGMT).
+ */
+export interface PartitionIR {
+	/** Partition strategy */
+	readonly strategy: 'RANGE' | 'LIST' | 'HASH';
+
+	/** Partition key columns */
+	readonly columns: readonly string[];
 }
 
 /**
@@ -221,6 +294,24 @@ export interface IndexIR {
 
 	/** Whether this is a unique index */
 	readonly unique?: boolean;
+
+	/** Index access method (default: btree) */
+	readonly method?: string;
+
+	/** Partial index predicate (WHERE clause) */
+	readonly where?: string;
+
+	/** Expression-based index entries (used instead of/alongside columns) */
+	readonly expressions?: readonly string[];
+
+	/** Non-key columns to include (INCLUDE clause, PG11+) */
+	readonly include?: readonly string[];
+
+	/** Per-column operator class overrides (non-default only). Key = column name, value = opclass name */
+	readonly opclass?: Readonly<Record<string, string>>;
+
+	/** Index storage parameters (WITH clause). Key = param name, value = param value */
+	readonly with?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -242,12 +333,21 @@ export interface TableIR {
 	/** Index definitions */
 	readonly indexes: readonly IndexIR[];
 
+	/** CHECK constraints */
+	readonly checkConstraints?: readonly CheckConstraintIR[];
+
 	/**
 	 * Auto-generated pseudo-columns from self-referential FKs.
 	 * Each self-ref FK generates: parent/child roles + ascendant/descendant keywords.
 	 * For multi-FK tables, roles are scoped (e.g., manager.ascendant).
 	 */
 	readonly pseudoColumns?: readonly PseudoColumnMetadata[];
+
+	/** Table-level comment (COMMENT ON TABLE) */
+	readonly comment?: string;
+
+	/** Partition configuration (parent table). Child management deferred to DDL-PARTITION-MGMT. */
+	readonly partition?: PartitionIR;
 }
 
 /**
@@ -352,6 +452,15 @@ export interface ModelIR {
 
 	/** Relation definitions indexed by "source.name" */
 	readonly relations: ReadonlyMap<string, RelationIR>;
+
+	/** ENUM type definitions indexed by name */
+	readonly enums?: ReadonlyMap<string, EnumIR>;
+
+	/** Extension names to ensure (CREATE EXTENSION IF NOT EXISTS) */
+	readonly extensions?: readonly string[];
+
+	/** Sequence definitions */
+	readonly sequences?: ReadonlyMap<string, SequenceIR>;
 
 	// --- Helper Methods ---
 

@@ -2,7 +2,15 @@
  * DDL Generator Tests
  */
 
-import type { ForeignKeyIR, IndexIR, ModelIR, TableIR } from '@dbsp/core';
+import type {
+	ForeignKeyIR,
+	IndexIR,
+	ModelIR,
+	PartitionIR,
+	SequenceIR,
+	TableIR,
+} from '@dbsp/core';
+import { ModelIRImpl } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { generateDDL } from './ddl-generator.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
@@ -545,6 +553,71 @@ describe('DDL Generator', () => {
 			const autoIndex = ddl.find((stmt) => stmt.includes('idx_posts_user_id'));
 			expect(autoIndex).toBeUndefined();
 		});
+
+		describe('Index enhancements in DDL', () => {
+			it('should generate CREATE INDEX USING gin with opclass', () => {
+				const schema = {
+					tables: new Map([
+						[
+							'posts',
+							{
+								name: 'posts',
+								columns: [{ name: 'body', type: 'text', nullable: false }],
+								primaryKey: undefined,
+								foreignKeys: [],
+								indexes: [
+									{
+										name: 'idx_posts_body_gin',
+										columns: ['body'],
+										method: 'gin',
+										opclass: { body: 'gin_trgm_ops' },
+									} satisfies IndexIR,
+								],
+							} satisfies TableIR,
+						],
+					]),
+					relations: new Map(),
+				} as unknown as ModelIR;
+
+				const ddl = generateDDL(schema);
+				const idx = ddl.find((s) => s.includes('idx_posts_body_gin'));
+				expect(idx).toBeDefined();
+				expect(idx).toBe(
+					'CREATE INDEX "idx_posts_body_gin" ON "posts" USING gin ("body" gin_trgm_ops);',
+				);
+			});
+
+			it('should generate partial index with WHERE clause', () => {
+				const schema = {
+					tables: new Map([
+						[
+							'users',
+							{
+								name: 'users',
+								columns: [{ name: 'email', type: 'string', nullable: false }],
+								primaryKey: undefined,
+								foreignKeys: [],
+								indexes: [
+									{
+										name: 'idx_users_active_email',
+										columns: ['email'],
+										where: 'active = true',
+									} satisfies IndexIR,
+								],
+							} satisfies TableIR,
+						],
+					]),
+					relations: new Map(),
+				} as unknown as ModelIR;
+
+				const ddl = generateDDL(schema);
+				const idx = ddl.find((s) => s.includes('idx_users_active_email'));
+				expect(idx).toBeDefined();
+				expect(idx).toBe(
+					'CREATE INDEX "idx_users_active_email" ON "users" ("email") WHERE active = true;',
+				);
+			});
+		});
 	});
 
 	describe('DROP TABLE', () => {
@@ -728,5 +801,676 @@ describe('DDL Generator', () => {
 			expect(alterTableCount).toBe(1);
 			expect(createIndexCount).toBe(2);
 		});
+	});
+});
+
+describe('CHECK constraints in DDL', () => {
+	it('should emit CHECK constraints after table creation', () => {
+		const schema = {
+			tables: new Map([
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								autoIncrement: true,
+							},
+							{ name: 'age', type: 'integer', nullable: false },
+						],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [
+							{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+						],
+					} satisfies TableIR,
+				],
+			]),
+			relations: new Map(),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema);
+		// CREATE TABLE comes first
+		expect(stmts[0]).toContain('CREATE TABLE');
+		// CHECK constraint statement comes after
+		const checkStmt = stmts.find((s) => s.includes('CHECK'));
+		expect(checkStmt).toBe(
+			'ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0));',
+		);
+	});
+
+	it('should emit no CHECK statements when table has no checkConstraints', () => {
+		const schema = {
+			tables: new Map([
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								autoIncrement: true,
+							},
+						],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+					} satisfies TableIR,
+				],
+			]),
+			relations: new Map(),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema);
+		const checkStmt = stmts.find((s) => s.includes('CHECK'));
+		expect(checkStmt).toBeUndefined();
+	});
+
+	it('should emit CHECK constraints after FK constraints and before indexes', () => {
+		const schema = {
+			tables: new Map([
+				[
+					'orders',
+					{
+						name: 'orders',
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								autoIncrement: true,
+							},
+							{ name: 'amount', type: 'decimal', nullable: false },
+							{ name: 'user_id', type: 'integer', nullable: false },
+						],
+						primaryKey: 'id',
+						foreignKeys: [
+							{
+								columns: ['user_id'],
+								references: { table: 'users', columns: ['id'] },
+							} satisfies ForeignKeyIR,
+						],
+						indexes: [
+							{
+								name: 'idx_orders_amount',
+								columns: ['amount'],
+								unique: false,
+							} satisfies IndexIR,
+						],
+						checkConstraints: [
+							{
+								name: 'orders_amount_check',
+								expression: 'CHECK ((amount > 0))',
+							},
+						],
+					} satisfies TableIR,
+				],
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								autoIncrement: true,
+							},
+						],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+					} satisfies TableIR,
+				],
+			]),
+			relations: new Map(),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema);
+		const createIdx = stmts.findIndex((s) =>
+			s.includes('CREATE TABLE "orders"'),
+		);
+		const fkIdx = stmts.findIndex(
+			(s) => s.includes('ADD CONSTRAINT') && s.includes('FOREIGN KEY'),
+		);
+		const checkIdx = stmts.findIndex((s) => s.includes('orders_amount_check'));
+		const indexIdx = stmts.findIndex(
+			(s) => s.includes('CREATE') && s.includes('INDEX'),
+		);
+
+		expect(createIdx).toBeGreaterThanOrEqual(0);
+		expect(fkIdx).toBeGreaterThan(createIdx);
+		expect(checkIdx).toBeGreaterThan(fkIdx);
+		expect(indexIdx).toBeGreaterThan(fkIdx);
+	});
+});
+
+describe('ENUM types in DDL', () => {
+	it('should emit CREATE TYPE before CREATE TABLE', () => {
+		const schema = {
+			tables: new Map([
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						foreignKeys: [],
+						indexes: [],
+					} satisfies import('@dbsp/types').TableIR,
+				],
+			]),
+			relations: new Map(),
+			enums: new Map([
+				['status', { name: 'status', values: ['active', 'inactive'] }],
+			]),
+			getTable: () => undefined,
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema);
+		const typeIdx = stmts.findIndex((s) => s.includes('CREATE TYPE'));
+		const tableIdx = stmts.findIndex((s) => s.includes('CREATE TABLE'));
+		expect(typeIdx).toBeGreaterThanOrEqual(0);
+		expect(typeIdx).toBeLessThan(tableIdx);
+	});
+
+	it('should emit correct CREATE TYPE SQL', () => {
+		const schema = {
+			tables: new Map(),
+			relations: new Map(),
+			enums: new Map([
+				[
+					'status',
+					{ name: 'status', values: ['active', 'inactive', 'pending'] },
+				],
+			]),
+			getTable: () => undefined,
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema);
+		expect(stmts).toContain(
+			"CREATE TYPE \"status\" AS ENUM ('active', 'inactive', 'pending');",
+		);
+	});
+
+	it('should emit schema-qualified CREATE TYPE when schemaName is set', () => {
+		const schema = {
+			tables: new Map(),
+			relations: new Map(),
+			enums: new Map([['role', { name: 'role', values: ['admin', 'user'] }]]),
+			getTable: () => undefined,
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema, { schemaName: 'public' });
+		expect(stmts).toContain(
+			'CREATE TYPE "public"."role" AS ENUM (\'admin\', \'user\');',
+		);
+	});
+
+	it('should skip ENUM pass when schema has no enums', () => {
+		const schema = {
+			tables: new Map([
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						foreignKeys: [],
+						indexes: [],
+					} satisfies import('@dbsp/types').TableIR,
+				],
+			]),
+			relations: new Map(),
+			getTable: () => undefined,
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema);
+		expect(stmts.some((s) => s.includes('CREATE TYPE'))).toBe(false);
+	});
+});
+
+// ============================================================================
+// FK Enhancements: onUpdate + deferred in DDL
+// ============================================================================
+
+describe('FK enhancements in DDL', () => {
+	function makeSimpleSchema(fk: ForeignKeyIR): ModelIR {
+		const usersTable: TableIR = {
+			name: 'users',
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+		};
+		const ordersTable: TableIR = {
+			name: 'orders',
+			columns: [{ name: 'user_id', type: 'integer', nullable: false }],
+			foreignKeys: [fk],
+			indexes: [],
+		};
+		return {
+			tables: new Map([
+				['users', usersTable],
+				['orders', ordersTable],
+			]),
+			relations: new Map(),
+			enums: new Map(),
+			getTable: (name) =>
+				[usersTable, ordersTable].find((t) => t.name === name),
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		} as unknown as ModelIR;
+	}
+
+	it('should emit ON UPDATE CASCADE', () => {
+		const schema = makeSimpleSchema({
+			columns: ['user_id'],
+			references: { table: 'users', columns: ['id'] },
+			onUpdate: 'CASCADE',
+		});
+		const stmts = generateDDL(schema);
+		const fkStmt = stmts.find((s) => s.includes('FOREIGN KEY'));
+		expect(fkStmt).toBeDefined();
+		expect(fkStmt).toContain('ON UPDATE CASCADE');
+	});
+
+	it('should emit DEFERRABLE INITIALLY DEFERRED', () => {
+		const schema = makeSimpleSchema({
+			columns: ['user_id'],
+			references: { table: 'users', columns: ['id'] },
+			deferred: true,
+		});
+		const stmts = generateDDL(schema);
+		const fkStmt = stmts.find((s) => s.includes('FOREIGN KEY'));
+		expect(fkStmt).toBeDefined();
+		expect(fkStmt).toContain('DEFERRABLE INITIALLY DEFERRED');
+	});
+
+	it('should NOT emit ON UPDATE when absent', () => {
+		const schema = makeSimpleSchema({
+			columns: ['user_id'],
+			references: { table: 'users', columns: ['id'] },
+		});
+		const stmts = generateDDL(schema);
+		const fkStmt = stmts.find((s) => s.includes('FOREIGN KEY'));
+		expect(fkStmt).toBeDefined();
+		expect(fkStmt).not.toContain('ON UPDATE');
+		expect(fkStmt).not.toContain('DEFERRABLE');
+	});
+});
+
+// ============================================================================
+// Block 5: Column Enhancements in DDL
+// ============================================================================
+
+describe('Column enhancements in DDL', () => {
+	function makeSchemaWithTable(table: import('@dbsp/types').TableIR): ModelIR {
+		return {
+			tables: new Map([[table.name, table]]),
+			relations: new Map(),
+			enums: new Map(),
+			getTable: (name) => (name === table.name ? table : undefined),
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		} as unknown as ModelIR;
+	}
+
+	it('should emit COLLATE in column definition', () => {
+		const table: import('@dbsp/types').TableIR = {
+			name: 'users',
+			columns: [
+				{ name: 'name', type: 'string', nullable: false, collation: 'en_US' },
+			],
+			foreignKeys: [],
+			indexes: [],
+		};
+		const stmts = generateDDL(makeSchemaWithTable(table));
+		const createStmt = stmts.find((s) => s.includes('CREATE TABLE'));
+		expect(createStmt).toBeDefined();
+		expect(createStmt).toContain('COLLATE "en_US"');
+	});
+
+	it('should emit GENERATED ALWAYS AS IDENTITY', () => {
+		const table: import('@dbsp/types').TableIR = {
+			name: 'users',
+			columns: [
+				{ name: 'id', type: 'integer', nullable: false, identity: 'always' },
+			],
+			foreignKeys: [],
+			indexes: [],
+		};
+		const stmts = generateDDL(makeSchemaWithTable(table));
+		const createStmt = stmts.find((s) => s.includes('CREATE TABLE'));
+		expect(createStmt).toBeDefined();
+		expect(createStmt).toContain('GENERATED ALWAYS AS IDENTITY');
+	});
+
+	it('should emit GENERATED BY DEFAULT AS IDENTITY', () => {
+		const table: import('@dbsp/types').TableIR = {
+			name: 'users',
+			columns: [
+				{ name: 'id', type: 'integer', nullable: false, identity: 'byDefault' },
+			],
+			foreignKeys: [],
+			indexes: [],
+		};
+		const stmts = generateDDL(makeSchemaWithTable(table));
+		const createStmt = stmts.find((s) => s.includes('CREATE TABLE'));
+		expect(createStmt).toBeDefined();
+		expect(createStmt).toContain('GENERATED BY DEFAULT AS IDENTITY');
+	});
+
+	it('should emit COMMENT ON TABLE after indexes', () => {
+		const table: import('@dbsp/types').TableIR = {
+			name: 'users',
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+			foreignKeys: [],
+			indexes: [{ name: 'idx_users_id', columns: ['id'] }],
+			comment: 'User accounts',
+		};
+		const stmts = generateDDL(makeSchemaWithTable(table));
+		const commentIdx = stmts.findIndex((s) => s.includes('COMMENT ON TABLE'));
+		const indexIdx = stmts.findIndex((s) => s.includes('CREATE INDEX'));
+		expect(commentIdx).toBeGreaterThan(-1);
+		expect(commentIdx).toBeGreaterThan(indexIdx);
+		expect(stmts[commentIdx]).toMatch(
+			/COMMENT ON TABLE "users" IS 'User accounts'/,
+		);
+	});
+
+	it('should emit COMMENT ON COLUMN', () => {
+		const table: import('@dbsp/types').TableIR = {
+			name: 'users',
+			columns: [
+				{
+					name: 'email',
+					type: 'string',
+					nullable: false,
+					comment: 'Primary email',
+				},
+			],
+			foreignKeys: [],
+			indexes: [],
+		};
+		const stmts = generateDDL(makeSchemaWithTable(table));
+		const commentStmt = stmts.find((s) => s.includes('COMMENT ON COLUMN'));
+		expect(commentStmt).toBeDefined();
+		expect(commentStmt).toMatch(
+			/COMMENT ON COLUMN "users"\."email" IS 'Primary email'/,
+		);
+	});
+
+	it('should escape single quotes in COMMENT', () => {
+		const table: import('@dbsp/types').TableIR = {
+			name: 'users',
+			columns: [],
+			foreignKeys: [],
+			indexes: [],
+			comment: "O'Brien's table",
+		};
+		const stmts = generateDDL(makeSchemaWithTable(table));
+		const commentStmt = stmts.find((s) => s.includes('COMMENT ON TABLE'));
+		expect(commentStmt).toContain("O''Brien''s table");
+	});
+
+	it('should not emit COMMENT statements when none are present', () => {
+		const table: import('@dbsp/types').TableIR = {
+			name: 'users',
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+			foreignKeys: [],
+			indexes: [],
+		};
+		const stmts = generateDDL(makeSchemaWithTable(table));
+		expect(stmts.some((s) => s.includes('COMMENT ON'))).toBe(false);
+	});
+});
+
+// ============================================================================
+// Extensions and Sequences in DDL
+// ============================================================================
+
+describe('Extensions and sequences in DDL', () => {
+	it('should emit CREATE EXTENSION before tables', () => {
+		const model = new ModelIRImpl(
+			new Map([
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+					} satisfies TableIR,
+				],
+			]),
+			new Map(),
+			undefined,
+			['uuid-ossp'],
+		);
+		const stmts = generateDDL(model);
+		const extIdx = stmts.findIndex((s) => s.includes('CREATE EXTENSION'));
+		const tableIdx = stmts.findIndex((s) => s.includes('CREATE TABLE'));
+		expect(extIdx).toBeGreaterThanOrEqual(0);
+		expect(tableIdx).toBeGreaterThan(extIdx);
+	});
+
+	it('should emit correct CREATE EXTENSION statement', () => {
+		const model = new ModelIRImpl(new Map(), new Map(), undefined, [
+			'pgcrypto',
+			'uuid-ossp',
+		]);
+		const stmts = generateDDL(model);
+		expect(stmts).toContain('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
+		expect(stmts).toContain('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";');
+	});
+
+	it('should emit CREATE SEQUENCE before tables', () => {
+		const seq: SequenceIR = { name: 'order_seq', startWith: 1, incrementBy: 1 };
+		const model = new ModelIRImpl(
+			new Map([
+				[
+					'orders',
+					{
+						name: 'orders',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+					} satisfies TableIR,
+				],
+			]),
+			new Map(),
+			undefined,
+			undefined,
+			new Map([['order_seq', seq]]),
+		);
+		const stmts = generateDDL(model);
+		const seqIdx = stmts.findIndex((s) => s.includes('CREATE SEQUENCE'));
+		const tableIdx = stmts.findIndex((s) => s.includes('CREATE TABLE'));
+		expect(seqIdx).toBeGreaterThanOrEqual(0);
+		expect(tableIdx).toBeGreaterThan(seqIdx);
+	});
+
+	it('should emit CREATE SEQUENCE with all options', () => {
+		const seq: SequenceIR = {
+			name: 'order_seq',
+			startWith: 100,
+			incrementBy: 5,
+			minValue: 1,
+			maxValue: 9999,
+			cycle: true,
+		};
+		const model = new ModelIRImpl(
+			new Map(),
+			new Map(),
+			undefined,
+			undefined,
+			new Map([['order_seq', seq]]),
+		);
+		const stmts = generateDDL(model);
+		expect(stmts).toContain(
+			'CREATE SEQUENCE "order_seq" START WITH 100 INCREMENT BY 5 MINVALUE 1 MAXVALUE 9999 CYCLE;',
+		);
+	});
+
+	it('should qualify sequence name with schemaName', () => {
+		const seq: SequenceIR = { name: 'order_seq' };
+		const model = new ModelIRImpl(
+			new Map(),
+			new Map(),
+			undefined,
+			undefined,
+			new Map([['order_seq', seq]]),
+		);
+		const stmts = generateDDL(model, { schemaName: 'myschema' });
+		expect(stmts.some((s) => s.includes('"myschema"."order_seq"'))).toBe(true);
+	});
+
+	it('should emit extensions before sequences before tables', () => {
+		const seq: SequenceIR = { name: 'order_seq' };
+		const model = new ModelIRImpl(
+			new Map([
+				[
+					'orders',
+					{
+						name: 'orders',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+					} satisfies TableIR,
+				],
+			]),
+			new Map(),
+			undefined,
+			['uuid-ossp'],
+			new Map([['order_seq', seq]]),
+		);
+		const stmts = generateDDL(model);
+		const extIdx = stmts.findIndex((s) => s.includes('CREATE EXTENSION'));
+		const seqIdx = stmts.findIndex((s) => s.includes('CREATE SEQUENCE'));
+		const tableIdx = stmts.findIndex((s) => s.includes('CREATE TABLE'));
+		expect(extIdx).toBeGreaterThanOrEqual(0);
+		expect(seqIdx).toBeGreaterThanOrEqual(0);
+		expect(extIdx).toBeLessThan(seqIdx);
+		expect(seqIdx).toBeLessThan(tableIdx);
+	});
+
+	it('should skip extensions/sequences passes when not present', () => {
+		const table: TableIR = {
+			name: 'users',
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+			foreignKeys: [],
+			indexes: [],
+		};
+		const model = new ModelIRImpl(new Map([['users', table]]), new Map());
+		const stmts = generateDDL(model);
+		expect(stmts.some((s) => s.includes('CREATE EXTENSION'))).toBe(false);
+		expect(stmts.some((s) => s.includes('CREATE SEQUENCE'))).toBe(false);
+	});
+});
+
+// ============================================================================
+// Partitioning DDL Tests
+// ============================================================================
+
+describe('Partitioning in DDL', () => {
+	function makePartitionedModel(
+		tableName: string,
+		partition: PartitionIR,
+	): ModelIR {
+		const table: TableIR = {
+			name: tableName,
+			columns: [
+				{ name: 'id', type: 'integer', nullable: false },
+				{ name: 'created_at', type: 'timestamp', nullable: false },
+			],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+			partition,
+		};
+		return new ModelIRImpl(new Map([[tableName, table]]), new Map());
+	}
+
+	it('should emit PARTITION BY RANGE in CREATE TABLE', () => {
+		const model = makePartitionedModel('events', {
+			strategy: 'RANGE',
+			columns: ['created_at'],
+		});
+		const stmts = generateDDL(model);
+		const createSql = stmts.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toBeDefined();
+		expect(createSql).toContain('PARTITION BY RANGE ("created_at")');
+		expect(createSql).toMatch(/\)\s+PARTITION BY RANGE/);
+	});
+
+	it('should emit PARTITION BY LIST in CREATE TABLE', () => {
+		const model = makePartitionedModel('orders', {
+			strategy: 'LIST',
+			columns: ['region'],
+		});
+		const stmts = generateDDL(model);
+		const createSql = stmts.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toContain('PARTITION BY LIST ("region")');
+	});
+
+	it('should emit PARTITION BY HASH in CREATE TABLE', () => {
+		const model = makePartitionedModel('logs', {
+			strategy: 'HASH',
+			columns: ['id'],
+		});
+		const stmts = generateDDL(model);
+		const createSql = stmts.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toContain('PARTITION BY HASH ("id")');
+	});
+
+	it('should not emit PARTITION BY for non-partitioned tables', () => {
+		const table: TableIR = {
+			name: 'users',
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+			foreignKeys: [],
+			indexes: [],
+		};
+		const model = new ModelIRImpl(new Map([['users', table]]), new Map());
+		const stmts = generateDDL(model);
+		const createSql = stmts.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).not.toContain('PARTITION BY');
+	});
+
+	it('should support multi-column partition keys', () => {
+		const model = makePartitionedModel('sales', {
+			strategy: 'RANGE',
+			columns: ['year', 'month'],
+		});
+		const stmts = generateDDL(model);
+		const createSql = stmts.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toContain('PARTITION BY RANGE ("year", "month")');
 	});
 });
