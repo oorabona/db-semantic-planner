@@ -79,6 +79,17 @@ export interface WhereInIntent {
 	readonly subquery?: QueryIntent;
 }
 
+
+/**
+ * Array membership filter using PostgreSQL ANY() operator.
+ * Compiles to: "col" = ANY($N::type[])
+ */
+export interface WhereAnyIntent {
+	readonly kind: 'any';
+	readonly field: string;
+	readonly values: readonly unknown[];
+}
+
 /**
  * Range operator for PostgreSQL range types.
  * - overlaps: && (ranges have common points)
@@ -294,6 +305,7 @@ export type WhereIntent =
 	| WhereComparisonIntent
 	| WhereLikeIntent
 	| WhereInIntent
+	| WhereAnyIntent
 	| WhereNullIntent
 	| WhereRangeIntent
 	| WhereAndIntent

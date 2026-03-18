@@ -46,6 +46,7 @@ export {
 	gt,
 	gte,
 	// Array
+	any,
 	inArray,
 	// Type guards
 	isDistinctField,
