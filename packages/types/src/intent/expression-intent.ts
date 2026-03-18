@@ -105,6 +105,8 @@ export interface AggregateExpressionIntent {
 	readonly distinct?: boolean | undefined;
 	/** Extra arguments for multi-arg aggregates like string_agg(field, separator) */
 	readonly extraArgs?: readonly unknown[] | undefined;
+	/** FILTER (WHERE ...) clause for conditional aggregation */
+	readonly filter?: WhereIntent | undefined;
 }
 
 /**
