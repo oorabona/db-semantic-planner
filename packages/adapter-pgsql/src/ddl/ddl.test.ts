@@ -1037,3 +1037,76 @@ describe('ENUM types in DDL', () => {
 		expect(stmts.some((s) => s.includes('CREATE TYPE'))).toBe(false);
 	});
 });
+
+
+// ============================================================================
+// FK Enhancements: onUpdate + deferred in DDL
+// ============================================================================
+
+describe('FK enhancements in DDL', () => {
+	function makeSimpleSchema(fk: ForeignKeyIR): ModelIR {
+		const usersTable: TableIR = {
+			name: 'users',
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+		};
+		const ordersTable: TableIR = {
+			name: 'orders',
+			columns: [{ name: 'user_id', type: 'integer', nullable: false }],
+			foreignKeys: [fk],
+			indexes: [],
+		};
+		return {
+			tables: new Map([
+				['users', usersTable],
+				['orders', ordersTable],
+			]),
+			relations: new Map(),
+			enums: new Map(),
+			getTable: (name) =>
+				[usersTable, ordersTable].find((t) => t.name === name),
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		} as unknown as ModelIR;
+	}
+
+	it('should emit ON UPDATE CASCADE', () => {
+		const schema = makeSimpleSchema({
+			columns: ['user_id'],
+			references: { table: 'users', columns: ['id'] },
+			onUpdate: 'CASCADE',
+		});
+		const stmts = generateDDL(schema);
+		const fkStmt = stmts.find((s) => s.includes('FOREIGN KEY'));
+		expect(fkStmt).toBeDefined();
+		expect(fkStmt).toContain('ON UPDATE CASCADE');
+	});
+
+	it('should emit DEFERRABLE INITIALLY DEFERRED', () => {
+		const schema = makeSimpleSchema({
+			columns: ['user_id'],
+			references: { table: 'users', columns: ['id'] },
+			deferred: true,
+		});
+		const stmts = generateDDL(schema);
+		const fkStmt = stmts.find((s) => s.includes('FOREIGN KEY'));
+		expect(fkStmt).toBeDefined();
+		expect(fkStmt).toContain('DEFERRABLE INITIALLY DEFERRED');
+	});
+
+	it('should NOT emit ON UPDATE when absent', () => {
+		const schema = makeSimpleSchema({
+			columns: ['user_id'],
+			references: { table: 'users', columns: ['id'] },
+		});
+		const stmts = generateDDL(schema);
+		const fkStmt = stmts.find((s) => s.includes('FOREIGN KEY'));
+		expect(fkStmt).toBeDefined();
+		expect(fkStmt).not.toContain('ON UPDATE');
+		expect(fkStmt).not.toContain('DEFERRABLE');
+	});
+});

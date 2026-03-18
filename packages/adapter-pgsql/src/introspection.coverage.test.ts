@@ -1064,7 +1064,8 @@ describe('introspection — FK handling and delete rules', () => {
 			{ rows: [] },
 		);
 		const model = await introspect(pool);
-		expect(model.getTable('b')?.foreignKeys[0]?.onDelete).toBe('NO ACTION');
+		// NO ACTION is the default — omitted from ForeignKeyIR when it's the default
+		expect(model.getTable('b')?.foreignKeys[0]?.onDelete).toBeUndefined();
 	});
 
 	it('handles composite FK (multi-column)', async () => {

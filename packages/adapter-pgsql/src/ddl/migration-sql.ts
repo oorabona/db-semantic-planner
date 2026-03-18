@@ -58,6 +58,8 @@ export interface MigrationSQLOptions {
 	readonly schemaName?: string;
 	/** Whether to include destructive changes (drops) */
 	readonly includeDestructive?: boolean;
+	/** Automatically create indexes on FK columns for new tables (default: true) */
+	readonly fkAutoIndex?: boolean;
 }
 
 // ============================================================================
@@ -126,6 +128,34 @@ export function generateMigrationSQL(
 		for (const change of phase) {
 			const sql = changeToUpSQL(change, schemaName);
 			if (sql) statements.push(sql);
+		}
+	}
+
+	// FK auto-indexes for new tables (single-column FKs without explicit index)
+	if (options?.fkAutoIndex !== false) {
+		for (const change of changes) {
+			if (change.kind === 'create_table') {
+				const table = change.meta?.table as TableIR | undefined;
+				if (!table) continue;
+				const explicitIndexColumns = new Set(
+					table.indexes.flatMap((idx) =>
+						idx.columns.length === 1 ? idx.columns : [],
+					),
+				);
+				for (const fk of table.foreignKeys) {
+					const fkCol = fk.columns[0];
+					if (
+						fk.columns.length === 1 &&
+						fkCol &&
+						!explicitIndexColumns.has(fkCol)
+					) {
+						const indexName = q(idxName(table.name, [fkCol]));
+						statements.push(
+							`CREATE INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(table.name, schemaName)} (${q(fkCol)});`,
+						);
+					}
+				}
+			}
 		}
 	}
 
@@ -595,7 +625,11 @@ function generateAddFKSQL(
 	const onDelete = fk.onDelete
 		? ` ON DELETE ${mapOnDeleteAction(fk.onDelete)}`
 		: '';
-	return `ALTER TABLE ${qualTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete};`;
+	const onUpdate = fk.onUpdate
+		? ` ON UPDATE ${mapOnDeleteAction(fk.onUpdate)}`
+		: '';
+	const deferred = fk.deferred ? ' DEFERRABLE INITIALLY DEFERRED' : '';
+	return `ALTER TABLE ${qualTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete}${onUpdate}${deferred};`;
 }
 
 function formatDefault(value: unknown): string {

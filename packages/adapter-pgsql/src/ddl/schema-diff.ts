@@ -511,16 +511,24 @@ function compareForeignKeys(
 				meta: { fk },
 			});
 		} else {
-			// FK exists in both — check onDelete action
+			// FK exists in both — check onDelete, onUpdate, and deferred
 			const dbFK = dbFKMap.get(key)!;
 			const schemaOnDelete = fk.onDelete ?? 'NO ACTION';
 			const dbOnDelete = dbFK.onDelete ?? 'NO ACTION';
-			if (schemaOnDelete !== dbOnDelete) {
+			const schemaOnUpdate = fk.onUpdate ?? 'NO ACTION';
+			const dbOnUpdate = dbFK.onUpdate ?? 'NO ACTION';
+			const schemaDeferred = fk.deferred ?? false;
+			const dbDeferred = dbFK.deferred ?? false;
+			if (
+				schemaOnDelete !== dbOnDelete ||
+				schemaOnUpdate !== dbOnUpdate ||
+				schemaDeferred !== dbDeferred
+			) {
 				changes.push({
 					kind: 'alter_foreign_key',
 					table: schema.name,
 					destructive: false,
-					details: `Change onDelete of FK (${fk.columns.join(', ')}) from ${dbOnDelete} to ${schemaOnDelete}`,
+					details: `Alter FK (${fk.columns.join(', ')}) — onDelete/onUpdate/deferred changed`,
 					meta: { fk, previousOnDelete: dbOnDelete, oldFk: dbFK },
 				});
 			}

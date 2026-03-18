@@ -327,12 +327,16 @@ function generateAlterTableAddFK(
 		.map((col) => quoteIdentifier(naming.toDatabase(col)))
 		.join(', ');
 
-	// ON DELETE action
+	// ON DELETE / ON UPDATE / DEFERRABLE actions
 	const onDelete = fk.onDelete
 		? ` ON DELETE ${mapOnDeleteAction(fk.onDelete)}`
 		: '';
+	const onUpdate = fk.onUpdate
+		? ` ON UPDATE ${mapOnDeleteAction(fk.onUpdate)}`
+		: '';
+	const deferred = fk.deferred ? ' DEFERRABLE INITIALLY DEFERRED' : '';
 
-	return `ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete};`;
+	return `ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete}${onUpdate}${deferred};`;
 }
 
 // ============================================================================

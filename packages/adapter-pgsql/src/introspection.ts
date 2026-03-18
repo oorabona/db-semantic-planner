@@ -84,6 +84,9 @@ interface RawForeignKey {
 	target_table: string;
 	target_column: string;
 	delete_rule: string;
+	update_rule: string;
+	is_deferrable: string;
+	initially_deferred: string;
 }
 
 interface RawIndex {
@@ -150,7 +153,10 @@ export async function introspect(
 		   kcu.column_name AS source_column,
 		   ccu.table_name AS target_table,
 		   ccu.column_name AS target_column,
-		   rc.delete_rule
+		   rc.delete_rule,
+		   rc.update_rule,
+		   tc.is_deferrable,
+		   tc.initially_deferred
 		 FROM information_schema.table_constraints tc
 		 JOIN information_schema.key_column_usage kcu
 		   ON tc.constraint_name = kcu.constraint_name
@@ -322,6 +328,8 @@ export async function introspect(
 			cols: string[];
 			refs: string[];
 			deleteRule: string;
+			updateRule: string;
+			deferred: boolean;
 		}
 	>();
 	for (const fk of fksResult.rows) {
@@ -336,6 +344,9 @@ export async function introspect(
 				cols: [fk.source_column],
 				refs: [fk.target_column],
 				deleteRule: fk.delete_rule,
+				updateRule: fk.update_rule,
+				deferred:
+					fk.is_deferrable === 'YES' && fk.initially_deferred === 'YES',
 			});
 		}
 	}
@@ -364,10 +375,14 @@ export async function introspect(
 			if (fk.source !== tableName) continue;
 			// Only include FK if target table is in our filtered set
 			if (!tableNames.includes(fk.target)) continue;
+			const onDelete = mapDeleteRule(fk.deleteRule);
+			const onUpdate = mapDeleteRule(fk.updateRule);
 			foreignKeys.push({
 				columns: fk.cols,
 				references: { table: fk.target, columns: fk.refs },
-				onDelete: mapDeleteRule(fk.deleteRule),
+				...(onDelete !== 'NO ACTION' ? { onDelete } : {}),
+				...(onUpdate !== 'NO ACTION' ? { onUpdate } : {}),
+				...(fk.deferred ? { deferred: true } : {}),
 			});
 		}
 

@@ -1958,3 +1958,128 @@ describe('ENUM types', () => {
 		});
 	});
 });
+
+
+// ============================================================================
+// FK Enhancements: onUpdate + deferred + auto-index
+// ============================================================================
+
+describe('FK enhancements — migration SQL', () => {
+	const baseFk: ForeignKeyIR = {
+		columns: ['user_id'],
+		references: { table: 'users', columns: ['id'] },
+	};
+
+	it('should generate ON UPDATE CASCADE', () => {
+		const diff = makeDiff([{
+			kind: 'add_foreign_key',
+			table: 'orders',
+			destructive: false,
+			details: '',
+			meta: { fk: { ...baseFk, onUpdate: 'CASCADE' } },
+		}]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toContain('ON UPDATE CASCADE');
+	});
+
+	it('should generate DEFERRABLE INITIALLY DEFERRED', () => {
+		const diff = makeDiff([{
+			kind: 'add_foreign_key',
+			table: 'orders',
+			destructive: false,
+			details: '',
+			meta: { fk: { ...baseFk, deferred: true } },
+		}]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toContain('DEFERRABLE INITIALLY DEFERRED');
+	});
+
+	it('should generate combined ON DELETE + ON UPDATE + DEFERRABLE', () => {
+		const diff = makeDiff([{
+			kind: 'add_foreign_key',
+			table: 'orders',
+			destructive: false,
+			details: '',
+			meta: { fk: { ...baseFk, onDelete: 'CASCADE', onUpdate: 'SET NULL', deferred: true } },
+		}]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toContain('ON DELETE CASCADE');
+		expect(sql[0]).toContain('ON UPDATE SET NULL');
+		expect(sql[0]).toContain('DEFERRABLE INITIALLY DEFERRED');
+	});
+
+	it('should NOT emit ON UPDATE when onUpdate is absent', () => {
+		const diff = makeDiff([{
+			kind: 'add_foreign_key',
+			table: 'orders',
+			destructive: false,
+			details: '',
+			meta: { fk: baseFk },
+		}]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).not.toContain('ON UPDATE');
+		expect(sql[0]).not.toContain('DEFERRABLE');
+	});
+
+	it('should generate FK auto-index for new tables', () => {
+		const table = makeTable('orders', [
+			makeCol({ name: 'user_id', type: 'integer' }),
+		]);
+		const tableWithFk: TableIR = {
+			...table,
+			foreignKeys: [baseFk],
+		};
+		const diff = makeDiff([{
+			kind: 'create_table',
+			table: 'orders',
+			destructive: false,
+			details: '',
+			meta: { table: tableWithFk },
+		}]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql.some((s) => s.includes('CREATE INDEX') && s.includes('"user_id"'))).toBe(true);
+	});
+
+	it('should NOT generate FK auto-index when fkAutoIndex=false', () => {
+		const table = makeTable('orders', [
+			makeCol({ name: 'user_id', type: 'integer' }),
+		]);
+		const tableWithFk: TableIR = {
+			...table,
+			foreignKeys: [baseFk],
+		};
+		const diff = makeDiff([{
+			kind: 'create_table',
+			table: 'orders',
+			destructive: false,
+			details: '',
+			meta: { table: tableWithFk },
+		}]);
+		const sql = generateMigrationSQL(diff, { fkAutoIndex: false });
+		expect(sql.some((s) => s.includes('CREATE INDEX') && s.includes('"user_id"'))).toBe(false);
+	});
+
+	it('should NOT generate FK auto-index when explicit index covers the FK column', () => {
+		const table = makeTable('orders', [
+			makeCol({ name: 'user_id', type: 'integer' }),
+		]);
+		const tableWithFk: TableIR = {
+			...table,
+			foreignKeys: [baseFk],
+			indexes: [{ name: 'idx_orders_user_id', columns: ['user_id'] }],
+		};
+		const diff = makeDiff([{
+			kind: 'create_table',
+			table: 'orders',
+			destructive: false,
+			details: '',
+			meta: { table: tableWithFk },
+		}]);
+		const sql = generateMigrationSQL(diff);
+		const autoIndexCount = sql.filter((s) =>
+			s.includes('CREATE INDEX') && s.includes('"user_id"'),
+		).length;
+		// Only the explicit index from create_index phase (none here), no duplicates
+		expect(autoIndexCount).toBe(0);
+	});
+});

@@ -207,6 +207,12 @@ export interface ForeignKeyIR {
 
 	/** Delete behavior */
 	readonly onDelete?: OnDeleteAction;
+
+	/** Update behavior */
+	readonly onUpdate?: OnDeleteAction;
+
+	/** Whether this FK constraint is deferrable (DEFERRABLE INITIALLY DEFERRED) */
+	readonly deferred?: boolean;
 }
 
 /**
