@@ -10,6 +10,7 @@
 import type { DialectCapabilities } from './dialects.js';
 import type {
 	BatchUpdateIntent,
+	CteQueryIntent,
 	DeleteIntent,
 	InsertFromIntent,
 	InsertIntent,
@@ -308,6 +309,9 @@ export interface CompilingAdapter extends BaseAdapter {
 		model: ModelIR,
 		options?: CompileOptions,
 	): CompiledQuery;
+
+	/** Compile a CTE query backed by unnest() arrays (BATCH-001). */
+	compileCteQuery(intent: CteQueryIntent, options?: CompileOptions): CompiledQuery;
 
 	/** Create a dump for observability. */
 	createDump(plan: PlanReport, query: CompiledQuery, meta?: DumpMeta): Dump;
