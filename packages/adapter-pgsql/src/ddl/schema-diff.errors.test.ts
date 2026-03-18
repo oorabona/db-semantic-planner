@@ -268,7 +268,7 @@ describe('compareSchemata — edge cases', () => {
 
 			const change = findChange(diff.changes, 'alter_foreign_key');
 			expect(change).toBeDefined();
-			expect(change!.details).toContain('from NO ACTION to CASCADE');
+			expect(change!.details).toContain('onDelete/onUpdate/deferred changed');
 			expect(change!.meta).toEqual(
 				expect.objectContaining({ previousOnDelete: 'NO ACTION' }),
 			);
@@ -331,7 +331,7 @@ describe('compareSchemata — edge cases', () => {
 
 			const change = findChange(diff.changes, 'alter_foreign_key');
 			expect(change).toBeDefined();
-			expect(change!.details).toContain('from SET NULL to RESTRICT');
+			expect(change!.details).toContain('onDelete/onUpdate/deferred changed');
 		});
 
 		it('should produce no change when schema has NO ACTION explicitly and db has no onDelete', () => {

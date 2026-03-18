@@ -1575,3 +1575,72 @@ describe('ENUM types', () => {
 		expect(diff.hasDestructive).toBe(true);
 	});
 });
+
+
+// ============================================================================
+// FK Enhancements: onUpdate + deferred
+// ============================================================================
+
+describe('FK enhancements — compareForeignKeys', () => {
+	const baseFk: ForeignKeyIR = {
+		columns: ['user_id'],
+		references: { table: 'users', columns: ['id'] },
+	};
+	const usersTable = makeTable({
+		name: 'users',
+		columns: [makeCol({ name: 'id', type: 'integer' })],
+	});
+
+	it('should detect onUpdate change', () => {
+		const schema = makeTable({
+			name: 'orders',
+			foreignKeys: [{ ...baseFk, onUpdate: 'CASCADE' }],
+		});
+		const db = makeTable({
+			name: 'orders',
+			foreignKeys: [baseFk],
+		});
+		const diff = compareSchemata(makeModel([usersTable, schema]), makeModel([usersTable, db]));
+		const change = diff.changes.find((c) => c.kind === 'alter_foreign_key');
+		expect(change).toBeDefined();
+		expect(change?.details).toContain('onDelete/onUpdate/deferred');
+	});
+
+	it('should detect deferred change', () => {
+		const schema = makeTable({
+			name: 'orders',
+			foreignKeys: [{ ...baseFk, deferred: true }],
+		});
+		const db = makeTable({
+			name: 'orders',
+			foreignKeys: [baseFk],
+		});
+		const diff = compareSchemata(makeModel([usersTable, schema]), makeModel([usersTable, db]));
+		const change = diff.changes.find((c) => c.kind === 'alter_foreign_key');
+		expect(change).toBeDefined();
+		expect(change?.details).toContain('onDelete/onUpdate/deferred');
+	});
+
+	it('should detect combined onDelete+onUpdate+deferred change', () => {
+		const schema = makeTable({
+			name: 'orders',
+			foreignKeys: [{ ...baseFk, onDelete: 'CASCADE', onUpdate: 'SET NULL', deferred: true }],
+		});
+		const db = makeTable({
+			name: 'orders',
+			foreignKeys: [{ ...baseFk, onDelete: 'RESTRICT' }],
+		});
+		const diff = compareSchemata(makeModel([usersTable, schema]), makeModel([usersTable, db]));
+		const change = diff.changes.find((c) => c.kind === 'alter_foreign_key');
+		expect(change).toBeDefined();
+		expect(change?.meta?.oldFk).toBeDefined();
+	});
+
+	it('should ignore identical FK with onUpdate and deferred', () => {
+		const fk: ForeignKeyIR = { ...baseFk, onUpdate: 'CASCADE', deferred: true };
+		const schema = makeTable({ name: 'orders', foreignKeys: [fk] });
+		const db = makeTable({ name: 'orders', foreignKeys: [fk] });
+		const diff = compareSchemata(makeModel([usersTable, schema]), makeModel([usersTable, db]));
+		expect(diff.changes.filter((c) => c.kind === 'alter_foreign_key')).toHaveLength(0);
+	});
+});
