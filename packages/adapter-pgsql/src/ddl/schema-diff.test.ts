@@ -4,6 +4,7 @@ import type {
 	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
+	PartitionIR,
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
@@ -2059,5 +2060,123 @@ describe('Sequences', () => {
 		const diff = compareSchemata(schema, db);
 		const change = diff.changes.find((c) => c.kind === 'alter_sequence');
 		expect((change?.meta?.previousSequence as SequenceIR).incrementBy).toBe(1);
+	});
+});
+
+// ============================================================================
+// Partitioning Tests
+// ============================================================================
+
+describe('Partitioning', () => {
+	function makePartitionedTable(
+		name: string,
+		partition?: PartitionIR,
+	): TableIR {
+		return {
+			name,
+			columns: [{ name: 'created_at', type: 'timestamp', nullable: false }],
+			foreignKeys: [],
+			indexes: [],
+			...(partition ? { partition } : {}),
+		};
+	}
+
+	it('should not flag identical partition config', () => {
+		const partition: PartitionIR = {
+			strategy: 'RANGE',
+			columns: ['created_at'],
+		};
+		const schema = makeModel([makePartitionedTable('events', partition)]);
+		const db = makeModel([makePartitionedTable('events', partition)]);
+		const diff = compareSchemata(schema, db);
+		const partitionChanges = diff.changes.filter(
+			(c) => c.meta?.isPartitionChange === true,
+		);
+		expect(partitionChanges).toHaveLength(0);
+	});
+
+	it('should flag strategy change as destructive', () => {
+		const schema = makeModel([
+			makePartitionedTable('events', {
+				strategy: 'RANGE',
+				columns: ['created_at'],
+			}),
+		]);
+		const db = makeModel([
+			makePartitionedTable('events', {
+				strategy: 'LIST',
+				columns: ['created_at'],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		const partitionChange = diff.changes.find(
+			(c) => c.meta?.isPartitionChange === true,
+		);
+		expect(partitionChange).toBeDefined();
+		expect(partitionChange?.kind).toBe('drop_table');
+		expect(partitionChange?.destructive).toBe(true);
+		expect(partitionChange?.details).toContain('LIST');
+		expect(partitionChange?.details).toContain('RANGE');
+	});
+
+	it('should flag column change as destructive', () => {
+		const schema = makeModel([
+			makePartitionedTable('events', {
+				strategy: 'RANGE',
+				columns: ['updated_at'],
+			}),
+		]);
+		const db = makeModel([
+			makePartitionedTable('events', {
+				strategy: 'RANGE',
+				columns: ['created_at'],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		const partitionChange = diff.changes.find(
+			(c) => c.meta?.isPartitionChange === true,
+		);
+		expect(partitionChange).toBeDefined();
+		expect(partitionChange?.destructive).toBe(true);
+	});
+
+	it('should flag adding partition to existing non-partitioned table as destructive', () => {
+		const schema = makeModel([
+			makePartitionedTable('events', {
+				strategy: 'RANGE',
+				columns: ['created_at'],
+			}),
+		]);
+		const db = makeModel([makePartitionedTable('events')]);
+		const diff = compareSchemata(schema, db);
+		const partitionChange = diff.changes.find(
+			(c) => c.meta?.isPartitionChange === true,
+		);
+		expect(partitionChange).toBeDefined();
+		expect(partitionChange?.kind).toBe('drop_table');
+		expect(partitionChange?.destructive).toBe(true);
+		expect(partitionChange?.details).toContain(
+			'Cannot add partition to existing table',
+		);
+	});
+
+	it('should flag removing partition as destructive', () => {
+		const schema = makeModel([makePartitionedTable('events')]);
+		const db = makeModel([
+			makePartitionedTable('events', {
+				strategy: 'HASH',
+				columns: ['id'],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		const partitionChange = diff.changes.find(
+			(c) => c.meta?.isPartitionChange === true,
+		);
+		expect(partitionChange).toBeDefined();
+		expect(partitionChange?.kind).toBe('drop_table');
+		expect(partitionChange?.destructive).toBe(true);
+		expect(partitionChange?.details).toContain(
+			'Cannot remove partition from existing table',
+		);
 	});
 });

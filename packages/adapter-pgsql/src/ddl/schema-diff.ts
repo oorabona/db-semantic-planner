@@ -15,6 +15,7 @@ import type {
 	ForeignKeyIR,
 	IndexIR,
 	ModelIR,
+	PartitionIR,
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
@@ -199,6 +200,7 @@ export function compareSchemata(
 		compareIndexes(schemaTable, dbTable, changes);
 		compareCheckConstraints(schemaTable, dbTable, changes);
 		compareComments(schemaTable, dbTable, changes);
+		comparePartitions(schemaTable, dbTable, changes);
 	}
 
 	// 2. Tables that exist in DB but not in schema → drop_table
@@ -269,6 +271,14 @@ function normalizeTable(table: TableIR, plugin: NamingPlugin): TableIR {
 			...idx,
 			columns: idx.columns.map(toDb),
 		})),
+		...(table.partition
+			? {
+					partition: {
+						strategy: table.partition.strategy,
+						columns: table.partition.columns.map(toDb),
+					},
+				}
+			: {}),
 	};
 }
 
@@ -725,6 +735,61 @@ function compareComments(
 				});
 			}
 		}
+	}
+}
+
+// ============================================================================
+// Partition Diff
+// ============================================================================
+
+/**
+ * Compare partition configs between schema and DB.
+ * PostgreSQL does not support ALTER TABLE ... SET PARTITION STRATEGY.
+ * Any mismatch (add, remove, or change) requires DROP + CREATE.
+ * We emit a destructive drop_table change with isPartitionChange=true as a marker.
+ */
+function comparePartitions(
+	schema: TableIR,
+	db: TableIR,
+	changes: SchemaChange[],
+): void {
+	const sp = schema.partition as PartitionIR | undefined;
+	const dp = db.partition as PartitionIR | undefined;
+
+	if (!sp && !dp) return; // Neither has partition — nothing to do
+
+	if (sp && dp) {
+		// Both have partition — check if config matches
+		const sameStrategy = sp.strategy === dp.strategy;
+		const sameCols = sp.columns.join(',') === dp.columns.join(',');
+		if (!sameStrategy || !sameCols) {
+			changes.push({
+				kind: 'drop_table',
+				table: schema.name,
+				destructive: true,
+				details: `Cannot alter partition strategy of "${schema.name}" (${dp.strategy} → ${sp.strategy}). Requires DROP + CREATE (data migration needed).`,
+				meta: { isPartitionChange: true },
+			});
+		}
+		// Same config → no change needed
+	} else if (sp && !dp) {
+		// Adding partition to non-partitioned table
+		changes.push({
+			kind: 'drop_table',
+			table: schema.name,
+			destructive: true,
+			details: `Cannot add partition to existing table "${schema.name}". Requires DROP + CREATE (data migration needed).`,
+			meta: { isPartitionChange: true },
+		});
+	} else {
+		// Removing partition from partitioned table
+		changes.push({
+			kind: 'drop_table',
+			table: schema.name,
+			destructive: true,
+			details: `Cannot remove partition from existing table "${schema.name}". Requires DROP + CREATE (data migration needed).`,
+			meta: { isPartitionChange: true },
+		});
 	}
 }
 

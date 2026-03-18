@@ -37,6 +37,7 @@ function createMockPool(
 	checks: QueryResult<any> = { rows: [] },
 	extensions: QueryResult<any> = { rows: [] },
 	sequences: QueryResult<any> = { rows: [] },
+	partitions: QueryResult<any> = { rows: [] },
 ) {
 	return {
 		query: vi
@@ -48,6 +49,7 @@ function createMockPool(
 			.mockResolvedValueOnce(enums) // ENUM types
 			.mockResolvedValueOnce(comments) // comments (pg_description)
 			.mockResolvedValueOnce(checks) // CHECK constraints
+			.mockResolvedValueOnce(partitions) // partition configs (pg_partitioned_table)
 			.mockResolvedValueOnce(extensions) // extensions (pg_extension)
 			.mockResolvedValueOnce(sequences), // sequences (pg_sequences)
 	} as any;
@@ -1943,8 +1945,8 @@ describe('introspection — hierarchy detection', () => {
 			before.getTime(),
 		);
 		expect(model.introspectedAt.getTime()).toBeLessThanOrEqual(after.getTime());
-		// Default schema = 'public' (passed to queries); 9 queries: columns, PKs, FKs, indexes, enums, comments, checks, extensions, sequences
-		expect(pool.query).toHaveBeenCalledTimes(9);
+		// Default schema = 'public' (passed to queries); 10 queries: columns, PKs, FKs, indexes, enums, comments, checks, partitions, extensions, sequences
+		expect(pool.query).toHaveBeenCalledTimes(10);
 		expect(pool.query.mock.calls[0][1]).toEqual(['public']);
 	});
 

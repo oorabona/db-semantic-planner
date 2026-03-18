@@ -840,7 +840,13 @@ function generateCreateTableSQL(table: TableIR, schemaName?: string): string {
 	}
 
 	const body = elements.map((el) => `  ${el}`).join(',\n');
-	return `CREATE TABLE ${qualTable} (\n${body}\n);`;
+	let sql = `CREATE TABLE ${qualTable} (\n${body}\n)`;
+	if (table.partition) {
+		const partCols = table.partition.columns.map(q).join(', ');
+		sql += ` PARTITION BY ${table.partition.strategy} (${partCols})`;
+	}
+	sql += ';';
+	return sql;
 }
 
 function generateAddFKSQL(

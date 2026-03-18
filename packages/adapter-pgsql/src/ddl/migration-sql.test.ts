@@ -13,6 +13,7 @@ import type {
 	ColumnIR,
 	ForeignKeyIR,
 	IndexIR,
+	PartitionIR,
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
@@ -2631,5 +2632,125 @@ describe('Sequences — migration SQL', () => {
 		]);
 		const sql = generateDownSQL(diff);
 		expect(sql[0]).toBe('ALTER SEQUENCE "order_seq" INCREMENT BY 1;');
+	});
+});
+
+// ============================================================================
+// Partitioning SQL Tests
+// ============================================================================
+
+describe('Partitioning', () => {
+	function makePartitionedTableIR(
+		name: string,
+		partition: PartitionIR,
+	): TableIR {
+		return {
+			name,
+			columns: [
+				{ name: 'id', type: 'integer', nullable: false },
+				{ name: 'created_at', type: 'timestamp', nullable: false },
+			],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+			partition,
+		};
+	}
+
+	it('should generate PARTITION BY RANGE in CREATE TABLE', () => {
+		const table = makePartitionedTableIR('events', {
+			strategy: 'RANGE',
+			columns: ['created_at'],
+		});
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'events',
+				destructive: false,
+				details: '',
+				meta: { table },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		const createSql = sql.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toBeDefined();
+		expect(createSql).toContain('PARTITION BY RANGE ("created_at")');
+		expect(createSql).toMatch(/\)\s+PARTITION BY RANGE/);
+		expect(createSql).toMatch(/PARTITION BY RANGE \("created_at"\);$/);
+	});
+
+	it('should generate PARTITION BY LIST in CREATE TABLE', () => {
+		const table = makePartitionedTableIR('orders', {
+			strategy: 'LIST',
+			columns: ['region'],
+		});
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'orders',
+				destructive: false,
+				details: '',
+				meta: { table },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		const createSql = sql.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toContain('PARTITION BY LIST ("region")');
+	});
+
+	it('should generate PARTITION BY HASH in CREATE TABLE', () => {
+		const table = makePartitionedTableIR('logs', {
+			strategy: 'HASH',
+			columns: ['id'],
+		});
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'logs',
+				destructive: false,
+				details: '',
+				meta: { table },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		const createSql = sql.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toContain('PARTITION BY HASH ("id")');
+	});
+
+	it('should not emit PARTITION BY for non-partitioned tables', () => {
+		const table = makeTable('users', [
+			makeCol({ name: 'id', type: 'integer' }),
+		]);
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'users',
+				destructive: false,
+				details: '',
+				meta: { table },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		const createSql = sql.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).not.toContain('PARTITION BY');
+	});
+
+	it('should support multi-column partition keys', () => {
+		const table = makePartitionedTableIR('sales', {
+			strategy: 'RANGE',
+			columns: ['year', 'month'],
+		});
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'sales',
+				destructive: false,
+				details: '',
+				meta: { table },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		const createSql = sql.find((s) => s.includes('CREATE TABLE'));
+		expect(createSql).toContain('PARTITION BY RANGE ("year", "month")');
 	});
 });

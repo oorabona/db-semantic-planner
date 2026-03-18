@@ -21,6 +21,7 @@ import type {
 	IndexIR,
 	ModelIR,
 	OnDeleteAction,
+	PartitionIR,
 	RelationIR,
 	RelationType,
 	SequenceIR,
@@ -101,6 +102,12 @@ interface RawIndex {
 	method: string;
 	predicate: string | null;
 	reloptions: string[] | null;
+}
+
+interface RawPartition {
+	table_name: string;
+	strategy: string;
+	columns: string[];
 }
 
 // ============================================================================
@@ -276,6 +283,41 @@ export async function introspect(
 		[schema],
 	);
 
+	// Step 7b: Fetch partition configurations
+	const partitionsResult = await pool.query<RawPartition>(
+		`SELECT
+		   c.relname AS table_name,
+		   p.partstrat AS strategy,
+		   array_agg(a.attname ORDER BY pk.n) AS columns
+		 FROM pg_partitioned_table p
+		 JOIN pg_class c ON c.oid = p.partrelid
+		 JOIN pg_namespace n ON n.oid = c.relnamespace
+		 JOIN LATERAL unnest(p.partattrs) WITH ORDINALITY AS pk(attnum, n) ON true
+		 JOIN pg_attribute a ON a.attrelid = p.partrelid AND a.attnum = pk.attnum
+		 WHERE n.nspname = $1
+		 GROUP BY c.relname, p.partstrat`,
+		[schema],
+	);
+
+	// Build partition map by table name
+	const tablePartitions = new Map<string, PartitionIR>();
+	for (const row of partitionsResult.rows) {
+		const strategyMap: Record<string, 'RANGE' | 'LIST' | 'HASH'> = {
+			r: 'RANGE',
+			l: 'LIST',
+			h: 'HASH',
+		};
+		const strategy = strategyMap[row.strategy];
+		if (!strategy) continue; // Unknown strategy — skip
+		const columns: string[] = Array.isArray(row.columns)
+			? row.columns
+			: String(row.columns)
+					.replace(/^\{|}$/g, '')
+					.split(',')
+					.filter(Boolean);
+		tablePartitions.set(row.table_name, { strategy, columns });
+	}
+
 	// Group CHECK constraints by table (strip schema prefix if present)
 	const tableChecks = new Map<string, CheckConstraintIR[]>();
 	for (const ck of checksResult.rows) {
@@ -449,6 +491,7 @@ export async function introspect(
 
 		const checks = tableChecks.get(tableName);
 		const tableComment = tableComments.get(tableName);
+		const partitionConfig = tablePartitions.get(tableName);
 		const table: TableIR = {
 			name: tableName,
 			columns,
@@ -459,6 +502,7 @@ export async function introspect(
 			indexes: tableIndexes.get(tableName) ?? [],
 			...(checks && checks.length > 0 ? { checkConstraints: checks } : {}),
 			...(tableComment ? { comment: tableComment } : {}),
+			...(partitionConfig ? { partition: partitionConfig } : {}),
 		};
 		tables.set(tableName, table);
 	}
