@@ -126,6 +126,26 @@ export function compareSchemata(
 				details: `Create table "${name}" with ${schemaTable.columns.length} columns`,
 				meta: { table: schemaTable },
 			});
+			// Emit FK constraints for new table (phase 9, after CREATE TABLE phase 5)
+			for (const fk of schemaTable.foreignKeys) {
+				changes.push({
+					kind: 'add_foreign_key',
+					table: name,
+					destructive: false,
+					details: `Add FK (${fk.columns.join(', ')}) → ${fk.references.table}(${fk.references.columns.join(', ')})`,
+					meta: { fk },
+				});
+			}
+			// Emit indexes for new table (phase 11, after FK phase 9)
+			for (const idx of schemaTable.indexes) {
+				changes.push({
+					kind: 'create_index',
+					table: name,
+					destructive: false,
+					details: `Create ${idx.unique ? 'unique ' : ''}index on (${idx.columns.join(', ')})`,
+					meta: { index: idx },
+				});
+			}
 			continue;
 		}
 

@@ -4,6 +4,14 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## DDL-FK-IDX — emit FK + indexes for new tables in migration SQL (2026-03-18)
+
+- Fix in compareSchemata: emit add_foreign_key + create_index changes for new tables before the continue statement
+- No changes to generateCreateTableSQL — composite UNIQUE handled via CREATE UNIQUE INDEX path
+- Topological order preserved naturally via existing getPhase() dispatcher (create_table=5, add_fk=9, create_index=11)
+
+---
+
 ## AGG-001 — FILTER clause support in aggregates (2026-03-18)
 
 - Reuse existing `funcCall()` helper's `filter?: Node` param (sets `agg_filter` on FuncCall AST) — no new AST work

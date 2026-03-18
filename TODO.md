@@ -24,7 +24,7 @@
 (CTE-001 archived → docs/historic/done-2026-03.md)
 (BATCH-001 archived → docs/historic/done-2026-03.md)
 (AGG-001 archived → docs/historic/done-2026-03.md)
-- [ ] 🐛 **DDL-FK-IDX** [Adapter] `generateMigrationSQL` for `create_table` changes must emit FK constraints + indexes + composite UNIQUE. Currently only emits bare CREATE TABLE — FK/indexes stored in TableIR metadata but not rendered. They only appear in subsequent ALTER diffs. Blocks astix ORM migration "from scratch" scenario (v2 creates 7 tables + FK + indexes in one migration). — Priority: P0 (from astix PoC 2026-03-18)
+(DDL-FK-IDX archived → docs/historic/done-2026-03.md)
 - [ ] 💡 **NQL-WITH** [NQL] WITH ... AS (...) non-recursive CTE syntax in NQL parser — deferred from BATCH-001. — Priority: P1 (from /adversarial 2026-03-18)
 - [ ] 🔧 **BATCH-DRY-001** [Adapter] Extract shared `mapModelIRTypeToPgBase()` — duplicated in any.ts + compiler-utils.ts. — Priority: M (from /review F-001)
 - [ ] 🔧 **BATCH-DRY-002** [Adapter] Extract `stripArraySuffix()` helper — repeated 5× across files. — Priority: S (from /review F-002)
