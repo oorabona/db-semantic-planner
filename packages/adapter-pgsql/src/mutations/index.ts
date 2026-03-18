@@ -5,10 +5,13 @@
  */
 
 export {
+	type BatchUpdateConfig,
 	compileDelete,
 	compileInsert,
 	compileInsertFrom,
 	compileMutation,
+	compileUnnestInsert,
+	compileUnnestUpdate,
 	compileUpdate,
 	compileUpsertFrom,
 	type DeleteConfig,
@@ -23,6 +26,7 @@ export {
 	buildOnConflictClause,
 	type ConflictAction,
 	type ConflictTarget,
+	compileUnnestUpsert,
 	compileUpsert,
 	conditionalUpdate,
 	excludedRef,

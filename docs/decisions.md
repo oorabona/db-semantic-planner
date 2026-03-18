@@ -12,6 +12,25 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## BATCH-001 — Batch unnest API for INSERT/UPDATE with array parameters (2026-03-18)
+
+- Compilation-level strategy switch (VALUES vs unnest) — not API-level. Threshold: 50 rows default, configurable, 0 = force unnest
+- Batch UPDATE via new .batchSet() method (fundamentally different SQL pattern from single SET)
+- ANY() as new filter helper + NQL keyword (not reusing in())
+- CTE builder: withCte().fromUnnest().withIndex() — new builder, not extending recursive builder
+- Schema-driven type inference via ModelIR column types — runtime fallback only when no schema
+- WITH ORDINALITY instead of generate_series for CTE index
+- Sparse batches: group by shape, emit one INSERT per group. Missing required column = build error
+- Array cardinality validation before SQL generation — never rely on PG silent NULL-padding
+- Composite PK support in batchSet via string | string[]
+- maxBatchSize: optional guard in CompileOptions, throw if exceeded
+- Dual-path CTE: design study only, implementation deferred
+- NQL WITH syntax deferred to NQL-WITH story
+- pgsql-deparser normalizes type casts to CAST($N AS type[]) form (not $N::type[])
+- CTE query uses regex param renumbering to shift outer query params after CTE params
+
+---
+
 ## AGG-001 — FILTER clause support in aggregates (2026-03-18)
 
 - Reuse existing `funcCall()` helper's `filter?: Node` param (sets `agg_filter` on FuncCall AST) — no new AST work

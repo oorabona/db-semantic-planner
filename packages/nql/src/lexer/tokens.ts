@@ -65,6 +65,11 @@ export const Every = createToken({ name: 'Every', pattern: /every\b/i });
 export const Insert = createToken({ name: 'Insert', pattern: /insert\b/i });
 export const Into = createToken({ name: 'Into', pattern: /into\b/i });
 export const In = createToken({ name: 'In', pattern: /in\b/i });
+// BATCH-001: ANY operator keyword (for col = ANY(:param) syntax)
+// longer_alt: Identifier ensures ANY(identifier) isn't consumed as keyword when used as identifier
+export const Any = createToken({ name: 'Any', pattern: /ANY\b/i });
+// BATCH-001: Named parameter token — :paramName (used in ANY(:param))
+export const NamedParam = createToken({ name: 'NamedParam', pattern: /:[a-zA-Z_][a-zA-Z0-9_]*/ });
 export const Between = createToken({ name: 'Between', pattern: /between\b/i });
 export const Like = createToken({ name: 'Like', pattern: /like\b/i });
 
@@ -328,6 +333,7 @@ export const allTokens = [
 	Insert, // Must come before In
 	Into, // Must come before In
 	In,
+	Any, // BATCH-001: ANY keyword (after In — no prefix conflict with In)
 	Between,
 	Like,
 	Overlaps,
@@ -388,6 +394,7 @@ export const allTokens = [
 	RParen,
 	LBracket,
 	RBracket,
+	NamedParam, // BATCH-001: :paramName — must come BEFORE Colon (longest match wins)
 	Colon,
 	Equals,
 	LessThan,

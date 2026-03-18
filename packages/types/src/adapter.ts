@@ -9,6 +9,8 @@
 
 import type { DialectCapabilities } from './dialects.js';
 import type {
+	BatchUpdateIntent,
+	CteQueryIntent,
 	DeleteIntent,
 	InsertFromIntent,
 	InsertIntent,
@@ -86,6 +88,22 @@ export interface CompileOptionsBase {
 
 	/** Correlation ID for distributed tracing */
 	readonly correlationId?: string;
+
+	/**
+	 * Row count threshold for switching INSERT compilation from VALUES to unnest strategy.
+	 * Rows <= threshold use VALUES ($1,$2),... Rows > threshold use SELECT unnest($1::type[]),...
+	 * Set to 0 to force unnest for all batch sizes.
+	 * @default 50
+	 */
+	readonly batchThreshold?: number;
+
+	/**
+	 * Maximum allowed batch size for INSERT operations.
+	 * If set and the number of rows exceeds this limit, an InvalidOperationError is thrown.
+	 * Useful to prevent accidental unbounded inserts.
+	 * @default undefined (no limit)
+	 */
+	readonly maxBatchSize?: number;
 }
 
 /**
@@ -267,6 +285,12 @@ export interface CompilingAdapter extends BaseAdapter {
 	/** Compile an update intent to executable SQL. */
 	compileUpdate(intent: UpdateIntent, options?: CompileOptions): CompiledQuery;
 
+	/** Compile a batch update intent to executable SQL (BATCH-001). */
+	compileBatchUpdate(
+		intent: BatchUpdateIntent,
+		options?: CompileOptions,
+	): CompiledQuery;
+
 	/** Compile a delete intent to executable SQL. */
 	compileDelete(intent: DeleteIntent, options?: CompileOptions): CompiledQuery;
 
@@ -285,6 +309,9 @@ export interface CompilingAdapter extends BaseAdapter {
 		model: ModelIR,
 		options?: CompileOptions,
 	): CompiledQuery;
+
+	/** Compile a CTE query backed by unnest() arrays (BATCH-001). */
+	compileCteQuery(intent: CteQueryIntent, options?: CompileOptions): CompiledQuery;
 
 	/** Create a dump for observability. */
 	createDump(plan: PlanReport, query: CompiledQuery, meta?: DumpMeta): Dump;

@@ -55,6 +55,8 @@ export interface ColumnValidatorSchema {
 export interface NqlCompilerOptions {
 	readonly pseudoColumnKeywords?: readonly string[];
 	readonly recursiveKeywords?: readonly string[];
+	/** BATCH-001: Named parameters for ANY(:param) expressions */
+	readonly params?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -67,6 +69,8 @@ export interface CompilerContext {
 	readonly pseudoColumnKeywords: ReadonlySet<string>;
 	readonly recursiveKeywords: ReadonlySet<string>;
 	readonly validator: ColumnValidator | null;
+	/** BATCH-001: Named parameters for ANY(:param) expressions */
+	readonly params: Readonly<Record<string, unknown>>;
 }
 
 /**

@@ -117,6 +117,7 @@ export class NqlCompiler {
 			pseudoColumnKeywords,
 			recursiveKeywords,
 			validator,
+			params: options?.params ?? {},
 		};
 
 		// Wire up cross-module function references

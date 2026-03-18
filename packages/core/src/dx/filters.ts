@@ -30,6 +30,7 @@ import type {
 	WhereAndIntent,
 	WhereComparisonIntent,
 	WhereExistsIntent,
+	WhereAnyIntent,
 	WhereInIntent,
 	WhereIntent,
 	WhereLikeIntent,
@@ -245,6 +246,25 @@ export function inArray(
 	values: readonly unknown[],
 ): WhereInIntent {
 	return { kind: 'in', field: getColumnName(field), values };
+}
+
+
+/**
+ * Array membership filter using PostgreSQL ANY() operator.
+ * Compiles to: "col" = ANY($N::type[])
+ *
+ * Unlike inArray(), any() produces an explicit type-cast in the SQL.
+ * Use this when you need guaranteed type safety with array parameters.
+ *
+ * @example
+ * orm.select('symbols').where(any('id', [1, 2, 3])).all()
+ * // SQL: SELECT * FROM "symbols" WHERE "id" = ANY($1::int[])
+ */
+export function any(
+	field: ColumnRef<string, string, unknown> | string,
+	values: readonly unknown[],
+): WhereAnyIntent {
+	return { kind: 'any', field: getColumnName(field), values };
 }
 
 // ============================================================================

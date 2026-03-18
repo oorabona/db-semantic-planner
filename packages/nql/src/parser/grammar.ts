@@ -9,6 +9,7 @@ import { type CstNode, CstParser, type IToken } from 'chevrotain';
 import {
 	All,
 	And,
+	Any,
 	As,
 	Asc,
 	Ascendant,
@@ -66,6 +67,7 @@ import {
 	Not,
 	NotEquals,
 	NoWait,
+	NamedParam,
 	NqlLexer,
 	Null,
 	NumberLiteral,
@@ -492,6 +494,8 @@ export class NqlParser extends CstParser {
 							{ ALT: () => this.SUBRULE(this.betweenSuffix) },
 							// [NOT] IN (...)
 							{ ALT: () => this.SUBRULE(this.inSuffix) },
+							// = ANY(:param) — BATCH-001
+							{ ALT: () => this.SUBRULE(this.anySuffix) },
 							// IS [NOT] NULL
 							{ ALT: () => this.SUBRULE(this.isNullSuffix) },
 							// Range operators (overlaps, contains, containedBy) with range literal
@@ -678,6 +682,19 @@ export class NqlParser extends CstParser {
 	/**
 	 * in_suffix = [ "not" ] "in" ( "(" value_list ")" | "(" scalar_subquery ")" | date_range_literal ) ;
 	 */
+	/**
+	 * any_suffix = '=' 'ANY' '(' ':' identifier ')' ;
+	 * BATCH-001: Parses the ANY(:paramName) suffix after a column expression.
+	 * Example: id = ANY(:ids)
+	 */
+	private anySuffix = this.RULE('anySuffix', () => {
+		this.CONSUME(Equals);
+		this.CONSUME(Any);
+		this.CONSUME(LParen);
+		this.CONSUME(NamedParam);
+		this.CONSUME(RParen);
+	});
+
 	private inSuffix = this.RULE('inSuffix', () => {
 		this.OPTION(() => this.CONSUME(Not));
 		this.CONSUME(In);

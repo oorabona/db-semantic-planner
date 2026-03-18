@@ -7,15 +7,17 @@
  * @module pgsql-adapter
  */
 
-import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import { InvalidOperationError, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import type {
 	Adapter,
 	AdapterCapabilities,
 	AdapterLogger,
 	AdapterStreamOptions,
+	BatchUpdateIntent,
 	CompiledQuery,
 	CompileOptions,
 	CompileResultWithIncludes,
+	CteQueryIntent,
 	DbCasing,
 	DeleteIntent,
 	DialectCapabilities,
@@ -40,7 +42,7 @@ import {
 	defaultFkDerivation,
 	type FkColumnDerivation,
 } from './assert-field.js';
-import { innerJoin, rangeVar } from './ast-helpers.js';
+import { binaryExpr, columnRef, funcCall, innerJoin, integerNode, rangeVar, stringNode } from './ast-helpers.js';
 import {
 	type CompilerOptions,
 	compilePlan,
@@ -64,9 +66,13 @@ import {
 	introspect as introspectDb,
 } from './introspection.js';
 import {
+	type BatchUpdateConfig,
 	compileDelete as compileDeleteMutation,
 	compileInsertFrom as compileInsertFromMutation,
 	compileInsert as compileInsertMutation,
+	compileUnnestInsert as compileUnnestInsertMutation,
+	compileUnnestUpdate as compileUnnestUpdateMutation,
+	compileUnnestUpsert as compileUnnestUpsertMutation,
 	compileUpdate as compileUpdateMutation,
 	compileUpsertFrom as compileUpsertFromMutation,
 	compileUpsert as compileUpsertMutation,
@@ -78,6 +84,11 @@ import {
 	type UpsertConfig,
 	type UpsertFromConfig,
 } from './mutations/index.js';
+import {
+	inferPgArrayType,
+	transposeToColumnArrays,
+	validateBatchCardinality,
+} from './compiler-utils.js';
 import {
 	getNamingPluginForDbCasing,
 	type NamingPlugin,
@@ -95,6 +106,7 @@ import {
 	type RecursiveCteConfig,
 } from './recursive/index.js';
 import { generateCursorName } from './streaming/cursor.js';
+import { createTypeCastParamRef } from './param-ref.js';
 import { validateIdentifier } from './validate.js';
 
 // ============================================================================
@@ -850,6 +862,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	/**
 	 * Compile an insert intent to executable SQL.
 	 */
+	/**
+	 * Compile an insert intent to executable SQL.
+	 *
+	 * Strategy switch (per CompileOptions):
+	 * - rows <= batchThreshold (default 50): VALUES ($1,$2),($3,$4),...
+	 * - rows > batchThreshold OR batchThreshold === 0: SELECT unnest($1::type[]),...
+	 */
 	compileInsert(intent: InsertIntent, options?: CompileOptions): CompiledQuery {
 		const schemaName = this.schemaName ?? options?.schemaName;
 
@@ -880,7 +899,24 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...(columnTypes && { columnTypes }),
 		};
 
-		const ast = compileInsertMutation(config, ctx, state);
+		// maxBatchSize guard (INV-07)
+		const maxBatchSize = options?.maxBatchSize;
+		if (maxBatchSize !== undefined && values.length > maxBatchSize) {
+			throw new InvalidOperationError(
+				'insert',
+				`Batch size ${values.length} exceeds maxBatchSize ${maxBatchSize}`,
+			);
+		}
+
+		// Strategy switch: unnest for large batches, VALUES for small (INV-03)
+		const batchThreshold = options?.batchThreshold ?? 50;
+		const useUnnest =
+			values.length > 0 &&
+			(batchThreshold === 0 || values.length > batchThreshold);
+
+		const ast = useUnnest
+			? compileUnnestInsertMutation(config, ctx, state)
+			: compileInsertMutation(config, ctx, state);
 		const sql = deparseQuoted(ast);
 
 		return {
@@ -965,6 +1001,91 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			parameters: state.parameters,
 		};
 	}
+
+
+	/**
+	 * Compile a batch update intent to executable SQL using unnest FROM strategy (BATCH-001).
+	 *
+	 * Generates:
+	 *   UPDATE "table" SET "update_col" = t."update_col" [, "scalar_col" = $N]
+	 *   FROM unnest(CAST($1 AS type[]), CAST($2 AS type[])) AS t("match_col", "update_col")
+	 *   WHERE "table"."match_col" = t."match_col"
+	 *   [RETURNING ...]
+	 */
+	compileBatchUpdate(
+		intent: BatchUpdateIntent,
+		options?: CompileOptions,
+	): CompiledQuery {
+		const schemaName = this.schemaName ?? options?.schemaName;
+
+		const ctx: CompilerContext = {
+			naming: this.naming,
+			rootTable: intent.table,
+			...(schemaName !== undefined && { schema: schemaName }),
+			maxRecursiveDepth: 100,
+		};
+		const state = createCompilerState();
+
+		if (intent.updates.length === 0) {
+			throw new InvalidOperationError(
+				'update',
+				'batchSet requires at least one row',
+			);
+		}
+
+		// Extract all columns from the first row
+		const allColumns = Object.keys(intent.updates[0]!);
+		const matchColumns = [...intent.matchColumns];
+
+		// Validate that all match columns appear in the data
+		for (const mc of matchColumns) {
+			if (!allColumns.includes(mc)) {
+				throw new InvalidOperationError(
+					'update',
+					`Match column "${mc}" not found in update data. Each row must include the match column(s).`,
+				);
+			}
+		}
+
+		// Build row-major values matrix and validate cardinality
+		const values = intent.updates.map((row) =>
+			allColumns.map((col) => row[col]),
+		);
+		validateBatchCardinality(allColumns, values);
+
+		// Transpose to column-major arrays
+		const columnArrays = transposeToColumnArrays(allColumns, values);
+
+		// Get column types for type inference
+		const columnTypes = this.getColumnTypes(intent.table, allColumns);
+
+		// Build scalar SET entries from scalarSet
+		const scalarSet = intent.scalarSet
+			? Object.entries(intent.scalarSet).map(([column, value]) => ({
+					column,
+					value,
+				}))
+			: undefined;
+
+		const config: BatchUpdateConfig = {
+			table: intent.table,
+			matchColumns,
+			allColumns,
+			columnArrays,
+			...(scalarSet && { scalarSet }),
+			...(intent.returning && { returning: [...intent.returning] }),
+			...(columnTypes && { columnTypes }),
+		};
+
+		const ast = compileUnnestUpdateMutation(config, ctx, state);
+		const sql = deparseQuoted(ast);
+
+		return {
+			sql,
+			parameters: state.parameters,
+		};
+	}
+
 
 	/**
 	 * Compile a delete intent to executable SQL.
@@ -1063,6 +1184,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			}
 		}
 
+		const columnTypes = this.getColumnTypes(intent.table, columns);
+
 		const config: UpsertConfig = {
 			table: intent.table,
 			columns,
@@ -1071,9 +1194,27 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			conflictAction,
 			...(updateColumns && { updateColumns }),
 			...(intent.returning && { returning: [...intent.returning] }),
+			...(columnTypes && { columnTypes }),
 		};
 
-		const ast = compileUpsertMutation(config, ctx, state);
+		// maxBatchSize guard (INV-07)
+		const maxBatchSize = options?.maxBatchSize;
+		if (maxBatchSize !== undefined && values.length > maxBatchSize) {
+			throw new InvalidOperationError(
+				'upsert',
+				`Batch size ${values.length} exceeds maxBatchSize ${maxBatchSize}`,
+			);
+		}
+
+		// Strategy switch: unnest for large batches, VALUES for small (INV-03)
+		const batchThreshold = options?.batchThreshold ?? 50;
+		const useUnnest =
+			values.length > 0 &&
+			(batchThreshold === 0 || values.length > batchThreshold);
+
+		const ast = useUnnest
+			? compileUnnestUpsertMutation(config, ctx, state)
+			: compileUpsertMutation(config, ctx, state);
 		const sql = deparseQuoted(ast);
 
 		return {
@@ -1326,6 +1467,150 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		return {
 			sql,
 			parameters: [],
+		};
+	}
+
+	/**
+	 * Compile a CTE query backed by unnest() arrays (BATCH-001 Block 5).
+	 *
+	 * Strategy: compile CTE nodes to SQL fragments, compile outer query
+	 * independently (parameters starting at $1), then renumber outer params
+	 * to start after CTE params and prepend WITH clause.
+	 */
+	compileCteQuery(
+		intent: CteQueryIntent,
+		options?: CompileOptions,
+	): CompiledQuery {
+		const schemaName = this.schemaName ?? options?.schemaName;
+		const state = createCompilerState();
+
+		// 1. Build CTE nodes and accumulate CTE parameters
+		const cteNodes: Node[] = intent.ctes.map((cte) => {
+			if (cte.kind !== 'unnestCte') {
+				const kind = (cte as { kind: string }).kind;
+				throw new Error(
+					`PgsqlAdapter.compileCteQuery: Unsupported CTE kind '${kind}'`,
+				);
+			}
+			return this.buildUnnestCte(cte, state);
+		});
+
+		// 2. Compile outer query independently ($1, $2, ... relative to outer)
+		const outerCompileOptions: CompileOptions =
+			schemaName !== undefined ? { schemaName } : {};
+		const outerPlanReport: import('@dbsp/types').PlanReport = {
+			rootTable: intent.query.from,
+			decisions: [],
+			warnings: [],
+			ctes: [],
+			intent: intent.query,
+			metadata: {
+				planningTimeMs: 0,
+				relationsAnalyzed: 0,
+				isAmbiguous: false,
+			},
+		};
+		const outerCompiled = this.compile(outerPlanReport, outerCompileOptions);
+
+		// 3. Renumber outer SQL parameters to follow CTE parameters
+		const cteParamCount = state.parameters.length;
+		const renumberedOuterSql =
+			cteParamCount > 0
+				? outerCompiled.sql.replace(
+						/\$([0-9]+)/g,
+						(_: string, n: string) => '$' + (parseInt(n) + cteParamCount),
+					)
+				: outerCompiled.sql;
+
+		// 4. Deparse CTE nodes to SQL fragments
+		const cteSqlParts = cteNodes.map((n) => deparseQuoted(n));
+		const withClause = cteSqlParts.join(', ');
+
+		const sql =
+			withClause.length > 0
+				? `WITH ${withClause} ${renumberedOuterSql}`
+				: renumberedOuterSql;
+
+		return {
+			sql,
+			parameters: [...state.parameters, ...outerCompiled.parameters],
+		};
+	}
+
+	/**
+	 * Build a CommonTableExpr AST node for an unnest-backed CTE.
+	 * Produces: CommonTableExpr { ctename: 'name', ctequery: SelectStmt {...} }
+	 */
+	private buildUnnestCte(
+		cte: import('@dbsp/types').UnnestCteIntent,
+		state: ReturnType<typeof createCompilerState>,
+	): Node {
+		const columns = Object.keys(cte.columns);
+		const hasIndex = cte.indexColumn !== undefined;
+		const indexCol = cte.indexColumn ?? 'ordinality';
+
+		// Build unnest arguments: CAST($N AS type[]) for each column
+		const unnestArgs: Node[] = columns.map((col) => {
+			const colArray = cte.columns[col] as unknown[];
+			const sampleValue = colArray.find((v) => v !== null && v !== undefined);
+			const pgArrayType = inferPgArrayType(col, undefined, sampleValue);
+			const pgBaseType = pgArrayType.endsWith('[]')
+				? pgArrayType.slice(0, -2)
+				: pgArrayType;
+
+			state.parameters.push(colArray);
+			state.paramIndex++;
+			return createTypeCastParamRef(state.paramIndex, pgBaseType, true);
+		});
+
+		// All column alias names: col1, col2, ...[, ordinality]
+		const allAliasNames = [
+			...columns.map((c) => this.naming.toDatabase(c)),
+			...(hasIndex ? ['ordinality'] : []),
+		];
+
+		// FROM unnest(args...) [WITH ORDINALITY] AS t("col1", "col2"[, ordinality])
+		const rangeFunc: Node = {
+			RangeFunction: {
+				ordinality: hasIndex,
+				functions: [{ List: { items: [funcCall('unnest', unnestArgs)] } }],
+				alias: {
+					aliasname: 't',
+					colnames: allAliasNames.map((n) => stringNode(n)),
+				},
+			},
+		};
+
+		// SELECT targets: t."col1", t."col2"[, (t.ordinality - 1) AS "idx"]
+		const targets: Node[] = columns.map((col) => ({
+			ResTarget: {
+				val: columnRef(col, 't', undefined, this.naming),
+				name: this.naming.toDatabase(col),
+			},
+		}));
+		if (hasIndex) {
+			targets.push({
+				ResTarget: {
+					val: binaryExpr(
+						'-',
+						columnRef('ordinality', 't'),
+						integerNode(1),
+					),
+					name: indexCol,
+				},
+			});
+		}
+
+		const cteSelectStmt: SelectStmt = {
+			targetList: targets,
+			fromClause: [rangeFunc],
+		};
+
+		return {
+			CommonTableExpr: {
+				ctename: cte.name,
+				ctequery: { SelectStmt: cteSelectStmt },
+			},
 		};
 	}
 
