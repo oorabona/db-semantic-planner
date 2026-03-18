@@ -212,6 +212,20 @@ export interface ForeignKeyIR {
 /**
  * CHECK constraint definition
  */
+
+/**
+ * PostgreSQL ENUM type definition
+ */
+export interface EnumIR {
+	/** Enum type name */
+	readonly name: string;
+
+	/** Ordered list of enum values */
+	readonly values: readonly string[];
+
+	/** Schema name (if not in default schema) */
+	readonly schema?: string;
+}
 export interface CheckConstraintIR {
 	/** Constraint name in database */
 	readonly name: string;
@@ -366,6 +380,9 @@ export interface ModelIR {
 
 	/** Relation definitions indexed by "source.name" */
 	readonly relations: ReadonlyMap<string, RelationIR>;
+
+	/** ENUM type definitions indexed by name */
+	readonly enums?: ReadonlyMap<string, EnumIR>;
 
 	// --- Helper Methods ---
 

@@ -1,5 +1,5 @@
 import { ModelIRImpl } from '@dbsp/core';
-import type { ColumnIR, ForeignKeyIR, IndexIR, TableIR } from '@dbsp/types';
+import type { ColumnIR, EnumIR, ForeignKeyIR, IndexIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
 	type CompareSchemataOptions,
@@ -1383,5 +1383,68 @@ describe('CHECK constraints', () => {
 		const kinds = changeKinds(diff.changes);
 		expect(kinds).toContain('create_table');
 		expect(kinds).toContain('add_check_constraint');
+	});
+});
+
+
+// ============================================================================
+// ENUM Types
+// ============================================================================
+
+function makeModelWithEnums(tables: TableIR[], enums: Map<string, { name: string; values: string[] }>) {
+	const tableMap = new Map(tables.map((t) => [t.name, t]));
+	return new ModelIRImpl(tableMap, new Map(), enums as Map<string, EnumIR>);
+}
+
+describe('ENUM types', () => {
+	it('should detect new enum type', () => {
+		const schema = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]));
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toEqual(['create_enum']);
+	});
+
+	it('should detect dropped enum type', () => {
+		const schema = makeModel([]);
+		const db = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]));
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toEqual(['drop_enum']);
+	});
+
+	it('should detect new enum value', () => {
+		const schema = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive', 'pending'] }]]));
+		const db = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]));
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toEqual(['alter_enum_add_value']);
+	});
+
+	it('should flag removed enum value as destructive', () => {
+		const schema = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active'] }]]));
+		const db = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]));
+		const diff = compareSchemata(schema, db);
+		expect(diff.changes.some((c) => c.destructive)).toBe(true);
+	});
+
+	it('should detect no changes for identical enums', () => {
+		const schema = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]));
+		const db = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]));
+		const diff = compareSchemata(schema, db);
+		expect(diff.changes).toEqual([]);
+	});
+
+	it('should emit alter_enum_add_value with correct position metadata', () => {
+		const schema = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive', 'pending'] }]]));
+		const db = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]));
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'alter_enum_add_value');
+		expect(change?.meta?.value).toBe('pending');
+		expect(change?.meta?.after).toBe('inactive');
+	});
+
+	it('should mark drop_enum as destructive', () => {
+		const schema = makeModel([]);
+		const db = makeModelWithEnums([], new Map([['status', { name: 'status', values: ['active'] }]]));
+		const diff = compareSchemata(schema, db);
+		expect(diff.hasDestructive).toBe(true);
 	});
 });

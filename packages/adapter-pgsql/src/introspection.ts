@@ -16,6 +16,7 @@ import type {
 	CheckConstraintIR,
 	ColumnIR,
 	ColumnType,
+	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
 	ModelIR,
@@ -183,7 +184,33 @@ export async function introspect(
 		[schema],
 	);
 
-	// Step 5: Fetch CHECK constraints
+	// Step 5: Fetch ENUM types
+	const enumsResult = await pool.query<{ name: string; values: string[] }>(
+		`SELECT
+		   t.typname AS name,
+		   array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values
+		 FROM pg_type t
+		 JOIN pg_enum e ON e.enumtypid = t.oid
+		 JOIN pg_namespace n ON n.oid = t.typnamespace
+		 WHERE t.typtype = 'e'
+		   AND n.nspname = $1
+		 GROUP BY t.typname`,
+		[schema],
+	);
+
+	// Build enum map
+	const enumMap = new Map<string, EnumIR>();
+	for (const row of enumsResult.rows) {
+		const values: string[] = Array.isArray(row.values)
+			? row.values
+			: String(row.values)
+					.replace(/^\{|}$/g, '')
+					.split(',')
+					.filter(Boolean);
+		enumMap.set(row.name, { name: row.name, values });
+	}
+
+	// Step 6: Fetch CHECK constraints
 	const checksResult = await pool.query<{
 		name: string;
 		expression: string;
@@ -342,7 +369,7 @@ export async function introspect(
 	const hierarchies = detectHierarchies(tables, fksByConstraint, tableNames);
 
 	// Build ModelIR
-	const modelIR = new ModelIRImpl(tables, relations);
+	const modelIR = new ModelIRImpl(tables, relations, enumMap);
 
 	return Object.assign(modelIR, {
 		hierarchies,
