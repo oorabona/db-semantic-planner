@@ -5,6 +5,7 @@
 
 import type {
 	AmbiguityCheckResult,
+	EnumIR,
 	ModelIR,
 	RelationIR,
 	TableIR,
@@ -16,6 +17,7 @@ import type {
 export class ModelIRImpl implements ModelIR {
 	readonly tables: ReadonlyMap<string, TableIR>;
 	readonly relations: ReadonlyMap<string, RelationIR>;
+	readonly enums?: ReadonlyMap<string, EnumIR>;
 
 	// Pre-computed indexes for efficient lookups
 	private readonly relationsBySource: ReadonlyMap<
@@ -30,6 +32,7 @@ export class ModelIRImpl implements ModelIR {
 	constructor(
 		tables: Map<string, TableIR>,
 		relations: Map<string, RelationIR>,
+		enums?: Map<string, EnumIR>,
 	) {
 		// Freeze the maps to ensure immutability
 		this.tables = Object.freeze(new Map(tables)) as ReadonlyMap<
@@ -40,6 +43,12 @@ export class ModelIRImpl implements ModelIR {
 			string,
 			RelationIR
 		>;
+		if (enums) {
+			this.enums = Object.freeze(new Map(enums)) as ReadonlyMap<
+				string,
+				EnumIR
+			>;
+		}
 
 		// Build indexes
 		this.relationsBySource = this.buildRelationsBySourceIndex(relations);

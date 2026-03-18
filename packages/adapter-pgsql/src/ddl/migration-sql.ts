@@ -10,6 +10,7 @@
 import type {
 	CheckConstraintIR,
 	ColumnIR,
+	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
 	TableIR,
@@ -67,17 +68,21 @@ export interface MigrationSQLOptions {
  * Generate ordered SQL statements from a SchemaDiff.
  *
  * Topological order:
- * 1. DROP FK constraints (must drop before referenced tables)
- * 2. DROP indexes
- * 3. DROP columns
- * 4. DROP primary keys
- * 5. DROP tables
- * 6. CREATE tables
- * 7. ADD columns
- * 8. ALTER columns (type, nullable, default)
- * 9. ADD primary keys
+ * 0.  DROP FK/CHECK constraints (must drop before referenced tables)
+ * 1.  DROP indexes
+ * 2.  DROP columns
+ * 3.  DROP primary keys
+ * 4.  DROP tables, DROP ENUMs
+ * 5.  CREATE ENUMs (must exist before tables that use them)
+ * 6.  CREATE tables
+ * 7.  ADD columns
+ * 8.  ALTER columns (type, nullable, default)
+ * 9.  ADD primary keys
  * 10. ADD FK constraints (must add after referenced tables exist)
- * 11. CREATE indexes
+ * 11. ALTER FK (drop + re-add)
+ * 12. CREATE indexes
+ * 13. ADD CHECK constraints
+ * 14. ALTER ENUM ADD VALUE (must be last — has transaction visibility caveats in PG)
  */
 export function generateMigrationSQL(
 	diff: SchemaDiff,
@@ -97,15 +102,17 @@ export function generateMigrationSQL(
 		[], // 1: drop index
 		[], // 2: drop column
 		[], // 3: drop PK
-		[], // 4: drop table
-		[], // 5: create table
-		[], // 6: add column
-		[], // 7: alter column
-		[], // 8: add PK
-		[], // 9: add FK
-		[], // 10: alter FK (drop + re-add)
-		[], // 11: create index
-		[], // 12: add CHECK constraint
+		[], // 4: drop table, drop ENUM
+		[], // 5: create ENUM
+		[], // 6: create table
+		[], // 7: add column
+		[], // 8: alter column
+		[], // 9: add PK
+		[], // 10: add FK
+		[], // 11: alter FK (drop + re-add)
+		[], // 12: create index
+		[], // 13: add CHECK constraint
+		[], // 14: alter ENUM add value (must be after CREATE TABLE, outside transaction)
 	];
 
 	for (const change of changes) {
@@ -141,25 +148,30 @@ function getPhase(kind: SchemaChange['kind']): number {
 		case 'drop_primary_key':
 			return 3;
 		case 'drop_table':
+		case 'drop_enum':
 			return 4;
-		case 'create_table':
+		case 'create_enum':
 			return 5;
-		case 'add_column':
+		case 'create_table':
 			return 6;
+		case 'add_column':
+			return 7;
 		case 'alter_column_type':
 		case 'alter_column_nullable':
 		case 'alter_column_default':
-			return 7;
-		case 'add_primary_key':
 			return 8;
-		case 'add_foreign_key':
+		case 'add_primary_key':
 			return 9;
-		case 'alter_foreign_key':
+		case 'add_foreign_key':
 			return 10;
-		case 'create_index':
+		case 'alter_foreign_key':
 			return 11;
-		case 'add_check_constraint':
+		case 'create_index':
 			return 12;
+		case 'add_check_constraint':
+			return 13;
+		case 'alter_enum_add_value':
+			return 14;
 	}
 }
 
@@ -287,6 +299,32 @@ function changeToUpSQL(
 			if (!check) return undefined;
 			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${q(check.name)};`;
 		}
+
+		case 'create_enum': {
+			const enumDef = change.meta?.enum as EnumIR;
+			if (!enumDef) return undefined;
+			const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
+			const values = enumDef.values.map((v) => `'${v.replace(/'/g, "''")}'`).join(', ');
+			return `CREATE TYPE ${enumName} AS ENUM (${values});`;
+		}
+
+		case 'alter_enum_add_value': {
+			const enumDef = change.meta?.enum as EnumIR;
+			const value = change.meta?.value as string;
+			const after = change.meta?.after as string | undefined;
+			if (!enumDef || !value) return undefined;
+			const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
+			const escaped = value.replace(/'/g, "''");
+			const position = after ? ` AFTER '${after.replace(/'/g, "''")}'` : '';
+			return `ALTER TYPE ${enumName} ADD VALUE IF NOT EXISTS '${escaped}'${position};`;
+		}
+
+		case 'drop_enum': {
+			const enumDef = change.meta?.enum as EnumIR;
+			if (!enumDef) return undefined;
+			const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
+			return `DROP TYPE IF EXISTS ${enumName} CASCADE;`;
+		}
 	}
 }
 
@@ -390,15 +428,36 @@ function changeToDownSQL(
 			const check = change.meta?.check as CheckConstraintIR | undefined;
 			if (!check) return undefined;
 			return (
-				'DO $$ BEGIN ALTER TABLE ' +
+				'DO $ BEGIN ALTER TABLE ' +
 				qualifyTable(change.table, schemaName) +
 				' ADD CONSTRAINT ' +
 				q(check.name) +
 				' ' +
 				check.expression +
-				'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;'
+				'; EXCEPTION WHEN duplicate_object THEN NULL; END $;'
 			);
 		}
+
+		case 'create_enum': {
+			// DOWN: drop the type that was created
+			const enumDef = change.meta?.enum as EnumIR | undefined;
+			if (!enumDef) return undefined;
+			const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
+			return `DROP TYPE IF EXISTS ${enumName} CASCADE;`;
+		}
+
+		case 'drop_enum': {
+			// DOWN: recreate the type that was dropped
+			const enumDef = change.meta?.enum as EnumIR | undefined;
+			if (!enumDef) return undefined;
+			const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
+			const values = enumDef.values.map((v) => `'${v.replace(/'/g, "''")}'`).join(', ');
+			return `CREATE TYPE ${enumName} AS ENUM (${values});`;
+		}
+
+		case 'alter_enum_add_value':
+			// DOWN: ALTER TYPE ADD VALUE cannot be reversed in PostgreSQL
+			return `-- ALTER TYPE ADD VALUE cannot be reversed in PostgreSQL`;
 	}
 }
 
@@ -428,18 +487,21 @@ export function generateDownSQL(
 
 	// Group changes by phase for topological ordering
 	const phases: SchemaChange[][] = [
-		[], // 0: drop FK
+		[], // 0: drop FK, drop CHECK
 		[], // 1: drop index
 		[], // 2: drop column
 		[], // 3: drop PK
-		[], // 4: drop table
-		[], // 5: create table
-		[], // 6: add column
-		[], // 7: alter column
-		[], // 8: add PK
-		[], // 9: add FK
-		[], // 10: alter FK (drop + re-add)
-		[], // 11: create index
+		[], // 4: drop table, drop ENUM
+		[], // 5: create ENUM
+		[], // 6: create table
+		[], // 7: add column
+		[], // 8: alter column
+		[], // 9: add PK
+		[], // 10: add FK
+		[], // 11: alter FK (drop + re-add)
+		[], // 12: create index
+		[], // 13: add CHECK constraint
+		[], // 14: alter ENUM add value
 	];
 
 	for (const change of changes) {

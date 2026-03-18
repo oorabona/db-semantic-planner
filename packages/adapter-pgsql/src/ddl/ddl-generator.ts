@@ -79,6 +79,19 @@ export function generateDDL(
 	}
 
 	// ========================================================================
+	// PASS 0.5: CREATE TYPE for ENUM types (must be before CREATE TABLE)
+	// ========================================================================
+	if (schema.enums) {
+		for (const [, enumDef] of schema.enums) {
+			const enumName = schemaName
+				? `${quoteIdentifier(naming.toDatabase(schemaName))}.${quoteIdentifier(enumDef.name)}`
+				: quoteIdentifier(enumDef.name);
+			const values = enumDef.values.map((v) => `'${v.replace(/'/g, "''")}'`).join(', ');
+			statements.push(`CREATE TYPE ${enumName} AS ENUM (${values});`);
+		}
+	}
+
+	// ========================================================================
 	// PASS 1: CREATE TABLE statements (without FK constraints)
 	// ========================================================================
 	for (const table of tables) {

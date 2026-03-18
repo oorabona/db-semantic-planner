@@ -1606,3 +1606,194 @@ describe('CHECK constraints migration SQL', () => {
 		expect(sql[3]).toContain('DO $$');
 	});
 });
+
+
+// ============================================================================
+// ENUM types
+// ============================================================================
+
+describe('ENUM types', () => {
+	it('should generate CREATE TYPE for new enum', () => {
+		const diff = makeDiff([{
+			kind: 'create_enum',
+			table: '',
+			destructive: false,
+			details: 'Create enum',
+			meta: { enum: { name: 'status', values: ['active', 'inactive'] } },
+		}]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toBe("CREATE TYPE \"status\" AS ENUM ('active', 'inactive');");
+	});
+
+	it('should generate CREATE TYPE with schema prefix', () => {
+		const diff = makeDiff([{
+			kind: 'create_enum',
+			table: '',
+			destructive: false,
+			details: 'Create enum',
+			meta: { enum: { name: 'status', values: ['active', 'inactive'] } },
+		}]);
+		const sql = generateMigrationSQL(diff, { schemaName: 'myschema' });
+		expect(sql[0]).toBe("CREATE TYPE \"myschema\".\"status\" AS ENUM ('active', 'inactive');");
+	});
+
+	it('should escape single quotes in enum values', () => {
+		const diff = makeDiff([{
+			kind: 'create_enum',
+			table: '',
+			destructive: false,
+			details: 'Create enum',
+			meta: { enum: { name: 'mood', values: ["it's fine", 'bad'] } },
+		}]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toBe("CREATE TYPE \"mood\" AS ENUM ('it''s fine', 'bad');");
+	});
+
+	it('should generate ALTER TYPE ADD VALUE with position', () => {
+		const diff = makeDiff([{
+			kind: 'alter_enum_add_value',
+			table: '',
+			destructive: false,
+			details: 'Add value',
+			meta: { enum: { name: 'status', values: ['active', 'inactive', 'pending'] }, value: 'pending', after: 'inactive' },
+		}]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toBe("ALTER TYPE \"status\" ADD VALUE IF NOT EXISTS 'pending' AFTER 'inactive';");
+	});
+
+	it('should generate ALTER TYPE ADD VALUE without position', () => {
+		const diff = makeDiff([{
+			kind: 'alter_enum_add_value',
+			table: '',
+			destructive: false,
+			details: 'Add value',
+			meta: { enum: { name: 'status', values: ['active', 'pending'] }, value: 'pending', after: undefined },
+		}]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toBe("ALTER TYPE \"status\" ADD VALUE IF NOT EXISTS 'pending';");
+	});
+
+	it('should generate DROP TYPE for removed enum', () => {
+		const diff = makeDiff([{
+			kind: 'drop_enum',
+			table: '',
+			destructive: true,
+			details: 'Drop enum',
+			meta: { enum: { name: 'status', values: ['active', 'inactive'] } },
+		}]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toBe('DROP TYPE IF EXISTS "status" CASCADE;');
+	});
+
+	it('should order create_enum BEFORE create_table', () => {
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'users',
+				destructive: false,
+				details: '',
+				meta: {
+					table: makeTable('users', [makeCol({ name: 'id', type: 'integer' })]),
+				},
+			},
+			{
+				kind: 'create_enum',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { enum: { name: 'status', values: ['a'] } },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		const typeIdx = sql.findIndex((s) => s.includes('CREATE TYPE'));
+		const tableIdx = sql.findIndex((s) => s.includes('CREATE TABLE'));
+		expect(typeIdx).toBeGreaterThanOrEqual(0);
+		expect(typeIdx).toBeLessThan(tableIdx);
+	});
+
+	it('should order alter_enum_add_value AFTER create_index', () => {
+		const diff = makeDiff([
+			{
+				kind: 'alter_enum_add_value',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { enum: { name: 'status', values: ['a', 'b'] }, value: 'b', after: 'a' },
+			},
+			{
+				kind: 'create_index',
+				table: 'users',
+				destructive: false,
+				details: '',
+				meta: { index: { name: 'idx_users_name', columns: ['name'], unique: false } },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		const indexIdx = sql.findIndex((s) => s.includes('INDEX'));
+		const addValueIdx = sql.findIndex((s) => s.includes('ADD VALUE'));
+		expect(indexIdx).toBeGreaterThanOrEqual(0);
+		expect(addValueIdx).toBeGreaterThan(indexIdx);
+	});
+
+	it('should order drop_enum BEFORE create_enum in same diff', () => {
+		const diff = makeDiff([
+			{
+				kind: 'create_enum',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { enum: { name: 'new_status', values: ['a'] } },
+			},
+			{
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: '',
+				meta: { enum: { name: 'old_status', values: ['x'] } },
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		const dropIdx = sql.findIndex((s) => s.includes('DROP TYPE'));
+		const createIdx = sql.findIndex((s) => s.includes('CREATE TYPE'));
+		expect(dropIdx).toBeGreaterThanOrEqual(0);
+		expect(dropIdx).toBeLessThan(createIdx);
+	});
+
+	describe('DOWN SQL for ENUM types', () => {
+		it('create_enum DOWN should DROP the type', () => {
+			const diff = makeDiff([{
+				kind: 'create_enum',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { enum: { name: 'status', values: ['a', 'b'] } },
+			}]);
+			const sql = generateDownSQL(diff);
+			expect(sql[0]).toBe('DROP TYPE IF EXISTS "status" CASCADE;');
+		});
+
+		it('drop_enum DOWN should recreate the type', () => {
+			const diff = makeDiff([{
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: '',
+				meta: { enum: { name: 'status', values: ['active', 'inactive'] } },
+			}]);
+			const sql = generateDownSQL(diff);
+			expect(sql[0]).toBe("CREATE TYPE \"status\" AS ENUM ('active', 'inactive');");
+		});
+
+		it('alter_enum_add_value DOWN should emit a comment', () => {
+			const diff = makeDiff([{
+				kind: 'alter_enum_add_value',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { enum: { name: 'status', values: ['a', 'b'] }, value: 'b', after: 'a' },
+			}]);
+			const sql = generateDownSQL(diff);
+			expect(sql[0]).toContain('cannot be reversed');
+		});
+	});
+});

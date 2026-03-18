@@ -402,8 +402,8 @@ describe('introspect', () => {
 		await introspect(pool, { schema: 'tenant_1' });
 
 		const mockQuery = pool.query as ReturnType<typeof vi.fn>;
-		// All 4 queries (columns, PKs, FKs, indexes) should pass 'tenant_1' as parameter
-		expect(mockQuery).toHaveBeenCalledTimes(5);
+		// All 6 queries (columns, PKs, FKs, indexes, enums, checks) should pass 'tenant_1' as parameter
+		expect(mockQuery).toHaveBeenCalledTimes(6);
 		for (const call of mockQuery.mock.calls) {
 			expect(call[1]).toEqual(['tenant_1']);
 		}

@@ -11,8 +11,10 @@
 export type {
 	AmbiguityCheckResult,
 	Cardinality,
+	CheckConstraintIR,
 	ColumnIR,
 	ColumnType,
+	EnumIR,
 	FilterStrategy,
 	ForeignKeyIR,
 	IncludeStrategy,

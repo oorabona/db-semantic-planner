@@ -877,3 +877,98 @@ describe('CHECK constraints in DDL', () => {
 		expect(indexIdx).toBeGreaterThan(fkIdx);
 	});
 });
+
+
+describe('ENUM types in DDL', () => {
+	it('should emit CREATE TYPE before CREATE TABLE', () => {
+		const schema = {
+			tables: new Map([
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						foreignKeys: [],
+						indexes: [],
+					} satisfies import('@dbsp/types').TableIR,
+				],
+			]),
+			relations: new Map(),
+			enums: new Map([
+				['status', { name: 'status', values: ['active', 'inactive'] }],
+			]),
+			getTable: () => undefined,
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema);
+		const typeIdx = stmts.findIndex((s) => s.includes('CREATE TYPE'));
+		const tableIdx = stmts.findIndex((s) => s.includes('CREATE TABLE'));
+		expect(typeIdx).toBeGreaterThanOrEqual(0);
+		expect(typeIdx).toBeLessThan(tableIdx);
+	});
+
+	it('should emit correct CREATE TYPE SQL', () => {
+		const schema = {
+			tables: new Map(),
+			relations: new Map(),
+			enums: new Map([
+				['status', { name: 'status', values: ['active', 'inactive', 'pending'] }],
+			]),
+			getTable: () => undefined,
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema);
+		expect(stmts).toContain("CREATE TYPE \"status\" AS ENUM ('active', 'inactive', 'pending');");
+	});
+
+	it('should emit schema-qualified CREATE TYPE when schemaName is set', () => {
+		const schema = {
+			tables: new Map(),
+			relations: new Map(),
+			enums: new Map([
+				['role', { name: 'role', values: ['admin', 'user'] }],
+			]),
+			getTable: () => undefined,
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema, { schemaName: 'public' });
+		expect(stmts).toContain("CREATE TYPE \"public\".\"role\" AS ENUM ('admin', 'user');");
+	});
+
+	it('should skip ENUM pass when schema has no enums', () => {
+		const schema = {
+			tables: new Map([
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						foreignKeys: [],
+						indexes: [],
+					} satisfies import('@dbsp/types').TableIR,
+				],
+			]),
+			relations: new Map(),
+			getTable: () => undefined,
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema);
+		expect(stmts.some((s) => s.includes('CREATE TYPE'))).toBe(false);
+	});
+});

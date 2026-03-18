@@ -11,6 +11,7 @@ import type {
 	CheckConstraintIR,
 	ColumnIR,
 	DbCasing,
+	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
 	ModelIR,
@@ -46,7 +47,11 @@ export type ChangeKind =
 	| 'drop_index'
 	// CHECK constraints
 	| 'add_check_constraint'
-	| 'drop_check_constraint';
+	| 'drop_check_constraint'
+	// ENUM types
+	| 'create_enum'
+	| 'alter_enum_add_value'
+	| 'drop_enum';
 
 export interface SchemaChange {
 	readonly kind: ChangeKind;
@@ -119,6 +124,9 @@ export function compareSchemata(
 		? normalizeTableMap(schema.tables, plugin)
 		: new Map(schema.tables);
 	const dbTables = new Map(db.tables);
+
+	// 0. Compare ENUM types (schema-level, before tables)
+	compareEnums(schema, db, changes);
 
 	// 1. Tables that exist in schema but not in DB → create_table
 	for (const [name, schemaTable] of schemaTables) {
@@ -649,6 +657,74 @@ function compareCheckConstraints(
 	}
 }
 
+// ============================================================================
+// ENUM comparison (schema-level, not table-level)
+// ============================================================================
+
+function compareEnums(
+	schema: ModelIR,
+	db: ModelIR,
+	changes: SchemaChange[],
+): void {
+	const schemaEnums = schema.enums ?? new Map<string, EnumIR>();
+	const dbEnums = db.enums ?? new Map<string, EnumIR>();
+
+	// Enums in schema but not in DB → create
+	for (const [name, enumDef] of schemaEnums) {
+		if (!dbEnums.has(name)) {
+			changes.push({
+				kind: 'create_enum',
+				table: '',
+				destructive: false,
+				details: `Create enum "${name}" with values (${enumDef.values.join(', ')})`,
+				meta: { enum: enumDef },
+			});
+		} else {
+			// Exists in both → check for new values
+			const dbEnum = dbEnums.get(name)!;
+			// Find values in schema that are not in DB → add
+			for (let i = 0; i < enumDef.values.length; i++) {
+				const val = enumDef.values[i]!;
+				if (!dbEnum.values.includes(val)) {
+					const prevVal = i > 0 ? enumDef.values[i - 1] : undefined;
+					changes.push({
+						kind: 'alter_enum_add_value',
+						table: '',
+						destructive: false,
+						details: `Add value '${val}' to enum "${name}"${prevVal ? ` after '${prevVal}'` : ''}`,
+						meta: { enum: enumDef, value: val, after: prevVal },
+					});
+				}
+			}
+			// Values in DB but not in schema → PG limitation, flag as error
+			for (const val of dbEnum.values) {
+				if (!enumDef.values.includes(val)) {
+					changes.push({
+						kind: 'drop_enum',
+						table: '',
+						destructive: true,
+						details: `Cannot remove value '${val}' from enum "${name}" — PostgreSQL limitation. Requires DROP TYPE + CREATE TYPE (data migration needed).`,
+						meta: { enum: dbEnum, removedValue: val, isValueRemoval: true },
+					});
+				}
+			}
+		}
+	}
+
+	// Enums in DB but not in schema → drop
+	for (const [name, enumDef] of dbEnums) {
+		if (!schemaEnums.has(name)) {
+			changes.push({
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: `Drop enum "${name}"`,
+				meta: { enum: enumDef },
+			});
+		}
+	}
+}
+
 function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 	const tables = { added: 0, dropped: 0 };
 	const columns = { added: 0, dropped: 0, altered: 0 };
@@ -692,6 +768,11 @@ function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 				break;
 			case 'drop_index':
 				indexes.dropped++;
+				break;
+			case 'create_enum':
+			case 'alter_enum_add_value':
+			case 'drop_enum':
+				// ENUM changes are schema-level; not counted in table/column/index summaries
 				break;
 		}
 	}
