@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { compile, parse } from '../index.js';
+import type { NqlSelectExpression } from '../parser/ast.js';
 
 /**
  * Coverage tests for visit-expression.ts branches.
@@ -1109,7 +1110,7 @@ describe('visit-expression R2: subtraction operator', () => {
 		if (selectClause && 'items' in selectClause) {
 			const items = selectClause.items;
 			expect(items.length).toBeGreaterThan(0);
-			const expr = items[0]!.expression;
+			const expr = (items[0]! as NqlSelectExpression).expression;
 			expect(expr.type).toBe('binary');
 			if (expr.type === 'binary') {
 				expect(expr.operator).toBe('-');
@@ -1129,7 +1130,7 @@ describe('visit-expression R2: division and modulo operators', () => {
 		if (stmt.type !== 'query') return;
 		const selectClause = stmt.clauses.find((c) => c.type === 'select');
 		if (selectClause && 'items' in selectClause) {
-			const expr = selectClause.items[0]!.expression;
+			const expr = (selectClause.items[0]! as NqlSelectExpression).expression;
 			expect(expr.type).toBe('binary');
 			if (expr.type === 'binary') {
 				expect(expr.operator).toBe('/');
@@ -1143,7 +1144,7 @@ describe('visit-expression R2: division and modulo operators', () => {
 		if (stmt.type !== 'query') return;
 		const selectClause = stmt.clauses.find((c) => c.type === 'select');
 		if (selectClause && 'items' in selectClause) {
-			const expr = selectClause.items[0]!.expression;
+			const expr = (selectClause.items[0]! as NqlSelectExpression).expression;
 			expect(expr.type).toBe('binary');
 			if (expr.type === 'binary') {
 				expect(expr.operator).toBe('%');
@@ -1182,7 +1183,7 @@ describe('visit-expression R2: CASE expressions', () => {
 		if (stmt.type !== 'query') return;
 		const selectClause = stmt.clauses.find((c) => c.type === 'select');
 		if (selectClause && 'items' in selectClause) {
-			const expr = selectClause.items[0]!.expression;
+			const expr = (selectClause.items[0]! as NqlSelectExpression).expression;
 			expect(expr.type).toBe('case');
 			if (expr.type === 'case') {
 				expect(expr.whenClauses.length).toBe(2);
@@ -1199,7 +1200,7 @@ describe('visit-expression R2: CASE expressions', () => {
 		if (stmt.type !== 'query') return;
 		const selectClause = stmt.clauses.find((c) => c.type === 'select');
 		if (selectClause && 'items' in selectClause) {
-			const expr = selectClause.items[0]!.expression;
+			const expr = (selectClause.items[0]! as NqlSelectExpression).expression;
 			expect(expr.type).toBe('case');
 			if (expr.type === 'case') {
 				expect(expr.subject).toBeDefined();
@@ -1216,11 +1217,11 @@ describe('visit-expression R2: CASE expressions', () => {
 		if (stmt.type !== 'query') return;
 		const selectClause = stmt.clauses.find((c) => c.type === 'select');
 		if (selectClause && 'items' in selectClause) {
-			const expr = selectClause.items[0]!.expression;
+			const expr = (selectClause.items[0]! as NqlSelectExpression).expression;
 			expect(expr.type).toBe('case');
 			if (expr.type === 'case') {
 				expect(expr.whenClauses.length).toBe(1);
-				expect(expr.elseResult).toBeUndefined();
+				expect(expr.elseClause).toBeUndefined();
 			}
 		}
 	});
@@ -1237,7 +1238,7 @@ describe('visit-expression R2: path with depth hint', () => {
 		if (stmt.type !== 'query') return;
 		const selectClause = stmt.clauses.find((c) => c.type === 'select');
 		if (selectClause && 'items' in selectClause) {
-			const expr = selectClause.items[0]!.expression;
+			const expr = (selectClause.items[0]! as NqlSelectExpression).expression;
 			expect(expr.type).toBe('path');
 			if (expr.type === 'path') {
 				expect(expr.depthHint).toBe(3);

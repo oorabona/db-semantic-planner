@@ -24,6 +24,8 @@ import { describe, expect, it } from 'vitest';
 import { compile } from '../index.js';
 import type { CompileResult } from './index.js';
 
+type MutationWithWhere = UpdateIntent | DeleteIntent;
+
 // ---------------------------------------------------------------------------
 // Helper
 // ---------------------------------------------------------------------------
@@ -698,7 +700,7 @@ describe('resolveBindingsInWhere with bound IN', () => {
 		);
 
 		expect(result.mutation).toBeDefined();
-		const where = result.mutation?.where;
+		const where = (result.mutation as MutationWithWhere)?.where;
 		expect(where).toBeDefined();
 		expect(where?.kind).toBe('in');
 		// The IN clause should have a subquery from the bound CTE
@@ -713,7 +715,7 @@ describe('resolveBindingsInWhere with bound IN', () => {
 		);
 
 		expect(result.mutation).toBeDefined();
-		const where = result.mutation?.where;
+		const where = (result.mutation as MutationWithWhere)?.where;
 		expect(where).toBeDefined();
 		expect(where?.kind).toBe('in');
 		const inWhere = where as WhereInIntent;
@@ -726,7 +728,7 @@ describe('resolveBindingsInWhere with bound IN', () => {
 		);
 
 		expect(result.mutation).toBeDefined();
-		const where = result.mutation?.where;
+		const where = (result.mutation as MutationWithWhere)?.where;
 		expect(where).toBeDefined();
 		// NOT wraps the in clause
 		expect(where?.kind).toBe('not');
@@ -738,7 +740,7 @@ describe('resolveBindingsInWhere with bound IN', () => {
 		);
 
 		expect(result.mutation).toBeDefined();
-		const where = result.mutation?.where;
+		const where = (result.mutation as MutationWithWhere)?.where;
 		expect(where).toBeDefined();
 		expect(where?.kind).toBe('and');
 	});
@@ -755,7 +757,7 @@ describe('resolveBindingsInWhere NOT path', () => {
 		);
 
 		expect(result.mutation).toBeDefined();
-		const where = result.mutation?.where;
+		const where = (result.mutation as MutationWithWhere)?.where;
 		expect(where?.kind).toBe('not');
 	});
 });
@@ -771,7 +773,7 @@ describe('resolveBindingsInWhere AND/OR unchanged', () => {
 		);
 
 		expect(result.mutation).toBeDefined();
-		const where = result.mutation?.where;
+		const where = (result.mutation as MutationWithWhere)?.where;
 		expect(where?.kind).toBe('and');
 	});
 });
