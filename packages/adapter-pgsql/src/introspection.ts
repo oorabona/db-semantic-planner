@@ -197,7 +197,10 @@ export async function introspect(
 			 ORDER BY tc.constraint_name, kcu.ordinal_position`,
 			[schema],
 		),
-		// 4. Indexes (excluding PK-backing indexes)
+		// 4. Indexes (excluding PK-backing indexes and unique-constraint-backing indexes).
+		// Unique constraints created via col.unique / UNIQUE keyword in DDL produce an implicit
+		// backing index that is NOT a user-defined index — it is tracked via col.unique on the
+		// ColumnIR instead. Including it here would cause spurious drop_index diffs on roundtrip.
 		pool.query<RawIndex>(
 			`SELECT
 			   i.relname AS index_name,
@@ -216,6 +219,11 @@ export async function introspect(
 			 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
 			 WHERE n.nspname = $1
 			   AND NOT ix.indisprimary
+			   AND NOT EXISTS (
+			     SELECT 1 FROM pg_constraint c
+			     WHERE c.conindid = i.oid
+			       AND c.contype = 'u'
+			   )
 			 GROUP BY i.relname, t.relname, ix.indisunique, am.amname, ix.indpred, ix.indrelid, i.reloptions
 			 ORDER BY t.relname, i.relname`,
 			[schema],

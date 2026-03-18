@@ -857,7 +857,8 @@ function generateAddFKSQL(
 	const qualTable = qualifyTable(tableName, schemaName);
 	const constraintName = q(fkName(tableName, fk.columns));
 	const fkCols = fk.columns.map(q).join(', ');
-	const refTable = q(fk.references.table);
+	// Referenced table must also be schema-qualified to resolve within the same schema
+	const refTable = qualifyTable(fk.references.table, schemaName);
 	const refCols = fk.references.columns.map(q).join(', ');
 	const onDelete = fk.onDelete
 		? ` ON DELETE ${mapOnDeleteAction(fk.onDelete)}`
