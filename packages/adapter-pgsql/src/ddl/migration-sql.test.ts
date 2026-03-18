@@ -8,10 +8,11 @@
  * - Destructive change filtering
  */
 
+import { ModelIRImpl } from '@dbsp/core';
 import type { ColumnIR, ForeignKeyIR, IndexIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
-import type { SchemaChange, SchemaDiff } from './schema-diff.js';
+import { compareSchemata, type SchemaChange, type SchemaDiff } from './schema-diff.js';
 
 // ============================================================================
 // Test helpers
@@ -1271,6 +1272,217 @@ describe('generateDownSQL', () => {
 			expect(sql[3]).toContain('DROP COLUMN "notes"');
 			// Table DROP last
 			expect(sql[4]).toContain('DROP TABLE IF EXISTS "users"');
+		});
+	});
+
+	describe('compareSchemata + generateMigrationSQL (end-to-end, new table FK/index)', () => {
+		// Helper to build a minimal ModelIR from a list of TableIR
+		function makeModel(tables: TableIR[]): ModelIRImpl {
+			return new ModelIRImpl(
+				new Map(tables.map((t) => [t.name, t])),
+				new Map(),
+			);
+		}
+
+		// Helper to build a TableIR with optional FK/index arrays
+		function makeFullTable(
+			name: string,
+			columns: ColumnIR[],
+			opts: {
+				pk?: string | string[];
+				foreignKeys?: ForeignKeyIR[];
+				indexes?: IndexIR[];
+			} = {},
+		): TableIR {
+			return {
+				name,
+				columns,
+				...(opts.pk !== undefined ? { primaryKey: opts.pk } : {}),
+				foreignKeys: opts.foreignKeys ?? [],
+				indexes: opts.indexes ?? [],
+			};
+		}
+
+		it('emits add_foreign_key for a new table with a FK (CREATE TABLE before ALTER TABLE)', () => {
+			const usersTable = makeFullTable(
+				'users',
+				[makeCol({ name: 'id', type: 'integer', autoIncrement: true })],
+				{ pk: 'id' },
+			);
+			const schema = makeModel([
+				usersTable,
+				makeFullTable(
+					'orders',
+					[
+						makeCol({ name: 'id', type: 'integer', autoIncrement: true }),
+						makeCol({ name: 'user_id', type: 'integer', nullable: false }),
+					],
+					{
+						pk: 'id',
+						foreignKeys: [
+							{
+								columns: ['user_id'],
+								references: { table: 'users', columns: ['id'] },
+							},
+						],
+					},
+				),
+			]);
+			const db = makeModel([]); // empty DB
+
+			const diff = compareSchemata(schema, db);
+			const sql = generateMigrationSQL(diff);
+
+			// Must have CREATE TABLE and ADD CONSTRAINT ... FOREIGN KEY
+			const createIdx = sql.findIndex((s) => s.startsWith('CREATE TABLE "orders"'));
+			const fkIdx = sql.findIndex((s) => s.includes('FOREIGN KEY'));
+
+			expect(createIdx).toBeGreaterThanOrEqual(0);
+			expect(fkIdx).toBeGreaterThanOrEqual(0);
+			// CREATE TABLE (phase 5) must come before ADD FK (phase 9)
+			expect(fkIdx).toBeGreaterThan(createIdx);
+			// Exact FK statement
+			expect(sql[fkIdx]).toBe(
+				'ALTER TABLE "orders" ADD CONSTRAINT "fk_orders_user_id" FOREIGN KEY ("user_id") REFERENCES "users" ("id");',
+			);
+		});
+
+		it('emits create_index for a new table with an index (CREATE TABLE before CREATE INDEX)', () => {
+			const schema = makeModel([
+				makeFullTable(
+					'users',
+					[
+						makeCol({ name: 'id', type: 'integer', autoIncrement: true }),
+						makeCol({ name: 'email', type: 'string', nullable: false }),
+					],
+					{
+						pk: 'id',
+						indexes: [
+							{ name: 'idx_users_email', columns: ['email'], unique: true },
+						],
+					},
+				),
+			]);
+			const db = makeModel([]);
+
+			const diff = compareSchemata(schema, db);
+			const sql = generateMigrationSQL(diff);
+
+			const createIdx = sql.findIndex((s) => s.startsWith('CREATE TABLE "users"'));
+			const idxIdx = sql.findIndex((s) => s.includes('CREATE UNIQUE INDEX'));
+
+			expect(createIdx).toBeGreaterThanOrEqual(0);
+			expect(idxIdx).toBeGreaterThanOrEqual(0);
+			// CREATE TABLE (phase 5) must come before CREATE INDEX (phase 11)
+			expect(idxIdx).toBeGreaterThan(createIdx);
+			expect(sql[idxIdx]).toBe(
+				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email" ON "users" ("email");',
+			);
+		});
+
+		it('emits CREATE TABLE → FK (phase 9) → INDEX (phase 11) in topological order', () => {
+			const usersTable = makeFullTable(
+				'users',
+				[makeCol({ name: 'id', type: 'integer', autoIncrement: true })],
+				{ pk: 'id' },
+			);
+			const schema = makeModel([
+				usersTable,
+				makeFullTable(
+					'orders',
+					[
+						makeCol({ name: 'id', type: 'integer', autoIncrement: true }),
+						makeCol({ name: 'user_id', type: 'integer', nullable: false }),
+						makeCol({ name: 'sku', type: 'string', nullable: false }),
+					],
+					{
+						pk: 'id',
+						foreignKeys: [
+							{
+								columns: ['user_id'],
+								references: { table: 'users', columns: ['id'] },
+							},
+						],
+						indexes: [
+							{ columns: ['sku'], unique: false },
+						],
+					},
+				),
+			]);
+			const db = makeModel([]);
+
+			const diff = compareSchemata(schema, db);
+			const sql = generateMigrationSQL(diff);
+
+			const createIdx = sql.findIndex((s) => s.startsWith('CREATE TABLE "orders"'));
+			const fkIdx = sql.findIndex((s) => s.includes('FOREIGN KEY'));
+			const idxIdx = sql.findIndex((s) => s.includes('CREATE INDEX'));
+
+			expect(createIdx).toBeGreaterThanOrEqual(0);
+			expect(fkIdx).toBeGreaterThanOrEqual(0);
+			expect(idxIdx).toBeGreaterThanOrEqual(0);
+			// Phase order: 5 (create_table) < 9 (add_foreign_key) < 11 (create_index)
+			expect(fkIdx).toBeGreaterThan(createIdx);
+			expect(idxIdx).toBeGreaterThan(fkIdx);
+		});
+
+		it('does not emit FK/index changes for existing tables (regression: existing diff path unchanged)', () => {
+			const existingTable = makeFullTable(
+				'users',
+				[makeCol({ name: 'id', type: 'integer', autoIncrement: true })],
+				{
+					pk: 'id',
+					foreignKeys: [],
+					indexes: [{ name: 'idx_users_id', columns: ['id'], unique: false }],
+				},
+			);
+			// DB already has the table with the same index
+			const schema = makeModel([existingTable]);
+			const db = makeModel([existingTable]);
+
+			const diff = compareSchemata(schema, db);
+			const sql = generateMigrationSQL(diff);
+
+			// No changes needed when schema matches DB exactly
+			expect(sql).toHaveLength(0);
+		});
+
+		it('emits FK with onDelete for a new table', () => {
+			const postsTable = makeFullTable(
+				'posts',
+				[makeCol({ name: 'id', type: 'integer', autoIncrement: true })],
+				{ pk: 'id' },
+			);
+			const schema = makeModel([
+				postsTable,
+				makeFullTable(
+					'comments',
+					[
+						makeCol({ name: 'id', type: 'integer', autoIncrement: true }),
+						makeCol({ name: 'post_id', type: 'integer', nullable: false }),
+					],
+					{
+						pk: 'id',
+						foreignKeys: [
+							{
+								columns: ['post_id'],
+								references: { table: 'posts', columns: ['id'] },
+								onDelete: 'CASCADE',
+							},
+						],
+					},
+				),
+			]);
+			const db = makeModel([]);
+
+			const diff = compareSchemata(schema, db);
+			const sql = generateMigrationSQL(diff);
+
+			const fkIdx = sql.findIndex((s) => s.includes('FOREIGN KEY'));
+			expect(fkIdx).toBeGreaterThanOrEqual(0);
+			expect(sql[fkIdx]).toBe(
+				'ALTER TABLE "comments" ADD CONSTRAINT "fk_comments_post_id" FOREIGN KEY ("post_id") REFERENCES "posts" ("id") ON DELETE CASCADE;',
+			);
 		});
 	});
 
