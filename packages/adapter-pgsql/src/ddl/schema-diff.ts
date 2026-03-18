@@ -617,13 +617,38 @@ function compareIndexes(
 	db: TableIR,
 	changes: SchemaChange[],
 ): void {
+	// Build the set of FK auto-index keys.
+	// generateDDL (fkAutoIndex=true default) creates an index for every single-column FK that
+	// does not already have an explicit index.  These indexes are managed automatically — they
+	// should never trigger create_index or drop_index diffs.
+	const explicitIndexCols = new Set(
+		schema.indexes.flatMap((idx) =>
+			idx.columns.length === 1 ? idx.columns : [],
+		),
+	);
+	const autoFkIndexKeys = new Set(
+		schema.foreignKeys
+			.filter(
+				(fk) =>
+					fk.columns.length === 1 &&
+					fk.columns[0] !== undefined &&
+					!explicitIndexCols.has(fk.columns[0]),
+			)
+			.map((fk) =>
+				indexKey({
+					columns: fk.columns,
+					unique: false,
+				}),
+			),
+	);
+
 	// Index identity: columns + unique flag (name is cosmetic)
 	const schemaIdxMap = new Map(
 		schema.indexes.map((idx) => [indexKey(idx), idx]),
 	);
 	const dbIdxMap = new Map(db.indexes.map((idx) => [indexKey(idx), idx]));
 
-	// Indexes in schema but not in DB → create
+	// Explicit indexes in schema but not in DB → create
 	for (const [key, idx] of schemaIdxMap) {
 		if (!dbIdxMap.has(key)) {
 			changes.push({
@@ -636,9 +661,9 @@ function compareIndexes(
 		}
 	}
 
-	// Indexes in DB but not in schema → drop
+	// Indexes in DB but not in schema → drop (skip auto-FK indexes — they are auto-managed)
 	for (const [key, idx] of dbIdxMap) {
-		if (!schemaIdxMap.has(key)) {
+		if (!schemaIdxMap.has(key) && !autoFkIndexKeys.has(key)) {
 			changes.push({
 				kind: 'drop_index',
 				table: schema.name,

@@ -391,8 +391,8 @@ function generateAlterTableAddFK(
 		.map((col) => quoteIdentifier(naming.toDatabase(col)))
 		.join(', ');
 
-	// Referenced table and columns
-	const refTable = quoteIdentifier(naming.toDatabase(fk.references.table));
+	// Referenced table and columns (must also be schema-qualified to match the target table's schema)
+	const refTable = qualifyTable(fk.references.table, schemaName, naming);
 	const refCols = fk.references.columns
 		.map((col) => quoteIdentifier(naming.toDatabase(col)))
 		.join(', ');
