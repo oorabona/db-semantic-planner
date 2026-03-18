@@ -70,6 +70,9 @@ interface RawColumn {
 	udt_name: string;
 	is_nullable: string;
 	column_default: string | null;
+	collation_name: string | null;
+	is_identity: string;
+	identity_generation: string | null;
 }
 
 interface RawPrimaryKey {
@@ -123,9 +126,10 @@ export async function introspect(
 	const schema = options?.schema ?? 'public';
 	const warnings: string[] = [];
 
-	// Step 1: Fetch columns
+	// Step 1: Fetch columns (including identity and collation)
 	const columnsResult = await pool.query<RawColumn>(
-		`SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default
+		`SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default,
+		        collation_name, is_identity, identity_generation
 		 FROM information_schema.columns
 		 WHERE table_schema = $1
 		 ORDER BY table_name, ordinal_position`,
@@ -223,7 +227,38 @@ export async function introspect(
 		enumMap.set(row.name, { name: row.name, values });
 	}
 
-	// Step 6: Fetch CHECK constraints
+	// Step 6: Fetch comments (table and column level) from pg_description
+	const commentsResult = await pool.query<{
+		table_name: string;
+		column_name: string | null;
+		comment: string;
+	}>(
+		`SELECT
+		   c.relname AS table_name,
+		   a.attname AS column_name,
+		   d.description AS comment
+		 FROM pg_description d
+		 JOIN pg_class c ON c.oid = d.objoid
+		 JOIN pg_namespace n ON n.oid = c.relnamespace
+		 LEFT JOIN pg_attribute a ON a.attrelid = d.objoid AND a.attnum = d.objsubid
+		 WHERE n.nspname = $1
+		   AND d.objsubid >= 0`,
+		[schema],
+	);
+
+	// Build comment maps: table comments (objsubid=0) and column comments (objsubid>0)
+	const tableComments = new Map<string, string>();
+	const columnComments = new Map<string, string>(); // key: "table.column"
+	for (const row of commentsResult.rows) {
+		if (row.column_name === null) {
+			// objsubid = 0 → table comment
+			tableComments.set(row.table_name, row.comment);
+		} else {
+			columnComments.set(`${row.table_name}.${row.column_name}`, row.comment);
+		}
+	}
+
+	// Step 7: Fetch CHECK constraints
 	const checksResult = await pool.query<{
 		name: string;
 		expression: string;
@@ -361,13 +396,35 @@ export async function introspect(
 		const rawCols = tableColumns.get(tableName) ?? [];
 		const pkCols = tablePKs.get(tableName);
 
-		const columns: ColumnIR[] = rawCols.map((col) => ({
-			name: col.column_name,
-			type: mapPgType(col.data_type, col.udt_name),
-			nullable: col.is_nullable === 'YES',
-			...(col.column_default != null ? { default: col.column_default } : {}),
-			dbType: col.udt_name,
-		}));
+		const columns: ColumnIR[] = rawCols.map((col) => {
+			// Map identity_generation: 'ALWAYS' → 'always', 'BY DEFAULT' → 'byDefault'
+			const identity =
+				col.is_identity === 'YES' && col.identity_generation
+					? col.identity_generation === 'ALWAYS'
+						? ('always' as const)
+						: ('byDefault' as const)
+					: undefined;
+
+			// Collation: skip null and the PostgreSQL default collation name
+			const collation =
+				col.collation_name && col.collation_name !== 'default'
+					? col.collation_name
+					: undefined;
+
+			const colComment =
+				columnComments.get(`${tableName}.${col.column_name}`) ?? undefined;
+
+			return {
+				name: col.column_name,
+				type: mapPgType(col.data_type, col.udt_name),
+				nullable: col.is_nullable === 'YES',
+				...(col.column_default != null ? { default: col.column_default } : {}),
+				dbType: col.udt_name,
+				...(collation ? { collation } : {}),
+				...(identity ? { identity } : {}),
+				...(colComment ? { comment: colComment } : {}),
+			};
+		});
 
 		// Build FK list for this table
 		const foreignKeys: ForeignKeyIR[] = [];
@@ -391,6 +448,7 @@ export async function introspect(
 		}
 
 		const checks = tableChecks.get(tableName);
+		const tableComment = tableComments.get(tableName);
 		const table: TableIR = {
 			name: tableName,
 			columns,
@@ -400,6 +458,7 @@ export async function introspect(
 			foreignKeys,
 			indexes: tableIndexes.get(tableName) ?? [],
 			...(checks && checks.length > 0 ? { checkConstraints: checks } : {}),
+			...(tableComment ? { comment: tableComment } : {}),
 		};
 		tables.set(tableName, table);
 	}

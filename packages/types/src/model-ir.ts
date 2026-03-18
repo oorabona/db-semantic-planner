@@ -190,6 +190,15 @@ export interface ColumnIR {
 
 	/** Whether column auto-increments (SERIAL, IDENTITY, AUTOINCREMENT) */
 	readonly autoIncrement?: boolean;
+
+	/** Collation name for string columns */
+	readonly collation?: string;
+
+	/** Column comment (COMMENT ON COLUMN) */
+	readonly comment?: string;
+
+	/** Identity column generation strategy (GENERATED {ALWAYS|BY DEFAULT} AS IDENTITY) */
+	readonly identity?: 'always' | 'byDefault';
 }
 
 /**
@@ -300,6 +309,9 @@ export interface TableIR {
 	 * For multi-FK tables, roles are scoped (e.g., manager.ascendant).
 	 */
 	readonly pseudoColumns?: readonly PseudoColumnMetadata[];
+
+	/** Table-level comment (COMMENT ON TABLE) */
+	readonly comment?: string;
 }
 
 /**

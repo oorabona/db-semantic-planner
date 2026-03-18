@@ -1644,3 +1644,134 @@ describe('FK enhancements — compareForeignKeys', () => {
 		expect(diff.changes.filter((c) => c.kind === 'alter_foreign_key')).toHaveLength(0);
 	});
 });
+
+// ============================================================================
+// Block 5: Column Enhancements — collation, identity, comments
+// ============================================================================
+
+describe('Column enhancements', () => {
+	it('should detect collation change', () => {
+		const schema = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'name', collation: 'en_US' })] }),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'name' })] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'alter_column_collation');
+		expect(change).toBeDefined();
+		expect(change?.column).toBe('name');
+		expect(change?.destructive).toBe(false);
+	});
+
+	it('should detect identity added', () => {
+		const schema = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'id', identity: 'always' })] }),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'id' })] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'alter_column_identity');
+		expect(change).toBeDefined();
+		expect(change?.column).toBe('id');
+		expect(change?.meta?.column).toMatchObject({ identity: 'always' });
+		expect(change?.meta?.previousIdentity).toBeUndefined();
+	});
+
+	it('should detect identity removed', () => {
+		const schema = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'id' })] }),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'id', identity: 'byDefault' })] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'alter_column_identity');
+		expect(change).toBeDefined();
+		expect(change?.meta?.previousIdentity).toBe('byDefault');
+	});
+
+	it('should detect identity type change (always → byDefault)', () => {
+		const schema = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'id', identity: 'byDefault' })] }),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'id', identity: 'always' })] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'alter_column_identity');
+		expect(change).toBeDefined();
+		expect(change?.meta?.column).toMatchObject({ identity: 'byDefault' });
+		expect(change?.meta?.previousIdentity).toBe('always');
+	});
+
+	it('should detect table comment added', () => {
+		const schema = makeModel([
+			makeTable({ name: 'users', columns: [], comment: 'User accounts' }),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'add_comment');
+		expect(change).toBeDefined();
+		expect(change?.table).toBe('users');
+		expect(change?.column).toBeUndefined();
+		expect(change?.meta?.target).toBe('table');
+		expect(change?.meta?.comment).toBe('User accounts');
+	});
+
+	it('should detect column comment added', () => {
+		const schema = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'email', comment: 'Primary email' })] }),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'email' })] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'add_comment');
+		expect(change).toBeDefined();
+		expect(change?.column).toBe('email');
+		expect(change?.meta?.target).toBe('column');
+		expect(change?.meta?.comment).toBe('Primary email');
+	});
+
+	it('should detect comment removed (→ drop_comment)', () => {
+		const schema = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'email' })] }),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'email', comment: 'Old comment' })] }),
+		]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'drop_comment');
+		expect(change).toBeDefined();
+		expect(change?.column).toBe('email');
+		expect(change?.meta?.target).toBe('column');
+	});
+
+	it('should ignore identical collation', () => {
+		const col = makeCol({ name: 'name', collation: 'en_US' });
+		const schema = makeModel([makeTable({ name: 'users', columns: [col] })]);
+		const db = makeModel([makeTable({ name: 'users', columns: [col] })]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.changes.filter((c) => c.kind === 'alter_column_collation')).toHaveLength(0);
+	});
+
+	it('should ignore identical identity', () => {
+		const col = makeCol({ name: 'id', identity: 'always' });
+		const schema = makeModel([makeTable({ name: 'users', columns: [col] })]);
+		const db = makeModel([makeTable({ name: 'users', columns: [col] })]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.changes.filter((c) => c.kind === 'alter_column_identity')).toHaveLength(0);
+	});
+
+	it('should ignore identical comment', () => {
+		const table = makeTable({ name: 'users', columns: [], comment: 'Same comment' });
+		const schema = makeModel([table]);
+		const db = makeModel([table]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.changes.filter((c) => c.kind === 'add_comment' || c.kind === 'drop_comment')).toHaveLength(0);
+	});
+});

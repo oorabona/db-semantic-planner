@@ -85,6 +85,7 @@ export interface MigrationSQLOptions {
  * 12. CREATE indexes
  * 13. ADD CHECK constraints
  * 14. ALTER ENUM ADD VALUE (must be last — has transaction visibility caveats in PG)
+ * 15. COMMENT ON TABLE / COLUMN (very last)
  */
 export function generateMigrationSQL(
 	diff: SchemaDiff,
@@ -115,6 +116,7 @@ export function generateMigrationSQL(
 		[], // 12: create index
 		[], // 13: add CHECK constraint
 		[], // 14: alter ENUM add value (must be after CREATE TABLE, outside transaction)
+		[], // 15: COMMENT ON TABLE / COLUMN (very last)
 	];
 
 	for (const change of changes) {
@@ -189,6 +191,8 @@ function getPhase(kind: SchemaChange['kind']): number {
 		case 'alter_column_type':
 		case 'alter_column_nullable':
 		case 'alter_column_default':
+		case 'alter_column_collation':
+		case 'alter_column_identity':
 			return 8;
 		case 'add_primary_key':
 			return 9;
@@ -202,6 +206,9 @@ function getPhase(kind: SchemaChange['kind']): number {
 			return 13;
 		case 'alter_enum_add_value':
 			return 14;
+		case 'add_comment':
+		case 'drop_comment':
+			return 15;
 	}
 }
 
@@ -381,6 +388,49 @@ function changeToUpSQL(
 			const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
 			return `DROP TYPE IF EXISTS ${enumName} CASCADE;`;
 		}
+
+		case 'alter_column_collation': {
+			const col = change.meta?.column as ColumnIR;
+			if (!col) return undefined;
+			const collation = col.collation ? ` COLLATE "${col.collation}"` : '';
+			const typeName = mapColumnType(col);
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${q(change.column!)} TYPE ${typeName}${collation};`;
+		}
+
+		case 'alter_column_identity': {
+			const col = change.meta?.column as ColumnIR;
+			const prevIdentity = change.meta?.previousIdentity as string | undefined;
+			if (!col) return undefined;
+			const table = qualifyTable(change.table, schemaName);
+			const column = q(change.column!);
+			if (!col.identity && prevIdentity) {
+				return `ALTER TABLE ${table} ALTER COLUMN ${column} DROP IDENTITY IF EXISTS;`;
+			}
+			if (col.identity && !prevIdentity) {
+				const gen = col.identity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
+				return `ALTER TABLE ${table} ALTER COLUMN ${column} ADD GENERATED ${gen} AS IDENTITY;`;
+			}
+			// Change from one type to another
+			const gen = col.identity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
+			return `ALTER TABLE ${table} ALTER COLUMN ${column} SET GENERATED ${gen};`;
+		}
+
+		case 'add_comment': {
+			const comment = change.meta?.comment as string;
+			const target = change.meta?.target as string;
+			if (target === 'table') {
+				return `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS '${comment.replace(/'/g, "''")}';`;
+			}
+			return `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${q(change.column!)} IS '${comment.replace(/'/g, "''")}';`;
+		}
+
+		case 'drop_comment': {
+			const target = change.meta?.target as string;
+			if (target === 'table') {
+				return `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS NULL;`;
+			}
+			return `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${q(change.column!)} IS NULL;`;
+		}
 	}
 }
 
@@ -514,6 +564,46 @@ function changeToDownSQL(
 		case 'alter_enum_add_value':
 			// DOWN: ALTER TYPE ADD VALUE cannot be reversed in PostgreSQL
 			return `-- ALTER TYPE ADD VALUE cannot be reversed in PostgreSQL`;
+
+		case 'alter_column_collation': {
+			// DOWN: restore previous collation — stored in db state, not in meta; emit warning
+			return `-- WARNING: Cannot reverse alter_column_collation "${change.table}"."${change.column}" -- previous collation unknown`;
+		}
+
+		case 'alter_column_identity': {
+			const col = change.meta?.column as ColumnIR | undefined;
+			const prevIdentity = change.meta?.previousIdentity as string | undefined;
+			if (!col) return undefined;
+			const table = qualifyTable(change.table, schemaName);
+			const column = q(change.column!);
+			// Reverse: restore previous identity state
+			if (prevIdentity && !col.identity) {
+				// Was identity, now not → re-add identity
+				const gen = prevIdentity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
+				return `ALTER TABLE ${table} ALTER COLUMN ${column} ADD GENERATED ${gen} AS IDENTITY;`;
+			}
+			if (!prevIdentity && col.identity) {
+				// Was not identity, now is → drop identity
+				return `ALTER TABLE ${table} ALTER COLUMN ${column} DROP IDENTITY IF EXISTS;`;
+			}
+			// Change between types → restore previous
+			const gen = prevIdentity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
+			return `ALTER TABLE ${table} ALTER COLUMN ${column} SET GENERATED ${gen};`;
+		}
+
+		case 'add_comment': {
+			// DOWN: remove the comment that was added
+			const target = change.meta?.target as string;
+			if (target === 'table') {
+				return `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS NULL;`;
+			}
+			return `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${q(change.column!)} IS NULL;`;
+		}
+
+		case 'drop_comment': {
+			// DOWN: cannot restore comment — value was lost
+			return `-- WARNING: Cannot reverse drop_comment "${change.table}"${change.column ? `."${change.column}"` : ''} -- comment text was lost`;
+		}
 	}
 }
 
