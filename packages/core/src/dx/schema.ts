@@ -20,6 +20,7 @@ import type { Mutable } from '@dbsp/types/internal';
 import type { DbCasing } from '../adapter.js';
 import { ModelIRImpl } from '../model-impl.js';
 import type {
+	CheckConstraintIR,
 	ColumnIR,
 	ColumnType,
 	ForeignKeyIR,
@@ -29,6 +30,7 @@ import type {
 	PseudoColumnMetadata,
 	RelationIR,
 	RelationType,
+	SequenceIR,
 	TableIR,
 } from '../model-ir.js';
 import { createPseudoColumnMetadata } from '../model-ir.js';
@@ -157,12 +159,30 @@ export type SchemaDefinition = Record<string, TableDef>;
  * });
  * ```
  */
+export interface SchemaIndexOptions {
+	/** Columns included in the index */
+	columns: string[];
+	/** Whether this is a unique index */
+	unique?: boolean;
+	/** Custom index name (auto-generated if not provided) */
+	name?: string;
+	/** Index access method (default: btree). E.g. 'gin', 'gist', 'hnsw', 'bm25' */
+	method?: string;
+	/** Partial index predicate (WHERE clause) */
+	where?: string;
+	/** Per-column operator class overrides. Key = column name, value = opclass name */
+	opclass?: Record<string, string>;
+	/** Index storage parameters (WITH clause). Key = param name, value = param value */
+	with?: Record<string, string>;
+}
+
 export interface SchemaTableOptions {
-	/** Composite indexes for this table */
-	indexes?: Array<{
-		columns: string[];
-		unique?: boolean;
-		name?: string;
+	/** Indexes for this table (simple, composite, partial, GIN, HNSW, BM25, etc.) */
+	indexes?: SchemaIndexOptions[];
+	/** CHECK constraints for this table */
+	checkConstraints?: Array<{
+		name: string;
+		expression: string;
 	}>;
 	/** Composite foreign keys for this table (use ref() with columns/references) */
 	foreignKeys?: RefDefinition[];
@@ -172,6 +192,25 @@ export interface SchemaTableOptions {
  * Per-table constraint options, keyed by table name.
  */
 export type SchemaConstraints = Record<string, SchemaTableOptions>;
+
+/**
+ * Top-level schema-wide DDL objects: extensions, sequences.
+ */
+export interface SchemaExtras {
+	/** PostgreSQL extensions to ensure (CREATE EXTENSION IF NOT EXISTS "name") */
+	extensions?: string[];
+	/** Sequences to create (CREATE SEQUENCE). Key = sequence name */
+	sequences?: Record<
+		string,
+		{
+			startWith?: number;
+			incrementBy?: number;
+			minValue?: number;
+			maxValue?: number;
+			cycle?: boolean;
+		}
+	>;
+}
 
 /**
  * Result of schema() function with strongly-typed table/column info.
@@ -490,9 +529,10 @@ export function schema<T extends SchemaDefinition>(
 	definition: T,
 	constraints?: SchemaConstraints,
 	options?: SchemaOptions,
+	extras?: SchemaExtras,
 ): Schema<T> {
 	// Validate and convert to ModelIR
-	const model = schemaToModelIR(definition, constraints);
+	const model = schemaToModelIR(definition, constraints, extras);
 	const tableNames = Object.keys(definition) as (keyof T)[];
 
 	// Validate default filters reference existing tables
@@ -550,6 +590,7 @@ export class SchemaValidationError extends Error {
 export function schemaToModelIR(
 	definition: SchemaDefinition,
 	constraints?: SchemaConstraints,
+	extras?: SchemaExtras,
 ): ModelIR {
 	const tableNames = Object.keys(definition);
 
@@ -577,7 +618,18 @@ export function schemaToModelIR(
 		relationMap.set(qualifiedName, relation);
 	}
 
-	return new ModelIRImpl(tableMap, relationMap);
+	// Phase 6: Build extras (extensions, sequences)
+	const extensions = extras?.extensions;
+	const sequenceMap = extras?.sequences
+		? new Map(
+				Object.entries(extras.sequences).map(([name, seq]) => [
+					name,
+					{ name, ...seq },
+				]),
+			)
+		: undefined;
+
+	return new ModelIRImpl(tableMap, relationMap, undefined, extensions, sequenceMap);
 }
 
 // ============================================================================
@@ -936,15 +988,28 @@ function buildTables(
 
 		// Process table-level constraints (2nd arg to schema())
 		const tableConstraints = constraints?.[tableName];
+		const checkConstraints: CheckConstraintIR[] = [];
 		if (tableConstraints) {
-			// Composite indexes
+			// Indexes (simple, composite, partial, GIN, HNSW, BM25, etc.)
 			if (tableConstraints.indexes) {
 				for (const idx of tableConstraints.indexes) {
-					indexes.push({
+					const indexIR: Mutable<IndexIR> = {
 						name: idx.name ?? `idx_${tableName}_${idx.columns.join('_')}`,
 						columns: idx.columns,
 						unique: idx.unique ?? false,
-					});
+					};
+					if (idx.method) indexIR.method = idx.method;
+					if (idx.where) indexIR.where = idx.where;
+					if (idx.opclass) indexIR.opclass = idx.opclass;
+					if (idx.with) indexIR.with = idx.with;
+					indexes.push(indexIR as IndexIR);
+				}
+			}
+
+			// CHECK constraints
+			if (tableConstraints.checkConstraints) {
+				for (const chk of tableConstraints.checkConstraints) {
+					checkConstraints.push({ name: chk.name, expression: `CHECK (${chk.expression})` });
 				}
 			}
 
@@ -980,6 +1045,7 @@ function buildTables(
 			...(finalPk !== undefined ? { primaryKey: finalPk } : {}),
 			foreignKeys,
 			indexes,
+			...(checkConstraints.length > 0 ? { checkConstraints } : {}),
 			...(pseudoColumns.length > 0 ? { pseudoColumns } : {}),
 		};
 		tables.push(table);
