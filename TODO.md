@@ -24,7 +24,7 @@
 (CTE-001 archived → docs/historic/done-2026-03.md)
 (BATCH-001 archived → docs/historic/done-2026-03.md)
 (AGG-001 archived → docs/historic/done-2026-03.md)
-- [x] ✅ **DDL-FK-IDX** [Adapter] `generateMigrationSQL` for `create_table` changes must emit FK constraints + indexes + composite UNIQUE. Fixed in `compareSchemata`: new tables now emit `add_foreign_key` + `create_index` changes with correct topological order (phases 5→9→11). — Priority: P0 (2026-03-18)
+(DDL-FK-IDX archived → docs/historic/done-2026-03.md)
 - [ ] 💡 **NQL-WITH** [NQL] WITH ... AS (...) non-recursive CTE syntax in NQL parser — deferred from BATCH-001. — Priority: P1 (from /adversarial 2026-03-18)
 - [ ] 🔧 **BATCH-DRY-001** [Adapter] Extract shared `mapModelIRTypeToPgBase()` — duplicated in any.ts + compiler-utils.ts. — Priority: M (from /review F-001)
 - [ ] 🔧 **BATCH-DRY-002** [Adapter] Extract `stripArraySuffix()` helper — repeated 5× across files. — Priority: S (from /review F-002)
