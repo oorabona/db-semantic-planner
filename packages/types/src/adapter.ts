@@ -9,6 +9,7 @@
 
 import type { DialectCapabilities } from './dialects.js';
 import type {
+	BatchUpdateIntent,
 	DeleteIntent,
 	InsertFromIntent,
 	InsertIntent,
@@ -282,6 +283,12 @@ export interface CompilingAdapter extends BaseAdapter {
 
 	/** Compile an update intent to executable SQL. */
 	compileUpdate(intent: UpdateIntent, options?: CompileOptions): CompiledQuery;
+
+	/** Compile a batch update intent to executable SQL (BATCH-001). */
+	compileBatchUpdate(
+		intent: BatchUpdateIntent,
+		options?: CompileOptions,
+	): CompiledQuery;
 
 	/** Compile a delete intent to executable SQL. */
 	compileDelete(intent: DeleteIntent, options?: CompileOptions): CompiledQuery;

@@ -227,10 +227,38 @@ export interface UpsertIntent {
 /**
  * Union of all mutation intents.
  */
+
+/**
+ * Batch update intent - update multiple rows using unnest FROM strategy.
+ * Generates: UPDATE "table" SET "col" = t."col" FROM unnest($1::type[], ...) AS t("match", "col") WHERE "table"."match" = t."match"
+ *
+ * @example { type: 'batchUpdate', table: 'calls', matchColumns: ['id'], updates: [{id: 1, callee_id: 42}] }
+ */
+export interface BatchUpdateIntent {
+	readonly type: 'batchUpdate';
+
+	/** Target table name */
+	readonly table: string;
+
+	/** Column(s) used to match rows (WHERE clause join condition) */
+	readonly matchColumns: readonly string[];
+
+	/** Array of row objects containing match + update column values */
+	readonly updates: readonly Record<string, unknown>[];
+
+	/** Optional scalar values applied to ALL rows (non-array SET clause) */
+	readonly scalarSet?: Record<string, unknown>;
+
+	/** Columns to return from updated rows (RETURNING clause) */
+	readonly returning?: readonly string[];
+}
+
+
 export type MutationIntent =
 	| InsertIntent
 	| InsertFromIntent
 	| UpsertFromIntent
 	| UpdateIntent
+	| BatchUpdateIntent
 	| DeleteIntent
 	| UpsertIntent;
