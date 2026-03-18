@@ -246,6 +246,24 @@ export interface IndexIR {
 
 	/** Whether this is a unique index */
 	readonly unique?: boolean;
+
+	/** Index access method (default: btree) */
+	readonly method?: string;
+
+	/** Partial index predicate (WHERE clause) */
+	readonly where?: string;
+
+	/** Expression-based index entries (used instead of/alongside columns) */
+	readonly expressions?: readonly string[];
+
+	/** Non-key columns to include (INCLUDE clause, PG11+) */
+	readonly include?: readonly string[];
+
+	/** Per-column operator class overrides (non-default only). Key = column name, value = opclass name */
+	readonly opclass?: Readonly<Record<string, string>>;
+
+	/** Index storage parameters (WITH clause). Key = param name, value = param value */
+	readonly with?: Readonly<Record<string, string>>;
 }
 
 /**

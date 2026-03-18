@@ -28,6 +28,7 @@
 - [ ] 🟡 **DDL-COMPLETE** [Adapter] Complete DDL migration system — CHECK, ENUM, SEQUENCE, EXTENSION, PARTITION, index methods/partial/expression, onUpdate FK, collation, comments, identity, multi-schema, deferred constraints, FK auto-index consistency. — Priority: P0
   - [x] ✅ Block 1: CHECK constraints — IR types, introspection, diff, migration SQL, DDL pass (2026-03-18)
   - [x] ✅ Block 2: ENUM types — EnumIR, compareEnums, phases 5/14, changeToUpSQL/Down, generateDDL pass 0.5, introspection mock fixes (2026-03-18)
+  - [x] ✅ Block 3: Index enhancements — method/WHERE/expressions/INCLUDE/opclass/WITH on IndexIR; indexKey extended; generateCreateIndex + changeToUpSQL extended; introspection query extended; 14 new tests across 3 test files (2026-03-18)
 - [ ] 💡 **DDL-VIEWS** [Adapter] VIEW support — CREATE/DROP VIEW, materialized views, introspection, diff. — Priority: P1 (deferred from DDL-COMPLETE)
 - [ ] 💡 **DDL-TRIGGERS** [Adapter] TRIGGER support — CREATE/DROP TRIGGER, trigger functions, introspection, diff. — Priority: P2 (deferred from DDL-COMPLETE)
 - [ ] 💡 **DDL-PARTITION-MGMT** [Adapter] Partition child table management — CREATE TABLE ... PARTITION OF ... FOR VALUES, partition addition/removal/split. Parent PARTITION BY handled in DDL-COMPLETE. — Priority: P2 (deferred from /adversarial DDL-COMPLETE)

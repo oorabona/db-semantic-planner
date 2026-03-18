@@ -267,8 +267,34 @@ function changeToUpSQL(
 			if (!idx) return undefined;
 			const indexName = q(idxName(change.table, idx.columns, idx.name));
 			const unique = idx.unique ? 'UNIQUE ' : '';
-			const cols = idx.columns.map(q).join(', ');
-			return `CREATE ${unique}INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(change.table, schemaName)} (${cols});`;
+			const method = idx.method ? ` USING ${idx.method}` : '';
+
+			// Build column list: expressions first (unquoted), then named columns with optional opclass
+			const colParts: string[] = [];
+			if (idx.expressions && idx.expressions.length > 0) {
+				for (const expr of idx.expressions) {
+					colParts.push(expr);
+				}
+			}
+			for (const col of idx.columns) {
+				const opclass = idx.opclass?.[col] ?? '';
+				colParts.push(`${q(col)}${opclass ? ` ${opclass}` : ''}`);
+			}
+			const cols = colParts.join(', ');
+
+			const include =
+				idx.include && idx.include.length > 0
+					? ` INCLUDE (${idx.include.map(q).join(', ')})`
+					: '';
+			const withParams =
+				idx.with && Object.keys(idx.with).length > 0
+					? ` WITH (${Object.entries(idx.with)
+							.map(([k, v]) => `${k} = ${v}`)
+							.join(', ')})`
+					: '';
+			const where = idx.where ? ` WHERE ${idx.where}` : '';
+
+			return `CREATE ${unique}INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(change.table, schemaName)}${method} (${cols})${include}${withParams}${where};`;
 		}
 
 		case 'drop_index': {

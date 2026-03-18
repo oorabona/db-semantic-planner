@@ -91,6 +91,9 @@ interface RawIndex {
 	table_name: string;
 	columns: string[];
 	is_unique: boolean;
+	method: string;
+	predicate: string | null;
+	reloptions: string[] | null;
 }
 
 // ============================================================================
@@ -170,16 +173,20 @@ export async function introspect(
 		   i.relname AS index_name,
 		   t.relname AS table_name,
 		   array_agg(a.attname ORDER BY k.n) AS columns,
-		   ix.indisunique AS is_unique
+		   ix.indisunique AS is_unique,
+		   am.amname AS method,
+		   pg_get_expr(ix.indpred, ix.indrelid, false) AS predicate,
+		   i.reloptions AS reloptions
 		 FROM pg_index ix
 		 JOIN pg_class i ON i.oid = ix.indexrelid
 		 JOIN pg_class t ON t.oid = ix.indrelid
 		 JOIN pg_namespace n ON n.oid = t.relnamespace
+		 JOIN pg_am am ON am.oid = i.relam
 		 CROSS JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, n)
 		 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
 		 WHERE n.nspname = $1
 		   AND NOT ix.indisprimary
-		 GROUP BY i.relname, t.relname, ix.indisunique
+		 GROUP BY i.relname, t.relname, ix.indisunique, am.amname, ix.indpred, ix.indrelid, i.reloptions
 		 ORDER BY t.relname, i.relname`,
 		[schema],
 	);
@@ -246,15 +253,35 @@ export async function introspect(
 	// Group indexes by table
 	const tableIndexes = new Map<string, IndexIR[]>();
 	for (const idx of indexesResult.rows) {
+		const columns: string[] = Array.isArray(idx.columns)
+			? idx.columns
+			: String(idx.columns)
+					.replace(/^\{|}$/g, '')
+					.split(',')
+					.filter(Boolean);
+
+		// Parse reloptions array (e.g. ['m=16', 'ef_construction=200']) into a Record
+		let withParams: Record<string, string> | undefined;
+		if (Array.isArray(idx.reloptions) && idx.reloptions.length > 0) {
+			withParams = {};
+			for (const opt of idx.reloptions) {
+				const eqIdx = opt.indexOf('=');
+				if (eqIdx !== -1) {
+					withParams[opt.slice(0, eqIdx)] = opt.slice(eqIdx + 1);
+				}
+			}
+		}
+
 		const indexIR: IndexIR = {
 			name: idx.index_name,
-			columns: Array.isArray(idx.columns)
-				? idx.columns
-				: String(idx.columns)
-						.replace(/^\{|}$/g, '')
-						.split(',')
-						.filter(Boolean),
+			columns,
 			...(idx.is_unique ? { unique: true } : {}),
+			// Only store method when it's not the default 'btree'
+			...(idx.method && idx.method !== 'btree' ? { method: idx.method } : {}),
+			...(idx.predicate ? { where: idx.predicate } : {}),
+			...(withParams && Object.keys(withParams).length > 0
+				? { with: withParams }
+				: {}),
 		};
 		const existing = tableIndexes.get(idx.table_name);
 		if (existing) {

@@ -545,6 +545,71 @@ describe('DDL Generator', () => {
 			const autoIndex = ddl.find((stmt) => stmt.includes('idx_posts_user_id'));
 			expect(autoIndex).toBeUndefined();
 		});
+
+		describe('Index enhancements in DDL', () => {
+			it('should generate CREATE INDEX USING gin with opclass', () => {
+				const schema = {
+					tables: new Map([
+						[
+							'posts',
+							{
+								name: 'posts',
+								columns: [{ name: 'body', type: 'text', nullable: false }],
+								primaryKey: undefined,
+								foreignKeys: [],
+								indexes: [
+									{
+										name: 'idx_posts_body_gin',
+										columns: ['body'],
+										method: 'gin',
+										opclass: { body: 'gin_trgm_ops' },
+									} satisfies IndexIR,
+								],
+							} satisfies TableIR,
+						],
+					]),
+					relations: new Map(),
+				} as unknown as ModelIR;
+
+				const ddl = generateDDL(schema);
+				const idx = ddl.find((s) => s.includes('idx_posts_body_gin'));
+				expect(idx).toBeDefined();
+				expect(idx).toBe(
+					'CREATE INDEX "idx_posts_body_gin" ON "posts" USING gin ("body" gin_trgm_ops);',
+				);
+			});
+
+			it('should generate partial index with WHERE clause', () => {
+				const schema = {
+					tables: new Map([
+						[
+							'users',
+							{
+								name: 'users',
+								columns: [{ name: 'email', type: 'string', nullable: false }],
+								primaryKey: undefined,
+								foreignKeys: [],
+								indexes: [
+									{
+										name: 'idx_users_active_email',
+										columns: ['email'],
+										where: 'active = true',
+									} satisfies IndexIR,
+								],
+							} satisfies TableIR,
+						],
+					]),
+					relations: new Map(),
+				} as unknown as ModelIR;
+
+				const ddl = generateDDL(schema);
+				const idx = ddl.find((s) => s.includes('idx_users_active_email'));
+				expect(idx).toBeDefined();
+				expect(idx).toBe(
+					'CREATE INDEX "idx_users_active_email" ON "users" ("email") WHERE active = true;',
+				);
+			});
+		});
 	});
 
 	describe('DROP TABLE', () => {
