@@ -449,7 +449,6 @@ describe('Dialect Capabilities', () => {
 	});
 });
 
-
 describe('DDL Feature Capabilities (CAPS-001)', () => {
 	// SC-01: PostgreSQL adapter declares all DDL capabilities
 	describe('when reading POSTGRESQL_CAPABILITIES', () => {
@@ -549,5 +548,135 @@ describe('createDialectCapabilities factory (INV-11)', () => {
 		expect(caps.supportsDDLCheckConstraints).toBe(true);
 		expect(caps.supportsDDLEnumTypes).toBe(true);
 		expect(caps.supportsDDLSequences).toBeUndefined();
+	});
+});
+
+describe('createDialectCapabilities with version (CAPS-VERSION)', () => {
+	const baseMysqlOpts = {
+		name: 'mysql',
+		identifierQuote: '`' as const,
+		parameterStyle: 'question' as const,
+		limitStyle: 'limit-offset' as const,
+		booleanStyle: 'native' as const,
+		recursivePathStyle: 'string' as const,
+		stringConcatStyle: 'function' as const,
+		// MySQL features
+		supportsDDLEnumTypes: true,
+		supportsDDLCheckConstraints: true,
+		supportsDDLExpressionIndexes: true,
+		supportsDDLOnUpdateFK: true,
+		supportsDDLCollation: true,
+		supportsDDLComments: true,
+		supportsDDLPartitioning: true,
+	};
+
+	const mysqlVersionReqs = {
+		checkConstraint: { min: '8.0.16' },
+		expressionIndex: { min: '8.0.13' },
+	};
+
+	it('should enable version-gated features when version meets minimum', () => {
+		// Arrange & Act
+		const caps = createDialectCapabilities(baseMysqlOpts, {
+			version: '8.0.16',
+			versionRequirements: mysqlVersionReqs,
+		});
+
+		// Assert — both CHECK (8.0.16) and expression indexes (8.0.13) enabled
+		expect(caps.supportsDDLCheckConstraints).toBe(true);
+		expect(caps.supportsDDLExpressionIndexes).toBe(true);
+		// Non-version-gated features still present
+		expect(caps.supportsDDLEnumTypes).toBe(true);
+	});
+
+	it('should disable version-gated features when version is below minimum', () => {
+		// Arrange & Act
+		const caps = createDialectCapabilities(baseMysqlOpts, {
+			version: '8.0.15',
+			versionRequirements: mysqlVersionReqs,
+		});
+
+		// Assert — CHECK requires 8.0.16, not met
+		expect(caps.supportsDDLCheckConstraints).toBeUndefined();
+		// Expression indexes require 8.0.13, met
+		expect(caps.supportsDDLExpressionIndexes).toBe(true);
+		// Non-version-gated features unaffected
+		expect(caps.supportsDDLEnumTypes).toBe(true);
+	});
+
+	it('should handle maxVersion (feature deprecated)', () => {
+		// Arrange — hypothetical: feature only in 8.0.0 to 8.4.0
+		const caps = createDialectCapabilities(
+			{ ...baseMysqlOpts, supportsDDLPartitioning: true },
+			{
+				version: '9.0.0',
+				versionRequirements: { partition: { min: '8.0.0', max: '8.4.0' } },
+			},
+		);
+
+		// Assert — version 9.0 exceeds max 8.4.0
+		expect(caps.supportsDDLPartitioning).toBeUndefined();
+	});
+
+	it('should keep maxVersion feature when version is within range', () => {
+		const caps = createDialectCapabilities(
+			{ ...baseMysqlOpts, supportsDDLPartitioning: true },
+			{
+				version: '8.2.0',
+				versionRequirements: { partition: { min: '8.0.0', max: '8.4.0' } },
+			},
+		);
+
+		expect(caps.supportsDDLPartitioning).toBe(true);
+	});
+
+	it('should work without version option (backward compat)', () => {
+		// Arrange & Act — no version, flags taken as-is
+		const caps = createDialectCapabilities(baseMysqlOpts);
+
+		// Assert — all explicitly set flags present
+		expect(caps.supportsDDLCheckConstraints).toBe(true);
+		expect(caps.supportsDDLExpressionIndexes).toBe(true);
+	});
+
+	it('should handle SQLite version requirements', () => {
+		const sqliteCaps = createDialectCapabilities(
+			{
+				name: 'sqlite',
+				identifierQuote: '"',
+				parameterStyle: 'question',
+				limitStyle: 'limit-offset',
+				booleanStyle: 'numeric',
+				recursivePathStyle: 'string',
+				stringConcatStyle: 'operator',
+				supportsDDLCheckConstraints: true,
+				supportsDDLPartialIndexes: true,
+				supportsDDLDeferredFK: true,
+				supportsDDLExpressionIndexes: true,
+				supportsDDLOnUpdateFK: true,
+			},
+			{
+				version: '3.8.0',
+				versionRequirements: {
+					partialIndex: { min: '3.8.0' },
+					expressionIndex: { min: '3.9.0' },
+				},
+			},
+		);
+
+		// 3.8.0 >= 3.8.0 → met
+		expect(sqliteCaps.supportsDDLPartialIndexes).toBe(true);
+		// 3.8.0 < 3.9.0 → not met
+		expect(sqliteCaps.supportsDDLExpressionIndexes).toBeUndefined();
+	});
+
+	it('should compare version segments numerically (not lexicographically)', () => {
+		// '8.0.9' vs '8.0.16' — lexicographic would say 9 > 1, but 9 < 16
+		const caps = createDialectCapabilities(baseMysqlOpts, {
+			version: '8.0.9',
+			versionRequirements: { checkConstraint: { min: '8.0.16' } },
+		});
+
+		expect(caps.supportsDDLCheckConstraints).toBeUndefined();
 	});
 });

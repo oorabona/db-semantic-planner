@@ -9,16 +9,6 @@
 
 import type { DialectCapabilities } from './dialects.js';
 import type {
-	CheckConstraintIR,
-	ColumnIR,
-	EnumIR,
-	ForeignKeyIR,
-	IndexIR,
-	ModelIR,
-	PartitionIR,
-	SequenceIR,
-} from './model-ir.js';
-import type {
 	BatchUpdateIntent,
 	CteQueryIntent,
 	DeleteIntent,
@@ -30,6 +20,16 @@ import type {
 	UpsertIntent,
 	WhereIntent,
 } from './intent-ast.js';
+import type {
+	CheckConstraintIR,
+	ColumnIR,
+	EnumIR,
+	ForeignKeyIR,
+	IndexIR,
+	ModelIR,
+	PartitionIR,
+	SequenceIR,
+} from './model-ir.js';
 import type { PlanReport, RecursivePlanReport } from './planner.js';
 
 // ============================================================================
@@ -320,7 +320,10 @@ export interface CompilingAdapter extends BaseAdapter {
 	): CompiledQuery;
 
 	/** Compile a CTE query backed by unnest() arrays (BATCH-001). */
-	compileCteQuery(intent: CteQueryIntent, options?: CompileOptions): CompiledQuery;
+	compileCteQuery(
+		intent: CteQueryIntent,
+		options?: CompileOptions,
+	): CompiledQuery;
 
 	/** Create a dump for observability. */
 	createDump(plan: PlanReport, query: CompiledQuery, meta?: DumpMeta): Dump;
@@ -469,7 +472,6 @@ export interface Adapter<DB = unknown>
 	readonly dbCasing: DbCasing;
 }
 
-
 // ============================================================================
 // DDL Feature Negotiation (CAPS-001/002)
 // ============================================================================
@@ -479,11 +481,29 @@ export type UnsupportedFeatureBehavior = 'error' | 'warning' | 'ignore';
 
 /** Aligned with DialectCapabilities supportsDDL* flags (1:1 mapping) */
 export type DDLFeature =
-	| 'enum' | 'sequence' | 'extension' | 'partition'
-	| 'checkConstraint' | 'onUpdateFK' | 'deferredFK'
-	| 'identity' | 'collation' | 'comment'
-	| 'indexMethod' | 'indexOpclass' | 'indexInclude'
-	| 'partialIndex' | 'expressionIndex';
+	| 'enum'
+	| 'sequence'
+	| 'extension'
+	| 'partition'
+	| 'checkConstraint'
+	| 'onUpdateFK'
+	| 'deferredFK'
+	| 'identity'
+	| 'collation'
+	| 'comment'
+	| 'indexMethod'
+	| 'indexOpclass'
+	| 'indexInclude'
+	| 'partialIndex'
+	| 'expressionIndex';
+
+/** Version range for a DDL feature — resolved at createDialectCapabilities() time */
+export interface DDLFeatureVersionRange {
+	/** Minimum database version required (inclusive). E.g., '8.0.16' */
+	readonly min?: string;
+	/** Maximum database version supported (inclusive, optional). For deprecation. */
+	readonly max?: string;
+}
 
 /** Per-feature behavior overrides (global default + optional per-feature) */
 export interface FeatureBehaviorConfig {
@@ -500,7 +520,9 @@ export class UnsupportedFeatureError extends Error {
 		readonly adapter: string,
 		readonly element: string,
 	) {
-		super(`Unsupported feature "${feature}" on adapter "${adapter}" for "${element}"`);
+		super(
+			`Unsupported feature "${feature}" on adapter "${adapter}" for "${element}"`,
+		);
 		this.name = 'UnsupportedFeatureError';
 	}
 }
@@ -554,7 +576,10 @@ export interface FeatureTranslator<F extends DDLFeature = DDLFeature> {
 	/** Which IR feature this translator handles */
 	readonly feature: F;
 	/** Generate SQL for this feature. Return null to skip (use default behavior). */
-	translate(element: DDLFeatureElementMap[F], context: TranslationContext): string[] | null;
+	translate(
+		element: DDLFeatureElementMap[F],
+		context: TranslationContext,
+	): string[] | null;
 }
 
 export interface TranslationContext {

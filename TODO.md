@@ -37,7 +37,7 @@
 - [ ] 🔧 **DDL-OPCLASS-INTRO** [Adapter] Index introspection missing opclass/include/expressions — pg_opclass join, pg_get_expr(indexprs), indnkeyatts for INCLUDE columns. — Priority: M (from /review F-004)
 - [ ] 🔧 **DDL-ENUM-DEPCHECK** [Adapter] drop_enum without column dependency check — scan ModelIR tables for columns referencing enum before emitting DROP TYPE. — Priority: M (from /review F-005)
 - [ ] 🔧 **DDL-SEQ-DRY** [Adapter] Sequence SQL generation duplicated 4× — extract buildSequenceClause(seq: SequenceIR) shared helper. — Priority: S (from /review F-007)
-- [ ] 💡 **CAPS-VERSION** [Types] Version-aware dialect capabilities — MySQL 8.0.16+ for CHECK, SQLite 3.9+ for partial indexes, etc. Flag per min-version. — Priority: L (from /adversarial CAPS, deferred: not needed until 2nd adapter)
+- [x] ✅ **CAPS-VERSION** [Types] Version-aware dialect capabilities — MySQL 8.0.16+ for CHECK, SQLite 3.9+ for partial indexes, etc. Flag per min-version. — Priority: L (2026-03-19)
 - [ ] 💡 **NQL-WITH** [NQL] WITH ... AS (...) non-recursive CTE syntax in NQL parser — deferred from BATCH-001. — Priority: P1 (from /adversarial 2026-03-18)
 - [ ] 🔧 **BATCH-DRY-001** [Adapter] Extract shared `mapModelIRTypeToPgBase()` — duplicated in any.ts + compiler-utils.ts. — Priority: M (from /review F-001)
 - [ ] 🔧 **BATCH-DRY-002** [Adapter] Extract `stripArraySuffix()` helper — repeated 5× across files. — Priority: S (from /review F-002)
