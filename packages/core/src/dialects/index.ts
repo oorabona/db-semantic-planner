@@ -8,11 +8,16 @@
  * and provides runtime constants and functions.
  */
 
-import type { ColumnType } from '@dbsp/types';
+import type {
+	ColumnType,
+	DDLFeature,
+	DDLFeatureVersionRange,
+} from '@dbsp/types';
 
 // Re-export all dialect types from @dbsp/types for backward compatibility
 export type {
 	CommonColumnType,
+	DDLFeatureVersionRange,
 	DialectCapabilities,
 	DialectName,
 	DuckDBColumnType,
@@ -191,16 +196,73 @@ export const MSSQL_CAPABILITIES: DialectCapabilities = {
 	booleanStyle: 'numeric',
 };
 
+/**
+ * Compare two version strings numerically (e.g., '8.0.16' vs '8.0.15').
+ * Returns: -1 if a < b, 0 if equal, 1 if a > b.
+ * Supports any number of segments (3.8, 8.0.16, 15.0.1.2).
+ */
+function compareVersions(a: string, b: string): number {
+	const partsA = a.split('.').map(Number);
+	const partsB = b.split('.').map(Number);
+	const len = Math.max(partsA.length, partsB.length);
+	for (let i = 0; i < len; i++) {
+		const segA = partsA[i] ?? 0;
+		const segB = partsB[i] ?? 0;
+		if (segA < segB) return -1;
+		if (segA > segB) return 1;
+	}
+	return 0;
+}
+
+/** Maps DDLFeature name → DialectCapabilities flag name */
+const FEATURE_TO_FLAG: Record<DDLFeature, string> = {
+	enum: 'supportsDDLEnumTypes',
+	sequence: 'supportsDDLSequences',
+	extension: 'supportsDDLExtensions',
+	partition: 'supportsDDLPartitioning',
+	checkConstraint: 'supportsDDLCheckConstraints',
+	onUpdateFK: 'supportsDDLOnUpdateFK',
+	deferredFK: 'supportsDDLDeferredFK',
+	identity: 'supportsDDLIdentityColumns',
+	collation: 'supportsDDLCollation',
+	comment: 'supportsDDLComments',
+	indexMethod: 'supportsDDLIndexMethods',
+	indexOpclass: 'supportsDDLIndexOpclass',
+	indexInclude: 'supportsDDLIndexInclude',
+	partialIndex: 'supportsDDLPartialIndexes',
+	expressionIndex: 'supportsDDLExpressionIndexes',
+};
 
 /**
  * Factory helper for adapter authors to create DialectCapabilities.
  * All DDL flags default to false (unsupported) unless overridden.
  * Required fields (name, syntax variants) must be provided.
+ *
+ * @param overrides - Required syntax fields plus any capability overrides.
+ * @param options - Optional version-aware resolution. When `version` and
+ *   `versionRequirements` are both provided, features outside their version
+ *   range are set to `undefined` (unsupported) in the returned capabilities.
  */
 export function createDialectCapabilities(
-	overrides: Partial<DialectCapabilities> & Pick<DialectCapabilities, 'name' | 'identifierQuote' | 'parameterStyle' | 'limitStyle' | 'booleanStyle' | 'recursivePathStyle' | 'stringConcatStyle'>,
+	overrides: Partial<DialectCapabilities> &
+		Pick<
+			DialectCapabilities,
+			| 'name'
+			| 'identifierQuote'
+			| 'parameterStyle'
+			| 'limitStyle'
+			| 'booleanStyle'
+			| 'recursivePathStyle'
+			| 'stringConcatStyle'
+		>,
+	options?: {
+		/** Current database version (e.g., '8.0.16', '3.35.0') */
+		version?: string;
+		/** Per-feature version requirements. Features outside the range are set to undefined. */
+		versionRequirements?: Partial<Record<DDLFeature, DDLFeatureVersionRange>>;
+	},
 ): DialectCapabilities {
-	return {
+	const result: Record<string, unknown> = {
 		// Feature defaults (all false = unsupported)
 		supportsReturning: false,
 		supportsRecursiveCTE: false,
@@ -215,8 +277,26 @@ export function createDialectCapabilities(
 		// DDL flags all default to undefined (unsupported per INV-02)
 		...overrides,
 	};
-}
 
+	if (options?.version && options?.versionRequirements) {
+		const ver = options.version;
+		const reqs = options.versionRequirements;
+		for (const [feature, range] of Object.entries(reqs) as [
+			DDLFeature,
+			DDLFeatureVersionRange,
+		][]) {
+			const flagName = FEATURE_TO_FLAG[feature];
+			if (!flagName) continue;
+			const meetsMin = !range.min || compareVersions(ver, range.min) >= 0;
+			const meetsMax = !range.max || compareVersions(ver, range.max) <= 0;
+			if (!meetsMin || !meetsMax) {
+				delete result[flagName];
+			}
+		}
+	}
+
+	return result as unknown as DialectCapabilities;
+}
 
 /**
  * Registry of all known dialect capabilities.
