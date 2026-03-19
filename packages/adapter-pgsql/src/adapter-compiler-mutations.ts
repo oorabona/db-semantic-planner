@@ -5,7 +5,7 @@
  * @internal
  */
 
-import { InvalidOperationError } from '@dbsp/core';
+import { InvalidOperationError, isSqlRaw } from '@dbsp/core';
 import type {
 	BatchUpdateIntent,
 	CompiledQuery,
@@ -398,19 +398,32 @@ export function compileUpsert(
 
 	const firstRow = intent.values?.[0] ?? {};
 
-	// If explicit set values are provided for doUpdate, merge them into insert values
-	// so that EXCLUDED.column references have the correct values
-	const mergedFirstRow =
-		intent.action.type === 'doUpdate' && intent.action.set
-			? { ...firstRow, ...intent.action.set }
-			: firstRow;
+	// Separate raw SQL expressions from scalar set values.
+	// Raw expressions are emitted verbatim in ON CONFLICT DO UPDATE SET —
+	// they must NOT be merged into INSERT VALUES rows (they are not values).
+	// Scalar set values are merged so EXCLUDED.column picks them up.
+	const rawExprs: Record<string, string> = {};
+	const scalarSet: Record<string, unknown> = {};
+	if (intent.action.type === 'doUpdate' && intent.action.set) {
+		for (const [key, val] of Object.entries(intent.action.set)) {
+			if (isSqlRaw(val)) {
+				rawExprs[key] = val.sql;
+			} else {
+				scalarSet[key] = val;
+			}
+		}
+	}
+
+	// Merge only scalar set values into INSERT VALUES rows so EXCLUDED.column
+	// references resolve correctly.
+	const hasScalarSet = Object.keys(scalarSet).length > 0;
+	const mergedFirstRow = hasScalarSet
+		? { ...firstRow, ...scalarSet }
+		: firstRow;
 
 	const columns = Object.keys(mergedFirstRow);
 	const values = (intent.values ?? []).map((row) => {
-		const mergedRow =
-			intent.action.type === 'doUpdate' && intent.action.set
-				? { ...row, ...intent.action.set }
-				: row;
+		const mergedRow = hasScalarSet ? { ...row, ...scalarSet } : row;
 		return columns.map((col) => mergedRow[col]);
 	});
 
@@ -430,12 +443,13 @@ export function compileUpsert(
 	const conflictAction: 'nothing' | 'update' =
 		intent.action.type === 'doNothing' ? 'nothing' : 'update';
 
-	// Determine update columns
+	// Determine update columns.
+	// All columns in intent.action.set are update columns (both scalar and raw).
+	// Scalar ones use EXCLUDED.column, raw ones use the parsed SQL expression.
 	let updateColumns: string[] | undefined;
 	if (intent.action.type === 'doUpdate') {
 		if (intent.action.set) {
-			// Explicit update columns from set
-			// Values were merged into INSERT VALUES above, so EXCLUDED.column will reference them
+			// All keys in set become update columns (raw + scalar combined)
 			updateColumns = Object.keys(intent.action.set);
 		} else {
 			// Default: update all non-conflict columns
@@ -446,6 +460,7 @@ export function compileUpsert(
 	}
 
 	const columnTypes = getColumnTypes(intent.table, columns, deps);
+	const hasRawExprs = Object.keys(rawExprs).length > 0;
 
 	const config: UpsertConfig = {
 		table: intent.table,
@@ -456,6 +471,7 @@ export function compileUpsert(
 		...(updateColumns && { updateColumns }),
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(columnTypes && { columnTypes }),
+		...(hasRawExprs && { updateExpressions: rawExprs }),
 	};
 
 	// maxBatchSize guard (INV-07)

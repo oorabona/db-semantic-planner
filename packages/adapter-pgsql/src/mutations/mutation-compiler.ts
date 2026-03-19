@@ -11,6 +11,7 @@
  */
 
 import type { Node } from '@pgsql/types';
+import { isSqlRaw } from '@dbsp/core';
 import {
 	columnRef,
 	type DeleteOptions,
@@ -32,6 +33,7 @@ import type {
 import { createTypeCastParamRef } from '../param-ref.js';
 import {
 	inferPgArrayType,
+	parseRawExpression,
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from '../compiler-utils.js';
@@ -294,12 +296,16 @@ export function compileUpdate(
 	const naming = ctx.naming;
 	const tableAlias = config.table;
 
-	// Build SET clause - convert unknown values to Node
+	// Build SET clause - convert unknown values to Node.
+	// Raw SQL expressions (SqlRawExpression) are parsed directly into AST nodes;
+	// all other values become parameterized $N references.
 	const columnTypes = config.columnTypes;
 	const setClause: Array<{ column: string; value: Node }> = config.set.map(
 		({ column, value }) => ({
 			column: naming.toDatabase(column),
-			value: valueToNode(value, state, columnTypes?.[column]),
+			value: isSqlRaw(value)
+				? parseRawExpression(value.sql)
+				: valueToNode(value, state, columnTypes?.[column]),
 		}),
 	);
 

@@ -6,6 +6,8 @@
  */
 
 import { InvalidOperationError } from '@dbsp/core';
+import type { Node } from '@pgsql/types';
+import { parseSync } from 'pgsql-parser';
 
 // ============================================================================
 // Type Inference
@@ -52,7 +54,10 @@ export function inferPgArrayType(
  */
 function mapToPgBaseType(pgType: string): string {
 	// Strip length/precision qualifiers like VARCHAR(255), NUMERIC(10,2)
-	const normalized = pgType.toUpperCase().replace(/\(.*\)/, '').trim();
+	const normalized = pgType
+		.toUpperCase()
+		.replace(/\(.*\)/, '')
+		.trim();
 	switch (normalized) {
 		case 'INTEGER':
 		case 'INT':
@@ -140,4 +145,38 @@ export function validateBatchCardinality(
 			);
 		}
 	}
+}
+
+// ============================================================================
+// Raw SQL Expression Parsing
+// ============================================================================
+
+/**
+ * Parse a raw SQL fragment into a pg AST expression node.
+ *
+ * Wraps the fragment in `SELECT <fragment>` to obtain a valid statement,
+ * then extracts the expression from the first target-list entry.
+ * Used by mutation compilers to inject raw SQL into SET clauses.
+ *
+ * @throws Error if the fragment cannot be parsed as a valid SQL expression.
+ * @internal
+ */
+export function parseRawExpression(sqlFragment: string): Node {
+	const wrapped = `SELECT ${sqlFragment}`;
+	const parsed = parseSync(wrapped);
+	const stmt = parsed.stmts?.[0]?.stmt;
+	const expr =
+		stmt &&
+		'SelectStmt' in stmt &&
+		(
+			stmt.SelectStmt as {
+				targetList?: Array<{ ResTarget?: { val?: Node } }>;
+			}
+		).targetList?.[0]?.ResTarget?.val;
+	if (!expr) {
+		throw new Error(
+			`sql(): cannot parse raw SQL fragment as expression: ${sqlFragment}`,
+		);
+	}
+	return expr;
 }

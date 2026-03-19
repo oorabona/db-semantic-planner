@@ -72,6 +72,11 @@ export {
 	rank,
 	// Raw SQL escape hatch
 	raw,
+	// Raw SQL set expression (for doUpdate() / set() mutations)
+	isSqlRaw,
+	sql,
+	type SqlRawExpression,
+	SQL_RAW_MARKER,
 	// Relation column (select from joined table)
 	relationColumn,
 	rowNumber,

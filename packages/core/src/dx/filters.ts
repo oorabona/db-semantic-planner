@@ -771,6 +771,79 @@ export function relationColumn(
 }
 
 // ============================================================================
+// Raw SQL Set Expression (for doUpdate() / set() mutations)
+// ============================================================================
+
+/**
+ * Symbol to identify raw SQL expression values in set() / doUpdate()
+ * @internal
+ */
+export const SQL_RAW_MARKER = Symbol.for('dbsp:raw-sql');
+
+/**
+ * A raw SQL expression for use in mutation set values (doUpdate / set).
+ * Created by the {@link sql} function.
+ */
+export interface SqlRawExpression {
+	readonly [SQL_RAW_MARKER]: true;
+	readonly sql: string;
+}
+
+/**
+ * Create a raw SQL expression for use in `doUpdate()` and `set()` mutation values.
+ *
+ * @warning **SECURITY RISK: SQL INJECTION VULNERABILITY**
+ * The SQL fragment is inserted **WITHOUT** parameterization.
+ * Only use with hardcoded expressions — **NEVER** with user input.
+ *
+ * **SAFE USAGE:**
+ * - Hardcoded functions: `sql('now()')` ✅
+ * - Excluded references: `sql('excluded.count + 1')` ✅
+ * - Server-controlled literals: `sql('gen_random_uuid()')` ✅
+ *
+ * **NEVER:**
+ * - Interpolate user input: `` sql(`'${userInput}'`) `` ❌
+ * - Use request parameters: `sql(req.query.expr)` ❌
+ *
+ * @param sqlFragment - Raw SQL fragment (must be safe — no user input!)
+ * @returns SqlRawExpression for use in doUpdate() / set()
+ *
+ * @example
+ * ```typescript
+ * orm.upsert('files')
+ *   .values({ id: 1, name: 'test' })
+ *   .onConflict({ columns: ['id'] })
+ *   .doUpdate({ last_parsed: sql('now()'), count: sql('excluded.count + 1') })
+ *   .execute();
+ *
+ * orm.update('files')
+ *   .set({ last_parsed: sql('now()') })
+ *   .where(eq('id', 1))
+ *   .execute();
+ * ```
+ *
+ * @see {@link https://owasp.org/www-community/attacks/SQL_Injection | OWASP SQL Injection}
+ */
+export function sql(sqlFragment: string): SqlRawExpression {
+	if (!sqlFragment || sqlFragment.trim() === '') {
+		throw new Error('sql() requires a non-empty SQL fragment');
+	}
+	return { [SQL_RAW_MARKER]: true, sql: sqlFragment };
+}
+
+/**
+ * Type guard: check if a value is a raw SQL expression created by {@link sql}.
+ */
+export function isSqlRaw(value: unknown): value is SqlRawExpression {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		SQL_RAW_MARKER in value &&
+		(value as Record<symbol, unknown>)[SQL_RAW_MARKER] === true
+	);
+}
+
+// ============================================================================
 // Window Functions (re-exported from window-functions.ts)
 // ============================================================================
 
