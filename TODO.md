@@ -67,9 +67,9 @@
 
 ### CRITICAL — Decompose god functions
 
-- [ ] 🔧 **ARCH-001** [Adapter] Decompose `convertSelect` (complexity **356**, 240 LOC) in `packages/adapter-pgsql/src/intent-to-decisions.ts` — split into decision-type-specific strategy builders. Highest complexity in codebase. — Priority: CRITICAL
+- [x] ✅ **ARCH-001** [Adapter] Decompose `convertSelect` — 13 expression handlers extracted into dispatch map, 245→78 LOC. (2026-03-19)
 - [ ] 🔧 **ARCH-002** [Adapter] Decompose `PgsqlAdapter` (1780 LOC monolithic class) in `packages/adapter-pgsql/src/pgsql-adapter.ts` — extract DDL, introspection, transactions, compilation into focused modules. 30 direct callers, risk=HIGH. — Priority: CRITICAL
-- [ ] 🔧 **ARCH-003** [Adapter] Decompose `compileSelect` (complexity **163**, 429 LOC) in `packages/adapter-pgsql/src/compiler.ts` — extract per-clause compilation (WHERE, JOIN, ORDER BY, GROUP BY). — Priority: CRITICAL
+- [x] ✅ **ARCH-003** [Adapter] Decompose `compileSelect` — 7 helpers extracted (createHandlerContext, createHandlerState, compileSelectTarget, compileIncludeDecision, compileWhereDecision, flushPendingJoins, buildSelectStmt), 439→122 LOC. (2026-03-19)
 
 ### HIGH — GUI + handler duplication
 
