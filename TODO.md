@@ -26,7 +26,7 @@
 (AGG-001 archived → docs/historic/done-2026-03.md)
 (DDL-FK-IDX archived → docs/historic/done-2026-03.md)
 (DDL-COMPLETE archived → docs/historic/done-2026-03.md)
-- [x] ✅ **SCHEMA-DSL-EXT** [Core] Extend schema() DSL — method, opclass, with, where on indexes + checkConstraints + sequences + extensions. Used by astix to eliminate 37 rawIndexes. (2026-03-18, from astix ORM migration)
+(SCHEMA-DSL-EXT archived → docs/historic/done-2026-03.md)
 - [ ] 💡 **DDL-VIEWS** [Adapter] VIEW support — CREATE/DROP VIEW, materialized views, introspection, diff. — Priority: P1 (deferred from DDL-COMPLETE)
 - [ ] 💡 **DDL-TRIGGERS** [Adapter] TRIGGER support — CREATE/DROP TRIGGER, trigger functions, introspection, diff. — Priority: P2 (deferred from DDL-COMPLETE)
 - [ ] 💡 **DDL-PARTITION-MGMT** [Adapter] Partition child table management — CREATE TABLE ... PARTITION OF ... FOR VALUES, partition addition/removal/split. Parent PARTITION BY handled in DDL-COMPLETE. — Priority: P2 (deferred from /adversarial DDL-COMPLETE)
@@ -37,6 +37,7 @@
 - [ ] 🔧 **DDL-OPCLASS-INTRO** [Adapter] Index introspection missing opclass/include/expressions — pg_opclass join, pg_get_expr(indexprs), indnkeyatts for INCLUDE columns. — Priority: M (from /review F-004)
 - [ ] 🔧 **DDL-ENUM-DEPCHECK** [Adapter] drop_enum without column dependency check — scan ModelIR tables for columns referencing enum before emitting DROP TYPE. — Priority: M (from /review F-005)
 - [ ] 🔧 **DDL-SEQ-DRY** [Adapter] Sequence SQL generation duplicated 4× — extract buildSequenceClause(seq: SequenceIR) shared helper. — Priority: S (from /review F-007)
+- [ ] 💡 **CAPS-VERSION** [Types] Version-aware dialect capabilities — MySQL 8.0.16+ for CHECK, SQLite 3.9+ for partial indexes, etc. Flag per min-version. — Priority: L (from /adversarial CAPS, deferred: not needed until 2nd adapter)
 - [ ] 💡 **NQL-WITH** [NQL] WITH ... AS (...) non-recursive CTE syntax in NQL parser — deferred from BATCH-001. — Priority: P1 (from /adversarial 2026-03-18)
 - [ ] 🔧 **BATCH-DRY-001** [Adapter] Extract shared `mapModelIRTypeToPgBase()` — duplicated in any.ts + compiler-utils.ts. — Priority: M (from /review F-001)
 - [ ] 🔧 **BATCH-DRY-002** [Adapter] Extract `stripArraySuffix()` helper — repeated 5× across files. — Priority: S (from /review F-002)
@@ -44,6 +45,18 @@
 - [ ] 🔧 **BATCH-FIX-002** [Adapter] Map timestamp/date to native PG types in `mapModelTypeToPg`. — Priority: S (from /review F-004)
 - [ ] 💡 **EXT-001** [Extensions] `@dbsp/pgvector` package — vector type, distance operators (`<=>`, `<->`), HNSW/IVFFlat index DDL. Blocks 2 cosine-distance queries + 3 vector search queries. — Priority: P1 (from astix ORM migration assessment 2026-03-15)
 - [ ] 💡 **EXT-002** [Extensions] `@dbsp/paradedb` package — BM25 `@@@` operator, `paradedb.score()`, index management. Blocks 3 full-text/BM25 search queries. — Priority: P2 (from astix ORM migration assessment 2026-03-15)
+
+---
+
+## P1 — Multi-Adapter Capability Negotiation (2026-03-19)
+
+> ModelIR = universal representation. Each adapter interprets features per its capabilities.
+> Unsupported features: configurable behavior (warn+skip OR error/throw).
+> Tier 1 (OSS baseline): PostgreSQL, MySQL, SQLite, DuckDB. Tier 2 (best-effort): Oracle, MSSQL, CouchDB.
+
+(CAPS-001→005 archived → docs/historic/done-2026-03.md)
+- [ ] 🔧 **CAPS-DRY-001** [Adapter] `isChangeSupported()` missing `alter_column_collation`/`alter_column_identity` ChangeKind filters — Priority: S (from /review F-003)
+- [ ] 🔧 **CAPS-DOC-001** [Adapter] Add JSDoc to `sup()` helper explaining undefined vs false semantics — Priority: S (from /review F-004)
 
 ---
 

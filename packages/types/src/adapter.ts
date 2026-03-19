@@ -9,6 +9,16 @@
 
 import type { DialectCapabilities } from './dialects.js';
 import type {
+	CheckConstraintIR,
+	ColumnIR,
+	EnumIR,
+	ForeignKeyIR,
+	IndexIR,
+	ModelIR,
+	PartitionIR,
+	SequenceIR,
+} from './model-ir.js';
+import type {
 	BatchUpdateIntent,
 	CteQueryIntent,
 	DeleteIntent,
@@ -20,7 +30,6 @@ import type {
 	UpsertIntent,
 	WhereIntent,
 } from './intent-ast.js';
-import type { ModelIR } from './model-ir.js';
 import type { PlanReport, RecursivePlanReport } from './planner.js';
 
 // ============================================================================
@@ -458,4 +467,98 @@ export interface Adapter<DB = unknown>
 	 * @since ARCH-006
 	 */
 	readonly dbCasing: DbCasing;
+}
+
+
+// ============================================================================
+// DDL Feature Negotiation (CAPS-001/002)
+// ============================================================================
+
+/** Behavior when schema uses features the adapter doesn't support */
+export type UnsupportedFeatureBehavior = 'error' | 'warning' | 'ignore';
+
+/** Aligned with DialectCapabilities supportsDDL* flags (1:1 mapping) */
+export type DDLFeature =
+	| 'enum' | 'sequence' | 'extension' | 'partition'
+	| 'checkConstraint' | 'onUpdateFK' | 'deferredFK'
+	| 'identity' | 'collation' | 'comment'
+	| 'indexMethod' | 'indexOpclass' | 'indexInclude'
+	| 'partialIndex' | 'expressionIndex';
+
+/** Per-feature behavior overrides (global default + optional per-feature) */
+export interface FeatureBehaviorConfig {
+	/** Global default behavior (default: 'warning') */
+	readonly default: UnsupportedFeatureBehavior;
+	/** Per-feature overrides */
+	readonly overrides?: Partial<Record<DDLFeature, UnsupportedFeatureBehavior>>;
+}
+
+/** Error thrown when behavior = 'error' and unsupported feature detected */
+export class UnsupportedFeatureError extends Error {
+	constructor(
+		readonly feature: string,
+		readonly adapter: string,
+		readonly element: string,
+	) {
+		super(`Unsupported feature "${feature}" on adapter "${adapter}" for "${element}"`);
+		this.name = 'UnsupportedFeatureError';
+	}
+}
+
+/** Warning emitted when behavior = 'warning' */
+export interface FeatureWarning {
+	readonly feature: string;
+	readonly adapter: string;
+	readonly element: string;
+	readonly message: string;
+}
+
+// ============================================================================
+// Feature Translation Interface (CAPS-005 — design only)
+// ============================================================================
+
+/** Type-safe element map: DDLFeature → IR type (INV-12) */
+export interface DDLFeatureElementMap {
+	enum: EnumIR;
+	sequence: SequenceIR;
+	extension: string;
+	partition: PartitionIR;
+	checkConstraint: CheckConstraintIR;
+	onUpdateFK: ForeignKeyIR;
+	deferredFK: ForeignKeyIR;
+	identity: ColumnIR;
+	collation: ColumnIR;
+	comment: { target: 'table' | 'column'; name: string; comment: string };
+	indexMethod: IndexIR;
+	indexOpclass: IndexIR;
+	indexInclude: IndexIR;
+	partialIndex: IndexIR;
+	expressionIndex: IndexIR;
+}
+
+/**
+ * Interface for translating IR features to dialect-specific SQL.
+ * Adapters register translators to handle features their way.
+ *
+ * @example PG enum translator
+ * ```typescript
+ * const pgEnumTranslator: FeatureTranslator<'enum'> = {
+ *   feature: 'enum',
+ *   translate(element, context) {
+ *     return [`CREATE TYPE "${element.name}" AS ENUM (${element.values.map(v => `'${v}'`).join(', ')})`];
+ *   },
+ * };
+ * ```
+ */
+export interface FeatureTranslator<F extends DDLFeature = DDLFeature> {
+	/** Which IR feature this translator handles */
+	readonly feature: F;
+	/** Generate SQL for this feature. Return null to skip (use default behavior). */
+	translate(element: DDLFeatureElementMap[F], context: TranslationContext): string[] | null;
+}
+
+export interface TranslationContext {
+	readonly schemaName?: string;
+	readonly tableName?: string;
+	readonly dialectCapabilities: DialectCapabilities;
 }

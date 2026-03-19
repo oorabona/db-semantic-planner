@@ -178,4 +178,42 @@ export interface DialectCapabilities {
 	 * - DuckDB: json_group_array()
 	 */
 	readonly supportsJsonAgg: boolean;
+
+	// =========================================================================
+	// DDL Feature Support (CAPS-001)
+	// =========================================================================
+
+	/** ENUM types (PG: CREATE TYPE, MySQL: inline ENUM(), SQLite: CHECK) */
+	readonly supportsDDLEnumTypes?: boolean;
+	/** Sequences (PG: CREATE SEQUENCE, MySQL: N/A uses AUTO_INCREMENT) */
+	readonly supportsDDLSequences?: boolean;
+	/** Extensions (PG: CREATE EXTENSION, others: N/A or load_extension) */
+	readonly supportsDDLExtensions?: boolean;
+	/** Table partitioning (PG/MySQL: PARTITION BY, SQLite: N/A) */
+	readonly supportsDDLPartitioning?: boolean;
+
+	/** CHECK constraints (PG/MySQL 8.0.16+/SQLite: CHECK) */
+	readonly supportsDDLCheckConstraints?: boolean;
+	/** ON UPDATE actions on FK (CASCADE, SET NULL, etc.) */
+	readonly supportsDDLOnUpdateFK?: boolean;
+	/** DEFERRABLE INITIALLY DEFERRED on FK constraints */
+	readonly supportsDDLDeferredFK?: boolean;
+
+	/** Identity columns — GENERATED {ALWAYS|BY DEFAULT} AS IDENTITY */
+	readonly supportsDDLIdentityColumns?: boolean;
+	/** Column collation (COLLATE) */
+	readonly supportsDDLCollation?: boolean;
+	/** COMMENT ON TABLE/COLUMN (PG: COMMENT ON, MySQL: inline COMMENT) */
+	readonly supportsDDLComments?: boolean;
+
+	/** Non-btree index methods (GIN, GiST, HASH, BRIN, HNSW) */
+	readonly supportsDDLIndexMethods?: boolean;
+	/** Per-column operator class (gin_trgm_ops, vector_cosine_ops) */
+	readonly supportsDDLIndexOpclass?: boolean;
+	/** INCLUDE non-key columns (PG11+, Oracle 18c+, MSSQL) */
+	readonly supportsDDLIndexInclude?: boolean;
+	/** Partial indexes (WHERE clause) */
+	readonly supportsDDLPartialIndexes?: boolean;
+	/** Expression/functional indexes */
+	readonly supportsDDLExpressionIndexes?: boolean;
 }

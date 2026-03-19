@@ -48,6 +48,23 @@ export const POSTGRESQL_CAPABILITIES: DialectCapabilities = {
 	supportsLateralJoin: true,
 	supportsJsonAgg: true,
 
+	// DDL Feature Support (CAPS-001)
+	supportsDDLEnumTypes: true,
+	supportsDDLSequences: true,
+	supportsDDLExtensions: true,
+	supportsDDLPartitioning: true,
+	supportsDDLCheckConstraints: true,
+	supportsDDLOnUpdateFK: true,
+	supportsDDLDeferredFK: true,
+	supportsDDLIdentityColumns: true,
+	supportsDDLCollation: true,
+	supportsDDLComments: true,
+	supportsDDLIndexMethods: true,
+	supportsDDLIndexOpclass: true,
+	supportsDDLIndexInclude: true,
+	supportsDDLPartialIndexes: true,
+	supportsDDLExpressionIndexes: true,
+
 	// Syntax
 	recursivePathStyle: 'array',
 	stringConcatStyle: 'operator',
@@ -173,6 +190,33 @@ export const MSSQL_CAPABILITIES: DialectCapabilities = {
 	limitStyle: 'top', // TOP or OFFSET FETCH
 	booleanStyle: 'numeric',
 };
+
+
+/**
+ * Factory helper for adapter authors to create DialectCapabilities.
+ * All DDL flags default to false (unsupported) unless overridden.
+ * Required fields (name, syntax variants) must be provided.
+ */
+export function createDialectCapabilities(
+	overrides: Partial<DialectCapabilities> & Pick<DialectCapabilities, 'name' | 'identifierQuote' | 'parameterStyle' | 'limitStyle' | 'booleanStyle' | 'recursivePathStyle' | 'stringConcatStyle'>,
+): DialectCapabilities {
+	return {
+		// Feature defaults (all false = unsupported)
+		supportsReturning: false,
+		supportsRecursiveCTE: false,
+		supportsWindowFunctions: false,
+		supportsArrayType: false,
+		supportsRangeTypes: false,
+		supportsJsonType: false,
+		supportsJsonOperators: false,
+		supportsSchemas: false,
+		supportsLateralJoin: false,
+		supportsJsonAgg: false,
+		// DDL flags all default to undefined (unsupported per INV-02)
+		...overrides,
+	};
+}
+
 
 /**
  * Registry of all known dialect capabilities.

@@ -11,6 +11,7 @@ import type {
 	CheckConstraintIR,
 	ColumnIR,
 	DbCasing,
+	DialectCapabilities,
 	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
@@ -110,6 +111,8 @@ export interface CompareSchemataOptions {
 	 * (e.g. snake_case) before comparison with the introspected model.
 	 */
 	dbCasing?: DbCasing;
+	/** Dialect capabilities — comparisons for unsupported features will be skipped */
+	readonly dialectCapabilities?: DialectCapabilities;
 }
 
 // ============================================================================
@@ -140,14 +143,24 @@ export function compareSchemata(
 		: new Map(schema.tables);
 	const dbTables = new Map(db.tables);
 
+	const caps = options?.dialectCapabilities;
+	// Helper: feature is supported if no caps provided (backward compat) OR flag is true
+	const sup = (flag: boolean | undefined) => !caps || flag === true;
+
 	// 0. Compare ENUM types (schema-level, before tables)
-	compareEnums(schema, db, changes);
+	if (sup(caps?.supportsDDLEnumTypes)) {
+		compareEnums(schema, db, changes);
+	}
 
 	// 0a. Compare extensions (schema-level)
-	compareExtensions(schema, db, changes);
+	if (sup(caps?.supportsDDLExtensions)) {
+		compareExtensions(schema, db, changes);
+	}
 
 	// 0b. Compare sequences (schema-level, before tables)
-	compareSequences(schema, db, changes);
+	if (sup(caps?.supportsDDLSequences)) {
+		compareSequences(schema, db, changes);
+	}
 
 	// 1. Tables that exist in schema but not in DB → create_table
 	for (const [name, schemaTable] of schemaTables) {
@@ -180,14 +193,16 @@ export function compareSchemata(
 				});
 			}
 			// Emit CHECK constraints for new table (phase 12, after indexes)
-			for (const check of schemaTable.checkConstraints ?? []) {
-				changes.push({
-					kind: 'add_check_constraint',
-					table: name,
-					destructive: false,
-					details: `Add CHECK constraint "${check.name}" ${check.expression}`,
-					meta: { check },
-				});
+			if (sup(caps?.supportsDDLCheckConstraints)) {
+				for (const check of schemaTable.checkConstraints ?? []) {
+					changes.push({
+						kind: 'add_check_constraint',
+						table: name,
+						destructive: false,
+						details: `Add CHECK constraint "${check.name}" ${check.expression}`,
+						meta: { check },
+					});
+				}
 			}
 			continue;
 		}
@@ -198,8 +213,12 @@ export function compareSchemata(
 		comparePrimaryKeys(schemaTable, dbTable, changes);
 		compareForeignKeys(schemaTable, dbTable, changes);
 		compareIndexes(schemaTable, dbTable, changes);
-		compareCheckConstraints(schemaTable, dbTable, changes);
-		compareComments(schemaTable, dbTable, changes);
+		if (sup(caps?.supportsDDLCheckConstraints)) {
+			compareCheckConstraints(schemaTable, dbTable, changes);
+		}
+		if (sup(caps?.supportsDDLComments)) {
+			compareComments(schemaTable, dbTable, changes);
+		}
 		comparePartitions(schemaTable, dbTable, changes);
 	}
 

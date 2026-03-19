@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	assertTypeSupported,
+	createDialectCapabilities,
 	DUCKDB_CAPABILITIES,
 	extendDialect,
 	getAvailableDialects,
@@ -445,5 +446,108 @@ describe('Dialect Capabilities', () => {
 				}
 			});
 		});
+	});
+});
+
+
+describe('DDL Feature Capabilities (CAPS-001)', () => {
+	// SC-01: PostgreSQL adapter declares all DDL capabilities
+	describe('when reading POSTGRESQL_CAPABILITIES', () => {
+		it('should have all 15 DDL flags set to true', () => {
+			// Arrange
+			const caps = POSTGRESQL_CAPABILITIES;
+
+			// Act & Assert
+			expect(caps.supportsDDLEnumTypes).toBe(true);
+			expect(caps.supportsDDLSequences).toBe(true);
+			expect(caps.supportsDDLExtensions).toBe(true);
+			expect(caps.supportsDDLPartitioning).toBe(true);
+			expect(caps.supportsDDLCheckConstraints).toBe(true);
+			expect(caps.supportsDDLOnUpdateFK).toBe(true);
+			expect(caps.supportsDDLDeferredFK).toBe(true);
+			expect(caps.supportsDDLIdentityColumns).toBe(true);
+			expect(caps.supportsDDLCollation).toBe(true);
+			expect(caps.supportsDDLComments).toBe(true);
+			expect(caps.supportsDDLIndexMethods).toBe(true);
+			expect(caps.supportsDDLIndexOpclass).toBe(true);
+			expect(caps.supportsDDLIndexInclude).toBe(true);
+			expect(caps.supportsDDLPartialIndexes).toBe(true);
+			expect(caps.supportsDDLExpressionIndexes).toBe(true);
+		});
+	});
+
+	// SC-02: Missing capability flag defaults to unsupported
+	describe('when DialectCapabilities omits DDL flags', () => {
+		it('should treat missing flags as unsupported (undefined)', () => {
+			// Arrange — MYSQL_CAPABILITIES has no DDL flags currently
+			const caps = MYSQL_CAPABILITIES;
+
+			// Act & Assert
+			expect(caps.supportsDDLEnumTypes).toBeUndefined();
+			expect(caps.supportsDDLSequences).toBeUndefined();
+			expect(caps.supportsDDLExtensions).toBeUndefined();
+		});
+	});
+
+	// SC-03: Existing adapters without new flags still work (backward compat)
+	describe('when an old adapter has no DDL flags', () => {
+		it('should still satisfy DialectCapabilities type (optional fields)', () => {
+			// Arrange — create capabilities with only required fields
+			const oldCaps = createDialectCapabilities({
+				name: 'old-adapter',
+				identifierQuote: '"',
+				parameterStyle: 'dollar',
+				limitStyle: 'limit-offset',
+				booleanStyle: 'native',
+				recursivePathStyle: 'array',
+				stringConcatStyle: 'operator',
+			});
+
+			// Act & Assert — should have a valid name and no DDL flags
+			expect(oldCaps.name).toBe('old-adapter');
+			expect(oldCaps.supportsDDLEnumTypes).toBeUndefined();
+			expect(oldCaps.supportsReturning).toBe(false);
+		});
+	});
+});
+
+describe('createDialectCapabilities factory (INV-11)', () => {
+	it('should set all feature flags to false by default', () => {
+		// Arrange & Act
+		const caps = createDialectCapabilities({
+			name: 'test',
+			identifierQuote: '"',
+			parameterStyle: 'question',
+			limitStyle: 'limit-offset',
+			booleanStyle: 'native',
+			recursivePathStyle: 'string',
+			stringConcatStyle: 'function',
+		});
+
+		// Assert
+		expect(caps.supportsReturning).toBe(false);
+		expect(caps.supportsRecursiveCTE).toBe(false);
+		expect(caps.supportsDDLEnumTypes).toBeUndefined();
+	});
+
+	it('should allow overriding specific flags', () => {
+		// Arrange & Act
+		const caps = createDialectCapabilities({
+			name: 'mysql',
+			identifierQuote: '`',
+			parameterStyle: 'question',
+			limitStyle: 'limit-offset',
+			booleanStyle: 'native',
+			recursivePathStyle: 'string',
+			stringConcatStyle: 'function',
+			supportsReturning: false,
+			supportsDDLCheckConstraints: true,
+			supportsDDLEnumTypes: true,
+		});
+
+		// Assert
+		expect(caps.supportsDDLCheckConstraints).toBe(true);
+		expect(caps.supportsDDLEnumTypes).toBe(true);
+		expect(caps.supportsDDLSequences).toBeUndefined();
 	});
 });

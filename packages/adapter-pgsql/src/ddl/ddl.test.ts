@@ -3,6 +3,7 @@
  */
 
 import type {
+	DialectCapabilities,
 	ForeignKeyIR,
 	IndexIR,
 	ModelIR,
@@ -10,7 +11,7 @@ import type {
 	SequenceIR,
 	TableIR,
 } from '@dbsp/core';
-import { ModelIRImpl } from '@dbsp/core';
+import { ModelIRImpl, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { generateDDL } from './ddl-generator.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
@@ -1472,5 +1473,110 @@ describe('Partitioning in DDL', () => {
 		const stmts = generateDDL(model);
 		const createSql = stmts.find((s) => s.includes('CREATE TABLE'));
 		expect(createSql).toContain('PARTITION BY RANGE ("year", "month")');
+	});
+});
+
+describe('DDL Generation with Capabilities (CAPS-003)', () => {
+	/** Build a rich ModelIR with enums, extensions, sequences, check constraints */
+	function makeFullModel() {
+		const table: TableIR = {
+			name: 'orders',
+			columns: [
+				{ name: 'id', type: 'integer', nullable: false },
+				{ name: 'amount', type: 'decimal', nullable: false },
+			],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+			checkConstraints: [
+				{ name: 'orders_amount_check', expression: 'CHECK ((amount > 0))' },
+			],
+		};
+		return new ModelIRImpl(
+			new Map([['orders', table]]),
+			new Map(),
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+			['uuid-ossp'],
+			new Map([['order_seq', { name: 'order_seq', startWith: 1, incrementBy: 1 }]]),
+		);
+	}
+
+	const noEnumCaps: DialectCapabilities = {
+		...POSTGRESQL_CAPABILITIES,
+		supportsDDLEnumTypes: false,
+	};
+
+	const noCheckCaps: DialectCapabilities = {
+		...POSTGRESQL_CAPABILITIES,
+		supportsDDLCheckConstraints: false,
+	};
+
+	const noExtCaps: DialectCapabilities = {
+		...POSTGRESQL_CAPABILITIES,
+		supportsDDLExtensions: false,
+	};
+
+	const noSeqCaps: DialectCapabilities = {
+		...POSTGRESQL_CAPABILITIES,
+		supportsDDLSequences: false,
+	};
+
+	// SC-09: Skip unsupported ENUMs
+	it('should skip CREATE TYPE when supportsDDLEnumTypes is false', () => {
+		const model = makeFullModel();
+		const stmts = generateDDL(model, { dialectCapabilities: noEnumCaps });
+		expect(stmts.some((s) => s.includes('CREATE TYPE'))).toBe(false);
+		// CREATE TABLE must still be present
+		expect(stmts.some((s) => s.includes('CREATE TABLE'))).toBe(true);
+	});
+
+	// SC-10: PG generates everything
+	it('should include all DDL features with POSTGRESQL_CAPABILITIES', () => {
+		const model = makeFullModel();
+		const stmts = generateDDL(model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+		expect(stmts.some((s) => s.includes('CREATE TYPE'))).toBe(true);
+		expect(stmts.some((s) => s.includes('CREATE SEQUENCE'))).toBe(true);
+		expect(stmts.some((s) => s.includes('CREATE EXTENSION'))).toBe(true);
+	});
+
+	// SC-12: Partial support — CHECK yes, ENUMs no
+	it('should generate CHECK but skip ENUMs when partially supported', () => {
+		const model = makeFullModel();
+		const stmts = generateDDL(model, { dialectCapabilities: noEnumCaps });
+		// No ENUM
+		expect(stmts.some((s) => s.includes('CREATE TYPE'))).toBe(false);
+		// CHECK still present
+		expect(stmts.some((s) => s.includes('CHECK'))).toBe(true);
+	});
+
+	it('should skip CHECK constraints when supportsDDLCheckConstraints is false', () => {
+		const model = makeFullModel();
+		const stmts = generateDDL(model, { dialectCapabilities: noCheckCaps });
+		expect(stmts.some((s) => s.includes('CHECK'))).toBe(false);
+		// Table still created
+		expect(stmts.some((s) => s.includes('CREATE TABLE'))).toBe(true);
+	});
+
+	it('should skip CREATE EXTENSION when supportsDDLExtensions is false', () => {
+		const model = makeFullModel();
+		const stmts = generateDDL(model, { dialectCapabilities: noExtCaps });
+		expect(stmts.some((s) => s.includes('CREATE EXTENSION'))).toBe(false);
+	});
+
+	it('should skip CREATE SEQUENCE when supportsDDLSequences is false', () => {
+		const model = makeFullModel();
+		const stmts = generateDDL(model, { dialectCapabilities: noSeqCaps });
+		expect(stmts.some((s) => s.includes('CREATE SEQUENCE'))).toBe(false);
+	});
+
+	it('should generate all features when no dialectCapabilities provided (backward compat)', () => {
+		const model = makeFullModel();
+		const stmts = generateDDL(model);
+		expect(stmts.some((s) => s.includes('CREATE TYPE'))).toBe(true);
+		expect(stmts.some((s) => s.includes('CREATE SEQUENCE'))).toBe(true);
+		expect(stmts.some((s) => s.includes('CREATE EXTENSION'))).toBe(true);
+		expect(stmts.some((s) => s.includes('CHECK'))).toBe(true);
 	});
 });

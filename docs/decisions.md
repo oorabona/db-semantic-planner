@@ -4,6 +4,22 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## CAPS — Multi-adapter capability negotiation (2026-03-19)
+
+- DDL flags go on DialectCapabilities (not AdapterCapabilities) — dialect-level, not adapter-level
+- 15 individual flags (split from 10 per /llm consensus: advancedIndexes and deferredConstraints too coarse)
+- Flag semantics: `supportsDDL*` = "adapter can handle this IR feature" (not "same SQL as PG"). Partial support valid.
+- Default UnsupportedFeatureBehavior = 'warning' (emit + skip). User can set 'error' for strict mode
+- Per-feature override via FeatureBehaviorConfig { default, overrides?: Record<DDLFeature, behavior> }
+- `createDialectCapabilities(overrides)` factory helper for adapter authors (fills safe defaults)
+- FeatureTranslator<F> with type-safe DDLFeatureElementMap — design only, no concrete implementation
+- CAPS-005 = design only. Translation implementation deferred to adapter-mysql/sqlite stories
+- CAPS-VERSION (version-aware capabilities) deferred — not needed until 2nd adapter
+- Tier 1 (full): PG, MySQL, SQLite, DuckDB. Tier 2 (best-effort): Oracle, MSSQL, CouchDB
+- ForeignKeyIR uses `references.table` (not `targetTable`), `deferred` (not `deferrable`)
+
+---
+
 ## DDL-COMPLETE — Complete DDL migration system (2026-03-18)
 
 - Single monolithic story (not split into multiple)
