@@ -7,7 +7,7 @@
  * @module pgsql-adapter
  */
 
-import { InvalidOperationError, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import type {
 	Adapter,
 	AdapterCapabilities,
@@ -32,81 +32,46 @@ import type {
 	UpdateIntent,
 	UpsertFromIntent,
 	UpsertIntent,
-	WhereIntent,
 } from '@dbsp/types';
-import type { Mutable } from '@dbsp/types/internal';
-import type { Node, SelectStmt } from '@pgsql/types';
 import type { Pool, PoolClient } from 'pg';
+import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
+import { compileSubqueryInclude as compileSubqueryIncludeImpl } from './adapter-compiler-includes.js';
+import {
+	compileBatchUpdate as compileBatchUpdateImpl,
+	compileDelete as compileDeleteImpl,
+	compileInsertFrom as compileInsertFromImpl,
+	compileInsert as compileInsertImpl,
+	compileUpdate as compileUpdateImpl,
+	compileUpsertFrom as compileUpsertFromImpl,
+	compileUpsert as compileUpsertImpl,
+} from './adapter-compiler-mutations.js';
+import {
+	compileCteQuery as compileCteQueryImpl,
+	compileRecursive as compileRecursiveImpl,
+} from './adapter-compiler-recursive.js';
+import {
+	compileSelect,
+	compileWithIncludes as compileWithIncludesImpl,
+} from './adapter-compiler-select.js';
 import {
 	DEFAULT_PK_COLUMN,
 	defaultFkDerivation,
 	type FkColumnDerivation,
 } from './assert-field.js';
-import { binaryExpr, columnRef, funcCall, innerJoin, integerNode, rangeVar, stringNode } from './ast-helpers.js';
-import {
-	type CompilerOptions,
-	compilePlan,
-	type PlanDecision,
-	type SimplifiedPlanReport,
-} from './compiler.js';
 import {
 	type GenerateDDLOptions,
 	generateDDL as generateDDLStatements,
 } from './ddl/index.js';
-import { deparseQuoted } from './deparse.js';
-import {
-	type CompilerContext,
-	createCompilerState,
-	type Decision,
-} from './handlers/index.js';
-import { intentToDecisions } from './intent-to-decisions.js';
 import {
 	type IntrospectedModelIR,
 	type IntrospectionOptions,
 	introspect as introspectDb,
 } from './introspection.js';
 import {
-	type BatchUpdateConfig,
-	compileDelete as compileDeleteMutation,
-	compileInsertFrom as compileInsertFromMutation,
-	compileInsert as compileInsertMutation,
-	compileUnnestInsert as compileUnnestInsertMutation,
-	compileUnnestUpdate as compileUnnestUpdateMutation,
-	compileUnnestUpsert as compileUnnestUpsertMutation,
-	compileUpdate as compileUpdateMutation,
-	compileUpsertFrom as compileUpsertFromMutation,
-	compileUpsert as compileUpsertMutation,
-	type DeleteConfig,
-	type InsertConfig,
-	type InsertFromConfig,
-	RANGE_TYPES,
-	type UpdateConfig,
-	type UpsertConfig,
-	type UpsertFromConfig,
-} from './mutations/index.js';
-import {
-	inferPgArrayType,
-	transposeToColumnArrays,
-	validateBatchCardinality,
-} from './compiler-utils.js';
-import {
 	getNamingPluginForDbCasing,
 	type NamingPlugin,
 } from './naming-plugin.js';
-import {
-	convertDottedFieldsToExists,
-	deriveForeignKey,
-	extractAllIncludeDecisions,
-	extractExistsDecisions,
-	mapComparisonOperator,
-	valueToNode,
-} from './plan-decision-extractor.js';
-import {
-	buildRecursiveCte,
-	type RecursiveCteConfig,
-} from './recursive/index.js';
 import { generateCursorName } from './streaming/cursor.js';
-import { createTypeCastParamRef } from './param-ref.js';
 import { validateIdentifier } from './validate.js';
 
 // ============================================================================
@@ -214,6 +179,20 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	/**
+	 * Shared compilation dependencies — built lazily from adapter fields.
+	 * Passed to compiler sub-modules instead of `this`.
+	 */
+	private get compileDeps(): AdapterCompilerDeps {
+		return {
+			naming: this.naming,
+			schemaName: this.schemaName,
+			model: this.model,
+			defaultPk: this.defaultPk,
+			deriveFk: this.deriveFk,
+		};
+	}
+
+	/**
 	 * Returns the pool/client executor, or throws if in compile-only mode.
 	 */
 	private requireConnection(): Pool | PoolClient {
@@ -252,33 +231,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	// =========================================================================
-	// Private Helpers
-	// =========================================================================
-
-	/**
-	 * Build a column-type map for a table, filtered to only columns
-	 * whose type requires explicit type-casting (e.g. range types).
-	 * Returns undefined if no type-cast columns are found (or model unavailable).
-	 */
-	private getColumnTypes(
-		tableName: string,
-		columns: string[],
-	): Record<string, string> | undefined {
-		if (!this.model) return undefined;
-		const table = this.model.getTable(tableName);
-		if (!table) return undefined;
-		let result: Record<string, string> | undefined;
-		for (const col of columns) {
-			const columnIR = table.columns.find((c) => c.name === col);
-			if (columnIR && RANGE_TYPES.has(columnIR.type)) {
-				result ??= {};
-				result[col] = columnIR.type;
-			}
-		}
-		return result;
-	}
-
-	// =========================================================================
 	// CompilingAdapter Methods
 	// =========================================================================
 
@@ -289,240 +241,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		plan: PlanReport,
 		options?: CompileOptions,
 	): CompiledQuery<T> {
-		const schemaName = this.schemaName ?? options?.schemaName;
-
-		const compilerOptions: CompilerOptions = {
-			naming: this.naming,
-			...(schemaName && { schema: schemaName }),
-			defaultPkColumnName: this.defaultPk,
-			deriveFkColumnName: this.deriveFk,
-		};
-
-		// Convert PlanReport (core) → SimplifiedPlanReport (pgsql compiler)
-		// The core's plan.decisions contain observability data, not SQL instructions.
-		// The actual query structure is in plan.intent (QueryIntent).
-		// Note: For unit tests with mock plans (no intent), fall back to plan.decisions directly.
-		let simplifiedPlan: SimplifiedPlanReport;
-
-		if (plan.intent) {
-			// Real usage: convert intent to decisions
-			let decisions = intentToDecisions(plan.intent, plan.rootTable);
-
-			// Filter out broken EXISTS decisions from intentToDecisions
-			// (they use relation name as targetTable instead of actual table name)
-			decisions = decisions.filter(
-				(d) =>
-					!(
-						d.type === 'where' &&
-						(d.operator === 'exists' || d.operator === 'notExists')
-					),
-			);
-
-			// Convert dotted-field comparisons (e.g., "parent.name") to EXISTS subqueries
-			// NQL compiles relation-path filters as plain comparisons with dotted field names
-			const resolvedModel = options?.model ?? this.model;
-			if (resolvedModel) {
-				decisions = convertDottedFieldsToExists(
-					decisions,
-					plan.rootTable,
-					resolvedModel,
-				);
-			}
-
-			// Add correct EXISTS decisions from planner's filter-strategy decisions
-			// (they have the actual target table in context.target)
-			const existsDecisions = extractExistsDecisions(plan, options?.model);
-
-			// Phase 3: Extract ALL include decisions (json_agg, join, lateral, cte, subquery)
-			const unifiedIncludeDecisions = extractAllIncludeDecisions(
-				plan,
-				this.defaultPk,
-				this.deriveFk,
-			);
-
-			// Propagate filter conditions from EXISTS to matching include decisions
-			// When a relation is both filtered and included, the filter should appear
-			// in both the EXISTS subquery AND the include subquery
-			const enrichedUnifiedDecisions = unifiedIncludeDecisions.map((jd) => {
-				if (jd.type !== 'includeStrategy' || !jd.relationName) return jd;
-
-				const matchingExists = existsDecisions.find(
-					(ed) =>
-						ed.type === 'where' &&
-						(ed.operator === 'exists' || ed.operator === 'notExists') &&
-						(ed.relationName === jd.relationName ||
-							ed.targetTable === jd.targetTable) &&
-						ed.conditions &&
-						(ed.conditions as PlanDecision[]).length > 0,
-				);
-
-				if (matchingExists?.conditions) {
-					return { ...jd, conditions: matchingExists.conditions };
-				}
-				return jd;
-			});
-
-			// Deduplicate: remove selectRelationColumn decisions for relations
-			// already covered by an include strategy.
-			// Include handlers (json_agg, lateral, CTE, join) already compile the
-			// relation's columns — emitting both would produce duplicate columns.
-			// Standalone relation expressions (no matching include) are kept.
-			// Note: selectPseudoColumn (recursive traversals like manager.name)
-			// are never covered by includes — they always compile independently.
-			const includedRelations = new Set(
-				enrichedUnifiedDecisions
-					.filter((d) => d.type === 'includeStrategy')
-					.map((d) => d.relationName as string)
-					.filter(Boolean),
-			);
-
-			// Collect specific columns per relation from selectRelationColumn
-			// decisions that will be deduplicated. This preserves column info
-			// that would otherwise be lost when selectRelationColumn is removed.
-			const relationColumnsMap = new Map<string, string[]>();
-			if (includedRelations.size > 0) {
-				for (const d of decisions) {
-					if (d.type === 'selectRelationColumn' && d.relation && d.column) {
-						const col = d.column as string;
-						const rootRelation = (d.relation as string).split('.')[0] ?? '';
-						if (includedRelations.has(rootRelation)) {
-							if (col === '*') {
-								// Wildcard: select all columns from relation
-								relationColumnsMap.set(rootRelation, ['*']);
-								continue;
-							}
-							const existing = relationColumnsMap.get(rootRelation);
-							if (existing && !existing.includes('*')) {
-								if (!existing.includes(col)) existing.push(col);
-							} else if (!existing) {
-								relationColumnsMap.set(rootRelation, [col]);
-							}
-						}
-					}
-				}
-
-				// Inject collected columns into matching includeStrategy decisions
-				if (relationColumnsMap.size > 0) {
-					for (const d of enrichedUnifiedDecisions) {
-						if (d.type === 'includeStrategy' && d.relationName) {
-							const cols = relationColumnsMap.get(d.relationName as string);
-							if (cols) {
-								(d as Mutable<PlanDecision>).columns = cols;
-							}
-						}
-					}
-				}
-
-				// Validate injected columns exist in target table schema
-				const validationModel = options?.model ?? this.model;
-				if (validationModel && relationColumnsMap.size > 0) {
-					for (const d of enrichedUnifiedDecisions) {
-						if (
-							d.type === 'includeStrategy' &&
-							d.columns &&
-							d.targetTable &&
-							!(
-								(d.columns as string[]).length === 1 &&
-								(d.columns as string[])[0] === '*'
-							)
-						) {
-							const targetTable = validationModel.getTable(
-								d.targetTable as string,
-							);
-							if (targetTable) {
-								const validColumnNames = new Set(
-									targetTable.columns.map((c) => c.name),
-								);
-								const invalid = (d.columns as string[]).filter(
-									(c) => !validColumnNames.has(c),
-								);
-								if (invalid.length > 0) {
-									throw new Error(
-										`Unknown column(s) ${invalid.map((c) => `'${c}'`).join(', ')} ` +
-											`in relation '${d.relationName}' (table '${d.targetTable}'). ` +
-											`Available: ${[...validColumnNames].join(', ')}`,
-									);
-								}
-							}
-						}
-					}
-				}
-			}
-
-			const deduplicatedDecisions =
-				includedRelations.size > 0
-					? decisions.filter((d) => {
-							if (d.type === 'selectRelationColumn' && d.relation) {
-								// relation may be a dotted path (e.g. "userRoles.role.permissions")
-								// — check if the root segment is covered by an include
-								const rel = d.relation as string;
-								const rootRelation = rel.split('.')[0] ?? rel;
-								if (includedRelations.has(rootRelation)) {
-									return false; // covered by include strategy
-								}
-							}
-							return true;
-						})
-					: decisions;
-
-			const allDecisions = [
-				...deduplicatedDecisions,
-				...existsDecisions,
-				...enrichedUnifiedDecisions,
-			];
-
-			// Enrich range operator decisions with dataType from model
-			// (PostgreSQL requires explicit type casts for range parameters)
-			const model = options?.model;
-			if (model) {
-				for (let i = 0; i < allDecisions.length; i++) {
-					const d = allDecisions[i];
-					if (
-						d &&
-						d.type === 'where' &&
-						(d.operator === 'contains' ||
-							d.operator === 'containedBy' ||
-							d.operator === 'overlaps')
-					) {
-						const tableName = d.table || plan.rootTable;
-						const table = model.getTable(tableName);
-						if (table) {
-							const col = table.columns.find((c) => c.name === d.column);
-							if (col?.type.endsWith('range')) {
-								allDecisions[i] = {
-									...d,
-									dataType: col.type,
-								} as typeof d;
-							}
-						}
-					}
-				}
-			}
-
-			simplifiedPlan = {
-				rootTable: plan.rootTable,
-				decisions: allDecisions,
-				...(schemaName ? { schema: schemaName } : {}),
-				...(plan.intent?.existsWrap ? { existsWrap: true } : {}),
-				...(plan.intent?.lock ? { lock: plan.intent.lock } : {}),
-			};
-		} else {
-			// Unit test with mock data: use decisions directly (legacy format).
-			// Tests supply adapter-format PlanDecisions inside a core PlanReport,
-			// so the runtime data is already in the right shape — bridge the type gap.
-			simplifiedPlan = {
-				rootTable: plan.rootTable,
-				decisions: bridgeLegacyDecisions(plan.decisions),
-				...(schemaName ? { schema: schemaName } : {}),
-			};
-		}
-
-		const result = compilePlan(simplifiedPlan, compilerOptions);
-
-		return {
-			sql: result.sql,
-			parameters: result.parameters,
-		};
+		return compileSelect<T>(plan, options, this.compileDeps);
 	}
 
 	/**
@@ -532,72 +251,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		plan: PlanReport,
 		options?: CompileOptions,
 	): CompileResultWithIncludes<T> {
-		const main = this.compile<T>(plan, options);
-
-		// Extract subquery include info from planner decisions
-		// Decisions with choice === 'subquery' need separate execution
-		const subqueryIncludes: SubqueryIncludeInfo[] = [];
-
-		for (const d of plan.decisions) {
-			if (d.type !== 'include-strategy' || d.choice !== 'subquery') continue;
-
-			const ctx = d.context;
-			if (!ctx.target) continue;
-
-			const relationName = ctx.includeAlias ?? ctx.relation;
-			if (!relationName) continue;
-
-			// Derive FK using shared helper
-			const rawFk =
-				deriveForeignKey(ctx, this.deriveFk, this.defaultPk) ?? this.defaultPk;
-			const fk = Array.isArray(rawFk) ? rawFk[0]! : rawFk;
-
-			// For subquery include, we need:
-			// - sourceKey: column on the parent result to extract IDs from
-			// - foreignKey: column on the target table to match via WHERE ... IN
-			//
-			// belongsTo (posts → author): FK=authorId is on source.
-			//   Extract authorId from parents → SELECT * FROM authors WHERE id IN (...)
-			//   sourceKey=authorId, foreignKey=id (target PK)
-			//
-			// hasMany (authors → posts): FK=authorId is on target.
-			//   Extract id from parents → SELECT * FROM posts WHERE author_id IN (...)
-			//   sourceKey=id, foreignKey=authorId (target FK)
-			const isBelongsTo = ctx.relationType === 'belongsTo';
-			const sourceKey = isBelongsTo ? fk : 'id';
-			const targetFk = isBelongsTo ? 'id' : fk;
-
-			// Find matching include intent for select/where passthrough
-			const includeIntent = (
-				plan.intent?.include as Array<Record<string, unknown>> | undefined
-			)?.find(
-				(i) => i.relation === relationName || i.relation === ctx.includeAlias,
-			);
-
-			const entry: Mutable<SubqueryIncludeInfo> = {
-				relationName,
-				targetTable: ctx.target,
-				foreignKey: targetFk,
-				sourceKey,
-				sourceTable: ctx.sourceTable ?? plan.rootTable,
-			};
-			if (typeof ctx.relationType === 'string') {
-				entry.relationType = ctx.relationType;
-			}
-			if (includeIntent?.select != null) {
-				entry.select = includeIntent.select as NonNullable<
-					SubqueryIncludeInfo['select']
-				>;
-			}
-			if (includeIntent?.where != null) {
-				entry.where = includeIntent.where as NonNullable<
-					SubqueryIncludeInfo['where']
-				>;
-			}
-			subqueryIncludes.push(entry);
-		}
-
-		return { main, subqueryIncludes };
+		return compileWithIncludesImpl<T>(plan, options, this.compileDeps);
 	}
 
 	/**
@@ -614,254 +268,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		parentIds: readonly unknown[],
 		options?: CompileOptions,
 	): CompiledQuery {
-		const schemaName = this.schemaName ?? options?.schemaName;
-		const state = createCompilerState();
-
-		// Handle empty parent IDs - return query that returns no results
-		if (parentIds.length === 0) {
-			const tableName = schemaName
-				? `"${this.naming.toDatabase(schemaName)}"."${this.naming.toDatabase(info.targetTable)}"`
-				: `"${this.naming.toDatabase(info.targetTable)}"`;
-
-			return {
-				sql: `SELECT * FROM ${tableName} WHERE FALSE`,
-				parameters: [],
-			};
-		}
-
-		// Determine FK column(s)
-		const fkColumns = Array.isArray(info.foreignKey)
-			? info.foreignKey
-			: [info.foreignKey];
-
-		// For M:N relations with junction table
-		if (info.through && info.throughSourceKey && info.throughTargetKey) {
-			return this.compileSubqueryIncludeManyToMany(
-				info,
-				parentIds,
-				schemaName,
-				state,
-			);
-		}
-
-		// Build SELECT target list
-		const targetList = [
-			{ ResTarget: { val: { ColumnRef: { fields: [{ A_Star: {} }] } } } },
-		];
-
-		// Build FROM clause
-		const fromClause = [
-			{
-				RangeVar: {
-					relname: this.naming.toDatabase(info.targetTable),
-					inh: true,
-					relpersistence: 'p',
-					...(schemaName && {
-						schemaname: this.naming.toDatabase(schemaName),
-					}),
-				},
-			},
-		];
-
-		// Build WHERE clause: foreignKey IN ($1, $2, ...)
-		let whereClause: Node;
-
-		if (fkColumns.length === 1) {
-			// Single column FK: column IN ($1, $2, ...)
-			const paramRefs = parentIds.map((id) => {
-				state.parameters.push(id);
-				state.paramIndex++;
-				return { ParamRef: { number: state.paramIndex } };
-			});
-
-			whereClause = {
-				A_Expr: {
-					kind: 'AEXPR_IN',
-					name: [{ String: { sval: '=' } }],
-					lexpr: {
-						ColumnRef: {
-							fields: [
-								{ String: { sval: this.naming.toDatabase(fkColumns[0]!) } },
-							],
-						},
-					},
-					rexpr: { List: { items: paramRefs } },
-				},
-			};
-		} else {
-			// Composite FK: (col1, col2) IN (($1, $2), ($3, $4), ...)
-			// For simplicity, use OR of ANDs
-			const conditions = parentIds.map((id) => {
-				const idValues = id as unknown[];
-				const colConditions = fkColumns.map((col, idx) => {
-					state.parameters.push(idValues[idx]);
-					state.paramIndex++;
-					return {
-						A_Expr: {
-							kind: 'AEXPR_OP',
-							name: [{ String: { sval: '=' } }],
-							lexpr: {
-								ColumnRef: {
-									fields: [{ String: { sval: this.naming.toDatabase(col) } }],
-								},
-							},
-							rexpr: { ParamRef: { number: state.paramIndex } },
-						},
-					};
-				});
-
-				return colConditions.length === 1
-					? colConditions[0]
-					: { BoolExpr: { boolop: 'AND_EXPR', args: colConditions } };
-			});
-
-			whereClause =
-				conditions.length === 1
-					? (conditions[0] as Node)
-					: { BoolExpr: { boolop: 'OR_EXPR', args: conditions as Node[] } };
-		}
-
-		// Build SELECT statement
-		const selectAst: Node = {
-			SelectStmt: {
-				targetList,
-				fromClause,
-				whereClause,
-			},
-		};
-
-		const sql = deparseQuoted(selectAst);
-
-		return {
-			sql,
-			parameters: state.parameters,
-		};
+		return compileSubqueryIncludeImpl(
+			info,
+			parentIds,
+			options,
+			this.compileDeps,
+		);
 	}
 
-	/**
-	 * Internal: Compile M:N subquery include with junction table.
-	 */
-	private compileSubqueryIncludeManyToMany(
-		info: SubqueryIncludeInfo,
-		parentIds: readonly unknown[],
-		schemaName: string | undefined,
-		state: ReturnType<typeof createCompilerState>,
-	): CompiledQuery {
-		// M:N: SELECT t.* FROM target t
-		//      JOIN junction j ON t.pk = j.throughTargetKey
-		//      WHERE j.throughSourceKey IN ($1, $2, ...)
-
-		const targetAlias = 't';
-		const junctionAlias = 'j';
-
-		const throughTable = info.through!;
-		const throughSourceKey = info.throughSourceKey!;
-		const throughTargetKey = info.throughTargetKey!;
-
-		// Determine target PK (usually 'id', but could be from sourceKey)
-		const targetPk = Array.isArray(info.sourceKey)
-			? info.sourceKey[0]!
-			: info.sourceKey;
-
-		// Build param refs for parent IDs
-		const paramRefs = parentIds.map((id) => {
-			state.parameters.push(id);
-			state.paramIndex++;
-			return { ParamRef: { number: state.paramIndex } };
-		});
-
-		// Build WHERE clause: j.throughSourceKey IN (...)
-		const whereClause: Node = {
-			A_Expr: {
-				kind: 'AEXPR_IN',
-				name: [{ String: { sval: '=' } }],
-				lexpr: {
-					ColumnRef: {
-						fields: [
-							{ String: { sval: junctionAlias } },
-							{ String: { sval: this.naming.toDatabase(throughSourceKey) } },
-						],
-					},
-				},
-				rexpr: { List: { items: paramRefs } },
-			},
-		};
-
-		// Build JOIN condition: t.pk = j.throughTargetKey
-		const joinQuals: Node = {
-			A_Expr: {
-				kind: 'AEXPR_OP',
-				name: [{ String: { sval: '=' } }],
-				lexpr: {
-					ColumnRef: {
-						fields: [
-							{ String: { sval: targetAlias } },
-							{ String: { sval: this.naming.toDatabase(targetPk) } },
-						],
-					},
-				},
-				rexpr: {
-					ColumnRef: {
-						fields: [
-							{ String: { sval: junctionAlias } },
-							{ String: { sval: this.naming.toDatabase(throughTargetKey) } },
-						],
-					},
-				},
-			},
-		};
-
-		// Build FROM clause with JOIN using helper functions
-		const targetRangeVar = rangeVar(
-			info.targetTable,
-			targetAlias,
-			schemaName,
-			this.naming,
-		);
-
-		const junctionRangeVar = rangeVar(
-			throughTable,
-			junctionAlias,
-			schemaName,
-			this.naming,
-		);
-
-		// Use innerJoin helper for proper typing
-		const joinNode = innerJoin(targetRangeVar, junctionRangeVar, joinQuals);
-		const fromClause = [joinNode];
-
-		// Build SELECT t.*
-		const targetList = [
-			{
-				ResTarget: {
-					val: {
-						ColumnRef: {
-							fields: [{ String: { sval: targetAlias } }, { A_Star: {} }],
-						},
-					},
-				},
-			},
-		];
-
-		const selectAst: Node = {
-			SelectStmt: {
-				targetList,
-				fromClause,
-				whereClause,
-			},
-		};
-
-		const sql = deparseQuoted(selectAst);
-
-		return {
-			sql,
-			parameters: state.parameters,
-		};
-	}
-
-	/**
-	 * Compile an insert intent to executable SQL.
-	 */
 	/**
 	 * Compile an insert intent to executable SQL.
 	 *
@@ -870,59 +284,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * - rows > batchThreshold OR batchThreshold === 0: SELECT unnest($1::type[]),...
 	 */
 	compileInsert(intent: InsertIntent, options?: CompileOptions): CompiledQuery {
-		const schemaName = this.schemaName ?? options?.schemaName;
-
-		// Create compiler context and state
-		const ctx: CompilerContext = {
-			naming: this.naming,
-			rootTable: intent.table,
-			...(schemaName !== undefined && { schema: schemaName }),
-			maxRecursiveDepth: 100,
-		};
-		const state = createCompilerState();
-
-		// Convert InsertIntent to InsertConfig
-		// Extract columns and values from intent
-		const firstRow = intent.values?.[0] ?? {};
-		const columns = Object.keys(firstRow);
-		const values = (intent.values ?? []).map((row) =>
-			columns.map((col) => row[col]),
-		);
-
-		const columnTypes = this.getColumnTypes(intent.table, columns);
-
-		const config: InsertConfig = {
-			table: intent.table,
-			columns,
-			values,
-			...(intent.returning && { returning: [...intent.returning] }),
-			...(columnTypes && { columnTypes }),
-		};
-
-		// maxBatchSize guard (INV-07)
-		const maxBatchSize = options?.maxBatchSize;
-		if (maxBatchSize !== undefined && values.length > maxBatchSize) {
-			throw new InvalidOperationError(
-				'insert',
-				`Batch size ${values.length} exceeds maxBatchSize ${maxBatchSize}`,
-			);
-		}
-
-		// Strategy switch: unnest for large batches, VALUES for small (INV-03)
-		const batchThreshold = options?.batchThreshold ?? 50;
-		const useUnnest =
-			values.length > 0 &&
-			(batchThreshold === 0 || values.length > batchThreshold);
-
-		const ast = useUnnest
-			? compileUnnestInsertMutation(config, ctx, state)
-			: compileInsertMutation(config, ctx, state);
-		const sql = deparseQuoted(ast);
-
-		return {
-			sql,
-			parameters: state.parameters,
-		};
+		return compileInsertImpl(intent, options, this.compileDeps);
 	}
 
 	/**
@@ -933,75 +295,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: InsertFromIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		const schemaName = this.schemaName ?? options?.schemaName;
-
-		// Create compiler context and state
-		const ctx: CompilerContext = {
-			naming: this.naming,
-			rootTable: intent.source, // Source table for WHERE compilation
-			...(schemaName !== undefined && { schema: schemaName }),
-			maxRecursiveDepth: 100,
-		};
-		const state = createCompilerState();
-
-		// Convert InsertFromIntent to InsertFromConfig
-		const config: InsertFromConfig = {
-			targetTable: intent.table,
-			sourceTable: intent.source,
-			...(intent.columns && { columns: [...intent.columns] }),
-			...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
-			...(intent.limit !== undefined && { limit: intent.limit }),
-			...(intent.returning && { returning: [...intent.returning] }),
-		};
-
-		const ast = compileInsertFromMutation(config, ctx, state);
-		const sql = deparseQuoted(ast);
-
-		return {
-			sql,
-			parameters: state.parameters,
-		};
+		return compileInsertFromImpl(intent, options, this.compileDeps);
 	}
 
 	/**
 	 * Compile an update intent to executable SQL.
 	 */
 	compileUpdate(intent: UpdateIntent, options?: CompileOptions): CompiledQuery {
-		const schemaName = this.schemaName ?? options?.schemaName;
-
-		// Create compiler context and state
-		const ctx: CompilerContext = {
-			naming: this.naming,
-			rootTable: intent.table,
-			...(schemaName !== undefined && { schema: schemaName }),
-			maxRecursiveDepth: 100,
-		};
-		const state = createCompilerState();
-
-		// Convert UpdateIntent to UpdateConfig
-		const setColumns = Object.keys(intent.set ?? {});
-		const columnTypes = this.getColumnTypes(intent.table, setColumns);
-
-		const config: UpdateConfig = {
-			table: intent.table,
-			set: Object.entries(intent.set ?? {}).map(([column, value]) => ({
-				column,
-				value,
-			})),
-			...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
-			...(intent.returning && { returning: [...intent.returning] }),
-			...(columnTypes && { columnTypes }),
-		};
-
-		const ast = compileUpdateMutation(config, ctx, state);
-		const sql = deparseQuoted(ast);
-
-		return {
-			sql,
-			parameters: state.parameters,
-		};
+		return compileUpdateImpl(intent, options, this.compileDeps);
 	}
-
 
 	/**
 	 * Compile a batch update intent to executable SQL using unnest FROM strategy (BATCH-001).
@@ -1016,211 +318,21 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: BatchUpdateIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		const schemaName = this.schemaName ?? options?.schemaName;
-
-		const ctx: CompilerContext = {
-			naming: this.naming,
-			rootTable: intent.table,
-			...(schemaName !== undefined && { schema: schemaName }),
-			maxRecursiveDepth: 100,
-		};
-		const state = createCompilerState();
-
-		if (intent.updates.length === 0) {
-			throw new InvalidOperationError(
-				'update',
-				'batchSet requires at least one row',
-			);
-		}
-
-		// Extract all columns from the first row
-		const allColumns = Object.keys(intent.updates[0]!);
-		const matchColumns = [...intent.matchColumns];
-
-		// Validate that all match columns appear in the data
-		for (const mc of matchColumns) {
-			if (!allColumns.includes(mc)) {
-				throw new InvalidOperationError(
-					'update',
-					`Match column "${mc}" not found in update data. Each row must include the match column(s).`,
-				);
-			}
-		}
-
-		// Build row-major values matrix and validate cardinality
-		const values = intent.updates.map((row) =>
-			allColumns.map((col) => row[col]),
-		);
-		validateBatchCardinality(allColumns, values);
-
-		// Transpose to column-major arrays
-		const columnArrays = transposeToColumnArrays(allColumns, values);
-
-		// Get column types for type inference
-		const columnTypes = this.getColumnTypes(intent.table, allColumns);
-
-		// Build scalar SET entries from scalarSet
-		const scalarSet = intent.scalarSet
-			? Object.entries(intent.scalarSet).map(([column, value]) => ({
-					column,
-					value,
-				}))
-			: undefined;
-
-		const config: BatchUpdateConfig = {
-			table: intent.table,
-			matchColumns,
-			allColumns,
-			columnArrays,
-			...(scalarSet && { scalarSet }),
-			...(intent.returning && { returning: [...intent.returning] }),
-			...(columnTypes && { columnTypes }),
-		};
-
-		const ast = compileUnnestUpdateMutation(config, ctx, state);
-		const sql = deparseQuoted(ast);
-
-		return {
-			sql,
-			parameters: state.parameters,
-		};
+		return compileBatchUpdateImpl(intent, options, this.compileDeps);
 	}
-
 
 	/**
 	 * Compile a delete intent to executable SQL.
 	 */
 	compileDelete(intent: DeleteIntent, options?: CompileOptions): CompiledQuery {
-		const schemaName = this.schemaName ?? options?.schemaName;
-
-		// Create compiler context and state
-		const ctx: CompilerContext = {
-			naming: this.naming,
-			rootTable: intent.table,
-			...(schemaName !== undefined && { schema: schemaName }),
-			maxRecursiveDepth: 100,
-		};
-		const state = createCompilerState();
-
-		// Convert DeleteIntent to DeleteConfig
-		const config: DeleteConfig = {
-			table: intent.table,
-			...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
-			...(intent.returning && { returning: [...intent.returning] }),
-		};
-
-		const ast = compileDeleteMutation(config, ctx, state);
-		const sql = deparseQuoted(ast);
-
-		return {
-			sql,
-			parameters: state.parameters,
-		};
+		return compileDeleteImpl(intent, options, this.compileDeps);
 	}
 
 	/**
 	 * Compile an upsert intent to executable SQL (DX-026).
 	 */
 	compileUpsert(intent: UpsertIntent, options?: CompileOptions): CompiledQuery {
-		const schemaName = this.schemaName ?? options?.schemaName;
-
-		// Create compiler context and state
-		const ctx: CompilerContext = {
-			naming: this.naming,
-			rootTable: intent.table,
-			...(schemaName !== undefined && { schema: schemaName }),
-			maxRecursiveDepth: 100,
-		};
-		const state = createCompilerState();
-
-		// Convert UpsertIntent to UpsertConfig
-		// Extract columns and values from intent
-		const firstRow = intent.values?.[0] ?? {};
-
-		// If explicit set values are provided for doUpdate, merge them into insert values
-		// so that EXCLUDED.column references have the correct values
-		const mergedFirstRow =
-			intent.action.type === 'doUpdate' && intent.action.set
-				? { ...firstRow, ...intent.action.set }
-				: firstRow;
-
-		const columns = Object.keys(mergedFirstRow);
-		const values = (intent.values ?? []).map((row) => {
-			const mergedRow =
-				intent.action.type === 'doUpdate' && intent.action.set
-					? { ...row, ...intent.action.set }
-					: row;
-			return columns.map((col) => mergedRow[col]);
-		});
-
-		// Build conflict target
-		const conflictTarget: {
-			columns?: string[];
-			constraint?: string;
-		} = {};
-
-		if ('columns' in intent.onConflict) {
-			conflictTarget.columns = [...intent.onConflict.columns];
-		} else if ('constraint' in intent.onConflict) {
-			conflictTarget.constraint = intent.onConflict.constraint;
-		}
-
-		// Build conflict action
-		const conflictAction: 'nothing' | 'update' =
-			intent.action.type === 'doNothing' ? 'nothing' : 'update';
-
-		// Determine update columns
-		let updateColumns: string[] | undefined;
-		if (intent.action.type === 'doUpdate') {
-			if (intent.action.set) {
-				// Explicit update columns from set
-				// Values were merged into INSERT VALUES above, so EXCLUDED.column will reference them
-				updateColumns = Object.keys(intent.action.set);
-			} else {
-				// Default: update all non-conflict columns
-				const conflictCols =
-					'columns' in intent.onConflict ? intent.onConflict.columns : [];
-				updateColumns = columns.filter((col) => !conflictCols.includes(col));
-			}
-		}
-
-		const columnTypes = this.getColumnTypes(intent.table, columns);
-
-		const config: UpsertConfig = {
-			table: intent.table,
-			columns,
-			values,
-			conflictTarget,
-			conflictAction,
-			...(updateColumns && { updateColumns }),
-			...(intent.returning && { returning: [...intent.returning] }),
-			...(columnTypes && { columnTypes }),
-		};
-
-		// maxBatchSize guard (INV-07)
-		const maxBatchSize = options?.maxBatchSize;
-		if (maxBatchSize !== undefined && values.length > maxBatchSize) {
-			throw new InvalidOperationError(
-				'upsert',
-				`Batch size ${values.length} exceeds maxBatchSize ${maxBatchSize}`,
-			);
-		}
-
-		// Strategy switch: unnest for large batches, VALUES for small (INV-03)
-		const batchThreshold = options?.batchThreshold ?? 50;
-		const useUnnest =
-			values.length > 0 &&
-			(batchThreshold === 0 || values.length > batchThreshold);
-
-		const ast = useUnnest
-			? compileUnnestUpsertMutation(config, ctx, state)
-			: compileUpsertMutation(config, ctx, state);
-		const sql = deparseQuoted(ast);
-
-		return {
-			sql,
-			parameters: state.parameters,
-		};
+		return compileUpsertImpl(intent, options, this.compileDeps);
 	}
 
 	/**
@@ -1231,44 +343,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: UpsertFromIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		const schemaName = this.schemaName ?? options?.schemaName;
-
-		const ctx: CompilerContext = {
-			naming: this.naming,
-			rootTable: intent.source,
-			...(schemaName !== undefined && { schema: schemaName }),
-			maxRecursiveDepth: 100,
-		};
-		const state = createCompilerState();
-
-		// Derive columns from model if not explicitly specified (needed for ON CONFLICT SET)
-		let columns: string[] | undefined;
-		if (intent.columns) {
-			columns = [...intent.columns];
-		} else if (options?.model) {
-			const targetTable = options.model.getTable(intent.table);
-			if (targetTable) {
-				columns = targetTable.columns.map((c) => c.name);
-			}
-		}
-
-		const config: UpsertFromConfig = {
-			targetTable: intent.table,
-			sourceTable: intent.source,
-			conflictColumns: [...intent.conflictColumns],
-			...(columns && { columns }),
-			...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
-			...(intent.limit !== undefined && { limit: intent.limit }),
-			...(intent.returning && { returning: [...intent.returning] }),
-		};
-
-		const ast = compileUpsertFromMutation(config, ctx, state);
-		const sql = deparseQuoted(ast);
-
-		return {
-			sql,
-			parameters: state.parameters,
-		};
+		return compileUpsertFromImpl(intent, options, this.compileDeps);
 	}
 
 	/**
@@ -1277,197 +352,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 */
 	compileRecursive(
 		report: RecursivePlanReport,
-		_model: ModelIR,
+		model: ModelIR,
 		options?: CompileOptions,
 	): CompiledQuery {
-		const schemaName = this.schemaName ?? options?.schemaName;
-		const intent = report.intent;
-		const traversal = intent.traversal;
-
-		const trackPath = intent.track?.path !== undefined;
-		const trackDepth = intent.track?.depth !== undefined;
-
-		let config: RecursiveCteConfig;
-
-		if (traversal.kind === 'edge-table') {
-			const table = traversal.nodeTable;
-			const pkColumn = traversal.nodeId;
-			const ctx: CompilerContext = {
-				naming: this.naming,
-				rootTable: table,
-				...(schemaName !== undefined && { schema: schemaName }),
-				maxRecursiveDepth: intent.maxDepth,
-			};
-
-			// Get columns to select
-			const startSelect = intent.start.select ?? [];
-			const nodeIdColumn =
-				intent.start.nodeIdExpr.kind === 'column'
-					? intent.start.nodeIdExpr.name
-					: pkColumn;
-			const selectColumns = Array.from(new Set([nodeIdColumn, ...startSelect]));
-
-			// Edge-table traversal: join through a junction table
-			const edgeFrom =
-				traversal.direction === 'in' ? traversal.edgeTo : traversal.edgeFrom;
-			const edgeTo =
-				traversal.direction === 'in' ? traversal.edgeFrom : traversal.edgeTo;
-
-			// Build anchor WHERE from intent.start.where
-			const anchorWhere = intent.start.where
-				? this.buildRecursiveAnchorWhere(intent.start.where, '__n')
-				: undefined;
-
-			const base: RecursiveCteConfig = {
-				cteAlias: intent.cteName,
-				table,
-				pkColumn,
-				fkColumn: '', // unused in edge-table mode
-				outerAlias: 't0',
-				isAncestors: false,
-				maxDepth: intent.maxDepth,
-				selectColumns,
-				trackPath,
-				usePg14Cycle: false,
-				edgeTable: traversal.edgeTable,
-				edgeFrom,
-				edgeTo,
-				ctx,
-			};
-
-			// Add optional properties only when defined
-			if (traversal.direction === 'both') {
-				base.bidirectionalStrategy =
-					traversal.edgeStorageHint === 'directed-only' ? 'union-all' : 'union';
-			}
-			if (anchorWhere) {
-				base.anchorWhere = anchorWhere;
-			}
-
-			config = base;
-		} else if (traversal.kind === 'adjacency') {
-			const table = traversal.nodeTable;
-			const pkColumn = traversal.nodeId;
-			const ctx: CompilerContext = {
-				naming: this.naming,
-				rootTable: table,
-				...(schemaName !== undefined && { schema: schemaName }),
-				maxRecursiveDepth: intent.maxDepth,
-			};
-
-			const startSelect = intent.start.select ?? [];
-			const nodeIdColumn =
-				intent.start.nodeIdExpr.kind === 'column'
-					? intent.start.nodeIdExpr.name
-					: pkColumn;
-			const selectColumns = Array.from(new Set([nodeIdColumn, ...startSelect]));
-
-			// Adjacency-list traversal: self-referencing FK
-			config = {
-				cteAlias: intent.cteName,
-				table,
-				pkColumn,
-				fkColumn: traversal.parentId,
-				outerAlias: 't0',
-				isAncestors: traversal.direction === 'ancestors',
-				maxDepth: intent.maxDepth,
-				selectColumns,
-				trackPath,
-				usePg14Cycle: false,
-				ctx,
-			};
-		} else {
-			// Exhaustive check: only 'custom' remains, which is reserved for P2
-			const _exhaustive: 'custom' = traversal.kind;
-			throw new Error(
-				`PgsqlAdapter.compileRecursive: Unsupported traversal kind '${_exhaustive}'`,
-			);
-		}
-
-		// Build the recursive CTE
-		const { cte, extraCtes } = buildRecursiveCte(config);
-
-		// Build final target list (include __depth and __path when tracked)
-		const finalTargets: Node[] = config.selectColumns.map((col: string) => ({
-			ResTarget: {
-				val: {
-					ColumnRef: {
-						fields: [
-							{ String: { sval: config.cteAlias } },
-							{ String: { sval: this.naming.toDatabase(col) } },
-						],
-					},
-				},
-				name: this.naming.toDatabase(col),
-			},
-		}));
-
-		if (trackDepth) {
-			const depthAlias = intent.track?.depth?.as ?? '__depth';
-			finalTargets.push({
-				ResTarget: {
-					val: {
-						ColumnRef: {
-							fields: [
-								{ String: { sval: config.cteAlias } },
-								{ String: { sval: '__depth' } },
-							],
-						},
-					},
-					name: depthAlias,
-				},
-			});
-		}
-
-		if (trackPath) {
-			const pathAlias = intent.track?.path?.as ?? '__path';
-			finalTargets.push({
-				ResTarget: {
-					val: {
-						ColumnRef: {
-							fields: [
-								{ String: { sval: config.cteAlias } },
-								{ String: { sval: '__path' } },
-							],
-						},
-					},
-					name: pathAlias,
-				},
-			});
-		}
-
-		// Assemble all CTEs (extra CTEs like __edges_bidir go first)
-		const ctes: Node[] = [];
-		if (extraCtes) {
-			ctes.push(...extraCtes);
-		}
-		ctes.push(cte);
-
-		// Build the final SELECT that uses the CTE
-		const selectStmt: SelectStmt = {
-			targetList: finalTargets,
-			fromClause: [
-				{
-					RangeVar: {
-						relname: config.cteAlias,
-						inh: true,
-						relpersistence: 'p',
-					},
-				},
-			],
-			withClause: {
-				ctes,
-				recursive: true,
-			},
-		};
-
-		// Deparse AST to SQL
-		const sql = deparseQuoted({ SelectStmt: selectStmt });
-
-		return {
-			sql,
-			parameters: [],
-		};
+		return compileRecursiveImpl(report, model, options, this.compileDeps);
 	}
 
 	/**
@@ -1481,188 +369,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: CteQueryIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		const schemaName = this.schemaName ?? options?.schemaName;
-		const state = createCompilerState();
-
-		// 1. Build CTE nodes and accumulate CTE parameters
-		const cteNodes: Node[] = intent.ctes.map((cte) => {
-			if (cte.kind !== 'unnestCte') {
-				const kind = (cte as { kind: string }).kind;
-				throw new Error(
-					`PgsqlAdapter.compileCteQuery: Unsupported CTE kind '${kind}'`,
-				);
-			}
-			return this.buildUnnestCte(cte, state);
-		});
-
-		// 2. Compile outer query independently ($1, $2, ... relative to outer)
-		const outerCompileOptions: CompileOptions =
-			schemaName !== undefined ? { schemaName } : {};
-		const outerPlanReport: import('@dbsp/types').PlanReport = {
-			rootTable: intent.query.from,
-			decisions: [],
-			warnings: [],
-			ctes: [],
-			intent: intent.query,
-			metadata: {
-				planningTimeMs: 0,
-				relationsAnalyzed: 0,
-				isAmbiguous: false,
-			},
-		};
-		const outerCompiled = this.compile(outerPlanReport, outerCompileOptions);
-
-		// 3. Renumber outer SQL parameters to follow CTE parameters
-		const cteParamCount = state.parameters.length;
-		const renumberedOuterSql =
-			cteParamCount > 0
-				? outerCompiled.sql.replace(
-						/\$([0-9]+)/g,
-						(_: string, n: string) => '$' + (parseInt(n) + cteParamCount),
-					)
-				: outerCompiled.sql;
-
-		// 4. Deparse CTE nodes to SQL fragments
-		const cteSqlParts = cteNodes.map((n) => deparseQuoted(n));
-		const withClause = cteSqlParts.join(', ');
-
-		const sql =
-			withClause.length > 0
-				? `WITH ${withClause} ${renumberedOuterSql}`
-				: renumberedOuterSql;
-
-		return {
-			sql,
-			parameters: [...state.parameters, ...outerCompiled.parameters],
-		};
-	}
-
-	/**
-	 * Build a CommonTableExpr AST node for an unnest-backed CTE.
-	 * Produces: CommonTableExpr { ctename: 'name', ctequery: SelectStmt {...} }
-	 */
-	private buildUnnestCte(
-		cte: import('@dbsp/types').UnnestCteIntent,
-		state: ReturnType<typeof createCompilerState>,
-	): Node {
-		const columns = Object.keys(cte.columns);
-		const hasIndex = cte.indexColumn !== undefined;
-		const indexCol = cte.indexColumn ?? 'ordinality';
-
-		// Build unnest arguments: CAST($N AS type[]) for each column
-		const unnestArgs: Node[] = columns.map((col) => {
-			const colArray = cte.columns[col] as unknown[];
-			const sampleValue = colArray.find((v) => v !== null && v !== undefined);
-			const pgArrayType = inferPgArrayType(col, undefined, sampleValue);
-			const pgBaseType = pgArrayType.endsWith('[]')
-				? pgArrayType.slice(0, -2)
-				: pgArrayType;
-
-			state.parameters.push(colArray);
-			state.paramIndex++;
-			return createTypeCastParamRef(state.paramIndex, pgBaseType, true);
-		});
-
-		// All column alias names: col1, col2, ...[, ordinality]
-		const allAliasNames = [
-			...columns.map((c) => this.naming.toDatabase(c)),
-			...(hasIndex ? ['ordinality'] : []),
-		];
-
-		// FROM unnest(args...) [WITH ORDINALITY] AS t("col1", "col2"[, ordinality])
-		const rangeFunc: Node = {
-			RangeFunction: {
-				ordinality: hasIndex,
-				functions: [{ List: { items: [funcCall('unnest', unnestArgs)] } }],
-				alias: {
-					aliasname: 't',
-					colnames: allAliasNames.map((n) => stringNode(n)),
-				},
-			},
-		};
-
-		// SELECT targets: t."col1", t."col2"[, (t.ordinality - 1) AS "idx"]
-		const targets: Node[] = columns.map((col) => ({
-			ResTarget: {
-				val: columnRef(col, 't', undefined, this.naming),
-				name: this.naming.toDatabase(col),
-			},
-		}));
-		if (hasIndex) {
-			targets.push({
-				ResTarget: {
-					val: binaryExpr(
-						'-',
-						columnRef('ordinality', 't'),
-						integerNode(1),
-					),
-					name: indexCol,
-				},
-			});
-		}
-
-		const cteSelectStmt: SelectStmt = {
-			targetList: targets,
-			fromClause: [rangeFunc],
-		};
-
-		return {
-			CommonTableExpr: {
-				ctename: cte.name,
-				ctequery: { SelectStmt: cteSelectStmt },
-			},
-		};
-	}
-
-	/**
-	 * Build an anchor WHERE clause AST node from a WhereIntent.
-	 * Used for edge-table recursive CTE anchor queries.
-	 */
-	private buildRecursiveAnchorWhere(where: unknown, tableAlias: string): Node {
-		if (!where || typeof where !== 'object') {
-			return { A_Const: { boolval: { boolval: true } } };
-		}
-		const w = where as Record<string, unknown>;
-
-		switch (w.kind) {
-			case 'comparison': {
-				const dbCol = this.naming.toDatabase(w.field as string);
-				const left: Node = {
-					ColumnRef: {
-						fields: [
-							{ String: { sval: tableAlias } },
-							{ String: { sval: dbCol } },
-						],
-					},
-				};
-				const op = mapComparisonOperator(w.operator as string);
-				const right: Node = valueToNode(w.value);
-				return {
-					A_Expr: {
-						kind: 'AEXPR_OP',
-						name: [{ String: { sval: op } }],
-						lexpr: left,
-						rexpr: right,
-					},
-				};
-			}
-			case 'and': {
-				const conditions = (w.conditions as unknown[]).map((c) =>
-					this.buildRecursiveAnchorWhere(c, tableAlias),
-				);
-				if (conditions.length === 1) return conditions[0]!;
-				return { BoolExpr: { boolop: 'AND_EXPR', args: conditions } };
-			}
-			case 'or': {
-				const conditions = (w.conditions as unknown[]).map((c) =>
-					this.buildRecursiveAnchorWhere(c, tableAlias),
-				);
-				if (conditions.length === 1) return conditions[0]!;
-				return { BoolExpr: { boolop: 'OR_EXPR', args: conditions } };
-			}
-			default:
-				return { A_Const: { boolval: { boolval: true } } };
-		}
+		return compileCteQueryImpl(intent, options, this.compileDeps);
 	}
 
 	/**
@@ -1982,32 +689,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const identifierType = type as 'table' | 'column' | 'schema' | 'alias';
 		validateIdentifier(value, identifierType);
 	}
-}
-
-// ============================================================================
-// Internal helpers
-// ============================================================================
-
-/**
- * Bridge core's PlanDecision[] (observability format) to adapter's PlanDecision[].
- * Used only in the legacy/test path where mock plans carry adapter-format decisions
- * inside a core PlanReport. At runtime the data is already in adapter format.
- */
-function bridgeLegacyDecisions(
-	decisions: readonly unknown[],
-): SimplifiedPlanReport['decisions'] {
-	return decisions as SimplifiedPlanReport['decisions'];
-}
-
-/**
- * Bridge a WhereIntent into a Decision for mutation config.
- * The WHERE dispatcher's `normalizeToDecision` handles the actual
- * `kind`/`field` → `type`/`column`/`operator` conversion at runtime.
- * The two types share no structural overlap (WhereIntent uses `kind`,
- * Decision uses `type`), hence the typed bridge function.
- */
-function whereIntentAsDecision(where: WhereIntent): Decision {
-	return where as never as Decision;
 }
 
 // ============================================================================

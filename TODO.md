@@ -68,7 +68,7 @@
 ### CRITICAL — Decompose god functions
 
 - [x] ✅ **ARCH-001** [Adapter] Decompose `convertSelect` — 13 expression handlers extracted into dispatch map, 245→78 LOC. (2026-03-19)
-- [ ] 🔧 **ARCH-002** [Adapter] Decompose `PgsqlAdapter` (1780 LOC monolithic class) in `packages/adapter-pgsql/src/pgsql-adapter.ts` — extract DDL, introspection, transactions, compilation into focused modules. 30 direct callers, risk=HIGH. — Priority: CRITICAL
+- [x] ✅ **ARCH-002** [Adapter] Decompose `PgsqlAdapter` compilation domain — 15 methods (568 LOC) extracted into 4 modules (adapter-compiler-select, -includes, -mutations, -recursive) + deps type. pgsql-adapter.ts: 1985→745 LOC. 2416 tests pass. (2026-03-19)
 - [x] ✅ **ARCH-003** [Adapter] Decompose `compileSelect` — 7 helpers extracted (createHandlerContext, createHandlerState, compileSelectTarget, compileIncludeDecision, compileWhereDecision, flushPendingJoins, buildSelectStmt), 439→122 LOC. (2026-03-19)
 
 ### HIGH — GUI + handler duplication
