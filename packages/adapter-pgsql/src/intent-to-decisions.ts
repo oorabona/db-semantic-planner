@@ -13,7 +13,8 @@ import type {
 } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import type { PlanDecision } from './compiler.js';
-import type { RangeValue, WindowOver } from './handlers/types.js';
+import type { RangeValue } from './handlers/types.js';
+import { EXPRESSION_HANDLERS } from './select-expression-handlers.js';
 
 // ============================================================================
 // Main Converter
@@ -89,8 +90,6 @@ export function intentToDecisions(
 // SELECT Conversion
 // ============================================================================
 
-
-
 /**
  * Apply a filter condition to a decision if a filter intent is present.
  */
@@ -104,7 +103,6 @@ function applyFilterCondition(
 		if (filterDecision) decision.filterCondition = filterDecision;
 	}
 }
-
 
 function convertSelect(
 	select: SelectIntent,
@@ -134,183 +132,17 @@ function convertSelect(
 
 		for (const exprUnknown of columns) {
 			const expr = exprUnknown as Record<string, unknown>;
-			const exprKind = expr.kind as string;
-
-			if (exprKind === 'column') {
-				const decision: Mutable<PlanDecision> = {
-					type: 'select',
-					column: expr.column as string,
-					table: rootTable,
-				};
-				if (expr.as) decision.alias = expr.as as string;
-				decisions.push(decision);
-			} else if (exprKind === 'columnAlias') {
-				const decision: Mutable<PlanDecision> = {
-					type: 'select',
-					column: expr.column as string,
-					table: rootTable,
-				};
-				if (expr.alias) decision.alias = expr.alias as string;
-				decisions.push(decision);
-			} else if (exprKind === 'aggregate') {
-				// Aggregate expressions
-				const aggFunc = expr.function as string;
-				const aggField = expr.field as string | undefined;
-				const aggAs = expr.as as string | undefined;
-				const aggDistinct = expr.distinct as boolean | undefined;
-				const aggFilter = expr.filter as WhereIntent | undefined;
-
-				if (aggFunc === 'count' && !aggField) {
-					const decision: Mutable<PlanDecision> = {
-						type: 'selectFunction',
-						function: 'count',
-						column: '*',
-						table: rootTable,
-					};
-					if (aggAs) decision.alias = aggAs;
-					applyFilterCondition(decision, aggFilter, rootTable);
-					decisions.push(decision);
-				} else if (aggFunc === 'count' && aggDistinct && aggField) {
-					const decision: Mutable<PlanDecision> = {
-						type: 'selectFunction',
-						function: 'countDistinct',
-						column: aggField,
-						table: rootTable,
-					};
-					if (aggAs) decision.alias = aggAs;
-					applyFilterCondition(decision, aggFilter, rootTable);
-					decisions.push(decision);
-				} else {
-					const decision: Mutable<PlanDecision> = {
-						type: 'selectFunction',
-						function: aggFunc,
-						table: rootTable,
-					};
-					if (aggField) decision.column = aggField;
-					if (aggAs) decision.alias = aggAs;
-					applyFilterCondition(decision, aggFilter, rootTable);
-					decisions.push(decision);
-				}
-			} else if (exprKind === 'coalesce') {
-				// COALESCE expression - use first field as primary
-				const decision: Mutable<PlanDecision> = {
-					type: 'selectFunction',
-					function: 'coalesce',
-					args: expr.fields as string[],
-					table: rootTable,
-				};
-				if (expr.as) decision.alias = expr.as as string;
-				decisions.push(decision);
-			} else if (exprKind === 'raw') {
-				// Raw SQL expression
-				const decision: Mutable<PlanDecision> = {
-					type: 'selectFunction',
-					function: 'raw',
-					args: [expr.sql as string],
-					table: rootTable,
-				};
-				if (expr.as) decision.alias = expr.as as string;
-				decisions.push(decision);
-			} else if (exprKind === 'window') {
-				// Window function expression
-				const windowFunc = expr.function as string;
-				const windowAlias = expr.alias as string;
-				const windowField = expr.field as string | undefined;
-				const over = expr.over as WindowOver;
-
-				const decision: Mutable<PlanDecision> = {
-					type: 'selectWindow',
-					function: windowFunc,
-					alias: windowAlias,
-					table: rootTable,
-				};
-				if (windowField) decision.field = windowField;
-				if (over.partitionBy) decision.partitionBy = over.partitionBy;
-				if (over.orderBy) decision.orderBy = over.orderBy;
-				const windowOffset = expr.offset as number | undefined;
-				const windowDefault = expr.defaultValue as unknown;
-				if (windowOffset !== undefined) decision.args = [windowOffset];
-				if (windowDefault !== undefined) decision.value = windowDefault;
-				decisions.push(decision);
-			} else if (exprKind === 'case') {
-				// CASE WHEN ... THEN ... ELSE ... END expression
-				const whenClauses = expr.when as Array<{
-					condition: WhereIntent;
-					result: Record<string, unknown>;
-				}>;
-				const conditions = whenClauses.map((wc) => ({
-					when: convertWhereCondition(wc.condition, rootTable),
-					// biome-ignore lint/suspicious/noThenProperty: intentional reserved word in decision object
-					then: wc.result,
-				}));
-
-				// CASE decisions carry { when, then } tuples in `conditions` —
-				// structurally different from PlanDecision[]. The compiler and
-				// case handler both expect this shape at runtime.
-				const decision: Mutable<PlanDecision> = {
-					type: 'selectExpression',
-					expressionType: 'case',
-					table: rootTable,
-				};
-				// Assign conditions separately: the runtime type is { when, then }[]
-				// but PlanDecision declares conditions as PlanDecision[].
-				(decision as Record<string, unknown>).conditions = conditions;
-				if (expr.else) {
-					decision.value = expr.else;
-				}
-				if (expr.as) decision.alias = expr.as as string;
-				decisions.push(decision);
-			} else if (exprKind === 'relationColumn') {
-				// Relation column: SELECT relation.column AS alias
-				const decision: Mutable<PlanDecision> = {
-					type: 'selectRelationColumn',
-					relation: expr.relation as string,
-					column: (expr.column ?? '*') as string,
-					table: rootTable,
-				};
-				if (expr.as) decision.alias = expr.as as string;
-				decisions.push(decision);
-			} else if (exprKind === 'pseudoColumn') {
-				// Pseudo-column expressions (e.g. manager.name, ancestors.*) are hints
-				// to the planner — they trigger include strategy decisions (CTE, json_agg)
-				// which handle the actual SQL generation. The pseudo-column handler in
-				// the expression registry is reserved for standalone DX API usage via
-				// selectPseudoColumn decisions created directly by user code.
-			} else if (exprKind === 'arithmetic') {
-				// Arithmetic expression: SELECT left op right AS alias
-				const decision: Mutable<PlanDecision> = {
-					type: 'selectArithmetic',
-					operator: expr.operator as string,
-					args: [expr.left, expr.right],
-					table: rootTable,
-				};
-				if (expr.as) decision.alias = expr.as as string;
-				decisions.push(decision);
-			} else if (exprKind === 'jsonExtract') {
-				// JSON extraction: col->'key' or col->>'key'
-				const decision: Mutable<PlanDecision> = {
-					type: 'selectFunction',
-					function: 'jsonExtract',
-					column: expr.field as string,
-					args: expr.path as string[],
-					table: rootTable,
-				};
-				if (expr.mode) decision.jsonMode = expr.mode as 'json' | 'text';
-				if (expr.as) decision.alias = expr.as as string;
-				decisions.push(decision);
-			} else if (exprKind === 'jsonPathExtract') {
-				// JSON path extraction: col#>'{a,b}' or col#>>'{a,b}'
-				const decision: Mutable<PlanDecision> = {
-					type: 'selectFunction',
-					function: 'jsonPathExtract',
-					column: expr.field as string,
-					args: [expr.path as string],
-					table: rootTable,
-				};
-				if (expr.mode) decision.jsonMode = expr.mode as 'json' | 'text';
-				if (expr.as) decision.alias = expr.as as string;
-				decisions.push(decision);
+			const handler = EXPRESSION_HANDLERS[expr.kind as string];
+			if (handler) {
+				handler(
+					expr,
+					rootTable,
+					decisions,
+					applyFilterCondition,
+					convertWhereCondition,
+				);
 			}
+			// else: unknown kind (e.g., pseudoColumn) — intentional no-op
 		}
 
 		return decisions;
