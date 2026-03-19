@@ -1,6 +1,12 @@
 import type { Adapter } from '../adapter.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
+import type {
+	FeatureBehaviorConfig,
+	UnsupportedFeatureBehavior,
+} from '@dbsp/types';
+
+import { negotiateFeatures } from './negotiate-features.js';
 
 import { NamingConventionMismatchError } from './errors.js';
 import {
@@ -126,6 +132,14 @@ export interface SimplifiedOrmOptions<
 	 * or 'abort' to propagate the error.
 	 */
 	readonly onHookError?: HookErrorHandler;
+
+	/**
+	 * Behavior when schema uses features the adapter doesn't support.
+	 * Default: 'warning' (emit warning + skip).
+	 * Use 'error' for strict environments, 'ignore' to suppress.
+	 * Pass FeatureBehaviorConfig for per-feature overrides.
+	 */
+	readonly unsupportedFeatures?: UnsupportedFeatureBehavior | FeatureBehaviorConfig;
 }
 
 /**
@@ -195,6 +209,7 @@ export function createOrm<T extends SchemaDefinition>(
 		planOptions: globalPlanOptions,
 		hooks: hookManager,
 		onHookError,
+		unsupportedFeatures,
 	} = options;
 
 	// ARCH-006: Either schema or model is required
@@ -232,6 +247,18 @@ export function createOrm<T extends SchemaDefinition>(
 				'or model (ModelIR). For database introspection, use getSchemaFromDb() ' +
 				'from the adapter (e.g. adapter.introspect()).',
 		);
+	}
+
+	// CAPS-003: Feature negotiation — cross-check ModelIR against adapter capabilities
+	if (adapter?.dialectCapabilities) {
+		const result = negotiateFeatures(
+			model,
+			adapter.dialectCapabilities,
+			unsupportedFeatures ?? 'warning',
+		);
+		for (const w of result.warnings) {
+			console.warn(`[dbsp] ${w.message}`);
+		}
 	}
 
 	// E17b: Freeze hook manager on ORM creation — no hooks can be added after

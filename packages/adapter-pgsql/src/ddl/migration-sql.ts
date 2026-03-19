@@ -10,6 +10,7 @@
 import type {
 	CheckConstraintIR,
 	ColumnIR,
+	DialectCapabilities,
 	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
@@ -61,6 +62,37 @@ export interface MigrationSQLOptions {
 	readonly includeDestructive?: boolean;
 	/** Automatically create indexes on FK columns for new tables (default: true) */
 	readonly fkAutoIndex?: boolean;
+	/** Dialect capabilities — migration SQL for unsupported features will be filtered */
+	readonly dialectCapabilities?: DialectCapabilities;
+}
+
+// ============================================================================
+// Capability Helpers
+// ============================================================================
+
+/** Check if a change kind is supported by the dialect capabilities */
+function isChangeSupported(kind: string, caps: DialectCapabilities): boolean {
+	switch (kind) {
+		case 'create_enum':
+		case 'drop_enum':
+		case 'alter_enum_add_value':
+			return caps.supportsDDLEnumTypes === true;
+		case 'create_extension':
+		case 'drop_extension':
+			return caps.supportsDDLExtensions === true;
+		case 'create_sequence':
+		case 'drop_sequence':
+		case 'alter_sequence':
+			return caps.supportsDDLSequences === true;
+		case 'add_check_constraint':
+		case 'drop_check_constraint':
+			return caps.supportsDDLCheckConstraints === true;
+		case 'add_comment':
+		case 'drop_comment':
+			return caps.supportsDDLComments === true;
+		default:
+			return true;
+	}
 }
 
 // ============================================================================
@@ -96,9 +128,16 @@ export function generateMigrationSQL(
 	const includeDestructive = options?.includeDestructive ?? true;
 
 	// Filter out destructive changes if not included
-	const changes = includeDestructive
+	const filteredChanges = includeDestructive
 		? diff.changes
 		: diff.changes.filter((c) => !c.destructive);
+
+	const caps = options?.dialectCapabilities;
+
+	// Filter out changes for unsupported DDL features
+	const changes = caps
+		? filteredChanges.filter((c) => isChangeSupported(c.kind, caps))
+		: filteredChanges;
 
 	// Group changes by phase for topological ordering
 	const phases: SchemaChange[][] = [

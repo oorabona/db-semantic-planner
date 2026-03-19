@@ -9,6 +9,7 @@
 
 import type {
 	ColumnIR,
+	DialectCapabilities,
 	ForeignKeyIR,
 	IndexIR,
 	ModelIR,
@@ -34,6 +35,8 @@ export interface GenerateDDLOptions {
 	readonly fkAutoIndex?: boolean;
 	/** Naming plugin for identifier transformation */
 	readonly naming?: NamingPlugin;
+	/** Dialect capabilities — DDL passes for unsupported features will be skipped */
+	readonly dialectCapabilities?: DialectCapabilities;
 }
 
 // ============================================================================
@@ -62,7 +65,11 @@ export function generateDDL(
 		schemaName,
 		fkAutoIndex = true,
 		naming = identityNaming,
+		dialectCapabilities: caps,
 	} = options;
+
+	/** Returns true if the feature is supported (or no caps provided — all features on). */
+	const sup = (flag: boolean | undefined): boolean => !caps || flag === true;
 
 	// Get all tables
 	const tables = Array.from(schema.tables.values());
@@ -70,7 +77,7 @@ export function generateDDL(
 	// ========================================================================
 	// PASS -1: CREATE EXTENSION (before everything)
 	// ========================================================================
-	if (schema.extensions) {
+	if (schema.extensions && sup(caps?.supportsDDLExtensions)) {
 		for (const ext of schema.extensions) {
 			statements.push(`CREATE EXTENSION IF NOT EXISTS "${ext}";`);
 		}
@@ -79,7 +86,7 @@ export function generateDDL(
 	// ========================================================================
 	// PASS -0.5: CREATE SEQUENCE (before tables)
 	// ========================================================================
-	if (schema.sequences) {
+	if (schema.sequences && sup(caps?.supportsDDLSequences)) {
 		for (const [, seq] of schema.sequences) {
 			const seqName = schemaName
 				? `${quoteIdentifier(naming.toDatabase(schemaName))}.${quoteIdentifier(seq.name)}`
@@ -110,7 +117,7 @@ export function generateDDL(
 	// ========================================================================
 	// PASS 0.5: CREATE TYPE for ENUM types (must be before CREATE TABLE)
 	// ========================================================================
-	if (schema.enums) {
+	if (schema.enums && sup(caps?.supportsDDLEnumTypes)) {
 		for (const [, enumDef] of schema.enums) {
 			const enumName = schemaName
 				? `${quoteIdentifier(naming.toDatabase(schemaName))}.${quoteIdentifier(enumDef.name)}`
@@ -143,13 +150,15 @@ export function generateDDL(
 	// ========================================================================
 	// PASS 2.5: ALTER TABLE ADD CHECK CONSTRAINT
 	// ========================================================================
-	for (const table of tables) {
-		for (const check of table.checkConstraints ?? []) {
-			const qualifiedTable = qualifyTable(table.name, schemaName, naming);
-			const constraintName = quoteIdentifier(check.name);
-			statements.push(
-				`ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} ${check.expression};`,
-			);
+	if (sup(caps?.supportsDDLCheckConstraints)) {
+		for (const table of tables) {
+			for (const check of table.checkConstraints ?? []) {
+				const qualifiedTable = qualifyTable(table.name, schemaName, naming);
+				const constraintName = quoteIdentifier(check.name);
+				statements.push(
+					`ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} ${check.expression};`,
+				);
+			}
 		}
 	}
 
@@ -195,22 +204,23 @@ export function generateDDL(
 	// ========================================================================
 	// PASS 4: COMMENT ON TABLE / COLUMN
 	// ========================================================================
-	for (const table of tables) {
-		if (table.comment) {
-			const qualifiedTable = qualifyTable(table.name, schemaName, naming);
-			statements.push(
-				`COMMENT ON TABLE ${qualifiedTable} IS '${table.comment.replace(/'/g, "''")}';`,
-			);
-		}
-		for (const col of table.columns) {
-			if (col.comment) {
+	if (sup(caps?.supportsDDLComments))
+		for (const table of tables) {
+			if (table.comment) {
 				const qualifiedTable = qualifyTable(table.name, schemaName, naming);
 				statements.push(
-					`COMMENT ON COLUMN ${qualifiedTable}.${quoteIdentifier(naming.toDatabase(col.name))} IS '${col.comment.replace(/'/g, "''")}';`,
+					`COMMENT ON TABLE ${qualifiedTable} IS '${table.comment.replace(/'/g, "''")}';`,
 				);
 			}
+			for (const col of table.columns) {
+				if (col.comment) {
+					const qualifiedTable = qualifyTable(table.name, schemaName, naming);
+					statements.push(
+						`COMMENT ON COLUMN ${qualifiedTable}.${quoteIdentifier(naming.toDatabase(col.name))} IS '${col.comment.replace(/'/g, "''")}';`,
+					);
+				}
+			}
 		}
-	}
 
 	return statements;
 }

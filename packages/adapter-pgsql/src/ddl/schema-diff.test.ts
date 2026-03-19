@@ -1,6 +1,7 @@
-import { ModelIRImpl } from '@dbsp/core';
+import { ModelIRImpl, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import type {
 	ColumnIR,
+	DialectCapabilities,
 	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
@@ -2286,5 +2287,129 @@ describe('buildSummary — missing ChangeKind cases (F-006 regression)', () => {
 		expect(diff.summary.tables.added).toBe(0);
 		expect(diff.summary.columns.added).toBe(0);
 		expect(diff.summary.constraints.added).toBe(0);
+	});
+});
+
+describe('compareSchemata with Capabilities (CAPS-003)', () => {
+	// SC-11: compareSchemata ignores unsupported features
+
+	it('should not emit enum changes when supportsDDLEnumTypes is false', () => {
+		const caps: DialectCapabilities = {
+			...POSTGRESQL_CAPABILITIES,
+			supportsDDLEnumTypes: false,
+		};
+		const schema = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db, { dialectCapabilities: caps });
+		const enumChanges = diff.changes.filter(
+			(c) => c.kind === 'create_enum' || c.kind === 'drop_enum',
+		);
+		expect(enumChanges).toHaveLength(0);
+	});
+
+	it('should emit enum changes when supportsDDLEnumTypes is true', () => {
+		const caps: DialectCapabilities = {
+			...POSTGRESQL_CAPABILITIES,
+			supportsDDLEnumTypes: true,
+		};
+		const schema = makeModelWithEnums(
+			[],
+			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
+		);
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db, { dialectCapabilities: caps });
+		const enumChanges = diff.changes.filter((c) => c.kind === 'create_enum');
+		expect(enumChanges).toHaveLength(1);
+	});
+
+	it('should emit all changes when no dialectCapabilities provided (backward compat)', () => {
+		const schema = makeModelWithEnums(
+			[makeTable({ name: 'users', columns: [makeCol({ name: 'id' })] })],
+			new Map([['status', { name: 'status', values: ['active'] }]]),
+		);
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.changes.some((c) => c.kind === 'create_enum')).toBe(true);
+		expect(diff.changes.some((c) => c.kind === 'create_table')).toBe(true);
+	});
+
+	it('should not emit sequence changes when supportsDDLSequences is false', () => {
+		const caps: DialectCapabilities = {
+			...POSTGRESQL_CAPABILITIES,
+			supportsDDLSequences: false,
+		};
+		const seq: SequenceIR = { name: 'order_seq', startWith: 1 };
+		const schema = makeModelWithSequences([seq]);
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db, { dialectCapabilities: caps });
+		const seqChanges = diff.changes.filter((c) => c.kind === 'create_sequence');
+		expect(seqChanges).toHaveLength(0);
+	});
+
+	it('should not emit check constraint changes for new table when supportsDDLCheckConstraints is false', () => {
+		const caps: DialectCapabilities = {
+			...POSTGRESQL_CAPABILITIES,
+			supportsDDLCheckConstraints: false,
+		};
+		const schema = makeModel([
+			makeTable({
+				name: 'orders',
+				columns: [makeCol({ name: 'id' }), makeCol({ name: 'amount' })],
+				checkConstraints: [
+					{ name: 'orders_amount_check', expression: 'CHECK ((amount > 0))' },
+				],
+			}),
+		]);
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db, { dialectCapabilities: caps });
+		const checkChanges = diff.changes.filter(
+			(c) => c.kind === 'add_check_constraint',
+		);
+		expect(checkChanges).toHaveLength(0);
+		// create_table still emitted
+		expect(diff.changes.some((c) => c.kind === 'create_table')).toBe(true);
+	});
+
+	it('should emit check constraints with POSTGRESQL_CAPABILITIES', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'orders',
+				columns: [makeCol({ name: 'id' }), makeCol({ name: 'amount' })],
+				checkConstraints: [
+					{ name: 'orders_amount_check', expression: 'CHECK ((amount > 0))' },
+				],
+			}),
+		]);
+		const db = makeModel([]);
+		const diff = compareSchemata(schema, db, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+		const checkChanges = diff.changes.filter(
+			(c) => c.kind === 'add_check_constraint',
+		);
+		expect(checkChanges).toHaveLength(1);
+	});
+
+	it('should not emit comment changes when supportsDDLComments is false', () => {
+		const caps: DialectCapabilities = {
+			...POSTGRESQL_CAPABILITIES,
+			supportsDDLComments: false,
+		};
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id' })],
+				comment: 'User table',
+			}),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [makeCol({ name: 'id' })] }),
+		]);
+		const diff = compareSchemata(schema, db, { dialectCapabilities: caps });
+		const commentChanges = diff.changes.filter((c) => c.kind === 'add_comment');
+		expect(commentChanges).toHaveLength(0);
 	});
 });
