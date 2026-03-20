@@ -1,5 +1,6 @@
 /* biome-ignore-all lint/style/noNonNullAssertion: Builder internals use non-null assertions on validated state */
 import type { Mutable } from '@dbsp/types/internal';
+import { ExpressionRef } from './expressions.js';
 import type { Adapter, Dump } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type {
@@ -419,10 +420,23 @@ export class QueryBuilderImpl<TResult = unknown>
 	}
 
 	orderBy(
-		fieldOrRecordOrSpecs: string | OrderByRecord | readonly OrderBySpec[],
+		fieldOrRecordOrSpecs:
+			| string
+			| OrderByRecord
+			| readonly OrderBySpec[]
+			| ExpressionRef,
 		direction?: SortDirection,
 	): QueryBuilder<TResult> {
 		const builder = this.clone();
+
+		// ExpressionRef form: orderBy(expr) or orderBy(expr, 'desc')
+		if (fieldOrRecordOrSpecs instanceof ExpressionRef) {
+			builder.orderByIntents.push({
+				expression: fieldOrRecordOrSpecs.intent,
+				direction: direction ?? 'asc',
+			});
+			return builder;
+		}
 
 		// String form: orderBy('field') or orderBy('field', 'desc')
 		if (typeof fieldOrRecordOrSpecs === 'string') {

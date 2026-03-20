@@ -5,6 +5,7 @@
 
 import type { RangeValue } from '../shared/utils.js';
 import type { ComparisonOperator, NullOperator } from './operators.js';
+import type { ExpressionIntent } from './expression-intent.js';
 import type { QueryIntent } from './query-intent.js';
 import type { RecursiveExistsOptions } from './recursive-types.js';
 
@@ -297,6 +298,14 @@ export interface WhereJsonExistsIntent {
 	readonly key: string;
 }
 
+/** WHERE clause using a custom expression with comparison */
+export interface WhereExpressionIntent {
+	readonly kind: 'expression';
+	readonly expr: ExpressionIntent;
+	readonly operator: ComparisonOperator;
+	readonly value: unknown;
+}
+
 /**
  * Where intent - filter conditions union type
  * Discriminated union using 'kind' field
@@ -316,4 +325,5 @@ export type WhereIntent =
 	| WhereRelationFilterIntent
 	| WhereSubqueryIntent
 	| WhereJsonContainsIntent
-	| WhereJsonExistsIntent;
+	| WhereJsonExistsIntent
+	| WhereExpressionIntent;

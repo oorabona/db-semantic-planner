@@ -7,6 +7,7 @@
  * that builds PostgreSQL AST nodes and deparses them to SQL.
  */
 
+import type { ExpressionIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,
@@ -35,6 +36,7 @@ import {
 } from './ast-helpers.js';
 import { deparseQuoted } from './deparse.js';
 import { resolveCaseValue as resolveCaseValueShared } from './handlers/expression/case-value.js';
+import { compileExpressionIntent } from './handlers/expression/custom.js';
 import { registerAllExpressionHandlers } from './handlers/expression/index.js';
 import { genericWindowHandler } from './handlers/expression/window.js';
 import { registerAllIncludeHandlers } from './handlers/include/index.js';
@@ -119,6 +121,10 @@ function mapToHandlerDecision(
 		partition: pd.partitionBy,
 		jsonPath: pd.jsonPath,
 		jsonMode: pd.jsonMode,
+		expressionIntent: pd.expressionIntent,
+		subqueryOperator: pd.subqueryOperator,
+		selectColumn: pd.selectColumn,
+		aggregate: pd.aggregate,
 	} as HandlerDecision;
 }
 
@@ -217,6 +223,8 @@ export interface PlanDecision {
 	readonly subqueryOperator?: string;
 	// FILTER (WHERE ...) condition for aggregate expressions (WhereIntent serialized as PlanDecision)
 	readonly filterCondition?: PlanDecision;
+	// Custom expression intent for selectCustomExpression, WHERE expression, and ORDER BY expression
+	readonly expressionIntent?: unknown;
 }
 
 /**
@@ -653,6 +661,23 @@ export class PlanCompiler {
 				break;
 			}
 
+			case 'selectCustomExpression': {
+				const exprIntent = decision.expressionIntent as ExpressionIntent;
+				const ctx = this.createHandlerContext(plan, plan.rootTable);
+				const state = this.createHandlerState();
+				const node = compileExpressionIntent(exprIntent, ctx, state);
+				// parameters are shared by reference; only sync paramIndex
+				this.state.paramIndex = state.paramIndex;
+				const alias = decision.alias || decision.column || undefined;
+				targetList.push({
+					ResTarget: {
+						val: node,
+						...(alias ? { name: this.naming.toDatabase(alias) } : {}),
+					},
+				});
+				break;
+			}
+
 			case 'selectRelationColumn':
 			case 'selectPseudoColumn':
 			case 'selectArithmetic': {
@@ -961,6 +986,7 @@ export class PlanCompiler {
 				case 'selectPseudoColumn':
 				case 'selectArithmetic':
 				case 'selectWindow':
+				case 'selectCustomExpression':
 					this.compileSelectTarget(decision, plan, targetList);
 					break;
 
@@ -986,7 +1012,24 @@ export class PlanCompiler {
 				}
 
 				case 'orderBy':
-					if (decision.column) {
+					if (decision.expressionIntent) {
+						const exprCtx = this.createHandlerContext(plan, plan.rootTable);
+						const exprState = this.createHandlerState();
+						const exprNode = compileExpressionIntent(
+							decision.expressionIntent as ExpressionIntent,
+							exprCtx,
+							exprState,
+						);
+						// parameters are shared by reference; only sync paramIndex
+						this.state.paramIndex = exprState.paramIndex;
+						orderBy.push(
+							sortBy(
+								exprNode,
+								decision.direction ?? 'ASC',
+								decision.nulls ?? 'DEFAULT',
+							),
+						);
+					} else if (decision.column) {
 						orderBy.push(
 							sortBy(
 								columnRef(

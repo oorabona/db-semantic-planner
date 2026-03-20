@@ -24,6 +24,7 @@ import {
 } from './coalesce.js';
 // Handler imports
 import { columnAliasHandler, columnHandler, starHandler } from './column.js';
+import { customExpressionHandler } from './custom.js';
 import { jsonExtractHandler, jsonPathExtractHandler } from './json.js';
 import {
 	chainedPseudoHandler,
@@ -69,6 +70,7 @@ export {
 } from './coalesce.js';
 // Re-exports
 export { columnAliasHandler, columnHandler, starHandler } from './column.js';
+export { compileExpressionIntent, customExpressionHandler } from './custom.js';
 export { jsonExtractHandler, jsonPathExtractHandler } from './json.js';
 export {
 	chainedPseudoHandler,
@@ -194,6 +196,7 @@ export const allExpressionHandlers = [
 	...relationExpressionHandlers,
 	...jsonExpressionHandlers,
 	arithmeticHandler,
+	customExpressionHandler,
 ];
 
 /**

@@ -296,6 +296,26 @@ export function handleJsonPathExtractExpression(
 	decisions.push(decision);
 }
 
+/**
+ * customOp / customFn / ref / param / cast / unary — custom expression in SELECT.
+ * The expression intent is stored as-is in a 'selectCustomExpression' decision.
+ * Compilation is deferred to compileExpressionIntent in compiler.ts.
+ */
+export function handleCustomExpressionSelect(
+	expr: Record<string, unknown>,
+	rootTable: string,
+	decisions: PlanDecision[],
+): void {
+	const decision: Mutable<PlanDecision> = {
+		type: 'selectCustomExpression',
+		expressionIntent: expr,
+		table: rootTable,
+	};
+	const alias = expr.as as string | undefined;
+	if (alias) decision.alias = alias;
+	decisions.push(decision);
+}
+
 // ============================================================================
 // Dispatch Map
 // ============================================================================
@@ -334,4 +354,19 @@ export const EXPRESSION_HANDLERS: Record<string, SelectExpressionHandler> = {
 		handleJsonExtractExpression(expr, rootTable, decisions),
 	jsonPathExtract: (expr, rootTable, decisions) =>
 		handleJsonPathExtractExpression(expr, rootTable, decisions),
+	// Custom expression types — produce 'selectCustomExpression' decisions
+	literal: (expr, rootTable, decisions) =>
+		handleCustomExpressionSelect(expr, rootTable, decisions),
+	customOp: (expr, rootTable, decisions) =>
+		handleCustomExpressionSelect(expr, rootTable, decisions),
+	customFn: (expr, rootTable, decisions) =>
+		handleCustomExpressionSelect(expr, rootTable, decisions),
+	ref: (expr, rootTable, decisions) =>
+		handleCustomExpressionSelect(expr, rootTable, decisions),
+	param: (expr, rootTable, decisions) =>
+		handleCustomExpressionSelect(expr, rootTable, decisions),
+	cast: (expr, rootTable, decisions) =>
+		handleCustomExpressionSelect(expr, rootTable, decisions),
+	unary: (expr, rootTable, decisions) =>
+		handleCustomExpressionSelect(expr, rootTable, decisions),
 };
