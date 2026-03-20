@@ -198,6 +198,19 @@ export interface IncludeOptions {
 	 * Nested includes for deep loading.
 	 */
 	readonly include?: readonly NestedInclude[];
+
+	/**
+	 * Join type for the include when using the 'join' strategy.
+	 * - 'left' (default): LEFT JOIN — all root rows returned, NULL for unmatched relations
+	 * - 'inner': INNER JOIN — only root rows WITH a matching related record are returned
+	 *
+	 * Forces the 'join' include strategy (overrides auto-selection).
+	 *
+	 * @example
+	 * include('file', { join: 'inner' })
+	 * // → INNER JOIN files ON files.id = symbols.file_id
+	 */
+	readonly join?: 'inner' | 'left';
 }
 
 /**

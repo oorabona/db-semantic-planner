@@ -117,6 +117,21 @@ export interface IncludeIntent {
 	 * // Planner then picks lateral, join, subquery, or cte (never json_agg)
 	 */
 	readonly strategy?: 'auto' | 'flat' | undefined;
+
+	/**
+	 * Join type for the include when using the 'join' strategy.
+	 * - 'left' (default): LEFT JOIN — all root rows returned, NULL for unmatched relations
+	 * - 'inner': INNER JOIN — only root rows WITH a matching related record are returned
+	 *
+	 * Forces the 'join' include strategy (overrides auto-selection).
+	 *
+	 * @example
+	 * // Only return symbols that have a matching file
+	 * include('file', { join: 'inner' })
+	 * // → INNER JOIN files ON files.id = symbols.file_id
+	 * // → Only symbols WITH a matching file are returned
+	 */
+	readonly join?: 'inner' | 'left' | undefined;
 }
 
 // ============================================================================

@@ -937,10 +937,13 @@ function processInclude(
 		relation.source === relation.target;
 
 	// Determine include strategy
-	// Priority: 1) recursive → cte, 2) include.strategy override, 3) auto-detect
+	// Priority: 1) recursive → cte, 2) include.join → forces join strategy, 3) include.strategy override, 4) auto-detect
 	let includeStrategy: ResolvedIncludeStrategy;
 	if (isRecursiveInclude) {
 		includeStrategy = 'cte';
+	} else if (include.join !== undefined) {
+		// Explicit join type forces the 'join' strategy (inner or left JOIN)
+		includeStrategy = 'join';
 	} else if (include.strategy === 'flat') {
 		// NQL v2.1: flat = exclude nested output (json_agg), planner picks best flat strategy
 		// lateral only when per-row LIMIT is needed; otherwise join is simpler
@@ -956,6 +959,15 @@ function processInclude(
 	} else {
 		includeStrategy = determineIncludeStrategy(relation, opts);
 	}
+
+	// Pre-compute join type for include-strategy decision embedding
+	// (only relevant when strategy is 'join')
+	const explicitJoinType: 'inner' | 'left' | undefined =
+		includeStrategy === 'join'
+			? include.join ??
+				determineJoinType(relation, opts, !!include.where)
+			: undefined;
+
 	const includeDecisionId = generateDecisionId(state, 'include-strategy');
 
 	state.decisions.push({
@@ -974,6 +986,8 @@ function processInclude(
 			}),
 		},
 		choice: includeStrategy,
+		// Embed joinType so the adapter's join handler can use it directly
+		...(explicitJoinType !== undefined && { joinType: explicitJoinType }),
 		reasoning: isRecursiveInclude
 			? `Recursive include on self-referential relation "${relation.name}" → forced CTE strategy`
 			: generateIncludeReasoning(relation, includeStrategy),
@@ -1013,10 +1027,8 @@ function processInclude(
 		}
 	}
 
-	// Determine join type (only if using join strategy)
-	if (includeStrategy === 'join') {
-		const hasFilter = !!include.where;
-		const joinType = determineJoinType(relation, opts, hasFilter);
+	// Emit join-type decision (only if using join strategy)
+	if (includeStrategy === 'join' && explicitJoinType !== undefined) {
 		const joinDecisionId = generateDecisionId(state, 'join-type');
 
 		state.decisions.push({
@@ -1028,9 +1040,13 @@ function processInclude(
 				relation: relation.name,
 				intentPath,
 			},
-			choice: joinType,
-			reasoning: generateJoinReasoning(relation, joinType, hasFilter),
-			alternatives: joinType === 'left' ? ['inner'] : ['left'],
+			choice: explicitJoinType,
+			reasoning: generateJoinReasoning(
+				relation,
+				explicitJoinType,
+				!!include.where,
+			),
+			alternatives: explicitJoinType === 'left' ? ['inner'] : ['left'],
 		});
 	}
 

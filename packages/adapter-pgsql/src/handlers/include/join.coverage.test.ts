@@ -192,4 +192,78 @@ describe('joinIncludeHandler — coverage', () => {
 		);
 		expect(result.join).toHaveProperty('JoinExpr');
 	});
+
+	it('defaults to LEFT JOIN when joinType is not set', () => {
+		const state = createCompilerState();
+		const result = joinIncludeHandler.compile(
+			{
+				type: 'includeStrategy',
+				strategy: 'join',
+				relation: 'author',
+				targetTable: 'users',
+				sourceColumn: 'author_id',
+				targetColumn: 'id',
+			},
+			makeCtx(),
+			state,
+		);
+		expect(result.join.JoinExpr.jointype).toBe('JOIN_LEFT');
+	});
+
+	it('produces INNER JOIN when joinType is "inner"', () => {
+		const state = createCompilerState();
+		const result = joinIncludeHandler.compile(
+			{
+				type: 'includeStrategy',
+				strategy: 'join',
+				relation: 'author',
+				targetTable: 'users',
+				sourceColumn: 'author_id',
+				targetColumn: 'id',
+				joinType: 'inner',
+			},
+			makeCtx(),
+			state,
+		);
+		expect(result.join).toHaveProperty('JoinExpr');
+		expect(result.join.JoinExpr.jointype).toBe('JOIN_INNER');
+	});
+
+	it('produces LEFT JOIN when joinType is "left"', () => {
+		const state = createCompilerState();
+		const result = joinIncludeHandler.compile(
+			{
+				type: 'includeStrategy',
+				strategy: 'join',
+				relation: 'author',
+				targetTable: 'users',
+				sourceColumn: 'author_id',
+				targetColumn: 'id',
+				joinType: 'left',
+			},
+			makeCtx(),
+			state,
+		);
+		expect(result.join.JoinExpr.jointype).toBe('JOIN_LEFT');
+	});
+
+	it('produces INNER JOIN with specific columns', () => {
+		const state = createCompilerState();
+		const result = joinIncludeHandler.compile(
+			{
+				type: 'includeStrategy',
+				strategy: 'join',
+				relation: 'file',
+				targetTable: 'files',
+				sourceColumn: 'file_id',
+				targetColumn: 'id',
+				joinType: 'inner',
+				columns: ['path', 'name'],
+			},
+			makeCtx(),
+			state,
+		);
+		expect(result.join.JoinExpr.jointype).toBe('JOIN_INNER');
+		expect(result.targets).toHaveLength(2);
+	});
 });
