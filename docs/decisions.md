@@ -4,6 +4,18 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## DDL-RLS — Row-Level Security policies (2026-03-20)
+
+- PolicyIR in types (generic model) — not adapter-specific
+- SQL predicates as strings (same escape hatch as IndexIR.where)
+- rlsEnabled + policies on TableIR (same pattern as indexes, checks, foreignKeys)
+- Capability flag supportsDDLRowLevelSecurity for multi-dialect
+- NOT abstracting Oracle VPD or MSSQL predicates — fundamentally different mechanisms
+- Policies replaced (DROP + CREATE), not altered — simplifies diff logic
+- Phase ordering: RLS enable (phase 17) before policies (phase 18)
+
+---
+
 ## EDGE-001-002 — Remove WASM from prod + internalize pgsql-deparser (2026-03-20)
 
 - Replace parseSync (WASM) with a pure-TS recursive descent expression parser for sql() escape hatch
