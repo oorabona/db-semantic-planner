@@ -63,6 +63,7 @@
 - [x] ✅ **BATCH-FIX-002** [Adapter] Fix `mapModelIRTypeToPgBase`: `timestamp` → `timestamptz`, `date` → `date` (was `text`). (2026-03-20)
 - [x] ✅ **EXT-001** [Extensions] Generic expression primitives (op/fn/ref/param/cast/literal/unary) in `@dbsp/core` + pgvector extension wrappers (cosineDistance, rawDistance, l2Distance, innerProduct) in `adapter-pgsql/extensions/`. Full SELECT/WHERE/ORDER BY pipeline. 2455 tests passing. (2026-03-20)
 - [x] ✅ **EXT-002** [Extensions] ParadeDB extension wrappers (score, parse, boost, booleanSearch, bm25Search) in adapter-pgsql/extensions/paradedb.ts. 16 tests. (2026-03-20)
+- [x] ✅ **EXT-NAMED-PARAMS** [Extensions] NamedArgExpr support — `NamedArgExpressionIntent` in types, `namedArg()` primitive in core, `NamedArgExpr` compiler handler + deparser, `parse()` updated to named-arg syntax. 15 new tests, all 4746 passing. (2026-03-20)
 
 ---
 

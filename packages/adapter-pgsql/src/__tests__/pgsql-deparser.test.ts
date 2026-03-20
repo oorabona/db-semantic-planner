@@ -881,3 +881,71 @@ describe('LockingClause', () => {
 		);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// NamedArgExpr
+// ---------------------------------------------------------------------------
+
+describe('NamedArgExpr', () => {
+	it('deparses named arg with string literal value', () => {
+		const node: Node = {
+			NamedArgExpr: {
+				arg: { A_Const: { sval: { sval: 'name_searchable' } } },
+				name: 'field',
+				argnumber: -1,
+			},
+		} as unknown as Node;
+		const result = deparse(node);
+		expect(result).toBe("field => 'name_searchable'");
+	});
+
+	it('deparses named arg with param ref value', () => {
+		const node: Node = {
+			NamedArgExpr: {
+				arg: { ParamRef: { number: 1, location: -1 } },
+				name: 'query_string',
+				argnumber: -1,
+			},
+		} as unknown as Node;
+		const result = deparse(node);
+		expect(result).toBe('query_string => $1');
+	});
+
+	it('deparses named arg with integer literal value', () => {
+		const node: Node = {
+			NamedArgExpr: {
+				arg: integerNode(42),
+				name: 'limit',
+				argnumber: -1,
+			},
+		} as unknown as Node;
+		const result = deparse(node);
+		expect(result).toBe('limit => 42');
+	});
+
+	it('deparses named arg inside a function call', () => {
+		const node: Node = funcCall(
+			['paradedb', 'parse'],
+			[
+				{
+					NamedArgExpr: {
+						arg: { A_Const: { sval: { sval: 'name' } } },
+						name: 'field',
+						argnumber: -1,
+					},
+				} as unknown as Node,
+				{
+					NamedArgExpr: {
+						arg: { ParamRef: { number: 1, location: -1 } },
+						name: 'query_string',
+						argnumber: -1,
+					},
+				} as unknown as Node,
+			],
+		);
+		const result = deparse(node);
+		expect(result).toContain("field => 'name'");
+		expect(result).toContain('query_string => $1');
+		expect(result).toContain('paradedb.parse');
+	});
+});
