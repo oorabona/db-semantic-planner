@@ -9,6 +9,7 @@ import { anyHandler } from './any.js';
 // Handler imports - simple
 import { betweenHandler } from './between.js';
 import { comparisonHandler } from './comparison.js';
+import { customExpressionWhereHandler } from './custom-expression.js';
 // Handler imports - complex (exists, subquery, relation)
 import { everyHandler, existsHandler, notExistsHandler } from './exists.js';
 import { inHandler } from './in.js';
@@ -36,6 +37,7 @@ export { anyHandler } from './any.js';
 // Re-export individual handlers
 export { betweenHandler } from './between.js';
 export { comparisonHandler } from './comparison.js';
+export { customExpressionWhereHandler } from './custom-expression.js';
 export { everyHandler, existsHandler, notExistsHandler } from './exists.js';
 export { inHandler } from './in.js';
 export {
@@ -62,6 +64,7 @@ export {
  * All simple WHERE handlers
  */
 export const simpleWhereHandlers = [
+	customExpressionWhereHandler,
 	comparisonHandler,
 	likeHandler,
 	nullHandler,

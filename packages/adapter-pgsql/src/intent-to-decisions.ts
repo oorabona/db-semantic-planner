@@ -231,6 +231,8 @@ interface FlatWhereFields {
 	readonly jsonMode?: string;
 	readonly reversed?: boolean;
 	readonly key?: string;
+	// Custom expression WHERE (kind: 'expression')
+	readonly expr?: unknown;
 }
 
 function convertWhereCondition(
@@ -600,6 +602,17 @@ function convertWhereCondition(
 				table: rootTable,
 			};
 
+		// Custom expression: { kind: 'expression', expr, operator, value }
+		case 'expression':
+			return {
+				type: 'where',
+				operator: 'expression',
+				expressionIntent: cond.expr,
+				value: cond.value,
+				subqueryOperator: cond.operator as string,
+				table: rootTable,
+			};
+
 		default:
 			// Unknown condition type
 			return null;
@@ -621,11 +634,26 @@ function convertOrderBy(order: OrderByIntent, rootTable: string): PlanDecision {
 			: 'LAST'
 		: undefined;
 
+	// Expression-based ORDER BY (e.g. rawDistance('vector', qv))
+	if (order.expression) {
+		const base: PlanDecision = {
+			type: 'orderBy',
+			expressionIntent: order.expression,
+			direction,
+			table: rootTable,
+		};
+		if (nulls) {
+			return { ...base, nulls };
+		}
+		return base;
+	}
+
 	const decision: PlanDecision = {
 		type: 'orderBy',
-		column: order.field,
 		direction,
 		table: rootTable,
+		// field is optional in OrderByIntent after expression extension (exactOptionalPropertyTypes)
+		...(order.field ? { column: order.field } : {}),
 	};
 
 	// Only add nulls if defined (exactOptionalPropertyTypes)

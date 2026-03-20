@@ -282,6 +282,50 @@ export interface JsonPathExtractIntent {
 	readonly as?: string | undefined;
 }
 
+/** Custom binary operator expression (e.g., <=> for pgvector) */
+export interface CustomOpExpressionIntent {
+	readonly kind: 'customOp';
+	readonly operator: string;
+	readonly left: ExpressionIntent;
+	readonly right: ExpressionIntent;
+	readonly as?: string;
+}
+
+/** Custom function call (e.g., paradedb.score) */
+export interface CustomFnExpressionIntent {
+	readonly kind: 'customFn';
+	readonly name: string;
+	readonly args: readonly ExpressionIntent[];
+	readonly as?: string;
+}
+
+/** Column reference in custom expressions */
+export interface RefExpressionIntent {
+	readonly kind: 'ref';
+	readonly column: string;
+}
+
+/** Parameterized value with automatic $N binding */
+export interface ParamExpressionIntent {
+	readonly kind: 'param';
+	readonly value: unknown;
+}
+
+/** Type cast expression */
+export interface CastExpressionIntent {
+	readonly kind: 'cast';
+	readonly expr: ExpressionIntent;
+	readonly typeName: string;
+}
+
+/** Unary operator expression (e.g., NOT, -, ~) */
+export interface UnaryExpressionIntent {
+	readonly kind: 'unary';
+	readonly operator: string;
+	readonly operand: ExpressionIntent;
+	readonly as?: string;
+}
+
 /**
  * Expression intent union type - computed/derived values in SELECT
  * Extensible for future expression types
@@ -304,7 +348,13 @@ export type ExpressionIntent =
 	| JsonExtractIntent
 	| JsonContainsIntent
 	| JsonExistsIntent
-	| JsonPathExtractIntent;
+	| JsonPathExtractIntent
+	| CustomOpExpressionIntent
+	| CustomFnExpressionIntent
+	| RefExpressionIntent
+	| ParamExpressionIntent
+	| CastExpressionIntent
+	| UnaryExpressionIntent;
 
 // ============================================================================
 // Window Functions (P3-A)
