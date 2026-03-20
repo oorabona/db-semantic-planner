@@ -44,6 +44,7 @@ export type ChangeKind =
 	| 'add_foreign_key'
 	| 'drop_foreign_key'
 	| 'alter_foreign_key'
+	| 'validate_constraint'
 	// Indexes
 	| 'create_index'
 	| 'drop_index'
@@ -591,7 +592,7 @@ function compareForeignKeys(
 				meta: { fk },
 			});
 		} else {
-			// FK exists in both — check onDelete, onUpdate, and deferred
+			// FK exists in both — check onDelete, onUpdate, deferred, and notValid
 			const dbFK = dbFKMap.get(key)!;
 			const schemaOnDelete = fk.onDelete ?? 'NO ACTION';
 			const dbOnDelete = dbFK.onDelete ?? 'NO ACTION';
@@ -610,6 +611,18 @@ function compareForeignKeys(
 					destructive: false,
 					details: `Alter FK (${fk.columns.join(', ')}) — onDelete/onUpdate/deferred changed`,
 					meta: { fk, previousOnDelete: dbOnDelete, oldFk: dbFK },
+				});
+			}
+			// notValid: true in DB but false/undefined in schema → emit validate_constraint
+			const dbNotValid = dbFK.notValid ?? false;
+			const schemaNotValid = fk.notValid ?? false;
+			if (dbNotValid && !schemaNotValid) {
+				changes.push({
+					kind: 'validate_constraint',
+					table: schema.name,
+					destructive: false,
+					details: `Validate FK constraint on (${fk.columns.join(', ')})`,
+					meta: { fk },
 				});
 			}
 		}
@@ -866,7 +879,7 @@ function compareCheckConstraints(
 				meta: { check },
 			});
 		} else {
-			// Both have it — compare expression
+			// Both have it — compare expression and notValid
 			const dbCheck = dbMap.get(name)!;
 			if (check.expression !== dbCheck.expression) {
 				// Expression changed → drop + re-add
@@ -884,6 +897,19 @@ function compareCheckConstraints(
 					details: `Add CHECK constraint "${name}" ${check.expression}`,
 					meta: { check },
 				});
+			} else {
+				// notValid: true in DB but false/undefined in schema → emit validate_constraint
+				const dbNotValid = dbCheck.notValid ?? false;
+				const schemaNotValid = check.notValid ?? false;
+				if (dbNotValid && !schemaNotValid) {
+					changes.push({
+						kind: 'validate_constraint',
+						table: schema.name,
+						destructive: false,
+						details: `Validate CHECK constraint "${name}"`,
+						meta: { check },
+					});
+				}
 			}
 		}
 	}
@@ -959,12 +985,22 @@ function compareEnums(
 	// Enums in DB but not in schema → drop
 	for (const [name, enumDef] of dbEnums) {
 		if (!schemaEnums.has(name)) {
+			// Scan DB tables for columns still referencing this enum type.
+			// These must be cast to text before the DROP TYPE can succeed.
+			const referencingColumns: Array<{ table: string; column: string }> = [];
+			for (const [tableName, tableIR] of db.tables) {
+				for (const col of tableIR.columns) {
+					if (col.originalDbType === name) {
+						referencingColumns.push({ table: tableName, column: col.name });
+					}
+				}
+			}
 			changes.push({
 				kind: 'drop_enum',
 				table: '',
 				destructive: true,
 				details: `Drop enum "${name}"`,
-				meta: { enum: enumDef },
+				meta: { enum: enumDef, referencingColumns },
 			});
 		}
 	}

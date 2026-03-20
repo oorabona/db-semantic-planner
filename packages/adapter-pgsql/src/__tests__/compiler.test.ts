@@ -836,3 +836,64 @@ describe('PlanCompiler', () => {
 		});
 	});
 });
+
+// ============================================================================
+// DISTINCT ON
+// ============================================================================
+
+describe('DISTINCT ON compilation', () => {
+	it('compiles DISTINCT ON with a single column', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'users',
+			decisions: [{ type: 'distinctOn', columns: ['id'] }],
+		};
+
+		const result = compilePlan(plan);
+		const normalized = normalizeSQL(result.sql);
+
+		expect(normalized).toMatch(/distinct on \([^)]*id[^)]*\)/i);
+	});
+
+	it('compiles DISTINCT ON with multiple columns', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'users',
+			decisions: [{ type: 'distinctOn', columns: ['id', 'name'] }],
+		};
+
+		const result = compilePlan(plan);
+		const normalized = normalizeSQL(result.sql);
+
+		expect(normalized).toMatch(/distinct on \([^)]*id[^)]*name[^)]*\)/i);
+	});
+
+	it('compiles DISTINCT ON combined with explicit column selection', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'users',
+			decisions: [
+				{ type: 'select', column: 'id' },
+				{ type: 'select', column: 'email' },
+				{ type: 'distinctOn', columns: ['id'] },
+			],
+		};
+
+		const result = compilePlan(plan);
+		const normalized = normalizeSQL(result.sql);
+
+		expect(normalized).toMatch(/distinct on \([^)]*id[^)]*\)/i);
+		expect(normalized).toContain('id');
+		expect(normalized).toContain('email');
+	});
+
+	it('applies naming plugin to DISTINCT ON columns', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'users',
+			decisions: [{ type: 'distinctOn', columns: ['createdAt'] }],
+		};
+
+		const compiler = new PlanCompiler({ naming: new CamelCaseNamingPlugin() });
+		const result = compiler.compile(plan);
+		const normalized = normalizeSQL(result.sql);
+
+		expect(normalized).toMatch(/distinct on \([^)]*created_at[^)]*\)/i);
+	});
+});

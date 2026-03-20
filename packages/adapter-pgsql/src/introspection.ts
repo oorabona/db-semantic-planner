@@ -98,6 +98,10 @@ interface RawIndex {
 	index_name: string;
 	table_name: string;
 	columns: string[];
+	include_columns: string[] | null;
+	expressions_text: string | null;
+	opclass_names: string[] | null;
+	opclass_cols: string[] | null;
 	is_unique: boolean;
 	method: string;
 	predicate: string | null;
@@ -108,6 +112,39 @@ interface RawPartition {
 	table_name: string;
 	strategy: string;
 	columns: string[];
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Parse the comma-separated expression list returned by pg_get_expr(indexprs, ...).
+ *
+ * PostgreSQL serialises multiple expression index entries as a comma-separated
+ * string, e.g. `"lower(email), (score * 2)"`.  A naive split on "," would break
+ * on expressions that contain commas inside parentheses (e.g. function calls with
+ * multiple arguments), so we track parenthesis depth.
+ */
+function parseExpressionsList(raw: string): readonly string[] {
+	const results: string[] = [];
+	let depth = 0;
+	let start = 0;
+	for (let i = 0; i < raw.length; i++) {
+		const ch = raw[i];
+		if (ch === '(') {
+			depth++;
+		} else if (ch === ')') {
+			depth--;
+		} else if (ch === ',' && depth === 0) {
+			const expr = raw.slice(start, i).trim();
+			if (expr) results.push(expr);
+			start = i + 1;
+		}
+	}
+	const last = raw.slice(start).trim();
+	if (last) results.push(last);
+	return results;
 }
 
 // ============================================================================
@@ -201,11 +238,29 @@ export async function introspect(
 		// Unique constraints created via col.unique / UNIQUE keyword in DDL produce an implicit
 		// backing index that is NOT a user-defined index — it is tracked via col.unique on the
 		// ColumnIR instead. Including it here would cause spurious drop_index diffs on roundtrip.
+		// Enhanced to capture:
+		//   - INCLUDE columns (PG11+): indkey positions > indnkeyatts
+		//   - Expression index entries: attnum = 0 in indkey → pg_get_expr(indexprs)
+		//   - Per-column operator classes: pg_opclass join on indclass, non-default only
 		pool.query<RawIndex>(
 			`SELECT
 			   i.relname AS index_name,
 			   t.relname AS table_name,
-			   array_agg(a.attname ORDER BY k.n) AS columns,
+			   -- Key columns (attnum != 0 means real column, within key positions)
+			   array_agg(a.attname ORDER BY k.n)
+			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0) AS columns,
+			   -- INCLUDE columns (positions after indnkeyatts)
+			   array_agg(a_inc.attname ORDER BY k.n)
+			     FILTER (WHERE k.n > ix.indnkeyatts) AS include_columns,
+			   -- Full expression string for expression indexes (NULL if none)
+			   pg_get_expr(ix.indexprs, ix.indrelid, false) AS expressions_text,
+			   -- Non-default opclass names (parallel arrays with opclass_cols)
+			   array_agg(oc.opcname ORDER BY k.n)
+			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
+			             AND NOT oc.opcdefault) AS opclass_names,
+			   array_agg(a.attname ORDER BY k.n)
+			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
+			             AND NOT oc.opcdefault) AS opclass_cols,
 			   ix.indisunique AS is_unique,
 			   am.amname AS method,
 			   pg_get_expr(ix.indpred, ix.indrelid, false) AS predicate,
@@ -215,16 +270,31 @@ export async function introspect(
 			 JOIN pg_class t ON t.oid = ix.indrelid
 			 JOIN pg_namespace n ON n.oid = t.relnamespace
 			 JOIN pg_am am ON am.oid = i.relam
+			 -- Unnest all indkey entries (key + INCLUDE positions)
 			 CROSS JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, n)
-			 JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
-			 WHERE n.nspname = $1
+			 -- Real column (key positions, attnum != 0)
+			 LEFT JOIN pg_attribute a
+			   ON a.attrelid = t.oid AND a.attnum = k.attnum AND k.attnum != 0
+			 -- INCLUDE column (positions past indnkeyatts)
+			 LEFT JOIN pg_attribute a_inc
+			   ON a_inc.attrelid = t.oid AND a_inc.attnum = k.attnum AND k.n > ix.indnkeyatts
+			 -- Operator class for key columns (indclass is int2vector, cast to int2[])
+			 LEFT JOIN pg_opclass oc
+			   ON oc.oid = (ix.indclass::int2[])[k.n - 1]
+			   AND k.n <= ix.indnkeyatts AND k.attnum != 0
+			 WHERE n.nspname = 		// 4. Indexes (excluding PK-backing indexes and unique-constraint-backing indexes).
+		// Unique constraints created via col.unique / UNIQUE keyword in DDL produce an implicit
+		// backing index that is NOT a user-defined index — it is tracked via col.unique on the
+		// ColumnIR instead. Including it here would cause spurious drop_index diffs on roundtrip.
+
 			   AND NOT ix.indisprimary
 			   AND NOT EXISTS (
 			     SELECT 1 FROM pg_constraint c
 			     WHERE c.conindid = i.oid
 			       AND c.contype = 'u'
 			   )
-			 GROUP BY i.relname, t.relname, ix.indisunique, am.amname, ix.indpred, ix.indrelid, i.reloptions
+			 GROUP BY i.relname, t.relname, ix.indisunique, am.amname,
+			          ix.indpred, ix.indrelid, ix.indexprs, i.reloptions
 			 ORDER BY t.relname, i.relname`,
 			[schema],
 		),
@@ -382,6 +452,26 @@ export async function introspect(
 			...(idx.predicate ? { where: idx.predicate } : {}),
 			...(withParams && Object.keys(withParams).length > 0
 				? { with: withParams }
+				: {}),
+			// INCLUDE columns (PG11+)
+			...(Array.isArray(idx.include_columns) && idx.include_columns.length > 0
+				? { include: idx.include_columns as readonly string[] }
+				: {}),
+			// Expression index entries — parse comma-separated pg_get_expr output
+			// e.g. "lower(email), (score * 2)" → ['lower(email)', '(score * 2)']
+			...(idx.expressions_text
+				? { expressions: parseExpressionsList(idx.expressions_text) }
+				: {}),
+			// Per-column operator class overrides (non-default only)
+			...(Array.isArray(idx.opclass_cols) &&
+			idx.opclass_cols.length > 0 &&
+			Array.isArray(idx.opclass_names) &&
+			idx.opclass_names.length > 0
+				? {
+						opclass: Object.fromEntries(
+							idx.opclass_cols.map((col, i) => [col, idx.opclass_names![i]!]),
+						) as Record<string, string>,
+					}
 				: {}),
 		};
 		const existing = tableIndexes.get(idx.table_name);

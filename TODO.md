@@ -35,7 +35,7 @@
 > - §10 System catalogs (4): 🚫 Always raw by design
 > Only DISTINCT ON (PostgreSQL-specific) is a minor gap — .distinct() covers most cases.
 
-- [ ] 💡 **DISTINCT-ON** [Adapter] PostgreSQL DISTINCT ON support — `orm.select().distinctOn('column')` for `SELECT DISTINCT ON (col)`. Minor gap, `.distinct()` covers 90% of cases. — Priority: L (from orm-raw-inventory §1+§6)
+- [x] ✅ **DISTINCT-ON** [Adapter] PostgreSQL DISTINCT ON support — `orm.select().distinctOn('column')` for `SELECT DISTINCT ON (col)`. (2026-03-20)
 
 (DX-050 archived → docs/historic/done-2026-03.md)
 (CTE-001 archived → docs/historic/done-2026-03.md)
@@ -48,15 +48,16 @@
 - [ ] 💡 **DDL-TRIGGERS** [Adapter] TRIGGER support — CREATE/DROP TRIGGER, trigger functions, introspection, diff. — Priority: P2 (deferred from DDL-COMPLETE)
 - [ ] 💡 **DDL-PARTITION-MGMT** [Adapter] Partition child table management — CREATE TABLE ... PARTITION OF ... FOR VALUES, partition addition/removal/split. Parent PARTITION BY handled in DDL-COMPLETE. — Priority: P2 (deferred from /adversarial DDL-COMPLETE)
 - [ ] 💡 **DDL-EXT-SCHEMA** [Adapter] Extension schema qualification — CREATE EXTENSION ... SCHEMA pg_catalog. — Priority: L (deferred from /adversarial DDL-COMPLETE)
-- [ ] 💡 **DDL-VALIDATE** [Adapter] NOT VALID / VALIDATE CONSTRAINT for CHECK and FK — add constraints without scanning existing rows, then validate separately. — Priority: M (from /llm Codex DDL-COMPLETE)
+- [x] ✅ **DDL-VALIDATE** [Adapter] NOT VALID / VALIDATE CONSTRAINT for FK and CHECK — `notValid?: boolean` on `ForeignKeyIR`/`CheckConstraintIR`, `validate_constraint` ChangeKind, `compareSchemata` emits it on notValid→valid transition, phase 16 in migration ordering. 20 new tests. (2026-03-20)
 - [ ] 💡 **DDL-RLS** [Adapter] Row-Level Security policies — CREATE/DROP POLICY, introspect pg_policy. — Priority: M (from /llm Copilot DDL-COMPLETE)
 - [ ] 💡 **DDL-DOMAINS** [Adapter] Custom domain types — CREATE DOMAIN with constraints. — Priority: L (from /llm Copilot DDL-COMPLETE)
-- [ ] 🔧 **DDL-OPCLASS-INTRO** [Adapter] Index introspection missing opclass/include/expressions — pg_opclass join, pg_get_expr(indexprs), indnkeyatts for INCLUDE columns. — Priority: M (from /review F-004)
-- [ ] 🔧 **DDL-ENUM-DEPCHECK** [Adapter] drop_enum without column dependency check — scan ModelIR tables for columns referencing enum before emitting DROP TYPE. — Priority: M (from /review F-005)
+- [x] ✅ **DDL-OPCLASS-INTRO** [Adapter] Index introspection: added opclass/include/expressions — pg_opclass join on indclass, pg_get_expr(indexprs), indnkeyatts for INCLUDE columns. 5 new unit tests. (2026-03-20)
+- [x] ✅ **DDL-ENUM-DEPCHECK** [Adapter] drop_enum column dependency check — scan DB ModelIR tables for columns with `originalDbType === enumName`, emit `ALTER TABLE ... TYPE text` before `DROP TYPE`. 5 tests (unit + e2e). (2026-03-20)
 - [x] ✅ **DDL-SEQ-DRY** [Adapter] Extract `buildSequenceClause()` shared helper — eliminates 4× duplicated sequence SQL generation. (2026-03-20)
 (CAPS-VERSION, UPSERT-RAW, EDGE-001, EDGE-002 archived → docs/historic/done-2026-03.md)
 - [ ] 💡 **NQL-WITH** [NQL] WITH ... AS (...) non-recursive CTE syntax in NQL parser — deferred from BATCH-001. — Priority: P1 (from /adversarial 2026-03-18)
 - [x] ✅ **BATCH-DRY-001** [Adapter] Extract shared `mapModelIRTypeToPgBase()` to `compiler-utils.ts` — removed local duplicate in `any.ts`. (2026-03-20)
+- [x] ✅ **EDGE-FLOAT** [Adapter] Float literal support in raw-expression-parser — `tokenise()` produces FLOAT tokens, `parsePrimary()` emits `A_Const.fval` nodes, 7 new tests. (2026-03-20)
 - [x] ✅ **BATCH-DRY-002** [Adapter] Extract `stripArraySuffix()` helper to `compiler-utils.ts` — eliminated 4× inline pattern. (2026-03-20)
 - [x] ✅ **BATCH-FIX-001** [Adapter] Add `bigint` to `inferPgArrayType` runtime fallback → `int8[]`. (2026-03-20)
 - [x] ✅ **BATCH-FIX-002** [Adapter] Fix `mapModelIRTypeToPgBase`: `timestamp` → `timestamptz`, `date` → `date` (was `text`). (2026-03-20)
@@ -78,7 +79,7 @@
 - [x] ✅ **EXT-001** [Core+Adapter] Generic expression primitives (op/fn/ref/param/cast/literal/unary) + pgvector extension (cosineDistance, rawDistance, l2Distance, innerProduct). 2455 tests. (2026-03-20)
 - [ ] 💡 **EXT-PARAM-DEDUP** [Core] Param deduplication — same expression in SELECT+WHERE+ORDER BY produces 3 params instead of 1. — Priority: L (from /adversarial EXT-001)
 - [ ] 💡 **EXT-NAMED-PARAMS** [Core] Named parameter syntax (`field => 'name'`) for ParadeDB functions — Priority: M (from /adversarial EXT-001, deferred to EXT-002)
-- [ ] 💡 **EXT-TEMPLATE** [Docs] Extension developer guide/template — how to create a new extension module — Priority: S (from /adversarial EXT-001)
+- [x] ✅ **EXT-TEMPLATE** [Docs] Extension developer guide/template — `packages/adapter-pgsql/src/extensions/README.md` (2026-03-20)
 - [x] ✅ **CAPS-DRY-001** [Adapter] `isChangeSupported()` — added `alter_column_collation`/`alter_column_identity` cases. (2026-03-20)
 - [x] ✅ **CAPS-DOC-001** [Adapter] Add JSDoc to `sup()` helper in `ddl-generator.ts` and `schema-diff.ts` explaining undefined/false/true semantics. (2026-03-20)
 

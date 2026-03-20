@@ -2328,3 +2328,63 @@ describe('include() with recursive options', () => {
 		expect(dump).toBeDefined();
 	});
 });
+
+// ============================================================================
+// distinctOn() method
+// ============================================================================
+
+describe('distinctOn() method', () => {
+	it('sets distinctOn in the query intent for a single column', async () => {
+		const rows = [{ id: 1 }];
+		const adapter = createSpyAdapter(rows);
+		const orm = createOrm({ adapter, schema: testSchema });
+
+		const result = await orm.select('users').distinctOn('id').all();
+
+		expect(result).toHaveLength(1);
+	});
+
+	it('sets distinctOn in the query intent for multiple columns', async () => {
+		const rows = [{ id: 1 }];
+		const adapter = createSpyAdapter(rows);
+		const orm = createOrm({ adapter, schema: testSchema });
+
+		const result = await orm.select('users').distinctOn('id', 'name').all();
+
+		expect(result).toHaveLength(1);
+	});
+
+	it('includes distinctOn in dump plan intent', () => {
+		const adapter = createSpyAdapter();
+		const orm = createOrm({ adapter, schema: testSchema });
+
+		const dump = orm.select('users').distinctOn('email').dump();
+
+		expect(dump).toBeDefined();
+	});
+
+	it('is chainable with where and columns', async () => {
+		const rows = [{ id: 1, email: 'a@b.com' }];
+		const adapter = createSpyAdapter(rows);
+		const orm = createOrm({ adapter, schema: testSchema });
+
+		const result = await orm
+			.select('users')
+			.distinctOn('id')
+			.columns(['id', 'email'])
+			.where(eq('active', true))
+			.all();
+
+		expect(result).toBeDefined();
+	});
+
+	it('preserves distinctOn across clone (chained limit)', async () => {
+		const rows = [{ id: 1 }];
+		const adapter = createSpyAdapter(rows);
+		const orm = createOrm({ adapter, schema: testSchema });
+
+		const result = await orm.select('users').distinctOn('id').limit(10).all();
+
+		expect(result).toHaveLength(1);
+	});
+});

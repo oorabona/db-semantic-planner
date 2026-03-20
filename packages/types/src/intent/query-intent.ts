@@ -52,6 +52,13 @@ export interface QueryIntent {
 	 */
 	readonly distinct?: boolean;
 
+	/**
+	 * Columns for PostgreSQL DISTINCT ON (...) clause.
+	 * Produces: SELECT DISTINCT ON ("col1", "col2") ...
+	 * Takes precedence over `distinct` when set.
+	 */
+	readonly distinctOn?: readonly string[];
+
 	/** Maximum number of rows */
 	readonly limit?: number;
 

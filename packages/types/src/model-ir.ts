@@ -222,6 +222,9 @@ export interface ForeignKeyIR {
 
 	/** Whether this FK constraint is deferrable (DEFERRABLE INITIALLY DEFERRED) */
 	readonly deferred?: boolean;
+
+	/** If true, add the constraint WITHOUT scanning existing rows (NOT VALID). Use validate_constraint to validate later. */
+	readonly notValid?: boolean;
 }
 
 /**
@@ -268,6 +271,9 @@ export interface CheckConstraintIR {
 
 	/** CHECK expression in canonical form (from pg_get_constraintdef) */
 	readonly expression: string;
+
+	/** If true, add the constraint WITHOUT scanning existing rows (NOT VALID). Use validate_constraint to validate later. */
+	readonly notValid?: boolean;
 }
 
 /**
