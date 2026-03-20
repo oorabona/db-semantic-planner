@@ -10,6 +10,7 @@
  */
 
 import type { Node } from '@pgsql/types';
+import { mapModelIRTypeToPgBase } from '../../compiler-utils.js';
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
@@ -21,50 +22,16 @@ import { COLLECTION_OPERATORS } from '../types.js';
 import { buildColumnRef } from './utils.js';
 
 /**
- * Infer PostgreSQL array type name from a runtime value sample.
+ * Infer PostgreSQL base type from a runtime value sample.
  * Returns the base type name (without []) — the caller appends the array cast.
  */
 function inferPgBaseType(sample: unknown): string {
+	if (typeof sample === 'bigint') return 'int8';
 	if (typeof sample === 'boolean') return 'bool';
 	if (typeof sample === 'number') {
 		return Number.isInteger(sample) ? 'int4' : 'float8';
 	}
-	if (typeof sample === 'bigint') return 'int8';
 	return 'text';
-}
-
-/**
- * Map a ModelIR column type string to a PostgreSQL base type name.
- * Returns undefined when the type is not in the whitelist — falls back to runtime inference.
- */
-function mapModelTypeToPg(dataType: string): string | undefined {
-	const t = dataType.toLowerCase();
-	// Integer types
-	if (t === 'integer' || t === 'int' || t === 'serial' || t === 'bigserial')
-		return 'int4';
-	if (t === 'bigint') return 'int8';
-	// Float types
-	if (
-		t === 'decimal' ||
-		t === 'float' ||
-		t === 'double' ||
-		t === 'real' ||
-		t === 'numeric'
-	)
-		return 'float8';
-	// Text types
-	if (t === 'text' || t === 'string' || t === 'varchar' || t === 'char')
-		return 'text';
-	// Boolean
-	if (t === 'boolean' || t === 'bool') return 'bool';
-	// JSON
-	if (t === 'json' || t === 'jsonb') return 'jsonb';
-	// UUID
-	if (t === 'uuid') return 'uuid';
-	// Dates — safe fallback to text
-	if (t === 'timestamp' || t === 'timestamptz' || t === 'date') return 'text';
-	// DX-050 custom dbType — use verbatim (caller will append [])
-	return dataType;
 }
 
 /**
@@ -108,7 +75,9 @@ export const anyHandler: WhereHandler = {
 		// Determine the PG base type
 		let pgBaseType: string;
 		if (decision.dataType) {
-			pgBaseType = mapModelTypeToPg(decision.dataType) ?? decision.dataType;
+			// mapModelIRTypeToPgBase returns undefined for custom DX-050 dbType — use verbatim
+			pgBaseType =
+				mapModelIRTypeToPgBase(decision.dataType) ?? decision.dataType;
 		} else {
 			// Runtime inspection: find first non-null value
 			const sample = values.find((v) => v !== null && v !== undefined);

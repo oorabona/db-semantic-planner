@@ -17,8 +17,25 @@
 
 ## P0 — Core Features Required by astix ORM Migration (2026-03-15)
 
-> Blockers identified from astix ORM migration re-assessment (72 `executeRaw` calls, 12 files).
-> Spec: `astix/docs/plans/migrate-raw-sql-to-dbsp.md § Re-Assessment (2026-03-15)`
+> Re-assessment 2026-03-20: 108 `orm.raw()` calls. Inventory: `astix/docs/orm-raw-inventory.md`
+> After rigorous audit: dbsp already covers ~94/108 calls via existing features.
+> Remaining raw: DDL (10) + system catalogs (4) = always raw by design.
+> Migration work is ASTIX-SIDE (use include/returning/notExists/distinct), not new dbsp features.
+
+### Assessment summary (2026-03-20)
+> - §1 JOINs (~50): ✅ Covered by `include('relation', { select, where })` — all FK relations declared
+> - §2 WITH RECURSIVE (9): ✅ Covered by recursive includes (DX-017)
+> - §3 CTE mutations (8): ✅ Covered by `.delete().returning()` — count client-side, no CTE needed
+> - §4 UPDATE...FROM unnest (5): ✅ Covered by `batchSet()` (BATCH-001)
+> - §5 DDL (10): 🚫 Always raw by design
+> - §6 pgvector (2): ✅ EXT-001 (cosineDistance etc.) + include for JOINs
+> - §7 ParadeDB (4): ✅ EXT-002 (bm25Search etc.) + include for JOINs
+> - §8 sql() in set (4): ✅ UPSERT-RAW (sql('now()') in .set())
+> - §9 NOT EXISTS (4): ✅ `notExists('relation')` works on delete builder — FK declared
+> - §10 System catalogs (4): 🚫 Always raw by design
+> Only DISTINCT ON (PostgreSQL-specific) is a minor gap — .distinct() covers most cases.
+
+- [ ] 💡 **DISTINCT-ON** [Adapter] PostgreSQL DISTINCT ON support — `orm.select().distinctOn('column')` for `SELECT DISTINCT ON (col)`. Minor gap, `.distinct()` covers 90% of cases. — Priority: L (from orm-raw-inventory §1+§6)
 
 (DX-050 archived → docs/historic/done-2026-03.md)
 (CTE-001 archived → docs/historic/done-2026-03.md)
@@ -36,15 +53,15 @@
 - [ ] 💡 **DDL-DOMAINS** [Adapter] Custom domain types — CREATE DOMAIN with constraints. — Priority: L (from /llm Copilot DDL-COMPLETE)
 - [ ] 🔧 **DDL-OPCLASS-INTRO** [Adapter] Index introspection missing opclass/include/expressions — pg_opclass join, pg_get_expr(indexprs), indnkeyatts for INCLUDE columns. — Priority: M (from /review F-004)
 - [ ] 🔧 **DDL-ENUM-DEPCHECK** [Adapter] drop_enum without column dependency check — scan ModelIR tables for columns referencing enum before emitting DROP TYPE. — Priority: M (from /review F-005)
-- [ ] 🔧 **DDL-SEQ-DRY** [Adapter] Sequence SQL generation duplicated 4× — extract buildSequenceClause(seq: SequenceIR) shared helper. — Priority: S (from /review F-007)
+- [x] ✅ **DDL-SEQ-DRY** [Adapter] Extract `buildSequenceClause()` shared helper — eliminates 4× duplicated sequence SQL generation. (2026-03-20)
 (CAPS-VERSION, UPSERT-RAW, EDGE-001, EDGE-002 archived → docs/historic/done-2026-03.md)
 - [ ] 💡 **NQL-WITH** [NQL] WITH ... AS (...) non-recursive CTE syntax in NQL parser — deferred from BATCH-001. — Priority: P1 (from /adversarial 2026-03-18)
-- [ ] 🔧 **BATCH-DRY-001** [Adapter] Extract shared `mapModelIRTypeToPgBase()` — duplicated in any.ts + compiler-utils.ts. — Priority: M (from /review F-001)
-- [ ] 🔧 **BATCH-DRY-002** [Adapter] Extract `stripArraySuffix()` helper — repeated 5× across files. — Priority: S (from /review F-002)
-- [ ] 🐛 **BATCH-FIX-001** [Adapter] Add `bigint` to `inferPgArrayType` runtime fallback. — Priority: S (from /review F-003)
-- [ ] 🔧 **BATCH-FIX-002** [Adapter] Map timestamp/date to native PG types in `mapModelTypeToPg`. — Priority: S (from /review F-004)
+- [x] ✅ **BATCH-DRY-001** [Adapter] Extract shared `mapModelIRTypeToPgBase()` to `compiler-utils.ts` — removed local duplicate in `any.ts`. (2026-03-20)
+- [x] ✅ **BATCH-DRY-002** [Adapter] Extract `stripArraySuffix()` helper to `compiler-utils.ts` — eliminated 4× inline pattern. (2026-03-20)
+- [x] ✅ **BATCH-FIX-001** [Adapter] Add `bigint` to `inferPgArrayType` runtime fallback → `int8[]`. (2026-03-20)
+- [x] ✅ **BATCH-FIX-002** [Adapter] Fix `mapModelIRTypeToPgBase`: `timestamp` → `timestamptz`, `date` → `date` (was `text`). (2026-03-20)
 - [x] ✅ **EXT-001** [Extensions] Generic expression primitives (op/fn/ref/param/cast/literal/unary) in `@dbsp/core` + pgvector extension wrappers (cosineDistance, rawDistance, l2Distance, innerProduct) in `adapter-pgsql/extensions/`. Full SELECT/WHERE/ORDER BY pipeline. 2455 tests passing. (2026-03-20)
-- [ ] 💡 **EXT-002** [Extensions] `@dbsp/paradedb` package — BM25 `@@@` operator, `paradedb.score()`, index management. Blocks 3 full-text/BM25 search queries. — Priority: P2 (from astix ORM migration assessment 2026-03-15)
+- [x] ✅ **EXT-002** [Extensions] ParadeDB extension wrappers (score, parse, boost, booleanSearch, bm25Search) in adapter-pgsql/extensions/paradedb.ts. 16 tests. (2026-03-20)
 
 ---
 
@@ -62,8 +79,8 @@
 - [ ] 💡 **EXT-PARAM-DEDUP** [Core] Param deduplication — same expression in SELECT+WHERE+ORDER BY produces 3 params instead of 1. — Priority: L (from /adversarial EXT-001)
 - [ ] 💡 **EXT-NAMED-PARAMS** [Core] Named parameter syntax (`field => 'name'`) for ParadeDB functions — Priority: M (from /adversarial EXT-001, deferred to EXT-002)
 - [ ] 💡 **EXT-TEMPLATE** [Docs] Extension developer guide/template — how to create a new extension module — Priority: S (from /adversarial EXT-001)
-- [ ] 🔧 **CAPS-DRY-001** [Adapter] `isChangeSupported()` missing `alter_column_collation`/`alter_column_identity` ChangeKind filters — Priority: S (from /review F-003)
-- [ ] 🔧 **CAPS-DOC-001** [Adapter] Add JSDoc to `sup()` helper explaining undefined vs false semantics — Priority: S (from /review F-004)
+- [x] ✅ **CAPS-DRY-001** [Adapter] `isChangeSupported()` — added `alter_column_collation`/`alter_column_identity` cases. (2026-03-20)
+- [x] ✅ **CAPS-DOC-001** [Adapter] Add JSDoc to `sup()` helper in `ddl-generator.ts` and `schema-diff.ts` explaining undefined/false/true semantics. (2026-03-20)
 
 ---
 

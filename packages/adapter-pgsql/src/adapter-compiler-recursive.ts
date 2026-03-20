@@ -25,7 +25,7 @@ import {
 	integerNode,
 	stringNode,
 } from './ast-helpers.js';
-import { inferPgArrayType } from './compiler-utils.js';
+import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { deparseQuoted } from './deparse.js';
 import type { CompilerContext } from './handlers/index.js';
 import { createCompilerState } from './handlers/index.js';
@@ -345,9 +345,7 @@ function buildUnnestCte(
 		const colArray = cte.columns[col] as unknown[];
 		const sampleValue = colArray.find((v) => v !== null && v !== undefined);
 		const pgArrayType = inferPgArrayType(col, undefined, sampleValue);
-		const pgBaseType = pgArrayType.endsWith('[]')
-			? pgArrayType.slice(0, -2)
-			: pgArrayType;
+		const pgBaseType = stripArraySuffix(pgArrayType);
 
 		state.parameters.push(colArray);
 		state.paramIndex++;
