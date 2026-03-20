@@ -1497,7 +1497,9 @@ describe('DDL Generation with Capabilities (CAPS-003)', () => {
 			new Map(),
 			new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]),
 			['uuid-ossp'],
-			new Map([['order_seq', { name: 'order_seq', startWith: 1, incrementBy: 1 }]]),
+			new Map([
+				['order_seq', { name: 'order_seq', startWith: 1, incrementBy: 1 }],
+			]),
 		);
 	}
 

@@ -9,7 +9,7 @@
  *   SELECT ... FROM "outerTable" WHERE ...
  */
 
-import { InvalidOperationError, createOrm, eq } from '@dbsp/core';
+import { createOrm, eq, InvalidOperationError } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -245,9 +245,7 @@ describe('error cases', () => {
 	it('throws on array length mismatch in fromUnnest', () => {
 		const orm = makeOrm();
 		expect(() => {
-			orm
-				.withCte('data')
-				.fromUnnest({ id: [1, 2, 3], name: ['a', 'b'] }); // length mismatch
+			orm.withCte('data').fromUnnest({ id: [1, 2, 3], name: ['a', 'b'] }); // length mismatch
 		}).toThrow(InvalidOperationError);
 	});
 

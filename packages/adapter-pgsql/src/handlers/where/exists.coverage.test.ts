@@ -29,9 +29,7 @@ const mockDispatch: WhereDispatcher = (decision, ctx, state) => {
 			name: [{ String: { sval: '=' } }],
 			lexpr: {
 				ColumnRef: {
-					fields: [
-						{ String: { sval: decision.column ?? 'status' } },
-					],
+					fields: [{ String: { sval: decision.column ?? 'status' } }],
 				},
 			},
 			rexpr: { A_Const: { sval: { sval: 'approved' } } },

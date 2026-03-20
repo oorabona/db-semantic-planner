@@ -7,7 +7,7 @@
 
 import { InvalidOperationError } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
-import { parseSync } from 'pgsql-parser';
+import { parseExpression } from './raw-expression-parser.js';
 
 // ============================================================================
 // Type Inference
@@ -162,21 +162,11 @@ export function validateBatchCardinality(
  * @internal
  */
 export function parseRawExpression(sqlFragment: string): Node {
-	const wrapped = `SELECT ${sqlFragment}`;
-	const parsed = parseSync(wrapped);
-	const stmt = parsed.stmts?.[0]?.stmt;
-	const expr =
-		stmt &&
-		'SelectStmt' in stmt &&
-		(
-			stmt.SelectStmt as {
-				targetList?: Array<{ ResTarget?: { val?: Node } }>;
-			}
-		).targetList?.[0]?.ResTarget?.val;
-	if (!expr) {
+	try {
+		return parseExpression(sqlFragment);
+	} catch {
 		throw new Error(
 			`sql(): cannot parse raw SQL fragment as expression: ${sqlFragment}`,
 		);
 	}
-	return expr;
 }

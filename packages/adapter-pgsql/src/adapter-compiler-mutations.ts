@@ -18,6 +18,18 @@ import type {
 	UpsertIntent,
 	WhereIntent,
 } from '@dbsp/types';
+import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
+import {
+	inferPgArrayType,
+	transposeToColumnArrays,
+	validateBatchCardinality,
+} from './compiler-utils.js';
+import { deparseQuoted } from './deparse.js';
+import {
+	type CompilerContext,
+	createCompilerState,
+	type Decision,
+} from './handlers/index.js';
 import {
 	type BatchUpdateConfig,
 	compileDelete as compileDeleteMutation,
@@ -37,18 +49,6 @@ import {
 	type UpsertConfig,
 	type UpsertFromConfig,
 } from './mutations/index.js';
-import {
-	inferPgArrayType,
-	transposeToColumnArrays,
-	validateBatchCardinality,
-} from './compiler-utils.js';
-import { deparseQuoted } from './deparse.js';
-import {
-	type CompilerContext,
-	createCompilerState,
-	type Decision,
-} from './handlers/index.js';
-import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 
 // ============================================================================
 // Internal helpers
@@ -297,9 +297,7 @@ export function compileBatchUpdate(
 	}
 
 	// Build row-major values matrix and validate cardinality
-	const values = intent.updates.map((row) =>
-		allColumns.map((col) => row[col]),
-	);
+	const values = intent.updates.map((row) => allColumns.map((col) => row[col]));
 	validateBatchCardinality(allColumns, values);
 
 	// Transpose to column-major arrays

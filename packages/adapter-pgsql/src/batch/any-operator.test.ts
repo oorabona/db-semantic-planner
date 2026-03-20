@@ -8,13 +8,7 @@
  *   SC-11 — NQL ANY syntax: WHERE id = ANY(:ids)
  */
 
-import {
-	any,
-	POSTGRESQL_CAPABILITIES,
-	plan,
-	ref,
-	schema,
-} from '@dbsp/core';
+import { any, POSTGRESQL_CAPABILITIES, plan, ref, schema } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
@@ -117,10 +111,9 @@ describe('ANY() operator — BATCH-001 Block 1', () => {
 
 	describe('SC-11: NQL ANY syntax', () => {
 		it('parses "symbols | where id = ANY(:ids)" and compiles to col = ANY($1::int4[])', () => {
-			const result = nqlToSQLWithParams(
-				'symbols | where id = ANY(:ids)',
-				{ ids: [1, 2, 3] },
-			);
+			const result = nqlToSQLWithParams('symbols | where id = ANY(:ids)', {
+				ids: [1, 2, 3],
+			});
 
 			expect(result.sql).toMatch(/id\s*=\s*any\s*\(/i);
 			expect(result.sql).toMatch(/int4\[\]/i);
