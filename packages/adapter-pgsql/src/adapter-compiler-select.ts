@@ -13,20 +13,20 @@ import type {
 	SubqueryIncludeInfo,
 } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
+import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import {
 	type CompilerOptions,
 	compilePlan,
 	type PlanDecision,
 	type SimplifiedPlanReport,
 } from './compiler.js';
+import { intentToDecisions } from './intent-to-decisions.js';
 import {
 	convertDottedFieldsToExists,
 	deriveForeignKey,
 	extractAllIncludeDecisions,
 	extractExistsDecisions,
 } from './plan-decision-extractor.js';
-import { intentToDecisions } from './intent-to-decisions.js';
-import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 
 // ============================================================================
 // Internal: legacy bridge

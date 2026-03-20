@@ -6,12 +6,16 @@
  * @internal
  */
 
-import type { CompiledQuery, CompileOptions, SubqueryIncludeInfo } from '@dbsp/types';
+import type {
+	CompiledQuery,
+	CompileOptions,
+	SubqueryIncludeInfo,
+} from '@dbsp/types';
 import type { Node } from '@pgsql/types';
+import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { innerJoin, rangeVar } from './ast-helpers.js';
 import { deparseQuoted } from './deparse.js';
 import { createCompilerState } from './handlers/index.js';
-import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 
 // ============================================================================
 // compileSubqueryInclude

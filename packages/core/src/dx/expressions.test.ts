@@ -1,0 +1,389 @@
+import { describe, expect, it } from 'vitest';
+import type {
+	CastExpressionIntent,
+	CustomFnExpressionIntent,
+	CustomOpExpressionIntent,
+	LiteralExpressionIntent,
+	ParamExpressionIntent,
+	RefExpressionIntent,
+	UnaryExpressionIntent,
+	WhereExpressionIntent,
+} from '../intent-ast.js';
+import {
+	ExpressionRef,
+	cast,
+	fn,
+	literal,
+	op,
+	param,
+	ref,
+	unary,
+} from './expressions.js';
+
+describe('Expression Primitives', () => {
+	describe('ref()', () => {
+		it('should create RefExpressionIntent', () => {
+			const r = ref('column');
+			expect(r.intent).toEqual({ kind: 'ref', column: 'column' } satisfies RefExpressionIntent);
+		});
+
+		it('should set __expr marker', () => {
+			expect(ref('col').__expr).toBe(true);
+		});
+
+		it('should support table.column notation', () => {
+			const r = ref('t.score');
+			expect((r.intent as RefExpressionIntent).column).toBe('t.score');
+		});
+
+		it('should be instanceof ExpressionRef', () => {
+			expect(ref('col')).toBeInstanceOf(ExpressionRef);
+		});
+	});
+
+	describe('param()', () => {
+		it('should create ParamExpressionIntent for number', () => {
+			const p = param(42);
+			expect(p.intent).toEqual({ kind: 'param', value: 42 } satisfies ParamExpressionIntent);
+		});
+
+		it('should accept arrays (vectors)', () => {
+			const p = param([0.1, 0.2, 0.3]);
+			expect(p.intent).toEqual({ kind: 'param', value: [0.1, 0.2, 0.3] });
+		});
+
+		it('should accept null', () => {
+			const p = param(null);
+			expect((p.intent as ParamExpressionIntent).value).toBeNull();
+		});
+
+		it('should accept boolean', () => {
+			const p = param(true);
+			expect((p.intent as ParamExpressionIntent).value).toBe(true);
+		});
+
+		it('should accept string values', () => {
+			const p = param('active');
+			expect((p.intent as ParamExpressionIntent).value).toBe('active');
+		});
+	});
+
+	describe('cast()', () => {
+		it('should create CastExpressionIntent', () => {
+			const c = cast(param([0.1]), 'vector');
+			expect(c.intent).toEqual({
+				kind: 'cast',
+				expr: { kind: 'param', value: [0.1] },
+				typeName: 'vector',
+			} satisfies CastExpressionIntent);
+		});
+
+		it('should accept array types (int[])', () => {
+			const c = cast(param([1, 2]), 'int[]');
+			expect((c.intent as CastExpressionIntent).typeName).toBe('int[]');
+		});
+
+		it('should accept types with spaces (double precision)', () => {
+			const c = cast(ref('val'), 'double precision');
+			expect((c.intent as CastExpressionIntent).typeName).toBe('double precision');
+		});
+
+		it('should throw on invalid type name — SQL injection attempt', () => {
+			expect(() => cast(param(1), "'); DROP TABLE users; --")).toThrow('Invalid type');
+		});
+
+		it('should throw on empty type name', () => {
+			expect(() => cast(param(1), '')).toThrow('Invalid type');
+		});
+
+		it('should throw on type with semicolon', () => {
+			expect(() => cast(param(1), 'vector; DROP TABLE')).toThrow('Invalid type');
+		});
+	});
+
+	describe('op()', () => {
+		it('should create CustomOpExpressionIntent', () => {
+			const o = op('<=>', ref('vector'), cast(param([0.1]), 'vector'));
+			expect(o.intent.kind).toBe('customOp');
+			const intent = o.intent as CustomOpExpressionIntent;
+			expect(intent.operator).toBe('<=>');
+			expect(intent.left).toEqual({ kind: 'ref', column: 'vector' });
+			expect(intent.right.kind).toBe('cast');
+		});
+
+		it('should apply implicit conversion: string → ref', () => {
+			const o = op('<=>', 'vector', param([0.1]));
+			expect((o.intent as CustomOpExpressionIntent).left).toEqual({
+				kind: 'ref',
+				column: 'vector',
+			});
+		});
+
+		it('should apply implicit conversion: number → param', () => {
+			const o = op('+', ref('col'), 1);
+			expect((o.intent as CustomOpExpressionIntent).right).toEqual({
+				kind: 'param',
+				value: 1,
+			});
+		});
+
+		it('should apply implicit conversion: array → param', () => {
+			const o = op('<=>', 'vector', [0.1, 0.2]);
+			expect((o.intent as CustomOpExpressionIntent).right).toEqual({
+				kind: 'param',
+				value: [0.1, 0.2],
+			});
+		});
+
+		it('should apply implicit conversion: boolean → param', () => {
+			const o = op('=', 'active', true);
+			expect((o.intent as CustomOpExpressionIntent).right).toEqual({
+				kind: 'param',
+				value: true,
+			});
+		});
+
+		it('should throw on empty operator', () => {
+			expect(() => op('', ref('a'), ref('b'))).toThrow('Invalid operator');
+		});
+
+		it('should throw on SQL injection in operator', () => {
+			expect(() => op("'; DROP TABLE users; --", ref('a'), ref('b'))).toThrow(
+				'Invalid operator',
+			);
+		});
+
+		it('should throw on operator with spaces', () => {
+			expect(() => op('IS NOT', ref('a'), ref('b'))).toThrow('Invalid operator');
+		});
+
+		it('should support standard arithmetic operators', () => {
+			expect(() => op('+', ref('a'), ref('b'))).not.toThrow();
+			expect(() => op('-', ref('a'), ref('b'))).not.toThrow();
+			expect(() => op('*', ref('a'), ref('b'))).not.toThrow();
+			expect(() => op('/', ref('a'), ref('b'))).not.toThrow();
+		});
+
+		it('should support pgvector operators', () => {
+			expect(() => op('<=>', ref('v'), ref('w'))).not.toThrow();
+			expect(() => op('<->', ref('v'), ref('w'))).not.toThrow();
+			expect(() => op('<#>', ref('v'), ref('w'))).not.toThrow();
+		});
+	});
+
+	describe('fn()', () => {
+		it('should create CustomFnExpressionIntent with no args', () => {
+			const f = fn('now');
+			expect(f.intent).toEqual({
+				kind: 'customFn',
+				name: 'now',
+				args: [],
+			} satisfies CustomFnExpressionIntent);
+		});
+
+		it('should handle schema-qualified names (paradedb.score)', () => {
+			const f = fn('paradedb.score', ref('id'));
+			const intent = f.intent as CustomFnExpressionIntent;
+			expect(intent.name).toBe('paradedb.score');
+			expect(intent.args).toHaveLength(1);
+		});
+
+		it('should apply implicit conversion on args: string → ref', () => {
+			const f = fn('my_func', 'col');
+			expect((f.intent as CustomFnExpressionIntent).args[0]).toEqual({
+				kind: 'ref',
+				column: 'col',
+			});
+		});
+
+		it('should apply implicit conversion on args: number → param', () => {
+			const f = fn('my_func', 42);
+			expect((f.intent as CustomFnExpressionIntent).args[0]).toEqual({
+				kind: 'param',
+				value: 42,
+			});
+		});
+
+		it('should apply implicit conversion on multiple args', () => {
+			const f = fn('my_func', 'col', 42);
+			const args = (f.intent as CustomFnExpressionIntent).args;
+			expect(args[0]).toEqual({ kind: 'ref', column: 'col' });
+			expect(args[1]).toEqual({ kind: 'param', value: 42 });
+		});
+
+		it('should throw on empty name', () => {
+			expect(() => fn('')).toThrow('Invalid function');
+		});
+
+		it('should throw on name with SQL injection', () => {
+			expect(() => fn("'; DROP TABLE users; --")).toThrow('Invalid function');
+		});
+
+		it('should throw on name starting with digit', () => {
+			expect(() => fn('123func')).toThrow('Invalid function');
+		});
+
+		it('should support ST_ prefixed GIS functions', () => {
+			expect(() => fn('ST_Distance', ref('geom'), param([0, 0]))).not.toThrow();
+		});
+	});
+
+	describe('literal()', () => {
+		it('should create LiteralExpressionIntent for number', () => {
+			const l = literal(42);
+			expect(l.intent).toEqual({
+				kind: 'literal',
+				value: 42,
+			} satisfies LiteralExpressionIntent);
+		});
+
+		it('should handle null', () => {
+			const l = literal(null);
+			expect(l.intent).toEqual({ kind: 'literal', value: null });
+		});
+
+		it('should handle string (SQL string literal, not column ref)', () => {
+			const l = literal('text');
+			expect(l.intent).toEqual({ kind: 'literal', value: 'text' });
+		});
+
+		it('should handle boolean', () => {
+			const l = literal(true);
+			expect(l.intent).toEqual({ kind: 'literal', value: true });
+		});
+
+		it('should handle float', () => {
+			const l = literal(3.14);
+			expect((l.intent as LiteralExpressionIntent).value).toBe(3.14);
+		});
+	});
+
+	describe('unary()', () => {
+		it('should create UnaryExpressionIntent', () => {
+			const u = unary('NOT', ref('active'));
+			expect(u.intent).toEqual({
+				kind: 'unary',
+				operator: 'NOT',
+				operand: { kind: 'ref', column: 'active' },
+			} satisfies UnaryExpressionIntent);
+		});
+
+		it('should apply implicit conversion: string → ref', () => {
+			const u = unary('-', 'score');
+			expect((u.intent as UnaryExpressionIntent).operand).toEqual({
+				kind: 'ref',
+				column: 'score',
+			});
+		});
+
+		it('should throw on empty operator', () => {
+			expect(() => unary('', ref('col'))).toThrow('Invalid operator');
+		});
+
+		it('should throw on operator with spaces', () => {
+			expect(() => unary('IS NOT', ref('col'))).toThrow('Invalid operator');
+		});
+	});
+
+	describe('ExpressionRef chaining', () => {
+		it('.as() should return new ExpressionRef with alias', () => {
+			const r = ref('col');
+			const aliased = r.as('my_alias');
+			expect(aliased).not.toBe(r); // new instance
+			expect(aliased).toBeInstanceOf(ExpressionRef);
+			expect((aliased.intent as RefExpressionIntent & { as?: string }).as).toBe('my_alias');
+		});
+
+		it('.as() should not mutate original', () => {
+			const r = ref('col');
+			r.as('alias');
+			expect((r.intent as RefExpressionIntent & { as?: string }).as).toBeUndefined();
+		});
+
+		it('.eq() should return WhereExpressionIntent', () => {
+			const where = ref('status').eq('active');
+			expect(where).toEqual({
+				kind: 'expression',
+				expr: { kind: 'ref', column: 'status' },
+				operator: 'eq',
+				value: 'active',
+			} satisfies WhereExpressionIntent);
+		});
+
+		it('.neq() should return WhereExpressionIntent', () => {
+			const where = ref('status').neq('deleted');
+			expect(where.kind).toBe('expression');
+			expect(where.operator).toBe('neq');
+			expect(where.value).toBe('deleted');
+		});
+
+		it('.gt() should return WhereExpressionIntent', () => {
+			const where = ref('score').gt(0);
+			expect(where.operator).toBe('gt');
+		});
+
+		it('.gte() should return WhereExpressionIntent with correct fields', () => {
+			const expr = op('<=>', ref('v'), cast(param([0.1]), 'vector'));
+			const where = expr.gte(0.5);
+			expect(where.kind).toBe('expression');
+			expect(where.operator).toBe('gte');
+			expect(where.value).toBe(0.5);
+			expect(where.expr).toBe(expr.intent);
+		});
+
+		it('.lt() should return WhereExpressionIntent', () => {
+			const where = op('<->', 'v', [0.1]).lt(1.0);
+			expect(where.operator).toBe('lt');
+		});
+
+		it('.lte() should return WhereExpressionIntent', () => {
+			const where = op('<->', 'v', [0.1]).lte(1.0);
+			expect(where.operator).toBe('lte');
+		});
+
+		it('implements ExpressionSpec duck-type (__expr marker + intent)', () => {
+			const r = ref('col');
+			expect(r.__expr).toBe(true);
+			expect('intent' in r).toBe(true);
+		});
+	});
+
+	describe('nested expressions', () => {
+		it('should build cosine similarity expression tree (1 - dist)', () => {
+			// 1 - (vector <=> $1::vector)
+			const expr = op(
+				'-',
+				literal(1),
+				op('<=>', ref('vector'), cast(param([0.1, 0.2]), 'vector')),
+			);
+			expect(expr.intent.kind).toBe('customOp');
+			const intent = expr.intent as CustomOpExpressionIntent;
+			expect(intent.operator).toBe('-');
+			expect(intent.left.kind).toBe('literal');
+			expect((intent.left as LiteralExpressionIntent).value).toBe(1);
+			expect(intent.right.kind).toBe('customOp');
+			const innerOp = intent.right as CustomOpExpressionIntent;
+			expect(innerOp.operator).toBe('<=>');
+			expect(innerOp.left).toEqual({ kind: 'ref', column: 'vector' });
+			expect(innerOp.right.kind).toBe('cast');
+			const castIntent = innerOp.right as CastExpressionIntent;
+			expect(castIntent.typeName).toBe('vector');
+			expect((castIntent.expr as ParamExpressionIntent).value).toEqual([0.1, 0.2]);
+		});
+
+		it('should support col-vs-col expression (no params)', () => {
+			const expr = op('<=>', ref('e1.v'), ref('e2.v'));
+			const intent = expr.intent as CustomOpExpressionIntent;
+			expect(intent.left).toEqual({ kind: 'ref', column: 'e1.v' });
+			expect(intent.right).toEqual({ kind: 'ref', column: 'e2.v' });
+		});
+
+		it('should support deeply nested fn wrapping op', () => {
+			const dist = op('<=>', ref('vec'), cast(param([0.1]), 'vector'));
+			const expr = fn('ABS', dist);
+			const intent = expr.intent as CustomFnExpressionIntent;
+			expect(intent.name).toBe('ABS');
+			expect(intent.args[0]?.kind).toBe('customOp');
+		});
+	});
+});

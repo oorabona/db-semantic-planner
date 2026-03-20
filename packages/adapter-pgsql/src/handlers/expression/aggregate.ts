@@ -99,7 +99,13 @@ export const sumHandler: ExpressionHandler = {
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
-		return buildAggregate('sum', decision.column, false, ctx, decision.filterWhere);
+		return buildAggregate(
+			'sum',
+			decision.column,
+			false,
+			ctx,
+			decision.filterWhere,
+		);
 	},
 };
 
@@ -114,7 +120,13 @@ export const avgHandler: ExpressionHandler = {
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
-		return buildAggregate('avg', decision.column, false, ctx, decision.filterWhere);
+		return buildAggregate(
+			'avg',
+			decision.column,
+			false,
+			ctx,
+			decision.filterWhere,
+		);
 	},
 };
 
@@ -129,7 +141,13 @@ export const minHandler: ExpressionHandler = {
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
-		return buildAggregate('min', decision.column, false, ctx, decision.filterWhere);
+		return buildAggregate(
+			'min',
+			decision.column,
+			false,
+			ctx,
+			decision.filterWhere,
+		);
 	},
 };
 
@@ -144,7 +162,13 @@ export const maxHandler: ExpressionHandler = {
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
-		return buildAggregate('max', decision.column, false, ctx, decision.filterWhere);
+		return buildAggregate(
+			'max',
+			decision.column,
+			false,
+			ctx,
+			decision.filterWhere,
+		);
 	},
 };
 
@@ -163,6 +187,12 @@ export const genericAggregateHandler: ExpressionHandler = {
 		if (!funcName) {
 			throw new Error('Generic aggregate requires function name');
 		}
-		return buildAggregate(funcName, decision.column, false, ctx, decision.filterWhere);
+		return buildAggregate(
+			funcName,
+			decision.column,
+			false,
+			ctx,
+			decision.filterWhere,
+		);
 	},
 };

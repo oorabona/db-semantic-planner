@@ -22,7 +22,7 @@ function makeCtx(overrides: Partial<CompilerContext> = {}): CompilerContext {
 }
 
 /** Mock dispatcher for nested conditions */
-const mockDispatch: WhereDispatcher = (decision, ctx, state) => {
+const mockDispatch: WhereDispatcher = (decision, _ctx, _state) => {
 	// Return a simple equality expression
 	return {
 		A_Expr: {
@@ -172,7 +172,7 @@ describe('andHandler', () => {
 		const state = createCompilerState();
 		let dispatchCount = 0;
 
-		const countingDispatch: WhereDispatcher = (decision, ctx, state) => {
+		const countingDispatch: WhereDispatcher = (_decision, _ctx, _state) => {
 			dispatchCount++;
 			return { A_Const: { boolval: { boolval: true } } };
 		};
@@ -327,7 +327,7 @@ describe('orHandler', () => {
 		const state = createCompilerState();
 		let dispatchCount = 0;
 
-		const countingDispatch: WhereDispatcher = (decision, ctx, state) => {
+		const countingDispatch: WhereDispatcher = (_decision, _ctx, _state) => {
 			dispatchCount++;
 			return { A_Const: { boolval: { boolval: true } } };
 		};
@@ -405,7 +405,7 @@ describe('notHandler', () => {
 		const state = createCompilerState();
 		let dispatchCount = 0;
 
-		const countingDispatch: WhereDispatcher = (decision, ctx, state) => {
+		const countingDispatch: WhereDispatcher = (_decision, _ctx, _state) => {
 			dispatchCount++;
 			return { A_Const: { boolval: { boolval: true } } };
 		};
@@ -430,7 +430,7 @@ describe('notHandler', () => {
 		const state = createCompilerState();
 		let capturedCtx: CompilerContext | undefined;
 
-		const inspectDispatch: WhereDispatcher = (decision, ctx, state) => {
+		const inspectDispatch: WhereDispatcher = (_decision, ctx, _state) => {
 			capturedCtx = ctx;
 			return { A_Const: { boolval: { boolval: true } } };
 		};

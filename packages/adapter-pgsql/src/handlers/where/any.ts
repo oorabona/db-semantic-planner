@@ -40,12 +40,21 @@ function inferPgBaseType(sample: unknown): string {
 function mapModelTypeToPg(dataType: string): string | undefined {
 	const t = dataType.toLowerCase();
 	// Integer types
-	if (t === 'integer' || t === 'int' || t === 'serial' || t === 'bigserial') return 'int4';
+	if (t === 'integer' || t === 'int' || t === 'serial' || t === 'bigserial')
+		return 'int4';
 	if (t === 'bigint') return 'int8';
 	// Float types
-	if (t === 'decimal' || t === 'float' || t === 'double' || t === 'real' || t === 'numeric') return 'float8';
+	if (
+		t === 'decimal' ||
+		t === 'float' ||
+		t === 'double' ||
+		t === 'real' ||
+		t === 'numeric'
+	)
+		return 'float8';
 	// Text types
-	if (t === 'text' || t === 'string' || t === 'varchar' || t === 'char') return 'text';
+	if (t === 'text' || t === 'string' || t === 'varchar' || t === 'char')
+		return 'text';
 	// Boolean
 	if (t === 'boolean' || t === 'bool') return 'bool';
 	// JSON

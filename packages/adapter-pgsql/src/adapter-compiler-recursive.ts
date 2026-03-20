@@ -16,21 +16,28 @@ import type {
 	UnnestCteIntent,
 } from '@dbsp/types';
 import type { Node, SelectStmt } from '@pgsql/types';
-import { binaryExpr, columnRef, funcCall, integerNode, stringNode } from './ast-helpers.js';
-import { deparseQuoted } from './deparse.js';
-import { createCompilerState } from './handlers/index.js';
+import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
+import { compileSelect } from './adapter-compiler-select.js';
 import {
-	inferPgArrayType,
-} from './compiler-utils.js';
+	binaryExpr,
+	columnRef,
+	funcCall,
+	integerNode,
+	stringNode,
+} from './ast-helpers.js';
+import { inferPgArrayType } from './compiler-utils.js';
+import { deparseQuoted } from './deparse.js';
+import type { CompilerContext } from './handlers/index.js';
+import { createCompilerState } from './handlers/index.js';
+import { createTypeCastParamRef } from './param-ref.js';
+import {
+	mapComparisonOperator,
+	valueToNode,
+} from './plan-decision-extractor.js';
 import {
 	buildRecursiveCte,
 	type RecursiveCteConfig,
 } from './recursive/index.js';
-import { createTypeCastParamRef } from './param-ref.js';
-import { mapComparisonOperator, valueToNode } from './plan-decision-extractor.js';
-import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
-import { compileSelect } from './adapter-compiler-select.js';
-import type { CompilerContext } from './handlers/index.js';
 
 // ============================================================================
 // compileRecursive
@@ -284,7 +291,11 @@ export function compileCteQuery(
 			isAmbiguous: false,
 		},
 	};
-	const outerCompiled = compileSelect(outerPlanReport, outerCompileOptions, deps);
+	const outerCompiled = compileSelect(
+		outerPlanReport,
+		outerCompileOptions,
+		deps,
+	);
 
 	// 3. Renumber outer SQL parameters to follow CTE parameters
 	const cteParamCount = state.parameters.length;
@@ -292,7 +303,7 @@ export function compileCteQuery(
 		cteParamCount > 0
 			? outerCompiled.sql.replace(
 					/\$([0-9]+)/g,
-					(_: string, n: string) => '$' + (parseInt(n) + cteParamCount),
+					(_: string, n: string) => `$${parseInt(n, 10) + cteParamCount}`,
 				)
 			: outerCompiled.sql;
 
@@ -371,11 +382,7 @@ function buildUnnestCte(
 	if (hasIndex) {
 		targets.push({
 			ResTarget: {
-				val: binaryExpr(
-					'-',
-					columnRef('ordinality', 't'),
-					integerNode(1),
-				),
+				val: binaryExpr('-', columnRef('ordinality', 't'), integerNode(1)),
 				name: indexCol,
 			},
 		});

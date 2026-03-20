@@ -44,7 +44,7 @@
 - [ ] 🔧 **BATCH-DRY-002** [Adapter] Extract `stripArraySuffix()` helper — repeated 5× across files. — Priority: S (from /review F-002)
 - [ ] 🐛 **BATCH-FIX-001** [Adapter] Add `bigint` to `inferPgArrayType` runtime fallback. — Priority: S (from /review F-003)
 - [ ] 🔧 **BATCH-FIX-002** [Adapter] Map timestamp/date to native PG types in `mapModelTypeToPg`. — Priority: S (from /review F-004)
-- [ ] 💡 **EXT-001** [Extensions] `@dbsp/pgvector` package — vector type, distance operators (`<=>`, `<->`), HNSW/IVFFlat index DDL. Blocks 2 cosine-distance queries + 3 vector search queries. — Priority: P1 (from astix ORM migration assessment 2026-03-15)
+- [x] ✅ **EXT-001** [Extensions] Generic expression primitives (op/fn/ref/param/cast/literal/unary) in `@dbsp/core` + pgvector extension wrappers (cosineDistance, rawDistance, l2Distance, innerProduct) in `adapter-pgsql/extensions/`. Full SELECT/WHERE/ORDER BY pipeline. 2455 tests passing. (2026-03-20)
 - [ ] 💡 **EXT-002** [Extensions] `@dbsp/paradedb` package — BM25 `@@@` operator, `paradedb.score()`, index management. Blocks 3 full-text/BM25 search queries. — Priority: P2 (from astix ORM migration assessment 2026-03-15)
 
 ---
@@ -57,6 +57,11 @@
 
 (CAPS-001→005 archived → docs/historic/done-2026-03.md)
 - [ ] 💡 **DX-WARMUP** [Adapter] Expose `warmup()` async function for serverless cold-start optimization — pre-load libpg-query WASM before first query. — Priority: L
+- [x] ✅ **EXT-001 Block 1+2** [Core+Types] Intent types (CustomOp/Fn/Ref/Param/Cast/Unary) + core primitives (op/fn/ref/param/cast/literal/unary/ExpressionRef) + planner pass-through (2026-03-20)
+- [ ] 🟡 **EXT-001 Block 3+4** [Adapter] Compiler handlers + pgvector extension — Priority: P0
+- [ ] 💡 **EXT-PARAM-DEDUP** [Core] Param deduplication — same expression in SELECT+WHERE+ORDER BY produces 3 params instead of 1. — Priority: L (from /adversarial EXT-001, deferred: pg handles well, optimize later)
+- [ ] 💡 **EXT-NAMED-PARAMS** [Core] Named parameter syntax (`field => 'name'`) for ParadeDB functions — Priority: M (from /adversarial EXT-001, deferred to EXT-002)
+- [ ] 💡 **EXT-TEMPLATE** [Docs] Extension developer guide/template — how to create a new extension module — Priority: S (from /adversarial EXT-001)
 - [ ] 🔧 **CAPS-DRY-001** [Adapter] `isChangeSupported()` missing `alter_column_collation`/`alter_column_identity` ChangeKind filters — Priority: S (from /review F-003)
 - [ ] 🔧 **CAPS-DOC-001** [Adapter] Add JSDoc to `sup()` helper explaining undefined vs false semantics — Priority: S (from /review F-004)
 

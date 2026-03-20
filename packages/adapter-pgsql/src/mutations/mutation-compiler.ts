@@ -10,8 +10,8 @@
  * - RETURNING clause for all mutations
  */
 
-import type { Node } from '@pgsql/types';
 import { isSqlRaw } from '@dbsp/core';
+import type { Node } from '@pgsql/types';
 import {
 	columnRef,
 	type DeleteOptions,
@@ -23,6 +23,12 @@ import {
 	type UpdateOptions,
 	updateStmt,
 } from '../ast-helpers.js';
+import {
+	inferPgArrayType,
+	parseRawExpression,
+	transposeToColumnArrays,
+	validateBatchCardinality,
+} from '../compiler-utils.js';
 import { createWhereDispatcher } from '../handlers/index.js';
 import type {
 	CompilerContext,
@@ -31,12 +37,6 @@ import type {
 	InsertStmtNode,
 } from '../handlers/types.js';
 import { createTypeCastParamRef } from '../param-ref.js';
-import {
-	inferPgArrayType,
-	parseRawExpression,
-	transposeToColumnArrays,
-	validateBatchCardinality,
-} from '../compiler-utils.js';
 
 // ============================================================================
 // Shared Helpers
@@ -190,7 +190,6 @@ export function compileInsert(
 	return insertStmt(options);
 }
 
-
 /**
  * Compile an INSERT statement using the unnest strategy for large batches.
  *
@@ -283,7 +282,6 @@ export function compileUnnestInsert(
 
 	return insertStmt(options);
 }
-
 
 /**
  * Compile an UPDATE statement from configuration.
@@ -470,7 +468,6 @@ export function compileUnnestUpdate(
 
 	return updateStmt(options);
 }
-
 
 export function compileDelete(
 	config: DeleteConfig,

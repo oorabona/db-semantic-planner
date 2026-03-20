@@ -26,8 +26,8 @@ export {
 export {
 	acquireMigrationLock,
 	type ChangeKind,
-	compareSchemata,
 	type CompareSchemataOptions,
+	compareSchemata,
 	type DiffSummary,
 	ensureMigrationsTable,
 	type GenerateDDLOptions,
@@ -65,6 +65,13 @@ export {
 	getTotalExecutionTime,
 	parseExplainJson,
 } from './explain/index.js';
+// Extensions (pgvector, etc.)
+export {
+	cosineDistance,
+	innerProduct,
+	l2Distance,
+	rawDistance,
+} from './extensions/index.js';
 // Handler Registry — types only (implementation details remain in ./handlers/index.js)
 export type {
 	CompilerContext,

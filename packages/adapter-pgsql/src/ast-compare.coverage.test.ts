@@ -81,10 +81,7 @@ describe('compareAST — coverage', () => {
 	});
 
 	it('ignores location fields in objects', () => {
-		const result = compareAST(
-			{ a: 1, location: 10 },
-			{ a: 1, location: 20 },
-		);
+		const result = compareAST({ a: 1, location: 10 }, { a: 1, location: 20 });
 		expect(result.equal).toBe(true);
 	});
 
@@ -97,18 +94,12 @@ describe('compareAST — coverage', () => {
 	});
 
 	it('compares nested objects recursively', () => {
-		const result = compareAST(
-			{ a: { b: { c: 1 } } },
-			{ a: { b: { c: 2 } } },
-		);
+		const result = compareAST({ a: { b: { c: 1 } } }, { a: { b: { c: 2 } } });
 		expect(result.equal).toBe(false);
 	});
 
 	it('compares arrays of objects', () => {
-		const result = compareAST(
-			[{ a: 1 }, { b: 2 }],
-			[{ a: 1 }, { b: 2 }],
-		);
+		const result = compareAST([{ a: 1 }, { b: 2 }], [{ a: 1 }, { b: 2 }]);
 		expect(result.equal).toBe(true);
 	});
 
@@ -132,9 +123,7 @@ describe('roundtripTest — coverage', () => {
 	});
 
 	it('roundtrips SELECT with WHERE', () => {
-		const result = roundtripTest(
-			'SELECT * FROM users WHERE id = 1',
-		);
+		const result = roundtripTest('SELECT * FROM users WHERE id = 1');
 		expect(result.comparison.equal).toBe(true);
 	});
 });

@@ -47,7 +47,12 @@ function makeUpdateIntent(
 	};
 	if (whereField !== undefined) {
 		// Build a comparison intent directly (not via eq() which needs planner context)
-		intent.where = { kind: 'comparison', field: whereField, operator: '=', value: whereValue };
+		intent.where = {
+			kind: 'comparison',
+			field: whereField,
+			operator: '=',
+			value: whereValue,
+		};
 	}
 	return intent;
 }
@@ -64,11 +69,9 @@ function normalizeSQL(s: string): string {
 describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 	it('AC-1: emits raw SQL function call — now() — in ON CONFLICT DO UPDATE SET', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
-		const intent = makeUpsertIntent(
-			[{ id: 1, name: 'test.ts' }],
-			['id'],
-			{ last_parsed: sql('now()') },
-		);
+		const intent = makeUpsertIntent([{ id: 1, name: 'test.ts' }], ['id'], {
+			last_parsed: sql('now()'),
+		});
 
 		const result = adapter.compileUpsert(intent as any);
 		const normalized = normalizeSQL(result.sql);
@@ -87,11 +90,9 @@ describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 
 	it('AC-2: emits excluded column reference arithmetic in ON CONFLICT DO UPDATE SET', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
-		const intent = makeUpsertIntent(
-			[{ id: 1, count: 0 }],
-			['id'],
-			{ count: sql('excluded.count + 1') },
-		);
+		const intent = makeUpsertIntent([{ id: 1, count: 0 }], ['id'], {
+			count: sql('excluded.count + 1'),
+		});
 
 		const result = adapter.compileUpsert(intent as any);
 		const normalized = normalizeSQL(result.sql);
@@ -109,11 +110,10 @@ describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 
 	it('AC-3: handles mixed raw and scalar values in doUpdate set', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
-		const intent = makeUpsertIntent(
-			[{ id: 1, name: 'original.ts' }],
-			['id'],
-			{ name: 'updated.ts', last_parsed: sql('now()') },
-		);
+		const intent = makeUpsertIntent([{ id: 1, name: 'original.ts' }], ['id'], {
+			name: 'updated.ts',
+			last_parsed: sql('now()'),
+		});
 
 		const result = adapter.compileUpsert(intent as any);
 		const normalized = normalizeSQL(result.sql);
@@ -135,11 +135,9 @@ describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 
 	it('AC-4: existing scalar doUpdate still uses EXCLUDED.column', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
-		const intent = makeUpsertIntent(
-			[{ id: 1, name: 'test.ts' }],
-			['id'],
-			{ name: 'updated.ts' },
-		);
+		const intent = makeUpsertIntent([{ id: 1, name: 'test.ts' }], ['id'], {
+			name: 'updated.ts',
+		});
 
 		const result = adapter.compileUpsert(intent as any);
 		const normalized = normalizeSQL(result.sql);
@@ -156,11 +154,9 @@ describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 
 	it('AC-5: raw-only set does not add extra INSERT columns', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
-		const intent = makeUpsertIntent(
-			[{ id: 1, name: 'test.ts' }],
-			['id'],
-			{ last_parsed: sql('now()') },
-		);
+		const intent = makeUpsertIntent([{ id: 1, name: 'test.ts' }], ['id'], {
+			last_parsed: sql('now()'),
+		});
 
 		const result = adapter.compileUpsert(intent as any);
 		const normalized = normalizeSQL(result.sql);
@@ -178,14 +174,10 @@ describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 
 	it('AC-6: handles multiple raw expressions in doUpdate set', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
-		const intent = makeUpsertIntent(
-			[{ id: 1 }],
-			['id'],
-			{
-				last_parsed: sql('now()'),
-				updated_at: sql('now()'),
-			},
-		);
+		const intent = makeUpsertIntent([{ id: 1 }], ['id'], {
+			last_parsed: sql('now()'),
+			updated_at: sql('now()'),
+		});
 
 		const result = adapter.compileUpsert(intent as any);
 		const normalized = normalizeSQL(result.sql);
@@ -223,11 +215,7 @@ describe('UPSERT-RAW: raw SQL in doUpdate() set', () => {
 describe('UPSERT-RAW: raw SQL in compileUpdate set()', () => {
 	it('AC-7: emits raw SQL function call — now() — in UPDATE SET', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
-		const intent = makeUpdateIntent(
-			{ last_parsed: sql('now()') },
-			'id',
-			1,
-		);
+		const intent = makeUpdateIntent({ last_parsed: sql('now()') }, 'id', 1);
 
 		const result = adapter.compileUpdate(intent as any);
 

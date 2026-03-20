@@ -219,7 +219,6 @@ export function compileUpsert(
 	};
 }
 
-
 /**
  * Compile a UPSERT statement using the unnest strategy for large batches.
  *
@@ -310,7 +309,6 @@ export function compileUnnestUpsert(
 		},
 	};
 }
-
 
 // ============================================================================
 // Helpers
