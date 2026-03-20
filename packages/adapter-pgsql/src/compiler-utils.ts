@@ -34,6 +34,7 @@ export function inferPgArrayType(
 
 	// 2. Runtime fallback: infer from sample value type
 	if (sampleValue !== null && sampleValue !== undefined) {
+		if (typeof sampleValue === 'bigint') return 'int8[]';
 		if (typeof sampleValue === 'number') {
 			return Number.isInteger(sampleValue) ? 'int4[]' : 'float8[]';
 		}
@@ -103,6 +104,70 @@ function mapToPgBaseType(pgType: string): string {
 			// Pass through for custom types (DX-050 dbType) — lowercase for consistency
 			return pgType.toLowerCase();
 	}
+}
+
+// ============================================================================
+// Array Suffix Helpers
+// ============================================================================
+
+/**
+ * Strip the trailing `[]` suffix from a PostgreSQL array type string.
+ *
+ * @example
+ * stripArraySuffix('int4[]')  // → 'int4'
+ * stripArraySuffix('text[]')  // → 'text'
+ * stripArraySuffix('text')    // → 'text'  (no-op if no suffix)
+ */
+export function stripArraySuffix(pgArrayType: string): string {
+	return pgArrayType.endsWith('[]') ? pgArrayType.slice(0, -2) : pgArrayType;
+}
+
+// ============================================================================
+// ModelIR Type Mapping
+// ============================================================================
+
+/**
+ * Map a ModelIR column type string to a PostgreSQL base type name used in
+ * array casts (without the `[]` suffix).
+ *
+ * Returns `undefined` when the type is not in the whitelist — callers should
+ * fall back to runtime inference in that case.
+ *
+ * @example
+ * mapModelIRTypeToPgBase('integer')   // → 'int4'
+ * mapModelIRTypeToPgBase('timestamp') // → 'timestamptz'
+ * mapModelIRTypeToPgBase('date')      // → 'date'
+ */
+export function mapModelIRTypeToPgBase(dataType: string): string | undefined {
+	const t = dataType.toLowerCase();
+	// Integer types
+	if (t === 'integer' || t === 'int' || t === 'serial' || t === 'bigserial')
+		return 'int4';
+	if (t === 'bigint') return 'int8';
+	// Float types
+	if (
+		t === 'decimal' ||
+		t === 'float' ||
+		t === 'double' ||
+		t === 'real' ||
+		t === 'numeric'
+	)
+		return 'float8';
+	// Text types
+	if (t === 'text' || t === 'string' || t === 'varchar' || t === 'char')
+		return 'text';
+	// Boolean
+	if (t === 'boolean' || t === 'bool') return 'bool';
+	// JSON
+	if (t === 'json' || t === 'jsonb') return 'jsonb';
+	// UUID
+	if (t === 'uuid') return 'uuid';
+	// Date/time — map to native PG types
+	if (t === 'timestamp' || t === 'timestamptz' || t === 'datetime')
+		return 'timestamptz';
+	if (t === 'date') return 'date';
+	// Not in whitelist — caller falls back to runtime inference
+	return undefined;
 }
 
 // ============================================================================

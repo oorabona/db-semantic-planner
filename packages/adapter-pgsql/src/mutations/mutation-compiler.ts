@@ -26,6 +26,7 @@ import {
 import {
 	inferPgArrayType,
 	parseRawExpression,
+	stripArraySuffix,
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from '../compiler-utils.js';
@@ -238,9 +239,7 @@ export function compileUnnestInsert(
 
 		// Strip the trailing [] to get base type (inferPgArrayType returns e.g. "int4[]")
 		const pgArrayType = inferPgArrayType(col, columnTypes, sampleValue);
-		const pgBaseType = pgArrayType.endsWith('[]')
-			? pgArrayType.slice(0, -2)
-			: pgArrayType;
+		const pgBaseType = stripArraySuffix(pgArrayType);
 
 		// Add array parameter and get its 1-based index
 		state.parameters.push(colArray);
@@ -393,9 +392,7 @@ export function compileUnnestUpdate(
 		const sampleValue = colArray.find((v) => v !== null && v !== undefined);
 		const pgArrayType = inferPgArrayType(col, columnTypes, sampleValue);
 		// pgArrayType is already "type[]"; strip [] to get base type for createTypeCastParamRef
-		const pgBaseType = pgArrayType.endsWith('[]')
-			? pgArrayType.slice(0, -2)
-			: pgArrayType;
+		const pgBaseType = stripArraySuffix(pgArrayType);
 
 		state.parameters.push(colArray);
 		state.paramIndex++;

@@ -144,6 +144,13 @@ export function compareSchemata(
 
 	const caps = options?.dialectCapabilities;
 	// Helper: feature is supported if no caps provided (backward compat) OR flag is true
+	/**
+	 * Check whether a DDL feature is supported.
+	 *
+	 * - `undefined`: capability flag not set → feature is on by default (no caps = all features).
+	 * - `false`: capability explicitly disabled → feature is skipped.
+	 * - `true`: capability explicitly enabled → feature is included.
+	 */
 	const sup = (flag: boolean | undefined) => !caps || flag === true;
 
 	// 0. Compare ENUM types (schema-level, before tables)
