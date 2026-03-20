@@ -16,6 +16,7 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { identityNaming, type NamingPlugin } from '../naming-plugin.js';
+import { buildSequenceClause } from './migration-sql.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
 // ============================================================================
@@ -68,7 +69,13 @@ export function generateDDL(
 		dialectCapabilities: caps,
 	} = options;
 
-	/** Returns true if the feature is supported (or no caps provided — all features on). */
+	/**
+	 * Check whether a DDL feature is supported.
+	 *
+	 * - `undefined`: capability flag not set → feature is on by default (no caps = all features).
+	 * - `false`: capability explicitly disabled → feature is skipped.
+	 * - `true`: capability explicitly enabled → feature is included.
+	 */
 	const sup = (flag: boolean | undefined): boolean => !caps || flag === true;
 
 	// Get all tables
@@ -91,15 +98,7 @@ export function generateDDL(
 			const seqName = schemaName
 				? `${quoteIdentifier(naming.toDatabase(schemaName))}.${quoteIdentifier(seq.name)}`
 				: quoteIdentifier(seq.name);
-			const parts: string[] = [`CREATE SEQUENCE ${seqName}`];
-			if (seq.startWith !== undefined)
-				parts.push(`START WITH ${seq.startWith}`);
-			if (seq.incrementBy !== undefined)
-				parts.push(`INCREMENT BY ${seq.incrementBy}`);
-			if (seq.minValue !== undefined) parts.push(`MINVALUE ${seq.minValue}`);
-			if (seq.maxValue !== undefined) parts.push(`MAXVALUE ${seq.maxValue}`);
-			if (seq.cycle) parts.push('CYCLE');
-			statements.push(`${parts.join(' ')};`);
+			statements.push(buildSequenceClause('CREATE SEQUENCE', seqName, seq));
 		}
 	}
 

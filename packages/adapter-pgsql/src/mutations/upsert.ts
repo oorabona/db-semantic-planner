@@ -14,6 +14,7 @@ import { columnRef, funcCall } from '../ast-helpers.js';
 import {
 	inferPgArrayType,
 	parseRawExpression,
+	stripArraySuffix,
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from '../compiler-utils.js';
@@ -255,9 +256,7 @@ export function compileUnnestUpsert(
 
 		// Strip trailing [] to get base type
 		const pgArrayType = inferPgArrayType(col, columnTypes, sampleValue);
-		const pgBaseType = pgArrayType.endsWith('[]')
-			? pgArrayType.slice(0, -2)
-			: pgArrayType;
+		const pgBaseType = stripArraySuffix(pgArrayType);
 
 		// Add array parameter and get its 1-based index
 		state.parameters.push(colArray);

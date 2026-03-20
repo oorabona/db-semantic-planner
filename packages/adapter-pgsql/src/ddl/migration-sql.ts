@@ -51,6 +51,51 @@ function idxName(
 	return customName ?? `idx_${table}_${columns.join('_')}`;
 }
 
+/**
+ * Build a sequence options clause (shared by CREATE SEQUENCE, ALTER SEQUENCE, and their reverses).
+ *
+ * @param verb - SQL verb: `'CREATE SEQUENCE'` or `'ALTER SEQUENCE'`
+ * @param seqName - Already-quoted and schema-qualified sequence name
+ * @param seq - Sequence properties to emit
+ * @param includeCycleNoCycle - When true, emits `NO CYCLE` for `seq.cycle === false`
+ *   (needed by ALTER SEQUENCE; CREATE SEQUENCE omits the clause when cycle is false)
+ * @returns Full SQL statement ending with `;`
+ */
+/**
+ * Build a sequence options clause shared by CREATE SEQUENCE, ALTER SEQUENCE, and their reverses.
+ *
+ * @param verb - SQL verb: `'CREATE SEQUENCE'` or `'ALTER SEQUENCE'`
+ * @param seqName - Already-quoted and schema-qualified sequence name
+ * @param seq - Sequence properties to emit
+ * @param includeCycleNoCycle - When true (ALTER SEQUENCE), emits `NO CYCLE` for `seq.cycle === false`.
+ *   When false (CREATE SEQUENCE), only emits `CYCLE` when truthy; no `NO CYCLE` clause.
+ * @returns Full SQL statement ending with `;`
+ */
+export function buildSequenceClause(
+	verb: 'CREATE SEQUENCE' | 'ALTER SEQUENCE',
+	seqName: string,
+	seq: Pick<
+		SequenceIR,
+		'startWith' | 'incrementBy' | 'minValue' | 'maxValue' | 'cycle'
+	>,
+	includeCycleNoCycle = false,
+): string {
+	const parts: string[] = [`${verb} ${seqName}`];
+	if (seq.startWith !== undefined) parts.push(`START WITH ${seq.startWith}`);
+	if (seq.incrementBy !== undefined)
+		parts.push(`INCREMENT BY ${seq.incrementBy}`);
+	if (seq.minValue !== undefined) parts.push(`MINVALUE ${seq.minValue}`);
+	if (seq.maxValue !== undefined) parts.push(`MAXVALUE ${seq.maxValue}`);
+	if (includeCycleNoCycle) {
+		// ALTER SEQUENCE: emit CYCLE or NO CYCLE when the flag is defined
+		if (seq.cycle !== undefined) parts.push(seq.cycle ? 'CYCLE' : 'NO CYCLE');
+	} else {
+		// CREATE SEQUENCE: only emit CYCLE when truthy; silence NO CYCLE
+		if (seq.cycle) parts.push('CYCLE');
+	}
+	return `${parts.join(' ')};`;
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -90,6 +135,10 @@ function isChangeSupported(kind: string, caps: DialectCapabilities): boolean {
 		case 'add_comment':
 		case 'drop_comment':
 			return caps.supportsDDLComments === true;
+		case 'alter_column_collation':
+			return caps.supportsDDLCollation === true;
+		case 'alter_column_identity':
+			return caps.supportsDDLIdentityColumns === true;
 		default:
 			return true;
 	}
@@ -504,15 +553,7 @@ function changeToUpSQL(
 			const seqName = schemaName
 				? `${q(schemaName)}.${q(seq.name)}`
 				: q(seq.name);
-			const parts: string[] = [`CREATE SEQUENCE ${seqName}`];
-			if (seq.startWith !== undefined)
-				parts.push(`START WITH ${seq.startWith}`);
-			if (seq.incrementBy !== undefined)
-				parts.push(`INCREMENT BY ${seq.incrementBy}`);
-			if (seq.minValue !== undefined) parts.push(`MINVALUE ${seq.minValue}`);
-			if (seq.maxValue !== undefined) parts.push(`MAXVALUE ${seq.maxValue}`);
-			if (seq.cycle) parts.push('CYCLE');
-			return `${parts.join(' ')};`;
+			return buildSequenceClause('CREATE SEQUENCE', seqName, seq);
 		}
 
 		case 'alter_sequence': {
@@ -521,15 +562,7 @@ function changeToUpSQL(
 			const seqName = schemaName
 				? `${q(schemaName)}.${q(seq.name)}`
 				: q(seq.name);
-			const parts: string[] = [`ALTER SEQUENCE ${seqName}`];
-			if (seq.startWith !== undefined)
-				parts.push(`START WITH ${seq.startWith}`);
-			if (seq.incrementBy !== undefined)
-				parts.push(`INCREMENT BY ${seq.incrementBy}`);
-			if (seq.minValue !== undefined) parts.push(`MINVALUE ${seq.minValue}`);
-			if (seq.maxValue !== undefined) parts.push(`MAXVALUE ${seq.maxValue}`);
-			if (seq.cycle !== undefined) parts.push(seq.cycle ? 'CYCLE' : 'NO CYCLE');
-			return `${parts.join(' ')};`;
+			return buildSequenceClause('ALTER SEQUENCE', seqName, seq, true);
 		}
 
 		case 'drop_sequence': {
@@ -753,18 +786,7 @@ function changeToDownSQL(
 			const seqName = schemaName
 				? `${q(schemaName)}.${q(prevSeq.name)}`
 				: q(prevSeq.name);
-			const parts: string[] = [`ALTER SEQUENCE ${seqName}`];
-			if (prevSeq.startWith !== undefined)
-				parts.push(`START WITH ${prevSeq.startWith}`);
-			if (prevSeq.incrementBy !== undefined)
-				parts.push(`INCREMENT BY ${prevSeq.incrementBy}`);
-			if (prevSeq.minValue !== undefined)
-				parts.push(`MINVALUE ${prevSeq.minValue}`);
-			if (prevSeq.maxValue !== undefined)
-				parts.push(`MAXVALUE ${prevSeq.maxValue}`);
-			if (prevSeq.cycle !== undefined)
-				parts.push(prevSeq.cycle ? 'CYCLE' : 'NO CYCLE');
-			return `${parts.join(' ')};`;
+			return buildSequenceClause('ALTER SEQUENCE', seqName, prevSeq, true);
 		}
 
 		case 'drop_sequence': {
@@ -774,15 +796,7 @@ function changeToDownSQL(
 			const seqName = schemaName
 				? `${q(schemaName)}.${q(seq.name)}`
 				: q(seq.name);
-			const parts: string[] = [`CREATE SEQUENCE ${seqName}`];
-			if (seq.startWith !== undefined)
-				parts.push(`START WITH ${seq.startWith}`);
-			if (seq.incrementBy !== undefined)
-				parts.push(`INCREMENT BY ${seq.incrementBy}`);
-			if (seq.minValue !== undefined) parts.push(`MINVALUE ${seq.minValue}`);
-			if (seq.maxValue !== undefined) parts.push(`MAXVALUE ${seq.maxValue}`);
-			if (seq.cycle) parts.push('CYCLE');
-			return `${parts.join(' ')};`;
+			return buildSequenceClause('CREATE SEQUENCE', seqName, seq);
 		}
 	}
 }
