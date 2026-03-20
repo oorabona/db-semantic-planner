@@ -178,6 +178,15 @@ const users = await scopedOrm.select('users').all();
 
 **Security:** Schema name MUST be validated against allow-list pattern (identifier validation).
 
+## DDL Features
+
+The PostgreSQL adapter supports the following DDL schema features via `compareSchemata()` and `generateDDL()`:
+
+- Tables, columns, types (enums, sequences), extensions
+- Indexes, check constraints, foreign keys, comments
+- **Row-Level Security (RLS):** `rlsEnabled` + `policies[]` on TableIR — see `docs/guides/how-to-use-rls-policies.md`
+- Feature support is gated by `DialectCapabilities` flags (e.g. `supportsDDLRowLevelSecurity`)
+
 ## Observability
 
 Every query produces a `Dump`:
