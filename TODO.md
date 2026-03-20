@@ -98,7 +98,7 @@
 
 - [ ] 🔧 **ARCH-004** [GUI] Refactor `App.tsx` (1056 LOC, complexity **171**) — extract into sub-components (Editor, ResultsPanel, SettingsPanel) + custom hooks (useQueryExecution, useResultsViewer). — Priority: H
 - [x] ✅ **ARCH-005** [Adapter] Consolidate duplicate `compile()` handler methods — extracted 4 factory functions (`createSimpleAggregateHandler`, `createNoArgWindowHandler`, `createLagLeadHandler`, `createColumnWindowHandler`) eliminating 10 duplicate bodies across aggregate.ts and window.ts. (2026-03-20)
-- [ ] 🔧 **ARCH-006** [NQL] Decompose `compileExpression` (complexity **109**, 195 callees) in `packages/nql/src/compiler/compile-expression.ts` — split by expression type. — Priority: H
+- [x] ✅ **ARCH-006** [NQL] Decompose `compileExpression` (complexity **109**, 195 callees) — 8 handler functions extracted (`compileLogical`, `compileComparison`, `compileRange`, `compileMembership`, `compileBetween`, `compileNull`, `compileJson`, `compileRelationFilter`), dispatcher thinned to ~30 LOC. 1111+2575+1042 tests pass. (2026-03-20)
 
 ### MEDIUM — Code health findings (2026-03-14)
 
