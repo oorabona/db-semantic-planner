@@ -38,178 +38,142 @@ import {
 } from './expression-utils.js';
 import type { CompilerContext, CompilerFns } from './types.js';
 
-/**
- * Compile a boolean expression to a WhereIntent tree.
- */
-export function compileExpression(
+// ---------------------------------------------------------------------------
+// Handler functions (extracted from switch cases)
+// ---------------------------------------------------------------------------
+
+function compileLogical(
 	expr: NqlExpression,
 	ctx: CompilerContext,
 	fns: CompilerFns,
 	aliasContext?: string,
 	outerAliases?: string[],
 ): WhereIntent {
-	switch (expr.type) {
-		case 'binary': {
-			const binary = expr as NqlBinaryExpression;
-			if (binary.operator === 'and') {
-				return {
-					kind: 'and',
-					conditions: [
-						compileExpression(
-							binary.left,
-							ctx,
-							fns,
-							aliasContext,
-							outerAliases,
-						),
-						compileExpression(
-							binary.right,
-							ctx,
-							fns,
-							aliasContext,
-							outerAliases,
-						),
-					],
-				};
-			}
-			if (binary.operator === 'or') {
-				return {
-					kind: 'or',
-					conditions: [
-						compileExpression(
-							binary.left,
-							ctx,
-							fns,
-							aliasContext,
-							outerAliases,
-						),
-						compileExpression(
-							binary.right,
-							ctx,
-							fns,
-							aliasContext,
-							outerAliases,
-						),
-					],
-				};
-			}
-			/* v8 ignore start — defensive: only and/or reach here; arithmetic is in SELECT context -- @preserve */
-			// Arithmetic binary → comparison context shouldn't reach here
-			throw new Error(
-				`Unsupported binary operator in WHERE: ${binary.operator}`,
-			);
-			/* v8 ignore stop -- @preserve */
-		}
-
-		case 'unary': {
-			const unary = expr as NqlUnaryExpression;
-			if (unary.operator === 'not') {
-				return {
-					kind: 'not',
-					condition: compileExpression(
-						unary.operand,
+	if (expr.type === 'binary') {
+		const binary = expr as NqlBinaryExpression;
+		if (binary.operator === 'and') {
+			return {
+				kind: 'and',
+				conditions: [
+					compileExpression(
+						binary.left,
 						ctx,
 						fns,
 						aliasContext,
 						outerAliases,
 					),
-				};
-			}
-			/* v8 ignore next — defensive: only 'not' unary reaches WHERE context -- @preserve */
-			throw new Error(`Unsupported unary operator: ${unary.operator}`);
-		}
-
-		case 'comparison': {
-			const comp = expr as NqlComparisonExpression;
-
-			// JSON access on LHS: data->'key' = 'val'
-			if (comp.left.type === 'jsonAccess') {
-				const jsonLeft = comp.left as NqlJsonAccessExpression;
-				const baseField = expressionToField(jsonLeft.base, aliasContext);
-				/* v8 ignore start — defensive: jsonAccess base is always a path expression -- @preserve */
-				if (!baseField) {
-					throw new Error('JSON access base must be a field reference');
-				}
-				/* v8 ignore stop -- @preserve */
-				const operator = mapComparisonOperator(comp.operator);
-				const value = resolveFilterValue(
-					comp.right,
-					ctx,
-					aliasContext,
-					outerAliases,
-				);
-				return {
-					kind: 'comparison',
-					field: baseField,
-					operator,
-					value,
-					jsonPath: jsonLeft.path,
-					jsonMode: jsonLeft.mode,
-				} satisfies WhereComparisonIntent;
-			}
-
-			// JSON function on LHS: json_extract_text(data, 'key') = 'val'
-			if (comp.left.type === 'function') {
-				const fn = comp.left.name.toLowerCase();
-				if (fn === 'json_extract' || fn === 'json_extract_text') {
-					/* v8 ignore start — defensive: parser guarantees at least 2 args for json_extract -- @preserve */
-					if (comp.left.args.length < 2) {
-						throw new Error(`${fn}() requires at least 2 arguments`);
-					}
-					/* v8 ignore stop -- @preserve */
-					const baseField = expressionToField(comp.left.args[0]!, aliasContext);
-					/* v8 ignore start — defensive: first arg is always a field reference -- @preserve */
-					if (!baseField) {
-						throw new Error(`${fn}() first argument must be a field reference`);
-					}
-					/* v8 ignore stop -- @preserve */
-					const keys = comp.left.args
-						.slice(1)
-						.map((a) =>
-							String(resolveFilterValue(a, ctx, aliasContext, outerAliases)),
-						);
-					const operator = mapComparisonOperator(comp.operator);
-					const value = resolveFilterValue(
-						comp.right,
+					compileExpression(
+						binary.right,
 						ctx,
+						fns,
 						aliasContext,
 						outerAliases,
-					);
-					return {
-						kind: 'comparison',
-						field: baseField,
-						operator,
-						value,
-						jsonPath: keys,
-						jsonMode: fn === 'json_extract' ? 'json' : 'text',
-					} satisfies WhereComparisonIntent;
-				}
-			}
+					),
+				],
+			};
+		}
+		if (binary.operator === 'or') {
+			return {
+				kind: 'or',
+				conditions: [
+					compileExpression(
+						binary.left,
+						ctx,
+						fns,
+						aliasContext,
+						outerAliases,
+					),
+					compileExpression(
+						binary.right,
+						ctx,
+						fns,
+						aliasContext,
+						outerAliases,
+					),
+				],
+			};
+		}
+		/* v8 ignore start — defensive: only and/or reach here; arithmetic is in SELECT context -- @preserve */
+		// Arithmetic binary → comparison context shouldn't reach here
+		throw new Error(
+			`Unsupported binary operator in WHERE: ${binary.operator}`,
+		);
+		/* v8 ignore stop -- @preserve */
+	}
 
-			const field = expressionToField(comp.left, aliasContext);
-			/* v8 ignore start — defensive: parser guarantees LHS is a path expression -- @preserve */
-			if (!field) {
-				throw new Error('Left side of comparison must be a field reference');
+	// unary
+	const unary = expr as NqlUnaryExpression;
+	if (unary.operator === 'not') {
+		return {
+			kind: 'not',
+			condition: compileExpression(
+				unary.operand,
+				ctx,
+				fns,
+				aliasContext,
+				outerAliases,
+			),
+		};
+	}
+	/* v8 ignore next — defensive: only 'not' unary reaches WHERE context -- @preserve */
+	throw new Error(`Unsupported unary operator: ${unary.operator}`);
+}
+
+function compileComparison(
+	expr: NqlExpression,
+	ctx: CompilerContext,
+	fns: CompilerFns,
+	aliasContext?: string,
+	outerAliases?: string[],
+): WhereIntent {
+	const comp = expr as NqlComparisonExpression;
+
+	// JSON access on LHS: data->'key' = 'val'
+	if (comp.left.type === 'jsonAccess') {
+		const jsonLeft = comp.left as NqlJsonAccessExpression;
+		const baseField = expressionToField(jsonLeft.base, aliasContext);
+		/* v8 ignore start — defensive: jsonAccess base is always a path expression -- @preserve */
+		if (!baseField) {
+			throw new Error('JSON access base must be a field reference');
+		}
+		/* v8 ignore stop -- @preserve */
+		const operator = mapComparisonOperator(comp.operator);
+		const value = resolveFilterValue(
+			comp.right,
+			ctx,
+			aliasContext,
+			outerAliases,
+		);
+		return {
+			kind: 'comparison',
+			field: baseField,
+			operator,
+			value,
+			jsonPath: jsonLeft.path,
+			jsonMode: jsonLeft.mode,
+		} satisfies WhereComparisonIntent;
+	}
+
+	// JSON function on LHS: json_extract_text(data, 'key') = 'val'
+	if (comp.left.type === 'function') {
+		const fn = comp.left.name.toLowerCase();
+		if (fn === 'json_extract' || fn === 'json_extract_text') {
+			/* v8 ignore start — defensive: parser guarantees at least 2 args for json_extract -- @preserve */
+			if (comp.left.args.length < 2) {
+				throw new Error(`${fn}() requires at least 2 arguments`);
 			}
 			/* v8 ignore stop -- @preserve */
-			// Validate WHERE column on current table context
-			validateWhereField(ctx, field, aliasContext, comp.left);
-
-			// Handle LIKE specially
-			if (comp.operator === 'like') {
-				const pattern = resolveFilterValue(
-					comp.right,
-					ctx,
-					aliasContext,
-					outerAliases,
-				);
-				return {
-					kind: 'like',
-					field,
-					pattern: String(pattern),
-				};
+			const baseField = expressionToField(comp.left.args[0]!, aliasContext);
+			/* v8 ignore start — defensive: first arg is always a field reference -- @preserve */
+			if (!baseField) {
+				throw new Error(`${fn}() first argument must be a field reference`);
 			}
-
+			/* v8 ignore stop -- @preserve */
+			const keys = comp.left.args
+				.slice(1)
+				.map((a) =>
+					String(resolveFilterValue(a, ctx, aliasContext, outerAliases)),
+				);
 			const operator = mapComparisonOperator(comp.operator);
 			const value = resolveFilterValue(
 				comp.right,
@@ -217,303 +181,281 @@ export function compileExpression(
 				aliasContext,
 				outerAliases,
 			);
-
 			return {
 				kind: 'comparison',
-				field,
+				field: baseField,
 				operator,
 				value,
-			};
+				jsonPath: keys,
+				jsonMode: fn === 'json_extract' ? 'json' : 'text',
+			} satisfies WhereComparisonIntent;
 		}
+	}
 
-		case 'rangeOp': {
-			const rangeExpr = expr as NqlRangeOpExpression;
-			const field = expressionToField(rangeExpr.left, aliasContext);
-			/* v8 ignore start — defensive: parser guarantees LHS is a path expression -- @preserve */
-			if (!field) {
+	const field = expressionToField(comp.left, aliasContext);
+	/* v8 ignore start — defensive: parser guarantees LHS is a path expression -- @preserve */
+	if (!field) {
+		throw new Error('Left side of comparison must be a field reference');
+	}
+	/* v8 ignore stop -- @preserve */
+	// Validate WHERE column on current table context
+	validateWhereField(ctx, field, aliasContext, comp.left);
+
+	// Handle LIKE specially
+	if (comp.operator === 'like') {
+		const pattern = resolveFilterValue(
+			comp.right,
+			ctx,
+			aliasContext,
+			outerAliases,
+		);
+		return {
+			kind: 'like',
+			field,
+			pattern: String(pattern),
+		};
+	}
+
+	const operator = mapComparisonOperator(comp.operator);
+	const value = resolveFilterValue(
+		comp.right,
+		ctx,
+		aliasContext,
+		outerAliases,
+	);
+
+	return {
+		kind: 'comparison',
+		field,
+		operator,
+		value,
+	};
+}
+
+function compileRange(
+	expr: NqlExpression,
+	ctx: CompilerContext,
+	fns: CompilerFns,
+	aliasContext?: string,
+	outerAliases?: string[],
+): WhereIntent {
+	const rangeExpr = expr as NqlRangeOpExpression;
+	const field = expressionToField(rangeExpr.left, aliasContext);
+	/* v8 ignore start — defensive: parser guarantees LHS is a path expression -- @preserve */
+	if (!field) {
+		throw new Error(
+			'Left side of range operator must be a field reference',
+		);
+	}
+	/* v8 ignore stop -- @preserve */
+	validateWhereField(ctx, field, aliasContext, rangeExpr.left);
+	// Handle both range literals and scalar values
+	let rangeValue: string | unknown;
+	if (rangeExpr.range) {
+		rangeValue = expressionToRangeValue(rangeExpr.range);
+	} else if (rangeExpr.scalar) {
+		// Scalar value for "contains" operator (e.g., contains 25)
+		rangeValue = resolveFilterValue(
+			rangeExpr.scalar,
+			ctx,
+			aliasContext,
+			outerAliases,
+		);
+	} /* v8 ignore start — defensive: parser guarantees range or scalar -- @preserve */ else {
+		throw new Error(
+			'Range operator requires either a range literal or scalar value',
+		);
+	}
+	/* v8 ignore stop -- @preserve */
+	return {
+		kind: 'range',
+		field,
+		operator: rangeExpr.operator,
+		value: rangeValue,
+	} as WhereRangeIntent;
+}
+
+function compileMembership(
+	expr: NqlExpression,
+	ctx: CompilerContext,
+	fns: CompilerFns,
+	aliasContext?: string,
+	outerAliases?: string[],
+): WhereIntent {
+	if (expr.type === 'any') {
+		const anyExpr = expr as NqlAnyExpression;
+		const field = expressionToField(anyExpr.column, aliasContext);
+		/* v8 ignore start — defensive: parser guarantees ANY LHS is a path expression -- @preserve */
+		if (!field) {
+			throw new Error('ANY expression must reference a field');
+		}
+		/* v8 ignore stop -- @preserve */
+		validateWhereField(ctx, field, aliasContext, anyExpr.column);
+		const rawValues = ctx.params[anyExpr.paramName];
+		const values: readonly unknown[] = Array.isArray(rawValues)
+			? rawValues
+			: [];
+		return { kind: 'any', field, values } satisfies WhereAnyIntent;
+	}
+
+	// in
+	const inExpr = expr as NqlInExpression;
+	const field = expressionToField(inExpr.expression, aliasContext);
+	/* v8 ignore start — defensive: parser guarantees IN LHS is a path expression -- @preserve */
+	if (!field) {
+		throw new Error('IN expression must reference a field');
+	}
+	/* v8 ignore stop -- @preserve */
+	validateWhereField(ctx, field, aliasContext, inExpr.expression);
+
+	let values: unknown[];
+	if (Array.isArray(inExpr.values)) {
+		values = inExpr.values.map((v) =>
+			resolveFilterValue(v, ctx, aliasContext, outerAliases),
+		);
+
+		// Amendment 11: detect if ALL values are date range patterns → expand to OR of ANDs
+		const dateRangeValues = values.filter(
+			(v): v is string => typeof v === 'string' && isDateRangePattern(v),
+		);
+		if (dateRangeValues.length > 0) {
+			if (dateRangeValues.length !== values.length) {
 				throw new Error(
-					'Left side of range operator must be a field reference',
+					'Cannot mix date range patterns with regular values in IN list. ' +
+						'Use all date ranges or all literals.',
 				);
 			}
-			/* v8 ignore stop -- @preserve */
-			validateWhereField(ctx, field, aliasContext, rangeExpr.left);
-			// Handle both range literals and scalar values
-			let rangeValue: string | unknown;
-			if (rangeExpr.range) {
-				rangeValue = expressionToRangeValue(rangeExpr.range);
-			} else if (rangeExpr.scalar) {
-				// Scalar value for "contains" operator (e.g., contains 25)
-				rangeValue = resolveFilterValue(
-					rangeExpr.scalar,
-					ctx,
-					aliasContext,
-					outerAliases,
-				);
-			} /* v8 ignore start — defensive: parser guarantees range or scalar -- @preserve */ else {
-				throw new Error(
-					'Range operator requires either a range literal or scalar value',
-				);
-			}
-			/* v8 ignore stop -- @preserve */
-			return {
-				kind: 'range',
-				field,
-				operator: rangeExpr.operator,
-				value: rangeValue,
-			} as WhereRangeIntent;
+			return expandDateRangeList(field, dateRangeValues, inExpr.negated);
+		}
+	} else if ('type' in inExpr.values && inExpr.values.type === 'subquery') {
+		// Subquery is a full QueryIntent — contextual validation at adapter level
+		// Subqueries in IN clauses are always simple queries, never set operations
+		const subquery = fns.compileQuery(
+			inExpr.values.query,
+			ctx,
+		) as QueryIntent;
+
+		const result: WhereInIntent = {
+			kind: 'in',
+			field,
+			values: [],
+			subquery,
+		};
+
+		if (inExpr.negated) {
+			return { kind: 'not', condition: result };
 		}
 
-		case 'in': {
-			const inExpr = expr as NqlInExpression;
-			const field = expressionToField(inExpr.expression, aliasContext);
-			/* v8 ignore start — defensive: parser guarantees IN LHS is a path expression -- @preserve */
-			if (!field) {
-				throw new Error('IN expression must reference a field');
-			}
-			/* v8 ignore stop -- @preserve */
-			validateWhereField(ctx, field, aliasContext, inExpr.expression);
+		return result;
+	} else if (
+		'type' in inExpr.values &&
+		inExpr.values.type === 'dateRange'
+	) {
+		// Single date range: 'YYYY-Q1' → >= start AND < end (half-open)
+		return expandDateRangeList(
+			field,
+			[inExpr.values.value],
+			inExpr.negated,
+		);
+	} else {
+		values = [];
+	}
 
-			let values: unknown[];
-			if (Array.isArray(inExpr.values)) {
-				values = inExpr.values.map((v) =>
-					resolveFilterValue(v, ctx, aliasContext, outerAliases),
-				);
+	const result: WhereInIntent = {
+		kind: 'in',
+		field,
+		values,
+	};
 
-				// Amendment 11: detect if ALL values are date range patterns → expand to OR of ANDs
-				const dateRangeValues = values.filter(
-					(v): v is string => typeof v === 'string' && isDateRangePattern(v),
-				);
-				if (dateRangeValues.length > 0) {
-					if (dateRangeValues.length !== values.length) {
-						throw new Error(
-							'Cannot mix date range patterns with regular values in IN list. ' +
-								'Use all date ranges or all literals.',
-						);
-					}
-					return expandDateRangeList(field, dateRangeValues, inExpr.negated);
-				}
-			} else if ('type' in inExpr.values && inExpr.values.type === 'subquery') {
-				// Subquery is a full QueryIntent — contextual validation at adapter level
-				// Subqueries in IN clauses are always simple queries, never set operations
-				const subquery = fns.compileQuery(
-					inExpr.values.query,
-					ctx,
-				) as QueryIntent;
+	if (inExpr.negated) {
+		return { kind: 'not', condition: result };
+	}
 
-				const result: WhereInIntent = {
-					kind: 'in',
-					field,
-					values: [],
-					subquery,
-				};
+	return result;
+}
 
-				if (inExpr.negated) {
-					return { kind: 'not', condition: result };
-				}
+function compileBetween(
+	expr: NqlExpression,
+	ctx: CompilerContext,
+	fns: CompilerFns,
+	aliasContext?: string,
+	outerAliases?: string[],
+): WhereIntent {
+	const between = expr as NqlBetweenExpression;
+	const field = expressionToField(between.expression, aliasContext);
+	/* v8 ignore start — defensive: parser guarantees BETWEEN LHS is a path -- @preserve */
+	if (!field) {
+		throw new Error('BETWEEN expression must reference a field');
+	}
+	/* v8 ignore stop -- @preserve */
+	validateWhereField(ctx, field, aliasContext, between.expression);
 
-				return result;
-			} else if (
-				'type' in inExpr.values &&
-				inExpr.values.type === 'dateRange'
-			) {
-				// Single date range: 'YYYY-Q1' → >= start AND < end (half-open)
-				return expandDateRangeList(
-					field,
-					[inExpr.values.value],
-					inExpr.negated,
-				);
-			} else {
-				values = [];
-			}
-
-			const result: WhereInIntent = {
-				kind: 'in',
-				field,
-				values,
-			};
-
-			if (inExpr.negated) {
-				return { kind: 'not', condition: result };
-			}
-
-			return result;
-		}
-
-		case 'between': {
-			const between = expr as NqlBetweenExpression;
-			const field = expressionToField(between.expression, aliasContext);
-			/* v8 ignore start — defensive: parser guarantees BETWEEN LHS is a path -- @preserve */
-			if (!field) {
-				throw new Error('BETWEEN expression must reference a field');
-			}
-			/* v8 ignore stop -- @preserve */
-			validateWhereField(ctx, field, aliasContext, between.expression);
-
-			return {
-				kind: 'range',
-				field,
-				operator: 'between',
-				value: {
-					lower: resolveFilterValue(
-						between.low,
-						ctx,
-						aliasContext,
-						outerAliases,
-					),
-					upper: resolveFilterValue(
-						between.high,
-						ctx,
-						aliasContext,
-						outerAliases,
-					),
-				},
-			};
-		}
-
-		case 'isNull': {
-			const isNull = expr as NqlIsNullExpression;
-			const field = expressionToField(isNull.expression, aliasContext);
-			/* v8 ignore start — defensive: parser guarantees IS NULL LHS is a path -- @preserve */
-			if (!field) {
-				throw new Error('IS NULL expression must reference a field');
-			}
-			/* v8 ignore stop -- @preserve */
-			validateWhereField(ctx, field, aliasContext, isNull.expression);
-
-			return {
-				kind: 'null',
-				field,
-				operator: isNull.negated ? 'isNotNull' : 'isNull',
-			};
-		}
-
-		case 'exists': {
-			// EXISTS (subquery) syntax is parsed but not yet fully supported
-			throw new Error(
-				'EXISTS (subquery) is not supported in NQL. ' +
-					'Use relation filters instead:\n' +
-					'  orders | with customer | where customer.active = true\n' +
-					'  orders | where exists(customer, active = true)\n' +
-					'These compile to efficient EXISTS subqueries automatically.',
-			);
-		}
-
-		case 'relationFilter': {
-			// SPEC-002: Cross-table relation filters
-			const relFilter = expr as NqlRelationFilterExpression;
-			// Build alias stack: current aliasContext (if any) becomes an outer alias for nested filters
-			const nestedOuterAliases = aliasContext
-				? [...(outerAliases ?? []), aliasContext]
-				: (outerAliases ?? []);
-			// Resolve relation target for inner scope validation (first segment of relation path)
-			const prevRelationTarget = ctx.currentRelationTarget;
-			if (ctx.currentFromTable && ctx.validator && relFilter.relation[0]) {
-				ctx.currentRelationTarget = ctx.validator.resolveRelationTarget(
-					ctx.currentFromTable,
-					relFilter.relation[0],
-				);
-			}
-			const where = compileExpression(
-				relFilter.condition,
+	return {
+		kind: 'range',
+		field,
+		operator: 'between',
+		value: {
+			lower: resolveFilterValue(
+				between.low,
 				ctx,
-				fns,
-				relFilter.alias,
-				nestedOuterAliases,
-			);
-			ctx.currentRelationTarget = prevRelationTarget;
-			return {
-				kind: 'relationFilter',
-				relation: relFilter.relation,
-				where,
-				mode: relFilter.mode,
-				...(relFilter.alias !== undefined && { alias: relFilter.alias }),
-			};
-		}
+				aliasContext,
+				outerAliases,
+			),
+			upper: resolveFilterValue(
+				between.high,
+				ctx,
+				aliasContext,
+				outerAliases,
+			),
+		},
+	};
+}
 
-		case 'function': {
-			// JSON function notation in WHERE context
-			const fn = expr.name.toLowerCase();
-			if (fn === 'json_contains' || fn === 'json_contained_by') {
-				/* v8 ignore start — defensive: parser guarantees at least 2 args -- @preserve */
-				if (expr.args.length < 2) {
-					throw new Error(`${fn}() requires 2 arguments: field and value`);
-				}
-				/* v8 ignore stop -- @preserve */
-				const jsonField = expressionToField(expr.args[0]!, aliasContext);
-				/* v8 ignore start — defensive: first arg is always a field reference -- @preserve */
-				if (!jsonField) {
-					throw new Error(`${fn}() first argument must be a field reference`);
-				}
-				/* v8 ignore stop -- @preserve */
-				const jsonValue = resolveFilterValue(
-					expr.args[1]!,
-					ctx,
-					aliasContext,
-					outerAliases,
-				);
-				return {
-					kind: 'jsonContains',
-					field: jsonField,
-					value: jsonValue,
-					reversed: fn === 'json_contained_by',
-				} satisfies WhereJsonContainsIntent;
-			}
-			if (fn === 'json_exists') {
-				/* v8 ignore start — defensive: parser guarantees at least 2 args -- @preserve */
-				if (expr.args.length < 2) {
-					throw new Error(`${fn}() requires 2 arguments: field and key`);
-				}
-				/* v8 ignore stop -- @preserve */
-				const jsonField = expressionToField(expr.args[0]!, aliasContext);
-				/* v8 ignore start — defensive: first arg is always a field reference -- @preserve */
-				if (!jsonField) {
-					throw new Error(`${fn}() first argument must be a field reference`);
-				}
-				/* v8 ignore stop -- @preserve */
-				const key = resolveFilterValue(
-					expr.args[1]!,
-					ctx,
-					aliasContext,
-					outerAliases,
-				);
-				return {
-					kind: 'jsonExists',
-					field: jsonField,
-					key: String(key),
-				} satisfies WhereJsonExistsIntent;
-			}
-			/* v8 ignore next — defensive: only json_* functions reach WHERE context -- @preserve */
-			throw new Error(`Unsupported function in WHERE context: ${fn}()`);
-		}
+function compileNull(
+	expr: NqlExpression,
+	ctx: CompilerContext,
+	aliasContext?: string,
+): WhereIntent {
+	const isNull = expr as NqlIsNullExpression;
+	const field = expressionToField(isNull.expression, aliasContext);
+	/* v8 ignore start — defensive: parser guarantees IS NULL LHS is a path -- @preserve */
+	if (!field) {
+		throw new Error('IS NULL expression must reference a field');
+	}
+	/* v8 ignore stop -- @preserve */
+	validateWhereField(ctx, field, aliasContext, isNull.expression);
 
-		case 'jsonComparison': {
-			const jsonComp = expr as NqlJsonComparisonExpression;
-			const jsonField = expressionToField(jsonComp.left, aliasContext);
-			/* v8 ignore start — defensive: parser guarantees LHS is a path expression -- @preserve */
-			if (!jsonField) {
-				throw new Error(
-					'Left side of JSON comparison must be a field reference',
-				);
+	return {
+		kind: 'null',
+		field,
+		operator: isNull.negated ? 'isNotNull' : 'isNull',
+	};
+}
+
+function compileJson(
+	expr: NqlExpression,
+	ctx: CompilerContext,
+	fns: CompilerFns,
+	aliasContext?: string,
+	outerAliases?: string[],
+): WhereIntent {
+	if (expr.type === 'function') {
+		// JSON function notation in WHERE context
+		const fn = expr.name.toLowerCase();
+		if (fn === 'json_contains' || fn === 'json_contained_by') {
+			/* v8 ignore start — defensive: parser guarantees at least 2 args -- @preserve */
+			if (expr.args.length < 2) {
+				throw new Error(`${fn}() requires 2 arguments: field and value`);
 			}
 			/* v8 ignore stop -- @preserve */
-
-			if (jsonComp.operator === '?') {
-				const key = resolveFilterValue(
-					jsonComp.right,
-					ctx,
-					aliasContext,
-					outerAliases,
-				);
-				return {
-					kind: 'jsonExists',
-					field: jsonField,
-					key: String(key),
-				} satisfies WhereJsonExistsIntent;
+			const jsonField = expressionToField(expr.args[0]!, aliasContext);
+			/* v8 ignore start — defensive: first arg is always a field reference -- @preserve */
+			if (!jsonField) {
+				throw new Error(`${fn}() first argument must be a field reference`);
 			}
-
-			// @> or <@
+			/* v8 ignore stop -- @preserve */
 			const jsonValue = resolveFilterValue(
-				jsonComp.right,
+				expr.args[1]!,
 				ctx,
 				aliasContext,
 				outerAliases,
@@ -522,30 +464,113 @@ export function compileExpression(
 				kind: 'jsonContains',
 				field: jsonField,
 				value: jsonValue,
-				reversed: jsonComp.operator === '<@',
+				reversed: fn === 'json_contained_by',
 			} satisfies WhereJsonContainsIntent;
 		}
-
-		case 'any': {
-			const anyExpr = expr as NqlAnyExpression;
-			const field = expressionToField(anyExpr.column, aliasContext);
-			/* v8 ignore start — defensive: parser guarantees ANY LHS is a path expression -- @preserve */
-			if (!field) {
-				throw new Error('ANY expression must reference a field');
+		if (fn === 'json_exists') {
+			/* v8 ignore start — defensive: parser guarantees at least 2 args -- @preserve */
+			if (expr.args.length < 2) {
+				throw new Error(`${fn}() requires 2 arguments: field and key`);
 			}
 			/* v8 ignore stop -- @preserve */
-			validateWhereField(ctx, field, aliasContext, anyExpr.column);
-			const rawValues = ctx.params[anyExpr.paramName];
-			const values: readonly unknown[] = Array.isArray(rawValues)
-				? rawValues
-				: [];
-			return { kind: 'any', field, values } satisfies WhereAnyIntent;
+			const jsonField = expressionToField(expr.args[0]!, aliasContext);
+			/* v8 ignore start — defensive: first arg is always a field reference -- @preserve */
+			if (!jsonField) {
+				throw new Error(`${fn}() first argument must be a field reference`);
+			}
+			/* v8 ignore stop -- @preserve */
+			const key = resolveFilterValue(
+				expr.args[1]!,
+				ctx,
+				aliasContext,
+				outerAliases,
+			);
+			return {
+				kind: 'jsonExists',
+				field: jsonField,
+				key: String(key),
+			} satisfies WhereJsonExistsIntent;
 		}
-
-		/* v8 ignore next — defensive: all parser-produced expression types are handled above -- @preserve */
-		default:
-			throw new Error(`Unsupported expression type in WHERE: ${expr.type}`);
+		/* v8 ignore next — defensive: only json_* functions reach WHERE context -- @preserve */
+		throw new Error(`Unsupported function in WHERE context: ${fn}()`);
 	}
+
+	// jsonComparison
+	const jsonComp = expr as NqlJsonComparisonExpression;
+	const jsonField = expressionToField(jsonComp.left, aliasContext);
+	/* v8 ignore start — defensive: parser guarantees LHS is a path expression -- @preserve */
+	if (!jsonField) {
+		throw new Error(
+			'Left side of JSON comparison must be a field reference',
+		);
+	}
+	/* v8 ignore stop -- @preserve */
+
+	if (jsonComp.operator === '?') {
+		const key = resolveFilterValue(
+			jsonComp.right,
+			ctx,
+			aliasContext,
+			outerAliases,
+		);
+		return {
+			kind: 'jsonExists',
+			field: jsonField,
+			key: String(key),
+		} satisfies WhereJsonExistsIntent;
+	}
+
+	// @> or <@
+	const jsonValue = resolveFilterValue(
+		jsonComp.right,
+		ctx,
+		aliasContext,
+		outerAliases,
+	);
+	return {
+		kind: 'jsonContains',
+		field: jsonField,
+		value: jsonValue,
+		reversed: jsonComp.operator === '<@',
+	} satisfies WhereJsonContainsIntent;
+}
+
+function compileRelationFilter(
+	expr: NqlExpression,
+	ctx: CompilerContext,
+	fns: CompilerFns,
+	aliasContext?: string,
+	outerAliases?: string[],
+): WhereIntent {
+	// SPEC-002: Cross-table relation filters
+	const relFilter = expr as NqlRelationFilterExpression;
+	// Build alias stack: current aliasContext (if any) becomes an outer alias for nested filters
+	const nestedOuterAliases = aliasContext
+		? [...(outerAliases ?? []), aliasContext]
+		: (outerAliases ?? []);
+	// Resolve relation target for inner scope validation (first segment of relation path)
+	const prevRelationTarget = ctx.currentRelationTarget;
+	if (ctx.currentFromTable && ctx.validator && relFilter.relation[0]) {
+		ctx.currentRelationTarget = ctx.validator.resolveRelationTarget(
+			ctx.currentFromTable,
+			relFilter.relation[0],
+		);
+	}
+	const where = compileExpression(
+		relFilter.condition,
+		ctx,
+		fns,
+		relFilter.alias,
+		nestedOuterAliases,
+	);
+	ctx.currentRelationTarget = prevRelationTarget;
+	return {
+		kind: 'relationFilter',
+		relation: relFilter.relation,
+		where,
+		mode: relFilter.mode,
+		...(relFilter.alias !== undefined && { alias: relFilter.alias }),
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -593,4 +618,52 @@ function expandDateRangeList(
 	}
 
 	return result;
+}
+
+// ---------------------------------------------------------------------------
+// Main dispatcher (thin switch)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compile a boolean expression to a WhereIntent tree.
+ */
+export function compileExpression(
+	expr: NqlExpression,
+	ctx: CompilerContext,
+	fns: CompilerFns,
+	aliasContext?: string,
+	outerAliases?: string[],
+): WhereIntent {
+	switch (expr.type) {
+		case 'binary':
+		case 'unary':
+			return compileLogical(expr, ctx, fns, aliasContext, outerAliases);
+		case 'comparison':
+			return compileComparison(expr, ctx, fns, aliasContext, outerAliases);
+		case 'rangeOp':
+			return compileRange(expr, ctx, fns, aliasContext, outerAliases);
+		case 'in':
+		case 'any':
+			return compileMembership(expr, ctx, fns, aliasContext, outerAliases);
+		case 'between':
+			return compileBetween(expr, ctx, fns, aliasContext, outerAliases);
+		case 'isNull':
+			return compileNull(expr, ctx, aliasContext);
+		case 'jsonComparison':
+		case 'function':
+			return compileJson(expr, ctx, fns, aliasContext, outerAliases);
+		case 'relationFilter':
+			return compileRelationFilter(expr, ctx, fns, aliasContext, outerAliases);
+		case 'exists':
+			throw new Error(
+				'EXISTS (subquery) is not supported in NQL. ' +
+					'Use relation filters instead:\n' +
+					'  orders | with customer | where customer.active = true\n' +
+					'  orders | where exists(customer, active = true)\n' +
+					'These compile to efficient EXISTS subqueries automatically.',
+			);
+		/* v8 ignore next — defensive: all parser-produced expression types are handled above -- @preserve */
+		default:
+			throw new Error(`Unsupported expression type in WHERE: ${expr.type}`);
+	}
 }
