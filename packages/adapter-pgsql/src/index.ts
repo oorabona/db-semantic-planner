@@ -26,8 +26,8 @@ export {
 export {
 	acquireMigrationLock,
 	type ChangeKind,
-	compareSchemata,
 	type CompareSchemataOptions,
+	compareSchemata,
 	type DiffSummary,
 	ensureMigrationsTable,
 	type GenerateDDLOptions,

@@ -846,7 +846,7 @@ export function windowFuncCall(
 
 	// Window definition
 	const windowDef: Record<string, unknown> = {
-		frameOptions: 1034, // RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW (default)
+		frameOptions: 1034, // Implicit default frame (NONDEFAULT bit not set → no frame clause emitted)
 	};
 
 	if (partitionClause.length > 0) {

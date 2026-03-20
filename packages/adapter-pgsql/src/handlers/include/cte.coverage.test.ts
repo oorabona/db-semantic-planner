@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type { CompilerContext, CompilerState, Decision } from '../types.js';
+import type { CompilerContext, Decision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import { cteIncludeHandler } from './cte.js';
 

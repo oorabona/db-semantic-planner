@@ -26,7 +26,7 @@ function makeCtx(overrides: Partial<CompilerContext> = {}): CompilerContext {
 }
 
 /** Minimal dispatcher that returns a boolean const for nested conditions */
-const mockDispatch: WhereDispatcher = (decision, ctx, state) => {
+const mockDispatch: WhereDispatcher = (decision, _ctx, _state) => {
 	// For EXISTS-style delegation, return true
 	if (
 		decision.operator === 'exists' ||
@@ -385,7 +385,7 @@ describe('relationFilterHandler mode:is with conditions', () => {
 		const state = createCompilerState();
 		let capturedCtx: CompilerContext | undefined;
 
-		const inspectDispatch: WhereDispatcher = (decision, ctx, state) => {
+		const inspectDispatch: WhereDispatcher = (_decision, ctx, _state) => {
 			capturedCtx = ctx;
 			return { A_Const: { boolval: { boolval: true } } };
 		};

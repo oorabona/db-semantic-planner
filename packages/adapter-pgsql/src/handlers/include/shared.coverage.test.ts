@@ -30,7 +30,12 @@ describe('deriveFkColumns - belongsTo', () => {
 			relationType: 'belongsTo',
 			targetTable: 'users',
 		};
-		const result = deriveFkColumns(decision, 'posts', 'id', (table, pk) => `${table}_${pk}`);
+		const result = deriveFkColumns(
+			decision,
+			'posts',
+			'id',
+			(table, pk) => `${table}_${pk}`,
+		);
 		expect(result.sourceColumn).toBe('users_id');
 		expect(result.targetColumn).toBe('id');
 	});
@@ -51,7 +56,12 @@ describe('deriveFkColumns - belongsTo', () => {
 			relationType: 'belongsTo',
 			targetTable: 'users',
 		};
-		const result = deriveFkColumns(decision, 'posts', 'uuid', (table, pk) => `${table}_${pk}`);
+		const result = deriveFkColumns(
+			decision,
+			'posts',
+			'uuid',
+			(table, pk) => `${table}_${pk}`,
+		);
 		expect(result.sourceColumn).toBe('users_uuid');
 		expect(result.targetColumn).toBe('uuid');
 	});
@@ -98,7 +108,12 @@ describe('deriveFkColumns - hasMany', () => {
 			relationType: 'hasMany',
 			targetTable: 'posts',
 		};
-		const result = deriveFkColumns(decision, 'users', 'id', (table, pk) => `${table}_${pk}`);
+		const result = deriveFkColumns(
+			decision,
+			'users',
+			'id',
+			(table, pk) => `${table}_${pk}`,
+		);
 		expect(result.sourceColumn).toBe('id');
 		expect(result.targetColumn).toBe('users_id');
 	});
@@ -119,7 +134,12 @@ describe('deriveFkColumns - hasMany', () => {
 			relationType: 'hasMany',
 			targetTable: 'posts',
 		};
-		const result = deriveFkColumns(decision, 'users', 'uuid', (table, pk) => `${table}_${pk}`);
+		const result = deriveFkColumns(
+			decision,
+			'users',
+			'uuid',
+			(table, pk) => `${table}_${pk}`,
+		);
 		expect(result.sourceColumn).toBe('uuid');
 		expect(result.targetColumn).toBe('users_uuid');
 	});
@@ -157,7 +177,12 @@ describe('deriveFkColumns - hasOne', () => {
 			relationType: 'hasOne',
 			targetTable: 'profiles',
 		};
-		const result = deriveFkColumns(decision, 'users', 'id', (table, pk) => `${table}_${pk}`);
+		const result = deriveFkColumns(
+			decision,
+			'users',
+			'id',
+			(table, pk) => `${table}_${pk}`,
+		);
 		expect(result.sourceColumn).toBe('id');
 		expect(result.targetColumn).toBe('users_id');
 	});

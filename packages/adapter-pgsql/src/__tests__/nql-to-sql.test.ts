@@ -766,8 +766,8 @@ describe('Bug regressions', () => {
 				'select categories.* from categories where exists' +
 					' (select 1 from categories as categories_exists_0' +
 					' where categories.id = categories_exists_0."parentid"' +
-					' and (categories_exists_0."sortorder" > categories."sortorder"' +
-					' and categories_exists_0.name <> categories.name))',
+					' and categories_exists_0."sortorder" > categories."sortorder"' +
+					' and categories_exists_0.name <> categories.name)',
 			);
 		});
 	});

@@ -4,6 +4,16 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## EDGE-001-002 — Remove WASM from prod + internalize pgsql-deparser (2026-03-20)
+
+- Replace parseSync (WASM) with a pure-TS recursive descent expression parser for sql() escape hatch
+- Move libpg-query + pgsql-parser to devDependencies (tests only, used as comparison baseline)
+- Remove WASM copy from tsup onSuccess hook
+- Internalize pgsql-deparser — write a focused TS deparser for the ~33 AST node types dbsp produces
+- Move pgsql-deparser to devDependencies (used as comparison baseline for deparser tests)
+
+---
+
 ## CAPS — Multi-adapter capability negotiation (2026-03-19)
 
 - DDL flags go on DialectCapabilities (not AdapterCapabilities) — dialect-level, not adapter-level

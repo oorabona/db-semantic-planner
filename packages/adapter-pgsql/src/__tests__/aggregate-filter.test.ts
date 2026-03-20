@@ -6,21 +6,20 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
+import { columnRef, eqExpr, normalizeSQL } from '../ast-helpers.js';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
-import { identityNaming } from '../naming-plugin.js';
+import {
+	avgHandler,
+	countDistinctHandler,
+	countHandler,
+	genericAggregateHandler,
+	maxHandler,
+	minHandler,
+	sumHandler,
+} from '../handlers/expression/aggregate.js';
 import type { CompilerContext, Decision } from '../handlers/types.js';
 import { createCompilerState } from '../handlers/types.js';
-import {
-	countHandler,
-	countDistinctHandler,
-	sumHandler,
-	avgHandler,
-	minHandler,
-	maxHandler,
-	genericAggregateHandler,
-} from '../handlers/expression/aggregate.js';
-import { eqExpr, columnRef } from '../ast-helpers.js';
+import { identityNaming } from '../naming-plugin.js';
 
 // ============================================================================
 // Helpers

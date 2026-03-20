@@ -1,16 +1,4 @@
-import { copyFileSync, mkdirSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { defineConfig } from 'tsup';
-
-const copyWasm = async () => {
-	const wasmSrc = resolve(
-		'../../node_modules/.pnpm/libpg-query@17.7.3/node_modules/libpg-query/wasm/libpg-query.wasm',
-	);
-	const wasmDest = resolve('dist/libpg-query.wasm');
-	mkdirSync('dist', { recursive: true });
-	copyFileSync(wasmSrc, wasmDest);
-	console.log(`✅ Copied WASM: \${wasmSrc} → \${wasmDest}`);
-};
 
 export default defineConfig({
 	entry: {
@@ -21,5 +9,16 @@ export default defineConfig({
 	sourcemap: true,
 	clean: true,
 	target: 'node20',
-	onSuccess: copyWasm,
+	external: [
+		'fs',
+		'path',
+		'os',
+		'crypto',
+		'stream',
+		'url',
+		'util',
+		'pg',
+		'pg-pool',
+		'pg-cursor',
+	],
 });

@@ -452,7 +452,9 @@ describe('jsonAggIncludeHandler', () => {
 						A_Expr: {
 							kind: 'AEXPR_OP',
 							name: [{ String: { sval: '=' } }],
-							lexpr: { ColumnRef: { fields: [{ String: { sval: 'approved' } }] } },
+							lexpr: {
+								ColumnRef: { fields: [{ String: { sval: 'approved' } }] },
+							},
 							rexpr: { ParamRef: { number: 1 } },
 						},
 					},

@@ -8,7 +8,7 @@
  *   [RETURNING ...]
  */
 
-import { InvalidOperationError, createOrm } from '@dbsp/core';
+import { createOrm, InvalidOperationError } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -42,7 +42,10 @@ describe('SC-05: basic batch update', () => {
 		expect(result.sql).toEqual(
 			'UPDATE calls SET callee_id = t.callee_id FROM unnest(CAST($1 AS int4[]), CAST($2 AS int4[])) AS t(id, callee_id) WHERE calls.id = t.id',
 		);
-		expect(result.parameters).toEqual([[10, 20], [42, 43]]);
+		expect(result.parameters).toEqual([
+			[10, 20],
+			[42, 43],
+		]);
 	});
 
 	it('transposes values correctly to column arrays', () => {
@@ -136,7 +139,9 @@ describe('SC-07: batch update with RETURNING', () => {
 			returning: ['id', 'callee_id'],
 		});
 
-		expect(result.sql).toContain('RETURNING calls.id AS id, calls.callee_id AS callee_id');
+		expect(result.sql).toContain(
+			'RETURNING calls.id AS id, calls.callee_id AS callee_id',
+		);
 	});
 
 	it('builder chain: .batchSet() + .returning()', () => {
@@ -182,9 +187,10 @@ describe('SC-08: composite match columns', () => {
 
 		const result = orm
 			.update('org_memberships')
-			.batchSet(['org_id', 'user_id'], [
-				{ org_id: 1, user_id: 10, role: 'admin' },
-			])
+			.batchSet(
+				['org_id', 'user_id'],
+				[{ org_id: 1, user_id: 10, role: 'admin' }],
+			)
 			.dump();
 
 		expect(result.sql).toContain('org_memberships.org_id = t.org_id');

@@ -60,7 +60,7 @@ describe('SC-01: large batch (100 rows) uses unnest', () => {
 	it('column arrays contain the correct values', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
 		const rows = makeEmbeddingRows3Col(3).concat(
-			makeEmbeddingRows3Col(97).map((r, i) => ({
+			makeEmbeddingRows3Col(97).map((r, _i) => ({
 				...r,
 				symbol_id: (r.symbol_id as number) + 3,
 			})),

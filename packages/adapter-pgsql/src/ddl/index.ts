@@ -30,8 +30,8 @@ export {
 } from './migration-tracker.js';
 export {
 	type ChangeKind,
-	compareSchemata,
 	type CompareSchemataOptions,
+	compareSchemata,
 	type DiffSummary,
 	type SchemaChange,
 	type SchemaDiff,
