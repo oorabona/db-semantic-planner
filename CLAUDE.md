@@ -187,6 +187,17 @@ The PostgreSQL adapter supports the following DDL schema features via `compareSc
 - **Row-Level Security (RLS):** `rlsEnabled` + `policies[]` on TableIR — see `docs/guides/how-to-use-rls-policies.md`
 - Feature support is gated by `DialectCapabilities` flags (e.g. `supportsDDLRowLevelSecurity`)
 
+## Query Features
+
+| Feature | API | Example |
+|---------|-----|---------|
+| Expression primitives | `op()`, `fn()`, `ref()`, `param()`, `cast()`, `literal()`, `unary()`, `namedArg()` | `op('<=>', ref('vector'), cast(param(qv), 'vector'))` |
+| pgvector | `cosineDistance()`, `rawDistance()`, `l2Distance()`, `innerProduct()` | `cosineDistance('vector', qv).as('score')` |
+| ParadeDB | `score()`, `bm25Search()`, `parse()`, `boost()`, `booleanSearch()` | `bm25Search('s', term, { name: 3.0 })` |
+| INNER JOIN | `include('rel', { join: 'inner' })` | Filters root rows by relation |
+| DISTINCT ON | `.distinctOn('col1', 'col2')` | PostgreSQL DISTINCT ON |
+| Guides | `docs/guides/how-to-use-expression-primitives.md`, `docs/guides/how-to-use-extensions.md`, `docs/guides/how-to-use-rls-policies.md` | |
+
 ## Observability
 
 Every query produces a `Dump`:

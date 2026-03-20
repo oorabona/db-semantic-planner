@@ -327,5 +327,9 @@
 
 ## Completed
 
+- [x] ✅ [Docs] expression primitives guide (docs/guides/how-to-use-expression-primitives.md) (2026-03-20)
+- [x] ✅ [Docs] extensions guide — pgvector + ParadeDB (docs/guides/how-to-use-extensions.md) (2026-03-20)
+- [x] ✅ [Docs] CLAUDE.md Query Features section added (2026-03-20)
+
 (GUI-016, GUI-016b, SCHEMA-EVO archived → docs/historic/done-2026-02.md)
 (Archived → docs/historic/done-2026-02.md)
