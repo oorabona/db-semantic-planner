@@ -546,9 +546,404 @@ export class PlanCompiler {
 	// SELECT Compilation
 	// --------------------------------------------------------------------------
 
+	/** Build a HandlerCompilerContext for the given plan and optional alias override. */
+	private createHandlerContext(
+		plan: SimplifiedPlanReport,
+		currentAlias?: string,
+	): HandlerCompilerContext {
+		return {
+			naming: this.naming,
+			rootTable: plan.rootTable,
+			currentAlias: currentAlias ?? plan.rootTable,
+			maxRecursiveDepth: 100,
+			defaultPkColumnName: this.defaultPk,
+			deriveFkColumnName: this.deriveFk,
+			...((plan.schema ?? this.schema)
+				? { schema: plan.schema ?? this.schema }
+				: {}),
+		} as HandlerCompilerContext;
+	}
+
+	/** Build a fresh HandlerCompilerState sharing the current parameter array. */
+	private createHandlerState(): HandlerCompilerState {
+		return {
+			parameters: this.state.parameters,
+			paramIndex: this.state.paramIndex,
+			ctes: new Map(),
+			aliases: new Map(),
+			joins: [],
+		};
+	}
+
+	/**
+	 * Compile a SELECT-list target via expression handler.
+	 * Wraps the node in a ResTarget and pushes it onto targetList.
+	 */
+	private compileSelectTarget(
+		decision: PlanDecision,
+		plan: SimplifiedPlanReport,
+		targetList: Node[],
+	): void {
+		switch (decision.type) {
+			case 'select':
+				if (decision.column === '*') {
+					targetList.push(starTarget(decision.table, this.naming));
+				} else if (decision.column) {
+					targetList.push(
+						columnTarget(
+							decision.column,
+							decision.alias,
+							decision.table,
+							this.naming,
+						),
+					);
+				}
+				break;
+
+			case 'selectFunction': {
+				ensureExpressionHandlersRegistered();
+				const funcType = decision.function;
+				if (!funcType) break;
+				const handler = getExpressionHandler(funcType);
+				const ctx = this.createHandlerContext(
+					plan,
+					decision.table ?? plan.rootTable,
+				);
+				const state = this.createHandlerState();
+				const handlerDecision = mapToHandlerDecision(
+					decision,
+					plan.rootTable,
+					this.defaultPk,
+					this.deriveFk,
+				);
+				// Compile FILTER (WHERE ...) clause if present
+				const filterNode = compileFilterCondition(
+					decision.filterCondition,
+					createWhereDispatcher(),
+					ctx,
+					state,
+				);
+				const hydratedDecision = filterNode
+					? { ...handlerDecision, filterWhere: filterNode }
+					: handlerDecision;
+				const node = handler.compile(hydratedDecision, ctx, state);
+				this.state.paramIndex = state.paramIndex;
+				targetList.push({
+					ResTarget: {
+						val: node,
+						...(decision.alias
+							? { name: this.naming.toDatabase(decision.alias) }
+							: {}),
+					},
+				});
+				break;
+			}
+
+			case 'selectExpression': {
+				if (decision.expressionType === 'case') {
+					const caseNode = this.compileCaseExpression(decision);
+					const alias = decision.alias;
+					targetList.push({
+						ResTarget: {
+							val: caseNode,
+							...(alias ? { name: this.naming.toDatabase(alias) } : {}),
+						},
+					});
+				}
+				break;
+			}
+
+			case 'selectRelationColumn':
+			case 'selectPseudoColumn':
+			case 'selectArithmetic': {
+				ensureExpressionHandlersRegistered();
+				const exprType =
+					decision.type === 'selectRelationColumn'
+						? 'relationColumn'
+						: decision.type === 'selectPseudoColumn'
+							? 'pseudoColumn'
+							: 'arithmetic';
+				const handler = getExpressionHandler(exprType);
+				const ctx = this.createHandlerContext(plan, plan.rootTable);
+				const state = this.createHandlerState();
+				const handlerDecision = mapToHandlerDecision(
+					decision,
+					plan.rootTable,
+					this.defaultPk,
+					this.deriveFk,
+				);
+				const node = handler.compile(handlerDecision, ctx, state);
+				this.state.paramIndex = state.paramIndex;
+				targetList.push({
+					ResTarget: {
+						val: node,
+						...(decision.alias
+							? { name: this.naming.toDatabase(decision.alias) }
+							: {}),
+					},
+				});
+				break;
+			}
+
+			case 'selectWindow': {
+				const winFuncName = decision.function;
+				if (!winFuncName) break;
+				// Always use genericWindowHandler — avoids aggregate handlers
+				// (sumHandler, avgHandler) being picked for names like 'sum', 'avg'
+				// which produce FuncCall WITHOUT OVER clause.
+				const winHandler = genericWindowHandler;
+				const ctx = this.createHandlerContext(
+					plan,
+					decision.table ?? plan.rootTable,
+				);
+				const state = this.createHandlerState();
+				const winDecision = mapToHandlerDecision(
+					decision,
+					plan.rootTable,
+					this.defaultPk,
+					this.deriveFk,
+				);
+				const winNode = winHandler.compile(winDecision, ctx, state);
+				this.state.paramIndex = state.paramIndex;
+				targetList.push({
+					ResTarget: {
+						val: winNode,
+						...(decision.alias
+							? { name: this.naming.toDatabase(decision.alias) }
+							: {}),
+					},
+				});
+				break;
+			}
+		}
+	}
+
+	/**
+	 * Compile an includeStrategy decision and register its results.
+	 * Pushes targets onto targetList, raw joins / CTEs onto instance collections.
+	 */
+	private compileIncludeDecision(
+		decision: PlanDecision,
+		plan: SimplifiedPlanReport,
+		targetList: Node[],
+	): void {
+		const includeResult = this.compileIncludeViaHandler(decision, plan);
+		if (includeResult.targets) {
+			targetList.push(...includeResult.targets);
+		}
+		if (includeResult.rawJoin) {
+			this.rawJoins.push(includeResult.rawJoin);
+		}
+		if (includeResult.additionalJoins) {
+			this.rawJoins.push(...includeResult.additionalJoins);
+		}
+		if (includeResult.cte) {
+			this.pendingCtes.push(includeResult.cte);
+		}
+	}
+
+	/**
+	 * Fold a WHERE-family decision into an existing where expression.
+	 * Returns the updated (or new) where node.
+	 */
+	private compileWhereDecision(
+		decision: PlanDecision,
+		currentWhere: Node | undefined,
+	): Node | undefined {
+		switch (decision.type) {
+			case 'where': {
+				// JOIN filter: register INNER JOIN instead of EXISTS subquery
+				if (
+					decision.operator === 'exists' &&
+					decision.choice === 'join' &&
+					decision.targetTable
+				) {
+					this.registerJoinFilter(decision);
+					// Add user conditions (on joined table) to WHERE
+					if (decision.conditions && decision.conditions.length > 0) {
+						const joinTarget = decision.targetTable!;
+						const condNodes = decision.conditions.map((c) =>
+							this.dispatchWhere(c as PlanDecision, {
+								currentAlias: joinTarget,
+							}),
+						);
+						const combined =
+							condNodes.length === 1 ? condNodes[0]! : andExpr(...condNodes);
+						return currentWhere ? andExpr(currentWhere, combined) : combined;
+					}
+					return currentWhere;
+				}
+				const whereExpr = this.dispatchWhere(decision);
+				return currentWhere ? andExpr(currentWhere, whereExpr) : whereExpr;
+			}
+
+			case 'whereAnd':
+				if (decision.conditions) {
+					const andConditions = decision.conditions.map((c) =>
+						this.dispatchWhere(c),
+					);
+					const combined =
+						andConditions.length === 1
+							? andConditions[0]!
+							: andExpr(...andConditions);
+					return currentWhere ? andExpr(currentWhere, combined) : combined;
+				}
+				return currentWhere;
+
+			case 'whereOr':
+				if (decision.conditions) {
+					const orConditions = decision.conditions.map((c) =>
+						this.dispatchWhere(c),
+					);
+					const combined =
+						orConditions.length === 1
+							? orConditions[0]!
+							: orExpr(...orConditions);
+					return currentWhere ? andExpr(currentWhere, combined) : combined;
+				}
+				return currentWhere;
+
+			case 'whereNot':
+				if (decision.conditions) {
+					const notConditions = decision.conditions.map((c) =>
+						this.dispatchWhere(c),
+					);
+					const innerExpr =
+						notConditions.length === 1
+							? notConditions[0]!
+							: andExpr(...notConditions);
+					const negated = notExpr(innerExpr);
+					return currentWhere ? andExpr(currentWhere, negated) : negated;
+				}
+				return currentWhere;
+
+			default:
+				return currentWhere;
+		}
+	}
+
+	/**
+	 * Flush pendingJoins and rawJoins into the FROM clause.
+	 * Mutates the from array in-place.
+	 */
+	private flushPendingJoins(from: Node[], plan: SimplifiedPlanReport): void {
+		// Flush pending JOINs into FROM clause
+		for (const pj of this.pendingJoins) {
+			const targetRV = rangeVar(
+				pj.table,
+				pj.alias,
+				plan.schema ?? this.schema,
+				this.naming,
+			);
+			const base =
+				from.length > 0
+					? from[0]!
+					: rangeVar(
+							plan.rootTable,
+							undefined,
+							plan.schema ?? this.schema,
+							this.naming,
+						);
+			from[0] =
+				pj.type === 'LEFT JOIN'
+					? leftJoin(base, targetRV, pj.on)
+					: innerJoin(base, targetRV, pj.on);
+		}
+
+		// Flush raw JOIN nodes from include handlers (e.g., LATERAL)
+		for (const rawJoin of this.rawJoins) {
+			const base =
+				from.length > 0
+					? from[0]!
+					: rangeVar(
+							plan.rootTable,
+							undefined,
+							plan.schema ?? this.schema,
+							this.naming,
+						);
+			// Raw joins are pre-built JoinExpr — inject base table as larg
+			const joinExpr = rawJoin as JoinExprNode;
+			if (joinExpr.JoinExpr) {
+				joinExpr.JoinExpr.larg = base;
+				from[0] = rawJoin;
+			}
+		}
+	}
+
+	/**
+	 * Assemble the final SelectStmt from all accumulated clause nodes.
+	 * Also handles the default SELECT *, CTEs, and row-level locking.
+	 */
+	private buildSelectStmt(
+		targetList: Node[],
+		from: Node[],
+		where: Node | undefined,
+		orderBy: Node[],
+		groupBy: Node[],
+		having: Node | undefined,
+		limit: Node | undefined,
+		offset: Node | undefined,
+		distinct: boolean,
+		plan: SimplifiedPlanReport,
+	): Node {
+		// Default to SELECT * if no columns specified
+		if (targetList.length === 0) {
+			targetList.push(starTarget(undefined, this.naming));
+		}
+
+		// Build options object, only including defined properties
+		const options: Parameters<typeof selectStmt>[0] = {
+			targetList,
+			from,
+		};
+
+		if (where) options.where = where;
+		if (groupBy.length > 0) options.groupBy = groupBy;
+		if (having) options.having = having;
+		if (orderBy.length > 0) options.orderBy = orderBy;
+		if (limit) options.limit = limit;
+		if (offset) options.offset = offset;
+		if (distinct) options.distinct = distinct;
+		if (this.pendingCtes.length > 0) {
+			options.withClause = { ctes: this.pendingCtes, recursive: false };
+		}
+
+		// Row-level locking (E15: FOR UPDATE/SHARE/etc.)
+		if (plan.lock) {
+			const mapped = mapLockToAst(plan.lock);
+			// INV-E15-05: When query has JOINs (includes), scope lock to root table
+			// to prevent lock amplification on joined tables.
+			const hasJoins = this.rawJoins.length > 0;
+			options.lockingClause = {
+				...mapped,
+				...(hasJoins
+					? {
+							lockedRels: [
+								rangeVar(
+									plan.rootTable,
+									undefined,
+									plan.schema ?? this.schema,
+									this.naming,
+								),
+							],
+						}
+					: {}),
+			};
+		}
+
+		return selectStmt(options);
+	}
+
 	private compileSelect(plan: SimplifiedPlanReport): Node {
 		const targetList: Node[] = [];
-		const from: Node[] = [];
+		const from: Node[] = [
+			rangeVar(
+				plan.rootTable,
+				undefined,
+				plan.schema ?? this.schema,
+				this.naming,
+			),
+		];
 		let where: Node | undefined;
 		const orderBy: Node[] = [];
 		const groupBy: Node[] = [];
@@ -557,279 +952,31 @@ export class PlanCompiler {
 		let offset: Node | undefined;
 		let distinct = false;
 
-		// Start with base table
-		from.push(
-			rangeVar(
-				plan.rootTable,
-				undefined,
-				plan.schema ?? this.schema,
-				this.naming,
-			),
-		);
-
 		for (const decision of plan.decisions) {
 			switch (decision.type) {
 				case 'select':
-					if (decision.column === '*') {
-						targetList.push(starTarget(decision.table, this.naming));
-					} else if (decision.column) {
-						targetList.push(
-							columnTarget(
-								decision.column,
-								decision.alias,
-								decision.table,
-								this.naming,
-							),
-						);
-					}
-					break;
-
-				case 'selectFunction': {
-					ensureExpressionHandlersRegistered();
-					const funcType = decision.function;
-					if (!funcType) break;
-					const handler = getExpressionHandler(funcType);
-					const exprCtx = {
-						naming: this.naming,
-						rootTable: plan.rootTable,
-						currentAlias: decision.table ?? plan.rootTable,
-						maxRecursiveDepth: 100,
-						defaultPkColumnName: this.defaultPk,
-						deriveFkColumnName: this.deriveFk,
-						...((plan.schema ?? this.schema)
-							? { schema: plan.schema ?? this.schema }
-							: {}),
-					} as HandlerCompilerContext;
-					const exprState: HandlerCompilerState = {
-						parameters: this.state.parameters,
-						paramIndex: this.state.paramIndex,
-						ctes: new Map(),
-						aliases: new Map(),
-						joins: [],
-					};
-					const handlerDecision = mapToHandlerDecision(
-						decision,
-						plan.rootTable,
-						this.defaultPk,
-						this.deriveFk,
-					);
-					// Compile FILTER (WHERE ...) clause if present
-					const filterNode = compileFilterCondition(
-						decision.filterCondition,
-						createWhereDispatcher(),
-						exprCtx,
-						exprState,
-					);
-					const hydratedDecision = filterNode
-						? { ...handlerDecision, filterWhere: filterNode }
-						: handlerDecision;
-					const node = handler.compile(hydratedDecision, exprCtx, exprState);
-					this.state.paramIndex = exprState.paramIndex;
-					targetList.push({
-						ResTarget: {
-							val: node,
-							...(decision.alias
-								? { name: this.naming.toDatabase(decision.alias) }
-								: {}),
-						},
-					});
-					break;
-				}
-
-				case 'selectExpression': {
-					if (decision.expressionType === 'case') {
-						const caseNode = this.compileCaseExpression(decision);
-						const alias = decision.alias;
-						targetList.push({
-							ResTarget: {
-								val: caseNode,
-								...(alias ? { name: this.naming.toDatabase(alias) } : {}),
-							},
-						});
-					}
-					break;
-				}
-
+				case 'selectFunction':
+				case 'selectExpression':
 				case 'selectRelationColumn':
 				case 'selectPseudoColumn':
-				case 'selectArithmetic': {
-					ensureExpressionHandlersRegistered();
-					const exprType =
-						decision.type === 'selectRelationColumn'
-							? 'relationColumn'
-							: decision.type === 'selectPseudoColumn'
-								? 'pseudoColumn'
-								: 'arithmetic';
-					const handler = getExpressionHandler(exprType);
-					const exprCtx = {
-						naming: this.naming,
-						rootTable: plan.rootTable,
-						currentAlias: plan.rootTable,
-						maxRecursiveDepth: 100,
-						defaultPkColumnName: this.defaultPk,
-						deriveFkColumnName: this.deriveFk,
-						...((plan.schema ?? this.schema)
-							? { schema: plan.schema ?? this.schema }
-							: {}),
-					} as HandlerCompilerContext;
-					const exprState: HandlerCompilerState = {
-						parameters: this.state.parameters,
-						paramIndex: this.state.paramIndex,
-						ctes: new Map(),
-						aliases: new Map(),
-						joins: [],
-					};
-					const handlerDecision = mapToHandlerDecision(
-						decision,
-						plan.rootTable,
-						this.defaultPk,
-						this.deriveFk,
-					);
-					const node = handler.compile(handlerDecision, exprCtx, exprState);
-					this.state.paramIndex = exprState.paramIndex;
-					targetList.push({
-						ResTarget: {
-							val: node,
-							...(decision.alias
-								? { name: this.naming.toDatabase(decision.alias) }
-								: {}),
-						},
-					});
+				case 'selectArithmetic':
+				case 'selectWindow':
+					this.compileSelectTarget(decision, plan, targetList);
 					break;
-				}
 
-				case 'selectWindow': {
-					const winFuncName = decision.function;
-					if (!winFuncName) break;
-					// Always use genericWindowHandler — avoids aggregate handlers
-					// (sumHandler, avgHandler) being picked for names like 'sum', 'avg'
-					// which produce FuncCall WITHOUT OVER clause.
-					const winHandler = genericWindowHandler;
-					const winCtx = {
-						naming: this.naming,
-						rootTable: plan.rootTable,
-						currentAlias: decision.table ?? plan.rootTable,
-						maxRecursiveDepth: 100,
-						defaultPkColumnName: this.defaultPk,
-						deriveFkColumnName: this.deriveFk,
-						...((plan.schema ?? this.schema)
-							? { schema: plan.schema ?? this.schema }
-							: {}),
-					} as HandlerCompilerContext;
-					const winState: HandlerCompilerState = {
-						parameters: this.state.parameters,
-						paramIndex: this.state.paramIndex,
-						ctes: new Map(),
-						aliases: new Map(),
-						joins: [],
-					};
-					const winDecision = mapToHandlerDecision(
-						decision,
-						plan.rootTable,
-						this.defaultPk,
-						this.deriveFk,
-					);
-					const winNode = winHandler.compile(winDecision, winCtx, winState);
-					this.state.paramIndex = winState.paramIndex;
-					targetList.push({
-						ResTarget: {
-							val: winNode,
-							...(decision.alias
-								? { name: this.naming.toDatabase(decision.alias) }
-								: {}),
-						},
-					});
+				case 'includeStrategy':
+					this.compileIncludeDecision(decision, plan, targetList);
 					break;
-				}
 
-				case 'includeStrategy': {
-					// Unified include dispatch via handler registry
-					const includeResult = this.compileIncludeViaHandler(decision, plan);
-					if (includeResult.targets) {
-						targetList.push(...includeResult.targets);
-					}
-					if (includeResult.rawJoin) {
-						this.rawJoins.push(includeResult.rawJoin);
-					}
-					if (includeResult.additionalJoins) {
-						this.rawJoins.push(...includeResult.additionalJoins);
-					}
-					if (includeResult.cte) {
-						this.pendingCtes.push(includeResult.cte);
-					}
-					break;
-				}
-
-				case 'where': {
-					// JOIN filter: register INNER JOIN instead of EXISTS subquery
-					if (
-						decision.operator === 'exists' &&
-						decision.choice === 'join' &&
-						decision.targetTable
-					) {
-						this.registerJoinFilter(decision);
-						// Add user conditions (on joined table) to WHERE
-						if (decision.conditions && decision.conditions.length > 0) {
-							const joinTarget = decision.targetTable!;
-							const condNodes = decision.conditions.map((c) =>
-								this.dispatchWhere(c as PlanDecision, {
-									currentAlias: joinTarget,
-								}),
-							);
-							const combined =
-								condNodes.length === 1 ? condNodes[0]! : andExpr(...condNodes);
-							where = where ? andExpr(where, combined) : combined;
-						}
-						break;
-					}
-					const whereExpr = this.dispatchWhere(decision);
-					where = where ? andExpr(where, whereExpr) : whereExpr;
-					break;
-				}
-
+				case 'where':
 				case 'whereAnd':
-					if (decision.conditions) {
-						const andConditions = decision.conditions.map((c) =>
-							this.dispatchWhere(c),
-						);
-						const combined =
-							andConditions.length === 1
-								? andConditions[0]!
-								: andExpr(...andConditions);
-						where = where ? andExpr(where, combined) : combined;
-					}
-					break;
-
 				case 'whereOr':
-					if (decision.conditions) {
-						const orConditions = decision.conditions.map((c) =>
-							this.dispatchWhere(c),
-						);
-						const combined =
-							orConditions.length === 1
-								? orConditions[0]!
-								: orExpr(...orConditions);
-						where = where ? andExpr(where, combined) : combined;
-					}
-					break;
-
 				case 'whereNot':
-					if (decision.conditions) {
-						const notConditions = decision.conditions.map((c) =>
-							this.dispatchWhere(c),
-						);
-						const innerExpr =
-							notConditions.length === 1
-								? notConditions[0]!
-								: andExpr(...notConditions);
-						const negated = notExpr(innerExpr);
-						where = where ? andExpr(where, negated) : negated;
-					}
+					where = this.compileWhereDecision(decision, where);
 					break;
 
 				case 'join': {
 					const joinExpr = this.compileJoin(decision, plan);
-					// Replace or add to from clause
 					if (from.length === 1) {
 						from[0] = joinExpr;
 					} else {
@@ -896,94 +1043,19 @@ export class PlanCompiler {
 			}
 		}
 
-		// Flush pending JOINs into FROM clause
-		for (const pj of this.pendingJoins) {
-			const targetRV = rangeVar(
-				pj.table,
-				pj.alias,
-				plan.schema ?? this.schema,
-				this.naming,
-			);
-			const base =
-				from.length > 0
-					? from[0]!
-					: rangeVar(
-							plan.rootTable,
-							undefined,
-							plan.schema ?? this.schema,
-							this.naming,
-						);
-			from[0] =
-				pj.type === 'LEFT JOIN'
-					? leftJoin(base, targetRV, pj.on)
-					: innerJoin(base, targetRV, pj.on);
-		}
-
-		// Flush raw JOIN nodes from include handlers (e.g., LATERAL)
-		for (const rawJoin of this.rawJoins) {
-			const base =
-				from.length > 0
-					? from[0]!
-					: rangeVar(
-							plan.rootTable,
-							undefined,
-							plan.schema ?? this.schema,
-							this.naming,
-						);
-			// Raw joins are pre-built JoinExpr — inject base table as larg
-			const joinExpr = rawJoin as JoinExprNode;
-			if (joinExpr.JoinExpr) {
-				joinExpr.JoinExpr.larg = base;
-				from[0] = rawJoin;
-			}
-		}
-
-		// Default to SELECT * if no columns specified
-		if (targetList.length === 0) {
-			targetList.push(starTarget(undefined, this.naming));
-		}
-
-		// Build options object, only including defined properties
-		const options: Parameters<typeof selectStmt>[0] = {
+		this.flushPendingJoins(from, plan);
+		return this.buildSelectStmt(
 			targetList,
 			from,
-		};
-
-		if (where) options.where = where;
-		if (groupBy.length > 0) options.groupBy = groupBy;
-		if (having) options.having = having;
-		if (orderBy.length > 0) options.orderBy = orderBy;
-		if (limit) options.limit = limit;
-		if (offset) options.offset = offset;
-		if (distinct) options.distinct = distinct;
-		if (this.pendingCtes.length > 0) {
-			options.withClause = { ctes: this.pendingCtes, recursive: false };
-		}
-
-		// Row-level locking (E15: FOR UPDATE/SHARE/etc.)
-		if (plan.lock) {
-			const mapped = mapLockToAst(plan.lock);
-			// INV-E15-05: When query has JOINs (includes), scope lock to root table
-			// to prevent lock amplification on joined tables.
-			const hasJoins = this.rawJoins.length > 0;
-			options.lockingClause = {
-				...mapped,
-				...(hasJoins
-					? {
-							lockedRels: [
-								rangeVar(
-									plan.rootTable,
-									undefined,
-									plan.schema ?? this.schema,
-									this.naming,
-								),
-							],
-						}
-					: {}),
-			};
-		}
-
-		return selectStmt(options);
+			where,
+			orderBy,
+			groupBy,
+			having,
+			limit,
+			offset,
+			distinct,
+			plan,
+		);
 	}
 
 	// --------------------------------------------------------------------------

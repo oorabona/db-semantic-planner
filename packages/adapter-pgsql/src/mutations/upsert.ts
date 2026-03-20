@@ -13,6 +13,7 @@ import type { InferClause, Node, OnConflictClause } from '@pgsql/types';
 import { columnRef, funcCall } from '../ast-helpers.js';
 import {
 	inferPgArrayType,
+	parseRawExpression,
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from '../compiler-utils.js';
@@ -67,6 +68,17 @@ export interface UpsertConfig {
 	returning?: string[];
 	/** Optional column type hints for unnest casting (schema-driven) */
 	columnTypes?: Record<string, string>;
+	/**
+	 * Raw SQL expressions for specific update columns.
+	 * These are injected verbatim into the ON CONFLICT DO UPDATE SET clause.
+	 * Keys are logical column names (before naming plugin), values are raw SQL fragments.
+	 *
+	 * @warning SECURITY: fragments are inserted without parameterization.
+	 *   Only use with hardcoded expressions. Never with user input.
+	 *
+	 * @example { last_parsed: 'now()', count: 'excluded.count + 1' }
+	 */
+	updateExpressions?: Record<string, string>;
 }
 
 // ============================================================================
@@ -119,6 +131,18 @@ export function buildOnConflictClause(
 
 	const targetList: Node[] = updateColumns.map((col) => {
 		const dbCol = naming.toDatabase(col);
+
+		// Raw SQL expression: emit the parsed AST node verbatim
+		const rawExpr = config.updateExpressions?.[col];
+		if (rawExpr !== undefined) {
+			return {
+				ResTarget: {
+					name: dbCol,
+					val: parseRawExpression(rawExpr),
+				},
+			};
+		}
+
 		return {
 			ResTarget: {
 				name: dbCol,
@@ -194,7 +218,6 @@ export function compileUpsert(
 		},
 	};
 }
-
 
 /**
  * Compile a UPSERT statement using the unnest strategy for large batches.
@@ -286,7 +309,6 @@ export function compileUnnestUpsert(
 		},
 	};
 }
-
 
 // ============================================================================
 // Helpers

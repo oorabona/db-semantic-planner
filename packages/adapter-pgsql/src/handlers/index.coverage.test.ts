@@ -25,11 +25,11 @@ import {
 	hasExpressionHandler,
 	hasIncludeHandler,
 	hasWhereHandler,
+	registerAllExpressionHandlers,
+	registerAllIncludeHandlers,
 	registerExpressionHandler,
 	registerIncludeHandler,
 	registerWhereHandler,
-	registerAllExpressionHandlers,
-	registerAllIncludeHandlers,
 } from './index.js';
 
 // Force handler registration upfront by triggering a dispatch
@@ -276,7 +276,12 @@ describe('handlers/index - Coverage Tests', () => {
 		it('normalizes comparison kind', () => {
 			const s = state();
 			const node = dispatch(
-				{ kind: 'comparison', field: 'name', operator: '=', value: 'Alice' } as any,
+				{
+					kind: 'comparison',
+					field: 'name',
+					operator: '=',
+					value: 'Alice',
+				} as any,
 				ctx,
 				s,
 			);
@@ -490,9 +495,7 @@ describe('handlers/index - Coverage Tests', () => {
 			const node = dispatch(
 				{
 					type: 'whereAnd',
-					conditions: [
-						{ type: 'where', column: 'a', operator: '=', value: 1 },
-					],
+					conditions: [{ type: 'where', column: 'a', operator: '=', value: 1 }],
 				} as any,
 				ctx,
 				s,
@@ -505,9 +508,7 @@ describe('handlers/index - Coverage Tests', () => {
 			const node = dispatch(
 				{
 					type: 'whereOr',
-					conditions: [
-						{ type: 'where', column: 'a', operator: '=', value: 1 },
-					],
+					conditions: [{ type: 'where', column: 'a', operator: '=', value: 1 }],
 				} as any,
 				ctx,
 				s,
@@ -520,9 +521,7 @@ describe('handlers/index - Coverage Tests', () => {
 			const node = dispatch(
 				{
 					type: 'whereNot',
-					conditions: [
-						{ type: 'where', column: 'a', operator: '=', value: 1 },
-					],
+					conditions: [{ type: 'where', column: 'a', operator: '=', value: 1 }],
 				} as any,
 				ctx,
 				s,

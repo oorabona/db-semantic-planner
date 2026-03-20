@@ -1,10 +1,11 @@
 /**
  * Deparse AST to SQL string.
- * Re-exports deparseSync from pgsql-deparser with a consistent API.
+ * Uses the internal deparser for production; pgsql-deparser stays in devDeps
+ * for comparison tests only.
  */
 import type { Node } from '@pgsql/types';
-import { deparseSync } from 'pgsql-deparser';
+import { deparse } from './pgsql-deparser.js';
 
 export function deparseQuoted(ast: Node): string {
-	return deparseSync(ast);
+	return deparse(ast);
 }

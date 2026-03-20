@@ -37,8 +37,7 @@
 - [ ] 🔧 **DDL-OPCLASS-INTRO** [Adapter] Index introspection missing opclass/include/expressions — pg_opclass join, pg_get_expr(indexprs), indnkeyatts for INCLUDE columns. — Priority: M (from /review F-004)
 - [ ] 🔧 **DDL-ENUM-DEPCHECK** [Adapter] drop_enum without column dependency check — scan ModelIR tables for columns referencing enum before emitting DROP TYPE. — Priority: M (from /review F-005)
 - [ ] 🔧 **DDL-SEQ-DRY** [Adapter] Sequence SQL generation duplicated 4× — extract buildSequenceClause(seq: SequenceIR) shared helper. — Priority: S (from /review F-007)
-- [x] ✅ **CAPS-VERSION** [Types] Version-aware dialect capabilities — MySQL 8.0.16+ for CHECK, SQLite 3.9+ for partial indexes, etc. Flag per min-version. — Priority: L (2026-03-19)
-- [ ] 🐛 **UPSERT-RAW** [Core] `doUpdate()` in upsert builder doesn't support raw SQL expressions (e.g., `orm.raw('now()')`) — values serialized as `{}` instead of emitted as SQL. Blocks `upsertFile` in astix (needs `last_parsed = now()` in ON CONFLICT DO UPDATE). — Priority: P1 (from astix ORM migration 2026-03-19)
+(CAPS-VERSION, UPSERT-RAW, EDGE-001, EDGE-002 archived → docs/historic/done-2026-03.md)
 - [ ] 💡 **NQL-WITH** [NQL] WITH ... AS (...) non-recursive CTE syntax in NQL parser — deferred from BATCH-001. — Priority: P1 (from /adversarial 2026-03-18)
 - [ ] 🔧 **BATCH-DRY-001** [Adapter] Extract shared `mapModelIRTypeToPgBase()` — duplicated in any.ts + compiler-utils.ts. — Priority: M (from /review F-001)
 - [ ] 🔧 **BATCH-DRY-002** [Adapter] Extract `stripArraySuffix()` helper — repeated 5× across files. — Priority: S (from /review F-002)
@@ -56,6 +55,9 @@
 > Tier 1 (OSS baseline): PostgreSQL, MySQL, SQLite, DuckDB. Tier 2 (best-effort): Oracle, MSSQL, CouchDB.
 
 (CAPS-001→005 archived → docs/historic/done-2026-03.md)
+(EDGE-001, EDGE-002, EDGE-002/F-001, EDGE-002/F-002, EDGE-002/LINT archived → docs/historic/done-2026-03.md)
+- [x] ⏭️ **DX-WARMUP** [Adapter] Obsolete — EDGE-001 eliminated WASM, warmup() no longer needed. (2026-03-20)
+- [ ] 💡 **EDGE-FLOAT** [Adapter] raw-expression-parser: add float literal support (e.g. `sql('3.14')`) — Priority: L (from /review EDGE-002 F-005)
 - [ ] 🔧 **CAPS-DRY-001** [Adapter] `isChangeSupported()` missing `alter_column_collation`/`alter_column_identity` ChangeKind filters — Priority: S (from /review F-003)
 - [ ] 🔧 **CAPS-DOC-001** [Adapter] Add JSDoc to `sup()` helper explaining undefined vs false semantics — Priority: S (from /review F-004)
 
@@ -67,9 +69,9 @@
 
 ### CRITICAL — Decompose god functions
 
-- [ ] 🔧 **ARCH-001** [Adapter] Decompose `convertSelect` (complexity **356**, 240 LOC) in `packages/adapter-pgsql/src/intent-to-decisions.ts` — split into decision-type-specific strategy builders. Highest complexity in codebase. — Priority: CRITICAL
-- [ ] 🔧 **ARCH-002** [Adapter] Decompose `PgsqlAdapter` (1780 LOC monolithic class) in `packages/adapter-pgsql/src/pgsql-adapter.ts` — extract DDL, introspection, transactions, compilation into focused modules. 30 direct callers, risk=HIGH. — Priority: CRITICAL
-- [ ] 🔧 **ARCH-003** [Adapter] Decompose `compileSelect` (complexity **163**, 429 LOC) in `packages/adapter-pgsql/src/compiler.ts` — extract per-clause compilation (WHERE, JOIN, ORDER BY, GROUP BY). — Priority: CRITICAL
+- [x] ✅ **ARCH-001** [Adapter] Decompose `convertSelect` — 13 expression handlers extracted into dispatch map, 245→78 LOC. (2026-03-19)
+- [x] ✅ **ARCH-002** [Adapter] Decompose `PgsqlAdapter` compilation domain — 15 methods (568 LOC) extracted into 4 modules (adapter-compiler-select, -includes, -mutations, -recursive) + deps type. pgsql-adapter.ts: 1985→745 LOC. 2416 tests pass. (2026-03-19)
+- [x] ✅ **ARCH-003** [Adapter] Decompose `compileSelect` — 7 helpers extracted (createHandlerContext, createHandlerState, compileSelectTarget, compileIncludeDecision, compileWhereDecision, flushPendingJoins, buildSelectStmt), 439→122 LOC. (2026-03-19)
 
 ### HIGH — GUI + handler duplication
 

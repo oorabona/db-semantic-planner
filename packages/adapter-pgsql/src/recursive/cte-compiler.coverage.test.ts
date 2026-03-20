@@ -1,8 +1,11 @@
 // @ts-nocheck — coverage test: runtime assertions on AST nodes
 
 import { describe, expect, it } from 'vitest';
-import { buildRecursiveCte, buildRecursiveScalarSubquery } from './cte-compiler.js';
 import { identityNaming } from '../naming-plugin.js';
+import {
+	buildRecursiveCte,
+	buildRecursiveScalarSubquery,
+} from './cte-compiler.js';
 
 // ============================================================================
 // Test Helpers
@@ -265,7 +268,9 @@ describe('buildRecursiveCte - edge-table mode', () => {
 				kind: 'AEXPR_OP',
 				name: [{ String: { sval: '=' } }],
 				lexpr: {
-					ColumnRef: { fields: [{ String: { sval: '__n' } }, { String: { sval: 'id' } }] },
+					ColumnRef: {
+						fields: [{ String: { sval: '__n' } }, { String: { sval: 'id' } }],
+					},
 				},
 				rexpr: { A_Const: { ival: { ival: 42 } } },
 			},
@@ -405,7 +410,9 @@ describe('buildRecursiveScalarSubquery', () => {
 			'recursive',
 			true,
 		);
-		expect(result.SubLink.subselect.SelectStmt.withClause).toHaveProperty('ctes');
+		expect(result.SubLink.subselect.SelectStmt.withClause).toHaveProperty(
+			'ctes',
+		);
 		expect(result.SubLink.subselect.SelectStmt.withClause.ctes).toHaveLength(1);
 	});
 });
@@ -450,7 +457,10 @@ describe('buildRecursiveCte - complex combinations', () => {
 						name: [{ String: { sval: '=' } }],
 						lexpr: {
 							ColumnRef: {
-								fields: [{ String: { sval: '__n' } }, { String: { sval: 'active' } }],
+								fields: [
+									{ String: { sval: '__n' } },
+									{ String: { sval: 'active' } },
+								],
 							},
 						},
 						rexpr: { A_Const: { boolval: { boolval: true } } },

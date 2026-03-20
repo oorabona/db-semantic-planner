@@ -244,7 +244,11 @@ describe('compileValueOrFieldRef', () => {
 	it('falls back to rootTable when scope:outer but no outerAlias', () => {
 		const state = createCompilerState();
 		const ctxNoOuter = makeCtx({ currentAlias: 'sub' });
-		const fieldRef = { kind: 'fieldRef' as const, column: 'id', scope: 'outer' as const };
+		const fieldRef = {
+			kind: 'fieldRef' as const,
+			column: 'id',
+			scope: 'outer' as const,
+		};
 
 		const node = compileValueOrFieldRef(fieldRef, ctxNoOuter, state);
 
@@ -254,7 +258,11 @@ describe('compileValueOrFieldRef', () => {
 	it('uses currentAlias when scope:inner and currentAlias is set', () => {
 		const state = createCompilerState();
 		const ctxWithAlias = makeCtx({ currentAlias: 'p' });
-		const fieldRef = { kind: 'fieldRef' as const, column: 'title', scope: 'inner' as const };
+		const fieldRef = {
+			kind: 'fieldRef' as const,
+			column: 'title',
+			scope: 'inner' as const,
+		};
 
 		const node = compileValueOrFieldRef(fieldRef, ctxWithAlias, state);
 
@@ -263,7 +271,11 @@ describe('compileValueOrFieldRef', () => {
 
 	it('falls back to rootTable when scope:inner but no currentAlias', () => {
 		const state = createCompilerState();
-		const fieldRef = { kind: 'fieldRef' as const, column: 'title', scope: 'inner' as const };
+		const fieldRef = {
+			kind: 'fieldRef' as const,
+			column: 'title',
+			scope: 'inner' as const,
+		};
 
 		const node = compileValueOrFieldRef(fieldRef, ctx, state);
 
@@ -311,7 +323,11 @@ describe('compileValueOrFieldRef', () => {
 				fromDatabase: (name) => name.toLowerCase(),
 			},
 		});
-		const fieldRef = { kind: 'fieldRef' as const, column: 'author_id', scope: 'inner' as const };
+		const fieldRef = {
+			kind: 'fieldRef' as const,
+			column: 'author_id',
+			scope: 'inner' as const,
+		};
 
 		const node = compileValueOrFieldRef(fieldRef, ctxWithNaming, state);
 

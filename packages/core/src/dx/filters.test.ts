@@ -19,6 +19,7 @@ import {
 	isDistinctField,
 	isNotNull,
 	isNull,
+	isSqlRaw,
 	like,
 	lt,
 	lte,
@@ -31,6 +32,8 @@ import {
 	rangeOverlaps,
 	raw,
 	relationColumn,
+	SQL_RAW_MARKER,
+	sql,
 } from './filters.js';
 
 // ============================================================================
@@ -967,6 +970,72 @@ describe('Type-safe filters with ColumnRef (DX-040)', () => {
 				field: 'deletedAt',
 				operator: 'isNull',
 			});
+		});
+	});
+});
+
+// ============================================================================
+// UPSERT-RAW: sql() raw SQL set expression
+// ============================================================================
+
+describe('sql() — raw SQL set expression', () => {
+	describe('sql()', () => {
+		it('returns an object with SQL_RAW_MARKER and sql properties', () => {
+			const expr = sql('now()');
+			expect(expr[SQL_RAW_MARKER]).toBe(true);
+			expect(expr.sql).toBe('now()');
+		});
+
+		it('accepts multi-token SQL fragments', () => {
+			const expr = sql('excluded.count + 1');
+			expect(expr.sql).toBe('excluded.count + 1');
+		});
+
+		it('accepts SQL function calls', () => {
+			const expr = sql('gen_random_uuid()');
+			expect(expr.sql).toBe('gen_random_uuid()');
+		});
+
+		it('throws on empty string', () => {
+			expect(() => sql('')).toThrow('sql() requires a non-empty SQL fragment');
+		});
+
+		it('throws on whitespace-only string', () => {
+			expect(() => sql('   ')).toThrow(
+				'sql() requires a non-empty SQL fragment',
+			);
+		});
+	});
+
+	describe('isSqlRaw()', () => {
+		it('returns true for sql() results', () => {
+			expect(isSqlRaw(sql('now()'))).toBe(true);
+		});
+
+		it('returns false for plain strings', () => {
+			expect(isSqlRaw('now()')).toBe(false);
+		});
+
+		it('returns false for numbers', () => {
+			expect(isSqlRaw(42)).toBe(false);
+		});
+
+		it('returns false for null', () => {
+			expect(isSqlRaw(null)).toBe(false);
+		});
+
+		it('returns false for plain objects without marker', () => {
+			expect(isSqlRaw({ sql: 'now()' })).toBe(false);
+		});
+
+		it('returns false for objects with wrong marker value', () => {
+			const fake = { [SQL_RAW_MARKER]: false, sql: 'now()' };
+			expect(isSqlRaw(fake)).toBe(false);
+		});
+
+		it('returns true for object with correct marker', () => {
+			const expr = { [SQL_RAW_MARKER]: true as const, sql: 'now()' };
+			expect(isSqlRaw(expr)).toBe(true);
 		});
 	});
 });

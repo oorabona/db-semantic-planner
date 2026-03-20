@@ -33,7 +33,11 @@ describe('plan-decision-extractor - coverage', () => {
 		});
 
 		it('finds relationFilter intent', () => {
-			const where = { kind: 'relationFilter', relation: 'comments', mode: 'some' };
+			const where = {
+				kind: 'relationFilter',
+				relation: 'comments',
+				mode: 'some',
+			};
 			expect(findExistsIntents(where)).toEqual([where]);
 		});
 
@@ -64,7 +68,12 @@ describe('plan-decision-extractor - coverage', () => {
 		});
 
 		it('returns empty for unrecognized kind', () => {
-			const where = { kind: 'comparison', field: 'id', operator: 'eq', value: 1 };
+			const where = {
+				kind: 'comparison',
+				field: 'id',
+				operator: 'eq',
+				value: 1,
+			};
 			expect(findExistsIntents(where)).toEqual([]);
 		});
 	});
@@ -166,7 +175,9 @@ describe('plan-decision-extractor - coverage', () => {
 		});
 
 		it('returns undefined for unknown relationType', () => {
-			expect(deriveForeignKey({ relationType: 'unknown' }, deriveFk, 'id')).toBeUndefined();
+			expect(
+				deriveForeignKey({ relationType: 'unknown' }, deriveFk, 'id'),
+			).toBeUndefined();
 		});
 
 		it('returns undefined if no FK and no relationType', () => {
@@ -249,9 +260,20 @@ describe('plan-decision-extractor - coverage', () => {
 
 	describe('convertWhereToDecisions', () => {
 		it('converts comparison condition', () => {
-			const where = { kind: 'comparison', field: 'age', operator: 'gte', value: 18 };
+			const where = {
+				kind: 'comparison',
+				field: 'age',
+				operator: 'gte',
+				value: 18,
+			};
 			expect(convertWhereToDecisions(where, 'users')).toEqual([
-				{ type: 'where', column: 'age', operator: 'gte', value: 18, table: 'users' },
+				{
+					type: 'where',
+					column: 'age',
+					operator: 'gte',
+					value: 18,
+					table: 'users',
+				},
 			]);
 		});
 
@@ -271,20 +293,41 @@ describe('plan-decision-extractor - coverage', () => {
 		it('converts in condition with values', () => {
 			const where = { kind: 'in', field: 'id', values: [1, 2, 3] };
 			expect(convertWhereToDecisions(where, 'users')).toEqual([
-				{ type: 'where', column: 'id', operator: 'in', value: [1, 2, 3], table: 'users' },
+				{
+					type: 'where',
+					column: 'id',
+					operator: 'in',
+					value: [1, 2, 3],
+					table: 'users',
+				},
 			]);
 		});
 
 		it('converts in condition with subquery', () => {
-			const subquery = { type: 'select', from: 'active', select: { fields: ['id'] } };
+			const subquery = {
+				type: 'select',
+				from: 'active',
+				select: { fields: ['id'] },
+			};
 			const where = { kind: 'in', field: 'id', subquery };
 			expect(convertWhereToDecisions(where, 'users')).toEqual([
-				{ type: 'where', column: 'id', operator: 'in', value: subquery, table: 'users' },
+				{
+					type: 'where',
+					column: 'id',
+					operator: 'in',
+					value: subquery,
+					table: 'users',
+				},
 			]);
 		});
 
 		it('converts range condition with explicit operator', () => {
-			const where = { kind: 'range', field: 'price', operator: 'gte', value: 100 };
+			const where = {
+				kind: 'range',
+				field: 'price',
+				operator: 'gte',
+				value: 100,
+			};
 			expect(convertWhereToDecisions(where, 'products')).toEqual([
 				{
 					type: 'where',
@@ -339,7 +382,9 @@ describe('plan-decision-extractor - coverage', () => {
 		it('converts AND with single condition (unwraps)', () => {
 			const where = {
 				kind: 'and',
-				conditions: [{ kind: 'comparison', field: 'id', operator: 'eq', value: 1 }],
+				conditions: [
+					{ kind: 'comparison', field: 'id', operator: 'eq', value: 1 },
+				],
 			};
 			const result = convertWhereToDecisions(where, 'users');
 			expect(result).toHaveLength(1);
@@ -368,7 +413,9 @@ describe('plan-decision-extractor - coverage', () => {
 		it('converts OR with single condition (unwraps)', () => {
 			const where = {
 				kind: 'or',
-				conditions: [{ kind: 'comparison', field: 'id', operator: 'eq', value: 1 }],
+				conditions: [
+					{ kind: 'comparison', field: 'id', operator: 'eq', value: 1 },
+				],
 			};
 			const result = convertWhereToDecisions(where, 'users');
 			expect(result).toHaveLength(1);
@@ -383,7 +430,12 @@ describe('plan-decision-extractor - coverage', () => {
 		it('converts NOT with condition', () => {
 			const where = {
 				kind: 'not',
-				condition: { kind: 'comparison', field: 'deleted', operator: 'eq', value: true },
+				condition: {
+					kind: 'comparison',
+					field: 'deleted',
+					operator: 'eq',
+					value: true,
+				},
 			};
 			const result = convertWhereToDecisions(where, 'users');
 			expect(result).toHaveLength(1);
@@ -421,7 +473,13 @@ describe('plan-decision-extractor - coverage', () => {
 
 		it('converts dotted field to EXISTS subquery', () => {
 			const decisions = [
-				{ type: 'where', column: 'posts.title', operator: 'like', value: '%test%', table: 'users' },
+				{
+					type: 'where',
+					column: 'posts.title',
+					operator: 'like',
+					value: '%test%',
+					table: 'users',
+				},
 			];
 			const result = convertDottedFieldsToExists(decisions, 'users', mockModel);
 			expect(result[0].operator).toBe('exists');
@@ -432,7 +490,13 @@ describe('plan-decision-extractor - coverage', () => {
 
 		it('preserves non-dotted fields', () => {
 			const decisions = [
-				{ type: 'where', column: 'name', operator: 'eq', value: 'John', table: 'users' },
+				{
+					type: 'where',
+					column: 'name',
+					operator: 'eq',
+					value: 'John',
+					table: 'users',
+				},
 			];
 			const result = convertDottedFieldsToExists(decisions, 'users', mockModel);
 			expect(result).toEqual(decisions);
@@ -524,7 +588,16 @@ describe('plan-decision-extractor - coverage', () => {
 			const plan = {
 				rootTable: 'users',
 				intent: {
-					where: { kind: 'exists', relation: 'posts', where: { kind: 'comparison', field: 'published', operator: 'eq', value: true } },
+					where: {
+						kind: 'exists',
+						relation: 'posts',
+						where: {
+							kind: 'comparison',
+							field: 'published',
+							operator: 'eq',
+							value: true,
+						},
+					},
 				},
 				decisions: [
 					{
@@ -561,7 +634,9 @@ describe('plan-decision-extractor - coverage', () => {
 		it('extracts relationFilter mode=none as notExists', () => {
 			const plan = {
 				rootTable: 'users',
-				intent: { where: { kind: 'relationFilter', relation: 'posts', mode: 'none' } },
+				intent: {
+					where: { kind: 'relationFilter', relation: 'posts', mode: 'none' },
+				},
 				decisions: [
 					{
 						type: 'filter-strategy',
@@ -577,7 +652,9 @@ describe('plan-decision-extractor - coverage', () => {
 		it('extracts relationFilter mode=every', () => {
 			const plan = {
 				rootTable: 'users',
-				intent: { where: { kind: 'relationFilter', relation: 'posts', mode: 'every' } },
+				intent: {
+					where: { kind: 'relationFilter', relation: 'posts', mode: 'every' },
+				},
 				decisions: [
 					{
 						type: 'filter-strategy',
@@ -666,7 +743,9 @@ describe('plan-decision-extractor - coverage', () => {
 		it('resolves FK from model if provided', () => {
 			const model = {
 				getRelation: (key: string) =>
-					key === 'users.posts' ? { target: 'posts', foreignKey: 'user_id' } : undefined,
+					key === 'users.posts'
+						? { target: 'posts', foreignKey: 'user_id' }
+						: undefined,
 			};
 			const plan = {
 				rootTable: 'users',
@@ -675,7 +754,11 @@ describe('plan-decision-extractor - coverage', () => {
 					{
 						type: 'filter-strategy',
 						choice: 'exists',
-						context: { target: 'posts', relation: 'posts', sourceTable: 'users' },
+						context: {
+							target: 'posts',
+							relation: 'posts',
+							sourceTable: 'users',
+						},
 					},
 				],
 			};
@@ -693,7 +776,11 @@ describe('plan-decision-extractor - coverage', () => {
 					{
 						type: 'include-strategy',
 						choice: 'json_agg',
-						context: { target: 'posts', relation: 'posts', intentPath: 'include[0]' },
+						context: {
+							target: 'posts',
+							relation: 'posts',
+							intentPath: 'include[0]',
+						},
 					},
 				],
 			};
@@ -711,7 +798,11 @@ describe('plan-decision-extractor - coverage', () => {
 					{
 						type: 'include-strategy',
 						choice: 'lateral',
-						context: { target: 'posts', relation: 'posts', intentPath: 'include[0]' },
+						context: {
+							target: 'posts',
+							relation: 'posts',
+							intentPath: 'include[0]',
+						},
 					},
 				],
 			};
@@ -727,7 +818,11 @@ describe('plan-decision-extractor - coverage', () => {
 					{
 						type: 'include-strategy',
 						choice: 'subquery',
-						context: { target: 'posts', relation: 'posts', intentPath: 'include[0]' },
+						context: {
+							target: 'posts',
+							relation: 'posts',
+							intentPath: 'include[0]',
+						},
 					},
 				],
 			};
@@ -738,7 +833,14 @@ describe('plan-decision-extractor - coverage', () => {
 		it('extracts join strategy as flat decision', () => {
 			const plan = {
 				rootTable: 'users',
-				intent: { include: [{ relation: 'profile', select: { type: 'fields', fields: ['bio'] } }] },
+				intent: {
+					include: [
+						{
+							relation: 'profile',
+							select: { type: 'fields', fields: ['bio'] },
+						},
+					],
+				},
 				decisions: [
 					{
 						type: 'include-strategy',
@@ -761,7 +863,11 @@ describe('plan-decision-extractor - coverage', () => {
 					{
 						type: 'include-strategy',
 						choice: 'cte',
-						context: { target: 'posts', relation: 'posts', intentPath: 'include[0]' },
+						context: {
+							target: 'posts',
+							relation: 'posts',
+							intentPath: 'include[0]',
+						},
 					},
 				],
 			};
@@ -784,7 +890,11 @@ describe('plan-decision-extractor - coverage', () => {
 					{
 						type: 'include-strategy',
 						choice: 'json_agg',
-						context: { target: 'posts', relation: 'posts', intentPath: 'include[0]' },
+						context: {
+							target: 'posts',
+							relation: 'posts',
+							intentPath: 'include[0]',
+						},
 					},
 					{
 						type: 'include-strategy',
@@ -811,7 +921,11 @@ describe('plan-decision-extractor - coverage', () => {
 					{
 						type: 'include-strategy',
 						choice: 'json_agg',
-						context: { target: 'posts', relation: 'posts', intentPath: 'include[0]' },
+						context: {
+							target: 'posts',
+							relation: 'posts',
+							intentPath: 'include[0]',
+						},
 					},
 				],
 			};
@@ -854,7 +968,11 @@ describe('plan-decision-extractor - coverage', () => {
 					{
 						type: 'include-strategy',
 						choice: 'json_agg',
-						context: { target: 'posts', relation: 'posts', intentPath: 'include[0]' },
+						context: {
+							target: 'posts',
+							relation: 'posts',
+							intentPath: 'include[0]',
+						},
 					},
 				],
 			};
@@ -871,7 +989,11 @@ describe('plan-decision-extractor - coverage', () => {
 					{
 						type: 'include-strategy',
 						choice: 'json_agg',
-						context: { target: 'posts', relation: 'posts', intentPath: 'include[0]' },
+						context: {
+							target: 'posts',
+							relation: 'posts',
+							intentPath: 'include[0]',
+						},
 					},
 					{
 						type: 'include-strategy',
@@ -904,7 +1026,12 @@ describe('plan-decision-extractor - coverage', () => {
 			const plan = {
 				rootTable: 'users',
 				intent: {
-					include: [{ relation: 'profile', select: { type: 'fields', fields: ['bio', 'avatar'] } }],
+					include: [
+						{
+							relation: 'profile',
+							select: { type: 'fields', fields: ['bio', 'avatar'] },
+						},
+					],
 				},
 				decisions: [
 					{

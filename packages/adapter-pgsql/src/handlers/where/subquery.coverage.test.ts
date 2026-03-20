@@ -26,7 +26,7 @@ function makeCtx(overrides: Partial<CompilerContext> = {}): CompilerContext {
 }
 
 /** Mock dispatcher for nested conditions */
-const mockDispatch: WhereDispatcher = (decision, ctx, state) => {
+const mockDispatch: WhereDispatcher = (_decision, _ctx, _state) => {
 	return {
 		A_Expr: {
 			kind: 'AEXPR_OP',
@@ -298,7 +298,7 @@ describe('scalarSubqueryHandler', () => {
 		const ctxWithSchema = makeCtx({ schema: 'public' });
 		let capturedCtx: CompilerContext | undefined;
 
-		const inspectDispatch: WhereDispatcher = (decision, ctx, state) => {
+		const inspectDispatch: WhereDispatcher = (_decision, ctx, _state) => {
 			capturedCtx = ctx;
 			return { A_Const: { boolval: { boolval: true } } };
 		};
