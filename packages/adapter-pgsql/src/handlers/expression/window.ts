@@ -94,51 +94,41 @@ function buildWindowFunction(
 }
 
 /**
- * ROW_NUMBER() handler
- *
- * ROW_NUMBER() OVER (PARTITION BY ... ORDER BY ...)
+ * Factory for no-argument window function handlers (ROW_NUMBER, RANK, DENSE_RANK, etc.).
+ * Produces: FUNC() OVER (PARTITION BY ... ORDER BY ...)
  */
-export const rowNumberHandler: ExpressionHandler = {
-	types: ['rowNumber', 'ROW_NUMBER', 'row_number'],
+function createNoArgWindowHandler(
+	funcName: string,
+	types: string[],
+): ExpressionHandler {
+	return {
+		types,
+		compile(
+			decision: Decision,
+			ctx: CompilerContext,
+			_state: CompilerState,
+		): Node {
+			return buildWindowFunction(funcName, [], decision, ctx);
+		},
+	};
+}
 
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		_state: CompilerState,
-	): Node {
-		return buildWindowFunction('row_number', [], decision, ctx);
-	},
-};
+/** ROW_NUMBER() OVER (...) handler */
+export const rowNumberHandler = createNoArgWindowHandler('row_number', [
+	'rowNumber',
+	'ROW_NUMBER',
+	'row_number',
+]);
 
-/**
- * RANK() handler
- */
-export const rankHandler: ExpressionHandler = {
-	types: ['rank', 'RANK'],
+/** RANK() OVER (...) handler */
+export const rankHandler = createNoArgWindowHandler('rank', ['rank', 'RANK']);
 
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		_state: CompilerState,
-	): Node {
-		return buildWindowFunction('rank', [], decision, ctx);
-	},
-};
-
-/**
- * DENSE_RANK() handler
- */
-export const denseRankHandler: ExpressionHandler = {
-	types: ['denseRank', 'DENSE_RANK', 'dense_rank'],
-
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		_state: CompilerState,
-	): Node {
-		return buildWindowFunction('dense_rank', [], decision, ctx);
-	},
-};
+/** DENSE_RANK() OVER (...) handler */
+export const denseRankHandler = createNoArgWindowHandler('dense_rank', [
+	'denseRank',
+	'DENSE_RANK',
+	'dense_rank',
+]);
 
 /**
  * NTILE(n) handler
@@ -161,126 +151,96 @@ export const ntileHandler: ExpressionHandler = {
 };
 
 /**
- * LAG(column, offset, default) handler
+ * Factory for LAG/LEAD-style window handlers: FUNC(column, offset, default) OVER (...).
  */
-export const lagHandler: ExpressionHandler = {
-	types: ['lag', 'LAG'],
+function createLagLeadHandler(
+	funcName: string,
+	types: string[],
+): ExpressionHandler {
+	const upperName = funcName.toUpperCase();
+	return {
+		types,
+		compile(
+			decision: Decision,
+			ctx: CompilerContext,
+			state: CompilerState,
+		): Node {
+			const column = decision.column;
+			if (!column) {
+				throw new Error(`${upperName} requires a column`);
+			}
 
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		state: CompilerState,
-	): Node {
-		const column = decision.column;
-		if (!column) {
-			throw new Error('LAG requires a column');
-		}
+			const tableAlias = ctx.currentAlias ?? ctx.rootTable;
+			const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
 
-		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
+			const args: Node[] = [colRef];
 
-		const args: Node[] = [colRef];
+			// Optional offset (default 1)
+			const offset = decision.args?.[0] ?? 1;
+			const offsetParamNumber = ++state.paramIndex;
+			state.parameters.push(offset);
+			args.push(createParamRef(offsetParamNumber));
 
-		// Optional offset (default 1)
-		const offset = decision.args?.[0] ?? 1;
-		const offsetParamNumber = ++state.paramIndex;
-		state.parameters.push(offset);
-		args.push(createParamRef(offsetParamNumber));
+			// Optional default value
+			if (decision.value !== undefined) {
+				const defaultParamNumber = ++state.paramIndex;
+				state.parameters.push(decision.value);
+				args.push(createParamRef(defaultParamNumber));
+			}
 
-		// Optional default value
-		if (decision.value !== undefined) {
-			const defaultParamNumber = ++state.paramIndex;
-			state.parameters.push(decision.value);
-			args.push(createParamRef(defaultParamNumber));
-		}
+			return buildWindowFunction(funcName, args, decision, ctx);
+		},
+	};
+}
 
-		return buildWindowFunction('lag', args, decision, ctx);
-	},
-};
+/** LAG(column, offset, default) OVER (...) handler */
+export const lagHandler = createLagLeadHandler('lag', ['lag', 'LAG']);
+
+/** LEAD(column, offset, default) OVER (...) handler */
+export const leadHandler = createLagLeadHandler('lead', ['lead', 'LEAD']);
 
 /**
- * LEAD(column, offset, default) handler
+ * Factory for single-column window value handlers (FIRST_VALUE, LAST_VALUE).
+ * Produces: FUNC(column) OVER (...)
  */
-export const leadHandler: ExpressionHandler = {
-	types: ['lead', 'LEAD'],
+function createColumnWindowHandler(
+	funcName: string,
+	types: string[],
+): ExpressionHandler {
+	const upperName = funcName.toUpperCase();
+	return {
+		types,
+		compile(
+			decision: Decision,
+			ctx: CompilerContext,
+			_state: CompilerState,
+		): Node {
+			const column = decision.column;
+			if (!column) {
+				throw new Error(`${upperName} requires a column`);
+			}
 
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		state: CompilerState,
-	): Node {
-		const column = decision.column;
-		if (!column) {
-			throw new Error('LEAD requires a column');
-		}
+			const tableAlias = ctx.currentAlias ?? ctx.rootTable;
+			const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
 
-		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
+			return buildWindowFunction(funcName, [colRef], decision, ctx);
+		},
+	};
+}
 
-		const args: Node[] = [colRef];
+/** FIRST_VALUE(column) OVER (...) handler */
+export const firstValueHandler = createColumnWindowHandler('first_value', [
+	'firstValue',
+	'FIRST_VALUE',
+	'first_value',
+]);
 
-		// Optional offset (default 1)
-		const offset = decision.args?.[0] ?? 1;
-		const offsetParamNumber = ++state.paramIndex;
-		state.parameters.push(offset);
-		args.push(createParamRef(offsetParamNumber));
-
-		// Optional default value
-		if (decision.value !== undefined) {
-			const defaultParamNumber = ++state.paramIndex;
-			state.parameters.push(decision.value);
-			args.push(createParamRef(defaultParamNumber));
-		}
-
-		return buildWindowFunction('lead', args, decision, ctx);
-	},
-};
-
-/**
- * FIRST_VALUE(column) handler
- */
-export const firstValueHandler: ExpressionHandler = {
-	types: ['firstValue', 'FIRST_VALUE', 'first_value'],
-
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		_state: CompilerState,
-	): Node {
-		const column = decision.column;
-		if (!column) {
-			throw new Error('FIRST_VALUE requires a column');
-		}
-
-		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
-
-		return buildWindowFunction('first_value', [colRef], decision, ctx);
-	},
-};
-
-/**
- * LAST_VALUE(column) handler
- */
-export const lastValueHandler: ExpressionHandler = {
-	types: ['lastValue', 'LAST_VALUE', 'last_value'],
-
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		_state: CompilerState,
-	): Node {
-		const column = decision.column;
-		if (!column) {
-			throw new Error('LAST_VALUE requires a column');
-		}
-
-		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
-
-		return buildWindowFunction('last_value', [colRef], decision, ctx);
-	},
-};
+/** LAST_VALUE(column) OVER (...) handler */
+export const lastValueHandler = createColumnWindowHandler('last_value', [
+	'lastValue',
+	'LAST_VALUE',
+	'last_value',
+]);
 
 /**
  * Generic window function handler
