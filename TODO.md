@@ -37,10 +37,7 @@
 - [ ] 🔧 **DDL-OPCLASS-INTRO** [Adapter] Index introspection missing opclass/include/expressions — pg_opclass join, pg_get_expr(indexprs), indnkeyatts for INCLUDE columns. — Priority: M (from /review F-004)
 - [ ] 🔧 **DDL-ENUM-DEPCHECK** [Adapter] drop_enum without column dependency check — scan ModelIR tables for columns referencing enum before emitting DROP TYPE. — Priority: M (from /review F-005)
 - [ ] 🔧 **DDL-SEQ-DRY** [Adapter] Sequence SQL generation duplicated 4× — extract buildSequenceClause(seq: SequenceIR) shared helper. — Priority: S (from /review F-007)
-- [x] ✅ **CAPS-VERSION** [Types] Version-aware dialect capabilities — MySQL 8.0.16+ for CHECK, SQLite 3.9+ for partial indexes, etc. Flag per min-version. — Priority: L (2026-03-19)
-- [x] ✅ **UPSERT-RAW** [Core] `sql()` marker + `isSqlRaw()` for raw SQL in `doUpdate()` / `set()`. Emits verbatim SQL via `parseRawExpression` (AST-safe, no string templating). Handles mixed raw+scalar, raw-only, UPDATE SET. (2026-03-19)
-- [x] ✅ **EDGE-001** [Adapter] Remove WASM from production: pure-TS `parseExpression` replaces `parseSync` in `parseRawExpression`. Zero WASM refs in dist. 25 parser tests + all 2452 passing. (2026-03-20)
-- [x] ✅ **EDGE-002** [Adapter] Internalize pgsql-deparser: pure-TS deparser replacing WASM dep. Handles all 30+ AST node types dbsp produces. `pgsql-deparser` moved to devDependencies. All 8841 tests pass. Bundle: 390.8K (reduced). (2026-03-20)
+(CAPS-VERSION, UPSERT-RAW, EDGE-001, EDGE-002 archived → docs/historic/done-2026-03.md)
 - [ ] 💡 **NQL-WITH** [NQL] WITH ... AS (...) non-recursive CTE syntax in NQL parser — deferred from BATCH-001. — Priority: P1 (from /adversarial 2026-03-18)
 - [ ] 🔧 **BATCH-DRY-001** [Adapter] Extract shared `mapModelIRTypeToPgBase()` — duplicated in any.ts + compiler-utils.ts. — Priority: M (from /review F-001)
 - [ ] 🔧 **BATCH-DRY-002** [Adapter] Extract `stripArraySuffix()` helper — repeated 5× across files. — Priority: S (from /review F-002)
@@ -58,12 +55,9 @@
 > Tier 1 (OSS baseline): PostgreSQL, MySQL, SQLite, DuckDB. Tier 2 (best-effort): Oracle, MSSQL, CouchDB.
 
 (CAPS-001→005 archived → docs/historic/done-2026-03.md)
-- [x] ✅ **EDGE-001** [Adapter] Remove libpg-query WASM from production — done. (2026-03-20)
-- [x] ✅ **EDGE-002** [Adapter] Internalize pgsql-deparser — done. (2026-03-20)
-- [x] ✅ **EDGE-002/F-001** [Adapter] Add NullIfExpr handler to pgsql-deparser + tests — done. (2026-03-20)
-- [x] ✅ **EDGE-002/F-002** [Adapter] Add MinMaxExpr (GREATEST/LEAST) handler to pgsql-deparser + tests — done. (2026-03-20)
-- [x] ✅ **EDGE-002/LINT** [Adapter] Fix all biome lint violations in adapter-pgsql (noThenProperty suppressions, useLiteralKeys) — done. (2026-03-20)
-- [ ] 💡 **DX-WARMUP** [Adapter] Expose `warmup()` async function for serverless cold-start optimization — pre-load libpg-query WASM before first query. Becomes obsolete if EDGE-001 lands. — Priority: L
+(EDGE-001, EDGE-002, EDGE-002/F-001, EDGE-002/F-002, EDGE-002/LINT archived → docs/historic/done-2026-03.md)
+- [x] ⏭️ **DX-WARMUP** [Adapter] Obsolete — EDGE-001 eliminated WASM, warmup() no longer needed. (2026-03-20)
+- [ ] 💡 **EDGE-FLOAT** [Adapter] raw-expression-parser: add float literal support (e.g. `sql('3.14')`) — Priority: L (from /review EDGE-002 F-005)
 - [ ] 🔧 **CAPS-DRY-001** [Adapter] `isChangeSupported()` missing `alter_column_collation`/`alter_column_identity` ChangeKind filters — Priority: S (from /review F-003)
 - [ ] 🔧 **CAPS-DOC-001** [Adapter] Add JSDoc to `sup()` helper explaining undefined vs false semantics — Priority: S (from /review F-004)
 
