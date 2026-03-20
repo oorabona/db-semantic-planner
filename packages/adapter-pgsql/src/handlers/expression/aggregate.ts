@@ -89,88 +89,46 @@ export const countDistinctHandler: ExpressionHandler = {
 };
 
 /**
- * SUM handler
+ * Factory for simple aggregate handlers (no distinct, column required).
+ * Produces: FUNC(column) FILTER (WHERE ...)
  */
-export const sumHandler: ExpressionHandler = {
-	types: ['sum', 'SUM'],
+function createSimpleAggregateHandler(
+	funcName: string,
+	types: string[],
+): ExpressionHandler {
+	return {
+		types,
+		compile(
+			decision: Decision,
+			ctx: CompilerContext,
+			_state: CompilerState,
+		): Node {
+			return buildAggregate(
+				funcName,
+				decision.column,
+				false,
+				ctx,
+				decision.filterWhere,
+			);
+		},
+	};
+}
 
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		_state: CompilerState,
-	): Node {
-		return buildAggregate(
-			'sum',
-			decision.column,
-			false,
-			ctx,
-			decision.filterWhere,
-		);
-	},
-};
+/** SUM handler */
+export const sumHandler = createSimpleAggregateHandler('sum', ['sum', 'SUM']);
 
-/**
- * AVG handler
- */
-export const avgHandler: ExpressionHandler = {
-	types: ['avg', 'AVG', 'average'],
+/** AVG handler */
+export const avgHandler = createSimpleAggregateHandler('avg', [
+	'avg',
+	'AVG',
+	'average',
+]);
 
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		_state: CompilerState,
-	): Node {
-		return buildAggregate(
-			'avg',
-			decision.column,
-			false,
-			ctx,
-			decision.filterWhere,
-		);
-	},
-};
+/** MIN handler */
+export const minHandler = createSimpleAggregateHandler('min', ['min', 'MIN']);
 
-/**
- * MIN handler
- */
-export const minHandler: ExpressionHandler = {
-	types: ['min', 'MIN'],
-
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		_state: CompilerState,
-	): Node {
-		return buildAggregate(
-			'min',
-			decision.column,
-			false,
-			ctx,
-			decision.filterWhere,
-		);
-	},
-};
-
-/**
- * MAX handler
- */
-export const maxHandler: ExpressionHandler = {
-	types: ['max', 'MAX'],
-
-	compile(
-		decision: Decision,
-		ctx: CompilerContext,
-		_state: CompilerState,
-	): Node {
-		return buildAggregate(
-			'max',
-			decision.column,
-			false,
-			ctx,
-			decision.filterWhere,
-		);
-	},
-};
+/** MAX handler */
+export const maxHandler = createSimpleAggregateHandler('max', ['max', 'MAX']);
 
 /**
  * Generic aggregate handler for custom aggregates
