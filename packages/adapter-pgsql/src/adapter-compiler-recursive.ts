@@ -303,7 +303,7 @@ export function compileCteQuery(
 		cteParamCount > 0
 			? outerCompiled.sql.replace(
 					/\$([0-9]+)/g,
-					(_: string, n: string) => '$' + (parseInt(n) + cteParamCount),
+					(_: string, n: string) => `$${parseInt(n, 10) + cteParamCount}`,
 				)
 			: outerCompiled.sql;
 

@@ -478,8 +478,10 @@ export function parseExpression(sqlFragment: string): Node {
 	const parser = new Parser(tokens);
 	const node = parser.parseExpr();
 
+	// biome-ignore lint/complexity/useLiteralKeys: accessing private members via bracket notation intentionally
 	if (parser['peek']().kind !== 'EOF') {
 		const remaining = tokens
+			// biome-ignore lint/complexity/useLiteralKeys: accessing private members via bracket notation intentionally
 			.slice(parser['pos'])
 			.map((t) => t.value)
 			.join(' ');

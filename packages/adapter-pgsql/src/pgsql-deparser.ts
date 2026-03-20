@@ -100,6 +100,10 @@ export function deparse(node: Node): string {
 			return deparseFuncCall(inner as FuncCall);
 		case 'CoalesceExpr':
 			return deparseCoalesceExpr(inner as CoalesceExpr);
+		case 'NullIfExpr':
+			return deparseNullIfExpr(inner as { args?: Node[] });
+		case 'MinMaxExpr':
+			return deparseMinMaxExpr(inner as { op?: string; args?: Node[] });
 		case 'CaseExpr':
 			return deparseCaseExpr(inner as CaseExpr);
 		case 'CaseWhen':
@@ -298,9 +302,7 @@ function strNodeVal(n: Node): string {
 	const r = n as Record<string, unknown>;
 	const k = Object.keys(r)[0]!;
 	if (k === 'String') {
-		return (
-			((r[k] as Record<string, unknown>)['sval'] as string | undefined) ?? ''
-		);
+		return ((r[k] as Record<string, unknown>).sval as string | undefined) ?? '';
 	}
 	return '';
 }
@@ -327,30 +329,30 @@ function deparseFloatNode(node: Float): string {
 // ---------------------------------------------------------------------------
 
 function deparseAConst(node: A_Const): string {
-	if ('isnull' in node && (node as Record<string, unknown>)['isnull']) {
+	if ('isnull' in node && (node as Record<string, unknown>).isnull) {
 		return 'NULL';
 	}
 	const rec = node as Record<string, unknown>;
 	// integer: { ival: { ival: N } } or { ival: N }
-	if ('ival' in rec && rec['ival'] !== undefined) {
-		const iv = rec['ival'] as Record<string, unknown> | number;
-		return String(typeof iv === 'object' ? (iv['ival'] as number) : iv);
+	if ('ival' in rec && rec.ival !== undefined) {
+		const iv = rec.ival as Record<string, unknown> | number;
+		return String(typeof iv === 'object' ? (iv.ival as number) : iv);
 	}
 	// float: { fval: { fval: "N" } } or { fval: "N" }
-	if ('fval' in rec && rec['fval'] !== undefined) {
-		const fv = rec['fval'] as Record<string, unknown> | string;
-		return typeof fv === 'object' ? String(fv['fval'] ?? '') : fv;
+	if ('fval' in rec && rec.fval !== undefined) {
+		const fv = rec.fval as Record<string, unknown> | string;
+		return typeof fv === 'object' ? String(fv.fval ?? '') : fv;
 	}
 	// boolean: { boolval: { boolval: bool } } or { boolval: bool }
-	if ('boolval' in rec && rec['boolval'] !== undefined) {
-		const bv = rec['boolval'] as Record<string, unknown> | boolean;
-		const val = typeof bv === 'object' ? (bv['boolval'] as boolean) : bv;
+	if ('boolval' in rec && rec.boolval !== undefined) {
+		const bv = rec.boolval as Record<string, unknown> | boolean;
+		const val = typeof bv === 'object' ? (bv.boolval as boolean) : bv;
 		return val ? 'true' : 'false';
 	}
 	// string: { sval: { sval: "..." } } or { sval: "..." }
-	if ('sval' in rec && rec['sval'] !== undefined) {
-		const sv = rec['sval'] as Record<string, unknown> | string;
-		const s = typeof sv === 'object' ? String(sv['sval'] ?? '') : sv;
+	if ('sval' in rec && rec.sval !== undefined) {
+		const sv = rec.sval as Record<string, unknown> | string;
+		const s = typeof sv === 'object' ? String(sv.sval ?? '') : sv;
 		return quoteString(s);
 	}
 	return 'NULL';
@@ -376,7 +378,7 @@ function deparseColumnRef(node: ColumnRef): string {
 		if (k === 'A_Star') return '*';
 		// String node → identifier
 		const inner = r[k] as Record<string, unknown>;
-		return quoteIdent(String(inner['sval'] ?? ''));
+		return quoteIdent(String(inner.sval ?? ''));
 	});
 	return parts.join('.');
 }
@@ -460,7 +462,7 @@ function deparseAExpr(node: A_Expr): string {
 	if (kind === 'AEXPR_BETWEEN' || kind === 'AEXPR_NOT_BETWEEN') {
 		const left = node.lexpr ? deparse(node.lexpr) : '';
 		const listRec = node.rexpr as Record<string, unknown>;
-		const listInner = listRec['List'] as { items: Node[] } | undefined;
+		const listInner = listRec.List as { items: Node[] } | undefined;
 		const items = listInner?.items ?? [];
 		const low = items[0] ? deparse(items[0]) : '';
 		const high = items[1] ? deparse(items[1]) : '';
@@ -527,9 +529,7 @@ function deparseFuncCall(node: FuncCall): string {
 		const r = n as Record<string, unknown>;
 		const k = Object.keys(r)[0]!;
 		if (k === 'String') {
-			return quoteIdent(
-				String((r[k] as Record<string, unknown>)['sval'] ?? ''),
-			);
+			return quoteIdent(String((r[k] as Record<string, unknown>).sval ?? ''));
 		}
 		return deparse(n);
 	});
@@ -570,6 +570,22 @@ function deparseFuncCall(node: FuncCall): string {
 function deparseCoalesceExpr(node: CoalesceExpr): string {
 	const args = (node.args ?? []).map(nodeToStr);
 	return `COALESCE(${args.join(', ')})`;
+}
+
+function deparseNullIfExpr(node: { args?: Node[] }): string {
+	const args = node.args ?? [];
+	if (args.length !== 2) {
+		throw new Error(
+			`NullIfExpr requires exactly 2 arguments, got ${args.length}`,
+		);
+	}
+	return `NULLIF(${deparse(args[0]!)}, ${deparse(args[1]!)})`;
+}
+
+function deparseMinMaxExpr(node: { op?: string; args?: Node[] }): string {
+	const args = (node.args ?? []).map(nodeToStr);
+	const fn = node.op === 'IS_GREATEST' ? 'GREATEST' : 'LEAST';
+	return `${fn}(${args.join(', ')})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -613,7 +629,7 @@ function deparseTypeName(node: TypeName): string {
 			const r = n as Record<string, unknown>;
 			const k = Object.keys(r)[0]!;
 			if (k === 'String') {
-				const sval = String((r[k] as Record<string, unknown>)['sval'] ?? '');
+				const sval = String((r[k] as Record<string, unknown>).sval ?? '');
 				if (sval === 'pg_catalog') return null;
 				return sval;
 			}
@@ -821,10 +837,10 @@ function deparseWindowDef(node: WindowDef): string {
 
 function deparseCommonTableExpr(node: CommonTableExpr): string {
 	const rec = node as unknown as Record<string, unknown>;
-	const cteName = String(rec['ctename'] ?? '');
-	const ctequery = rec['ctequery'] as Node | undefined;
-	const cteCols = rec['cte_cols'] as Node[] | undefined;
-	const cycleClause = rec['cycle_clause'] as CTECycleClause | undefined;
+	const cteName = String(rec.ctename ?? '');
+	const ctequery = rec.ctequery as Node | undefined;
+	const cteCols = rec.cte_cols as Node[] | undefined;
+	const cycleClause = rec.cycle_clause as CTECycleClause | undefined;
 
 	let result = `${quoteIdent(cteName)} AS `;
 
@@ -833,9 +849,7 @@ function deparseCommonTableExpr(node: CommonTableExpr): string {
 			const r = c as Record<string, unknown>;
 			const k = Object.keys(r)[0]!;
 			if (k === 'String') {
-				return quoteIdent(
-					String((r[k] as Record<string, unknown>)['sval'] ?? ''),
-				);
+				return quoteIdent(String((r[k] as Record<string, unknown>).sval ?? ''));
 			}
 			return deparse(c);
 		});
@@ -859,18 +873,16 @@ function deparseWithClause(node: WithClause): string {
 
 function deparseCTECycleClause(node: CTECycleClause): string {
 	const rec = node as unknown as Record<string, unknown>;
-	const colList = (rec['cycle_col_list'] ?? []) as Node[];
-	const markColumn = String(rec['cycle_mark_column'] ?? '');
-	const pathColumn = String(rec['cycle_path_column'] ?? '');
+	const colList = (rec.cycle_col_list ?? []) as Node[];
+	const markColumn = String(rec.cycle_mark_column ?? '');
+	const pathColumn = String(rec.cycle_path_column ?? '');
 
 	const cols = colList
 		.map((c) => {
 			const r = c as Record<string, unknown>;
 			const k = Object.keys(r)[0]!;
 			if (k === 'String') {
-				return quoteIdent(
-					String((r[k] as Record<string, unknown>)['sval'] ?? ''),
-				);
+				return quoteIdent(String((r[k] as Record<string, unknown>).sval ?? ''));
 			}
 			return deparse(c);
 		})
@@ -885,13 +897,13 @@ function deparseCTECycleClause(node: CTECycleClause): string {
 
 function deparseSelectStmt(node: SelectStmt): string {
 	const rec = node as unknown as Record<string, unknown>;
-	const op = rec['op'] as string | undefined;
+	const op = rec.op as string | undefined;
 
 	// UNION / INTERSECT / EXCEPT
 	if (op && op !== 'SETOP_NONE') {
-		const larg = rec['larg'] as SelectStmt | undefined;
-		const rarg = rec['rarg'] as SelectStmt | undefined;
-		const all = rec['all'] as boolean | undefined;
+		const larg = rec.larg as SelectStmt | undefined;
+		const rarg = rec.rarg as SelectStmt | undefined;
+		const all = rec.all as boolean | undefined;
 		const left = larg ? deparseSelectStmt(larg) : '';
 		const right = rarg ? deparseSelectStmt(rarg) : '';
 		let setOp: string;
@@ -912,12 +924,11 @@ function deparseSelectStmt(node: SelectStmt): string {
 	}
 
 	// VALUES clause
-	const valuesLists = rec['valuesLists'] as Node[] | undefined;
+	const valuesLists = rec.valuesLists as Node[] | undefined;
 	if (valuesLists && valuesLists.length > 0) {
 		const rows = valuesLists.map((row) => {
 			const rowRec = row as Record<string, unknown>;
-			const items =
-				(rowRec['List'] as { items: Node[] } | undefined)?.items ?? [];
+			const items = (rowRec.List as { items: Node[] } | undefined)?.items ?? [];
 			return `(${items.map(nodeToStr).join(', ')})`;
 		});
 		return `VALUES ${rows.join(', ')}`;
@@ -926,13 +937,13 @@ function deparseSelectStmt(node: SelectStmt): string {
 	const parts: string[] = [];
 
 	// WITH clause
-	const withClause = rec['withClause'] as WithClause | undefined;
+	const withClause = rec.withClause as WithClause | undefined;
 	if (withClause) {
 		parts.push(deparseWithClause(withClause));
 	}
 
 	// SELECT [DISTINCT]
-	const distinctClause = rec['distinctClause'] as Node[] | undefined;
+	const distinctClause = rec.distinctClause as Node[] | undefined;
 	let selectKeyword = 'SELECT';
 	if (distinctClause !== undefined) {
 		if (Array.isArray(distinctClause) && distinctClause.length > 0) {
@@ -1013,13 +1024,13 @@ function deparseInsertStmt(node: InsertStmt): string {
 			const r = c as Record<string, unknown>;
 			// Format 1: { ResTarget: { name: "col" } }  (ast-helpers.ts)
 			if ('ResTarget' in r) {
-				const rt = r['ResTarget'] as ResTarget | undefined;
+				const rt = r.ResTarget as ResTarget | undefined;
 				return quoteIdent(rt?.name ?? '');
 			}
 			// Format 2: { String: { sval: "col" } }  (upsert.ts)
 			if ('String' in r) {
-				const s = r['String'] as Record<string, unknown> | undefined;
-				return quoteIdent(String(s?.['sval'] ?? ''));
+				const s = r.String as Record<string, unknown> | undefined;
+				return quoteIdent(String(s?.sval ?? ''));
 			}
 			return deparse(c);
 		});
@@ -1062,7 +1073,7 @@ function deparseUpdateStmt(node: UpdateStmt): string {
 	}
 
 	const setItems = (node.targetList ?? []).map((t) => {
-		const rt = (t as Record<string, unknown>)['ResTarget'] as
+		const rt = (t as Record<string, unknown>).ResTarget as
 			| ResTarget
 			| undefined;
 		const name = rt?.name ?? '';
@@ -1099,9 +1110,8 @@ function deparseDeleteStmt(node: DeleteStmt): string {
 		parts.push(deparseRangeVar(node.relation));
 	}
 
-	const usingClause = (node as unknown as Record<string, unknown>)[
-		'usingClause'
-	] as Node[] | undefined;
+	const usingClause = (node as unknown as Record<string, unknown>)
+		.usingClause as Node[] | undefined;
 	if (usingClause && usingClause.length > 0) {
 		parts.push(`USING ${usingClause.map(nodeToStr).join(', ')}`);
 	}
@@ -1133,7 +1143,7 @@ function deparseOnConflictClause(node: OnConflictClause): string {
 		parts.push('DO NOTHING');
 	} else if (node.action === 'ONCONFLICT_UPDATE') {
 		const setItems = (node.targetList ?? []).map((t) => {
-			const rt = (t as Record<string, unknown>)['ResTarget'] as
+			const rt = (t as Record<string, unknown>).ResTarget as
 				| ResTarget
 				| undefined;
 			const name = rt?.name ?? '';
@@ -1161,7 +1171,7 @@ function deparseInferClause(node: InferClause): string {
 	const indexElems = node.indexElems ?? [];
 	if (indexElems.length > 0) {
 		const cols = indexElems.map((e) => {
-			const ie = (e as Record<string, unknown>)['IndexElem'] as
+			const ie = (e as Record<string, unknown>).IndexElem as
 				| IndexElem
 				| undefined;
 			return ie ? deparseIndexElem(ie) : deparse(e);
@@ -1190,15 +1200,15 @@ function deparseIndexElem(node: IndexElem): string {
 // ---------------------------------------------------------------------------
 
 function deparseRangeFunction(node: Record<string, unknown>): string {
-	const functions = (node['functions'] ?? []) as Node[];
-	const ordinality = node['ordinality'] as boolean | undefined;
-	const alias = node['alias'] as Record<string, unknown> | undefined;
+	const functions = (node.functions ?? []) as Node[];
+	const ordinality = node.ordinality as boolean | undefined;
+	const alias = node.alias as Record<string, unknown> | undefined;
 
 	// Each element in `functions` is a List node with [funcCall, defList?]
 	const funcParts = functions.map((f) => {
 		const fRec = f as Record<string, unknown>;
 		if ('List' in fRec) {
-			const items = (fRec['List'] as Record<string, unknown>)['items'] as
+			const items = (fRec.List as Record<string, unknown>).items as
 				| Node[]
 				| undefined;
 			// First item is the function call, rest are def elements
@@ -1215,17 +1225,15 @@ function deparseRangeFunction(node: Record<string, unknown>): string {
 	}
 
 	if (alias) {
-		const aliasname = String(alias['aliasname'] ?? '');
+		const aliasname = String(alias.aliasname ?? '');
 		result += ` AS ${quoteIdent(aliasname)}`;
 
-		const colnames = (alias['colnames'] ?? []) as Node[];
+		const colnames = (alias.colnames ?? []) as Node[];
 		if (colnames.length > 0) {
 			const cols = colnames.map((c) => {
 				const cr = c as Record<string, unknown>;
 				if ('String' in cr) {
-					return String(
-						(cr['String'] as Record<string, unknown>)['sval'] ?? '',
-					);
+					return String((cr.String as Record<string, unknown>).sval ?? '');
 				}
 				return deparse(c);
 			});
@@ -1241,16 +1249,16 @@ function deparseRangeFunction(node: Record<string, unknown>): string {
 // ---------------------------------------------------------------------------
 
 function deparseRangeSubselect(node: Record<string, unknown>): string {
-	const lateral = node['lateral'] as boolean | undefined;
-	const subquery = node['subquery'] as Node | undefined;
-	const alias = node['alias'] as Record<string, unknown> | undefined;
+	const lateral = node.lateral as boolean | undefined;
+	const subquery = node.subquery as Node | undefined;
+	const alias = node.alias as Record<string, unknown> | undefined;
 
 	const prefix = lateral ? 'LATERAL ' : '';
 	const subStr = subquery ? deparse(subquery) : '';
 	let result = `${prefix}(${subStr})`;
 
 	if (alias) {
-		const aliasname = String(alias['aliasname'] ?? '');
+		const aliasname = String(alias.aliasname ?? '');
 		result += ` AS ${quoteIdent(aliasname)}`;
 	}
 
@@ -1323,16 +1331,16 @@ function deparseExplainStmt(node: ExplainStmt): string {
 
 function deparseDefElem(node: DefElem): string {
 	const rec = node as unknown as Record<string, unknown>;
-	const defname = String(rec['defname'] ?? '');
+	const defname = String(rec.defname ?? '');
 	const name = defname.toUpperCase();
-	const arg = rec['arg'] as Node | undefined;
+	const arg = rec.arg as Node | undefined;
 
 	if (arg) {
 		const argRec = arg as Record<string, unknown>;
 		const argKey = Object.keys(argRec)[0]!;
 		if (argKey === 'String') {
 			const sval = String(
-				(argRec[argKey] as Record<string, unknown>)['sval'] ?? '',
+				(argRec[argKey] as Record<string, unknown>).sval ?? '',
 			);
 			return `${name} ${sval.toUpperCase()}`;
 		}
@@ -1347,7 +1355,7 @@ function deparseDefElem(node: DefElem): string {
 
 function deparseClosePortalStmt(node: ClosePortalStmt): string {
 	const rec = node as unknown as Record<string, unknown>;
-	const portalname = rec['portalname'] as string | undefined;
+	const portalname = rec.portalname as string | undefined;
 	if (portalname) {
 		return `CLOSE ${quoteIdent(portalname)}`;
 	}
@@ -1377,9 +1385,9 @@ function deparseArrayExpr(node: A_ArrayExpr): string {
 
 function deparseDeclareCursorStmt(node: DeclareCursorStmt): string {
 	const rec = node as unknown as Record<string, unknown>;
-	const portalname = String(rec['portalname'] ?? '');
-	const query = rec['query'] as Node | undefined;
-	const opts = (rec['options'] as number | undefined) ?? 0;
+	const portalname = String(rec.portalname ?? '');
+	const query = rec.query as Node | undefined;
+	const opts = (rec.options as number | undefined) ?? 0;
 
 	const parts: string[] = ['DECLARE', quoteIdent(portalname)];
 
@@ -1410,9 +1418,9 @@ const FETCH_DIR_MAP: Record<string, string> = {
 
 function deparseFetchStmt(node: FetchStmt): string {
 	const rec = node as unknown as Record<string, unknown>;
-	const direction = String(rec['direction'] ?? '');
-	const howMany = rec['howMany'];
-	const portalname = String(rec['portalname'] ?? '');
+	const direction = String(rec.direction ?? '');
+	const howMany = rec.howMany;
+	const portalname = String(rec.portalname ?? '');
 
 	const parts: string[] = ['FETCH'];
 	const dir = FETCH_DIR_MAP[direction] ?? direction;

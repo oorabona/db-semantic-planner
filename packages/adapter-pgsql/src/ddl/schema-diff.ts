@@ -8,7 +8,6 @@
  */
 
 import type {
-	CheckConstraintIR,
 	ColumnIR,
 	DbCasing,
 	DialectCapabilities,

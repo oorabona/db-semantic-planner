@@ -333,6 +333,7 @@ describe('PlanCompiler - Coverage Tests', () => {
 									operator: '=',
 									value: 1,
 								},
+								// biome-ignore lint/suspicious/noThenProperty: CASE/WHEN decision object uses 'then' key
 								then: 'active',
 							},
 						],
@@ -364,6 +365,7 @@ describe('PlanCompiler - Coverage Tests', () => {
 									operator: '=',
 									value: 1,
 								},
+								// biome-ignore lint/suspicious/noThenProperty: CASE/WHEN decision object uses 'then' key
 								then: 'pending',
 							},
 							{
@@ -373,6 +375,7 @@ describe('PlanCompiler - Coverage Tests', () => {
 									operator: '=',
 									value: 2,
 								},
+								// biome-ignore lint/suspicious/noThenProperty: CASE/WHEN decision object uses 'then' key
 								then: 'shipped',
 							},
 							{
@@ -382,6 +385,7 @@ describe('PlanCompiler - Coverage Tests', () => {
 									operator: '=',
 									value: 3,
 								},
+								// biome-ignore lint/suspicious/noThenProperty: CASE/WHEN decision object uses 'then' key
 								then: 'delivered',
 							},
 						],
@@ -1774,6 +1778,7 @@ describe('PlanCompiler - Coverage Tests', () => {
 									operator: '=',
 									value: true,
 								},
+								// biome-ignore lint/suspicious/noThenProperty: CASE/WHEN decision object uses 'then' key
 								then: 'yes',
 							},
 						],
@@ -2454,6 +2459,7 @@ describe('PlanCompiler - Coverage Tests', () => {
 									operator: '=',
 									value: false,
 								},
+								// biome-ignore lint/suspicious/noThenProperty: CASE/WHEN decision object uses 'then' key
 								then: null,
 							},
 						],
@@ -2485,6 +2491,7 @@ describe('PlanCompiler - Coverage Tests', () => {
 									operator: '=',
 									value: 'admin',
 								},
+								// biome-ignore lint/suspicious/noThenProperty: CASE/WHEN decision object uses 'then' key
 								then: {
 									kind: 'column',
 									column: 'display_name',

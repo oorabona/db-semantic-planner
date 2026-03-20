@@ -20,7 +20,6 @@ import type {
 } from '@dbsp/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import {
-	inferPgArrayType,
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from './compiler-utils.js';

@@ -60,6 +60,9 @@
 (CAPS-001→005 archived → docs/historic/done-2026-03.md)
 - [x] ✅ **EDGE-001** [Adapter] Remove libpg-query WASM from production — done. (2026-03-20)
 - [x] ✅ **EDGE-002** [Adapter] Internalize pgsql-deparser — done. (2026-03-20)
+- [x] ✅ **EDGE-002/F-001** [Adapter] Add NullIfExpr handler to pgsql-deparser + tests — done. (2026-03-20)
+- [x] ✅ **EDGE-002/F-002** [Adapter] Add MinMaxExpr (GREATEST/LEAST) handler to pgsql-deparser + tests — done. (2026-03-20)
+- [x] ✅ **EDGE-002/LINT** [Adapter] Fix all biome lint violations in adapter-pgsql (noThenProperty suppressions, useLiteralKeys) — done. (2026-03-20)
 - [ ] 💡 **DX-WARMUP** [Adapter] Expose `warmup()` async function for serverless cold-start optimization — pre-load libpg-query WASM before first query. Becomes obsolete if EDGE-001 lands. — Priority: L
 - [ ] 🔧 **CAPS-DRY-001** [Adapter] `isChangeSupported()` missing `alter_column_collation`/`alter_column_identity` ChangeKind filters — Priority: S (from /review F-003)
 - [ ] 🔧 **CAPS-DOC-001** [Adapter] Add JSDoc to `sup()` helper explaining undefined vs false semantics — Priority: S (from /review F-004)

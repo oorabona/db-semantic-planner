@@ -15,7 +15,6 @@
 
 import type { PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { identityNaming } from './naming-plugin.js';
 import {
 	createPgsqlCompileOnlyAdapter,
 	PgsqlAdapter,

@@ -54,13 +54,15 @@ import { deparse } from '../pgsql-deparser.js';
  * single-line output. Normalized comparison verifies semantic equivalence.
  */
 function normalizeSQL(sql: string): string {
-	return sql
-		.toLowerCase()
-		.replace(/\s+/g, ' ')
-		// Normalize spaces inside parentheses: ( x, y ) → (x, y)
-		.replace(/\(\s+/g, '(')
-		.replace(/\s+\)/g, ')')
-		.trim();
+	return (
+		sql
+			.toLowerCase()
+			.replace(/\s+/g, ' ')
+			// Normalize spaces inside parentheses: ( x, y ) → (x, y)
+			.replace(/\(\s+/g, '(')
+			.replace(/\s+\)/g, ')')
+			.trim()
+	);
 }
 
 function compare(node: Node): void {
@@ -400,6 +402,61 @@ describe('CoalesceExpr', () => {
 });
 
 // ---------------------------------------------------------------------------
+// NullIfExpr
+// ---------------------------------------------------------------------------
+
+describe('NullIfExpr', () => {
+	it('NULLIF(col, value)', () => {
+		compare({
+			NullIfExpr: {
+				args: [columnRef('score'), { A_Const: { ival: { ival: 0 } } }],
+			},
+		});
+	});
+
+	it('NULLIF(col, string)', () => {
+		compare({
+			NullIfExpr: {
+				args: [columnRef('status'), { A_Const: { sval: { sval: 'deleted' } } }],
+			},
+		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// MinMaxExpr
+// ---------------------------------------------------------------------------
+
+describe('MinMaxExpr', () => {
+	it('GREATEST(a, b)', () => {
+		compare({
+			MinMaxExpr: {
+				op: 'IS_GREATEST',
+				args: [columnRef('a'), columnRef('b')],
+			},
+		});
+	});
+
+	it('LEAST(a, b, c)', () => {
+		compare({
+			MinMaxExpr: {
+				op: 'IS_LEAST',
+				args: [columnRef('a'), columnRef('b'), columnRef('c')],
+			},
+		});
+	});
+
+	it('GREATEST with param', () => {
+		compare({
+			MinMaxExpr: {
+				op: 'IS_GREATEST',
+				args: [columnRef('score'), createParamRef(1)],
+			},
+		});
+	});
+});
+
+// ---------------------------------------------------------------------------
 // SortBy
 // ---------------------------------------------------------------------------
 
@@ -567,8 +624,8 @@ describe('SelectStmt', () => {
 			SelectStmt: {
 				op: 'SETOP_UNION',
 				all: true,
-				larg: (s1 as { SelectStmt: unknown })['SelectStmt'],
-				rarg: (s2 as { SelectStmt: unknown })['SelectStmt'],
+				larg: (s1 as { SelectStmt: unknown }).SelectStmt,
+				rarg: (s2 as { SelectStmt: unknown }).SelectStmt,
 			},
 		});
 	});
@@ -751,10 +808,11 @@ describe('OnConflictClause', () => {
 			values: [[createParamRef(1)]],
 		});
 		// Manually attach onConflict
-		const insertInner = (node as Record<string, unknown>)[
-			'InsertStmt'
-		] as Record<string, unknown>;
-		insertInner['onConflictClause'] = {
+		const insertInner = (node as Record<string, unknown>).InsertStmt as Record<
+			string,
+			unknown
+		>;
+		insertInner.onConflictClause = {
 			action: 'ONCONFLICT_NOTHING',
 		};
 		compare(node);
@@ -766,10 +824,11 @@ describe('OnConflictClause', () => {
 			columns: ['id', 'name'],
 			values: [[createParamRef(1), createParamRef(2)]],
 		});
-		const insertInner = (node as Record<string, unknown>)[
-			'InsertStmt'
-		] as Record<string, unknown>;
-		insertInner['onConflictClause'] = {
+		const insertInner = (node as Record<string, unknown>).InsertStmt as Record<
+			string,
+			unknown
+		>;
+		insertInner.onConflictClause = {
 			action: 'ONCONFLICT_UPDATE',
 			infer: {
 				indexElems: [{ IndexElem: { name: 'id' } }],

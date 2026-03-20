@@ -8,7 +8,7 @@
  *   SC-11 — NQL ANY syntax: WHERE id = ANY(:ids)
  */
 
-import { any, POSTGRESQL_CAPABILITIES, plan, ref, schema } from '@dbsp/core';
+import { any, POSTGRESQL_CAPABILITIES, plan, schema } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
