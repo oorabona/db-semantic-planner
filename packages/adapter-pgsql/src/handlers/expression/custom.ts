@@ -135,13 +135,14 @@ export function compileExpressionIntent(
 		}
 
 		case 'namedArg': {
-			const i = intent as NamedArgExpressionIntent;
-			const argNode = compileExpressionIntent(i.value, ctx, state);
-			// PostgreSQL NamedArgExpr AST node
+			const nae = intent as NamedArgExpressionIntent;
+			const argNode = compileExpressionIntent(nae.value, ctx, state);
+			// NamedArgExpr is a valid PostgreSQL AST node but not included in @pgsql/types Node union.
+			// The internal deparser handles it correctly. Cast through unknown is safe here.
 			return {
 				NamedArgExpr: {
 					arg: argNode,
-					name: i.name,
+					name: nae.name,
 					argnumber: -1,
 				},
 			} as unknown as Node;

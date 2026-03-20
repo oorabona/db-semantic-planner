@@ -64,7 +64,7 @@ function buildPolicySQL(tableName: string, policy: PolicyIR, schemaName?: string
 		policy.permissive === false ? ' AS RESTRICTIVE' : ' AS PERMISSIVE';
 	const toClause =
 		policy.roles && policy.roles.length > 0
-			? ` TO ${policy.roles.join(', ')}`
+			? ` TO ${policy.roles.map(r => q(r)).join(', ')}`
 			: '';
 	const usingClause = policy.using ? ` USING (${policy.using})` : '';
 	const withCheckClause = policy.withCheck

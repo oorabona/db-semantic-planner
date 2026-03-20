@@ -36,6 +36,9 @@
 > Only DISTINCT ON (PostgreSQL-specific) is a minor gap — .distinct() covers most cases.
 
 - [x] ✅ **DISTINCT-ON** [Adapter] PostgreSQL DISTINCT ON support — `orm.select().distinctOn('column')` for `SELECT DISTINCT ON (col)`. (2026-03-20)
+- [x] ✅ **F-001** [Core] Add name validation to `namedArg()` — injection guard matching `fn()` pattern. (2026-03-20)
+- [x] ✅ **F-002** [Adapter] Quote role names in `buildPolicySQL` (`migration-sql.ts`) via `q(r)`. (2026-03-20)
+- [x] ✅ **F-003** [Adapter] Quote role names in `generateCreatePolicy` (`ddl-generator.ts`) via `quoteIdentifier(r)`. (2026-03-20)
 
 (DX-050 archived → docs/historic/done-2026-03.md)
 (CTE-001 archived → docs/historic/done-2026-03.md)

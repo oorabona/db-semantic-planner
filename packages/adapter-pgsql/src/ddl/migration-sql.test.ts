@@ -3500,7 +3500,9 @@ describe('NOT VALID / VALIDATE CONSTRAINT', () => {
 // ============================================================================
 
 describe('DDL-RLS: Row-Level Security', () => {
-	function makeRlsTable(overrides: Partial<TableIR> & { name: string }): TableIR {
+	function makeRlsTable(
+		overrides: Partial<TableIR> & { name: string },
+	): TableIR {
 		return {
 			columns: [],
 			foreignKeys: [],
@@ -3563,8 +3565,27 @@ describe('DDL-RLS: Row-Level Security', () => {
 				]),
 			);
 			expect(sql).toEqual([
-				`CREATE POLICY "tenant_isolation" ON "documents" FOR ALL AS PERMISSIVE TO app_user, app_admin USING (tenant_id = current_setting('app.tenant')::uuid) WITH CHECK (tenant_id = current_setting('app.tenant')::uuid);`,
+				`CREATE POLICY "tenant_isolation" ON "documents" FOR ALL AS PERMISSIVE TO "app_user", "app_admin" USING (tenant_id = current_setting('app.tenant')::uuid) WITH CHECK (tenant_id = current_setting('app.tenant')::uuid);`,
 			]);
+		});
+
+		it('create_policy role names are double-quoted (F-002 security fix)', () => {
+			const policy: PolicyIR = {
+				name: 'p',
+				roles: ['app_user', 'app admin'],
+			};
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'create_policy',
+						table: 't',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+				]),
+			);
+			expect(sql[0]).toContain('TO "app_user", "app admin"');
 		});
 
 		it('create_policy with minimal options (name only)', () => {
@@ -3833,7 +3854,7 @@ describe('DDL-RLS: Row-Level Security', () => {
 				]),
 			);
 			expect(sql).toEqual([
-				`CREATE POLICY "tenant_isolation" ON "documents" FOR SELECT AS PERMISSIVE TO app_user USING (tenant_id = current_setting('app.tenant')::uuid);`,
+				`CREATE POLICY "tenant_isolation" ON "documents" FOR SELECT AS PERMISSIVE TO "app_user" USING (tenant_id = current_setting('app.tenant')::uuid);`,
 			]);
 		});
 	});
@@ -3883,6 +3904,32 @@ describe('DDL-RLS: Row-Level Security', () => {
 			const stmts = generateDDL(model);
 			expect(stmts.some((s) => s.includes('CREATE POLICY'))).toBe(true);
 			expect(stmts.some((s) => s.includes('"tenant_isolation"'))).toBe(true);
+		});
+
+		it('generateDDL policy role names are double-quoted (F-003 security fix)', async () => {
+			const { generateDDL } = await import('./ddl-generator.js');
+			const policy: PolicyIR = {
+				name: 'tenant_isolation',
+				command: 'ALL',
+				roles: ['app_user', 'app_admin'],
+				using: 'true',
+			};
+			const model = new ModelIRImpl(
+				new Map([
+					[
+						'documents',
+						makeRlsTable({
+							name: 'documents',
+							rlsEnabled: true,
+							policies: [policy],
+						}),
+					],
+				]),
+				new Map(),
+			);
+			const stmts = generateDDL(model);
+			const policyStmt = stmts.find((s) => s.includes('CREATE POLICY'));
+			expect(policyStmt).toContain('TO "app_user", "app_admin"');
 		});
 
 		it('capability gating: supportsDDLRowLevelSecurity=false omits RLS SQL', async () => {

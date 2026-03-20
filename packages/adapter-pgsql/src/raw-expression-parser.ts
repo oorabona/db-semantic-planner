@@ -45,6 +45,11 @@ interface Token {
 	value: string;
 }
 
+/**
+ * Note: Scientific notation (e.g., 3.14e5, 2.5E-3) is not supported.
+ * The parser handles simple decimal floats only (e.g., 3.14, 0.5).
+ * Scientific notation is rare in SQL expression fragments (sql() escape hatch).
+ */
 function tokenise(input: string): Token[] {
 	const tokens: Token[] = [];
 	let i = 0;
