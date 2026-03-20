@@ -5,6 +5,13 @@
  */
 
 export {
+	bm25Search,
+	booleanSearch,
+	boost,
+	parse,
+	score,
+} from './paradedb.js';
+export {
 	cosineDistance,
 	innerProduct,
 	l2Distance,
