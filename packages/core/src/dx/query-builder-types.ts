@@ -311,6 +311,23 @@ export interface QueryBuilder<TResult = unknown> {
 	distinct(): QueryBuilder<TResult>;
 
 	/**
+	 * Apply PostgreSQL DISTINCT ON (...) to the query.
+	 *
+	 * @param columns - One or more column names to deduplicate on
+	 * @returns A new QueryBuilder with DISTINCT ON applied
+	 *
+	 * @example
+	 * ```typescript
+	 * orm.select('users').distinctOn('department').all();
+	 * // SQL: SELECT DISTINCT ON ("department") * FROM "users"
+	 *
+	 * orm.select('logs').distinctOn('user_id', 'action').all();
+	 * // SQL: SELECT DISTINCT ON ("user_id", "action") * FROM "logs"
+	 * ```
+	 */
+	distinctOn(...columns: string[]): QueryBuilder<TResult>;
+
+	/**
 	 * Acquire a FOR UPDATE lock on selected rows.
 	 * Default wait policy is 'block' (wait for the lock).
 	 *

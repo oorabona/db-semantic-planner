@@ -29,6 +29,7 @@ import type { Node } from '@pgsql/types';
 
 type TokenKind =
 	| 'INT'
+	| 'FLOAT'
 	| 'STRING'
 	| 'IDENT'
 	| 'OP'
@@ -59,13 +60,22 @@ function tokenise(input: string): Token[] {
 			continue;
 		}
 
-		// Integer literal
+		// Integer or float literal
 		if (/[0-9]/.test(ch)) {
 			let num = '';
 			while (i < src.length && /[0-9]/.test(src[i]!)) {
 				num += src[i++]!;
 			}
-			tokens.push({ kind: 'INT', value: num });
+			// Check for decimal fraction → float
+			if (src[i] === '.' && i + 1 < src.length && /[0-9]/.test(src[i + 1]!)) {
+				num += src[i++]!; // consume '.'
+				while (i < src.length && /[0-9]/.test(src[i]!)) {
+					num += src[i++]!;
+				}
+				tokens.push({ kind: 'FLOAT', value: num });
+			} else {
+				tokens.push({ kind: 'INT', value: num });
+			}
 			continue;
 		}
 
@@ -253,6 +263,15 @@ class Parser {
 			return {
 				A_Const: {
 					ival: { ival: parseInt(tok.value, 10) },
+				},
+			} as unknown as Node;
+		}
+
+		if (tok.kind === 'FLOAT') {
+			this.consume();
+			return {
+				A_Const: {
+					fval: { fval: tok.value },
 				},
 			} as unknown as Node;
 		}

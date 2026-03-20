@@ -908,7 +908,7 @@ export class PlanCompiler {
 		having: Node | undefined,
 		limit: Node | undefined,
 		offset: Node | undefined,
-		distinct: boolean,
+		distinct: boolean | Node[],
 		plan: SimplifiedPlanReport,
 	): Node {
 		// Default to SELECT * if no columns specified
@@ -975,7 +975,7 @@ export class PlanCompiler {
 		let having: Node | undefined;
 		let limit: Node | undefined;
 		let offset: Node | undefined;
-		let distinct = false;
+		let distinct: boolean | Node[] = false;
 
 		for (const decision of plan.decisions) {
 			switch (decision.type) {
@@ -1082,6 +1082,14 @@ export class PlanCompiler {
 
 				case 'distinct':
 					distinct = true;
+					break;
+
+				case 'distinctOn':
+					if (decision.columns && decision.columns.length > 0) {
+						distinct = decision.columns.map((col) =>
+							columnRef(col as string, undefined, undefined, this.naming),
+						);
+					}
 					break;
 			}
 		}

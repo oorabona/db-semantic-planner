@@ -140,3 +140,65 @@ describe('intentToDecisions', () => {
 		});
 	});
 });
+
+// ============================================================================
+// DISTINCT ON
+// ============================================================================
+
+describe('intentToDecisions — DISTINCT ON', () => {
+	it('emits distinctOn decision for a single column', () => {
+		const intent = {
+			type: 'select' as const,
+			from: 'users',
+			distinctOn: ['id'] as const,
+		};
+
+		const decisions = intentToDecisions(intent, 'users');
+
+		const d = decisions.find((x) => x.type === 'distinctOn');
+		expect(d).toBeDefined();
+		expect(d?.columns).toEqual(['id']);
+	});
+
+	it('emits distinctOn decision for multiple columns', () => {
+		const intent = {
+			type: 'select' as const,
+			from: 'users',
+			distinctOn: ['id', 'name'] as const,
+		};
+
+		const decisions = intentToDecisions(intent, 'users');
+
+		const d = decisions.find((x) => x.type === 'distinctOn');
+		expect(d).toBeDefined();
+		expect(d?.columns).toEqual(['id', 'name']);
+	});
+
+	it('prefers distinctOn over distinct when both are set', () => {
+		const intent = {
+			type: 'select' as const,
+			from: 'users',
+			distinct: true,
+			distinctOn: ['id'] as const,
+		};
+
+		const decisions = intentToDecisions(intent, 'users');
+
+		expect(decisions.some((x) => x.type === 'distinctOn')).toBe(true);
+		expect(decisions.some((x) => x.type === 'distinct')).toBe(false);
+	});
+
+	it('falls back to distinct when distinctOn is empty', () => {
+		const intent = {
+			type: 'select' as const,
+			from: 'users',
+			distinct: true,
+			distinctOn: [] as const,
+		};
+
+		const decisions = intentToDecisions(intent, 'users');
+
+		expect(decisions.some((x) => x.type === 'distinct')).toBe(true);
+		expect(decisions.some((x) => x.type === 'distinctOn')).toBe(false);
+	});
+});

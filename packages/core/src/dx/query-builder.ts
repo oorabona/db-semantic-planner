@@ -104,6 +104,7 @@ export class QueryBuilderImpl<TResult = unknown>
 	private offsetValue: number | undefined = undefined;
 	private havingIntents: WhereIntent[] = [];
 	private isDistinctQuery = false;
+	private distinctOnColumns: string[] = [];
 	private skipDefaultFilters = false;
 	private lockIntent: import('@dbsp/types').LockIntent | undefined = undefined;
 
@@ -345,6 +346,27 @@ export class QueryBuilderImpl<TResult = unknown>
 	distinct(): QueryBuilder<TResult> {
 		const builder = this.clone();
 		builder.isDistinctQuery = true;
+		return builder;
+	}
+
+	/**
+	 * Apply PostgreSQL DISTINCT ON (...) to the query.
+	 *
+	 * @param columns - One or more column names to deduplicate on
+	 * @returns A new QueryBuilder with DISTINCT ON applied
+	 *
+	 * @example
+	 * ```typescript
+	 * orm.select('users').distinctOn('department').all();
+	 * // SQL: SELECT DISTINCT ON ("department") * FROM "users"
+	 *
+	 * orm.select('logs').distinctOn('user_id', 'action').all();
+	 * // SQL: SELECT DISTINCT ON ("user_id", "action") * FROM "logs"
+	 * ```
+	 */
+	distinctOn(...columns: string[]): QueryBuilder<TResult> {
+		const builder = this.clone();
+		builder.distinctOnColumns = columns;
 		return builder;
 	}
 
@@ -1432,6 +1454,11 @@ export class QueryBuilderImpl<TResult = unknown>
 			intent.distinct = true;
 		}
 
+		// Add DISTINCT ON columns (PostgreSQL-specific)
+		if (this.distinctOnColumns.length > 0) {
+			intent.distinctOn = [...this.distinctOnColumns];
+		}
+
 		if (this.includes.length > 0) {
 			intent.include = this.includes;
 		}
@@ -1782,6 +1809,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		// Clone scalar state
 		builder.selectIntent = this.selectIntent;
 		builder.isDistinctQuery = this.isDistinctQuery;
+		builder.distinctOnColumns = [...this.distinctOnColumns];
 		builder.skipDefaultFilters = this.skipDefaultFilters;
 		builder.strictModeOverride = this.strictModeOverride;
 		builder.limitValue = this.limitValue;

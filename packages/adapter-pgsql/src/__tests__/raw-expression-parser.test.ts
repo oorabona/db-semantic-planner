@@ -110,6 +110,44 @@ describe('parseExpression — column references', () => {
 // Arithmetic
 // ---------------------------------------------------------------------------
 
+describe('parseExpression — float literals', () => {
+	it('parses float literal: 3.14', () => {
+		expectMatchesLibpg('3.14');
+	});
+
+	it('parses float literal: 1.5 + 2.7', () => {
+		expectMatchesLibpg('1.5 + 2.7');
+	});
+
+	it('parses float literal: 0.5', () => {
+		expectMatchesLibpg('0.5');
+	});
+
+	it('produces Float AST node with fval string for 3.14', () => {
+		const node = parseExpression('3.14') as unknown as {
+			A_Const: { fval: { fval: string } };
+		};
+		expect(node.A_Const.fval.fval).toBe('3.14');
+	});
+
+	it('produces Float operands for 1.5 + 2.7', () => {
+		const node = parseExpression('1.5 + 2.7') as unknown as {
+			A_Expr: {
+				lexpr: { A_Const: { fval: { fval: string } } };
+				rexpr: { A_Const: { fval: { fval: string } } };
+			};
+		};
+		expect(node.A_Expr.lexpr.A_Const.fval.fval).toBe('1.5');
+		expect(node.A_Expr.rexpr.A_Const.fval.fval).toBe('2.7');
+	});
+
+	it('treats 3. (no fractional digits) as integer + DOT token', () => {
+		// "3." should NOT be a float — no digits after the dot
+		// It tokenises as INT(3) DOT, which will fail to parse (trailing DOT)
+		expect(() => parseExpression('3.')).toThrow();
+	});
+});
+
 describe('parseExpression — arithmetic', () => {
 	it('parses integer literal: 1', () => {
 		expectMatchesLibpg('1');

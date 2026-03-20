@@ -68,8 +68,10 @@ export function intentToDecisions(
 		}
 	}
 
-	// 6. DISTINCT
-	if (intent.distinct) {
+	// 6. DISTINCT / DISTINCT ON
+	if (intent.distinctOn && intent.distinctOn.length > 0) {
+		decisions.push({ type: 'distinctOn', columns: intent.distinctOn });
+	} else if (intent.distinct) {
 		decisions.push({ type: 'distinct' });
 	}
 
