@@ -97,7 +97,7 @@
 ### HIGH — GUI + handler duplication
 
 - [ ] 🔧 **ARCH-004** [GUI] Refactor `App.tsx` (1056 LOC, complexity **171**) — extract into sub-components (Editor, ResultsPanel, SettingsPanel) + custom hooks (useQueryExecution, useResultsViewer). — Priority: H
-- [ ] 🔧 **ARCH-005** [Adapter] Consolidate 10 semantically duplicate `compile()` handler methods across `packages/adapter-pgsql/src/handlers/` — extract dispatch template or use code generation. Similarity=1.0 (exact copies). — Priority: H
+- [x] ✅ **ARCH-005** [Adapter] Consolidate duplicate `compile()` handler methods — extracted 4 factory functions (`createSimpleAggregateHandler`, `createNoArgWindowHandler`, `createLagLeadHandler`, `createColumnWindowHandler`) eliminating 10 duplicate bodies across aggregate.ts and window.ts. (2026-03-20)
 - [ ] 🔧 **ARCH-006** [NQL] Decompose `compileExpression` (complexity **109**, 195 callees) in `packages/nql/src/compiler/compile-expression.ts` — split by expression type. — Priority: H
 
 ### MEDIUM — Code health findings (2026-03-14)
