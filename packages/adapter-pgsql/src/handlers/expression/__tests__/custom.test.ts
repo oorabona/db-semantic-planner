@@ -217,4 +217,44 @@ describe('compileExpressionIntent', () => {
 			expect(result.parameters).toHaveLength(0);
 		});
 	});
+
+	describe('namedArg', () => {
+		it('compiles namedArg with literal value to name => value SQL', () => {
+			const result = compileCustomExpr({
+				kind: 'namedArg',
+				name: 'field',
+				value: { kind: 'literal', value: 'name_searchable' },
+			});
+			expect(normalizeSQL(result.sql)).toContain("field => 'name_searchable'");
+			expect(result.parameters).toHaveLength(0);
+		});
+
+		it('compiles namedArg with param value to name => $N SQL', () => {
+			const result = compileCustomExpr({
+				kind: 'namedArg',
+				name: 'query_string',
+				value: { kind: 'param', value: 'hello world' },
+			});
+			expect(normalizeSQL(result.sql)).toContain('query_string => $1');
+			expect(result.parameters).toHaveLength(1);
+			expect(result.parameters[0]).toBe('hello world');
+		});
+
+		it('compiles namedArg inside customFn (paradedb.parse pattern)', () => {
+			const result = compileCustomExpr({
+				kind: 'customFn',
+				name: 'paradedb.parse',
+				args: [
+					{ kind: 'namedArg', name: 'field', value: { kind: 'literal', value: 'name' } },
+					{ kind: 'namedArg', name: 'query_string', value: { kind: 'param', value: 'test' } },
+				],
+			});
+			const sql = normalizeSQL(result.sql);
+			expect(sql).toContain('paradedb.parse');
+			expect(sql).toContain("field => 'name'");
+			expect(sql).toContain('query_string => $1');
+			expect(result.parameters).toHaveLength(1);
+			expect(result.parameters[0]).toBe('test');
+		});
+	});
 });

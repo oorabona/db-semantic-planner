@@ -9,16 +9,12 @@
  *
  * @remarks
  * ParadeDB functions accept both named and positional arguments.
- * This module uses positional args via fn() primitives, which produces:
- *   paradedb.parse('field_name', $1)
- * instead of the named form:
+ * This module uses named args via namedArg() for parse(), which produces:
  *   paradedb.parse(field => 'field_name', query_string => $1)
- *
- * Both forms are functionally equivalent in ParadeDB.
- * Named parameter syntax (NamedArgExpr) is deferred to EXT-NAMED-PARAMS.
+ * Named parameter syntax is supported via the NamedArgExpressionIntent (EXT-NAMED-PARAMS).
  */
 
-import { ExpressionRef, exprRef, fn, literal, op, param } from '@dbsp/core';
+import { ExpressionRef, exprRef, fn, literal, namedArg, op, param } from '@dbsp/core';
 
 /**
  * BM25 relevance score for a row.
@@ -40,7 +36,7 @@ export function score(keyField: string): ExpressionRef {
 /**
  * Parse a single-field BM25 query expression.
  *
- * Compiles to: paradedb.parse('field', $N)
+ * Compiles to: paradedb.parse(field => 'field_name', query_string => $N)
  *
  * @param field - Column name to search in (must be indexed in the BM25 index)
  * @param query - Query string value (will be bound as a parameter)
@@ -48,7 +44,7 @@ export function score(keyField: string): ExpressionRef {
  *
  * @example
  * parse('name', 'hello world')
- * // → paradedb.parse('name', $1)
+ * // → paradedb.parse(field => 'name', query_string => $1)
  */
 export function parse(
 	field: string,
@@ -58,7 +54,11 @@ export function parse(
 	// Otherwise, wrap it in param() so it becomes a bound $N parameter.
 	const queryExpr: ExpressionRef =
 		query instanceof ExpressionRef ? query : param(query);
-	return fn('paradedb.parse', literal(field), queryExpr);
+	return fn(
+		'paradedb.parse',
+		namedArg('field', literal(field)),
+		namedArg('query_string', queryExpr),
+	);
 }
 
 /**

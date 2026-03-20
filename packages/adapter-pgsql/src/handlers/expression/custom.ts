@@ -11,6 +11,7 @@ import type {
 	CustomOpExpressionIntent,
 	ExpressionIntent,
 	LiteralExpressionIntent,
+	NamedArgExpressionIntent,
 	ParamExpressionIntent,
 	RefExpressionIntent,
 	UnaryExpressionIntent,
@@ -131,6 +132,19 @@ export function compileExpressionIntent(
 					rexpr: operandNode,
 				},
 			};
+		}
+
+		case 'namedArg': {
+			const i = intent as NamedArgExpressionIntent;
+			const argNode = compileExpressionIntent(i.value, ctx, state);
+			// PostgreSQL NamedArgExpr AST node
+			return {
+				NamedArgExpr: {
+					arg: argNode,
+					name: i.name,
+					argnumber: -1,
+				},
+			} as unknown as Node;
 		}
 
 		default: {

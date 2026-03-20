@@ -147,6 +147,15 @@ describe('parse', () => {
 		expect(sql).toContain('$1');
 		expect(result.parameters[0]).toBe('world');
 	});
+
+	it('uses named argument syntax: field => ... and query_string => ...', () => {
+		const expr = parse('name_searchable', 'hello');
+		const result = compileSelectExpr(expr, 'p');
+		const sql = normalizeSQL(result.sql);
+
+		expect(sql).toContain("field => 'name_searchable'");
+		expect(sql).toContain('query_string => $1');
+	});
 });
 
 // ---------------------------------------------------------------------------

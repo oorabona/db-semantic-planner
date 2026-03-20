@@ -340,6 +340,7 @@ export {
 	ExpressionRef,
 	fn,
 	literal,
+	namedArg,
 	op,
 	param,
 	ref as exprRef,

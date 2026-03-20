@@ -30,6 +30,7 @@ import type {
 	CustomOpExpressionIntent,
 	ExpressionIntent,
 	LiteralExpressionIntent,
+	NamedArgExpressionIntent,
 	ParamExpressionIntent,
 	RefExpressionIntent,
 	UnaryExpressionIntent,
@@ -267,4 +268,21 @@ export function unary(operator: string, expr: ExprInput): ExpressionRef {
 		operator,
 		operand: toExpressionIntent(expr),
 	} satisfies UnaryExpressionIntent);
+}
+
+/**
+ * Named argument for function calls: name => value.
+ * Use inside fn() args to produce PostgreSQL named-argument syntax.
+ *
+ * @example namedArg('field', literal('name_searchable'))
+ *          → field => 'name_searchable'
+ * @example namedArg('query_string', param('hello'))
+ *          → query_string => $1
+ */
+export function namedArg(name: string, value: ExprInput): ExpressionRef {
+	return new ExpressionRef({
+		kind: 'namedArg',
+		name,
+		value: toExpressionIntent(value),
+	} satisfies NamedArgExpressionIntent);
 }

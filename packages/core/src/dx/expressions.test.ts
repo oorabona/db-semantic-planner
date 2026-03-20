@@ -4,6 +4,7 @@ import type {
 	CustomFnExpressionIntent,
 	CustomOpExpressionIntent,
 	LiteralExpressionIntent,
+	NamedArgExpressionIntent,
 	ParamExpressionIntent,
 	RefExpressionIntent,
 	UnaryExpressionIntent,
@@ -14,6 +15,7 @@ import {
 	cast,
 	fn,
 	literal,
+	namedArg,
 	op,
 	param,
 	ref,
@@ -385,5 +387,63 @@ describe('Expression Primitives', () => {
 			expect(intent.name).toBe('ABS');
 			expect(intent.args[0]?.kind).toBe('customOp');
 		});
+	});
+});
+
+// ============================================================================
+// namedArg()
+// ============================================================================
+
+describe('namedArg()', () => {
+	it('creates a namedArg intent with the correct kind and name', () => {
+		const expr = namedArg('field', literal('name_searchable'));
+		const intent = expr.intent as NamedArgExpressionIntent;
+		expect(intent.kind).toBe('namedArg');
+		expect(intent.name).toBe('field');
+	});
+
+	it('returns an ExpressionRef', () => {
+		expect(namedArg('query_string', param('hello'))).toBeInstanceOf(ExpressionRef);
+	});
+
+	it('wraps a literal value — intent.value is LiteralExpressionIntent', () => {
+		const expr = namedArg('field', literal('my_column'));
+		const intent = expr.intent as NamedArgExpressionIntent;
+		expect(intent.value.kind).toBe('literal');
+		expect((intent.value as { kind: string; value: unknown }).value).toBe('my_column');
+	});
+
+	it('wraps a param value — intent.value is ParamExpressionIntent', () => {
+		const expr = namedArg('query_string', param('search term'));
+		const intent = expr.intent as NamedArgExpressionIntent;
+		expect(intent.value.kind).toBe('param');
+		expect((intent.value as { kind: string; value: unknown }).value).toBe('search term');
+	});
+
+	it('accepts an ExpressionRef as value (unwraps .intent)', () => {
+		const inner = literal('col');
+		const expr = namedArg('field', inner);
+		const intent = expr.intent as NamedArgExpressionIntent;
+		expect(intent.value.kind).toBe('literal');
+	});
+
+	it('accepts a string shorthand as value — becomes RefExpressionIntent', () => {
+		const expr = namedArg('field', 'my_column');
+		const intent = expr.intent as NamedArgExpressionIntent;
+		expect(intent.value.kind).toBe('ref');
+		expect((intent.value as { kind: string; column: string }).column).toBe('my_column');
+	});
+
+	it('can be used as fn() argument — composes correctly', () => {
+		const expr = fn('paradedb.parse',
+			namedArg('field', literal('name')),
+			namedArg('query_string', param('hello')),
+		);
+		const intent = expr.intent as CustomFnExpressionIntent;
+		expect(intent.kind).toBe('customFn');
+		expect(intent.name).toBe('paradedb.parse');
+		expect(intent.args).toHaveLength(2);
+		expect(intent.args[0]?.kind).toBe('namedArg');
+		expect(intent.args[1]?.kind).toBe('namedArg');
 	});
 });

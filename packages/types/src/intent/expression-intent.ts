@@ -318,6 +318,13 @@ export interface CastExpressionIntent {
 	readonly typeName: string;
 }
 
+/** Named argument in a function call: name => value */
+export interface NamedArgExpressionIntent {
+	readonly kind: 'namedArg';
+	readonly name: string;
+	readonly value: ExpressionIntent;
+}
+
 /** Unary operator expression (e.g., NOT, -, ~) */
 export interface UnaryExpressionIntent {
 	readonly kind: 'unary';
@@ -354,7 +361,8 @@ export type ExpressionIntent =
 	| RefExpressionIntent
 	| ParamExpressionIntent
 	| CastExpressionIntent
-	| UnaryExpressionIntent;
+	| UnaryExpressionIntent
+	| NamedArgExpressionIntent;
 
 // ============================================================================
 // Window Functions (P3-A)
