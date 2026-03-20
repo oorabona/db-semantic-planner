@@ -216,4 +216,7 @@ export interface DialectCapabilities {
 	readonly supportsDDLPartialIndexes?: boolean;
 	/** Expression/functional indexes */
 	readonly supportsDDLExpressionIndexes?: boolean;
+
+	/** Row-Level Security policies (PG: CREATE POLICY, ALTER TABLE ENABLE ROW LEVEL SECURITY) */
+	readonly supportsDDLRowLevelSecurity?: boolean;
 }

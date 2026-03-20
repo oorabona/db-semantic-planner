@@ -22,6 +22,7 @@ import type {
 	ModelIR,
 	OnDeleteAction,
 	PartitionIR,
+	PolicyIR,
 	RelationIR,
 	RelationType,
 	SequenceIR,
@@ -173,7 +174,8 @@ export async function introspect(
 
 	// All catalog queries are independent — run in parallel for performance.
 	// Order matches the coverage test mock sequence: columns, pks, fks, indexes,
-	// enums, comments, checks, partitions, extensions (no schema param), sequences.
+	// enums, comments, checks, partitions, extensions (no schema param), sequences,
+	// rls state, policies.
 	const [
 		columnsResult,
 		pksResult,
@@ -185,6 +187,8 @@ export async function introspect(
 		partitionsResult,
 		extensionsResult,
 		sequencesResult,
+		rlsResult,
+		policiesResult,
 	] = await Promise.all([
 		// 1. Columns (including identity and collation)
 		pool.query<RawColumn>(
@@ -384,6 +388,39 @@ export async function introspect(
 			   AND d.objid IS NULL`,
 			[schema],
 		),
+		// 11. RLS enabled state per table
+		pool.query<{ table_name: string; rls_enabled: boolean }>(
+			`SELECT c.relname AS table_name, c.relrowsecurity AS rls_enabled
+			 FROM pg_class c
+			 JOIN pg_namespace n ON n.oid = c.relnamespace
+			 WHERE n.nspname = $1
+			   AND c.relkind = 'r'`,
+			[schema],
+		),
+		// 12. Row-Level Security policies
+		pool.query<{
+			table_name: string;
+			policy_name: string;
+			cmd: string;
+			roles: string[];
+			permissive: boolean;
+			using_expr: string | null;
+			with_check_expr: string | null;
+		}>(
+			`SELECT
+			   c.relname AS table_name,
+			   p.polname AS policy_name,
+			   p.polcmd AS cmd,
+			   ARRAY(SELECT rolname FROM pg_roles WHERE oid = ANY(p.polroles)) AS roles,
+			   p.polpermissive AS permissive,
+			   pg_get_expr(p.polqual, p.polrelid) AS using_expr,
+			   pg_get_expr(p.polwithcheck, p.polrelid) AS with_check_expr
+			 FROM pg_policy p
+			 JOIN pg_class c ON c.oid = p.polrelid
+			 JOIN pg_namespace n ON n.oid = c.relnamespace
+			 WHERE n.nspname = $1`,
+			[schema],
+		),
 	]);
 
 	// Build partition map by table name
@@ -559,6 +596,41 @@ export async function introspect(
 		}
 	}
 
+	// Build RLS enabled map by table name
+	const tableRlsEnabled = new Map<string, boolean>();
+	for (const row of rlsResult.rows) {
+		tableRlsEnabled.set(row.table_name, row.rls_enabled);
+	}
+
+	// Build policies map by table name
+	const tablePolicies = new Map<string, PolicyIR[]>();
+	for (const row of policiesResult.rows) {
+		const cmdMap: Record<string, PolicyIR['command']> = {
+			r: 'SELECT',
+			a: 'INSERT',
+			w: 'UPDATE',
+			d: 'DELETE',
+			'*': 'ALL',
+		};
+		const command = cmdMap[row.cmd] ?? 'ALL';
+		const policyIR: PolicyIR = {
+			name: row.policy_name,
+			command,
+			...(Array.isArray(row.roles) && row.roles.length > 0
+				? { roles: row.roles as readonly string[] }
+				: {}),
+			...(!row.permissive ? { permissive: false } : {}),
+			...(row.using_expr ? { using: row.using_expr } : {}),
+			...(row.with_check_expr ? { withCheck: row.with_check_expr } : {}),
+		};
+		const existing = tablePolicies.get(row.table_name);
+		if (existing) {
+			existing.push(policyIR);
+		} else {
+			tablePolicies.set(row.table_name, [policyIR]);
+		}
+	}
+
 	// Apply include/exclude filters
 	let tableNames = Array.from(tableColumns.keys());
 	tableNames = filterTables(tableNames, options);
@@ -623,6 +695,8 @@ export async function introspect(
 		const checks = tableChecks.get(tableName);
 		const tableComment = tableComments.get(tableName);
 		const partitionConfig = tablePartitions.get(tableName);
+		const rlsEnabled = tableRlsEnabled.get(tableName) ?? false;
+		const policies = tablePolicies.get(tableName);
 		const table: TableIR = {
 			name: tableName,
 			columns,
@@ -634,6 +708,8 @@ export async function introspect(
 			...(checks && checks.length > 0 ? { checkConstraints: checks } : {}),
 			...(tableComment ? { comment: tableComment } : {}),
 			...(partitionConfig ? { partition: partitionConfig } : {}),
+			...(rlsEnabled ? { rlsEnabled: true } : {}),
+			...(policies && policies.length > 0 ? { policies } : {}),
 		};
 		tables.set(tableName, table);
 	}

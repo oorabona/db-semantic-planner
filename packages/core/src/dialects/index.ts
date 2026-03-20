@@ -69,6 +69,7 @@ export const POSTGRESQL_CAPABILITIES: DialectCapabilities = {
 	supportsDDLIndexInclude: true,
 	supportsDDLPartialIndexes: true,
 	supportsDDLExpressionIndexes: true,
+	supportsDDLRowLevelSecurity: true,
 
 	// Syntax
 	recursivePathStyle: 'array',
