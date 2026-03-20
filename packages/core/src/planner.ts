@@ -759,6 +759,9 @@ function processWhere(
 		case 'null':
 			// No relation analysis needed
 			break;
+
+		case 'expression':
+			break; // Custom expression — no relation analysis, pass through
 	}
 }
 

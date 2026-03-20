@@ -334,3 +334,15 @@ export type {
 } from './types.js';
 // Type guard
 export { isExpressionSpec } from './types.js';
+// Expression primitives (EXT-001)
+export {
+	cast,
+	ExpressionRef,
+	fn,
+	literal,
+	op,
+	param,
+	ref as exprRef,
+	type ExprInput,
+	unary,
+} from './expressions.js';
