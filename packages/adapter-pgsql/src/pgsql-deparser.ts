@@ -164,6 +164,10 @@ export function deparse(node: Node): string {
 			return deparseIndexElem(inner as IndexElem);
 		case 'RangeFunction':
 			return deparseRangeFunction(inner as Record<string, unknown>);
+		case 'NamedArgExpr': {
+			const nae = inner as { arg: Node; name: string };
+			return `${nae.name} => ${deparse(nae.arg)}`;
+		}
 		case 'RangeSubselect':
 			return deparseRangeSubselect(inner as Record<string, unknown>);
 		default:
