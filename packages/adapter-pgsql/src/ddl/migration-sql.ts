@@ -205,7 +205,8 @@ export function generateMigrationSQL(
 		[], // 12: create index
 		[], // 13: add CHECK constraint
 		[], // 14: alter ENUM add value (must be after CREATE TABLE, outside transaction)
-		[], // 15: COMMENT ON TABLE / COLUMN (very last)
+		[], // 15: COMMENT ON TABLE / COLUMN
+		[], // 16: VALIDATE CONSTRAINT (after FK/CHECK added with NOT VALID)
 	];
 
 	for (const change of changes) {
@@ -304,6 +305,9 @@ function getPhase(kind: SchemaChange['kind']): number {
 		case 'add_comment':
 		case 'drop_comment':
 			return 15;
+		case 'validate_constraint':
+			// Runs after add_foreign_key / add_check_constraint so the constraint exists
+			return 16;
 	}
 }
 
@@ -441,6 +445,7 @@ function changeToUpSQL(
 			const check = change.meta?.check as CheckConstraintIR;
 			if (!check) return undefined;
 			const constraintName = q(check.name);
+			const notValid = check.notValid ? ' NOT VALID' : '';
 			return (
 				'DO $$ BEGIN ALTER TABLE ' +
 				qualifyTable(change.table, schemaName) +
@@ -448,8 +453,21 @@ function changeToUpSQL(
 				constraintName +
 				' ' +
 				check.expression +
+				notValid +
 				'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;'
 			);
+		}
+
+		case 'validate_constraint': {
+			const fk = change.meta?.fk as ForeignKeyIR | undefined;
+			const check = change.meta?.check as CheckConstraintIR | undefined;
+			const constraintName = fk
+				? q(fkName(change.table, fk.columns))
+				: check
+					? q(check.name)
+					: undefined;
+			if (!constraintName) return undefined;
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} VALIDATE CONSTRAINT ${constraintName};`;
 		}
 
 		case 'drop_check_constraint': {
@@ -489,7 +507,22 @@ function changeToUpSQL(
 			const enumName = schemaName
 				? `${q(schemaName)}.${q(enumDef.name)}`
 				: q(enumDef.name);
-			return `DROP TYPE IF EXISTS ${enumName} CASCADE;`;
+			// Before dropping the type, cast any referencing columns to text
+			// to prevent "cannot drop type: still referenced" errors.
+			const refs = change.meta?.referencingColumns as
+				| Array<{ table: string; column: string }>
+				| undefined;
+			const alterStatements =
+				refs && refs.length > 0
+					? refs.map(
+							(ref) =>
+								`ALTER TABLE ${qualifyTable(ref.table, schemaName)} ALTER COLUMN ${q(ref.column)} TYPE text;`,
+						)
+					: [];
+			return [
+				...alterStatements,
+				`DROP TYPE IF EXISTS ${enumName} CASCADE;`,
+			].join('\n');
 		}
 
 		case 'alter_column_collation': {
@@ -798,6 +831,10 @@ function changeToDownSQL(
 				: q(seq.name);
 			return buildSequenceClause('CREATE SEQUENCE', seqName, seq);
 		}
+
+		case 'validate_constraint':
+			// DOWN: VALIDATE CONSTRAINT cannot be reversed in PostgreSQL
+			return `-- VALIDATE CONSTRAINT cannot be reversed in PostgreSQL (table: "${change.table}")`;
 	}
 }
 
@@ -843,6 +880,7 @@ export function generateDownSQL(
 		[], // 13: add CHECK constraint
 		[], // 14: alter ENUM add value
 		[], // 15: comments
+		[], // 16: VALIDATE CONSTRAINT
 	];
 
 	for (const change of changes) {
@@ -926,7 +964,8 @@ function generateAddFKSQL(
 		? ` ON UPDATE ${mapOnDeleteAction(fk.onUpdate)}`
 		: '';
 	const deferred = fk.deferred ? ' DEFERRABLE INITIALLY DEFERRED' : '';
-	return `ALTER TABLE ${qualTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete}${onUpdate}${deferred};`;
+	const notValid = fk.notValid ? ' NOT VALID' : '';
+	return `ALTER TABLE ${qualTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete}${onUpdate}${deferred}${notValid};`;
 }
 
 function formatDefault(value: unknown): string {

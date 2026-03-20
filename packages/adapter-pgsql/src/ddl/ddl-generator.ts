@@ -414,8 +414,9 @@ function generateAlterTableAddFK(
 		? ` ON UPDATE ${mapOnDeleteAction(fk.onUpdate)}`
 		: '';
 	const deferred = fk.deferred ? ' DEFERRABLE INITIALLY DEFERRED' : '';
+	const notValid = fk.notValid ? ' NOT VALID' : '';
 
-	return `ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete}${onUpdate}${deferred};`;
+	return `ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete}${onUpdate}${deferred}${notValid};`;
 }
 
 // ============================================================================

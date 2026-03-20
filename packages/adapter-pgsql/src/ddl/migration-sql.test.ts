@@ -11,6 +11,7 @@
 import { ModelIRImpl } from '@dbsp/core';
 import type {
 	ColumnIR,
+	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
 	PartitionIR,
@@ -1880,6 +1881,74 @@ describe('ENUM types', () => {
 		expect(sql[0]).toBe('DROP TYPE IF EXISTS "status" CASCADE;');
 	});
 
+	it('should emit ALTER TABLE ... TYPE text before DROP TYPE when columns reference the enum', () => {
+		const diff = makeDiff([
+			{
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: 'Drop enum "status"',
+				meta: {
+					enum: { name: 'status', values: ['active', 'inactive'] },
+					referencingColumns: [
+						{ table: 'users', column: 'status' },
+						{ table: 'orders', column: 'state' },
+					],
+				},
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		// Single statement entry (joined with \n)
+		expect(sql).toHaveLength(1);
+		const lines = sql[0]!.split('\n');
+		expect(lines).toHaveLength(3);
+		expect(lines[0]).toBe(
+			'ALTER TABLE "users" ALTER COLUMN "status" TYPE text;',
+		);
+		expect(lines[1]).toBe(
+			'ALTER TABLE "orders" ALTER COLUMN "state" TYPE text;',
+		);
+		expect(lines[2]).toBe('DROP TYPE IF EXISTS "status" CASCADE;');
+	});
+
+	it('should emit ALTER TABLE with schema prefix before DROP TYPE when schema is set', () => {
+		const diff = makeDiff([
+			{
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: 'Drop enum "status"',
+				meta: {
+					enum: { name: 'status', values: ['active'] },
+					referencingColumns: [{ table: 'users', column: 'status' }],
+				},
+			},
+		]);
+		const sql = generateMigrationSQL(diff, { schemaName: 'myschema' });
+		const lines = sql[0]!.split('\n');
+		expect(lines[0]).toBe(
+			'ALTER TABLE "myschema"."users" ALTER COLUMN "status" TYPE text;',
+		);
+		expect(lines[1]).toBe('DROP TYPE IF EXISTS "myschema"."status" CASCADE;');
+	});
+
+	it('should emit plain DROP TYPE when referencingColumns is empty', () => {
+		const diff = makeDiff([
+			{
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: 'Drop enum "status"',
+				meta: {
+					enum: { name: 'status', values: ['active'] },
+					referencingColumns: [],
+				},
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toBe('DROP TYPE IF EXISTS "status" CASCADE;');
+	});
+
 	it('should order create_enum BEFORE create_table', () => {
 		const diff = makeDiff([
 			{
@@ -2007,6 +2076,74 @@ describe('ENUM types', () => {
 			]);
 			const sql = generateDownSQL(diff);
 			expect(sql[0]).toContain('cannot be reversed');
+		});
+	});
+
+	describe('drop_enum column dependency check (end-to-end via compareSchemata)', () => {
+		function makeModelWithEnumsAndTables(
+			tables: TableIR[],
+			enums: Map<string, EnumIR>,
+		): ModelIRImpl {
+			return new ModelIRImpl(
+				new Map(tables.map((t) => [t.name, t])),
+				new Map(),
+				enums,
+			);
+		}
+
+		it('emits ALTER TABLE TYPE text before DROP TYPE when a DB column references the enum', () => {
+			// Schema has no enum "status" → DB still has it with a referencing column
+			const dbTable = makeTable('users', [
+				makeCol({ name: 'id', type: 'integer' }),
+				makeCol({ name: 'status', type: 'string', originalDbType: 'status' }),
+			]);
+			const schemaModel = new ModelIRImpl(new Map(), new Map());
+			const dbModel = makeModelWithEnumsAndTables(
+				[dbTable],
+				new Map<string, EnumIR>([
+					['status', { name: 'status', values: ['active', 'inactive'] }],
+				]),
+			);
+
+			const diff = compareSchemata(schemaModel, dbModel);
+			const sql = generateMigrationSQL(diff);
+
+			const dropTypeIdx = sql.findIndex((s) => s.includes('DROP TYPE'));
+			expect(dropTypeIdx).toBeGreaterThanOrEqual(0);
+
+			// The DROP TYPE statement entry must contain an ALTER TABLE before it
+			const dropEntry = sql[dropTypeIdx]!;
+			const lines = dropEntry.split('\n');
+			expect(lines.length).toBeGreaterThan(1);
+			expect(lines[0]).toBe(
+				'ALTER TABLE "users" ALTER COLUMN "status" TYPE text;',
+			);
+			expect(lines[lines.length - 1]).toBe(
+				'DROP TYPE IF EXISTS "status" CASCADE;',
+			);
+		});
+
+		it('emits plain DROP TYPE when no DB column references the enum', () => {
+			const dbTable = makeTable('users', [
+				makeCol({ name: 'id', type: 'integer' }),
+				makeCol({ name: 'name', type: 'string' }),
+			]);
+			const schemaModel = new ModelIRImpl(new Map(), new Map());
+			const dbModel = makeModelWithEnumsAndTables(
+				[dbTable],
+				new Map<string, EnumIR>([
+					['old_status', { name: 'old_status', values: ['x'] }],
+				]),
+			);
+
+			const diff = compareSchemata(schemaModel, dbModel);
+			const sql = generateMigrationSQL(diff);
+
+			const dropTypeIdx = sql.findIndex((s) => s.includes('DROP TYPE'));
+			expect(dropTypeIdx).toBeGreaterThanOrEqual(0);
+			expect(sql[dropTypeIdx]).toBe(
+				'DROP TYPE IF EXISTS "old_status" CASCADE;',
+			);
 		});
 	});
 });
@@ -2962,5 +3099,396 @@ describe('generateCreateTableSQL — collation and identity (F-003 regression)',
 		expect(createSql).toBeDefined();
 		expect(createSql).toContain('COLLATE "C"');
 		expect(createSql).toContain('GENERATED ALWAYS AS IDENTITY');
+	});
+});
+
+// ============================================================================
+// DDL-VALIDATE: NOT VALID and VALIDATE CONSTRAINT
+// ============================================================================
+
+describe('NOT VALID / VALIDATE CONSTRAINT', () => {
+	describe('add_foreign_key with notValid: true', () => {
+		it('should append NOT VALID to FK ADD CONSTRAINT SQL', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+				notValid: true,
+			};
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'add_foreign_key',
+						table: 'posts',
+						destructive: false,
+						details: '',
+						meta: { fk },
+					},
+				]),
+			);
+			expect(sql[0]).toBe(
+				'ALTER TABLE "posts" ADD CONSTRAINT "fk_posts_user_id" FOREIGN KEY ("user_id") REFERENCES "users" ("id") NOT VALID;',
+			);
+		});
+
+		it('should not append NOT VALID when notValid is false', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+				notValid: false,
+			};
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'add_foreign_key',
+						table: 'posts',
+						destructive: false,
+						details: '',
+						meta: { fk },
+					},
+				]),
+			);
+			expect(sql[0]).toBe(
+				'ALTER TABLE "posts" ADD CONSTRAINT "fk_posts_user_id" FOREIGN KEY ("user_id") REFERENCES "users" ("id");',
+			);
+		});
+
+		it('should append NOT VALID after DEFERRABLE clause when both set', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['org_id'],
+				references: { table: 'orgs', columns: ['id'] },
+				onDelete: 'CASCADE',
+				deferred: true,
+				notValid: true,
+			};
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'add_foreign_key',
+						table: 'members',
+						destructive: false,
+						details: '',
+						meta: { fk },
+					},
+				]),
+			);
+			expect(sql[0]).toBe(
+				'ALTER TABLE "members" ADD CONSTRAINT "fk_members_org_id" FOREIGN KEY ("org_id") REFERENCES "orgs" ("id") ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED NOT VALID;',
+			);
+		});
+	});
+
+	describe('add_check_constraint with notValid: true', () => {
+		it('should append NOT VALID to CHECK ADD CONSTRAINT SQL', () => {
+			const diff = makeDiff([
+				{
+					kind: 'add_check_constraint',
+					table: 'users',
+					destructive: false,
+					details: '',
+					meta: {
+						check: {
+							name: 'users_age_check',
+							expression: 'CHECK ((age > 0))',
+							notValid: true,
+						},
+					},
+				},
+			]);
+			const sql = generateMigrationSQL(diff);
+			expect(sql[0]).toBe(
+				'DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0)) NOT VALID; EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
+			);
+		});
+
+		it('should not append NOT VALID when notValid is absent', () => {
+			const diff = makeDiff([
+				{
+					kind: 'add_check_constraint',
+					table: 'users',
+					destructive: false,
+					details: '',
+					meta: {
+						check: {
+							name: 'users_age_check',
+							expression: 'CHECK ((age > 0))',
+						},
+					},
+				},
+			]);
+			const sql = generateMigrationSQL(diff);
+			expect(sql[0]).toBe(
+				'DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0)); EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
+			);
+		});
+	});
+
+	describe('validate_constraint', () => {
+		it('should generate VALIDATE CONSTRAINT for FK', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'validate_constraint',
+						table: 'posts',
+						destructive: false,
+						details: '',
+						meta: { fk },
+					},
+				]),
+			);
+			expect(sql[0]).toBe(
+				'ALTER TABLE "posts" VALIDATE CONSTRAINT "fk_posts_user_id";',
+			);
+		});
+
+		it('should generate VALIDATE CONSTRAINT for CHECK', () => {
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'validate_constraint',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: {
+							check: {
+								name: 'users_age_check',
+								expression: 'CHECK ((age > 0))',
+							},
+						},
+					},
+				]),
+			);
+			expect(sql[0]).toBe(
+				'ALTER TABLE "users" VALIDATE CONSTRAINT "users_age_check";',
+			);
+		});
+
+		it('should generate VALIDATE CONSTRAINT with schema prefix', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'validate_constraint',
+						table: 'posts',
+						destructive: false,
+						details: '',
+						meta: { fk },
+					},
+				]),
+				{ schemaName: 'myschema' },
+			);
+			expect(sql[0]).toBe(
+				'ALTER TABLE "myschema"."posts" VALIDATE CONSTRAINT "fk_posts_user_id";',
+			);
+		});
+
+		it('should return undefined when no meta', () => {
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'validate_constraint',
+						table: 'posts',
+						destructive: false,
+						details: '',
+					},
+				]),
+			);
+			expect(sql).toHaveLength(0);
+		});
+
+		it('validate_constraint runs after add_foreign_key (phase 16 > phase 10)', () => {
+			const fkAdd: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+				notValid: true,
+			};
+			const fkValidate: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'validate_constraint',
+						table: 'posts',
+						destructive: false,
+						details: '',
+						meta: { fk: fkValidate },
+					},
+					{
+						kind: 'add_foreign_key',
+						table: 'posts',
+						destructive: false,
+						details: '',
+						meta: { fk: fkAdd },
+					},
+				]),
+			);
+			expect(sql).toHaveLength(2);
+			expect(sql[0]).toContain('ADD CONSTRAINT');
+			expect(sql[1]).toContain('VALIDATE CONSTRAINT');
+		});
+
+		it('should generate DOWN comment for validate_constraint', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const down = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'validate_constraint',
+						table: 'posts',
+						destructive: false,
+						details: '',
+						meta: { fk },
+					},
+				]),
+			);
+			expect(down[0]).toContain('cannot be reversed');
+		});
+	});
+
+	describe('compareSchemata emits validate_constraint', () => {
+		it('should emit validate_constraint when FK transitions from notValid to valid', () => {
+			const fkDB: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+				notValid: true,
+			};
+			const fkSchema: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+				notValid: false,
+			};
+			const usersTable: TableIR = {
+				name: 'users',
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+			};
+			const tableSchema: TableIR = {
+				name: 'posts',
+				columns: [],
+				foreignKeys: [fkSchema],
+				indexes: [],
+			};
+			const tableDB: TableIR = {
+				name: 'posts',
+				columns: [],
+				foreignKeys: [fkDB],
+				indexes: [],
+			};
+			const schemaModel = new ModelIRImpl(
+				new Map([
+					['users', usersTable],
+					['posts', tableSchema],
+				]),
+				new Map(),
+			);
+			const dbModel = new ModelIRImpl(
+				new Map([
+					['users', usersTable],
+					['posts', tableDB],
+				]),
+				new Map(),
+			);
+			const diff = compareSchemata(schemaModel, dbModel);
+			const validate = diff.changes.find(
+				(c) => c.kind === 'validate_constraint',
+			);
+			expect(validate).toBeDefined();
+			expect(validate?.table).toBe('posts');
+		});
+
+		it('should emit validate_constraint when CHECK transitions from notValid to valid', () => {
+			const tableSchema: TableIR = {
+				name: 'users',
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+				checkConstraints: [
+					{
+						name: 'users_age_check',
+						expression: 'CHECK ((age > 0))',
+						notValid: false,
+					},
+				],
+			};
+			const tableDB: TableIR = {
+				name: 'users',
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+				checkConstraints: [
+					{
+						name: 'users_age_check',
+						expression: 'CHECK ((age > 0))',
+						notValid: true,
+					},
+				],
+			};
+			const schemaModel = new ModelIRImpl(
+				new Map([['users', tableSchema]]),
+				new Map(),
+			);
+			const dbModel = new ModelIRImpl(new Map([['users', tableDB]]), new Map());
+			const diff = compareSchemata(schemaModel, dbModel);
+			const validate = diff.changes.find(
+				(c) => c.kind === 'validate_constraint',
+			);
+			expect(validate).toBeDefined();
+			expect(validate?.table).toBe('users');
+		});
+
+		it('should NOT emit validate_constraint when both are notValid', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+				notValid: true,
+			};
+			const usersTable: TableIR = {
+				name: 'users',
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+			};
+			const tableSchema: TableIR = {
+				name: 'posts',
+				columns: [],
+				foreignKeys: [fk],
+				indexes: [],
+			};
+			const tableDB: TableIR = {
+				name: 'posts',
+				columns: [],
+				foreignKeys: [fk],
+				indexes: [],
+			};
+			const schemaModel = new ModelIRImpl(
+				new Map([
+					['users', usersTable],
+					['posts', tableSchema],
+				]),
+				new Map(),
+			);
+			const dbModel = new ModelIRImpl(
+				new Map([
+					['users', usersTable],
+					['posts', tableDB],
+				]),
+				new Map(),
+			);
+			const diff = compareSchemata(schemaModel, dbModel);
+			expect(diff.changes.some((c) => c.kind === 'validate_constraint')).toBe(
+				false,
+			);
+		});
 	});
 });

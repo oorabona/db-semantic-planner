@@ -555,4 +555,162 @@ describe('introspect', () => {
 		expect(posts.indexes).toHaveLength(1);
 		expect(posts.indexes[0]!.columns).toEqual(['author_id', 'title']);
 	});
+
+	it('should map INCLUDE columns from index introspection', async () => {
+		const indexes = [
+			{
+				index_name: 'idx_users_email_inc',
+				table_name: 'users',
+				columns: ['email'],
+				include_columns: ['name', 'id'],
+				expressions_text: null,
+				opclass_names: null,
+				opclass_cols: null,
+				is_unique: false,
+				method: 'btree',
+				predicate: null,
+				reloptions: null,
+			},
+		];
+		const pool = createMockPool([
+			usersPostsColumns,
+			usersPostsPKs,
+			usersPostsFKs,
+			indexes,
+		]);
+		const result = await introspect(pool);
+
+		const users = result.tables.get('users')!;
+		const idx = users.indexes[0]!;
+		expect(idx.name).toBe('idx_users_email_inc');
+		expect(idx.columns).toEqual(['email']);
+		expect(idx.include).toEqual(['name', 'id']);
+		expect(idx.expressions).toBeUndefined();
+		expect(idx.opclass).toBeUndefined();
+	});
+
+	it('should map expression index entries from introspection', async () => {
+		const indexes = [
+			{
+				index_name: 'idx_users_lower_email',
+				table_name: 'users',
+				// expression-only index: columns array is empty (attnum=0 entries filtered out)
+				columns: [],
+				include_columns: null,
+				expressions_text: 'lower(email)',
+				opclass_names: null,
+				opclass_cols: null,
+				is_unique: false,
+				method: 'btree',
+				predicate: null,
+				reloptions: null,
+			},
+		];
+		const pool = createMockPool([
+			usersPostsColumns,
+			usersPostsPKs,
+			usersPostsFKs,
+			indexes,
+		]);
+		const result = await introspect(pool);
+
+		const users = result.tables.get('users')!;
+		const idx = users.indexes[0]!;
+		expect(idx.name).toBe('idx_users_lower_email');
+		expect(idx.expressions).toEqual(['lower(email)']);
+	});
+
+	it('should parse multi-expression index entries with nested parentheses', async () => {
+		const indexes = [
+			{
+				index_name: 'idx_multi_expr',
+				table_name: 'users',
+				columns: [],
+				include_columns: null,
+				// pg_get_expr serialises multiple expressions comma-separated
+				expressions_text: 'lower(email), coalesce(name, id::text)',
+				opclass_names: null,
+				opclass_cols: null,
+				is_unique: false,
+				method: 'btree',
+				predicate: null,
+				reloptions: null,
+			},
+		];
+		const pool = createMockPool([
+			usersPostsColumns,
+			usersPostsPKs,
+			usersPostsFKs,
+			indexes,
+		]);
+		const result = await introspect(pool);
+
+		const users = result.tables.get('users')!;
+		const idx = users.indexes[0]!;
+		expect(idx.expressions).toEqual([
+			'lower(email)',
+			'coalesce(name, id::text)',
+		]);
+	});
+
+	it('should map non-default opclass overrides from introspection', async () => {
+		const indexes = [
+			{
+				index_name: 'idx_users_name_text_ops',
+				table_name: 'users',
+				columns: ['name', 'email'],
+				include_columns: null,
+				expressions_text: null,
+				// only 'name' column has a non-default opclass
+				opclass_names: ['text_pattern_ops'],
+				opclass_cols: ['name'],
+				is_unique: false,
+				method: 'btree',
+				predicate: null,
+				reloptions: null,
+			},
+		];
+		const pool = createMockPool([
+			usersPostsColumns,
+			usersPostsPKs,
+			usersPostsFKs,
+			indexes,
+		]);
+		const result = await introspect(pool);
+
+		const users = result.tables.get('users')!;
+		const idx = users.indexes[0]!;
+		expect(idx.opclass).toEqual({ name: 'text_pattern_ops' });
+	});
+
+	it('should omit include/expressions/opclass when absent', async () => {
+		const indexes = [
+			{
+				index_name: 'idx_plain',
+				table_name: 'users',
+				columns: ['email'],
+				include_columns: null,
+				expressions_text: null,
+				opclass_names: null,
+				opclass_cols: null,
+				is_unique: false,
+				method: 'btree',
+				predicate: null,
+				reloptions: null,
+			},
+		];
+		const pool = createMockPool([
+			usersPostsColumns,
+			usersPostsPKs,
+			usersPostsFKs,
+			indexes,
+		]);
+		const result = await introspect(pool);
+
+		const users = result.tables.get('users')!;
+		const idx = users.indexes[0]!;
+		expect(idx.include).toBeUndefined();
+		expect(idx.expressions).toBeUndefined();
+		expect(idx.opclass).toBeUndefined();
+	});
 });
