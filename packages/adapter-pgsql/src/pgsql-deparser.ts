@@ -439,8 +439,15 @@ function deparseAExpr(node: A_Expr): string {
 	const op = getOpName(node);
 
 	if (kind === 'AEXPR_OP') {
-		const left = node.lexpr ? deparse(node.lexpr) : '';
-		const right = node.rexpr ? deparse(node.rexpr) : '';
+		// Parenthesize nested A_Expr operands to preserve operator precedence.
+		// Custom operators have unknown precedence — wrap nested binary
+		// expressions to guarantee correct SQL semantics.
+		const leftRaw = node.lexpr ? deparse(node.lexpr) : '';
+		const rightRaw = node.rexpr ? deparse(node.rexpr) : '';
+		const left =
+			node.lexpr && 'A_Expr' in node.lexpr ? `(${leftRaw})` : leftRaw;
+		const right =
+			node.rexpr && 'A_Expr' in node.rexpr ? `(${rightRaw})` : rightRaw;
 		if (!left) {
 			return `${op} ${right}`;
 		}
