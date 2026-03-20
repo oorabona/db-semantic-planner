@@ -4,7 +4,36 @@ Decisions archived from workflow — newest first.
 
 ---
 
-## DDL-RLS — Row-Level Security policies (2026-03-20)
+## Session marathon 2026-03-20 — Expression primitives, extensions, DDL, refactors
+
+### EXT-001 — Expression primitives + pgvector
+- Option C hybrid: generic primitives (op/fn/ref/param/cast/literal/unary) in core + typed wrappers in adapter
+- Primitives are PUBLIC API in @dbsp/core — not internal-only
+- Extensions as modules in adapter-pgsql/src/extensions/ (not separate packages)
+- Implicit conversion in op/fn: string=ref, number/array/boolean=param
+- Input validation regex on operator/function/type names (security)
+- Compiler always parenthesizes custom ops (from /llm consensus)
+- param()=$N binding vs literal()=inline SQL value (from /llm)
+- Custom fn() does NOT trigger GROUP BY (from /llm Gemini)
+- compileExpressionIntent: recursive dispatcher shared by SELECT/WHERE/ORDER BY
+- exprRef barrel alias to avoid collision with schema DSL ref()
+
+### EXT-002 — ParadeDB extension
+- Uses positional args via fn() — ParadeDB accepts both named and positional
+- bm25Search() shares param intent reference across all field parse() calls
+
+### EXT-NAMED-PARAMS — Named argument expressions
+- NamedArgExpr AST node for PostgreSQL `name => value` syntax
+- namedArg() validates name against FUNCTION_NAME_PATTERN (security)
+- ParadeDB parse() updated to use proper named-arg syntax
+
+### JOIN-TYPE — include() with join type
+- `join?: 'inner' | 'left'` on IncludeOptions (not `mode` — too generic)
+- `join: 'inner'` forces planner to use join strategy + INNER JOIN
+- Default 'left' preserves existing behavior (backward compatible)
+- Filters root rows when combined with where (unlike default include behavior)
+
+### DDL-RLS — Row-Level Security policies (2026-03-20)
 
 - PolicyIR in types (generic model) — not adapter-specific
 - SQL predicates as strings (same escape hatch as IndexIR.where)
