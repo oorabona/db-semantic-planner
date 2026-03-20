@@ -11,8 +11,8 @@ import type {
 	WhereExpressionIntent,
 } from '../intent-ast.js';
 import {
-	ExpressionRef,
 	cast,
+	ExpressionRef,
 	fn,
 	literal,
 	namedArg,
@@ -26,7 +26,10 @@ describe('Expression Primitives', () => {
 	describe('ref()', () => {
 		it('should create RefExpressionIntent', () => {
 			const r = ref('column');
-			expect(r.intent).toEqual({ kind: 'ref', column: 'column' } satisfies RefExpressionIntent);
+			expect(r.intent).toEqual({
+				kind: 'ref',
+				column: 'column',
+			} satisfies RefExpressionIntent);
 		});
 
 		it('should set __expr marker', () => {
@@ -46,7 +49,10 @@ describe('Expression Primitives', () => {
 	describe('param()', () => {
 		it('should create ParamExpressionIntent for number', () => {
 			const p = param(42);
-			expect(p.intent).toEqual({ kind: 'param', value: 42 } satisfies ParamExpressionIntent);
+			expect(p.intent).toEqual({
+				kind: 'param',
+				value: 42,
+			} satisfies ParamExpressionIntent);
 		});
 
 		it('should accept arrays (vectors)', () => {
@@ -87,11 +93,15 @@ describe('Expression Primitives', () => {
 
 		it('should accept types with spaces (double precision)', () => {
 			const c = cast(ref('val'), 'double precision');
-			expect((c.intent as CastExpressionIntent).typeName).toBe('double precision');
+			expect((c.intent as CastExpressionIntent).typeName).toBe(
+				'double precision',
+			);
 		});
 
 		it('should throw on invalid type name — SQL injection attempt', () => {
-			expect(() => cast(param(1), "'); DROP TABLE users; --")).toThrow('Invalid type');
+			expect(() => cast(param(1), "'); DROP TABLE users; --")).toThrow(
+				'Invalid type',
+			);
 		});
 
 		it('should throw on empty type name', () => {
@@ -99,7 +109,9 @@ describe('Expression Primitives', () => {
 		});
 
 		it('should throw on type with semicolon', () => {
-			expect(() => cast(param(1), 'vector; DROP TABLE')).toThrow('Invalid type');
+			expect(() => cast(param(1), 'vector; DROP TABLE')).toThrow(
+				'Invalid type',
+			);
 		});
 	});
 
@@ -156,7 +168,9 @@ describe('Expression Primitives', () => {
 		});
 
 		it('should throw on operator with spaces', () => {
-			expect(() => op('IS NOT', ref('a'), ref('b'))).toThrow('Invalid operator');
+			expect(() => op('IS NOT', ref('a'), ref('b'))).toThrow(
+				'Invalid operator',
+			);
 		});
 
 		it('should support standard arithmetic operators', () => {
@@ -293,13 +307,17 @@ describe('Expression Primitives', () => {
 			const aliased = r.as('my_alias');
 			expect(aliased).not.toBe(r); // new instance
 			expect(aliased).toBeInstanceOf(ExpressionRef);
-			expect((aliased.intent as RefExpressionIntent & { as?: string }).as).toBe('my_alias');
+			expect((aliased.intent as RefExpressionIntent & { as?: string }).as).toBe(
+				'my_alias',
+			);
 		});
 
 		it('.as() should not mutate original', () => {
 			const r = ref('col');
 			r.as('alias');
-			expect((r.intent as RefExpressionIntent & { as?: string }).as).toBeUndefined();
+			expect(
+				(r.intent as RefExpressionIntent & { as?: string }).as,
+			).toBeUndefined();
 		});
 
 		it('.eq() should return WhereExpressionIntent', () => {
@@ -370,7 +388,9 @@ describe('Expression Primitives', () => {
 			expect(innerOp.right.kind).toBe('cast');
 			const castIntent = innerOp.right as CastExpressionIntent;
 			expect(castIntent.typeName).toBe('vector');
-			expect((castIntent.expr as ParamExpressionIntent).value).toEqual([0.1, 0.2]);
+			expect((castIntent.expr as ParamExpressionIntent).value).toEqual([
+				0.1, 0.2,
+			]);
 		});
 
 		it('should support col-vs-col expression (no params)', () => {
@@ -403,21 +423,27 @@ describe('namedArg()', () => {
 	});
 
 	it('returns an ExpressionRef', () => {
-		expect(namedArg('query_string', param('hello'))).toBeInstanceOf(ExpressionRef);
+		expect(namedArg('query_string', param('hello'))).toBeInstanceOf(
+			ExpressionRef,
+		);
 	});
 
 	it('wraps a literal value — intent.value is LiteralExpressionIntent', () => {
 		const expr = namedArg('field', literal('my_column'));
 		const intent = expr.intent as NamedArgExpressionIntent;
 		expect(intent.value.kind).toBe('literal');
-		expect((intent.value as { kind: string; value: unknown }).value).toBe('my_column');
+		expect((intent.value as { kind: string; value: unknown }).value).toBe(
+			'my_column',
+		);
 	});
 
 	it('wraps a param value — intent.value is ParamExpressionIntent', () => {
 		const expr = namedArg('query_string', param('search term'));
 		const intent = expr.intent as NamedArgExpressionIntent;
 		expect(intent.value.kind).toBe('param');
-		expect((intent.value as { kind: string; value: unknown }).value).toBe('search term');
+		expect((intent.value as { kind: string; value: unknown }).value).toBe(
+			'search term',
+		);
 	});
 
 	it('accepts an ExpressionRef as value (unwraps .intent)', () => {
@@ -431,11 +457,14 @@ describe('namedArg()', () => {
 		const expr = namedArg('field', 'my_column');
 		const intent = expr.intent as NamedArgExpressionIntent;
 		expect(intent.value.kind).toBe('ref');
-		expect((intent.value as { kind: string; column: string }).column).toBe('my_column');
+		expect((intent.value as { kind: string; column: string }).column).toBe(
+			'my_column',
+		);
 	});
 
 	it('can be used as fn() argument — composes correctly', () => {
-		const expr = fn('paradedb.parse',
+		const expr = fn(
+			'paradedb.parse',
 			namedArg('field', literal('name')),
 			namedArg('query_string', param('hello')),
 		);
@@ -445,5 +474,17 @@ describe('namedArg()', () => {
 		expect(intent.args).toHaveLength(2);
 		expect(intent.args[0]?.kind).toBe('namedArg');
 		expect(intent.args[1]?.kind).toBe('namedArg');
+	});
+
+	it('throws on invalid name (injection guard)', () => {
+		expect(() => namedArg("'; DROP TABLE--", literal(1))).toThrow(
+			"namedArg: invalid argument name: '; DROP TABLE--",
+		);
+	});
+
+	it('throws on empty name', () => {
+		expect(() => namedArg('', literal(1))).toThrow(
+			'namedArg: invalid argument name: ',
+		);
 	});
 });

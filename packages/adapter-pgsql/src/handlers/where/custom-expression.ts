@@ -62,7 +62,12 @@ export const customExpressionWhereHandler: WhereHandler = {
 
 		// Map comparison operator
 		const rawOp = decision.subqueryOperator ?? decision.operator ?? '=';
-		const sqlOp = OP_MAP[rawOp] ?? rawOp;
+		const sqlOp = OP_MAP[rawOp];
+		if (!sqlOp) {
+			throw new Error(
+				`customExpressionWhereHandler: unsupported comparison operator: ${rawOp}`,
+			);
+		}
 
 		return binaryExpr(sqlOp, leftNode, rightNode);
 	},

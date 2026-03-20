@@ -280,6 +280,9 @@ export function unary(operator: string, expr: ExprInput): ExpressionRef {
  *          → query_string => $1
  */
 export function namedArg(name: string, value: ExprInput): ExpressionRef {
+	if (!name || !FUNCTION_NAME_PATTERN.test(name)) {
+		throw new Error(`namedArg: invalid argument name: ${name}`);
+	}
 	return new ExpressionRef({
 		kind: 'namedArg',
 		name,

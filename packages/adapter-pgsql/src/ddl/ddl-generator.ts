@@ -509,7 +509,7 @@ function generateCreatePolicy(
 		policy.permissive === false ? ' AS RESTRICTIVE' : ' AS PERMISSIVE';
 	const toClause =
 		policy.roles && policy.roles.length > 0
-			? ` TO ${policy.roles.join(', ')}`
+			? ` TO ${policy.roles.map(r => quoteIdentifier(r)).join(', ')}`
 			: '';
 	const usingClause = policy.using ? ` USING (${policy.using})` : '';
 	const withCheckClause = policy.withCheck
