@@ -277,6 +277,39 @@ export interface CheckConstraintIR {
 }
 
 /**
+ * Row-Level Security policy definition.
+ *
+ * Models PostgreSQL's CREATE POLICY. Other dialects (Oracle VPD, MSSQL security predicates)
+ * use fundamentally different mechanisms — this interface captures the PG-style model which
+ * is the most common. Adapters without RLS support skip policies via capability negotiation.
+ *
+ * @example
+ * ```typescript
+ * {
+ *   name: 'tenant_isolation',
+ *   command: 'ALL',
+ *   roles: ['app_user'],
+ *   using: "tenant_id = current_setting('app.current_tenant')::uuid",
+ *   withCheck: "tenant_id = current_setting('app.current_tenant')::uuid",
+ * }
+ * ```
+ */
+export interface PolicyIR {
+	/** Policy name (must be unique per table) */
+	readonly name: string;
+	/** SQL command the policy applies to (default: ALL) */
+	readonly command?: 'ALL' | 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE';
+	/** Database roles the policy applies to (default: PUBLIC) */
+	readonly roles?: readonly string[];
+	/** Whether the policy is permissive or restrictive (default: PERMISSIVE) */
+	readonly permissive?: boolean;
+	/** USING expression — SQL predicate for row visibility (SELECT, UPDATE, DELETE) */
+	readonly using?: string;
+	/** WITH CHECK expression — SQL predicate for new/modified rows (INSERT, UPDATE) */
+	readonly withCheck?: string;
+}
+
+/**
  * Table partition configuration (parent table only).
  * Child partition management is out of scope (DDL-PARTITION-MGMT).
  */
@@ -354,6 +387,12 @@ export interface TableIR {
 
 	/** Partition configuration (parent table). Child management deferred to DDL-PARTITION-MGMT. */
 	readonly partition?: PartitionIR;
+
+	/** Whether Row-Level Security is enabled on this table */
+	readonly rlsEnabled?: boolean;
+
+	/** Row-Level Security policies */
+	readonly policies?: readonly PolicyIR[];
 }
 
 /**
