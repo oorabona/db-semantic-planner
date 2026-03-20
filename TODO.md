@@ -35,10 +35,7 @@
 > - §10 System catalogs (4): 🚫 Always raw by design
 > Only DISTINCT ON (PostgreSQL-specific) is a minor gap — .distinct() covers most cases.
 
-- [x] ✅ **DISTINCT-ON** [Adapter] PostgreSQL DISTINCT ON support — `orm.select().distinctOn('column')` for `SELECT DISTINCT ON (col)`. (2026-03-20)
-- [x] ✅ **F-001** [Core] Add name validation to `namedArg()` — injection guard matching `fn()` pattern. (2026-03-20)
-- [x] ✅ **F-002** [Adapter] Quote role names in `buildPolicySQL` (`migration-sql.ts`) via `q(r)`. (2026-03-20)
-- [x] ✅ **F-003** [Adapter] Quote role names in `generateCreatePolicy` (`ddl-generator.ts`) via `quoteIdentifier(r)`. (2026-03-20)
+(DISTINCT-ON, F-001→003 archived → docs/historic/done-2026-03.md)
 
 (DX-050 archived → docs/historic/done-2026-03.md)
 (CTE-001 archived → docs/historic/done-2026-03.md)
@@ -51,23 +48,12 @@
 - [ ] 💡 **DDL-TRIGGERS** [Adapter] TRIGGER support — CREATE/DROP TRIGGER, trigger functions, introspection, diff. — Priority: P2 (deferred from DDL-COMPLETE)
 - [ ] 💡 **DDL-PARTITION-MGMT** [Adapter] Partition child table management — CREATE TABLE ... PARTITION OF ... FOR VALUES, partition addition/removal/split. Parent PARTITION BY handled in DDL-COMPLETE. — Priority: P2 (deferred from /adversarial DDL-COMPLETE)
 - [ ] 💡 **DDL-EXT-SCHEMA** [Adapter] Extension schema qualification — CREATE EXTENSION ... SCHEMA pg_catalog. — Priority: L (deferred from /adversarial DDL-COMPLETE)
-- [x] ✅ **DDL-VALIDATE** [Adapter] NOT VALID / VALIDATE CONSTRAINT for FK and CHECK — `notValid?: boolean` on `ForeignKeyIR`/`CheckConstraintIR`, `validate_constraint` ChangeKind, `compareSchemata` emits it on notValid→valid transition, phase 16 in migration ordering. 20 new tests. (2026-03-20)
-- [x] ✅ **DDL-RLS** [Adapter] Row-Level Security policies — `PolicyIR` in types, `rlsEnabled`/`policies` on `TableIR`, `supportsDDLRowLevelSecurity` cap flag, DDL generation (ENABLE RLS + CREATE POLICY), schema diff (enable_rls/disable_rls/create_policy/drop_policy ChangeKinds), migration SQL (UP+DOWN), phase ordering (17+18), pg_policy introspection. 34 new tests, all 2639 passing. (2026-03-20)
+(DDL-VALIDATE, DDL-RLS archived → docs/historic/done-2026-03.md)
 - [ ] 💡 **DDL-DOMAINS** [Adapter] Custom domain types — CREATE DOMAIN with constraints. — Priority: L (from /llm Copilot DDL-COMPLETE)
-- [x] ✅ **DDL-OPCLASS-INTRO** [Adapter] Index introspection: added opclass/include/expressions — pg_opclass join on indclass, pg_get_expr(indexprs), indnkeyatts for INCLUDE columns. 5 new unit tests. (2026-03-20)
-- [x] ✅ **DDL-ENUM-DEPCHECK** [Adapter] drop_enum column dependency check — scan DB ModelIR tables for columns with `originalDbType === enumName`, emit `ALTER TABLE ... TYPE text` before `DROP TYPE`. 5 tests (unit + e2e). (2026-03-20)
-- [x] ✅ **DDL-SEQ-DRY** [Adapter] Extract `buildSequenceClause()` shared helper — eliminates 4× duplicated sequence SQL generation. (2026-03-20)
+(DDL-OPCLASS-INTRO, DDL-ENUM-DEPCHECK, DDL-SEQ-DRY archived → docs/historic/done-2026-03.md)
 (CAPS-VERSION, UPSERT-RAW, EDGE-001, EDGE-002 archived → docs/historic/done-2026-03.md)
 - [ ] 💡 **NQL-WITH** [NQL] WITH ... AS (...) non-recursive CTE syntax in NQL parser — deferred from BATCH-001. — Priority: P1 (from /adversarial 2026-03-18)
-- [x] ✅ **BATCH-DRY-001** [Adapter] Extract shared `mapModelIRTypeToPgBase()` to `compiler-utils.ts` — removed local duplicate in `any.ts`. (2026-03-20)
-- [x] ✅ **JOIN-TYPE** [Core/Adapter] Add `join?: 'inner' | 'left'` to `include()` — forces join strategy with INNER/LEFT JOIN; `join: 'inner'` filters root rows to only those with a matching related record. Types: `IncludeIntent`, `IncludeOptions`, `PlanDecision`. Planner forces strategy to 'join', embeds joinType on include-strategy decision. Adapter handler reads `decision.joinType`. 14 new adapter tests + 4 core intent tests. (2026-03-20)
-- [x] ✅ **EDGE-FLOAT** [Adapter] Float literal support in raw-expression-parser — `tokenise()` produces FLOAT tokens, `parsePrimary()` emits `A_Const.fval` nodes, 7 new tests. (2026-03-20)
-- [x] ✅ **BATCH-DRY-002** [Adapter] Extract `stripArraySuffix()` helper to `compiler-utils.ts` — eliminated 4× inline pattern. (2026-03-20)
-- [x] ✅ **BATCH-FIX-001** [Adapter] Add `bigint` to `inferPgArrayType` runtime fallback → `int8[]`. (2026-03-20)
-- [x] ✅ **BATCH-FIX-002** [Adapter] Fix `mapModelIRTypeToPgBase`: `timestamp` → `timestamptz`, `date` → `date` (was `text`). (2026-03-20)
-- [x] ✅ **EXT-001** [Extensions] Generic expression primitives (op/fn/ref/param/cast/literal/unary) in `@dbsp/core` + pgvector extension wrappers (cosineDistance, rawDistance, l2Distance, innerProduct) in `adapter-pgsql/extensions/`. Full SELECT/WHERE/ORDER BY pipeline. 2455 tests passing. (2026-03-20)
-- [x] ✅ **EXT-002** [Extensions] ParadeDB extension wrappers (score, parse, boost, booleanSearch, bm25Search) in adapter-pgsql/extensions/paradedb.ts. 16 tests. (2026-03-20)
-- [x] ✅ **EXT-NAMED-PARAMS** [Extensions] NamedArgExpr support — `NamedArgExpressionIntent` in types, `namedArg()` primitive in core, `NamedArgExpr` compiler handler + deparser, `parse()` updated to named-arg syntax. 15 new tests, all 4746 passing. (2026-03-20)
+(BATCH-DRY-001/002, BATCH-FIX-001/002, JOIN-TYPE, EDGE-FLOAT, EXT-001, EXT-002, EXT-NAMED-PARAMS archived → docs/historic/done-2026-03.md)
 
 ---
 
@@ -79,14 +65,8 @@
 
 (CAPS-001→005 archived → docs/historic/done-2026-03.md)
 (EDGE-001, EDGE-002, EDGE-002/F-001, EDGE-002/F-002, EDGE-002/LINT archived → docs/historic/done-2026-03.md)
-- [x] ⏭️ **DX-WARMUP** [Adapter] Obsolete — EDGE-001 eliminated WASM, warmup() no longer needed. (2026-03-20)
-- [ ] 💡 **EDGE-FLOAT** [Adapter] raw-expression-parser: add float literal support (e.g. `sql('3.14')`) — Priority: L (from /review EDGE-002 F-005)
-- [x] ✅ **EXT-001** [Core+Adapter] Generic expression primitives (op/fn/ref/param/cast/literal/unary) + pgvector extension (cosineDistance, rawDistance, l2Distance, innerProduct). 2455 tests. (2026-03-20)
+(DX-WARMUP obsolete, EDGE-FLOAT, EXT-001, EXT-TEMPLATE, EXT-NAMED-PARAMS, CAPS-DRY-001, CAPS-DOC-001 archived → docs/historic/done-2026-03.md)
 - [ ] 💡 **EXT-PARAM-DEDUP** [Core] Param deduplication — same expression in SELECT+WHERE+ORDER BY produces 3 params instead of 1. — Priority: L (from /adversarial EXT-001)
-- [ ] 💡 **EXT-NAMED-PARAMS** [Core] Named parameter syntax (`field => 'name'`) for ParadeDB functions — Priority: M (from /adversarial EXT-001, deferred to EXT-002)
-- [x] ✅ **EXT-TEMPLATE** [Docs] Extension developer guide/template — `packages/adapter-pgsql/src/extensions/README.md` (2026-03-20)
-- [x] ✅ **CAPS-DRY-001** [Adapter] `isChangeSupported()` — added `alter_column_collation`/`alter_column_identity` cases. (2026-03-20)
-- [x] ✅ **CAPS-DOC-001** [Adapter] Add JSDoc to `sup()` helper in `ddl-generator.ts` and `schema-diff.ts` explaining undefined/false/true semantics. (2026-03-20)
 
 ---
 
@@ -103,8 +83,7 @@
 ### HIGH — GUI + handler duplication
 
 - [ ] 🔧 **ARCH-004** [GUI] Refactor `App.tsx` (1056 LOC, complexity **171**) — extract into sub-components (Editor, ResultsPanel, SettingsPanel) + custom hooks (useQueryExecution, useResultsViewer). — Priority: H
-- [x] ✅ **ARCH-005** [Adapter] Consolidate duplicate `compile()` handler methods — extracted 4 factory functions (`createSimpleAggregateHandler`, `createNoArgWindowHandler`, `createLagLeadHandler`, `createColumnWindowHandler`) eliminating 10 duplicate bodies across aggregate.ts and window.ts. (2026-03-20)
-- [x] ✅ **ARCH-006** [NQL] Decompose `compileExpression` (complexity **109**, 195 callees) — 8 handler functions extracted (`compileLogical`, `compileComparison`, `compileRange`, `compileMembership`, `compileBetween`, `compileNull`, `compileJson`, `compileRelationFilter`), dispatcher thinned to ~30 LOC. 1111+2575+1042 tests pass. (2026-03-20)
+(ARCH-005, ARCH-006 archived → docs/historic/done-2026-03.md)
 
 ### MEDIUM — Code health findings (2026-03-14)
 
