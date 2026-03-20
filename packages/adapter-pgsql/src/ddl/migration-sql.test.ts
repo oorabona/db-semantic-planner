@@ -11,10 +11,12 @@
 import { ModelIRImpl } from '@dbsp/core';
 import type {
 	ColumnIR,
+	DialectCapabilities,
 	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
 	PartitionIR,
+	PolicyIR,
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
@@ -3489,6 +3491,649 @@ describe('NOT VALID / VALIDATE CONSTRAINT', () => {
 			expect(diff.changes.some((c) => c.kind === 'validate_constraint')).toBe(
 				false,
 			);
+		});
+	});
+});
+
+// ============================================================================
+// DDL-RLS: Row-Level Security
+// ============================================================================
+
+describe('DDL-RLS: Row-Level Security', () => {
+	function makeRlsTable(overrides: Partial<TableIR> & { name: string }): TableIR {
+		return {
+			columns: [],
+			foreignKeys: [],
+			indexes: [],
+			...overrides,
+		};
+	}
+
+	describe('changeToUpSQL', () => {
+		it('enable_rls generates ALTER TABLE ENABLE ROW LEVEL SECURITY', () => {
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'enable_rls',
+						table: 'documents',
+						destructive: false,
+						details: '',
+					},
+				]),
+			);
+			expect(sql).toEqual([
+				'ALTER TABLE "documents" ENABLE ROW LEVEL SECURITY;',
+			]);
+		});
+
+		it('disable_rls generates ALTER TABLE DISABLE ROW LEVEL SECURITY', () => {
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'disable_rls',
+						table: 'documents',
+						destructive: false,
+						details: '',
+					},
+				]),
+			);
+			expect(sql).toEqual([
+				'ALTER TABLE "documents" DISABLE ROW LEVEL SECURITY;',
+			]);
+		});
+
+		it('create_policy with all options', () => {
+			const policy: PolicyIR = {
+				name: 'tenant_isolation',
+				command: 'ALL',
+				roles: ['app_user', 'app_admin'],
+				permissive: true,
+				using: "tenant_id = current_setting('app.tenant')::uuid",
+				withCheck: "tenant_id = current_setting('app.tenant')::uuid",
+			};
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'create_policy',
+						table: 'documents',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+				]),
+			);
+			expect(sql).toEqual([
+				`CREATE POLICY "tenant_isolation" ON "documents" FOR ALL AS PERMISSIVE TO app_user, app_admin USING (tenant_id = current_setting('app.tenant')::uuid) WITH CHECK (tenant_id = current_setting('app.tenant')::uuid);`,
+			]);
+		});
+
+		it('create_policy with minimal options (name only)', () => {
+			const policy: PolicyIR = { name: 'open' };
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'create_policy',
+						table: 'documents',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+				]),
+			);
+			expect(sql).toEqual([
+				`CREATE POLICY "open" ON "documents" FOR ALL AS PERMISSIVE;`,
+			]);
+		});
+
+		it('create_policy SELECT command with USING only', () => {
+			const policy: PolicyIR = {
+				name: 'read_own',
+				command: 'SELECT',
+				using: 'owner_id = current_user_id()',
+			};
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'create_policy',
+						table: 'documents',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+				]),
+			);
+			expect(sql).toEqual([
+				`CREATE POLICY "read_own" ON "documents" FOR SELECT AS PERMISSIVE USING (owner_id = current_user_id());`,
+			]);
+		});
+
+		it('create_policy RESTRICTIVE', () => {
+			const policy: PolicyIR = {
+				name: 'no_delete',
+				command: 'DELETE',
+				permissive: false,
+				using: 'false',
+			};
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'create_policy',
+						table: 'documents',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+				]),
+			);
+			expect(sql).toEqual([
+				`CREATE POLICY "no_delete" ON "documents" FOR DELETE AS RESTRICTIVE USING (false);`,
+			]);
+		});
+
+		it('drop_policy generates DROP POLICY IF EXISTS', () => {
+			const policy: PolicyIR = { name: 'tenant_isolation' };
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'drop_policy',
+						table: 'documents',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+				]),
+			);
+			expect(sql).toEqual([
+				`DROP POLICY IF EXISTS "tenant_isolation" ON "documents";`,
+			]);
+		});
+
+		it('schema-qualified table in enable_rls and create_policy', () => {
+			const policy: PolicyIR = { name: 'tenant', using: 'tenant_id = $1' };
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'enable_rls',
+						table: 'documents',
+						destructive: false,
+						details: '',
+					},
+					{
+						kind: 'create_policy',
+						table: 'documents',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+				]),
+				{ schemaName: 'tenant_42' },
+			);
+			expect(sql[0]).toBe(
+				'ALTER TABLE "tenant_42"."documents" ENABLE ROW LEVEL SECURITY;',
+			);
+			expect(sql[1]).toBe(
+				`CREATE POLICY "tenant" ON "tenant_42"."documents" FOR ALL AS PERMISSIVE USING (tenant_id = $1);`,
+			);
+		});
+
+		it('phase ordering: enable_rls (17) comes after create_index (12)', () => {
+			const policy: PolicyIR = { name: 'p' };
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'create_policy',
+						table: 't',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+					{
+						kind: 'enable_rls',
+						table: 't',
+						destructive: false,
+						details: '',
+					},
+					{
+						kind: 'create_index',
+						table: 't',
+						destructive: false,
+						details: '',
+						meta: { index: { columns: ['id'], unique: false } },
+					},
+				]),
+			);
+			const kinds = sql.map((s) => {
+				if (s.includes('ENABLE ROW LEVEL')) return 'enable_rls';
+				if (s.includes('CREATE POLICY')) return 'create_policy';
+				if (s.includes('INDEX')) return 'create_index';
+				return 'other';
+			});
+			expect(kinds.indexOf('create_index')).toBeLessThan(
+				kinds.indexOf('enable_rls'),
+			);
+			expect(kinds.indexOf('enable_rls')).toBeLessThan(
+				kinds.indexOf('create_policy'),
+			);
+		});
+
+		it('isChangeSupported: supportsDDLRowLevelSecurity=false filters RLS kinds', () => {
+			const policy: PolicyIR = { name: 'p', using: 'true' };
+			const caps: DialectCapabilities = {
+				name: 'no-rls',
+				supportsReturning: false,
+				supportsRecursiveCTE: false,
+				supportsWindowFunctions: false,
+				supportsArrayType: false,
+				supportsRangeTypes: false,
+				supportsJsonType: false,
+				supportsJsonOperators: false,
+				supportsSchemas: false,
+				supportsLateralJoin: false,
+				supportsJsonAgg: false,
+				recursivePathStyle: 'string',
+				stringConcatStyle: 'operator',
+				identifierQuote: '"',
+				parameterStyle: 'dollar',
+				limitStyle: 'limit-offset',
+				booleanStyle: 'native',
+				supportsDDLRowLevelSecurity: false,
+			};
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'enable_rls',
+						table: 'documents',
+						destructive: false,
+						details: '',
+					},
+					{
+						kind: 'create_policy',
+						table: 'documents',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+				]),
+				{ dialectCapabilities: caps },
+			);
+			expect(sql).toHaveLength(0);
+		});
+	});
+
+	describe('changeToDownSQL', () => {
+		it('enable_rls DOWN reverses to DISABLE', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'enable_rls',
+						table: 'documents',
+						destructive: false,
+						details: '',
+					},
+				]),
+			);
+			expect(sql).toEqual([
+				'ALTER TABLE "documents" DISABLE ROW LEVEL SECURITY;',
+			]);
+		});
+
+		it('disable_rls DOWN reverses to ENABLE', () => {
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'disable_rls',
+						table: 'documents',
+						destructive: false,
+						details: '',
+					},
+				]),
+			);
+			expect(sql).toEqual([
+				'ALTER TABLE "documents" ENABLE ROW LEVEL SECURITY;',
+			]);
+		});
+
+		it('create_policy DOWN drops the policy', () => {
+			const policy: PolicyIR = {
+				name: 'tenant_isolation',
+				using: "tenant_id = current_setting('app.tenant')::uuid",
+			};
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'create_policy',
+						table: 'documents',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+				]),
+			);
+			expect(sql).toEqual([
+				`DROP POLICY IF EXISTS "tenant_isolation" ON "documents";`,
+			]);
+		});
+
+		it('drop_policy DOWN recreates the policy', () => {
+			const policy: PolicyIR = {
+				name: 'tenant_isolation',
+				command: 'SELECT',
+				roles: ['app_user'],
+				using: "tenant_id = current_setting('app.tenant')::uuid",
+			};
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'drop_policy',
+						table: 'documents',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+				]),
+			);
+			expect(sql).toEqual([
+				`CREATE POLICY "tenant_isolation" ON "documents" FOR SELECT AS PERMISSIVE TO app_user USING (tenant_id = current_setting('app.tenant')::uuid);`,
+			]);
+		});
+	});
+
+	describe('generateDDL', () => {
+		it('rlsEnabled generates ENABLE ROW LEVEL SECURITY', async () => {
+			const { generateDDL } = await import('./ddl-generator.js');
+			const model = new ModelIRImpl(
+				new Map([
+					[
+						'documents',
+						makeRlsTable({
+							name: 'documents',
+							rlsEnabled: true,
+						}),
+					],
+				]),
+				new Map(),
+			);
+			const stmts = generateDDL(model);
+			expect(stmts.some((s) => s.includes('ENABLE ROW LEVEL SECURITY'))).toBe(
+				true,
+			);
+		});
+
+		it('policies generate CREATE POLICY statements', async () => {
+			const { generateDDL } = await import('./ddl-generator.js');
+			const policy: PolicyIR = {
+				name: 'tenant_isolation',
+				command: 'ALL',
+				roles: ['app_user'],
+				using: "tenant_id = current_setting('app.tenant')::uuid",
+			};
+			const model = new ModelIRImpl(
+				new Map([
+					[
+						'documents',
+						makeRlsTable({
+							name: 'documents',
+							rlsEnabled: true,
+							policies: [policy],
+						}),
+					],
+				]),
+				new Map(),
+			);
+			const stmts = generateDDL(model);
+			expect(stmts.some((s) => s.includes('CREATE POLICY'))).toBe(true);
+			expect(stmts.some((s) => s.includes('"tenant_isolation"'))).toBe(true);
+		});
+
+		it('capability gating: supportsDDLRowLevelSecurity=false omits RLS SQL', async () => {
+			const { generateDDL } = await import('./ddl-generator.js');
+			const noCaps: DialectCapabilities = {
+				name: 'no-rls',
+				supportsReturning: false,
+				supportsRecursiveCTE: false,
+				supportsWindowFunctions: false,
+				supportsArrayType: false,
+				supportsRangeTypes: false,
+				supportsJsonType: false,
+				supportsJsonOperators: false,
+				supportsSchemas: false,
+				supportsLateralJoin: false,
+				supportsJsonAgg: false,
+				recursivePathStyle: 'string',
+				stringConcatStyle: 'operator',
+				identifierQuote: '"',
+				parameterStyle: 'dollar',
+				limitStyle: 'limit-offset',
+				booleanStyle: 'native',
+				supportsDDLRowLevelSecurity: false,
+			};
+			const policy: PolicyIR = { name: 'p', using: 'true' };
+			const model = new ModelIRImpl(
+				new Map([
+					[
+						'documents',
+						makeRlsTable({
+							name: 'documents',
+							rlsEnabled: true,
+							policies: [policy],
+						}),
+					],
+				]),
+				new Map(),
+			);
+			const stmts = generateDDL(model, { dialectCapabilities: noCaps });
+			expect(stmts.some((s) => s.includes('ROW LEVEL SECURITY'))).toBe(false);
+			expect(stmts.some((s) => s.includes('CREATE POLICY'))).toBe(false);
+		});
+	});
+
+	describe('compareSchemata', () => {
+		it('new table with rlsEnabled emits enable_rls change', () => {
+			const table = makeRlsTable({ name: 'documents', rlsEnabled: true });
+			const schemaModel = new ModelIRImpl(
+				new Map([['documents', table]]),
+				new Map(),
+			);
+			const dbModel = new ModelIRImpl(new Map(), new Map());
+			const diff = compareSchemata(schemaModel, dbModel);
+			expect(diff.changes.some((c) => c.kind === 'enable_rls')).toBe(true);
+		});
+
+		it('new table with policies emits create_policy changes', () => {
+			const policy: PolicyIR = { name: 'p', using: 'true' };
+			const table = makeRlsTable({
+				name: 'documents',
+				rlsEnabled: true,
+				policies: [policy],
+			});
+			const schemaModel = new ModelIRImpl(
+				new Map([['documents', table]]),
+				new Map(),
+			);
+			const dbModel = new ModelIRImpl(new Map(), new Map());
+			const diff = compareSchemata(schemaModel, dbModel);
+			expect(diff.changes.some((c) => c.kind === 'create_policy')).toBe(true);
+		});
+
+		it('existing table: rlsEnabled added → enable_rls change', () => {
+			const schemaTable = makeRlsTable({ name: 'documents', rlsEnabled: true });
+			const dbTable = makeRlsTable({ name: 'documents' });
+			const schemaModel = new ModelIRImpl(
+				new Map([['documents', schemaTable]]),
+				new Map(),
+			);
+			const dbModel = new ModelIRImpl(
+				new Map([['documents', dbTable]]),
+				new Map(),
+			);
+			const diff = compareSchemata(schemaModel, dbModel);
+			expect(diff.changes.some((c) => c.kind === 'enable_rls')).toBe(true);
+		});
+
+		it('existing table: rlsEnabled removed → disable_rls change', () => {
+			const schemaTable = makeRlsTable({ name: 'documents' });
+			const dbTable = makeRlsTable({ name: 'documents', rlsEnabled: true });
+			const schemaModel = new ModelIRImpl(
+				new Map([['documents', schemaTable]]),
+				new Map(),
+			);
+			const dbModel = new ModelIRImpl(
+				new Map([['documents', dbTable]]),
+				new Map(),
+			);
+			const diff = compareSchemata(schemaModel, dbModel);
+			expect(diff.changes.some((c) => c.kind === 'disable_rls')).toBe(true);
+		});
+
+		it('new policy → create_policy change', () => {
+			const policy: PolicyIR = { name: 'p', using: 'true' };
+			const schemaTable = makeRlsTable({
+				name: 'documents',
+				rlsEnabled: true,
+				policies: [policy],
+			});
+			const dbTable = makeRlsTable({ name: 'documents', rlsEnabled: true });
+			const schemaModel = new ModelIRImpl(
+				new Map([['documents', schemaTable]]),
+				new Map(),
+			);
+			const dbModel = new ModelIRImpl(
+				new Map([['documents', dbTable]]),
+				new Map(),
+			);
+			const diff = compareSchemata(schemaModel, dbModel);
+			expect(diff.changes.some((c) => c.kind === 'create_policy')).toBe(true);
+		});
+
+		it('removed policy → drop_policy change', () => {
+			const policy: PolicyIR = { name: 'p', using: 'true' };
+			const schemaTable = makeRlsTable({ name: 'documents', rlsEnabled: true });
+			const dbTable = makeRlsTable({
+				name: 'documents',
+				rlsEnabled: true,
+				policies: [policy],
+			});
+			const schemaModel = new ModelIRImpl(
+				new Map([['documents', schemaTable]]),
+				new Map(),
+			);
+			const dbModel = new ModelIRImpl(
+				new Map([['documents', dbTable]]),
+				new Map(),
+			);
+			const diff = compareSchemata(schemaModel, dbModel);
+			expect(diff.changes.some((c) => c.kind === 'drop_policy')).toBe(true);
+		});
+
+		it('changed policy → drop_policy + create_policy', () => {
+			const oldPolicy: PolicyIR = { name: 'p', using: 'true' };
+			const newPolicy: PolicyIR = { name: 'p', using: 'false' };
+			const schemaTable = makeRlsTable({
+				name: 'documents',
+				rlsEnabled: true,
+				policies: [newPolicy],
+			});
+			const dbTable = makeRlsTable({
+				name: 'documents',
+				rlsEnabled: true,
+				policies: [oldPolicy],
+			});
+			const schemaModel = new ModelIRImpl(
+				new Map([['documents', schemaTable]]),
+				new Map(),
+			);
+			const dbModel = new ModelIRImpl(
+				new Map([['documents', dbTable]]),
+				new Map(),
+			);
+			const diff = compareSchemata(schemaModel, dbModel);
+			expect(diff.changes.some((c) => c.kind === 'drop_policy')).toBe(true);
+			expect(diff.changes.some((c) => c.kind === 'create_policy')).toBe(true);
+		});
+
+		it('unchanged policy → no RLS changes', () => {
+			const policy: PolicyIR = {
+				name: 'p',
+				command: 'SELECT',
+				using: 'true',
+				roles: ['app_user'],
+			};
+			const schemaTable = makeRlsTable({
+				name: 'documents',
+				rlsEnabled: true,
+				policies: [policy],
+			});
+			const dbTable = makeRlsTable({
+				name: 'documents',
+				rlsEnabled: true,
+				policies: [policy],
+			});
+			const schemaModel = new ModelIRImpl(
+				new Map([['documents', schemaTable]]),
+				new Map(),
+			);
+			const dbModel = new ModelIRImpl(
+				new Map([['documents', dbTable]]),
+				new Map(),
+			);
+			const diff = compareSchemata(schemaModel, dbModel);
+			const rlsChanges = diff.changes.filter(
+				(c) =>
+					c.kind === 'enable_rls' ||
+					c.kind === 'disable_rls' ||
+					c.kind === 'create_policy' ||
+					c.kind === 'drop_policy',
+			);
+			expect(rlsChanges).toHaveLength(0);
+		});
+
+		it('capability gating: supportsDDLRowLevelSecurity=false skips RLS diff', () => {
+			const policy: PolicyIR = { name: 'p', using: 'true' };
+			const schemaTable = makeRlsTable({
+				name: 'documents',
+				rlsEnabled: true,
+				policies: [policy],
+			});
+			const dbTable = makeRlsTable({ name: 'documents' });
+			const schemaModel = new ModelIRImpl(
+				new Map([['documents', schemaTable]]),
+				new Map(),
+			);
+			const dbModel = new ModelIRImpl(
+				new Map([['documents', dbTable]]),
+				new Map(),
+			);
+			const caps: DialectCapabilities = {
+				name: 'no-rls',
+				supportsReturning: false,
+				supportsRecursiveCTE: false,
+				supportsWindowFunctions: false,
+				supportsArrayType: false,
+				supportsRangeTypes: false,
+				supportsJsonType: false,
+				supportsJsonOperators: false,
+				supportsSchemas: false,
+				supportsLateralJoin: false,
+				supportsJsonAgg: false,
+				recursivePathStyle: 'string',
+				stringConcatStyle: 'operator',
+				identifierQuote: '"',
+				parameterStyle: 'dollar',
+				limitStyle: 'limit-offset',
+				booleanStyle: 'native',
+				supportsDDLRowLevelSecurity: false,
+			};
+			const diff = compareSchemata(schemaModel, dbModel, {
+				dialectCapabilities: caps,
+			});
+			const rlsChanges = diff.changes.filter(
+				(c) =>
+					c.kind === 'enable_rls' ||
+					c.kind === 'disable_rls' ||
+					c.kind === 'create_policy' ||
+					c.kind === 'drop_policy',
+			);
+			expect(rlsChanges).toHaveLength(0);
 		});
 	});
 });

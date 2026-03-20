@@ -16,6 +16,7 @@ import type {
 	IndexIR,
 	ModelIR,
 	PartitionIR,
+	PolicyIR,
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
@@ -67,7 +68,12 @@ export type ChangeKind =
 	// Sequences
 	| 'create_sequence'
 	| 'alter_sequence'
-	| 'drop_sequence';
+	| 'drop_sequence'
+	// Row-Level Security
+	| 'enable_rls'
+	| 'disable_rls'
+	| 'create_policy'
+	| 'drop_policy';
 
 export interface SchemaChange {
 	readonly kind: ChangeKind;
@@ -211,6 +217,26 @@ export function compareSchemata(
 					});
 				}
 			}
+			// Emit RLS enable + policies for new table (after table creation)
+			if (sup(caps?.supportsDDLRowLevelSecurity)) {
+				if (schemaTable.rlsEnabled) {
+					changes.push({
+						kind: 'enable_rls',
+						table: name,
+						destructive: false,
+						details: `Enable RLS on table "${name}"`,
+					});
+				}
+				for (const policy of schemaTable.policies ?? []) {
+					changes.push({
+						kind: 'create_policy',
+						table: name,
+						destructive: false,
+						details: `Create policy "${policy.name}" on "${name}"`,
+						meta: { policy },
+					});
+				}
+			}
 			continue;
 		}
 
@@ -227,6 +253,9 @@ export function compareSchemata(
 			compareComments(schemaTable, dbTable, changes);
 		}
 		comparePartitions(schemaTable, dbTable, changes);
+		if (sup(caps?.supportsDDLRowLevelSecurity)) {
+			comparePolicies(schemaTable, dbTable, changes);
+		}
 	}
 
 	// 2. Tables that exist in DB but not in schema → drop_table
@@ -1100,6 +1129,94 @@ function compareSequences(
 	}
 }
 
+// ============================================================================
+// RLS Policy Comparison
+// ============================================================================
+
+function comparePolicies(
+	schema: TableIR,
+	db: TableIR,
+	changes: SchemaChange[],
+): void {
+	const schemaRlsEnabled = schema.rlsEnabled ?? false;
+	const dbRlsEnabled = db.rlsEnabled ?? false;
+
+	// RLS enabled state changed
+	if (schemaRlsEnabled && !dbRlsEnabled) {
+		changes.push({
+			kind: 'enable_rls',
+			table: schema.name,
+			destructive: false,
+			details: `Enable RLS on table "${schema.name}"`,
+		});
+	} else if (!schemaRlsEnabled && dbRlsEnabled) {
+		changes.push({
+			kind: 'disable_rls',
+			table: schema.name,
+			destructive: false,
+			details: `Disable RLS on table "${schema.name}"`,
+		});
+	}
+
+	const schemaPolicies = schema.policies ?? [];
+	const dbPolicies = db.policies ?? [];
+
+	const schemaMap = new Map<string, PolicyIR>(schemaPolicies.map((p) => [p.name, p]));
+	const dbMap = new Map<string, PolicyIR>(dbPolicies.map((p) => [p.name, p]));
+
+	// In schema but not in DB → create
+	for (const [name, policy] of schemaMap) {
+		if (!dbMap.has(name)) {
+			changes.push({
+				kind: 'create_policy',
+				table: schema.name,
+				destructive: false,
+				details: `Create policy "${name}" on "${schema.name}"`,
+				meta: { policy },
+			});
+		} else {
+			// Policy exists in both — compare all fields; if changed → drop + recreate
+			const dbPolicy = dbMap.get(name)!;
+			const changed =
+				policy.command !== dbPolicy.command ||
+				policy.using !== dbPolicy.using ||
+				policy.withCheck !== dbPolicy.withCheck ||
+				policy.permissive !== dbPolicy.permissive ||
+				JSON.stringify(policy.roles ?? []) !==
+					JSON.stringify(dbPolicy.roles ?? []);
+			if (changed) {
+				changes.push({
+					kind: 'drop_policy',
+					table: schema.name,
+					destructive: false,
+					details: `Drop policy "${name}" on "${schema.name}" (changed)`,
+					meta: { policy: dbPolicy },
+				});
+				changes.push({
+					kind: 'create_policy',
+					table: schema.name,
+					destructive: false,
+					details: `Create policy "${name}" on "${schema.name}"`,
+					meta: { policy },
+				});
+			}
+		}
+	}
+
+	// In DB but not in schema → drop
+	for (const [name, policy] of dbMap) {
+		if (!schemaMap.has(name)) {
+			changes.push({
+				kind: 'drop_policy',
+				table: schema.name,
+				destructive: false,
+				details: `Drop policy "${name}" on "${schema.name}"`,
+				meta: { policy },
+			});
+		}
+	}
+}
+
 function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 	const tables = { added: 0, dropped: 0 };
 	const columns = { added: 0, dropped: 0, altered: 0 };
@@ -1160,6 +1277,10 @@ function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 			case 'create_sequence':
 			case 'alter_sequence':
 			case 'drop_sequence':
+			case 'enable_rls':
+			case 'disable_rls':
+			case 'create_policy':
+			case 'drop_policy':
 				// Schema-level or metadata changes; not counted in table/column/index/constraint summaries
 				break;
 		}

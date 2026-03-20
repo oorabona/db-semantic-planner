@@ -13,6 +13,7 @@ import type {
 	ForeignKeyIR,
 	IndexIR,
 	ModelIR,
+	PolicyIR,
 	TableIR,
 } from '@dbsp/types';
 import { identityNaming, type NamingPlugin } from '../naming-plugin.js';
@@ -196,6 +197,25 @@ export function generateDDL(
 						generateCreateIndex(table.name, autoIdx, schemaName, naming),
 					);
 				}
+			}
+		}
+	}
+
+	// ========================================================================
+	// PASS 3.5: ENABLE ROW LEVEL SECURITY + CREATE POLICY
+	// ========================================================================
+	if (sup(caps?.supportsDDLRowLevelSecurity)) {
+		for (const table of tables) {
+			if (table.rlsEnabled) {
+				const qualifiedTable = qualifyTable(table.name, schemaName, naming);
+				statements.push(
+					`ALTER TABLE ${qualifiedTable} ENABLE ROW LEVEL SECURITY;`,
+				);
+			}
+			for (const policy of table.policies ?? []) {
+				statements.push(
+					generateCreatePolicy(table.name, policy, schemaName, naming),
+				);
 			}
 		}
 	}
@@ -464,4 +484,36 @@ function generateCreateIndex(
 	const where = idx.where ? ` WHERE ${idx.where}` : '';
 
 	return `CREATE ${unique}INDEX ${indexName} ON ${qualifiedTable}${method} (${cols})${include}${withParams}${where};`;
+}
+
+// ============================================================================
+// generateCreatePolicy
+// ============================================================================
+
+/**
+ * Generate a CREATE POLICY statement.
+ */
+function generateCreatePolicy(
+	tableName: string,
+	policy: PolicyIR,
+	schemaName: string | undefined,
+	naming: NamingPlugin,
+): string {
+	const qualifiedTable = qualifyTable(tableName, schemaName, naming);
+	const policyName = quoteIdentifier(policy.name);
+	const forClause =
+		policy.command && policy.command !== 'ALL'
+			? ` FOR ${policy.command}`
+			: ' FOR ALL';
+	const asClause =
+		policy.permissive === false ? ' AS RESTRICTIVE' : ' AS PERMISSIVE';
+	const toClause =
+		policy.roles && policy.roles.length > 0
+			? ` TO ${policy.roles.join(', ')}`
+			: '';
+	const usingClause = policy.using ? ` USING (${policy.using})` : '';
+	const withCheckClause = policy.withCheck
+		? ` WITH CHECK (${policy.withCheck})`
+		: '';
+	return `CREATE POLICY ${policyName} ON ${qualifiedTable}${forClause}${asClause}${toClause}${usingClause}${withCheckClause};`;
 }

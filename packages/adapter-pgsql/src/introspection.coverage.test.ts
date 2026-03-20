@@ -38,6 +38,8 @@ function createMockPool(
 	extensions: QueryResult<any> = { rows: [] },
 	sequences: QueryResult<any> = { rows: [] },
 	partitions: QueryResult<any> = { rows: [] },
+	rlsState: QueryResult<any> = { rows: [] },
+	policies: QueryResult<any> = { rows: [] },
 ) {
 	return {
 		query: vi
@@ -51,7 +53,9 @@ function createMockPool(
 			.mockResolvedValueOnce(checks) // CHECK constraints
 			.mockResolvedValueOnce(partitions) // partition configs (pg_partitioned_table)
 			.mockResolvedValueOnce(extensions) // extensions (pg_extension)
-			.mockResolvedValueOnce(sequences), // sequences (pg_sequences)
+			.mockResolvedValueOnce(sequences) // sequences (pg_sequences)
+			.mockResolvedValueOnce(rlsState) // RLS enabled state per table
+			.mockResolvedValueOnce(policies), // RLS policies
 	} as any;
 }
 
@@ -1945,8 +1949,8 @@ describe('introspection — hierarchy detection', () => {
 			before.getTime(),
 		);
 		expect(model.introspectedAt.getTime()).toBeLessThanOrEqual(after.getTime());
-		// Default schema = 'public' (passed to queries); 10 queries: columns, PKs, FKs, indexes, enums, comments, checks, partitions, extensions, sequences
-		expect(pool.query).toHaveBeenCalledTimes(10);
+		// Default schema = 'public' (passed to queries); 12 queries: columns, PKs, FKs, indexes, enums, comments, checks, partitions, extensions, sequences, rls state, policies
+		expect(pool.query).toHaveBeenCalledTimes(12);
 		expect(pool.query.mock.calls[0][1]).toEqual(['public']);
 	});
 

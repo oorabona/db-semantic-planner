@@ -14,6 +14,7 @@ import type {
 	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
+	PolicyIR,
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
@@ -49,6 +50,27 @@ function idxName(
 	customName?: string,
 ): string {
 	return customName ?? `idx_${table}_${columns.join('_')}`;
+}
+
+/** Build a CREATE POLICY SQL statement from a PolicyIR. */
+function buildPolicySQL(tableName: string, policy: PolicyIR, schemaName?: string): string {
+	const policyName = q(policy.name);
+	const qt = qualifyTable(tableName, schemaName);
+	const forClause =
+		policy.command && policy.command !== 'ALL'
+			? ` FOR ${policy.command}`
+			: ' FOR ALL';
+	const asClause =
+		policy.permissive === false ? ' AS RESTRICTIVE' : ' AS PERMISSIVE';
+	const toClause =
+		policy.roles && policy.roles.length > 0
+			? ` TO ${policy.roles.join(', ')}`
+			: '';
+	const usingClause = policy.using ? ` USING (${policy.using})` : '';
+	const withCheckClause = policy.withCheck
+		? ` WITH CHECK (${policy.withCheck})`
+		: '';
+	return `CREATE POLICY ${policyName} ON ${qt}${forClause}${asClause}${toClause}${usingClause}${withCheckClause};`;
 }
 
 /**
@@ -139,6 +161,11 @@ function isChangeSupported(kind: string, caps: DialectCapabilities): boolean {
 			return caps.supportsDDLCollation === true;
 		case 'alter_column_identity':
 			return caps.supportsDDLIdentityColumns === true;
+		case 'enable_rls':
+		case 'disable_rls':
+		case 'create_policy':
+		case 'drop_policy':
+			return caps.supportsDDLRowLevelSecurity === true;
 		default:
 			return true;
 	}
@@ -207,6 +234,8 @@ export function generateMigrationSQL(
 		[], // 14: alter ENUM add value (must be after CREATE TABLE, outside transaction)
 		[], // 15: COMMENT ON TABLE / COLUMN
 		[], // 16: VALIDATE CONSTRAINT (after FK/CHECK added with NOT VALID)
+		[], // 17: ENABLE/DISABLE ROW LEVEL SECURITY
+		[], // 18: CREATE/DROP POLICY
 	];
 
 	for (const change of changes) {
@@ -308,6 +337,14 @@ function getPhase(kind: SchemaChange['kind']): number {
 		case 'validate_constraint':
 			// Runs after add_foreign_key / add_check_constraint so the constraint exists
 			return 16;
+		case 'enable_rls':
+		case 'disable_rls':
+			// After table is created / indexes set up
+			return 17;
+		case 'create_policy':
+		case 'drop_policy':
+			// After RLS is enabled
+			return 18;
 	}
 }
 
@@ -606,6 +643,24 @@ function changeToUpSQL(
 				: q(seq.name);
 			return `DROP SEQUENCE IF EXISTS ${seqName} CASCADE;`;
 		}
+
+		case 'enable_rls':
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ENABLE ROW LEVEL SECURITY;`;
+
+		case 'disable_rls':
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DISABLE ROW LEVEL SECURITY;`;
+
+		case 'create_policy': {
+			const policy = change.meta?.policy as PolicyIR;
+			if (!policy) return undefined;
+			return buildPolicySQL(change.table, policy, schemaName);
+		}
+
+		case 'drop_policy': {
+			const policy = change.meta?.policy as PolicyIR;
+			if (!policy) return undefined;
+			return `DROP POLICY IF EXISTS ${q(policy.name)} ON ${qualifyTable(change.table, schemaName)};`;
+		}
 	}
 }
 
@@ -835,6 +890,28 @@ function changeToDownSQL(
 		case 'validate_constraint':
 			// DOWN: VALIDATE CONSTRAINT cannot be reversed in PostgreSQL
 			return `-- VALIDATE CONSTRAINT cannot be reversed in PostgreSQL (table: "${change.table}")`;
+
+		case 'enable_rls':
+			// DOWN: reverse enable → disable
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DISABLE ROW LEVEL SECURITY;`;
+
+		case 'disable_rls':
+			// DOWN: reverse disable → enable
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ENABLE ROW LEVEL SECURITY;`;
+
+		case 'create_policy': {
+			// DOWN: drop the policy that was created
+			const policy = change.meta?.policy as PolicyIR;
+			if (!policy) return undefined;
+			return `DROP POLICY IF EXISTS ${q(policy.name)} ON ${qualifyTable(change.table, schemaName)};`;
+		}
+
+		case 'drop_policy': {
+			// DOWN: recreate the policy that was dropped
+			const policy = change.meta?.policy as PolicyIR;
+			if (!policy) return undefined;
+			return buildPolicySQL(change.table, policy, schemaName);
+		}
 	}
 }
 
@@ -881,6 +958,8 @@ export function generateDownSQL(
 		[], // 14: alter ENUM add value
 		[], // 15: comments
 		[], // 16: VALIDATE CONSTRAINT
+		[], // 17: ENABLE/DISABLE ROW LEVEL SECURITY
+		[], // 18: CREATE/DROP POLICY
 	];
 
 	for (const change of changes) {
