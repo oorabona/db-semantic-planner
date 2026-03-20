@@ -61,6 +61,13 @@ export interface PlanDecision {
 	/** The choice made */
 	readonly choice: string;
 
+	/**
+	 * Join type for include-strategy decisions using the 'join' strategy.
+	 * Set when the user explicitly requests 'inner' or 'left' via IncludeIntent.join.
+	 * When absent, the join handler defaults to LEFT JOIN.
+	 */
+	readonly joinType?: 'inner' | 'left';
+
 	/** Human-readable reasoning */
 	readonly reasoning: string;
 

@@ -184,6 +184,33 @@ describe('includeOptionsToIntent()', () => {
 		expect(result.select).toBeDefined();
 		expect(result.include).toHaveLength(1);
 	});
+
+	it('should pass through join: "inner"', () => {
+		const result = includeOptionsToIntent('file', { join: 'inner' });
+		expect(result.join).toBe('inner');
+	});
+
+	it('should pass through join: "left"', () => {
+		const result = includeOptionsToIntent('file', { join: 'left' });
+		expect(result.join).toBe('left');
+	});
+
+	it('should not set join when not provided', () => {
+		const result = includeOptionsToIntent('file', {});
+		expect(result.join).toBeUndefined();
+	});
+
+	it('should combine join with where and select', () => {
+		const where = eq('project_id', 42);
+		const result = includeOptionsToIntent('file', {
+			join: 'inner',
+			where,
+			select: { type: 'fields', fields: ['path'] },
+		});
+		expect(result.join).toBe('inner');
+		expect(result.where).toBe(where);
+		expect(result.select).toBeDefined();
+	});
 });
 
 // ============================================================================

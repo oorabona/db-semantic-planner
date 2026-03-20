@@ -89,6 +89,10 @@ export function includeOptionsToIntent(
 		);
 	}
 
+	if (options.join !== undefined) {
+		intent.join = options.join;
+	}
+
 	// Handle recursive options (DX-017)
 	if (isRecursiveIncludeOptions(options)) {
 		const recursiveOpts: Mutable<IncludeRecursiveOptions> = {};

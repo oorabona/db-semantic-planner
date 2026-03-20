@@ -1,10 +1,11 @@
 /**
  * JOIN Include Strategy Handler
  *
- * Implements the 'join' include strategy using LEFT JOIN.
- * This is the simplest strategy: adds a LEFT JOIN to the FROM clause.
+ * Implements the 'join' include strategy using LEFT JOIN (default) or INNER JOIN.
+ * This is the simplest strategy: adds a JOIN to the FROM clause.
  *
- * Produces: LEFT JOIN related_table AS relation ON source.fk = related.pk
+ * Produces: LEFT JOIN related_table AS relation ON source.fk = related.pk  (default)
+ *       or: INNER JOIN related_table AS relation ON source.fk = related.pk  (join: 'inner')
  * With aliased columns: "relation.column" for hydration
  */
 
@@ -29,15 +30,16 @@ import type {
 } from '../types.js';
 
 /**
- * Build a LEFT JOIN expression
+ * Build a JOIN expression (LEFT JOIN by default, INNER JOIN when joinType='inner').
  */
-function buildLeftJoin(
+function buildJoin(
 	targetTable: string,
 	targetAlias: string,
 	sourceAlias: string,
 	sourceColumn: string,
 	targetColumn: string,
 	ctx: CompilerContext,
+	joinType: 'inner' | 'left' = 'left',
 ): Node {
 	// Build the join condition: source.sourceColumn = target.targetColumn
 	const joinCondition = fkCorrelation(
@@ -49,7 +51,7 @@ function buildLeftJoin(
 	);
 
 	const joinExpr: JoinExpr = {
-		jointype: 'JOIN_LEFT',
+		jointype: joinType === 'inner' ? 'JOIN_INNER' : 'JOIN_LEFT',
 		rarg: rangeVar(targetTable, targetAlias, ctx.schema, ctx.naming),
 		quals: joinCondition,
 	};
@@ -96,14 +98,15 @@ export const joinIncludeHandler: IncludeHandler = {
 				ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
 			);
 
-		// Build the LEFT JOIN
-		const join = buildLeftJoin(
+		// Build the JOIN (LEFT or INNER based on decision.joinType)
+		const join = buildJoin(
 			targetTable,
 			targetAlias,
 			sourceAlias,
 			sourceColumn,
 			targetColumn,
 			ctx,
+			decision.joinType ?? 'left',
 		);
 
 		// Build column targets with "relation.column" aliases for hydration

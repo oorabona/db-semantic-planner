@@ -57,6 +57,7 @@
 (CAPS-VERSION, UPSERT-RAW, EDGE-001, EDGE-002 archived → docs/historic/done-2026-03.md)
 - [ ] 💡 **NQL-WITH** [NQL] WITH ... AS (...) non-recursive CTE syntax in NQL parser — deferred from BATCH-001. — Priority: P1 (from /adversarial 2026-03-18)
 - [x] ✅ **BATCH-DRY-001** [Adapter] Extract shared `mapModelIRTypeToPgBase()` to `compiler-utils.ts` — removed local duplicate in `any.ts`. (2026-03-20)
+- [x] ✅ **JOIN-TYPE** [Core/Adapter] Add `join?: 'inner' | 'left'` to `include()` — forces join strategy with INNER/LEFT JOIN; `join: 'inner'` filters root rows to only those with a matching related record. Types: `IncludeIntent`, `IncludeOptions`, `PlanDecision`. Planner forces strategy to 'join', embeds joinType on include-strategy decision. Adapter handler reads `decision.joinType`. 14 new adapter tests + 4 core intent tests. (2026-03-20)
 - [x] ✅ **EDGE-FLOAT** [Adapter] Float literal support in raw-expression-parser — `tokenise()` produces FLOAT tokens, `parsePrimary()` emits `A_Const.fval` nodes, 7 new tests. (2026-03-20)
 - [x] ✅ **BATCH-DRY-002** [Adapter] Extract `stripArraySuffix()` helper to `compiler-utils.ts` — eliminated 4× inline pattern. (2026-03-20)
 - [x] ✅ **BATCH-FIX-001** [Adapter] Add `bigint` to `inferPgArrayType` runtime fallback → `int8[]`. (2026-03-20)
