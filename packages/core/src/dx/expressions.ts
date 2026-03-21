@@ -25,6 +25,7 @@
  */
 
 import type {
+	ArrayExpressionIntent,
 	CastExpressionIntent,
 	CustomFnExpressionIntent,
 	CustomOpExpressionIntent,
@@ -33,6 +34,7 @@ import type {
 	NamedArgExpressionIntent,
 	ParamExpressionIntent,
 	RefExpressionIntent,
+	StarExpressionIntent,
 	UnaryExpressionIntent,
 	WhereExpressionIntent,
 	WhereIntent,
@@ -311,3 +313,23 @@ export function namedArg(name: string, value: ExprInput): ExpressionRef {
 		value: toExpressionIntent(value),
 	} satisfies NamedArgExpressionIntent);
 }
+
+
+/** SQL wildcard (*) — use in fn('count', star()) for COUNT(*) */
+export function star(): ExpressionRef {
+	return new ExpressionRef({ kind: 'star' } satisfies StarExpressionIntent);
+}
+
+/**
+ * PostgreSQL ARRAY constructor: ARRAY[item1, item2, ...]
+ *
+ * @example array(literal(1), literal(2), literal(3)) → ARRAY[1, 2, 3]
+ * @example array(ref('name'), ref('kind')) → ARRAY["name", "kind"]
+ */
+export function array(...items: ExprInput[]): ExpressionRef {
+	return new ExpressionRef({
+		kind: 'array',
+		elements: items.map(toExpressionIntent),
+	} satisfies ArrayExpressionIntent);
+}
+

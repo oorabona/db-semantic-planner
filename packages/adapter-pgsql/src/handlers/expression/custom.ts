@@ -6,6 +6,7 @@
  */
 
 import type {
+	ArrayExpressionIntent,
 	CastExpressionIntent,
 	CustomFnExpressionIntent,
 	CustomOpExpressionIntent,
@@ -148,6 +149,21 @@ export function compileExpressionIntent(
 					argnumber: -1,
 				},
 			} as unknown as Node;
+		}
+
+		case 'star':
+			// ColumnRef with A_Star field — deparseColumnRef renders it as *
+			// When passed to fn(), funcCall() puts it in args → count(*) etc.
+			return {
+				ColumnRef: { fields: [{ A_Star: {} }] },
+			} as unknown as Node;
+
+		case 'array': {
+			const ae = intent as ArrayExpressionIntent;
+			const elements = ae.elements.map((el) =>
+				compileExpressionIntent(el, ctx, state),
+			);
+			return { A_ArrayExpr: { elements } } as unknown as Node;
 		}
 
 		default: {

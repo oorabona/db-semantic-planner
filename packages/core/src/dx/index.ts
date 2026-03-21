@@ -336,6 +336,7 @@ export type {
 export { isExpressionSpec } from './types.js';
 // Expression primitives (EXT-001)
 export {
+	array,
 	cast,
 	ExpressionRef,
 	fn,
@@ -344,6 +345,7 @@ export {
 	op,
 	param,
 	ref as exprRef,
+	star,
 	type ExprInput,
 	unary,
 } from './expressions.js';

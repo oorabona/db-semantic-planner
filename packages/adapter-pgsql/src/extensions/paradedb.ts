@@ -14,7 +14,7 @@
  * Named parameter syntax is supported via the NamedArgExpressionIntent (EXT-NAMED-PARAMS).
  */
 
-import { ExpressionRef, exprRef, fn, literal, namedArg, op, param } from '@dbsp/core';
+import { array, ExpressionRef, exprRef, fn, literal, namedArg, op, param } from '@dbsp/core';
 
 /**
  * BM25 relevance score for a row.
@@ -90,8 +90,20 @@ export function boost(factor: number, expr: ExpressionRef): ExpressionRef {
  * booleanSearch([boost(3.0, parse('name', q)), boost(1.0, parse('doc', q))])
  * // → paradedb.boolean(paradedb.boost(3.0, ...), paradedb.boost(1.0, ...))
  */
+/**
+ * Combine multiple BM25 sub-expressions with boolean OR logic.
+ *
+ * Compiles to: paradedb.boolean(should => ARRAY[expr1, expr2, ...])
+ *
+ * @param exprs - One or more sub-expressions (typically boost() calls)
+ * @returns ExpressionRef for use on the right side of the @@@ operator
+ *
+ * @example
+ * booleanSearch([boost(3.0, parse('name', q)), boost(1.0, parse('doc', q))])
+ * // → paradedb.boolean(should => ARRAY[paradedb.boost(3.0, ...), paradedb.boost(1.0, ...)])
+ */
 export function booleanSearch(exprs: ExpressionRef[]): ExpressionRef {
-	return fn('paradedb.boolean', ...exprs);
+	return fn('paradedb.boolean', namedArg('should', array(...exprs)));
 }
 
 /**

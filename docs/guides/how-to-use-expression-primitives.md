@@ -119,6 +119,40 @@ namedArg('query_string', param('hello')) // → query_string => $1
 Used inside `fn()` to produce PostgreSQL named-parameter syntax (`=>` form),
 as required by some extension functions (e.g., `paradedb.parse`).
 
+### `star()` — SQL wildcard (*)
+
+```typescript
+import { star, fn } from '@dbsp/core';
+
+star()                  // → *
+fn('count', star())     // → count(*)
+```
+
+Use `star()` inside `fn()` to produce aggregate functions that operate on all rows.
+Do not use it in `.column()` directly — use the query builder's select-all default instead.
+
+### `array(...items)` — PostgreSQL ARRAY constructor
+
+```typescript
+import { array, literal, ref, param } from '@dbsp/core';
+
+array(literal(1), literal(2), literal(3))  // → ARRAY[1, 2, 3]
+array(ref('name'), ref('kind'))            // → ARRAY["name", "kind"]
+array(param('a'), param('b'))              // → ARRAY[$1, $2]
+```
+
+Implicit conversions apply to all items (same rules as `fn()` and `op()`).
+
+### COUNT(*)
+
+```typescript
+import { fn, star, cast, eq } from '@dbsp/core';
+
+fn('count', star())                     // → count(*)
+fn('count', star()).filter(eq(...))     // → count(*) FILTER (WHERE ...)
+cast(fn('count', star()), 'int')        // → CAST(count(*) AS int)
+```
+
 ## ExpressionRef Chaining
 
 All primitives return an `ExpressionRef` — a chainable wrapper with three usage modes:
@@ -192,7 +226,7 @@ orm.select('embeddings')
 
 ## Key Files
 
-- `packages/core/src/dx/expressions.ts` — `ExpressionRef`, `op`, `fn`, `ref`, `param`, `cast`, `literal`, `unary`, `namedArg`
+- `packages/core/src/dx/expressions.ts` — `ExpressionRef`, `op`, `fn`, `ref`, `param`, `cast`, `literal`, `unary`, `namedArg`, `star`, `array`
 - `packages/adapter-pgsql/src/extensions/pgvector.ts` — pgvector helpers built on these primitives
 - `packages/adapter-pgsql/src/extensions/paradedb.ts` — ParadeDB helpers built on these primitives
 - `packages/adapter-pgsql/src/handlers/expression/` — compiler handlers for each expression kind
