@@ -18,7 +18,8 @@
 ## Bugs
 
 - [x] ✅ **INTRO-INDEXES** [Adapter] `introspect()` index catalog query had `$1` accidentally replaced with a JS `//` comment inside a template literal — PostgreSQL received the raw comment text as SQL, failing with `syntax error at or near "Indexes"`. Fixed: restored `WHERE n.nspname = $1`. Regression tests added. (2026-03-21)
-- [ ] 🐛 **WCOUNT-STAR** [Core] `wCount()` window function requires a field argument — no zero-arg `wCount()` or `wCountStar()` to produce `COUNT(*) OVER()`. Blocks ~9 astix orm.raw() migrations in code-health.ts (pagination total alongside GROUP BY). — Priority: P0
+- [ ] 🐛 **FN-FILTER** [Core] `fn('array_agg', ref('col')).filter(condition)` — `.filter()` only exists on `AggregateExpr` (count/sum/avg/min/max), not on `ExpressionRef` returned by `fn()`. Blocks astix migrations using `array_agg() FILTER`, `json_agg() FILTER`. Fix: either add `.filter()` to `ExpressionRef`, or add `arrayAgg()`, `jsonAgg()` to typed aggregate API. — Priority: P1
+- [x] ✅ **WCOUNT-STAR** [Core] `wCount()` now accepts optional field — `wCount()` with no arg produces `COUNT(*) OVER(...)`, `wCount('id')` produces `COUNT("id") OVER(...)`. `WindowFunctionKind.aggregate.field` made optional, `exactOptionalPropertyTypes`-safe via conditional spread. 3 builder tests + 2 compiler SQL tests added. (2026-03-21)
 - [x] ✅ **INCLUDE-2HOP** [Adapter] `include('callee.file')` resolved FK on ROOT table instead of intermediate table. Fixed: `toJoinIncludeDecision` now propagates `sourceTable`; `mapToHandlerDecision` uses `pd.sourceTable ?? rootTable` for `deriveFkColumns`; `PlanCompiler` tracks `joinAliasMap` (targetTable→alias) so 2nd-hop `currentAlias` resolves to the intermediate alias (e.g., `callee`) not the root. 2 regression tests added. (2026-03-21)
 
 ---

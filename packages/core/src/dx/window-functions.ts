@@ -38,8 +38,8 @@ type WindowFunctionKind =
 	| { type: 'ranking'; fn: 'row_number' | 'rank' | 'dense_rank' }
 	| {
 			type: 'aggregate';
-			fn: 'sum' | 'avg' | 'count' | 'min' | 'max';
-			field: string;
+		fn: 'sum' | 'avg' | 'count' | 'min' | 'max';
+		field?: string;
 	  }
 	| { type: 'offset'; fn: 'lag' | 'lead'; field: string };
 
@@ -85,9 +85,13 @@ export class WindowBuilder {
 	 */
 	static aggregate(
 		fn: 'sum' | 'avg' | 'count' | 'min' | 'max',
-		field: string,
+		field?: string,
 	): WindowBuilder {
-		return new WindowBuilder({ type: 'aggregate', fn, field });
+		return new WindowBuilder({
+			type: 'aggregate',
+			fn,
+			...(field !== undefined ? { field } : {}),
+		});
 	}
 
 	/**
@@ -261,15 +265,20 @@ export function wAvg(field: string): WindowBuilder {
 }
 
 /**
- * COUNT window function: count within partition
+ * COUNT window function: count within partition.
+ * When called with no argument, produces COUNT(*) OVER (...).
  *
- * @param field - Field to count
+ * @param field - Optional field to count. Omit for COUNT(*).
  *
- * @example
+ * @example COUNT(*) OVER()
+ * wCount().over({ partitionBy: ['project_id'] }).as('total')
+ * // → COUNT(*) OVER (PARTITION BY "project_id") AS "total"
+ *
+ * @example COUNT(field) OVER()
  * wCount('id').partitionBy('category').as('items_in_category')
  * // → COUNT("id") OVER (PARTITION BY "category") AS "items_in_category"
  */
-export function wCount(field: string): WindowBuilder {
+export function wCount(field?: string): WindowBuilder {
 	return WindowBuilder.aggregate('count', field);
 }
 
