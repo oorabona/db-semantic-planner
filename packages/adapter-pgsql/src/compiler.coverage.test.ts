@@ -443,6 +443,45 @@ describe('PlanCompiler - Coverage Tests', () => {
 			expect(sql).toContain('rank');
 			expect(sql).toContain('over');
 		});
+
+		it('compiles COUNT(*) OVER() when no field is set (WCOUNT-STAR)', () => {
+			const plan: SimplifiedPlanReport = {
+				rootTable: 'tasks',
+				decisions: [
+					{
+						type: 'selectWindow',
+						function: 'count',
+						// no field → COUNT(*) OVER(...)
+						partitionBy: ['project_id'],
+						alias: 'total',
+					},
+				],
+			};
+			const compiler = new PlanCompiler();
+			const result = compiler.compile(plan);
+			const sql = normalizeSQL(result.sql);
+			expect(sql).toContain('count(*)');
+			expect(sql).toContain('over');
+			expect(sql).toContain('partition by');
+		});
+
+		it('compiles COUNT(*) OVER() with empty OVER clause (no partition, no order)', () => {
+			const plan: SimplifiedPlanReport = {
+				rootTable: 'items',
+				decisions: [
+					{
+						type: 'selectWindow',
+						function: 'count',
+						alias: 'total_rows',
+					},
+				],
+			};
+			const compiler = new PlanCompiler();
+			const result = compiler.compile(plan);
+			const sql = normalizeSQL(result.sql);
+			expect(sql).toContain('count(*)');
+			expect(sql).toContain('over');
+		});
 	});
 
 	describe('selectRelationColumn', () => {
