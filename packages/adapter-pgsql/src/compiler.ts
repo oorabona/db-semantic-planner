@@ -126,6 +126,7 @@ function mapToHandlerDecision(
 		subqueryOperator: pd.subqueryOperator,
 		selectColumn: pd.selectColumn,
 		aggregate: pd.aggregate,
+		columnAliases: pd.columnAliases,
 	} as HandlerDecision;
 }
 
@@ -208,6 +209,9 @@ export interface PlanDecision {
 	readonly expressionType?: string;
 	// Relation column properties
 	readonly relation?: string;
+	// User-supplied aliases for specific relation columns (col -> alias).
+	// Populated when selectRelationColumn decisions carry an `alias` field.
+	readonly columnAliases?: Readonly<Record<string, string>>;
 	// Pseudo-column (recursive traversal) properties
 	readonly traversal?: string;
 	readonly pkColumn?: string;
@@ -444,8 +448,12 @@ export class PlanCompiler {
 			handlerDecision.strategy as 'json_agg' | 'join' | 'lateral' | 'cte',
 		);
 
-		// Pre-compile filter conditions for the handler (e.g., EXISTS propagation)
+		// Pre-compile filter conditions for the handler (e.g., EXISTS propagation).
+		// INCLUDE-WHERE-SCOPE: skip for 'join' strategy — its conditions are folded
+		// into the root WHERE clause in compileSelect() instead. Pre-compiling here
+		// would double-consume parameter slots without producing usable SQL.
 		if (
+			strategy !== 'join' &&
 			decision.conditions &&
 			(decision.conditions as PlanDecision[]).length > 0
 		) {
@@ -1045,6 +1053,24 @@ export class PlanCompiler {
 
 				case 'includeStrategy':
 					this.compileIncludeDecision(decision, plan, targetList);
+					// INCLUDE-WHERE-SCOPE: when join strategy has WHERE conditions,
+					// fold them into the root query WHERE clause. Use the joined
+					// table's alias (= relationName) as currentAlias so column refs
+					// like `project_id` resolve to `file.project_id`, not `root.project_id`.
+					if (
+						decision.choice === 'join' &&
+						decision.conditions &&
+						(decision.conditions as PlanDecision[]).length > 0
+					) {
+						const joinAlias = decision.relationName as string | undefined;
+						for (const cond of decision.conditions as PlanDecision[]) {
+							const condExpr = this.dispatchWhere(
+								cond,
+								joinAlias ? { currentAlias: joinAlias } : undefined,
+							);
+							where = where ? andExpr(where, condExpr) : condExpr;
+						}
+					}
 					break;
 
 				case 'where':

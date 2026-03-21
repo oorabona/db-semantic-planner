@@ -109,17 +109,22 @@ export const joinIncludeHandler: IncludeHandler = {
 			decision.joinType ?? 'left',
 		);
 
-		// Build column targets with "relation.column" aliases for hydration
+		// Build column targets with output aliases for hydration.
+		// Prefer user-supplied alias from columnAliases; fall back to
+		// the "relation.column" convention used by the hydration layer.
 		const targets: Node[] = [];
 		const columns = decision.columns;
+		const columnAliases = decision.columnAliases;
 		if (columns && columns.length > 0) {
 			if (columns.length === 1 && columns[0] === '*') {
 				// Wildcard: select all columns from the joined relation
 				targets.push(starTarget(targetAlias, ctx.naming));
 			} else {
 				for (const col of columns) {
+					const outputAlias =
+						columnAliases?.[col] ?? `${relation}.${col}`;
 					targets.push(
-						columnTarget(col, `${relation}.${col}`, targetAlias, ctx.naming),
+						columnTarget(col, outputAlias, targetAlias, ctx.naming),
 					);
 				}
 			}

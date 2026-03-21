@@ -129,6 +129,25 @@ export function compileSelect<T = unknown>(
 			return jd;
 		});
 
+		// INCLUDE-COUNT: When the query is aggregate-only (no GROUP BY fields),
+		// join includes must not contribute SELECT columns — only the JOIN itself
+		// is needed (for filtering). Strip `columns` from join includeStrategy
+		// decisions so the join handler emits only the JoinExpr, not ResTargets.
+		// Without this fix, mixing COUNT(*) with a join include produces invalid SQL:
+		//   SELECT COUNT(*), "file"."id" AS "file.id" FROM ... -- PG rejects this
+		const isAggregateOnly =
+			plan.intent?.select &&
+			'type' in plan.intent.select &&
+			plan.intent.select.type === 'aggregate' &&
+			!('fields' in plan.intent.select && (plan.intent.select as { fields?: unknown }).fields);
+		if (isAggregateOnly) {
+			for (const d of enrichedUnifiedDecisions) {
+				if (d.type === 'includeStrategy' && d.choice === 'join') {
+					(d as Mutable<PlanDecision>).columns = [];
+				}
+			}
+		}
+
 		// Deduplicate: remove selectRelationColumn decisions for relations
 		// already covered by an include strategy.
 		// Include handlers (json_agg, lateral, CTE, join) already compile the
@@ -145,36 +164,81 @@ export function compileSelect<T = unknown>(
 
 		// Collect specific columns per relation from selectRelationColumn
 		// decisions that will be deduplicated. This preserves column info
-		// that would otherwise be lost when selectRelationColumn is removed.
-		const relationColumnsMap = new Map<string, string[]>();
+		// (including user-supplied aliases) that would otherwise be lost
+		// when selectRelationColumn decisions are removed.
+		//
+		// Key: full relation path (e.g. 'callee' for 1-hop, 'callee.file' for
+		// 2-hop). This lets relationColumn('callee.file', 'path', 'fp') target
+		// the leaf includeStrategy decision (relationName='file') rather than
+		// the 1st-hop one (relationName='callee').
+		type RelationColumnEntry = { col: string; alias?: string };
+		const relationColumnsMap = new Map<string, RelationColumnEntry[]>();
+
+		/**
+		 * Find the relationColumnsMap key for a given includeStrategy relationName.
+		 * Exact match first (1-hop); then suffix match '.relationName' (2-hop+).
+		 */
+		function findRelationMapKey(relationName: string): string | undefined {
+			if (relationColumnsMap.has(relationName)) return relationName;
+			const suffix = `.${relationName}`;
+			for (const key of relationColumnsMap.keys()) {
+				if (key.endsWith(suffix)) return key;
+			}
+			return undefined;
+		}
+
 		if (includedRelations.size > 0) {
 			for (const d of decisions) {
 				if (d.type === 'selectRelationColumn' && d.relation && d.column) {
 					const col = d.column as string;
-					const rootRelation = (d.relation as string).split('.')[0] ?? '';
+					const alias = d.alias as string | undefined;
+					const fullRelation = d.relation as string;
+					const rootRelation = fullRelation.split('.')[0] ?? '';
 					if (includedRelations.has(rootRelation)) {
+						// Use full path as map key so 'callee.file' is stored separately
+						// from 'callee' — avoids injecting 2-hop columns into 1-hop includes.
+						const mapKey = fullRelation;
 						if (col === '*') {
-							// Wildcard: select all columns from relation
-							relationColumnsMap.set(rootRelation, ['*']);
+							// Wildcard: select all columns from relation (no aliases)
+							relationColumnsMap.set(mapKey, [{ col: '*' }]);
 							continue;
 						}
-						const existing = relationColumnsMap.get(rootRelation);
-						if (existing && !existing.includes('*')) {
-							if (!existing.includes(col)) existing.push(col);
-						} else if (!existing) {
-							relationColumnsMap.set(rootRelation, [col]);
+						const existing = relationColumnsMap.get(mapKey);
+						if (existing) {
+							if (existing.length === 1 && existing[0]?.col === '*') {
+								// Wildcard already set — skip
+								continue;
+							}
+							if (!existing.some((e) => e.col === col)) {
+								existing.push({ col, alias });
+							}
+						} else {
+							relationColumnsMap.set(mapKey, [{ col, alias }]);
 						}
 					}
 				}
 			}
 
-			// Inject collected columns into matching includeStrategy decisions
+			// Inject collected columns and aliases into matching includeStrategy decisions
 			if (relationColumnsMap.size > 0) {
 				for (const d of enrichedUnifiedDecisions) {
 					if (d.type === 'includeStrategy' && d.relationName) {
-						const cols = relationColumnsMap.get(d.relationName as string);
-						if (cols) {
-							(d as Mutable<PlanDecision>).columns = cols;
+						const mapKey = findRelationMapKey(d.relationName as string);
+						const entries = mapKey
+							? relationColumnsMap.get(mapKey)
+							: undefined;
+						if (entries) {
+							const mut = d as Mutable<PlanDecision>;
+							// columns: plain string array (preserves existing contract)
+							mut.columns = entries.map((e) => e.col);
+							// columnAliases: map col -> user alias (only non-trivial aliases)
+							const aliasMap: Record<string, string> = {};
+							for (const { col, alias } of entries) {
+								if (alias) aliasMap[col] = alias;
+							}
+							if (Object.keys(aliasMap).length > 0) {
+								mut.columnAliases = aliasMap;
+							}
 						}
 					}
 				}

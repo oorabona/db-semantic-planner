@@ -1088,4 +1088,105 @@ describe('plan-decision-extractor - coverage', () => {
 			expect(extractLeftJoinIncludeDecisions(plan)).toEqual([]);
 		});
 	});
+
+	// INCLUDE-WHERE-SCOPE regression: extractAllIncludeDecisions must propagate
+	// WHERE conditions from the include intent into the join decision's conditions.
+	describe('extractAllIncludeDecisions — join where conditions (INCLUDE-WHERE-SCOPE)', () => {
+		it('populates conditions when include intent has a where clause', () => {
+			const plan = {
+				rootTable: 'symbols',
+				intent: {
+					include: [
+						{
+							relation: 'file',
+							where: {
+								kind: 'comparison',
+								field: 'project_id',
+								operator: 'eq',
+								value: 42,
+							},
+						},
+					],
+				},
+				decisions: [
+					{
+						type: 'include-strategy',
+						choice: 'join',
+						context: { target: 'files', relation: 'file' },
+					},
+				],
+			};
+			const result = extractAllIncludeDecisions(plan);
+			expect(result).toHaveLength(1);
+			expect(result[0].conditions).toBeDefined();
+			expect(result[0].conditions).toHaveLength(1);
+			const cond = result[0].conditions[0];
+			expect(cond.type).toBe('where');
+			expect(cond.column).toBe('project_id');
+			expect(cond.value).toBe(42);
+			// Condition table should be the joined alias (relationName)
+			expect(cond.table).toBe('file');
+		});
+
+		it('leaves conditions undefined when include has no where clause', () => {
+			const plan = {
+				rootTable: 'symbols',
+				intent: {
+					include: [{ relation: 'file' }],
+				},
+				decisions: [
+					{
+						type: 'include-strategy',
+						choice: 'join',
+						context: { target: 'files', relation: 'file' },
+					},
+				],
+			};
+			const result = extractAllIncludeDecisions(plan);
+			expect(result[0].conditions).toBeUndefined();
+		});
+
+		it('populates conditions from AND where clause', () => {
+			const plan = {
+				rootTable: 'symbols',
+				intent: {
+					include: [
+						{
+							relation: 'file',
+							where: {
+								kind: 'and',
+								conditions: [
+									{
+										kind: 'comparison',
+										field: 'project_id',
+										operator: 'eq',
+										value: 5,
+									},
+									{
+										kind: 'comparison',
+										field: 'deleted',
+										operator: 'eq',
+										value: false,
+									},
+								],
+							},
+						},
+					],
+				},
+				decisions: [
+					{
+						type: 'include-strategy',
+						choice: 'join',
+						context: { target: 'files', relation: 'file' },
+					},
+				],
+			};
+			const result = extractAllIncludeDecisions(plan);
+			expect(result[0].conditions).toBeDefined();
+			// AND with 2 conditions → single whereAnd decision
+			expect(result[0].conditions).toHaveLength(1);
+			expect(result[0].conditions[0].type).toBe('whereAnd');
+			expect(result[0].conditions[0].conditions).toHaveLength(2);
+		});
+	});
 });
