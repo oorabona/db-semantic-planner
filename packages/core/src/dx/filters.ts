@@ -182,6 +182,19 @@ export const lt: ComparisonFilter = createComparisonFilter('lt');
  */
 export const lte: ComparisonFilter = createComparisonFilter('lte');
 
+
+/**
+ * Null-safe inequality: field IS DISTINCT FROM value
+ *
+ * Unlike neq(), returns true when one side is NULL and the other is not.
+ * Standard SQL (SQL:2003).
+ *
+ * @example isDistinctFrom('status', 'active') → status IS DISTINCT FROM 'active'
+ * @example isDistinctFrom(users.status, null) → status IS DISTINCT FROM NULL
+ */
+export const isDistinctFrom: ComparisonFilter = createComparisonFilter('isDistinctFrom');
+
+
 // ============================================================================
 // String Operators
 // ============================================================================

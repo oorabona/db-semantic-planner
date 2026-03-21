@@ -48,6 +48,7 @@ export {
 	// Array
 	any,
 	inArray,
+	isDistinctFrom,
 	// Type guards
 	isDistinctField,
 	// Null

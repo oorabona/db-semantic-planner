@@ -172,6 +172,7 @@ export function mapComparisonOperator(op: string): string {
 		lte: '<=',
 		like: 'LIKE',
 		ilike: 'ILIKE',
+		isDistinctFrom: 'IS DISTINCT FROM',
 	};
 	return map[op] ?? '=';
 }

@@ -17,3 +17,4 @@ export {
 	l2Distance,
 	rawDistance,
 } from './pgvector.js';
+export { generateSeries, nextval } from './pgsql-builtins.js';
