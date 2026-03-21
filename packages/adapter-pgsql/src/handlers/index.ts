@@ -369,11 +369,15 @@ function normalizeToDecision(input: Decision): Decision {
 			const conditions = raw.where
 				? [normalizeToDecision(raw.where as Decision)]
 				: undefined;
+			// Prefer explicit targetTable if already resolved (e.g. by compileDelete's
+			// resolveExistsIntent which maps the logical relation name → real table name).
+			// Fall back to relation name when no ModelIR is available.
+			const targetTable = (raw.targetTable as string | undefined) ?? relation;
 			return {
 				type: 'exists',
 				operator: kind, // 'exists' | 'notExists'
 				relation,
-				targetTable: relation, // defaults to relation name; handler may override
+				targetTable,
 				...(conditions && { conditions }),
 			};
 		}
