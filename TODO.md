@@ -17,6 +17,7 @@
 
 ## Bugs
 
+- [x] ✅ **INTRO-OIDVECTOR** [Adapter] `introspect()` opclass join cast `oidvector → int2[]` rejected by PG — fixed to `oidvector → oid[]` in index catalog query (2026-03-21)
 - [x] ✅ **INTRO-INDEXES** [Adapter] `introspect()` index catalog query had `$1` accidentally replaced with a JS `//` comment inside a template literal — PostgreSQL received the raw comment text as SQL, failing with `syntax error at or near "Indexes"`. Fixed: restored `WHERE n.nspname = $1`. Regression tests added. (2026-03-21)
 - [ ] 🐛 **FN-FILTER** [Core] `fn('array_agg', ref('col')).filter(condition)` — `.filter()` only exists on `AggregateExpr` (count/sum/avg/min/max), not on `ExpressionRef` returned by `fn()`. Blocks astix migrations using `array_agg() FILTER`, `json_agg() FILTER`. Fix: either add `.filter()` to `ExpressionRef`, or add `arrayAgg()`, `jsonAgg()` to typed aggregate API. — Priority: P1
 - [x] ✅ **WCOUNT-STAR** [Core] `wCount()` now accepts optional field — `wCount()` with no arg produces `COUNT(*) OVER(...)`, `wCount('id')` produces `COUNT("id") OVER(...)`. `WindowFunctionKind.aggregate.field` made optional, `exactOptionalPropertyTypes`-safe via conditional spread. 3 builder tests + 2 compiler SQL tests added. (2026-03-21)
