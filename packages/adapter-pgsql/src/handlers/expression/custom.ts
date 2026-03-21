@@ -166,6 +166,19 @@ export function compileExpressionIntent(
 			return { A_ArrayExpr: { elements } } as unknown as Node;
 		}
 
+		case 'relationColumn': {
+			// Produced by relationColumn(relation, column, as) — ORDER BY a joined relation's column.
+			// Alias lookup: state.aliases may be empty for expression-scoped states;
+			// fall back to the relation name itself (which is used as the SQL JOIN alias).
+			const rc = intent as unknown as {
+				relation: string;
+				column: string;
+				as: string;
+			};
+			const alias = state.aliases.get(rc.relation) ?? rc.relation;
+			return columnRef(rc.column, alias, undefined, ctx.naming);
+		}
+
 		default: {
 			throw new Error(
 				`compileExpressionIntent: unsupported expression kind '${kind}'`,

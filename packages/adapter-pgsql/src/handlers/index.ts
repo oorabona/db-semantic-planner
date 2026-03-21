@@ -185,6 +185,8 @@ interface RawDecisionInput extends Decision {
 	readonly jsonMode?: 'json' | 'text';
 	readonly reversed?: boolean;
 	readonly key?: string;
+	// Exists/NotExists intent fields
+	readonly where?: unknown;
 }
 
 /**
@@ -358,6 +360,23 @@ function normalizeToDecision(input: Decision): Decision {
 				operator: 'jsonExists',
 				value: raw.key,
 			};
+		case 'exists':
+		case 'notExists': {
+			// WhereExistsIntent / WhereNotExistsIntent from notExists() / exists() helpers.
+			// These are passed directly to mutations (DELETE/UPDATE WHERE) without going
+			// through the planner, so we normalize them here for the EXISTS/NOT EXISTS handlers.
+			const relation = raw.relation as string;
+			const conditions = raw.where
+				? [normalizeToDecision(raw.where as Decision)]
+				: undefined;
+			return {
+				type: 'exists',
+				operator: kind, // 'exists' | 'notExists'
+				relation,
+				targetTable: relation, // defaults to relation name; handler may override
+				...(conditions && { conditions }),
+			};
+		}
 		default:
 			// Pass through for types already in Decision format or unknown
 			return input;

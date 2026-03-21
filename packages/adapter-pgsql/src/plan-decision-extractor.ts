@@ -579,12 +579,13 @@ function toJoinIncludeDecision(
 	const relationName = context.relation ?? context.includeAlias;
 	if (!context.target || !relationName) return undefined;
 
-	// Find matching include intent to get column list
+	// Find matching include intent to get column list and where conditions
 	const includeIntent = (
 		plan.intent?.include as
 			| Array<{
 					relation: string;
 					select?: { type: string; fields?: readonly string[] };
+					where?: unknown;
 			  }>
 			| undefined
 	)?.find(
@@ -605,6 +606,28 @@ function toJoinIncludeDecision(
 		| 'hasOne'
 		| undefined;
 
+	// Extract WHERE conditions from include intent.
+	// When include({ join: 'inner', where: ... }) is used, the WHERE conditions
+	// must be applied to the root query's WHERE clause (scoped to the joined
+	// table's alias = relationName) to actually filter the root rows.
+	let conditions: PlanDecision[] | undefined;
+	if (includeIntent?.where) {
+		const converted = convertWhereToDecisions(
+			includeIntent.where,
+			relationName as string,
+		);
+		if (converted.length > 0) {
+			conditions = converted;
+		}
+	}
+
+	// Forward joinType from the planner decision so the join handler produces
+	// the correct JOIN type (INNER vs LEFT).
+	const joinType = (d as unknown as Record<string, unknown>).joinType as
+		| 'inner'
+		| 'left'
+		| undefined;
+
 	return {
 		type: 'includeStrategy',
 		choice: 'join',
@@ -615,6 +638,8 @@ function toJoinIncludeDecision(
 		foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
 		parentKey: defaultPk,
 		columns,
+		...(joinType && { joinType }),
+		...(conditions && { conditions }),
 	};
 }
 

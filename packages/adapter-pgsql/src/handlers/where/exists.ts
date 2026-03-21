@@ -11,7 +11,6 @@ import type { Node, SelectStmt, SubLink } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,
 	defaultFkDerivation,
-	requiredColumn,
 } from '../../assert-field.js';
 import { columnRef, eqExpr, rangeVar } from '../../ast-helpers.js';
 import type {
@@ -76,11 +75,13 @@ function buildExistsSubquery(
 ): Node {
 	const relation = decision.relation;
 	const targetTable = decision.targetTable ?? relation;
-	const sourceColumn = requiredColumn(
-		decision.sourceColumn,
-		'sourceColumn',
-		'EXISTS handler',
-	);
+	// sourceColumn: prefer explicit value from decision (set by planner's mapToHandlerDecision).
+	// When called directly from mutation WHERE (DELETE/UPDATE), the planner is bypassed and
+	// sourceColumn is absent — fall back to the PK convention (typically 'id' for hasMany).
+	const sourceColumn =
+		decision.sourceColumn ??
+		ctx.defaultPkColumnName ??
+		DEFAULT_PK_COLUMN;
 	const targetColumn =
 		decision.targetColumn ??
 		(ctx.deriveFkColumnName ?? defaultFkDerivation)(

@@ -929,5 +929,69 @@ describe('PgsqlAdapter', () => {
 			const compiled = adapter.compile(plan, { model } as any);
 			expect(compiled.sql).toContain('orders_lat_0.anything');
 		});
+
+		// ── RELATION-COL-RESULT fix ──────────────────────────────────────────
+		// relationColumn('file', 'path', 'file_path') with join strategy must
+		// produce `"file"."path" AS "file_path"` in the SELECT list.
+		// Before the fix, the alias was dropped and "file.path" (pg notation)
+		// was used instead, making the result column unreachable.
+
+		function joinInclude(relation: string, targetTable: string): unknown {
+			return {
+				type: 'include-strategy',
+				choice: 'join',
+				context: {
+					relation,
+					target: targetTable,
+					relationType: 'belongsTo',
+					sourceTable: undefined,
+				},
+			};
+		}
+
+		it('propagates user-supplied alias for join include (RELATION-COL-RESULT)', () => {
+			const adapter = new PgsqlAdapter(undefined, {});
+			const plan = buildPlanWithRelationColumns(
+				'symbols',
+				[
+					{ kind: 'column', column: 'id' },
+					{ kind: 'column', column: 'name' },
+					{
+						kind: 'relationColumn',
+						relation: 'file',
+						column: 'path',
+						as: 'file_path',
+					},
+				],
+				[joinInclude('file', 'files')],
+			);
+
+			const compiled = adapter.compile(plan);
+			// SQL must contain the user-supplied alias file_path (user alias),
+			// not the default "file.path" alias (convention fallback).
+			// We check for " file_path" (with space) to avoid false positives on "file_path_extra".
+			expect(compiled.sql).toMatch(/\bfile_path\b/);
+			expect(compiled.sql).not.toMatch(/AS\s+"?file\.path"?/);
+		});
+
+		it('falls back to relation.column alias when no alias provided (join)', () => {
+			const adapter = new PgsqlAdapter(undefined, {});
+			const plan = buildPlanWithRelationColumns(
+				'symbols',
+				[
+					{ kind: 'column', column: 'id' },
+					{
+						kind: 'relationColumn',
+						relation: 'file',
+						column: 'path',
+						// No `as` — fall back to "file.path" convention
+					},
+				],
+				[joinInclude('file', 'files')],
+			);
+
+			const compiled = adapter.compile(plan);
+			expect(compiled.sql).toContain('"file.path"');
+		});
 	});
 });

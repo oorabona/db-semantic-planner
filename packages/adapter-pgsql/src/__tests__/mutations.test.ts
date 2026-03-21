@@ -3,6 +3,7 @@
  */
 
 import type { Node } from '@pgsql/types';
+import { exists, notExists } from '@dbsp/core';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type {
 	CompilerContext,
@@ -24,6 +25,7 @@ import {
 	type UpdateConfig,
 	type UpsertConfig,
 } from '../mutations/index.js';
+import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 
 // Register WHERE handlers before tests
@@ -610,5 +612,75 @@ describe('UPSERT Compiler', () => {
 			expect(result.FuncCall.funcname[0].String.sval).toBe('coalesce');
 			expect(result.FuncCall.args).toHaveLength(2);
 		});
+	});
+});
+
+// ============================================================================
+// DELETE-NOT-EXISTS: notExists() / exists() on DELETE mutations (P1 hotfix)
+// ============================================================================
+
+describe('DELETE with notExists / exists WHERE (DELETE-NOT-EXISTS)', () => {
+	const adapter = createPgsqlCompileOnlyAdapter();
+
+	it('DELETE ... WHERE NOT EXISTS compiles correctly', () => {
+		const intent = {
+			type: 'delete' as const,
+			table: 'embeddings',
+			where: notExists('symbol'),
+		};
+		const { sql, parameters } = adapter.compileDelete(intent);
+		expect(sql).toMatch(/NOT.*EXISTS/i);
+		expect(sql).toMatch(/SELECT 1 FROM/i);
+		expect(sql).toMatch(/symbol/i);
+		expect(parameters).toEqual([]);
+	});
+
+	it('DELETE ... WHERE NOT EXISTS with RETURNING compiles correctly', () => {
+		const intent = {
+			type: 'delete' as const,
+			table: 'embeddings',
+			where: notExists('symbol'),
+			returning: ['id'] as readonly string[],
+		};
+		const { sql, parameters } = adapter.compileDelete(intent);
+		expect(sql).toMatch(/NOT.*EXISTS/i);
+		expect(sql).toMatch(/RETURNING/i);
+		expect(parameters).toEqual([]);
+	});
+
+	it('DELETE ... WHERE EXISTS compiles correctly', () => {
+		const intent = {
+			type: 'delete' as const,
+			table: 'posts',
+			where: exists('comments'),
+		};
+		const { sql } = adapter.compileDelete(intent);
+		expect(sql).toMatch(/EXISTS/i);
+		expect(sql).not.toMatch(/NOT EXISTS/i);
+		expect(sql).toMatch(/comment/i);
+	});
+
+	it('normalizeToDecision: kind=notExists routes to NOT EXISTS handler (not "=" comparison)', () => {
+		const state = {
+			parameters: [] as unknown[],
+			paramIndex: 0,
+			joins: [] as import('@pgsql/types').Node[],
+			ctes: new Map<string, import('@pgsql/types').Node>(),
+			aliases: new Map<string, string>(),
+		};
+		const ctx: import('../handlers/types.js').CompilerContext = {
+			naming: new CamelCaseNamingPlugin(),
+			rootTable: 'embeddings',
+			maxRecursiveDepth: 100,
+		};
+		const config: DeleteConfig = {
+			table: 'embeddings',
+			where: [{ kind: 'notExists', relation: 'symbol' } as unknown as Decision],
+		};
+		const result = compileDelete(config, ctx, state);
+		const stmt = (result as any).DeleteStmt;
+		expect(stmt.whereClause).toBeDefined();
+		expect(stmt.whereClause).toHaveProperty('BoolExpr');
+		expect(stmt.whereClause.BoolExpr.boolop).toBe('NOT_EXPR');
 	});
 });

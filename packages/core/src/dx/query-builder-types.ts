@@ -16,7 +16,9 @@ import type {
 	WhereIntent,
 } from '../intent-ast.js';
 import type { PlanOptions, PlanReport } from '../planner.js';
+import type { ExpressionRef } from './expressions.js';
 import type { DistinctField } from './filters.js';
+import type { ExpressionSpec } from './types.js';
 import type { WhereFilter } from './object-filter.js';
 import type {
 	CursorPaginatedResult,
@@ -418,6 +420,8 @@ export interface QueryBuilder<TResult = unknown> {
 	orderBy(field: string, direction?: SortDirection): QueryBuilder<TResult>;
 	orderBy(fields: OrderByRecord): QueryBuilder<TResult>;
 	orderBy(specs: readonly OrderBySpec[]): QueryBuilder<TResult>;
+	orderBy(expr: ExpressionRef, direction?: SortDirection): QueryBuilder<TResult>;
+	orderBy(expr: ExpressionSpec, direction?: SortDirection): QueryBuilder<TResult>;
 
 	/**
 	 * Limit the number of results returned.

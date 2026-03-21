@@ -61,6 +61,7 @@ import {
 	type ColumnSpec,
 	type CursorPaginatedResult,
 	type CursorPaginateOptions,
+	type ExpressionSpec,
 	type IncludeOptionsWithRecursive,
 	isExpressionSpec,
 	type OrderByRecord,
@@ -446,7 +447,8 @@ export class QueryBuilderImpl<TResult = unknown>
 			| string
 			| OrderByRecord
 			| readonly OrderBySpec[]
-			| ExpressionRef,
+			| ExpressionRef
+			| ExpressionSpec,
 		direction?: SortDirection,
 	): QueryBuilder<TResult> {
 		const builder = this.clone();
@@ -455,6 +457,15 @@ export class QueryBuilderImpl<TResult = unknown>
 		if (fieldOrRecordOrSpecs instanceof ExpressionRef) {
 			builder.orderByIntents.push({
 				expression: fieldOrRecordOrSpecs.intent,
+				direction: direction ?? 'asc',
+			});
+			return builder;
+		}
+
+		// ExpressionSpec form: orderBy(relationColumn(...)) or other plain ExpressionSpec objects
+		if (isExpressionSpec(fieldOrRecordOrSpecs as ColumnSpec)) {
+			builder.orderByIntents.push({
+				expression: (fieldOrRecordOrSpecs as { intent: ExpressionIntent }).intent,
 				direction: direction ?? 'asc',
 			});
 			return builder;
