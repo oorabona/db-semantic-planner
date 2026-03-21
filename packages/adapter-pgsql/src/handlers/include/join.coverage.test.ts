@@ -266,4 +266,71 @@ describe('joinIncludeHandler — coverage', () => {
 		expect(result.join.JoinExpr.jointype).toBe('JOIN_INNER');
 		expect(result.targets).toHaveLength(2);
 	});
+
+	// RELATION-COL-RESULT fix: columnAliases must be used as output alias
+	it('uses user-supplied alias from columnAliases for target', () => {
+		const state = createCompilerState();
+		const result = joinIncludeHandler.compile(
+			{
+				type: 'includeStrategy',
+				strategy: 'join',
+				relation: 'file',
+				targetTable: 'files',
+				sourceColumn: 'file_id',
+				targetColumn: 'id',
+				columns: ['path'],
+				columnAliases: { path: 'file_path' },
+			},
+			makeCtx(),
+			state,
+		);
+		expect(result.targets).toHaveLength(1);
+		// The ResTarget name must be the user-supplied alias, not "file.path"
+		const target = result.targets[0];
+		expect(target.ResTarget.name).toBe('file_path');
+	});
+
+	it('falls back to relation.column alias when no columnAliases entry', () => {
+		const state = createCompilerState();
+		const result = joinIncludeHandler.compile(
+			{
+				type: 'includeStrategy',
+				strategy: 'join',
+				relation: 'file',
+				targetTable: 'files',
+				sourceColumn: 'file_id',
+				targetColumn: 'id',
+				columns: ['path'],
+				// No columnAliases — fall back to convention
+			},
+			makeCtx(),
+			state,
+		);
+		expect(result.targets).toHaveLength(1);
+		const target = result.targets[0];
+		expect(target.ResTarget.name).toBe('file.path');
+	});
+
+	it('uses user alias for one column, falls back for another', () => {
+		const state = createCompilerState();
+		const result = joinIncludeHandler.compile(
+			{
+				type: 'includeStrategy',
+				strategy: 'join',
+				relation: 'file',
+				targetTable: 'files',
+				sourceColumn: 'file_id',
+				targetColumn: 'id',
+				columns: ['path', 'name'],
+				columnAliases: { path: 'file_path' }, // only 'path' aliased
+			},
+			makeCtx(),
+			state,
+		);
+		expect(result.targets).toHaveLength(2);
+		const pathTarget = result.targets[0];
+		const nameTarget = result.targets[1];
+		expect(pathTarget.ResTarget.name).toBe('file_path');
+		expect(nameTarget.ResTarget.name).toBe('file.name');
+	});
 });

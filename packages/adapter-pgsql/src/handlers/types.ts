@@ -134,6 +134,9 @@ export interface Decision {
 	// Relation expansion specific
 	readonly expandRelation?: string;
 	readonly relationColumns?: readonly string[];
+	// User-supplied aliases for specific relation columns (col -> alias).
+	// Populated when selectRelationColumn decisions carry an `alias` field.
+	readonly columnAliases?: Readonly<Record<string, string>>;
 	// JSON-specific
 	readonly jsonPath?: readonly string[];
 	readonly jsonMode?: 'json' | 'text';
