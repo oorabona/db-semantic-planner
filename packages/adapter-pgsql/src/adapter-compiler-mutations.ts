@@ -63,6 +63,46 @@ function whereIntentAsDecision(where: WhereIntent): Decision {
 }
 
 /**
+ * Resolve the actual database table name for an exists/notExists relation.
+ *
+ * `notExists('symbol')` carries `relation: 'symbol'` (the logical relation name).
+ * The mutation path bypasses the planner, so `normalizeToDecision` sets
+ * `targetTable: relation` — using 'symbol' as the table name instead of 'symbols'.
+ *
+ * This helper looks up `sourceTable.relation` in ModelIR and returns the target
+ * table name. Falls back to `relation` if ModelIR is unavailable or the relation
+ * is not found (compile-only mode / no schema).
+ */
+function resolveExistsTargetTable(
+	sourceTable: string,
+	relation: string,
+	model: import('@dbsp/types').ModelIR | undefined,
+): string {
+	if (!model) return relation;
+	const rel = model.getRelation(`${sourceTable}.${relation}`);
+	return rel?.target ?? relation;
+}
+
+/**
+ * Enrich an exists/notExists WhereIntent with the resolved `targetTable` so that
+ * `normalizeToDecision` uses the real database table name, not the logical relation name.
+ */
+function resolveExistsIntent(
+	where: WhereIntent,
+	sourceTable: string,
+	deps: AdapterCompilerDeps,
+): WhereIntent {
+	const w = where as Record<string, unknown>;
+	const kind = w.kind as string | undefined;
+	if (kind !== 'exists' && kind !== 'notExists') return where;
+	const relation = w.relation as string;
+	const targetTable = resolveExistsTargetTable(sourceTable, relation, deps.model);
+	// Only enrich if we resolved to a different name (avoid mutation when model absent)
+	if (targetTable === relation) return where;
+	return { ...w, targetTable } as unknown as WhereIntent;
+}
+
+/**
  * Build a column-type map for a table, filtered to only columns
  * whose type requires explicit type-casting (e.g. range types).
  * Returns undefined if no type-cast columns are found (or model unavailable).
@@ -355,9 +395,15 @@ export function compileDelete(
 	};
 	const state = createCompilerState();
 
+	// Resolve exists/notExists relation name → real table name before compiling.
+	// The mutation path bypasses the planner, so we must resolve targetTable here.
+	const resolvedWhere = intent.where
+		? resolveExistsIntent(intent.where, intent.table, deps)
+		: undefined;
+
 	const config: DeleteConfig = {
 		table: intent.table,
-		...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
+		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(intent.returning && { returning: [...intent.returning] }),
 	};
 

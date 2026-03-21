@@ -684,3 +684,65 @@ describe('DELETE with notExists / exists WHERE (DELETE-NOT-EXISTS)', () => {
 		expect(stmt.whereClause.BoolExpr.boolop).toBe('NOT_EXPR');
 	});
 });
+
+// ============================================================================
+// DELETE-NOTEXISTS-ALIAS: relation name resolved to actual table name via ModelIR
+// ============================================================================
+
+describe('DELETE-NOTEXISTS-ALIAS: notExists() resolves relation to real table name', () => {
+	it('uses ModelIR to resolve relation "symbol" -> table "symbols" in NOT EXISTS subquery', async () => {
+		// Build a minimal ModelIR with relation embeddings.symbol -> symbols table
+		const relations = new Map([
+			['embeddings.symbol', {
+				name: 'symbol',
+				type: 'belongsTo' as const,
+				source: 'embeddings',
+				target: 'symbols',
+				cardinality: 'many-to-one' as const,
+				optionality: 'optional' as const,
+				includeStrategy: 'auto' as const,
+				filterStrategy: 'auto' as const,
+				joinDefault: 'auto' as const,
+				foreignKeys: [],
+			}],
+		]);
+		const model = {
+			tables: new Map(),
+			relations,
+			getTable: () => undefined,
+			getRelation: (qname: string) => relations.get(qname),
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false }),
+		} as unknown as import('@dbsp/types').ModelIR;
+
+		const { createPgsqlCompileOnlyAdapter: createAdapter } = await import('../pgsql-adapter.js');
+		const adapterWithModel = createAdapter({ model });
+
+		const intent = {
+			type: 'delete' as const,
+			table: 'embeddings',
+			where: notExists('symbol'),
+		};
+		const { sql } = adapterWithModel.compileDelete(intent);
+
+		// Must reference "symbols" table (not just "symbol")
+		expect(sql).toContain('symbols'); // table resolved via ModelIR
+		expect(sql).not.toMatch(/\bsymbol\b(?!s)/); // not bare relation name
+		expect(sql).toMatch(/NOT.*EXISTS/i);
+	});
+
+	it('falls back to relation name when no model is available (compile-only mode)', () => {
+		// Without ModelIR, targetTable defaults to the relation name — safe fallback
+		const adapterNoModel = createPgsqlCompileOnlyAdapter();
+
+		const intent = {
+			type: 'delete' as const,
+			table: 'embeddings',
+			where: notExists('symbols'), // caller passes actual table name directly
+		};
+		const { sql } = adapterNoModel.compileDelete(intent);
+		expect(sql).toMatch(/NOT.*EXISTS/i);
+		expect(sql).toMatch(/symbols/i);
+	});
+});
