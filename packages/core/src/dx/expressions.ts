@@ -35,6 +35,7 @@ import type {
 	RefExpressionIntent,
 	UnaryExpressionIntent,
 	WhereExpressionIntent,
+	WhereIntent,
 } from '../intent-ast.js';
 
 // ============================================================================
@@ -140,6 +141,27 @@ export class ExpressionRef {
 	/** WHERE: expr <= value */
 	lte(value: unknown): WhereExpressionIntent {
 		return { kind: 'expression', expr: this.intent, operator: 'lte', value };
+	}
+
+	/**
+	 * Add a FILTER (WHERE ...) clause to this function expression.
+	 * Only valid on `fn()` expressions (customFn kind).
+	 * Returns a new ExpressionRef — does not mutate.
+	 *
+	 * @example fn('array_agg', ref('name')).filter(eq('active', true))
+	 *          → array_agg("name") FILTER (WHERE "active" = $1)
+	 * @throws Error if called on non-customFn expressions
+	 */
+	filter(condition: WhereIntent): ExpressionRef {
+		if (this.intent.kind !== 'customFn') {
+			throw new Error(
+				`filter() can only be used on function expressions created with fn(). Got kind: '${this.intent.kind}'`,
+			);
+		}
+		return new ExpressionRef({
+			...this.intent,
+			filter: condition,
+		} as CustomFnExpressionIntent);
 	}
 }
 
