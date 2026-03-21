@@ -258,3 +258,96 @@ describe('compileExpressionIntent', () => {
 		});
 	});
 });
+
+
+describe('json_build_object pattern (FN-JSON-BUILD)', () => {
+	it('compiles multi-arg fn() with literal keys and ref values', () => {
+		// json_build_object('name', "name", 'kind', "kind")
+		// literal() produces SQL string constant; ref() produces column reference
+		const result = compileCustomExpr({
+			kind: 'customFn',
+			name: 'json_build_object',
+			args: [
+				{ kind: 'literal', value: 'name' },
+				{ kind: 'ref', column: 'name' },
+				{ kind: 'literal', value: 'kind' },
+				{ kind: 'ref', column: 'kind' },
+			],
+		});
+		expect(normalizeSQL(result.sql)).toBe(
+			"select json_build_object('name', name, 'kind', kind) from items",
+		);
+		expect(result.parameters).toHaveLength(0);
+	});
+
+	it('compiles nested fn() — json_agg wrapping json_build_object', () => {
+		// json_agg(json_build_object('name', "name"))
+		const result = compileCustomExpr({
+			kind: 'customFn',
+			name: 'json_agg',
+			args: [
+				{
+					kind: 'customFn',
+					name: 'json_build_object',
+					args: [
+						{ kind: 'literal', value: 'name' },
+						{ kind: 'ref', column: 'name' },
+					],
+				},
+			],
+		});
+		expect(normalizeSQL(result.sql)).toBe(
+			"select json_agg(json_build_object('name', name)) from items",
+		);
+		expect(result.parameters).toHaveLength(0);
+	});
+
+	it('compiles 6-arg json_build_object (3 key-value pairs)', () => {
+		const result = compileCustomExpr({
+			kind: 'customFn',
+			name: 'json_build_object',
+			args: [
+				{ kind: 'literal', value: 'id' },
+				{ kind: 'ref', column: 'id' },
+				{ kind: 'literal', value: 'name' },
+				{ kind: 'ref', column: 'name' },
+				{ kind: 'literal', value: 'score' },
+				{ kind: 'param', value: 42 },
+			],
+		});
+		expect(normalizeSQL(result.sql)).toBe(
+			"select json_build_object('id', id, 'name', name, 'score', $1) from items",
+		);
+		expect(result.parameters).toEqual([42]);
+	});
+
+	it('implicit string args become column refs (not string literals) — use literal() for keys', () => {
+		// This documents the implicit conversion: bare string → ref (column reference)
+		// If the user writes fn('json_build_object', 'name', ref('name')):
+		//   'name' (string) → ref('name') → "name" column ref, NOT 'name' SQL literal
+		const resultWithImplicitString = compileCustomExpr({
+			kind: 'customFn',
+			name: 'json_build_object',
+			args: [
+				{ kind: 'ref', column: 'name' }, // implicit string conversion produces this
+				{ kind: 'ref', column: 'name' },
+			],
+		});
+		// Both are column refs — this is WRONG for json_build_object keys
+		expect(normalizeSQL(resultWithImplicitString.sql)).toBe(
+			'select json_build_object(name, name) from items',
+		);
+		// Correct pattern: use literal() for string keys
+		const resultWithLiteral = compileCustomExpr({
+			kind: 'customFn',
+			name: 'json_build_object',
+			args: [
+				{ kind: 'literal', value: 'name' }, // literal() keeps it as SQL string
+				{ kind: 'ref', column: 'name' },
+			],
+		});
+		expect(normalizeSQL(resultWithLiteral.sql)).toBe(
+			"select json_build_object('name', name) from items",
+		);
+	});
+});
