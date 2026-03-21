@@ -180,6 +180,98 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 		});
 	});
 
+	describe('2-hop nested LEFT JOIN include (INCLUDE-2HOP)', () => {
+		it('should use intermediate table FK for second-hop join', () => {
+			// Scenario: calls → callee (symbols) → file (files)
+			// First hop: calls.callee_id → symbols.id  (belongsTo)
+			// Second hop: symbols.file_id → files.id   (belongsTo)
+			// Bug: without fix, second hop uses calls.file_id instead of symbols.file_id
+			const plan: SimplifiedPlanReport = {
+				rootTable: 'calls',
+				decisions: [
+					{ type: 'select', column: '*', table: 'calls' },
+					// First hop: calls → symbols via callee_id
+					{
+						type: 'includeStrategy',
+						choice: 'join',
+						relationName: 'callee',
+						targetTable: 'symbols',
+						sourceTable: 'calls',
+						relationType: 'belongsTo',
+						foreignKey: 'callee_id',
+						parentKey: 'id',
+						columns: ['id', 'name'],
+					} satisfies PlanDecision,
+					// Second hop: symbols → files via file_id
+					// sourceTable MUST be 'symbols', not 'calls'
+					{
+						type: 'includeStrategy',
+						choice: 'join',
+						relationName: 'file',
+						targetTable: 'files',
+						sourceTable: 'symbols',
+						relationType: 'belongsTo',
+						foreignKey: 'file_id',
+						parentKey: 'id',
+						columns: ['id', 'path'],
+					} satisfies PlanDecision,
+				],
+			};
+
+			const result = compileToSql(plan);
+
+			// First hop: calls.callee_id = callee.id
+			expect(result.sql).toMatch(/calls\.callee_id\s*=\s*callee\.id/);
+			// Second hop: MUST use callee.file_id (symbols alias), NOT calls.file_id
+			expect(result.sql).toMatch(/callee\.file_id\s*=\s*file\.id/);
+			// Must NOT use calls.file_id (the bug)
+			expect(result.sql).not.toContain('calls.file_id');
+			// Both JOINs present
+			expect(result.sql).toMatch(/LEFT JOIN\s+symbols\s+AS\s+callee/);
+			expect(result.sql).toMatch(/LEFT JOIN\s+files\s+AS\s+file/);
+		});
+
+		it('should use intermediate table for hasMany second hop', () => {
+			// Scenario: users → posts (hasMany) → comments (hasMany)
+			// First hop: posts.author_id → users.id  (hasMany: users.id = posts.author_id)
+			// Second hop: comments.post_id → posts.id (hasMany: posts.id = comments.post_id)
+			const plan: SimplifiedPlanReport = {
+				rootTable: 'users',
+				decisions: [
+					{ type: 'select', column: '*', table: 'users' },
+					{
+						type: 'includeStrategy',
+						choice: 'join',
+						relationName: 'posts',
+						targetTable: 'posts',
+						sourceTable: 'users',
+						relationType: 'hasMany',
+						foreignKey: 'author_id',
+						parentKey: 'id',
+						columns: ['id', 'title'],
+					} satisfies PlanDecision,
+					{
+						type: 'includeStrategy',
+						choice: 'join',
+						relationName: 'comments',
+						targetTable: 'comments',
+						sourceTable: 'posts',
+						relationType: 'hasMany',
+						foreignKey: 'post_id',
+						parentKey: 'id',
+						columns: ['id', 'body'],
+					} satisfies PlanDecision,
+				],
+			};
+
+			const result = compileToSql(plan);
+
+			// Second hop must join on posts.id = comments.post_id (not users.id)
+			expect(result.sql).toMatch(/posts\.id\s*=\s*comments\.post_id/);
+			expect(result.sql).not.toContain('users.post_id');
+		});
+	});
+
 	describe('mixed JOIN filter + LEFT JOIN include', () => {
 		it('should compile INNER JOIN for filter and LEFT JOIN for include', () => {
 			const plan: SimplifiedPlanReport = {

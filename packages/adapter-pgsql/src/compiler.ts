@@ -86,7 +86,7 @@ function mapToHandlerDecision(
 		paramIndex: pd.paramIndex,
 		direction: pd.direction,
 		joinType: pd.joinType,
-		...deriveFkColumns(pd, rootTable, defaultPk, deriveFk),
+		...deriveFkColumns(pd, pd.sourceTable ?? rootTable, defaultPk, deriveFk),
 		targetTable: pd.targetTable,
 		function: pd.function,
 		args: pd.args,
@@ -305,6 +305,12 @@ export class PlanCompiler {
 	private rawJoins: Node[] = [];
 	/** CTE nodes from include handlers (e.g., CTE strategy) */
 	private pendingCtes: Node[] = [];
+	/**
+	 * Maps joined targetTable → alias for multi-hop FK resolution.
+	 * Populated as join decisions are compiled so later hops can find
+	 * the correct source alias (e.g., 'symbols' → 'callee').
+	 */
+	private joinAliasMap: Map<string, string> = new Map();
 
 	constructor(options: CompilerOptions = {}) {
 		this.naming = options.naming ?? identityNaming;
@@ -457,10 +463,17 @@ export class PlanCompiler {
 			)._compiledFilterWhere = combined;
 		}
 
-		// Bridge compiler context for include handler (may need different currentAlias)
+		// Bridge compiler context for include handler.
+		// For multi-hop flat joins the sourceTable differs from the root table —
+		// resolve the alias of that intermediate table from the registry so the
+		// ON clause references the right prefix (e.g., callee.file_id, not calls.file_id).
+		const sourceAlias =
+			decision.sourceTable && decision.sourceTable !== plan.rootTable
+				? (this.joinAliasMap.get(decision.sourceTable) ?? decision.sourceTable)
+				: plan.rootTable;
 		const ctx = {
 			...this.handlerCtx(),
-			currentAlias: plan.rootTable,
+			currentAlias: sourceAlias,
 		} as HandlerCompilerContext;
 
 		const handlerState: HandlerCompilerState = {
@@ -475,6 +488,17 @@ export class PlanCompiler {
 
 		// Sync parameters back
 		this.state.paramIndex = handlerState.paramIndex;
+
+		// Register targetTable → alias for multi-hop FK resolution.
+		// Later join decisions whose sourceTable matches this targetTable
+		// will use the alias (e.g., relationName) as their sourceAlias.
+		if (
+			decision.choice === 'join' &&
+			decision.targetTable &&
+			decision.relationName
+		) {
+			this.joinAliasMap.set(decision.targetTable, decision.relationName);
+		}
 
 		const out: {
 			targets?: Node[];
@@ -505,6 +529,7 @@ export class PlanCompiler {
 		this.pendingJoins = [];
 		this.rawJoins = [];
 		this.pendingCtes = [];
+		this.joinAliasMap = new Map();
 
 		// Determine query type from decisions
 		const queryType = this.detectQueryType(plan.decisions);

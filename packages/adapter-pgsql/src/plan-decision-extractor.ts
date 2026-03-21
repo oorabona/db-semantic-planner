@@ -610,6 +610,7 @@ function toJoinIncludeDecision(
 		choice: 'join',
 		relationName,
 		targetTable: context.target,
+		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),
 		foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
 		parentKey: defaultPk,
