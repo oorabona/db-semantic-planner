@@ -1965,3 +1965,49 @@ describe('introspection — hierarchy detection', () => {
 		expect(pool.query.mock.calls[0][1]).toEqual(['my_schema']);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// INTRO-INDEXES regression: index SQL query must contain $1 and no JS comments
+// ---------------------------------------------------------------------------
+describe('introspection — query SQL integrity (INTRO-INDEXES)', () => {
+	it('index query contains $1 parameter placeholder (not a bare keyword)', async () => {
+		const pool = createMockPool(
+			{ rows: [] },
+			{ rows: [] },
+			{ rows: [] },
+			{ rows: [] },
+		);
+		await introspect(pool);
+		// 4th query (index 3) is the index catalog query
+		const indexQuerySql: string = pool.query.mock.calls[3][0];
+		expect(indexQuerySql).toContain('$1');
+	});
+
+	it('index query does not contain embedded JS-style // comments (INTRO-INDEXES bug)', async () => {
+		const pool = createMockPool(
+			{ rows: [] },
+			{ rows: [] },
+			{ rows: [] },
+			{ rows: [] },
+		);
+		await introspect(pool);
+		// 4th query (index 3) is the index catalog query
+		const indexQuerySql: string = pool.query.mock.calls[3][0];
+		// JS // comments inside a template literal become literal text in the SQL string,
+		// which PostgreSQL rejects with "syntax error at or near ..."
+		expect(indexQuerySql).not.toContain('// ');
+	});
+
+	it('index query WHERE clause binds schema via $1 (not bare text)', async () => {
+		const pool = createMockPool(
+			{ rows: [] },
+			{ rows: [] },
+			{ rows: [] },
+			{ rows: [] },
+		);
+		await introspect(pool);
+		const indexQuerySql: string = pool.query.mock.calls[3][0];
+		// Must have: WHERE n.nspname = $1
+		expect(indexQuerySql).toMatch(/WHERE\s+n\.nspname\s*=\s*\$1/);
+	});
+});
