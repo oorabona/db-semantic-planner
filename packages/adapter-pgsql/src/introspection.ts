@@ -282,9 +282,9 @@ export async function introspect(
 			 -- INCLUDE column (positions past indnkeyatts)
 			 LEFT JOIN pg_attribute a_inc
 			   ON a_inc.attrelid = t.oid AND a_inc.attnum = k.attnum AND k.n > ix.indnkeyatts
-			 -- Operator class for key columns (indclass is int2vector, cast to int2[])
+			 -- Operator class for key columns (indclass is oidvector, cast to oid[])
 			 LEFT JOIN pg_opclass oc
-			   ON oc.oid = (ix.indclass::int2[])[k.n - 1]
+			   ON oc.oid = (ix.indclass::oid[])[k.n - 1]
 			   AND k.n <= ix.indnkeyatts AND k.attnum != 0
 			 WHERE n.nspname = $1
 			   AND NOT ix.indisprimary
