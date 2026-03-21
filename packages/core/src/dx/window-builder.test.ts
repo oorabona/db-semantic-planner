@@ -218,12 +218,32 @@ describe('DX-021: Window Functions Builder Pattern', () => {
 			expect(intent.field).toBe('salary');
 		});
 
-		it('wCount should create COUNT window function', () => {
+		it('wCount should create COUNT window function with field', () => {
 			const spec = wCount('id').partitionBy('category').as('items_count');
 			const intent = getWindowIntent(spec);
 
 			expect(intent.function).toBe('count');
 			expect(intent.field).toBe('id');
+		});
+
+		it('wCount() without field should produce COUNT(*) intent (no field)', () => {
+			const spec = wCount().partitionBy('project_id').as('total');
+			const intent = getWindowIntent(spec);
+
+			expect(intent.function).toBe('count');
+			expect(intent.field).toBeUndefined();
+			expect(intent.alias).toBe('total');
+			expect(intent.over.partitionBy).toEqual(['project_id']);
+		});
+
+		it('wCount() with no args and empty OVER should produce COUNT(*) OVER()', () => {
+			const spec = wCount().as('total_rows');
+			const intent = getWindowIntent(spec);
+
+			expect(intent.function).toBe('count');
+			expect(intent.field).toBeUndefined();
+			expect(intent.over.partitionBy).toBeUndefined();
+			expect(intent.over.orderBy).toBeUndefined();
 		});
 
 		it('wMin should create MIN window function', () => {
