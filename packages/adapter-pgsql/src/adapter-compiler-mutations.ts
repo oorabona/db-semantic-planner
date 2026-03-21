@@ -63,29 +63,41 @@ function whereIntentAsDecision(where: WhereIntent): Decision {
 }
 
 /**
- * Resolve the actual database table name for an exists/notExists relation.
+ * Resolve relation metadata for an exists/notExists WHERE condition.
  *
  * `notExists('symbol')` carries `relation: 'symbol'` (the logical relation name).
  * The mutation path bypasses the planner, so `normalizeToDecision` sets
  * `targetTable: relation` — using 'symbol' as the table name instead of 'symbols'.
  *
- * This helper looks up `sourceTable.relation` in ModelIR and returns the target
- * table name. Falls back to `relation` if ModelIR is unavailable or the relation
- * is not found (compile-only mode / no schema).
+ * This helper looks up `sourceTable.relation` in ModelIR and returns:
+ * - `targetTable`: real DB table name (e.g. 'symbols' for relation 'symbol')
+ * - `sourceColumn`: FK column on the root table for `belongsTo` (e.g. 'symbol_id')
+ * - `targetColumn`: PK on the target table (always 'id' for standard schemas)
+ *
+ * Falls back gracefully when ModelIR is unavailable or relation not found.
  */
-function resolveExistsTargetTable(
+function resolveExistsRelation(
 	sourceTable: string,
 	relation: string,
 	model: import('@dbsp/types').ModelIR | undefined,
-): string {
-	if (!model) return relation;
+): { targetTable: string; sourceColumn?: string; targetColumn?: string } {
+	if (!model) return { targetTable: relation };
 	const rel = model.getRelation(`${sourceTable}.${relation}`);
-	return rel?.target ?? relation;
+	if (!rel) return { targetTable: relation };
+	const targetTable = rel.target;
+	// For belongsTo: FK is on the source table (e.g. embeddings.symbol_id → symbols.id)
+	if (rel.type === 'belongsTo') {
+		const fk = typeof rel.foreignKey === 'string' ? rel.foreignKey : rel.foreignKey?.[0];
+		return { targetTable, sourceColumn: fk, targetColumn: 'id' };
+	}
+	// For hasMany/hasOne: FK is on the target table (e.g. symbols.file_id → files.id)
+	return { targetTable };
 }
 
 /**
- * Enrich an exists/notExists WhereIntent with the resolved `targetTable` so that
- * `normalizeToDecision` uses the real database table name, not the logical relation name.
+ * Enrich an exists/notExists WhereIntent with the resolved `targetTable`,
+ * `sourceColumn`, and `targetColumn` so that `buildExistsSubquery` correlates
+ * the subquery using the correct FK columns instead of convention-based defaults.
  */
 function resolveExistsIntent(
 	where: WhereIntent,
@@ -96,10 +108,15 @@ function resolveExistsIntent(
 	const kind = w.kind as string | undefined;
 	if (kind !== 'exists' && kind !== 'notExists') return where;
 	const relation = w.relation as string;
-	const targetTable = resolveExistsTargetTable(sourceTable, relation, deps.model);
+	const resolved = resolveExistsRelation(sourceTable, relation, deps.model);
 	// Only enrich if we resolved to a different name (avoid mutation when model absent)
-	if (targetTable === relation) return where;
-	return { ...w, targetTable } as unknown as WhereIntent;
+	if (resolved.targetTable === relation && !resolved.sourceColumn) return where;
+	return {
+		...w,
+		targetTable: resolved.targetTable,
+		...(resolved.sourceColumn !== undefined && { sourceColumn: resolved.sourceColumn }),
+		...(resolved.targetColumn !== undefined && { targetColumn: resolved.targetColumn }),
+	} as unknown as WhereIntent;
 }
 
 /**

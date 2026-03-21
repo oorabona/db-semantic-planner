@@ -373,11 +373,16 @@ function normalizeToDecision(input: Decision): Decision {
 			// resolveExistsIntent which maps the logical relation name → real table name).
 			// Fall back to relation name when no ModelIR is available.
 			const targetTable = (raw.targetTable as string | undefined) ?? relation;
+			// Pass through FK column hints resolved by resolveExistsIntent from ModelIR.
+			const sourceColumn = raw.sourceColumn as string | undefined;
+			const targetColumn = raw.targetColumn as string | undefined;
 			return {
 				type: 'exists',
 				operator: kind, // 'exists' | 'notExists'
 				relation,
 				targetTable,
+				...(sourceColumn !== undefined && { sourceColumn }),
+				...(targetColumn !== undefined && { targetColumn }),
 				...(conditions && { conditions }),
 			};
 		}
