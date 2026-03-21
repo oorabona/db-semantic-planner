@@ -351,3 +351,89 @@ describe('json_build_object pattern (FN-JSON-BUILD)', () => {
 		);
 	});
 });
+
+// ============================================================================
+// star() compiler tests
+// ============================================================================
+
+describe('star() expression', () => {
+	it('compiles star() to unquoted *', () => {
+		const result = compileCustomExpr({ kind: 'star' });
+		expect(normalizeSQL(result.sql)).toBe('select * from items');
+		expect(result.parameters).toHaveLength(0);
+	});
+
+	it('compiles COUNT(*) via fn + star', () => {
+		const result = compileCustomExpr({
+			kind: 'customFn',
+			name: 'count',
+			args: [{ kind: 'star' }],
+		});
+		expect(normalizeSQL(result.sql)).toBe('select count(*) from items');
+		expect(result.parameters).toHaveLength(0);
+	});
+
+	it('compiles COUNT(*) with alias', () => {
+		const result = compileCustomExpr(
+			{ kind: 'customFn', name: 'count', args: [{ kind: 'star' }] },
+			'total',
+		);
+		expect(normalizeSQL(result.sql)).toBe(
+			'select count(*) as total from items',
+		);
+	});
+});
+
+// ============================================================================
+// array() compiler tests
+// ============================================================================
+
+describe('array() expression', () => {
+	it('compiles array() to ARRAY[...]', () => {
+		const result = compileCustomExpr({
+			kind: 'array',
+			elements: [
+				{ kind: 'literal', value: 1 },
+				{ kind: 'literal', value: 2 },
+			],
+		});
+		expect(normalizeSQL(result.sql)).toBe('select array[1, 2] from items');
+		expect(result.parameters).toHaveLength(0);
+	});
+
+	it('compiles array() with params', () => {
+		const result = compileCustomExpr({
+			kind: 'array',
+			elements: [
+				{ kind: 'param', value: 'a' },
+				{ kind: 'param', value: 'b' },
+			],
+		});
+		expect(normalizeSQL(result.sql)).toBe('select array[$1, $2] from items');
+		expect(result.parameters).toEqual(['a', 'b']);
+	});
+
+	it('compiles nested array in fn (unnest pattern)', () => {
+		const result = compileCustomExpr({
+			kind: 'customFn',
+			name: 'unnest',
+			args: [
+				{
+					kind: 'array',
+					elements: [
+						{ kind: 'literal', value: 1 },
+						{ kind: 'literal', value: 2 },
+					],
+				},
+			],
+		});
+		expect(normalizeSQL(result.sql)).toBe(
+			'select unnest(array[1, 2]) from items',
+		);
+	});
+
+	it('compiles empty array', () => {
+		const result = compileCustomExpr({ kind: 'array', elements: [] });
+		expect(normalizeSQL(result.sql)).toBe('select array[] from items');
+	});
+});

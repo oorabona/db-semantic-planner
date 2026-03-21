@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type {
+	ArrayExpressionIntent,
 	CastExpressionIntent,
 	CustomFnExpressionIntent,
 	CustomOpExpressionIntent,
@@ -7,10 +8,12 @@ import type {
 	NamedArgExpressionIntent,
 	ParamExpressionIntent,
 	RefExpressionIntent,
+	StarExpressionIntent,
 	UnaryExpressionIntent,
 	WhereExpressionIntent,
 } from '../intent-ast.js';
 import {
+	array,
 	cast,
 	ExpressionRef,
 	fn,
@@ -19,6 +22,7 @@ import {
 	op,
 	param,
 	ref,
+	star,
 	unary,
 } from './expressions.js';
 
@@ -486,5 +490,89 @@ describe('namedArg()', () => {
 		expect(() => namedArg('', literal(1))).toThrow(
 			'namedArg: invalid argument name: ',
 		);
+	});
+});
+
+// ============================================================================
+// star()
+// ============================================================================
+
+describe('star()', () => {
+	it('should create StarExpressionIntent', () => {
+		expect(star().intent).toEqual({ kind: 'star' } satisfies StarExpressionIntent);
+	});
+
+	it('should return an ExpressionRef', () => {
+		expect(star()).toBeInstanceOf(ExpressionRef);
+	});
+
+	it('should set __expr marker', () => {
+		expect(star().__expr).toBe(true);
+	});
+
+	it('composes with fn() for COUNT(*) pattern', () => {
+		const expr = fn('count', star());
+		const intent = expr.intent as CustomFnExpressionIntent;
+		expect(intent.kind).toBe('customFn');
+		expect(intent.name).toBe('count');
+		expect(intent.args).toHaveLength(1);
+		expect(intent.args[0]).toEqual({ kind: 'star' } satisfies StarExpressionIntent);
+	});
+});
+
+// ============================================================================
+// array()
+// ============================================================================
+
+describe('array()', () => {
+	it('should create ArrayExpressionIntent with elements', () => {
+		const a = array(literal(1), literal(2));
+		const intent = a.intent as ArrayExpressionIntent;
+		expect(intent.kind).toBe('array');
+		expect(intent.elements).toHaveLength(2);
+	});
+
+	it('should return an ExpressionRef', () => {
+		expect(array(literal(1))).toBeInstanceOf(ExpressionRef);
+	});
+
+	it('should apply implicit conversion: string → ref', () => {
+		const a = array('col');
+		const elements = (a.intent as ArrayExpressionIntent).elements;
+		expect(elements[0]).toEqual({ kind: 'ref', column: 'col' });
+	});
+
+	it('should apply implicit conversion: number → param', () => {
+		const a = array(42);
+		const elements = (a.intent as ArrayExpressionIntent).elements;
+		expect(elements[0]).toEqual({ kind: 'param', value: 42 });
+	});
+
+	it('should apply implicit conversion for mixed inputs', () => {
+		const a = array('col', 42);
+		const elements = (a.intent as ArrayExpressionIntent).elements;
+		expect(elements[0]).toEqual({ kind: 'ref', column: 'col' });
+		expect(elements[1]).toEqual({ kind: 'param', value: 42 });
+	});
+
+	it('should wrap ExpressionRef elements directly', () => {
+		const a = array(literal(1), literal(2), literal(3));
+		const elements = (a.intent as ArrayExpressionIntent).elements;
+		expect(elements[0]).toEqual({ kind: 'literal', value: 1 });
+		expect(elements[1]).toEqual({ kind: 'literal', value: 2 });
+		expect(elements[2]).toEqual({ kind: 'literal', value: 3 });
+	});
+
+	it('should accept zero elements', () => {
+		const a = array();
+		const intent = a.intent as ArrayExpressionIntent;
+		expect(intent.elements).toHaveLength(0);
+	});
+
+	it('composes with fn() for unnest(ARRAY[...]) pattern', () => {
+		const expr = fn('unnest', array(literal(1), literal(2)));
+		const intent = expr.intent as CustomFnExpressionIntent;
+		expect(intent.name).toBe('unnest');
+		expect(intent.args[0]?.kind).toBe('array');
 	});
 });
