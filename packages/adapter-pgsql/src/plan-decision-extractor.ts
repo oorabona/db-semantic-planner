@@ -579,18 +579,30 @@ function toJoinIncludeDecision(
 	const relationName = context.relation ?? context.includeAlias;
 	if (!context.target || !relationName) return undefined;
 
-	// Find matching include intent to get column list and where conditions
-	const includeIntent = (
+	// Find matching include intent to get column list and where conditions.
+	// For 2-hop includes (intentPath: 'include[0].include[0]'), resolveIncludeByPath
+	// traverses the nested include tree — a flat find() only reaches the top level and
+	// would miss nested include intents that carry their own { where } conditions.
+	const intentPath = (context as unknown as Record<string, unknown>)
+		?.intentPath as string | undefined;
+	const includeIntent = resolveIncludeByPath(
 		plan.intent?.include as
 			| Array<{
 					relation: string;
 					select?: { type: string; fields?: readonly string[] };
 					where?: unknown;
+					include?: unknown[];
 			  }>
-			| undefined
-	)?.find(
-		(i) => i.relation === relationName || i.relation === context.relation,
-	);
+			| undefined,
+		intentPath,
+		relationName as string,
+	) as
+		| {
+				relation: string;
+				select?: { type: string; fields?: readonly string[] };
+				where?: unknown;
+		  }
+		| undefined;
 
 	let columns: string[] = [defaultPk];
 	if (includeIntent?.select?.type === 'fields' && includeIntent.select.fields) {
