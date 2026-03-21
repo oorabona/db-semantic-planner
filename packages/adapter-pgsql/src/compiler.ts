@@ -54,6 +54,7 @@ import type {
 	SelectStmtNode,
 } from './handlers/types.js';
 import { isSelectWithFields } from './handlers/types.js';
+import { convertWhereCondition } from './intent-to-decisions.js';
 import { compileValue } from './handlers/where/utils.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
@@ -691,6 +692,33 @@ export class PlanCompiler {
 				const ctx = this.createHandlerContext(plan, plan.rootTable);
 				const state = this.createHandlerState();
 				const node = compileExpressionIntent(exprIntent, ctx, state);
+				// Apply FILTER (WHERE ...) clause for customFn intents (e.g. array_agg FILTER (WHERE ...))
+				// Compiled at this level to use compileFilterCondition + convertWhereCondition
+				// without introducing circular deps in custom.ts.
+				if (
+					exprIntent.kind === 'customFn' &&
+					(exprIntent as import('@dbsp/types').CustomFnExpressionIntent).filter
+				) {
+					const filterIntent = (
+						exprIntent as import('@dbsp/types').CustomFnExpressionIntent
+					).filter!;
+					const filterDecision = convertWhereCondition(
+						filterIntent,
+						plan.rootTable,
+					);
+					if (filterDecision) {
+						const filterNode = compileFilterCondition(
+							filterDecision,
+							createWhereDispatcher(),
+							ctx,
+							state,
+						);
+						if (filterNode && 'FuncCall' in node) {
+							(node as { FuncCall: Record<string, unknown> }).FuncCall.agg_filter =
+								filterNode;
+						}
+					}
+				}
 				// parameters are shared by reference; only sync paramIndex
 				this.state.paramIndex = state.paramIndex;
 				const alias = decision.alias || decision.column || undefined;
