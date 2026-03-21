@@ -5,6 +5,7 @@
  * Each handler transforms a specific decision type into PostgreSQL AST nodes.
  */
 
+import type { ModelIR } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { FkColumnDerivation } from '../assert-field.js';
 import type { NamingPlugin } from '../naming-plugin.js';
@@ -48,6 +49,12 @@ export interface CompilerContext {
 		query: import('@dbsp/types').QueryIntent,
 		paramOffset: number,
 	) => { ast: Node; parameters: readonly unknown[] };
+	/**
+	 * Optional ModelIR for type-aware parameter casting.
+	 * When provided, WHERE comparisons emit `$N::type` to eliminate
+	 * PostgreSQL type inference ambiguity for nullable columns.
+	 */
+	readonly model?: ModelIR;
 }
 
 // ============================================================================

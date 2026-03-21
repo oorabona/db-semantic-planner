@@ -58,11 +58,15 @@ export function compileSelect<T = unknown>(
 ): CompiledQuery<T> {
 	const schemaName = deps.schemaName ?? options?.schemaName;
 
+	const resolvedModelForCompiler = options?.model ?? deps.model;
 	const compilerOptions: CompilerOptions = {
 		naming: deps.naming,
 		...(schemaName && { schema: schemaName }),
 		defaultPkColumnName: deps.defaultPk,
 		deriveFkColumnName: deps.deriveFk,
+		...(resolvedModelForCompiler != null && {
+			model: resolvedModelForCompiler,
+		}),
 	};
 
 	// Convert PlanReport (core) → SimplifiedPlanReport (pgsql compiler)
@@ -139,7 +143,10 @@ export function compileSelect<T = unknown>(
 			plan.intent?.select &&
 			'type' in plan.intent.select &&
 			plan.intent.select.type === 'aggregate' &&
-			!('fields' in plan.intent.select && (plan.intent.select as { fields?: unknown }).fields);
+			!(
+				'fields' in plan.intent.select &&
+				(plan.intent.select as { fields?: unknown }).fields
+			);
 		if (isAggregateOnly) {
 			for (const d of enrichedUnifiedDecisions) {
 				if (d.type === 'includeStrategy' && d.choice === 'join') {
@@ -224,9 +231,7 @@ export function compileSelect<T = unknown>(
 				for (const d of enrichedUnifiedDecisions) {
 					if (d.type === 'includeStrategy' && d.relationName) {
 						const mapKey = findRelationMapKey(d.relationName as string);
-						const entries = mapKey
-							? relationColumnsMap.get(mapKey)
-							: undefined;
+						const entries = mapKey ? relationColumnsMap.get(mapKey) : undefined;
 						if (entries) {
 							const mut = d as Mutable<PlanDecision>;
 							// columns: plain string array (preserves existing contract)

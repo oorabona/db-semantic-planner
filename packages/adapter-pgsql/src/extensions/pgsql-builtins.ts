@@ -1,11 +1,10 @@
-
 /**
  * PostgreSQL built-in function helpers.
  *
  * Thin wrappers around core expression primitives for common PostgreSQL functions.
  * Same pattern as pgvector.ts and paradedb.ts.
  */
-import { fn, literal, type ExpressionRef } from '@dbsp/core';
+import { type ExpressionRef, fn, literal } from '@dbsp/core';
 
 /**
  * Generate a series of values: generate_series(start, stop[, step])

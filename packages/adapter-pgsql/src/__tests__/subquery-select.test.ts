@@ -1,4 +1,3 @@
-
 /**
  * Tests for SubqueryExpression.asExpr() — scalar subqueries as SELECT columns.
  *
@@ -9,11 +8,11 @@
  * Also covers parameter renumbering when the outer query already has params.
  */
 
-import { subquery, outerRef, eq } from '@dbsp/core';
+import { eq, outerRef, subquery } from '@dbsp/core';
+import type { SubqueryExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
-import type { SubqueryExpressionIntent } from '@dbsp/types';
 
 // ============================================================================
 // Unit: SubqueryExpression.asExpr() API
@@ -43,8 +42,14 @@ describe('SubqueryExpression.asExpr()', () => {
 	});
 
 	it('SubqueryBuilder.asExpr() produces same result as build().asExpr()', () => {
-		const spec1 = subquery('calls').where(eq('symbolId', 1)).count().asExpr('n');
-		const spec2 = subquery('calls').where(eq('symbolId', 1)).count().asExpr('n');
+		const spec1 = subquery('calls')
+			.where(eq('symbolId', 1))
+			.count()
+			.asExpr('n');
+		const spec2 = subquery('calls')
+			.where(eq('symbolId', 1))
+			.count()
+			.asExpr('n');
 
 		expect(spec1.intent).toEqual(spec2.intent);
 		expect(spec1.__expr).toBe(true);
@@ -63,7 +68,11 @@ describe('compileExpressionIntent — subquery kind', () => {
 		const { sql } = compilePlan({
 			rootTable: 'symbols',
 			decisions: [
-				{ type: 'selectCustomExpression', expressionIntent: intent, alias: 'call_count' },
+				{
+					type: 'selectCustomExpression',
+					expressionIntent: intent,
+					alias: 'call_count',
+				},
 			],
 		});
 
@@ -83,7 +92,11 @@ describe('compileExpressionIntent — subquery kind', () => {
 		const { sql } = compilePlan({
 			rootTable: 'categories',
 			decisions: [
-				{ type: 'selectCustomExpression', expressionIntent: intent, alias: 'max_price' },
+				{
+					type: 'selectCustomExpression',
+					expressionIntent: intent,
+					alias: 'max_price',
+				},
 			],
 		});
 
@@ -128,13 +141,18 @@ describe('compileExpressionIntent — subquery kind', () => {
 	});
 
 	it('throws when ctx.compileSubquery is not set', async () => {
-		const { compileExpressionIntent } = await import('../handlers/expression/custom.js');
+		const { compileExpressionIntent } = await import(
+			'../handlers/expression/custom.js'
+		);
 		const intent: SubqueryExpressionIntent = {
 			kind: 'subquery',
 			query: {
 				type: 'select',
 				from: 'calls',
-				select: { type: 'aggregate', aggregates: [{ function: 'count', field: '*' }] },
+				select: {
+					type: 'aggregate',
+					aggregates: [{ function: 'count', field: '*' }],
+				},
 			},
 			as: 'n',
 		};

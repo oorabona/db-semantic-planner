@@ -7,7 +7,7 @@
  * @module pgsql-adapter
  */
 
-import { plan as planFn, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import { POSTGRESQL_CAPABILITIES, plan as planFn } from '@dbsp/core';
 import type {
 	Adapter,
 	AdapterCapabilities,
@@ -51,10 +51,6 @@ import {
 	compileRecursive as compileRecursiveImpl,
 } from './adapter-compiler-recursive.js';
 import {
-	compileSetOperation as compileSetOperationImpl,
-	createLeafCompileFn,
-} from './set-operation.js';
-import {
 	compileSelect,
 	compileWithIncludes as compileWithIncludesImpl,
 } from './adapter-compiler-select.js';
@@ -76,6 +72,10 @@ import {
 	getNamingPluginForDbCasing,
 	type NamingPlugin,
 } from './naming-plugin.js';
+import {
+	compileSetOperation as compileSetOperationImpl,
+	createLeafCompileFn,
+} from './set-operation.js';
 import { generateCursorName } from './streaming/cursor.js';
 import { validateIdentifier } from './validate.js';
 

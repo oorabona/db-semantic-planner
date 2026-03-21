@@ -1,4 +1,3 @@
-
 /**
  * pgsql-builtins Extension Tests
  *

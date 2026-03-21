@@ -6,7 +6,7 @@
 
 import type { Node } from '@pgsql/types';
 import { booleanConstNode } from '../../ast-helpers.js';
-import { createParamRef } from '../../param-ref.js';
+import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -14,7 +14,7 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { COLLECTION_OPERATORS } from '../types.js';
-import { buildColumnRef } from './utils.js';
+import { buildColumnRef, resolveColumnPgType } from './utils.js';
 
 /**
  * Create IN expression using = ANY($N)
@@ -24,15 +24,19 @@ function createInExpr(
 	columnNode: Node,
 	state: CompilerState,
 	values: unknown[],
+	columnType?: string,
 ): Node {
 	state.paramIndex++;
 	state.parameters.push(values);
+	const paramNode = columnType
+		? createTypeCastParamRef(state.paramIndex, columnType, true)
+		: createParamRef(state.paramIndex);
 	return {
 		A_Expr: {
 			kind: 'AEXPR_OP_ANY',
 			name: [{ String: { sval: '=' } }],
 			lexpr: columnNode,
-			rexpr: createParamRef(state.paramIndex),
+			rexpr: paramNode,
 		},
 	};
 }
@@ -45,15 +49,19 @@ function createNotInExpr(
 	columnNode: Node,
 	state: CompilerState,
 	values: unknown[],
+	columnType?: string,
 ): Node {
 	state.paramIndex++;
 	state.parameters.push(values);
+	const paramNode = columnType
+		? createTypeCastParamRef(state.paramIndex, columnType, true)
+		: createParamRef(state.paramIndex);
 	return {
 		A_Expr: {
 			kind: 'AEXPR_OP_ALL',
 			name: [{ String: { sval: '<>' } }],
 			lexpr: columnNode,
-			rexpr: createParamRef(state.paramIndex),
+			rexpr: paramNode,
 		},
 	};
 }
@@ -88,11 +96,12 @@ export const inHandler: WhereHandler = {
 		}
 
 		const columnNode = buildColumnRef(column, ctx);
+		const columnType = resolveColumnPgType(column, ctx);
 
 		if (operator === COLLECTION_OPERATORS.NOT_IN || operator === 'notIn') {
-			return createNotInExpr(columnNode, state, values);
+			return createNotInExpr(columnNode, state, values, columnType);
 		}
 
-		return createInExpr(columnNode, state, values);
+		return createInExpr(columnNode, state, values, columnType);
 	},
 };

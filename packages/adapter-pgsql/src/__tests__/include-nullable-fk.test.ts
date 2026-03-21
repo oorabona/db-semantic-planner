@@ -1,4 +1,3 @@
-
 /**
  * INCLUDE-NULLABLE-FK reproduction test.
  *
@@ -14,13 +13,13 @@
  */
 
 import { createOrm, eq, plan, ref, schema } from '@dbsp/core';
-import { describe, expect, it } from 'vitest';
-import { normalizeSQL } from '../ast-helpers.js';
-import { compileSelect } from '../adapter-compiler-select.js';
-import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
-import { identityNaming } from '../naming-plugin.js';
-import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
 import type { PlanReport } from '@dbsp/types';
+import { describe, expect, it } from 'vitest';
+import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
+import { compileSelect } from '../adapter-compiler-select.js';
+import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
+import { normalizeSQL } from '../ast-helpers.js';
+import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
@@ -48,7 +47,10 @@ const deps: AdapterCompilerDeps = {
 	deriveFk: defaultFkDerivation,
 };
 
-function compileFromPlan(planReport: PlanReport): { sql: string; parameters: readonly unknown[] } {
+function compileFromPlan(planReport: PlanReport): {
+	sql: string;
+	parameters: readonly unknown[];
+} {
 	return compileSelect(planReport, undefined, deps);
 }
 
@@ -105,13 +107,19 @@ function buildPlanWithNullableFkWhere(symbolId: number): PlanReport {
 // ---------------------------------------------------------------------------
 // Strategy B: full DX approach (schema + createOrm + include + dump)
 // ---------------------------------------------------------------------------
-function buildOrmDump(symbolId: number): { sql: string; parameters: readonly unknown[] } {
+function buildOrmDump(symbolId: number): {
+	sql: string;
+	parameters: readonly unknown[];
+} {
 	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
 	const orm = createOrm({ model: testSchema.model, adapter });
 
 	const dump = orm
 		.select('variable_uses')
-		.include('def', { join: 'inner', where: eq('enclosing_symbol_id', symbolId) })
+		.include('def', {
+			join: 'inner',
+			where: eq('enclosing_symbol_id', symbolId),
+		})
 		.dump();
 
 	return { sql: dump.sql, parameters: dump.params };
@@ -125,7 +133,9 @@ describe('INCLUDE-NULLABLE-FK: include with WHERE on nullable integer FK column'
 
 	describe('Strategy A: direct PlanReport compilation', () => {
 		it('compiles to valid SQL without throwing', () => {
-			expect(() => compileFromPlan(buildPlanWithNullableFkWhere(SYMBOL_ID))).not.toThrow();
+			expect(() =>
+				compileFromPlan(buildPlanWithNullableFkWhere(SYMBOL_ID)),
+			).not.toThrow();
 		});
 
 		it('produces an INNER JOIN on variable_defs', () => {
@@ -186,7 +196,9 @@ describe('INCLUDE-NULLABLE-FK: include with WHERE on nullable integer FK column'
 
 	describe('Strategy C: planner round-trip (plan() + adapter.compile())', () => {
 		it('full pipeline from QueryIntent to SQL does not throw', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+			const adapter = createPgsqlCompileOnlyAdapter({
+				model: testSchema.model,
+			});
 
 			const intent = {
 				type: 'select' as const,
@@ -209,7 +221,9 @@ describe('INCLUDE-NULLABLE-FK: include with WHERE on nullable integer FK column'
 		});
 
 		it('planner round-trip: SQL contains JOIN, WHERE, and integer parameter', () => {
-			const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+			const adapter = createPgsqlCompileOnlyAdapter({
+				model: testSchema.model,
+			});
 
 			const intent = {
 				type: 'select' as const,

@@ -54,8 +54,11 @@ import type {
 	SelectStmtNode,
 } from './handlers/types.js';
 import { isSelectWithFields } from './handlers/types.js';
-import { convertWhereCondition, intentToDecisions } from './intent-to-decisions.js';
 import { compileValue } from './handlers/where/utils.js';
+import {
+	convertWhereCondition,
+	intentToDecisions,
+} from './intent-to-decisions.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 import { createParamRef } from './param-ref.js';
@@ -280,7 +283,11 @@ function renumberNode(value: unknown, offset: number): unknown {
 	if (typeof value !== 'object') return value;
 	const obj = value as Record<string, unknown>;
 	// ParamRef node: { ParamRef: { number: N } }
-	if ('ParamRef' in obj && obj.ParamRef !== null && typeof obj.ParamRef === 'object') {
+	if (
+		'ParamRef' in obj &&
+		obj.ParamRef !== null &&
+		typeof obj.ParamRef === 'object'
+	) {
 		const pr = obj.ParamRef as Record<string, unknown>;
 		return { ParamRef: { ...pr, number: (pr.number as number) + offset } };
 	}
@@ -303,6 +310,8 @@ export interface CompilerOptions {
 	readonly defaultPkColumnName?: string;
 	/** Convention for deriving FK column names: (tableName, pkName) => fkColumnName */
 	readonly deriveFkColumnName?: FkColumnDerivation;
+	/** ModelIR for type-aware parameter casting in WHERE clauses */
+	readonly model?: import('@dbsp/types').ModelIR;
 }
 
 /**
@@ -327,6 +336,7 @@ export class PlanCompiler {
 	private readonly schema: string | undefined;
 	private readonly defaultPk: string;
 	private readonly deriveFk: FkColumnDerivation;
+	private readonly model: import('@dbsp/types').ModelIR | undefined;
 	/** Mutable state shared with extracted condition/value compilation functions */
 	private state: HandlerCompilerState = {
 		parameters: [],
@@ -360,6 +370,7 @@ export class PlanCompiler {
 		this.schema = options.schema ?? undefined;
 		this.defaultPk = options.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
 		this.deriveFk = options.deriveFkColumnName ?? defaultFkDerivation;
+		this.model = options.model ?? undefined;
 	}
 
 	/** Build immutable context for handler-based WHERE compilation */
@@ -371,6 +382,7 @@ export class PlanCompiler {
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
 			...(this.schema != null && { schema: this.schema }),
+			...(this.model != null && { model: this.model }),
 		} as HandlerCompilerContext;
 	}
 
@@ -641,6 +653,7 @@ export class PlanCompiler {
 			...((plan.schema ?? this.schema)
 				? { schema: plan.schema ?? this.schema }
 				: {}),
+			...(this.model != null && { model: this.model }),
 		} as HandlerCompilerContext;
 	}
 
@@ -741,20 +754,23 @@ export class PlanCompiler {
 					compileSubquery(
 						query: import('@dbsp/types').QueryIntent,
 						paramOffset: number,
-					): { ast: import('@pgsql/types').Node; parameters: readonly unknown[] } {
+					): {
+						ast: import('@pgsql/types').Node;
+						parameters: readonly unknown[];
+					} {
 						// Compile the inner QueryIntent through a fresh PlanCompiler
 						// (same options: naming, schema, defaultPk, deriveFk)
 						const innerCompiler = new PlanCompiler({
 							naming: outerThis.naming,
-							schema: outerThis.schema,
+							...(outerThis.schema !== undefined && { schema: outerThis.schema }),
 							defaultPkColumnName: outerThis.defaultPk,
 							deriveFkColumnName: outerThis.deriveFk,
 						});
-					const innerPlan: SimplifiedPlanReport = {
-						rootTable: query.from,
-						decisions: intentToDecisions(query, query.from),
-					};
-					const innerResult = innerCompiler.compile(innerPlan);
+						const innerPlan: SimplifiedPlanReport = {
+							rootTable: query.from,
+							decisions: intentToDecisions(query, query.from),
+						};
+						const innerResult = innerCompiler.compile(innerPlan);
 						// Renumber ParamRef $N in the inner AST by paramOffset so they
 						// don't collide with the outer query's already-consumed parameters.
 						const renumbered = renumberParamRefsInAst(
@@ -788,8 +804,9 @@ export class PlanCompiler {
 							state,
 						);
 						if (filterNode && 'FuncCall' in node) {
-							(node as { FuncCall: Record<string, unknown> }).FuncCall.agg_filter =
-								filterNode;
+							(
+								node as { FuncCall: Record<string, unknown> }
+							).FuncCall.agg_filter = filterNode;
 						}
 					}
 				}

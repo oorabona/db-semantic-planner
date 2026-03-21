@@ -6,7 +6,7 @@
 import { isFieldRef } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { columnRef, nullConstNode } from '../../ast-helpers.js';
-import { createParamRef } from '../../param-ref.js';
+import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import type { CompilerContext, CompilerState } from '../types.js';
 import { isParamRef } from '../types.js';
 
@@ -42,6 +42,7 @@ export function buildParamRef(value: unknown, state: CompilerState): Node {
 export function compileValue(
 	value: unknown,
 	state: Pick<CompilerState, 'parameters' | 'paramIndex'>,
+	columnType?: string,
 ): Node {
 	if (value === null || value === undefined) {
 		return nullConstNode();
@@ -49,12 +50,16 @@ export function compileValue(
 
 	if (isParamRef(value)) {
 		state.parameters.push(value.value);
-		return createParamRef(value.paramIndex);
+		return columnType
+			? createTypeCastParamRef(value.paramIndex, columnType)
+			: createParamRef(value.paramIndex);
 	}
 
 	const idx = ++state.paramIndex;
 	state.parameters.push(value);
-	return createParamRef(idx);
+	return columnType
+		? createTypeCastParamRef(idx, columnType)
+		: createParamRef(idx);
 }
 
 /**
@@ -66,6 +71,7 @@ export function compileValueOrFieldRef(
 	value: unknown,
 	ctx: CompilerContext,
 	state: Pick<CompilerState, 'parameters' | 'paramIndex'>,
+	columnType?: string,
 ): Node {
 	if (isFieldRef(value)) {
 		const alias =
@@ -74,5 +80,25 @@ export function compileValueOrFieldRef(
 				: (ctx.currentAlias ?? ctx.rootTable);
 		return columnRef(value.column, alias, undefined, ctx.naming);
 	}
-	return compileValue(value, state);
+	return compileValue(value, state, columnType);
+}
+
+/**
+ * Resolve the PostgreSQL type for a column from the ModelIR in the context.
+ * Returns undefined when model is absent or column is not found.
+ */
+export function resolveColumnPgType(
+	columnName: string,
+	ctx: CompilerContext,
+): string | undefined {
+	if (!ctx.model) return undefined;
+	const table = ctx.model.getTable(ctx.rootTable);
+	if (!table) return undefined;
+	const column = table.columns.find((c) => c.name === columnName);
+	if (!column) return undefined;
+	// Only cast when originalDbType is explicitly set (populated by introspection).
+	// Manually defined schemas omit this field — we do not guess the PG type from
+	// the abstract ColumnType to avoid breaking queries on non-introspected schemas.
+	if (column.originalDbType) return column.originalDbType;
+	return undefined;
 }
