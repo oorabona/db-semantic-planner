@@ -42,6 +42,7 @@ import type {
 	WhereRelationFilterIntent,
 } from '../intent-ast.js';
 import { getColumnName } from './column-utils.js';
+import { type SubqueryBuilder, type SubqueryExpression } from './subquery-builder.js';
 import {
 	type ColumnRef,
 	RELATION_META,
@@ -259,6 +260,27 @@ export function inArray(
 	values: readonly unknown[],
 ): WhereInIntent {
 	return { kind: 'in', field: getColumnName(field), values };
+}
+
+/**
+ * IN subquery: field IN (SELECT ...)
+ *
+ * Creates a WHERE condition that checks if a field's value exists
+ * in the result set of a subquery.
+ *
+ * @example
+ * // Users who have posts
+ * orm.select('users').where(inSubquery('id',
+ *   subquery('posts').select('userId')
+ * )).all()
+ * // SQL: SELECT * FROM users WHERE id = ANY(SELECT user_id FROM posts)
+ */
+export function inSubquery(
+	field: ColumnRef<string, string, unknown> | string,
+	query: SubqueryBuilder | SubqueryExpression,
+): WhereInIntent {
+	const expr = 'build' in query ? (query as SubqueryBuilder).build() : (query as SubqueryExpression);
+	return { kind: 'in', field: getColumnName(field), values: [], subquery: expr.toIntent() };
 }
 
 

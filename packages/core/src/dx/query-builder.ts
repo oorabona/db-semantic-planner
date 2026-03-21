@@ -57,6 +57,12 @@ import {
 import { ResultHydrator } from './result-hydrator.js';
 import type { DefaultFilters } from './schema.js';
 import {
+	buildSetOperationIntent,
+	SetOperationBuilderImpl,
+	type QueryIntentSource,
+	type SetOperationBuilder,
+} from './set-operation-builder.js';
+import {
 	type AggregateOptions,
 	type ColumnSpec,
 	type CursorPaginatedResult,
@@ -1845,6 +1851,64 @@ export class QueryBuilderImpl<TResult = unknown>
 	 *   .all();
 	 * ```
 	 */
+	// --------------------------------------------------------------------------
+	// Set operations (UNION / INTERSECT / EXCEPT)
+	// --------------------------------------------------------------------------
+
+	union(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
+		return new SetOperationBuilderImpl(
+			buildSetOperationIntent('union', false, this, other as unknown as QueryIntentSource),
+			this.model,
+			this.adapter,
+			this.schemaName,
+		);
+	}
+
+	unionAll(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
+		return new SetOperationBuilderImpl(
+			buildSetOperationIntent('union', true, this, other as unknown as QueryIntentSource),
+			this.model,
+			this.adapter,
+			this.schemaName,
+		);
+	}
+
+	intersect(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
+		return new SetOperationBuilderImpl(
+			buildSetOperationIntent('intersect', false, this, other as unknown as QueryIntentSource),
+			this.model,
+			this.adapter,
+			this.schemaName,
+		);
+	}
+
+	intersectAll(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
+		return new SetOperationBuilderImpl(
+			buildSetOperationIntent('intersect', true, this, other as unknown as QueryIntentSource),
+			this.model,
+			this.adapter,
+			this.schemaName,
+		);
+	}
+
+	except(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
+		return new SetOperationBuilderImpl(
+			buildSetOperationIntent('except', false, this, other as unknown as QueryIntentSource),
+			this.model,
+			this.adapter,
+			this.schemaName,
+		);
+	}
+
+	exceptAll(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
+		return new SetOperationBuilderImpl(
+			buildSetOperationIntent('except', true, this, other as unknown as QueryIntentSource),
+			this.model,
+			this.adapter,
+			this.schemaName,
+		);
+	}
+
 	withoutDefaultFilters(): QueryBuilder<TResult> {
 		const builder = this.clone();
 		builder.skipDefaultFilters = true;

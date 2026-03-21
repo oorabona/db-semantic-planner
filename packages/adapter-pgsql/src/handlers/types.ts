@@ -35,6 +35,19 @@ export interface CompilerContext {
 	readonly deriveFkColumnName?: FkColumnDerivation;
 	/** Alias of the outer (parent) query — used for FieldRef scope:'outer' resolution in EXISTS subqueries */
 	readonly outerAlias?: string;
+	/**
+	 * Optional callback to compile a QueryIntent into an AST Node (SubLink subselect).
+	 * Set by PlanCompiler when compiling selectCustomExpression — enables SubqueryExpressionIntent
+	 * to embed a fully compiled sub-SELECT into the parent SELECT column list.
+	 *
+	 * @param query - The inner QueryIntent to compile
+	 * @param paramOffset - Current outer paramIndex; inner $N are renumbered by this offset
+	 * @returns The compiled SelectStmt AST node and the inner parameters
+	 */
+	readonly compileSubquery?: (
+		query: import('@dbsp/types').QueryIntent,
+		paramOffset: number,
+	) => { ast: Node; parameters: readonly unknown[] };
 }
 
 // ============================================================================

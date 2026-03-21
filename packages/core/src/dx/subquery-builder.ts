@@ -11,6 +11,7 @@ import type {
 	WhereIntent,
 	WhereSubqueryIntent,
 } from '../intent-ast.js';
+import type { ExpressionSpec } from './types.js';
 
 // ============================================================================
 // Subquery Builder
@@ -158,6 +159,24 @@ export class SubqueryBuilder {
 	}
 
 	/**
+	 * Wrap this subquery as an ExpressionSpec for use as a SELECT column.
+	 * Shorthand for `.build().asExpr(alias)`.
+	 *
+	 * @param alias - Column alias for the result
+	 * @returns ExpressionSpec suitable for passing to .columns()
+	 *
+	 * @example
+	 * // SELECT id, (SELECT count(*) FROM calls WHERE symbol_id = s.id) AS call_count
+	 * query('symbols').columns([
+	 *   'id',
+	 *   subquery('calls').where({ symbolId: outerRef('id') }).count().asExpr('call_count'),
+	 * ])
+	 */
+	asExpr(alias: string): ExpressionSpec {
+		return this.build().asExpr(alias);
+	}
+
+	/**
 	 * Create a clone of this builder (immutable pattern).
 	 */
 	private clone(): SubqueryBuilder {
@@ -205,6 +224,27 @@ export class SubqueryExpression {
 			field,
 			operator,
 			subquery: this.intent,
+		};
+	}
+
+	/**
+	 * Wrap this subquery as an ExpressionSpec for use as a SELECT column.
+	 *
+	 * @param alias - Column alias for the result (required: SELECT expressions need a name)
+	 * @returns ExpressionSpec suitable for passing to .columns()
+	 *
+	 * @example
+	 * // SELECT id, (SELECT count(*) FROM calls WHERE calls.symbol_id = s.id) AS call_count
+	 * // FROM symbols s
+	 * query('symbols').columns([
+	 *   'id',
+	 *   subquery('calls').count().asExpr('call_count'),
+	 * ])
+	 */
+	asExpr(alias: string): ExpressionSpec {
+		return {
+			__expr: true,
+			intent: { kind: 'subquery', query: this.intent, as: alias },
 		};
 	}
 }

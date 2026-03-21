@@ -54,7 +54,7 @@ import type {
 	SelectStmtNode,
 } from './handlers/types.js';
 import { isSelectWithFields } from './handlers/types.js';
-import { convertWhereCondition } from './intent-to-decisions.js';
+import { convertWhereCondition, intentToDecisions } from './intent-to-decisions.js';
 import { compileValue } from './handlers/where/utils.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
@@ -252,6 +252,44 @@ export interface CompiledResult {
 	readonly sql: string;
 	readonly parameters: readonly unknown[];
 	readonly ast: Node;
+}
+
+// ============================================================================
+// AST Utilities
+// ============================================================================
+
+/**
+ * Walk a PostgreSQL AST Node tree and renumber all ParamRef.number values
+ * by adding `offset` to each. Used to merge inner subquery parameters into
+ * the outer query's parameter sequence without $N collisions.
+ *
+ * @param node - Root AST node (any pgsql Node object or array)
+ * @param offset - Value to add to every ParamRef.number found
+ * @returns A new node tree with renumbered ParamRefs (original is not mutated)
+ */
+function renumberParamRefsInAst(node: unknown, offset: number): Node {
+	if (offset === 0) return node as Node;
+	return renumberNode(node, offset) as Node;
+}
+
+function renumberNode(value: unknown, offset: number): unknown {
+	if (value === null || value === undefined) return value;
+	if (Array.isArray(value)) {
+		return value.map((item) => renumberNode(item, offset));
+	}
+	if (typeof value !== 'object') return value;
+	const obj = value as Record<string, unknown>;
+	// ParamRef node: { ParamRef: { number: N } }
+	if ('ParamRef' in obj && obj.ParamRef !== null && typeof obj.ParamRef === 'object') {
+		const pr = obj.ParamRef as Record<string, unknown>;
+		return { ParamRef: { ...pr, number: (pr.number as number) + offset } };
+	}
+	// Recursively walk all object properties
+	const result: Record<string, unknown> = {};
+	for (const key of Object.keys(obj)) {
+		result[key] = renumberNode(obj[key], offset);
+	}
+	return result;
 }
 
 // ============================================================================
@@ -697,7 +735,35 @@ export class PlanCompiler {
 
 			case 'selectCustomExpression': {
 				const exprIntent = decision.expressionIntent as ExpressionIntent;
-				const ctx = this.createHandlerContext(plan, plan.rootTable);
+				const outerThis = this;
+				const ctx = {
+					...this.createHandlerContext(plan, plan.rootTable),
+					compileSubquery(
+						query: import('@dbsp/types').QueryIntent,
+						paramOffset: number,
+					): { ast: import('@pgsql/types').Node; parameters: readonly unknown[] } {
+						// Compile the inner QueryIntent through a fresh PlanCompiler
+						// (same options: naming, schema, defaultPk, deriveFk)
+						const innerCompiler = new PlanCompiler({
+							naming: outerThis.naming,
+							schema: outerThis.schema,
+							defaultPkColumnName: outerThis.defaultPk,
+							deriveFkColumnName: outerThis.deriveFk,
+						});
+					const innerPlan: SimplifiedPlanReport = {
+						rootTable: query.from,
+						decisions: intentToDecisions(query, query.from),
+					};
+					const innerResult = innerCompiler.compile(innerPlan);
+						// Renumber ParamRef $N in the inner AST by paramOffset so they
+						// don't collide with the outer query's already-consumed parameters.
+						const renumbered = renumberParamRefsInAst(
+							innerResult.ast,
+							paramOffset,
+						);
+						return { ast: renumbered, parameters: innerResult.parameters };
+					},
+				} as HandlerCompilerContext;
 				const state = this.createHandlerState();
 				const node = compileExpressionIntent(exprIntent, ctx, state);
 				// Apply FILTER (WHERE ...) clause for customFn intents (e.g. array_agg FILTER (WHERE ...))

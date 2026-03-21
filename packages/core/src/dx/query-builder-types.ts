@@ -10,6 +10,7 @@
  */
 
 import type { Dump } from '../adapter.js';
+import type { SetOperationBuilder } from './set-operation-builder.js';
 import type {
 	LockStrength,
 	LockWaitPolicy,
@@ -569,6 +570,88 @@ export interface QueryBuilder<TResult = unknown> {
 	 * ```
 	 */
 	withoutDefaultFilters(): QueryBuilder<TResult>;
+
+	/**
+	 * Combine with another query using UNION (deduplicates rows).
+	 *
+	 * Both queries must select compatible columns.
+	 *
+	 * @param other - The query to union with
+	 * @returns A SetOperationBuilder for further chaining or execution
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await orm.select('employees')
+	 *   .union(orm.select('contractors'))
+	 *   .all();
+	 * // SQL: (SELECT ...) UNION (SELECT ...)
+	 * ```
+	 */
+	union(other: QueryBuilder<TResult>): SetOperationBuilder<TResult>;
+
+	/**
+	 * Combine with another query using UNION ALL (keeps duplicate rows).
+	 *
+	 * @param other - The query to union with
+	 * @returns A SetOperationBuilder for further chaining or execution
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await orm.select('employees')
+	 *   .unionAll(orm.select('contractors'))
+	 *   .all();
+	 * // SQL: (SELECT ...) UNION ALL (SELECT ...)
+	 * ```
+	 */
+	unionAll(other: QueryBuilder<TResult>): SetOperationBuilder<TResult>;
+
+	/**
+	 * Combine with another query using INTERSECT (rows present in both).
+	 *
+	 * @param other - The query to intersect with
+	 * @returns A SetOperationBuilder for further chaining or execution
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await orm.select('active_users')
+	 *   .intersect(orm.select('verified_users'))
+	 *   .all();
+	 * // SQL: (SELECT ...) INTERSECT (SELECT ...)
+	 * ```
+	 */
+	intersect(other: QueryBuilder<TResult>): SetOperationBuilder<TResult>;
+
+	/**
+	 * Combine with another query using INTERSECT ALL (rows present in both, with duplicates).
+	 *
+	 * @param other - The query to intersect with
+	 * @returns A SetOperationBuilder for further chaining or execution
+	 */
+	intersectAll(other: QueryBuilder<TResult>): SetOperationBuilder<TResult>;
+
+	/**
+	 * Combine with another query using EXCEPT (rows in this query but not in other).
+	 *
+	 * @param other - The query to subtract
+	 * @returns A SetOperationBuilder for further chaining or execution
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await orm.select('all_users')
+	 *   .except(orm.select('banned_users'))
+	 *   .all();
+	 * // SQL: (SELECT ...) EXCEPT (SELECT ...)
+	 * ```
+	 */
+	except(other: QueryBuilder<TResult>): SetOperationBuilder<TResult>;
+
+	/**
+	 * Combine with another query using EXCEPT ALL (rows in this query but not in other, with duplicates).
+	 *
+	 * @param other - The query to subtract
+	 * @returns A SetOperationBuilder for further chaining or execution
+	 */
+	exceptAll(other: QueryBuilder<TResult>): SetOperationBuilder<TResult>;
 
 	/**
 	 * Generate the execution plan for this query.

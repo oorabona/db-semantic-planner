@@ -7,7 +7,7 @@
  * @module pgsql-adapter
  */
 
-import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import { plan as planFn, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import type {
 	Adapter,
 	AdapterCapabilities,
@@ -28,6 +28,7 @@ import type {
 	ModelIR,
 	PlanReport,
 	RecursivePlanReport,
+	SetOperationIntent,
 	SubqueryIncludeInfo,
 	UpdateIntent,
 	UpsertFromIntent,
@@ -49,6 +50,10 @@ import {
 	compileCteQuery as compileCteQueryImpl,
 	compileRecursive as compileRecursiveImpl,
 } from './adapter-compiler-recursive.js';
+import {
+	compileSetOperation as compileSetOperationImpl,
+	createLeafCompileFn,
+} from './set-operation.js';
 import {
 	compileSelect,
 	compileWithIncludes as compileWithIncludesImpl,
@@ -370,6 +375,22 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		options?: CompileOptions,
 	): CompiledQuery {
 		return compileCteQueryImpl(intent, options, this.compileDeps);
+	}
+
+	/**
+	 * Compile a set operation (UNION / INTERSECT / EXCEPT) to SQL.
+	 */
+	compileSetOperation(
+		intent: SetOperationIntent,
+		model: ModelIR,
+		_options?: CompileOptions,
+	): CompiledQuery {
+		const compileFn = createLeafCompileFn(this, model, planFn);
+		const result = compileSetOperationImpl(intent, compileFn);
+		return {
+			sql: result.sql,
+			parameters: result.parameters,
+		};
 	}
 
 	/**

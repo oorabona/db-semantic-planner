@@ -48,6 +48,7 @@ export {
 	// Array
 	any,
 	inArray,
+	inSubquery,
 	isDistinctFrom,
 	// Type guards
 	isDistinctField,
@@ -265,6 +266,11 @@ export {
 	type SchemaConversionResult,
 	type ValidatedResolvedSchema,
 } from './schema-bridge.js';
+// Set Operation Builder (UNION / INTERSECT / EXCEPT)
+export {
+	type SetOperationBuilder,
+	SetOperationBuilderImpl,
+} from './set-operation-builder.js';
 // Subquery Builder (DX-012 Block 3)
 export {
 	isSubqueryExpression,

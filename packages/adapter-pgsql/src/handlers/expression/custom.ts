@@ -15,6 +15,7 @@ import type {
 	NamedArgExpressionIntent,
 	ParamExpressionIntent,
 	RefExpressionIntent,
+	SubqueryExpressionIntent,
 	UnaryExpressionIntent,
 } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
@@ -164,6 +165,32 @@ export function compileExpressionIntent(
 				compileExpressionIntent(el, ctx, state),
 			);
 			return { A_ArrayExpr: { elements } } as unknown as Node;
+		}
+
+		case 'subquery': {
+			const sq = intent as SubqueryExpressionIntent;
+			if (!ctx.compileSubquery) {
+				throw new Error(
+					"compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. " +
+						'Use asExpr() only in .columns() context, not in standalone expressions.',
+				);
+			}
+			const { ast: innerAst, parameters: innerParams } = ctx.compileSubquery(
+				sq.query,
+				state.paramIndex,
+			);
+			// Append inner parameters to outer state (shared array, appended in order)
+			for (const p of innerParams) {
+				state.parameters.push(p);
+			}
+			state.paramIndex += innerParams.length;
+			// Wrap the inner SelectStmt in a SubLink (scalar subquery expression)
+			return {
+				SubLink: {
+					subLinkType: 'EXPR_SUBLINK',
+					subselect: innerAst,
+				},
+			} as unknown as Node;
 		}
 
 		case 'relationColumn': {

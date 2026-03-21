@@ -101,6 +101,6 @@ export interface SetOperationIntent {
 	readonly kind: 'setOperation';
 	readonly op: SetOperationType;
 	readonly all: boolean;
-	readonly left: QueryIntent;
+	readonly left: QueryIntent | SetOperationIntent;
 	readonly right: QueryIntent | SetOperationIntent;
 }
