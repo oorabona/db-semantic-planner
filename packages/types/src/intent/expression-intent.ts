@@ -327,6 +327,18 @@ export interface NamedArgExpressionIntent {
 	readonly value: ExpressionIntent;
 }
 
+/** Star/wildcard expression (*) — used in COUNT(*), SELECT *, etc. */
+export interface StarExpressionIntent {
+	readonly kind: 'star';
+}
+
+/** PostgreSQL ARRAY constructor: ARRAY[item1, item2, ...] */
+export interface ArrayExpressionIntent {
+	readonly kind: 'array';
+	readonly elements: readonly ExpressionIntent[];
+	readonly as?: string;
+}
+
 /** Unary operator expression (e.g., NOT, -, ~) */
 export interface UnaryExpressionIntent {
 	readonly kind: 'unary';
@@ -364,7 +376,9 @@ export type ExpressionIntent =
 	| ParamExpressionIntent
 	| CastExpressionIntent
 	| UnaryExpressionIntent
-	| NamedArgExpressionIntent;
+	| NamedArgExpressionIntent
+	| StarExpressionIntent
+	| ArrayExpressionIntent;
 
 // ============================================================================
 // Window Functions (P3-A)
