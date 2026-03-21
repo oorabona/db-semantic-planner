@@ -69,6 +69,8 @@ export function compileExpressionIntent(
 			const argNodes = i.args.map((arg) =>
 				compileExpressionIntent(arg, ctx, state),
 			);
+			// Note: FILTER (WHERE ...) on customFn is applied at the compiler level
+			// (selectCustomExpression branch in compiler.ts) to avoid circular deps.
 			return funcCall(nameParts, argNodes);
 		}
 
@@ -160,6 +162,32 @@ export function compileExpressionIntent(
  * Expression handler for custom expression intents in SELECT.
  * Dispatches customOp, customFn, ref, param, cast, unary to compileExpressionIntent.
  */
+
+/**
+ * Compile a WhereIntent FILTER clause to an AST Node for use in customFn expressions.
+ *
+ * Uses require() for createWhereDispatcher and convertWhereCondition to avoid circular
+ * dependencies (compiler.ts → custom.ts). The PlanDecision from convertWhereCondition
+ * is structurally compatible with Decision for simple filter conditions.
+ */
+/**
+ * Compile a WhereIntent FILTER clause to an AST Node for use in customFn expressions.
+ *
+ * Uses direct imports (not require()) — both are safe:
+ * - handlers/index.ts does not import custom.ts (no circular dep)
+ * - intent-to-decisions.ts imports PlanDecision from compiler.ts as `import type` only
+ *   (type-only imports have no runtime circular dep in ESM)
+ */
+/**
+ * Compile a WhereIntent FILTER clause to an AST Node for use in customFn expressions.
+ *
+ * Uses direct import for convertWhereCondition (safe: intent-to-decisions.ts only has
+ * `import type` from compiler.ts, no runtime circular dep).
+ *
+ * Uses require() for createWhereDispatcher to avoid circular initialization:
+ *   handlers/index.ts → where/index.ts → custom-expression.ts → custom.ts
+ */
+
 export const customExpressionHandler: ExpressionHandler = {
 	types: [
 		'customOp',

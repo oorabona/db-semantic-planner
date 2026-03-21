@@ -237,7 +237,7 @@ interface FlatWhereFields {
 	readonly expr?: unknown;
 }
 
-function convertWhereCondition(
+export function convertWhereCondition(
 	condition: WhereIntent,
 	rootTable: string,
 ): PlanDecision | null {

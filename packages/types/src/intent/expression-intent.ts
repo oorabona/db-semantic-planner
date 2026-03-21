@@ -297,6 +297,8 @@ export interface CustomFnExpressionIntent {
 	readonly name: string;
 	readonly args: readonly ExpressionIntent[];
 	readonly as?: string;
+	/** FILTER (WHERE ...) clause for conditional aggregation */
+	readonly filter?: WhereIntent | undefined;
 }
 
 /** Column reference in custom expressions */
