@@ -15,6 +15,14 @@
 
 ---
 
+## Bugs
+
+- [x] ✅ **INTRO-INDEXES** [Adapter] `introspect()` index catalog query had `$1` accidentally replaced with a JS `//` comment inside a template literal — PostgreSQL received the raw comment text as SQL, failing with `syntax error at or near "Indexes"`. Fixed: restored `WHERE n.nspname = $1`. Regression tests added. (2026-03-21)
+- [ ] 🐛 **WCOUNT-STAR** [Core] `wCount()` window function requires a field argument — no zero-arg `wCount()` or `wCountStar()` to produce `COUNT(*) OVER()`. Blocks ~9 astix orm.raw() migrations in code-health.ts (pagination total alongside GROUP BY). — Priority: P0
+- [x] ✅ **INCLUDE-2HOP** [Adapter] `include('callee.file')` resolved FK on ROOT table instead of intermediate table. Fixed: `toJoinIncludeDecision` now propagates `sourceTable`; `mapToHandlerDecision` uses `pd.sourceTable ?? rootTable` for `deriveFkColumns`; `PlanCompiler` tracks `joinAliasMap` (targetTable→alias) so 2nd-hop `currentAlias` resolves to the intermediate alias (e.g., `callee`) not the root. 2 regression tests added. (2026-03-21)
+
+---
+
 ## P0 — Core Features Required by astix ORM Migration (2026-03-15)
 
 > Re-assessment 2026-03-20: 108 `orm.raw()` calls. Inventory: `astix/docs/orm-raw-inventory.md`

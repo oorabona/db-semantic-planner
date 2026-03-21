@@ -286,11 +286,7 @@ export async function introspect(
 			 LEFT JOIN pg_opclass oc
 			   ON oc.oid = (ix.indclass::int2[])[k.n - 1]
 			   AND k.n <= ix.indnkeyatts AND k.attnum != 0
-			 WHERE n.nspname = 		// 4. Indexes (excluding PK-backing indexes and unique-constraint-backing indexes).
-		// Unique constraints created via col.unique / UNIQUE keyword in DDL produce an implicit
-		// backing index that is NOT a user-defined index — it is tracked via col.unique on the
-		// ColumnIR instead. Including it here would cause spurious drop_index diffs on roundtrip.
-
+			 WHERE n.nspname = $1
 			   AND NOT ix.indisprimary
 			   AND NOT EXISTS (
 			     SELECT 1 FROM pg_constraint c
