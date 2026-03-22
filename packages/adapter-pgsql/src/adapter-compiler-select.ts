@@ -155,6 +155,24 @@ export function compileSelect<T = unknown>(
 			}
 		}
 
+		// DISTINCT-VECTOR: When SELECT DISTINCT is active, join includes must NOT
+		// contribute their full column list to the SELECT. PostgreSQL requires all
+		// expressions in the SELECT list to be comparable for DISTINCT; vector-type
+		// columns have no equality operator and cause "ERROR: could not identify an
+		// equality operator for type vector".
+		// Keep the JOIN (for filtering) but strip the auto-selected columns.
+		// Explicitly requested columns (via relationColumn()) are still injected
+		// below via relationColumnsMap — they are the caller's responsibility to
+		// make DISTINCT-safe.
+		const isDistinct = plan.intent?.distinct === true;
+		if (isDistinct) {
+			for (const d of enrichedUnifiedDecisions) {
+				if (d.type === 'includeStrategy' && d.choice === 'join') {
+					(d as Mutable<PlanDecision>).columns = [];
+				}
+			}
+		}
+
 		// Deduplicate: remove selectRelationColumn decisions for relations
 		// already covered by an include strategy.
 		// Include handlers (json_agg, lateral, CTE, join) already compile the
