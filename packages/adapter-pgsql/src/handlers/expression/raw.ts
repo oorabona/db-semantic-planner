@@ -12,7 +12,6 @@
 
 import { getLogger } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
-import { parseSync } from 'pgsql-parser';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -27,16 +26,9 @@ import type {
  * Only use for expressions that cannot be represented in the planner.
  */
 function buildRawExpression(sql: string): Node {
-	// Use pgsql-parser (real PostgreSQL parser) to handle all SQL expression
-	// forms including COUNT(*), aggregate functions, and type casts.
-	// The custom parseExpression only handles a limited expression grammar.
-	const parsed = parseSync(`SELECT ${sql}`);
-	const target = (parsed.stmts[0]!.stmt as {
-		SelectStmt: {
-			targetList: Array<{ ResTarget: { val: Node } }>;
-		};
-	}).SelectStmt.targetList[0]!.ResTarget.val;
-	return target;
+	// Custom RawSQL node — handled by our deparser as verbatim SQL passthrough.
+	// No WASM parser dependency — the deparser outputs the SQL string as-is.
+	return { RawSQL: { sql } } as unknown as Node;
 }
 
 /**

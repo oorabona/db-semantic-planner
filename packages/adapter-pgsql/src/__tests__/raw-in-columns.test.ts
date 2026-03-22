@@ -47,8 +47,8 @@ describe('RAW-IN-COLUMNS: raw() expressions compile correctly in SELECT', () => 
 
 		const sql = normalizeSQL(dump.sql);
 
-		// pgsql-deparser normalizes COUNT(*)::int → cast(count(*) as int4)
-		expect(sql).toContain('cast(count(*) as int4)');
+		// RawSQL passthrough: SQL emitted verbatim (no parse/reformat)
+		expect(sql).toContain('count(*)::int');
 		// Alias present (unquoted for simple lowercase names)
 		expect(sql).toContain('as count');
 		// No parameters needed for a raw expression with no user values
@@ -64,9 +64,10 @@ describe('RAW-IN-COLUMNS: raw() expressions compile correctly in SELECT', () => 
 
 		const sql = normalizeSQL(dump.sql);
 
+		// RawSQL passthrough (normalizeSQL lowercases)
 		expect(sql).toContain('now()');
-		// "current_time" is a PostgreSQL reserved word so the deparser quotes it
-		expect(sql).toContain('"current_time"');
+		// Alias applied by ResTarget wrapping
+		expect(sql).toMatch(/current_time/i);
 		expect(dump.params).toHaveLength(0);
 	});
 
@@ -82,8 +83,8 @@ describe('RAW-IN-COLUMNS: raw() expressions compile correctly in SELECT', () => 
 		// Regular columns are table-qualified and unquoted by the deparser
 		expect(sql).toContain('orders.id');
 		expect(sql).toContain('orders.status');
-		// Raw expression is compiled (deparser normalizes ::int → cast(... as int4))
-		expect(sql).toContain('cast(count(*) as int4)');
+		// RawSQL passthrough: SQL emitted verbatim
+		expect(sql).toContain('count(*)::int');
 		// Alias is unquoted for simple lowercase names
 		expect(sql).toContain('as count');
 	});

@@ -20,7 +20,5 @@ export default defineConfig({
 		'pg',
 		'pg-pool',
 		'pg-cursor',
-		'pgsql-parser',
-		'libpg-query',
 	],
 });

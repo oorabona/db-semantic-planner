@@ -168,6 +168,10 @@ export function deparse(node: Node): string {
 			const nae = inner as { arg: Node; name: string };
 			return `${nae.name} => ${deparse(nae.arg)}`;
 		}
+		case 'RawSQL': {
+			// Custom node: verbatim SQL passthrough (used by raw() escape hatch)
+			return (inner as { sql: string }).sql;
+		}
 		case 'RangeSubselect':
 			return deparseRangeSubselect(inner as Record<string, unknown>);
 		default:
