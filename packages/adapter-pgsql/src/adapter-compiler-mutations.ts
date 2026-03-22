@@ -43,7 +43,6 @@ import {
 	type DeleteConfig,
 	type InsertConfig,
 	type InsertFromConfig,
-	RANGE_TYPES,
 	type UpdateConfig,
 	type UpsertConfig,
 	type UpsertFromConfig,
@@ -120,9 +119,10 @@ function resolveExistsIntent(
 }
 
 /**
- * Build a column-type map for a table, filtered to only columns
- * whose type requires explicit type-casting (e.g. range types).
- * Returns undefined if no type-cast columns are found (or model unavailable).
+ * Build a column-type map for a table, covering all typed columns so that
+ * `inferPgArrayType` can produce schema-driven array casts (e.g. int4[], bool[]).
+ * Prefers `originalDbType` when set (preserves precision info from introspection).
+ * Returns undefined if no columns found (or model unavailable).
  */
 function getColumnTypes(
 	tableName: string,
@@ -135,9 +135,10 @@ function getColumnTypes(
 	let result: Record<string, string> | undefined;
 	for (const col of columns) {
 		const columnIR = table.columns.find((c) => c.name === col);
-		if (columnIR && RANGE_TYPES.has(columnIR.type)) {
+		if (columnIR) {
 			result ??= {};
-			result[col] = columnIR.type;
+			// Prefer originalDbType (preserves introspection precision) over ColumnType
+			result[col] = columnIR.originalDbType ?? columnIR.type;
 		}
 	}
 	return result;
