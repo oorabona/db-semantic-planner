@@ -364,6 +364,11 @@ export class PlanCompiler {
 	 * the correct source alias (e.g., 'symbols' → 'callee').
 	 */
 	private joinAliasMap: Map<string, string> = new Map();
+	/**
+	 * Tracks all join aliases in use for the current query.
+	 * Ensures no two JOINs share the same alias (DOUBLE-ALIAS prevention).
+	 */
+	private usedJoinAliases: Set<string> = new Set();
 
 	constructor(options: CompilerOptions = {}) {
 		this.naming = options.naming ?? identityNaming;
@@ -543,6 +548,31 @@ export class PlanCompiler {
 			joins: [],
 		};
 
+		// Deduplicate join alias before compiling (DOUBLE-ALIAS prevention).
+		// The join handler derives its alias as: relation ?? targetTable.
+		// If two includes resolve to the same alias (e.g., include('def.file') +
+		// include('file') both produce alias 'file'), suffix with _N to disambiguate.
+		let finalJoinAlias: string | undefined;
+		if (decision.choice === 'join') {
+			const candidateAlias =
+				handlerDecision.relation ??
+				handlerDecision.targetTable ??
+				handlerDecision.relationName;
+			if (candidateAlias) {
+				let alias = candidateAlias;
+				let counter = 1;
+				while (this.usedJoinAliases.has(alias)) {
+					alias = `${candidateAlias}_${counter++}`;
+				}
+				this.usedJoinAliases.add(alias);
+				finalJoinAlias = alias;
+				// Inject the deduplicated alias so the handler uses it
+				if (alias !== candidateAlias) {
+					(handlerDecision as { relation?: string }).relation = alias;
+				}
+			}
+		}
+
 		const result = handler.compile(handlerDecision, ctx, handlerState);
 
 		// Sync parameters back
@@ -554,9 +584,12 @@ export class PlanCompiler {
 		if (
 			decision.choice === 'join' &&
 			decision.targetTable &&
-			decision.relationName
+			(finalJoinAlias ?? decision.relationName)
 		) {
-			this.joinAliasMap.set(decision.targetTable, decision.relationName);
+			this.joinAliasMap.set(
+				decision.targetTable,
+				finalJoinAlias ?? decision.relationName!,
+			);
 		}
 
 		const out: {
