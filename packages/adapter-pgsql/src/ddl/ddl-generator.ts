@@ -17,6 +17,7 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { identityNaming, type NamingPlugin } from '../naming-plugin.js';
+import { validateIdentifier, validateSqlExpression } from '../validate.js';
 import { buildSequenceClause } from './migration-sql.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
@@ -251,8 +252,18 @@ export function generateDDL(
 /**
  * Quote an identifier (table name, column name, etc.)
  */
+/**
+ * Quote an identifier (table name, column name, etc.) for use in DDL.
+ *
+ * @security Validates the identifier via validateIdentifier() before quoting.
+ * Escapes embedded double-quotes by doubling them as defense-in-depth.
+ * Only call this with identifiers that have been validated upstream (table names,
+ * column names, policy names). Do NOT call with raw user input without validation.
+ */
 function quoteIdentifier(name: string): string {
-	return `"${name}"`;
+	validateIdentifier(name, 'alias');
+	// Defense-in-depth: escape any embedded double-quotes by doubling them.
+	return `"${name.replace(/"/g, '""')}"`;
 }
 
 /**
@@ -302,9 +313,22 @@ function generateCreateTable(
 
 	// Add primary key constraint (omit if no PK defined)
 	if (table.primaryKey !== undefined) {
-		const pkColumns = Array.isArray(table.primaryKey)
-			? table.primaryKey
-			: [table.primaryKey];
+		// Normalize primaryKey: typed as string | readonly string[], but
+		// introspected models may pass { columns: string[] } — extract columns defensively.
+		const rawPk = table.primaryKey as unknown;
+		let pkColumns: readonly string[];
+		if (
+			rawPk !== null &&
+			typeof rawPk === 'object' &&
+			'columns' in rawPk &&
+			Array.isArray((rawPk as { columns: unknown }).columns)
+		) {
+			pkColumns = (rawPk as { columns: string[] }).columns;
+		} else if (Array.isArray(rawPk)) {
+			pkColumns = rawPk as readonly string[];
+		} else {
+			pkColumns = [rawPk as string];
+		}
 		const pkCols = pkColumns
 			.map((col) => quoteIdentifier(naming.toDatabase(col)))
 			.join(', ');
@@ -366,10 +390,18 @@ function generateColumnDef(col: ColumnIR, naming: NamingPlugin): string {
 /**
  * Format a default value for SQL.
  */
+/**
+ * Format a default value for SQL.
+ *
+ * @security The `{ sql: string }` escape hatch is validated via validateSqlExpression()
+ * before interpolation to prevent injection of multi-statement or comment-bearing strings.
+ */
 function formatDefaultValue(value: unknown): string {
 	// Handle SqlDefault object: { sql: 'now()' }
 	if (typeof value === 'object' && value !== null && 'sql' in value) {
-		return (value as Record<string, unknown>).sql as string;
+		const sql = (value as Record<string, unknown>).sql as string;
+		validateSqlExpression(sql, 'column default');
+		return sql;
 	}
 
 	// Handle function-like expressions (e.g., 'now()')
@@ -511,6 +543,12 @@ function generateCreatePolicy(
 		policy.roles && policy.roles.length > 0
 			? ` TO ${policy.roles.map(r => quoteIdentifier(r)).join(', ')}`
 			: '';
+	if (policy.using) {
+		validateSqlExpression(policy.using, 'policy USING expression');
+	}
+	if (policy.withCheck) {
+		validateSqlExpression(policy.withCheck, 'policy WITH CHECK expression');
+	}
 	const usingClause = policy.using ? ` USING (${policy.using})` : '';
 	const withCheckClause = policy.withCheck
 		? ` WITH CHECK (${policy.withCheck})`

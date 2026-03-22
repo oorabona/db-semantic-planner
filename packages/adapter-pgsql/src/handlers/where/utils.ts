@@ -4,6 +4,7 @@
  */
 
 import { isFieldRef } from '@dbsp/types';
+import { validateDbTypeName } from '../../validate.js';
 import type { Node } from '@pgsql/types';
 import { columnRef, nullConstNode } from '../../ast-helpers.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
@@ -99,6 +100,6 @@ export function resolveColumnPgType(
 	// Only cast when originalDbType is explicitly set (populated by introspection).
 	// Manually defined schemas omit this field — we do not guess the PG type from
 	// the abstract ColumnType to avoid breaking queries on non-introspected schemas.
-	if (column.originalDbType) return column.originalDbType;
+	if (column.originalDbType) return validateDbTypeName(column.originalDbType);
 	return undefined;
 }
