@@ -15,6 +15,16 @@ import { isParamRef } from '../types.js';
  * Build column reference from decision column, using current alias or root table.
  */
 export function buildColumnRef(column: string, ctx: CompilerContext): Node {
+	// Handle qualified names like 'alias.column' — split and use the explicit table qualifier.
+	// This is required when ref('alias.col') is used inside filter conditions (e.g. isNotNull).
+	// Without splitting, the full dotted string becomes a column name and the root table is
+	// prepended, producing "root"."alias.col" (3-part) instead of "alias"."col" (2-part).
+	if (column.includes('.')) {
+		const dotIndex = column.indexOf('.');
+		const table = column.substring(0, dotIndex);
+		const col = column.substring(dotIndex + 1);
+		return columnRef(col, table, undefined, ctx.naming);
+	}
 	const alias = ctx.currentAlias ?? ctx.rootTable;
 	// Schema is NOT used for column references — aliases and table names in WHERE
 	// are query-scoped, not schema-qualified. Schema is only for FROM/JOIN entries.
