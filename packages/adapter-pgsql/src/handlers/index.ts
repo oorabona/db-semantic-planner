@@ -332,11 +332,12 @@ function normalizeToDecision(input: Decision): Decision {
 					}),
 				} as Decision;
 			}
+			// Use 'value' (not 'values') to match what inHandler.compile() reads
 			return {
 				type: 'where',
 				column: raw.field as string,
 				operator: raw.not ? 'notIn' : 'in',
-				values: raw.values as readonly unknown[],
+				value: raw.values as readonly unknown[],
 			};
 		}
 		case 'like':
