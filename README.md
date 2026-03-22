@@ -433,9 +433,10 @@ See [NQL Reference](docs/guides/nql-reference.md) for complete syntax.
 | `schema()`, `ref()` | Define tables, columns, and relations |
 | `createOrm()` | Create an ORM instance with adapter |
 | `eq()`, `neq()`, `gt()`, `gte()`, `lt()`, `lte()` | Comparison filters |
+| `isDistinctFrom()` | Null-safe inequality (SQL:2003) |
 | `like()` | Pattern matching filter |
 | `isNull()`, `isNotNull()` | Null checks |
-| `inArray()` | Array membership |
+| `inArray()`, `inSubquery()` | Array membership / IN (subquery) |
 | `and()`, `or()`, `not()` | Logical operators |
 | `exists()`, `notExists()` | Subquery existence checks |
 | `some()`, `every()`, `none()` | Relation quantifier filters |
@@ -445,7 +446,8 @@ See [NQL Reference](docs/guides/nql-reference.md) for complete syntax.
 | `wSum()`, `wAvg()`, `wCount()`, `wMin()`, `wMax()` | Window aggregate functions |
 | `lag()`, `lead()` | Window offset functions |
 | `coalesce()`, `raw()`, `col()`, `distinct()` | Expression helpers |
-| `subquery()`, `outerRef()` | Correlated subquery builders |
+| `subquery()`, `outerRef()` | Correlated subquery builders (WHERE + SELECT via `.asExpr()`) |
+| `.union()`, `.intersect()`, `.except()` | Set operations (UNION, INTERSECT, EXCEPT) |
 | `Errors` | Error factory with type guards |
 
 See [ORM API Guide](docs/guides/orm-api.md) for complete API documentation.
@@ -456,6 +458,9 @@ See [ORM API Guide](docs/guides/orm-api.md) for complete API documentation.
 |--------|-------------|
 | `createPgsqlAdapter()` | Create adapter for pg Pool instance |
 | `createPgsqlCompileOnlyAdapter()` | Create compile-only adapter (no DB required) |
+| `cosineDistance()`, `l2Distance()`, `innerProduct()` | pgvector similarity operators |
+| `bm25Search()`, `score()`, `parse()`, `boost()` | ParadeDB full-text search |
+| `generateSeries()`, `nextval()` | PostgreSQL built-in helpers |
 
 ## Planner Decisions
 
@@ -522,12 +527,14 @@ pnpm lint
 
 ## Status
 
-**✅ v1.0 Ready** - 2,180+ tests passing across 6 packages
+**✅ v1.0 Ready** - 7,000+ tests passing across 7 packages
 
-- Core: Schema DSL, ModelIR, IntentAST, Semantic Planner, DX Layer (824 tests)
-- Adapter: PostgreSQL-native SQL Compiler, Multi-tenant, Observability (451 tests)
+- Core: Schema DSL, ModelIR, IntentAST, Semantic Planner, DX Layer (2,100+ tests)
+- Adapter: PostgreSQL-native SQL Compiler, Multi-tenant, DDL, Observability (2,800+ tests)
 - NQL: Natural Query Language parser (257 tests)
 - CLI: Generate, Verify, REPL (314 tests)
+- Types: Shared type contracts
+- GUI: Desktop explorer (Tauri v2 + React 19)
 - E2E: PostgreSQL integration via Testcontainers (333 tests)
 
 ## License
