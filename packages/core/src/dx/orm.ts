@@ -272,7 +272,7 @@ export function createOrm<T extends SchemaDefinition>(
 	const tablesProxy: object =
 		schemaObj && 'tables' in schemaObj
 			? (schemaObj.tables as object)
-			: createTablesProxy(model, [...model.tables.keys()]);
+			: createTablesProxy(model, model.tables ? [...model.tables.keys()] : []);
 
 	// Create ORM instance with ModelIR
 	// Cast to InferDB<T> since createOrmInstance uses internal types

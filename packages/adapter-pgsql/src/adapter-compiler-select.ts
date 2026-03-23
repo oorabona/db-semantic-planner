@@ -235,10 +235,10 @@ export function compileSelect<T = unknown>(
 								continue;
 							}
 							if (!existing.some((e) => e.col === col)) {
-								existing.push({ col, alias });
+								existing.push({ col, ...(alias !== undefined && { alias }) });
 							}
 						} else {
-							relationColumnsMap.set(mapKey, [{ col, alias }]);
+							relationColumnsMap.set(mapKey, [{ col, ...(alias !== undefined && { alias }) }]);
 						}
 					}
 				}
