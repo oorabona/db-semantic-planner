@@ -427,14 +427,7 @@ export class PlanCompiler {
 						? (rawSelect.fields?.[0] ?? '*')
 						: '*';
 			const subConditions = sub.where
-				? [
-						mapToHandlerDecision(
-							sub.where,
-							sub.from,
-							this.defaultPk,
-							this.deriveFk,
-						),
-					]
+				? [this.mapInSubqueryCondition(sub.where, sub.from)]
 				: [];
 			const rawLimit = sub.limit;
 			const rawOrderBy = sub.orderBy;
@@ -461,6 +454,59 @@ export class PlanCompiler {
 			? { ...this.handlerCtx(), ...ctxOverrides }
 			: this.handlerCtx();
 		return dispatcher(mapped, ctx, this.state);
+	}
+
+	/**
+	 * Recursively convert a PlanDecision (potentially with nested in+subquery)
+	 * into a HandlerDecision suitable for the WHERE dispatcher.
+	 *
+	 * When a PlanDecision has operator='in'/'notIn' with a subquery object,
+	 * mapToHandlerDecision loses the subquery because HandlerDecision has no
+	 * `subquery` field. This method detects that pattern and converts it to the
+	 * inSubquery/notInSubquery form that buildScalarSubquery expects.
+	 *
+	 * Called recursively so 2+ levels of nested IN subqueries all work.
+	 */
+	private mapInSubqueryCondition(
+		pd: PlanDecision,
+		rootTable: string,
+	): HandlerDecision {
+		const sub = pd.subquery as
+			| (PlanDecision['subquery'] & { where?: PlanDecision })
+			| undefined;
+		if (sub && (pd.operator === 'in' || pd.operator === 'notIn')) {
+			const op = pd.operator === 'notIn' ? 'notInSubquery' : 'inSubquery';
+			const rawSelect = sub.select as unknown;
+			const selectColumn =
+				typeof rawSelect === 'string'
+					? rawSelect
+					: isSelectWithFields(rawSelect)
+						? (rawSelect.fields?.[0] ?? '*')
+						: '*';
+			// Recursively apply: the inner subquery's WHERE may itself be
+			// another in+subquery (the NESTED-INSUBQUERY case)
+			const subConditions: HandlerDecision[] = sub.where
+				? [this.mapInSubqueryCondition(sub.where, sub.from)]
+				: [];
+			const rawLimit = sub.limit;
+			const rawOrderBy = sub.orderBy;
+			return {
+				...mapToHandlerDecision(pd, rootTable, this.defaultPk, this.deriveFk),
+				operator: op,
+				targetTable: sub.from,
+				selectColumn,
+				conditions: subConditions,
+				...(rawLimit != null && { limit: rawLimit }),
+				...(rawOrderBy && {
+					orderBy: rawOrderBy.map((o) => ({
+						column: o.field,
+						direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
+					})),
+				}),
+			} as HandlerDecision;
+		}
+		// Non-subquery case: plain mapToHandlerDecision suffices
+		return mapToHandlerDecision(pd, rootTable, this.defaultPk, this.deriveFk);
 	}
 
 	/**
