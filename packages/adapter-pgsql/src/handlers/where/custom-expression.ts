@@ -55,6 +55,14 @@ export const customExpressionWhereHandler: WhereHandler = {
 		// Left side: compile the custom expression
 		const leftNode = compileExpressionIntent(exprIntent, ctx, state);
 
+		// Standalone boolean expression: op('!=', exprRef('a'), exprRef('b')) passed
+		// directly to .where() — no right-side value or comparison operator.
+		// decision.operator === 'expression' is the WHERE handler discriminant (not a SQL op).
+		// A standalone expression has no subqueryOperator and no scalar value to bind.
+		if (decision.value === undefined && !decision.subqueryOperator) {
+			return leftNode;
+		}
+
 		// Right side: bind the comparison value as a parameter
 		const idx = ++state.paramIndex;
 		state.parameters.push(decision.value);

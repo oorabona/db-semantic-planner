@@ -46,7 +46,10 @@ function buildWindowDef(decision: Decision, ctx: CompilerContext): WindowDef {
 
 	const tableAlias = ctx.currentAlias ?? ctx.rootTable;
 
-	const windowDef: WindowDef = {};
+	// frameOptions: 1034 is the default implicit frame (NONDEFAULT bit not set →
+	// no frame clause emitted by deparser). Required for the OVER() clause to be
+	// emitted correctly even when there are no PARTITION BY or ORDER BY columns.
+	const windowDef: WindowDef = { frameOptions: 1034 };
 
 	// PARTITION BY
 	if (partition && partition.length > 0) {
@@ -62,12 +65,11 @@ function buildWindowDef(decision: Decision, ctx: CompilerContext): WindowDef {
 		);
 	}
 
-	// Frame clause (ROWS/RANGE BETWEEN ... AND ...)
-	// For simplicity, we use a predefined frame or default
+	// Frame clause (ROWS/RANGE BETWEEN ... AND ...): skipped for now,
+	// PostgreSQL uses defaults when frame is not explicitly set.
 	if (frame) {
-		// Parse frame string like "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW"
-		// This would need more complex parsing - for now, we skip it
-		// and let PostgreSQL use defaults
+		// Future: parse and emit frame clause
+		void frame;
 	}
 
 	return windowDef;
