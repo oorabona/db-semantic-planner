@@ -377,6 +377,19 @@ function normalizeToDecision(input: Decision): Decision {
 			// Pass through FK column hints resolved by resolveExistsIntent from ModelIR.
 			const sourceColumn = raw.sourceColumn as string | undefined;
 			const targetColumn = raw.targetColumn as string | undefined;
+			// Pass through include declarations (JOIN inside the subquery).
+			const includeIntent = raw.include as
+				| Record<string, { join?: 'inner' | 'left' }>
+				| undefined;
+			// Convert include map to a Decision[] for the handler.
+			// Each entry becomes a minimal join decision: { type: 'existsInclude', relation, joinType }.
+			const includeDecisions: Decision[] | undefined = includeIntent
+				? Object.entries(includeIntent).map(([rel, opts]) => ({
+						type: 'existsInclude',
+						relation: rel,
+						joinType: opts.join ?? 'inner',
+					}))
+				: undefined;
 			return {
 				type: 'exists',
 				operator: kind, // 'exists' | 'notExists'
@@ -385,6 +398,7 @@ function normalizeToDecision(input: Decision): Decision {
 				...(sourceColumn !== undefined && { sourceColumn }),
 				...(targetColumn !== undefined && { targetColumn }),
 				...(conditions && { conditions }),
+				...(includeDecisions && { include: includeDecisions }),
 			};
 		}
 		default:

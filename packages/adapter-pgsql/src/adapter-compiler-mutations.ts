@@ -409,11 +409,13 @@ export function compileDelete(
 ): CompiledQuery {
 	const schemaName = deps.schemaName ?? options?.schemaName;
 
+	const resolvedModel = options?.model ?? deps.model;
 	const ctx: CompilerContext = {
 		naming: deps.naming,
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
 		maxRecursiveDepth: 100,
+		...(resolvedModel !== undefined && { model: resolvedModel }),
 	};
 	const state = createCompilerState();
 

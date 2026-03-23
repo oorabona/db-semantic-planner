@@ -450,6 +450,19 @@ export function extractExistsDecisions(
 			else if (mode === 'every') operator = 'every';
 		}
 
+		// Extract include declarations from the matching intent (JOIN inside subquery).
+		// Convert the intent's include map to a Decision[] for the EXISTS handler.
+		const includeIntent = (
+			matchingIntent as Record<string, unknown> | undefined
+		)?.include as Record<string, { join?: 'inner' | 'left' }> | undefined;
+		const includeDecisions: PlanDecision[] | undefined = includeIntent
+			? Object.entries(includeIntent).map(([rel, opts]) => ({
+					type: 'existsInclude',
+					relation: rel,
+					joinType: opts.join ?? 'inner',
+				}))
+			: undefined;
+
 		const decision: PlanDecision = {
 			type: 'where',
 			operator,
@@ -460,6 +473,8 @@ export function extractExistsDecisions(
 			...(d.choice === 'join' && { choice: 'join' }),
 			// Pass relation name for alias (self-referential tables)
 			...(context.relation && { relationName: context.relation }),
+			// Pass include declarations (JOIN inside the EXISTS subquery)
+			...(includeDecisions && { include: includeDecisions }),
 		};
 		results.push(decision);
 	}

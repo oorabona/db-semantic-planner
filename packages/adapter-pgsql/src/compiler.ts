@@ -118,6 +118,9 @@ function mapToHandlerDecision(
 		conditions: pd.conditions?.map((c) =>
 			mapToHandlerDecision(c, rootTable, defaultPk, deriveFk),
 		),
+		include: pd.include?.map((c) =>
+			mapToHandlerDecision(c, rootTable, defaultPk, deriveFk),
+		),
 		orderBy: pd.orderBy?.map((o) => ({
 			column: o.field,
 			direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
@@ -236,6 +239,8 @@ export interface PlanDecision {
 	readonly expressionIntent?: unknown;
 	// LIKE escape character
 	readonly escape?: string;
+	// Include declarations (JOIN inside EXISTS subquery)
+	readonly include?: readonly PlanDecision[];
 }
 
 /**

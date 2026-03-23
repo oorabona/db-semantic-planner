@@ -487,7 +487,11 @@ export function not(condition: WhereIntent): WhereNotIntent {
  */
 export function exists(
 	relation: string,
-	options?: { where?: WhereIntent; recursive?: RecursiveExistsOptions },
+	options?: {
+		where?: WhereIntent;
+		recursive?: RecursiveExistsOptions;
+		include?: Record<string, { join?: 'inner' | 'left' }>;
+	},
 ): WhereExistsIntent {
 	const result: Mutable<WhereExistsIntent> = { kind: 'exists', relation };
 	if (options?.where !== undefined) {
@@ -495,6 +499,9 @@ export function exists(
 	}
 	if (options?.recursive !== undefined) {
 		result.recursive = options.recursive;
+	}
+	if (options?.include !== undefined) {
+		result.include = options.include;
 	}
 	return result;
 }
@@ -510,7 +517,11 @@ export function exists(
  */
 export function notExists(
 	relation: string,
-	options?: { where?: WhereIntent; recursive?: RecursiveExistsOptions },
+	options?: {
+		where?: WhereIntent;
+		recursive?: RecursiveExistsOptions;
+		include?: Record<string, { join?: 'inner' | 'left' }>;
+	},
 ): WhereNotExistsIntent {
 	const result: Mutable<WhereNotExistsIntent> = {
 		kind: 'notExists',
@@ -521,6 +532,9 @@ export function notExists(
 	}
 	if (options?.recursive !== undefined) {
 		result.recursive = options.recursive;
+	}
+	if (options?.include !== undefined) {
+		result.include = options.include;
 	}
 	return result;
 }
