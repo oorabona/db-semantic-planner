@@ -11,22 +11,22 @@
 
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../../../../adapter-pgsql/src/pgsql-adapter.js';
+import { normalizeSQL } from '../../sql-utils.js';
 import { eq } from '../filters.js';
 import { createOrm } from '../orm.js';
 import { ref, schema } from '../schema.js';
-import { normalizeSQL } from '../../sql-utils.js';
 
 const db = schema({
 	users: {
-		id: { type: "integer", primaryKey: true },
-		name: "string",
-		email: "string",
-		active: "boolean",
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		email: 'string',
+		active: 'boolean',
 	},
 	posts: {
-		id: { type: "integer", primaryKey: true },
-		title: "string",
-		authorId: ref("users"),
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		authorId: ref('users'),
 	},
 });
 
@@ -115,7 +115,7 @@ describe('DX-040-SURFACE: orm.from() with include()', () => {
 		const dump = orm.from(posts).include('author').dump();
 		// author is a belongsTo (authorId -> users.id): scalar subquery via json_agg
 		expect(normalizeSQL(dump.sql)).toBe(
-			"select posts.*, coalesce((select json_agg(to_jsonb(__t__)) from users as __t__ where __t__.id = posts.\"authorid\"), '[]'::json) as author_json from posts",
+			'select posts.*, coalesce((select json_agg(to_jsonb(__t__)) from users as __t__ where __t__.id = posts."authorid"), \'[]\'::json) as author_json from posts',
 		);
 		expect(dump.params).toEqual([]);
 	});
@@ -162,10 +162,7 @@ describe('DX-040-SURFACE: typed mutations via TableRef', () => {
 
 	it('SC-09: orm.removeFrom() produces exact DELETE SQL', () => {
 		const { users } = orm.tables;
-		const dump = orm
-			.removeFrom(users)
-			.where(eq(users.id, 1))
-			.dump();
+		const dump = orm.removeFrom(users).where(eq(users.id, 1)).dump();
 		expect(normalizeSQL(dump.sql)).toBe(
 			'delete from users where users.id = $1',
 		);
@@ -263,10 +260,14 @@ describe('DX-040-SURFACE: Type-level safety', () => {
 	it('into().values() rejects wrong column type', () => {
 		const { users } = orm.tables;
 		// Valid
-		orm.into(users).values({ name: 'Alice', email: 'test@test.com', active: true });
+		orm
+			.into(users)
+			.values({ name: 'Alice', email: 'test@test.com', active: true });
 
 		// @ts-expect-error — active must be boolean, not string
-		orm.into(users).values({ name: 'Alice', email: 'test@test.com', active: 'not boolean' });
+		orm
+			.into(users)
+			.values({ name: 'Alice', email: 'test@test.com', active: 'not boolean' });
 	});
 
 	it('OrmInstance does not expose string-based select()', () => {
@@ -308,7 +309,10 @@ describe('DX-040-SURFACE: Type-level safety', () => {
 		const { users } = orm.tables;
 		const query = orm.from(users).columns(['id', 'name']);
 		expectTypeOf(query.all).returns.resolves.toEqualTypeOf<
-			Pick<{ id: number; name: string; email: string; active: boolean }, 'id' | 'name'>[]
+			Pick<
+				{ id: number; name: string; email: string; active: boolean },
+				'id' | 'name'
+			>[]
 		>();
 	});
 });

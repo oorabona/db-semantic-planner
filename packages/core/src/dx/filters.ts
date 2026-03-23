@@ -28,9 +28,9 @@ import type {
 	ComparisonOperator,
 	RecursiveExistsOptions,
 	WhereAndIntent,
+	WhereAnyIntent,
 	WhereComparisonIntent,
 	WhereExistsIntent,
-	WhereAnyIntent,
 	WhereInIntent,
 	WhereIntent,
 	WhereLikeIntent,
@@ -42,13 +42,16 @@ import type {
 	WhereRelationFilterIntent,
 } from '../intent-ast.js';
 import { getColumnName } from './column-utils.js';
-import { type SubqueryBuilder, type SubqueryExpression } from './subquery-builder.js';
+import type {
+	SubqueryBuilder,
+	SubqueryExpression,
+} from './subquery-builder.js';
 import {
 	type ColumnRef,
 	RELATION_META,
 	type RelationRef,
 } from './table-ref.js';
-import type { ExpressionSpec } from './types.js';
+import type { AliasedExprColumn, ExpressionSpec } from './types.js';
 
 // ============================================================================
 // Type-Safe Column Reference Support (DX-040)
@@ -183,7 +186,6 @@ export const lt: ComparisonFilter = createComparisonFilter('lt');
  */
 export const lte: ComparisonFilter = createComparisonFilter('lte');
 
-
 /**
  * Null-safe inequality: field IS DISTINCT FROM value
  *
@@ -193,8 +195,8 @@ export const lte: ComparisonFilter = createComparisonFilter('lte');
  * @example isDistinctFrom('status', 'active') → status IS DISTINCT FROM 'active'
  * @example isDistinctFrom(users.status, null) → status IS DISTINCT FROM NULL
  */
-export const isDistinctFrom: ComparisonFilter = createComparisonFilter('isDistinctFrom');
-
+export const isDistinctFrom: ComparisonFilter =
+	createComparisonFilter('isDistinctFrom');
 
 // ============================================================================
 // String Operators
@@ -236,9 +238,7 @@ export function like(
 		pattern,
 	};
 	const withCi =
-		caseInsensitive !== undefined
-			? { ...intent, caseInsensitive }
-			: intent;
+		caseInsensitive !== undefined ? { ...intent, caseInsensitive } : intent;
 	if (escape !== undefined) {
 		return { ...withCi, escape };
 	}
@@ -287,10 +287,17 @@ export function inSubquery(
 	field: ColumnRef<string, string, unknown> | string,
 	query: SubqueryBuilder | SubqueryExpression,
 ): WhereInIntent {
-	const expr = 'build' in query ? (query as SubqueryBuilder).build() : (query as SubqueryExpression);
-	return { kind: 'in', field: getColumnName(field), values: [], subquery: expr.toIntent() };
+	const expr =
+		'build' in query
+			? (query as SubqueryBuilder).build()
+			: (query as SubqueryExpression);
+	return {
+		kind: 'in',
+		field: getColumnName(field),
+		values: [],
+		subquery: expr.toIntent(),
+	};
 }
-
 
 /**
  * Array membership filter using PostgreSQL ANY() operator.
@@ -793,24 +800,24 @@ export function col(column: string, alias: string): ExpressionSpec {
  * ])
  * ```
  */
-export function relationColumn(
+export function relationColumn<A extends string>(
 	relation: string,
 	column: string,
-	as: string,
-): ExpressionSpec {
+	as: A,
+): AliasedExprColumn<A> {
 	if (!relation || relation.trim() === '') {
 		throw new Error('relationColumn() requires a non-empty relation path');
 	}
 	if (!column || column.trim() === '') {
 		throw new Error('relationColumn() requires a non-empty column name');
 	}
-	if (!as || as.trim() === '') {
+	if (!as || (as as string).trim() === '') {
 		throw new Error('relationColumn() requires a non-empty alias');
 	}
 	return {
 		__expr: true,
 		intent: { kind: 'relationColumn', relation, column, as },
-	};
+	} as unknown as AliasedExprColumn<A>;
 }
 
 // ============================================================================

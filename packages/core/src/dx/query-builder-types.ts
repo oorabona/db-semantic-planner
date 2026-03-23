@@ -10,7 +10,6 @@
  */
 
 import type { Dump } from '../adapter.js';
-import type { SetOperationBuilder } from './set-operation-builder.js';
 import type {
 	LockStrength,
 	LockWaitPolicy,
@@ -19,7 +18,6 @@ import type {
 import type { PlanOptions, PlanReport } from '../planner.js';
 import type { ExpressionRef } from './expressions.js';
 import type { DistinctField } from './filters.js';
-import type { ExpressionSpec } from './types.js';
 import type { WhereFilter } from './object-filter.js';
 import type {
 	CursorPaginatedResult,
@@ -28,9 +26,12 @@ import type {
 	PaginateOptions,
 	StreamOptions,
 } from './pagination-types.js';
+import type { SetOperationBuilder } from './set-operation-builder.js';
 import type {
 	AggregateOptions,
+	AliasedExprColumn,
 	ColumnSpec,
+	ExpressionSpec,
 	IncludeOptionsWithRecursive,
 	OrderByRecord,
 	OrderBySpec,
@@ -131,6 +132,21 @@ export interface QueryBuilder<TResult = unknown> {
 	columns<K extends keyof TResult & string>(
 		columns: readonly K[],
 	): QueryBuilder<Pick<TResult, K>>;
+	columns<
+		const T extends readonly (
+			| (keyof TResult & string)
+			| AliasedExprColumn<string>
+		)[],
+	>(
+		columns: T,
+	): QueryBuilder<
+		Pick<TResult, Extract<T[number], keyof TResult & string>> & {
+			[E in Extract<
+				T[number],
+				AliasedExprColumn<string>
+			> as E['__alias']]: E['__value'];
+		}
+	>;
 	columns(columns: readonly ColumnSpec[]): QueryBuilder<TResult>;
 
 	/**
@@ -425,8 +441,14 @@ export interface QueryBuilder<TResult = unknown> {
 	): QueryBuilder<TResult>;
 	orderBy(fields: OrderByRecord): QueryBuilder<TResult>;
 	orderBy(specs: readonly OrderBySpec[]): QueryBuilder<TResult>;
-	orderBy(expr: ExpressionRef, direction?: SortDirection): QueryBuilder<TResult>;
-	orderBy(expr: ExpressionSpec, direction?: SortDirection): QueryBuilder<TResult>;
+	orderBy(
+		expr: ExpressionRef,
+		direction?: SortDirection,
+	): QueryBuilder<TResult>;
+	orderBy(
+		expr: ExpressionSpec,
+		direction?: SortDirection,
+	): QueryBuilder<TResult>;
 
 	/**
 	 * Limit the number of results returned.

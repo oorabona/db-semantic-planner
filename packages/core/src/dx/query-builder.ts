@@ -1,6 +1,5 @@
 /* biome-ignore-all lint/style/noNonNullAssertion: Builder internals use non-null assertions on validated state */
 import type { Mutable } from '@dbsp/types/internal';
-import { ExpressionRef } from './expressions.js';
 import type { Adapter, Dump } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type {
@@ -17,13 +16,13 @@ import type {
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions, PlanReport } from '../planner.js';
 import { AmbiguousPlanError, plan } from '../planner.js';
-
 import {
 	AmbiguousRelationError,
 	ExecutionError,
 	InvalidOperationError,
 	NotFoundError,
 } from './errors.js';
+import { ExpressionRef } from './expressions.js';
 import {
 	and,
 	type DistinctField,
@@ -58,12 +57,13 @@ import { ResultHydrator } from './result-hydrator.js';
 import type { DefaultFilters } from './schema.js';
 import {
 	buildSetOperationIntent,
-	SetOperationBuilderImpl,
 	type QueryIntentSource,
 	type SetOperationBuilder,
+	SetOperationBuilderImpl,
 } from './set-operation-builder.js';
 import {
 	type AggregateOptions,
+	type AliasedExprColumn,
 	type ColumnSpec,
 	type CursorPaginatedResult,
 	type CursorPaginateOptions,
@@ -168,6 +168,22 @@ export class QueryBuilderImpl<TResult = unknown>
 	columns<K extends keyof TResult & string>(
 		columns: readonly K[],
 	): QueryBuilder<Pick<TResult, K>>;
+	// Overload: mixed strings + AliasedExprColumn → extends result type with aliased props
+	columns<
+		const T extends readonly (
+			| (keyof TResult & string)
+			| AliasedExprColumn<string>
+		)[],
+	>(
+		columns: T,
+	): QueryBuilder<
+		Pick<TResult, Extract<T[number], keyof TResult & string>> & {
+			[E in Extract<
+				T[number],
+				AliasedExprColumn<string>
+			> as E['__alias']]: E['__value'];
+		}
+	>;
 	// Overload: mixed columns (strings + expressions) → TResult
 	columns(columns: readonly ColumnSpec[]): QueryBuilder<TResult>;
 	// Implementation
@@ -472,7 +488,8 @@ export class QueryBuilderImpl<TResult = unknown>
 		// ExpressionSpec form: orderBy(relationColumn(...)) or other plain ExpressionSpec objects
 		if (isExpressionSpec(fieldOrRecordOrSpecs as ColumnSpec)) {
 			builder.orderByIntents.push({
-				expression: (fieldOrRecordOrSpecs as { intent: ExpressionIntent }).intent,
+				expression: (fieldOrRecordOrSpecs as { intent: ExpressionIntent })
+					.intent,
 				direction: direction ?? 'asc',
 			});
 			return builder;
@@ -1873,7 +1890,12 @@ export class QueryBuilderImpl<TResult = unknown>
 
 	union(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
 		return new SetOperationBuilderImpl(
-			buildSetOperationIntent('union', false, this, other as unknown as QueryIntentSource),
+			buildSetOperationIntent(
+				'union',
+				false,
+				this,
+				other as unknown as QueryIntentSource,
+			),
 			this.model,
 			this.adapter,
 			this.schemaName,
@@ -1882,7 +1904,12 @@ export class QueryBuilderImpl<TResult = unknown>
 
 	unionAll(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
 		return new SetOperationBuilderImpl(
-			buildSetOperationIntent('union', true, this, other as unknown as QueryIntentSource),
+			buildSetOperationIntent(
+				'union',
+				true,
+				this,
+				other as unknown as QueryIntentSource,
+			),
 			this.model,
 			this.adapter,
 			this.schemaName,
@@ -1891,7 +1918,12 @@ export class QueryBuilderImpl<TResult = unknown>
 
 	intersect(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
 		return new SetOperationBuilderImpl(
-			buildSetOperationIntent('intersect', false, this, other as unknown as QueryIntentSource),
+			buildSetOperationIntent(
+				'intersect',
+				false,
+				this,
+				other as unknown as QueryIntentSource,
+			),
 			this.model,
 			this.adapter,
 			this.schemaName,
@@ -1900,7 +1932,12 @@ export class QueryBuilderImpl<TResult = unknown>
 
 	intersectAll(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
 		return new SetOperationBuilderImpl(
-			buildSetOperationIntent('intersect', true, this, other as unknown as QueryIntentSource),
+			buildSetOperationIntent(
+				'intersect',
+				true,
+				this,
+				other as unknown as QueryIntentSource,
+			),
 			this.model,
 			this.adapter,
 			this.schemaName,
@@ -1909,7 +1946,12 @@ export class QueryBuilderImpl<TResult = unknown>
 
 	except(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
 		return new SetOperationBuilderImpl(
-			buildSetOperationIntent('except', false, this, other as unknown as QueryIntentSource),
+			buildSetOperationIntent(
+				'except',
+				false,
+				this,
+				other as unknown as QueryIntentSource,
+			),
 			this.model,
 			this.adapter,
 			this.schemaName,
@@ -1918,7 +1960,12 @@ export class QueryBuilderImpl<TResult = unknown>
 
 	exceptAll(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
 		return new SetOperationBuilderImpl(
-			buildSetOperationIntent('except', true, this, other as unknown as QueryIntentSource),
+			buildSetOperationIntent(
+				'except',
+				true,
+				this,
+				other as unknown as QueryIntentSource,
+			),
 			this.model,
 			this.adapter,
 			this.schemaName,
