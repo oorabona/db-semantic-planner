@@ -290,5 +290,5 @@ export function createOrm<T extends SchemaDefinition>(
 		onHookError,
 		undefined, // inTransaction
 		tablesProxy,
-	) as OrmInstance<InferDB<T>>;
+	) as unknown as OrmInstance<InferDB<T>>;
 }

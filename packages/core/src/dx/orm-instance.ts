@@ -73,7 +73,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 	return {
 		strictMode,
 		nql,
-		tables: (tablesProxy ?? {}) as Record<string, TableRef<any, any, any>>,
+		tables: (tablesProxy ?? {}) as OrmInstance<DB>['tables'],
 		from<TTable extends TableRef<any, any, any>>(
 			table: TTable,
 		): QueryBuilder<InferTableRow<TTable>> {

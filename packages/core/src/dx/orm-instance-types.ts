@@ -221,7 +221,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * @since DX-040-SURFACE
 	 */
-	readonly tables: Record<string, TableRef<any, any, any>>;
+	readonly tables: { [K in keyof DB & string]: TableRef<K, any, any> };
 
 	/**
 	 * Start a type-safe SELECT query from a TableRef.
