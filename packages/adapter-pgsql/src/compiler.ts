@@ -1291,14 +1291,21 @@ export class PlanCompiler {
 
 				case 'groupBy':
 					if (decision.column) {
-						groupBy.push(
-							columnRef(
-								decision.column,
-								decision.table,
-								undefined,
-								this.naming,
-							),
-						);
+						// Support 'relation.column' dotted notation — same as ORDER BY column path.
+						// Without this split, 'file.path' would produce "symbols"."file.path" (wrong).
+						const gbCol = decision.column as string;
+						const gbDot = gbCol.indexOf('.');
+						if (gbDot !== -1) {
+							const gbTable = gbCol.slice(0, gbDot);
+							const gbColumn = gbCol.slice(gbDot + 1);
+							groupBy.push(
+								columnRef(gbColumn, gbTable, undefined, this.naming),
+							);
+						} else {
+							groupBy.push(
+								columnRef(gbCol, decision.table, undefined, this.naming),
+							);
+						}
 					}
 					break;
 
