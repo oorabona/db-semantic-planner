@@ -311,78 +311,28 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		// =====================================================================
 
 		insert(table: string): InsertBuilder {
-			return new InsertBuilder({
-				table,
-				model,
-				adapter,
-				schemaName,
-				hookStore,
-				onHookError,
-				inTransaction,
-			});
+			return new InsertBuilder({ table, ...mutationOpts });
 		},
 
 		update(table: string): UpdateBuilder {
-			return new UpdateBuilder({
-				table,
-				model,
-				adapter,
-				schemaName,
-				hookStore,
-				onHookError,
-				inTransaction,
-			});
+			return new UpdateBuilder({ table, ...mutationOpts });
 		},
 
 		delete(table: string): DeleteBuilder {
-			return new DeleteBuilder({
-				table,
-				model,
-				adapter,
-				schemaName,
-				hookStore,
-				onHookError,
-				inTransaction,
-			});
+			return new DeleteBuilder({ table, ...mutationOpts });
 		},
 
 		updateAll(table: string): UpdateBuilder {
-			return new UpdateBuilder({
-				table,
-				model,
-				adapter,
-				schemaName,
-				allowAll: true,
-				hookStore,
-				onHookError,
-				inTransaction,
-			});
+			return new UpdateBuilder({ table, allowAll: true, ...mutationOpts });
 		},
 
 		deleteAll(table: string): DeleteBuilder {
-			return new DeleteBuilder({
-				table,
-				model,
-				adapter,
-				schemaName,
-				allowAll: true,
-				hookStore,
-				onHookError,
-				inTransaction,
-			});
+			return new DeleteBuilder({ table, allowAll: true, ...mutationOpts });
 		},
 
 		// DX-026: Upsert support
 		upsert(table: string): UpsertBuilder {
-			return new UpsertBuilder({
-				table,
-				model,
-				adapter,
-				schemaName,
-				hookStore,
-				onHookError,
-				inTransaction,
-			});
+			return new UpsertBuilder({ table, ...mutationOpts });
 		},
 
 		// =====================================================================
