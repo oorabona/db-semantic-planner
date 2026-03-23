@@ -296,9 +296,9 @@ const SAFE_TYPE_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_ ]*(\(\d+(,\s*\d+)?\))?(\[\])?$/
  * @throws Error if the expression contains forbidden characters.
  */
 export function validateSqlExpression(sql: string, context: string): void {
-	if (/[;]|--|\/\*/.test(sql)) {
+	if (/[;]|--|\/\*|\$\$|\\/.test(sql)) {
 		throw new Error(
-			`Unsafe SQL expression in ${context}: contains forbidden characters (;, --, /*). Value: "${sql}"`,
+			`Unsafe SQL expression in ${context}: contains forbidden characters (;, --, /*, $, \\). Value: "${sql}"`,
 		);
 	}
 }

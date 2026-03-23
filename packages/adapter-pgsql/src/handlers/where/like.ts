@@ -15,6 +15,11 @@ import type {
 import { PATTERN_OPERATORS } from '../types.js';
 import { buildColumnRef, buildParamRef } from './utils.js';
 
+/** A_Expr with optional ESCAPE clause for LIKE operator */
+interface A_ExprWithEscape {
+	A_Expr: Record<string, unknown> & { escape?: Node };
+}
+
 /**
  * Pattern operators handler (LIKE, ILIKE)
  */
@@ -48,13 +53,9 @@ export const likeHandler: WhereHandler = {
 		if (decision.escape !== undefined) {
 			// Attach escape param as a runtime property on the A_Expr node
 			// so that deparseAExpr can render ESCAPE $N
+			// NOTE: escape property read by deparseAExpr() in pgsql-deparser.ts (AEXPR_LIKE case)
 			const escapeRef = buildParamRef(decision.escape, state);
-			(
-				(exprNode as unknown as Record<string, unknown>).A_Expr as Record<
-					string,
-					unknown
-				>
-			).escape = escapeRef;
+			(exprNode as A_ExprWithEscape).A_Expr.escape = escapeRef;
 		}
 
 		return exprNode;

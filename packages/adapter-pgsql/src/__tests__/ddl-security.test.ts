@@ -46,16 +46,35 @@ describe('validateSqlExpression', () => {
 		expect(() => validateSqlExpression('now()', 'test')).not.toThrow();
 	});
 
-	it("allows safe expression: 'default_value'::text", () => {
-		expect(() => validateSqlExpression("'default_value'::text", 'test')).not.toThrow();
-	});
-
 	it('allows safe expression: gen_random_uuid()', () => {
 		expect(() => validateSqlExpression('gen_random_uuid()', 'test')).not.toThrow();
 	});
 
-	it('allows safe expression with single quotes only', () => {
-		expect(() => validateSqlExpression("'hello world'", 'test')).not.toThrow();
+	it('allows safe expression: CURRENT_TIMESTAMP', () => {
+		expect(() => validateSqlExpression('CURRENT_TIMESTAMP', 'test')).not.toThrow();
+	});
+
+	it('allows safe expression: true', () => {
+		expect(() => validateSqlExpression('true', 'test')).not.toThrow();
+	});
+
+	it('allows safe expression: false', () => {
+		expect(() => validateSqlExpression('false', 'test')).not.toThrow();
+	});
+
+	it('allows single-quoted string in expression (valid for defaults/policies)', () => {
+		expect(() =>
+			validateSqlExpression("current_setting('app.tenant_id')::integer", 'test'),
+		).not.toThrow();
+	});
+
+	it('rejects expressions containing dollar-quoting', () => {
+		const dollarQuoted = '\x24\x24injected\x24\x24';
+		expect(() => validateSqlExpression(dollarQuoted, 'test')).toThrow(/forbidden characters/);
+	});
+
+	it('rejects expressions containing a backslash (escape sequence)', () => {
+		expect(() => validateSqlExpression('value\\n', 'test')).toThrow(/forbidden characters/);
 	});
 });
 

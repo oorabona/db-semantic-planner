@@ -17,6 +17,14 @@ import type {
 } from '../types.js';
 
 /**
+ * Default window frame options for bare OVER() clause.
+ * Value: FRAMEOPTION_NONDEFAULT | FRAMEOPTION_RANGE | FRAMEOPTION_BETWEEN |
+ *        FRAMEOPTION_START_UNBOUNDED_PRECEDING | FRAMEOPTION_END_CURRENT_ROW
+ * See: src/include/nodes/parsenodes.h in PostgreSQL source
+ */
+const WINDOW_FRAME_DEFAULT = 1034;
+
+/**
  * Build a SortBy node for ORDER BY clause
  */
 function buildSortBy(
@@ -46,10 +54,10 @@ function buildWindowDef(decision: Decision, ctx: CompilerContext): WindowDef {
 
 	const tableAlias = ctx.currentAlias ?? ctx.rootTable;
 
-	// frameOptions: 1034 is the default implicit frame (NONDEFAULT bit not set →
-	// no frame clause emitted by deparser). Required for the OVER() clause to be
-	// emitted correctly even when there are no PARTITION BY or ORDER BY columns.
-	const windowDef: WindowDef = { frameOptions: 1034 };
+	// frameOptions: WINDOW_FRAME_DEFAULT is the default implicit frame (NONDEFAULT
+	// bit not set → no frame clause emitted by deparser). Required for the OVER()
+	// clause to be emitted correctly even when there are no PARTITION BY or ORDER BY.
+	const windowDef: WindowDef = { frameOptions: WINDOW_FRAME_DEFAULT };
 
 	// PARTITION BY
 	if (partition && partition.length > 0) {
