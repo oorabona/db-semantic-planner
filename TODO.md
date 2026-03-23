@@ -4,6 +4,8 @@
 
 ## In Progress
 
+- [x] ✅ **NESTED-INSUBQUERY** [Adapter] Fix 2-level nested inSubquery compilation — `mapInSubqueryCondition` in compiler.ts recursively converts `in+subquery` PlanDecisions before `mapToHandlerDecision` strips the subquery field; 3 regression tests (2026-03-23)
+
 - [x] ✅ **CORE-SET-OPS** [Core] Add `.union()`, `.unionAll()`, `.intersect()`, `.except()` to QueryBuilder — 19 tests, typecheck clean (2026-03-21)
 - [x] ✅ **ADAPTER-PARAM-CAST** [Adapter] Explicit parameter type casting in WHERE/IN comparisons — emits CAST($N AS type) when originalDbType is set in ModelIR, 14 tests, no existing test regressions (2026-03-21)
 - [x] ✅ **SEC-DDL** [Adapter] Fix 5 DDL security findings: validateSqlExpression + validateDbTypeName in validate.ts; quoteIdentifier, formatDefaultValue, generateCreatePolicy hardened in ddl-generator.ts; mapColumnType and resolveColumnPgType validated; 26 security tests — 2811 tests pass, 0 new TS errors (2026-03-22)
@@ -30,7 +32,7 @@
 - [x] ✅ **DOUBLE-ALIAS** [Core] Join aliases derived from leaf relation name only → collision. Fix: `usedJoinAliases` Set in PlanCompiler, suffix dedup `_1`. 3 regression tests in `double-alias.test.ts`. (2026-03-22)
 - [x] ✅ **RAW-IN-COLUMNS** [Core] rawHandler read `value` (undefined) instead of `args[0]` + WASM TypeCast hack. Fix: read `args[0]`, RawSQL deparser node (no WASM). 5 regression tests in `raw-in-columns.test.ts`. (2026-03-22)
 - [x] ✅ **INCLUDE-2HOP-FILE** [Core] `.include('symbol.file', {join})` 2-hop join — outer `symbol` wrapper got no explicit join → json_agg strategy → inner `file` join ON clause referenced `symbols` not in outer FROM. Fix: `parseDotNotationInclude` propagates `join` option to ALL intermediate wrappers. 4 regression tests in `include-2hop-file.test.ts`. (2026-03-22)
-- [ ] 🐛 **NESTED-INSUBQUERY** [Core] `inSubquery` nested 2 levels deep not supported — `mapToHandlerDecision` doesn't recurse into `{ kind: 'in', subquery: ... }` inside another subquery's WHERE. Reproducer: `SELECT DISTINCT model FROM embeddings WHERE symbol_id IN (SELECT id FROM symbols WHERE file_id IN (SELECT id FROM files WHERE project_id = ANY($1)))`. Blocks `getDistinctEmbeddingModels` in astix. Found during re-migration (2026-03-23). — Priority: P2
+- [x] ✅ **NESTED-INSUBQUERY** [Adapter] `mapToHandlerDecision()` dropped `subquery` field → nested inSubquery compiled with wrong handler. Fix: `mapInSubqueryCondition()` recursive method preserves subquery chain. 3 regression tests in `nested-insubquery.test.ts`. (2026-03-23)
 - [x] ✅ **DISTINCT-VECTOR** [Adapter] `.distinct()` with `.include()` — join include pushed all joined columns (incl. `vector(1024)`) into SELECT DISTINCT. Fix: `compileSelect` detects `intent.distinct===true` and clears `columns` from join includeStrategy decisions (keeps JOIN for filtering). 4 regression tests in `distinct-include.test.ts`. (2026-03-22)
 - [x] ✅ **GTE-IN-DELETE** [Core] `normalizeToDecision` for `kind:'in'` returned `values:` but `inHandler` reads `value:` → key mismatch silently discarded inArray values. Fix: `values:` → `value:`. 4 regression tests in `gte-in-delete.test.ts`. (2026-03-22)
 - [x] ✅ **INCLUDE-NULLABLE-FK** [Adapter] Param type casting via `resolveColumnPgType()` + `originalDbType` → `CAST($N AS type)`. Fix covers all WHERE comparisons. 14 regression tests in `param-type-cast.test.ts`. (2026-03-22)
