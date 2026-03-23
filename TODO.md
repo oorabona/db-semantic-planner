@@ -4,6 +4,13 @@
 
 ## In Progress
 
+- [x] ✅ **DX-040-SURFACE** [Core] Add `orm.tables` + `orm.from(tableRef)` to OrmInstance — exposes pre-built tables proxy, from() extracts table name via TABLE_META and delegates to QueryBuilder; `select()` deprecated in type; `InferTables` exported from index; 10 tests, 2160 tests pass, TSC clean (2026-03-23)
+
+- [x] ✅ **LIKE-ESCAPE** [Core/Adapter] Add `escape` option to `like()` — `like('col', 'pat', { escape: '\\' })` → `WHERE col LIKE $1 ESCAPE $2`; modified WhereLikeIntent, filters.ts, intent-to-decisions, likeHandler, deparseAExpr, mapToHandlerDecision; 10 tests (2026-03-23)
+- [x] ✅ **NULLS-LAST** [Core] Add `orderBy('col', 'desc', { nulls: 'last' })` overload — threads through query-builder.ts (already supported in array/intent layer); 4 tests (2026-03-23)
+
+- [x] ✅ **REF-VS-REF** [Adapter/Core] Fix `op('!=', exprRef('a'), exprRef('b'))` producing `__expr != __expr` — added `instanceof ExpressionRef` detection in `query-builder.ts` `where()` + standalone boolean expression support in `custom-expression.ts`; 4 regression tests (2026-03-23)
+- [x] ✅ **WINDOW-FN-BARE** [Adapter] Fix `wCount().as('total')` (no partitionBy/orderBy) not emitting `OVER()` clause — set `frameOptions: 1034` in `buildWindowDef()` for empty window; 3 regression tests (2026-03-23)
 - [x] ✅ **NESTED-INSUBQUERY** [Adapter] Fix 2-level nested inSubquery compilation — `mapInSubqueryCondition` in compiler.ts recursively converts `in+subquery` PlanDecisions before `mapToHandlerDecision` strips the subquery field; 3 regression tests (2026-03-23)
 
 - [x] ✅ **CORE-SET-OPS** [Core] Add `.union()`, `.unionAll()`, `.intersect()`, `.except()` to QueryBuilder — 19 tests, typecheck clean (2026-03-21)
@@ -55,6 +62,23 @@
 - [x] ✅ **DELETE-NOTEXISTS-ALIAS** [Adapter] `orm.delete('embeddings').where(notExists('symbol')).returning(['id'])` — the generated SQL uses the relation alias `"symbol"` as table name instead of the actual table name `"symbols"`. PG error: `relation "symbol" does not exist`. The DELETE-NOT-EXISTS fix resolved the routing, but the table name resolution still uses the schema alias. Astix integration test: `orm-migration.spec.ts > deleteOrphanEmbeddings`. — Priority: P1 Fixed: `resolveExistsIntent()` in `compileDelete` uses `model.getRelation()` to map relation name to real table; `normalizeToDecision` reads `raw.targetTable` first. 4 regression tests in `delete-notexists-alias.test.ts` + `mutations.test.ts`. (2026-03-21)
 - [x] ✅ **ORDERBY-COMPUTED-EXPR** [Adapter] `orderBy(op('-', ref('end_line'), ref('start_line')), 'asc')` — computed arithmetic expressions in ORDER BY are not supported. `getSymbol` (line-based branch) needs `ORDER BY (end_line - start_line) ASC` to return the narrowest enclosing symbol. Current workaround: stays on orm.raw(). — Priority: P2 Verified: NOT a bug. `op()` with `exprRef()` args already handled by `compileExpressionIntent` (kind=op). Bug was caller using schema DSL `ref()` instead of `exprRef()`. 4 regression tests in `orderby-computed-expr.test.ts`. (2026-03-21)
 - [x] ✅ **INCLUDE-2HOP** [Adapter] `include('callee.file')` resolved FK on ROOT table instead of intermediate table. Fixed: `toJoinIncludeDecision` now propagates `sourceTable`; `mapToHandlerDecision` uses `pd.sourceTable ?? rootTable` for `deriveFkColumns`; `PlanCompiler` tracks `joinAliasMap` (targetTable→alias) so 2nd-hop `currentAlias` resolves to the intermediate alias (e.g., `callee`) not the root. 2 regression tests added. (2026-03-21)
+
+---
+
+## Feature Requests — from astix code-health migration (2026-03-23)
+
+> 67 `orm.raw()` calls remain. 11 in code-health.ts blocked by missing dbsp features.
+> Inventory: `astix/docs/orm-raw-inventory.md`
+
+| Feature | Priority | Unblocks | Description |
+|---------|----------|----------|-------------|
+| **AGG-JOINED-COL** | P1 | 4 checks (highCoupling, godFunctions, largeFiles, unresolvedCalls) | `count(ref('joinedRelation.id'))` / `min(ref('joinedRelation.path'))` — aggregate functions on columns from JOINed tables, usable in SELECT + HAVING |
+| **NOTEXISTS-MULTI-JOIN** | P1 | 3 checks (deadCode, unusedExports, orphanFiles) | `notExists('relation', { where: ... })` with JOINs inside the subquery + outer-column references. Currently notExists only follows 1 FK with 1 WhereIntent. |
+| **CASE-INTENT** | P2 | 1 check (unusedDeps) | `caseWhen(condition, thenExpr).else(elseExpr)` — conditional expressions in SELECT columns |
+| **LIKE-ESCAPE** | P2 | 1 check (unusedVariables) | `like('col', pattern, { escape: '\\' })` — escape character for LIKE WHERE clauses |
+| **NULLS-LAST-EXPR** | P2 | 1 check (complexFunctions) | `orderBy(op(...), 'asc', { nulls: 'last' })` — NULLS LAST on computed expression in ORDER BY |
+| **REF-VS-REF** | P1 | 1 check (circularImports) | `op('!=', ref('col_a'), ref('col_b'))` — same-table column-to-column comparison in `.where()` compiles to `__expr != __expr` instead of `"col_a" != "col_b"` |
+| **WINDOW-FN** | P2 | 1 check (unresolvedTypeBindings) + others | `wCount()` / `COUNT(*) OVER()` in SELECT columns — window functions not supported in `.columns()` builder |
 
 ---
 

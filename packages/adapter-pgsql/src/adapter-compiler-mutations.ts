@@ -87,7 +87,11 @@ function resolveExistsRelation(
 	// For belongsTo: FK is on the source table (e.g. embeddings.symbol_id → symbols.id)
 	if (rel.type === 'belongsTo') {
 		const fk = typeof rel.foreignKey === 'string' ? rel.foreignKey : rel.foreignKey?.[0];
-		return { targetTable, sourceColumn: fk, targetColumn: 'id' };
+		return {
+			targetTable,
+			...(fk !== undefined && { sourceColumn: fk }),
+			targetColumn: 'id',
+		};
 	}
 	// For hasMany/hasOne: FK is on the target table (e.g. symbols.file_id → files.id)
 	return { targetTable };
@@ -103,7 +107,7 @@ function resolveExistsIntent(
 	sourceTable: string,
 	deps: AdapterCompilerDeps,
 ): WhereIntent {
-	const w = where as Record<string, unknown>;
+	const w = where as unknown as Record<string, unknown>;
 	const kind = w.kind as string | undefined;
 	if (kind !== 'exists' && kind !== 'notExists') return where;
 	const relation = w.relation as string;
