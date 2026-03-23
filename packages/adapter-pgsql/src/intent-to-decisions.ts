@@ -233,6 +233,8 @@ interface FlatWhereFields {
 	readonly jsonMode?: string;
 	readonly reversed?: boolean;
 	readonly key?: string;
+	// LIKE escape character
+	readonly escape?: string;
 	// Custom expression WHERE (kind: 'expression')
 	readonly expr?: unknown;
 }
@@ -261,14 +263,19 @@ export function convertWhereCondition(
 		}
 
 		// LIKE: { kind: 'like', field: 'name', pattern: '%john%' }
-		case 'like':
-			return {
+		case 'like': {
+			const likeDecision: Mutable<PlanDecision> = {
 				type: 'where',
 				column: cond.field as string,
 				operator: cond.caseInsensitive ? 'ilike' : 'like',
 				value: cond.pattern,
 				table: rootTable,
 			};
+			if (cond.escape !== undefined) {
+				likeDecision.escape = cond.escape;
+			}
+			return likeDecision;
+		}
 
 		// IN: { kind: 'in', field: 'id', values: [1, 2, 3] } or { kind: 'in', field: 'id', subquery: {...} }
 		case 'in': {

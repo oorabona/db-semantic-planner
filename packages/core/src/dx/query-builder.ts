@@ -456,6 +456,7 @@ export class QueryBuilderImpl<TResult = unknown>
 			| ExpressionRef
 			| ExpressionSpec,
 		direction?: SortDirection,
+		options?: { nulls?: import('./types.js').NullsPosition },
 	): QueryBuilder<TResult> {
 		const builder = this.clone();
 
@@ -477,11 +478,12 @@ export class QueryBuilderImpl<TResult = unknown>
 			return builder;
 		}
 
-		// String form: orderBy('field') or orderBy('field', 'desc')
+		// String form: orderBy('field') or orderBy('field', 'desc') or orderBy('field', 'desc', { nulls: 'last' })
 		if (typeof fieldOrRecordOrSpecs === 'string') {
 			builder.orderByIntents.push({
 				field: fieldOrRecordOrSpecs,
 				direction: direction ?? 'asc',
+				...(options?.nulls !== undefined ? { nulls: options.nulls } : {}),
 			});
 			return builder;
 		}
@@ -522,6 +524,20 @@ export class QueryBuilderImpl<TResult = unknown>
 
 	where(condition: WhereIntent | WhereFilter<TResult>): QueryBuilder<TResult> {
 		const builder = this.clone();
+		// Detect ExpressionRef used as a standalone boolean WHERE predicate.
+		// op('!=', exprRef('a'), exprRef('b')) returns ExpressionRef which has __expr:true
+		// but no `kind` property, so isWhereIntent() returns false and objectToWhereIntent()
+		// would map `__expr: true` as a column field. Handle this before the WhereIntent check.
+		if (condition instanceof ExpressionRef) {
+			// Wrap the expression intent in a WhereExpressionIntent with no value/operator.
+			// The WHERE handler detects this and emits the expression node directly.
+			const whereExpr = {
+				kind: 'expression',
+				expr: condition.intent,
+			} as unknown as WhereIntent;
+			builder.whereIntents.push(whereExpr);
+			return builder;
+		}
 		// Convert object filter to WhereIntent if needed
 		const intent = isWhereIntent(condition)
 			? condition

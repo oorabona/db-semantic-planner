@@ -224,17 +224,25 @@ export function like(
 export function like(
 	field: ColumnRef<string, string, string> | string,
 	pattern: string,
-	caseInsensitive?: boolean,
+	options?: boolean | { caseInsensitive?: boolean; escape?: string },
 ): WhereLikeIntent {
+	const caseInsensitive =
+		typeof options === 'boolean' ? options : options?.caseInsensitive;
+	const escape = typeof options === 'object' ? options.escape : undefined;
+
 	const intent: WhereLikeIntent = {
 		kind: 'like',
 		field: getColumnName(field),
 		pattern,
 	};
-	if (caseInsensitive !== undefined) {
-		return { ...intent, caseInsensitive };
+	const withCi =
+		caseInsensitive !== undefined
+			? { ...intent, caseInsensitive }
+			: intent;
+	if (escape !== undefined) {
+		return { ...withCi, escape };
 	}
-	return intent;
+	return withCi;
 }
 
 // ============================================================================

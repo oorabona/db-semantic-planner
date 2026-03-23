@@ -418,7 +418,11 @@ export interface QueryBuilder<TResult = unknown> {
 	 *   .all();
 	 * ```
 	 */
-	orderBy(field: string, direction?: SortDirection): QueryBuilder<TResult>;
+	orderBy(
+		field: string,
+		direction?: SortDirection,
+		options?: { nulls?: import('./types.js').NullsPosition },
+	): QueryBuilder<TResult>;
 	orderBy(fields: OrderByRecord): QueryBuilder<TResult>;
 	orderBy(specs: readonly OrderBySpec[]): QueryBuilder<TResult>;
 	orderBy(expr: ExpressionRef, direction?: SortDirection): QueryBuilder<TResult>;

@@ -166,6 +166,8 @@ export interface Decision {
 	readonly filterWhere?: import('@pgsql/types').Node;
 	// Custom expression intent for selectCustomExpression, WHERE expression, and ORDER BY expression
 	readonly expressionIntent?: unknown;
+	// LIKE escape character
+	readonly escape?: string;
 }
 
 // ============================================================================

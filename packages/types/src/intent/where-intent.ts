@@ -67,6 +67,8 @@ export interface WhereLikeIntent {
 	readonly pattern: string;
 	/** Case-insensitive matching */
 	readonly caseInsensitive?: boolean;
+	/** Escape character for LIKE pattern (e.g. '\\' to escape _ and %) */
+	readonly escape?: string;
 }
 
 /**

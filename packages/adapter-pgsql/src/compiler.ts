@@ -130,6 +130,7 @@ function mapToHandlerDecision(
 		selectColumn: pd.selectColumn,
 		aggregate: pd.aggregate,
 		columnAliases: pd.columnAliases,
+		escape: pd.escape,
 	} as HandlerDecision;
 }
 
@@ -233,6 +234,8 @@ export interface PlanDecision {
 	readonly filterCondition?: PlanDecision;
 	// Custom expression intent for selectCustomExpression, WHERE expression, and ORDER BY expression
 	readonly expressionIntent?: unknown;
+	// LIKE escape character
+	readonly escape?: string;
 }
 
 /**

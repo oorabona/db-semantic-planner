@@ -488,7 +488,14 @@ function deparseAExpr(node: A_Expr): string {
 	if (kind === 'AEXPR_LIKE') {
 		const left = node.lexpr ? deparse(node.lexpr) : '';
 		const right = node.rexpr ? deparse(node.rexpr) : '';
-		return op === '!~~' ? `${left} NOT LIKE ${right}` : `${left} LIKE ${right}`;
+		const base = op === '!~~' ? `${left} NOT LIKE ${right}` : `${left} LIKE ${right}`;
+		const escape = (node as unknown as Record<string, unknown>).escape as
+			| import('@pgsql/types').Node
+			| undefined;
+		if (escape) {
+			return `${base} ESCAPE ${deparse(escape)}`;
+		}
+		return base;
 	}
 
 	if (kind === 'AEXPR_ILIKE') {

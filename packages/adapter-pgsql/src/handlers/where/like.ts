@@ -37,10 +37,26 @@ export const likeHandler: WhereHandler = {
 		const left = buildColumnRef(column, ctx);
 		const right = buildParamRef(value, state);
 
+		let exprNode: Node;
+
 		if (operator === PATTERN_OPERATORS.ILIKE || operator === 'ilike') {
-			return ilikeExpr(left, right);
+			exprNode = ilikeExpr(left, right);
+		} else {
+			exprNode = likeExpr(left, right);
 		}
 
-		return likeExpr(left, right);
+		if (decision.escape !== undefined) {
+			// Attach escape param as a runtime property on the A_Expr node
+			// so that deparseAExpr can render ESCAPE $N
+			const escapeRef = buildParamRef(decision.escape, state);
+			(
+				(exprNode as unknown as Record<string, unknown>).A_Expr as Record<
+					string,
+					unknown
+				>
+			).escape = escapeRef;
+		}
+
+		return exprNode;
 	},
 };
