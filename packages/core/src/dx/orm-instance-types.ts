@@ -205,6 +205,14 @@ export interface OrmOptionsWithAdapter<DB = unknown>
  *
  * @since DX-040-SURFACE
  */
+/**
+ * Convenience alias: `OrmOf<typeof mySchema>` = `OrmInstance<InferDB<typeof mySchema>>`.
+ * Use this when you need to annotate the ORM type explicitly (class properties, function params).
+ * If you use `createOrm()` directly, TypeScript infers the type automatically — no alias needed.
+ */
+export type OrmOf<S extends import('./schema.js').SchemaDefinition> =
+	OrmInstance<import('./schema.js').InferDB<S>>;
+
 export interface OrmInstance<DB = Record<string, unknown>> {
 	/**
 	 * Type-safe table references for query building.

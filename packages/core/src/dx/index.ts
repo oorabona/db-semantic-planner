@@ -311,6 +311,7 @@ export {
 } from './table-ref.js';
 // DX-040-SURFACE: InferTables utility type for typed table refs
 export { type InferTables } from './schema-tables-types.js';
+export { type OrmOf } from './orm-instance-types.js';
 // Types
 export type {
 	AggregateOptions,
