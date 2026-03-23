@@ -25,6 +25,7 @@ import type {
 
 export type {
 	OrmInstance,
+	OrmInstanceInternal,
 	OrmOptions,
 	OrmOptionsWithAdapter,
 	OrmOptionsWithModel,

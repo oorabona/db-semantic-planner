@@ -25,6 +25,7 @@ import type { InferTableRow, TableRef } from './table-ref.js';
 import type {
 	ListHierarchyOptions,
 	OrmInstance,
+	OrmInstanceInternal,
 	QueryBuilder,
 	RelationHints,
 } from './types.js';
@@ -49,7 +50,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 	onHookError?: HookErrorHandler,
 	inTransaction?: boolean,
 	tablesProxy?: object,
-): OrmInstance<DB> {
+): OrmInstanceInternal<DB> {
 	// Create NQL template tag (DX-040)
 	// NQL compiler is now integrated directly - @dbsp/nql is imported in nql.ts
 	const nql: NqlTag = createNqlTag(
@@ -58,6 +59,16 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		adapter as Adapter<unknown> | undefined,
 		schemaName,
 	);
+
+	// Helper: build a MutationBuilder options object (shared across mutation methods)
+	const mutationOpts = {
+		model,
+		adapter,
+		schemaName,
+		hookStore,
+		onHookError,
+		inTransaction,
+	} as const;
 
 	return {
 		strictMode,
@@ -103,7 +114,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				inTransaction,
 			);
 		},
-		withSchema(schemaName: string): OrmInstance<DB> {
+		withSchema(schemaName: string): OrmInstanceInternal<DB> {
 			// Validate schema name to prevent SQL injection
 			if (adapter) {
 				adapter.validateIdentifier(schemaName, 'schema');
@@ -256,6 +267,43 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			// Result shape from include({ recursive, direction: 'descendants' }):
 			// { id, ..., descendants: [...] }
 			return extractRecursiveField<TResult>(result, 'descendants');
+		},
+
+		// =====================================================================
+		// Typed Mutation Entry Points (DX-040-SURFACE)
+		// Extract table name from TableRef metadata and delegate to string methods
+		// =====================================================================
+
+		into(tableRef: TableRef<any, any, any>): InsertBuilder {
+			const tableName = tableRef[TABLE_META];
+			if (tableName === undefined) {
+				throw new Error('Invalid TableRef: missing TABLE_META symbol');
+			}
+			return new InsertBuilder({ table: tableName as string, ...mutationOpts });
+		},
+
+		modify(tableRef: TableRef<any, any, any>): UpdateBuilder {
+			const tableName = tableRef[TABLE_META];
+			if (tableName === undefined) {
+				throw new Error('Invalid TableRef: missing TABLE_META symbol');
+			}
+			return new UpdateBuilder({ table: tableName as string, ...mutationOpts });
+		},
+
+		removeFrom(tableRef: TableRef<any, any, any>): DeleteBuilder {
+			const tableName = tableRef[TABLE_META];
+			if (tableName === undefined) {
+				throw new Error('Invalid TableRef: missing TABLE_META symbol');
+			}
+			return new DeleteBuilder({ table: tableName as string, ...mutationOpts });
+		},
+
+		upsertInto(tableRef: TableRef<any, any, any>): UpsertBuilder {
+			const tableName = tableRef[TABLE_META];
+			if (tableName === undefined) {
+				throw new Error('Invalid TableRef: missing TABLE_META symbol');
+			}
+			return new UpsertBuilder({ table: tableName as string, ...mutationOpts });
 		},
 
 		// =====================================================================

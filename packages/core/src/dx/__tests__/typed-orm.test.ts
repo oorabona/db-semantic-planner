@@ -118,3 +118,85 @@ describe('DX-040-SURFACE: orm.from() with union()', () => {
 		expect(dump.sql.toUpperCase()).toContain('UNION');
 	});
 });
+
+describe('DX-040-SURFACE: typed mutations via TableRef', () => {
+	it('SC-07: orm.into() produces INSERT SQL', () => {
+		const { users } = orm.tables;
+		const dump = orm
+			.into(users)
+			.values({ name: 'Alice', email: 'alice@example.com', active: true })
+			.dump();
+		expect(dump.sql.toUpperCase()).toContain('INSERT');
+		expect(dump.sql.toLowerCase()).toContain('users');
+	});
+
+	it('SC-08: orm.modify() produces UPDATE SQL', () => {
+		const { users } = orm.tables;
+		const dump = orm
+			.modify(users)
+			.set({ active: false })
+			.where(eq(users.id, 1))
+			.dump();
+		expect(dump.sql.toUpperCase()).toContain('UPDATE');
+		expect(dump.sql.toLowerCase()).toContain('users');
+		expect(dump.parameters).toContain(false);
+		expect(dump.parameters).toContain(1);
+	});
+
+	it('SC-09: orm.removeFrom() produces DELETE SQL', () => {
+		const { users } = orm.tables;
+		const dump = orm
+			.removeFrom(users)
+			.where(eq(users.id, 1))
+			.dump();
+		expect(dump.sql.toUpperCase()).toContain('DELETE');
+		expect(dump.sql.toLowerCase()).toContain('users');
+		expect(dump.parameters).toContain(1);
+	});
+
+	it('SC-10: orm.upsertInto() produces INSERT ... ON CONFLICT SQL', () => {
+		const { users } = orm.tables;
+		const dump = orm
+			.upsertInto(users)
+			.values({ name: 'Alice', email: 'alice@example.com', active: true })
+			.onConflict(['email'])
+			.doNothing()
+			.dump();
+		expect(dump.sql.toUpperCase()).toContain('INSERT');
+		expect(dump.sql.toUpperCase()).toContain('ON CONFLICT');
+		expect(dump.sql.toLowerCase()).toContain('users');
+	});
+
+	it('SC-11: orm.from() still works after typed mutations are added (regression)', () => {
+		const { users } = orm.tables;
+		const dump = orm.from(users).where(eq(users.active, true)).dump();
+		expect(dump.sql.toUpperCase()).toContain('SELECT');
+		expect(dump.sql.toLowerCase()).toContain('users');
+		expect(dump.params).toContain(true);
+	});
+
+	it('SC-12: string-based select() is not on public OrmInstance type', () => {
+		// @ts-expect-error -- select() is not on public OrmInstance
+		orm.select('users');
+	});
+
+	it('SC-13: string-based insert() is not on public OrmInstance type', () => {
+		// @ts-expect-error -- insert() is not on public OrmInstance
+		orm.insert('users');
+	});
+
+	it('SC-14: string-based update() is not on public OrmInstance type', () => {
+		// @ts-expect-error -- update() is not on public OrmInstance
+		orm.update('users');
+	});
+
+	it('SC-15: string-based delete() is not on public OrmInstance type', () => {
+		// @ts-expect-error -- delete() is not on public OrmInstance
+		orm.delete('users');
+	});
+
+	it('SC-16: string-based upsert() is not on public OrmInstance type', () => {
+		// @ts-expect-error -- upsert() is not on public OrmInstance
+		orm.upsert('users');
+	});
+});

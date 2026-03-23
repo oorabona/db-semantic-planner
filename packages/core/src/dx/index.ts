@@ -329,6 +329,7 @@ export type {
 	OrderByRecord,
 	OrderBySpec,
 	OrmInstance,
+	OrmInstanceInternal,
 	OrmOptions,
 	OrmOptionsWithAdapter,
 	OrmOptionsWithModel,
