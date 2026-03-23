@@ -293,4 +293,22 @@ describe('DX-040-SURFACE: Type-level safety', () => {
 		// @ts-expect-error — upsert() is removed from public OrmInstance type
 		orm.upsert('users');
 	});
+
+	it('SC-17: from(users).all() infers exact row type without cast', () => {
+		const { users } = orm.tables;
+		const query = orm.from(users);
+		// Must resolve to { id: number; name: string; email: string; active: boolean }[]
+		// without any `as unknown as T` cast
+		expectTypeOf(query.all).returns.resolves.toEqualTypeOf<
+			{ id: number; name: string; email: string; active: boolean }[]
+		>();
+	});
+
+	it('SC-18: from(users).columns([...]).all() infers Pick type without cast', () => {
+		const { users } = orm.tables;
+		const query = orm.from(users).columns(['id', 'name']);
+		expectTypeOf(query.all).returns.resolves.toEqualTypeOf<
+			Pick<{ id: number; name: string; email: string; active: boolean }, 'id' | 'name'>[]
+		>();
+	});
 });

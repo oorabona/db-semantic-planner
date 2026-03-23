@@ -8,7 +8,7 @@
  * @since R01
  */
 
-import type { InferTableRow, TableRef } from './table-ref.js';
+import type { ColumnRef, InferTableRow, TableRef } from './table-ref.js';
 import type { Adapter } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
@@ -226,6 +226,19 @@ export type OrmOf<S> =
 			? OrmInstance<import('./schema.js').InferDB<S>>
 			: never;
 
+/**
+ * Convert a row type `{ col: Type }` to column refs `{ col: ColumnRef<Table, 'col', Type> }`
+ * so that `InferTableRow` can extract the types back from a `TableRef`.
+ *
+ * This is used exclusively to type `OrmInstance.tables` with full column type info.
+ *
+ * @typeParam TTable - The table name literal (e.g. `'users'`)
+ * @typeParam TRow   - The row type from `DB[K]` (e.g. `{ id: number; name: string }`)
+ */
+type RowToColumnRefs<TTable extends string, TRow> = {
+	[K in keyof TRow & string]: ColumnRef<TTable, K, TRow[K]>;
+};
+
 export interface OrmInstance<DB = Record<string, unknown>> {
 	/**
 	 * Type-safe table references for query building.
@@ -242,7 +255,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * @since DX-040-SURFACE
 	 */
-	readonly tables: { [K in keyof DB & string]: TableRef<K, any, any> };
+	readonly tables: { [K in keyof DB & string]: TableRef<K, RowToColumnRefs<K, DB[K]>, any> };
 
 	/**
 	 * Start a type-safe SELECT query from a TableRef.
