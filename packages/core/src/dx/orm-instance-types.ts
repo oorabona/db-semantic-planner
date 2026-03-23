@@ -8,6 +8,7 @@
  * @since R01
  */
 
+import type { InferTableRow, TableRef } from './table-ref.js';
 import type { Adapter } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
@@ -180,7 +181,51 @@ export interface OrmOptionsWithAdapter<DB = unknown>
  */
 export interface OrmInstance<DB = Record<string, unknown>> {
 	/**
-	 * Start building a SELECT query from a table.
+	 * Type-safe table references for query building.
+	 *
+	 * Provides access to tables and their columns as typed objects.
+	 * Use destructuring to get individual table references, then pass
+	 * them to `from()` for type-safe queries.
+	 *
+	 * @example
+	 * ```typescript
+	 * const { users, posts } = orm.tables;
+	 * const activeUsers = await orm.from(users).where(eq(users.active, true)).all();
+	 * ```
+	 *
+	 * @since DX-040-SURFACE
+	 */
+	readonly tables: Record<string, TableRef<any, any, any>>;
+
+	/**
+	 * Start a type-safe query from a TableRef.
+	 *
+	 * Extracts the table name from the TableRef's metadata and delegates
+	 * to the internal select implementation. All QueryBuilder features
+	 * (include, union, groupBy, having, etc.) are available.
+	 *
+	 * @typeParam TTable - The TableRef type (inferred from the argument)
+	 * @param table - A TableRef from `orm.tables`
+	 * @returns A QueryBuilder typed to the table's row type
+	 *
+	 * @example
+	 * ```typescript
+	 * const { users } = orm.tables;
+	 * const user = await orm.from(users).where(eq(users.id, 1)).first();
+	 * ```
+	 *
+	 * @since DX-040-SURFACE
+	 */
+	from<TTable extends TableRef<any, any, any>>(
+		table: TTable,
+	): QueryBuilder<InferTableRow<TTable>>;
+
+	/**
+	 * Start building a SELECT query from a table (string-based API).
+	 *
+	 * @deprecated Prefer `orm.from(orm.tables.tableName)` for type-safe queries.
+	 * This method remains for internal use and backward compatibility.
+	 * @internal
 	 *
 	 * When DB generic is provided:
 	 * - Table name is constrained to `keyof DB`

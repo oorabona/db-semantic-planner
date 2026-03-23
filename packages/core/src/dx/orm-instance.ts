@@ -20,6 +20,8 @@ import { CteBuilder } from './cte-builder.js';
 import { createNqlTag, type NqlTag } from './nql.js';
 import { QueryBuilderImpl } from './query-builder.js';
 import type { DefaultFilters } from './schema.js';
+import { TABLE_META } from './symbols.js';
+import type { InferTableRow, TableRef } from './table-ref.js';
 import type {
 	ListHierarchyOptions,
 	OrmInstance,
@@ -46,6 +48,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 	hookStore?: HookStore,
 	onHookError?: HookErrorHandler,
 	inTransaction?: boolean,
+	tablesProxy?: object,
 ): OrmInstance<DB> {
 	// Create NQL template tag (DX-040)
 	// NQL compiler is now integrated directly - @dbsp/nql is imported in nql.ts
@@ -59,6 +62,29 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 	return {
 		strictMode,
 		nql,
+		tables: (tablesProxy ?? {}) as Record<string, TableRef<any, any, any>>,
+		from<TTable extends TableRef<any, any, any>>(
+			table: TTable,
+		): QueryBuilder<InferTableRow<TTable>> {
+			const tableName = table[TABLE_META];
+			if (tableName === undefined) {
+				throw new Error('Invalid TableRef: missing TABLE_META symbol');
+			}
+			return new QueryBuilderImpl<InferTableRow<TTable>>(
+				model,
+				strictMode,
+				tableName as string,
+				relationHints,
+				adapter,
+				schemaName,
+				dialectCapabilities,
+				globalPlanOptions,
+				defaultFilters,
+				hookStore,
+				onHookError,
+				inTransaction,
+			);
+		},
 		select<K extends keyof DB & string, TResult = DB[K]>(
 			from: K,
 		): QueryBuilder<TResult> {
@@ -97,6 +123,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				hookStore,
 				onHookError,
 				inTransaction,
+				tablesProxy,
 			);
 		},
 
@@ -338,6 +365,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 					hookStore,
 					onHookError,
 					true, // inTransaction
+					tablesProxy,
 				);
 				return fn(txOrm);
 			});

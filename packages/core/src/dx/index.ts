@@ -309,6 +309,8 @@ export {
 	type RelationType,
 	type TableRef,
 } from './table-ref.js';
+// DX-040-SURFACE: InferTables utility type for typed table refs
+export { type InferTables } from './schema-tables-types.js';
 // Types
 export type {
 	AggregateOptions,
