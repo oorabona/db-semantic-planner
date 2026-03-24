@@ -20,7 +20,7 @@ import { compileExpressionIntent } from './handlers/expression/custom.js';
 import { createWhereDispatcher } from './handlers/index.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
+	Decision,
 	CompilerState,
 } from './handlers/types.js';
 import { createCompilerState } from './handlers/types.js';
@@ -282,7 +282,7 @@ export function compileWhereIntent(
 					column: field,
 					operator: 'between',
 					value: [rv.lower, rv.upper],
-				} as CompilerDecision,
+				} as Decision,
 				handlerCtx,
 				ctx.paramState,
 			);
@@ -296,7 +296,7 @@ export function compileWhereIntent(
 				operator,
 				value,
 				...(rangeDataType !== undefined && { dataType: rangeDataType }),
-			} as CompilerDecision,
+			} as Decision,
 			handlerCtx,
 			ctx.paramState,
 		);
@@ -323,7 +323,7 @@ export function compileWhereIntent(
 				operator,
 				value: likeIntent.pattern,
 				escape: likeIntent.escape,
-			} as CompilerDecision,
+			} as Decision,
 			handlerCtx,
 			ctx.paramState,
 		);
@@ -436,14 +436,14 @@ export function compileWhereIntent(
 
 	// `and`, `or`, `not` contain nested WhereIntents. If we let them fall
 	// through to the dispatcher, each nested condition is processed via
-	// normalizeToCompilerDecision which hits `default` for `expression` kind
+	// normalizeToDecision which hits `default` for `expression` kind
 	// (returning it unchanged), then the comparison handler is selected based on
 	// `intent.operator` (e.g. 'lte') — but that handler expects `decision.column`
 	// which is absent → throws "Comparison handler requires a column".
 	// Fix: handle and/or/not recursively via compileWhereIntent so every nested
 	// condition gets proper dispatch (including expression, subquery, etc.).
 	if (intent.kind === 'and') {
-		const andIntent = intent as { conditions: WhereIntent[] };
+		const andIntent = intent as unknown as { conditions: WhereIntent[] };
 		const nodes = andIntent.conditions.map((c) => compileWhereIntent(c, ctx));
 		if (nodes.length === 0) {
 			// Empty AND = tautology; use a truthy constant
@@ -453,7 +453,7 @@ export function compileWhereIntent(
 		return andExpr(...nodes);
 	}
 	if (intent.kind === 'or') {
-		const orIntent = intent as { conditions: WhereIntent[] };
+		const orIntent = intent as unknown as { conditions: WhereIntent[] };
 		const nodes = orIntent.conditions.map((c) => compileWhereIntent(c, ctx));
 		if (nodes.length === 0) {
 			// Empty OR = contradiction; use a falsy constant
@@ -471,14 +471,14 @@ export function compileWhereIntent(
 	// createWhereDispatcher calls normalizeToDecision internally, which handles:
 	// comparison, like, in, any, null, exists, notExists,
 	// jsonContains, jsonExists — plus pass-through for unknown kinds.
-	// Map WhereIntent.field → CompilerDecision.column for kinds that use the comparison handler.
+	// Map WhereIntent.field → Decision.column for kinds that use the comparison handler.
 	// Only comparison/null kinds read `decision.column` — other kinds (like, in, any, json*)
-	// use `field`/`pattern`/`values` via normalizeToCompilerDecision and adding `column` would
+	// use `field`/`pattern`/`values` via normalizeToDecision and adding `column` would
 	// confuse their dispatch.
 	const needsColumn = intent.kind === 'comparison' || intent.kind === 'null';
 	const bridged = needsColumn
-		? { ...intent, column: (intent as Record<string, unknown>).field } as unknown as CompilerDecision
-		: intent as unknown as CompilerDecision;
+		? { ...intent, column: (intent as unknown as Record<string, unknown>).field } as unknown as Decision
+		: intent as unknown as Decision;
 	return dispatcher(
 		bridged,
 		handlerCtx,
