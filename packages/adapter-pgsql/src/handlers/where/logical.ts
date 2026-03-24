@@ -13,8 +13,8 @@ import {
 } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
@@ -27,7 +27,7 @@ export const andHandler: WhereHandler = {
 	operators: [LOGICAL_OPERATORS.AND],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -64,7 +64,7 @@ export const orHandler: WhereHandler = {
 	operators: [LOGICAL_OPERATORS.OR],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -103,7 +103,7 @@ export const notHandler: WhereHandler = {
 	operators: [LOGICAL_OPERATORS.NOT],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,

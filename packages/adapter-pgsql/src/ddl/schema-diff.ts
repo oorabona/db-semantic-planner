@@ -1161,9 +1161,7 @@ function comparePolicies(
 	const schemaPolicies = schema.policies ?? [];
 	const dbPolicies = db.policies ?? [];
 
-	const schemaMap = new Map<string, PolicyIR>(
-		schemaPolicies.map((p) => [p.name, p]),
-	);
+	const schemaMap = new Map<string, PolicyIR>(schemaPolicies.map((p) => [p.name, p]));
 	const dbMap = new Map<string, PolicyIR>(dbPolicies.map((p) => [p.name, p]));
 
 	// In schema but not in DB → create

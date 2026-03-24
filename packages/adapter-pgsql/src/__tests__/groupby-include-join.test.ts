@@ -1,3 +1,4 @@
+
 /**
  * Issue 9: include() + groupBy() — hydration columns break GROUP BY
  *
@@ -16,7 +17,7 @@
  *   projects: id (PK), name
  */
 
-import { createOrm, exprRef, op, ref, schema } from '@dbsp/core';
+import { createOrm, schema, ref, op, exprRef } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 

@@ -6,7 +6,7 @@
  * - Registration functions (where, expression, include)
  * - Lookup functions (get/has handlers)
  * - Error paths (duplicate registration, missing handlers)
- * - normalizeToDecision (WhereIntent → CompilerDecision conversion)
+ * - normalizeToDecision (WhereIntent → Decision conversion)
  * - createWhereDispatcher (operator aliases, recursive dispatch)
  * - Registry stats and operator listing
  * - clearHandlers

@@ -12,10 +12,10 @@
  */
 
 import { eq, exprRef, fn } from '@dbsp/core';
-import type { CustomFnExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
+import type { CustomFnExpressionIntent } from '@dbsp/types';
 
 function compileFnExpr(
 	expr: ReturnType<typeof fn>,
@@ -78,11 +78,7 @@ describe('FN-REF-ALIAS: exprRef() inside fn() column qualification', () => {
 
 	it('nested fn(): inner exprRef() stays unqualified', () => {
 		const sql = compileFnExpr(
-			fn(
-				'coalesce',
-				fn('array_agg', exprRef('id')),
-				fn('array_agg', exprRef('name')),
-			),
+			fn('coalesce', fn('array_agg', exprRef('id')), fn('array_agg', exprRef('name'))),
 		);
 		expect(sql).toContain('array_agg(id)');
 		expect(sql).toContain('array_agg(name)');

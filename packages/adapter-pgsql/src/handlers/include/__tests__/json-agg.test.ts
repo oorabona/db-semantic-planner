@@ -10,7 +10,7 @@ import { parseSync } from 'pgsql-parser';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../../../ast-helpers.js';
 import { identityNaming } from '../../../naming-plugin.js';
-import type { CompilerContext, CompilerDecision } from '../../types.js';
+import type { CompilerContext, Decision } from '../../types.js';
 import { createCompilerState } from '../../types.js';
 import { jsonAggIncludeHandler } from '../json-agg.js';
 
@@ -23,9 +23,7 @@ function makeCtx(rootTable: string, currentAlias?: string): CompilerContext {
 	} as CompilerContext;
 }
 
-function buildDecision(
-	overrides: Partial<CompilerDecision> = {},
-): CompilerDecision {
+function buildDecision(overrides: Partial<Decision> = {}): Decision {
 	return {
 		type: 'selectJsonAgg',
 		relation: 'posts',
@@ -34,7 +32,7 @@ function buildDecision(
 		foreignKey: 'user_id',
 		parentKey: 'id',
 		...overrides,
-	} as CompilerDecision;
+	} as Decision;
 }
 
 /**
@@ -187,7 +185,7 @@ describe('json-agg handler', () => {
 					foreignKey: 'user_id',
 					parentKey: 'id',
 					// Missing relationType → should be skipped
-				} as CompilerDecision,
+				} as Decision,
 			],
 		});
 

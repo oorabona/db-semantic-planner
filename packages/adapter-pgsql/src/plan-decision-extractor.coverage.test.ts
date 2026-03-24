@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	convertDottedFieldsToExists,
+	convertWhereToDecisions,
 	deriveForeignKey,
 	extractAllIncludeDecisions,
 	extractExistsDecisions,
@@ -254,6 +255,208 @@ describe('plan-decision-extractor - coverage', () => {
 			expect(valueToNode({ key: 'value' })).toEqual({
 				A_Const: { sval: { sval: '[object Object]' } },
 			});
+		});
+	});
+
+	describe('convertWhereToDecisions', () => {
+		it('converts comparison condition', () => {
+			const where = {
+				kind: 'comparison',
+				field: 'age',
+				operator: 'gte',
+				value: 18,
+			};
+			expect(convertWhereToDecisions(where, 'users')).toEqual([
+				{
+					type: 'where',
+					column: 'age',
+					operator: 'gte',
+					value: 18,
+					table: 'users',
+				},
+			]);
+		});
+
+		it('converts like condition', () => {
+			const where = { kind: 'like', field: 'name', pattern: '%John%' };
+			expect(convertWhereToDecisions(where, 'users')).toEqual([
+				{
+					type: 'where',
+					column: 'name',
+					operator: 'like',
+					value: '%John%',
+					table: 'users',
+				},
+			]);
+		});
+
+		it('converts in condition with values', () => {
+			const where = { kind: 'in', field: 'id', values: [1, 2, 3] };
+			expect(convertWhereToDecisions(where, 'users')).toEqual([
+				{
+					type: 'where',
+					column: 'id',
+					operator: 'in',
+					value: [1, 2, 3],
+					table: 'users',
+				},
+			]);
+		});
+
+		it('converts in condition with subquery', () => {
+			const subquery = {
+				type: 'select',
+				from: 'active',
+				select: { fields: ['id'] },
+			};
+			const where = { kind: 'in', field: 'id', subquery };
+			expect(convertWhereToDecisions(where, 'users')).toEqual([
+				{
+					type: 'where',
+					column: 'id',
+					operator: 'in',
+					value: subquery,
+					table: 'users',
+				},
+			]);
+		});
+
+		it('converts range condition with explicit operator', () => {
+			const where = {
+				kind: 'range',
+				field: 'price',
+				operator: 'gte',
+				value: 100,
+			};
+			expect(convertWhereToDecisions(where, 'products')).toEqual([
+				{
+					type: 'where',
+					column: 'price',
+					operator: 'gte',
+					value: 100,
+					table: 'products',
+				},
+			]);
+		});
+
+		it('converts range condition without operator (defaults to between)', () => {
+			const where = { kind: 'range', field: 'age', value: [18, 65] };
+			expect(convertWhereToDecisions(where, 'users')).toEqual([
+				{
+					type: 'where',
+					column: 'age',
+					operator: 'between',
+					value: [18, 65],
+					table: 'users',
+				},
+			]);
+		});
+
+		it('converts null condition', () => {
+			const where = { kind: 'null', field: 'deleted_at', operator: 'isNull' };
+			expect(convertWhereToDecisions(where, 'users')).toEqual([
+				{
+					type: 'where',
+					column: 'deleted_at',
+					operator: 'isNull',
+					value: null,
+					table: 'users',
+				},
+			]);
+		});
+
+		it('converts AND with multiple conditions', () => {
+			const where = {
+				kind: 'and',
+				conditions: [
+					{ kind: 'comparison', field: 'age', operator: 'gte', value: 18 },
+					{ kind: 'comparison', field: 'active', operator: 'eq', value: true },
+				],
+			};
+			const result = convertWhereToDecisions(where, 'users');
+			expect(result).toHaveLength(1);
+			expect(result[0].type).toBe('whereAnd');
+			expect(result[0].conditions).toHaveLength(2);
+		});
+
+		it('converts AND with single condition (unwraps)', () => {
+			const where = {
+				kind: 'and',
+				conditions: [
+					{ kind: 'comparison', field: 'id', operator: 'eq', value: 1 },
+				],
+			};
+			const result = convertWhereToDecisions(where, 'users');
+			expect(result).toHaveLength(1);
+			expect(result[0].type).toBe('where');
+		});
+
+		it('converts AND with empty conditions', () => {
+			const where = { kind: 'and', conditions: [] };
+			expect(convertWhereToDecisions(where, 'users')).toEqual([]);
+		});
+
+		it('converts OR with multiple conditions', () => {
+			const where = {
+				kind: 'or',
+				conditions: [
+					{ kind: 'comparison', field: 'role', operator: 'eq', value: 'admin' },
+					{ kind: 'comparison', field: 'role', operator: 'eq', value: 'owner' },
+				],
+			};
+			const result = convertWhereToDecisions(where, 'users');
+			expect(result).toHaveLength(1);
+			expect(result[0].type).toBe('whereOr');
+			expect(result[0].conditions).toHaveLength(2);
+		});
+
+		it('converts OR with single condition (unwraps)', () => {
+			const where = {
+				kind: 'or',
+				conditions: [
+					{ kind: 'comparison', field: 'id', operator: 'eq', value: 1 },
+				],
+			};
+			const result = convertWhereToDecisions(where, 'users');
+			expect(result).toHaveLength(1);
+			expect(result[0].type).toBe('where');
+		});
+
+		it('converts OR with empty conditions', () => {
+			const where = { kind: 'or', conditions: [] };
+			expect(convertWhereToDecisions(where, 'users')).toEqual([]);
+		});
+
+		it('converts NOT with condition', () => {
+			const where = {
+				kind: 'not',
+				condition: {
+					kind: 'comparison',
+					field: 'deleted',
+					operator: 'eq',
+					value: true,
+				},
+			};
+			const result = convertWhereToDecisions(where, 'users');
+			expect(result).toHaveLength(1);
+			expect(result[0].type).toBe('whereNot');
+			expect(result[0].conditions).toHaveLength(1);
+		});
+
+		it('converts NOT with empty condition', () => {
+			const where = { kind: 'not', condition: { kind: 'unknown' } };
+			expect(convertWhereToDecisions(where, 'users')).toEqual([]);
+		});
+
+		it('returns empty for unknown kind', () => {
+			const where = { kind: 'unknownType', field: 'x' };
+			expect(convertWhereToDecisions(where, 'users')).toEqual([]);
+		});
+
+		it('returns empty for null/undefined where', () => {
+			expect(convertWhereToDecisions(null, 'users')).toEqual([]);
+			expect(convertWhereToDecisions(undefined, 'users')).toEqual([]);
+			expect(convertWhereToDecisions('string', 'users')).toEqual([]);
 		});
 	});
 

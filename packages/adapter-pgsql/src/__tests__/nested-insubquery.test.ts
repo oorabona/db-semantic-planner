@@ -6,7 +6,7 @@
  * to PlanDecision, then normalizeToDecision() sees column !== undefined and
  * returns early -- never re-normalizing inner 'in'+subquery to 'inSubquery'.
  *
- * Fix: normalizeToDecision() must re-process CompilerDecision objects that have
+ * Fix: normalizeToDecision() must re-process Decision objects that have
  * operator='in'/'notIn' + subquery property even when column is already set.
  *
  * Schema:
@@ -60,16 +60,12 @@ describe('NESTED-INSUBQUERY: 2-level nested inSubquery compiles correctly', () =
 			.where(
 				inSubquery(
 					'symbol_id',
-					subquery('symbols')
-						.select('id')
-						.where(
-							inSubquery(
-								'file_id',
-								subquery('files')
-									.select('id')
-									.where(any('project_id', projectIds)),
-							),
+					subquery('symbols').select('id').where(
+						inSubquery(
+							'file_id',
+							subquery('files').select('id').where(any('project_id', projectIds)),
 						),
+					),
 				),
 			)
 			.dump();
@@ -91,9 +87,7 @@ describe('NESTED-INSUBQUERY: 2-level nested inSubquery compiles correctly', () =
 		);
 
 		// Innermost: project_id = ANY($1)
-		expect(sql, 'Should contain ANY clause').toMatch(
-			/project_id\s*=\s*any\s*\(/i,
-		);
+		expect(sql, 'Should contain ANY clause').toMatch(/project_id\s*=\s*any\s*\(/i);
 
 		// Parameters: projectIds array bound as $1
 		expect(dump.params, 'Should have one parameter').toHaveLength(1);
@@ -106,7 +100,12 @@ describe('NESTED-INSUBQUERY: 2-level nested inSubquery compiles correctly', () =
 		const dump = orm
 			.select('embeddings')
 			.columns(['model'])
-			.where(inSubquery('symbol_id', subquery('symbols').select('id')))
+			.where(
+				inSubquery(
+					'symbol_id',
+					subquery('symbols').select('id'),
+				),
+			)
 			.dump();
 
 		const sql = normalizeSQL(dump.sql);
@@ -130,9 +129,7 @@ describe('NESTED-INSUBQUERY: 2-level nested inSubquery compiles correctly', () =
 
 		const sql = normalizeSQL(dump.sql);
 
-		expect(sql, 'Should produce = ANY(...)').toMatch(
-			/project_id\s*=\s*any\s*\(/i,
-		);
+		expect(sql, 'Should produce = ANY(...)').toMatch(/project_id\s*=\s*any\s*\(/i);
 		expect(dump.params[0], 'Should bind ids array').toEqual(ids);
 	});
 });

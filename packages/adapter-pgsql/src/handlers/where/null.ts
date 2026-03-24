@@ -7,8 +7,8 @@
 import type { Node, NullTest } from '@pgsql/types';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	WhereHandler,
 } from '../types.js';
 import { NULL_OPERATORS } from '../types.js';
@@ -33,7 +33,7 @@ export const nullHandler: WhereHandler = {
 	operators: [NULL_OPERATORS.IS_NULL, NULL_OPERATORS.IS_NOT_NULL],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {

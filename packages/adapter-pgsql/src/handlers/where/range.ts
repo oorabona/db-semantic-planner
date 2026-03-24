@@ -8,8 +8,8 @@ import type { Node } from '@pgsql/types';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	WhereHandler,
 } from '../types.js';
 import { isRangeValue } from '../types.js';
@@ -31,7 +31,7 @@ export const rangeHandler: WhereHandler = {
 	operators: ['contains', 'containedBy', 'overlaps'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

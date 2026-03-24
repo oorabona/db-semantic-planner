@@ -8,8 +8,8 @@ import type { Node } from '@pgsql/types';
 import { ilikeExpr, likeExpr } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	WhereHandler,
 } from '../types.js';
 import { PATTERN_OPERATORS } from '../types.js';
@@ -27,7 +27,7 @@ export const likeHandler: WhereHandler = {
 	operators: [PATTERN_OPERATORS.LIKE, PATTERN_OPERATORS.ILIKE],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

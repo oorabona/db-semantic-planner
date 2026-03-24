@@ -8,8 +8,8 @@ import type { Node } from '@pgsql/types';
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	WhereHandler,
 } from '../types.js';
 import { buildColumnRef } from './utils.js';
@@ -23,7 +23,7 @@ export const betweenHandler: WhereHandler = {
 	operators: ['between'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

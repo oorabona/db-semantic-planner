@@ -1,3 +1,4 @@
+
 /**
  * OUTERREF-IN-NOTEXISTS regression test.
  *
@@ -12,19 +13,11 @@
  *
  * Fix: convertWhereCondition() detects SubqueryRefIntent in comparison values
  * and converts { kind: 'ref', column } → { kind: 'fieldRef', scope: 'outer', column }
- * before the CompilerDecision is created, so compileValueOrFieldRef() routes it to
+ * before the Decision is created, so compileValueOrFieldRef() routes it to
  * columnRef() with the outer query alias.
  */
 
-import {
-	createOrm,
-	eq,
-	neq,
-	notExists,
-	outerRef,
-	ref,
-	schema,
-} from '@dbsp/core';
+import { createOrm, notExists, neq, eq, outerRef, schema, ref } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -67,14 +60,9 @@ describe('OUTERREF-IN-NOTEXISTS: outerRef() compiles to column ref, not paramete
 		//   orm.select('symbols').where(notExists('callers', { where: neq('caller_file_id', outerRef('file_id')) }))
 		// Expected SQL: NOT EXISTS (SELECT 1 FROM calls ... WHERE ... != symbols."file_id")
 		const orm = buildOrm();
-		const dump = orm
-			.select('symbols')
-			.where(
-				notExists('callers', {
-					where: neq('caller_file_id', outerRef('file_id')),
-				}),
-			)
-			.dump();
+		const dump = orm.select('symbols').where(
+			notExists('callers', { where: neq('caller_file_id', outerRef('file_id')) }),
+		).dump();
 
 		// outerRef('file_id') must compile to a column reference: symbols.file_id
 		// NOT to a parameter $N = '{"kind":"ref","column":"file_id"}'
@@ -93,14 +81,9 @@ describe('OUTERREF-IN-NOTEXISTS: outerRef() compiles to column ref, not paramete
 
 	it('eq with outerRef produces column reference in NOT EXISTS subquery', () => {
 		const orm = buildOrm();
-		const dump = orm
-			.select('symbols')
-			.where(
-				notExists('callers', {
-					where: eq('caller_file_id', outerRef('file_id')),
-				}),
-			)
-			.dump();
+		const dump = orm.select('symbols').where(
+			notExists('callers', { where: eq('caller_file_id', outerRef('file_id')) }),
+		).dump();
 
 		// outerRef('file_id') must compile to a column reference: symbols.file_id
 		expect(dump.sql).toMatch(/symbols\.file_id/);
@@ -116,10 +99,9 @@ describe('OUTERREF-IN-NOTEXISTS: outerRef() compiles to column ref, not paramete
 
 	it('scalar values are still parameterized after the fix (no regression)', () => {
 		const orm = buildOrm();
-		const dump = orm
-			.select('symbols')
-			.where(notExists('callers', { where: eq('caller_file_id', 42) }))
-			.dump();
+		const dump = orm.select('symbols').where(
+			notExists('callers', { where: eq('caller_file_id', 42) }),
+		).dump();
 
 		// Scalar 42 must be a parameterized value, not a column ref
 		expect(dump.params).toContain(42);

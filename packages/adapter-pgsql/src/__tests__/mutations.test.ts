@@ -2,13 +2,13 @@
  * Mutation Compiler Tests
  */
 
-import { exists, notExists } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
+import { exists, notExists } from '@dbsp/core';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 } from '../handlers/types.js';
 import { registerAllWhereHandlers } from '../handlers/where/index.js';
 import {
@@ -25,8 +25,8 @@ import {
 	type UpdateConfig,
 	type UpsertConfig,
 } from '../mutations/index.js';
-import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 
 // Register WHERE handlers before tests
 beforeAll(() => {
@@ -206,7 +206,7 @@ describe('Mutation Compiler', () => {
 						column: 'id',
 						value: 123,
 						table: 'posts',
-					} as CompilerDecision,
+					} as Decision,
 				],
 			};
 
@@ -311,7 +311,7 @@ describe('Mutation Compiler', () => {
 						column: 'id',
 						value: 456,
 						table: 'posts',
-					} as CompilerDecision,
+					} as Decision,
 				],
 			};
 
@@ -333,13 +333,13 @@ describe('Mutation Compiler', () => {
 						column: 'published',
 						value: false,
 						table: 'posts',
-					} as CompilerDecision,
+					} as Decision,
 					{
 						type: '=',
 						column: 'archived',
 						value: true,
 						table: 'posts',
-					} as CompilerDecision,
+					} as Decision,
 				],
 			};
 
@@ -373,7 +373,7 @@ describe('Mutation Compiler', () => {
 			const ctx = createContext('users');
 			const state = createState();
 
-			const decision: CompilerDecision = {
+			const decision: Decision = {
 				type: 'insert',
 				table: 'users',
 				columns: ['name', 'email'],
@@ -389,7 +389,7 @@ describe('Mutation Compiler', () => {
 			const ctx = createContext('users');
 			const state = createState();
 
-			const decision: CompilerDecision = {
+			const decision: Decision = {
 				type: 'update',
 				table: 'users',
 				set: [{ column: 'name', value: 'Updated' }],
@@ -405,7 +405,7 @@ describe('Mutation Compiler', () => {
 			const ctx = createContext('posts');
 			const state = createState();
 
-			const decision: CompilerDecision = {
+			const decision: Decision = {
 				type: 'delete',
 				table: 'posts',
 				conditions: [{ type: '=', column: 'id', value: 999, table: 'posts' }],
@@ -675,12 +675,7 @@ describe('DELETE with notExists / exists WHERE (DELETE-NOT-EXISTS)', () => {
 		};
 		const config: DeleteConfig = {
 			table: 'embeddings',
-			where: [
-				{
-					kind: 'notExists',
-					relation: 'symbol',
-				} as unknown as CompilerDecision,
-			],
+			where: [{ kind: 'notExists', relation: 'symbol' } as unknown as Decision],
 		};
 		const result = compileDelete(config, ctx, state);
 		const stmt = (result as any).DeleteStmt;
@@ -698,21 +693,18 @@ describe('DELETE-NOTEXISTS-ALIAS: notExists() resolves relation to real table na
 	it('uses ModelIR to resolve relation "symbol" -> table "symbols" in NOT EXISTS subquery', async () => {
 		// Build a minimal ModelIR with relation embeddings.symbol -> symbols table
 		const relations = new Map([
-			[
-				'embeddings.symbol',
-				{
-					name: 'symbol',
-					type: 'belongsTo' as const,
-					source: 'embeddings',
-					target: 'symbols',
-					cardinality: 'many-to-one' as const,
-					optionality: 'optional' as const,
-					includeStrategy: 'auto' as const,
-					filterStrategy: 'auto' as const,
-					joinDefault: 'auto' as const,
-					foreignKeys: [],
-				},
-			],
+			['embeddings.symbol', {
+				name: 'symbol',
+				type: 'belongsTo' as const,
+				source: 'embeddings',
+				target: 'symbols',
+				cardinality: 'many-to-one' as const,
+				optionality: 'optional' as const,
+				includeStrategy: 'auto' as const,
+				filterStrategy: 'auto' as const,
+				joinDefault: 'auto' as const,
+				foreignKeys: [],
+			}],
 		]);
 		const model = {
 			tables: new Map(),
@@ -724,9 +716,7 @@ describe('DELETE-NOTEXISTS-ALIAS: notExists() resolves relation to real table na
 			isAmbiguous: () => ({ ambiguous: false }),
 		} as unknown as import('@dbsp/types').ModelIR;
 
-		const { createPgsqlCompileOnlyAdapter: createAdapter } = await import(
-			'../pgsql-adapter.js'
-		);
+		const { createPgsqlCompileOnlyAdapter: createAdapter } = await import('../pgsql-adapter.js');
 		const adapterWithModel = createAdapter({ model });
 
 		const intent = {

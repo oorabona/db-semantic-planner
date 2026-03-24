@@ -23,8 +23,8 @@ import {
 } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	IncludeHandler,
 	IncludeResult,
 } from '../types.js';
@@ -71,7 +71,7 @@ export const joinIncludeHandler: IncludeHandler = {
 	strategy: 'join',
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): IncludeResult {
@@ -121,8 +121,11 @@ export const joinIncludeHandler: IncludeHandler = {
 				targets.push(starTarget(targetAlias, ctx.naming));
 			} else {
 				for (const col of columns) {
-					const outputAlias = columnAliases?.[col] ?? `${relation}.${col}`;
-					targets.push(columnTarget(col, outputAlias, targetAlias, ctx.naming));
+					const outputAlias =
+						columnAliases?.[col] ?? `${relation}.${col}`;
+					targets.push(
+						columnTarget(col, outputAlias, targetAlias, ctx.naming),
+					);
 				}
 			}
 		}

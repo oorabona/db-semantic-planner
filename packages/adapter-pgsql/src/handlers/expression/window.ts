@@ -11,8 +11,8 @@ import { columnRef } from '../../ast-helpers.js';
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -47,10 +47,7 @@ function buildSortBy(
 /**
  * Build a WindowDef (OVER clause)
  */
-function buildWindowDef(
-	decision: CompilerDecision,
-	ctx: CompilerContext,
-): WindowDef {
+function buildWindowDef(decision: Decision, ctx: CompilerContext): WindowDef {
 	const partition = decision.partition;
 	const orderBy = decision.orderBy;
 	const frame = decision.frame;
@@ -92,7 +89,7 @@ function buildWindowDef(
 function buildWindowFunction(
 	funcName: string,
 	args: Node[],
-	decision: CompilerDecision,
+	decision: Decision,
 	ctx: CompilerContext,
 ): Node {
 	const windowDef = buildWindowDef(decision, ctx);
@@ -117,7 +114,7 @@ function createNoArgWindowHandler(
 	return {
 		types,
 		compile(
-			decision: CompilerDecision,
+			decision: Decision,
 			ctx: CompilerContext,
 			_state: CompilerState,
 		): Node {
@@ -150,7 +147,7 @@ export const ntileHandler: ExpressionHandler = {
 	types: ['ntile', 'NTILE'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -174,7 +171,7 @@ function createLagLeadHandler(
 	return {
 		types,
 		compile(
-			decision: CompilerDecision,
+			decision: Decision,
 			ctx: CompilerContext,
 			state: CompilerState,
 		): Node {
@@ -224,7 +221,7 @@ function createColumnWindowHandler(
 	return {
 		types,
 		compile(
-			decision: CompilerDecision,
+			decision: Decision,
 			ctx: CompilerContext,
 			_state: CompilerState,
 		): Node {
@@ -262,7 +259,7 @@ export const genericWindowHandler: ExpressionHandler = {
 	types: ['window', 'windowFunc'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

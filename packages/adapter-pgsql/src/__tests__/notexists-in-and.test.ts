@@ -1,3 +1,4 @@
+
 /**
  * Regression test: notExists() nested inside and() must produce exactly ONE NOT EXISTS clause.
  *
@@ -66,7 +67,12 @@ describe('notExists() inside and() — duplicate NOT EXISTS regression', () => {
 
 		const dump = orm
 			.select('symbols')
-			.where(and(eq('exported', true), notExists('callee_calls')))
+			.where(
+				and(
+					eq('exported', true),
+					notExists('callee_calls'),
+				),
+			)
 			.dump();
 
 		const normalized = ws(dump.sql);
@@ -81,7 +87,12 @@ describe('notExists() inside and() — duplicate NOT EXISTS regression', () => {
 
 		const dump = orm
 			.select('symbols')
-			.where(and(eq('exported', true), notExists('callee_calls')))
+			.where(
+				and(
+					eq('exported', true),
+					notExists('callee_calls'),
+				),
+			)
 			.dump();
 
 		const normalized = ws(dump.sql);
@@ -98,7 +109,12 @@ describe('notExists() inside and() — duplicate NOT EXISTS regression', () => {
 
 		const dump = orm
 			.select('symbols')
-			.where(and(eq('exported', true), notExists('callee_calls')))
+			.where(
+				and(
+					eq('exported', true),
+					notExists('callee_calls'),
+				),
+			)
 			.dump();
 
 		const normalized = ws(dump.sql);
@@ -142,7 +158,10 @@ describe('notExists() at top level (regression guard)', () => {
 	it('top-level notExists still produces exactly one NOT EXISTS', () => {
 		const orm = buildOrm();
 
-		const dump = orm.select('symbols').where(notExists('callee_calls')).dump();
+		const dump = orm
+			.select('symbols')
+			.where(notExists('callee_calls'))
+			.dump();
 
 		const normalized = ws(dump.sql);
 
@@ -153,7 +172,10 @@ describe('notExists() at top level (regression guard)', () => {
 	it('top-level notExists uses actual table name "calls"', () => {
 		const orm = buildOrm();
 
-		const dump = orm.select('symbols').where(notExists('callee_calls')).dump();
+		const dump = orm
+			.select('symbols')
+			.where(notExists('callee_calls'))
+			.dump();
 
 		const normalized = ws(dump.sql);
 

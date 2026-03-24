@@ -1,3 +1,4 @@
+
 /**
  * Tests for FILTER (WHERE ...) clause support on fn() custom function expressions.
  *
@@ -7,16 +8,18 @@
  */
 
 import { eq, exprRef, fn, isNotNull } from '@dbsp/core';
-import type { CustomFnExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
+import type { CustomFnExpressionIntent } from '@dbsp/types';
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
-function getExprIntent(expr: ReturnType<typeof fn>): CustomFnExpressionIntent {
+function getExprIntent(
+	expr: ReturnType<typeof fn>,
+): CustomFnExpressionIntent {
 	return (expr as unknown as { intent: CustomFnExpressionIntent }).intent;
 }
 
@@ -86,7 +89,7 @@ describe('ExpressionRef.filter()', () => {
 	it('filter() throws on non-customFn ExpressionRef (exprRef)', () => {
 		const expr = exprRef('name');
 		expect(() => expr.filter(eq('active', true))).toThrow(
-			'filter() can only be used on function expressions created with fn()',
+			"filter() can only be used on function expressions created with fn()",
 		);
 	});
 });

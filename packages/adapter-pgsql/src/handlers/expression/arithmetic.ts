@@ -10,8 +10,8 @@ import { columnRef } from '../../ast-helpers.js';
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -43,7 +43,7 @@ export const arithmeticHandler: ExpressionHandler = {
 	types: ['arithmetic', 'math', 'calc'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

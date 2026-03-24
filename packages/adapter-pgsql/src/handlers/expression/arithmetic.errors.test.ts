@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type { CompilerContext, CompilerDecision } from '../types.js';
+import type { CompilerContext, Decision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import { arithmeticHandler } from './arithmetic.js';
 
@@ -29,7 +29,7 @@ describe('arithmeticHandler errors', () => {
 
 	it('throws when both operands are missing (no args)', () => {
 		const state = createCompilerState();
-		const decision = { type: 'arithmetic' } as CompilerDecision;
+		const decision = { type: 'arithmetic' } as Decision;
 		expect(() => arithmeticHandler.compile(decision, ctx, state)).toThrow(
 			'Arithmetic handler requires left and right operands',
 		);
@@ -40,7 +40,7 @@ describe('arithmeticHandler errors', () => {
 		const decision = {
 			type: 'arithmetic',
 			args: [],
-		} as unknown as CompilerDecision;
+		} as unknown as Decision;
 		expect(() => arithmeticHandler.compile(decision, ctx, state)).toThrow(
 			'Arithmetic handler requires left and right operands',
 		);
@@ -51,7 +51,7 @@ describe('arithmeticHandler errors', () => {
 		const decision = {
 			type: 'arithmetic',
 			args: ['price'],
-		} as unknown as CompilerDecision;
+		} as unknown as Decision;
 		expect(() => arithmeticHandler.compile(decision, ctx, state)).toThrow(
 			'Arithmetic handler requires left and right operands',
 		);
@@ -62,7 +62,7 @@ describe('arithmeticHandler errors', () => {
 		const decision = {
 			type: 'arithmetic',
 			args: [undefined, 'quantity'],
-		} as unknown as CompilerDecision;
+		} as unknown as Decision;
 		expect(() => arithmeticHandler.compile(decision, ctx, state)).toThrow(
 			'Arithmetic handler requires left and right operands',
 		);
@@ -74,7 +74,7 @@ describe('arithmeticHandler errors', () => {
 			type: 'arithmetic',
 			operator: '*',
 			args: undefined,
-		} as unknown as CompilerDecision;
+		} as unknown as Decision;
 		expect(() => arithmeticHandler.compile(decision, ctx, state)).toThrow(
 			'Arithmetic handler requires left and right operands',
 		);

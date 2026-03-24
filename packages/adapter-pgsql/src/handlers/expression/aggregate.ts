@@ -10,8 +10,8 @@ import type { Node } from '@pgsql/types';
 import { columnRef, funcCall } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -58,7 +58,7 @@ export const countHandler: ExpressionHandler = {
 	types: ['count', 'COUNT'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
@@ -76,7 +76,7 @@ export const countDistinctHandler: ExpressionHandler = {
 	types: ['countDistinct', 'COUNT_DISTINCT'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
@@ -99,7 +99,7 @@ function createSimpleAggregateHandler(
 	return {
 		types,
 		compile(
-			decision: CompilerDecision,
+			decision: Decision,
 			ctx: CompilerContext,
 			_state: CompilerState,
 		): Node {
@@ -137,7 +137,7 @@ export const genericAggregateHandler: ExpressionHandler = {
 	types: ['aggregate', 'agg'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {

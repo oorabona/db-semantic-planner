@@ -8,11 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type {
-	CompilerContext,
-	CompilerDecision,
-	WhereDispatcher,
-} from '../types.js';
+import type { CompilerContext, Decision, WhereDispatcher } from '../types.js';
 import { createCompilerState } from '../types.js';
 import {
 	hasNoRelationHandler,
@@ -65,7 +61,7 @@ describe('relationFilterHandler mode:some', () => {
 			relation: 'comments',
 			targetTable: 'comments',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = relationFilterHandler.compile(
 			decision,
@@ -86,7 +82,7 @@ describe('relationFilterHandler mode:some', () => {
 			relation: 'comments',
 			targetTable: 'comments',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = relationFilterHandler.compile(
 			decision,
@@ -114,7 +110,7 @@ describe('relationFilterHandler mode:none', () => {
 			relation: 'comments',
 			targetTable: 'comments',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = relationFilterHandler.compile(
 			decision,
@@ -134,7 +130,7 @@ describe('relationFilterHandler mode:none', () => {
 			relation: 'comments',
 			targetTable: 'comments',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = relationFilterHandler.compile(
 			decision,
@@ -170,7 +166,7 @@ describe('relationFilterHandler mode:every', () => {
 					value: 'approved',
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = relationFilterHandler.compile(
 			decision,
@@ -199,7 +195,7 @@ describe('relationFilterHandler mode:is', () => {
 			relation: 'author',
 			targetTable: 'authors',
 			sourceColumn: 'author_id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = relationFilterHandler.compile(
 			decision,
@@ -228,7 +224,7 @@ describe('relationFilterHandler mode:is', () => {
 			relation: 'author',
 			targetTable: 'authors',
 			sourceColumn: 'author_id',
-		} as CompilerDecision;
+		} as Decision;
 
 		relationFilterHandler.compile(
 			decision,
@@ -251,7 +247,7 @@ describe('relationFilterHandler mode:is', () => {
 			targetTable: 'authors',
 			sourceColumn: 'author_id',
 			targetColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		relationFilterHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -264,7 +260,7 @@ describe('relationFilterHandler mode:is', () => {
 			type: 'where',
 			operator: 'is',
 			sourceColumn: 'author_id',
-		} as CompilerDecision;
+		} as Decision;
 
 		expect(() =>
 			relationFilterHandler.compile(decision, ctx, state, mockDispatch),
@@ -279,14 +275,14 @@ describe('relationFilterHandler mode:is', () => {
 			relation: 'author',
 			targetTable: 'authors',
 			sourceColumn: 'author_id',
-		} as CompilerDecision;
+		} as Decision;
 		const decision2 = {
 			type: 'where',
 			operator: 'is',
 			relation: 'category',
 			targetTable: 'categories',
 			sourceColumn: 'category_id',
-		} as CompilerDecision;
+		} as Decision;
 
 		relationFilterHandler.compile(decision1, ctx, state, mockDispatch);
 		relationFilterHandler.compile(decision2, ctx, state, mockDispatch);
@@ -304,7 +300,7 @@ describe('relationFilterHandler mode:is', () => {
 			relation: 'author',
 			targetTable: 'authors',
 			sourceColumn: 'author_id',
-		} as CompilerDecision;
+		} as Decision;
 
 		relationFilterHandler.compile(decision, ctxWithAlias, state, mockDispatch);
 
@@ -335,7 +331,7 @@ describe('relationFilterHandler mode:is with conditions', () => {
 					value: true,
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = relationFilterHandler.compile(
 			decision,
@@ -370,7 +366,7 @@ describe('relationFilterHandler mode:is with conditions', () => {
 					value: 10,
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = relationFilterHandler.compile(
 			decision,
@@ -408,7 +404,7 @@ describe('relationFilterHandler mode:is with conditions', () => {
 					value: true,
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		relationFilterHandler.compile(decision, ctx, state, inspectDispatch);
 
@@ -433,7 +429,7 @@ describe('relationFilterHandler mode:isNot', () => {
 			relation: 'author',
 			targetTable: 'authors',
 			sourceColumn: 'author_id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = relationFilterHandler.compile(
 			decision,
@@ -464,7 +460,7 @@ describe('relationFilterHandler mode:isNot', () => {
 					value: true,
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = relationFilterHandler.compile(
 			decision,
@@ -494,7 +490,7 @@ describe('hasRelationHandler', () => {
 			relation: 'comments',
 			targetTable: 'comments',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = hasRelationHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -509,7 +505,7 @@ describe('hasRelationHandler', () => {
 			relation: 'comments',
 			targetTable: 'comments',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = hasRelationHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -532,7 +528,7 @@ describe('hasNoRelationHandler', () => {
 			relation: 'comments',
 			targetTable: 'comments',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = hasNoRelationHandler.compile(
 			decision,
@@ -552,7 +548,7 @@ describe('hasNoRelationHandler', () => {
 			relation: 'comments',
 			targetTable: 'comments',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = hasNoRelationHandler.compile(
 			decision,

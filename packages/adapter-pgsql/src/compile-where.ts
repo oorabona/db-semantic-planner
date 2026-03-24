@@ -15,7 +15,7 @@ import type {
 	WhereIntent,
 } from '@dbsp/types';
 import type { Node, SelectStmt, SubLink } from '@pgsql/types';
-import { binaryExpr, columnRef, rangeVar } from './ast-helpers.js';
+import { andExpr, binaryExpr, columnRef, notExpr, orExpr, rangeVar } from './ast-helpers.js';
 import { compileExpressionIntent } from './handlers/expression/custom.js';
 import { createWhereDispatcher } from './handlers/index.js';
 import type {
@@ -434,12 +434,53 @@ export function compileWhereIntent(
 		);
 	}
 
+	// `and`, `or`, `not` contain nested WhereIntents. If we let them fall
+	// through to the dispatcher, each nested condition is processed via
+	// normalizeToCompilerDecision which hits `default` for `expression` kind
+	// (returning it unchanged), then the comparison handler is selected based on
+	// `intent.operator` (e.g. 'lte') — but that handler expects `decision.column`
+	// which is absent → throws "Comparison handler requires a column".
+	// Fix: handle and/or/not recursively via compileWhereIntent so every nested
+	// condition gets proper dispatch (including expression, subquery, etc.).
+	if (intent.kind === 'and') {
+		const andIntent = intent as { conditions: WhereIntent[] };
+		const nodes = andIntent.conditions.map((c) => compileWhereIntent(c, ctx));
+		if (nodes.length === 0) {
+			// Empty AND = tautology; use a truthy constant
+			return { TypeCast: { arg: { Integer: { ival: 1 } }, typeName: { TypeName: { names: [{ String: { sval: 'bool' } }], typemod: -1 } } } } as unknown as Node;
+		}
+		if (nodes.length === 1) return nodes[0]!;
+		return andExpr(...nodes);
+	}
+	if (intent.kind === 'or') {
+		const orIntent = intent as { conditions: WhereIntent[] };
+		const nodes = orIntent.conditions.map((c) => compileWhereIntent(c, ctx));
+		if (nodes.length === 0) {
+			// Empty OR = contradiction; use a falsy constant
+			return { TypeCast: { arg: { Integer: { ival: 0 } }, typeName: { TypeName: { names: [{ String: { sval: 'bool' } }], typemod: -1 } } } } as unknown as Node;
+		}
+		if (nodes.length === 1) return nodes[0]!;
+		return orExpr(...nodes);
+	}
+	if (intent.kind === 'not') {
+		const notIntent = intent as { condition: WhereIntent };
+		return notExpr(compileWhereIntent(notIntent.condition, ctx));
+	}
+
 	// All other kinds: cast WhereIntent to Decision.
 	// createWhereDispatcher calls normalizeToDecision internally, which handles:
-	// comparison, like, in, any, null, and, or, not, exists, notExists,
-	// jsonContains, jsonExists — plus pass-through for expression/subquery/etc.
+	// comparison, like, in, any, null, exists, notExists,
+	// jsonContains, jsonExists — plus pass-through for unknown kinds.
+	// Map WhereIntent.field → CompilerDecision.column for kinds that use the comparison handler.
+	// Only comparison/null kinds read `decision.column` — other kinds (like, in, any, json*)
+	// use `field`/`pattern`/`values` via normalizeToCompilerDecision and adding `column` would
+	// confuse their dispatch.
+	const needsColumn = intent.kind === 'comparison' || intent.kind === 'null';
+	const bridged = needsColumn
+		? { ...intent, column: (intent as Record<string, unknown>).field } as unknown as CompilerDecision
+		: intent as unknown as CompilerDecision;
 	return dispatcher(
-		intent as unknown as CompilerDecision,
+		bridged,
 		handlerCtx,
 		ctx.paramState,
 	);

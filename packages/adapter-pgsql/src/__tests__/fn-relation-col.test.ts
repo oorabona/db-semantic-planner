@@ -1,3 +1,4 @@
+
 /**
  * @module fn-relation-col.test
  * Tests for fn() with ref('relation.col') arguments in SELECT context.
@@ -12,9 +13,9 @@
  */
 
 import { exprRef, fn } from '@dbsp/core';
-import type { CustomFnExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
+import type { CustomFnExpressionIntent } from '@dbsp/types';
 
 /**
  * Compile a fn() expression in SELECT context and return normalized SQL.
@@ -41,12 +42,9 @@ function compileFnWithRef(
 	return compilePlan(plan).sql;
 }
 
-describe("fn() with ref('relation.col') argument compilation", () => {
+describe('fn() with ref(\'relation.col\') argument compilation', () => {
 	it('fn("min", ref("callerFile.path")) emits min("callerFile"."path")', () => {
-		const sql = compileFnWithRef(
-			fn('min', exprRef('callerFile.path')),
-			'example',
-		);
+		const sql = compileFnWithRef(fn('min', exprRef('callerFile.path')), 'example');
 
 		// Must contain table-qualified form — "callerFile" is quoted (mixed case), path is lowercase
 		expect(sql).toContain('"callerFile".path');
@@ -83,11 +81,7 @@ describe("fn() with ref('relation.col') argument compilation", () => {
 	it('nested fn(): inner ref with dot resolves to join alias', () => {
 		// coalesce(min(callerFile.path), max(callerFile.name))
 		const sql = compileFnWithRef(
-			fn(
-				'coalesce',
-				fn('min', exprRef('callerFile.path')),
-				fn('max', exprRef('callerFile.name')),
-			),
+			fn('coalesce', fn('min', exprRef('callerFile.path')), fn('max', exprRef('callerFile.name'))),
 			'result',
 		);
 

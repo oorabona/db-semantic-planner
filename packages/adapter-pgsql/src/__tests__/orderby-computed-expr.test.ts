@@ -1,16 +1,9 @@
 // ORDERBY-COMPUTED-EXPR regression test
-import { op, exprRef as ref } from '@dbsp/core';
+import { exprRef as ref, op } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import {
-	compilePlan,
-	type PlanDecision,
-	type SimplifiedPlanReport,
-} from '../compiler.js';
+import { compilePlan, type PlanDecision, type SimplifiedPlanReport } from '../compiler.js';
 
-function compileToSql(plan: SimplifiedPlanReport): {
-	sql: string;
-	parameters: readonly unknown[];
-} {
+function compileToSql(plan: SimplifiedPlanReport): { sql: string; parameters: readonly unknown[] } {
 	return compilePlan(plan);
 }
 
@@ -21,12 +14,7 @@ describe('ORDERBY-COMPUTED-EXPR: orderBy(op(...)) generates correct SQL', () => 
 			rootTable: 'symbols',
 			decisions: [
 				{ type: 'select', column: '*', table: 'symbols' },
-				{
-					type: 'orderBy',
-					expressionIntent: expr.intent as Record<string, unknown>,
-					direction: 'ASC',
-					table: 'symbols',
-				} satisfies PlanDecision,
+				{ type: 'orderBy', expressionIntent: expr.intent as Record<string, unknown>, direction: 'ASC', table: 'symbols' } satisfies PlanDecision,
 			],
 		};
 		const result = compileToSql(plan);
@@ -43,12 +31,7 @@ describe('ORDERBY-COMPUTED-EXPR: orderBy(op(...)) generates correct SQL', () => 
 			rootTable: 'symbols',
 			decisions: [
 				{ type: 'select', column: '*', table: 'symbols' },
-				{
-					type: 'orderBy',
-					expressionIntent: expr.intent as Record<string, unknown>,
-					direction: 'ASC',
-					table: 'symbols',
-				} satisfies PlanDecision,
+				{ type: 'orderBy', expressionIntent: expr.intent as Record<string, unknown>, direction: 'ASC', table: 'symbols' } satisfies PlanDecision,
 			],
 		};
 		const result = compileToSql(plan);
@@ -61,12 +44,7 @@ describe('ORDERBY-COMPUTED-EXPR: orderBy(op(...)) generates correct SQL', () => 
 			rootTable: 'symbols',
 			decisions: [
 				{ type: 'select', column: '*', table: 'symbols' },
-				{
-					type: 'orderBy',
-					expressionIntent: expr.intent as Record<string, unknown>,
-					direction: 'DESC',
-					table: 'symbols',
-				} satisfies PlanDecision,
+				{ type: 'orderBy', expressionIntent: expr.intent as Record<string, unknown>, direction: 'DESC', table: 'symbols' } satisfies PlanDecision,
 			],
 		};
 		const result = compileToSql(plan);
@@ -79,12 +57,7 @@ describe('ORDERBY-COMPUTED-EXPR: orderBy(op(...)) generates correct SQL', () => 
 			rootTable: 'rankings',
 			decisions: [
 				{ type: 'select', column: '*', table: 'rankings' },
-				{
-					type: 'orderBy',
-					expressionIntent: expr.intent as Record<string, unknown>,
-					direction: 'DESC',
-					table: 'rankings',
-				} satisfies PlanDecision,
+				{ type: 'orderBy', expressionIntent: expr.intent as Record<string, unknown>, direction: 'DESC', table: 'rankings' } satisfies PlanDecision,
 			],
 		};
 		const result = compileToSql(plan);

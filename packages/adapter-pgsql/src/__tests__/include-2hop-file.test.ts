@@ -1,3 +1,4 @@
+
 /**
  * INCLUDE-2HOP-FILE regression test.
  *
@@ -61,10 +62,7 @@ describe('INCLUDE-2HOP-FILE: dot-notation include generates correct 2-hop JOIN',
 
 		// Must contain two separate JOIN clauses (symbol + file)
 		const joinMatches = sql.match(/\bjoin\b/gi);
-		expect(
-			joinMatches?.length,
-			'Expected 2 JOIN clauses',
-		).toBeGreaterThanOrEqual(2);
+		expect(joinMatches?.length, 'Expected 2 JOIN clauses').toBeGreaterThanOrEqual(2);
 
 		// Must join the symbols table first (intermediate hop)
 		expect(sql, 'Should JOIN symbols as symbol').toContain('symbols as symbol');
@@ -125,13 +123,14 @@ describe('INCLUDE-2HOP-FILE: dot-notation include generates correct 2-hop JOIN',
 	it('regression guard: dot-notation without join option keeps default strategy', () => {
 		const orm = buildOrm();
 		// No join option — should not force join strategy on intermediate relations
-		const dump = orm.select('symbol_parents').include('symbol.file').dump();
+		const dump = orm
+			.select('symbol_parents')
+			.include('symbol.file')
+			.dump();
 
 		const sql = normalizeSQL(dump.sql);
 
 		// Should produce valid SQL regardless of strategy
-		expect(sql, 'Should contain FROM symbol_parents').toContain(
-			'symbol_parents',
-		);
+		expect(sql, 'Should contain FROM symbol_parents').toContain('symbol_parents');
 	});
 });

@@ -95,10 +95,9 @@ export function createCompilerState(): CompilerState {
 // ============================================================================
 
 /**
- * Primary adapter-local decision type for handler consumption.
- * Matches core's PlanDecision structure.
+ * Base decision interface matching core's PlanDecision structure.
  */
-export interface CompilerDecision {
+export interface Decision {
 	readonly type: string;
 	readonly table?: string;
 	readonly column?: string;
@@ -115,7 +114,7 @@ export interface CompilerDecision {
 	readonly targetTable?: string;
 	readonly function?: string;
 	readonly args?: readonly unknown[];
-	readonly conditions?: readonly CompilerDecision[];
+	readonly conditions?: readonly Decision[];
 	readonly columns?: readonly string[];
 	readonly values?: readonly unknown[];
 	readonly set?: readonly { column: string; value: unknown }[];
@@ -125,12 +124,12 @@ export interface CompilerDecision {
 	readonly strategy?: 'join' | 'lateral' | 'json_agg' | 'cte';
 	readonly relation?: string;
 	readonly relationName?: string;
-	readonly include?: readonly CompilerDecision[];
+	readonly include?: readonly Decision[];
 	// Relation metadata (for json_agg nesting)
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
 	readonly foreignKey?: string;
 	readonly parentKey?: string;
-	readonly children?: readonly CompilerDecision[];
+	readonly children?: readonly Decision[];
 	// Window function specific
 	readonly partition?: readonly string[];
 	readonly orderBy?: readonly { column: string; direction?: 'ASC' | 'DESC' }[];
@@ -192,7 +191,7 @@ export interface WhereHandler {
 	 * @returns PostgreSQL AST node for the condition
 	 */
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -203,7 +202,7 @@ export interface WhereHandler {
  * Dispatcher for recursive WHERE compilation.
  */
 export type WhereDispatcher = (
-	decision: CompilerDecision,
+	decision: Decision,
 	ctx: CompilerContext,
 	state: CompilerState,
 ) => Node;
@@ -223,11 +222,7 @@ export interface ExpressionHandler {
 	 * @param state Mutable compiler state
 	 * @returns PostgreSQL AST node for the expression
 	 */
-	compile(
-		decision: CompilerDecision,
-		ctx: CompilerContext,
-		state: CompilerState,
-	): Node;
+	compile(decision: Decision, ctx: CompilerContext, state: CompilerState): Node;
 }
 
 /**
@@ -246,7 +241,7 @@ export interface IncludeHandler {
 	 * @returns Object with modifications to apply
 	 */
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): IncludeResult;
