@@ -9,6 +9,7 @@
  */
 
 import type { ModelIR, PlanReport } from '@dbsp/types';
+import { isSubqueryRef } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,
@@ -216,16 +217,23 @@ export function convertWhereToDecisions(
 	const w = where as Record<string, unknown>;
 
 	switch (w.kind) {
-		case 'comparison':
+		case 'comparison': {
+			// Convert SubqueryRefIntent { kind: 'ref', column } to FieldRef { kind: 'fieldRef', scope: 'outer', column }
+			// so that compileValueOrFieldRef() treats it as a column reference, not a parameter.
+			const rawValue = w.value;
+			const resolvedValue = isSubqueryRef(rawValue)
+				? { kind: 'fieldRef' as const, scope: 'outer' as const, column: (rawValue as { column: string }).column }
+				: rawValue;
 			return [
 				{
 					type: 'where',
 					column: w.field as string,
 					operator: w.operator as string,
-					value: w.value,
+					value: resolvedValue,
 					table,
 				},
 			];
+		}
 		case 'like':
 			return [
 				{

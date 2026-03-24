@@ -11,6 +11,7 @@ import type {
 	SelectIntent,
 	WhereIntent,
 } from '@dbsp/types';
+import { isSubqueryRef } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import type { PlanDecision } from './compiler.js';
 import type { RangeValue } from './handlers/types.js';
@@ -249,11 +250,17 @@ export function convertWhereCondition(
 	switch (kind) {
 		// Comparison: { kind: 'comparison', field: 'name', operator: 'eq', value: 'John' }
 		case 'comparison': {
+			// Convert SubqueryRefIntent { kind: 'ref', column } to FieldRef { kind: 'fieldRef', scope: 'outer', column }
+			// so that compileValueOrFieldRef() treats it as a column reference, not a parameter.
+			const rawValue = cond.value;
+			const resolvedValue = isSubqueryRef(rawValue)
+				? { kind: 'fieldRef' as const, scope: 'outer' as const, column: rawValue.column }
+				: rawValue;
 			const result: Mutable<PlanDecision> = {
 				type: 'where',
 				column: cond.field as string,
 				operator: cond.operator as string,
-				value: cond.value,
+				value: resolvedValue,
 				table: rootTable,
 			};
 			// Propagate JSON access metadata
