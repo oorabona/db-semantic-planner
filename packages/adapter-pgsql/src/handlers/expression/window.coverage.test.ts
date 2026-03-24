@@ -232,7 +232,10 @@ describe('ntileHandler', () => {
 
 	it('compiles with value from decision.args[0]', () => {
 		const state = createCompilerState();
-		const decision = { type: 'ntile', args: [5] } as unknown as CompilerDecision;
+		const decision = {
+			type: 'ntile',
+			args: [5],
+		} as unknown as CompilerDecision;
 		const result = ntileHandler.compile(decision, ctx, state);
 		expect(state.parameters).toContain(5);
 	});
@@ -414,7 +417,10 @@ describe('firstValueHandler', () => {
 
 	it('compiles with column', () => {
 		const state = createCompilerState();
-		const decision = { type: 'firstValue', column: 'price' } as CompilerDecision;
+		const decision = {
+			type: 'firstValue',
+			column: 'price',
+		} as CompilerDecision;
 		const result = firstValueHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.funcname?.[0]?.String?.sval).toBe('first_value');
 		expect(result.FuncCall?.args).toHaveLength(1);
@@ -445,7 +451,10 @@ describe('firstValueHandler', () => {
 	it('uses currentAlias when set', () => {
 		const state = createCompilerState();
 		const ctxWithAlias = makeCtx({ currentAlias: 'w1' });
-		const decision = { type: 'firstValue', column: 'value' } as CompilerDecision;
+		const decision = {
+			type: 'firstValue',
+			column: 'value',
+		} as CompilerDecision;
 		const result = firstValueHandler.compile(decision, ctxWithAlias, state);
 		const colRef = result.FuncCall?.args?.[0]?.ColumnRef;
 		expect(colRef?.fields).toContainEqual({ String: { sval: 'w1' } });
@@ -492,7 +501,10 @@ describe('lastValueHandler', () => {
 	it('uses currentAlias when set', () => {
 		const state = createCompilerState();
 		const ctxWithAlias = makeCtx({ currentAlias: 'w2' });
-		const decision = { type: 'lastValue', column: 'result' } as CompilerDecision;
+		const decision = {
+			type: 'lastValue',
+			column: 'result',
+		} as CompilerDecision;
 		const result = lastValueHandler.compile(decision, ctxWithAlias, state);
 		const colRef = result.FuncCall?.args?.[0]?.ColumnRef;
 		expect(colRef?.fields).toContainEqual({ String: { sval: 'w2' } });

@@ -1,4 +1,3 @@
-
 /**
  * DOUBLE-ALIAS regression tests
  *

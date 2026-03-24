@@ -7,7 +7,11 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type { CompilerContext, CompilerDecision, WhereDispatcher } from '../types.js';
+import type {
+	CompilerContext,
+	CompilerDecision,
+	WhereDispatcher,
+} from '../types.js';
 import { createCompilerState } from '../types.js';
 
 /** No-op dispatcher — range handler never recurses */

@@ -1,4 +1,3 @@
-
 /**
  * NOTEXISTS-JOIN: Support `include` option inside notExists() / exists() for JOIN within subquery.
  *
@@ -235,4 +234,4 @@ describe('notExists() with include — SELECT path via ORM', () => {
 		expect(normalized).toMatch(/JOIN\s+"?files"?/i);
 		expect(normalized).toContain('project_id');
 	});
-})
+});

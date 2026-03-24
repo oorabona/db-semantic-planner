@@ -1,6 +1,5 @@
-
+import { createOrm, like, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { like, createOrm, schema } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({

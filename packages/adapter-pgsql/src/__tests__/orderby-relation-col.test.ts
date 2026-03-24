@@ -1,4 +1,3 @@
-
 /**
  * ORDERBY-RELATION-COL regression test.
  *
@@ -175,7 +174,9 @@ describe('ORDERBY-RELATION-COL: ExpressionSpec shape validation', () => {
 		// would push field='__expr' and field='intent', producing ORDER BY "__expr" ASC
 		const spec = relationColumn('callerFile', 'path', 'callerFilePath');
 		const entries = Object.entries(spec);
-		const wouldHaveProducedExprField = entries.some(([key]) => key === '__expr');
+		const wouldHaveProducedExprField = entries.some(
+			([key]) => key === '__expr',
+		);
 		// Confirm the shape that caused the bug — __expr IS a top-level key
 		expect(wouldHaveProducedExprField).toBe(true);
 		// The fix: isExpressionSpec() catches this BEFORE the Object.entries() path

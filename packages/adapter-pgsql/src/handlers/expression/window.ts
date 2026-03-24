@@ -11,8 +11,8 @@ import { columnRef } from '../../ast-helpers.js';
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -47,7 +47,10 @@ function buildSortBy(
 /**
  * Build a WindowDef (OVER clause)
  */
-function buildWindowDef(decision: CompilerDecision, ctx: CompilerContext): WindowDef {
+function buildWindowDef(
+	decision: CompilerDecision,
+	ctx: CompilerContext,
+): WindowDef {
 	const partition = decision.partition;
 	const orderBy = decision.orderBy;
 	const frame = decision.frame;

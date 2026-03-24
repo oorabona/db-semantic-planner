@@ -14,8 +14,8 @@ import { getLogger } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	ExpressionHandler,
 } from '../types.js';
 

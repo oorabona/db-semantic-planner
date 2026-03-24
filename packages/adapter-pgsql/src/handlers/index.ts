@@ -8,8 +8,8 @@
 import type { Node } from '@pgsql/types';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	ExpressionHandler,
 	IncludeHandler,
 	WhereDispatcher,
@@ -193,7 +193,9 @@ interface RawCompilerDecisionInput extends CompilerDecision {
  * Normalize a WhereIntent (IntentAST format) into a CompilerDecision (handler format).
  * WhereIntent uses `kind` + `field`, CompilerDecision uses `type` + `column` + `operator`.
  */
-function normalizeToCompilerDecision(input: CompilerDecision): CompilerDecision {
+function normalizeToCompilerDecision(
+	input: CompilerDecision,
+): CompilerDecision {
 	// If it already has `column`, it's already a CompilerDecision.
 	// BUT: if jsonPath is present, reroute to jsonComparison handler
 	// (mapToHandlerDecision sets column but keeps the original operator like 'eq')
@@ -281,7 +283,9 @@ function normalizeToCompilerDecision(input: CompilerDecision): CompilerDecision 
 			return {
 				type: 'not',
 				operator: 'not',
-				conditions: [normalizeToCompilerDecision(raw.condition as CompilerDecision)],
+				conditions: [
+					normalizeToCompilerDecision(raw.condition as CompilerDecision),
+				],
 			};
 		case 'null':
 			return {
@@ -383,13 +387,14 @@ function normalizeToCompilerDecision(input: CompilerDecision): CompilerDecision 
 				| undefined;
 			// Convert include map to a CompilerDecision[] for the handler.
 			// Each entry becomes a minimal join decision: { type: 'existsInclude', relation, joinType }.
-			const includeCompilerDecisions: CompilerDecision[] | undefined = includeIntent
-				? Object.entries(includeIntent).map(([rel, opts]) => ({
-						type: 'existsInclude',
-						relation: rel,
-						joinType: opts.join ?? 'inner',
-					}))
-				: undefined;
+			const includeCompilerDecisions: CompilerDecision[] | undefined =
+				includeIntent
+					? Object.entries(includeIntent).map(([rel, opts]) => ({
+							type: 'existsInclude',
+							relation: rel,
+							joinType: opts.join ?? 'inner',
+						}))
+					: undefined;
 			return {
 				type: 'exists',
 				operator: kind, // 'exists' | 'notExists'

@@ -8,15 +8,18 @@
  */
 
 import type { Node, SelectStmt, SubLink } from '@pgsql/types';
+import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import {
-	DEFAULT_PK_COLUMN,
-	defaultFkDerivation,
-} from '../../assert-field.js';
-import { columnRef, eqExpr, fkCorrelation, joinExpr, rangeVar } from '../../ast-helpers.js';
+	columnRef,
+	eqExpr,
+	fkCorrelation,
+	joinExpr,
+	rangeVar,
+} from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
@@ -79,9 +82,7 @@ function buildExistsSubquery(
 	// When called directly from mutation WHERE (DELETE/UPDATE), the planner is bypassed and
 	// sourceColumn is absent — fall back to the PK convention (typically 'id' for hasMany).
 	const sourceColumn =
-		decision.sourceColumn ??
-		ctx.defaultPkColumnName ??
-		DEFAULT_PK_COLUMN;
+		decision.sourceColumn ?? ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
 	const targetColumn =
 		decision.targetColumn ??
 		(ctx.deriveFkColumnName ?? defaultFkDerivation)(
@@ -138,7 +139,12 @@ function buildExistsSubquery(
 	}
 
 	// Build SELECT 1 FROM targetTable AS targetAlias [JOIN ...] WHERE ...
-	let fromNode: Node = rangeVar(targetTable, targetAlias, ctx.schema, ctx.naming);
+	let fromNode: Node = rangeVar(
+		targetTable,
+		targetAlias,
+		ctx.schema,
+		ctx.naming,
+	);
 
 	// Add JOIN clauses for each include entry.
 	// Each include entry in decision.include has shape: { type:'existsInclude', relation, joinType }
@@ -215,7 +221,12 @@ function buildExistsSubquery(
 					? 'JOIN_LEFT'
 					: 'JOIN_INNER';
 
-			const joinRangeVar = rangeVar(joinTargetTable, joinAlias, ctx.schema, ctx.naming);
+			const joinRangeVar = rangeVar(
+				joinTargetTable,
+				joinAlias,
+				ctx.schema,
+				ctx.naming,
+			);
 
 			// Wrap current fromNode with the new join: JoinExpr { larg: fromNode, rarg: joinRangeVar }
 			fromNode = joinExpr(joinType, fromNode, joinRangeVar, joinQuals);

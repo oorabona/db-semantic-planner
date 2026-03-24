@@ -34,6 +34,11 @@ import {
 	starTarget,
 	updateStmt,
 } from './ast-helpers.js';
+import {
+	buildSubqueryFromIntent,
+	compileWhereIntent,
+	type WhereCompilerCtx,
+} from './compile-where.js';
 import { deparseQuoted } from './deparse.js';
 import { resolveCaseValue as resolveCaseValueShared } from './handlers/expression/case-value.js';
 import { compileExpressionIntent } from './handlers/expression/custom.js';
@@ -47,8 +52,8 @@ import {
 	getIncludeHandler,
 } from './handlers/index.js';
 import type {
-	CompilerContext as HandlerCompilerContext,
 	CompilerDecision,
+	CompilerContext as HandlerCompilerContext,
 	CompilerState as HandlerCompilerState,
 	JoinExprNode,
 	SelectStmtNode,
@@ -56,11 +61,9 @@ import type {
 import { isSelectWithFields } from './handlers/types.js';
 import { compileValue } from './handlers/where/utils.js';
 import {
-	buildSubqueryFromIntent,
-	compileWhereIntent,
-	type WhereCompilerCtx,
-} from './compile-where.js';
-import { buildClauseDecisions, convertSelectIntent } from './intent-to-decisions.js';
+	buildClauseDecisions,
+	convertSelectIntent,
+} from './intent-to-decisions.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 import { createParamRef } from './param-ref.js';
@@ -138,7 +141,6 @@ function enrichForCompile(
 		escape: pd.escape,
 	} as CompilerDecision;
 }
-
 
 /**
  * Compile an optional filterCondition (PlanDecision) to an AST Node.
@@ -898,7 +900,9 @@ export class PlanCompiler {
 						// (same options: naming, schema, defaultPk, deriveFk)
 						const innerCompiler = new PlanCompiler({
 							naming: outerThis.naming,
-							...(outerThis.schema !== undefined && { schema: outerThis.schema }),
+							...(outerThis.schema !== undefined && {
+								schema: outerThis.schema,
+							}),
 							defaultPkColumnName: outerThis.defaultPk,
 							deriveFkColumnName: outerThis.deriveFk,
 						});
@@ -909,10 +913,22 @@ export class PlanCompiler {
 								// WHERE and HAVING are compiled via whereRaw decisions inside PlanCompiler
 								// (this path does not go through compileWhereIntent).
 								...(query.where
-									? [{ type: 'whereRaw' as const, expressionIntent: query.where, table: query.from }]
+									? [
+											{
+												type: 'whereRaw' as const,
+												expressionIntent: query.where,
+												table: query.from,
+											},
+										]
 									: []),
 								...(query.having
-									? [{ type: 'havingRaw' as const, expressionIntent: query.having, table: query.from }]
+									? [
+											{
+												type: 'havingRaw' as const,
+												expressionIntent: query.having,
+												table: query.from,
+											},
+										]
 									: []),
 								...buildClauseDecisions(query, query.from),
 							],

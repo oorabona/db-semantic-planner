@@ -13,19 +13,26 @@ import type {
 	SubqueryIncludeInfo,
 } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
-import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import type { Node } from '@pgsql/types';
+import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
+import { andExpr } from './ast-helpers.js';
+import {
+	buildSubqueryFromIntent,
+	compileWhereIntent,
+	type WhereCompilerCtx,
+} from './compile-where.js';
 import {
 	type CompilerOptions,
 	compilePlan,
 	type PlanDecision,
 	type SimplifiedPlanReport,
 } from './compiler.js';
-import { buildSubqueryFromIntent, compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
-import { andExpr } from './ast-helpers.js';
 import { deparseQuoted } from './deparse.js';
 import { createCompilerState } from './handlers/types.js';
-import { buildClauseDecisions, convertSelectIntent } from './intent-to-decisions.js';
+import {
+	buildClauseDecisions,
+	convertSelectIntent,
+} from './intent-to-decisions.js';
 import {
 	convertDottedFieldsToExists,
 	deriveForeignKey,
@@ -48,10 +55,11 @@ import {
  * Returns null when the decision itself should be removed.
  * Containers (whereAnd/whereOr/whereNot) that become empty after stripping are also removed.
  */
-function stripExistsFromDecision(
-	d: PlanDecision,
-): PlanDecision | null {
-	if (d.type === 'where' && (d.operator === 'exists' || d.operator === 'notExists')) {
+function stripExistsFromDecision(d: PlanDecision): PlanDecision | null {
+	if (
+		d.type === 'where' &&
+		(d.operator === 'exists' || d.operator === 'notExists')
+	) {
 		return null;
 	}
 	if (
@@ -212,8 +220,7 @@ export function compileSelect<T = unknown>(
 		// Keep the JOIN (for filtering/inner join semantics) but strip auto-columns.
 		// Explicitly requested columns (via relationColumn()) are still preserved —
 		// the caller is responsible for including them in groupBy().
-		const hasGroupBy =
-			plan.intent?.groupBy && plan.intent.groupBy.length > 0;
+		const hasGroupBy = plan.intent?.groupBy && plan.intent.groupBy.length > 0;
 		if (hasGroupBy) {
 			for (const d of enrichedUnifiedDecisions) {
 				if (d.type === 'includeStrategy' && d.choice === 'join') {
@@ -287,7 +294,9 @@ export function compileSelect<T = unknown>(
 								existing.push({ col, ...(alias !== undefined && { alias }) });
 							}
 						} else {
-							relationColumnsMap.set(mapKey, [{ col, ...(alias !== undefined && { alias }) }]);
+							relationColumnsMap.set(mapKey, [
+								{ col, ...(alias !== undefined && { alias }) },
+							]);
 						}
 					}
 				}
@@ -465,7 +474,7 @@ export function compileSelect<T = unknown>(
 				return false;
 			}),
 			...buildClauseDecisions(plan.intent, plan.rootTable), // ORDER BY, GROUP BY, DISTINCT, LIMIT, OFFSET
-			...existsDecisions,          // keep — already resolved by planner
+			...existsDecisions, // keep — already resolved by planner
 			...enrichedUnifiedDecisions, // keep — include strategies (JOINs, json_agg, etc.)
 		];
 
@@ -517,9 +526,11 @@ export function compileSelect<T = unknown>(
 		paramState: sharedState,
 		naming: deps.naming,
 		...(schemaName && { schemaName }),
-		...(resolvedModelForCompiler != null && { model: resolvedModelForCompiler }),
+		...(resolvedModelForCompiler != null && {
+			model: resolvedModelForCompiler,
+		}),
 		// Bug 3 fix: pass schemaName through so scalar subqueries are schema-qualified
-	compileSubquery: (intent, offset) =>
+		compileSubquery: (intent, offset) =>
 			buildSubqueryFromIntent(intent, offset, deps.naming, schemaName),
 	});
 
@@ -533,13 +544,26 @@ export function compileSelect<T = unknown>(
 	// WHERE/HAVING must be injected into the INNER SelectStmt, not the outer wrapper
 	// (which has no FROM clause and would produce invalid SQL).
 	const selectNode = result.ast as { SelectStmt?: Record<string, unknown> };
-	const outerStmt = selectNode.SelectStmt as Record<string, unknown> | undefined;
+	const outerStmt = selectNode.SelectStmt as
+		| Record<string, unknown>
+		| undefined;
 
 	let stmtTarget: Record<string, unknown> | undefined;
 	if (plan.intent.existsWrap && outerStmt) {
 		// Navigate: outer.targetList[0].ResTarget.val.SubLink.subselect.SelectStmt
-		const outerTargetList = outerStmt['targetList'] as Array<{ ResTarget?: { val?: { SubLink?: { subselect?: { SelectStmt?: Record<string, unknown> } } } } }> | undefined;
-		const innerSelectStmt = outerTargetList?.[0]?.ResTarget?.val?.SubLink?.subselect?.SelectStmt;
+		const outerTargetList = outerStmt['targetList'] as
+			| Array<{
+					ResTarget?: {
+						val?: {
+							SubLink?: {
+								subselect?: { SelectStmt?: Record<string, unknown> };
+							};
+						};
+					};
+			  }>
+			| undefined;
+		const innerSelectStmt =
+			outerTargetList?.[0]?.ResTarget?.val?.SubLink?.subselect?.SelectStmt;
 		stmtTarget = innerSelectStmt ?? outerStmt;
 	} else {
 		stmtTarget = outerStmt;
@@ -562,7 +586,11 @@ export function compileSelect<T = unknown>(
 		// to EXISTS decisions by convertDottedFieldsToExists → compilePlan handles them.
 		// compileWhereIntent must NOT also emit them or the WHERE is duplicated/broken.
 		if (
-			(k === 'comparison' || k === 'like' || k === 'null' || k === 'any' || k === 'in') &&
+			(k === 'comparison' ||
+				k === 'like' ||
+				k === 'null' ||
+				k === 'any' ||
+				k === 'in') &&
 			'field' in intent &&
 			typeof (intent as { field?: unknown }).field === 'string' &&
 			(intent as { field: string }).field.includes('.')
@@ -604,7 +632,10 @@ export function compileSelect<T = unknown>(
 			// via existsDecisions (resolved target tables from the planner).
 			const nonExistsWhere = stripExistsFromIntent(plan.intent.where);
 			if (nonExistsWhere !== null) {
-				const whereNode: Node = compileWhereIntent(nonExistsWhere, makeWhereCtx());
+				const whereNode: Node = compileWhereIntent(
+					nonExistsWhere,
+					makeWhereCtx(),
+				);
 				// AND with existing whereClause (EXISTS nodes from compilePlan).
 				const existing = stmtTarget['whereClause'] as Node | undefined;
 				stmtTarget['whereClause'] = existing
@@ -615,7 +646,10 @@ export function compileSelect<T = unknown>(
 		}
 		if (plan.intent.having) {
 			// HAVING has no exists/notExists — compile directly.
-			const havingNode: Node = compileWhereIntent(plan.intent.having, makeWhereCtx());
+			const havingNode: Node = compileWhereIntent(
+				plan.intent.having,
+				makeWhereCtx(),
+			);
 			stmtTarget['havingClause'] = havingNode;
 			didInject = true;
 		}

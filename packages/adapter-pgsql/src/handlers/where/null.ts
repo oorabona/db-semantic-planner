@@ -7,8 +7,8 @@
 import type { Node, NullTest } from '@pgsql/types';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	WhereHandler,
 } from '../types.js';
 import { NULL_OPERATORS } from '../types.js';

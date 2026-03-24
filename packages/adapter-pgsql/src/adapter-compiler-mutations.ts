@@ -6,7 +6,6 @@
  */
 
 import { InvalidOperationError, isSqlRaw } from '@dbsp/core';
-import type { Node } from '@pgsql/types';
 import type {
 	BatchUpdateIntent,
 	CompiledQuery,
@@ -19,17 +18,22 @@ import type {
 	UpsertIntent,
 	WhereIntent,
 } from '@dbsp/types';
+import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
+import {
+	buildSubqueryFromIntent,
+	compileWhereIntent,
+	type WhereCompilerCtx,
+} from './compile-where.js';
 import {
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from './compiler-utils.js';
-import { buildSubqueryFromIntent, compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
 import { deparseQuoted } from './deparse.js';
 import {
 	type CompilerContext,
-	createCompilerState,
 	type CompilerState,
+	createCompilerState,
 } from './handlers/index.js';
 import {
 	type BatchUpdateConfig,
@@ -49,7 +53,6 @@ import {
 	type UpsertConfig,
 	type UpsertFromConfig,
 } from './mutations/index.js';
-
 
 // ============================================================================
 // Internal helpers
@@ -80,7 +83,8 @@ function resolveExistsRelation(
 	const targetTable = rel.target;
 	// For belongsTo: FK is on the source table (e.g. embeddings.symbol_id → symbols.id)
 	if (rel.type === 'belongsTo') {
-		const fk = typeof rel.foreignKey === 'string' ? rel.foreignKey : rel.foreignKey?.[0];
+		const fk =
+			typeof rel.foreignKey === 'string' ? rel.foreignKey : rel.foreignKey?.[0];
 		return {
 			targetTable,
 			...(fk !== undefined && { sourceColumn: fk }),
@@ -111,8 +115,12 @@ function resolveExistsIntent(
 	return {
 		...w,
 		targetTable: resolved.targetTable,
-		...(resolved.sourceColumn !== undefined && { sourceColumn: resolved.sourceColumn }),
-		...(resolved.targetColumn !== undefined && { targetColumn: resolved.targetColumn }),
+		...(resolved.sourceColumn !== undefined && {
+			sourceColumn: resolved.sourceColumn,
+		}),
+		...(resolved.targetColumn !== undefined && {
+			targetColumn: resolved.targetColumn,
+		}),
 	} as unknown as WhereIntent;
 }
 
@@ -293,8 +301,11 @@ function injectWhereClause(
  * Used by compileInsertFrom / compileUpsertFrom to apply WHERE after building the AST.
  */
 function injectSelectWhereClause(ast: Node, whereNode: Node): void {
-	const insertNode = (ast as { InsertStmt: Record<string, unknown> }).InsertStmt;
-	const selectQuery = insertNode?.selectStmt as Record<string, unknown> | undefined;
+	const insertNode = (ast as { InsertStmt: Record<string, unknown> })
+		.InsertStmt;
+	const selectQuery = insertNode?.selectStmt as
+		| Record<string, unknown>
+		| undefined;
 	if (selectQuery && 'SelectStmt' in selectQuery) {
 		(selectQuery.SelectStmt as Record<string, unknown>).whereClause = whereNode;
 	}

@@ -28,7 +28,9 @@ function makeCtx(overrides: Partial<CompilerContext> = {}): CompilerContext {
 	} as CompilerContext;
 }
 
-function buildDecision(overrides: Record<string, unknown> = {}): CompilerDecision {
+function buildDecision(
+	overrides: Record<string, unknown> = {},
+): CompilerDecision {
 	return {
 		type: 'includeStrategy',
 		relation: 'posts',

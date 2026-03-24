@@ -245,8 +245,16 @@ describe('compileExpressionIntent', () => {
 				kind: 'customFn',
 				name: 'paradedb.parse',
 				args: [
-					{ kind: 'namedArg', name: 'field', value: { kind: 'literal', value: 'name' } },
-					{ kind: 'namedArg', name: 'query_string', value: { kind: 'param', value: 'test' } },
+					{
+						kind: 'namedArg',
+						name: 'field',
+						value: { kind: 'literal', value: 'name' },
+					},
+					{
+						kind: 'namedArg',
+						name: 'query_string',
+						value: { kind: 'param', value: 'test' },
+					},
 				],
 			});
 			const sql = normalizeSQL(result.sql);
@@ -258,7 +266,6 @@ describe('compileExpressionIntent', () => {
 		});
 	});
 });
-
 
 describe('json_build_object pattern (FN-JSON-BUILD)', () => {
 	it('compiles multi-arg fn() with literal keys and ref values', () => {

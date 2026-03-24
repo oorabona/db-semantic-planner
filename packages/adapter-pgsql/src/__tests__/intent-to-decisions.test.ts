@@ -8,17 +8,24 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { buildClauseDecisions, convertSelectIntent } from '../intent-to-decisions.js';
+import {
+	buildClauseDecisions,
+	convertSelectIntent,
+} from '../intent-to-decisions.js';
 
 describe('convertSelectIntent', () => {
 	it('defaults to SELECT * when no select provided', () => {
 		const decisions = convertSelectIntent(undefined, 'products');
-		expect(decisions).toEqual([{ type: 'select', column: '*', table: 'products' }]);
+		expect(decisions).toEqual([
+			{ type: 'select', column: '*', table: 'products' },
+		]);
 	});
 
 	it('converts SelectAllIntent { all: true }', () => {
 		const decisions = convertSelectIntent({ all: true } as any, 'products');
-		expect(decisions).toEqual([{ type: 'select', column: '*', table: 'products' }]);
+		expect(decisions).toEqual([
+			{ type: 'select', column: '*', table: 'products' },
+		]);
 	});
 
 	it('converts SelectFieldsIntent with multiple fields', () => {

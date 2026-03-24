@@ -8,8 +8,8 @@ import type { Node } from '@pgsql/types';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	WhereHandler,
 } from '../types.js';
 import { isRangeValue } from '../types.js';

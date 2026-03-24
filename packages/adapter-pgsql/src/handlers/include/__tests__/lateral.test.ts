@@ -26,7 +26,9 @@ function makeCtx(
 	} as CompilerContext;
 }
 
-function buildDecision(overrides: Partial<CompilerDecision> = {}): CompilerDecision {
+function buildDecision(
+	overrides: Partial<CompilerDecision> = {},
+): CompilerDecision {
 	return {
 		type: 'includeStrategy',
 		relation: 'posts',

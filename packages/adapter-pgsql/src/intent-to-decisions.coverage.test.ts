@@ -4,9 +4,12 @@
  * Focus: Branch coverage for all intent types, WHERE condition variants, expressions
  */
 
-import { describe, expect, it } from 'vitest';
-import { buildClauseDecisions, convertSelectIntent } from './intent-to-decisions.js';
 import type { QueryIntent } from '@dbsp/types';
+import { describe, expect, it } from 'vitest';
+import {
+	buildClauseDecisions,
+	convertSelectIntent,
+} from './intent-to-decisions.js';
 
 // Local shim: combine both new focused functions so existing tests work unchanged.
 // WHERE/HAVING are intentionally excluded — they are compiled via compileWhereIntent.
@@ -585,7 +588,11 @@ describe('intentToDecisions - coverage', () => {
 			// HAVING is compiled separately via compileWhereIntent — not in clause decisions
 			expect(decisions.find((d) => d.type === 'havingRaw')).toBeUndefined();
 			// GROUP BY is still produced
-			expect(decisions).toContainEqual({ type: 'groupBy', column: 'user_id', table: 'orders' });
+			expect(decisions).toContainEqual({
+				type: 'groupBy',
+				column: 'user_id',
+				table: 'orders',
+			});
 		});
 
 		it('converts DISTINCT flag', () => {
@@ -677,7 +684,10 @@ describe('intentToDecisions - coverage', () => {
 					subquery: {
 						type: 'select' as const,
 						from: 'users',
-						select: { type: 'aggregate' as const, aggregates: [{ function: 'avg' as const, field: 'salary' }] },
+						select: {
+							type: 'aggregate' as const,
+							aggregates: [{ function: 'avg' as const, field: 'salary' }],
+						},
 					},
 				},
 			};
@@ -689,7 +699,12 @@ describe('intentToDecisions - coverage', () => {
 			const intent = {
 				type: 'select' as const,
 				from: 'users',
-				where: { kind: 'comparison' as const, field: 'active', operator: 'eq', value: true },
+				where: {
+					kind: 'comparison' as const,
+					field: 'active',
+					operator: 'eq',
+					value: true,
+				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
 			expect(decisions.find((d) => d.type === 'whereRaw')).toBeUndefined();

@@ -13,8 +13,8 @@ import { createParamRef } from '../../param-ref.js';
 import { compileExpressionIntent } from '../expression/custom.js';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';

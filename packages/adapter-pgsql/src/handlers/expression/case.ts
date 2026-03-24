@@ -11,8 +11,8 @@ import { columnRef } from '../../ast-helpers.js';
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	ExpressionHandler,
 } from '../types.js';
 import { resolveCaseValue as resolveCaseValueShared } from './case-value.js';
@@ -125,7 +125,9 @@ export const simpleCaseHandler: ExpressionHandler = {
 			// Build the comparison value — `when` may be a CompilerDecision with .value
 			// or a primitive; extract the raw value for parameterization.
 			const whenParamNumber = ++state.paramIndex;
-			const whenCompilerDecision = cond.when as CompilerDecision & { value?: unknown };
+			const whenCompilerDecision = cond.when as CompilerDecision & {
+				value?: unknown;
+			};
 			state.parameters.push(whenCompilerDecision.value ?? cond.when);
 			const whenExpr = createParamRef(whenParamNumber);
 
