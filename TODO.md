@@ -4,6 +4,22 @@
 
 ## In Progress
 
+- [x] ✅ **INCLUDE-WHERE-EXPR** [Adapter] Fix `op().eq()` expressions in `include({ where })` silently dropped — `convertWhereToDecisions()` in `plan-decision-extractor.ts` now handles `case 'expression'` (same as `convertWhereCondition`); 5 regression tests in `include-where-regex.test.ts` (2026-03-24)
+
+- [x] ✅ **OUTERREF-NOTEXISTS** [Adapter] Fix `outerRef('col')` in `notExists({ where: neq/eq(...) })` serialized as JSON parameter instead of column reference — `convertWhereToDecisions()` (SELECT/ORM path, plan-decision-extractor.ts) and `convertWhereCondition()` (mutation path, intent-to-decisions.ts) now detect `SubqueryRefIntent { kind: 'ref' }` and convert to `FieldRef { kind: 'fieldRef', scope: 'outer' }` before creating decision; `compileValueOrFieldRef` then routes to `columnRef()`; 3 regression tests in `outerref-in-notexists.test.ts` (2026-03-24)
+
+- [x] ✅ **NOTEXISTS-AND** [Adapter] Fix `notExists()` inside `and()` generating duplicate NOT EXISTS clauses — `stripExistsFromDecision()` replaces flat filter in `compileSelect` with recursive strip that removes exists/notExists from whereAnd/whereOr/whereNot containers too; 7 regression tests in `notexists-in-and.test.ts`, 2903 adapter + 2197 core tests pass (2026-03-24)
+
+- [x] ✅ **NOTEXISTS-INVERSE** [Core/Adapter] Fix `notExists('callee_calls')` resolving to wrong table — planner correctly uses `model.getRelation()` to resolve inverse hasMany relation name to real target table; test gap filled with 10 regression tests in `notexists-inverse-relation.test.ts` (2026-03-24)
+- [x] ✅ **GROUPBY-INCLUDE-JOIN** [Adapter] Fix `include(join) + groupBy()` — joined table hydration columns not in GROUP BY cause PostgreSQL error; `compileSelect` now strips `columns` from join `includeStrategy` when `hasGroupBy`; 5 regression tests in `groupby-include-join.test.ts` (2026-03-24)
+- [x] ✅ **NULLS-LAST-EXPR** [Core] Fix `orderBy(op(...), dir, { nulls: 'last' })` — ExpressionRef/ExpressionSpec branches in `orderBy()` now propagate `options.nulls`; added `options` param to TypeScript overloads in `query-builder-types.ts`; 6 regression tests in `orderby-expr-nulls.test.ts` (2026-03-24)
+- [x] ✅ **NOTEXISTS-JOIN** [Core/Adapter] Add `include` option to `exists()`/`notExists()` for JOIN inside subquery — `notExists('rel', { include: { alias: { join: 'inner' } }, where: ... })` generates `NOT EXISTS (SELECT 1 FROM target JOIN joined ON fk WHERE ...)` via both DELETE mutation path and SELECT ORM path; FK resolution from ModelIR; 9 tests in `notexists-join.test.ts`, 954 adapter unit tests pass, TSC clean (2026-03-23)
+
+- [x] ✅ **GROUPBY-REL** [Adapter] Fix `groupBy(['id', 'relation.col'])` with INNER JOIN — dotted column names in `groupBy` case of `compileSelect` now split on `.` to produce `columnRef(col, table)` instead of wrong `columnRef('rel.col', rootTable)`; 3 regression tests in `groupby-relation.test.ts` (2026-03-23)
+- [x] ✅ **FN-REF-DOT** [Adapter] Verify `fn('min', ref('rel.col'))` resolves JOIN alias — `ref` case in `compileExpressionIntent` already splits on `.`; no code change needed; 5 confirmation tests in `fn-relation-col.test.ts` using `exprRef()` (correct API alias for expression col refs) (2026-03-23)
+
+- [x] ✅ **ORM-TABLES-TYPE** [Core] Fix `orm.from(table).columns([...]).all()` type inference — added `RowToColumnRefs<TTable, TRow>` utility type in `orm-instance-types.ts`, updated `tables` from `TableRef<K, any, any>` to `TableRef<K, RowToColumnRefs<K, DB[K]>, any>`; zero runtime changes; 2 new type-level tests (SC-17, SC-18); 2184 core tests pass, TSC clean (2026-03-23)
+
 - [x] ✅ **DX-040-SURFACE** [Core] Add `orm.tables` + `orm.from(tableRef)` to OrmInstance — exposes pre-built tables proxy, from() extracts table name via TABLE_META and delegates to QueryBuilder; `select()` deprecated in type; `InferTables` exported from index; 10 tests, 2160 tests pass, TSC clean (2026-03-23)
 
 - [x] ✅ **LIKE-ESCAPE** [Core/Adapter] Add `escape` option to `like()` — `like('col', 'pat', { escape: '\\' })` → `WHERE col LIKE $1 ESCAPE $2`; modified WhereLikeIntent, filters.ts, intent-to-decisions, likeHandler, deparseAExpr, mapToHandlerDecision; 10 tests (2026-03-23)
@@ -75,9 +91,9 @@
 | **AGG-JOINED-COL** | P1 | 4 checks (highCoupling, godFunctions, largeFiles, unresolvedCalls) | `count(ref('joinedRelation.id'))` / `min(ref('joinedRelation.path'))` — aggregate functions on columns from JOINed tables, usable in SELECT + HAVING |
 | **NOTEXISTS-MULTI-JOIN** | P1 | 3 checks (deadCode, unusedExports, orphanFiles) | `notExists('relation', { where: ... })` with JOINs inside the subquery + outer-column references. Currently notExists only follows 1 FK with 1 WhereIntent. |
 | **CASE-INTENT** | P2 | 1 check (unusedDeps) | `caseWhen(condition, thenExpr).else(elseExpr)` — conditional expressions in SELECT columns |
-| **LIKE-ESCAPE** | P2 | 1 check (unusedVariables) | `like('col', pattern, { escape: '\\' })` — escape character for LIKE WHERE clauses |
-| **NULLS-LAST-EXPR** | P2 | 1 check (complexFunctions) | `orderBy(op(...), 'asc', { nulls: 'last' })` — NULLS LAST on computed expression in ORDER BY |
-| **REF-VS-REF** | P1 | 1 check (circularImports) | `op('!=', ref('col_a'), ref('col_b'))` — same-table column-to-column comparison in `.where()` compiles to `__expr != __expr` instead of `"col_a" != "col_b"` |
+| ~~**LIKE-ESCAPE**~~ | ~~P2~~ | ~~1 check (unusedVariables)~~ | ~~`like('col', pattern, { escape: '\\' })` — escape character for LIKE WHERE clauses~~ ✅ Done 2026-03-23 |
+| ~~**NULLS-LAST-EXPR**~~ | ~~P2~~ | ~~1 check (complexFunctions)~~ | ~~`orderBy(op(...), 'asc', { nulls: 'last' })` — NULLS LAST on computed expression in ORDER BY~~ ✅ Done 2026-03-24 (Issue 10: `orderBy` ExpressionRef/ExpressionSpec branches now propagate `options.nulls`) |
+| ~~**REF-VS-REF**~~ | ~~P1~~ | ~~1 check (circularImports)~~ | ~~`op('!=', ref('col_a'), ref('col_b'))` — same-table column-to-column comparison in `.where()` compiles to `__expr != __expr` instead of `"col_a" != "col_b"`~~ ✅ Done 2026-03-23 |
 | **WINDOW-FN** | P2 | 1 check (unresolvedTypeBindings) + others | `wCount()` / `COUNT(*) OVER()` in SELECT columns — window functions not supported in `.columns()` builder |
 
 ---
