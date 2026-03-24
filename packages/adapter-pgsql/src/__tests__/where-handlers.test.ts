@@ -6,10 +6,10 @@ import { deparseSync } from 'pgsql-deparser';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
 	type CompilerContext,
-	type CompilerDecision,
 	clearHandlers,
 	createCompilerState,
 	createWhereDispatcher,
+	type Decision,
 } from '../handlers/index.js';
 import {
 	registerAllWhereHandlers,
@@ -19,7 +19,7 @@ import { identityNaming } from '../naming-plugin.js';
 
 // Helper to compile a decision to SQL
 function compileToSql(
-	decision: CompilerDecision,
+	decision: Decision,
 	ctx?: Partial<CompilerContext>,
 ): { sql: string; params: unknown[] } {
 	const fullCtx: CompilerContext = {

@@ -8,7 +8,7 @@ import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../../../ast-helpers.js';
 import { identityNaming } from '../../../naming-plugin.js';
-import type { CompilerContext, CompilerDecision } from '../../types.js';
+import type { CompilerContext, Decision } from '../../types.js';
 import { createCompilerState } from '../../types.js';
 import { lateralIncludeHandler } from '../lateral.js';
 
@@ -26,9 +26,7 @@ function makeCtx(
 	} as CompilerContext;
 }
 
-function buildDecision(
-	overrides: Partial<CompilerDecision> = {},
-): CompilerDecision {
+function buildDecision(overrides: Partial<Decision> = {}): Decision {
 	return {
 		type: 'includeStrategy',
 		relation: 'posts',
@@ -40,7 +38,7 @@ function buildDecision(
 		parentKey: 'id',
 		strategy: 'lateral',
 		...overrides,
-	} as CompilerDecision;
+	} as Decision;
 }
 
 /**
@@ -247,7 +245,7 @@ describe('lateral handler', () => {
 						},
 					],
 				},
-			] as readonly CompilerDecision[],
+			] as readonly Decision[],
 		});
 
 		const result = lateralIncludeHandler.compile(decision, ctx, state);
@@ -281,7 +279,7 @@ describe('lateral handler', () => {
 			targetColumn: 'user_id',
 			relationType: 'hasMany',
 			strategy: 'lateral',
-		} as CompilerDecision;
+		} as Decision;
 
 		expect(() => lateralIncludeHandler.compile(decision, ctx, state)).toThrow(
 			'LATERAL include requires targetTable',
@@ -362,7 +360,7 @@ describe('lateral handler', () => {
 					foreignKey: 'order_id',
 					parentKey: 'id',
 				},
-			] as readonly CompilerDecision[],
+			] as readonly Decision[],
 		});
 
 		const result = lateralIncludeHandler.compile(decision, ctx, state);

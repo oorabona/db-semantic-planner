@@ -31,8 +31,8 @@ import {
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -222,6 +222,21 @@ export function compileExpressionIntent(
 /**
  * Compile a WhereIntent FILTER clause to an AST Node for use in customFn expressions.
  *
+ * Uses require() for createWhereDispatcher and convertWhereCondition to avoid circular
+ * dependencies (compiler.ts → custom.ts). The PlanDecision from convertWhereCondition
+ * is structurally compatible with Decision for simple filter conditions.
+ */
+/**
+ * Compile a WhereIntent FILTER clause to an AST Node for use in customFn expressions.
+ *
+ * Uses direct imports (not require()) — both are safe:
+ * - handlers/index.ts does not import custom.ts (no circular dep)
+ * - intent-to-decisions.ts imports PlanDecision from compiler.ts as `import type` only
+ *   (type-only imports have no runtime circular dep in ESM)
+ */
+/**
+ * Compile a WhereIntent FILTER clause to an AST Node for use in customFn expressions.
+ *
  * Uses direct import for convertWhereCondition (safe: intent-to-decisions.ts only has
  * `import type` from compiler.ts, no runtime circular dep).
  *
@@ -241,7 +256,7 @@ export const customExpressionHandler: ExpressionHandler = {
 	],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

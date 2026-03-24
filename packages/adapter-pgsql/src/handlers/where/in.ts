@@ -9,8 +9,8 @@ import { booleanConstNode } from '../../ast-helpers.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	WhereHandler,
 } from '../types.js';
 import { COLLECTION_OPERATORS } from '../types.js';
@@ -73,7 +73,7 @@ export const inHandler: WhereHandler = {
 	operators: [COLLECTION_OPERATORS.IN, COLLECTION_OPERATORS.NOT_IN],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

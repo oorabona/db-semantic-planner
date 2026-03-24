@@ -34,11 +34,6 @@ import {
 	starTarget,
 	updateStmt,
 } from './ast-helpers.js';
-import {
-	buildSubqueryFromIntent,
-	compileWhereIntent,
-	type WhereCompilerCtx,
-} from './compile-where.js';
 import { deparseQuoted } from './deparse.js';
 import { resolveCaseValue as resolveCaseValueShared } from './handlers/expression/case-value.js';
 import { compileExpressionIntent } from './handlers/expression/custom.js';
@@ -52,39 +47,39 @@ import {
 	getIncludeHandler,
 } from './handlers/index.js';
 import type {
-	CompilerDecision,
 	CompilerContext as HandlerCompilerContext,
 	CompilerState as HandlerCompilerState,
+	Decision as HandlerDecision,
 	JoinExprNode,
 	SelectStmtNode,
 } from './handlers/types.js';
 import { isSelectWithFields } from './handlers/types.js';
 import { compileValue } from './handlers/where/utils.js';
 import {
-	buildClauseDecisions,
-	convertSelectIntent,
+	convertWhereCondition,
+	intentToDecisions,
 } from './intent-to-decisions.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 import { createParamRef } from './param-ref.js';
 
 // ============================================================================
-// PlanDecision → CompilerDecision enrichment
+// PlanDecision → HandlerDecision mapper
 // ============================================================================
 
 /**
- * Enrich a PlanDecision into a CompilerDecision for handler consumption.
+ * Recursively map a PlanDecision tree to a HandlerDecision tree.
  *
- * Performs field-by-field mapping (column ?? field, relation ?? relationName,
- * deriveFkColumns, orderBy normalisation, recursive children/conditions/include)
- * so handlers receive a fully resolved Decision without any `as unknown as` casts.
+ * Both types are structurally similar but nominally distinct. This explicit
+ * mapper avoids `as unknown as` double casts by doing the conversion
+ * field-by-field, including recursive children/conditions.
  */
-function enrichForCompile(
+function mapToHandlerDecision(
 	pd: PlanDecision,
 	rootTable: string,
 	defaultPk: string,
 	deriveFk: FkColumnDerivation,
-): CompilerDecision {
+): HandlerDecision {
 	return {
 		type: pd.type,
 		table: pd.table,
@@ -106,7 +101,7 @@ function enrichForCompile(
 		offset: pd.offset,
 		strategy: (pd.choice === 'subquery'
 			? 'json_agg'
-			: pd.choice) as CompilerDecision['strategy'],
+			: pd.choice) as HandlerDecision['strategy'],
 		relation: pd.relation ?? pd.relationName,
 		relationName: pd.relationName,
 		relationType: pd.relationType,
@@ -118,13 +113,13 @@ function enrichForCompile(
 		fkColumn: pd.fkColumn,
 		maxDepth: pd.maxDepth,
 		children: pd.children?.map((c) =>
-			enrichForCompile(c, pd.targetTable ?? rootTable, defaultPk, deriveFk),
+			mapToHandlerDecision(c, pd.targetTable ?? rootTable, defaultPk, deriveFk),
 		),
 		conditions: pd.conditions?.map((c) =>
-			enrichForCompile(c, rootTable, defaultPk, deriveFk),
+			mapToHandlerDecision(c, rootTable, defaultPk, deriveFk),
 		),
 		include: pd.include?.map((c) =>
-			enrichForCompile(c, rootTable, defaultPk, deriveFk),
+			mapToHandlerDecision(c, rootTable, defaultPk, deriveFk),
 		),
 		orderBy: pd.orderBy?.map((o) => ({
 			column: o.field,
@@ -139,7 +134,7 @@ function enrichForCompile(
 		aggregate: pd.aggregate,
 		columnAliases: pd.columnAliases,
 		escape: pd.escape,
-	} as CompilerDecision;
+	} as HandlerDecision;
 }
 
 /**
@@ -153,24 +148,7 @@ function compileFilterCondition(
 	state: HandlerCompilerState,
 ): import('@pgsql/types').Node | undefined {
 	if (!filterCondition) return undefined;
-	// whereRaw: the filter stores a WhereIntent directly — compile via compileWhereIntent.
-	if (filterCondition.type === 'whereRaw') {
-		const whereCtx: WhereCompilerCtx = {
-			rootTable: ctx.rootTable,
-			aliases: new Map(),
-			paramState: state,
-			naming: ctx.naming,
-			...(ctx.schema !== undefined && { schemaName: ctx.schema }),
-			...(ctx.model !== undefined && { model: ctx.model }),
-			compileSubquery: (sqIntent, offset) =>
-				buildSubqueryFromIntent(sqIntent, offset, ctx.naming, ctx.schema),
-		};
-		return compileWhereIntent(
-			filterCondition.expressionIntent as import('@dbsp/types').WhereIntent,
-			whereCtx,
-		);
-	}
-	const mapped = enrichForCompile(
+	const mapped = mapToHandlerDecision(
 		filterCondition,
 		ctx.rootTable,
 		ctx.defaultPkColumnName ?? 'id',
@@ -429,26 +407,8 @@ export class PlanCompiler {
 		decision: PlanDecision,
 		ctxOverrides?: Partial<HandlerCompilerContext>,
 	): Node {
-		// whereRaw: bypass PlanDecision → CompilerDecision mapping and compile
-		// the stored WhereIntent directly via compileWhereIntent.
-		if (decision.type === 'whereRaw') {
-			const whereCtx: WhereCompilerCtx = {
-				rootTable: this.currentRootTable,
-				aliases: new Map(),
-				paramState: this.state,
-				naming: this.naming,
-				...(this.schema !== undefined && { schemaName: this.schema }),
-				...(this.model !== undefined && { model: this.model }),
-				compileSubquery: (sqIntent, offset) =>
-					buildSubqueryFromIntent(sqIntent, offset, this.naming, this.schema),
-			};
-			return compileWhereIntent(
-				decision.expressionIntent as import('@dbsp/types').WhereIntent,
-				whereCtx,
-			);
-		}
 		const dispatcher = createWhereDispatcher();
-		const mapped = enrichForCompile(
+		const mapped = mapToHandlerDecision(
 			decision,
 			this.currentRootTable,
 			this.defaultPk,
@@ -492,7 +452,7 @@ export class PlanCompiler {
 						direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
 					})),
 				}),
-			} as CompilerDecision;
+			} as HandlerDecision;
 			const ctx = ctxOverrides
 				? { ...this.handlerCtx(), ...ctxOverrides }
 				: this.handlerCtx();
@@ -515,21 +475,10 @@ export class PlanCompiler {
 	 *
 	 * Called recursively so 2+ levels of nested IN subqueries all work.
 	 */
-	/**
-	 * Recursively convert a PlanDecision (potentially with nested in+subquery)
-	 * into a CompilerDecision suitable for the WHERE dispatcher.
-	 *
-	 * When a PlanDecision has operator='in'/'notIn' with a subquery object,
-	 * enrichForCompile loses the subquery because CompilerDecision has no
-	 * `subquery` field. This method detects that pattern and converts it to the
-	 * inSubquery/notInSubquery form that buildScalarSubquery expects.
-	 *
-	 * Called recursively so 2+ levels of nested IN subqueries all work.
-	 */
 	private mapInSubqueryCondition(
 		pd: PlanDecision,
 		rootTable: string,
-	): CompilerDecision {
+	): HandlerDecision {
 		const sub = pd.subquery as
 			| (PlanDecision['subquery'] & { where?: PlanDecision })
 			| undefined;
@@ -544,13 +493,13 @@ export class PlanCompiler {
 						: '*';
 			// Recursively apply: the inner subquery's WHERE may itself be
 			// another in+subquery (the NESTED-INSUBQUERY case)
-			const subConditions: CompilerDecision[] = sub.where
+			const subConditions: HandlerDecision[] = sub.where
 				? [this.mapInSubqueryCondition(sub.where, sub.from)]
 				: [];
 			const rawLimit = sub.limit;
 			const rawOrderBy = sub.orderBy;
 			return {
-				...enrichForCompile(pd, rootTable, this.defaultPk, this.deriveFk),
+				...mapToHandlerDecision(pd, rootTable, this.defaultPk, this.deriveFk),
 				operator: op,
 				targetTable: sub.from,
 				selectColumn,
@@ -562,10 +511,10 @@ export class PlanCompiler {
 						direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
 					})),
 				}),
-			} as CompilerDecision;
+			} as HandlerDecision;
 		}
-		// Non-subquery case: enrichForCompile suffices
-		return enrichForCompile(pd, rootTable, this.defaultPk, this.deriveFk);
+		// Non-subquery case: plain mapToHandlerDecision suffices
+		return mapToHandlerDecision(pd, rootTable, this.defaultPk, this.deriveFk);
 	}
 
 	/**
@@ -597,7 +546,7 @@ export class PlanCompiler {
 
 		// Bridge PlanDecision -> handler Decision via explicit mapper
 		// (mapper handles subquery → json_agg mapping internally)
-		const handlerDecision = enrichForCompile(
+		const handlerDecision = mapToHandlerDecision(
 			decision,
 			plan.rootTable,
 			this.defaultPk,
@@ -841,7 +790,7 @@ export class PlanCompiler {
 					decision.table ?? plan.rootTable,
 				);
 				const state = this.createHandlerState();
-				const handlerDecision = enrichForCompile(
+				const handlerDecision = mapToHandlerDecision(
 					decision,
 					plan.rootTable,
 					this.defaultPk,
@@ -900,38 +849,13 @@ export class PlanCompiler {
 						// (same options: naming, schema, defaultPk, deriveFk)
 						const innerCompiler = new PlanCompiler({
 							naming: outerThis.naming,
-							...(outerThis.schema !== undefined && {
-								schema: outerThis.schema,
-							}),
+							...(outerThis.schema !== undefined && { schema: outerThis.schema }),
 							defaultPkColumnName: outerThis.defaultPk,
 							deriveFkColumnName: outerThis.deriveFk,
 						});
 						const innerPlan: SimplifiedPlanReport = {
 							rootTable: query.from,
-							decisions: [
-								...convertSelectIntent(query.select, query.from),
-								// WHERE and HAVING are compiled via whereRaw decisions inside PlanCompiler
-								// (this path does not go through compileWhereIntent).
-								...(query.where
-									? [
-											{
-												type: 'whereRaw' as const,
-												expressionIntent: query.where,
-												table: query.from,
-											},
-										]
-									: []),
-								...(query.having
-									? [
-											{
-												type: 'havingRaw' as const,
-												expressionIntent: query.having,
-												table: query.from,
-											},
-										]
-									: []),
-								...buildClauseDecisions(query, query.from),
-							],
+							decisions: intentToDecisions(query, query.from),
 						};
 						const innerResult = innerCompiler.compile(innerPlan);
 						// Renumber ParamRef $N in the inner AST by paramOffset so they
@@ -946,8 +870,8 @@ export class PlanCompiler {
 				const state = this.createHandlerState();
 				const node = compileExpressionIntent(exprIntent, ctx, state);
 				// Apply FILTER (WHERE ...) clause for customFn intents (e.g. array_agg FILTER (WHERE ...))
-				// Compiled at this level using compileWhereIntent directly to avoid
-				// circular deps in custom.ts and the deprecated convertWhereCondition path.
+				// Compiled at this level to use compileFilterCondition + convertWhereCondition
+				// without introducing circular deps in custom.ts.
 				if (
 					exprIntent.kind === 'customFn' &&
 					(exprIntent as import('@dbsp/types').CustomFnExpressionIntent).filter
@@ -955,18 +879,22 @@ export class PlanCompiler {
 					const filterIntent = (
 						exprIntent as import('@dbsp/types').CustomFnExpressionIntent
 					).filter!;
-					const filterDispatcher = createWhereDispatcher();
-					// Cast filterIntent (WhereIntent) to CompilerDecision — the dispatcher's
-					// normalizeToDecision handles the kind→type/column/operator conversion at runtime.
-					const filterNode = filterDispatcher(
-						filterIntent as unknown as CompilerDecision,
-						ctx,
-						state,
+					const filterDecision = convertWhereCondition(
+						filterIntent,
+						plan.rootTable,
 					);
-					if (filterNode && 'FuncCall' in node) {
-						(
-							node as { FuncCall: Record<string, unknown> }
-						).FuncCall.agg_filter = filterNode;
+					if (filterDecision) {
+						const filterNode = compileFilterCondition(
+							filterDecision,
+							createWhereDispatcher(),
+							ctx,
+							state,
+						);
+						if (filterNode && 'FuncCall' in node) {
+							(
+								node as { FuncCall: Record<string, unknown> }
+							).FuncCall.agg_filter = filterNode;
+						}
 					}
 				}
 				// parameters are shared by reference; only sync paramIndex
@@ -994,7 +922,7 @@ export class PlanCompiler {
 				const handler = getExpressionHandler(exprType);
 				const ctx = this.createHandlerContext(plan, plan.rootTable);
 				const state = this.createHandlerState();
-				const handlerDecision = enrichForCompile(
+				const handlerDecision = mapToHandlerDecision(
 					decision,
 					plan.rootTable,
 					this.defaultPk,
@@ -1025,7 +953,7 @@ export class PlanCompiler {
 					decision.table ?? plan.rootTable,
 				);
 				const state = this.createHandlerState();
-				const winDecision = enrichForCompile(
+				const winDecision = mapToHandlerDecision(
 					decision,
 					plan.rootTable,
 					this.defaultPk,
@@ -1144,12 +1072,6 @@ export class PlanCompiler {
 					return currentWhere ? andExpr(currentWhere, negated) : negated;
 				}
 				return currentWhere;
-
-			case 'whereRaw': {
-				// whereRaw: expressionIntent holds a raw WhereIntent — compile directly.
-				const rawNode = this.dispatchWhere(decision);
-				return currentWhere ? andExpr(currentWhere, rawNode) : rawNode;
-			}
 
 			default:
 				return currentWhere;
@@ -1325,7 +1247,6 @@ export class PlanCompiler {
 				case 'whereAnd':
 				case 'whereOr':
 				case 'whereNot':
-				case 'whereRaw':
 					where = this.compileWhereDecision(decision, where);
 					break;
 
@@ -1394,7 +1315,6 @@ export class PlanCompiler {
 					break;
 
 				case 'having':
-				case 'havingRaw':
 					having = this.dispatchWhere(decision);
 					break;
 

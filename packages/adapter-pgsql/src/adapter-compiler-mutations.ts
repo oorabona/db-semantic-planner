@@ -18,13 +18,7 @@ import type {
 	UpsertIntent,
 	WhereIntent,
 } from '@dbsp/types';
-import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
-import {
-	buildSubqueryFromIntent,
-	compileWhereIntent,
-	type WhereCompilerCtx,
-} from './compile-where.js';
 import {
 	transposeToColumnArrays,
 	validateBatchCardinality,
@@ -32,8 +26,8 @@ import {
 import { deparseQuoted } from './deparse.js';
 import {
 	type CompilerContext,
-	type CompilerState,
 	createCompilerState,
+	type Decision,
 } from './handlers/index.js';
 import {
 	type BatchUpdateConfig,
@@ -57,6 +51,15 @@ import {
 // ============================================================================
 // Internal helpers
 // ============================================================================
+
+/**
+ * Bridge a WhereIntent into a Decision for mutation config.
+ * The WHERE dispatcher's `normalizeToDecision` handles the actual
+ * `kind`/`field` → `type`/`column`/`operator` conversion at runtime.
+ */
+function whereIntentAsDecision(where: WhereIntent): Decision {
+	return where as never as Decision;
+}
 
 /**
  * Resolve relation metadata for an exists/notExists WHERE condition.
@@ -83,8 +86,7 @@ function resolveExistsRelation(
 	const targetTable = rel.target;
 	// For belongsTo: FK is on the source table (e.g. embeddings.symbol_id → symbols.id)
 	if (rel.type === 'belongsTo') {
-		const fk =
-			typeof rel.foreignKey === 'string' ? rel.foreignKey : rel.foreignKey?.[0];
+		const fk = typeof rel.foreignKey === 'string' ? rel.foreignKey : rel.foreignKey?.[0];
 		return {
 			targetTable,
 			...(fk !== undefined && { sourceColumn: fk }),
@@ -115,12 +117,8 @@ function resolveExistsIntent(
 	return {
 		...w,
 		targetTable: resolved.targetTable,
-		...(resolved.sourceColumn !== undefined && {
-			sourceColumn: resolved.sourceColumn,
-		}),
-		...(resolved.targetColumn !== undefined && {
-			targetColumn: resolved.targetColumn,
-		}),
+		...(resolved.sourceColumn !== undefined && { sourceColumn: resolved.sourceColumn }),
+		...(resolved.targetColumn !== undefined && { targetColumn: resolved.targetColumn }),
 	} as unknown as WhereIntent;
 }
 
@@ -244,71 +242,22 @@ export function compileInsertFrom(
 	};
 	const state = createCompilerState();
 
-	// Build config WITHOUT where so the mutation compiler assigns no WHERE params.
-	// We compile WHERE separately via compileWhereIntent and inject into the AST.
 	const config: InsertFromConfig = {
 		targetTable: intent.table,
 		sourceTable: intent.source,
 		...(intent.columns && { columns: [...intent.columns] }),
+		...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
 		...(intent.limit !== undefined && { limit: intent.limit }),
 		...(intent.returning && { returning: [...intent.returning] }),
 	};
 
 	const ast = compileInsertFromMutation(config, ctx, state);
-
-	if (intent.where) {
-		const whereCtx: WhereCompilerCtx = {
-			rootTable: intent.source,
-			aliases: new Map(),
-			paramState: state,
-			naming: deps.naming,
-			...(schemaName !== undefined && { schemaName }),
-			compileSubquery: (sqIntent, offset) =>
-				buildSubqueryFromIntent(sqIntent, offset, deps.naming),
-		};
-		const whereNode = compileWhereIntent(intent.where, whereCtx);
-		injectSelectWhereClause(ast, whereNode);
-	}
-
 	const sql = deparseQuoted(ast);
 
 	return {
 		sql,
 		parameters: state.parameters,
 	};
-}
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-/**
- * Inject a pre-built WHERE Node into an UpdateStmt or DeleteStmt AST node.
- * Centralises the unsafe cast to a single location.
- */
-function injectWhereClause(
-	ast: Node,
-	stmtKey: 'UpdateStmt' | 'DeleteStmt',
-	whereNode: Node,
-): void {
-	(ast as { [K in typeof stmtKey]: Record<string, unknown> })[stmtKey][
-		'whereClause'
-	] = whereNode;
-}
-
-/**
- * Inject a pre-built WHERE Node into the SelectStmt embedded inside an InsertStmt.
- * Used by compileInsertFrom / compileUpsertFrom to apply WHERE after building the AST.
- */
-function injectSelectWhereClause(ast: Node, whereNode: Node): void {
-	const insertNode = (ast as { InsertStmt: Record<string, unknown> })
-		.InsertStmt;
-	const selectQuery = insertNode?.selectStmt as
-		| Record<string, unknown>
-		| undefined;
-	if (selectQuery && 'SelectStmt' in selectQuery) {
-		(selectQuery.SelectStmt as Record<string, unknown>).whereClause = whereNode;
-	}
 }
 
 // ============================================================================
@@ -325,63 +274,30 @@ export function compileUpdate(
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	const schemaName = deps.schemaName ?? options?.schemaName;
-	const resolvedModel = options?.model ?? deps.model;
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
 		maxRecursiveDepth: 100,
-		...(resolvedModel !== undefined && { model: resolvedModel }),
 	};
-	const state: CompilerState = createCompilerState();
+	const state = createCompilerState();
 
 	const setColumns = Object.keys(intent.set ?? {});
 	const columnTypes = getColumnTypes(intent.table, setColumns, deps);
 
-	// PRIMARY PATH: call compileUpdateMutation with empty WHERE first so SET
-	// parameters are assigned their correct positions ($1, $2, …) in state.
-	// Then call compileWhereIntent with the same state so WHERE parameters are
-	// appended at positions ($N+1, …) — preserving the SET-before-WHERE ordering
-	// that PostgreSQL UPDATE requires.
-	// The pre-built WHERE Node is then injected into the returned UpdateStmt.
-	// PRIMARY PATH: compile SET params first (no WHERE) so WHERE params get
-	// correct $N positions. Then compile WHERE and inject into the UpdateStmt AST.
-	const configNoWhere: UpdateConfig = {
+	const config: UpdateConfig = {
 		table: intent.table,
 		set: Object.entries(intent.set ?? {}).map(([column, value]) => ({
 			column,
 			value,
 		})),
+		...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(columnTypes && { columnTypes }),
 	};
 
-	const ast = compileUpdateMutation(configNoWhere, ctx, state);
-
-	// Resolve exists/notExists relation name → real table name before compiling.
-	// The mutation path bypasses the planner, so we must resolve targetTable here.
-	const resolvedWhere = intent.where
-		? resolveExistsIntent(intent.where, intent.table, deps)
-		: undefined;
-
-	if (resolvedWhere) {
-		const whereCtx: WhereCompilerCtx = {
-			rootTable: intent.table,
-			aliases: new Map(),
-			paramState: state,
-			naming: deps.naming,
-			...(schemaName !== undefined && { schemaName }),
-			...(resolvedModel !== undefined && { model: resolvedModel }),
-			compileSubquery: (sqIntent, offset) =>
-				buildSubqueryFromIntent(sqIntent, offset, deps.naming),
-		};
-
-		// Append WHERE params to state (they start after SET params).
-		const whereNode = compileWhereIntent(resolvedWhere, whereCtx);
-		injectWhereClause(ast, 'UpdateStmt', whereNode);
-	}
-
+	const ast = compileUpdateMutation(config, ctx, state);
 	const sql = deparseQuoted(ast);
 
 	return {
@@ -501,7 +417,7 @@ export function compileDelete(
 		maxRecursiveDepth: 100,
 		...(resolvedModel !== undefined && { model: resolvedModel }),
 	};
-	const state: CompilerState = createCompilerState();
+	const state = createCompilerState();
 
 	// Resolve exists/notExists relation name → real table name before compiling.
 	// The mutation path bypasses the planner, so we must resolve targetTable here.
@@ -509,32 +425,13 @@ export function compileDelete(
 		? resolveExistsIntent(intent.where, intent.table, deps)
 		: undefined;
 
-	// PRIMARY PATH: compile WHERE via compileWhereIntent using the shared state.
-	// Parameters from the WHERE clause are pushed directly into state.parameters
-	// (DELETE has no SET params, so WHERE params are always at positions $1, $2, …).
-	// The resulting Node is injected into the DeleteStmt AST post-construction.
 	const config: DeleteConfig = {
 		table: intent.table,
+		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(intent.returning && { returning: [...intent.returning] }),
 	};
 
-	const ast: Node = compileDeleteMutation(config, ctx, state);
-
-	if (resolvedWhere) {
-		const whereCtx: WhereCompilerCtx = {
-			rootTable: intent.table,
-			aliases: new Map(),
-			paramState: state,
-			naming: deps.naming,
-			...(schemaName !== undefined && { schemaName }),
-			...(resolvedModel !== undefined && { model: resolvedModel }),
-			compileSubquery: (sqIntent, offset) =>
-				buildSubqueryFromIntent(sqIntent, offset, deps.naming),
-		};
-		const whereNode = compileWhereIntent(resolvedWhere, whereCtx);
-		injectWhereClause(ast, 'DeleteStmt', whereNode);
-	}
-
+	const ast = compileDeleteMutation(config, ctx, state);
 	const sql = deparseQuoted(ast);
 
 	return {
@@ -705,33 +602,17 @@ export function compileUpsertFrom(
 		}
 	}
 
-	// Build config WITHOUT where so the mutation compiler assigns no WHERE params.
-	// We compile WHERE separately via compileWhereIntent and inject into the AST.
 	const config: UpsertFromConfig = {
 		targetTable: intent.table,
 		sourceTable: intent.source,
 		conflictColumns: [...intent.conflictColumns],
 		...(columns && { columns }),
+		...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
 		...(intent.limit !== undefined && { limit: intent.limit }),
 		...(intent.returning && { returning: [...intent.returning] }),
 	};
 
 	const ast = compileUpsertFromMutation(config, ctx, state);
-
-	if (intent.where) {
-		const whereCtx: WhereCompilerCtx = {
-			rootTable: intent.source,
-			aliases: new Map(),
-			paramState: state,
-			naming: deps.naming,
-			...(schemaName !== undefined && { schemaName }),
-			compileSubquery: (sqIntent, offset) =>
-				buildSubqueryFromIntent(sqIntent, offset, deps.naming),
-		};
-		const whereNode = compileWhereIntent(intent.where, whereCtx);
-		injectSelectWhereClause(ast, whereNode);
-	}
-
 	const sql = deparseQuoted(ast);
 
 	return {

@@ -21,8 +21,8 @@ import {
 } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -437,7 +437,7 @@ export const pseudoColumnHandler: ExpressionHandler = {
 	types: ['pseudoColumn', 'pseudo', 'hierarchy'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -500,7 +500,7 @@ export const singleHopPseudoHandler: ExpressionHandler = {
 	types: ['singleHopPseudo', 'parentPseudo', 'childPseudo'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
@@ -618,7 +618,7 @@ export const chainedPseudoHandler: ExpressionHandler = {
 	types: ['chainedPseudo', 'multiHopPseudo'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {

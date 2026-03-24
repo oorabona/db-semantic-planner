@@ -1,3 +1,4 @@
+
 /**
  * DDL Security Tests
  *
@@ -18,9 +19,9 @@ import { validateDbTypeName, validateSqlExpression } from '../validate.js';
 
 describe('validateSqlExpression', () => {
 	it('rejects expressions containing a semicolon', () => {
-		expect(() =>
-			validateSqlExpression('now(); DROP TABLE users', 'test'),
-		).toThrow(/forbidden characters/);
+		expect(() => validateSqlExpression('now(); DROP TABLE users', 'test')).toThrow(
+			/forbidden characters/,
+		);
 	});
 
 	it('rejects expressions containing a line-comment marker (--)', () => {
@@ -46,15 +47,11 @@ describe('validateSqlExpression', () => {
 	});
 
 	it('allows safe expression: gen_random_uuid()', () => {
-		expect(() =>
-			validateSqlExpression('gen_random_uuid()', 'test'),
-		).not.toThrow();
+		expect(() => validateSqlExpression('gen_random_uuid()', 'test')).not.toThrow();
 	});
 
 	it('allows safe expression: CURRENT_TIMESTAMP', () => {
-		expect(() =>
-			validateSqlExpression('CURRENT_TIMESTAMP', 'test'),
-		).not.toThrow();
+		expect(() => validateSqlExpression('CURRENT_TIMESTAMP', 'test')).not.toThrow();
 	});
 
 	it('allows safe expression: true', () => {
@@ -67,24 +64,17 @@ describe('validateSqlExpression', () => {
 
 	it('allows single-quoted string in expression (valid for defaults/policies)', () => {
 		expect(() =>
-			validateSqlExpression(
-				"current_setting('app.tenant_id')::integer",
-				'test',
-			),
+			validateSqlExpression("current_setting('app.tenant_id')::integer", 'test'),
 		).not.toThrow();
 	});
 
 	it('rejects expressions containing dollar-quoting', () => {
 		const dollarQuoted = '\x24\x24injected\x24\x24';
-		expect(() => validateSqlExpression(dollarQuoted, 'test')).toThrow(
-			/forbidden characters/,
-		);
+		expect(() => validateSqlExpression(dollarQuoted, 'test')).toThrow(/forbidden characters/);
 	});
 
 	it('rejects expressions containing a backslash (escape sequence)', () => {
-		expect(() => validateSqlExpression('value\\n', 'test')).toThrow(
-			/forbidden characters/,
-		);
+		expect(() => validateSqlExpression('value\\n', 'test')).toThrow(/forbidden characters/);
 	});
 });
 
@@ -102,9 +92,7 @@ describe('validateDbTypeName', () => {
 	});
 
 	it('rejects type names starting with a digit', () => {
-		expect(() => validateDbTypeName('1nvalid')).toThrow(
-			/Unsafe database type name/,
-		);
+		expect(() => validateDbTypeName('1nvalid')).toThrow(/Unsafe database type name/);
 	});
 
 	it('allows: integer', () => {
@@ -130,9 +118,7 @@ describe('validateDbTypeName', () => {
 	});
 
 	it('allows: CHARACTER VARYING(100)', () => {
-		expect(validateDbTypeName('CHARACTER VARYING(100)')).toBe(
-			'CHARACTER VARYING(100)',
-		);
+		expect(validateDbTypeName('CHARACTER VARYING(100)')).toBe('CHARACTER VARYING(100)');
 	});
 });
 
@@ -149,8 +135,7 @@ describe('SEC-004: quoteIdentifier (via DDL generator behaviour)', () => {
 		const model = buildMinimalModel([{ name: 'ok_policy', command: 'SELECT' }]);
 		// Bypass TypeScript to inject an invalid name at runtime
 		// model.tables is a Map — use .get() to access the table, then .policies[]
-		(model.tables.get('users').policies[0] as Record<string, unknown>).name =
-			'bad"policy';
+		(model.tables.get('users').policies[0] as Record<string, unknown>).name = 'bad"policy';
 		expect(() =>
 			generateDDL(model, { dialectCapabilities: buildCaps() }),
 		).toThrow(/invalid characters/);
@@ -159,8 +144,7 @@ describe('SEC-004: quoteIdentifier (via DDL generator behaviour)', () => {
 	it('rejects an empty identifier', async () => {
 		const { generateDDL } = await import('../ddl/ddl-generator.js');
 		const model = buildMinimalModel([{ name: 'ok_policy', command: 'SELECT' }]);
-		(model.tables.get('users').policies[0] as Record<string, unknown>).name =
-			'';
+		(model.tables.get('users').policies[0] as Record<string, unknown>).name = '';
 		expect(() =>
 			generateDDL(model, { dialectCapabilities: buildCaps() }),
 		).toThrow(/cannot be empty/);

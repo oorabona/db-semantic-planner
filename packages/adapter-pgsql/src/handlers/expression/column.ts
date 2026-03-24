@@ -10,8 +10,8 @@ import type { Node, ResTarget } from '@pgsql/types';
 import { columnRef } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -24,7 +24,7 @@ export const columnHandler: ExpressionHandler = {
 	types: ['column', 'col', 'field'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
@@ -48,7 +48,7 @@ export const columnAliasHandler: ExpressionHandler = {
 	types: ['columnAlias', 'as', 'alias'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
@@ -86,7 +86,7 @@ export const starHandler: ExpressionHandler = {
 	types: ['star', '*', 'all'],
 
 	compile(
-		_decision: CompilerDecision,
+		_decision: Decision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {

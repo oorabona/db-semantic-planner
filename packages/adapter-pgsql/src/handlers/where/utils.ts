@@ -4,10 +4,10 @@
  */
 
 import { isFieldRef } from '@dbsp/types';
+import { validateDbTypeName } from '../../validate.js';
 import type { Node } from '@pgsql/types';
 import { columnRef, nullConstNode } from '../../ast-helpers.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
-import { validateDbTypeName } from '../../validate.js';
 import type { CompilerContext, CompilerState } from '../types.js';
 import { isParamRef } from '../types.js';
 

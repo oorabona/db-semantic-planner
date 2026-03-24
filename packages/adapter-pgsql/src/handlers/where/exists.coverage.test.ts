@@ -8,11 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type {
-	CompilerContext,
-	CompilerDecision,
-	WhereDispatcher,
-} from '../types.js';
+import type { CompilerContext, Decision, WhereDispatcher } from '../types.js';
 import { createCompilerState } from '../types.js';
 import { everyHandler, existsHandler, notExistsHandler } from './exists.js';
 
@@ -57,7 +53,7 @@ describe('existsHandler', () => {
 			targetTable: 'comments',
 			sourceColumn: 'id',
 			targetColumn: 'post_id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = existsHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -74,7 +70,7 @@ describe('existsHandler', () => {
 			relation: 'comments',
 			targetTable: 'comments',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = existsHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -93,7 +89,7 @@ describe('existsHandler', () => {
 			relation: 'comments',
 			targetTable: 'comments',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = existsHandler.compile(
 			decision,
@@ -111,7 +107,7 @@ describe('existsHandler', () => {
 			type: 'where',
 			operator: 'exists',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		expect(() =>
 			existsHandler.compile(decision, ctx, state, mockDispatch),
@@ -126,14 +122,14 @@ describe('existsHandler', () => {
 			relation: 'comments',
 			targetTable: 'comments',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 		const decision2 = {
 			type: 'where',
 			operator: 'exists',
 			relation: 'likes',
 			targetTable: 'likes',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		existsHandler.compile(decision1, ctx, state, mockDispatch);
 		existsHandler.compile(decision2, ctx, state, mockDispatch);
@@ -150,7 +146,7 @@ describe('existsHandler', () => {
 			relation: 'comments',
 			targetTable: 'comments',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = existsHandler.compile(
 			decision,
@@ -178,7 +174,7 @@ describe('existsHandler', () => {
 					value: 'approved',
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = existsHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -208,7 +204,7 @@ describe('existsHandler', () => {
 					value: 3,
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = existsHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -239,7 +235,7 @@ describe('existsHandler', () => {
 					value: 'approved',
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		existsHandler.compile(decision, ctxWithSchema, state, inspectDispatch);
 
@@ -270,7 +266,7 @@ describe('existsHandler', () => {
 					value: 'approved',
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		existsHandler.compile(decision, ctx, state, inspectDispatch);
 
@@ -294,7 +290,7 @@ describe('notExistsHandler', () => {
 			relation: 'comments',
 			targetTable: 'comments',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = notExistsHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -321,7 +317,7 @@ describe('notExistsHandler', () => {
 					value: 'spam',
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = notExistsHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -346,7 +342,7 @@ describe('everyHandler', () => {
 			targetTable: 'comments',
 			sourceColumn: 'id',
 			conditions: [],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = everyHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -362,7 +358,7 @@ describe('everyHandler', () => {
 			relation: 'comments',
 			targetTable: 'comments',
 			sourceColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = everyHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -386,7 +382,7 @@ describe('everyHandler', () => {
 					value: 'approved',
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = everyHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -417,7 +413,7 @@ describe('everyHandler', () => {
 					value: 3,
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = everyHandler.compile(decision, ctx, state, mockDispatch);
 

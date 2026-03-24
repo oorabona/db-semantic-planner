@@ -13,8 +13,8 @@ import { createParamRef } from '../../param-ref.js';
 import { compileExpressionIntent } from '../expression/custom.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
@@ -45,7 +45,7 @@ export const customExpressionWhereHandler: WhereHandler = {
 	operators: ['expression'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		_dispatch: WhereDispatcher,

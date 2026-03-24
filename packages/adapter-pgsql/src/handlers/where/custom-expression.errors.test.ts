@@ -61,20 +61,7 @@ describe('customExpressionWhereHandler — operator validation', () => {
 
 	it('does not throw for all mapped operators', () => {
 		const expr = { kind: 'ref', column: 'price' };
-		const validOps = [
-			'eq',
-			'neq',
-			'gt',
-			'gte',
-			'lt',
-			'lte',
-			'=',
-			'!=',
-			'>',
-			'>=',
-			'<',
-			'<=',
-		];
+		const validOps = ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', '=', '!=', '>', '>=', '<', '<='];
 		for (const op of validOps) {
 			expect(() => compileWhereExpr(expr, op, 42)).not.toThrow();
 		}

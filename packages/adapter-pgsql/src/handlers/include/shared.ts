@@ -9,7 +9,7 @@ import {
 	defaultFkDerivation,
 	type FkColumnDerivation,
 } from '../../assert-field.js';
-/** Minimal shape required by deriveFkColumns — works with both CompilerDecision and PlanDecision. */
+/** Minimal shape required by deriveFkColumns — works with both Decision and PlanDecision. */
 export interface FkColumnSource {
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
 	readonly foreignKey?: string;

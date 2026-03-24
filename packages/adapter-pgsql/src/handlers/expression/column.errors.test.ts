@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type { CompilerContext, CompilerDecision } from '../types.js';
+import type { CompilerContext, Decision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import { columnAliasHandler, columnHandler } from './column.js';
 
@@ -30,7 +30,7 @@ describe('columnHandler errors', () => {
 
 	it('throws when column is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'column' } as CompilerDecision;
+		const decision = { type: 'column' } as Decision;
 		expect(() => columnHandler.compile(decision, ctx, state)).toThrow(
 			'Column handler requires column',
 		);
@@ -41,7 +41,7 @@ describe('columnHandler errors', () => {
 		const decision = {
 			type: 'column',
 			column: undefined,
-		} as unknown as CompilerDecision;
+		} as unknown as Decision;
 		expect(() => columnHandler.compile(decision, ctx, state)).toThrow(
 			'Column handler requires column',
 		);
@@ -57,10 +57,7 @@ describe('columnAliasHandler errors', () => {
 
 	it('throws when column is missing', () => {
 		const state = createCompilerState();
-		const decision = {
-			type: 'columnAlias',
-			alias: 'user_name',
-		} as CompilerDecision;
+		const decision = { type: 'columnAlias', alias: 'user_name' } as Decision;
 		expect(() => columnAliasHandler.compile(decision, ctx, state)).toThrow(
 			'Column alias handler requires column',
 		);
@@ -72,7 +69,7 @@ describe('columnAliasHandler errors', () => {
 			type: 'columnAlias',
 			column: undefined,
 			alias: 'user_name',
-		} as unknown as CompilerDecision;
+		} as unknown as Decision;
 		expect(() => columnAliasHandler.compile(decision, ctx, state)).toThrow(
 			'Column alias handler requires column',
 		);

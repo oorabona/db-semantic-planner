@@ -1,5 +1,6 @@
-import { createOrm, schema } from '@dbsp/core';
+
 import { describe, expect, it } from 'vitest';
+import { createOrm, schema } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 const testSchema = schema({
@@ -10,10 +11,7 @@ const testSchema = schema({
 	},
 });
 
-const orm = createOrm({
-	schema: testSchema,
-	adapter: createPgsqlCompileOnlyAdapter(),
-});
+const orm = createOrm({ schema: testSchema, adapter: createPgsqlCompileOnlyAdapter() });
 
 describe('orderBy() NULLS FIRST / NULLS LAST', () => {
 	it('orderBy with nulls: last produces NULLS LAST', () => {

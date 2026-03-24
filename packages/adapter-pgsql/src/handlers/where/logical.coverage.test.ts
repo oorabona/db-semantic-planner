@@ -8,11 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type {
-	CompilerContext,
-	CompilerDecision,
-	WhereDispatcher,
-} from '../types.js';
+import type { CompilerContext, Decision, WhereDispatcher } from '../types.js';
 import { createCompilerState } from '../types.js';
 import { andHandler, notHandler, orHandler } from './logical.js';
 
@@ -54,7 +50,7 @@ describe('andHandler', () => {
 		const decision = {
 			type: 'where',
 			operator: 'and',
-		} as CompilerDecision;
+		} as Decision;
 
 		expect(() =>
 			andHandler.compile(decision, ctx, state, mockDispatch),
@@ -67,7 +63,7 @@ describe('andHandler', () => {
 			type: 'where',
 			operator: 'and',
 			conditions: 'not-an-array',
-		} as unknown as CompilerDecision;
+		} as unknown as Decision;
 
 		expect(() =>
 			andHandler.compile(decision, ctx, state, mockDispatch),
@@ -80,7 +76,7 @@ describe('andHandler', () => {
 			type: 'where',
 			operator: 'and',
 			conditions: [],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = andHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -101,7 +97,7 @@ describe('andHandler', () => {
 					value: 'active',
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = andHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -129,7 +125,7 @@ describe('andHandler', () => {
 					value: 18,
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = andHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -163,7 +159,7 @@ describe('andHandler', () => {
 					value: 100,
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = andHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -189,7 +185,7 @@ describe('andHandler', () => {
 				{ type: 'where', operator: '=', column: 'b', value: 2 },
 				{ type: 'where', operator: '=', column: 'c', value: 3 },
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		andHandler.compile(decision, ctx, state, countingDispatch);
 
@@ -209,7 +205,7 @@ describe('orHandler', () => {
 		const decision = {
 			type: 'where',
 			operator: 'or',
-		} as CompilerDecision;
+		} as Decision;
 
 		expect(() => orHandler.compile(decision, ctx, state, mockDispatch)).toThrow(
 			'OR handler requires conditions array',
@@ -222,7 +218,7 @@ describe('orHandler', () => {
 			type: 'where',
 			operator: 'or',
 			conditions: { not: 'array' },
-		} as unknown as CompilerDecision;
+		} as unknown as Decision;
 
 		expect(() => orHandler.compile(decision, ctx, state, mockDispatch)).toThrow(
 			'OR handler requires conditions array',
@@ -235,7 +231,7 @@ describe('orHandler', () => {
 			type: 'where',
 			operator: 'or',
 			conditions: [],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = orHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -256,7 +252,7 @@ describe('orHandler', () => {
 					value: 'active',
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = orHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -284,7 +280,7 @@ describe('orHandler', () => {
 					value: 'pending',
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = orHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -318,7 +314,7 @@ describe('orHandler', () => {
 					value: 'draft',
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = orHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -343,7 +339,7 @@ describe('orHandler', () => {
 				{ type: 'where', operator: '=', column: 'a', value: 1 },
 				{ type: 'where', operator: '=', column: 'b', value: 2 },
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		orHandler.compile(decision, ctx, state, countingDispatch);
 
@@ -363,7 +359,7 @@ describe('notHandler', () => {
 		const decision = {
 			type: 'where',
 			operator: 'not',
-		} as CompilerDecision;
+		} as Decision;
 
 		expect(() =>
 			notHandler.compile(decision, ctx, state, mockDispatch),
@@ -376,7 +372,7 @@ describe('notHandler', () => {
 			type: 'where',
 			operator: 'not',
 			conditions: [],
-		} as CompilerDecision;
+		} as Decision;
 
 		expect(() =>
 			notHandler.compile(decision, ctx, state, mockDispatch),
@@ -396,7 +392,7 @@ describe('notHandler', () => {
 					value: 'deleted',
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = notHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -422,7 +418,7 @@ describe('notHandler', () => {
 				{ type: 'where', operator: '=', column: 'b', value: 2 },
 				{ type: 'where', operator: '=', column: 'c', value: 3 },
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		notHandler.compile(decision, ctx, state, countingDispatch);
 
@@ -450,7 +446,7 @@ describe('notHandler', () => {
 					value: false,
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		notHandler.compile(decision, ctx, state, inspectDispatch);
 

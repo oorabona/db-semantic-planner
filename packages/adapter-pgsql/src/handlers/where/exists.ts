@@ -8,18 +8,15 @@
  */
 
 import type { Node, SelectStmt, SubLink } from '@pgsql/types';
-import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import {
-	columnRef,
-	eqExpr,
-	fkCorrelation,
-	joinExpr,
-	rangeVar,
-} from '../../ast-helpers.js';
+	DEFAULT_PK_COLUMN,
+	defaultFkDerivation,
+} from '../../assert-field.js';
+import { columnRef, eqExpr, fkCorrelation, joinExpr, rangeVar } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
@@ -71,7 +68,7 @@ function buildCorrelation(
  * WHERE targetAlias.fk = sourceAlias.pk [AND additional conditions]
  */
 function buildExistsSubquery(
-	decision: CompilerDecision,
+	decision: Decision,
 	ctx: CompilerContext,
 	state: CompilerState,
 	dispatch: WhereDispatcher,
@@ -82,7 +79,9 @@ function buildExistsSubquery(
 	// When called directly from mutation WHERE (DELETE/UPDATE), the planner is bypassed and
 	// sourceColumn is absent — fall back to the PK convention (typically 'id' for hasMany).
 	const sourceColumn =
-		decision.sourceColumn ?? ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
+		decision.sourceColumn ??
+		ctx.defaultPkColumnName ??
+		DEFAULT_PK_COLUMN;
 	const targetColumn =
 		decision.targetColumn ??
 		(ctx.deriveFkColumnName ?? defaultFkDerivation)(
@@ -139,21 +138,16 @@ function buildExistsSubquery(
 	}
 
 	// Build SELECT 1 FROM targetTable AS targetAlias [JOIN ...] WHERE ...
-	let fromNode: Node = rangeVar(
-		targetTable,
-		targetAlias,
-		ctx.schema,
-		ctx.naming,
-	);
+	let fromNode: Node = rangeVar(targetTable, targetAlias, ctx.schema, ctx.naming);
 
 	// Add JOIN clauses for each include entry.
 	// Each include entry in decision.include has shape: { type:'existsInclude', relation, joinType }
 	// The relation is used as the join alias so dotted WHERE references (e.g. callerFile.project_id) resolve.
-	const includeCompilerDecisions = decision.include as
+	const includeDecisions = decision.include as
 		| readonly { relation?: string; joinType?: string }[]
 		| undefined;
-	if (includeCompilerDecisions && includeCompilerDecisions.length > 0) {
-		for (const inc of includeCompilerDecisions) {
+	if (includeDecisions && includeDecisions.length > 0) {
+		for (const inc of includeDecisions) {
 			const joinRelation = inc.relation;
 			if (!joinRelation) continue;
 
@@ -221,12 +215,7 @@ function buildExistsSubquery(
 					? 'JOIN_LEFT'
 					: 'JOIN_INNER';
 
-			const joinRangeVar = rangeVar(
-				joinTargetTable,
-				joinAlias,
-				ctx.schema,
-				ctx.naming,
-			);
+			const joinRangeVar = rangeVar(joinTargetTable, joinAlias, ctx.schema, ctx.naming);
 
 			// Wrap current fromNode with the new join: JoinExpr { larg: fromNode, rarg: joinRangeVar }
 			fromNode = joinExpr(joinType, fromNode, joinRangeVar, joinQuals);
@@ -257,7 +246,7 @@ export const existsHandler: WhereHandler = {
 	operators: ['exists', 'some'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -276,7 +265,7 @@ export const notExistsHandler: WhereHandler = {
 	operators: ['notExists', 'none'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -296,7 +285,7 @@ export const everyHandler: WhereHandler = {
 	operators: ['every'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -310,7 +299,7 @@ export const everyHandler: WhereHandler = {
 		}
 
 		// Wrap conditions in NOT
-		const invertedCompilerDecision: CompilerDecision = {
+		const invertedDecision: Decision = {
 			...decision,
 			conditions: [
 				{
@@ -322,7 +311,7 @@ export const everyHandler: WhereHandler = {
 		};
 
 		const subquery = buildExistsSubquery(
-			invertedCompilerDecision,
+			invertedDecision,
 			ctx,
 			state,
 			dispatch,

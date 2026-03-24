@@ -1,3 +1,4 @@
+
 /**
  * Issue 8: notExists('callee_calls') generates FROM "calls" not FROM "callee_calls"
  *
@@ -14,7 +15,7 @@
  *   caller_calls: hasMany(calls) via caller_id
  */
 
-import { createOrm, exists, notExists, ref, schema } from '@dbsp/core';
+import { createOrm, notExists, exists, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 

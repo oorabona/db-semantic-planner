@@ -12,8 +12,8 @@ import type { Node, ResTarget } from '@pgsql/types';
 import { columnRef, columnRefStar } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -28,7 +28,7 @@ export const relationStarHandler: ExpressionHandler = {
 	types: ['relationStar', 'relation.*', 'expandStar'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -62,7 +62,7 @@ export const relationColumnHandler: ExpressionHandler = {
 	types: ['relationColumn', 'relation.column', 'relCol'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -103,7 +103,7 @@ export const relationColumnsHandler: ExpressionHandler = {
 	types: ['relationColumns', 'expandColumns', 'relCols'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -151,7 +151,7 @@ export const relationAliasHandler: ExpressionHandler = {
 	types: ['relationAlias', 'relation.column.as', 'relColAs'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -197,7 +197,7 @@ export const prefixedRelationColumnHandler: ExpressionHandler = {
 	types: ['prefixedRelationColumn', 'prefixedRelCol'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

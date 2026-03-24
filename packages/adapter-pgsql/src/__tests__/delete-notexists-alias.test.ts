@@ -10,32 +10,21 @@
  */
 
 import { exists, notExists } from '@dbsp/core';
-import type { ModelIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import type { ModelIR } from '@dbsp/types';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
-function buildModel(
-	source: string,
-	name: string,
-	target: string,
-	foreignKey?: string,
-): ModelIR {
+function buildModel(source: string, name: string, target: string, foreignKey?: string): ModelIR {
 	const rel = {
-		name,
-		type: 'belongsTo' as const,
-		source,
-		target,
-		cardinality: 'many-to-one' as const,
-		optionality: 'optional' as const,
-		includeStrategy: 'auto' as const,
-		filterStrategy: 'auto' as const,
-		joinDefault: 'auto' as const,
+		name, type: "belongsTo" as const, source, target,
+		cardinality: "many-to-one" as const, optionality: "optional" as const,
+		includeStrategy: "auto" as const, filterStrategy: "auto" as const,
+		joinDefault: "auto" as const,
 		...(foreignKey !== undefined && { foreignKey }),
 	};
-	const relations = new Map([[source + '.' + name, rel]]);
+	const relations = new Map([[source + "." + name, rel]]);
 	return {
-		tables: new Map(),
-		relations,
+		tables: new Map(), relations,
 		getTable: () => undefined,
 		getRelation: (qname: string) => relations.get(qname),
 		getRelationsFrom: () => [],

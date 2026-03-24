@@ -1,3 +1,4 @@
+
 /**
  * Regression tests: op() expressions in include({ where }) are compiled.
  *
@@ -9,13 +10,13 @@
  * plan-decision-extractor.ts.
  */
 
+import { normalizeSQL } from '../ast-helpers.js';
+import { compileSelect } from '../adapter-compiler-select.js';
+import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
+import { identityNaming } from '../naming-plugin.js';
+import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
 import type { PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
-import { compileSelect } from '../adapter-compiler-select.js';
-import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
-import { normalizeSQL } from '../ast-helpers.js';
-import { identityNaming } from '../naming-plugin.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -27,10 +28,7 @@ const deps: AdapterCompilerDeps = {
 	deriveFk: defaultFkDerivation,
 };
 
-function compile(plan: PlanReport): {
-	sql: string;
-	parameters: readonly unknown[];
-} {
+function compile(plan: PlanReport): { sql: string; parameters: readonly unknown[] } {
 	return compileSelect(plan, undefined, deps);
 }
 
@@ -58,24 +56,20 @@ function makeRegexWhereIntent(regexValue: string) {
  * Minimal PlanReport: symbols INNER JOIN files ON files.id = symbols.file_id
  * with a regex filter on files.path in the include where.
  */
-function makePlanWithRegexIncludeWhere(
-	options: { regexValue?: string; extraAndCondition?: boolean } = {},
-): PlanReport {
+function makePlanWithRegexIncludeWhere(options: {
+	regexValue?: string;
+	extraAndCondition?: boolean;
+} = {}): PlanReport {
 	const { regexValue = '^src/', extraAndCondition = false } = options;
 
 	const whereIntent = extraAndCondition
 		? {
 				kind: 'and' as const,
 				conditions: [
-					{
-						kind: 'comparison' as const,
-						field: 'project_id',
-						operator: 'eq',
-						value: 1,
-					},
+					{ kind: 'comparison' as const, field: 'project_id', operator: 'eq', value: 1 },
 					makeRegexWhereIntent(regexValue),
 				],
-			}
+		  }
 		: makeRegexWhereIntent(regexValue);
 
 	return {
@@ -158,17 +152,13 @@ describe('include({ where: op().eq() }) — custom expression WHERE is compiled'
 	});
 
 	it('regex value is bound as a parameter, not inlined as a literal', () => {
-		const result = compile(
-			makePlanWithRegexIncludeWhere({ regexValue: '^lib/' }),
-		);
+		const result = compile(makePlanWithRegexIncludeWhere({ regexValue: '^lib/' }));
 
 		expect(result.parameters).toContain('^lib/');
 	});
 
 	it('AND(eq + regex) in include where: both conditions appear in SQL', () => {
-		const result = compile(
-			makePlanWithRegexIncludeWhere({ extraAndCondition: true }),
-		);
+		const result = compile(makePlanWithRegexIncludeWhere({ extraAndCondition: true }));
 		const sql = normalizeSQL(result.sql);
 
 		// Both conditions must be present
@@ -180,9 +170,7 @@ describe('include({ where: op().eq() }) — custom expression WHERE is compiled'
 	});
 
 	it('AND condition produces WHERE with AND keyword', () => {
-		const result = compile(
-			makePlanWithRegexIncludeWhere({ extraAndCondition: true }),
-		);
+		const result = compile(makePlanWithRegexIncludeWhere({ extraAndCondition: true }));
 		const sql = normalizeSQL(result.sql);
 
 		expect(sql).toMatch(/\bwhere\b/i);

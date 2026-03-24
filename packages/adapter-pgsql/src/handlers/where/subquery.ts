@@ -16,8 +16,8 @@ import type {
 import { columnRef, integerNode, rangeVar, sortBy } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerDecision,
 	CompilerState,
+	Decision,
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
@@ -69,7 +69,7 @@ function createScalarSubLink(
  * SELECT aggregate(column) FROM table [WHERE conditions]
  */
 function buildScalarSubquery(
-	decision: CompilerDecision,
+	decision: Decision,
 	ctx: CompilerContext,
 	state: CompilerState,
 	dispatch: WhereDispatcher,
@@ -199,7 +199,7 @@ export const scalarSubqueryHandler: WhereHandler = {
 	],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -228,7 +228,7 @@ export const inSubqueryHandler: WhereHandler = {
 	operators: ['inSubquery'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -263,7 +263,7 @@ export const notInSubqueryHandler: WhereHandler = {
 	operators: ['notInSubquery'],
 
 	compile(
-		decision: CompilerDecision,
+		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,

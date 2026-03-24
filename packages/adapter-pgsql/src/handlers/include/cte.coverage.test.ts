@@ -15,7 +15,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type { CompilerContext, CompilerDecision } from '../types.js';
+import type { CompilerContext, Decision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import { cteIncludeHandler } from './cte.js';
 
@@ -28,9 +28,7 @@ function makeCtx(overrides: Partial<CompilerContext> = {}): CompilerContext {
 	} as CompilerContext;
 }
 
-function buildDecision(
-	overrides: Record<string, unknown> = {},
-): CompilerDecision {
+function buildDecision(overrides: Record<string, unknown> = {}): Decision {
 	return {
 		type: 'includeStrategy',
 		relation: 'posts',
@@ -39,7 +37,7 @@ function buildDecision(
 		targetColumn: 'user_id',
 		strategy: 'cte',
 		...overrides,
-	} as CompilerDecision;
+	} as Decision;
 }
 
 describe('cteIncludeHandler - Coverage Tests', () => {

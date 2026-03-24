@@ -8,11 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type {
-	CompilerContext,
-	CompilerDecision,
-	WhereDispatcher,
-} from '../types.js';
+import type { CompilerContext, Decision, WhereDispatcher } from '../types.js';
 import { createCompilerState } from '../types.js';
 import {
 	inSubqueryHandler,
@@ -57,7 +53,7 @@ describe('scalarSubqueryHandler', () => {
 			subqueryOperator: '=',
 			targetTable: 'products',
 			selectColumn: 'price',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = scalarSubqueryHandler.compile(
 			decision,
@@ -80,7 +76,7 @@ describe('scalarSubqueryHandler', () => {
 			operator: 'scalarSubquery',
 			targetTable: 'products',
 			selectColumn: 'price',
-		} as CompilerDecision;
+		} as Decision;
 
 		expect(() =>
 			scalarSubqueryHandler.compile(decision, ctx, state, mockDispatch),
@@ -94,7 +90,7 @@ describe('scalarSubqueryHandler', () => {
 			operator: 'scalarSubquery',
 			column: 'price',
 			selectColumn: 'price',
-		} as CompilerDecision;
+		} as Decision;
 
 		expect(() =>
 			scalarSubqueryHandler.compile(decision, ctx, state, mockDispatch),
@@ -109,7 +105,7 @@ describe('scalarSubqueryHandler', () => {
 			column: 'price',
 			targetTable: 'products',
 			selectColumn: 'price',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = scalarSubqueryHandler.compile(
 			decision,
@@ -134,7 +130,7 @@ describe('scalarSubqueryHandler', () => {
 				subqueryOperator: op,
 				targetTable: 'products',
 				selectColumn: 'price',
-			} as CompilerDecision;
+			} as Decision;
 
 			const node = scalarSubqueryHandler.compile(
 				decision,
@@ -159,7 +155,7 @@ describe('scalarSubqueryHandler', () => {
 			targetTable: 'products',
 			selectColumn: 'price',
 			aggregate: 'AVG',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = scalarSubqueryHandler.compile(
 			decision,
@@ -182,7 +178,7 @@ describe('scalarSubqueryHandler', () => {
 			targetTable: 'comments',
 			selectColumn: '*',
 			aggregate: 'COUNT',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = scalarSubqueryHandler.compile(
 			decision,
@@ -203,7 +199,7 @@ describe('scalarSubqueryHandler', () => {
 			targetTable: 'reviews',
 			selectColumn: 'rating',
 			aggregate: 'AVG',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = scalarSubqueryHandler.compile(
 			decision,
@@ -223,7 +219,7 @@ describe('scalarSubqueryHandler', () => {
 			column: 'author_id',
 			targetTable: 'users',
 			selectColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = scalarSubqueryHandler.compile(
 			decision,
@@ -251,7 +247,7 @@ describe('scalarSubqueryHandler', () => {
 					value: 'electronics',
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = scalarSubqueryHandler.compile(
 			decision,
@@ -285,7 +281,7 @@ describe('scalarSubqueryHandler', () => {
 					value: 0,
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = scalarSubqueryHandler.compile(
 			decision,
@@ -321,7 +317,7 @@ describe('scalarSubqueryHandler', () => {
 					value: true,
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		scalarSubqueryHandler.compile(
 			decision,
@@ -343,7 +339,7 @@ describe('scalarSubqueryHandler', () => {
 			targetTable: 'prices',
 			selectColumn: 'amount',
 			orderBy: [{ column: 'created_at', direction: 'DESC' as const }],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = scalarSubqueryHandler.compile(
 			decision,
@@ -364,7 +360,7 @@ describe('scalarSubqueryHandler', () => {
 			targetTable: 'products',
 			selectColumn: 'price',
 			limit: 1,
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = scalarSubqueryHandler.compile(
 			decision,
@@ -385,7 +381,7 @@ describe('scalarSubqueryHandler', () => {
 			targetTable: 'products',
 			selectColumn: 'price',
 			limit: { paramIndex: 5 },
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = scalarSubqueryHandler.compile(
 			decision,
@@ -406,7 +402,7 @@ describe('scalarSubqueryHandler', () => {
 			targetTable: 'products',
 			selectColumn: 'price',
 			limit: { paramIndex: 'invalid' },
-		} as unknown as CompilerDecision;
+		} as unknown as Decision;
 
 		expect(() =>
 			scalarSubqueryHandler.compile(decision, ctx, state, mockDispatch),
@@ -421,14 +417,14 @@ describe('scalarSubqueryHandler', () => {
 			column: 'price',
 			targetTable: 'products',
 			selectColumn: 'price',
-		} as CompilerDecision;
+		} as Decision;
 		const decision2 = {
 			type: 'where',
 			operator: 'scalarSubquery',
 			column: 'rating',
 			targetTable: 'reviews',
 			selectColumn: 'rating',
-		} as CompilerDecision;
+		} as Decision;
 
 		scalarSubqueryHandler.compile(decision1, ctx, state, mockDispatch);
 		scalarSubqueryHandler.compile(decision2, ctx, state, mockDispatch);
@@ -452,7 +448,7 @@ describe('inSubqueryHandler', () => {
 			column: 'author_id',
 			targetTable: 'active_users',
 			selectColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = inSubqueryHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -470,7 +466,7 @@ describe('inSubqueryHandler', () => {
 			operator: 'inSubquery',
 			targetTable: 'active_users',
 			selectColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		expect(() =>
 			inSubqueryHandler.compile(decision, ctx, state, mockDispatch),
@@ -486,7 +482,7 @@ describe('inSubqueryHandler', () => {
 			column: 'author_id',
 			targetTable: 'active_users',
 			selectColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = inSubqueryHandler.compile(
 			decision,
@@ -514,7 +510,7 @@ describe('inSubqueryHandler', () => {
 					value: true,
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = inSubqueryHandler.compile(decision, ctx, state, mockDispatch);
 
@@ -537,7 +533,7 @@ describe('notInSubqueryHandler', () => {
 			column: 'author_id',
 			targetTable: 'banned_users',
 			selectColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = notInSubqueryHandler.compile(
 			decision,
@@ -560,7 +556,7 @@ describe('notInSubqueryHandler', () => {
 			operator: 'notInSubquery',
 			targetTable: 'banned_users',
 			selectColumn: 'id',
-		} as CompilerDecision;
+		} as Decision;
 
 		expect(() =>
 			notInSubqueryHandler.compile(decision, ctx, state, mockDispatch),
@@ -583,7 +579,7 @@ describe('notInSubqueryHandler', () => {
 					value: 'banned',
 				},
 			],
-		} as CompilerDecision;
+		} as Decision;
 
 		const node = notInSubqueryHandler.compile(
 			decision,
