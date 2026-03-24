@@ -173,6 +173,24 @@ export function compileSelect<T = unknown>(
 			}
 		}
 
+		// GROUP-BY-JOIN: When GROUP BY is active, join includes must NOT contribute
+		// their hydration columns to the SELECT. PostgreSQL requires all non-aggregate
+		// expressions in the SELECT list to appear in the GROUP BY clause; auto-selected
+		// join columns (e.g. "file"."id" AS "file.id") are not in GROUP BY and cause
+		// "ERROR: column must appear in the GROUP BY clause".
+		// Keep the JOIN (for filtering/inner join semantics) but strip auto-columns.
+		// Explicitly requested columns (via relationColumn()) are still preserved —
+		// the caller is responsible for including them in groupBy().
+		const hasGroupBy =
+			plan.intent?.groupBy && plan.intent.groupBy.length > 0;
+		if (hasGroupBy) {
+			for (const d of enrichedUnifiedDecisions) {
+				if (d.type === 'includeStrategy' && d.choice === 'join') {
+					(d as Mutable<PlanDecision>).columns = [];
+				}
+			}
+		}
+
 		// Deduplicate: remove selectRelationColumn decisions for relations
 		// already covered by an include strategy.
 		// Include handlers (json_agg, lateral, CTE, join) already compile the

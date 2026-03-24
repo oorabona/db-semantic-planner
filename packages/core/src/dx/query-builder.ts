@@ -476,11 +476,12 @@ export class QueryBuilderImpl<TResult = unknown>
 	): QueryBuilder<TResult> {
 		const builder = this.clone();
 
-		// ExpressionRef form: orderBy(expr) or orderBy(expr, 'desc')
+		// ExpressionRef form: orderBy(expr) or orderBy(expr, 'desc') or orderBy(expr, 'desc', { nulls: 'last' })
 		if (fieldOrRecordOrSpecs instanceof ExpressionRef) {
 			builder.orderByIntents.push({
 				expression: fieldOrRecordOrSpecs.intent,
 				direction: direction ?? 'asc',
+				...(options?.nulls !== undefined ? { nulls: options.nulls } : {}),
 			});
 			return builder;
 		}
@@ -491,6 +492,7 @@ export class QueryBuilderImpl<TResult = unknown>
 				expression: (fieldOrRecordOrSpecs as { intent: ExpressionIntent })
 					.intent,
 				direction: direction ?? 'asc',
+				...(options?.nulls !== undefined ? { nulls: options.nulls } : {}),
 			});
 			return builder;
 		}

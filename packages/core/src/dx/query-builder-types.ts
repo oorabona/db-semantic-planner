@@ -444,10 +444,12 @@ export interface QueryBuilder<TResult = unknown> {
 	orderBy(
 		expr: ExpressionRef,
 		direction?: SortDirection,
+		options?: { nulls?: import('./types.js').NullsPosition },
 	): QueryBuilder<TResult>;
 	orderBy(
 		expr: ExpressionSpec,
 		direction?: SortDirection,
+		options?: { nulls?: import('./types.js').NullsPosition },
 	): QueryBuilder<TResult>;
 
 	/**
