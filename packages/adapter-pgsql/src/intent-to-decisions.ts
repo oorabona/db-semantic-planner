@@ -1,8 +1,13 @@
 /**
- * Intent to Decisions Converter
+ * Intent to Decisions — SELECT and clause compilers.
  *
- * Converts core's QueryIntent into Decision[] format for the pgsql compiler.
- * This bridges the gap between the planner output and SQL compilation.
+ * Converts core's QueryIntent fields into PlanDecision[] for the pgsql compiler.
+ * Two focused exports replace the old monolithic intentToDecisions:
+ *
+ *   convertSelectIntent  — SELECT-list decisions only
+ *   buildClauseDecisions — ORDER BY, GROUP BY, DISTINCT, LIMIT, OFFSET decisions only
+ *
+ * WHERE and HAVING are compiled directly via compileWhereIntent (compile-where.ts).
  */
 
 import type {
@@ -15,105 +20,26 @@ import type { Mutable } from '@dbsp/types/internal';
 import type { PlanDecision } from './compiler.js';
 import { EXPRESSION_HANDLERS } from './select-expression-handlers.js';
 
-// ============================================================================
-// Main Converter
-// ============================================================================
-
 /**
- * Convert a QueryIntent into Decision[] for the pgsql compiler.
+ * Convert a SelectIntent into SELECT-list PlanDecision[].
  *
- * @param intent - The QueryIntent from core's planner
- * @param rootTable - The root table name (from plan.rootTable)
- * @returns Array of decisions the compiler can process
+ * Handles all SelectIntent variants:
+ *   - SelectAllIntent             → { type: 'select', column: '*' }
+ *   - SelectFieldsIntent          → one { type: 'select' } per field
+ *   - SelectWithExpressionsIntent → handler-dispatched selectCustomExpression / etc.
+ *   - SelectAggregateIntent       → selectFunction decisions
+ *
+ * @param select    - The SelectIntent from QueryIntent.select (may be undefined)
+ * @param rootTable - The root table alias for column references
  */
-export function intentToDecisions(
-	intent: QueryIntent,
+export function convertSelectIntent(
+	select: SelectIntent | undefined,
 	rootTable: string,
 ): PlanDecision[] {
-	const decisions: PlanDecision[] = [];
-
-	// 1. SELECT clause
-	if (intent.select) {
-		decisions.push(...convertSelect(intent.select, rootTable));
-	} else {
-		// Default to SELECT *
-		decisions.push({ type: 'select', column: '*', table: rootTable });
+	if (!select) {
+		return [{ type: 'select', column: '*', table: rootTable }];
 	}
 
-	// 2. WHERE clause — emitted as whereRaw so the compiler compiles
-	// the WhereIntent directly via compileWhereIntent (no PlanDecision conversion).
-	if (intent.where) {
-		decisions.push({ type: 'whereRaw', expressionIntent: intent.where, table: rootTable });
-	}
-
-	// 3. ORDER BY clause
-	if (intent.orderBy && intent.orderBy.length > 0) {
-		for (const order of intent.orderBy) {
-			decisions.push(convertOrderBy(order, rootTable));
-		}
-	}
-
-	// 4. GROUP BY clause
-	if (intent.groupBy && intent.groupBy.length > 0) {
-		for (const col of intent.groupBy) {
-			decisions.push({ type: 'groupBy', column: col, table: rootTable });
-		}
-	}
-
-	// 5. HAVING clause — emitted as havingRaw so the compiler compiles
-	// the WhereIntent directly via compileWhereIntent (no PlanDecision conversion).
-	if (intent.having) {
-		decisions.push({ type: 'havingRaw', expressionIntent: intent.having, table: rootTable });
-	}
-
-	// 6. DISTINCT / DISTINCT ON
-	if (intent.distinctOn && intent.distinctOn.length > 0) {
-		decisions.push({ type: 'distinctOn', columns: intent.distinctOn });
-	} else if (intent.distinct) {
-		decisions.push({ type: 'distinct' });
-	}
-
-	// 7. LIMIT
-	if (intent.limit !== undefined) {
-		decisions.push({ type: 'limit', limit: intent.limit });
-	}
-
-	// 8. OFFSET
-	if (intent.offset !== undefined) {
-		decisions.push({ type: 'offset', offset: intent.offset });
-	}
-
-	return decisions;
-}
-
-// ============================================================================
-// SELECT Conversion
-// ============================================================================
-
-/**
- * Apply a filter condition to a decision if a filter intent is present.
- * Stores the raw WhereIntent as a whereRaw decision; compiled via compileWhereIntent.
- */
-function applyFilterCondition(
-	decision: Mutable<PlanDecision>,
-	filter: WhereIntent | undefined,
-	_rootTable: string,
-): void {
-	if (filter) {
-		// Store the raw WhereIntent as a whereRaw decision in filterCondition.
-		// compileFilterCondition in compiler.ts handles this via compileWhereIntent.
-		(decision as Record<string, unknown>).filterCondition = {
-			type: 'whereRaw',
-			expressionIntent: filter,
-		};
-	}
-}
-
-function convertSelect(
-	select: SelectIntent,
-	rootTable: string,
-): PlanDecision[] {
-	// Handle different SelectIntent types using discriminator
 	const selectType = 'type' in select ? select.type : undefined;
 
 	// SelectAllIntent: { all: true }
@@ -144,7 +70,6 @@ function convertSelect(
 					rootTable,
 					decisions,
 					applyFilterCondition,
-					// Wrap WhereIntent as whereRaw — compiler handles via compileWhereIntent
 					(condition: import('@dbsp/types').WhereIntent, _table: string) =>
 						({ type: 'whereRaw', expressionIntent: condition }) as import('./compiler.js').PlanDecision,
 				);
@@ -155,18 +80,16 @@ function convertSelect(
 		return decisions;
 	}
 
+	// SelectAggregateIntent: { aggregates: [...] }
 	if ('aggregates' in select) {
-		// SelectAggregateIntent
 		const decisions: PlanDecision[] = [];
 
-		// Add non-aggregate fields
 		if (select.fields) {
 			for (const field of select.fields) {
 				decisions.push({ type: 'select', column: field, table: rootTable });
 			}
 		}
 
-		// Add aggregates
 		for (const agg of select.aggregates) {
 			const aggDecision: Mutable<PlanDecision> = {
 				type: 'selectFunction',
@@ -192,21 +115,68 @@ function convertSelect(
 }
 
 // ============================================================================
-// ORDER BY Conversion
+// buildClauseDecisions — ORDER BY, GROUP BY, DISTINCT, LIMIT, OFFSET
 // ============================================================================
 
-function convertOrderBy(order: OrderByIntent, rootTable: string): PlanDecision {
-	// Convert lowercase direction to uppercase
+/**
+ * Build PlanDecision[] for all non-SELECT, non-WHERE clauses from a QueryIntent:
+ * ORDER BY, GROUP BY, DISTINCT / DISTINCT ON, LIMIT, OFFSET.
+ *
+ * WHERE and HAVING are intentionally excluded — they are compiled directly via
+ * compileWhereIntent in adapter-compiler-select.ts.
+ *
+ * @param intent    - The QueryIntent containing clause fields
+ * @param rootTable - The root table name
+ */
+export function buildClauseDecisions(
+	intent: QueryIntent,
+	rootTable: string,
+): PlanDecision[] {
+	const decisions: PlanDecision[] = [];
+
+	// ORDER BY
+	if (intent.orderBy && intent.orderBy.length > 0) {
+		for (const order of intent.orderBy) {
+			decisions.push(buildOrderByDecision(order, rootTable));
+		}
+	}
+
+	// GROUP BY
+	if (intent.groupBy && intent.groupBy.length > 0) {
+		for (const col of intent.groupBy) {
+			decisions.push({ type: 'groupBy', column: col, table: rootTable });
+		}
+	}
+
+	// DISTINCT / DISTINCT ON
+	if (intent.distinctOn && intent.distinctOn.length > 0) {
+		decisions.push({ type: 'distinctOn', columns: intent.distinctOn });
+	} else if (intent.distinct) {
+		decisions.push({ type: 'distinct' });
+	}
+
+	// LIMIT
+	if (intent.limit !== undefined) {
+		decisions.push({ type: 'limit', limit: intent.limit });
+	}
+
+	// OFFSET
+	if (intent.offset !== undefined) {
+		decisions.push({ type: 'offset', offset: intent.offset });
+	}
+
+	return decisions;
+}
+
+function buildOrderByDecision(order: OrderByIntent, rootTable: string): PlanDecision {
 	const direction: 'ASC' | 'DESC' = order.direction === 'desc' ? 'DESC' : 'ASC';
 
-	// Convert lowercase nulls to uppercase if present
 	const nulls: 'FIRST' | 'LAST' | undefined = order.nulls
 		? order.nulls === 'first'
 			? 'FIRST'
 			: 'LAST'
 		: undefined;
 
-	// Expression-based ORDER BY (e.g. rawDistance('vector', qv))
 	if (order.expression) {
 		const base: PlanDecision = {
 			type: 'orderBy',
@@ -214,33 +184,35 @@ function convertOrderBy(order: OrderByIntent, rootTable: string): PlanDecision {
 			direction,
 			table: rootTable,
 		};
-		if (nulls) {
-			return { ...base, nulls };
-		}
-		return base;
+		return nulls ? { ...base, nulls } : base;
 	}
 
 	const decision: PlanDecision = {
 		type: 'orderBy',
 		direction,
 		table: rootTable,
-		// field is optional in OrderByIntent after expression extension (exactOptionalPropertyTypes)
 		...(order.field ? { column: order.field } : {}),
 	};
 
-	// Only add nulls if defined (exactOptionalPropertyTypes)
-	if (nulls) {
-		return { ...decision, nulls };
-	}
-
-	return decision;
+	return nulls ? { ...decision, nulls } : decision;
 }
 
-// ============================================================================
-// CASE expression helpers
-// ============================================================================
-
 /**
- * Convert a CASE WHEN condition (ExpressionIntent) to a PlanDecision
- * that compileCondition can handle.
+ * Apply a filter condition to a decision if a filter intent is present.
+ * Stores the raw WhereIntent as a whereRaw decision; compiled via compileWhereIntent.
  */
+function applyFilterCondition(
+	decision: Mutable<PlanDecision>,
+	filter: WhereIntent | undefined,
+	_rootTable: string,
+): void {
+	if (filter) {
+		// Store the raw WhereIntent as a whereRaw decision in filterCondition.
+		// compileFilterCondition in compiler.ts handles this via compileWhereIntent.
+		(decision as Record<string, unknown>).filterCondition = {
+			type: 'whereRaw',
+			expressionIntent: filter,
+		};
+	}
+}
+

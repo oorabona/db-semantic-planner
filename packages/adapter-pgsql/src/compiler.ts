@@ -60,7 +60,7 @@ import {
 	compileWhereIntent,
 	type WhereCompilerCtx,
 } from './compile-where.js';
-import { intentToDecisions } from './intent-to-decisions.js';
+import { buildClauseDecisions, convertSelectIntent } from './intent-to-decisions.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 import { createParamRef } from './param-ref.js';
@@ -904,7 +904,18 @@ export class PlanCompiler {
 						});
 						const innerPlan: SimplifiedPlanReport = {
 							rootTable: query.from,
-							decisions: intentToDecisions(query, query.from),
+							decisions: [
+								...convertSelectIntent(query.select, query.from),
+								// WHERE and HAVING are compiled via whereRaw decisions inside PlanCompiler
+								// (this path does not go through compileWhereIntent).
+								...(query.where
+									? [{ type: 'whereRaw' as const, expressionIntent: query.where, table: query.from }]
+									: []),
+								...(query.having
+									? [{ type: 'havingRaw' as const, expressionIntent: query.having, table: query.from }]
+									: []),
+								...buildClauseDecisions(query, query.from),
+							],
 						};
 						const innerResult = innerCompiler.compile(innerPlan);
 						// Renumber ParamRef $N in the inner AST by paramOffset so they

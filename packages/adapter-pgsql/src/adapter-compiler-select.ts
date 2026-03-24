@@ -25,7 +25,7 @@ import { buildSubqueryFromIntent, compileWhereIntent, type WhereCompilerCtx } fr
 import { andExpr } from './ast-helpers.js';
 import { deparseQuoted } from './deparse.js';
 import { createCompilerState } from './handlers/types.js';
-import { intentToDecisions } from './intent-to-decisions.js';
+import { buildClauseDecisions, convertSelectIntent } from './intent-to-decisions.js';
 import {
 	convertDottedFieldsToExists,
 	deriveForeignKey,
@@ -106,8 +106,10 @@ export function compileSelect<T = unknown>(
 	let simplifiedPlan: SimplifiedPlanReport;
 
 	if (plan.intent) {
-		// Real usage: convert intent to decisions
-		let decisions = intentToDecisions(plan.intent, plan.rootTable);
+		// Real usage: compile SELECT-list decisions from intent.
+		// ORDER BY, GROUP BY, DISTINCT, LIMIT, OFFSET are compiled via buildClauseDecisions below.
+		// WHERE and HAVING are compiled separately via compileWhereIntent (injected into AST after compilePlan).
+		let decisions = convertSelectIntent(plan.intent.select, plan.rootTable);
 
 		// Strip exists/notExists decisions from intentToDecisions — they use the
 		// relation name as targetTable (unresolved). extractExistsDecisions (below)
@@ -451,7 +453,7 @@ export function compileSelect<T = unknown>(
 				// P1-2 fix: keep type:'where' decisions with operator:'exists' or
 				// operator:'notExists' — these were added by convertDottedFieldsToExists
 				// and must reach compilePlan to generate the EXISTS subquery SQL.
-				// Plain comparison / logical decisions from intentToDecisions are
+				// Plain comparison / logical decisions from convertSelectIntent are
 				// compiled separately by compileWhereIntent and must be filtered out
 				// to avoid duplicates.
 				if (
@@ -462,6 +464,7 @@ export function compileSelect<T = unknown>(
 				}
 				return false;
 			}),
+			...buildClauseDecisions(plan.intent, plan.rootTable), // ORDER BY, GROUP BY, DISTINCT, LIMIT, OFFSET
 			...existsDecisions,          // keep — already resolved by planner
 			...enrichedUnifiedDecisions, // keep — include strategies (JOINs, json_agg, etc.)
 		];

@@ -1,129 +1,35 @@
 /**
- * Tests for intentToDecisions converter
+ * Tests for intent-to-decisions converters.
  *
- * E05 regression: Verify WhereSubqueryIntent is converted correctly.
- * Note: WHERE intents are now emitted as whereRaw decisions — the raw WhereIntent
- * is stored in expressionIntent and compiled directly by the PlanCompiler.
+ * convertSelectIntent — SELECT-list decisions only
+ * buildClauseDecisions — ORDER BY, GROUP BY, DISTINCT, LIMIT, OFFSET
+ *
+ * Note: WHERE is compiled separately via compileWhereIntent, not via these helpers.
  */
 
 import { describe, expect, it } from 'vitest';
-import { intentToDecisions } from '../intent-to-decisions.js';
+import { buildClauseDecisions, convertSelectIntent } from '../intent-to-decisions.js';
 
-describe('intentToDecisions', () => {
-	describe('E05 Regression: WhereSubqueryIntent', () => {
-		it('emits whereRaw decision for scalar subquery comparison', () => {
-			const intent = {
-				type: 'select' as const,
-				from: 'products',
-				select: { type: 'fields' as const, fields: ['name', 'price'] as const },
-				where: {
-					kind: 'subquery' as const,
-					field: 'price',
-					operator: 'gt' as const,
-					subquery: {
-						type: 'select' as const,
-						from: 'products',
-						select: {
-							type: 'aggregate' as const,
-							aggregates: [{ function: 'avg' as const, field: 'price' }],
-						},
-					},
-				},
-			};
+describe('convertSelectIntent', () => {
+	it('defaults to SELECT * when no select provided', () => {
+		const decisions = convertSelectIntent(undefined, 'products');
+		expect(decisions).toEqual([{ type: 'select', column: '*', table: 'products' }]);
+	});
 
-			const decisions = intentToDecisions(intent, 'products');
+	it('converts SelectAllIntent { all: true }', () => {
+		const decisions = convertSelectIntent({ all: true } as any, 'products');
+		expect(decisions).toEqual([{ type: 'select', column: '*', table: 'products' }]);
+	});
 
-			// WHERE is now emitted as whereRaw — expressionIntent holds the original WhereIntent
-			const whereDecision = decisions.find((d) => d.type === 'whereRaw');
-			expect(whereDecision).toBeDefined();
-			expect(whereDecision?.expressionIntent).toMatchObject({
-				kind: 'subquery',
-				field: 'price',
-				operator: 'gt',
-			});
-		});
-
-		it('emits whereRaw decision for scalar subquery with inner WHERE condition', () => {
-			const intent = {
-				type: 'select' as const,
-				from: 'users',
-				where: {
-					kind: 'subquery' as const,
-					field: 'id',
-					operator: 'eq' as const,
-					subquery: {
-						type: 'select' as const,
-						from: 'orders',
-						select: { type: 'fields' as const, fields: ['user_id'] as const },
-						where: {
-							kind: 'comparison' as const,
-							field: 'status',
-							operator: 'eq' as const,
-							value: 'paid',
-						},
-					},
-				},
-			};
-
-			const decisions = intentToDecisions(intent, 'users');
-
-			const whereDecision = decisions.find((d) => d.type === 'whereRaw');
-			expect(whereDecision).toBeDefined();
-			expect(whereDecision?.expressionIntent).toMatchObject({
-				kind: 'subquery',
-				field: 'id',
-				operator: 'eq',
-			});
-		});
-
-		it('emits whereRaw for all comparison operators', () => {
-			const operators = [
-				{ op: 'eq' },
-				{ op: 'neq' },
-				{ op: 'gt' },
-				{ op: 'gte' },
-				{ op: 'lt' },
-				{ op: 'lte' },
-			] as const;
-
-			for (const { op } of operators) {
-				const intent = {
-					type: 'select' as const,
-					from: 'products',
-					where: {
-						kind: 'subquery' as const,
-						field: 'price',
-						operator: op,
-						subquery: {
-							type: 'select' as const,
-							from: 'products',
-							select: {
-								type: 'aggregate' as const,
-								aggregates: [{ function: 'max' as const, field: 'price' }],
-							},
-						},
-					},
-				};
-
-				const decisions = intentToDecisions(intent, 'products');
-				const whereDecision = decisions.find((d) => d.type === 'whereRaw');
-				expect(whereDecision).toBeDefined();
-				expect((whereDecision?.expressionIntent as { operator: string })?.operator).toBe(op);
-			}
-		});
-
-		it('emits no whereRaw for intent with no where field', () => {
-			const intent = {
-				from: 'products',
-				// no where field
-			};
-
-			const decisions = intentToDecisions(intent as any, 'products');
-
-			// No where → no whereRaw
-			const whereDecision = decisions.find((d) => d.type === 'whereRaw');
-			expect(whereDecision).toBeUndefined();
-		});
+	it('converts SelectFieldsIntent with multiple fields', () => {
+		const decisions = convertSelectIntent(
+			{ type: 'fields', fields: ['name', 'price'] } as any,
+			'products',
+		);
+		expect(decisions).toEqual([
+			{ type: 'select', column: 'name', table: 'products' },
+			{ type: 'select', column: 'price', table: 'products' },
+		]);
 	});
 });
 
@@ -131,7 +37,7 @@ describe('intentToDecisions', () => {
 // DISTINCT ON
 // ============================================================================
 
-describe('intentToDecisions — DISTINCT ON', () => {
+describe('buildClauseDecisions — DISTINCT ON', () => {
 	it('emits distinctOn decision for a single column', () => {
 		const intent = {
 			type: 'select' as const,
@@ -139,7 +45,7 @@ describe('intentToDecisions — DISTINCT ON', () => {
 			distinctOn: ['id'] as const,
 		};
 
-		const decisions = intentToDecisions(intent, 'users');
+		const decisions = buildClauseDecisions(intent, 'users');
 
 		const d = decisions.find((x) => x.type === 'distinctOn');
 		expect(d).toBeDefined();
@@ -153,7 +59,7 @@ describe('intentToDecisions — DISTINCT ON', () => {
 			distinctOn: ['id', 'name'] as const,
 		};
 
-		const decisions = intentToDecisions(intent, 'users');
+		const decisions = buildClauseDecisions(intent, 'users');
 
 		const d = decisions.find((x) => x.type === 'distinctOn');
 		expect(d).toBeDefined();
@@ -168,7 +74,7 @@ describe('intentToDecisions — DISTINCT ON', () => {
 			distinctOn: ['id'] as const,
 		};
 
-		const decisions = intentToDecisions(intent, 'users');
+		const decisions = buildClauseDecisions(intent, 'users');
 
 		expect(decisions.some((x) => x.type === 'distinctOn')).toBe(true);
 		expect(decisions.some((x) => x.type === 'distinct')).toBe(false);
@@ -182,7 +88,7 @@ describe('intentToDecisions — DISTINCT ON', () => {
 			distinctOn: [] as const,
 		};
 
-		const decisions = intentToDecisions(intent, 'users');
+		const decisions = buildClauseDecisions(intent, 'users');
 
 		expect(decisions.some((x) => x.type === 'distinct')).toBe(true);
 		expect(decisions.some((x) => x.type === 'distinctOn')).toBe(false);
