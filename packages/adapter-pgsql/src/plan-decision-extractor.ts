@@ -297,6 +297,20 @@ export function convertWhereToDecisions(
 			if (subDecisions.length === 0) return [];
 			return [{ type: 'whereNot', conditions: subDecisions }];
 		}
+		// Custom expression: { kind: 'expression', expr, operator, value }
+		// Produced by ExpressionRef.eq(), .neq(), .gt(), etc.
+		// e.g. op('~', ref('path'), param(regex)).eq(true)
+		case 'expression':
+			return [
+				{
+					type: 'where',
+					operator: 'expression',
+					expressionIntent: w.expr,
+					value: w.value,
+					subqueryOperator: w.operator as string,
+					table,
+				},
+			];
 		default:
 			return [];
 	}
